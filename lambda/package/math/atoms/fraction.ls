@@ -223,18 +223,26 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
     let denom_total = render_total_of(denom_box)
     let child_total = max(numer_total, denom_total)
     if (frac_ctx.style == "script" and frac_ctx.script_container) {
+        // Metric-driven: derive child wrappers from numer/denom raw metrics
+        // scaled by 5/7 (scriptscript ratio from script parent). vlist_h
+        // follows: -numer_top - 3 + numer_child_h. depth_holder accounts
+        // for denom descender.
+        let numer_ch = script_frac_child_h_metric(numer_box)
+        let denom_ch = script_frac_child_h_metric(denom_box)
+        let dh = script_frac_depth_holder_metric(denom_box, 0.54)
+        let vh = 0.5 + numer_ch
         {
-            height: 0.97,
-            depth: 0.54,
-            render_height: 0.97,
-            render_depth: 0.54,
-            render_total: 1.51,
-            depth_holder: 0.54,
+            height: vh,
+            depth: dh,
+            render_height: vh,
+            render_depth: dh,
+            render_total: vh + dh,
+            depth_holder: dh,
             denom_top: -2.46,
             line_top: -3.22,
             numer_top: -3.5,
-            numer_child_height: 0.47,
-            denom_child_height: 0.47,
+            numer_child_height: numer_ch,
+            denom_child_height: denom_ch,
             child_font_pct: "71.43%",
             rule_height: 0.05
         }
@@ -257,18 +265,23 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             rule_height: 0.04
         }
     } else if (frac_ctx.style == "scriptscript") {
+        // B3: scriptscript-style frac (mirror of B1's metric-driven approach)
+        let numer_ch = script_frac_child_h_metric(numer_box)
+        let denom_ch = script_frac_child_h_metric(denom_box)
+        let dh = script_frac_depth_holder_metric(denom_box, 0.54)
+        let vh = 0.5 + numer_ch
         {
-            height: 0.97,
-            depth: 0.54,
-            render_height: 0.97,
-            render_depth: 0.54,
-            render_total: 1.51,
-            depth_holder: 0.54,
+            height: vh,
+            depth: dh,
+            render_height: vh,
+            render_depth: dh,
+            render_total: vh + dh,
+            depth_holder: dh,
             denom_top: -2.46,
             line_top: -3.22,
             numer_top: -3.5,
-            numer_child_height: 0.47,
-            denom_child_height: 0.47,
+            numer_child_height: numer_ch,
+            denom_child_height: denom_ch,
             child_font_pct: "71.43%",
             rule_height: 0.05
         }
@@ -706,6 +719,27 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
 fn script_frac_child_height(child_box, fallback) {
     let total = render_total_of(child_box)
     if (total >= 0.7) fallback else 0.46
+}
+
+// Compute the wrapper height for a fraction child rendered at scriptscript
+// scaling (5/7 of parent script). Uses raw metrics when available; matches
+// MathLive's `ceil2((h_raw + d_raw) * 5/7)` for descender atoms, h-only for
+// non-descenders. The hbox's raw fields propagate from text_box leaves.
+fn script_frac_child_h_metric(child_box) {
+    let h_raw = if (child_box.height_raw != null) child_box.height_raw else child_box.height
+    let d_raw = if (child_box.depth_raw != null) child_box.depth_raw else child_box.depth
+    let has_descender = d_raw > 0.005
+    let total_em = if (has_descender) (h_raw + d_raw) * (5.0 / 7.0)
+                   else h_raw * (5.0 / 7.0)
+    ceil2(total_em)
+}
+
+// depth_holder for script-style fraction with descender denominator:
+// extends below the denom's baseline by the scaled descender extent.
+fn script_frac_depth_holder_metric(denom_box, base_holder) {
+    let d_raw = if (denom_box.depth_raw != null) denom_box.depth_raw else denom_box.depth
+    if (d_raw > 0.005) ceil2(base_holder + d_raw * (5.0 / 7.0))
+    else base_holder
 }
 
 // For default fraction spec: denom wrapper height should accommodate

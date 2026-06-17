@@ -854,6 +854,36 @@ Net gain from proposal landing    +186 cases (+20.2 percentage points)
 Upstream baseline                 206 / 206  (100%)  — held throughout
 ```
 
+### Script-style fraction branches (B1, B3) — partial metric-driven port
+
+After the sup_only rewrite, work continued on the script-style fraction branches B1–B8 (fractions inside subscripts/superscripts).
+
+**Workflow probe** ([script-frac-probe](.claude/projects/-Users-henryluo-Projects-Lambda/06e73d5b-133a-4d33-bf08-c01620a12298/subagents/workflows/wf_064da107-b8b)) collected MathLive emit values for 9 representative cases (`a_{\frac{1}{2}}`, `a_{\frac{x}{y}}`, `a_{\frac{A}{x}}`, `a_{\frac{p}{x}}`, etc.). Confirmed pattern:
+- `vlist_h = 0.5 + ceil2(numer_h * 5/7)` (5/7 = scriptscript scale)
+- `denom_top = -2.46`, `line_top = -3.22`, `numer_top = -3.5` (constants per script style)
+- `numer_child_h = ceil2(numer_box.h_raw * 5/7)` for non-descender; `ceil2((h_raw + d_raw) * 5/7)` for descender
+- `denom_child_h` same pattern
+- `depth_holder = 0.54` base, bumped by `ceil2(denom.d_raw * 5/7)` for descender denom
+
+**Implementation** ([fraction.ls:225-298](lambda/package/math/atoms/fraction.ls:225)):
+- Added `script_frac_child_h_metric()` and `script_frac_depth_holder_metric()` helpers.
+- **B1** (script + script_container) and **B3** (scriptscript-style) now use metric-driven children.
+- Reduced drift in `a_{\frac{x}{y}}` from 10 findings to 3 (the remaining 3 are precision drifts in the outer sub_only wrapper, not the fraction itself).
+
+**B6/B7/B8 attempted but reverted**: These branches (`denom_total < 0.7`, `child_total >= 0.7`, catch-all) dispatch on conditions that catch real corpus tests tuned against the original hardcoded values. Metric-driven rewrite caused 33 baseline regressions. Reverting kept zero regression.
+
+The lesson: each script-style branch dispatch is interlocked with specific corpus tests. Full B1-B8 port requires per-branch verification with content-specific fixtures isolating each dispatch path. Estimated remaining effort: 30-50h.
+
+### Final session state (this push)
+
+```
+Corpus pass rate                  614 / 921  (66.7%) — unchanged
+Fixture (fraction branches)       12 / 27 pass (B1 and B3 internally correct)
+Upstream baseline                 206 / 206  (100%)
+```
+
+No corpus pass count change this session but `a_{\frac{x}{y}}`-style cases are now structurally closer to MathLive (3 findings vs 10). When the outer sub_only precision drift is closed in a future pass, these cases will flip to PASS.
+
 ### Remaining gaps in subscript rendering
 
 - **Compound sup-only** (`x^{a+b}`, `x^{a^b}`): sup_only currently uses hardcoded `vlist_height` per content-classifier. Compound and nested cases need formula `vlist_height = -top - 3 + child_h` where `child_h` reflects the SUP's full emitted extent. Patterns observed:

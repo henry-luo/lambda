@@ -1,7 +1,7 @@
 /**
  * js_util.cpp — Node.js-style 'util' module for LambdaJS
  *
- * Provides utility functions: format, inspect, types, promisify (stub).
+ * Provides utility functions: format, inspect, types, promisify.
  * Registered as built-in module 'util' via js_module_get().
  */
 #include "js_runtime.h"
@@ -19,6 +19,7 @@
 
 // forward declarations
 extern "C" Item js_util_inspect(Item obj_item, Item options_item);
+extern "C" Item js_symbol_for(Item desc);
 
 // Helper: make JS undefined
 static inline Item make_js_undefined() {
@@ -456,13 +457,118 @@ extern "C" Item js_util_types_isSet(Item value) {
 }
 
 // =============================================================================
-// util.promisify(original) — stub (returns function wrapping callback-based API)
+// util.promisify(original) — callback-last API to Promise wrapper
 // =============================================================================
 
+static Item js_util_promisify_callback(Item env_item, Item rest_args) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+
+    Item resolve = env[0];
+    Item reject = env[1];
+    int64_t argc = js_array_length(rest_args);
+    Item err = (argc > 0) ? js_array_get_int(rest_args, 0) : make_js_undefined();
+
+    if (js_is_truthy(err)) {
+        Item reject_args[1] = {err};
+        js_call_function(reject, make_js_undefined(), reject_args, 1);
+        return make_js_undefined();
+    }
+
+    Item value = make_js_undefined();
+    if (argc == 2) {
+        value = js_array_get_int(rest_args, 1);
+    } else if (argc > 2) {
+        value = js_array_new(0);
+        for (int64_t i = 1; i < argc; i++) {
+            js_array_push(value, js_array_get_int(rest_args, i));
+        }
+    }
+
+    Item resolve_args[1] = {value};
+    js_call_function(resolve, make_js_undefined(), resolve_args, 1);
+    return make_js_undefined();
+}
+
+static Item js_util_promisify_executor(Item env_item, Item resolve, Item reject) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+
+    Item original = env[0];
+    Item this_arg = env[1];
+    Item call_args_array = env[2];
+    int64_t argc64 = js_array_length(call_args_array);
+    if (argc64 < 0) argc64 = 0;
+
+    Item* cb_env = js_alloc_env(2);
+    cb_env[0] = resolve;
+    cb_env[1] = reject;
+    Item callback = js_new_closure((void*)js_util_promisify_callback, -1, cb_env, 2);
+
+    int argc = (int)argc64 + 1;
+    Item* call_args = (Item*)alloca((size_t)argc * sizeof(Item));
+    for (int i = 0; i < (int)argc64; i++) {
+        call_args[i] = js_array_get_int(call_args_array, i);
+    }
+    call_args[argc - 1] = callback;
+
+    js_call_function(original, this_arg, call_args, argc);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        Item reject_args[1] = {error};
+        js_call_function(reject, make_js_undefined(), reject_args, 1);
+        if (js_check_exception()) js_clear_exception();
+    }
+    return make_js_undefined();
+}
+
+static Item js_util_promisified_function(Item env_item, Item rest_args) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return js_promise_reject(make_string_item("promisified function missing target"));
+
+    Item original = env[0];
+    Item this_arg = js_get_this();
+
+    Item call_args_array = js_array_new(0);
+    int64_t argc = js_array_length(rest_args);
+    for (int64_t i = 0; i < argc; i++) {
+        js_array_push(call_args_array, js_array_get_int(rest_args, i));
+    }
+
+    Item* exec_env = js_alloc_env(3);
+    exec_env[0] = original;
+    exec_env[1] = this_arg;
+    exec_env[2] = call_args_array;
+    Item executor = js_new_closure((void*)js_util_promisify_executor, 2, exec_env, 3);
+    return js_promise_create(executor);
+}
+
+static Item js_util_promisify_custom_symbol(void) {
+    return js_symbol_for(make_string_item("nodejs.util.promisify.custom"));
+}
+
 extern "C" Item js_util_promisify(Item fn_item) {
-    // stub — returns the function as-is for now
-    // proper promisify requires Promise support
-    return fn_item;
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("original", "function", fn_item);
+    }
+
+    Item custom_key = js_util_promisify_custom_symbol();
+    Item custom = js_property_get(fn_item, custom_key);
+    if (js_check_exception()) return ItemNull;
+    if (custom.item != ITEM_NULL && custom.item != ITEM_JS_UNDEFINED &&
+        get_type_id(custom) != LMD_TYPE_UNDEFINED) {
+        if (get_type_id(custom) != LMD_TYPE_FUNC) {
+            return js_throw_invalid_arg_type("util.promisify.custom", "function", custom);
+        }
+        return custom;
+    }
+
+    Item* env = js_alloc_env(1);
+    env[0] = fn_item;
+    Item wrapper = js_new_closure((void*)js_util_promisified_function, -1, env, 1);
+    js_property_set(wrapper, custom_key, wrapper);
+    js_set_function_name(wrapper, make_string_item("promisified"));
+    return wrapper;
 }
 
 // =============================================================================
@@ -1128,6 +1234,10 @@ extern "C" Item js_get_util_namespace(void) {
         js_property_set(inspect_fn, make_string_item("custom"), custom_sym);
     }
     js_util_set_method(util_namespace, "promisify",           (void*)js_util_promisify, 1);
+    {
+        Item promisify_fn = js_property_get(util_namespace, make_string_item("promisify"));
+        js_property_set(promisify_fn, make_string_item("custom"), js_util_promisify_custom_symbol());
+    }
     js_util_set_method(util_namespace, "callbackify",         (void*)js_util_callbackify, 1);
     js_util_set_method(util_namespace, "deprecate",           (void*)js_util_deprecate, 2);
     js_util_set_method(util_namespace, "inherits",            (void*)js_util_inherits, 2);
