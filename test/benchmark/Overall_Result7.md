@@ -443,6 +443,24 @@ Missing LambdaJS timings remain unchanged:
 - `jetstream/hashmap`
 - `jetstream/raytrace3d`
 
+### Comparison to Past Results
+
+The latest current-tree number is the dense-array rerun above. It is a small improvement over the first June 16 Result7 snapshot, but it is materially worse than the older recorded LambdaJS benchmark runs.
+
+Older `Overall_Result3.md` and `Overall_Result4.md` publish MIR Direct overall summaries, so the LambdaJS/Node values below were computed from their raw `LambdaJS` and `Node.js` columns. Missing `---` rows were excluded. `Overall_Result6.md` did not rerun JetStream, so its March R7 aggregate is a five-suite LambdaJS result only.
+
+| Report | Date | Scope | LambdaJS / Node.js geo mean | Coverage | Read |
+|---|---:|---|---:|---:|---|
+| `Overall_Result7.md` latest rerun | 2026-06-16 | 6 suites | **17.81x slower** | 57 / 62 timed | Current tree; use this for current discussions |
+| `Overall_Result7.md` initial fresh run | 2026-06-16 | 6 suites | 18.43x slower | 57 / 62 timed | Latest rerun improved this by 1.035x geo mean |
+| `Overall_Result4.md` raw LambdaJS columns | 2026-03-19 | 6 suites | ~7.93x slower | 61 / 62 timed | Older tree had better coverage and aggregate ratio |
+| `Overall_Result3.md` raw LambdaJS columns | 2026-03-09 | 6 suites | ~8.78x slower | 60 / 62 timed | Similar older six-suite baseline |
+| `Overall_Result6.md` March R7 | 2026-03-24 | 5 suites, no JetStream | ~2.14x slower | 53 / 53 timed | Strong older LambdaJS-only optimization snapshot, not six-suite comparable |
+
+On the shared five-suite family from `Overall_Result6.md` (R7RS, AWFY, BENG, KOSTYA, LARCENY), the latest Result7 snapshot is about **13.34x** slower than Node over 51 timed cases, versus about **2.15x** in the March R7 table over 53 timed cases. That is roughly **6.2x worse** on the comparable suite family, before adding the current JetStream gap of **207.86x** over its six timed cases.
+
+`Overall_Result.md` and `Overall_Result5.md` are not used as LambdaJS-vs-Node comparison baselines here because they are MIR Direct/C2MIR and direct-string-pointer experiment reports. `Overall_Result2.md` is also left out of the aggregate table because LambdaJS coverage was still partial and included one non-positive timing, making its geometric mean unsuitable as a clean benchmark baseline.
+
 ### Interpretation
 
 The inline dense-array fast path is a net positive. The strongest gains landed exactly where expected: dense numeric loops and array-heavy workloads (`matmul`, `mandelbrot`, `cube3d`, `spectralnorm`, `sieve`). The optimization also improved the current LambdaJS/Node geometric ratio from the earlier Round 7 snapshot's **18.43x** to **17.81x** over the same 57 timed benchmarks.
