@@ -535,6 +535,141 @@ static Item js_dom_testdriver_key(Item key_item,
     return (Item){.item = b2it(ok && (prevented || mutated))};
 }
 
+static bool js_dom_exec_command_is_core_text(const char* cmd) {
+    if (!cmd) return false;
+    return strcasecmp(cmd, "insertText") == 0 ||
+        strcasecmp(cmd, "insertHTML") == 0 ||
+        strcasecmp(cmd, "insertParagraph") == 0 ||
+        strcasecmp(cmd, "insertLineBreak") == 0 ||
+        strcasecmp(cmd, "delete") == 0 ||
+        strcasecmp(cmd, "forwardDelete") == 0;
+}
+
+static bool js_dom_exec_command_is_supported(const char* cmd) {
+    if (!cmd) return false;
+    if (js_dom_exec_command_is_core_text(cmd)) return true;
+    return strcasecmp(cmd, "copy") == 0 ||
+        strcasecmp(cmd, "cut") == 0 ||
+        strcasecmp(cmd, "paste") == 0;
+}
+
+static bool js_dom_exec_command_map_intent(const char* cmd,
+                                           const char* value,
+                                           InputIntent* out) {
+    if (!cmd || !out) return false;
+    memset(out, 0, sizeof(*out));
+    if (strcasecmp(cmd, "insertText") == 0) {
+        out->type = INPUT_INTENT_INSERT_TEXT;
+        out->data = value ? value : "";
+        return true;
+    }
+    if (strcasecmp(cmd, "insertHTML") == 0) {
+        out->type = INPUT_INTENT_INSERT_FROM_PASTE;
+        out->data = value ? value : "";
+        out->html_data = value ? value : "";
+        out->data_mime = "text/html";
+        return true;
+    }
+    if (strcasecmp(cmd, "insertParagraph") == 0) {
+        out->type = INPUT_INTENT_INSERT_PARAGRAPH;
+        return true;
+    }
+    if (strcasecmp(cmd, "insertLineBreak") == 0) {
+        out->type = INPUT_INTENT_INSERT_LINE_BREAK;
+        return true;
+    }
+    if (strcasecmp(cmd, "delete") == 0) {
+        out->type = INPUT_INTENT_DELETE_CONTENT_BACKWARD;
+        out->key = RDT_KEY_BACKSPACE;
+        return true;
+    }
+    if (strcasecmp(cmd, "forwardDelete") == 0) {
+        out->type = INPUT_INTENT_DELETE_CONTENT_FORWARD;
+        out->key = RDT_KEY_DELETE;
+        return true;
+    }
+    return false;
+}
+
+static bool js_dom_exec_command_has_rich_target(void) {
+    DocState* state = js_dom_testdriver_state();
+    if (!state) return false;
+    int fallback_offset = 0;
+    View* target = js_dom_testdriver_current_target(state, &fallback_offset);
+    if (!target) return false;
+    EditingSurface surface;
+    return js_dom_testdriver_rich_surface(target, &surface);
+}
+
+static Item js_dom_exec_command_core_text(Item* args, int argc) {
+    if (!_js_current_document || !args || argc < 1) {
+        return (Item){.item = ITEM_FALSE};
+    }
+    const char* cmd = fn_to_cstr(args[0]);
+    if (!js_dom_exec_command_is_core_text(cmd)) {
+        return (Item){.item = ITEM_FALSE};
+    }
+
+    DocState* state = js_dom_testdriver_state();
+    if (!state) return (Item){.item = ITEM_FALSE};
+
+    const char* value = argc >= 3 ? fn_to_cstr(args[2]) : "";
+    InputIntent intent;
+    if (!js_dom_exec_command_map_intent(cmd, value, &intent)) {
+        return (Item){.item = ITEM_FALSE};
+    }
+
+    int fallback_offset = 0;
+    View* target = js_dom_testdriver_current_target(state, &fallback_offset);
+    if (!target) return (Item){.item = ITEM_FALSE};
+
+    EditingSurface surface;
+    if (!js_dom_testdriver_rich_surface(target, &surface)) {
+        return (Item){.item = ITEM_FALSE};
+    }
+
+    EventContext evcon;
+    memset(&evcon, 0, sizeof(evcon));
+    evcon.target_document = _js_current_document;
+    evcon.event.key.type = RDT_EVENT_KEY_DOWN;
+    evcon.event.key.key = intent.key;
+    evcon.event.key.mods = intent.mods;
+
+    EditingDispatchHooks hooks;
+    hooks.dispatch_input_event = js_dom_testdriver_dispatch_input_event;
+    hooks.dispatch_lambda_event = nullptr;
+    hooks.copy_selection = nullptr;
+    hooks.user = nullptr;
+
+    JsDomTestdriverMutationArgs mutate_args;
+    mutate_args.fallback_view = target;
+    mutate_args.fallback_offset = fallback_offset;
+
+    EditingTransaction tx;
+    memset(&tx, 0, sizeof(tx));
+    tx.surface = &surface;
+    tx.intent = &intent;
+    tx.hooks = &hooks;
+    tx.mutate = js_dom_testdriver_rich_mutate;
+    tx.mutate_user = &mutate_args;
+    tx.operation = "execCommand";
+    tx.dispatch_input_without_mutation = false;
+    tx.mutation_invalidates_layout = true;
+    tx.mutation_invalidates_paint = true;
+
+    bool prevented = false;
+    bool mutated = false;
+    bool ok = editing_run_transaction(&evcon, &tx, &prevented, &mutated, nullptr);
+    if (ok && mutated && _js_current_document) {
+        js_dom_mutation_notify(DOM_JS_MUTATION_TEXT, surface.owner, surface.owner);
+        js_dom_queue_selectionchange(state->dom_selection);
+    }
+    log_debug("js_dom_exec_command_core_text: command=%s inputType=%s ok=%d prevented=%d mutated=%d",
+              cmd ? cmd : "?", input_intent_type_name(intent.type),
+              ok ? 1 : 0, prevented ? 1 : 0, mutated ? 1 : 0);
+    return (Item){.item = b2it(ok && (prevented || mutated))};
+}
+
 static bool js_dom_node_contains(DomNode* ancestor, DomNode* node) {
     for (DomNode* cur = node; cur; cur = cur->parent) {
         if (cur == ancestor) return true;
@@ -3867,40 +4002,45 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     }
 
     // document.execCommand(cmd, [showUI], [value]) — legacy editing API.
-    // We delegate to a JS-side helper installed by the WPT shim so that
-    // the page's `oncopy`/`oncut`/`onpaste` handlers and any
-    // `addEventListener('copy', ...)` listeners fire and can populate the
-    // synthetic clipboard. Returns false if no handler is installed.
+    // EC-1 core text commands run through the same rich editing transaction
+    // envelope as synthetic key input. Clipboard commands still delegate to a
+    // JS-side helper installed by the WPT shim so page clipboard handlers can
+    // populate the synthetic clipboard store.
     if (strcmp(method, "execCommand") == 0) {
+        const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
+        if (js_dom_exec_command_is_core_text(cmd)) {
+            return js_dom_exec_command_core_text(args, argc);
+        }
         Item helper_key = (Item){.item = s2it(heap_create_name("__lambda_execCommand_handler"))};
         Item helper = js_get_global_property(helper_key);
         TypeId htype = get_type_id(helper);
         if (htype == LMD_TYPE_FUNC) {
             // The WPT clipboard shim installs this helper to fire
             // copy/cut/paste event listeners during synthetic gestures —
-            // see Radiant_Clipboard_WPT_Status.md. For all other commands,
-            // the helper itself returns false, matching §9: Radiant never
-            // mutates the document via execCommand.
+            // see Radiant_Clipboard_WPT_Status.md. For non-clipboard
+            // commands, the helper itself returns false.
             return js_call_function(helper, js_get_document_object_value(), args, argc);
         }
-        // CE-6 (Radiant_Design_Content_Editable.md §9): with no shim
-        // installed, execCommand returns false and does NOT mutate, does
-        // NOT dispatch beforeinput, ever. Feature detection still sees
-        // `typeof document.execCommand === 'function'`.
         return (Item){.item = ITEM_FALSE};
     }
-    // CE-6 (Radiant_Design_Content_Editable.md §9): the legacy
-    // queryCommand* surface. We return spec-conformant "command does not
-    // exist" answers for every command, so a page that probes them sees a
-    // consistent "not supported" picture rather than mixed results.
+    // queryCommand* reports the native EC-1 command surface plus clipboard
+    // commands. State/value/indeterm grow in later EC tiers.
     if (strcmp(method, "queryCommandSupported") == 0) {
         const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
-        bool supported = cmd && strcasecmp(cmd, "delete") == 0;
+        bool supported = js_dom_exec_command_is_supported(cmd);
         return (Item){.item = b2it(supported)};
     }
     if (strcmp(method, "queryCommandEnabled") == 0) {
         const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
-        bool enabled = cmd && strcasecmp(cmd, "delete") == 0 && js_document_design_mode;
+        bool enabled = false;
+        if (cmd && js_dom_exec_command_is_core_text(cmd)) {
+            enabled = js_document_design_mode ||
+                js_dom_exec_command_has_rich_target();
+        } else if (cmd && (strcasecmp(cmd, "copy") == 0 ||
+                          strcasecmp(cmd, "cut") == 0 ||
+                          strcasecmp(cmd, "paste") == 0)) {
+            enabled = true;
+        }
         return (Item){.item = b2it(enabled)};
     }
     if (strcmp(method, "queryCommandIndeterm") == 0 ||

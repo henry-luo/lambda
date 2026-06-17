@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button slices landed.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button slices landed; EC-1 native core-text execCommand bridge started.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -348,7 +348,41 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
   `dispatchEvent` directly instead of depending on `typeof` reporting a
   JavaScript function.
 
-**Current SI verification (2026-06-16):**
+**SI-10 — Backspace fallback event-envelope probe: LANDED (2026-06-17).**
+
+- Tightened the WPT `Actions` keyboard shim so Backspace/Delete fallback
+  mutation does not call the native editing hook a second time after the
+  native path has already dispatched `beforeinput` but declined to mutate.
+  This removes duplicate `beforeinput` events from the measured structural
+  deletion frontier.
+- When the JS fallback path performs a temporary DOM deletion after a native
+  `beforeinput`, it now dispatches the matching post-mutation `input` event.
+  The fallback previous-text search is also clamped to the active editing host
+  so Backspace at the start of an editor cannot mutate unrelated document text.
+- The broad Backspace target-range file remains skipped because the remaining
+  failures are real engine gaps: block joins, empty inline cleanup, atomic
+  element deletion, table-cell selections, whitespace target-range semantics,
+  and modifier behavior. The probe improved from `26/163` to `44/163`.
+
+**SI-11 — empty inline deletion cleanup probe: LANDED (2026-06-17).**
+
+- Added a narrow post-delete cleanup to the native rich default transaction:
+  if Backspace/Delete empties a text node whose parent is an ordinary inline
+  formatting wrapper, the wrapper is removed via the existing live-range
+  mutation envelope and the caret collapses to the wrapper's former parent
+  boundary. Editing-host/contenteditable boundaries and non-text children are
+  deliberately preserved.
+- Mirrored the same cleanup in the WPT `Actions` keyboard fallback path for
+  fallback DOM mutations. The broad skipped Backspace target-range probe now
+  measures `45/163` instead of `44/163`: it clears the caret-after-inline
+  wrapper innerHTML case, while caret-inside-inline target ranges and many
+  structural deletion cases remain real blockers.
+- The skipped Backspace file is still not enabled globally. Remaining failures
+  continue to cluster around block joins, in-inline target range calculation,
+  atomic element deletion, table-cell selections, whitespace semantics, and
+  modifier behavior.
+
+**Current SI verification (2026-06-17):**
 
 | Check | Result |
 |---|---|
@@ -372,19 +406,20 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 | `input-events-spin-button-click-on-number-input-prevent-default` | 1/1 passed |
 | `input-events-spin-button-click-on-number-input-delete-document` | 1/1 passed |
 | `select-event-drag-remove` | 1/1 passed |
-| `input-events-get-target-ranges-backspace.tentative` | measured 26/163; remains skipped |
+| `input-events-get-target-ranges-backspace.tentative` | measured 45/163; remains skipped |
 | `DomText_EmptyString_Backed` | passed |
 | focused WPT test rebuilds | `test_wpt_contenteditable_gtest` rebuilt |
-| `test_wpt_contenteditable_gtest` | 196 cases: 165 pass / 31 skip / 0 fail |
+| `test_wpt_contenteditable_gtest` | 194 cases: 163 pass / 31 skip / 0 fail |
 | `test_wpt_selection_gtest` | 159 cases: 97 pass / 62 skip / 0 fail |
 | `test_wpt_dom_events_gtest` | 96 cases: 43 pass / 53 skip / 0 fail |
-| `test_js_gtest` | 196 passed / 0 failed |
-| `make test262-baseline` | regressions 0; 40261 / 40261 fully passing; retry 0.0s |
+| `test_js_gtest` | 196 passed / 0 failed; existing memtrack leak diagnostics printed |
+| `make test262-baseline` | not rerun for SI-11; previous SI-9 result was regressions 0; 40261 / 40261 fully passing; retry 0.0s |
 
-**Global gate note:** SI-9's local WPT/JS guards and the mandatory §1.1
-JavaScript regression gate are green. The broader SI phase can keep advancing
-from the remaining skipped deletion/pointer matrices without carrying a global
-gate blocker.
+**Global gate note:** SI-11's local WPT guards and `test_js_gtest` are green.
+The full `make test262-baseline` gate was not rerun for this deletion-cleanup slice,
+so the broader SI phase should still run the mandatory §1.1 gate before being
+closed. The phase can keep advancing from the remaining skipped
+deletion/pointer matrices without carrying a local WPT blocker.
 
 **Next SI slice:** broaden synthetic input beyond the enabled Backspace/Delete,
 number spin-key, number spin-button, and text-control drag-select pointer
@@ -500,6 +535,46 @@ hooks}, each unlocking a slice of the Chrome corpus (§7):
 | **EC-6 Cleanup / history** | `removeFormat`, `selectAll`, `undo`, `redo`, clipboard `cut`/`copy`/`paste` (reuse `radiant/clipboard.cpp`) | `execCommand/`, `undo/`, `pasteboard/` |
 
 `queryCommand*` and `designMode` land alongside EC-1 and grow per tier.
+
+### 6.7 Progress
+
+**EC-1a — native core-text execCommand bridge: LANDED (2026-06-17).**
+
+- `document.execCommand(...)` now handles the EC-1 core text commands natively:
+  `insertText`, `insertParagraph`, `insertLineBreak`, `delete`,
+  `forwardDelete`, and `insertHTML`. These commands map to `InputIntent`s and
+  run through `editing_run_transaction`, reusing the same cancelable
+  `beforeinput` → rich default mutation → `input` envelope as synthetic key
+  input.
+- `queryCommandSupported(...)` reports the native EC-1 surface plus the
+  clipboard commands already served by the WPT shim. `queryCommandEnabled(...)`
+  enables core text commands for an active rich editing target, and preserves
+  the HTML `designMode="on"` document-scope behavior required by WPT's
+  `user-interaction-editing-designMode.html` case.
+- Clipboard commands (`copy`, `cut`, `paste`) still delegate to the JS-side WPT
+  helper so page clipboard event handlers continue to populate the synthetic
+  clipboard store.
+- `insertHTML` is currently paste-shaped: it carries `html_data` and the
+  `text/html` MIME marker through the intent, but the EC-1 rich default
+  mutation still inserts textual content. Full HTML fragment parsing/insertion
+  remains part of the broader `insertHTML` mutation work.
+- `queryCommandState`, `queryCommandValue`, and `queryCommandIndeterm` remain
+  stubbed for later EC tiers.
+
+**Current EC verification (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct `execCommand("insertText")` DOM smoke | `supported=true`, `enabled=true`, `ok=true`, `innerHTML=aXb`, `beforeinput/input=1:insertText` |
+| Focused designMode WPT regression | `user-interaction-editing-designMode`: 3/3 passed |
+| `test_wpt_contenteditable_gtest` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest` | 196 passed / 0 failed; existing memtrack leak diagnostics printed |
+| `make test262-baseline` | not rerun for EC-1a; previous SI-9 result was regressions 0; 40261 / 40261 fully passing; retry 0.0s |
+
+**Global gate note:** EC-1a's local WPT guards and `test_js_gtest` are green.
+The full `make test262-baseline` gate still needs to run before declaring the
+whole EC-1 tier complete.
 
 ---
 

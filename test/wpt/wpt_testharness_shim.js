@@ -700,7 +700,54 @@ function _wpt_dispatch_native_edit_key(code, shift, ctrl, alt, meta) {
         return false;
     }
 }
-function _wpt_send_one_key(elem, code) {
+function _wpt_is_cleanup_inline_wrapper(n) {
+    if (!n || n.nodeType !== 1 || !n.tagName) return false;
+    if (n.hasAttribute && n.hasAttribute("contenteditable")) return false;
+    var tag = String(n.tagName).toLowerCase();
+    return tag === "a" || tag === "abbr" || tag === "b" ||
+        tag === "bdi" || tag === "bdo" || tag === "big" ||
+        tag === "cite" || tag === "code" || tag === "del" ||
+        tag === "dfn" || tag === "em" || tag === "font" ||
+        tag === "i" || tag === "ins" || tag === "kbd" ||
+        tag === "mark" || tag === "q" || tag === "s" ||
+        tag === "samp" || tag === "small" || tag === "span" ||
+        tag === "strike" || tag === "strong" || tag === "sub" ||
+        tag === "sup" || tag === "time" || tag === "tt" ||
+        tag === "u" || tag === "var";
+}
+function _wpt_inline_wrapper_is_empty(n) {
+    if (!n || n.nodeType !== 1) return false;
+    var child = n.firstChild;
+    while (child) {
+        if (child.nodeType !== 3) return false;
+        var s = child.data;
+        if (typeof s !== "string") s = child.textContent || "";
+        if (s.length > 0) return false;
+        child = child.nextSibling;
+    }
+    return true;
+}
+function _wpt_cleanup_empty_inline_after_delete(textNode, sel) {
+    if (!textNode || textNode.nodeType !== 3 || !sel) return false;
+    var wrapper = textNode.parentNode;
+    if (!_wpt_is_cleanup_inline_wrapper(wrapper) ||
+        !_wpt_inline_wrapper_is_empty(wrapper)) {
+        return false;
+    }
+    var parent = wrapper.parentNode;
+    if (!parent) return false;
+    var idx = 0;
+    var child = parent.firstChild;
+    while (child && child !== wrapper) {
+        idx++;
+        child = child.nextSibling;
+    }
+    if (child !== wrapper) return false;
+    try { parent.removeChild(wrapper); } catch (_) { return false; }
+    try { sel.collapse(parent, idx); } catch (_) {}
+    return true;
+}
+function _wpt_send_one_key(elem, code, nativeAlreadyTried) {
     // Text-control path
     var ae = null;
     var elemTag = (elem && elem.tagName) ? elem.tagName.toUpperCase() : "";
@@ -795,7 +842,15 @@ function _wpt_send_one_key(elem, code) {
     }
     if (sel.rangeCount === 0) return;
     var r = sel.getRangeAt(0);
-    if ((code === 0xE003 || code === 0xE017) &&
+    var fallbackHost = _wpt_editing_host_for_node(r.startContainer) ||
+        _wpt_editing_host_for_node(r.endContainer);
+    function _finish_fallback_delete(mutated, inputType) {
+        if (mutated && nativeAlreadyTried && fallbackHost) {
+            _wpt_dispatch_input_event(fallbackHost, "input", inputType, null);
+        }
+    }
+    if (!nativeAlreadyTried &&
+        (code === 0xE003 || code === 0xE017) &&
         _wpt_dispatch_native_edit_key(code, false, false, false, false)) {
         return;
     }
@@ -840,11 +895,14 @@ function _wpt_send_one_key(elem, code) {
     }
     if (code === 0xE003) { // Backspace
         if (!r.collapsed) {
+            var deletedRange = false;
             try {
                 var sc = r.startContainer; var so = r.startOffset;
                 r.deleteContents();
                 sel.collapse(sc, so);
+                deletedRange = true;
             } catch (_) {}
+            _finish_fallback_delete(deletedRange, "deleteContentBackward");
             return;
         }
         var n2 = r.startContainer; var off2 = r.startOffset;
@@ -858,20 +916,32 @@ function _wpt_send_one_key(elem, code) {
                 try { n2.data = ns; } catch (_) {
                     try { n2.textContent = ns; } catch (_) {}
                 }
+                if (ns.length === 0 &&
+                    _wpt_cleanup_empty_inline_after_delete(n2, sel)) {
+                    _finish_fallback_delete(true, "deleteContentBackward");
+                    return;
+                }
                 try { sel.collapse(n2, off2 - 1); } catch (_) {}
+                _finish_fallback_delete(true, "deleteContentBackward");
                 return;
             }
             // off2 === 0: walk to previous text node in document order.
-            var prev = _wpt_prev_text_node(n2);
+            var prev = _wpt_prev_text_node(n2, fallbackHost);
             if (prev) {
                 var ps = prev.data || prev.textContent || "";
                 if (ps.length > 0) {
                     try { prev.data = ps.slice(0, ps.length - 1); } catch (_) {
                         try { prev.textContent = ps.slice(0, ps.length - 1); } catch (_) {}
                     }
+                    if (ps.length === 1 &&
+                        _wpt_cleanup_empty_inline_after_delete(prev, sel)) {
+                        _finish_fallback_delete(true, "deleteContentBackward");
+                        return;
+                    }
                     // Caret stays at (n2, 0) but selection should refresh
                     // so listeners observe a change.
                     try { sel.collapse(n2, 0); } catch (_) {}
+                    _finish_fallback_delete(true, "deleteContentBackward");
                 }
             }
             return;
@@ -883,7 +953,13 @@ function _wpt_send_one_key(elem, code) {
                 var cs = child.data || child.textContent || "";
                 if (cs.length > 0) {
                     try { child.data = cs.slice(0, cs.length - 1); } catch (_) {}
+                    if (cs.length === 1 &&
+                        _wpt_cleanup_empty_inline_after_delete(child, sel)) {
+                        _finish_fallback_delete(true, "deleteContentBackward");
+                        return;
+                    }
                     try { sel.collapse(child, cs.length - 1); } catch (_) {}
+                    _finish_fallback_delete(true, "deleteContentBackward");
                 }
             }
         }
@@ -891,11 +967,14 @@ function _wpt_send_one_key(elem, code) {
     }
     if (code === 0xE017) { // Delete
         if (!r.collapsed) {
+            var deletedForwardRange = false;
             try {
                 var sc2 = r.startContainer; var so2 = r.startOffset;
                 r.deleteContents();
                 sel.collapse(sc2, so2);
+                deletedForwardRange = true;
             } catch (_) {}
+            _finish_fallback_delete(deletedForwardRange, "deleteContentForward");
             return;
         }
         var dn = r.startContainer; var doff = r.startOffset;
@@ -903,16 +982,23 @@ function _wpt_send_one_key(elem, code) {
         if (dn.nodeType === 3) {
             var ds = dn.data || dn.textContent || "";
             if (doff < ds.length) {
-                try { dn.data = ds.slice(0, doff) + ds.slice(doff + 1); } catch (_) {
-                    try { dn.textContent = ds.slice(0, doff) + ds.slice(doff + 1); } catch (_) {}
+                var fwd = ds.slice(0, doff) + ds.slice(doff + 1);
+                try { dn.data = fwd; } catch (_) {
+                    try { dn.textContent = fwd; } catch (_) {}
+                }
+                if (fwd.length === 0 &&
+                    _wpt_cleanup_empty_inline_after_delete(dn, sel)) {
+                    _finish_fallback_delete(true, "deleteContentForward");
+                    return;
                 }
                 try { sel.collapse(dn, doff); } catch (_) {}
+                _finish_fallback_delete(true, "deleteContentForward");
             }
         }
         return;
     }
 }
-function _wpt_prev_text_node(n) {
+function _wpt_prev_text_node(n, root) {
     // Walk backward in document order until a text node is found.
     var cur = n;
     while (cur) {
@@ -922,6 +1008,7 @@ function _wpt_prev_text_node(n) {
             while (cur.lastChild) cur = cur.lastChild;
             if (cur.nodeType === 3) return cur;
         } else {
+            if (root && cur === root) return null;
             cur = cur.parentNode;
             if (!cur) return null;
         }
@@ -1635,7 +1722,7 @@ _WptActions.prototype.send = function() {
                                shift_held, ctrl_held, alt_held, meta_held)) {
                     // handled by Radiant's editing transaction path
                 } else if (ks.key === "\uE003" || ks.key === "\uE017") {
-                    _wpt_send_one_key(null, ks.key.charCodeAt(0));
+                    _wpt_send_one_key(null, ks.key.charCodeAt(0), true);
                 } else if (!(ctrl_held || alt_held || meta_held)) {
                     _wpt_type_printable_key(ks.key);
                 }
