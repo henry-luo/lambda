@@ -181,9 +181,18 @@ static JsExecProfileEvent js_exec_profile_event_for_runtime_call(const char* fn_
     if (strcmp(fn_name, "js_get_slot_i") == 0) return JS_EXEC_PROF_GET_SLOT_I;
     if (strcmp(fn_name, "js_set_slot_f") == 0) return JS_EXEC_PROF_SET_SLOT_F;
     if (strcmp(fn_name, "js_set_slot_i") == 0) return JS_EXEC_PROF_SET_SLOT_I;
-    if (strcmp(fn_name, "push_d") == 0) return JS_EXEC_PROF_BOX_FLOAT;
-    if (strcmp(fn_name, "it2i") == 0) return JS_EXEC_PROF_UNBOX_INT;
-    if (strcmp(fn_name, "it2d") == 0) return JS_EXEC_PROF_UNBOX_FLOAT;
+    if (strcmp(fn_name, "push_d") == 0 ||
+        strcmp(fn_name, "js_profiled_push_d") == 0) {
+        return JS_EXEC_PROF_BOX_FLOAT;
+    }
+    if (strcmp(fn_name, "it2i") == 0 ||
+        strcmp(fn_name, "js_profiled_it2i") == 0) {
+        return JS_EXEC_PROF_UNBOX_INT;
+    }
+    if (strcmp(fn_name, "it2d") == 0 ||
+        strcmp(fn_name, "js_profiled_it2d") == 0) {
+        return JS_EXEC_PROF_UNBOX_FLOAT;
+    }
     if (strncmp(fn_name, "js_to_", 6) == 0 || strncmp(fn_name, "js_coerce", 9) == 0) {
         return JS_EXEC_PROF_COERCE;
     }

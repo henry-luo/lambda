@@ -5764,13 +5764,13 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
             MIR_reg_t r = jm_new_reg(mt, "inf", MIR_T_D);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_double_op(mt->ctx, INFINITY)));
-            return jm_call_1(mt, "push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, r));
+            return jm_call_1(mt, "js_profiled_push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, r));
         }
         if (MATH_MATCH("max", 3)) {
             MIR_reg_t r = jm_new_reg(mt, "ninf", MIR_T_D);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_double_op(mt->ctx, -INFINITY)));
-            return jm_call_1(mt, "push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, r));
+            return jm_call_1(mt, "js_profiled_push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, r));
         }
     }
     // Math.min(x) / Math.max(x) with 1 arg → js_to_number(x)
@@ -10803,7 +10803,7 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                             idx_native2 = jm_emit_double_to_int(mt, idx_f);
                         } else {
                             MIR_reg_t idx_b = jm_transpile_box_item(mt, mem->property);
-                            idx_native2 = jm_call_1(mt, "it2i", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_b));
+                            idx_native2 = jm_call_1(mt, "js_profiled_it2i", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_b));
                         }
                         log_debug("P9b: inline this.%.*s[idx] as typed array type %d",
                                   (int)prop_id->name->len, prop_id->name->chars, ta_type);

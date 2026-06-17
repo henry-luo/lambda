@@ -46,6 +46,9 @@ extern bool js_for_in_key_is_live(Item object, Item key);
 extern Item js_async_iterator_step_result(Item iterator);
 extern int64_t js_iterator_result_done(Item result);
 extern Item js_iterator_result_value(Item result);
+extern Item js_profiled_push_d(double dval);
+extern double js_profiled_it2d(Item item);
+extern int64_t js_profiled_it2i(Item item);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
@@ -1081,6 +1084,7 @@ JitImport jit_runtime_imports[] = {
     {"is_truthy", FPTR(is_truthy)},
     {"v2it", FPTR(v2it)},
     {"push_d", FPTR(push_d)},
+    {"js_profiled_push_d", FPTR(js_profiled_push_d)},
     {"push_l", FPTR(push_l)},
     {"push_l_safe", FPTR(push_l_safe)},
     {"push_d_safe", FPTR(push_d_safe)},
@@ -1094,7 +1098,9 @@ JitImport jit_runtime_imports[] = {
     {"item_at", FPTR(item_at)},
     {"it2l", FPTR(it2l)},
     {"it2d", FPTR(it2d)},
+    {"js_profiled_it2d", FPTR(js_profiled_it2d)},
     {"it2i", FPTR(it2i)},
+    {"js_profiled_it2i", FPTR(js_profiled_it2i)},
     {"it2b", FPTR(it2b)},
     {"it2s", FPTR(it2s)},
     {"fn_to_cstr", FPTR(fn_to_cstr)},

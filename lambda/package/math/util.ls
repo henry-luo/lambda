@@ -24,7 +24,12 @@ fn pad_left(s, width, ch) {
     else pad_left(ch ++ s, width, ch)
 }
 
-// format a number as em units: "0.5em"
+// format a number as em units: "0.5em".
+// Uses 5-decimal precision to preserve exact CSS values used by Lambda's
+// existing layout. MathLive trims to 2 decimals; for values like 0.23744,
+// MathLive would emit "0.24em" (round-up) while Lambda's fmt_num gives
+// "0.23744em". The 0.01em precision mismatch is part of the strut-formula
+// gap that's intentional architectural difference.
 pub fn fmt_em(x) {
     if (abs(x) >= 100000.0) fmt_large_em(x)
     else fmt_num(x, 5) ++ "em"

@@ -1,7 +1,7 @@
 # Transpile JS Tune10 Proposal: Execution-Profile Guided Benchmark Tuning
 
 Date: 2026-06-16
-Status: proposal
+Status: in progress
 
 Primary sources:
 
@@ -20,6 +20,23 @@ Validation baseline after adding the profiler:
 | --- | --- |
 | `./test/test_js_gtest.exe` | 196 / 196 passed |
 | `make test262-baseline` | 40253 / 40253 fully passing, 0 regressions |
+
+Implementation update, 2026-06-17:
+
+- P0-C has its first implementation slice: generated JS MIR calls to
+  `push_d`, `it2d`, and `it2i` now route through JS-only profiled wrappers.
+- The TSV event families stay stable as `box_float`, `unbox_float`, and
+  `unbox_int`; the detailed MIR-site section shows the wrapper import names.
+- Validation run: `make build-test`, `./test/test_js_gtest.exe --gtest_brief=1`,
+  `make release`, and `make test262-baseline` all completed successfully.
+- `make test262-baseline` finished at `40261 / 40261` fully passing with
+  `0` regressions.
+- Release profiler smoke:
+  `JS_EXEC_PROFILE=time JS_EXEC_PROFILE_OUT=temp/js_exec_profile_tune10_smoke.tsv ./lambda.exe js test/benchmark/awfy/sieve2_bundle.js --no-log`
+  passed with `Sieve: PASS`.
+- The smoke TSV includes `box_float` with `1` runtime call / `16` MIR sites and
+  `unbox_float` with `2` runtime calls / `2` MIR sites; the MIR helper section
+  records `js_profiled_push_d` and `js_profiled_it2d`.
 
 The Tune10 goal is to stop tuning from aggregate benchmark wall time alone and
 move to a per-mechanism loop: profile a benchmark, choose the hottest runtime or
