@@ -104,13 +104,15 @@ The spec-named kernels `js_ordinary_set` / `js_ordinary_set_via_accessor` live i
 
 ## 7. Object.defineProperty
 
-`js_object_define_property` (`js_globals.cpp:8075`) handles Proxy `[[DefineOwnProperty]]`, typed-array integer-index defines, String-exotic rules, and the non-extensible new-property reject, then calls **`ValidateAndApplyPropertyDescriptor`** (`js_globals.cpp:283`) — a full ES2020 §9.1.6.3 implementation:
+`js_object_define_property` (`js_globals.cpp`) handles Proxy `[[DefineOwnProperty]]`, typed-array integer-index defines, String-exotic rules, and the non-extensible new-property reject, then calls **`ValidateAndApplyPropertyDescriptor`** — a full ES2020 §9.1.6.3 implementation. The top-level function is now an ordered validation/apply pipeline:
 
 - sets `js_skip_accessor_dispatch` (RAII) so internal writes are `[[DefineOwnProperty]]`, not `[[Set]]`;
-- **Array `length`** exotic path (`ToUint32`/`ToNumber` double-conversion, companion-map `length` shape flags, non-configurable-index shrink);
-- descriptor validation (mixed accessor/data → TypeError; non-callable get/set → TypeError);
-- **non-configurable invariant checks** (no config/enumerable change; no data↔accessor conversion; non-writable value/writable change via SameValue `js_object_is`; accessor get/set change) using the flag-first `js_props_obj_query_*` helpers and the live `JsAccessorPair`;
-- applies storage via `js_descriptor_from_object` -> `js_define_own_property_from_descriptor` (`js_props.cpp:556`), which clears/sets `IS_ACCESSOR`, writes data via `fn_map_set`, clears `JSPD_DELETED` on resurrection, and mutates attribute flags through `js_attr_set_*`.
+- **Array `length`** exotic validation via `js_define_property_validate_array_exotic` (`ToUint32`/`ToNumber` double-conversion, companion-map `length` shape flags, non-configurable-index shrink);
+- descriptor object validation via `js_define_property_validate_descriptor_object` (mixed accessor/data -> TypeError; non-callable get/set -> TypeError);
+- existing-property state collection via `js_define_property_collect_existing_state`;
+- array companion-map index invariants via `js_define_property_validate_array_companion_index`;
+- **non-configurable invariant checks** via `js_define_property_validate_nonconfigurable_update` (no config/enumerable change; no data<->accessor conversion; non-writable value/writable change via SameValue `js_object_is`; accessor get/set change) using the flag-first `js_props_obj_query_*` helpers and the live `JsAccessorPair`;
+- storage apply via `js_define_property_apply_validated_descriptor` -> `js_descriptor_from_object` -> `js_define_own_property_from_descriptor` (`js_props.cpp`), which clears/sets `IS_ACCESSOR`, writes data via `fn_map_set`, clears `JSPD_DELETED` on resurrection, and mutates attribute flags through `js_attr_set_*`.
 
 ---
 
@@ -149,8 +151,8 @@ Because instances **share** the cached `TypeMap`, any per-instance attribute cha
 ## 11. Known Issues & Future Improvements
 
 1. **Dense array hole sentinel remains.** `JS_DELETED_SENTINEL_VAL` (`js_runtime.h:26`) now uses unused tag `0x7E` and marks dense `Array::items` holes, not ordinary descriptor metadata. Ordinary map/FUNC/ARRAY companion-map deletes use `JSPD_DELETED`; readers that may inspect dense array items still preserve a raw-hole check, while ordinary property readers use `js_own_shape_slot_status`.
-2. **Oversized dispatch functions.** The post-Js59 cleanup split MAP built-in fallback out of `js_property_get`, the ordinary MAP tombstone/configurable/frozen tail out of `js_delete_property`, and ARRAY/MAP/FUNC branches out of `js_property_set`. `ValidateAndApplyPropertyDescriptor` and the remaining array/function delete branches still need further decomposition across ordinary, exotic, array, proxy, and function special cases.
-3. **Linear scans on hot paths.** Built-in method lookup is linear `strncmp` over each spec table (`js_runtime_builtin_registry.cpp:20`). *Improvement:* sort + bsearch (or hash) the spec tables, then continue migrating the remaining oversized property dispatch branches to smaller kernels in `js_props.cpp`.
+2. **Property dispatch decomposition status.** The post-Js59 cleanup split MAP built-in fallback out of `js_property_get`, ordinary MAP tombstone/configurable/frozen handling plus ARRAY/FUNC/string-exotic branches out of `js_delete_property`, ARRAY/MAP/FUNC branches out of `js_property_set`, and the validation/apply phases out of `ValidateAndApplyPropertyDescriptor`. Remaining cleanup is now optional polish: move more helper internals into `js_props.cpp` once their contracts are stable.
+3. **Linear scans on hot paths.** Built-in method lookup is linear `strncmp` over each spec table (`js_runtime_builtin_registry.cpp:20`). *Improvement:* sort + bsearch (or hash) the spec tables.
 4. **TypeMap pointer guard is defensive.** The TypeMap plausibility guard is centralized as `typemap_ptr_is_plausible` (`lambda-data.hpp:283`), so JS property/class readers share one safety net. The `lib_marked.js` corrupt-`type` crash family traced to captured block-scoped lets is fixed in MIR last-closure environment tracking; keep the guard as a defensive invariant check, not as the primary fix for that bug family.
 
 ---

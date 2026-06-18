@@ -64,6 +64,8 @@ Landed on 2026-06-17, with post-P6 cleanup on 2026-06-18:
 - `js_property_get` now delegates MAP built-in/prototype fallback to `js_map_builtin_fallback_get`, keeping the main ordinary-get dispatcher smaller while preserving class, constructor, Object.prototype, null-proto, deletion, and collection fallback semantics.
 - `js_delete_property` now delegates the ordinary MAP delete tail to `js_delete_map_property`, separating canonicalization, frozen/non-configurable rejection, flag cleanup, and tombstone creation from the top-level delete dispatcher.
 - `js_property_set` now delegates its ARRAY, MAP, and FUNC branches to `js_property_set_array`, `js_property_set_map`, and `js_property_set_function`, leaving the top-level setter focused on preflight checks and broad type dispatch.
+- `ValidateAndApplyPropertyDescriptor` now delegates array-exotic validation, descriptor-object validation, existing-state collection, array companion-map invariants, non-configurable update validation, and final storage application to helper-sized functions.
+- `js_delete_property` now delegates string-exotic rejection plus FUNC and ARRAY deletion to `js_delete_string_exotic_property`, `js_delete_function_property`, and `js_delete_array_property`.
 - MIR last-closure environment tracking now has an explicit `JS_MIR_LAST_CLOSURE_CAPTURE_MAX`, clamped readback/writeback, and full-capacity save/restore snapshots across block/loop boundaries. This fixes the stale 16-entry snapshot path around captured block-scoped lets that could feed later corrupt `Map::type` reads.
 - Added `test/js/mir_closure_env_block_shadow.{js,txt}` to pin the captured block-scoped let shadowing case past 16 captures.
 
@@ -87,6 +89,7 @@ make build-test
 make test262-baseline
 ./lambda.exe js test/js/mir_closure_env_block_shadow.js --no-log
 ./test/test_js_gtest.exe '--gtest_filter=*mir_closure_env_block_shadow*:*lib_marked*:*regex_lookahead*:*metadata_class_identity*:*metadata_delete_shape_status*' --gtest_brief=1
+./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/*property_descriptors*:JavaScriptTests/JsFileTest.Run/*delete*:JavaScriptTests/JsFileTest.Run/*metadata*:JavaScriptTests/JsFileTest.Run/*sparse*' --gtest_brief=1
 ```
 
 Results:
@@ -124,10 +127,14 @@ Results:
 - Post-P6 dispatch/MIR cleanup: focused `./test/test_js_gtest.exe '--gtest_filter=*mir_closure_env_block_shadow*:*lib_marked*:*regex_lookahead*:*metadata_class_identity*:*metadata_delete_shape_status*' --gtest_brief=1` passed 5/5.
 - Post-P6 dispatch/MIR cleanup: full `./test/test_js_gtest.exe --gtest_brief=1` passed 234/234.
 - Post-P6 dispatch/MIR cleanup: `make test262-baseline` fully passed 40261 / 40261, failed 0, regressions 0, retry 0.0s.
+- Descriptor/delete branch cleanup: `make build-test` passed.
+- Descriptor/delete branch cleanup: focused descriptor/delete/sparse/metadata gtest passed 26/26.
+- Descriptor/delete branch cleanup: full `./test/test_js_gtest.exe --gtest_brief=1` passed 234/234.
+- Descriptor/delete branch cleanup: `make test262-baseline` fully passed 40261 / 40261, failed 0, regressions 0, retry 0.0s.
 
 Remaining work:
 
-- None for the Js59 string-marker, sentinel, FUNC virtual-shadow, shared `TypeMap` lookup/growth, `js_ordinary_set` outcome cleanup, `js_property_set` top-level branch decomposition, or captured block-scoped-let MIR corrupt-`type` root cause. Larger refactor debt remains outside the Js59 acceptance bar: further decomposition of `ValidateAndApplyPropertyDescriptor` and the remaining array/function branches in `js_delete_property`.
+- None for the Js59 string-marker, sentinel, FUNC virtual-shadow, shared `TypeMap` lookup/growth, `js_ordinary_set` outcome cleanup, major property dispatch decomposition, `ValidateAndApplyPropertyDescriptor` top-level decomposition, array/function delete branch decomposition, or captured block-scoped-let MIR corrupt-`type` root cause.
 
 ## 1. Starting Baseline
 
@@ -464,6 +471,31 @@ Landed evidence:
 - `make build-test` passed.
 - `./lambda.exe js test/js/mir_closure_env_block_shadow.js --no-log` matched expected output.
 - Focused `./test/test_js_gtest.exe '--gtest_filter=*mir_closure_env_block_shadow*:*lib_marked*:*regex_lookahead*:*metadata_class_identity*:*metadata_delete_shape_status*' --gtest_brief=1` passed 5/5.
+- Full `./test/test_js_gtest.exe --gtest_brief=1` passed 234/234.
+- Full `make test262-baseline` passed fully with 40261 / 40261, failed 0, regressions 0, and retry 0.0s.
+
+### Post-P6 - Descriptor And Delete Branch Cleanup
+
+Work:
+
+1. Split `ValidateAndApplyPropertyDescriptor` into helper-sized validation/apply stages:
+   `js_define_property_validate_array_exotic`,
+   `js_define_property_validate_descriptor_object`,
+   `js_define_property_collect_existing_state`,
+   `js_define_property_validate_array_companion_index`,
+   `js_define_property_validate_nonconfigurable_update`, and
+   `js_define_property_apply_validated_descriptor`.
+2. Split `js_delete_property` string-exotic, FUNC, and ARRAY branches into
+   `js_delete_string_exotic_property`,
+   `js_delete_function_property`, and
+   `js_delete_array_property`.
+
+Landed evidence:
+
+- `ValidateAndApplyPropertyDescriptor` is now an ordered pipeline: object check, key canonicalization, array-exotic validation, descriptor validation, existing-state collection, array companion-map invariant check, non-configurable update validation, and final storage apply.
+- `js_delete_property` now dispatches null/undefined, exotic, string-exotic, FUNC, ARRAY, and ordinary MAP deletion through distinct helpers.
+- `make build-test` passed.
+- Focused descriptor/delete/sparse/metadata gtest passed 26/26.
 - Full `./test/test_js_gtest.exe --gtest_brief=1` passed 234/234.
 - Full `make test262-baseline` passed fully with 40261 / 40261, failed 0, regressions 0, and retry 0.0s.
 
