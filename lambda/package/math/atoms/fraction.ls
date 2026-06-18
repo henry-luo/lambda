@@ -325,26 +325,22 @@ fn build_frac_bar_rule15(numer_box, denom_box, geom) {
             <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(geom.depth_holder)>
         >
     >
-    // height/depth are full precision (height_raw/depth_raw carry the same).
-    // render_* are CEIL@2 projections of those values so wrappers that have not
-    // yet migrated to the single-rounding strut path (htmlData/text/script/hbox)
-    // still emit a correct rounded strut. These are COMPUTED from the rule, not
-    // a constant table — the headline debt (frac_bar_spec) is gone for this case.
+    // Phase A (box-model collapse), applied where it's safe — a metric-driven
+    // box. height/depth ARE the layout values (CEIL projections for a non-raw
+    // consumer); full precision lives in *_raw for the single-rounding strut.
+    // render_height/render_depth are NOT set: they would just equal height/
+    // depth, and every consumer null-coalesces render_height -> height. Only
+    // render_total survives because CEIL(h+d) != CEIL(h)+CEIL(d) (the §1.4
+    // asymmetry); it goes when the whole tree carries full precision.
     let h_em = util.ceil_em2(geom.frac_height)             // strut height
     let d_em = 0.0 - util.ceil_em2(0.0 - geom.frac_depth)  // va depth (ceil toward 0)
     let total_em = util.ceil_em2(geom.frac_height + geom.frac_depth)
     {
         element: el,
         height: h_em,
-        // depth is the CEIL-toward-zero projection (matches the va a non-raw
-        // consumer emits via fmt_em(-depth), e.g. the \left..\right strut). The
-        // FULL-precision depth lives in depth_raw for the single-rounding path
-        // and in left_right_render_depth for stretchy delimiter sizing.
         depth: d_em,
         height_raw: if (geom.expose_raw) geom.frac_height else null,
         depth_raw: if (geom.expose_raw) geom.frac_depth else null,
-        render_height: h_em,
-        render_depth: d_em,
         render_total: total_em,
         // full-precision content extent for \left..\right delimiter sizing
         // (stretchy delimiters size against the unrounded content, not CEIL@2).

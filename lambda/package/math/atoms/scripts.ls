@@ -336,14 +336,15 @@ fn make_limits_stack(op_box, sub_box, sup_box) {
     let full_depth = 0.0 - r.minp
     let h_num = ceil_em2(r.maxp)
     let d_num = 0.0 - ceil_em2(0.0 - full_depth)
+    // Phase A: a metric-driven box carries one height/depth (CEIL projections;
+    // full precision in *_raw). render_height/render_depth are omitted — they
+    // would equal height/depth and every consumer null-coalesces to those.
     {
         element: el,
         height: h_num,
         depth: d_num,
         height_raw: r.maxp,
         depth_raw: full_depth,
-        render_height: h_num,
-        render_depth: d_num,
         render_total: ceil_em2(r.maxp + full_depth),
         width: max(op_box.width, max(if (has_sub) sub_box.width * fs else 0.0,
                                      if (has_sup) sup_box.width * fs else 0.0)),
