@@ -3,7 +3,7 @@
 // This header declares the canonical abstract operations from ECMA-262
 // §7.3 / §10.1, mirroring spec naming. The intent is that every property
 // operation in the engine routes through these — eliminating parallel
-// dispatch paths and centralizing the deleted-sentinel / IS_ACCESSOR /
+// dispatch paths and centralizing the shape-tombstone / IS_ACCESSOR /
 // class-method-dispatch invariants.
 //
 // See vibe/jube/Transpile_Js38_Refactor.md for the migration plan.
@@ -34,8 +34,7 @@ extern "C" {
 //  - String  → as-is
 //  - INT/FLOAT/BOOL/NULL/UNDEFINED → canonical string via ES ToString
 // Idempotent. The single canonical entry point — every operation that takes
-// a raw `Item key` MUST call this before consulting shape entries, marker
-// strings, or the deleted sentinel.
+// a raw `Item key` MUST call this before consulting shape entries or slots.
 //
 // Implemented: lambda/js/js_runtime.cpp.
 Item js_to_property_key(Item key);
@@ -73,14 +72,31 @@ int64_t js_key_is_symbol_c(Item key);
 // Stage B harness.
 typedef enum {
     JS_OWN_NOT_FOUND = 0,  // no own slot; caller should walk prototype chain
-    JS_OWN_DELETED   = 1,  // own slot held the deleted-sentinel; caller should
-                           // walk prototype chain but record the deletion
+    JS_OWN_DELETED   = 1,  // own slot/shape is tombstoned; caller should walk
+                           // prototype chain but record the deletion
                            // (Object.prototype top-of-chain semantics)
     JS_OWN_READY     = 2,  // *out_value is the resolved [[Get]] result
                            // (data value, getter return, setter-only undefined,
                            //  or a thrown private-field error). Caller MUST
                            // return *out_value verbatim and NOT walk further.
 } JsOwnGetStatus;
+
+// P5: centralized own shape/slot status. This is the lowest-level ordinary
+// property state query for MAP storage, FUNC properties_map storage, and ARRAY
+// companion-map storage. It treats either JSPD_DELETED or the transition
+// JS_DELETED_SENTINEL_VAL slot as a deleted own property.
+typedef enum {
+    JS_SHAPE_SLOT_ABSENT   = 0,
+    JS_SHAPE_SLOT_DELETED  = 1,
+    JS_SHAPE_SLOT_DATA     = 2,
+    JS_SHAPE_SLOT_ACCESSOR = 3,
+} JsShapeSlotStatus;
+
+JsShapeSlotStatus js_own_shape_slot_status(Item object,
+                                            const char* name,
+                                            int name_len,
+                                            Item* out_slot,
+                                            ShapeEntry** out_se);
 
 // Look up own property `key` on `object` (must be LMD_TYPE_MAP). If the slot
 // carries IS_ACCESSOR, dispatch the getter using `Receiver` as `this` (or
@@ -154,9 +170,9 @@ JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
 
 // Stage A1.8: own-only HasProperty boolean kernel.
 //
-// True iff `object` is LMD_TYPE_MAP, has an own slot under (name, name_len),
-// and the slot is not the deleted sentinel. IS_ACCESSOR slots count as
-// present (the JsAccessorPair* itself is the descriptor).
+// True iff `object` has an own MAP/FUNC/ARRAY companion-map property under
+// (name, name_len), and that property is not tombstoned by JSPD_DELETED or the
+// transition deleted sentinel. IS_ACCESSOR slots count as present.
 //
 // This is the read-only fast path for callers that just need a boolean
 // answer — `js_has_own_property` MAP/FUNC branches, defineProperty
@@ -171,7 +187,7 @@ bool js_ordinary_has_own(Item object, const char* name, int name_len);
 //
 // Returns:
 //   JS_HAS_PRESENT — own slot exists with a non-sentinel value.
-//   JS_HAS_DELETED — own slot exists but holds the deleted sentinel.
+//   JS_HAS_DELETED — own slot/shape exists but is tombstoned.
 //   JS_HAS_ABSENT  — no own slot at all (object may also be non-MAP).
 //
 // Use site: `js_has_own_property` MAP branch must NOT fall through to the
@@ -187,8 +203,8 @@ JsOwnSlotStatus js_ordinary_own_status(Item object, const char* name, int name_l
 // Stage A1.9: ES §10.1.7.1 OrdinaryHasProperty (O, P) — own + proto chain.
 //
 // Walks `object`.[[Prototype]]* using js_get_prototype_of, returning true at
-// the first own slot with a non-sentinel value. A sentinel-tombstoned own
-// slot does NOT short-circuit — we keep walking up the chain (matches the
+// the first own property that is not tombstoned. A tombstoned own property
+// does NOT short-circuit — we keep walking up the chain (matches the
 // existing js_in semantics where a deleted own slot still allows an
 // inherited property to satisfy `in`).
 //
@@ -248,9 +264,9 @@ JsSetterDispatchStatus js_ordinary_set(Item object, const char* name, int name_l
 //      reports non-configurable, return false (cannot delete).
 //   3. Clear IS_ACCESSOR shape flag on the bare-key slot if set, so future
 //      reads do not dispatch a deleted accessor.
-//   4. Tombstone the data slot AND the legacy `__get_X` / `__set_X` /
-//      `__nw_X` / `__ne_X` / `__nc_X` markers (so subsequent define-property
-//      treats this as a fresh property).
+//   4. Tombstone the shape entry with JSPD_DELETED and write the transition
+//      slot sentinel, clearing IS_ACCESSOR so subsequent reads cannot dispatch
+//      a deleted accessor pair.
 //   5. Return true.
 //
 // Excludes: arrays (sentinel-hole semantics), functions (properties_map
@@ -294,15 +310,14 @@ JsResolveFieldStatus js_ordinary_resolve_shape_value(ShapeEntry* e,
 // bits indicate which fields are populated (mirrors ES IsAccessorDescriptor
 // / IsDataDescriptor / IsGenericDescriptor logic).
 //
-// Stage A2.1 INTRODUCES the inspector kernel that synthesizes a descriptor
-// from current storage (shape flags + slot + legacy `__nc_`/`__ne_`/`__nw_`
-// markers + `__get_`/`__set_` markers). Storage layout is unchanged; this
-// is a read-side consolidation.
+// The inspector kernel synthesizes a descriptor from current storage
+// (shape flags + slot + JsAccessorPair). Deleted slots are canonicalized via
+// `js_own_shape_slot_status`.
 //
 // Stage A2.2+ will introduce the write-side kernel, route all
 // Object.defineProperty / accessor-install paths through it, and finally
 // collapse storage to a dense PropertyDescriptor table — eliminating the
-// JSPD_IS_ACCESSOR + JS_DELETED_SENTINEL_VAL + legacy-marker triplets.
+// JSPD_IS_ACCESSOR + transition-sentinel pairing.
 
 #define JS_PD_HAS_VALUE        0x01u  // descriptor carries [[Value]]
 #define JS_PD_HAS_GET          0x02u  // descriptor carries [[Get]]
@@ -347,11 +362,8 @@ static inline void js_pd_set_configurable(JsPropertyDescriptor* d, bool b) {
 //
 // This is the unified read kernel. It folds together:
 //   - shape flag inspection (JSPD_IS_ACCESSOR / writable / enum / config),
-//   - slot read with deleted-sentinel awareness,
+//   - slot read with shape-bit and transition-sentinel deleted awareness,
 //   - JsAccessorPair extraction for accessor descriptors,
-//   - legacy `__get_X` / `__set_X` marker fallback for native bindings
-//     that have not yet been migrated to the IS_ACCESSOR scheme,
-//   - legacy `__nc_X` / `__ne_X` / `__nw_X` flag-marker fallback.
 //
 // All Object.getOwnPropertyDescriptor / Reflect.getOwnPropertyDescriptor /
 // Object.{is,seal,freeze} / Object.assign read-side paths should route
@@ -400,19 +412,17 @@ bool js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* out);
 //   - HAS_GET | HAS_SET → routes through `js_define_accessor_partial`
 //     (allocates / merges JsAccessorPair, sets IS_ACCESSOR shape flag).
 //   - HAS_VALUE → writes data slot via js_property_set / js_func_init_property,
-//     clears IS_ACCESSOR if the slot was previously an accessor (was_accessor),
-//     and removes legacy __get_/__set_ markers.
+//     clears IS_ACCESSOR if the slot was previously an accessor (was_accessor).
 //   - HAS_WRITABLE / HAS_ENUMERABLE / HAS_CONFIGURABLE → write the
-//     corresponding `__nw_X` / `__ne_X` / `__nc_X` markers (set when the
-//     attribute is FALSE, clear when TRUE). For new properties, absent
+//     corresponding inverse ShapeEntry flags. For new properties, absent
 //     attributes default to non-* (writable=false, enumerable=false,
 //     configurable=false per ES2020 default descriptor).
 //
 // This is the centralized write kernel for Object.defineProperty,
 // Object.defineProperties, Reflect.defineProperty, and the accessor-install
 // paths. Stage A2.4 will route ValidateAndApplyPropertyDescriptor's storage
-// tail through this; storage layout (legacy markers + JsAccessorPair slots)
-// is unchanged so unmigrated readers continue to work.
+// tail through this; storage layout is ShapeEntry flags + JsAccessorPair slots
+// plus the transition delete sentinel.
 void js_define_own_property_from_descriptor(Item object,
                                              const char* name,
                                              int name_len,

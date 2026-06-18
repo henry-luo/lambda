@@ -49,6 +49,23 @@ static inline Item js_props_accessor_result(Item value) {
 extern "C++" String* heap_create_name(const char* name, size_t len);
 extern void fn_map_set(Item map_item, Item key, Item value);
 
+// Mirror of JsFuncProps from js_globals.cpp / js_runtime.cpp — used here to
+// reach `properties_map`. Layout MUST stay in sync.
+struct JsFuncPropsView_props {
+    TypeId type_id;
+    void* func_ptr;
+    int param_count;
+    Item* env;
+    int env_size;
+    Item prototype;
+    Item bound_this;
+    Item* bound_args;
+    int bound_argc;
+    String* name;
+    int builtin_id;
+    Item properties_map;
+};
+
 // Stage E: debug-only invariant assertions. Compiled out under NDEBUG.
 // Three classes of invariants the property-model kernels enforce:
 //   (E1) Key well-formedness: callers must pass a non-NULL name buffer
@@ -74,36 +91,64 @@ extern void fn_map_set(Item map_item, Item key, Item value);
 #  define JS_PROPS_ASSERT_ACCESSOR_PAIR(slot, se)    ((void)0)
 #endif
 
+static Map* js_props_storage_map(Item object) {
+    TypeId t = get_type_id(object);
+    if (t == LMD_TYPE_MAP) return object.map;
+    if (t == LMD_TYPE_ARRAY) {
+        Array* arr = object.array;
+        return (arr && arr->extra != 0) ? (Map*)(uintptr_t)arr->extra : NULL;
+    }
+    if (t == LMD_TYPE_FUNC) {
+        JsFuncPropsView_props* fn = (JsFuncPropsView_props*)object.function;
+        if (!fn || fn->properties_map.item == 0) return NULL;
+        if (get_type_id(fn->properties_map) != LMD_TYPE_MAP) return NULL;
+        return fn->properties_map.map;
+    }
+    return NULL;
+}
+
+extern "C" JsShapeSlotStatus js_own_shape_slot_status(Item object,
+                                                        const char* name,
+                                                        int name_len,
+                                                        Item* out_slot,
+                                                        ShapeEntry** out_se) {
+    JS_PROPS_ASSERT_KEY(name, name_len);
+    if (out_slot) *out_slot = ItemNull;
+    if (out_se) *out_se = NULL;
+
+    Map* m = js_props_storage_map(object);
+    if (!m) return JS_SHAPE_SLOT_ABSENT;
+
+    ShapeEntry* se = js_find_shape_entry(object, name, name_len);
+    if (out_se) *out_se = se;
+
+    bool found = false;
+    Item slot = js_map_get_fast_ext(m, name, name_len, &found);
+    if (out_slot) *out_slot = slot;
+
+    if (se && jspd_is_deleted(se)) return JS_SHAPE_SLOT_DELETED;
+    if (!found) return JS_SHAPE_SLOT_ABSENT;
+    if (js_props_is_deleted_sentinel(slot)) return JS_SHAPE_SLOT_DELETED;
+    if (se && jspd_is_accessor(se)) return JS_SHAPE_SLOT_ACCESSOR;
+    return JS_SHAPE_SLOT_DATA;
+}
+
 extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
                                               Item Receiver, Item* out_value) {
-    // Caller is responsible for ensuring `object` is LMD_TYPE_MAP and `key`
-    // has been canonicalized. We still tolerate non-string keys (fallback to
-    // map_get) for robustness during migration.
-    Map* m = object.map;
-    bool own_found = false;
-    Item slot = ItemNull;
-
+    // Caller is responsible for ensuring `key` has been canonicalized. String
+    // and symbol keys use the central shape/slot status helper so MAP storage,
+    // FUNC properties_map storage, and ARRAY companion-map storage share the
+    // same deleted/accessor rules.
     TypeId kt = key._type_id;
     if (kt == LMD_TYPE_STRING || kt == LMD_TYPE_SYMBOL) {
-        const char* ks = key.get_chars();
+        const char* kc = key.get_chars();
         int kl = (int)key.get_len();
-        slot = js_map_get_fast_ext(m, ks, kl, &own_found);
-    } else {
-        slot = map_get(m, key);
-        own_found = (slot.item != ItemNull.item);
-    }
-
-    if (!own_found) return JS_OWN_NOT_FOUND;
-
-    // Deleted-sentinel: caller should fall through to prototype chain (and
-    // remember the deletion for top-of-chain Object.prototype semantics).
-    if (js_props_is_deleted_sentinel(slot)) return JS_OWN_DELETED;
-
-    // IS_ACCESSOR dispatch — only string/symbol keys can carry shape entries.
-    if (kt == LMD_TYPE_STRING || kt == LMD_TYPE_SYMBOL) {
-        ShapeEntry* se = js_find_shape_entry(object, key.get_chars(),
-                                             (int)key.get_len());
-        if (se && jspd_is_accessor(se)) {
+        Item slot = ItemNull;
+        ShapeEntry* se = NULL;
+        JsShapeSlotStatus status = js_own_shape_slot_status(object, kc, kl, &slot, &se);
+        if (status == JS_SHAPE_SLOT_ABSENT) return JS_OWN_NOT_FOUND;
+        if (status == JS_SHAPE_SLOT_DELETED) return JS_OWN_DELETED;
+        if (status == JS_SHAPE_SLOT_ACCESSOR) {
             JsAccessorPair* pair = js_item_to_accessor_pair(slot);
             if (pair && pair->getter.item != ItemNull.item) {
                 Item this_val = (Receiver.item ? Receiver : object);
@@ -113,8 +158,6 @@ extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
             // Setter-only accessor:
             //  - private field (#x): TypeError per ES §PrivateFieldGet.
             //  - public         : returns undefined per ES §9.1.8.1.
-            const char* kc = key.get_chars();
-            int kl = (int)key.get_len();
             if (kl > 10 && memcmp(kc, "__private_", 10) == 0) {
                 char msg[256];
                 snprintf(msg, sizeof(msg),
@@ -126,9 +169,15 @@ extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
             *out_value = js_props_undefined();
             return JS_OWN_READY;
         }
+        *out_value = slot;
+        return JS_OWN_READY;
     }
 
-    // Plain data property.
+    Map* m = object.map;
+    Item slot = map_get(m, key);
+    bool own_found = (slot.item != ItemNull.item);
+    if (!own_found) return JS_OWN_NOT_FOUND;
+    if (js_props_is_deleted_sentinel(slot)) return JS_OWN_DELETED;
     *out_value = slot;
     return JS_OWN_READY;
 }
@@ -165,17 +214,14 @@ extern "C" JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
                                                          Item* out_value) {
     JS_PROPS_ASSERT_KEY(name, name_len);
     if (out_pair) *out_pair = NULL;
-    if (get_type_id(object) != LMD_TYPE_MAP) return JS_DESC_NONE;
-
-    bool found = false;
-    Item slot = js_map_get_fast_ext(object.map, name, name_len, &found);
-    if (!found) return JS_DESC_NONE;
-    if (js_props_is_deleted_sentinel(slot)) return JS_DESC_DELETED;
-
-    ShapeEntry* se = js_find_shape_entry(object, name, name_len);
+    Item slot = ItemNull;
+    ShapeEntry* se = NULL;
+    JsShapeSlotStatus status = js_own_shape_slot_status(object, name, name_len, &slot, &se);
+    if (status == JS_SHAPE_SLOT_ABSENT) return JS_DESC_NONE;
+    if (status == JS_SHAPE_SLOT_DELETED) return JS_DESC_DELETED;
     JS_PROPS_ASSERT_NOT_DEL_ACCESSOR(slot, se);
     JS_PROPS_ASSERT_ACCESSOR_PAIR(slot, se);
-    if (se && jspd_is_accessor(se)) {
+    if (status == JS_SHAPE_SLOT_ACCESSOR) {
         JsAccessorPair* pair = js_item_to_accessor_pair(slot);
         if (pair) {
             if (out_pair) *out_pair = pair;
@@ -195,27 +241,22 @@ extern "C" JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
 // into a single boolean, used by `js_has_own_property` MAP/FUNC branches and
 // by callers that only need to know "is there an own property here?".
 //
-// Returns true iff (object has type LMD_TYPE_MAP) AND there is an own slot
-// AND the slot is not the deleted sentinel. IS_ACCESSOR slots count as
-// present (the pair itself is the descriptor).
+// Returns true iff there is an own MAP/FUNC/ARRAY companion-map slot and it is
+// not tombstoned by shape bit or transition sentinel. IS_ACCESSOR slots count
+// as present (the pair itself is the descriptor).
 extern "C" bool js_ordinary_has_own(Item object, const char* name, int name_len) {
     JS_PROPS_ASSERT_KEY(name, name_len);
-    if (get_type_id(object) != LMD_TYPE_MAP) return false;
-    bool found = false;
-    Item slot = js_map_get_fast_ext(object.map, name, name_len, &found);
-    if (!found) return false;
-    if (js_props_is_deleted_sentinel(slot)) return false;
-    return true;
+    JsShapeSlotStatus status = js_own_shape_slot_status(object, name, name_len, NULL, NULL);
+    return status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR;
 }
 
 // Stage A1.8b: tri-state own-slot status — see header for contract.
 extern "C" JsOwnSlotStatus js_ordinary_own_status(Item object, const char* name, int name_len) {
     JS_PROPS_ASSERT_KEY(name, name_len);
-    if (get_type_id(object) != LMD_TYPE_MAP) return JS_HAS_ABSENT;
-    bool found = false;
-    Item slot = js_map_get_fast_ext(object.map, name, name_len, &found);
-    if (!found) return JS_HAS_ABSENT;
-    return js_props_is_deleted_sentinel(slot) ? JS_HAS_DELETED : JS_HAS_PRESENT;
+    JsShapeSlotStatus status = js_own_shape_slot_status(object, name, name_len, NULL, NULL);
+    if (status == JS_SHAPE_SLOT_DELETED) return JS_HAS_DELETED;
+    if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) return JS_HAS_PRESENT;
+    return JS_HAS_ABSENT;
 }
 
 // Stage A1.9: own + proto-chain HasProperty (no proxy / builtin fallback).
@@ -269,13 +310,13 @@ extern "C" bool js_ordinary_delete(Item object, const char* name, int name_len) 
     JS_PROPS_ASSERT_KEY(name, name_len);
     if (get_type_id(object) != LMD_TYPE_MAP) return true;
     Map* m = object.map;
-    bool slot_found = false;
-    Item slot = js_map_get_fast_ext(m, name, name_len, &slot_found);
+    Item slot = ItemNull;
+    ShapeEntry* se = NULL;
+    JsShapeSlotStatus status = js_own_shape_slot_status(object, name, name_len, &slot, &se);
     // Absent or tombstoned: per spec, delete of non-existent property succeeds.
-    if (!slot_found || js_props_is_deleted_sentinel(slot)) return true;
+    if (status == JS_SHAPE_SLOT_ABSENT || status == JS_SHAPE_SLOT_DELETED) return true;
 
     // Non-configurable check (shape-flag-first via existing helper).
-    ShapeEntry* se = js_find_shape_entry(object, name, name_len);
     JS_PROPS_ASSERT_NOT_DEL_ACCESSOR(slot, se);
     JS_PROPS_ASSERT_ACCESSOR_PAIR(slot, se);
     if (!js_props_query_configurable(m, se, name, name_len)) return false;
@@ -311,6 +352,7 @@ extern "C" JsResolveFieldStatus js_ordinary_resolve_shape_value(ShapeEntry* e,
                                                                   Item receiver,
                                                                   Item* out_value) {
     Item slot = _map_read_field(e, m->data);
+    if (jspd_is_deleted(e)) return JS_RESOLVE_DELETED;
     if (js_props_is_deleted_sentinel(slot)) return JS_RESOLVE_DELETED;
 
     if (jspd_is_accessor(e)) {
@@ -330,23 +372,6 @@ extern "C" JsResolveFieldStatus js_ordinary_resolve_shape_value(ShapeEntry* e,
     return JS_RESOLVE_VALUE;
 }
 
-// Mirror of JsFuncProps from js_globals.cpp / js_runtime.cpp — used here to
-// reach `properties_map`. Layout MUST stay in sync.
-struct JsFuncPropsView_props {
-    TypeId type_id;
-    void* func_ptr;
-    int param_count;
-    Item* env;
-    int env_size;
-    Item prototype;
-    Item bound_this;
-    Item* bound_args;
-    int bound_argc;
-    String* name;
-    int builtin_id;
-    Item properties_map;
-};
-
 // Synthesize descriptor from (obj, storage_map). `obj` is used for shape
 // lookup (which delegates to obj.function for FUNC objects); `m` is the
 // underlying Map* used for slot reads. For LMD_TYPE_MAP these are the same;
@@ -355,14 +380,12 @@ static bool js_props_desc_from_storage(Item obj, Map* m,
                                         const char* name, int name_len,
                                         JsPropertyDescriptor* out) {
     if (!m) return false;
-    ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
+    Item slot = ItemNull;
+    ShapeEntry* se = NULL;
+    JsShapeSlotStatus status = js_own_shape_slot_status(obj, name, name_len, &slot, &se);
+    if (status == JS_SHAPE_SLOT_ABSENT || status == JS_SHAPE_SLOT_DELETED) return false;
 
-    bool slot_found = false;
-    Item slot = js_map_get_fast_ext(m, name, name_len, &slot_found);
-
-    if (slot_found && js_props_is_deleted_sentinel(slot)) return false;
-
-    if (slot_found && se && jspd_is_accessor(se)) {
+    if (status == JS_SHAPE_SLOT_ACCESSOR) {
         JsAccessorPair* pair = js_item_to_accessor_pair(slot);
         if (pair) {
             out->flags |= JS_PD_HAS_GET;
@@ -376,12 +399,6 @@ static bool js_props_desc_from_storage(Item obj, Map* m,
         if (jspd_is_enumerable(se))   out->flags |= JS_PD_ENUMERABLE;
         if (jspd_is_configurable(se)) out->flags2 |= 0x01u;
         return true;
-    }
-
-    if (!slot_found) return false;
-
-    if (slot_found && se && jspd_is_accessor(se)) {
-        // already handled above
     }
 
     // Phase-5D: legacy __get_X/__set_X probe removed. IS_ACCESSOR own-path
@@ -565,19 +582,17 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
 
     // ----- Accessor descriptor: install via the IS_ACCESSOR chokepoint.
     if (is_accessor_desc) {
-        // Detect array exotic: arrays don't carry shape entries for indexed
-        // slots, so Scheme B (IS_ACCESSOR shape flag) cannot apply. Use legacy
-        // __get_X/__set_X companion-map markers instead — readers for array
-        // index access dispatch via these markers.
+        // Detect array exotic: dense array slots do not carry shape entries, so
+        // numeric-index accessors are stored under the digit-string key in the
+        // array companion map with IS_ACCESSOR set there.
         bool is_array_exotic = (get_type_id(object) == LMD_TYPE_ARRAY) ||
             (get_type_id(object) == LMD_TYPE_MAP && object.map &&
              object.map->map_kind == MAP_KIND_ARRAY_PROPS);
 
         if (is_array_exotic) {
-            // Numeric (index) array properties: use legacy __get_<idx>/__set_<idx>
-            // markers in the companion map. Index slots can't carry IS_ACCESSOR
-            // shape flags reliably (no shape entry per index, and writing the
-            // pair into arr->items[idx] would clobber any data slot/hole).
+            // Numeric (index) array properties: use the companion map digit
+            // entry. Writing the pair into arr->items[idx] would clobber a data
+            // slot/hole, so the companion-map shape entry owns IS_ACCESSOR.
             //
             // Non-numeric (named) array properties: route through the IS_ACCESSOR
             // chokepoint just like regular objects. The companion map carries
@@ -601,7 +616,7 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
             }
 
             if (is_numeric_index) {
-                // Phase 5D: route numeric-index accessors through the IS_ACCESSOR
+                // Route numeric-index accessors through the IS_ACCESSOR
                 // chokepoint *on the companion map* (not the array itself).
                 // Calling js_define_accessor_partial(arr, ...) would recurse into
                 // js_property_set(arr, "<idx>", pair) which routes to js_array_set
@@ -679,8 +694,15 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
             // [[Set]], which can still reject on writability/non-extensibility.
             // Guard on a real shape entry so virtual/special properties stay on
             // their established setter path.
+            if (jspd_is_deleted(value_se)) {
+                js_shape_entry_set_deleted(object, name, name_len, /*is_deleted=*/false);
+            }
             fn_map_set(object, name_item, pd->value);
         } else if (get_type_id(object) == LMD_TYPE_FUNC) {
+            ShapeEntry* fn_se = js_find_shape_entry(object, name, name_len);
+            if (fn_se && jspd_is_deleted(fn_se)) {
+                js_shape_entry_set_deleted(object, name, name_len, /*is_deleted=*/false);
+            }
             js_func_init_property(object, name_item, pd->value);
         } else {
             js_property_set(object, name_item, pd->value);

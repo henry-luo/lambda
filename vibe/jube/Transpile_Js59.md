@@ -2,7 +2,7 @@
 
 Date: 2026-06-17
 
-Status: P1/P2/P3, post-P3 non-P4 leftovers, and P4 class-identity migration are implemented. P5/P6 remain. Js58 closed the sparse-array work with a clean ES2024 baseline. Js59 finishes the object/property metadata migration described in `doc/dev/js/JS_06_Objects_Properties_Prototypes.md`: retire engine dependence on string-marker metadata (`__nw_` / `__ne_` / `__nc_` / `__get_` / `__set_` / `__class_name__`) and make `ShapeEntry::flags`, `JsAccessorPair`, and `TypeMap::js_class` the only ordinary metadata sources.
+Status: P1/P2/P3, post-P3 non-P4 leftovers, P4, P5, and P6 are implemented. Js58 closed the sparse-array work with a clean ES2024 baseline. Js59 finishes the object/property metadata migration described in `doc/dev/js/JS_06_Objects_Properties_Prototypes.md`: retire engine dependence on string-marker metadata (`__nw_` / `__ne_` / `__nc_` / `__get_` / `__set_` / `__class_name__`) and make `ShapeEntry::flags`, `JsAccessorPair`, and `TypeMap::js_class` the only ordinary metadata sources.
 
 This is a correctness and maintainability proposal, not a performance-tuning proposal. The rule for every phase is: no hard-coded workaround, no MIR patch, no parser regeneration, and no broad refactor unless the phase root cause requires it.
 
@@ -47,6 +47,16 @@ Landed on 2026-06-17:
 - `Function.prototype[@@hasInstance]` now treats constructor-like class MAPs as callable constructors and delegates to ordinary prototype-chain identity instead of rejecting them before `instanceof` can run its class-map path.
 - Class constructor maps synthesize `Function.prototype` through implicit-prototype lookup, and map shape rebuilds preserve `TypeMap::js_class` so wrapper prototypes keep their brand after delete/redefine operations.
 - Added `test/js/props/metadata_class_identity.{js,txt}` and documented it in `test/js/props/README.md`.
+- P5 deleted/tombstone centralization is implemented.
+- Added `js_own_shape_slot_status`, returning `ABSENT`, `DELETED`, `DATA`, or `ACCESSOR` for MAP storage, FUNC `properties_map` storage, and ARRAY companion-map storage.
+- Ordinary get/has/descriptor/enumeration/propertyIsEnumerable, array companion-map sparse/index reads, descriptor application, and ordinary delete paths now treat `JSPD_DELETED` and the transition sentinel through one shape-slot status model.
+- Ordinary writes and descriptor installs clear `JSPD_DELETED` before installing a new value or accessor pair.
+- Dense array holes and FUNC virtual-property shadows remain documented sentinel users; they are value-storage/virtual-shadow behavior, not retired string-marker metadata.
+- Added `test/js/props/metadata_delete_shape_status.{js,txt}` and documented it in `test/js/props/README.md`.
+- P6 cleanup and docs are implemented.
+- Removed the dead `js_dual_write_marker_flags` surface.
+- Removed/renamed marker-specific named-property helpers; the remaining freeze/seal internal-state helper no longer presents itself as descriptor marker metadata.
+- Updated `doc/dev/js/JS_06_Objects_Properties_Prototypes.md` to mark the migration complete for ordinary metadata and to document the remaining non-metadata sentinel users.
 
 Verified gates:
 
@@ -62,6 +72,10 @@ make build-test
 make test262-baseline
 ./lambda.exe js test/js/props/metadata_class_identity.js --no-log
 make build-test
+./lambda.exe js test/js/props/metadata_delete_shape_status.js --no-log
+./test/test_js_gtest.exe '--gtest_filter=*metadata_delete_shape_status*' --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --run-async --batch-file=temp/js59_p5p6_regressions.txt --jobs=1 --batch-chunk-size=1 --async-chunk-size=1 --write-failures=temp/js59_p5p6_regressions_failures.tsv --gtest_brief=1
+make test262-baseline
 ```
 
 Results:
@@ -73,27 +87,33 @@ Results:
 - Focused post-P3 non-P4 leftover shard: 2/2 passed.
 - Targeted P3 Test262 regression rerun: 19/19 passed, failed 0.
 - Focused P4 Test262 regression slice: 14/14 passed, failed 0.
-- Latest full JS gtest: 223/223 passed.
+- Latest full JS gtest: 224/224 passed.
 - test262 baseline: first full P3 run fully passed 40261 / 40261, failed 0, regressions 0.
 - Latest post-P3 non-P4 cleanup test262 baseline: fully passed 40261 / 40261, failed 0, regressions 0.
 - P4 direct fixture: `metadata_class_identity` output matched expected.
 - P4 build gate: `make build-test` passed.
 - Latest P4 test262 baseline: fully passed 40261 / 40261, failed 0, regressions 0.
+- P5 direct fixture: `metadata_delete_shape_status` output matched expected.
+- P5 focused gtest: 1/1 passed.
+- P5/P6 build gate: `make build-test` passed.
+- P5/P6 focused Test262 regression slice: 6/6 passed, failed 0.
+- Final P5/P6 full JS gtest: 224/224 passed.
+- Final P5/P6 test262 baseline: fully passed 40261 / 40261, failed 0, regressions 0.
 
 Remaining work:
 
-- P5/P6 still own deleted-state cleanup and final documentation.
+- None for Js59 P5/P6.
 
 ## 1. Starting Baseline
 
-Current checked-in state at proposal time:
+Current checked-in state at proposal time, before the Js59 phases landed:
 
 - `ShapeEntry::flags` already carries `JSPD_NON_WRITABLE`, `JSPD_NON_ENUMERABLE`, `JSPD_NON_CONFIGURABLE`, `JSPD_IS_ACCESSOR`, and `JSPD_DELETED` in `lambda/lambda-data.hpp`.
 - `JsAccessorPair` already stores getter/setter pairs directly under the real property key, with `JSPD_IS_ACCESSOR` disambiguating the slot.
-- `js_property_set` still runs the transition hooks `js_intercept_accessor_marker` and `js_dual_write_marker_flags` before ordinary storage.
-- Named-property attribute reads are mostly shape-first, but digit-string array attributes and array `length` still use `__nw_` / `__ne_` / `__nc_` marker fallbacks.
-- Static object-literal accessor parsing in `build_js_ast.cpp` still encodes non-computed getter/setter keys as `__get_X` / `__set_X`, and MIR lowering strips the prefix later.
-- `TypeMap::js_class` exists and many readers prefer it, but many writers/readers still use `__class_name__`, especially older built-ins, DOM/CSS wrappers, stream/formdata helpers, user-defined class lowering, and legacy instanceof/duck-typing paths.
+- `js_property_set` still ran the transition hooks `js_intercept_accessor_marker` and `js_dual_write_marker_flags` before ordinary storage.
+- Named-property attribute reads were mostly shape-first, but digit-string array attributes and array `length` still used `__nw_` / `__ne_` / `__nc_` marker fallbacks.
+- Static object-literal accessor parsing in `build_js_ast.cpp` still encoded non-computed getter/setter keys as `__get_X` / `__set_X`, and MIR lowering stripped the prefix later.
+- `TypeMap::js_class` existed and many readers preferred it, but many writers/readers still used `__class_name__`, especially older built-ins, DOM/CSS wrappers, stream/formdata helpers, user-defined class lowering, and legacy instanceof/duck-typing paths.
 - Deletes still dual-write slot sentinel state and `JSPD_DELETED`; array holes and FUNC virtual property shadows still depend on `JS_DELETED_SENTINEL_VAL`.
 
 Latest known Js58 admission evidence in the checked-in proposal is `make test262-baseline` with `Fully passed: 40261 / 40261`, `Failed: 0`, and `Regressions: 0`. Js59 P0 must refresh this in the current checkout before code changes.
@@ -123,7 +143,7 @@ This migration touches one of the hottest and widest semantic surfaces in Lambda
 Highest-risk areas:
 
 - Array numeric index descriptors: dense storage lives in `Array::items`, while descriptor attributes live in the companion map.
-- Array `length`: virtual property with special writable semantics, currently tracked by `__nw_length`.
+- Array `length`: virtual property with special writable semantics, now tracked by the companion-map `length` shape entry.
 - FUNC virtual properties: `length`, `name`, and `prototype` can be shadow-deleted by sentinel slots even when no ordinary stored slot exists.
 - Built-in class hierarchy checks: current code sometimes uses string suffix checks such as "ends with Error" or class-name equality along a prototype chain.
 - User-defined classes: dynamic names cannot all become enum values; they need a separate non-marker model.
@@ -154,6 +174,7 @@ make test262-baseline
 | `metadata_function_custom_attrs` | Function custom-property enumerability reads `properties_map` `ShapeEntry::flags`, and user `__ne_` keys are ordinary. |
 | `metadata_regexp_lastindex_attrs` | `RegExp.prototype.compile` honors non-writable `lastIndex` through shape flags, and user `__nw_lastIndex` is ordinary. |
 | `metadata_class_identity` | Built-in wrappers, errors, promises, typed arrays, streams, DOM/CSS wrappers, and util/assert type checks resolve through `JsClass` or explicit prototype links. |
+| `metadata_delete_shape_status` | Deleted ordinary, function custom, and array companion-map slots are hidden by `js_own_shape_slot_status` and revive cleanly. |
 
 Acceptance:
 
@@ -221,7 +242,7 @@ Landed evidence:
 
 Root cause:
 
-Dense array data lives in `arr->items[idx]`, so a plain dense element has no `ShapeEntry`. That is why numeric index attributes still fall back to `__nw_<idx>` / `__ne_<idx>` / `__nc_<idx>`, and length writability still falls back to `__nw_length`.
+Dense array data lives in `arr->items[idx]`, so a plain dense element has no `ShapeEntry`. At the start of P3, numeric index attributes still fell back to `__nw_<idx>` / `__ne_<idx>` / `__nc_<idx>`, and length writability still fell back to `__nw_length`.
 
 Chosen model:
 
@@ -296,7 +317,7 @@ Landed evidence:
 - `metadata_class_identity` confirms public `__class_name__` is ordinary, built-in RegExp/Date/wrapper brands come from `TypeMap::js_class`, user-defined classes do not receive engine marker slots, class constructors keep function behavior, and subclass/instance identity uses prototype links.
 - `Function.prototype[@@hasInstance]` now accepts constructor-like class MAPs, so `new C() instanceof C` and explicit `Function.prototype[Symbol.hasInstance].call(C, c)` both reach ordinary prototype identity.
 - `map_rebuild_for_type_change` preserves the `TypeMap::js_class` byte, so deleting/redefining properties on built-in wrapper prototypes does not erase their `Object.prototype.toString` brand.
-- Full `./test/test_js_gtest.exe --gtest_brief=1` passed 223/223.
+- Then-current P4 full `./test/test_js_gtest.exe --gtest_brief=1` passed 223/223 before the P5 fixture was added.
 - `make test262-baseline` fully passed 40261 / 40261 with failed 0 and regressions 0.
 
 ### P5 - Centralize Deleted/Tombstone Semantics For Ordinary Maps
@@ -325,6 +346,14 @@ Acceptance:
 - No ordinary MAP reader manually interprets sentinel without going through the status helper.
 - Full `./test/test_js_gtest.exe --gtest_brief=1` and `make test262-baseline` pass.
 
+Landed evidence:
+
+- `metadata_delete_shape_status` confirms ordinary object deletes hide keys from `hasOwnProperty`, `in`, `Object.getOwnPropertyNames`, and `Object.keys`, then revive cleanly through `Object.defineProperty`.
+- The fixture also covers prototype fallthrough after own delete, function custom-property delete/rewrite, and array companion-map digit-entry delete/redefine.
+- `js_own_shape_slot_status` is now the shared state query for MAP/FUNC/ARRAY companion-map storage; dense array holes and FUNC virtual shadows are the explicitly retained sentinel users.
+- Direct `./lambda.exe js test/js/props/metadata_delete_shape_status.js --no-log` matched expected output.
+- Focused `./test/test_js_gtest.exe '--gtest_filter=*metadata_delete_shape_status*' --gtest_brief=1` passed 1/1.
+
 ### P6 - Cleanup, Docs, And Final Gate
 
 Work:
@@ -345,6 +374,15 @@ make build-test
 ./test/test_js_gtest.exe --gtest_brief=1
 make test262-baseline
 ```
+
+Landed evidence:
+
+- Removed the dead `js_dual_write_marker_flags` declaration and implementation.
+- Removed the dead `js_defprop_has_marker` helper and renamed the remaining freeze/seal state helpers away from marker terminology.
+- Updated `doc/dev/js/JS_06_Objects_Properties_Prototypes.md` and `test/js/props/README.md`.
+- Final `./test/test_js_gtest.exe --gtest_brief=1` passed 224/224.
+- The P5/P6 focused Test262 regression slice passed 6/6.
+- Final `make test262-baseline` fully passed 40261 / 40261 with failed 0 and regressions 0.
 
 Optional timing smoke after final correctness:
 

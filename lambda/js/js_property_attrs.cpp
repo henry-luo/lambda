@@ -93,14 +93,16 @@ extern "C" ShapeEntry* js_find_shape_entry(Item obj, const char* name, int name_
     // Fast path via hash table when populated.
     ShapeEntry* hit = typemap_hash_lookup(tm, name, name_len);
     if (hit) return hit;
-    // Fallback linear scan (in case hash table not populated for this map).
+    // Fallback linear scan (in case hash table overflowed). Match
+    // js_map_get_fast's last-writer-wins behavior for duplicate shape names.
+    ShapeEntry* found = nullptr;
     for (ShapeEntry* e = tm->shape; e; e = e->next) {
         if (e->name && (int)e->name->length == name_len &&
             memcmp(e->name->str, name, name_len) == 0) {
-            return e;
+            found = e;
         }
     }
-    return nullptr;
+    return found;
 }
 
 // Locate the underlying Map* whose `type` field would receive a cloned TypeMap
@@ -434,11 +436,10 @@ extern "C" bool js_props_obj_query_configurable(Item obj, const char* name, int 
 // =============================================================================
 //
 // Pre-A2-T5: each helper unconditionally wrote a `__nw_/__ne_/__nc_<name>`
-// marker via `js_defprop_set_marker`, and the `js_dual_write_marker_flags`
-// hook propagated the marker into the corresponding `JSPD_NON_*` shape bit.
-// That double-bookkeeping was needed because `ShapeEntry::flags` could be
-// shared across sibling Maps (per-callsite shape cache) and an in-place
-// mutation would corrupt them all.
+// marker and a property-set hook propagated the marker into the corresponding
+// `JSPD_NON_*` shape bit. That double-bookkeeping was needed because
+// `ShapeEntry::flags` could be shared across sibling Maps (per-callsite shape
+// cache) and an in-place mutation would corrupt them all.
 //
 // Post-A2-T5: with `js_shape_entry_update_flags` going through the Map-local
 // TypeMap clone (A2-T1+T2), shape flags are reliably per-Map. Js59 P3 also
@@ -472,38 +473,6 @@ extern "C" void js_attr_set_enumerable(Item obj, const char* name, int name_len,
 extern "C" void js_attr_set_configurable(Item obj, const char* name, int name_len, bool configurable) {
     if (configurable) js_attr_apply_shape_flags(obj, name, name_len, 0, JSPD_NON_CONFIGURABLE);
     else              js_attr_apply_shape_flags(obj, name, name_len, JSPD_NON_CONFIGURABLE, 0);
-}
-
-extern "C" bool js_dual_write_marker_flags(Item obj, Item key, Item value) {
-    // Quick reject: only string keys can be markers.
-    if (get_type_id(key) != LMD_TYPE_STRING) return false;
-    String* ks = it2s(key);
-    if (!ks || ks->len < 6) return false;
-    const char* k = ks->chars;
-    if (k[0] != '_' || k[1] != '_') return false;
-
-    bool is_tombstone = (value.item == JS_DELETED_SENTINEL_VAL);
-    bool is_truthy_val = !is_tombstone && js_is_truthy(value);
-    int klen = (int)ks->len;
-    uint8_t flag = 0;
-    int prefix_len = 0;
-    if      (klen >= 5 && memcmp(k, "__nw_", 5) == 0) { flag = JSPD_NON_WRITABLE;     prefix_len = 5; }
-    else if (klen >= 5 && memcmp(k, "__ne_", 5) == 0) { flag = JSPD_NON_ENUMERABLE;   prefix_len = 5; }
-    else if (klen >= 5 && memcmp(k, "__nc_", 5) == 0) { flag = JSPD_NON_CONFIGURABLE; prefix_len = 5; }
-    // Phase 5: __get_ / __set_ branches are gone. Accessors are installed
-    // through JsAccessorPair storage under the visible property name.
-    else return false;
-
-    const char* prop = k + prefix_len;
-    int prop_len = klen - prefix_len;
-    if (prop_len <= 0) return true; // matched marker prefix but no name; nothing to update
-
-    // Boolean markers (nw/ne/nc): truthy → set, tombstone-or-falsy → clear.
-    uint8_t set_mask = 0, clear_mask = 0;
-    if (is_truthy_val) set_mask = flag;
-    else               clear_mask = flag;
-    js_shape_entry_update_flags(obj, prop, prop_len, set_mask, clear_mask);
-    return true;
 }
 
 // =============================================================================
@@ -542,7 +511,7 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
         // pair slot is not visible to enumeration/JSON/spread.
         uint8_t set_mask = JSPD_IS_ACCESSOR | JSPD_NON_ENUMERABLE;
         if (attrs & JSPD_NON_CONFIGURABLE) set_mask |= JSPD_NON_CONFIGURABLE;
-        js_shape_entry_update_flags(obj, ns->chars, nl, set_mask, 0);
+        js_shape_entry_update_flags(obj, ns->chars, nl, set_mask, JSPD_DELETED);
     }
 
     // NON_CONFIGURABLE is encoded in the shape entry flags above.
@@ -658,7 +627,7 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
     uint8_t set_mask = JSPD_IS_ACCESSOR;
     if (attrs & JSPD_NON_ENUMERABLE)   set_mask |= JSPD_NON_ENUMERABLE;
     if (attrs & JSPD_NON_CONFIGURABLE) set_mask |= JSPD_NON_CONFIGURABLE;
-    js_shape_entry_update_flags(obj, ns->chars, (int)ns->len, set_mask, 0);
+    js_shape_entry_update_flags(obj, ns->chars, (int)ns->len, set_mask, JSPD_DELETED);
 }
 
 // Phase-5C: 4-arg MIR-friendly wrapper. Returns `obj` so transpiler call sites
