@@ -169,3 +169,29 @@ run(
   0,
   () => editor.querySelector("td").firstChild,
   3);
+
+run(
+  "table-cell-cross-row-prev-tail",
+  "<table><tr><td>abc</td><td>def</td></tr><tr><td>ghi</td></tr></table>",
+  () => editor.querySelectorAll("td")[2].firstChild,
+  0,
+  "<table><tbody><tr><td>abc</td><td>defghi</td></tr></tbody></table>",
+  () => editor.querySelectorAll("td")[1].firstChild,
+  3,
+  () => editor.querySelectorAll("td")[2].firstChild,
+  0,
+  () => editor.querySelectorAll("td")[1].firstChild,
+  3);
+
+run(
+  "table-cell-cross-row-current-tail",
+  "<table><tr><td>abc</td></tr><tr><td>def</td><td>ghi</td></tr></table>",
+  () => editor.querySelectorAll("td")[1].firstChild,
+  0,
+  "<table><tbody><tr><td>abcdef</td></tr><tr><td>ghi</td></tr></tbody></table>",
+  () => editor.querySelector("td").firstChild,
+  3,
+  () => editor.querySelectorAll("td")[1].firstChild,
+  0,
+  () => editor.querySelector("td").firstChild,
+  3);

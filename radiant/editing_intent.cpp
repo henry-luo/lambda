@@ -170,12 +170,15 @@ bool input_intent_from_key_event(const KeyEvent* key_event, InputIntent* out) {
         return true;
     }
     if (key_event->key == RDT_KEY_BACKSPACE) {
-        out->type = (alt || ctrl) ? INPUT_INTENT_DELETE_WORD_BACKWARD
-                                  : INPUT_INTENT_DELETE_CONTENT_BACKWARD;
+        out->type = cmd ? INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD
+            : (alt || ctrl) ? INPUT_INTENT_DELETE_WORD_BACKWARD
+            : INPUT_INTENT_DELETE_CONTENT_BACKWARD;
         return true;
     }
     if (key_event->key == RDT_KEY_DELETE) {
-        out->type = INPUT_INTENT_DELETE_CONTENT_FORWARD;
+        out->type = cmd ? INPUT_INTENT_DELETE_SOFT_LINE_FORWARD
+            : (alt || ctrl) ? INPUT_INTENT_DELETE_WORD_FORWARD
+            : INPUT_INTENT_DELETE_CONTENT_FORWARD;
         return true;
     }
 

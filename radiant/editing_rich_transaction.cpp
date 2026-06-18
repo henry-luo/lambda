@@ -1864,6 +1864,10 @@ static const char* rich_text_default_mutation_operation(
         case INPUT_INTENT_DELETE_CONTENT_FORWARD:
         case INPUT_INTENT_DELETE_WORD_BACKWARD:
         case INPUT_INTENT_DELETE_WORD_FORWARD:
+        case INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD:
+        case INPUT_INTENT_DELETE_SOFT_LINE_FORWARD:
+        case INPUT_INTENT_DELETE_HARD_LINE_BACKWARD:
+        case INPUT_INTENT_DELETE_HARD_LINE_FORWARD:
             return "delete";
         default:
             return "replace";
