@@ -75,8 +75,8 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     map_type->last = shape_entry;
     map_type->length++;
 
-    // A1: populate inline hash table for O(1) property lookup
-    typemap_hash_insert(map_type, shape_entry);
+    // A1: populate/grow property hash table for O(1) property lookup
+    typemap_hash_insert_owned(map_type, shape_entry, input->pool);
 
     // ensure data capacity
     int bsize = type_info[type_id].byte_size;
@@ -250,7 +250,7 @@ bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
         if (!map_type->shape) map_type->shape = shape_entry;
         map_type->last = shape_entry;
         map_type->length++;
-        typemap_hash_insert(map_type, shape_entry);
+        typemap_hash_insert_owned(map_type, shape_entry, input->pool);
         if (mp->data) {
             *(bool*)((char*)mp->data + byte_offset) = false;
         }

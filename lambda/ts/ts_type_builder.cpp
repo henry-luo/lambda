@@ -41,15 +41,6 @@ static Type* make_base_type(Pool* pool, TypeId tid) {
     return t;
 }
 
-// build TypeMap with ShapeEntry chain and populate hash table
-static void typemap_hash_build(TypeMap* tm) {
-    tm->field_count = 0;
-    memset(tm->field_index, 0, sizeof(tm->field_index));
-    for (ShapeEntry* e = tm->shape; e; e = e->next) {
-        typemap_hash_insert(tm, e);
-    }
-}
-
 Type* ts_resolve_type(TsTranspiler* tp, TsTypeNode* node) {
     if (!node) return make_base_type(tp->ast_pool, LMD_TYPE_ANY);
     if (node->resolved_type) return node->resolved_type;
@@ -175,7 +166,7 @@ Type* ts_resolve_type(TsTranspiler* tp, TsTypeNode* node) {
             prev_se = se;
         }
         tm->last = prev_se;
-        typemap_hash_build(tm);
+        typemap_hash_build(tm, pool);
         node->resolved_type = (Type*)tm;
         return (Type*)tm;
     }

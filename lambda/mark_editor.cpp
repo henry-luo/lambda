@@ -580,6 +580,7 @@ Item MarkEditor::map_rebuild_with_new_shape(Map* old_map, ShapeBuilder* builder,
         while (new_type->last && new_type->last->next) {
             new_type->last = new_type->last->next;
         }
+        typemap_hash_build(new_type, pool_);
 
         arraylist_append(type_list_, new_type);
         result_map->type = new_type;
@@ -594,6 +595,7 @@ Item MarkEditor::map_rebuild_with_new_shape(Map* old_map, ShapeBuilder* builder,
         while (old_type->last && old_type->last->next) {
             old_type->last = old_type->last->next;
         }
+        typemap_hash_build(old_type, pool_);
     }
 
     // Free old data (inline mode only), replace with new
@@ -1113,6 +1115,7 @@ Item MarkEditor::elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* bu
     while (new_type->last && new_type->last->next) {
         new_type->last = new_type->last->next;
     }
+    typemap_hash_build((TypeMap*)new_type, pool_);
 
     arraylist_append(type_list_, new_type);
     result_elmt->type = new_type;
@@ -1669,6 +1672,7 @@ Item MarkEditor::elmt_copy_with_new_children(Element* old_elmt, Item* new_childr
     memcpy(new_type, old_type, sizeof(TypeElmt));
     new_type->content_length = new_length;
     new_type->type_index = type_list_->length;
+    typemap_hash_build((TypeMap*)new_type, pool_);
     arraylist_append(type_list_, new_type);
 
     // Copy attribute data (if any)

@@ -2512,17 +2512,13 @@ extern "C" Item js_new_object_with_shape(const char** prop_names, const int* pro
     tm->length = count;
     tm->byte_size = count * (int)sizeof(void*);
 
-    // Populate hash table
-    ShapeEntry* se = first;
-    while (se) {
-        typemap_hash_insert(tm, se);
-        se = se->next;
-    }
+    // Populate/grow hash table.
+    typemap_hash_build(tm, js_input->pool);
 
     // P1: Build slot_entries array for O(1) slot-indexed access
     if (count <= 16) {
         ShapeEntry** entries = (ShapeEntry**)pool_calloc(js_input->pool, count * sizeof(ShapeEntry*));
-        se = first;
+        ShapeEntry* se = first;
         for (int i = 0; i < count && se; i++, se = se->next) {
             entries[i] = se;
         }
@@ -2863,7 +2859,7 @@ Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_found) 
     // garbage tagged-Item value like 0x340007000020004). Reject obviously-
     // invalid pointers: anything with bits set in the upper 16 (typical
     // userspace addresses on macOS / Linux are ≤ 2^48).
-    if (map_type && (uintptr_t)map_type > 0x0000FFFFFFFFFFFFULL) {
+    if (map_type && !typemap_ptr_is_plausible(map_type)) {
         static int p0_corrupt_log = 0;
         if (p0_corrupt_log < 3) {
             log_error("js_map_get_fast: corrupt m->type=%p on m=%p — key='%.*s'",
@@ -2875,42 +2871,18 @@ Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_found) 
     }
     if (!map_type || !map_type->shape) { if (out_found) *out_found = false; return ItemNull; }
 
-    // A1: Try hash table first for O(1) lookup (covers >99% of JS objects).
-    // The hash table uses last-writer-wins via typemap_hash_insert, so the
-    // entry in the table always points to the latest ShapeEntry for that name.
-    if (map_type->field_count > 0) {
-        ShapeEntry* entry = typemap_hash_lookup(map_type, key_str, key_len);
-        if (entry) {
-            if (out_found) *out_found = true;
-            return _map_read_field(entry, m->data);
-        }
-        // Not found in hash table — may have overflowed (capacity=32).
-        // Walk all named fields linearly to catch overflow entries, and also
-        // check unnamed (nested/spread) entries.
-        ShapeEntry* field = map_type->shape;
-        Item overflow_result = ItemNull;
-        bool found = false;
-        while (field) {
-            if (!field->name) {
-                Map* nested_map = *(Map**)((char*)m->data + field->byte_offset);
-                if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
-                    bool nested_found;
-                    Item nested_result = _map_get((TypeMap*)nested_map->type, nested_map->data, (char*)key_str, &nested_found);
-                    if (nested_found) { if (out_found) *out_found = true; return nested_result; }
-                }
-            } else if (field->name->str == key_str ||  // A6: interned pointer match
-                       (field->name->length == (size_t)key_len &&
-                        memcmp(field->name->str, key_str, key_len) == 0)) {
-                overflow_result = _map_read_field(field, m->data);
-                found = true;
-            }
-            field = field->next;
-        }
-        if (out_found) *out_found = found;
-        return overflow_result;
+    // A1: Named fields go through the shared TypeMap lookup. It uses the active
+    // hash table when available and falls back to the authoritative shape chain
+    // when the table is unpopulated or saturated.
+    ShapeEntry* entry = typemap_hash_lookup(map_type, key_str, key_len);
+    if (entry) {
+        if (out_found) *out_found = true;
+        return _map_read_field(entry, m->data);
     }
 
-    // Fallback: linear scan for objects without hash table
+    // Fallback for spread/nested maps (field->name == NULL). Named fields were
+    // already handled above, so this pass avoids duplicate linear scans on large
+    // plain maps.
     ShapeEntry* field = map_type->shape;
     Item result = ItemNull;
     bool found = false;
@@ -2925,11 +2897,6 @@ Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_found) 
                     found = true;
                 }
             }
-        } else if (field->name->str == key_str ||  // A6: interned pointer match
-                   (field->name->length == (size_t)key_len &&
-                    memcmp(field->name->str, key_str, key_len) == 0)) {
-            result = _map_read_field(field, m->data);
-            found = true;
         }
         field = field->next;
     }

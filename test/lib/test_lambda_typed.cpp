@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "../../lib/lambda_typed.hpp"
+#include "../../lambda/js/js_props.h"
 
 namespace {
 
@@ -209,6 +210,38 @@ TEST(LambdaTypedItem, TypeMapHashLookupFindsOverflowShapeEntries) {
               &entries[TYPEMAP_HASH_CAPACITY]);
 }
 
+TEST(LambdaTypedItem, TypeMapHashOwnedInsertGrowsPastInlineTable) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+
+    enum { count = TYPEMAP_HASH_CAPACITY + 1 };
+    TypeMap tm = {};
+    ShapeEntry entries[count] = {};
+    StrView names[count] = {};
+    char key_storage[count][4] = {};
+
+    for (int i = 0; i < count; i++) {
+        set_test_shape_name(key_storage[i], i);
+        names[i].str = key_storage[i];
+        names[i].length = 3;
+        entries[i].name = &names[i];
+        entries[i].byte_offset = i;
+        if (i > 0) entries[i - 1].next = &entries[i];
+        if (!tm.shape) tm.shape = &entries[i];
+        tm.last = &entries[i];
+        tm.length++;
+        typemap_hash_insert_owned(&tm, &entries[i], pool);
+    }
+
+    EXPECT_NE(tm.field_index_dynamic, nullptr);
+    EXPECT_GT(typemap_hash_capacity(&tm), TYPEMAP_HASH_CAPACITY);
+    EXPECT_EQ(tm.field_count, count);
+    EXPECT_EQ(typemap_hash_lookup(&tm, key_storage[count - 1], 3),
+              &entries[count - 1]);
+
+    pool_destroy(pool);
+}
+
 TEST(LambdaTypedItem, TypeMapHashLookupFallsBackToLastShapeMatch) {
     TypeMap tm = {};
     ShapeEntry first = {};
@@ -229,6 +262,14 @@ TEST(LambdaTypedItem, TypeMapHashLookupFallsBackToLastShapeMatch) {
     tm.last = &second;
 
     EXPECT_EQ(typemap_hash_lookup(&tm, "dup", 3), &second);
+}
+
+TEST(LambdaTypedItem, JsOrdinarySetOutcomeSeparatesDataWrite) {
+    static_assert(JS_SET_NOT_FOUND == 0,
+                  "no-accessor status stays ABI-stable for existing callers");
+    static_assert(JS_SET_DATA_WRITTEN != JS_SET_NOT_FOUND,
+                  "successful data writes must not look like missing setters");
+    EXPECT_NE(JS_SET_DATA_WRITTEN, JS_SET_NOT_FOUND);
 }
 
 TEST(LambdaTypedItem, HoleSentinelWrapsDeletedSlotPayload) {

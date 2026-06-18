@@ -240,6 +240,7 @@ typedef struct ShapeEntry {
 // pointer. The shape chain remains authoritative when the table is not populated
 // or saturates.
 #define TYPEMAP_HASH_CAPACITY 32
+#define TYPEMAP_HASH_DYNAMIC_MAX_CAPACITY 32768
 
 typedef struct TypeMap : Type {
     int64_t length;  // no. of items in the map
@@ -249,9 +250,12 @@ typedef struct TypeMap : Type {
     ShapeEntry* shape;  // first shape entry of the map
     ShapeEntry* last;  // last shape entry of the map
     const char* struct_name;  // C struct name for direct access (NULL if anonymous)
-    // A1: Inline property hash table for O(1) lookup
+    // A1: property hash table for O(1) lookup. Small maps use the inline table;
+    // larger maps may attach a pool-owned dynamic table.
     ShapeEntry* field_index[TYPEMAP_HASH_CAPACITY];  // hash table slots (NULL = empty)
-    uint8_t field_count;  // number of hash slots used (0 = not populated)
+    ShapeEntry** field_index_dynamic;  // NULL = use inline field_index
+    uint16_t field_count;  // number of hash slots used (0 = not populated)
+    uint16_t field_capacity;  // 0 = inline capacity, otherwise dynamic slot count
     // P1: Slot-indexed array for O(1) shaped property access (used by js_get_slot_fast/js_set_slot_fast).
     // Populated for constructor-shaped objects. slot_entries[i] points to the i-th ShapeEntry.
     ShapeEntry** slot_entries;  // NULL if not populated; else array of slot_count pointers
@@ -274,6 +278,61 @@ typedef struct TypeMap : Type {
 // Thin alias over lib/hash.h so the algorithm choice lives in one place.
 static inline uint32_t typemap_fnv1a(const char* key, int len) {
     return hash_fnv1a_32(key, (size_t)len);
+}
+
+static inline bool typemap_ptr_is_plausible(void* p) {
+    return p && (uintptr_t)p <= 0x0000FFFFFFFFFFFFULL;
+}
+
+static inline ShapeEntry** typemap_hash_slots(TypeMap* tm) {
+    if (!tm) return NULL;
+    return (tm->field_index_dynamic && tm->field_capacity > 0)
+        ? tm->field_index_dynamic
+        : tm->field_index;
+}
+
+static inline int typemap_hash_capacity(TypeMap* tm) {
+    if (!tm) return 0;
+    return (tm->field_index_dynamic && tm->field_capacity > 0)
+        ? (int)tm->field_capacity
+        : TYPEMAP_HASH_CAPACITY;
+}
+
+static inline int typemap_hash_recommended_capacity(int64_t expected_fields) {
+    if (expected_fields <= TYPEMAP_HASH_CAPACITY) return TYPEMAP_HASH_CAPACITY;
+    int64_t target = expected_fields * 2;
+    if (target < expected_fields) target = TYPEMAP_HASH_DYNAMIC_MAX_CAPACITY;
+    int capacity = TYPEMAP_HASH_CAPACITY;
+    while ((int64_t)capacity < target && capacity < TYPEMAP_HASH_DYNAMIC_MAX_CAPACITY) {
+        capacity <<= 1;
+    }
+    return capacity;
+}
+
+static inline void typemap_hash_clear(TypeMap* tm) {
+    if (!tm) return;
+    memset(tm->field_index, 0, sizeof(tm->field_index));
+    if (tm->field_index_dynamic && tm->field_capacity > 0) {
+        memset(tm->field_index_dynamic, 0, (size_t)tm->field_capacity * sizeof(ShapeEntry*));
+    }
+    tm->field_count = 0;
+}
+
+static inline void typemap_hash_prepare(TypeMap* tm, Pool* pool, int64_t expected_fields) {
+    if (!tm) return;
+    tm->field_index_dynamic = NULL;
+    tm->field_capacity = 0;
+    memset(tm->field_index, 0, sizeof(tm->field_index));
+    tm->field_count = 0;
+
+    int capacity = typemap_hash_recommended_capacity(expected_fields);
+    if (capacity > TYPEMAP_HASH_CAPACITY && pool) {
+        ShapeEntry** dynamic_slots = (ShapeEntry**)pool_calloc(pool, (size_t)capacity * sizeof(ShapeEntry*));
+        if (dynamic_slots) {
+            tm->field_index_dynamic = dynamic_slots;
+            tm->field_capacity = (uint16_t)capacity;
+        }
+    }
 }
 
 static inline bool typemap_shape_name_equals(ShapeEntry* e, const char* key, int key_len) {
@@ -300,24 +359,46 @@ static inline ShapeEntry* typemap_shape_lookup_last(TypeMap* tm, const char* key
 // Uses last-writer-wins: if a name already exists, the slot is overwritten.
 static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
     if (!tm || !entry || !entry->name) return;
+    ShapeEntry** slots = typemap_hash_slots(tm);
+    int capacity = typemap_hash_capacity(tm);
+    if (!slots || capacity <= 0) return;
     uint32_t h = typemap_fnv1a(entry->name->str, (int)entry->name->length);
-    uint32_t idx = h & (TYPEMAP_HASH_CAPACITY - 1);
-    for (int probe = 0; probe < TYPEMAP_HASH_CAPACITY; probe++) {
-        uint32_t slot = (idx + probe) & (TYPEMAP_HASH_CAPACITY - 1);
-        if (!tm->field_index[slot]) {
-            if (tm->field_count >= TYPEMAP_HASH_CAPACITY) return;
-            tm->field_index[slot] = entry;
+    uint32_t idx = h & ((uint32_t)capacity - 1);
+    for (int probe = 0; probe < capacity; probe++) {
+        uint32_t slot = (idx + (uint32_t)probe) & ((uint32_t)capacity - 1);
+        if (!slots[slot]) {
+            if (tm->field_count >= (uint16_t)capacity) return;
+            slots[slot] = entry;
             tm->field_count++;
             return;
         }
         // last-writer-wins: replace existing entry with same name
-        if (typemap_shape_name_equals(tm->field_index[slot],
+        if (typemap_shape_name_equals(slots[slot],
                                       entry->name->str, (int)entry->name->length)) {
-            tm->field_index[slot] = entry;
+            slots[slot] = entry;
             return;
         }
     }
-    // table full — field_count stays below TYPEMAP_HASH_CAPACITY
+    // table full — callers fall back to the authoritative shape chain.
+}
+
+static inline void typemap_hash_build(TypeMap* tm, Pool* pool) {
+    if (!tm) return;
+    typemap_hash_prepare(tm, pool, tm->length);
+    for (ShapeEntry* e = tm->shape; e; e = e->next) {
+        typemap_hash_insert(tm, e);
+    }
+}
+
+static inline void typemap_hash_insert_owned(TypeMap* tm, ShapeEntry* entry, Pool* pool) {
+    if (!tm || !entry) return;
+    int current_capacity = typemap_hash_capacity(tm);
+    int wanted_capacity = typemap_hash_recommended_capacity(tm->length);
+    if (pool && wanted_capacity > current_capacity) {
+        typemap_hash_build(tm, pool);
+        return;
+    }
+    typemap_hash_insert(tm, entry);
 }
 
 // A1: Lookup a ShapeEntry by name through the hash table.
@@ -326,14 +407,16 @@ static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
 // the same char* pointer), falling back to memcmp only on pointer mismatch.
 static inline ShapeEntry* typemap_hash_lookup(TypeMap* tm, const char* key, int key_len) {
     if (!tm || !key || key_len < 0) return NULL;
-    if (tm->field_count == 0 || tm->field_count >= TYPEMAP_HASH_CAPACITY) {
+    int capacity = typemap_hash_capacity(tm);
+    ShapeEntry** slots = typemap_hash_slots(tm);
+    if (!slots || capacity <= 0 || tm->field_count == 0 || tm->field_count >= (uint16_t)capacity) {
         return typemap_shape_lookup_last(tm, key, key_len);
     }
     uint32_t h = typemap_fnv1a(key, key_len);
-    uint32_t idx = h & (TYPEMAP_HASH_CAPACITY - 1);
-    for (int probe = 0; probe < TYPEMAP_HASH_CAPACITY; probe++) {
-        uint32_t slot = (idx + probe) & (TYPEMAP_HASH_CAPACITY - 1);
-        ShapeEntry* e = tm->field_index[slot];
+    uint32_t idx = h & ((uint32_t)capacity - 1);
+    for (int probe = 0; probe < capacity; probe++) {
+        uint32_t slot = (idx + (uint32_t)probe) & ((uint32_t)capacity - 1);
+        ShapeEntry* e = slots[slot];
         if (!e) return NULL;  // empty slot → not found
         if (typemap_shape_name_equals(e, key, key_len)) {
             return e;

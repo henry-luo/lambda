@@ -538,20 +538,7 @@ extern "C" void rb_setattr(Item object, Item name, Item value) {
     if (map_type && map_type->shape) {
         String* str_key = it2s(name);
         if (str_key) {
-            ShapeEntry* found = (map_type->field_count > 0)
-                ? typemap_hash_lookup(map_type, str_key->chars, (int)str_key->len)
-                : nullptr;
-            if (!found) {
-                ShapeEntry* entry = map_type->shape;
-                while (entry) {
-                    if (entry->name && entry->name->length == (size_t)str_key->len
-                        && strncmp(entry->name->str, str_key->chars, str_key->len) == 0) {
-                        found = entry;
-                        break;
-                    }
-                    entry = entry->next;
-                }
-            }
+            ShapeEntry* found = typemap_hash_lookup(map_type, str_key->chars, (int)str_key->len);
             if (found) {
                 fn_map_set(object, name, value);
                 return;

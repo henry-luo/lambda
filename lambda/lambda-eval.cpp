@@ -4983,12 +4983,8 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_et->ns = old_et->ns;
         new_et->type_index = tl->length;
 
-        // Populate hash table for O(1) property lookup
-        ShapeEntry* he = first;
-        while (he) {
-            typemap_hash_insert((TypeMap*)new_et, he);
-            he = he->next;
-        }
+        // Populate/grow hash table for O(1) property lookup.
+        typemap_hash_build((TypeMap*)new_et, context->pool);
 
         arraylist_append(tl, new_et);
         *type_slot = new_et;
@@ -5005,12 +5001,8 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_mt->is_private_clone = old_map_type->is_private_clone;
         new_mt->js_class = old_map_type->js_class;
 
-        // Populate hash table for O(1) property lookup
-        ShapeEntry* he = first;
-        while (he) {
-            typemap_hash_insert(new_mt, he);
-            he = he->next;
-        }
+        // Populate/grow hash table for O(1) property lookup.
+        typemap_hash_build(new_mt, context->pool);
 
         // Rebuild slot_entries if old TypeMap had them (for shaped JS objects)
         if (old_map_type->slot_entries && old_map_type->slot_count > 0 &&

@@ -130,6 +130,8 @@ typedef enum {
                              // caller MUST return value verbatim
     JS_SET_NO_SETTER   = 2,  // pair found but pair->setter == ItemNull;
                              // caller decides strict-throw vs sloppy no-op
+    JS_SET_DATA_WRITTEN = 3, // no accessor handled the set; own data write
+                             // completed on Receiver/object
 } JsSetterDispatchStatus;
 
 // Walk own + proto chain for an IS_ACCESSOR pair under (`name`, `name_len`).
@@ -253,7 +255,8 @@ bool js_ordinary_get(Item object, const char* name, int name_len,
 //   JS_SET_DISPATCHED if an inherited setter ran (V was passed to setter),
 //   JS_SET_NO_SETTER  if an inherited accessor had no setter (caller decides
 //                     strict-throw vs sloppy no-op),
-//   JS_SET_NOT_FOUND  if the data write succeeded (no inherited accessor).
+//   JS_SET_DATA_WRITTEN if the data write succeeded (no inherited accessor),
+//   JS_SET_NOT_FOUND  if no write target was available.
 //
 // Excludes: non-writable / non-extensible / frozen checks, proxies, exotic
 // objects, array length, function-property metadata. Use
