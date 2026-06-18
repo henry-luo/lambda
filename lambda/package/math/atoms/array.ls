@@ -135,8 +135,6 @@ fn box_with_type(bx, atom_type) => {
     type: atom_type,
     italic: bx.italic,
     skew: bx.skew,
-    strut_total: bx.strut_total,
-    strut_depth_em: bx.strut_depth_em,
     is_fraction: bx.is_fraction
 }
 
@@ -541,8 +539,6 @@ fn wrap_with_delimiters(table_box, ld, rd) {
         render_height: table_box.render_height,
         render_depth: table_box.render_depth,
         render_total: table_box.render_total,
-        strut_total: table_box.strut_total,
-        strut_depth_em: table_box.strut_depth_em,
         width: total_width,
         type: "ord",
         italic: 0.0,

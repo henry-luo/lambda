@@ -9,11 +9,11 @@
 > **sqrt/radical (display/text metric-driven — bucket dispatch gone, +17 corpus, +1 baseline, 0 regressions; §10.0)**,
 > **delimiter raw exposure (the `2.41` magic RETIRED — sized-delim glyphs carry height_raw/depth_raw, strut CEIL@2s h+d once; pure refactor, 0 pass-rate change; §10.3)**,
 > Task 5 partial (`fmt_delim_em` special-cases removed),
-> **last 2 baseline residuals FIXED (script-reached fractions now expose raw; fraction.ls:248) → SACRED 206/206**.
-> BLOCKED/deferred: Task 4 (arrays — 2-row depth_holder float artifact, low yield),
-> mechanical collapse 7/8/9 (the CAPSTONE).
-> NEXT: **Phase A collapse** (box-model field-deletion) — fractions/scripts/sqrt/delimiters all carry full precision now.
-> Then arrays + extended-corpus compound clusters (equation/align/cfrac/integrals/matrices-with-inner-content).
+> **last 2 baseline residuals FIXED (script-reached fractions now expose raw; fraction.ls:248) → SACRED 206/206**,
+> **Phase A first increment: `strut_total`+`strut_depth_em` DELETED (\left..\right on use_raw; 0 pass-rate change)**.
+> BLOCKED/deferred: Task 4 (arrays — 2-row depth_holder float artifact, low yield).
+> NEXT Phase A: convert remaining non-raw producers (accents/arrays/bbox/integral-side-limits) to expose raw,
+> then collapse `render_total`/`render_height`/`render_depth`. Then extended-corpus compound clusters.
 > NOTE: corpus golden is **display-rooted** (MathLive SSR default); the harness now renders displaystyle.
 
 ## Hard execution order (corrected by synthesis)

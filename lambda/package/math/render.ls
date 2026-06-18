@@ -1598,21 +1598,30 @@ fn render_stretchy_delimiter_group(left_text, right_text, content) {
     let style_attr = stretchy_left_right_style(content)
     let box_height = max(content.height, max(left_box.height, right_box.height))
     let box_depth = max(content.depth, max(left_box.depth, right_box.depth))
-    let strut = stretchy_left_right_strut_total(content, left_box, right_box)
+    // Full-precision box extent: the content's raw height/depth maxed with the
+    // delimiter glyph raw. Exposing these lets the outer strut round h+d ONCE
+    // (the use_raw path) — replacing the strut_total override entirely.
+    let content_h = if (content.height_raw != null) content.height_raw else content.height
+    let content_d = if (content.left_right_render_depth != null) content.left_right_render_depth
+        else if (content.depth_raw != null) content.depth_raw else content.depth
+    let box_h_raw = max(content_h, max(delim_raw_h(left_box), delim_raw_h(right_box)))
+    let box_d_raw = max(content_d, max(delim_raw_d(left_box), delim_raw_d(right_box)))
+    let strut = stretchy_left_right_render_total(content, left_box, right_box)
     {
         element: <span class: css.LEFT_RIGHT, style: style_attr;
             for (el in elements) el
         >,
         height: box_height,
         depth: box_depth,
+        height_raw: box_h_raw,
+        depth_raw: box_d_raw,
         render_height: box_height,
         render_depth: box_depth,
         render_total: strut,
         width: sum((for (p in parts where p != null) p.width)),
         type: "minner",
         italic: 0.0,
-        skew: 0.0,
-        strut_total: strut
+        skew: 0.0
     }
 }
 
@@ -1626,7 +1635,7 @@ fn stretchy_left_right_style(content) {
     "margin-top:" ++ fmt_delim_em(0.0 - render_depth) ++ ";height:" ++ fmt_delim_em(render_total)
 }
 
-fn left_right_strut_total(content) {
+fn left_right_content_total(content) {
     if (content.left_right_render_total != null) round(content.left_right_render_total * 100.0) / 100.0
     else if (content.render_total != null) round(content.render_total * 100.0) / 100.0
     else null
@@ -1639,8 +1648,8 @@ fn delim_raw_d(b) { if (b.depth_raw != null) b.depth_raw else b.depth }
 // computed ONCE (mirrors MathLive box.ts toString). The delimiter glyphs carry
 // raw extent (delimiters.ls sized_delim_raw) so a Size3 pair sums to 2.40003
 // and rounds to 2.41 naturally — no special-casing.
-fn stretchy_left_right_strut_total(content, left_box, right_box) {
-    let content_total = left_right_strut_total(content)
+fn stretchy_left_right_render_total(content, left_box, right_box) {
+    let content_total = left_right_content_total(content)
     let content_h = if (content.height_raw != null) content.height_raw else content.height
     let content_d = if (content.left_right_render_depth != null) content.left_right_render_depth
         else if (content.depth_raw != null) content.depth_raw else content.depth
@@ -2908,8 +2917,6 @@ fn box_with_type(bx, atom_type) => {
     type: atom_type,
     italic: bx.italic,
     skew: bx.skew,
-    strut_total: bx.strut_total,
-    strut_depth_em: bx.strut_depth_em,
     is_fraction: bx.is_fraction,
     is_script_radical: bx.is_script_radical
 }

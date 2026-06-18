@@ -435,7 +435,7 @@ the goldens are displaystyle.**
 | **C — Rule 18 scripts** | **mostly done.** | `render_sup_only` fully rewritten to pure Rule 18c `supShift` + single-child makeVList (−74 lines; legacy_top/legacy_vlist/legacy_child_h tables, tall_base/tall_script/numeric_x_script gates, 0.41/0.43 magic, 4 orphan helpers all gone). `render_both` + `make_limits_stack` were already metric-driven (Math4 B/C earlier). `render_sub_only` got the ceil2-projection fix. Remaining: the box-record on these still carries `render_*`/`*_raw` (Phase A). |
 | **D — Array vshift** | **BLOCKED.** | The dynamic MathLive `makeVList` algorithm reproduces 1-row/3-row matrices byte-exact, but the **2-row `depth_holder` golden 0.96 is a float-imprecision artifact** — the closed form gives 0.95, and even MathLive's own JS float gives `ceil2(0.9500…01)=0.95`. Both snapshots emit 0.96, so it comes from MathLive's actual per-cell metrics differing from Lambda's 0.84/0.36 arstrut model. Reverted (regressed 2-row matrices). Also: most "matrix" corpus failures are *inner content* (fractions/delims/scripts), so Task-4 yield is low. |
 | **E — Regression cleanup** | **ongoing.** | Down to 2 upstream-baseline fails, both the fraction-in-sup residual (see 10.4). sqrt chain cleared. |
-| **A — Box-model collapse** | **BLOCKED — it is the CAPSTONE, not the enabler.** | Field-deletion cannot happen until every producer emits clean full-precision boxes. Current field counts across `lambda/package/math/`: `render_total` ~186, `render_depth` ~158, `render_height` ~129, `left_right_render_*` ~72, `strut_total` ~23, `strut_depth_em` ~21. `render_total` alone has ~53 distinct producers. The `math.ls` emit (lines 34-76) already has the `use_raw` single-CEIL@2 path wired; the collapse = making `use_raw` universally true, which requires §10.2 D + the delimiter/sqrt conversions to finish and stop setting `strut_total`/`render_total`. **§4's "A first" ordering is contradicted by §1.3's own interlock; A is last.** |
+| **A — Box-model collapse** | **STARTED — `strut_total` + `strut_depth_em` DELETED.** | First clean increment (§10.6). `strut_depth_em` was dead (never set → always null) — removed wholesale. `strut_total` had ONE producer (the `\left..\right` box, render.ls); converted it to expose `height_raw`/`depth_raw` (content raw maxed with the delimiter glyph raw) so the outer strut rounds h+d ONCE via the `use_raw` path — then deleted the `strut_total` field + the override branches in `math.ls`. `\left..\right` now flows through `use_raw`. Verified no-op (824/921, SACRED 206/206). Remaining: `render_total` (~145), `render_height` (~100), `render_depth` (~127) — blocked on converting the still-hardcoded producers (accents/arrays/bbox/integrals) to expose raw first; `left_right_render_*` stay (full-precision delimiter margin positioning, MathLive emits un-rounded). |
 
 ### 10.3 Other hardcode removed this session (leaf + emit producers)
 - **box.ls leaf metrics (Task 6):** removed ~120 lines of **dead per-character
@@ -469,10 +469,30 @@ environments, `cfrac`, integral clusters, matrices with inner fraction/script
 content, and a long-symbol-string descender cluster.
 
 **Recommended next order:** ~~delimiter raw exposure~~ DONE (§10.3),
-~~baseline residuals~~ DONE (§10.0b). Next is **Phase A** collapse (the box-model
-field-deletion capstone — fractions/scripts/sqrt/delimiters all carry full
-precision now; only arrays remain non-raw). Then **D (arrays)** (low-yield) and
+~~baseline residuals~~ DONE (§10.0b), ~~Phase A first increment~~ DONE (§10.6:
+`strut_total`/`strut_depth_em` deleted). Next Phase A steps: convert the
+remaining non-raw producers (**accents**, **arrays**, **bbox/enclose**,
+**integral side-limits**) to expose correct `height_raw`/`depth_raw`, then
+collapse `render_total`/`render_height`/`render_depth`. Then **D (arrays)** and
 the extended-corpus compound clusters.
+
+### 10.6 Phase A — first increment DONE (`strut_total` + `strut_depth_em` deleted)
+Two of the box model's nine vertical-extent fields are gone, with zero pass-rate
+change (824/921, SACRED 206/206):
+- **`strut_depth_em`** was DEAD — plumbed through ~7 sites but never assigned a
+  real value (`first_strut_depth_em` always returned null). Deleted wholesale.
+- **`strut_total`** had exactly ONE producer: the `\left..\right` box
+  (`render_stretchy_delimiter_group`). It set `strut_total` to force the
+  `math.ls` non-raw emit path with a hand-computed strut height. Converted that
+  box to expose `height_raw`/`depth_raw` = the full-precision box extent
+  (content's `height_raw`/`left_right_render_depth` maxed with the delimiter
+  glyph raw from §10.3), so the outer strut now rounds `h+d` ONCE via `use_raw`
+  — reproducing the same emit. Then deleted the `strut_total` field and the two
+  override branches in `math.ls` (`use_raw` no longer needs to exclude it; the
+  `fmt_fixed(total,2)` strut-bottom branch is gone). Probe confirms
+  `\left(\frac{a}{b}\right)` now satisfies `use_raw`. Functions renamed
+  `*_strut_total` → `*_render_total`/`left_right_content_total` (the field they
+  feed is `render_total`, not the deleted `strut_total`).
 
 ### 10.5 Acceptance-criteria scorecard (§8)
 1. *No per-content em constant tables in fraction.ls/scripts.ls* — **fraction.ls

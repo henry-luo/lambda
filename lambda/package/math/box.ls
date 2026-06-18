@@ -475,7 +475,6 @@ pub fn hbox(boxes) {
             else if (v.render_total != null) v.render_total
             else hbox_render_height_of(v, suppress_operator_height) +
                  hbox_render_depth_of(v, suppress_text_depth)))
-    let strut_depth_em = first_strut_depth_em(valid, 0)
     // Full-precision raw max: propagated for strut emission only. If ANY
     // child lacks a raw value (e.g. composite boxes from fractions/scripts),
     // we conservatively skip propagation and fall back to rounded values
@@ -507,8 +506,6 @@ pub fn hbox(boxes) {
         type: "ord",
         italic: 0.0,
         skew: 0.0,
-        strut_total: if (len(valid) == 1) valid[0].strut_total else null,
-        strut_depth_em: strut_depth_em,
         is_fraction: if (len(valid) == 1) valid[0].is_fraction else null,
         is_script_radical: has_script_radical(valid, 0)
     }
@@ -562,12 +559,6 @@ fn collect_elements(valid, i, acc) {
         (let v = valid[i],
          let next = acc ++ elements_of(v),
          collect_elements(valid, i + 1, next))
-}
-
-fn first_strut_depth_em(items, i) {
-    if (i >= len(items)) null
-    else if (items[i].strut_depth_em != null) items[i].strut_depth_em
-    else first_strut_depth_em(items, i + 1)
 }
 
 fn has_suppress_hbox_text_depth(items, i) {
@@ -717,8 +708,6 @@ pub fn with_class(bx, cls) => {
     render_total: bx.render_total,
     left_right_render_depth: bx.left_right_render_depth,
     left_right_render_total: bx.left_right_render_total,
-    strut_total: bx.strut_total,
-    strut_depth_em: bx.strut_depth_em,
     width: bx.width,
     type: bx.type,
     italic: bx.italic,
