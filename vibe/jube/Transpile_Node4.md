@@ -29,7 +29,7 @@ LambdaJS now passes **1,462 of 3,521** official Node.js parallel tests (**41.5%*
 
 > Per-module numbers in §3.1 were captured at 1,463 (single-test flicker `test-abortcontroller.js` between the measurement and lock-in runs); the difference is noise on a 3,521-test suite.
 
-> 2026-06-18 focused drift checks against the current local LambdaJS build: `util` stayed **7/27** with 0 regressions and 2 improvements; `stream` stayed **50/213** with 0 crashes; `dns` stayed **0/29**; `https` improved to **42/63** with 3 improvements; `net` is now **94/148** with 0 crashes, 0 regressions, and 12 improvements after the Track 0.3 socket-connect stabilization slice; `child_process` is now **34/97** with 0 crashes, 0 regressions, and 8 improvements after the Track 0.4 spawn/fork stabilization slice; `tls` is now **130/214** with 0 crashes, 0 regressions, and 78 improvements after the Track 0.5 TLS/node:test/closure-env stabilization slice. Re-run the full release methodology in §9 before changing the locked baseline.
+> 2026-06-18 focused drift checks against the current local LambdaJS build: `util` stayed **7/27** with 0 regressions and 2 improvements; `stream` stayed **50/213** with 0 crashes; `dns` is now **10/29** with 0 crashes, 0 regressions, and 10 improvements after the Track E.1 lookup/promises/internal-binding slice; `https` improved to **42/63** with 3 improvements; `net` is now **94/148** with 0 crashes, 0 regressions, and 12 improvements after the Track 0.3 socket-connect stabilization slice; `child_process` is now **34/97** with 0 crashes, 0 regressions, and 8 improvements after the Track 0.4 spawn/fork stabilization slice; `tls` is now **130/214** with 0 crashes, 0 regressions, and 78 improvements after the Track 0.5 TLS/node:test/closure-env stabilization slice. Re-run the full release methodology in §9 before changing the locked baseline.
 
 > Measurement method is documented in [§9](#9-appendix-measurement-methodology) so these numbers are reproducible.
 
@@ -44,7 +44,7 @@ Node3 proposed Phases 6–14. Here is what the code actually shows today.
 | **6 — Error codes** | +80 | 🟡 **Infra done, migration ~15%** | `js_error_codes.h` exists (30 `JS_ERR_*` constants); helpers `js_throw_invalid_arg_type/_out_of_range/_type_error_code` at `js_runtime.cpp:21483–21570`. But only ~105 coded call sites vs ~700+ plain. `js_typed_array.cpp` alone has 65 plain + 45 coded; `js_runtime.cpp` has 401 plain. |
 | **7 — Stream internals** | +100 | 🔴 **NOT STARTED** | `js_stream.cpp` still 840 LOC. State is JS-map properties (`__flowing__`, `__buffer__`), only option storage for `highWaterMark` rather than backpressure, `_write` gets a noop callback, and there is no `Symbol.asyncIterator`. **This is the critical miss.** |
 | **8 — Crypto** | +60 | 🟢 **Symmetric done, asymmetric missing** | `createCipheriv/Decipheriv` (AES-CBC/CTR/GCM) `js_crypto.cpp:908–938`; `pbkdf2(Sync)` `:945`; `scrypt(Sync)` `:1112`; `subtle.digest/encrypt/decrypt` `:1225–1440`; `getCiphers/getHashes/timingSafeEqual`. Missing: sign/verify, DH/ECDH, keygen, KeyObject, X509, `randomFillSync`, `getFips`. |
-| **9 — Module resolution** | +50 | 🟢 **Mostly done** | `stream/promises` is now a real namespace (`js_runtime.cpp:31691`), plus `fs/promises`, `dns/promises`, `timers/promises`, `util/types`, `path/posix|win32`, `assert/strict`, `node:test`, `vm`, `perf_hooks`. `internal/util` and `internal/test/binding` are recognized as engine built-ins; remaining internal work is `internalBinding` constant/object fidelity. |
+| **9 — Module resolution** | +50 | 🟢 **Mostly done** | `stream/promises` is now a real namespace (`js_runtime.cpp:31691`), plus `fs/promises`, `dns/promises`, `timers/promises`, `util/types`, `path/posix|win32`, `assert/strict`, `node:test`, `vm`, `perf_hooks`. `internal/util` and `internal/test/binding` are recognized as engine built-ins; `internalBinding('cares_wrap')` now exists for DNS test hooks. Remaining internal work is broader `internalBinding` constant/object fidelity. |
 | **10 — Process & OS** | +40 | 🟢 **Done** | `process.binding`, `allowedNodeEnvironmentFlags`, `report`, `setuid/setgid` all at `js_globals.cpp:3270–3330`. `os.cpus/networkInterfaces/userInfo/constants` complete (`js_os.cpp`). |
 | **11 — child_process & REPL** | +40 | 🟡 **exec/spawn improved, fork/IPC skeletal** | `js_child_process.cpp` is now 1,338 LOC. Track 0.4 added guarded `uv_spawn` failures, async `error`/`spawn` events, stream `data/end/close`, multiple listeners, LambdaJS self-spawn routing through `lambda.exe js`, numeric arg stringification, `process.execArgv`, string exit codes, stdio `inherit`/`ipc` basics, and a thin `fork()` bridge. Remaining: real IPC messaging, full stdio validation/options, `spawn-shell` warning/common fidelity. |
 | **12 — zlib streaming** | +35 | 🔴 **Blocked on Phase 7** | `js_zlib.cpp` (463 LOC): sync only (`gzipSync` etc.). No `createGzip/createDeflate` Transform classes, no async-callback form, brotli stubbed (`:320` returns error), no zstd. |
@@ -83,7 +83,7 @@ Rows for `https`, `net`, `child_process`, `tls`, `stream`, `util`, and `dns` wer
 | crypto | 120 | 15 | 12% | 0 | asymmetric gap (sign/verify/keygen/KeyObject) |
 | zlib | 61 | 8 | 13% | 0 | **streaming gap — blocked on stream core** |
 | worker | 139 | 28 | 20% | 0 | stub (single-threaded); out of scope beyond stub passes |
-| **dns** | 29 | **0** | **0%** | 0 | **total failure — callback path exists, but lookup option/error semantics and Resolver coverage still miss Node** |
+| **dns** | 29 | **10** | **34%** | 0 | **lookup/promises now cover the core option/error path; remaining gap is resolver record coverage, the Resolver class, and common/dns fidelity** |
 
 <sup>*os prefix matched a small sample in the probe; the module is otherwise mature.</sup>
 
@@ -110,6 +110,7 @@ Current 2026-06-18 focused module checks show active regressions against the loc
 - `net`: none after the Track 0.3 focused rerun (`./test/test_node_gtest.exe --modules=net --timeout=15000 --gtest_brief=1`)
 - `child_process`: none after the Track 0.4 focused rerun (`./test/test_node_gtest.exe --modules=child_process --timeout=15000 --gtest_brief=1`)
 - `tls`: none after the Track 0.5 focused rerun (`./test/test_node_gtest.exe --modules=tls --timeout=15000 --gtest_brief=1`)
+- `dns`: none after the Track E.1 focused rerun (`./test/test_node_gtest.exe --modules=dns --timeout=15000 --gtest_brief=1`)
 
 Historical sampled stale-baseline root causes (real at the time, but recheck before treating as current):
 - `test-next-tick.js` → `AssertionError: deepStrictEqual values are not equal` — **nextTick ordering regressed**.
@@ -169,7 +170,7 @@ The locked full-suite crashers and the 2026-06-18 focused `net`/`tls` reruns wer
 
 ### RC6 — Total-failure / stub modules
 
-- **dns 0/29**: `dns.lookup(host, cb)` now has an async `uv_getaddrinfo` path, but the official `test-dns-lookup.js` still fails (`Missing expected exception` in the 2026-06-18 direct run), option/error semantics are incomplete, `dns.resolve` still fakes A/AAAA via `getaddrinfo`, and there is no `Resolver` class (`js_dns.cpp`, 219 LOC). Also the source of 4 historical `snapshot-dns` stale-baseline deltas.
+- **dns 10/29**: Track E.1 landed variadic `dns.lookup(host, [options], cb)`, option validation for `family`/`hints`/`all`/`verbatim`/`order`, callback/promise result shaping, IP-literal short-circuiting, a real `dns.promises.lookup`, `require('dns/promises')`, a mutable `internalBinding('cares_wrap').getaddrinfo` hook for official memory-error tests, and delayed `internal/test/binding` warnings. Direct `test-dns-lookup.js` now exits 0 and the focused gate reports 10 improvements / 0 regressions. Remaining work is resolver record fidelity, the `Resolver` class, and `common/dns`; historical `snapshot-dns` stale-baseline deltas should be rechecked against this partial.
 - **async_hooks / AsyncLocalStorage**: registered but stubbed (no context propagation) — already cost one regression (`test-async-local-storage-contexts.js`) and block async-context-dependent http/timer tests.
 
 ---
@@ -262,7 +263,7 @@ C.2 **Real `util.promisify` + `callbackify` (+15).** Implement the Node algorith
 
 C.3 **`Buffer.prototype` iterator surface + `keys/values/entries` (+3).** `test-buffer-iterator.js` is in the locked baseline, so some iterator behavior already works through the wider engine/runtime path, but `js_buffer.cpp` still does not explicitly expose the Node Buffer prototype iterator family (`keys`, `values`, `entries`, `[Symbol.iterator]`). Keep this as a narrow API/fidelity cleanup, not a broad Buffer rewrite.
 
-C.4 **`internalBinding` / `internal/test/binding` stub (+15).** The `internal/test/binding` specifier is now recognized by both static require resolution and the module dispatcher, but the remaining work is to widen the returned `uv`/`config` constant coverage to match the official tests (Node3 §9.3 sketch is correct).
+C.4 **`internalBinding` / `internal/test/binding` stub (+15).** The `internal/test/binding` specifier is now recognized by both static require resolution and the module dispatcher and emits the expected internal-testing warning on next tick. `internalBinding('cares_wrap')` now has a mutable `getaddrinfo` hook for DNS tests. The remaining work is to widen the returned `uv`/`config` constant coverage to match the official tests (Node3 §9.3 sketch is correct).
 
 C.5 **`common/internet` + `common/wpt` shims (+10–30).** `common/internet` provides `addresses` + graceful `skip()` for network tests; `common/wpt` routes the WPT harness to Lambda's `assert`. Add under `lambda/js/test_shim/`.
 
@@ -287,7 +288,9 @@ Reuse the cipher null-guard discipline from Track 0 to avoid new crashers.
 
 ### Track E — dns Rebuild + AsyncLocalStorage (P2, independent, **~+35**)
 
-E.1 **Fix dns (0 → ~20).** Complete `dns.lookup(host, [opts], cb)` option/error semantics (the 2026-06-18 direct `test-dns-lookup.js` failure is `Missing expected exception`, not a missing callback function), implement real `dns.resolve{4,6,Mx,Txt,Srv,...}` via libuv/a resolver instead of the current A/AAAA `getaddrinfo` shortcut, add the `Resolver` class, and make `dns/promises` return real Promises rather than exposing callback-shaped methods. Recovers the historical `snapshot-dns` stale-baseline deltas too.
+E.1 **Fix dns (0 → ~20; partial 10/29 landed 2026-06-18).** The first slice completed `dns.lookup(host, [opts], cb)` option/error semantics for the official lookup suite, implemented real Promise shaping for `dns.promises.lookup`, wired `require('dns/promises')` to the Promise namespace, added IP-literal short-circuiting, and added the `internalBinding('cares_wrap').getaddrinfo` hook used by memory-error tests. The direct official `test-dns-lookup.js` now exits 0. The focused module gate is now **10/29**, **0 crashed**, **0 timed out**, **0 regressions**, **10 improvements**: `test-dns-default-order-ipv4.js`, `test-dns-default-order-ipv6.js`, `test-dns-default-order-verbatim.js`, `test-dns-lookup-promises-options-deprecated.js`, `test-dns-lookup.js`, `test-dns-lookupService.js`, `test-dns-memory-error.js`, `test-dns-promises-exists.js`, `test-dns-resolve-promises.js`, and `test-dns-set-default-order.js`.
+
+The slice also fixed a shared assertion root cause: `assert.rejects()` now captures expected error/message state per Promise handler instead of using process-global statics, so concurrent rejection assertions no longer overwrite each other. Remaining E.1 work: implement real `dns.resolve{4,6,Mx,Txt,Srv,...}` record handling instead of the current lookup shortcut, add the `Resolver` class, complete `common/dns` fidelity, and recheck the historical `snapshot-dns` stale-baseline deltas.
 
 E.2 **Real AsyncLocalStorage (+15).** Propagate a context store across `nextTick`/microtask/timer/libuv callbacks (a context stack saved/restored around each scheduled callback in `js_event_loop.cpp`). Recovers `test-async-local-storage-*` and unblocks async-context http tests. Full `async_hooks` ID tracking remains out of scope.
 
@@ -371,7 +374,12 @@ Tests come from `ref/node/test/parallel/` (3,938 files); the runner filters by t
 
 ```
 $ ./lambda.exe js ref/node/test/parallel/test-dns-lookup.js --no-log
-Uncaught AssertionError: Missing expected exception  # dns.lookup semantics still keep dns at 0/29
+# exits 0 after the 2026-06-18 Track E.1 lookup/promises slice
+
+$ ./test/test_node_gtest.exe --modules=dns --timeout=15000 --gtest_brief=1
+# Total 29, Passed 10, Failed 19, Crashed 0, Timed out 0,
+# Regressions 0, Improvements 10. Remaining failures are outside
+# the core test-dns-lookup.js path.
 
 # Historical stale-baseline samples from the 2026-06-16 audit; recheck before
 # treating them as current locked-baseline regressions:

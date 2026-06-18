@@ -449,10 +449,6 @@ extern "C" Item js_assert_partialDeepStrictEqual(Item actual, Item expected, Ite
 // assert.rejects / assert.doesNotReject — async assertion helpers
 // =============================================================================
 
-// Shared state for promise handlers (single-threaded, safe)
-static Item s_rejects_error_expected = {0};
-static Item s_rejects_message = {0};
-
 // Validate a rejected value against an expected error pattern.
 // Returns true if validation passes, false if it fails (and throws assertion error).
 static bool validate_rejection(Item thrown, Item error_expected, Item message) {
@@ -546,9 +542,10 @@ static Item js_assert_rejects_on_fulfilled(Item value) {
     return make_js_undefined();
 }
 
-static Item js_assert_rejects_on_rejected(Item reason) {
-    Item error_expected = s_rejects_error_expected;
-    Item message = s_rejects_message;
+static Item js_assert_rejects_on_rejected(Item env_item, Item reason) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    Item error_expected = env ? env[0] : make_js_undefined();
+    Item message = env ? env[1] : make_js_undefined();
     validate_rejection(reason, error_expected, message);
     return make_js_undefined();
 }
@@ -574,11 +571,11 @@ extern "C" Item js_assert_rejects(Item asyncFnOrPromise, Item error_expected, It
         promise = asyncFnOrPromise;
     }
 
-    s_rejects_error_expected = error_expected;
-    s_rejects_message = message;
-
     Item on_fulfilled = js_new_function((void*)js_assert_rejects_on_fulfilled, 1);
-    Item on_rejected = js_new_function((void*)js_assert_rejects_on_rejected, 1);
+    Item* reject_env = js_alloc_env(2);
+    reject_env[0] = error_expected;
+    reject_env[1] = message;
+    Item on_rejected = js_new_closure((void*)js_assert_rejects_on_rejected, 1, reject_env, 2);
     return js_promise_then(promise, on_fulfilled, on_rejected);
 }
 

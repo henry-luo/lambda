@@ -24,6 +24,7 @@ extern "C" Item js_has_own_property(Item obj, Item key);
 extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
 extern "C" Item js_util_custom_promisify_args_symbol(void);
+extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item push_d(double dval);
 extern "C" double it2d(Item item);
 extern "C" int64_t it2i(Item item);
@@ -31404,6 +31405,27 @@ extern "C" Item js_get_vm_namespace(void) {
     return vm_ns;
 }
 
+static Item js_cares_getaddrinfo_default(Item hostname, Item family, Item hints, Item all) {
+    (void)hostname;
+    (void)family;
+    (void)hints;
+    (void)all;
+    return (Item){.item = i2it(0)};
+}
+
+static Item js_emit_internal_test_binding_warning(void) {
+    Item warning = js_new_object();
+    js_property_set(warning,
+        (Item){.item = s2it(heap_create_name("name", 4))},
+        (Item){.item = s2it(heap_create_name("internal/test/binding", 21))});
+    js_property_set(warning,
+        (Item){.item = s2it(heap_create_name("message", 7))},
+        (Item){.item = s2it(heap_create_name("These APIs are for internal testing only. Do not use them.", 58))});
+    js_process_emit((Item){.item = s2it(heap_create_name("warning", 7))}, warning);
+    if (js_check_exception()) js_clear_exception();
+    return make_js_undefined();
+}
+
 // internalBinding() — provides internal bindings for Node.js official tests
 extern "C" Item js_internal_binding(Item name) {
     if (get_type_id(name) != LMD_TYPE_STRING) return ItemNull;
@@ -31440,6 +31462,20 @@ extern "C" Item js_internal_binding(Item name) {
             (Item){.item = s2it(heap_create_name("errname", 7))},
             js_new_function((void*)js_uv_errname, 1));
         return uv_obj;
+    }
+
+    if (s->len == 10 && memcmp(s->chars, "cares_wrap", 10) == 0) {
+        static Item cares_obj = {0};
+        static uint64_t cares_epoch = (uint64_t)-1;
+        if (cares_obj.item == 0 || cares_epoch != js_heap_epoch) {
+            cares_epoch = js_heap_epoch;
+            cares_obj = js_new_object();
+            heap_register_gc_root(&cares_obj.item);
+            js_property_set(cares_obj,
+                (Item){.item = s2it(heap_create_name("getaddrinfo", 11))},
+                js_new_function((void*)js_cares_getaddrinfo_default, 4));
+        }
+        return cares_obj;
     }
 
     // internalBinding('config')
@@ -32065,9 +32101,8 @@ extern "C" Item js_module_get(Item specifier) {
     // node:dns/promises — promise-based DNS API
     if ((spec->len == 12 && memcmp(spec->chars, "dns/promises", 12) == 0) ||
         (spec->len == 17 && memcmp(spec->chars, "node:dns/promises", 17) == 0)) {
-        extern Item js_get_dns_namespace(void);
-        // dns/promises uses the same namespace — lookup/resolve already work
-        return js_get_dns_namespace();
+        extern Item js_get_dns_promises_namespace(void);
+        return js_get_dns_promises_namespace();
     }
     // internal/util — selected internal symbols used by official Node.js tests
     if ((spec->len == 13 && memcmp(spec->chars, "internal/util", 13) == 0) ||
@@ -32092,6 +32127,8 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 24 && memcmp(spec->chars, "internal/test/binding.js", 24) == 0)) {
         static Item itb_ns = {0};
         static uint64_t itb_epoch = (uint64_t)-1;
+        static uint64_t itb_warning_epoch = (uint64_t)-1;
+        static bool itb_warning_scheduled = false;
         if (itb_ns.item == 0 || itb_epoch != js_heap_epoch) {
             itb_epoch = js_heap_epoch;
             itb_ns = js_new_object();
@@ -32104,6 +32141,14 @@ extern "C" Item js_module_get(Item specifier) {
                 (Item){.item = s2it(heap_create_name("internalBinding", 15))},
                 js_new_function((void*)js_internal_binding, 1));
             js_property_set(itb_ns, (Item){.item = s2it(heap_create_name("default", 7))}, itb_ns);
+        }
+        if (itb_warning_epoch != js_heap_epoch) {
+            itb_warning_epoch = js_heap_epoch;
+            itb_warning_scheduled = false;
+        }
+        if (!itb_warning_scheduled) {
+            itb_warning_scheduled = true;
+            js_next_tick_enqueue(js_new_function((void*)js_emit_internal_test_binding_warning, 0));
         }
         return itb_ns;
     }
