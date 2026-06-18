@@ -9363,7 +9363,7 @@ extern "C" Item js_for_in_keys(Item object) {
 
                 // skip engine-internal marker properties.
                 // 'constructor' is not unconditionally skipped here — its
-                // enumerability is determined by the __ne_ marker below
+                // enumerability is determined by the shape flags below
                 // (default-set non-enumerable on class/object prototypes;
                 //  user-defined static class fields override to enumerable).
                 bool skip = false;
@@ -12933,7 +12933,7 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                     return (Item){.item = b2it(false)}; // prototype is non-configurable
                 return (Item){.item = b2it(true)}; // non-constructors don't have prototype
             }
-            // Honor __nc_<key> non-configurable marker on properties_map.
+            // Honor non-configurable shape flags on properties_map.
             if (sk && sk->len > 0 && sk->len < 200 &&
                 fn->properties_map.item != 0 &&
                 get_type_id(fn->properties_map) == LMD_TYPE_MAP) {

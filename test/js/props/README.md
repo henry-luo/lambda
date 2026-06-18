@@ -29,3 +29,5 @@ part of `test_js_gtest.exe` in batch mode and complete in <1s collectively.
 | `metadata_user_attribute_keys.js` | user properties named `__nw_x`/`__ne_x`/`__nc_x` are ordinary enumerable data keys | §10.1.7 OrdinaryOwnPropertyKeys |
 | `metadata_array_index_attrs.js` | array index descriptor attributes live on the companion-map digit `ShapeEntry`, not `__nw_`/`__ne_`/`__nc_` marker slots | §10.4.2.1 Array Exotic Objects |
 | `metadata_array_length_attrs.js` | array `length` writability is a companion-map `ShapeEntry` flag and marker-looking user keys stay ordinary | §10.4.2.4 ArraySetLength |
+| `metadata_function_custom_attrs.js` | function custom-property enumerability is read from `properties_map` `ShapeEntry::flags`, not `__ne_` marker slots | §20.1.3.4 propertyIsEnumerable |
+| `metadata_regexp_lastindex_attrs.js` | `RegExp.prototype.compile` enforces `lastIndex` writability from `ShapeEntry::flags`, not `__nw_lastIndex` | §22.2.3.1 RegExpAlloc |

@@ -2,7 +2,7 @@
 
 Date: 2026-06-17
 
-Status: proposal with P1/P2/P3 landed. Js58 closed the sparse-array work with a clean ES2024 baseline. Js59 finishes the object/property metadata migration described in `doc/dev/js/JS_06_Objects_Properties_Prototypes.md`: retire engine dependence on string-marker metadata (`__nw_` / `__ne_` / `__nc_` / `__get_` / `__set_` / `__class_name__`) and make `ShapeEntry::flags`, `JsAccessorPair`, and `TypeMap::js_class` the only ordinary metadata sources.
+Status: proposal with P1/P2/P3 and post-P3 non-P4 leftovers landed. Js58 closed the sparse-array work with a clean ES2024 baseline. Js59 finishes the object/property metadata migration described in `doc/dev/js/JS_06_Objects_Properties_Prototypes.md`: retire engine dependence on string-marker metadata (`__nw_` / `__ne_` / `__nc_` / `__get_` / `__set_` / `__class_name__`) and make `ShapeEntry::flags`, `JsAccessorPair`, and `TypeMap::js_class` the only ordinary metadata sources.
 
 This is a correctness and maintainability proposal, not a performance-tuning proposal. The rule for every phase is: no hard-coded workaround, no MIR patch, no parser regeneration, and no broad refactor unless the phase root cause requires it.
 
@@ -33,6 +33,11 @@ Landed on 2026-06-17:
 - Mapped arguments reads now consult promoted companion descriptor slots before falling back to mapped parameter storage, preserving Test262 `Object.defineProperty(arguments, "0", ...)` behavior after dense argument slots are tombstoned.
 - User keys that look like array metadata, such as `__nw_0` and `__nw_length`, are ordinary own properties.
 - Added `test/js/props/metadata_array_index_attrs.{js,txt}` and `test/js/props/metadata_array_length_attrs.{js,txt}`.
+- Post-P3 non-P4 leftover cleanup is implemented.
+- `Object.prototype.propertyIsEnumerable` now reads ordinary-map and function custom-property enumerability from the target `ShapeEntry::flags`; it no longer probes `__ne_<key>` marker slots.
+- Function custom-property checks now treat `JS_DELETED_SENTINEL_VAL` slots as absent before consulting `properties_map` shape flags.
+- `RegExp.prototype.compile` now enforces `lastIndex` writability with the `lastIndex` `ShapeEntry` and `js_props_query_writable`; it no longer probes `__nw_lastIndex`.
+- Added `test/js/props/metadata_function_custom_attrs.{js,txt}` and `test/js/props/metadata_regexp_lastindex_attrs.{js,txt}`.
 
 Verified gates:
 
@@ -42,6 +47,7 @@ make build-test
 ./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/*metadata*' --gtest_brief=1
 ./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/*delete*:JavaScriptTests/JsFileTest.Run/*metadata*:JavaScriptTests/JsFileTest.Run/*super_property_set_finds_inherited_setter' --gtest_brief=1
 ./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/*metadata*:JavaScriptTests/JsFileTest.Run/*sparse*:JavaScriptTests/JsFileTest.Run/*property_descriptors*:JavaScriptTests/JsFileTest.Run/*delete*:JavaScriptTests/JsFileTest.Run/lib_immer:JavaScriptTests/JsFileTest.Run/v20_tagged_templates' --gtest_brief=1
+./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/*metadata_function_custom_attrs:JavaScriptTests/JsFileTest.Run/*metadata_regexp_lastindex_attrs' --gtest_brief=1
 ./test/test_js_gtest.exe --gtest_brief=1
 ./test/test_js_test262_gtest.exe --batch-only --run-async --batch-file=temp/js59_p3_regressions.txt --jobs=1 --batch-chunk-size=1 --async-chunk-size=1 --write-failures=temp/js59_p3_regressions_failures.tsv
 make test262-baseline
@@ -53,10 +59,11 @@ Results:
 - Focused metadata shard: 3/3 passed.
 - Focused delete/metadata/super shard: 8/8 passed.
 - Focused P3 metadata/sparse/descriptors/delete/freeze/tagged-template shard: 23/23 passed.
+- Focused post-P3 non-P4 leftover shard: 2/2 passed.
 - Targeted P3 Test262 regression rerun: 19/19 passed, failed 0.
-- Full JS gtest: 214/214 passed.
+- Latest full JS gtest: 221/221 passed.
 - test262 baseline: first full P3 run fully passed 40261 / 40261, failed 0, regressions 0.
-- Final post-cleanup test262 baseline: fully passed 40260 / 40261; 1 retry-only non-fully-passing slow test (`built_ins_decodeURI_S15_1_3_1_A2_5_T1_js`); failed 0; regressions 0.
+- Latest post-P3 non-P4 cleanup test262 baseline: fully passed 40261 / 40261, failed 0, regressions 0.
 
 Remaining work:
 
@@ -130,6 +137,8 @@ make test262-baseline
 | `metadata_named_attr_flags` | `Object.defineProperty` for named data props survives get/set/delete/redefine without marker slots. |
 | `metadata_array_index_attrs` | `Object.defineProperty(arr, "5", ...)` preserves value, writable/enumerable/configurable, delete behavior, and sparse/dense reads. |
 | `metadata_array_length_attrs` | `Object.defineProperty(arr, "length", { writable:false })` blocks growth/shrink correctly without `__nw_length`. |
+| `metadata_function_custom_attrs` | Function custom-property enumerability reads `properties_map` `ShapeEntry::flags`, and user `__ne_` keys are ordinary. |
+| `metadata_regexp_lastindex_attrs` | `RegExp.prototype.compile` honors non-writable `lastIndex` through shape flags, and user `__nw_lastIndex` is ordinary. |
 | `metadata_class_identity` | Built-in wrappers, errors, promises, typed arrays, streams, DOM/CSS wrappers, and util/assert type checks resolve through `JsClass` or explicit prototype links. |
 
 Acceptance:
