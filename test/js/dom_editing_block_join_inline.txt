@@ -3,3 +3,5 @@ bold-bold ok=true html=<p><b>abc</b><b>def</b></p> expected=true before=deleteCo
 italic-bold ok=true html=<p><i>abc</i><b>def</b></p> expected=true before=deleteContentBackward:1:true,3,true,0 input=deleteContentBackward:0 focus=true:3
 text-nested-inline ok=true html=<p>abc<b><i>def</i></b></p> expected=true before=deleteContentBackward:1:true,3,true,0 input=deleteContentBackward:0 focus=true:3
 nested-nested-inline ok=true html=<p><b><i>abc</i></b><u><em>def</em></u></p> expected=true before=deleteContentBackward:1:true,3,true,0 input=deleteContentBackward:0 focus=true:3
+multi-sibling-inline ok=true html=<p><b>ab</b><i>c</i><em>d</em><u>ef</u></p> expected=true before=deleteContentBackward:1:true,1,true,0 input=deleteContentBackward:0 focus=true:1
+mixed-nested-fragment ok=true html=<p>ab<i>c</i><b><i>d</i></b>ef</p> expected=true before=deleteContentBackward:1:true,1,true,0 input=deleteContentBackward:0 focus=true:1

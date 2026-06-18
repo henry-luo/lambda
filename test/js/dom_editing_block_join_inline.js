@@ -76,3 +76,17 @@ run(
   () => editor.firstChild.firstChild.firstChild.firstChild,
   () => editor.firstChild.nextSibling.firstChild.firstChild.firstChild,
   "<p><b><i>abc</i></b><u><em>def</em></u></p>");
+
+run(
+  "multi-sibling-inline",
+  "<p><b>ab</b><i>c</i></p><p><em>d</em><u>ef</u></p>",
+  () => editor.firstChild.lastChild.firstChild,
+  () => editor.firstChild.nextSibling.firstChild.firstChild,
+  "<p><b>ab</b><i>c</i><em>d</em><u>ef</u></p>");
+
+run(
+  "mixed-nested-fragment",
+  "<p>ab<i>c</i></p><p><b><i>d</i></b>ef</p>",
+  () => editor.firstChild.lastChild.firstChild,
+  () => editor.firstChild.nextSibling.firstChild.firstChild.firstChild,
+  "<p>ab<i>c</i><b><i>d</i></b>ef</p>");

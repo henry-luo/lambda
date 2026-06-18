@@ -138,6 +138,7 @@ static uint32_t compute_rich_composition_target_ranges(
 static bool target_range_is_join_block_tag(uintptr_t tag_id) {
     switch (tag_id) {
         case HTM_TAG_DIV:
+        case HTM_TAG_LI:
         case HTM_TAG_P:
         case HTM_TAG_PRE:
             return true;
@@ -211,6 +212,29 @@ static bool target_range_inline_chain_text_only(DomNode* node, DomText* text) {
         cur = elem->first_child;
     }
     return cur == text_node;
+}
+
+static bool target_range_inline_fragment_node(DomNode* node) {
+    if (!node) return false;
+    if (node->is_text()) return true;
+    if (!node->is_element()) return false;
+    DomElement* elem = node->as_element();
+    if (!elem || !target_range_is_simple_inline_tag(elem->tag()) ||
+        dom_element_has_attribute(elem, "contenteditable")) {
+        return false;
+    }
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (!target_range_inline_fragment_node(child)) return false;
+    }
+    return true;
+}
+
+static bool target_range_block_inline_fragments(DomElement* block) {
+    if (!block || !block->first_child) return false;
+    for (DomNode* child = block->first_child; child; child = child->next_sibling) {
+        if (!target_range_inline_fragment_node(child)) return false;
+    }
+    return true;
 }
 
 static bool target_range_simple_text_content(DomElement* block,
@@ -543,6 +567,41 @@ static bool target_range_backspace_block_join(DomBoundary caret,
     return true;
 }
 
+static bool target_range_backspace_inline_fragment_block_join(
+        DomBoundary caret,
+        EditingTargetRange* out) {
+    if (!out || !caret.node || !caret.node->is_text() || caret.offset != 0) {
+        return false;
+    }
+
+    DomText* text = caret.node->as_text();
+    DomElement* current_block = target_range_text_block_parent(text);
+    if (!current_block || !target_range_block_inline_fragments(current_block)) {
+        return false;
+    }
+    DomNode* current_node = static_cast<DomNode*>(current_block);
+    if (target_range_find_text_descendant(current_node, false) != text) {
+        return false;
+    }
+
+    DomNode* prev_node = current_node->prev_sibling;
+    if (!prev_node || !prev_node->is_element()) return false;
+    DomElement* prev_block = prev_node->as_element();
+    if (!prev_block || !target_range_is_join_block_tag(prev_block->tag()) ||
+        !target_range_block_inline_fragments(prev_block)) {
+        return false;
+    }
+
+    DomText* prev_text = target_range_find_text_descendant(prev_node, true);
+    if (!prev_text) return false;
+    out[0].start = {
+        static_cast<DomNode*>(prev_text),
+        dom_text_utf16_length(prev_text)
+    };
+    out[0].end = { static_cast<DomNode*>(text), 0 };
+    return true;
+}
+
 static bool target_range_backspace_trailing_br_block_join(
         DomBoundary caret,
         EditingTargetRange* out) {
@@ -730,6 +789,9 @@ uint32_t editing_compute_target_ranges(DocState* state,
     switch (intent->type) {
         case INPUT_INTENT_DELETE_CONTENT_BACKWARD: {
             if (target_range_backspace_block_join(start, out)) {
+                return 1;
+            }
+            if (target_range_backspace_inline_fragment_block_join(start, out)) {
                 return 1;
             }
             if (target_range_backspace_trailing_br_block_join(start, out)) {
