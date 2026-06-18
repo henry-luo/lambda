@@ -695,33 +695,6 @@ static bool js_define_property_validate_nonconfigurable_update(
     return true;
 }
 
-static void js_define_property_fill_sparse_accessor_index(Item obj, const char* name,
-                                                          int name_len, bool is_accessor) {
-    // ES5 §15.4.5.1: array exotic — accessor at sparse index grows items array.
-    if (!is_accessor || get_type_id(obj) != LMD_TYPE_ARRAY ||
-        name_len <= 0 || name_len > 10) {
-        return;
-    }
-    bool is_idx = true;
-    int64_t idx = 0;
-    for (int ci = 0; ci < name_len; ci++) {
-        char ch = name[ci];
-        if (ch < '0' || ch > '9') { is_idx = false; break; }
-        idx = idx * 10 + (ch - '0');
-    }
-    if (is_idx && (name_len == 1 || name[0] != '0') && idx >= 0) {
-        Array* arr = obj.array;
-        int64_t gap = idx - (int64_t)arr->length;
-        if (gap >= 0 && gap < 100000) {
-            extern void js_array_push_item_direct(Array* arr, Item value);
-            Item hole = (Item){.item = JS_DELETED_SENTINEL_VAL};
-            while ((int64_t)arr->length <= idx) {
-                js_array_push_item_direct(arr, hole);
-            }
-        }
-    }
-}
-
 static void js_define_property_apply_validated_descriptor(Item obj, Item name,
                                                           Item descriptor,
                                                           bool is_arguments_exotic,
@@ -739,9 +712,8 @@ static void js_define_property_apply_validated_descriptor(Item obj, Item name,
     //   - For new data property OR accessor→data conversion without explicit
     //     `writable`, default to non-writable.
     //
-    // What stays inline here:
-    //   - Generic-descriptor undefined-write fallback (no value/get/set).
-    //   - Array index hole-fill for accessor descriptors at sparse indices.
+    // Sparse array accessor hole-fill is also owned by the descriptor write
+    // kernel, so this helper is now validation-to-descriptor glue only.
 
     Item nm = js_to_string(name);
     if (get_type_id(nm) != LMD_TYPE_STRING) return;
@@ -762,14 +734,11 @@ static void js_define_property_apply_validated_descriptor(Item obj, Item name,
         pd.flags |= JS_PD_HAS_VALUE;
     }
 
-    bool is_accessor = js_pd_is_accessor(&pd);
-
     Item define_target = obj;
     if (is_arguments_exotic && nm_len == 6 && strncmp(nm_chars, "length", 6) == 0) {
         define_target = (Item){.map = (Map*)(uintptr_t)obj.array->extra};
     }
     js_define_own_property_from_descriptor(define_target, nm_chars, nm_len, &pd, is_new_property);
-    js_define_property_fill_sparse_accessor_index(obj, nm_chars, nm_len, is_accessor);
 }
 
 // ES2020 §9.1.6.3 ValidateAndApplyPropertyDescriptor
@@ -13041,7 +13010,7 @@ static Item js_delete_array_property(Item obj, Item key) {
         }
     }
     if (idx >= 0 && idx < arr->length) {
-        // v27: check __nc_ (non-configurable) marker before deleting
+        // Check companion-map ShapeEntry flags before deleting.
         if (arr->extra != 0) {
             // Stage A1: ToPropertyKey — uniform stringification.
             Item k_str = js_to_property_key(key);

@@ -2,7 +2,7 @@
 
 Date: 2026-06-17
 
-Status: P1/P2/P3, post-P3 non-P4 leftovers, P4, P5, P6, post-P6 sentinel/FUNC cleanup, broader TypeMap/outcome cleanup, and the follow-up property-dispatch/MIR closure-env cleanup are implemented. Js58 closed the sparse-array work with a clean ES2024 baseline. Js59 finishes the object/property metadata migration described in `doc/dev/js/JS_06_Objects_Properties_Prototypes.md`: retire engine dependence on string-marker metadata (`__nw_` / `__ne_` / `__nc_` / `__get_` / `__set_` / `__class_name__`) and make `ShapeEntry::flags`, `JsAccessorPair`, and `TypeMap::js_class` the only ordinary metadata sources.
+Status: P1/P2/P3, post-P3 non-P4 leftovers, P4, P5, P6, post-P6 sentinel/FUNC cleanup, broader TypeMap/outcome cleanup, follow-up property-dispatch/MIR closure-env cleanup, and post-closure optional polish are implemented. Js58 closed the sparse-array work with a clean ES2024 baseline. Js59 finishes the object/property metadata migration described in `doc/dev/js/JS_06_Objects_Properties_Prototypes.md`: retire engine dependence on string-marker metadata (`__nw_` / `__ne_` / `__nc_` / `__get_` / `__set_` / `__class_name__`) and make `ShapeEntry::flags`, `JsAccessorPair`, and `TypeMap::js_class` the only ordinary metadata sources.
 
 This is a correctness and maintainability proposal, not a performance-tuning proposal. The rule for the metadata-migration phases is: no hard-coded workaround, no MIR patch, no parser regeneration, and no broad refactor unless the phase root cause requires it. The post-P6 closure-env follow-up below is separate and touches MIR only to fix the stale captured-let root cause.
 
@@ -68,6 +68,8 @@ Landed on 2026-06-17, with post-P6 cleanup on 2026-06-18:
 - `js_delete_property` now delegates string-exotic rejection plus FUNC and ARRAY deletion to `js_delete_string_exotic_property`, `js_delete_function_property`, and `js_delete_array_property`.
 - MIR last-closure environment tracking now has an explicit `JS_MIR_LAST_CLOSURE_CAPTURE_MAX`, clamped readback/writeback, and full-capacity save/restore snapshots across block/loop boundaries. This fixes the stale 16-entry snapshot path around captured block-scoped lets that could feed later corrupt `Map::type` reads.
 - Added `test/js/mir_closure_env_block_shadow.{js,txt}` to pin the captured block-scoped let shadowing case past 16 captures.
+- Optional polish moved sparse array accessor hole-fill into `js_define_own_property_from_descriptor`, leaving `ValidateAndApplyPropertyDescriptor` as validation-to-descriptor glue.
+- Optional polish added a positive cache for built-in method spec lookup before the cold fallback spec-table scan.
 
 Verified gates:
 
@@ -131,10 +133,14 @@ Results:
 - Descriptor/delete branch cleanup: focused descriptor/delete/sparse/metadata gtest passed 26/26.
 - Descriptor/delete branch cleanup: full `./test/test_js_gtest.exe --gtest_brief=1` passed 234/234.
 - Descriptor/delete branch cleanup: `make test262-baseline` fully passed 40261 / 40261, failed 0, regressions 0, retry 0.0s.
+- Optional polish: `make build-test` passed.
+- Optional polish: focused descriptor/delete/sparse/metadata gtest passed 26/26.
+- Optional polish: full `./test/test_js_gtest.exe --gtest_brief=1` passed 234/234.
+- Optional polish: `make test262-baseline` fully passed 40261 / 40261, failed 0, regressions 0, retry 0.0s.
 
 Remaining work:
 
-- None for the Js59 string-marker, sentinel, FUNC virtual-shadow, shared `TypeMap` lookup/growth, `js_ordinary_set` outcome cleanup, major property dispatch decomposition, `ValidateAndApplyPropertyDescriptor` top-level decomposition, array/function delete branch decomposition, or captured block-scoped-let MIR corrupt-`type` root cause.
+- None for the Js59 string-marker, sentinel, FUNC virtual-shadow, shared `TypeMap` lookup/growth, `js_ordinary_set` outcome cleanup, major property dispatch decomposition, `ValidateAndApplyPropertyDescriptor` top-level decomposition, array/function delete branch decomposition, captured block-scoped-let MIR corrupt-`type` root cause, or post-closure optional polish.
 
 ## 1. Starting Baseline
 
@@ -494,6 +500,30 @@ Landed evidence:
 
 - `ValidateAndApplyPropertyDescriptor` is now an ordered pipeline: object check, key canonicalization, array-exotic validation, descriptor validation, existing-state collection, array companion-map invariant check, non-configurable update validation, and final storage apply.
 - `js_delete_property` now dispatches null/undefined, exotic, string-exotic, FUNC, ARRAY, and ordinary MAP deletion through distinct helpers.
+- `make build-test` passed.
+- Focused descriptor/delete/sparse/metadata gtest passed 26/26.
+- Full `./test/test_js_gtest.exe --gtest_brief=1` passed 234/234.
+- Full `make test262-baseline` passed fully with 40261 / 40261, failed 0, regressions 0, and retry 0.0s.
+
+### Post-P6 - Optional Polish
+
+Work:
+
+1. Move sparse array accessor index hole-fill from `js_globals.cpp` into
+   `js_define_own_property_from_descriptor` so the descriptor write kernel
+   owns the array storage side effect.
+2. Add a positive cache to `js_find_builtin_method_spec` keyed by spec table,
+   property-name hash, and length; cold misses and first hits still use the
+   simple spec-table scan.
+3. Clean stale comments that still described shape-flag checks as `__nc_`
+   marker probes.
+
+Landed evidence:
+
+- `ValidateAndApplyPropertyDescriptor` no longer carries the sparse accessor
+  hole-fill helper; descriptor storage writes stay in `js_props.cpp`.
+- Built-in prototype/static method lookup reuses cached positive spec hits
+  without changing miss behavior.
 - `make build-test` passed.
 - Focused descriptor/delete/sparse/metadata gtest passed 26/26.
 - Full `./test/test_js_gtest.exe --gtest_brief=1` passed 234/234.

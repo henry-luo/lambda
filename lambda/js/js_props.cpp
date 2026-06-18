@@ -472,6 +472,37 @@ static inline Item js_props_str(const char* s, int len) {
     return (Item){.item = s2it(heap_create_name(s, (size_t)len))};
 }
 
+static void js_props_fill_sparse_accessor_index(Item object,
+                                                const char* name,
+                                                int name_len,
+                                                bool is_accessor_desc) {
+    // ES array exotic define: accessor descriptors at sparse numeric indices
+    // materialize holes up to the index so later length/iteration paths see
+    // the descriptor as an own array property.
+    if (!is_accessor_desc || get_type_id(object) != LMD_TYPE_ARRAY ||
+        name_len <= 0 || name_len > 10) {
+        return;
+    }
+
+    bool is_idx = true;
+    int64_t idx = 0;
+    for (int i = 0; i < name_len; i++) {
+        char ch = name[i];
+        if (ch < '0' || ch > '9') { is_idx = false; break; }
+        idx = idx * 10 + (ch - '0');
+    }
+    if (!is_idx || (name_len > 1 && name[0] == '0') || idx < 0) return;
+
+    Array* arr = object.array;
+    int64_t gap = idx - (int64_t)arr->length;
+    if (gap < 0 || gap >= 100000) return;
+
+    Item hole = (Item){.item = JS_DELETED_SENTINEL_VAL};
+    while ((int64_t)arr->length <= idx) {
+        js_array_push_item_direct(arr, hole);
+    }
+}
+
 static inline Item js_props_throw_type(const char* msg) {
     Item tn = js_props_str("TypeError", 9);
     Item m  = js_props_str(msg, (int)strlen(msg));
@@ -747,4 +778,6 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
     } else if (is_new_property) {
         js_attr_set_configurable(object, name, name_len, /*configurable=*/false);
     }
+
+    js_props_fill_sparse_accessor_index(object, name, name_len, is_accessor_desc);
 }
