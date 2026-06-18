@@ -2853,6 +2853,7 @@ if (typeof DOMParser === "undefined") {
         var bodyMatch = src.match(/<body\b([^>]*)>([\s\S]*)<\/body>/i);
         var body = makeElement("body", bodyMatch ? bodyMatch[1] : "");
         var childSrc = bodyMatch ? bodyMatch[2] : src;
+        try { body.innerHTML = childSrc; } catch (_) {}
         var children = [];
         var childRe = /<(input|textarea|div|span)\b([^>]*)>/ig;
         var childMatch;

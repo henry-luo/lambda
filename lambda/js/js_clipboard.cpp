@@ -1178,7 +1178,7 @@ static Item js_clipboard_materialise(Item items_array, Item resolved_values) {
             // Sanitise text/html (sanitised standard format only; "web text/html"
             // custom-format is preserved verbatim by virtue of having a
             // different lower_key e.g. "web text/html").
-            if (strcmp(ks->chars, "text/html") == 0) {
+            if (ks->len == 9 && memcmp(ks->chars, "text/html", 9) == 0) {
                 StrBuf* sb = strbuf_new();
                 strip_html_script_style(sb, tbuf, tlen);
                 mem_free(tbuf);
@@ -1379,6 +1379,18 @@ extern "C" Item js_clipboard_read(Item opts) {
             for (int64_t j = 0; j < nk; j++) {
                 Item k = js_array_get_int(keys, j);
                 Item v = js_property_get(rec, k);
+                if (get_type_id(k) == LMD_TYPE_STRING &&
+                    get_type_id(v) == LMD_TYPE_STRING) {
+                    String* ks = it2s(k);
+                    String* vs = it2s(v);
+                    if (ks && vs && ks->len == 9 &&
+                        memcmp(ks->chars, "text/html", 9) == 0) {
+                        StrBuf* sb = strbuf_new();
+                        strip_html_script_style(sb, vs->chars, vs->len);
+                        v = make_str_n(sb->str ? sb->str : "", sb->length);
+                        strbuf_free(sb);
+                    }
+                }
                 Item parts = js_array_new(0);
                 js_array_push(parts, v);
                 Item bopts = js_new_object();

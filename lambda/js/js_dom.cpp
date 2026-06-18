@@ -4127,6 +4127,26 @@ static bool js_dom_is_script_focusable(DomElement* elem) {
     return false;
 }
 
+static void js_dom_clear_focus_if_disabled_now(DomElement* changed_elem) {
+    if (!changed_elem) return;
+    DocState* state = changed_elem->doc ? changed_elem->doc->state : js_dom_current_state();
+    if (state) {
+        View* focused = focus_get(state);
+        if (focused && focused->is_element() &&
+            js_dom_node_contains((DomNode*)changed_elem, (DomNode*)focused)) {
+            DomElement* focused_elem = ((DomNode*)focused)->as_element();
+            if (js_dom_is_disabled_for_focus(focused_elem)) {
+                focus_clear(state);
+            }
+        }
+    }
+    if (js_document_active_element &&
+        js_dom_node_contains((DomNode*)changed_elem, (DomNode*)js_document_active_element) &&
+        js_dom_is_disabled_for_focus(js_document_active_element)) {
+        js_document_active_element = nullptr;
+    }
+}
+
 static bool js_dom_style_preserves_leading_ws(DomElement* elem, bool inherited) {
     const char* style = elem ? dom_element_get_attribute(elem, "style") : nullptr;
     if (!style) return inherited;
@@ -5220,6 +5240,14 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     // envelope as synthetic key input.
     if (strcmp(method, "execCommand") == 0) {
         const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
+        if (js_dom_exec_command_is_clipboard(cmd)) {
+            Item helper_key = (Item){.item = s2it(heap_create_name("__lambda_execCommand_handler"))};
+            Item helper = js_get_global_property(helper_key);
+            if (get_type_id(helper) == LMD_TYPE_FUNC) {
+                Item handled = js_call_function(helper, js_get_document_object_value(), args, argc);
+                if (js_is_truthy(handled)) return handled;
+            }
+        }
         if (js_dom_exec_command_is_native(cmd)) {
             return js_dom_exec_command_native(args, argc);
         }
@@ -9444,6 +9472,9 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             bool truthy = js_is_truthy(value);
             if (truthy) {
                 dom_element_set_attribute(elem, attr, "");
+                if (strcmp(attr, "disabled") == 0) {
+                    js_dom_clear_focus_if_disabled_now(elem);
+                }
             } else {
                 dom_element_remove_attribute(elem, attr);
                 if (_is_tag(elem, "select") && strcmp(attr, "multiple") == 0) {
