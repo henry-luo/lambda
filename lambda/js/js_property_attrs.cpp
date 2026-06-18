@@ -50,23 +50,13 @@ extern "C" JsAccessorPair* js_alloc_accessor_pair(Item getter, Item setter) {
 
 // Locate the underlying TypeMap holding shape entries for a JS object.
 // Arrays use a companion Map stored in arr->extra (NULL if not yet allocated).
-// P0 safety: typical userspace pointers on macOS / Linux fit in 48 bits.
-// Anything above that is a tagged Item value that somehow ended up in the
-// `type` slot of a Map struct (lib_marked.js triggers this — a callback
-// receives an object whose Map.type field reads as 0x1a00000000000000).
-// Returning nullptr makes the prototype-chain walks short-circuit cleanly
-// instead of dereferencing the garbage TypeMap pointer.
-static inline bool js_is_plausible_typemap_ptr(void* p) {
-    return p && (uintptr_t)p <= 0x0000FFFFFFFFFFFFULL;
-}
-
 static TypeMap* js_obj_typemap(Item obj) {
     TypeId t = get_type_id(obj);
     if (t == LMD_TYPE_MAP) {
         Map* m = obj.map;
         if (!m) return nullptr;
         TypeMap* tm = (TypeMap*)m->type;
-        return js_is_plausible_typemap_ptr(tm) ? tm : nullptr;
+        return typemap_ptr_is_plausible(tm) ? tm : nullptr;
     }
     if (t == LMD_TYPE_ARRAY) {
         Array* arr = obj.array;
@@ -74,7 +64,7 @@ static TypeMap* js_obj_typemap(Item obj) {
         Map* m = (Map*)(uintptr_t)arr->extra;
         if (!m) return nullptr;
         TypeMap* tm = (TypeMap*)m->type;
-        return js_is_plausible_typemap_ptr(tm) ? tm : nullptr;
+        return typemap_ptr_is_plausible(tm) ? tm : nullptr;
     }
     if (t == LMD_TYPE_FUNC) {
         JsFuncPropsView* fn = (JsFuncPropsView*)obj.function;
@@ -83,7 +73,7 @@ static TypeMap* js_obj_typemap(Item obj) {
         Map* m = fn->properties_map.map;
         if (!m) return nullptr;
         TypeMap* tm = (TypeMap*)m->type;
-        return js_is_plausible_typemap_ptr(tm) ? tm : nullptr;
+        return typemap_ptr_is_plausible(tm) ? tm : nullptr;
     }
     return nullptr;
 }
@@ -91,19 +81,7 @@ static TypeMap* js_obj_typemap(Item obj) {
 extern "C" ShapeEntry* js_find_shape_entry(Item obj, const char* name, int name_len) {
     TypeMap* tm = js_obj_typemap(obj);
     if (!tm) return nullptr;
-    // Fast path via hash table when populated.
-    ShapeEntry* hit = typemap_hash_lookup(tm, name, name_len);
-    if (hit) return hit;
-    // Fallback linear scan (in case hash table overflowed). Match
-    // js_map_get_fast's last-writer-wins behavior for duplicate shape names.
-    ShapeEntry* found = nullptr;
-    for (ShapeEntry* e = tm->shape; e; e = e->next) {
-        if (e->name && (int)e->name->length == name_len &&
-            memcmp(e->name->str, name, name_len) == 0) {
-            found = e;
-        }
-    }
-    return found;
+    return typemap_hash_lookup(tm, name, name_len);
 }
 
 // Locate the underlying Map* whose `type` field would receive a cloned TypeMap
@@ -176,12 +154,9 @@ static TypeMap* js_typemap_clone_for_mutation(Item obj) {
     clone->shape = first_clone;
     clone->last = last_clone;
 
-    // Repopulate the per-TypeMap field_index hash (it's a fixed-size open
-    // address table on the TypeMap struct itself, so the source's table is
-    // not aliased — must rebuild against the cloned entries).
-    for (ShapeEntry* e = first_clone; e; e = e->next) {
-        typemap_hash_insert(clone, e);
-    }
+    // Repopulate the per-TypeMap field_index hash against the cloned entries.
+    // Dynamic tables are pool-owned, so clones must never alias the source index.
+    typemap_hash_build(clone, pool);
 
     // Mirror slot_entries if the source published a slot-indexed lookup
     // (constructor-shaped objects go through this path).

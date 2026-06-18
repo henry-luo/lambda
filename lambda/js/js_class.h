@@ -141,14 +141,11 @@ enum JsClass : uint8_t {
     JS_CLASS__COUNT  // sentinel
 };
 
-// P0 safety: typical userspace pointers on macOS / Linux fit in 48 bits.
-// Anything above that is a tagged Item value that somehow ended up in the
-// `type` slot of a Map struct (lib_marked.js triggers this — a Map struct's
-// `type` field reads as 0x1a00000000000000). Use this to gate every
-// `m->type` dereference under js_class.h so we never read past a garbage
-// pointer.
+// P0 safety: central TypeMap pointer plausibility guard. This is a runtime
+// safety net for the known lib_marked/MIR scope-env corruption path, not the
+// root-cause fix.
 static inline bool js_typemap_ptr_is_plausible(void* p) {
-    return p && (uintptr_t)p <= 0x0000FFFFFFFFFFFFULL;
+    return typemap_ptr_is_plausible(p);
 }
 
 // Read the JsClass tag carried by an object. Returns JS_CLASS_NONE for

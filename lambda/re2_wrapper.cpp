@@ -524,6 +524,7 @@ Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
     mt->length = 2;
     mt->byte_size = byte_size;
     mt->type_index = tl->length;
+    typemap_hash_build(mt, pool);
     arraylist_append(tl, mt);
 
     // create Map container

@@ -2,7 +2,7 @@
 
 Date: 2026-06-17
 
-Status: P1/P2/P3, post-P3 non-P4 leftovers, P4, P5, P6, and the post-P6 sentinel/FUNC cleanup are implemented. Js58 closed the sparse-array work with a clean ES2024 baseline. Js59 finishes the object/property metadata migration described in `doc/dev/js/JS_06_Objects_Properties_Prototypes.md`: retire engine dependence on string-marker metadata (`__nw_` / `__ne_` / `__nc_` / `__get_` / `__set_` / `__class_name__`) and make `ShapeEntry::flags`, `JsAccessorPair`, and `TypeMap::js_class` the only ordinary metadata sources.
+Status: P1/P2/P3, post-P3 non-P4 leftovers, P4, P5, P6, post-P6 sentinel/FUNC cleanup, and broader TypeMap/outcome cleanup are implemented. Js58 closed the sparse-array work with a clean ES2024 baseline. Js59 finishes the object/property metadata migration described in `doc/dev/js/JS_06_Objects_Properties_Prototypes.md`: retire engine dependence on string-marker metadata (`__nw_` / `__ne_` / `__nc_` / `__get_` / `__set_` / `__class_name__`) and make `ShapeEntry::flags`, `JsAccessorPair`, and `TypeMap::js_class` the only ordinary metadata sources.
 
 This is a correctness and maintainability proposal, not a performance-tuning proposal. The rule for every phase is: no hard-coded workaround, no MIR patch, no parser regeneration, and no broad refactor unless the phase root cause requires it.
 
@@ -106,10 +106,15 @@ Results:
 - Broader TypeMap lookup slice: focused `./test/test_lambda_typed.exe --gtest_filter='LambdaTypedItem.TypeMapHashLookup*' --gtest_brief=1` passed 2/2.
 - Broader TypeMap lookup slice: full `./test/test_js_gtest.exe --gtest_brief=1` passed 233/233.
 - Broader TypeMap lookup slice: `make test262-baseline` fully passed 40261 / 40261, failed 0, regressions 0, retry 0.0s.
+- Broader TypeMap growth/outcome slice: `make build-test` passed.
+- Broader TypeMap growth/outcome slice: focused `./test/test_lambda_typed.exe '--gtest_filter=LambdaTypedItem.TypeMapHash*:LambdaTypedItem.JsOrdinarySetOutcomeSeparatesDataWrite' --gtest_brief=1` passed 4/4.
+- Broader TypeMap growth/outcome slice: full `./test/test_lambda_typed.exe --gtest_brief=1` passed 13/13.
+- Broader TypeMap growth/outcome slice: full `./test/test_js_gtest.exe --gtest_brief=1` passed 233/233.
+- Broader TypeMap growth/outcome slice: `make test262-baseline` fully passed 40261 / 40261, failed 0, regressions 0, retry 0.0s.
 
 Remaining work:
 
-- None for the Js59 string-marker, sentinel, FUNC virtual-shadow, or shared `TypeMap` lookup-correctness cleanup. Larger refactor debt remains outside the Js59 acceptance bar: oversized property dispatch functions, dynamic/growing `TypeMap` hash performance work, corrupt `type` pointer guard root-cause work, and the `js_ordinary_set` outcome API.
+- None for the Js59 string-marker, sentinel, FUNC virtual-shadow, shared `TypeMap` lookup/growth, or `js_ordinary_set` outcome cleanup. Larger refactor debt remains outside the Js59 acceptance bar: oversized property dispatch function decomposition and the MIR-side corrupt `type` pointer root cause around captured block-scoped lets.
 
 ## 1. Starting Baseline
 
@@ -287,7 +292,7 @@ Landed evidence:
 - `Object.freeze` / `preventExtensions` regressions in `lib_immer` and `v20_tagged_templates` were fixed by materializing companion-map descriptor slots with the internal map writer before tombstoning dense values.
 - A 19-test Test262 mapped-arguments regression cluster was fixed by letting mapped argument reads consult promoted companion descriptor slots before falling back to parameter storage.
 - Full `./test/test_js_gtest.exe --gtest_brief=1` passed 214/214.
-- `make test262-baseline` reported failed 0 and regressions 0. The first full P3 run fully passed 40261 / 40261; the final post-cleanup run recovered one slow `decodeURI` test in Phase 4 and reported 40260 / 40261 fully passing plus 1 retry-only non-fully-passing test.
+- `make test262-baseline` reported failed 0 and regressions 0. The first full P3 run fully passed 40261 / 40261; later post-cleanup baselines superseded the transient `decodeURI` recovery and fully passed 40261 / 40261 with retry 0.0s.
 
 ### P4 - Finish Built-In Class Identity Migration
 
@@ -396,19 +401,31 @@ Landed evidence:
 - The P5/P6 focused Test262 regression slice passed 6/6.
 - Final `make test262-baseline` fully passed 40261 / 40261 with failed 0, regressions 0, and retry 0.0s.
 
-### Post-P6 - Broader TypeMap Lookup Cleanup
+### Post-P6 - Broader TypeMap Lookup And Outcome Cleanup
 
 Work:
 
 1. Keep the fixed inline `TypeMap::field_index` table as an accelerator, not the source of truth.
 2. Make shared `typemap_hash_lookup` fall back to the authoritative shape chain when the table is unpopulated or saturated.
 3. Preserve last-writer-wins lookup semantics for duplicate shape names.
+4. Let pool-owned `TypeMap` shapes grow beyond the inline hash table while stack/unowned shapes keep the inline table plus authoritative fallback.
+5. Rebuild dynamic TypeMap hash tables on shape clone/rebuild so mutable clones do not alias the source table.
+6. Split successful data writes from "not found" in `js_ordinary_set` so callers can distinguish an actual write from a missing receiver slot.
+7. Centralize the corrupt-`type` runtime guard as `typemap_ptr_is_plausible` while leaving the MIR codegen root-cause fix outside this runtime cleanup.
 
 Landed evidence:
 
 - Added `typemap_shape_lookup_last`, shared name comparison, and saturated/unpopulated fallback in `lambda/lambda-data.hpp`.
+- Added pool-owned dynamic TypeMap hash tables (`typemap_hash_build`, `typemap_hash_insert_owned`) and wired rebuild/clone paths through the shared helper.
+- Removed duplicate named-field fallback scans from `js_map_get_fast`; it now relies on shared `typemap_hash_lookup` for named fields and scans only spread/nested-map entries after a miss.
+- Added `JS_SET_DATA_WRITTEN`, and `js_ordinary_set` now returns it when a data write succeeds.
+- Centralized the TypeMap pointer plausibility guard in `lambda-data.hpp`; this is a shared runtime safety net, not the MIR root-cause fix.
 - Added focused `LambdaTypedItem.TypeMapHashLookup*` coverage for overflow shape entries and duplicate-name last-writer-wins fallback.
+- Added focused `LambdaTypedItem.TypeMapHashOwnedInsertGrowsPastInlineTable` and `LambdaTypedItem.JsOrdinarySetOutcomeSeparatesDataWrite` coverage.
 - Focused `./test/test_lambda_typed.exe --gtest_filter='LambdaTypedItem.TypeMapHashLookup*' --gtest_brief=1` passed 2/2.
+- Focused `./test/test_lambda_typed.exe '--gtest_filter=LambdaTypedItem.TypeMapHash*:LambdaTypedItem.JsOrdinarySetOutcomeSeparatesDataWrite' --gtest_brief=1` passed 4/4.
+- Full `./test/test_lambda_typed.exe --gtest_brief=1` passed 13/13.
+- `make build-test` passed.
 - Full `./test/test_js_gtest.exe --gtest_brief=1` passed 233/233.
 - Full `make test262-baseline` passed fully with 40261 / 40261, failed 0, regressions 0, and retry 0.0s.
 

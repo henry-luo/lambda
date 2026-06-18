@@ -302,7 +302,7 @@ extern "C" JsSetterDispatchStatus js_ordinary_set(Item object, const char* name,
     if (get_type_id(target) != LMD_TYPE_MAP) return JS_SET_NOT_FOUND;
     Item key = (Item){.item = s2it(heap_create_name(name, name_len))};
     js_property_set(target, key, value);
-    return JS_SET_NOT_FOUND;
+    return JS_SET_DATA_WRITTEN;
 }
 
 extern "C" bool js_shape_mark_deleted_own(Item object, const char* name, int name_len,
