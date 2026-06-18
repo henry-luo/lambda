@@ -571,6 +571,10 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
 // =============================================================================
 
 extern "C" void js_fetch_reset(void) {
+    if (g_fetch_base_dir) {
+        mem_free(g_fetch_base_dir);
+        g_fetch_base_dir = NULL;
+    }
     for (int i = 0; i < response_body_count; i++) {
         if (response_bodies[i]) {
             mem_free(response_bodies[i]);

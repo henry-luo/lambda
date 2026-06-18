@@ -329,6 +329,22 @@ static DomText* rich_transaction_live_text_at_index(DomElement* parent,
     return fallback;
 }
 
+static uint32_t rich_transaction_child_count(DomElement* parent) {
+    uint32_t count = 0;
+    if (!parent) return 0;
+    for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
+        count++;
+    }
+    return count;
+}
+
+static uint32_t rich_transaction_child_index_or_end(DomElement* parent,
+                                                    DomNode* child) {
+    if (!parent || !child) return rich_transaction_child_count(parent);
+    uint32_t idx = dom_node_child_index(child);
+    return idx == (uint32_t)-1 ? rich_transaction_child_count(parent) : idx;
+}
+
 struct RichJoinBlockContent {
     DomNode* child;
     DomText* text;
@@ -437,6 +453,43 @@ static bool rich_transaction_append_child_for_edit(DomElement* parent,
         }
     }
     return static_cast<DomNode*>(parent)->append_child(child);
+}
+
+static bool rich_transaction_insert_child_for_edit(DomElement* parent,
+                                                   DomNode* child,
+                                                   uint32_t child_idx) {
+    if (!parent || !child || child->parent) return false;
+    if (parent->native_element && parent->doc && parent->doc->input) {
+        if (child_idx > 0x7fffffffu) return false;
+        Item child_item;
+        if (!rich_transaction_item_for_child(child, &child_item)) {
+            return false;
+        }
+        MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+        Item result = editor.elmt_insert_child(
+            {.element = parent->native_element},
+            (int)child_idx, // INT_CAST_OK: MarkEditor child index API is int.
+            child_item
+        );
+        if (!result.element) {
+            log_debug("rich_transaction_insert_child_for_edit: backing insert rejected");
+            return false;
+        }
+        parent->native_element = result.element;
+        if (parent->doc->input->ui_mode) {
+            return true;
+        }
+    }
+
+    DomNode* parent_node = static_cast<DomNode*>(parent);
+    DomNode* ref = parent->first_child;
+    uint32_t idx = 0;
+    while (ref && idx < child_idx) {
+        ref = ref->next_sibling;
+        idx++;
+    }
+    if (ref) return parent_node->insert_before(child, ref);
+    return parent_node->append_child(child);
 }
 
 static bool rich_transaction_join_previous_block(
@@ -774,6 +827,181 @@ static bool rich_format_tag_matches(const EditingIntent* intent,
     }
 }
 
+enum RichInlineFormatBit {
+    RICH_INLINE_FORMAT_BOLD = 1u << 0,
+    RICH_INLINE_FORMAT_ITALIC = 1u << 1,
+    RICH_INLINE_FORMAT_UNDERLINE = 1u << 2,
+    RICH_INLINE_FORMAT_STRIKETHROUGH = 1u << 3,
+    RICH_INLINE_FORMAT_SUBSCRIPT = 1u << 4,
+    RICH_INLINE_FORMAT_SUPERSCRIPT = 1u << 5
+};
+
+static uint32_t rich_format_state_bit_for_intent(const EditingIntent* intent) {
+    if (!intent) return 0;
+    switch (intent->type) {
+        case INPUT_INTENT_FORMAT_BOLD:
+            return RICH_INLINE_FORMAT_BOLD;
+        case INPUT_INTENT_FORMAT_ITALIC:
+            return RICH_INLINE_FORMAT_ITALIC;
+        case INPUT_INTENT_FORMAT_UNDERLINE:
+            return RICH_INLINE_FORMAT_UNDERLINE;
+        case INPUT_INTENT_FORMAT_STRIKETHROUGH:
+            return RICH_INLINE_FORMAT_STRIKETHROUGH;
+        case INPUT_INTENT_FORMAT_SUBSCRIPT:
+            return RICH_INLINE_FORMAT_SUBSCRIPT;
+        case INPUT_INTENT_FORMAT_SUPERSCRIPT:
+            return RICH_INLINE_FORMAT_SUPERSCRIPT;
+        default:
+            return 0;
+    }
+}
+
+static const char* rich_format_tag_name_for_bit(uint32_t bit) {
+    switch (bit) {
+        case RICH_INLINE_FORMAT_BOLD:
+            return "b";
+        case RICH_INLINE_FORMAT_ITALIC:
+            return "i";
+        case RICH_INLINE_FORMAT_UNDERLINE:
+            return "u";
+        case RICH_INLINE_FORMAT_STRIKETHROUGH:
+            return "s";
+        case RICH_INLINE_FORMAT_SUBSCRIPT:
+            return "sub";
+        case RICH_INLINE_FORMAT_SUPERSCRIPT:
+            return "sup";
+        default:
+            return nullptr;
+    }
+}
+
+static uint32_t rich_format_bit_for_tag(uintptr_t tag) {
+    switch (tag) {
+        case HTM_TAG_B:
+        case HTM_TAG_STRONG:
+            return RICH_INLINE_FORMAT_BOLD;
+        case HTM_TAG_I:
+        case HTM_TAG_EM:
+            return RICH_INLINE_FORMAT_ITALIC;
+        case HTM_TAG_U:
+            return RICH_INLINE_FORMAT_UNDERLINE;
+        case HTM_TAG_S:
+        case HTM_TAG_STRIKE:
+            return RICH_INLINE_FORMAT_STRIKETHROUGH;
+        case HTM_TAG_SUB:
+            return RICH_INLINE_FORMAT_SUBSCRIPT;
+        case HTM_TAG_SUP:
+            return RICH_INLINE_FORMAT_SUPERSCRIPT;
+        default:
+            return 0;
+    }
+}
+
+static bool rich_format_plain_wrapper_for_merge(DomElement* elem) {
+    if (!elem || !rich_format_bit_for_tag(elem->tag())) return false;
+    if (elem->id || elem->class_count > 0) return false;
+    return true;
+}
+
+static bool rich_format_can_merge_pair(DomElement* left, DomElement* right) {
+    if (!left || !right) return false;
+    if (left->tag() != right->tag()) return false;
+    return rich_format_plain_wrapper_for_merge(left) &&
+        rich_format_plain_wrapper_for_merge(right);
+}
+
+static bool rich_format_move_children_for_merge(DocState* state,
+                                                DomElement* dst,
+                                                DomElement* src) {
+    if (!state || !dst || !src) return false;
+    while (src->first_child) {
+        DomNode* child = src->first_child;
+        dom_mutation_pre_remove(state, child);
+        if (!rich_transaction_remove_child_for_edit(src, child)) {
+            return false;
+        }
+        if (!rich_transaction_append_child_for_edit(dst, child)) {
+            return false;
+        }
+        dom_mutation_post_insert(state, static_cast<DomNode*>(dst), child);
+    }
+    return !src->first_child;
+}
+
+static DomElement* rich_format_merge_pair(DocState* state,
+                                          DomElement* left,
+                                          DomElement* right) {
+    if (!state || !rich_format_can_merge_pair(left, right) ||
+        !right->parent || right->parent != static_cast<DomNode*>(left)->parent ||
+        !right->parent->is_element()) {
+        return nullptr;
+    }
+
+    DomElement* parent = lam::dom_require_element(right->parent);
+    DomNode* right_node = static_cast<DomNode*>(right);
+    if (!parent || !rich_format_move_children_for_merge(state, left, right)) {
+        return nullptr;
+    }
+    dom_mutation_pre_remove(state, right_node);
+    if (!rich_transaction_remove_child_for_edit(parent, right_node)) {
+        return nullptr;
+    }
+    left->native_element = nullptr;
+    right->native_element = nullptr;
+    log_debug("editing_rich_default_format: merged adjacent <%s> wrappers",
+              left->node_name());
+    return left;
+}
+
+static DomElement* rich_format_normalize_adjacent(DocState* state,
+                                                  DomElement* wrapper) {
+    if (!state || !wrapper || !wrapper->parent) return wrapper;
+
+    bool merged = true;
+    while (merged && wrapper && wrapper->parent) {
+        merged = false;
+        DomNode* wrapper_node = static_cast<DomNode*>(wrapper);
+        DomNode* prev = wrapper_node->prev_sibling;
+        if (prev && prev->is_element()) {
+            DomElement* prev_elem = lam::dom_require_element(prev);
+            DomElement* normalized = rich_format_merge_pair(state, prev_elem,
+                                                            wrapper);
+            if (normalized) {
+                wrapper = normalized;
+                merged = true;
+                continue;
+            }
+        }
+
+        DomNode* next = wrapper_node->next_sibling;
+        if (next && next->is_element()) {
+            DomElement* next_elem = lam::dom_require_element(next);
+            DomElement* normalized = rich_format_merge_pair(state, wrapper,
+                                                            next_elem);
+            if (normalized) {
+                wrapper = normalized;
+                merged = true;
+            }
+        }
+    }
+    return wrapper;
+}
+
+static uint32_t rich_format_ancestor_state_bits(const EditingSurface* surface,
+                                                DomNode* node) {
+    if (!surface || !surface->owner || !node) return 0;
+    uint32_t bits = 0;
+    DomNode* owner_node = static_cast<DomNode*>(surface->owner);
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        if (cur->is_element()) {
+            DomElement* elem = lam::dom_require_element(cur);
+            if (elem) bits |= rich_format_bit_for_tag(elem->tag());
+        }
+        if (cur == owner_node) break;
+    }
+    return bits;
+}
+
 static bool rich_format_range_selects_all_children(DomRange* range,
                                                    DomElement* wrapper) {
     if (!range || !wrapper) return false;
@@ -912,7 +1140,30 @@ bool editing_rich_default_format(DocState* state,
 
     DomRange* range = state->dom_selection->ranges[0];
     if (dom_range_collapsed(range)) {
-        return false;
+        uint32_t bit = rich_format_state_bit_for_intent(intent);
+        if (!bit || !range->start.node) return false;
+
+        uint32_t inherited = rich_format_ancestor_state_bits(surface,
+            range->start.node);
+        bool current = (state->editing.inline_format_state_mask & bit)
+            ? ((state->editing.inline_format_state & bit) != 0)
+            : ((inherited & bit) != 0);
+        state->editing.inline_format_state_mask |= bit;
+        if (current) {
+            state->editing.inline_format_state &= ~bit;
+        } else {
+            state->editing.inline_format_state |= bit;
+        }
+
+        editing_interaction_set_active_surface(state, surface);
+        if (log_mutation) {
+            log_mutation(state, surface, intent, "format-typing-state",
+                         0, 0, range->start.offset, range->end.offset,
+                         log_user);
+        }
+        log_debug("editing_rich_default_format: toggled typing state bit=%u active=%d",
+                  bit, (state->editing.inline_format_state & bit) ? 1 : 0);
+        return true;
     }
 
     DomElement* toggle_wrapper =
@@ -1877,6 +2128,213 @@ bool editing_rich_default_indent(DocState* state,
     return false;
 }
 
+static DomText* rich_create_detached_text(DomDocument* doc,
+                                          const char* data,
+                                          uint32_t data_len) {
+    if (!doc || !doc->input || !data) return nullptr;
+    MarkBuilder builder(doc->input);
+    String* s = builder.createDomTextString(data, data_len);
+    if (!s) return nullptr;
+    return dom_text_create_detached(s, doc);
+}
+
+static DomNode* rich_create_formatted_insert_node(
+        DomDocument* doc,
+        const char* data,
+        uint32_t data_len,
+        uint32_t active_bits,
+        DomText** out_text) {
+    if (out_text) *out_text = nullptr;
+    if (!doc || !data || data_len == 0) return nullptr;
+
+    DomText* text = rich_create_detached_text(doc, data, data_len);
+    if (!text) return nullptr;
+    if (out_text) *out_text = text;
+
+    static const uint32_t ordered_bits[] = {
+        RICH_INLINE_FORMAT_BOLD,
+        RICH_INLINE_FORMAT_ITALIC,
+        RICH_INLINE_FORMAT_UNDERLINE,
+        RICH_INLINE_FORMAT_STRIKETHROUGH,
+        RICH_INLINE_FORMAT_SUBSCRIPT,
+        RICH_INLINE_FORMAT_SUPERSCRIPT
+    };
+
+    DomNode* child = static_cast<DomNode*>(text);
+    for (int32_t i = (int32_t)(sizeof(ordered_bits) / sizeof(ordered_bits[0])) - 1;
+         i >= 0; i--) {
+        uint32_t bit = ordered_bits[i];
+        if ((active_bits & bit) == 0) continue;
+        const char* tag_name = rich_format_tag_name_for_bit(bit);
+        DomElement* wrapper = rich_create_native_element(doc, tag_name);
+        if (!wrapper) return nullptr;
+        if (!rich_transaction_append_child_for_edit(wrapper, child)) {
+            return nullptr;
+        }
+        child = static_cast<DomNode*>(wrapper);
+    }
+    return child;
+}
+
+static bool rich_split_format_wrapper_for_plain_insert(
+        DocState* state,
+        DomElement* wrapper,
+        DomNode* reference,
+        DomElement** io_parent,
+        uint32_t* io_index) {
+    if (!state || !wrapper || !wrapper->parent || !wrapper->parent->is_element() ||
+        !io_parent || !io_index) {
+        return false;
+    }
+
+    DomNode* wrapper_node = static_cast<DomNode*>(wrapper);
+    DomElement* parent = lam::dom_require_element(wrapper_node->parent);
+    if (!parent) return false;
+    uint32_t wrapper_idx = dom_node_child_index(wrapper_node);
+    if (wrapper_idx == (uint32_t)-1) return false;
+
+    if (reference && reference->parent == wrapper_node) {
+        DomElement* right_wrapper =
+            rich_create_native_element(wrapper->doc, wrapper->tag_name);
+        if (!right_wrapper) return false;
+
+        DomNode* child = reference;
+        while (child) {
+            DomNode* next = child->next_sibling;
+            dom_mutation_pre_remove(state, child);
+            if (!wrapper_node->remove_child(child)) return false;
+            if (!rich_transaction_append_child_for_edit(right_wrapper, child)) {
+                return false;
+            }
+            dom_mutation_post_insert(state, static_cast<DomNode*>(right_wrapper), child);
+            child = next;
+        }
+
+        uint32_t insert_right_at = wrapper_idx + 1;
+        if (!rich_transaction_insert_child_for_edit(parent,
+                static_cast<DomNode*>(right_wrapper), insert_right_at)) {
+            return false;
+        }
+    }
+
+    bool wrapper_empty = !wrapper->first_child;
+    if (wrapper_empty) {
+        dom_mutation_pre_remove(state, wrapper_node);
+        if (!rich_transaction_remove_child_for_edit(parent, wrapper_node)) {
+            return false;
+        }
+        *io_index = wrapper_idx;
+    } else {
+        *io_index = wrapper_idx + 1;
+    }
+    *io_parent = parent;
+    return true;
+}
+
+static bool rich_insert_text_with_typing_state(
+        DocState* state,
+        const EditingSurface* surface,
+        const EditingIntent* intent,
+        DomText* text,
+        uint32_t start,
+        uint32_t data_len,
+        EditingRichMutationLogFn log_mutation,
+        void* log_user) {
+    if (!state || !surface || !intent || !text || !text->parent ||
+        !text->parent->is_element() || !intent->data || data_len == 0 ||
+        state->editing.inline_format_state_mask == 0) {
+        return false;
+    }
+
+    DomElement* parent = lam::dom_require_element(text->parent);
+    if (!parent || !parent->doc) return false;
+
+    uint32_t inherited = rich_format_ancestor_state_bits(surface,
+        static_cast<DomNode*>(text));
+    uint32_t desired = inherited;
+    desired &= ~state->editing.inline_format_state_mask;
+    desired |= state->editing.inline_format_state &
+        state->editing.inline_format_state_mask;
+
+    const char* old_text = text->text ? text->text : "";
+    uint32_t old_len = text->length > 0
+        ? (uint32_t)text->length
+        : (uint32_t)strlen(old_text);
+    if (start > old_len) start = old_len;
+
+    uint32_t split_u16 = dom_text_utf8_to_utf16(text, start);
+    DomNode* reference = nullptr;
+    if (start == 0) {
+        reference = static_cast<DomNode*>(text);
+    } else if (start >= old_len) {
+        reference = static_cast<DomNode*>(text)->next_sibling;
+    } else {
+        DomText* right = dom_text_split_at(state, text, split_u16);
+        if (!right) return false;
+        reference = static_cast<DomNode*>(right);
+    }
+
+    DomElement* insert_parent = parent;
+    uint32_t insert_idx = rich_transaction_child_index_or_end(parent, reference);
+    uint32_t disabled = inherited & ~desired;
+    if (disabled != 0) {
+        DomNode* owner_node = static_cast<DomNode*>(surface->owner);
+        DomNode* cur = static_cast<DomNode*>(parent);
+        DomNode* active_reference = reference;
+        while (cur && cur != owner_node) {
+            if (!cur->is_element()) break;
+            DomElement* elem = lam::dom_require_element(cur);
+            uint32_t bit = elem ? rich_format_bit_for_tag(elem->tag()) : 0;
+            DomNode* next_ancestor = cur->parent;
+            if (bit && (disabled & bit)) {
+                if (!rich_split_format_wrapper_for_plain_insert(
+                        state, elem, active_reference, &insert_parent,
+                        &insert_idx)) {
+                    return false;
+                }
+                active_reference = static_cast<DomNode*>(elem)->next_sibling;
+            }
+            cur = next_ancestor;
+        }
+    }
+
+    uint32_t container_bits = rich_format_ancestor_state_bits(surface,
+        static_cast<DomNode*>(insert_parent));
+    uint32_t wrapper_bits = desired & ~container_bits;
+    DomText* inserted_text = nullptr;
+    DomNode* inserted = rich_create_formatted_insert_node(parent->doc,
+        intent->data, data_len, wrapper_bits, &inserted_text);
+    if (!inserted || !inserted_text) return false;
+
+    if (!rich_transaction_insert_child_for_edit(insert_parent, inserted,
+            insert_idx)) {
+        return false;
+    }
+    dom_mutation_post_insert(state, static_cast<DomNode*>(insert_parent),
+                             inserted);
+    if (inserted->is_element()) {
+        rich_format_normalize_adjacent(state, lam::dom_require_element(inserted));
+    }
+
+    if (!rich_transaction_collapse_text_caret(state, inserted_text, data_len)) {
+        return false;
+    }
+    EditingSurface live_surface;
+    if (editing_surface_from_target(static_cast<View*>(inserted_text),
+            &live_surface) && editing_surface_is_rich(&live_surface)) {
+        editing_interaction_set_active_surface(state, &live_surface);
+    } else {
+        editing_interaction_set_active_surface(state, surface);
+    }
+    if (log_mutation) {
+        log_mutation(state, surface, intent, "insert-typing-state",
+                     0, data_len, data_len, data_len, log_user);
+    }
+    log_debug("rich_insert_text_with_typing_state: inserted %u bytes with bits=%u",
+              data_len, desired);
+    return true;
+}
+
 bool editing_rich_default_replace(DocState* state,
                                   const EditingIntent* intent,
                                   View* fallback_view,
@@ -2001,6 +2459,20 @@ bool editing_rich_default_replace(DocState* state,
     }
 
     uint32_t data_len = (uint32_t)strlen(data);
+    EditingSurface insert_surface;
+    const EditingSurface* insert_surface_ptr = fallback_surface_ptr;
+    if (!insert_surface_ptr &&
+        editing_surface_from_target(static_cast<View*>(text), &insert_surface) &&
+        editing_surface_is_rich(&insert_surface)) {
+        insert_surface_ptr = &insert_surface;
+    }
+    if (intent->type == INPUT_INTENT_INSERT_TEXT && start == end &&
+        data_len > 0 && state->editing.inline_format_state_mask != 0 &&
+        rich_insert_text_with_typing_state(state, insert_surface_ptr, intent,
+            text, start, data_len, log_mutation, log_user)) {
+        return true;
+    }
+
     size_t new_len = (size_t)old_len - (size_t)(end - start) + (size_t)data_len;
     char* replacement = (char*)mem_alloc(new_len + 1, MEM_CAT_TEMP);
     if (!replacement) return false;

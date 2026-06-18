@@ -7,6 +7,7 @@
 #include "rdt_video.h"
 #include "webview.h"
 #include "state_store.hpp"
+#include "form_control.hpp"
 #include <locale.h>
 #include <stdlib.h>
 
@@ -238,6 +239,18 @@ static void destroy_video_resources(ViewTree* tree) {
     destroy_video_in_view(tree->root);
 }
 
+static void destroy_form_props_in_dom(DomNode* node) {
+    if (!node || !node->is_element()) return;
+    DomElement* elem = node->as_element();
+    DomNode* child = elem->first_child;
+    while (child) {
+        destroy_form_props_in_dom(child);
+        child = child->next_sibling;
+    }
+
+    form_control_release_prop(elem);
+}
+
 void free_document(DomDocument* doc) {
     if (!doc) return;
 
@@ -252,6 +265,8 @@ void free_document(DomDocument* doc) {
     script_runner_cleanup_js_state(doc);
 
     radiant_document_destroy_state(doc);
+
+    destroy_form_props_in_dom((DomNode*)doc->root);
 
     if (doc->view_tree) {
         // destroy video resources before bulk-freeing the pool
