@@ -403,7 +403,7 @@ Everything else that mentions `contenteditable` is excluded per §11.6.
 
 | WPT dir | Cases | What it pins / status | This doc § |
 |---|---|---|---|
-| `ref/wpt/input-events/` | 25 | The §6 `InputEvent` surface. **Blocked headless today:** 23/25 drive synthetic typing via `test_driver`, which the `js` runtime does not deliver, so they auto-skip (Phase 8F); `input-events-exec-command` is skipped (rejected API, §9). Genuine conformance begins once synthetic input lands (CE-3). | §6 |
+| `ref/wpt/input-events/` | 25 | The §6 `InputEvent` surface. **Blocked headless today:** 23/25 drive synthetic typing via `test_driver`, which the `js` runtime does not deliver, so they auto-skip (Phase 8F); `input-events-exec-command` is tracked by the CE2 execCommand/Chrome-editing workstream. Genuine conformance begins once synthetic input lands (CE-3). | §6 |
 | `ref/wpt/editing/crashtests/` | 137 | Engine robustness — pass iff the runtime survives the `--document` load (no crash *signal*; a clean error exit, e.g. an uncaught exception on an unimplemented API, still counts as survived). | §4–§6 |
 | `ref/wpt/html/interaction/focus/` | 7 | Focusability / `activeElement` / tabindex of editing hosts (contenteditable subset of the dir). | §5 |
 | `ref/wpt/html/editing/editing-0/` | 25 | `contentEditable` / `isContentEditable` / `designMode` / `spellcheck` / `autocapitalize` IDL + editing-host basics; ~15 are reftests that auto-skip (layout-compare path). | §4 |
@@ -413,7 +413,8 @@ fail.** The failures are real CE-1/CE-2 conformance gaps — IDL reflection for
 `contentEditable` / `designMode` / `spellcheck` / `autocapitalize` /
 `writingsuggestions`, and the focus-fixup / tabindex / autofocus model — plus
 **one genuine engine crash** (`editing/crashtests/insertparagraph-in-listitem-in-svg-followed-by-collapsible-spaces`
-→ SIGABRT). Tracked in the status doc (§11.5).
+→ SIGABRT). Current progress is tracked in
+[Radiant_Design_Content_Editable2.md](Radiant_Design_Content_Editable2.md).
 
 The **selection-side** editing-host Tier-A tests
 (`selection/contenteditable/`, `selection/textcontrols/`) already run under
@@ -423,7 +424,7 @@ here. Clipboard (`clipboard-apis/`, already 19/19) and composition
 
 ### 11.2 Tier B — Informational gauge (tracked, NEVER gates CI)
 
-Single number in the status doc; movement is reviewed, not required.
+Single number in CE2; movement is reviewed, not required.
 
 - `ref/wpt/editing/run/*` (the entire `execCommand` quirk corpus —
   `bold.html`, `delete.html`, `indent.html`, `createlink.html`,
@@ -455,19 +456,18 @@ Mined into our own model tests + UI-automation, never run as WPT:
 | Bucket | Why skipped |
 |---|---|
 | `contenteditable/` (top-level dir: `plaintext-only.html`, `select-text-change-crash.html`, `synthetic-height.html`/`-ref`) | Ad-hoc grab-bag, **not** a structured suite — three unrelated WPT test *types* with no coherent editing-host coverage: (1) one IDL-reflection testharness test (`plaintext-only.html`, 2 asserts on `isContentEditable`/`contentEditable === "plaintext-only"`) — already covered by the CE-1 IDL tests authored against §4.1; (2) one crash regression test (`select-text-change-crash.html`, `outerText` on an `<option>` in a `<select contenteditable>` — passes by not crashing, no asserts); (3) one layout **reftest** (`synthetic-height.html` ↔ `-ref`, visual-match that empty editable blocks get a synthesized line height) which needs the render-compare path, not the JS harness. Nothing to gain by wiring it up; the only in-scope assertion (plaintext-only reflection) is covered elsewhere. Contrast `selection/contenteditable/` (§11.1 Tier A), which *is* a structured selection-in-editing-host suite. |
-| `editing/run/*` (Tier B) | execCommand corpus — we reject the API (§9); kept as gauge only. |
+| `editing/run/*` (Tier B) | execCommand corpus — superseded by CE2's execCommand/Chrome-editing gauge. |
 | `editing/manual/*` | Manual gestures; out of automatable scope. |
 | `editing/plaintext-only/*` that depends on legacy execCommand semantics | Replaced by `inputType` filtering tests we author against §4.1's `plaintext-only` mode. |
 | `editing/edit-context/*` | Experimental successor API; revisit in a later stage. |
 | `selection/shadow-dom/*` (subset) | Shadow DOM is a separate Radiant work-stream; partial-defer. |
 | `uievents/keyboard/*` tests that depend on a specific OS layout | Documented per-test as platform-specific. |
 
-### 11.5 Status doc
+### 11.5 Status tracking
 
-A new [`Radiant_ContentEditable_WPT_Status.md`](Radiant_ContentEditable_WPT_Status.md)
-(this directory) carries: headline numbers, per-file Tier-A matrix,
-documented `SKIP_SUBSTRINGS` rationale, Tier-B gauge number — same
-template as [Radiant_Clipboard_WPT_Status.md](Radiant_Clipboard_WPT_Status.md).
+[Radiant_Design_Content_Editable2.md](Radiant_Design_Content_Editable2.md)
+is the living tracker for headline numbers, per-file Tier-A progress,
+documented `SKIP_SUBSTRINGS` rationale, and the Chrome-editing gauge.
 
 ### 11.6 Why the other `contenteditable` WPT areas are excluded
 
@@ -535,7 +535,7 @@ stays dark until synthetic input lands.
 | **CE-4 — `inputmode` / `enterkeyhint`** | Attribute reflection on `HTMLElement`; one-call forward to `RdTextInputClient` (editor3 §3.9) on host focus. | IDL tests in `html/dom/idlharness*` for these attributes pass; macOS IME observed receiving the hint via `NSTextInputClient` validAttributes. |
 | **CE-5 — Drop into editable** | Lower drop-on-editable to `beforeinput {insertFromDrop, dataTransfer}`; pair with `deleteByDrag` for completed drag-outs; `plaintext-only` filters DataTransfer to text/plain. | Drag/drop subset of `input-events-cut-paste` and a new `test/ui/rte_drop.json` UI-automation pass. |
 | **CE-6 — Reject legacy explicitly** | `execCommand` returns `false`; `queryCommand*` per §9; `designMode` no-op; `format*` `inputType` never produced. | A new `test/wpt/test_wpt_contenteditable_negative_gtest.cpp` asserts each non-API: `typeof document.execCommand === 'function'` but `document.execCommand('bold')` returns `false`, no DOM mutation, no `beforeinput` fired. |
-| **CE-7 — JS API surface + status doc** | Expose `contentEditable`/`isContentEditable`/`inputMode`/`enterKeyHint` IDL; `InputEvent` constructor; `StaticRange`. Publish `Radiant_ContentEditable_WPT_Status.md`. | A pure-JS PM minimal example runs against Radiant headlessly without touching execCommand. Status doc published. |
+| **CE-7 — JS API surface + CE2 tracking** | Expose `contentEditable`/`isContentEditable`/`inputMode`/`enterKeyHint` IDL; `InputEvent` constructor; `StaticRange`. Track WPT progress in CE2. | A pure-JS PM minimal example runs against Radiant headlessly without touching execCommand. CE2 tracking updated. |
 
 **Dependencies:** CE-1 → CE-2/CE-3; CE-3 → CE-4/CE-5; CE-6 and CE-7 land
 last, in parallel. CE-3 unlocks editor3 §3.6 (WPT Tier A: input) — they
@@ -561,9 +561,8 @@ share the runner.
 - **One plumbing, two consumers:** the Stage-2 `edit <rte_doc>` template
   and a pure-JS PM minimal page both run on the same dispatcher with no
   per-consumer divergence.
-- **`Radiant_ContentEditable_WPT_Status.md` published** with headline
-  numbers, per-file Tier-A matrix, `SKIP_SUBSTRINGS` rationale, and the
-  Tier-B `editing/run/*` gauge number.
+- **CE2 tracking updated** with headline numbers, per-file Tier-A matrix,
+  `SKIP_SUBSTRINGS` rationale, and the Chrome-editing gauge number.
 
 ---
 

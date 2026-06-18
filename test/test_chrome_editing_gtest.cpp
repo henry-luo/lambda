@@ -1,0 +1,501 @@
+/*
+ * Chrome/Blink editing corpus runner.
+ *
+ * The corpus lives in the sibling lambda-test repo and is exposed here through
+ * test/editing -> ../../lambda-test/editing. This runner is deliberately
+ * gauge-style: every discovered runnable file must pass unless it is skipped
+ * by capability filters, while imported coverage grows phase by phase in CE2.
+ */
+
+#include <gtest/gtest.h>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+#ifdef _WIN32
+    #define WIN32_LEAN_AND_MEAN
+    #define NOGDI
+    #define NOUSER
+    #define NOHELP
+    #define NOMCX
+    #include <windows.h>
+    #include <process.h>
+    #include <io.h>
+    #include <direct.h>
+    #define popen _popen
+    #define pclose _pclose
+    #define unlink _unlink
+    #define WEXITSTATUS(status) (status)
+#else
+    #include <dirent.h>
+    #include <sys/wait.h>
+    #include <unistd.h>
+#endif
+
+static const char* EDITING_ROOT = "test/editing";
+static const char* HARNESS_PATH = "test/editing/resources/chrome-editing-harness.js";
+static const char* TEMP_DIR = "temp";
+
+static bool starts_with(const char* text, const char* prefix) {
+    return strncmp(text, prefix, strlen(prefix)) == 0;
+}
+
+static bool ends_with(const std::string& text, const char* suffix) {
+    size_t suffix_len = strlen(suffix);
+    return text.size() >= suffix_len &&
+        text.compare(text.size() - suffix_len, suffix_len, suffix) == 0;
+}
+
+static std::string read_file_contents(const char* path) {
+    FILE* f = fopen(path, "r");
+    if (!f) return "";
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (sz < 0) {
+        fclose(f);
+        return "";
+    }
+    std::string result((size_t)sz, '\0');
+    size_t read = fread(&result[0], 1, (size_t)sz, f);
+    result.resize(read);
+    fclose(f);
+    return result;
+}
+
+static void write_file_contents(const char* path, const std::string& content) {
+    FILE* f = fopen(path, "w");
+    if (!f) return;
+    fwrite(content.data(), 1, content.size(), f);
+    fclose(f);
+}
+
+static std::string dir_of(const std::string& path) {
+    size_t slash = path.find_last_of("/\\");
+    if (slash == std::string::npos) return ".";
+    return path.substr(0, slash);
+}
+
+static std::string extract_attr(const std::string& tag, const char* attr) {
+    std::string needle = std::string(attr) + "=";
+    size_t p = tag.find(needle);
+    if (p == std::string::npos) return "";
+    p += needle.size();
+    if (p >= tag.size()) return "";
+    char quote = tag[p];
+    if (quote == '"' || quote == '\'') {
+        size_t end = tag.find(quote, p + 1);
+        if (end == std::string::npos) return "";
+        return tag.substr(p + 1, end - p - 1);
+    }
+    size_t end = p;
+    while (end < tag.size() && tag[end] != ' ' && tag[end] != '\t' &&
+           tag[end] != '>' && tag[end] != '/') {
+        end++;
+    }
+    return tag.substr(p, end - p);
+}
+
+static std::string normalize_relative_path(const std::string& base_dir,
+                                           const std::string& rel) {
+    std::vector<std::string> parts;
+    std::string combined = base_dir + "/" + rel;
+    size_t pos = 0;
+    while (pos <= combined.size()) {
+        size_t slash = combined.find('/', pos);
+        if (slash == std::string::npos) slash = combined.size();
+        std::string part = combined.substr(pos, slash - pos);
+        if (part.empty() || part == ".") {
+        } else if (part == "..") {
+            if (!parts.empty()) parts.pop_back();
+        } else {
+            parts.push_back(part);
+        }
+        pos = slash + 1;
+        if (slash == combined.size()) break;
+    }
+
+    std::string out;
+    for (size_t i = 0; i < parts.size(); i++) {
+        if (i) out += "/";
+        out += parts[i];
+    }
+    return out;
+}
+
+static std::string extract_scripts(const std::string& html,
+                                   const std::string& html_dir) {
+    std::string result;
+    size_t pos = 0;
+    while (pos < html.size()) {
+        size_t tag_start = html.find("<script", pos);
+        if (tag_start == std::string::npos) break;
+        size_t tag_end = html.find('>', tag_start);
+        if (tag_end == std::string::npos) break;
+
+        std::string tag = html.substr(tag_start, tag_end - tag_start + 1);
+        std::string src = extract_attr(tag, "src");
+        if (!src.empty()) {
+            if (src.find("://") == std::string::npos && src[0] != '/') {
+                std::string full = normalize_relative_path(html_dir, src);
+                std::string body = read_file_contents(full.c_str());
+                if (!body.empty()) {
+                    result += "\n// ---- inlined " + src + " ----\n";
+                    result += body;
+                    result += "\n";
+                }
+            }
+            pos = tag_end + 1;
+            continue;
+        }
+
+        size_t close = html.find("</script>", tag_end);
+        if (close == std::string::npos) break;
+        result += html.substr(tag_end + 1, close - tag_end - 1);
+        result += "\n";
+        pos = close + strlen("</script>");
+    }
+    return result;
+}
+
+static std::string execute_js_with_doc(const char* js_path,
+                                       const char* html_path,
+                                       int* exit_code) {
+    char command[1200];
+#ifdef _WIN32
+    snprintf(command, sizeof(command),
+             "lambda.exe js \"%s\" --document \"%s\" --no-log 2>&1",
+             js_path, html_path);
+#else
+    snprintf(command, sizeof(command),
+             "./lambda.exe js \"%s\" --document \"%s\" --no-log 2>&1",
+             js_path, html_path);
+#endif
+
+    FILE* pipe = popen(command, "r");
+    if (!pipe) {
+        *exit_code = -1;
+        return "";
+    }
+
+    std::string output;
+    char buffer[1024];
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        output += buffer;
+    }
+    int raw = pclose(pipe);
+    *exit_code = WEXITSTATUS(raw);
+    return output;
+}
+
+struct ChromeEditingParam {
+    std::string html_path;
+    std::string rel_path;
+    std::string test_name;
+    bool skip;
+};
+
+struct ChromeEditingResult {
+    ChromeEditingParam param;
+    bool skipped;
+    bool failed;
+    int pass_count;
+    int total_count;
+    int exit_code;
+    double seconds;
+    std::string skip_reason;
+    std::string output;
+    std::vector<std::string> failures;
+};
+
+static bool should_skip_file(const std::string& rel_path) {
+    if (rel_path.find("/resources/") != std::string::npos) return true;
+    if (ends_with(rel_path, "-expected.html")) return true;
+    if (ends_with(rel_path, "-expected.txt")) return true;
+    if (ends_with(rel_path, "-ref.html")) return true;
+    if (rel_path.find("-manual") != std::string::npos) return true;
+    return false;
+}
+
+static std::string sanitize_test_name(std::string name) {
+    if (ends_with(name, ".html")) name.resize(name.size() - 5);
+    for (char& c : name) {
+        if (!isalnum((unsigned char)c)) c = '_';
+    }
+    if (name.empty()) name = "empty";
+    return name;
+}
+
+static void scan_dir(const std::string& dir,
+                     const std::string& rel_prefix,
+                     std::vector<ChromeEditingParam>& params) {
+#ifdef _WIN32
+    std::string pattern = dir + "\\*";
+    struct _finddata_t fd;
+    intptr_t handle = _findfirst(pattern.c_str(), &fd);
+    if (handle == -1) return;
+    do {
+        const char* name = fd.name;
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
+        std::string rel = rel_prefix.empty() ? std::string(name)
+                                             : rel_prefix + "/" + name;
+        if (fd.attrib & _A_SUBDIR) {
+            scan_dir(dir + "/" + name, rel, params);
+            continue;
+        }
+#else
+    DIR* d = opendir(dir.c_str());
+    if (!d) return;
+    struct dirent* entry;
+    while ((entry = readdir(d)) != NULL) {
+        const char* name = entry->d_name;
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
+        std::string rel = rel_prefix.empty() ? std::string(name)
+                                             : rel_prefix + "/" + name;
+        if (entry->d_type == DT_DIR) {
+            scan_dir(dir + "/" + name, rel, params);
+            continue;
+        }
+#endif
+
+        if (!ends_with(name, ".html")) continue;
+        ChromeEditingParam p;
+        p.html_path = dir + "/" + name;
+        p.rel_path = rel;
+        p.test_name = sanitize_test_name(rel);
+        p.skip = should_skip_file(rel);
+        params.push_back(p);
+
+#ifdef _WIN32
+    } while (_findnext(handle, &fd) == 0);
+    _findclose(handle);
+#else
+    }
+    closedir(d);
+#endif
+}
+
+static std::vector<ChromeEditingParam> discover_chrome_editing_tests() {
+    std::vector<ChromeEditingParam> params;
+    scan_dir(EDITING_ROOT, "", params);
+    std::sort(params.begin(), params.end(),
+              [](const ChromeEditingParam& a,
+                 const ChromeEditingParam& b) {
+                  return a.test_name < b.test_name;
+              });
+    return params;
+}
+
+static ChromeEditingResult run_chrome_editing_case(
+        const ChromeEditingParam& p) {
+    ChromeEditingResult result;
+    result.param = p;
+    result.skipped = false;
+    result.failed = false;
+    result.pass_count = 0;
+    result.total_count = 0;
+    result.exit_code = 0;
+    result.seconds = 0.0;
+
+    auto started = std::chrono::steady_clock::now();
+    if (p.skip) {
+        result.skipped = true;
+        result.skip_reason = "skipped corpus support file/manual/baseline: " +
+                             p.rel_path;
+        return result;
+    }
+
+    std::string html = read_file_contents(p.html_path.c_str());
+    if (html.empty()) {
+        result.failed = true;
+        result.failures.push_back("Could not read test file: " + p.html_path);
+        return result;
+    }
+
+    std::string harness = read_file_contents(HARNESS_PATH);
+    if (harness.empty()) {
+        result.failed = true;
+        result.failures.push_back(std::string("Could not read harness: ") +
+                                  HARNESS_PATH);
+        return result;
+    }
+
+    std::string scripts = extract_scripts(html, dir_of(p.html_path));
+    if (scripts.empty()) {
+        result.skipped = true;
+        result.skip_reason = "no script body in editing test: " + p.rel_path;
+        return result;
+    }
+
+    std::string combined = harness + "\n" + scripts +
+        "\n_chrome_editing_print_summary();\n";
+    std::string temp_js = std::string(TEMP_DIR) + "/chrome_editing_" +
+        p.test_name + ".js";
+    write_file_contents(temp_js.c_str(), combined);
+
+    int exit_code = 0;
+    std::string output = execute_js_with_doc(temp_js.c_str(), p.html_path.c_str(),
+        &exit_code);
+    unlink(temp_js.c_str());
+
+    result.exit_code = exit_code;
+    result.output = output;
+
+    size_t pos = 0;
+    while (pos < output.size()) {
+        size_t eol = output.find('\n', pos);
+        if (eol == std::string::npos) eol = output.size();
+        std::string line = output.substr(pos, eol - pos);
+        pos = eol + 1;
+        if (line.substr(0, 6) == "FAIL: ") result.failures.push_back(line);
+        if (line.substr(0, 23) == "CHROME_EDITING_RESULT: ") {
+            sscanf(line.c_str(), "CHROME_EDITING_RESULT: %d/%d",
+                   &result.pass_count, &result.total_count);
+        }
+    }
+
+    if (result.total_count == 0) {
+        result.failed = true;
+        result.failures.push_back("No Chrome editing results from " +
+            p.rel_path + "\nExit code: " + std::to_string(exit_code) +
+            "\nOutput (first 2KB):\n" + output.substr(0, 2048));
+    } else {
+        result.failed = exit_code != 0 || !result.failures.empty() ||
+            result.pass_count != result.total_count;
+    }
+
+    auto ended = std::chrono::steady_clock::now();
+    result.seconds = std::chrono::duration<double>(ended - started).count();
+    return result;
+}
+
+class ChromeEditingTest :
+    public testing::TestWithParam<ChromeEditingParam> {};
+
+static void report_gtest_result(const ChromeEditingResult& result) {
+    if (result.skipped) {
+        GTEST_SKIP() << result.skip_reason;
+        return;
+    }
+    printf("  %s: %d/%d passed\n", result.param.rel_path.c_str(),
+           result.pass_count, result.total_count);
+    for (const auto& failure : result.failures) {
+        ADD_FAILURE() << failure;
+    }
+    EXPECT_EQ(result.exit_code, 0) << result.output;
+    EXPECT_EQ(result.pass_count, result.total_count)
+        << "Not all assertions passed in " << result.param.rel_path;
+}
+
+TEST_P(ChromeEditingTest, Run) {
+    report_gtest_result(run_chrome_editing_case(GetParam()));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ChromeEditing,
+    ChromeEditingTest,
+    testing::ValuesIn(discover_chrome_editing_tests()),
+    [](const testing::TestParamInfo<ChromeEditingParam>& info) {
+        return info.param.test_name;
+    });
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(ChromeEditingTest);
+
+static int get_parallel_jobs() {
+    const char* env_jobs = getenv("LAMBDA_CHROME_EDITING_JOBS");
+    if (env_jobs && env_jobs[0]) {
+        int jobs = atoi(env_jobs);
+        if (jobs > 0) return jobs;
+    }
+    unsigned int cpus = std::thread::hardware_concurrency();
+    if (cpus <= 1) return 1;
+    return (int)cpus - 1;
+}
+
+static bool has_filtered_gtest_arg(int argc, char** argv) {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--gtest_list_tests") == 0) return true;
+        if (starts_with(argv[i], "--gtest_filter=")) {
+            const char* filter = argv[i] + strlen("--gtest_filter=");
+            if (strcmp(filter, "*") != 0 && strcmp(filter, "ChromeEditing*") != 0)
+                return true;
+        }
+    }
+    return false;
+}
+
+static int run_parallel_suite() {
+    std::vector<ChromeEditingParam> params = discover_chrome_editing_tests();
+    std::vector<ChromeEditingResult> results(params.size());
+    std::atomic<size_t> next_index(0);
+    std::mutex print_mutex;
+
+    int jobs = get_parallel_jobs();
+    if (jobs < 1) jobs = 1;
+    if ((size_t)jobs > params.size() && !params.empty()) jobs = (int)params.size();
+
+    printf("[==========] Running %zu Chrome editing cases with %d jobs\n",
+           params.size(), jobs);
+    auto started = std::chrono::steady_clock::now();
+
+    std::vector<std::thread> workers;
+    for (int wi = 0; wi < jobs; wi++) {
+        workers.emplace_back([&]() {
+            while (true) {
+                size_t index = next_index.fetch_add(1);
+                if (index >= params.size()) break;
+                const ChromeEditingParam& p = params[index];
+                {
+                    std::lock_guard<std::mutex> lock(print_mutex);
+                    printf("[ RUN      ] ChromeEditing/ChromeEditingTest.Run/%s\n",
+                           p.test_name.c_str());
+                }
+
+                ChromeEditingResult result = run_chrome_editing_case(p);
+                results[index] = result;
+                {
+                    std::lock_guard<std::mutex> lock(print_mutex);
+                    const char* status = result.skipped ? "[  SKIPPED ]" :
+                        (result.failed ? "[  FAILED  ]" : "[       OK ]");
+                    printf("%s ChromeEditing/ChromeEditingTest.Run/%s (%.0f ms)\n",
+                           status, p.test_name.c_str(),
+                           result.seconds * 1000.0);
+                }
+            }
+        });
+    }
+    for (auto& worker : workers) worker.join();
+
+    auto ended = std::chrono::steady_clock::now();
+    double total_seconds = std::chrono::duration<double>(ended - started).count();
+
+    int failures = 0;
+    int skipped = 0;
+    for (const auto& result : results) {
+        if (result.skipped) skipped++;
+        else if (result.failed) failures++;
+    }
+
+    printf("[==========] %zu Chrome editing cases ran. (%.0f ms total)\n",
+           params.size(), total_seconds * 1000.0);
+    printf("[  PASSED  ] %zu tests.\n", params.size() - failures - skipped);
+    if (skipped > 0) printf("[  SKIPPED ] %d tests.\n", skipped);
+    if (failures > 0) printf("[  FAILED  ] %d tests.\n", failures);
+    return failures == 0 ? 0 : 1;
+}
+
+int main(int argc, char** argv) {
+    if (!has_filtered_gtest_arg(argc, argv)) {
+        return run_parallel_suite();
+    }
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}
