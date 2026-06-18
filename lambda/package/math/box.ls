@@ -339,17 +339,10 @@ fn text_height(text) {
     else if (text == "↗" or text == "↖" or text == "↘" or text == "↙") 0.37
     else if (is_number_text(text)) 0.65
     else if (text_has_tall_delim(text)) 0.75
-    // Multi-char operator names — cmr metrics for letters that compose them.
-    // Probed against MathLive's actual rendering. Without these, the default
-    // 0.7 over-estimates strut height for cos/log/sin/etc.
-    else if (text == "sin" or text == "sinh" or text == "csc" or
-             text == "lim" or text == "liminf" or text == "limsup" or
-             text == "min" or text == "max" or text == "deg" or text == "dim") 0.67
-    else if (text == "cos" or text == "cosh" or text == "sec" or
-             text == "sec" or text == "ker" or text == "hom" or text == "arg") 0.44
-    else if (text == "tan" or text == "tanh" or text == "ln") 0.62
-    else if (text == "log" or text == "exp" or text == "det" or
-             text == "gcd" or text == "lg" or text == "Pr") 0.7
+    // Multi-char operator names (sin/cos/log/…) were DEAD here: they render as
+    // text_box(name, css.CMR, "mop"), so text_height_for() takes the
+    // max_char_height(name, "cmr", …) path and only uses this function as the
+    // (never-reached) fallback — every composing letter is in the cmr table.
     else met.DEFAULT_CHAR_HEIGHT
 }
 
