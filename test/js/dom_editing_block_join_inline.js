@@ -62,3 +62,17 @@ run(
   () => editor.firstChild.firstChild.firstChild,
   () => editor.firstChild.nextSibling.firstChild.firstChild,
   "<p><i>abc</i><b>def</b></p>");
+
+run(
+  "text-nested-inline",
+  "<p>abc</p><p><b><i>def</i></b></p>",
+  () => editor.firstChild.firstChild,
+  () => editor.firstChild.nextSibling.firstChild.firstChild.firstChild,
+  "<p>abc<b><i>def</i></b></p>");
+
+run(
+  "nested-nested-inline",
+  "<p><b><i>abc</i></b></p><p><u><em>def</em></u></p>",
+  () => editor.firstChild.firstChild.firstChild.firstChild,
+  () => editor.firstChild.nextSibling.firstChild.firstChild.firstChild,
+  "<p><b><i>abc</i></b><u><em>def</em></u></p>");

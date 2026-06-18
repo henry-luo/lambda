@@ -1,0 +1,2 @@
+one-br ok=true html=<p>abcdef</p> expected=true before=deleteContentBackward:1:true,1,true,0 input=deleteContentBackward:0 focus=true:3 focusExpected=3
+two-br ok=true html=<p>abc<br>def</p> expected=true before=deleteContentBackward:1:true,2,true,0 input=deleteContentBackward:0 focus=true:0 focusExpected=0

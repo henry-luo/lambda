@@ -198,6 +198,21 @@ struct TargetRangeJoinContent {
     bool direct_text;
 };
 
+static bool target_range_inline_chain_text_only(DomNode* node, DomText* text) {
+    DomNode* cur = node;
+    DomNode* text_node = static_cast<DomNode*>(text);
+    while (cur && cur != text_node) {
+        if (!cur->is_element()) return false;
+        DomElement* elem = cur->as_element();
+        if (!elem || !target_range_is_simple_inline_tag(elem->tag()) ||
+            !elem->first_child || elem->first_child != elem->last_child) {
+            return false;
+        }
+        cur = elem->first_child;
+    }
+    return cur == text_node;
+}
+
 static bool target_range_simple_text_content(DomElement* block,
                                              DomText* text,
                                              TargetRangeJoinContent* out) {
@@ -220,10 +235,7 @@ static bool target_range_simple_text_content(DomElement* block,
     }
     if (!child->is_element()) return false;
 
-    DomElement* inline_elem = child->as_element();
-    if (!inline_elem || !target_range_is_simple_inline_tag(inline_elem->tag()) ||
-        inline_elem->first_child != static_cast<DomNode*>(text) ||
-        inline_elem->last_child != static_cast<DomNode*>(text)) {
+    if (!target_range_inline_chain_text_only(child, text)) {
         return false;
     }
     if (out) {
@@ -299,6 +311,121 @@ static DomText* target_range_previous_cleanup_inline_text(DomText* text,
     DomElement* elem = prev->as_element();
     if (!target_range_can_cleanup_inline(elem, surface)) return nullptr;
     return elem->first_child->as_text();
+}
+
+static bool target_range_is_atomic_delete_tag(uintptr_t tag_id) {
+    return tag_id == HTM_TAG_BR || tag_id == HTM_TAG_HR || tag_id == HTM_TAG_IMG;
+}
+
+static DomNode* target_range_child_at(DomElement* parent, uint32_t index) {
+    if (!parent) return nullptr;
+    uint32_t cur = 0;
+    for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
+        if (cur == index) return child;
+        cur++;
+    }
+    return nullptr;
+}
+
+static bool target_range_atomic_node(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    DomElement* elem = node->as_element();
+    return elem && target_range_is_atomic_delete_tag(elem->tag());
+}
+
+static uint32_t target_range_text_byte_len(DomText* text) {
+    if (!text) return 0;
+    const char* data = text->text ? text->text : "";
+    return text->length > 0 ? (uint32_t)text->length : (uint32_t)strlen(data);
+}
+
+static bool target_range_backspace_atomic_whitespace(DomBoundary caret,
+                                                     const EditingSurface* surface,
+                                                     EditingTargetRange* out) {
+    if (!out || !surface || !surface->owner || !caret.node ||
+        !caret.node->is_text() || !caret.node->parent ||
+        !caret.node->parent->is_element()) {
+        return false;
+    }
+
+    DomText* text = caret.node->as_text();
+    DomElement* parent = caret.node->parent->as_element();
+    DomNode* atomic_node = caret.node->prev_sibling;
+    if (!text || !parent || !atomic_node || !atomic_node->is_element()) {
+        return false;
+    }
+    DomElement* atomic = atomic_node->as_element();
+    if (!atomic || !target_range_node_is_inside(atomic_node, surface->owner)) {
+        return false;
+    }
+    uintptr_t tag = atomic->tag();
+    if (tag != HTM_TAG_BR && tag != HTM_TAG_HR) return false;
+
+    uint32_t atomic_idx = dom_node_child_index(atomic_node);
+    if (atomic_idx == (uint32_t)-1) return false;
+
+    const char* data = text->text ? text->text : "";
+    uint32_t text_len = target_range_text_byte_len(text);
+    uint32_t leading_len = target_range_leading_space_len(data, text_len);
+    if (leading_len > 0 && caret.offset <= leading_len) {
+        out[0].start = { static_cast<DomNode*>(parent), atomic_idx };
+        out[0].end = { static_cast<DomNode*>(text), leading_len };
+        return true;
+    }
+
+    if (tag != HTM_TAG_HR || caret.offset != 0) return false;
+    DomNode* before_atomic = atomic_node->prev_sibling;
+    if (!before_atomic) return false;
+    if (before_atomic->is_text()) {
+        DomText* prev_text = before_atomic->as_text();
+        const char* prev_data = prev_text->text ? prev_text->text : "";
+        uint32_t prev_len = target_range_text_byte_len(prev_text);
+        uint32_t trimmed_len = target_range_trim_trailing_space(prev_data, prev_len);
+        if (trimmed_len == prev_len) return false;
+        out[0].start = { static_cast<DomNode*>(prev_text), trimmed_len };
+        out[0].end = { static_cast<DomNode*>(parent), atomic_idx + 1 };
+        return true;
+    }
+    if (before_atomic->is_element() &&
+        before_atomic->as_element()->tag() == HTM_TAG_BR) {
+        out[0].start = { static_cast<DomNode*>(parent), atomic_idx - 1 };
+        out[0].end = { static_cast<DomNode*>(parent), atomic_idx + 1 };
+        return true;
+    }
+    return false;
+}
+
+static bool target_range_backspace_atomic(DomBoundary caret,
+                                          const EditingSurface* surface,
+                                          EditingTargetRange* out) {
+    if (!out || !surface || !surface->owner || !caret.node) return false;
+
+    DomElement* parent = nullptr;
+    DomNode* previous = nullptr;
+    uint32_t start_idx = 0;
+    if (caret.node->is_text()) {
+        if (caret.offset != 0 || !caret.node->parent ||
+            !caret.node->parent->is_element()) {
+            return false;
+        }
+        parent = caret.node->parent->as_element();
+        previous = caret.node->prev_sibling;
+        if (!previous) return false;
+        start_idx = dom_node_child_index(previous);
+    } else if (caret.node->is_element()) {
+        parent = caret.node->as_element();
+        if (caret.offset == 0) return false;
+        previous = target_range_child_at(parent, caret.offset - 1);
+        start_idx = caret.offset - 1;
+    }
+
+    if (!parent || !previous || start_idx == (uint32_t)-1) return false;
+    if (!target_range_atomic_node(previous)) return false;
+    if (!target_range_node_is_inside(previous, surface->owner)) return false;
+
+    out[0].start = { static_cast<DomNode*>(parent), start_idx };
+    out[0].end = { static_cast<DomNode*>(parent), start_idx + 1 };
+    return true;
 }
 
 static bool target_range_backspace_empty_inline(DomBoundary caret,
@@ -416,6 +543,141 @@ static bool target_range_backspace_block_join(DomBoundary caret,
     return true;
 }
 
+static bool target_range_backspace_trailing_br_block_join(
+        DomBoundary caret,
+        EditingTargetRange* out) {
+    if (!out || !caret.node || !caret.node->is_text() || caret.offset != 0) {
+        return false;
+    }
+
+    DomText* text = caret.node->as_text();
+    DomElement* current_block = target_range_text_block_parent(text);
+    TargetRangeJoinContent current_content;
+    if (!current_block ||
+        !target_range_simple_text_content(current_block, text,
+            &current_content) ||
+        !current_content.direct_text) {
+        return false;
+    }
+
+    DomNode* current_node = static_cast<DomNode*>(current_block);
+    DomNode* prev_node = current_node->prev_sibling;
+    if (!prev_node || !prev_node->is_element()) return false;
+    DomElement* prev_block = prev_node->as_element();
+    if (!prev_block || !target_range_is_join_block_tag(prev_block->tag()) ||
+        !prev_block->first_child || !prev_block->first_child->is_text()) {
+        return false;
+    }
+
+    DomNode* last = prev_block->last_child;
+    if (!last || !last->is_element() ||
+        last->as_element()->tag() != HTM_TAG_BR) {
+        return false;
+    }
+    for (DomNode* child = prev_block->first_child->next_sibling;
+         child; child = child->next_sibling) {
+        if (!child->is_element() || child->as_element()->tag() != HTM_TAG_BR) {
+            return false;
+        }
+    }
+
+    uint32_t br_idx = dom_node_child_index(last);
+    if (br_idx == (uint32_t)-1) return false;
+    out[0].start = { static_cast<DomNode*>(prev_block), br_idx };
+    out[0].end = { static_cast<DomNode*>(text), 0 };
+    return true;
+}
+
+static bool target_range_backspace_child_block_parent_join(
+        DomBoundary caret,
+        EditingTargetRange* out) {
+    if (!out || !caret.node || !caret.node->is_text()) {
+        return false;
+    }
+
+    DomText* text = caret.node->as_text();
+    if (!text || !text->parent || !text->parent->is_element()) return false;
+    DomElement* parent = text->parent->as_element();
+    if (!parent || !target_range_is_join_block_tag(parent->tag())) return false;
+
+    DomNode* text_node = static_cast<DomNode*>(text);
+    DomNode* prev_node = text_node->prev_sibling;
+    if (!prev_node || !prev_node->is_element()) return false;
+    DomElement* prev_block = prev_node->as_element();
+    if (!prev_block || !target_range_is_join_block_tag(prev_block->tag())) {
+        return false;
+    }
+
+    DomText* prev_text = target_range_find_text_descendant(prev_node, true);
+    TargetRangeJoinContent prev_content;
+    if (!prev_text ||
+        !target_range_simple_text_content(prev_block, prev_text,
+            &prev_content) ||
+        !prev_content.direct_text) {
+        return false;
+    }
+
+    const char* prev_data = prev_text->text ? prev_text->text : "";
+    const char* current_data = text->text ? text->text : "";
+    uint32_t prev_len = target_range_text_byte_len(prev_text);
+    uint32_t current_len = target_range_text_byte_len(text);
+    uint32_t start_offset = prev_len;
+    uint32_t end_offset = 0;
+    if (prev_block->tag() != HTM_TAG_PRE && parent->tag() != HTM_TAG_PRE) {
+        start_offset = target_range_trim_trailing_space(prev_data, prev_len);
+        end_offset = target_range_leading_space_len(current_data, current_len);
+    }
+    if (caret.offset > end_offset) return false;
+
+    out[0].start = { static_cast<DomNode*>(prev_text), start_offset };
+    out[0].end = { static_cast<DomNode*>(text), end_offset };
+    return true;
+}
+
+static bool target_range_backspace_parent_text_child_block_join(
+        DomBoundary caret,
+        EditingTargetRange* out) {
+    if (!out || !caret.node || !caret.node->is_text()) {
+        return false;
+    }
+
+    DomText* text = caret.node->as_text();
+    DomElement* current_block = target_range_text_block_parent(text);
+    TargetRangeJoinContent current_content;
+    if (!current_block ||
+        !target_range_simple_text_content(current_block, text,
+            &current_content) ||
+        !current_content.direct_text) {
+        return false;
+    }
+
+    DomNode* current_node = static_cast<DomNode*>(current_block);
+    DomNode* prev_node = current_node->prev_sibling;
+    if (!prev_node || !prev_node->is_text()) return false;
+    DomText* prev_text = prev_node->as_text();
+
+    DomElement* parent = current_node->parent && current_node->parent->is_element()
+        ? current_node->parent->as_element()
+        : nullptr;
+    if (!parent || !target_range_is_join_block_tag(parent->tag())) return false;
+
+    const char* prev_data = prev_text->text ? prev_text->text : "";
+    const char* current_data = text->text ? text->text : "";
+    uint32_t prev_len = target_range_text_byte_len(prev_text);
+    uint32_t current_len = target_range_text_byte_len(text);
+    uint32_t start_offset = prev_len;
+    uint32_t end_offset = 0;
+    if (parent->tag() != HTM_TAG_PRE && current_block->tag() != HTM_TAG_PRE) {
+        start_offset = target_range_trim_trailing_space(prev_data, prev_len);
+        end_offset = target_range_leading_space_len(current_data, current_len);
+    }
+    if (caret.offset > end_offset) return false;
+
+    out[0].start = { static_cast<DomNode*>(prev_text), start_offset };
+    out[0].end = { static_cast<DomNode*>(text), end_offset };
+    return true;
+}
+
 uint32_t editing_compute_target_ranges(DocState* state,
                                        const EditingSurface* surface,
                                        const EditingIntent* intent,
@@ -470,7 +732,22 @@ uint32_t editing_compute_target_ranges(DocState* state,
             if (target_range_backspace_block_join(start, out)) {
                 return 1;
             }
+            if (target_range_backspace_trailing_br_block_join(start, out)) {
+                return 1;
+            }
+            if (target_range_backspace_child_block_parent_join(start, out)) {
+                return 1;
+            }
+            if (target_range_backspace_parent_text_child_block_join(start, out)) {
+                return 1;
+            }
             if (target_range_backspace_empty_inline(start, surface, out)) {
+                return 1;
+            }
+            if (target_range_backspace_atomic_whitespace(start, surface, out)) {
+                return 1;
+            }
+            if (target_range_backspace_atomic(start, surface, out)) {
                 return 1;
             }
             DomBoundary prev = dom_boundary_move(start, DOM_MOD_CHARACTER, -1);

@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join/inline-cleanup-target-range slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting, conservative whole-wrapper toggle-off, collapsed typing-state inline insertion, and collapsed insertion adjacent-wrapper normalization landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard/history started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, native rich-host `copy`/`cut`/`paste`, native rich-host `undo`/`redo` event-envelope plus bounded snapshot/selection restore support, and keyboard/default-action rich undo/redo integration.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join/inline-cleanup-target-range/atomic-delete/atomic-whitespace/trailing-br-block-join/nested-block-parent-join/inline-chain-join/reverse-nested-text-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting, conservative whole-wrapper toggle-off, collapsed typing-state inline insertion, and collapsed insertion adjacent-wrapper normalization landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard/history started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, native rich-host `copy`/`cut`/`paste`, native rich-host `undo`/`redo` event-envelope plus bounded snapshot/selection restore support, and keyboard/default-action rich undo/redo integration.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -452,6 +452,101 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
   deletion, list/table joins, whitespace-only edge cases, and modifier variants
   remain in the skipped Backspace matrix.
 
+**SI-15 — simple atomic Backspace target range + mutation: LANDED
+(2026-06-18).**
+
+- Added native `beforeinput.getTargetRanges()` coverage for simple atomic
+  previous-sibling deletion. Backspace immediately after a visible `<br>`,
+  `<img>`, or `<hr>` now reports a child-boundary range around that node, e.g.
+  `<p>abc<br>[]def</p>` reports `p` offset `1` to `2`.
+- Matched the default Backspace mutation path to that range. The transaction
+  removes the atomic child through the same live-range mutation envelope used
+  by inline cleanup and block joins, dispatches the normal `input` event with
+  an empty post-mutation target-range list, and collapses the caret to the
+  removed child's former parent boundary.
+- Covered both text-offset and element-boundary carets. This includes the WPT
+  shape `<p>abc<img>{}<img>def</p>`, where the selection is collapsed in the
+  parent element between two atomic children rather than inside a text node.
+- Scope is deliberately the simple non-whitespace family only. Whitespace
+  absorption around `<br>`/`<hr>`, invisible trailing line-break handling,
+  deeper block joins, list/table joins, and modifier variants remain future SI
+  work.
+
+**SI-16 — whitespace-sensitive atomic Backspace edges: LANDED
+(2026-06-18).**
+
+- Extended the SI-15 atomic range/mutation path for separator whitespace cases
+  where deleting only the atomic child would expose invisible whitespace:
+  `<p>abc<br>[] def</p>`, `<p>abc<br> []def</p>`,
+  `<div>abc <hr>[]def</div>`, `<div>abc<hr> []def</div>`, and
+  `<div>abc<br><hr>[]def</div>`.
+- `beforeinput.getTargetRanges()` now includes the whitespace that is part of
+  the actual deletion: leading text after `<br>/<hr>`, trailing text before
+  `<hr>`, or the invisible `<br>` immediately before `<hr>`.
+- The default mutation path mirrors those ranges by trimming the relevant text
+  node or removing the paired `<br>` before removing the atomic separator, then
+  dispatching the normal `input` event with an empty target-range list and
+  collapsing the caret to the separator's former parent boundary.
+- Scope remains separator-specific. Image-adjacent spaces stay visible and keep
+  the simple SI-15 child-boundary range. Deeper inline fragments, list/table
+  joins, and modifier variants remain future SI work.
+
+**SI-17 — trailing `<br>` block-boundary joins: LANDED
+(2026-06-18).**
+
+- Added a narrow block-join path for previous blocks whose children are exactly
+  one text node followed by one or more trailing `<br>` elements, with the
+  caret at the start of a following simple text-only block.
+- `beforeinput.getTargetRanges()` now reports the WPT boundary ranges:
+  `<p>abc<br></p><p>[]def</p>` starts in the previous block at offset `1`,
+  and `<p>abc<br><br></p><p>[]def</p>` starts at offset `2`; both end at
+  offset `0` in the following text node.
+- The default mutation removes the invisible trailing `<br>` and joins the
+  blocks. A single trailing `<br>` joins to `<p>abcdef</p>`; two trailing
+  `<br>` elements preserve one visible line break and join to
+  `<p>abc<br>def</p>`.
+- Scope remains intentionally narrow: text-only current blocks and previous
+  `text + br*` blocks only. Richer inline fragments, nested block boundaries,
+  list/table joins, and modifier variants remain future SI work.
+
+**SI-18 — direct child-block-to-parent joins: LANDED
+(2026-06-18).**
+
+- Added a narrow nested block-boundary Backspace path for the WPT family where
+  the caret is at the start, or inside leading collapsible whitespace, of a
+  direct text node following a previous direct child block:
+  `<div><p>abc</p>[]def</div>` and
+  `<div><p>abc   </p>   []def</div>`.
+- `beforeinput.getTargetRanges()` now reports the cross-boundary deletion from
+  the previous child block's text end, or pre-trailing-space offset, through
+  the parent text node's leading whitespace. The matching default mutation
+  joins to `<div><p>abcdef</p></div>` and collapses the caret to offset `3` in
+  the surviving child block text node.
+- Scope is direct and text-only: previous sibling must be a simple text block,
+  the parent-side content must be a direct text node, and the join target is
+  limited to `div`/`p`/`pre`. Deeper inline fragments, reverse
+  parent-to-child joins, list/table joins, and modifier variants remain future
+  SI work.
+
+**SI-19 — single-chain inline joins + reverse nested text joins: LANDED
+(2026-06-18).**
+
+- Broadened the simple inline block-join classifier from one inline wrapper
+  around one text node to a single-child inline chain around one text node. The
+  default mutation still moves only the current block's top-level wrapper, so
+  `<p>abc</p><p><b><i>[]def</i></b></p>` now joins to
+  `<p>abc<b><i>def</i></b></p>`, and nested previous/current wrappers join
+  without flattening or merging the wrapper chain.
+- Added the direct reverse nested boundary of SI-18:
+  `<div>abc<p>[]def</p></div>` and
+  `<div>abc   <p>   []def</p></div>` now report cross-boundary Backspace
+  ranges from the parent text node to the child block text node, mutate to
+  `<div>abcdef</div>`, and collapse the caret to the parent text at offset `3`.
+- Scope remains deliberately narrow: inline chains must be single-child paths
+  to one text node, reverse nested joins require direct parent text followed by
+  a direct text-only child `div`/`p`/`pre`, and there is still no arbitrary
+  inline-fragment flattening, list/table join, or modifier-specific behavior.
+
 **Current SI verification (2026-06-18):**
 
 | Check | Result |
@@ -478,11 +573,17 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 | `select-event-drag-remove` | 1/1 passed |
 | Direct simple block-join DOM regression | `ok=true`, `html=<p>abcdef</p>`, `before=deleteContentBackward:1:true,3,true,0`, `input=deleteContentBackward:0` |
 | Direct whitespace block-join DOM regression | offsets 3/2/1/0 all join to `<p>abcdef</p>` with `before=deleteContentBackward:1:true,3,true,3` and `input=deleteContentBackward:0` |
-| Direct inline block-join DOM regression | text/bold, bold/bold, and italic/bold WPT shapes all pass with matching HTML and `before=deleteContentBackward:1:true,3,true,0` |
+| Direct inline block-join DOM regression | text/bold, bold/bold, italic/bold, text/nested-inline, and nested/nested-inline shapes all pass with matching HTML and `before=deleteContentBackward:1:true,3,true,0` |
 | Direct inline cleanup target-range DOM regression | after-inline and inside-inline shapes both pass with `html=<p>ac</p>`, empty post-`input` target ranges, and caret at parent offset `1` |
-| `input-events-get-target-ranges-backspace.tentative` | last measured 45/163 before SI-12/SI-14; remains skipped |
+| Direct atomic target-range DOM regression | visible `<br>`, `<img>`, `<hr>`, between-images boundary, and whitespace-sensitive `<br>/<hr>` separator shapes pass with matching `beforeinput` ranges and empty post-`input` ranges |
+| Direct trailing-`br` block-join DOM regression | one-`br` and two-`br` previous-block shapes pass with matching WPT target ranges and empty post-`input` ranges |
+| Direct nested block parent-join DOM regression | child-block-to-parent, whitespace child-block-to-parent, parent-text-to-child-block, and whitespace parent-text-to-child-block shapes pass with matching WPT target ranges and empty post-`input` ranges |
+| `input-events-get-target-ranges-backspace.tentative` | last measured 45/163 before SI-12/SI-19; remains skipped |
 | focused `dom_editing_backspace_inline_cleanup_range` JS gtest | passed |
-| related block-join deletion JS gtests | `dom_editing_block_join_inline`, `dom_editing_block_join`, and `dom_editing_block_join_whitespace` passed |
+| focused `dom_editing_backspace_atomic_range` JS gtest | passed |
+| focused `dom_editing_block_join_trailing_br` JS gtest | passed |
+| focused `dom_editing_nested_block_join` JS gtest | passed |
+| related block-join deletion JS gtests | `dom_editing_block_join_inline`, `dom_editing_block_join`, `dom_editing_block_join_whitespace`, `dom_editing_block_join_trailing_br`, and `dom_editing_nested_block_join` passed |
 | `DomText_EmptyString_Backed` | passed |
 | focused WPT test rebuilds | `test_wpt_contenteditable_gtest` rebuilt |
 | `test_wpt_contenteditable_gtest` | 194 cases: 163 pass / 31 skip / 0 fail |
@@ -491,7 +592,7 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 | `test_js_gtest` | 199 passed / 0 failed; existing memtrack leak diagnostics printed |
 | `make test262-baseline` | not rerun for SI-13; previous SI-9 result was regressions 0; 40261 / 40261 fully passing; retry 0.0s |
 
-**Global gate note:** SI-14's local DOM regression and related deletion
+**Global gate note:** SI-19's local DOM regression and related deletion
 guards are green.
 The full `make test262-baseline` gate was not rerun for this block-join slice,
 so the broader SI phase should still run the mandatory §1.1 gate before being
@@ -500,9 +601,9 @@ deletion/pointer matrices without carrying a local WPT blocker.
 
 **Next SI slice:** broaden synthetic input beyond the enabled Backspace/Delete,
 number spin-key, number spin-button, and text-control drag-select pointer
-subset: remaining `getTargetRanges` deletion matrices (in-inline target ranges,
-deeper inline fragments, atomic deletion, list/table joins, whitespace
-semantics, and modifier variants),
+subset: remaining `getTargetRanges` deletion matrices (arbitrary deeper inline
+fragments, remaining invisible line-break/block-boundary cases, list/table
+joins, and modifier variants),
 broader text-control delete coverage, and richer pointer drag/hit-test
 injection outside the newly enabled text-control and contenteditable
 mouse-button files.

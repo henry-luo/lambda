@@ -149,6 +149,24 @@ static bool rich_transaction_caret_from_state(DocState* state,
     return true;
 }
 
+static bool rich_transaction_boundary_caret_from_state(DocState* state,
+                                                       DomBoundary* out) {
+    if (out) {
+        out->node = nullptr;
+        out->offset = 0;
+    }
+    if (!state || !state->dom_selection ||
+        state->dom_selection->range_count == 0 ||
+        !state->dom_selection->ranges[0] || !out) {
+        return false;
+    }
+
+    DomRange* range = state->dom_selection->ranges[0];
+    if (!dom_range_collapsed(range) || !range->start.node) return false;
+    *out = range->start;
+    return true;
+}
+
 static bool rich_transaction_is_text_deletion_intent(
         const EditingIntent* intent) {
     if (!intent) return false;
@@ -356,6 +374,219 @@ static bool rich_transaction_delete_previous_inline_wrapper(
     return true;
 }
 
+static bool rich_transaction_is_atomic_delete_tag(uintptr_t tag_id) {
+    return tag_id == HTM_TAG_BR || tag_id == HTM_TAG_HR || tag_id == HTM_TAG_IMG;
+}
+
+static DomNode* rich_transaction_child_at(DomElement* parent, uint32_t index) {
+    if (!parent) return nullptr;
+    uint32_t cur = 0;
+    for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
+        if (cur == index) return child;
+        cur++;
+    }
+    return nullptr;
+}
+
+static bool rich_transaction_delete_atomic_node(
+        DocState* state,
+        const EditingSurface* surface,
+        DomElement* parent,
+        DomNode* node,
+        EditingRichMutationLogFn log_mutation,
+        const EditingIntent* intent,
+        void* log_user) {
+    if (!state || !parent || !node ||
+        node->parent != static_cast<DomNode*>(parent) ||
+        !node->is_element()) {
+        return false;
+    }
+
+    DomElement* elem = lam::dom_require_element(node);
+    if (!elem || !rich_transaction_is_atomic_delete_tag(elem->tag())) {
+        return false;
+    }
+
+    uint32_t child_idx = dom_node_child_index(node);
+    if (child_idx == (uint32_t)-1) return false;
+    dom_mutation_pre_remove(state, node);
+    if (!rich_transaction_remove_child_for_edit(parent, node)) {
+        return false;
+    }
+    if (!rich_transaction_collapse_dom_caret(state,
+            static_cast<DomNode*>(parent), child_idx)) {
+        return false;
+    }
+
+    EditingSurface live_surface;
+    if (editing_surface_from_target(static_cast<View*>(parent),
+            &live_surface) && editing_surface_is_rich(&live_surface)) {
+        editing_interaction_set_active_surface(state, &live_surface);
+        if (log_mutation) {
+            log_mutation(state, &live_surface, intent, "delete-atomic",
+                         1, 0, child_idx, child_idx, log_user);
+        }
+    } else if (surface) {
+        editing_interaction_set_active_surface(state, surface);
+        if (log_mutation) {
+            log_mutation(state, surface, intent, "delete-atomic",
+                         1, 0, child_idx, child_idx, log_user);
+        }
+    }
+    log_debug("rich_transaction_delete_atomic_node: removed %s at index %u",
+              elem->node_name(), child_idx);
+    return true;
+}
+
+static bool rich_transaction_atomic_space(unsigned char ch) {
+    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
+}
+
+static uint32_t rich_transaction_text_byte_len(DomText* text) {
+    if (!text) return 0;
+    const char* data = text->text ? text->text : "";
+    return text->length > 0 ? (uint32_t)text->length : (uint32_t)strlen(data);
+}
+
+static uint32_t rich_transaction_atomic_leading_space_len(const char* text,
+                                                          uint32_t length) {
+    uint32_t count = 0;
+    while (count < length &&
+           rich_transaction_atomic_space((unsigned char)text[count])) {
+        count++;
+    }
+    return count;
+}
+
+static uint32_t rich_transaction_atomic_trim_trailing_space(const char* text,
+                                                           uint32_t length) {
+    while (length > 0 &&
+           rich_transaction_atomic_space((unsigned char)text[length - 1])) {
+        length--;
+    }
+    return length;
+}
+
+static bool rich_transaction_set_text_slice(DomText* text,
+                                            uint32_t start,
+                                            uint32_t end) {
+    if (!text || end < start) return false;
+    const char* data = text->text ? text->text : "";
+    uint32_t len = rich_transaction_text_byte_len(text);
+    if (start > len) start = len;
+    if (end > len) end = len;
+    if (end < start) end = start;
+    uint32_t new_len = end - start;
+    char* replacement = (char*)mem_alloc((size_t)new_len + 1, MEM_CAT_TEMP);
+    if (!replacement) return false;
+    if (new_len > 0) memcpy(replacement, data + start, new_len);
+    replacement[new_len] = '\0';
+    bool ok = dom_text_set_content(text, replacement);
+    mem_free(replacement);
+    return ok;
+}
+
+static bool rich_transaction_delete_previous_atomic_whitespace_before_text(
+        DocState* state,
+        const EditingSurface* surface,
+        DomText* text,
+        uint32_t caret_offset,
+        EditingRichMutationLogFn log_mutation,
+        const EditingIntent* intent,
+        void* log_user) {
+    if (!state || !text || !text->parent || !text->parent->is_element()) {
+        return false;
+    }
+
+    DomNode* text_node = static_cast<DomNode*>(text);
+    DomNode* atomic_node = text_node->prev_sibling;
+    if (!atomic_node || !atomic_node->is_element()) return false;
+    DomElement* atomic = lam::dom_require_element(atomic_node);
+    if (!atomic) return false;
+    uintptr_t tag = atomic->tag();
+    if (tag != HTM_TAG_BR && tag != HTM_TAG_HR) return false;
+
+    DomElement* parent = lam::dom_require_element(text->parent);
+    if (!parent) return false;
+    uint32_t atomic_idx = dom_node_child_index(atomic_node);
+    if (atomic_idx == (uint32_t)-1) return false;
+
+    const char* data = text->text ? text->text : "";
+    uint32_t text_len = rich_transaction_text_byte_len(text);
+    uint32_t leading_len =
+        rich_transaction_atomic_leading_space_len(data, text_len);
+    if (leading_len > 0 && caret_offset <= leading_len) {
+        if (!rich_transaction_set_text_slice(text, leading_len, text_len)) {
+            return false;
+        }
+        return rich_transaction_delete_atomic_node(state, surface, parent,
+            atomic_node, log_mutation, intent, log_user);
+    }
+
+    if (tag != HTM_TAG_HR || caret_offset != 0) return false;
+    DomNode* before_atomic = atomic_node->prev_sibling;
+    if (!before_atomic) return false;
+    if (before_atomic->is_text()) {
+        DomText* prev_text = lam::dom_require_text(before_atomic);
+        const char* prev_data = prev_text->text ? prev_text->text : "";
+        uint32_t prev_len = rich_transaction_text_byte_len(prev_text);
+        uint32_t trimmed_len =
+            rich_transaction_atomic_trim_trailing_space(prev_data, prev_len);
+        if (trimmed_len == prev_len) return false;
+        if (!rich_transaction_set_text_slice(prev_text, 0, trimmed_len)) {
+            return false;
+        }
+        return rich_transaction_delete_atomic_node(state, surface, parent,
+            atomic_node, log_mutation, intent, log_user);
+    }
+    if (before_atomic->is_element() &&
+        before_atomic->as_element()->tag() == HTM_TAG_BR) {
+        dom_mutation_pre_remove(state, before_atomic);
+        if (!rich_transaction_remove_child_for_edit(parent, before_atomic)) {
+            return false;
+        }
+        if (!rich_transaction_delete_atomic_node(state, surface, parent,
+                atomic_node, log_mutation, intent, log_user)) {
+            return false;
+        }
+        log_debug("rich_transaction_delete_previous_atomic_whitespace_before_text: removed br before hr at index %u",
+                  atomic_idx - 1);
+        return true;
+    }
+    return false;
+}
+
+static bool rich_transaction_delete_previous_atomic_before_text(
+        DocState* state,
+        const EditingSurface* surface,
+        DomText* text,
+        EditingRichMutationLogFn log_mutation,
+        const EditingIntent* intent,
+        void* log_user) {
+    if (!text || !text->parent || !text->parent->is_element()) return false;
+    DomNode* previous = static_cast<DomNode*>(text)->prev_sibling;
+    if (!previous) return false;
+    DomElement* parent = lam::dom_require_element(text->parent);
+    return rich_transaction_delete_atomic_node(state, surface, parent, previous,
+        log_mutation, intent, log_user);
+}
+
+static bool rich_transaction_delete_previous_atomic_at_boundary(
+        DocState* state,
+        const EditingSurface* surface,
+        DomBoundary caret,
+        EditingRichMutationLogFn log_mutation,
+        const EditingIntent* intent,
+        void* log_user) {
+    if (!caret.node || !caret.node->is_element() || caret.offset == 0) {
+        return false;
+    }
+    DomElement* parent = lam::dom_require_element(caret.node);
+    DomNode* previous = rich_transaction_child_at(parent, caret.offset - 1);
+    return rich_transaction_delete_atomic_node(state, surface, parent, previous,
+        log_mutation, intent, log_user);
+}
+
 static bool rich_transaction_delete_dom_range_and_read_caret(
         DocState* state, DomText** out_text, uint32_t* out_byte_offset) {
     if (!state || !state->dom_selection) return false;
@@ -424,6 +655,22 @@ struct RichJoinBlockContent {
     bool direct_text;
 };
 
+static bool rich_transaction_inline_chain_text_only(DomNode* node,
+                                                    DomText* text) {
+    DomNode* cur = node;
+    DomNode* text_node = static_cast<DomNode*>(text);
+    while (cur && cur != text_node) {
+        if (!cur->is_element()) return false;
+        DomElement* elem = lam::dom_require_element(cur);
+        if (!elem || !rich_transaction_is_cleanup_inline_tag(elem->tag()) ||
+            !elem->first_child || elem->first_child != elem->last_child) {
+            return false;
+        }
+        cur = elem->first_child;
+    }
+    return cur == text_node;
+}
+
 static bool rich_transaction_simple_text_content(DomElement* block,
                                                  DomText* text,
                                                  RichJoinBlockContent* out) {
@@ -448,10 +695,7 @@ static bool rich_transaction_simple_text_content(DomElement* block,
     }
     if (!child->is_element()) return false;
 
-    DomElement* inline_elem = lam::dom_require_element(child);
-    if (!inline_elem || !rich_transaction_is_cleanup_inline_tag(inline_elem->tag()) ||
-        inline_elem->first_child != static_cast<DomNode*>(text) ||
-        inline_elem->last_child != static_cast<DomNode*>(text)) {
+    if (!rich_transaction_inline_chain_text_only(child, text)) {
         return false;
     }
     if (out) {
@@ -697,6 +941,296 @@ static bool rich_transaction_join_previous_block(
     log_debug("rich_transaction_join_previous_block: joined %u/%u + %u/%u bytes",
               prev_keep_len, prev_len, current_len - current_skip_len,
               current_len);
+    return true;
+}
+
+static bool rich_transaction_join_previous_trailing_br_block(
+        DocState* state,
+        const EditingSurface* surface,
+        DomText* text,
+        uint32_t caret_offset,
+        EditingRichMutationLogFn log_mutation,
+        const EditingIntent* intent,
+        void* log_user) {
+    if (!state || !text || caret_offset != 0) return false;
+
+    DomElement* current_block = rich_transaction_text_block_parent(text);
+    RichJoinBlockContent current_content;
+    if (!current_block ||
+        !rich_transaction_simple_text_content(current_block, text,
+            &current_content) ||
+        !current_content.direct_text) {
+        return false;
+    }
+
+    DomNode* current_node = static_cast<DomNode*>(current_block);
+    DomNode* prev_node = current_node->prev_sibling;
+    if (!prev_node || !prev_node->is_element()) return false;
+
+    DomElement* prev_block = lam::dom_require_element(prev_node);
+    if (!prev_block || !rich_transaction_is_join_block_tag(prev_block->tag()) ||
+        !prev_block->first_child || !prev_block->first_child->is_text()) {
+        return false;
+    }
+
+    DomText* prev_text = lam::dom_require_text(prev_block->first_child);
+    DomNode* last = prev_block->last_child;
+    if (!prev_text || !last || !last->is_element() ||
+        last->as_element()->tag() != HTM_TAG_BR) {
+        return false;
+    }
+    for (DomNode* child = prev_block->first_child->next_sibling;
+         child; child = child->next_sibling) {
+        if (!child->is_element() || child->as_element()->tag() != HTM_TAG_BR) {
+            return false;
+        }
+    }
+
+    DomElement* parent = current_node->parent && current_node->parent->is_element()
+        ? lam::dom_require_element(current_node->parent)
+        : nullptr;
+    if (!parent) return false;
+
+    uint32_t br_idx = dom_node_child_index(last);
+    if (br_idx == (uint32_t)-1) return false;
+    const char* prev_data = prev_text->text ? prev_text->text : "";
+    const char* current_data = text->text ? text->text : "";
+    uint32_t prev_len = rich_transaction_text_byte_len(prev_text);
+    uint32_t current_len = rich_transaction_text_byte_len(text);
+
+    dom_mutation_pre_remove(state, last);
+    if (!rich_transaction_remove_child_for_edit(prev_block, last)) {
+        return false;
+    }
+
+    DomText* caret_text = prev_text;
+    uint32_t caret_offset_after = prev_len;
+    if (br_idx == 1) {
+        size_t joined_len = (size_t)prev_len + (size_t)current_len;
+        char* joined = (char*)mem_alloc(joined_len + 1, MEM_CAT_TEMP);
+        if (!joined) return false;
+        if (prev_len > 0) memcpy(joined, prev_data, prev_len);
+        if (current_len > 0) memcpy(joined + prev_len, current_data, current_len);
+        joined[joined_len] = '\0';
+        bool updated = dom_text_set_content(prev_text, joined);
+        mem_free(joined);
+        if (!updated) return false;
+    } else {
+        DomNode* moving_child = current_content.child;
+        if (!moving_child || !current_node->remove_child(moving_child)) {
+            return false;
+        }
+        if (!rich_transaction_append_child_for_edit(prev_block, moving_child)) {
+            current_node->append_child(moving_child);
+            return false;
+        }
+        caret_text = text;
+        caret_offset_after = 0;
+    }
+
+    dom_mutation_pre_remove(state, current_node);
+    if (!rich_transaction_remove_child_for_edit(parent, current_node)) {
+        return false;
+    }
+    if (!rich_transaction_collapse_text_caret(state, caret_text,
+            caret_offset_after)) {
+        return false;
+    }
+
+    EditingSurface live_surface;
+    if (editing_surface_from_target(static_cast<View*>(caret_text),
+            &live_surface) && editing_surface_is_rich(&live_surface)) {
+        editing_interaction_set_active_surface(state, &live_surface);
+        if (log_mutation) {
+            log_mutation(state, &live_surface, intent, "block-join-br",
+                         prev_len, prev_len + current_len,
+                         caret_offset_after, caret_offset_after, log_user);
+        }
+    } else if (surface) {
+        editing_interaction_set_active_surface(state, surface);
+    }
+    log_debug("rich_transaction_join_previous_trailing_br_block: joined with trailing br at index %u",
+              br_idx);
+    return true;
+}
+
+static bool rich_transaction_join_child_block_with_parent_text(
+        DocState* state,
+        const EditingSurface* surface,
+        DomText* text,
+        uint32_t caret_offset,
+        EditingRichMutationLogFn log_mutation,
+        const EditingIntent* intent,
+        void* log_user) {
+    if (!state || !text || !text->parent || !text->parent->is_element()) {
+        return false;
+    }
+
+    DomElement* parent = lam::dom_require_element(text->parent);
+    if (!parent || !rich_transaction_is_join_block_tag(parent->tag())) {
+        return false;
+    }
+
+    DomNode* text_node = static_cast<DomNode*>(text);
+    DomNode* prev_node = text_node->prev_sibling;
+    if (!prev_node || !prev_node->is_element()) return false;
+    DomElement* prev_block = lam::dom_require_element(prev_node);
+    if (!prev_block || !rich_transaction_is_join_block_tag(prev_block->tag())) {
+        return false;
+    }
+
+    DomText* prev_text = editing_rich_find_text_descendant(prev_node, true);
+    RichJoinBlockContent prev_content;
+    if (!prev_text ||
+        !rich_transaction_simple_text_content(prev_block, prev_text,
+            &prev_content) ||
+        !prev_content.direct_text) {
+        return false;
+    }
+
+    const char* prev_data = prev_text->text ? prev_text->text : "";
+    const char* current_data = text->text ? text->text : "";
+    uint32_t prev_len = rich_transaction_text_byte_len(prev_text);
+    uint32_t current_len = rich_transaction_text_byte_len(text);
+    uint32_t prev_keep_len = prev_len;
+    uint32_t current_skip_len = 0;
+    if (prev_block->tag() != HTM_TAG_PRE && parent->tag() != HTM_TAG_PRE) {
+        prev_keep_len = rich_transaction_trim_trailing_space(prev_data, prev_len);
+        current_skip_len = rich_transaction_leading_space_len(current_data, current_len);
+    }
+    if (caret_offset > current_skip_len) return false;
+
+    size_t joined_len =
+        (size_t)prev_keep_len + (size_t)(current_len - current_skip_len);
+    char* joined = (char*)mem_alloc(joined_len + 1, MEM_CAT_TEMP);
+    if (!joined) return false;
+    if (prev_keep_len > 0) memcpy(joined, prev_data, prev_keep_len);
+    if (current_len > current_skip_len) {
+        memcpy(joined + prev_keep_len, current_data + current_skip_len,
+               current_len - current_skip_len);
+    }
+    joined[joined_len] = '\0';
+
+    int64_t prev_idx = dom_text_get_child_index(prev_text);
+    bool updated = dom_text_set_content(prev_text, joined);
+    mem_free(joined);
+    if (!updated) return false;
+
+    DomText* live_prev_text =
+        rich_transaction_live_text_at_index(prev_block, prev_idx, prev_text);
+
+    dom_mutation_pre_remove(state, text_node);
+    if (!rich_transaction_remove_child_for_edit(parent, text_node)) {
+        return false;
+    }
+    if (!rich_transaction_collapse_text_caret(state, live_prev_text,
+            prev_keep_len)) {
+        return false;
+    }
+
+    EditingSurface live_surface;
+    if (editing_surface_from_target(static_cast<View*>(live_prev_text),
+            &live_surface) && editing_surface_is_rich(&live_surface)) {
+        editing_interaction_set_active_surface(state, &live_surface);
+        if (log_mutation) {
+            log_mutation(state, &live_surface, intent, "nested-block-join",
+                         prev_keep_len, prev_len + current_skip_len,
+                         prev_keep_len, prev_keep_len, log_user);
+        }
+    } else if (surface) {
+        editing_interaction_set_active_surface(state, surface);
+    }
+    log_debug("rich_transaction_join_child_block_with_parent_text: joined nested block at offset %u",
+              prev_keep_len);
+    return true;
+}
+
+static bool rich_transaction_join_parent_text_with_child_block(
+        DocState* state,
+        const EditingSurface* surface,
+        DomText* text,
+        uint32_t caret_offset,
+        EditingRichMutationLogFn log_mutation,
+        const EditingIntent* intent,
+        void* log_user) {
+    if (!state || !text) return false;
+
+    DomElement* current_block = rich_transaction_text_block_parent(text);
+    RichJoinBlockContent current_content;
+    if (!current_block ||
+        !rich_transaction_simple_text_content(current_block, text,
+            &current_content) ||
+        !current_content.direct_text) {
+        return false;
+    }
+
+    DomNode* current_node = static_cast<DomNode*>(current_block);
+    DomNode* prev_node = current_node->prev_sibling;
+    if (!prev_node || !prev_node->is_text()) return false;
+    DomText* prev_text = lam::dom_require_text(prev_node);
+
+    DomElement* parent = current_node->parent && current_node->parent->is_element()
+        ? lam::dom_require_element(current_node->parent)
+        : nullptr;
+    if (!parent || !rich_transaction_is_join_block_tag(parent->tag())) {
+        return false;
+    }
+
+    const char* prev_data = prev_text->text ? prev_text->text : "";
+    const char* current_data = text->text ? text->text : "";
+    uint32_t prev_len = rich_transaction_text_byte_len(prev_text);
+    uint32_t current_len = rich_transaction_text_byte_len(text);
+    uint32_t prev_keep_len = prev_len;
+    uint32_t current_skip_len = 0;
+    if (parent->tag() != HTM_TAG_PRE && current_block->tag() != HTM_TAG_PRE) {
+        prev_keep_len = rich_transaction_trim_trailing_space(prev_data, prev_len);
+        current_skip_len = rich_transaction_leading_space_len(current_data, current_len);
+    }
+    if (caret_offset > current_skip_len) return false;
+
+    size_t joined_len =
+        (size_t)prev_keep_len + (size_t)(current_len - current_skip_len);
+    char* joined = (char*)mem_alloc(joined_len + 1, MEM_CAT_TEMP);
+    if (!joined) return false;
+    if (prev_keep_len > 0) memcpy(joined, prev_data, prev_keep_len);
+    if (current_len > current_skip_len) {
+        memcpy(joined + prev_keep_len, current_data + current_skip_len,
+               current_len - current_skip_len);
+    }
+    joined[joined_len] = '\0';
+
+    int64_t prev_idx = dom_text_get_child_index(prev_text);
+    bool updated = dom_text_set_content(prev_text, joined);
+    mem_free(joined);
+    if (!updated) return false;
+
+    DomText* live_prev_text =
+        rich_transaction_live_text_at_index(parent, prev_idx, prev_text);
+
+    dom_mutation_pre_remove(state, current_node);
+    if (!rich_transaction_remove_child_for_edit(parent, current_node)) {
+        return false;
+    }
+    if (!rich_transaction_collapse_text_caret(state, live_prev_text,
+            prev_keep_len)) {
+        return false;
+    }
+
+    EditingSurface live_surface;
+    if (editing_surface_from_target(static_cast<View*>(live_prev_text),
+            &live_surface) && editing_surface_is_rich(&live_surface)) {
+        editing_interaction_set_active_surface(state, &live_surface);
+        if (log_mutation) {
+            log_mutation(state, &live_surface, intent,
+                         "nested-parent-text-join",
+                         prev_keep_len, prev_len + current_skip_len,
+                         prev_keep_len, prev_keep_len, log_user);
+        }
+    } else if (surface) {
+        editing_interaction_set_active_surface(state, surface);
+    }
+    log_debug("rich_transaction_join_parent_text_with_child_block: joined nested block at offset %u",
+              prev_keep_len);
     return true;
 }
 
@@ -2468,6 +3002,15 @@ bool editing_rich_default_replace(DocState* state,
             }
         }
         if (!text && !rich_transaction_caret_from_state(state, &text, &start)) {
+            if (intent->type == INPUT_INTENT_DELETE_CONTENT_BACKWARD) {
+                DomBoundary caret;
+                if (rich_transaction_boundary_caret_from_state(state, &caret) &&
+                    rich_transaction_delete_previous_atomic_at_boundary(
+                        state, fallback_surface_ptr, caret,
+                        log_mutation, intent, log_user)) {
+                    return true;
+                }
+            }
             return false;
         }
         end = start;
@@ -2504,7 +3047,32 @@ bool editing_rich_default_replace(DocState* state,
                         log_mutation, intent, log_user)) {
                     return true;
                 }
+                if (rich_transaction_join_previous_trailing_br_block(
+                        state, fallback_surface_ptr, text, start,
+                        log_mutation, intent, log_user)) {
+                    return true;
+                }
+                if (rich_transaction_join_child_block_with_parent_text(
+                        state, fallback_surface_ptr, text, start,
+                        log_mutation, intent, log_user)) {
+                    return true;
+                }
+                if (rich_transaction_join_parent_text_with_child_block(
+                        state, fallback_surface_ptr, text, start,
+                        log_mutation, intent, log_user)) {
+                    return true;
+                }
+                if (rich_transaction_delete_previous_atomic_whitespace_before_text(
+                        state, fallback_surface_ptr, text, start,
+                        log_mutation, intent, log_user)) {
+                    return true;
+                }
                 if (start == 0 && rich_transaction_delete_previous_inline_wrapper(
+                        state, fallback_surface_ptr, text,
+                        log_mutation, intent, log_user)) {
+                    return true;
+                }
+                if (start == 0 && rich_transaction_delete_previous_atomic_before_text(
                         state, fallback_surface_ptr, text,
                         log_mutation, intent, log_user)) {
                     return true;
