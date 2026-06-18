@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join/inline-cleanup-target-range/atomic-delete/atomic-whitespace/trailing-br-block-join/empty-br-block-join/nested-block-parent-join/inline-chain-join/reverse-nested-text-join/inline-fragment-block-join/list-item-join/nested-list-unwrap/table-cell-join/table-span-guard/table-cross-row-guard/modifier-line-delete slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting, conservative whole-wrapper toggle-off, collapsed typing-state inline insertion, and collapsed insertion adjacent-wrapper normalization landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard/history started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, native rich-host `copy`/`cut`/`paste`, native rich-host `undo`/`redo` event-envelope plus bounded snapshot/selection restore support, and keyboard/default-action rich undo/redo integration.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join/inline-cleanup-target-range/atomic-delete/atomic-whitespace/trailing-br-block-join/empty-br-block-join/nested-block-parent-join/inline-chain-join/reverse-nested-text-join/inline-fragment-block-join/list-item-join/nested-list-unwrap/nested-list-split/table-cell-join/table-span-guard/table-cross-row-join/table-colspan-normalize/modifier-line-delete slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting, conservative whole-wrapper toggle-off, collapsed typing-state inline insertion, and collapsed insertion adjacent-wrapper normalization landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard/history started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, native rich-host `copy`/`cut`/`paste`, native rich-host `undo`/`redo` event-envelope plus bounded snapshot/selection restore support, and keyboard/default-action rich undo/redo integration.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -615,6 +615,25 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
   first cell in the next row leaves the table unchanged. Cross-row joins,
   row/section deletion, and span normalization remain out of scope.
 
+**SI-24 — nested-list split + broader invisible/table joins: LANDED
+(2026-06-18).**
+
+- Broadened nested-list unwrap from the sole trailing nested item to the first
+  item of a multi-item nested list. Backspace at the start of that first nested
+  `<li>` now lifts it after the parent `<li>` and leaves the remaining nested
+  siblings inside the nested list.
+- Broadened empty filler block joins from a single `<br>` child to a block that
+  contains one filler `<br>` plus whitespace-only text nodes. The whitespace and
+  filler are removed before the following text block is absorbed, so the join
+  does not leak invisible boundary text into the result.
+- Replaced the table cross-row guard for the ordinary one-cell row shape with a
+  real join: the first cell of the next row can merge into the previous row's
+  last unspanned cell, and the now-empty row is removed.
+- Added same-row `colspan` normalization for table-cell joins. When either
+  joined cell has `colspan`, the surviving cell's `colspan` absorbs both cells'
+  spans. `rowspan` remains guarded until the table-grid occupancy pass can
+  normalize overlapping later rows safely.
+
 **Current SI verification (2026-06-18):**
 
 | Check | Result |
@@ -645,13 +664,13 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 | Direct inline cleanup target-range DOM regression | after-inline and inside-inline shapes both pass with `html=<p>ac</p>`, empty post-`input` target ranges, and caret at parent offset `1` |
 | Direct atomic target-range DOM regression | visible `<br>`, `<img>`, `<hr>`, between-images boundary, and whitespace-sensitive `<br>/<hr>` separator shapes pass with matching `beforeinput` ranges and empty post-`input` ranges |
 | Direct trailing-`br` block-join DOM regression | one-`br` and two-`br` previous-block shapes pass with matching WPT target ranges and empty post-`input` ranges |
-| Direct empty filler-`br` block-join DOM regression | previous `<p><br></p>` and `<div><br></div>` filler blocks absorb the following text block with matching WPT target ranges and empty post-`input` ranges |
+| Direct empty filler-`br` block-join DOM regression | previous `<p><br></p>`, `<div><br></div>`, and whitespace-plus-single-filler-`br` blocks absorb the following text block with matching WPT target ranges and empty post-`input` ranges |
 | Direct nested block parent-join DOM regression | child-block-to-parent, whitespace child-block-to-parent, parent-text-to-child-block, and whitespace parent-text-to-child-block shapes pass with matching WPT target ranges and empty post-`input` ranges |
 | Direct list-item block-join DOM regression | adjacent ordered/unordered list item text, whitespace, and inline-fragment joins pass with matching target ranges and empty post-`input` ranges |
-| Direct nested-list unwrap DOM regression | nested text and inline-wrapper list items lift after their parent `<li>` with matching target ranges and caret preservation |
-| Direct table-cell block-join DOM regression | adjacent `td` text, whitespace, and inline-fragment joins pass with matching target ranges, implicit `<tbody>` serialization, empty post-`input` ranges; `rowspan`/`colspan` and cross-row guard cases leave the DOM unchanged without firing `input` |
+| Direct nested-list unwrap DOM regression | nested text, inline-wrapper, and first-item-of-multi-item nested list shapes lift after their parent `<li>` with matching target ranges and caret preservation; remaining nested siblings stay nested |
+| Direct table-cell block-join DOM regression | adjacent `td` text, whitespace, inline-fragment, previous-`colspan`, current-`colspan`, and ordinary cross-row joins pass with matching target ranges, implicit `<tbody>` serialization, empty post-`input` ranges; `rowspan` guard cases leave the DOM unchanged without firing `input` |
 | Direct modifier line-delete DOM regression | Meta Backspace/Delete map to `deleteSoftLineBackward`/`deleteSoftLineForward`, report current-line target ranges, mutate the current line, and leave empty post-`input` ranges |
-| `input-events-get-target-ranges-backspace.tentative` | last measured 45/163 before SI-12/SI-23; remains skipped |
+| `input-events-get-target-ranges-backspace.tentative` | last measured 45/163 before SI-12/SI-24; remains skipped |
 | focused `dom_editing_backspace_inline_cleanup_range` JS gtest | passed |
 | focused `dom_editing_backspace_atomic_range` JS gtest | passed |
 | focused `dom_editing_block_join_trailing_br` JS gtest | passed |
@@ -668,9 +687,9 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 | `test_wpt_selection_gtest` | 159 cases: 97 pass / 62 skip / 0 fail |
 | `test_wpt_dom_events_gtest` | 96 cases: 43 pass / 53 skip / 0 fail |
 | `test_js_gtest` | 199 passed / 0 failed; existing memtrack leak diagnostics printed |
-| `make test262-baseline` | not rerun for SI-23; previous SI-9 result was regressions 0; 40261 / 40261 fully passing; retry 0.0s |
+| `make test262-baseline` | not rerun for SI-24; previous SI-9 result was regressions 0; 40261 / 40261 fully passing; retry 0.0s |
 
-**Global gate note:** SI-23's local DOM regression and related deletion
+**Global gate note:** SI-24's local DOM regression and related deletion
 guards are green.
 The full `make test262-baseline` gate was not rerun for this deletion slice,
 so the broader SI phase should still run the mandatory §1.1 gate before being
@@ -680,10 +699,11 @@ deletion/pointer matrices without carrying a local WPT blocker.
 **Next SI slice:** broaden synthetic input beyond the enabled Backspace/Delete,
 number spin-key, number spin-button, and text-control drag-select pointer
 subset: remaining `getTargetRanges` deletion matrices (remaining invisible
-line-break/block-boundary cases beyond trailing-`br` and single filler-`br`,
-broader nested-list/list-unwrapping behavior beyond the sole trailing nested
-item, richer table structure cases beyond the spanned-cell/cross-row guards,
-and additional modifier variants beyond rich Meta line deletion),
+line-break/block-boundary cases beyond trailing-`br` and whitespace-plus-single
+filler-`br`, broader nested-list/list-unwrapping behavior beyond first nested
+item lifting, richer table structure cases beyond ordinary cross-row joins and
+same-row `colspan` absorption, `rowspan` table-grid normalization, and
+additional modifier variants beyond rich Meta line deletion),
 broader text-control delete coverage, and richer pointer drag/hit-test
 injection outside the newly enabled text-control and contenteditable
 mouse-button files.

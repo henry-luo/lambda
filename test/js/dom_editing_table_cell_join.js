@@ -122,14 +122,31 @@ run(
   () => editor.querySelector("td").childNodes[1].firstChild,
   1);
 
-runNoJoin(
+run(
   "table-cell-prev-colspan",
   "<table><tr><td colspan=\"2\">abc</td><td>def</td></tr></table>",
   () => editor.querySelectorAll("td")[1].firstChild,
   0,
-  "<table><tbody><tr><td colspan=\"2\">abc</td><td>def</td></tr></tbody></table>",
+  "<table><tbody><tr><td colspan=\"3\">abcdef</td></tr></tbody></table>",
+  () => editor.querySelector("td").firstChild,
+  3,
   () => editor.querySelectorAll("td")[1].firstChild,
-  0);
+  0,
+  () => editor.querySelector("td").firstChild,
+  3);
+
+run(
+  "table-cell-current-colspan",
+  "<table><tr><td>abc</td><td colspan=\"2\">def</td></tr></table>",
+  () => editor.querySelectorAll("td")[1].firstChild,
+  0,
+  "<table><tbody><tr><td colspan=\"3\">abcdef</td></tr></tbody></table>",
+  () => editor.querySelector("td").firstChild,
+  3,
+  () => editor.querySelectorAll("td")[1].firstChild,
+  0,
+  () => editor.querySelector("td").firstChild,
+  3);
 
 runNoJoin(
   "table-cell-current-rowspan",
@@ -140,11 +157,15 @@ runNoJoin(
   () => editor.querySelectorAll("td")[1].firstChild,
   0);
 
-runNoJoin(
+run(
   "table-cell-cross-row",
   "<table><tr><td>abc</td></tr><tr><td>def</td></tr></table>",
   () => editor.querySelectorAll("td")[1].firstChild,
   0,
-  "<table><tbody><tr><td>abc</td></tr><tr><td>def</td></tr></tbody></table>",
+  "<table><tbody><tr><td>abcdef</td></tr></tbody></table>",
+  () => editor.querySelector("td").firstChild,
+  3,
   () => editor.querySelectorAll("td")[1].firstChild,
-  0);
+  0,
+  () => editor.querySelector("td").firstChild,
+  3);

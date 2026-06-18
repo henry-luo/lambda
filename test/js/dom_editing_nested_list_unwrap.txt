@@ -1,2 +1,3 @@
 nested-list-text ok=true html=<ul><li>abc</li><li>def</li></ul> expected=true before=deleteContentBackward:1:true,3,true,0 input=deleteContentBackward:0 focus=true:0 focusExpected=0
 nested-list-inline ok=true html=<ol><li><b>abc</b></li><li><em>def</em></li></ol> expected=true before=deleteContentBackward:1:true,3,true,0 input=deleteContentBackward:0 focus=true:0 focusExpected=0
+nested-list-multi-item ok=true html=<ul><li>abc<ul><li>ghi</li></ul></li><li>def</li></ul> expected=true before=deleteContentBackward:1:true,3,true,0 input=deleteContentBackward:0 focus=true:0 focusExpected=0

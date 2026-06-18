@@ -52,3 +52,8 @@ run(
   "empty-br-div",
   "<div><br></div><div>def</div>",
   "<div>def</div>");
+
+run(
+  "whitespace-empty-br-paragraph",
+  "<p>   <br></p><p>def</p>",
+  "<p>def</p>");

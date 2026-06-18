@@ -167,9 +167,13 @@ static bool target_range_join_block_pair_allowed(DomElement* prev_block,
     if (!prev_cell || !current_cell) return false;
     if (prev_block->parent != current_block->parent) return false;
     return !dom_element_has_attribute(prev_block, "rowspan") &&
-        !dom_element_has_attribute(prev_block, "colspan") &&
-        !dom_element_has_attribute(current_block, "rowspan") &&
-        !dom_element_has_attribute(current_block, "colspan");
+        !dom_element_has_attribute(current_block, "rowspan");
+}
+
+static bool target_range_table_cell_without_span(DomElement* cell) {
+    return cell && target_range_is_table_cell_tag(cell->tag()) &&
+        !dom_element_has_attribute(cell, "rowspan") &&
+        !dom_element_has_attribute(cell, "colspan");
 }
 
 static DomElement* target_range_text_block_parent(DomText* text) {
@@ -422,6 +426,28 @@ static DomText* target_range_last_text_before_child(DomElement* parent,
         if (text) found = text;
     }
     return found;
+}
+
+static bool target_range_whitespace_text_node(DomNode* node) {
+    if (!node || !node->is_text()) return false;
+    DomText* text = node->as_text();
+    const char* data = text && text->text ? text->text : "";
+    uint32_t len = target_range_text_byte_len(text);
+    return target_range_leading_space_len(data, len) == len;
+}
+
+static bool target_range_filler_br_block(DomElement* block) {
+    if (!block || !block->first_child) return false;
+    uint32_t br_count = 0;
+    for (DomNode* child = block->first_child; child; child = child->next_sibling) {
+        if (child->is_element() &&
+            child->as_element()->tag() == HTM_TAG_BR) {
+            br_count++;
+            continue;
+        }
+        if (!target_range_whitespace_text_node(child)) return false;
+    }
+    return br_count == 1;
 }
 
 static bool target_range_backspace_atomic_whitespace(DomBoundary caret,
@@ -733,10 +759,7 @@ static bool target_range_backspace_empty_br_block_join(
     DomElement* prev_block = prev_node->as_element();
     if (!prev_block || !target_range_is_join_block_tag(prev_block->tag()) ||
         !target_range_join_block_pair_allowed(prev_block, current_block) ||
-        !prev_block->first_child ||
-        prev_block->first_child != prev_block->last_child ||
-        !prev_block->first_child->is_element() ||
-        prev_block->first_child->as_element()->tag() != HTM_TAG_BR) {
+        !target_range_filler_br_block(prev_block)) {
         return false;
     }
 
@@ -854,8 +877,7 @@ static bool target_range_backspace_nested_list_unwrap(DomBoundary caret,
         ? current_li_node->parent->as_element()
         : nullptr;
     if (!nested_list || !target_range_is_list_tag(nested_list->tag()) ||
-        nested_list->first_child != current_li_node ||
-        nested_list->last_child != current_li_node) {
+        nested_list->first_child != current_li_node) {
         return false;
     }
 
@@ -888,6 +910,61 @@ static bool target_range_backspace_nested_list_unwrap(DomBoundary caret,
         dom_text_utf16_length(prev_text)
     };
     out[0].end = { static_cast<DomNode*>(text), 0 };
+    return true;
+}
+
+static bool target_range_backspace_table_cross_row_join(DomBoundary caret,
+                                                        EditingTargetRange* out) {
+    if (!out || !caret.node || !caret.node->is_text()) return false;
+
+    DomText* text = caret.node->as_text();
+    DomElement* current_cell = target_range_text_block_parent(text);
+    TargetRangeJoinContent current_content;
+    if (!current_cell || !target_range_table_cell_without_span(current_cell) ||
+        !target_range_simple_text_content(current_cell, text,
+            &current_content) ||
+        !current_content.direct_text) {
+        return false;
+    }
+
+    DomNode* current_cell_node = static_cast<DomNode*>(current_cell);
+    DomElement* current_row = current_cell_node->parent &&
+            current_cell_node->parent->is_element()
+        ? current_cell_node->parent->as_element()
+        : nullptr;
+    if (!current_row || current_row->tag() != HTM_TAG_TR ||
+        current_row->first_child != current_cell_node) {
+        return false;
+    }
+
+    DomNode* prev_row_node = static_cast<DomNode*>(current_row)->prev_sibling;
+    if (!prev_row_node || !prev_row_node->is_element()) return false;
+    DomElement* prev_row = prev_row_node->as_element();
+    if (!prev_row || prev_row->tag() != HTM_TAG_TR || !prev_row->last_child ||
+        !prev_row->last_child->is_element()) {
+        return false;
+    }
+
+    DomElement* prev_cell = prev_row->last_child->as_element();
+    if (!target_range_table_cell_without_span(prev_cell)) return false;
+    DomText* prev_text = target_range_find_text_descendant(
+        static_cast<DomNode*>(prev_cell), true);
+    TargetRangeJoinContent prev_content;
+    if (!prev_text || !target_range_simple_text_content(prev_cell, prev_text,
+            &prev_content) || !prev_content.direct_text) {
+        return false;
+    }
+
+    const char* prev_data = prev_text->text ? prev_text->text : "";
+    const char* current_data = text->text ? text->text : "";
+    uint32_t prev_len = target_range_text_byte_len(prev_text);
+    uint32_t current_len = target_range_text_byte_len(text);
+    uint32_t start_offset = target_range_trim_trailing_space(prev_data, prev_len);
+    uint32_t end_offset = target_range_leading_space_len(current_data, current_len);
+    if (caret.offset > end_offset) return false;
+
+    out[0].start = { static_cast<DomNode*>(prev_text), start_offset };
+    out[0].end = { static_cast<DomNode*>(text), end_offset };
     return true;
 }
 
@@ -948,10 +1025,10 @@ uint32_t editing_compute_target_ranges(DocState* state,
             if (target_range_backspace_inline_fragment_block_join(start, out)) {
                 return 1;
             }
-            if (target_range_backspace_trailing_br_block_join(start, out)) {
+            if (target_range_backspace_empty_br_block_join(start, out)) {
                 return 1;
             }
-            if (target_range_backspace_empty_br_block_join(start, out)) {
+            if (target_range_backspace_trailing_br_block_join(start, out)) {
                 return 1;
             }
             if (target_range_backspace_child_block_parent_join(start, out)) {
@@ -961,6 +1038,9 @@ uint32_t editing_compute_target_ranges(DocState* state,
                 return 1;
             }
             if (target_range_backspace_nested_list_unwrap(start, out)) {
+                return 1;
+            }
+            if (target_range_backspace_table_cross_row_join(start, out)) {
                 return 1;
             }
             if (target_range_backspace_empty_inline(start, surface, out)) {

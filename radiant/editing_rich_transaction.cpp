@@ -631,9 +631,78 @@ static bool rich_transaction_join_block_pair_allowed(DomElement* prev_block,
     if (!prev_cell || !current_cell) return false;
     if (prev_block->parent != current_block->parent) return false;
     return !dom_element_has_attribute(prev_block, "rowspan") &&
-        !dom_element_has_attribute(prev_block, "colspan") &&
-        !dom_element_has_attribute(current_block, "rowspan") &&
-        !dom_element_has_attribute(current_block, "colspan");
+        !dom_element_has_attribute(current_block, "rowspan");
+}
+
+static bool rich_transaction_table_cell_without_span(DomElement* cell) {
+    return cell && rich_transaction_is_table_cell_tag(cell->tag()) &&
+        !dom_element_has_attribute(cell, "rowspan") &&
+        !dom_element_has_attribute(cell, "colspan");
+}
+
+static uint32_t rich_transaction_table_cell_colspan(DomElement* cell) {
+    const char* attr = cell ? dom_element_get_attribute(cell, "colspan") : nullptr;
+    if (!attr || !attr[0]) return 1;
+    uint32_t span = 0;
+    for (const char* p = attr; *p; p++) {
+        if (*p < '0' || *p > '9') return 1;
+        span = span * 10 + (uint32_t)(*p - '0');
+        if (span > 1000) return 1;
+    }
+    return span > 0 ? span : 1;
+}
+
+static bool rich_transaction_normalize_table_cell_colspan_after_join(
+        DomElement* prev_cell,
+        DomElement* current_cell) {
+    if (!prev_cell || !current_cell ||
+        !rich_transaction_is_table_cell_tag(prev_cell->tag()) ||
+        !rich_transaction_is_table_cell_tag(current_cell->tag()) ||
+        prev_cell->parent != current_cell->parent) {
+        return true;
+    }
+
+    bool had_span = dom_element_has_attribute(prev_cell, "colspan") ||
+        dom_element_has_attribute(current_cell, "colspan");
+    if (!had_span) return true;
+
+    uint32_t joined_span = rich_transaction_table_cell_colspan(prev_cell) +
+        rich_transaction_table_cell_colspan(current_cell);
+    if (joined_span <= 1) {
+        if (dom_element_has_attribute(prev_cell, "colspan")) {
+            return dom_element_remove_attribute(prev_cell, "colspan");
+        }
+        return true;
+    }
+
+    char span_text[16];
+    snprintf(span_text, sizeof(span_text), "%u", joined_span);
+    return dom_element_set_attribute(prev_cell, "colspan", span_text);
+}
+
+static uint32_t rich_transaction_leading_space_len(const char* text,
+                                                   uint32_t length);
+
+static bool rich_transaction_whitespace_text_node(DomNode* node) {
+    if (!node || !node->is_text()) return false;
+    DomText* text = lam::dom_require_text(node);
+    const char* data = text && text->text ? text->text : "";
+    uint32_t len = rich_transaction_text_byte_len(text);
+    return rich_transaction_leading_space_len(data, len) == len;
+}
+
+static bool rich_transaction_filler_br_block(DomElement* block) {
+    if (!block || !block->first_child) return false;
+    uint32_t br_count = 0;
+    for (DomNode* child = block->first_child; child; child = child->next_sibling) {
+        if (child->is_element() &&
+            child->as_element()->tag() == HTM_TAG_BR) {
+            br_count++;
+            continue;
+        }
+        if (!rich_transaction_whitespace_text_node(child)) return false;
+    }
+    return br_count == 1;
 }
 
 static DomElement* rich_transaction_text_block_parent(DomText* text) {
@@ -928,6 +997,10 @@ static bool rich_transaction_join_previous_block(
             current_node->append_child(moving_child);
             return false;
         }
+        if (!rich_transaction_normalize_table_cell_colspan_after_join(
+                prev_block, current_block)) {
+            return false;
+        }
         dom_mutation_pre_remove(state, current_node);
         if (!rich_transaction_remove_child_for_edit(parent, current_node)) {
             return false;
@@ -969,6 +1042,11 @@ static bool rich_transaction_join_previous_block(
 
     DomText* live_prev_text =
         rich_transaction_live_text_at_index(prev_block, prev_idx, prev_text);
+
+    if (!rich_transaction_normalize_table_cell_colspan_after_join(
+            prev_block, current_block)) {
+        return false;
+    }
 
     dom_mutation_pre_remove(state, current_node);
     if (!rich_transaction_remove_child_for_edit(parent, current_node)) {
@@ -1204,10 +1282,7 @@ static bool rich_transaction_join_previous_empty_br_block(
     DomElement* prev_block = lam::dom_require_element(prev_node);
     if (!prev_block || !rich_transaction_is_join_block_tag(prev_block->tag()) ||
         !rich_transaction_join_block_pair_allowed(prev_block, current_block) ||
-        !prev_block->first_child ||
-        prev_block->first_child != prev_block->last_child ||
-        !prev_block->first_child->is_element() ||
-        prev_block->first_child->as_element()->tag() != HTM_TAG_BR) {
+        !rich_transaction_filler_br_block(prev_block)) {
         return false;
     }
 
@@ -1216,10 +1291,12 @@ static bool rich_transaction_join_previous_empty_br_block(
         : nullptr;
     if (!parent) return false;
 
-    DomNode* filler = prev_block->first_child;
-    dom_mutation_pre_remove(state, filler);
-    if (!rich_transaction_remove_child_for_edit(prev_block, filler)) {
-        return false;
+    while (prev_block->first_child) {
+        DomNode* filler = prev_block->first_child;
+        dom_mutation_pre_remove(state, filler);
+        if (!rich_transaction_remove_child_for_edit(prev_block, filler)) {
+            return false;
+        }
     }
 
     DomNode* moving_child = current_content.child;
@@ -1456,8 +1533,7 @@ static bool rich_transaction_join_nested_list_item_with_parent(
         ? lam::dom_require_element(current_li_node->parent)
         : nullptr;
     if (!nested_list || !rich_transaction_is_list_tag(nested_list->tag()) ||
-        nested_list->first_child != current_li_node ||
-        nested_list->last_child != current_li_node) {
+        nested_list->first_child != current_li_node) {
         return false;
     }
 
@@ -1484,16 +1560,22 @@ static bool rich_transaction_join_nested_list_item_with_parent(
     uint32_t parent_idx = dom_node_child_index(parent_li_node);
     if (parent_idx == (uint32_t)-1) return false;
 
-    if (!nested_list_node->remove_child(current_li_node)) return false;
+    bool nested_list_will_empty = nested_list->last_child == current_li_node;
+    dom_mutation_pre_remove(state, current_li_node);
+    if (!rich_transaction_remove_child_for_edit(nested_list, current_li_node)) {
+        return false;
+    }
     if (!rich_transaction_insert_child_for_edit(outer_list, current_li_node,
             parent_idx + 1)) {
-        nested_list_node->append_child(current_li_node);
+        rich_transaction_insert_child_for_edit(nested_list, current_li_node, 0);
         return false;
     }
 
-    dom_mutation_pre_remove(state, nested_list_node);
-    if (!rich_transaction_remove_child_for_edit(parent_li, nested_list_node)) {
-        return false;
+    if (nested_list_will_empty) {
+        dom_mutation_pre_remove(state, nested_list_node);
+        if (!rich_transaction_remove_child_for_edit(parent_li, nested_list_node)) {
+            return false;
+        }
     }
 
     if (!rich_transaction_collapse_text_caret(state, text, 0)) {
@@ -1511,6 +1593,121 @@ static bool rich_transaction_join_nested_list_item_with_parent(
         editing_interaction_set_active_surface(state, surface);
     }
     log_debug("rich_transaction_join_nested_list_item_with_parent: lifted nested li after parent");
+    return true;
+}
+
+static bool rich_transaction_join_previous_row_cell(
+        DocState* state,
+        const EditingSurface* surface,
+        DomText* text,
+        uint32_t caret_offset,
+        EditingRichMutationLogFn log_mutation,
+        const EditingIntent* intent,
+        void* log_user) {
+    if (!state || !text) return false;
+
+    DomElement* current_cell = rich_transaction_text_block_parent(text);
+    RichJoinBlockContent current_content;
+    if (!current_cell || !rich_transaction_table_cell_without_span(current_cell) ||
+        !rich_transaction_simple_text_content(current_cell, text,
+            &current_content) ||
+        !current_content.direct_text) {
+        return false;
+    }
+
+    DomNode* current_cell_node = static_cast<DomNode*>(current_cell);
+    DomElement* current_row = current_cell_node->parent &&
+            current_cell_node->parent->is_element()
+        ? lam::dom_require_element(current_cell_node->parent)
+        : nullptr;
+    if (!current_row || current_row->tag() != HTM_TAG_TR ||
+        current_row->first_child != current_cell_node) {
+        return false;
+    }
+
+    DomNode* current_row_node = static_cast<DomNode*>(current_row);
+    DomNode* prev_row_node = current_row_node->prev_sibling;
+    if (!prev_row_node || !prev_row_node->is_element()) return false;
+    DomElement* prev_row = lam::dom_require_element(prev_row_node);
+    if (!prev_row || prev_row->tag() != HTM_TAG_TR || !prev_row->last_child ||
+        !prev_row->last_child->is_element()) {
+        return false;
+    }
+
+    DomElement* prev_cell = lam::dom_require_element(prev_row->last_child);
+    if (!rich_transaction_table_cell_without_span(prev_cell)) return false;
+    DomText* prev_text = editing_rich_find_text_descendant(
+        static_cast<DomNode*>(prev_cell), true);
+    RichJoinBlockContent prev_content;
+    if (!prev_text || !rich_transaction_simple_text_content(prev_cell,
+            prev_text, &prev_content) || !prev_content.direct_text) {
+        return false;
+    }
+
+    const char* prev_data = prev_text->text ? prev_text->text : "";
+    const char* current_data = text->text ? text->text : "";
+    uint32_t prev_len = rich_transaction_text_byte_len(prev_text);
+    uint32_t current_len = rich_transaction_text_byte_len(text);
+    uint32_t prev_keep_len = rich_transaction_trim_trailing_space(prev_data,
+        prev_len);
+    uint32_t current_skip_len = rich_transaction_leading_space_len(current_data,
+        current_len);
+    if (caret_offset > current_skip_len) return false;
+
+    size_t joined_len =
+        (size_t)prev_keep_len + (size_t)(current_len - current_skip_len);
+    char* joined = (char*)mem_alloc(joined_len + 1, MEM_CAT_TEMP);
+    if (!joined) return false;
+    if (prev_keep_len > 0) memcpy(joined, prev_data, prev_keep_len);
+    if (current_len > current_skip_len) {
+        memcpy(joined + prev_keep_len, current_data + current_skip_len,
+               current_len - current_skip_len);
+    }
+    joined[joined_len] = '\0';
+
+    int64_t prev_idx = dom_text_get_child_index(prev_text);
+    bool updated = dom_text_set_content(prev_text, joined);
+    mem_free(joined);
+    if (!updated) return false;
+
+    DomText* live_prev_text =
+        rich_transaction_live_text_at_index(prev_cell, prev_idx, prev_text);
+
+    dom_mutation_pre_remove(state, current_cell_node);
+    if (!rich_transaction_remove_child_for_edit(current_row, current_cell_node)) {
+        return false;
+    }
+
+    if (!current_row->first_child) {
+        DomElement* row_parent = current_row_node->parent &&
+                current_row_node->parent->is_element()
+            ? lam::dom_require_element(current_row_node->parent)
+            : nullptr;
+        if (!row_parent) return false;
+        dom_mutation_pre_remove(state, current_row_node);
+        if (!rich_transaction_remove_child_for_edit(row_parent, current_row_node)) {
+            return false;
+        }
+    }
+
+    if (!rich_transaction_collapse_text_caret(state, live_prev_text,
+            prev_keep_len)) {
+        return false;
+    }
+
+    EditingSurface live_surface;
+    if (editing_surface_from_target(static_cast<View*>(live_prev_text),
+            &live_surface) && editing_surface_is_rich(&live_surface)) {
+        editing_interaction_set_active_surface(state, &live_surface);
+        if (log_mutation) {
+            log_mutation(state, &live_surface, intent, "table-cross-row-join",
+                         prev_keep_len, prev_len + current_skip_len,
+                         prev_keep_len, prev_keep_len, log_user);
+        }
+    } else if (surface) {
+        editing_interaction_set_active_surface(state, surface);
+    }
+    log_debug("rich_transaction_join_previous_row_cell: joined first cell with previous row");
     return true;
 }
 
@@ -3340,12 +3537,12 @@ bool editing_rich_default_replace(DocState* state,
                         log_mutation, intent, log_user)) {
                     return true;
                 }
-                if (rich_transaction_join_previous_trailing_br_block(
+                if (rich_transaction_join_previous_empty_br_block(
                         state, fallback_surface_ptr, text, start,
                         log_mutation, intent, log_user)) {
                     return true;
                 }
-                if (rich_transaction_join_previous_empty_br_block(
+                if (rich_transaction_join_previous_trailing_br_block(
                         state, fallback_surface_ptr, text, start,
                         log_mutation, intent, log_user)) {
                     return true;
@@ -3361,6 +3558,11 @@ bool editing_rich_default_replace(DocState* state,
                     return true;
                 }
                 if (rich_transaction_join_nested_list_item_with_parent(
+                        state, fallback_surface_ptr, text, start,
+                        log_mutation, intent, log_user)) {
+                    return true;
+                }
+                if (rich_transaction_join_previous_row_cell(
                         state, fallback_surface_ptr, text, start,
                         log_mutation, intent, log_user)) {
                     return true;

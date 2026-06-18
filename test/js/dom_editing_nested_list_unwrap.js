@@ -70,3 +70,15 @@ run(
   0,
   () => editor.querySelector("em").firstChild,
   0);
+
+run(
+  "nested-list-multi-item",
+  "<ul><li>abc<ul><li>def</li><li>ghi</li></ul></li></ul>",
+  () => editor.querySelectorAll("li")[1].firstChild,
+  "<ul><li>abc<ul><li>ghi</li></ul></li><li>def</li></ul>",
+  () => editor.querySelector("li").firstChild,
+  3,
+  () => editor.querySelectorAll("li")[1].firstChild,
+  0,
+  () => editor.children[0].children[1].firstChild,
+  0);
