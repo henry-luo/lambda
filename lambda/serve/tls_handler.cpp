@@ -171,23 +171,46 @@ void tls_context_destroy(TlsContext *ctx) {
 // Certificate loading
 // ============================================================================
 
+static int tls_input_is_inline_pem(const char *input) {
+    return input && strstr(input, "-----BEGIN") != NULL;
+}
+
+static int tls_parse_cert_input(mbedtls_x509_crt *cert, const char *input) {
+    if (tls_input_is_inline_pem(input)) {
+        return mbedtls_x509_crt_parse(cert, (const unsigned char*)input, strlen(input) + 1);
+    }
+    return mbedtls_x509_crt_parse_file(cert, input);
+}
+
+static int tls_parse_key_input(mbedtls_pk_context *key, const char *input,
+                               mbedtls_ctr_drbg_context *ctr_drbg) {
+    if (tls_input_is_inline_pem(input)) {
+        return mbedtls_pk_parse_key(key, (const unsigned char*)input, strlen(input) + 1,
+                                    NULL, 0, mbedtls_ctr_drbg_random, ctr_drbg);
+    }
+    return mbedtls_pk_parse_keyfile(key, input, NULL, mbedtls_ctr_drbg_random, ctr_drbg);
+}
+
+static const char* tls_input_log_label(const char *input) {
+    return tls_input_is_inline_pem(input) ? "<inline PEM>" : input;
+}
+
 int tls_load_certificates(TlsContext *ctx, const char *cert_file, const char *key_file) {
     if (!ctx || !cert_file || !key_file) return -1;
 
-    int ret = mbedtls_x509_crt_parse_file(ctx->own_cert, cert_file);
+    int ret = tls_parse_cert_input(ctx->own_cert, cert_file);
     if (ret != 0) {
         char errbuf[128];
         mbedtls_strerror(ret, errbuf, sizeof(errbuf));
-        log_error("tls failed to load certificate '%s': %s", cert_file, errbuf);
+        log_error("tls failed to load certificate '%s': %s", tls_input_log_label(cert_file), errbuf);
         return -1;
     }
 
-    ret = mbedtls_pk_parse_keyfile(ctx->own_key, key_file, NULL,
-                                    mbedtls_ctr_drbg_random, ctx->ctr_drbg);
+    ret = tls_parse_key_input(ctx->own_key, key_file, ctx->ctr_drbg);
     if (ret != 0) {
         char errbuf[128];
         mbedtls_strerror(ret, errbuf, sizeof(errbuf));
-        log_error("tls failed to load private key '%s': %s", key_file, errbuf);
+        log_error("tls failed to load private key '%s': %s", tls_input_log_label(key_file), errbuf);
         return -1;
     }
 
@@ -199,7 +222,8 @@ int tls_load_certificates(TlsContext *ctx, const char *cert_file, const char *ke
         return -1;
     }
 
-    log_info("tls loaded certificate: %s, key: %s", cert_file, key_file);
+    log_info("tls loaded certificate: %s, key: %s",
+             tls_input_log_label(cert_file), tls_input_log_label(key_file));
     return 0;
 }
 
@@ -211,16 +235,16 @@ int tls_set_ca_certificates(TlsContext *ctx, const char *ca_file) {
         mbedtls_x509_crt_init(ctx->ca_chain);
     }
 
-    int ret = mbedtls_x509_crt_parse_file(ctx->ca_chain, ca_file);
+    int ret = tls_parse_cert_input(ctx->ca_chain, ca_file);
     if (ret != 0) {
         char errbuf[128];
         mbedtls_strerror(ret, errbuf, sizeof(errbuf));
-        log_error("tls failed to load CA certificates '%s': %s", ca_file, errbuf);
+        log_error("tls failed to load CA certificates '%s': %s", tls_input_log_label(ca_file), errbuf);
         return -1;
     }
 
     mbedtls_ssl_conf_ca_chain(ctx->ssl_config, ctx->ca_chain, NULL);
-    log_info("tls loaded CA certificates: %s", ca_file);
+    log_info("tls loaded CA certificates: %s", tls_input_log_label(ca_file));
     return 0;
 }
 

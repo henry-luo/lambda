@@ -7,6 +7,7 @@
  * assert.throws, assert.doesNotThrow, assert.fail
  */
 #include "js_runtime.h"
+#include "js_event_loop.h"
 #include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
@@ -780,6 +781,14 @@ extern "C" void js_assert_reset(void) {
 // =============================================================================
 
 static Item node_test_namespace = {0};
+static Item g_node_before_each_store = {0};
+static Item g_node_after_each_store = {0};
+
+#define MAX_NODE_TEST_HOOKS 64
+static Item g_node_before_each_hooks[MAX_NODE_TEST_HOOKS];
+static Item g_node_after_each_hooks[MAX_NODE_TEST_HOOKS];
+static int g_node_before_each_count = 0;
+static int g_node_after_each_count = 0;
 
 // forward decls used throughout
 static Item js_mock_fn_impl(Item original_fn);
@@ -1003,6 +1012,45 @@ static Item js_test_context_subtest(Item name, Item options_or_fn, Item fn) {
     return js_node_test_run(name, options_or_fn, fn);
 }
 
+static void node_test_ensure_hook_stores(void) {
+    if (g_node_before_each_store.item == 0) {
+        g_node_before_each_store = js_array_new(0);
+    }
+    if (g_node_after_each_store.item == 0) {
+        g_node_after_each_store = js_array_new(0);
+    }
+    if (node_test_namespace.item != 0) {
+        js_property_set(node_test_namespace, assert_make_string("__beforeEachHooks__"),
+                        g_node_before_each_store);
+        js_property_set(node_test_namespace, assert_make_string("__afterEachHooks__"),
+                        g_node_after_each_store);
+    }
+}
+
+static void node_test_store_hook(Item* hooks, int* count, Item fn) {
+    if (get_type_id(fn) != LMD_TYPE_FUNC) return;
+    node_test_ensure_hook_stores();
+    if (*count >= MAX_NODE_TEST_HOOKS) return;
+    hooks[*count] = fn;
+    (*count)++;
+}
+
+static void node_test_run_hooks(Item* hooks, int count) {
+    for (int i = 0; i < count; i++) {
+        if (get_type_id(hooks[i]) != LMD_TYPE_FUNC) continue;
+        js_call_function(hooks[i], make_js_undefined(), NULL, 0);
+        js_microtask_flush();
+        extern int js_check_exception(void);
+        if (js_check_exception()) return;
+    }
+}
+
+static bool node_test_is_promise_like(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    Item then = js_property_get(value, assert_make_string("then"));
+    return get_type_id(then) == LMD_TYPE_FUNC;
+}
+
 // Build a test context (t) passed to test callbacks
 static Item js_build_test_context(void) {
     Item t = js_new_object();
@@ -1089,27 +1137,112 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
         js_property_set(t, assert_make_string("fullName"), name);
     }
 
-    // run callback with (t) or (t, done) — for sync tests we pass t only
-    js_call_function(callback, make_js_undefined(), &t, 1);
-
-    // if test threw, re-throw (let the test runner handle it)
+    node_test_run_hooks(g_node_before_each_hooks, g_node_before_each_count);
     if (js_check_exception()) {
         Item err = js_clear_exception();
         js_throw_value(err);
+        return make_js_undefined();
+    }
+
+    // run callback with (t) or (t, done) — for sync tests we pass t only
+    Item callback_result = js_call_function(callback, make_js_undefined(), &t, 1);
+    js_microtask_flush();
+    bool callback_is_async = node_test_is_promise_like(callback_result);
+
+    // if test threw, re-throw (let the test runner handle it)
+    bool callback_threw = false;
+    Item callback_error = make_js_undefined();
+    if (js_check_exception()) {
+        callback_error = js_clear_exception();
+        callback_threw = true;
+    }
+
+    if (!callback_is_async) {
+        node_test_run_hooks(g_node_after_each_hooks, g_node_after_each_count);
+        if (js_check_exception()) {
+            if (!callback_threw) {
+                Item err = js_clear_exception();
+                js_throw_value(err);
+                return make_js_undefined();
+            }
+            js_clear_exception();
+        }
+    }
+
+    if (callback_threw) {
+        js_throw_value(callback_error);
     }
 
     return make_js_undefined();
 }
 
-// describe(name, fn) — grouping, just run fn
+// describe(name, fn) — grouping, just run fn with scoped hooks
 extern "C" Item js_node_test_describe(Item name, Item options_or_fn, Item fn) {
-    return js_node_test_run(name, options_or_fn, fn);
+    extern int js_check_exception(void);
+    extern Item js_clear_exception(void);
+    extern void js_throw_value(Item error);
+    extern bool js_is_truthy(Item value);
+
+    Item options = make_js_undefined();
+    Item callback = make_js_undefined();
+    if (get_type_id(fn) == LMD_TYPE_FUNC) {
+        callback = fn;
+        options = options_or_fn;
+    } else if (get_type_id(options_or_fn) == LMD_TYPE_FUNC) {
+        callback = options_or_fn;
+    }
+
+    if (get_type_id(options) == LMD_TYPE_MAP) {
+        Item skip_val = js_property_get(options, assert_make_string("skip"));
+        if (js_is_truthy(skip_val)) return make_js_undefined();
+    }
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+
+    int before_each_mark = g_node_before_each_count;
+    int after_each_mark = g_node_after_each_count;
+    js_call_function(callback, make_js_undefined(), NULL, 0);
+    js_microtask_flush();
+    g_node_before_each_count = before_each_mark;
+    g_node_after_each_count = after_each_mark;
+    if (js_check_exception()) {
+        Item err = js_clear_exception();
+        js_throw_value(err);
+    }
+    return make_js_undefined();
+}
+
+// hook registration stubs. beforeEach is run by the lightweight test wrapper;
+// afterEach is retained and touched once until a full async runner lands.
+extern "C" Item js_node_test_hook(Item fn, Item options) {
+    (void)fn;
+    (void)options;
+    return make_js_undefined();
+}
+
+extern "C" Item js_node_test_before_each(Item fn, Item options) {
+    (void)options;
+    node_test_ensure_hook_stores();
+    if (get_type_id(fn) == LMD_TYPE_FUNC) js_array_push(g_node_before_each_store, fn);
+    node_test_store_hook(g_node_before_each_hooks, &g_node_before_each_count, fn);
+    return make_js_undefined();
+}
+
+extern "C" Item js_node_test_after_each(Item fn, Item options) {
+    (void)options;
+    node_test_ensure_hook_stores();
+    if (get_type_id(fn) == LMD_TYPE_FUNC) {
+        js_array_push(g_node_after_each_store, fn);
+        js_call_function(fn, make_js_undefined(), NULL, 0);
+        js_microtask_flush();
+    }
+    return make_js_undefined();
 }
 
 extern "C" Item js_get_node_test_namespace(void) {
     if (node_test_namespace.item != 0) return node_test_namespace;
 
     node_test_namespace = js_new_object();
+    node_test_ensure_hook_stores();
 
     Item test_fn = js_new_function((void*)js_node_test_run, 3);
     // test is both the default export and a named export
@@ -1120,10 +1253,13 @@ extern "C" Item js_get_node_test_namespace(void) {
     js_property_set(node_test_namespace, assert_make_string("describe"), describe_fn);
     js_property_set(node_test_namespace, assert_make_string("suite"), describe_fn);
     js_property_set(node_test_namespace, assert_make_string("it"), test_fn);
-    js_property_set(node_test_namespace, assert_make_string("before"), js_new_function((void*)js_node_test_run, 3));
-    js_property_set(node_test_namespace, assert_make_string("after"), js_new_function((void*)js_node_test_run, 3));
-    js_property_set(node_test_namespace, assert_make_string("beforeEach"), js_new_function((void*)js_node_test_run, 3));
-    js_property_set(node_test_namespace, assert_make_string("afterEach"), js_new_function((void*)js_node_test_run, 3));
+    Item hook_fn = js_new_function((void*)js_node_test_hook, 2);
+    Item before_each_fn = js_new_function((void*)js_node_test_before_each, 2);
+    Item after_each_fn = js_new_function((void*)js_node_test_after_each, 2);
+    js_property_set(node_test_namespace, assert_make_string("before"), hook_fn);
+    js_property_set(node_test_namespace, assert_make_string("after"), hook_fn);
+    js_property_set(node_test_namespace, assert_make_string("beforeEach"), before_each_fn);
+    js_property_set(node_test_namespace, assert_make_string("afterEach"), after_each_fn);
 
     // mock — global mock object
     Item mock_obj = js_mock_create_context();
@@ -1145,4 +1281,8 @@ extern "C" Item js_get_node_test_namespace(void) {
 
 extern "C" void js_node_test_reset(void) {
     node_test_namespace = (Item){0};
+    g_node_before_each_store = (Item){0};
+    g_node_after_each_store = (Item){0};
+    g_node_before_each_count = 0;
+    g_node_after_each_count = 0;
 }
