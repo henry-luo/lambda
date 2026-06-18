@@ -7,6 +7,7 @@
  * assert.throws, assert.doesNotThrow, assert.fail
  */
 #include "js_runtime.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -276,16 +277,7 @@ extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item messa
 
     // RegExp: test thrown.message against regex
     if (exp_type == LMD_TYPE_MAP) {
-        // check if it's a RegExp (has __class_name__ = "RegExp")
-        bool has_regex = false;
-        Item cn_key = assert_make_string("__class_name__");
-        Item cn_val = js_property_get(error_expected, cn_key);
-        if (get_type_id(cn_val) == LMD_TYPE_STRING) {
-            String* cns = it2s(cn_val);
-            if (cns && cns->len == 6 && strncmp(cns->chars, "RegExp", 6) == 0)
-                has_regex = true;
-        }
-
+        bool has_regex = js_class_id(error_expected) == JS_CLASS_REGEXP;
         if (has_regex) {
             // RegExp: test against thrown.message or String(thrown)
             extern Item js_to_string_val(Item value);
@@ -314,11 +306,7 @@ extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item messa
 
                 // check if expected_val is a RegExp (for stack: /pattern/)
                 TypeId ev_type = get_type_id(expected_val);
-                if (ev_type == LMD_TYPE_MAP) {
-                    Item ev_cn = js_property_get(expected_val, cn_key);
-                    if (get_type_id(ev_cn) == LMD_TYPE_STRING) {
-                        String* ev_cns = it2s(ev_cn);
-                        if (ev_cns && ev_cns->len == 6 && strncmp(ev_cns->chars, "RegExp", 6) == 0) {
+                if (ev_type == LMD_TYPE_MAP && js_class_id(expected_val) == JS_CLASS_REGEXP) {
                             // regex match
                             extern Item js_to_string_val(Item value);
                             Item actual_str = (get_type_id(actual_val) == LMD_TYPE_STRING) ? actual_val : js_to_string_val(actual_val);
@@ -331,8 +319,6 @@ extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item messa
                                 return throw_assertion_error(buf);
                             }
                             continue;
-                        }
-                    }
                 }
 
                 // strict equality check
@@ -496,15 +482,7 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
     }
 
     if (exp_type == LMD_TYPE_MAP) {
-        // check if RegExp
-        Item cn_key = assert_make_string("__class_name__");
-        Item cn_val = js_property_get(error_expected, cn_key);
-        bool is_regex = false;
-        if (get_type_id(cn_val) == LMD_TYPE_STRING) {
-            String* cns = it2s(cn_val);
-            if (cns && cns->len == 6 && strncmp(cns->chars, "RegExp", 6) == 0)
-                is_regex = true;
-        }
+        bool is_regex = js_class_id(error_expected) == JS_CLASS_REGEXP;
 
         if (is_regex) {
             extern Item js_to_string_val(Item value);
@@ -528,11 +506,7 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
 
                 // check if expected_val is a RegExp
                 TypeId ev_type = get_type_id(expected_val);
-                if (ev_type == LMD_TYPE_MAP) {
-                    Item ev_cn = js_property_get(expected_val, cn_key);
-                    if (get_type_id(ev_cn) == LMD_TYPE_STRING) {
-                        String* ev_cns = it2s(ev_cn);
-                        if (ev_cns && ev_cns->len == 6 && strncmp(ev_cns->chars, "RegExp", 6) == 0) {
+                if (ev_type == LMD_TYPE_MAP && js_class_id(expected_val) == JS_CLASS_REGEXP) {
                             extern Item js_to_string_val(Item value);
                             Item actual_str = (get_type_id(actual_val) == LMD_TYPE_STRING)
                                 ? actual_val : js_to_string_val(actual_val);
@@ -546,8 +520,6 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
                                 return false;
                             }
                             continue;
-                        }
-                    }
                 }
 
                 Item eq = js_strict_equal(expected_val, actual_val);

@@ -1519,10 +1519,7 @@ extern "C" Item js_date_new(void) {
     Item time_val = js_date_now();
     Item key = (Item){.item = s2it(heap_create_name("__time__"))};
     js_property_set(obj, key, time_val);
-    // mark as Date for instanceof
-    Item cls_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
-    js_property_set(obj, cls_key, (Item){.item = s2it(heap_create_name("Date"))});
-    js_class_stamp(obj, JS_CLASS_DATE);  // A3-T3b
+    js_class_stamp(obj, JS_CLASS_DATE);
     js_date_set_instance_prototype(obj);
     return obj;
 }
@@ -1646,8 +1643,7 @@ extern "C" Item js_date_new_from(Item value) {
         else store_time(NAN);
     }
 date_done:
-    Item cls_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
-    js_property_set(obj, cls_key, (Item){.item = s2it(heap_create_name("Date"))});
+    js_class_stamp(obj, JS_CLASS_DATE);
     js_date_set_instance_prototype(obj);
     return obj;
 }
@@ -2211,8 +2207,7 @@ extern "C" Item js_date_new_multi(Item args_array) {
     // Build the Date object now (so we always return a Date even when time value is NaN)
     Item obj = js_new_object();
     Item time_key = (Item){.item = s2it(heap_create_name("__time__"))};
-    Item cls_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
-    js_property_set(obj, cls_key, (Item){.item = s2it(heap_create_name("Date"))});
+    js_class_stamp(obj, JS_CLASS_DATE);
 
     // ES spec: if any of y, m, d, h, mi, s, ms is NaN → final time value is NaN
     double ms_val;
@@ -5256,6 +5251,78 @@ static bool js_is_function_prototype_map_for_instanceof(Item item) {
     return is_proto && js_class_id(item) == JS_CLASS_FUNCTION;
 }
 
+static bool js_instanceof_is_object_like_type(TypeId type) {
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
+        type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT ||
+        type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+}
+
+static bool js_instanceof_can_walk_prototype(Item item) {
+    return js_instanceof_is_object_like_type(get_type_id(item));
+}
+
+static bool js_prototype_chain_contains(Item left, Item target_proto) {
+    TypeId target_type = get_type_id(target_proto);
+    if (!js_instanceof_is_object_like_type(target_type)) return false;
+    Item obj = js_get_prototype_of(left);
+    int depth = 0;
+    while (obj.item != 0 && obj.item != ItemNull.item && depth < 32) {
+        if (obj.item == target_proto.item) return true;
+        obj = js_get_prototype_of(obj);
+        depth++;
+    }
+    return false;
+}
+
+static Item js_map_constructor_prototype_for_instanceof(Item right, bool* out_is_constructor) {
+    if (out_is_constructor) *out_is_constructor = false;
+    if (get_type_id(right) != LMD_TYPE_MAP) return ItemNull;
+
+    bool instance_proto_own = false;
+    Item instance_proto = js_map_get_fast_ext(right.map, "__instance_proto__", 18, &instance_proto_own);
+    bool has_ctor = false;
+    js_map_get_fast_ext(right.map, "__ctor__", 8, &has_ctor);
+
+    Item prototype_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+    Item public_proto = js_property_get(right, prototype_key);
+    if (js_check_exception()) return ItemNull;
+    TypeId pt = get_type_id(public_proto);
+    if (js_instanceof_is_object_like_type(pt)) {
+        if (instance_proto_own || has_ctor) {
+            if (out_is_constructor) *out_is_constructor = true;
+            return public_proto;
+        }
+        if (pt == LMD_TYPE_MAP) {
+            Item constructor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+            Item public_ctor = js_property_get(public_proto, constructor_key);
+            if (js_check_exception()) return ItemNull;
+            if (public_ctor.item == right.item) {
+                if (out_is_constructor) *out_is_constructor = true;
+                return public_proto;
+            }
+        }
+    }
+    if ((instance_proto_own || has_ctor) &&
+        public_proto.item != ItemNull.item && get_type_id(public_proto) != LMD_TYPE_UNDEFINED) {
+        if (out_is_constructor) *out_is_constructor = true;
+        return public_proto;
+    }
+    if (instance_proto_own && instance_proto.item != ItemNull.item) {
+        if (out_is_constructor) *out_is_constructor = true;
+        return instance_proto;
+    }
+    return ItemNull;
+}
+
+static bool js_class_matches_instanceof_target(JsClass actual, JsClass target) {
+    if (actual == target) return true;
+    if (target == JS_CLASS_ERROR) return js_class_is_error_like(actual);
+    if (target == JS_CLASS_EVENT) return js_class_is_event_like(actual);
+    if (target == JS_CLASS_UI_EVENT) return js_class_is_ui_event_like(actual);
+    if (target == JS_CLASS_MOUSE_EVENT) return js_class_is_mouse_event_like(actual);
+    return false;
+}
+
 extern "C" Item js_instanceof(Item left, Item right) {
     return js_instanceof_impl(left, right, false);
 }
@@ -5267,8 +5334,8 @@ extern "C" Item js_ordinary_has_instance(Item left, Item right) {
 
 static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
     // right should be a constructor (a class). We check if left's prototype chain
-    // contains right's prototype. For our implementation, we check if right has
-    // a __class_name__ marker that matches any __class_name__ in left's proto chain.
+    // contains right's prototype, with enum-backed built-in fallback for native
+    // constructor functions.
 
     // ES spec: if right is not an object, throw TypeError
     TypeId rt = get_type_id(right);
@@ -5296,18 +5363,30 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
         }
     }
 
-    // ES spec: if right is an object but not callable, throw TypeError
-    if (rt == LMD_TYPE_MAP) {
-        // MAP is only valid if it has __class_name__ (constructor object) — otherwise not callable
-        Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-        Item cn = map_get(right.map, class_key);
-        if (cn.item == 0 || get_type_id(cn) != LMD_TYPE_STRING) {
+    Item right_map_proto = ItemNull;
+    bool right_map_is_constructor = false;
+    if (rt == LMD_TYPE_MAP && !js_is_function_prototype_map_for_instanceof(right)) {
+        right_map_proto = js_map_constructor_prototype_for_instanceof(right, &right_map_is_constructor);
+        if (js_check_exception()) return ItemNull;
+        bool has_ctor = false;
+        js_map_get_fast_ext(right.map, "__ctor__", 8, &has_ctor);
+        if (!right_map_is_constructor && !has_ctor) {
             js_throw_type_error("Right-hand side of 'instanceof' is not callable");
             return (Item){.item = b2it(false)};
         }
     }
 
-    if (get_type_id(left) != LMD_TYPE_MAP && get_type_id(left) != LMD_TYPE_ARRAY && get_type_id(left) != LMD_TYPE_FUNC) return (Item){.item = b2it(false)};
+    if (!js_instanceof_can_walk_prototype(left)) return (Item){.item = b2it(false)};
+
+    if (rt == LMD_TYPE_MAP && !js_is_function_prototype_map_for_instanceof(right)) {
+        Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+        Item public_proto = js_property_get(right, proto_key);
+        if (js_check_exception()) return ItemNull;
+        if (js_instanceof_is_object_like_type(get_type_id(public_proto)) &&
+            js_prototype_chain_contains(left, public_proto)) {
+            return (Item){.item = b2it(true)};
+        }
+    }
 
     // If right is a function, use ES spec OrdinaryHasInstance:
     // Walk left's __proto__ chain comparing against right.prototype
@@ -5322,23 +5401,13 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
         if (js_check_exception()) return ItemNull;
         // ES spec 7.3.19 step 6: If Type(P) is not Object, throw TypeError
         TypeId fp_type = get_type_id(func_proto);
-        if (fp_type != LMD_TYPE_MAP && fp_type != LMD_TYPE_ARRAY && fp_type != LMD_TYPE_FUNC) {
+        if (!js_instanceof_is_object_like_type(fp_type)) {
             js_throw_type_error("Function has non-object prototype in instanceof check");
             return (Item){.item = b2it(false)};
         }
-        if (func_proto.item != ItemNull.item && fp_type == LMD_TYPE_MAP) {
-            // Walk left's __proto__ chain looking for func_proto (identity check)
-            // Use js_get_prototype_of for each step (handles arrays, functions, builtins)
-            Item obj = js_get_prototype_of(left);
-            int depth = 0;
-            while (obj.item != 0 && obj.item != ItemNull.item && depth < 32) {
-                TypeId ot = get_type_id(obj);
-                if (ot == LMD_TYPE_MAP && obj.map == func_proto.map) {
-                    return (Item){.item = b2it(true)};
-                }
-                obj = js_get_prototype_of(obj);
-                depth++;
-            }
+        bool contains_func_proto = func_proto.item != ItemNull.item && js_prototype_chain_contains(left, func_proto);
+        if (contains_func_proto) {
+            return (Item){.item = b2it(true)};
         }
         // Fallback: also check __ctor__ walk for class-based objects
         {
@@ -5361,14 +5430,6 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
             Item name_item = (Item){.item = s2it(fp->name)};
             return js_instanceof_classname(left, name_item);
         }
-        {
-            Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-            Item name_item = js_property_get(right, class_key);
-            if (js_check_exception()) return ItemNull;
-            if (get_type_id(name_item) == LMD_TYPE_STRING) {
-                return js_instanceof_classname(left, name_item);
-            }
-        }
         return (Item){.item = b2it(false)};
     }
 
@@ -5379,80 +5440,33 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
         Item func_proto = js_property_get(right, proto_key);
         if (js_check_exception()) return ItemNull;
         TypeId fp_type = get_type_id(func_proto);
-        if (fp_type != LMD_TYPE_MAP && fp_type != LMD_TYPE_ARRAY && fp_type != LMD_TYPE_FUNC) {
+        if (!js_instanceof_is_object_like_type(fp_type)) {
             js_throw_type_error("Function has non-object prototype in instanceof check");
             return (Item){.item = b2it(false)};
         }
-        Item obj = js_get_prototype_of(left);
-        int depth = 0;
-        while (obj.item != 0 && obj.item != ItemNull.item && depth < 32) {
-            TypeId ot = get_type_id(obj);
-            if (ot == LMD_TYPE_MAP && fp_type == LMD_TYPE_MAP && obj.map == func_proto.map) {
-                return (Item){.item = b2it(true)};
-            }
-            if (ot == LMD_TYPE_ARRAY && fp_type == LMD_TYPE_ARRAY && obj.array == func_proto.array) {
-                return (Item){.item = b2it(true)};
-            }
-            if (ot == LMD_TYPE_FUNC && fp_type == LMD_TYPE_FUNC && obj.function == func_proto.function) {
-                return (Item){.item = b2it(true)};
-            }
-            obj = js_get_prototype_of(obj);
-            depth++;
-        }
-        return (Item){.item = b2it(false)};
+        return (Item){.item = b2it(js_prototype_chain_contains(left, func_proto))};
     }
 
-    // Get the class name from right (constructor's __class_name__)
-    Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-    Item right_name = map_get(right.map, class_key);
-    if (right_name.item == 0 || get_type_id(right_name) != LMD_TYPE_STRING)
-        return (Item){.item = b2it(false)};
-
-    bool has_instance_proto = false;
-    js_map_get_fast_ext(right.map, "__instance_proto__", 18, &has_instance_proto);
-    if (has_instance_proto) {
-        Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-        Item ctor_proto = js_property_get(right, proto_key);
-        if (js_check_exception()) return ItemNull;
-        TypeId cp_type = get_type_id(ctor_proto);
-        if (cp_type != LMD_TYPE_MAP && cp_type != LMD_TYPE_ARRAY && cp_type != LMD_TYPE_FUNC) {
-            js_throw_type_error("Function has non-object prototype in instanceof check");
-            return (Item){.item = b2it(false)};
-        }
-        Item obj = js_get_prototype_of(left);
-        int depth = 0;
-        while (obj.item != 0 && obj.item != ItemNull.item && depth < 32) {
-            TypeId ot = get_type_id(obj);
-            if (ot == LMD_TYPE_MAP && cp_type == LMD_TYPE_MAP && obj.map == ctor_proto.map) {
-                return (Item){.item = b2it(true)};
-            }
-            if (ot == LMD_TYPE_ARRAY && cp_type == LMD_TYPE_ARRAY && obj.array == ctor_proto.array) {
-                return (Item){.item = b2it(true)};
-            }
-            if (ot == LMD_TYPE_FUNC && cp_type == LMD_TYPE_FUNC && obj.function == ctor_proto.function) {
-                return (Item){.item = b2it(true)};
-            }
-            obj = js_get_prototype_of(obj);
-            depth++;
-        }
+    TypeId rp_type = get_type_id(right_map_proto);
+    if (!js_instanceof_is_object_like_type(rp_type)) {
+        js_throw_type_error("Function has non-object prototype in instanceof check");
         return (Item){.item = b2it(false)};
     }
-
-    // Delegate to name-based check
-    return js_instanceof_classname(left, right_name);
+    bool contains_map_proto = js_prototype_chain_contains(left, right_map_proto);
+    return (Item){.item = b2it(contains_map_proto)};
 }
 
-// Forward decls for DOM identity checks (host objects under MAP_KIND_DOM that
-// don't carry __class_name__ in their property map).
+// Forward decls for DOM identity checks (host objects under MAP_KIND_DOM).
 extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
 
-// instanceof check by class name string — walks prototype chain checking __class_name__
+// instanceof check by constructor name for native function fallback.
 extern "C" Item js_instanceof_classname(Item left, Item classname) {
     if (get_type_id(classname) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
 
     String* rn = it2s(classname);
     if (!rn) return (Item){.item = b2it(false)};
+    JsClass target_cls = js_class_from_name(rn->chars, (int)rn->len);
 
     // Check built-in types that don't use __class_name__ prototype chain
     TypeId lt = get_type_id(left);
@@ -5490,13 +5504,7 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
     }
     // RegExp check
     if (rn->len == 6 && strncmp(rn->chars, "RegExp", 6) == 0) {
-        // RegExp objects are stored as maps with a regex data pointer — check for __rd property
-        if (lt == LMD_TYPE_MAP) {
-            Item rkey = (Item){.item = s2it(heap_create_name("__rd", 4))};
-            Item rval = map_get(left.map, rkey);
-            return (Item){.item = b2it(rval.item != 0 && get_type_id(rval) != LMD_TYPE_NULL)};
-        }
-        return (Item){.item = b2it(false)};
+        return (Item){.item = b2it(lt == LMD_TYPE_MAP && js_class_id(left) == JS_CLASS_REGEXP)};
     }
 
     if (lt == LMD_TYPE_MAP) {
@@ -5543,113 +5551,23 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
         }
     }
 
-    if (lt != LMD_TYPE_MAP) {
-        // For Arrays with custom prototypes, walk the proto chain looking for class_name
-        if (lt == LMD_TYPE_ARRAY) {
-            Item custom_proto = js_array_get_custom_proto(left);
-            if (custom_proto.item != ItemNull.item && get_type_id(custom_proto) == LMD_TYPE_MAP) {
-                Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-                Item obj = custom_proto;
-                int depth = 0;
-                while (obj.item != 0 && get_type_id(obj) == LMD_TYPE_MAP && depth < 32) {
-                    // T5a: prefer typed JsClass byte; fall back to legacy string
-                    const char* on_chars = NULL;
-                    int on_len = 0;
-                    JsClass jc = js_class_get(obj);
-                    if (jc != JS_CLASS_NONE) {
-                        const char* nm = js_class_to_name(jc);
-                        if (nm) { on_chars = nm; on_len = (int)strlen(nm); }
-                    }
-                    if (!on_chars) {
-                        Item obj_name = map_get(obj.map, class_key);
-                        if (obj_name.item != 0 && get_type_id(obj_name) == LMD_TYPE_STRING) {
-                            String* on = it2s(obj_name);
-                            if (on) { on_chars = on->chars; on_len = (int)on->len; }
-                        }
-                    }
-                    if (on_chars && on_len == (int)rn->len && strncmp(on_chars, rn->chars, on_len) == 0) {
-                        return (Item){.item = b2it(true)};
-                    }
-                    Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
-                    obj = map_get(obj.map, proto_key);
-                    depth++;
-                }
-            }
-        }
+    if (target_cls == JS_CLASS_NONE) {
+        return (Item){.item = b2it(false)};
+    }
+    if (!js_instanceof_can_walk_prototype(left)) {
         return (Item){.item = b2it(false)};
     }
 
-    Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-
-    // Check if left has this class name in its prototype chain
     Item obj = left;
     int depth = 0;
-    while (obj.item != 0 && get_type_id(obj) == LMD_TYPE_MAP && depth < 32) {
-        // T5a: prefer typed JsClass byte; fall back to legacy `__class_name__` string.
-        // (User-defined classes & unenumerated subclasses still use the string.)
-        const char* on_chars = NULL;
-        int on_len = 0;
-        JsClass jc = js_class_get(obj);
-        if (jc != JS_CLASS_NONE) {
-            const char* nm = js_class_to_name(jc);
-            if (nm) { on_chars = nm; on_len = (int)strlen(nm); }
+    while (obj.item != 0 && obj.item != ItemNull.item && depth < 32) {
+        JsClass actual = js_class_id(obj);
+        if (actual != JS_CLASS_NONE && js_class_matches_instanceof_target(actual, target_cls)) {
+            return (Item){.item = b2it(true)};
         }
-        if (!on_chars) {
-            Item obj_name = map_get(obj.map, class_key);
-            if (obj_name.item != 0 && get_type_id(obj_name) == LMD_TYPE_STRING) {
-                String* on = it2s(obj_name);
-                if (on) { on_chars = on->chars; on_len = (int)on->len; }
-            }
-        }
-        if (on_chars) {
-            if (on_len == (int)rn->len && strncmp(on_chars, rn->chars, on_len) == 0) {
-                return (Item){.item = b2it(true)};
-            }
-            // error hierarchy: any *Error subtype instanceof Error
-            if (rn->len == 5 && strncmp(rn->chars, "Error", 5) == 0) {
-                // check if class name ends with "Error" (covers TypeError, RangeError, AssertionError, etc.)
-                if (on_len > 5 && strncmp(on_chars + on_len - 5, "Error", 5) == 0) {
-                    return (Item){.item = b2it(true)};
-                }
-            }
-            // Event hierarchy: any *Event subtype instanceof Event
-            if (rn->len == 5 && strncmp(rn->chars, "Event", 5) == 0) {
-                if (on_len > 5 && strncmp(on_chars + on_len - 5, "Event", 5) == 0) {
-                    return (Item){.item = b2it(true)};
-                }
-            }
-            // UIEvent hierarchy: Mouse / Keyboard / Focus / Composition /
-            // Input / Wheel / Pointer events all extend UIEvent.
-            if (rn->len == 7 && strncmp(rn->chars, "UIEvent", 7) == 0) {
-                static const char* const ui_subs[] = {
-                    "MouseEvent", "KeyboardEvent", "FocusEvent",
-                    "CompositionEvent", "InputEvent", "WheelEvent",
-                    "PointerEvent", NULL };
-                for (int i = 0; ui_subs[i]; i++) {
-                    size_t sl = strlen(ui_subs[i]);
-                    if ((size_t)on_len == sl && strncmp(on_chars, ui_subs[i], sl) == 0) {
-                        return (Item){.item = b2it(true)};
-                    }
-                }
-            }
-            // MouseEvent hierarchy: Wheel / Pointer extend MouseEvent.
-            if (rn->len == 10 && strncmp(rn->chars, "MouseEvent", 10) == 0) {
-                if ((on_len == 10 && strncmp(on_chars, "WheelEvent", 10) == 0) ||
-                    (on_len == 12 && strncmp(on_chars, "PointerEvent", 12) == 0)) {
-                    return (Item){.item = b2it(true)};
-                }
-            }
-            // EventTarget: any DOM Node, document, or constructed EventTarget
-            // is an EventTarget. Plain Event instances are NOT.
-            if (rn->len == 11 && strncmp(rn->chars, "EventTarget", 11) == 0) {
-                if (on_len == 11 && strncmp(on_chars, "EventTarget", 11) == 0) {
-                    return (Item){.item = b2it(true)};
-                }
-            }
-        }
-        // walk up __proto__
-        Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
-        obj = map_get(obj.map, proto_key);
+        Item next = js_get_prototype_of(obj);
+        if (next.item == obj.item) break;
+        obj = next;
         depth++;
     }
     return (Item){.item = b2it(false)};
@@ -7783,8 +7701,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
         // through unified js_get_own_property_descriptor inspector. Falls
         // through to the data-property + virtual-builtin paths below when
         // the kernel reports an own data property (or no own property at
-        // all) — those paths still depend on `__class_name__` and shape
-        // shape semantics that A2 has not yet collapsed.
+        // all).
         {
             JsPropertyDescriptor pd = {};
             if (js_get_own_property_descriptor(obj, name_str->chars,
@@ -7801,8 +7718,8 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                                     (Item){.item = b2it(js_pd_is_configurable(&pd))});
                     return desc;
                 }
-                // Data descriptor — fall through to the legacy data-property
-                // path (which handles __class_name__ virtual-builtin synth).
+                // Data descriptor — fall through to the data-property path,
+                // including stamped prototype virtual builtins.
             }
         }
 
@@ -7813,7 +7730,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
         }
 
         // v26: Check if the property is actually stored in the map, or if it's a
-        // virtual builtin method from __class_name__ resolution. Builtins should have
+        // virtual builtin method from stamped prototype resolution. Builtins should have
         // enumerable:false, configurable:true.
         {
             bool stored = false;
@@ -8387,14 +8304,8 @@ extern "C" Item js_array_is_array(Item value) {
     if (type == LMD_TYPE_MAP) {
         bool is_proto = false;
         Item proto_flag = js_map_get_fast_ext(value.map, "__is_proto__", 12, &is_proto);
-        bool has_class = false;
-        Item class_name = js_map_get_fast_ext(value.map, "__class_name__", 14, &has_class);
-        if (is_proto && js_is_truthy(proto_flag) && has_class &&
-            get_type_id(class_name) == LMD_TYPE_STRING) {
-            String* str = it2s(class_name);
-            if (str && str->len == 5 && strncmp(str->chars, "Array", 5) == 0) {
-                return (Item){.item = ITEM_TRUE};
-            }
+        if (is_proto && js_is_truthy(proto_flag) && js_class_id(value) == JS_CLASS_ARRAY) {
+            return (Item){.item = ITEM_TRUE};
         }
     }
     // Arguments exotic objects use LMD_TYPE_ARRAY internally but are not arrays per spec
@@ -8641,11 +8552,11 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     Array* arr = result.array;
     bool is_regexp_obj = js_class_id((Item){.map = m}) == JS_CLASS_REGEXP;
     bool is_class_ctor = false;
-    bool has_class_name_marker = false;
+    bool has_instance_proto = false;
     bool has_class_prototype = false;
-    js_map_get_fast_ext(m, "__class_name__", 14, &has_class_name_marker);
+    js_map_get_fast_ext(m, "__instance_proto__", 18, &has_instance_proto);
     js_map_get_fast_ext(m, "prototype", 9, &has_class_prototype);
-    is_class_ctor = has_class_name_marker && has_class_prototype;
+    is_class_ctor = has_instance_proto && has_class_prototype;
     int entry_count = 0;
     for (ShapeEntry* count_entry = tm->shape; count_entry; count_entry = count_entry->next) entry_count++;
     int64_t* idx_pairs = entry_count > 0 ? (int64_t*)mem_alloc(sizeof(int64_t) * 2 * entry_count, MEM_CAT_JS_RUNTIME) : NULL;
@@ -8726,7 +8637,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     // Phase-5D: legacy __get_<name>/__set_<name> pass-2 scan removed.
     // Accessor properties now use IS_ACCESSOR shape flag with bare-name
     // shape entries — pass 1 above already enumerates them.
-    // v26: for prototype Maps with __class_name__ and __is_proto__, append builtin method names
+    // v26: for stamped prototype Maps, append builtin method names
     {
         bool ip_own = false;
         js_map_get_fast_ext(m, "__is_proto__", 12, &ip_own);
@@ -8806,7 +8717,6 @@ static bool js_is_engine_internal_enumeration_key(const char* name, int name_len
     }
     if ((name_len == 9 && strncmp(name, "__proto__", 9) == 0) ||
         (name_len == 15 && strncmp(name, "__source_text__", 15) == 0) ||
-        (name_len == 14 && strncmp(name, "__class_name__", 14) == 0) ||
         (name_len == 18 && strncmp(name, "__instance_proto__", 18) == 0) ||
         (name_len == 18 && strncmp(name, "__primitiveValue__", 18) == 0) ||
         (name_len == 23 && strncmp(name, "__class_private_index__", 23) == 0) ||
@@ -10921,7 +10831,7 @@ extern "C" Item js_object_spread_into(Item target, Item source) {
 }
 
 // =============================================================================
-// Helper: check if a Map with __class_name__ has a built-in method as own prop
+// Helper: check if a stamped prototype map has a built-in method as own prop
 // Returns true if the map is a prototype object and the key matches a builtin.
 // =============================================================================
 static bool js_map_has_builtin_method(Map* m, const char* name, int len) {
@@ -16340,14 +16250,9 @@ extern "C" Item js_get_typed_array_base_proto() {
     if (js_typed_array_base_proto.item != 0) return js_typed_array_base_proto;
     js_typed_array_base_proto = js_new_object();
     heap_register_gc_root(&js_typed_array_base_proto.item);
-    // Set __class_name__ for type identification
-    Item cnk = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-    Item cnv = (Item){.item = s2it(heap_create_name("TypedArray", 10))};
-    js_property_set(js_typed_array_base_proto, cnk, cnv);
     // Set __is_proto__ marker
     Item ipk = (Item){.item = s2it(heap_create_name("__is_proto__", 12))};
     js_property_set(js_typed_array_base_proto, ipk, (Item){.item = b2it(true)});
-    // A3-T3a: dual-write JsClass byte alongside __class_name__.
     js_class_stamp(js_typed_array_base_proto, JS_CLASS_TYPED_ARRAY);
     // Connect %TypedArray%.prototype to %TypedArray%
     Item base = js_get_typed_array_base();
@@ -17141,10 +17046,7 @@ static Item js_readable_stream_get_reader_stub(void) {
 
 extern "C" Item js_readable_stream_new(void) {
     Item obj = js_new_object();
-    Item class_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
-    Item class_val = (Item){.item = s2it(heap_create_name("ReadableStream"))};
-    js_property_set(obj, class_key, class_val);
-    js_class_stamp(obj, JS_CLASS_READABLE_STREAM);  // A3-T3b
+    js_class_stamp(obj, JS_CLASS_READABLE_STREAM);
     Item get_reader_key = (Item){.item = s2it(heap_create_name("getReader"))};
     Item get_reader_fn = js_new_function((void*)js_readable_stream_get_reader_stub, 0);
     js_property_set(obj, get_reader_key, get_reader_fn);
@@ -17158,10 +17060,7 @@ static Item js_writable_stream_get_writer_stub(void) {
 
 extern "C" Item js_writable_stream_new(void) {
     Item obj = js_new_object();
-    Item class_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
-    Item class_val = (Item){.item = s2it(heap_create_name("WritableStream"))};
-    js_property_set(obj, class_key, class_val);
-    js_class_stamp(obj, JS_CLASS_WRITABLE_STREAM);  // A3-T3b
+    js_class_stamp(obj, JS_CLASS_WRITABLE_STREAM);
     Item get_writer_key = (Item){.item = s2it(heap_create_name("getWriter"))};
     Item get_writer_fn = js_new_function((void*)js_writable_stream_get_writer_stub, 0);
     js_property_set(obj, get_writer_key, get_writer_fn);

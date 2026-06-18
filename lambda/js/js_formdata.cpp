@@ -763,9 +763,7 @@ static void fd_install_methods(Item fd_obj) {
     prop_set(fd_obj, "forEach", js_new_function((void*)js_fd_forEach, 2));
     // Symbol.iterator → same as entries()
     js_property_set(fd_obj, make_sym_iterator_key(), js_new_function((void*)js_fd_entries, 0));
-    // class marker for instanceof checks
-    prop_set(fd_obj, "__class_name__", make_str("FormData"));
-    js_class_stamp(fd_obj, JS_CLASS_FORM_DATA);  // A3-T3b
+    js_class_stamp(fd_obj, JS_CLASS_FORM_DATA);
 }
 
 // ============================================================================
@@ -809,8 +807,7 @@ static const char* blob_options_type(Item options) {
 // new Blob([parts], { type })
 static Item js_blob_construct(Item parts, Item options) {
     Item obj = js_new_object();
-    prop_set(obj, "__class_name__", make_str("Blob"));
-    js_class_stamp(obj, JS_CLASS_BLOB);  // A3-T3b
+    js_class_stamp(obj, JS_CLASS_BLOB);
     int64_t size = (get_type_id(parts) == LMD_TYPE_UNDEFINED) ? 0 : blob_compute_size(parts);
     prop_set(obj, "size", make_int_item(size));
     prop_set(obj, "type", make_str(blob_options_type(options)));
@@ -829,8 +826,7 @@ static int64_t now_epoch_ms() {
 // new File([parts], name, { type, lastModified })
 static Item js_file_construct(Item parts, Item name, Item options) {
     Item obj = js_new_object();
-    prop_set(obj, "__class_name__", make_str("File"));
-    js_class_stamp(obj, JS_CLASS_FILE);  // A3-T3b
+    js_class_stamp(obj, JS_CLASS_FILE);
 
     int64_t size = (get_type_id(parts) == LMD_TYPE_UNDEFINED) ? 0 : blob_compute_size(parts);
     prop_set(obj, "size", make_int_item(size));
@@ -862,8 +858,7 @@ static Item fd_blob_to_file(Item value, Item filename_item) {
     bool is_file = (js_class_id(value) == JS_CLASS_FILE);
 
     Item file = js_new_object();
-    prop_set(file, "__class_name__", make_str("File"));
-    js_class_stamp(file, JS_CLASS_FILE);  // A3-T3b
+    js_class_stamp(file, JS_CLASS_FILE);
 
     Item sz = prop_get(value, "size");
     prop_set(file, "size", get_type_id(sz) == LMD_TYPE_INT ? sz : make_int_item(0));
@@ -894,8 +889,7 @@ static Item fd_blob_to_file(Item value, Item filename_item) {
 // Create a File stub for an empty file input.
 static Item fd_make_file_stub() {
     Item obj = js_new_object();
-    prop_set(obj, "__class_name__", make_str("File"));
-    js_class_stamp(obj, JS_CLASS_FILE);  // A3-T3b
+    js_class_stamp(obj, JS_CLASS_FILE);
     prop_set(obj, "size",           make_int_item(0));
     prop_set(obj, "name",           make_str(""));
     prop_set(obj, "type",           make_str("application/octet-stream"));

@@ -821,16 +821,9 @@ extern "C" Item js_cssom_rule_get_property(Item rule_item, Item prop_name) {
             for (size_t i = 0; i < nr_count; i++) {
                 if (!nr[i]) continue;
                 if (nr[i]->type == CSS_RULE_NESTED_DECLARATIONS) {
-                    // Wrap as plain Map with __class_name__ and style property
-                    // (not a js_css_rule_marker wrapper, so __class_name__ is readable
-                    // by js_instanceof_classname via low-level map_get)
                     Item style_decl = wrap_rule_decl(nr[i], pool);
-                    // Build a plain JS object: { __class_name__: "CSSNestedDeclarations", style: ... }
                     Item nd_obj = js_new_object();
-                    Item class_key = make_string_item("__class_name__");
-                    Item class_val = make_string_item("CSSNestedDeclarations");
-                    js_property_set(nd_obj, class_key, class_val);
-                    js_class_stamp(nd_obj, JS_CLASS_CSS_NESTED_DECLARATIONS);  // A3-T3b
+                    js_class_stamp(nd_obj, JS_CLASS_CSS_NESTED_DECLARATIONS);
                     Item style_key = make_string_item("style");
                     js_property_set(nd_obj, style_key, style_decl);
                     array_push(arr, nd_obj);

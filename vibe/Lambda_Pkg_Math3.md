@@ -1126,10 +1126,41 @@ Upstream baseline 206 / 206 (100%)*
 Net across this conversation's "continue to fix" rounds: **614 → 754
 (+140 cases, +15.2pp)**, with the upstream MathLive corpus at a clean 206/206.
 
+### Phase 3 round 6 — environments, display integrals, unknown commands
+
+- **Display-mode integrals (biggest win, +7)** — integrals now place limits to
+  the SIDE (`lm_msubsup` adjacent) in BOTH inline and display mode
+  ([scripts.ls](lambda/package/math/atoms/scripts.ls) — dropped the
+  `not ctx.is_display` guard). MathLive never stacks integral limits by
+  default, so the many display `\int_{-\infty}^{\infty} e^{-x^2} dx` cases now
+  pass.
+- **`\begin{equation}` environment** ([array.ls](lambda/package/math/atoms/array.ls))
+  — added the leading+trailing 0.5em `lm_arraycolsep` MathLive wraps the single
+  column in, and a content-derived `equation_table_metrics` that centers the
+  row on the math axis (height = content.height, depth ≈ content.height − 0.51,
+  depth-holder one notch deeper for the vlist-s baseline). Closes `E = mc^2`,
+  `ax^2+bx+c=0`, etc.
+- **Unknown commands with arguments** ([render.ls](lambda/package/math/render.ls)
+  `render_unknown_command_node`) — an unknown `\cmd{...}` now renders the way
+  MathLive does: an `lm_error lm_cmr` span carrying `\cmd` (with backslash,
+  height/depth from the cmr `\` glyph 0.75/0.25), a 0.17em gap, then the
+  argument rendered as ordinary math. Closes standalone `\label{eq:x}`,
+  `\tag{...}`, etc.
+
+```
+754 → 763 / 921 (82.8%)   [environments + display integrals + unknown commands]
+Upstream baseline 206 / 206 (100%)
+```
+
+Net across the conversation: **614 → 763 (+149 cases, +16.2pp)**, upstream
+206/206 clean.
+
 Residuals that resisted cheap fixes (each ≤0.05em or per-content): the bigop
 sub-baseline `top` (sum vs prod differ by sub height; a derived formula
-regressed sum, reverted), the `\lim …` composite strut depth (0.01em, raw not
-propagated through the text-op box), `\epsilon` (MathLive substitutes an
+regressed sum, reverted), depth-heavy content centered inside `\begin{equation}`
+(the integral-in-equation needs MathLive's full array vshift, not derivable
+cleanly from two data points), the `\lim …` composite strut depth (0.01em, raw
+not propagated through the text-op box), `\epsilon` (MathLive substitutes an
 upright cmr glyph Lambda lacks a metric for), and the ~30 hand-tuned fraction
 dispatch branches.
 

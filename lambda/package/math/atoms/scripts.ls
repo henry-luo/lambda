@@ -27,7 +27,10 @@ pub fn render(node, context, render_fn) {
     let cmd_name = if (is_big_op) string(base.name) else ""
     let is_integral = is_integral_op(cmd_name)
 
-    if (is_big_op and is_integral and not ctx.is_display(context))
+    if (is_big_op and is_integral)
+        // Integrals place their limits to the SIDE (lm_msubsup adjacent to the
+        // symbol) in both inline AND display mode — MathLive never stacks
+        // integral limits by default.
         render_integral_inline_scripts(base, node, context, render_fn)
     else if (is_big_op and not ctx.is_script(context))
         render_big_op_limits(base, node, context, render_fn)

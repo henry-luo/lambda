@@ -1,0 +1,16 @@
+fakeKeys:__class_name__
+fakeTag:[object Object]
+fakeInstance:false
+fakeUtil:false
+regexOwnMarker:false
+regexBrand:[object RegExp],true,true
+dateOwnMarker:false
+dateBrand:[object Date],true,true
+classMarkers:false,false,false
+classIdentity:true,3,true
+classFunctionIdentity:true,true,true
+arraySubclass:true,true,true,1,1
+wrapper:false,[object Number],true
+stringPrototypeAfterDelete:[object String],[object String]
+numberPrototypeAfterDelete:[object Number],[object Number]
+OK

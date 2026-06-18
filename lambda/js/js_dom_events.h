@@ -92,7 +92,7 @@ Item js_create_event_target(void);
 // ============================================================================
 // Event subclass constructors (called by JsCtor wrappers in js_globals.cpp).
 // Each takes (type, init) and returns an Event-shaped object stamped with the
-// extra IDL members and `__class_name__` for instanceof.
+// extra IDL members and typed class identity for instanceof.
 // ============================================================================
 Item js_ctor_ui_event_fn(Item type, Item init);
 Item js_ctor_focus_event_fn(Item type, Item init);

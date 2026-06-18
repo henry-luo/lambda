@@ -5006,16 +5006,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
                         jm_emit_exc_propagate_check(mt);
                     }
-                    // Create class object with __class_name__ property
                     MIR_reg_t cls_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
                     jm_emit_set_private_class_index(mt, cls_obj, ce);
                     jm_emit_set_class_source(mt, cls_obj, cls_node);
-                    MIR_reg_t cn_key = jm_box_string_literal(mt, "__class_name__", 14);
-                    MIR_reg_t cn_val = jm_box_string_literal(mt, cls_node->name->chars, (int)cls_node->name->len);
-                    jm_call_3(mt, "js_property_set", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cn_key),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cn_val));
                     // Update local variable
                     char vname[128];
                     snprintf(vname, sizeof(vname), "_js_%.*s", (int)cls_node->name->len, cls_node->name->chars);
@@ -5251,15 +5244,6 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         jm_call_void_2(mt, "js_set_default_constructor_property",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
-                        // Set __class_name__ on prototype for instanceof chain
-                        {
-                            MIR_reg_t pcn_key = jm_box_string_literal(mt, "__class_name__", 14);
-                            MIR_reg_t pcn_val = jm_box_string_literal(mt, cls_node->name->chars, (int)cls_node->name->len);
-                            jm_call_3(mt, "js_property_set", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, pcn_key),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, pcn_val));
-                        }
                         // Set up prototype's __proto__ chain for instanceof on parent classes
                         {
                             JsClassEntry* sc = ce->superclass;
