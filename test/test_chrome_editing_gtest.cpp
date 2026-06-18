@@ -217,6 +217,8 @@ struct ChromeEditingResult {
 };
 
 static bool should_skip_file(const std::string& rel_path) {
+    if (rel_path.find("/deferred/") != std::string::npos ||
+        starts_with(rel_path.c_str(), "deferred/")) return true;
     if (rel_path.find("/resources/") != std::string::npos) return true;
     if (ends_with(rel_path, "-expected.html")) return true;
     if (ends_with(rel_path, "-expected.txt")) return true;

@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join/inline-cleanup-target-range/atomic-delete/atomic-whitespace/trailing-br-block-join/empty-br-block-join/nested-block-parent-join/inline-chain-join/reverse-nested-text-join/inline-fragment-block-join/list-item-join/nested-list-unwrap/nested-list-split/table-cell-join/table-span-guard/table-cross-row-join/table-cross-row-tail/table-colspan-normalize/modifier-line-delete/modifier-word-delete slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting, conservative whole-wrapper toggle-off, collapsed typing-state inline insertion, and collapsed insertion adjacent-wrapper normalization landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard/history started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, native rich-host `copy`/`cut`/`paste`, native rich-host `undo`/`redo` event-envelope plus bounded snapshot/selection restore support, and keyboard/default-action rich undo/redo integration; CET-0 Chrome editing corpus symlink/runner/bootstrap seed landed.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join/inline-cleanup-target-range/atomic-delete/atomic-whitespace/trailing-br-block-join/empty-br-block-join/nested-block-parent-join/inline-chain-join/reverse-nested-text-join/inline-fragment-block-join/list-item-join/nested-list-unwrap/nested-list-split/table-cell-join/table-span-guard/table-cross-row-join/table-cross-row-tail/table-colspan-normalize/modifier-line-delete/modifier-word-delete slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting, conservative whole-wrapper toggle-off, collapsed typing-state inline insertion, and collapsed insertion adjacent-wrapper normalization landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard/history started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, native rich-host `copy`/`cut`/`paste`, native rich-host `undo`/`redo` event-envelope plus bounded snapshot/selection restore support, and keyboard/default-action rich undo/redo integration; CET-0 Chrome editing corpus symlink/runner/bootstrap seed landed; CET-1 first imported selection files and CET-2 first imported deletion file landed.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -1683,6 +1683,26 @@ Mirroring the existing **`test/js262 → ../lambda-test/js262`** pattern (the js
   `lambda.exe js --document`, and parses `CHROME_EDITING_RESULT`.
 - Initial bootstrap verification: `./test/test_chrome_editing_gtest.exe
   --gtest_brief=1` discovered 2 cases and passed 2/2.
+
+**CET-1a/CET-2a — first real Chromium imports: LANDED (2026-06-18).**
+
+- Imported Chromium `editing/selection/selectNode.html` and
+  `editing/selection/selectNodeContents.html` into `lambda-test/editing/`.
+  These are old Blink console-output tests; the local Chrome editing harness
+  now recognizes the common `#console` `Success.` / `Test Failed` pattern and
+  includes the `testRunner.dumpEditingCallbacks()` /
+  `dumpAsLayoutWithPixelResults()` no-ops those files call.
+- Imported Chromium `editing/deleting/delete-character-001.html`, the first
+  assert-selection-style deletion test. The harness now provides a minimal
+  `test()` plus `assert_selection(markup, command, expected)` shim that parses
+  caret markers, drives native `document.execCommand(command)`, and serializes
+  the caret back into markup for comparison.
+- Imported `editing/deleting/delete-character-002.html` into
+  `deleting/deferred/` rather than the runnable gauge. It currently aborts
+  `lambda.exe` through the textarea `document.execCommand('Delete')` path and
+  is recorded in the corpus `MANIFEST` as a deferred CET-2 root-cause target.
+- Verification: `./test/test_chrome_editing_gtest.exe --gtest_brief=1`
+  discovered 6 cases: 5 passed / 1 skipped (`deferred/`).
 
 | Phase | Import | Needs | Notes |
 |---|---|---|---|
