@@ -16,7 +16,7 @@
 **Status:** Phased out (historical record of landed work)
 **Date:** 2026-05-28
 **Layer:** Interaction/editing core, above DOM Range/Selection and below form controls, contenteditable hosts, JS DOM events, and Lambda `edit <...>` templates.
-**Related docs:** [Radiant_Design_Form_Input.md](Radiant_Design_Form_Input.md), [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md), [Radiant_Design_State.md](Radiant_Design_State.md), [Radiant_Design_Event.md](Radiant_Design_Event.md), [Radiant_Design_Selection.md](Radiant_Design_Selection.md), [Radiant_ContentEditable_WPT_Status.md](Radiant_ContentEditable_WPT_Status.md)
+**Related docs:** [Radiant_Design_Form_Input.md](Radiant_Design_Form_Input.md), [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md), [Radiant_Design_Content_Editable2.md](Radiant_Design_Content_Editable2.md), [Radiant_Design_State.md](Radiant_Design_State.md), [Radiant_Design_Event.md](Radiant_Design_Event.md), [Radiant_Design_Selection.md](Radiant_Design_Selection.md)
 
 ---
 
@@ -636,7 +636,7 @@ reconstructable length sequences reach it for a password field.
 | **E5 - Auto Scroll** | Implement selection-drag autoscroll for text controls, scroll containers, and document viewport. Introduce the **one shared editing animation tick** (caret blink + autoscroll + IME reveal timer, §6.4). | UI tests cover drag past edge in input, textarea, contenteditable; autoscroll continues while pointer is held still outside the viewport |
 | **E6 - State And History** | Add `EditingInteractionState`; route undo/redo through controller | Form undo restores local snapshots; contenteditable emits history intents |
 | **E7 - IME Unification** | Implement the composition transaction sketched in E2: platform IME calls one composition controller for both form and rich surfaces | `insertCompositionText` and `composition*` order is consistent; matches the E2 sketch with no `EditingIntent` rework |
-| **E8 - Logging And WPT** | Add editing log records (including the §8 password redaction rule); wire WPT/status docs for form/input-events/contenteditable | Event log can reconstruct an edit cascade; password fields emit no reconstructable lengths; Tier-A runners start filling status tables |
+| **E8 - Logging And WPT** | Add editing log records (including the §8 password redaction rule); wire WPT tracking for form/input-events/contenteditable through CE2 | Event log can reconstruct an edit cascade; password fields emit no reconstructable lengths; Tier-A runners start filling CE2 status tables |
 
 **Dependencies:** E0 gates E3 and E4 (both rest on a true canonical
 selection). E2's composition sketch gates E7. The shared animation tick (E5)
@@ -681,8 +681,8 @@ Test groups:
 
 For WPT:
 
-- Reuse the planned contenteditable runner from
-  [Radiant_ContentEditable_WPT_Status.md](Radiant_ContentEditable_WPT_Status.md).
+- Reuse the contenteditable runner and track its status in
+  [Radiant_Design_Content_Editable2.md](Radiant_Design_Content_Editable2.md).
 - Add form/input-events cases after E3, especially `beforeinput`, `input`,
   `selectionchange`, and text-control focus.
 - Keep `editing/run/*` as a non-gating legacy gauge.

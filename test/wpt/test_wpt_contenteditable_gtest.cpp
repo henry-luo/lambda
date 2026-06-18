@@ -17,9 +17,8 @@
  *
  * Selection-side editing-host tests (selection/contenteditable/,
  * selection/textcontrols/) already run under test_wpt_selection_gtest.cpp and
- * are NOT duplicated here. The execCommand corpus (editing/run, editing/other,
- * editing/whitespaces, most of editing/plaintext-only) is excluded because
- * Radiant rejects execCommand by design — see the design doc §11.6.
+ * are NOT duplicated here. The Chrome/Blink execCommand corpus is tracked by
+ * test_chrome_editing_gtest.cpp and CE2, not this WPT-focused runner.
  *
  * Test types within the four dirs:
  *   - testharness tests  -> run, produce N/M assertion counts
@@ -91,8 +90,7 @@ static const int TEST_ROOT_COUNT = sizeof(TEST_ROOTS) / sizeof(TEST_ROOTS[0]);
 // Tests we deliberately skip.
 // ---------------------------------------------------------------------------
 static const char* SKIP_SUBSTRINGS[] = {
-    // execCommand is rejected by design (Radiant_Design_Content_Editable.md §9);
-    // the one input-events test that drives it can never pass.
+    // Covered by the CE2 execCommand/Chrome-editing track, not this WPT slice.
     "input-events-exec-command",
     // Manual tests need human gestures; there is no automated headless path.
     "-manual",

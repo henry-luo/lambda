@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join/inline-cleanup-target-range/atomic-delete/atomic-whitespace/trailing-br-block-join/empty-br-block-join/nested-block-parent-join/inline-chain-join/reverse-nested-text-join/inline-fragment-block-join/list-item-join/nested-list-unwrap/nested-list-split/table-cell-join/table-span-guard/table-cross-row-join/table-cross-row-tail/table-colspan-normalize/modifier-line-delete/modifier-word-delete slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting, conservative whole-wrapper toggle-off, collapsed typing-state inline insertion, and collapsed insertion adjacent-wrapper normalization landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard/history started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, native rich-host `copy`/`cut`/`paste`, native rich-host `undo`/`redo` event-envelope plus bounded snapshot/selection restore support, and keyboard/default-action rich undo/redo integration.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join/inline-cleanup-target-range/atomic-delete/atomic-whitespace/trailing-br-block-join/empty-br-block-join/nested-block-parent-join/inline-chain-join/reverse-nested-text-join/inline-fragment-block-join/list-item-join/nested-list-unwrap/nested-list-split/table-cell-join/table-span-guard/table-cross-row-join/table-cross-row-tail/table-colspan-normalize/modifier-line-delete/modifier-word-delete slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting, conservative whole-wrapper toggle-off, collapsed typing-state inline insertion, and collapsed insertion adjacent-wrapper normalization landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard/history started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, native rich-host `copy`/`cut`/`paste`, native rich-host `undo`/`redo` event-envelope plus bounded snapshot/selection restore support, and keyboard/default-action rich undo/redo integration; CET-0 Chrome editing corpus symlink/runner/bootstrap seed landed; CET-1 first imported selection files and CET-2 first imported deletion file landed.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -1651,9 +1651,9 @@ Mirroring the existing **`test/js262 → ../lambda-test/js262`** pattern (the js
 
 - **Corpus:** new `lambda-test/editing/` in the sibling [`henry-luo/lambda-test`](https://github.com/henry-luo/lambda-test) repo, mirroring Blink's `editing/` subdir layout, plus the adapted shared helpers (`assert_selection.js`, `dump-as-markup.js`, `editing.js`) and a `MANIFEST` recording the source Chromium commit + per-file import/defer status + BSD license.
 - **Symlink (in the `lambda` repo, pointing at the sibling corpus):** the link
-  *lives at* `lambda/test/editing` and *points to* `../lambda-test/editing` —
-  i.e. run from the `lambda` repo root: `ln -s ../lambda-test/editing test/editing`.
-  Identical direction to the existing `test/js262 → ../lambda-test/js262`. The
+  *lives at* `lambda/test/editing` and *points to* `../../lambda-test/editing` —
+  i.e. run from the `lambda` repo root: `ln -s ../../lambda-test/editing test/editing`.
+  Identical direction to the existing `test/js262 → ../../lambda-test/js262`. The
   symlink itself is git-tracked in `lambda`; the corpus content is versioned in
   `lambda-test`. (Until `lambda-test/editing/` is populated this would be a
   dangling link, so it is created together with the first import — CET‑1.)
@@ -1668,6 +1668,42 @@ Mirroring the existing **`test/js262 → ../lambda-test/js262`** pattern (the js
 
 ### 7.4 Phased import (gated on the matching execCommand tier + Phase SI)
 
+**CET-0 — runner/corpus bootstrap: LANDED (2026-06-18).**
+
+- Created the sibling `lambda-test/editing/` bootstrap corpus with a `MANIFEST`,
+  a minimal `resources/chrome-editing-harness.js`, and two seed pages under
+  Chrome-style subdirs: `selection/basic-selection.html` and
+  `execCommand/bold-basic.html`.
+- Added the tracked `lambda/test/editing` symlink pointing to
+  `../../lambda-test/editing`, matching the existing sibling-corpus pattern.
+- Added `lambda/test/test_chrome_editing_gtest.cpp` and registered it in
+  `build_lambda_config.json` as the extended `test_chrome_editing_gtest.exe`
+  target. The runner recursively discovers `test/editing/**/*.html`, prepends
+  the bootstrap harness, inlines relative scripts, runs each file through
+  `lambda.exe js --document`, and parses `CHROME_EDITING_RESULT`.
+- Initial bootstrap verification: `./test/test_chrome_editing_gtest.exe
+  --gtest_brief=1` discovered 2 cases and passed 2/2.
+
+**CET-1a/CET-2a — first real Chromium imports: LANDED (2026-06-18).**
+
+- Imported Chromium `editing/selection/selectNode.html` and
+  `editing/selection/selectNodeContents.html` into `lambda-test/editing/`.
+  These are old Blink console-output tests; the local Chrome editing harness
+  now recognizes the common `#console` `Success.` / `Test Failed` pattern and
+  includes the `testRunner.dumpEditingCallbacks()` /
+  `dumpAsLayoutWithPixelResults()` no-ops those files call.
+- Imported Chromium `editing/deleting/delete-character-001.html`, the first
+  assert-selection-style deletion test. The harness now provides a minimal
+  `test()` plus `assert_selection(markup, command, expected)` shim that parses
+  caret markers, drives native `document.execCommand(command)`, and serializes
+  the caret back into markup for comparison.
+- Imported `editing/deleting/delete-character-002.html` into
+  `deleting/deferred/` rather than the runnable gauge. It currently aborts
+  `lambda.exe` through the textarea `document.execCommand('Delete')` path and
+  is recorded in the corpus `MANIFEST` as a deferred CET-2 root-cause target.
+- Verification: `./test/test_chrome_editing_gtest.exe --gtest_brief=1`
+  discovered 6 cases: 5 passed / 1 skipped (`deferred/`).
+
 | Phase | Import | Needs | Notes |
 |---|---|---|---|
 | **CET-1** | `caret/`, `selection/` | P0 + SI | caret navigation + selection; little/no execCommand |
@@ -1679,7 +1715,7 @@ Mirroring the existing **`test/js262 → ../lambda-test/js262`** pattern (the js
 | **CET-7** | `undo/`, `editability/`, `spelling/`, `pasteboard/` | EC-6 | history, editability flags, clipboard |
 | **defer** | `shadow/`, `text-iterator/`, `unsupported-content/` | — | Shadow-DOM workstream / internal / N/A |
 
-Each CET phase: import the subdir into `lambda-test/editing/`, implement the commands it exercises, drive to a **tracked pass rate** in the status doc (§ below) — not a hard 100% gate initially (see Risk on quirks).
+Each CET phase: import the subdir into `lambda-test/editing/`, implement the commands it exercises, drive to a **tracked pass rate in this CE2 document** — not a hard 100% gate initially (see Risk on quirks).
 
 ---
 
@@ -1705,7 +1741,9 @@ All phase exits above also require the global JavaScript regression gate in
 §1.1: `make test262-baseline` with `0` regressions / `0` retries, and
 `./test/test_js_gtest.exe --gtest_brief=1` with `0` failures.
 
-A new **`Radiant_ContentEditable_WPT_Status.md`** (planned in Content_Editable.md §11.5) carries the headline numbers for all three runners (selection, contenteditable, chrome-editing) plus the EC command-coverage matrix and the CET per-subdir gauge.
+This CE2 document carries the headline numbers for all three runners
+(selection, contenteditable, chrome-editing) plus the EC command-coverage
+matrix and the CET per-subdir gauge.
 
 ---
 
@@ -1742,7 +1780,7 @@ A new **`Radiant_ContentEditable_WPT_Status.md`** (planned in Content_Editable.m
 - **Phase 0:** `test_wpt_selection_gtest` and `test_wpt_contenteditable_gtest` both green (only documented capability skips remain); the two engine crashes root-caused and fixed.
 - **Phase SI:** `input-events` WPT tests no longer auto-skipped; `eventSender` / `test_driver` injection works headless.
 - **Direction 1:** `document.execCommand` + `queryCommand*` + `designMode` implemented; the EC-tiered command set passes its WPT `editing/run` + Chrome `execCommand` subset to a tracked, rising rate; every edit still flows through cancelable `beforeinput` → mutation → `input` (the §6 contract holds).
-- **Direction 2:** `lambda-test/editing/` populated per CET phase with provenance + license; `test/editing → ../lambda-test/editing` symlink; `test_chrome_editing_gtest` runner wired into `make`; per-subdir pass rate tracked in the status doc.
+- **Direction 2:** `lambda-test/editing/` populated per CET phase with provenance + license; `test/editing → ../../lambda-test/editing` symlink; `test_chrome_editing_gtest` runner wired into `make`; per-subdir pass rate tracked in CE2.
 - **Docs:** Content_Editable.md §9 carries a forward-note that execCommand is now in scope per this document.
 
 ---

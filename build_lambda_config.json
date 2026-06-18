@@ -3810,6 +3810,18 @@
                         "icon": "✏️"
                     },
                     {
+                        "source": "test/test_chrome_editing_gtest.cpp",
+                        "name": "Chrome Editing Corpus Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_chrome_editing_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🧭"
+                    },
+                    {
                         "source": "test/wpt/test_wpt_clipboard_gtest.cpp",
                         "name": "WPT Clipboard API Tests",
                         "category": "extended",
