@@ -82,3 +82,15 @@ run(
   0,
   () => editor.children[0].children[1].firstChild,
   0);
+
+run(
+  "nested-list-trailing-whitespace",
+  "<ul><li>abc<ul><li>def</li></ul>  </li></ul>",
+  () => editor.querySelectorAll("li")[1].firstChild,
+  "<ul><li>abc</li><li>def</li></ul>",
+  () => editor.querySelector("li").firstChild,
+  3,
+  () => editor.querySelectorAll("li")[1].firstChild,
+  0,
+  () => editor.querySelectorAll("li")[1].firstChild,
+  0);

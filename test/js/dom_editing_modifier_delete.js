@@ -1,7 +1,7 @@
 const editor = document.getElementById("editor");
 const selection = getSelection();
 
-function run(label, key, meta, html, offset, expectedHtml,
+function run(label, key, shift, ctrl, alt, meta, html, offset, expectedHtml,
              expectedInputType, expectedStartOffset, expectedEndOffset,
              expectedFocusOffset) {
   editor.innerHTML = html;
@@ -28,7 +28,7 @@ function run(label, key, meta, html, offset, expectedHtml,
 
   editor.addEventListener("beforeinput", onBeforeInput);
   editor.addEventListener("input", onInput);
-  const ok = __lambda_testdriver_key(key, false, false, false, meta);
+  const ok = __lambda_testdriver_key(key, shift, ctrl, alt, meta);
   editor.removeEventListener("beforeinput", onBeforeInput);
   editor.removeEventListener("input", onInput);
 
@@ -49,6 +49,9 @@ function run(label, key, meta, html, offset, expectedHtml,
 run(
   "meta-backspace-line",
   0xE003,
+  false,
+  false,
+  false,
   true,
   "<p>one\ntwo three</p>",
   7,
@@ -61,6 +64,9 @@ run(
 run(
   "meta-delete-line",
   0xE017,
+  false,
+  false,
+  false,
   true,
   "<p>one\ntwo three</p>",
   4,
@@ -68,4 +74,64 @@ run(
   "deleteSoftLineForward",
   4,
   13,
+  4);
+
+run(
+  "alt-backspace-word",
+  0xE003,
+  false,
+  false,
+  true,
+  false,
+  "<p>one two three</p>",
+  13,
+  "<p>one two </p>",
+  "deleteWordBackward",
+  8,
+  13,
+  8);
+
+run(
+  "alt-delete-word",
+  0xE017,
+  false,
+  false,
+  true,
+  false,
+  "<p>one two three</p>",
+  4,
+  "<p>one  three</p>",
+  "deleteWordForward",
+  4,
+  7,
+  4);
+
+run(
+  "ctrl-backspace-word",
+  0xE003,
+  false,
+  true,
+  false,
+  false,
+  "<p>one two three</p>",
+  13,
+  "<p>one two </p>",
+  "deleteWordBackward",
+  8,
+  13,
+  8);
+
+run(
+  "ctrl-delete-word",
+  0xE017,
+  false,
+  true,
+  false,
+  false,
+  "<p>one two three</p>",
+  4,
+  "<p>one  three</p>",
+  "deleteWordForward",
+  4,
+  7,
   4);

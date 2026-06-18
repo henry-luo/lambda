@@ -7967,7 +7967,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         intent.type == INPUT_INTENT_INSERT_LINE_BREAK ||
                         intent.type == INPUT_INTENT_DELETE_BY_CUT ||
                         intent.type == INPUT_INTENT_DELETE_CONTENT_BACKWARD ||
-                        intent.type == INPUT_INTENT_DELETE_CONTENT_FORWARD;
+                        intent.type == INPUT_INTENT_DELETE_CONTENT_FORWARD ||
+                        intent.type == INPUT_INTENT_DELETE_WORD_BACKWARD ||
+                        intent.type == INPUT_INTENT_DELETE_WORD_FORWARD ||
+                        intent.type == INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD ||
+                        intent.type == INPUT_INTENT_DELETE_SOFT_LINE_FORWARD ||
+                        intent.type == INPUT_INTENT_DELETE_HARD_LINE_BACKWARD ||
+                        intent.type == INPUT_INTENT_DELETE_HARD_LINE_FORWARD;
                     if (defaultable && dispatch_rich_transaction_defaultable(
                             &evcon, intent_target, &intent, intent_target,
                             rich_keydown_caret_offset)) {

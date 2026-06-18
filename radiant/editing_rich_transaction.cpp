@@ -695,14 +695,44 @@ static bool rich_transaction_filler_br_block(DomElement* block) {
     if (!block || !block->first_child) return false;
     uint32_t br_count = 0;
     for (DomNode* child = block->first_child; child; child = child->next_sibling) {
+        if (child->is_element() && child->as_element()->tag() == HTM_TAG_BR) {
+            br_count++;
+            continue;
+        }
         if (child->is_element() &&
-            child->as_element()->tag() == HTM_TAG_BR) {
+            rich_transaction_is_cleanup_inline_tag(child->as_element()->tag()) &&
+            !dom_element_has_attribute(child->as_element(), "contenteditable") &&
+            rich_transaction_filler_br_block(child->as_element())) {
             br_count++;
             continue;
         }
         if (!rich_transaction_whitespace_text_node(child)) return false;
     }
     return br_count == 1;
+}
+
+static bool rich_transaction_only_whitespace_after(DomNode* node) {
+    for (DomNode* cur = node ? node->next_sibling : nullptr; cur;
+         cur = cur->next_sibling) {
+        if (!rich_transaction_whitespace_text_node(cur)) return false;
+    }
+    return true;
+}
+
+static bool rich_transaction_remove_whitespace_after(
+        DocState* state,
+        DomElement* parent,
+        DomNode* node) {
+    if (!parent || !node) return false;
+    while (node->next_sibling) {
+        DomNode* sibling = node->next_sibling;
+        if (!rich_transaction_whitespace_text_node(sibling)) return false;
+        dom_mutation_pre_remove(state, sibling);
+        if (!rich_transaction_remove_child_for_edit(parent, sibling)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static DomElement* rich_transaction_text_block_parent(DomText* text) {
@@ -1543,7 +1573,7 @@ static bool rich_transaction_join_nested_list_item_with_parent(
         ? lam::dom_require_element(nested_list_node->parent)
         : nullptr;
     if (!parent_li || parent_li->tag() != HTM_TAG_LI ||
-        parent_li->last_child != nested_list_node ||
+        !rich_transaction_only_whitespace_after(nested_list_node) ||
         parent_li->first_child == nested_list_node) {
         return false;
     }
@@ -1572,6 +1602,10 @@ static bool rich_transaction_join_nested_list_item_with_parent(
     }
 
     if (nested_list_will_empty) {
+        if (!rich_transaction_remove_whitespace_after(state, parent_li,
+                nested_list_node)) {
+            return false;
+        }
         dom_mutation_pre_remove(state, nested_list_node);
         if (!rich_transaction_remove_child_for_edit(parent_li, nested_list_node)) {
             return false;
@@ -1864,6 +1898,10 @@ static const char* rich_text_default_mutation_operation(
         case INPUT_INTENT_DELETE_CONTENT_FORWARD:
         case INPUT_INTENT_DELETE_WORD_BACKWARD:
         case INPUT_INTENT_DELETE_WORD_FORWARD:
+        case INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD:
+        case INPUT_INTENT_DELETE_SOFT_LINE_FORWARD:
+        case INPUT_INTENT_DELETE_HARD_LINE_BACKWARD:
+        case INPUT_INTENT_DELETE_HARD_LINE_FORWARD:
             return "delete";
         default:
             return "replace";

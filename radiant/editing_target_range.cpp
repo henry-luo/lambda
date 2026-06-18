@@ -440,14 +440,28 @@ static bool target_range_filler_br_block(DomElement* block) {
     if (!block || !block->first_child) return false;
     uint32_t br_count = 0;
     for (DomNode* child = block->first_child; child; child = child->next_sibling) {
+        if (child->is_element() && child->as_element()->tag() == HTM_TAG_BR) {
+            br_count++;
+            continue;
+        }
         if (child->is_element() &&
-            child->as_element()->tag() == HTM_TAG_BR) {
+            target_range_is_simple_inline_tag(child->as_element()->tag()) &&
+            !dom_element_has_attribute(child->as_element(), "contenteditable") &&
+            target_range_filler_br_block(child->as_element())) {
             br_count++;
             continue;
         }
         if (!target_range_whitespace_text_node(child)) return false;
     }
     return br_count == 1;
+}
+
+static bool target_range_only_whitespace_after(DomNode* node) {
+    for (DomNode* cur = node ? node->next_sibling : nullptr; cur;
+         cur = cur->next_sibling) {
+        if (!target_range_whitespace_text_node(cur)) return false;
+    }
+    return true;
 }
 
 static bool target_range_backspace_atomic_whitespace(DomBoundary caret,
@@ -887,7 +901,7 @@ static bool target_range_backspace_nested_list_unwrap(DomBoundary caret,
         ? nested_list_node->parent->as_element()
         : nullptr;
     if (!parent_li || parent_li->tag() != HTM_TAG_LI ||
-        parent_li->last_child != nested_list_node ||
+        !target_range_only_whitespace_after(nested_list_node) ||
         parent_li->first_child == nested_list_node) {
         return false;
     }

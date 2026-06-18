@@ -57,3 +57,8 @@ run(
   "whitespace-empty-br-paragraph",
   "<p>   <br></p><p>def</p>",
   "<p>def</p>");
+
+run(
+  "inline-wrapped-empty-br-paragraph",
+  "<p> <span> <br> </span> </p><p>def</p>",
+  "<p>def</p>");
