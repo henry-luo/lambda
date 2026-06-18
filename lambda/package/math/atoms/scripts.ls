@@ -155,8 +155,8 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
         depth: box_d,
         height_raw: box_h_raw,
         depth_raw: box_d_raw,
-        render_height: box_h,
-        render_depth: box_d,
+        // Phase A: render_height/render_depth omitted (== height/depth, consumers
+        // null-coalesce). render_total kept until delimiters (task 5) convert.
         render_total: box_h + box_d,
         width: 0.55556,
         type: "mop",
@@ -267,15 +267,17 @@ fn large_op_box_metric(text) {
 // MathLive makeLimitsStack (v-box.ts) for display big operators: stacks the
 // below limit, the axis-centred op symbol, and the above limit separated by
 // bigOpSpacing gaps, laid out with makeVList — NO hardcoded em constants.
-fn make_limits_stack(op_box, sub_box, sup_box) {
+fn make_limits_stack(op_box, sub_box, sup_box, is_centered) {
     let bos1 = met.at(met.bigOpSpacing1, 0)
     let bos2 = met.at(met.bigOpSpacing2, 0)
     let bos3 = met.at(met.bigOpSpacing3, 0)
     let bos4 = met.at(met.bigOpSpacing4, 0)
     let bos5 = met.at(met.bigOpSpacing5, 0)
     let fs = 0.7   // display -> script scale for the limits
-    let op_h = op_box.height
-    let op_d = op_box.depth
+    // use full-precision op metrics: a symbol op (large_op_box_metric) sets
+    // height directly; a text op (text_box) sets height=CEIL, height_raw=full.
+    let op_h = ls_raw_h(op_box)
+    let op_d = ls_raw_d(op_box)
     let has_sub = sub_box != null
     let has_sup = sup_box != null
     // limits are rendered unscaled by Lambda; scale into the parent frame
@@ -295,8 +297,10 @@ fn make_limits_stack(op_box, sub_box, sup_box) {
     else
         [op_item, {k: above_shift}, sup_item, {k: bos5}]
     // axis-centring of the op symbol (rule 13), applied as a position shift
+    // symbol ops (∑/∏) are axis-centred (rule 13); text ops (\lim/\max) are
+    // NOT (operator.ts passes no baseShift) — they sit on the baseline.
     let bs_half = (op_h - op_d) / 2.0
-    let base_shift = bs_half - met.AXIS_HEIGHT
+    let base_shift = if (is_centered) (bs_half - met.AXIS_HEIGHT) else 0.0
     // initial vlist position (depth): both/above use "bottom" mode, below-only
     // uses "top" mode (top = op_h - baseShift).
     let depth0 = if (has_sub and has_sup)
@@ -374,10 +378,13 @@ fn render_big_op_limits(base, node, context, render_fn) {
     let sub_box = if (has_sub) render_fn(node.sub, ctx.sub_context(context)) else null
     let sup_box = if (has_sup) render_fn(node.sup, ctx.sup_context(context)) else null
 
-    // Symbol big-ops (∑/∏/⋃/⨁… — NOT \lim/\max text-ops, NOT integrals which
-    // route earlier) with limits use the metric-driven makeLimitsStack.
+    // Both symbol big-ops (∑/∏/⋃/⨁…, axis-centred) AND text-ops (\lim/\max/
+    // \det, baseline) with over/under limits use the metric-driven
+    // makeLimitsStack — only integrals (side-limits, routed earlier) stay off it.
     if (is_text_op == null and unicode != null and (has_sub or has_sup))
-        make_limits_stack(large_op_box_metric(unicode), sub_box, sup_box)
+        make_limits_stack(large_op_box_metric(unicode), sub_box, sup_box, true)
+    else if (is_text_op != null and (has_sub or has_sup))
+        make_limits_stack(op_box, sub_box, sup_box, false)
     else if (has_sub or has_sup)
         render_large_op_limits_vlist(op_box, sub_box, sup_box, is_text_op != null)
     else
