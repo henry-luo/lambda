@@ -159,13 +159,38 @@ fn render_sized(ch, level, atom_type) {
     let scale = level_to_scale(level)
     let h = if (level == 3) 1.45 else scale * 0.5
     let d = if (level == 3) 0.95 else scale * 0.3
+    let raw = sized_delim_raw(level)
     if (is_vertical_bar(ch))
         render_vertical_mult(ch, level, atom_type)
     else
-        box.make_box(
+        delim_box(
             sized_delim_el(cls, ch, atom_type),
-            h, d, 0.4 * scale, atom_type
+            h, d, 0.4 * scale, atom_type, raw.h, raw.d
         )
+}
+
+// Full-precision glyph extent of a Size1–4 delimiter (KaTeX_SizeN-Regular,
+// U+0028 metrics; the Size fonts are axis-centred so every bracket shares
+// these): used so the \left..\right strut rounds h+d ONCE via CEIL@2 instead
+// of summing the pre-rounded height/depth (which dropped the trailing 0.00003
+// and forced the old `2.41` magic).
+fn sized_delim_raw(level) {
+    let h = if (level == 1) 0.85 else if (level == 2) 1.15 else if (level == 3) 1.45 else 1.75
+    let d = if (level == 1) 0.35001 else if (level == 2) 0.65002 else if (level == 3) 0.95003 else 1.25003
+    let r = {h: h, d: d}
+    r
+}
+
+fn delim_box(el, h, d, w, atom_type, h_raw, d_raw) => {
+    element: el,
+    height: h,
+    depth: d,
+    height_raw: h_raw,
+    depth_raw: d_raw,
+    width: w,
+    type: atom_type,
+    italic: 0.0,
+    skew: 0.0
 }
 
 fn sized_delim_el(cls, ch, atom_type) {
@@ -270,6 +295,8 @@ fn render_vertical_mult(ch, level, atom_type) {
         >,
         height: vertical_mult_box_height(level),
         depth: vertical_mult_box_depth(level),
+        height_raw: sized_delim_raw(level).h,
+        depth_raw: sized_delim_raw(level).d,
         render_height: vertical_mult_box_height(level),
         render_depth: vertical_mult_box_depth(level),
         render_total: vertical_mult_render_total(level),
@@ -308,6 +335,8 @@ fn render_mult_left_right_delim(delim, atom_type) {
         >,
         height: 1.45,
         depth: 0.95,
+        height_raw: 1.45,
+        depth_raw: 0.95003,
         render_height: 1.45,
         render_depth: 0.95,
         render_total: 2.41,

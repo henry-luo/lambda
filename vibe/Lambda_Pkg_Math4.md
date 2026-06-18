@@ -371,11 +371,35 @@ clean path to ≥99%.
 
 ## 10. Progress & status — 2026-06-18
 
-**Headline: corpus 763 (pre-Math4) → 805/921, upstream baseline 203/206, ~1000
+**Headline: corpus 763 (pre-Math4) → 822/921, upstream baseline 204/206, ~1000
 hardcoded layout lines removed.** The thesis of §9 held: the metric port turns
 per-case tuning into structural fixes. The biggest single win is that
 `fraction.ls` is now **100% metric-driven** — the 50-branch `frac_bar_spec`
-table is *deleted*.
+table is *deleted*. Latest: **sqrt/radical is now metric-driven** (display/text
+styles) — the bucket dispatch is gone, +17 corpus, +1 baseline, zero regressions.
+
+### 10.0 sqrt/radical conversion — DONE (display/text)
+`render.ls` `sqrt_spec` bucket dispatch (size1+size3-only, 3 `make_*_sqrt_spec`
+tables) replaced by `sqrt_geom`, a faithful port of TeXBook Rule 11 =
+MathLive's `SurdAtom.render` + `makeCustomSizedDelim` + `VBox`
+(ref/mathlive/src/atoms/surd.ts, core/delimiters.ts, core/v-box.ts). Every
+dimension derives from `body_box.height_raw`/`depth_raw` + the surd font
+metrics. Key facts that made it byte-exact:
+- `ruleWidth=θ/factor`, `φ=X_HEIGHT` (display) else `θ`; `ψ=θ+¼φ`;
+  `innerTotal=max(2φ·factor, h+d)`; `minDelim=innerTotal+ψ+θ`.
+- surd size = smallest glyph whose total > minDelim; totals (small,Size1–4) =
+  `1.0, 1.20001, 1.80002, 2.40003, 3.00003` (U+221A metrics). Adds Size2/Size4
+  the buckets lacked (fixes `\sqrt{x^2+y^2}` and 16 others).
+- re-center clearance: `lc=(ψ+(surd_total−θ)−(h+d))/2` when surd taller than body.
+- `Box.setTop` is a **no-op when |t|≤0.01** (so tall radicals emit no sign `top`
+  and keep the raw surd height — this is why size3 result_h = max(surd.h, body_h)).
+- pstrut = `max(maxFontSize, h, θ)+2`; empty body has maxFontSize 0 → 2.04, else 1.0.
+- depth projection uses the `0 − ceil2(0 − d)` (round-toward-zero) idiom so the
+  non-raw fallback va matches MathLive — same convention as fraction.ls:308.
+Script/scriptscript radicals keep the legacy specs (`make_sqrt_spec` for the
+indexed-script branch, `make_script_sqrt_spec`) — their `render_total` floors are
+load-bearing and no corpus failures sit there. This clears the §10.4 sqrt chain:
+**SURDS 5/5** (quadratic `ax^2+bx+c=…\left(…\sqrt{b^2-4ac}…\right)` now passes).
 
 ### 10.1 Corpus-rendering-mode correction (prerequisite, was masking everything)
 The gate harness (`run_lambda_mathlive_markup.mjs`) rendered non-`\[..\]` cases
@@ -395,7 +419,7 @@ the goldens are displaystyle.**
 | **B — Rule 15 fractions** | **DONE.** | `frac_bar_spec` + `build_frac_bar_legacy` + 26 helper fns **deleted (−778 lines)**; `fraction.ls` 1321→539. Every bar fraction (display/text/script/scriptscript, colorbox, composite children) flows through `frac_bar_geom` + `build_frac_bar_rule15`. Key fixes: (a) geometry-style is one step "up" from the math style for script-*cell* fractions but unchanged for sub/superscript-reached ones — keyed on `script_container`; (b) `partial_box` (∂) given raw metrics + corrected depth (0.08→0) so `\pdiff` takes the metric path. FRACTIONS 9/9. |
 | **C — Rule 18 scripts** | **mostly done.** | `render_sup_only` fully rewritten to pure Rule 18c `supShift` + single-child makeVList (−74 lines; legacy_top/legacy_vlist/legacy_child_h tables, tall_base/tall_script/numeric_x_script gates, 0.41/0.43 magic, 4 orphan helpers all gone). `render_both` + `make_limits_stack` were already metric-driven (Math4 B/C earlier). `render_sub_only` got the ceil2-projection fix. Remaining: the box-record on these still carries `render_*`/`*_raw` (Phase A). |
 | **D — Array vshift** | **BLOCKED.** | The dynamic MathLive `makeVList` algorithm reproduces 1-row/3-row matrices byte-exact, but the **2-row `depth_holder` golden 0.96 is a float-imprecision artifact** — the closed form gives 0.95, and even MathLive's own JS float gives `ceil2(0.9500…01)=0.95`. Both snapshots emit 0.96, so it comes from MathLive's actual per-cell metrics differing from Lambda's 0.84/0.36 arstrut model. Reverted (regressed 2-row matrices). Also: most "matrix" corpus failures are *inner content* (fractions/delims/scripts), so Task-4 yield is low. |
-| **E — Regression cleanup** | **ongoing.** | Down to 3 upstream-baseline fails, all on one chain (see 10.4). |
+| **E — Regression cleanup** | **ongoing.** | Down to 2 upstream-baseline fails, both the fraction-in-sup residual (see 10.4). sqrt chain cleared. |
 | **A — Box-model collapse** | **BLOCKED — it is the CAPSTONE, not the enabler.** | Field-deletion cannot happen until every producer emits clean full-precision boxes. Current field counts across `lambda/package/math/`: `render_total` ~186, `render_depth` ~158, `render_height` ~129, `left_right_render_*` ~72, `strut_total` ~23, `strut_depth_em` ~21. `render_total` alone has ~53 distinct producers. The `math.ls` emit (lines 34-76) already has the `use_raw` single-CEIL@2 path wired; the collapse = making `use_raw` universally true, which requires §10.2 D + the delimiter/sqrt conversions to finish and stop setting `strut_total`/`render_total`. **§4's "A first" ordering is contradicted by §1.3's own interlock; A is last.** |
 
 ### 10.3 Other hardcode removed this session (leaf + emit producers)
@@ -409,42 +433,41 @@ the goldens are displaystyle.**
 - **delimiter strut (Task 5, partial):** the `fmt_delim_em` hardcoded
   `0.686`/`2.076` special-cases are gone — `\left..\right` margin-top/height
   emit at full precision with trailing zeros trimmed (`trim_trailing_zeros(fmt_fixed(v,6))`;
-  MathLive does NOT CEIL@2 these). The `2.41` magic stays — its clean removal
-  needs `render_vertical_mult` (delimiters.ls) to expose `height_raw`/`depth_raw`.
+  MathLive does NOT CEIL@2 these).
+- **`2.41` magic RETIRED (delimiter raw exposure) — DONE, pure refactor, 0 pass-rate change.**
+  The sized-delim producers (`render_sized`, `render_vertical_mult`,
+  `render_mult_left_right_delim` in delimiters.ls) now carry `height_raw`/`depth_raw`
+  = the full-precision Size1–4 glyph extents (axis-centred U+0028 metrics:
+  `0.85/0.35001`, `1.15/0.65002`, `1.45/0.95003`, `1.75/1.25003`). The
+  `\left..\right` strut (`stretchy_left_right_strut_total`, render.ls) now sums
+  `box_h_raw + box_d_raw` and CEIL@2s ONCE — a Size3 pair makes `1.45+0.95003 =
+  2.40003 → 2.41` naturally, so the `abs(box_total−2.4)<0.001→2.41` special-case
+  is deleted. Verified: SURDS quadratic still emits strut-bottom `2.41em`;
+  LEFT/RIGHT 55/55, ENVIRONMENTS 9/9, FRACTIONS 9/9, corpus 822, SACRED 204/206.
 
-### 10.4 Outstanding issues (the remaining 3 upstream-baseline fails + the chain)
-All 3 sit on **one cascade: `b^2` superscript → `\sqrt` → `\frac` → `\left..\right`.**
-The metric-driven sup is *correct*; the chain over-grows because **sqrt is still
-a hardcoded bucket dispatch**.
-1. **sqrt/radical (`sqrt_spec`, render.ls:2112) — the next conversion, ALGORITHM
-   ALREADY CRACKED + VERIFIED.** It's a bucket dispatch on `body.height`; the
-   buckets are too coarse (only size1 + size3 exist — *no size2/size4*), so
-   `\sqrt{x^2+y^2}` (needs size2) and 25 others fail. The MathLive metric core is
-   solved and byte-checked: `height = body.h + lineClearance`,
-   `depth = surd_total − height`; surd size from
-   `minDelimiterHeight = max(2·φ·factor, body.h+body.d)+lineClearance+ruleWidth`
-   vs `sizeMaxHeight [1.0,1.2,1.8,2.4,3.0]`; **surd totals [1.0, 1.21, 1.81,
-   2.41, 3.01]**; `lineClearance` adjusts when `surd_total−ruleWidth >
-   body.h+body.d+lineClearance`. REMAINING: the makeVList CSS-top emit
-   (`body_top`/`line_top`/`sign_top`/`pstrut`) must be byte-exact across 55 cases
-   — the current top model is 0.01-0.02 off, which would regress the 29 passing
-   sqrt cases, so it was NOT shipped half-done.
-2. **fraction-in-sup residual** (`x^{2-\frac34}`): geometry now correct (vlists
-   match exactly); fails only on the outer strut by a sub-0.01 single-rounding
-   cascade — dissolves once §10.2 A lands (universal `use_raw`).
-3. **left/right delimiter** (the SURDS quadratic): same sqrt cascade as (1).
+### 10.4 Outstanding issues (the remaining 2 upstream-baseline fails)
+The sqrt chain is **cleared** (sqrt now metric-driven, see §10.0). The 2 residual
+fails are both the **fraction-in-sup residual**:
+1. **`x^{2-\frac12}`** (SPACING AND KERN) and **`x^{2-\frac34}`**
+   (SUPERSCRIPT/SUBSCRIPT): geometry now correct (vlists match exactly); fails
+   only on the outer strut by a sub-0.01 single-rounding cascade — dissolves once
+   §10.2 A lands (universal `use_raw`). These are the LAST 2 baseline fails.
 
-**Recommended next order:** finish **sqrt** (clears the chain → likely 206/206),
-then the **delimiter raw exposure** (kills the `2.41` magic), then **Phase A**
-collapse (now that fractions/scripts/sqrt/delimiters all carry full precision),
-then revisit **D (arrays)** which is low-yield and float-fragile.
+**Recommended next order:** ~~delimiter raw exposure~~ DONE (§10.3). Next is
+**Phase A** collapse (fractions/scripts/sqrt/delimiters now all carry full
+precision; only arrays remain non-raw), which should also clear the 2
+fraction-in-sup residuals (both fail ONLY on strut-bottom `1.84` vs `1.85`, a
+sub-0.01 raw-sum imprecision in the `x^{2-\frac34}` sup height — exactly the
+universal-`use_raw` cascade Phase A fixes). Then revisit **D (arrays)** which is
+low-yield and float-fragile.
 
 ### 10.5 Acceptance-criteria scorecard (§8)
 1. *No per-content em constant tables in fraction.ls/scripts.ls* — **fraction.ls
-   ✅ (frac_bar_spec gone); scripts.ls ✅ for sup/sub/both** (render_* fields
-   remain pending Phase A).
+   ✅ (frac_bar_spec gone); scripts.ls ✅ for sup/sub/both; render.ls sqrt ✅
+   (bucket dispatch gone, display/text metric-driven)** (render_* fields remain
+   pending Phase A; script-radical specs retained).
 2. *One height/depth; render_*/*_raw/strut_* gone* — ❌ (Phase A, blocked as above).
 3. *Fixtures 100%* — not re-run this session.
-4. *Corpus ≥ 763* — ✅ **805**.
-5. *Zero regressions on the 206 baseline at end-state* — **203/206** (3 on the
-   sqrt chain; expected to clear with the sqrt conversion).
+4. *Corpus ≥ 763* — ✅ **822**.
+5. *Zero regressions on the 206 baseline at end-state* — **204/206** (2 on the
+   fraction-in-sup residual; expected to clear with Phase A).
