@@ -235,8 +235,10 @@ typedef struct ShapeEntry {
 } ShapeEntry;
 
 // A1: Property hash table — inline open-addressing table for O(1) property lookup.
-// For objects with ≤32 properties (covers >99% of JS objects), uses a small fixed
-// table indexed by FNV-1a hash. Each slot stores a ShapeEntry pointer.
+// For objects with ≤32 hash-indexed properties (covers >99% of JS objects), uses
+// a small fixed table indexed by FNV-1a hash. Each slot stores a ShapeEntry
+// pointer. The shape chain remains authoritative when the table is not populated
+// or saturates.
 #define TYPEMAP_HASH_CAPACITY 32
 
 typedef struct TypeMap : Type {
@@ -249,7 +251,7 @@ typedef struct TypeMap : Type {
     const char* struct_name;  // C struct name for direct access (NULL if anonymous)
     // A1: Inline property hash table for O(1) lookup
     ShapeEntry* field_index[TYPEMAP_HASH_CAPACITY];  // hash table slots (NULL = empty)
-    uint8_t field_count;  // number of fields in hash table (0 = not populated)
+    uint8_t field_count;  // number of hash slots used (0 = not populated)
     // P1: Slot-indexed array for O(1) shaped property access (used by js_get_slot_fast/js_set_slot_fast).
     // Populated for constructor-shaped objects. slot_entries[i] points to the i-th ShapeEntry.
     ShapeEntry** slot_entries;  // NULL if not populated; else array of slot_count pointers
@@ -274,10 +276,30 @@ static inline uint32_t typemap_fnv1a(const char* key, int len) {
     return hash_fnv1a_32(key, (size_t)len);
 }
 
+static inline bool typemap_shape_name_equals(ShapeEntry* e, const char* key, int key_len) {
+    if (!e || !e->name || !e->name->str || !key || key_len < 0) return false;
+    if (e->name->str == key && e->name->length == (size_t)key_len) return true;
+    return e->name->length == (size_t)key_len &&
+           memcmp(e->name->str, key, (size_t)key_len) == 0;
+}
+
+// Canonical shape-chain lookup. Keeps last-writer-wins semantics for duplicate
+// names and covers entries that were not inserted into the fixed inline hash.
+static inline ShapeEntry* typemap_shape_lookup_last(TypeMap* tm, const char* key, int key_len) {
+    if (!tm) return NULL;
+    ShapeEntry* found = NULL;
+    for (ShapeEntry* e = tm->shape; e; e = e->next) {
+        if (typemap_shape_name_equals(e, key, key_len)) {
+            found = e;
+        }
+    }
+    return found;
+}
+
 // A1: Insert a ShapeEntry into the TypeMap hash table (open addressing, linear probe).
 // Uses last-writer-wins: if a name already exists, the slot is overwritten.
 static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
-    if (!entry || !entry->name) return;
+    if (!tm || !entry || !entry->name) return;
     uint32_t h = typemap_fnv1a(entry->name->str, (int)entry->name->length);
     uint32_t idx = h & (TYPEMAP_HASH_CAPACITY - 1);
     for (int probe = 0; probe < TYPEMAP_HASH_CAPACITY; probe++) {
@@ -289,9 +311,8 @@ static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
             return;
         }
         // last-writer-wins: replace existing entry with same name
-        if (tm->field_index[slot]->name &&
-            tm->field_index[slot]->name->length == entry->name->length &&
-            memcmp(tm->field_index[slot]->name->str, entry->name->str, entry->name->length) == 0) {
+        if (typemap_shape_name_equals(tm->field_index[slot],
+                                      entry->name->str, (int)entry->name->length)) {
             tm->field_index[slot] = entry;
             return;
         }
@@ -304,16 +325,17 @@ static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
 // A6: Uses pointer comparison first (interned strings via name pool share
 // the same char* pointer), falling back to memcmp only on pointer mismatch.
 static inline ShapeEntry* typemap_hash_lookup(TypeMap* tm, const char* key, int key_len) {
-    if (tm->field_count == 0) return NULL;
+    if (!tm || !key || key_len < 0) return NULL;
+    if (tm->field_count == 0 || tm->field_count >= TYPEMAP_HASH_CAPACITY) {
+        return typemap_shape_lookup_last(tm, key, key_len);
+    }
     uint32_t h = typemap_fnv1a(key, key_len);
     uint32_t idx = h & (TYPEMAP_HASH_CAPACITY - 1);
     for (int probe = 0; probe < TYPEMAP_HASH_CAPACITY; probe++) {
         uint32_t slot = (idx + probe) & (TYPEMAP_HASH_CAPACITY - 1);
         ShapeEntry* e = tm->field_index[slot];
         if (!e) return NULL;  // empty slot → not found
-        if (e->name && e->name->str && (e->name->str == key ||  // A6: interned pointer match (fast)
-            (e->name->length == (size_t)key_len &&
-             memcmp(e->name->str, key, key_len) == 0))) {
+        if (typemap_shape_name_equals(e, key, key_len)) {
             return e;
         }
     }

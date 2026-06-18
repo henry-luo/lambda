@@ -247,7 +247,6 @@ static bool js_array_apply_failed_length_shrink(Item obj, int64_t new_len, bool 
         if (pm && pm->type) {
             TypeMap* tm = (TypeMap*)pm->type;
             Item pm_item = (Item){.map = pm};
-            Item deleted = (Item){.item = JS_DELETED_SENTINEL_VAL};
             for (ShapeEntry* entry = tm->shape; entry; entry = entry->next) {
                 if (!entry->name) continue;
                 int name_len = (int)entry->name->length;
@@ -261,8 +260,7 @@ static bool js_array_apply_failed_length_shrink(Item obj, int64_t new_len, bool 
                 if (!js_props_query_configurable(pm, se, name, name_len)) {
                     if (index > highest_nonconfig) highest_nonconfig = index;
                 } else {
-                    Item key = (Item){.item = s2it(heap_create_name(name, name_len))};
-                    js_property_set(pm_item, key, deleted);
+                    js_ordinary_delete(pm_item, name, name_len);
                 }
             }
         }
@@ -898,6 +896,7 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
 extern "C" void js_mark_own_proto_property(Item object);
 extern "C" Item js_object_prevent_extensions(Item obj);
 extern "C" Item js_get_generator_shared_proto(bool is_async);
+Map* js_resolve_object_prototype();
 
 // forward declaration for builtin method check helper
 static bool js_map_has_builtin_method(Map* m, const char* name, int len);
@@ -3984,6 +3983,13 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
     if (get_type_id(method_name) != LMD_TYPE_STRING) return ItemNull;
     String* method = it2s(method_name);
     if (!method) return ItemNull;
+    if (get_type_id(num) == LMD_TYPE_MAP &&
+        js_ordinary_own_status(num, method->chars, (int)method->len) == JS_HAS_DELETED) {
+        Item fn = js_property_access(num, method_name);
+        if (js_check_exception()) return ItemNull;
+        if (get_type_id(fn) == LMD_TYPE_FUNC) return js_call_function(fn, num, args, argc);
+        return js_throw_type_error("method is not a function");
+    }
 
     // BigInt prototype methods
     if (get_type_id(num) == LMD_TYPE_DECIMAL) {
@@ -8363,13 +8369,25 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     if (type == LMD_TYPE_FUNC) {
         // function own properties: length, name, [prototype] + custom from properties_map
         bool has_proto = js_func_has_own_prototype(object); // constructors & generators have prototype
+        JsFuncProps* fn_props = (JsFuncProps*)object.function;
+        bool include_length = true;
+        bool include_name = true;
+        if (fn_props->properties_map.item != 0 && get_type_id(fn_props->properties_map) == LMD_TYPE_MAP) {
+            JsShapeSlotStatus length_status = js_own_shape_slot_status(
+                fn_props->properties_map, "length", 6, NULL, NULL);
+            JsShapeSlotStatus name_status = js_own_shape_slot_status(
+                fn_props->properties_map, "name", 4, NULL, NULL);
+            if (length_status == JS_SHAPE_SLOT_DELETED) include_length = false;
+            if (name_status == JS_SHAPE_SLOT_DELETED) include_name = false;
+        }
         Item result = js_array_new(0);
-        js_array_push(result, (Item){.item = s2it(heap_create_name("length", 6))});
-        js_array_push(result, (Item){.item = s2it(heap_create_name("name", 4))});
+        if (include_length)
+            js_array_push(result, (Item){.item = s2it(heap_create_name("length", 6))});
+        if (include_name)
+            js_array_push(result, (Item){.item = s2it(heap_create_name("name", 4))});
         if (has_proto)
             js_array_push(result, (Item){.item = s2it(heap_create_name("prototype", 9))});
         // Include properties from properties_map (Number.NEGATIVE_INFINITY, static methods, etc.)
-        JsFuncProps* fn_props = (JsFuncProps*)object.function;
         if (fn_props->properties_map.item != 0 && get_type_id(fn_props->properties_map) == LMD_TYPE_MAP) {
             Map* pm = fn_props->properties_map.map;
             if (pm && pm->type) {
@@ -8493,7 +8511,17 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                     bool is_proto = false;
                     js_map_get_fast_ext(m, "__is_proto__", 12, &is_proto);
                     if (is_proto) {
+                        int prev_len = result.array ? result.array->length : 0;
                         js_append_builtin_method_names(LMD_TYPE_STRING, result);
+                        Array* out = result.array;
+                        for (int i = out->length - 1; i >= prev_len; i--) {
+                            String* new_s = it2s(out->items[i]);
+                            if (new_s &&
+                                js_ordinary_own_status(object, new_s->chars, (int)new_s->len) == JS_HAS_DELETED) {
+                                for (int k = i; k < out->length - 1; k++) out->items[k] = out->items[k + 1];
+                                out->length--;
+                            }
+                        }
                     }
                     return result;
                 }
@@ -8609,13 +8637,15 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                     for (int i = arr->length - 1; i >= prev_len; i--) {
                         String* new_s = it2s(arr->items[i]);
                         bool dup = false;
+                        bool deleted = new_s &&
+                            js_ordinary_own_status(object, new_s->chars, (int)new_s->len) == JS_HAS_DELETED;
                         for (int j = 0; j < prev_len; j++) {
                             String* old_s = it2s(arr->items[j]);
                             if (old_s && new_s && old_s->len == new_s->len && memcmp(old_s->chars, new_s->chars, new_s->len) == 0) {
                                 dup = true; break;
                             }
                         }
-                        if (dup) {
+                        if (dup || deleted) {
                             for (int k = i; k < arr->length - 1; k++) arr->items[k] = arr->items[k+1];
                             arr->length--;
                         }
@@ -10789,11 +10819,21 @@ extern "C" Item js_object_spread_into(Item target, Item source) {
 // =============================================================================
 static bool js_map_has_builtin_method(Map* m, const char* name, int len) {
     // Only check builtin methods on actual prototype objects (not instances)
+    if (!m) return false;
     bool ip_own = false;
     js_map_get_fast_ext(m, "__is_proto__", 12, &ip_own);
     if (!ip_own) return false;
     JsClass cls = js_class_id((Item){.map = m});
-    if (cls == JS_CLASS_NONE) return false;
+    if (cls == JS_CLASS_NONE) {
+        Map* object_proto = js_resolve_object_prototype();
+        if (object_proto && m == object_proto) {
+            if (len == 11 && strncmp(name, "constructor", 11) == 0) return true;
+            if (js_lookup_builtin_method(LMD_TYPE_MAP, name, len).item != ItemNull.item) {
+                return true;
+            }
+        }
+        return false;
+    }
     // map class to TypeId for builtin lookup
     TypeId lookup_type = LMD_TYPE_MAP;
     if (cls == JS_CLASS_STRING) lookup_type = LMD_TYPE_STRING;
@@ -10803,6 +10843,13 @@ static bool js_map_has_builtin_method(Map* m, const char* name, int len) {
     else if (cls == JS_CLASS_BOOLEAN) lookup_type = LMD_TYPE_BOOL;
     // Skip "constructor" — handled separately
     if (len == 11 && strncmp(name, "constructor", 11) == 0) return true;
+    // Object.prototype's generic methods are virtual LMD_TYPE_MAP builtins,
+    // not class-specific registry entries. Deleting them must still
+    // materialize a shape tombstone on Object.prototype itself.
+    if (cls == JS_CLASS_OBJECT &&
+        js_lookup_builtin_method(LMD_TYPE_MAP, name, len).item != ItemNull.item) {
+        return true;
+    }
     // Symbol.iterator (__sym_1) is a virtual property on Array and String prototypes
     if (len == 7 && strncmp(name, "__sym_1", 7) == 0) {
         if (lookup_type == LMD_TYPE_ARRAY || lookup_type == LMD_TYPE_STRING) return true;
@@ -12797,33 +12844,17 @@ extern "C" Item js_delete_property(Item obj, Item key) {
 
             }
         }
-        // Mark as deleted in properties_map. The bare-key sentinel write
-        // below is load-bearing for FUNC's virtual properties (length,
-        // name, prototype): they're computed from struct fields and never
-        // materialized in properties_map's shape, so the FUNC `get` branch
-        // intercepts the sentinel slot to shadow the virtual property.
-        //
-        // A2-T9 (post AT-4 Option B): the legacy `__nw_/__ne_/__nc_<key>`
-        // marker-tombstone loop that used to follow has been removed. With
-        // AT-4 Option B, named-property reads via `js_props_query_*` no
-        // longer consult those markers — the shape flag is authoritative —
-        // so tombstoning them was dead work. The shape-aware
-        // non-configurable check above (via `js_props_query_configurable`)
-        // is the spec-correct gate; if it returns true we proceed with the
-        // sentinel write. The original WONTFIX (routing through
-        // `js_ordinary_delete` regressed 35 S15_*_A9 tests because the
-        // kernel short-circuits when the slot is absent) still applies —
-        // FUNC virtual-shadow needs the unconditional sentinel write that
-        // the spec-pure kernel won't emit. Keep the inline write.
-        js_property_set(fn->properties_map, key, (Item){.item = JS_DELETED_SENTINEL_VAL});
-        // A2-T8c dual-write: stamp JSPD_DELETED on the properties_map shape
-        // entry so readers can detect tombstones via shape (in addition to
-        // the slot-value sentinel that this branch writes for FUNC virtual
-        // properties).
-        if (get_type_id(key) == LMD_TYPE_STRING) {
-            String* sk = it2s(key);
+        // Mark as deleted in properties_map. Function virtual properties
+        // (length/name/prototype) are computed from the function struct, so
+        // deleting one may need to materialize a safe backing slot first; the
+        // JSPD_DELETED bit then shadows the virtual value without storing the
+        // dense-array hole sentinel in typed map storage.
+        Item prop_key = js_to_property_key(key);
+        if (get_type_id(prop_key) == LMD_TYPE_STRING) {
+            String* sk = it2s(prop_key);
             if (sk && sk->len > 0) {
-                js_shape_entry_set_deleted(fn->properties_map, sk->chars, (int)sk->len, /*is_deleted=*/true);
+                js_shape_mark_deleted_own(fn->properties_map, sk->chars, (int)sk->len,
+                                           /*create_if_missing=*/true);
             }
         }
         return (Item){.item = b2it(true)};
@@ -12836,9 +12867,7 @@ extern "C" Item js_delete_property(Item obj, Item key) {
             if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
                 if (arr->is_content == 1 && arr->extra != 0) {
                     Item pm_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
-                    Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
-                    js_property_set(pm_item, length_key, (Item){.item = JS_DELETED_SENTINEL_VAL});
-                    js_shape_entry_set_deleted(pm_item, "length", 6, /*is_deleted=*/true);
+                    js_shape_mark_deleted_own(pm_item, "length", 6, /*create_if_missing=*/true);
                     return (Item){.item = b2it(true)};
                 }
                 if (js_strict_mode) {
@@ -12922,14 +12951,8 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                             js_shape_entry_update_flags(pm_item, ks->chars, (int)ks->len, 0,
                                 (uint8_t)(JSPD_NON_WRITABLE | JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE));
                         }
-                        Item bare_k = (Item){.item = s2it(heap_create_name(ks->chars, ks->len))};
-                        js_property_set(pm_item, bare_k, (Item){.item = JS_DELETED_SENTINEL_VAL});
-                        // A2-T8c dual-write: stamp JSPD_DELETED on the
-                        // companion-map shape entry under the digit-string
-                        // name (post-AT-1 the entry exists for accessors
-                        // installed via intercept; no-op otherwise, which
-                        // is fine — the slot-value sentinel still applies).
-                        js_shape_entry_set_deleted(pm_item, ks->chars, (int)ks->len, /*is_deleted=*/true);
+                        js_shape_mark_deleted_own(pm_item, ks->chars, (int)ks->len,
+                                                   /*create_if_missing=*/false);
                     }
                 }
             }
@@ -12961,15 +12984,10 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         return (Item){.item = b2it(true)};
     }
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
-    // Stage A1: canonicalize key via js_to_property_key (Symbol→__sym_N,
-    // INT/FLOAT→decimal string) so marker tombstones below match the shape
-    // entry created at defineProperty time.
-    {
-        TypeId kt0 = get_type_id(key);
-        if (kt0 == LMD_TYPE_INT || kt0 == LMD_TYPE_FLOAT) {
-            key = js_to_property_key(key);
-        }
-    }
+    // Canonicalize key via ToPropertyKey so tombstones match the shape entry
+    // created by the corresponding get/set/defineProperty path.
+    key = js_to_property_key(key);
+    if (js_check_exception()) return (Item){.item = b2it(false)};
     // v95: Track __sym_1 deletion on a map (Array.prototype[Symbol.iterator] may be deleted)
     if (!g_array_sym_iter_ever_set && get_type_id(key) == LMD_TYPE_STRING) {
         String* _dk = it2s(key);
@@ -13017,17 +13035,9 @@ extern "C" Item js_delete_property(Item obj, Item key) {
             }
         }
     }
-    // Mark property as deleted using sentinel value.
-    // Object.keys, hasOwnProperty, in, and JSON.stringify skip sentinel entries.
-    //
-    // Clear descriptor shape flags before setting the sentinel.
-    // js_property_set enforces non-writable checks, which would silently reject
-    // the sentinel write for properties defined via Object.defineProperty with
-    // writable:false (the default). We clear the flags first, then
-    // use js_property_set for the sentinel (which may trigger shape rebuild).
-    //
-    // The attr helpers route through the per-Map shape clone, so sibling Maps
-    // sharing an older TypeMap keep their descriptor flags untouched.
+    // Mark property as deleted through ShapeEntry flags. Object.keys,
+    // hasOwnProperty, in, JSON.stringify, and prototype lookup all read this
+    // through js_own_shape_slot_status/js_ordinary_* helpers.
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* str_key = it2s(key);
         if (str_key && str_key->len > 0 && str_key->len < 200) {
@@ -13037,7 +13047,6 @@ extern "C" Item js_delete_property(Item obj, Item key) {
             int kl = (int)str_key->len;
             const char* kc = str_key->chars;
             ShapeEntry* _se = js_find_shape_entry(obj, kc, kl);
-            // Clear non-writable (allows sentinel write through js_property_set)
             if (!js_props_query_writable(obj.map, _se, kc, kl))
                 js_attr_set_writable(obj, kc, kl, /*writable=*/true);
             // Clear non-configurable
@@ -13046,60 +13055,23 @@ extern "C" Item js_delete_property(Item obj, Item key) {
             // Clear non-enumerable
             if (!js_props_query_enumerable(obj.map, _se, kc, kl))
                 js_attr_set_enumerable(obj, kc, kl, /*enumerable=*/true);
-            // AT-3: legacy __get_<name>/__set_<name> sentinel write retired.
+            // AT-3: legacy __get_<name>/__set_<name> tombstone writes retired.
             // Post-AT-1 accessors are stored as IS_ACCESSOR shape entry under
-            // the property name; the IS_ACCESSOR flag is cleared and the slot
-            // sentinel-written by the block below.
+            // the property name; the helper below clears IS_ACCESSOR and sets
+            // JSPD_DELETED.
         }
     }
-    // For FLOAT-typed fields, fn_map_set's FLOAT→INT widening path converts the
-    // INT sentinel to a double, making it unrecognizable. Fix: first set a BOOL
-    // value (which forces a type rebuild from FLOAT → BOOL), then set the INT sentinel.
     Map* m = obj.map;
-    TypeMap* map_type = m ? (TypeMap*)m->type : NULL;
-    if (map_type && map_type->shape && get_type_id(key) == LMD_TYPE_STRING) {
-        String* str_key = it2s(key);
-        if (str_key) {
-            ShapeEntry* entry = map_type->shape;
-            while (entry) {
-                if (entry->name && entry->name->length == (size_t)str_key->len &&
-                    strncmp(entry->name->str, str_key->chars, str_key->len) == 0) {
-                    if (entry->type->type_id == LMD_TYPE_FLOAT) {
-                        // Force type change from FLOAT → BOOL via rebuild
-                        js_property_set(obj, key, (Item){.item = b2it(false)});
-                    }
-                    break;
-                }
-                entry = entry->next;
-            }
-        }
-    }
-    // Phase 4 / A2-T3: clear IS_ACCESSOR shape flag before writing sentinel.
-    // If the property was an accessor (slot holds JsAccessorPair*), the
-    // sentinel write would leave IS_ACCESSOR set with a stale int sentinel
-    // in the slot — subsequent reads (descriptor synthesis, dispatch) would
-    // dereference the sentinel as a pair pointer and crash. Routed through
-    // the per-Map clone primitive so sibling Maps are unaffected.
-    if (map_type && map_type->shape && get_type_id(key) == LMD_TYPE_STRING) {
+    TypeMap* map_type = (m && js_typemap_ptr_is_plausible(m->type)) ? (TypeMap*)m->type : NULL;
+    if (m && get_type_id(key) == LMD_TYPE_STRING) {
         String* str_key = it2s(key);
         if (str_key && str_key->len > 0) {
-            ShapeEntry* _se = js_find_shape_entry(obj, str_key->chars, (int)str_key->len);
-            if (_se && jspd_is_accessor(_se)) {
-                js_shape_entry_set_accessor(obj, str_key->chars, (int)str_key->len, /*is_accessor=*/false);
+            bool create_if_missing = js_map_has_builtin_method(
+                m, str_key->chars, (int)str_key->len);
+            if ((map_type && map_type->shape) || create_if_missing) {
+                js_shape_mark_deleted_own(obj, str_key->chars, (int)str_key->len,
+                                           create_if_missing);
             }
-        }
-    }
-    js_property_set(obj, key, (Item){.item = JS_DELETED_SENTINEL_VAL});
-    // A2-T8 dual-write: also stamp the JSPD_DELETED bit on the shape entry so
-    // future readers can detect tombstones without consulting the slot value
-    // (avoids the FLOAT-key sentinel-misread bug class). The slot sentinel
-    // continues to be written for back-compat with un-migrated readers; once
-    // all readers move to bit-only probing, this dual-write collapses to the
-    // bit-only call. No-op when no shape entry exists for the key.
-    if (map_type && map_type->shape && get_type_id(key) == LMD_TYPE_STRING) {
-        String* str_key = it2s(key);
-        if (str_key && str_key->len > 0) {
-            js_shape_entry_set_deleted(obj, str_key->chars, (int)str_key->len, /*is_deleted=*/true);
         }
     }
     return (Item){.item = b2it(true)};

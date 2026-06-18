@@ -32,4 +32,4 @@ part of `test_js_gtest.exe` in batch mode and complete in <1s collectively.
 | `metadata_function_custom_attrs.js` | function custom-property enumerability is read from `properties_map` `ShapeEntry::flags`, not `__ne_` marker slots | §20.1.3.4 propertyIsEnumerable |
 | `metadata_regexp_lastindex_attrs.js` | `RegExp.prototype.compile` enforces `lastIndex` writability from `ShapeEntry::flags`, not `__nw_lastIndex` | §22.2.3.1 RegExpAlloc |
 | `metadata_class_identity.js` | public `__class_name__` is an ordinary key; built-in brands use `TypeMap::js_class`, and user classes use constructor/prototype identity | §10.1.1 OrdinaryObjectCreate |
-| `metadata_delete_shape_status.js` | deleted ordinary, function, and array companion-map slots are hidden by centralized shape-slot status and revive cleanly on redefine/write | §10.1.10 OrdinaryDelete |
+| `metadata_delete_shape_status.js` | deleted ordinary, virtual function, custom function, Object.prototype virtual builtin, and array companion-map slots are hidden by centralized shape-slot status; old INT sentinel payloads remain ordinary values | §10.1.10 OrdinaryDelete |

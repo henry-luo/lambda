@@ -237,7 +237,7 @@ class HoleSentinel {
 
 public:
     static uint64_t raw_value() {
-        return ((uint64_t)LMD_TYPE_INT << 56) | 0x00DEAD00DEAD00ULL;
+        return 0x7E00DEAD00DEAD00ULL;
     }
 
     static HoleSentinel make() {
