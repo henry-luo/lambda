@@ -89,7 +89,8 @@ pub fn render(node, context, render_fn) {
         build_frac_nobar(numer_box, denom_box, frac_ctx, cmd,
             is_unbraced_numeric_nobar(node))
     else
-        build_frac_bar(numer_box, denom_box, ns, cl, ds, rule_thickness, frac_ctx)
+        build_frac_bar(numer_box, denom_box, ns, cl, ds, rule_thickness, frac_ctx,
+            cmd == "\\tfrac")
 
     // wrap with delimiters if present
     if (left_delim != null or right_delim != null)
@@ -110,6 +111,8 @@ fn wrap_cfrac_fraction(frac_box) {
         >,
         height: frac_box.height,
         depth: frac_box.depth,
+        height_raw: frac_box.height_raw,
+        depth_raw: frac_box.depth_raw,
         render_height: frac_box.render_height,
         render_depth: frac_box.render_depth,
         render_total: frac_box.render_total,
@@ -126,7 +129,7 @@ fn wrap_cfrac_fraction(frac_box) {
 pub fn render_boxes(numer_box, denom_box, context) {
     let frac_ctx = context
     let frac_box = build_frac_bar(numer_box, denom_box, 0.0, 0.0, 0.0,
-        met.at(met.defaultRuleThickness, met.style_index(frac_ctx.style)), frac_ctx)
+        met.at(met.defaultRuleThickness, met.style_index(frac_ctx.style)), frac_ctx, false)
     wrap_default_fraction(frac_box)
 }
 
@@ -144,8 +147,144 @@ fn build_frac_nobar(numer_box, denom_box, frac_ctx, cmd, unbraced_numeric) {
     build_frac_nobar_vlist(numer_box, denom_box, frac_ctx, cmd, unbraced_numeric)
 }
 
-// Rule 15d: with bar line
-fn build_frac_bar(numer_box, denom_box, ns, cl, ds, rule_thickness, frac_ctx) {
+// Rule 15d: with bar line — dispatcher.
+// Top-level (display-geometry) bar fractions are computed directly from
+// TeXBook Rule 15d + MathLive's makeVList (see frac_bar_geom / build_frac_bar_rule15),
+// with NO hardcoded em constants. Script/scriptscript, \tfrac, colorbox, and
+// composite-child fractions still fall through to the legacy constant table
+// (frac_bar_spec) until their geometry is ported too.
+fn build_frac_bar(numer_box, denom_box, ns, cl, ds, rule_thickness, frac_ctx, text_geom) {
+    let geom = frac_bar_geom(frac_ctx, numer_box, denom_box, text_geom)
+    if (geom != null) build_frac_bar_rule15(numer_box, denom_box, geom)
+    else build_frac_bar_legacy(numer_box, denom_box, ns, cl, ds, rule_thickness, frac_ctx)
+}
+
+// full-precision metric accessors (fall back to rounded when raw absent)
+fn frac_raw_h(bx) { if (bx.height_raw != null) bx.height_raw else bx.height }
+fn frac_raw_d(bx) { if (bx.depth_raw != null) bx.depth_raw else bx.depth }
+
+// Rule 15d geometry, computed from font metrics + sigma constants.
+// Returns a geom record (all em values full precision) or null to fall back to
+// the legacy constant dispatch. Handles only the top-level display-geometry
+// case for now: numer/denom rendered unscaled, shifts num1/denom1.
+fn frac_bar_geom(frac_ctx, numer_box, denom_box, text_geom) {
+    let style = frac_ctx.style
+    let is_script = style == "script" or style == "scriptscript"
+    let has_raw = numer_box.height_raw != null and numer_box.depth_raw != null and
+                  denom_box.height_raw != null and denom_box.depth_raw != null
+    if (is_script or text_geom or frac_ctx.colorbox_content == true or not has_raw)
+        null
+    else {
+        let theta = met.at(met.defaultRuleThickness, 0)   // 0.04
+        let axis = met.AXIS_HEIGHT                          // 0.25
+        let clearance = 3.0 * theta                         // display: 3 theta
+        let n_h = frac_raw_h(numer_box)
+        let n_d = frac_raw_d(numer_box)
+        let d_h = frac_raw_h(denom_box)
+        let d_d = frac_raw_d(denom_box)
+        // Rule 15d: shift numerator up by u, denominator down by v, keeping
+        // each clear of the bar (centred on the axis) by `clearance`.
+        let numer_line = axis + theta / 2.0
+        let denom_line = axis - theta / 2.0
+        let numer_shift = max(met.at(met.num1, 0), clearance + n_d + numer_line)
+        let denom_shift = max(met.at(met.denom1, 0), clearance + d_h - denom_line)
+        let fl_h = theta / 2.0
+        let fl_d = theta / 2.0
+        // MathLive makeVList (individualShift, children bottom->top:
+        // denom @ +denom_shift, fracLine @ -denom_line, numer @ -numer_shift).
+        // currPos accumulates from the initial depth; tops emit as
+        // -pstrut - currPos - box.depth (pstrut added at emission).
+        let depth0 = 0.0 - denom_shift - d_d
+        let denom_end = depth0 + d_h + d_d
+        let diff_fl = denom_line - depth0 - fl_d
+        let cp_fl = depth0 + diff_fl
+        let fl_end = cp_fl + fl_h + fl_d
+        let diff_n = numer_shift - cp_fl - n_d
+        let cp_n = cp_fl + diff_n
+        let numer_end = cp_n + n_h + n_d
+        let pstrut = max(1.0, max(n_h, d_h)) + 2.0
+        let max_pos = max(depth0, max(denom_end, max(cp_fl, max(fl_end, max(cp_n, numer_end)))))
+        let min_pos = min(depth0, min(denom_end, min(cp_fl, min(fl_end, min(cp_n, numer_end)))))
+        {
+            frac_height: max_pos,
+            frac_depth: 0.0 - min_pos,
+            vlist_h: max_pos,
+            depth_holder: 0.0 - min_pos,
+            denom_top: 0.0 - pstrut - depth0 - d_d,
+            line_top: 0.0 - pstrut - cp_fl - fl_d,
+            numer_top: 0.0 - pstrut - cp_n - n_d,
+            numer_ch: n_h + n_d,
+            denom_ch: d_h + d_d,
+            rule_height: theta,
+            pstrut: pstrut
+        }
+    }
+}
+
+// Emit the bar-fraction vlist from a computed geom record. Every CSS dimension
+// is CEIL@2 of a full-precision value (matching MathLive box.ts toString); the
+// box carries a single full-precision height/depth (mirrored into *_raw so the
+// outer strut rounds once via math.ls).
+fn build_frac_bar_rule15(numer_box, denom_box, geom) {
+    let numer_elements = box.elements_of(numer_box)
+    let denom_elements = box.elements_of(denom_box)
+    let numer_style = "height:" ++ util.fmt_em_ceil2(geom.numer_ch) ++ ";display:inline-block"
+    let denom_style = "height:" ++ util.fmt_em_ceil2(geom.denom_ch) ++ ";display:inline-block"
+    let line_style = "height:" ++ util.fmt_em_ceil2(geom.rule_height) ++ ";display:inline-block"
+    let pstrut_style = "height:" ++ util.fmt_em_ceil2(geom.pstrut)
+    let el = <span class: css.VLIST_T2;
+        <span class: css.VLIST_R;
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(geom.vlist_h);
+                <span class: css.CENTER, style: "top:" ++ util.fmt_em_ceil2(geom.denom_top);
+                    <span class: css.PSTRUT, style: pstrut_style>
+                    <span style: denom_style;
+                        for (e in denom_elements) e
+                    >
+                >
+                <span style: "top:" ++ util.fmt_em_ceil2(geom.line_top);
+                    <span class: css.PSTRUT, style: pstrut_style>
+                    <span class: css.FRAC_LINE, style: line_style>
+                >
+                <span class: css.CENTER, style: "top:" ++ util.fmt_em_ceil2(geom.numer_top);
+                    <span class: css.PSTRUT, style: pstrut_style>
+                    <span style: numer_style;
+                        for (e in numer_elements) e
+                    >
+                >
+            >
+            <span class: css.VLIST_S; "​">
+        >
+        <span class: css.VLIST_R;
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(geom.depth_holder)>
+        >
+    >
+    // height/depth are full precision (height_raw/depth_raw carry the same).
+    // render_* are CEIL@2 projections of those values so wrappers that have not
+    // yet migrated to the single-rounding strut path (htmlData/text/script/hbox)
+    // still emit a correct rounded strut. These are COMPUTED from the rule, not
+    // a constant table — the headline debt (frac_bar_spec) is gone for this case.
+    let h_em = util.ceil_em2(geom.frac_height)             // strut height
+    let d_em = 0.0 - util.ceil_em2(0.0 - geom.frac_depth)  // va depth (ceil toward 0)
+    let total_em = util.ceil_em2(geom.frac_height + geom.frac_depth)
+    {
+        element: el,
+        height: h_em,
+        depth: geom.frac_depth,
+        height_raw: geom.frac_height,
+        depth_raw: geom.frac_depth,
+        render_height: h_em,
+        render_depth: d_em,
+        render_total: total_em,
+        width: max(numer_box.width, denom_box.width),
+        type: "mord",
+        italic: 0.0,
+        skew: 0.0,
+        is_fraction: true
+    }
+}
+
+// Rule 15d: with bar line (legacy constant dispatch)
+fn build_frac_bar_legacy(numer_box, denom_box, ns, cl, ds, rule_thickness, frac_ctx) {
     let spec = frac_bar_spec(frac_ctx, numer_box, denom_box)
     let numer_elements = box.elements_of(numer_box)
     let denom_elements = box.elements_of(denom_box)
@@ -1062,6 +1201,8 @@ fn wrap_default_fraction(frac_box) {
         >,
         height: frac_box.height,
         depth: frac_box.depth,
+        height_raw: frac_box.height_raw,
+        depth_raw: frac_box.depth_raw,
         render_height: frac_box.render_height,
         render_depth: frac_box.render_depth,
         render_total: frac_box.render_total,
