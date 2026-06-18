@@ -1724,10 +1724,21 @@ int main(int argc, char *argv[]) {
             // Set up process.argv C-level storage (actual Lambda array built lazily)
             {
                 static const char* js_argv_store[64];
+                static const char* js_exec_argv_store[32];
                 static int js_argc_store = 0;
+                static int js_exec_argc_store = 0;
                 js_argc_store = 0;
+                js_exec_argc_store = 0;
                 js_argv_store[js_argc_store++] = argv[0]; // lambda.exe
                 js_argv_store[js_argc_store++] = js_file; // script path
+                for (int i = 2; i < argc && js_exec_argc_store < 32; i++) {
+                    if (argv[i] == js_file || strcmp(argv[i], js_file) == 0) break;
+                    if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
+                    if (strcmp(argv[i], "--mir-interp") == 0) continue;
+                    if (strcmp(argv[i], "--diagnose") == 0) continue;
+                    if (strncmp(argv[i], "--opt-level=", 12) == 0) continue;
+                    if (argv[i][0] == '-') js_exec_argv_store[js_exec_argc_store++] = argv[i];
+                }
                 // Pass remaining non-option arguments
                 for (int i = 2; i < argc && js_argc_store < 64; i++) {
                     if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
@@ -1738,6 +1749,7 @@ int main(int argc, char *argv[]) {
                     js_argv_store[js_argc_store++] = argv[i];
                 }
                 js_store_process_argv(js_argc_store, js_argv_store);
+                js_store_process_exec_argv(js_exec_argc_store, js_exec_argv_store);
             }
 
             // Tune6: optional per-phase transpile timing + scope-lookup counters,
