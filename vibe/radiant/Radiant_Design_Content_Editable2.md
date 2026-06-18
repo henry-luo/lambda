@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting, conservative whole-wrapper toggle-off, collapsed typing-state inline insertion, and collapsed insertion adjacent-wrapper normalization landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard/history started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, native rich-host `copy`/`cut`/`paste`, and native rich-host `undo`/`redo` event-envelope plus bounded snapshot/selection restore support.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join/inline-cleanup-target-range slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting, conservative whole-wrapper toggle-off, collapsed typing-state inline insertion, and collapsed insertion adjacent-wrapper normalization landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard/history started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, native rich-host `copy`/`cut`/`paste`, native rich-host `undo`/`redo` event-envelope plus bounded snapshot/selection restore support, and keyboard/default-action rich undo/redo integration.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -431,7 +431,28 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
   list/table joins, atomic nodes, modifier variants, and the rest of the broad
   skipped Backspace matrix remain future SI work.
 
-**Current SI verification (2026-06-17):**
+**SI-14 — single-character inline cleanup target range + mutation: LANDED
+(2026-06-18).**
+
+- Added native `beforeinput.getTargetRanges()` coverage for the two WPT
+  inline-wrapper cleanup shapes:
+  `<p>a<span>b[]</span>c</p>` reports a range from the parent before the
+  wrapper to the parent after the wrapper, and
+  `<p>a<span>b</span>[]c</p>` reports a range from the parent before the
+  wrapper to the following text node at offset `0`.
+- Matched the default Backspace mutation path to those target ranges. The
+  caret-inside-inline case already deletes the single text unit then removes
+  the now-empty inline wrapper; the caret-after-inline case now removes the
+  previous ordinary inline wrapper directly instead of treating offset `0` in
+  the following text node as a no-op. Both shapes mutate to `<p>ac</p>` and
+  collapse the caret to the parent at offset `1`.
+- Scope remains intentionally narrow: ordinary cleanup inline tags only, one
+  text leaf, exactly one UTF-16 unit, no nested contenteditable boundary, and
+  no arbitrary inline-fragment flattening. Deeper inline fragments, atomic
+  deletion, list/table joins, whitespace-only edge cases, and modifier variants
+  remain in the skipped Backspace matrix.
+
+**Current SI verification (2026-06-18):**
 
 | Check | Result |
 |---|---|
@@ -458,7 +479,10 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 | Direct simple block-join DOM regression | `ok=true`, `html=<p>abcdef</p>`, `before=deleteContentBackward:1:true,3,true,0`, `input=deleteContentBackward:0` |
 | Direct whitespace block-join DOM regression | offsets 3/2/1/0 all join to `<p>abcdef</p>` with `before=deleteContentBackward:1:true,3,true,3` and `input=deleteContentBackward:0` |
 | Direct inline block-join DOM regression | text/bold, bold/bold, and italic/bold WPT shapes all pass with matching HTML and `before=deleteContentBackward:1:true,3,true,0` |
-| `input-events-get-target-ranges-backspace.tentative` | last measured 45/163 before SI-12/SI-13; remains skipped |
+| Direct inline cleanup target-range DOM regression | after-inline and inside-inline shapes both pass with `html=<p>ac</p>`, empty post-`input` target ranges, and caret at parent offset `1` |
+| `input-events-get-target-ranges-backspace.tentative` | last measured 45/163 before SI-12/SI-14; remains skipped |
+| focused `dom_editing_backspace_inline_cleanup_range` JS gtest | passed |
+| related block-join deletion JS gtests | `dom_editing_block_join_inline`, `dom_editing_block_join`, and `dom_editing_block_join_whitespace` passed |
 | `DomText_EmptyString_Backed` | passed |
 | focused WPT test rebuilds | `test_wpt_contenteditable_gtest` rebuilt |
 | `test_wpt_contenteditable_gtest` | 194 cases: 163 pass / 31 skip / 0 fail |
@@ -467,7 +491,8 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 | `test_js_gtest` | 199 passed / 0 failed; existing memtrack leak diagnostics printed |
 | `make test262-baseline` | not rerun for SI-13; previous SI-9 result was regressions 0; 40261 / 40261 fully passing; retry 0.0s |
 
-**Global gate note:** SI-13's local WPT guards and `test_js_gtest` are green.
+**Global gate note:** SI-14's local DOM regression and related deletion
+guards are green.
 The full `make test262-baseline` gate was not rerun for this block-join slice,
 so the broader SI phase should still run the mandatory §1.1 gate before being
 closed. The phase can keep advancing from the remaining skipped
@@ -1312,6 +1337,46 @@ before declaring the whole EC-6 tier complete.
 **Global gate note:** EC-6e's focused JS regression, full JS suite, and local
 WPT guards are green. The full `make test262-baseline` gate still needs to run
 before declaring the whole EC-6 tier complete.
+
+**EC-6f — keyboard/default-action rich undo/redo integration: LANDED
+(2026-06-18).**
+
+- Rich keyboard history shortcuts now route through the shared
+  `beforeinput -> mutate -> input` transaction path with
+  `historyUndo` / `historyRedo`, rather than stopping at the event-envelope
+  controller callback.
+- Default rich edit transactions capture a pre-mutation HTML/selection snapshot
+  and commit the post-mutation snapshot only when the transaction actually
+  mutates the host, so native keyboard typing/deletion/paste can feed the same
+  bounded rich history used by `execCommand("undo"|"redo")`.
+- The history transaction targets the stable rich editing host instead of the
+  focused text view, so snapshot replay can replace the host subtree without
+  invalidating the active transaction surface.
+- Fixed the restore-path duplicate text root cause in UI-mode DOM append:
+  when `MarkEditor::dom_relink_children` has already linked a text wrapper for
+  a newly appended string, `dom_element_append_text` now reuses that relinked
+  node instead of creating a second wrapper over the same native string.
+- Scope is still bounded to same-host snapshot replay. Semantic command-level
+  grouping, persistent history, and cross-host chronological replay remain
+  future work.
+
+**Current EC verification after EC-6f (2026-06-18):**
+
+| Check | Result |
+|---|---|
+| Rich keyboard history UI regression | `Ctrl+Z` / `Ctrl+Y` still dispatch cancelable `historyUndo` / `historyRedo`; uncanceled rich typing records a snapshot; keyboard undo restores `undo seed`; keyboard redo restores the typed `X` |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing macOS-version linker warnings only |
+| `./lambda.exe view test/ui/test_editing_history_rich.html --event-file test/ui/test_editing_history_rich.json --headless --no-log` | 28 events, 10 assertions passed / 0 failed |
+| `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_history' --gtest_brief=1` | passed |
+| `./test/test_js_gtest.exe --gtest_brief=1` | 222 passed / 0 failed |
+| `./test/test_wpt_selection_gtest.exe --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `./test/test_wpt_contenteditable_gtest.exe --gtest_brief=1` | 194 cases: 160 pass / 31 skip / 3 fail; failures are existing crash-test-style aborts outside the focused keyboard history regression |
+
+**Global gate note:** EC-6f's focused keyboard-history regression, focused JS
+history regression, full JS suite, and local selection WPT guard are green. The
+full contenteditable WPT guard still has three crash-test failures, and the full
+`make test262-baseline` gate still needs to run before declaring the whole EC-6
+tier complete.
 
 ---
 

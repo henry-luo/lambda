@@ -272,6 +272,88 @@ static DomText* target_range_find_text_descendant(DomNode* node, bool last) {
     return found;
 }
 
+static bool target_range_node_is_inside(DomNode* node, DomElement* owner) {
+    DomNode* owner_node = static_cast<DomNode*>(owner);
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        if (cur == owner_node) return true;
+    }
+    return false;
+}
+
+static bool target_range_can_cleanup_inline(DomElement* elem,
+                                            const EditingSurface* surface) {
+    if (!elem || !elem->parent || !elem->parent->is_element()) return false;
+    if (surface && surface->owner == elem) return false;
+    if (dom_element_has_attribute(elem, "contenteditable")) return false;
+    if (!target_range_is_simple_inline_tag(elem->tag())) return false;
+    return elem->first_child && elem->first_child == elem->last_child &&
+        elem->first_child->is_text();
+}
+
+static DomText* target_range_previous_cleanup_inline_text(DomText* text,
+                                                          const EditingSurface* surface) {
+    if (!text || !text->parent || !text->parent->is_element()) return nullptr;
+    DomNode* text_node = static_cast<DomNode*>(text);
+    DomNode* prev = text_node->prev_sibling;
+    if (!prev || !prev->is_element()) return nullptr;
+    DomElement* elem = prev->as_element();
+    if (!target_range_can_cleanup_inline(elem, surface)) return nullptr;
+    return elem->first_child->as_text();
+}
+
+static bool target_range_backspace_empty_inline(DomBoundary caret,
+                                                const EditingSurface* surface,
+                                                EditingTargetRange* out) {
+    if (!out || !surface || !surface->owner || !caret.node) return false;
+    DomText* deleted_text = nullptr;
+    DomBoundary end = caret;
+    bool caret_inside_deleted_text = false;
+
+    if (caret.node->is_text()) {
+        DomText* text = caret.node->as_text();
+        uint32_t text_len = dom_text_utf16_length(text);
+        if (caret.offset == text_len && text_len == 1) {
+            deleted_text = text;
+            caret_inside_deleted_text = true;
+        } else if (caret.offset == 0) {
+            DomText* prev_text = target_range_previous_cleanup_inline_text(
+                text, surface);
+            if (prev_text && dom_text_utf16_length(prev_text) == 1) {
+                deleted_text = prev_text;
+            }
+        }
+    }
+
+    if (!deleted_text || !deleted_text->parent ||
+        !deleted_text->parent->is_element()) {
+        return false;
+    }
+    if (!target_range_node_is_inside(static_cast<DomNode*>(deleted_text),
+            surface->owner)) {
+        return false;
+    }
+
+    DomElement* inline_elem = deleted_text->parent->as_element();
+    if (!target_range_can_cleanup_inline(inline_elem, surface)) {
+        return false;
+    }
+
+    DomNode* inline_node = static_cast<DomNode*>(inline_elem);
+    DomElement* parent = inline_node->parent && inline_node->parent->is_element()
+        ? inline_node->parent->as_element()
+        : nullptr;
+    if (!parent) return false;
+
+    uint32_t inline_idx = dom_node_child_index(inline_node);
+    if (inline_idx == (uint32_t)-1) return false;
+    out[0].start = { static_cast<DomNode*>(parent), inline_idx };
+    if (caret_inside_deleted_text) {
+        end = { static_cast<DomNode*>(parent), inline_idx + 1 };
+    }
+    out[0].end = end;
+    return true;
+}
+
 static bool target_range_backspace_block_join(DomBoundary caret,
                                               EditingTargetRange* out) {
     if (!out || !caret.node || !caret.node->is_text()) {
@@ -386,6 +468,9 @@ uint32_t editing_compute_target_ranges(DocState* state,
     switch (intent->type) {
         case INPUT_INTENT_DELETE_CONTENT_BACKWARD: {
             if (target_range_backspace_block_join(start, out)) {
+                return 1;
+            }
+            if (target_range_backspace_empty_inline(start, surface, out)) {
                 return 1;
             }
             DomBoundary prev = dom_boundary_move(start, DOM_MOD_CHARACTER, -1);
