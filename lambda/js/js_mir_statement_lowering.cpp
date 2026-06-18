@@ -2870,18 +2870,8 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             }
         }
 
-        // Set __class_name__ for instanceof support
-        if (ce->name) {
-            MIR_reg_t cn_key = jm_box_string_literal(mt, "__class_name__", 14);
-            MIR_reg_t cn_val = jm_box_string_literal(mt, ce->name->chars, (int)ce->name->len);
-            jm_call_3(mt, "js_property_set", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, cn_key),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, cn_val));
-        }
-
         // v20: Set __proto__ to the class's prototype object (which already has all
-        // methods, __class_name__, and superclass __proto__ chain from class declaration).
+        // methods and superclass __proto__ chain from class declaration).
         // This avoids copying methods onto each instance — methods live on the prototype
         // and are accessed via the prototype chain, matching ES spec behavior.
         {
@@ -4754,16 +4744,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
                         jm_emit_exc_propagate_check(mt);
                     }
-                    // Create class object with __class_name__ property
                     MIR_reg_t cls_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
                     jm_emit_set_private_class_index(mt, cls_obj, ce);
                     jm_emit_set_class_source(mt, cls_obj, cls_node);
-                    MIR_reg_t cn_key = jm_box_string_literal(mt, "__class_name__", 14);
-                    MIR_reg_t cn_val = jm_box_string_literal(mt, cls_node->name->chars, (int)cls_node->name->len);
-                    jm_call_3(mt, "js_property_set", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cn_key),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cn_val));
                     // Store class object in module var
                     char vname[128];
                     snprintf(vname, sizeof(vname), "_js_%.*s", (int)cls_node->name->len, cls_node->name->chars);
@@ -5003,14 +4986,6 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         jm_call_void_2(mt, "js_set_default_constructor_property",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
-                        {
-                            MIR_reg_t pcn_key = jm_box_string_literal(mt, "__class_name__", 14);
-                            MIR_reg_t pcn_val = jm_box_string_literal(mt, cls_node->name->chars, (int)cls_node->name->len);
-                            jm_call_3(mt, "js_property_set", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, pcn_key),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, pcn_val));
-                        }
                         {
                             JsClassEntry* sc = ce->superclass;
                             MIR_reg_t last_proto = proto_obj;

@@ -5000,6 +5000,10 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_mt->length = field_count;
         new_mt->byte_size = new_byte_size;
         new_mt->type_index = tl->length;
+        new_mt->has_named_shape = old_map_type->has_named_shape;
+        new_mt->struct_name = old_map_type->struct_name;
+        new_mt->is_private_clone = old_map_type->is_private_clone;
+        new_mt->js_class = old_map_type->js_class;
 
         // Populate hash table for O(1) property lookup
         ShapeEntry* he = first;

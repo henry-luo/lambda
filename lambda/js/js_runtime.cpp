@@ -1394,56 +1394,56 @@ extern "C" Item js_constructor_create_object(Item callee) {
                 while (proto.item != ItemNull.item && depth < 16) {
                     TypeId proto_t = get_type_id(proto);
                     if (proto_t == LMD_TYPE_MAP) {
-                        Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-                        Item pcn = js_property_get(proto, cn_key);
-                        if (get_type_id(pcn) == LMD_TYPE_STRING) {
-                            String* pcn_s = it2s(pcn);
-                            if (pcn_s) {
-                                if (pcn_s->len == 5 && strncmp(pcn_s->chars, "Array", 5) == 0) {
-                                    obj = js_array_new(0);
-                                    break;
-                                }
-                                // v37: Map/Set/WeakMap/WeakSet — create collection with internal state
-                                if (pcn_s->len == 3 && strncmp(pcn_s->chars, "Map", 3) == 0) {
-                                    obj = js_map_collection_new();
-                                    break;
-                                }
-                                if (pcn_s->len == 3 && strncmp(pcn_s->chars, "Set", 3) == 0) {
-                                    obj = js_set_collection_new();
-                                    break;
-                                }
-                                if (pcn_s->len == 7 && strncmp(pcn_s->chars, "WeakMap", 7) == 0) {
-                                    extern Item js_weakmap_new(void);
-                                    obj = js_weakmap_new();
-                                    break;
-                                }
-                                if (pcn_s->len == 7 && strncmp(pcn_s->chars, "WeakSet", 7) == 0) {
-                                    extern Item js_weakset_new(void);
-                                    obj = js_weakset_new();
-                                    break;
-                                }
-                                // v37: RegExp — create empty regex
-                                if (pcn_s->len == 6 && strncmp(pcn_s->chars, "RegExp", 6) == 0) {
-                                    extern Item js_regexp_construct(Item pattern, Item flags);
-                                    Item empty = (Item){.item = s2it(heap_create_name("(?:)", 4))};
-                                    Item no_flags = (Item){.item = s2it(heap_create_name("", 0))};
-                                    obj = js_regexp_construct(empty, no_flags);
-                                    break;
-                                }
-                                // v37: Date — create date wrapper
-                                if (pcn_s->len == 4 && strncmp(pcn_s->chars, "Date", 4) == 0) {
-                                    extern Item js_date_new(void);
-                                    obj = js_date_new();
-                                    break;
-                                }
-                                // v37: Promise — create promise
-                                if (pcn_s->len == 7 && strncmp(pcn_s->chars, "Promise", 7) == 0) {
-                                    extern Item js_promise_create_pending(void);
-                                    obj = js_promise_create_pending();
-                                    break;
-                                }
+                        bool created_builtin = false;
+                        switch (js_class_id(proto)) {
+                            case JS_CLASS_ARRAY:
+                                obj = js_array_new(0);
+                                created_builtin = true;
+                                break;
+                            case JS_CLASS_MAP:
+                                obj = js_map_collection_new();
+                                created_builtin = true;
+                                break;
+                            case JS_CLASS_SET:
+                                obj = js_set_collection_new();
+                                created_builtin = true;
+                                break;
+                            case JS_CLASS_WEAK_MAP: {
+                                extern Item js_weakmap_new(void);
+                                obj = js_weakmap_new();
+                                created_builtin = true;
+                                break;
                             }
+                            case JS_CLASS_WEAK_SET: {
+                                extern Item js_weakset_new(void);
+                                obj = js_weakset_new();
+                                created_builtin = true;
+                                break;
+                            }
+                            case JS_CLASS_REGEXP: {
+                                extern Item js_regexp_construct(Item pattern, Item flags);
+                                Item empty = (Item){.item = s2it(heap_create_name("(?:)", 4))};
+                                Item no_flags = (Item){.item = s2it(heap_create_name("", 0))};
+                                obj = js_regexp_construct(empty, no_flags);
+                                created_builtin = true;
+                                break;
+                            }
+                            case JS_CLASS_DATE: {
+                                extern Item js_date_new(void);
+                                obj = js_date_new();
+                                created_builtin = true;
+                                break;
+                            }
+                            case JS_CLASS_PROMISE: {
+                                extern Item js_promise_create_pending(void);
+                                obj = js_promise_create_pending();
+                                created_builtin = true;
+                                break;
+                            }
+                            default:
+                                break;
                         }
+                        if (created_builtin) break;
                         proto = js_get_prototype(proto);
                     } else {
                         break;
@@ -2076,10 +2076,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             js_has_pending_new_target = false;
             return js_throw_type_error("Function.prototype is not a constructor");
         }
-        bool class_name_own = false;
         bool ctor_own = false;
         bool instance_proto_own = false;
-        Item class_name = js_map_get_fast(callee.map, "__class_name__", 14, &class_name_own);
         Item ctor = js_map_get_fast(callee.map, "__ctor__", 8, &ctor_own);
         Item instance_proto = js_map_get_fast(callee.map, "__instance_proto__", 18, &instance_proto_own);
         if (instance_proto.item == ItemNull.item) {
@@ -2093,15 +2091,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 }
             }
         }
-        if (class_name.item == ItemNull.item) {
-            Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
-            Item public_name = js_property_get(callee, name_key);
-            if (public_name.item != ItemNull.item && get_type_id(public_name) != LMD_TYPE_UNDEFINED) {
-                class_name = public_name;
-            }
-        }
         // Only treat maps as constructable when they carry constructor/prototype class metadata.
-        // Instances may also have __class_name__, but `new instance` must still throw.
         if (ctor.item == ItemNull.item && instance_proto.item == ItemNull.item) {
             // Plain object — not a constructor
             js_pending_new_target = ItemNull;
@@ -2130,10 +2120,6 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             Item result = js_typed_array_construct(subclass_ta_type, arg, off, tlen, argc);
             if (get_type_id(result) == LMD_TYPE_MAP) {
                 js_set_prototype(result, construction_proto);
-                if (class_name.item != ItemNull.item) {
-                    Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-                    js_property_set(result, cn_key, class_name);
-                }
             }
             if (ctor_own && get_type_id(ctor) == LMD_TYPE_FUNC) {
                 js_pending_new_target = callee;
@@ -2173,10 +2159,6 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 if (js_check_exception()) return ItemNull;
                 TypeId rtt = get_type_id(result);
                 if (rtt == LMD_TYPE_MAP || rtt == LMD_TYPE_ARRAY || rtt == LMD_TYPE_ELEMENT) {
-                    // Note: do NOT overwrite __class_name__ here — the base
-                    // [[Construct]] already tagged the instance's class (e.g.
-                    // JS_CLASS_BOOLEAN via its TypeMap), and adding a property
-                    // would reset that tag and break brand checks (valueOf, etc.).
                     js_init_class_instance_fields(callee, result);
                 }
                 return result;
@@ -2215,20 +2197,11 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             if (construction_proto.item != ItemNull.item && get_type_id(construction_proto) == LMD_TYPE_MAP) {
                 js_set_prototype(result, construction_proto);
             }
-            if (class_name.item != ItemNull.item) {
-                Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-                js_property_set(result, cn_key, class_name);
-            }
             Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
             js_property_set(result, ctor_key, callee);
             js_mark_non_enumerable(result, ctor_key);
             js_init_class_instance_fields(callee, result);
             return result;
-        }
-        // Copy __class_name__ from the class object
-        if (class_name.item != ItemNull.item) {
-            Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-            js_property_set(obj, cn_key, class_name);
         }
         // v18c: Set constructor property (instance.constructor === Class)
         Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
@@ -3819,19 +3792,12 @@ extern "C" Item js_property_get(Item object, Item key) {
             }
             // v18c: .constructor fallback — return appropriate constructor when not found
             if (!_np_is_null_proto && str_key->len == 11 && strncmp(str_key->chars, "constructor", 11) == 0) {
-                // T5a: prefer typed JsClass byte; fall back to legacy string read
-                // (user-defined classes still write `__class_name__`).
-                JsClass cls_c = js_class_get(object);
+                JsClass cls_c = js_class_id(object);
                 if (cls_c != JS_CLASS_NONE) {
                     const char* cn_name = js_class_to_name(cls_c);
                     if (cn_name) {
                         return js_get_constructor((Item){.item = s2it(heap_create_name(cn_name, (int)strlen(cn_name)))});
                     }
-                }
-                bool cn_own = false;
-                Item cn = js_map_get_fast(object.map, "__class_name__", 14, &cn_own);
-                if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
-                    return js_get_constructor(cn);
                 }
                 // Plain object — return Object constructor
                 Item obj_name = (Item){.item = s2it(heap_create_name("Object", 6))};
@@ -4271,47 +4237,16 @@ extern "C" Item js_property_get(Item object, Item key) {
                 if (fn->prototype.item == ItemNull.item) {
                     fn->prototype = js_new_object();
                     heap_register_gc_root(&fn->prototype.item);
-                    // v18o: Set __class_name__ on built-in constructor prototypes
-                    // This enables type-specific builtin method resolution on MAPs.
+                    // Stamp built-in constructor prototypes so type-specific
+                    // builtin method resolution works without public markers.
                     if (fn->name) {
                         const char* nm = fn->name->chars;
                         int nl = (int)fn->name->len;
-                        // Set __class_name__ for known constructors
-                        bool needs_class_name = 
-                            (nl == 5 && strncmp(nm, "Array", 5) == 0) ||
-                            (nl == 6 && strncmp(nm, "String", 6) == 0) ||
-                            (nl == 6 && strncmp(nm, "Number", 6) == 0) ||
-                            (nl == 7 && strncmp(nm, "Boolean", 7) == 0) ||
-                            (nl == 6 && strncmp(nm, "BigInt", 6) == 0) ||
-                            (nl == 6 && strncmp(nm, "Object", 6) == 0) ||
-                            (nl == 8 && strncmp(nm, "Function", 8) == 0) ||
-                            (nl == 4 && strncmp(nm, "Date", 4) == 0) ||
-                            (nl == 6 && strncmp(nm, "RegExp", 6) == 0) ||
-                            (nl == 5 && strncmp(nm, "Error", 5) == 0) ||
-                            (nl == 9 && strncmp(nm, "TypeError", 9) == 0) ||
-                            (nl == 10 && strncmp(nm, "RangeError", 10) == 0) ||
-                            (nl == 11 && strncmp(nm, "SyntaxError", 11) == 0) ||
-                            (nl == 14 && strncmp(nm, "ReferenceError", 14) == 0) ||
-                            (nl == 8 && strncmp(nm, "URIError", 8) == 0) ||
-                            (nl == 9 && strncmp(nm, "EvalError", 9) == 0) ||
-                            (nl == 14 && strncmp(nm, "AggregateError", 14) == 0) ||
-                            (nl == 6 && strncmp(nm, "Symbol", 6) == 0) ||
-                            (nl == 7 && strncmp(nm, "Promise", 7) == 0) ||
-                            (nl == 7 && strncmp(nm, "WeakRef", 7) == 0) ||
-                            (nl == 20 && strncmp(nm, "FinalizationRegistry", 20) == 0);
-                        if (needs_class_name) {
-                            Item cnk = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-                            Item cnv = (Item){.item = s2it(heap_create_name(nm, nl))};
-                            js_property_set(fn->prototype, cnk, cnv);
-                            // v26: mark as prototype object for builtin method enumeration
+                        JsClass cls = js_class_from_name(nm, nl);
+                        if (cls != JS_CLASS_NONE) {
                             Item ipk = (Item){.item = s2it(heap_create_name("__is_proto__", 12))};
                             js_property_set(fn->prototype, ipk, (Item){.item = b2it(true)});
-                            // A3-T3a: dual-write the typed JsClass byte alongside the
-                            // legacy `__class_name__` string. The dispatch fast-path
-                            // (js_proto_class_method_dispatch) prefers the byte; legacy
-                            // readers continue to consult the string.
-                            JsClass cls = js_class_from_name(nm, nl);
-                            if (cls != JS_CLASS_NONE) js_class_stamp(fn->prototype, cls);
+                            js_class_stamp(fn->prototype, cls);
                         }
                         // Array.prototype.length = 0 (per spec, Array.prototype is an Array exotic object)
                         if (nl == 5 && strncmp(nm, "Array", 5) == 0) {
@@ -4629,10 +4564,6 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                         // DataView.prototype methods
                         if (nl == 8 && strncmp(nm, "DataView", 8) == 0) {
-                            // Add __class_name__ since DataView is not in needs_class_name
-                            Item cnk = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-                            Item cnv = (Item){.item = s2it(heap_create_name("DataView", 8))};
-                            js_property_set(fn->prototype, cnk, cnv);
                             js_class_stamp(fn->prototype, JS_CLASS_DATA_VIEW);
                             // Symbol.toStringTag
                             Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
@@ -4644,10 +4575,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                         // ArrayBuffer.prototype methods
                         if (nl == 11 && strncmp(nm, "ArrayBuffer", 11) == 0) {
-                            // __class_name__
-                            Item cnk = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-                            Item cnv = (Item){.item = s2it(heap_create_name("ArrayBuffer", 11))};
-                            js_property_set(fn->prototype, cnk, cnv);
+                            js_class_stamp(fn->prototype, JS_CLASS_ARRAY_BUFFER);
                             // Symbol.toStringTag
                             Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
                             Item tag_val = (Item){.item = s2it(heap_create_name("ArrayBuffer", 11))};
@@ -4658,9 +4586,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                         // SharedArrayBuffer.prototype methods
                         if (nl == 17 && strncmp(nm, "SharedArrayBuffer", 17) == 0) {
-                            Item cnk = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-                            Item cnv = (Item){.item = s2it(heap_create_name("SharedArrayBuffer", 17))};
-                            js_property_set(fn->prototype, cnk, cnv);
+                            js_class_stamp(fn->prototype, JS_CLASS_SHARED_ARRAY_BUFFER);
                             Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
                             Item tag_val = (Item){.item = s2it(heap_create_name("SharedArrayBuffer", 17))};
                             js_property_set(fn->prototype, tag_key, tag_val);
@@ -7528,9 +7454,8 @@ extern "C" Item js_new_check_constructor_return(Item obj, Item result) {
 }
 
 extern "C" void js_set_internal_class_name(Item obj, Item class_name) {
-    if (js_is_proxy(obj)) obj = js_proxy_get_target(obj);
-    Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-    js_property_set(obj, cn_key, class_name);
+    (void)obj;
+    (void)class_name;
 }
 
 // =============================================================================
@@ -8309,30 +8234,20 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                         return (Item){.item = s2it(heap_create_name(buf, blen))};
                     }
                 }
-                // Use class identity for the tag when it matches a built-in type.
-                // T5a: prefer typed JsClass byte; fall back to legacy `__class_name__` string.
+                // Use stamped class identity for the tag when it matches a built-in type.
                 const char* c = NULL;
                 int cl = 0;
-                JsClass jc = js_class_get(this_val);
+                JsClass jc = js_class_id(this_val);
                 if (jc != JS_CLASS_NONE) {
                     const char* nm = js_class_to_name(jc);
                     if (nm) { c = nm; cl = (int)strlen(nm); }
-                }
-                if (!c) {
-                    bool own_cn = false;
-                    Item cn = js_map_get_fast(m, "__class_name__", 14, &own_cn);
-                    if (own_cn && get_type_id(cn) == LMD_TYPE_STRING) {
-                        String* cn_str = it2s(cn);
-                        if (cn_str && cn_str->len > 0) { c = cn_str->chars; cl = (int)cn_str->len; }
-                    }
                 }
                 if (c) {
                         // Map class names to ES spec builtinTag
                         const char* tag = NULL;
                         int tag_len = 0;
                         // Error and subclasses → "Error" (only for instances, not prototypes)
-                        if ((cl >= 5 && strncmp(c + cl - 5, "Error", 5) == 0) ||
-                            (cl == 14 && strncmp(c, "AggregateError", 14) == 0)) {
+                        if (js_class_is_error_like(jc)) {
                             // ES spec: [[ErrorData]] is only on error instances, not prototypes
                             bool is_proto = false;
                             js_map_get_fast(m, "__is_proto__", 12, &is_proto);
@@ -8458,21 +8373,13 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 bool found = false;
                 js_map_get_fast(m, "__rd", 4, &found);
                 if (found) return (Item){.item = s2it(heap_create_name("[object RegExp]", 15))};
-                // T5a: prefer typed JsClass byte; fall back to legacy `__class_name__` string.
+                // Use stamped class identity for built-in tags.
                 const char* cnchars = NULL;
                 int cnlen = 0;
-                JsClass jc2 = js_class_get(this_val);
+                JsClass jc2 = js_class_id(this_val);
                 if (jc2 != JS_CLASS_NONE) {
                     const char* nm = js_class_to_name(jc2);
                     if (nm) { cnchars = nm; cnlen = (int)strlen(nm); }
-                }
-                if (!cnchars) {
-                    found = false;
-                    Item cn = js_map_get_fast(m, "__class_name__", 14, &found);
-                    if (found && get_type_id(cn) == LMD_TYPE_STRING) {
-                        String* cns = it2s(cn);
-                        if (cns) { cnchars = cns->chars; cnlen = (int)cns->len; }
-                    }
                 }
                 if (cnchars) {
                         if (cnlen == 4 && memcmp(cnchars, "Date", 4) == 0)
@@ -8481,10 +8388,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                         bool is_proto = false;
                         js_map_get_fast(m, "__is_proto__", 12, &is_proto);
                         if (!is_proto) {
-                            if (cnlen == 5 && memcmp(cnchars, "Error", 5) == 0)
-                                return (Item){.item = s2it(heap_create_name("[object Error]", 14))};
-                            // Check for error subtypes
-                            if (cnlen >= 5 && memcmp(cnchars + cnlen - 5, "Error", 5) == 0)
+                            if (js_class_is_error_like(jc2))
                                 return (Item){.item = s2it(heap_create_name("[object Error]", 14))};
                         }
                         if (cnlen == 3 && memcmp(cnchars, "Map", 3) == 0)
@@ -9210,7 +9114,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     }
     case JS_BUILTIN_FUNC_HAS_INSTANCE: {
         // Function.prototype[@@hasInstance](V) — ES spec §19.2.3.6
-        if (get_type_id(this_val) != LMD_TYPE_FUNC && !js_is_proxy(this_val) && !js_is_function_prototype_map(this_val)) {
+        TypeId this_type = get_type_id(this_val);
+        bool is_callable_class_map = this_type == LMD_TYPE_MAP && js_is_constructor_internal(this_val);
+        if (this_type != LMD_TYPE_FUNC && !js_is_proxy(this_val) &&
+            !js_is_function_prototype_map(this_val) && !is_callable_class_map) {
             return (Item){.item = ITEM_FALSE};
         }
         return js_ordinary_has_instance(arg0, this_val);
@@ -10085,13 +9992,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_SYM_TO_STRING: {
         Item sym = this_val;
         // If this is a Symbol wrapper object, unwrap __primitiveValue__
-        if (get_type_id(this_val) == LMD_TYPE_MAP) {
-            Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-            Item cn = js_property_get(this_val, cn_key);
-            if (get_type_id(cn) == LMD_TYPE_STRING && it2s(cn)->len == 6 && strncmp(it2s(cn)->chars, "Symbol", 6) == 0) {
-                Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-                sym = js_property_get(this_val, pv_key);
-            }
+        if (get_type_id(this_val) == LMD_TYPE_MAP && js_class_id(this_val) == JS_CLASS_SYMBOL) {
+            Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
+            sym = js_property_get(this_val, pv_key);
         }
         return js_symbol_to_string(sym);
     }
@@ -10101,14 +10004,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         if (get_type_id(this_val) == LMD_TYPE_INT && it2i(this_val) <= -(int64_t)JS_SYMBOL_BASE) {
             return this_val;
         }
-        if (get_type_id(this_val) == LMD_TYPE_MAP) {
-            Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-            Item cn = js_property_get(this_val, cn_key);
-            if (get_type_id(cn) == LMD_TYPE_STRING && it2s(cn)->len == 6 && strncmp(it2s(cn)->chars, "Symbol", 6) == 0) {
-                Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-                Item pv = js_property_get(this_val, pv_key);
-                if (get_type_id(pv) == LMD_TYPE_INT && it2i(pv) <= -(int64_t)JS_SYMBOL_BASE) return pv;
-            }
+        if (get_type_id(this_val) == LMD_TYPE_MAP && js_class_id(this_val) == JS_CLASS_SYMBOL) {
+            Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
+            Item pv = js_property_get(this_val, pv_key);
+            if (get_type_id(pv) == LMD_TYPE_INT && it2i(pv) <= -(int64_t)JS_SYMBOL_BASE) return pv;
         }
         if (builtin_id == JS_BUILTIN_SYM_VALUE_OF) {
             js_throw_type_error("Symbol.prototype.valueOf requires that 'this' be a Symbol");
@@ -10125,14 +10024,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         if (get_type_id(this_val) == LMD_TYPE_INT && it2i(this_val) <= -(int64_t)JS_SYMBOL_BASE) {
             return js_symbol_get_description(this_val);
         }
-        if (get_type_id(this_val) == LMD_TYPE_MAP) {
-            Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-            Item cn = js_property_get(this_val, cn_key);
-            if (get_type_id(cn) == LMD_TYPE_STRING && it2s(cn)->len == 6 && strncmp(it2s(cn)->chars, "Symbol", 6) == 0) {
-                Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-                Item pv = js_property_get(this_val, pv_key);
-                return js_symbol_get_description(pv);
-            }
+        if (get_type_id(this_val) == LMD_TYPE_MAP && js_class_id(this_val) == JS_CLASS_SYMBOL) {
+            Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
+            Item pv = js_property_get(this_val, pv_key);
+            return js_symbol_get_description(pv);
         }
         js_throw_type_error("Symbol.prototype.description requires that 'this' be a Symbol");
         return ItemNull;
@@ -13878,9 +13773,6 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     // Per ES §22.2.3.1 RegExpAlloc: lastIndex is {writable:true, enumerable:false, configurable:false}
     js_mark_non_enumerable(regex_obj, li_key);
     js_mark_non_configurable(regex_obj, li_key);
-    heap_create_name("__class_name__", 14);
-    Item cn_val = (Item){.item = s2it(heap_create_name("RegExp", 6))};
-    js_regex_put_fresh(regex_obj, "__class_name__", 14, cn_val);
     js_class_stamp(regex_obj, JS_CLASS_REGEXP);
     // v90: set __proto__ so prototype chain overrides (delete/reassign Symbol.matchAll etc.) work
     Item regexp_proto = js_get_regexp_prototype();
@@ -15362,10 +15254,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     // Per ES §22.2.3.1: lastIndex is {writable:true, enumerable:false, configurable:false}
     js_mark_non_enumerable(regex_obj, li_key);
     js_mark_non_configurable(regex_obj, li_key);
-    // v46: set __class_name__ for RegExp prototype method resolution
-    Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-    Item cn_val = (Item){.item = s2it(heap_create_name("RegExp", 6))};
-    js_property_set(regex_obj, cn_key, cn_val);
+    js_class_stamp(regex_obj, JS_CLASS_REGEXP);
     // v90: set __proto__ so prototype chain overrides work
     Item regexp_proto = js_get_regexp_prototype();
     if (regexp_proto.item != ItemNull.item) {
@@ -19032,16 +18921,6 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 JsClass cls = js_class_id(obj);
                 if (cls == JS_CLASS_TEXT_ENCODER || cls == JS_CLASS_TEXT_DECODER) {
                     is_text_codec = true;
-                } else {
-                    // legacy fallback for unstamped instances
-                    bool has_cls = false;
-                    Item cls_v = js_map_get_fast(obj.map, "__class_name__", 14, &has_cls);
-                    if (has_cls && get_type_id(cls_v) == LMD_TYPE_STRING) {
-                        String* cname = it2s(cls_v);
-                        if ((cname->len == 11 && memcmp(cname->chars, "TextEncoder", 11) == 0) ||
-                            (cname->len == 11 && memcmp(cname->chars, "TextDecoder", 11) == 0))
-                            is_text_codec = true;
-                    }
                 }
             }
             if (is_text_codec) {
@@ -19095,22 +18974,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     }
                 }
                 // v20: Error.prototype.toString — "name: message" format.
-                // Use the suffix string check (covers TypeError/RangeError/SyntaxError/etc.
-                // which are not enumerated in JsClass). The js_class_id check
-                // covers Error/AggregateError directly.
                 {
                     JsClass cls_e = js_class_id(obj);
-                    if (cls_e == JS_CLASS_ERROR || cls_e == JS_CLASS_AGGREGATE_ERROR) {
+                    if (js_class_is_error_like(cls_e)) {
                         return js_to_string(obj);
-                    }
-                    bool cn_own = false;
-                    Item cn = js_map_get_fast(obj.map, "__class_name__", 14, &cn_own);
-                    if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
-                        String* cn_str = it2s(cn);
-                        if (cn_str && cn_str->len >= 5 &&
-                            strncmp(cn_str->chars + cn_str->len - 5, "Error", 5) == 0) {
-                            return js_to_string(obj);
-                        }
                     }
                 }
                 // v18l: Wrapper objects (Number, String, Boolean) — delegate to primitive methods
@@ -20151,7 +20018,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             // ES5: String wrapper MAP — extract __primitiveValue__ directly to avoid
             // ToPrimitive recursion (calling js_to_string on a String wrapper MAP
             // re-enters here through toString/valueOf prototype dispatch).
-            // String.prototype itself has __class_name__="String" but no
+            // String.prototype itself has the String class tag but no
             // __primitiveValue__; per ES5 [[StringData]] = "" so default to empty.
             if (get_type_id(str) == LMD_TYPE_MAP) {
                 if (js_class_id(str) == JS_CLASS_STRING) {
@@ -26091,12 +25958,10 @@ static void js_wrapper_set_proto(Item obj, const char* ctor_name, int ctor_len) 
     }
 }
 
-// Create a Number wrapper object: new Number(42) → {__class_name__: "Number", __primitiveValue__: 42}
+// Create a Number wrapper object with [[NumberData]] in __primitiveValue__.
 extern "C" Item js_new_number_wrapper(Item arg) {
     Item obj = js_new_object();
-    Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-    Item cn_val = (Item){.item = s2it(heap_create_name("Number", 6))};
-    js_property_set(obj, cn_key, cn_val);
+    js_class_stamp(obj, JS_CLASS_NUMBER);
     Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
     js_property_set(obj, pv_key, js_to_number(arg));
     js_wrapper_set_proto(obj, "Number", 6);
@@ -26119,9 +25984,7 @@ extern "C" Item js_new_number_checked(Item arg) {
 // Create a Boolean wrapper object
 extern "C" Item js_new_boolean_wrapper(Item arg) {
     Item obj = js_new_object();
-    Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-    Item cn_val = (Item){.item = s2it(heap_create_name("Boolean", 7))};
-    js_property_set(obj, cn_key, cn_val);
+    js_class_stamp(obj, JS_CLASS_BOOLEAN);
     Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
     js_property_set(obj, pv_key, js_to_boolean(arg));
     js_wrapper_set_proto(obj, "Boolean", 7);
@@ -26131,9 +25994,7 @@ extern "C" Item js_new_boolean_wrapper(Item arg) {
 // Create a String wrapper object
 extern "C" Item js_new_string_wrapper(Item arg) {
     Item obj = js_new_object();
-    Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-    Item cn_val = (Item){.item = s2it(heap_create_name("String", 6))};
-    js_property_set(obj, cn_key, cn_val);
+    js_class_stamp(obj, JS_CLASS_STRING);
     Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
     Item str_val = js_to_string(arg);
     js_property_set(obj, pv_key, str_val);
@@ -26159,9 +26020,7 @@ extern "C" Item js_to_object(Item value) {
     // Symbol wrapper must be checked before number (symbols are encoded as negative ints)
     if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
         Item obj = js_new_object();
-        Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-        Item cn_val = (Item){.item = s2it(heap_create_name("Symbol", 6))};
-        js_property_set(obj, cn_key, cn_val);
+        js_class_stamp(obj, JS_CLASS_SYMBOL);
         Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
         js_property_set(obj, pv_key, value);
         js_wrapper_set_proto(obj, "Symbol", 6);
@@ -26172,9 +26031,7 @@ extern "C" Item js_to_object(Item value) {
     if (type == LMD_TYPE_DECIMAL && js_is_bigint(value)) {
         // BigInt wrapper object with __primitiveValue__
         Item obj = js_new_object();
-        Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-        Item cn_val = (Item){.item = s2it(heap_create_name("BigInt", 6))};
-        js_property_set(obj, cn_key, cn_val);
+        js_class_stamp(obj, JS_CLASS_BIGINT);
         Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
         js_property_set(obj, pv_key, value);
         js_wrapper_set_proto(obj, "BigInt", 6);
@@ -26301,12 +26158,9 @@ extern "C" Item js_get_prototype(Item object) {
 
 // Resolve the effective prototype of `object` for property-chain walking.
 // If `object` has an own `__proto__` slot, return it. Otherwise synthesize the
-// implicit prototype from `__class_name__`: e.g. an instance with __class_name__
-// "Date" implicitly inherits from Date.prototype, which in turn inherits from
-// Object.prototype. This unifies behavior with `Object.getPrototypeOf` (which
-// performs the same constructor-based fallback in `js_get_prototype_of`) so that
-// user-added properties on built-in prototypes are visible during property
-// lookup, not just the small set of built-in methods dispatched via class name.
+// implicit prototype from the stamped built-in class byte. This unifies behavior
+// with `Object.getPrototypeOf` so that user-added properties on built-in
+// prototypes are visible during property lookup.
 //
 // Returns ItemNull only at the top of the chain (Object.prototype itself, or
 // when the explicit `__proto__` slot holds the null sentinel).
@@ -26319,22 +26173,25 @@ static Item js_get_implicit_proto(Item object) {
         if (raw.item == ITEM_JS_UNDEFINED) return ItemNull;
         return raw;
     }
+    // Class constructor maps are callable objects. They do not carry a public
+    // class-name marker, so route their implicit prototype through Function.
+    bool own_instance_proto = false;
+    js_map_get_fast_ext(m, "__instance_proto__", 18, &own_instance_proto);
+    if (own_instance_proto) {
+        Item func_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
+        if (get_type_id(func_ctor) != LMD_TYPE_FUNC) return ItemNull;
+        Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+        Item func_proto = js_property_get(func_ctor, proto_key);
+        if (get_type_id(func_proto) != LMD_TYPE_MAP) return ItemNull;
+        return func_proto;
+    }
     // No own __proto__ slot — synthesize from class identity.
-    // T5a: prefer typed JsClass byte; fall back to legacy `__class_name__` string
-    // (user-defined classes still write the string).
     const char* cls = "Object";
     int cls_len = 6;
-    JsClass jc = js_class_get(object);
+    JsClass jc = js_class_id(object);
     if (jc != JS_CLASS_NONE) {
         const char* nm = js_class_to_name(jc);
         if (nm) { cls = nm; cls_len = (int)strlen(nm); }
-    } else {
-        bool cn_found = false;
-        Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &cn_found);
-        if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
-            String* s = it2s(cn);
-            if (s && s->len > 0) { cls = s->chars; cls_len = (int)s->len; }
-        }
     }
     // Look up the constructor and read its `.prototype` property.
     Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name(cls, cls_len))});
@@ -26362,8 +26219,7 @@ static Item js_get_implicit_proto(Item object) {
 // toString on Boolean.prototype before the walk continues to Object.prototype
 // (which physically owns the generic Object.toString).
 // A3-T3c: per-class dispatch helper, parameterized by JsClass. Called
-// from js_proto_class_method_dispatch after class identity is resolved
-// (either via the typed byte or the legacy `__class_name__` strncmp).
+// from js_proto_class_method_dispatch after class identity is resolved.
 // Returns ItemNull when the key doesn't match any class-specific method
 // or when the class has no dispatch table.
 static Item js_proto_class_dispatch_for_class(JsClass cls, const char* key_str, int key_len) {
@@ -26402,10 +26258,8 @@ static Item js_proto_class_dispatch_for_class(JsClass cls, const char* key_str, 
 // toString on Boolean.prototype before the walk continues to Object.prototype
 // (which physically owns the generic Object.toString).
 //
-// A3-T3c: class identity is resolved once (typed byte first, legacy
-// `__class_name__` strncmp as fallback for unstamped prototypes), then
-// dispatched through the unified js_proto_class_dispatch_for_class table.
-// No more dual-table maintenance.
+// Class identity is resolved once from the stamped byte, then dispatched
+// through the unified js_proto_class_dispatch_for_class table.
 static Item js_proto_class_method_dispatch(Item proto, const char* key_str, int key_len) {
     if (!key_str || key_len <= 0) return ItemNull;
     if (get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
@@ -26414,20 +26268,8 @@ static Item js_proto_class_method_dispatch(Item proto, const char* key_str, int 
     js_map_get_fast_ext(pm, "__is_proto__", 12, &ip_own);
     if (!ip_own) return ItemNull;
 
-    // Fast path: typed JsClass byte stamped at prototype-creation time.
-    JsClass cls = js_class_get(proto);
-    if (cls == JS_CLASS_NONE) {
-        // Legacy fallback: read the `__class_name__` string property and
-        // map it to a JsClass tag. Kept for any prototype path that hasn't
-        // been stamped yet (full retirement at A3-T5).
-        bool cn_own = false;
-        Item cn = js_map_get_fast_ext(pm, "__class_name__", 14, &cn_own);
-        if (!cn_own || get_type_id(cn) != LMD_TYPE_STRING) return ItemNull;
-        String* cn_str = it2s(cn);
-        if (!cn_str) return ItemNull;
-        cls = js_class_from_name(cn_str->chars, (int)cn_str->len);
-        if (cls == JS_CLASS_NONE) return ItemNull;
-    }
+    JsClass cls = js_class_id(proto);
+    if (cls == JS_CLASS_NONE) return ItemNull;
     return js_proto_class_dispatch_for_class(cls, key_str, key_len);
 }
 
@@ -26461,7 +26303,7 @@ extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_fou
             }
         }
     }
-    // walk up the chain via implicit __proto__ (own slot, or synthesized from __class_name__)
+    // walk up the chain via implicit __proto__
     Item proto = js_get_implicit_proto(object);
     int depth = 0;
     while (proto.item != ItemNull.item && depth < 32) {
@@ -26542,7 +26384,7 @@ extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_fou
         // Phase 5: legacy __get_<key> proto-level probe removed. The IS_ACCESSOR
         // fast-path above handles all accessor dispatch on each proto level.
         // Class-specific built-in method dispatch: if `proto` is a built-in
-        // prototype (has __is_proto__ + __class_name__), check class-specific
+        // prototype, check class-specific
         // methods (Boolean.prototype.toString, Date.prototype.getTime, etc.)
         // before walking to the next proto level. This prevents Object.prototype's
         // physical generic methods from incorrectly shadowing class-specific ones.
@@ -28296,9 +28138,7 @@ static Item js_promise_to_item(JsPromise* p) {
     Item obj = js_new_object();
     String* key = heap_create_name("__promise_idx", 13);
     js_property_set(obj, (Item){.item = s2it(key)}, (Item){.item = i2it(idx)});
-    // Set __class_name__ for instanceof Promise support
-    String* cn_key = heap_create_name("__class_name__", 14);
-    js_property_set(obj, (Item){.item = s2it(cn_key)}, (Item){.item = s2it(heap_create_name("Promise", 7))});
+    js_class_stamp(obj, JS_CLASS_PROMISE);
     // Set __proto__ to Promise.prototype so methods are inherited
     js_wrapper_set_proto(obj, "Promise", 7);
     p->wrapper = obj;
@@ -32443,10 +32283,7 @@ extern "C" Item js_text_encoder_new(void) {
     Item k = (Item){.item = s2it(heap_create_name("encoding"))};
     Item v = (Item){.item = s2it(heap_create_name("utf-8"))};
     js_property_set(obj, k, v);
-    // Mark as TextEncoder for method dispatch
-    Item type_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
-    Item type_val = (Item){.item = s2it(heap_create_name("TextEncoder"))};
-    js_property_set(obj, type_key, type_val);
+    js_class_stamp(obj, JS_CLASS_TEXT_ENCODER);
     return obj;
 }
 
@@ -32481,10 +32318,7 @@ extern "C" Item js_text_decoder_new(Item encoding_item) {
     Item k = (Item){.item = s2it(heap_create_name("encoding"))};
     Item v = (Item){.item = s2it(heap_create_name(enc))};
     js_property_set(obj, k, v);
-    // Mark as TextDecoder for method dispatch
-    Item type_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
-    Item type_val = (Item){.item = s2it(heap_create_name("TextDecoder"))};
-    js_property_set(obj, type_key, type_val);
+    js_class_stamp(obj, JS_CLASS_TEXT_DECODER);
     return obj;
 }
 

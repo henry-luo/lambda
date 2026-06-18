@@ -15,6 +15,7 @@
  * - pipeline(src, ...transforms, dst, cb) — pipe chain with error handling
  */
 #include "js_runtime.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -65,7 +66,6 @@ static Item key_finished;
 static Item key_destroyed;
 static Item key_listeners;
 static Item key_buffer;
-static Item key_class_name;
 static bool keys_init = false;
 
 static void ensure_keys() {
@@ -86,7 +86,6 @@ static void ensure_keys() {
     key_destroyed= make_string_item("__destroyed__");
     key_listeners= make_string_item("__listeners__");
     key_buffer   = make_string_item("__buffer__");
-    key_class_name = make_string_item("__class_name__");
     keys_init = true;
 }
 
@@ -387,7 +386,7 @@ extern "C" Item js_readable_new(Item opts) {
     ensure_keys();
     Item obj = js_new_object();
 
-    js_property_set(obj, key_class_name, make_string_item("Readable"));
+    js_class_stamp(obj, JS_CLASS_READABLE);
     js_property_set(obj, key_readable, (Item){.item = b2it(true)});
     js_property_set(obj, key_flowing, (Item){.item = b2it(false)});
     js_property_set(obj, key_ended, (Item){.item = b2it(false)});
@@ -543,7 +542,7 @@ extern "C" Item js_writable_new(Item opts) {
     ensure_keys();
     Item obj = js_new_object();
 
-    js_property_set(obj, key_class_name, make_string_item("Writable"));
+    js_class_stamp(obj, JS_CLASS_WRITABLE);
     js_property_set(obj, key_writable, (Item){.item = b2it(true)});
     js_property_set(obj, key_finished, (Item){.item = b2it(false)});
     js_property_set(obj, key_destroyed, (Item){.item = b2it(false)});
@@ -571,7 +570,7 @@ extern "C" Item js_duplex_new(Item opts) {
     ensure_keys();
     Item obj = js_new_object();
 
-    js_property_set(obj, key_class_name, make_string_item("Duplex"));
+    js_class_stamp(obj, JS_CLASS_DUPLEX);
     js_property_set(obj, key_readable, (Item){.item = b2it(true)});
     js_property_set(obj, key_writable, (Item){.item = b2it(true)});
     js_property_set(obj, key_flowing, (Item){.item = b2it(false)});
@@ -667,7 +666,7 @@ extern "C" Item js_transform_new(Item opts) {
     ensure_keys();
     Item obj = js_new_object();
 
-    js_property_set(obj, key_class_name, make_string_item("Transform"));
+    js_class_stamp(obj, JS_CLASS_TRANSFORM);
     js_property_set(obj, key_readable, (Item){.item = b2it(true)});
     js_property_set(obj, key_writable, (Item){.item = b2it(true)});
     js_property_set(obj, key_flowing, (Item){.item = b2it(false)});
@@ -714,7 +713,7 @@ extern "C" Item js_passthrough_transform(Item self, Item chunk, Item encoding, I
 
 extern "C" Item js_passthrough_new(Item opts) {
     Item obj = js_transform_new(opts);
-    js_property_set(obj, key_class_name, make_string_item("PassThrough"));
+    js_class_stamp(obj, JS_CLASS_PASS_THROUGH);
     // set default _transform for pass-through behavior
     js_property_set(obj, make_string_item("_transform"),
                     js_new_function((void*)js_passthrough_transform, 4));

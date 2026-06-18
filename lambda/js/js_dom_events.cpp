@@ -868,10 +868,7 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
             (Item){.item = s2it(heap_create_name("defaultPrevented"))}, dp_desc);
     }
 
-    // Stamp class identity (T5b: typed JsClass byte; legacy `__class_name__`
-    // string write retired). `event instanceof Event` resolves via the byte
-    // path (or the suffix-string fallback for any subclass not in the enum).
-    js_class_stamp(event, JS_CLASS_EVENT);  // A3-T3b
+    js_class_stamp(event, JS_CLASS_EVENT);
     event_apply_new_target_prototype(event);
 
     return event;
@@ -887,8 +884,7 @@ Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable
     event_set_item(event, "detail", detail);
     Item ice_key = (Item){.item = s2it(heap_create_name("initCustomEvent"))};
     js_property_set(event, ice_key, js_new_function((void*)js_event_init_custom_event, 4));
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(event, JS_CLASS_CUSTOM_EVENT);  // A3-T3b
+    js_class_stamp(event, JS_CLASS_CUSTOM_EVENT);
     return event;
 }
 
@@ -926,8 +922,7 @@ Item js_create_event_target(void) {
     js_property_set(et, ael, js_new_function((void*)js_eventtarget_add_listener, 3));
     js_property_set(et, rel, js_new_function((void*)js_eventtarget_remove_listener, 3));
     js_property_set(et, dis, js_new_function((void*)js_eventtarget_dispatch, 1));
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(et, JS_CLASS_EVENT_TARGET);  // A3-T3b
+    js_class_stamp(et, JS_CLASS_EVENT_TARGET);
     return et;
 }
 
@@ -935,7 +930,7 @@ Item js_create_event_target(void) {
 // Event subclasses (UIEvent / MouseEvent / KeyboardEvent / FocusEvent /
 // WheelEvent / CompositionEvent). Each is a thin wrapper that builds the
 // base Event object then stamps in the dictionary fields with the spec
-// defaults. __class_name__ is set so `instanceof` works via the name fallback.
+// defaults.
 // ============================================================================
 
 static Item read_init(Item init, const char* key) {
@@ -1003,16 +998,8 @@ static Item init_item(Item init, const char* key) {
 }
 
 static void stamp_class(Item ev, const char* name) {
-    // A3-T3b: dual-write legacy `__class_name__` string AND typed JsClass
-    // byte. T6 attempted to skip the string write for enumerated classes
-    // but broke `Props.SuperSet_FindsInheritedSetter` via an indirect
-    // input.cpp map_put assertion; root cause not pursued. Helper still
-    // needs the string for unenumerated subclasses (UIEvent / MouseEvent /
-    // KeyboardEvent / FocusEvent / WheelEvent / CompositionEvent).
-    js_property_set(ev,
-        (Item){.item = s2it(heap_create_name("__class_name__"))},
-        (Item){.item = s2it(heap_create_name(name))});
-    js_class_stamp(ev, js_class_from_name(name, (int)strlen(name)));
+    JsClass cls = js_class_from_name(name, (int)strlen(name));
+    if (cls != JS_CLASS_NONE) js_class_stamp(ev, cls);
 }
 
 // EventModifierInit dict members shared by Mouse/Keyboard.
@@ -1210,9 +1197,7 @@ static Item js_input_event_snapshot_range(Item range) {
 
 static bool js_input_event_is_static_range(Item range) {
     if (get_type_id(range) != LMD_TYPE_MAP) return false;
-    Item key = (Item){.item = s2it(heap_create_name("__class_name__"))};
-    const char* class_name = fn_to_cstr(js_property_get(range, key));
-    return class_name && strcmp(class_name, "StaticRange") == 0;
+    return js_class_id(range) == JS_CLASS_STATIC_RANGE;
 }
 
 static void js_input_event_throw_dom_exception(const char* name, const char* message) {
@@ -1741,13 +1726,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
         // when the event's class is `MouseEvent` (or descendant such as
         // PointerEvent). A plain `Event("click")` does not trigger any
         // legacy-pre-activation steps.
-        Item cls_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
-        Item cls_val = js_property_get(event_item, cls_key);
-        const char* cls = fn_to_cstr(cls_val);
-        bool is_mouse_event = cls && (
-            strcmp(cls, "MouseEvent") == 0 ||
-            strcmp(cls, "PointerEvent") == 0 ||
-            strcmp(cls, "WheelEvent") == 0);
+        bool is_mouse_event = js_class_is_mouse_event_like(js_class_id(event_item));
         void* node_ptr = is_mouse_event ? js_dom_unwrap_element(elem_item) : nullptr;
         if (node_ptr) {
             DomNode* node = (DomNode*)node_ptr;

@@ -13281,7 +13281,6 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
     case JS_AST_NODE_CLASS_DECLARATION:
     case JS_AST_NODE_CLASS_EXPRESSION: {
         // Class expression: var X = class Y {} or var X = class {}
-        // Return an object with __class_name__ for instanceof support.
         JsClassNode* cls_expr = (JsClassNode*)expr;
         MIR_reg_t cls_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
         MIR_reg_t ctor_super_val = 0;
@@ -13332,14 +13331,6 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             jm_call_void_1(mt, "js_check_class_heritage_constructor",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, checked_heritage_val));
             jm_emit_exc_propagate_check(mt);
-        }
-        if (effective_name) {
-            MIR_reg_t cn_key = jm_box_string_literal(mt, "__class_name__", 14);
-            MIR_reg_t cn_val = jm_box_string_literal(mt, effective_name->chars, (int)effective_name->len);
-            jm_call_3(mt, "js_property_set", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, cn_key),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, cn_val));
         }
             // Inherit static methods from parent classes (base-first, then own overrides)
             if (ce) {
@@ -13508,15 +13499,6 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 jm_call_void_2(mt, "js_set_default_constructor_property",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
-                // Set __class_name__ on prototype for instanceof chain
-                if (effective_name) {
-                    MIR_reg_t pcn_key = jm_box_string_literal(mt, "__class_name__", 14);
-                    MIR_reg_t pcn_val = jm_box_string_literal(mt, effective_name->chars, (int)effective_name->len);
-                    jm_call_3(mt, "js_property_set", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, pcn_key),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, pcn_val));
-                }
                 // Set up prototype's __proto__ chain for instanceof on parent classes
                 {
                     JsClassEntry* sc = ce->superclass;
@@ -14125,7 +14107,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_super_val));
             }
-        log_debug("js-mir: class expression evaluated with __class_name__");
+        log_debug("js-mir: class expression evaluated with prototype identity");
         return cls_obj;
     }
     default:

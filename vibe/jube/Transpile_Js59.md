@@ -2,7 +2,7 @@
 
 Date: 2026-06-17
 
-Status: proposal with P1/P2/P3 and post-P3 non-P4 leftovers landed. Js58 closed the sparse-array work with a clean ES2024 baseline. Js59 finishes the object/property metadata migration described in `doc/dev/js/JS_06_Objects_Properties_Prototypes.md`: retire engine dependence on string-marker metadata (`__nw_` / `__ne_` / `__nc_` / `__get_` / `__set_` / `__class_name__`) and make `ShapeEntry::flags`, `JsAccessorPair`, and `TypeMap::js_class` the only ordinary metadata sources.
+Status: P1/P2/P3, post-P3 non-P4 leftovers, and P4 class-identity migration are implemented. P5/P6 remain. Js58 closed the sparse-array work with a clean ES2024 baseline. Js59 finishes the object/property metadata migration described in `doc/dev/js/JS_06_Objects_Properties_Prototypes.md`: retire engine dependence on string-marker metadata (`__nw_` / `__ne_` / `__nc_` / `__get_` / `__set_` / `__class_name__`) and make `ShapeEntry::flags`, `JsAccessorPair`, and `TypeMap::js_class` the only ordinary metadata sources.
 
 This is a correctness and maintainability proposal, not a performance-tuning proposal. The rule for every phase is: no hard-coded workaround, no MIR patch, no parser regeneration, and no broad refactor unless the phase root cause requires it.
 
@@ -38,6 +38,15 @@ Landed on 2026-06-17:
 - Function custom-property checks now treat `JS_DELETED_SENTINEL_VAL` slots as absent before consulting `properties_map` shape flags.
 - `RegExp.prototype.compile` now enforces `lastIndex` writability with the `lastIndex` `ShapeEntry` and `js_props_query_writable`; it no longer probes `__nw_lastIndex`.
 - Added `test/js/props/metadata_function_custom_attrs.{js,txt}` and `test/js/props/metadata_regexp_lastindex_attrs.{js,txt}`.
+- P4 class identity migration is implemented.
+- `JsClass` now covers the remaining engine-known classes previously routed through `__class_name__`, including error subclasses, DOM event subclasses, Selection/Range-adjacent classes, clipboard wrappers, shared array buffers, and Node stream wrappers.
+- `js_class_id` is byte-only. User properties named `__class_name__` are ordinary properties and cannot spoof RegExp/Error/Event/etc. brands.
+- Built-in wrappers, Date, RegExp, Promise, TextEncoder/TextDecoder, FormData/Blob/File, clipboard, DOM events, CSS nested declarations, readable/writable stream stubs, and Node streams now stamp `TypeMap::js_class` instead of writing the public marker.
+- User-defined class lowering no longer emits `__class_name__` on class objects, prototypes, or instances; `instanceof` uses constructor/prototype identity.
+- `instanceof`, `Object.prototype.toString`, implicit prototype synthesis, prototype method dispatch, util/assert predicates, and EventEmitter error handling now use enum identity or explicit prototype links instead of marker reads/string duck-typing.
+- `Function.prototype[@@hasInstance]` now treats constructor-like class MAPs as callable constructors and delegates to ordinary prototype-chain identity instead of rejecting them before `instanceof` can run its class-map path.
+- Class constructor maps synthesize `Function.prototype` through implicit-prototype lookup, and map shape rebuilds preserve `TypeMap::js_class` so wrapper prototypes keep their brand after delete/redefine operations.
+- Added `test/js/props/metadata_class_identity.{js,txt}` and documented it in `test/js/props/README.md`.
 
 Verified gates:
 
@@ -51,6 +60,8 @@ make build-test
 ./test/test_js_gtest.exe --gtest_brief=1
 ./test/test_js_test262_gtest.exe --batch-only --run-async --batch-file=temp/js59_p3_regressions.txt --jobs=1 --batch-chunk-size=1 --async-chunk-size=1 --write-failures=temp/js59_p3_regressions_failures.tsv
 make test262-baseline
+./lambda.exe js test/js/props/metadata_class_identity.js --no-log
+make build-test
 ```
 
 Results:
@@ -61,13 +72,16 @@ Results:
 - Focused P3 metadata/sparse/descriptors/delete/freeze/tagged-template shard: 23/23 passed.
 - Focused post-P3 non-P4 leftover shard: 2/2 passed.
 - Targeted P3 Test262 regression rerun: 19/19 passed, failed 0.
-- Latest full JS gtest: 221/221 passed.
+- Focused P4 Test262 regression slice: 14/14 passed, failed 0.
+- Latest full JS gtest: 223/223 passed.
 - test262 baseline: first full P3 run fully passed 40261 / 40261, failed 0, regressions 0.
 - Latest post-P3 non-P4 cleanup test262 baseline: fully passed 40261 / 40261, failed 0, regressions 0.
+- P4 direct fixture: `metadata_class_identity` output matched expected.
+- P4 build gate: `make build-test` passed.
+- Latest P4 test262 baseline: fully passed 40261 / 40261, failed 0, regressions 0.
 
 Remaining work:
 
-- P4 still owns `__class_name__` retirement in favor of `TypeMap::js_class` and explicit prototype identity.
 - P5/P6 still own deleted-state cleanup and final documentation.
 
 ## 1. Starting Baseline
@@ -276,6 +290,14 @@ Acceptance:
 - `metadata_class_identity`, `class_advanced`, `promise_subclass_prealloc`, `native_backing_props`, `util_promisify`, Node module gtests that use util/assert, and existing class props fixtures pass.
 - `rg -n '"__class_name__"' lambda/js` contains no executable engine metadata write/read for built-in dispatch. User-facing display names may remain only under ordinary property names such as `name`.
 - Full `./test/test_js_gtest.exe --gtest_brief=1` and `make test262-baseline` pass.
+
+Landed evidence:
+
+- `metadata_class_identity` confirms public `__class_name__` is ordinary, built-in RegExp/Date/wrapper brands come from `TypeMap::js_class`, user-defined classes do not receive engine marker slots, class constructors keep function behavior, and subclass/instance identity uses prototype links.
+- `Function.prototype[@@hasInstance]` now accepts constructor-like class MAPs, so `new C() instanceof C` and explicit `Function.prototype[Symbol.hasInstance].call(C, c)` both reach ordinary prototype identity.
+- `map_rebuild_for_type_change` preserves the `TypeMap::js_class` byte, so deleting/redefining properties on built-in wrapper prototypes does not erase their `Object.prototype.toString` brand.
+- Full `./test/test_js_gtest.exe --gtest_brief=1` passed 223/223.
+- `make test262-baseline` fully passed 40261 / 40261 with failed 0 and regressions 0.
 
 ### P5 - Centralize Deleted/Tombstone Semantics For Ordinary Maps
 

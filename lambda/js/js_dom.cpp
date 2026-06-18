@@ -5455,16 +5455,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
         if (strcmp(prop, "Selection") == 0 || strcmp(prop, "Range") == 0) {
             Item global_ctor = js_get_global_property(prop_name);
             if (get_type_id(global_ctor) == LMD_TYPE_FUNC) return global_ctor;
-            // Class stub: a Map with __class_name__ so `instanceof` works.
-            // js_instanceof_classname fast-paths on the name to call our
-            // js_dom_item_is_selection / js_dom_item_is_range checks.
-            extern Item js_new_object();
-            extern Item js_property_set(Item obj, Item key, Item value);
-            Item ctor = js_new_object();
-            String* cn = heap_create_name(prop);
-            Item key = (Item){.item = s2it(heap_create_name("__class_name__"))};
-            js_property_set(ctor, key, (Item){.item = s2it(cn)});
-            return ctor;
+            return ItemNull;
         }
     }
 

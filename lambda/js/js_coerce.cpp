@@ -62,9 +62,9 @@ static bool js_is_class_constructor_map_for_coerce(Item value) {
     bool has_instance_proto = false;
     js_map_get_fast_ext(value.map, "__instance_proto__", 18, &has_instance_proto);
     if (has_instance_proto) return true;
-    bool has_class_name = false;
-    js_map_get_fast_ext(value.map, "__class_name__", 14, &has_class_name);
-    return has_class_name;
+    bool has_ctor = false;
+    js_map_get_fast_ext(value.map, "__ctor__", 8, &has_ctor);
+    return has_ctor;
 }
 
 static bool js_is_callable_proxy_target_for_coerce(Item value) {

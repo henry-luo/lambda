@@ -547,10 +547,7 @@ extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
         }
         js_property_set(obj, stack_key, (Item){.item = s2it(heap_create_name(buf, len))});
     }
-    // Set __class_name__ for instanceof support
-    Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-    js_property_set(obj, cn_key, name_val);
-    js_class_stamp(obj, JS_CLASS_ERROR);  // A3-T3b — js_new_error always uses "Error"
+    js_class_stamp(obj, JS_CLASS_ERROR);
     // Set __proto__ to Error.prototype so prototype methods (toString) are found
     {
         Item ctor_fn = js_get_constructor(name_val);
@@ -614,16 +611,16 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
         }
         js_property_set(obj, stack_key, (Item){.item = s2it(heap_create_name(buf, len))});
     }
-    // Set __class_name__ for instanceof support
-    Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-    js_property_set(obj, cn_key, error_name);
-    // A3-T3b: typed JsClass byte. Subtype-specific names (TypeError,
-    // RangeError, etc.) collapse to JS_CLASS_ERROR for now — they share
-    // the same prototype-chain dispatch.
+    // Stamp typed class identity. Unknown engine-created names ending in
+    // "Error" still get generic Error identity.
     {
         String* en = (get_type_id(error_name) == LMD_TYPE_STRING) ? it2s(error_name) : NULL;
-        JsClass ec = (en && en->len == 14 && !strncmp(en->chars, "AggregateError", 14))
-            ? JS_CLASS_AGGREGATE_ERROR : JS_CLASS_ERROR;
+        JsClass ec = en ? js_class_from_name(en->chars, (int)en->len) : JS_CLASS_ERROR;
+        if (ec == JS_CLASS_NONE && en && en->len >= 5 &&
+            !strncmp(en->chars + en->len - 5, "Error", 5)) {
+            ec = JS_CLASS_ERROR;
+        }
+        if (ec == JS_CLASS_NONE) ec = JS_CLASS_ERROR;
         js_class_stamp(obj, ec);
     }
     // v18c: Set .constructor for assert.throws / constructor identity checks

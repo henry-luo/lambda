@@ -22,6 +22,25 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item);
 extern "C" Item js_symbol_for(Item desc);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 
+struct JsUtilFunctionView {
+    TypeId type_id;
+    void* func_ptr;
+    int param_count;
+    Item* env;
+    int env_size;
+    Item prototype;
+    Item bound_this;
+    Item* bound_args;
+    int bound_argc;
+    String* name;
+    int builtin_id;
+    Item properties_map;
+    uint16_t flags;
+};
+
+#define JS_UTIL_FUNC_FLAG_GENERATOR 1
+#define JS_UTIL_FUNC_FLAG_ASYNC 128
+
 // Helper: make JS undefined
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
@@ -936,19 +955,8 @@ extern "C" Item js_util_types_isBuffer(Item obj) {
 extern "C" Item js_util_types_isError(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
     JsClass cls = js_class_id(obj);
-    if (cls == JS_CLASS_ERROR || cls == JS_CLASS_AGGREGATE_ERROR ||
-        cls == JS_CLASS_ABORT_ERROR || cls == JS_CLASS_DOM_EXCEPTION) {
+    if (js_class_is_error_like(cls) || cls == JS_CLASS_DOM_EXCEPTION) {
         return (Item){.item = b2it(true)};
-    }
-    // Legacy duck-type: any __class_name__ ending in "Error" (covers user-defined
-    // subclasses + non-stamped builtins like TypeError/RangeError/SyntaxError
-    // whose JsClass tag is JS_CLASS_ERROR via from_name fallback OR via the
-    // js_new_error_with_name path that doesn't yet have per-name JsClass tags).
-    Item cn = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cn) == LMD_TYPE_STRING) {
-        String* s = it2s(cn);
-        if (s && s->len >= 5 && memcmp(s->chars + s->len - 5, "Error", 5) == 0)
-            return (Item){.item = b2it(true)};
     }
     // check for .message + .stack
     Item msg = js_property_get(obj, make_string_item("message"));
@@ -1046,7 +1054,6 @@ extern "C" Item js_util_types_isSymbolObject(Item obj) {
 }
 
 extern "C" Item js_util_types_isNativeError(Item obj) {
-    // same as isError — checks __class_name__ ending in "Error"
     return js_util_types_isError(obj);
 }
 
@@ -1072,13 +1079,8 @@ extern "C" Item js_util_types_isExternal(Item obj) {
 
 extern "C" Item js_util_types_isGeneratorFunction(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_FUNC) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cn) == LMD_TYPE_STRING) {
-        String* s = it2s(cn);
-        if (s && s->len == 17 && memcmp(s->chars, "GeneratorFunction", 17) == 0)
-            return (Item){.item = b2it(true)};
-    }
-    return (Item){.item = b2it(false)};
+    JsUtilFunctionView* fn = (JsUtilFunctionView*)obj.function;
+    return (Item){.item = b2it(fn && (fn->flags & JS_UTIL_FUNC_FLAG_GENERATOR))};
 }
 
 extern "C" Item js_util_types_isGeneratorObject(Item obj) {
@@ -1087,13 +1089,9 @@ extern "C" Item js_util_types_isGeneratorObject(Item obj) {
 
 extern "C" Item js_util_types_isAsyncFunction(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_FUNC) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cn) == LMD_TYPE_STRING) {
-        String* s = it2s(cn);
-        if (s && s->len == 13 && memcmp(s->chars, "AsyncFunction", 13) == 0)
-            return (Item){.item = b2it(true)};
-    }
-    return (Item){.item = b2it(false)};
+    JsUtilFunctionView* fn = (JsUtilFunctionView*)obj.function;
+    return (Item){.item = b2it(fn && (fn->flags & JS_UTIL_FUNC_FLAG_ASYNC) &&
+        !(fn->flags & JS_UTIL_FUNC_FLAG_GENERATOR))};
 }
 
 extern "C" Item js_util_types_isMapIterator(Item obj) {
