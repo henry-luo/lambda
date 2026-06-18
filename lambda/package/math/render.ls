@@ -154,10 +154,19 @@ fn render_relation(node, context) {
     // If this is a command-form relation (e.g., \uparrow, \downarrow), look
     // up its Unicode glyph. The grammar tokenizes these as relation nodes
     // rather than commands, so render_command's symbol lookup isn't invoked.
-    let display = if (len(text) > 0 and slice(text, 0, 1) == "\\") {
+    let display0 = if (len(text) > 0 and slice(text, 0, 1) == "\\") {
         let unicode = sym.lookup_symbol(text)
         if (unicode != null) unicode else text
     } else text
+    // The `<`/`>` relation glyphs are emitted RAW by MathLive inside top-level
+    // math `lm_cmr` spans (unlike text-mode `<`/`>`, e.g. inside `\text{...}`,
+    // which it escapes). Carry them as private-use sentinels (U+E000/U+E001)
+    // that the HTML serializer maps back to raw glyphs after entity-escaping
+    // everything else. Skip the sentinel for inline math embedded in text.
+    let raw_lt_gt = context.text_embedded != true
+    let display = if (raw_lt_gt and display0 == "<") "\u{E000}"
+        else if (raw_lt_gt and display0 == ">") "\u{E001}"
+        else display0
     // ASCII `!` is mclose in TeX math, not mrel — `n!` should typeset
     // without thickspace between the letter and the factorial.
     let atom_type = if (text == "!") "mclose" else "mrel"
@@ -805,8 +814,12 @@ fn render_text_inline_math_content(content) {
         let before_box = if (before != "") box.text_box(before, css.TEXT, "mord") else null
         let parse_src = inline_text_math_parse_source(math_src)
         let ast^err = parse(parse_src, {type: "math", flavor: "latex"})
+        // Mark inline math embedded in \text{...}: MathLive escapes `<`/`>`
+        // here (text-mode semantics) rather than emitting them raw as it does
+        // for top-level math relations.
+        let embedded_ctx = ctx.derive(ctx.text_context(), {text_embedded: true})
         let math_box = if (^err) box.text_box("$" ++ math_src ++ "$", css.TEXT, "mord")
-            else render_node(ast, ctx.text_context())
+            else render_node(ast, embedded_ctx)
         let math_gap = if (before_box != null) box.skip_box(0.17) else null
         let after_box = if (after != "") box.text_box(after, css.TEXT, "mord") else null
         transparent_hbox([before_box, math_gap, math_box, after_box])
@@ -1994,16 +2007,22 @@ fn render_sqrt_index(index_box, context, compact_index) {
     let is_sized = context.size > 1.0
     let is_compact = is_sized or compact_index
     let elements = if (is_empty) ["\u00A0"] else box.elements_of(index_box)
-    let h = if (is_script and is_empty) 0.27
-        else if (is_empty) 0.33
-        else if (is_sized) 0.64
-        else if (is_compact) 0.65
-        else 0.78
+    // The radical index renders at scriptscript scale (font-size 50%). Its
+    // content-wrapper height is the index glyph's metric height × 0.5 (CEIL@2)
+    // — e.g. `n` (0.43056) → 0.22, not the old hardcoded 0.33. The vlist
+    // height follows as -top - 3 + child_h.
+    let idx_h_raw = if (index_box.height_raw != null) index_box.height_raw else index_box.height
+    let derived_child = util.ceil_em2(idx_h_raw * 0.5)
     let top = if (is_script and is_empty) -3.26
         else if (is_empty) -3.32
         else if (is_compact) -3.32
         else -3.45
-    let child_h = if (is_empty) 0.0 else if (is_sized) 0.32 else 0.33
+    let child_h = if (is_empty) 0.0 else if (is_sized) 0.32 else derived_child
+    let h = if (is_script and is_empty) 0.27
+        else if (is_empty) 0.33
+        else if (is_sized) 0.64
+        else if (is_compact) (0.0 - top - 3.0 + child_h)
+        else 0.78
     let child_font = if (is_script and is_empty) "71.43%"
         else if (is_sized) "48.24%"
         else "50%"

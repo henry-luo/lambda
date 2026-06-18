@@ -50,17 +50,27 @@ pub fn box_styled(cls, style, height, depth, width, box_type) => {
     skew: 0.0
 }
 
-// create a box from a text string (leaf node)
+// create a box from a text string (leaf node). The element keeps `text`
+// verbatim (which may carry the U+E000/U+E001 `<`/`>` raw-emit sentinels),
+// while metric lookups use the de-sentinelized form so heights/widths come
+// from the real `<`/`>` glyph metrics.
 pub fn text_box(text, cls, box_type) => {
     element: text_element(text, cls),
-    height: text_height_for(text, cls),
-    depth: text_depth_for(text, cls),
-    height_raw: text_height_raw_for(text, cls),
-    depth_raw: text_depth_raw_for(text, cls),
+    height: text_height_for(metric_text(text), cls),
+    depth: text_depth_for(metric_text(text), cls),
+    height_raw: text_height_raw_for(metric_text(text), cls),
+    depth_raw: text_depth_raw_for(metric_text(text), cls),
     width: met.DEFAULT_CHAR_WIDTH * float(len(text)),
     type: box_type,
     italic: 0.0,
     skew: 0.0
+}
+
+// Map the raw-emit sentinels back to their real glyphs for metric lookup.
+fn metric_text(text) {
+    if (text == "\u{E000}") "<"
+    else if (text == "\u{E001}") ">"
+    else text
 }
 
 // Full-precision (5dp) height for strut emission. Looks up the metric
