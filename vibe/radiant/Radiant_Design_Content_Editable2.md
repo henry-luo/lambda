@@ -662,6 +662,19 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 - `rowspan` remains guarded; these cases are unspanned table-grid-preserving
   joins, not occupancy rewriting across row spans.
 
+**SI-27 — whitespace-sensitive filler/list edges: LANDED
+(2026-06-18).**
+
+- Broadened invisible filler block detection so a block containing whitespace
+  plus an inline-wrapped filler `<br>` is treated like the direct filler-`br`
+  family. Target ranges still start at the previous block boundary, the
+  wrapper/whitespace filler is removed, and the following direct text block is
+  absorbed without leaking invisible text into the result.
+- Broadened nested-list unwrap so whitespace-only nodes after the nested list
+  do not block Backspace at the start of the first nested `<li>`. When the
+  lifted item empties the nested list, the trailing whitespace-only nodes are
+  removed before the list is removed, leaving the parent `<li>` normalized.
+
 **Current SI verification (2026-06-18):**
 
 | Check | Result |
@@ -692,10 +705,10 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 | Direct inline cleanup target-range DOM regression | after-inline and inside-inline shapes both pass with `html=<p>ac</p>`, empty post-`input` target ranges, and caret at parent offset `1` |
 | Direct atomic target-range DOM regression | visible `<br>`, `<img>`, `<hr>`, between-images boundary, and whitespace-sensitive `<br>/<hr>` separator shapes pass with matching `beforeinput` ranges and empty post-`input` ranges |
 | Direct trailing-`br` block-join DOM regression | one-`br` and two-`br` previous-block shapes pass with matching WPT target ranges and empty post-`input` ranges |
-| Direct empty filler-`br` block-join DOM regression | previous `<p><br></p>`, `<div><br></div>`, and whitespace-plus-single-filler-`br` blocks absorb the following text block with matching WPT target ranges and empty post-`input` ranges |
+| Direct empty filler-`br` block-join DOM regression | previous `<p><br></p>`, `<div><br></div>`, whitespace-plus-single-filler-`br`, and inline-wrapped filler-`br` blocks absorb the following text block with matching WPT target ranges and empty post-`input` ranges |
 | Direct nested block parent-join DOM regression | child-block-to-parent, whitespace child-block-to-parent, parent-text-to-child-block, and whitespace parent-text-to-child-block shapes pass with matching WPT target ranges and empty post-`input` ranges |
 | Direct list-item block-join DOM regression | adjacent ordered/unordered list item text, whitespace, and inline-fragment joins pass with matching target ranges and empty post-`input` ranges |
-| Direct nested-list unwrap DOM regression | nested text, inline-wrapper, and first-item-of-multi-item nested list shapes lift after their parent `<li>` with matching target ranges and caret preservation; remaining nested siblings stay nested |
+| Direct nested-list unwrap DOM regression | nested text, inline-wrapper, first-item-of-multi-item, and trailing-whitespace-after-nested-list shapes lift after their parent `<li>` with matching target ranges and caret preservation; remaining nested siblings stay nested |
 | Direct table-cell block-join DOM regression | adjacent `td` text, whitespace, inline-fragment, previous-`colspan`, current-`colspan`, ordinary cross-row, previous-row-tail cross-row, and current-row-tail cross-row joins pass with matching target ranges, implicit `<tbody>` serialization, empty post-`input` ranges; `rowspan` guard cases leave the DOM unchanged without firing `input` |
 | Direct modifier line/word-delete DOM regression | Meta Backspace/Delete map to `deleteSoftLineBackward`/`deleteSoftLineForward`; Alt/Ctrl Backspace/Delete map to `deleteWordBackward`/`deleteWordForward`; all report matching target ranges, mutate the requested span, and leave empty post-`input` ranges |
 | `input-events-get-target-ranges-backspace.tentative` | last measured 45/163 before SI-12/SI-26; remains skipped |
@@ -714,22 +727,23 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 | `test_wpt_contenteditable_gtest` | 194 cases: 163 pass / 31 skip / 0 fail |
 | `test_wpt_selection_gtest` | 159 cases: 97 pass / 62 skip / 0 fail |
 | `test_wpt_dom_events_gtest` | 96 cases: 43 pass / 53 skip / 0 fail |
-| `test_js_gtest` | 199 passed / 0 failed; existing memtrack leak diagnostics printed |
-| `make test262-baseline` | not rerun for SI-26; previous SI-9 result was regressions 0; 40261 / 40261 fully passing; retry 0.0s |
+| `test_js_gtest` | not rerun in full for SI-27; previous SI-26 full run was 199 passed / 0 failed with existing memtrack leak diagnostics printed |
+| `make test262-baseline` | not rerun for SI-27; previous SI-9 result was regressions 0; 40261 / 40261 fully passing; retry 0.0s |
 
-**Global gate note:** SI-26's local DOM regression and related deletion
+**Global gate note:** SI-27's local DOM regressions and related deletion
 guards are green.
-The full `make test262-baseline` gate was not rerun for this deletion slice,
-so the broader SI phase should still run the mandatory §1.1 gate before being
-closed. The phase can keep advancing from the remaining skipped
+The full `make test262-baseline` and full `test_js_gtest` gates were not rerun
+for this deletion slice, so the broader SI phase should still run the mandatory
+§1.1 gate before being closed. The phase can keep advancing from the remaining skipped
 deletion/pointer matrices without carrying a local WPT blocker.
 
 **Next SI slice:** broaden synthetic input beyond the enabled Backspace/Delete,
 number spin-key, number spin-button, and text-control drag-select pointer
 subset: remaining `getTargetRanges` deletion matrices (remaining invisible
-line-break/block-boundary cases beyond trailing-`br` and whitespace-plus-single
-filler-`br`, broader nested-list/list-unwrapping behavior beyond first nested
-item lifting, richer table structure cases beyond ordinary cross-row joins and
+line-break/block-boundary cases beyond trailing-`br`, whitespace-plus-single
+filler-`br`, and inline-wrapped filler-`br`, broader nested-list/list-unwrapping
+behavior beyond first nested item lifting and trailing-whitespace edges, richer
+table structure cases beyond ordinary cross-row joins and
 same-row `colspan` absorption/tail-preserving cross-row joins, `rowspan` table-grid normalization, and
 additional modifier variants beyond rich Meta line deletion and Alt/Ctrl word
 deletion),
