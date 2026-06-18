@@ -1198,6 +1198,47 @@ bool js_is_cjs_file(const char* path) {
     return true;
 }
 
+static bool js_require_path_has_known_extension(const char* path) {
+    int len = path ? (int)strlen(path) : 0;
+    return (len >= 3 && strcmp(path + len - 3, ".js") == 0) ||
+           (len >= 4 && strcmp(path + len - 4, ".mjs") == 0) ||
+           (len >= 4 && strcmp(path + len - 4, ".cjs") == 0) ||
+           (len >= 5 && strcmp(path + len - 5, ".json") == 0) ||
+           (len >= 3 && strcmp(path + len - 3, ".ls") == 0);
+}
+
+static char* js_require_read_resolved_path(char* path_buf, int path_buf_size) {
+    char original[512];
+    snprintf(original, sizeof(original), "%s", path_buf);
+
+    char* source = read_text_file(path_buf);
+    if (source) return source;
+
+    int len = (int)strlen(original);
+    bool has_node_prefix = (len >= 5 && strncmp(original, "node:", 5) == 0);
+    if (!has_node_prefix && !js_require_path_has_known_extension(original) &&
+            len + 3 < path_buf_size) {
+        snprintf(path_buf, path_buf_size, "%s.js", original);
+        source = read_text_file(path_buf);
+        if (source) return source;
+    }
+
+    snprintf(path_buf, path_buf_size, "%s", original);
+    size_t plen = strlen(path_buf);
+    if (plen >= 3 && strcmp(path_buf + plen - 3, ".js") == 0) {
+        path_buf[plen - 3] = '\0';
+        plen -= 3;
+    }
+    if (plen + strlen("/index.js") < (size_t)path_buf_size) {
+        strncat(path_buf, "/index.js", path_buf_size - strlen(path_buf) - 1);
+        source = read_text_file(path_buf);
+        if (source) return source;
+    }
+
+    snprintf(path_buf, path_buf_size, "%s", original);
+    return NULL;
+}
+
 char* js_wrap_cjs_source(const char* source, const char* filename) {
     char filename_buf[2048];
     snprintf(filename_buf, sizeof(filename_buf), "%s", filename);
@@ -1257,18 +1298,8 @@ extern "C" Item js_require(Item specifier) {
     char path_buf[512];
     snprintf(path_buf, sizeof(path_buf), "%.*s", (int)spec->len, spec->chars);
 
-    // Read the source file
-    char* source = read_text_file(path_buf);
-    if (!source) {
-        // Node.js directory resolution: try path/index.js
-        size_t plen = strlen(path_buf);
-        // Strip .js extension if present, then try /index.js
-        if (plen >= 3 && strcmp(path_buf + plen - 3, ".js") == 0) {
-            path_buf[plen - 3] = '\0';
-        }
-        strncat(path_buf, "/index.js", sizeof(path_buf) - strlen(path_buf) - 1);
-        source = read_text_file(path_buf);
-    }
+    // Read the source file using Node-style file and directory fallbacks.
+    char* source = js_require_read_resolved_path(path_buf, (int)sizeof(path_buf));
     if (!source) {
         log_error("require: cannot read module '%s'", path_buf);
         // For internal/* modules, return empty object to prevent destructure crashes

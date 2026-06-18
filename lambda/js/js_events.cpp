@@ -543,45 +543,46 @@ extern "C" Item js_ee_constructor(void) {
     return emitter;
 }
 
+static Item js_ee_once_resolve_handler(Item env_item, Item rest_args) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+
+    Item resolve = env[0];
+    int64_t total = js_array_length(rest_args);
+    Item args_array = js_array_new(0);
+    for (int64_t i = 0; i < total; i++) {
+        js_array_push(args_array, js_array_get_int(rest_args, i));
+    }
+    Item call_args[1] = {args_array};
+    js_call_function(resolve, make_js_undefined(), call_args, 1);
+    return make_js_undefined();
+}
+
+static Item js_ee_once_reject_handler(Item env_item, Item rest_args) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+
+    Item reject = env[0];
+    int64_t total = js_array_length(rest_args);
+    Item err = (total > 0) ? js_array_get_int(rest_args, 0) : make_js_undefined();
+    Item call_args[1] = {err};
+    js_call_function(reject, make_js_undefined(), call_args, 1);
+    return make_js_undefined();
+}
+
 // events.once(emitter, eventName) — static, returns a Promise that resolves
 // with an array of args when the event fires, or rejects on 'error'.
 static Item js_ee_static_once(Item emitter, Item event_name) {
     extern Item js_promise_with_resolvers(void);
-    extern Item js_new_function(void* fptr, int param_count);
-    extern Item js_bind_function(Item func, Item this_val, Item* args, int arg_count);
 
     Item resolvers = js_promise_with_resolvers();
     Item promise = js_property_get(resolvers, make_string_item("promise"));
     Item resolve_fn = js_property_get(resolvers, make_string_item("resolve"));
     Item reject_fn = js_property_get(resolvers, make_string_item("reject"));
 
-    // Create a wrapper that collects all args into an array and resolves.
-    // Use a variadic lambda-like approach: bind resolve_fn as first bound arg.
-    // The wrapper receives (...args) and calls resolve([...args]).
-    struct OnceWrapper {
-        static Item handler(Item rest_args) {
-            // rest_args is the variadic args array
-            // 'this' is the emitter, but we stored resolve_fn via bind
-            // We need resolve_fn — it's bound as first arg in rest
-            // Actually, we'll use a different approach: store resolve in a closure
-
-            // The first element is resolve_fn (we prepended it via bind)
-            Item resolve = js_array_get_int(rest_args, 0);
-            // remaining elements are the actual event args
-            int64_t total = js_array_length(rest_args);
-            Item args_array = js_array_new(0);
-            for (int64_t i = 1; i < total; i++) {
-                js_array_push(args_array, js_array_get_int(rest_args, i));
-            }
-            Item call_args[1] = {args_array};
-            js_call_function(resolve, make_js_undefined(), call_args, 1);
-            return make_js_undefined();
-        }
-    };
-
-    // Create wrapper fn(-1 = variadic), bind resolve_fn as first bound arg
-    Item wrapper = js_new_function((void*)OnceWrapper::handler, -1);
-    Item bound = js_bind_function(wrapper, make_js_undefined(), &resolve_fn, 1);
+    Item* resolve_env = js_alloc_env(1);
+    resolve_env[0] = resolve_fn;
+    Item bound = js_new_closure((void*)js_ee_once_resolve_handler, -1, resolve_env, 1);
 
     // Call emitter.once(eventName, bound_wrapper)
     Item once_method = js_property_get(emitter, make_string_item("once"));
@@ -597,21 +598,13 @@ static Item js_ee_static_once(Item emitter, Item event_name) {
         if (en->len == 5 && memcmp(en->chars, "error", 5) == 0) is_error_event = true;
     }
     if (!is_error_event) {
-        // On 'error', reject the promise
-        struct ErrorWrapper {
-            static Item handler(Item rest_args) {
-                Item reject = js_array_get_int(rest_args, 0);
-                int64_t total = js_array_length(rest_args);
-                Item err = (total > 1) ? js_array_get_int(rest_args, 1) : make_js_undefined();
-                Item call_args[1] = {err};
-                js_call_function(reject, make_js_undefined(), call_args, 1);
-                return make_js_undefined();
-            }
-        };
-        Item err_wrapper = js_new_function((void*)ErrorWrapper::handler, -1);
-        Item err_bound = js_bind_function(err_wrapper, make_js_undefined(), &reject_fn, 1);
+        Item* reject_env = js_alloc_env(1);
+        reject_env[0] = reject_fn;
+        Item err_bound = js_new_closure((void*)js_ee_once_reject_handler, -1, reject_env, 1);
         Item err_once_args[2] = {make_string_item("error"), err_bound};
-        js_call_function(once_method, emitter, err_once_args, 2);
+        if (get_type_id(once_method) == LMD_TYPE_FUNC) {
+            js_call_function(once_method, emitter, err_once_args, 2);
+        }
     }
 
     return promise;

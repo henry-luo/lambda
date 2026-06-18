@@ -29,9 +29,9 @@ struct mbedtls_ctr_drbg_context;
 // ============================================================================
 
 struct TlsConfig {
-    const char *cert_file;          // path to PEM certificate file
-    const char *key_file;           // path to PEM private key file
-    const char *ca_file;            // path to CA certificate file (optional)
+    const char *cert_file;          // path to PEM certificate file, or inline PEM
+    const char *key_file;           // path to PEM private key file, or inline PEM
+    const char *ca_file;            // path to CA certificate file, or inline PEM (optional)
     const char *cipher_list;        // cipher suites (NULL for defaults)
     int verify_peer;                // verify client certificates (0/1)
     int min_version;                // minimum TLS version (0 = TLS 1.2)
