@@ -11,7 +11,7 @@ LambdaJS now passes **1,462 of 3,521** official Node.js parallel tests (**41.5%*
 - The previous baseline (`test/node/official_baseline.txt`, preserved as `*.stale-1414`) was **stale**: re-measurement showed **77 new passes and 28 regressions** against it, all from unrelated language-conformance work landing without a Node-regression gate. The first action of Node4 — re-baseline and gate against regressions — has been completed in tandem with this proposal.
 - Node3's plan was executed **out of order**. The work that landed (crypto ciphers, Buffer, assert, a real TLS layer, module sub-path resolution, process/os) tracked Phases 6/8/9/10/13. **Phase 7 — the stream state-machine rebuild, identified in Node3 as the highest-reward item — was never started.** `js_stream.cpp` is still 840 LOC of the same map-based stubs.
 - Because streams were skipped, `http`, `net`, `zlib`, and the crypto cipher all got built **standalone on libuv** instead of on a shared stream core. They do not compose (no `pipe`, no `for await`, no `createReadStream`). This is now the dominant structural blocker.
-- There is a **stability problem**: the locked full-suite run had 26 hard crashers + 2 timeouts, and focused 2026-06-18 reruns show the pressure is still real: `net` is now 82/148 with 15 crashers and `tls` is 51/214 with 11 crashers. Crashes are worse than failures -- they are exit-139 segfaults on error, abort, invalid-option, and lifetime paths.
+- There is a **stability problem**: the locked full-suite run had 26 hard crashers + 2 timeouts, and focused 2026-06-18 reruns show the pressure is still real. The first Track 0 slice has now cleared the focused `net` crash cluster (`net` is 94/148 with 0 crashers and 0 regressions), but `tls` is still 51/214 with 11 crashers. Crashes are worse than failures -- they are exit-139 segfaults on error, abort, invalid-option, and lifetime paths.
 - Several modules with **near-complete code score very low** (`assert` 2/14, `buffer` 25/67, `util` 7/27). Their gap is *message/semantics fidelity* (exact `ERR_*` codes and Node-format messages), not missing APIs.
 
 **Node4 target: ~1,800 (51%)** via six tracks, with a stretch to 1,900+. The central thesis: **build the real stream core, re-platform the I/O subsystems onto it, then close the wiring / stability / fidelity gaps around it.**
@@ -29,7 +29,7 @@ LambdaJS now passes **1,462 of 3,521** official Node.js parallel tests (**41.5%*
 
 > Per-module numbers in §3.1 were captured at 1,463 (single-test flicker `test-abortcontroller.js` between the measurement and lock-in runs); the difference is noise on a 3,521-test suite.
 
-> 2026-06-18 focused drift checks against the current local LambdaJS build: `util` stayed **7/27** with 0 regressions and 2 improvements; `stream` stayed **50/213** with 0 crashes; `dns` stayed **0/29**; `https` improved to **42/63** with 3 improvements; `net` stayed **82/148** but now shows 15 crashers and 2 regressions; `tls` shows **51/214** with 11 crashers and 4 regressions. Re-run the full release methodology in §9 before changing the locked baseline.
+> 2026-06-18 focused drift checks against the current local LambdaJS build: `util` stayed **7/27** with 0 regressions and 2 improvements; `stream` stayed **50/213** with 0 crashes; `dns` stayed **0/29**; `https` improved to **42/63** with 3 improvements; `net` is now **94/148** with 0 crashes, 0 regressions, and 12 improvements after the Track 0.3 socket-connect stabilization slice; `tls` shows **51/214** with 11 crashers and 4 regressions. Re-run the full release methodology in §9 before changing the locked baseline.
 
 > Measurement method is documented in [§9](#9-appendix-measurement-methodology) so these numbers are reproducible.
 
@@ -66,7 +66,7 @@ Rows for `https`, `net`, `tls`, `stream`, `util`, and `dns` were refreshed with 
 | http | 388 | 277 | 71% | 0 | Best-supported; gains now need streaming bodies + chunked encoding |
 | fs | 251 | 166 | 66% | 0 | async defers correctly (libuv); missing `FileHandle`, `fs.watch`, `createReadStream` |
 | https | 63 | 42 | 67% | 0 | Still no true TLS wiring: `createServer()` delegates to HTTP despite the TLS-aware file header; 3 current improvements |
-| net | 148 | 82 | 55% | **15** | Crash cluster on connect/options/error paths; `client_connect_cb` has a status guard, but `Socket.connect` is still stubby and Socket is not a Duplex |
+| net | 148 | 94 | 64% | 0 | Track 0.3 landed real connect argument normalization, hostname lookup events, pending-connect destroy safety, and `uv_tcp_getsockname()` addresses; still not a Duplex |
 | os | (7)* | 3 | — | 0 | small prefix sample; mostly complete |
 | process | 93 | 36 | 39% | 1 | message fidelity + a few APIs |
 | events | 36 | 13 | 36% | 0 | missing `events.on()` async-iterator, functional captureRejections |
@@ -91,7 +91,7 @@ Rows for `https`, `net`, `tls`, `stream`, `util`, and `dns` were refreshed with 
 
 | Cluster | Count | Tests | Likely root cause |
 |---------|------:|-------|-------------------|
-| **net** | 15 in 2026-06-18 focused run | autoselectfamily, better-error-messages-{path,port-hostname}, connect-{after-destroy,immediate-finish,no-arg,options-invalid,options-port}, dns-{custom-lookup,error}, localerror, options-lookup, pipe-connect-errors, socket-connect-invalid-autoselectfamily(×2) | `client_connect_cb` now checks `status != 0`, so this is no longer just the raw callback null-deref. The remaining crashes point at the JS-facing `Socket.connect`/options/invalid-argument path and Node-shaped error object construction. |
+| **net** | **0 in the post-Track 0.3 focused run** | Was 15 in the earlier 2026-06-18 focused run: autoselectfamily, better-error-messages-{path,port-hostname}, connect-{after-destroy,immediate-finish,no-arg,options-invalid,options-port}, dns-{custom-lookup,error}, localerror, options-lookup, pipe-connect-errors, socket-connect-invalid-autoselectfamily(×2) | Fixed by `Socket.connect`/`net.connect` rest-arg normalization, Node-shaped validation errors, deferred close while DNS/connect is pending, `lookup` error emission, and method receiver fixes. Remaining net failures are stream/Duplex semantics rather than crashers. |
 | **child_process** | 3 | spawn-error, spawn-shell, spawn-typeerror | `spawn()` error path dereferences a null spawn result |
 | **tls** | 11 in 2026-06-18 focused run | client-abort, client-allow-partial-trust-chain, client-default-ciphers, connect-allow-half-open-option, connect-hints-option, destroy-whilst-write, ip-servername-forbidden, socket-allow-half-open-option, socket-constructor-alpn-options-parsing, tlswrap-segfault-2, wrap-event-emmiter | Handshake/socket lifetime and option-validation paths still read freed or uninitialized TLS/socket state. |
 | **console** | 2 | async-write-error, sync-write-error | Write-error EPIPE path |
@@ -107,7 +107,7 @@ Rows for `https`, `net`, `tls`, `stream`, `util`, and `dns` were refreshed with 
 The 2026-06-16 re-baseline audit found 28 failures relative to the stale 1,414 baseline, clustered in `snapshot-dns` (4), `https` (3), `http` (3), `vm` (2), `tls` (2), `domain` (2), plus singletons. Those were historical stale-baseline deltas, not necessarily current regressions after `test/node/official_baseline.txt` was relocked at 1,462.
 
 Current 2026-06-18 focused module checks show active regressions against the locked 1,462 baseline in:
-- `net`: `test-net-connect-after-destroy.js`, `test-net-dns-error.js`
+- `net`: none after the Track 0.3 focused rerun (`./test/test_node_gtest.exe --modules=net --timeout=15000 --gtest_brief=1`)
 - `tls`: `test-tls-connect-hints-option.js`, `test-tls-destroy-whilst-write.js`, `test-tls-socket-constructor-alpn-options-parsing.js`, `test-tls-tlswrap-segfault-2.js`
 
 Historical sampled stale-baseline root causes (real at the time, but recheck before treating as current):
@@ -146,7 +146,7 @@ Six structural causes account for the bulk of the locked 2,058 failures plus the
 
 Because there was no stream core to build on, each I/O module reimplemented its own ad-hoc data flow directly over libuv:
 - **http** (`js_http.cpp`, 1,329 LOC): `IncomingMessage.body` is a **string**, not a Readable; `ServerResponse` accumulates body in memory; no chunked transfer-encoding; `Agent` pooling is fake.
-- **net** (`js_net.cpp`, 654 LOC): `Socket` is **not a Duplex**; `setKeepAlive/setNoDelay/ref/unref` are no-ops; `address()` is hardcoded.
+- **net** (`js_net.cpp`, 1,094 LOC): `Socket` is **not a Duplex**; `setKeepAlive/setNoDelay/ref/unref` are no-ops. `connect()` now validates options and uses libuv DNS/TCP with safer lifetime handling, but the stream contract is still ad-hoc.
 - **zlib** (`js_zlib.cpp`): sync only; the streaming `createGzip()` family doesn't exist.
 - **crypto cipher**: `Cipher/Decipher` are not Transform streams (only `update`/`final`).
 
@@ -160,7 +160,7 @@ Two high-value capabilities exist but aren't wired:
 
 ### RC4 — Stability: crashers on error, abort, and invalid-option paths
 
-The locked full-suite crashers and the 2026-06-18 focused `net`/`tls` reruns are overwhelmingly on **error / abort / invalid-argument / option-validation paths**. Some raw guards have already landed (`net` and `tls` connect callbacks check nonzero status), but the JS-facing API layers still expose stubbed `Socket.connect`, incomplete option normalization, and lifetime paths that can read freed or uninitialized socket/TLS state. These are still mostly guard, validation, and object-shaping fixes rather than a stream-core redesign.
+The locked full-suite crashers and the 2026-06-18 focused `net`/`tls` reruns were overwhelmingly on **error / abort / invalid-argument / option-validation paths**. The `net` side of that class has now been converted into clean passes/failures by fixing `Socket.connect`, option normalization, DNS lookup events, and pending-connect lifetime handling. The same shape remains in `tls`, where abort/options/wrap paths can still read freed or uninitialized TLS/socket state.
 
 ### RC5 — Message & semantics fidelity
 
@@ -196,13 +196,13 @@ Track F (child fork/IPC + fidelity sweep) ─ independent
 
 0.2 **Add a Node-regression gate.** Wire the node-official runner into the same CI guard used for `test-lambda-baseline` so language commits (es2024/eval/sparse-array) can't silently regress Node tests as they did here (28 regressions).
 
-0.3 **Kill the net crash cluster (15 tests in the 2026-06-18 focused run).** `client_connect_cb` now guards nonzero `status`, so the next root-cause slice is the JS-facing `Socket.connect` / option-validation path: normalize `(port, host, cb)` and object options, create Node-shaped `Error` objects with `code`/`errno`/`syscall`, emit `'error'` instead of crashing, keep `setNoDelay/setKeepAlive/ref/unref` chainable, and make `address()` read from `uv_tcp_getsockname` instead of the hardcoded `127.0.0.1:0`.
+0.3 **Kill the net crash cluster (done, 2026-06-18).** Focused net rerun is now **94/148**, **0 crashed**, **0 timed out**, **0 regressions**, **12 improvements**. Landed: normalized `(port, host, cb)` and object options for `net.connect`/`createConnection`/`Socket.connect`, Node-shaped validation and DNS errors, `'lookup'` event emission, pending-DNS/connect destroy safety, receiver fixes for Socket/Server methods, `resume()` chaining, and `address()` from `uv_tcp_getsockname`. Remaining net work belongs under Track A/B because `Socket` still is not a real Duplex.
 
 0.4 **Fix child_process spawn crashers (3).** Guard the `spawn()` failure path; on `uv_spawn` error, emit `'error'` with `ERR_*`/errno rather than crashing.
 
 0.5 **Fix tls abort/options/wrap crashers (11 tests in the 2026-06-18 focused run).** Add null/already-freed guards on `tls_conn` and socket state, then normalize unsupported option paths (`allowHalfOpen`, hints, ALPN/default-cipher cases) into Node-shaped failures instead of reading invalid TLS state.
 
-0.6 **Fix active regressions, and re-check the historical stale-baseline fossils.** Current focused regressions are `net` (`test-net-connect-after-destroy.js`, `test-net-dns-error.js`) and `tls` (`test-tls-connect-hints-option.js`, `test-tls-destroy-whilst-write.js`, `test-tls-socket-constructor-alpn-options-parsing.js`, `test-tls-tlswrap-segfault-2.js`). The old `nextTick` and `Invalid eval source` samples came from the stale-baseline audit and should be revalidated before they are treated as current blockers.
+0.6 **Fix active regressions, and re-check the historical stale-baseline fossils.** Current focused regressions are now `tls` only (`test-tls-connect-hints-option.js`, `test-tls-destroy-whilst-write.js`, `test-tls-socket-constructor-alpn-options-parsing.js`, `test-tls-tlswrap-segfault-2.js`); the previous `net` focused regressions (`test-net-connect-after-destroy.js`, `test-net-dns-error.js`) pass in the Track 0.3 rerun. The old `nextTick` and `Invalid eval source` samples came from the stale-baseline audit and should be revalidated before they are treated as current blockers.
 
 0.7 **Runner: per-module reporting + crash auto-quarantine.** Print the §3.1 table automatically and auto-tag crashers (already half-built — `write_crashers()` exists).
 
