@@ -37,6 +37,8 @@
 #include <cstdlib>
 
 extern __thread EvalContext* context;
+extern "C" void heap_register_gc_root(uint64_t* slot);
+extern "C" void heap_unregister_gc_root(uint64_t* slot);
 
 // ============================================================================
 // Helpers
@@ -157,6 +159,15 @@ static DocState* get_or_create_state() {
 TypeMap js_dom_range_marker     = {};
 TypeMap js_dom_selection_marker = {};
 
+struct SelectionExpandoEntry {
+    Map* wrapper;
+    uint64_t props_item;
+};
+
+static const int SELECTION_EXPANDO_CAP = 64;
+static __thread SelectionExpandoEntry s_selection_expandos[SELECTION_EXPANDO_CAP] = {};
+static __thread int s_selection_expando_count = 0;
+
 // Forward decls
 static Item build_range_object(DomRange* r);
 static Item build_selection_object(DomSelection* s);
@@ -189,6 +200,56 @@ static inline DomSelection* selection_from(Item obj) {
 }
 static inline DomRange*     range_from_this()     { return range_from(js_get_this()); }
 static inline DomSelection* selection_from_this() { return selection_from(js_get_this()); }
+
+static bool selection_is_native_property(const char* p) {
+    if (!p) return true;
+    return strcmp(p, "anchorNode") == 0 ||
+        strcmp(p, "anchorOffset") == 0 ||
+        strcmp(p, "focusNode") == 0 ||
+        strcmp(p, "focusOffset") == 0 ||
+        strcmp(p, "isCollapsed") == 0 ||
+        strcmp(p, "rangeCount") == 0 ||
+        strcmp(p, "type") == 0 ||
+        strcmp(p, "direction") == 0 ||
+        strcmp(p, "getRangeAt") == 0 ||
+        strcmp(p, "addRange") == 0 ||
+        strcmp(p, "removeRange") == 0 ||
+        strcmp(p, "removeAllRanges") == 0 ||
+        strcmp(p, "empty") == 0 ||
+        strcmp(p, "collapse") == 0 ||
+        strcmp(p, "setPosition") == 0 ||
+        strcmp(p, "collapseToStart") == 0 ||
+        strcmp(p, "collapseToEnd") == 0 ||
+        strcmp(p, "extend") == 0 ||
+        strcmp(p, "setBaseAndExtent") == 0 ||
+        strcmp(p, "selectAllChildren") == 0 ||
+        strcmp(p, "containsNode") == 0 ||
+        strcmp(p, "deleteFromDocument") == 0 ||
+        strcmp(p, "toString") == 0 ||
+        strcmp(p, "modify") == 0 ||
+        strcmp(p, "__forceDirection") == 0;
+}
+
+static Item selection_expando_map(Item obj, bool create) {
+    if (!js_dom_item_is_selection(obj)) return ItemNull;
+    Map* wrapper = obj.map;
+    for (int i = 0; i < s_selection_expando_count; i++) {
+        if (s_selection_expandos[i].wrapper == wrapper) {
+            return (Item){.item = s_selection_expandos[i].props_item};
+        }
+    }
+    if (!create || s_selection_expando_count >= SELECTION_EXPANDO_CAP) {
+        return ItemNull;
+    }
+    Item props = js_new_object();
+    if (get_type_id(props) != LMD_TYPE_MAP) return ItemNull;
+    SelectionExpandoEntry* entry =
+        &s_selection_expandos[s_selection_expando_count++];
+    entry->wrapper = wrapper;
+    entry->props_item = props.item;
+    heap_register_gc_root(&entry->props_item);
+    return props;
+}
 
 static bool selection_state_set(DomSelection* s,
                                 const DomBoundary* anchor,
@@ -1121,7 +1182,23 @@ extern "C" Item js_dom_selection_get_property(Item obj, Item key) {
     if (strcmp(p, "modify") == 0)             return _sel_methods.modify;
     if (strcmp(p, "__forceDirection") == 0)   return _sel_methods.__forceDirection;
 
+    Item expando = selection_expando_map(obj, false);
+    if (expando.item != ITEM_NULL) {
+        Item value = js_property_get(expando, key);
+        if (value.item != ITEM_NULL) return value;
+    }
     return ItemNull;
+}
+
+extern "C" Item js_dom_selection_set_property(Item obj, Item key, Item value) {
+    if (!selection_from(obj)) return value;
+    const char* p = fn_to_cstr(key);
+    if (selection_is_native_property(p)) return value;
+    Item expando = selection_expando_map(obj, true);
+    if (expando.item != ITEM_NULL) {
+        js_property_set(expando, key, value);
+    }
+    return value;
 }
 
 // ============================================================================
@@ -1439,6 +1516,12 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
 extern "C" void js_dom_selection_reset(void) {
     memset(&_range_methods, 0, sizeof(_range_methods));
     memset(&_sel_methods, 0, sizeof(_sel_methods));
+    for (int i = 0; i < s_selection_expando_count; i++) {
+        heap_unregister_gc_root(&s_selection_expandos[i].props_item);
+        s_selection_expandos[i].wrapper = nullptr;
+        s_selection_expandos[i].props_item = 0;
+    }
+    s_selection_expando_count = 0;
 
     // Native lifetime is owned by the per-document DocState. Walk the
     // current document's live ranges, drop our JS-side retain, and clear
