@@ -43,7 +43,13 @@ pub fn text_context() {
 // Context derivation — create child contexts
 // ============================================================
 
-// derive a new context with overrides
+// derive a new context with overrides.
+//
+// NOTE: this is a hand-maintained allowlist — any NEW context field must be
+// added here or it is silently dropped when a child context is derived (this
+// bit `text_embedded` once). A map-spread merge (`{*ctx, *overrides}`) would
+// remove the footgun, but that syntax does not compile in the current Lambda
+// build, so the allowlist remains the working idiom. See Lambda_Pkg_Math4.md.
 pub fn derive(ctx, overrides) {
     {
         style: if (overrides.style != null) overrides.style else ctx.style,

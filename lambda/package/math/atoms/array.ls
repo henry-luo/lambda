@@ -211,7 +211,9 @@ fn is_col_sep(child) {
 // ============================================================
 
 fn build_table(row_boxes, ncols, nrows, aligns, env_name) {
-    let metrics = table_metrics(env_name, nrows)
+    let metrics = if (env_name == "equation" and nrows == 1 and ncols == 1)
+        equation_table_metrics(row_boxes[0][0])
+        else table_metrics(env_name, nrows)
     let total_w = compute_table_width(row_boxes, ncols, env_name)
     let children = build_table_children(row_boxes, ncols, aligns, metrics, env_name, 0, [])
     {
@@ -233,7 +235,7 @@ fn build_table(row_boxes, ncols, nrows, aligns, env_name) {
 fn build_table_children(row_boxes, ncols, aligns, metrics, env_name, col, acc) {
     if (col >= ncols) add_trailing_array_sep(acc, env_name)
     else {
-        let with_leading = if (col == 0 and env_name == "array")
+        let with_leading = if (col == 0 and (env_name == "array" or env_name == "equation"))
             acc ++ [array_col_sep(0.5)]
         else if (col == 0 and env_name == "smallmatrix")
             acc ++ [array_col_sep(0.2)]
@@ -249,7 +251,7 @@ fn build_table_children(row_boxes, ncols, aligns, metrics, env_name, col, acc) {
 }
 
 fn add_trailing_array_sep(acc, env_name) {
-    if (env_name == "array") acc ++ [array_col_sep(0.5)]
+    if (env_name == "array" or env_name == "equation") acc ++ [array_col_sep(0.5)]
     else if (env_name == "cases" or env_name == "dcases") acc ++ [array_col_sep(1.0)]
     else if (env_name == "smallmatrix") acc ++ [array_col_sep(0.2)]
     else acc
@@ -332,6 +334,36 @@ fn dcases_table_metrics(nrows) {
     } else matrix_table_metrics(nrows)
 }
 
+// A single-row `equation` environment centers its content on the math axis
+// (0.25em). Derive the table metrics from the content box's real height/depth
+// rather than the fixed matrix estimates, so `E = mc^2` (content h=0.87) emits
+// strut 0.87 / strut-bottom 1.23 instead of the generic 0.85 / 1.21.
+fn equation_table_metrics(content_box) {
+    let ch = if (content_box.render_height != null) content_box.render_height else content_box.height
+    let cd = if (content_box.render_depth != null) content_box.render_depth else content_box.depth
+    // Centered on the axis: the symmetric half-extent is the larger of the
+    // above-axis and below-axis reach; height/depth straddle the axis.
+    let axis = 0.255
+    let half = max(ch - axis, cd + axis)
+    let h = util.ceil_em2(axis + half)
+    let d = util.ceil_em2(half - axis)
+    // The depth-holder vlist runs one rounding-notch deeper than the emitted
+    // box depth (the vlist-s baseline rule), matching MathLive's 0.37 vs the
+    // 0.36 strut-bottom vertical-align.
+    let dh = util.ceil_em2(half - axis + 0.01)
+    {
+        height: h,
+        depth: d,
+        render_total: util.ceil_em2(h + d),
+        vlist_height: h,
+        depth_holder: dh,
+        pstrut: 3.0,
+        cell_height: util.ceil_em2(h + d),
+        is_equation: true,
+        eq_top: 0.0 - util.ceil_em2(3.0 - (h - 0.86))
+    }
+}
+
 fn matrix_table_metrics(nrows) => {
     height: 0.85 + 0.6 * float(nrows - 1),
     depth: 0.35 + 0.6 * float(nrows - 1),
@@ -355,7 +387,8 @@ fn array_table_metrics(nrows) => {
 }
 
 fn row_top(metrics, row) {
-    if (metrics.height == 0.84) array_row_top(row)
+    if (metrics.is_equation == true) metrics.eq_top
+    else if (metrics.height == 0.84) array_row_top(row)
     else if (metrics.pstrut == 3.01) cases_row_top(row)
     else if (metrics.pstrut == 3.81) dcases_row_top(row)
     else matrix_row_top(metrics, row)
