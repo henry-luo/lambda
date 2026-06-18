@@ -235,6 +235,10 @@ static std::string extract_scripts(const std::string& html,
         std::string tag = html.substr(tag_start, tag_end - tag_start + 1);
         std::string src = extract_attr(tag, "src");
         if (!src.empty()) {
+            if (ends_with(src, "assert_selection.js")) {
+                pos = tag_end + 1;
+                continue;
+            }
             if (src.find("://") == std::string::npos && src[0] != '/') {
                 std::string full = normalize_relative_path(html_dir, src);
                 std::string body = read_file_contents(full.c_str());
@@ -252,6 +256,28 @@ static std::string extract_scripts(const std::string& html,
         if (close == std::string::npos) break;
         result += html.substr(tag_end + 1, close - tag_end - 1);
         result += "\n";
+        pos = close + strlen("</script>");
+    }
+    return result;
+}
+
+static std::string strip_script_elements(const std::string& html) {
+    std::string result;
+    size_t pos = 0;
+    while (pos < html.size()) {
+        size_t tag_start = html.find("<script", pos);
+        if (tag_start == std::string::npos) {
+            result += html.substr(pos);
+            break;
+        }
+        result += html.substr(pos, tag_start - pos);
+        size_t tag_end = html.find('>', tag_start);
+        if (tag_end == std::string::npos) break;
+        size_t close = html.find("</script>", tag_end);
+        if (close == std::string::npos) {
+            pos = tag_end + 1;
+            continue;
+        }
         pos = close + strlen("</script>");
     }
     return result;
@@ -731,12 +757,16 @@ static ChromeEditingResult run_chrome_editing_case(
     std::string temp_js = std::string(TEMP_DIR) + "/chrome_editing_" +
         p.test_name + ".js";
     write_file_contents(temp_js.c_str(), combined);
+    std::string temp_html = std::string(TEMP_DIR) + "/chrome_editing_" +
+        p.test_name + ".html";
+    write_file_contents(temp_html.c_str(), strip_script_elements(html));
 
     int exit_code = 0;
-    std::string output = execute_js_with_doc(temp_js.c_str(), p.html_path.c_str(),
+    std::string output = execute_js_with_doc(temp_js.c_str(), temp_html.c_str(),
         &exit_code);
     if (!keep_chrome_editing_temp_scripts()) {
         unlink(temp_js.c_str());
+        unlink(temp_html.c_str());
     }
 
     result.exit_code = exit_code;
