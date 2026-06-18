@@ -699,22 +699,38 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
         let has_any_descender = numer_box.depth > 0.05 or denom_box.depth > 0.05
         let denom_full = denom_box.height + denom_box.depth
         let denom_h = if (denom_box.height < 0.7) ceil2(denom_full) else 0.7
-        let extra_depth = if (denom_box.depth > 0.0) denom_box.depth else 0.0
-        let frac_depth = 0.68 + extra_depth
+        // The fraction descent below the bar follows the denominator's real
+        // descent: 0.68 baseline + denom descender (CEIL@2). For `c+d` the
+        // `+`/`d` descent (0.08333) lifts it to 0.77, not the bare 0.76.
+        let denom_d_for_depth = if (denom_box.depth_raw != null and denom_box.depth_raw > 0.0)
+            denom_box.depth_raw else denom_box.depth
+        let frac_depth = if (denom_box.depth > 0.05) ceil2(0.68 + denom_d_for_depth) else 0.68
         let frac_h = if (has_any_descender) 1.2 else 1.19
         let total = frac_h + frac_depth
+        let dh = if (denom_box.depth > 0.05) frac_depth else 0.69
+        // Child wrapper heights span the full glyph extent (h+d). When the
+        // numer/denom carries an operator with descent (e.g. `+` in `a+b`,
+        // depth 0.08), the wrapper grows to ceil2(h+d) = 0.78 rather than the
+        // bare height. Uses raw metrics when the hbox propagated them.
+        let numer_h_raw = if (numer_box.height_raw != null) numer_box.height_raw else numer_box.height
+        let numer_d_raw = if (numer_box.depth_raw != null) numer_box.depth_raw else numer_box.depth
+        let numer_ch = if (numer_box.depth > 0.05) ceil2(numer_h_raw + numer_d_raw) else numer_box.height
+        let denom_h_raw = if (denom_box.height_raw != null) denom_box.height_raw else denom_box.height
+        let denom_d_raw = if (denom_box.depth_raw != null) denom_box.depth_raw else denom_box.depth
+        let denom_ch = if (denom_box.height >= 0.7 and denom_box.depth > 0.05)
+            ceil2(denom_h_raw + denom_d_raw) else denom_h
         {
             height: frac_h,
             depth: frac_depth,
             render_height: frac_h,
             render_depth: frac_depth,
             render_total: total,
-            depth_holder: 0.69,
+            depth_holder: dh,
             denom_top: -2.31,
             line_top: -3.23,
             numer_top: -3.5,
-            numer_child_height: numer_box.height,
-            denom_child_height: denom_h,
+            numer_child_height: numer_ch,
+            denom_child_height: denom_ch,
             child_font_pct: null,
             rule_height: 0.04
         }

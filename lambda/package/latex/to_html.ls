@@ -136,11 +136,17 @@ fn format_data_attrs_rec(attrs, i, n, acc) {
 // ============================================================
 
 fn escape_html(s) {
-    // HTML5 only requires `<` and `&` to be escaped in text content; literal
-    // `>` is allowed. MathLive's output emits `>` unescaped, so match it.
+    // Standard text escaping: `&`, `<`, `>` → entities (correct for text-mode
+    // and `\not{...}` overlay targets, which MathLive escapes). The math
+    // relation glyphs `<`/`>` — which MathLive emits RAW inside `lm_cmr`
+    // spans — are carried as private-use sentinels (U+E000/U+E001) by the
+    // relation/operator renderers and mapped back to raw glyphs here, AFTER
+    // the entity escaping, so only true relations stay unescaped.
     let r1 = replace(s, "&", "&amp;")
     let r2 = replace(r1, "<", "&lt;")
-    r2
+    let r3 = replace(r2, ">", "&gt;")
+    let r4 = replace(r3, "", "<")
+    replace(r4, "", ">")
 }
 
 fn escape_attr(s) {

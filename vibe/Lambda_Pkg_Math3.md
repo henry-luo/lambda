@@ -1096,8 +1096,42 @@ tables from MathLive's `font-metrics-data.ts`:
 Upstream baseline 206 / 206 (100%)*
 ```
 
-Net across this conversation's "continue to fix" rounds: **614 → 745
-(+131 cases, +14.2pp)**.
+### Phase 3 round 5 — long-tail sweep
+
+- **`<`/`>` raw emission** — MathLive emits the `<`/`>` relation glyphs RAW
+  inside math `lm_cmr` spans, but escapes `<`/`>` in text-mode / `\not{...}`
+  overlay targets. Lambda's global `escape_html` couldn't do both. Resolved
+  with a private-use sentinel (U+E000/U+E001): `render_relation`
+  ([render.ls](lambda/package/math/render.ls)) emits the sentinel for `<`/`>`,
+  `escape_html` ([to_html.ls](lambda/package/latex/to_html.ls)) maps it back to
+  raw *after* entity-escaping, and a new `text_embedded` context flag (threaded
+  through `ctx.derive`) suppresses the sentinel for inline math inside
+  `\text{...}`. `box.text_box` de-sentinelizes for metric lookup so the `<`
+  glyph keeps its real height. **This finally cleared the upstream baseline to
+  a true 206/206** (the long-standing `a\not{<>} b` snap mismatch is gone).
+- **Negative-depth superscripts** — `child_h` in `render_sup_only`
+  ([scripts.ls](lambda/package/math/atoms/scripts.ls)) now always spans
+  `(h+d)×scale`; for glyphs that sit above the baseline with negative depth
+  (`\circ`, d=-0.0555) this shrinks the wrapper, closing `90^\circ` (0.28 not
+  0.32).
+- **Radical index scriptscript scale** — `render_sqrt_index`
+  ([render.ls](lambda/package/math/render.ls)) derives the index wrapper height
+  from `ceil2(index.height_raw × 0.5)` (scriptscript) instead of a hardcoded
+  0.33, and the vlist height follows as `-top-3+child_h`. Closes `\sqrt[n]{x}`.
+
+```
+745 → 754 / 921 (81.9%)   [long-tail sweep; upstream now a true 206/206]
+```
+
+Net across this conversation's "continue to fix" rounds: **614 → 754
+(+140 cases, +15.2pp)**, with the upstream MathLive corpus at a clean 206/206.
+
+Residuals that resisted cheap fixes (each ≤0.05em or per-content): the bigop
+sub-baseline `top` (sum vs prod differ by sub height; a derived formula
+regressed sum, reverted), the `\lim …` composite strut depth (0.01em, raw not
+propagated through the text-op box), `\epsilon` (MathLive substitutes an
+upright cmr glyph Lambda lacks a metric for), and the ~30 hand-tuned fraction
+dispatch branches.
 
 ### Phase 3 round 2 additions
 

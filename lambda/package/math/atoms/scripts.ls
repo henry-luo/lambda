@@ -629,8 +629,11 @@ fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, context, font
     let sup_d_raw = if (sup_box.depth_raw != null) sup_box.depth_raw else sup_box.depth
     let has_descender = sup_d_raw > 0.0
     let sup_h_only = ceil_em2(sup_h_raw * font_scale)
-    let child_h = if (has_descender) ceil_em2((sup_h_raw + sup_d_raw) * font_scale)
-                  else sup_h_only
+    // The wrapper height spans the glyph's full vertical extent (h + d). The
+    // depth term lifts for descenders (d > 0, e.g. `^y`) AND shrinks for
+    // glyphs that sit above the baseline with negative depth (e.g. `\circ`,
+    // d = -0.0555 → 90^\circ wrapper 0.28 not 0.32).
+    let child_h = ceil_em2((sup_h_raw + sup_d_raw) * font_scale)
     // Legacy values for fraction-child paths (preserved to avoid regression)
     let tall_script = sup_box.height > 0.72
     // Treat the base as "tall" when it's either a high-glyph base (h > 0.9,

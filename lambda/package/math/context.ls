@@ -54,7 +54,8 @@ pub fn derive(ctx, overrides) {
         phantom: if (overrides.phantom != null) overrides.phantom else ctx.phantom,
         script_container: if (overrides.script_container != null) overrides.script_container else ctx.script_container,
         fraction_child: if (overrides.fraction_child != null) overrides.fraction_child else ctx.fraction_child,
-        colorbox_content: if (overrides.colorbox_content != null) overrides.colorbox_content else ctx.colorbox_content
+        colorbox_content: if (overrides.colorbox_content != null) overrides.colorbox_content else ctx.colorbox_content,
+        text_embedded: if (overrides.text_embedded != null) overrides.text_embedded else ctx.text_embedded
     }
 }
 
