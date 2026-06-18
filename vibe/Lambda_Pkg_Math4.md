@@ -371,12 +371,27 @@ clean path to ≥99%.
 
 ## 10. Progress & status — 2026-06-18
 
-**Headline: corpus 763 (pre-Math4) → 822/921, upstream baseline 204/206, ~1000
-hardcoded layout lines removed.** The thesis of §9 held: the metric port turns
-per-case tuning into structural fixes. The biggest single win is that
-`fraction.ls` is now **100% metric-driven** — the 50-branch `frac_bar_spec`
-table is *deleted*. Latest: **sqrt/radical is now metric-driven** (display/text
-styles) — the bucket dispatch is gone, +17 corpus, +1 baseline, zero regressions.
+**Headline: corpus 763 (pre-Math4) → 824/921, upstream baseline 206/206 (PERFECT —
+the hard gate is met), ~1000 hardcoded layout lines removed.** The thesis of §9
+held: the metric port turns per-case tuning into structural fixes. `fraction.ls`
+is **100% metric-driven** (50-branch `frac_bar_spec` *deleted*); **sqrt/radical
+is metric-driven** (bucket dispatch gone, +17 corpus); the **`2.41` delimiter
+magic is retired** (raw glyph exposure); and the **last 2 baseline residuals are
+fixed** by exposing raw on script-reached fractions (§10.0b) → **SACRED 206/206**.
+
+### 10.0b Last 2 baseline residuals FIXED → SACRED 206/206
+The `x^{2-\frac34}` / `x^{2-\frac12}` fraction-in-sup cases failed ONLY on the
+outer strut-bottom (`1.85` vs golden `1.84`) AND the sup child `top` (`-3.47` vs
+`-3.48`). Root cause: the `\frac34` **rendered at script style exposed no raw**
+(`expose_raw: is_display or is_fraction_child` excluded script-reached
+fractions), so `render_sup_only` fell back to the CEIL-projected `height 0.97`/
+`depth 0.53` instead of the raw `0.9628`/`0.5318`. That inflated `supShift`
+(`0.47875` vs `0.48001`) and the box `height_raw` (`1.15775` vs `1.15397`). Fix
+(fraction.ls:248): `expose_raw` now also fires when `frac_ctx.script_container
+== true` — the gate's old rationale ("can't flip the still-legacy script
+parent") is stale since `render_sup_only`/`render_both` are now Rule-18
+metric-driven and consume the raw correctly. +2 corpus (822→824), SACRED
+204→**206/206**, 0 regressions.
 
 ### 10.0 sqrt/radical conversion — DONE (display/text)
 `render.ls` `sqrt_spec` bucket dispatch (size1+size3-only, 3 `make_*_sqrt_spec`
@@ -445,21 +460,19 @@ the goldens are displaystyle.**
   is deleted. Verified: SURDS quadratic still emits strut-bottom `2.41em`;
   LEFT/RIGHT 55/55, ENVIRONMENTS 9/9, FRACTIONS 9/9, corpus 822, SACRED 204/206.
 
-### 10.4 Outstanding issues (the remaining 2 upstream-baseline fails)
-The sqrt chain is **cleared** (sqrt now metric-driven, see §10.0). The 2 residual
-fails are both the **fraction-in-sup residual**:
-1. **`x^{2-\frac12}`** (SPACING AND KERN) and **`x^{2-\frac34}`**
-   (SUPERSCRIPT/SUBSCRIPT): geometry now correct (vlists match exactly); fails
-   only on the outer strut by a sub-0.01 single-rounding cascade — dissolves once
-   §10.2 A lands (universal `use_raw`). These are the LAST 2 baseline fails.
+### 10.4 Outstanding issues — SACRED baseline is now 206/206 (no fails)
+The sqrt chain is cleared (§10.0), the `2.41` magic is retired (§10.3), and the
+last 2 fraction-in-sup residuals are fixed (§10.0b). **The upstream 206-case
+baseline now passes 206/206.** Remaining corpus failures (824/921) are all in the
+extended (non-baseline) set — compound constructs: `equation`/`align`
+environments, `cfrac`, integral clusters, matrices with inner fraction/script
+content, and a long-symbol-string descender cluster.
 
-**Recommended next order:** ~~delimiter raw exposure~~ DONE (§10.3). Next is
-**Phase A** collapse (fractions/scripts/sqrt/delimiters now all carry full
-precision; only arrays remain non-raw), which should also clear the 2
-fraction-in-sup residuals (both fail ONLY on strut-bottom `1.84` vs `1.85`, a
-sub-0.01 raw-sum imprecision in the `x^{2-\frac34}` sup height — exactly the
-universal-`use_raw` cascade Phase A fixes). Then revisit **D (arrays)** which is
-low-yield and float-fragile.
+**Recommended next order:** ~~delimiter raw exposure~~ DONE (§10.3),
+~~baseline residuals~~ DONE (§10.0b). Next is **Phase A** collapse (the box-model
+field-deletion capstone — fractions/scripts/sqrt/delimiters all carry full
+precision now; only arrays remain non-raw). Then **D (arrays)** (low-yield) and
+the extended-corpus compound clusters.
 
 ### 10.5 Acceptance-criteria scorecard (§8)
 1. *No per-content em constant tables in fraction.ls/scripts.ls* — **fraction.ls
@@ -468,6 +481,5 @@ low-yield and float-fragile.
    pending Phase A; script-radical specs retained).
 2. *One height/depth; render_*/*_raw/strut_* gone* — ❌ (Phase A, blocked as above).
 3. *Fixtures 100%* — not re-run this session.
-4. *Corpus ≥ 763* — ✅ **822**.
-5. *Zero regressions on the 206 baseline at end-state* — **204/206** (2 on the
-   fraction-in-sup residual; expected to clear with Phase A).
+4. *Corpus ≥ 763* — ✅ **824**.
+5. *Zero regressions on the 206 baseline at end-state* — ✅ **206/206** (met).

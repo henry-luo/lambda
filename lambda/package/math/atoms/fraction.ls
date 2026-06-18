@@ -241,11 +241,12 @@ fn frac_bar_geom(frac_ctx, numer_box, denom_box, gstyle, is_fraction_child) {
             pstrut: pstrut,
             font_pct: if (s_child == 1.0) null else font_pct_str(s_child),
             // Expose height_raw to the single-rounding strut path AND to a
-            // parent fraction's Rule 15 (which reads the child's raw metrics)
-            // when this fraction is itself a fraction-child or a top-level
-            // display fraction. A scaled fraction reached via a subscript does
-            // NOT expose raw, so it can't flip the still-legacy script parent.
-            expose_raw: is_display or is_fraction_child
+            // parent's Rule 15/18 (which reads the child's raw metrics). Covers
+            // top-level display fractions, fraction-children, and fractions
+            // reached via a sub/superscript (script_container) — the script
+            // parents (render_sup_only/render_both, now Rule 18-metric-driven)
+            // consume this raw to round their vlist/strut once.
+            expose_raw: is_display or is_fraction_child or frac_ctx.script_container == true
         }
 }
 

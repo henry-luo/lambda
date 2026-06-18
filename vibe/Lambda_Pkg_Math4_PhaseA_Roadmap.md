@@ -3,16 +3,17 @@
 > Generated 2026-06-18 by the phaseA-producer-specs workflow. Tasks #1-9 in the session todo list.
 
 > **STATUS 2026-06-18 — see `Lambda_Pkg_Math4.md` §10 for the authoritative progress log.**
-> Corpus 763→**822/921**, baseline **204/206**, ~1000 hardcode lines removed.
+> Corpus 763→**824/921**, baseline **206/206 (PERFECT — hard gate met)**, ~1000 hardcode lines removed.
 > DONE: Task 2 (text-op/integral limits), **Task 1 (frac_bar_spec DELETED, fraction.ls 100% metric-driven)**,
 > Task 3 (render_sup_only Rule 18c), Task 6 (leaf dead-heuristic removal + imath fix),
 > **sqrt/radical (display/text metric-driven — bucket dispatch gone, +17 corpus, +1 baseline, 0 regressions; §10.0)**,
 > **delimiter raw exposure (the `2.41` magic RETIRED — sized-delim glyphs carry height_raw/depth_raw, strut CEIL@2s h+d once; pure refactor, 0 pass-rate change; §10.3)**,
-> Task 5 partial (`fmt_delim_em` special-cases removed).
+> Task 5 partial (`fmt_delim_em` special-cases removed),
+> **last 2 baseline residuals FIXED (script-reached fractions now expose raw; fraction.ls:248) → SACRED 206/206**.
 > BLOCKED/deferred: Task 4 (arrays — 2-row depth_holder float artifact, low yield),
 > mechanical collapse 7/8/9 (the CAPSTONE).
-> NEXT: **Phase A collapse** — fractions/scripts/sqrt/delimiters all carry full precision now;
-> should clear the last 2 baseline fails (both fraction-in-sup residuals: strut-bottom 1.84 vs 1.85, sub-0.01 raw-sum).
+> NEXT: **Phase A collapse** (box-model field-deletion) — fractions/scripts/sqrt/delimiters all carry full precision now.
+> Then arrays + extended-corpus compound clusters (equation/align/cfrac/integrals/matrices-with-inner-content).
 > NOTE: corpus golden is **display-rooted** (MathLive SSR default); the harness now renders displaystyle.
 
 ## Hard execution order (corrected by synthesis)
