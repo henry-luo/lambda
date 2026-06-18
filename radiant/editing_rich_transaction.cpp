@@ -283,6 +283,79 @@ static bool rich_transaction_cleanup_empty_inline_after_delete(
     return true;
 }
 
+static bool rich_transaction_can_delete_inline_wrapper(
+        DomElement* elem,
+        const EditingSurface* surface) {
+    if (!elem || !elem->parent || !elem->parent->is_element()) return false;
+    if (surface && surface->owner == elem) return false;
+    if (dom_element_has_attribute(elem, "contenteditable")) return false;
+    return rich_transaction_is_cleanup_inline_tag(elem->tag());
+}
+
+static bool rich_transaction_delete_previous_inline_wrapper(
+        DocState* state,
+        const EditingSurface* surface,
+        DomText* text,
+        EditingRichMutationLogFn log_mutation,
+        const EditingIntent* intent,
+        void* log_user) {
+    if (!state || !text || !text->parent || !text->parent->is_element()) {
+        return false;
+    }
+
+    DomElement* parent = lam::dom_require_element(text->parent);
+    DomNode* text_node = static_cast<DomNode*>(text);
+    DomNode* prev_node = text_node->prev_sibling;
+    if (!parent || !prev_node || !prev_node->is_element()) return false;
+
+    DomElement* inline_elem = lam::dom_require_element(prev_node);
+    if (!rich_transaction_can_delete_inline_wrapper(inline_elem, surface)) {
+        return false;
+    }
+    if (!inline_elem->first_child ||
+        inline_elem->first_child != inline_elem->last_child ||
+        !inline_elem->first_child->is_text()) {
+        return false;
+    }
+
+    DomText* prev_text = lam::dom_require_text(inline_elem->first_child);
+    if (!prev_text || dom_text_utf16_length(prev_text) != 1) return false;
+
+    uint32_t inline_idx = dom_node_child_index(prev_node);
+    if (inline_idx == (uint32_t)-1) return false;
+    uint32_t old_len = prev_text->length > 0
+        ? (uint32_t)prev_text->length
+        : (uint32_t)strlen(prev_text->text ? prev_text->text : "");
+
+    dom_mutation_pre_remove(state, prev_node);
+    if (!rich_transaction_remove_child_for_edit(parent, prev_node)) {
+        return false;
+    }
+    if (!rich_transaction_collapse_dom_caret(state,
+            static_cast<DomNode*>(parent), inline_idx)) {
+        return false;
+    }
+
+    EditingSurface live_surface;
+    if (editing_surface_from_target(static_cast<View*>(parent),
+            &live_surface) && editing_surface_is_rich(&live_surface)) {
+        editing_interaction_set_active_surface(state, &live_surface);
+        if (log_mutation) {
+            log_mutation(state, &live_surface, intent, "delete-inline",
+                         old_len, 0, inline_idx, inline_idx, log_user);
+        }
+    } else if (surface) {
+        editing_interaction_set_active_surface(state, surface);
+        if (log_mutation) {
+            log_mutation(state, surface, intent, "delete-inline",
+                         old_len, 0, inline_idx, inline_idx, log_user);
+        }
+    }
+    log_debug("rich_transaction_delete_previous_inline_wrapper: removed %s at index %u",
+              inline_elem->node_name(), inline_idx);
+    return true;
+}
+
 static bool rich_transaction_delete_dom_range_and_read_caret(
         DocState* state, DomText** out_text, uint32_t* out_byte_offset) {
     if (!state || !state->dom_selection) return false;
@@ -2428,6 +2501,11 @@ bool editing_rich_default_replace(DocState* state,
             if (intent->type == INPUT_INTENT_DELETE_CONTENT_BACKWARD) {
                 if (rich_transaction_join_previous_block(
                         state, fallback_surface_ptr, text, start,
+                        log_mutation, intent, log_user)) {
+                    return true;
+                }
+                if (start == 0 && rich_transaction_delete_previous_inline_wrapper(
+                        state, fallback_surface_ptr, text,
                         log_mutation, intent, log_user)) {
                     return true;
                 }

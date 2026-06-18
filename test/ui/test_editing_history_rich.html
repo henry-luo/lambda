@@ -8,8 +8,9 @@
       font: 16px sans-serif;
       margin: 24px;
     }
-    #host {
+    .host {
       border: 1px solid #777;
+      margin-bottom: 12px;
       padding: 12px;
       width: 420px;
       min-height: 48px;
@@ -20,10 +21,11 @@
   </style>
 </head>
 <body>
-  <div id="host" contenteditable="true">alpha beta gamma</div>
+  <div id="cancel-host" class="host" contenteditable="true">alpha beta gamma</div>
+  <div id="restore-host" class="host" contenteditable="true">undo seed</div>
   <div id="log">none</div>
   <script>
-    var host = document.getElementById('host');
+    var host = document.getElementById('cancel-host');
     var log = document.getElementById('log');
     host.addEventListener('beforeinput', function(event) {
       if (event.inputType === 'historyUndo' ||

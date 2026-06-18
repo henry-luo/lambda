@@ -4755,6 +4755,85 @@ static bool js_dom_rich_history_restore(DocState* state,
     return true;
 }
 
+typedef struct JsDomRichHistoryPending {
+    DomElement* owner;
+    char* before_html;
+    JsDomRichHistorySelection before_sel;
+} JsDomRichHistoryPending;
+
+extern "C" void* js_dom_rich_history_capture_before(
+        DocState* state,
+        const EditingSurface* surface,
+        const EditingIntent* intent) {
+    if (!state || !surface || !intent || !surface->owner ||
+        !editing_surface_is_rich(surface) ||
+        !js_dom_rich_history_should_record(intent)) {
+        return nullptr;
+    }
+
+    char* before_html = js_dom_rich_history_snapshot(surface->owner);
+    if (!before_html) return nullptr;
+
+    JsDomRichHistoryPending* pending =
+        (JsDomRichHistoryPending*)mem_calloc(1,
+            sizeof(JsDomRichHistoryPending), MEM_CAT_JS_RUNTIME);
+    if (!pending) {
+        mem_free(before_html);
+        return nullptr;
+    }
+    pending->owner = surface->owner;
+    pending->before_html = before_html;
+    js_dom_rich_history_capture_selection(state, surface->owner,
+                                          &pending->before_sel);
+    return pending;
+}
+
+extern "C" void js_dom_rich_history_commit_after(
+        DocState* state,
+        const EditingSurface* surface,
+        const EditingIntent* intent,
+        void* opaque_pending,
+        bool mutated) {
+    JsDomRichHistoryPending* pending =
+        (JsDomRichHistoryPending*)opaque_pending;
+    if (!pending) return;
+
+    if (mutated && state && surface && intent && surface->owner &&
+        pending->owner == surface->owner &&
+        js_dom_node_is_connected((DomNode*)surface->owner)) {
+        char* after_html = js_dom_rich_history_snapshot(surface->owner);
+        JsDomRichHistorySelection after_sel;
+        memset(&after_sel, 0, sizeof(after_sel));
+        js_dom_rich_history_capture_selection(state, surface->owner,
+                                              &after_sel);
+        js_dom_rich_history_record(surface->owner,
+                                   pending->before_html,
+                                   after_html,
+                                   &pending->before_sel,
+                                   &after_sel);
+        mem_free(after_html);
+    }
+
+    mem_free(pending->before_html);
+    mem_free(pending);
+}
+
+extern "C" bool js_dom_rich_history_restore_for_surface(
+        DocState* state,
+        const EditingSurface* surface,
+        InputIntentType input_type) {
+    if (input_type != INPUT_INTENT_HISTORY_UNDO &&
+        input_type != INPUT_INTENT_HISTORY_REDO) {
+        return false;
+    }
+
+    EditingIntent intent;
+    memset(&intent, 0, sizeof(intent));
+    intent.type = input_type;
+    intent.data = "";
+    return js_dom_rich_history_restore(state, surface, &intent);
+}
+
 // ============================================================================
 // Helper: get uppercase tag name (per DOM spec)
 // ============================================================================

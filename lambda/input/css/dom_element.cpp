@@ -2372,8 +2372,18 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
         if (candidate) {
             text_node = candidate;
         } else {
-            text_node = dom_text_create(string_value, parent);
-            if (text_node) dom_append_to_sibling_chain(parent, text_node);
+            text_node = nullptr;
+            DomNode* relinked = parent->last_child;
+            if (relinked && relinked->is_text()) {
+                DomText* relinked_text = relinked->as_text();
+                if (relinked_text && relinked_text->native_string == string_value) {
+                    text_node = relinked_text;
+                }
+            }
+            if (!text_node) {
+                text_node = dom_text_create(string_value, parent);
+                if (text_node) dom_append_to_sibling_chain(parent, text_node);
+            }
         }
     } else {
         // Create separate DomText wrapper with Lambda backing

@@ -51,6 +51,20 @@
 // only need the two-string builder for the paste/drop dispatch path.
 extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
                                                   const char* text_html);
+extern "C" void* js_dom_rich_history_capture_before(
+    DocState* state,
+    const EditingSurface* surface,
+    const EditingIntent* intent);
+extern "C" void js_dom_rich_history_commit_after(
+    DocState* state,
+    const EditingSurface* surface,
+    const EditingIntent* intent,
+    void* pending,
+    bool mutated);
+extern "C" bool js_dom_rich_history_restore_for_surface(
+    DocState* state,
+    const EditingSurface* surface,
+    InputIntentType input_type);
 #include "../lib/hashmap.h"           // hashmap utilities used by DocState maps
 #include "../lib/memtrack.h"          // mem_free
 #include <chrono>       // timing for reactive event dispatch
@@ -2215,7 +2229,26 @@ static bool dispatch_rich_transaction_defaultable(EventContext* evcon,
     tx.dispatch_input_without_mutation = false;
     tx.mutation_invalidates_layout = true;
     tx.mutation_invalidates_paint = true;
-    return editing_run_transaction(evcon, &tx, nullptr, nullptr, nullptr);
+
+    void* history_pending =
+        js_dom_rich_history_capture_before(state, &surface, intent);
+    bool mutated = false;
+    bool ok = editing_run_transaction(evcon, &tx, nullptr, &mutated, nullptr);
+    js_dom_rich_history_commit_after(state, &surface, intent,
+                                     history_pending, ok && mutated);
+    return ok;
+}
+
+static bool rich_history_transaction_mutate(EventContext* evcon,
+                                            DocState* state,
+                                            const EditingSurface* surface,
+                                            const EditingIntent* intent,
+                                            void* user) {
+    (void)evcon;
+    (void)intent;
+    InputIntentType input_type =
+        user ? *(InputIntentType*)user : INPUT_INTENT_NONE;
+    return js_dom_rich_history_restore_for_surface(state, surface, input_type);
 }
 
 static bool dispatch_rich_selection_snapshot(EventContext* evcon,
@@ -2976,15 +3009,40 @@ static bool dispatch_editing_history_for_controller(EventContext* evcon,
         memset(&intent, 0, sizeof(intent));
         intent.type = input_type;
         intent.data = "";
-        View* target = surface->view ? surface->view : static_cast<View*>(surface->owner);
-        bool handled = dispatch_rich_consumer_transaction_operation(evcon, target,
-            &intent, "history");
+        View* target = static_cast<View*>(surface->owner);
         DocState* state = event_context_target_state(evcon);
+        EditingSurface live_surface;
+        if (!editing_surface_from_target(target, &live_surface) ||
+            !editing_surface_is_rich(&live_surface)) {
+            return false;
+        }
+
+        EditingDispatchHooks hooks;
+        hooks.dispatch_input_event = dispatch_editing_input_event;
+        hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
+        hooks.copy_selection = dispatch_editing_copy_selection;
+        hooks.user = nullptr;
+
+        EditingTransaction tx;
+        memset(&tx, 0, sizeof(tx));
+        tx.surface = &live_surface;
+        tx.intent = &intent;
+        tx.hooks = &hooks;
+        tx.mutate = rich_history_transaction_mutate;
+        tx.mutate_user = &input_type;
+        tx.operation = "history";
+        tx.dispatch_input_without_mutation = false;
+        tx.mutation_invalidates_layout = true;
+        tx.mutation_invalidates_paint = true;
+
+        bool mutated = false;
+        bool handled = editing_run_transaction(evcon, &tx, nullptr, &mutated,
+                                               nullptr);
         event_log_editing_history(state, surface, &intent,
                                   input_type == INPUT_INTENT_HISTORY_UNDO
                                       ? "undo"
                                       : "redo",
-                                  0, 0, false);
+                                  0, 0, mutated);
         return handled;
     }
 
