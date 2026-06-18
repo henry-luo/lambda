@@ -54,9 +54,28 @@ pub fn render(node, context, render_fn) {
         ctx.derive(context, {style: frac_style})
     else context
 
-    // create numerator and denominator contexts
-    let num_ctx = ctx.numer_context(frac_ctx)
-    let den_ctx = ctx.denom_context(frac_ctx)
+    // MathLive geometry style (display/text/script/scriptscript) for this
+    // fraction. A directly-nested fraction inherits it via frac_gstyle; a
+    // top-level / subscript-reached fraction derives it from the cmd + style
+    // (the corpus renders inline at DISPLAY geometry, so text -> display).
+    let is_fraction_child = frac_ctx.frac_gstyle != null
+    let gstyle = if (frac_ctx.frac_gstyle != null) frac_ctx.frac_gstyle
+        else if (cmd == "\\tfrac") "text"
+        else if (frac_ctx.style == "script") "script"
+        else if (frac_ctx.style == "scriptscript") "scriptscript"
+        else "display"
+    // numerator/denominator geometry style (one step smaller), threaded so a
+    // fraction nested directly in the numer/denom renders correctly.
+    let child_gstyle = match gstyle {
+        case "display": "text"
+        case "text": "script"
+        case "script": "scriptscript"
+        default: "scriptscript"
+    }
+
+    // create numerator and denominator contexts (carry the child geometry)
+    let num_ctx = ctx.derive(ctx.numer_context(frac_ctx), {frac_gstyle: child_gstyle})
+    let den_ctx = ctx.derive(ctx.denom_context(frac_ctx), {frac_gstyle: child_gstyle})
 
     // render numerator and denominator
     let numer_box = if (node.numer != null) render_fn(node.numer, num_ctx)
@@ -90,7 +109,7 @@ pub fn render(node, context, render_fn) {
             is_unbraced_numeric_nobar(node))
     else
         build_frac_bar(numer_box, denom_box, ns, cl, ds, rule_thickness, frac_ctx,
-            cmd == "\\tfrac")
+            gstyle, is_fraction_child)
 
     // wrap with delimiters if present
     if (left_delim != null or right_delim != null)
@@ -128,8 +147,13 @@ fn wrap_cfrac_fraction(frac_box) {
 
 pub fn render_boxes(numer_box, denom_box, context) {
     let frac_ctx = context
+    let gstyle = if (frac_ctx.frac_gstyle != null) frac_ctx.frac_gstyle
+        else if (frac_ctx.style == "script") "script"
+        else if (frac_ctx.style == "scriptscript") "scriptscript"
+        else "display"
     let frac_box = build_frac_bar(numer_box, denom_box, 0.0, 0.0, 0.0,
-        met.at(met.defaultRuleThickness, met.style_index(frac_ctx.style)), frac_ctx, false)
+        met.at(met.defaultRuleThickness, met.style_index(frac_ctx.style)), frac_ctx,
+        gstyle, frac_ctx.frac_gstyle != null)
     wrap_default_fraction(frac_box)
 }
 
@@ -148,13 +172,14 @@ fn build_frac_nobar(numer_box, denom_box, frac_ctx, cmd, unbraced_numeric) {
 }
 
 // Rule 15d: with bar line — dispatcher.
-// Top-level (display-geometry) bar fractions are computed directly from
-// TeXBook Rule 15d + MathLive's makeVList (see frac_bar_geom / build_frac_bar_rule15),
-// with NO hardcoded em constants. Script/scriptscript, \tfrac, colorbox, and
-// composite-child fractions still fall through to the legacy constant table
-// (frac_bar_spec) until their geometry is ported too.
-fn build_frac_bar(numer_box, denom_box, ns, cl, ds, rule_thickness, frac_ctx, text_geom) {
-    let geom = frac_bar_geom(frac_ctx, numer_box, denom_box, text_geom)
+// Bar fractions are computed directly from TeXBook Rule 15d + MathLive's
+// makeVList (see frac_bar_geom / build_frac_bar_rule15) with NO hardcoded em
+// constants for: top-level display/text (\frac/\dfrac/\tfrac) AND directly
+// fraction-nested fractions (gstyle threaded via frac_gstyle). Subscript-reached
+// script/scriptscript fractions, colorbox, and composite-child fractions still
+// fall through to the legacy constant table until their parents are ported.
+fn build_frac_bar(numer_box, denom_box, ns, cl, ds, rule_thickness, frac_ctx, gstyle, is_fraction_child) {
+    let geom = frac_bar_geom(frac_ctx, numer_box, denom_box, gstyle, is_fraction_child)
     if (geom != null) build_frac_bar_rule15(numer_box, denom_box, geom)
     else build_frac_bar_legacy(numer_box, denom_box, ns, cl, ds, rule_thickness, frac_ctx)
 }
@@ -169,26 +194,21 @@ fn frac_raw_d(bx) { if (bx.depth_raw != null) bx.depth_raw else bx.depth }
 // emit the matching font-size on the wrapper). Returns a geom record (all em
 // values full precision) or null to fall back to the legacy constant dispatch
 // (colorbox quirks, or composite children that lack raw metrics).
-fn frac_bar_geom(frac_ctx, numer_box, denom_box, text_geom) {
+fn frac_bar_geom(frac_ctx, numer_box, denom_box, gstyle, is_fraction_child) {
     let has_raw = numer_box.height_raw != null and numer_box.depth_raw != null and
                   denom_box.height_raw != null and denom_box.depth_raw != null
-    // Script/scriptscript fractions interlock with their (still-legacy) parent
-    // fraction/script, which reads the child box metrics to pick its branch:
-    // changing the inner box regresses the outer. They stay on legacy until the
-    // parent composition is ported too. Display + text (\tfrac) have no such
-    // parent dependency (top-level), so they go through the rule.
-    let nested_script = frac_ctx.style == "script" or frac_ctx.style == "scriptscript"
-    if (frac_ctx.colorbox_content == true or not has_raw or nested_script)
+    // A script/scriptscript fraction reached via a SUBSCRIPT (not a fraction
+    // numerator) interlocks with the still-legacy scripts.ls that composes it:
+    // changing the inner box regresses the script. Those stay on legacy until
+    // Rule 18 is ported. Fraction-nested fractions (is_fraction_child) and
+    // top-level display/text fractions have no such legacy-parent dependency.
+    let subscript_script = (not is_fraction_child) and
+        (frac_ctx.style == "script" or frac_ctx.style == "scriptscript")
+    if (frac_ctx.colorbox_content == true or not has_raw or subscript_script)
         null
     else {
-        // geom_style: the effective TeX style for the fraction geometry.
-        // \tfrac forces text; a fraction nested in a script keeps script/
-        // scriptscript; a bare \frac/\dfrac at top level renders with DISPLAY
-        // geometry (num1/denom1, unscaled children) — matching MathLive.
-        let geom_style = if (text_geom) "text"
-            else if (frac_ctx.style == "script") "script"
-            else if (frac_ctx.style == "scriptscript") "scriptscript"
-            else "display"
+        // geom_style is the MathLive geometry style threaded/derived in render().
+        let geom_style = gstyle
         let is_display = geom_style == "display"
         // numerator/denominator style for this geometry (one step smaller)
         let child_style = match geom_style {
@@ -247,12 +267,12 @@ fn frac_bar_geom(frac_ctx, numer_box, denom_box, text_geom) {
             rule_height: theta,
             pstrut: pstrut,
             font_pct: if (s_child == 1.0) null else font_pct_str(s_child),
-            // Only DISPLAY-geometry (top-level) fractions expose height_raw to
-            // the single-rounding strut path. Scaled (text/script/scriptscript)
-            // fractions are always nested; exposing raw would flip the PARENT
-            // fraction/script into the rule path before its composition is
-            // ported, cascading regressions. They emit via render_* instead.
-            expose_raw: is_display
+            // Expose height_raw to the single-rounding strut path AND to a
+            // parent fraction's Rule 15 (which reads the child's raw metrics)
+            // when this fraction is itself a fraction-child or a top-level
+            // display fraction. A scaled fraction reached via a subscript does
+            // NOT expose raw, so it can't flip the still-legacy script parent.
+            expose_raw: is_display or is_fraction_child
         }
     }
 }
@@ -316,12 +336,20 @@ fn build_frac_bar_rule15(numer_box, denom_box, geom) {
     {
         element: el,
         height: h_em,
-        depth: geom.frac_depth,
+        // depth is the CEIL-toward-zero projection (matches the va a non-raw
+        // consumer emits via fmt_em(-depth), e.g. the \left..\right strut). The
+        // FULL-precision depth lives in depth_raw for the single-rounding path
+        // and in left_right_render_depth for stretchy delimiter sizing.
+        depth: d_em,
         height_raw: if (geom.expose_raw) geom.frac_height else null,
         depth_raw: if (geom.expose_raw) geom.frac_depth else null,
         render_height: h_em,
         render_depth: d_em,
         render_total: total_em,
+        // full-precision content extent for \left..\right delimiter sizing
+        // (stretchy delimiters size against the unrounded content, not CEIL@2).
+        left_right_render_depth: geom.frac_depth,
+        left_right_render_total: geom.frac_height + geom.frac_depth,
         width: max(numer_box.width, denom_box.width),
         type: "mord",
         italic: 0.0,
