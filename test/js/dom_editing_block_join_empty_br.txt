@@ -1,0 +1,2 @@
+empty-br-paragraph ok=true html=<p>def</p> expected=true before=deleteContentBackward:1:true,0,true,0 input=deleteContentBackward:0 focus=true:0 focusExpected=0
+empty-br-div ok=true html=<div>def</div> expected=true before=deleteContentBackward:1:true,0,true,0 input=deleteContentBackward:0 focus=true:0 focusExpected=0

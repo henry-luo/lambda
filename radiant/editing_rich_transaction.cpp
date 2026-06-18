@@ -618,6 +618,10 @@ static bool rich_transaction_is_table_cell_tag(uintptr_t tag_id) {
     return tag_id == HTM_TAG_TD || tag_id == HTM_TAG_TH;
 }
 
+static bool rich_transaction_is_list_tag(uintptr_t tag_id) {
+    return tag_id == HTM_TAG_OL || tag_id == HTM_TAG_UL;
+}
+
 static bool rich_transaction_join_block_pair_allowed(DomElement* prev_block,
                                                      DomElement* current_block) {
     if (!prev_block || !current_block) return false;
@@ -1174,6 +1178,82 @@ static bool rich_transaction_join_previous_trailing_br_block(
     return true;
 }
 
+static bool rich_transaction_join_previous_empty_br_block(
+        DocState* state,
+        const EditingSurface* surface,
+        DomText* text,
+        uint32_t caret_offset,
+        EditingRichMutationLogFn log_mutation,
+        const EditingIntent* intent,
+        void* log_user) {
+    if (!state || !text || caret_offset != 0) return false;
+
+    DomElement* current_block = rich_transaction_text_block_parent(text);
+    RichJoinBlockContent current_content;
+    if (!current_block ||
+        !rich_transaction_simple_text_content(current_block, text,
+            &current_content) ||
+        !current_content.direct_text) {
+        return false;
+    }
+
+    DomNode* current_node = static_cast<DomNode*>(current_block);
+    DomNode* prev_node = current_node->prev_sibling;
+    if (!prev_node || !prev_node->is_element()) return false;
+
+    DomElement* prev_block = lam::dom_require_element(prev_node);
+    if (!prev_block || !rich_transaction_is_join_block_tag(prev_block->tag()) ||
+        !rich_transaction_join_block_pair_allowed(prev_block, current_block) ||
+        !prev_block->first_child ||
+        prev_block->first_child != prev_block->last_child ||
+        !prev_block->first_child->is_element() ||
+        prev_block->first_child->as_element()->tag() != HTM_TAG_BR) {
+        return false;
+    }
+
+    DomElement* parent = current_node->parent && current_node->parent->is_element()
+        ? lam::dom_require_element(current_node->parent)
+        : nullptr;
+    if (!parent) return false;
+
+    DomNode* filler = prev_block->first_child;
+    dom_mutation_pre_remove(state, filler);
+    if (!rich_transaction_remove_child_for_edit(prev_block, filler)) {
+        return false;
+    }
+
+    DomNode* moving_child = current_content.child;
+    if (!moving_child || !current_node->remove_child(moving_child)) {
+        return false;
+    }
+    if (!rich_transaction_append_child_for_edit(prev_block, moving_child)) {
+        current_node->append_child(moving_child);
+        return false;
+    }
+
+    dom_mutation_pre_remove(state, current_node);
+    if (!rich_transaction_remove_child_for_edit(parent, current_node)) {
+        return false;
+    }
+    if (!rich_transaction_collapse_text_caret(state, text, 0)) {
+        return false;
+    }
+
+    EditingSurface live_surface;
+    if (editing_surface_from_target(static_cast<View*>(text),
+            &live_surface) && editing_surface_is_rich(&live_surface)) {
+        editing_interaction_set_active_surface(state, &live_surface);
+        if (log_mutation) {
+            log_mutation(state, &live_surface, intent,
+                         "empty-br-block-join", 0, 0, 0, 0, log_user);
+        }
+    } else if (surface) {
+        editing_interaction_set_active_surface(state, surface);
+    }
+    log_debug("rich_transaction_join_previous_empty_br_block: moved text into filler block");
+    return true;
+}
+
 static bool rich_transaction_join_child_block_with_parent_text(
         DocState* state,
         const EditingSurface* surface,
@@ -1351,6 +1431,86 @@ static bool rich_transaction_join_parent_text_with_child_block(
     }
     log_debug("rich_transaction_join_parent_text_with_child_block: joined nested block at offset %u",
               prev_keep_len);
+    return true;
+}
+
+static bool rich_transaction_join_nested_list_item_with_parent(
+        DocState* state,
+        const EditingSurface* surface,
+        DomText* text,
+        uint32_t caret_offset,
+        EditingRichMutationLogFn log_mutation,
+        const EditingIntent* intent,
+        void* log_user) {
+    if (!state || !text || caret_offset != 0) return false;
+
+    DomElement* current_li = rich_transaction_text_block_parent(text);
+    if (!current_li || current_li->tag() != HTM_TAG_LI) return false;
+    DomNode* current_li_node = static_cast<DomNode*>(current_li);
+    if (editing_rich_find_text_descendant(current_li_node, false) != text) {
+        return false;
+    }
+
+    DomElement* nested_list = current_li_node->parent &&
+            current_li_node->parent->is_element()
+        ? lam::dom_require_element(current_li_node->parent)
+        : nullptr;
+    if (!nested_list || !rich_transaction_is_list_tag(nested_list->tag()) ||
+        nested_list->first_child != current_li_node ||
+        nested_list->last_child != current_li_node) {
+        return false;
+    }
+
+    DomNode* nested_list_node = static_cast<DomNode*>(nested_list);
+    DomElement* parent_li = nested_list_node->parent &&
+            nested_list_node->parent->is_element()
+        ? lam::dom_require_element(nested_list_node->parent)
+        : nullptr;
+    if (!parent_li || parent_li->tag() != HTM_TAG_LI ||
+        parent_li->last_child != nested_list_node ||
+        parent_li->first_child == nested_list_node) {
+        return false;
+    }
+
+    DomNode* parent_li_node = static_cast<DomNode*>(parent_li);
+    DomElement* outer_list = parent_li_node->parent &&
+            parent_li_node->parent->is_element()
+        ? lam::dom_require_element(parent_li_node->parent)
+        : nullptr;
+    if (!outer_list || !rich_transaction_is_list_tag(outer_list->tag())) {
+        return false;
+    }
+
+    uint32_t parent_idx = dom_node_child_index(parent_li_node);
+    if (parent_idx == (uint32_t)-1) return false;
+
+    if (!nested_list_node->remove_child(current_li_node)) return false;
+    if (!rich_transaction_insert_child_for_edit(outer_list, current_li_node,
+            parent_idx + 1)) {
+        nested_list_node->append_child(current_li_node);
+        return false;
+    }
+
+    dom_mutation_pre_remove(state, nested_list_node);
+    if (!rich_transaction_remove_child_for_edit(parent_li, nested_list_node)) {
+        return false;
+    }
+
+    if (!rich_transaction_collapse_text_caret(state, text, 0)) {
+        return false;
+    }
+    EditingSurface live_surface;
+    if (editing_surface_from_target(static_cast<View*>(text),
+            &live_surface) && editing_surface_is_rich(&live_surface)) {
+        editing_interaction_set_active_surface(state, &live_surface);
+        if (log_mutation) {
+            log_mutation(state, &live_surface, intent,
+                         "nested-list-unwrap", 0, 0, 0, 0, log_user);
+        }
+    } else if (surface) {
+        editing_interaction_set_active_surface(state, surface);
+    }
+    log_debug("rich_transaction_join_nested_list_item_with_parent: lifted nested li after parent");
     return true;
 }
 
@@ -3185,12 +3345,22 @@ bool editing_rich_default_replace(DocState* state,
                         log_mutation, intent, log_user)) {
                     return true;
                 }
+                if (rich_transaction_join_previous_empty_br_block(
+                        state, fallback_surface_ptr, text, start,
+                        log_mutation, intent, log_user)) {
+                    return true;
+                }
                 if (rich_transaction_join_child_block_with_parent_text(
                         state, fallback_surface_ptr, text, start,
                         log_mutation, intent, log_user)) {
                     return true;
                 }
                 if (rich_transaction_join_parent_text_with_child_block(
+                        state, fallback_surface_ptr, text, start,
+                        log_mutation, intent, log_user)) {
+                    return true;
+                }
+                if (rich_transaction_join_nested_list_item_with_parent(
                         state, fallback_surface_ptr, text, start,
                         log_mutation, intent, log_user)) {
                     return true;

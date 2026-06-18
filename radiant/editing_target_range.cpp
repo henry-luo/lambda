@@ -154,6 +154,10 @@ static bool target_range_is_table_cell_tag(uintptr_t tag_id) {
     return tag_id == HTM_TAG_TD || tag_id == HTM_TAG_TH;
 }
 
+static bool target_range_is_list_tag(uintptr_t tag_id) {
+    return tag_id == HTM_TAG_OL || tag_id == HTM_TAG_UL;
+}
+
 static bool target_range_join_block_pair_allowed(DomElement* prev_block,
                                                  DomElement* current_block) {
     if (!prev_block || !current_block) return false;
@@ -406,6 +410,18 @@ static bool target_range_text_line_boundary(DomBoundary caret,
         out[0].end = caret;
     }
     return true;
+}
+
+static DomText* target_range_last_text_before_child(DomElement* parent,
+                                                    DomNode* stop_child) {
+    if (!parent || !stop_child) return nullptr;
+    DomText* found = nullptr;
+    for (DomNode* child = parent->first_child; child && child != stop_child;
+         child = child->next_sibling) {
+        DomText* text = target_range_find_text_descendant(child, true);
+        if (text) found = text;
+    }
+    return found;
 }
 
 static bool target_range_backspace_atomic_whitespace(DomBoundary caret,
@@ -694,6 +710,41 @@ static bool target_range_backspace_trailing_br_block_join(
     return true;
 }
 
+static bool target_range_backspace_empty_br_block_join(
+        DomBoundary caret,
+        EditingTargetRange* out) {
+    if (!out || !caret.node || !caret.node->is_text() || caret.offset != 0) {
+        return false;
+    }
+
+    DomText* text = caret.node->as_text();
+    DomElement* current_block = target_range_text_block_parent(text);
+    TargetRangeJoinContent current_content;
+    if (!current_block ||
+        !target_range_simple_text_content(current_block, text,
+            &current_content) ||
+        !current_content.direct_text) {
+        return false;
+    }
+
+    DomNode* current_node = static_cast<DomNode*>(current_block);
+    DomNode* prev_node = current_node->prev_sibling;
+    if (!prev_node || !prev_node->is_element()) return false;
+    DomElement* prev_block = prev_node->as_element();
+    if (!prev_block || !target_range_is_join_block_tag(prev_block->tag()) ||
+        !target_range_join_block_pair_allowed(prev_block, current_block) ||
+        !prev_block->first_child ||
+        prev_block->first_child != prev_block->last_child ||
+        !prev_block->first_child->is_element() ||
+        prev_block->first_child->as_element()->tag() != HTM_TAG_BR) {
+        return false;
+    }
+
+    out[0].start = { static_cast<DomNode*>(prev_block), 0 };
+    out[0].end = { static_cast<DomNode*>(text), 0 };
+    return true;
+}
+
 static bool target_range_backspace_child_block_parent_join(
         DomBoundary caret,
         EditingTargetRange* out) {
@@ -784,6 +835,62 @@ static bool target_range_backspace_parent_text_child_block_join(
     return true;
 }
 
+static bool target_range_backspace_nested_list_unwrap(DomBoundary caret,
+                                                      EditingTargetRange* out) {
+    if (!out || !caret.node || !caret.node->is_text() || caret.offset != 0) {
+        return false;
+    }
+
+    DomText* text = caret.node->as_text();
+    DomElement* current_li = target_range_text_block_parent(text);
+    if (!current_li || current_li->tag() != HTM_TAG_LI) return false;
+    DomNode* current_li_node = static_cast<DomNode*>(current_li);
+    if (target_range_find_text_descendant(current_li_node, false) != text) {
+        return false;
+    }
+
+    DomElement* nested_list = current_li_node->parent &&
+            current_li_node->parent->is_element()
+        ? current_li_node->parent->as_element()
+        : nullptr;
+    if (!nested_list || !target_range_is_list_tag(nested_list->tag()) ||
+        nested_list->first_child != current_li_node ||
+        nested_list->last_child != current_li_node) {
+        return false;
+    }
+
+    DomNode* nested_list_node = static_cast<DomNode*>(nested_list);
+    DomElement* parent_li = nested_list_node->parent &&
+            nested_list_node->parent->is_element()
+        ? nested_list_node->parent->as_element()
+        : nullptr;
+    if (!parent_li || parent_li->tag() != HTM_TAG_LI ||
+        parent_li->last_child != nested_list_node ||
+        parent_li->first_child == nested_list_node) {
+        return false;
+    }
+
+    DomNode* parent_li_node = static_cast<DomNode*>(parent_li);
+    DomElement* outer_list = parent_li_node->parent &&
+            parent_li_node->parent->is_element()
+        ? parent_li_node->parent->as_element()
+        : nullptr;
+    if (!outer_list || !target_range_is_list_tag(outer_list->tag())) {
+        return false;
+    }
+
+    DomText* prev_text = target_range_last_text_before_child(parent_li,
+        nested_list_node);
+    if (!prev_text) return false;
+
+    out[0].start = {
+        static_cast<DomNode*>(prev_text),
+        dom_text_utf16_length(prev_text)
+    };
+    out[0].end = { static_cast<DomNode*>(text), 0 };
+    return true;
+}
+
 uint32_t editing_compute_target_ranges(DocState* state,
                                        const EditingSurface* surface,
                                        const EditingIntent* intent,
@@ -844,10 +951,16 @@ uint32_t editing_compute_target_ranges(DocState* state,
             if (target_range_backspace_trailing_br_block_join(start, out)) {
                 return 1;
             }
+            if (target_range_backspace_empty_br_block_join(start, out)) {
+                return 1;
+            }
             if (target_range_backspace_child_block_parent_join(start, out)) {
                 return 1;
             }
             if (target_range_backspace_parent_text_child_block_join(start, out)) {
+                return 1;
+            }
+            if (target_range_backspace_nested_list_unwrap(start, out)) {
                 return 1;
             }
             if (target_range_backspace_empty_inline(start, surface, out)) {

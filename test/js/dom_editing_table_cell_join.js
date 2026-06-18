@@ -139,3 +139,12 @@ runNoJoin(
   "<table><tbody><tr><td>abc</td><td rowspan=\"2\">def</td></tr><tr><td>ghi</td></tr></tbody></table>",
   () => editor.querySelectorAll("td")[1].firstChild,
   0);
+
+runNoJoin(
+  "table-cell-cross-row",
+  "<table><tr><td>abc</td></tr><tr><td>def</td></tr></table>",
+  () => editor.querySelectorAll("td")[1].firstChild,
+  0,
+  "<table><tbody><tr><td>abc</td></tr><tr><td>def</td></tr></tbody></table>",
+  () => editor.querySelectorAll("td")[1].firstChild,
+  0);
