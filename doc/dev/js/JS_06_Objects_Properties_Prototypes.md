@@ -78,7 +78,7 @@ Because `pool_calloc` zeroes the header, **all ordinary objects are `MAP_KIND_PL
    - string-wrapper indexed access + virtual `length` for `JS_CLASS_STRING`;
    - **prototype walk** `js_prototype_lookup_ex` (`:3592`);
    - top-of-chain deletion guard (don't resurrect a deleted Object.prototype builtin);
-   - **builtin-method fallback** by `js_class_id` then `js_lookup_builtin_method` then `.constructor` then collection methods;
+   - **builtin-method fallback** via `js_map_builtin_fallback_get`: `js_class_id`, `js_lookup_builtin_method`, `.constructor`, and collection methods;
    - else `make_js_undefined()`.
 3. **ARRAY / ELEMENT branches** handle index/length/companion-map access, including `JSPD_IS_ACCESSOR` slots on the companion map.
 
@@ -88,14 +88,15 @@ Because `pool_calloc` zeroes the header, **all ordinary objects are `MAP_KIND_PL
 
 ## 6. Property set
 
-`js_property_set(object, key, value)` (`js_runtime.cpp:5058`).
+`js_property_set(object, key, value)` (`js_runtime.cpp`) is now a thin preflight dispatcher over helper-sized branches.
 
 <img alt="Property set dispatch" src="diagram/property_set_dispatch.svg" width="720">
 
 1. **Dense-array fast path** for an INT key on a plain array.
 2. Base checks: null/undefined -> TypeError; private-host check; primitive/symbol base handling.
-3. **ARRAY branch** - `length` resize (honoring the companion-map `length` shape flags), non-numeric keys -> companion map (with inherited-setter walk), numeric-index accessor/non-writable guards from the companion-map digit entry, OrdinarySet proto-walk for inherited index accessors.
-4. **MAP branch** - key stringification; proxy private slots; `__proto__` set -> `js_reflect_set_prototype_of`; **`__frozen__` reject**; **non-writable guard** via `js_prop_attrs_fast_path` (shape flags); **exotic gate** `js_try_exotic_property_set`; **setter dispatch** (proxy `[[Set]]` forward, then `js_ordinary_set_via_accessor` walking own+proto for an `IS_ACCESSOR` pair, then a non-writable inherited-data reject); **data write** - `fn_map_set` for an existing shape entry (clearing `JSPD_DELETED` and preserving enum order for resurrection), else `map_put` with extensible/sealed/frozen checks.
+3. **ARRAY branch** via `js_property_set_array` - `length` resize (honoring the companion-map `length` shape flags), non-numeric keys -> companion map (with inherited-setter walk), numeric-index accessor/non-writable guards from the companion-map digit entry, OrdinarySet proto-walk for inherited index accessors.
+4. **MAP branch** via `js_property_set_map` - key stringification; proxy private slots; `__proto__` set -> `js_reflect_set_prototype_of`; **`__frozen__` reject**; **non-writable guard** via `js_prop_attrs_fast_path` (shape flags); **exotic gate** `js_try_exotic_property_set`; **setter dispatch** (proxy `[[Set]]` forward, then `js_ordinary_set_via_accessor` walking own+proto for an `IS_ACCESSOR` pair, then a non-writable inherited-data reject); **data write** - `fn_map_set` for an existing shape entry (clearing `JSPD_DELETED` and preserving enum order for resurrection), else `map_put` with extensible/sealed/frozen checks.
+5. **FUNC branch** via `js_property_set_function` - virtual `prototype`/`name`/`length` handling, bound-function restricted properties, inherited setter/non-writable checks, then `properties_map` storage.
 
 The spec-named kernels `js_ordinary_set` / `js_ordinary_set_via_accessor` live in `js_props.cpp:254`.
 
@@ -148,9 +149,9 @@ Because instances **share** the cached `TypeMap`, any per-instance attribute cha
 ## 11. Known Issues & Future Improvements
 
 1. **Dense array hole sentinel remains.** `JS_DELETED_SENTINEL_VAL` (`js_runtime.h:26`) now uses unused tag `0x7E` and marks dense `Array::items` holes, not ordinary descriptor metadata. Ordinary map/FUNC/ARRAY companion-map deletes use `JSPD_DELETED`; readers that may inspect dense array items still preserve a raw-hole check, while ordinary property readers use `js_own_shape_slot_status`.
-2. **Oversized dispatch functions.** `js_property_set`, `js_property_get`, `ValidateAndApplyPropertyDescriptor`, and `js_delete_property` remain monolithic and deeply nested across ordinary, exotic, array, proxy, and function special cases.
-3. **Linear scans on hot paths.** Built-in method lookup is linear `strncmp` over each spec table (`js_runtime_builtin_registry.cpp:20`). *Improvement:* sort + bsearch (or hash) the spec tables, then migrate the oversized property dispatch functions to the smaller kernels in `js_props.cpp`.
-4. **Corrupt-`type`-pointer root cause remains MIR-side.** The TypeMap plausibility guard is centralized as `typemap_ptr_is_plausible` (`lambda-data.hpp:283`), so JS property/class readers share one safety net. The known `lib_marked.js` corrupt-`type` crash is still traced to MIR scope-env/register liveness around captured block-scoped lets; fixing that codegen root cause remains separate from the runtime guard.
+2. **Oversized dispatch functions.** The post-Js59 cleanup split MAP built-in fallback out of `js_property_get`, the ordinary MAP tombstone/configurable/frozen tail out of `js_delete_property`, and ARRAY/MAP/FUNC branches out of `js_property_set`. `ValidateAndApplyPropertyDescriptor` and the remaining array/function delete branches still need further decomposition across ordinary, exotic, array, proxy, and function special cases.
+3. **Linear scans on hot paths.** Built-in method lookup is linear `strncmp` over each spec table (`js_runtime_builtin_registry.cpp:20`). *Improvement:* sort + bsearch (or hash) the spec tables, then continue migrating the remaining oversized property dispatch branches to smaller kernels in `js_props.cpp`.
+4. **TypeMap pointer guard is defensive.** The TypeMap plausibility guard is centralized as `typemap_ptr_is_plausible` (`lambda-data.hpp:283`), so JS property/class readers share one safety net. The `lib_marked.js` corrupt-`type` crash family traced to captured block-scoped lets is fixed in MIR last-closure environment tracking; keep the guard as a defensive invariant check, not as the primary fix for that bug family.
 
 ---
 

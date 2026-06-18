@@ -127,6 +127,7 @@ static const uint64_t MASK56         = 0x00FFFFFFFFFFFFFFULL;
 
 static const int JS_MIR_MAX_COLLECTED_FUNCTIONS = 32768;
 static const int JS_MIR_MAX_COLLECTED_CLASSES = 4096;
+static const int JS_MIR_LAST_CLOSURE_CAPTURE_MAX = 512;
 
 struct JsMirImportEntry {
     MIR_item_t proto;
@@ -423,9 +424,9 @@ struct JsMirTranspiler {
     // Closure env read-back for mutable captures (forEach, reduce, etc.)
     MIR_reg_t last_closure_env_reg;
     int last_closure_capture_count;
-    char last_closure_capture_names[512][128];
-    int last_closure_capture_slots[512];
-    bool last_closure_capture_is_nfe[512];
+    char last_closure_capture_names[JS_MIR_LAST_CLOSURE_CAPTURE_MAX][128];
+    int last_closure_capture_slots[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    bool last_closure_capture_is_nfe[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool last_closure_has_env;
     bool allow_loop_let_scope_env_for_immediate_call;
     bool preserve_last_closure_env_after_readback;

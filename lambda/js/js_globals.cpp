@@ -12765,6 +12765,101 @@ extern "C" Item js_json_stringify(Item value) {
 // delete operator — remove property from object
 // =============================================================================
 
+static Item js_delete_map_property(Item obj, Item key) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
+    // Canonicalize key via ToPropertyKey so tombstones match the shape entry
+    // created by the corresponding get/set/defineProperty path.
+    key = js_to_property_key(key);
+    if (js_check_exception()) return (Item){.item = b2it(false)};
+    // v95: Track __sym_1 deletion on a map (Array.prototype[Symbol.iterator] may be deleted)
+    if (!g_array_sym_iter_ever_set && get_type_id(key) == LMD_TYPE_STRING) {
+        String* _dk = it2s(key);
+        if (_dk && _dk->len == 7 && strncmp(_dk->chars, "__sym_1", 7) == 0)
+            g_array_sym_iter_ever_set = 1;
+    }
+    // v16: Frozen objects reject property deletion
+    {
+        Map* m = obj.map;
+        bool frozen_found = false;
+        Item frozen_val = js_map_get_fast_ext(m, "__frozen__", 10, &frozen_found);
+        if (frozen_found && js_is_truthy(frozen_val)) {
+            if (js_strict_mode) {
+                String* sk = (get_type_id(key) == LMD_TYPE_STRING) ? it2s(key) : NULL;
+                char msg[256];
+                snprintf(msg, sizeof(msg), "Cannot delete property '%.*s' of a frozen object",
+                         sk ? (int)sk->len : 0, sk ? sk->chars : "");
+                Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+                Item em = (Item){.item = s2it(heap_create_name(msg))};
+                js_throw_value(js_new_error_with_name(tn, em));
+            }
+            return (Item){.item = b2it(false)};
+        }
+    }
+    // v16: Non-configurable properties cannot be deleted
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* str_key = it2s(key);
+        if (str_key && str_key->len > 0 && str_key->len < 200) {
+            // Phase 2c fast path: consult ShapeEntry::flags first.
+            int fp = js_prop_attrs_fast_path(obj, str_key->chars, (int)str_key->len, JSPD_NON_CONFIGURABLE);
+            bool is_nc = false;
+            if (fp == 0) {
+                is_nc = true;
+            }
+            if (is_nc) {
+                if (js_strict_mode) {
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "Cannot delete property '%.*s' of #<Object>",
+                             (int)str_key->len, str_key->chars);
+                    Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+                    Item em = (Item){.item = s2it(heap_create_name(msg))};
+                    js_throw_value(js_new_error_with_name(tn, em));
+                }
+                return (Item){.item = b2it(false)};
+            }
+        }
+    }
+    // Mark property as deleted through ShapeEntry flags. Object.keys,
+    // hasOwnProperty, in, JSON.stringify, and prototype lookup all read this
+    // through js_own_shape_slot_status/js_ordinary_* helpers.
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* str_key = it2s(key);
+        if (str_key && str_key->len > 0 && str_key->len < 200) {
+            // Probe-then-clear pattern. `js_props_query_*` is shape-first, so
+            // clear each non-default flag only when the current descriptor
+            // state requires it.
+            int kl = (int)str_key->len;
+            const char* kc = str_key->chars;
+            ShapeEntry* _se = js_find_shape_entry(obj, kc, kl);
+            if (!js_props_query_writable(obj.map, _se, kc, kl))
+                js_attr_set_writable(obj, kc, kl, /*writable=*/true);
+            // Clear non-configurable
+            if (!js_props_query_configurable(obj.map, _se, kc, kl))
+                js_attr_set_configurable(obj, kc, kl, /*configurable=*/true);
+            // Clear non-enumerable
+            if (!js_props_query_enumerable(obj.map, _se, kc, kl))
+                js_attr_set_enumerable(obj, kc, kl, /*enumerable=*/true);
+            // AT-3: legacy __get_<name>/__set_<name> tombstone writes retired.
+            // Post-AT-1 accessors are stored as IS_ACCESSOR shape entry under
+            // the property name; the helper below clears IS_ACCESSOR and sets
+            // JSPD_DELETED.
+        }
+    }
+    Map* m = obj.map;
+    TypeMap* map_type = (m && js_typemap_ptr_is_plausible(m->type)) ? (TypeMap*)m->type : NULL;
+    if (m && get_type_id(key) == LMD_TYPE_STRING) {
+        String* str_key = it2s(key);
+        if (str_key && str_key->len > 0) {
+            bool create_if_missing = js_map_has_builtin_method(
+                m, str_key->chars, (int)str_key->len);
+            if ((map_type && map_type->shape) || create_if_missing) {
+                js_shape_mark_deleted_own(obj, str_key->chars, (int)str_key->len,
+                                           create_if_missing);
+            }
+        }
+    }
+    return (Item){.item = b2it(true)};
+}
+
 extern "C" Item js_delete_property(Item obj, Item key) {
     // TypeError if base is null or undefined (non-object-coercible)
     // But only if there's no pending exception (e.g. from an unresolvable reference)
@@ -12983,98 +13078,7 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         }
         return (Item){.item = b2it(true)};
     }
-    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
-    // Canonicalize key via ToPropertyKey so tombstones match the shape entry
-    // created by the corresponding get/set/defineProperty path.
-    key = js_to_property_key(key);
-    if (js_check_exception()) return (Item){.item = b2it(false)};
-    // v95: Track __sym_1 deletion on a map (Array.prototype[Symbol.iterator] may be deleted)
-    if (!g_array_sym_iter_ever_set && get_type_id(key) == LMD_TYPE_STRING) {
-        String* _dk = it2s(key);
-        if (_dk && _dk->len == 7 && strncmp(_dk->chars, "__sym_1", 7) == 0)
-            g_array_sym_iter_ever_set = 1;
-    }
-    // v16: Frozen objects reject property deletion
-    {
-        Map* m = obj.map;
-        bool frozen_found = false;
-        Item frozen_val = js_map_get_fast_ext(m, "__frozen__", 10, &frozen_found);
-        if (frozen_found && js_is_truthy(frozen_val)) {
-            if (js_strict_mode) {
-                String* sk = (get_type_id(key) == LMD_TYPE_STRING) ? it2s(key) : NULL;
-                char msg[256];
-                snprintf(msg, sizeof(msg), "Cannot delete property '%.*s' of a frozen object",
-                         sk ? (int)sk->len : 0, sk ? sk->chars : "");
-                Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                Item em = (Item){.item = s2it(heap_create_name(msg))};
-                js_throw_value(js_new_error_with_name(tn, em));
-            }
-            return (Item){.item = b2it(false)};
-        }
-    }
-    // v16: Non-configurable properties cannot be deleted
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* str_key = it2s(key);
-        if (str_key && str_key->len > 0 && str_key->len < 200) {
-            // Phase 2c fast path: consult ShapeEntry::flags first.
-            int fp = js_prop_attrs_fast_path(obj, str_key->chars, (int)str_key->len, JSPD_NON_CONFIGURABLE);
-            bool is_nc = false;
-            if (fp == 0) {
-                is_nc = true;
-            }
-            if (is_nc) {
-                if (js_strict_mode) {
-                    char msg[256];
-                    snprintf(msg, sizeof(msg), "Cannot delete property '%.*s' of #<Object>",
-                             (int)str_key->len, str_key->chars);
-                    Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                    Item em = (Item){.item = s2it(heap_create_name(msg))};
-                    js_throw_value(js_new_error_with_name(tn, em));
-                }
-                return (Item){.item = b2it(false)};
-            }
-        }
-    }
-    // Mark property as deleted through ShapeEntry flags. Object.keys,
-    // hasOwnProperty, in, JSON.stringify, and prototype lookup all read this
-    // through js_own_shape_slot_status/js_ordinary_* helpers.
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* str_key = it2s(key);
-        if (str_key && str_key->len > 0 && str_key->len < 200) {
-            // Probe-then-clear pattern. `js_props_query_*` is shape-first, so
-            // clear each non-default flag only when the current descriptor
-            // state requires it.
-            int kl = (int)str_key->len;
-            const char* kc = str_key->chars;
-            ShapeEntry* _se = js_find_shape_entry(obj, kc, kl);
-            if (!js_props_query_writable(obj.map, _se, kc, kl))
-                js_attr_set_writable(obj, kc, kl, /*writable=*/true);
-            // Clear non-configurable
-            if (!js_props_query_configurable(obj.map, _se, kc, kl))
-                js_attr_set_configurable(obj, kc, kl, /*configurable=*/true);
-            // Clear non-enumerable
-            if (!js_props_query_enumerable(obj.map, _se, kc, kl))
-                js_attr_set_enumerable(obj, kc, kl, /*enumerable=*/true);
-            // AT-3: legacy __get_<name>/__set_<name> tombstone writes retired.
-            // Post-AT-1 accessors are stored as IS_ACCESSOR shape entry under
-            // the property name; the helper below clears IS_ACCESSOR and sets
-            // JSPD_DELETED.
-        }
-    }
-    Map* m = obj.map;
-    TypeMap* map_type = (m && js_typemap_ptr_is_plausible(m->type)) ? (TypeMap*)m->type : NULL;
-    if (m && get_type_id(key) == LMD_TYPE_STRING) {
-        String* str_key = it2s(key);
-        if (str_key && str_key->len > 0) {
-            bool create_if_missing = js_map_has_builtin_method(
-                m, str_key->chars, (int)str_key->len);
-            if ((map_type && map_type->shape) || create_if_missing) {
-                js_shape_mark_deleted_own(obj, str_key->chars, (int)str_key->len,
-                                           create_if_missing);
-            }
-        }
-    }
-    return (Item){.item = b2it(true)};
+    return js_delete_map_property(obj, key);
 }
 
 extern "C" Item js_delete_property_strict(Item obj, Item key) {
