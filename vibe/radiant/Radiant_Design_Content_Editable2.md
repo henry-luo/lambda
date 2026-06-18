@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join/inline-cleanup-target-range/atomic-delete/atomic-whitespace/trailing-br-block-join/empty-br-block-join/nested-block-parent-join/inline-chain-join/reverse-nested-text-join/inline-fragment-block-join/list-item-join/nested-list-unwrap/nested-list-split/table-cell-join/table-span-guard/table-cross-row-join/table-cross-row-tail/table-colspan-normalize/modifier-line-delete/modifier-word-delete slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting, conservative whole-wrapper toggle-off, collapsed typing-state inline insertion, and collapsed insertion adjacent-wrapper normalization landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard/history started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, native rich-host `copy`/`cut`/`paste`, native rich-host `undo`/`redo` event-envelope plus bounded snapshot/selection restore support, and keyboard/default-action rich undo/redo integration; CET-0 Chrome editing corpus symlink/runner/bootstrap seed landed; CET-1 first imported selection files and CET-2 first imported deletion file landed.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join/inline-cleanup-target-range/atomic-delete/atomic-whitespace/trailing-br-block-join/empty-br-block-join/nested-block-parent-join/inline-chain-join/reverse-nested-text-join/inline-fragment-block-join/list-item-join/nested-list-unwrap/nested-list-split/table-cell-join/table-span-guard/table-cross-row-join/table-cross-row-tail/table-colspan-normalize/modifier-line-delete/modifier-word-delete slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting, conservative whole-wrapper toggle-off, collapsed typing-state inline insertion, and collapsed insertion adjacent-wrapper normalization landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard/history started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, native rich-host `copy`/`cut`/`paste`, native rich-host `undo`/`redo` event-envelope plus bounded snapshot/selection restore support, and keyboard/default-action rich undo/redo integration; CET-0 Chrome editing corpus symlink/runner/bootstrap seed landed; CET corpus migration complete as a full Chromium `editing/` subtree mirror with a RUNNABLE allowlist gauge; CET harness expanded for fuller `assert_selection`, dump/text baselines, `js-test.js`, `eventSender`, and `testRunner` compatibility; current runnable slice covers initial selection and Delete/ForwardDelete while the rest of the imported corpus is skipped until harness/engine support lands.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -1614,13 +1614,29 @@ before declaring the whole EC-6 tier complete.
 | `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_history' --gtest_brief=1` | passed |
 | `./test/test_js_gtest.exe --gtest_brief=1` | 222 passed / 0 failed |
 | `./test/test_wpt_selection_gtest.exe --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
-| `./test/test_wpt_contenteditable_gtest.exe --gtest_brief=1` | 194 cases: 160 pass / 31 skip / 3 fail; failures are existing crash-test-style aborts outside the focused keyboard history regression |
+| `./test/test_wpt_contenteditable_gtest.exe --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
 
 **Global gate note:** EC-6f's focused keyboard-history regression, focused JS
-history regression, full JS suite, and local selection WPT guard are green. The
-full contenteditable WPT guard still has three crash-test failures, and the full
-`make test262-baseline` gate still needs to run before declaring the whole EC-6
-tier complete.
+history regression, full JS suite, and local selection/contenteditable WPT
+guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-6 tier complete.
+
+**Contenteditable WPT regression repair (2026-06-18).** Fixed the three
+unexpected crash-test regressions in the contenteditable WPT runner:
+`delete-immediately-after-changing-input-type-from-time`,
+`insert-image-with-joining-header-element-and-body`, and
+`inserthorizontalrule-with-2-selection-ranges-and-one-is-outside-body`.
+
+- Direct `Range.setStart()` / `Range.setEnd()` calls now resync a live
+  `Selection` that owns the mutated range, so non-collapsed selections do not
+  keep a stale `direction=none` cache after script mutates the selected range.
+- Text-control caret projection now repairs the editing selection shadow from
+  the live form-control selection/value state, clamping stale selection offsets
+  after input `type` / value changes instead of tripping the DocState shadow
+  invariant.
+- Verification: all three focused crash regressions pass individually, and
+  `./test/test_wpt_contenteditable_gtest.exe --gtest_brief=1` reports
+  194 cases: 163 pass / 31 skip / 0 fail.
 
 ---
 
@@ -1703,6 +1719,67 @@ Mirroring the existing **`test/js262 → ../lambda-test/js262`** pattern (the js
   is recorded in the corpus `MANIFEST` as a deferred CET-2 root-cause target.
 - Verification: `./test/test_chrome_editing_gtest.exe --gtest_brief=1`
   discovered 6 cases: 5 passed / 1 skipped (`deferred/`).
+
+**CET-2b — phased deletion imports: LANDED (2026-06-18).**
+
+- Extended the local `assert_selection` shim to support Chromium's callback
+  form (`selection => { ... }`) in addition to the command-string form.
+- Imported Chromium `editing/deleting/forward-delete.html` as a runnable
+  CET-2 case. It drives repeated `document.execCommand('ForwardDelete')` from
+  a callback and passes under the current Lambda editing bridge.
+- Imported Chromium `editing/deleting/delete-character-003.html` and
+  `editing/deleting/delete-br-001.html` into `deleting/deferred/`. The first
+  currently aborts with the DocState interaction invariant when deleting around
+  br-only line-break runs; the second gets the expected DOM mutations but
+  disagrees with Blink on selection anchor offsets after repeated adjacent-br
+  Delete. Both are recorded in the corpus `MANIFEST` with provenance and
+  root-cause notes.
+- Verification: `./test/test_chrome_editing_gtest.exe --gtest_brief=1`
+  discovered 9 cases: 6 passed / 3 skipped (`deferred/`).
+
+**CET-M — complete Chrome editing corpus migration: LANDED (2026-06-18).**
+
+- Mirrored Chromium `third_party/blink/web_tests/editing/` from
+  `refs/heads/main` into `lambda-test/editing/`, including the previously
+  outstanding big buckets: `caret/`, `selection/`, `deleting/`, `inserting/`,
+  `execCommand/`, `style/`, `input/`, `undo/`, `editability/`, and
+  `pasteboard/`. The remaining smaller top-level dirs (`shadow/`, `spelling/`,
+  `text-iterator/`, `unsupported-content/`) and root helpers/metadata were
+  mirrored too, so the corpus is a complete subtree import rather than a
+  hand-picked directory set.
+- Provenance recorded in `lambda-test/editing/MANIFEST`: Chromium commit
+  `9e9f55b7212dfa7f9abcecd76ee76af2abae285a`, tree
+  `a47b7d38eba41bac5e678ce6a6ba81901559374e`, fetched 2026-06-18.
+- Added `lambda-test/editing/RUNNABLE` as the Lambda runner allowlist. The
+  runner now discovers the full imported html corpus but only executes files
+  listed in RUNNABLE; the rest remain visible as skipped imports until the
+  corresponding harness flavor and editing behavior are supported.
+- Verification: `./test/test_chrome_editing_gtest.exe --gtest_brief=1`
+  discovered 2751 html cases: 6 passed / 2745 skipped.
+
+**CET-H1 — Chrome editing harness compatibility expansion: LANDED
+(2026-06-18).**
+
+- The runner now injects per-file metadata for sibling `-expected.txt`
+  baselines. The local harness compares those baselines when a test calls
+  `testRunner.dumpAsText()` or `testRunner.dumpAsMarkup()`, while preserving
+  the existing assertion-counter result protocol.
+- Expanded `resources/chrome-editing-harness.js` with a broader
+  `js-test.js`-style assertion shim (`shouldBe*`, `shouldThrow`,
+  `assert_equals`, `assert_true`, `$`, `finishJSTest`, etc.), fuller
+  `testRunner` no-ops/behaviors (`dumpAsText`, `dumpAsMarkup`,
+  `waitUntilDone`, `notifyDone`, `findString`, `execCommand`, selection
+  bounds), and a wider `eventSender` keyboard/modifier surface with safe
+  pointer-method placeholders.
+- Reworked local `assert_selection` compatibility around Chromium's marker
+  conventions: command strings with values, callback tester objects with
+  `selection.document`, temporary marker-element parsing, collapsed-caret
+  marker coalescing, contenteditable attribute serialization, and
+  `assert_selection_and_return_sample`.
+- Verification: `make -C build/premake config=debug_native
+  test_chrome_editing_gtest -j10` passed, and
+  `./test/test_chrome_editing_gtest.exe --gtest_brief=1` remains green with
+  2751 discovered html cases: 6 passed / 2745 skipped.
 
 | Phase | Import | Needs | Notes |
 |---|---|---|---|

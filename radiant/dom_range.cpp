@@ -355,6 +355,8 @@ static void range_check_cross_root_drop(DomRange* r) {
     }
 }
 
+static void resync_selection_after_mutation(DocState* state);
+
 // After a boundary mutation, ensure start <= end. If not, collapse the
 // other end to match (per spec: "If range's start is after its end, set
 // the other boundary to the same point as the changed boundary.")
@@ -383,6 +385,7 @@ bool dom_range_set_start(DomRange* r, DomNode* node, uint32_t offset, const char
     enforce_range_invariant(r, /*start_was_set=*/true);
     dom_range_invalidate_layout(r);
     range_check_cross_root_drop(r);
+    resync_selection_after_mutation(r->state);
     return true;
 }
 
@@ -397,6 +400,7 @@ bool dom_range_set_end(DomRange* r, DomNode* node, uint32_t offset, const char**
     enforce_range_invariant(r, /*start_was_set=*/false);
     dom_range_invalidate_layout(r);
     range_check_cross_root_drop(r);
+    resync_selection_after_mutation(r->state);
     return true;
 }
 

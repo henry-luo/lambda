@@ -1717,8 +1717,8 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
         FormControlProp* form = control->form;
         if (!form) return;
 
-        uint32_t start_u16 = current->start_u16;
-        uint32_t end_u16 = current->end_u16;
+        uint32_t start_u16 = form->selection_start;
+        uint32_t end_u16 = form->selection_end;
         if (start_u16 > form->current_value_u16_len) {
             start_u16 = form->current_value_u16_len;
         }
@@ -1726,6 +1726,36 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
             end_u16 = form->current_value_u16_len;
         }
         if (start_u16 > end_u16) start_u16 = end_u16;
+        uint8_t direction = form->selection_direction & 3;
+        if (direction > 2) direction = 0;
+
+        DomSelectionDirection editing_direction =
+            editing_direction_from_text_control(start_u16, end_u16, direction);
+        bool repaired_form = form->selection_start != start_u16 ||
+            form->selection_end != end_u16 ||
+            form->selection_direction != direction;
+        bool repaired_shadow = current->kind != EDIT_SEL_TEXT_CONTROL ||
+            current->control != control ||
+            current->start_u16 != start_u16 ||
+            current->end_u16 != end_u16 ||
+            current->direction != editing_direction ||
+            current->mutation_seq != state->selection_mutation_seq;
+        if (repaired_form) {
+            form->selection_start = start_u16;
+            form->selection_end = end_u16;
+            form->selection_direction = direction;
+            form_control_sync_text_control_state(state, static_cast<View*>(control));
+        }
+        if (repaired_shadow) {
+            state_store_note_selection_mutation(state);
+            memset(current, 0, sizeof(*current));
+            current->kind = EDIT_SEL_TEXT_CONTROL;
+            current->direction = editing_direction;
+            current->control = control;
+            current->start_u16 = start_u16;
+            current->end_u16 = end_u16;
+            current->mutation_seq = state->selection_mutation_seq;
+        }
 
         uint32_t start_byte = text_control_u16_offset_to_byte(form, start_u16);
         uint32_t end_byte = text_control_u16_offset_to_byte(form, end_u16);

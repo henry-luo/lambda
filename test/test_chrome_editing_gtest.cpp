@@ -42,6 +42,7 @@
 
 static const char* EDITING_ROOT = "test/editing";
 static const char* HARNESS_PATH = "test/editing/resources/chrome-editing-harness.js";
+static const char* RUNNABLE_PATH = "test/editing/RUNNABLE";
 static const char* TEMP_DIR = "temp";
 
 static bool starts_with(const char* text, const char* prefix) {
@@ -52,6 +53,20 @@ static bool ends_with(const std::string& text, const char* suffix) {
     size_t suffix_len = strlen(suffix);
     return text.size() >= suffix_len &&
         text.compare(text.size() - suffix_len, suffix_len, suffix) == 0;
+}
+
+static std::string trim_ascii(std::string text) {
+    size_t start = 0;
+    while (start < text.size() && (text[start] == ' ' || text[start] == '\t' ||
+           text[start] == '\r' || text[start] == '\n')) {
+        start++;
+    }
+    size_t end = text.size();
+    while (end > start && (text[end - 1] == ' ' || text[end - 1] == '\t' ||
+           text[end - 1] == '\r' || text[end - 1] == '\n')) {
+        end--;
+    }
+    return text.substr(start, end - start);
 }
 
 static std::string read_file_contents(const char* path) {
@@ -69,6 +84,13 @@ static std::string read_file_contents(const char* path) {
     result.resize(read);
     fclose(f);
     return result;
+}
+
+static bool file_exists(const char* path) {
+    FILE* f = fopen(path, "r");
+    if (!f) return false;
+    fclose(f);
+    return true;
 }
 
 static void write_file_contents(const char* path, const std::string& content) {
@@ -128,6 +150,32 @@ static std::string normalize_relative_path(const std::string& base_dir,
         if (i) out += "/";
         out += parts[i];
     }
+    return out;
+}
+
+static std::string js_string_literal(const std::string& value) {
+    std::string out = "\"";
+    for (unsigned char c : value) {
+        switch (c) {
+        case '\\': out += "\\\\"; break;
+        case '"': out += "\\\""; break;
+        case '\b': out += "\\b"; break;
+        case '\f': out += "\\f"; break;
+        case '\n': out += "\\n"; break;
+        case '\r': out += "\\r"; break;
+        case '\t': out += "\\t"; break;
+        default:
+            if (c < 0x20) {
+                char buf[8];
+                snprintf(buf, sizeof(buf), "\\u%04x", c);
+                out += buf;
+            } else {
+                out += (char)c;
+            }
+            break;
+        }
+    }
+    out += "\"";
     return out;
 }
 
@@ -203,6 +251,13 @@ struct ChromeEditingParam {
     bool skip;
 };
 
+static std::string expected_text_path_for(const ChromeEditingParam& p) {
+    if (!ends_with(p.html_path, ".html")) return "";
+    std::string path = p.html_path.substr(0, p.html_path.size() - 5);
+    path += "-expected.txt";
+    return path;
+}
+
 struct ChromeEditingResult {
     ChromeEditingParam param;
     bool skipped;
@@ -216,7 +271,31 @@ struct ChromeEditingResult {
     std::vector<std::string> failures;
 };
 
-static bool should_skip_file(const std::string& rel_path) {
+static std::vector<std::string> load_runnable_files() {
+    std::vector<std::string> paths;
+    std::string content = read_file_contents(RUNNABLE_PATH);
+    size_t pos = 0;
+    while (pos <= content.size()) {
+        size_t eol = content.find('\n', pos);
+        if (eol == std::string::npos) eol = content.size();
+        std::string line = trim_ascii(content.substr(pos, eol - pos));
+        if (!line.empty() && line[0] != '#') paths.push_back(line);
+        pos = eol + 1;
+        if (eol == content.size()) break;
+    }
+    std::sort(paths.begin(), paths.end());
+    return paths;
+}
+
+static bool is_runnable_file(const std::string& rel_path,
+                             const std::vector<std::string>& runnable_files) {
+    return std::binary_search(runnable_files.begin(), runnable_files.end(),
+                              rel_path);
+}
+
+static bool should_skip_file(const std::string& rel_path,
+                             const std::vector<std::string>& runnable_files) {
+    if (!is_runnable_file(rel_path, runnable_files)) return true;
     if (rel_path.find("/deferred/") != std::string::npos ||
         starts_with(rel_path.c_str(), "deferred/")) return true;
     if (rel_path.find("/resources/") != std::string::npos) return true;
@@ -238,6 +317,7 @@ static std::string sanitize_test_name(std::string name) {
 
 static void scan_dir(const std::string& dir,
                      const std::string& rel_prefix,
+                     const std::vector<std::string>& runnable_files,
                      std::vector<ChromeEditingParam>& params) {
 #ifdef _WIN32
     std::string pattern = dir + "\\*";
@@ -250,7 +330,7 @@ static void scan_dir(const std::string& dir,
         std::string rel = rel_prefix.empty() ? std::string(name)
                                              : rel_prefix + "/" + name;
         if (fd.attrib & _A_SUBDIR) {
-            scan_dir(dir + "/" + name, rel, params);
+            scan_dir(dir + "/" + name, rel, runnable_files, params);
             continue;
         }
 #else
@@ -263,7 +343,7 @@ static void scan_dir(const std::string& dir,
         std::string rel = rel_prefix.empty() ? std::string(name)
                                              : rel_prefix + "/" + name;
         if (entry->d_type == DT_DIR) {
-            scan_dir(dir + "/" + name, rel, params);
+            scan_dir(dir + "/" + name, rel, runnable_files, params);
             continue;
         }
 #endif
@@ -273,7 +353,7 @@ static void scan_dir(const std::string& dir,
         p.html_path = dir + "/" + name;
         p.rel_path = rel;
         p.test_name = sanitize_test_name(rel);
-        p.skip = should_skip_file(rel);
+        p.skip = should_skip_file(rel, runnable_files);
         params.push_back(p);
 
 #ifdef _WIN32
@@ -287,12 +367,27 @@ static void scan_dir(const std::string& dir,
 
 static std::vector<ChromeEditingParam> discover_chrome_editing_tests() {
     std::vector<ChromeEditingParam> params;
-    scan_dir(EDITING_ROOT, "", params);
+    std::vector<std::string> runnable_files = load_runnable_files();
+    for (const std::string& rel : runnable_files) {
+        ChromeEditingParam p;
+        p.html_path = std::string(EDITING_ROOT) + "/" + rel;
+        p.rel_path = rel;
+        p.test_name = sanitize_test_name(rel);
+        p.skip = false;
+        params.push_back(p);
+    }
+    scan_dir(EDITING_ROOT, "", runnable_files, params);
     std::sort(params.begin(), params.end(),
               [](const ChromeEditingParam& a,
                  const ChromeEditingParam& b) {
-                  return a.test_name < b.test_name;
+                  if (a.test_name != b.test_name)
+                      return a.test_name < b.test_name;
+                  return a.rel_path < b.rel_path;
               });
+    params.erase(std::unique(params.begin(), params.end(),
+                 [](const ChromeEditingParam& a, const ChromeEditingParam& b) {
+                     return a.rel_path == b.rel_path;
+                 }), params.end());
     return params;
 }
 
@@ -337,7 +432,21 @@ static ChromeEditingResult run_chrome_editing_case(
         return result;
     }
 
-    std::string combined = harness + "\n" + scripts +
+    std::string expected_path = expected_text_path_for(p);
+    bool has_expected = !expected_path.empty() && file_exists(expected_path.c_str());
+    std::string expected_text = has_expected
+        ? read_file_contents(expected_path.c_str())
+        : "";
+
+    std::string metadata;
+    metadata += "\n_chrome_editing_test_path = " +
+        js_string_literal(p.rel_path) + ";\n";
+    metadata += "_chrome_editing_expected_path = " +
+        js_string_literal(has_expected ? expected_path : "") + ";\n";
+    metadata += "_chrome_editing_expected_text = " +
+        js_string_literal(expected_text) + ";\n";
+
+    std::string combined = harness + metadata + "\n" + scripts +
         "\n_chrome_editing_print_summary();\n";
     std::string temp_js = std::string(TEMP_DIR) + "/chrome_editing_" +
         p.test_name + ".js";
@@ -455,6 +564,10 @@ static int run_parallel_suite() {
                 size_t index = next_index.fetch_add(1);
                 if (index >= params.size()) break;
                 const ChromeEditingParam& p = params[index];
+                if (p.skip) {
+                    results[index] = run_chrome_editing_case(p);
+                    continue;
+                }
                 {
                     std::lock_guard<std::mutex> lock(print_mutex);
                     printf("[ RUN      ] ChromeEditing/ChromeEditingTest.Run/%s\n",
