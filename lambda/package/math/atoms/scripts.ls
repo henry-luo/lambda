@@ -787,8 +787,10 @@ fn render_sub_only(base_box, sub_box, init_sub, x_height, si, is_char, font_scal
     >
     {
         element: el,
+        // depth is the CEIL@2 projection (non-raw strut consumers); depth_raw
+        // keeps full precision for the single-rounding use_raw path.
         height: 0.0,
-        depth: depth_holder_raw,
+        depth: ceil_em2(depth_holder_raw),
         height_raw: 0.0,
         depth_raw: depth_holder_raw,
         width: sub_box.width * font_scale,
@@ -803,108 +805,67 @@ fn render_sub_only(base_box, sub_box, init_sub, x_height, si, is_char, font_scal
 // ============================================================
 
 fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, context, font_scale) {
-    let in_fraction_child = context.fraction_child == true
-    let compound_fraction_script = in_fraction_child and sup_box.width > 0.8
-    // Fraction-child contexts use their own (previously tuned) hardcoded
-    // values; non-fraction-child contexts use the metric-driven formula
-    // derived from MathLive's emission:
-    //   top = -3.41 (constant for inline math)
-    //   vlist_height = -top - 3 + ceil2(sup_h_raw * font_scale)
-    //                = 0.41 + ceil2(sup_h_raw * font_scale)
-    //   child_h     = ceil2((h_raw + d_raw) * font_scale) for descender,
-    //                 ceil2(h_raw * font_scale) otherwise
-    let sup_h_raw = if (sup_box.height_raw != null) sup_box.height_raw else sup_box.height
-    let sup_d_raw = if (sup_box.depth_raw != null) sup_box.depth_raw else sup_box.depth
-    let has_descender = sup_d_raw > 0.0
-    let sup_h_only = ceil_em2(sup_h_raw * font_scale)
-    // The wrapper height spans the glyph's full vertical extent (h + d). The
-    // depth term lifts for descenders (d > 0, e.g. `^y`) AND shrinks for
-    // glyphs that sit above the baseline with negative depth (e.g. `\circ`,
-    // d = -0.0555 → 90^\circ wrapper 0.28 not 0.32).
-    let child_h = ceil_em2((sup_h_raw + sup_d_raw) * font_scale)
-    // Legacy values for fraction-child paths (preserved to avoid regression)
-    let tall_script = sup_box.height > 0.72
-    // Treat the base as "tall" when it's either a high-glyph base (h > 0.9,
-    // e.g. fractions/radicals) OR a delimiter-group atom (`\left...\right`)
-    // — MathLive shifts the script higher in both cases. Plain text-line
-    // glyphs like cmr `|` (h=0.75) follow the derived formula instead.
-    let base_is_inner = base_box.type == "minner"
-    let tall_base = base_box.height > 0.9 or base_is_inner
-    let numeric_x_script = is_mathit_x_box(base_box) and is_numeric_script_box(sup_box)
-    let legacy_vlist = if (compound_fraction_script and context.cramped == true) 0.76
-        else if (in_fraction_child and context.cramped == true) 0.75
-        else if (in_fraction_child) 0.82
-        else if (tall_script) 1.16 else if (tall_base) 0.94
-        else if (numeric_x_script) 0.87
-        else 0.72
-    let legacy_top = if (in_fraction_child and context.cramped == true) -3.28
-        else if (in_fraction_child) -3.36
-        else 0.0 - (3.0 + if (tall_script) 0.48 else if (tall_base) 0.47 else 0.41)
-    let legacy_child_h = script_inner_height(sup_box, tall_script, in_fraction_child)
-    // Derived (metric-driven) values for non-fraction-child contexts.
-    // derived_vlist is the EMIT value (ceil2). derived_vlist_raw keeps the
-    // pre-ceil precision so the outer strut's CEIL@2 of (h_raw + d_raw)
-    // produces the right output for sibling descenders (e.g. y in x^n+y^n).
-    //
-    // The script sits at top = -(3.0 + offset). The offset is the baseline
-    // shift of the sup above the line: 0.41 at the first script level and
-    // 0.43 when this script is itself nested inside another script (e.g. the
-    // inner `²` of `x^{x^2}` / `e^{-x^2}`). The `script_container` flag is set
-    // only by sup/sub contexts — NOT by fraction numer/denom — so a script
-    // inside a fraction numerator (`\frac{b^2}{2a}`) stays shallow, matching
-    // MathLive's DOM font-size cascade.
-    let is_deep = context.script_container == true
-    let top_offset = if (is_deep) 0.43 else 0.41
-    let derived_top = 0.0 - (3.0 + top_offset)
-    let derived_vlist = top_offset + sup_h_only
-    let derived_vlist_raw = top_offset + sup_h_raw * font_scale
-    // Pick formula vs legacy: use derived formula for non-tall contexts AND
-    // for tall scripts whose content is itself a script (nested sup, e.g.
-    // `x^{x^2}`). Fractions/radicals in the sup (no raw metrics) stay on the
-    // legacy hardcoded path.
-    let sup_is_nested_script = tall_script and sup_box.height_raw != null and
-        sup_box.is_fraction != true
-    let use_derived = not in_fraction_child and not tall_base and
-        (not tall_script or sup_is_nested_script)
-    let vlist_height = if (use_derived) derived_vlist else legacy_vlist
-    let top = if (use_derived) derived_top else legacy_top
-    let inner_h = if (use_derived) child_h else legacy_child_h
-    // Font-size: 70% at the first script level; the true mathstyle ratio
-    // (71.43% for script→scriptscript) only when this script is nested inside
-    // another script. A script inside a fraction numerator stays 70%.
-    let font_pct = if (is_deep) fmt_font_pct(font_scale) else "70%"
-    let inner_style = "height:" ++ util.fmt_em(inner_h) ++ ";display:inline-block;font-size: " ++ font_pct
+    // Rule 18c (TeXBook): a superscript-only atom. The script rises by
+    //   supShift = max(initSup, sup1/2/3, supDepth·scale + ¼·xHeight)
+    // above the baseline and is laid out with the single-child makeVList
+    // (one box + pstrut). Everything is derived from metrics — no hardcoded
+    // top offsets, per-shape vlist tables, or tall-base/tall-script gates.
+    let sup_h = if (sup_box.height_raw != null) sup_box.height_raw else sup_box.height
+    let sup_d = if (sup_box.depth_raw != null) sup_box.depth_raw else sup_box.depth
+    let sup_h_s = sup_h * font_scale
+    let sup_d_s = sup_d * font_scale
+    let sup_shift = max(init_sup, max(min_sup, sup_d_s + 0.25 * x_height))
+    // Single-child makeVList: the child sits at shift -sup_shift (upward).
+    //   depth0 = sup_shift - sup_d_s   (lowest point of the content)
+    //   max_pos = sup_shift + sup_h_s  (highest point)
+    //   top    = -pstrut - sup_shift   (childWrap offset)
+    let pstrut = max(1.0, sup_h_s) + 2.0
+    let max_pos = sup_shift + sup_h_s
+    let min_pos = sup_shift - sup_d_s
+    let top = 0.0 - pstrut - sup_shift
+    let has_depth = min_pos < 0.0
+    let depth_out = if (has_depth) (0.0 - min_pos) else 0.0
+    let inner_style = "height:" ++ util.fmt_em_ceil2(sup_h_s + sup_d_s) ++
+        ";display:inline-block;font-size: " ++ fmt_font_pct(font_scale)
     let sup_elements = merge_script_elements(box.elements_of(sup_box))
-    let el = <span class: css.VLIST_T;
-        <span class: css.VLIST_R;
-            <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_height);
-                <span style: "top:" ++ util.fmt_em(top) ++ ";margin-right:0.05em";
-                    <span class: css.PSTRUT, style: "height:3em">
-                    <span style: inner_style;
-                        for (el in sup_elements) el
-                    >
+    let top_row = <span style: "top:" ++ util.fmt_em_ceil2(top) ++ ";margin-right:0.05em";
+        <span class: css.PSTRUT, style: "height:" ++ util.fmt_em_ceil2(pstrut)>
+        <span style: inner_style;
+            for (el in sup_elements) el
+        >
+    >
+    // Two vlist rows only when the content dips below the baseline (rare for a
+    // sup, e.g. a deep descender shifted little); otherwise a single row.
+    let el = if (has_depth)
+        <span class: css.VLIST_T2;
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(max_pos);
+                    top_row
+                >
+                <span class: css.VLIST_S; "​">
+            >
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(depth_out)>
+            >
+        >
+    else
+        <span class: css.VLIST_T;
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(max_pos);
+                    top_row
                 >
             >
         >
-    >
-    // Only set height_raw on the derived path. Legacy returns null to
-    // signal "no full-precision tracking" — outer strut falls back to
-    // fmt_em on the rounded value (preserves previous emission behavior
-    // for tall_script / tall_base / fraction-child cases).
-    let height_raw_out = if (use_derived) derived_vlist_raw else null
-    let depth_raw_out = if (use_derived) 0.0 else null
     {
         element: el,
-        height: vlist_height,
-        depth: 0.0,
-        height_raw: height_raw_out,
-        depth_raw: depth_raw_out,
-        render_height: if (in_fraction_child) vlist_height else null,
-        render_depth: if (in_fraction_child) 0.0 else null,
-        render_total: if (in_fraction_child)
-            (if (compound_fraction_script) 1.01
-             else if (context.cramped == true) 1.0 else 1.01)
-            else null,
+        // height/depth are the CEIL@2 projections (consumed by the non-raw
+        // strut path, e.g. next to a \left..\right base that lacks depth_raw);
+        // height_raw/depth_raw carry full precision for the single-rounding
+        // use_raw path (sibling descenders, x^n + y^n).
+        height: ceil_em2(max_pos),
+        depth: ceil_em2(depth_out),
+        height_raw: max_pos,
+        depth_raw: depth_out,
         width: sup_box.width * font_scale,
         type: "ord",
         italic: 0.0,
@@ -920,41 +881,6 @@ fn fmt_font_pct(scale) {
     let as_int = int(rounded + 0.000001)
     if (abs(rounded - float(as_int)) < 0.001) string(as_int) ++ "%"
     else util.fmt_num(rounded, 2) ++ "%"
-}
-
-fn is_mathit_x_box(bx) {
-    // Any single italic Latin letter base. MathLive's 0.87 vlist_height
-    // applies to all letter+digit superscript pairs, not only "x".
-    let els = box.elements_of(bx)
-    len(els) == 1 and els[0] is element and els[0].class == css.MATHIT and
-    len(els[0]) == 1 and els[0][0] is string and
-    (let ch = string(els[0][0]),
-     len(ch) == 1 and ((ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z")))
-}
-
-fn is_numeric_script_box(bx) {
-    let els = box.elements_of(bx)
-    len(els) == 1 and els[0] is element and els[0].class == css.CMR and
-    len(els[0]) == 1 and els[0][0] is string and is_digit_text(string(els[0][0]), 0)
-}
-
-fn is_digit_text(text, i) {
-    if (len(text) == 0) false
-    else if (i >= len(text)) true
-    else {
-        let ch = slice(text, i, i + 1)
-        (ch == "0" or ch == "1" or ch == "2" or ch == "3" or ch == "4" or
-         ch == "5" or ch == "6" or ch == "7" or ch == "8" or ch == "9") and
-            is_digit_text(text, i + 1)
-    }
-}
-
-fn script_inner_height(sup_box, tall_script, in_fraction_child) {
-    if (in_fraction_child and sup_box.width > 0.8) 0.6
-    else if (in_fraction_child) 0.46
-    else if (tall_script) 1.05
-    else if (sup_box.element is element and sup_box.element.class == css.CMR) 0.46
-    else 0.31
 }
 
 fn can_merge_script_text(a, b) {
