@@ -1,0 +1,2 @@
+meta-backspace-line ok=true html="<p>one\n three</p>" expected=true before=deleteSoftLineBackward:1:true,4,true,7 expectedBefore=deleteSoftLineBackward:1:true,4,true,7 input=deleteSoftLineBackward:0 focus=true:4 focusExpected=4
+meta-delete-line ok=true html="<p>one\n</p>" expected=true before=deleteSoftLineForward:1:true,4,true,13 expectedBefore=deleteSoftLineForward:1:true,4,true,13 input=deleteSoftLineForward:0 focus=true:4 focusExpected=4

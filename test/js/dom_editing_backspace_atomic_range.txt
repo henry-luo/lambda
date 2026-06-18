@@ -1,0 +1,9 @@
+br-before-text ok=true html=<p>abcdef</p> expected=true before=deleteContentBackward:1:true,1,true,2 input=deleteContentBackward:0 focus=true:1 focusExpected=1
+img-before-text ok=true html=<p>abcdef</p> expected=true before=deleteContentBackward:1:true,1,true,2 input=deleteContentBackward:0 focus=true:1 focusExpected=1
+img-boundary ok=true html=<p>abc<img src="y">def</p> expected=true before=deleteContentBackward:1:true,1,true,2 input=deleteContentBackward:0 focus=true:1 focusExpected=1
+hr-before-text ok=true html=<div>abcdef</div> expected=true before=deleteContentBackward:1:true,1,true,2 input=deleteContentBackward:0 focus=true:1 focusExpected=1
+br-leading-space-start ok=true html=<p>abcdef</p> expected=true before=deleteContentBackward:1:true,1,true,1 input=deleteContentBackward:0 focus=true:1 focusExpected=1
+br-leading-space-inside ok=true html=<p>abcdef</p> expected=true before=deleteContentBackward:1:true,1,true,1 input=deleteContentBackward:0 focus=true:1 focusExpected=1
+hr-trailing-space ok=true html=<div>abcdef</div> expected=true before=deleteContentBackward:1:true,3,true,2 input=deleteContentBackward:0 focus=true:1 focusExpected=1
+hr-leading-space ok=true html=<div>abcdef</div> expected=true before=deleteContentBackward:1:true,1,true,1 input=deleteContentBackward:0 focus=true:1 focusExpected=1
+br-before-hr ok=true html=<div>abcdef</div> expected=true before=deleteContentBackward:1:true,1,true,3 input=deleteContentBackward:0 focus=true:1 focusExpected=1
