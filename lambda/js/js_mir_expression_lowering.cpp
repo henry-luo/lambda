@@ -6286,12 +6286,17 @@ static void jm_clear_last_closure_tracking(JsMirTranspiler* mt) {
 void jm_readback_closure_env(JsMirTranspiler* mt) {
     if (!mt->last_closure_has_env) return;
     if (mt->last_closure_env_reg == 0) return;
+    int readback_count = mt->last_closure_capture_count;
+    if (readback_count < 0) return;
+    if (readback_count > JS_MIR_LAST_CLOSURE_CAPTURE_MAX) {
+        readback_count = JS_MIR_LAST_CLOSURE_CAPTURE_MAX;
+    }
     MIR_label_t readback_done = jm_new_label(mt);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
         MIR_new_label_op(mt->ctx, readback_done),
         MIR_new_reg_op(mt->ctx, mt->last_closure_env_reg),
         MIR_new_int_op(mt->ctx, 0)));
-    for (int i = 0; i < mt->last_closure_capture_count; i++) {
+    for (int i = 0; i < readback_count; i++) {
         if (mt->last_closure_capture_is_nfe[i]) continue;
         JsMirVarEntry* var = jm_find_var(mt, mt->last_closure_capture_names[i]);
         if (!var) {
@@ -12019,6 +12024,30 @@ static void jm_promote_capture_to_scope_env(JsMirTranspiler* mt, JsMirVarEntry* 
         MIR_new_reg_op(mt->ctx, val)));
 }
 
+static int jm_last_closure_track_count(JsFuncCollected* fc) {
+    if (!fc || fc->capture_count <= 0) return 0;
+    if (fc->capture_count > JS_MIR_LAST_CLOSURE_CAPTURE_MAX) {
+        return JS_MIR_LAST_CLOSURE_CAPTURE_MAX;
+    }
+    return fc->capture_count;
+}
+
+static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
+        JsFuncCollected* fc, bool use_capture_slots) {
+    if (!mt || !fc || env == 0) return;
+    int count = jm_last_closure_track_count(fc);
+    mt->last_closure_env_reg = env;
+    mt->last_closure_capture_count = count;
+    for (int ci = 0; ci < count; ci++) {
+        snprintf(mt->last_closure_capture_names[ci],
+            sizeof(mt->last_closure_capture_names[ci]), "%s", fc->captures[ci].name);
+        mt->last_closure_capture_slots[ci] =
+            use_capture_slots ? fc->captures[ci].scope_env_slot : ci;
+        mt->last_closure_capture_is_nfe[ci] = fc->captures[ci].is_nfe_binding;
+    }
+    mt->last_closure_has_env = count > 0;
+}
+
 MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
     if (!fc || !fc->func_item) return jm_emit_null(mt);
     int pc = fc->param_count;
@@ -12180,15 +12209,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             // class-constructor path goes through jm_create_func_or_closure rather
             // than jm_transpile_func_expr, so without this it would never register
             // and outer writes would never reach the constructor's captured env.
-            mt->last_closure_env_reg = env;
-            mt->last_closure_capture_count = fc->capture_count;
-            for (int ci = 0; ci < fc->capture_count && ci < 16; ci++) {
-                snprintf(mt->last_closure_capture_names[ci], 128, "%s", fc->captures[ci].name);
-                mt->last_closure_capture_slots[ci] =
-                    has_remapped ? fc->captures[ci].scope_env_slot : ci;
-                mt->last_closure_capture_is_nfe[ci] = fc->captures[ci].is_nfe_binding;
-            }
-            mt->last_closure_has_env = true;
+            jm_track_last_closure_env(mt, env, fc, has_remapped);
         }
     } else {
         fn_reg = jm_call_2(mt, "js_new_function", MIR_T_I64,
@@ -12285,14 +12306,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
             }
         }
         if (use_scope_env) {
-            mt->last_closure_env_reg = mt->scope_env_reg;
-            mt->last_closure_capture_count = fc->capture_count;
-            for (int ci = 0; ci < fc->capture_count; ci++) {
-                snprintf(mt->last_closure_capture_names[ci], 128, "%s", fc->captures[ci].name);
-                mt->last_closure_capture_slots[ci] = fc->captures[ci].scope_env_slot;
-                mt->last_closure_capture_is_nfe[ci] = fc->captures[ci].is_nfe_binding;
-            }
-            mt->last_closure_has_env = true;
+            jm_track_last_closure_env(mt, mt->scope_env_reg, fc, true);
 
             fn_reg = jm_call_4(mt, "js_new_closure", MIR_T_I64,
                 MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
@@ -12472,15 +12486,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 }
             }
 
-            mt->last_closure_env_reg = env;
-            mt->last_closure_capture_count = fc->capture_count;
-            for (int ci = 0; ci < fc->capture_count; ci++) {
-                snprintf(mt->last_closure_capture_names[ci], 128, "%s", fc->captures[ci].name);
-                mt->last_closure_capture_slots[ci] =
-                    has_remapped ? fc->captures[ci].scope_env_slot : ci;
-                mt->last_closure_capture_is_nfe[ci] = fc->captures[ci].is_nfe_binding;
-            }
-            mt->last_closure_has_env = true;
+            jm_track_last_closure_env(mt, env, fc, has_remapped);
 
             fn_reg = jm_call_4(mt, "js_new_closure", MIR_T_I64,
                 MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),

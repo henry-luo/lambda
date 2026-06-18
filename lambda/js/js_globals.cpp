@@ -275,6 +275,472 @@ static bool js_array_apply_failed_length_shrink(Item obj, int64_t new_len, bool 
 static int64_t js_parse_array_index(const char* s, int len);
 static bool js_is_arguments_exotic_array_for_proto(Item value);
 
+typedef struct JsDefineExistingState {
+    bool is_new_property;
+    bool has_existing_desc;
+    bool existing_configurable;
+    bool existing_writable;
+    bool existing_accessor;
+} JsDefineExistingState;
+
+static void js_define_property_throw_type_error(const char* message) {
+    Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+    Item msg = (Item){.item = s2it(heap_create_name(message))};
+    js_throw_value(js_new_error_with_name(tn, msg));
+}
+
+static bool js_define_property_validate_array_exotic(Item obj, Item name,
+                                                     Item descriptor,
+                                                     bool is_arguments_exotic) {
+    // ES §9.4.2.1: Array exotic objects — special [[DefineOwnProperty]] for "length"
+    // If obj is an array and name is "length", validate the value as a valid array length.
+    if (get_type_id(obj) != LMD_TYPE_ARRAY || is_arguments_exotic ||
+        get_type_id(name) != LMD_TYPE_STRING) {
+        return true;
+    }
+
+    String* ns = it2s(name);
+    // J39-7: ES §9.4.2.1 step 3.f.iii — for an array index P >= length,
+    // if length is non-writable, throw TypeError. Index names are decimal
+    // digit strings.
+    if (ns && ns->len > 0 && ns->len <= 10 &&
+        (ns->len == 1 || ns->chars[0] != '0')) {
+        bool _is_idx = true;
+        uint64_t _idx = 0;
+        for (uint32_t _i = 0; _i < ns->len; _i++) {
+            char _c = ns->chars[_i];
+            if (_c < '0' || _c > '9') { _is_idx = false; break; }
+            _idx = _idx * 10 + (uint64_t)(_c - '0');
+        }
+        if (_is_idx && _idx <= 0xFFFFFFFEULL) {
+            bool _nw_len = !js_props_obj_query_writable(obj, "length", 6);
+            if (_nw_len && obj.array && (uint64_t)obj.array->length <= _idx) {
+                js_define_property_throw_type_error(
+                    "Cannot add property: array length is non-writable");
+                return false;
+            }
+        }
+    }
+
+    if (!ns || ns->len != 6 || strncmp(ns->chars, "length", 6) != 0) {
+        return true;
+    }
+
+    Item val_k = (Item){.item = s2it(heap_create_name("value", 5))};
+    if (it2b(js_in(val_k, descriptor))) {
+        Item len_val = js_property_get(descriptor, val_k);
+        // ArraySetLength performs ToUint32(value), then a separate
+        // ToNumber(value). Both conversions are observable.
+        Item u32_item = js_to_number(len_val);
+        extern int js_check_exception(void);
+        if (js_check_exception()) return false;
+        TypeId u32_nt = get_type_id(u32_item);
+        double u32_d = (u32_nt == LMD_TYPE_FLOAT) ? it2d(u32_item) :
+                       (u32_nt == LMD_TYPE_INT) ? (double)it2i(u32_item) :
+                       (u32_nt == LMD_TYPE_INT64) ? (double)it2l(u32_item) : NAN;
+        uint32_t u32 = 0;
+        if (isfinite(u32_d)) {
+            double u32_mod = fmod(u32_d, 4294967296.0);
+            if (u32_mod < 0.0) u32_mod += 4294967296.0;
+            u32 = (uint32_t)u32_mod;
+        }
+
+        Item num_item = js_to_number(len_val);
+        if (js_check_exception()) return false;
+        TypeId nt = get_type_id(num_item);
+        double d = (nt == LMD_TYPE_FLOAT) ? it2d(num_item) :
+                   (nt == LMD_TYPE_INT) ? (double)it2i(num_item) :
+                   (nt == LMD_TYPE_INT64) ? (double)it2l(num_item) : NAN;
+        if ((double)u32 != d) {
+            Item tn = (Item){.item = s2it(heap_create_name("RangeError"))};
+            Item msg = (Item){.item = s2it(heap_create_name("Invalid array length"))};
+            js_throw_value(js_new_error_with_name(tn, msg));
+            return false;
+        }
+        // J39-7: ES §9.4.2.4 ArraySetLength step 16/17 — if existing
+        // length is non-writable, reject any value change.
+        // Writable→non-writable is allowed
+        // (handled by step-7d below for the writable attribute).
+        bool _nw_len = !js_props_obj_query_writable(obj, "length", 6);
+        if (_nw_len && (uint32_t)obj.array->length != u32) {
+            js_define_property_reject_false_type_error("Cannot redefine property: length");
+            return false;
+        }
+        if (obj.array && (int64_t)u32 < obj.array->length &&
+            js_array_has_nonconfigurable_index_from(obj, (int64_t)u32)) {
+            Item wri_key_for_shrink = (Item){.item = s2it(heap_create_name("writable", 8))};
+            bool make_non_writable = it2b(js_in(wri_key_for_shrink, descriptor)) &&
+                !js_is_truthy(js_property_get(descriptor, wri_key_for_shrink));
+            js_array_apply_failed_length_shrink(obj, (int64_t)u32, make_non_writable);
+            js_define_property_throw_type_error(
+                "Cannot shrink array length past non-configurable index");
+            return false;
+        }
+    }
+
+    Item cfg_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
+    if (it2b(js_in(cfg_key, descriptor)) && js_is_truthy(js_property_get(descriptor, cfg_key))) {
+        js_define_property_reject_false_type_error("Cannot redefine property: length configurable");
+        return false;
+    }
+    Item enum_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
+    if (it2b(js_in(enum_key, descriptor)) && js_is_truthy(js_property_get(descriptor, enum_key))) {
+        js_define_property_reject_false_type_error("Cannot redefine property: length enumerable");
+        return false;
+    }
+    Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
+    Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
+    if (it2b(js_in(get_key, descriptor)) || it2b(js_in(set_key, descriptor))) {
+        js_define_property_reject_false_type_error("Cannot redefine property: length accessor");
+        return false;
+    }
+    Item wri_key = (Item){.item = s2it(heap_create_name("writable", 8))};
+    if (it2b(js_in(wri_key, descriptor)) && js_is_truthy(js_property_get(descriptor, wri_key))) {
+        bool _nw_len = !js_props_obj_query_writable(obj, "length", 6);
+        if (_nw_len) {
+            js_define_property_reject_false_type_error("Cannot redefine property: length writable");
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool js_define_property_validate_descriptor_object(Item descriptor) {
+    // v18l: TypeError if descriptor is not an object (ES5 8.10.5 ToPropertyDescriptor step 1)
+    // Any object type is valid (Map, Function, Array, Element, etc.); reject primitives.
+    TypeId desc_type = get_type_id(descriptor);
+    if (desc_type != LMD_TYPE_MAP && desc_type != LMD_TYPE_FUNC &&
+        desc_type != LMD_TYPE_ARRAY && desc_type != LMD_TYPE_ELEMENT) {
+        js_define_property_throw_type_error("Property description must be an object");
+        return false;
+    }
+
+    // v18l: Validate descriptor — mixed accessor+data is TypeError (ES5 8.10.5 step 9)
+    Item get_k = (Item){.item = s2it(heap_create_name("get", 3))};
+    Item set_k = (Item){.item = s2it(heap_create_name("set", 3))};
+    Item val_k = (Item){.item = s2it(heap_create_name("value", 5))};
+    Item wri_k = (Item){.item = s2it(heap_create_name("writable", 8))};
+    bool has_get = it2b(js_in(get_k, descriptor));
+    bool has_set = it2b(js_in(set_k, descriptor));
+    bool has_val = it2b(js_in(val_k, descriptor));
+    bool has_wri = it2b(js_in(wri_k, descriptor));
+    if ((has_get || has_set) && (has_val || has_wri)) {
+        js_define_property_throw_type_error(
+            "Invalid property descriptor. Cannot both specify accessors and a value or writable attribute");
+        return false;
+    }
+    // v18l: Non-callable getter/setter is TypeError (ES5 8.10.5 step 7.b / 8.b)
+    if (has_get) {
+        Item getter = js_property_get(descriptor, get_k);
+        if (get_type_id(getter) != LMD_TYPE_FUNC && get_type_id(getter) != LMD_TYPE_UNDEFINED) {
+            js_define_property_throw_type_error("Getter must be a function");
+            return false;
+        }
+    }
+    if (has_set) {
+        Item setter = js_property_get(descriptor, set_k);
+        if (get_type_id(setter) != LMD_TYPE_FUNC && get_type_id(setter) != LMD_TYPE_UNDEFINED) {
+            js_define_property_throw_type_error("Setter must be a function");
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool js_define_property_collect_existing_state(Item obj, Item name,
+                                                      JsDefineExistingState* out_state) {
+    if (!out_state) return false;
+    out_state->is_new_property = !it2b(js_has_own_property(obj, name));
+    out_state->has_existing_desc = false;
+    out_state->existing_configurable = true;
+    out_state->existing_writable = true;
+    out_state->existing_accessor = false;
+
+    if (out_state->is_new_property) {
+        Item existing_desc = js_object_get_own_property_descriptor(obj, name);
+        if (js_check_exception()) return false;
+        if (get_type_id(existing_desc) == LMD_TYPE_MAP) {
+            out_state->is_new_property = false;
+        }
+    }
+    if (!out_state->is_new_property) {
+        Item existing_desc = js_object_get_own_property_descriptor(obj, name);
+        if (js_check_exception()) return false;
+        if (get_type_id(existing_desc) == LMD_TYPE_MAP) {
+            out_state->has_existing_desc = true;
+            bool found = false;
+            Item conf = js_map_get_fast_ext(existing_desc.map, "configurable", 12, &found);
+            out_state->existing_configurable = found ? js_is_truthy(conf) : true;
+            found = false;
+            Item writable = js_map_get_fast_ext(existing_desc.map, "writable", 8, &found);
+            out_state->existing_writable = found ? js_is_truthy(writable) : true;
+            bool has_get = false;
+            bool has_set = false;
+            js_map_get_fast_ext(existing_desc.map, "get", 3, &has_get);
+            js_map_get_fast_ext(existing_desc.map, "set", 3, &has_set);
+            out_state->existing_accessor = has_get || has_set;
+        }
+    }
+    if (out_state->is_new_property && get_type_id(obj) == LMD_TYPE_ARRAY) {
+        Item nsc = js_to_string(name);
+        if (get_type_id(nsc) == LMD_TYPE_STRING) {
+            String* ns = it2s(nsc);
+            int64_t idx = ns ? js_parse_array_index(ns->chars, (int)ns->len) : -1;
+            if (idx >= 0 && obj.array && idx < obj.array->length) {
+                out_state->is_new_property = false;
+            }
+        }
+    }
+    // also check accessor markers: accessor-only properties on arrays may not be detected by js_has_own_property
+    if (out_state->is_new_property && get_type_id(obj) == LMD_TYPE_ARRAY) {
+        Item nsc = js_to_string(name);
+        if (get_type_id(nsc) == LMD_TYPE_STRING) {
+            String* ns = it2s(nsc);
+            if (ns && ns->len > 0 && ns->len < 200) {
+                // AT-3: accessors on arrays are stored on the companion map under
+                // the digit-string name with the IS_ACCESSOR shape flag (post-AT-1).
+                Map* pm = obj.array && obj.array->extra ? (Map*)(uintptr_t)obj.array->extra : nullptr;
+                if (pm) {
+                    Item pm_item = (Item){.map = pm};
+                    ShapeEntry* _se = js_find_shape_entry(pm_item, ns->chars, (int)ns->len);
+                    if (_se && jspd_is_accessor(_se)) out_state->is_new_property = false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+static bool js_define_property_validate_array_companion_index(Item obj, Item name,
+                                                              Item descriptor) {
+    if (get_type_id(obj) != LMD_TYPE_ARRAY || !obj.array || obj.array->extra == 0) {
+        return true;
+    }
+    Item nsc = js_to_string(name);
+    if (get_type_id(nsc) != LMD_TYPE_STRING) return true;
+    String* ns = it2s(nsc);
+    if (!ns || ns->len <= 0 || ns->len >= 200 ||
+        js_parse_array_index(ns->chars, (int)ns->len) < 0) {
+        return true;
+    }
+
+    Map* pm = (Map*)(uintptr_t)obj.array->extra;
+    Item pm_item = (Item){.map = pm};
+    ShapeEntry* se = js_find_shape_entry(pm_item, ns->chars, (int)ns->len);
+    bool companion_non_config = !js_props_query_configurable(pm, se, ns->chars, (int)ns->len);
+    bool companion_accessor = se && jspd_is_accessor(se);
+
+    Item cfg_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
+    if (companion_non_config && it2b(js_in(cfg_key, descriptor)) &&
+        js_is_truthy(js_property_get(descriptor, cfg_key))) {
+        js_define_property_reject_false_type_error("Cannot redefine property: configurable");
+        return false;
+    }
+
+    Item val_key_check = (Item){.item = s2it(heap_create_name("value", 5))};
+    Item wri_key_check = (Item){.item = s2it(heap_create_name("writable", 8))};
+    Item get_key_check = (Item){.item = s2it(heap_create_name("get", 3))};
+    Item set_key_check = (Item){.item = s2it(heap_create_name("set", 3))};
+    bool desc_is_data = it2b(js_in(val_key_check, descriptor)) || it2b(js_in(wri_key_check, descriptor));
+    bool desc_is_accessor = it2b(js_in(get_key_check, descriptor)) || it2b(js_in(set_key_check, descriptor));
+    if (companion_non_config && companion_accessor && desc_is_data) {
+        js_define_property_reject_false_type_error("Cannot redefine property: accessor to data");
+        return false;
+    }
+    if (companion_non_config && !companion_accessor && se && desc_is_accessor) {
+        js_define_property_reject_false_type_error("Cannot redefine property: data to accessor");
+        return false;
+    }
+    return true;
+}
+
+static bool js_define_property_validate_nonconfigurable_update(
+    Item obj, Item name, Item descriptor, const JsDefineExistingState* state) {
+    if (!state || state->is_new_property) return true;
+
+    Item name_str_check = js_to_string(name);
+    if (get_type_id(name_str_check) != LMD_TYPE_STRING) return true;
+    String* ns_check = it2s(name_str_check);
+    if (!ns_check || ns_check->len <= 0 || ns_check->len >= 200) return true;
+
+    // Stage A3.3: shape-flag-first attribute query.
+    bool is_non_configurable = state->has_existing_desc
+        ? !state->existing_configurable
+        : !js_props_obj_query_configurable(
+            obj, ns_check->chars, (int)ns_check->len);
+
+    if (!is_non_configurable) return true;
+
+    // 7a: reject if desc.[[Configurable]] is true
+    Item cfg_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
+    if (it2b(js_in(cfg_key, descriptor))) {
+        Item cfg_val = js_property_get(descriptor, cfg_key);
+        if (js_is_truthy(cfg_val)) {
+            js_define_property_reject_false_type_error("Cannot redefine property: configurable");
+            return false;
+        }
+    }
+    // 7b: reject if desc.[[Enumerable]] differs from current
+    Item enum_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
+    if (it2b(js_in(enum_key, descriptor))) {
+        Item enum_val = js_property_get(descriptor, enum_key);
+        bool desc_enum = js_is_truthy(enum_val);
+        // Stage A3.3: shape-flag-first attribute query.
+        bool cur_enum = js_props_obj_query_enumerable(
+            obj, ns_check->chars, (int)ns_check->len);
+        if (desc_enum != cur_enum) {
+            js_define_property_reject_false_type_error("Cannot redefine property: enumerable");
+            return false;
+        }
+    }
+    // Check if current is accessor or data property
+    // AT-3: accessors are stored as JsAccessorPair with IS_ACCESSOR
+    // shape flag (post-AT-1). Probe shape entry only.
+    ShapeEntry* _se_acc_chk = js_find_shape_entry(obj, ns_check->chars, (int)ns_check->len);
+    if (!_se_acc_chk && get_type_id(obj) == LMD_TYPE_ARRAY && obj.array && obj.array->extra != 0 &&
+        js_parse_array_index(ns_check->chars, (int)ns_check->len) >= 0) {
+        Item companion = (Item){.map = (Map*)(uintptr_t)obj.array->extra};
+        _se_acc_chk = js_find_shape_entry(companion, ns_check->chars, (int)ns_check->len);
+    }
+    bool cur_is_accessor = state->has_existing_desc
+        ? state->existing_accessor
+        : (_se_acc_chk && jspd_is_accessor(_se_acc_chk));
+
+    Item val_key_check = (Item){.item = s2it(heap_create_name("value", 5))};
+    Item wri_key_check = (Item){.item = s2it(heap_create_name("writable", 8))};
+    Item get_key_check = (Item){.item = s2it(heap_create_name("get", 3))};
+    Item set_key_check = (Item){.item = s2it(heap_create_name("set", 3))};
+    bool desc_is_data = it2b(js_in(val_key_check, descriptor)) || it2b(js_in(wri_key_check, descriptor));
+    bool desc_is_accessor = it2b(js_in(get_key_check, descriptor)) || it2b(js_in(set_key_check, descriptor));
+
+    // 7c: reject if converting between accessor and data
+    if (cur_is_accessor && desc_is_data) {
+        js_define_property_reject_false_type_error("Cannot redefine property: accessor to data");
+        return false;
+    }
+    if (!cur_is_accessor && desc_is_accessor) {
+        js_define_property_reject_false_type_error("Cannot redefine property: data to accessor");
+        return false;
+    }
+
+    if (!cur_is_accessor) {
+        // 7d: data property — check writable constraints.
+        // Stage A3.3: shape-flag-first attribute query.
+        bool is_non_writable = state->has_existing_desc
+            ? !state->existing_writable
+            : !js_props_obj_query_writable(
+                obj, ns_check->chars, (int)ns_check->len);
+
+        if (is_non_writable) {
+            // reject if trying to make writable
+            if (it2b(js_in(wri_key_check, descriptor))) {
+                Item wri_val = js_property_get(descriptor, wri_key_check);
+                if (js_is_truthy(wri_val)) {
+                    js_define_property_reject_false_type_error("Cannot redefine property: writable");
+                    return false;
+                }
+            }
+            // reject if trying to change value (SameValue per spec)
+            if (it2b(js_in(val_key_check, descriptor))) {
+                Item new_val = js_property_get(descriptor, val_key_check);
+                Item cur_val = js_property_get(obj, name);
+                if (!it2b(js_object_is(cur_val, new_val))) {
+                    js_define_property_reject_false_type_error("Cannot redefine property: value");
+                    return false;
+                }
+            }
+        }
+    } else {
+        // 7e: accessor property: reject if get/set differ from
+        // the current JsAccessorPair stored at slot X.
+        Item cur_pair_get = make_js_undefined();
+        Item cur_pair_set = make_js_undefined();
+        bool have_pair = false;
+        if (_se_acc_chk && jspd_is_accessor(_se_acc_chk)) {
+            Map* _m = (get_type_id(obj) == LMD_TYPE_MAP) ? obj.map :
+                      (get_type_id(obj) == LMD_TYPE_ARRAY && obj.array && obj.array->extra)
+                          ? (Map*)(uintptr_t)obj.array->extra : nullptr;
+            if (_m) {
+                bool sf = false;
+                Item sv = js_map_get_fast_ext(_m, ns_check->chars, (int)ns_check->len, &sf);
+                if (sf) {
+                    JsAccessorPair* pair = js_item_to_accessor_pair(sv);
+                    if (pair) {
+                        cur_pair_get = (pair->getter.item != ItemNull.item) ? pair->getter : make_js_undefined();
+                        cur_pair_set = (pair->setter.item != ItemNull.item) ? pair->setter : make_js_undefined();
+                        have_pair = true;
+                    }
+                }
+            }
+        }
+        if (it2b(js_in(get_key_check, descriptor))) {
+            Item new_get = js_property_get(descriptor, get_key_check);
+            // AT-3: post-AT-1 accessors always go through IS_ACCESSOR
+            // shape probe; the !have_pair branch is unreachable.
+            Item cur_get = have_pair ? cur_pair_get : make_js_undefined();
+            if (!it2b(js_object_is(cur_get, new_get))) {
+                js_define_property_reject_false_type_error("Cannot redefine property: getter");
+                return false;
+            }
+        }
+        if (it2b(js_in(set_key_check, descriptor))) {
+            Item new_set = js_property_get(descriptor, set_key_check);
+            Item cur_set = have_pair ? cur_pair_set : make_js_undefined();
+            if (!it2b(js_object_is(cur_set, new_set))) {
+                js_define_property_reject_false_type_error("Cannot redefine property: setter");
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static void js_define_property_apply_validated_descriptor(Item obj, Item name,
+                                                          Item descriptor,
+                                                          bool is_arguments_exotic,
+                                                          bool is_new_property) {
+    // Stage A2.4: route storage through unified kernel
+    // `js_define_own_property_from_descriptor` (in js_props.cpp).
+    //
+    // The kernel performs all storage writes:
+    //   - Accessor: install via the IS_ACCESSOR chokepoint (`js_define_accessor_partial`).
+    //               Tombstones data slot when converting data to accessor.
+    //   - Data: clears IS_ACCESSOR shape flag if previously accessor and tracks
+    //           was_accessor.
+    //   - Attribute flags: write inverse ShapeEntry bits from HAS_* fields;
+    //     new-property defaults to non-* (ES §6.2.5.5).
+    //   - For new data property OR accessor→data conversion without explicit
+    //     `writable`, default to non-writable.
+    //
+    // Sparse array accessor hole-fill is also owned by the descriptor write
+    // kernel, so this helper is now validation-to-descriptor glue only.
+
+    Item nm = js_to_string(name);
+    if (get_type_id(nm) != LMD_TYPE_STRING) return;
+    String* nm_s = it2s(nm);
+    if (!nm_s || nm_s->len >= 200) return;
+    const char* nm_chars = nm_s->chars;
+    int nm_len = (int)nm_s->len;
+
+    JsPropertyDescriptor pd;
+    if (!js_descriptor_from_object(descriptor, &pd)) return;
+
+    if (get_type_id(obj) == LMD_TYPE_FUNC &&
+        ((nm_len == 6 && strncmp(nm_chars, "length", 6) == 0) ||
+         (nm_len == 4 && strncmp(nm_chars, "name", 4) == 0) ||
+         (nm_len == 9 && strncmp(nm_chars, "prototype", 9) == 0)) &&
+        (pd.flags & (JS_PD_HAS_VALUE | JS_PD_HAS_GET | JS_PD_HAS_SET)) == 0) {
+        pd.value = js_property_get(obj, name);
+        pd.flags |= JS_PD_HAS_VALUE;
+    }
+
+    Item define_target = obj;
+    if (is_arguments_exotic && nm_len == 6 && strncmp(nm_chars, "length", 6) == 0) {
+        define_target = (Item){.map = (Map*)(uintptr_t)obj.array->extra};
+    }
+    js_define_own_property_from_descriptor(define_target, nm_chars, nm_len, &pd, is_new_property);
+}
+
 // ES2020 §9.1.6.3 ValidateAndApplyPropertyDescriptor
 static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descriptor) {
     if (!js_require_object_type(obj, "defineProperty")) return ItemNull;
@@ -294,459 +760,27 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
         name = js_to_property_key(name);
     }
 
-    // ES §9.4.2.1: Array exotic objects — special [[DefineOwnProperty]] for "length"
-    // If obj is an array and name is "length", validate the value as a valid array length.
     bool is_arguments_exotic = js_is_arguments_exotic_array_for_proto(obj);
-    if (get_type_id(obj) == LMD_TYPE_ARRAY && !is_arguments_exotic && get_type_id(name) == LMD_TYPE_STRING) {
-        String* ns = it2s(name);
-        // J39-7: ES §9.4.2.1 step 3.f.iii — for an array index P >= length,
-        // if length is non-writable, throw TypeError. Index names are decimal
-        // digit strings.
-        if (ns && ns->len > 0 && ns->len <= 10 &&
-            (ns->len == 1 || ns->chars[0] != '0')) {
-            bool _is_idx = true;
-            uint64_t _idx = 0;
-            for (uint32_t _i = 0; _i < ns->len; _i++) {
-                char _c = ns->chars[_i];
-                if (_c < '0' || _c > '9') { _is_idx = false; break; }
-                _idx = _idx * 10 + (uint64_t)(_c - '0');
-            }
-            if (_is_idx && _idx <= 0xFFFFFFFEULL) {
-                bool _nw_len = !js_props_obj_query_writable(obj, "length", 6);
-                if (_nw_len && obj.array && (uint64_t)obj.array->length <= _idx) {
-                    Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                    Item msg = (Item){.item = s2it(heap_create_name("Cannot add property: array length is non-writable"))};
-                    js_throw_value(js_new_error_with_name(tn, msg));
-                    return obj;
-                }
-            }
-        }
-        if (ns && ns->len == 6 && strncmp(ns->chars, "length", 6) == 0) {
-            Item val_k = (Item){.item = s2it(heap_create_name("value", 5))};
-            if (it2b(js_in(val_k, descriptor))) {
-                Item len_val = js_property_get(descriptor, val_k);
-                // ArraySetLength performs ToUint32(value), then a separate
-                // ToNumber(value). Both conversions are observable.
-                Item u32_item = js_to_number(len_val);
-                extern int js_check_exception(void);
-                if (js_check_exception()) return obj;
-                TypeId u32_nt = get_type_id(u32_item);
-                double u32_d = (u32_nt == LMD_TYPE_FLOAT) ? it2d(u32_item) :
-                               (u32_nt == LMD_TYPE_INT) ? (double)it2i(u32_item) :
-                               (u32_nt == LMD_TYPE_INT64) ? (double)it2l(u32_item) : NAN;
-                uint32_t u32 = 0;
-                if (isfinite(u32_d)) {
-                    double u32_mod = fmod(u32_d, 4294967296.0);
-                    if (u32_mod < 0.0) u32_mod += 4294967296.0;
-                    u32 = (uint32_t)u32_mod;
-                }
-
-                Item num_item = js_to_number(len_val);
-                if (js_check_exception()) return obj;
-                TypeId nt = get_type_id(num_item);
-                double d = (nt == LMD_TYPE_FLOAT) ? it2d(num_item) :
-                           (nt == LMD_TYPE_INT) ? (double)it2i(num_item) :
-                           (nt == LMD_TYPE_INT64) ? (double)it2l(num_item) : NAN;
-                if ((double)u32 != d) {
-                    Item tn = (Item){.item = s2it(heap_create_name("RangeError"))};
-                    Item msg = (Item){.item = s2it(heap_create_name("Invalid array length"))};
-                    js_throw_value(js_new_error_with_name(tn, msg));
-                    return obj;
-                }
-                // J39-7: ES §9.4.2.4 ArraySetLength step 16/17 — if existing
-                // length is non-writable, reject any value change.
-                // Writable→non-writable is allowed
-                // (handled by step-7d below for the writable attribute).
-                bool _nw_len = !js_props_obj_query_writable(obj, "length", 6);
-                if (_nw_len && (uint32_t)obj.array->length != u32) {
-                    js_define_property_reject_false_type_error("Cannot redefine property: length");
-                    return obj;
-                }
-                if (obj.array && (int64_t)u32 < obj.array->length &&
-                    js_array_has_nonconfigurable_index_from(obj, (int64_t)u32)) {
-                    Item wri_key_for_shrink = (Item){.item = s2it(heap_create_name("writable", 8))};
-                    bool make_non_writable = it2b(js_in(wri_key_for_shrink, descriptor)) &&
-                        !js_is_truthy(js_property_get(descriptor, wri_key_for_shrink));
-                    js_array_apply_failed_length_shrink(obj, (int64_t)u32, make_non_writable);
-                    Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                    Item msg = (Item){.item = s2it(heap_create_name("Cannot shrink array length past non-configurable index"))};
-                    js_throw_value(js_new_error_with_name(tn, msg));
-                    return obj;
-                }
-            }
-            Item cfg_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
-            if (it2b(js_in(cfg_key, descriptor)) && js_is_truthy(js_property_get(descriptor, cfg_key))) {
-                js_define_property_reject_false_type_error("Cannot redefine property: length configurable");
-                return obj;
-            }
-            Item enum_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
-            if (it2b(js_in(enum_key, descriptor)) && js_is_truthy(js_property_get(descriptor, enum_key))) {
-                js_define_property_reject_false_type_error("Cannot redefine property: length enumerable");
-                return obj;
-            }
-            Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
-            Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
-            if (it2b(js_in(get_key, descriptor)) || it2b(js_in(set_key, descriptor))) {
-                js_define_property_reject_false_type_error("Cannot redefine property: length accessor");
-                return obj;
-            }
-            Item wri_key = (Item){.item = s2it(heap_create_name("writable", 8))};
-            if (it2b(js_in(wri_key, descriptor)) && js_is_truthy(js_property_get(descriptor, wri_key))) {
-                bool _nw_len = !js_props_obj_query_writable(obj, "length", 6);
-                if (_nw_len) {
-                    js_define_property_reject_false_type_error("Cannot redefine property: length writable");
-                    return obj;
-                }
-            }
-        }
-    }
-
-    // v18l: TypeError if descriptor is not an object (ES5 8.10.5 ToPropertyDescriptor step 1)
-    // Any object type is valid (Map, Function, Array, Element, etc.); reject primitives.
-    TypeId desc_type = get_type_id(descriptor);
-    if (desc_type != LMD_TYPE_MAP && desc_type != LMD_TYPE_FUNC &&
-        desc_type != LMD_TYPE_ARRAY && desc_type != LMD_TYPE_ELEMENT) {
-        Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-        Item msg = (Item){.item = s2it(heap_create_name("Property description must be an object"))};
-        js_throw_value(js_new_error_with_name(tn, msg));
+    if (!js_define_property_validate_array_exotic(
+            obj, name, descriptor, is_arguments_exotic)) {
         return obj;
     }
-    // v18l: Validate descriptor — mixed accessor+data is TypeError (ES5 8.10.5 step 9)
-    {
-        Item get_k = (Item){.item = s2it(heap_create_name("get", 3))};
-        Item set_k = (Item){.item = s2it(heap_create_name("set", 3))};
-        Item val_k = (Item){.item = s2it(heap_create_name("value", 5))};
-        Item wri_k = (Item){.item = s2it(heap_create_name("writable", 8))};
-        bool has_get = it2b(js_in(get_k, descriptor));
-        bool has_set = it2b(js_in(set_k, descriptor));
-        bool has_val = it2b(js_in(val_k, descriptor));
-        bool has_wri = it2b(js_in(wri_k, descriptor));
-        if ((has_get || has_set) && (has_val || has_wri)) {
-            Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-            Item msg = (Item){.item = s2it(heap_create_name("Invalid property descriptor. Cannot both specify accessors and a value or writable attribute"))};
-            js_throw_value(js_new_error_with_name(tn, msg));
-            return obj;
-        }
-        // v18l: Non-callable getter/setter is TypeError (ES5 8.10.5 step 7.b / 8.b)
-        if (has_get) {
-            Item getter = js_property_get(descriptor, get_k);
-            if (get_type_id(getter) != LMD_TYPE_FUNC && get_type_id(getter) != LMD_TYPE_UNDEFINED) {
-                Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                Item msg = (Item){.item = s2it(heap_create_name("Getter must be a function"))};
-                js_throw_value(js_new_error_with_name(tn, msg));
-                return obj;
-            }
-        }
-        if (has_set) {
-            Item setter = js_property_get(descriptor, set_k);
-            if (get_type_id(setter) != LMD_TYPE_FUNC && get_type_id(setter) != LMD_TYPE_UNDEFINED) {
-                Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                Item msg = (Item){.item = s2it(heap_create_name("Setter must be a function"))};
-                js_throw_value(js_new_error_with_name(tn, msg));
-                return obj;
-            }
-        }
-    }
-    // v18n: check is_new_property BEFORE setting any value (since js_property_set creates the property)
-    bool has_existing_desc_for_define = false;
-    bool existing_desc_configurable = true;
-    bool existing_desc_writable = true;
-    bool existing_desc_accessor = false;
-    bool is_new_property = !it2b(js_has_own_property(obj, name));
-    if (is_new_property) {
-        Item existing_desc = js_object_get_own_property_descriptor(obj, name);
-        if (js_check_exception()) return obj;
-        if (get_type_id(existing_desc) == LMD_TYPE_MAP) {
-            is_new_property = false;
-        }
-    }
-    if (!is_new_property) {
-        Item existing_desc = js_object_get_own_property_descriptor(obj, name);
-        if (js_check_exception()) return obj;
-        if (get_type_id(existing_desc) == LMD_TYPE_MAP) {
-            has_existing_desc_for_define = true;
-            bool found = false;
-            Item conf = js_map_get_fast_ext(existing_desc.map, "configurable", 12, &found);
-            existing_desc_configurable = found ? js_is_truthy(conf) : true;
-            found = false;
-            Item writable = js_map_get_fast_ext(existing_desc.map, "writable", 8, &found);
-            existing_desc_writable = found ? js_is_truthy(writable) : true;
-            bool has_get = false;
-            bool has_set = false;
-            js_map_get_fast_ext(existing_desc.map, "get", 3, &has_get);
-            js_map_get_fast_ext(existing_desc.map, "set", 3, &has_set);
-            existing_desc_accessor = has_get || has_set;
-        }
-    }
-    if (is_new_property && get_type_id(obj) == LMD_TYPE_ARRAY) {
-        Item nsc = js_to_string(name);
-        if (get_type_id(nsc) == LMD_TYPE_STRING) {
-            String* ns = it2s(nsc);
-            int64_t idx = ns ? js_parse_array_index(ns->chars, (int)ns->len) : -1;
-            if (idx >= 0 && obj.array && idx < obj.array->length) {
-                is_new_property = false;
-            }
-        }
-    }
-    // also check accessor markers: accessor-only properties on arrays may not be detected by js_has_own_property
-    if (is_new_property && get_type_id(obj) == LMD_TYPE_ARRAY) {
-        Item nsc = js_to_string(name);
-        if (get_type_id(nsc) == LMD_TYPE_STRING) {
-            String* ns = it2s(nsc);
-            if (ns && ns->len > 0 && ns->len < 200) {
-                // AT-3: accessors on arrays are stored on the companion map under
-                // the digit-string name with the IS_ACCESSOR shape flag (post-AT-1).
-                Map* pm = obj.array && obj.array->extra ? (Map*)(uintptr_t)obj.array->extra : nullptr;
-                if (pm) {
-                    Item pm_item = (Item){.map = pm};
-                    ShapeEntry* _se = js_find_shape_entry(pm_item, ns->chars, (int)ns->len);
-                    if (_se && jspd_is_accessor(_se)) is_new_property = false;
-                }
-            }
-        }
+
+    if (!js_define_property_validate_descriptor_object(descriptor)) return obj;
+    JsDefineExistingState existing_state;
+    if (!js_define_property_collect_existing_state(obj, name, &existing_state)) return obj;
+
+    if (!js_define_property_validate_array_companion_index(obj, name, descriptor)) {
+        return obj;
     }
 
-    if (get_type_id(obj) == LMD_TYPE_ARRAY && obj.array && obj.array->extra != 0) {
-        Item nsc = js_to_string(name);
-        if (get_type_id(nsc) == LMD_TYPE_STRING) {
-            String* ns = it2s(nsc);
-            if (ns && ns->len > 0 && ns->len < 200 &&
-                js_parse_array_index(ns->chars, (int)ns->len) >= 0) {
-                Map* pm = (Map*)(uintptr_t)obj.array->extra;
-                Item pm_item = (Item){.map = pm};
-                ShapeEntry* se = js_find_shape_entry(pm_item, ns->chars, (int)ns->len);
-                bool companion_non_config = !js_props_query_configurable(pm, se, ns->chars, (int)ns->len);
-                bool companion_accessor = se && jspd_is_accessor(se);
-
-                Item cfg_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
-                if (companion_non_config && it2b(js_in(cfg_key, descriptor)) &&
-                    js_is_truthy(js_property_get(descriptor, cfg_key))) {
-                    js_define_property_reject_false_type_error("Cannot redefine property: configurable");
-                    return obj;
-                }
-
-                Item val_key_check = (Item){.item = s2it(heap_create_name("value", 5))};
-                Item wri_key_check = (Item){.item = s2it(heap_create_name("writable", 8))};
-                Item get_key_check = (Item){.item = s2it(heap_create_name("get", 3))};
-                Item set_key_check = (Item){.item = s2it(heap_create_name("set", 3))};
-                bool desc_is_data = it2b(js_in(val_key_check, descriptor)) || it2b(js_in(wri_key_check, descriptor));
-                bool desc_is_accessor = it2b(js_in(get_key_check, descriptor)) || it2b(js_in(set_key_check, descriptor));
-                if (companion_non_config && companion_accessor && desc_is_data) {
-                    js_define_property_reject_false_type_error("Cannot redefine property: accessor to data");
-                    return obj;
-                }
-                if (companion_non_config && !companion_accessor && se && desc_is_accessor) {
-                    js_define_property_reject_false_type_error("Cannot redefine property: data to accessor");
-                    return obj;
-                }
-            }
-        }
+    if (!js_define_property_validate_nonconfigurable_update(
+            obj, name, descriptor, &existing_state)) {
+        return obj;
     }
 
-    // ES2020 §9.1.6.3 step 7: If existing property is non-configurable, reject certain changes
-    if (!is_new_property) {
-        Item name_str_check = js_to_string(name);
-        if (get_type_id(name_str_check) == LMD_TYPE_STRING) {
-            String* ns_check = it2s(name_str_check);
-            if (ns_check && ns_check->len > 0 && ns_check->len < 200) {
-                // Stage A3.3: shape-flag-first attribute query.
-                bool is_non_configurable = has_existing_desc_for_define
-                    ? !existing_desc_configurable
-                    : !js_props_obj_query_configurable(
-                        obj, ns_check->chars, (int)ns_check->len);
-
-                if (is_non_configurable) {
-                    // 7a: reject if desc.[[Configurable]] is true
-                    Item cfg_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
-                    if (it2b(js_in(cfg_key, descriptor))) {
-                        Item cfg_val = js_property_get(descriptor, cfg_key);
-                        if (js_is_truthy(cfg_val)) {
-                            js_define_property_reject_false_type_error("Cannot redefine property: configurable");
-                            return obj;
-                        }
-                    }
-                    // 7b: reject if desc.[[Enumerable]] differs from current
-                    Item enum_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
-                    if (it2b(js_in(enum_key, descriptor))) {
-                        Item enum_val = js_property_get(descriptor, enum_key);
-                        bool desc_enum = js_is_truthy(enum_val);
-                        // Stage A3.3: shape-flag-first attribute query.
-                        bool cur_enum = js_props_obj_query_enumerable(
-                            obj, ns_check->chars, (int)ns_check->len);
-                        if (desc_enum != cur_enum) {
-                            js_define_property_reject_false_type_error("Cannot redefine property: enumerable");
-                            return obj;
-                        }
-                    }
-                    // Check if current is accessor or data property
-                    // AT-3: accessors are stored as JsAccessorPair with IS_ACCESSOR
-                    // shape flag (post-AT-1). Probe shape entry only.
-                    ShapeEntry* _se_acc_chk = js_find_shape_entry(obj, ns_check->chars, (int)ns_check->len);
-                    if (!_se_acc_chk && get_type_id(obj) == LMD_TYPE_ARRAY && obj.array && obj.array->extra != 0 &&
-                        js_parse_array_index(ns_check->chars, (int)ns_check->len) >= 0) {
-                        Item companion = (Item){.map = (Map*)(uintptr_t)obj.array->extra};
-                        _se_acc_chk = js_find_shape_entry(companion, ns_check->chars, (int)ns_check->len);
-                    }
-                    bool cur_is_accessor = has_existing_desc_for_define
-                        ? existing_desc_accessor
-                        : (_se_acc_chk && jspd_is_accessor(_se_acc_chk));
-
-                    Item val_key_check = (Item){.item = s2it(heap_create_name("value", 5))};
-                    Item wri_key_check = (Item){.item = s2it(heap_create_name("writable", 8))};
-                    Item get_key_check = (Item){.item = s2it(heap_create_name("get", 3))};
-                    Item set_key_check = (Item){.item = s2it(heap_create_name("set", 3))};
-                    bool desc_is_data = it2b(js_in(val_key_check, descriptor)) || it2b(js_in(wri_key_check, descriptor));
-                    bool desc_is_accessor = it2b(js_in(get_key_check, descriptor)) || it2b(js_in(set_key_check, descriptor));
-
-                    // 7c: reject if converting between accessor and data
-                    if (cur_is_accessor && desc_is_data) {
-                        js_define_property_reject_false_type_error("Cannot redefine property: accessor to data");
-                        return obj;
-                    }
-                    if (!cur_is_accessor && desc_is_accessor) {
-                        js_define_property_reject_false_type_error("Cannot redefine property: data to accessor");
-                        return obj;
-                    }
-
-                    if (!cur_is_accessor) {
-                        // 7d: data property — check writable constraints.
-                        // Stage A3.3: shape-flag-first attribute query.
-                        bool is_non_writable = has_existing_desc_for_define
-                            ? !existing_desc_writable
-                            : !js_props_obj_query_writable(
-                                obj, ns_check->chars, (int)ns_check->len);
-
-                        if (is_non_writable) {
-                            // reject if trying to make writable
-                            if (it2b(js_in(wri_key_check, descriptor))) {
-                                Item wri_val = js_property_get(descriptor, wri_key_check);
-                                if (js_is_truthy(wri_val)) {
-                                    js_define_property_reject_false_type_error("Cannot redefine property: writable");
-                                    return obj;
-                                }
-                            }
-                            // reject if trying to change value (SameValue per spec)
-                            if (it2b(js_in(val_key_check, descriptor))) {
-                                Item new_val = js_property_get(descriptor, val_key_check);
-                                Item cur_val = js_property_get(obj, name);
-                                if (!it2b(js_object_is(cur_val, new_val))) {
-                                    js_define_property_reject_false_type_error("Cannot redefine property: value");
-                                    return obj;
-                                }
-                            }
-                        }
-                    } else {
-                        // 7e: accessor property: reject if get/set differ from
-                        // the current JsAccessorPair stored at slot X.
-                        Item cur_pair_get = make_js_undefined();
-                        Item cur_pair_set = make_js_undefined();
-                        bool have_pair = false;
-                        if (_se_acc_chk && jspd_is_accessor(_se_acc_chk)) {
-                            Map* _m = (get_type_id(obj) == LMD_TYPE_MAP) ? obj.map :
-                                      (get_type_id(obj) == LMD_TYPE_ARRAY && obj.array && obj.array->extra)
-                                          ? (Map*)(uintptr_t)obj.array->extra : nullptr;
-                            if (_m) {
-                                bool sf = false;
-                                Item sv = js_map_get_fast_ext(_m, ns_check->chars, (int)ns_check->len, &sf);
-                                if (sf) {
-                                    JsAccessorPair* pair = js_item_to_accessor_pair(sv);
-                                    if (pair) {
-                                        cur_pair_get = (pair->getter.item != ItemNull.item) ? pair->getter : make_js_undefined();
-                                        cur_pair_set = (pair->setter.item != ItemNull.item) ? pair->setter : make_js_undefined();
-                                        have_pair = true;
-                                    }
-                                }
-                            }
-                        }
-                        if (it2b(js_in(get_key_check, descriptor))) {
-                            Item new_get = js_property_get(descriptor, get_key_check);
-                            // AT-3: post-AT-1 accessors always go through IS_ACCESSOR
-                            // shape probe; the !have_pair branch is unreachable.
-                            Item cur_get = have_pair ? cur_pair_get : make_js_undefined();
-                            if (!it2b(js_object_is(cur_get, new_get))) {
-                                js_define_property_reject_false_type_error("Cannot redefine property: getter");
-                                return obj;
-                            }
-                        }
-                        if (it2b(js_in(set_key_check, descriptor))) {
-                            Item new_set = js_property_get(descriptor, set_key_check);
-                            Item cur_set = have_pair ? cur_pair_set : make_js_undefined();
-                            if (!it2b(js_object_is(cur_set, new_set))) {
-                                js_define_property_reject_false_type_error("Cannot redefine property: setter");
-                                return obj;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Stage A2.4: route storage through unified kernel
-    // `js_define_own_property_from_descriptor` (in js_props.cpp).
-    //
-    // The kernel performs all storage writes:
-    //   - Accessor: install via the IS_ACCESSOR chokepoint (`js_define_accessor_partial`).
-    //               Tombstones data slot when converting data to accessor.
-    //   - Data: clears IS_ACCESSOR shape flag if previously accessor and tracks
-    //           was_accessor.
-    //   - Attribute flags: write inverse ShapeEntry bits from HAS_* fields;
-    //     new-property defaults to non-* (ES §6.2.5.5).
-    //   - For new data property OR accessor→data conversion without explicit
-    //     `writable`, default to non-writable.
-    //
-    // What stays inline here:
-    //   - Generic-descriptor undefined-write fallback (no value/get/set).
-    //   - Array index hole-fill for accessor descriptors at sparse indices.
-
-    Item nm = js_to_string(name);
-    if (get_type_id(nm) != LMD_TYPE_STRING) return obj;
-    String* nm_s = it2s(nm);
-    if (!nm_s || nm_s->len >= 200) return obj;
-    const char* nm_chars = nm_s->chars;
-    int nm_len = (int)nm_s->len;
-
-    JsPropertyDescriptor pd;
-    if (!js_descriptor_from_object(descriptor, &pd)) return obj;
-
-    if (get_type_id(obj) == LMD_TYPE_FUNC &&
-        ((nm_len == 6 && strncmp(nm_chars, "length", 6) == 0) ||
-         (nm_len == 4 && strncmp(nm_chars, "name", 4) == 0) ||
-         (nm_len == 9 && strncmp(nm_chars, "prototype", 9) == 0)) &&
-        (pd.flags & (JS_PD_HAS_VALUE | JS_PD_HAS_GET | JS_PD_HAS_SET)) == 0) {
-        pd.value = js_property_get(obj, name);
-        pd.flags |= JS_PD_HAS_VALUE;
-    }
-
-    bool is_accessor = js_pd_is_accessor(&pd);
-
-    Item define_target = obj;
-    if (is_arguments_exotic && nm_len == 6 && strncmp(nm_chars, "length", 6) == 0) {
-        define_target = (Item){.map = (Map*)(uintptr_t)obj.array->extra};
-    }
-    js_define_own_property_from_descriptor(define_target, nm_chars, nm_len, &pd, is_new_property);
-
-    // ES5 §15.4.5.1: array exotic — accessor at sparse index grows items array.
-    if (is_accessor && get_type_id(obj) == LMD_TYPE_ARRAY && nm_len > 0 && nm_len <= 10) {
-        bool is_idx = true;
-        int64_t idx = 0;
-        for (int ci = 0; ci < nm_len; ci++) {
-            char ch = nm_chars[ci];
-            if (ch < '0' || ch > '9') { is_idx = false; break; }
-            idx = idx * 10 + (ch - '0');
-        }
-        if (is_idx && (nm_len == 1 || nm_chars[0] != '0') && idx >= 0) {
-            Array* arr = obj.array;
-            int64_t gap = idx - (int64_t)arr->length;
-            if (gap >= 0 && gap < 100000) {
-                extern void js_array_push_item_direct(Array* arr, Item value);
-                Item hole = (Item){.item = JS_DELETED_SENTINEL_VAL};
-                while ((int64_t)arr->length <= idx) {
-                    js_array_push_item_direct(arr, hole);
-                }
-            }
-        }
-    }
+    js_define_property_apply_validated_descriptor(
+        obj, name, descriptor, is_arguments_exotic, existing_state.is_new_property);
     return obj;
 }
 
@@ -12765,224 +12799,7 @@ extern "C" Item js_json_stringify(Item value) {
 // delete operator — remove property from object
 // =============================================================================
 
-extern "C" Item js_delete_property(Item obj, Item key) {
-    // TypeError if base is null or undefined (non-object-coercible)
-    // But only if there's no pending exception (e.g. from an unresolvable reference)
-    if (obj.item == ITEM_NULL || obj.item == ITEM_JS_UNDEFINED) {
-        extern int js_check_exception(void);
-        if (!js_check_exception()) {
-            String* sk = (get_type_id(key) == LMD_TYPE_STRING) ? it2s(key) : NULL;
-            const char* base = (obj.item == ITEM_NULL) ? "null" : "undefined";
-            char msg[256];
-            snprintf(msg, sizeof(msg), "Cannot delete property '%.*s' of %s",
-                     sk ? (int)sk->len : 0, sk ? sk->chars : "", base);
-            Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-            Item em = (Item){.item = s2it(heap_create_name(msg, strlen(msg)))};
-            js_throw_value(js_new_error_with_name(tn, em));
-        }
-        return (Item){.item = b2it(false)};
-    }
-    Item exotic_result = ItemNull;
-    if (js_try_exotic_delete_property(obj, key, &exotic_result)) return exotic_result;
-    if (get_type_id(obj) == LMD_TYPE_MAP && js_class_id(obj) == JS_CLASS_STRING &&
-        get_type_id(key) == LMD_TYPE_STRING) {
-        String* sk = it2s(key);
-        bool reject = false;
-        if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
-            reject = true;
-        } else if (sk && sk->len > 0 && sk->len <= 18) {
-            bool all_digits = true;
-            int64_t idx = 0;
-            for (int i = 0; i < (int)sk->len; i++) {
-                if (sk->chars[i] < '0' || sk->chars[i] > '9') {
-                    all_digits = false;
-                    break;
-                }
-                idx = idx * 10 + (sk->chars[i] - '0');
-            }
-            if (all_digits && (sk->len == 1 || sk->chars[0] != '0')) {
-                bool pv_found = false;
-                Item pv = js_map_get_fast_ext(obj.map, "__primitiveValue__", 18, &pv_found);
-                if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) {
-                    String* pv_s = it2s(pv);
-                    int64_t slen = pv_s ? js_global_utf16_len(pv_s->chars, (int)pv_s->len, (bool)pv_s->is_ascii) : 0;
-                    reject = idx >= 0 && idx < slen;
-                }
-            }
-        }
-        if (reject) {
-            if (js_strict_mode) js_throw_type_error("Cannot delete non-configurable property");
-            return (Item){.item = b2it(false)};
-        }
-    }
-    // v23: Handle function property deletion (name, length, prototype, custom)
-    if (get_type_id(obj) == LMD_TYPE_FUNC) {
-        JsFuncProps* fn = (JsFuncProps*)obj.function;
-        // Ensure properties_map exists
-        if (fn->properties_map.item == 0) {
-            fn->properties_map = js_new_object();
-            heap_register_gc_root(&fn->properties_map.item);
-        }
-        // Check non-configurable: prototype is non-configurable by default for constructors
-        if (get_type_id(key) == LMD_TYPE_STRING) {
-            String* sk = it2s(key);
-            if (sk && sk->len == 9 && strncmp(sk->chars, "prototype", 9) == 0) {
-                if (js_func_has_own_prototype(obj))
-                    return (Item){.item = b2it(false)}; // prototype is non-configurable
-                return (Item){.item = b2it(true)}; // non-constructors don't have prototype
-            }
-            // Honor non-configurable shape flags on properties_map.
-            if (sk && sk->len > 0 && sk->len < 200 &&
-                fn->properties_map.item != 0 &&
-                get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-                // Stage A3.2: shape-flag-first non-configurable check on fn props map.
-                ShapeEntry* _se = js_find_shape_entry(fn->properties_map, sk->chars, (int)sk->len);
-                if (!js_props_query_configurable(fn->properties_map.map, _se,
-                                                  sk->chars, (int)sk->len)) {
-                    return (Item){.item = b2it(false)};
-                }
-
-            }
-        }
-        // Mark as deleted in properties_map. Function virtual properties
-        // (length/name/prototype) are computed from the function struct, so
-        // deleting one may need to materialize a safe backing slot first; the
-        // JSPD_DELETED bit then shadows the virtual value without storing the
-        // dense-array hole sentinel in typed map storage.
-        Item prop_key = js_to_property_key(key);
-        if (get_type_id(prop_key) == LMD_TYPE_STRING) {
-            String* sk = it2s(prop_key);
-            if (sk && sk->len > 0) {
-                js_shape_mark_deleted_own(fn->properties_map, sk->chars, (int)sk->len,
-                                           /*create_if_missing=*/true);
-            }
-        }
-        return (Item){.item = b2it(true)};
-    }
-    // v25: Handle array element deletion — set element to sentinel to create "hole"
-    if (get_type_id(obj) == LMD_TYPE_ARRAY) {
-        Array* arr = obj.array;
-        if (get_type_id(key) == LMD_TYPE_STRING) {
-            String* sk = it2s(key);
-            if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
-                if (arr->is_content == 1 && arr->extra != 0) {
-                    Item pm_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
-                    js_shape_mark_deleted_own(pm_item, "length", 6, /*create_if_missing=*/true);
-                    return (Item){.item = b2it(true)};
-                }
-                if (js_strict_mode) {
-                    js_throw_type_error("Cannot delete non-configurable property");
-                }
-                return (Item){.item = b2it(false)};
-            }
-        }
-        // Convert key to numeric index
-        int64_t idx = -1;
-        if (get_type_id(key) == LMD_TYPE_INT) {
-            idx = it2i(key);
-        } else if (get_type_id(key) == LMD_TYPE_STRING) {
-            String* sk = it2s(key);
-            if (sk && sk->len > 0 && sk->len <= 10) {
-                bool is_num = true;
-                int64_t n = 0;
-                for (int i = 0; i < (int)sk->len; i++) {
-                    char c = sk->chars[i];
-                    if (c < '0' || c > '9') { is_num = false; break; }
-                    n = n * 10 + (c - '0');
-                }
-                if (is_num && !(sk->len > 1 && sk->chars[0] == '0')) idx = n;
-            }
-        }
-        if (idx >= 0 && idx < arr->length) {
-            // v27: check __nc_ (non-configurable) marker before deleting
-            if (arr->extra != 0) {
-                // Stage A1: ToPropertyKey — uniform stringification.
-                Item k_str = js_to_property_key(key);
-                if (get_type_id(k_str) == LMD_TYPE_STRING) {
-                    String* ks = it2s(k_str);
-                    if (ks) {
-                        Map* pm = (Map*)(uintptr_t)arr->extra;
-                        // Stage A3.2: shape-flag-first non-configurable check.
-                        Item pm_item = (Item){.map = pm};
-                        ShapeEntry* _se = js_find_shape_entry(pm_item, ks->chars, (int)ks->len);
-                        if (!js_props_query_configurable(pm, _se, ks->chars, (int)ks->len)) {
-                            if (js_strict_mode) {
-                                js_throw_type_error("Cannot delete non-configurable property");
-                            }
-                            return (Item){.item = b2it(false)};
-                        }
-                    }
-                }
-            }
-            if (idx < arr->capacity) {
-                arr->items[idx] = (Item){.item = JS_DELETED_SENTINEL_VAL};
-            }
-            // Arguments exotic objects: deleting a mapped index breaks the
-            // ParameterMap link, so later re-defining the index must not
-            // update the formal parameter binding.
-            if (arr->is_content == 1 && arr->extra != 0) {
-                Item pm_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
-                char marker_key[64];
-                snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)idx);
-                js_property_set(pm_item,
-                    (Item){.item = s2it(heap_create_name(marker_key, strlen(marker_key)))},
-                    (Item){.item = b2it(true)});
-            }
-            // Clear descriptor state in the companion map so the index is no
-            // longer treated as an own property after delete.
-            if (arr->extra != 0) {
-                // Stage A1: ToPropertyKey — uniform stringification.
-                Item k_str = js_to_property_key(key);
-                if (get_type_id(k_str) == LMD_TYPE_STRING) {
-                    String* ks = it2s(k_str);
-                    if (ks && ks->len > 0 && ks->len < 200) {
-                        Item pm_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
-                        // Phase 5 / A2-T3: clear IS_ACCESSOR shape flag on the
-                        // bare-key slot (which holds JsAccessorPair*) before
-                        // tombstoning, so reads no longer dispatch to the
-                        // deleted accessor. Routed through the per-Map clone
-                        // primitive so sibling Maps sharing this TypeMap
-                        // (shape cache) keep their IS_ACCESSOR untouched.
-                        ShapeEntry* _se = js_find_shape_entry(pm_item, ks->chars, (int)ks->len);
-                        if (_se && jspd_is_accessor(_se)) {
-                            js_shape_entry_set_accessor(pm_item, ks->chars, (int)ks->len, /*is_accessor=*/false);
-                        }
-                        if (_se) {
-                            js_shape_entry_update_flags(pm_item, ks->chars, (int)ks->len, 0,
-                                (uint8_t)(JSPD_NON_WRITABLE | JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE));
-                        }
-                        js_shape_mark_deleted_own(pm_item, ks->chars, (int)ks->len,
-                                                   /*create_if_missing=*/false);
-                    }
-                }
-            }
-            return (Item){.item = b2it(true)};
-        }
-        // Non-numeric or out-of-range key: route through Stage A1.12 kernel
-        // on the array's companion map. Kernel performs the same configurable
-        // check (via js_props_query_configurable), tombstones the 5 marker
-        // prefixes, clears IS_ACCESSOR shape-flag, and writes the bare-key
-        // sentinel — superset of what the legacy code did inline.
-        if (arr->extra != 0) {
-            Map* pm = (Map*)(uintptr_t)arr->extra;
-            Item pm_item = (Item){.map = pm};
-            // Stage A1: ToPropertyKey so Symbol keys (__sym_N) and FLOAT keys
-            // are canonicalized identically to define-property time.
-            Item k = js_to_property_key(key);
-            if (get_type_id(k) == LMD_TYPE_STRING) {
-                String* ks = it2s(k);
-                if (ks && ks->len > 0 && ks->len < 200) {
-                    if (!js_ordinary_delete(pm_item, ks->chars, (int)ks->len)) {
-                        if (js_strict_mode) {
-                            js_throw_type_error("Cannot delete non-configurable property");
-                        }
-                        return (Item){.item = b2it(false)};
-                    }
-                }
-            }
-        }
-        return (Item){.item = b2it(true)};
-    }
+static Item js_delete_map_property(Item obj, Item key) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
     // Canonicalize key via ToPropertyKey so tombstones match the shape entry
     // created by the corresponding get/set/defineProperty path.
@@ -13075,6 +12892,243 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         }
     }
     return (Item){.item = b2it(true)};
+}
+
+static bool js_delete_string_exotic_property(Item obj, Item key, Item* out_result) {
+    if (out_result) *out_result = ItemNull;
+    if (get_type_id(obj) != LMD_TYPE_MAP || js_class_id(obj) != JS_CLASS_STRING ||
+        get_type_id(key) != LMD_TYPE_STRING) {
+        return false;
+    }
+    String* sk = it2s(key);
+    bool reject = false;
+    if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
+        reject = true;
+    } else if (sk && sk->len > 0 && sk->len <= 18) {
+        bool all_digits = true;
+        int64_t idx = 0;
+        for (int i = 0; i < (int)sk->len; i++) {
+            if (sk->chars[i] < '0' || sk->chars[i] > '9') {
+                all_digits = false;
+                break;
+            }
+            idx = idx * 10 + (sk->chars[i] - '0');
+        }
+        if (all_digits && (sk->len == 1 || sk->chars[0] != '0')) {
+            bool pv_found = false;
+            Item pv = js_map_get_fast_ext(obj.map, "__primitiveValue__", 18, &pv_found);
+            if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) {
+                String* pv_s = it2s(pv);
+                int64_t slen = pv_s ? js_global_utf16_len(pv_s->chars, (int)pv_s->len, (bool)pv_s->is_ascii) : 0;
+                reject = idx >= 0 && idx < slen;
+            }
+        }
+    }
+    if (reject) {
+        if (js_strict_mode) js_throw_type_error("Cannot delete non-configurable property");
+        if (out_result) *out_result = (Item){.item = b2it(false)};
+        return true;
+    }
+    return false;
+}
+
+static Item js_delete_function_property(Item obj, Item key) {
+    JsFuncProps* fn = (JsFuncProps*)obj.function;
+    // Ensure properties_map exists
+    if (fn->properties_map.item == 0) {
+        fn->properties_map = js_new_object();
+        heap_register_gc_root(&fn->properties_map.item);
+    }
+    // Check non-configurable: prototype is non-configurable by default for constructors
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* sk = it2s(key);
+        if (sk && sk->len == 9 && strncmp(sk->chars, "prototype", 9) == 0) {
+            if (js_func_has_own_prototype(obj))
+                return (Item){.item = b2it(false)}; // prototype is non-configurable
+            return (Item){.item = b2it(true)}; // non-constructors don't have prototype
+        }
+        // Honor non-configurable shape flags on properties_map.
+        if (sk && sk->len > 0 && sk->len < 200 &&
+            fn->properties_map.item != 0 &&
+            get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+            // Stage A3.2: shape-flag-first non-configurable check on fn props map.
+            ShapeEntry* _se = js_find_shape_entry(fn->properties_map, sk->chars, (int)sk->len);
+            if (!js_props_query_configurable(fn->properties_map.map, _se,
+                                              sk->chars, (int)sk->len)) {
+                return (Item){.item = b2it(false)};
+            }
+
+        }
+    }
+    // Mark as deleted in properties_map. Function virtual properties
+    // (length/name/prototype) are computed from the function struct, so
+    // deleting one may need to materialize a safe backing slot first; the
+    // JSPD_DELETED bit then shadows the virtual value without storing the
+    // dense-array hole sentinel in typed map storage.
+    Item prop_key = js_to_property_key(key);
+    if (get_type_id(prop_key) == LMD_TYPE_STRING) {
+        String* sk = it2s(prop_key);
+        if (sk && sk->len > 0) {
+            js_shape_mark_deleted_own(fn->properties_map, sk->chars, (int)sk->len,
+                                       /*create_if_missing=*/true);
+        }
+    }
+    return (Item){.item = b2it(true)};
+}
+
+static Item js_delete_array_property(Item obj, Item key) {
+    Array* arr = obj.array;
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* sk = it2s(key);
+        if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
+            if (arr->is_content == 1 && arr->extra != 0) {
+                Item pm_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
+                js_shape_mark_deleted_own(pm_item, "length", 6, /*create_if_missing=*/true);
+                return (Item){.item = b2it(true)};
+            }
+            if (js_strict_mode) {
+                js_throw_type_error("Cannot delete non-configurable property");
+            }
+            return (Item){.item = b2it(false)};
+        }
+    }
+    // Convert key to numeric index
+    int64_t idx = -1;
+    if (get_type_id(key) == LMD_TYPE_INT) {
+        idx = it2i(key);
+    } else if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* sk = it2s(key);
+        if (sk && sk->len > 0 && sk->len <= 10) {
+            bool is_num = true;
+            int64_t n = 0;
+            for (int i = 0; i < (int)sk->len; i++) {
+                char c = sk->chars[i];
+                if (c < '0' || c > '9') { is_num = false; break; }
+                n = n * 10 + (c - '0');
+            }
+            if (is_num && !(sk->len > 1 && sk->chars[0] == '0')) idx = n;
+        }
+    }
+    if (idx >= 0 && idx < arr->length) {
+        // Check companion-map ShapeEntry flags before deleting.
+        if (arr->extra != 0) {
+            // Stage A1: ToPropertyKey — uniform stringification.
+            Item k_str = js_to_property_key(key);
+            if (get_type_id(k_str) == LMD_TYPE_STRING) {
+                String* ks = it2s(k_str);
+                if (ks) {
+                    Map* pm = (Map*)(uintptr_t)arr->extra;
+                    // Stage A3.2: shape-flag-first non-configurable check.
+                    Item pm_item = (Item){.map = pm};
+                    ShapeEntry* _se = js_find_shape_entry(pm_item, ks->chars, (int)ks->len);
+                    if (!js_props_query_configurable(pm, _se, ks->chars, (int)ks->len)) {
+                        if (js_strict_mode) {
+                            js_throw_type_error("Cannot delete non-configurable property");
+                        }
+                        return (Item){.item = b2it(false)};
+                    }
+                }
+            }
+        }
+        if (idx < arr->capacity) {
+            arr->items[idx] = (Item){.item = JS_DELETED_SENTINEL_VAL};
+        }
+        // Arguments exotic objects: deleting a mapped index breaks the
+        // ParameterMap link, so later re-defining the index must not
+        // update the formal parameter binding.
+        if (arr->is_content == 1 && arr->extra != 0) {
+            Item pm_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
+            char marker_key[64];
+            snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)idx);
+            js_property_set(pm_item,
+                (Item){.item = s2it(heap_create_name(marker_key, strlen(marker_key)))},
+                (Item){.item = b2it(true)});
+        }
+        // Clear descriptor state in the companion map so the index is no
+        // longer treated as an own property after delete.
+        if (arr->extra != 0) {
+            // Stage A1: ToPropertyKey — uniform stringification.
+            Item k_str = js_to_property_key(key);
+            if (get_type_id(k_str) == LMD_TYPE_STRING) {
+                String* ks = it2s(k_str);
+                if (ks && ks->len > 0 && ks->len < 200) {
+                    Item pm_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
+                    // Phase 5 / A2-T3: clear IS_ACCESSOR shape flag on the
+                    // bare-key slot (which holds JsAccessorPair*) before
+                    // tombstoning, so reads no longer dispatch to the
+                    // deleted accessor. Routed through the per-Map clone
+                    // primitive so sibling Maps sharing this TypeMap
+                    // (shape cache) keep their IS_ACCESSOR untouched.
+                    ShapeEntry* _se = js_find_shape_entry(pm_item, ks->chars, (int)ks->len);
+                    if (_se && jspd_is_accessor(_se)) {
+                        js_shape_entry_set_accessor(pm_item, ks->chars, (int)ks->len, /*is_accessor=*/false);
+                    }
+                    if (_se) {
+                        js_shape_entry_update_flags(pm_item, ks->chars, (int)ks->len, 0,
+                            (uint8_t)(JSPD_NON_WRITABLE | JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE));
+                    }
+                    js_shape_mark_deleted_own(pm_item, ks->chars, (int)ks->len,
+                                               /*create_if_missing=*/false);
+                }
+            }
+        }
+        return (Item){.item = b2it(true)};
+    }
+    // Non-numeric or out-of-range key: route through Stage A1.12 kernel
+    // on the array's companion map. Kernel performs the same configurable
+    // check (via js_props_query_configurable), tombstones the 5 marker
+    // prefixes, clears IS_ACCESSOR shape-flag, and writes the bare-key
+    // sentinel — superset of what the legacy code did inline.
+    if (arr->extra != 0) {
+        Map* pm = (Map*)(uintptr_t)arr->extra;
+        Item pm_item = (Item){.map = pm};
+        // Stage A1: ToPropertyKey so Symbol keys (__sym_N) and FLOAT keys
+        // are canonicalized identically to define-property time.
+        Item k = js_to_property_key(key);
+        if (get_type_id(k) == LMD_TYPE_STRING) {
+            String* ks = it2s(k);
+            if (ks && ks->len > 0 && ks->len < 200) {
+                if (!js_ordinary_delete(pm_item, ks->chars, (int)ks->len)) {
+                    if (js_strict_mode) {
+                        js_throw_type_error("Cannot delete non-configurable property");
+                    }
+                    return (Item){.item = b2it(false)};
+                }
+            }
+        }
+    }
+    return (Item){.item = b2it(true)};
+}
+
+extern "C" Item js_delete_property(Item obj, Item key) {
+    // TypeError if base is null or undefined (non-object-coercible)
+    // But only if there's no pending exception (e.g. from an unresolvable reference)
+    if (obj.item == ITEM_NULL || obj.item == ITEM_JS_UNDEFINED) {
+        extern int js_check_exception(void);
+        if (!js_check_exception()) {
+            String* sk = (get_type_id(key) == LMD_TYPE_STRING) ? it2s(key) : NULL;
+            const char* base = (obj.item == ITEM_NULL) ? "null" : "undefined";
+            char msg[256];
+            snprintf(msg, sizeof(msg), "Cannot delete property '%.*s' of %s",
+                     sk ? (int)sk->len : 0, sk ? sk->chars : "", base);
+            Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+            Item em = (Item){.item = s2it(heap_create_name(msg, strlen(msg)))};
+            js_throw_value(js_new_error_with_name(tn, em));
+        }
+        return (Item){.item = b2it(false)};
+    }
+    Item exotic_result = ItemNull;
+    if (js_try_exotic_delete_property(obj, key, &exotic_result)) return exotic_result;
+    if (js_delete_string_exotic_property(obj, key, &exotic_result)) return exotic_result;
+    // v23: Handle function property deletion (name, length, prototype, custom)
+    if (get_type_id(obj) == LMD_TYPE_FUNC) {
+        return js_delete_function_property(obj, key);
+    }
+    // v25: Handle array element deletion — set element to sentinel to create "hole"
+    if (get_type_id(obj) == LMD_TYPE_ARRAY) {
+        return js_delete_array_property(obj, key);
+    }
+    return js_delete_map_property(obj, key);
 }
 
 extern "C" Item js_delete_property_strict(Item obj, Item key) {

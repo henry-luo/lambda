@@ -78,7 +78,7 @@ Because `pool_calloc` zeroes the header, **all ordinary objects are `MAP_KIND_PL
    - string-wrapper indexed access + virtual `length` for `JS_CLASS_STRING`;
    - **prototype walk** `js_prototype_lookup_ex` (`:3592`);
    - top-of-chain deletion guard (don't resurrect a deleted Object.prototype builtin);
-   - **builtin-method fallback** by `js_class_id` then `js_lookup_builtin_method` then `.constructor` then collection methods;
+   - **builtin-method fallback** via `js_map_builtin_fallback_get`: `js_class_id`, `js_lookup_builtin_method`, `.constructor`, and collection methods;
    - else `make_js_undefined()`.
 3. **ARRAY / ELEMENT branches** handle index/length/companion-map access, including `JSPD_IS_ACCESSOR` slots on the companion map.
 
@@ -88,14 +88,15 @@ Because `pool_calloc` zeroes the header, **all ordinary objects are `MAP_KIND_PL
 
 ## 6. Property set
 
-`js_property_set(object, key, value)` (`js_runtime.cpp:5058`).
+`js_property_set(object, key, value)` (`js_runtime.cpp`) is now a thin preflight dispatcher over helper-sized branches.
 
 <img alt="Property set dispatch" src="diagram/property_set_dispatch.svg" width="720">
 
 1. **Dense-array fast path** for an INT key on a plain array.
 2. Base checks: null/undefined -> TypeError; private-host check; primitive/symbol base handling.
-3. **ARRAY branch** - `length` resize (honoring the companion-map `length` shape flags), non-numeric keys -> companion map (with inherited-setter walk), numeric-index accessor/non-writable guards from the companion-map digit entry, OrdinarySet proto-walk for inherited index accessors.
-4. **MAP branch** - key stringification; proxy private slots; `__proto__` set -> `js_reflect_set_prototype_of`; **`__frozen__` reject**; **non-writable guard** via `js_prop_attrs_fast_path` (shape flags); **exotic gate** `js_try_exotic_property_set`; **setter dispatch** (proxy `[[Set]]` forward, then `js_ordinary_set_via_accessor` walking own+proto for an `IS_ACCESSOR` pair, then a non-writable inherited-data reject); **data write** - `fn_map_set` for an existing shape entry (clearing `JSPD_DELETED` and preserving enum order for resurrection), else `map_put` with extensible/sealed/frozen checks.
+3. **ARRAY branch** via `js_property_set_array` - `length` resize (honoring the companion-map `length` shape flags), non-numeric keys -> companion map (with inherited-setter walk), numeric-index accessor/non-writable guards from the companion-map digit entry, OrdinarySet proto-walk for inherited index accessors.
+4. **MAP branch** via `js_property_set_map` - key stringification; proxy private slots; `__proto__` set -> `js_reflect_set_prototype_of`; **`__frozen__` reject**; **non-writable guard** via `js_prop_attrs_fast_path` (shape flags); **exotic gate** `js_try_exotic_property_set`; **setter dispatch** (proxy `[[Set]]` forward, then `js_ordinary_set_via_accessor` walking own+proto for an `IS_ACCESSOR` pair, then a non-writable inherited-data reject); **data write** - `fn_map_set` for an existing shape entry (clearing `JSPD_DELETED` and preserving enum order for resurrection), else `map_put` with extensible/sealed/frozen checks.
+5. **FUNC branch** via `js_property_set_function` - virtual `prototype`/`name`/`length` handling, bound-function restricted properties, inherited setter/non-writable checks, then `properties_map` storage.
 
 The spec-named kernels `js_ordinary_set` / `js_ordinary_set_via_accessor` live in `js_props.cpp:254`.
 
@@ -103,13 +104,15 @@ The spec-named kernels `js_ordinary_set` / `js_ordinary_set_via_accessor` live i
 
 ## 7. Object.defineProperty
 
-`js_object_define_property` (`js_globals.cpp:8075`) handles Proxy `[[DefineOwnProperty]]`, typed-array integer-index defines, String-exotic rules, and the non-extensible new-property reject, then calls **`ValidateAndApplyPropertyDescriptor`** (`js_globals.cpp:283`) — a full ES2020 §9.1.6.3 implementation:
+`js_object_define_property` (`js_globals.cpp`) handles Proxy `[[DefineOwnProperty]]`, typed-array integer-index defines, String-exotic rules, and the non-extensible new-property reject, then calls **`ValidateAndApplyPropertyDescriptor`** — a full ES2020 §9.1.6.3 implementation. The top-level function is now an ordered validation/apply pipeline:
 
 - sets `js_skip_accessor_dispatch` (RAII) so internal writes are `[[DefineOwnProperty]]`, not `[[Set]]`;
-- **Array `length`** exotic path (`ToUint32`/`ToNumber` double-conversion, companion-map `length` shape flags, non-configurable-index shrink);
-- descriptor validation (mixed accessor/data → TypeError; non-callable get/set → TypeError);
-- **non-configurable invariant checks** (no config/enumerable change; no data↔accessor conversion; non-writable value/writable change via SameValue `js_object_is`; accessor get/set change) using the flag-first `js_props_obj_query_*` helpers and the live `JsAccessorPair`;
-- applies storage via `js_descriptor_from_object` -> `js_define_own_property_from_descriptor` (`js_props.cpp:556`), which clears/sets `IS_ACCESSOR`, writes data via `fn_map_set`, clears `JSPD_DELETED` on resurrection, and mutates attribute flags through `js_attr_set_*`.
+- **Array `length`** exotic validation via `js_define_property_validate_array_exotic` (`ToUint32`/`ToNumber` double-conversion, companion-map `length` shape flags, non-configurable-index shrink);
+- descriptor object validation via `js_define_property_validate_descriptor_object` (mixed accessor/data -> TypeError; non-callable get/set -> TypeError);
+- existing-property state collection via `js_define_property_collect_existing_state`;
+- array companion-map index invariants via `js_define_property_validate_array_companion_index`;
+- **non-configurable invariant checks** via `js_define_property_validate_nonconfigurable_update` (no config/enumerable change; no data<->accessor conversion; non-writable value/writable change via SameValue `js_object_is`; accessor get/set change) using the flag-first `js_props_obj_query_*` helpers and the live `JsAccessorPair`;
+- storage apply via `js_define_property_apply_validated_descriptor` -> `js_descriptor_from_object` -> `js_define_own_property_from_descriptor` (`js_props.cpp`), which clears/sets `IS_ACCESSOR`, writes data via `fn_map_set`, clears `JSPD_DELETED` on resurrection, and mutates attribute flags through `js_attr_set_*`.
 
 ---
 
@@ -148,9 +151,9 @@ Because instances **share** the cached `TypeMap`, any per-instance attribute cha
 ## 11. Known Issues & Future Improvements
 
 1. **Dense array hole sentinel remains.** `JS_DELETED_SENTINEL_VAL` (`js_runtime.h:26`) now uses unused tag `0x7E` and marks dense `Array::items` holes, not ordinary descriptor metadata. Ordinary map/FUNC/ARRAY companion-map deletes use `JSPD_DELETED`; readers that may inspect dense array items still preserve a raw-hole check, while ordinary property readers use `js_own_shape_slot_status`.
-2. **Oversized dispatch functions.** `js_property_set`, `js_property_get`, `ValidateAndApplyPropertyDescriptor`, and `js_delete_property` remain monolithic and deeply nested across ordinary, exotic, array, proxy, and function special cases.
-3. **Linear scans on hot paths.** Built-in method lookup is linear `strncmp` over each spec table (`js_runtime_builtin_registry.cpp:20`). *Improvement:* sort + bsearch (or hash) the spec tables, then migrate the oversized property dispatch functions to the smaller kernels in `js_props.cpp`.
-4. **Corrupt-`type`-pointer root cause remains MIR-side.** The TypeMap plausibility guard is centralized as `typemap_ptr_is_plausible` (`lambda-data.hpp:283`), so JS property/class readers share one safety net. The known `lib_marked.js` corrupt-`type` crash is still traced to MIR scope-env/register liveness around captured block-scoped lets; fixing that codegen root cause remains separate from the runtime guard.
+2. **Property dispatch decomposition status.** The post-Js59 cleanup split MAP built-in fallback out of `js_property_get`, ordinary MAP tombstone/configurable/frozen handling plus ARRAY/FUNC/string-exotic branches out of `js_delete_property`, ARRAY/MAP/FUNC branches out of `js_property_set`, and the validation/apply phases out of `ValidateAndApplyPropertyDescriptor`. Sparse array accessor hole-fill now lives in the descriptor write kernel (`js_define_own_property_from_descriptor`), so no Js59-specific dispatch cleanup remains.
+3. **Built-in registry lookup.** Built-in method lookup uses a small positive cache before falling back to the spec-table scan (`js_runtime_builtin_registry.cpp:18`). Cold misses and first hits still scan the table. *Improvement:* add sorted table indexes or a miss cache only if release profiling shows the fallback is hot.
+4. **TypeMap pointer guard is defensive.** The TypeMap plausibility guard is centralized as `typemap_ptr_is_plausible` (`lambda-data.hpp:283`), so JS property/class readers share one safety net. The `lib_marked.js` corrupt-`type` crash family traced to captured block-scoped lets is fixed in MIR last-closure environment tracking; keep the guard as a defensive invariant check, not as the primary fix for that bug family.
 
 ---
 

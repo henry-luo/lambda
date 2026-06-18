@@ -13,14 +13,65 @@ static bool js_builtin_cache_init = false;
 
 extern "C" void js_func_init_property(Item fn_item, Item key, Item value);
 
+typedef struct JsBuiltinSpecLookupCacheEntry {
+    const JsBuiltinMethodSpec* specs;
+    const JsBuiltinMethodSpec* spec;
+    uint32_t hash;
+    int len;
+} JsBuiltinSpecLookupCacheEntry;
+
+#define JS_BUILTIN_SPEC_LOOKUP_CACHE_SIZE 1024u
+static JsBuiltinSpecLookupCacheEntry
+    js_builtin_spec_lookup_cache[JS_BUILTIN_SPEC_LOOKUP_CACHE_SIZE];
+
 static const char* js_builtin_method_spec_display_name(const JsBuiltinMethodSpec* spec) {
     return spec->display_name ? spec->display_name : spec->name;
 }
 
+static uint32_t js_builtin_spec_name_hash(const char* name, int len) {
+    uint32_t h = 2166136261u;
+    for (int i = 0; i < len; i++) {
+        h ^= (uint8_t)name[i];
+        h *= 16777619u;
+    }
+    return h ? h : 1u;
+}
+
+static const JsBuiltinMethodSpec* js_builtin_spec_cache_get(
+        const JsBuiltinMethodSpec* specs, const char* name, int len,
+        uint32_t hash) {
+    uint32_t slot = hash & (JS_BUILTIN_SPEC_LOOKUP_CACHE_SIZE - 1u);
+    JsBuiltinSpecLookupCacheEntry* entry = &js_builtin_spec_lookup_cache[slot];
+    if (entry->specs != specs || entry->len != len || entry->hash != hash ||
+        !entry->spec || !entry->spec->name) {
+        return NULL;
+    }
+    if (strncmp(name, entry->spec->name, len) == 0) return entry->spec;
+    return NULL;
+}
+
+static void js_builtin_spec_cache_put(const JsBuiltinMethodSpec* specs,
+                                      const JsBuiltinMethodSpec* spec,
+                                      int len, uint32_t hash) {
+    uint32_t slot = hash & (JS_BUILTIN_SPEC_LOOKUP_CACHE_SIZE - 1u);
+    JsBuiltinSpecLookupCacheEntry* entry = &js_builtin_spec_lookup_cache[slot];
+    entry->specs = specs;
+    entry->spec = spec;
+    entry->hash = hash;
+    entry->len = len;
+}
+
 static const JsBuiltinMethodSpec* js_find_builtin_method_spec(const JsBuiltinMethodSpec* specs, const char* name, int len) {
     if (!specs || !name) return NULL;
+    uint32_t hash = js_builtin_spec_name_hash(name, len);
+    const JsBuiltinMethodSpec* cached = js_builtin_spec_cache_get(specs, name, len, hash);
+    if (cached) return cached;
+
+    char first = len > 0 ? name[0] : '\0';
     for (int i = 0; specs[i].name; i++) {
-        if (len == specs[i].len && strncmp(name, specs[i].name, len) == 0) {
+        if (len == specs[i].len && first == specs[i].name[0] &&
+            strncmp(name, specs[i].name, len) == 0) {
+            js_builtin_spec_cache_put(specs, &specs[i], len, hash);
             return &specs[i];
         }
     }

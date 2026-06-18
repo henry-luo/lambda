@@ -25,10 +25,63 @@ static JsMirVarEntry* jm_find_nearest_catch_param_var(JsMirTranspiler* mt, const
     return NULL;
 }
 
+typedef struct JsMirLastClosureSnapshot {
+    bool has_env;
+    MIR_reg_t env_reg;
+    int capture_count;
+    bool preserve_after_readback;
+    char capture_names[JS_MIR_LAST_CLOSURE_CAPTURE_MAX][128];
+    int capture_slots[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    bool capture_is_nfe[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+} JsMirLastClosureSnapshot;
+
+static int jm_last_closure_capture_count_clamped(int count) {
+    if (count < 0) return 0;
+    if (count > JS_MIR_LAST_CLOSURE_CAPTURE_MAX) return JS_MIR_LAST_CLOSURE_CAPTURE_MAX;
+    return count;
+}
+
+static void jm_save_last_closure_snapshot(JsMirTranspiler* mt, JsMirLastClosureSnapshot* snapshot) {
+    if (!mt || !snapshot) return;
+    snapshot->has_env = mt->last_closure_has_env;
+    snapshot->env_reg = mt->last_closure_env_reg;
+    snapshot->capture_count = jm_last_closure_capture_count_clamped(mt->last_closure_capture_count);
+    snapshot->preserve_after_readback = mt->preserve_last_closure_env_after_readback;
+    for (int i = 0; i < snapshot->capture_count; i++) {
+        snprintf(snapshot->capture_names[i], sizeof(snapshot->capture_names[i]),
+            "%s", mt->last_closure_capture_names[i]);
+        snapshot->capture_slots[i] = mt->last_closure_capture_slots[i];
+        snapshot->capture_is_nfe[i] = mt->last_closure_capture_is_nfe[i];
+    }
+}
+
+static void jm_clear_last_closure_snapshot(JsMirTranspiler* mt) {
+    if (!mt) return;
+    mt->last_closure_has_env = false;
+    mt->last_closure_env_reg = 0;
+    mt->last_closure_capture_count = 0;
+}
+
+static void jm_restore_last_closure_snapshot(JsMirTranspiler* mt,
+        const JsMirLastClosureSnapshot* snapshot) {
+    if (!mt || !snapshot) return;
+    mt->last_closure_has_env = snapshot->has_env;
+    mt->last_closure_env_reg = snapshot->env_reg;
+    mt->last_closure_capture_count = snapshot->capture_count;
+    mt->preserve_last_closure_env_after_readback = snapshot->preserve_after_readback;
+    for (int i = 0; i < snapshot->capture_count; i++) {
+        snprintf(mt->last_closure_capture_names[i],
+            sizeof(mt->last_closure_capture_names[i]), "%s", snapshot->capture_names[i]);
+        mt->last_closure_capture_slots[i] = snapshot->capture_slots[i];
+        mt->last_closure_capture_is_nfe[i] = snapshot->capture_is_nfe[i];
+    }
+}
+
 void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
         const char* name, MIR_reg_t val_reg, TypeId type_id) {
     if (!mt || !name || !mt->last_closure_has_env || mt->last_closure_env_reg == 0) return;
-    for (int i = 0; i < mt->last_closure_capture_count; i++) {
+    int capture_count = jm_last_closure_capture_count_clamped(mt->last_closure_capture_count);
+    for (int i = 0; i < capture_count; i++) {
         if (mt->last_closure_capture_is_nfe[i]) continue;
         if (strcmp(mt->last_closure_capture_names[i], name) != 0) continue;
         int slot = mt->last_closure_capture_slots[i] >= 0 ? mt->last_closure_capture_slots[i] : i;
@@ -1762,21 +1815,9 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     // Update — use native path for typed increment/assignment
     jm_emit_label(mt, l_update);
     if (for_node->update) {
-        bool saved_last_closure_has_env = mt->last_closure_has_env;
-        MIR_reg_t saved_last_closure_env_reg = mt->last_closure_env_reg;
-        int saved_last_closure_capture_count = mt->last_closure_capture_count;
-        bool saved_preserve_last_closure_env = mt->preserve_last_closure_env_after_readback;
-        char saved_last_closure_capture_names[16][128];
-        int saved_last_closure_capture_slots[16];
-        bool saved_last_closure_capture_is_nfe[16];
-        for (int sci = 0; sci < saved_last_closure_capture_count && sci < 16; sci++) {
-            snprintf(saved_last_closure_capture_names[sci], 128, "%s", mt->last_closure_capture_names[sci]);
-            saved_last_closure_capture_slots[sci] = mt->last_closure_capture_slots[sci];
-            saved_last_closure_capture_is_nfe[sci] = mt->last_closure_capture_is_nfe[sci];
-        }
-        mt->last_closure_has_env = false;
-        mt->last_closure_env_reg = 0;
-        mt->last_closure_capture_count = 0;
+        JsMirLastClosureSnapshot saved_last_closure;
+        jm_save_last_closure_snapshot(mt, &saved_last_closure);
+        jm_clear_last_closure_snapshot(mt);
         mt->preserve_last_closure_env_after_readback = true;
 
         TypeId upd_type = jm_get_effective_type(mt, for_node->update);
@@ -1799,15 +1840,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
                     loop_var->reg, loop_var->type_id);
             }
         }
-        mt->last_closure_has_env = saved_last_closure_has_env;
-        mt->last_closure_env_reg = saved_last_closure_env_reg;
-        mt->last_closure_capture_count = saved_last_closure_capture_count;
-        mt->preserve_last_closure_env_after_readback = saved_preserve_last_closure_env;
-        for (int sci = 0; sci < saved_last_closure_capture_count && sci < 16; sci++) {
-            snprintf(mt->last_closure_capture_names[sci], 128, "%s", saved_last_closure_capture_names[sci]);
-            mt->last_closure_capture_slots[sci] = saved_last_closure_capture_slots[sci];
-            mt->last_closure_capture_is_nfe[sci] = saved_last_closure_capture_is_nfe[sci];
-        }
+        jm_restore_last_closure_snapshot(mt, &saved_last_closure);
     }
 
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_test)));
@@ -3599,21 +3632,9 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // `for (let ctor of ctors) {...}` would write back to the FIRST loop's
     // last evil's env, and reads of the body's bindings would route through
     // that stale env. See §12.14.
-    bool saved_last_closure_has_env = mt->last_closure_has_env;
-    MIR_reg_t saved_last_closure_env_reg = mt->last_closure_env_reg;
-    int saved_last_closure_capture_count = mt->last_closure_capture_count;
-    char saved_last_closure_capture_names[16][128];
-    int saved_last_closure_capture_slots[16];
-    bool saved_last_closure_capture_is_nfe[16];
-    int p19_save_n = saved_last_closure_capture_count < 16 ? saved_last_closure_capture_count : 16;
-    for (int sci = 0; sci < p19_save_n; sci++) {
-        snprintf(saved_last_closure_capture_names[sci], 128, "%s", mt->last_closure_capture_names[sci]);
-        saved_last_closure_capture_slots[sci] = mt->last_closure_capture_slots[sci];
-        saved_last_closure_capture_is_nfe[sci] = mt->last_closure_capture_is_nfe[sci];
-    }
-    mt->last_closure_has_env = false;
-    mt->last_closure_env_reg = 0;
-    mt->last_closure_capture_count = 0;
+    JsMirLastClosureSnapshot saved_last_closure;
+    jm_save_last_closure_snapshot(mt, &saved_last_closure);
+    jm_clear_last_closure_snapshot(mt);
 
     jm_push_scope(mt);
 
@@ -3663,6 +3684,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     if (!var_name && !destr_pattern && !obj_destr_pattern && !lhs_ref_node && !lhs_call_target) {
         log_error("js-mir: for-of/for-in missing loop variable");
         jm_pop_scope(mt);
+        jm_restore_last_closure_snapshot(mt, &saved_last_closure);
         return;
     }
 
@@ -4019,6 +4041,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         if (mt->iteration_depth > 0) mt->iteration_depth--;
         if (mt->loop_depth > 0) mt->loop_depth--;
         jm_pop_scope(mt);
+        jm_restore_last_closure_snapshot(mt, &saved_last_closure);
         return;
     }
 
@@ -4365,14 +4388,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     jm_pop_scope(mt);
 
     // Js55 P19: restore last-closure tracking saved at entry.
-    mt->last_closure_has_env = saved_last_closure_has_env;
-    mt->last_closure_env_reg = saved_last_closure_env_reg;
-    mt->last_closure_capture_count = saved_last_closure_capture_count;
-    for (int sci = 0; sci < p19_save_n; sci++) {
-        snprintf(mt->last_closure_capture_names[sci], 128, "%s", saved_last_closure_capture_names[sci]);
-        mt->last_closure_capture_slots[sci] = saved_last_closure_capture_slots[sci];
-        mt->last_closure_capture_is_nfe[sci] = saved_last_closure_capture_is_nfe[sci];
-    }
+    jm_restore_last_closure_snapshot(mt, &saved_last_closure);
 }
 
 void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
@@ -5451,21 +5467,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         // Js55 P19: save and reset last-closure tracking so a prior block's
         // closure cannot capture this block's let/const initializers via
         // jm_write_last_closure_capture_if_matching. See §12.14.
-        bool blk_saved_last_closure_has_env = mt->last_closure_has_env;
-        MIR_reg_t blk_saved_last_closure_env_reg = mt->last_closure_env_reg;
-        int blk_saved_last_closure_capture_count = mt->last_closure_capture_count;
-        char blk_saved_last_closure_capture_names[16][128];
-        int blk_saved_last_closure_capture_slots[16];
-        bool blk_saved_last_closure_capture_is_nfe[16];
-        int blk_save_n = blk_saved_last_closure_capture_count < 16 ? blk_saved_last_closure_capture_count : 16;
-        for (int sci = 0; sci < blk_save_n; sci++) {
-            snprintf(blk_saved_last_closure_capture_names[sci], 128, "%s", mt->last_closure_capture_names[sci]);
-            blk_saved_last_closure_capture_slots[sci] = mt->last_closure_capture_slots[sci];
-            blk_saved_last_closure_capture_is_nfe[sci] = mt->last_closure_capture_is_nfe[sci];
-        }
-        mt->last_closure_has_env = false;
-        mt->last_closure_env_reg = 0;
-        mt->last_closure_capture_count = 0;
+        JsMirLastClosureSnapshot blk_saved_last_closure;
+        jm_save_last_closure_snapshot(mt, &blk_saved_last_closure);
+        jm_clear_last_closure_snapshot(mt);
 
         jm_push_scope(mt);
         jm_init_block_tdz(mt, stmt);  // v20 TDZ
@@ -5475,14 +5479,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         jm_pop_scope(mt);
 
         // Js55 P19: restore prior tracking.
-        mt->last_closure_has_env = blk_saved_last_closure_has_env;
-        mt->last_closure_env_reg = blk_saved_last_closure_env_reg;
-        mt->last_closure_capture_count = blk_saved_last_closure_capture_count;
-        for (int sci = 0; sci < blk_save_n; sci++) {
-            snprintf(mt->last_closure_capture_names[sci], 128, "%s", blk_saved_last_closure_capture_names[sci]);
-            mt->last_closure_capture_slots[sci] = blk_saved_last_closure_capture_slots[sci];
-            mt->last_closure_capture_is_nfe[sci] = blk_saved_last_closure_capture_is_nfe[sci];
-        }
+        jm_restore_last_closure_snapshot(mt, &blk_saved_last_closure);
         break;
     }
     case JS_AST_NODE_EXPRESSION_STATEMENT: {

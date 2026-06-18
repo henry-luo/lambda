@@ -3464,6 +3464,170 @@ static bool js_object_prototype_builtin_deleted(const char* key_str, int key_len
     return js_ordinary_own_status(proto_item, key_str, key_len) == JS_HAS_DELETED;
 }
 
+static Item js_map_builtin_fallback_get(Item object, String* str_key,
+        bool own_was_deleted_sentinel, bool* out_found) {
+    if (out_found) *out_found = false;
+    if (!str_key || get_type_id(object) != LMD_TYPE_MAP || !object.map) return ItemNull;
+
+    Item builtin = ItemNull;
+    // v18o: Check JsClass FIRST for type-specific prototype resolution.
+    // This ensures Number.prototype.toString returns Number's toString, not Object's.
+    if (!own_was_deleted_sentinel) {
+        JsClass cls = js_class_id(object);
+        if (cls == JS_CLASS_STRING) {
+            // String.prototype[Symbol.iterator]
+            if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
+                if (out_found) *out_found = true;
+                return js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
+            }
+            builtin = js_lookup_builtin_method(LMD_TYPE_STRING, str_key->chars, str_key->len);
+            if (builtin.item != ItemNull.item) {
+                if (out_found) *out_found = true;
+                return builtin;
+            }
+        } else if (cls == JS_CLASS_NUMBER) {
+            // Number prototype methods: toString, valueOf, toFixed, toPrecision, toExponential
+            if (str_key->len == 8 && strncmp(str_key->chars, "toString", 8) == 0) {
+                if (out_found) *out_found = true;
+                return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_STRING, "toString", 1);
+            }
+            if (str_key->len == 7 && strncmp(str_key->chars, "valueOf", 7) == 0) {
+                if (out_found) *out_found = true;
+                return js_get_or_create_builtin(JS_BUILTIN_NUM_VALUE_OF, "valueOf", 0);
+            }
+            if (str_key->len == 7 && strncmp(str_key->chars, "toFixed", 7) == 0) {
+                if (out_found) *out_found = true;
+                return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_FIXED, "toFixed", 1);
+            }
+            if (str_key->len == 11 && strncmp(str_key->chars, "toPrecision", 11) == 0) {
+                if (out_found) *out_found = true;
+                return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_PRECISION, "toPrecision", 1);
+            }
+            if (str_key->len == 13 && strncmp(str_key->chars, "toExponential", 13) == 0) {
+                if (out_found) *out_found = true;
+                return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_EXPONENTIAL, "toExponential", 1);
+            }
+        } else if (cls == JS_CLASS_DATE) {
+            Item date_method = js_lookup_builtin_prototype_method_for_class(
+                JS_CLASS_DATE, str_key->chars, (int)str_key->len);
+            if (date_method.item != ItemNull.item) {
+                if (out_found) *out_found = true;
+                return date_method;
+            }
+            // Symbol.toPrimitive (stored as __sym_2)
+            if (str_key->len == 7 && strncmp(str_key->chars, "__sym_2", 7) == 0) {
+                if (out_found) *out_found = true;
+                return js_get_or_create_builtin(JS_BUILTIN_DATE_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
+            }
+        } else if (cls == JS_CLASS_SYMBOL) {
+            if (str_key->len == 8 && strncmp(str_key->chars, "toString", 8) == 0) {
+                if (out_found) *out_found = true;
+                return js_get_or_create_builtin(JS_BUILTIN_SYM_TO_STRING, "toString", 0);
+            }
+            if (str_key->len == 7 && strncmp(str_key->chars, "valueOf", 7) == 0) {
+                if (out_found) *out_found = true;
+                return js_get_or_create_builtin(JS_BUILTIN_SYM_VALUE_OF, "valueOf", 0);
+            }
+        } else if (cls == JS_CLASS_REGEXP) {
+            Item regexp_method = js_lookup_builtin_prototype_method_for_class(
+                JS_CLASS_REGEXP, str_key->chars, (int)str_key->len);
+            if (regexp_method.item != ItemNull.item) {
+                if (out_found) *out_found = true;
+                return regexp_method;
+            }
+            // v90: Symbol-keyed methods resolved via prototype chain (supports delete/override)
+        } else if (cls == JS_CLASS_ARRAY) {
+            // Array.prototype[Symbol.iterator] -> values
+            if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
+                if (out_found) *out_found = true;
+                return js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
+            }
+            builtin = js_lookup_builtin_method(LMD_TYPE_ARRAY, str_key->chars, (int)str_key->len);
+            if (builtin.item != ItemNull.item) {
+                if (out_found) *out_found = true;
+                return builtin;
+            }
+        } else if (cls == JS_CLASS_BOOLEAN) {
+            builtin = js_lookup_builtin_method(LMD_TYPE_BOOL, str_key->chars, (int)str_key->len);
+            if (builtin.item != ItemNull.item) {
+                if (out_found) *out_found = true;
+                return builtin;
+            }
+        }
+    }
+
+    // Class constructor maps are callable objects and inherit Function.prototype
+    // methods (apply/call/bind/toString/@@hasInstance).
+    bool own_ip_ts = false;
+    js_map_get_fast_ext(object.map, "__instance_proto__", 18, &own_ip_ts);
+    if (own_ip_ts) {
+        builtin = js_lookup_builtin_method(LMD_TYPE_FUNC, str_key->chars, (int)str_key->len);
+        if (builtin.item != ItemNull.item) {
+            if (out_found) *out_found = true;
+            return builtin;
+        }
+    }
+
+    // J39-7: null-proto objects (Object.create(null)) must NOT inherit
+    // Object.prototype methods or `.constructor`.
+    bool is_null_proto = false;
+    Item raw_proto = js_map_get_fast(object.map, "__proto__", 9);
+    if (raw_proto.item == ITEM_JS_UNDEFINED) is_null_proto = true;
+
+    if (!is_null_proto && !js_object_prototype_builtin_deleted(str_key->chars, (int)str_key->len)) {
+        builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
+        if (builtin.item != ItemNull.item) {
+            if (out_found) *out_found = true;
+            return builtin;
+        }
+    }
+
+    // v18c: .constructor fallback returns the appropriate constructor.
+    if (!is_null_proto && str_key->len == 11 && strncmp(str_key->chars, "constructor", 11) == 0) {
+        if (out_found) *out_found = true;
+        JsClass cls_c = js_class_id(object);
+        if (cls_c != JS_CLASS_NONE) {
+            const char* cn_name = js_class_to_name(cls_c);
+            if (cn_name) {
+                return js_get_constructor((Item){.item = s2it(heap_create_name(cn_name, (int)strlen(cn_name)))});
+            }
+        }
+        Item obj_name = (Item){.item = s2it(heap_create_name("Object", 6))};
+        return js_get_constructor(obj_name);
+    }
+
+    // v55: Collection (Set/Map) method resolution via Symbol.iterator and named methods.
+    JsCollectionData* cd = js_get_collection_data(object);
+    if (cd) {
+        if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
+            if (out_found) *out_found = true;
+            return cd->type == JS_COLLECTION_SET
+                ? js_get_or_create_builtin(JS_BUILTIN_SET_VALUES, "[Symbol.iterator]", 0)
+                : js_get_or_create_builtin(JS_BUILTIN_MAP_ENTRIES, "[Symbol.iterator]", 0);
+        }
+        if (str_key->len == 6 && strncmp(str_key->chars, "values", 6) == 0) {
+            if (out_found) *out_found = true;
+            return js_get_or_create_builtin(
+                cd->type == JS_COLLECTION_SET ? JS_BUILTIN_SET_VALUES : JS_BUILTIN_MAP_VALUES,
+                "values", 0);
+        }
+        if (str_key->len == 4 && strncmp(str_key->chars, "keys", 4) == 0) {
+            if (out_found) *out_found = true;
+            return js_get_or_create_builtin(
+                cd->type == JS_COLLECTION_SET ? JS_BUILTIN_SET_KEYS : JS_BUILTIN_MAP_KEYS,
+                "keys", 0);
+        }
+        if (str_key->len == 7 && strncmp(str_key->chars, "entries", 7) == 0) {
+            if (out_found) *out_found = true;
+            return js_get_or_create_builtin(
+                cd->type == JS_COLLECTION_SET ? JS_BUILTIN_SET_ENTRIES : JS_BUILTIN_MAP_ENTRIES,
+                "entries", 0);
+        }
+    }
+
+    return ItemNull;
+}
+
 extern "C" Item js_property_get(Item object, Item key) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_PROPERTY_GET);
     TypeId type = get_type_id(object);
@@ -3677,138 +3841,14 @@ extern "C" Item js_property_get(Item object, Item key) {
                 return make_js_undefined();
             }
         }
-        // Property not found — check for built-in methods (Object.prototype)
-        // Also check Array/String methods for prototype objects
+        // Property not found — check built-in/prototype fallback through the
+        // extracted helper so the main dispatcher stays focused on ordinary get.
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
-            Item builtin = ItemNull;
-            // v18o: Check JsClass FIRST for type-specific prototype resolution
-            // This ensures Number.prototype.toString returns Number's toString, not Object's.
-            if (!own_was_deleted_sentinel) {
-                JsClass cls = js_class_id(object);
-                if (cls == JS_CLASS_STRING) {
-                        // String.prototype[Symbol.iterator]
-                        if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
-                            return js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
-                        }
-                        builtin = js_lookup_builtin_method(LMD_TYPE_STRING, str_key->chars, str_key->len);
-                        if (builtin.item != ItemNull.item) return builtin;
-                    } else if (cls == JS_CLASS_NUMBER) {
-                        // Number prototype methods: toString, valueOf, toFixed, toPrecision, toExponential
-                        if (str_key->len == 8 && strncmp(str_key->chars, "toString", 8) == 0) {
-                            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_STRING, "toString", 1);
-                        }
-                        if (str_key->len == 7 && strncmp(str_key->chars, "valueOf", 7) == 0) {
-                            return js_get_or_create_builtin(JS_BUILTIN_NUM_VALUE_OF, "valueOf", 0);
-                        }
-                        if (str_key->len == 7 && strncmp(str_key->chars, "toFixed", 7) == 0) {
-                            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_FIXED, "toFixed", 1);
-                        }
-                        if (str_key->len == 11 && strncmp(str_key->chars, "toPrecision", 11) == 0) {
-                            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_PRECISION, "toPrecision", 1);
-                        }
-                        if (str_key->len == 13 && strncmp(str_key->chars, "toExponential", 13) == 0) {
-                            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_EXPONENTIAL, "toExponential", 1);
-                        }
-                    } else if (cls == JS_CLASS_DATE) {
-                        Item date_method = js_lookup_builtin_prototype_method_for_class(JS_CLASS_DATE, str_key->chars, (int)str_key->len);
-                        if (date_method.item != ItemNull.item) return date_method;
-                        // Symbol.toPrimitive (stored as __sym_2)
-                        if (str_key->len == 7 && strncmp(str_key->chars, "__sym_2", 7) == 0) {
-                            return js_get_or_create_builtin(JS_BUILTIN_DATE_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
-                        }
-                    } else if (cls == JS_CLASS_SYMBOL) {
-                        if (str_key->len == 8 && strncmp(str_key->chars, "toString", 8) == 0) {
-                            return js_get_or_create_builtin(JS_BUILTIN_SYM_TO_STRING, "toString", 0);
-                        }
-                        if (str_key->len == 7 && strncmp(str_key->chars, "valueOf", 7) == 0) {
-                            return js_get_or_create_builtin(JS_BUILTIN_SYM_VALUE_OF, "valueOf", 0);
-                        }
-                    } else if (cls == JS_CLASS_REGEXP) {
-                        Item regexp_method = js_lookup_builtin_prototype_method_for_class(JS_CLASS_REGEXP, str_key->chars, (int)str_key->len);
-                        if (regexp_method.item != ItemNull.item) return regexp_method;
-                        // v90: Symbol-keyed methods resolved via prototype chain (supports delete/override)
-                    } else if (cls == JS_CLASS_ARRAY) {
-                        // Array.prototype[Symbol.iterator] → values
-                        if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
-                            return js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
-                        }
-                        // Array.prototype methods: resolve via Array builtin table
-                        builtin = js_lookup_builtin_method(LMD_TYPE_ARRAY, str_key->chars, (int)str_key->len);
-                        if (builtin.item != ItemNull.item) return builtin;
-                    } else if (cls == JS_CLASS_BOOLEAN) {
-                        // Boolean wrapper: toString/valueOf resolve to boolean-specific builtins
-                        builtin = js_lookup_builtin_method(LMD_TYPE_BOOL, str_key->chars, (int)str_key->len);
-                        if (builtin.item != ItemNull.item) return builtin;
-                    }
-            }
-            // Class constructor maps are callable objects and inherit
-            // Function.prototype methods (apply/call/bind/toString/@@hasInstance).
-            {
-                bool own_ip_ts = false;
-                js_map_get_fast_ext(object.map, "__instance_proto__", 18, &own_ip_ts);
-                if (own_ip_ts) {
-                    builtin = js_lookup_builtin_method(LMD_TYPE_FUNC, str_key->chars, (int)str_key->len);
-                    if (builtin.item != ItemNull.item) return builtin;
-                }
-            }
-            // J39-7: null-proto objects (Object.create(null)) must NOT inherit
-            // Object.prototype methods or `.constructor`. The own __proto__ slot
-            // holds ITEM_JS_UNDEFINED as the null sentinel.
-            bool _np_is_null_proto = false;
-            {
-                Item _np_raw = js_map_get_fast(object.map, "__proto__", 9);
-                if (_np_raw.item == ITEM_JS_UNDEFINED) _np_is_null_proto = true;
-            }
-            // Check Object.prototype methods (applies to all objects with proto)
-            if (!_np_is_null_proto) {
-                if (!js_object_prototype_builtin_deleted(str_key->chars, (int)str_key->len)) {
-                    builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
-                    if (builtin.item != ItemNull.item) return builtin;
-                }
-            }
-            // v18c: .constructor fallback — return appropriate constructor when not found
-            if (!_np_is_null_proto && str_key->len == 11 && strncmp(str_key->chars, "constructor", 11) == 0) {
-                JsClass cls_c = js_class_id(object);
-                if (cls_c != JS_CLASS_NONE) {
-                    const char* cn_name = js_class_to_name(cls_c);
-                    if (cn_name) {
-                        return js_get_constructor((Item){.item = s2it(heap_create_name(cn_name, (int)strlen(cn_name)))});
-                    }
-                }
-                // Plain object — return Object constructor
-                Item obj_name = (Item){.item = s2it(heap_create_name("Object", 6))};
-                return js_get_constructor(obj_name);
-            }
-            // v55: Collection (Set/Map) method resolution via Symbol.iterator and named methods
-            {
-                JsCollectionData* cd = js_get_collection_data(object);
-                if (cd) {
-                    // Symbol.iterator → Set: values, Map: entries
-                    if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
-                        if (cd->type == JS_COLLECTION_SET)
-                            return js_get_or_create_builtin(JS_BUILTIN_SET_VALUES, "[Symbol.iterator]", 0);
-                        else
-                            return js_get_or_create_builtin(JS_BUILTIN_MAP_ENTRIES, "[Symbol.iterator]", 0);
-                    }
-                    // Named iterator methods
-                    if (str_key->len == 6 && strncmp(str_key->chars, "values", 6) == 0) {
-                        return js_get_or_create_builtin(
-                            cd->type == JS_COLLECTION_SET ? JS_BUILTIN_SET_VALUES : JS_BUILTIN_MAP_VALUES,
-                            "values", 0);
-                    }
-                    if (str_key->len == 4 && strncmp(str_key->chars, "keys", 4) == 0) {
-                        return js_get_or_create_builtin(
-                            cd->type == JS_COLLECTION_SET ? JS_BUILTIN_SET_KEYS : JS_BUILTIN_MAP_KEYS,
-                            "keys", 0);
-                    }
-                    if (str_key->len == 7 && strncmp(str_key->chars, "entries", 7) == 0) {
-                        return js_get_or_create_builtin(
-                            cd->type == JS_COLLECTION_SET ? JS_BUILTIN_SET_ENTRIES : JS_BUILTIN_MAP_ENTRIES,
-                            "entries", 0);
-                    }
-                }
-            }
+            bool builtin_found = false;
+            Item builtin = js_map_builtin_fallback_get(
+                object, str_key, own_was_deleted_sentinel, &builtin_found);
+            if (builtin_found) return builtin;
         }
         // v37: Private member brand check — accessing #field on wrong object throws TypeError
         if (get_type_id(key) == LMD_TYPE_STRING) {
@@ -5050,6 +5090,728 @@ static inline bool js_array_fast_own_dense_set(Item object, int64_t index, Item 
     return true;
 }
 
+static Item js_property_set_array(Item object, Item key, Item value) {
+    if (js_property_key_needs_object_to_key(key)) {
+        key = js_to_property_key(key);
+        if (js_check_exception()) return value;
+    }
+    js_dom_options_collection_before_property_set(object, key, value);
+    // Handle arr.length = newLength (resize array)
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* str_key = it2s(key);
+        if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
+            if (js_runtime_is_arguments_exotic(object)) {
+                js_property_set(js_arguments_companion_item(object), key, value);
+                return value;
+            }
+            double u32_num = js_get_number(value);
+            if (js_check_exception()) return value;
+            uint32_t u32_len = 0;
+            if (isfinite(u32_num)) {
+                double u32_mod = fmod(u32_num, 4294967296.0);
+                if (u32_mod < 0.0) u32_mod += 4294967296.0;
+                u32_len = (uint32_t)u32_mod;
+            }
+            double new_len_num = js_get_number(value);
+            if (js_check_exception()) return value;
+            if ((double)u32_len != new_len_num) {
+                return js_throw_range_error("Invalid array length");
+            }
+            if (!js_props_obj_query_writable(object, "length", 6)) {
+                if (js_strict_mode) {
+                    return js_throw_type_error("Cannot assign to read only property 'length' of array");
+                }
+                return value;
+            }
+            int64_t new_len = (int64_t)u32_len;
+            Array* arr = object.array;
+            if (new_len >= 0) {
+                if (new_len > arr->length) {
+                    if (js_array_should_keep_length_sparse(arr, new_len)) {
+                        log_debug("js_property_set: sparse length expansion %lld->%lld (gap %lld), skipping dense holes",
+                                  (long long)arr->length, (long long)new_len,
+                                  (long long)(new_len - arr->length));
+                        js_array_stamp_dense_tail_holes(arr);
+                        arr->length = new_len;
+                        return value;
+                    }
+                    // Extend: ensure capacity and fill with undefined.
+                    // Use direct realloc to avoid GC-triggering array_push loops.
+                    if (new_len + 4 > arr->capacity) {
+                        int64_t new_cap = new_len + 4;
+                        Item* new_items = (Item*)mem_alloc(new_cap * sizeof(Item), MEM_CAT_JS_RUNTIME);
+                        if (arr->items && arr->length > 0) {
+                            memcpy(new_items, arr->items, arr->length * sizeof(Item));
+                        }
+                        js_array_install_runtime_items(arr, new_items, new_cap);
+                    }
+                    // Fill new slots with holes (deleted sentinel)
+                    Item hole = lam::hole_sentinel_item();
+                    for (int64_t i = arr->length; i < new_len; i++) {
+                        arr->items[i] = hole;
+                    }
+                    arr->length = new_len;
+                } else if (new_len < arr->length) {
+                    // Truncate
+                    js_array_delete_sparse_indices_from(lam::gc_borrow(arr), new_len);
+                    arr->length = new_len;
+                }
+            }
+            return value;
+        }
+    }
+    // v25: non-numeric string keys on arrays → store in companion map (arr->extra)
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* sk = it2s(key);
+        if (sk && sk->len > 0) {
+            int64_t string_index = -1;
+            if (!js_array_parse_index_name(sk->chars, (int)sk->len, &string_index)) {
+                // OrdinarySetWithOwnDescriptor: an own data property (stored in
+                // the array's companion map) shadows any prototype setter, so
+                // skip the prototype accessor walk when one exists. Otherwise a
+                // setter on Array.prototype (e.g. test262's `groups` probe)
+                // would intercept writes to the array's own data property.
+                bool own_data_prop = false;
+                if (object.array->extra != 0) {
+                    Map* pm0 = (Map*)(uintptr_t)object.array->extra;
+                    Item pm0_item = (Item){.map = pm0};
+                    ShapeEntry* se0 = js_find_shape_entry(pm0_item, sk->chars, (int)sk->len);
+                    if (se0 && !jspd_is_accessor(se0)) own_data_prop = true;
+                }
+                if (!own_data_prop && !js_skip_accessor_dispatch) {
+                    Item lookup_root = js_get_prototype(object);
+                    if (lookup_root.item == ItemNull.item) lookup_root = js_get_prototype_of(object);
+                    JsSetterDispatchStatus st = js_ordinary_set_via_accessor(
+                        lookup_root, sk->chars, (int)sk->len, value, object);
+                    if (st == JS_SET_DISPATCHED) return value;
+                    if (st == JS_SET_NO_SETTER) {
+                        js_strict_throw_property_error("set property which has only a getter on",
+                                                       sk->chars, (int)sk->len);
+                        return value;
+                    }
+                }
+                // store in companion map
+                Array* arr = object.array;
+                Map* pm;
+                if (arr->extra == 0) {
+                    Item obj = js_new_object();
+                    obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
+                    arr->extra = (int64_t)(uintptr_t)obj.map;
+                }
+                pm = (Map*)(uintptr_t)arr->extra;
+                Item map_item = (Item){.map = pm};
+                js_property_set(map_item, key, value);
+                return value;
+            }
+        }
+    }
+    TypeId key_tid = get_type_id(key);
+    if (key_tid == LMD_TYPE_BOOL) {
+        const char* prop_name = it2b(key) ? "true" : "false";
+        int prop_len = it2b(key) ? 4 : 5;
+        Item prop_key = (Item){.item = s2it(heap_create_name(prop_name, prop_len))};
+        js_property_set(object, prop_key, value);
+        return value;
+    }
+    if (key_tid == LMD_TYPE_NULL) {
+        Item prop_key = (Item){.item = s2it(heap_create_name("null", 4))};
+        js_property_set(object, prop_key, value);
+        return value;
+    }
+    if (key_tid == LMD_TYPE_UNDEFINED) {
+        Item prop_key = (Item){.item = s2it(heap_create_name("undefined", 9))};
+        js_property_set(object, prop_key, value);
+        return value;
+    }
+    if ((key_tid == LMD_TYPE_INT || key_tid == LMD_TYPE_INT64 || key_tid == LMD_TYPE_FLOAT) && !js_key_is_symbol(key) &&
+        !js_array_key_is_index(key, NULL)) {
+        Item prop_key = js_array_numeric_key_to_property_key(key);
+        js_property_set(object, prop_key, value);
+        return value;
+    }
+    // check for setter accessor on numeric index before array set
+    if (object.array->extra != 0) {
+        int idx = (int)js_get_number(key);
+        if (idx >= 0) {
+            Map* props = (Map*)(uintptr_t)object.array->extra;
+            // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
+            char idx_buf[32];
+            int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
+            Item pm_item = (Item){.map = props};
+            ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
+            Item slot_val = ItemNull;
+            JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, &slot_val, NULL);
+            if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
+                if (status == JS_SHAPE_SLOT_ACCESSOR) {
+                    JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                    if (pair && pair->setter.item != ItemNull.item) {
+                        Item args[1] = { value };
+                        js_call_function(pair->setter, object, args, 1);
+                        return value;
+                    }
+                    // getter-only accessor: strict TypeError, sloppy no-op.
+                    js_strict_throw_property_error("set property which has only a getter on",
+                                                   idx_buf, idx_len);
+                    return value;
+                }
+                if (_se_idx) {
+                    Item idx_key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
+                    js_property_set(pm_item, idx_key, value);
+                    return value;
+                }
+            }
+            // AT-3: legacy __set_<idx> marker fallback retired (post-AT-1
+            // intercept routes companion-map accessor writes through the
+            // IS_ACCESSOR shape path probed above).
+        }
+    }
+    // Arguments exotic object: numeric index beyond length goes to companion map (no length extension)
+    if (object.array->is_content == 1) {
+        double idx_d = js_get_number(key);
+        int64_t idx = (int64_t)idx_d;
+        if (idx_d == idx_d && idx >= 0 && idx >= object.array->length) {
+            Array* arr = object.array;
+            Map* pm;
+            if (arr->extra == 0) {
+                Item obj = js_new_object();
+                obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
+                arr->extra = (int64_t)(uintptr_t)obj.map;
+            }
+            pm = (Map*)(uintptr_t)arr->extra;
+            Item map_item = (Item){.map = pm};
+            char idx_buf[32];
+            snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
+            Item str_key = (Item){.item = s2it(heap_create_name(idx_buf, (int)strlen(idx_buf)))};
+            js_property_set(map_item, str_key, value);
+            return value;
+        }
+    }
+    // J39-7: ES OrdinarySet — walk Array.prototype chain for inherited
+    // accessor on numeric-index key. Done here (not in js_array_set) so
+    // array literal construction in transpiler — which calls js_array_set
+    // directly with CreateDataProperty semantics — bypasses this walk.
+    if (!js_skip_accessor_dispatch) {
+        double idx_d = js_get_number(key);
+        int64_t idx = (int64_t)idx_d;
+        if (idx_d == idx_d && idx >= 0) {
+            char idx_buf[32];
+            int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
+            Item prop_key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
+            Item own_index_desc = js_object_get_own_property_descriptor(object, prop_key);
+            bool own_index_present = get_type_id(own_index_desc) == LMD_TYPE_MAP;
+            if (!own_index_present) {
+                Item arr_proto = js_get_prototype_of(object);
+                if (js_is_proxy(arr_proto)) {
+                    js_proxy_trap_set_with_receiver(arr_proto, prop_key, value, object);
+                    return value;
+                }
+                if (arr_proto.item != ItemNull.item && get_type_id(arr_proto) == LMD_TYPE_MAP) {
+                    JsAccessorPair* ap = js_find_accessor_pair_inheritable(
+                        arr_proto, idx_buf, idx_len);
+                    if (ap) {
+                        if (ap->setter.item != ItemNull.item &&
+                            get_type_id(ap->setter) == LMD_TYPE_FUNC) {
+                            Item set_args[1] = { value };
+                            js_call_function(ap->setter, object, set_args, 1);
+                            return value;
+                        }
+                        if (js_strict_mode) {
+                            js_strict_throw_property_error(
+                                "set property which has only a getter on",
+                                idx_buf, idx_len);
+                        }
+                        return value;
+                    }
+                }
+            }
+        }
+    }
+    return js_array_set(object, key, value);
+}
+
+static Item js_property_set_map(Item object, Item key, Item value) {
+    // OffscreenCanvas / CanvasRenderingContext2D property intercept (ctx.font = "...")
+    if (js_canvas_property_set_intercept(object, key, value))
+        return value;
+    Map* m = object.map;
+    if (js_runtime_trace_enabled()) {
+        static int _r_trace = 0;
+        if (_r_trace < 3 && get_type_id(key) == LMD_TYPE_STRING) {
+            String* rk = it2s(key);
+            if (rk && rk->len == 1 && rk->chars[0] == 'R' && get_type_id(value) == LMD_TYPE_FLOAT) {
+                log_error("TRACE .R set to FLOAT: val=%f total=%d", it2d(value), _trace_total_calls);
+                _r_trace++;
+            }
+        }
+    }
+    // JS semantics: non-string keys are coerced to strings (ToPropertyKey)
+    TypeId kt = get_type_id(key);
+    if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
+        char buf[64];
+        if (kt == LMD_TYPE_INT) {
+            snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
+        } else {
+            double dv = it2d(key);
+            js_double_to_string(dv, buf, sizeof(buf));
+        }
+        key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+    } else if (kt == LMD_TYPE_BOOL) {
+        const char* s = it2b(key) ? "true" : "false";
+        key = (Item){.item = s2it(heap_create_name(s, strlen(s)))};
+    } else if (kt == LMD_TYPE_NULL) {
+        key = (Item){.item = s2it(heap_create_name("null", 4))};
+    } else if (kt == LMD_TYPE_UNDEFINED) {
+        key = (Item){.item = s2it(heap_create_name("undefined", 9))};
+    }
+    bool private_internal_property_key = js_is_private_internal_property_key(key);
+    if (private_internal_property_key && js_is_proxy(object)) {
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* private_key = it2s(key);
+            if (private_key && private_key->len > 10 &&
+                strncmp(private_key->chars, "__private_", 10) == 0 &&
+                !js_private_define_active &&
+                js_private_brand_mismatch(object, private_key)) {
+                char msg[256];
+                snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
+                    (int)private_key->len - 10, private_key->chars + 10);
+                return js_throw_type_error(msg);
+            }
+        }
+        Item slots = js_proxy_private_slots(object, true);
+        if (get_type_id(slots) == LMD_TYPE_MAP) {
+            return js_property_set(slots, key, value);
+        }
+    }
+    if (get_type_id(key) == LMD_TYPE_STRING && js_class_id(object) == JS_CLASS_ARRAY) {
+        bool is_proto = false;
+        js_map_get_fast_ext(m, "__is_proto__", 12, &is_proto);
+        if (is_proto) {
+            String* sk = it2s(key);
+            int64_t idx = -1;
+            if (sk && js_array_parse_index_name(sk->chars, (int)sk->len, &idx)) {
+                Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                Item len_item = js_property_get(object, length_key);
+                int64_t old_len = 0;
+                TypeId len_type = get_type_id(len_item);
+                if (len_type == LMD_TYPE_INT) old_len = it2i(len_item);
+                else if (len_type == LMD_TYPE_INT64) old_len = it2l(len_item);
+                else if (len_type == LMD_TYPE_FLOAT) old_len = (int64_t)it2d(len_item);
+                if (old_len <= idx) {
+                    js_property_set(object, length_key, (Item){.item = i2it(idx + 1)});
+                }
+            }
+        }
+    }
+    if (!js_skip_accessor_dispatch && get_type_id(key) == LMD_TYPE_STRING) {
+        String* sk = it2s(key);
+        if (sk && sk->len == 9 && strncmp(sk->chars, "__proto__", 9) == 0) {
+            TypeId vt = get_type_id(value);
+            bool value_is_proto = value.item == ItemNull.item || vt == LMD_TYPE_NULL ||
+                vt == LMD_TYPE_MAP || vt == LMD_TYPE_ARRAY || vt == LMD_TYPE_FUNC ||
+                vt == LMD_TYPE_ELEMENT;
+            if (value_is_proto) {
+                bool own_proto_marker = false;
+                Item own_proto_val = js_map_get_fast_ext(m, "__json_own_proto__", 18, &own_proto_marker);
+                if (own_proto_marker && !js_is_truthy(own_proto_val)) {
+                    Item current_proto = js_get_prototype(object);
+                    if (js_is_proxy(current_proto)) {
+                        ScopedProxyReceiver _recv_guard(object);
+                        js_proxy_trap_set(current_proto, key, value);
+                        return value;
+                    }
+                    Item ok = js_reflect_set_prototype_of(object, value);
+                    if (js_exception_pending) return value;
+                    if (!it2b(js_to_boolean(ok))) {
+                        js_throw_type_error("Object prototype may only be an Object or null");
+                    }
+                    return value;
+                }
+            }
+        }
+    }
+    // v16: Enforce Object.freeze — frozen objects reject all property writes
+    {
+        bool frozen_found = false;
+        Item frozen_val = js_map_get_fast(m, "__frozen__", 10, &frozen_found);
+        if (frozen_found && js_is_truthy(frozen_val)) {
+            // skip writes to internal properties (needed for freeze itself)
+            if (get_type_id(key) == LMD_TYPE_STRING) {
+                String* sk = it2s(key);
+                bool internal_non_symbol = sk && sk->len >= 2 && sk->chars[0] == '_' && sk->chars[1] == '_' &&
+                    !(sk->len > 6 && strncmp(sk->chars, "__sym_", 6) == 0);
+                bool own_accessor_property = false;
+                if (!internal_non_symbol && sk) {
+                    ShapeEntry* shape_entry = js_find_shape_entry(object, sk->chars, (int)sk->len);
+                    own_accessor_property = shape_entry && jspd_is_accessor(shape_entry);
+                }
+                if (!internal_non_symbol && !own_accessor_property) {
+                    js_strict_throw_property_error("assign to read only", sk ? sk->chars : NULL, sk ? (int)sk->len : 0);
+                    return value; // silently reject write to frozen object
+                }
+            }
+        }
+    }
+    // v16: Enforce non-writable properties via shape flags.
+    // Phase 4: skip when js_skip_accessor_dispatch is set — that flag indicates
+    // the caller is installing engine-internal accessor storage (e.g.
+    // js_define_accessor_partial writing a JsAccessorPair* to the slot during
+    // data→accessor conversion via Object.defineProperty). Honoring __nw_ here
+    // would leave the slot at the stale data value while IS_ACCESSOR gets set,
+    // causing reads to dereference the integer as a JsAccessorPair* and crash.
+    if (get_type_id(key) == LMD_TYPE_STRING && !js_skip_accessor_dispatch) {
+        String* str_key = it2s(key);
+        if (str_key && str_key->len > 0 && str_key->len < 200) {
+            // Phase 2b fast path: consult ShapeEntry::flags first.
+            // 1 → entry exists & writable → allow write.
+            // 0 → entry exists & non-writable → throw immediately.
+            // -1 → no entry on this map; default writable.
+            int fp = js_prop_attrs_fast_path(object, str_key->chars, (int)str_key->len, JSPD_NON_WRITABLE);
+            if (fp == 0) {
+                js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
+                return value;
+            }
+            // fp == 1 → fast skip, fall through to write
+        }
+    }
+    // MapKind fast path: skip exotic checks for plain objects
+    if (m->map_kind != MAP_KIND_PLAIN && !private_internal_property_key) {
+        Item exotic_result = ItemNull;
+        if (js_try_exotic_property_set(object, key, &value, &exotic_result)) return exotic_result;
+    }
+    // Setter property dispatch. Skip when writing the deleted sentinel
+    // (used by js_delete_property to tombstone a slot — must not trigger
+    // accessor / TypeError-on-no-setter logic).
+    if (!js_skip_accessor_dispatch && !js_is_deleted_sentinel(value) && get_type_id(key) == LMD_TYPE_STRING) {
+        String* str_key = it2s(key);
+        if (str_key && str_key->len < 64) {
+            // ES §9.5.9: Proxy in prototype chain forwards [[Set]] through
+            // the proxy's set trap with the original receiver. Without this,
+            // setter dispatch silently bypasses the proxy.
+            {
+                Item _cur = object;
+                int _depth = 0;
+                bool own_has = false;
+                {
+                    ShapeEntry* _se_own = js_find_shape_entry(object, str_key->chars, (int)str_key->len);
+                    own_has = (_se_own != NULL);
+                    if (own_has && str_key->len == 9 &&
+                        strncmp(str_key->chars, "__proto__", 9) == 0 &&
+                        !jspd_is_accessor(_se_own)) {
+                        own_has = false;
+                    }
+                }
+                if (!own_has && get_type_id(_cur) == LMD_TYPE_MAP) {
+                    Item _proto = js_get_prototype(_cur);
+                    if (_proto.item == ItemNull.item) _proto = js_get_prototype_of(_cur);
+                    while (_proto.item != ItemNull.item &&
+                           get_type_id(_proto) == LMD_TYPE_MAP && _depth < 16) {
+                        if (js_is_proxy(_proto)) {
+                            // Stage D: RAII guard ensures js_proxy_receiver
+                            // restores even if js_proxy_trap_set throws.
+                            ScopedProxyReceiver _recv_guard(object);
+                            js_proxy_trap_set(_proto, key, value);
+                            return value;
+                        }
+                        // Stop walking when we find an own entry on this proto:
+                        // either accessor (handled below) or data (no proxy interception needed).
+                        ShapeEntry* _se_p = js_find_shape_entry(_proto, str_key->chars, (int)str_key->len);
+                        if (_se_p) break;
+                        _proto = js_get_prototype(_proto);
+                        _depth++;
+                    }
+                }
+            }
+            // Stage A1.4: IS_ACCESSOR setter dispatch on own + proto chain
+            // routed through js_ordinary_set_via_accessor.
+            {
+                if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0 &&
+                    !js_private_define_active &&
+                    js_private_brand_mismatch(object, str_key)) {
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
+                        (int)str_key->len - 10, str_key->chars + 10);
+                    return js_throw_type_error(msg);
+                }
+                Item recv = js_proxy_receiver.item ? js_proxy_receiver : object;
+                JsSetterDispatchStatus st = js_ordinary_set_via_accessor(
+                    object, str_key->chars, (int)str_key->len, value, recv);
+                if (st == JS_SET_DISPATCHED) return value;
+                if (st == JS_SET_NO_SETTER) {
+                    if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
+                        char msg[256];
+                        snprintf(msg, sizeof(msg), "'#%.*s' was defined without a setter",
+                            (int)str_key->len - 10, str_key->chars + 10);
+                        return js_throw_type_error(msg);
+                    }
+                    // Accessor with no callable setter: strict TypeError, sloppy no-op.
+                    js_strict_throw_property_error("set property which has only a getter on",
+                                                   str_key->chars, (int)str_key->len);
+                    return value;
+                }
+                // JS_SET_NOT_FOUND: fall through to normal data write below.
+            }
+            bool has_own_before_set = js_ordinary_has_own(object, str_key->chars, (int)str_key->len);
+            bool class_intrinsic_define = !has_own_before_set && js_is_class_constructor_map(object) &&
+                ((str_key->len == 4 && strncmp(str_key->chars, "name", 4) == 0) ||
+                 (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0));
+            if (!has_own_before_set && !class_intrinsic_define &&
+                js_proto_chain_has_nonwritable_data(object, str_key->chars, (int)str_key->len)) {
+                if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "Cannot assign to private method '#%.*s'",
+                        (int)str_key->len - 10, str_key->chars + 10);
+                    return js_throw_type_error(msg);
+                }
+                js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
+                return value;
+            }
+            if (!has_own_before_set && !js_private_define_active &&
+                str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
+                char msg[256];
+                snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
+                    (int)str_key->len - 10, str_key->chars + 10);
+                return js_throw_type_error(msg);
+            }
+            // Phase 5: legacy __get_X / __set_X probe block removed. Phase 4
+            // intercept routes all transpiled accessor writes through
+            // JsAccessorPair storage, and Phase 3 Stage C migrated native
+            // installs. The IS_ACCESSOR fast-path above is the only source
+            // of accessor dispatch.
+        }
+    }
+    // JS object / Lambda map: try fn_map_set first (update existing field),
+    // fall back to map_put for new keys
+    TypeMap* map_type = (TypeMap*)m->type;
+    if (map_type && map_type != &EmptyMap && map_type->shape) {
+        // search for existing key
+        String* str_key = NULL;
+        TypeId key_type = get_type_id(key);
+        if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
+        else if (key_type == LMD_TYPE_SYMBOL) str_key = it2s(key);
+        if (str_key) {
+            ShapeEntry* found_entry = js_find_shape_entry(object, str_key->chars, (int)str_key->len);
+            if (found_entry) {
+                // v37: If deleted sentinel, move entry to end of list for correct enum order
+                JsShapeSlotStatus slot_status = js_own_shape_slot_status(
+                    object, str_key->chars, (int)str_key->len, NULL, NULL);
+                if (m->data) {
+                    if (slot_status == JS_SHAPE_SLOT_DELETED) {
+                        bool internal_non_symbol = str_key->len >= 2 && str_key->chars[0] == '_' && str_key->chars[1] == '_' &&
+                            !(str_key->len > 6 && strncmp(str_key->chars, "__sym_", 6) == 0);
+                        if (!internal_non_symbol && !js_is_extensible(object)) {
+                            js_strict_throw_property_error("add property", str_key->chars, (int)str_key->len);
+                            return value;
+                        }
+                        // Unlink from current position
+                        ShapeEntry* prev = NULL;
+                        ShapeEntry* scan = map_type->shape;
+                        while (scan && scan != found_entry) { prev = scan; scan = scan->next; }
+                        if (prev) prev->next = found_entry->next;
+                        else map_type->shape = found_entry->next;
+                        if (map_type->last == found_entry) {
+                            map_type->last = prev ? prev : map_type->shape;
+                        }
+                        // Append at end
+                        found_entry->next = NULL;
+                        if (map_type->last) map_type->last->next = found_entry;
+                        else map_type->shape = found_entry;
+                        map_type->last = found_entry;
+                    }
+                }
+                if (slot_status == JS_SHAPE_SLOT_DELETED || jspd_is_deleted(found_entry)) {
+                    js_shape_entry_set_deleted(object, str_key->chars, (int)str_key->len, /*is_deleted=*/false);
+                }
+                fn_map_set(object, key, value);
+                js_sync_global_var_module_binding(object, key, value);
+                return value;
+            }
+        }
+    }
+    // key not found or empty map — add new key via map_put
+    // v21: Check non-extensible before adding new property
+    {
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            if (!js_skip_accessor_dispatch && js_is_class_constructor_map(object) &&
+                js_is_restricted_function_property_name(sk) &&
+                !js_ordinary_has_own(object, sk->chars, (int)sk->len)) {
+                return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
+            }
+            // skip internal properties (__ prefix)
+            bool internal_non_symbol = sk && sk->len >= 2 && sk->chars[0] == '_' && sk->chars[1] == '_' &&
+                !(sk->len > 6 && strncmp(sk->chars, "__sym_", 6) == 0);
+            if (!internal_non_symbol) {
+                bool ne_found = false;
+                Item ne_val = js_map_get_fast(m, "__non_extensible__", 17, &ne_found);
+                if (ne_found && js_is_truthy(ne_val)) {
+                    js_strict_throw_property_error("add property", sk->chars, (int)sk->len);
+                    return value; // silently reject — object is not extensible
+                }
+                // also check sealed and frozen (they imply non-extensible)
+                bool sl_found = false;
+                Item sl_val = js_map_get_fast(m, "__sealed__", 10, &sl_found);
+                if (sl_found && js_is_truthy(sl_val)) {
+                    js_strict_throw_property_error("add property", sk->chars, (int)sk->len);
+                    return value;
+                }
+            }
+        }
+    }
+    if (js_input) {
+        String* str_key = NULL;
+        TypeId key_type = get_type_id(key);
+        if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
+        else if (key_type == LMD_TYPE_SYMBOL) str_key = it2s(key);
+        if (str_key) {
+            map_put(m, str_key, value, js_input);
+            js_sync_global_var_module_binding(object, key, value);
+        }
+    } else {
+        log_error("js_property_set: no js_input context for map_put");
+    }
+    return value;
+}
+
+static Item js_property_set_function(Item object, Item key, Item value) {
+    JsFunction* fn = (JsFunction*)object.function;
+    String* str_key = NULL;
+    TypeId key_type = get_type_id(key);
+    if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
+    if (str_key && str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0) {
+        // A2-T9 (post AT-4 Option B): consult the shape-aware writability
+        // helper instead of probing `__nw_prototype` directly. Built-in
+        // constructors (TypedArray, Error subclasses, etc.) whose
+        // prototype is non-writable have JSPD_NON_WRITABLE stamped on the
+        // properties_map shape entry by `js_attr_set_writable`.
+        if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+            ShapeEntry* _se_p = js_find_shape_entry(fn->properties_map, "prototype", 9);
+            if (!js_props_query_writable(fn->properties_map.map, _se_p, "prototype", 9)) {
+                return value; // non-writable, silently reject
+            }
+        }
+        // ES spec: built-in constructor .prototype is non-writable. Mirrors the
+        // descriptor synthesis in js_object_get_own_property_descriptor.
+        if (js_func_is_builtin_ctor(object)) return value;
+        if (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) {
+            if (fn->properties_map.item == 0) {
+                fn->properties_map = js_new_object();
+                heap_register_gc_root(&fn->properties_map.item);
+            }
+            js_property_set(fn->properties_map, key, value);
+            return value;
+        }
+        fn->prototype = value;
+        // Register fn->prototype as a GC root so the prototype map survives GC.
+        // JsFunction is pool-allocated (invisible to GC), but fn->prototype points
+        // to a GC-managed map. Without this, the prototype gets collected when no
+        // live objects reference it via __proto__.
+        heap_register_gc_root(&fn->prototype.item);
+        // For non-MAP prototypes (null, undefined, number, etc.), also store in
+        // properties_map so GET can distinguish "explicitly set to null" from
+        // "never set" (both have fn->prototype.item == 0 for null).
+        if (get_type_id(value) != LMD_TYPE_MAP) {
+            if (fn->properties_map.item == 0) {
+                fn->properties_map = js_new_object();
+                heap_register_gc_root(&fn->properties_map.item);
+            }
+            js_property_set(fn->properties_map, key, value);
+        } else {
+            // MAP prototype: clear properties_map entry if previously set to non-MAP
+            if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+                if (get_type_id(key) == LMD_TYPE_STRING) {
+                    String* sk = it2s(key);
+                    if (sk && sk->len > 0) {
+                        js_shape_mark_deleted_own(fn->properties_map,
+                            sk->chars, (int)sk->len, /*create_if_missing=*/true);
+                    }
+                }
+            }
+        }
+        return value;
+    }
+    // v23: .name and .length are non-writable by default on functions.
+    // Simple assignment should be silently ignored unless the property was
+    // explicitly made writable via Object.defineProperty.
+    // Phase 5: bypass when called via js_define_accessor_partial — that
+    // helper installs a JsAccessorPair into properties_map under "name"
+    // and must not be blocked by the virtual non-writable guard.
+    if (!js_skip_accessor_dispatch &&
+        str_key && ((str_key->len == 4 && memcmp(str_key->chars, "name", 4) == 0) ||
+                    (str_key->len == 6 && memcmp(str_key->chars, "length", 6) == 0))) {
+        if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+            bool has_key = false;
+            js_map_get_fast_ext(fn->properties_map.map, str_key->chars, (int)str_key->len, &has_key);
+            if (has_key) {
+                // Property was explicitly set (class init or defineProperty).
+                // A2-T9 (post AT-4 Option B): the shape-aware helper is
+                // authoritative for named-property writability — when a
+                // slot exists, the dual-write path guarantees a shape
+                // entry exists too, so the legacy `__nw_<name>` marker
+                // probe that used to follow the fast path is dead and
+                // has been removed.
+                ShapeEntry* _se = js_find_shape_entry(fn->properties_map, str_key->chars, (int)str_key->len);
+                if (!js_props_query_writable(fn->properties_map.map, _se, str_key->chars, (int)str_key->len)) {
+                    js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
+                    return value; // non-writable, silently reject
+                }
+                // writable, fall through to store
+            } else {
+                // Virtual .name/.length — non-writable by default
+                js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
+                return value;
+            }
+        } else {
+            // No properties_map — virtual .name/.length — non-writable by default
+            js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
+            return value;
+        }
+    }
+    if (!js_skip_accessor_dispatch && (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) && str_key &&
+        ((str_key->len == 6 && memcmp(str_key->chars, "caller", 6) == 0) ||
+         (str_key->len == 9 && memcmp(str_key->chars, "arguments", 9) == 0))) {
+        return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
+    }
+    // v18: store arbitrary properties in backing map (e.g. assert._isSameValue = fn)
+    if (!js_skip_accessor_dispatch && str_key && str_key->len > 0 && str_key->len < 200 &&
+        !js_func_has_own_property_map_key(object, str_key->chars, (int)str_key->len)) {
+        Item proto = js_get_prototype_of(object);
+        if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
+            JsSetterDispatchStatus st = js_ordinary_set_via_accessor(
+                proto, str_key->chars, (int)str_key->len, value, object);
+            if (st == JS_SET_DISPATCHED) return value;
+            if (st == JS_SET_NO_SETTER) {
+                js_strict_throw_property_error("set property which has only a getter on",
+                                               str_key->chars, (int)str_key->len);
+                return value;
+            }
+        }
+        if (js_proto_chain_has_nonwritable_data(object, str_key->chars, (int)str_key->len)) {
+            js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
+            return value;
+        }
+    }
+    if (fn->properties_map.item == 0) {
+        fn->properties_map = js_new_object();
+        heap_register_gc_root(&fn->properties_map.item);
+    }
+    if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+        // A2-T9 (post AT-4 Option B): consult shape-aware writability
+        // helper. It returns the JS default (writable) for named props
+        // when the shape entry is absent (property hasn't been added
+        // yet) — the legacy `__nw_<name>` marker fallback is dead for
+        // named keys post AT-4 and has been removed.
+        if (str_key && str_key->len > 0 && str_key->len < 200) {
+            ShapeEntry* _se = js_find_shape_entry(fn->properties_map, str_key->chars, (int)str_key->len);
+            if (!js_props_query_writable(fn->properties_map.map, _se, str_key->chars, (int)str_key->len)) {
+                js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
+                return value;
+            }
+        }
+        js_property_set(fn->properties_map, key, value);
+    }
+    return value;
+}
+
 extern "C" Item js_property_set(Item object, Item key, Item value) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_PROPERTY_SET);
     // Fast path: result[i] = v where i is an existing own dense element of a
@@ -5124,242 +5886,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
 
     // Array: result[i] = val or arr.length = n
     if (type == LMD_TYPE_ARRAY) {
-        if (js_property_key_needs_object_to_key(key)) {
-            key = js_to_property_key(key);
-            if (js_check_exception()) return value;
-        }
-        js_dom_options_collection_before_property_set(object, key, value);
-        // Handle arr.length = newLength (resize array)
-        if (get_type_id(key) == LMD_TYPE_STRING) {
-            String* str_key = it2s(key);
-            if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
-                if (js_runtime_is_arguments_exotic(object)) {
-                    js_property_set(js_arguments_companion_item(object), key, value);
-                    return value;
-                }
-                double u32_num = js_get_number(value);
-                if (js_check_exception()) return value;
-                uint32_t u32_len = 0;
-                if (isfinite(u32_num)) {
-                    double u32_mod = fmod(u32_num, 4294967296.0);
-                    if (u32_mod < 0.0) u32_mod += 4294967296.0;
-                    u32_len = (uint32_t)u32_mod;
-                }
-                double new_len_num = js_get_number(value);
-                if (js_check_exception()) return value;
-                if ((double)u32_len != new_len_num) {
-                    return js_throw_range_error("Invalid array length");
-                }
-                if (!js_props_obj_query_writable(object, "length", 6)) {
-                    if (js_strict_mode) {
-                        return js_throw_type_error("Cannot assign to read only property 'length' of array");
-                    }
-                    return value;
-                }
-                int64_t new_len = (int64_t)u32_len;
-                Array* arr = object.array;
-                if (new_len >= 0) {
-                    if (new_len > arr->length) {
-                        if (js_array_should_keep_length_sparse(arr, new_len)) {
-                            log_debug("js_property_set: sparse length expansion %lld->%lld (gap %lld), skipping dense holes",
-                                      (long long)arr->length, (long long)new_len,
-                                      (long long)(new_len - arr->length));
-                            js_array_stamp_dense_tail_holes(arr);
-                            arr->length = new_len;
-                            return value;
-                        }
-                        // Extend: ensure capacity and fill with undefined.
-                        // Use direct realloc to avoid GC-triggering array_push loops.
-                        if (new_len + 4 > arr->capacity) {
-                            int64_t new_cap = new_len + 4;
-                            Item* new_items = (Item*)mem_alloc(new_cap * sizeof(Item), MEM_CAT_JS_RUNTIME);
-                            if (arr->items && arr->length > 0) {
-                                memcpy(new_items, arr->items, arr->length * sizeof(Item));
-                            }
-                            js_array_install_runtime_items(arr, new_items, new_cap);
-                        }
-                        // Fill new slots with holes (deleted sentinel)
-                        Item hole = lam::hole_sentinel_item();
-                        for (int64_t i = arr->length; i < new_len; i++) {
-                            arr->items[i] = hole;
-                        }
-                        arr->length = new_len;
-                    } else if (new_len < arr->length) {
-                        // Truncate
-                        js_array_delete_sparse_indices_from(lam::gc_borrow(arr), new_len);
-                        arr->length = new_len;
-                    }
-                }
-                return value;
-            }
-        }
-        // v25: non-numeric string keys on arrays → store in companion map (arr->extra)
-        if (get_type_id(key) == LMD_TYPE_STRING) {
-            String* sk = it2s(key);
-            if (sk && sk->len > 0) {
-                int64_t string_index = -1;
-                if (!js_array_parse_index_name(sk->chars, (int)sk->len, &string_index)) {
-                    // OrdinarySetWithOwnDescriptor: an own data property (stored in
-                    // the array's companion map) shadows any prototype setter, so
-                    // skip the prototype accessor walk when one exists. Otherwise a
-                    // setter on Array.prototype (e.g. test262's `groups` probe)
-                    // would intercept writes to the array's own data property.
-                    bool own_data_prop = false;
-                    if (object.array->extra != 0) {
-                        Map* pm0 = (Map*)(uintptr_t)object.array->extra;
-                        Item pm0_item = (Item){.map = pm0};
-                        ShapeEntry* se0 = js_find_shape_entry(pm0_item, sk->chars, (int)sk->len);
-                        if (se0 && !jspd_is_accessor(se0)) own_data_prop = true;
-                    }
-                    if (!own_data_prop && !js_skip_accessor_dispatch) {
-                        Item lookup_root = js_get_prototype(object);
-                        if (lookup_root.item == ItemNull.item) lookup_root = js_get_prototype_of(object);
-                        JsSetterDispatchStatus st = js_ordinary_set_via_accessor(
-                            lookup_root, sk->chars, (int)sk->len, value, object);
-                        if (st == JS_SET_DISPATCHED) return value;
-                        if (st == JS_SET_NO_SETTER) {
-                            js_strict_throw_property_error("set property which has only a getter on",
-                                                           sk->chars, (int)sk->len);
-                            return value;
-                        }
-                    }
-                    // store in companion map
-                    Array* arr = object.array;
-                    Map* pm;
-                    if (arr->extra == 0) {
-                        Item obj = js_new_object();
-                        obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-                        arr->extra = (int64_t)(uintptr_t)obj.map;
-                    }
-                    pm = (Map*)(uintptr_t)arr->extra;
-                    Item map_item = (Item){.map = pm};
-                    js_property_set(map_item, key, value);
-                    return value;
-                }
-            }
-        }
-        TypeId key_tid = get_type_id(key);
-        if (key_tid == LMD_TYPE_BOOL) {
-            const char* prop_name = it2b(key) ? "true" : "false";
-            int prop_len = it2b(key) ? 4 : 5;
-            Item prop_key = (Item){.item = s2it(heap_create_name(prop_name, prop_len))};
-            js_property_set(object, prop_key, value);
-            return value;
-        }
-        if (key_tid == LMD_TYPE_NULL) {
-            Item prop_key = (Item){.item = s2it(heap_create_name("null", 4))};
-            js_property_set(object, prop_key, value);
-            return value;
-        }
-        if (key_tid == LMD_TYPE_UNDEFINED) {
-            Item prop_key = (Item){.item = s2it(heap_create_name("undefined", 9))};
-            js_property_set(object, prop_key, value);
-            return value;
-        }
-        if ((key_tid == LMD_TYPE_INT || key_tid == LMD_TYPE_INT64 || key_tid == LMD_TYPE_FLOAT) && !js_key_is_symbol(key) &&
-            !js_array_key_is_index(key, NULL)) {
-            Item prop_key = js_array_numeric_key_to_property_key(key);
-            js_property_set(object, prop_key, value);
-            return value;
-        }
-        // check for setter accessor on numeric index before array set
-        if (object.array->extra != 0) {
-            int idx = (int)js_get_number(key);
-            if (idx >= 0) {
-                Map* props = (Map*)(uintptr_t)object.array->extra;
-                // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
-                char idx_buf[32];
-                int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
-                Item pm_item = (Item){.map = props};
-                ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
-                Item slot_val = ItemNull;
-                JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, &slot_val, NULL);
-                if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
-                    if (status == JS_SHAPE_SLOT_ACCESSOR) {
-                        JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
-                        if (pair && pair->setter.item != ItemNull.item) {
-                            Item args[1] = { value };
-                            js_call_function(pair->setter, object, args, 1);
-                            return value;
-                        }
-                        // getter-only accessor: strict TypeError, sloppy no-op.
-                        js_strict_throw_property_error("set property which has only a getter on",
-                                                       idx_buf, idx_len);
-                        return value;
-                    }
-                    if (_se_idx) {
-                        Item idx_key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
-                        js_property_set(pm_item, idx_key, value);
-                        return value;
-                    }
-                }
-                // AT-3: legacy __set_<idx> marker fallback retired (post-AT-1
-                // intercept routes companion-map accessor writes through the
-                // IS_ACCESSOR shape path probed above).
-            }
-        }
-        // Arguments exotic object: numeric index beyond length goes to companion map (no length extension)
-        if (object.array->is_content == 1) {
-            double idx_d = js_get_number(key);
-            int64_t idx = (int64_t)idx_d;
-            if (idx_d == idx_d && idx >= 0 && idx >= object.array->length) {
-                Array* arr = object.array;
-                Map* pm;
-                if (arr->extra == 0) {
-                    Item obj = js_new_object();
-                    obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-                    arr->extra = (int64_t)(uintptr_t)obj.map;
-                }
-                pm = (Map*)(uintptr_t)arr->extra;
-                Item map_item = (Item){.map = pm};
-                char idx_buf[32];
-                snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
-                Item str_key = (Item){.item = s2it(heap_create_name(idx_buf, (int)strlen(idx_buf)))};
-                js_property_set(map_item, str_key, value);
-                return value;
-            }
-        }
-        // J39-7: ES OrdinarySet — walk Array.prototype chain for inherited
-        // accessor on numeric-index key. Done here (not in js_array_set) so
-        // array literal construction in transpiler — which calls js_array_set
-        // directly with CreateDataProperty semantics — bypasses this walk.
-        if (!js_skip_accessor_dispatch) {
-            double idx_d = js_get_number(key);
-            int64_t idx = (int64_t)idx_d;
-            if (idx_d == idx_d && idx >= 0) {
-                char idx_buf[32];
-                int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
-                Item prop_key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
-                Item own_index_desc = js_object_get_own_property_descriptor(object, prop_key);
-                bool own_index_present = get_type_id(own_index_desc) == LMD_TYPE_MAP;
-                if (!own_index_present) {
-                    Item arr_proto = js_get_prototype_of(object);
-                    if (js_is_proxy(arr_proto)) {
-                        js_proxy_trap_set_with_receiver(arr_proto, prop_key, value, object);
-                        return value;
-                    }
-                    if (arr_proto.item != ItemNull.item && get_type_id(arr_proto) == LMD_TYPE_MAP) {
-                        JsAccessorPair* ap = js_find_accessor_pair_inheritable(
-                            arr_proto, idx_buf, idx_len);
-                        if (ap) {
-                            if (ap->setter.item != ItemNull.item &&
-                                get_type_id(ap->setter) == LMD_TYPE_FUNC) {
-                                Item set_args[1] = { value };
-                                js_call_function(ap->setter, object, set_args, 1);
-                                return value;
-                            }
-                            if (js_strict_mode) {
-                                js_strict_throw_property_error(
-                                    "set property which has only a getter on",
-                                    idx_buf, idx_len);
-                            }
-                            return value;
-                        }
-                    }
-                }
-            }
-        }
-        return js_array_set(object, key, value);
+        return js_property_set_array(object, key, value);
     }
 
     // Typed array: ta[i] = val (use map_kind for fast check)
@@ -5385,486 +5912,12 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     }
 
     if (type == LMD_TYPE_MAP) {
-        // OffscreenCanvas / CanvasRenderingContext2D property intercept (ctx.font = "...")
-        if (js_canvas_property_set_intercept(object, key, value))
-            return value;
-        Map* m = object.map;
-        if (js_runtime_trace_enabled()) {
-            static int _r_trace = 0;
-            if (_r_trace < 3 && get_type_id(key) == LMD_TYPE_STRING) {
-                String* rk = it2s(key);
-                if (rk && rk->len == 1 && rk->chars[0] == 'R' && get_type_id(value) == LMD_TYPE_FLOAT) {
-                    log_error("TRACE .R set to FLOAT: val=%f total=%d", it2d(value), _trace_total_calls);
-                    _r_trace++;
-                }
-            }
-        }
-        // JS semantics: non-string keys are coerced to strings (ToPropertyKey)
-        TypeId kt = get_type_id(key);
-        if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
-            char buf[64];
-            if (kt == LMD_TYPE_INT) {
-                snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
-            } else {
-                double dv = it2d(key);
-                js_double_to_string(dv, buf, sizeof(buf));
-            }
-            key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
-        } else if (kt == LMD_TYPE_BOOL) {
-            const char* s = it2b(key) ? "true" : "false";
-            key = (Item){.item = s2it(heap_create_name(s, strlen(s)))};
-        } else if (kt == LMD_TYPE_NULL) {
-            key = (Item){.item = s2it(heap_create_name("null", 4))};
-        } else if (kt == LMD_TYPE_UNDEFINED) {
-            key = (Item){.item = s2it(heap_create_name("undefined", 9))};
-        }
-        bool private_internal_property_key = js_is_private_internal_property_key(key);
-        if (private_internal_property_key && js_is_proxy(object)) {
-            if (get_type_id(key) == LMD_TYPE_STRING) {
-                String* private_key = it2s(key);
-                if (private_key && private_key->len > 10 &&
-                    strncmp(private_key->chars, "__private_", 10) == 0 &&
-                    !js_private_define_active &&
-                    js_private_brand_mismatch(object, private_key)) {
-                    char msg[256];
-                    snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
-                        (int)private_key->len - 10, private_key->chars + 10);
-                    return js_throw_type_error(msg);
-                }
-            }
-            Item slots = js_proxy_private_slots(object, true);
-            if (get_type_id(slots) == LMD_TYPE_MAP) {
-                return js_property_set(slots, key, value);
-            }
-        }
-        if (get_type_id(key) == LMD_TYPE_STRING && js_class_id(object) == JS_CLASS_ARRAY) {
-            bool is_proto = false;
-            js_map_get_fast_ext(m, "__is_proto__", 12, &is_proto);
-            if (is_proto) {
-                String* sk = it2s(key);
-                int64_t idx = -1;
-                if (sk && js_array_parse_index_name(sk->chars, (int)sk->len, &idx)) {
-                    Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
-                    Item len_item = js_property_get(object, length_key);
-                    int64_t old_len = 0;
-                    TypeId len_type = get_type_id(len_item);
-                    if (len_type == LMD_TYPE_INT) old_len = it2i(len_item);
-                    else if (len_type == LMD_TYPE_INT64) old_len = it2l(len_item);
-                    else if (len_type == LMD_TYPE_FLOAT) old_len = (int64_t)it2d(len_item);
-                    if (old_len <= idx) {
-                        js_property_set(object, length_key, (Item){.item = i2it(idx + 1)});
-                    }
-                }
-            }
-        }
-        if (!js_skip_accessor_dispatch && get_type_id(key) == LMD_TYPE_STRING) {
-            String* sk = it2s(key);
-            if (sk && sk->len == 9 && strncmp(sk->chars, "__proto__", 9) == 0) {
-                TypeId vt = get_type_id(value);
-                bool value_is_proto = value.item == ItemNull.item || vt == LMD_TYPE_NULL ||
-                    vt == LMD_TYPE_MAP || vt == LMD_TYPE_ARRAY || vt == LMD_TYPE_FUNC ||
-                    vt == LMD_TYPE_ELEMENT;
-                if (value_is_proto) {
-                    bool own_proto_marker = false;
-                    Item own_proto_val = js_map_get_fast_ext(m, "__json_own_proto__", 18, &own_proto_marker);
-                    if (own_proto_marker && !js_is_truthy(own_proto_val)) {
-                        Item current_proto = js_get_prototype(object);
-                        if (js_is_proxy(current_proto)) {
-                            ScopedProxyReceiver _recv_guard(object);
-                            js_proxy_trap_set(current_proto, key, value);
-                            return value;
-                        }
-                        Item ok = js_reflect_set_prototype_of(object, value);
-                        if (js_exception_pending) return value;
-                        if (!it2b(js_to_boolean(ok))) {
-                            js_throw_type_error("Object prototype may only be an Object or null");
-                        }
-                        return value;
-                    }
-                }
-            }
-        }
-        // v16: Enforce Object.freeze — frozen objects reject all property writes
-        {
-            bool frozen_found = false;
-            Item frozen_val = js_map_get_fast(m, "__frozen__", 10, &frozen_found);
-            if (frozen_found && js_is_truthy(frozen_val)) {
-                // skip writes to internal properties (needed for freeze itself)
-                if (get_type_id(key) == LMD_TYPE_STRING) {
-                    String* sk = it2s(key);
-                    bool internal_non_symbol = sk && sk->len >= 2 && sk->chars[0] == '_' && sk->chars[1] == '_' &&
-                        !(sk->len > 6 && strncmp(sk->chars, "__sym_", 6) == 0);
-                    bool own_accessor_property = false;
-                    if (!internal_non_symbol && sk) {
-                        ShapeEntry* shape_entry = js_find_shape_entry(object, sk->chars, (int)sk->len);
-                        own_accessor_property = shape_entry && jspd_is_accessor(shape_entry);
-                    }
-                    if (!internal_non_symbol && !own_accessor_property) {
-                        js_strict_throw_property_error("assign to read only", sk ? sk->chars : NULL, sk ? (int)sk->len : 0);
-                        return value; // silently reject write to frozen object
-                    }
-                }
-            }
-        }
-        // v16: Enforce non-writable properties via shape flags.
-        // Phase 4: skip when js_skip_accessor_dispatch is set — that flag indicates
-        // the caller is installing engine-internal accessor storage (e.g.
-        // js_define_accessor_partial writing a JsAccessorPair* to the slot during
-        // data→accessor conversion via Object.defineProperty). Honoring __nw_ here
-        // would leave the slot at the stale data value while IS_ACCESSOR gets set,
-        // causing reads to dereference the integer as a JsAccessorPair* and crash.
-        if (get_type_id(key) == LMD_TYPE_STRING && !js_skip_accessor_dispatch) {
-            String* str_key = it2s(key);
-            if (str_key && str_key->len > 0 && str_key->len < 200) {
-                // Phase 2b fast path: consult ShapeEntry::flags first.
-                // 1 → entry exists & writable → allow write.
-                // 0 → entry exists & non-writable → throw immediately.
-                // -1 → no entry on this map; default writable.
-                int fp = js_prop_attrs_fast_path(object, str_key->chars, (int)str_key->len, JSPD_NON_WRITABLE);
-                if (fp == 0) {
-                    js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
-                    return value;
-                }
-                // fp == 1 → fast skip, fall through to write
-            }
-        }
-        // MapKind fast path: skip exotic checks for plain objects
-        if (m->map_kind != MAP_KIND_PLAIN && !private_internal_property_key) {
-            Item exotic_result = ItemNull;
-            if (js_try_exotic_property_set(object, key, &value, &exotic_result)) return exotic_result;
-        }
-        // Setter property dispatch. Skip when writing the deleted sentinel
-        // (used by js_delete_property to tombstone a slot — must not trigger
-        // accessor / TypeError-on-no-setter logic).
-        if (!js_skip_accessor_dispatch && !js_is_deleted_sentinel(value) && get_type_id(key) == LMD_TYPE_STRING) {
-            String* str_key = it2s(key);
-            if (str_key && str_key->len < 64) {
-                // ES §9.5.9: Proxy in prototype chain forwards [[Set]] through
-                // the proxy's set trap with the original receiver. Without this,
-                // setter dispatch silently bypasses the proxy.
-                {
-                    Item _cur = object;
-                    int _depth = 0;
-                    bool own_has = false;
-                    {
-                        ShapeEntry* _se_own = js_find_shape_entry(object, str_key->chars, (int)str_key->len);
-                        own_has = (_se_own != NULL);
-                        if (own_has && str_key->len == 9 &&
-                            strncmp(str_key->chars, "__proto__", 9) == 0 &&
-                            !jspd_is_accessor(_se_own)) {
-                            own_has = false;
-                        }
-                    }
-                    if (!own_has && get_type_id(_cur) == LMD_TYPE_MAP) {
-                        Item _proto = js_get_prototype(_cur);
-                        if (_proto.item == ItemNull.item) _proto = js_get_prototype_of(_cur);
-                        while (_proto.item != ItemNull.item &&
-                               get_type_id(_proto) == LMD_TYPE_MAP && _depth < 16) {
-                            if (js_is_proxy(_proto)) {
-                                // Stage D: RAII guard ensures js_proxy_receiver
-                                // restores even if js_proxy_trap_set throws.
-                                ScopedProxyReceiver _recv_guard(object);
-                                js_proxy_trap_set(_proto, key, value);
-                                return value;
-                            }
-                            // Stop walking when we find an own entry on this proto:
-                            // either accessor (handled below) or data (no proxy interception needed).
-                            ShapeEntry* _se_p = js_find_shape_entry(_proto, str_key->chars, (int)str_key->len);
-                            if (_se_p) break;
-                            _proto = js_get_prototype(_proto);
-                            _depth++;
-                        }
-                    }
-                }
-                // Stage A1.4: IS_ACCESSOR setter dispatch on own + proto chain
-                // routed through js_ordinary_set_via_accessor.
-                {
-                    if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0 &&
-                        !js_private_define_active &&
-                        js_private_brand_mismatch(object, str_key)) {
-                        char msg[256];
-                        snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
-                            (int)str_key->len - 10, str_key->chars + 10);
-                        return js_throw_type_error(msg);
-                    }
-                    Item recv = js_proxy_receiver.item ? js_proxy_receiver : object;
-                    JsSetterDispatchStatus st = js_ordinary_set_via_accessor(
-                        object, str_key->chars, (int)str_key->len, value, recv);
-                    if (st == JS_SET_DISPATCHED) return value;
-                    if (st == JS_SET_NO_SETTER) {
-                        if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
-                            char msg[256];
-                            snprintf(msg, sizeof(msg), "'#%.*s' was defined without a setter",
-                                (int)str_key->len - 10, str_key->chars + 10);
-                            return js_throw_type_error(msg);
-                        }
-                        // Accessor with no callable setter: strict TypeError, sloppy no-op.
-                        js_strict_throw_property_error("set property which has only a getter on",
-                                                       str_key->chars, (int)str_key->len);
-                        return value;
-                    }
-                    // JS_SET_NOT_FOUND: fall through to normal data write below.
-                }
-                bool has_own_before_set = js_ordinary_has_own(object, str_key->chars, (int)str_key->len);
-                bool class_intrinsic_define = !has_own_before_set && js_is_class_constructor_map(object) &&
-                    ((str_key->len == 4 && strncmp(str_key->chars, "name", 4) == 0) ||
-                     (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0));
-                if (!has_own_before_set && !class_intrinsic_define &&
-                    js_proto_chain_has_nonwritable_data(object, str_key->chars, (int)str_key->len)) {
-                    if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
-                        char msg[256];
-                        snprintf(msg, sizeof(msg), "Cannot assign to private method '#%.*s'",
-                            (int)str_key->len - 10, str_key->chars + 10);
-                        return js_throw_type_error(msg);
-                    }
-                    js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
-                    return value;
-                }
-                if (!has_own_before_set && !js_private_define_active &&
-                    str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
-                    char msg[256];
-                    snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
-                        (int)str_key->len - 10, str_key->chars + 10);
-                    return js_throw_type_error(msg);
-                }
-                // Phase 5: legacy __get_X / __set_X probe block removed. Phase 4
-                // intercept routes all transpiled accessor writes through
-                // JsAccessorPair storage, and Phase 3 Stage C migrated native
-                // installs. The IS_ACCESSOR fast-path above is the only source
-                // of accessor dispatch.
-            }
-        }
-        // JS object / Lambda map: try fn_map_set first (update existing field),
-        // fall back to map_put for new keys
-        TypeMap* map_type = (TypeMap*)m->type;
-        if (map_type && map_type != &EmptyMap && map_type->shape) {
-            // search for existing key
-            String* str_key = NULL;
-            TypeId key_type = get_type_id(key);
-            if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
-            else if (key_type == LMD_TYPE_SYMBOL) str_key = it2s(key);
-            if (str_key) {
-                ShapeEntry* found_entry = js_find_shape_entry(object, str_key->chars, (int)str_key->len);
-                if (found_entry) {
-                    // v37: If deleted sentinel, move entry to end of list for correct enum order
-                    JsShapeSlotStatus slot_status = js_own_shape_slot_status(
-                        object, str_key->chars, (int)str_key->len, NULL, NULL);
-                    if (m->data) {
-                        if (slot_status == JS_SHAPE_SLOT_DELETED) {
-                            bool internal_non_symbol = str_key->len >= 2 && str_key->chars[0] == '_' && str_key->chars[1] == '_' &&
-                                !(str_key->len > 6 && strncmp(str_key->chars, "__sym_", 6) == 0);
-                            if (!internal_non_symbol && !js_is_extensible(object)) {
-                                js_strict_throw_property_error("add property", str_key->chars, (int)str_key->len);
-                                return value;
-                            }
-                            // Unlink from current position
-                            ShapeEntry* prev = NULL;
-                            ShapeEntry* scan = map_type->shape;
-                            while (scan && scan != found_entry) { prev = scan; scan = scan->next; }
-                            if (prev) prev->next = found_entry->next;
-                            else map_type->shape = found_entry->next;
-                            if (map_type->last == found_entry) {
-                                map_type->last = prev ? prev : map_type->shape;
-                            }
-                            // Append at end
-                            found_entry->next = NULL;
-                            if (map_type->last) map_type->last->next = found_entry;
-                            else map_type->shape = found_entry;
-                            map_type->last = found_entry;
-                        }
-                    }
-                    if (slot_status == JS_SHAPE_SLOT_DELETED || jspd_is_deleted(found_entry)) {
-                        js_shape_entry_set_deleted(object, str_key->chars, (int)str_key->len, /*is_deleted=*/false);
-                    }
-                    fn_map_set(object, key, value);
-                    js_sync_global_var_module_binding(object, key, value);
-                    return value;
-                }
-            }
-        }
-        // key not found or empty map — add new key via map_put
-        // v21: Check non-extensible before adding new property
-        {
-            if (get_type_id(key) == LMD_TYPE_STRING) {
-                String* sk = it2s(key);
-                if (!js_skip_accessor_dispatch && js_is_class_constructor_map(object) &&
-                    js_is_restricted_function_property_name(sk) &&
-                    !js_ordinary_has_own(object, sk->chars, (int)sk->len)) {
-                    return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
-                }
-                // skip internal properties (__ prefix)
-                bool internal_non_symbol = sk && sk->len >= 2 && sk->chars[0] == '_' && sk->chars[1] == '_' &&
-                    !(sk->len > 6 && strncmp(sk->chars, "__sym_", 6) == 0);
-                if (!internal_non_symbol) {
-                    bool ne_found = false;
-                    Item ne_val = js_map_get_fast(m, "__non_extensible__", 17, &ne_found);
-                    if (ne_found && js_is_truthy(ne_val)) {
-                        js_strict_throw_property_error("add property", sk->chars, (int)sk->len);
-                        return value; // silently reject — object is not extensible
-                    }
-                    // also check sealed and frozen (they imply non-extensible)
-                    bool sl_found = false;
-                    Item sl_val = js_map_get_fast(m, "__sealed__", 10, &sl_found);
-                    if (sl_found && js_is_truthy(sl_val)) {
-                        js_strict_throw_property_error("add property", sk->chars, (int)sk->len);
-                        return value;
-                    }
-                }
-            }
-        }
-        if (js_input) {
-            String* str_key = NULL;
-            TypeId key_type = get_type_id(key);
-            if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
-            else if (key_type == LMD_TYPE_SYMBOL) str_key = it2s(key);
-            if (str_key) {
-                map_put(m, str_key, value, js_input);
-                js_sync_global_var_module_binding(object, key, value);
-            }
-        } else {
-            log_error("js_property_set: no js_input context for map_put");
-        }
-        return value;
+        return js_property_set_map(object, key, value);
     }
 
     // Function: setting .prototype on a function (constructor pattern)
     if (type == LMD_TYPE_FUNC) {
-        JsFunction* fn = (JsFunction*)object.function;
-        String* str_key = NULL;
-        TypeId key_type = get_type_id(key);
-        if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
-        if (str_key && str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0) {
-            // A2-T9 (post AT-4 Option B): consult the shape-aware writability
-            // helper instead of probing `__nw_prototype` directly. Built-in
-            // constructors (TypedArray, Error subclasses, etc.) whose
-            // prototype is non-writable have JSPD_NON_WRITABLE stamped on the
-            // properties_map shape entry by `js_attr_set_writable`.
-            if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-                ShapeEntry* _se_p = js_find_shape_entry(fn->properties_map, "prototype", 9);
-                if (!js_props_query_writable(fn->properties_map.map, _se_p, "prototype", 9)) {
-                    return value; // non-writable, silently reject
-                }
-            }
-            // ES spec: built-in constructor .prototype is non-writable. Mirrors the
-            // descriptor synthesis in js_object_get_own_property_descriptor.
-            if (js_func_is_builtin_ctor(object)) return value;
-            if (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) {
-                if (fn->properties_map.item == 0) {
-                    fn->properties_map = js_new_object();
-                    heap_register_gc_root(&fn->properties_map.item);
-                }
-                js_property_set(fn->properties_map, key, value);
-                return value;
-            }
-            fn->prototype = value;
-            // Register fn->prototype as a GC root so the prototype map survives GC.
-            // JsFunction is pool-allocated (invisible to GC), but fn->prototype points
-            // to a GC-managed map. Without this, the prototype gets collected when no
-            // live objects reference it via __proto__.
-            heap_register_gc_root(&fn->prototype.item);
-            // For non-MAP prototypes (null, undefined, number, etc.), also store in
-            // properties_map so GET can distinguish "explicitly set to null" from
-            // "never set" (both have fn->prototype.item == 0 for null).
-            if (get_type_id(value) != LMD_TYPE_MAP) {
-                if (fn->properties_map.item == 0) {
-                    fn->properties_map = js_new_object();
-                    heap_register_gc_root(&fn->properties_map.item);
-                }
-                js_property_set(fn->properties_map, key, value);
-            } else {
-                // MAP prototype: clear properties_map entry if previously set to non-MAP
-                if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-                    if (get_type_id(key) == LMD_TYPE_STRING) {
-                        String* sk = it2s(key);
-                        if (sk && sk->len > 0) {
-                            js_shape_mark_deleted_own(fn->properties_map,
-                                sk->chars, (int)sk->len, /*create_if_missing=*/true);
-                        }
-                    }
-                }
-            }
-            return value;
-        }
-        // v23: .name and .length are non-writable by default on functions.
-        // Simple assignment should be silently ignored unless the property was
-        // explicitly made writable via Object.defineProperty.
-        // Phase 5: bypass when called via js_define_accessor_partial — that
-        // helper installs a JsAccessorPair into properties_map under "name"
-        // and must not be blocked by the virtual non-writable guard.
-        if (!js_skip_accessor_dispatch &&
-            str_key && ((str_key->len == 4 && memcmp(str_key->chars, "name", 4) == 0) ||
-                        (str_key->len == 6 && memcmp(str_key->chars, "length", 6) == 0))) {
-            if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-                bool has_key = false;
-                js_map_get_fast_ext(fn->properties_map.map, str_key->chars, (int)str_key->len, &has_key);
-                if (has_key) {
-                    // Property was explicitly set (class init or defineProperty).
-                    // A2-T9 (post AT-4 Option B): the shape-aware helper is
-                    // authoritative for named-property writability — when a
-                    // slot exists, the dual-write path guarantees a shape
-                    // entry exists too, so the legacy `__nw_<name>` marker
-                    // probe that used to follow the fast path is dead and
-                    // has been removed.
-                    ShapeEntry* _se = js_find_shape_entry(fn->properties_map, str_key->chars, (int)str_key->len);
-                    if (!js_props_query_writable(fn->properties_map.map, _se, str_key->chars, (int)str_key->len)) {
-                        js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
-                        return value; // non-writable, silently reject
-                    }
-                    // writable, fall through to store
-                } else {
-                    // Virtual .name/.length — non-writable by default
-                    js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
-                    return value;
-                }
-            } else {
-                // No properties_map — virtual .name/.length — non-writable by default
-                js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
-                return value;
-            }
-        }
-        if (!js_skip_accessor_dispatch && (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) && str_key &&
-            ((str_key->len == 6 && memcmp(str_key->chars, "caller", 6) == 0) ||
-             (str_key->len == 9 && memcmp(str_key->chars, "arguments", 9) == 0))) {
-            return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
-        }
-        // v18: store arbitrary properties in backing map (e.g. assert._isSameValue = fn)
-        if (!js_skip_accessor_dispatch && str_key && str_key->len > 0 && str_key->len < 200 &&
-            !js_func_has_own_property_map_key(object, str_key->chars, (int)str_key->len)) {
-            Item proto = js_get_prototype_of(object);
-            if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
-                JsSetterDispatchStatus st = js_ordinary_set_via_accessor(
-                    proto, str_key->chars, (int)str_key->len, value, object);
-                if (st == JS_SET_DISPATCHED) return value;
-                if (st == JS_SET_NO_SETTER) {
-                    js_strict_throw_property_error("set property which has only a getter on",
-                                                   str_key->chars, (int)str_key->len);
-                    return value;
-                }
-            }
-            if (js_proto_chain_has_nonwritable_data(object, str_key->chars, (int)str_key->len)) {
-                js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
-                return value;
-            }
-        }
-        if (fn->properties_map.item == 0) {
-            fn->properties_map = js_new_object();
-            heap_register_gc_root(&fn->properties_map.item);
-        }
-        if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-            // A2-T9 (post AT-4 Option B): consult shape-aware writability
-            // helper. It returns the JS default (writable) for named props
-            // when the shape entry is absent (property hasn't been added
-            // yet) — the legacy `__nw_<name>` marker fallback is dead for
-            // named keys post AT-4 and has been removed.
-            if (str_key && str_key->len > 0 && str_key->len < 200) {
-                ShapeEntry* _se = js_find_shape_entry(fn->properties_map, str_key->chars, (int)str_key->len);
-                if (!js_props_query_writable(fn->properties_map.map, _se, str_key->chars, (int)str_key->len)) {
-                    js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
-                    return value;
-                }
-            }
-            js_property_set(fn->properties_map, key, value);
-        }
+        return js_property_set_function(object, key, value);
     }
 
     return value;
