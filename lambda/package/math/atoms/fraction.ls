@@ -61,8 +61,16 @@ pub fn render(node, context, render_fn) {
     let is_fraction_child = frac_ctx.frac_gstyle != null
     let gstyle = if (frac_ctx.frac_gstyle != null) frac_ctx.frac_gstyle
         else if (cmd == "\\tfrac") "text"
-        else if (frac_ctx.style == "script") "script"
-        else if (frac_ctx.style == "scriptscript") "scriptscript"
+        // A fraction reached through a sub/superscript (script_container) keeps
+        // its own geometry style (the display->script cascade already happened
+        // at the script boundary). A fraction in a script-style CELL
+        // (cases/smallmatrix, script_container false) renders one geometry step
+        // "up" — display-rooted corpus, so a script-cell fraction uses text
+        // geometry (children at script, font-size 70%), matching MathLive.
+        else if (frac_ctx.style == "script")
+            (if (frac_ctx.script_container == true) "script" else "text")
+        else if (frac_ctx.style == "scriptscript")
+            (if (frac_ctx.script_container == true) "scriptscript" else "script")
         else "display"
     // numerator/denominator geometry style (one step smaller), threaded so a
     // fraction nested directly in the numer/denom renders correctly.
@@ -197,14 +205,12 @@ fn frac_raw_d(bx) { if (bx.depth_raw != null) bx.depth_raw else bx.depth }
 fn frac_bar_geom(frac_ctx, numer_box, denom_box, gstyle, is_fraction_child) {
     let has_raw = numer_box.height_raw != null and numer_box.depth_raw != null and
                   denom_box.height_raw != null and denom_box.depth_raw != null
-    // A script/scriptscript fraction reached via a SUBSCRIPT (not a fraction
-    // numerator) interlocks with the still-legacy scripts.ls that composes it:
-    // changing the inner box regresses the script. Those stay on legacy until
-    // Rule 18 is ported. Fraction-nested fractions (is_fraction_child) and
-    // top-level display/text fractions have no such legacy-parent dependency.
-    let subscript_script = (not is_fraction_child) and
-        (frac_ctx.style == "script" or frac_ctx.style == "scriptscript")
-    if (frac_ctx.colorbox_content == true or not has_raw or subscript_script)
+    // Script/scriptscript fractions now use the metric path too: their geometry
+    // style is mapped one step "up" (display-rooted corpus, see render()), and
+    // scripts.ls is Rule 18-driven, so the inner fraction and its script parent
+    // are computed from the same metrics. colorbox and raw-less composite
+    // children still fall through to the legacy table.
+    if (frac_ctx.colorbox_content == true or not has_raw)
         null
     else {
         // geom_style is the MathLive geometry style threaded/derived in render().
