@@ -750,7 +750,10 @@ fn symbol_font_class(cmd_text, context) {
 fn render_colorbox_content(content_arg, context) {
     if (content_arg is string) box.text_box(string(content_arg), css.TEXT, "mord")
     else
-        (let content_context = ctx.derive(context, {colorbox_content: true}),
+        // \colorbox content is text-mode; any embedded `$...$` is inline math
+        // (text-style), so reset to text-style regardless of the ambient
+        // (display) style — matches MathLive's inline-math reset.
+        (let content_context = ctx.derive(context, {colorbox_content: true, style: "text"}),
          let children = render_children(content_arg, content_context),
          let spaced = apply_spacing(children, content_context),
          transparent_hbox(spaced))

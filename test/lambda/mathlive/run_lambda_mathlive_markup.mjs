@@ -273,7 +273,13 @@ fn render_formula(test_case) {
         result
     }
     else {
-        let rendered = if (test_case.display) math_pkg.render_display(ast) else math_pkg.render_inline(ast)
+        // MathLive's convertLatexToMarkup (which generated the golden
+        // snapshots) defaults to mathstyle: 'displaystyle' regardless of the
+        // \[..\] delimiters (mathlive-ssr.ts:106-108). The whole corpus is
+        // therefore display-rooted — verified: inline-golden superscripts use
+        // sup1 (0.41), never sup2 (0.36). Render display-style to match the
+        // ground truth.
+        let rendered = math_pkg.render_display(ast)
         let html = html_ser.to_html(rendered)
         let result = {formula: formula, error: "no-error", html: html}
         result
