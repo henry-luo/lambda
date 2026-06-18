@@ -2496,6 +2496,89 @@
                         ],
                         "binary": "test_lottie_player_gtest.exe",
                         "icon": "🎭"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_css_syntax_gtest.cpp",
+                        "name": "WPT CSS Syntax Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_css_syntax_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "icon": "🎨"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_selection_gtest.cpp",
+                        "name": "WPT Selection API Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_selection_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🖱️"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_contenteditable_gtest.cpp",
+                        "name": "WPT contenteditable Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_contenteditable_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "✏️"
+                    },
+                    {
+                        "source": "test/test_chrome_editing_gtest.cpp",
+                        "name": "Chrome Editing Corpus Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_chrome_editing_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🧭"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_clipboard_gtest.cpp",
+                        "name": "WPT Clipboard API Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_clipboard_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "📋"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_dom_events_gtest.cpp",
+                        "name": "WPT DOM Events Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_dom_events_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🪝"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_form_gtest.cpp",
+                        "name": "WPT Form Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_form_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "📝"
                     }
                 ],
                 "type": "library"
@@ -3773,89 +3856,6 @@
                             "gtest_main"
                         ],
                         "icon": "📦"
-                    },
-                    {
-                        "source": "test/wpt/test_wpt_css_syntax_gtest.cpp",
-                        "name": "WPT CSS Syntax Tests",
-                        "category": "extended",
-                        "dependencies": [],
-                        "binary": "test_wpt_css_syntax_gtest.exe",
-                        "libraries": [
-                            "gtest"
-                        ],
-                        "icon": "🎨"
-                    },
-                    {
-                        "source": "test/wpt/test_wpt_selection_gtest.cpp",
-                        "name": "WPT Selection API Tests",
-                        "category": "extended",
-                        "dependencies": [],
-                        "binary": "test_wpt_selection_gtest.exe",
-                        "libraries": [
-                            "gtest"
-                        ],
-                        "requires_lambda_exe": true,
-                        "icon": "🖱️"
-                    },
-                    {
-                        "source": "test/wpt/test_wpt_contenteditable_gtest.cpp",
-                        "name": "WPT contenteditable Tests",
-                        "category": "extended",
-                        "dependencies": [],
-                        "binary": "test_wpt_contenteditable_gtest.exe",
-                        "libraries": [
-                            "gtest"
-                        ],
-                        "requires_lambda_exe": true,
-                        "icon": "✏️"
-                    },
-                    {
-                        "source": "test/test_chrome_editing_gtest.cpp",
-                        "name": "Chrome Editing Corpus Tests",
-                        "category": "extended",
-                        "dependencies": [],
-                        "binary": "test_chrome_editing_gtest.exe",
-                        "libraries": [
-                            "gtest"
-                        ],
-                        "requires_lambda_exe": true,
-                        "icon": "🧭"
-                    },
-                    {
-                        "source": "test/wpt/test_wpt_clipboard_gtest.cpp",
-                        "name": "WPT Clipboard API Tests",
-                        "category": "extended",
-                        "dependencies": [],
-                        "binary": "test_wpt_clipboard_gtest.exe",
-                        "libraries": [
-                            "gtest"
-                        ],
-                        "requires_lambda_exe": true,
-                        "icon": "📋"
-                    },
-                    {
-                        "source": "test/wpt/test_wpt_dom_events_gtest.cpp",
-                        "name": "WPT DOM Events Tests",
-                        "category": "extended",
-                        "dependencies": [],
-                        "binary": "test_wpt_dom_events_gtest.exe",
-                        "libraries": [
-                            "gtest"
-                        ],
-                        "requires_lambda_exe": true,
-                        "icon": "🪝"
-                    },
-                    {
-                        "source": "test/wpt/test_wpt_form_gtest.cpp",
-                        "name": "WPT Form & FormData Tests",
-                        "category": "extended",
-                        "dependencies": [],
-                        "binary": "test_wpt_form_gtest.exe",
-                        "libraries": [
-                            "gtest"
-                        ],
-                        "requires_lambda_exe": true,
-                        "icon": "📝"
                     },
                     {
                         "source": "test/test_lambda_std_gtest.cpp",
