@@ -1845,8 +1845,11 @@ static Item js_date_to_json(Item this_val) {
 
 // Process argv storage — C-level copy (safe before heap init)
 static Item js_process_argv_items = {.item = ITEM_NULL};
+static Item js_process_exec_argv_items = {.item = ITEM_NULL};
 static const char** js_process_argv_raw = NULL;
+static const char** js_process_exec_argv_raw = NULL;
 static int js_process_argc_raw = 0;
+static int js_process_exec_argc_raw = 0;
 
 // v20: Date setter methods — mutate internal _time timestamp
 // method_id: 20=setTime, 21=setFullYear, 22=setMonth, 23=setDate,
@@ -2321,6 +2324,11 @@ extern "C" void js_store_process_argv(int argc, const char** argv) {
     js_process_argv_raw = argv;
 }
 
+extern "C" void js_store_process_exec_argv(int argc, const char** argv) {
+    js_process_exec_argc_raw = argc;
+    js_process_exec_argv_raw = argv;
+}
+
 extern "C" void js_set_process_argv(int argc, const char** argv) {
     // Build a Lambda array from the argv (requires heap to be active)
     Array* arr = array();
@@ -2328,6 +2336,14 @@ extern "C" void js_set_process_argv(int argc, const char** argv) {
         array_push(arr, (Item){.item = s2it(heap_create_name(argv[i]))});
     }
     js_process_argv_items = array_end(arr);
+}
+
+extern "C" void js_set_process_exec_argv(int argc, const char** argv) {
+    Array* arr = array();
+    for (int i = 0; i < argc; i++) {
+        array_push(arr, (Item){.item = s2it(heap_create_name(argv[i]))});
+    }
+    js_process_exec_argv_items = array_end(arr);
 }
 
 extern "C" Item js_get_process_argv(void) {
@@ -2341,6 +2357,17 @@ extern "C" Item js_get_process_argv(void) {
         js_process_argv_items = array_end(arr);
     }
     return js_process_argv_items;
+}
+
+extern "C" Item js_get_process_exec_argv(void) {
+    if (js_process_exec_argv_items.item == ITEM_NULL && js_process_exec_argc_raw > 0) {
+        js_set_process_exec_argv(js_process_exec_argc_raw, js_process_exec_argv_raw);
+    }
+    if (js_process_exec_argv_items.item == ITEM_NULL) {
+        Array* arr = array();
+        js_process_exec_argv_items = array_end(arr);
+    }
+    return js_process_exec_argv_items;
 }
 
 // process object (lazy-initialized for `var p = process` standalone usage)
@@ -2379,6 +2406,14 @@ extern "C" Item js_process_exit(Item code_item) {
     TypeId type = get_type_id(code_item);
     if (type == LMD_TYPE_INT) code = (int)it2i(code_item);
     else if (type == LMD_TYPE_FLOAT) code = (int)it2d(code_item);
+    else if (type == LMD_TYPE_STRING) {
+        String* s = it2s(code_item);
+        char buf[64];
+        int len = (int)s->len < (int)sizeof(buf) - 1 ? (int)s->len : (int)sizeof(buf) - 1;
+        memcpy(buf, s->chars, (size_t)len);
+        buf[len] = '\0';
+        code = atoi(buf);
+    }
     // Fire 'exit' listeners before terminating (Node.js compatibility)
     js_process_emit_exit(code);
     exit(code);
@@ -3080,6 +3115,20 @@ extern "C" Item js_process_setSourceMapsEnabled(Item val) {
     return make_js_undefined();
 }
 
+extern "C" Item js_process_send(Item msg) {
+    (void)msg;
+    return (Item){.item = b2it(true)};
+}
+
+extern "C" Item js_process_disconnect(void) {
+    if (js_process_object.item != ITEM_NULL) {
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("connected", 9))},
+            (Item){.item = b2it(false)});
+    }
+    return make_js_undefined();
+}
+
 extern "C" Item js_get_process_object_value(void) {
     if (js_process_object.item == ITEM_NULL) {
         js_process_object = js_object_create(ItemNull);
@@ -3146,6 +3195,13 @@ extern "C" Item js_get_process_object_value(void) {
         js_process_set_method(js_process_object, "setUncaughtExceptionCaptureCallback", (void*)js_process_setUncaughtExceptionCaptureCallback, 1);
         js_process_set_method(js_process_object, "getActiveResourcesInfo", (void*)js_process_getActiveResourcesInfo, 0);
         js_process_set_method(js_process_object, "setSourceMapsEnabled", (void*)js_process_setSourceMapsEnabled, 1);
+        if (getenv("LAMBDA_JS_IPC")) {
+            js_process_set_method(js_process_object, "send", (void*)js_process_send, 1);
+            js_process_set_method(js_process_object, "disconnect", (void*)js_process_disconnect, 0);
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("connected", 9))},
+                (Item){.item = b2it(true)});
+        }
         js_process_set_method(js_process_object, "on", (void*)js_process_on, 2);
         js_process_set_method(js_process_object, "addListener", (void*)js_process_on, 2);
         js_process_set_method(js_process_object, "once", (void*)js_process_once, 2);
@@ -3204,13 +3260,9 @@ extern "C" Item js_get_process_object_value(void) {
             }
         }
 
-        // execArgv — empty array (no V8 flags)
-        {
-            Item execArgv_arr = js_array_new(0);
-            js_property_set(js_process_object,
-                (Item){.item = s2it(heap_create_name("execArgv", 8))},
-                execArgv_arr);
-        }
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("execArgv", 8))},
+            js_get_process_exec_argv());
 
         // config — minimal process.config for Node.js compat
         {
@@ -8180,6 +8232,17 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
 // Object.defineProperties — define multiple properties on an object
 // =============================================================================
 
+static void js_define_properties_cleanup(Item* desc_keys, Item* desc_objs) {
+    if (desc_keys) {
+        heap_unregister_gc_root_range((uint64_t*)desc_keys);
+        mem_free(desc_keys);
+    }
+    if (desc_objs) {
+        heap_unregister_gc_root_range((uint64_t*)desc_objs);
+        mem_free(desc_objs);
+    }
+}
+
 extern "C" Item js_object_define_properties(Item obj, Item props) {
     if (!js_require_object_type(obj, "defineProperties")) return ItemNull;
     // ES spec §19.1.2.3 step 1: Let props be ? ToObject(Properties).
@@ -8204,23 +8267,29 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
     if (get_type_id(keys) != LMD_TYPE_ARRAY) return obj;
     int n = keys.array->length;
     if (n == 0) return obj;
+
     // J39-7: ES §19.1.2.3 ObjectDefineProperties is two-phase per spec:
     //   Phase 1 (step 4): for each key, fetch descObj (may invoke getter) and
     //     validate via ToPropertyDescriptor — collect into descriptors list.
     //   Phase 2 (step 5): for each (key, desc), DefinePropertyOrThrow.
     // If any ToPropertyDescriptor throws in phase 1, no defines happen.
-    Item* desc_keys = (Item*)mem_alloc(sizeof(Item) * n, MEM_CAT_JS_RUNTIME);
-    Item* desc_objs = (Item*)mem_alloc(sizeof(Item) * n, MEM_CAT_JS_RUNTIME);
+    Item* desc_keys = (Item*)mem_calloc((size_t)n, sizeof(Item), MEM_CAT_JS_RUNTIME);
+    Item* desc_objs = (Item*)mem_calloc((size_t)n, sizeof(Item), MEM_CAT_JS_RUNTIME);
     if (!desc_keys || !desc_objs) {
         if (desc_keys) mem_free(desc_keys);
         if (desc_objs) mem_free(desc_objs);
         return obj;
     }
+    heap_register_gc_root_range((uint64_t*)desc_keys, n);
+    heap_register_gc_root_range((uint64_t*)desc_objs, n);
     int desc_count = 0;
     for (int i = 0; i < n; i++) {
         Item key = keys.array->items[i];
         Item prop_desc = js_object_get_own_property_descriptor(props_obj, key);
-        if (js_check_exception()) { mem_free(desc_keys); mem_free(desc_objs); return obj; }
+        if (js_check_exception()) {
+            js_define_properties_cleanup(desc_keys, desc_objs);
+            return obj;
+        }
         if (get_type_id(prop_desc) == LMD_TYPE_UNDEFINED || get_type_id(prop_desc) == LMD_TYPE_NULL) {
             continue;
         }
@@ -8232,11 +8301,13 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
         }
         if (!enumerable) continue;
         Item desc = js_property_get(props_obj, key);
-        if (js_check_exception()) { mem_free(desc_keys); mem_free(desc_objs); return obj; }
+        if (js_check_exception()) {
+            js_define_properties_cleanup(desc_keys, desc_objs);
+            return obj;
+        }
         JsPropertyDescriptor tmp;
         if (!js_descriptor_from_object(desc, &tmp)) {
-            mem_free(desc_keys);
-            mem_free(desc_objs);
+            js_define_properties_cleanup(desc_keys, desc_objs);
             return obj; // ToPropertyDescriptor threw — abort before any define
         }
         desc_keys[desc_count] = key;
@@ -8248,8 +8319,7 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
         js_object_define_property(obj, key, desc_objs[i]);
         if (js_check_exception()) break; // DefinePropertyOrThrow failure
     }
-    mem_free(desc_keys);
-    mem_free(desc_objs);
+    js_define_properties_cleanup(desc_keys, desc_objs);
     return obj;
 }
 
@@ -13875,9 +13945,12 @@ extern "C" void js_globals_batch_reset() {
     js_global_builtin_fn_cache_reset();
     // reset process.argv cache and process object
     js_process_argv_items = (Item){.item = ITEM_NULL};
+    js_process_exec_argv_items = (Item){.item = ITEM_NULL};
     js_process_object = (Item){.item = ITEM_NULL};
     js_process_argc_raw = 0;
+    js_process_exec_argc_raw = 0;
     js_process_argv_raw = NULL;
+    js_process_exec_argv_raw = NULL;
     // reset with-statement scope stack — stale Items become dangling after heap reset
     extern void js_with_batch_reset(void);
     js_with_batch_reset();
