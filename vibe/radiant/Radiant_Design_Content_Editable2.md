@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, and native rich-host `copy`/`cut`/`paste`.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard/history started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, native rich-host `copy`/`cut`/`paste`, and native rich-host `undo`/`redo` event-envelope plus bounded snapshot/selection restore support.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -1169,6 +1169,110 @@ and the remaining EC-6 cleanup/history/clipboard commands are not complete.
 **Global gate note:** EC-6b's focused JS regression, full JS suite, and local
 WPT guards are green. The full `make test262-baseline` gate still needs to run,
 and EC-6 history `undo`/`redo` remains incomplete.
+
+**EC-6c — native rich-host execCommand undo/redo event envelope: LANDED
+(2026-06-18).**
+
+- Added native `document.execCommand("undo"|"redo")` support to the EC command
+  registry. The commands map to the existing dispatchable
+  `INPUT_INTENT_HISTORY_UNDO` / `INPUT_INTENT_HISTORY_REDO` intents, so
+  `queryCommandSupported(...)` and `queryCommandEnabled(...)` now expose the
+  history command surface for active rich editing hosts.
+- The commands run through the same `editing_run_transaction(...)` envelope as
+  the rest of native execCommand. They dispatch cancelable
+  `beforeinput { inputType: "historyUndo"|"historyRedo" }` with empty target
+  ranges and report success when the event is prevented by a consumer.
+- Native rich DOM restoration is still deliberately not claimed: when no
+  consumer handles/prevents the history event, the mutation callback returns
+  false rather than falling through into text replacement. This preserves the
+  existing "consumer-owned rich history" contract while closing the command
+  registry/event-envelope slice.
+
+**Current EC verification after EC-6c (2026-06-18):**
+
+| Check | Result |
+|---|---|
+| Direct undo/redo event-envelope DOM regression | `undo` and `redo` report supported/enabled, dispatch `historyUndo` / `historyRedo` beforeinput with `0` target ranges, return true when canceled, do not dispatch `input`, and leave the DOM unchanged |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing macOS-version linker warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_history' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 222 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-6c's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-6 tier complete. EC-6c deliberately stopped at the
+event envelope; EC-6d below adds the first native snapshot restore slice.
+
+**EC-6d — native rich-host execCommand undo/redo snapshot restore: LANDED
+(2026-06-18).**
+
+- Added a bounded native rich-host history ring over `innerHTML` snapshots.
+  Successful native `execCommand(...)` rich DOM mutations now capture the host's
+  serialized children before and after the transaction, skip no-op snapshots,
+  truncate redo state on a new mutation, and cap the process-local stack at 64
+  entries.
+- `document.execCommand("undo"|"redo")` still runs through
+  `editing_run_transaction(...)`, so it dispatches the same cancelable
+  `beforeinput` / non-cancelable `input` envelope with
+  `inputType: "historyUndo"|"historyRedo"`. When not prevented, the mutation
+  callback restores the matching live host through the shared parser-backed
+  `innerHTML` replacement helper and collapses selection to the start of that
+  host.
+- The helper is also reused by the public `innerHTML` setter, keeping native
+  child clearing, fragment parsing, named-element registration, select cache
+  refresh, and mutation notification in one path.
+- Scope remains intentionally conservative: native `execCommand` only,
+  host-scoped, process-local, not persistent, no keyboard shortcut integration,
+  no semantic command-level undo model, no selection-range restoration yet, and
+  no cross-surface chronological replay beyond the currently focused host.
+  The ring is cleared by both the JS DOM batch reset path and runtime cleanup.
+
+**Current EC verification after EC-6d (2026-06-18):**
+
+| Check | Result |
+|---|---|
+| Direct undo/redo DOM regression | `insertText` records a snapshot, `undo` restores `abcd`, `redo` restores `abXcd`, and the event stream is `insertText`, `historyUndo`, `historyRedo` |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing macOS-version linker warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_history' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 222 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-6d's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-6 tier complete.
+
+**EC-6e — native rich-host undo/redo selection restore: LANDED
+(2026-06-18).**
+
+- Extended each native rich history entry with before/after selection snapshots.
+  Each endpoint is recorded as a fixed-depth child-index path from the editing
+  host plus its DOM boundary offset, so selection can be resolved against the
+  equivalent nodes after the host subtree is rebuilt from the stored HTML.
+- Native undo now restores the pre-mutation selection and native redo restores
+  the post-mutation selection. The old host-start collapse remains only as a
+  conservative fallback when an endpoint path cannot be captured or resolved.
+- The first regression covers the common caret case: `insertText` at `ab|cd`,
+  `undo` restores `ab|cd`, and `redo` restores `abX|cd`.
+- Scope is still bounded to native `execCommand` history and same-host snapshot
+  replay. It does not yet provide semantic command-level undo grouping, keyboard
+  shortcut integration, persistent history, or cross-host chronological replay.
+
+**Current EC verification after EC-6e (2026-06-18):**
+
+| Check | Result |
+|---|---|
+| Direct undo/redo DOM + selection regression | `undo` restores `abcd` with caret `2`; `redo` restores `abXcd` with caret `3`; event stream remains `insertText`, `historyUndo`, `historyRedo` |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing macOS-version linker warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_history' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 222 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-6e's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-6 tier complete.
 
 ---
 

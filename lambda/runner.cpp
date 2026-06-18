@@ -25,6 +25,7 @@
 #include "../lib/uv_loop.h"
 
 extern "C" Item js_property_get(Item object, Item key);
+extern "C" void js_dom_shutdown(void);
 
 // ============================================================================
 // Lambda Home Path
@@ -1450,6 +1451,7 @@ void runtime_cleanup(Runtime* runtime) {
     module_registry_cleanup();
     template_registry_destroy(g_template_registry);
     js_eval_preamble_cache_reset();
+    js_dom_shutdown();
     js_event_loop_shutdown();
     lambda_uv_cleanup();
     lambda_stack_cleanup();
