@@ -654,18 +654,35 @@ fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, context, font
     // derived_vlist is the EMIT value (ceil2). derived_vlist_raw keeps the
     // pre-ceil precision so the outer strut's CEIL@2 of (h_raw + d_raw)
     // produces the right output for sibling descenders (e.g. y in x^n+y^n).
-    let derived_top = 0.0 - 3.41
-    let derived_vlist = 0.41 + sup_h_only
-    let derived_vlist_raw = 0.41 + sup_h_raw * font_scale
-    // Pick formula vs legacy: use derived formula for non-tall contexts.
-    // numeric_x_script (italic-letter base + digit sup like p^2) is INCLUDED
-    // in the derived path — formula produces the same emit value (0.87) but
-    // with proper raw precision (0.86111) for strut-emit consistency.
-    let use_derived = not in_fraction_child and not tall_script and not tall_base
+    //
+    // The script sits at top = -(3.0 + offset). The offset is the baseline
+    // shift of the sup above the line: 0.41 at the first script level and
+    // 0.43 when this script is itself nested inside another script (e.g. the
+    // inner `²` of `x^{x^2}` / `e^{-x^2}`). The `script_container` flag is set
+    // only by sup/sub contexts — NOT by fraction numer/denom — so a script
+    // inside a fraction numerator (`\frac{b^2}{2a}`) stays shallow, matching
+    // MathLive's DOM font-size cascade.
+    let is_deep = context.script_container == true
+    let top_offset = if (is_deep) 0.43 else 0.41
+    let derived_top = 0.0 - (3.0 + top_offset)
+    let derived_vlist = top_offset + sup_h_only
+    let derived_vlist_raw = top_offset + sup_h_raw * font_scale
+    // Pick formula vs legacy: use derived formula for non-tall contexts AND
+    // for tall scripts whose content is itself a script (nested sup, e.g.
+    // `x^{x^2}`). Fractions/radicals in the sup (no raw metrics) stay on the
+    // legacy hardcoded path.
+    let sup_is_nested_script = tall_script and sup_box.height_raw != null and
+        sup_box.is_fraction != true
+    let use_derived = not in_fraction_child and not tall_base and
+        (not tall_script or sup_is_nested_script)
     let vlist_height = if (use_derived) derived_vlist else legacy_vlist
     let top = if (use_derived) derived_top else legacy_top
     let inner_h = if (use_derived) child_h else legacy_child_h
-    let inner_style = "height:" ++ util.fmt_em(inner_h) ++ ";display:inline-block;font-size: 70%"
+    // Font-size: 70% at the first script level; the true mathstyle ratio
+    // (71.43% for script→scriptscript) only when this script is nested inside
+    // another script. A script inside a fraction numerator stays 70%.
+    let font_pct = if (is_deep) fmt_font_pct(font_scale) else "70%"
+    let inner_style = "height:" ++ util.fmt_em(inner_h) ++ ";display:inline-block;font-size: " ++ font_pct
     let sup_elements = merge_script_elements(box.elements_of(sup_box))
     let el = <span class: css.VLIST_T;
         <span class: css.VLIST_R;
@@ -702,6 +719,16 @@ fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, context, font
         italic: 0.0,
         skew: 0.0
     }
+}
+
+// Format a font-size percentage the way MathLive does: integer when whole
+// (e.g. 0.7 -> "70%"), else 2-decimal (e.g. 5/7 -> "71.43%").
+fn fmt_font_pct(scale) {
+    let pct = scale * 100.0
+    let rounded = round(pct * 100.0) / 100.0
+    let as_int = int(rounded + 0.000001)
+    if (abs(rounded - float(as_int)) < 0.001) string(as_int) ++ "%"
+    else util.fmt_num(rounded, 2) ++ "%"
 }
 
 fn is_mathit_x_box(bx) {

@@ -1036,9 +1036,68 @@ Upstream baseline                           206 / 206  (100%)*
 
 `\int_{-\infty}^{\infty} x` (standalone) was also fixed (the sub minus's
 0.08333 depth now feeds `sub_height_for` via `(h+d)*0.7`, and `depth_holder`/
-box depth bump by `ceil2(depth_raw*0.7)`), but the corpus instances embed it in
-`\int_{-\infty}^{\infty} e^{-x^2} dx` whose `e^{-x^2}` nested-superscript
-height is still over-computed (see residuals).
+box depth bump by `ceil2(depth_raw*0.7)`).
+
+### Phase 3 round 3 — nested-superscript box model
+
+The `e^{-x^2}` / `x^{x^2}` nested-superscript over-computation (the documented
+hard residual) was resolved by making `render_sup_only`
+([scripts.ls](lambda/package/math/atoms/scripts.ls)) mathstyle-aware:
+
+- **Style-dependent script shift** — the sup baseline offset is 0.41 at the
+  first script level (top `-3.41`) and 0.43 one level deeper (top `-3.43`),
+  matching MathLive's per-mathstyle `supShift`. The deepening is gated on the
+  `script_container` context flag — set only by sup/sub contexts, NOT by
+  fraction numerator/denominator — so a script inside a fraction numerator
+  (`\frac{b^2}{2a}`) correctly stays shallow.
+- **Style-dependent font-size** — the inner script wrapper emits the true
+  mathstyle ratio (`71.43%` for script→scriptscript) only when nested inside
+  another script; otherwise `70%`. This mirrors MathLive's DOM font-size
+  cascade (a fraction numerator doesn't introduce an intervening font-size
+  span, so its child scripts stay at 70%).
+- **Derived path for nested scripts** — the metric-driven `child_h`/`vlist`
+  formulas (previously gated off for `tall_script`) now apply when the sup is
+  itself a script (`height_raw` present, not a fraction). With the inner
+  script returning its proper `height_raw`, the outer `ceil2(h_raw·0.7)`
+  resolves to MathLive's exact wrapper height.
+
+Closes `x^{x^2}`, `e^{-x^2}`, `a^{b^c}`, `2^{2^2}`, and the
+`\int_{-\infty}^{\infty} e^{-x^2} dx = \sqrt{\pi}` family (×12 in corpus).
+`e^{x^2+y^2}` (multi-script sup with a descender) is down to a lone 0.01em
+residual.
+
+```
+732 → 737 / 921 (80.0%)   [nested-superscript box model]
+Upstream baseline 206 / 206 (100%)*
+```
+
+### Phase 3 round 4 — per-font metric tables
+
+The `\mathbf`/`\mathtt`/`\mathfrak`/`\mathscr`/`\mathcal` height drifts (Lambda
+fell back to the 0.69/0.7 heuristic) were closed by porting six more font
+tables from MathLive's `font-metrics-data.ts`:
+
+- **Generator** ([generate_metrics_data.mjs](test/lambda/mathlive/generate_metrics_data.mjs))
+  now emits **Main-Bold, Typewriter-Regular, Fraktur-Regular, Script-Regular,
+  Caligraphic-Regular, SansSerif-Regular** alongside Main-Regular/Math-Italic/
+  AMS-Regular, and `lookup()` dispatches `mathbf`/`tt`/`frak`/`script`/`cal`/
+  `sans` to them. (Also re-added `width_raw_of` to the generator — a manual
+  edit had been clobbered by an earlier regeneration, briefly zeroing the
+  accent margins.)
+- **`font_from_class`** ([box.ls](lambda/package/math/box.ls)) maps the
+  `lm_mathbf`/`lm_tt`/`lm_frak`/`lm_script`/`lm_cal`/`lm_sans` classes to those
+  fonts, so single-char height/width lookups hit real metrics.
+- **Italic correction** ([box.ls](lambda/package/math/box.ls) `text_style`)
+  now emits the per-font italic margin-right for Script/Caligraphic/Fraktur/
+  Bold capitals — closes `\mathscr{F}` (`margin-right:0.14em`).
+
+```
+737 → 745 / 921 (80.9%)   [per-font metric tables]
+Upstream baseline 206 / 206 (100%)*
+```
+
+Net across this conversation's "continue to fix" rounds: **614 → 745
+(+131 cases, +14.2pp)**.
 
 ### Phase 3 round 2 additions
 

@@ -131,6 +131,12 @@ fn font_from_class(cls) {
     else if (cls == css.MATHIT) "mathit"
     else if (cls == css.AMS) "ams"
     else if (cls == css.BB) "ams"
+    else if (cls == css.MATHBF) "mathbf"
+    else if (cls == css.TT) "tt"
+    else if (cls == css.FRAK) "frak"
+    else if (cls == css.SCRIPT) "script"
+    else if (cls == css.CAL) "cal"
+    else if (cls == css.SANS) "sans"
     else if (cls == "lcGreek lm_mathit") "mathit"
     else if (cls == "lm_cmr lm_it") "mathit"
     else null
@@ -260,11 +266,27 @@ fn text_style(text, cls) {
         let it = if (m != null) metrics_data.italic_of(m) else null
         if (it != null and it > 0.0) "margin-right:" ++ util.fmt_em(it) else null
     }
-    else if (len(text) == 1 and (cls == css.CMR or cls == css.MATHBF)) {
+    else if (len(text) == 1 and cls == css.CMR) {
         let m = metrics_data.lookup(text, "cmr")
         let it = if (m != null) metrics_data.italic_of(m) else null
         if (it != null and it > 0.0) "margin-right:" ++ util.fmt_em(it) else null
     }
+    else if (len(text) == 1 and italic_corrected_font(cls) != null) {
+        // Script/Caligraphic/Fraktur capitals carry an italic correction
+        // (e.g. \mathscr{F} → margin-right:0.14em) emitted from the
+        // per-font metric table.
+        let m = metrics_data.lookup(text, italic_corrected_font(cls))
+        let it = if (m != null) metrics_data.italic_of(m) else null
+        if (it != null and it > 0.0) "margin-right:" ++ util.fmt_em(it) else null
+    }
+    else null
+}
+
+fn italic_corrected_font(cls) {
+    if (cls == css.MATHBF) "mathbf"
+    else if (cls == css.SCRIPT) "script"
+    else if (cls == css.CAL) "cal"
+    else if (cls == css.FRAK) "frak"
     else null
 }
 

@@ -59,10 +59,22 @@ function parseFontSection(fontName) {
 const mainRegular = parseFontSection('Main-Regular');
 const mathItalic  = parseFontSection('Math-Italic');
 const amsRegular  = parseFontSection('AMS-Regular');
+const mainBold    = parseFontSection('Main-Bold');
+const typewriter  = parseFontSection('Typewriter-Regular');
+const fraktur     = parseFontSection('Fraktur-Regular');
+const script      = parseFontSection('Script-Regular');
+const caligraphic = parseFontSection('Caligraphic-Regular');
+const sansSerif   = parseFontSection('SansSerif-Regular');
 
 console.log(`Main-Regular: ${Object.keys(mainRegular).length} entries`);
 console.log(`Math-Italic:  ${Object.keys(mathItalic).length} entries`);
 console.log(`AMS-Regular:  ${Object.keys(amsRegular).length} entries`);
+console.log(`Main-Bold:    ${Object.keys(mainBold).length} entries`);
+console.log(`Typewriter:   ${Object.keys(typewriter).length} entries`);
+console.log(`Fraktur:      ${Object.keys(fraktur).length} entries`);
+console.log(`Script:       ${Object.keys(script).length} entries`);
+console.log(`Caligraphic:  ${Object.keys(caligraphic).length} entries`);
+console.log(`SansSerif:    ${Object.keys(sansSerif).length} entries`);
 
 // Convert codepoint → character string for keys.
 function cpToChar(cp) {
@@ -167,8 +179,31 @@ const content = header +
   '// ============================================================\n' +
   emitMap('ams_regular', amsRegular) + '\n\n' +
   '// ============================================================\n' +
+  '// Main-Bold (cmb) — \\mathbf\n' +
+  '// ============================================================\n' +
+  emitMap('main_bold', mainBold) + '\n\n' +
+  '// ============================================================\n' +
+  '// Typewriter-Regular (cmtt) — \\mathtt\n' +
+  '// ============================================================\n' +
+  emitMap('typewriter', typewriter) + '\n\n' +
+  '// ============================================================\n' +
+  '// Fraktur-Regular — \\mathfrak\n' +
+  '// ============================================================\n' +
+  emitMap('fraktur', fraktur) + '\n\n' +
+  '// ============================================================\n' +
+  '// Script-Regular — \\mathscr\n' +
+  '// ============================================================\n' +
+  emitMap('script_font', script) + '\n\n' +
+  '// ============================================================\n' +
+  '// Caligraphic-Regular — \\mathcal\n' +
+  '// ============================================================\n' +
+  emitMap('caligraphic', caligraphic) + '\n\n' +
+  '// ============================================================\n' +
+  '// SansSerif-Regular — \\mathsf\n' +
+  '// ============================================================\n' +
+  emitMap('sans_serif', sansSerif) + '\n\n' +
+  '// ============================================================\n' +
   '// Lookup: single-character string + font name → metrics or null\n' +
-  '// font_name: "cmr" / "main", "mathit" / "cmmi", "ams"\n' +
   '// ============================================================\n' +
   '\n' +
   'pub fn lookup(ch, font_name) {\n' +
@@ -176,6 +211,12 @@ const content = header +
   '    else if (font_name == "cmr" or font_name == "main") main_regular[ch]\n' +
   '    else if (font_name == "mathit" or font_name == "cmmi") math_italic[ch]\n' +
   '    else if (font_name == "ams") ams_regular[ch]\n' +
+  '    else if (font_name == "mathbf" or font_name == "bold") main_bold[ch]\n' +
+  '    else if (font_name == "tt") typewriter[ch]\n' +
+  '    else if (font_name == "frak") fraktur[ch]\n' +
+  '    else if (font_name == "script") script_font[ch]\n' +
+  '    else if (font_name == "cal") caligraphic[ch]\n' +
+  '    else if (font_name == "sans") sans_serif[ch]\n' +
   '    else null\n' +
   '}\n' +
   '\n' +
@@ -185,9 +226,10 @@ const content = header +
   'pub fn italic_of(metrics) { if (metrics == null) null else metrics[2] }\n' +
   'pub fn skew_of(metrics)   { if (metrics == null) null else metrics[3] }\n' +
   'pub fn width_of(metrics)  { if (metrics == null) null else metrics[4] }\n' +
-  '// Full-precision (5dp) values — for strut emission only.\n' +
+  '// Full-precision (5dp) values — for strut emission and accent centering.\n' +
   'pub fn height_raw_of(metrics) { if (metrics == null) null else metrics[5] }\n' +
-  'pub fn depth_raw_of(metrics)  { if (metrics == null) null else metrics[6] }\n';
+  'pub fn depth_raw_of(metrics)  { if (metrics == null) null else metrics[6] }\n' +
+  'pub fn width_raw_of(metrics)  { if (metrics == null) null else metrics[7] }\n';
 
 fs.writeFileSync(OUT, content, 'utf8');
 const sizeKb = (content.length / 1024).toFixed(1);
