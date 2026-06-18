@@ -54,6 +54,10 @@ static FormControlProp* form_prop_for_view(View* view);
 static bool view_element_has_attr(View* view, const char* attr_name);
 static int form_default_selected_index_from_tree(View* view);
 static float form_default_range_value(View* view, FormControlProp* form);
+static void view_state_set_hovered_internal(DocState* state, View* view, bool hovered,
+                                            bool assert_after_mutation);
+static void view_state_set_active_internal(DocState* state, View* view, bool active,
+                                           bool assert_after_mutation);
 
 typedef struct DumpNodeState {
     void* node;
@@ -1023,12 +1027,26 @@ DocState* state_store_doc_state(StateStore* store) {
     return store ? store->doc_state : NULL;
 }
 
+static uint32_t view_state_detach_node(DocState* state, DomNode* node);
+
 void state_store_destroy(DomDocument* document) {
     if (!document) return;
     StateStore* store = document->state_store;
     DocState* state = store ? store->doc_state : document->state;
     if (state) {
+        state_begin_batch(state);
+        doc_state_set_hover_target(state, NULL);
+        doc_state_set_active_target(state, NULL);
+        focus_clear(state);
+        if (document->root) {
+            uint32_t removed = view_state_detach_node(state, static_cast<DomNode*>(document->root));
+            if (removed > 0) {
+                state->version++;
+                log_debug("state_store_destroy: detached %u ViewState entries before unload", removed);
+            }
+        }
         doc_state_set_lifecycle(state, DOC_LIFECYCLE_UNLOADED);
+        state_end_batch(state);
         state->owner_store = NULL;
         radiant_state_destroy(state);
     }
@@ -2707,6 +2725,54 @@ static uint32_t view_state_clear_interaction_flag(DocState* state, const char* n
     return changed;
 }
 
+static bool view_state_target_path_contains(View* target, View* candidate) {
+    for (View* node = target; node; node = static_cast<View*>(node->parent)) {
+        if (node == candidate) return true;
+    }
+    return false;
+}
+
+static uint32_t view_state_sync_interaction_flag_path(DocState* state, DomNode* root,
+                                                      View* target, const char* name) {
+    if (!state || !root || !state->view_state_map || !name) return 0;
+
+    uint32_t changed = 0;
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(state->view_state_map, &iter, &item)) {
+        ViewStateEntry* entry = (ViewStateEntry*)item;
+        ViewState* view_state = entry ? entry->state : NULL;
+        if (!view_state) continue;
+
+        View* live_view = view_state_find_live_id(root, entry->view_id);
+        bool expected = target && live_view &&
+            view_state_target_path_contains(target, live_view);
+        if (strcmp(name, "hover") == 0) {
+            bool current = view_state->flags.hovered != 0;
+            if (current != expected) {
+                view_state->flags.hovered = expected ? 1 : 0;
+                changed++;
+            }
+        } else if (strcmp(name, "active") == 0) {
+            bool current = view_state->flags.active != 0;
+            if (current != expected) {
+                view_state->flags.active = expected ? 1 : 0;
+                changed++;
+            }
+        }
+    }
+    for (View* node = target; node; node = static_cast<View*>(node->parent)) {
+        if (strcmp(name, "hover") == 0) {
+            if (!state_get_bool(state, node, STATE_HOVER)) changed++;
+            view_state_set_hovered_internal(state, node, true, false);
+        } else if (strcmp(name, "active") == 0) {
+            if (!state_get_bool(state, node, STATE_ACTIVE)) changed++;
+            view_state_set_active_internal(state, node, true, false);
+        }
+    }
+    return changed;
+}
+
 static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode* root) {
     if (!state || !root) return 0;
     uint32_t changed = 0;
@@ -2716,14 +2782,22 @@ static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode*
         state->hover_target = NULL;
         changed++;
     }
-    if (!state->hover_target) changed += view_state_clear_interaction_flag(state, "hover");
+    if (!state->hover_target) {
+        changed += view_state_clear_interaction_flag(state, "hover");
+    } else {
+        changed += view_state_sync_interaction_flag_path(state, root, state->hover_target, "hover");
+    }
 
     if (state->active_target && !view_state_tree_contains_view(root, state->active_target)) {
         doc_state_log_view_target_transition(state, "active.target", state->active_target, NULL);
         state->active_target = NULL;
         changed++;
     }
-    if (!state->active_target) changed += view_state_clear_interaction_flag(state, "active");
+    if (!state->active_target) {
+        changed += view_state_clear_interaction_flag(state, "active");
+    } else {
+        changed += view_state_sync_interaction_flag_path(state, root, state->active_target, "active");
+    }
 
     if (state->drag_target && !view_state_tree_contains_view(root, state->drag_target)) {
         doc_state_log_view_target_transition(state, "drag.target", state->drag_target, NULL);
@@ -2793,7 +2867,12 @@ uint32_t view_state_prune_orphans(DocState* state) {
             uint32_t state_view_id = entry->state ? entry->state->view_id : 0;
             View* key_live = view_state_find_live_id(root, entry->view_id);
             View* state_live = view_state_find_live_id(root, state_view_id);
-            if (!entry->state || !key_live || !state_live) {
+            bool invalid_live_kind = false;
+            if (entry->state && key_live && entry->kind == VIEW_STATE_FORM_CONTROL) {
+                DomElement* elem = key_live->is_element() ? lam::dom_require_element(key_live) : NULL;
+                invalid_live_kind = !elem || !elem->form;
+            }
+            if (!entry->state || !key_live || !state_live || invalid_live_kind) {
                 ViewStateEntry query = { .view_id = entry->view_id, .kind = entry->kind, .state = NULL };
                 view_state_release_payload(entry->state);
                 hashmap_delete(state->view_state_map, &query);
@@ -3303,8 +3382,23 @@ static void view_state_set_hovered_internal(DocState* state, View* view, bool ho
     if (!view_state) view_state = view_state_get_or_create(state, view, VIEW_STATE_BASE);
     if (!view_state) return;
     bool old_value = view_state->flags.hovered != 0;
-    if (old_value == hovered) return;
-    view_state->flags.hovered = hovered ? 1 : 0;
+    bool changed = false;
+    uint32_t view_id = view_state_resolve_id(view);
+    if (view_id != 0 && state && state->view_state_map) {
+        for (int kind_int = VIEW_STATE_BASE; kind_int <= VIEW_STATE_CUSTOM; kind_int++) {
+            ViewStateKind kind = (ViewStateKind)kind_int;
+            ViewStateEntry query = { .view_id = view_id, .kind = kind, .state = NULL };
+            const ViewStateEntry* found = (const ViewStateEntry*)hashmap_get(state->view_state_map, &query);
+            if (!found || !found->state) continue;
+            if ((found->state->flags.hovered != 0) == hovered) continue;
+            found->state->flags.hovered = hovered ? 1 : 0;
+            changed = true;
+        }
+    } else if ((view_state->flags.hovered != 0) != hovered) {
+        view_state->flags.hovered = hovered ? 1 : 0;
+        changed = true;
+    }
+    if (!changed) return;
     view_state_log_bool_transition(state, view, "hover", old_value, hovered);
     state->is_dirty = true;
     state->needs_repaint = true;
@@ -3330,8 +3424,23 @@ static void view_state_set_active_internal(DocState* state, View* view, bool act
     if (!view_state) view_state = view_state_get_or_create(state, view, VIEW_STATE_BASE);
     if (!view_state) return;
     bool old_value = view_state->flags.active != 0;
-    if (old_value == active) return;
-    view_state->flags.active = active ? 1 : 0;
+    bool changed = false;
+    uint32_t view_id = view_state_resolve_id(view);
+    if (view_id != 0 && state && state->view_state_map) {
+        for (int kind_int = VIEW_STATE_BASE; kind_int <= VIEW_STATE_CUSTOM; kind_int++) {
+            ViewStateKind kind = (ViewStateKind)kind_int;
+            ViewStateEntry query = { .view_id = view_id, .kind = kind, .state = NULL };
+            const ViewStateEntry* found = (const ViewStateEntry*)hashmap_get(state->view_state_map, &query);
+            if (!found || !found->state) continue;
+            if ((found->state->flags.active != 0) == active) continue;
+            found->state->flags.active = active ? 1 : 0;
+            changed = true;
+        }
+    } else if ((view_state->flags.active != 0) != active) {
+        view_state->flags.active = active ? 1 : 0;
+        changed = true;
+    }
+    if (!changed) return;
     view_state_log_bool_transition(state, view, "active", old_value, active);
     state->is_dirty = true;
     state->needs_repaint = true;
@@ -3345,8 +3454,23 @@ void view_state_set_focused(DocState* state, View* view, bool focused) {
     if (!view_state) view_state = view_state_get_or_create(state, view, VIEW_STATE_BASE);
     if (!view_state) return;
     bool old_value = view_state->flags.focused != 0;
-    if (old_value == focused) return;
-    view_state->flags.focused = focused ? 1 : 0;
+    bool changed = false;
+    uint32_t view_id = view_state_resolve_id(view);
+    if (view_id != 0 && state && state->view_state_map) {
+        for (int kind_int = VIEW_STATE_BASE; kind_int <= VIEW_STATE_CUSTOM; kind_int++) {
+            ViewStateKind kind = (ViewStateKind)kind_int;
+            ViewStateEntry query = { .view_id = view_id, .kind = kind, .state = NULL };
+            const ViewStateEntry* found = (const ViewStateEntry*)hashmap_get(state->view_state_map, &query);
+            if (!found || !found->state) continue;
+            if ((found->state->flags.focused != 0) == focused) continue;
+            found->state->flags.focused = focused ? 1 : 0;
+            changed = true;
+        }
+    } else if ((view_state->flags.focused != 0) != focused) {
+        view_state->flags.focused = focused ? 1 : 0;
+        changed = true;
+    }
+    if (!changed) return;
     view_state_log_bool_transition(state, view, "focus", old_value, focused);
     state->is_dirty = true;
     state->needs_repaint = true;
