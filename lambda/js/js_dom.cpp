@@ -89,6 +89,40 @@ static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_
 static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId prop_id, int pseudo_type);
 static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
+void js_dom_register_named_elements(DomElement* root);
+static bool js_dom_node_is_connected(DomNode* node);
+static void _select_refresh_cached_selected_options_for_node(DomNode* node);
+
+#define JS_DOM_RICH_HISTORY_CAP 64
+#define JS_DOM_RICH_HISTORY_PATH_CAP 32
+
+typedef struct JsDomRichHistoryBoundary {
+    bool valid;
+    uint32_t depth;
+    uint32_t path[JS_DOM_RICH_HISTORY_PATH_CAP];
+    uint32_t offset;
+} JsDomRichHistoryBoundary;
+
+typedef struct JsDomRichHistorySelection {
+    JsDomRichHistoryBoundary anchor;
+    JsDomRichHistoryBoundary focus;
+} JsDomRichHistorySelection;
+
+static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
+                                      bool notify_mutation);
+static char* js_dom_rich_history_snapshot(DomElement* owner);
+static bool js_dom_rich_history_capture_selection(
+    DocState* state, DomElement* owner, JsDomRichHistorySelection* out);
+static bool js_dom_rich_history_restore(DocState* state,
+                                        const EditingSurface* surface,
+                                        const EditingIntent* intent);
+static bool js_dom_rich_history_should_record(const EditingIntent* intent);
+static void js_dom_rich_history_record(DomElement* owner,
+                                       const char* before_html,
+                                       const char* after_html,
+                                       const JsDomRichHistorySelection* before_sel,
+                                       const JsDomRichHistorySelection* after_sel);
+static void js_dom_rich_history_reset();
 
 static String* js_dom_create_document_string(DomDocument* doc, const char* str, size_t len) {
     if (!doc || !doc->arena || !str) return nullptr;
@@ -521,6 +555,10 @@ static bool js_dom_testdriver_rich_mutate(EventContext* evcon,
         return editing_rich_default_indent(state, surface, intent,
                                            nullptr, nullptr);
     }
+    if (intent && (intent->type == INPUT_INTENT_HISTORY_UNDO ||
+                   intent->type == INPUT_INTENT_HISTORY_REDO)) {
+        return js_dom_rich_history_restore(state, surface, intent);
+    }
     JsDomTestdriverMutationArgs* args = (JsDomTestdriverMutationArgs*)user;
     View* fallback_view = nullptr;
     int fallback_offset = 0;
@@ -681,6 +719,12 @@ static bool js_dom_exec_command_is_clipboard(const char* cmd) {
         strcasecmp(cmd, "paste") == 0;
 }
 
+static bool js_dom_exec_command_is_history(const char* cmd) {
+    if (!cmd) return false;
+    return strcasecmp(cmd, "undo") == 0 ||
+        strcasecmp(cmd, "redo") == 0;
+}
+
 static bool js_dom_exec_command_is_native(const char* cmd) {
     return js_dom_exec_command_is_core_text(cmd) ||
         js_dom_exec_command_is_inline_format(cmd) ||
@@ -688,7 +732,8 @@ static bool js_dom_exec_command_is_native(const char* cmd) {
         js_dom_exec_command_is_link_object(cmd) ||
         js_dom_exec_command_is_color_font(cmd) ||
         js_dom_exec_command_is_cleanup_selection(cmd) ||
-        js_dom_exec_command_is_clipboard(cmd);
+        js_dom_exec_command_is_clipboard(cmd) ||
+        js_dom_exec_command_is_history(cmd);
 }
 
 static bool js_dom_exec_command_is_supported(const char* cmd) {
@@ -786,6 +831,14 @@ static bool js_dom_exec_command_map_intent(const char* cmd,
     }
     if (strcasecmp(cmd, "selectAll") == 0) {
         out->type = INPUT_INTENT_SELECT_ALL;
+        return true;
+    }
+    if (strcasecmp(cmd, "undo") == 0) {
+        out->type = INPUT_INTENT_HISTORY_UNDO;
+        return true;
+    }
+    if (strcasecmp(cmd, "redo") == 0) {
+        out->type = INPUT_INTENT_HISTORY_REDO;
         return true;
     }
     if (strcasecmp(cmd, "cut") == 0) {
@@ -969,6 +1022,18 @@ static Item js_dom_exec_command_native(Item* args, int argc) {
     if (!js_dom_exec_command_map_intent(cmd, value, &intent)) {
         return (Item){.item = ITEM_FALSE};
     }
+    bool record_history = js_dom_rich_history_should_record(&intent);
+    char* history_before = record_history
+        ? js_dom_rich_history_snapshot(surface.owner)
+        : nullptr;
+    JsDomRichHistorySelection history_before_sel;
+    memset(&history_before_sel, 0, sizeof(history_before_sel));
+    JsDomRichHistorySelection history_after_sel;
+    memset(&history_after_sel, 0, sizeof(history_after_sel));
+    if (record_history) {
+        js_dom_rich_history_capture_selection(state, surface.owner,
+                                              &history_before_sel);
+    }
 
     EventContext evcon;
     memset(&evcon, 0, sizeof(evcon));
@@ -1002,6 +1067,15 @@ static Item js_dom_exec_command_native(Item* args, int argc) {
     bool prevented = false;
     bool mutated = false;
     bool ok = editing_run_transaction(&evcon, &tx, &prevented, &mutated, nullptr);
+    if (ok && mutated && record_history && history_before) {
+        char* history_after = js_dom_rich_history_snapshot(surface.owner);
+        js_dom_rich_history_capture_selection(state, surface.owner,
+                                              &history_after_sel);
+        js_dom_rich_history_record(surface.owner, history_before, history_after,
+                                   &history_before_sel, &history_after_sel);
+        mem_free(history_after);
+    }
+    mem_free(history_before);
     input_intent_dispose(&intent);
     if (ok && mutated && _js_current_document) {
         js_dom_mutation_notify(DOM_JS_MUTATION_TEXT, surface.owner, surface.owner);
@@ -1467,6 +1541,7 @@ static void reset_dom_wrapper_cache(); // forward declaration
 extern "C" void js_dom_batch_reset() {
     DocState* state = js_dom_current_state();
     js_dom_selection_reset();
+    js_dom_rich_history_reset();
     reset_dom_wrapper_cache();
     js_document_proxy_item = (Item){.item = ITEM_NULL};
     js_document_default_view = (Item){.item = ITEM_NULL};
@@ -1479,6 +1554,10 @@ extern "C" void js_dom_batch_reset() {
     js_xhr_reset();
     expando_reset();
     tc_reset_focus_state(state);
+}
+
+extern "C" void js_dom_shutdown() {
+    js_dom_rich_history_reset();
 }
 
 // ============================================================================
@@ -4267,6 +4346,337 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
             strbuf_append_char(sb, '>');
         }
     }
+}
+
+static char* js_dom_rich_history_snapshot(DomElement* owner) {
+    if (!owner) return nullptr;
+    StrBuf* sb = strbuf_new_cap(256);
+    if (!sb) return nullptr;
+    for (DomNode* child = owner->first_child; child; child = child->next_sibling) {
+        collect_inner_html(child, sb);
+    }
+    char* copy = mem_strdup(sb->str ? sb->str : "", MEM_CAT_JS_RUNTIME);
+    strbuf_free(sb);
+    return copy;
+}
+
+static bool js_dom_rich_history_capture_boundary(
+    DomElement* owner, const DomBoundary* boundary,
+    JsDomRichHistoryBoundary* out) {
+    if (out) memset(out, 0, sizeof(*out));
+    if (!owner || !boundary || !boundary->node || !out ||
+        !dom_boundary_is_valid(boundary)) {
+        return false;
+    }
+
+    DomNode* owner_node = (DomNode*)owner;
+    if (!js_dom_node_contains(owner_node, boundary->node)) return false;
+
+    uint32_t reverse_path[JS_DOM_RICH_HISTORY_PATH_CAP];
+    uint32_t depth = 0;
+    for (DomNode* cur = boundary->node; cur && cur != owner_node;
+         cur = cur->parent) {
+        if (depth == JS_DOM_RICH_HISTORY_PATH_CAP) return false;
+        uint32_t index = dom_node_child_index(cur);
+        if (index == UINT32_MAX) return false;
+        reverse_path[depth++] = index;
+    }
+
+    for (uint32_t i = 0; i < depth; i++) {
+        out->path[i] = reverse_path[depth - 1 - i];
+    }
+    out->depth = depth;
+    out->offset = boundary->offset;
+    out->valid = true;
+    return true;
+}
+
+static bool js_dom_rich_history_capture_selection(
+    DocState* state, DomElement* owner, JsDomRichHistorySelection* out) {
+    if (out) memset(out, 0, sizeof(*out));
+    if (!state || !owner || !out || !state->dom_selection ||
+        state->dom_selection->range_count == 0) {
+        return false;
+    }
+
+    DomBoundary anchor = dom_selection_anchor_boundary(state->dom_selection);
+    DomBoundary focus = dom_selection_focus_boundary(state->dom_selection);
+    bool anchor_ok = js_dom_rich_history_capture_boundary(
+        owner, &anchor, &out->anchor);
+    bool focus_ok = js_dom_rich_history_capture_boundary(
+        owner, &focus, &out->focus);
+    return anchor_ok && focus_ok;
+}
+
+static DomNode* js_dom_rich_history_child_at(DomElement* elem,
+                                             uint32_t index) {
+    if (!elem) return nullptr;
+    uint32_t i = 0;
+    for (DomNode* child = elem->first_child; child;
+         child = child->next_sibling, i++) {
+        if (i == index) return child;
+    }
+    return nullptr;
+}
+
+static bool js_dom_rich_history_resolve_boundary(
+    DomElement* owner, const JsDomRichHistoryBoundary* snapshot,
+    DomBoundary* out) {
+    if (!owner || !snapshot || !snapshot->valid || !out) return false;
+
+    DomNode* node = (DomNode*)owner;
+    for (uint32_t i = 0; i < snapshot->depth; i++) {
+        if (!node || !node->is_element()) return false;
+        node = js_dom_rich_history_child_at(node->as_element(),
+                                            snapshot->path[i]);
+    }
+    if (!node) return false;
+
+    uint32_t limit = dom_node_boundary_length(node);
+    out->node = node;
+    out->offset = snapshot->offset <= limit ? snapshot->offset : limit;
+    return true;
+}
+
+static bool js_dom_rich_history_restore_selection(
+    DocState* state, DomElement* owner,
+    const JsDomRichHistorySelection* snapshot) {
+    if (!state || !owner || !snapshot) return false;
+
+    DomBoundary anchor;
+    DomBoundary focus;
+    if (!js_dom_rich_history_resolve_boundary(owner, &snapshot->anchor,
+                                              &anchor) ||
+        !js_dom_rich_history_resolve_boundary(owner, &snapshot->focus,
+                                              &focus)) {
+        return false;
+    }
+
+    const char* exc = nullptr;
+    if (!state_store_set_selection(state, &anchor, &focus, &exc)) {
+        log_debug("js_dom_rich_history_restore_selection: rejected: %s",
+                  exc ? exc : "?");
+        return false;
+    }
+    return true;
+}
+
+static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
+                                      bool notify_mutation) {
+    if (!elem || !html_str) return false;
+    DomDocument* doc = elem->doc;
+
+    DomNode* child = elem->first_child;
+    while (child) {
+        DomNode* next = child->next_sibling;
+        dom_pre_remove(child);
+        child->parent = nullptr;
+        child->next_sibling = nullptr;
+        child->prev_sibling = nullptr;
+        child = next;
+    }
+    elem->first_child = nullptr;
+    elem->last_child = nullptr;
+
+    if (doc && doc->input && elem->native_element &&
+        elem->native_element->length > 0) {
+        if (elem->native_element->length > INT32_MAX) {
+            log_error("js_dom_replace_inner_html: too many native children");
+            return false;
+        }
+        MarkEditor editor(doc->input, EDIT_MODE_INLINE);
+        Item cleared = editor.elmt_delete_children(
+            {.element = elem->native_element},
+            0,
+            (int)elem->native_element->length);
+        if (get_type_id(cleared) == LMD_TYPE_ELEMENT) {
+            elem->native_element = cleared.element;
+        } else {
+            log_error("js_dom_replace_inner_html: native clear failed");
+            return false;
+        }
+    }
+
+    if (html_str[0] != '\0') {
+        if (!doc || !doc->input) return false;
+
+        Html5Parser* parser = html5_fragment_parser_create(
+            doc->pool, doc->arena, doc->input);
+        if (!parser) return false;
+
+        html5_fragment_parse(parser, html_str);
+        Element* body_elem = html5_fragment_get_body(parser);
+        if (!body_elem) return false;
+
+        for (int64_t i = 0; i < body_elem->length; i++) {
+            TypeId type = get_type_id(body_elem->items[i]);
+            if (type == LMD_TYPE_ELEMENT) {
+                DomElement* child_dom = build_dom_tree_from_element(
+                    body_elem->items[i].element, doc, nullptr);
+                if (child_dom) dom_element_append_child(elem, child_dom);
+            } else if (type == LMD_TYPE_STRING) {
+                String* s = it2s(body_elem->items[i]);
+                if (s) dom_element_append_text(elem, s->chars);
+            }
+        }
+    }
+
+    js_dom_register_named_elements(elem);
+    _select_refresh_cached_selected_options_for_node((DomNode*)elem);
+    if (notify_mutation) {
+        js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
+                               (DomNode*)elem, elem->parent);
+    }
+    log_debug("js_dom_replace_inner_html: replaced <%s>",
+              elem->tag_name ? elem->tag_name : "?");
+    return true;
+}
+
+typedef struct JsDomRichHistoryEntry {
+    DomElement* owner;
+    char* before_html;
+    char* after_html;
+    JsDomRichHistorySelection before_sel;
+    JsDomRichHistorySelection after_sel;
+} JsDomRichHistoryEntry;
+
+static JsDomRichHistoryEntry js_dom_rich_history[JS_DOM_RICH_HISTORY_CAP];
+static uint32_t js_dom_rich_history_count = 0;
+static uint32_t js_dom_rich_history_cursor = 0;
+
+static void js_dom_rich_history_entry_clear(JsDomRichHistoryEntry* entry) {
+    if (!entry) return;
+    mem_free(entry->before_html);
+    mem_free(entry->after_html);
+    entry->owner = nullptr;
+    entry->before_html = nullptr;
+    entry->after_html = nullptr;
+    memset(&entry->before_sel, 0, sizeof(entry->before_sel));
+    memset(&entry->after_sel, 0, sizeof(entry->after_sel));
+}
+
+static void js_dom_rich_history_truncate_from(uint32_t start) {
+    if (start > js_dom_rich_history_count) start = js_dom_rich_history_count;
+    for (uint32_t i = start; i < js_dom_rich_history_count; i++) {
+        js_dom_rich_history_entry_clear(&js_dom_rich_history[i]);
+    }
+    js_dom_rich_history_count = start;
+    if (js_dom_rich_history_cursor > js_dom_rich_history_count) {
+        js_dom_rich_history_cursor = js_dom_rich_history_count;
+    }
+}
+
+static void js_dom_rich_history_reset() {
+    js_dom_rich_history_truncate_from(0);
+    js_dom_rich_history_cursor = 0;
+}
+
+static bool js_dom_rich_history_should_record(const EditingIntent* intent) {
+    if (!intent) return false;
+    switch (intent->type) {
+        case INPUT_INTENT_NONE:
+        case INPUT_INTENT_HISTORY_UNDO:
+        case INPUT_INTENT_HISTORY_REDO:
+        case INPUT_INTENT_SELECT_ALL:
+            return false;
+        default:
+            return true;
+    }
+}
+
+static void js_dom_rich_history_record(DomElement* owner,
+                                       const char* before_html,
+                                       const char* after_html,
+                                       const JsDomRichHistorySelection* before_sel,
+                                       const JsDomRichHistorySelection* after_sel) {
+    if (!owner || !before_html || !after_html ||
+        strcmp(before_html, after_html) == 0) {
+        return;
+    }
+
+    js_dom_rich_history_truncate_from(js_dom_rich_history_cursor);
+    if (js_dom_rich_history_count == JS_DOM_RICH_HISTORY_CAP) {
+        js_dom_rich_history_entry_clear(&js_dom_rich_history[0]);
+        memmove(&js_dom_rich_history[0], &js_dom_rich_history[1],
+                sizeof(js_dom_rich_history[0]) * (JS_DOM_RICH_HISTORY_CAP - 1));
+        js_dom_rich_history_count = JS_DOM_RICH_HISTORY_CAP - 1;
+        js_dom_rich_history_cursor = js_dom_rich_history_count;
+    }
+
+    JsDomRichHistoryEntry* entry =
+        &js_dom_rich_history[js_dom_rich_history_count];
+    entry->owner = owner;
+    entry->before_html = mem_strdup(before_html, MEM_CAT_JS_RUNTIME);
+    entry->after_html = mem_strdup(after_html, MEM_CAT_JS_RUNTIME);
+    if (before_sel) entry->before_sel = *before_sel;
+    else memset(&entry->before_sel, 0, sizeof(entry->before_sel));
+    if (after_sel) entry->after_sel = *after_sel;
+    else memset(&entry->after_sel, 0, sizeof(entry->after_sel));
+    if (!entry->before_html || !entry->after_html) {
+        js_dom_rich_history_entry_clear(entry);
+        return;
+    }
+    js_dom_rich_history_count++;
+    js_dom_rich_history_cursor = js_dom_rich_history_count;
+    log_debug("js_dom_rich_history_record: depth=%u cursor=%u",
+              js_dom_rich_history_count, js_dom_rich_history_cursor);
+}
+
+static bool js_dom_rich_history_restore(DocState* state,
+                                        const EditingSurface* surface,
+                                        const EditingIntent* intent) {
+    if (!state || !surface || !surface->owner || !intent ||
+        !editing_surface_is_rich(surface)) {
+        return false;
+    }
+
+    JsDomRichHistoryEntry* entry = nullptr;
+    const char* html = nullptr;
+    const JsDomRichHistorySelection* selection = nullptr;
+    if (intent->type == INPUT_INTENT_HISTORY_UNDO) {
+        if (js_dom_rich_history_cursor == 0) return false;
+        entry = &js_dom_rich_history[js_dom_rich_history_cursor - 1];
+        html = entry->before_html;
+        selection = &entry->before_sel;
+    } else if (intent->type == INPUT_INTENT_HISTORY_REDO) {
+        if (js_dom_rich_history_cursor >= js_dom_rich_history_count) return false;
+        entry = &js_dom_rich_history[js_dom_rich_history_cursor];
+        html = entry->after_html;
+        selection = &entry->after_sel;
+    } else {
+        return false;
+    }
+
+    if (!entry || entry->owner != surface->owner ||
+        !js_dom_node_is_connected((DomNode*)entry->owner) || !html) {
+        log_debug("js_dom_rich_history_restore: no matching live rich history entry");
+        return false;
+    }
+
+    if (!js_dom_replace_inner_html(entry->owner, html, false)) {
+        return false;
+    }
+
+    if (!js_dom_rich_history_restore_selection(state, entry->owner,
+                                               selection)) {
+        DomNode* owner_node = (DomNode*)entry->owner;
+        DomBoundary caret = { owner_node, 0 };
+        const char* exc = nullptr;
+        if (!state_store_set_selection(state, &caret, &caret, &exc)) {
+            log_debug("js_dom_rich_history_restore: fallback selection rejected: %s",
+                      exc ? exc : "?");
+        }
+    }
+
+    if (intent->type == INPUT_INTENT_HISTORY_UNDO) {
+        js_dom_rich_history_cursor--;
+    } else {
+        js_dom_rich_history_cursor++;
+    }
+    log_debug("js_dom_rich_history_restore: inputType=%s depth=%u cursor=%u",
+              input_intent_type_name(intent->type),
+              js_dom_rich_history_count, js_dom_rich_history_cursor);
+    return true;
 }
 
 // ============================================================================
@@ -8489,83 +8899,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
     if (strcmp(prop, "innerHTML") == 0) {
         const char* html_str = fn_to_cstr(value);
         if (!html_str) return ItemNull;
-        DomDocument* doc = elem->doc;
-
-        // 1. Remove all existing children
-        DomNode* child = elem->first_child;
-        while (child) {
-            DomNode* next = child->next_sibling;
-            dom_pre_remove(child);
-            child->parent = nullptr;
-            child->next_sibling = nullptr;
-            child->prev_sibling = nullptr;
-            child = next;
-        }
-        elem->first_child = nullptr;
-        elem->last_child = nullptr;
-
-        if (doc && doc->input && elem->native_element &&
-            elem->native_element->length > 0) {
-            if (elem->native_element->length > INT32_MAX) {
-                log_error("js_dom_innerHTML_clear_native_children: too many children");
-                return value;
-            }
-            MarkEditor editor(doc->input, EDIT_MODE_INLINE);
-            Item cleared = editor.elmt_delete_children(
-                {.element = elem->native_element},
-                0,
-                (int)elem->native_element->length);
-            if (get_type_id(cleared) == LMD_TYPE_ELEMENT) {
-                elem->native_element = cleared.element;
-            } else {
-                log_error("js_dom_innerHTML_clear_native_children: edit failed");
-                return value;
-            }
-        }
-
-        // 2. Empty string → done (cleared children)
-        if (html_str[0] == '\0') {
-            _select_refresh_cached_selected_options_for_node((DomNode*)elem);
-            return value;
-        }
-
-        // 3. Parse HTML fragment
-        if (!doc || !doc->input) return value;
-
-        Html5Parser* parser = html5_fragment_parser_create(
-            doc->pool, doc->arena, doc->input);
-        if (!parser) return value;
-
-        html5_fragment_parse(parser, html_str);
-        Element* body_elem = html5_fragment_get_body(parser);
-        if (!body_elem) return value;
-
-        // 4. Convert parsed Lambda Elements to DOM nodes and append
-        for (int64_t i = 0; i < body_elem->length; i++) {
-            TypeId type = get_type_id(body_elem->items[i]);
-            if (type == LMD_TYPE_ELEMENT) {
-                DomElement* child_dom = build_dom_tree_from_element(
-                    body_elem->items[i].element, doc, nullptr);
-                if (child_dom) {
-                    dom_element_append_child(elem, child_dom);
-                }
-            } else if (type == LMD_TYPE_STRING) {
-                String* s = it2s(body_elem->items[i]);
-                if (s) {
-                    dom_element_append_text(elem, s->chars);
-                }
-            }
-        }
-
-        log_debug("js_dom_set_property: set innerHTML on <%s>",
-                  elem->tag_name ? elem->tag_name : "?");
-        // Re-register element ids on the global object so HTML5 named-property
-        // access on Window picks up dynamically inserted elements (the WPT
-        // selection tests rely on `document.body.innerHTML = "<div id=foo>..."`
-        // making `foo` a global).
-        js_dom_register_named_elements(elem);
-        _select_refresh_cached_selected_options_for_node((DomNode*)elem);
-        js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE, (DomNode*)elem, elem->parent);
+        js_dom_replace_inner_html(elem, html_str, true);
         return value;
     }
 

@@ -1,0 +1,3 @@
+undo supported=true enabled=true ok=true before=historyUndo|0 inputs=0 html=abcd expected=true
+redo supported=true enabled=true ok=true before=historyRedo|0 inputs=0 html=abcd expected=true
+native-restore insert=true undo=true redo=true afterInsert=abXcd afterUndo=abcd afterRedo=abXcd undoSel=true:2:true:2 redoSel=true:3:true:3 before=historyUndo|0,historyRedo|0 inputs=insertText,historyUndo,historyRedo expected=true
