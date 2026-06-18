@@ -2,6 +2,7 @@
 
 #include "form_control.hpp"
 #include "state_store.hpp"
+#include "text_edit.hpp"
 #include "text_control.hpp"
 #include "view.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -141,10 +142,30 @@ static bool target_range_is_join_block_tag(uintptr_t tag_id) {
         case HTM_TAG_LI:
         case HTM_TAG_P:
         case HTM_TAG_PRE:
+        case HTM_TAG_TD:
+        case HTM_TAG_TH:
             return true;
         default:
             return false;
     }
+}
+
+static bool target_range_is_table_cell_tag(uintptr_t tag_id) {
+    return tag_id == HTM_TAG_TD || tag_id == HTM_TAG_TH;
+}
+
+static bool target_range_join_block_pair_allowed(DomElement* prev_block,
+                                                 DomElement* current_block) {
+    if (!prev_block || !current_block) return false;
+    bool prev_cell = target_range_is_table_cell_tag(prev_block->tag());
+    bool current_cell = target_range_is_table_cell_tag(current_block->tag());
+    if (!prev_cell && !current_cell) return true;
+    if (!prev_cell || !current_cell) return false;
+    if (prev_block->parent != current_block->parent) return false;
+    return !dom_element_has_attribute(prev_block, "rowspan") &&
+        !dom_element_has_attribute(prev_block, "colspan") &&
+        !dom_element_has_attribute(current_block, "rowspan") &&
+        !dom_element_has_attribute(current_block, "colspan");
 }
 
 static DomElement* target_range_text_block_parent(DomText* text) {
@@ -363,6 +384,30 @@ static uint32_t target_range_text_byte_len(DomText* text) {
     return text->length > 0 ? (uint32_t)text->length : (uint32_t)strlen(data);
 }
 
+static bool target_range_text_line_boundary(DomBoundary caret,
+                                            bool forward,
+                                            EditingTargetRange* out) {
+    if (!out || !caret.node || !caret.node->is_text()) return false;
+    DomText* text = caret.node->as_text();
+    if (!text) return false;
+
+    const char* data = text->text ? text->text : "";
+    uint32_t text_len = target_range_text_byte_len(text);
+    uint32_t byte_offset = dom_text_utf16_to_utf8(text, caret.offset);
+    uint32_t byte_boundary = forward
+        ? te_line_end(data, text_len, byte_offset)
+        : te_line_start(data, text_len, byte_offset);
+    uint32_t utf16_boundary = dom_text_utf8_to_utf16(text, byte_boundary);
+    if (forward) {
+        out[0].start = caret;
+        out[0].end = { caret.node, utf16_boundary };
+    } else {
+        out[0].start = { caret.node, utf16_boundary };
+        out[0].end = caret;
+    }
+    return true;
+}
+
 static bool target_range_backspace_atomic_whitespace(DomBoundary caret,
                                                      const EditingSurface* surface,
                                                      EditingTargetRange* out) {
@@ -524,7 +569,8 @@ static bool target_range_backspace_block_join(DomBoundary caret,
     DomNode* prev_node = current_node->prev_sibling;
     if (!prev_node || !prev_node->is_element()) return false;
     DomElement* prev_block = prev_node->as_element();
-    if (!prev_block || !target_range_is_join_block_tag(prev_block->tag())) {
+    if (!prev_block || !target_range_is_join_block_tag(prev_block->tag()) ||
+        !target_range_join_block_pair_allowed(prev_block, current_block)) {
         return false;
     }
 
@@ -588,6 +634,7 @@ static bool target_range_backspace_inline_fragment_block_join(
     if (!prev_node || !prev_node->is_element()) return false;
     DomElement* prev_block = prev_node->as_element();
     if (!prev_block || !target_range_is_join_block_tag(prev_block->tag()) ||
+        !target_range_join_block_pair_allowed(prev_block, current_block) ||
         !target_range_block_inline_fragments(prev_block)) {
         return false;
     }
@@ -837,6 +884,9 @@ uint32_t editing_compute_target_ranges(DocState* state,
         }
         case INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD:
         case INPUT_INTENT_DELETE_HARD_LINE_BACKWARD: {
+            if (target_range_text_line_boundary(start, false, out)) {
+                return 1;
+            }
             DomBoundary prev = dom_boundary_move(start, DOM_MOD_DOCUMENT, -1);
             out[0].start = prev;
             out[0].end = end;
@@ -844,6 +894,9 @@ uint32_t editing_compute_target_ranges(DocState* state,
         }
         case INPUT_INTENT_DELETE_SOFT_LINE_FORWARD:
         case INPUT_INTENT_DELETE_HARD_LINE_FORWARD: {
+            if (target_range_text_line_boundary(end, true, out)) {
+                return 1;
+            }
             DomBoundary next = dom_boundary_move(end, DOM_MOD_DOCUMENT, +1);
             out[0].start = start;
             out[0].end = next;

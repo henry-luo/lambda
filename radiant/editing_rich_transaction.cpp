@@ -173,7 +173,11 @@ static bool rich_transaction_is_text_deletion_intent(
     return intent->type == INPUT_INTENT_DELETE_CONTENT_BACKWARD ||
         intent->type == INPUT_INTENT_DELETE_CONTENT_FORWARD ||
         intent->type == INPUT_INTENT_DELETE_WORD_BACKWARD ||
-        intent->type == INPUT_INTENT_DELETE_WORD_FORWARD;
+        intent->type == INPUT_INTENT_DELETE_WORD_FORWARD ||
+        intent->type == INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD ||
+        intent->type == INPUT_INTENT_DELETE_SOFT_LINE_FORWARD ||
+        intent->type == INPUT_INTENT_DELETE_HARD_LINE_BACKWARD ||
+        intent->type == INPUT_INTENT_DELETE_HARD_LINE_FORWARD;
 }
 
 static bool rich_transaction_is_cleanup_inline_tag(uintptr_t tag_id) {
@@ -602,10 +606,30 @@ static bool rich_transaction_is_join_block_tag(uintptr_t tag_id) {
         case HTM_TAG_LI:
         case HTM_TAG_P:
         case HTM_TAG_PRE:
+        case HTM_TAG_TD:
+        case HTM_TAG_TH:
             return true;
         default:
             return false;
     }
+}
+
+static bool rich_transaction_is_table_cell_tag(uintptr_t tag_id) {
+    return tag_id == HTM_TAG_TD || tag_id == HTM_TAG_TH;
+}
+
+static bool rich_transaction_join_block_pair_allowed(DomElement* prev_block,
+                                                     DomElement* current_block) {
+    if (!prev_block || !current_block) return false;
+    bool prev_cell = rich_transaction_is_table_cell_tag(prev_block->tag());
+    bool current_cell = rich_transaction_is_table_cell_tag(current_block->tag());
+    if (!prev_cell && !current_cell) return true;
+    if (!prev_cell || !current_cell) return false;
+    if (prev_block->parent != current_block->parent) return false;
+    return !dom_element_has_attribute(prev_block, "rowspan") &&
+        !dom_element_has_attribute(prev_block, "colspan") &&
+        !dom_element_has_attribute(current_block, "rowspan") &&
+        !dom_element_has_attribute(current_block, "colspan");
 }
 
 static DomElement* rich_transaction_text_block_parent(DomText* text) {
@@ -855,7 +879,8 @@ static bool rich_transaction_join_previous_block(
     if (!prev_node || !prev_node->is_element()) return false;
 
     DomElement* prev_block = lam::dom_require_element(prev_node);
-    if (!prev_block || !rich_transaction_is_join_block_tag(prev_block->tag())) {
+    if (!prev_block || !rich_transaction_is_join_block_tag(prev_block->tag()) ||
+        !rich_transaction_join_block_pair_allowed(prev_block, current_block)) {
         return false;
     }
     DomText* prev_text = editing_rich_find_text_descendant(prev_node, true);
@@ -992,6 +1017,7 @@ static bool rich_transaction_join_previous_inline_fragment_block(
     if (!prev_node || !prev_node->is_element()) return false;
     DomElement* prev_block = lam::dom_require_element(prev_node);
     if (!prev_block || !rich_transaction_is_join_block_tag(prev_block->tag()) ||
+        !rich_transaction_join_block_pair_allowed(prev_block, current_block) ||
         !rich_transaction_block_inline_fragments(prev_block)) {
         return false;
     }
@@ -3057,7 +3083,11 @@ bool editing_rich_default_replace(DocState* state,
         intent->type != INPUT_INTENT_DELETE_CONTENT_BACKWARD &&
         intent->type != INPUT_INTENT_DELETE_CONTENT_FORWARD &&
         intent->type != INPUT_INTENT_DELETE_WORD_BACKWARD &&
-        intent->type != INPUT_INTENT_DELETE_WORD_FORWARD) {
+        intent->type != INPUT_INTENT_DELETE_WORD_FORWARD &&
+        intent->type != INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD &&
+        intent->type != INPUT_INTENT_DELETE_SOFT_LINE_FORWARD &&
+        intent->type != INPUT_INTENT_DELETE_HARD_LINE_BACKWARD &&
+        intent->type != INPUT_INTENT_DELETE_HARD_LINE_FORWARD) {
         return false;
     }
 
@@ -3132,7 +3162,11 @@ bool editing_rich_default_replace(DocState* state,
     } else if (intent->type == INPUT_INTENT_DELETE_CONTENT_BACKWARD ||
                intent->type == INPUT_INTENT_DELETE_CONTENT_FORWARD ||
                intent->type == INPUT_INTENT_DELETE_WORD_BACKWARD ||
-               intent->type == INPUT_INTENT_DELETE_WORD_FORWARD) {
+               intent->type == INPUT_INTENT_DELETE_WORD_FORWARD ||
+               intent->type == INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD ||
+               intent->type == INPUT_INTENT_DELETE_SOFT_LINE_FORWARD ||
+               intent->type == INPUT_INTENT_DELETE_HARD_LINE_BACKWARD ||
+               intent->type == INPUT_INTENT_DELETE_HARD_LINE_FORWARD) {
         data = "";
         if (start == end) {
             if (intent->type == INPUT_INTENT_DELETE_CONTENT_BACKWARD) {
@@ -3199,6 +3233,16 @@ bool editing_rich_default_replace(DocState* state,
                 uint32_t next = te_next_word_byte(old_text, old_len, end);
                 if (next <= end) return false;
                 end = next;
+            } else if (intent->type == INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD ||
+                       intent->type == INPUT_INTENT_DELETE_HARD_LINE_BACKWARD) {
+                uint32_t line_start = te_line_start(old_text, old_len, start);
+                if (line_start >= start) return false;
+                start = line_start;
+            } else if (intent->type == INPUT_INTENT_DELETE_SOFT_LINE_FORWARD ||
+                       intent->type == INPUT_INTENT_DELETE_HARD_LINE_FORWARD) {
+                uint32_t line_end = te_line_end(old_text, old_len, end);
+                if (line_end <= end) return false;
+                end = line_end;
             }
         }
     }

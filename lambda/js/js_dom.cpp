@@ -397,13 +397,18 @@ static bool js_dom_testdriver_rich_surface(View* target,
 static InputIntentType js_dom_testdriver_delete_intent(uint32_t wpt_key,
                                                        int mods,
                                                        bool has_range) {
+    bool line_modifier = (mods & RDT_MOD_SUPER) != 0;
     bool word_modifier = (mods & (RDT_MOD_CTRL | RDT_MOD_ALT)) != 0;
     if (wpt_key == 0xE003) {
-        if (has_range || !word_modifier) return INPUT_INTENT_DELETE_CONTENT_BACKWARD;
+        if (has_range) return INPUT_INTENT_DELETE_CONTENT_BACKWARD;
+        if (line_modifier) return INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD;
+        if (!word_modifier) return INPUT_INTENT_DELETE_CONTENT_BACKWARD;
         return INPUT_INTENT_DELETE_WORD_BACKWARD;
     }
     if (wpt_key == 0xE017) {
-        if (has_range || !word_modifier) return INPUT_INTENT_DELETE_CONTENT_FORWARD;
+        if (has_range) return INPUT_INTENT_DELETE_CONTENT_FORWARD;
+        if (line_modifier) return INPUT_INTENT_DELETE_SOFT_LINE_FORWARD;
+        if (!word_modifier) return INPUT_INTENT_DELETE_CONTENT_FORWARD;
         return INPUT_INTENT_DELETE_WORD_FORWARD;
     }
     return INPUT_INTENT_NONE;
