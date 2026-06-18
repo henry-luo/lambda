@@ -123,7 +123,7 @@ static inline JsAccessorPair* js_item_to_accessor_pair(Item it) {
 // Returns NULL if no shape entry exists for that name (i.e. the property has not
 // been added yet, or the object kind has no map). For Phase 1b dual-write mode,
 // callers use this to set/clear flags on the ShapeEntry corresponding to a JS
-// property that was just written via the legacy magic-key scheme.
+// property that was just written or defined.
 ShapeEntry* js_find_shape_entry(Item obj, const char* name, int name_len);
 
 // Convenience: set flags bits on the ShapeEntry for `name` (no-op if not found).
@@ -152,15 +152,11 @@ void js_shape_entry_set_deleted(Item obj, const char* name, int name_len, bool i
 // =============================================================================
 //
 // Query whether the named own property of map `m` is enumerable / writable /
-// configurable. The shape entry `se` (if non-NULL) is consulted FIRST: if its
-// JSPD_NON_* flag bit is set, the property is treated accordingly without
-// further probing. Otherwise (or when `se == NULL`), a legacy `__ne_X` /
-// `__nw_X` / `__nc_X` marker probe on `m` provides the answer. This combined
-// check is robust against shared (pool-deduplicated) shape entries whose flag
-// bits could not be safely mutated by `js_dual_write_marker_flags`.
+// configurable. ShapeEntry::flags are authoritative. If `se == NULL`, helpers
+// return the ordinary JS default attributes for a data property.
 //
-// Use these to replace the repetitive `snprintf("__ne_%.*s") + map_get_fast_ext
-// + js_is_truthy` pattern across enumerator/spread/assign sites.
+// Use these wherever descriptor attributes are needed across enumerator,
+// spread, assign, delete, and descriptor-application sites.
 bool js_props_query_enumerable(Map* m, ShapeEntry* se,
                                 const char* name, int name_len);
 bool js_props_query_writable(Map* m, ShapeEntry* se,
@@ -177,7 +173,7 @@ bool js_props_obj_query_writable(Item obj, const char* name, int name_len);
 bool js_props_obj_query_configurable(Item obj, const char* name, int name_len);
 
 // =============================================================================
-// Stage A2.6: attribute marker write helpers
+// Attribute write helpers
 // =============================================================================
 //
 // Centralize attribute mutation. Each helper sets/clears the inverse
@@ -186,9 +182,9 @@ bool js_props_obj_query_configurable(Item obj, const char* name, int name_len);
 //   - `writable=false` → set NON_WRITABLE    (non-writable)
 //   - same inverse semantics for enumerable / configurable.
 //
-// Named properties must already have a ShapeEntry. During the array migration,
-// dense numeric indices and the virtual array `length` may still fall back to
-// the temporary companion-map marker slots.
+// Named properties must already have a ShapeEntry. Dense numeric array indices
+// and the virtual array `length` are materialized into companion-map shape
+// entries before the flag is mutated.
 //
 // Property name length must satisfy 0 < name_len < 240 (defensive bound for
 // the 256-byte stack buffer including the 5-byte prefix and NUL).
@@ -197,45 +193,21 @@ void js_attr_set_enumerable(Item obj, const char* name, int name_len, bool enume
 void js_attr_set_configurable(Item obj, const char* name, int name_len, bool configurable);
 
 // =============================================================================
-// Phase 2a: Universal dual-write hook
+// Reader fast-path helpers
 // =============================================================================
 //
-// Inspect an array companion-map property write `(obj, key, value)`. If `key`
-// is an attribute marker key (`__nw_X` / `__ne_X` / `__nc_X`), extract the
-// underlying property name X and update the corresponding bit on the X
-// ShapeEntry::flags. Truthy `value` sets the bit; tombstoned-or-falsy clears it
-// (except for accessor markers, which are sticky once set — Phase 2 readers
-// will manage clear-on-tombstone after migration).
-//
-// Returns true if the key matched a marker pattern (caller may use this hint
-// to know that a flag mutation occurred). No-op (returns false) for any
-// non-marker key, non-string key, or unknown prefix.
-//
-// This is still used only for the array companion-map transition path. Public
-// writes to marker-looking names on ordinary objects are plain JS properties.
-bool js_dual_write_marker_flags(Item obj, Item key, Item value);
-
-// =============================================================================
-// Phase 2b: Reader fast-path helpers
-// =============================================================================
-//
-// `js_prop_attrs_fast_path` returns a tri-state hint about whether the legacy
-// magic-key probe for an attribute marker can be skipped:
-//   1  → shape entry exists AND attribute is the JS default (e.g. writable):
-//        the marker is provably absent on this map; SKIP the probe entirely.
-//   0  → shape entry exists AND attribute is non-default (e.g. non-writable):
-//        the marker is provably present; act as if probe found a truthy value.
+// `js_prop_attrs_fast_path` returns a tri-state hint for direct shape-flag
+// checks:
+//   1  -> shape entry exists AND attribute is the JS default (e.g. writable).
+//   0  -> shape entry exists AND attribute is non-default (e.g. non-writable).
 //  -1  → shape entry not found (property hasn't been added yet, or this object
-//        kind has no map): fall through to the legacy probe — required for
-//        edge cases like ro_globals which set `__nw_X` markers on globalThis
-//        for properties that live on the prototype chain.
+//        kind has no map).
 //
 // `attr_flag` must be exactly one of JSPD_NON_WRITABLE / JSPD_NON_ENUMERABLE /
 // JSPD_NON_CONFIGURABLE / JSPD_IS_ACCESSOR.
 //
-// IMPORTANT: do not use this for accessor (get/set) probes yet — Phase 2a
-// flag-population for accessor-only properties is incomplete (no shape entry
-// is created for X when only `__get_X` is stored). Use only for nw/ne/nc.
+// Use only for inverse attribute flags. Accessor presence should be read with
+// `js_own_shape_slot_status` or the accessor-pair helpers.
 static inline int js_prop_attrs_fast_path(Item obj, const char* name, int name_len,
                                           uint8_t attr_flag) {
     ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
@@ -250,11 +222,8 @@ static inline int js_prop_attrs_fast_path(Item obj, const char* name, int name_l
 // `js_install_native_accessor` is the single chokepoint for installing native
 // (C/builtin) accessor properties — RegExp prototype getters, length getter,
 // Symbol.species, Symbol.iterator, TypedArray buffer/byteLength/byteOffset, etc.
-// During Stage A it preserves the legacy `__get_X`/`__set_X` magic-key storage
-// (via js_property_set, which routes through dual-write to populate shape
-// flags). Stage B will switch the underlying storage to put the
-// `JsAccessorPair` Item in the slot for X with `JSPD_IS_ACCESSOR` set on the
-// shape entry, with a single-line edit here.
+// Stores a `JsAccessorPair` Item in the visible property slot with
+// `JSPD_IS_ACCESSOR` set on the shape entry.
 //
 // `attrs` uses the JSPD_* inverse-bit encoding: pass 0 for ES default
 // (enumerable + configurable). For ES accessor defaults (non-enumerable,

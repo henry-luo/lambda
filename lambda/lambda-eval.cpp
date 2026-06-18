@@ -5112,15 +5112,19 @@ void fn_map_set(Item map_item, Item key, Item value) {
         return;
     }
 
-    // get key as C string
+    // get key text; Lambda strings/symbols are length-bearing even when their
+    // chars are NUL-terminated, and JS property names may contain any byte.
     const char* key_cstr = NULL;
+    size_t key_len = 0;
     TypeId key_type = get_type_id(key);
     if (key_type == LMD_TYPE_STRING) {
         String* s = key.get_safe_string();
         key_cstr = s ? s->chars : NULL;
+        key_len = s ? s->len : 0;
     } else if (key_type == LMD_TYPE_SYMBOL) {
         Symbol* sym = key.get_safe_symbol();
         key_cstr = sym ? sym->chars : NULL;
+        key_len = sym ? sym->len : 0;
     } else {
         log_error("fn_map_set: key must be string or symbol");
         return;
@@ -5134,9 +5138,13 @@ void fn_map_set(Item map_item, Item key, Item value) {
     TypeId value_type = get_type_id(value);
     ShapeEntry* entry = map_type->shape;
     while (entry) {
-        // A6: pointer comparison first (interned strings share char* pointers)
-        if (entry->name && entry->name->str &&
-            (entry->name->str == key_cstr || strcmp(entry->name->str, key_cstr) == 0)) {
+        bool name_matches = false;
+        if (entry->name && entry->name->str && entry->name->length == key_len) {
+            // A6: pointer comparison first (interned strings share char* pointers)
+            name_matches = (entry->name->str == key_cstr ||
+                memcmp(entry->name->str, key_cstr, key_len) == 0);
+        }
+        if (name_matches) {
             TypeId field_type = entry->type->type_id;
             void* field_ptr = (char*)*data_slot + entry->byte_offset;
 

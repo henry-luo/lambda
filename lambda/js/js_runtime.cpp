@@ -1540,9 +1540,9 @@ static bool js_private_storage_has_own(Item object, Item private_key) {
         lookup_object = js_proxy_private_slots(object, false);
     }
     if (get_type_id(lookup_object) != LMD_TYPE_MAP) return false;
-    bool found = false;
-    Item existing = js_map_get_fast(lookup_object.map, key_str->chars, (int)key_str->len, &found);
-    return found && existing.item != JS_DELETED_SENTINEL_VAL;
+    JsShapeSlotStatus status = js_own_shape_slot_status(
+        lookup_object, key_str->chars, (int)key_str->len, NULL, NULL);
+    return status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR;
 }
 
 static bool js_private_brand_storage_has_own(Item object, String* field_key_str) {
@@ -4015,29 +4015,24 @@ extern "C" Item js_property_get(Item object, Item key) {
             char idx_buf[32];
             int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
             Item pm_item = (Item){.map = props};
-            ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
-            if (_se_idx && jspd_is_accessor(_se_idx)) {
-                bool slot_found = false;
-                Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
-                if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
-                    JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
-                    if (pair && pair->getter.item != ItemNull.item) {
-                        return js_accessor_call_result(pair->getter, object);
-                    }
-                    // setter-only accessor: shadows inherited (ES §9.1.8)
-                    return make_js_undefined();
+            Item slot_val = ItemNull;
+            JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, &slot_val, NULL);
+            if (status == JS_SHAPE_SLOT_ACCESSOR) {
+                JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                if (pair && pair->getter.item != ItemNull.item) {
+                    return js_accessor_call_result(pair->getter, object);
                 }
+                // setter-only accessor: shadows inherited (ES §9.1.8)
+                return make_js_undefined();
             }
             // AT-3: legacy __get_<idx>/__set_<idx> marker fallback retired.
             // Post-AT-1 the intercept routes companion-map accessor writes
             // through JsAccessorPair under the digit-string name with
             // IS_ACCESSOR shape flag, which the probe above already finds.
-            bool sparse_found = false;
-            Item sparse_val = js_map_get_fast_ext(props, idx_buf, idx_len, &sparse_found);
-            if (sparse_found && sparse_val.item != JS_DELETED_SENTINEL_VAL) {
+            if (status == JS_SHAPE_SLOT_DATA) {
                 bool dense_present = idx < object.array->length && idx < object.array->capacity &&
                     object.array->items[idx].item != JS_DELETED_SENTINEL_VAL;
-                if (!dense_present) return sparse_val;
+                if (!dense_present) return slot_val;
             }
         }
         if (idx_d == idx_d && idx >= 0 && idx < object.array->length && idx < object.array->capacity) {
@@ -4052,9 +4047,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                 char idx_buf[32];
                 snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
                 Map* pm = (Map*)(uintptr_t)object.array->extra;
-                bool pm_found = false;
-                Item pm_val = js_map_get_fast_ext(pm, idx_buf, (int)strlen(idx_buf), &pm_found);
-                if (pm_found && !js_is_deleted_sentinel(pm_val)) return pm_val;
+                Item pm_item = (Item){.map = pm};
+                Item pm_val = ItemNull;
+                JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, (int)strlen(idx_buf), &pm_val, NULL);
+                if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) return pm_val;
             }
         }
         // prototype chain lookup for numeric indices (holes, out-of-range)
@@ -4713,17 +4709,16 @@ extern "C" Item js_property_get(Item object, Item key) {
                         // Phase 5: dispatch IS_ACCESSOR slots in MAP proto with
                         // `object` as receiver. Without this, the raw
                         // JsAccessorPair* leaks out as if it were a Function.
-                        ShapeEntry* _se_m = js_find_shape_entry(proto, str_key->chars, (int)str_key->len);
-                        if (_se_m && jspd_is_accessor(_se_m)) {
-                            bool sf = false;
-                            Item slot = js_map_get_fast_ext(proto.map, str_key->chars, (int)str_key->len, &sf);
-                            if (sf && slot.item != JS_DELETED_SENTINEL_VAL) {
-                                JsAccessorPair* pair = js_item_to_accessor_pair(slot);
-                                if (pair && pair->getter.item != ItemNull.item) {
-                                    return js_accessor_call_result(pair->getter, object);
-                                }
-                                return make_js_undefined();
+                        ShapeEntry* _se_m = NULL;
+                        Item slot = ItemNull;
+                        JsShapeSlotStatus status = js_own_shape_slot_status(
+                            proto, str_key->chars, (int)str_key->len, &slot, &_se_m);
+                        if (status == JS_SHAPE_SLOT_ACCESSOR) {
+                            JsAccessorPair* pair = js_item_to_accessor_pair(slot);
+                            if (pair && pair->getter.item != ItemNull.item) {
+                                return js_accessor_call_result(pair->getter, object);
                             }
+                            return make_js_undefined();
                         }
                         Item result = map_get(proto.map, key);
                         if (result.item != ItemNull.item) return result;
@@ -5321,10 +5316,10 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
                 Item pm_item = (Item){.map = props};
                 ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
-                bool slot_found = false;
-                Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
-                if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
-                    if (_se_idx && jspd_is_accessor(_se_idx)) {
+                Item slot_val = ItemNull;
+                JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, &slot_val, NULL);
+                if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
+                    if (status == JS_SHAPE_SLOT_ACCESSOR) {
                         JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
                         if (pair && pair->setter.item != ItemNull.item) {
                             Item args[1] = { value };
@@ -5693,27 +5688,13 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
             else if (key_type == LMD_TYPE_SYMBOL) str_key = it2s(key);
             if (str_key) {
-                ShapeEntry* found_entry = NULL;
-                // A1: Use hash table for O(1) existing-key check
-                if (map_type->field_count > 0) {
-                    found_entry = typemap_hash_lookup(map_type, str_key->chars, (int)str_key->len);
-                } else {
-                    ShapeEntry* entry = map_type->shape;
-                    while (entry) {
-                        if (entry->name && (entry->name->str == str_key->chars ||  // A6: interned pointer
-                            (entry->name->length == (size_t)str_key->len
-                             && strncmp(entry->name->str, str_key->chars, str_key->len) == 0))) {
-                            found_entry = entry;
-                            break;
-                        }
-                        entry = entry->next;
-                    }
-                }
+                ShapeEntry* found_entry = js_find_shape_entry(object, str_key->chars, (int)str_key->len);
                 if (found_entry) {
                     // v37: If deleted sentinel, move entry to end of list for correct enum order
+                    JsShapeSlotStatus slot_status = js_own_shape_slot_status(
+                        object, str_key->chars, (int)str_key->len, NULL, NULL);
                     if (m->data) {
-                        Item cur = _map_read_field(found_entry, m->data);
-                        if (js_is_deleted_sentinel(cur)) {
+                        if (slot_status == JS_SHAPE_SLOT_DELETED) {
                             bool internal_non_symbol = str_key->len >= 2 && str_key->chars[0] == '_' && str_key->chars[1] == '_' &&
                                 !(str_key->len > 6 && strncmp(str_key->chars, "__sym_", 6) == 0);
                             if (!internal_non_symbol && !js_is_extensible(object)) {
@@ -5735,6 +5716,9 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                             else map_type->shape = found_entry;
                             map_type->last = found_entry;
                         }
+                    }
+                    if (slot_status == JS_SHAPE_SLOT_DELETED || jspd_is_deleted(found_entry)) {
+                        js_shape_entry_set_deleted(object, str_key->chars, (int)str_key->len, /*is_deleted=*/false);
                     }
                     fn_map_set(object, key, value);
                     js_sync_global_var_module_binding(object, key, value);
@@ -6938,24 +6922,19 @@ extern "C" Item js_array_get(Item array, Item index) {
         // AT-3: IS_ACCESSOR shape-flag dispatch under digit-string name
         // (post-AT-1 the intercept routes accessor writes here).
         Item pm_item = (Item){.map = props};
-        ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
-        if (_se_idx && jspd_is_accessor(_se_idx)) {
-            bool slot_found = false;
-            Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
-            if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
-                JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
-                if (pair && pair->getter.item != ItemNull.item) {
-                    return js_accessor_call_result(pair->getter, array);
-                }
-                return make_js_undefined();
+        Item slot_val = ItemNull;
+        JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, &slot_val, NULL);
+        if (status == JS_SHAPE_SLOT_ACCESSOR) {
+            JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+            if (pair && pair->getter.item != ItemNull.item) {
+                return js_accessor_call_result(pair->getter, array);
             }
+            return make_js_undefined();
         }
-        bool sparse_found = false;
-        Item sparse_val = js_map_get_fast_ext(props, idx_buf, idx_len, &sparse_found);
-        if (sparse_found && sparse_val.item != JS_DELETED_SENTINEL_VAL) {
+        if (status == JS_SHAPE_SLOT_DATA) {
             bool dense_present = idx < arr->length && idx < arr->capacity &&
                 arr->items[idx].item != JS_DELETED_SENTINEL_VAL;
-            if (!dense_present) return sparse_val;
+            if (!dense_present) return slot_val;
         }
     }
 
@@ -6997,17 +6976,14 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
             char idx_buf[32];
             int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
             Item pm_item = (Item){.map = props};
-            ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
-            if (_se_idx && jspd_is_accessor(_se_idx)) {
-                bool slot_found = false;
-                Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
-                if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
-                    JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
-                    if (pair && pair->getter.item != ItemNull.item) {
-                        return js_accessor_call_result(pair->getter, array);
-                    }
-                    return make_js_undefined();
+            Item slot_val = ItemNull;
+            JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, &slot_val, NULL);
+            if (status == JS_SHAPE_SLOT_ACCESSOR) {
+                JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                if (pair && pair->getter.item != ItemNull.item) {
+                    return js_accessor_call_result(pair->getter, array);
                 }
+                return make_js_undefined();
             }
             // AT-3: legacy __get_<idx> marker fallback retired.
         }
@@ -7015,9 +6991,10 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
             char idx_buf[32];
             int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
             Map* props = (Map*)(uintptr_t)arr->extra;
-            bool sparse_found = false;
-            Item sparse_val = js_map_get_fast_ext(props, idx_buf, idx_len, &sparse_found);
-            if (sparse_found && sparse_val.item != JS_DELETED_SENTINEL_VAL) {
+            Item pm_item = (Item){.map = props};
+            Item sparse_val = ItemNull;
+            JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, &sparse_val, NULL);
+            if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
                 bool dense_present = index < arr->length && index < arr->capacity &&
                     arr->items[index].item != JS_DELETED_SENTINEL_VAL;
                 if (!dense_present) return sparse_val;
@@ -7035,9 +7012,10 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
                 char idx_buf[32];
                 snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
                 Map* pm = (Map*)(uintptr_t)arr->extra;
-                bool pm_found = false;
-                Item pm_val = js_map_get_fast_ext(pm, idx_buf, (int)strlen(idx_buf), &pm_found);
-                if (pm_found && !js_is_deleted_sentinel(pm_val)) return pm_val;
+                Item pm_item = (Item){.map = pm};
+                Item pm_val = ItemNull;
+                JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, (int)strlen(idx_buf), &pm_val, NULL);
+                if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) return pm_val;
             }
         }
         // prototype chain lookup for numeric indices (holes, out-of-range)
@@ -7103,10 +7081,10 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
         int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
         Item pm_item = (Item){.map = pm};
         ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
-        bool slot_found = false;
-        Item slot_val = js_map_get_fast_ext(pm, idx_buf, idx_len, &slot_found);
-        if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
-            if (_se_idx && jspd_is_accessor(_se_idx)) {
+        Item slot_val = ItemNull;
+        JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, &slot_val, NULL);
+        if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
+            if (status == JS_SHAPE_SLOT_ACCESSOR) {
                 JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
                 if (pair && pair->setter.item != ItemNull.item) {
                     js_call_function(pair->setter, array, &value, 1);
@@ -7158,9 +7136,9 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
             own_index_present = true;
         } else if (arr->extra != 0) {
             Map* pm = (Map*)(uintptr_t)arr->extra;
-            bool pm_found = false;
-            Item pm_val = js_map_get_fast_ext(pm, idx_buf2, idx_len2, &pm_found);
-            own_index_present = pm_found && pm_val.item != JS_DELETED_SENTINEL_VAL;
+            Item pm_item = (Item){.map = pm};
+            JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf2, idx_len2, NULL, NULL);
+            own_index_present = status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR;
         }
         if (!own_index_present) {
             Item prop_key = (Item){.item = s2it(heap_create_name(idx_buf2, idx_len2))};
@@ -7291,10 +7269,9 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
         if (!js_props_query_writable(pm, _se_idx, idx_buf, idx_len)) {
             return value;
         }
-        bool slot_found = false;
-        Item slot_val = js_map_get_fast_ext(pm, idx_buf, idx_len, &slot_found);
+        JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, NULL, NULL);
         if (_se_idx && !jspd_is_accessor(_se_idx) &&
-            slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+            status == JS_SHAPE_SLOT_DATA) {
             Item str_key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
             js_property_set(pm_item, str_key, value);
             return value;
@@ -8113,30 +8090,15 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 String* ks = it2s(k);
                 Map* m = property_object.map;
                 if (m && m->type) {
-                    // Check if property exists in actual map shape
-                    bool found_in_shape = false;
                     ShapeEntry* found_entry = NULL;
-                    TypeMap* tm = (TypeMap*)m->type;
-                    ShapeEntry* e = tm->shape;
-                    while (e) {
-                        if (e->name && e->name->length == (size_t)ks->len &&
-                            strncmp(e->name->str, ks->chars, ks->len) == 0) {
-                            Item val = _map_read_field(e, m->data);
-                            if (val.item != JS_DELETED_SENTINEL_VAL) {
-                                found_in_shape = true;
-                                found_entry = e;
-                            }
-                            break;
-                        }
-                        e = e->next;
-                    }
+                    JsShapeSlotStatus status = js_own_shape_slot_status(
+                        property_object, ks->chars, (int)ks->len, NULL, &found_entry);
                     // A2-T7: legacy __get_X/__set_X marker fallback retired.
-                    // Accessor writes are intercepted into JsAccessorPair storage
-                    // with an IS_ACCESSOR shape entry on non-companion maps, so
-                    // the shape walk above already finds them. Companion maps
-                    // (MAP_KIND_ARRAY_PROPS) bypass intercept and still use markers,
-                    // but propertyIsEnumerable on those goes through a different path.
-                    if (!found_in_shape) return (Item){.item = ITEM_FALSE};
+                    // Accessors are stored as JsAccessorPair slots with an
+                    // IS_ACCESSOR shape entry, so the status query above sees
+                    // both data and accessor properties.
+                    if (status != JS_SHAPE_SLOT_DATA && status != JS_SHAPE_SLOT_ACCESSOR)
+                        return (Item){.item = ITEM_FALSE};
                     return (Item){.item = b2it(js_props_query_enumerable(m, found_entry,
                         ks->chars, (int)ks->len))};
                 }
@@ -8157,12 +8119,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 }
                 JsFunction* fn = (JsFunction*)property_object.function;
                 if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-                    // First check if property exists in properties_map
-                    bool has_key = false;
-                    Item slot = js_map_get_fast_ext(fn->properties_map.map, ks->chars, (int)ks->len, &has_key);
-                    if (has_key && slot.item != JS_DELETED_SENTINEL_VAL) {
-                        ShapeEntry* se = js_find_shape_entry(fn->properties_map,
-                            ks->chars, (int)ks->len);
+                    ShapeEntry* se = NULL;
+                    JsShapeSlotStatus status = js_own_shape_slot_status(
+                        property_object, ks->chars, (int)ks->len, NULL, &se);
+                    if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
                         return (Item){.item = b2it(js_props_query_enumerable(fn->properties_map.map,
                             se, ks->chars, (int)ks->len))};
                     }
@@ -21606,25 +21566,21 @@ static inline Item js_array_element(Item arr_item, int64_t idx) {
         char idx_buf[32];
         int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
         Item pm_item = (Item){.map = props};
-        ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
-        if (_se_idx && jspd_is_accessor(_se_idx)) {
-            bool slot_found = false;
-            Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
-            if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
-                JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
-                if (pair && pair->getter.item != ItemNull.item) {
-                    return js_accessor_call_result(pair->getter, arr_item);
-                }
-                return make_js_undefined();
+        Item slot_val = ItemNull;
+        JsShapeSlotStatus status = js_own_shape_slot_status(
+            pm_item, idx_buf, idx_len, &slot_val, NULL);
+        if (status == JS_SHAPE_SLOT_ACCESSOR) {
+            JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+            if (pair && pair->getter.item != ItemNull.item) {
+                return js_accessor_call_result(pair->getter, arr_item);
             }
+            return make_js_undefined();
         }
         // AT-3: legacy __get_<idx> marker fallback retired.
-        bool sparse_found = false;
-        Item sparse_val = js_map_get_fast_ext(props, idx_buf, idx_len, &sparse_found);
-        if (sparse_found && sparse_val.item != JS_DELETED_SENTINEL_VAL) {
+        if (status == JS_SHAPE_SLOT_DATA) {
             bool dense_present = idx >= 0 && idx < arr->length && idx < arr->capacity &&
                 arr->items[idx].item != JS_DELETED_SENTINEL_VAL;
-            if (!dense_present) return sparse_val;
+            if (!dense_present) return slot_val;
         }
     }
     // J39-7: spec [[Get]] for index >= length returns undefined (after array
@@ -21696,9 +21652,8 @@ static void js_create_data_property_or_throw(Item object, int64_t index, Item va
                 }
                 if (!is_writable)   js_attr_set_writable(object, buf, blen, /*writable=*/true);
                 if (!is_enumerable) js_attr_set_enumerable(object, buf, blen, /*enumerable=*/true);
-                bool slot_found = false;
-                Item slot_val = js_map_get_fast_ext(props, buf, blen, &slot_found);
-                if (_se && slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, buf, blen, NULL, NULL);
+                if (_se && (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR)) {
                     Item key = (Item){.item = s2it(heap_create_name(buf, blen))};
                     js_property_set(pm_item, key, value);
                     return;
@@ -21803,7 +21758,7 @@ static Item js_array_species_create(Item original_array, int64_t length) {
 
 // v37: ES spec §23.1 — Check if prototype chain has numeric-index properties.
 // Called once per array method to determine if holes need prototype chain walking.
-// Scans ShapeEntries of each prototype MAP for numeric keys or accessor markers (__get_N, __set_N).
+// Scans ShapeEntries of each prototype MAP for numeric keys.
 static bool js_proto_chain_has_numeric_keys(Item arr) {
     Item proto = js_get_prototype_of(arr);
     int depth = 0;
@@ -21821,11 +21776,6 @@ static bool js_proto_chain_has_numeric_keys(Item arr) {
                         size_t len = se->name->length;
                         // Direct numeric key (e.g., "0", "1", "42")
                         if (len <= 10 && s[0] >= '0' && s[0] <= '9') return true;
-                        // Accessor marker: __get_N or __set_N where N is numeric
-                        if (len > 6 && s[0] == '_' && s[1] == '_' &&
-                            ((s[2] == 'g' && s[3] == 'e' && s[4] == 't') ||
-                             (s[2] == 's' && s[3] == 'e' && s[4] == 't')) &&
-                            s[5] == '_' && s[6] >= '0' && s[6] <= '9') return true;
                     }
                     se = se->next;
                 }
@@ -21857,20 +21807,20 @@ static bool js_array_has_element(Item arr, lam::GcPtr<Array> a, int64_t idx, Ite
         char idx_buf[32];
         int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
         Item pm_item = (Item){.map = props};
-        ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
-        bool slot_found = false;
-        Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
-        if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
-            if (_se_idx && jspd_is_accessor(_se_idx)) {
-                JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
-                if (pair && pair->getter.item != ItemNull.item) {
-                    *out = js_call_function(pair->getter, arr, NULL, 0);
-                } else {
-                    // setter-only accessor: shadows inherited, value undefined
-                    *out = make_js_undefined();
-                }
-                return true;
+        Item slot_val = ItemNull;
+        JsShapeSlotStatus status = js_own_shape_slot_status(
+            pm_item, idx_buf, idx_len, &slot_val, NULL);
+        if (status == JS_SHAPE_SLOT_ACCESSOR) {
+            JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+            if (pair && pair->getter.item != ItemNull.item) {
+                *out = js_call_function(pair->getter, arr, NULL, 0);
+            } else {
+                // setter-only accessor: shadows inherited, value undefined
+                *out = make_js_undefined();
             }
+            return true;
+        }
+        if (status == JS_SHAPE_SLOT_DATA) {
             // Sparse high-index elements are stored as ordinary data
             // properties on the companion map. Array iteration HasProperty
             // must see them just like dense slots.
@@ -22016,9 +21966,9 @@ static bool js_array_sparse_key_has_current_slot(Map* props, int64_t idx) {
     if (!props) return false;
     char idx_buf[32];
     int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
-    bool found = false;
-    Item val = js_map_get_fast_ext(props, idx_buf, idx_len, &found);
-    return found && val.item != JS_DELETED_SENTINEL_VAL;
+    Item pm_item = (Item){.map = props};
+    JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, NULL, NULL);
+    return status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR;
 }
 
 // For sparse arrays with no numeric prototype keys, callback methods can skip
@@ -22052,6 +22002,7 @@ static bool js_array_find_next_own_element(Item arr, lam::GcPtr<Array> a, int64_
                 int64_t idx = -1;
                 if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
                 if (idx < start || idx >= len) continue;
+                if (jspd_is_deleted(se)) continue;
                 Item val = _map_read_field(se, props->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) continue;
                 if (best_extra < 0 || idx < best_extra) best_extra = idx;
@@ -24021,6 +23972,7 @@ includes_slow_path:
                 int64_t sparse_idx = -1;
                 if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &sparse_idx)) continue;
                 if (sparse_idx < start || sparse_idx >= end || sparse_idx < dense_end) continue;
+                if (jspd_is_deleted(se)) continue;
                 Item sparse_val = _map_read_field(se, pm->data);
                 if (sparse_val.item == JS_DELETED_SENTINEL_VAL) continue;
                 if (jspd_is_accessor(se)) {
@@ -24547,6 +24499,7 @@ includes_slow_path:
                 int64_t idx = -1;
                 if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
                 if (idx < a->capacity || idx >= a->length) continue;
+                if (jspd_is_deleted(se)) continue;
                 Item val = _map_read_field(se, pm->data);
                 if (val.item != JS_DELETED_SENTINEL_VAL) sparse_count++;
             }
@@ -24564,6 +24517,7 @@ includes_slow_path:
                 int64_t idx = -1;
                 if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
                 if (idx < a->capacity || idx >= a->length) continue;
+                if (jspd_is_deleted(se)) continue;
                 Item val = _map_read_field(se, pm->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) continue;
                 sparse_indices[sparse_pos] = idx;

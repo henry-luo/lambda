@@ -277,12 +277,13 @@ static inline uint32_t typemap_fnv1a(const char* key, int len) {
 // A1: Insert a ShapeEntry into the TypeMap hash table (open addressing, linear probe).
 // Uses last-writer-wins: if a name already exists, the slot is overwritten.
 static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
-    if (!entry || !entry->name || tm->field_count >= TYPEMAP_HASH_CAPACITY) return;
+    if (!entry || !entry->name) return;
     uint32_t h = typemap_fnv1a(entry->name->str, (int)entry->name->length);
     uint32_t idx = h & (TYPEMAP_HASH_CAPACITY - 1);
     for (int probe = 0; probe < TYPEMAP_HASH_CAPACITY; probe++) {
         uint32_t slot = (idx + probe) & (TYPEMAP_HASH_CAPACITY - 1);
         if (!tm->field_index[slot]) {
+            if (tm->field_count >= TYPEMAP_HASH_CAPACITY) return;
             tm->field_index[slot] = entry;
             tm->field_count++;
             return;
