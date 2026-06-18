@@ -214,6 +214,145 @@ fn render_inline_big_op_scripts(base, node, context, render_fn) {
     }
 }
 
+// full-precision metric accessors for limit boxes
+fn ls_raw_h(b) { if (b.height_raw != null) b.height_raw else b.height }
+fn ls_raw_d(b) { if (b.depth_raw != null) b.depth_raw else b.depth }
+
+fn ls_child_style(hd, fs) {
+    "height:" ++ util.fmt_em_ceil2(hd) ++ ";display:inline-block" ++
+        (if (fs) ";font-size: 70%" else "")
+}
+
+// Sum of a makeVList child list's vertical extents (kerns + box h+d).
+fn ls_sum(items, i, acc) {
+    if (i >= len(items)) acc
+    else (let it = items[i],
+          let e = if (it.k != null) it.k else (it.h + it.d),
+          ls_sum(items, i + 1, acc + e))
+}
+
+// Walk a makeVList child list (kern {k} or box {b,h,d,fs}), accumulating
+// currPos; record each box's emitted top (= -pstrut - currPos - depth) and
+// track the overall max/min position (the box height/depth).
+fn ls_walk(items, i, pstrut, cp, maxp, minp, centers) {
+    let result = if (i >= len(items)) {maxp: maxp, minp: minp, centers: centers}
+        else (let it = items[i],
+            if (it.k != null)
+                (let cp2 = cp + it.k,
+                 ls_walk(items, i + 1, pstrut, cp2, max(maxp, cp2), min(minp, cp2), centers))
+            else
+                (let top = 0.0 - pstrut - cp - it.d,
+                 let cp2 = cp + it.h + it.d,
+                 ls_walk(items, i + 1, pstrut, cp2, max(maxp, cp2), min(minp, cp2),
+                     centers ++ [{top: top, b: it.b, hd: it.h + it.d, fs: it.fs}])))
+    result
+}
+
+// Large operator box. The Size2 ∑/∏/⋃/⨁… glyphs share height 1.05, depth
+// 0.55001 (kept as-is so the pstrut = max(1.0, 1.05)+2 emits 3.05). The axis
+// centring (rule 13) is applied as a baseShift in make_limits_stack's
+// positions, NOT folded into height (which would break the pstrut).
+fn large_op_box_metric(text) {
+    {
+        element: <span class: "lm_op-symbol lm_large-op"; text>,
+        height: 1.05,
+        depth: 0.55001,
+        width: 1.44445,
+        type: "mop",
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
+// MathLive makeLimitsStack (v-box.ts) for display big operators: stacks the
+// below limit, the axis-centred op symbol, and the above limit separated by
+// bigOpSpacing gaps, laid out with makeVList — NO hardcoded em constants.
+fn make_limits_stack(op_box, sub_box, sup_box) {
+    let bos1 = met.at(met.bigOpSpacing1, 0)
+    let bos2 = met.at(met.bigOpSpacing2, 0)
+    let bos3 = met.at(met.bigOpSpacing3, 0)
+    let bos4 = met.at(met.bigOpSpacing4, 0)
+    let bos5 = met.at(met.bigOpSpacing5, 0)
+    let fs = 0.7   // display -> script scale for the limits
+    let op_h = op_box.height
+    let op_d = op_box.depth
+    let has_sub = sub_box != null
+    let has_sup = sup_box != null
+    // limits are rendered unscaled by Lambda; scale into the parent frame
+    let sub_h = if (has_sub) ls_raw_h(sub_box) * fs else 0.0
+    let sub_d = if (has_sub) ls_raw_d(sub_box) * fs else 0.0
+    let sup_h = if (has_sup) ls_raw_h(sup_box) * fs else 0.0
+    let sup_d = if (has_sup) ls_raw_d(sup_box) * fs else 0.0
+    let above_shift = if (has_sup) max(bos1, bos3 - sup_d) else 0.0
+    let below_shift = if (has_sub) max(bos2, bos4 - sub_h) else 0.0
+    let op_item = {b: op_box, h: op_h, d: op_d, fs: false}
+    let sub_item = {b: sub_box, h: sub_h, d: sub_d, fs: true}
+    let sup_item = {b: sup_box, h: sup_h, d: sup_d, fs: true}
+    let items = if (has_sub and has_sup)
+        [{k: bos5}, sub_item, {k: below_shift}, op_item, {k: above_shift}, sup_item, {k: bos5}]
+    else if (has_sub)
+        [{k: bos5}, sub_item, {k: below_shift}, op_item]
+    else
+        [op_item, {k: above_shift}, sup_item, {k: bos5}]
+    // axis-centring of the op symbol (rule 13), applied as a position shift
+    let bs_half = (op_h - op_d) / 2.0
+    let base_shift = bs_half - met.AXIS_HEIGHT
+    // initial vlist position (depth): both/above use "bottom" mode, below-only
+    // uses "top" mode (top = op_h - baseShift).
+    let depth0 = if (has_sub and has_sup)
+        0.0 - (bos5 + sub_h + sub_d + below_shift + op_d + base_shift)
+    else if (has_sub)
+        (op_h - base_shift) - ls_sum(items, 0, 0.0)
+    else
+        0.0 - (op_d + base_shift)
+    let pstrut = max(1.0, max(op_h, max(sub_h, sup_h))) + 2.0
+    let r = ls_walk(items, 0, pstrut, depth0, depth0, depth0, [])
+    let pstrut_style = "height:" ++ util.fmt_em_ceil2(pstrut)
+    let centers = (for (c in r.centers)
+        <span class: css.CENTER, style: "top:" ++ util.fmt_em_ceil2(c.top);
+            <span class: css.PSTRUT, style: pstrut_style>
+            <span style: ls_child_style(c.hd, c.fs);
+                for (e in box.elements_of(c.b)) e
+            >
+        >
+    )
+    let el = <span class: css.OP_GROUP;
+        <span class: css.VLIST_T2;
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(r.maxp);
+                    for (c in centers) c
+                >
+                <span class: css.VLIST_S; "​">
+            >
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(0.0 - r.minp)>
+            >
+        >
+    >
+    // full precision in *_raw (single-rounding strut path); height/depth and
+    // render_* are CEIL projections for non-raw consumers (an hbox sibling
+    // that lacks raw forces the rounded path — e.g. the \prod in a sum of
+    // fractions).
+    let full_depth = 0.0 - r.minp
+    let h_num = ceil_em2(r.maxp)
+    let d_num = 0.0 - ceil_em2(0.0 - full_depth)
+    {
+        element: el,
+        height: h_num,
+        depth: d_num,
+        height_raw: r.maxp,
+        depth_raw: full_depth,
+        render_height: h_num,
+        render_depth: d_num,
+        render_total: ceil_em2(r.maxp + full_depth),
+        width: max(op_box.width, max(if (has_sub) sub_box.width * fs else 0.0,
+                                     if (has_sup) sup_box.width * fs else 0.0)),
+        type: "mop",
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
 // render a big operator with limits above/below (display mode)
 fn render_big_op_limits(base, node, context, render_fn) {
     let cmd = string(base.name)
@@ -234,7 +373,11 @@ fn render_big_op_limits(base, node, context, render_fn) {
     let sub_box = if (has_sub) render_fn(node.sub, ctx.sub_context(context)) else null
     let sup_box = if (has_sup) render_fn(node.sup, ctx.sup_context(context)) else null
 
-    if (has_sub or has_sup)
+    // Symbol big-ops (∑/∏/⋃/⨁… — NOT \lim/\max text-ops, NOT integrals which
+    // route earlier) with limits use the metric-driven makeLimitsStack.
+    if (is_text_op == null and unicode != null and (has_sub or has_sup))
+        make_limits_stack(large_op_box_metric(unicode), sub_box, sup_box)
+    else if (has_sub or has_sup)
         render_large_op_limits_vlist(op_box, sub_box, sup_box, is_text_op != null)
     else
         (let scaled_op = if (is_text_op != null) op_box else box.with_scale(op_box, 1.5),
@@ -509,46 +652,80 @@ fn script_pair(base_box, script_box) {
 // Case A: Both superscript and subscript
 // ============================================================
 
+// Rule 18e (both sub + sup), emitted via MathLive's makeVList (vlist-t2) —
+// NOT the legacy inline-block stack. The corpus is display-rooted, so the min
+// sup shift uses sup1. Child metrics are scaled into the parent frame; the box
+// exposes full-precision height_raw/depth_raw so the outer strut rounds once.
 fn render_both(base_box, sup_box, sub_box, init_sup, init_sub,
                min_sup, x_height, rule_width, si,
                sup_font_scale, sub_font_scale) {
-    let sup_shift = max(init_sup, max(min_sup, sup_box.depth + 0.25 * x_height))
-    let sub_shift = max(init_sub, met.at(met.sub2, si))
-
-    // Rule 18e: check gap between sup bottom and sub top
-    let gap = sup_shift - sup_box.depth - (sub_box.height - sub_shift)
+    let sup_h = if (sup_box.height_raw != null) sup_box.height_raw else sup_box.height
+    let sup_d = if (sup_box.depth_raw != null) sup_box.depth_raw else sup_box.depth
+    let sub_h = if (sub_box.height_raw != null) sub_box.height_raw else sub_box.height
+    let sub_d = if (sub_box.depth_raw != null) sub_box.depth_raw else sub_box.depth
+    let sup_h_s = sup_h * sup_font_scale
+    let sup_d_s = sup_d * sup_font_scale
+    let sub_h_s = sub_h * sub_font_scale
+    let sub_d_s = sub_d * sub_font_scale
+    let min_sup_d = met.at(met.sup1, si)
+    let sup_shift0 = max(init_sup, max(min_sup_d, sup_d_s + 0.25 * x_height))
+    let sub_shift0 = max(init_sub, met.at(met.sub2, si))
+    let gap = sup_shift0 - sup_d_s - (sub_h_s - sub_shift0)
     let min_gap = 4.0 * rule_width
-
-    let adjusted = if (gap < min_gap)
-        (let sub_adj = min_gap - gap,
-         let new_sub = sub_shift + sub_adj,
-         let psi = 0.8 * x_height - (sup_shift - sup_box.depth),
-         if (psi > 0.0)
-             {sup_shift: sup_shift + psi, sub_shift: new_sub - psi}
-         else
-             {sup_shift: sup_shift, sub_shift: new_sub})
-    else
-        {sup_shift: sup_shift, sub_shift: sub_shift}
-
-    let sup_scale_str = util.fmt_pct(sup_font_scale)
-    let sub_scale_str = util.fmt_pct(sub_font_scale)
-    let sup_inner = sup_box.element
-    let sub_inner = sub_box.element
-    let sup_el = <span style: "display:block;font-size:" ++ sup_scale_str ++ ";line-height:1;text-align:left"; sup_inner>
-    let sub_el = <span style: "display:block;font-size:" ++ sub_scale_str ++ ";line-height:1;text-align:left"; sub_inner>
-    // inline-block baseline = last child (sub) baseline; shift it down
-    let va = util.fmt_em(0.0 - adjusted.sub_shift)
-    let container_style = "display:inline-block;vertical-align:" ++ va ++ ";text-align:left"
-    let max_w = max(sup_box.width * sup_font_scale, sub_box.width * sub_font_scale)
-    let el = <span style: container_style;
-        sup_el
-        sub_el
+    let adj = if (gap < min_gap)
+        (let new_sub = sub_shift0 + (min_gap - gap),
+         let psi = 0.8 * x_height - (sup_shift0 - sup_d_s),
+         if (psi > 0.0) {sup: sup_shift0 + psi, sub: new_sub - psi}
+         else {sup: sup_shift0, sub: new_sub})
+    else {sup: sup_shift0, sub: sub_shift0}
+    let sup_shift = adj.sup
+    let sub_shift = adj.sub
+    // makeVList individualShift, children bottom->top: subBox @ +sub_shift,
+    // supBox @ -sup_shift. currPos accumulates from the initial depth.
+    let depth0 = 0.0 - sub_shift - sub_d_s
+    let sub_end = depth0 + sub_h_s + sub_d_s
+    let diff_sup = sup_shift - depth0 - sup_d_s
+    let cp_sup = depth0 + diff_sup
+    let sup_end = cp_sup + sup_h_s + sup_d_s
+    let pstrut = max(1.0, max(sub_h_s, sup_h_s)) + 2.0
+    let max_pos = max(depth0, max(sub_end, max(cp_sup, sup_end)))
+    let min_pos = min(depth0, min(sub_end, min(cp_sup, sup_end)))
+    let pstrut_style = "height:" ++ util.fmt_em_ceil2(pstrut)
+    let sub_style = "height:" ++ util.fmt_em_ceil2(sub_h_s + sub_d_s) ++
+        ";display:inline-block;font-size: " ++ fmt_font_pct(sub_font_scale)
+    let sup_style = "height:" ++ util.fmt_em_ceil2(sup_h_s + sup_d_s) ++
+        ";display:inline-block;font-size: " ++ fmt_font_pct(sup_font_scale)
+    let sub_elements = box.elements_of(sub_box)
+    let sup_elements = box.elements_of(sup_box)
+    let el = <span class: css.VLIST_T2;
+        <span class: css.VLIST_R;
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(max_pos);
+                <span style: "top:" ++ util.fmt_em_ceil2(0.0 - pstrut - depth0 - sub_d_s);
+                    <span class: css.PSTRUT, style: pstrut_style>
+                    <span style: sub_style;
+                        for (e in sub_elements) e
+                    >
+                >
+                <span style: "top:" ++ util.fmt_em_ceil2(0.0 - pstrut - cp_sup - sup_d_s);
+                    <span class: css.PSTRUT, style: pstrut_style>
+                    <span style: sup_style;
+                        for (e in sup_elements) e
+                    >
+                >
+            >
+            <span class: css.VLIST_S; "​">
+        >
+        <span class: css.VLIST_R;
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(0.0 - min_pos)>
+        >
     >
     {
         element: el,
-        height: adjusted.sup_shift + sup_box.height * sup_font_scale,
-        depth: adjusted.sub_shift + sub_box.depth * sub_font_scale,
-        width: max_w,
+        height: max_pos,
+        depth: 0.0 - min_pos,
+        height_raw: max_pos,
+        depth_raw: 0.0 - min_pos,
+        width: max(sup_box.width * sup_font_scale, sub_box.width * sub_font_scale),
         type: "ord",
         italic: 0.0,
         skew: 0.0
