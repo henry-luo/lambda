@@ -1,6 +1,6 @@
 # Transpile_Node4: Stream-Centric Architecture & the Path Past 41%
 
-> **Status of this document.** This proposal supersedes the planning in `Transpile_Node3.md`. It re-measures the Node.js compatibility baseline against a **fresh `make release` build (2026-06-16)**, reconciles what actually landed since Node3 against what was planned, and lays out the next set of work ordered by impact-per-effort. Every claim is grounded in the current `lambda/js/` code (`file:line` cited; line numbers drift — confirm against the symbol).
+> **Status of this document.** This proposal supersedes the planning in `Transpile_Node3.md`. It re-measures the Node.js compatibility baseline against a **fresh `make release` build (2026-06-16)**, then refreshes key module claims against the current LambdaJS implementation with focused checks on 2026-06-18. The locked full-suite baseline remains 1,462; the 2026-06-18 spot-checks below are drift indicators, not a replacement full release baseline. Every claim is grounded in the current `lambda/js/` code (`file:line` cited; line numbers drift -- confirm against the symbol).
 
 ---
 
@@ -9,10 +9,10 @@
 LambdaJS now passes **1,462 of 3,521** official Node.js parallel tests (**41.5%**), measured on a fresh release build and locked in as the new baseline on 2026-06-16. That is **+48 net** over Node3's 1,414 snapshot — but the headline number hides the real story:
 
 - The previous baseline (`test/node/official_baseline.txt`, preserved as `*.stale-1414`) was **stale**: re-measurement showed **77 new passes and 28 regressions** against it, all from unrelated language-conformance work landing without a Node-regression gate. The first action of Node4 — re-baseline and gate against regressions — has been completed in tandem with this proposal.
-- Node3's plan was executed **out of order**. The work that landed (crypto ciphers, Buffer, assert, a real TLS layer, module sub-path resolution, process/os) tracked Phases 6/8/9/10/13. **Phase 7 — the stream state-machine rebuild, identified in Node3 as the highest-reward item — was never started.** `js_stream.cpp` is still 841 LOC of the same map-based stubs.
+- Node3's plan was executed **out of order**. The work that landed (crypto ciphers, Buffer, assert, a real TLS layer, module sub-path resolution, process/os) tracked Phases 6/8/9/10/13. **Phase 7 — the stream state-machine rebuild, identified in Node3 as the highest-reward item — was never started.** `js_stream.cpp` is still 840 LOC of the same map-based stubs.
 - Because streams were skipped, `http`, `net`, `zlib`, and the crypto cipher all got built **standalone on libuv** instead of on a shared stream core. They do not compose (no `pipe`, no `for await`, no `createReadStream`). This is now the dominant structural blocker.
-- There is a **stability problem**: 26 hard crashers + 2 timeouts, concentrated in `net` (11), `child_process` spawn (3), and `tls` (3). Crashes are worse than failures — they are exit-139 segfaults on error paths.
-- Several modules with **near-complete code score very low** (`assert` 2/14, `buffer` 25/67, `util` 5/27). Their gap is *message/semantics fidelity* (exact `ERR_*` codes and Node-format messages), not missing APIs.
+- There is a **stability problem**: the locked full-suite run had 26 hard crashers + 2 timeouts, and focused 2026-06-18 reruns show the pressure is still real. The first Track 0 slice has now cleared the focused `net` crash cluster (`net` is 94/148 with 0 crashers and 0 regressions), but `tls` is still 51/214 with 11 crashers. Crashes are worse than failures -- they are exit-139 segfaults on error, abort, invalid-option, and lifetime paths.
+- Several modules with **near-complete code score very low** (`assert` 2/14, `buffer` 25/67, `util` 7/27). Their gap is *message/semantics fidelity* (exact `ERR_*` codes and Node-format messages), not missing APIs.
 
 **Node4 target: ~1,800 (51%)** via six tracks, with a stretch to 1,900+. The central thesis: **build the real stream core, re-platform the I/O subsystems onto it, then close the wiring / stability / fidelity gaps around it.**
 
@@ -29,6 +29,8 @@ LambdaJS now passes **1,462 of 3,521** official Node.js parallel tests (**41.5%*
 
 > Per-module numbers in §3.1 were captured at 1,463 (single-test flicker `test-abortcontroller.js` between the measurement and lock-in runs); the difference is noise on a 3,521-test suite.
 
+> 2026-06-18 focused drift checks against the current local LambdaJS build: `util` stayed **7/27** with 0 regressions and 2 improvements; `stream` stayed **50/213** with 0 crashes; `dns` stayed **0/29**; `https` improved to **42/63** with 3 improvements; `net` is now **94/148** with 0 crashes, 0 regressions, and 12 improvements after the Track 0.3 socket-connect stabilization slice; `tls` shows **51/214** with 11 crashers and 4 regressions. Re-run the full release methodology in §9 before changing the locked baseline.
+
 > Measurement method is documented in [§9](#9-appendix-measurement-methodology) so these numbers are reproducible.
 
 ---
@@ -40,7 +42,7 @@ Node3 proposed Phases 6–14. Here is what the code actually shows today.
 | Node3 Phase | Planned | Actual status now | Evidence |
 |------|---------|-------------------|----------|
 | **6 — Error codes** | +80 | 🟡 **Infra done, migration ~15%** | `js_error_codes.h` exists (30 `JS_ERR_*` constants); helpers `js_throw_invalid_arg_type/_out_of_range/_type_error_code` at `js_runtime.cpp:21483–21570`. But only ~105 coded call sites vs ~700+ plain. `js_typed_array.cpp` alone has 65 plain + 45 coded; `js_runtime.cpp` has 401 plain. |
-| **7 — Stream internals** | +100 | 🔴 **NOT STARTED** | `js_stream.cpp` still 841 LOC. State is JS-map properties (`__flowing__`, `__buffer__`), no `highWaterMark`/backpressure, `_write` callback ignored (`:438–443`), no `Symbol.asyncIterator`. **This is the critical miss.** |
+| **7 — Stream internals** | +100 | 🔴 **NOT STARTED** | `js_stream.cpp` still 840 LOC. State is JS-map properties (`__flowing__`, `__buffer__`), only option storage for `highWaterMark` rather than backpressure, `_write` gets a noop callback, and there is no `Symbol.asyncIterator`. **This is the critical miss.** |
 | **8 — Crypto** | +60 | 🟢 **Symmetric done, asymmetric missing** | `createCipheriv/Decipheriv` (AES-CBC/CTR/GCM) `js_crypto.cpp:908–938`; `pbkdf2(Sync)` `:945`; `scrypt(Sync)` `:1112`; `subtle.digest/encrypt/decrypt` `:1225–1440`; `getCiphers/getHashes/timingSafeEqual`. Missing: sign/verify, DH/ECDH, keygen, KeyObject, X509, `randomFillSync`, `getFips`. |
 | **9 — Module resolution** | +50 | 🟢 **Mostly done** | `stream/promises` is now a real namespace (`js_runtime.cpp:31691`), plus `fs/promises`, `dns/promises`, `timers/promises`, `util/types`, `path/posix|win32`, `assert/strict`, `node:test`, `vm`, `perf_hooks`. `internal/util` and `internal/test/binding` are recognized as engine built-ins; remaining internal work is `internalBinding` constant/object fidelity. |
 | **10 — Process & OS** | +40 | 🟢 **Done** | `process.binding`, `allowedNodeEnvironmentFlags`, `report`, `setuid/setgid` all at `js_globals.cpp:3270–3330`. `os.cpus/networkInterfaces/userInfo/constants` complete (`js_os.cpp`). |
@@ -57,12 +59,14 @@ Node3 proposed Phases 6–14. Here is what the code actually shows today.
 
 ### 3.1 Per-module pass rates (priority modules)
 
+Rows for `https`, `net`, `tls`, `stream`, `util`, and `dns` were refreshed with focused 2026-06-18 runs against the current local build. The remaining rows are from the 2026-06-16 release-baseline probe and should be refreshed before using their exact counts in a release decision.
+
 | Module | Total | Pass | Rate | Crash | Read on the gap |
 |--------|------:|-----:|-----:|------:|-----------------|
 | http | 388 | 277 | 71% | 0 | Best-supported; gains now need streaming bodies + chunked encoding |
 | fs | 251 | 166 | 66% | 0 | async defers correctly (libuv); missing `FileHandle`, `fs.watch`, `createReadStream` |
-| https | 63 | 39 | 62% | 0 | **No TLS** — passes are non-encrypted paths; 3 regressions |
-| net | 148 | 82 | 55% | **11** | Crash cluster on connect-error paths; not a Duplex |
+| https | 63 | 42 | 67% | 0 | Still no true TLS wiring: `createServer()` delegates to HTTP despite the TLS-aware file header; 3 current improvements |
+| net | 148 | 94 | 64% | 0 | Track 0.3 landed real connect argument normalization, hostname lookup events, pending-connect destroy safety, and `uv_tcp_getsockname()` addresses; still not a Duplex |
 | os | (7)* | 3 | — | 0 | small prefix sample; mostly complete |
 | process | 93 | 36 | 39% | 1 | message fidelity + a few APIs |
 | events | 36 | 13 | 36% | 0 | missing `events.on()` async-iterator, functional captureRejections |
@@ -72,24 +76,24 @@ Node3 proposed Phases 6–14. Here is what the code actually shows today.
 | repl | 105 | 34 | 32% | 2 | mostly out of scope; 2 crashers |
 | url | 16 | 5 | 31% | 0 | WHATWG URL edge cases |
 | child_process | 97 | 26 | 27% | **3** | fork/IPC missing; spawn-error crashers |
-| tls | 214 | 52 | 24% | **3** | real handshake but many API gaps; abort crashers |
+| tls | 214 | 51 | 24% | **11** | real handshake but many API/lifetime gaps; abort/options/wrap crashers |
 | stream | 213 | 50 | 23% | 0 | **the linchpin — 163 failing** |
 | util | 27 | 7 | 26% | 0 | promisify promise/mustCall drain + inspect gaps; callbackify official pass |
 | assert | 14 | 2 | 14% | 0 | **code complete — gap is AssertionError message fidelity** |
 | crypto | 120 | 15 | 12% | 0 | asymmetric gap (sign/verify/keygen/KeyObject) |
 | zlib | 61 | 8 | 13% | 0 | **streaming gap — blocked on stream core** |
 | worker | 139 | 28 | 20% | 0 | stub (single-threaded); out of scope beyond stub passes |
-| **dns** | 29 | **0** | **0%** | 0 | **total failure — `dns.lookup` callback broken** |
+| **dns** | 29 | **0** | **0%** | 0 | **total failure — callback path exists, but lookup option/error semantics and Resolver coverage still miss Node** |
 
 <sup>*os prefix matched a small sample in the probe; the module is otherwise mature.</sup>
 
-### 3.2 Crash inventory (26 crashes + 2 timeouts) — `temp/_node_official_crashers.txt`
+### 3.2 Crash inventory (locked 26 crashes + 2 timeouts; spot-check drift noted)
 
 | Cluster | Count | Tests | Likely root cause |
 |---------|------:|-------|-------------------|
-| **net** | 11 | autoselectfamily, better-error-messages-{path,port-hostname}, connect-{immediate-finish,no-arg,options-invalid}, dns-custom-lookup, localerror, pipe-connect-errors, socket-connect-invalid-autoselectfamily(×2) | Null-deref in the connect **error callback** path; `Socket.connect` is a stub (`js_net.cpp:156`) and error objects are dereferenced unguarded |
+| **net** | **0 in the post-Track 0.3 focused run** | Was 15 in the earlier 2026-06-18 focused run: autoselectfamily, better-error-messages-{path,port-hostname}, connect-{after-destroy,immediate-finish,no-arg,options-invalid,options-port}, dns-{custom-lookup,error}, localerror, options-lookup, pipe-connect-errors, socket-connect-invalid-autoselectfamily(×2) | Fixed by `Socket.connect`/`net.connect` rest-arg normalization, Node-shaped validation errors, deferred close while DNS/connect is pending, `lookup` error emission, and method receiver fixes. Remaining net failures are stream/Duplex semantics rather than crashers. |
 | **child_process** | 3 | spawn-error, spawn-shell, spawn-typeerror | `spawn()` error path dereferences a null spawn result |
-| **tls** | 3 | client-abort, client-abort2, client-allow-partial-trust-chain | Abort during handshake frees `tls_conn` then reads it |
+| **tls** | 11 in 2026-06-18 focused run | client-abort, client-allow-partial-trust-chain, client-default-ciphers, connect-allow-half-open-option, connect-hints-option, destroy-whilst-write, ip-servername-forbidden, socket-allow-half-open-option, socket-constructor-alpn-options-parsing, tlswrap-segfault-2, wrap-event-emmiter | Handshake/socket lifetime and option-validation paths still read freed or uninitialized TLS/socket state. |
 | **console** | 2 | async-write-error, sync-write-error | Write-error EPIPE path |
 | **repl** | 2 | array-prototype-tempering, unsafe-array-iteration | Prototype tampering crashes the iterator fast-path |
 | **signal/process** | 3 | signal-args (130), signal-handler (143), process-kill-pid (143) | Signal delivery into the event loop |
@@ -98,11 +102,15 @@ Node3 proposed Phases 6–14. Here is what the code actually shows today.
 
 > Crashes block more than their own test — a segfault can abort a worker batch. **Track 0 fixes these first.**
 
-### 3.3 Regression inventory (28 baseline tests now failing)
+### 3.3 Regression inventory
 
-Clustered in `snapshot-dns` (4), `https` (3), `http` (3), `vm` (2), `tls` (2), `domain` (2), plus singletons. Two are **crash regressions** (exit 139): `test-net-pipe-connect-errors.js`, `test-tls-client-allow-partial-trust-chain.js`.
+The 2026-06-16 re-baseline audit found 28 failures relative to the stale 1,414 baseline, clustered in `snapshot-dns` (4), `https` (3), `http` (3), `vm` (2), `tls` (2), `domain` (2), plus singletons. Those were historical stale-baseline deltas, not necessarily current regressions after `test/node/official_baseline.txt` was relocked at 1,462.
 
-Sampled root causes (real, not flaky):
+Current 2026-06-18 focused module checks show active regressions against the locked 1,462 baseline in:
+- `net`: none after the Track 0.3 focused rerun (`./test/test_node_gtest.exe --modules=net --timeout=15000 --gtest_brief=1`)
+- `tls`: `test-tls-connect-hints-option.js`, `test-tls-destroy-whilst-write.js`, `test-tls-socket-constructor-alpn-options-parsing.js`, `test-tls-tlswrap-segfault-2.js`
+
+Historical sampled stale-baseline root causes (real at the time, but recheck before treating as current):
 - `test-next-tick.js` → `AssertionError: deepStrictEqual values are not equal` — **nextTick ordering regressed**.
 - `test-process-hrtime-bigint.js`, `test-buffer-swap-fast.js` → `Uncaught SyntaxError: Invalid eval source` — a **shared engine-level regression** from recent language/eval work, surfacing in the `*-fast` internal-binding tests.
 
@@ -110,10 +118,10 @@ These confirm the baseline drifted because of unrelated language-conformance wor
 
 ### 3.4 The "complete code, low pass-rate" anomaly
 
-`buffer` (37%), `assert` (14%), and `util` (26%) have substantially complete implementations (2,459 / 1,176 / 1,401 LOC) yet score low. Their failures are not missing methods — they are:
+`buffer` (37%), `assert` (14%), and `util` (26%) have substantially complete implementations (2,459 / 1,176 / 1,455 LOC) yet score low. Their failures are not missing methods — they are:
 - exact `AssertionError` / `TypeError` **message strings** and `.code` properties,
 - `util.inspect` output format (depth, colors, circular markers),
-- `util.promisify` only having a basic callback-last Promise wrapper, while `util.inspect` still lacks Node's formatting fidelity.
+- remaining `util.promisify` promise/mustCall drain behavior, while `util.inspect` still lacks Node's formatting fidelity.
 
 **Implication:** for these modules, a "fidelity sweep" (Track C/F) yields more than new features.
 
@@ -121,7 +129,7 @@ These confirm the baseline drifted because of unrelated language-conformance wor
 
 ## 4. Root-Cause Re-Analysis
 
-Five structural causes account for the bulk of the 2,056 failures + 26 crashes.
+Six structural causes account for the bulk of the locked 2,058 failures plus the current crash pressure.
 
 ### RC1 — No real stream state machine (the linchpin)
 
@@ -138,7 +146,7 @@ Five structural causes account for the bulk of the 2,056 failures + 26 crashes.
 
 Because there was no stream core to build on, each I/O module reimplemented its own ad-hoc data flow directly over libuv:
 - **http** (`js_http.cpp`, 1,329 LOC): `IncomingMessage.body` is a **string**, not a Readable; `ServerResponse` accumulates body in memory; no chunked transfer-encoding; `Agent` pooling is fake.
-- **net** (`js_net.cpp`, 654 LOC): `Socket` is **not a Duplex**; `setKeepAlive/setNoDelay/ref/unref` are no-ops; `address()` is hardcoded.
+- **net** (`js_net.cpp`, 1,094 LOC): `Socket` is **not a Duplex**; `setKeepAlive/setNoDelay/ref/unref` are no-ops. `connect()` now validates options and uses libuv DNS/TCP with safer lifetime handling, but the stream contract is still ad-hoc.
 - **zlib** (`js_zlib.cpp`): sync only; the streaming `createGzip()` family doesn't exist.
 - **crypto cipher**: `Cipher/Decipher` are not Transform streams (only `update`/`final`).
 
@@ -150,9 +158,9 @@ Two high-value capabilities exist but aren't wired:
 - **https has no TLS.** `js_https.cpp:39–43` delegates to `js_http_createServer()` on port 443; the comment itself says *"In a full implementation, this would pipe TLS sockets into HTTP parsing."* Meanwhile `js_tls.cpp` is a **real** mbedTLS handshake. Connecting them is wiring, not new crypto.
 - **`util.promisify` is partially real.** Node4 C.2 slices replaced the literal `return fn_item` stub with a callback-last Promise wrapper, `util.promisify.custom`, `internal/util.customPromisifyArgs`, Node default first-value resolution, named multi-result objects, and `DEP0174` warning emission. Local module coverage now passes, but the official `test-util-promisify.js` still fails on broader promise/mustCall drain behavior (direct run now reaches one anonymous `mustCall` instead of zero). `callbackify` now has a Promise-to-callback wrapper and official `test-util-callbackify.js` passes, so the remaining utility gap is promisify harness/promise fidelity plus `util.inspect`.
 
-### RC4 — Stability: null-deref crashers on error paths
+### RC4 — Stability: crashers on error, abort, and invalid-option paths
 
-The 26 crashers (RC §3.2) are overwhelmingly on **error / abort / invalid-argument paths** in `net`, `child_process`, and `tls` — code that constructs an error object or frees a handle and then dereferences it. These are guard-and-return fixes, not redesigns, and they recover both the crashing test and the worker stability around it.
+The locked full-suite crashers and the 2026-06-18 focused `net`/`tls` reruns were overwhelmingly on **error / abort / invalid-argument / option-validation paths**. The `net` side of that class has now been converted into clean passes/failures by fixing `Socket.connect`, option normalization, DNS lookup events, and pending-connect lifetime handling. The same shape remains in `tls`, where abort/options/wrap paths can still read freed or uninitialized TLS/socket state.
 
 ### RC5 — Message & semantics fidelity
 
@@ -160,7 +168,7 @@ The 26 crashers (RC §3.2) are overwhelmingly on **error / abort / invalid-argum
 
 ### RC6 — Total-failure / stub modules
 
-- **dns 0/29**: `dns.lookup(host, cb)` throws `TypeError: is not a function`; `dns.resolve` fakes A/AAAA via `getaddrinfo`; no `Resolver` class (`js_dns.cpp`, 219 LOC). Also the source of 4 `snapshot-dns` regressions.
+- **dns 0/29**: `dns.lookup(host, cb)` now has an async `uv_getaddrinfo` path, but the official `test-dns-lookup.js` still fails (`Missing expected exception` in the 2026-06-18 direct run), option/error semantics are incomplete, `dns.resolve` still fakes A/AAAA via `getaddrinfo`, and there is no `Resolver` class (`js_dns.cpp`, 219 LOC). Also the source of 4 historical `snapshot-dns` stale-baseline deltas.
 - **async_hooks / AsyncLocalStorage**: registered but stubbed (no context propagation) — already cost one regression (`test-async-local-storage-contexts.js`) and block async-context-dependent http/timer tests.
 
 ---
@@ -188,17 +196,17 @@ Track F (child fork/IPC + fidelity sweep) ─ independent
 
 0.2 **Add a Node-regression gate.** Wire the node-official runner into the same CI guard used for `test-lambda-baseline` so language commits (es2024/eval/sparse-array) can't silently regress Node tests as they did here (28 regressions).
 
-0.3 **Kill the net crash cluster (11 tests).** Guard the connect-error callback path in `js_net.cpp` (`client_connect_cb` ~`:264`, `Socket.connect` stub `:156`): on `status < 0`, build a proper `Error` with `code`/`errno`/`syscall` and emit `'error'` instead of dereferencing a null result. Implement `setNoDelay/setKeepAlive/ref/unref` as real no-ops returning `this`, and `address()` from `uv_tcp_getsockname`.
+0.3 **Kill the net crash cluster (done, 2026-06-18).** Focused net rerun is now **94/148**, **0 crashed**, **0 timed out**, **0 regressions**, **12 improvements**. Landed: normalized `(port, host, cb)` and object options for `net.connect`/`createConnection`/`Socket.connect`, Node-shaped validation and DNS errors, `'lookup'` event emission, pending-DNS/connect destroy safety, receiver fixes for Socket/Server methods, `resume()` chaining, and `address()` from `uv_tcp_getsockname`. Remaining net work belongs under Track A/B because `Socket` still is not a real Duplex.
 
 0.4 **Fix child_process spawn crashers (3).** Guard the `spawn()` failure path; on `uv_spawn` error, emit `'error'` with `ERR_*`/errno rather than crashing.
 
-0.5 **Fix tls abort crashers (3).** Null/already-freed guard on `tls_conn` in the abort/close path of `js_tls.cpp`.
+0.5 **Fix tls abort/options/wrap crashers (11 tests in the 2026-06-18 focused run).** Add null/already-freed guards on `tls_conn` and socket state, then normalize unsupported option paths (`allowHalfOpen`, hints, ALPN/default-cipher cases) into Node-shaped failures instead of reading invalid TLS state.
 
-0.6 **Fix the 2 crash-regressions + the shared "Invalid eval source" regression** (root cause behind `test-process-hrtime-bigint`, `test-buffer-swap-fast`) and the **nextTick-ordering regression**.
+0.6 **Fix active regressions, and re-check the historical stale-baseline fossils.** Current focused regressions are now `tls` only (`test-tls-connect-hints-option.js`, `test-tls-destroy-whilst-write.js`, `test-tls-socket-constructor-alpn-options-parsing.js`, `test-tls-tlswrap-segfault-2.js`); the previous `net` focused regressions (`test-net-connect-after-destroy.js`, `test-net-dns-error.js`) pass in the Track 0.3 rerun. The old `nextTick` and `Invalid eval source` samples came from the stale-baseline audit and should be revalidated before they are treated as current blockers.
 
 0.7 **Runner: per-module reporting + crash auto-quarantine.** Print the §3.1 table automatically and auto-tag crashers (already half-built — `write_crashers()` exists).
 
-> Net effect: convert ~26 crashers and ~20 recoverable regressions into clean fails/passes. Conservative **+30**, plus restored signal quality.
+> Net effect: convert the locked full-suite crashers, plus the currently visible `net`/`tls` crash drift, into clean failures or passes. Conservative **+30**, plus restored signal quality.
 
 ---
 
@@ -241,7 +249,7 @@ Once A lands, each subsystem becomes a thin adapter over the shared core instead
 
 High return for low effort; none depend on the stream rewrite.
 
-C.1 **Wire https → TLS (+10–15).** Replace the `js_https.cpp:39` delegation with `js_tls_createServer` for the server and `tls.connect` for the client, feeding decrypted bytes into the existing HTTP parser. The TLS layer already works (`js_tls.cpp:302`); this is plumbing. Also fixes 3 https regressions.
+C.1 **Wire https → TLS (+10–15).** Replace the `js_https.cpp:39` delegation with `js_tls_createServer` for the server and `tls.connect` for the client, feeding decrypted bytes into the existing HTTP parser. The TLS layer already works (`js_tls.cpp:302`); this is plumbing. The 2026-06-18 focused `https` run is already 42/63 with 3 improvements and 0 regressions, but the implementation still delegates server creation to plain HTTP, so the strategic gap remains.
 
 C.2 **Real `util.promisify` + `callbackify` (+15).** Implement the Node algorithm (last-arg callback `(err, value)` → resolve/reject; honor `util.promisify.custom`). `JsPromise` is fully available. Widely depended upon across fs/dns/stream/timers tests.
 
@@ -251,7 +259,7 @@ C.2 **Real `util.promisify` + `callbackify` (+15).** Implement the Node algorith
 
 **2026-06-17 promisify fidelity landing:** `util.promisify` now matches Node's result-shaping rules for the covered cases: default multi-value callbacks resolve to the first success value, while `fn[require('internal/util').customPromisifyArgs] = ['a', 'b']` resolves to an object mapping names to callback values. `internal/util` is now treated as an engine-provided built-in during static `require()` resolution (including the `.js` resolver fallback), and `process.off`/`removeListener` now actually removes registered listeners so the official warning tests can detach `mustNotCall` handlers. Promise-returning originals emit the Node `DEP0174` warning object. Updated `test/node/util_promisify.js` + `.txt`. Verification: `make build`; `./lambda.exe js test/node/util_promisify.js --no-log`; `./lambda.exe js test/node/util_callbackify.js --no-log`; `make build-test`; `./test/test_node_module_gtest.exe --gtest_filter=NodeModuleTests/NodeFileTest.Run/util_promisify:NodeModuleTests/NodeFileTest.Run/util_callbackify --gtest_brief=1` → **2/2 pass**; `./test/test_node_gtest.exe --modules=util --timeout=15000 --gtest_brief=1` → util official subset remains **7/27 pass, 20 fail, 0 regressions, 2 improvements**. Direct `test-util-promisify.js` now reaches one anonymous `mustCall` before exit (previously zero), but still fails the remaining `75 vs 1` promise/mustCall drain accounting.
 
-C.3 **`Buffer[Symbol.iterator]` + `keys/values/entries` (+3).** Only missing piece of an otherwise-complete Buffer.
+C.3 **`Buffer.prototype` iterator surface + `keys/values/entries` (+3).** `test-buffer-iterator.js` is in the locked baseline, so some iterator behavior already works through the wider engine/runtime path, but `js_buffer.cpp` still does not explicitly expose the Node Buffer prototype iterator family (`keys`, `values`, `entries`, `[Symbol.iterator]`). Keep this as a narrow API/fidelity cleanup, not a broad Buffer rewrite.
 
 C.4 **`internalBinding` / `internal/test/binding` stub (+15).** The `internal/test/binding` specifier is now recognized by both static require resolution and the module dispatcher, but the remaining work is to widen the returned `uv`/`config` constant coverage to match the official tests (Node3 §9.3 sketch is correct).
 
@@ -278,7 +286,7 @@ Reuse the cipher null-guard discipline from Track 0 to avoid new crashers.
 
 ### Track E — dns Rebuild + AsyncLocalStorage (P2, independent, **~+35**)
 
-E.1 **Fix dns (0 → ~20).** Repair the broken `dns.lookup(host, [opts], cb)` callback signature (currently throws `TypeError`), implement real `dns.resolve{4,6,Mx,Txt,Srv,...}` via libuv `uv_getaddrinfo`/a resolver, add the `Resolver` class, and make `dns/promises` wrap them correctly. Recovers the 4 `snapshot-dns` regressions too.
+E.1 **Fix dns (0 → ~20).** Complete `dns.lookup(host, [opts], cb)` option/error semantics (the 2026-06-18 direct `test-dns-lookup.js` failure is `Missing expected exception`, not a missing callback function), implement real `dns.resolve{4,6,Mx,Txt,Srv,...}` via libuv/a resolver instead of the current A/AAAA `getaddrinfo` shortcut, add the `Resolver` class, and make `dns/promises` return real Promises rather than exposing callback-shaped methods. Recovers the historical `snapshot-dns` stale-baseline deltas too.
 
 E.2 **Real AsyncLocalStorage (+15).** Propagate a context store across `nextTick`/microtask/timer/libuv callbacks (a context stack saved/restored around each scheduled callback in `js_event_loop.cpp`). Recovers `test-async-local-storage-*` and unblocks async-context http tests. Full `async_hooks` ID tracking remains out of scope.
 
@@ -335,7 +343,7 @@ Disabled in the runner today: `http2` (268), `dgram` (75), `wasi`. Out of scope:
 | Metric | Target |
 |--------|--------|
 | Baseline passes | ≥ 1,775 (50%+) |
-| **Zero crashes** | 26 → 0 (Track 0 is a hard gate) |
+| **Zero crashes** | locked 26 → 0, and current `net`/`tls` spot-check crashers → 0 (Track 0 is a hard gate) |
 | Zero regressions | Node-regression gate in CI (Track 0.2) |
 | stream rate | ≥ 55% (50 → ≥117) |
 | crypto rate | ≥ 45% (15 → ≥54) |
@@ -361,14 +369,16 @@ Tests come from `ref/node/test/parallel/` (3,938 files); the runner filters by t
 ### Failure samples
 
 ```
-$ lambda.exe js test-dns-lookup.js
-Uncaught TypeError: is not a function          # dns.lookup callback form broken → dns 0/29
+$ ./lambda.exe js ref/node/test/parallel/test-dns-lookup.js --no-log
+Uncaught AssertionError: Missing expected exception  # dns.lookup semantics still keep dns at 0/29
 
+# Historical stale-baseline samples from the 2026-06-16 audit; recheck before
+# treating them as current locked-baseline regressions:
 $ lambda.exe js test-next-tick.js
-Uncaught AssertionError: deepStrictEqual ...    # nextTick ordering regressed
+Uncaught AssertionError: deepStrictEqual ...    # nextTick ordering had regressed
 
 $ lambda.exe js test-buffer-swap-fast.js
-Uncaught SyntaxError: Invalid eval source       # shared engine regression (also hrtime-bigint)
+Uncaught SyntaxError: Invalid eval source       # shared engine regression sample (also hrtime-bigint)
 
 # js_https.cpp:39 — comment in source:
 #   "In a full implementation, this would pipe TLS sockets into HTTP parsing"
