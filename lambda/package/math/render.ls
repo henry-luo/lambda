@@ -759,10 +759,16 @@ fn render_colorbox_content(content_arg, context) {
          transparent_hbox(spaced))
 }
 
+// The ∂ glyph as a BARE element (no class span / italic margin — matches the
+// \pdiff golden) but carrying full-precision metrics from the cmr table so the
+// \pdiff fraction's children expose height_raw/depth_raw and can take the
+// metric path. cmr ∂ = height 0.69444, depth 0 (no descender).
 fn partial_box() => {
     element: "∂",
     height: 0.7,
-    depth: 0.08,
+    depth: 0.0,
+    height_raw: 0.69444,
+    depth_raw: 0.0,
     width: 0.45,
     type: "mord",
     italic: 0.0,
