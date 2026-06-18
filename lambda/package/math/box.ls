@@ -323,18 +323,8 @@ fn text_height(text) {
         text == "z" or
         // Descender short-body letters (height 0.44, depth 0.19 separately)
         text == "g" or text == "y" or text == "p" or text == "q") 0.44
-    // Greek lowercase — heights from MathLive Math-Italic probe.
-    // Short body (0.44): α γ η ι κ μ ν ο π ρ σ τ υ χ ω ϵ ϕ ϱ
-    else if (text == "α" or text == "γ" or text == "η" or text == "ι" or
-             text == "κ" or text == "μ" or text == "ν" or text == "ο" or
-             text == "π" or text == "ρ" or text == "σ" or text == "τ" or
-             text == "υ" or text == "χ" or text == "ω" or
-             text == "ε" or text == "φ" or text == "ϱ" or text == "ϕ" or
-             text == "ϵ") 0.44
-    // Tall body (0.7): β δ ε ζ θ λ ξ φ ψ ϑ
-    else if (text == "β" or text == "δ" or text == "ζ" or
-             text == "θ" or text == "λ" or text == "ξ" or
-             text == "ψ" or text == "ϑ") 0.7
+    // Greek lowercase heights now come from metrics_data (Math-Italic);
+    // the per-letter heuristic was dead (text_height_for looks up first).
     // Greek uppercase: cmr/Main-Regular height 0.69
     else if (text == "Γ" or text == "Δ" or text == "Θ" or text == "Λ" or
              text == "Π" or text == "Σ" or text == "Υ" or text == "Φ" or
@@ -444,8 +434,10 @@ fn text_depth(text) {
     else if (text == "↑" or text == "↓" or text == "⇑" or text == "⇓") 0.19
     // Vertical bi-directional arrows + nmid have deeper descent 0.25
     else if (text == "↕" or text == "⇕" or text == "∤") 0.25
-    // Dotless i/j (cmmi M118 depth 0.19)
-    else if (text == "ı" or text == "ȷ") 0.19
+    // Dotless i/j (cmmi M118): raw descent 0.19444 → CEIL@2 0.20 in the
+    // bottom strut (single-round of the descent, matching the golden's
+    // 0.90 strut-bottom / -0.20 vertical-align for \imath/\jmath).
+    else if (text == "ı" or text == "ȷ") 0.2
     // Set membership / perpendicular: cmsy depth ≈ 0.2
     else if (text == "∈" or text == "∋" or text == "∉" or
              text == "⊥" or text == "⊤") 0.2
@@ -486,12 +478,8 @@ fn text_depth(text) {
     else if (text == "⋄") 0.0 - 0.06
     // wp (℘): descender 0.19
     else if (text == "℘") 0.19
-    // Greek lowercase descenders (Math-Italic depths ≈ 0.19-0.2).
-    else if (text == "β" or text == "γ" or text == "η" or text == "ζ" or
-             text == "μ" or text == "ξ" or text == "ρ" or text == "φ" or
-             text == "χ" or text == "ψ" or text == "ϕ" or text == "ϱ") 0.19
-    // epsilon has slightly deeper descent (0.2)
-    else if (text == "ε") 0.2
+    // Greek lowercase descenders now come from metrics_data (Math-Italic);
+    // the per-letter depth heuristic was dead (lookup takes precedence).
     // Relations with NEGATIVE depth (sit above baseline). MathLive emits a
     // bottom strut with positive vertical-align for these.
     else if (text == "≈") 0.0 - 0.02
