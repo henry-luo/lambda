@@ -289,6 +289,10 @@ struct FormControlProp {
     }
 };
 
+// Release a form-control property attached to a DOM element. This is used by
+// both layout-owned views and JS-created detached nodes.
+void form_control_release_prop(DomElement* elem);
+
 // Helper functions
 
 /**

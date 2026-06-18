@@ -282,6 +282,8 @@ typedef struct EditingInteractionState {
     uint32_t rich_transaction_selection_seq;
     uint32_t rich_transaction_target_range_count;
     EditingTargetRangeSnapshot rich_transaction_target_ranges[4];
+    uint32_t inline_format_state;
+    uint32_t inline_format_state_mask;
 } EditingInteractionState;
 
 /**

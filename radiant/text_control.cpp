@@ -21,6 +21,7 @@
 // Headless/no-JS builds get the no-op weak fallback below.
 extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_selectionchange(DomElement* elem);
 extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_selectionchange(DomElement* /*elem*/) {}
+extern void font_prop_release_handle(FontProp* fprop);
 
 void tc_notify_selection_changed(DomElement* elem) {
     if (!elem) return;
@@ -81,6 +82,25 @@ FormControlProp* tc_get_or_create_form(DomElement* elem) {
     elem->form = f;
     elem->item_prop_type = DomElement::ITEM_PROP_FORM;
     return f;
+}
+
+void form_control_release_prop(DomElement* elem) {
+    if (!elem || elem->item_prop_type != DomElement::ITEM_PROP_FORM || !elem->form) {
+        return;
+    }
+
+    FormControlProp* form = elem->form;
+    if (form->placeholder_font) {
+        font_prop_release_handle(form->placeholder_font);
+        form->placeholder_font = nullptr;
+    }
+    if (form->heap_allocated) {
+        delete form;
+    } else {
+        form->~FormControlProp();
+    }
+    elem->form = nullptr;
+    elem->item_prop_type = DomElement::ITEM_PROP_NONE;
 }
 
 // ---- public: UTF-8 ↔ UTF-16 --------------------------------------------

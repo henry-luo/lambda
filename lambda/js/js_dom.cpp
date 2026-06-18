@@ -50,6 +50,7 @@
 #include "../input/html5/html5_parser.h"
 
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
+extern void free_document(DomDocument* doc);
 
 #include <cstring>
 #include <cctype>
@@ -1098,6 +1099,17 @@ static uintptr_t js_dom_exec_command_inline_tag(const char* cmd) {
     return 0;
 }
 
+static uint32_t js_dom_exec_command_inline_state_bit(const char* cmd) {
+    if (!cmd) return 0;
+    if (strcasecmp(cmd, "bold") == 0) return 1u << 0;
+    if (strcasecmp(cmd, "italic") == 0) return 1u << 1;
+    if (strcasecmp(cmd, "underline") == 0) return 1u << 2;
+    if (strcasecmp(cmd, "strikethrough") == 0) return 1u << 3;
+    if (strcasecmp(cmd, "subscript") == 0) return 1u << 4;
+    if (strcasecmp(cmd, "superscript") == 0) return 1u << 5;
+    return 0;
+}
+
 static bool js_dom_exec_command_inline_tag_matches(const char* cmd,
                                                    uintptr_t tag) {
     if (!cmd || !tag) return false;
@@ -1130,6 +1142,11 @@ static bool js_dom_exec_command_query_inline_state(const char* cmd) {
         state->dom_selection->range_count == 0 ||
         !state->dom_selection->ranges[0]) {
         return false;
+    }
+
+    uint32_t bit = js_dom_exec_command_inline_state_bit(cmd);
+    if (bit && (state->editing.inline_format_state_mask & bit)) {
+        return (state->editing.inline_format_state & bit) != 0;
     }
 
     DomBoundary boundary = dom_selection_focus_boundary(state->dom_selection);
@@ -1535,6 +1552,7 @@ static bool js_dom_replace_text_data(DomText* text_node, uint32_t offset,
  */
 static void expando_reset(); // forward declaration
 static void reset_dom_wrapper_cache(); // forward declaration
+static void reset_foreign_document_cache(); // forward declaration
 // Phase 6E: text-control helpers are shared with Radiant event/render paths.
 #include "../../radiant/text_control.hpp"
 #define tc_is_text_control_elem(e)      tc_is_text_control(e)
@@ -1553,11 +1571,19 @@ extern "C" void js_dom_batch_reset() {
     js_dom_events_reset();
     js_xhr_reset();
     expando_reset();
+    reset_foreign_document_cache();
     tc_reset_focus_state(state);
 }
 
 extern "C" void js_dom_shutdown() {
     js_dom_rich_history_reset();
+    reset_dom_wrapper_cache();
+    js_dom_events_reset();
+    js_xhr_reset();
+    expando_reset();
+    reset_foreign_document_cache();
+    _js_current_document = nullptr;
+    _js_main_document = nullptr;
 }
 
 // ============================================================================
@@ -2036,6 +2062,10 @@ static void reset_dom_wrapper_cache() {
     DomWrapperCacheChunk* chunk = s_dom_wrapper_cache_head;
     while (chunk) {
         for (int i = 0; i < chunk->count; i++) {
+            DomNode* node = chunk->entries[i].node;
+            if (node && node->is_element()) {
+                form_control_release_prop(node->as_element());
+            }
             heap_unregister_gc_root(&chunk->entries[i].item);
             chunk->entries[i].node = nullptr;
             chunk->entries[i].item = 0;
@@ -2392,6 +2422,52 @@ static IframeContentEntry* lookup_iframe_entry(DomElement* iframe) {
         if (s_iframe_cache[i].iframe == iframe) return &s_iframe_cache[i];
     }
     return NULL;
+}
+
+static bool doc_already_destroyed(DomDocument** docs, int doc_count, DomDocument* doc) {
+    if (!doc) return true;
+    for (int i = 0; i < doc_count; i++) {
+        if (docs[i] == doc) return true;
+    }
+    return false;
+}
+
+static void destroy_cached_doc_once(DomDocument** docs, int* doc_count, DomDocument* doc) {
+    if (!doc || doc == _js_main_document || doc_already_destroyed(docs, *doc_count, doc)) {
+        return;
+    }
+    if (*doc_count < FOREIGN_DOC_CACHE_SIZE + IFRAME_CACHE_SIZE) {
+        docs[*doc_count] = doc;
+        (*doc_count)++;
+    }
+    free_document(doc);
+}
+
+static void reset_foreign_document_cache() {
+    DomDocument* destroyed_docs[FOREIGN_DOC_CACHE_SIZE + IFRAME_CACHE_SIZE] = {};
+    int destroyed_doc_count = 0;
+
+    for (int i = 0; i < s_foreign_doc_cache_count; i++) {
+        heap_unregister_gc_root(&s_foreign_doc_cache[i].item);
+        destroy_cached_doc_once(
+            destroyed_docs, &destroyed_doc_count, s_foreign_doc_cache[i].doc);
+        s_foreign_doc_cache[i].doc = nullptr;
+        s_foreign_doc_cache[i].item = 0;
+    }
+    s_foreign_doc_cache_count = 0;
+
+    for (int i = 0; i < s_iframe_cache_count; i++) {
+        destroy_cached_doc_once(
+            destroyed_docs, &destroyed_doc_count, s_iframe_cache[i].doc);
+        s_iframe_cache[i].iframe = nullptr;
+        s_iframe_cache[i].doc = nullptr;
+    }
+    s_iframe_cache_count = 0;
+
+    for (int i = 0; i < s_doc_with_window_count; i++) {
+        s_doc_with_window[i] = nullptr;
+    }
+    s_doc_with_window_count = 0;
 }
 
 static Item wrap_foreign_doc(DomDocument* doc) {

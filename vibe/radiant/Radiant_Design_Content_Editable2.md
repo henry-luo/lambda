@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard/history started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, native rich-host `copy`/`cut`/`paste`, and native rich-host `undo`/`redo` event-envelope plus bounded snapshot/selection restore support.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting, conservative whole-wrapper toggle-off, collapsed typing-state inline insertion, and collapsed insertion adjacent-wrapper normalization landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard/history started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, native rich-host `copy`/`cut`/`paste`, and native rich-host `undo`/`redo` event-envelope plus bounded snapshot/selection restore support.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -756,6 +756,45 @@ whole EC-2 tier complete.
 | `test_js_gtest --gtest_brief=1` | 202 passed / 0 failed; existing memtrack leak diagnostics printed |
 
 **Global gate note:** EC-2c's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-2 tier complete.
+
+**EC-2d — collapsed inline typing-state toggles: LANDED (2026-06-18).**
+
+- Collapsed inline `execCommand("bold"|"italic"|"underline"|"strikethrough"|
+  "subscript"|"superscript")` now records an explicit rich editing typing
+  state instead of rejecting the collapsed range. `queryCommandState(...)`
+  reflects that override immediately, so toolbar state updates before the next
+  text insertion.
+- `execCommand("insertText", false, text)` now honors that typing state for
+  rich contenteditable carets. Toggling bold on at a plain caret inserts the
+  new text as `<b>text</b>`, and toggling bold off inside a simple `<b>` text
+  wrapper splits the wrapper around the inserted plain text.
+- Collapsed typing-state insertion also normalizes plain adjacent same-tag
+  wrappers created at the insertion boundary, so `<b>ab</b>|cd` plus bold
+  insertion becomes `<b>abX</b>cd`, and `ab|<b>cd</b>` becomes
+  `ab<b>Xcd</b>`.
+- The typing-state bitmask lives in the shared `EditingInteractionState`, so
+  the state is owned by Radiant's editing controller rather than by a JS-only
+  workaround.
+- Scope remains conservative: wrapper splitting is currently limited to simple
+  inline typing-state insertions, selected-range sibling normalization remains
+  future work, and semantic command-level undo grouping still relies on the
+  existing snapshot history rather than a richer command model.
+
+**Current EC verification after EC-2d (2026-06-18):**
+
+| Check | Result |
+|---|---|
+| Collapsed inline typing-state DOM regression | bold-on at a plain caret inserts `<b>X</b>abcd`; bold-off inside `<b>ab|cd</b>` inserts `<b>ab</b>X<b>cd</b>`; bold-on inside italic inserts `<i>ab<b>X</b>cd</i>` without duplicating the inherited wrapper; bold-on next to existing wrappers merges `<b>ab</b>|cd` to `<b>abX</b>cd` and `ab|<b>cd</b>` to `ab<b>Xcd</b>`; query state follows the override |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing warnings only |
+| `make check-int-cast` | passed |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_inline_format' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_js_gtest --gtest_brief=1` | 222 passed / 0 failed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+
+**Global gate note:** EC-2d's focused JS regression, full JS suite, and local
 WPT guards are green. The full `make test262-baseline` gate still needs to run
 before declaring the whole EC-2 tier complete.
 
