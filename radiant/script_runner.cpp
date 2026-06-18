@@ -1965,6 +1965,61 @@ typedef struct InlineHandlerInstallCollection {
 // hashmap callbacks for DomElement* keys
 HASHMAP_DEFINE_PTRKEY(inline_handler_install, InlineHandlerInstallEntry, element)
 
+static bool inline_handler_ident_start(char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+           c == '_' || c == '$';
+}
+
+static bool inline_handler_ident_part(char c) {
+    return inline_handler_ident_start(c) || (c >= '0' && c <= '9');
+}
+
+static const char* inline_handler_skip_space(const char* p) {
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    return p;
+}
+
+static bool append_global_call_inline_handler(StrBuf* compile_buf,
+                                              const char* attr_val) {
+    const char* p = inline_handler_skip_space(attr_val);
+    if (strncmp(p, "return", 6) == 0 && !inline_handler_ident_part(p[6])) {
+        p = inline_handler_skip_space(p + 6);
+    }
+    if (!inline_handler_ident_start(*p)) return false;
+
+    const char* name_start = p;
+    p++;
+    while (inline_handler_ident_part(*p)) p++;
+    size_t name_len = (size_t)(p - name_start);
+    if (name_len == 0 || name_len > 128) return false;
+
+    p = inline_handler_skip_space(p);
+    if (*p != '(') return false;
+    p = inline_handler_skip_space(p + 1);
+
+    bool pass_event = false;
+    if (strncmp(p, "event", 5) == 0 && !inline_handler_ident_part(p[5])) {
+        pass_event = true;
+        p = inline_handler_skip_space(p + 5);
+    }
+    if (*p != ')') return false;
+    p = inline_handler_skip_space(p + 1);
+    if (*p == ';') p = inline_handler_skip_space(p + 1);
+    if (*p != '\0') return false;
+
+    strbuf_append_str(compile_buf,
+        "var __lambda_inline_fn = (typeof globalThis !== 'undefined') ? globalThis[\"");
+    strbuf_append_str_n(compile_buf, name_start, name_len);
+    strbuf_append_str(compile_buf,
+        "\"] : null; if (typeof __lambda_inline_fn !== 'function' && typeof window !== 'undefined') { __lambda_inline_fn = window[\"");
+    strbuf_append_str_n(compile_buf, name_start, name_len);
+    strbuf_append_str(compile_buf,
+        "\"]; } if (typeof __lambda_inline_fn === 'function') { return __lambda_inline_fn.call(this");
+    if (pass_event) strbuf_append_str(compile_buf, ", event");
+    strbuf_append_str(compile_buf, "); } return undefined;");
+    return true;
+}
+
 static void collect_handlers_recursive(DomElement* elem,
                                         InlineHandlerInstallCollection* handlers,
                                         StrBuf* compile_buf, int* handler_id, int depth) {
@@ -1989,7 +2044,9 @@ static void collect_handlers_recursive(DomElement* elem,
             strbuf_append_str(compile_buf, "function ");
             strbuf_append_str(compile_buf, func_name);
             strbuf_append_str(compile_buf, "(event) { ");
-            strbuf_append_str(compile_buf, attr_val);
+            if (!append_global_call_inline_handler(compile_buf, attr_val)) {
+                strbuf_append_str(compile_buf, attr_val);
+            }
             strbuf_append_str(compile_buf, " }\n");
 
             // store func_name on pool for later lookup
