@@ -163,31 +163,60 @@ fn build_frac_bar(numer_box, denom_box, ns, cl, ds, rule_thickness, frac_ctx, te
 fn frac_raw_h(bx) { if (bx.height_raw != null) bx.height_raw else bx.height }
 fn frac_raw_d(bx) { if (bx.depth_raw != null) bx.depth_raw else bx.depth }
 
-// Rule 15d geometry, computed from font metrics + sigma constants.
-// Returns a geom record (all em values full precision) or null to fall back to
-// the legacy constant dispatch. Handles only the top-level display-geometry
-// case for now: numer/denom rendered unscaled, shifts num1/denom1.
+// Rule 15d geometry, computed from font metrics + sigma constants — covers
+// the display/text/script/scriptscript geometry styles (the children are
+// rendered unscaled by Lambda, so we scale their metrics here by s_child and
+// emit the matching font-size on the wrapper). Returns a geom record (all em
+// values full precision) or null to fall back to the legacy constant dispatch
+// (colorbox quirks, or composite children that lack raw metrics).
 fn frac_bar_geom(frac_ctx, numer_box, denom_box, text_geom) {
-    let style = frac_ctx.style
-    let is_script = style == "script" or style == "scriptscript"
     let has_raw = numer_box.height_raw != null and numer_box.depth_raw != null and
                   denom_box.height_raw != null and denom_box.depth_raw != null
-    if (is_script or text_geom or frac_ctx.colorbox_content == true or not has_raw)
+    // Script/scriptscript fractions interlock with their (still-legacy) parent
+    // fraction/script, which reads the child box metrics to pick its branch:
+    // changing the inner box regresses the outer. They stay on legacy until the
+    // parent composition is ported too. Display + text (\tfrac) have no such
+    // parent dependency (top-level), so they go through the rule.
+    let nested_script = frac_ctx.style == "script" or frac_ctx.style == "scriptscript"
+    if (frac_ctx.colorbox_content == true or not has_raw or nested_script)
         null
     else {
-        let theta = met.at(met.defaultRuleThickness, 0)   // 0.04
-        let axis = met.AXIS_HEIGHT                          // 0.25
-        let clearance = 3.0 * theta                         // display: 3 theta
-        let n_h = frac_raw_h(numer_box)
-        let n_d = frac_raw_d(numer_box)
-        let d_h = frac_raw_h(denom_box)
-        let d_d = frac_raw_d(denom_box)
+        // geom_style: the effective TeX style for the fraction geometry.
+        // \tfrac forces text; a fraction nested in a script keeps script/
+        // scriptscript; a bare \frac/\dfrac at top level renders with DISPLAY
+        // geometry (num1/denom1, unscaled children) — matching MathLive.
+        let geom_style = if (text_geom) "text"
+            else if (frac_ctx.style == "script") "script"
+            else if (frac_ctx.style == "scriptscript") "scriptscript"
+            else "display"
+        let is_display = geom_style == "display"
+        // numerator/denominator style for this geometry (one step smaller)
+        let child_style = match geom_style {
+            case "display": "text"
+            case "text": "script"
+            case "script": "scriptscript"
+            default: "scriptscript"
+        }
+        let csi = met.style_index(child_style)   // shift sigma index (child)
+        let fsi = met.style_index(geom_style)    // rule thickness index (frac)
+        // child scale relative to the fraction's own frame
+        let s_child = met.style_scale(child_style) / met.style_scale(geom_style)
+        let theta = met.at(met.defaultRuleThickness, fsi)
+        let axis = met.AXIS_HEIGHT
+        let clearance = if (is_display) 3.0 * theta else theta
+        // scaled child metrics (in the fraction's frame)
+        let n_h = frac_raw_h(numer_box) * s_child
+        let n_d = frac_raw_d(numer_box) * s_child
+        let d_h = frac_raw_h(denom_box) * s_child
+        let d_d = frac_raw_d(denom_box) * s_child
         // Rule 15d: shift numerator up by u, denominator down by v, keeping
         // each clear of the bar (centred on the axis) by `clearance`.
         let numer_line = axis + theta / 2.0
         let denom_line = axis - theta / 2.0
-        let numer_shift = max(met.at(met.num1, 0), clearance + n_d + numer_line)
-        let denom_shift = max(met.at(met.denom1, 0), clearance + d_h - denom_line)
+        let num_sigma = if (is_display) met.num1 else met.num2
+        let denom_sigma = if (is_display) met.denom1 else met.denom2
+        let numer_shift = max(met.at(num_sigma, csi), clearance + n_d + numer_line)
+        let denom_shift = max(met.at(denom_sigma, csi), clearance + d_h - denom_line)
         let fl_h = theta / 2.0
         let fl_d = theta / 2.0
         // MathLive makeVList (individualShift, children bottom->top:
@@ -216,9 +245,26 @@ fn frac_bar_geom(frac_ctx, numer_box, denom_box, text_geom) {
             numer_ch: n_h + n_d,
             denom_ch: d_h + d_d,
             rule_height: theta,
-            pstrut: pstrut
+            pstrut: pstrut,
+            font_pct: if (s_child == 1.0) null else font_pct_str(s_child),
+            // Only DISPLAY-geometry (top-level) fractions expose height_raw to
+            // the single-rounding strut path. Scaled (text/script/scriptscript)
+            // fractions are always nested; exposing raw would flip the PARENT
+            // fraction/script into the rule path before its composition is
+            // ported, cascading regressions. They emit via render_* instead.
+            expose_raw: is_display
         }
     }
+}
+
+// MathLive box.ts emits font-size as `Math.ceil(scale*10000)/100`% (with a
+// leading space). 0.7 -> "70%", 5/7 -> "71.43%".
+fn font_pct_str(s) {
+    let scaled = s * 10000.0
+    let i = int(scaled)
+    let c = if (float(i) >= scaled) i else i + 1
+    let pct = float(c) / 100.0
+    "font-size: " ++ util.fmt_num(pct, 2) ++ "%"
 }
 
 // Emit the bar-fraction vlist from a computed geom record. Every CSS dimension
@@ -228,8 +274,9 @@ fn frac_bar_geom(frac_ctx, numer_box, denom_box, text_geom) {
 fn build_frac_bar_rule15(numer_box, denom_box, geom) {
     let numer_elements = box.elements_of(numer_box)
     let denom_elements = box.elements_of(denom_box)
-    let numer_style = "height:" ++ util.fmt_em_ceil2(geom.numer_ch) ++ ";display:inline-block"
-    let denom_style = "height:" ++ util.fmt_em_ceil2(geom.denom_ch) ++ ";display:inline-block"
+    let fs_suffix = if (geom.font_pct != null) ";" ++ geom.font_pct else ""
+    let numer_style = "height:" ++ util.fmt_em_ceil2(geom.numer_ch) ++ ";display:inline-block" ++ fs_suffix
+    let denom_style = "height:" ++ util.fmt_em_ceil2(geom.denom_ch) ++ ";display:inline-block" ++ fs_suffix
     let line_style = "height:" ++ util.fmt_em_ceil2(geom.rule_height) ++ ";display:inline-block"
     let pstrut_style = "height:" ++ util.fmt_em_ceil2(geom.pstrut)
     let el = <span class: css.VLIST_T2;
@@ -270,8 +317,8 @@ fn build_frac_bar_rule15(numer_box, denom_box, geom) {
         element: el,
         height: h_em,
         depth: geom.frac_depth,
-        height_raw: geom.frac_height,
-        depth_raw: geom.frac_depth,
+        height_raw: if (geom.expose_raw) geom.frac_height else null,
+        depth_raw: if (geom.expose_raw) geom.frac_depth else null,
         render_height: h_em,
         render_depth: d_em,
         render_total: total_em,
