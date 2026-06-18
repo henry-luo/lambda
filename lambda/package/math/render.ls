@@ -1598,6 +1598,7 @@ fn render_stretchy_delimiter_group(left_text, right_text, content) {
     let style_attr = stretchy_left_right_style(content)
     let box_height = max(content.height, max(left_box.height, right_box.height))
     let box_depth = max(content.depth, max(left_box.depth, right_box.depth))
+    let strut = stretchy_left_right_strut_total(content, box_height, box_depth)
     {
         element: <span class: css.LEFT_RIGHT, style: style_attr;
             for (el in elements) el
@@ -1606,12 +1607,12 @@ fn render_stretchy_delimiter_group(left_text, right_text, content) {
         depth: box_depth,
         render_height: box_height,
         render_depth: box_depth,
-        render_total: stretchy_left_right_strut_total(content, box_height, box_depth),
+        render_total: strut,
         width: sum((for (p in parts where p != null) p.width)),
         type: "minner",
         italic: 0.0,
         skew: 0.0,
-        strut_total: stretchy_left_right_strut_total(content, box_height, box_depth)
+        strut_total: strut
     }
 }
 
@@ -1634,16 +1635,32 @@ fn left_right_strut_total(content) {
 fn stretchy_left_right_strut_total(content, box_height, box_depth) {
     let content_total = left_right_strut_total(content)
     let box_total = box_height + box_depth
+    // A Size3 stacked-bar pair (h 1.45, d 0.95) has raw extent ~2.405 → CEIL@2
+    // 2.41, but the CEIL-projected height/depth sum to 2.40; bump it back.
     let adjusted_box_total = if (abs(box_total - 2.4) < 0.001) 2.41 else box_total
     if (content_total == null) adjusted_box_total
     else max(content_total, adjusted_box_total)
 }
 
+// \left..\right margin-top/height: MathLive emits these at full precision
+// with trailing zeros trimmed (NOT CEIL@2) — 0.686, 1.069108, 0.08333. Build
+// the 6dp fixed string with integer arithmetic (avoids float-to-string
+// artifacts) then drop trailing zeros.
 fn fmt_delim_em(v) {
-    if (abs(abs(v) - 0.686) < 0.0001 or abs(v - 2.076) < 0.0001)
-        util.fmt_em(v)
-    else
-        util.fmt_fixed(v, 6) ++ "em"
+    trim_trailing_zeros(util.fmt_fixed(v, 6)) ++ "em"
+}
+
+fn trim_trailing_zeros(s) {
+    if (index_of(s, ".") < 0) s
+    else trim_tz_loop(s, len(s))
+}
+
+fn trim_tz_loop(s, n) {
+    if (n <= 0) s
+    else (let last = slice(s, n - 1, n),
+          if (last == "0") trim_tz_loop(s, n - 1)
+          else if (last == ".") slice(s, 0, n - 1)
+          else slice(s, 0, n))
 }
 
 // ============================================================

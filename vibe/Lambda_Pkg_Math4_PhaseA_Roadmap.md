@@ -2,6 +2,17 @@
 
 > Generated 2026-06-18 by the phaseA-producer-specs workflow. Tasks #1-9 in the session todo list.
 
+> **STATUS 2026-06-18 — see `Lambda_Pkg_Math4.md` §10 for the authoritative progress log.**
+> Corpus 763→**805/921**, baseline **203/206**, ~1000 hardcode lines removed.
+> DONE: Task 2 (text-op/integral limits), **Task 1 (frac_bar_spec DELETED, fraction.ls 100% metric-driven)**,
+> Task 3 (render_sup_only Rule 18c), Task 6 (leaf dead-heuristic removal + imath fix),
+> Task 5 partial (`fmt_delim_em` special-cases removed; `2.41` magic remains).
+> BLOCKED/deferred: Task 4 (arrays — 2-row depth_holder float artifact, low yield),
+> mechanical collapse 7/8/9 (the CAPSTONE — needs sqrt + delimiter raw first; "A first" is wrong).
+> NEXT: **sqrt/radical** (algorithm cracked + verified, only the makeVList CSS-top emit remains)
+> — clears the last 3 baseline fails which all sit on the `b^2`-sup → `\sqrt` → `\frac` → `\left..\right` chain.
+> NOTE: corpus golden is **display-rooted** (MathLive SSR default); the harness now renders displaystyle.
+
 ## Hard execution order (corrected by synthesis)
 Task 2 ∥ Task 4 (independent) → Task 6 (leaf audit) → Task 3 → Task 1 (script branch + colorbox) → Task 5 (last) → mechanical collapse (7→8→9).
 
