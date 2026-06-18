@@ -8,3 +8,8 @@ bold supported=true enabled=true ok=true state=false html=bc expected=true state
 bold supported=true enabled=true ok=true state=false html=bc expected=true stateExpected=true
 italic supported=true enabled=true ok=true state=false html=bc expected=true stateExpected=true
 strikethrough supported=true enabled=true ok=true state=false html=bc expected=true stateExpected=true
+bold-collapsed toggle=true toggleState=true insert=true insertState=true html=<b>X</b>abcd expected=true stateExpected=true
+bold-collapsed toggle=true toggleState=false insert=true insertState=false html=<b>ab</b>X<b>cd</b> expected=true stateExpected=true
+bold-collapsed toggle=true toggleState=true insert=true insertState=true html=<i>ab<b>X</b>cd</i> expected=true stateExpected=true
+bold-collapsed toggle=true toggleState=true insert=true insertState=true html=<b>abX</b>cd expected=true stateExpected=true
+bold-collapsed toggle=true toggleState=true insert=true insertState=true html=ab<b>Xcd</b> expected=true stateExpected=true

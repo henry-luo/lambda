@@ -26,6 +26,8 @@
 
 extern "C" Item js_property_get(Item object, Item key);
 extern "C" void js_dom_shutdown(void);
+struct DomDocument;
+extern void free_document(DomDocument* doc);
 
 // ============================================================================
 // Lambda Home Path
@@ -1448,13 +1450,11 @@ void runtime_cleanup(Runtime* runtime) {
     // Dump profiling data if enabled (before freeing anything)
     profile_dump_to_file();
 
+    js_canvas_cleanup();
     module_registry_cleanup();
     template_registry_destroy(g_template_registry);
     js_eval_preamble_cache_reset();
-    js_dom_shutdown();
-    js_event_loop_shutdown();
-    lambda_uv_cleanup();
-    lambda_stack_cleanup();
+    js_fetch_reset();
 
     // Destroy retained execution state (heap, nursery, name_pool)
     if (runtime->heap) {
@@ -1466,6 +1466,12 @@ void runtime_cleanup(Runtime* runtime) {
         tmp_ctx.nursery = runtime->nursery;
         tmp_ctx.result = ItemNull;
         context = &tmp_ctx;
+
+        js_dom_shutdown();
+        if (runtime->dom_doc) {
+            free_document((DomDocument*)runtime->dom_doc);
+            runtime->dom_doc = NULL;
+        }
 
         print_heap_entries();
         check_memory_leak();
@@ -1487,7 +1493,16 @@ void runtime_cleanup(Runtime* runtime) {
         runtime->heap = NULL;
         runtime->nursery = NULL;
         context = NULL;
+    } else {
+        js_dom_shutdown();
+        if (runtime->dom_doc) {
+            free_document((DomDocument*)runtime->dom_doc);
+            runtime->dom_doc = NULL;
+        }
     }
+    js_event_loop_shutdown();
+    lambda_uv_cleanup();
+    lambda_stack_cleanup();
     if (runtime->scripts) {
         for (int i = 0; i < runtime->scripts->length; i++) {
             Script *script = (Script*)runtime->scripts->data[i];

@@ -1187,6 +1187,8 @@ extern "C" bool state_store_set_selection(DocState* state,
     }
 
     if (!anchor || !focus || !anchor->node || !focus->node) {
+        state->editing.inline_format_state = 0;
+        state->editing.inline_format_state_mask = 0;
         dom_selection_remove_all_ranges(selection);
         state_store_refresh_caret_projection(state);
         return true;
@@ -1198,6 +1200,10 @@ extern "C" bool state_store_set_selection(DocState* state,
     } else {
         ok = dom_selection_set_base_and_extent(selection,
             anchor->node, anchor->offset, focus->node, focus->offset, out_exception);
+    }
+    if (ok) {
+        state->editing.inline_format_state = 0;
+        state->editing.inline_format_state_mask = 0;
     }
     return ok;
 }
@@ -2014,6 +2020,8 @@ void radiant_state_reset(DocState* state) {
     state->editing.rich_transaction_input_type = 0;
     state->editing.rich_transaction_selection_seq = 0;
     state->editing.rich_transaction_target_range_count = 0;
+    state->editing.inline_format_state = 0;
+    state->editing.inline_format_state_mask = 0;
     memset(state->editing.rich_transaction_target_ranges, 0,
            sizeof(state->editing.rich_transaction_target_ranges));
 

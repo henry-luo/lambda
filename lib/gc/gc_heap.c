@@ -10,6 +10,7 @@
  */
 #include "gc_heap.h"
 #include "../log.h"
+#include "../memtrack.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -218,6 +219,7 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 #define LMD_TYPE_UNDEFINED_ 26
 
 #define MAP_KIND_ITERATOR_ 6
+#define MAP_KIND_PROXY_    9
 
 // ============================================================================
 // Lifecycle
@@ -895,6 +897,15 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
             if (data_ptr) gc_mark_item(gc, *(uint64_t*)data_ptr);
             break;
         }
+        if (tag == LMD_TYPE_MAP_ && map_kind == MAP_KIND_PROXY_) {
+            if (data_ptr) {
+                uint64_t* slots = (uint64_t*)data_ptr;
+                gc_mark_item(gc, slots[0]);
+                gc_mark_item(gc, slots[1]);
+                gc_mark_item(gc, slots[2]);
+            }
+            break;
+        }
         if (!type_ptr || !data_ptr) break;
 
         // Walk shape entries to find Item fields
@@ -1299,6 +1310,17 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
         if (data && gc->vmap_destroy) {
             gc->vmap_destroy(data);
             *(void**)(p + 8) = NULL;  // prevent double-free at context teardown
+        }
+    }
+    else if (tag == LMD_TYPE_MAP_) {
+        uint8_t* p = (uint8_t*)obj;
+        uint8_t map_kind = p[1] >> 4;
+        if (map_kind == MAP_KIND_ITERATOR_ || map_kind == MAP_KIND_PROXY_) {
+            void* data = *(void**)(p + 16);
+            if (data) {
+                mem_free(data);
+                *(void**)(p + 16) = NULL;
+            }
         }
     }
     // Other types: sub-allocations (items[], data, closure_env) are in data zone

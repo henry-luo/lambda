@@ -268,6 +268,7 @@ extern "C" void js_reset_template_registry(void);
 extern "C" void js_iterator_proto_cache_reset(void);
 extern "C" void js_reset_css_namespace_object(void);
 extern "C" void js_dynfunc_cache_reset(void);
+extern "C" void js_canvas_cleanup(void);
 
 extern "C" void js_batch_reset() {
     // increment epoch to invalidate cached heap objects
@@ -286,6 +287,7 @@ extern "C" void js_batch_reset() {
     js_reset_heap_bound_runtime_state();
     // reset cached global objects (Math, JSON, console, Reflect) so they're recreated fresh
     // — tests may modify them (delete/overwrite properties)
+    js_canvas_cleanup();
     js_reset_math_object();
     js_reset_json_object();
     js_reset_console_object();
@@ -415,6 +417,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_reset_transient_call_state();
     js_reset_heap_bound_runtime_state();
     // reset cached global objects — tests may modify them
+    js_canvas_cleanup();
     js_reset_math_object();
     js_reset_json_object();
     js_reset_console_object();

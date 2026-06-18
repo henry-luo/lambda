@@ -178,24 +178,7 @@ void free_view(ViewTree* tree, View* view) {
 }
 
 static void release_form_control_prop(DomElement* elem) {
-    if (!elem || elem->item_prop_type != DomElement::ITEM_PROP_FORM || !elem->form) {
-        return;
-    }
-
-    FormControlProp* form = elem->form;
-    if (form->placeholder_font) {
-        font_prop_release_handle(form->placeholder_font);
-        form->placeholder_font = nullptr;
-    }
-
-    if (form->heap_allocated) {
-        delete form;
-    }
-    else {
-        form->~FormControlProp();
-    }
-    elem->form = nullptr;
-    elem->item_prop_type = DomElement::ITEM_PROP_NONE;
+    form_control_release_prop(elem);
 }
 
 static void release_embedded_document(DomElement* elem) {

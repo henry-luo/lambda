@@ -3923,14 +3923,13 @@ int main(int argc, char *argv[]) {
             fflush(stdout);
         }
 
-        // In hot-reload batch mode the worker process exits immediately after
-        // this point. Do not walk the persistent JS heap or preamble MIR state
-        // during process-exit teardown: stressy generated RegExp suites can
-        // leave a very large, repeatedly reset heap, and final GC/JIT walking is
-        // unnecessary when the OS is about to reclaim the worker. In-batch heap
-        // recycling above still performs full cleanup when the process needs to
-        // continue.
         if (hot_reload) {
+            js_test262_hot_context_destroy(&batch_context);
+            jm_cleanup_deferred_mir();
+            if (has_preamble) {
+                preamble_state_destroy(&preamble);
+                has_preamble = false;
+            }
             context = NULL;
         } else {
             // Clean up deferred MIR contexts after the JS batch state has been

@@ -305,10 +305,42 @@ fn render_command(node, context) {
             if (op_name != null) {
             box.with_class(box.text_box(op_name, css.CMR, "mop"), css.OP_GROUP)
             } else {
-                box.text_box(cmd_text, css.ERROR, "mord")
+                render_unknown_command_node(node, name_str, context)
             }
         }
     }
+    }
+}
+
+// An unknown `\cmd{...}` renders the way MathLive does: an `lm_error lm_cmr`
+// span carrying `\cmd`, followed by the command's arguments rendered as
+// ordinary math (the braces are not consumed by an unknown macro). E.g.
+// `\label{eq:x}` → error("\label") + the math `eq:x`.
+fn render_unknown_command_node(node, name_str, context) {
+    // The leading `\` (cmr backslash: height 0.75, depth 0.25) governs the
+    // error token's vertical extent.
+    let err_box = {
+        element: <span class: css.classes([css.ERROR, css.CMR]); "\\" ++ name_str>,
+        height: 0.75,
+        depth: 0.25,
+        height_raw: 0.75,
+        depth_raw: 0.25,
+        width: 0.4 * float(len(name_str) + 1),
+        type: "mord",
+        italic: 0.0,
+        skew: 0.0
+    }
+    // Render only the brace/bracket-group arguments as math (skip the bare
+    // command-name string). MathLive puts a thin space (0.17em) between the
+    // error token and the following argument content.
+    let arg_boxes = (for (child in node
+        where child is element and (name(child) == 'group' or name(child) == 'brack_group'))
+        render_node(child, context))
+    if (len(arg_boxes) == 0) err_box
+    else {
+        let all_boxes = [err_box, box.skip_box(0.17)] ++ arg_boxes
+        let spaced = apply_spacing(all_boxes, context)
+        box_with_type(box.hbox(spaced), "minner")
     }
 }
 
