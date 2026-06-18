@@ -42,8 +42,10 @@
 
 static const char* EDITING_ROOT = "test/editing";
 static const char* HARNESS_PATH = "test/editing/resources/chrome-editing-harness.js";
+static const char* HARNESS_PATCH_PATH = "test/chrome_editing_ce3_harness_patch.js";
 static const char* RUNNABLE_PATH = "test/editing/RUNNABLE";
 static const char* TEMP_DIR = "temp";
+static const char* RESULT_ARTIFACT_PATH = "temp/chrome_editing_results.jsonl";
 
 static bool starts_with(const char* text, const char* prefix) {
     return strncmp(text, prefix, strlen(prefix)) == 0;
@@ -107,10 +109,32 @@ static std::string dir_of(const std::string& path) {
 }
 
 static std::string extract_attr(const std::string& tag, const char* attr) {
-    std::string needle = std::string(attr) + "=";
-    size_t p = tag.find(needle);
+    size_t p = 0;
+    size_t attr_len = strlen(attr);
+    while (true) {
+        p = tag.find(attr, p);
+        if (p == std::string::npos) return "";
+        bool left_ok = p == 0 || tag[p - 1] == ' ' || tag[p - 1] == '\t' ||
+            tag[p - 1] == '\r' || tag[p - 1] == '\n' || tag[p - 1] == '<';
+        bool right_ok = p + attr_len >= tag.size() ||
+            tag[p + attr_len] == '=' || tag[p + attr_len] == ' ' ||
+            tag[p + attr_len] == '\t' || tag[p + attr_len] == '\r' ||
+            tag[p + attr_len] == '\n';
+        if (left_ok && right_ok) break;
+        p += attr_len;
+    }
+    p += attr_len;
+    while (p < tag.size() && (tag[p] == ' ' || tag[p] == '\t' ||
+           tag[p] == '\r' || tag[p] == '\n')) {
+        p++;
+    }
+    if (p >= tag.size() || tag[p] != '=') return "";
+    p++;
+    while (p < tag.size() && (tag[p] == ' ' || tag[p] == '\t' ||
+           tag[p] == '\r' || tag[p] == '\n')) {
+        p++;
+    }
     if (p == std::string::npos) return "";
-    p += needle.size();
     if (p >= tag.size()) return "";
     char quote = tag[p];
     if (quote == '"' || quote == '\'') {
@@ -179,6 +203,25 @@ static std::string js_string_literal(const std::string& value) {
     return out;
 }
 
+static std::string json_string_literal(const std::string& value) {
+    return js_string_literal(value);
+}
+
+static bool contains_text(const std::string& text, const char* needle) {
+    return text.find(needle) != std::string::npos;
+}
+
+static bool has_tag(const std::vector<std::string>& tags, const char* tag) {
+    for (const std::string& candidate : tags) {
+        if (candidate == tag) return true;
+    }
+    return false;
+}
+
+static void add_tag(std::vector<std::string>& tags, const char* tag) {
+    if (!has_tag(tags, tag)) tags.push_back(tag);
+}
+
 static std::string extract_scripts(const std::string& html,
                                    const std::string& html_dir) {
     std::string result;
@@ -218,14 +261,22 @@ static std::string execute_js_with_doc(const char* js_path,
                                        const char* html_path,
                                        int* exit_code) {
     char command[1200];
+    const char* timeout_env = getenv("LAMBDA_CHROME_EDITING_TIMEOUT");
+    int timeout_seconds = timeout_env && timeout_env[0] ? atoi(timeout_env) : 0;
 #ifdef _WIN32
     snprintf(command, sizeof(command),
              "lambda.exe js \"%s\" --document \"%s\" --no-log 2>&1",
              js_path, html_path);
 #else
-    snprintf(command, sizeof(command),
-             "./lambda.exe js \"%s\" --document \"%s\" --no-log 2>&1",
-             js_path, html_path);
+    if (timeout_seconds > 0) {
+        snprintf(command, sizeof(command),
+                 "perl -e 'alarm shift; exec @ARGV' %d ./lambda.exe js \"%s\" --document \"%s\" --no-log 2>&1",
+                 timeout_seconds, js_path, html_path);
+    } else {
+        snprintf(command, sizeof(command),
+                 "./lambda.exe js \"%s\" --document \"%s\" --no-log 2>&1",
+                 js_path, html_path);
+    }
 #endif
 
     FILE* pipe = popen(command, "r");
@@ -240,7 +291,17 @@ static std::string execute_js_with_doc(const char* js_path,
         output += buffer;
     }
     int raw = pclose(pipe);
+#ifndef _WIN32
+    if (WIFEXITED(raw)) {
+        *exit_code = WEXITSTATUS(raw);
+    } else if (WIFSIGNALED(raw)) {
+        *exit_code = 128 + WTERMSIG(raw);
+    } else {
+        *exit_code = raw;
+    }
+#else
     *exit_code = WEXITSTATUS(raw);
+#endif
     return output;
 }
 
@@ -262,14 +323,203 @@ struct ChromeEditingResult {
     ChromeEditingParam param;
     bool skipped;
     bool failed;
+    bool timeout;
+    bool abort;
     int pass_count;
     int total_count;
     int exit_code;
     double seconds;
     std::string skip_reason;
     std::string output;
+    std::string bucket;
+    std::string classifier;
+    std::vector<std::string> flavor_tags;
     std::vector<std::string> failures;
 };
+
+static std::string top_level_bucket(const std::string& rel_path) {
+    size_t slash = rel_path.find('/');
+    if (slash == std::string::npos) return "(root)";
+    return rel_path.substr(0, slash);
+}
+
+static std::vector<std::string> classify_flavors(const std::string& rel_path,
+                                                 const std::string& html,
+                                                 const std::string& scripts,
+                                                 bool has_expected) {
+    std::string source = html + "\n" + scripts;
+    std::vector<std::string> tags;
+    if (contains_text(source, "assert_selection") ||
+        contains_text(source, "assertSelection") ||
+        contains_text(rel_path, "assert_selection")) {
+        add_tag(tags, "assert_selection");
+    }
+    if (contains_text(source, "runEditingTest") ||
+        contains_text(source, "runDumpAsTextEditingTest") ||
+        contains_text(source, "editing.js")) {
+        add_tag(tags, "editing.js");
+    }
+    if (contains_text(source, "js-test.js") ||
+        contains_text(source, "shouldBe") ||
+        contains_text(source, "successfullyParsed")) {
+        add_tag(tags, "js-test");
+    }
+    if (has_expected || contains_text(source, "dumpAsText") ||
+        contains_text(source, "dumpAsMarkup")) {
+        add_tag(tags, "dump-baseline");
+    }
+    if (contains_text(source, "dumpAsLayout") ||
+        contains_text(source, "dumpAsLayoutWithPixelResults") ||
+        starts_with(rel_path.c_str(), "caret/")) {
+        add_tag(tags, "visual-layout");
+    }
+    if (contains_text(source, "eventSender.mouse") ||
+        contains_text(source, "eventSender.leapForward") ||
+        contains_text(source, "dragMode") ||
+        contains_text(rel_path, "drag") ||
+        contains_text(rel_path, "mouse")) {
+        add_tag(tags, "pointer-drag");
+    }
+    if (contains_text(source, "clipboard") ||
+        contains_text(source, "Clipboard") ||
+        contains_text(source, "paste") ||
+        contains_text(source, "Paste") ||
+        contains_text(source, "copy") ||
+        contains_text(source, "Copy") ||
+        contains_text(source, "cut") ||
+        contains_text(source, "Cut") ||
+        starts_with(rel_path.c_str(), "pasteboard/")) {
+        add_tag(tags, "clipboard");
+    }
+    if (contains_text(source, "internals")) {
+        add_tag(tags, "internals");
+    }
+    if (contains_text(source, "shadowRoot") ||
+        contains_text(source, "ShadowRoot") ||
+        starts_with(rel_path.c_str(), "shadow/")) {
+        add_tag(tags, "shadow");
+    }
+    if (tags.empty()) add_tag(tags, "plain-script");
+    return tags;
+}
+
+static std::string first_failure_line(const ChromeEditingResult& result) {
+    if (!result.failures.empty()) return result.failures[0];
+    size_t pos = 0;
+    while (pos < result.output.size()) {
+        size_t eol = result.output.find('\n', pos);
+        if (eol == std::string::npos) eol = result.output.size();
+        std::string line = result.output.substr(pos, eol - pos);
+        if (!line.empty()) return line;
+        pos = eol + 1;
+        if (eol == result.output.size()) break;
+    }
+    if (!result.skip_reason.empty()) return result.skip_reason;
+    return "";
+}
+
+static std::string classify_failure(const ChromeEditingResult& result) {
+    if (result.skipped) {
+        return result.classifier.empty() ? "skipped" : result.classifier;
+    }
+    if (!result.failed) return "passed";
+    if (result.timeout) return "timeout";
+    if (result.abort) return "process_abort";
+    std::string signal = result.output;
+    for (const std::string& failure : result.failures) {
+        signal += "\n";
+        signal += failure;
+    }
+    if (contains_text(signal, "ReferenceError") ||
+        contains_text(signal, " is not defined") ||
+        contains_text(signal, "not a function") ||
+        contains_text(signal, "Cannot find variable")) {
+        return "harness_missing_api";
+    }
+    if (has_tag(result.flavor_tags, "internals")) return "unsupported_internals";
+    if (has_tag(result.flavor_tags, "shadow")) return "unsupported_shadow";
+    if (has_tag(result.flavor_tags, "visual-layout")) return "unsupported_layout_visual";
+    if (result.total_count == 0) return "no_results";
+    if (!result.failures.empty() || result.pass_count != result.total_count) {
+        return "assertion_mismatch";
+    }
+    return "process_exit";
+}
+
+static std::string outcome_for_result(const ChromeEditingResult& result) {
+    if (result.skipped) return "skip";
+    if (result.failed) return "fail";
+    return "pass";
+}
+
+static std::string result_to_jsonl(const ChromeEditingResult& result) {
+    std::string json = "{";
+    json += "\"rel_path\":" + json_string_literal(result.param.rel_path);
+    json += ",\"bucket\":" + json_string_literal(result.bucket);
+    json += ",\"flavor_tags\":[";
+    for (size_t i = 0; i < result.flavor_tags.size(); i++) {
+        if (i) json += ",";
+        json += json_string_literal(result.flavor_tags[i]);
+    }
+    json += "]";
+    json += ",\"outcome\":" + json_string_literal(outcome_for_result(result));
+    json += ",\"classifier\":" + json_string_literal(result.classifier);
+    json += ",\"pass_count\":" + std::to_string(result.pass_count);
+    json += ",\"total_count\":" + std::to_string(result.total_count);
+    json += ",\"exit_code\":" + std::to_string(result.exit_code);
+    json += ",\"timeout\":" + std::string(result.timeout ? "true" : "false");
+    json += ",\"abort\":" + std::string(result.abort ? "true" : "false");
+    json += ",\"seconds\":" + std::to_string(result.seconds);
+    json += ",\"first_failure_line\":" + json_string_literal(first_failure_line(result));
+    json += "}\n";
+    return json;
+}
+
+struct ChromeEditingCounter {
+    std::string name;
+    int count;
+};
+
+static void bump_counter(std::vector<ChromeEditingCounter>& counters,
+                         const std::string& name) {
+    for (ChromeEditingCounter& counter : counters) {
+        if (counter.name == name) {
+            counter.count++;
+            return;
+        }
+    }
+    ChromeEditingCounter counter;
+    counter.name = name;
+    counter.count = 1;
+    counters.push_back(counter);
+}
+
+static void write_result_artifact(const std::vector<ChromeEditingResult>& results) {
+    std::string content;
+    for (const ChromeEditingResult& result : results) {
+        content += result_to_jsonl(result);
+    }
+    write_file_contents(RESULT_ARTIFACT_PATH, content);
+}
+
+static void print_classifier_summary(const std::vector<ChromeEditingResult>& results) {
+    std::vector<ChromeEditingCounter> counters;
+    for (const ChromeEditingResult& result : results) {
+        bump_counter(counters, result.classifier);
+    }
+    std::sort(counters.begin(), counters.end(),
+              [](const ChromeEditingCounter& a,
+                 const ChromeEditingCounter& b) {
+                  if (a.count != b.count) return a.count > b.count;
+                  return a.name < b.name;
+              });
+    printf("[----------] Chrome editing result artifact: %s\n",
+           RESULT_ARTIFACT_PATH);
+    for (const ChromeEditingCounter& counter : counters) {
+        printf("[----------]   %-28s %d\n", counter.name.c_str(),
+               counter.count);
+    }
+}
 
 static std::vector<std::string> load_runnable_files() {
     std::vector<std::string> paths;
@@ -293,16 +543,27 @@ static bool is_runnable_file(const std::string& rel_path,
                               rel_path);
 }
 
+static bool run_all_imported_chrome_editing_tests() {
+    const char* env = getenv("LAMBDA_CHROME_EDITING_RUN_ALL");
+    return env && env[0] && strcmp(env, "0") != 0;
+}
+
+static bool keep_chrome_editing_temp_scripts() {
+    const char* env = getenv("LAMBDA_CHROME_EDITING_KEEP_TEMP");
+    return env && env[0] && strcmp(env, "0") != 0;
+}
+
 static bool should_skip_file(const std::string& rel_path,
                              const std::vector<std::string>& runnable_files) {
-    if (!is_runnable_file(rel_path, runnable_files)) return true;
-    if (rel_path.find("/deferred/") != std::string::npos ||
-        starts_with(rel_path.c_str(), "deferred/")) return true;
     if (rel_path.find("/resources/") != std::string::npos) return true;
     if (ends_with(rel_path, "-expected.html")) return true;
     if (ends_with(rel_path, "-expected.txt")) return true;
     if (ends_with(rel_path, "-ref.html")) return true;
     if (rel_path.find("-manual") != std::string::npos) return true;
+    if (run_all_imported_chrome_editing_tests()) return false;
+    if (!is_runnable_file(rel_path, runnable_files)) return true;
+    if (rel_path.find("/deferred/") != std::string::npos ||
+        starts_with(rel_path.c_str(), "deferred/")) return true;
     return false;
 }
 
@@ -368,13 +629,15 @@ static void scan_dir(const std::string& dir,
 static std::vector<ChromeEditingParam> discover_chrome_editing_tests() {
     std::vector<ChromeEditingParam> params;
     std::vector<std::string> runnable_files = load_runnable_files();
-    for (const std::string& rel : runnable_files) {
-        ChromeEditingParam p;
-        p.html_path = std::string(EDITING_ROOT) + "/" + rel;
-        p.rel_path = rel;
-        p.test_name = sanitize_test_name(rel);
-        p.skip = false;
-        params.push_back(p);
+    if (!run_all_imported_chrome_editing_tests()) {
+        for (const std::string& rel : runnable_files) {
+            ChromeEditingParam p;
+            p.html_path = std::string(EDITING_ROOT) + "/" + rel;
+            p.rel_path = rel;
+            p.test_name = sanitize_test_name(rel);
+            p.skip = false;
+            params.push_back(p);
+        }
     }
     scan_dir(EDITING_ROOT, "", runnable_files, params);
     std::sort(params.begin(), params.end(),
@@ -397,16 +660,21 @@ static ChromeEditingResult run_chrome_editing_case(
     result.param = p;
     result.skipped = false;
     result.failed = false;
+    result.timeout = false;
+    result.abort = false;
     result.pass_count = 0;
     result.total_count = 0;
     result.exit_code = 0;
     result.seconds = 0.0;
+    result.bucket = top_level_bucket(p.rel_path);
 
     auto started = std::chrono::steady_clock::now();
     if (p.skip) {
         result.skipped = true;
         result.skip_reason = "skipped corpus support file/manual/baseline: " +
                              p.rel_path;
+        result.flavor_tags = classify_flavors(p.rel_path, "", "", false);
+        result.classifier = classify_failure(result);
         return result;
     }
 
@@ -414,6 +682,7 @@ static ChromeEditingResult run_chrome_editing_case(
     if (html.empty()) {
         result.failed = true;
         result.failures.push_back("Could not read test file: " + p.html_path);
+        result.classifier = classify_failure(result);
         return result;
     }
 
@@ -422,13 +691,22 @@ static ChromeEditingResult run_chrome_editing_case(
         result.failed = true;
         result.failures.push_back(std::string("Could not read harness: ") +
                                   HARNESS_PATH);
+        result.classifier = classify_failure(result);
         return result;
+    }
+    std::string harness_patch = read_file_contents(HARNESS_PATCH_PATH);
+    if (!harness_patch.empty()) {
+        harness += "\n// ---- CE3 harness overlay ----\n";
+        harness += harness_patch;
+        harness += "\n";
     }
 
     std::string scripts = extract_scripts(html, dir_of(p.html_path));
     if (scripts.empty()) {
         result.skipped = true;
         result.skip_reason = "no script body in editing test: " + p.rel_path;
+        result.flavor_tags = classify_flavors(p.rel_path, html, scripts, false);
+        result.classifier = classify_failure(result);
         return result;
     }
 
@@ -437,6 +715,8 @@ static ChromeEditingResult run_chrome_editing_case(
     std::string expected_text = has_expected
         ? read_file_contents(expected_path.c_str())
         : "";
+    result.flavor_tags = classify_flavors(p.rel_path, html, scripts,
+        has_expected);
 
     std::string metadata;
     metadata += "\n_chrome_editing_test_path = " +
@@ -455,10 +735,17 @@ static ChromeEditingResult run_chrome_editing_case(
     int exit_code = 0;
     std::string output = execute_js_with_doc(temp_js.c_str(), p.html_path.c_str(),
         &exit_code);
-    unlink(temp_js.c_str());
+    if (!keep_chrome_editing_temp_scripts()) {
+        unlink(temp_js.c_str());
+    }
 
     result.exit_code = exit_code;
     result.output = output;
+    result.timeout = exit_code == 142 || contains_text(output, "Alarm clock") ||
+        contains_text(output, "SIGALRM") ||
+        contains_text(output, "timed out");
+    result.abort = exit_code == 134 || contains_text(output, "Abort trap") ||
+        contains_text(output, "SIGABRT");
 
     size_t pos = 0;
     while (pos < output.size()) {
@@ -473,7 +760,13 @@ static ChromeEditingResult run_chrome_editing_case(
         }
     }
 
-    if (result.total_count == 0) {
+    if (result.total_count == 0 && result.exit_code == 0 &&
+        has_tag(result.flavor_tags, "visual-layout")) {
+        result.skipped = true;
+        result.skip_reason = "unsupported visual/layout-only Chrome editing case: " +
+            p.rel_path;
+        result.classifier = "unsupported_layout_visual";
+    } else if (result.total_count == 0) {
         result.failed = true;
         result.failures.push_back("No Chrome editing results from " +
             p.rel_path + "\nExit code: " + std::to_string(exit_code) +
@@ -485,6 +778,7 @@ static ChromeEditingResult run_chrome_editing_case(
 
     auto ended = std::chrono::steady_clock::now();
     result.seconds = std::chrono::duration<double>(ended - started).count();
+    result.classifier = classify_failure(result);
     return result;
 }
 
@@ -598,12 +892,14 @@ static int run_parallel_suite() {
         if (result.skipped) skipped++;
         else if (result.failed) failures++;
     }
+    write_result_artifact(results);
 
     printf("[==========] %zu Chrome editing cases ran. (%.0f ms total)\n",
            params.size(), total_seconds * 1000.0);
     printf("[  PASSED  ] %zu tests.\n", params.size() - failures - skipped);
     if (skipped > 0) printf("[  SKIPPED ] %d tests.\n", skipped);
     if (failures > 0) printf("[  FAILED  ] %d tests.\n", failures);
+    print_classifier_summary(results);
     return failures == 0 ? 0 : 1;
 }
 

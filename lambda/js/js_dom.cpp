@@ -264,11 +264,32 @@ static inline DomJsMutationKind js_dom_style_mutation_kind(CssPropertyId prop_id
     }
 }
 
+static DomDocument* js_dom_node_owner_document(DomNode* node) {
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        if (cur->is_element()) {
+            DomElement* elem = cur->as_element();
+            if (elem && elem->doc) return elem->doc;
+        }
+    }
+    return nullptr;
+}
+
+static DomDocument* js_dom_mutation_document(DomNode* target, DomNode* parent) {
+    DomDocument* doc = js_dom_node_owner_document(target);
+    if (!doc) doc = js_dom_node_owner_document(parent);
+    return doc ? doc : _js_current_document;
+}
+
+static DocState* js_dom_state_for_nodes(DomNode* target, DomNode* parent) {
+    DomDocument* doc = js_dom_mutation_document(target, parent);
+    return doc ? doc->state : nullptr;
+}
+
 static inline void js_dom_record_mutation_detail(DomJsMutationKind kind,
                                                  DomNode* target,
                                                  DomNode* parent,
                                                  uint32_t sequence) {
-    DomDocument* doc = _js_current_document;
+    DomDocument* doc = js_dom_mutation_document(target, parent);
     if (!doc) return;
 
     if (sequence == 0) {
@@ -303,7 +324,7 @@ static inline void js_dom_record_mutation_detail(DomJsMutationKind kind,
 static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_UNKNOWN,
                                           DomNode* target = nullptr,
                                           DomNode* parent = nullptr) {
-    DomDocument* doc = _js_current_document;
+    DomDocument* doc = js_dom_mutation_document(target, parent);
     if (!doc) return;
 
     doc->js_mutation_count++;
@@ -320,7 +341,7 @@ static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATI
         js_dom_record_mutation_detail(kind, target, parent, doc->js_mutation_sequence);
     }
 
-    DocState* st = js_dom_current_state();
+    DocState* st = doc->state;
     if (st) view_state_prune_orphans(st);
 }
 
@@ -1420,7 +1441,7 @@ static bool js_dom_node_is_connected(DomNode* node) {
 }
 
 static inline void dom_pre_remove(DomNode* child) {
-    DocState* st = js_dom_current_state();
+    DocState* st = js_dom_state_for_nodes(child, child ? child->parent : nullptr);
     if (st && child) {
         dom_mutation_pre_remove(st, child);
 
@@ -1450,13 +1471,13 @@ static inline void dom_pre_remove(DomNode* child) {
                                   child ? child->parent : nullptr, 0);
 }
 static inline void dom_post_insert(DomNode* parent, DomNode* node) {
-    DocState* st = js_dom_current_state();
+    DocState* st = js_dom_state_for_nodes(node, parent);
     if (st && parent && node) dom_mutation_post_insert(st, parent, node);
     js_dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_INSERT, node, parent, 0);
 }
 static inline void dom_text_replace_data(DomText* text, uint32_t off,
                                          uint32_t cnt, uint32_t repl_len) {
-    DocState* st = js_dom_current_state();
+    DocState* st = js_dom_state_for_nodes((DomNode*)text, text ? text->parent : nullptr);
     if (st && text) dom_mutation_text_replace_data(st, text, off, cnt, repl_len);
     js_dom_record_mutation_detail(DOM_JS_MUTATION_TEXT, (DomNode*)text,
                                   text ? text->parent : nullptr, 0);
@@ -4222,7 +4243,7 @@ extern "C" void js_dom_focus_if_editing_host_for_selection(void* dom_node) {
     DomElement* elem = node->as_element();
     if (!js_dom_is_editing_host(elem)) return;
     if (!js_dom_is_script_focusable(elem)) return;
-    DocState* state = js_dom_current_state();
+    DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
     js_document_active_element = elem;
     focus_set(state, (View*)elem, false);
 }
@@ -5775,13 +5796,14 @@ static Item js_text_control_set_selection_range(Item start_arg, Item end_arg, It
     Item self = js_get_this();
     DomElement* elem = (DomElement*)js_dom_unwrap_element(self);
     if (!elem || !tc_is_text_control_elem(elem)) return make_js_undefined();
+    DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
 
     int64_t s = it2i(start_arg);
     int64_t e = it2i(end_arg);
     if (s < 0) s = 0;
     if (e < 0) e = 0;
     uint8_t dir = text_control_direction_from_item(dir_arg);
-    form_control_set_selection(js_dom_current_state(), (View*)elem, (uint32_t)s, (uint32_t)e, dir);
+    form_control_set_selection(state, (View*)elem, (uint32_t)s, (uint32_t)e, dir);
     return make_js_undefined();
 }
 
@@ -5792,10 +5814,11 @@ static Item js_text_control_select(void) {
 
     tc_ensure_init(elem);
     FormControlProp* f = elem->form;
+    DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
     if (js_dom_is_script_focusable(elem)) {
-        focus_set(js_dom_current_state(), (View*)elem, false);
+        focus_set(state, (View*)elem, false);
     }
-    form_control_set_selection(js_dom_current_state(), (View*)elem, 0, f->current_value_u16_len, 0);
+    form_control_set_selection(state, (View*)elem, 0, f->current_value_u16_len, 0);
     return make_js_undefined();
 }
 
@@ -5920,7 +5943,8 @@ static Item js_text_control_set_range_text_for_elem(DomElement* elem,
     }
     mem_free(new_value);
     _value_mark_dirty(elem);
-    form_control_set_selection(js_dom_current_state(), (View*)elem,
+    DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+    form_control_set_selection(state, (View*)elem,
         final_start, final_end, final_direction);
     return make_js_undefined();
 }
@@ -8201,20 +8225,23 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         if (strcmp(prop, "selectionStart") == 0) {
             tc_ensure_init(elem);
             uint32_t start = 0;
-            form_control_get_selection(js_dom_current_state(), (View*)elem, &start, NULL, NULL);
+            DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+            form_control_get_selection(state, (View*)elem, &start, NULL, NULL);
             return (Item){.item = i2it((int64_t)start)};
         }
         if (strcmp(prop, "selectionEnd") == 0) {
             tc_ensure_init(elem);
             uint32_t end = 0;
-            form_control_get_selection(js_dom_current_state(), (View*)elem, NULL, &end, NULL);
+            DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+            form_control_get_selection(state, (View*)elem, NULL, &end, NULL);
             return (Item){.item = i2it((int64_t)end)};
         }
         if (strcmp(prop, "selectionDirection") == 0) {
             tc_ensure_init(elem);
             const char* d = "none";
             uint8_t direction = 0;
-            form_control_get_selection(js_dom_current_state(), (View*)elem, NULL, NULL, &direction);
+            DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+            form_control_get_selection(state, (View*)elem, NULL, NULL, &direction);
             if (direction == 1) d = "forward";
             else if (direction == 2) d = "backward";
             return (Item){.item = s2it(heap_create_name(d))};
@@ -8829,10 +8856,13 @@ static void parse_class_names(DomElement* elem, const char* class_str) {
 }
 
 extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) {
-    // Range / Selection wrappers expose only read-only attributes; silently
-    // ignore writes (matches W3C: setters are no-ops, not TypeError).
-    if (js_dom_item_is_range(elem_item) || js_dom_item_is_selection(elem_item))
+    // Range wrappers expose only read-only attributes; silently ignore writes.
+    if (js_dom_item_is_range(elem_item))
         return value;
+    // Selection native attributes are read-only, but imported browser harnesses
+    // also attach helper expandos (document/window/computeLeft/etc.).
+    if (js_dom_item_is_selection(elem_item))
+        return js_dom_selection_set_property(elem_item, prop_name, value);
 
     if (js_is_inline_style(elem_item)) {
         DomElement* owner = js_inline_style_owner(elem_item);
@@ -10652,7 +10682,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
 
     // focus() / blur() — stubs for headless mode
     if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
-        DocState* state = js_dom_current_state();
+        DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
         if (strcmp(method, "focus") == 0) {
             if (js_dom_is_script_focusable(elem)) {
                 js_document_active_element = elem;
@@ -10716,7 +10746,8 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
                 else if (strcmp(d, "backward") == 0) dir = 2;
             }
         }
-        form_control_set_selection(js_dom_current_state(), (View*)elem, (uint32_t)s, (uint32_t)e, dir);
+        DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+        form_control_set_selection(state, (View*)elem, (uint32_t)s, (uint32_t)e, dir);
         return make_js_undefined();
     }
 
@@ -10734,10 +10765,11 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
     if (strcmp(method, "select") == 0 && tc_is_text_control_elem(elem)) {
         tc_ensure_init(elem);
         FormControlProp* f = elem->form;
+        DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
         if (js_dom_is_script_focusable(elem)) {
-            focus_set(js_dom_current_state(), (View*)elem, false);
+            focus_set(state, (View*)elem, false);
         }
-        form_control_set_selection(js_dom_current_state(), (View*)elem, 0, f->current_value_u16_len, 0);
+        form_control_set_selection(state, (View*)elem, 0, f->current_value_u16_len, 0);
         return make_js_undefined();
     }
 
@@ -11488,8 +11520,35 @@ static void _install_iface(Item global, const char* name) {
     js_property_set(global, (Item){.item = s2it(heap_create_name(name))}, ctor);
 }
 
+static void _set_ctor_int_constant(Item ctor, const char* name, int64_t value) {
+    js_property_set(ctor, (Item){.item = s2it(heap_create_name(name))},
+        (Item){.item = i2it(value)});
+}
+
+static void _install_node_iface(Item global) {
+    Item ctor = js_new_function((void*)_coll_illegal_constructor, 0);
+    js_set_function_name(ctor, (Item){.item = s2it(heap_create_name("Node"))});
+    Item proto = js_new_object();
+    js_property_set(proto, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);
+    js_property_set(ctor, (Item){.item = s2it(heap_create_name("prototype"))}, proto);
+    _set_ctor_int_constant(ctor, "ELEMENT_NODE", 1);
+    _set_ctor_int_constant(ctor, "ATTRIBUTE_NODE", 2);
+    _set_ctor_int_constant(ctor, "TEXT_NODE", 3);
+    _set_ctor_int_constant(ctor, "CDATA_SECTION_NODE", 4);
+    _set_ctor_int_constant(ctor, "ENTITY_REFERENCE_NODE", 5);
+    _set_ctor_int_constant(ctor, "ENTITY_NODE", 6);
+    _set_ctor_int_constant(ctor, "PROCESSING_INSTRUCTION_NODE", 7);
+    _set_ctor_int_constant(ctor, "COMMENT_NODE", 8);
+    _set_ctor_int_constant(ctor, "DOCUMENT_NODE", 9);
+    _set_ctor_int_constant(ctor, "DOCUMENT_TYPE_NODE", 10);
+    _set_ctor_int_constant(ctor, "DOCUMENT_FRAGMENT_NODE", 11);
+    _set_ctor_int_constant(ctor, "NOTATION_NODE", 12);
+    js_property_set(global, (Item){.item = s2it(heap_create_name("Node"))}, ctor);
+}
+
 extern "C" void js_dom_install_collection_globals(void) {
     Item global = js_get_global_this();
+    _install_node_iface(global);
     _install_iface(global, "HTMLCollection");
     _install_iface(global, "HTMLFormControlsCollection");
     _install_iface(global, "HTMLOptionsCollection");
