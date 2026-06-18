@@ -242,8 +242,8 @@ extern "C" JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
 // by callers that only need to know "is there an own property here?".
 //
 // Returns true iff there is an own MAP/FUNC/ARRAY companion-map slot and it is
-// not tombstoned by shape bit or transition sentinel. IS_ACCESSOR slots count
-// as present (the pair itself is the descriptor).
+// not tombstoned by shape bit or a retained raw hole value. IS_ACCESSOR slots
+// count as present (the pair itself is the descriptor).
 extern "C" bool js_ordinary_has_own(Item object, const char* name, int name_len) {
     JS_PROPS_ASSERT_KEY(name, name_len);
     JsShapeSlotStatus status = js_own_shape_slot_status(object, name, name_len, NULL, NULL);
@@ -305,6 +305,28 @@ extern "C" JsSetterDispatchStatus js_ordinary_set(Item object, const char* name,
     return JS_SET_NOT_FOUND;
 }
 
+extern "C" bool js_shape_mark_deleted_own(Item object, const char* name, int name_len,
+                                           bool create_if_missing) {
+    JS_PROPS_ASSERT_KEY(name, name_len);
+    ShapeEntry* se = js_find_shape_entry(object, name, name_len);
+    if (!se && create_if_missing) {
+        Item key = (Item){.item = s2it(heap_create_name(name, (size_t)name_len))};
+        {
+            ScopedSkipAccessorDispatch _skip_guard;
+            js_property_set(object, key, js_props_undefined());
+        }
+        se = js_find_shape_entry(object, name, name_len);
+    }
+    if (!se) return false;
+    if (jspd_is_accessor(se)) {
+        js_shape_entry_set_accessor(object, name, name_len, /*is_accessor=*/false);
+    }
+    js_shape_entry_update_flags(object, name, name_len, 0,
+        (uint8_t)(JSPD_NON_WRITABLE | JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE));
+    js_shape_entry_set_deleted(object, name, name_len, /*is_deleted=*/true);
+    return true;
+}
+
 // Stage A1.12: OrdinaryDelete — own-property delete on LMD_TYPE_MAP.
 extern "C" bool js_ordinary_delete(Item object, const char* name, int name_len) {
     JS_PROPS_ASSERT_KEY(name, name_len);
@@ -321,27 +343,7 @@ extern "C" bool js_ordinary_delete(Item object, const char* name, int name_len) 
     JS_PROPS_ASSERT_ACCESSOR_PAIR(slot, se);
     if (!js_props_query_configurable(m, se, name, name_len)) return false;
 
-    // A2-T3: clear IS_ACCESSOR shape flag so future reads don't dispatch the
-    // deleted accessor pair under the bare-name slot. Routed through the
-    // Map-local clone primitive so siblings sharing this TypeMap (via shape
-    // cache) keep their own IS_ACCESSOR state.
-    if (se && jspd_is_accessor(se)) {
-        js_shape_entry_set_accessor(object, name, name_len, /*is_accessor=*/false);
-    }
-
-    // Clear shape-backed attributes first so the subsequent sentinel write is
-    // not blocked by the non-writable guard.
-    if (se) {
-        js_shape_entry_update_flags(object, name, name_len, 0,
-            (uint8_t)(JSPD_NON_WRITABLE | JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE));
-    }
-
-    Item bare = (Item){.item = s2it(heap_create_name(name, name_len))};
-    js_property_set(object, bare, (Item){.item = JS_DELETED_SENTINEL_VAL});
-    // A2-T8c dual-write: stamp JSPD_DELETED on the shape entry so readers can
-    // detect tombstones via shape (independent of the slot-value sentinel).
-    js_shape_entry_set_deleted(object, name, name_len, /*is_deleted=*/true);
-    return true;
+    return js_shape_mark_deleted_own(object, name, name_len, /*create_if_missing=*/false);
 }
 
 // External: defined in lambda-data-runtime.cpp (C++ linkage).

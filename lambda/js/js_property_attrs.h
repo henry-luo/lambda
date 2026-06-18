@@ -46,11 +46,9 @@ static inline bool jspd_is_configurable(const ShapeEntry* se) {
 static inline bool jspd_is_accessor(const ShapeEntry* se) {
     return se && (se->flags & JSPD_IS_ACCESSOR);
 }
-// A2-T8: tombstone bit. Successor to the JS_DELETED_SENTINEL_VAL slot encoding
-// (which overlaps the LMD_TYPE_INT domain and forces every reader to canonicalise
-// the slot value before probing). The bit lives on the ShapeEntry so readers can
-// answer "is this property deleted?" with one shape-entry probe regardless of
-// the slot's stored type.
+// Tombstone bit for ordinary MAP/FUNC/ARRAY companion-map properties. Dense
+// array holes use a raw sentinel in array item slots; typed map slots use this
+// shape bit instead.
 static inline bool jspd_is_deleted(const ShapeEntry* se) {
     return se && (se->flags & JSPD_DELETED);
 }
@@ -138,13 +136,10 @@ void js_shape_entry_update_flags(Item obj, const char* name, int name_len,
 // does not exist or the bit is already in the requested state.
 void js_shape_entry_set_accessor(Item obj, const char* name, int name_len, bool is_accessor);
 
-// A2-T8: set or clear the JSPD_DELETED tombstone bit on the ShapeEntry for
-// `name`. Per-Map clone safe (same primitive as the other shape mutators).
-// During the T8 transition, callers should write the legacy
-// JS_DELETED_SENTINEL_VAL slot value *and* call this helper; once readers
-// migrate to bit-only probing, the sentinel write site can drop. No-op when
-// no shape entry exists for `name` (e.g. companion-map indexed positions —
-// see AT-4 for the indexed-position storage unification).
+// Set or clear the JSPD_DELETED tombstone bit on the ShapeEntry for `name`.
+// Per-Map clone safe (same primitive as the other shape mutators). No-op when
+// no shape entry exists; callers that need to shadow a virtual property should
+// materialize a safe slot first.
 void js_shape_entry_set_deleted(Item obj, const char* name, int name_len, bool is_deleted);
 
 // =============================================================================

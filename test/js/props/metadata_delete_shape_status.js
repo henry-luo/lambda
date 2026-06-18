@@ -27,6 +27,10 @@ Object.defineProperty(o, "a", {
 });
 ok(o.a === 2 && o.hasOwnProperty("a") && hasKey(o, "a"));
 
+var oldPayload = 0xDEAD00DEAD00;
+var collision = { oldPayload: oldPayload };
+ok(collision.hasOwnProperty("oldPayload") && collision.oldPayload === oldPayload && hasKey(collision, "oldPayload"));
+
 var proto = { x: 7 };
 var child = Object.create(proto);
 Object.defineProperty(child, "x", {
@@ -45,6 +49,28 @@ ok(!f.hasOwnProperty("custom") && !hasName(f, "custom") && !hasKey(f, "custom"))
 f.custom = 2;
 ok(f.custom === 2 && Object.prototype.propertyIsEnumerable.call(f, "custom"));
 
+function vf(a, b) {}
+delete vf.length;
+ok(!vf.hasOwnProperty("length") && !hasName(vf, "length") && vf.length === 0);
+Object.defineProperty(vf, "length", {
+  value: 4,
+  writable: true,
+  enumerable: true,
+  configurable: true
+});
+ok(vf.length === 4 && vf.hasOwnProperty("length") && hasKey(vf, "length"));
+
+function nf() {}
+delete nf.name;
+ok(!nf.hasOwnProperty("name") && !hasName(nf, "name") && nf.name === undefined);
+Object.defineProperty(nf, "name", {
+  value: "revived",
+  writable: true,
+  enumerable: true,
+  configurable: true
+});
+ok(nf.name === "revived" && nf.hasOwnProperty("name") && hasKey(nf, "name"));
+
 var a = [];
 Object.defineProperty(a, "2", {
   value: "two",
@@ -61,3 +87,27 @@ Object.defineProperty(a, "2", {
   configurable: true
 });
 ok(a[2] === "new" && hasKey(a, "2"));
+
+var dense = [];
+dense[0] = oldPayload;
+ok(0 in dense && dense[0] === oldPayload);
+
+var objProtoToStringDeleted = delete Object.prototype.toString;
+ok(objProtoToStringDeleted && !Object.prototype.hasOwnProperty("toString") && !hasName(Object.prototype, "toString"));
+ok(typeof Object.prototype.toString === "undefined" && typeof ({}).toString === "undefined");
+
+var objProtoToStringDirectThrows = false;
+try {
+  Object.prototype.toString();
+} catch (e) {
+  objProtoToStringDirectThrows = e instanceof TypeError;
+}
+ok(objProtoToStringDirectThrows);
+
+var objProtoToStringComputedThrows = false;
+try {
+  Object.prototype["toString"]();
+} catch (e) {
+  objProtoToStringComputedThrows = e instanceof TypeError;
+}
+ok(objProtoToStringComputedThrows);

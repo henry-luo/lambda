@@ -4,6 +4,7 @@
  */
 
 #include "js_property_attrs.h"
+#include "js_props.h"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
 #include "js_state_guards.h"
@@ -248,13 +249,11 @@ extern "C" void js_shape_entry_set_accessor(Item obj, const char* name, int name
     }
 }
 
-// A2-T8 tombstone bit mutator. Same per-Map clone safety as the accessor
-// helper. Bit-only — does NOT write the legacy JS_DELETED_SENTINEL_VAL slot
-// value (callers in the transition phase should call this *and* the existing
-// sentinel write site; once readers migrate to the bit, the sentinel write
-// can drop). When the property has no shape entry yet (e.g. companion-map
-// indexed positions on arrays) this is a no-op — those sites continue to use
-// the slot sentinel until AT-4 lands.
+// Tombstone bit mutator. Same per-Map clone safety as the accessor helper.
+// Bit-only: ordinary map/property deletes do not store the raw dense-array
+// hole sentinel in typed map slots. When the property has no shape entry yet
+// this is a no-op; callers that need a virtual tombstone should materialize a
+// safe slot first via js_shape_mark_deleted_own(..., create_if_missing=true).
 extern "C" void js_shape_entry_set_deleted(Item obj, const char* name, int name_len,
                                            bool is_deleted) {
     if (is_deleted) {
@@ -331,8 +330,8 @@ static bool js_attr_ensure_array_shape_entry(Item obj, const char* name, int nam
     Item slot_value = (Item){.item = ITEM_JS_UNDEFINED};
     bool slot_found = false;
     if (get_type_id(target) == LMD_TYPE_MAP) {
-        slot_value = js_map_get_fast_ext(target.map, name, name_len, &slot_found);
-        if (slot_found && slot_value.item == JS_DELETED_SENTINEL_VAL) slot_found = false;
+        JsShapeSlotStatus status = js_own_shape_slot_status(target, name, name_len, &slot_value, NULL);
+        slot_found = (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR);
     }
     if (!slot_found && arr && js_attrs_name_is_digits(name, name_len)) {
         int64_t idx = js_attrs_parse_index_name(name, name_len);

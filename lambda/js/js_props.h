@@ -83,8 +83,8 @@ typedef enum {
 
 // P5: centralized own shape/slot status. This is the lowest-level ordinary
 // property state query for MAP storage, FUNC properties_map storage, and ARRAY
-// companion-map storage. It treats either JSPD_DELETED or the transition
-// JS_DELETED_SENTINEL_VAL slot as a deleted own property.
+// companion-map storage. It treats either JSPD_DELETED or a retained raw hole
+// slot as a deleted own property.
 typedef enum {
     JS_SHAPE_SLOT_ABSENT   = 0,
     JS_SHAPE_SLOT_DELETED  = 1,
@@ -97,6 +97,13 @@ JsShapeSlotStatus js_own_shape_slot_status(Item object,
                                             int name_len,
                                             Item* out_slot,
                                             ShapeEntry** out_se);
+
+// Mark an existing ordinary shape entry deleted using JSPD_DELETED. When
+// `create_if_missing` is true, materialize a safe undefined data slot first so
+// FUNC virtual properties can be shadow-deleted without storing the raw array
+// hole sentinel in map storage.
+bool js_shape_mark_deleted_own(Item object, const char* name, int name_len,
+                               bool create_if_missing);
 
 // Look up own property `key` on `object` (must be LMD_TYPE_MAP). If the slot
 // carries IS_ACCESSOR, dispatch the getter using `Receiver` as `this` (or
@@ -264,9 +271,8 @@ JsSetterDispatchStatus js_ordinary_set(Item object, const char* name, int name_l
 //      reports non-configurable, return false (cannot delete).
 //   3. Clear IS_ACCESSOR shape flag on the bare-key slot if set, so future
 //      reads do not dispatch a deleted accessor.
-//   4. Tombstone the shape entry with JSPD_DELETED and write the transition
-//      slot sentinel, clearing IS_ACCESSOR so subsequent reads cannot dispatch
-//      a deleted accessor pair.
+//   4. Tombstone the shape entry with JSPD_DELETED, clearing IS_ACCESSOR so
+//      subsequent reads cannot dispatch a deleted accessor pair.
 //   5. Return true.
 //
 // Excludes: arrays (sentinel-hole semantics), functions (properties_map

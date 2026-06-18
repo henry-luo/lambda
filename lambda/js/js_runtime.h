@@ -20,10 +20,10 @@ static inline bool js_map_kind_uses_default_object_to_primitive(uint8_t map_kind
            map_kind == MAP_KIND_FOREIGN_DOC;
 }
 
-// Sentinel value for deleted properties (used by delete operator).
-// Encoded as a tagged INT (LMD_TYPE_INT=4) with a unique payload 0x00DEAD00DEAD00.
-// This roundtrips correctly through map_field_store/map_read_field for INT fields.
-#define JS_DELETED_SENTINEL_VAL (((uint64_t)LMD_TYPE_INT << 56) | 0x00DEAD00DEAD00ULL)
+// Sentinel value for dense array holes. Uses type tag 0x7E (unused), so it
+// cannot collide with any valid JS value. Ordinary object deletes use
+// JSPD_DELETED shape bits instead of storing this raw value in map slots.
+#define JS_DELETED_SENTINEL_VAL 0x7E00DEAD00DEAD00ULL
 
 // Sentinel value for iterator "done" (returned by js_iterator_step when exhausted).
 // Uses type tag 0x7F (unused) so it cannot collide with any valid JS value

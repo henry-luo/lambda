@@ -47,7 +47,7 @@ Retired metadata strings:
 - `__get_X` / `__set_X` are no longer accessor storage. Accessor producers install a `JsAccessorPair` under the visible property name and set `JSPD_IS_ACCESSOR`.
 - `__nw_` / `__ne_` / `__nc_` are no longer attribute storage or fallback. Attribute reads and writes use `ShapeEntry::flags`; array descriptor-special indices and `length` are materialized in the companion map before flags are mutated.
 - `__class_name__` is no longer built-in brand metadata. Built-in identity is the `TypeMap::js_class` byte; user class identity is constructor/prototype identity.
-- Deletes stamp `JSPD_DELETED` and, during the current transition, also write `JS_DELETED_SENTINEL_VAL` for compatibility with narrow sentinel users. Ordinary readers go through `js_own_shape_slot_status`, which canonicalizes `ABSENT`, `DELETED`, `DATA`, and `ACCESSOR`.
+- Deletes stamp `JSPD_DELETED`; ordinary map/FUNC/ARRAY companion-map slots no longer receive `JS_DELETED_SENTINEL_VAL`. Dense array holes still use the raw sentinel in `Array::items`. Ordinary readers go through `js_own_shape_slot_status`, which canonicalizes `ABSENT`, `DELETED`, `DATA`, and `ACCESSOR`.
 
 The unified read/write descriptor record is `JsPropertyDescriptor` (`js_props.h:307`), used by `js_get_own_property_descriptor`, `js_descriptor_from_object`, and `js_define_own_property_from_descriptor`.
 
@@ -147,13 +147,11 @@ Because instances **share** the cached `TypeMap`, any per-instance attribute cha
 
 ## 11. Known Issues & Future Improvements
 
-1. **Transition sentinel still exists.** Ordinary property readers now query `JSPD_DELETED` through `js_own_shape_slot_status`, but delete still writes `JS_DELETED_SENTINEL_VAL` while dense array holes and FUNC virtual-property shadows depend on it. Future cleanup should separate value-slot holes from ordinary descriptor tombstones before removing any sentinel write.
-2. **Deleted-sentinel overlaps the INT domain.** `JS_DELETED_SENTINEL_VAL` (`js_runtime.h:26`) looks like a valid INT, which is why ordinary readers must never interpret slots directly without the shape/slot status helper. The FLOAT-key delete path still carries a BOOL pre-write to avoid FLOAT->INT widening before the transition sentinel is written.
-3. **Oversized dispatch functions.** `js_property_set`, `js_property_get`, `ValidateAndApplyPropertyDescriptor`, and `js_delete_property` remain monolithic and deeply nested across ordinary, exotic, array, proxy, and function special cases.
-4. **Linear scans on hot paths.** Built-in method lookup is linear `strncmp` over each spec table (`js_runtime_builtin_registry.cpp:20`); the `TypeMap` hash is fixed-32 and refuses new keys when full (`lambda-data.hpp:280`), so objects with >32 named fields degrade to linear shape walks. Existing keys are still replaceable in a full table. *Improvement:* sort + bsearch (or hash) the spec tables; grow `field_index`.
-5. **Corrupt-`type`-pointer band-aids.** Several sites guard against `m->type > 0x0000FFFFFFFFFFFF` "garbage tagged-Item" values (`js_runtime.cpp:2777`, `js_class.h:126`, `js_property_attrs.cpp:57`), citing a real crash (`lib_marked.js`). This is a latent memory-safety hazard (a non-Map typing as `LMD_TYPE_MAP`) worked around rather than root-caused.
-6. **FUNC delete can't use the spec-pure kernel (documented WONTFIX).** `js_delete_property` keeps an inline sentinel write for FUNC because routing through `js_ordinary_delete` regressed 35 `S15_*_A9` tests. That sentinel shadows virtual `length`, `name`, and `prototype` properties that are computed from the function struct rather than stored as ordinary slots.
-7. **`js_ordinary_set` conflates outcomes** - returns `JS_SET_NOT_FOUND` after a successful own data write (`js_props.cpp:264`), so callers cannot distinguish "wrote data" from "no accessor"; limited impact because the main ABI path does not use this kernel.
+1. **Dense array hole sentinel remains.** `JS_DELETED_SENTINEL_VAL` (`js_runtime.h:26`) now uses unused tag `0x7E` and marks dense `Array::items` holes, not ordinary descriptor metadata. Ordinary map/FUNC/ARRAY companion-map deletes use `JSPD_DELETED`; readers that may inspect dense array items still preserve a raw-hole check, while ordinary property readers use `js_own_shape_slot_status`.
+2. **Oversized dispatch functions.** `js_property_set`, `js_property_get`, `ValidateAndApplyPropertyDescriptor`, and `js_delete_property` remain monolithic and deeply nested across ordinary, exotic, array, proxy, and function special cases.
+3. **Linear scans on hot paths.** Built-in method lookup is linear `strncmp` over each spec table (`js_runtime_builtin_registry.cpp:20`); the `TypeMap` hash is fixed-32 and refuses new keys when full (`lambda-data.hpp:280`), so objects with >32 named fields degrade to linear shape walks. Existing keys are still replaceable in a full table. *Improvement:* sort + bsearch (or hash) the spec tables; grow `field_index`.
+4. **Corrupt-`type`-pointer band-aids.** Several sites guard against `m->type > 0x0000FFFFFFFFFFFF` "garbage tagged-Item" values (`js_runtime.cpp:2777`, `js_class.h:126`, `js_property_attrs.cpp:57`), citing a real crash (`lib_marked.js`). This is a latent memory-safety hazard (a non-Map typing as `LMD_TYPE_MAP`) worked around rather than root-caused.
+5. **`js_ordinary_set` conflates outcomes** - returns `JS_SET_NOT_FOUND` after a successful own data write (`js_props.cpp:264`), so callers cannot distinguish "wrote data" from "no accessor"; limited impact because the main ABI path does not use this kernel.
 
 ---
 

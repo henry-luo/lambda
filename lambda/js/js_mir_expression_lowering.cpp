@@ -8639,6 +8639,51 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 jm_emit_exc_propagate_check(mt);
             }
 
+            bool object_prototype_member_call = false;
+            if (!m->optional && !call->optional && m->object &&
+                m->object->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+                JsMemberNode* base_member = (JsMemberNode*)m->object;
+                if (!base_member->computed && base_member->object &&
+                    base_member->object->node_type == JS_AST_NODE_IDENTIFIER &&
+                    base_member->property &&
+                    base_member->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* base_obj = (JsIdentifierNode*)base_member->object;
+                    JsIdentifierNode* base_prop = (JsIdentifierNode*)base_member->property;
+                    object_prototype_member_call =
+                        base_obj->name && base_obj->name->len == 6 &&
+                        strncmp(base_obj->name->chars, "Object", 6) == 0 &&
+                        base_prop->name && base_prop->name->len == 9 &&
+                        strncmp(base_prop->name->chars, "prototype", 9) == 0;
+                }
+            }
+            if (object_prototype_member_call) {
+                bool args_have_yield = false;
+                if (mt->in_generator) {
+                    for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
+                        if (jm_has_yield(chk)) { args_have_yield = true; break; }
+                    }
+                }
+                MIR_reg_t fn = jm_call_2(mt, "js_property_access", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name));
+                jm_emit_exc_propagate_check(mt);
+                int recv_arg_spill = -1, fn_arg_spill = -1;
+                if (args_have_yield) {
+                    recv_arg_spill = jm_gen_spill_save(mt, recv);
+                    fn_arg_spill = jm_gen_spill_save(mt, fn);
+                }
+                MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+                if (recv_arg_spill >= 0) {
+                    jm_gen_spill_load(mt, recv, recv_arg_spill);
+                    jm_gen_spill_load(mt, fn, fn_arg_spill);
+                }
+                return jm_call_4(mt, "js_call_function", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+            }
+
             if (!m->optional && jm_has_optional_chain(m->object)) {
                 MIR_label_t l_opt_skip = jm_new_label(mt);
                 MIR_label_t l_opt_call = jm_new_label(mt);

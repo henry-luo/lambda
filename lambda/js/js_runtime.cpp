@@ -3489,6 +3489,14 @@ static Item js_eval_initializer_resolve_private_key(Item object, String* key) {
     return js_private_find_scoped_key_on_object_chain(object, suffix, suffix_len);
 }
 
+static bool js_object_prototype_builtin_deleted(const char* key_str, int key_len) {
+    if (!key_str || key_len <= 0) return false;
+    Map* object_proto = js_resolve_object_prototype();
+    if (!object_proto) return false;
+    Item proto_item = (Item){.map = object_proto};
+    return js_ordinary_own_status(proto_item, key_str, key_len) == JS_HAS_DELETED;
+}
+
 extern "C" Item js_property_get(Item object, Item key) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_PROPERTY_GET);
     TypeId type = get_type_id(object);
@@ -3709,7 +3717,7 @@ extern "C" Item js_property_get(Item object, Item key) {
             Item builtin = ItemNull;
             // v18o: Check JsClass FIRST for type-specific prototype resolution
             // This ensures Number.prototype.toString returns Number's toString, not Object's.
-            {
+            if (!own_was_deleted_sentinel) {
                 JsClass cls = js_class_id(object);
                 if (cls == JS_CLASS_STRING) {
                         // String.prototype[Symbol.iterator]
@@ -3787,8 +3795,10 @@ extern "C" Item js_property_get(Item object, Item key) {
             }
             // Check Object.prototype methods (applies to all objects with proto)
             if (!_np_is_null_proto) {
-                builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
-                if (builtin.item != ItemNull.item) return builtin;
+                if (!js_object_prototype_builtin_deleted(str_key->chars, (int)str_key->len)) {
+                    builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
+                    if (builtin.item != ItemNull.item) return builtin;
+                }
             }
             // v18c: .constructor fallback — return appropriate constructor when not found
             if (!_np_is_null_proto && str_key->len == 11 && strncmp(str_key->chars, "constructor", 11) == 0) {
@@ -3877,26 +3887,16 @@ extern "C" Item js_property_get(Item object, Item key) {
                 // v25: check companion map for custom properties first
                 if (object.array->extra != 0) {
                     Map* pm = (Map*)(uintptr_t)object.array->extra;
-                    bool pm_found = false;
-                    Item pm_val = js_map_get_fast_ext(pm, str_key->chars, (int)str_key->len, &pm_found);
-                    if (pm_found && !js_is_deleted_sentinel(pm_val)) {
-                        // Phase 5D array migration: if shape entry has JSPD_IS_ACCESSOR,
-                        // slot holds a JsAccessorPair*; dispatch via pair->getter.
-                        ShapeEntry* _se = js_find_shape_entry(object, str_key->chars, (int)str_key->len);
-                        if (_se && jspd_is_accessor(_se)) {
-                            JsAccessorPair* pair = js_item_to_accessor_pair(pm_val);
-                            if (pair && pair->getter.item != ItemNull.item) {
-                                return js_accessor_call_result(pair->getter, object);
-                            }
-                            return make_js_undefined();
-                        }
+                    Item pm_item = (Item){.map = pm};
+                    Item pm_val = ItemNull;
+                    JsOwnGetStatus pm_status = js_ordinary_get_own(pm_item, key, object, &pm_val);
+                    if (pm_status == JS_OWN_READY) {
                         return pm_val;
                     }
                     // Phase 5D array migration: legacy __get_<name>/__set_<name>
-                    // probes removed for named-key accessors. The bare-name fast
-                    // probe above with IS_ACCESSOR shape-flag dispatch is the
-                    // sole accessor-detection path. Numeric index accessors still
-                    // use legacy markers (handled separately in numeric-index path).
+                    // probes removed for named-key accessors. The ordinary
+                    // own-get helper above handles IS_ACCESSOR and deleted
+                    // shape state for companion-map properties.
                     // v29: strict arguments — throw TypeError on callee/caller access
                     if (object.array->is_content == 1 &&
                         ((str_key->len == 6 && strncmp(str_key->chars, "callee", 6) == 0) ||
@@ -3917,8 +3917,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                     if (str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0) {
                         return js_get_prototype_of(object);
                     }
-                    Item object_builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
-                    if (object_builtin.item != ItemNull.item) return object_builtin;
+                    if (!js_object_prototype_builtin_deleted(str_key->chars, (int)str_key->len)) {
+                        Item object_builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
+                        if (object_builtin.item != ItemNull.item) return object_builtin;
+                    }
                 }
                 // v18c: .constructor for arrays → Array constructor
                 if (str_key->len == 11 && strncmp(str_key->chars, "constructor", 11) == 0) {
@@ -3955,8 +3957,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                 Item builtin = js_lookup_builtin_method(LMD_TYPE_ARRAY, str_key->chars, str_key->len);
                 if (builtin.item != ItemNull.item) return builtin;
                 // Check Object.prototype methods (toString, hasOwnProperty, etc.)
-                builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
-                if (builtin.item != ItemNull.item) return builtin;
+                if (!js_object_prototype_builtin_deleted(str_key->chars, (int)str_key->len)) {
+                    builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
+                    if (builtin.item != ItemNull.item) return builtin;
+                }
                 // Walk custom prototype chain if array has custom __proto__
                 if (object.array->extra != 0) {
                     Item custom_proto = js_array_get_custom_proto(object);
@@ -4640,11 +4644,10 @@ extern "C" Item js_property_get(Item object, Item key) {
             // .call, .apply, .bind and other Function.prototype methods
             Item builtin = js_lookup_builtin_method(LMD_TYPE_FUNC, str_key->chars, str_key->len);
             if (builtin.item != ItemNull.item) return builtin;
-            // v18: check custom properties backing map (e.g. assert._isSameValue)
-            if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-                Item result = map_get(fn->properties_map.map, key);
-                if (result.item != ItemNull.item) return result;
-            }
+            // Custom properties on properties_map were handled by the
+            // shape-aware own probe above. Do not raw-read the backing map here:
+            // virtual deletes materialize a safe slot whose JSPD_DELETED bit is
+            // the authoritative absence state.
             // Function.prototype[@@hasInstance] — default OrdinaryHasInstance
             if (str_key->len == 7 && strncmp(str_key->chars, "__sym_3", 7) == 0) {
                 return js_get_or_create_builtin(JS_BUILTIN_FUNC_HAS_INSTANCE, "[Symbol.hasInstance]", 1);
@@ -4679,21 +4682,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                     if (get_type_id(proto) == LMD_TYPE_FUNC) {
                         JsFunction* proto_fn = (JsFunction*)proto.function;
                         if (proto_fn->properties_map.item != 0 && get_type_id(proto_fn->properties_map) == LMD_TYPE_MAP) {
-                            Item result = map_get(proto_fn->properties_map.map, key);
-                            if (result.item != ItemNull.item) {
-                                ShapeEntry* _se = js_find_shape_entry(proto, str_key->chars, (int)str_key->len);
-                                // Phase 4: if shape entry has IS_ACCESSOR, slot holds a
-                                // JsAccessorPair*; dispatch via pair->getter with `object`
-                                // as `this`. Required for inherited accessors like
-                                // Float64Array[Symbol.species] (getter installed on
-                                // %TypedArray%).
-                                if (_se && jspd_is_accessor(_se)) {
-                                    JsAccessorPair* pair = js_item_to_accessor_pair(result);
-                                    if (pair && pair->getter.item != ItemNull.item) {
-                                        return js_accessor_call_result(pair->getter, object);
-                                    }
-                                    return make_js_undefined();
-                                }
+                            Item result = ItemNull;
+                            JsOwnGetStatus proto_fn_status = js_ordinary_get_own(
+                                proto_fn->properties_map, key, object, &result);
+                            if (proto_fn_status == JS_OWN_READY) {
                                 return result;
                             }
                         }
@@ -4754,8 +4746,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                 if (str_key->len == 7 && strncmp(str_key->chars, "valueOf", 7) == 0) {
                     return js_get_or_create_builtin(JS_BUILTIN_SYM_VALUE_OF, "valueOf", 0);
                 }
-                Item object_builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
-                if (object_builtin.item != ItemNull.item) return object_builtin;
+                if (!js_object_prototype_builtin_deleted(str_key->chars, (int)str_key->len)) {
+                    Item object_builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
+                    if (object_builtin.item != ItemNull.item) return object_builtin;
+                }
                 Item proto = js_get_prototype_of(object);
                 if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
                     Item saved_receiver = js_proxy_receiver;
@@ -5028,7 +5022,6 @@ static void js_array_delete_sparse_indices_from(lam::GcPtr<Array> arr, int64_t n
     if (!pm || !pm->type) return;
     TypeMap* tm = (TypeMap*)pm->type;
     Item map_item = (Item){.map = pm};
-    Item deleted = lam::hole_sentinel_item();
     for (ShapeEntry* entry = tm->shape; entry; entry = entry->next) {
         if (!entry->name) continue;
         int name_len = (int)entry->name->length;
@@ -5038,8 +5031,7 @@ static void js_array_delete_sparse_indices_from(lam::GcPtr<Array> arr, int64_t n
         if (index < new_len) continue;
         ShapeEntry* se = js_find_shape_entry(map_item, name, name_len);
         if (!js_props_query_configurable(pm, se, name, name_len)) continue;
-        Item key = (Item){.item = s2it(heap_create_name(name, name_len))};
-        js_property_set(map_item, key, deleted);
+        js_ordinary_delete(map_item, name, name_len);
     }
 }
 
@@ -5069,11 +5061,8 @@ static bool js_func_has_own_property_map_key(Item object, const char* name, int 
     if (get_type_id(object) != LMD_TYPE_FUNC) return false;
     JsFunction* fn = (JsFunction*)object.function;
     if (fn->properties_map.item == 0 || get_type_id(fn->properties_map) != LMD_TYPE_MAP) return false;
-    ShapeEntry* se = js_find_shape_entry(fn->properties_map, name, name_len);
-    if (!se) return false;
-    bool found = false;
-    Item val = js_map_get_fast_ext(fn->properties_map.map, name, name_len, &found);
-    return found && val.item != JS_DELETED_SENTINEL_VAL;
+    JsShapeSlotStatus status = js_own_shape_slot_status(fn->properties_map, name, name_len, NULL, NULL);
+    return status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR;
 }
 
 // Fast path for writing an existing own dense data element of a plain Array.
@@ -5818,15 +5807,11 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             } else {
                 // MAP prototype: clear properties_map entry if previously set to non-MAP
                 if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-                    Item del = lam::hole_sentinel_item();
-                    js_property_set(fn->properties_map, key, del);
-                    // A2-T8c dual-write: stamp JSPD_DELETED on the shape entry
-                    // so readers can detect tombstones via shape (independent
-                    // of the slot-value sentinel).
                     if (get_type_id(key) == LMD_TYPE_STRING) {
                         String* sk = it2s(key);
                         if (sk && sk->len > 0) {
-                            js_shape_entry_set_deleted(fn->properties_map, sk->chars, (int)sk->len, /*is_deleted=*/true);
+                            js_shape_mark_deleted_own(fn->properties_map,
+                                sk->chars, (int)sk->len, /*create_if_missing=*/true);
                         }
                     }
                 }
@@ -6582,12 +6567,13 @@ extern "C" int64_t js_get_length(Item object) {
     // Function .length = formal parameter count (unless overridden/deleted)
     if (get_type_id(object) == LMD_TYPE_FUNC) {
         JsFunction* fn = (JsFunction*)object.function;
-        // v23: Check properties_map first for overridden/deleted .length
+        // Check properties_map first for overridden/deleted .length.
         if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-            bool pm_found = false;
-            Item pm_val = js_map_get_fast_ext(fn->properties_map.map, "length", 6, &pm_found);
-            if (pm_found) {
-                if (js_is_deleted_sentinel(pm_val)) return 0;
+            Item pm_val = ItemNull;
+            JsShapeSlotStatus status = js_own_shape_slot_status(
+                fn->properties_map, "length", 6, &pm_val, NULL);
+            if (status == JS_SHAPE_SLOT_DELETED) return 0;
+            if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
                 return (int64_t)js_get_number(pm_val);
             }
         }
@@ -6611,30 +6597,19 @@ extern "C" int64_t js_get_length(Item object) {
     // 3. Prototype "length" property
     // before falling back to fn_len
     if (get_type_id(object) == LMD_TYPE_MAP) {
-        Map* m = object.map;
         // Check own "length" property
-        bool own_found = false;
-        Item result = js_map_get_fast(m, "length", 6, &own_found);
-        if (own_found && !js_is_deleted_sentinel(result)) {
-            // Phase 5: own "length" may be a JsAccessorPair stored under
-            // IS_ACCESSOR shape flag. Dispatch the getter rather than coercing
-            // the pair (which would yield NaN→0 via js_get_number).
-            ShapeEntry* _se = js_find_shape_entry(object, "length", 6);
-            if (_se && jspd_is_accessor(_se)) {
-                JsAccessorPair* pair = js_item_to_accessor_pair(result);
-                if (pair && pair->getter.item != ItemNull.item) {
-                    Item v = js_call_function(pair->getter, object, NULL, 0);
-                    return (int64_t)js_get_number(v);
-                }
-                return 0;
-            }
+        Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+        Item result = ItemNull;
+        JsOwnGetStatus own_status = js_ordinary_get_own(object, len_key, object, &result);
+        if (own_status == JS_OWN_READY) {
+            // Phase 5: ordinary-get dispatches own accessors before the value
+            // is coerced to a length number.
             return (int64_t)js_get_number(result);
         }
         // Phase-5D: legacy __get_length own + proto probes removed.
         // IS_ACCESSOR own-path is handled above; proto-chain accessor
         // dispatch is performed by js_prototype_lookup below.
         // Check prototype chain for regular "length" property
-        Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
         Item proto_result = js_prototype_lookup(object, len_key);
         if (proto_result.item != ItemNull.item && !js_is_deleted_sentinel(proto_result)) {
             return (int64_t)js_get_number(proto_result);
@@ -6669,27 +6644,17 @@ extern "C" Item js_get_length_item(Item object) {
         return js_make_number((double)js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii));
     }
     if (get_type_id(object) == LMD_TYPE_MAP) {
-        Map* m = object.map;
         // Check own "length" property - return raw value
-        bool own_found = false;
-        Item result = js_map_get_fast(m, "length", 6, &own_found);
-        if (own_found && !js_is_deleted_sentinel(result)) {
-            // Phase 5: own "length" may be a JsAccessorPair stored under
-            // IS_ACCESSOR shape flag. Dispatch the getter instead of returning
-            // the raw pair (which would surface as a function-typed Item).
-            ShapeEntry* _se = js_find_shape_entry(object, "length", 6);
-            if (_se && jspd_is_accessor(_se)) {
-                JsAccessorPair* pair = js_item_to_accessor_pair(result);
-                if (pair && pair->getter.item != ItemNull.item) {
-                    return js_accessor_call_result(pair->getter, object);
-                }
-                return make_js_undefined();
-            }
+        Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+        Item result = ItemNull;
+        JsOwnGetStatus own_status = js_ordinary_get_own(object, len_key, object, &result);
+        if (own_status == JS_OWN_READY) {
+            // Phase 5: ordinary-get dispatches own accessors instead of
+            // returning the raw JsAccessorPair slot.
             return result;  // return raw Item, not converted to number
         }
         // Phase-5D: legacy __get_length own + proto probes removed.
         // Check prototype chain
-        Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
         Item proto_result = js_prototype_lookup(object, len_key);
         if (proto_result.item != ItemNull.item && !js_is_deleted_sentinel(proto_result)) {
             return proto_result;
@@ -7812,6 +7777,28 @@ static Item js_object_to_string_result(const char* tag, int tag_len) {
     return (Item){.item = s2it(heap_create_name(buf, blen))};
 }
 
+static bool js_object_to_string_result_from_tag(Item tag, Item* out_result) {
+    if (get_type_id(tag) != LMD_TYPE_STRING) return false;
+    String* ts = it2s(tag);
+    if (!ts) return false;
+    *out_result = js_object_to_string_result(ts->chars, (int)ts->len);
+    return true;
+}
+
+static bool js_object_to_string_shape_tag(Item object, Item receiver,
+                                          bool include_proto, Item* out_result) {
+    Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+    Item tag = ItemNull;
+    JsOwnGetStatus own_status = js_ordinary_get_own(object, tag_key, receiver, &tag);
+    if (own_status == JS_OWN_READY) {
+        return js_object_to_string_result_from_tag(tag, out_result);
+    }
+    if (!include_proto) return false;
+    tag = js_prototype_lookup(object, tag_key);
+    if (tag.item == ItemNull.item) return false;
+    return js_object_to_string_result_from_tag(tag, out_result);
+}
+
 static bool js_proxy_chain_has_revoked(Item obj) {
     int depth = 0;
     while (js_is_proxy(obj) && depth < 32) {
@@ -8179,21 +8166,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             Map* m = this_val.map;
             if (m) {
                 // Check Symbol.toStringTag first (highest priority per spec)
-                bool tag_found = false;
-                Item tag = js_map_get_fast(m, "__sym_4", 7, &tag_found);
-                if (!tag_found) {
-                    Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
-                    tag = js_prototype_lookup(this_val, tag_key);
-                    tag_found = (tag.item != ItemNull.item);
-                }
-                if (tag_found && get_type_id(tag) == LMD_TYPE_STRING) {
-                    String* ts = it2s(tag);
-                    if (ts) {
-                        char buf[256];
-                        int blen = snprintf(buf, sizeof(buf), "[object %.*s]", (int)ts->len, ts->chars);
-                        return (Item){.item = s2it(heap_create_name(buf, blen))};
-                    }
-                }
+                Item tag_result = ItemNull;
+                if (js_object_to_string_shape_tag(this_val, this_val, true, &tag_result))
+                    return tag_result;
                 // Use stamped class identity for the tag when it matches a built-in type.
                 const char* c = NULL;
                 int cl = 0;
@@ -8253,36 +8228,17 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         }
         if (tt == LMD_TYPE_ARRAY) {
             // v41: Check for custom Symbol.toStringTag on array (via companion map)
-            Array* arr = this_val.array;
-            if (arr && arr->extra) {
-                bool tag_found = false;
-                Item tag = js_map_get_fast((Map*)arr->extra, "__sym_4", 7, &tag_found);
-                if (tag_found && get_type_id(tag) == LMD_TYPE_STRING) {
-                    String* ts = it2s(tag);
-                    if (ts) {
-                        char buf[256];
-                        int blen = snprintf(buf, sizeof(buf), "[object %.*s]", (int)ts->len, ts->chars);
-                        return (Item){.item = s2it(heap_create_name(buf, blen))};
-                    }
-                }
-            }
+            Item tag_result = ItemNull;
+            if (js_object_to_string_shape_tag(this_val, this_val, false, &tag_result))
+                return tag_result;
             return (Item){.item = s2it(heap_create_name("[object Array]", 14))};
         }
         if (tt == LMD_TYPE_FUNC) {
             // v41: Check for custom Symbol.toStringTag on function
             JsFunction* fn = (JsFunction*)this_val.function;
-            if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-                bool tag_found = false;
-                Item tag = js_map_get_fast(fn->properties_map.map, "__sym_4", 7, &tag_found);
-                if (tag_found && get_type_id(tag) == LMD_TYPE_STRING) {
-                    String* ts = it2s(tag);
-                    if (ts) {
-                        char buf[256];
-                        int blen = snprintf(buf, sizeof(buf), "[object %.*s]", (int)ts->len, ts->chars);
-                        return (Item){.item = s2it(heap_create_name(buf, blen))};
-                    }
-                }
-            }
+            Item tag_result = ItemNull;
+            if (js_object_to_string_shape_tag(this_val, this_val, false, &tag_result))
+                return tag_result;
             // v41: Generator functions → [object GeneratorFunction]
             if (fn->flags & JS_FUNC_FLAG_GENERATOR)
                 return (Item){.item = s2it(heap_create_name("[object GeneratorFunction]", 26))};
@@ -8312,23 +8268,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 // Check for custom Symbol.toStringTag FIRST (well-known symbol ID=4, stored as __sym_4)
                 // ES spec: @@toStringTag takes priority when explicitly set
                 // Check own property first, then prototype chain
-                bool tag_found = false;
-                Item tag = js_map_get_fast(m, "__sym_4", 7, &tag_found);
-                if (!tag_found) {
-                    // Check prototype chain for @@toStringTag
-                    Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
-                    tag = js_prototype_lookup(this_val, tag_key);
-                    if (tag.item != ITEM_NULL && get_type_id(tag) == LMD_TYPE_STRING)
-                        tag_found = true;
-                }
-                if (tag_found && get_type_id(tag) == LMD_TYPE_STRING) {
-                    String* ts = it2s(tag);
-                    if (ts) {
-                        char buf[256];
-                        int blen = snprintf(buf, sizeof(buf), "[object %.*s]", (int)ts->len, ts->chars);
-                        return (Item){.item = s2it(heap_create_name(buf, blen))};
-                    }
-                }
+                Item tag_result = ItemNull;
+                if (js_object_to_string_shape_tag(this_val, this_val, true, &tag_result))
+                    return tag_result;
                 // Check for specific object types via __rd (RegExp)
                 bool found = false;
                 js_map_get_fast(m, "__rd", 4, &found);
@@ -9874,6 +9816,23 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_NUM_TO_FIXED:
     case JS_BUILTIN_NUM_TO_PRECISION:
     case JS_BUILTIN_NUM_TO_EXPONENTIAL: {
+        static const char* num_method_names[] = {
+            [JS_BUILTIN_NUM_TO_STRING - JS_BUILTIN_NUM_TO_STRING] = "toString",
+            [JS_BUILTIN_NUM_VALUE_OF - JS_BUILTIN_NUM_TO_STRING] = "valueOf",
+            [JS_BUILTIN_NUM_TO_FIXED - JS_BUILTIN_NUM_TO_STRING] = "toFixed",
+            [JS_BUILTIN_NUM_TO_PRECISION - JS_BUILTIN_NUM_TO_STRING] = "toPrecision",
+            [JS_BUILTIN_NUM_TO_EXPONENTIAL - JS_BUILTIN_NUM_TO_STRING] = "toExponential",
+        };
+        int nidx = builtin_id - JS_BUILTIN_NUM_TO_STRING;
+        const char* mname = num_method_names[nidx];
+        Item method_name = {.item = s2it(heap_create_name(mname, strlen(mname)))};
+        if (get_type_id(this_val) == LMD_TYPE_MAP &&
+            js_ordinary_own_status(this_val, mname, (int)strlen(mname)) == JS_HAS_DELETED) {
+            Item fn = js_property_access(this_val, method_name);
+            if (js_check_exception()) return ItemNull;
+            if (get_type_id(fn) == LMD_TYPE_FUNC) return js_call_function(fn, this_val, args, arg_count);
+            return js_throw_not_callable(mname);
+        }
         // Extract number value from this_val (could be primitive or wrapper)
         Item num_val = this_val;
         TypeId tv_type = get_type_id(this_val);
@@ -9902,16 +9861,6 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             return num_val;
         }
         // Delegate to js_number_method which handles toString, toFixed, etc.
-        static const char* num_method_names[] = {
-            [JS_BUILTIN_NUM_TO_STRING - JS_BUILTIN_NUM_TO_STRING] = "toString",
-            [JS_BUILTIN_NUM_VALUE_OF - JS_BUILTIN_NUM_TO_STRING] = "valueOf",
-            [JS_BUILTIN_NUM_TO_FIXED - JS_BUILTIN_NUM_TO_STRING] = "toFixed",
-            [JS_BUILTIN_NUM_TO_PRECISION - JS_BUILTIN_NUM_TO_STRING] = "toPrecision",
-            [JS_BUILTIN_NUM_TO_EXPONENTIAL - JS_BUILTIN_NUM_TO_STRING] = "toExponential",
-        };
-        int nidx = builtin_id - JS_BUILTIN_NUM_TO_STRING;
-        const char* mname = num_method_names[nidx];
-        Item method_name = {.item = s2it(heap_create_name(mname, strlen(mname)))};
         return js_number_method(num_val, method_name, args, arg_count);
     }
 
@@ -18917,6 +18866,22 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                         return js_call_function(ts_fn, obj, args, argc);
                     }
                 }
+                if (js_object_prototype_builtin_deleted(method->chars, (int)method->len)) {
+                    Item fn = js_property_access(obj, method_name);
+                    if (js_check_exception()) return ItemNull;
+                    if (get_type_id(fn) == LMD_TYPE_FUNC) {
+                        return js_call_function(fn, obj, args, argc);
+                    }
+                    return js_throw_not_callable("toString");
+                }
+                if (js_ordinary_own_status(obj, "toString", 8) == JS_HAS_DELETED) {
+                    Item fn = js_property_access(obj, method_name);
+                    if (js_check_exception()) return ItemNull;
+                    if (get_type_id(fn) == LMD_TYPE_FUNC) {
+                        return js_call_function(fn, obj, args, argc);
+                    }
+                    return js_throw_not_callable("toString");
+                }
                 // Buffer prototype: Uint8Array (Buffer) instances use buffer toString
                 // use map_get (own-property only) to avoid prototype chain recursion
                 if (js_is_typed_array(obj)) {
@@ -18973,6 +18938,14 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                             return js_call_function(hop_fn, obj, args, argc);
                         }
                     }
+                }
+                if (js_object_prototype_builtin_deleted(method->chars, (int)method->len)) {
+                    Item fn = js_property_access(obj, method_name);
+                    if (js_check_exception()) return ItemNull;
+                    if (get_type_id(fn) == LMD_TYPE_FUNC) {
+                        return js_call_function(fn, obj, args, argc);
+                    }
+                    return js_throw_not_callable("hasOwnProperty");
                 }
                 // Built-in hasOwnProperty: delegate to comprehensive implementation
                 // which handles accessor properties (__get_/__set_), arrays, functions, etc.
@@ -19956,6 +19929,16 @@ static Item js_string_matchall_get_flags(Item rx) {
 // =============================================================================
 
 extern "C" Item js_string_method(Item str, Item method_name, Item* args, int argc) {
+    if (get_type_id(str) == LMD_TYPE_MAP && get_type_id(method_name) == LMD_TYPE_STRING) {
+        String* deleted_method = it2s(method_name);
+        if (deleted_method &&
+            js_ordinary_own_status(str, deleted_method->chars, (int)deleted_method->len) == JS_HAS_DELETED) {
+            Item fn = js_property_access(str, method_name);
+            if (js_check_exception()) return ItemNull;
+            if (get_type_id(fn) == LMD_TYPE_FUNC) return js_call_function(fn, str, args, argc);
+            return js_throw_not_callable(deleted_method->chars);
+        }
+    }
     if (get_type_id(str) != LMD_TYPE_STRING || get_type_id(method_name) != LMD_TYPE_STRING) {
         // For replaceAll, defer ALL coercion of `this` until after searchValue checks per
         // ES §22.1.3.19 step ordering. The @@replace dispatch must receive the original
@@ -25860,9 +25843,11 @@ extern "C" void js_mark_own_proto_property(Item object) {
     Map* m = object.map;
     bool marker_found = false;
     Item marker_val = js_map_get_fast_ext(m, "__json_own_proto__", 18, &marker_found);
-    bool raw_found = false;
-    Item raw_proto = js_map_get_fast_ext(m, PROTO_KEY, PROTO_KEY_LEN, &raw_found);
-    if ((!marker_found || !js_is_truthy(marker_val)) && raw_found && raw_proto.item != JS_DELETED_SENTINEL_VAL) {
+    Item raw_proto = ItemNull;
+    JsShapeSlotStatus proto_status = js_own_shape_slot_status(
+        object, PROTO_KEY, PROTO_KEY_LEN, &raw_proto, NULL);
+    if ((!marker_found || !js_is_truthy(marker_val)) &&
+        (proto_status == JS_SHAPE_SLOT_DATA || proto_status == JS_SHAPE_SLOT_ACCESSOR)) {
         ScopedSkipAccessorDispatch _skip_guard;
         js_property_set(object, (Item){.item = s2it(heap_create_name(INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN))},
             raw_proto);
@@ -25877,11 +25862,12 @@ extern "C" Item js_func_get_custom_proto(Item func) {
     if (get_type_id(func) != LMD_TYPE_FUNC) return ItemNull;
     JsFunction* fn = (JsFunction*)func.function;
     if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-        bool found = false;
         Item pk = js_get_proto_key();
         String* pks = it2s(pk);
-        Item result = js_map_get_fast_ext(fn->properties_map.map, pks->chars, (int)pks->len, &found);
-        if (found) return result;
+        Item result = ItemNull;
+        JsShapeSlotStatus status = js_own_shape_slot_status(
+            fn->properties_map, pks->chars, (int)pks->len, &result, NULL);
+        if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) return result;
     }
     return ItemNull;
 }
@@ -25891,11 +25877,13 @@ extern "C" Item js_array_get_custom_proto(Item arr) {
     if (get_type_id(arr) != LMD_TYPE_ARRAY) return ItemNull;
     if (arr.array->extra == 0) return ItemNull;
     Map* pm = (Map*)(uintptr_t)arr.array->extra;
-    bool found = false;
     Item pk = js_get_proto_key();
     String* pks = it2s(pk);
-    Item result = js_map_get_fast_ext(pm, pks->chars, (int)pks->len, &found);
-    if (found) return result;
+    Item pm_item = (Item){.map = pm};
+    Item result = ItemNull;
+    JsShapeSlotStatus status = js_own_shape_slot_status(
+        pm_item, pks->chars, (int)pks->len, &result, NULL);
+    if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) return result;
     return ItemNull;
 }
 
@@ -26074,9 +26062,11 @@ extern "C" Item js_get_prototype(Item object) {
     // Synthetic fast iterators use a 1-byte sentinel as `type`, not a real
     // TypeMap — never walk their (non-existent) shape for a __proto__ slot.
     if (m && m->map_kind == MAP_KIND_ITERATOR) return ItemNull;
-    bool internal_found = false;
-    Item internal_proto = js_map_get_fast_ext(m, INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN, &internal_found);
-    if (internal_found && internal_proto.item != JS_DELETED_SENTINEL_VAL) return internal_proto;
+    Item internal_proto = ItemNull;
+    JsShapeSlotStatus internal_status = js_own_shape_slot_status(
+        object, INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN, &internal_proto, NULL);
+    if (internal_status == JS_SHAPE_SLOT_DATA || internal_status == JS_SHAPE_SLOT_ACCESSOR)
+        return internal_proto;
     bool json_own_proto = false;
     Item json_own_proto_val = js_map_get_fast_ext(m, "__json_own_proto__", 18, &json_own_proto);
     if (json_own_proto && js_is_truthy(json_own_proto_val)) return ItemNull;
@@ -26098,7 +26088,10 @@ extern "C" Item js_get_prototype(Item object) {
         return ItemNull;
     }
     // P10f+P10d: direct first-match lookup with interned key
-    Item proto = js_map_get_fast(m, PROTO_KEY, PROTO_KEY_LEN);
+    Item proto = ItemNull;
+    JsShapeSlotStatus proto_status = js_own_shape_slot_status(
+        object, PROTO_KEY, PROTO_KEY_LEN, &proto, NULL);
+    if (proto_status == JS_SHAPE_SLOT_DELETED) return ItemNull;
     // TypedArray instances don't store __proto__; use per-type prototype
     if (proto.item == ITEM_NULL && m->map_kind == MAP_KIND_TYPED_ARRAY) {
         JsTypedArray* ta = js_get_typed_array_ptr(m);
@@ -26248,8 +26241,8 @@ extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_fou
     // holds the deleted sentinel), skip class dispatch so the lookup falls
     // through to the next prototype level (e.g., Object.prototype).
     if (key_str && get_type_id(object) == LMD_TYPE_MAP) {
-        Item own_slot = js_map_get_fast(object.map, key_str, key_len);
-        if (!js_is_deleted_sentinel(own_slot)) {
+        JsOwnSlotStatus own_status = js_ordinary_own_status(object, key_str, key_len);
+        if (own_status != JS_HAS_DELETED) {
             Item cm = js_proto_class_method_dispatch(object, key_str, key_len);
             if (cm.item != ItemNull.item) {
                 if (out_found) *out_found = true;
@@ -26311,28 +26304,22 @@ extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_fou
             if (out_found) *out_found = true;
             return result;
         }
-        Item result;
+        Item result = ItemNull;
+        JsOwnGetStatus own_get_status = JS_OWN_NOT_FOUND;
         if (key_str) {
-            result = js_map_get_fast(proto.map, key_str, key_len);
+            Item recv = js_proxy_receiver.item ? js_proxy_receiver : object;
+            own_get_status = js_ordinary_get_own(proto, property, recv, &result);
         } else {
             result = map_get(proto.map, property);
+            own_get_status = (result.item != ItemNull.item && !js_is_deleted_sentinel(result)) ?
+                JS_OWN_READY : JS_OWN_NOT_FOUND;
         }
         // Stage A1.3b: own-property + IS_ACCESSOR dispatch on this proto
         // level routed through js_ordinary_get_own. Receiver is the original
-        // object (or the active proxy_receiver) — NOT the proto. We still
-        // need `result` below to drive the deleted-sentinel branch for the
-        // class-method-dispatch skip.
-        if (result.item != ItemNull.item && !js_is_deleted_sentinel(result)) {
-            Item recv = js_proxy_receiver.item ? js_proxy_receiver : object;
-            Item ord_val = ItemNull;
-            JsOwnGetStatus st = js_ordinary_get_own(proto, property, recv, &ord_val);
-            if (st == JS_OWN_READY) {
-                if (out_found) *out_found = true;
-                return ord_val;
-            }
-            // st == NOT_FOUND should be unreachable here (we just confirmed
-            // a non-sentinel slot exists for this key); st == DELETED falls
-            // through. Either way, continue to class-method dispatch below.
+        // object (or the active proxy_receiver) — NOT the proto.
+        if (own_get_status == JS_OWN_READY) {
+            if (out_found) *out_found = true;
+            return result;
         }
 
         // Phase 5: legacy __get_<key> proto-level probe removed. The IS_ACCESSOR
@@ -26344,7 +26331,7 @@ extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_fou
         // physical generic methods from incorrectly shadowing class-specific ones.
         // BUT: skip if the key was explicitly deleted on this proto level (own
         // slot is the deleted sentinel), so the lookup falls through.
-        if (key_str && !js_is_deleted_sentinel(result)) {
+        if (key_str && own_get_status != JS_OWN_DELETED) {
             Item cm = js_proto_class_method_dispatch(proto, key_str, key_len);
             if (cm.item != ItemNull.item) {
                 if (out_found) *out_found = true;
@@ -27414,10 +27401,10 @@ Item js_check_array_sym_iterator() {
     JsFunction* afn = (JsFunction*)arr_ctor.function;
     if (afn->prototype.item == 0 || afn->prototype.item == ItemNull.item) return ItemNull;
     if (get_type_id(afn->prototype) != LMD_TYPE_MAP) return ItemNull;
-    bool found = false;
-    Item sym_iter = js_map_get_fast(afn->prototype.map, "__sym_1", 7, &found);
-    if (!found) return ItemNull;  // not present on Array.prototype — use default
-    if (sym_iter.item == JS_DELETED_SENTINEL_VAL) return make_js_undefined();  // deleted
+    Item sym_iter = ItemNull;
+    JsShapeSlotStatus status = js_own_shape_slot_status(afn->prototype, "__sym_1", 7, &sym_iter, NULL);
+    if (status == JS_SHAPE_SLOT_ABSENT) return ItemNull;  // not present on Array.prototype — use default
+    if (status == JS_SHAPE_SLOT_DELETED) return make_js_undefined();  // deleted
     if (get_type_id(sym_iter) == LMD_TYPE_FUNC) {
         JsFunction* sfn = (JsFunction*)sym_iter.function;
         if (sfn->builtin_id == 0) return sym_iter;  // user-defined function
