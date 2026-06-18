@@ -41,6 +41,13 @@ struct LambdaVisitKind {
     int operator()(lam::ItemOf<T>) { return 9; }
 };
 
+static void set_test_shape_name(char* out, int index) {
+    out[0] = 'k';
+    out[1] = (char)('0' + ((index / 10) % 10));
+    out[2] = (char)('0' + (index % 10));
+    out[3] = '\0';
+}
+
 } // namespace
 
 TEST(LambdaTypedItem, PreservesAbiSize) {
@@ -177,6 +184,51 @@ TEST(LambdaTypedItem, ShapeRefBorrowsAndAdvancesShapeEntries) {
 
     shape = lam::shape_next(shape);
     EXPECT_FALSE((bool)shape);
+}
+
+TEST(LambdaTypedItem, TypeMapHashLookupFindsOverflowShapeEntries) {
+    TypeMap tm = {};
+    ShapeEntry entries[TYPEMAP_HASH_CAPACITY + 1] = {};
+    StrView names[TYPEMAP_HASH_CAPACITY + 1] = {};
+    char key_storage[TYPEMAP_HASH_CAPACITY + 1][4] = {};
+
+    for (int i = 0; i <= TYPEMAP_HASH_CAPACITY; i++) {
+        set_test_shape_name(key_storage[i], i);
+        names[i].str = key_storage[i];
+        names[i].length = 3;
+        entries[i].name = &names[i];
+        entries[i].byte_offset = i;
+        if (i > 0) entries[i - 1].next = &entries[i];
+        typemap_hash_insert(&tm, &entries[i]);
+    }
+    tm.shape = &entries[0];
+    tm.last = &entries[TYPEMAP_HASH_CAPACITY];
+
+    EXPECT_EQ(tm.field_count, TYPEMAP_HASH_CAPACITY);
+    EXPECT_EQ(typemap_hash_lookup(&tm, key_storage[TYPEMAP_HASH_CAPACITY], 3),
+              &entries[TYPEMAP_HASH_CAPACITY]);
+}
+
+TEST(LambdaTypedItem, TypeMapHashLookupFallsBackToLastShapeMatch) {
+    TypeMap tm = {};
+    ShapeEntry first = {};
+    ShapeEntry second = {};
+    StrView first_name = {};
+    StrView second_name = {};
+    first_name.str = "dup";
+    first_name.length = 3;
+    second_name.str = "dup";
+    second_name.length = 3;
+
+    first.name = &first_name;
+    first.byte_offset = 8;
+    first.next = &second;
+    second.name = &second_name;
+    second.byte_offset = 16;
+    tm.shape = &first;
+    tm.last = &second;
+
+    EXPECT_EQ(typemap_hash_lookup(&tm, "dup", 3), &second);
 }
 
 TEST(LambdaTypedItem, HoleSentinelWrapsDeletedSlotPayload) {

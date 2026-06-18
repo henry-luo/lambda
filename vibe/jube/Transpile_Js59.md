@@ -103,10 +103,13 @@ Results:
 - Final P5/P6 full JS gtest: 225/225 passed.
 - Final P5/P6 test262 baseline: fully passed 40261 / 40261, failed 0, regressions 0.
 - Post-cleanup `make test262-baseline`: fully passed 40261 / 40261, failed 0, regressions 0, retry 0.0s.
+- Broader TypeMap lookup slice: focused `./test/test_lambda_typed.exe --gtest_filter='LambdaTypedItem.TypeMapHashLookup*' --gtest_brief=1` passed 2/2.
+- Broader TypeMap lookup slice: full `./test/test_js_gtest.exe --gtest_brief=1` passed 233/233.
+- Broader TypeMap lookup slice: `make test262-baseline` fully passed 40261 / 40261, failed 0, regressions 0, retry 0.0s.
 
 Remaining work:
 
-- None for the Js59 string-marker, sentinel, or FUNC virtual-shadow cleanup. Larger refactor debt remains outside the Js59 acceptance bar: oversized property dispatch functions, fixed-size `TypeMap` hash behavior, corrupt `type` pointer guard root-cause work, and the `js_ordinary_set` outcome API.
+- None for the Js59 string-marker, sentinel, FUNC virtual-shadow, or shared `TypeMap` lookup-correctness cleanup. Larger refactor debt remains outside the Js59 acceptance bar: oversized property dispatch functions, dynamic/growing `TypeMap` hash performance work, corrupt `type` pointer guard root-cause work, and the `js_ordinary_set` outcome API.
 
 ## 1. Starting Baseline
 
@@ -392,6 +395,22 @@ Landed evidence:
 - Final `./test/test_js_gtest.exe --gtest_brief=1` passed 225/225.
 - The P5/P6 focused Test262 regression slice passed 6/6.
 - Final `make test262-baseline` fully passed 40261 / 40261 with failed 0, regressions 0, and retry 0.0s.
+
+### Post-P6 - Broader TypeMap Lookup Cleanup
+
+Work:
+
+1. Keep the fixed inline `TypeMap::field_index` table as an accelerator, not the source of truth.
+2. Make shared `typemap_hash_lookup` fall back to the authoritative shape chain when the table is unpopulated or saturated.
+3. Preserve last-writer-wins lookup semantics for duplicate shape names.
+
+Landed evidence:
+
+- Added `typemap_shape_lookup_last`, shared name comparison, and saturated/unpopulated fallback in `lambda/lambda-data.hpp`.
+- Added focused `LambdaTypedItem.TypeMapHashLookup*` coverage for overflow shape entries and duplicate-name last-writer-wins fallback.
+- Focused `./test/test_lambda_typed.exe --gtest_filter='LambdaTypedItem.TypeMapHashLookup*' --gtest_brief=1` passed 2/2.
+- Full `./test/test_js_gtest.exe --gtest_brief=1` passed 233/233.
+- Full `make test262-baseline` passed fully with 40261 / 40261, failed 0, regressions 0, and retry 0.0s.
 
 Optional timing smoke after final correctness:
 
