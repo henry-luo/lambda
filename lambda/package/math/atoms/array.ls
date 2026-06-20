@@ -301,9 +301,10 @@ fn cell_at(row_boxes, row, col) {
     else blank_cell_box()
 }
 
+// only smallmatrix still uses a hardcoded table (scriptstyle-cell model not
+// yet ported); everything else is metric-driven via compute_dyn_metrics.
 fn table_metrics(env_name, nrows) {
-    if (env_name == "cases") cases_table_metrics(nrows)
-    else matrix_table_metrics(nrows)
+    matrix_table_metrics(nrows)
 }
 
 // ============================================================
@@ -320,8 +321,7 @@ fn table_metrics(env_name, nrows) {
 // scale cells to scriptstyle and keep their legacy tables; equation has its own
 // centering.
 fn uses_dyn_metrics(env_name) {
-    not (env_name == "cases" or env_name == "rcases" or
-         env_name == "smallmatrix" or env_name == "equation")
+    not (env_name == "smallmatrix" or env_name == "equation")
 }
 
 // TeX \jot (3pt = 0.3em): extra depth added to every non-last row in dcases/
@@ -330,6 +330,13 @@ fn env_jot(env_name) {
     if (env_name == "dcases" or env_name == "rcases" or
         env_name == "aligned" or env_name == "align") 0.3
     else 0.0
+}
+
+// \arraystretch: cases/rcases reserve taller rows (1.2 → arstrut 1.008/0.432,
+// so short script cells get a fixed row height); everything else uses 1.0.
+fn env_arraystretch(env_name) {
+    if (env_name == "cases" or env_name == "rcases") 1.2
+    else 1.0
 }
 
 fn dyn_cell_h(b) { if (b != null and b.height_raw != null) b.height_raw else if (b != null) b.height else 0.0 }
@@ -400,10 +407,11 @@ fn dyn_cell_heights(rows, r, out) {
 }
 
 fn compute_dyn_metrics(row_boxes, ncols, nrows, env_name) {
-    // arstrut = 0.7/0.3 × arraystretch(1.0) × baselineskip(1.2). Compute the
-    // products (not the rounded 0.84/0.36) so the float matches MathLive.
-    let ah = 0.7 * 1.2
-    let ad = 0.3 * 1.2
+    // arstrut = 0.7/0.3 × arrayskip, arrayskip = arraystretch × baselineskip(1.2).
+    // Compute the products (not rounded) so the float matches MathLive.
+    let arrayskip = env_arraystretch(env_name) * 1.2
+    let ah = 0.7 * arrayskip
+    let ad = 0.3 * arrayskip
     let rows = dyn_rows(row_boxes, ncols, nrows, ah, ad, env_jot(env_name), 0, 0.0, [])
     let last = rows[nrows - 1]
     let total = last[2] + last[1]
@@ -430,19 +438,6 @@ fn compute_dyn_metrics(row_boxes, ncols, nrows, env_name) {
     m
 }
 
-fn cases_table_metrics(nrows) {
-    if (nrows == 2) {
-        {
-            height: 1.75,
-            depth: 1.25,
-            render_total: 3.01,
-            vlist_height: 1.69,
-            depth_holder: 1.19,
-            pstrut: 3.01,
-            cell_height: 1.44
-        }
-    } else matrix_table_metrics(nrows)
-}
 
 
 // A single-row `equation` environment centers its content on the math axis
@@ -490,7 +485,6 @@ fn matrix_table_metrics(nrows) => {
 fn row_top(metrics, row) {
     if (metrics.tops != null) metrics.tops[row]
     else if (metrics.is_equation == true) metrics.eq_top
-    else if (metrics.pstrut == 3.01) cases_row_top(row)
     else matrix_row_top(metrics, row)
 }
 
@@ -499,10 +493,6 @@ fn row_cell_height(metrics, row) {
     else metrics.cell_height
 }
 
-fn cases_row_top(row) {
-    if (row == 0) 0.0 - 3.69
-    else 0.0 - 2.25
-}
 
 
 fn matrix_row_top(metrics, row) {

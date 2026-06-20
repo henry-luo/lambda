@@ -13,8 +13,8 @@
 > **Phase A first increment: `strut_total`+`strut_depth_em` DELETED (\left..\right on use_raw; 0 pass-rate change)**.
 > **Task 4 arrays DONE for matrix family + array (§10.8): the "0.96 float artifact" was REPRODUCIBLE by replicating MathLive's exact makeVList float-accumulation order; per-nrows tables → `compute_dyn_metrics`; matrix delims expose glyph raw; 0 regression.**
 > **Phase A producer audit (§10.7): integrals already raw; simple accents converted; `render_total` deletion is BOUNDED — bbox (border) + line-accents (overline) have genuine emission≠layout splits that legitimately keep render_total.**
-> **Integral side-limits (render_integral_inline_scripts) metric-driven — ~15 layout constants → ∫ glyph metrics + Rule 18 shifts; 0 regression (§10.9).**
-> NEXT hardcode: scriptstyle array envs (cases/rcases/smallmatrix — blocked on cell-style model), equation centering; then extended-corpus clusters.
+> **Integral side-limits metric-driven (∫ glyph + Rule 18; §10.9); cases/rcases metric-driven (arraystretch 1.2 makes arstrut dominate → fixed box; Size4 brace; §10.10) — both 0 regression.**
+> NEXT hardcode: smallmatrix (golden row-wrappers 0.93/0.62 fit no arstrut model — blocked, currently failing); equation already metric-driven. Then extended-corpus clusters (equation-env/align/cfrac).
 > NOTE: corpus golden is **display-rooted** (MathLive SSR default); the harness now renders displaystyle.
 
 ## Hard execution order (corrected by synthesis)

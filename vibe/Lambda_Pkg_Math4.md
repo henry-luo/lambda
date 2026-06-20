@@ -569,16 +569,18 @@ What changed in `atoms/array.ls`:
   `depth_raw 1.25001` (a fraction-precision quirk, NOT the array algo). Accepted
   as a temporal regression (SACRED 205/206) per the "remove hardcode, regression
   OK" directive; clears when fraction depth precision is tightened.
-- STILL hardcoded: cases/rcases/smallmatrix, equation. **Attempted cases/rcases
-  (text cells + dynamic) → REVERTED: broke all 6 cases.** The scriptstyle
-  cell-model is inconsistent across goldens: cases #1 (`\sum/\frac` cells) passes
-  with SCRIPT cells (the `\sum` keeps over/under limits), but cases #2 wants
-  `x^2` at TEXT (0.82, not script 0.9) — and rendering cells at text turns the
-  `\sum` inline (loses limits), so #1 breaks. smallmatrix's golden has NO
-  font-size (full-size cells) yet decomposes to row depths (rd0≈0.49, rd1≈0.19)
-  that fit NO uniform arstrut — it doesn't match the standard `\@array` model.
-  These need the scriptstyle cell-rendering model untangled first; left on their
-  legacy tables (no further regression).
+- **cases/rcases NOW metric-driven** (§10.10): the key was `\arraystretch 1.2`
+  (`arstrut 1.008/0.432`), which makes the short script cells get a *fixed* row
+  height (1.44) → content box 1.69/1.19, and the Size4 `{` brace makes the outer
+  box 1.75/1.25. `cases_table_metrics`/`cases_row_top` DELETED; 0 regression.
+  (cases #2's `x^2` cell still fails — pre-existing script-vs-text cell-style
+  golden inconsistency, NOT the table.)
+- STILL hardcoded: **smallmatrix** (`matrix_table_metrics` fallback) — its golden
+  row wrappers (0.93/0.62, a 0.31 gap between the descender row and the plain
+  row) fit NO uniform arstrut/scale; appears to come from a different model.
+  Currently failing; left as-is. **equation** (`equation_table_metrics`) is
+  already content-derived (metric-driven); its remaining constants (axis 0.255,
+  eq_top) are algorithm parameters, not a fixed table.
 Matrix family + array: 0 regression (824/206). dcases: −1 (the 0.01 fraction
 tip). **The lesson: "non-reproducible" golden artifacts are often just
 float-order — replicate the exact computation.**
@@ -597,6 +599,22 @@ KEY gotcha: the box's `height_raw` must use the **raw** sup height (`h·0.7`), N
 the CEIL2'd wrapper `sub_height_for` — otherwise the strut sums 0.01 too high
 (2.45 vs golden 2.44). Remaining integral magic: `0.05` (sub-only scriptspace
 kern) and `pstrut 3.0`.
+
+### 10.10 cases/rcases metric-driven (the `\arraystretch` key)
+cases looked blocked (last turn, text+dynamic broke all 6). The breakthrough:
+the cases box is NOT content-derived — it's a *fixed* reserve because
+`\arraystretch = 1.2` makes the arstrut (`0.7·1.44 = 1.008` / `0.3·1.44 =
+0.432`) DOMINATE the small script cells. So `compute_dyn_metrics` reproduces it
+once `env_arraystretch(env)` feeds `arrayskip = arraystretch·1.2`:
+- content rows: `row h+d = arstrut = 1.44` (= the golden cell_height), 2-row
+  content box `1.69/1.19`, `pstrut = 1.008+2 = 3.01` — all exact.
+- the `{` brace (Size4, via `render_matrix_delim`/`matrix_sized_raw`) makes the
+  outer box `1.75/1.25`, strut `3.01`, va `−1.25` — exact.
+- cells stay at SCRIPT (so cases #1's `\sum` keeps inline limits); the walk's
+  float reproduces the row tops (`−3.69/−2.25`).
+Verified **0 regression** (823/205, same pass-set; cases #2's `x^2` still fails
+on the pre-existing script-vs-text cell-style golden inconsistency, unrelated to
+the table). `cases_table_metrics` + `cases_row_top` deleted.
 
 ### 10.5 Acceptance-criteria scorecard (§8)
 1. *No per-content em constant tables in fraction.ls/scripts.ls* — **fraction.ls
