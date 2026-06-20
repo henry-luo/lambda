@@ -752,6 +752,12 @@ static bool js_dom_exec_command_is_history(const char* cmd) {
         strcasecmp(cmd, "redo") == 0;
 }
 
+static bool js_dom_exec_command_uses_helper_first(const char* cmd) {
+    if (!cmd) return false;
+    return js_dom_exec_command_is_clipboard(cmd) ||
+        strcasecmp(cmd, "selectAll") == 0;
+}
+
 static bool js_dom_exec_command_is_native(const char* cmd) {
     return js_dom_exec_command_is_core_text(cmd) ||
         js_dom_exec_command_is_inline_format(cmd) ||
@@ -4583,10 +4589,33 @@ static bool js_dom_rich_history_restore_selection(
     return true;
 }
 
+static void js_dom_collapse_selection_before_child_replace(DomElement* elem,
+                                                           const char* context) {
+    if (!elem) return;
+    DocState* state = js_dom_state_for_nodes((DomNode*)elem, nullptr);
+    if (!state || !state->dom_selection ||
+        state->dom_selection->range_count == 0) {
+        return;
+    }
+
+    DomBoundary boundary = { (DomNode*)elem, 0 };
+    const char* exc = nullptr;
+    if (!state_store_set_selection(state, &boundary, &boundary, &exc)) {
+        log_debug("js_dom_collapse_selection_before_child_replace: %s rejected: %s",
+                  context ? context : "replace children", exc ? exc : "?");
+        state_store_legacy_selection_clear(state);
+        state_store_legacy_caret_clear(state);
+        return;
+    }
+    js_dom_queue_selectionchange(state->dom_selection);
+}
+
 static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
                                       bool notify_mutation) {
     if (!elem || !html_str) return false;
     DomDocument* doc = elem->doc;
+
+    js_dom_collapse_selection_before_child_replace(elem, "innerHTML");
 
     DomNode* child = elem->first_child;
     while (child) {
@@ -5243,7 +5272,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     // envelope as synthetic key input.
     if (strcmp(method, "execCommand") == 0) {
         const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
-        if (js_dom_exec_command_is_clipboard(cmd)) {
+        if (js_dom_exec_command_uses_helper_first(cmd)) {
             Item helper_key = (Item){.item = s2it(heap_create_name("__lambda_execCommand_handler"))};
             Item helper = js_get_global_property(helper_key);
             if (get_type_id(helper) == LMD_TYPE_FUNC) {
