@@ -1,0 +1,10 @@
+pbkdf2 buffer: true
+pbkdf2 latin1: true
+pbkdf2 hex: true
+pbkdf2 async err: true
+pbkdf2 async buffer: true
+pbkdf2 async hex: true
+invalid digest code: ERR_CRYPTO_INVALID_DIGEST
+missing digest overload: true
+keylen infinity: true
+buffer latin1 high: true

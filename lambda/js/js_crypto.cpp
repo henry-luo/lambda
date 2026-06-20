@@ -213,6 +213,17 @@ static bool crypto_item_is_undefined(Item item) {
 
 static bool extract_bytes(Item item, uint8_t** out, int* out_len);
 
+static Item crypto_buffer_from_bytes(const uint8_t* bytes, int len) {
+    if (len < 0) len = 0;
+    Item result = js_typed_array_new(JS_TYPED_UINT8, len);
+    JsTypedArray* ta = js_get_typed_array_ptr(result.map);
+    if (ta) {
+        ta->is_buffer = true;
+        if (ta->data && bytes && len > 0) memcpy(ta->data, bytes, (size_t)len);
+    }
+    return result;
+}
+
 extern "C" Item js_crypto_randomBytes(Item size_item) {
     int size = (int)it2i(size_item);
     if (size <= 0 || size > 65536) {
@@ -460,6 +471,11 @@ extern "C" Item js_crypto_randomInt(Item min_item, Item max_item) {
     crypto_random_bytes((uint8_t*)&rnd, sizeof(rnd));
     int64_t range = max_val - min_val;
     return (Item){.item = i2it(min_val + (int64_t)(rnd % (uint32_t)range))};
+}
+
+extern "C" Item js_crypto_argon2_unsupported(void) {
+    return js_throw_error_with_code(JS_ERR_CRYPTO_ARGON2_NOT_SUPPORTED,
+        "Argon2 is not supported by this crypto backend");
 }
 
 // ============================================================================
@@ -1406,36 +1422,103 @@ extern "C" Item js_crypto_createDecipheriv(Item alg_item, Item key_item, Item iv
 // pbkdf2(password, salt, iterations, keylen, digest, callback) → void
 // ============================================================================
 
+static Item crypto_pbkdf2_invalid_arg(const char* name, Item value) {
+    return js_throw_invalid_arg_type(name, "string, ArrayBuffer, Buffer, TypedArray, or DataView", value);
+}
+
+static bool crypto_pbkdf2_positive_int(Item value_item, const char* name, int* out_value) {
+    if (!out_value) return false;
+    TypeId type = get_type_id(value_item);
+    if (type != LMD_TYPE_INT && type != LMD_TYPE_FLOAT && type != LMD_TYPE_INT64) {
+        js_throw_invalid_arg_type(name, "number", value_item);
+        return false;
+    }
+
+    double value = 0.0;
+    if (type == LMD_TYPE_INT) value = (double)it2i(value_item);
+    else if (type == LMD_TYPE_FLOAT) value = it2d(value_item);
+    else value = (double)it2l(value_item);
+
+    if (value != value || value < 1.0 || value > 2147483647.0 || value != (double)(int)value) {
+        char received[64];
+        if (value != value) {
+            snprintf(received, sizeof(received), "NaN");
+        } else if (value == 1.0 / 0.0) {
+            snprintf(received, sizeof(received), "Infinity");
+        } else if (value == -1.0 / 0.0) {
+            snprintf(received, sizeof(received), "-Infinity");
+        } else if (type == LMD_TYPE_INT) {
+            snprintf(received, sizeof(received), "%lld", (long long)it2i(value_item));
+        } else if (type == LMD_TYPE_INT64) {
+            snprintf(received, sizeof(received), "%lld", (long long)it2l(value_item));
+        } else {
+            snprintf(received, sizeof(received), "%g", value);
+        }
+        char msg[160];
+        snprintf(msg, sizeof(msg),
+            "The value of \"%s\" is out of range. It must be an integer. Received %s",
+            name, received);
+        js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+        return false;
+    }
+
+    *out_value = (int)value;
+    return true;
+}
+
+static bool crypto_pbkdf2_digest_name(Item digest_item, char* out, int out_cap) {
+    if (!out || out_cap <= 0) return false;
+    out[0] = '\0';
+    if (get_type_id(digest_item) != LMD_TYPE_STRING) {
+        js_throw_invalid_arg_type("digest", "string", digest_item);
+        return false;
+    }
+    String* digest = it2s(digest_item);
+    int pos = 0;
+    for (int i = 0; digest && i < (int)digest->len && pos < out_cap - 1; i++) {
+        char c = digest->chars[i];
+        if (c == '-') continue;
+        out[pos++] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+    }
+    out[pos] = '\0';
+    return true;
+}
+
+static Item crypto_pbkdf2_invalid_digest(const char* digest) {
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Invalid digest: %s", digest ? digest : "");
+    return js_throw_type_error_code(JS_ERR_CRYPTO_INVALID_DIGEST, msg);
+}
+
 extern "C" Item js_crypto_pbkdf2Sync(Item pass_item, Item salt_item, Item iter_item,
                                       Item keylen_item, Item digest_item) {
     uint8_t* pass = NULL; int pass_len = 0;
     uint8_t* salt = NULL; int salt_len = 0;
 
-    if (!extract_bytes(pass_item, &pass, &pass_len)) return ItemNull;
-    if (!extract_bytes(salt_item, &salt, &salt_len)) { mem_free(pass); return ItemNull; }
+    if (!extract_bytes(pass_item, &pass, &pass_len)) return crypto_pbkdf2_invalid_arg("password", pass_item);
+    if (!extract_bytes(salt_item, &salt, &salt_len)) {
+        mem_free(pass);
+        return crypto_pbkdf2_invalid_arg("salt", salt_item);
+    }
 
-    int iterations = (int)it2i(iter_item);
-    int keylen = (int)it2i(keylen_item);
-
-    if (iterations < 1 || keylen < 1 || keylen > 1024) {
-        log_error("crypto: pbkdf2Sync: invalid iterations=%d keylen=%d", iterations, keylen);
+    int iterations = 0;
+    int keylen = 0;
+    if (!crypto_pbkdf2_positive_int(iter_item, "iterations", &iterations) ||
+        !crypto_pbkdf2_positive_int(keylen_item, "keylen", &keylen)) {
         mem_free(pass); mem_free(salt);
         return ItemNull;
     }
 
-    char digest_buf[32] = "sha1";
-    if (get_type_id(digest_item) == LMD_TYPE_STRING) {
-        String* d = it2s(digest_item);
-        int dlen = (int)d->len < 31 ? (int)d->len : 31;
-        memcpy(digest_buf, d->chars, (size_t)dlen);
-        digest_buf[dlen] = '\0';
+    char digest_buf[32];
+    if (!crypto_pbkdf2_digest_name(digest_item, digest_buf, (int)sizeof(digest_buf))) {
+        mem_free(pass); mem_free(salt);
+        return ItemNull;
     }
 
     int bits = crypto_digest_bits_for_name(digest_buf, true, true);
     if (bits == 0) {
-        log_error("crypto: pbkdf2Sync: unsupported digest: %s", digest_buf);
         mem_free(pass); mem_free(salt);
-        return ItemNull;
+        return crypto_pbkdf2_invalid_digest(digest_buf);
     }
 
     uint8_t* output = (uint8_t*)mem_alloc((size_t)keylen, MEM_CAT_JS_RUNTIME);
@@ -1452,9 +1535,7 @@ extern "C" Item js_crypto_pbkdf2Sync(Item pass_item, Item salt_item, Item iter_i
         return ItemNull;
     }
 
-    Item result = js_typed_array_new(JS_TYPED_UINT8, keylen);
-    JsTypedArray* ta = (JsTypedArray*)result.map->data;
-    if (ta && ta->data) memcpy(ta->data, output, (size_t)keylen);
+    Item result = crypto_buffer_from_bytes(output, keylen);
     mem_free(output);
     return result;
 }
@@ -1462,8 +1543,18 @@ extern "C" Item js_crypto_pbkdf2Sync(Item pass_item, Item salt_item, Item iter_i
 // async variant calls callback with (err, derivedKey)
 extern "C" Item js_crypto_pbkdf2(Item pass_item, Item salt_item, Item iter_item,
                                   Item keylen_item, Item digest_item, Item callback_item) {
-    // for simplicity, run synchronously and invoke callback
+    if (get_type_id(digest_item) == LMD_TYPE_FUNC && crypto_item_is_undefined(callback_item)) {
+        return js_throw_invalid_arg_type("digest", "string", make_js_undefined_crypto());
+    }
+    if (get_type_id(digest_item) != LMD_TYPE_STRING) {
+        return js_throw_invalid_arg_type("digest", "string", digest_item);
+    }
+    if (get_type_id(callback_item) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "Function", callback_item);
+    }
+
     Item derived = js_crypto_pbkdf2Sync(pass_item, salt_item, iter_item, keylen_item, digest_item);
+    if (js_check_exception()) return ItemNull;
     if (derived.item == ITEM_NULL) {
         Item err = make_string_item_crypto("pbkdf2 failed");
         js_call_function(callback_item, ItemNull, &err, 1);
@@ -2235,6 +2326,8 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(crypto_namespace, "createHmac",         (void*)js_crypto_createHmac, 2);
     crypto_set_method(crypto_namespace, "createCipheriv",     (void*)js_crypto_createCipheriv, 3);
     crypto_set_method(crypto_namespace, "createDecipheriv",   (void*)js_crypto_createDecipheriv, 3);
+    crypto_set_method(crypto_namespace, "argon2",             (void*)js_crypto_argon2_unsupported, 0);
+    crypto_set_method(crypto_namespace, "argon2Sync",         (void*)js_crypto_argon2_unsupported, 0);
     crypto_set_method(crypto_namespace, "randomBytes",        (void*)js_crypto_randomBytes, 1);
     crypto_set_method(crypto_namespace, "randomFillSync",     (void*)js_crypto_randomFillSync, 3);
     crypto_set_method(crypto_namespace, "randomFill",         (void*)js_crypto_randomFill, 4);

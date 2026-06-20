@@ -914,9 +914,31 @@ extern "C" Item js_buffer_toString(Item buf, Item encoding, Item start_item, Ite
         return result;
     }
 
-    if (strcmp(enc_buf, "ascii") == 0 || strcmp(enc_buf, "latin1") == 0 || strcmp(enc_buf, "binary") == 0) {
-        // latin1: each byte maps directly to a char (ISO 8859-1)
-        return make_string_item((const char*)slice, slice_len);
+    if (strcmp(enc_buf, "ascii") == 0) {
+        char* ascii = (char*)mem_alloc((size_t)slice_len + 1, MEM_CAT_JS_RUNTIME);
+        for (int i = 0; i < slice_len; i++) ascii[i] = (char)(slice[i] & 0x7F);
+        ascii[slice_len] = '\0';
+        Item result = make_string_item(ascii, slice_len);
+        mem_free(ascii);
+        return result;
+    }
+
+    if (strcmp(enc_buf, "latin1") == 0 || strcmp(enc_buf, "binary") == 0) {
+        char* latin1 = (char*)mem_alloc((size_t)slice_len * 2 + 1, MEM_CAT_JS_RUNTIME);
+        int j = 0;
+        for (int i = 0; i < slice_len; i++) {
+            uint8_t b = slice[i];
+            if (b < 0x80) {
+                latin1[j++] = (char)b;
+            } else {
+                latin1[j++] = (char)(0xC0 | (b >> 6));
+                latin1[j++] = (char)(0x80 | (b & 0x3F));
+            }
+        }
+        latin1[j] = '\0';
+        Item result = make_string_item(latin1, j);
+        mem_free(latin1);
+        return result;
     }
 
     if (strcmp(enc_buf, "ucs2") == 0 || strcmp(enc_buf, "ucs-2") == 0 ||

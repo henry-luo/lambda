@@ -1,0 +1,2 @@
+secLevel type: number
+secLevel range: true

@@ -31647,6 +31647,10 @@ extern "C" Item js_uv_errname(Item code) {
     return (Item){.item = s2it(heap_create_name(name, strlen(name)))};
 }
 
+static Item js_internal_crypto_getOpenSSLSecLevel(void) {
+    return (Item){.item = i2it(0)};
+}
+
 extern "C" Item js_module_get(Item specifier) {
     if (get_type_id(specifier) != LMD_TYPE_STRING) return ItemNull;
     String* spec = it2s(specifier);
@@ -32256,6 +32260,24 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 17 && memcmp(spec->chars, "node:dns/promises", 17) == 0)) {
         extern Item js_get_dns_promises_namespace(void);
         return js_get_dns_promises_namespace();
+    }
+    // internal/crypto/util — selected helpers used by crypto tests.
+    if ((spec->len == 20 && memcmp(spec->chars, "internal/crypto/util", 20) == 0) ||
+        (spec->len == 23 && memcmp(spec->chars, "internal/crypto/util.js", 23) == 0)) {
+        static Item crypto_util_ns = {0};
+        static uint64_t crypto_util_epoch = (uint64_t)-1;
+        if (crypto_util_ns.item == 0 || crypto_util_epoch != js_heap_epoch) {
+            crypto_util_epoch = js_heap_epoch;
+            crypto_util_ns = js_new_object();
+            heap_register_gc_root(&crypto_util_ns.item);
+            js_property_set(crypto_util_ns,
+                (Item){.item = s2it(heap_create_name("getOpenSSLSecLevel", 18))},
+                js_new_function((void*)js_internal_crypto_getOpenSSLSecLevel, 0));
+            js_property_set(crypto_util_ns,
+                (Item){.item = s2it(heap_create_name("default", 7))},
+                crypto_util_ns);
+        }
+        return crypto_util_ns;
     }
     // internal/util — selected internal symbols used by official Node.js tests
     if ((spec->len == 13 && memcmp(spec->chars, "internal/util", 13) == 0) ||
