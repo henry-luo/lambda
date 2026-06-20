@@ -3,7 +3,7 @@
 > Generated 2026-06-18 by the phaseA-producer-specs workflow. Tasks #1-9 in the session todo list.
 
 > **STATUS 2026-06-18 — see `Lambda_Pkg_Math4.md` §10 for the authoritative progress log.**
-> Corpus 763→**824/921**, baseline **206/206 (PERFECT — hard gate met)**, ~1000 hardcode lines removed.
+> Corpus 763→**823/921**, baseline **205/206** (1 fail = deliberate temporal regression: dcases 0.01 fraction-precision float-tip), ~1000+ hardcode lines removed.
 > DONE: Task 2 (text-op/integral limits), **Task 1 (frac_bar_spec DELETED, fraction.ls 100% metric-driven)**,
 > Task 3 (render_sup_only Rule 18c), Task 6 (leaf dead-heuristic removal + imath fix),
 > **sqrt/radical (display/text metric-driven — bucket dispatch gone, +17 corpus, +1 baseline, 0 regressions; §10.0)**,
@@ -11,9 +11,10 @@
 > Task 5 partial (`fmt_delim_em` special-cases removed),
 > **last 2 baseline residuals FIXED (script-reached fractions now expose raw; fraction.ls:248) → SACRED 206/206**,
 > **Phase A first increment: `strut_total`+`strut_depth_em` DELETED (\left..\right on use_raw; 0 pass-rate change)**.
-> BLOCKED/deferred: Task 4 (arrays — 2-row depth_holder float artifact, low yield).
-> NEXT Phase A: convert remaining non-raw producers (accents/arrays/bbox/integral-side-limits) to expose raw,
-> then collapse `render_total`/`render_height`/`render_depth`. Then extended-corpus compound clusters.
+> **Task 4 arrays DONE for matrix family + array (§10.8): the "0.96 float artifact" was REPRODUCIBLE by replicating MathLive's exact makeVList float-accumulation order; per-nrows tables → `compute_dyn_metrics`; matrix delims expose glyph raw; 0 regression.**
+> **Phase A producer audit (§10.7): integrals already raw; simple accents converted; `render_total` deletion is BOUNDED — bbox (border) + line-accents (overline) have genuine emission≠layout splits that legitimately keep render_total.**
+> **Integral side-limits (render_integral_inline_scripts) metric-driven — ~15 layout constants → ∫ glyph metrics + Rule 18 shifts; 0 regression (§10.9).**
+> NEXT hardcode: scriptstyle array envs (cases/rcases/smallmatrix — blocked on cell-style model), equation centering; then extended-corpus clusters.
 > NOTE: corpus golden is **display-rooted** (MathLive SSR default); the harness now renders displaystyle.
 
 ## Hard execution order (corrected by synthesis)

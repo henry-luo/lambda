@@ -76,34 +76,49 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
     let has_sub = sub_box != null
     let has_sup = sup_box != null
 
-    // MathLive integral metrics (Size2): h=1.36, d=0.86, italic=0.45
-    // The msubsup vlist height/depth-holder differ by limit configuration:
-    //   sub+sup:    vlist=1.55, depth_holder=0.9, sub uses margin-left:-italic
-    //   sub-only:   vlist=-0.41 (negative — content only above its origin),
-    //               depth_holder=0.9, sub uses margin-right:+0.05em
-    //   sup-only:   vlist=1.55, depth_holder=0 (sup-only TODO)
-    // Sub margin behavior: when paired with sup, nestle into the integral's
-    // italic correction (negative left margin). When sub alone, MathLive
-    // offsets slightly to the right.
-    let sub_margin_attr = if (has_sup)
-        "margin-left:-0.44em"
-        else "margin-right:0.05em"
+    // ∫ Size2 glyph metrics (KaTeX_Size2 U+222B = [depth, height, italic]) +
+    // TeXBook Rule 18 side-limit shifts. The sup rises by `int_h - supDrop·s`
+    // (a tall base: init shift dominates), the sub drops by `int_d + subDrop·s`;
+    // every position below derives from these — no hardcoded em offsets.
+    let int_h = 1.36
+    let int_d = 0.86225
+    let int_italic = 0.44445
+    let s = 0.7
+    let si = met.style_index(context.style)
+    let sup_shift = int_h - met.at(met.supDrop, si) * s
+    let sub_shift = int_d + met.at(met.subDrop, si) * s
+    let pstrut = 3.0
 
-    // Sub/sup heights derive from content's actual height scaled to script
-    // style (×0.7) then CEIL@2 to match MathLive's emission.
+    // Sub/sup wrapper heights = content (height+depth) scaled to script ×0.7,
+    // CEIL@2 (the inline-block CSS height); fall back to 0.46 without raw.
     let sub_inner_h = if (sub_box != null) sub_height_for(sub_box) else 0.46
     let sup_inner_h = if (sup_box != null) sub_height_for(sup_box) else 0.46
-    // Vlist height tracks the sup's extent + a fixed offset of 1.09em (the
-    // gap between baseline and sup top). With only sub, vlist is negative
-    // (-0.41) since content is below origin.
-    let vlist_height = if (has_sup) (1.09 + sup_inner_h) else (0.0 - 0.41)
-    // A sub whose box dips below the baseline (e.g. the minus in
-    // `\int_{-\infty}`) pushes the descent down by depth×0.7 (CEIL@2).
-    let sub_extra_d = if (has_sub and sub_box.depth_raw != null and sub_box.depth_raw > 0.0)
-        ceil_em2(sub_box.depth_raw * 0.7) else 0.0
-    let depth_holder = 0.9 + sub_extra_d
-    let sub_top = -2.1
-    let sup_top = -4.08
+    // Full-precision script extents (scaled ×0.7) — used for the box's true
+    // height/depth so the single-rounding strut sums them ONCE.
+    let sup_raw_h = if (has_sup)
+        (if (sup_box.height_raw != null) sup_box.height_raw else sup_box.height) * s
+        else 0.0
+    let sub_raw_d = if (has_sub and sub_box.depth_raw != null and sub_box.depth_raw > 0.0)
+        sub_box.depth_raw * s else 0.0
+    let sup_raw_d = if (has_sup and sup_box.depth_raw != null and sup_box.depth_raw > 0.0)
+        sup_box.depth_raw * s else 0.0
+    // box extent (full precision): sup raises the top to sup_shift+sup_h, the
+    // sub drops the bottom to sub_shift(+descender).
+    let box_h_raw = if (has_sup) (sup_shift + sup_raw_h) else int_h
+    let box_d_raw = if (has_sub) (sub_shift + sub_raw_d) else int_d
+
+    // sub nestles under the integral's italic overhang (margin-left = -italic);
+    // alone it sits slightly right (scriptspace kern).
+    let sub_margin_attr = if (has_sup)
+        "margin-left:" ++ util.fmt_em(util.ceil_em2(0.0 - int_italic))
+        else "margin-right:0.05em"
+    // vlist max extent: the sup top (sub+sup / sup-only) or the sub top alone
+    // (negative — the sub sits below the origin).
+    let vlist_height = if (has_sup) util.ceil_em2(box_h_raw)
+        else util.ceil_em2(0.0 - sub_shift + sub_inner_h)
+    let depth_holder = if (has_sub) util.ceil_em2(box_d_raw) else 0.0
+    let sub_top = util.ceil_em2(0.0 - pstrut + sub_shift)
+    let sup_top = util.ceil_em2(0.0 - pstrut - sup_shift - sup_raw_d)
     let sub_span = if (has_sub) [
         <span style: "top:" ++ util.fmt_em(sub_top) ++ ";" ++ sub_margin_attr;
             <span class: css.PSTRUT, style: "height:3em">
@@ -121,7 +136,7 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
         >
     ] else []
 
-    let int_symbol_style = "margin-right:0.45em"
+    let int_symbol_style = "margin-right:" ++ util.fmt_em(util.ceil_em2(int_italic))
     let el = <span class: css.OP_GROUP;
         <span class: "lm_op-symbol lm_large-op", style: int_symbol_style; display_text>
         <span class: css.MSUBSUP;
@@ -139,16 +154,10 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
             >
         >
     >
-    // Box height/depth follow MathLive's effective extents. With both
-    // limits the box reaches up to the sup and the strut-bottom drops to
-    // accommodate the sub. The raw fields use slightly-higher precision so
-    // CEIL@2 of (h_raw + d_raw) matches MathLive's emitted strut-bottom.
-    let box_h = if (has_sup) vlist_height else 1.36
-    let box_d = if (has_sub) 0.89 + sub_extra_d else 0.86
-    let box_h_raw = box_h
-    let box_d_raw = if (has_sub and has_sup) 0.89 + sub_extra_d
-        else if (has_sub) 0.89222 + sub_extra_d
-        else 0.86225
+    // height/depth are the CEIL@2 projections of the full-precision extents
+    // (box_h_raw/box_d_raw computed above).
+    let box_h = util.ceil_em2(box_h_raw)
+    let box_d = 0.0 - util.ceil_em2(0.0 - box_d_raw)
     {
         element: el,
         height: box_h,
@@ -157,7 +166,7 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
         depth_raw: box_d_raw,
         // Phase A: render_height/render_depth omitted (== height/depth, consumers
         // null-coalesce). render_total kept until delimiters (task 5) convert.
-        render_total: box_h + box_d,
+        render_total: util.ceil_em2(box_h_raw + box_d_raw),
         width: 0.55556,
         type: "mop",
         italic: 0.0,

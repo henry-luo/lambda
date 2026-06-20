@@ -1369,7 +1369,27 @@ fn render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_he
             >
         >
     >
-    accent_box(el, vlist_h, 0.0, base_box.width)
+    accent_box_raw(el, vlist_h, base_box.width)
+}
+
+// A simple accent sits entirely above the baseline (depth 0) and its vlist
+// height is already CEIL@2, so it can carry raw metrics safely: with depth 0
+// there is no cross-term to overshoot the single-rounding strut. (Wide and
+// missing-base accents have depth and stay on the non-raw accent_box.)
+fn accent_box_raw(el, h, w) => {
+    element: el,
+    height: h,
+    depth: 0.0,
+    height_raw: h,
+    depth_raw: 0.0,
+    render_height: h,
+    render_depth: 0.0,
+    render_total: h,
+    width: w,
+    type: "mord",
+    italic: 0.0,
+    skew: 0.0,
+    no_left_bin_space: true
 }
 
 // Format an accent margin: MathLive emits a bare "0" (no unit) for zero,

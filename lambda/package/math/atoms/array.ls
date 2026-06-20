@@ -211,6 +211,8 @@ fn is_col_sep(child) {
 fn build_table(row_boxes, ncols, nrows, aligns, env_name) {
     let metrics = if (env_name == "equation" and nrows == 1 and ncols == 1)
         equation_table_metrics(row_boxes[0][0])
+        else if (uses_dyn_metrics(env_name))
+        compute_dyn_metrics(row_boxes, ncols, nrows, env_name)
         else table_metrics(env_name, nrows)
     let total_w = compute_table_width(row_boxes, ncols, env_name)
     let children = build_table_children(row_boxes, ncols, aligns, metrics, env_name, 0, [])
@@ -220,6 +222,8 @@ fn build_table(row_boxes, ncols, nrows, aligns, env_name) {
         >,
         height: metrics.height,
         depth: metrics.depth,
+        height_raw: metrics.height_raw,
+        depth_raw: metrics.depth_raw,
         render_height: metrics.height,
         render_depth: metrics.depth,
         render_total: metrics.render_total,
@@ -298,10 +302,132 @@ fn cell_at(row_boxes, row, col) {
 }
 
 fn table_metrics(env_name, nrows) {
-    if (env_name == "array") array_table_metrics(nrows)
-    else if (env_name == "cases") cases_table_metrics(nrows)
-    else if (env_name == "dcases") dcases_table_metrics(nrows)
+    if (env_name == "cases") cases_table_metrics(nrows)
     else matrix_table_metrics(nrows)
+}
+
+// ============================================================
+// Metric-driven table layout (TeX \@array, ref MathLive array.ts render).
+// Replaces the per-nrows hardcoded *_table_metrics + *_row_top tables for
+// scale-1.0 environments. Each row's height/depth derive from the real cell
+// boxes plus the array strut (arstrutHeight 0.84, arstrutDepth 0.36 =
+// 0.7/0.3 × arraystretch(1.0) × baselineskip(1.2)); the box height/depth,
+// vlist tops, and depth-holder all fall out of the centering offset.
+// ============================================================
+
+// scale-1.0 envs (cells render at the ambient/display style): matrix family,
+// array, dcases (display cells; adds inter-row `jot`). cases/rcases/smallmatrix
+// scale cells to scriptstyle and keep their legacy tables; equation has its own
+// centering.
+fn uses_dyn_metrics(env_name) {
+    not (env_name == "cases" or env_name == "rcases" or
+         env_name == "smallmatrix" or env_name == "equation")
+}
+
+// TeX \jot (3pt = 0.3em): extra depth added to every non-last row in dcases/
+// rcases/aligned-style environments (NOT matrices, cases, or array).
+fn env_jot(env_name) {
+    if (env_name == "dcases" or env_name == "rcases" or
+        env_name == "aligned" or env_name == "align") 0.3
+    else 0.0
+}
+
+fn dyn_cell_h(b) { if (b != null and b.height_raw != null) b.height_raw else if (b != null) b.height else 0.0 }
+fn dyn_cell_d(b) { if (b != null and b.depth_raw != null) b.depth_raw else if (b != null) b.depth else 0.0 }
+
+fn dyn_row_max_h(row_boxes, r, ncols, col, acc) {
+    if (col >= ncols) acc
+    else dyn_row_max_h(row_boxes, r, ncols, col + 1, max(acc, dyn_cell_h(cell_at(row_boxes, r, col))))
+}
+
+fn dyn_row_max_d(row_boxes, r, ncols, col, acc) {
+    if (col >= ncols) acc
+    else dyn_row_max_d(row_boxes, r, ncols, col + 1, max(acc, dyn_cell_d(cell_at(row_boxes, r, col))))
+}
+
+// per-row [height, depth, pos]: arstrut maxed with the tallest/deepest cell;
+// pos = running total after the row's height (TeX \@array accumulation). The
+// running float order MUST match MathLive so the 0.01 CEIL@2 boundary cases
+// (e.g. 2-row depth-holder 0.96, not 0.95) reproduce exactly.
+fn dyn_rows(row_boxes, ncols, nrows, ah, ad, jot, r, total, acc) {
+    if (r >= nrows) acc
+    else {
+        let mh = max(ah, dyn_row_max_h(row_boxes, r, ncols, 0, 0.0))
+        let md0 = max(ad, dyn_row_max_d(row_boxes, r, ncols, 0, 0.0))
+        let md = if (r < nrows - 1) md0 + jot else md0
+        let t1 = total + mh
+        dyn_rows(row_boxes, ncols, nrows, ah, ad, jot, r + 1, t1 + md, acc ++ [[mh, md, t1]])
+    }
+}
+
+fn dyn_max_h(rows, i, acc) {
+    if (i >= len(rows)) acc
+    else dyn_max_h(rows, i + 1, max(acc, rows[i][0]))
+}
+
+// getVListChildrenAndDepth (individualShift): the kern inserted before each
+// row i>=1 so its baseline lands at shift = pos[i]-offset.
+fn dyn_sizes(rows, off, i, cp_gv, acc) {
+    if (i >= len(rows)) acc
+    else {
+        let shift = rows[i][2] - off
+        let diff = 0.0 - shift - cp_gv - rows[i][1]
+        let size = diff - (rows[i - 1][0] + rows[i - 1][1])
+        dyn_sizes(rows, off, i + 1, cp_gv + diff, acc ++ [size])
+    }
+}
+
+// makeRows: place each row, accumulating currPos / minPos / maxPos exactly as
+// MathLive v-box.ts. Returns the childWrap tops + extremes (full precision).
+fn dyn_walk(rows, sizes, pstrut, i, cur, mn, mx, tops) {
+    if (i >= len(rows)) {
+        let r = {tops: tops, min_pos: mn, max_pos: mx}
+        r
+    } else {
+        let cp1 = if (i == 0) cur else cur + sizes[i - 1]
+        let mn1 = if (i == 0) mn else min(mn, cp1)
+        let mx1 = if (i == 0) mx else max(mx, cp1)
+        let top = 0.0 - pstrut - cp1 - rows[i][1]
+        let cp2 = cp1 + rows[i][0] + rows[i][1]
+        dyn_walk(rows, sizes, pstrut, i + 1, cp2, min(mn1, cp2), max(mx1, cp2),
+                 tops ++ [util.ceil_em2(top)])
+    }
+}
+
+fn dyn_cell_heights(rows, r, out) {
+    if (r >= len(rows)) out
+    else dyn_cell_heights(rows, r + 1, out ++ [util.ceil_em2(rows[r][0] + rows[r][1])])
+}
+
+fn compute_dyn_metrics(row_boxes, ncols, nrows, env_name) {
+    // arstrut = 0.7/0.3 × arraystretch(1.0) × baselineskip(1.2). Compute the
+    // products (not the rounded 0.84/0.36) so the float matches MathLive.
+    let ah = 0.7 * 1.2
+    let ad = 0.3 * 1.2
+    let rows = dyn_rows(row_boxes, ncols, nrows, ah, ad, env_jot(env_name), 0, 0.0, [])
+    let last = rows[nrows - 1]
+    let total = last[2] + last[1]
+    // `array` aligns to the first row's baseline; matrices/dcases centre on axis
+    let off = if (env_name == "array") rows[0][0] else total / 2.0 + 0.25
+    let pstrut = max(1.0, dyn_max_h(rows, 0, 0.0)) + 2.0
+    let depth0 = 0.0 - (rows[0][2] - off) - rows[0][1]
+    let sizes = dyn_sizes(rows, off, 1, depth0, [])
+    let w = dyn_walk(rows, sizes, pstrut, 0, depth0, depth0, depth0, [])
+    let box_h = w.max_pos
+    let box_d = 0.0 - w.min_pos
+    let m = {
+        height: util.ceil_em2(box_h),
+        depth: util.ceil_em2(box_d),
+        height_raw: box_h,
+        depth_raw: box_d,
+        render_total: util.ceil_em2(box_h + box_d),
+        vlist_height: util.ceil_em2(box_h),
+        depth_holder: util.ceil_em2(box_d),
+        pstrut: util.ceil_em2(pstrut),
+        tops: w.tops,
+        cell_heights: dyn_cell_heights(rows, 0, [])
+    }
+    m
 }
 
 fn cases_table_metrics(nrows) {
@@ -318,19 +444,6 @@ fn cases_table_metrics(nrows) {
     } else matrix_table_metrics(nrows)
 }
 
-fn dcases_table_metrics(nrows) {
-    if (nrows == 2) {
-        {
-            height: 3.46,
-            depth: 2.95,
-            render_total: 6.41,
-            vlist_height: 3.46,
-            depth_holder: 2.96,
-            pstrut: 3.81,
-            cell_height: 3.36
-        }
-    } else matrix_table_metrics(nrows)
-}
 
 // A single-row `equation` environment centers its content on the math axis
 // (0.25em). Derive the table metrics from the content box's real height/depth
@@ -374,28 +487,16 @@ fn matrix_table_metrics(nrows) => {
     cell_height: 1.2
 }
 
-fn array_table_metrics(nrows) => {
-    height: 0.84,
-    depth: 0.36 + 1.2 * float(nrows - 1),
-    render_total: 1.2 + 1.2 * float(nrows - 1),
-    vlist_height: 0.84,
-    depth_holder: 0.36 + 1.2 * float(nrows - 1),
-    pstrut: 3.0,
-    cell_height: 1.2
-}
-
 fn row_top(metrics, row) {
-    if (metrics.is_equation == true) metrics.eq_top
-    else if (metrics.height == 0.84) array_row_top(row)
+    if (metrics.tops != null) metrics.tops[row]
+    else if (metrics.is_equation == true) metrics.eq_top
     else if (metrics.pstrut == 3.01) cases_row_top(row)
-    else if (metrics.pstrut == 3.81) dcases_row_top(row)
     else matrix_row_top(metrics, row)
 }
 
 fn row_cell_height(metrics, row) {
-    if (metrics.pstrut == 3.81) {
-        if (row == 0) 3.36 else 3.06
-    } else metrics.cell_height
+    if (metrics.cell_heights != null) metrics.cell_heights[row]
+    else metrics.cell_height
 }
 
 fn cases_row_top(row) {
@@ -403,10 +504,6 @@ fn cases_row_top(row) {
     else 0.0 - 2.25
 }
 
-fn dcases_row_top(row) {
-    if (row == 0) 0.0 - 5.45
-    else 0.0 - 2.09
-}
 
 fn matrix_row_top(metrics, row) {
     let nrows = int(round((metrics.render_total - 1.21) / 1.2)) + 1
@@ -419,12 +516,6 @@ fn matrix_row_top(metrics, row) {
         else if (row == 1) 0.0 - 3.0
         else 0.0 - 1.81 + 1.2 * float(row - 2)
     }
-}
-
-fn array_row_top(row) {
-    if (row == 0) 0.0 - 3.0
-    else if (row == 1) 0.0 - 1.79
-    else 0.0 - 0.6 + 1.2 * float(row - 2)
 }
 
 // ============================================================
@@ -530,21 +621,31 @@ fn wrap_with_delimiters(table_box, ld, rd) {
     let parts = (for (p in [left_box, table_box, right_box] where p != null) p)
     let children = (for (p in parts) p.element)
     let total_width = sum((for (p in parts) p.width))
+    // The strut spans the taller of the content and the (axis-centred)
+    // delimiter glyphs — exactly like \left..\right. Exposing raw lets the
+    // outer strut round h+d ONCE so a Size3 bracket pair emits 2.41.
+    let ch = if (table_box.height_raw != null) table_box.height_raw else table_box.height
+    let cd = if (table_box.depth_raw != null) table_box.depth_raw else table_box.depth
+    let box_h = max(ch, max(delim_ext_h(left_box), delim_ext_h(right_box)))
+    let box_d = max(cd, max(delim_ext_d(left_box), delim_ext_d(right_box)))
     {
         element: <span style: "display:inline-block";
             for child in children { child }
         >,
-        height: table_box.height,
-        depth: table_box.depth,
-        render_height: table_box.render_height,
-        render_depth: table_box.render_depth,
-        render_total: table_box.render_total,
+        height: util.ceil_em2(box_h),
+        depth: 0.0 - util.ceil_em2(0.0 - box_d),
+        height_raw: box_h,
+        depth_raw: box_d,
+        render_total: util.ceil_em2(box_h + box_d),
         width: total_width,
         type: "ord",
         italic: 0.0,
         skew: 0.0
     }
 }
+
+fn delim_ext_h(b) { if (b == null) 0.0 else if (b.height_raw != null) b.height_raw else b.height }
+fn delim_ext_d(b) { if (b == null) 0.0 else if (b.depth_raw != null) b.depth_raw else b.depth }
 
 fn render_null_right_delim() {
     {
@@ -577,15 +678,28 @@ fn render_plain_sized_delim(ch, level) {
         else if (level == 2) css.DELIM_SIZE2
         else if (level == 3) css.DELIM_SIZE3
         else css.DELIM_SIZE4
+    let raw = matrix_sized_raw(level)
     {
         element: <span class: cls; ch>,
         height: 0.6 * float(level),
         depth: 0.3 * float(level),
+        height_raw: raw.h,
+        depth_raw: raw.d,
         width: 0.4,
         type: "ord",
         italic: 0.0,
         skew: 0.0
     }
+}
+
+// full-precision Size1–4 delimiter glyph extent (axis-centred U+0028 metrics,
+// shared with delimiters.ls): drives the strut so a Size3 bracket pair rounds
+// 1.45+0.95003 → 2.41 once, matching MathLive.
+fn matrix_sized_raw(level) {
+    let h = if (level == 1) 0.85 else if (level == 2) 1.15 else if (level == 3) 1.45 else 1.75
+    let d = if (level == 1) 0.35001 else if (level == 2) 0.65002 else if (level == 3) 0.95003 else 1.25003
+    let r = {h: h, d: d}
+    r
 }
 
 fn render_square_mult_delim(ch) {
@@ -612,6 +726,8 @@ fn render_square_mult_delim(ch) {
         >,
         height: 2.05,
         depth: 1.55,
+        height_raw: 2.05,
+        depth_raw: 1.55003,
         width: 0.4,
         type: "ord",
         italic: 0.0,

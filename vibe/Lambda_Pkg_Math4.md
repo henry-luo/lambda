@@ -371,13 +371,17 @@ clean path to ≥99%.
 
 ## 10. Progress & status — 2026-06-18
 
-**Headline: corpus 763 (pre-Math4) → 824/921, upstream baseline 206/206 (PERFECT —
-the hard gate is met), ~1000 hardcoded layout lines removed.** The thesis of §9
-held: the metric port turns per-case tuning into structural fixes. `fraction.ls`
-is **100% metric-driven** (50-branch `frac_bar_spec` *deleted*); **sqrt/radical
-is metric-driven** (bucket dispatch gone, +17 corpus); the **`2.41` delimiter
-magic is retired** (raw glyph exposure); and the **last 2 baseline residuals are
-fixed** by exposing raw on script-reached fractions (§10.0b) → **SACRED 206/206**.
+**Headline: corpus 763 (pre-Math4) → 823/921, upstream baseline 205/206 (the one
+fail is a deliberate temporal regression — see below), ~1000+ hardcoded layout
+lines removed.** The thesis of §9 held: the metric port turns per-case tuning
+into structural fixes. `fraction.ls` is **100% metric-driven** (50-branch
+`frac_bar_spec` *deleted*); **sqrt/radical is metric-driven** (bucket dispatch
+gone, +17 corpus); the **`2.41` delimiter magic is retired** (raw glyph
+exposure); the **last 2 baseline residuals were fixed** (script-reached fractions
+expose raw, §10.0b → 206/206); and **arrays (matrix family + array + dcases) are
+now metric-driven** (§10.8) — the only baseline fail is the dcases 0.01
+fraction-precision float-tip (temporal, removing its hardcode per the "remove
+all hardcode, regression OK" directive).
 
 ### 10.0b Last 2 baseline residuals FIXED → SACRED 206/206
 The `x^{2-\frac34}` / `x^{2-\frac12}` fraction-in-sup cases failed ONLY on the
@@ -433,9 +437,9 @@ the goldens are displaystyle.**
 |------:|--------|-------|
 | **B — Rule 15 fractions** | **DONE.** | `frac_bar_spec` + `build_frac_bar_legacy` + 26 helper fns **deleted (−778 lines)**; `fraction.ls` 1321→539. Every bar fraction (display/text/script/scriptscript, colorbox, composite children) flows through `frac_bar_geom` + `build_frac_bar_rule15`. Key fixes: (a) geometry-style is one step "up" from the math style for script-*cell* fractions but unchanged for sub/superscript-reached ones — keyed on `script_container`; (b) `partial_box` (∂) given raw metrics + corrected depth (0.08→0) so `\pdiff` takes the metric path. FRACTIONS 9/9. |
 | **C — Rule 18 scripts** | **mostly done.** | `render_sup_only` fully rewritten to pure Rule 18c `supShift` + single-child makeVList (−74 lines; legacy_top/legacy_vlist/legacy_child_h tables, tall_base/tall_script/numeric_x_script gates, 0.41/0.43 magic, 4 orphan helpers all gone). `render_both` + `make_limits_stack` were already metric-driven (Math4 B/C earlier). `render_sub_only` got the ceil2-projection fix. Remaining: the box-record on these still carries `render_*`/`*_raw` (Phase A). |
-| **D — Array vshift** | **BLOCKED.** | The dynamic MathLive `makeVList` algorithm reproduces 1-row/3-row matrices byte-exact, but the **2-row `depth_holder` golden 0.96 is a float-imprecision artifact** — the closed form gives 0.95, and even MathLive's own JS float gives `ceil2(0.9500…01)=0.95`. Both snapshots emit 0.96, so it comes from MathLive's actual per-cell metrics differing from Lambda's 0.84/0.36 arstrut model. Reverted (regressed 2-row matrices). Also: most "matrix" corpus failures are *inner content* (fractions/delims/scripts), so Task-4 yield is low. |
+| **D — Array vshift** | **DONE for the matrix family + array (§10.8).** | The "unreproducible 0.96 artifact" was a RED HERRING: the 2-row `depth_holder` 0.96 (vs closed-form 0.95) IS reproducible by replicating MathLive's exact **float accumulation order** in the `makeVList` walk (`-minPos` accumulates to `0.95000000000000040` → ceil2 0.96; the closed form `total-off` gives exactly 0.95). The per-nrows `*_table_metrics`/`*_row_top` tables are replaced by `compute_dyn_metrics` (faithful walk) for matrix/pmatrix/bmatrix/.../array; matrix delimiters now expose glyph raw (like `\left..\right`). 824/206, ENVIRONMENTS 9/9, **0 regression**; `array_table_metrics`/`array_row_top` deleted. Still hardcoded: cases/rcases (scriptstyle cells), dcases (`jot` inter-row spacing), smallmatrix (scriptstyle scale), equation — scaling/spacing complexity, future work. |
 | **E — Regression cleanup** | **ongoing.** | Down to 2 upstream-baseline fails, both the fraction-in-sup residual (see 10.4). sqrt chain cleared. |
-| **A — Box-model collapse** | **STARTED — `strut_total` + `strut_depth_em` DELETED.** | First clean increment (§10.6). `strut_depth_em` was dead (never set → always null) — removed wholesale. `strut_total` had ONE producer (the `\left..\right` box, render.ls); converted it to expose `height_raw`/`depth_raw` (content raw maxed with the delimiter glyph raw) so the outer strut rounds h+d ONCE via the `use_raw` path — then deleted the `strut_total` field + the override branches in `math.ls`. `\left..\right` now flows through `use_raw`. Verified no-op (824/921, SACRED 206/206). Remaining: `render_total` (~145), `render_height` (~100), `render_depth` (~127) — blocked on converting the still-hardcoded producers (accents/arrays/bbox/integrals) to expose raw first; `left_right_render_*` stay (full-precision delimiter margin positioning, MathLive emits un-rounded). |
+| **A — Box-model collapse** | **STARTED — `strut_total` + `strut_depth_em` DELETED.** | First clean increment (§10.6). `strut_depth_em` was dead (never set → always null) — removed wholesale. `strut_total` had ONE producer (the `\left..\right` box, render.ls); converted it to expose `height_raw`/`depth_raw` (content raw maxed with the delimiter glyph raw) so the outer strut rounds h+d ONCE via the `use_raw` path — then deleted the `strut_total` field + the override branches in `math.ls`. `\left..\right` now flows through `use_raw`. Verified no-op (824/921, SACRED 206/206). **Producer audit (§10.7):** integrals ALREADY expose raw; simple accents converted; but `render_total` CANNOT be fully deleted — bbox (border) + line-accents (overline composite) have *genuine* emission≠layout splits (not rounding artifacts), so they legitimately keep it. `render_total` (~145), `render_height` (~100), `render_depth` (~127) remain for those + the non-raw fallback; `left_right_render_*` stay (full-precision delimiter margin, MathLive emits un-rounded). |
 
 ### 10.3 Other hardcode removed this session (leaf + emit producers)
 - **box.ls leaf metrics (Task 6):** removed ~120 lines of **dead per-character
@@ -493,6 +497,106 @@ change (824/921, SACRED 206/206):
   `\left(\frac{a}{b}\right)` now satisfies `use_raw`. Functions renamed
   `*_strut_total` → `*_render_total`/`left_right_content_total` (the field they
   feed is `render_total`, not the deleted `strut_total`).
+
+### 10.7 Phase A — producer audit (accents/arrays/bbox/integrals)
+Audited the remaining non-`use_raw` producers to see which can expose raw (so
+their trees round once). Findings:
+- **Integrals** (`render_integral_inline_scripts`) — ALREADY expose
+  `height_raw`/`depth_raw` and omit `render_height`/`render_depth`. `\int_0^1`
+  satisfies `use_raw`. Nothing to do.
+- **Simple accents** (`\hat`/`\vec`/`\bar`/`\dot`/`\tilde` over a single base,
+  via `render_simple_accent`) — CONVERTED. They sit entirely above the baseline
+  (depth 0) and their vlist height is already CEIL@2, so a new `accent_box_raw`
+  exposes `height_raw=vlist_h, depth_raw=0` — no cross-term to overshoot.
+  `\hat{x}`/`\bar{x}`/`\hat{x}+y` now `use_raw`; 0 regressions (ACCENTS 10/10).
+- **Wide / missing-base / line accents** — NOT converted. A first attempt to
+  expose raw on the *shared* `accent_box` regressed compound cases
+  (`\dot{x}\dot{x+1}\dot`: strut-bottom 1.14→1.15) because the hbox `use_raw`
+  cross-term (`max_h_raw + max_d_raw` from *different* children) overshoots the
+  non-raw `max(child render_total)`, and the accent depths (0.09/0.2) are
+  hardcoded approximations, not MathLive-exact. Reverted; left them on the
+  non-raw `accent_box`. The depth-bearing sibling keeps the compound hbox off
+  `use_raw`, which is correct.
+- **Line accents (`\overline`)** carry a genuine `render_total ≠ h+d` split
+  (e.g. 2.24 vs 2.04) — a real overline-composite extent, not a rounding
+  artifact. Cannot be single-`(h,d)`-paired.
+- **bbox/enclose** — genuine border split: golden top 1.75, bottom 3.01, va
+  −1.25, but `1.75 + 1.25 = 3.0 ≠ 3.01` (the border extends the bottom by 0.01
+  only). No `(h_raw,d_raw)` reproduces all three under CEIL@2 — `render_total`
+  is legitimately required.
+- **Arrays** — NOT converted: ENVIRONMENTS is SACRED (9/9), the 2-row
+  `depth_holder 0.96` is a documented float artifact that doesn't derive from
+  the algorithm, and (since bbox keeps `render_total` regardless) there's no
+  field-deletion payoff. Left as-is.
+
+**Conclusion:** `render_total` / `render_height` / `render_depth` **cannot be
+fully deleted** — bbox and line-accents have genuine emission-vs-layout splits
+(MathLive itself represents these via separate overlay/vlist structure). Phase A
+field-collapse is therefore *bounded*: `strut_total`/`strut_depth_em` are gone;
+the `render_*` trio stays for the genuinely-split constructs + the non-raw
+fallback. The achievable win — maximizing `use_raw` coverage so most trees round
+once — is now done for every cleanly-representable producer.
+
+### 10.8 Arrays metric-driven (matrix family + array) — the "artifact" cracked
+The long-standing Task-4 blocker (the 2-row `depth_holder` golden `0.96` that the
+closed-form array algorithm gives as `0.95`) was NOT an unreproducible MathLive
+metric difference. It is **float-accumulation order**: MathLive's `makeVList`
+walk accumulates `currPos` through per-row kerns, and the running float lands
+`-minPos = 0.95000000000000040` (just above 0.95) → `ceil2 = 0.96`. The
+closed-form `total − offset` computes `0.95` exactly. Replicating MathLive's
+EXACT operation order (including `arstrutHeight = 0.7*1.2` not the rounded
+`0.84`) reproduces every golden — 1-row `top 0.85 / depth-holder 0.35`, 2-row
+`tops -3.61,-2.4 / depth-holder 0.96 / strut 2.41 / va -0.95`, 3-row `-4.21,-3,
+-1.81` — byte-exact.
+
+What changed in `atoms/array.ls`:
+- `compute_dyn_metrics` replaces the per-`nrows` `matrix_table_metrics` +
+  `matrix_row_top` (and `array_*`, now deleted) for matrix/pmatrix/bmatrix/
+  Bmatrix/vmatrix/Vmatrix/array. It does the real `\@array` algorithm: per-row
+  `height/depth = max(arstrut, cells)`, running `total`, centering `offset =
+  total/2 + axis` (or `body[0].height` for `array`), then the faithful
+  `getVListChildrenAndDepth` + `makeRows` walk → tops, `maxPos`, `minPos`.
+- Matrix delimiters: `render_plain_sized_delim` + `render_square_mult_delim` now
+  carry `height_raw`/`depth_raw` (the Size1–4 glyph extents), and
+  `wrap_with_delimiters` computes the strut from `max(content, delim)` raw —
+  exactly the `\left..\right` model (§10.3). A Size3 bracket pair → 2.41.
+- Cells render unscaled (verified: `x@script` height 0.43056), so the matrix
+  family (cells at ambient style, scale 1.0) needs no scaling.
+- **dcases** also ported (display cells, scale 1.0) by adding TeX `\jot` (3pt =
+  0.3em) inter-row depth via `env_jot`; `dcases_table_metrics`/`dcases_row_top`
+  deleted. ONE residual: the dcases corpus case emits strut-bottom 6.42 vs
+  golden 6.41 — a 0.01 ceil2 float-tip traced to the inner fraction's
+  `depth_raw 1.25001` (a fraction-precision quirk, NOT the array algo). Accepted
+  as a temporal regression (SACRED 205/206) per the "remove hardcode, regression
+  OK" directive; clears when fraction depth precision is tightened.
+- STILL hardcoded: cases/rcases/smallmatrix, equation. **Attempted cases/rcases
+  (text cells + dynamic) → REVERTED: broke all 6 cases.** The scriptstyle
+  cell-model is inconsistent across goldens: cases #1 (`\sum/\frac` cells) passes
+  with SCRIPT cells (the `\sum` keeps over/under limits), but cases #2 wants
+  `x^2` at TEXT (0.82, not script 0.9) — and rendering cells at text turns the
+  `\sum` inline (loses limits), so #1 breaks. smallmatrix's golden has NO
+  font-size (full-size cells) yet decomposes to row depths (rd0≈0.49, rd1≈0.19)
+  that fit NO uniform arstrut — it doesn't match the standard `\@array` model.
+  These need the scriptstyle cell-rendering model untangled first; left on their
+  legacy tables (no further regression).
+Matrix family + array: 0 regression (824/206). dcases: −1 (the 0.01 fraction
+tip). **The lesson: "non-reproducible" golden artifacts are often just
+float-order — replicate the exact computation.**
+
+### 10.9 Integral side-limits metric-driven (clean no-op)
+`render_integral_inline_scripts` (scripts.ls) had ~15 hardcoded layout constants
+(1.09, 0.9, −2.1, −4.08, 1.55, −0.41, 0.89, 0.44, …). Replaced by derivations
+from the ∫ Size2 glyph metrics (`int_h 1.36`, `int_d 0.86225`, `int_italic
+0.44445` — kept as font data) + TeXBook Rule 18 side-limit shifts:
+`sup_shift = int_h − supDrop·0.7`, `sub_shift = int_d + subDrop·0.7`;
+`sup_top = ceil2(−3 − sup_shift − sup_d)`, `sub_top = ceil2(−3 + sub_shift)`,
+`vlist = ceil2(box_h_raw)` (sup) or `ceil2(−sub_shift + sub_inner_h)` (sub-only),
+`depth_holder = ceil2(box_d_raw)`, margins `= ceil2(±int_italic)` (0.45 / −0.44).
+**Verified 0 regression** (0 integrals newly-fail/pass, corpus 823, SACRED 205).
+KEY gotcha: the box's `height_raw` must use the **raw** sup height (`h·0.7`), NOT
+the CEIL2'd wrapper `sub_height_for` — otherwise the strut sums 0.01 too high
+(2.45 vs golden 2.44). Remaining integral magic: `0.05` (sub-only scriptspace
+kern) and `pstrut 3.0`.
 
 ### 10.5 Acceptance-criteria scorecard (§8)
 1. *No per-content em constant tables in fraction.ls/scripts.ls* — **fraction.ls
