@@ -1523,9 +1523,8 @@ extern "C" Item js_date_now(void) {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     double ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *fp = ms;
-    return (Item){.item = d2it(fp)};
+    ms = js_date_time_clip(ms);
+    return (Item){.item = i2it((int64_t)ms)};
 }
 
 // new Date() — returns a map that acts as a Date object.
@@ -1733,7 +1732,7 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
         return js_throw_type_error("this is not a Date object");
     }
 
-    double ms = time_val.get_double();
+    double ms = js_date_number_to_double(time_val);
     if (method_id == 0) { // getTime
         static double gt_buf[16];
         static int gt_idx = 0;

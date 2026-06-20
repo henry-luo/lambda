@@ -1,0 +1,9 @@
+type: string
+format: true
+option format: true
+unique: true
+version: true
+variant: true
+timestamp: true
+bad options: ERR_INVALID_ARG_TYPE
+bad cache option: ERR_INVALID_ARG_TYPE

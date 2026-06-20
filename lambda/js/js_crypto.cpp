@@ -31,6 +31,7 @@ extern "C" Item js_get_current_this(void);
 #else
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/time.h>
 #endif
 
 // ============================================================================
@@ -363,25 +364,55 @@ extern "C" Item js_crypto_getFips(void) {
 }
 
 // ============================================================================
-// randomUUID() → string "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
+// randomUUID/randomUUIDv7 → string "xxxxxxxx-xxxx-Vxxx-yxxx-xxxxxxxxxxxx"
 // ============================================================================
 
-extern "C" Item js_crypto_randomUUID(Item options) {
-    // validate options: must be undefined/null or an object
+static bool crypto_validate_uuid_options(Item options) {
     TypeId opt_type = get_type_id(options);
     if (opt_type != LMD_TYPE_UNDEFINED && opt_type != LMD_TYPE_NULL && opt_type != LMD_TYPE_MAP) {
-        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+        js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"options\" argument must be of type object.");
+        return false;
     }
     if (opt_type == LMD_TYPE_MAP) {
-        // validate disableEntropyCache if present
         Item dec = js_property_get(options, make_string_item_crypto("disableEntropyCache"));
         TypeId dec_type = get_type_id(dec);
         if (dec_type != LMD_TYPE_UNDEFINED && dec_type != LMD_TYPE_BOOL) {
-            return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
                 "The \"options.disableEntropyCache\" property must be of type boolean.");
+            return false;
         }
     }
+    return true;
+}
+
+static void crypto_uuid_format_bytes(uint8_t bytes[16], char out[UUID_STR_LEN]) {
+    int p = 0;
+    for (int i = 0; i < 16; i++) {
+        if (i == 4 || i == 6 || i == 8 || i == 10) out[p++] = '-';
+        out[p++] = hex_encode_nibble((unsigned)(bytes[i] >> 4));
+        out[p++] = hex_encode_nibble((unsigned)(bytes[i] & 0x0F));
+    }
+    out[p] = '\0';
+}
+
+static uint64_t crypto_unix_time_ms(void) {
+#ifdef _WIN32
+    FILETIME ft;
+    ULARGE_INTEGER uli;
+    GetSystemTimeAsFileTime(&ft);
+    uli.LowPart = ft.dwLowDateTime;
+    uli.HighPart = ft.dwHighDateTime;
+    return (uli.QuadPart - 116444736000000000ULL) / 10000ULL;
+#else
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return ((uint64_t)tv.tv_sec * 1000ULL) + ((uint64_t)tv.tv_usec / 1000ULL);
+#endif
+}
+
+extern "C" Item js_crypto_randomUUID(Item options) {
+    if (!crypto_validate_uuid_options(options)) return ItemNull;
 
     uint8_t bytes[16];
     if (!crypto_random_bytes(bytes, 16)) {
@@ -390,6 +421,30 @@ extern "C" Item js_crypto_randomUUID(Item options) {
     }
     char uuid[UUID_STR_LEN];
     uuid_v4_format(bytes, uuid);
+    return make_string_item_crypto(uuid);
+}
+
+extern "C" Item js_crypto_randomUUIDv7(Item options) {
+    if (!crypto_validate_uuid_options(options)) return ItemNull;
+
+    uint8_t bytes[16];
+    if (!crypto_random_bytes(bytes, 16)) {
+        log_error("crypto: randomUUIDv7: entropy source failed");
+        return ItemNull;
+    }
+
+    uint64_t ts = crypto_unix_time_ms();
+    bytes[0] = (uint8_t)(ts >> 40);
+    bytes[1] = (uint8_t)(ts >> 32);
+    bytes[2] = (uint8_t)(ts >> 24);
+    bytes[3] = (uint8_t)(ts >> 16);
+    bytes[4] = (uint8_t)(ts >> 8);
+    bytes[5] = (uint8_t)ts;
+    bytes[6] = (uint8_t)((bytes[6] & 0x0F) | 0x70);
+    bytes[8] = (uint8_t)((bytes[8] & 0x3F) | 0x80);
+
+    char uuid[UUID_STR_LEN];
+    crypto_uuid_format_bytes(bytes, uuid);
     return make_string_item_crypto(uuid);
 }
 
@@ -2184,6 +2239,7 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(crypto_namespace, "randomFillSync",     (void*)js_crypto_randomFillSync, 3);
     crypto_set_method(crypto_namespace, "randomFill",         (void*)js_crypto_randomFill, 4);
     crypto_set_method(crypto_namespace, "randomUUID",         (void*)js_crypto_randomUUID, 1);
+    crypto_set_method(crypto_namespace, "randomUUIDv7",       (void*)js_crypto_randomUUIDv7, 1);
     crypto_set_method(crypto_namespace, "randomInt",          (void*)js_crypto_randomInt, 2);
     crypto_set_method(crypto_namespace, "getFips",            (void*)js_crypto_getFips, 0);
     crypto_set_method(crypto_namespace, "getHashes",          (void*)js_crypto_getHashes, 0);
