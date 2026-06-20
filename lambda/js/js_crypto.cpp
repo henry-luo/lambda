@@ -210,6 +210,8 @@ static bool crypto_item_is_undefined(Item item) {
     return item.item == ITEM_JS_UNDEFINED || get_type_id(item) == LMD_TYPE_UNDEFINED;
 }
 
+static bool extract_bytes(Item item, uint8_t** out, int* out_len);
+
 extern "C" Item js_crypto_randomBytes(Item size_item) {
     int size = (int)it2i(size_item);
     if (size <= 0 || size > 65536) {
@@ -677,6 +679,64 @@ extern "C" Item js_crypto_createHash(Item alg_item) {
     js_property_set(obj, make_string_item_crypto("digest"),
                     js_new_function((void*)js_hash_digest, 1));
     return obj;
+}
+
+// crypto.hash(algorithm, data[, outputEncoding]) → digest
+extern "C" Item js_crypto_hash(Item alg_item, Item data_item, Item encoding_item) {
+    if (get_type_id(alg_item) != LMD_TYPE_STRING) {
+        return js_throw_invalid_arg_type("algorithm", "string", alg_item);
+    }
+
+    String* alg = it2s(alg_item);
+    char alg_buf[32];
+    int pos = 0;
+    for (int i = 0; alg && i < (int)alg->len && pos < (int)sizeof(alg_buf) - 1; i++) {
+        char c = alg->chars[i];
+        if (c == '-') continue;
+        alg_buf[pos++] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+    }
+    alg_buf[pos] = '\0';
+
+    int digest_bits = crypto_digest_bits_for_name(alg_buf, true, true);
+    int hash_len = (int)digest_output_len_bits(digest_bits);
+    if (hash_len <= 0 || hash_len > 64) {
+        return js_throw_invalid_arg_value("algorithm", "is invalid", alg_item);
+    }
+
+    const char* enc = "hex";
+    char enc_buf[32];
+    if (!crypto_item_is_undefined(encoding_item)) {
+        if (get_type_id(encoding_item) != LMD_TYPE_STRING) {
+            return js_throw_invalid_arg_type("outputEncoding", "string", encoding_item);
+        }
+        String* s = it2s(encoding_item);
+        int len = (int)s->len < (int)sizeof(enc_buf) - 1 ? (int)s->len : (int)sizeof(enc_buf) - 1;
+        memcpy(enc_buf, s->chars, (size_t)len);
+        enc_buf[len] = '\0';
+        enc = enc_buf;
+        if (strcmp(enc, "hex") != 0 && strcmp(enc, "base64") != 0 && strcmp(enc, "buffer") != 0) {
+            return js_throw_invalid_arg_value("outputEncoding", "is invalid", encoding_item);
+        }
+    }
+
+    uint8_t* data = NULL;
+    int data_len = 0;
+    if (!extract_bytes(data_item, &data, &data_len)) {
+        return js_throw_invalid_arg_type("data", "string, ArrayBuffer, Buffer, TypedArray, or DataView", data_item);
+    }
+
+    uint8_t hash[64];
+    bool ok = crypto_digest_compute_bits(digest_bits, data, 0, data_len, hash);
+    mem_free(data);
+    if (!ok) return ItemNull;
+
+    if (strcmp(enc, "hex") == 0) return bytes_to_hex_string(hash, hash_len);
+    if (strcmp(enc, "base64") == 0) return bytes_to_base64_string(hash, hash_len);
+
+    Item result = js_typed_array_new(JS_TYPED_UINT8, hash_len);
+    JsTypedArray* ta = (JsTypedArray*)result.map->data;
+    if (ta && ta->data) memcpy(ta->data, hash, (size_t)hash_len);
+    return result;
 }
 
 // ============================================================================
@@ -1748,6 +1808,132 @@ extern "C" Item js_crypto_getCiphers(void) {
     return arr;
 }
 
+struct CryptoCipherInfo {
+    const char* name;
+    int nid;
+    int block_size;
+    int iv_length;
+    int key_length;
+    const char* mode;
+};
+
+static const CryptoCipherInfo crypto_cipher_infos[] = {
+    {"aes-128-cbc", 419, 16, 16, 16, "cbc"},
+    {"aes-192-cbc", 423, 16, 16, 24, "cbc"},
+    {"aes-256-cbc", 427, 16, 16, 32, "cbc"},
+    {"aes-128-ctr", 904,  1, 16, 16, "ctr"},
+    {"aes-192-ctr", 905,  1, 16, 24, "ctr"},
+    {"aes-256-ctr", 906,  1, 16, 32, "ctr"},
+    {"aes-128-gcm", 895,  1, 12, 16, "gcm"},
+    {"aes-192-gcm", 898,  1, 12, 24, "gcm"},
+    {"aes-256-gcm", 901,  1, 12, 32, "gcm"},
+};
+
+static const CryptoCipherInfo* crypto_find_cipher_info_by_name(Item name_item) {
+    if (get_type_id(name_item) != LMD_TYPE_STRING) return NULL;
+    String* s = it2s(name_item);
+    if (!s) return NULL;
+    for (int i = 0; i < (int)(sizeof(crypto_cipher_infos) / sizeof(crypto_cipher_infos[0])); i++) {
+        const CryptoCipherInfo* info = &crypto_cipher_infos[i];
+        size_t len = strlen(info->name);
+        if (s->len == len && memcmp(s->chars, info->name, len) == 0) return info;
+    }
+    return NULL;
+}
+
+static bool crypto_item_to_int_exact(Item item, int* out_value) {
+    if (!out_value) return false;
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT) {
+        *out_value = (int)it2i(item);
+        return true;
+    }
+    if (type == LMD_TYPE_INT64) {
+        int64_t value = it2l(item);
+        if (value < -2147483648LL || value > 2147483647LL) return false;
+        *out_value = (int)value;
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        double value = it2d(item);
+        if (value != value || value < -2147483648.0 || value > 2147483647.0) return false;
+        int int_value = (int)value;
+        if ((double)int_value != value) return false;
+        *out_value = int_value;
+        return true;
+    }
+    return false;
+}
+
+static const CryptoCipherInfo* crypto_find_cipher_info_by_nid(Item nid_item) {
+    int nid = 0;
+    if (!crypto_item_to_int_exact(nid_item, &nid)) return NULL;
+    for (int i = 0; i < (int)(sizeof(crypto_cipher_infos) / sizeof(crypto_cipher_infos[0])); i++) {
+        const CryptoCipherInfo* info = &crypto_cipher_infos[i];
+        if (info->nid == nid) return info;
+    }
+    return NULL;
+}
+
+static bool crypto_validate_cipher_info_options(Item options_item, const CryptoCipherInfo* info) {
+    if (crypto_item_is_undefined(options_item)) return true;
+    if (get_type_id(options_item) != LMD_TYPE_MAP) {
+        js_throw_invalid_arg_type("options", "Object", options_item);
+        return false;
+    }
+
+    Item key_len_item = js_property_get(options_item, make_string_item_crypto("keyLength"));
+    if (!crypto_item_is_undefined(key_len_item)) {
+        int key_len = 0;
+        if (!crypto_item_to_int_exact(key_len_item, &key_len)) {
+            js_throw_invalid_arg_type("options.keyLength", "number", key_len_item);
+            return false;
+        }
+        if (!info || key_len != info->key_length) return false;
+    }
+
+    Item iv_len_item = js_property_get(options_item, make_string_item_crypto("ivLength"));
+    if (!crypto_item_is_undefined(iv_len_item)) {
+        int iv_len = 0;
+        if (!crypto_item_to_int_exact(iv_len_item, &iv_len)) {
+            js_throw_invalid_arg_type("options.ivLength", "number", iv_len_item);
+            return false;
+        }
+        if (!info || iv_len != info->iv_length) return false;
+    }
+    return true;
+}
+
+static Item crypto_cipher_info_to_object(const CryptoCipherInfo* info) {
+    if (!info) return make_js_undefined_crypto();
+    Item obj = js_new_object();
+    js_property_set(obj, make_string_item_crypto("name"), make_string_item_crypto(info->name));
+    js_property_set(obj, make_string_item_crypto("nid"), (Item){.item = i2it(info->nid)});
+    js_property_set(obj, make_string_item_crypto("blockSize"), (Item){.item = i2it(info->block_size)});
+    js_property_set(obj, make_string_item_crypto("ivLength"), (Item){.item = i2it(info->iv_length)});
+    js_property_set(obj, make_string_item_crypto("keyLength"), (Item){.item = i2it(info->key_length)});
+    js_property_set(obj, make_string_item_crypto("mode"), make_string_item_crypto(info->mode));
+    return obj;
+}
+
+extern "C" Item js_crypto_getCipherInfo(Item cipher_item, Item options_item) {
+    TypeId cipher_type = get_type_id(cipher_item);
+    const CryptoCipherInfo* info = NULL;
+    if (cipher_type == LMD_TYPE_STRING) {
+        info = crypto_find_cipher_info_by_name(cipher_item);
+    } else if (cipher_type == LMD_TYPE_INT || cipher_type == LMD_TYPE_FLOAT || cipher_type == LMD_TYPE_INT64) {
+        info = crypto_find_cipher_info_by_nid(cipher_item);
+    } else {
+        return js_throw_invalid_arg_type("nameOrNid", "string or number", cipher_item);
+    }
+
+    if (!crypto_validate_cipher_info_options(options_item, info)) {
+        if (js_check_exception()) return ItemNull;
+        return make_js_undefined_crypto();
+    }
+    return crypto_cipher_info_to_object(info);
+}
+
 // ============================================================================
 // Web Crypto subtle API (subset: digest, encrypt, decrypt)
 // All return Promises (resolved synchronously for now)
@@ -1990,6 +2176,7 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_namespace = js_new_object();
 
     crypto_set_method(crypto_namespace, "createHash",         (void*)js_crypto_createHash, 1);
+    crypto_set_method(crypto_namespace, "hash",               (void*)js_crypto_hash, 3);
     crypto_set_method(crypto_namespace, "createHmac",         (void*)js_crypto_createHmac, 2);
     crypto_set_method(crypto_namespace, "createCipheriv",     (void*)js_crypto_createCipheriv, 3);
     crypto_set_method(crypto_namespace, "createDecipheriv",   (void*)js_crypto_createDecipheriv, 3);
@@ -2001,6 +2188,7 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(crypto_namespace, "getFips",            (void*)js_crypto_getFips, 0);
     crypto_set_method(crypto_namespace, "getHashes",          (void*)js_crypto_getHashes, 0);
     crypto_set_method(crypto_namespace, "getCiphers",         (void*)js_crypto_getCiphers, 0);
+    crypto_set_method(crypto_namespace, "getCipherInfo",      (void*)js_crypto_getCipherInfo, 2);
     crypto_set_method(crypto_namespace, "timingSafeEqual",    (void*)js_crypto_timingSafeEqual, 2);
     crypto_set_method(crypto_namespace, "pbkdf2Sync",         (void*)js_crypto_pbkdf2Sync, 5);
     crypto_set_method(crypto_namespace, "pbkdf2",             (void*)js_crypto_pbkdf2, 6);

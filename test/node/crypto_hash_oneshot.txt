@@ -1,0 +1,8 @@
+hex equals: true
+base64 equals: true
+buffer length: 64
+buffer equals: true
+bad alg: ERR_INVALID_ARG_TYPE
+bad data: ERR_INVALID_ARG_TYPE
+bad enc type: ERR_INVALID_ARG_TYPE
+bad enc value: ERR_INVALID_ARG_VALUE

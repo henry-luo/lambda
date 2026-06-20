@@ -1,0 +1,11 @@
+cbc name: aes-128-cbc
+cbc nid: 419
+cbc block: 16
+cbc iv: 16
+cbc key: 16
+cbc mode: cbc
+cbc nid lookup: aes-128-cbc
+cbc key ok: true
+cbc key bad: true
+unknown: true
+bad arg: ERR_INVALID_ARG_TYPE
