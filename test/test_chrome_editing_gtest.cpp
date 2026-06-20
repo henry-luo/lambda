@@ -42,7 +42,7 @@
 
 static const char* EDITING_ROOT = "test/editing";
 static const char* HARNESS_PATH = "test/editing/resources/chrome-editing-harness.js";
-static const char* HARNESS_PATCH_PATH = "test/chrome_editing_ce3_harness_patch.js";
+static const char* HARNESS_PATCH_PATH = "test/editing/chrome_editing_ce3_harness_patch.js";
 static const char* RUNNABLE_PATH = "test/editing/RUNNABLE";
 static const char* TEMP_DIR = "temp";
 static const char* RESULT_ARTIFACT_PATH = "temp/chrome_editing_results.jsonl";
