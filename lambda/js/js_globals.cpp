@@ -31,6 +31,7 @@ extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
 extern "C" Item js_dom_range_get_prototype_value(void);
 extern "C" Item js_dom_selection_get_prototype_value(void);
+extern "C" Item js_internal_binding(Item name);
 extern double js_get_number(Item value);
 
 #define JS_FUNC_FLAG_HAS_BOUND_THIS_G 16
@@ -2544,6 +2545,11 @@ extern "C" Item js_process_binding(Item name) {
         js_property_set(cfg, (Item){.item = s2it(heap_create_name("hasCrypto", 9))}, (Item){.item = ITEM_TRUE});
         js_property_set(cfg, (Item){.item = s2it(heap_create_name("fipsMode", 8))}, (Item){.item = ITEM_FALSE});
         return cfg;
+    }
+    if ((s->len == 2 && memcmp(s->chars, "uv", 2) == 0) ||
+        (s->len == 9 && memcmp(s->chars, "constants", 9) == 0) ||
+        (s->len == 10 && memcmp(s->chars, "cares_wrap", 10) == 0)) {
+        return js_internal_binding(name);
     }
     return js_new_object();
 }

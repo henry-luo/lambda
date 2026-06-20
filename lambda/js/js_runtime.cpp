@@ -39,6 +39,8 @@ extern "C" Item js_new_string_wrapper(Item arg);
 extern "C" Item js_new_async_function_from_string(Item* args, int argc);
 extern "C" Item js_new_generator_function_from_string(Item* args, int argc, int is_async);
 extern "C" Item js_get_constructor(Item name_item);
+extern "C" Item js_get_fs_namespace(void);
+extern "C" Item js_get_os_namespace(void);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
@@ -31413,6 +31415,149 @@ static Item js_cares_getaddrinfo_default(Item hostname, Item family, Item hints,
     return (Item){.item = i2it(0)};
 }
 
+static Item js_node_binding_key(const char* name, int len) {
+    return (Item){.item = s2it(heap_create_name(name, len))};
+}
+
+static Item js_node_binding_key(const char* name) {
+    return js_node_binding_key(name, (int)strlen(name));
+}
+
+static bool js_node_binding_is_missing(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED;
+}
+
+static Item js_node_binding_null_object(void) {
+    return js_object_create(ItemNull);
+}
+
+static void js_node_binding_set(Item object, const char* name, Item value) {
+    js_property_set(object, js_node_binding_key(name), value);
+}
+
+static void js_node_binding_set_readonly(Item object, const char* name, Item value) {
+    Item key = js_node_binding_key(name);
+    js_property_set(object, key, value);
+    js_mark_non_writable(object, key);
+    js_mark_non_configurable(object, key);
+}
+
+static void js_node_binding_set_readonly_int(Item object, const char* name, int64_t value) {
+    js_node_binding_set_readonly(object, name, (Item){.item = i2it(value)});
+}
+
+static const char* const js_node_fs_constant_names[] = {
+    "F_OK", "R_OK", "W_OK", "X_OK",
+    "O_RDONLY", "O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC", "O_APPEND", "O_EXCL",
+    "S_IFMT", "S_IFREG", "S_IFDIR", "S_IFCHR", "S_IFBLK", "S_IFIFO", "S_IFLNK", "S_IFSOCK",
+    "S_IRUSR", "S_IWUSR", "S_IXUSR", "S_IRGRP", "S_IWGRP", "S_IXGRP", "S_IROTH", "S_IWOTH", "S_IXOTH",
+    "UV_DIRENT_UNKNOWN", "UV_DIRENT_FILE", "UV_DIRENT_DIR", "UV_DIRENT_LINK",
+    "UV_DIRENT_FIFO", "UV_DIRENT_SOCKET", "UV_DIRENT_CHAR", "UV_DIRENT_BLOCK",
+    "UV_FS_SYMLINK_DIR", "UV_FS_SYMLINK_JUNCTION",
+    "COPYFILE_EXCL", "COPYFILE_FICLONE", "COPYFILE_FICLONE_FORCE",
+    NULL
+};
+
+static const char* const js_node_errno_constant_names[] = {
+    "E2BIG", "EACCES", "EADDRINUSE", "EADDRNOTAVAIL", "EAGAIN",
+    "EALREADY", "EBADF", "EBUSY", "ECANCELED", "ECHILD",
+    "ECONNABORTED", "ECONNREFUSED", "ECONNRESET", "EDEADLK",
+    "EDESTADDRREQ", "EDOM", "EEXIST", "EFAULT", "EFBIG",
+    "EHOSTUNREACH", "EINPROGRESS", "EINTR", "EINVAL", "EIO",
+    "EISCONN", "EISDIR", "ELOOP", "EMFILE", "EMLINK", "EMSGSIZE",
+    "ENAMETOOLONG", "ENETDOWN", "ENETUNREACH", "ENFILE", "ENOBUFS",
+    "ENODEV", "ENOENT", "ENOMEM", "ENOPROTOOPT", "ENOSPC",
+    "ENOSYS", "ENOTCONN", "ENOTDIR", "ENOTEMPTY", "ENOTSOCK",
+    "ENOTSUP", "EPERM", "EPIPE", "EPROTONOSUPPORT", "EPROTOTYPE",
+    "ERANGE", "EROFS", "ESPIPE", "ESRCH", "ETIMEDOUT", "ETXTBSY",
+    "EWOULDBLOCK", "EXDEV", NULL
+};
+
+static const char* const js_node_priority_constant_names[] = {
+    "PRIORITY_LOW", "PRIORITY_BELOW_NORMAL", "PRIORITY_NORMAL",
+    "PRIORITY_ABOVE_NORMAL", "PRIORITY_HIGH", "PRIORITY_HIGHEST", NULL
+};
+
+static const char* const js_node_signal_constant_names[] = {
+    "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT",
+    "SIGBUS", "SIGFPE", "SIGKILL", "SIGUSR1", "SIGSEGV", "SIGUSR2",
+    "SIGPIPE", "SIGALRM", "SIGTERM", "SIGCHLD", "SIGCONT", "SIGSTOP",
+    "SIGTSTP", "SIGTTIN", "SIGTTOU", "SIGURG", "SIGXCPU", "SIGXFSZ",
+    "SIGVTALRM", "SIGPROF", "SIGWINCH", "SIGIO", "SIGSYS", NULL
+};
+
+static void js_node_binding_copy_constants(Item dst, Item src, const char* const* names) {
+    TypeId src_type = get_type_id(src);
+    if (src_type != LMD_TYPE_MAP && src_type != LMD_TYPE_ARRAY && src_type != LMD_TYPE_FUNC) return;
+    for (int i = 0; names[i]; i++) {
+        Item key = js_node_binding_key(names[i]);
+        Item value = js_property_get(src, key);
+        if (!js_node_binding_is_missing(value)) js_property_set(dst, key, value);
+    }
+}
+
+static Item js_node_binding_clone_constants(Item src, const char* const* names) {
+    Item dst = js_node_binding_null_object();
+    js_node_binding_copy_constants(dst, src, names);
+    js_object_freeze(dst);
+    return dst;
+}
+
+static Item js_node_binding_os_constants(void) {
+    Item os_ns = js_get_os_namespace();
+    Item os_constants = js_property_get(os_ns, js_node_binding_key("constants"));
+    Item errno_src = js_property_get(os_constants, js_node_binding_key("errno"));
+    Item priority_src = js_property_get(os_constants, js_node_binding_key("priority"));
+    Item signals_src = js_property_get(os_constants, js_node_binding_key("signals"));
+
+    Item os = js_node_binding_null_object();
+    js_node_binding_set_readonly_int(os, "UV_UDP_REUSEADDR", UV_UDP_REUSEADDR);
+    js_node_binding_set(os, "dlopen", js_node_binding_null_object());
+    js_node_binding_set(os, "errno", js_node_binding_clone_constants(errno_src, js_node_errno_constant_names));
+    js_node_binding_set(os, "priority", js_node_binding_clone_constants(priority_src, js_node_priority_constant_names));
+    js_node_binding_set(os, "signals", js_node_binding_clone_constants(signals_src, js_node_signal_constant_names));
+    js_object_freeze(js_property_get(os, js_node_binding_key("dlopen")));
+    js_object_freeze(os);
+    return os;
+}
+
+static Item js_node_binding_constants(void) {
+    Item fs_ns = js_get_fs_namespace();
+    Item fs_constants = js_property_get(fs_ns, js_node_binding_key("constants"));
+
+    Item constants = js_node_binding_null_object();
+    js_node_binding_set(constants, "crypto", js_node_binding_null_object());
+    js_node_binding_set(constants, "fs", fs_constants);
+    js_node_binding_set(constants, "internal", js_node_binding_null_object());
+    js_node_binding_set(constants, "os", js_node_binding_os_constants());
+    js_node_binding_set(constants, "trace", js_node_binding_null_object());
+    js_node_binding_set(constants, "zlib", js_node_binding_null_object());
+    js_object_freeze(js_property_get(constants, js_node_binding_key("crypto")));
+    js_object_freeze(js_property_get(constants, js_node_binding_key("internal")));
+    js_object_freeze(js_property_get(constants, js_node_binding_key("trace")));
+    js_object_freeze(js_property_get(constants, js_node_binding_key("zlib")));
+    js_object_freeze(constants);
+    return constants;
+}
+
+static Item js_node_public_constants(void) {
+    Item internal = js_node_binding_constants();
+    Item public_constants = js_node_binding_null_object();
+    Item fs = js_property_get(internal, js_node_binding_key("fs"));
+    Item os = js_property_get(internal, js_node_binding_key("os"));
+    Item errno_obj = js_property_get(os, js_node_binding_key("errno"));
+    Item priority_obj = js_property_get(os, js_node_binding_key("priority"));
+    Item signals_obj = js_property_get(os, js_node_binding_key("signals"));
+
+    js_node_binding_copy_constants(public_constants, fs, js_node_fs_constant_names);
+    js_node_binding_copy_constants(public_constants, errno_obj, js_node_errno_constant_names);
+    js_node_binding_copy_constants(public_constants, priority_obj, js_node_priority_constant_names);
+    js_node_binding_copy_constants(public_constants, signals_obj, js_node_signal_constant_names);
+    js_object_freeze(public_constants);
+    return public_constants;
+}
+
 static Item js_emit_internal_test_binding_warning(void) {
     Item warning = js_new_object();
     js_property_set(warning,
@@ -31452,9 +31597,7 @@ extern "C" Item js_internal_binding(Item name) {
             {NULL, 0}
         };
         for (int i = 0; uv_codes[i].name; i++) {
-            js_property_set(uv_obj,
-                (Item){.item = s2it(heap_create_name(uv_codes[i].name, strlen(uv_codes[i].name)))},
-                (Item){.item = i2it((int64_t)uv_codes[i].value)});
+            js_node_binding_set_readonly_int(uv_obj, uv_codes[i].name, uv_codes[i].value);
         }
         // errname(code) — return the error name for a UV error code
         extern Item js_uv_errname(Item code);
@@ -31462,6 +31605,10 @@ extern "C" Item js_internal_binding(Item name) {
             (Item){.item = s2it(heap_create_name("errname", 7))},
             js_new_function((void*)js_uv_errname, 1));
         return uv_obj;
+    }
+
+    if (s->len == 9 && memcmp(s->chars, "constants", 9) == 0) {
+        return js_node_binding_constants();
     }
 
     if (s->len == 10 && memcmp(s->chars, "cares_wrap", 10) == 0) {
@@ -31544,6 +31691,12 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 7 && memcmp(spec->chars, "node:os", 7) == 0)) {
         extern Item js_get_os_namespace(void);
         return js_get_os_namespace();
+    }
+    // node:constants
+    if ((spec->len == 9 && memcmp(spec->chars, "constants", 9) == 0) ||
+        (spec->len == 12 && memcmp(spec->chars, "constants.js", 12) == 0) ||
+        (spec->len == 14 && memcmp(spec->chars, "node:constants", 14) == 0)) {
+        return js_node_public_constants();
     }
     // node:url
     if ((spec->len == 3 && memcmp(spec->chars, "url", 3) == 0) ||

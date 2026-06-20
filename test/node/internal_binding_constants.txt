@@ -1,0 +1,14 @@
+top: crypto,fs,internal,os,trace,zlib
+os: UV_UDP_REUSEADDR,dlopen,errno,priority,signals
+null roots: true
+fs dirent type: number
+errno type: number
+signal type: number
+process constants: crypto,fs,internal,os,trace,zlib
+public frozen: true
+public fs type: number
+public errno match: true
+public signal match: true
+uv readonly: true
+uv errname: ENOENT
+process uv errname: function
