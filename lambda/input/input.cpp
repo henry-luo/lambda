@@ -1071,6 +1071,19 @@ void InputManager::destroy_global() {
     }
 }
 
+// Detach a URL pointer from any tracked Input that owns it, so the caller can
+// free the URL without ~InputManager double-freeing the same pointer.
+void InputManager::detach_url(Url* url) {
+    if (!g_input_manager || !url || !g_input_manager->inputs) return;
+    ArrayList* inputs = g_input_manager->inputs;
+    for (int i = 0; i < inputs->length; i++) {
+        Input* input = (Input*)inputs->data[i];
+        if (input && input->url == url) {
+            input->url = nullptr;
+        }
+    }
+}
+
 // Get the <html> element from the #document tree
 extern "C" Element* input_get_html_element(Input* input) {
     if (!input) return nullptr;

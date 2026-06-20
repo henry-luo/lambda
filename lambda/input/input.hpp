@@ -34,6 +34,11 @@ public:
     // Destroy the global instance (optional cleanup)
     static void destroy_global();
 
+    // Detach a URL pointer from any tracked Input that owns it (sets that
+    // input->url to null). Lets a caller free a URL it handed to create_input
+    // without ~InputManager / destroy_global double-freeing the same pointer.
+    static void detach_url(Url* url);
+
     // Instance methods for direct manager usage
     Input* create_input_instance(Url* abs_url);
     Pool* get_pool() const { return global_pool; }

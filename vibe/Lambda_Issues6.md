@@ -265,18 +265,48 @@ full math gate (823/921, unchanged).
 
 **Status: FIXED.**
 
-- **`./lambda.exe layout` leaks `dom_doc->url` — SEPARATE, pre-existing,
-  UNFIXED.** Independent of #36 (different ownership chain). The `layout`
-  command (`radiant/cmd_layout.cpp`) sets `dom_doc->url` from one of ~8 sources
-  (html_url/text_url/markdown_url/…) and tears the document down with
-  `dom_document_destroy()`, which frees `pending_navigation_url` but **not**
-  `url`. (The other DOM teardown, `free_document()` in `ui_context.cpp`, *does*
-  free `doc->url` — with an InputManager double-free guard — so only the
-  `dom_document_destroy`-direct callers leak.) A clean fix would move the
-  guarded url-free into `dom_document_destroy`, but `cmd_layout` also frees
-  several URLs (`base_url`/`input_url`/`resolved`) that may alias `dom_doc->url`,
-  so it needs a dedicated radiant url-ownership audit before changing the shared
-  destructor. Does **not** affect exit code. Left for a separate change.
+## 37. `./lambda.exe layout` URL leaks + a masked double-free — FIXED
+
+**Severity: MEDIUM** (leak) / **HIGH** (the masked UAF) — Two URL-ownership bugs
+in `radiant/cmd_layout.cpp`, exposed while fixing #36.
+
+**37a — `cwd` leak (the actual `layout` leak):** `cmd_layout` creates
+`Url* cwd = get_current_dir()` (`cmd_layout.cpp:6735`) as the base for resolving
+each input file's URL, but **never freed it** (`url_destroy(cwd)` appeared 0
+times). This was the real leak seen on a simple `.html` layout (1 Url + its
+component Strings). *(My earlier guess that it was `dom_doc->url` was wrong —
+`dom_doc->url` aliases `input_url`, which `layout_single_file` already frees.)*
+**Fix:** `url_destroy(cwd)` in the cleanup section before `return`.
+
+**37b — `input_url` double-free / use-after-free (was masked):** `layout_single_file`
+frees `input_url` (the per-file URL) at `cmd_layout.cpp:6483` **and** calls
+`InputManager::destroy_global()` at 6542. Several loaders (`load_markdown_doc`,
+latex, wiki, xml, script) pass `input_url` straight into `input_from_source`, so
+the tracked `Input` *owns that exact pointer* (`input->url == input_url`).
+Result: 6483 frees it, then 6542's `~InputManager()` frees it again →
+heap-use-after-free → **SIGABRT (exit 134)** for `./lambda.exe layout x.md`
+(and `.tex`/`.wiki`/`.xml`/`.ls`). HTML didn't crash because its loader resolves
+a *separate* URL for the input. Confirmed pre-existing (reproduces with all my
+changes reverted). **Fix:** added `InputManager::detach_url(Url*)` — nulls
+`input->url` on any tracked Input that owns the pointer — and call it before
+`url_destroy(input_url)` in `layout_single_file`. Doc-independent, so it also
+covers the case where doc creation failed after the input parsed. Now html,
+txt, svg, xml, wiki, ls layout are all leak-free and exit 0; markdown/latex no
+longer crash.
+
+**Status: FIXED (37a + 37b).**
+
+- **Residual: markdown/latex layout leaks ~48 `FontFaceDescriptor`s — SEPARATE,
+  pre-existing, UNFIXED.** Once 37b stopped the crash, markdown/latex layout
+  reaches shutdown and reports ~48 `MEM_CAT_LAYOUT` allocations (~2 KB) from
+  `radiant/font_face.cpp:215-231` — font-face descriptors registered when the
+  embedded-math fonts load, never freed (`font_context_reset_document_fonts`
+  doesn't release them). This is a **font-subsystem** lifecycle bug, not a URL
+  leak; it was always there, just hidden behind the UAF. The math `Runtime`
+  itself is fine (freed via `dom_document_destroy`→`lambda_runtime`). Converting
+  a UAF crash into a clean exit + reported leak is a strict improvement; the
+  descriptor leak is left for a dedicated font-lifecycle change. Does not affect
+  exit code.
 
 - **`expected a map, got data of type array` on package load.** Loading the
   math package (without `--no-log`) prints several:
@@ -307,7 +337,9 @@ full math gate (823/921, unchanged).
 | 34 | MIR | float param inferred `int` → JIT verify error | real only ⚠️ | workaround (constants inside) |
 | 35 | runtime | parse errors non-fatal, broken module runs | observed ✅ | workflow mitigation |
 | 36 | runtime | `parse()` leaks `parse://inline` URL (InputManager never torn down) | minimal ✅ | **FIXED** (destroy_global + 2 double-frees) |
-| — | runtime | `layout` leaks `dom_doc->url` (separate ownership chain) | observed ✅ | unfixed, pre-existing |
+| 37a | runtime | `layout` leaks `cwd` URL (never freed) | observed ✅ | **FIXED** (url_destroy(cwd)) |
+| 37b | runtime | `layout x.md`/`.tex`/… UAF — `input_url` double-free (was masked) | observed ✅ | **FIXED** (InputManager::detach_url) |
+| — | layout | markdown/latex leak ~48 FontFaceDescriptors (font subsystem) | observed ✅ | unfixed, pre-existing, separate |
 | — | runtime | `expected a map, got array` on load | observed ✅ | unfixed, low pri |
 | — | env | ~9 s cold JIT start (test-timeout trap) | observed ✅ | n/a |
 

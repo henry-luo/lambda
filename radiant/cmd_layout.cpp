@@ -6478,8 +6478,15 @@ static bool layout_single_file(
         state_dump = nullptr;
     }
 
-    // Free the input URL (dom_document_destroy doesn't own it)
+    // Free the input URL (dom_document_destroy doesn't own it). Some loaders
+    // (markdown/latex/wiki/xml/script) pass input_url straight into
+    // input_from_source, so a tracked Input ends up owning this exact pointer
+    // (input->url == input_url). InputManager::destroy_global() below frees
+    // every tracked input->url, so detach it from any owner first to avoid a
+    // double-free. detach_url is doc-independent, so it also covers the case
+    // where doc creation failed after the input was parsed.
     if (input_url) {
+        InputManager::detach_url(input_url);
         url_destroy(input_url);
         input_url = nullptr;
     }
@@ -6860,6 +6867,9 @@ int cmd_layout(int argc, char** argv) {
     log_debug("[Cleanup] Starting cleanup...");
     log_debug("[Cleanup] Cleaning up UI context...");
     ui_context_cleanup(&ui_context);
+    // cwd is the base URL passed (by pointer, not owned) into each
+    // layout_single_file call; cmd_layout owns it and must free it here.
+    if (cwd) url_destroy(cwd);
     log_debug("[Cleanup] Complete");
 
     printf("Completed layout command: %d success, %d failed\n", success_count, failure_count);
