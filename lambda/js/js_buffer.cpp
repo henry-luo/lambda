@@ -35,6 +35,8 @@ static Item make_string_item(const char* str) {
     return make_string_item(str, (int)strlen(str));
 }
 
+extern "C" Item js_get_current_this(void);
+
 // Helper: get raw data pointer and length from a typed array Item
 static uint8_t* buffer_data(Item buf, int* out_len) {
     if (!js_is_typed_array(buf)) { *out_len = 0; return NULL; }
@@ -1951,6 +1953,89 @@ static void buf_set_method(Item ns, const char* name, void* func_ptr, int param_
     js_property_set(ns, key, fn);
 }
 
+static Item buffer_iterator_key(const char* name, int len) {
+    return (Item){.item = s2it(heap_create_name(name, len))};
+}
+
+extern "C" Item js_buffer_iterator_identity(void) {
+    return js_get_current_this();
+}
+
+extern "C" Item js_buffer_iterator_next(void) {
+    Item iter = js_get_current_this();
+    if (get_type_id(iter) != LMD_TYPE_MAP) {
+        return js_throw_type_error("Buffer Iterator.prototype.next called on incompatible receiver");
+    }
+
+    Item done_key = buffer_iterator_key("__done__", 8);
+    Item done_val = js_property_get(iter, done_key);
+    if (get_type_id(done_val) == LMD_TYPE_BOOL && it2b(done_val)) {
+        Item result = js_new_object();
+        js_property_set(result, make_string_item("value"), make_js_undefined());
+        js_property_set(result, make_string_item("done"), (Item){.item = b2it(true)});
+        return result;
+    }
+
+    Item target = js_property_get(iter, buffer_iterator_key("__buf__", 7));
+    Item index_item = js_property_get(iter, buffer_iterator_key("__index__", 9));
+    Item kind_item = js_property_get(iter, buffer_iterator_key("__kind__", 8));
+    if (!js_is_typed_array(target) ||
+        get_type_id(index_item) != LMD_TYPE_INT ||
+        get_type_id(kind_item) != LMD_TYPE_INT) {
+        return js_throw_type_error("Buffer Iterator.prototype.next called on incompatible receiver");
+    }
+    if (js_typed_array_is_out_of_bounds_item(target)) {
+        return js_throw_type_error("Cannot perform Buffer.prototype iterator on an out-of-bounds ArrayBuffer");
+    }
+
+    int idx = (int)it2i(index_item);
+    int kind = (int)it2i(kind_item); // kind values: 0=keys, 1=values, 2=entries
+    int len = js_typed_array_length(target);
+    if (idx >= len) {
+        js_property_set(iter, done_key, (Item){.item = b2it(true)});
+        Item result = js_new_object();
+        js_property_set(result, make_string_item("value"), make_js_undefined());
+        js_property_set(result, make_string_item("done"), (Item){.item = b2it(true)});
+        return result;
+    }
+
+    js_property_set(iter, buffer_iterator_key("__index__", 9), (Item){.item = i2it(idx + 1)});
+    Item value = ItemNull;
+    if (kind == 0) {
+        value = (Item){.item = i2it(idx)};
+    } else if (kind == 2) {
+        Item elem = js_typed_array_get(target, (Item){.item = i2it(idx)});
+        if (elem.item == ITEM_NULL) elem = make_js_undefined();
+        Item pair = js_array_new(2);
+        pair.array->items[0] = (Item){.item = i2it(idx)};
+        pair.array->items[1] = elem;
+        value = pair;
+    } else {
+        value = js_typed_array_get(target, (Item){.item = i2it(idx)});
+        if (value.item == ITEM_NULL) value = make_js_undefined();
+    }
+
+    Item result = js_new_object();
+    js_property_set(result, make_string_item("value"), value);
+    js_property_set(result, make_string_item("done"), (Item){.item = b2it(false)});
+    return result;
+}
+
+static Item js_buffer_iterator_new(Item target, int kind) {
+    if (!js_is_typed_array(target)) {
+        return js_throw_type_error("Buffer iterator method called on incompatible receiver");
+    }
+
+    Item iter = js_new_object();
+    js_property_set(iter, buffer_iterator_key("__buf__", 7), target);
+    js_property_set(iter, buffer_iterator_key("__index__", 9), (Item){.item = i2it(0)});
+    js_property_set(iter, buffer_iterator_key("__kind__", 8), (Item){.item = i2it(kind)});
+    js_property_set(iter, buffer_iterator_key("__done__", 8), (Item){.item = b2it(false)});
+    js_property_set(iter, make_string_item("next"), js_new_function((void*)js_buffer_iterator_next, 0));
+    js_property_set(iter, buffer_iterator_key("__sym_1", 7), js_new_function((void*)js_buffer_iterator_identity, 0));
+    return iter;
+}
+
 // ─── Variable-width read/write ──────────────────────────────────────────────
 
 // buf.readUIntBE(offset, byteLength) — read unsigned int of 1-6 bytes, big-endian
@@ -2130,8 +2215,6 @@ extern "C" Item js_buffer_allocUnsafeSlow(Item size_item) {
 
 // ─── Instance method wrappers (this from js_get_current_this()) ─────────────
 
-extern "C" Item js_get_current_this(void);
-
 #define THIS js_get_current_this()
 
 // each instance wrapper reads this from js_get_current_this() and forwards
@@ -2173,6 +2256,15 @@ extern "C" Item js_buf_inst_subarray(Item start_item, Item end_item) {
 }
 extern "C" Item js_buf_inst_fill(Item value) {
     return js_buffer_fill(THIS, value);
+}
+extern "C" Item js_buf_inst_keys() {
+    return js_buffer_iterator_new(THIS, 0);
+}
+extern "C" Item js_buf_inst_values() {
+    return js_buffer_iterator_new(THIS, 1);
+}
+extern "C" Item js_buf_inst_entries() {
+    return js_buffer_iterator_new(THIS, 2);
 }
 
 // endian read wrappers
@@ -2257,6 +2349,11 @@ extern "C" Item js_get_buffer_prototype(void) {
     buf_set_method(buffer_prototype, "slice",      (void*)js_buf_inst_slice, 2);
     buf_set_method(buffer_prototype, "subarray",   (void*)js_buf_inst_subarray, 2);
     buf_set_method(buffer_prototype, "fill",       (void*)js_buf_inst_fill, 1);
+    buf_set_method(buffer_prototype, "keys",       (void*)js_buf_inst_keys, 0);
+    Item values_fn = js_new_function((void*)js_buf_inst_values, 0);
+    js_property_set(buffer_prototype, make_string_item("values"), values_fn);
+    js_property_set(buffer_prototype, buffer_iterator_key("__sym_1", 7), values_fn);
+    buf_set_method(buffer_prototype, "entries",    (void*)js_buf_inst_entries, 0);
 
     // endian-aware reads (1 arg: offset)
     buf_set_method(buffer_prototype, "readUInt8",     (void*)js_buf_inst_readUInt8, 1);
