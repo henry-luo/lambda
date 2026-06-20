@@ -1,0 +1,8 @@
+dns id: 4660
+dns question: example.com A
+dns answer a: 127.0.0.1
+dns answer txt: lambda
+dns answer srv: 1 443 target.example.com
+dns error: ENOTFOUND getaddrinfo something.invalid
+dns all: 2 4 6
+dns one: 127.0.0.1 4
