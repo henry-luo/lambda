@@ -61,6 +61,13 @@ Item js_create_event(const char* type, bool bubbles, bool cancelable);
 Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool composed);
 
 /**
+ * Create a legacy TextEvent object for document.createEvent("TextEvent").
+ * TextEvent is obsolete but still used by older editing tests.
+ */
+Item js_create_text_event_init(const char* type, bool bubbles, bool cancelable,
+                               bool composed, Item view, const char* data);
+
+/**
  * Build a synthetic click MouseEvent for HTMLElement.prototype.click().
  * Composed=true, bubbles=true, cancelable=true, detail=1; all coordinate/
  * button/modifier fields default to 0/false per the HTML spec.

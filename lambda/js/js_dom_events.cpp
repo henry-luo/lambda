@@ -776,6 +776,42 @@ extern "C" Item js_event_init_custom_event(Item type_arg, Item b_arg, Item c_arg
     return make_js_undefined();
 }
 
+// initTextEvent(type, bubbles, cancelable, view, data, inputMethod, locale)
+// Legacy WebKit/Blink editing tests still use this obsolete API.
+extern "C" Item js_event_init_text_event(Item type_arg, Item b_arg,
+        Item c_arg, Item view_arg, Item data_arg, Item input_method_arg,
+        Item locale_arg) {
+    js_event_init_event(type_arg, b_arg, c_arg);
+    Item ev = js_get_this();
+    if (get_type_id(ev) != LMD_TYPE_MAP) return make_js_undefined();
+    if (event_flag_get(ev, "__dispatch_flag")) return make_js_undefined();
+
+    TypeId vt = get_type_id(view_arg);
+    if (view_arg.item == 0 || vt == LMD_TYPE_UNDEFINED)
+        event_set_item(ev, "view", ItemNull);
+    else
+        event_set_item(ev, "view", view_arg);
+
+    const char* data = fn_to_cstr(data_arg);
+    event_set_str(ev, "data", data ? data : "");
+
+    TypeId mt = get_type_id(input_method_arg);
+    if (input_method_arg.item == 0 || mt == LMD_TYPE_UNDEFINED)
+        event_set_int(ev, "inputMethod", 0);
+    else {
+        Item num = js_to_number(input_method_arg);
+        TypeId nt = get_type_id(num);
+        if (nt == LMD_TYPE_INT) event_set_int(ev, "inputMethod", (int)it2i(num));
+        else if (nt == LMD_TYPE_INT64) event_set_int(ev, "inputMethod", (int)it2l(num));
+        else if (nt == LMD_TYPE_FLOAT) event_set_int(ev, "inputMethod", (int)it2d(num));
+        else event_set_int(ev, "inputMethod", 0);
+    }
+
+    const char* locale = fn_to_cstr(locale_arg);
+    event_set_str(ev, "locale", locale ? locale : "");
+    return make_js_undefined();
+}
+
 // cancelBubble setter — assigning true is equivalent to stopPropagation.
 // We expose a method-style helper; the legacy IDL accessor is approximated by
 // a writable own property on the event (set by ctor / dispatch loop).
@@ -876,6 +912,19 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
 
 Item js_create_event(const char* type, bool bubbles, bool cancelable) {
     return js_create_event_init(type, bubbles, cancelable, false);
+}
+
+Item js_create_text_event_init(const char* type, bool bubbles, bool cancelable,
+                               bool composed, Item view, const char* data) {
+    Item event = js_create_event_init(type, bubbles, cancelable, composed);
+    event_set_item(event, "view", view.item ? view : ItemNull);
+    event_set_str(event, "data", data ? data : "");
+    event_set_int(event, "inputMethod", 0);
+    event_set_str(event, "locale", "");
+    Item ite_key = (Item){.item = s2it(heap_create_name("initTextEvent"))};
+    js_property_set(event, ite_key,
+        js_new_function((void*)js_event_init_text_event, 7));
+    return event;
 }
 
 Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable,
