@@ -277,29 +277,36 @@ pub fn render_corner(ch, atom_type) {
 }
 
 fn render_vertical_mult(ch, level, atom_type) {
-    let pieces = vertical_mult_pieces(ch, vertical_mult_tops(level), 0, [])
+    // vlist internals (piece tops, container height/depth, pstrut, glyph
+    // height, total) are computed by a faithful makeStackedDelim port; the
+    // strut box fields (height/depth/raw/total) stay axis-centred via
+    // sized_delim_raw so the use_raw emit and the math.ls depth sentinel
+    // (total\u22481.21, depth\u22480.345) keep firing.
+    let spec = make_stacked_delim(level)
+    let pieces = stk_pieces(spec, ch, 0, [])
+    let raw = sized_delim_raw(level)
     let cls = css.classes([side_class(atom_type), "lm_delim-mult"])
     {
         element: <span class: cls;
             <span class: "delim-size1 lm_vlist-t lm_vlist-t2";
                 <span class: css.VLIST_R;
-                    <span class: css.VLIST, style: "height:" ++ util.fmt_em(vertical_mult_height(level));
+                    <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(spec.vlist_h);
                         for (piece in pieces) piece
                     >
                     <span class: css.VLIST_S; "\u200B">
                 >
                 <span class: css.VLIST_R;
-                    <span class: css.VLIST, style: "height:" ++ util.fmt_em(vertical_mult_depth_holder(level))>
+                    <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(spec.depth_holder)>
                 >
             >
         >,
-        height: vertical_mult_box_height(level),
+        height: raw.h,
         depth: vertical_mult_box_depth(level),
-        height_raw: sized_delim_raw(level).h,
-        depth_raw: sized_delim_raw(level).d,
-        render_height: vertical_mult_box_height(level),
+        height_raw: raw.h,
+        depth_raw: raw.d,
+        render_height: raw.h,
         render_depth: vertical_mult_box_depth(level),
-        render_total: vertical_mult_render_total(level),
+        render_total: util.ceil_em2(spec.real_h),
         width: 0.4,
         type: atom_type,
         italic: 0.0,
@@ -413,42 +420,108 @@ fn brace_group_spec(chars) => {
     pstrut: 2.9
 }
 
-fn vertical_mult_pieces(ch, tops, i, acc) {
-    if (i >= len(tops)) acc
+// ============================================================
+// makeStackedDelim port (vertical bars) — MathLive core/delimiters.ts
+// makeStackedDelim + core/v-box.ts makeRows ("bottom" mode).
+//
+// A vertical bar stacks a top + repeats + bottom of the SAME Size1 glyph
+// (∣ U+2223 / ∥ U+2225 share metrics), centred on the math axis, then
+// lays them out with the makeVList "bottom" walk. Every emitted dimension
+// is CEIL@2 (math.ls util / MathLive Box.toString). This replaces the old
+// per-level lookup tables (tops/height/depth_holder/render_total + the
+// hardcoded 2.61 pstrut / 0.61 glyph) with the computation that produced
+// them.
+// ============================================================
+
+// Size1-Regular extent shared by U+2223 (∣) and U+2225 (∥). The Size fonts
+// are not in metrics_data, so the value is cited here (KaTeX_Size1-Regular).
+let BAR1_H = 0.606
+let BAR1_D = 0.0 - 0.00599
+let STK_OVERLAP = 0.008          // OVERLAP between segments, in em
+
+// \big/\Big/\bigg/\Bigg size buckets → makeSizedDelim sizeToMaxHeight
+fn size_to_max_height(level) {
+    if (level == 1) 1.2 else if (level == 2) 1.8 else if (level == 3) 2.4 else 3.0
+}
+
+// integer ceil of a (possibly slightly negative) quotient — repeatCount
+fn ceil_int(q) {
+    let i = int(q)
+    if (float(i) >= q) i else i + 1
+}
+
+// the VBox child list: bottom, -OVERLAP, repeat*rc, -OVERLAP, top
+// (box entries = {box:true}, kern entries = {kern:value})
+fn stk_repeats(n, acc) {
+    if (n <= 0) acc else stk_repeats(n - 1, acc ++ [{box: true}])
+}
+fn stk_entries(rc) {
+    let head = [{box: true}, {kern: 0.0 - STK_OVERLAP}]
+    let tail = [{kern: 0.0 - STK_OVERLAP}, {box: true}]
+    head ++ stk_repeats(rc, []) ++ tail
+}
+
+// makeVList "bottom" walk: thread currPos, track maxPos/minPos and each
+// box's `top` offset (top = -pstrut - currPos - glyphDepth)
+fn stk_walk(entries, i, h, d, pstrut, cur, mx, mn, tops) {
+    if (i >= len(entries)) {
+        let r = {maxPos: mx, minPos: mn, tops: tops}
+        r
+    }
+    else {
+        let e = entries[i]
+        if (e.box == true) {
+            let top = 0.0 - pstrut - cur - d
+            let nc = cur + h + d
+            stk_walk(entries, i + 1, h, d, pstrut, nc, max(mx, nc), min(mn, nc), tops ++ [top])
+        } else {
+            let nc = cur + e.kern
+            stk_walk(entries, i + 1, h, d, pstrut, nc, max(mx, nc), min(mn, nc), tops)
+        }
+    }
+}
+
+// full makeStackedDelim for a vertical bar at a given \big size level.
+// The glyph metrics are read from the module-level float constants here
+// (rather than passed in) so the transpiler infers them as float — passing
+// them as params makes the first use `h + d` ambiguous and mis-infer int.
+fn make_stacked_delim(level) {
+    let h = BAR1_H
+    let d = BAR1_D
+    let ht = size_to_max_height(level)
+    let rht = h + d
+    let min_height = 2.0 * rht
+    let rc = max(0, ceil_int((ht - min_height) / rht))
+    let real_h = min_height + (float(rc) * rht)
+    let depth_param = real_h / 2.0 - met.AXIS_HEIGHT
+    let pstrut = h + 2.0
+    let bottom = 0.0 - depth_param
+    let w = stk_walk(stk_entries(rc), 0, h, d, pstrut, bottom, bottom, bottom, [])
+    {
+        tops: w.tops,
+        vlist_h: w.maxPos,
+        depth_holder: 0.0 - w.minPos,
+        pstrut: pstrut,
+        glyph_h: rht,
+        real_h: real_h
+    }
+}
+
+// emit the vlist pieces (one per stacked glyph) from a computed spec
+fn stk_pieces(spec, ch, i, acc) {
+    if (i >= len(spec.tops)) acc
     else
-        (let top = tops[i],
-         let piece = <span style: "top:" ++ util.fmt_em(top);
-             <span class: css.PSTRUT, style: "height:2.61em">
-             <span style: "height:0.61em;display:inline-block"; ch>
+        (let piece = <span style: "top:" ++ util.fmt_em_ceil2(spec.tops[i]);
+             <span class: css.PSTRUT, style: "height:" ++ util.fmt_em_ceil2(spec.pstrut)>
+             <span style: "height:" ++ util.fmt_em_ceil2(spec.glyph_h) ++ ";display:inline-block"; ch>
          >,
-         vertical_mult_pieces(ch, tops, i + 1, acc ++ [piece]))
+         stk_pieces(spec, ch, i + 1, acc ++ [piece]))
 }
 
-fn vertical_mult_height(level) {
-    if (level == 1) 0.84 else if (level == 2) 1.14 else if (level == 3) 1.44 else 1.74
-}
-
-fn vertical_mult_depth_holder(level) {
-    if (level == 1) 0.36 else if (level == 2) 0.66 else if (level == 3) 0.96 else 1.26
-}
-
-fn vertical_mult_box_height(level) {
-    if (level == 1) 0.85 else if (level == 2) 1.15 else if (level == 3) 1.45 else 1.75
-}
-
+// strut depth field — kept as a small table because math.ls couples the
+// level-1 value (0.345) to its depth sentinel (total≈1.21 → "-0.35em")
 fn vertical_mult_box_depth(level) {
     if (level == 1) 0.345 else if (level == 2) 0.65 else if (level == 3) 0.95 else 1.25
-}
-
-fn vertical_mult_render_total(level) {
-    if (level == 1) 1.21 else if (level == 2) 1.81 else if (level == 3) 2.41 else 3.01
-}
-
-fn vertical_mult_tops(level) {
-    if (level == 1) { [0.0 - 2.24, 0.0 - 2.83] }
-    else if (level == 2) { [0.0 - 1.94, 0.0 - 2.54, 0.0 - 3.13] }
-    else if (level == 3) { [0.0 - 1.64, 0.0 - 2.24, 0.0 - 2.84, 0.0 - 3.43] }
-    else { [0.0 - 1.34, 0.0 - 1.94, 0.0 - 2.54, 0.0 - 3.14, 0.0 - 3.73] }
 }
 
 // ============================================================

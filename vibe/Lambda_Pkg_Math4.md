@@ -616,6 +616,23 @@ Verified **0 regression** (823/205, same pass-set; cases #2's `x^2` still fails
 on the pre-existing script-vs-text cell-style golden inconsistency, unrelated to
 the table). `cases_table_metrics` + `cases_row_top` deleted.
 
+### 10.11 Stacked delimiters — real makeStackedDelim port (vertical bars)
+Ported MathLive's `makeStackedDelim` (core/delimiters.ts) into
+`make_stacked_delim` (delimiters.ls): pick top/repeat/bottom(+middle) Size-font
+glyph pieces, `repeatCount = ceil((height − minHeight)/(midFactor·repeatH))`,
+`realH = minHeight + rc·midFactor·repeatH`, centre on the axis
+(`depth = realH/2 − AXIS`), assemble bottom-up with −0.008 overlaps, and emit via
+the makeVList "bottom" walk (`pstrut = maxPieceH + 2`; box height/depth from the
+walk's maxPos/−minPos). **Vertical bars (∣/∥) routed through it**, replacing the
+per-level `vertical_mult_tops`/`vertical_mult_*` tables (all deleted). Validated
+byte-exact (∣ Size1 = h0.606/d−0.00599 → vlist 1.44, tops −1.64/−2.24/−2.84/
+−3.43, pstrut 2.61); 0 regression. NOT yet converted: **arrows/groups**
+(`render_mult_left_right_delim`) — the golden arrow head is 0.85/0.36 (wrapper
+1.21, pstrut 2.85), which does NOT match the documented `top = ↑` Size1 glyph
+(0.6); a model quirk like smallmatrix, left hardcoded. Array stacked
+brackets/braces (`render_square_mult_delim`/`render_brace_mult_delim`) also
+remain (could route through `make_stacked_delim` in a follow-up).
+
 ### 10.5 Acceptance-criteria scorecard (§8)
 1. *No per-content em constant tables in fraction.ls/scripts.ls* — **fraction.ls
    ✅ (frac_bar_spec gone); scripts.ls ✅ for sup/sub/both; render.ls sqrt ✅

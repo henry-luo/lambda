@@ -14,7 +14,8 @@
 > **Task 4 arrays DONE for matrix family + array (§10.8): the "0.96 float artifact" was REPRODUCIBLE by replicating MathLive's exact makeVList float-accumulation order; per-nrows tables → `compute_dyn_metrics`; matrix delims expose glyph raw; 0 regression.**
 > **Phase A producer audit (§10.7): integrals already raw; simple accents converted; `render_total` deletion is BOUNDED — bbox (border) + line-accents (overline) have genuine emission≠layout splits that legitimately keep render_total.**
 > **Integral side-limits metric-driven (∫ glyph + Rule 18; §10.9); cases/rcases metric-driven (arraystretch 1.2 makes arstrut dominate → fixed box; Size4 brace; §10.10) — both 0 regression.**
-> NEXT hardcode: smallmatrix (golden row-wrappers 0.93/0.62 fit no arstrut model — blocked, currently failing); equation already metric-driven. Then extended-corpus clusters (equation-env/align/cfrac).
+> **Stacked delimiters: vertical bars (∣/∥) ported to real makeStackedDelim (§10.11), 0 regression; vertical_mult_* tables deleted.**
+> NEXT hardcode: stacked ARROWS/groups (golden head 0.85/1.21 doesn't match documented top=↑ Size1 0.6 — quirk like smallmatrix) + array stacked brackets/braces; smallmatrix (blocked); equation already metric-driven.
 > NOTE: corpus golden is **display-rooted** (MathLive SSR default); the harness now renders displaystyle.
 
 ## Hard execution order (corrected by synthesis)

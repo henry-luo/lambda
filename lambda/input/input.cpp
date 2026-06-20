@@ -781,7 +781,9 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         log_debug("reading file from path: %s", pathname ? pathname : "null");
 
         Input* input = input_from_local_path(pathname, abs_url, type, flavor);
-        url_destroy(abs_url);
+        // on success the Input owns abs_url (stored as input->url, freed by
+        // ~InputManager); only free it here if no input was created.
+        if (!input) url_destroy(abs_url);
         return input;
     }
     else if (abs_url->scheme == URL_SCHEME_HTTP || abs_url->scheme == URL_SCHEME_HTTPS) {
@@ -808,10 +810,12 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         }
 
         Input* input = input_from_sysinfo(abs_url, pool);
+        // on success the Input owns abs_url (create_input stores it, freed by
+        // ~InputManager); only tear down the pool and url if creation failed.
         if (!input) {
             pool_destroy(pool);
+            url_destroy(abs_url);
         }
-        url_destroy(abs_url);
         return input;
     }
     else {

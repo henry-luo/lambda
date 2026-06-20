@@ -220,6 +220,11 @@ static int lambda_main_finish(int ret_code) {
     clipboard_store_shutdown();
     css_property_system_cleanup();
     radiant_state_cleanup_interned_names();
+    // tear down the InputManager singleton so its destructor url_destroy()s
+    // every tracked input->url (e.g. each parse()'s "parse://inline" dummy URL)
+    // and frees its global pool — otherwise those outlive the process and show
+    // up as memtrack leaks at shutdown.
+    InputManager::destroy_global();
     log_finish();
     MemtrackStats mem_stats = {};
     memtrack_get_stats(&mem_stats);
