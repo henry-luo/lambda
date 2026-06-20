@@ -1,0 +1,14 @@
+hmac instanceof: true
+hmac invalid arg: true
+hmac encoding throws: true
+hmac key invalid: true
+hmac md5 vector: true
+hmac sha1 multi: true
+hmac sha224 vector: true
+hmac raw buffer: true
+hmac raw hex: true
+hmac latin1: true
+hmac second digest: true
+hmac end/read: true
+hmac key object: true
+hmac invalid digest: true

@@ -39,15 +39,21 @@ extern "C" Item js_get_current_this(void);
 // ============================================================================
 
 static const uint8_t crypto_empty_bytes[1] = {0};
+static Item crypto_namespace = {0};
 
-static int crypto_digest_bits_for_name(const char* digest, bool allow_sha1, bool allow_sha224) {
+static int crypto_digest_bits_for_name_ext(const char* digest, bool allow_md5, bool allow_sha1, bool allow_sha224) {
     if (!digest) return 0;
+    if (allow_md5 && strcmp(digest, "md5") == 0) return DIGEST_MD5;
     if (allow_sha1 && strcmp(digest, "sha1") == 0) return DIGEST_SHA1;
     if (strcmp(digest, "sha256") == 0) return DIGEST_SHA256;
     if (strcmp(digest, "sha384") == 0) return DIGEST_SHA384;
     if (strcmp(digest, "sha512") == 0) return DIGEST_SHA512;
     if (allow_sha224 && strcmp(digest, "sha224") == 0) return DIGEST_SHA224;
     return 0;
+}
+
+static int crypto_digest_bits_for_name(const char* digest, bool allow_sha1, bool allow_sha224) {
+    return crypto_digest_bits_for_name_ext(digest, false, allow_sha1, allow_sha224);
 }
 
 static bool crypto_digest_compute_bits(int bits, const uint8_t* data,
@@ -488,7 +494,7 @@ static void hmac_compute(const uint8_t* key, int key_len,
     if (out_len) *out_len = 0;
     if (!out || !out_len) return;
 
-    int bits = crypto_digest_bits_for_name(alg, false, false);
+    int bits = crypto_digest_bits_for_name_ext(alg, true, true, true);
     int hash_len = (int)digest_output_len_bits(bits);
     if (hash_len <= 0) return;
 
@@ -526,6 +532,103 @@ static Item bytes_to_base64_string(const uint8_t* bytes, int len) {
     return result;
 }
 
+static void crypto_append_utf8_codepoint(char* out, int out_cap, int* pos, uint32_t cp) {
+    if (!out || !pos || *pos >= out_cap - 1) return;
+    if (cp < 0x80) {
+        out[(*pos)++] = (char)cp;
+    } else if (cp < 0x800 && *pos + 1 < out_cap - 1) {
+        out[(*pos)++] = (char)(0xC0 | (cp >> 6));
+        out[(*pos)++] = (char)(0x80 | (cp & 0x3F));
+    } else if (*pos + 2 < out_cap - 1) {
+        out[(*pos)++] = (char)(0xE0 | (cp >> 12));
+        out[(*pos)++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[(*pos)++] = (char)(0x80 | (cp & 0x3F));
+    }
+    out[*pos] = '\0';
+}
+
+static Item bytes_to_latin1_string(const uint8_t* bytes, int len) {
+    if (len <= 0) return make_string_item_crypto("");
+    char* out = (char*)mem_alloc((size_t)len * 2 + 1, MEM_CAT_JS_RUNTIME);
+    int pos = 0;
+    for (int i = 0; i < len; i++) {
+        crypto_append_utf8_codepoint(out, len * 2 + 1, &pos, bytes ? bytes[i] : 0);
+    }
+    Item result = make_string_item_crypto(out);
+    mem_free(out);
+    return result;
+}
+
+static Item bytes_to_ucs2_string(const uint8_t* bytes, int len) {
+    if (len <= 1) return make_string_item_crypto("");
+    char* out = (char*)mem_alloc((size_t)len * 2 + 1, MEM_CAT_JS_RUNTIME);
+    int pos = 0;
+    for (int i = 0; i + 1 < len; i += 2) {
+        uint32_t cp = (uint32_t)(bytes ? bytes[i] : 0) | ((uint32_t)(bytes ? bytes[i + 1] : 0) << 8);
+        crypto_append_utf8_codepoint(out, len * 2 + 1, &pos, cp);
+    }
+    Item result = make_string_item_crypto(out);
+    mem_free(out);
+    return result;
+}
+
+static bool crypto_normalize_string(Item item, char* out, int out_size, bool strip_dash) {
+    if (!out || out_size <= 0 || get_type_id(item) != LMD_TYPE_STRING) return false;
+    String* s = it2s(item);
+    int pos = 0;
+    for (int i = 0; s && i < (int)s->len && pos < out_size - 1; i++) {
+        char c = s->chars[i];
+        if (strip_dash && c == '-') continue;
+        out[pos++] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+    }
+    out[pos] = '\0';
+    return true;
+}
+
+static bool crypto_normalize_encoding(Item encoding_item, char* out, int out_size, bool* has_encoding) {
+    if (!out || out_size <= 0) return false;
+    out[0] = '\0';
+    if (has_encoding) *has_encoding = false;
+
+    TypeId type = get_type_id(encoding_item);
+    if (type == LMD_TYPE_MAP) {
+        encoding_item = js_to_string(encoding_item);
+        if (js_check_exception()) return false;
+        type = get_type_id(encoding_item);
+    }
+
+    if (crypto_item_is_undefined(encoding_item) || type == LMD_TYPE_NULL) return true;
+    if (type != LMD_TYPE_STRING) return true;
+
+    if (has_encoding) *has_encoding = true;
+    return crypto_normalize_string(encoding_item, out, out_size, false);
+}
+
+static Item crypto_digest_output_for_encoding(const uint8_t* bytes, int len, const char* enc, bool has_encoding) {
+    if (!has_encoding || !enc || enc[0] == '\0' || strcmp(enc, "buffer") == 0) {
+        return crypto_buffer_from_bytes(bytes, len);
+    }
+    if (strcmp(enc, "hex") == 0) return bytes_to_hex_string(bytes, len);
+    if (strcmp(enc, "base64") == 0) return bytes_to_base64_string(bytes, len);
+    if (strcmp(enc, "latin1") == 0 || strcmp(enc, "binary") == 0) return bytes_to_latin1_string(bytes, len);
+    if (strcmp(enc, "ucs2") == 0 || strcmp(enc, "ucs-2") == 0 ||
+        strcmp(enc, "utf16le") == 0 || strcmp(enc, "utf-16le") == 0) {
+        return bytes_to_ucs2_string(bytes, len);
+    }
+    if (strcmp(enc, "utf8") == 0 || strcmp(enc, "utf-8") == 0) {
+        String* str = heap_create_name((const char*)(bytes ? bytes : crypto_empty_bytes), (size_t)(len > 0 ? len : 0));
+        return (Item){.item = s2it(str)};
+    }
+    return crypto_buffer_from_bytes(bytes, len);
+}
+
+static Item crypto_empty_digest_output(Item encoding_item) {
+    char enc[32];
+    bool has_encoding = false;
+    if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) return ItemNull;
+    return crypto_digest_output_for_encoding(crypto_empty_bytes, 0, enc, has_encoding);
+}
+
 // ============================================================================
 // createHmac(algorithm, key) → object with update(data)/digest(encoding)
 // ============================================================================
@@ -539,6 +642,34 @@ struct HmacCtx {
     int data_cap;
 };
 
+static void hmac_ctx_free(HmacCtx* ctx) {
+    if (!ctx) return;
+    if (ctx->key) mem_free(ctx->key);
+    if (ctx->data) mem_free(ctx->data);
+    mem_free(ctx);
+}
+
+static void hmac_ctx_append(HmacCtx* ctx, const uint8_t* buf, int len) {
+    if (!ctx || len <= 0) return;
+    int need = ctx->data_len + len;
+    if (need > ctx->data_cap) {
+        int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
+        while (cap < need) cap *= 2;
+        ctx->data = (uint8_t*)mem_realloc(ctx->data, (size_t)cap, MEM_CAT_JS_RUNTIME);
+        ctx->data_cap = cap;
+    }
+    memcpy(ctx->data + ctx->data_len, buf, (size_t)len);
+    ctx->data_len += len;
+}
+
+static void crypto_link_instance_to_constructor(Item obj, const char* constructor_name) {
+    if (get_type_id(obj) != LMD_TYPE_MAP || get_type_id(crypto_namespace) != LMD_TYPE_MAP) return;
+    Item ctor = js_property_get(crypto_namespace, make_string_item_crypto(constructor_name));
+    if (get_type_id(ctor) != LMD_TYPE_FUNC) return;
+    Item proto = js_property_get(ctor, make_string_item_crypto("prototype"));
+    if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(obj, proto);
+}
+
 extern "C" Item js_hmac_update(Item data_item) {
     Item self = js_get_current_this();
     Item ctx_item = js_property_get(self, make_string_item_crypto("__hmac_ctx__"));
@@ -548,27 +679,16 @@ extern "C" Item js_hmac_update(Item data_item) {
 
     if (get_type_id(data_item) == LMD_TYPE_STRING) {
         String* s = it2s(data_item);
-        int need = ctx->data_len + (int)s->len;
-        if (need > ctx->data_cap) {
-            int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
-            while (cap < need) cap *= 2;
-            ctx->data = (uint8_t*)mem_realloc(ctx->data, (size_t)cap, MEM_CAT_JS_RUNTIME);
-            ctx->data_cap = cap;
-        }
-        memcpy(ctx->data + ctx->data_len, s->chars, s->len);
-        ctx->data_len += (int)s->len;
+        hmac_ctx_append(ctx, (const uint8_t*)s->chars, (int)s->len);
     } else if (js_is_typed_array(data_item)) {
         const uint8_t* buf; int len;
-        if (get_uint8_buffer(data_item, &buf, &len)) {
-            int need = ctx->data_len + len;
-            if (need > ctx->data_cap) {
-                int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
-                while (cap < need) cap *= 2;
-                ctx->data = (uint8_t*)mem_realloc(ctx->data, (size_t)cap, MEM_CAT_JS_RUNTIME);
-                ctx->data_cap = cap;
-            }
-            memcpy(ctx->data + ctx->data_len, buf, (size_t)len);
-            ctx->data_len += len;
+        if (get_uint8_buffer(data_item, &buf, &len)) hmac_ctx_append(ctx, buf, len);
+    } else if (js_is_dataview(data_item) || js_is_arraybuffer(data_item)) {
+        uint8_t* bytes = NULL;
+        int len = 0;
+        if (extract_bytes(data_item, &bytes, &len)) {
+            hmac_ctx_append(ctx, bytes, len);
+            mem_free(bytes);
         }
     }
     return self;
@@ -577,70 +697,84 @@ extern "C" Item js_hmac_update(Item data_item) {
 extern "C" Item js_hmac_digest(Item encoding_item) {
     Item self = js_get_current_this();
     Item ctx_item = js_property_get(self, make_string_item_crypto("__hmac_ctx__"));
-    if (ctx_item.item == 0) return ItemNull;
+    if (ctx_item.item == 0 || ctx_item.item == ITEM_NULL) return crypto_empty_digest_output(encoding_item);
     HmacCtx* ctx = (HmacCtx*)(uintptr_t)it2i(ctx_item);
-    if (!ctx) return ItemNull;
+    if (!ctx) return crypto_empty_digest_output(encoding_item);
+
+    char enc[32];
+    bool has_encoding = false;
+    if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) {
+        hmac_ctx_free(ctx);
+        js_property_set(self, make_string_item_crypto("__hmac_ctx__"), ItemNull);
+        return ItemNull;
+    }
 
     uint8_t hash[64];
     int hash_len = 0;
     hmac_compute(ctx->key, ctx->key_len, ctx->data, ctx->data_len, ctx->alg, hash, &hash_len);
 
-    if (ctx->key) mem_free(ctx->key);
-    if (ctx->data) mem_free(ctx->data);
-    mem_free(ctx);
+    hmac_ctx_free(ctx);
     js_property_set(self, make_string_item_crypto("__hmac_ctx__"), ItemNull);
 
-    if (hash_len == 0) return ItemNull;
+    if (hash_len == 0) return crypto_empty_digest_output(encoding_item);
+    return crypto_digest_output_for_encoding(hash, hash_len, enc, has_encoding);
+}
 
-    const char* enc = NULL;
-    char enc_buf[32];
-    if (get_type_id(encoding_item) == LMD_TYPE_STRING) {
-        String* s = it2s(encoding_item);
-        int len = (int)s->len < 31 ? (int)s->len : 31;
-        memcpy(enc_buf, s->chars, (size_t)len);
-        enc_buf[len] = '\0';
-        enc = enc_buf;
+extern "C" Item js_hmac_end(Item data_item) {
+    Item self = js_get_current_this();
+    if (!crypto_item_is_undefined(data_item) && data_item.item != ITEM_NULL) {
+        js_hmac_update(data_item);
+        if (js_check_exception()) return ItemNull;
     }
+    Item digest = js_hmac_digest(make_string_item_crypto("buffer"));
+    if (js_check_exception()) return ItemNull;
+    js_property_set(self, make_string_item_crypto("__hmac_read__"), digest);
+    return self;
+}
 
-    if (enc && strcmp(enc, "hex") == 0) return bytes_to_hex_string(hash, hash_len);
-    if (enc && strcmp(enc, "base64") == 0) return bytes_to_base64_string(hash, hash_len);
-
-    Item result = js_typed_array_new(JS_TYPED_UINT8, hash_len);
-    JsTypedArray* ta = (JsTypedArray*)result.map->data;
-    if (ta && ta->data) memcpy(ta->data, hash, (size_t)hash_len);
-    return result;
+extern "C" Item js_hmac_read(void) {
+    Item self = js_get_current_this();
+    Item digest = js_property_get(self, make_string_item_crypto("__hmac_read__"));
+    if (digest.item == 0 || digest.item == ITEM_NULL) return ItemNull;
+    js_property_set(self, make_string_item_crypto("__hmac_read__"), ItemNull);
+    return digest;
 }
 
 extern "C" Item js_crypto_createHmac(Item alg_item, Item key_item) {
-    if (get_type_id(alg_item) != LMD_TYPE_STRING) return js_throw_invalid_arg_type("algorithm", "string", alg_item);
-    String* alg = it2s(alg_item);
+    if (get_type_id(alg_item) != LMD_TYPE_STRING) return js_throw_invalid_arg_type("hmac", "string", alg_item);
 
-    HmacCtx* ctx = (HmacCtx*)mem_calloc(1, sizeof(HmacCtx), MEM_CAT_JS_RUNTIME);
-    int alen = (int)alg->len < 15 ? (int)alg->len : 15;
-    memcpy(ctx->alg, alg->chars, (size_t)alen);
-    ctx->alg[alen] = '\0';
-
-    if (get_type_id(key_item) == LMD_TYPE_STRING) {
-        String* ks = it2s(key_item);
-        ctx->key = (uint8_t*)mem_alloc(ks->len, MEM_CAT_JS_RUNTIME);
-        memcpy(ctx->key, ks->chars, ks->len);
-        ctx->key_len = (int)ks->len;
-    } else if (js_is_typed_array(key_item)) {
-        const uint8_t* buf; int len;
-        if (get_uint8_buffer(key_item, &buf, &len)) {
-            ctx->key = (uint8_t*)mem_alloc((size_t)len, MEM_CAT_JS_RUNTIME);
-            memcpy(ctx->key, buf, (size_t)len);
-            ctx->key_len = len;
-        }
+    char alg_buf[16];
+    crypto_normalize_string(alg_item, alg_buf, sizeof(alg_buf), true);
+    if (crypto_digest_bits_for_name_ext(alg_buf, true, true, true) == 0) {
+        char msg[128];
+        String* alg = it2s(alg_item);
+        snprintf(msg, sizeof(msg), "Invalid digest: %.*s", (int)alg->len, alg->chars);
+        return js_throw_type_error(msg);
     }
 
+    uint8_t* key = NULL;
+    int key_len = 0;
+    if (!extract_bytes(key_item, &key, &key_len)) {
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", key_item);
+    }
+
+    HmacCtx* ctx = (HmacCtx*)mem_calloc(1, sizeof(HmacCtx), MEM_CAT_JS_RUNTIME);
+    memcpy(ctx->alg, alg_buf, strlen(alg_buf) + 1);
+    ctx->key = key;
+    ctx->key_len = key_len;
+
     Item obj = js_new_object();
+    crypto_link_instance_to_constructor(obj, "Hmac");
     js_property_set(obj, make_string_item_crypto("__hmac_ctx__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
     js_property_set(obj, make_string_item_crypto("update"),
                     js_new_function((void*)js_hmac_update, 1));
     js_property_set(obj, make_string_item_crypto("digest"),
                     js_new_function((void*)js_hmac_digest, 1));
+    js_property_set(obj, make_string_item_crypto("end"),
+                    js_new_function((void*)js_hmac_end, 1));
+    js_property_set(obj, make_string_item_crypto("read"),
+                    js_new_function((void*)js_hmac_read, 0));
     return obj;
 }
 
@@ -2307,8 +2441,6 @@ extern "C" Item js_subtle_decrypt(Item alg_item, Item key_item, Item data_item) 
 // ============================================================================
 // crypto Module Namespace
 // ============================================================================
-
-static Item crypto_namespace = {0};
 
 static void crypto_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item_crypto(name);

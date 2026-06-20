@@ -10,6 +10,7 @@ extern "C" {
 #endif
 
 typedef enum {
+    DIGEST_MD5 = 128,
     DIGEST_SHA1 = 160,
     DIGEST_SHA224 = 224,
     DIGEST_SHA256 = 256,

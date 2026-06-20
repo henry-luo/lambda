@@ -62,6 +62,45 @@ static Item create_buffer(int size) {
     return buffer;
 }
 
+static uint32_t buffer_next_utf8_codepoint(const char* str, int len, int* index) {
+    if (!str || !index || *index >= len) return 0;
+    int i = *index;
+    unsigned char c = (unsigned char)str[i];
+    if (c < 0x80) {
+        *index = i + 1;
+        return c;
+    }
+    if ((c & 0xE0) == 0xC0 && i + 1 < len) {
+        *index = i + 2;
+        return ((uint32_t)(c & 0x1F) << 6) | (uint32_t)(str[i + 1] & 0x3F);
+    }
+    if ((c & 0xF0) == 0xE0 && i + 2 < len) {
+        *index = i + 3;
+        return ((uint32_t)(c & 0x0F) << 12) |
+               ((uint32_t)(str[i + 1] & 0x3F) << 6) |
+               (uint32_t)(str[i + 2] & 0x3F);
+    }
+    if ((c & 0xF8) == 0xF0 && i + 3 < len) {
+        *index = i + 4;
+        return ((uint32_t)(c & 0x07) << 18) |
+               ((uint32_t)(str[i + 1] & 0x3F) << 12) |
+               ((uint32_t)(str[i + 2] & 0x3F) << 6) |
+               (uint32_t)(str[i + 3] & 0x3F);
+    }
+    *index = i + 1;
+    return c;
+}
+
+static int buffer_utf8_codepoint_count(const char* str, int len) {
+    int count = 0;
+    int index = 0;
+    while (index < len) {
+        buffer_next_utf8_codepoint(str, len, &index);
+        count++;
+    }
+    return count;
+}
+
 // Helper: format "Received type <type> (<value>)" suffix for ERR_INVALID_ARG_TYPE errors
 static int format_received_suffix(char* buf, int buf_size, Item value) {
     TypeId tid = get_type_id(value);
@@ -274,26 +313,31 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
         }
 
         if (strcmp(enc_buf, "ascii") == 0) {
-            // ASCII: mask to 7 bits
-            int byte_len = (int)s->len;
+            // ascii: one output byte per code point, masked to 7 bits
+            int byte_len = buffer_utf8_codepoint_count(s->chars, (int)s->len);
             Item buf = create_buffer(byte_len);
             int buf_byte_len = 0;
             uint8_t* bdata = buffer_data(buf, &buf_byte_len);
             if (bdata) {
-                for (int i = 0; i < byte_len; i++)
-                    bdata[i] = (uint8_t)(s->chars[i] & 0x7F);
+                int index = 0;
+                for (int i = 0; i < byte_len; i++) {
+                    bdata[i] = (uint8_t)(buffer_next_utf8_codepoint(s->chars, (int)s->len, &index) & 0x7F);
+                }
             }
             return buf;
         }
 
         if (strcmp(enc_buf, "latin1") == 0 || strcmp(enc_buf, "binary") == 0) {
-            // Latin1/binary: each char → one byte (identity mapping)
-            int byte_len = (int)s->len;
+            // latin1/binary: one output byte per code point, keeping the low byte
+            int byte_len = buffer_utf8_codepoint_count(s->chars, (int)s->len);
             Item buf = create_buffer(byte_len);
             int buf_byte_len = 0;
             uint8_t* bdata = buffer_data(buf, &buf_byte_len);
-            if (bdata && byte_len > 0) {
-                memcpy(bdata, s->chars, byte_len);
+            if (bdata) {
+                int index = 0;
+                for (int i = 0; i < byte_len; i++) {
+                    bdata[i] = (uint8_t)(buffer_next_utf8_codepoint(s->chars, (int)s->len, &index) & 0xFF);
+                }
             }
             return buf;
         }

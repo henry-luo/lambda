@@ -16,6 +16,7 @@ static const uint8_t DIGEST_EMPTY_BYTES[1] = {0};
 
 static mbedtls_md_type_t digest_md_type_for_bits(int bits) {
     switch (bits) {
+        case DIGEST_MD5: return MBEDTLS_MD_MD5;
         case DIGEST_SHA1: return MBEDTLS_MD_SHA1;
         case DIGEST_SHA224: return MBEDTLS_MD_SHA224;
         case DIGEST_SHA256: return MBEDTLS_MD_SHA256;
