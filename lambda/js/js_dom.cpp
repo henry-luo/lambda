@@ -4919,6 +4919,9 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         if (strcmp(iface, "CustomEvent") == 0) {
             return js_create_custom_event_init("", false, false, false, ItemNull);
         }
+        if (strcmp(iface, "TextEvent") == 0) {
+            return js_create_text_event_init("", false, false, false, ItemNull, "");
+        }
         return js_create_event_init("", false, false, false);
     }
 
