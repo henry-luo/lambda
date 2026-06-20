@@ -201,6 +201,14 @@ static Item make_string_item_crypto(const char* str) {
     return (Item){.item = s2it(s)};
 }
 
+static inline Item make_js_undefined_crypto() {
+    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+}
+
+static bool crypto_item_is_undefined(Item item) {
+    return item.item == ITEM_JS_UNDEFINED || get_type_id(item) == LMD_TYPE_UNDEFINED;
+}
+
 extern "C" Item js_crypto_randomBytes(Item size_item) {
     int size = (int)it2i(size_item);
     if (size <= 0 || size > 65536) {
@@ -214,6 +222,141 @@ extern "C" Item js_crypto_randomBytes(Item size_item) {
         return ItemNull;
     }
     return result;
+}
+
+static bool crypto_to_int_index(Item item, int default_value, int* out_value, const char* name) {
+    if (!out_value) return false;
+    if (crypto_item_is_undefined(item)) {
+        *out_value = default_value;
+        return true;
+    }
+
+    Item num = js_to_number(item);
+    if (js_check_exception()) return false;
+
+    double value = 0.0;
+    TypeId num_type = get_type_id(num);
+    if (num_type == LMD_TYPE_INT) {
+        value = (double)it2i(num);
+    } else if (num_type == LMD_TYPE_FLOAT) {
+        value = it2d(num);
+    } else if (num_type == LMD_TYPE_INT64) {
+        value = (double)it2l(num);
+    } else {
+        js_throw_invalid_arg_type(name, "number", item);
+        return false;
+    }
+
+    if (value != value || value < -2147483648.0 || value > 2147483647.0) {
+        js_throw_out_of_range(name, "a finite integer", item);
+        return false;
+    }
+
+    *out_value = (int)value;
+    return true;
+}
+
+static bool crypto_get_fill_target(Item target_item, uint8_t** out_data, int* out_len) {
+    if (!out_data || !out_len) return false;
+    *out_data = NULL;
+    *out_len = 0;
+
+    if (js_is_typed_array(target_item)) {
+        int byte_len = js_typed_array_byte_length(target_item);
+        void* data = js_typed_array_current_data_ptr(target_item);
+        if (!data && byte_len > 0) {
+            js_throw_type_error("Cannot perform randomFillSync on an out-of-bounds TypedArray");
+            return false;
+        }
+        *out_data = (uint8_t*)data;
+        *out_len = byte_len;
+        return true;
+    }
+
+    if (js_is_dataview(target_item)) {
+        JsDataView* dv = js_get_dataview_ptr(target_item);
+        if (!dv || !dv->buffer || dv->buffer->detached) {
+            js_throw_type_error("Cannot perform randomFillSync on a detached DataView");
+            return false;
+        }
+        int byte_len = dv->length_tracking ? (dv->buffer->byte_length - dv->byte_offset) : dv->byte_length;
+        if (byte_len < 0) byte_len = 0;
+        *out_data = dv->buffer->data ? ((uint8_t*)dv->buffer->data + dv->byte_offset) : NULL;
+        *out_len = byte_len;
+        return true;
+    }
+
+    if (js_is_arraybuffer(target_item)) {
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(target_item);
+        if (!ab || ab->detached) {
+            js_throw_type_error("Cannot perform randomFillSync on a detached ArrayBuffer");
+            return false;
+        }
+        *out_data = (uint8_t*)ab->data;
+        *out_len = ab->byte_length;
+        return true;
+    }
+
+    js_throw_invalid_arg_type("buf", "ArrayBuffer, Buffer, TypedArray, or DataView", target_item);
+    return false;
+}
+
+// randomFillSync(buf[, offset[, size]]) → buf
+extern "C" Item js_crypto_randomFillSync(Item target_item, Item offset_item, Item size_item) {
+    uint8_t* data = NULL;
+    int byte_len = 0;
+    if (!crypto_get_fill_target(target_item, &data, &byte_len)) return ItemNull;
+
+    int offset = 0;
+    if (!crypto_to_int_index(offset_item, 0, &offset, "offset")) return ItemNull;
+    if (offset < 0 || offset > byte_len) {
+        return js_throw_out_of_range("offset", ">= 0 && <= buf.byteLength", offset_item);
+    }
+
+    int size = byte_len - offset;
+    if (!crypto_to_int_index(size_item, size, &size, "size")) return ItemNull;
+    if (size < 0 || size > byte_len - offset) {
+        return js_throw_out_of_range("size", ">= 0 && <= buf.byteLength - offset", size_item);
+    }
+
+    if (size > 0 && data) {
+        if (!crypto_random_bytes(data + offset, (size_t)size)) {
+            log_error("crypto: randomFillSync: entropy source failed");
+            return ItemNull;
+        }
+    }
+    return target_item;
+}
+
+// randomFill(buf[, offset[, size]], callback) → undefined
+extern "C" Item js_crypto_randomFill(Item target_item, Item offset_item, Item size_item, Item callback_item) {
+    Item callback = callback_item;
+    Item offset = offset_item;
+    Item size = size_item;
+
+    if (get_type_id(offset_item) == LMD_TYPE_FUNC) {
+        callback = offset_item;
+        offset = make_js_undefined_crypto();
+        size = make_js_undefined_crypto();
+    } else if (get_type_id(size_item) == LMD_TYPE_FUNC) {
+        callback = size_item;
+        size = make_js_undefined_crypto();
+    }
+
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "Function", callback);
+    }
+
+    Item filled = js_crypto_randomFillSync(target_item, offset, size);
+    if (filled.item == ITEM_NULL) return ItemNull;
+
+    Item args[2] = { ItemNull, filled };
+    js_call_function(callback, ItemNull, args, 2);
+    return make_js_undefined_crypto();
+}
+
+extern "C" Item js_crypto_getFips(void) {
+    return (Item){.item = i2it(0)};
 }
 
 // ============================================================================
@@ -1461,8 +1604,11 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(crypto_namespace, "createCipheriv",     (void*)js_crypto_createCipheriv, 3);
     crypto_set_method(crypto_namespace, "createDecipheriv",   (void*)js_crypto_createDecipheriv, 3);
     crypto_set_method(crypto_namespace, "randomBytes",        (void*)js_crypto_randomBytes, 1);
+    crypto_set_method(crypto_namespace, "randomFillSync",     (void*)js_crypto_randomFillSync, 3);
+    crypto_set_method(crypto_namespace, "randomFill",         (void*)js_crypto_randomFill, 4);
     crypto_set_method(crypto_namespace, "randomUUID",         (void*)js_crypto_randomUUID, 1);
     crypto_set_method(crypto_namespace, "randomInt",          (void*)js_crypto_randomInt, 2);
+    crypto_set_method(crypto_namespace, "getFips",            (void*)js_crypto_getFips, 0);
     crypto_set_method(crypto_namespace, "getHashes",          (void*)js_crypto_getHashes, 0);
     crypto_set_method(crypto_namespace, "getCiphers",         (void*)js_crypto_getCiphers, 0);
     crypto_set_method(crypto_namespace, "timingSafeEqual",    (void*)js_crypto_timingSafeEqual, 2);

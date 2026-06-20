@@ -1,0 +1,4 @@
+crypto modp2: 128 255 255
+crypto pem: true true
+crypto openssl: function false boolean
+crypto cli: true

@@ -1428,6 +1428,11 @@ static JsArrayBuffer* js_get_arraybuffer_ptr(Map* m) {
     return NULL;
 }
 
+extern "C" JsArrayBuffer* js_get_arraybuffer_ptr_item(Item val) {
+    if (!js_is_arraybuffer(val)) return NULL;
+    return js_get_arraybuffer_ptr(val.map);
+}
+
 // Wrap an existing JsArrayBuffer* in a Map Item (for .buffer property access)
 extern "C" Item js_arraybuffer_wrap(JsArrayBuffer* ab) {
     if (!ab) return (Item){.item = ITEM_NULL};

@@ -143,7 +143,7 @@ extern "C" Item js_buffer_alloc(Item size_item, Item fill_item) {
 
 // ─── new Buffer(arg, encoding?) — deprecated constructor ────────────────────
 // forward declaration
-extern "C" Item js_buffer_from(Item data, Item encoding);
+extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item);
 // new Buffer(size) → Buffer.alloc(size), new Buffer(string, enc) → Buffer.from(string, enc)
 // new Buffer(array) → Buffer.from(array), new Buffer(buffer) → Buffer.from(buffer)
 extern "C" Item js_buffer_construct(Item arg, Item encoding) {
@@ -154,12 +154,48 @@ extern "C" Item js_buffer_construct(Item arg, Item encoding) {
         return js_buffer_alloc(arg, fill);
     }
     // everything else delegates to Buffer.from
-    return js_buffer_from(arg, encoding);
+    return js_buffer_from(arg, encoding, make_js_undefined());
 }
 
-// ─── Buffer.from(data, encoding?) ───────────────────────────────────────────
-// data can be: string (utf-8), array of bytes, another Buffer/TypedArray
-extern "C" Item js_buffer_from(Item data, Item encoding) {
+static bool buffer_from_to_index(Item item, int default_value, int* out_index, const char* name) {
+    if (!out_index) return false;
+    if (get_type_id(item) == LMD_TYPE_UNDEFINED || item.item == ITEM_JS_UNDEFINED) {
+        *out_index = default_value;
+        return true;
+    }
+
+    Item num = js_to_number(item);
+    if (js_check_exception()) return false;
+
+    double value = 0.0;
+    TypeId num_type = get_type_id(num);
+    if (num_type == LMD_TYPE_INT) {
+        value = (double)it2i(num);
+    } else if (num_type == LMD_TYPE_FLOAT) {
+        value = it2d(num);
+    } else if (num_type == LMD_TYPE_INT64) {
+        value = (double)it2l(num);
+    } else {
+        char msg[160];
+        snprintf(msg, sizeof(msg), "The \"%s\" argument must be of type number.", name ? name : "offset");
+        js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+        return false;
+    }
+
+    if (value != value || value < 0.0 || value > 2147483647.0) {
+        char msg[160];
+        snprintf(msg, sizeof(msg), "The value of \"%s\" is out of range.", name ? name : "offset");
+        js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
+        return false;
+    }
+
+    *out_index = (int)value;
+    return true;
+}
+
+// ─── Buffer.from(data, encodingOrOffset?, length?) ─────────────────────────
+// data can be: string (utf-8), array of bytes, ArrayBuffer, another Buffer/TypedArray
+extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
     TypeId tid = get_type_id(data);
 
     if (tid == LMD_TYPE_STRING) {
@@ -335,6 +371,35 @@ extern "C" Item js_buffer_from(Item data, Item encoding) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
     }
 
+    // ArrayBuffer / SharedArrayBuffer → Buffer view over the same backing store
+    if (js_is_arraybuffer(data)) {
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(data);
+        if (!ab || ab->detached) {
+            return js_throw_type_error("Cannot create Buffer from a detached ArrayBuffer");
+        }
+
+        int byte_offset = 0;
+        if (!buffer_from_to_index(encoding, 0, &byte_offset, "byteOffset")) return ItemNull;
+        if (byte_offset > ab->byte_length) {
+            return js_throw_range_error_code("ERR_OUT_OF_RANGE",
+                "The value of \"byteOffset\" is out of range.");
+        }
+
+        int byte_length = ab->byte_length - byte_offset;
+        if (!buffer_from_to_index(length_item, byte_length, &byte_length, "length")) return ItemNull;
+        if (byte_length > ab->byte_length - byte_offset) {
+            return js_throw_range_error_code("ERR_OUT_OF_RANGE",
+                "The value of \"length\" is out of range.");
+        }
+
+        Item buf = js_typed_array_new_from_buffer(JS_TYPED_UINT8, data, byte_offset, byte_length);
+        if (js_is_typed_array(buf)) {
+            JsTypedArray* ta = js_get_typed_array_ptr(buf.map);
+            if (ta) ta->is_buffer = true;
+        }
+        return buf;
+    }
+
     // array of numbers
     if (tid == LMD_TYPE_ARRAY && js_array_length(data) >= 0) {
         int64_t arr_len = js_array_length(data);
@@ -376,7 +441,7 @@ extern "C" Item js_buffer_from(Item data, Item encoding) {
         Item data_val = js_property_get(data, data_key);
         if (get_type_id(type_val) == LMD_TYPE_STRING && get_type_id(data_val) == LMD_TYPE_ARRAY) {
             // recursively create from the data array
-            return js_buffer_from(data_val, encoding);
+            return js_buffer_from(data_val, encoding, make_js_undefined());
         }
         // array-like object with length property
         Item len_key = make_string_item("length", 6);
@@ -427,7 +492,7 @@ extern "C" Item js_buffer_of(Item a0, Item a1, Item a2) {
         js_array_push(arr, a1);
     if (get_type_id(a2) != LMD_TYPE_UNDEFINED)
         js_array_push(arr, a2);
-    return js_buffer_from(arr, make_js_undefined());
+    return js_buffer_from(arr, make_js_undefined(), make_js_undefined());
 }
 
 // ─── Buffer.concat(list, totalLength?) ──────────────────────────────────────
@@ -2431,7 +2496,7 @@ extern "C" Item js_get_buffer_namespace(void) {
     // static methods (Buffer.alloc, Buffer.from, etc.)
     buf_set_method(buffer_namespace, "alloc",      (void*)js_buffer_alloc, 2);
     buf_set_method(buffer_namespace, "allocUnsafe", (void*)js_buffer_allocUnsafe, 1);
-    buf_set_method(buffer_namespace, "from",       (void*)js_buffer_from, 2);
+    buf_set_method(buffer_namespace, "from",       (void*)js_buffer_from, 3);
     buf_set_method(buffer_namespace, "of",         (void*)js_buffer_of, 3);
     buf_set_method(buffer_namespace, "concat",     (void*)js_buffer_concat, 2);
     buf_set_method(buffer_namespace, "isBuffer",   (void*)js_buffer_isBuffer, 1);

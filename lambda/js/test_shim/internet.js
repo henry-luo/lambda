@@ -6,6 +6,9 @@ let common;
 try {
   common = require('./index');
 } catch (err) {
+  common = null;
+}
+if (common === null || common === undefined) {
   common = require('./common_index');
 }
 

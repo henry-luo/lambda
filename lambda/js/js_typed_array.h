@@ -107,6 +107,7 @@ Item js_arraybuffer_construct(Item length_arg);
 Item js_arraybuffer_construct_resizable(Item length_arg, Item options_arg);
 Item js_arraybuffer_wrap(JsArrayBuffer* ab);
 bool js_is_arraybuffer(Item val);
+JsArrayBuffer* js_get_arraybuffer_ptr_item(Item val);
 int  js_arraybuffer_byte_length(Item val);
 int  js_arraybuffer_max_byte_length(Item val);
 bool js_arraybuffer_is_resizable(Item val);

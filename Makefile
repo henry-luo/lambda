@@ -1017,12 +1017,16 @@ node-shim:
 		if [ ! -f ref/node/test/common/dns.js.orig ]; then \
 			cp ref/node/test/common/dns.js ref/node/test/common/dns.js.orig; \
 		fi; \
+		if [ ! -f ref/node/test/common/crypto.js.orig ]; then \
+			cp ref/node/test/common/crypto.js ref/node/test/common/crypto.js.orig; \
+		fi; \
 		cp lambda/js/test_shim/common_index.js ref/node/test/common/index.js; \
 		cp lambda/js/test_shim/tmpdir.js ref/node/test/common/tmpdir.js; \
 		cp lambda/js/test_shim/fixtures.js ref/node/test/common/fixtures.js; \
 		cp lambda/js/test_shim/internet.js ref/node/test/common/internet.js; \
 		cp lambda/js/test_shim/wpt.js ref/node/test/common/wpt.js; \
 		cp lambda/js/test_shim/dns.js ref/node/test/common/dns.js; \
+		cp lambda/js/test_shim/crypto.js ref/node/test/common/crypto.js; \
 		cp lambda/js/test_shim/package.json ref/node/test/common/package.json; \
 		echo "Shims installed."; \
 	else \
@@ -1045,6 +1049,9 @@ node-shim-restore:
 		fi; \
 		if [ -f ref/node/test/common/dns.js.orig ]; then \
 			mv ref/node/test/common/dns.js.orig ref/node/test/common/dns.js; \
+		fi; \
+		if [ -f ref/node/test/common/crypto.js.orig ]; then \
+			mv ref/node/test/common/crypto.js.orig ref/node/test/common/crypto.js; \
 		fi; \
 		echo "Originals restored."; \
 	else \
