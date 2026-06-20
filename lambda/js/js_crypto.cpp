@@ -82,10 +82,11 @@ static void sha512_compute(const uint8_t* data, int offset, int length, bool mod
 
 static bool get_uint8_buffer(Item ta_item, const uint8_t** out_data, int* out_length) {
     if (!js_is_typed_array(ta_item)) return false;
-    JsTypedArray* ta = (JsTypedArray*)ta_item.map->data;
-    if (!ta || !ta->data) return false;
-    *out_data = (const uint8_t*)ta->data;
-    *out_length = ta->length;
+    int byte_len = js_typed_array_byte_length(ta_item);
+    void* data = js_typed_array_current_data_ptr(ta_item);
+    if (!data && byte_len > 0) return false;
+    *out_data = data ? (const uint8_t*)data : crypto_empty_bytes;
+    *out_length = byte_len;
     return true;
 }
 
@@ -683,7 +684,7 @@ extern "C" Item js_crypto_createHash(Item alg_item) {
 // ============================================================================
 
 extern "C" Item js_crypto_getHashes(void) {
-    Item arr = js_array_new(3);
+    Item arr = js_array_new(0);
     js_array_push(arr, make_string_item_crypto("sha256"));
     js_array_push(arr, make_string_item_crypto("sha384"));
     js_array_push(arr, make_string_item_crypto("sha512"));
@@ -791,22 +792,227 @@ static void cipher_ctx_free(CipherCtx* ctx) {
 
 // extract key/iv from string or Uint8Array
 static bool extract_bytes(Item item, uint8_t** out, int* out_len) {
+    if (!out || !out_len) return false;
+    *out = NULL;
+    *out_len = 0;
+
     if (get_type_id(item) == LMD_TYPE_STRING) {
         String* s = it2s(item);
-        *out = (uint8_t*)mem_alloc(s->len, MEM_CAT_JS_RUNTIME);
-        memcpy(*out, s->chars, s->len);
+        size_t alloc_len = s->len > 0 ? s->len : 1;
+        *out = (uint8_t*)mem_alloc(alloc_len, MEM_CAT_JS_RUNTIME);
+        if (s->len > 0) memcpy(*out, s->chars, s->len);
         *out_len = (int)s->len;
         return true;
     } else if (js_is_typed_array(item)) {
         const uint8_t* buf; int len;
         if (get_uint8_buffer(item, &buf, &len)) {
-            *out = (uint8_t*)mem_alloc((size_t)len, MEM_CAT_JS_RUNTIME);
-            memcpy(*out, buf, (size_t)len);
+            size_t alloc_len = len > 0 ? (size_t)len : 1;
+            *out = (uint8_t*)mem_alloc(alloc_len, MEM_CAT_JS_RUNTIME);
+            if (len > 0) memcpy(*out, buf, (size_t)len);
+            *out_len = len;
+            return true;
+        }
+    } else if (js_is_dataview(item)) {
+        JsDataView* dv = js_get_dataview_ptr(item);
+        if (!dv || !dv->buffer || dv->buffer->detached) return false;
+        int len = dv->length_tracking ? (dv->buffer->byte_length - dv->byte_offset) : dv->byte_length;
+        if (len < 0) len = 0;
+        size_t alloc_len = len > 0 ? (size_t)len : 1;
+        *out = (uint8_t*)mem_alloc(alloc_len, MEM_CAT_JS_RUNTIME);
+        if (len > 0 && dv->buffer->data) {
+            memcpy(*out, (uint8_t*)dv->buffer->data + dv->byte_offset, (size_t)len);
+        }
+        *out_len = len;
+        return true;
+    } else if (js_is_arraybuffer(item)) {
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(item);
+        if (!ab || ab->detached) return false;
+        int len = ab->byte_length;
+        size_t alloc_len = len > 0 ? (size_t)len : 1;
+        *out = (uint8_t*)mem_alloc(alloc_len, MEM_CAT_JS_RUNTIME);
+        if (len > 0 && ab->data) memcpy(*out, ab->data, (size_t)len);
+        *out_len = len;
+        return true;
+    } else if (get_type_id(item) == LMD_TYPE_MAP) {
+        Item key_bytes = js_property_get(item, make_string_item_crypto("__crypto_secret_key__"));
+        const uint8_t* buf; int len;
+        if (get_uint8_buffer(key_bytes, &buf, &len)) {
+            size_t alloc_len = len > 0 ? (size_t)len : 1;
+            *out = (uint8_t*)mem_alloc(alloc_len, MEM_CAT_JS_RUNTIME);
+            if (len > 0) memcpy(*out, buf, (size_t)len);
             *out_len = len;
             return true;
         }
     }
     return false;
+}
+
+static Item crypto_arraybuffer_from_bytes(const uint8_t* bytes, int len) {
+    if (len < 0) len = 0;
+    Item result = js_arraybuffer_new(len);
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(result);
+    if (ab && ab->data && bytes && len > 0) {
+        memcpy(ab->data, bytes, (size_t)len);
+    }
+    return result;
+}
+
+extern "C" Item js_crypto_secretKeyExport(Item options_item) {
+    (void)options_item;
+    Item self = js_get_current_this();
+    Item key_bytes = js_property_get(self, make_string_item_crypto("__crypto_secret_key__"));
+    const uint8_t* buf = NULL;
+    int len = 0;
+    if (!get_uint8_buffer(key_bytes, &buf, &len)) return ItemNull;
+
+    Item result = js_typed_array_new(JS_TYPED_UINT8, len);
+    JsTypedArray* ta = js_get_typed_array_ptr(result.map);
+    if (ta && ta->data && buf && len > 0) memcpy(ta->data, buf, (size_t)len);
+    return result;
+}
+
+static Item crypto_secret_key_object_from_bytes(const uint8_t* key, int key_len) {
+    if (key_len < 0) key_len = 0;
+    Item bytes = js_typed_array_new(JS_TYPED_UINT8, key_len);
+    JsTypedArray* ta = js_get_typed_array_ptr(bytes.map);
+    if (ta && ta->data && key && key_len > 0) memcpy(ta->data, key, (size_t)key_len);
+
+    Item obj = js_new_object();
+    js_property_set(obj, make_string_item_crypto("__crypto_secret_key__"), bytes);
+    js_property_set(obj, make_string_item_crypto("type"), make_string_item_crypto("secret"));
+    js_property_set(obj, make_string_item_crypto("symmetricKeySize"), (Item){.item = i2it(key_len)});
+    js_property_set(obj, make_string_item_crypto("export"),
+                    js_new_function((void*)js_crypto_secretKeyExport, 1));
+    return obj;
+}
+
+extern "C" Item js_crypto_createSecretKey(Item key_item, Item encoding_item) {
+    (void)encoding_item;
+    uint8_t* key = NULL;
+    int key_len = 0;
+    if (!extract_bytes(key_item, &key, &key_len)) {
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, or DataView", key_item);
+    }
+
+    Item obj = crypto_secret_key_object_from_bytes(key, key_len);
+    mem_free(key);
+    return obj;
+}
+
+// ============================================================================
+// generateKeySync/generateKey — symmetric secret key generation
+// ============================================================================
+
+static bool crypto_string_equals(Item item, const char* expected) {
+    if (get_type_id(item) != LMD_TYPE_STRING || !expected) return false;
+    String* s = it2s(item);
+    size_t len = strlen(expected);
+    return s && s->len == len && memcmp(s->chars, expected, len) == 0;
+}
+
+static Item crypto_throw_invalid_property_type(const char* prop, const char* expected) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "The \"%s\" property must be of type %s.", prop, expected);
+    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+}
+
+static Item crypto_throw_invalid_property_value(const char* prop, const char* expected) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "The property '%s' must be one of: %s", prop, expected);
+    return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
+}
+
+static bool crypto_keygen_length(Item options_item, int* out_bits) {
+    if (!out_bits) return false;
+    *out_bits = 0;
+    if (get_type_id(options_item) != LMD_TYPE_MAP) {
+        js_throw_invalid_arg_type("options", "Object", options_item);
+        return false;
+    }
+
+    Item length_item = js_property_get(options_item, make_string_item_crypto("length"));
+    TypeId length_type = get_type_id(length_item);
+    if (length_type != LMD_TYPE_INT && length_type != LMD_TYPE_FLOAT && length_type != LMD_TYPE_INT64) {
+        crypto_throw_invalid_property_type("options.length", "number");
+        return false;
+    }
+
+    double value = 0.0;
+    if (length_type == LMD_TYPE_INT) value = (double)it2i(length_item);
+    else if (length_type == LMD_TYPE_FLOAT) value = it2d(length_item);
+    else value = (double)it2l(length_item);
+
+    if (value != value || value < 0.0 || value > 2147483647.0) {
+        js_throw_out_of_range("options.length", ">= 0 && <= 2147483647", length_item);
+        return false;
+    }
+    *out_bits = (int)value;
+    return true;
+}
+
+extern "C" Item js_crypto_generateKeySync(Item type_item, Item options_item) {
+    if (get_type_id(type_item) != LMD_TYPE_STRING) {
+        return js_throw_invalid_arg_type("type", "string", type_item);
+    }
+
+    bool is_aes = crypto_string_equals(type_item, "aes");
+    bool is_hmac = crypto_string_equals(type_item, "hmac");
+    if (!is_aes && !is_hmac) {
+        return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
+            "The argument 'type' must be a supported key type");
+    }
+
+    int bits = 0;
+    if (!crypto_keygen_length(options_item, &bits)) return ItemNull;
+
+    int bytes = 0;
+    if (is_aes) {
+        if (bits != 128 && bits != 192 && bits != 256) {
+            return crypto_throw_invalid_property_value("options.length", "128, 192, 256");
+        }
+        bytes = bits / 8;
+    } else {
+        if (bits < 8 || bits > 2147483647) {
+            return js_throw_out_of_range("options.length", ">= 8 && <= 2147483647", (Item){.item = i2it(bits)});
+        }
+        bytes = bits / 8;
+    }
+
+    uint8_t* key = (uint8_t*)mem_alloc((size_t)(bytes > 0 ? bytes : 1), MEM_CAT_JS_RUNTIME);
+    if (bytes > 0 && !crypto_random_bytes(key, (size_t)bytes)) {
+        mem_free(key);
+        log_error("crypto: generateKeySync: entropy source failed");
+        return ItemNull;
+    }
+    Item result = crypto_secret_key_object_from_bytes(key, bytes);
+    mem_free(key);
+    return result;
+}
+
+static Item js_crypto_generateKey_emit(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined_crypto();
+    Item callback = env[0];
+    Item result = env[1];
+    Item args[2] = { ItemNull, result };
+    js_call_function(callback, make_js_undefined_crypto(), args, 2);
+    return make_js_undefined_crypto();
+}
+
+extern "C" Item js_crypto_generateKey(Item type_item, Item options_item, Item callback_item) {
+    Item result = js_crypto_generateKeySync(type_item, options_item);
+    if (js_check_exception() || result.item == ITEM_NULL) return ItemNull;
+
+    if (get_type_id(callback_item) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "Function", callback_item);
+    }
+
+    Item* env = js_alloc_env(2);
+    env[0] = callback_item;
+    env[1] = result;
+    Item fn = js_new_closure((void*)js_crypto_generateKey_emit, 0, env, 2);
+    js_next_tick_enqueue(fn);
+    return make_js_undefined_crypto();
 }
 
 extern "C" Item js_cipher_update(Item data_item) {
@@ -1154,6 +1360,190 @@ extern "C" Item js_crypto_pbkdf2(Item pass_item, Item salt_item, Item iter_item,
 }
 
 // ============================================================================
+// hkdfSync/hkdf — RFC 5869 HMAC-based key derivation
+// ============================================================================
+
+static bool crypto_digest_name_from_item(Item digest_item, char* out, int out_cap) {
+    if (!out || out_cap <= 0) return false;
+    out[0] = '\0';
+    if (get_type_id(digest_item) != LMD_TYPE_STRING) {
+        js_throw_invalid_arg_type("digest", "string", digest_item);
+        return false;
+    }
+    String* digest = it2s(digest_item);
+    int pos = 0;
+    for (int i = 0; digest && i < (int)digest->len && pos < out_cap - 1; i++) {
+        char c = digest->chars[i];
+        if (c == '-') continue;
+        out[pos++] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+    }
+    out[pos] = '\0';
+    return true;
+}
+
+static bool crypto_hkdf_length_from_item(Item length_item, int* out_len) {
+    if (!out_len) return false;
+    TypeId type = get_type_id(length_item);
+    if (type != LMD_TYPE_INT && type != LMD_TYPE_FLOAT && type != LMD_TYPE_INT64) {
+        return js_throw_invalid_arg_type("length", "number", length_item), false;
+    }
+
+    double value = 0.0;
+    if (type == LMD_TYPE_INT) value = (double)it2i(length_item);
+    else if (type == LMD_TYPE_FLOAT) value = it2d(length_item);
+    else value = (double)it2l(length_item);
+
+    if (value != value || value < 0.0 || value > 2147483647.0) {
+        js_throw_out_of_range("length", ">= 0 && <= 2147483647", length_item);
+        return false;
+    }
+    *out_len = (int)value;
+    return true;
+}
+
+static bool crypto_hkdf_compute(int bits, const uint8_t* ikm, int ikm_len,
+                                const uint8_t* salt, int salt_len,
+                                const uint8_t* info, int info_len,
+                                uint8_t* out, int out_len) {
+    int hash_len = (int)digest_output_len_bits(bits);
+    if (hash_len <= 0 || hash_len > 64 || out_len < 0) return false;
+    if (out_len == 0) return true;
+
+    uint8_t zero_salt[64];
+    memset(zero_salt, 0, sizeof(zero_salt));
+    const uint8_t* salt_bytes = salt_len > 0 && salt ? salt : zero_salt;
+    size_t salt_size = salt_len > 0 ? (size_t)salt_len : (size_t)hash_len;
+    const uint8_t* ikm_bytes = ikm_len > 0 && ikm ? ikm : crypto_empty_bytes;
+
+    uint8_t prk[64];
+    if (!digest_hmac_compute_bits(bits, salt_bytes, salt_size,
+                                  ikm_bytes, (size_t)ikm_len,
+                                  prk, (size_t)hash_len)) {
+        return false;
+    }
+
+    uint8_t previous[64];
+    uint8_t block_input[64 + 1024 + 1];
+    int previous_len = 0;
+    int generated = 0;
+    int counter = 1;
+    const uint8_t* info_bytes = info_len > 0 && info ? info : crypto_empty_bytes;
+
+    while (generated < out_len && counter <= 255) {
+        int input_len = 0;
+        if (previous_len > 0) {
+            memcpy(block_input, previous, (size_t)previous_len);
+            input_len += previous_len;
+        }
+        if (info_len > 0) {
+            memcpy(block_input + input_len, info_bytes, (size_t)info_len);
+            input_len += info_len;
+        }
+        block_input[input_len++] = (uint8_t)counter;
+
+        if (!digest_hmac_compute_bits(bits, prk, (size_t)hash_len,
+                                      block_input, (size_t)input_len,
+                                      previous, (size_t)hash_len)) {
+            return false;
+        }
+        previous_len = hash_len;
+
+        int copy_len = out_len - generated;
+        if (copy_len > hash_len) copy_len = hash_len;
+        memcpy(out + generated, previous, (size_t)copy_len);
+        generated += copy_len;
+        counter++;
+    }
+    return generated == out_len;
+}
+
+static Item crypto_hkdf_invalid_arg(const char* name, Item value) {
+    return js_throw_invalid_arg_type(name, "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", value);
+}
+
+extern "C" Item js_crypto_hkdfSync(Item digest_item, Item ikm_item, Item salt_item,
+                                    Item info_item, Item length_item) {
+    char digest_name[32];
+    if (!crypto_digest_name_from_item(digest_item, digest_name, (int)sizeof(digest_name))) return ItemNull;
+
+    uint8_t* ikm = NULL; int ikm_len = 0;
+    uint8_t* salt = NULL; int salt_len = 0;
+    uint8_t* info = NULL; int info_len = 0;
+    if (!extract_bytes(ikm_item, &ikm, &ikm_len)) return crypto_hkdf_invalid_arg("ikm", ikm_item);
+    if (!extract_bytes(salt_item, &salt, &salt_len)) {
+        mem_free(ikm);
+        return crypto_hkdf_invalid_arg("salt", salt_item);
+    }
+    if (!extract_bytes(info_item, &info, &info_len)) {
+        mem_free(ikm); mem_free(salt);
+        return crypto_hkdf_invalid_arg("info", info_item);
+    }
+
+    int out_len = 0;
+    if (!crypto_hkdf_length_from_item(length_item, &out_len)) {
+        mem_free(ikm); mem_free(salt); mem_free(info);
+        return ItemNull;
+    }
+    if (info_len > 1024) {
+        mem_free(ikm); mem_free(salt); mem_free(info);
+        return js_throw_out_of_range("info", "<= 1024 bytes", info_item);
+    }
+
+    int bits = crypto_digest_bits_for_name(digest_name, true, true);
+    if (bits == 0) {
+        mem_free(ikm); mem_free(salt); mem_free(info);
+        return js_throw_type_error_code("ERR_CRYPTO_INVALID_DIGEST", "Invalid digest");
+    }
+
+    int hash_len = (int)digest_output_len_bits(bits);
+    if (out_len > hash_len * 255) {
+        mem_free(ikm); mem_free(salt); mem_free(info);
+        return js_throw_range_error_code("ERR_CRYPTO_INVALID_KEYLEN",
+            "Invalid key length");
+    }
+
+    uint8_t* output = (uint8_t*)mem_alloc((size_t)(out_len > 0 ? out_len : 1), MEM_CAT_JS_RUNTIME);
+    bool ok = crypto_hkdf_compute(bits, ikm, ikm_len, salt, salt_len, info, info_len, output, out_len);
+    mem_free(ikm); mem_free(salt); mem_free(info);
+    if (!ok) {
+        mem_free(output);
+        log_error("crypto: hkdfSync: derivation failed");
+        return ItemNull;
+    }
+
+    Item result = crypto_arraybuffer_from_bytes(output, out_len);
+    mem_free(output);
+    return result;
+}
+
+static Item js_crypto_hkdf_emit(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined_crypto();
+    Item callback = env[0];
+    Item result = env[1];
+    Item args[2] = { ItemNull, result };
+    js_call_function(callback, make_js_undefined_crypto(), args, 2);
+    return make_js_undefined_crypto();
+}
+
+extern "C" Item js_crypto_hkdf(Item digest_item, Item ikm_item, Item salt_item,
+                                Item info_item, Item length_item, Item callback_item) {
+    Item result = js_crypto_hkdfSync(digest_item, ikm_item, salt_item, info_item, length_item);
+    if (js_check_exception() || result.item == ITEM_NULL) return ItemNull;
+
+    if (get_type_id(callback_item) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "Function", callback_item);
+    }
+
+    Item* env = js_alloc_env(2);
+    env[0] = callback_item;
+    env[1] = result;
+    Item fn = js_new_closure((void*)js_crypto_hkdf_emit, 0, env, 2);
+    js_next_tick_enqueue(fn);
+    return make_js_undefined_crypto();
+}
+
+// ============================================================================
 // scryptSync(password, salt, keylen, options?) → Buffer
 // Pure implementation: scrypt = PBKDF2-HMAC-SHA256 + Salsa20/8 + ROMix
 // ============================================================================
@@ -1345,7 +1735,7 @@ extern "C" Item js_crypto_scryptSync(Item pass_item, Item salt_item, Item keylen
 // ============================================================================
 
 extern "C" Item js_crypto_getCiphers(void) {
-    Item arr = js_array_new(9);
+    Item arr = js_array_new(0);
     js_array_push(arr, make_string_item_crypto("aes-128-cbc"));
     js_array_push(arr, make_string_item_crypto("aes-192-cbc"));
     js_array_push(arr, make_string_item_crypto("aes-256-cbc"));
@@ -1614,7 +2004,12 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(crypto_namespace, "timingSafeEqual",    (void*)js_crypto_timingSafeEqual, 2);
     crypto_set_method(crypto_namespace, "pbkdf2Sync",         (void*)js_crypto_pbkdf2Sync, 5);
     crypto_set_method(crypto_namespace, "pbkdf2",             (void*)js_crypto_pbkdf2, 6);
+    crypto_set_method(crypto_namespace, "hkdfSync",           (void*)js_crypto_hkdfSync, 5);
+    crypto_set_method(crypto_namespace, "hkdf",               (void*)js_crypto_hkdf, 6);
     crypto_set_method(crypto_namespace, "scryptSync",         (void*)js_crypto_scryptSync, 4);
+    crypto_set_method(crypto_namespace, "createSecretKey",    (void*)js_crypto_createSecretKey, 2);
+    crypto_set_method(crypto_namespace, "generateKeySync",    (void*)js_crypto_generateKeySync, 2);
+    crypto_set_method(crypto_namespace, "generateKey",        (void*)js_crypto_generateKey, 3);
 
     // subtle Web Crypto API (subset)
     Item subtle = js_new_object();

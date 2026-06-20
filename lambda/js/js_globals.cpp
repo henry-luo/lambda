@@ -3318,9 +3318,12 @@ extern "C" Item js_get_process_object_value(void) {
             js_property_set(features_obj,
                 (Item){.item = s2it(heap_create_name("ipv6", 4))},
                 (Item){.item = ITEM_TRUE});
+            // Lambda's mbedTLS-backed crypto does not expose OpenSSL legacy
+            // provider digests; use the BoringSSL-compatible feature gate for
+            // Node tests that distinguish those algorithms.
             js_property_set(features_obj,
                 (Item){.item = s2it(heap_create_name("openssl_is_boringssl", 20))},
-                (Item){.item = ITEM_FALSE});
+                (Item){.item = ITEM_TRUE});
             js_property_set(features_obj,
                 (Item){.item = s2it(heap_create_name("quic", 4))},
                 (Item){.item = ITEM_FALSE});

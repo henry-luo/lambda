@@ -1,0 +1,10 @@
+aes type: secret
+aes size: 16
+aes export len: 16
+hmac size: 15
+hmac export len: 15
+aes invalid: ERR_INVALID_ARG_VALUE
+async err: true
+async order: true
+async size: 32
+async export len: 32
