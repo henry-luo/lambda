@@ -967,6 +967,117 @@ static Item crypto_empty_digest_output(Item encoding_item) {
     return crypto_digest_output_for_encoding(crypto_empty_bytes, 0, enc, has_encoding);
 }
 
+static uint32_t crypto_next_utf8_codepoint(const char* str, int len, int* index) {
+    if (!str || !index || *index >= len) return 0;
+    unsigned char ch = (unsigned char)str[*index];
+    if (ch < 0x80) {
+        (*index)++;
+        return ch;
+    }
+    if ((ch & 0xE0) == 0xC0 && *index + 1 < len) {
+        uint32_t cp = (uint32_t)(ch & 0x1F);
+        cp = (cp << 6) | (uint32_t)(str[*index + 1] & 0x3F);
+        *index += 2;
+        return cp;
+    }
+    if ((ch & 0xF0) == 0xE0 && *index + 2 < len) {
+        uint32_t cp = (uint32_t)(ch & 0x0F);
+        cp = (cp << 6) | (uint32_t)(str[*index + 1] & 0x3F);
+        cp = (cp << 6) | (uint32_t)(str[*index + 2] & 0x3F);
+        *index += 3;
+        return cp;
+    }
+    if ((ch & 0xF8) == 0xF0 && *index + 3 < len) {
+        uint32_t cp = (uint32_t)(ch & 0x07);
+        cp = (cp << 6) | (uint32_t)(str[*index + 1] & 0x3F);
+        cp = (cp << 6) | (uint32_t)(str[*index + 2] & 0x3F);
+        cp = (cp << 6) | (uint32_t)(str[*index + 3] & 0x3F);
+        *index += 4;
+        return cp;
+    }
+    (*index)++;
+    return ch;
+}
+
+static int crypto_utf8_codepoint_count(const char* str, int len) {
+    int count = 0;
+    int index = 0;
+    while (index < len) {
+        crypto_next_utf8_codepoint(str, len, &index);
+        count++;
+    }
+    return count;
+}
+
+static bool crypto_string_bytes_for_encoding(String* s, const char* enc, bool has_encoding,
+                                             uint8_t** out, int* out_len) {
+    if (!out || !out_len) return false;
+    *out = NULL;
+    *out_len = 0;
+    if (!s) return false;
+
+    if (!has_encoding || !enc || enc[0] == '\0' ||
+        strcmp(enc, "utf8") == 0 || strcmp(enc, "utf-8") == 0) {
+        size_t alloc_len = s->len > 0 ? s->len : 1;
+        *out = (uint8_t*)mem_alloc(alloc_len, MEM_CAT_JS_RUNTIME);
+        if (s->len > 0) memcpy(*out, s->chars, s->len);
+        *out_len = (int)s->len;
+        return true;
+    }
+
+    if (strcmp(enc, "base64") == 0 || strcmp(enc, "base64url") == 0) {
+        size_t decoded_len = 0;
+        uint8_t* decoded = base64_decode_variant(s->chars, s->len, &decoded_len,
+            strcmp(enc, "base64url") == 0 ? BASE64_URL : BASE64_STD);
+        if (!decoded && decoded_len == 0 && s->len > 0) return false;
+        *out = decoded ? decoded : (uint8_t*)mem_alloc(1, MEM_CAT_JS_RUNTIME);
+        *out_len = (int)decoded_len;
+        return true;
+    }
+
+    if (strcmp(enc, "hex") == 0) {
+        size_t bytes_len = s->len / 2;
+        *out = (uint8_t*)mem_alloc(bytes_len > 0 ? bytes_len : 1, MEM_CAT_JS_RUNTIME);
+        size_t written = 0;
+        if (!hex_decode(s->chars, s->len, *out, &written)) {
+            mem_free(*out);
+            *out = NULL;
+            return false;
+        }
+        *out_len = (int)written;
+        return true;
+    }
+
+    if (strcmp(enc, "latin1") == 0 || strcmp(enc, "binary") == 0 ||
+        strcmp(enc, "ascii") == 0) {
+        int count = crypto_utf8_codepoint_count(s->chars, (int)s->len);
+        *out = (uint8_t*)mem_alloc(count > 0 ? (size_t)count : 1, MEM_CAT_JS_RUNTIME);
+        int index = 0;
+        for (int i = 0; i < count; i++) {
+            uint32_t cp = crypto_next_utf8_codepoint(s->chars, (int)s->len, &index);
+            (*out)[i] = (uint8_t)(strcmp(enc, "ascii") == 0 ? (cp & 0x7F) : (cp & 0xFF));
+        }
+        *out_len = count;
+        return true;
+    }
+
+    if (strcmp(enc, "ucs2") == 0 || strcmp(enc, "ucs-2") == 0 ||
+        strcmp(enc, "utf16le") == 0 || strcmp(enc, "utf-16le") == 0) {
+        int count = crypto_utf8_codepoint_count(s->chars, (int)s->len);
+        *out = (uint8_t*)mem_alloc(count > 0 ? (size_t)(count * 2) : 1, MEM_CAT_JS_RUNTIME);
+        int index = 0;
+        for (int i = 0; i < count; i++) {
+            uint32_t cp = crypto_next_utf8_codepoint(s->chars, (int)s->len, &index);
+            (*out)[i * 2] = (uint8_t)(cp & 0xFF);
+            (*out)[i * 2 + 1] = (uint8_t)((cp >> 8) & 0xFF);
+        }
+        *out_len = count * 2;
+        return true;
+    }
+
+    return false;
+}
+
 // ============================================================================
 // createHmac(algorithm, key) → object with update(data)/digest(encoding)
 // ============================================================================
@@ -1125,39 +1236,63 @@ struct HashCtx {
     uint8_t* data;
     int data_len;
     int data_cap;
+    bool finalized;
 };
 
-extern "C" Item js_hash_update(Item data_item) {
+static void hash_ctx_free(HashCtx* ctx) {
+    if (!ctx) return;
+    if (ctx->data) mem_free(ctx->data);
+    mem_free(ctx);
+}
+
+static void hash_ctx_append(HashCtx* ctx, const uint8_t* buf, int len) {
+    if (!ctx || len <= 0) return;
+    int need = ctx->data_len + len;
+    if (need > ctx->data_cap) {
+        int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
+        while (cap < need) cap *= 2;
+        ctx->data = (uint8_t*)mem_realloc(ctx->data, (size_t)cap, MEM_CAT_JS_RUNTIME);
+        ctx->data_cap = cap;
+    }
+    memcpy(ctx->data + ctx->data_len, buf, (size_t)len);
+    ctx->data_len += len;
+}
+
+static Item crypto_throw_hash_finalized(void) {
+    return js_throw_error_with_code("ERR_CRYPTO_HASH_FINALIZED", "Digest already called");
+}
+
+extern "C" Item js_hash_update(Item data_item, Item encoding_item) {
     Item self = js_get_current_this();
     Item ctx_item = js_property_get(self, make_string_item_crypto("__hash_ctx__"));
-    if (ctx_item.item == 0) return self;
+    if (ctx_item.item == 0 || ctx_item.item == ITEM_NULL) return crypto_throw_hash_finalized();
     HashCtx* ctx = (HashCtx*)(uintptr_t)it2i(ctx_item);
-    if (!ctx) return self;
+    if (!ctx || ctx->finalized) return crypto_throw_hash_finalized();
 
     if (get_type_id(data_item) == LMD_TYPE_STRING) {
         String* s = it2s(data_item);
-        int need = ctx->data_len + (int)s->len;
-        if (need > ctx->data_cap) {
-            int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
-            while (cap < need) cap *= 2;
-            ctx->data = (uint8_t*)mem_realloc(ctx->data, (size_t)cap, MEM_CAT_JS_RUNTIME);
-            ctx->data_cap = cap;
+        char enc[32];
+        bool has_encoding = false;
+        if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) return ItemNull;
+        uint8_t* bytes = NULL;
+        int len = 0;
+        if (!crypto_string_bytes_for_encoding(s, enc, has_encoding, &bytes, &len)) {
+            return js_throw_invalid_arg_value("encoding", "is invalid", encoding_item);
         }
-        memcpy(ctx->data + ctx->data_len, s->chars, s->len);
-        ctx->data_len += (int)s->len;
+        hash_ctx_append(ctx, bytes, len);
+        mem_free(bytes);
     } else if (js_is_typed_array(data_item)) {
         const uint8_t* buf; int len;
-        if (get_uint8_buffer(data_item, &buf, &len)) {
-            int need = ctx->data_len + len;
-            if (need > ctx->data_cap) {
-                int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
-                while (cap < need) cap *= 2;
-                ctx->data = (uint8_t*)mem_realloc(ctx->data, (size_t)cap, MEM_CAT_JS_RUNTIME);
-                ctx->data_cap = cap;
-            }
-            memcpy(ctx->data + ctx->data_len, buf, (size_t)len);
-            ctx->data_len += len;
+        if (get_uint8_buffer(data_item, &buf, &len)) hash_ctx_append(ctx, buf, len);
+    } else if (js_is_dataview(data_item) || js_is_arraybuffer(data_item)) {
+        uint8_t* bytes = NULL;
+        int len = 0;
+        if (extract_bytes(data_item, &bytes, &len)) {
+            hash_ctx_append(ctx, bytes, len);
+            mem_free(bytes);
         }
+    } else {
+        return js_throw_invalid_arg_type("data", "string, ArrayBuffer, Buffer, TypedArray, or DataView", data_item);
     }
     return self;
 }
@@ -1165,14 +1300,18 @@ extern "C" Item js_hash_update(Item data_item) {
 extern "C" Item js_hash_digest(Item encoding_item) {
     Item self = js_get_current_this();
     Item ctx_item = js_property_get(self, make_string_item_crypto("__hash_ctx__"));
-    if (ctx_item.item == 0) return ItemNull;
+    if (ctx_item.item == 0 || ctx_item.item == ITEM_NULL) return crypto_throw_hash_finalized();
     HashCtx* ctx = (HashCtx*)(uintptr_t)it2i(ctx_item);
-    if (!ctx) return ItemNull;
+    if (!ctx || ctx->finalized) return crypto_throw_hash_finalized();
+
+    char enc[32];
+    bool has_encoding = false;
+    if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) return ItemNull;
 
     uint8_t hash[64];
     int hash_len = 0;
 
-    int digest_bits = crypto_digest_bits_for_name(ctx->alg, false, false);
+    int digest_bits = crypto_digest_bits_for_name_ext(ctx->alg, true, true, true);
     hash_len = (int)digest_output_len_bits(digest_bits);
     if (hash_len > 0) {
         if (!crypto_digest_compute_bits(digest_bits, ctx->data, 0, ctx->data_len, hash)) {
@@ -1180,48 +1319,236 @@ extern "C" Item js_hash_digest(Item encoding_item) {
         }
     }
 
-    if (ctx->data) mem_free(ctx->data);
-    mem_free(ctx);
+    hash_ctx_free(ctx);
     js_property_set(self, make_string_item_crypto("__hash_ctx__"), ItemNull);
 
-    if (hash_len == 0) return ItemNull;
+    if (hash_len == 0) return crypto_empty_digest_output(encoding_item);
+    return crypto_digest_output_for_encoding(hash, hash_len, enc, has_encoding);
+}
 
-    const char* enc = NULL;
-    char enc_buf[32];
-    if (get_type_id(encoding_item) == LMD_TYPE_STRING) {
-        String* s = it2s(encoding_item);
-        int len = (int)s->len < 31 ? (int)s->len : 31;
-        memcpy(enc_buf, s->chars, (size_t)len);
-        enc_buf[len] = '\0';
-        enc = enc_buf;
+extern "C" Item js_hash_end(Item data_item) {
+    Item self = js_get_current_this();
+    if (!crypto_item_is_undefined(data_item) && data_item.item != ITEM_NULL) {
+        js_hash_update(data_item, make_js_undefined_crypto());
+        if (js_check_exception()) return ItemNull;
     }
+    Item digest = js_hash_digest(make_string_item_crypto("buffer"));
+    if (js_check_exception()) return ItemNull;
+    js_property_set(self, make_string_item_crypto("__hash_read__"), digest);
+    return self;
+}
 
-    if (enc && strcmp(enc, "hex") == 0) return bytes_to_hex_string(hash, hash_len);
-    if (enc && strcmp(enc, "base64") == 0) return bytes_to_base64_string(hash, hash_len);
-
-    Item result = js_typed_array_new(JS_TYPED_UINT8, hash_len);
-    JsTypedArray* ta = (JsTypedArray*)result.map->data;
-    if (ta && ta->data) memcpy(ta->data, hash, (size_t)hash_len);
-    return result;
+extern "C" Item js_hash_read(void) {
+    Item self = js_get_current_this();
+    Item digest = js_property_get(self, make_string_item_crypto("__hash_read__"));
+    if (digest.item == 0 || digest.item == ITEM_NULL) return ItemNull;
+    js_property_set(self, make_string_item_crypto("__hash_read__"), ItemNull);
+    return digest;
 }
 
 extern "C" Item js_crypto_createHash(Item alg_item) {
     if (get_type_id(alg_item) != LMD_TYPE_STRING) return js_throw_invalid_arg_type("algorithm", "string", alg_item);
-    String* alg = it2s(alg_item);
+    char alg_buf[16];
+    crypto_normalize_string(alg_item, alg_buf, sizeof(alg_buf), true);
+    if (crypto_digest_bits_for_name_ext(alg_buf, true, true, true) == 0) {
+        return js_throw_type_error("Digest method not supported");
+    }
 
     HashCtx* ctx = (HashCtx*)mem_calloc(1, sizeof(HashCtx), MEM_CAT_JS_RUNTIME);
-    int alen = (int)alg->len < 15 ? (int)alg->len : 15;
-    memcpy(ctx->alg, alg->chars, (size_t)alen);
-    ctx->alg[alen] = '\0';
+    memcpy(ctx->alg, alg_buf, strlen(alg_buf) + 1);
 
     Item obj = js_new_object();
+    crypto_link_instance_to_constructor(obj, "Hash");
     js_property_set(obj, make_string_item_crypto("__hash_ctx__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
     js_property_set(obj, make_string_item_crypto("update"),
-                    js_new_function((void*)js_hash_update, 1));
+                    js_new_function((void*)js_hash_update, 2));
+    js_property_set(obj, make_string_item_crypto("write"),
+                    js_new_function((void*)js_hash_update, 2));
     js_property_set(obj, make_string_item_crypto("digest"),
                     js_new_function((void*)js_hash_digest, 1));
+    js_property_set(obj, make_string_item_crypto("end"),
+                    js_new_function((void*)js_hash_end, 1));
+    js_property_set(obj, make_string_item_crypto("read"),
+                    js_new_function((void*)js_hash_read, 0));
     return obj;
+}
+
+// ============================================================================
+// createSign/createVerify — streaming update surface
+// ============================================================================
+
+struct SignVerifyCtx {
+    char alg[16];
+    bool verify_mode;
+    bool finalized;
+    uint8_t* data;
+    int data_len;
+    int data_cap;
+};
+
+static void sign_verify_ctx_free(SignVerifyCtx* ctx) {
+    if (!ctx) return;
+    if (ctx->data) mem_free(ctx->data);
+    mem_free(ctx);
+}
+
+static void sign_verify_ctx_append(SignVerifyCtx* ctx, const uint8_t* buf, int len) {
+    if (!ctx || len <= 0) return;
+    int need = ctx->data_len + len;
+    if (need > ctx->data_cap) {
+        int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
+        while (cap < need) cap *= 2;
+        ctx->data = (uint8_t*)mem_realloc(ctx->data, (size_t)cap, MEM_CAT_JS_RUNTIME);
+        ctx->data_cap = cap;
+    }
+    memcpy(ctx->data + ctx->data_len, buf, (size_t)len);
+    ctx->data_len += len;
+}
+
+static Item crypto_throw_sign_verify_finalized(void) {
+    return js_throw_error_with_code(JS_ERR_CRYPTO_INVALID_STATE, "Sign or Verify already finalized");
+}
+
+static SignVerifyCtx* sign_verify_ctx_from_this(Item self) {
+    Item ctx_item = js_property_get(self, make_string_item_crypto("__sign_verify_ctx__"));
+    if (ctx_item.item == 0 || ctx_item.item == ITEM_NULL) return NULL;
+    return (SignVerifyCtx*)(uintptr_t)it2i(ctx_item);
+}
+
+extern "C" Item js_sign_verify_update(Item data_item, Item encoding_item) {
+    Item self = js_get_current_this();
+    SignVerifyCtx* ctx = sign_verify_ctx_from_this(self);
+    if (!ctx || ctx->finalized) return crypto_throw_sign_verify_finalized();
+
+    if (get_type_id(data_item) == LMD_TYPE_STRING) {
+        String* s = it2s(data_item);
+        char enc[32];
+        bool has_encoding = false;
+        if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) return ItemNull;
+        uint8_t* bytes = NULL;
+        int len = 0;
+        if (!crypto_string_bytes_for_encoding(s, enc, has_encoding, &bytes, &len)) {
+            return js_throw_invalid_arg_value("encoding", "is invalid", encoding_item);
+        }
+        sign_verify_ctx_append(ctx, bytes, len);
+        mem_free(bytes);
+    } else if (js_is_typed_array(data_item)) {
+        const uint8_t* buf; int len;
+        if (get_uint8_buffer(data_item, &buf, &len)) sign_verify_ctx_append(ctx, buf, len);
+    } else if (js_is_dataview(data_item) || js_is_arraybuffer(data_item)) {
+        uint8_t* bytes = NULL;
+        int len = 0;
+        if (extract_bytes(data_item, &bytes, &len)) {
+            sign_verify_ctx_append(ctx, bytes, len);
+            mem_free(bytes);
+        }
+    } else {
+        return js_throw_invalid_arg_type("data", "string, ArrayBuffer, Buffer, TypedArray, or DataView", data_item);
+    }
+    return self;
+}
+
+extern "C" Item js_sign_verify_end(Item data_item) {
+    if (!crypto_item_is_undefined(data_item) && data_item.item != ITEM_NULL) {
+        js_sign_verify_update(data_item, make_js_undefined_crypto());
+        if (js_check_exception()) return ItemNull;
+    }
+    return js_get_current_this();
+}
+
+extern "C" Item js_sign_verify_sign(Item key_item, Item encoding_item) {
+    (void)encoding_item;
+    Item self = js_get_current_this();
+    SignVerifyCtx* ctx = sign_verify_ctx_from_this(self);
+    if (!ctx || ctx->finalized) return crypto_throw_sign_verify_finalized();
+    if (ctx->verify_mode) return js_throw_type_error("Not a Sign object");
+    if (crypto_item_is_undefined(key_item) || key_item.item == ITEM_NULL) {
+        return js_throw_error_with_code(JS_ERR_CRYPTO_SIGN_KEY_REQUIRED, "No key provided to sign");
+    }
+
+    ctx->finalized = true;
+    js_property_set(self, make_string_item_crypto("__sign_verify_ctx__"), ItemNull);
+    sign_verify_ctx_free(ctx);
+    return js_throw_error_with_code(JS_ERR_METHOD_NOT_IMPLEMENTED,
+        "Asymmetric signing is not supported by this crypto backend");
+}
+
+extern "C" Item js_sign_verify_verify(Item key_item, Item signature_item, Item encoding_item) {
+    Item self = js_get_current_this();
+    SignVerifyCtx* ctx = sign_verify_ctx_from_this(self);
+    if (!ctx || ctx->finalized) return crypto_throw_sign_verify_finalized();
+    if (!ctx->verify_mode) return js_throw_type_error("Not a Verify object");
+
+    if (crypto_item_is_undefined(key_item) || key_item.item == ITEM_NULL) {
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", key_item);
+    }
+    if (crypto_item_is_undefined(signature_item) || signature_item.item == ITEM_NULL) {
+        return js_throw_invalid_arg_type("signature", "string, ArrayBuffer, Buffer, TypedArray, or DataView", signature_item);
+    }
+
+    if (get_type_id(signature_item) == LMD_TYPE_STRING) {
+        String* s = it2s(signature_item);
+        char enc[32];
+        bool has_encoding = false;
+        if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) return ItemNull;
+        uint8_t* bytes = NULL;
+        int len = 0;
+        if (!crypto_string_bytes_for_encoding(s, enc, has_encoding, &bytes, &len)) {
+            return js_throw_invalid_arg_value("encoding", "is invalid", encoding_item);
+        }
+        mem_free(bytes);
+    } else {
+        uint8_t* bytes = NULL;
+        int len = 0;
+        if (!extract_bytes(signature_item, &bytes, &len)) {
+            return js_throw_invalid_arg_type("signature", "string, ArrayBuffer, Buffer, TypedArray, or DataView", signature_item);
+        }
+        mem_free(bytes);
+    }
+
+    ctx->finalized = true;
+    js_property_set(self, make_string_item_crypto("__sign_verify_ctx__"), ItemNull);
+    sign_verify_ctx_free(ctx);
+    return (Item){.item = b2it(false)};
+}
+
+static Item js_crypto_create_sign_verify(Item alg_item, bool verify_mode) {
+    if (get_type_id(alg_item) != LMD_TYPE_STRING) return js_throw_invalid_arg_type("algorithm", "string", alg_item);
+
+    char alg_buf[16];
+    crypto_normalize_string(alg_item, alg_buf, sizeof(alg_buf), true);
+    if (crypto_digest_bits_for_name_ext(alg_buf, true, true, true) == 0) {
+        return js_throw_type_error("Digest method not supported");
+    }
+
+    SignVerifyCtx* ctx = (SignVerifyCtx*)mem_calloc(1, sizeof(SignVerifyCtx), MEM_CAT_JS_RUNTIME);
+    memcpy(ctx->alg, alg_buf, strlen(alg_buf) + 1);
+    ctx->verify_mode = verify_mode;
+
+    Item obj = js_new_object();
+    crypto_link_instance_to_constructor(obj, verify_mode ? "Verify" : "Sign");
+    js_property_set(obj, make_string_item_crypto("__sign_verify_ctx__"),
+                    (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
+    js_property_set(obj, make_string_item_crypto("update"),
+                    js_new_function((void*)js_sign_verify_update, 2));
+    js_property_set(obj, make_string_item_crypto("write"),
+                    js_new_function((void*)js_sign_verify_update, 2));
+    js_property_set(obj, make_string_item_crypto("end"),
+                    js_new_function((void*)js_sign_verify_end, 1));
+    js_property_set(obj, make_string_item_crypto("sign"),
+                    js_new_function((void*)js_sign_verify_sign, 2));
+    js_property_set(obj, make_string_item_crypto("verify"),
+                    js_new_function((void*)js_sign_verify_verify, 3));
+    return obj;
+}
+
+extern "C" Item js_crypto_createSign(Item alg_item) {
+    return js_crypto_create_sign_verify(alg_item, false);
+}
+
+extern "C" Item js_crypto_createVerify(Item alg_item) {
+    return js_crypto_create_sign_verify(alg_item, true);
 }
 
 // crypto.hash(algorithm, data[, outputEncoding]) → digest
@@ -1240,7 +1567,7 @@ extern "C" Item js_crypto_hash(Item alg_item, Item data_item, Item encoding_item
     }
     alg_buf[pos] = '\0';
 
-    int digest_bits = crypto_digest_bits_for_name(alg_buf, true, true);
+    int digest_bits = crypto_digest_bits_for_name_ext(alg_buf, true, true, true);
     int hash_len = (int)digest_output_len_bits(digest_bits);
     if (hash_len <= 0 || hash_len > 64) {
         return js_throw_invalid_arg_value("algorithm", "is invalid", alg_item);
@@ -1352,6 +1679,7 @@ static bool is_gcm_cipher(const char* alg) {
 
 struct CipherCtx {
     char alg[32];
+    char output_encoding[32];
     mbedtls_cipher_context_t cipher;
     mbedtls_gcm_context gcm;
     bool use_gcm;
@@ -1368,6 +1696,7 @@ struct CipherCtx {
     uint8_t auth_tag[16];
     bool has_auth_tag;
     bool finalized;
+    bool has_output_encoding;
 };
 
 static void cipher_ctx_append_data(CipherCtx* ctx, const uint8_t* buf, int len) {
@@ -1391,6 +1720,66 @@ static void cipher_ctx_free(CipherCtx* ctx) {
     if (ctx->aad) mem_free(ctx->aad);
     if (ctx->data) mem_free(ctx->data);
     mem_free(ctx);
+}
+
+static bool crypto_is_known_output_encoding(const char* enc) {
+    if (!enc || enc[0] == '\0') return true;
+    return strcmp(enc, "buffer") == 0 ||
+           strcmp(enc, "hex") == 0 ||
+           strcmp(enc, "base64") == 0 ||
+           strcmp(enc, "base64url") == 0 ||
+           strcmp(enc, "latin1") == 0 ||
+           strcmp(enc, "binary") == 0 ||
+           strcmp(enc, "ucs2") == 0 ||
+           strcmp(enc, "ucs-2") == 0 ||
+           strcmp(enc, "utf16le") == 0 ||
+           strcmp(enc, "utf-16le") == 0 ||
+           strcmp(enc, "utf8") == 0 ||
+           strcmp(enc, "utf-8") == 0;
+}
+
+static Item crypto_throw_unknown_encoding(const char* enc) {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "Unknown encoding: %s", enc ? enc : "");
+    return js_throw_type_error_code(JS_ERR_UNKNOWN_ENCODING, msg);
+}
+
+static bool cipher_normalize_output_encoding(Item encoding_item, char* out, int out_size, bool* has_encoding) {
+    if (!crypto_normalize_encoding(encoding_item, out, out_size, has_encoding)) return false;
+    if (has_encoding && *has_encoding && !crypto_is_known_output_encoding(out)) {
+        crypto_throw_unknown_encoding(out);
+        return false;
+    }
+    return true;
+}
+
+static bool cipher_accept_output_encoding(CipherCtx* ctx, const char* enc, bool has_encoding) {
+    if (!ctx || !has_encoding || !enc || enc[0] == '\0') return true;
+    if (!ctx->has_output_encoding) {
+        int len = (int)strlen(enc);
+        if (len >= (int)sizeof(ctx->output_encoding)) len = (int)sizeof(ctx->output_encoding) - 1;
+        memcpy(ctx->output_encoding, enc, (size_t)len);
+        ctx->output_encoding[len] = '\0';
+        ctx->has_output_encoding = true;
+        return true;
+    }
+    if (strcmp(ctx->output_encoding, enc) != 0) {
+        js_throw_type_error("Cannot change encoding");
+        return false;
+    }
+    return true;
+}
+
+static Item cipher_output_from_bytes(const uint8_t* bytes, int len, const char* enc, bool has_encoding) {
+    if (has_encoding && enc && strcmp(enc, "base64url") == 0) {
+        size_t out_len = base64_encoded_len((size_t)len, BASE64_URL);
+        char* out = (char*)mem_alloc(out_len + 1, MEM_CAT_JS_RUNTIME);
+        base64_encode(bytes ? bytes : crypto_empty_bytes, (size_t)len, out, BASE64_URL);
+        Item result = make_string_item_crypto(out);
+        mem_free(out);
+        return result;
+    }
+    return crypto_digest_output_for_encoding(bytes, len, enc, has_encoding);
 }
 
 // extract key/iv from string or Uint8Array
@@ -1618,12 +2007,18 @@ extern "C" Item js_crypto_generateKey(Item type_item, Item options_item, Item ca
     return make_js_undefined_crypto();
 }
 
-extern "C" Item js_cipher_update(Item data_item) {
+extern "C" Item js_cipher_update(Item data_item, Item input_encoding_item, Item output_encoding_item) {
+    (void)input_encoding_item;
     Item self = js_get_current_this();
     Item ctx_item = js_property_get(self, make_string_item_crypto("__cipher_ctx__"));
     if (ctx_item.item == 0) return ItemNull;
     CipherCtx* ctx = (CipherCtx*)(uintptr_t)it2i(ctx_item);
     if (!ctx || ctx->finalized) return ItemNull;
+
+    char out_enc[32];
+    bool has_out_enc = false;
+    if (!cipher_normalize_output_encoding(output_encoding_item, out_enc, sizeof(out_enc), &has_out_enc)) return ItemNull;
+    if (!cipher_accept_output_encoding(ctx, out_enc, has_out_enc)) return ItemNull;
 
     if (get_type_id(data_item) == LMD_TYPE_STRING) {
         String* s = it2s(data_item);
@@ -1647,24 +2042,26 @@ extern "C" Item js_cipher_update(Item data_item) {
         }
         ctx->data_len = 0; // consumed
         if (olen > 0) {
-            Item result = js_typed_array_new(JS_TYPED_UINT8, (int)olen);
-            JsTypedArray* ta = (JsTypedArray*)result.map->data;
-            if (ta && ta->data) memcpy(ta->data, out_buf, olen);
+            Item result = cipher_output_from_bytes(out_buf, (int)olen, out_enc, has_out_enc);
             mem_free(out_buf);
             return result;
         }
         mem_free(out_buf);
-        return js_typed_array_new(JS_TYPED_UINT8, 0);
+        return cipher_output_from_bytes(crypto_empty_bytes, 0, out_enc, has_out_enc);
     }
-    return js_typed_array_new(JS_TYPED_UINT8, 0);
+    return cipher_output_from_bytes(crypto_empty_bytes, 0, out_enc, has_out_enc);
 }
 
-extern "C" Item js_cipher_final(void) {
+extern "C" Item js_cipher_final(Item output_encoding_item) {
     Item self = js_get_current_this();
     Item ctx_item = js_property_get(self, make_string_item_crypto("__cipher_ctx__"));
     if (ctx_item.item == 0) return ItemNull;
     CipherCtx* ctx = (CipherCtx*)(uintptr_t)it2i(ctx_item);
     if (!ctx || ctx->finalized) return ItemNull;
+    char out_enc[32];
+    bool has_out_enc = false;
+    if (!cipher_normalize_output_encoding(output_encoding_item, out_enc, sizeof(out_enc), &has_out_enc)) return ItemNull;
+    if (!cipher_accept_output_encoding(ctx, out_enc, has_out_enc)) return ItemNull;
     log_debug("cipher_final: ctx=%p finalized=%d", ctx, ctx ? ctx->finalized : -1);
     if (!ctx || ctx->finalized) return ItemNull;
     ctx->finalized = true;
@@ -1688,9 +2085,7 @@ extern "C" Item js_cipher_final(void) {
                 return ItemNull;
             }
             ctx->has_auth_tag = true;
-            Item result = js_typed_array_new(JS_TYPED_UINT8, ctx->data_len);
-            JsTypedArray* ta = (JsTypedArray*)result.map->data;
-            if (ta && ta->data) memcpy(ta->data, out_buf, (size_t)ctx->data_len);
+            Item result = cipher_output_from_bytes(out_buf, ctx->data_len, out_enc, has_out_enc);
             mem_free(out_buf);
 
             // store auth tag on the object
@@ -1716,9 +2111,7 @@ extern "C" Item js_cipher_final(void) {
                 js_property_set(self, make_string_item_crypto("__cipher_ctx__"), ItemNull);
                 return ItemNull;
             }
-            Item result = js_typed_array_new(JS_TYPED_UINT8, ctx->data_len);
-            JsTypedArray* ta = (JsTypedArray*)result.map->data;
-            if (ta && ta->data) memcpy(ta->data, out_buf, (size_t)ctx->data_len);
+            Item result = cipher_output_from_bytes(out_buf, ctx->data_len, out_enc, has_out_enc);
             mem_free(out_buf);
             cipher_ctx_free(ctx);
             js_property_set(self, make_string_item_crypto("__cipher_ctx__"), ItemNull);
@@ -1736,12 +2129,10 @@ extern "C" Item js_cipher_final(void) {
             return ItemNull;
         }
         if (olen > 0) {
-            Item result = js_typed_array_new(JS_TYPED_UINT8, (int)olen);
-            JsTypedArray* ta = (JsTypedArray*)result.map->data;
-            if (ta && ta->data) memcpy(ta->data, finish_buf, olen);
+            Item result = cipher_output_from_bytes(finish_buf, (int)olen, out_enc, has_out_enc);
             return result;
         }
-        return js_typed_array_new(JS_TYPED_UINT8, 0);
+        return cipher_output_from_bytes(crypto_empty_bytes, 0, out_enc, has_out_enc);
     }
 }
 
@@ -1845,9 +2236,9 @@ static Item create_cipher_object(const char* alg, bool encrypting,
     js_property_set(obj, make_string_item_crypto("__cipher_ctx__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
     js_property_set(obj, make_string_item_crypto("update"),
-                    js_new_function((void*)js_cipher_update, 1));
+                    js_new_function((void*)js_cipher_update, 3));
     js_property_set(obj, make_string_item_crypto("final"),
-                    js_new_function((void*)js_cipher_final, 0));
+                    js_new_function((void*)js_cipher_final, 1));
     js_property_set(obj, make_string_item_crypto("getAuthTag"),
                     js_new_function((void*)js_cipher_getAuthTag, 0));
     js_property_set(obj, make_string_item_crypto("setAuthTag"),
@@ -2801,6 +3192,8 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(crypto_namespace, "createHash",         (void*)js_crypto_createHash, 1);
     crypto_set_method(crypto_namespace, "hash",               (void*)js_crypto_hash, 3);
     crypto_set_method(crypto_namespace, "createHmac",         (void*)js_crypto_createHmac, 2);
+    crypto_set_method(crypto_namespace, "createSign",         (void*)js_crypto_createSign, 1);
+    crypto_set_method(crypto_namespace, "createVerify",       (void*)js_crypto_createVerify, 1);
     crypto_set_method(crypto_namespace, "createCipheriv",     (void*)js_crypto_createCipheriv, 3);
     crypto_set_method(crypto_namespace, "createDecipheriv",   (void*)js_crypto_createDecipheriv, 3);
     crypto_set_method(crypto_namespace, "argon2",             (void*)js_crypto_argon2_unsupported, 0);
@@ -2857,6 +3250,10 @@ extern "C" Item js_get_crypto_namespace(void) {
         js_new_function((void*)js_crypto_createHash, 1));
     js_property_set(crypto_namespace, make_string_item_crypto("Hmac"),
         js_new_function((void*)js_crypto_createHmac, 2));
+    js_property_set(crypto_namespace, make_string_item_crypto("Sign"),
+        js_new_function((void*)js_crypto_createSign, 1));
+    js_property_set(crypto_namespace, make_string_item_crypto("Verify"),
+        js_new_function((void*)js_crypto_createVerify, 1));
     js_property_set(crypto_namespace, make_string_item_crypto("Cipher"),
         js_new_function((void*)js_crypto_createCipheriv, 3));
     js_property_set(crypto_namespace, make_string_item_crypto("Decipher"),

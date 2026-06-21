@@ -1,0 +1,2 @@
+sign verify buffer update encoding: true
+verify unsupported signature result: false
