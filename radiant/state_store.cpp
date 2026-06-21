@@ -1294,6 +1294,17 @@ extern "C" bool state_store_modify_selection(DocState* state,
                                 out_exception);
 }
 
+static bool selection_boundary_is_text_control(const DomBoundary* boundary) {
+    if (!boundary) return false;
+    for (DomNode* node = boundary->node; node; node = node->parent) {
+        if (node->is_element() &&
+            tc_is_text_control(lam::dom_require_element(node))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 extern "C" bool state_store_delete_selection_from_document(
         DocState* state,
         const char** out_exception) {
@@ -1311,6 +1322,11 @@ extern "C" bool state_store_delete_selection_from_document(
     }
 
     DomRange* range = selection->ranges[0];
+    if (selection_boundary_is_text_control(&range->start) ||
+        selection_boundary_is_text_control(&range->end)) {
+        return true;
+    }
+
     const char* exc = NULL;
     if (!dom_range_delete_contents(range, &exc) || exc) {
         if (out_exception) *out_exception = exc ? exc : "InvalidStateError";

@@ -18,6 +18,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -47,6 +48,7 @@ static const char* RUNNABLE_PATH = "test/editing/RUNNABLE";
 static const char* TEMP_DIR = "temp";
 static const char* RESULT_ARTIFACT_PATH = "temp/chrome_editing_results.jsonl";
 static const char* SUMMARY_ARTIFACT_PATH = "temp/chrome_editing_summary.json";
+static const size_t DEFAULT_CAPTURED_OUTPUT_LIMIT = 128 * 1024;
 
 static bool starts_with(const char* text, const char* prefix) {
     return strncmp(text, prefix, strlen(prefix)) == 0;
@@ -284,9 +286,82 @@ static std::string strip_script_elements(const std::string& html) {
     return result;
 }
 
-static std::string execute_js_with_doc(const char* js_path,
-                                       const char* html_path,
-                                       int* exit_code) {
+struct CapturedProcessOutput {
+    std::string text;
+    bool truncated;
+    size_t byte_count;
+};
+
+static size_t chrome_editing_output_limit() {
+    const char* limit_env = getenv("LAMBDA_CHROME_EDITING_OUTPUT_LIMIT");
+    if (limit_env && limit_env[0]) {
+        long value = atol(limit_env);
+        if (value >= 0) return (size_t)value;
+    }
+    return DEFAULT_CAPTURED_OUTPUT_LIMIT;
+}
+
+static void append_tail_output(std::string& tail, const char* data,
+                               size_t length, size_t tail_limit) {
+    if (tail_limit == 0 || length == 0) return;
+    tail.append(data, length);
+    if (tail.size() > tail_limit) {
+        tail.erase(0, tail.size() - tail_limit);
+    }
+}
+
+static CapturedProcessOutput capture_process_output(FILE* pipe) {
+    CapturedProcessOutput captured;
+    captured.truncated = false;
+    captured.byte_count = 0;
+
+    size_t limit = chrome_editing_output_limit();
+    std::string head;
+    std::string tail;
+    size_t head_limit = limit / 2;
+    size_t tail_limit = limit - head_limit;
+
+    char buffer[1024];
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        size_t length = strlen(buffer);
+        captured.byte_count += length;
+        if (limit == 0) {
+            captured.text.append(buffer, length);
+            continue;
+        }
+
+        size_t offset = 0;
+        if (head.size() < head_limit) {
+            size_t head_remaining = head_limit - head.size();
+            size_t head_copy = std::min(head_remaining, length);
+            head.append(buffer, head_copy);
+            offset = head_copy;
+        }
+        append_tail_output(tail, buffer + offset, length - offset, tail_limit);
+    }
+
+    if (limit == 0) return captured;
+    captured.truncated = captured.byte_count > limit;
+    if (!captured.truncated) {
+        captured.text = head + tail;
+        return captured;
+    }
+
+    captured.text = head;
+    captured.text += "\n[... Chrome editing output truncated; captured first ";
+    captured.text += std::to_string(head.size());
+    captured.text += " bytes and last ";
+    captured.text += std::to_string(tail.size());
+    captured.text += " bytes of ";
+    captured.text += std::to_string(captured.byte_count);
+    captured.text += " bytes ...]\n";
+    captured.text += tail;
+    return captured;
+}
+
+static CapturedProcessOutput execute_js_with_doc(const char* js_path,
+                                                 const char* html_path,
+                                                 int* exit_code) {
     char command[1200];
     const char* timeout_env = getenv("LAMBDA_CHROME_EDITING_TIMEOUT");
     int timeout_seconds = timeout_env && timeout_env[0] ? atoi(timeout_env) : 0;
@@ -309,14 +384,13 @@ static std::string execute_js_with_doc(const char* js_path,
     FILE* pipe = popen(command, "r");
     if (!pipe) {
         *exit_code = -1;
-        return "";
+        CapturedProcessOutput empty;
+        empty.truncated = false;
+        empty.byte_count = 0;
+        return empty;
     }
 
-    std::string output;
-    char buffer[1024];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        output += buffer;
-    }
+    CapturedProcessOutput output = capture_process_output(pipe);
     int raw = pclose(pipe);
 #ifndef _WIN32
     if (WIFEXITED(raw)) {
@@ -356,6 +430,8 @@ struct ChromeEditingResult {
     int total_count;
     int exit_code;
     double seconds;
+    bool output_truncated;
+    size_t output_bytes;
     std::string skip_reason;
     std::string output;
     std::string bucket;
@@ -496,6 +572,9 @@ static std::string result_to_jsonl(const ChromeEditingResult& result) {
     json += ",\"exit_code\":" + std::to_string(result.exit_code);
     json += ",\"timeout\":" + std::string(result.timeout ? "true" : "false");
     json += ",\"abort\":" + std::string(result.abort ? "true" : "false");
+    json += ",\"output_truncated\":" +
+        std::string(result.output_truncated ? "true" : "false");
+    json += ",\"output_bytes\":" + std::to_string(result.output_bytes);
     json += ",\"seconds\":" + std::to_string(result.seconds);
     json += ",\"first_failure_line\":" + json_string_literal(first_failure_line(result));
     json += "}\n";
@@ -803,6 +882,8 @@ static ChromeEditingResult run_chrome_editing_case(
     result.total_count = 0;
     result.exit_code = 0;
     result.seconds = 0.0;
+    result.output_truncated = false;
+    result.output_bytes = 0;
     result.bucket = top_level_bucket(p.rel_path);
 
     auto started = std::chrono::steady_clock::now();
@@ -873,8 +954,9 @@ static ChromeEditingResult run_chrome_editing_case(
     write_file_contents(temp_html.c_str(), strip_script_elements(html));
 
     int exit_code = 0;
-    std::string output = execute_js_with_doc(temp_js.c_str(), temp_html.c_str(),
-        &exit_code);
+    CapturedProcessOutput captured_output = execute_js_with_doc(temp_js.c_str(),
+        temp_html.c_str(), &exit_code);
+    std::string output = captured_output.text;
     if (!keep_chrome_editing_temp_scripts()) {
         unlink(temp_js.c_str());
         unlink(temp_html.c_str());
@@ -882,6 +964,8 @@ static ChromeEditingResult run_chrome_editing_case(
 
     result.exit_code = exit_code;
     result.output = output;
+    result.output_truncated = captured_output.truncated;
+    result.output_bytes = captured_output.byte_count;
     result.timeout = exit_code == 142 || contains_text(output, "Alarm clock") ||
         contains_text(output, "SIGALRM") ||
         contains_text(output, "timed out");
@@ -1016,7 +1100,6 @@ static int run_parallel_suite() {
                 }
 
                 ChromeEditingResult result = run_chrome_editing_case(p);
-                results[index] = result;
                 {
                     std::lock_guard<std::mutex> lock(print_mutex);
                     const char* status = result.skipped ? "[  SKIPPED ]" :
@@ -1025,6 +1108,7 @@ static int run_parallel_suite() {
                            status, p.test_name.c_str(),
                            result.seconds * 1000.0);
                 }
+                results[index] = std::move(result);
             }
         });
     }
