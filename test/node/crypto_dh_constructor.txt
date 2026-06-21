@@ -1,0 +1,10 @@
+dh instanceof: true
+dh prime bytes: true
+dh generator hex: 02
+dh ctor instanceof: true
+dh group instanceof: true
+dh group prime bytes: true
+dh group ctor instanceof: true
+ecdh instanceof: true
+ecdh ctor instanceof: true
+curves has secp384r1: true

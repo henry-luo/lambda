@@ -23,6 +23,7 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 #include "../../lib/base64.h"
 #include "../../lib/uuid.h"
 #include "../../lib/digest.h"
+#include <mbedtls/bignum.h>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -1645,6 +1646,432 @@ extern "C" Item js_crypto_getHashes(void) {
     js_array_push(arr, make_string_item_crypto("sha256"));
     js_array_push(arr, make_string_item_crypto("sha384"));
     js_array_push(arr, make_string_item_crypto("sha512"));
+    return arr;
+}
+
+// ============================================================================
+// Diffie-Hellman / ECDH constructor surfaces
+// ============================================================================
+
+static const char CRYPTO_DH_MODP2_HEX[] =
+    "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1"
+    "29024E088A67CC74020BBEA63B139B22514A08798E3404DD"
+    "EF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245"
+    "E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED"
+    "EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE65381"
+    "FFFFFFFFFFFFFFFF";
+
+static const char CRYPTO_DH_MODP5_HEX[] =
+    "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1"
+    "29024E088A67CC74020BBEA63B139B22514A08798E3404DD"
+    "EF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245"
+    "E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED"
+    "EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3D"
+    "C2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F"
+    "83655D23DCA3AD961C62F356208552BB9ED529077096966D"
+    "670C354E4ABC9804F1746C08CA237327FFFFFFFFFFFFFFFF";
+
+struct CryptoDhGroupDef {
+    const char* name;
+    const char* prime_hex;
+};
+
+static const CryptoDhGroupDef crypto_dh_groups[] = {
+    {"modp2", CRYPTO_DH_MODP2_HEX},
+    {"modp5", CRYPTO_DH_MODP5_HEX},
+    {NULL, NULL}
+};
+
+static bool crypto_hex_const_to_bytes(const char* hex, uint8_t** out, int* out_len) {
+    if (!hex || !out || !out_len) return false;
+    size_t hex_len = strlen(hex);
+    size_t bytes_len = hex_len / 2;
+    uint8_t* bytes = (uint8_t*)mem_alloc(bytes_len > 0 ? bytes_len : 1, MEM_CAT_JS_RUNTIME);
+    size_t written = 0;
+    if (!hex_decode(hex, hex_len, bytes, &written)) {
+        mem_free(bytes);
+        return false;
+    }
+    *out = bytes;
+    *out_len = (int)written;
+    return true;
+}
+
+static const CryptoDhGroupDef* crypto_dh_group_lookup(Item name_item) {
+    if (get_type_id(name_item) != LMD_TYPE_STRING) return NULL;
+    char name[32];
+    if (!crypto_normalize_string(name_item, name, sizeof(name), false)) return NULL;
+    for (int i = 0; crypto_dh_groups[i].name; i++) {
+        if (strcmp(name, crypto_dh_groups[i].name) == 0) return &crypto_dh_groups[i];
+    }
+    return NULL;
+}
+
+static Item crypto_throw_unknown_dh_group(void) {
+    return js_throw_error_with_code("ERR_CRYPTO_UNKNOWN_DH_GROUP", "Unknown DH group");
+}
+
+static Item crypto_throw_bad_dh_generator(void) {
+    return js_throw_error_with_code("ERR_OSSL_DH_BAD_GENERATOR", "bad generator");
+}
+
+static Item crypto_throw_dh_not_implemented(void) {
+    return js_throw_error_with_code(JS_ERR_METHOD_NOT_IMPLEMENTED,
+        "Diffie-Hellman key agreement is not supported by this crypto backend yet");
+}
+
+static bool crypto_item_to_integer(Item item, const char* name, int* out_value) {
+    if (!out_value) return false;
+    TypeId type = get_type_id(item);
+    double value = 0.0;
+    if (type == LMD_TYPE_INT) {
+        int64_t iv = it2i(item);
+        if (iv <= -(int64_t)JS_SYMBOL_BASE) {
+            return js_throw_invalid_arg_type(name, "number", item), false;
+        }
+        if (iv < -2147483648LL || iv > 2147483647LL) {
+            return js_throw_out_of_range(name, ">= -2147483648 && <= 2147483647", item), false;
+        }
+        *out_value = (int)iv;
+        return true;
+    }
+    if (type == LMD_TYPE_INT64) {
+        int64_t iv = it2l(item);
+        if (iv < -2147483648LL || iv > 2147483647LL) {
+            return js_throw_out_of_range(name, ">= -2147483648 && <= 2147483647", item), false;
+        }
+        *out_value = (int)iv;
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        value = it2d(item);
+        if (value != value || floor(value) != value ||
+                value < -2147483648.0 || value > 2147483647.0) {
+            return js_throw_out_of_range(name, "an integer", item), false;
+        }
+        *out_value = (int)value;
+        return true;
+    }
+    return js_throw_invalid_arg_type(name, "number", item), false;
+}
+
+static bool crypto_extract_bytes_with_encoding(Item item, Item encoding_item, uint8_t** out, int* out_len) {
+    if (get_type_id(item) == LMD_TYPE_STRING) {
+        char enc[32];
+        bool has_encoding = false;
+        if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) return false;
+        String* s = it2s(item);
+        if (!crypto_string_bytes_for_encoding(s, enc, has_encoding, out, out_len)) {
+            js_throw_invalid_arg_value("encoding", "is invalid", encoding_item);
+            return false;
+        }
+        return true;
+    }
+    return extract_bytes(item, out, out_len);
+}
+
+static bool crypto_generator_bytes_from_int(int generator, uint8_t** out, int* out_len) {
+    if (!out || !out_len) return false;
+    if (generator == 0) generator = 2;
+    if (generator <= 1) {
+        crypto_throw_bad_dh_generator();
+        return false;
+    }
+
+    uint8_t buf[4];
+    buf[0] = (uint8_t)((generator >> 24) & 0xFF);
+    buf[1] = (uint8_t)((generator >> 16) & 0xFF);
+    buf[2] = (uint8_t)((generator >> 8) & 0xFF);
+    buf[3] = (uint8_t)(generator & 0xFF);
+    int start = 0;
+    while (start < 3 && buf[start] == 0) start++;
+    int len = 4 - start;
+    *out = (uint8_t*)mem_alloc((size_t)len, MEM_CAT_JS_RUNTIME);
+    memcpy(*out, buf + start, (size_t)len);
+    *out_len = len;
+    return true;
+}
+
+static bool crypto_validate_generator_bytes(const uint8_t* bytes, int len) {
+    if (!bytes || len <= 0) {
+        crypto_throw_bad_dh_generator();
+        return false;
+    }
+    int first_non_zero = 0;
+    while (first_non_zero < len && bytes[first_non_zero] == 0) first_non_zero++;
+    if (first_non_zero >= len) {
+        crypto_throw_bad_dh_generator();
+        return false;
+    }
+    if (first_non_zero == len - 1 && bytes[first_non_zero] <= 1) {
+        crypto_throw_bad_dh_generator();
+        return false;
+    }
+    return true;
+}
+
+static bool crypto_parse_dh_generator(Item generator_item, Item encoding_item, uint8_t** out, int* out_len) {
+    if (!out || !out_len) return false;
+    *out = NULL;
+    *out_len = 0;
+    if (crypto_item_is_undefined(generator_item) || get_type_id(generator_item) == LMD_TYPE_NULL) {
+        return crypto_generator_bytes_from_int(2, out, out_len);
+    }
+
+    TypeId type = get_type_id(generator_item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        int generator = 0;
+        if (!crypto_item_to_integer(generator_item, "generator", &generator)) return false;
+        return crypto_generator_bytes_from_int(generator, out, out_len);
+    }
+
+    if (!crypto_extract_bytes_with_encoding(generator_item, encoding_item, out, out_len)) {
+        js_throw_invalid_arg_type("generator", "number, string, ArrayBuffer, Buffer, TypedArray, or DataView", generator_item);
+        return false;
+    }
+    if (!crypto_validate_generator_bytes(*out, *out_len)) {
+        mem_free(*out);
+        *out = NULL;
+        *out_len = 0;
+        return false;
+    }
+    return true;
+}
+
+static int crypto_mbedtls_random(void* ctx, unsigned char* output, size_t len) {
+    (void)ctx;
+    return crypto_random_bytes(output, len) ? 0 : -1;
+}
+
+static bool crypto_generate_dh_prime(int bits, uint8_t** out, int* out_len) {
+    if (!out || !out_len) return false;
+    *out = NULL;
+    *out_len = 0;
+    if (bits < 2) {
+        return js_throw_error_with_code("ERR_OSSL_BN_BITS_TOO_SMALL", "bits too small"), false;
+    }
+
+    mbedtls_mpi prime;
+    mbedtls_mpi_init(&prime);
+    int ret = mbedtls_mpi_gen_prime(&prime, (size_t)bits, MBEDTLS_MPI_GEN_PRIME_FLAG_DH,
+        crypto_mbedtls_random, NULL);
+    if (ret != 0) {
+        mbedtls_mpi_free(&prime);
+        log_error("crypto: DH prime generation failed: -0x%04x", -ret);
+        return js_throw_error_with_code("ERR_OSSL_DH_GENERATE_PRIME_FAILED", "Failed to generate DH prime"), false;
+    }
+
+    size_t len = mbedtls_mpi_size(&prime);
+    uint8_t* bytes = (uint8_t*)mem_alloc(len > 0 ? len : 1, MEM_CAT_JS_RUNTIME);
+    ret = mbedtls_mpi_write_binary(&prime, bytes, len);
+    mbedtls_mpi_free(&prime);
+    if (ret != 0) {
+        mem_free(bytes);
+        log_error("crypto: DH prime export failed: -0x%04x", -ret);
+        return js_throw_error_with_code("ERR_OSSL_DH_GENERATE_PRIME_FAILED", "Failed to export DH prime"), false;
+    }
+
+    *out = bytes;
+    *out_len = (int)len;
+    return true;
+}
+
+static Item crypto_output_object_bytes(Item self, const char* prop_name, Item encoding_item) {
+    Item bytes_item = js_property_get(self, make_string_item_crypto(prop_name));
+    uint8_t* bytes = NULL;
+    int len = 0;
+    if (!extract_bytes(bytes_item, &bytes, &len)) return ItemNull;
+    char enc[32];
+    bool has_encoding = false;
+    if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) {
+        mem_free(bytes);
+        return ItemNull;
+    }
+    Item result = crypto_digest_output_for_encoding(bytes, len, enc, has_encoding);
+    mem_free(bytes);
+    return result;
+}
+
+extern "C" Item js_dh_getPrime(Item encoding_item) {
+    return crypto_output_object_bytes(js_get_current_this(), "__dh_prime__", encoding_item);
+}
+
+extern "C" Item js_dh_getGenerator(Item encoding_item) {
+    return crypto_output_object_bytes(js_get_current_this(), "__dh_generator__", encoding_item);
+}
+
+extern "C" Item js_dh_generateKeys(Item encoding_item) {
+    (void)encoding_item;
+    return crypto_throw_dh_not_implemented();
+}
+
+extern "C" Item js_dh_computeSecret(Item key_item, Item input_encoding_item, Item output_encoding_item) {
+    (void)key_item;
+    (void)input_encoding_item;
+    (void)output_encoding_item;
+    return crypto_throw_dh_not_implemented();
+}
+
+static Item crypto_create_dh_object(const uint8_t* prime, int prime_len,
+                                    const uint8_t* generator, int generator_len,
+                                    const char* constructor_name) {
+    Item obj = js_new_object();
+    crypto_link_instance_to_constructor(obj, constructor_name);
+    js_property_set(obj, make_string_item_crypto("__dh_prime__"),
+        crypto_buffer_from_bytes(prime, prime_len));
+    js_property_set(obj, make_string_item_crypto("__dh_generator__"),
+        crypto_buffer_from_bytes(generator, generator_len));
+    js_property_set(obj, make_string_item_crypto("verifyError"),
+        (Item){.item = i2it(prime_len <= 1 ? 1 : 0)});
+    js_property_set(obj, make_string_item_crypto("getPrime"),
+        js_new_function((void*)js_dh_getPrime, 1));
+    js_property_set(obj, make_string_item_crypto("getGenerator"),
+        js_new_function((void*)js_dh_getGenerator, 1));
+    js_property_set(obj, make_string_item_crypto("generateKeys"),
+        js_new_function((void*)js_dh_generateKeys, 1));
+    js_property_set(obj, make_string_item_crypto("computeSecret"),
+        js_new_function((void*)js_dh_computeSecret, 3));
+    return obj;
+}
+
+extern "C" Item js_crypto_createDiffieHellman(Item size_or_key_item, Item key_encoding_or_generator_item,
+                                               Item generator_item, Item generator_encoding_item) {
+    uint8_t* prime = NULL;
+    int prime_len = 0;
+    uint8_t* generator = NULL;
+    int generator_len = 0;
+    TypeId first_type = get_type_id(size_or_key_item);
+
+    if (first_type == LMD_TYPE_INT || first_type == LMD_TYPE_INT64 || first_type == LMD_TYPE_FLOAT) {
+        int bits = 0;
+        if (!crypto_item_to_integer(size_or_key_item, "sizeOrKey", &bits)) return ItemNull;
+        if (!crypto_generate_dh_prime(bits, &prime, &prime_len)) return ItemNull;
+        if (!crypto_parse_dh_generator(key_encoding_or_generator_item, generator_item, &generator, &generator_len)) {
+            mem_free(prime);
+            return ItemNull;
+        }
+    } else {
+        Item key_encoding = make_js_undefined_crypto();
+        Item gen_value = key_encoding_or_generator_item;
+        Item gen_encoding = generator_item;
+        if (get_type_id(key_encoding_or_generator_item) == LMD_TYPE_STRING) {
+            key_encoding = key_encoding_or_generator_item;
+            gen_value = generator_item;
+            gen_encoding = generator_encoding_item;
+        }
+        if (!crypto_extract_bytes_with_encoding(size_or_key_item, key_encoding, &prime, &prime_len)) {
+            return js_throw_invalid_arg_type("sizeOrKey", "number, string, ArrayBuffer, Buffer, TypedArray, or DataView", size_or_key_item);
+        }
+        if (!crypto_parse_dh_generator(gen_value, gen_encoding, &generator, &generator_len)) {
+            mem_free(prime);
+            return ItemNull;
+        }
+    }
+
+    Item obj = crypto_create_dh_object(prime, prime_len, generator, generator_len, "DiffieHellman");
+    mem_free(prime);
+    mem_free(generator);
+    return obj;
+}
+
+extern "C" Item js_crypto_createDiffieHellmanGroup(Item name_item) {
+    const CryptoDhGroupDef* group = crypto_dh_group_lookup(name_item);
+    if (!group) return crypto_throw_unknown_dh_group();
+
+    uint8_t* prime = NULL;
+    int prime_len = 0;
+    if (!crypto_hex_const_to_bytes(group->prime_hex, &prime, &prime_len)) return ItemNull;
+    uint8_t generator[1] = {2};
+    Item obj = crypto_create_dh_object(prime, prime_len, generator, 1, "DiffieHellmanGroup");
+    mem_free(prime);
+    return obj;
+}
+
+extern "C" Item js_crypto_getDiffieHellman(Item name_item) {
+    return js_crypto_createDiffieHellmanGroup(name_item);
+}
+
+static bool crypto_curve_supported(Item curve_item, char* out, int out_size) {
+    if (get_type_id(curve_item) != LMD_TYPE_STRING) return false;
+    if (!crypto_normalize_string(curve_item, out, out_size, false)) return false;
+    return strcmp(out, "prime256v1") == 0 ||
+           strcmp(out, "secp384r1") == 0 ||
+           strcmp(out, "secp521r1") == 0;
+}
+
+static Item crypto_throw_ecdh_not_implemented(void) {
+    return js_throw_error_with_code(JS_ERR_METHOD_NOT_IMPLEMENTED,
+        "ECDH key agreement is not supported by this crypto backend yet");
+}
+
+extern "C" Item js_ecdh_generateKeys(Item encoding_item, Item format_item) {
+    (void)encoding_item;
+    (void)format_item;
+    return crypto_throw_ecdh_not_implemented();
+}
+
+extern "C" Item js_ecdh_computeSecret(Item key_item, Item input_encoding_item, Item output_encoding_item) {
+    (void)key_item;
+    (void)input_encoding_item;
+    (void)output_encoding_item;
+    return crypto_throw_ecdh_not_implemented();
+}
+
+extern "C" Item js_ecdh_getPublicKey(Item encoding_item, Item format_item) {
+    (void)encoding_item;
+    (void)format_item;
+    return js_throw_error_with_code("ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY", "Failed to get ECDH public key");
+}
+
+extern "C" Item js_ecdh_getPrivateKey(Item encoding_item) {
+    (void)encoding_item;
+    return js_throw_error_with_code("ERR_CRYPTO_ECDH_INVALID_PRIVATE_KEY", "Failed to get ECDH private key");
+}
+
+extern "C" Item js_ecdh_setPrivateKey(Item key_item, Item encoding_item) {
+    (void)key_item;
+    (void)encoding_item;
+    return crypto_throw_ecdh_not_implemented();
+}
+
+extern "C" Item js_ecdh_setPublicKey(Item key_item, Item encoding_item) {
+    (void)key_item;
+    (void)encoding_item;
+    return crypto_throw_ecdh_not_implemented();
+}
+
+extern "C" Item js_crypto_createECDH(Item curve_item) {
+    char curve[32];
+    if (get_type_id(curve_item) != LMD_TYPE_STRING) {
+        return js_throw_invalid_arg_type("curve", "string", curve_item);
+    }
+    if (!crypto_curve_supported(curve_item, curve, sizeof(curve))) {
+        return js_throw_type_error_code("ERR_CRYPTO_INVALID_CURVE", "Invalid EC curve name");
+    }
+
+    Item obj = js_new_object();
+    crypto_link_instance_to_constructor(obj, "ECDH");
+    js_property_set(obj, make_string_item_crypto("__ecdh_curve__"), make_string_item_crypto(curve));
+    js_property_set(obj, make_string_item_crypto("generateKeys"),
+        js_new_function((void*)js_ecdh_generateKeys, 2));
+    js_property_set(obj, make_string_item_crypto("computeSecret"),
+        js_new_function((void*)js_ecdh_computeSecret, 3));
+    js_property_set(obj, make_string_item_crypto("getPublicKey"),
+        js_new_function((void*)js_ecdh_getPublicKey, 2));
+    js_property_set(obj, make_string_item_crypto("getPrivateKey"),
+        js_new_function((void*)js_ecdh_getPrivateKey, 1));
+    js_property_set(obj, make_string_item_crypto("setPrivateKey"),
+        js_new_function((void*)js_ecdh_setPrivateKey, 2));
+    js_property_set(obj, make_string_item_crypto("setPublicKey"),
+        js_new_function((void*)js_ecdh_setPublicKey, 2));
+    return obj;
+}
+
+extern "C" Item js_crypto_getCurves(void) {
+    Item arr = js_array_new(0);
+    js_array_push(arr, make_string_item_crypto("prime256v1"));
+    js_array_push(arr, make_string_item_crypto("secp384r1"));
+    js_array_push(arr, make_string_item_crypto("secp521r1"));
     return arr;
 }
 
@@ -3456,8 +3883,13 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(crypto_namespace, "randomInt",          (void*)js_crypto_randomInt, 3);
     crypto_set_method(crypto_namespace, "getFips",            (void*)js_crypto_getFips, 0);
     crypto_set_method(crypto_namespace, "getHashes",          (void*)js_crypto_getHashes, 0);
+    crypto_set_method(crypto_namespace, "getCurves",          (void*)js_crypto_getCurves, 0);
     crypto_set_method(crypto_namespace, "getCiphers",         (void*)js_crypto_getCiphers, 0);
     crypto_set_method(crypto_namespace, "getCipherInfo",      (void*)js_crypto_getCipherInfo, 2);
+    crypto_set_method(crypto_namespace, "createDiffieHellman", (void*)js_crypto_createDiffieHellman, 4);
+    crypto_set_method(crypto_namespace, "createDiffieHellmanGroup", (void*)js_crypto_createDiffieHellmanGroup, 1);
+    crypto_set_method(crypto_namespace, "getDiffieHellman",   (void*)js_crypto_getDiffieHellman, 1);
+    crypto_set_method(crypto_namespace, "createECDH",         (void*)js_crypto_createECDH, 1);
     crypto_set_method(crypto_namespace, "timingSafeEqual",    (void*)js_crypto_timingSafeEqual, 2);
     crypto_set_method(crypto_namespace, "pbkdf2Sync",         (void*)js_crypto_pbkdf2Sync, 5);
     crypto_set_method(crypto_namespace, "pbkdf2",             (void*)js_crypto_pbkdf2, 6);
@@ -3508,6 +3940,12 @@ extern "C" Item js_get_crypto_namespace(void) {
         js_new_function((void*)js_crypto_createCipheriv, 3));
     js_property_set(crypto_namespace, make_string_item_crypto("Decipheriv"),
         js_new_function((void*)js_crypto_createDecipheriv, 3));
+    js_property_set(crypto_namespace, make_string_item_crypto("DiffieHellman"),
+        js_new_function((void*)js_crypto_createDiffieHellman, 4));
+    js_property_set(crypto_namespace, make_string_item_crypto("DiffieHellmanGroup"),
+        js_new_function((void*)js_crypto_createDiffieHellmanGroup, 1));
+    js_property_set(crypto_namespace, make_string_item_crypto("ECDH"),
+        js_new_function((void*)js_crypto_createECDH, 1));
 
     Item default_key = make_string_item_crypto("default");
     js_property_set(crypto_namespace, default_key, crypto_namespace);
