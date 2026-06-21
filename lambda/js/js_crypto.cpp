@@ -57,6 +57,34 @@ static int crypto_digest_bits_for_name(const char* digest, bool allow_sha1, bool
     return crypto_digest_bits_for_name_ext(digest, false, allow_sha1, allow_sha224);
 }
 
+static bool crypto_normalize_string(Item item, char* out, int out_size, bool strip_dash);
+
+static bool crypto_normalize_sign_verify_digest(Item alg_item, char* out, int out_size) {
+    if (!out || out_size <= 0) return false;
+    if (!crypto_normalize_string(alg_item, out, out_size, true)) return false;
+    if (crypto_digest_bits_for_name_ext(out, true, true, true) != 0) return true;
+
+    const char* digest = NULL;
+    if (strncmp(out, "rsa", 3) == 0) {
+        digest = out + 3;
+    } else if (strncmp(out, "dsa", 3) == 0) {
+        digest = out + 3;
+    } else if (strncmp(out, "ecdsa", 5) == 0) {
+        digest = out + 5;
+    } else if (strcmp(out, "dss1") == 0) {
+        digest = "sha1";
+    }
+
+    if (digest && crypto_digest_bits_for_name_ext(digest, true, true, true) != 0) {
+        int len = (int)strlen(digest);
+        if (len >= out_size) len = out_size - 1;
+        memmove(out, digest, (size_t)len);
+        out[len] = '\0';
+        return true;
+    }
+    return false;
+}
+
 static bool crypto_digest_compute_bits(int bits, const uint8_t* data,
                                   int offset, int length, uint8_t* out) {
     if (offset < 0) offset = 0;
@@ -1517,8 +1545,7 @@ static Item js_crypto_create_sign_verify(Item alg_item, bool verify_mode) {
     if (get_type_id(alg_item) != LMD_TYPE_STRING) return js_throw_invalid_arg_type("algorithm", "string", alg_item);
 
     char alg_buf[16];
-    crypto_normalize_string(alg_item, alg_buf, sizeof(alg_buf), true);
-    if (crypto_digest_bits_for_name_ext(alg_buf, true, true, true) == 0) {
+    if (!crypto_normalize_sign_verify_digest(alg_item, alg_buf, sizeof(alg_buf))) {
         return js_throw_type_error("Digest method not supported");
     }
 
@@ -1642,9 +1669,13 @@ extern "C" Item js_crypto_timingSafeEqual(Item a_item, Item b_item) {
 
 #include <mbedtls/cipher.h>
 #include <mbedtls/gcm.h>
+#include <mbedtls/nist_kw.h>
 
 // map Node.js algorithm name to mbedTLS cipher type
 static mbedtls_cipher_type_t resolve_cipher_type(const char* alg, int key_len) {
+    if (strcmp(alg, "aes-128-ecb") == 0) return MBEDTLS_CIPHER_AES_128_ECB;
+    if (strcmp(alg, "aes-192-ecb") == 0) return MBEDTLS_CIPHER_AES_192_ECB;
+    if (strcmp(alg, "aes-256-ecb") == 0) return MBEDTLS_CIPHER_AES_256_ECB;
     if (strcmp(alg, "aes-128-cbc") == 0) return MBEDTLS_CIPHER_AES_128_CBC;
     if (strcmp(alg, "aes-192-cbc") == 0) return MBEDTLS_CIPHER_AES_192_CBC;
     if (strcmp(alg, "aes-256-cbc") == 0) return MBEDTLS_CIPHER_AES_256_CBC;
@@ -1654,6 +1685,8 @@ static mbedtls_cipher_type_t resolve_cipher_type(const char* alg, int key_len) {
     if (strcmp(alg, "aes-128-gcm") == 0) return MBEDTLS_CIPHER_AES_128_GCM;
     if (strcmp(alg, "aes-192-gcm") == 0) return MBEDTLS_CIPHER_AES_192_GCM;
     if (strcmp(alg, "aes-256-gcm") == 0) return MBEDTLS_CIPHER_AES_256_GCM;
+    if (strcmp(alg, "id-aes128-wrap") == 0 && key_len == 16) return MBEDTLS_CIPHER_AES_128_KW;
+    if (strcmp(alg, "des-ede3-cbc") == 0 && key_len == 24) return MBEDTLS_CIPHER_DES_EDE3_CBC;
     // auto-detect key size for generic names
     if (strcmp(alg, "aes-cbc") == 0) {
         if (key_len == 16) return MBEDTLS_CIPHER_AES_128_CBC;
@@ -1677,12 +1710,73 @@ static bool is_gcm_cipher(const char* alg) {
     return strstr(alg, "gcm") != NULL;
 }
 
+static bool is_ecb_cipher(const char* alg) {
+    return strstr(alg, "ecb") != NULL;
+}
+
+static bool is_kw_cipher(const char* alg) {
+    return strcmp(alg, "id-aes128-wrap") == 0;
+}
+
+static bool is_known_cipher_name(const char* alg) {
+    return strcmp(alg, "aes-128-ecb") == 0 ||
+           strcmp(alg, "aes-192-ecb") == 0 ||
+           strcmp(alg, "aes-256-ecb") == 0 ||
+           strcmp(alg, "aes-128-cbc") == 0 ||
+           strcmp(alg, "aes-192-cbc") == 0 ||
+           strcmp(alg, "aes-256-cbc") == 0 ||
+           strcmp(alg, "aes-128-ctr") == 0 ||
+           strcmp(alg, "aes-192-ctr") == 0 ||
+           strcmp(alg, "aes-256-ctr") == 0 ||
+           strcmp(alg, "aes-128-gcm") == 0 ||
+           strcmp(alg, "aes-192-gcm") == 0 ||
+           strcmp(alg, "aes-256-gcm") == 0 ||
+           strcmp(alg, "aes-cbc") == 0 ||
+           strcmp(alg, "aes-ctr") == 0 ||
+           strcmp(alg, "aes-gcm") == 0 ||
+           strcmp(alg, "id-aes128-wrap") == 0 ||
+           strcmp(alg, "des-ede3-cbc") == 0;
+}
+
+static Item crypto_throw_unknown_cipher(void) {
+    return js_throw_error_with_code("ERR_CRYPTO_UNKNOWN_CIPHER", "Unknown cipher");
+}
+
+static Item crypto_throw_invalid_key_length(void) {
+    return js_throw_range_error_code("ERR_CRYPTO_INVALID_KEYLEN", "Invalid key length");
+}
+
+static Item crypto_throw_invalid_initialization_vector(void) {
+    return js_throw_type_error("Invalid initialization vector");
+}
+
+static bool crypto_cipher_iv_length_valid(const char* alg, int iv_len) {
+    if (is_ecb_cipher(alg)) return iv_len == 0;
+    if (is_kw_cipher(alg)) return iv_len == 8;
+    if (is_gcm_cipher(alg)) return iv_len > 0;
+    if (strcmp(alg, "des-ede3-cbc") == 0) return iv_len == 8;
+    return iv_len == 16;
+}
+
+static bool crypto_cipher_key_length_valid(const char* alg, int key_len) {
+    if (strncmp(alg, "aes-128-", 8) == 0) return key_len == 16;
+    if (strncmp(alg, "aes-192-", 8) == 0) return key_len == 24;
+    if (strncmp(alg, "aes-256-", 8) == 0) return key_len == 32;
+    if (strcmp(alg, "aes-cbc") == 0 || strcmp(alg, "aes-ctr") == 0 || strcmp(alg, "aes-gcm") == 0) {
+        return key_len == 16 || key_len == 24 || key_len == 32;
+    }
+    if (strcmp(alg, "id-aes128-wrap") == 0) return key_len == 16;
+    if (strcmp(alg, "des-ede3-cbc") == 0) return key_len == 24;
+    return false;
+}
+
 struct CipherCtx {
     char alg[32];
     char output_encoding[32];
     mbedtls_cipher_context_t cipher;
     mbedtls_gcm_context gcm;
     bool use_gcm;
+    bool use_kw;
     bool encrypting;
     uint8_t* key;
     int key_len;
@@ -1714,7 +1808,7 @@ static void cipher_ctx_append_data(CipherCtx* ctx, const uint8_t* buf, int len) 
 static void cipher_ctx_free(CipherCtx* ctx) {
     if (!ctx) return;
     if (ctx->use_gcm) mbedtls_gcm_free(&ctx->gcm);
-    else mbedtls_cipher_free(&ctx->cipher);
+    else if (!ctx->use_kw) mbedtls_cipher_free(&ctx->cipher);
     if (ctx->key) mem_free(ctx->key);
     if (ctx->iv) mem_free(ctx->iv);
     if (ctx->aad) mem_free(ctx->aad);
@@ -2008,12 +2102,15 @@ extern "C" Item js_crypto_generateKey(Item type_item, Item options_item, Item ca
 }
 
 extern "C" Item js_cipher_update(Item data_item, Item input_encoding_item, Item output_encoding_item) {
-    (void)input_encoding_item;
     Item self = js_get_current_this();
     Item ctx_item = js_property_get(self, make_string_item_crypto("__cipher_ctx__"));
     if (ctx_item.item == 0) return ItemNull;
     CipherCtx* ctx = (CipherCtx*)(uintptr_t)it2i(ctx_item);
     if (!ctx || ctx->finalized) return ItemNull;
+
+    char in_enc[32];
+    bool has_in_enc = false;
+    if (!crypto_normalize_encoding(input_encoding_item, in_enc, sizeof(in_enc), &has_in_enc)) return ItemNull;
 
     char out_enc[32];
     bool has_out_enc = false;
@@ -2022,7 +2119,13 @@ extern "C" Item js_cipher_update(Item data_item, Item input_encoding_item, Item 
 
     if (get_type_id(data_item) == LMD_TYPE_STRING) {
         String* s = it2s(data_item);
-        cipher_ctx_append_data(ctx, (const uint8_t*)s->chars, (int)s->len);
+        uint8_t* bytes = NULL;
+        int len = 0;
+        if (!crypto_string_bytes_for_encoding(s, in_enc, has_in_enc, &bytes, &len)) {
+            return js_throw_invalid_arg_value("encoding", "is invalid", input_encoding_item);
+        }
+        cipher_ctx_append_data(ctx, bytes, len);
+        mem_free(bytes);
     } else if (js_is_typed_array(data_item)) {
         const uint8_t* buf; int len;
         if (get_uint8_buffer(data_item, &buf, &len))
@@ -2030,7 +2133,7 @@ extern "C" Item js_cipher_update(Item data_item, Item input_encoding_item, Item 
     }
 
     // for non-GCM streaming, process complete blocks now
-    if (!ctx->use_gcm && ctx->data_len > 0) {
+    if (!ctx->use_gcm && !ctx->use_kw && ctx->data_len > 0) {
         size_t out_len = (size_t)ctx->data_len + 16;
         uint8_t* out_buf = (uint8_t*)mem_alloc(out_len, MEM_CAT_JS_RUNTIME);
         size_t olen = 0;
@@ -2117,6 +2220,43 @@ extern "C" Item js_cipher_final(Item output_encoding_item) {
             js_property_set(self, make_string_item_crypto("__cipher_ctx__"), ItemNull);
             return result;
         }
+    } else if (ctx->use_kw) {
+        mbedtls_nist_kw_context kw;
+        mbedtls_nist_kw_init(&kw);
+        int ret = mbedtls_nist_kw_setkey(&kw, MBEDTLS_CIPHER_ID_AES,
+            ctx->key, (unsigned int)(ctx->key_len * 8), ctx->encrypting ? 1 : 0);
+        if (ret != 0) {
+            log_error("crypto: AES-KW setkey failed: %d", ret);
+            mbedtls_nist_kw_free(&kw);
+            cipher_ctx_free(ctx);
+            js_property_set(self, make_string_item_crypto("__cipher_ctx__"), ItemNull);
+            return ItemNull;
+        }
+
+        size_t out_cap = (size_t)ctx->data_len + 8;
+        uint8_t* out_buf = (uint8_t*)mem_alloc(out_cap > 0 ? out_cap : 1, MEM_CAT_JS_RUNTIME);
+        size_t out_len = 0;
+        if (ctx->encrypting) {
+            ret = mbedtls_nist_kw_wrap(&kw, MBEDTLS_KW_MODE_KW,
+                ctx->data ? ctx->data : crypto_empty_bytes, (size_t)ctx->data_len,
+                out_buf, &out_len, out_cap);
+        } else {
+            ret = mbedtls_nist_kw_unwrap(&kw, MBEDTLS_KW_MODE_KW,
+                ctx->data ? ctx->data : crypto_empty_bytes, (size_t)ctx->data_len,
+                out_buf, &out_len, out_cap);
+        }
+        bool encrypting = ctx->encrypting;
+        mbedtls_nist_kw_free(&kw);
+        cipher_ctx_free(ctx);
+        js_property_set(self, make_string_item_crypto("__cipher_ctx__"), ItemNull);
+        if (ret != 0) {
+            log_error("crypto: AES-KW %s failed: %d", encrypting ? "wrap" : "unwrap", ret);
+            mem_free(out_buf);
+            return ItemNull;
+        }
+        Item result = cipher_output_from_bytes(out_buf, (int)out_len, out_enc, has_out_enc);
+        mem_free(out_buf);
+        return result;
     } else {
         // CBC/CTR: finish with padding
         uint8_t finish_buf[32];
@@ -2134,6 +2274,59 @@ extern "C" Item js_cipher_final(Item output_encoding_item) {
         }
         return cipher_output_from_bytes(crypto_empty_bytes, 0, out_enc, has_out_enc);
     }
+}
+
+static int crypto_item_byte_length(Item item) {
+    const uint8_t* buf = NULL;
+    int len = 0;
+    if (get_uint8_buffer(item, &buf, &len)) return len;
+    return 0;
+}
+
+static Item crypto_concat_buffer_items(Item first, Item second) {
+    const uint8_t* first_buf = NULL;
+    const uint8_t* second_buf = NULL;
+    int first_len = 0;
+    int second_len = 0;
+    get_uint8_buffer(first, &first_buf, &first_len);
+    get_uint8_buffer(second, &second_buf, &second_len);
+
+    int total = first_len + second_len;
+    Item result = crypto_buffer_from_bytes(NULL, total);
+    JsTypedArray* ta = js_get_typed_array_ptr(result.map);
+    if (ta && ta->data) {
+        if (first_buf && first_len > 0) memcpy(ta->data, first_buf, (size_t)first_len);
+        if (second_buf && second_len > 0) {
+            memcpy((uint8_t*)ta->data + first_len, second_buf, (size_t)second_len);
+        }
+    }
+    return result;
+}
+
+extern "C" Item js_cipher_end(Item data_item) {
+    Item self = js_get_current_this();
+    Item chunk = crypto_buffer_from_bytes(NULL, 0);
+    if (!crypto_item_is_undefined(data_item) && data_item.item != ITEM_NULL) {
+        chunk = js_cipher_update(data_item, make_js_undefined_crypto(), make_string_item_crypto("buffer"));
+        if (js_check_exception()) return ItemNull;
+    }
+    Item tail = js_cipher_final(make_string_item_crypto("buffer"));
+    if (js_check_exception()) return ItemNull;
+    Item combined = crypto_concat_buffer_items(chunk, tail);
+    int len = crypto_item_byte_length(combined);
+    js_property_set(self, make_string_item_crypto("__cipher_read__"), combined);
+    js_property_set(self, make_string_item_crypto("readableLength"), (Item){.item = i2it(len)});
+    return self;
+}
+
+extern "C" Item js_cipher_read(Item size_item) {
+    (void)size_item;
+    Item self = js_get_current_this();
+    Item data = js_property_get(self, make_string_item_crypto("__cipher_read__"));
+    if (data.item == 0 || data.item == ITEM_NULL) return ItemNull;
+    js_property_set(self, make_string_item_crypto("__cipher_read__"), ItemNull);
+    js_property_set(self, make_string_item_crypto("readableLength"), (Item){.item = i2it(0)});
+    return data;
 }
 
 extern "C" Item js_cipher_getAuthTag(void) {
@@ -2210,6 +2403,13 @@ static Item create_cipher_object(const char* alg, bool encrypting,
             cipher_ctx_free(ctx);
             return ItemNull;
         }
+    } else if (is_kw_cipher(alg)) {
+        ctx->use_kw = true;
+        if (key_len != 16 || iv_len != 8) {
+            log_error("crypto: invalid AES-KW key/iv length: key=%d iv=%d", key_len, iv_len);
+            cipher_ctx_free(ctx);
+            return ItemNull;
+        }
     } else {
         ctx->use_gcm = false;
         mbedtls_cipher_init(&ctx->cipher);
@@ -2226,19 +2426,28 @@ static Item create_cipher_object(const char* alg, bool encrypting,
         ret = mbedtls_cipher_setkey(&ctx->cipher, key, (int)(key_len * 8),
                                      encrypting ? MBEDTLS_ENCRYPT : MBEDTLS_DECRYPT);
         if (ret != 0) { cipher_ctx_free(ctx); return ItemNull; }
-        ret = mbedtls_cipher_set_iv(&ctx->cipher, iv, (size_t)iv_len);
-        if (ret != 0) { cipher_ctx_free(ctx); return ItemNull; }
+        if (!is_ecb_cipher(alg)) {
+            ret = mbedtls_cipher_set_iv(&ctx->cipher, iv, (size_t)iv_len);
+            if (ret != 0) { cipher_ctx_free(ctx); return ItemNull; }
+        }
         ret = mbedtls_cipher_reset(&ctx->cipher);
         if (ret != 0) { cipher_ctx_free(ctx); return ItemNull; }
     }
 
     Item obj = js_new_object();
+    crypto_link_instance_to_constructor(obj, encrypting ? "Cipheriv" : "Decipheriv");
     js_property_set(obj, make_string_item_crypto("__cipher_ctx__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
     js_property_set(obj, make_string_item_crypto("update"),
                     js_new_function((void*)js_cipher_update, 3));
     js_property_set(obj, make_string_item_crypto("final"),
                     js_new_function((void*)js_cipher_final, 1));
+    js_property_set(obj, make_string_item_crypto("end"),
+                    js_new_function((void*)js_cipher_end, 1));
+    js_property_set(obj, make_string_item_crypto("read"),
+                    js_new_function((void*)js_cipher_read, 1));
+    js_property_set(obj, make_string_item_crypto("readableLength"),
+                    (Item){.item = i2it(0)});
     js_property_set(obj, make_string_item_crypto("getAuthTag"),
                     js_new_function((void*)js_cipher_getAuthTag, 0));
     js_property_set(obj, make_string_item_crypto("setAuthTag"),
@@ -2248,8 +2457,10 @@ static Item create_cipher_object(const char* alg, bool encrypting,
     return obj;
 }
 
-extern "C" Item js_crypto_createCipheriv(Item alg_item, Item key_item, Item iv_item) {
-    if (get_type_id(alg_item) != LMD_TYPE_STRING) return ItemNull;
+static Item js_crypto_create_cipheriv_common(Item alg_item, Item key_item, Item iv_item, bool encrypting) {
+    if (get_type_id(alg_item) != LMD_TYPE_STRING) {
+        return js_throw_invalid_arg_type("cipher", "string", alg_item);
+    }
     String* alg = it2s(alg_item);
     char alg_buf[32];
     int alen = (int)alg->len < 31 ? (int)alg->len : 31;
@@ -2258,26 +2469,51 @@ extern "C" Item js_crypto_createCipheriv(Item alg_item, Item key_item, Item iv_i
 
     uint8_t* key = NULL; int key_len = 0;
     uint8_t* iv = NULL; int iv_len = 0;
-    if (!extract_bytes(key_item, &key, &key_len)) return ItemNull;
-    if (!extract_bytes(iv_item, &iv, &iv_len)) { mem_free(key); return ItemNull; }
+    if (!extract_bytes(key_item, &key, &key_len)) {
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", key_item);
+    }
 
-    return create_cipher_object(alg_buf, true, key, key_len, iv, iv_len);
+    if (!is_known_cipher_name(alg_buf)) {
+        mem_free(key);
+        return crypto_throw_unknown_cipher();
+    }
+    if (!crypto_cipher_key_length_valid(alg_buf, key_len)) {
+        mem_free(key);
+        return crypto_throw_invalid_key_length();
+    }
+
+    mbedtls_cipher_type_t ct = resolve_cipher_type(alg_buf, key_len);
+    if (ct == MBEDTLS_CIPHER_NONE) {
+        mem_free(key);
+        return crypto_throw_unknown_cipher();
+    }
+
+    if (is_ecb_cipher(alg_buf) && get_type_id(iv_item) == LMD_TYPE_NULL) {
+        iv = NULL;
+        iv_len = 0;
+    } else {
+        if (!extract_bytes(iv_item, &iv, &iv_len)) {
+            mem_free(key);
+            if (get_type_id(iv_item) == LMD_TYPE_NULL) return crypto_throw_invalid_initialization_vector();
+            return js_throw_invalid_arg_type("iv", "string, ArrayBuffer, Buffer, TypedArray, or DataView", iv_item);
+        }
+    }
+
+    if (!crypto_cipher_iv_length_valid(alg_buf, iv_len)) {
+        mem_free(key);
+        mem_free(iv);
+        return crypto_throw_invalid_initialization_vector();
+    }
+
+    return create_cipher_object(alg_buf, encrypting, key, key_len, iv, iv_len);
+}
+
+extern "C" Item js_crypto_createCipheriv(Item alg_item, Item key_item, Item iv_item) {
+    return js_crypto_create_cipheriv_common(alg_item, key_item, iv_item, true);
 }
 
 extern "C" Item js_crypto_createDecipheriv(Item alg_item, Item key_item, Item iv_item) {
-    if (get_type_id(alg_item) != LMD_TYPE_STRING) return ItemNull;
-    String* alg = it2s(alg_item);
-    char alg_buf[32];
-    int alen = (int)alg->len < 31 ? (int)alg->len : 31;
-    memcpy(alg_buf, alg->chars, (size_t)alen);
-    alg_buf[alen] = '\0';
-
-    uint8_t* key = NULL; int key_len = 0;
-    uint8_t* iv = NULL; int iv_len = 0;
-    if (!extract_bytes(key_item, &key, &key_len)) return ItemNull;
-    if (!extract_bytes(iv_item, &iv, &iv_len)) { mem_free(key); return ItemNull; }
-
-    return create_cipher_object(alg_buf, false, key, key_len, iv, iv_len);
+    return js_crypto_create_cipheriv_common(alg_item, key_item, iv_item, false);
 }
 
 // ============================================================================
@@ -2805,6 +3041,9 @@ extern "C" Item js_crypto_scryptSync(Item pass_item, Item salt_item, Item keylen
 
 extern "C" Item js_crypto_getCiphers(void) {
     Item arr = js_array_new(0);
+    js_array_push(arr, make_string_item_crypto("aes-128-ecb"));
+    js_array_push(arr, make_string_item_crypto("aes-192-ecb"));
+    js_array_push(arr, make_string_item_crypto("aes-256-ecb"));
     js_array_push(arr, make_string_item_crypto("aes-128-cbc"));
     js_array_push(arr, make_string_item_crypto("aes-192-cbc"));
     js_array_push(arr, make_string_item_crypto("aes-256-cbc"));
@@ -2814,6 +3053,8 @@ extern "C" Item js_crypto_getCiphers(void) {
     js_array_push(arr, make_string_item_crypto("aes-128-gcm"));
     js_array_push(arr, make_string_item_crypto("aes-192-gcm"));
     js_array_push(arr, make_string_item_crypto("aes-256-gcm"));
+    js_array_push(arr, make_string_item_crypto("id-aes128-wrap"));
+    js_array_push(arr, make_string_item_crypto("des-ede3-cbc"));
     return arr;
 }
 
@@ -2827,6 +3068,9 @@ struct CryptoCipherInfo {
 };
 
 static const CryptoCipherInfo crypto_cipher_infos[] = {
+    {"aes-128-ecb", 418, 16, 0, 16, "ecb"},
+    {"aes-192-ecb", 422, 16, 0, 24, "ecb"},
+    {"aes-256-ecb", 426, 16, 0, 32, "ecb"},
     {"aes-128-cbc", 419, 16, 16, 16, "cbc"},
     {"aes-192-cbc", 423, 16, 16, 24, "cbc"},
     {"aes-256-cbc", 427, 16, 16, 32, "cbc"},
@@ -2836,6 +3080,8 @@ static const CryptoCipherInfo crypto_cipher_infos[] = {
     {"aes-128-gcm", 895,  1, 12, 16, "gcm"},
     {"aes-192-gcm", 898,  1, 12, 24, "gcm"},
     {"aes-256-gcm", 901,  1, 12, 32, "gcm"},
+    {"id-aes128-wrap", 788, 8, 8, 16, "wrap"},
+    {"des-ede3-cbc", 44, 8, 8, 24, "cbc"},
 };
 
 static const CryptoCipherInfo* crypto_find_cipher_info_by_name(Item name_item) {
@@ -3257,6 +3503,10 @@ extern "C" Item js_get_crypto_namespace(void) {
     js_property_set(crypto_namespace, make_string_item_crypto("Cipher"),
         js_new_function((void*)js_crypto_createCipheriv, 3));
     js_property_set(crypto_namespace, make_string_item_crypto("Decipher"),
+        js_new_function((void*)js_crypto_createDecipheriv, 3));
+    js_property_set(crypto_namespace, make_string_item_crypto("Cipheriv"),
+        js_new_function((void*)js_crypto_createCipheriv, 3));
+    js_property_set(crypto_namespace, make_string_item_crypto("Decipheriv"),
         js_new_function((void*)js_crypto_createDecipheriv, 3));
 
     Item default_key = make_string_item_crypto("default");

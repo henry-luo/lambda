@@ -8232,10 +8232,14 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
 
                 bool args_have_yield = false;
+                bool args_have_spread = false;
                 if (mt->in_generator) {
                     for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
                         if (jm_has_yield(chk)) { args_have_yield = true; break; }
                     }
+                }
+                for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
+                    if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { args_have_spread = true; break; }
                 }
 
                 MIR_reg_t fn = jm_call_2(mt, "js_super_property_get", MIR_T_I64,
@@ -8246,10 +8250,18 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     recv_arg_spill = jm_gen_spill_save(mt, recv);
                     fn_arg_spill = jm_gen_spill_save(mt, fn);
                 }
-                MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+                MIR_reg_t args_ptr = args_have_spread ?
+                    jm_build_spread_args_array(mt, call->arguments) :
+                    jm_build_args_array(mt, call->arguments, arg_count);
                 if (recv_arg_spill >= 0) {
                     jm_gen_spill_load(mt, recv, recv_arg_spill);
                     jm_gen_spill_load(mt, fn, fn_arg_spill);
+                }
+                if (args_have_spread) {
+                    return jm_call_3(mt, "js_apply_function", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr));
                 }
                 return jm_call_4(mt, "js_call_function", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
@@ -8276,10 +8288,14 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 jm_emit_exc_propagate_check(mt);
             }
             bool args_have_yield = false;
+            bool args_have_spread = false;
             if (mt->in_generator) {
                 for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
                     if (jm_has_yield(chk)) { args_have_yield = true; break; }
                 }
+            }
+            for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
+                if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { args_have_spread = true; break; }
             }
 
             // Optional chaining: obj?.[expr](args)
@@ -8330,16 +8346,23 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     recv_arg_spill = jm_gen_spill_save(mt, recv);
                     fn_arg_spill = jm_gen_spill_save(mt, fn);
                 }
-                MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+                MIR_reg_t args_ptr = args_have_spread ?
+                    jm_build_spread_args_array(mt, call->arguments) :
+                    jm_build_args_array(mt, call->arguments, arg_count);
                 if (recv_arg_spill >= 0) {
                     jm_gen_spill_load(mt, recv, recv_arg_spill);
                     jm_gen_spill_load(mt, fn, fn_arg_spill);
                 }
-                MIR_reg_t call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                    MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                MIR_reg_t call_result = args_have_spread ?
+                    jm_call_3(mt, "js_apply_function", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr)) :
+                    jm_call_4(mt, "js_call_function", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                     MIR_new_reg_op(mt->ctx, call_result)));
                 jm_emit_label(mt, l_end);
@@ -8355,10 +8378,18 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 recv_arg_spill = jm_gen_spill_save(mt, recv);
                 fn_arg_spill = jm_gen_spill_save(mt, fn);
             }
-            MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+            MIR_reg_t args_ptr = args_have_spread ?
+                jm_build_spread_args_array(mt, call->arguments) :
+                jm_build_args_array(mt, call->arguments, arg_count);
             if (recv_arg_spill >= 0) {
                 jm_gen_spill_load(mt, recv, recv_arg_spill);
                 jm_gen_spill_load(mt, fn, fn_arg_spill);
+            }
+            if (args_have_spread) {
+                return jm_call_3(mt, "js_apply_function", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr));
             }
             return jm_call_4(mt, "js_call_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),

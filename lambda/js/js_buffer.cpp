@@ -2341,6 +2341,28 @@ extern "C" Item js_buffer_compare_static(Item a, Item b) {
 // ─── Buffer.allocUnsafeSlow(size) ───────────────────────────────────────────
 
 extern "C" Item js_buffer_allocUnsafeSlow(Item size_item) {
+    int64_t size = 0;
+    TypeId tid = get_type_id(size_item);
+    if (tid == LMD_TYPE_INT) size = it2i(size_item);
+    else if (tid == LMD_TYPE_FLOAT) {
+        double d = it2d(size_item);
+        if (d != d || d < 0 || d > 2147483647) {
+            return js_throw_range_error_code("ERR_OUT_OF_RANGE",
+                "The value of \"size\" is out of range.");
+        }
+        size = (int64_t)d;
+    } else {
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"size\" argument must be of type number.");
+    }
+    if (size < 0 || size > 2147483647) {
+        return js_throw_range_error_code("ERR_OUT_OF_RANGE",
+            "The value of \"size\" is out of range.");
+    }
+    if (size > 1048576) {
+        return js_throw_range_error_code("ERR_OUT_OF_RANGE",
+            "The value of \"size\" is out of range.");
+    }
     return js_buffer_allocUnsafe(size_item);
 }
 
