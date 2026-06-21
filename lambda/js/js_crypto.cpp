@@ -24,6 +24,9 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 #include "../../lib/uuid.h"
 #include "../../lib/digest.h"
 #include <mbedtls/bignum.h>
+#include <mbedtls/ecp.h>
+#include <mbedtls/md.h>
+#include <mbedtls/pk.h>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -248,6 +251,8 @@ static bool crypto_item_is_undefined(Item item) {
 }
 
 static bool extract_bytes(Item item, uint8_t** out, int* out_len);
+static int crypto_mbedtls_random(void* ctx, unsigned char* output, size_t len);
+static Item crypto_output_temp_bytes(const uint8_t* bytes, int len, Item encoding_item);
 
 static Item crypto_buffer_from_bytes(const uint8_t* bytes, int len) {
     if (len < 0) len = 0;
@@ -1445,6 +1450,41 @@ static SignVerifyCtx* sign_verify_ctx_from_this(Item self) {
     return (SignVerifyCtx*)(uintptr_t)it2i(ctx_item);
 }
 
+static mbedtls_md_type_t crypto_mbedtls_md_for_name(const char* alg) {
+    if (!alg) return MBEDTLS_MD_NONE;
+    if (strcmp(alg, "md5") == 0) return MBEDTLS_MD_MD5;
+    if (strcmp(alg, "sha1") == 0) return MBEDTLS_MD_SHA1;
+    if (strcmp(alg, "sha224") == 0) return MBEDTLS_MD_SHA224;
+    if (strcmp(alg, "sha256") == 0) return MBEDTLS_MD_SHA256;
+    if (strcmp(alg, "sha384") == 0) return MBEDTLS_MD_SHA384;
+    if (strcmp(alg, "sha512") == 0) return MBEDTLS_MD_SHA512;
+    return MBEDTLS_MD_NONE;
+}
+
+static bool crypto_private_key_bytes_for_sign(Item key_item, uint8_t** out, int* out_len) {
+    if (!out || !out_len) return false;
+    *out = NULL;
+    *out_len = 0;
+
+    if (get_type_id(key_item) == LMD_TYPE_STRING) {
+        String* s = it2s(key_item);
+        size_t len = s ? s->len : 0;
+        uint8_t* bytes = (uint8_t*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
+        if (len > 0 && s) memcpy(bytes, s->chars, len);
+        bytes[len] = 0;
+        *out = bytes;
+        *out_len = (int)(len + 1);
+        return true;
+    }
+
+    return extract_bytes(key_item, out, out_len);
+}
+
+static Item crypto_throw_sign_failed(const char* message) {
+    return js_throw_error_with_code("ERR_OSSL_CRYPTO_SIGN_FAILED",
+        message ? message : "Failed to sign data");
+}
+
 extern "C" Item js_sign_verify_update(Item data_item, Item encoding_item) {
     Item self = js_get_current_this();
     SignVerifyCtx* ctx = sign_verify_ctx_from_this(self);
@@ -1487,7 +1527,6 @@ extern "C" Item js_sign_verify_end(Item data_item) {
 }
 
 extern "C" Item js_sign_verify_sign(Item key_item, Item encoding_item) {
-    (void)encoding_item;
     Item self = js_get_current_this();
     SignVerifyCtx* ctx = sign_verify_ctx_from_this(self);
     if (!ctx || ctx->finalized) return crypto_throw_sign_verify_finalized();
@@ -1496,11 +1535,62 @@ extern "C" Item js_sign_verify_sign(Item key_item, Item encoding_item) {
         return js_throw_error_with_code(JS_ERR_CRYPTO_SIGN_KEY_REQUIRED, "No key provided to sign");
     }
 
+    mbedtls_md_type_t md_alg = crypto_mbedtls_md_for_name(ctx->alg);
+    int digest_bits = crypto_digest_bits_for_name_ext(ctx->alg, true, true, true);
+    int hash_len = (int)digest_output_len_bits(digest_bits);
+    if (md_alg == MBEDTLS_MD_NONE || hash_len <= 0 || hash_len > 64) {
+        ctx->finalized = true;
+        js_property_set(self, make_string_item_crypto("__sign_verify_ctx__"), ItemNull);
+        sign_verify_ctx_free(ctx);
+        return js_throw_type_error("Digest method not supported");
+    }
+
+    uint8_t hash[64];
+    if (!crypto_digest_compute_bits(digest_bits, ctx->data, 0, ctx->data_len, hash)) {
+        ctx->finalized = true;
+        js_property_set(self, make_string_item_crypto("__sign_verify_ctx__"), ItemNull);
+        sign_verify_ctx_free(ctx);
+        return crypto_throw_sign_failed("Failed to hash data for signing");
+    }
+
+    uint8_t* key_bytes = NULL;
+    int key_len = 0;
+    if (!crypto_private_key_bytes_for_sign(key_item, &key_bytes, &key_len)) {
+        ctx->finalized = true;
+        js_property_set(self, make_string_item_crypto("__sign_verify_ctx__"), ItemNull);
+        sign_verify_ctx_free(ctx);
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", key_item);
+    }
+
+    mbedtls_pk_context pk;
+    mbedtls_pk_init(&pk);
+    uint8_t signature[MBEDTLS_PK_SIGNATURE_MAX_SIZE];
+    size_t signature_len = 0;
+    Item result = ItemNull;
+
+    int ret = mbedtls_pk_parse_key(&pk, key_bytes, (size_t)key_len, NULL, 0,
+        crypto_mbedtls_random, NULL);
+    if (ret != 0) {
+        log_error("crypto: private key parse for sign failed: -0x%04x", -ret);
+        result = js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse private key");
+    } else {
+        ret = mbedtls_pk_sign(&pk, md_alg, hash, (size_t)hash_len,
+            signature, sizeof(signature), &signature_len,
+            crypto_mbedtls_random, NULL);
+        if (ret != 0) {
+            log_error("crypto: PK sign failed: -0x%04x", -ret);
+            result = crypto_throw_sign_failed("Failed to sign data");
+        } else {
+            result = crypto_output_temp_bytes(signature, (int)signature_len, encoding_item);
+        }
+    }
+
+    mbedtls_pk_free(&pk);
+    mem_free(key_bytes);
     ctx->finalized = true;
     js_property_set(self, make_string_item_crypto("__sign_verify_ctx__"), ItemNull);
     sign_verify_ctx_free(ctx);
-    return js_throw_error_with_code(JS_ERR_METHOD_NOT_IMPLEMENTED,
-        "Asymmetric signing is not supported by this crypto backend");
+    return result;
 }
 
 extern "C" Item js_sign_verify_verify(Item key_item, Item signature_item, Item encoding_item) {
@@ -2260,53 +2350,515 @@ extern "C" Item js_crypto_getDiffieHellman(Item name_item) {
     return js_crypto_createDiffieHellmanGroup(name_item);
 }
 
+static mbedtls_ecp_group_id crypto_ecdh_group_id(const char* curve) {
+    if (!curve) return MBEDTLS_ECP_DP_NONE;
+    if (strcmp(curve, "prime256v1") == 0 || strcmp(curve, "secp256r1") == 0) return MBEDTLS_ECP_DP_SECP256R1;
+    if (strcmp(curve, "secp384r1") == 0) return MBEDTLS_ECP_DP_SECP384R1;
+    if (strcmp(curve, "secp521r1") == 0) return MBEDTLS_ECP_DP_SECP521R1;
+    if (strcmp(curve, "secp256k1") == 0) return MBEDTLS_ECP_DP_SECP256K1;
+    return MBEDTLS_ECP_DP_NONE;
+}
+
 static bool crypto_curve_supported(Item curve_item, char* out, int out_size) {
     if (get_type_id(curve_item) != LMD_TYPE_STRING) return false;
     if (!crypto_normalize_string(curve_item, out, out_size, false)) return false;
-    return strcmp(out, "prime256v1") == 0 ||
-           strcmp(out, "secp384r1") == 0 ||
-           strcmp(out, "secp521r1") == 0;
+    return crypto_ecdh_group_id(out) != MBEDTLS_ECP_DP_NONE;
 }
 
-static Item crypto_throw_ecdh_not_implemented(void) {
-    return js_throw_error_with_code(JS_ERR_METHOD_NOT_IMPLEMENTED,
-        "ECDH key agreement is not supported by this crypto backend yet");
+static bool crypto_ecdh_load_group(const char* curve, mbedtls_ecp_group* group) {
+    if (!group) return false;
+    mbedtls_ecp_group_id id = crypto_ecdh_group_id(curve);
+    if (id == MBEDTLS_ECP_DP_NONE) return false;
+    int ret = mbedtls_ecp_group_load(group, id);
+    if (ret != 0) {
+        log_error("crypto: ECDH group load failed for %s: -0x%04x", curve ? curve : "(null)", -ret);
+        return false;
+    }
+    return true;
+}
+
+static bool crypto_ecdh_load_group_from_self(Item self, mbedtls_ecp_group* group) {
+    char curve[32];
+    Item curve_item = js_property_get(self, make_string_item_crypto("__ecdh_curve__"));
+    if (!crypto_normalize_string(curve_item, curve, sizeof(curve), false)) return false;
+    return crypto_ecdh_load_group(curve, group);
+}
+
+static int crypto_ecdh_field_len(const mbedtls_ecp_group* group) {
+    if (!group || group->pbits == 0) return 0;
+    return (int)((group->pbits + 7) / 8);
+}
+
+static int crypto_ecdh_scalar_len(const mbedtls_ecp_group* group) {
+    if (!group || group->nbits == 0) return crypto_ecdh_field_len(group);
+    return (int)((group->nbits + 7) / 8);
+}
+
+enum CryptoEcdhPointFormat {
+    CRYPTO_ECDH_POINT_UNCOMPRESSED = 0,
+    CRYPTO_ECDH_POINT_COMPRESSED = 1,
+    CRYPTO_ECDH_POINT_HYBRID = 2
+};
+
+static void crypto_format_ecdh_format_value(Item item, char* out, int out_size) {
+    if (!out || out_size <= 0) return;
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(item);
+        int len = s && s->len < (size_t)(out_size - 1) ? (int)s->len : out_size - 1;
+        if (len > 0 && s) memcpy(out, s->chars, (size_t)len);
+        out[len] = '\0';
+        return;
+    }
+    crypto_format_number_for_error(item, out, out_size);
+}
+
+static Item crypto_throw_ecdh_invalid_format(Item format_item) {
+    char value[64];
+    crypto_format_ecdh_format_value(format_item, value, sizeof(value));
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Invalid ECDH format: %s", value);
+    return js_throw_type_error_code("ERR_CRYPTO_ECDH_INVALID_FORMAT", msg);
+}
+
+static bool crypto_ecdh_parse_format(Item format_item, int* out_format) {
+    if (!out_format) return false;
+    *out_format = CRYPTO_ECDH_POINT_UNCOMPRESSED;
+    if (crypto_item_is_undefined(format_item) || get_type_id(format_item) == LMD_TYPE_NULL) return true;
+    if (get_type_id(format_item) != LMD_TYPE_STRING) {
+        crypto_throw_ecdh_invalid_format(format_item);
+        return false;
+    }
+    char format[32];
+    if (!crypto_normalize_string(format_item, format, sizeof(format), false)) {
+        crypto_throw_ecdh_invalid_format(format_item);
+        return false;
+    }
+    if (strcmp(format, "uncompressed") == 0) {
+        *out_format = CRYPTO_ECDH_POINT_UNCOMPRESSED;
+        return true;
+    }
+    if (strcmp(format, "compressed") == 0) {
+        *out_format = CRYPTO_ECDH_POINT_COMPRESSED;
+        return true;
+    }
+    if (strcmp(format, "hybrid") == 0) {
+        *out_format = CRYPTO_ECDH_POINT_HYBRID;
+        return true;
+    }
+    crypto_throw_ecdh_invalid_format(format_item);
+    return false;
+}
+
+static bool crypto_ecdh_read_public_point(const mbedtls_ecp_group* group,
+                                          const uint8_t* bytes, int len,
+                                          mbedtls_ecp_point* point) {
+    if (!group || !bytes || len <= 0 || !point) return false;
+
+    int ret = 0;
+    if (bytes[0] == 0x06 || bytes[0] == 0x07) {
+        uint8_t* copy = (uint8_t*)mem_alloc((size_t)len, MEM_CAT_JS_RUNTIME);
+        memcpy(copy, bytes, (size_t)len);
+        int expected_odd = bytes[0] & 1;
+        copy[0] = 0x04;
+        ret = mbedtls_ecp_point_read_binary(group, point, copy, (size_t)len);
+        mem_free(copy);
+        if (ret != 0) return false;
+        if (mbedtls_mpi_get_bit(&point->MBEDTLS_PRIVATE(Y), 0) != expected_odd) return false;
+    } else {
+        ret = mbedtls_ecp_point_read_binary(group, point, bytes, (size_t)len);
+        if (ret != 0) return false;
+    }
+
+    ret = mbedtls_ecp_check_pubkey(group, point);
+    if (ret != 0) return false;
+    return true;
+}
+
+static bool crypto_ecdh_write_public_point(const mbedtls_ecp_group* group,
+                                           const mbedtls_ecp_point* point,
+                                           int format, uint8_t** out, int* out_len) {
+    if (!group || !point || !out || !out_len) return false;
+    *out = NULL;
+    *out_len = 0;
+
+    int field_len = crypto_ecdh_field_len(group);
+    int max_len = field_len * 2 + 1;
+    if (field_len <= 0 || max_len <= 1) return false;
+
+    uint8_t* bytes = (uint8_t*)mem_alloc((size_t)max_len, MEM_CAT_JS_RUNTIME);
+    size_t written = 0;
+    int mbed_format = format == CRYPTO_ECDH_POINT_COMPRESSED ?
+        MBEDTLS_ECP_PF_COMPRESSED : MBEDTLS_ECP_PF_UNCOMPRESSED;
+    int ret = mbedtls_ecp_point_write_binary(group, point, mbed_format,
+        &written, bytes, (size_t)max_len);
+    if (ret != 0) {
+        mem_free(bytes);
+        log_error("crypto: ECDH public point write failed: -0x%04x", -ret);
+        return false;
+    }
+
+    if (format == CRYPTO_ECDH_POINT_HYBRID && written > 0) {
+        bytes[0] = (uint8_t)(mbedtls_mpi_get_bit(&point->MBEDTLS_PRIVATE(Y), 0) ? 0x07 : 0x06);
+    }
+
+    *out = bytes;
+    *out_len = (int)written;
+    return true;
+}
+
+static bool crypto_ecdh_public_prop_to_point(Item self, const mbedtls_ecp_group* group,
+                                             mbedtls_ecp_point* point) {
+    uint8_t* bytes = NULL;
+    int len = 0;
+    if (!crypto_object_bytes(self, "__ecdh_public__", &bytes, &len)) return false;
+    bool ok = crypto_ecdh_read_public_point(group, bytes, len, point);
+    mem_free(bytes);
+    return ok;
+}
+
+static bool crypto_ecdh_private_prop_to_mpi(Item self, mbedtls_mpi* value) {
+    uint8_t* bytes = NULL;
+    int len = 0;
+    if (!crypto_object_bytes(self, "__ecdh_private__", &bytes, &len)) return false;
+    int ret = mbedtls_mpi_read_binary(value, bytes, (size_t)len);
+    mem_free(bytes);
+    if (ret != 0) {
+        log_error("crypto: ECDH private MPI read failed: -0x%04x", -ret);
+        return false;
+    }
+    return true;
+}
+
+static bool crypto_ecdh_public_from_private(mbedtls_ecp_group* group,
+                                            const mbedtls_mpi* private_key,
+                                            mbedtls_ecp_point* public_key) {
+    if (!group || !private_key || !public_key) return false;
+    if (mbedtls_ecp_check_privkey(group, private_key) != 0) return false;
+    int ret = mbedtls_ecp_mul(group, public_key, private_key, &group->G,
+        crypto_mbedtls_random, NULL);
+    if (ret != 0) {
+        log_error("crypto: ECDH public derivation failed: -0x%04x", -ret);
+        return false;
+    }
+    return mbedtls_ecp_check_pubkey(group, public_key) == 0;
+}
+
+static bool crypto_ecdh_store_keypair(Item self, mbedtls_ecp_group* group,
+                                      const mbedtls_mpi* private_key,
+                                      const mbedtls_ecp_point* public_key) {
+    int scalar_len = crypto_ecdh_scalar_len(group);
+    uint8_t* private_bytes = NULL;
+    int private_len = 0;
+    uint8_t* public_bytes = NULL;
+    int public_len = 0;
+
+    bool ok = crypto_dh_write_fixed_mpi(private_key, scalar_len, &private_bytes, &private_len) &&
+              crypto_ecdh_write_public_point(group, public_key,
+                  CRYPTO_ECDH_POINT_UNCOMPRESSED, &public_bytes, &public_len);
+    if (!ok) {
+        if (private_bytes) mem_free(private_bytes);
+        if (public_bytes) mem_free(public_bytes);
+        return false;
+    }
+
+    js_property_set(self, make_string_item_crypto("__ecdh_private__"),
+        crypto_buffer_from_bytes(private_bytes, private_len));
+    js_property_set(self, make_string_item_crypto("__ecdh_public__"),
+        crypto_buffer_from_bytes(public_bytes, public_len));
+    mem_free(private_bytes);
+    mem_free(public_bytes);
+    return true;
+}
+
+static Item crypto_throw_ecdh_invalid_public_key(void) {
+    return js_throw_error_with_code("ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY",
+        "Public key is not valid for specified curve");
+}
+
+static Item crypto_throw_ecdh_convert_public_key(void) {
+    return js_throw_error_with_code("ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY",
+        "Failed to convert Buffer to EC_POINT");
+}
+
+static Item crypto_throw_ecdh_invalid_private_key(void) {
+    return js_throw_error_with_code("ERR_CRYPTO_INVALID_KEYTYPE",
+        "Private key is not valid for specified curve");
+}
+
+static void crypto_emit_ecdh_set_public_key_warning(void) {
+    Item warning = js_new_object();
+    js_property_set(warning, make_string_item_crypto("name"),
+        make_string_item_crypto("DeprecationWarning"));
+    js_property_set(warning, make_string_item_crypto("message"),
+        make_string_item_crypto("ecdh.setPublicKey() is deprecated."));
+    js_property_set(warning, make_string_item_crypto("code"),
+        make_string_item_crypto("DEP0031"));
+    js_process_emit(make_string_item_crypto("warning"), warning);
 }
 
 extern "C" Item js_ecdh_generateKeys(Item encoding_item, Item format_item) {
-    (void)encoding_item;
-    (void)format_item;
-    return crypto_throw_ecdh_not_implemented();
+    Item self = js_get_current_this();
+    int format = CRYPTO_ECDH_POINT_UNCOMPRESSED;
+    if (!crypto_ecdh_parse_format(format_item, &format)) return ItemNull;
+
+    mbedtls_ecp_group group;
+    mbedtls_mpi private_key;
+    mbedtls_ecp_point public_key;
+    mbedtls_ecp_group_init(&group);
+    mbedtls_mpi_init(&private_key);
+    mbedtls_ecp_point_init(&public_key);
+
+    uint8_t* public_bytes = NULL;
+    int public_len = 0;
+    Item result = ItemNull;
+    bool ok = crypto_ecdh_load_group_from_self(self, &group) &&
+              mbedtls_ecp_gen_keypair(&group, &private_key, &public_key,
+                  crypto_mbedtls_random, NULL) == 0 &&
+              crypto_ecdh_store_keypair(self, &group, &private_key, &public_key) &&
+              crypto_ecdh_write_public_point(&group, &public_key, format,
+                  &public_bytes, &public_len);
+
+    if (ok) result = crypto_output_temp_bytes(public_bytes, public_len, encoding_item);
+    if (public_bytes) mem_free(public_bytes);
+    mbedtls_ecp_point_free(&public_key);
+    mbedtls_mpi_free(&private_key);
+    mbedtls_ecp_group_free(&group);
+
+    if (!ok && !js_check_exception()) {
+        return js_throw_error_with_code("ERR_CRYPTO_OPERATION_FAILED", "Failed to generate ECDH key pair");
+    }
+    return result;
 }
 
 extern "C" Item js_ecdh_computeSecret(Item key_item, Item input_encoding_item, Item output_encoding_item) {
-    (void)key_item;
-    (void)input_encoding_item;
-    (void)output_encoding_item;
-    return crypto_throw_ecdh_not_implemented();
+    Item self = js_get_current_this();
+    uint8_t* peer_bytes = NULL;
+    int peer_len = 0;
+    if (!crypto_extract_bytes_with_encoding(key_item, input_encoding_item, &peer_bytes, &peer_len)) {
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, or DataView", key_item);
+    }
+
+    mbedtls_ecp_group group;
+    mbedtls_mpi private_key;
+    mbedtls_ecp_point peer_public;
+    mbedtls_ecp_point expected_public;
+    mbedtls_ecp_point stored_public;
+    mbedtls_ecp_point secret_point;
+    mbedtls_ecp_group_init(&group);
+    mbedtls_mpi_init(&private_key);
+    mbedtls_ecp_point_init(&peer_public);
+    mbedtls_ecp_point_init(&expected_public);
+    mbedtls_ecp_point_init(&stored_public);
+    mbedtls_ecp_point_init(&secret_point);
+
+    uint8_t* secret_bytes = NULL;
+    int secret_len = 0;
+    Item result = ItemNull;
+    bool ok = false;
+    bool invalid_pair = false;
+
+    if (!crypto_ecdh_load_group_from_self(self, &group)) goto done;
+    if (!crypto_ecdh_private_prop_to_mpi(self, &private_key)) {
+        js_throw_error_with_code("ERR_CRYPTO_INVALID_STATE", "ECDH private key is not set");
+        goto done;
+    }
+    if (!crypto_ecdh_read_public_point(&group, peer_bytes, peer_len, &peer_public)) {
+        crypto_throw_ecdh_invalid_public_key();
+        goto done;
+    }
+    if (!crypto_ecdh_public_from_private(&group, &private_key, &expected_public)) {
+        js_throw_error_with_code("ERR_CRYPTO_INVALID_STATE", "Invalid key pair");
+        goto done;
+    }
+    if (!crypto_ecdh_public_prop_to_point(self, &group, &stored_public)) {
+        js_throw_error_with_code("ERR_CRYPTO_INVALID_STATE", "Invalid key pair");
+        goto done;
+    }
+    if (mbedtls_mpi_cmp_mpi(&expected_public.MBEDTLS_PRIVATE(X), &stored_public.MBEDTLS_PRIVATE(X)) != 0 ||
+            mbedtls_mpi_cmp_mpi(&expected_public.MBEDTLS_PRIVATE(Y), &stored_public.MBEDTLS_PRIVATE(Y)) != 0) {
+        invalid_pair = true;
+        js_throw_error_with_code("ERR_CRYPTO_INVALID_STATE", "Invalid key pair");
+        goto done;
+    }
+
+    if (mbedtls_ecp_mul(&group, &secret_point, &private_key, &peer_public,
+            crypto_mbedtls_random, NULL) != 0) {
+        crypto_throw_ecdh_invalid_public_key();
+        goto done;
+    }
+    secret_len = crypto_ecdh_field_len(&group);
+    if (!crypto_dh_write_fixed_mpi(&secret_point.MBEDTLS_PRIVATE(X),
+            secret_len, &secret_bytes, &secret_len)) {
+        js_throw_error_with_code("ERR_CRYPTO_OPERATION_FAILED", "Failed to compute ECDH secret");
+        goto done;
+    }
+    ok = true;
+
+done:
+    mem_free(peer_bytes);
+    mbedtls_ecp_point_free(&secret_point);
+    mbedtls_ecp_point_free(&stored_public);
+    mbedtls_ecp_point_free(&expected_public);
+    mbedtls_ecp_point_free(&peer_public);
+    mbedtls_mpi_free(&private_key);
+    mbedtls_ecp_group_free(&group);
+
+    if (ok) {
+        result = crypto_output_temp_bytes(secret_bytes, secret_len, output_encoding_item);
+    } else if (!js_check_exception() && !invalid_pair) {
+        result = js_throw_error_with_code("ERR_CRYPTO_OPERATION_FAILED", "Failed to compute ECDH secret");
+    }
+    if (secret_bytes) mem_free(secret_bytes);
+    return result;
 }
 
 extern "C" Item js_ecdh_getPublicKey(Item encoding_item, Item format_item) {
-    (void)encoding_item;
-    (void)format_item;
-    return js_throw_error_with_code("ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY", "Failed to get ECDH public key");
+    Item self = js_get_current_this();
+    if (js_property_get(self, make_string_item_crypto("__ecdh_public__")).item == ITEM_NULL) {
+        return js_throw_error_with_code("ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY", "Failed to get ECDH public key");
+    }
+
+    int format = CRYPTO_ECDH_POINT_UNCOMPRESSED;
+    if (!crypto_ecdh_parse_format(format_item, &format)) return ItemNull;
+
+    mbedtls_ecp_group group;
+    mbedtls_ecp_point public_key;
+    mbedtls_ecp_group_init(&group);
+    mbedtls_ecp_point_init(&public_key);
+
+    uint8_t* public_bytes = NULL;
+    int public_len = 0;
+    Item result = ItemNull;
+    bool ok = crypto_ecdh_load_group_from_self(self, &group) &&
+              crypto_ecdh_public_prop_to_point(self, &group, &public_key) &&
+              crypto_ecdh_write_public_point(&group, &public_key, format,
+                  &public_bytes, &public_len);
+    if (ok) result = crypto_output_temp_bytes(public_bytes, public_len, encoding_item);
+    if (public_bytes) mem_free(public_bytes);
+    mbedtls_ecp_point_free(&public_key);
+    mbedtls_ecp_group_free(&group);
+    if (!ok && !js_check_exception()) {
+        return js_throw_error_with_code("ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY", "Failed to get ECDH public key");
+    }
+    return result;
 }
 
 extern "C" Item js_ecdh_getPrivateKey(Item encoding_item) {
-    (void)encoding_item;
-    return js_throw_error_with_code("ERR_CRYPTO_ECDH_INVALID_PRIVATE_KEY", "Failed to get ECDH private key");
+    Item self = js_get_current_this();
+    if (js_property_get(self, make_string_item_crypto("__ecdh_private__")).item == ITEM_NULL) {
+        return js_throw_error_with_code("ERR_CRYPTO_ECDH_INVALID_PRIVATE_KEY", "Failed to get ECDH private key");
+    }
+    return crypto_output_object_bytes(self, "__ecdh_private__", encoding_item);
 }
 
 extern "C" Item js_ecdh_setPrivateKey(Item key_item, Item encoding_item) {
-    (void)key_item;
-    (void)encoding_item;
-    return crypto_throw_ecdh_not_implemented();
+    uint8_t* private_bytes = NULL;
+    int private_len = 0;
+    if (!crypto_extract_bytes_with_encoding(key_item, encoding_item, &private_bytes, &private_len)) {
+        return js_throw_invalid_arg_type("privateKey", "string, ArrayBuffer, Buffer, TypedArray, or DataView", key_item);
+    }
+
+    Item self = js_get_current_this();
+    mbedtls_ecp_group group;
+    mbedtls_mpi private_key;
+    mbedtls_ecp_point public_key;
+    mbedtls_ecp_group_init(&group);
+    mbedtls_mpi_init(&private_key);
+    mbedtls_ecp_point_init(&public_key);
+
+    bool ok = crypto_ecdh_load_group_from_self(self, &group) &&
+              mbedtls_mpi_read_binary(&private_key, private_bytes, (size_t)private_len) == 0 &&
+              crypto_ecdh_public_from_private(&group, &private_key, &public_key) &&
+              crypto_ecdh_store_keypair(self, &group, &private_key, &public_key);
+
+    mem_free(private_bytes);
+    mbedtls_ecp_point_free(&public_key);
+    mbedtls_mpi_free(&private_key);
+    mbedtls_ecp_group_free(&group);
+
+    if (!ok && !js_check_exception()) return crypto_throw_ecdh_invalid_private_key();
+    return ok ? self : ItemNull;
 }
 
 extern "C" Item js_ecdh_setPublicKey(Item key_item, Item encoding_item) {
-    (void)key_item;
-    (void)encoding_item;
-    return crypto_throw_ecdh_not_implemented();
+    crypto_emit_ecdh_set_public_key_warning();
+    uint8_t* public_bytes = NULL;
+    int public_len = 0;
+    if (!crypto_extract_bytes_with_encoding(key_item, encoding_item, &public_bytes, &public_len)) {
+        return js_throw_invalid_arg_type("publicKey", "string, ArrayBuffer, Buffer, TypedArray, or DataView", key_item);
+    }
+
+    Item self = js_get_current_this();
+    mbedtls_ecp_group group;
+    mbedtls_ecp_point public_key;
+    mbedtls_ecp_group_init(&group);
+    mbedtls_ecp_point_init(&public_key);
+
+    uint8_t* canonical = NULL;
+    int canonical_len = 0;
+    bool ok = crypto_ecdh_load_group_from_self(self, &group) &&
+              crypto_ecdh_read_public_point(&group, public_bytes, public_len, &public_key) &&
+              crypto_ecdh_write_public_point(&group, &public_key,
+                  CRYPTO_ECDH_POINT_UNCOMPRESSED, &canonical, &canonical_len);
+
+    mem_free(public_bytes);
+    mbedtls_ecp_point_free(&public_key);
+    mbedtls_ecp_group_free(&group);
+    if (!ok) {
+        if (canonical) mem_free(canonical);
+        if (!js_check_exception()) return crypto_throw_ecdh_convert_public_key();
+        return ItemNull;
+    }
+
+    js_property_set(self, make_string_item_crypto("__ecdh_public__"),
+        crypto_buffer_from_bytes(canonical, canonical_len));
+    mem_free(canonical);
+    return self;
+}
+
+extern "C" Item js_ecdh_convertKey(Item key_item, Item curve_item,
+                                   Item input_encoding_item, Item output_encoding_item,
+                                   Item format_item) {
+    if (crypto_item_is_undefined(key_item) || get_type_id(key_item) == LMD_TYPE_NULL) {
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, or DataView", key_item);
+    }
+    char curve[32];
+    if (get_type_id(curve_item) != LMD_TYPE_STRING) {
+        return js_throw_invalid_arg_type("curve", "string", curve_item);
+    }
+    if (!crypto_curve_supported(curve_item, curve, sizeof(curve))) {
+        return js_throw_type_error_code("ERR_CRYPTO_INVALID_CURVE", "Invalid EC curve name");
+    }
+
+    int format = CRYPTO_ECDH_POINT_UNCOMPRESSED;
+    if (!crypto_ecdh_parse_format(format_item, &format)) return ItemNull;
+
+    uint8_t* key_bytes = NULL;
+    int key_len = 0;
+    if (!crypto_extract_bytes_with_encoding(key_item, input_encoding_item, &key_bytes, &key_len)) {
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, or DataView", key_item);
+    }
+
+    mbedtls_ecp_group group;
+    mbedtls_ecp_point public_key;
+    mbedtls_ecp_group_init(&group);
+    mbedtls_ecp_point_init(&public_key);
+    uint8_t* converted = NULL;
+    int converted_len = 0;
+    Item result = ItemNull;
+    bool ok = crypto_ecdh_load_group(curve, &group) &&
+              crypto_ecdh_read_public_point(&group, key_bytes, key_len, &public_key) &&
+              crypto_ecdh_write_public_point(&group, &public_key, format,
+                  &converted, &converted_len);
+
+    mem_free(key_bytes);
+    if (ok) result = crypto_output_temp_bytes(converted, converted_len, output_encoding_item);
+    if (converted) mem_free(converted);
+    mbedtls_ecp_point_free(&public_key);
+    mbedtls_ecp_group_free(&group);
+    if (!ok && !js_check_exception()) return crypto_throw_ecdh_convert_public_key();
+    return result;
 }
 
 extern "C" Item js_crypto_createECDH(Item curve_item) {
@@ -2321,6 +2873,8 @@ extern "C" Item js_crypto_createECDH(Item curve_item) {
     Item obj = js_new_object();
     crypto_link_instance_to_constructor(obj, "ECDH");
     js_property_set(obj, make_string_item_crypto("__ecdh_curve__"), make_string_item_crypto(curve));
+    js_property_set(obj, make_string_item_crypto("__ecdh_private__"), ItemNull);
+    js_property_set(obj, make_string_item_crypto("__ecdh_public__"), ItemNull);
     js_property_set(obj, make_string_item_crypto("generateKeys"),
         js_new_function((void*)js_ecdh_generateKeys, 2));
     js_property_set(obj, make_string_item_crypto("computeSecret"),
@@ -2341,6 +2895,7 @@ extern "C" Item js_crypto_getCurves(void) {
     js_array_push(arr, make_string_item_crypto("prime256v1"));
     js_array_push(arr, make_string_item_crypto("secp384r1"));
     js_array_push(arr, make_string_item_crypto("secp521r1"));
+    js_array_push(arr, make_string_item_crypto("secp256k1"));
     return arr;
 }
 
@@ -4284,6 +4839,7 @@ extern "C" Item js_get_crypto_namespace(void) {
     // point conversion
     js_property_set(constants, make_string_item_crypto("POINT_CONVERSION_COMPRESSED"), (Item){.item = i2it(2)});
     js_property_set(constants, make_string_item_crypto("POINT_CONVERSION_UNCOMPRESSED"), (Item){.item = i2it(4)});
+    js_property_set(constants, make_string_item_crypto("POINT_CONVERSION_HYBRID"), (Item){.item = i2it(6)});
     js_property_set(crypto_namespace, make_string_item_crypto("constants"), constants);
 
     // class constructors as stubs (for typeof/instanceof checks)
@@ -4307,8 +4863,10 @@ extern "C" Item js_get_crypto_namespace(void) {
         js_new_function((void*)js_crypto_createDiffieHellman, 4));
     js_property_set(crypto_namespace, make_string_item_crypto("DiffieHellmanGroup"),
         js_new_function((void*)js_crypto_createDiffieHellmanGroup, 1));
-    js_property_set(crypto_namespace, make_string_item_crypto("ECDH"),
-        js_new_function((void*)js_crypto_createECDH, 1));
+    Item ecdh_ctor = js_new_function((void*)js_crypto_createECDH, 1);
+    js_property_set(ecdh_ctor, make_string_item_crypto("convertKey"),
+        js_new_function((void*)js_ecdh_convertKey, 5));
+    js_property_set(crypto_namespace, make_string_item_crypto("ECDH"), ecdh_ctor);
 
     Item default_key = make_string_item_crypto("default");
     js_property_set(crypto_namespace, default_key, crypto_namespace);

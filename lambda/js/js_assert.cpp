@@ -280,14 +280,10 @@ extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item messa
     if (exp_type == LMD_TYPE_MAP) {
         bool has_regex = js_class_id(error_expected) == JS_CLASS_REGEXP;
         if (has_regex) {
-            // RegExp: test against thrown.message or String(thrown)
+            // RegExp: Node matches against String(thrown), e.g. "Error: message".
             extern Item js_to_string_val(Item value);
-            Item msg_key = assert_make_string("message");
-            Item thrown_msg = js_property_get(thrown, msg_key);
-            if (get_type_id(thrown_msg) == LMD_TYPE_UNDEFINED) {
-                thrown_msg = js_to_string_val(thrown);
-            }
-            Item test_result = js_regex_test(error_expected, thrown_msg);
+            Item thrown_str = js_to_string_val(thrown);
+            Item test_result = js_regex_test(error_expected, thrown_str);
             if (get_type_id(test_result) == LMD_TYPE_BOOL && it2b(test_result)) {
                 return make_js_undefined();
             }
@@ -483,11 +479,8 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
 
         if (is_regex) {
             extern Item js_to_string_val(Item value);
-            Item msg_key = assert_make_string("message");
-            Item thrown_msg = js_property_get(thrown, msg_key);
-            if (get_type_id(thrown_msg) == LMD_TYPE_UNDEFINED)
-                thrown_msg = js_to_string_val(thrown);
-            Item test_result = js_regex_test(error_expected, thrown_msg);
+            Item thrown_str = js_to_string_val(thrown);
+            Item test_result = js_regex_test(error_expected, thrown_str);
             if (get_type_id(test_result) == LMD_TYPE_BOOL && it2b(test_result)) return true;
             throw_assertion_error("The input did not match the regular expression");
             return false;
