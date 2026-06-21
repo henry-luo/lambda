@@ -755,7 +755,25 @@ static bool js_dom_exec_command_is_history(const char* cmd) {
 static bool js_dom_exec_command_uses_helper_first(const char* cmd) {
     if (!cmd) return false;
     return js_dom_exec_command_is_clipboard(cmd) ||
-        strcasecmp(cmd, "selectAll") == 0;
+        strcasecmp(cmd, "selectAll") == 0 ||
+        strcasecmp(cmd, "delete") == 0 ||
+        strcasecmp(cmd, "forwardDelete") == 0 ||
+        strcasecmp(cmd, "deleteForward") == 0 ||
+        strcasecmp(cmd, "undo") == 0;
+}
+
+static Item js_dom_exec_command_call_helper(Item* args, int argc) {
+    Item helper_key = (Item){.item = s2it(heap_create_name("__lambda_execCommand_handler"))};
+    Item helper = js_get_global_property(helper_key);
+    if (get_type_id(helper) == LMD_TYPE_FUNC) {
+        Item guard_key = (Item){.item = s2it(heap_create_name("__lambda_execCommand_helper_fallback"))};
+        Item prev_guard = js_get_global_property(guard_key);
+        js_set_global_property(guard_key, (Item){.item = ITEM_TRUE}, 0);
+        Item handled = js_call_function(helper, js_get_document_object_value(), args, argc);
+        js_set_global_property(guard_key, prev_guard, 0);
+        return handled;
+    }
+    return (Item){.item = ITEM_FALSE};
 }
 
 static bool js_dom_exec_command_is_native(const char* cmd) {
@@ -2349,6 +2367,13 @@ extern "C" Item js_get_document_object_value() {
 // Dispatch method calls on the document proxy object.
 // Routes to js_document_method which handles getElementById, querySelector, etc.
 extern "C" Item js_document_proxy_method(Item method_name, Item* args, int argc) {
+    const char* method = fn_to_cstr(method_name);
+    if (method && strcmp(method, "execCommand") != 0) {
+        Item fn = js_document_get_property(method_name);
+        if (get_type_id(fn) == LMD_TYPE_FUNC) {
+            return js_call_function(fn, js_get_document_object_value(), args, argc);
+        }
+    }
     return js_document_method(method_name, args, argc);
 }
 
@@ -5273,27 +5298,18 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     if (strcmp(method, "execCommand") == 0) {
         const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
         if (js_dom_exec_command_uses_helper_first(cmd)) {
-            Item helper_key = (Item){.item = s2it(heap_create_name("__lambda_execCommand_handler"))};
-            Item helper = js_get_global_property(helper_key);
-            if (get_type_id(helper) == LMD_TYPE_FUNC) {
-                Item handled = js_call_function(helper, js_get_document_object_value(), args, argc);
-                if (js_is_truthy(handled)) return handled;
-            }
+            Item handled = js_dom_exec_command_call_helper(args, argc);
+            if (js_is_truthy(handled)) return handled;
         }
         if (js_dom_exec_command_is_native(cmd)) {
-            return js_dom_exec_command_native(args, argc);
+            Item handled = js_dom_exec_command_native(args, argc);
+            if (js_is_truthy(handled)) return handled;
         }
-        Item helper_key = (Item){.item = s2it(heap_create_name("__lambda_execCommand_handler"))};
-        Item helper = js_get_global_property(helper_key);
-        TypeId htype = get_type_id(helper);
-        if (htype == LMD_TYPE_FUNC) {
-            // The WPT clipboard shim installs this helper to fire
-            // copy/cut/paste event listeners during synthetic gestures —
-            // see Radiant_Clipboard_WPT_Status.md. For non-clipboard
-            // commands, the helper itself returns false.
-            return js_call_function(helper, js_get_document_object_value(), args, argc);
-        }
-        return (Item){.item = ITEM_FALSE};
+        // The WPT/Chrome editing shims install this helper to fire
+        // clipboard listeners and to cover headless DOM selections that do not
+        // resolve to a Radiant editing surface. For commands the helper does
+        // not own, it returns false.
+        return js_dom_exec_command_call_helper(args, argc);
     }
     // queryCommand* reports the native EC command surface plus clipboard
     // commands. State/value/indeterm grow with the EC tiers.
@@ -5732,6 +5748,17 @@ extern "C" Item js_document_get_property(Item prop_name) {
     if (strcmp(prop, "dispatchEvent") == 0)
         return js_new_function((void*)js_eventtarget_dispatch, 1);
 
+    DomDocument* expando_doc = _js_current_document ? _js_current_document : _js_main_document;
+    void* stub_v = js_dom_get_or_create_doc_node(expando_doc);
+    if (stub_v) {
+        Item exp_map = expando_get_map((DomNode*)stub_v);
+        if (exp_map.item != ITEM_NULL) {
+            if (expando_map_has_key(exp_map, prop_name)) {
+                return js_property_get(exp_map, prop_name);
+            }
+        }
+    }
+
     // Document method names accessed as properties return ITEM_TRUE for feature detection
     static const char* doc_methods[] = {
         "getElementById", "getElementsByTagName", "getElementsByClassName",
@@ -5789,8 +5816,8 @@ extern "C" Item js_document_get_property(Item prop_name) {
         return root ? js_dom_wrap_element(root) : ItemNull;
     }
 
-    DomDocument* expando_doc = _js_current_document ? _js_current_document : _js_main_document;
-    void* stub_v = js_dom_get_or_create_doc_node(expando_doc);
+    expando_doc = _js_current_document ? _js_current_document : _js_main_document;
+    stub_v = js_dom_get_or_create_doc_node(expando_doc);
     if (stub_v) {
         Item exp_map = expando_get_map((DomNode*)stub_v);
         if (exp_map.item != ITEM_NULL) {
