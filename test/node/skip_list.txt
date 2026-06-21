@@ -44,9 +44,6 @@ test-snapshot-api.js                        # [snapshot] requires v8.startupSnap
 # --- Native addons ---
 test-crypto-fips.js                         # [native] requires FIPS OpenSSL build
 
-# --- Non-deterministic ---
-test-crypto-random.js                       # non-deterministic random output
-
 # --- Known hangs (timeout / infinite loop) ---
 test-stream-pipe-needDrain.js               # [hang] requires event loop (process.nextTick drain)
 test-stream-writable-write-cb-error.js      # [hang] requires event loop (process.nextTick)

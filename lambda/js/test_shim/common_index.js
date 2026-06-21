@@ -224,15 +224,18 @@ function expectsError(validator, exact) {
 let catchWarning;
 
 function _expectWarning(name, expected, code) {
+  let normalized;
   if (typeof expected === 'string') {
-    expected = [[expected, code]];
+    normalized = [[expected, code]];
   } else if (!Array.isArray(expected)) {
-    expected = Object.entries(expected).map(function(pair) { return [pair[1], pair[0]]; });
+    normalized = Object.entries(expected).map(function(pair) { return [pair[1], pair[0]]; });
   } else if (expected.length !== 0 && !Array.isArray(expected[0])) {
-    expected = [[expected[0], expected[1]]];
+    normalized = [[expected[0], expected[1]]];
+  } else {
+    normalized = expected;
   }
   return mustCall(function(warning) {
-    const expectedProperties = expected.shift();
+    const expectedProperties = normalized.shift();
     if (!expectedProperties) {
       assert.fail('Unexpected extra warning received: ' + warning);
     }
@@ -245,7 +248,7 @@ function _expectWarning(name, expected, code) {
       assert.match(warning.message, message);
     }
     assert.strictEqual(warning.code, warnCode);
-  }, expected.length);
+  }, normalized.length);
 }
 
 function expectWarning(nameOrMap, expected, code) {

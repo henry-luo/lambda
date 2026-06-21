@@ -1,0 +1,21 @@
+randomBytes buffer: true
+randomBytes length: 8
+randomBytes callback err: true
+randomBytes callback buffer: true
+randomBytes callback length: 5
+randomBytes callback called: true
+pseudo warning once: true
+pseudoRandomBytes hidden: true
+prng hidden: true
+rng hidden: true
+global crypto object: object
+getRandomValues function: function
+getRandomValues same: true
+getRandomValues length: 4
+randomInt one arg: true
+randomInt two arg: true
+randomInt callback err: true
+randomInt callback range: true
+randomInt callback called: true
+randomInt range error: true
+randomFill offset type: true
