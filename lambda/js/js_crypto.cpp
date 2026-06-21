@@ -14,6 +14,7 @@
 #include "../lambda-data.hpp"
 
 extern "C" Item js_get_current_this(void);
+extern "C" Item js_process_emit(Item event_name, Item arg1);
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include <cstring>
@@ -230,46 +231,196 @@ static Item crypto_buffer_from_bytes(const uint8_t* bytes, int len) {
     return result;
 }
 
-extern "C" Item js_crypto_randomBytes(Item size_item) {
-    int size = (int)it2i(size_item);
-    if (size <= 0 || size > 65536) {
-        return js_throw_out_of_range("size", ">= 0 && <= 65536", size_item);
+static void crypto_format_number_for_error(Item item, char* out, int out_size) {
+    if (!out || out_size <= 0) return;
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT) {
+        snprintf(out, out_size, "%lld", (long long)it2i(item));
+        return;
     }
-    Item result = js_typed_array_new(JS_TYPED_UINT8, size);
-    JsTypedArray* ta = (JsTypedArray*)result.map->data;
-    if (!ta || !ta->data) return ItemNull;
-    if (!crypto_random_bytes((uint8_t*)ta->data, (size_t)size)) {
+    if (type == LMD_TYPE_INT64) {
+        snprintf(out, out_size, "%lld", (long long)it2l(item));
+        return;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        double value = it2d(item);
+        if (value != value) {
+            snprintf(out, out_size, "NaN");
+        } else if (value == 1.0 / 0.0) {
+            snprintf(out, out_size, "Infinity");
+        } else if (value == -1.0 / 0.0) {
+            snprintf(out, out_size, "-Infinity");
+        } else if (value == (double)(int64_t)value) {
+            snprintf(out, out_size, "%lld", (long long)(int64_t)value);
+        } else {
+            snprintf(out, out_size, "%g", value);
+        }
+        return;
+    }
+    snprintf(out, out_size, "undefined");
+}
+
+static void crypto_format_invalid_received(Item actual, char* out, int out_size) {
+    if (!out || out_size <= 0) return;
+    TypeId type = get_type_id(actual);
+    if (type == LMD_TYPE_NULL) {
+        snprintf(out, out_size, " Received null");
+        return;
+    }
+    if (type == LMD_TYPE_UNDEFINED) {
+        snprintf(out, out_size, " Received undefined");
+        return;
+    }
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(actual);
+        int len = s ? (int)s->len : 0;
+        if (len > 25) len = 25;
+        snprintf(out, out_size, " Received type string ('%.*s%s')",
+            len, s ? s->chars : "", (s && s->len > 25) ? "..." : "");
+        return;
+    }
+    if (type == LMD_TYPE_BOOL) {
+        snprintf(out, out_size, " Received type boolean (%s)",
+            actual.item == ITEM_TRUE ? "true" : "false");
+        return;
+    }
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT || type == LMD_TYPE_INT64) {
+        char num_buf[64];
+        crypto_format_number_for_error(actual, num_buf, sizeof(num_buf));
+        snprintf(out, out_size, " Received type number (%s)", num_buf);
+        return;
+    }
+    if (type == LMD_TYPE_ARRAY) {
+        snprintf(out, out_size, " Received an instance of Array");
+        return;
+    }
+    if (type == LMD_TYPE_FUNC) {
+        snprintf(out, out_size, " Received function ");
+        return;
+    }
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP) {
+        snprintf(out, out_size, " Received an instance of Object");
+        return;
+    }
+    snprintf(out, out_size, " Received type object");
+}
+
+static Item crypto_throw_size_out_of_range(Item actual) {
+    char actual_buf[64];
+    crypto_format_number_for_error(actual, actual_buf, sizeof(actual_buf));
+    char msg[192];
+    snprintf(msg, sizeof(msg),
+        "The value of \"size\" is out of range. It must be >= 0 && <= 2147483647. Received %s",
+        actual_buf);
+    return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+}
+
+static bool crypto_size_to_int(Item size_item, int* out_size) {
+    if (!out_size) return false;
+    TypeId type = get_type_id(size_item);
+    double value = 0.0;
+    if (type == LMD_TYPE_INT) {
+        value = (double)it2i(size_item);
+    } else if (type == LMD_TYPE_FLOAT) {
+        value = it2d(size_item);
+    } else if (type == LMD_TYPE_INT64) {
+        value = (double)it2l(size_item);
+    } else {
+        js_throw_invalid_arg_type("size", "number", size_item);
+        return false;
+    }
+
+    if (value != value || value < 0.0 || value > 2147483647.0) {
+        crypto_throw_size_out_of_range(size_item);
+        return false;
+    }
+
+    *out_size = (int)value;
+    return true;
+}
+
+extern "C" Item js_crypto_randomBytes(Item size_item, Item callback_item) {
+    int size = 0;
+    if (!crypto_size_to_int(size_item, &size)) return ItemNull;
+
+    bool has_callback = !crypto_item_is_undefined(callback_item);
+    if (has_callback && get_type_id(callback_item) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "Function", callback_item);
+    }
+
+    Item result = crypto_buffer_from_bytes(NULL, size);
+    JsTypedArray* ta = js_get_typed_array_ptr(result.map);
+    if (!ta || (!ta->data && size > 0)) return ItemNull;
+    if (size > 0 && !crypto_random_bytes((uint8_t*)ta->data, (size_t)size)) {
         log_error("crypto: randomBytes: entropy source failed");
         return ItemNull;
+    }
+
+    if (has_callback) {
+        Item args[2] = { ItemNull, result };
+        js_call_function(callback_item, ItemNull, args, 2);
+        return make_js_undefined_crypto();
     }
     return result;
 }
 
-static bool crypto_to_int_index(Item item, int default_value, int* out_value, const char* name) {
+static bool crypto_pseudo_random_warning_emitted = false;
+
+extern "C" Item js_crypto_pseudoRandomBytes(Item size_item, Item callback_item) {
+    if (!crypto_pseudo_random_warning_emitted) {
+        crypto_pseudo_random_warning_emitted = true;
+        Item warning = js_new_object();
+        js_property_set(warning, make_string_item_crypto("name"),
+            make_string_item_crypto("DeprecationWarning"));
+        js_property_set(warning, make_string_item_crypto("message"),
+            make_string_item_crypto("crypto.pseudoRandomBytes is deprecated."));
+        js_property_set(warning, make_string_item_crypto("code"),
+            make_string_item_crypto("DEP0115"));
+        js_process_emit(make_string_item_crypto("warning"), warning);
+    }
+    return js_crypto_randomBytes(size_item, callback_item);
+}
+
+static Item crypto_throw_fill_out_of_range(const char* name, int max_value, Item actual) {
+    char actual_buf[64];
+    crypto_format_number_for_error(actual, actual_buf, sizeof(actual_buf));
+    char msg[192];
+    snprintf(msg, sizeof(msg),
+        "The value of \"%s\" is out of range. It must be >= 0 && <= %d. Received %s",
+        name, max_value, actual_buf);
+    return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+}
+
+static Item crypto_throw_size_offset_out_of_range(int max_value, int64_t received) {
+    char msg[160];
+    snprintf(msg, sizeof(msg),
+        "The value of \"size + offset\" is out of range. It must be <= %d. Received %lld",
+        max_value, (long long)received);
+    return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+}
+
+static bool crypto_to_int_index(Item item, int default_value, int max_value, int* out_value, const char* name) {
     if (!out_value) return false;
     if (crypto_item_is_undefined(item)) {
         *out_value = default_value;
         return true;
     }
 
-    Item num = js_to_number(item);
-    if (js_check_exception()) return false;
-
     double value = 0.0;
-    TypeId num_type = get_type_id(num);
-    if (num_type == LMD_TYPE_INT) {
-        value = (double)it2i(num);
-    } else if (num_type == LMD_TYPE_FLOAT) {
-        value = it2d(num);
-    } else if (num_type == LMD_TYPE_INT64) {
-        value = (double)it2l(num);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT) {
+        value = (double)it2i(item);
+    } else if (type == LMD_TYPE_FLOAT) {
+        value = it2d(item);
+    } else if (type == LMD_TYPE_INT64) {
+        value = (double)it2l(item);
     } else {
         js_throw_invalid_arg_type(name, "number", item);
         return false;
     }
 
-    if (value != value || value < -2147483648.0 || value > 2147483647.0) {
-        js_throw_out_of_range(name, "a finite integer", item);
+    if (value != value || value < 0.0 || value > (double)max_value) {
+        crypto_throw_fill_out_of_range(name, max_value, item);
         return false;
     }
 
@@ -329,15 +480,13 @@ extern "C" Item js_crypto_randomFillSync(Item target_item, Item offset_item, Ite
     if (!crypto_get_fill_target(target_item, &data, &byte_len)) return ItemNull;
 
     int offset = 0;
-    if (!crypto_to_int_index(offset_item, 0, &offset, "offset")) return ItemNull;
-    if (offset < 0 || offset > byte_len) {
-        return js_throw_out_of_range("offset", ">= 0 && <= buf.byteLength", offset_item);
-    }
+    if (!crypto_to_int_index(offset_item, 0, byte_len, &offset, "offset")) return ItemNull;
 
     int size = byte_len - offset;
-    if (!crypto_to_int_index(size_item, size, &size, "size")) return ItemNull;
-    if (size < 0 || size > byte_len - offset) {
-        return js_throw_out_of_range("size", ">= 0 && <= buf.byteLength - offset", size_item);
+    if (!crypto_to_int_index(size_item, size, 2147483647, &size, "size")) return ItemNull;
+    int64_t end = (int64_t)offset + (int64_t)size;
+    if (end > byte_len) {
+        return crypto_throw_size_offset_out_of_range(byte_len, end);
     }
 
     if (size > 0 && data) {
@@ -374,6 +523,50 @@ extern "C" Item js_crypto_randomFill(Item target_item, Item offset_item, Item si
     Item args[2] = { ItemNull, filled };
     js_call_function(callback, ItemNull, args, 2);
     return make_js_undefined_crypto();
+}
+
+static bool crypto_random_values_is_integer_array(JsTypedArray* ta) {
+    if (!ta) return false;
+    switch (ta->element_type) {
+        case JS_TYPED_INT8:
+        case JS_TYPED_UINT8:
+        case JS_TYPED_UINT8_CLAMPED:
+        case JS_TYPED_INT16:
+        case JS_TYPED_UINT16:
+        case JS_TYPED_INT32:
+        case JS_TYPED_UINT32:
+        case JS_TYPED_BIGINT64:
+        case JS_TYPED_BIGUINT64:
+            return true;
+        default:
+            return false;
+    }
+}
+
+extern "C" Item js_crypto_getRandomValues(Item target_item) {
+    if (!js_is_typed_array(target_item)) {
+        return js_throw_invalid_arg_type("array", "an integer-type TypedArray", target_item);
+    }
+
+    JsTypedArray* ta = js_get_typed_array_ptr(target_item.map);
+    if (!crypto_random_values_is_integer_array(ta)) {
+        return js_throw_type_error("The provided ArrayBufferView is not an integer typed array");
+    }
+
+    int byte_len = js_typed_array_byte_length(target_item);
+    void* data = js_typed_array_current_data_ptr(target_item);
+    if (!data && byte_len > 0) {
+        return js_throw_type_error("Cannot get random values on an out-of-bounds TypedArray");
+    }
+    if (byte_len > 65536) {
+        return js_throw_range_error("The ArrayBufferView's byte length exceeds 65536 bytes");
+    }
+
+    if (byte_len > 0 && !crypto_random_bytes((uint8_t*)data, (size_t)byte_len)) {
+        log_error("crypto: getRandomValues: entropy source failed");
+        return ItemNull;
+    }
+    return target_item;
 }
 
 extern "C" Item js_crypto_getFips(void) {
@@ -466,17 +659,162 @@ extern "C" Item js_crypto_randomUUIDv7(Item options) {
 }
 
 // ============================================================================
-// randomInt(min, max) → integer in [min, max)
+// randomInt([min,] max[, callback]) → integer in [min, max)
 // ============================================================================
 
-extern "C" Item js_crypto_randomInt(Item min_item, Item max_item) {
-    int64_t min_val = it2i(min_item);
-    int64_t max_val = it2i(max_item);
-    if (max_val <= min_val) return (Item){.item = i2it(min_val)};
-    uint32_t rnd;
-    crypto_random_bytes((uint8_t*)&rnd, sizeof(rnd));
+static const int64_t CRYPTO_RANDOM_INT_MAX_RANGE = 0xFFFFFFFFFFFFLL;
+static const double CRYPTO_RANDOM_INT_MAX_SAFE = 9007199254740991.0;
+
+static void crypto_format_int64_separated(int64_t value, char* out, int out_size) {
+    if (!out || out_size <= 0) return;
+    char digits[64];
+    snprintf(digits, sizeof(digits), "%lld", (long long)value);
+    int len = (int)strlen(digits);
+    int start = (digits[0] == '-') ? 1 : 0;
+    int digit_count = len - start;
+    int first_group = digit_count % 3;
+    if (first_group == 0) first_group = 3;
+
+    int pos = 0;
+    if (start && pos < out_size - 1) out[pos++] = '-';
+    for (int i = 0; i < digit_count && pos < out_size - 1; i++) {
+        if (i > 0 && (i - first_group) % 3 == 0 && pos < out_size - 1) {
+            out[pos++] = '_';
+        }
+        out[pos++] = digits[start + i];
+    }
+    out[pos] = '\0';
+}
+
+static Item crypto_throw_random_int_safe_integer(const char* name, Item actual) {
+    char suffix[192];
+    crypto_format_invalid_received(actual, suffix, sizeof(suffix));
+    char msg[320];
+    snprintf(msg, sizeof(msg),
+        "The \"%s\" argument must be a safe integer.%s", name, suffix);
+    return js_throw_type_error_code(JS_ERR_INVALID_ARG_TYPE, msg);
+}
+
+static bool crypto_item_to_safe_int(Item item, const char* name, int64_t* out_value) {
+    if (!out_value) return false;
+    TypeId type = get_type_id(item);
+    double value = 0.0;
+    if (type == LMD_TYPE_INT) {
+        int64_t iv = it2i(item);
+        if ((double)iv < -CRYPTO_RANDOM_INT_MAX_SAFE || (double)iv > CRYPTO_RANDOM_INT_MAX_SAFE) {
+            crypto_throw_random_int_safe_integer(name, item);
+            return false;
+        }
+        *out_value = iv;
+        return true;
+    }
+    if (type == LMD_TYPE_INT64) {
+        int64_t iv = it2l(item);
+        if ((double)iv < -CRYPTO_RANDOM_INT_MAX_SAFE || (double)iv > CRYPTO_RANDOM_INT_MAX_SAFE) {
+            crypto_throw_random_int_safe_integer(name, item);
+            return false;
+        }
+        *out_value = iv;
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        value = it2d(item);
+        if (value != value || value == 1.0 / 0.0 || value == -1.0 / 0.0 ||
+            floor(value) != value ||
+            value < -CRYPTO_RANDOM_INT_MAX_SAFE || value > CRYPTO_RANDOM_INT_MAX_SAFE) {
+            crypto_throw_random_int_safe_integer(name, item);
+            return false;
+        }
+        *out_value = (int64_t)value;
+        return true;
+    }
+
+    crypto_throw_random_int_safe_integer(name, item);
+    return false;
+}
+
+static Item crypto_throw_random_int_max_greater(int64_t min_val, int64_t max_val) {
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+        "The value of \"max\" is out of range. It must be greater than the value of \"min\" (%lld). Received %lld",
+        (long long)min_val, (long long)max_val);
+    return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+}
+
+static Item crypto_throw_random_int_max_bound(int64_t max_val) {
+    char max_buf[64];
+    char actual_buf[64];
+    snprintf(max_buf, sizeof(max_buf), "%lld", (long long)CRYPTO_RANDOM_INT_MAX_RANGE);
+    crypto_format_int64_separated(max_val, actual_buf, sizeof(actual_buf));
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+        "The value of \"max\" is out of range. It must be <= %s. Received %s",
+        max_buf, actual_buf);
+    return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+}
+
+static Item crypto_throw_random_int_range_bound(int64_t range) {
+    char max_buf[64];
+    char range_buf[64];
+    snprintf(max_buf, sizeof(max_buf), "%lld", (long long)CRYPTO_RANDOM_INT_MAX_RANGE);
+    crypto_format_int64_separated(range, range_buf, sizeof(range_buf));
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+        "The value of \"max - min\" is out of range. It must be <= %s. Received %s",
+        max_buf, range_buf);
+    return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+}
+
+extern "C" Item js_crypto_randomInt(Item min_item, Item max_item, Item callback_item) {
+    Item min_arg = (Item){.item = i2it(0)};
+    Item max_arg = min_item;
+    Item callback = callback_item;
+    bool one_arg_form = true;
+
+    if (get_type_id(max_item) == LMD_TYPE_FUNC && crypto_item_is_undefined(callback_item)) {
+        callback = max_item;
+    } else if (!crypto_item_is_undefined(max_item)) {
+        min_arg = min_item;
+        max_arg = max_item;
+        one_arg_form = false;
+    }
+
+    bool has_callback = !crypto_item_is_undefined(callback);
+    if (has_callback && get_type_id(callback) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "Function", callback);
+    }
+
+    int64_t min_val = 0;
+    int64_t max_val = 0;
+    if (!crypto_item_to_safe_int(min_arg, "min", &min_val)) return ItemNull;
+    if (!crypto_item_to_safe_int(max_arg, "max", &max_val)) return ItemNull;
+
+    if (max_val <= min_val) {
+        return crypto_throw_random_int_max_greater(min_val, max_val);
+    }
+
     int64_t range = max_val - min_val;
-    return (Item){.item = i2it(min_val + (int64_t)(rnd % (uint32_t)range))};
+    if (one_arg_form && max_val > CRYPTO_RANDOM_INT_MAX_RANGE) {
+        return crypto_throw_random_int_max_bound(max_val);
+    }
+    if (range > CRYPTO_RANDOM_INT_MAX_RANGE) {
+        return crypto_throw_random_int_range_bound(range);
+    }
+
+    uint64_t rnd = 0;
+    if (!crypto_random_bytes((uint8_t*)&rnd, sizeof(rnd))) {
+        log_error("crypto: randomInt: entropy source failed");
+        return ItemNull;
+    }
+    int64_t value = min_val + (int64_t)(rnd % (uint64_t)range);
+    Item result = (Item){.item = i2it(value)};
+
+    if (has_callback) {
+        Item args[2] = { ItemNull, result };
+        js_call_function(callback, ItemNull, args, 2);
+        return make_js_undefined_crypto();
+    }
+    return result;
 }
 
 extern "C" Item js_crypto_argon2_unsupported(void) {
@@ -2448,6 +2786,13 @@ static void crypto_set_method(Item ns, const char* name, void* func_ptr, int par
     js_property_set(ns, key, fn);
 }
 
+static void crypto_set_hidden_method(Item ns, const char* name, void* func_ptr, int param_count) {
+    Item key = make_string_item_crypto(name);
+    Item fn = js_new_function(func_ptr, param_count);
+    js_property_set(ns, key, fn);
+    js_mark_non_enumerable(ns, key);
+}
+
 extern "C" Item js_get_crypto_namespace(void) {
     if (crypto_namespace.item != 0) return crypto_namespace;
 
@@ -2460,12 +2805,16 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(crypto_namespace, "createDecipheriv",   (void*)js_crypto_createDecipheriv, 3);
     crypto_set_method(crypto_namespace, "argon2",             (void*)js_crypto_argon2_unsupported, 0);
     crypto_set_method(crypto_namespace, "argon2Sync",         (void*)js_crypto_argon2_unsupported, 0);
-    crypto_set_method(crypto_namespace, "randomBytes",        (void*)js_crypto_randomBytes, 1);
+    crypto_set_method(crypto_namespace, "randomBytes",        (void*)js_crypto_randomBytes, 2);
+    crypto_set_hidden_method(crypto_namespace, "pseudoRandomBytes", (void*)js_crypto_pseudoRandomBytes, 2);
+    crypto_set_hidden_method(crypto_namespace, "prng",              (void*)js_crypto_randomBytes, 2);
+    crypto_set_hidden_method(crypto_namespace, "rng",               (void*)js_crypto_randomBytes, 2);
     crypto_set_method(crypto_namespace, "randomFillSync",     (void*)js_crypto_randomFillSync, 3);
     crypto_set_method(crypto_namespace, "randomFill",         (void*)js_crypto_randomFill, 4);
+    crypto_set_method(crypto_namespace, "getRandomValues",    (void*)js_crypto_getRandomValues, 1);
     crypto_set_method(crypto_namespace, "randomUUID",         (void*)js_crypto_randomUUID, 1);
     crypto_set_method(crypto_namespace, "randomUUIDv7",       (void*)js_crypto_randomUUIDv7, 1);
-    crypto_set_method(crypto_namespace, "randomInt",          (void*)js_crypto_randomInt, 2);
+    crypto_set_method(crypto_namespace, "randomInt",          (void*)js_crypto_randomInt, 3);
     crypto_set_method(crypto_namespace, "getFips",            (void*)js_crypto_getFips, 0);
     crypto_set_method(crypto_namespace, "getHashes",          (void*)js_crypto_getHashes, 0);
     crypto_set_method(crypto_namespace, "getCiphers",         (void*)js_crypto_getCiphers, 0);

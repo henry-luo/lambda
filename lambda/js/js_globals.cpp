@@ -14408,6 +14408,8 @@ extern "C" Item js_get_global_this() {
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("process", 7))}, js_get_process_object_value());
         extern Item js_get_css_object_value(void);
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("CSS", 3))}, js_get_css_object_value());
+        extern Item js_get_crypto_namespace(void);
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("crypto", 6))}, js_get_crypto_namespace());
 
         // populate global functions as own properties
         static const struct { const char* name; int len; int param_count; } global_fns[] = {
