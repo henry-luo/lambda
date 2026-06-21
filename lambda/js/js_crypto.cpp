@@ -1715,11 +1715,6 @@ static Item crypto_throw_bad_dh_generator(void) {
     return js_throw_error_with_code("ERR_OSSL_DH_BAD_GENERATOR", "bad generator");
 }
 
-static Item crypto_throw_dh_not_implemented(void) {
-    return js_throw_error_with_code(JS_ERR_METHOD_NOT_IMPLEMENTED,
-        "Diffie-Hellman key agreement is not supported by this crypto backend yet");
-}
-
 static bool crypto_item_to_integer(Item item, const char* name, int* out_value) {
     if (!out_value) return false;
     TypeId type = get_type_id(item);
@@ -1892,6 +1887,128 @@ static Item crypto_output_object_bytes(Item self, const char* prop_name, Item en
     return result;
 }
 
+static bool crypto_object_bytes(Item self, const char* prop_name, uint8_t** out, int* out_len) {
+    if (!out || !out_len) return false;
+    *out = NULL;
+    *out_len = 0;
+    Item bytes_item = js_property_get(self, make_string_item_crypto(prop_name));
+    return extract_bytes(bytes_item, out, out_len);
+}
+
+static bool crypto_dh_read_mpi_prop(Item self, const char* prop_name,
+                                    mbedtls_mpi* out, int* out_len) {
+    uint8_t* bytes = NULL;
+    int len = 0;
+    if (!crypto_object_bytes(self, prop_name, &bytes, &len)) return false;
+    int ret = mbedtls_mpi_read_binary(out, bytes, (size_t)len);
+    mem_free(bytes);
+    if (ret != 0) {
+        log_error("crypto: DH MPI read failed for %s: -0x%04x", prop_name, -ret);
+        return false;
+    }
+    if (out_len) *out_len = len;
+    return true;
+}
+
+static bool crypto_dh_write_fixed_mpi(const mbedtls_mpi* value, int byte_len,
+                                      uint8_t** out, int* out_len) {
+    if (!value || !out || !out_len || byte_len <= 0) return false;
+    uint8_t* bytes = (uint8_t*)mem_alloc((size_t)byte_len, MEM_CAT_JS_RUNTIME);
+    int ret = mbedtls_mpi_write_binary(value, bytes, (size_t)byte_len);
+    if (ret != 0) {
+        mem_free(bytes);
+        log_error("crypto: DH MPI write failed: -0x%04x", -ret);
+        return false;
+    }
+    *out = bytes;
+    *out_len = byte_len;
+    return true;
+}
+
+static Item crypto_output_temp_bytes(const uint8_t* bytes, int len, Item encoding_item) {
+    char enc[32];
+    bool has_encoding = false;
+    if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) return ItemNull;
+    return crypto_digest_output_for_encoding(bytes, len, enc, has_encoding);
+}
+
+static Item crypto_throw_dh_key_too_small(void) {
+    return js_throw_error_with_code("ERR_CRYPTO_INVALID_KEYLEN", "Supplied key is too small");
+}
+
+static Item crypto_throw_dh_compute_failed(void) {
+    return js_throw_error_with_code("ERR_CRYPTO_OPERATION_FAILED", "Failed to compute Diffie-Hellman secret");
+}
+
+static bool crypto_dh_public_from_private(Item self, const uint8_t* private_bytes,
+                                          int private_len, uint8_t** out_public,
+                                          int* out_public_len) {
+    if (!private_bytes || private_len <= 0 || !out_public || !out_public_len) return false;
+
+    mbedtls_mpi P, G, X, Y;
+    mbedtls_mpi_init(&P);
+    mbedtls_mpi_init(&G);
+    mbedtls_mpi_init(&X);
+    mbedtls_mpi_init(&Y);
+
+    int prime_len = 0;
+    bool ok = crypto_dh_read_mpi_prop(self, "__dh_prime__", &P, &prime_len) &&
+              crypto_dh_read_mpi_prop(self, "__dh_generator__", &G, NULL) &&
+              mbedtls_mpi_read_binary(&X, private_bytes, (size_t)private_len) == 0 &&
+              mbedtls_mpi_exp_mod(&Y, &G, &X, &P, NULL) == 0 &&
+              crypto_dh_write_fixed_mpi(&Y, prime_len, out_public, out_public_len);
+
+    mbedtls_mpi_free(&Y);
+    mbedtls_mpi_free(&X);
+    mbedtls_mpi_free(&G);
+    mbedtls_mpi_free(&P);
+    return ok;
+}
+
+static bool crypto_dh_generate_keypair(Item self, uint8_t** out_private, int* out_private_len,
+                                       uint8_t** out_public, int* out_public_len) {
+    if (!out_private || !out_private_len || !out_public || !out_public_len) return false;
+    *out_private = NULL;
+    *out_private_len = 0;
+    *out_public = NULL;
+    *out_public_len = 0;
+
+    mbedtls_mpi P, range, candidate, X;
+    mbedtls_mpi_init(&P);
+    mbedtls_mpi_init(&range);
+    mbedtls_mpi_init(&candidate);
+    mbedtls_mpi_init(&X);
+
+    int prime_len = 0;
+    bool ok = false;
+    if (!crypto_dh_read_mpi_prop(self, "__dh_prime__", &P, &prime_len)) goto done;
+    if (mbedtls_mpi_cmp_int(&P, 5) < 0) goto done;
+    if (mbedtls_mpi_sub_int(&range, &P, 3) != 0) goto done;
+    if (mbedtls_mpi_fill_random(&candidate, (size_t)prime_len,
+            crypto_mbedtls_random, NULL) != 0) goto done;
+    if (mbedtls_mpi_mod_mpi(&candidate, &candidate, &range) != 0) goto done;
+    if (mbedtls_mpi_add_int(&X, &candidate, 2) != 0) goto done;
+    if (!crypto_dh_write_fixed_mpi(&X, prime_len, out_private, out_private_len)) goto done;
+    if (!crypto_dh_public_from_private(self, *out_private, *out_private_len,
+            out_public, out_public_len)) goto done;
+    ok = true;
+
+done:
+    if (!ok) {
+        if (*out_private) mem_free(*out_private);
+        if (*out_public) mem_free(*out_public);
+        *out_private = NULL;
+        *out_public = NULL;
+        *out_private_len = 0;
+        *out_public_len = 0;
+    }
+    mbedtls_mpi_free(&X);
+    mbedtls_mpi_free(&candidate);
+    mbedtls_mpi_free(&range);
+    mbedtls_mpi_free(&P);
+    return ok;
+}
+
 extern "C" Item js_dh_getPrime(Item encoding_item) {
     return crypto_output_object_bytes(js_get_current_this(), "__dh_prime__", encoding_item);
 }
@@ -1900,16 +2017,151 @@ extern "C" Item js_dh_getGenerator(Item encoding_item) {
     return crypto_output_object_bytes(js_get_current_this(), "__dh_generator__", encoding_item);
 }
 
+extern "C" Item js_dh_getPublicKey(Item encoding_item) {
+    Item self = js_get_current_this();
+    if (js_property_get(self, make_string_item_crypto("__dh_public__")).item == ITEM_NULL) {
+        return js_throw_error_with_code("ERR_CRYPTO_INVALID_STATE", "Diffie-Hellman public key is not set");
+    }
+    return crypto_output_object_bytes(self, "__dh_public__", encoding_item);
+}
+
+extern "C" Item js_dh_getPrivateKey(Item encoding_item) {
+    Item self = js_get_current_this();
+    if (js_property_get(self, make_string_item_crypto("__dh_private__")).item == ITEM_NULL) {
+        return js_throw_error_with_code("ERR_CRYPTO_INVALID_STATE", "Diffie-Hellman private key is not set");
+    }
+    return crypto_output_object_bytes(self, "__dh_private__", encoding_item);
+}
+
+extern "C" Item js_dh_setPublicKey(Item key_item, Item encoding_item) {
+    uint8_t* bytes = NULL;
+    int len = 0;
+    if (!crypto_extract_bytes_with_encoding(key_item, encoding_item, &bytes, &len)) {
+        return js_throw_invalid_arg_type("publicKey", "string, ArrayBuffer, Buffer, TypedArray, or DataView", key_item);
+    }
+    if (len <= 0) {
+        mem_free(bytes);
+        return crypto_throw_dh_key_too_small();
+    }
+    Item self = js_get_current_this();
+    js_property_set(self, make_string_item_crypto("__dh_public__"),
+        crypto_buffer_from_bytes(bytes, len));
+    mem_free(bytes);
+    return self;
+}
+
+extern "C" Item js_dh_setPrivateKey(Item key_item, Item encoding_item) {
+    uint8_t* private_bytes = NULL;
+    int private_len = 0;
+    if (!crypto_extract_bytes_with_encoding(key_item, encoding_item, &private_bytes, &private_len)) {
+        return js_throw_invalid_arg_type("privateKey", "string, ArrayBuffer, Buffer, TypedArray, or DataView", key_item);
+    }
+    if (private_len <= 0) {
+        mem_free(private_bytes);
+        return crypto_throw_dh_key_too_small();
+    }
+
+    Item self = js_get_current_this();
+    uint8_t* public_bytes = NULL;
+    int public_len = 0;
+    if (!crypto_dh_public_from_private(self, private_bytes, private_len,
+            &public_bytes, &public_len)) {
+        mem_free(private_bytes);
+        return crypto_throw_dh_compute_failed();
+    }
+
+    js_property_set(self, make_string_item_crypto("__dh_private__"),
+        crypto_buffer_from_bytes(private_bytes, private_len));
+    js_property_set(self, make_string_item_crypto("__dh_public__"),
+        crypto_buffer_from_bytes(public_bytes, public_len));
+    mem_free(private_bytes);
+    mem_free(public_bytes);
+    return self;
+}
+
 extern "C" Item js_dh_generateKeys(Item encoding_item) {
-    (void)encoding_item;
-    return crypto_throw_dh_not_implemented();
+    Item self = js_get_current_this();
+    uint8_t* private_bytes = NULL;
+    int private_len = 0;
+    uint8_t* public_bytes = NULL;
+    int public_len = 0;
+    if (!crypto_dh_generate_keypair(self, &private_bytes, &private_len,
+            &public_bytes, &public_len)) {
+        return crypto_throw_dh_compute_failed();
+    }
+
+    js_property_set(self, make_string_item_crypto("__dh_private__"),
+        crypto_buffer_from_bytes(private_bytes, private_len));
+    js_property_set(self, make_string_item_crypto("__dh_public__"),
+        crypto_buffer_from_bytes(public_bytes, public_len));
+    Item result = crypto_output_temp_bytes(public_bytes, public_len, encoding_item);
+    mem_free(private_bytes);
+    mem_free(public_bytes);
+    return result;
 }
 
 extern "C" Item js_dh_computeSecret(Item key_item, Item input_encoding_item, Item output_encoding_item) {
-    (void)key_item;
-    (void)input_encoding_item;
-    (void)output_encoding_item;
-    return crypto_throw_dh_not_implemented();
+    Item self = js_get_current_this();
+    uint8_t* private_bytes = NULL;
+    int private_len = 0;
+    if (!crypto_object_bytes(self, "__dh_private__", &private_bytes, &private_len) ||
+            private_len <= 0) {
+        if (private_bytes) mem_free(private_bytes);
+        return js_throw_error_with_code("ERR_CRYPTO_INVALID_STATE", "Diffie-Hellman private key is not set");
+    }
+
+    uint8_t* peer_bytes = NULL;
+    int peer_len = 0;
+    if (!crypto_extract_bytes_with_encoding(key_item, input_encoding_item, &peer_bytes, &peer_len)) {
+        mem_free(private_bytes);
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, or DataView", key_item);
+    }
+    if (peer_len <= 0) {
+        mem_free(private_bytes);
+        mem_free(peer_bytes);
+        return crypto_throw_dh_key_too_small();
+    }
+
+    mbedtls_mpi P, X, Peer, Secret;
+    mbedtls_mpi_init(&P);
+    mbedtls_mpi_init(&X);
+    mbedtls_mpi_init(&Peer);
+    mbedtls_mpi_init(&Secret);
+    int prime_len = 0;
+    uint8_t* secret_bytes = NULL;
+    int secret_len = 0;
+    bool ok = false;
+
+    if (!crypto_dh_read_mpi_prop(self, "__dh_prime__", &P, &prime_len)) goto done;
+    if (mbedtls_mpi_read_binary(&X, private_bytes, (size_t)private_len) != 0) goto done;
+    if (mbedtls_mpi_read_binary(&Peer, peer_bytes, (size_t)peer_len) != 0) goto done;
+    if (mbedtls_mpi_cmp_int(&Peer, 2) < 0) {
+        crypto_throw_dh_key_too_small();
+        goto done;
+    }
+    if (mbedtls_mpi_cmp_mpi(&Peer, &P) >= 0) {
+        js_throw_error_with_code("ERR_CRYPTO_INVALID_KEYLEN", "Supplied key is too large");
+        goto done;
+    }
+    if (mbedtls_mpi_exp_mod(&Secret, &Peer, &X, &P, NULL) != 0) goto done;
+    if (!crypto_dh_write_fixed_mpi(&Secret, prime_len, &secret_bytes, &secret_len)) goto done;
+    ok = true;
+
+done:
+    mem_free(private_bytes);
+    mem_free(peer_bytes);
+    mbedtls_mpi_free(&Secret);
+    mbedtls_mpi_free(&Peer);
+    mbedtls_mpi_free(&X);
+    mbedtls_mpi_free(&P);
+    if (!ok) {
+        if (secret_bytes) mem_free(secret_bytes);
+        if (!js_check_exception()) return crypto_throw_dh_compute_failed();
+        return ItemNull;
+    }
+    Item result = crypto_output_temp_bytes(secret_bytes, secret_len, output_encoding_item);
+    mem_free(secret_bytes);
+    return result;
 }
 
 static Item crypto_create_dh_object(const uint8_t* prime, int prime_len,
@@ -1921,6 +2173,8 @@ static Item crypto_create_dh_object(const uint8_t* prime, int prime_len,
         crypto_buffer_from_bytes(prime, prime_len));
     js_property_set(obj, make_string_item_crypto("__dh_generator__"),
         crypto_buffer_from_bytes(generator, generator_len));
+    js_property_set(obj, make_string_item_crypto("__dh_private__"), ItemNull);
+    js_property_set(obj, make_string_item_crypto("__dh_public__"), ItemNull);
     js_property_set(obj, make_string_item_crypto("verifyError"),
         (Item){.item = i2it(prime_len <= 1 ? 1 : 0)});
     js_property_set(obj, make_string_item_crypto("getPrime"),
@@ -1931,6 +2185,14 @@ static Item crypto_create_dh_object(const uint8_t* prime, int prime_len,
         js_new_function((void*)js_dh_generateKeys, 1));
     js_property_set(obj, make_string_item_crypto("computeSecret"),
         js_new_function((void*)js_dh_computeSecret, 3));
+    js_property_set(obj, make_string_item_crypto("getPublicKey"),
+        js_new_function((void*)js_dh_getPublicKey, 1));
+    js_property_set(obj, make_string_item_crypto("getPrivateKey"),
+        js_new_function((void*)js_dh_getPrivateKey, 1));
+    js_property_set(obj, make_string_item_crypto("setPublicKey"),
+        js_new_function((void*)js_dh_setPublicKey, 2));
+    js_property_set(obj, make_string_item_crypto("setPrivateKey"),
+        js_new_function((void*)js_dh_setPrivateKey, 2));
     return obj;
 }
 
@@ -1955,9 +2217,16 @@ extern "C" Item js_crypto_createDiffieHellman(Item size_or_key_item, Item key_en
         Item gen_value = key_encoding_or_generator_item;
         Item gen_encoding = generator_item;
         if (get_type_id(key_encoding_or_generator_item) == LMD_TYPE_STRING) {
-            key_encoding = key_encoding_or_generator_item;
-            gen_value = generator_item;
-            gen_encoding = generator_encoding_item;
+            if (first_type == LMD_TYPE_STRING ||
+                    crypto_item_is_undefined(generator_item) ||
+                    get_type_id(generator_item) == LMD_TYPE_NULL) {
+                key_encoding = key_encoding_or_generator_item;
+                gen_value = generator_item;
+                gen_encoding = generator_encoding_item;
+            } else {
+                gen_value = key_encoding_or_generator_item;
+                gen_encoding = generator_item;
+            }
         }
         if (!crypto_extract_bytes_with_encoding(size_or_key_item, key_encoding, &prime, &prime_len)) {
             return js_throw_invalid_arg_type("sizeOrKey", "number, string, ArrayBuffer, Buffer, TypedArray, or DataView", size_or_key_item);
@@ -2145,6 +2414,17 @@ static bool is_kw_cipher(const char* alg) {
     return strcmp(alg, "id-aes128-wrap") == 0;
 }
 
+static bool is_padded_block_cipher(const char* alg) {
+    return is_ecb_cipher(alg) ||
+           strstr(alg, "cbc") != NULL;
+}
+
+static int crypto_cipher_block_size(const char* alg) {
+    if (strcmp(alg, "des-ede3-cbc") == 0) return 8;
+    if (is_padded_block_cipher(alg)) return 16;
+    return 0;
+}
+
 static bool is_known_cipher_name(const char* alg) {
     return strcmp(alg, "aes-128-ecb") == 0 ||
            strcmp(alg, "aes-192-ecb") == 0 ||
@@ -2175,6 +2455,36 @@ static Item crypto_throw_invalid_key_length(void) {
 
 static Item crypto_throw_invalid_initialization_vector(void) {
     return js_throw_type_error("Invalid initialization vector");
+}
+
+static Item crypto_throw_openssl_cipher_error(const char* code, const char* message,
+                                              const char* library, const char* reason) {
+    Item type_name = (Item){.item = s2it(heap_create_name("Error"))};
+    Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
+    Item error = js_new_error_with_name(type_name, msg_item);
+    js_property_set(error, make_string_item_crypto("code"),
+        (Item){.item = s2it(heap_create_name(code, strlen(code)))});
+    js_property_set(error, make_string_item_crypto("library"),
+        (Item){.item = s2it(heap_create_name(library, strlen(library)))});
+    js_property_set(error, make_string_item_crypto("reason"),
+        (Item){.item = s2it(heap_create_name(reason, strlen(reason)))});
+    js_throw_value(error);
+    return ItemNull;
+}
+
+static Item crypto_throw_wrong_final_block_length(void) {
+    return crypto_throw_openssl_cipher_error("ERR_OSSL_EVP_WRONG_FINAL_BLOCK_LENGTH",
+        "wrong final block length", "Cipher functions", "wrong final block length");
+}
+
+static Item crypto_throw_bad_decrypt(void) {
+    return crypto_throw_openssl_cipher_error("ERR_OSSL_EVP_BAD_DECRYPT",
+        "bad decrypt", "Cipher functions", "bad decrypt");
+}
+
+static Item crypto_throw_data_not_multiple_of_block_length(void) {
+    return crypto_throw_openssl_cipher_error("ERR_OSSL_EVP_DATA_NOT_MULTIPLE_OF_BLOCK_LENGTH",
+        "data not multiple of block length", "Cipher functions", "data not multiple of block length");
 }
 
 static bool crypto_cipher_iv_length_valid(const char* alg, int iv_len) {
@@ -2214,13 +2524,16 @@ struct CipherCtx {
     uint8_t* data;
     int data_len;
     int data_cap;
+    int total_input_len;
     uint8_t auth_tag[16];
     bool has_auth_tag;
     bool finalized;
     bool has_output_encoding;
+    bool auto_padding;
 };
 
 static void cipher_ctx_append_data(CipherCtx* ctx, const uint8_t* buf, int len) {
+    if (!ctx || len <= 0) return;
     int need = ctx->data_len + len;
     if (need > ctx->data_cap) {
         int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
@@ -2230,6 +2543,13 @@ static void cipher_ctx_append_data(CipherCtx* ctx, const uint8_t* buf, int len) 
     }
     memcpy(ctx->data + ctx->data_len, buf, (size_t)len);
     ctx->data_len += len;
+    if (len > 0) {
+        if (ctx->total_input_len <= 2147483647 - len) {
+            ctx->total_input_len += len;
+        } else {
+            ctx->total_input_len = 2147483647;
+        }
+    }
 }
 
 static void cipher_ctx_free(CipherCtx* ctx) {
@@ -2568,6 +2888,10 @@ extern "C" Item js_cipher_update(Item data_item, Item input_encoding_item, Item 
         if (ret != 0) {
             log_error("crypto: cipher update failed: %d", ret);
             mem_free(out_buf);
+            if (ctx->encrypting && !ctx->auto_padding && is_padded_block_cipher(ctx->alg)) {
+                return crypto_throw_data_not_multiple_of_block_length();
+            }
+            if (is_padded_block_cipher(ctx->alg)) return crypto_throw_wrong_final_block_length();
             return ItemNull;
         }
         ctx->data_len = 0; // consumed
@@ -2685,14 +3009,33 @@ extern "C" Item js_cipher_final(Item output_encoding_item) {
         mem_free(out_buf);
         return result;
     } else {
-        // CBC/CTR: finish with padding
+        // block and stream ciphers: finish with the configured padding mode
+        bool empty_padded_decrypt = !ctx->encrypting && ctx->auto_padding &&
+            is_padded_block_cipher(ctx->alg) && ctx->total_input_len == 0;
+        int block_size = crypto_cipher_block_size(ctx->alg);
+        bool short_padded_decrypt = !ctx->encrypting && ctx->auto_padding &&
+            block_size > 0 && (ctx->total_input_len % block_size) != 0;
+        if (empty_padded_decrypt || short_padded_decrypt) {
+            cipher_ctx_free(ctx);
+            js_property_set(self, make_string_item_crypto("__cipher_ctx__"), ItemNull);
+            return crypto_throw_wrong_final_block_length();
+        }
         uint8_t finish_buf[32];
         size_t olen = 0;
         int ret = mbedtls_cipher_finish(&ctx->cipher, finish_buf, &olen);
+        bool encrypting = ctx->encrypting;
+        bool auto_padding = ctx->auto_padding;
+        bool padded_block = is_padded_block_cipher(ctx->alg);
         cipher_ctx_free(ctx);
         js_property_set(self, make_string_item_crypto("__cipher_ctx__"), ItemNull);
         if (ret != 0) {
             log_error("crypto: cipher finish failed: %d", ret);
+            if (encrypting && !auto_padding && padded_block) {
+                return crypto_throw_data_not_multiple_of_block_length();
+            }
+            if (padded_block && (!encrypting || !auto_padding)) {
+                return encrypting ? crypto_throw_wrong_final_block_length() : crypto_throw_bad_decrypt();
+            }
             return ItemNull;
         }
         if (olen > 0) {
@@ -2743,6 +3086,23 @@ extern "C" Item js_cipher_end(Item data_item) {
     int len = crypto_item_byte_length(combined);
     js_property_set(self, make_string_item_crypto("__cipher_read__"), combined);
     js_property_set(self, make_string_item_crypto("readableLength"), (Item){.item = i2it(len)});
+    return self;
+}
+
+extern "C" Item js_cipher_setAutoPadding(Item auto_padding_item) {
+    Item self = js_get_current_this();
+    Item ctx_item = js_property_get(self, make_string_item_crypto("__cipher_ctx__"));
+    if (ctx_item.item == 0) return self;
+    CipherCtx* ctx = (CipherCtx*)(uintptr_t)it2i(ctx_item);
+    if (!ctx || ctx->finalized) return self;
+
+    bool enabled = crypto_item_is_undefined(auto_padding_item) ||
+        js_is_truthy(auto_padding_item);
+    ctx->auto_padding = enabled;
+    if (!ctx->use_gcm && !ctx->use_kw && is_padded_block_cipher(ctx->alg)) {
+        mbedtls_cipher_set_padding_mode(&ctx->cipher,
+            enabled ? MBEDTLS_PADDING_PKCS7 : MBEDTLS_PADDING_NONE);
+    }
     return self;
 }
 
@@ -2820,6 +3180,7 @@ static Item create_cipher_object(const char* alg, bool encrypting,
     ctx->key_len = key_len;
     ctx->iv = iv;
     ctx->iv_len = iv_len;
+    ctx->auto_padding = true;
 
     if (is_gcm_cipher(alg)) {
         ctx->use_gcm = true;
@@ -2871,6 +3232,8 @@ static Item create_cipher_object(const char* alg, bool encrypting,
                     js_new_function((void*)js_cipher_final, 1));
     js_property_set(obj, make_string_item_crypto("end"),
                     js_new_function((void*)js_cipher_end, 1));
+    js_property_set(obj, make_string_item_crypto("setAutoPadding"),
+                    js_new_function((void*)js_cipher_setAutoPadding, 1));
     js_property_set(obj, make_string_item_crypto("read"),
                     js_new_function((void*)js_cipher_read, 1));
     js_property_set(obj, make_string_item_crypto("readableLength"),

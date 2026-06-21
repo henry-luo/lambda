@@ -5,6 +5,11 @@ dh ctor instanceof: true
 dh group instanceof: true
 dh group prime bytes: true
 dh group ctor instanceof: true
+dh secret match: true
+dh restored public: true
+dh encoded generator: true
+decipher empty final: true
+cipher no padding error: true
 ecdh instanceof: true
 ecdh ctor instanceof: true
 curves has secp384r1: true
