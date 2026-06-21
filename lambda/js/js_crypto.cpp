@@ -1374,6 +1374,183 @@ extern "C" Item js_crypto_createHash(Item alg_item) {
     return obj;
 }
 
+// ============================================================================
+// createSign/createVerify — streaming update surface
+// ============================================================================
+
+struct SignVerifyCtx {
+    char alg[16];
+    bool verify_mode;
+    bool finalized;
+    uint8_t* data;
+    int data_len;
+    int data_cap;
+};
+
+static void sign_verify_ctx_free(SignVerifyCtx* ctx) {
+    if (!ctx) return;
+    if (ctx->data) mem_free(ctx->data);
+    mem_free(ctx);
+}
+
+static void sign_verify_ctx_append(SignVerifyCtx* ctx, const uint8_t* buf, int len) {
+    if (!ctx || len <= 0) return;
+    int need = ctx->data_len + len;
+    if (need > ctx->data_cap) {
+        int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
+        while (cap < need) cap *= 2;
+        ctx->data = (uint8_t*)mem_realloc(ctx->data, (size_t)cap, MEM_CAT_JS_RUNTIME);
+        ctx->data_cap = cap;
+    }
+    memcpy(ctx->data + ctx->data_len, buf, (size_t)len);
+    ctx->data_len += len;
+}
+
+static Item crypto_throw_sign_verify_finalized(void) {
+    return js_throw_error_with_code(JS_ERR_CRYPTO_INVALID_STATE, "Sign or Verify already finalized");
+}
+
+static SignVerifyCtx* sign_verify_ctx_from_this(Item self) {
+    Item ctx_item = js_property_get(self, make_string_item_crypto("__sign_verify_ctx__"));
+    if (ctx_item.item == 0 || ctx_item.item == ITEM_NULL) return NULL;
+    return (SignVerifyCtx*)(uintptr_t)it2i(ctx_item);
+}
+
+extern "C" Item js_sign_verify_update(Item data_item, Item encoding_item) {
+    Item self = js_get_current_this();
+    SignVerifyCtx* ctx = sign_verify_ctx_from_this(self);
+    if (!ctx || ctx->finalized) return crypto_throw_sign_verify_finalized();
+
+    if (get_type_id(data_item) == LMD_TYPE_STRING) {
+        String* s = it2s(data_item);
+        char enc[32];
+        bool has_encoding = false;
+        if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) return ItemNull;
+        uint8_t* bytes = NULL;
+        int len = 0;
+        if (!crypto_string_bytes_for_encoding(s, enc, has_encoding, &bytes, &len)) {
+            return js_throw_invalid_arg_value("encoding", "is invalid", encoding_item);
+        }
+        sign_verify_ctx_append(ctx, bytes, len);
+        mem_free(bytes);
+    } else if (js_is_typed_array(data_item)) {
+        const uint8_t* buf; int len;
+        if (get_uint8_buffer(data_item, &buf, &len)) sign_verify_ctx_append(ctx, buf, len);
+    } else if (js_is_dataview(data_item) || js_is_arraybuffer(data_item)) {
+        uint8_t* bytes = NULL;
+        int len = 0;
+        if (extract_bytes(data_item, &bytes, &len)) {
+            sign_verify_ctx_append(ctx, bytes, len);
+            mem_free(bytes);
+        }
+    } else {
+        return js_throw_invalid_arg_type("data", "string, ArrayBuffer, Buffer, TypedArray, or DataView", data_item);
+    }
+    return self;
+}
+
+extern "C" Item js_sign_verify_end(Item data_item) {
+    if (!crypto_item_is_undefined(data_item) && data_item.item != ITEM_NULL) {
+        js_sign_verify_update(data_item, make_js_undefined_crypto());
+        if (js_check_exception()) return ItemNull;
+    }
+    return js_get_current_this();
+}
+
+extern "C" Item js_sign_verify_sign(Item key_item, Item encoding_item) {
+    (void)encoding_item;
+    Item self = js_get_current_this();
+    SignVerifyCtx* ctx = sign_verify_ctx_from_this(self);
+    if (!ctx || ctx->finalized) return crypto_throw_sign_verify_finalized();
+    if (ctx->verify_mode) return js_throw_type_error("Not a Sign object");
+    if (crypto_item_is_undefined(key_item) || key_item.item == ITEM_NULL) {
+        return js_throw_error_with_code(JS_ERR_CRYPTO_SIGN_KEY_REQUIRED, "No key provided to sign");
+    }
+
+    ctx->finalized = true;
+    js_property_set(self, make_string_item_crypto("__sign_verify_ctx__"), ItemNull);
+    sign_verify_ctx_free(ctx);
+    return js_throw_error_with_code(JS_ERR_METHOD_NOT_IMPLEMENTED,
+        "Asymmetric signing is not supported by this crypto backend");
+}
+
+extern "C" Item js_sign_verify_verify(Item key_item, Item signature_item, Item encoding_item) {
+    Item self = js_get_current_this();
+    SignVerifyCtx* ctx = sign_verify_ctx_from_this(self);
+    if (!ctx || ctx->finalized) return crypto_throw_sign_verify_finalized();
+    if (!ctx->verify_mode) return js_throw_type_error("Not a Verify object");
+
+    if (crypto_item_is_undefined(key_item) || key_item.item == ITEM_NULL) {
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", key_item);
+    }
+    if (crypto_item_is_undefined(signature_item) || signature_item.item == ITEM_NULL) {
+        return js_throw_invalid_arg_type("signature", "string, ArrayBuffer, Buffer, TypedArray, or DataView", signature_item);
+    }
+
+    if (get_type_id(signature_item) == LMD_TYPE_STRING) {
+        String* s = it2s(signature_item);
+        char enc[32];
+        bool has_encoding = false;
+        if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) return ItemNull;
+        uint8_t* bytes = NULL;
+        int len = 0;
+        if (!crypto_string_bytes_for_encoding(s, enc, has_encoding, &bytes, &len)) {
+            return js_throw_invalid_arg_value("encoding", "is invalid", encoding_item);
+        }
+        mem_free(bytes);
+    } else {
+        uint8_t* bytes = NULL;
+        int len = 0;
+        if (!extract_bytes(signature_item, &bytes, &len)) {
+            return js_throw_invalid_arg_type("signature", "string, ArrayBuffer, Buffer, TypedArray, or DataView", signature_item);
+        }
+        mem_free(bytes);
+    }
+
+    ctx->finalized = true;
+    js_property_set(self, make_string_item_crypto("__sign_verify_ctx__"), ItemNull);
+    sign_verify_ctx_free(ctx);
+    return (Item){.item = b2it(false)};
+}
+
+static Item js_crypto_create_sign_verify(Item alg_item, bool verify_mode) {
+    if (get_type_id(alg_item) != LMD_TYPE_STRING) return js_throw_invalid_arg_type("algorithm", "string", alg_item);
+
+    char alg_buf[16];
+    crypto_normalize_string(alg_item, alg_buf, sizeof(alg_buf), true);
+    if (crypto_digest_bits_for_name_ext(alg_buf, true, true, true) == 0) {
+        return js_throw_type_error("Digest method not supported");
+    }
+
+    SignVerifyCtx* ctx = (SignVerifyCtx*)mem_calloc(1, sizeof(SignVerifyCtx), MEM_CAT_JS_RUNTIME);
+    memcpy(ctx->alg, alg_buf, strlen(alg_buf) + 1);
+    ctx->verify_mode = verify_mode;
+
+    Item obj = js_new_object();
+    crypto_link_instance_to_constructor(obj, verify_mode ? "Verify" : "Sign");
+    js_property_set(obj, make_string_item_crypto("__sign_verify_ctx__"),
+                    (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
+    js_property_set(obj, make_string_item_crypto("update"),
+                    js_new_function((void*)js_sign_verify_update, 2));
+    js_property_set(obj, make_string_item_crypto("write"),
+                    js_new_function((void*)js_sign_verify_update, 2));
+    js_property_set(obj, make_string_item_crypto("end"),
+                    js_new_function((void*)js_sign_verify_end, 1));
+    js_property_set(obj, make_string_item_crypto("sign"),
+                    js_new_function((void*)js_sign_verify_sign, 2));
+    js_property_set(obj, make_string_item_crypto("verify"),
+                    js_new_function((void*)js_sign_verify_verify, 3));
+    return obj;
+}
+
+extern "C" Item js_crypto_createSign(Item alg_item) {
+    return js_crypto_create_sign_verify(alg_item, false);
+}
+
+extern "C" Item js_crypto_createVerify(Item alg_item) {
+    return js_crypto_create_sign_verify(alg_item, true);
+}
+
 // crypto.hash(algorithm, data[, outputEncoding]) → digest
 extern "C" Item js_crypto_hash(Item alg_item, Item data_item, Item encoding_item) {
     if (get_type_id(alg_item) != LMD_TYPE_STRING) {
@@ -3015,6 +3192,8 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(crypto_namespace, "createHash",         (void*)js_crypto_createHash, 1);
     crypto_set_method(crypto_namespace, "hash",               (void*)js_crypto_hash, 3);
     crypto_set_method(crypto_namespace, "createHmac",         (void*)js_crypto_createHmac, 2);
+    crypto_set_method(crypto_namespace, "createSign",         (void*)js_crypto_createSign, 1);
+    crypto_set_method(crypto_namespace, "createVerify",       (void*)js_crypto_createVerify, 1);
     crypto_set_method(crypto_namespace, "createCipheriv",     (void*)js_crypto_createCipheriv, 3);
     crypto_set_method(crypto_namespace, "createDecipheriv",   (void*)js_crypto_createDecipheriv, 3);
     crypto_set_method(crypto_namespace, "argon2",             (void*)js_crypto_argon2_unsupported, 0);
@@ -3071,6 +3250,10 @@ extern "C" Item js_get_crypto_namespace(void) {
         js_new_function((void*)js_crypto_createHash, 1));
     js_property_set(crypto_namespace, make_string_item_crypto("Hmac"),
         js_new_function((void*)js_crypto_createHmac, 2));
+    js_property_set(crypto_namespace, make_string_item_crypto("Sign"),
+        js_new_function((void*)js_crypto_createSign, 1));
+    js_property_set(crypto_namespace, make_string_item_crypto("Verify"),
+        js_new_function((void*)js_crypto_createVerify, 1));
     js_property_set(crypto_namespace, make_string_item_crypto("Cipher"),
         js_new_function((void*)js_crypto_createCipheriv, 3));
     js_property_set(crypto_namespace, make_string_item_crypto("Decipher"),
