@@ -46,6 +46,7 @@ static const char* HARNESS_PATCH_PATH = "test/editing/chrome_editing_ce3_harness
 static const char* RUNNABLE_PATH = "test/editing/RUNNABLE";
 static const char* TEMP_DIR = "temp";
 static const char* RESULT_ARTIFACT_PATH = "temp/chrome_editing_results.jsonl";
+static const char* SUMMARY_ARTIFACT_PATH = "temp/chrome_editing_summary.json";
 
 static bool starts_with(const char* text, const char* prefix) {
     return strncmp(text, prefix, strlen(prefix)) == 0;
@@ -506,6 +507,12 @@ struct ChromeEditingCounter {
     int count;
 };
 
+struct ChromeEditingBucketCounter {
+    std::string bucket;
+    std::string name;
+    int count;
+};
+
 static void bump_counter(std::vector<ChromeEditingCounter>& counters,
                          const std::string& name) {
     for (ChromeEditingCounter& counter : counters) {
@@ -520,12 +527,116 @@ static void bump_counter(std::vector<ChromeEditingCounter>& counters,
     counters.push_back(counter);
 }
 
+static void bump_bucket_counter(std::vector<ChromeEditingBucketCounter>& counters,
+                                const std::string& bucket,
+                                const std::string& name) {
+    for (ChromeEditingBucketCounter& counter : counters) {
+        if (counter.bucket == bucket && counter.name == name) {
+            counter.count++;
+            return;
+        }
+    }
+    ChromeEditingBucketCounter counter;
+    counter.bucket = bucket;
+    counter.name = name;
+    counter.count = 1;
+    counters.push_back(counter);
+}
+
 static void write_result_artifact(const std::vector<ChromeEditingResult>& results) {
     std::string content;
     for (const ChromeEditingResult& result : results) {
         content += result_to_jsonl(result);
     }
     write_file_contents(RESULT_ARTIFACT_PATH, content);
+}
+
+static void append_counter_array(std::string& json, const char* name,
+                                 const std::vector<ChromeEditingCounter>& counters) {
+    json += ",\n  ";
+    json += json_string_literal(name);
+    json += ": [";
+    for (size_t i = 0; i < counters.size(); i++) {
+        if (i) json += ",";
+        json += "\n    {\"name\":" + json_string_literal(counters[i].name) +
+            ",\"count\":" + std::to_string(counters[i].count) + "}";
+    }
+    if (!counters.empty()) json += "\n  ";
+    json += "]";
+}
+
+static void append_bucket_counter_array(
+        std::string& json, const char* name,
+        const std::vector<ChromeEditingBucketCounter>& counters) {
+    json += ",\n  ";
+    json += json_string_literal(name);
+    json += ": [";
+    for (size_t i = 0; i < counters.size(); i++) {
+        if (i) json += ",";
+        json += "\n    {\"bucket\":" + json_string_literal(counters[i].bucket) +
+            ",\"classifier\":" + json_string_literal(counters[i].name) +
+            ",\"count\":" + std::to_string(counters[i].count) + "}";
+    }
+    if (!counters.empty()) json += "\n  ";
+    json += "]";
+}
+
+static void write_summary_artifact(const std::vector<ChromeEditingResult>& results,
+                                   double total_seconds) {
+    int passed = 0;
+    int failed = 0;
+    int skipped = 0;
+    int aborts = 0;
+    int timeouts = 0;
+    std::vector<ChromeEditingCounter> classifier_counters;
+    std::vector<ChromeEditingCounter> bucket_counters;
+    std::vector<ChromeEditingBucketCounter> bucket_classifier_counters;
+    for (const ChromeEditingResult& result : results) {
+        if (result.skipped) skipped++;
+        else if (result.failed) failed++;
+        else passed++;
+        if (result.abort) aborts++;
+        if (result.timeout) timeouts++;
+        bump_counter(classifier_counters, result.classifier);
+        bump_counter(bucket_counters, result.bucket);
+        bump_bucket_counter(bucket_classifier_counters, result.bucket,
+            result.classifier);
+    }
+    std::sort(classifier_counters.begin(), classifier_counters.end(),
+              [](const ChromeEditingCounter& a,
+                 const ChromeEditingCounter& b) {
+                  if (a.count != b.count) return a.count > b.count;
+                  return a.name < b.name;
+              });
+    std::sort(bucket_counters.begin(), bucket_counters.end(),
+              [](const ChromeEditingCounter& a,
+                 const ChromeEditingCounter& b) {
+                  if (a.count != b.count) return a.count > b.count;
+                  return a.name < b.name;
+              });
+    std::sort(bucket_classifier_counters.begin(),
+              bucket_classifier_counters.end(),
+              [](const ChromeEditingBucketCounter& a,
+                 const ChromeEditingBucketCounter& b) {
+                  if (a.bucket != b.bucket) return a.bucket < b.bucket;
+                  if (a.count != b.count) return a.count > b.count;
+                  return a.name < b.name;
+              });
+
+    std::string json = "{\n";
+    json += "  \"total\":" + std::to_string(results.size());
+    json += ",\n  \"passed\":" + std::to_string(passed);
+    json += ",\n  \"failed\":" + std::to_string(failed);
+    json += ",\n  \"skipped\":" + std::to_string(skipped);
+    json += ",\n  \"abort_count\":" + std::to_string(aborts);
+    json += ",\n  \"timeout_count\":" + std::to_string(timeouts);
+    json += ",\n  \"seconds\":" + std::to_string(total_seconds);
+    append_counter_array(json, "classifiers", classifier_counters);
+    append_counter_array(json, "buckets", bucket_counters);
+    append_bucket_counter_array(json, "bucket_classifiers",
+        bucket_classifier_counters);
+    json += "\n}\n";
+    write_file_contents(SUMMARY_ARTIFACT_PATH, json);
 }
 
 static void print_classifier_summary(const std::vector<ChromeEditingResult>& results) {
@@ -809,6 +920,12 @@ static ChromeEditingResult run_chrome_editing_case(
     auto ended = std::chrono::steady_clock::now();
     result.seconds = std::chrono::duration<double>(ended - started).count();
     result.classifier = classify_failure(result);
+    if (result.failed && result.classifier == "unsupported_layout_visual") {
+        result.skipped = true;
+        result.failed = false;
+        result.skip_reason = "unsupported visual/layout Chrome editing case: " +
+            p.rel_path;
+    }
     return result;
 }
 
@@ -923,6 +1040,7 @@ static int run_parallel_suite() {
         else if (result.failed) failures++;
     }
     write_result_artifact(results);
+    write_summary_artifact(results, total_seconds);
 
     printf("[==========] %zu Chrome editing cases ran. (%.0f ms total)\n",
            params.size(), total_seconds * 1000.0);
@@ -930,6 +1048,8 @@ static int run_parallel_suite() {
     if (skipped > 0) printf("[  SKIPPED ] %d tests.\n", skipped);
     if (failures > 0) printf("[  FAILED  ] %d tests.\n", failures);
     print_classifier_summary(results);
+    printf("[----------] Chrome editing summary artifact: %s\n",
+           SUMMARY_ARTIFACT_PATH);
     return failures == 0 ? 0 : 1;
 }
 

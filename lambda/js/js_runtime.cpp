@@ -18989,9 +18989,21 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         if (js_check_exception()) return ItemNull;
         return js_call_function(fn, obj, args, argc);
     }
-    // DOM element methods: dispatch to js_dom_element_method before property fallback
+    // DOM host objects expose native methods through the DOM dispatcher, but
+    // explicit JS overrides (for example document.createRange = wrapper) must
+    // win before the native fallback.
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
         (obj.map->map_kind == MAP_KIND_DOM || obj.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
+        String* dom_method = it2s(method_name);
+        if (dom_method && !(dom_method->len == 11 &&
+                strncmp(dom_method->chars, "execCommand", 11) == 0)) {
+            bool own_dom_method = false;
+            Item dom_fn = js_map_get_fast(obj.map, dom_method->chars,
+                (int)dom_method->len, &own_dom_method);
+            if (own_dom_method && get_type_id(dom_fn) == LMD_TYPE_FUNC) {
+                return js_call_function(dom_fn, obj, args, argc);
+            }
+        }
         extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
         return js_dom_element_method(obj, method_name, args, argc);
     }
