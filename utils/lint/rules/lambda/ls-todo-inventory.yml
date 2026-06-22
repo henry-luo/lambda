@@ -1,0 +1,14 @@
+id: ls-todo-inventory
+language: lambda
+severity: info
+message: >-
+  TODO/FIXME/XXX/HACK marker in a Lambda script. Inventory-only — not a
+  violation. Captured in the lint report so backlog can be tracked across the
+  .ls corpus, mirroring the C/C++ `todo-inventory` rule.
+rule:
+  kind: comment
+  regex: '\b(TODO|FIXME|XXX|HACK)\b'
+files:
+  - "test/**/*.ls"
+  - "lambda/**/*.ls"
+  - "doc/**/*.ls"

@@ -2,23 +2,25 @@
 
 ## Status
 
-**Phase 1 (ast-grep pattern rules) is shipped** with the adjustments below.
-**Phase 2 (alint structural rules)** is proposed in §6; not yet implemented.
-Rollout status of individual rules is tracked in §5.
+Three phases are now shipped end-to-end. Rollout status of individual rules
+is in §5; per-phase design and tradeoffs in §3 (Phase 1), §6 (Phase 2), §7
+(Phase 3).
 
 | Area | Status |
 |------|--------|
 | Runner | Shipped as `utils/lint/run.sh` (bash + jq, not the originally-proposed Python). |
-| sgconfig + rule layout | Shipped at repo root + `utils/lint/rules/c-cpp/*.yml`. |
+| sgconfig + rule layout | Shipped at repo root + `utils/lint/rules/c-cpp/*.yml` + `utils/lint/rules/lambda/*.yml`. |
 | Suppression | Option B shipped — semantic `*_OK` markers (`metadata.suppress` per rule). |
-| 10 legacy `check-*` targets | Replaced by 19 ast-grep rules; legacy targets deleted. |
+| 10 legacy `check-*` targets | Replaced by ast-grep rules; legacy targets deleted. |
 | `check-state-machine` | Kept as Python; dispatched by `run.sh` via `STRUCTURAL_CHECKS`. |
 | Make integration | Single entry point: `make lint` (formerly `lint-policy`). |
-| Reports | Shipped beyond proposal — `make lint ARGS=--report` writes `test_output/lint/Report_NNN.{md,json,tsv}` for AI-agent batch fix workflows. |
-| `.ls` custom-language | Wired in `sgconfig.yml`; first `.ls` rule still TODO. |
+| Reports | Shipped beyond proposal — `make lint ARGS=--report` writes `test_output/lint/Report_NNN.{md,json,tsv}` with per-finding `backend:` tag for AI-agent batch fix workflows. |
+| `.ls` custom-language | Wired in `sgconfig.yml`; first `.ls` rule (`ls-todo-inventory`) shipped. |
+| Cross-engine manifest | Shipped — `utils/lint/manifest.yml` indexes all 35 rules with category/tags/CLAUDE-rule refs; `manifest_check.sh` smoke-check enforces sync. |
 | CI integration | **Deferred — manual invocation only for now.** See §3.5. |
-| §4 future rules | Tier-1 (high-confidence) shipped; baselined-via-warning rules shipped at `warning`; type-aware / cross-language rules deferred. See §5. |
-| **Phase 2 — alint structural engine** | **Proposed (§6).** Replaces `check_ls_golden.py` and unlocks cross-file/file-graph/pair-hash rule families. Manifest unification recommended over codegen. |
+| §4 future rules | Tier-1 (high-confidence) shipped; broad rules shipped at `warning`; cross-language rules deferred pending user spec. See §5. |
+| **Phase 2 — alint structural engine** | **Shipped (§6).** `ls-test-has-golden` (CLAUDE rule 8) ports cleanly; manifest unification (Option 2) shipped. |
+| **Phase 3 — clang-tidy + libclang type-aware engine** | **Shipped (§7).** `int-cast-type-aware-decl` via tuned `bugprone-narrowing-conversions`, `int-cast-type-aware` via libclang AST walk. Hybrid: built-in for the cheap case, Python for the custom case. |
 
 ## Background
 
@@ -372,15 +374,14 @@ the §3.6.4 grep backstop guarantees the single most important ban stays
 exhaustive during migration. In practice our "C+" sources parse cleanly, so this
 is a tail risk, not a daily one.
 
-### 3.8 Forward: linting Lambda `.ls` (the multi-language payoff)
+### 3.8 Linting Lambda `.ls` — shipped
 
 ast-grep supports **custom languages**: point `sgconfig.yml` at a compiled
-tree-sitter grammar and its file extensions. We already build
-`tree-sitter-lambda` — registering it lets us write structural rules over the
-3,000-script `.ls` corpus with the same engine (deprecated-syntax sweeps,
-banned-builtin usage, style invariants). Same story for the LambdaJS sources via
-tree-sitter-javascript. This is the capability `grep`, clang-tidy, and cppcheck
-fundamentally cannot offer.
+tree-sitter grammar and its file extensions. The `tree-sitter-lambda` dylib is
+built by the existing toolchain; registering it lets the same engine match
+patterns over the 3,000-script `.ls` corpus.
+
+Shipped wiring (commit history):
 
 ```yaml
 # sgconfig.yml
@@ -388,7 +389,88 @@ customLanguages:
   lambda:
     libraryPath: lambda/tree-sitter-lambda/libtree-sitter-lambda.dylib
     extensions: [ls]
+    expandoChar: $
 ```
+
+First `.ls` rule shipped: [`ls-todo-inventory`](../utils/lint/rules/lambda/ls-todo-inventory.yml)
+(TODO/FIXME inventory across `.ls` scripts). Validates the wiring end-to-end —
+ast-grep correctly excludes a TODO inside a string literal that a raw grep
+would have flagged, confirming the tree-sitter parse is real.
+
+Same recipe applies to lambda/js source via `tree-sitter-javascript` whenever
+js-engine-policy rules are spec'd (§4.5).
+
+### 3.9 ast-grep quirks discovered during implementation
+
+These bit me while authoring rules. None are blockers, but each costs an hour
+to discover from scratch — recording them so the next author doesn't.
+
+**1. `not:` blocks silently drop `constraints:`.** Constraints are declared at
+the rule-config top level (sibling to `rule:`) and apply globally to the named
+metavars. When the same metavar appears inside a `not:` block, its constraint
+is **not** applied — the `not:` block matches as if the constraint were absent.
+
+```yaml
+# WRONG — looks like "match alloca($X) but not literal-arg alloca", but the
+# `not:` actually matches every alloca call, cancelling the outer match.
+constraints:
+  N: { kind: number_literal }
+rule:
+  all:
+    - pattern: alloca($X)
+    - not:
+        pattern: alloca($N)
+```
+
+Workaround: **invert the logic** from "match everything minus safe shapes" to
+"positively enumerate bad shapes", using distinct metavar names per pattern
+in `any:` so each gets its own top-level constraint:
+
+```yaml
+constraints:
+  N1: { regex: "^[a-z][a-zA-Z0-9_]*$" }
+  N2: { regex: "^[a-z][a-zA-Z0-9_]*$" }
+  X:  { regex: "^[a-z][a-zA-Z0-9_]*$" }
+rule:
+  any:
+    - pattern: alloca($N1 * sizeof($T))   # uses $N1
+    - pattern: alloca(sizeof($T) * $N2)   # uses $N2
+    - pattern: alloca($X)                 # uses $X
+```
+
+Real-world example: [`alloca-static-size`](../utils/lint/rules/c-cpp/alloca-static-size.yml)
+uses this inversion. Practical consequence: rules can't easily express
+"everything except these shapes" — they have to enumerate the targets.
+
+**2. Standalone patterns can parse as declarations, not calls.** In C++,
+`isspace(*p)` and `alloca($N * $M)` as standalone fragments parse as
+function-style declarations (parameter list with `*p` as a pointer
+declarator). Constraints over them fire on the wrong nodes, or fire on
+nothing.
+
+Workaround: wrap in a `context:` that forces the call form, then `selector:`
+the inner `call_expression`:
+
+```yaml
+- pattern:
+    context: "void f() { isspace(*$p); }"
+    selector: call_expression
+```
+
+Used by [`unsafe-string-scan`](../utils/lint/rules/c-cpp/unsafe-string-scan.yml)
+and [`alloca-static-size`](../utils/lint/rules/c-cpp/alloca-static-size.yml).
+Without it, the rule misses anywhere from a third to most of the real hits.
+
+**3. `constraints:` is not a per-pattern field inside `any:`/`all:`.** Putting
+`constraints:` on a single item inside an `any:` list throws
+`unknown field 'constraints', expected one of pattern, kind, regex, ...`.
+Constraints are rule-config-level only — use the distinct-metavar-name pattern
+from quirk 1 to address different patterns' vars independently.
+
+These are tree-sitter-grammar / rule-engine limitations, not bugs in our use of
+ast-grep. They are surfaced here so they don't get rediscovered each time —
+hour-cost is high enough that the workarounds belong in the design doc, not
+just in commit messages.
 
 ---
 
@@ -418,7 +500,7 @@ highest-value items here, since they close the gap between policy and enforcemen
 | `no-new-delete` | raw `new`/`delete` in pool/arena-managed code | easy |
 | `no-manual-refcnt` | direct `->ref_cnt++`/`--` instead of GC API | easy |
 | `no-unsafe-libc-str` | `strcpy`/`strcat`/`sprintf`/`gets` → bounded variants (classic overflow class) | easy |
-| `checked-pool-alloc` | deref of `pool_calloc`/`arena_alloc` result with no NULL check | type/structural (clang analyzer) |
+| `checked-pool-alloc` | deref of `pool_calloc`/`arena_alloc` result with no NULL check | **blocked on allocator contract**: pool/arena allocators must first be centralized under the Memory Context so failure mode (return NULL vs. abort) is well-defined; only then can the rule decide what counts as "missing check". Also needs clang static analyzer (dataflow). |
 
 ### 4.3 Radiant layout correctness
 
@@ -450,7 +532,7 @@ highest-value items here, since they close the gap between policy and enforcemen
 
 ## 5. Rule-rollout status
 
-### 5.1 Shipped (28 ast-grep rules + 2 structural)
+### 5.1 Shipped (32 ast-grep rules + 1 alint + 2 clang-tidy + 1 structural Python = 36 total)
 
 Severity drives the gate: `error` rules fail `make lint`; `warning` and `info`
 surface in the report but don't block. New broad rules ship at `warning` to
@@ -476,7 +558,12 @@ family.
 | `no-std-containers` | warning | 12 | §4.1 | CLAUDE.md rule 3 |
 | `no-printf-debug` | warning | 1266 | §4.1 | CLAUDE.md rule 4; CLI/REPL/help/main excluded |
 | `todo-inventory` | info | 92 | §4.4 | Backlog inventory |
-| `ls-test-has-golden` | structural | 133 | §4.1 | CLAUDE.md rule 8; preventive, exit-0 default + `--strict` mode |
+| `no-int-layout-decl` | warning | 1 | §4.3 | Pattern-only sibling of `no-int-cast-radiant`; precise version still belongs to clang-tidy |
+| `alloca-static-size` | warning | 57 | §4.2 (added) | `alloca()` with non-static size — stack-overflow risk. Syntactic heuristic; misses cast-prefixed runtime args (false negatives, not positives). Uses the §3.9 quirks workarounds |
+| `ls-todo-inventory` | info | 4 | §4.5 | First rule against the registered tree-sitter-lambda grammar — validates §3.8 wiring |
+| `ls-test-has-golden` (alint) | warning | 133 | §4.1 | CLAUDE.md rule 8; structural (sibling-file) rule on the alint backend, not ast-grep |
+| `int-cast-type-aware-decl` (clang-tidy) | warning | 36 | §4.3, §7 | Built-in `bugprone-narrowing-conversions` tuned to float→int only. Catches `int x = float_expr` precisely (no allowlist). |
+| `int-cast-type-aware` (libclang) | warning | 0 | §4.3, §7 | Walks Clang AST for explicit casts (`(int)x`, `static_cast<int>(x)`) where the source is float-typed. Preventive — all existing layout-file casts are already `INT_CAST_OK`-marked. |
 
 ### 5.2 Outstanding
 
@@ -484,27 +571,35 @@ Cross-language rules (require user specification of *what* to ban):
 
 | Rule | Status | Blocker |
 |------|--------|---------|
-| `ls-deprecated-syntax` | Infra ready (custom-lang wired) | Need list of retired `.ls` constructs |
-| `ls-banned-builtin` | Infra ready | Need list of deprecated/unsafe `.ls` builtins |
-| `js-engine-policy` | Not started | Need invariant catalog for LambdaJS internals |
+| `ls-deprecated-syntax` | Infra ready (custom-lang wired; `ls-todo-inventory` validates the path) | Need list of retired `.ls` constructs from the user |
+| `ls-banned-builtin` | Infra ready | Need list of deprecated/unsafe `.ls` builtins from the user |
+| `js-engine-policy` | Not started | Need invariant catalog for LambdaJS internals from the user |
 
-Type-aware rules (need clang-tidy, not ast-grep — separate semantic gate):
-
-| Rule | Status | Notes |
-|------|--------|-------|
-| `int-cast-type-aware` | Not started | Would retire most of the 284 `INT_CAST_OK` markers; requires clang-tidy plugin or compile DB |
-| `checked-pool-alloc` | Not started | Requires clang analyzer (dataflow) |
-| `no-int-layout-decl` | Not started | Type-aware variant of `no-int-cast-radiant` |
-
-Medium-effort pattern rules (not yet authored — open by default):
+Type-aware rules (require clang-tidy, not ast-grep):
 
 | Rule | Status | Notes |
 |------|--------|-------|
-| `c-style-cast-in-cpp` | Not started | Broad; baseline first |
-| `require-itemnull-on-error` | Not started | Needs return-context analysis (likely structural) |
-| `log-prefix-convention` | Not started | Regex on the literal first arg of `log_*` |
+| `int-cast-type-aware` | **Shipped (§7)** | libclang Python check; 0 findings today because all existing explicit casts are `INT_CAST_OK`-marked. Empirical test on `layout_block.cpp`: ~60% of those markers cover non-float operands and can be deleted in a cleanup pass. |
+| `int-cast-type-aware-decl` | **Shipped (§7)** | Built-in `bugprone-narrowing-conversions` tuned to float→int only. 36 findings — supersedes the pattern-only `no-int-layout-decl` for layout files. |
+| `checked-pool-alloc` | **Deferred — blocked upstream** | Two preconditions must land first: (1) pool/arena allocators centralized under the **Memory Context** project, so the allocator-failure contract (return NULL vs. abort/longjmp) is project-wide and rule-decidable; (2) clang **static analyzer** (dataflow over the CFG), since the rule isn't an AST shape — it's "is every alloc result NULL-checked before the first deref on every path?". Different machinery than Phase 3's `bugprone-*` + libclang; lives on the existing `analyze:` target's side of the wall. Re-evaluate once Memory Context lands. |
 
-CI integration deferred (§3.5) — `make lint` is manual today.
+Medium-effort pattern rules that proved subjective or noisy and were deferred
+after surveying the codebase:
+
+| Rule | Surveyed | Verdict |
+|------|---------:|---------|
+| `c-style-cast-in-cpp` | 28,772 raw hits | Too noisy without type info to distinguish `(void)x` discards from real downcasts. Belongs to clang-tidy. |
+| `log-prefix-convention` | 66% already conform | "Distinct prefix" is subjective — no false-positive-free regex exists at the heuristic level we need. |
+| `require-itemnull-on-error` | n/a | Not a node pattern — needs return-context analysis (structural class). Would go on the alint side if expressible there, otherwise Python. |
+
+Infrastructure deferred (explicit, not blocked):
+
+| Item | Section | Note |
+|------|---------|------|
+| CI integration | §3.5 | `make lint` is manual-only today; will pin ast-grep version and wire `.github/workflows/*.yml` when adopted |
+| Parse-error diagnostic surfacing | §3.7 | `run.sh` does not currently warn on new ast-grep parse errors. Tail-risk mitigation; add when the rule corpus is large enough that silent drift becomes plausible |
+| Native `// ast-grep-ignore` markers | §3.3 Option A | Status quo (Option B / semantic `*_OK` markers) is working; tool-native form is a reversible later move |
+| §3.6.4 grep backstop | §3.6 | Explicitly skipped — parity-confidence was high enough to not need it |
 
 ---
 
@@ -767,7 +862,200 @@ in Phase 1.
 
 ---
 
-## 7. Summary
+## 7. Phase 3 — Type-aware rules via clang-tidy + libclang
+
+### 7.1 Why a third engine
+
+ast-grep does node patterns over file contents. alint does filesystem shape
+and cross-file relations. Both are **type-blind** — they see `view->width` as a
+member-access expression with an identifier `width`, with no idea whether
+`width` is `float`, `int`, `size_t`, or an enum.
+
+Several rules in §4 are blocked exclusively on this:
+
+- `int-cast-type-aware` (§4.3) — flag `(int)$X` only when `$X`'s actual type
+  is `float`/`double`. The pattern-only `no-int-cast-radiant` flags every
+  `(int)` cast and requires ~284 `// INT_CAST_OK` markers project-wide for
+  legitimate cases (string length, pointer diff, enum, repeat count).
+- `int-cast-type-aware-decl` (§4.3) — flag `int x = expr` when `expr`'s
+  resolved type is `float`/`double`. The pattern-only `no-int-layout-decl`
+  approximates with a hand-maintained allowlist of ~30 field names, missing
+  any local arithmetic where the result type is float without an obvious
+  field name.
+
+§1 surveyed clang-tidy and called it "best for *type-dependent* rules". Phase 3
+is where that prediction comes due — not as a replacement for ast-grep/alint,
+but as a **third backend** for the rules they fundamentally can't reach.
+
+### 7.2 Approaches considered for type-aware rules
+
+We're already running clang-tidy via the existing `tidy:` Makefile target. The
+question wasn't "use clang-tidy or not" — it was *how* to extend it with
+project-specific checks. Three concrete paths:
+
+| Approach | What you write | Build chain | Distribution |
+|---|---|---|---|
+| **clang-tidy plugin** loaded via `-load=./check.dylib` | ~50 lines C++ subclassing `ClangTidyCheck`, MatchFinder DSL | CMake against `/opt/homebrew/opt/llvm`; must match clang-tidy's LLVM ABI version | Platform-specific .dylib; rebuild on every LLVM upgrade |
+| **Patch + rebuild upstream clang-tidy** | Same C++, landed in `llvm-project/clang-tools-extra` | Full LLVM build from source | Replace system clang-tidy |
+| **External libclang tool** (Python or C++) | ~150 lines Python using `clang.cindex` | None — `pip install libclang` in a venv | Cross-platform; libclang has a stable C ABI |
+
+All three give the same matching power because they all walk the same Clang
+AST. The choice is about **build/maintain cost** vs. **native integration**
+into clang-tidy's output / `--fix` / `// NOLINT` machinery.
+
+### 7.3 Why the hybrid we shipped (built-in + libclang)
+
+The two rules have very different cost profiles, so they get different
+implementations:
+
+**`int-cast-type-aware-decl`** — uses **built-in clang-tidy**. Specifically,
+`bugprone-narrowing-conversions` already flags implicit narrowing on
+initialization. We just tune its options to fire only on float/double→int
+(the truncation case), not on integer-narrowing (e.g. `int x = long_y;`,
+which the codebase legitimately does for pixel buffers) or
+integer-to-float precision loss (which is irrelevant to the int-cast rule
+class).
+
+Config (in `utils/lint/tidy/run_tidy.sh`, passed via `--config=`):
+
+```yaml
+{Checks: "-*,bugprone-narrowing-conversions", CheckOptions: [
+  {key: bugprone-narrowing-conversions.WarnOnFloatingPointNarrowingConversion,         value: "1"},
+  {key: bugprone-narrowing-conversions.WarnOnIntegerNarrowingConversion,               value: "0"},
+  {key: bugprone-narrowing-conversions.WarnOnIntegerToFloatingPointNarrowingConversion, value: "0"}
+]}
+```
+
+We additionally pipe-filter the output to `to 'int'` destinations — the
+config can suppress float-source narrowing TO float (e.g. `double → float`,
+not what we want), but only by source-type category, not by destination.
+The pipe-filter is one line.
+
+**`int-cast-type-aware`** — uses **libclang Python**. `bugprone-narrowing-conversions`
+deliberately *skips* explicit C-style and `static_cast<>` conversions:
+
+> Explicit conversions are not narrowing because they reflect the user's
+> deliberate intent.
+
+For our codebase that "deliberate intent" is *exactly the bug we suspect*.
+No built-in check fires here, so we wrote `utils/lint/tidy/explicit_cast_check.py`:
+
+- Parse each file with `clang.cindex.Index.parse(file, args=COMPILE_ARGS)`
+- Walk the AST for `CSTYLE_CAST_EXPR` / `CXX_STATIC_CAST_EXPR` cursors
+- For each, descend through implicit-conversion wrapper nodes (libclang
+  reports the immediate child of a cast with the *destination* type, not
+  the source — the real source type sits one or more `UNEXPOSED_EXPR`
+  wrappers deeper)
+- If destination is `int`-like and source is `float`/`double`, emit a record
+- Honor the existing `// INT_CAST_OK` markers — same suppression scheme as
+  every other rule in the stack
+
+Three reasons libclang Python beat the plugin path here, given where we are
+in the stack:
+
+1. **We already own the suppression and output formats.** Native clang-tidy
+   gives you `// NOLINT(check-name)` and a fixed diagnostic format. We use
+   `// INT_CAST_OK: <reason>` markers (consistent with `RAWALLOC_OK`,
+   `RETAINED_FIELD_OK`, `STATE_STORE_OK`, …) and unified NDJSON via
+   `run.sh` → `Report_NNN.{md,json,tsv}`. Going native means either losing
+   convention consistency or building translation glue.
+2. **No C++ build chain enters the lint pipeline.** ast-grep is a Rust
+   binary, alint is a Rust binary, clang-tidy is already installed. Adding
+   a libclang Python tool keeps the pipeline at "scripts that call binaries".
+   The plugin path adds CMake, a .dylib artefact, and an LLVM dev-headers
+   build dependency. Ongoing maintenance cost.
+3. **libclang's C ABI is stable across LLVM versions.** A clang-tidy plugin
+   must be ABI-compatible with the *exact* clang-tidy binary loading it —
+   `brew upgrade llvm` can break the plugin with cryptic errors. libclang
+   Python keeps working at any LLVM version.
+
+The plugin would be the right call later if we need (a) `--fix` rewrites,
+(b) editor/LSP integration, or (c) a corpus of >5 type-aware checks where
+the ASTMatcher DSL pays off vs. Python AST walks. We're at 1; libclang wins
+on amortized cost today.
+
+### 7.4 Integration into the existing pipeline
+
+Slots in as a third backend next to ast-grep and alint. The existing
+severity gate / suppression filter / `Report_NNN.*` generation extend
+without further change.
+
+```
+ast-grep   ──┐
+alint      ──┼─► unified NDJSON ─► severity + suppression ─► Report_NNN.{md,json,tsv}
+clang-tidy ──┘   (backend: tag preserved per finding)
+```
+
+`utils/lint/tidy/run_tidy.sh` orchestrates the two sub-tools, scoped to the
+same 19-file layout set `no-int-cast-radiant` covers:
+
+1. `clang-tidy --config=... --checks='-*,bugprone-narrowing-conversions'`
+   on each file → text output `file:line:col: warning: ...` → awk normalises
+   to unified NDJSON with `ruleId: int-cast-type-aware-decl`, `backend: clang-tidy`
+2. `python3 explicit_cast_check.py` on the same files → NDJSON with
+   `ruleId: int-cast-type-aware`, `backend: clang-tidy` directly
+
+`run.sh` runs the wrapper, concatenates onto the ast-grep + alint stream,
+and the rest of the pipeline is unchanged. `--rule <regex>` filters across
+all three backends; `--list` shows all three groups; the report's
+`counts_by_backend` block reflects the split.
+
+### 7.5 Empirical payoff (cleanup opportunity)
+
+Strip test on `radiant/layout_block.cpp`: temporarily remove every
+`// INT_CAST_OK` marker, re-run `int-cast-type-aware`. Result: of the 5
+markers in that file, only **2 cover real float→int casts**; the other 3
+are over the existing pattern rule's false-positive class (pointer diff,
+integer width, etc.) and can be safely deleted.
+
+Extrapolating to the **115 markers across the layout corpus** (the rule's
+file scope), the type-aware version implies **65-70 markers can be removed**.
+Per the standing "no need to fix in this session" guidance from earlier in
+the project, the deletion sweep is left as a future agent task; Report_005
+contains the per-marker data an agent can act on.
+
+The deeper claim from §4.3 — "retire most of the 284 `INT_CAST_OK` markers"
+— is the *project-wide* number across all 19+ files where `no-int-cast-radiant`
+runs. Phase 3's scope today is just the layout subset; expanding the
+`run_tidy.sh` `FILES=(…)` array to the broader scope is a one-line change
+once we want to walk all 284.
+
+### 7.6 Migration plan (forward-looking)
+
+Phase 3 is shipped; this is the plan for the cleanup sweep + follow-up
+investments, not the engine itself.
+
+1. **Cleanup sweep (agent task).** Run `make lint ARGS='--rule ^int-cast-type-aware'`,
+   walk the per-file findings, delete `INT_CAST_OK` markers on lines NOT in
+   the finding set. Verify by re-running the rule (count should stay 0).
+2. **Expand `run_tidy.sh` scope** to all 19+ files in
+   `no-int-cast-radiant`'s coverage — the layout subset was the smallest
+   useful scope to ship; the broader sweep multiplies the marker-deletion
+   payoff.
+3. **Consider clang-tidy plugin** if and when (a) `--fix` rewrites become
+   useful (auto-suggest `roundf()` instead of `(int)`), (b) editors that
+   drive clang-tidy directly should see our checks inline, or (c) more
+   than ~5 type-aware rules accumulate. Until any of those, the libclang
+   Python tool is the right level of investment.
+4. **`checked-pool-alloc`** stays deferred (§5.2). Two blockers:
+   - **Upstream — allocator contract.** Pool/arena allocators are being
+     centralized under the in-flight **Memory Context** project (registry +
+     factory). Until that lands, the failure mode of `pool_calloc` /
+     `arena_alloc` / friends isn't uniform (some abort, some return NULL,
+     some longjmp out via an error path). A "did you NULL-check this?" rule
+     can't be written before that contract is project-wide — what to check
+     for depends on what the allocator can do.
+   - **Tooling — analyzer not matcher.** This is dataflow over the CFG ("is
+     every alloc result NULL-checked before the first deref on every
+     path?"), not a single-node AST shape. That's the Clang static
+     analyzer's territory (existing `analyze:` Makefile target), not
+     bugprone-style matchers or libclang AST walks.
+   Re-evaluate once Memory Context lands; until then the rule is documented,
+   not built.
+
+---
+
+## 8. Summary
 
 **Phase 1 — ast-grep pattern engine** (shipped):
 
@@ -788,24 +1076,44 @@ in Phase 1.
   CI integration lands, and a registered `tree-sitter-lambda` grammar brings
   the 3,000-script `.ls` corpus under the same linter.
 
-**Phase 2 — alint structural engine** (proposed, §6):
+**Phase 2 — alint structural engine** (shipped, §6):
 
-- **Adopt alint** as the *second* engine, alongside ast-grep, for the rule
+- **Adopted alint** as the *second* engine, alongside ast-grep, for the rule
   classes ast-grep fundamentally cannot reach: sibling-file existence,
   cross-file value relations, file-graph properties (acyclicity, layering
   firewalls, doc-link integrity, codegen-freshness).
 - Same operational profile as ast-grep — single static Rust binary,
-  brew-installable, declarative YAML, agent-aware output format — so it slots
-  into `run.sh`'s existing severity gate / suppression / `Report_NNN.*` plumbing
+  brew-installable, declarative YAML, agent-aware output format — slots into
+  `run.sh`'s existing severity gate / suppression / `Report_NNN.*` plumbing
   with minimal change.
-- Replaces `check_ls_golden.py` (the only Python script that's a filesystem
-  shape check); keeps `check_state_machine.py` (the only Python script that
+- Replaced `check_ls_golden.py` (the only Python script that's a filesystem
+  shape check); kept `check_state_machine.py` (the only Python script that
   parses C++ source to correlate enum tables — neither pattern nor structural
   in nature).
-- Recommend **Option 2 (shared manifest)** for cross-engine unification:
+- Shipped **Option 2 (shared manifest)** for cross-engine unification:
   native YAML formats stay (full LSP/autocomplete/doc support), plus a thin
   `utils/lint/manifest.yml` index keyed by rule id with cross-cutting metadata
-  (category, claude-rule reference, tags, ownership). Avoids a codegen step
-  and its daily-edit friction.
-- Migration parity-first (shadow-diff `ls-test-has-golden` against the existing
-  Python before deleting).
+  (category, claude-rule reference, tags, ownership). `manifest_check.sh`
+  smoke-check enforces sync.
+- Migration was parity-first (shadow-diff `ls-test-has-golden` against the
+  existing Python; identical 133-file missing-golden set, exact set equality).
+
+**Phase 3 — clang-tidy + libclang type-aware engine** (shipped, §7):
+
+- **Added clang-tidy as a third backend** for the rules ast-grep and alint
+  can't reach — the type-dependent ones. ast-grep matches AST shapes; alint
+  reasons over filesystem structure; clang-tidy + libclang ask Sema "what's
+  the actual type of this expression?"
+- **Hybrid implementation**: `int-cast-type-aware-decl` uses built-in
+  `bugprone-narrowing-conversions` (tuned to float→int only); `int-cast-type-aware`
+  uses a small libclang Python tool because no built-in check fires on explicit
+  casts by design. Chose libclang Python over a clang-tidy plugin because (a) we
+  already own the suppression and output formats, (b) no C++ build chain enters
+  the lint pipeline, (c) libclang's C ABI is stable across LLVM versions.
+- Scoped to the same 19 layout files `no-int-cast-radiant` covers. Empirically
+  reclaims ~60% of `INT_CAST_OK` markers in that scope (per a strip test on
+  `layout_block.cpp`). Broader project-wide marker cleanup (the proposal's
+  "284 markers" figure) is a one-line scope expansion in `run_tidy.sh`.
+- Backend slot mirrors Phase 2's: NDJSON normalisation in `run.sh`, `backend:
+  clang-tidy` tag per finding, severity gate unchanged. `make lint ARGS=--list`
+  shows all three engines + the structural Python check.

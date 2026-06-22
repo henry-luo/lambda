@@ -665,7 +665,7 @@ static float calculate_static_line_x(BlockContext* pa_block, Linebox* pa_line,
                 line_x = (static_direction == TD_LTR) ? avail_left : avail_right;
             }
             log_debug("[STATIC POS] Float+align adjusted line_x=%.1f (avail=[%.1f,%.1f], text-align=%d)",
-                      line_x, avail_left, avail_right, (int)ta); // INT_CAST_OK: enum for log
+                      line_x, avail_left, avail_right, (int)ta);
         }
     }
 
@@ -1557,7 +1557,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                     line_x = (static_direction == TD_LTR) ? avail_left : avail_right;
                 }
                 log_debug("[STATIC POS] Float+align adjusted line_x=%.1f (avail=[%.1f,%.1f], text-align=%d)",
-                          line_x, avail_left, avail_right, (int)ta); // INT_CAST_OK: enum for log
+                          line_x, avail_left, avail_right, (int)ta);
             }
         }
 
@@ -1860,7 +1860,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                     line_right = avail_right;
                 }
                 log_debug("[STATIC POS] RTL float+align adjusted line_right=%.1f (avail=[%.1f,%.1f], ta=%d)",
-                          line_right, avail_left, avail_right, (int)ta); // INT_CAST_OK: enum for log
+                          line_right, avail_left, avail_right, (int)ta);
             }
         }
 

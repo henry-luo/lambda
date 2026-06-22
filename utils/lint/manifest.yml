@@ -41,12 +41,12 @@ rules:
     enforces: claude-md/rule-1
     tags: [memory, mandatory]
 
-  no-int-cast-radiant:
+  alloca-static-size:
     backend: ast-grep
-    file: utils/lint/rules/c-cpp/no-int-cast-radiant.yml
-    category: layout-correctness
-    enforces: claude-md/rule-11
-    tags: [radiant, float, mandatory]
+    file: utils/lint/rules/c-cpp/alloca-static-size.yml
+    category: memory-safety
+    tags: [stack, alloca, heuristic]
+    note: "Syntactic heuristic — matches the common dynamic-size shapes (lowercase var, var × sizeof). A fully-precise constexpr-aware version belongs to clang-tidy."
 
   no-radiant-view-cast-layout:
     backend: ast-grep
@@ -83,6 +83,14 @@ rules:
     file: utils/lint/rules/c-cpp/no-raw-css-value-stack.yml
     category: layout-correctness
     tags: [css, lifetime]
+
+  no-int-layout-decl:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-int-layout-decl.yml
+    category: layout-correctness
+    enforces: claude-md/rule-11
+    tags: [radiant, float]
+    note: "Pattern-only sibling of no-int-cast-radiant. The type-aware version belongs to clang-tidy (see proposal §4.3)."
 
   dup-typeid-or:
     backend: ast-grep
@@ -206,6 +214,33 @@ rules:
     file: utils/lint/rules/c-cpp/todo-inventory.yml
     category: inventory
     tags: [backlog]
+
+  # ── ast-grep · Lambda (.ls) rules ───────────────────────────────────────
+
+  ls-todo-inventory:
+    backend: ast-grep
+    file: utils/lint/rules/lambda/ls-todo-inventory.yml
+    category: inventory
+    tags: [lambda-script, backlog]
+    note: "First rule using the registered tree-sitter-lambda custom-language grammar (see proposal §3.8 / §6)."
+
+  # ── clang-tidy / libclang · type-aware rules ────────────────────────────
+
+  int-cast-type-aware:
+    backend: clang-tidy
+    file: utils/lint/tidy/explicit_cast_check.py
+    category: layout-correctness
+    enforces: claude-md/rule-11
+    tags: [radiant, float, type-aware]
+    note: "Type-aware sibling of no-int-cast-radiant. Walks libclang AST for CSTYLE_CAST_EXPR / CXX_STATIC_CAST_EXPR nodes where the destination is int-like and the source operand resolves to float/double after stripping implicit-conversion wrappers."
+
+  int-cast-type-aware-decl:
+    backend: clang-tidy
+    file: utils/lint/tidy/run_tidy.sh
+    category: layout-correctness
+    enforces: claude-md/rule-11
+    tags: [radiant, float, type-aware]
+    note: "Wraps clang-tidy's built-in bugprone-narrowing-conversions check, tuned to fire only on float→int destinations (the truncation case). Catches `int x = float_expr` shapes that the pattern-only no-int-layout-decl misses."
 
   # ── alint · structural rules ────────────────────────────────────────────
 

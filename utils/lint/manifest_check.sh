@@ -12,7 +12,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 MANIFEST="$ROOT/utils/lint/manifest.yml"
-RULES_DIR="$ROOT/utils/lint/rules/c-cpp"
+RULES_DIR="$ROOT/utils/lint/rules"
 ALINT_CONFIG="$ROOT/.alint.yml"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "manifest_check: $1 not found" >&2; exit 127; }; }
@@ -23,10 +23,11 @@ need awk
 discovered=$(mktemp)
 trap 'rm -f "$discovered"' EXIT
 
-# ast-grep: id: <name> at top of each YAML
-for f in "$RULES_DIR"/*.yml; do
+# ast-grep: id: <name> at top of each YAML. Searches all language subdirs
+# (c-cpp/, lambda/, …) but skips the structural/ dir which is for Python scripts.
+while IFS= read -r f; do
   awk -F': *' '/^id:/{print $2; exit}' "$f" >> "$discovered"
-done
+done < <(find "$RULES_DIR" -name '*.yml' -not -path '*/structural/*')
 
 # alint: `alint list -q` prints "<level> <id>" per rule
 if command -v alint >/dev/null 2>&1 && [[ -f "$ALINT_CONFIG" ]]; then
@@ -36,6 +37,12 @@ fi
 # residual Python checks: derived from STRUCTURAL_CHECKS in run.sh
 # Keep this list in lockstep with run.sh (small enough that grepping is fine).
 awk -F: '/^  *"[a-z-]+:python/{ gsub(/[" ]/, "", $1); print $1 }' "$ROOT/utils/lint/run.sh" >> "$discovered"
+
+# clang-tidy / libclang rules: enumerated by run_tidy.sh's --list output equivalent.
+# Today there are exactly two; keep this in lockstep with run_tidy.sh.
+if [[ -f "$ROOT/utils/lint/tidy/run_tidy.sh" ]]; then
+  printf '%s\n' "int-cast-type-aware" "int-cast-type-aware-decl" >> "$discovered"
+fi
 
 # ---------- discover ids from manifest ----------
 manifest_ids=$(awk '/^  [a-z][a-z0-9-]*:$/{ sub(":",""); gsub(/ /,""); print }' "$MANIFEST")

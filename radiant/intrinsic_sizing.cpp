@@ -1332,7 +1332,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     result.max_content = total_width;    // Keep float precision
 
     log_debug("measure_text_intrinsic_widths: len=%zu, min=%.2f, max=%.2f, text_transform=%d",
-              length, result.min_content, result.max_content, (int)text_transform); // INT_CAST_OK: enum for log
+              length, result.min_content, result.max_content, (int)text_transform);
 
     return result;
 }

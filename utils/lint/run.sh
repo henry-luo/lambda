@@ -69,6 +69,11 @@ if (( LIST )); then
     # `alint list -q` emits two whitespace-separated columns: level, id
     (cd "$ROOT" && alint list -q 2>/dev/null | awk '{printf "  %-34s .alint.yml\n", $2}')
   fi
+  if [[ -x "$ROOT/utils/lint/tidy/run_tidy.sh" ]]; then
+    echo "clang-tidy / libclang rules (type-aware):"
+    echo "  int-cast-type-aware                utils/lint/tidy/explicit_cast_check.py"
+    echo "  int-cast-type-aware-decl           utils/lint/tidy/run_tidy.sh + bugprone-narrowing-conversions"
+  fi
   echo "structural Python checks:"
   for entry in "${STRUCTURAL_CHECKS[@]}"; do echo "  ${entry%%:*}"; done
   if [[ -x "$ROOT/utils/lint/manifest_check.sh" ]]; then
@@ -126,6 +131,23 @@ fi
 # Merge ast-grep + alint NDJSON streams.
 if [[ -n "$ALINT_RAW" ]]; then
   RAW=$([[ -n "$RAW" ]] && printf '%s\n%s\n' "$RAW" "$ALINT_RAW" || printf '%s\n' "$ALINT_RAW")
+fi
+
+# ---------- clang-tidy / libclang scan (type-aware rules) ----------
+# Backend script handles its own toolchain availability checks and emits
+# unified NDJSON directly (one record per finding, backend: clang-tidy).
+TIDY_RAW=""
+TIDY_SCRIPT="$ROOT/utils/lint/tidy/run_tidy.sh"
+if (( ! STRUCTURAL_ONLY )) && [[ -x "$TIDY_SCRIPT" ]]; then
+  TIDY_RAW=$("$TIDY_SCRIPT" 2>/dev/null || true)
+  # Apply --rule filter on the tidy stream (same shape as ast-grep filter).
+  if [[ -n "$RULE_FILTER" && -n "$TIDY_RAW" ]]; then
+    TIDY_RAW=$(printf '%s\n' "$TIDY_RAW" | jq -c "select(.ruleId | test(\"$RULE_FILTER\"))" 2>/dev/null || true)
+  fi
+fi
+
+if [[ -n "$TIDY_RAW" ]]; then
+  RAW=$([[ -n "$RAW" ]] && printf '%s\n%s\n' "$RAW" "$TIDY_RAW" || printf '%s\n' "$TIDY_RAW")
 fi
 
 # ---------- suppression filter (jq) ----------

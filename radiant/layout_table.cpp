@@ -4579,7 +4579,7 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
             shift_table_cell_vertical_align_child(child, vertical_offset);
             if (child->view_type == RDT_VIEW_TEXT) {
                 log_debug("%s CSS vertical-align: adjusted text Y by +%.1fpx (align=%d)", tcell->source_loc(),
-                         vertical_offset, (int)valign); // INT_CAST_OK: enum for log
+                         vertical_offset, (int)valign);
             }
         }
     }
