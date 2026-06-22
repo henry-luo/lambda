@@ -215,6 +215,28 @@ rules:
     category: inventory
     tags: [backlog]
 
+  # Radiant memory-safety audit follow-ups (Radiant_Memory_Safety_Issues.md):
+  large-stack-array:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/large-stack-array.yml
+    category: memory-safety
+    tags: [radiant, stack-overflow, audit-finding-14]
+    note: "Detects fixed-size arrays of 1024+ elements (literal or MAX_* constant) in layout/intrinsic/grid files where recursion can blow the stack. Radiant audit findings #14, #15."
+
+  unused-depth-param:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/unused-depth-param.yml
+    category: correctness
+    tags: [radiant, recursion, audit-finding-13]
+    note: "Detects functions with depth/recursion_depth/nesting parameters that never compare them — the recursion guard is being carried but not enforced. Radiant audit finding #13."
+
+  no-asymmetric-arg-null-check:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-asymmetric-arg-null-check.yml
+    category: correctness
+    tags: [radiant, css, audit-finding-9]
+    note: "Detects `func->args[N>=1]->data.<field>.value` accesses in resolve_css_style.cpp without prior per-arg null check. Sibling transform parsers do the check; matrix() and a few others regressed (Radiant audit finding #9)."
+
   # ── ast-grep · Lambda (.ls) rules ───────────────────────────────────────
 
   ls-todo-inventory:

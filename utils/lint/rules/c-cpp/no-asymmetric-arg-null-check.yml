@@ -1,0 +1,23 @@
+id: no-asymmetric-arg-null-check
+language: cpp
+severity: warning
+message: >-
+  `func->args[N>=1]->data.<field>.value` dereferenced — the CSS function-arg
+  parser counts commas even for empty arguments, so `func->arg_count >= N+1`
+  does NOT guarantee `args[N] != NULL`. Sibling transform parsers (translateX,
+  translateY, scale, …) per-arg null-check before dereferencing; matrix() and
+  some other higher-arity parsers regressed (Radiant audit finding #9). Add
+  `if (func->args[N])` (or augment the existing `if (arg_count >= …)` to
+  conjoin `&& args[0] && args[1] && …`), or mark with
+  "// ARG_NULL_OK: <reason>" if the parser guarantees non-null args upstream.
+metadata:
+  suppress: ARG_NULL_OK
+constraints:
+  # Match args[1] through args[9]. args[0] is conventionally guarded with a
+  # paired `arg_count >= 1 && args[0]` check; the bug class is parsers that
+  # forget args[1..N] need the same.
+  N: { regex: "^[1-9]$" }
+rule:
+  pattern: $OBJ->args[$N]->data.$F.value
+files:
+  - "radiant/resolve_css_style.cpp"

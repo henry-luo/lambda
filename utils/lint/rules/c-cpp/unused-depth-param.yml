@@ -1,0 +1,24 @@
+id: unused-depth-param
+language: cpp
+severity: warning
+message: >-
+  Function takes a `depth` / `recursion_depth` / `nesting` / `var_depth`
+  parameter but the body never compares it against a bound (`<`, `>`, `<=`,
+  `>=`, `==`, `!=`). The parameter is being carried but not enforced — the
+  caller's intent of capping recursion isn't actually applied. Add
+  `if (depth >= MAX_DEPTH) return …;` at function entry, or mark with
+  "// UNUSED_DEPTH_OK: <reason>" if the depth is genuinely for output
+  formatting (e.g. indentation) and not a recursion guard.
+metadata:
+  suppress: UNUSED_DEPTH_OK
+rule:
+  all:
+    - kind: function_definition
+      regex: "\\b(int|size_t|unsigned|uint32_t) (depth|recursion_depth|nesting|var_depth)\\b"
+    - not:
+        regex: "\\b(depth|recursion_depth|nesting|var_depth)\\s*[<>!=]+"
+# Scoped to radiant/ where the bug class (CSS / layout / SVG recursion) is
+# the structural concern. Math-formatter use of `depth` for indentation is
+# excluded by scope, not by exemption — they're in lambda/format/.
+files:
+  - "radiant/**/*.{c,cpp,h,hpp}"
