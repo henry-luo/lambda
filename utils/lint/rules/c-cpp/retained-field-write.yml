@@ -22,3 +22,7 @@ files:
   - "lambda/input/css/dom_element.{cpp,hpp}"
 ignores:
   - "radiant/retained_fields.hpp"
+  # SmTransitionScope has a `family` field that's an enum tag, not the
+  # DomElement::family retained pointer. The flat ast-grep pattern can't
+  # see types, so the file is excluded explicitly.
+  - "radiant/state_schema.cpp"

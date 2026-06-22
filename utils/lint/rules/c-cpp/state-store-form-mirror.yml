@@ -2,9 +2,11 @@ id: state-store-form-mirror
 language: cpp
 severity: error
 message: >-
-  External access to a FormControlProp mirror field. Form state must be read/written
-  through the StateStore projection, not the raw form-> mirror. Mark audited
-  exceptions with a trailing "// STATE_STORE_OK: <reason>".
+  External write to a FormControlProp mirror field. Form-state writes must go
+  through the StateStore projection so the store version bumps and observers
+  fire — reads of mirror fields are the by-design fast path and are not
+  flagged. Mark audited write exceptions with a trailing
+  "// STATE_STORE_OK: <reason>".
 metadata:
   suppress: STATE_STORE_OK
 constraints:
@@ -13,7 +15,13 @@ constraints:
   F:
     regex: "^(disabled|readonly|selected_index|hover_index|dropdown_open|checked|required|range_value|selection_start|selection_end|selection_direction)$"
 rule:
-  pattern: $O->$F
+  any:
+    - all:
+        - kind: assignment_expression
+        - has: { field: left, pattern: $O->$F }
+    - all:
+        - kind: update_expression
+        - has: { pattern: $O->$F }
 files:
   - "radiant/**/*.cpp"
   - "lambda/js/**/*.cpp"

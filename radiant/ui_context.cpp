@@ -266,7 +266,7 @@ void free_document(DomDocument* doc) {
 
     radiant_document_destroy_state(doc);
 
-    destroy_form_props_in_dom((DomNode*)doc->root);
+    destroy_form_props_in_dom(doc->root);
 
     if (doc->view_tree) {
         // destroy video resources before bulk-freeing the pool

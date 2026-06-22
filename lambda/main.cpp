@@ -2521,7 +2521,7 @@ int main(int argc, char *argv[]) {
                 return lambda_main_finish(svg_str ? 0 : 1);
             } else {
                 // For other formats (PDF, PNG), save SVG temp file and render it
-                const char* temp_svg = "/tmp/lambda_graph_temp.svg";
+                const char* temp_svg = "./temp/lambda_graph_temp.svg";
                 String* svg_str = format_xml(input->pool, input->root);
                 if (!svg_str) {
                     printf("Error: Failed to format SVG output\n");

@@ -5,14 +5,20 @@ message: >-
   printf/fprintf/std::cout used for diagnostics. CLAUDE.md rule 4 says use the
   log_debug/log_info/log_error helpers in lib/log.h (they route through
   log.txt, respect the log config, and start each line with a searchable
-  prefix). Excluded zones: lambda/cli/, lambda/repl/, lambda/main.cpp,
-  lambda/lambda-error.cpp, and any line carrying "// PRINTF_OK: <reason>".
+  prefix). CLI subcommand handlers, the REPL, polyglot-runtime
+  print/puts/echo builtins, the s-expression dumper, and the PDF byte writer
+  are all legitimate stdout emitters and are excluded by file. Mark a
+  single-line debug-print exception with "// PRINTF_OK: <reason>".
 metadata:
   suppress: PRINTF_OK
 rule:
   any:
     - pattern: printf($$$A)
-    - pattern: fprintf($$$A)
+    # fprintf is only a debug-output indicator when targeting stderr/stdout —
+    # `fprintf(some_file_handle, ...)` is legitimate file I/O and intentionally
+    # not flagged.
+    - pattern: fprintf(stderr, $$$A)
+    - pattern: fprintf(stdout, $$$A)
     - pattern: std::cout << $$$A
     - pattern: std::cerr << $$$A
 files:
@@ -21,10 +27,50 @@ files:
   - "lib/**/*.{c,cpp}"
 ignores:
   - "**/tree-sitter*/**"
+  # CLI / REPL entry points (existing).
   - "lambda/cli/**"
   - "lambda/repl/**"
   - "lambda/main.cpp"
+  - "lambda/main-repl.cpp"
   - "lambda/lambda-error.cpp"
   - "lambda/lambda-help.cpp"
   - "lambda/print.cpp"
-  # CLI/REPL entry points and tooling that legitimately write to stdout/stderr.
+  # CLI subcommand handlers (sibling of lambda/main.cpp) added per
+  # vibe/Lambda_Lint_Fix.md §3.1 — these legitimately produce stdout.
+  - "lambda/validator/ast_validate.cpp"   # `lambda validate` subcommand
+  - "lambda/headless_stubs.cpp"           # CLI-only build stubs
+  - "lambda/npm/**"                       # npm-compat CLI
+  - "lambda/runner.cpp"                   # CLI runner
+  - "radiant/webdriver/**"                # `lambda webdriver` subcommand
+  - "radiant/cmd_layout.cpp"              # `lambda layout` subcommand
+  - "radiant/event_sim.cpp"               # event-simulation test driver
+  - "radiant/render_img.cpp"              # image-rendering dump path
+  - "radiant/radiant.cpp"                 # radiant CLI driver
+  # Polyglot-runtime source-language print/puts/echo builtins and
+  # error-message formatters (these *are* the stdout/stderr-writing side of
+  # the runtime, not debug prints).
+  - "lambda/rb/rb_print.cpp"
+  - "lambda/rb/rb_runtime.cpp"
+  - "lambda/bash/transpile_bash_mir.cpp"
+  - "lambda/bash/bash_runtime.cpp"
+  - "lambda/bash/bash_builtins.cpp"        # echo/printf/pwd/type/caller builtins
+  - "lambda/bash/bash_errors.cpp"          # GNU-Bash-compatible error formatter
+  - "lambda/bash/bash_exec.cpp"            # exec builtin's stderr-on-failure
+  - "lambda/py/py_stdlib.cpp"
+  - "lambda/py/py_builtins.cpp"            # print/sys.stdout.write builtins
+  - "lambda/py/py_print.cpp"               # py AST printer (debug build only)
+  # Debug AST printers — sibling of rb_print.cpp / py_print.cpp, NDEBUG-guarded
+  # interactive dump helpers.
+  - "lambda/js/js_print.cpp"
+  - "lambda/input/css/css_style_node.cpp"  # css_specificity_print + style tree dumper
+  - "lambda/input/css/dom_node.cpp"        # dom-tree pretty printer
+  # Third-party / vendored: WOFF2 decoder (Google) error reports.
+  - "lib/font/woff2/**"
+  # lib/ infrastructure where direct stderr is intentional:
+  - "lib/log.c"                            # log infrastructure can't log itself
+  - "lib/cmdedit.c"                        # command-line editor prompt + history
+  - "lib/mempool.c"                        # POOLTRACE/POOLSTATS diagnostic mode
+  # Lambda's own s-expression dumper (Racket bridge).
+  - "lambda/emit_sexpr.cpp"
+  # PDF byte writer is by definition I/O-producing.
+  - "lib/pdf_writer.c"

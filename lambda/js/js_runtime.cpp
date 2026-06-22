@@ -11,6 +11,7 @@
 #include "js_exec_profile.h"
 #include "../../lib/lambda_typed.hpp"
 #include "../../lib/gc/gc_heap.h"
+#include "../../lib/memtrack.h"
 
 extern "C" Item js_to_property_key(Item key);
 extern __thread EvalContext* context;
@@ -14507,7 +14508,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         if (js_regex_wrapper_rewrite_v_flag_classes_c(vpat, vpat_len, &rewritten, &rewritten_len)
             && rewritten) {
             v_processed.assign(rewritten, rewritten_len);
-            free(rewritten);
+            mem_free(rewritten);
             effective_pattern = v_processed.c_str();
             effective_pattern_len = (int)v_processed.size();
         }
