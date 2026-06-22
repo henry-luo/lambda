@@ -30,6 +30,18 @@ static Item assert_make_string(const char* str) {
     return (Item){.item = s2it(s)};
 }
 
+static Item assert_namespace = {0};
+
+static void js_assert_attach_assertion_error_prototype(Item error) {
+    if (assert_namespace.item == 0) return;
+    Item ae_fn = js_property_get(assert_namespace, assert_make_string("AssertionError"));
+    if (get_type_id(ae_fn) != LMD_TYPE_FUNC) return;
+    Item ae_proto = js_property_get(ae_fn, assert_make_string("prototype"));
+    if (get_type_id(ae_proto) == LMD_TYPE_MAP) {
+        js_set_prototype(error, ae_proto);
+    }
+}
+
 // helper: throw AssertionError with full Node.js properties
 static Item throw_assertion_error_full(const char* message, Item actual, Item expected, const char* op_str, bool generated = true) {
     extern Item js_new_error_with_name(Item type_name, Item message);
@@ -45,6 +57,7 @@ static Item throw_assertion_error_full(const char* message, Item actual, Item ex
     js_property_set(error, assert_make_string("expected"), expected);
     if (op_str) js_property_set(error, assert_make_string("operator"), assert_make_string(op_str));
     js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(generated)});
+    js_assert_attach_assertion_error_prototype(error);
     js_throw_value(error);
     return make_js_undefined();
 }
@@ -613,8 +626,6 @@ extern "C" Item js_assert_doesNotReject(Item asyncFnOrPromise, Item error_expect
 // assert Module Namespace
 // =============================================================================
 
-static Item assert_namespace = {0};
-
 static void assert_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = assert_make_string(name);
     Item fn = js_new_function(func_ptr, param_count);
@@ -655,16 +666,7 @@ extern "C" Item js_assert_AssertionError_ctor(Item options) {
     js_property_set(error, assert_make_string("expected"), expected);
     if (op_str) js_property_set(error, assert_make_string("operator"), assert_make_string(op_str));
     js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(false)});
-    // Set prototype chain: error.__proto__ = AssertionError.prototype (inherits from Error.prototype)
-    if (assert_namespace.item != 0) {
-        Item ae_fn = js_property_get(assert_namespace, assert_make_string("AssertionError"));
-        if (get_type_id(ae_fn) == LMD_TYPE_FUNC) {
-            Item ae_proto = js_property_get(ae_fn, assert_make_string("prototype"));
-            if (get_type_id(ae_proto) == LMD_TYPE_MAP) {
-                js_set_prototype(error, ae_proto);
-            }
-        }
-    }
+    js_assert_attach_assertion_error_prototype(error);
     return error;
 }
 
