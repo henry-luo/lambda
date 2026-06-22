@@ -39,6 +39,168 @@ MIR_context_t g_active_mir_ctx = NULL;
 // inside `for { if (cond) { let X = …; } }` still counts as inside-loop.
 static void jm_collect_for_init_lexical_names(JsAstNode* node, struct hashmap* names, bool in_loop);
 
+static void jm_note_module_block_lexical_name(struct hashmap* seen, struct hashmap* duplicate_consts,
+        const char* name, int var_kind) {
+    if (!name || !seen || !duplicate_consts) return;
+    JsNameSetEntry key;
+    memset(&key, 0, sizeof(key));
+    snprintf(key.name, sizeof(key.name), "%s", name);
+    JsNameSetEntry* existing = (JsNameSetEntry*)hashmap_get(seen, &key);
+    if (existing) {
+        if (var_kind == JS_VAR_CONST || existing->var_kind == JS_VAR_CONST) {
+            jm_name_set_add(duplicate_consts, name);
+        }
+    } else {
+        jm_name_set_add_kind(seen, name, var_kind);
+    }
+}
+
+static void jm_note_module_block_lexical_pattern(struct hashmap* seen, struct hashmap* duplicate_consts,
+        JsAstNode* pat, int var_kind) {
+    if (!pat) return;
+    struct hashmap* names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    jm_collect_pattern_names(pat, names);
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(names, &iter, &item)) {
+        JsNameSetEntry* e = (JsNameSetEntry*)item;
+        jm_note_module_block_lexical_name(seen, duplicate_consts, e->name, var_kind);
+    }
+    hashmap_free(names);
+}
+
+static void jm_note_module_block_lexical_decl(struct hashmap* seen, struct hashmap* duplicate_consts,
+        JsVariableDeclarationNode* vd) {
+    if (!vd || (vd->kind != JS_VAR_LET && vd->kind != JS_VAR_CONST)) return;
+    for (JsAstNode* d = vd->declarations; d; d = d->next) {
+        if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
+        jm_note_module_block_lexical_pattern(seen, duplicate_consts, decl->id, (int)vd->kind);
+    }
+}
+
+static void jm_collect_duplicate_module_block_lexicals(JsAstNode* node,
+        struct hashmap* seen, struct hashmap* duplicate_consts, bool direct_program) {
+    if (!node) return;
+    switch (node->node_type) {
+    case JS_AST_NODE_PROGRAM: {
+        JsProgramNode* prog = (JsProgramNode*)node;
+        for (JsAstNode* s = prog->body; s; s = s->next)
+            jm_collect_duplicate_module_block_lexicals(s, seen, duplicate_consts, true);
+        return;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION:
+        if (!direct_program) {
+            jm_note_module_block_lexical_decl(seen, duplicate_consts, (JsVariableDeclarationNode*)node);
+        }
+        return;
+    case JS_AST_NODE_CLASS_DECLARATION: {
+        if (!direct_program) {
+            JsClassNode* cls = (JsClassNode*)node;
+            if (cls->name) {
+                char name[128];
+                snprintf(name, sizeof(name), "_js_%.*s", (int)cls->name->len, cls->name->chars);
+                jm_note_module_block_lexical_name(seen, duplicate_consts, name, (int)JS_VAR_CONST);
+            }
+        }
+        return;
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        for (JsAstNode* s = blk->statements; s; s = s->next)
+            jm_collect_duplicate_module_block_lexicals(s, seen, duplicate_consts, false);
+        return;
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* n = (JsIfNode*)node;
+        jm_collect_duplicate_module_block_lexicals(n->consequent, seen, duplicate_consts, false);
+        jm_collect_duplicate_module_block_lexicals(n->alternate, seen, duplicate_consts, false);
+        return;
+    }
+    case JS_AST_NODE_WHILE_STATEMENT: {
+        JsWhileNode* n = (JsWhileNode*)node;
+        jm_collect_duplicate_module_block_lexicals(n->body, seen, duplicate_consts, false);
+        return;
+    }
+    case JS_AST_NODE_DO_WHILE_STATEMENT: {
+        JsDoWhileNode* n = (JsDoWhileNode*)node;
+        jm_collect_duplicate_module_block_lexicals(n->body, seen, duplicate_consts, false);
+        return;
+    }
+    case JS_AST_NODE_FOR_STATEMENT: {
+        JsForNode* n = (JsForNode*)node;
+        if (n->init && n->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+            jm_note_module_block_lexical_decl(seen, duplicate_consts, (JsVariableDeclarationNode*)n->init);
+        } else {
+            jm_collect_duplicate_module_block_lexicals(n->init, seen, duplicate_consts, false);
+        }
+        jm_collect_duplicate_module_block_lexicals(n->body, seen, duplicate_consts, false);
+        return;
+    }
+    case JS_AST_NODE_FOR_OF_STATEMENT:
+    case JS_AST_NODE_FOR_IN_STATEMENT: {
+        JsForOfNode* n = (JsForOfNode*)node;
+        if (n->left) {
+            if (n->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                jm_note_module_block_lexical_decl(seen, duplicate_consts, (JsVariableDeclarationNode*)n->left);
+            } else if ((n->kind == JS_VAR_LET || n->kind == JS_VAR_CONST) &&
+                    n->left->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* id = (JsIdentifierNode*)n->left;
+                char name[128];
+                snprintf(name, sizeof(name), "_js_%.*s", (int)id->name->len, id->name->chars);
+                jm_note_module_block_lexical_name(seen, duplicate_consts, name, (int)n->kind);
+            } else {
+                jm_collect_duplicate_module_block_lexicals(n->left, seen, duplicate_consts, false);
+            }
+        }
+        jm_collect_duplicate_module_block_lexicals(n->body, seen, duplicate_consts, false);
+        return;
+    }
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* n = (JsTryNode*)node;
+        jm_collect_duplicate_module_block_lexicals(n->block, seen, duplicate_consts, false);
+        if (n->handler) jm_collect_duplicate_module_block_lexicals(n->handler, seen, duplicate_consts, false);
+        jm_collect_duplicate_module_block_lexicals(n->finalizer, seen, duplicate_consts, false);
+        return;
+    }
+    case JS_AST_NODE_CATCH_CLAUSE: {
+        JsCatchNode* n = (JsCatchNode*)node;
+        jm_note_module_block_lexical_pattern(seen, duplicate_consts, n->param, (int)JS_VAR_LET);
+        jm_collect_duplicate_module_block_lexicals(n->body, seen, duplicate_consts, false);
+        return;
+    }
+    case JS_AST_NODE_SWITCH_STATEMENT: {
+        JsSwitchNode* n = (JsSwitchNode*)node;
+        for (JsAstNode* c = n->cases; c; c = c->next)
+            jm_collect_duplicate_module_block_lexicals(c, seen, duplicate_consts, false);
+        return;
+    }
+    case JS_AST_NODE_SWITCH_CASE: {
+        JsSwitchCaseNode* n = (JsSwitchCaseNode*)node;
+        for (JsAstNode* s = n->consequent; s; s = s->next)
+            jm_collect_duplicate_module_block_lexicals(s, seen, duplicate_consts, false);
+        return;
+    }
+    case JS_AST_NODE_LABELED_STATEMENT: {
+        JsLabeledStatementNode* n = (JsLabeledStatementNode*)node;
+        jm_collect_duplicate_module_block_lexicals(n->body, seen, duplicate_consts, false);
+        return;
+    }
+    case JS_AST_NODE_EXPORT_DECLARATION: {
+        JsExportNode* n = (JsExportNode*)node;
+        jm_collect_duplicate_module_block_lexicals(n->declaration, seen, duplicate_consts, direct_program);
+        return;
+    }
+    case JS_AST_NODE_FUNCTION_DECLARATION:
+    case JS_AST_NODE_FUNCTION_EXPRESSION:
+    case JS_AST_NODE_ARROW_FUNCTION:
+        return;
+    default:
+        return;
+    }
+}
+
 static void jm_collect_for_init_lexical_pattern(JsAstNode* pat, struct hashmap* names) {
     if (!pat) return;
     if (pat->node_type == JS_AST_NODE_IDENTIFIER) {
@@ -3691,6 +3853,12 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         struct hashmap* for_init_lets = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
         jm_collect_for_init_lexical_names((JsAstNode*)program, for_init_lets, /*in_loop=*/false);
+        struct hashmap* module_block_lexicals_seen = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        struct hashmap* duplicate_module_block_const_lexicals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        jm_collect_duplicate_module_block_lexicals((JsAstNode*)program,
+            module_block_lexicals_seen, duplicate_module_block_const_lexicals, true);
 
         struct hashmap* scope_vars = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
@@ -3711,6 +3879,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (mc && mc->const_type == MCONST_MODVAR) return false;
             }
             if (jm_name_set_has(for_init_lets, name)) return false;
+            // The synthetic module scope env is keyed by capture name. Sibling
+            // duplicate const block bindings are distinct immutable JS bindings;
+            // keep those as private closure captures so later blocks cannot
+            // overwrite an earlier closure's const object.
+            if (jm_name_set_has(duplicate_module_block_const_lexicals, name)) return false;
             if (strcmp(name, "_js_this") == 0 ||
                 strcmp(name, "_js_new.target") == 0 ||
                 strcmp(name, "_js_arguments") == 0) return false;
@@ -3806,6 +3979,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         }
 
         hashmap_free(scope_vars);
+        hashmap_free(module_block_lexicals_seen);
+        hashmap_free(duplicate_module_block_const_lexicals);
         hashmap_free(for_init_lets);
     }
 
