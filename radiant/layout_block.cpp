@@ -37,6 +37,14 @@ using namespace std::chrono;
 
 extern void adjust_text_bounds(ViewText* text);
 
+static bool line_has_prior_flow_content(const Linebox* line) {
+    return line &&
+        (line->last_text_rect ||
+         line->has_replaced_content ||
+         line->has_c1_control_text ||
+         line->has_non_c1_text);
+}
+
 // Check if a view element is a descendant of another view element
 static bool view_is_descendant_of(ViewElement* child, ViewElement* ancestor) {
     ViewElement* walker = child->parent_view();
@@ -4885,6 +4893,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         log_notice("layout_block_content: count=%d", layout_block_content_count);
     }
 
+    if (block->blk) {
+        block->blk->bfc_float_avoidance_shift_y = 0.0f;
+    }
+
     block->x = pa_line->left;  block->y = pa_block->advance_y;
 
     bool is_float = block->position &&
@@ -5213,6 +5225,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             bfc_shift_down = current_y - y_in_bfc;
             if (bfc_shift_down > 0) {
                 log_debug("%s [BFC Float Avoid] Shifting element down by %.1f to avoid floats", block->source_loc(), bfc_shift_down);
+                if (block->blk) {
+                    block->blk->bfc_float_avoidance_shift_y = bfc_shift_down;
+                }
                 block->y += bfc_shift_down;
                 pa_block->advance_y += bfc_shift_down;
             }
@@ -7254,8 +7269,20 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             float margin_box_width = block->width +
                 (block->bound ? block->bound->margin.left + block->bound->margin.right : 0);
 
+            bool has_prior_flow_content = line_has_prior_flow_content(&lycon->line);
+            if (block->blk && block->blk->bfc_float_avoidance_shift_y > 0.0f &&
+                !lycon->line.has_float_intrusion &&
+                !has_prior_flow_content &&
+                lycon->line.advance_x > effective_left &&
+                effective_left + margin_box_width <= effective_right) {
+                log_debug("%s inline-block: reset stale float cursor after BFC shift %.1f, advance_x %.1f -> %.1f",
+                    elmt->source_loc(), block->blk->bfc_float_avoidance_shift_y,
+                    lycon->line.advance_x, effective_left);
+                lycon->line.advance_x = effective_left;
+            }
+
             if (lycon->line.advance_x + margin_box_width > effective_right && !parent_nowrap) {
-                if (!lycon->line.is_line_start) {
+                if (!lycon->line.is_line_start && has_prior_flow_content) {
                     // CSS 2.1 §9.4.2: Break to next line if there's prior content
                     line_break(lycon);
                     // After line break, update effective bounds for new Y
@@ -7342,7 +7369,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             lycon->line.effective_left : lycon->line.left;
                     }
                     block->x = effective_left;
-                } else if (lycon->line.advance_x > effective_left &&
+                } else if (lycon->line.has_float_intrusion &&
+                           lycon->line.advance_x > effective_left &&
                            effective_left + margin_box_width <= effective_right) {
                     // advance_x was pushed by a float that no longer intrudes at this y.
                     // Reset to effective_left where the content fits.
