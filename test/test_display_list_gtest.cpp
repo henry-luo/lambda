@@ -186,7 +186,7 @@ TEST_F(DisplayListTest, LinearGradientCopiesStopsAndTracksPathBounds) {
         {1.0f, 40, 50, 60, 128}
     };
     dl_fill_linear_gradient(&dl, path, 0.0f, 0.0f, 10.0f, 10.0f,
-                            stops, 2, RDT_FILL_EVEN_ODD, nullptr);
+                            stops, 2, RDT_FILL_EVEN_ODD, nullptr, nullptr);
     stops[0].r = 99;
 
     ASSERT_EQ(dl.count, 1);
@@ -212,7 +212,7 @@ TEST_F(DisplayListTest, RadialGradientCopiesStopsAndTracksTransformedBounds) {
     };
     RdtMatrix transform = rdt_matrix_translate(20.0f, 30.0f);
     dl_fill_radial_gradient(&dl, path, 5.0f, 6.0f, 7.0f,
-                            stops, 2, RDT_FILL_WINDING, &transform);
+                            stops, 2, RDT_FILL_WINDING, &transform, nullptr);
     stops[1].a = 99;
 
     ASSERT_EQ(dl.count, 1);
@@ -807,10 +807,10 @@ TEST_F(PaintIrParityTest, LinearGradientMatchesDirect) {
     test_display_list_stub_set_path_bounds(path, true, 0.0f, 0.0f, 10.0f, 10.0f);
     RdtGradientStop stops[2] = { {0.0f, 255, 0, 0, 255}, {1.0f, 0, 0, 255, 255} };
     paint_fill_linear_gradient(&pl, path, 0.0f, 0.0f, 10.0f, 10.0f, stops, 2,
-                               RDT_FILL_WINDING, nullptr);
+                               RDT_FILL_WINDING, nullptr, nullptr);
     lower();
     dl_fill_linear_gradient(&direct, path, 0.0f, 0.0f, 10.0f, 10.0f, stops, 2,
-                            RDT_FILL_WINDING, nullptr);
+                            RDT_FILL_WINDING, nullptr, nullptr);
     expect_lists_equal(lowered, direct);
 }
 
@@ -824,10 +824,10 @@ TEST_F(PaintIrParityTest, RadialGradientWithTransformMatchesDirect) {
     RdtMatrix m = rdt_matrix_identity();
     m.e11 = 2.0f; m.e22 = 2.0f; m.e13 = 5.0f;
     paint_fill_radial_gradient(&pl, path, 5.0f, 5.0f, 5.0f, stops, 3,
-                               RDT_FILL_WINDING, &m);
+                               RDT_FILL_WINDING, &m, nullptr);
     lower();
     dl_fill_radial_gradient(&direct, path, 5.0f, 5.0f, 5.0f, stops, 3,
-                            RDT_FILL_WINDING, &m);
+                            RDT_FILL_WINDING, &m, nullptr);
     expect_lists_equal(lowered, direct);
 }
 
@@ -2060,7 +2060,7 @@ TEST_F(PaintIrParityTest, SvgLoweringHonorsExportTargetCaps) {
         {1.0f, 4, 5, 6, 255}
     };
     paint_fill_linear_gradient(&pl, path, 0.0f, 0.0f, 10.0f, 10.0f,
-                               stops, 2, RDT_FILL_WINDING, nullptr);
+                               stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
 
     StrBuf* out = strbuf_new();
     ASSERT_NE(out, nullptr);
@@ -2101,7 +2101,7 @@ TEST_F(PaintIrParityTest, SvgLoweringEmitsLinearGradientPath) {
         {1.0f, 40, 50, 60, 128}
     };
     paint_fill_linear_gradient(&pl, path, 1.0f, 2.0f, 31.0f, 42.0f,
-                               stops, 2, RDT_FILL_WINDING, nullptr);
+                               stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
 
     StrBuf* out = strbuf_new();
     ASSERT_NE(out, nullptr);
@@ -2138,7 +2138,7 @@ TEST_F(PaintIrParityTest, SvgLoweringEmitsRadialGradientPath) {
         {0.75f, 4, 5, 6, 255}
     };
     paint_fill_radial_gradient(&pl, path, 10.0f, 5.0f, 8.0f,
-                               stops, 2, RDT_FILL_EVEN_ODD, nullptr);
+                               stops, 2, RDT_FILL_EVEN_ODD, nullptr, nullptr);
 
     StrBuf* out = strbuf_new();
     ASSERT_NE(out, nullptr);
