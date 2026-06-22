@@ -790,6 +790,37 @@ extern "C" Item js_util_inherits(Item ctor_item, Item super_item) {
 // util.isDeepStrictEqual(val1, val2) — basic deep equality
 // =============================================================================
 
+static bool js_util_dataview_current_byte_length(JsDataView* view, int* out_length) {
+    if (!view || !view->buffer || view->buffer->detached) return false;
+    if (view->buffer->byte_length < view->byte_offset) return false;
+    if (view->length_tracking) {
+        *out_length = view->buffer->byte_length - view->byte_offset;
+        return true;
+    }
+    if (view->byte_length < 0 ||
+        view->buffer->byte_length < (int64_t)view->byte_offset + (int64_t)view->byte_length) {
+        return false;
+    }
+    *out_length = view->byte_length;
+    return true;
+}
+
+static bool js_util_dataview_bytes_equal(Item a, Item b) {
+    JsDataView* av = js_get_dataview_ptr(a);
+    JsDataView* bv = js_get_dataview_ptr(b);
+    int alen = 0, blen = 0;
+    if (!js_util_dataview_current_byte_length(av, &alen) ||
+        !js_util_dataview_current_byte_length(bv, &blen)) {
+        return false;
+    }
+    if (alen != blen) return false;
+    if (alen == 0) return true;
+    if (!av->buffer->data || !bv->buffer->data) return false;
+    uint8_t* adata = (uint8_t*)av->buffer->data + av->byte_offset;
+    uint8_t* bdata = (uint8_t*)bv->buffer->data + bv->byte_offset;
+    return memcmp(adata, bdata, alen) == 0;
+}
+
 extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
     // use strict equality for primitives
     Item eq = js_strict_equal(a, b);
@@ -798,6 +829,13 @@ extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
     TypeId ta = get_type_id(a);
     TypeId tb = get_type_id(b);
     if (ta != tb) return (Item){.item = b2it(false)};
+
+    bool a_dataview = js_is_dataview(a);
+    bool b_dataview = js_is_dataview(b);
+    if (a_dataview || b_dataview) {
+        return (Item){.item = b2it(a_dataview && b_dataview &&
+                                  js_util_dataview_bytes_equal(a, b))};
+    }
 
     if (ta == LMD_TYPE_ARRAY) {
         int64_t la = js_array_length(a);

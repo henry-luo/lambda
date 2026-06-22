@@ -477,6 +477,28 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
         return buf;
     }
 
+    // DataView -> copy the viewed byte window.
+    if (js_is_dataview(data)) {
+        JsDataView* dv = js_get_dataview_ptr(data);
+        if (!dv || !dv->buffer || dv->buffer->detached) {
+            return js_throw_type_error("Cannot create Buffer from a detached DataView");
+        }
+        int byte_length = dv->length_tracking
+            ? dv->buffer->byte_length - dv->byte_offset
+            : dv->byte_length;
+        if (byte_length < 0 ||
+            dv->buffer->byte_length < dv->byte_offset ||
+            (!dv->length_tracking &&
+             dv->buffer->byte_length < dv->byte_offset + dv->byte_length)) {
+            return js_throw_type_error("Cannot create Buffer from an out-of-bounds DataView");
+        }
+        Item buffer_item = dv->buffer_item
+            ? (Item){.item = dv->buffer_item}
+            : js_arraybuffer_wrap(dv->buffer);
+        return js_buffer_from(buffer_item, (Item){.item = i2it(dv->byte_offset)},
+                              (Item){.item = i2it(byte_length)});
+    }
+
     // plain object: {type:"Buffer", data:[...]} reviver pattern, or array-like with length
     if (tid == LMD_TYPE_MAP) {
         Item type_key = make_string_item("type", 4);
@@ -624,12 +646,14 @@ extern "C" Item js_buffer_concat(Item list, Item total_length_item) {
 // ─── Buffer.isBuffer(obj) ───────────────────────────────────────────────────
 extern "C" Item js_buffer_isBuffer(Item obj) {
     if (!js_is_typed_array(obj)) return (Item){.item = b2it(false)};
-    // Buffer is a Uint8Array — check element type
-    Map* m = obj.map;
-    JsTypedArray* ta = (JsTypedArray*)m->data;
-    if (ta && ta->element_type == JS_TYPED_UINT8)
+    JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
+    if (ta && ta->element_type == JS_TYPED_UINT8 && ta->is_buffer)
         return (Item){.item = b2it(true)};
     return (Item){.item = b2it(false)};
+}
+
+static Item js_buffer_has_instance(Item value) {
+    return js_buffer_isBuffer(value);
 }
 
 // ─── Buffer.isUtf8(input) ──────────────────────────────────────────────────
@@ -2665,6 +2689,12 @@ extern "C" Item js_get_buffer_namespace(void) {
 
     // set up prototype (lazy, cached)
     js_property_set(buffer_namespace, make_string_item("prototype"), js_get_buffer_prototype());
+    {
+        Item has_instance_key = make_string_item("__sym_3");
+        js_create_data_property(buffer_namespace, has_instance_key,
+                                js_new_function((void*)js_buffer_has_instance, 1));
+        js_mark_non_enumerable(buffer_namespace, has_instance_key);
+    }
 
     // Buffer is the default export
     js_property_set(buffer_namespace, make_string_item("Buffer"), buffer_namespace);
