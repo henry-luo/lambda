@@ -1117,3 +1117,138 @@ investments, not the engine itself.
 - Backend slot mirrors Phase 2's: NDJSON normalisation in `run.sh`, `backend:
   clang-tidy` tag per finding, severity gate unchanged. `make lint ARGS=--list`
   shows all three engines + the structural Python check.
+
+---
+
+## Appendix A — CodeQL: how it compares to our stack
+
+This appendix records why CodeQL was *not* part of any phase, and the
+specific triggers that would change that. The short version: CodeQL operates
+one tier deeper than we currently need, at a setup cost we're not yet
+willing to pay.
+
+### A.1 What CodeQL is
+
+CodeQL is the static-analysis engine originally built by **Semmle** (Oxford
+program-analysis spinout), acquired by GitHub in 2019 and rebranded.
+It powers GitHub Code Scanning and ships as part of GitHub Advanced Security.
+
+The analysis model is **database-driven, not pattern-driven**:
+
+1. A *language extractor* compiles your source into a **relational database**
+   — every AST node, type, scope, control-flow edge, and dataflow successor
+   becomes a row in some table.
+2. Queries are written in **QL**, a declarative, side-effect-free,
+   strongly-typed language descended from Datalog. A query is logically a
+   set of predicates over the database tables; the evaluator finds all
+   tuples satisfying them.
+3. Results are emitted as SARIF, which feeds directly into GitHub Code
+   Scanning's PR-annotation UI.
+
+The defining property: QL queries can range over **multiple translation
+units, multiple files, and full control/data flow paths** in one expression.
+That capability is what ast-grep and tree-sitter–class tools fundamentally
+lack — they're per-file syntactic matchers.
+
+### A.2 Components / stack
+
+CodeQL is closed-source for the engine and CLI; what's open lives at
+[github.com/github/codeql](https://github.com/github/codeql) (the QL
+libraries and bundled queries). Implementation details below are inferred
+from Semmle's academic record, GitHub engineering posts, job postings, and
+the visible artefacts in the CLI distribution.
+
+| Component | Language | Notes |
+|---|---|---|
+| **QL evaluator (the engine)** | OCaml | The historical Semmle engine. Closed-source. Same lineage as Coq, Flow, Infer, and Hack's typechecker — program-analysis work has converged on OCaml because algebraic data types + pattern matching + native-code performance + a strong module system are exactly what an evaluator needs. |
+| **CodeQL CLI** (`codeql` binary) | Java | A small native wrapper launches a JAR. Visible inside the distribution. |
+| **C/C++ extractor** | C++ (wraps Clang's frontend) | Uses Clang for parse + Sema, then emits database tuples. |
+| **Java extractor** | Java (wraps Eclipse JDT) | |
+| **Python extractor** | Java + an embedded Python parser | |
+| **JavaScript / TypeScript extractor** | TypeScript (uses the TS compiler) | |
+| **Go / Ruby / Swift / C#** extractors | each in/around their respective toolchain | |
+| **QL standard libraries** (`codeql/cpp-all`, `codeql/javascript-all`, …) | QL itself | The `.qll` files defining `Expr`, `Function`, `DataFlow::Node`, taint configurations, etc. Open-source. |
+| **Bundled query packs** (`codeql/cpp-queries`, etc.) | QL | The actual security/quality queries you run. Open-source. |
+| **`.qlpack` packaging** | YAML manifests | Semver dependencies resolved from the registry on `ghcr.io/codeql`. |
+
+Distribution is per-language: installing CodeQL for one language pulls down
+the engine, the CLI, the matching extractor, the language's `*-all` library
+pack, and any query packs you reference — usually a few hundred MB combined
+before you've analysed anything.
+
+### A.3 Tier comparison vs. our stack
+
+CodeQL spans more tiers than any single backend we use, but it's slower and
+heavier in every one of them. The comparison really lives in **what tier
+each rule needs**:
+
+| Tier | Example rule | Our backend | CodeQL |
+|---|---|---|---|
+| Syntactic pattern | `no-raw-alloc`, `dup-typeid-or` | **ast-grep** — ~6 s, seconds-to-author | Possible, heavyweight |
+| Filesystem shape | `ls-test-has-golden`, file-graph integrity | **alint** — ~0.3 s, declarative YAML | Not its design centre — possible via custom extractor work |
+| Type-aware (single-procedure) | `int-cast-type-aware-decl` (float→int narrowing) | **clang-tidy** built-in / **libclang** AST walk — ~4 min for the broad sweep | Trivially expressible in QL via the type system; same cost shape (slow database build) |
+| Inter-procedural dataflow | `checked-pool-alloc` (proposal §4.2, deferred) | **clang-analyzer** (existing `make analyze`) | **CodeQL is purpose-built for this.** QL's `DataFlow::Configuration` framework is the canonical way to express "source → sink unless sanitised" properties. |
+| Taint analysis | "untrusted input flows into `system()` without escaping" | **Not in our stack** | **CodeQL's signature capability.** Web-app CVE classes are why GitHub bought Semmle. |
+| Security query packs (encyclopedic) | OWASP / CWE coverage | **Not in our stack** | **Ships hundreds, maintained.** Often the deciding reason to adopt for web-facing code. |
+
+clang-analyzer (which we already invoke via `make analyze` and as the
+`tidy-clang-analyzer-*` family inside `make lint-full`) gives us the
+**dataflow tier for C++ specifically** without CodeQL's database build.
+That single fact is most of why we haven't adopted CodeQL: the slowest tier
+we currently care about is already covered by a tool we already run.
+
+### A.4 What we'd gain — and what it costs
+
+**Gains** (real, not hypothetical — these are CodeQL's actual strengths):
+
+- Inter-procedural taint analysis with a mature framework (`DataFlow::Configuration`)
+- Path-sensitive null-deref / use-after-free tracking across function boundaries
+- Encyclopedic security query packs maintained by GitHub Security Lab
+- Native GitHub Code Scanning integration via SARIF — PR annotations, alert dashboards, compliance reporting
+- QL is genuinely a good language for these analyses once you've climbed the learning curve
+
+**Costs**:
+
+- **Database build**: minutes to hours per language; must be rebuilt on any
+  meaningful source change. This is the workflow killer — incompatible with
+  the iteration-speed split we just engineered (`make lint` ~6 s versus
+  `make lint-full` ~4 min). CodeQL would be `make lint-codeql` ~30 min.
+- **Disk + memory**: GB-sized databases, hundreds of MB of qlpacks. The
+  `~10 MB ast-grep binary + a YAML file` model evaporates.
+- **Learning curve**: QL is declarative-Datalog-flavoured. Authoring even a
+  trivial query is qualitatively different from writing an ast-grep pattern;
+  competent rule authors need a project-internal ramp-up.
+- **Language coverage gap**: no `tree-sitter-lambda`-equivalent extractor
+  exists for our `.ls` corpus. Writing one is substantial work — a non-trivial
+  amount of the proposal §3.8 / Phase 1 effort, but for QL instead of ast-grep.
+- **License**: free for public repos via GitHub Code Scanning; **paid (GitHub
+  Advanced Security)** for closed-source commercial use. ast-grep, alint, and
+  clang-tidy are all unconditionally free.
+- **Tier overlap**: CodeQL spans tiers we already cover. Adopting it would
+  mean either (a) running it in parallel with the existing stack and
+  reconciling overlapping findings, or (b) retiring some of the existing
+  backends. Neither is cheap.
+
+### A.5 Adoption triggers
+
+CodeQL becomes a sensible addition when at least one of these holds:
+
+1. We start shipping a **web-facing component** where untrusted input reaches
+   query/exec/file sinks. Taint analysis is then load-bearing, and CodeQL is
+   the industry-leading tool for it.
+2. We need **GitHub Code Scanning compliance** for a customer or contract —
+   SARIF + GitHub-native PR annotations are part of the deal.
+3. The deferred `checked-pool-alloc` rule (proposal §4.2) becomes urgent AND
+   clang-analyzer's existing dataflow checkers prove insufficient for our
+   specific allocator-failure contract. (Reminder: that rule is itself
+   currently blocked on the Memory Context centralisation, §4.2 / §7.6 — so
+   even this trigger is two preconditions deep.)
+4. The security-query-pack value proposition shifts — e.g., GitHub releases
+   CVE-class queries specifically targeting transpilers / JIT engines /
+   layout engines that map onto our code.
+
+Until one of those fires, the cost/benefit is not in CodeQL's favour for
+this codebase. The existing four-tier stack (ast-grep / alint / clang-tidy +
+libclang / clang-analyzer) covers the analyses we actually need without the
+database-build overhead, the SARIF tooling chain, the QL learning curve, or
+the closed-source dependency.
