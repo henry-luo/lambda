@@ -234,13 +234,31 @@ rules:
     tags: [radiant, float, type-aware]
     note: "Type-aware sibling of no-int-cast-radiant. Walks libclang AST for CSTYLE_CAST_EXPR / CXX_STATIC_CAST_EXPR nodes where the destination is int-like and the source operand resolves to float/double after stripping implicit-conversion wrappers."
 
-  int-cast-type-aware-decl:
+  # Family rules for the project-wide bug-finding clang-tidy pass.
+  # Per-finding rule ids land as `tidy-<check-name>` (e.g.
+  # `tidy-bugprone-branch-clone`); these three family entries are what the
+  # manifest tracks. The disabled-checks list is in utils/lint/tidy/run_tidy.sh.
+
+  tidy-bugprone:
     backend: clang-tidy
     file: utils/lint/tidy/run_tidy.sh
-    category: layout-correctness
-    enforces: claude-md/rule-11
-    tags: [radiant, float, type-aware]
-    note: "Wraps clang-tidy's built-in bugprone-narrowing-conversions check, tuned to fire only on float→int destinations (the truncation case). Catches `int x = float_expr` shapes that the pattern-only no-int-layout-decl misses."
+    category: bug-finder
+    tags: [clang-tidy, family]
+    note: "All bugprone-* clang-tidy checks (minus easily-swappable-parameters and reserved-identifier). Catches a wide bug class: branch clones, narrowing, multi-level pointer conversions, signed-char misuse, switch-default-case, incorrect roundings, etc."
+
+  tidy-clang-analyzer:
+    backend: clang-tidy
+    file: utils/lint/tidy/run_tidy.sh
+    category: bug-finder
+    tags: [clang-tidy, family, dataflow]
+    note: "Path-sensitive clang static analyzer checks (the same engine make analyze uses, dispatched via clang-tidy). Catches dead stores, enum-cast-out-of-range, dataflow bugs."
+
+  tidy-cert:
+    backend: clang-tidy
+    file: utils/lint/tidy/run_tidy.sh
+    category: bug-finder
+    tags: [clang-tidy, family, security]
+    note: "CERT C/C++ Secure Coding Standards (minus err33-c, err58-cpp, dcl37-c, dcl51-cpp which were too noisy on this codebase). Catches strtol-without-errno, C-style varargs, signed-char arithmetic UB, etc."
 
   # ── alint · structural rules ────────────────────────────────────────────
 

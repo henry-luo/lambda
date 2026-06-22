@@ -1,24 +1,23 @@
 #!/usr/bin/env bash
-# run_tidy.sh — Phase 3 backend (type-aware narrowing) for the Lambda lint stack.
+# run_tidy.sh — clang-tidy / libclang backend for the Lambda lint stack.
 #
-# Two rules, two sub-tools:
+# Two passes, both producing unified NDJSON with `backend: clang-tidy`:
 #
-#   int-cast-type-aware-decl   →  clang-tidy + bugprone-narrowing-conversions
-#                                 catches  `int x = float_expr;`
-#                                 (implicit narrowing on initialization)
+#  1. Project-wide bug-finding pass:
+#       Runs `bugprone-*,clang-analyzer-*,cert-*` (minus the families the
+#       project's .clang-tidy explicitly disables) across every .cpp under
+#       lambda/ and radiant/. Honours both clang-tidy's native `// NOLINT(...)`
+#       markers and our project markers (`TIDY_OK`).
+#       Rule id per finding: `tidy-<check-name>` (e.g. tidy-bugprone-macro-parentheses).
 #
-#   int-cast-type-aware        →  utils/lint/tidy/explicit_cast_check.py (libclang)
-#                                 catches  `(int)float_expr`  and  `static_cast<int>(...)`
-#                                 (explicit casts that bugprone-narrowing-conversions
-#                                 deliberately skips — programmer-intentional)
+#  2. Explicit float→int cast pass (libclang AST):
+#       utils/lint/tidy/explicit_cast_check.py — catches `(int)float_expr` /
+#       `static_cast<int>(float_expr)` that pass (1) ignores by design.
+#       Rule id: `int-cast-type-aware`. Suppressed by `// INT_CAST_OK`.
 #
-# Both emit findings in the unified record shape ast-grep + alint use, plus a
-# `backend: clang-tidy` tag. run.sh splices the stream into the existing
-# severity / suppression / report pipeline.
-#
-# Scope: the same file set as the `no-int-cast-radiant` ast-grep rule. Other
-# .cpp files (lambda/, lambda/js/, …) are intentionally out of scope for now —
-# narrowing-conversion warnings explode without per-directory triage.
+# Both passes emit records the run.sh pipeline consumes — the severity gate,
+# suppression filter (per-rule `metadata.suppress`), and Report_NNN.* writer
+# all apply with no further plumbing.
 
 set -uo pipefail
 
@@ -26,26 +25,36 @@ ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 CLANG_TIDY="${CLANG_TIDY:-/opt/homebrew/opt/llvm/bin/clang-tidy}"
 VENV_PY="$ROOT/utils/lint/tidy/.venv/bin/python3"
 EXPLICIT_PY="$ROOT/utils/lint/tidy/explicit_cast_check.py"
+JOBS="${LINT_TIDY_JOBS:-8}"   # parallel clang-tidy invocations
 
-# Subset of layout files that no-int-cast-radiant covers.
-FILES=(
-  radiant/layout_block.cpp        radiant/layout_inline.cpp
-  radiant/layout_text.cpp         radiant/layout_positioned.cpp
-  radiant/layout_flex.cpp         radiant/layout_flex_multipass.cpp
-  radiant/layout_flex_measurement.cpp
-  radiant/layout_table.cpp        radiant/layout_multicol.cpp
-  radiant/layout_grid.cpp         radiant/layout_grid_multipass.cpp
-  radiant/layout_form.cpp         radiant/layout_list.cpp
-  radiant/layout_counters.cpp
-  radiant/grid_sizing.cpp         radiant/grid_positioning.cpp
-  radiant/grid_utils.cpp
-  radiant/intrinsic_sizing.cpp
-)
+cd "$ROOT"
 
-# Inline clang-tidy config — overrides the project's .clang-tidy by passing
-# --checks. We want ONLY float→int narrowing, not int/int or int→float.
-TIDY_CHECKS='-*,bugprone-narrowing-conversions'
-TIDY_OPTS='{Checks: "-*,bugprone-narrowing-conversions", CheckOptions: [
+if [[ ! -x "$CLANG_TIDY" ]]; then
+  exit 0
+fi
+
+# ───────── pass 1: project-wide bug-finding (parallel) ─────────
+#
+# Checks: every bugprone-* / clang-analyzer-* / cert-* check, minus four the
+# project's .clang-tidy already disables (kept disabled here for parity with
+# `make tidy` of the past) and minus bugprone-narrowing-conversions for non-
+# float narrowing (we keep float→int only — the truncation case).
+TIDY_CHECKS='-*,bugprone-*,clang-analyzer-*,cert-*'
+# Matches the project's .clang-tidy disables.
+TIDY_CHECKS+=',-bugprone-easily-swappable-parameters'
+TIDY_CHECKS+=',-cert-err58-cpp'
+# Empirically too noisy on this codebase:
+#   cert-err33-c             fires on every fopen/fclose/fseek return that's
+#                            not stored — ~1100 findings, mostly false signal.
+#   bugprone-reserved-identifier
+#                            fires on the project's `_foo` prefix convention.
+TIDY_CHECKS+=',-cert-err33-c'
+TIDY_CHECKS+=',-bugprone-reserved-identifier'
+# cert-dcl37-c / cert-dcl51-cpp are aliases of bugprone-reserved-identifier;
+# disable for the same reason.
+TIDY_CHECKS+=',-cert-dcl37-c'
+TIDY_CHECKS+=',-cert-dcl51-cpp'
+TIDY_OPTS='{Checks: "'"$TIDY_CHECKS"'", CheckOptions: [
   {key: bugprone-narrowing-conversions.WarnOnFloatingPointNarrowingConversion,         value: "1"},
   {key: bugprone-narrowing-conversions.WarnOnIntegerNarrowingConversion,               value: "0"},
   {key: bugprone-narrowing-conversions.WarnOnIntegerToFloatingPointNarrowingConversion, value: "0"},
@@ -53,47 +62,87 @@ TIDY_OPTS='{Checks: "-*,bugprone-narrowing-conversions", CheckOptions: [
   {key: bugprone-narrowing-conversions.PedanticMode,                                   value: "0"}
 ]}'
 
-cd "$ROOT"
+# Parallel run. xargs handles file enumeration and the parallelism — no need
+# to materialise the file list in a bash array (macOS bash 3.2 lacks mapfile).
+# Output goes to a temp file because xargs interleaves stdouts otherwise.
+TIDY_OUT=$(mktemp)
+trap 'rm -f "$TIDY_OUT"' EXIT
 
-# Bail if the toolchain is missing — the rule simply produces no findings.
-if [[ ! -x "$CLANG_TIDY" ]] || [[ ! -x "$VENV_PY" ]] || [[ ! -f "$EXPLICIT_PY" ]]; then
-  exit 0
-fi
+find lambda radiant -type f -name '*.cpp' -not -path '*/tree-sitter*/*' 2>/dev/null \
+  | xargs -n 1 -P "$JOBS" -I {} "$CLANG_TIDY" {} \
+        --config="$TIDY_OPTS" \
+        --quiet \
+        -- -std=c++17 -I. -Ilib -Ilib/mem-pool/include -Ilambda -Iradiant -Iinclude -w \
+      2>&1 \
+  | grep -E ':[0-9]+:[0-9]+: warning:.*\[(bugprone|clang-analyzer|cert)-' \
+  > "$TIDY_OUT"
 
-# ───────── int-cast-type-aware-decl (implicit narrowing via clang-tidy) ─────────
-
-tidy_out=$(
-  for f in "${FILES[@]}"; do
-    "$CLANG_TIDY" "$f" --config="$TIDY_OPTS" --checks="$TIDY_CHECKS" --quiet \
-      -- -std=c++17 -I. -Ilib -Ilib/mem-pool/include -Ilambda -Iradiant -Iinclude -w \
-      2>&1 | grep -E ':[0-9]+:[0-9]+: warning:.*bugprone-narrowing-conversions'
-  done \
-  | grep -vE "to '(float|double|long double)'"   # only int-class destinations
-)
-
-# Normalise clang-tidy text output to unified NDJSON.
-# Each input line looks like:
-#   /Users/.../radiant/layout_block.cpp:3076:51: warning: narrowing conversion from 'float' to 'int' [bugprone-narrowing-conversions]
-printf '%s\n' "$tidy_out" | awk -v root="$ROOT/" '
-  /:[0-9]+:[0-9]+: warning:.*bugprone-narrowing-conversions/ {
+# Normalise output → unified NDJSON.
+# Honour BOTH our project marker (`// TIDY_OK`) and clang-tidy's native
+# `// NOLINT`/`// NOLINT(check-name)`. Suppression is per-line: read the
+# source line and skip if any marker is on it.
+awk -v root="$ROOT/" '
+  function read_line(file, line,    cmd, l) {
+    cmd = "sed -n " line "p " file
+    cmd | getline l
+    close(cmd)
+    return l
+  }
+  /:[0-9]+:[0-9]+: warning:.*\[(bugprone|clang-analyzer|cert)-/ {
     rel = $0
     sub(root, "", rel)
     if (match(rel, /:[0-9]+:[0-9]+: warning: /) == 0) next
     file_part = substr(rel, 1, RSTART - 1)
-    head      = substr(rel, RSTART, RLENGTH)         # ":line:col: warning: "
-    tail      = substr(rel, RSTART + RLENGTH)        # message + [check]
+    head      = substr(rel, RSTART, RLENGTH)
+    tail      = substr(rel, RSTART + RLENGTH)
     n = split(substr(head, 2), pos, ":")
     line = pos[1] + 0
     col  = pos[2] + 0
-    sub(/ +\[bugprone-narrowing-conversions\]$/, "", tail)
-    msg = tail
-    gsub(/\\/, "\\\\", msg)
-    gsub(/"/, "\\\"", msg)
-    printf "{\"ruleId\":\"int-cast-type-aware-decl\",\"severity\":\"warning\",\"message\":\"%s — drop the narrowing init or mark with // INT_CAST_OK: <reason>\",\"file\":\"%s\",\"range\":{\"start\":{\"line\":%d,\"column\":%d},\"end\":{\"line\":%d,\"column\":%d},\"byteOffset\":{\"start\":0,\"end\":0}},\"text\":\"%s\",\"lines\":\"\",\"metadata\":{\"suppress\":\"INT_CAST_OK\"},\"backend\":\"clang-tidy\"}\n",
-      msg, file_part, line - 1, col - 1, line - 1, col - 1, msg
+    # Strip the trailing [check-name] (single-check form: `[bugprone-foo]`)
+    # OR [check-a,check-b,check-c] (multi-check / alias form: pick first as id,
+    # since clang-tidy listed it first as the primary attribution).
+    if (match(tail, / \[[a-zA-Z][a-zA-Z0-9.,-]+\]$/) > 0) {
+      tag = substr(tail, RSTART + 2, RLENGTH - 3)
+      msg = substr(tail, 1, RSTART - 1)
+      # First check name in a comma-separated list.
+      i = index(tag, ",")
+      check = (i > 0 ? substr(tag, 1, i - 1) : tag)
+    } else {
+      check = "unknown"
+      msg   = tail
+    }
+    # Skip if NOLINT or our project marker is on the offending line.
+    src = read_line(root file_part, line)
+    if (src ~ /\/\/[[:space:]]*NOLINT/) next
+    if (src ~ /\/\/[[:space:]]*TIDY_OK/) next
+    # Skip narrowing-conversions findings to NON-int (already filtered to
+    # int by default since we set FP→int=1, but partial-parse can leak).
+    if (check == "bugprone-narrowing-conversions" && msg !~ /to .int.|to .unsigned|to .signed|to .short|to .long|to .char/) next
+
+    gsub(/\\/, "\\\\", msg);  gsub(/"/, "\\\"", msg)
+    gsub(/\\/, "\\\\", src);  gsub(/"/, "\\\"", src)
+    printf "{\"ruleId\":\"tidy-%s\",\"severity\":\"warning\",\"message\":\"%s — see clang-tidy `%s` (suppress with `// NOLINT(%s)` or `// TIDY_OK: <reason>`).\",\"file\":\"%s\",\"range\":{\"start\":{\"line\":%d,\"column\":%d},\"end\":{\"line\":%d,\"column\":%d},\"byteOffset\":{\"start\":0,\"end\":0}},\"text\":\"%s\",\"lines\":\"%s\",\"metadata\":{\"suppress\":\"TIDY_OK\"},\"backend\":\"clang-tidy\"}\n",
+      check, msg, check, check, file_part, line - 1, col - 1, line - 1, col - 1, msg, src
   }
-'
+' "$TIDY_OUT"
 
-# ───────── int-cast-type-aware (explicit casts via libclang) ─────────
+# ───────── pass 2: explicit float→int cast (libclang AST) ─────────
+# Limited to the same 19 layout files where this rule's payoff was empirically
+# validated (60-78% INT_CAST_OK marker reclaim). Broader scope = future work.
 
-"$VENV_PY" "$EXPLICIT_PY" --repo-root "$ROOT" "${FILES[@]}" 2>/dev/null
+if [[ -x "$VENV_PY" && -f "$EXPLICIT_PY" ]]; then
+  EXPLICIT_FILES=(
+    radiant/layout_block.cpp        radiant/layout_inline.cpp
+    radiant/layout_text.cpp         radiant/layout_positioned.cpp
+    radiant/layout_flex.cpp         radiant/layout_flex_multipass.cpp
+    radiant/layout_flex_measurement.cpp
+    radiant/layout_table.cpp        radiant/layout_multicol.cpp
+    radiant/layout_grid.cpp         radiant/layout_grid_multipass.cpp
+    radiant/layout_form.cpp         radiant/layout_list.cpp
+    radiant/layout_counters.cpp
+    radiant/grid_sizing.cpp         radiant/grid_positioning.cpp
+    radiant/grid_utils.cpp
+    radiant/intrinsic_sizing.cpp
+  )
+  "$VENV_PY" "$EXPLICIT_PY" --repo-root "$ROOT" "${EXPLICIT_FILES[@]}" 2>/dev/null
+fi

@@ -495,7 +495,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-pdf-render test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint lint-cppcheck docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint lint-full lint-cppcheck docs intellisense analyze-binary \
 	    build-debug build-release build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    generate-premake clean-premake build-test build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline \
@@ -579,14 +579,13 @@ help:
 	@echo "  analyze-single - Run static analysis on individual files"
 	@echo "  analyze-direct - Direct clang static analysis (bypasses build system)"
 	@echo "  analyze-compile-db - Use compile_commands.json for analysis (requires bear)"
-	@echo "  tidy          - Run clang-tidy analysis on C++ files"
-	@echo "  tidy-full     - Comprehensive clang-tidy with compile database"
-	@echo "  tidy-fix      - Run clang-tidy with automatic fixes (interactive)"
 	@echo "  tidy-printf   - Convert printf/fprintf(stderr) to log_debug() using Clang AST"
 	@echo "                  Usage: make tidy-printf FILE='pattern' [DRY_RUN=1] [BACKUP=1]"
 	@echo "  format        - Format source code with clang-format"
-	@echo "  lint          - Unified project-policy linter (ast-grep + alint + structural)"
-	@echo "                  Usage: make lint [ARGS='--rule <id>' | --report | --list]"
+	@echo "  lint          - Unified policy linter, fast pass (ast-grep + alint + structural)"
+	@echo "                  Usage: make lint [ARGS='--rule <id>' | --report | --list]   ~6 s"
+	@echo "  lint-full     - Same plus the clang-tidy backend (slow, comprehensive)"
+	@echo "                  Usage: make lint-full [ARGS=--report]                         ~4 min"
 	@echo "  lint-cppcheck - Run cppcheck static analyzer (orthogonal semantic gate)"
 	@echo "  count-loc     - Count lines of code in the repository"
 	@echo "  cheatsheet    - Regenerate Lambda_Cheatsheet.pdf from Markdown (requires pandoc, xelatex)"
@@ -1937,110 +1936,20 @@ analyze-binary:
 lint:
 	@utils/lint/run.sh $(ARGS)
 
+# Same pipeline plus the clang-tidy backend (bugprone-* + clang-analyzer-* +
+# cert-* across all of lambda/ + radiant/). Slow (~4 min on 8 cores); split
+# off from `make lint` so iterative dev runs stay fast (~6 s without tidy).
+# All Report_NNN.* still aggregate findings across every active backend.
+lint-full:
+	@utils/lint/run.sh --with-tidy $(ARGS)
+
 # Clang-tidy static analysis
-tidy:
-	@echo "Running clang-tidy analysis..."
-	@mkdir -p analysis-results-tidy
-	@if [ -f "/opt/homebrew/Cellar/llvm/21.1.0/bin/clang-tidy" ]; then \
-		CLANG_TIDY="/opt/homebrew/Cellar/llvm/21.1.0/bin/clang-tidy"; \
-	elif command -v clang-tidy >/dev/null 2>&1; then \
-		CLANG_TIDY="clang-tidy"; \
-	else \
-		echo "clang-tidy not found. Install with: brew install llvm"; \
-		exit 1; \
-	fi; \
-	echo "Analyzing C++ files with clang-tidy..."; \
-	find lambda -name "*.cpp" -not -path "*/tree-sitter*" | head -10 | while read file; do \
-		echo "Analyzing $$file..."; \
-		$$CLANG_TIDY "$$file" \
-			--checks='-*,bugprone-*,cert-*,clang-analyzer-*,misc-*,performance-*,portability-*,readability-*' \
-			-- -I. -Ilib -Ilib/mem-pool/include -Ilambda -std=c++17 \
-			2>&1 | grep -E "(warning|error|note)" | head -5 || echo "  (no issues found)"; \
-	done > analysis-results-tidy/tidy-summary.txt; \
-	echo ""; \
-	echo "📊 Clang-tidy Analysis Complete:"; \
-	echo "  Summary: analysis-results-tidy/tidy-summary.txt"; \
-	echo ""; \
-	if [ -s analysis-results-tidy/tidy-summary.txt ]; then \
-		echo "🔍 Sample Issues Found:"; \
-		head -15 analysis-results-tidy/tidy-summary.txt; \
-	else \
-		echo "✅ No issues found in analyzed files"; \
-	fi
-
-tidy-full:
-	@echo "Running comprehensive clang-tidy analysis..."
-	@mkdir -p analysis-results-tidy
-	@if [ -f "/opt/homebrew/Cellar/llvm/21.1.0/bin/clang-tidy" ]; then \
-		CLANG_TIDY="/opt/homebrew/Cellar/llvm/21.1.0/bin/clang-tidy"; \
-	elif command -v clang-tidy >/dev/null 2>&1; then \
-		CLANG_TIDY="clang-tidy"; \
-	else \
-		echo "clang-tidy not found. Install with: brew install llvm"; \
-		exit 1; \
-	fi; \
-	echo "Creating manual compile database for Lambda project..."; \
-	$(MAKE) generate-compile-db; \
-	if [ -f "compile_commands.json" ]; then \
-		echo "Running clang-tidy with compile database..."; \
-		find lambda -name "*.cpp" -not -path "*/tree-sitter*" | \
-		xargs $$CLANG_TIDY -p . > analysis-results-tidy/tidy-full-report.txt 2>&1; \
-	else \
-		echo "Compile database not available, running direct analysis..."; \
-		find lambda -name "*.cpp" -not -path "*/tree-sitter*" | while read file; do \
-			echo "Analyzing $$file..."; \
-			$$CLANG_TIDY "$$file" \
-				--checks='-*,bugprone-*,cert-*,clang-analyzer-*,misc-*,performance-*,portability-*,readability-*' \
-				-- -I. -Ilib -Ilib/mem-pool/include -Ilambda -std=c++17 \
-				2>&1 || echo "  (analysis completed with errors)"; \
-		done > analysis-results-tidy/tidy-full-report.txt 2>&1; \
-	fi; \
-	echo "Full report saved to analysis-results-tidy/tidy-full-report.txt"; \
-	echo "Generating summary..."; \
-	grep -E "(warning|error|note)" analysis-results-tidy/tidy-full-report.txt | \
-		head -100 > analysis-results-tidy/tidy-full-summary.txt || true; \
-	echo "Summary saved to analysis-results-tidy/tidy-full-summary.txt"
-
-# Generate compile_commands.json manually for clang-tidy
-generate-compile-db:
-	@echo "Generating compile_commands.json for Lambda project..."
-	@echo '[' > compile_commands.json
-	@find lambda -name "*.cpp" -not -path "*/tree-sitter*" | while IFS= read -r file; do \
-		echo "  {" >> compile_commands.json; \
-		echo "    \"directory\": \"$(PWD)\"," >> compile_commands.json; \
-		echo "    \"command\": \"clang++ -I. -Ilib -Ilib/mem-pool/include -Ilambda -Iwasm-deps/include -Iwindows-deps/include -std=c++17 -c $$file\"," >> compile_commands.json; \
-		echo "    \"file\": \"$$file\"" >> compile_commands.json; \
-		echo "  }," >> compile_commands.json; \
-	done
-	@# Remove trailing comma and close JSON
-	@sed -i '' '$$s/,//' compile_commands.json
-	@echo ']' >> compile_commands.json
-	@echo "Generated compile_commands.json with $$(grep -c '"file"' compile_commands.json) entries"
-
-tidy-fix:
-	@echo "Running clang-tidy with automatic fixes..."
-	@if [ -f "/opt/homebrew/Cellar/llvm/21.1.0/bin/clang-tidy" ]; then \
-		CLANG_TIDY="/opt/homebrew/Cellar/llvm/21.1.0/bin/clang-tidy"; \
-	elif command -v clang-tidy >/dev/null 2>&1; then \
-		CLANG_TIDY="clang-tidy"; \
-	else \
-		echo "clang-tidy not found. Install with: brew install llvm"; \
-		exit 1; \
-	fi; \
-	echo "⚠️  This will modify your source files. Make sure you have backups!"; \
-	read -p "Continue? (y/N): " confirm; \
-	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
-		find lambda -name "*.cpp" -not -path "*/tree-sitter*" | head -5 | while read file; do \
-			echo "Fixing $$file..."; \
-			$$CLANG_TIDY "$$file" --fix \
-				--checks='-*,modernize-*,readability-braces-around-statements,performance-*' \
-				-- -I. -Ilib -Ilib/mem-pool/include -Ilambda -std=c++17 \
-				2>/dev/null || echo "  (skipped due to errors)"; \
-		done; \
-		echo "Automatic fixes applied to selected files."; \
-	else \
-		echo "Cancelled."; \
-	fi
+# tidy / tidy-full / tidy-fix / generate-compile-db were retired in the Phase 3
+# unification: the `bugprone-* + clang-analyzer-* + cert-*` subset (minus
+# project-disabled noise) is now run by `make lint-full` (and on-demand by
+# `make lint ARGS='--rule ^tidy-*'`) via utils/lint/tidy/run_tidy.sh.
+# `tidy-printf` (below) is a different tool — a clang-based AST rewriter — and
+# is retained.
 
 # Refactor printf/fprintf to log_debug using clang-based tool
 # Usage: make tidy-printf FILE='pattern' [DRY_RUN=1] [BACKUP=1]

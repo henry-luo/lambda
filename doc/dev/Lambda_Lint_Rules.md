@@ -40,7 +40,7 @@ It is *not* a replacement for the orthogonal semantic gates (`tidy`,
 |---|---|---|
 | **ast-grep** | Node patterns over file *contents* (C/C++ and Lambda `.ls` via the registered `tree-sitter-lambda` grammar) | `utils/lint/rules/c-cpp/*.yml`, `utils/lint/rules/lambda/*.yml` |
 | **alint** | Filesystem *shape* and cross-file relations (sibling-file existence, file-graph integrity) | `.alint.yml` at repo root |
-| **clang-tidy + libclang** | *Type-aware* checks that need Clang's Sema (narrowing conversions, explicit float→int casts) | `utils/lint/tidy/run_tidy.sh` (orchestrator) + `utils/lint/tidy/explicit_cast_check.py` (libclang) |
+| **clang-tidy + libclang** | (1) Project-wide bug-finding pass: `bugprone-* + clang-analyzer-* + cert-*` (minus the project's disabled-check list). (2) Explicit float→int cast check via libclang AST. | `utils/lint/tidy/run_tidy.sh` (orchestrator) + `utils/lint/tidy/explicit_cast_check.py` (libclang) |
 | **Structural Python** | Coverage invariants that aren't expressible in any pattern engine (e.g. "every enum value has a table row") | `utils/check_state_machine.py` |
 
 A thin cross-engine **manifest** at `utils/lint/manifest.yml` indexes every
@@ -50,15 +50,33 @@ rule with metadata (category, claude-md reference, tags). The
 
 ## 3. Running
 
+Two main entry points, split by speed:
+
 ```bash
-make lint                                         # full sweep — the CI gate
+make lint                                         # fast pass (~6-8 s)
+                                                  # ast-grep + alint + structural Python
+make lint-full                                    # full sweep (~4 min)
+                                                  # the above + clang-tidy bug-finder
+```
+
+`make lint` is the default for interactive dev iteration. `make lint-full`
+includes the clang-tidy backend, which parses every `.cpp` under
+`lambda/`+`radiant/` from scratch — too slow for routine runs but the
+complete pre-merge gate.
+
+```bash
 make lint ARGS='--rule ^no-raw-alloc$'            # one rule (regex over rule ids)
 make lint ARGS='--rule ^state-store-'             # whole family
-make lint ARGS='--structural-only'                # skip pattern rules
+make lint ARGS='--rule ^tidy-'                    # auto-enables --with-tidy
+make lint ARGS='--with-tidy'                      # equivalent to `make lint-full`
+make lint ARGS='--structural-only'                # only structural Python checks
 make lint ARGS=--report                           # also write Report_NNN.{md,json,tsv}
 make lint ARGS=--list                             # list every rule across backends
 make lint ARGS=--format=github                    # GitHub Actions annotations
 ```
+
+A `--rule` filter that mentions `tidy-` or `int-cast-type-aware` auto-enables
+the clang-tidy backend — otherwise the filter would silently produce nothing.
 
 Direct invocation: `utils/lint/run.sh [args]` works the same way.
 
@@ -117,9 +135,8 @@ shorthand-temporary pitfall.
 
 | Rule | Backend | Sev. | Suppress | Enforces | What it catches |
 |---|---|---|---|---|---|
-| `int-cast-type-aware-decl` | clang-tidy | warning | `INT_CAST_OK` | CLAUDE rule 11 | `int x = float_expr;` initializations — truncates float to int. Uses built-in `bugprone-narrowing-conversions` tuned to float→int only. Precise (type-aware). |
-| `int-cast-type-aware` | libclang | warning | `INT_CAST_OK` | CLAUDE rule 11 | Explicit `(int)float_expr` / `static_cast<int>(float_expr)` casts. The type-aware sibling of the retired `no-int-cast-radiant`; only fires when the source resolves to `float`/`double`. |
-| `no-int-layout-decl` | ast-grep | warning | `INT_LAYOUT_OK` | CLAUDE rule 11 | Pattern-only sibling: `int x = obj->field` where `field` is in a small allowlist of known float layout dimensions (`width`/`height`/`padding`/…). |
+| `int-cast-type-aware` | libclang | warning | `INT_CAST_OK` | CLAUDE rule 11 | Explicit `(int)float_expr` / `static_cast<int>(float_expr)` casts. Type-aware: only fires when the source resolves to `float`/`double`. |
+| `no-int-layout-decl` | ast-grep | warning | `INT_LAYOUT_OK` | CLAUDE rule 11 | Pattern-only sibling: `int x = obj->field` where `field` is in a small allowlist of known float layout dimensions (`width`/`height`/`padding`/…). The clang-tidy `tidy-bugprone-narrowing-conversions` rule (§5.9) is the precise type-aware version and supersedes this. |
 | `css-temp-decl` | ast-grep | error | `CSS_TEMP_DECL_OK` | — | Fragile CSS shorthand temporary declarations in `resolve_css_style.cpp` (`CssDeclaration X = *decl;`, `obj.value = &local;`). Use `lam::CssTempDecl` / `lam::CssTempListDecl<N>` from `radiant/css_temp_decl.hpp`. |
 | `no-raw-css-value-stack` | ast-grep | error | `CSS_TEMP_DECL_OK` | — | Same hazard, scoped to other `radiant/*.cpp` files (extends `css-temp-decl`). |
 
@@ -181,6 +198,50 @@ Informational rules — surface findings in reports but never fail the gate.
 |---|---|---|---|
 | `todo-inventory` | ast-grep | info | TODO/FIXME/XXX/HACK markers in `lambda/` / `radiant/` / `lib/` C/C++ comments. |
 | `ls-todo-inventory` | ast-grep | info | Same, in `.ls` Lambda scripts. First rule against the registered `tree-sitter-lambda` grammar. |
+
+### 5.9 Project-wide bug-finding (clang-tidy families)
+
+A single backend pass runs `bugprone-* + clang-analyzer-* + cert-*` across
+every `.cpp` under `lambda/` + `radiant/` (~449 files, parallelized 8-wide).
+Per-finding rule IDs land as `tidy-<check-name>` so they group naturally in
+reports; the manifest tracks three **family** entries below.
+
+**Suppression**: honors clang-tidy's native `// NOLINT(check-name)` *and*
+the project marker `// TIDY_OK: <reason>` — drop a finding if either appears
+on the source line.
+
+**Disabled checks** (in [run_tidy.sh](../../utils/lint/tidy/run_tidy.sh) —
+empirically too noisy on this codebase):
+
+- `bugprone-easily-swappable-parameters`, `cert-err58-cpp` (already disabled
+  in the project [.clang-tidy](../../.clang-tidy))
+- `cert-err33-c` (~1100 false-positive findings: "you should check the
+  return value of every fopen/fclose")
+- `bugprone-reserved-identifier`, `cert-dcl37-c`, `cert-dcl51-cpp` (the
+  codebase uses `_`-prefixed identifiers intentionally)
+
+| Family rule | Sev. | Suppress | What it covers |
+|---|---|---|---|
+| `tidy-bugprone-*` | warning | `TIDY_OK`, `NOLINT(...)` | Bug-prone patterns: copy-pasted branches, narrowing conversions, multi-level implicit pointer conversions, signed-char misuse, missing switch defaults, incorrect roundings, widening before multiplication, etc. |
+| `tidy-clang-analyzer-*` | warning | same | Path-sensitive static analyzer (same engine `make analyze` uses): dead stores, enum-cast-out-of-range, NullDeref candidates, uninit values along specific paths. |
+| `tidy-cert-*` | warning | same | CERT C/C++ Secure Coding Standards: strtol without errno check, C-style varargs functions, signed-char arithmetic UB, predictable seeds, etc. |
+
+**Runtime**: ~3-4 min wall-clock for the parallel pass on 449 `.cpp` files.
+This is why it's split off into `make lint-full` (and an opt-in
+`--with-tidy` flag) — too slow for routine `make lint` runs but appropriate
+for pre-merge gates. Set `LINT_TIDY_JOBS=N` to override parallelism
+(default 8).
+
+A `--rule` filter that targets `tidy-` or `int-cast-type-aware` auto-enables
+the backend, so:
+
+```bash
+make lint ARGS='--rule ^tidy-bugprone-branch-clone$'   # works without --with-tidy
+```
+
+**History**: this backend replaces the retired `make tidy` / `tidy-full` /
+`tidy-fix` Makefile targets. `make tidy-printf` is a separate clang-based
+AST rewriter (printf → log_debug) and is unaffected.
 
 ## 6. Reports
 

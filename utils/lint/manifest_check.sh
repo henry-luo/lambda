@@ -38,10 +38,15 @@ fi
 # Keep this list in lockstep with run.sh (small enough that grepping is fine).
 awk -F: '/^  *"[a-z-]+:python/{ gsub(/[" ]/, "", $1); print $1 }' "$ROOT/utils/lint/run.sh" >> "$discovered"
 
-# clang-tidy / libclang rules: enumerated by run_tidy.sh's --list output equivalent.
-# Today there are exactly two; keep this in lockstep with run_tidy.sh.
+# clang-tidy / libclang rules. Two shapes:
+#   - int-cast-type-aware    : single rule, libclang AST tool (explicit casts)
+#   - tidy-{bugprone,clang-analyzer,cert} : family rules — each fires under
+#     many specific check names (tidy-bugprone-branch-clone, etc.). The
+#     manifest tracks the families, not every check name; we record the
+#     family ids here so the discovery side and manifest side reconcile.
 if [[ -f "$ROOT/utils/lint/tidy/run_tidy.sh" ]]; then
-  printf '%s\n' "int-cast-type-aware" "int-cast-type-aware-decl" >> "$discovered"
+  printf '%s\n' "int-cast-type-aware" \
+                "tidy-bugprone" "tidy-clang-analyzer" "tidy-cert" >> "$discovered"
 fi
 
 # ---------- discover ids from manifest ----------

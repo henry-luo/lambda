@@ -8,11 +8,15 @@
 # no pattern tool can express) are dispatched after the pattern pass.
 #
 # Usage:
-#   utils/lint/run.sh                 # all rules + structural checks
-#   utils/lint/run.sh --rule <regex>  # one rule (or family)
+#   utils/lint/run.sh                 # fast pass: ast-grep + alint + structural
+#   utils/lint/run.sh --with-tidy     # add the clang-tidy backend (slow ~3-4 min)
+#   utils/lint/run.sh --rule <regex>  # filter to one rule or family; auto-enables
+#                                     # --with-tidy when the regex targets tidy-*
 #   utils/lint/run.sh --report        # also write Report_NNN.{md,json,tsv}
 #   utils/lint/run.sh --format github # GitHub Actions annotations
 #   utils/lint/run.sh --list          # list rule + structural ids
+#
+# Make targets: `make lint` (fast) and `make lint-full` (adds clang-tidy).
 #
 # Exit: non-zero on any unsuppressed error-level finding or structural failure.
 
@@ -36,6 +40,7 @@ STRUCTURAL_CHECKS=(
 # ---------- arg parsing ----------
 RULE_FILTER=""; WRITE_REPORT=0; NO_STRUCTURAL=0; STRUCTURAL_ONLY=0
 FORMAT="pretty"; LIST=0
+WITH_TIDY=0   # clang-tidy backend OFF by default (slow, ~3-4 min) — opt in via --with-tidy
 
 usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -45,12 +50,19 @@ while [[ $# -gt 0 ]]; do
     --report)          WRITE_REPORT=1; shift;;
     --no-structural)   NO_STRUCTURAL=1; shift;;
     --structural-only) STRUCTURAL_ONLY=1; shift;;
+    --with-tidy)       WITH_TIDY=1; shift;;
     --format)          FORMAT="$2"; shift 2;;
     --list)            LIST=1; shift;;
     -h|--help)         usage; exit 0;;
     *)                 echo "lint: unknown arg '$1'" >&2; usage >&2; exit 2;;
   esac
 done
+
+# Auto-enable tidy when filtering to a tidy rule explicitly — otherwise
+# `make lint ARGS='--rule ^tidy-bugprone'` would silently produce nothing.
+if [[ -n "$RULE_FILTER" ]] && [[ "$RULE_FILTER" == *tidy* || "$RULE_FILTER" == *int-cast-type-aware* ]]; then
+  WITH_TIDY=1
+fi
 
 # ---------- dependency checks ----------
 need() { command -v "$1" >/dev/null 2>&1 || { echo "lint: $1 not found ($2)" >&2; exit 127; }; }
@@ -138,7 +150,7 @@ fi
 # unified NDJSON directly (one record per finding, backend: clang-tidy).
 TIDY_RAW=""
 TIDY_SCRIPT="$ROOT/utils/lint/tidy/run_tidy.sh"
-if (( ! STRUCTURAL_ONLY )) && [[ -x "$TIDY_SCRIPT" ]]; then
+if (( WITH_TIDY )) && (( ! STRUCTURAL_ONLY )) && [[ -x "$TIDY_SCRIPT" ]]; then
   TIDY_RAW=$("$TIDY_SCRIPT" 2>/dev/null || true)
   # Apply --rule filter on the tidy stream (same shape as ast-grep filter).
   if [[ -n "$RULE_FILTER" && -n "$TIDY_RAW" ]]; then
