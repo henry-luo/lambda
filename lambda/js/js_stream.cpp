@@ -22,6 +22,7 @@
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/strbuf.h"
 
 #include <cstdio>
 #include <cstring>
@@ -102,6 +103,9 @@ static int64_t js_stream_default_object_hwm = 16;
 static Item js_stream_make_error_with_code(const char* code, const char* message);
 static bool js_stream_readable_is_object_mode(Item self);
 static int64_t js_stream_readable_chunk_length(Item self, Item chunk);
+static bool js_stream_readable_accepts_more(Item self, Item buf);
+static bool js_stream_readable_buffer_has_string(Item buf);
+static Item js_stream_concat_decoded_chunks(Item buf, Item encoding);
 static bool js_stream_prepare_readable_chunk(Item self, Item* chunk, Item encoding);
 static void js_stream_flush_buffered_data(Item self);
 
@@ -849,6 +853,16 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
         }
 
         js_property_set(self, key_end_pending, js_bool_item(true));
+        Item buf = js_property_get(self, key_buffer);
+        bool has_buffered = get_type_id(buf) == LMD_TYPE_ARRAY && js_array_length(buf) > 0;
+        if (has_buffered) {
+            Item flowing = js_property_get(self, key_flowing);
+            if (flowing.item != 0 && it2b(flowing)) {
+                js_stream_schedule_data_flush(self);
+            } else if (js_state_get_bool(state, "readableListening")) {
+                stream_emit(self, "readable", NULL, 0);
+            }
+        }
         js_stream_schedule_end(self);
         return js_bool_item(true);
     }
@@ -887,7 +901,7 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
     } else if (js_state_get_bool(js_property_get(self, key_readable_state), "readableListening")) {
         stream_emit(self, "readable", NULL, 0);
     }
-    return js_bool_item(true);
+    return js_bool_item(js_stream_readable_accepts_more(self, buf));
 }
 
 extern "C" Item js_readable_push(Item self, Item chunk) {
@@ -940,7 +954,7 @@ extern "C" Item js_readable_unshift_encoded(Item self, Item chunk, Item encoding
     } else if (js_state_get_bool(js_property_get(self, key_readable_state), "readableListening")) {
         stream_emit(self, "readable", NULL, 0);
     }
-    return js_bool_item(true);
+    return js_bool_item(js_stream_readable_accepts_more(self, new_buf));
 }
 
 extern "C" Item js_readable_unshift(Item self, Item chunk) {
@@ -959,6 +973,62 @@ static int64_t js_stream_readable_chunk_length(Item self, Item chunk) {
     Item length = js_property_get(chunk, make_string_item("length"));
     if (get_type_id(length) == LMD_TYPE_INT) return it2i(length);
     return 0;
+}
+
+static int64_t js_stream_readable_buffer_length(Item self, Item buf) {
+    if (get_type_id(buf) != LMD_TYPE_ARRAY) return 0;
+    int64_t total = 0;
+    int64_t len = js_array_length(buf);
+    for (int64_t i = 0; i < len; i++) {
+        total += js_stream_readable_chunk_length(self, js_array_get_int(buf, i));
+    }
+    return total;
+}
+
+static bool js_stream_readable_accepts_more(Item self, Item buf) {
+    int64_t length = js_stream_readable_buffer_length(self, buf);
+    if (length == 0) return true;
+    Item state = js_property_get(self, key_readable_state);
+    int64_t hwm = js_stream_state_get_int(state, "highWaterMark", js_stream_default_byte_hwm);
+    return length < hwm;
+}
+
+static bool js_stream_readable_buffer_has_string(Item buf) {
+    if (get_type_id(buf) != LMD_TYPE_ARRAY) return false;
+    int64_t len = js_array_length(buf);
+    for (int64_t i = 0; i < len; i++) {
+        if (get_type_id(js_array_get_int(buf, i)) == LMD_TYPE_STRING) return true;
+    }
+    return false;
+}
+
+static Item js_stream_concat_decoded_chunks(Item buf, Item encoding) {
+    if (get_type_id(buf) != LMD_TYPE_ARRAY) return ItemNull;
+    StrBuf* sb = strbuf_new_cap(64);
+    if (!sb) return ItemNull;
+    int64_t len = js_array_length(buf);
+    for (int64_t i = 0; i < len; i++) {
+        Item chunk = js_array_get_int(buf, i);
+        Item text = chunk;
+        if (get_type_id(text) != LMD_TYPE_STRING) {
+            text = js_buffer_toString(chunk, encoding, make_js_undefined(), make_js_undefined());
+            if (js_check_exception()) {
+                strbuf_free(sb);
+                return ItemNull;
+            }
+        }
+        if (get_type_id(text) != LMD_TYPE_STRING) {
+            strbuf_free(sb);
+            return ItemNull;
+        }
+        String* str = it2s(text);
+        if (str && str->len > 0) {
+            strbuf_append_str_n(sb, str->chars, str->len);
+        }
+    }
+    String* result = heap_create_name(sb->str, sb->length);
+    strbuf_free(sb);
+    return (Item){.item = s2it(result)};
 }
 
 static Item js_readable_read_exact(Item self, Item buf, int64_t blen, int64_t want) {
@@ -1034,11 +1104,21 @@ extern "C" Item js_readable_read_size(Item self, Item size_item) {
         return js_stream_decode_readable_chunk(self, exact);
     }
 
+    if (!js_item_is_true(js_property_get(self, key_end_pending))) {
+        js_stream_call_read_if_needed(self, size_item);
+        buf = js_property_get(self, key_buffer);
+        if (get_type_id(buf) != LMD_TYPE_ARRAY) return ItemNull;
+        blen = js_array_length(buf);
+        if (blen == 0) return ItemNull;
+    }
+
     Item encoding = js_property_get(self, make_string_item("_encoding"));
     if (get_type_id(encoding) == LMD_TYPE_STRING) {
         Item joined = blen == 1
             ? js_array_get_int(buf, 0)
-            : js_buffer_concat(buf, make_js_undefined());
+            : (js_stream_readable_buffer_has_string(buf)
+                ? js_stream_concat_decoded_chunks(buf, encoding)
+                : js_buffer_concat(buf, make_js_undefined()));
         if (js_check_exception()) return ItemNull;
         js_property_set(self, key_buffer, js_array_new(0));
         if (js_item_is_true(js_property_get(self, key_end_pending)))

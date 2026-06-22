@@ -1892,7 +1892,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
         return js_throw_type_error("this is not a Date object");
     }
 
-    double ms = time_val.get_double();
+    double ms = js_date_number_to_double(time_val);
 
     auto is_present = [](Item v) -> bool {
         return v.item != ItemError.item;
