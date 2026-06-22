@@ -1,6 +1,7 @@
 #include "render_text.hpp"
 #include "render_glyph.hpp"
 #include "render_background.hpp"
+#include "render_border.hpp"
 #include "render_painter.hpp"
 #include "render_profiler.hpp"
 #include "layout_text.hpp"
@@ -19,6 +20,9 @@
 static void render_text_inline_background(RenderContext* rdcon, ViewText* text_view,
                                           TextRect* text_rect, DomElement* parent_elem,
                                           float x, float y);
+static void render_text_inline_border(RenderContext* rdcon, ViewText* text_view,
+                                      TextRect* text_rect, DomElement* parent_elem,
+                                      float x, float y, const Rect* bg_rect);
 static bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned char* str,
                                               TextRect* text_rect, TextShadow* text_shadow,
                                               CssEnum text_transform, bool preserve_spaces,
@@ -411,13 +415,13 @@ static void render_text_inline_background(RenderContext* rdcon, ViewText* text_v
                                           float x, float y) {
     if (!rdcon || !text_view || !text_rect || !parent_elem ||
         parent_elem->view_type != RDT_VIEW_INLINE ||
-        !parent_elem->bound || !parent_elem->bound->background ||
-        parent_elem->bound->background->color.a <= 0) {
+        !parent_elem->bound) {
         return;
     }
 
     float s = rdcon->scale;
-    Color* bg_color = &parent_elem->bound->background->color;
+    BackgroundProp* bg = parent_elem->bound->background;
+    Color* bg_color = bg ? &bg->color : nullptr;
     float bg_pad_top = parent_elem->bound->padding.top * s;
     float bg_pad_right = parent_elem->bound->padding.right * s;
     float bg_pad_bottom = parent_elem->bound->padding.bottom * s;
@@ -425,44 +429,76 @@ static void render_text_inline_background(RenderContext* rdcon, ViewText* text_v
     float bg_radius = parent_elem->bound->border ?
         parent_elem->bound->border->radius.top_left * s : 0;
 
-    bool is_first = (text_rect == text_view->rect);
-    bool is_last = (text_rect->next == nullptr);
-    float pl = is_first ? bg_pad_left : 0;
-    float pr = is_last ? bg_pad_right : 0;
     Rect bg_rect = {
-        x - pl,
+        x - bg_pad_left,
         y - bg_pad_top,
-        text_rect->width * s + pl + pr,
+        text_rect->width * s + bg_pad_left + bg_pad_right,
         text_rect->height * s + bg_pad_top + bg_pad_bottom
     };
 
-    if (bg_radius > 0) {
-        float r_left = is_first ? bg_radius : 0;
-        float r_right = is_last ? bg_radius : 0;
-        RdtPath* p = rdt_path_new();
-        float fx = bg_rect.x;
-        float fy = bg_rect.y;
-        float fw = bg_rect.width;
-        float fh = bg_rect.height;
-        rdt_path_move_to(p, fx + r_left, fy);
-        rdt_path_line_to(p, fx + fw - r_right, fy);
-        if (r_right > 0) rdt_path_cubic_to(p, fx + fw - r_right * 0.45f, fy, fx + fw, fy + r_right * 0.45f, fx + fw, fy + r_right);
-        else rdt_path_line_to(p, fx + fw, fy);
-        rdt_path_line_to(p, fx + fw, fy + fh - r_right);
-        if (r_right > 0) rdt_path_cubic_to(p, fx + fw, fy + fh - r_right * 0.45f, fx + fw - r_right * 0.45f, fy + fh, fx + fw - r_right, fy + fh);
-        else rdt_path_line_to(p, fx + fw, fy + fh);
-        rdt_path_line_to(p, fx + r_left, fy + fh);
-        if (r_left > 0) rdt_path_cubic_to(p, fx + r_left * 0.45f, fy + fh, fx, fy + fh - r_left * 0.45f, fx, fy + fh - r_left);
-        else rdt_path_line_to(p, fx, fy + fh);
-        rdt_path_line_to(p, fx, fy + r_left);
-        if (r_left > 0) rdt_path_cubic_to(p, fx, fy + r_left * 0.45f, fx + r_left * 0.45f, fy, fx + r_left, fy);
-        rdt_path_close(p);
-        rc_fill_path(rdcon, p, *bg_color, RDT_FILL_WINDING, NULL);
-        rdt_path_free(p);
-    } else {
-        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &bg_rect, bg_color->c,
-            &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+    if (bg_color && bg_color->a > 0) {
+        if (bg_radius > 0) {
+            float r_left = bg_radius;
+            float r_right = bg_radius;
+            RdtPath* p = rdt_path_new();
+            float fx = bg_rect.x;
+            float fy = bg_rect.y;
+            float fw = bg_rect.width;
+            float fh = bg_rect.height;
+            rdt_path_move_to(p, fx + r_left, fy);
+            rdt_path_line_to(p, fx + fw - r_right, fy);
+            if (r_right > 0) rdt_path_cubic_to(p, fx + fw - r_right * 0.45f, fy, fx + fw, fy + r_right * 0.45f, fx + fw, fy + r_right);
+            else rdt_path_line_to(p, fx + fw, fy);
+            rdt_path_line_to(p, fx + fw, fy + fh - r_right);
+            if (r_right > 0) rdt_path_cubic_to(p, fx + fw, fy + fh - r_right * 0.45f, fx + fw - r_right * 0.45f, fy + fh, fx + fw - r_right, fy + fh);
+            else rdt_path_line_to(p, fx + fw, fy + fh);
+            rdt_path_line_to(p, fx + r_left, fy + fh);
+            if (r_left > 0) rdt_path_cubic_to(p, fx + r_left * 0.45f, fy + fh, fx, fy + fh - r_left * 0.45f, fx, fy + fh - r_left);
+            else rdt_path_line_to(p, fx, fy + fh);
+            rdt_path_line_to(p, fx, fy + r_left);
+            if (r_left > 0) rdt_path_cubic_to(p, fx, fy + r_left * 0.45f, fx + r_left * 0.45f, fy, fx + r_left, fy);
+            rdt_path_close(p);
+            rc_fill_path(rdcon, p, *bg_color, RDT_FILL_WINDING, NULL);
+            rdt_path_free(p);
+        } else {
+            rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &bg_rect, bg_color->c,
+                &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+        }
     }
+
+    render_text_inline_border(rdcon, text_view, text_rect, parent_elem, x, y, &bg_rect);
+}
+
+static void render_text_inline_border(RenderContext* rdcon, ViewText* text_view,
+                                      TextRect* text_rect, DomElement* parent_elem,
+                                      float x, float y, const Rect* bg_rect) {
+    (void)text_view;
+    (void)x;
+    (void)y;
+    if (!rdcon || !text_view || !text_rect || !parent_elem ||
+        parent_elem->view_type != RDT_VIEW_INLINE ||
+        !parent_elem->bound || !parent_elem->bound->border || !bg_rect) {
+        return;
+    }
+
+    float s = rdcon->scale;
+    BorderProp* border = parent_elem->bound->border;
+    Rect border_rect = *bg_rect;
+    border_rect.x -= border->width.left * s;
+    border_rect.y -= border->width.top * s;
+    border_rect.width += (border->width.left + border->width.right) * s;
+    border_rect.height += (border->width.top + border->width.bottom) * s;
+
+    if (border_rect.width <= 0.0f || border_rect.height <= 0.0f) {
+        return;
+    }
+
+    ViewBlock* fragment_view = lam::unsafe_view_block_api_span(
+        lam::view_require_element(static_cast<View*>(parent_elem)));
+    Corner saved_radius = border->radius;
+    resolve_border_radius_percentages(&border->radius, border_rect.width / s, border_rect.height / s);
+    render_border(rdcon, fragment_view, border_rect);
+    border->radius = saved_radius;
 }
 
 typedef struct SkipInkGap {

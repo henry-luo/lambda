@@ -137,6 +137,15 @@ static bool image_orientation_uses_from_image(DomElement* element) {
     return true;
 }
 
+static bool image_is_generated_content_child(ViewBlock* block) {
+    if (!block || block->tag() != HTM_TAG_IMG || !block->parent || !block->parent->is_element()) {
+        return false;
+    }
+    DomElement* parent = lam::dom_require_element(block->parent);
+    const char* tag = parent ? parent->tag_name : nullptr;
+    return tag && (strcmp(tag, "::before") == 0 || strcmp(tag, "::after") == 0);
+}
+
 static ObjectViewBoxUsedRect resolve_object_view_box_rect(LayoutContext* lycon,
                                                           DomElement* element,
                                                           float intrinsic_width,
@@ -469,6 +478,7 @@ static DomElement* pseudo_create_image_child(LayoutContext* lycon, DomElement* p
 
     if (!img_elem->embed) {
         img_elem->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+        if (img_elem->embed) memset(img_elem->embed, 0, sizeof(EmbedProp));
     }
     if (!img_elem->embed) return nullptr;
 
@@ -478,7 +488,6 @@ static DomElement* pseudo_create_image_child(LayoutContext* lycon, DomElement* p
     img_elem->embed->img = load_image(lycon->ui_context, resolved_url);
     if (!img_elem->embed->img) {
         log_debug("[PSEUDO IMG] Failed to load generated content image: %s", resolved_url);
-        return nullptr;
     }
 
     return img_elem;
@@ -5451,6 +5460,22 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 img->max_render_width = max(lycon->block.given_width, img->max_render_width);
             }
             log_debug("%s image dimensions: %f x %f", block->source_loc(), lycon->block.given_width, lycon->block.given_height);
+        }
+        else if (!has_src_attr && image_is_generated_content_child(block)) {
+            // CSS generated content url() creates a replaced object even when the
+            // resource is unavailable. Reuse the existing broken-image fallback
+            // dimensions so the generated inline box still contributes a line box.
+            if (block->embed) {
+                block->embed->broken_alt_fallback = false;
+            }
+            if (!(block->blk && block->blk->given_width >= 0)) {
+                lycon->block.given_width = 16.0f;
+            }
+            if (!(block->blk && block->blk->given_height >= 0)) {
+                lycon->block.given_height = 16.0f;
+            }
+            log_debug("%s generated content image fallback: given_width=%.1f, given_height=%.1f",
+                      block->source_loc(), lycon->block.given_width, lycon->block.given_height);
         }
         else if (!has_src_attr) {
             // HTML <img> without a src/current request has no intrinsic size.
