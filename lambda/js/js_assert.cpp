@@ -467,6 +467,7 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
     extern Item js_strict_equal(Item left, Item right);
     extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
     extern int js_check_exception(void);
+    extern Item js_clear_exception(void);
     extern Item js_object_keys(Item obj);
 
     TypeId exp_type = get_type_id(error_expected);
@@ -475,10 +476,14 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
     }
 
     if (exp_type == LMD_TYPE_FUNC) {
-        // Error class: check instanceof
-        Item result = js_instanceof(thrown, error_expected);
-        if (get_type_id(result) == LMD_TYPE_BOOL && it2b(result)) return true;
-        // maybe it's a validation function
+        // Error class: check instanceof only for constructor-like functions.
+        Item proto = js_property_get(error_expected, assert_make_string("prototype"));
+        if (get_type_id(proto) == LMD_TYPE_MAP || get_type_id(proto) == LMD_TYPE_ELEMENT) {
+            Item result = js_instanceof(thrown, error_expected);
+            if (js_check_exception()) js_clear_exception();
+            else if (get_type_id(result) == LMD_TYPE_BOOL && it2b(result)) return true;
+        }
+        // Maybe it's a validation function.
         Item validate_result = js_call_function(error_expected, make_js_undefined(), &thrown, 1);
         if (js_check_exception()) return true; // validator threw — propagate
         if (assert_is_truthy(validate_result)) return true;

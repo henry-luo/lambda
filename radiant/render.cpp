@@ -29,6 +29,17 @@
  */
 // CollapsedBorder struct is now defined in view.hpp
 
+static bool inline_span_has_direct_text_fragment(ViewSpan* span) {
+    if (!span) return false;
+    for (View* child = span->first_child; child; child = child->next_sibling) {
+        if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
+            if (text->rect) return true;
+        }
+    }
+    return false;
+}
+
 void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
     BlockBlot pa_block = rdcon->block;
     if (block->bound) { render_bound(rdcon, block); }
@@ -179,12 +190,23 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     // Render border/outline for inline elements.
     // Background is rendered per-line-fragment in render_text_view so that
     // wrapping inline elements (e.g. <code> spanning two lines) don't fill
-    // the entire bounding-box rectangle with background color.
+    // the entire bounding-box rectangle with background color. Borders are
+    // handled by the same text-fragment path so rounded inline decorations
+    // break at line boundaries instead of enclosing the aggregate span box.
     if (!self_hidden && view_span->bound) {
         BackgroundProp* saved_bg = view_span->bound->background;
+        BorderProp* saved_border = view_span->bound->border;
+        bool border_is_fragment_painted = saved_border &&
+            inline_span_has_direct_text_fragment(view_span);
         view_span->bound->background = nullptr;
+        if (border_is_fragment_painted) {
+            view_span->bound->border = nullptr;
+        }
         render_bound(rdcon, lam::unsafe_view_block_api_span(view_span));
         view_span->bound->background = saved_bg;
+        if (border_is_fragment_painted) {
+            view_span->bound->border = saved_border;
+        }
     }
 
     View* view = view_span->first_child;

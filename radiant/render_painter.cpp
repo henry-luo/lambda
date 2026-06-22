@@ -62,7 +62,7 @@ void rc_fill_linear_gradient(RenderContext* rdcon, RdtPath* path,
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_fill_linear_gradient(&target, "rc_fill_linear_gradient",
                                       path, x1, y1, x2, y2,
-                                      stops, stop_count, rule, transform);
+                                      stops, stop_count, rule, transform, nullptr);
 }
 
 void rc_fill_radial_gradient(RenderContext* rdcon, RdtPath* path,
@@ -72,7 +72,7 @@ void rc_fill_radial_gradient(RenderContext* rdcon, RdtPath* path,
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_fill_radial_gradient(&target, "rc_fill_radial_gradient",
                                       path, cx, cy, r,
-                                      stops, stop_count, rule, transform);
+                                      stops, stop_count, rule, transform, nullptr);
 }
 
 void rc_draw_image(RenderContext* rdcon, const uint32_t* pixels,

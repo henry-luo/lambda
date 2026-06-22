@@ -1254,13 +1254,17 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
                               float x1, float y1, float x2, float y2,
                               const RdtGradientStop* stops, int stop_count,
                               RdtFillRule rule,
-                              const RdtMatrix* transform) {
+                              const RdtMatrix* transform,
+                              const RdtMatrix* gradient_transform) {
     if (!vec || !vec->impl || !p || !stops || stop_count < 2) return;
     RdtVectorImpl* impl = vec->impl;
     if (matrix_is_projective(transform)) {
         float tx1, ty1, tx2, ty2;
-        matrix_apply_point(transform, x1, y1, &tx1, &ty1);
-        matrix_apply_point(transform, x2, y2, &tx2, &ty2);
+        RdtMatrix combined = gradient_transform
+            ? rdt_matrix_multiply(transform, gradient_transform)
+            : *transform;
+        matrix_apply_point(&combined, x1, y1, &tx1, &ty1);
+        matrix_apply_point(&combined, x2, y2, &tx2, &ty2);
         Tvg_Paint shape = tvg_shape_new();
         path_replay_projective(p, shape, transform);
         if (rule == RDT_FILL_EVEN_ODD) {
@@ -1288,6 +1292,7 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
     rdt_hash_bytes(&hash, &stop_count, sizeof(stop_count));
     rdt_hash_bytes(&hash, stops, (size_t)stop_count * sizeof(RdtGradientStop));
     rdt_hash_bytes(&hash, &rule, sizeof(rule));
+    if (gradient_transform) rdt_hash_bytes(&hash, gradient_transform, sizeof(RdtMatrix));
     pthread_mutex_lock(&g_paint_cache_mutex);
     Tvg_Paint cached = paint_cache_dup_gradient_locked(hash, RDT_PAINT_CACHE_LINEAR_GRADIENT,
                                                        p, values, stops, stop_count, rule);
@@ -1317,6 +1322,12 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
         tvg_stops[i].a = stops[i].a;
     }
     tvg_gradient_set_color_stops(grad, tvg_stops, stop_count);
+    if (gradient_transform) {
+        Tvg_Matrix gm = { gradient_transform->e11, gradient_transform->e12, gradient_transform->e13,
+                          gradient_transform->e21, gradient_transform->e22, gradient_transform->e23,
+                          gradient_transform->e31, gradient_transform->e32, gradient_transform->e33 };
+        tvg_gradient_set_transform(grad, &gm);
+    }
     tvg_shape_set_gradient(shape, grad);
 
     Tvg_Paint draw = paint_cache_store_gradient(hash, RDT_PAINT_CACHE_LINEAR_GRADIENT,
@@ -1334,13 +1345,17 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
                               float cx, float cy, float r,
                               const RdtGradientStop* stops, int stop_count,
                               RdtFillRule rule,
-                              const RdtMatrix* transform) {
+                              const RdtMatrix* transform,
+                              const RdtMatrix* gradient_transform) {
     if (!vec || !vec->impl || !p || !stops || stop_count < 2) return;
     RdtVectorImpl* impl = vec->impl;
     if (matrix_is_projective(transform)) {
         float tcx, tcy, trx, try_;
-        matrix_apply_point(transform, cx, cy, &tcx, &tcy);
-        matrix_apply_point(transform, cx + r, cy, &trx, &try_);
+        RdtMatrix combined = gradient_transform
+            ? rdt_matrix_multiply(transform, gradient_transform)
+            : *transform;
+        matrix_apply_point(&combined, cx, cy, &tcx, &tcy);
+        matrix_apply_point(&combined, cx + r, cy, &trx, &try_);
         float tr = sqrtf((trx - tcx) * (trx - tcx) + (try_ - tcy) * (try_ - tcy));
         Tvg_Paint shape = tvg_shape_new();
         path_replay_projective(p, shape, transform);
@@ -1369,6 +1384,7 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
     rdt_hash_bytes(&hash, &stop_count, sizeof(stop_count));
     rdt_hash_bytes(&hash, stops, (size_t)stop_count * sizeof(RdtGradientStop));
     rdt_hash_bytes(&hash, &rule, sizeof(rule));
+    if (gradient_transform) rdt_hash_bytes(&hash, gradient_transform, sizeof(RdtMatrix));
     pthread_mutex_lock(&g_paint_cache_mutex);
     Tvg_Paint cached = paint_cache_dup_gradient_locked(hash, RDT_PAINT_CACHE_RADIAL_GRADIENT,
                                                        p, values, stops, stop_count, rule);
@@ -1398,6 +1414,12 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
         tvg_stops[i].a = stops[i].a;
     }
     tvg_gradient_set_color_stops(grad, tvg_stops, stop_count);
+    if (gradient_transform) {
+        Tvg_Matrix gm = { gradient_transform->e11, gradient_transform->e12, gradient_transform->e13,
+                          gradient_transform->e21, gradient_transform->e22, gradient_transform->e23,
+                          gradient_transform->e31, gradient_transform->e32, gradient_transform->e33 };
+        tvg_gradient_set_transform(grad, &gm);
+    }
     tvg_shape_set_gradient(shape, grad);
 
     Tvg_Paint draw = paint_cache_store_gradient(hash, RDT_PAINT_CACHE_RADIAL_GRADIENT,

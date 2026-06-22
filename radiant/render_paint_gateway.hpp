@@ -76,13 +76,15 @@ static inline void paint_record_fill_linear_gradient(PaintRecordTarget* target, 
                                                      float x1, float y1, float x2, float y2,
                                                      const RdtGradientStop* stops, int stop_count,
                                                      RdtFillRule rule,
-                                                     const RdtMatrix* transform) {
+                                                     const RdtMatrix* transform,
+                                                     const RdtMatrix* gradient_transform) {
     if (!paint_record_ready(target)) {
         paint_record_missing(target, op);
         return;
     }
     paint_fill_linear_gradient(target->paint_list, path, x1, y1, x2, y2,
-                               stops, stop_count, rule, transform);
+                               stops, stop_count, rule, transform,
+                               gradient_transform);
     paint_record_lower_pending(target);
 }
 
@@ -90,13 +92,15 @@ static inline void paint_record_fill_radial_gradient(PaintRecordTarget* target, 
                                                      RdtPath* path, float cx, float cy, float r,
                                                      const RdtGradientStop* stops, int stop_count,
                                                      RdtFillRule rule,
-                                                     const RdtMatrix* transform) {
+                                                     const RdtMatrix* transform,
+                                                     const RdtMatrix* gradient_transform) {
     if (!paint_record_ready(target)) {
         paint_record_missing(target, op);
         return;
     }
     paint_fill_radial_gradient(target->paint_list, path, cx, cy, r,
-                               stops, stop_count, rule, transform);
+                               stops, stop_count, rule, transform,
+                               gradient_transform);
     paint_record_lower_pending(target);
 }
 

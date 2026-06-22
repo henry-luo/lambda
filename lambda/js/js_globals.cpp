@@ -14564,6 +14564,18 @@ extern "C" Item js_get_global_this() {
                 js_new_function((void*)js_text_decoder_new, 1));
         }
 
+        // Web Streams constructors as globals
+        {
+            extern Item js_readable_stream_new(void);
+            extern Item js_writable_stream_new(void);
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("ReadableStream", 14))},
+                js_new_function((void*)js_readable_stream_new, 0));
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("WritableStream", 14))},
+                js_new_function((void*)js_writable_stream_new, 0));
+        }
+
         // globalThis.atob / globalThis.btoa
         {
             extern Item js_atob(Item);
@@ -16760,6 +16772,8 @@ static void js_symbol_desc_init() {
 #define JS_SYMBOL_ID_UNSCOPABLES    11
 #define JS_SYMBOL_ID_IS_CONCAT_SPREADABLE 12
 #define JS_SYMBOL_ID_MATCH_ALL     13
+#define JS_SYMBOL_ID_ASYNC_DISPOSE 14
+#define JS_SYMBOL_ID_DISPOSE       15
 
 static int js_symbol_entry_compare(const void* a, const void* b, void* udata) {
     (void)udata;
@@ -16800,7 +16814,9 @@ static uint64_t js_symbol_item_id(Item item) {
 // Per ES §19.4.2: each is {writable: false, enumerable: false, configurable: false}
 static void js_populate_symbol_ctor(Item fn_item) {
     struct { const char* name; int len; int sym_id; } well_known[] = {
+        {"asyncDispose", 12, JS_SYMBOL_ID_ASYNC_DISPOSE},
         {"asyncIterator", 13, JS_SYMBOL_ID_ASYNC_ITERATOR},
+        {"dispose", 7, JS_SYMBOL_ID_DISPOSE},
         {"hasInstance", 11, JS_SYMBOL_ID_HAS_INSTANCE},
         {"isConcatSpreadable", 18, JS_SYMBOL_ID_IS_CONCAT_SPREADABLE},
         {"iterator", 8, JS_SYMBOL_ID_ITERATOR},
@@ -16814,7 +16830,7 @@ static void js_populate_symbol_ctor(Item fn_item) {
         {"toStringTag", 11, JS_SYMBOL_ID_TO_STRING_TAG},
         {"unscopables", 11, JS_SYMBOL_ID_UNSCOPABLES},
     };
-    for (int i = 0; i < 13; i++) {
+    for (int i = 0; i < 15; i++) {
         Item key = (Item){.item = s2it(heap_create_name(well_known[i].name, well_known[i].len))};
         Item value = js_make_symbol_item(well_known[i].sym_id);
         js_func_init_property(fn_item, key, value);
@@ -16909,6 +16925,9 @@ extern "C" Item js_symbol_to_string(Item sym) {
     if (id == JS_SYMBOL_ID_SPLIT)          return (Item){.item = s2it(heap_create_name("Symbol(Symbol.split)", 20))};
     if (id == JS_SYMBOL_ID_UNSCOPABLES)    return (Item){.item = s2it(heap_create_name("Symbol(Symbol.unscopables)", 26))};
     if (id == JS_SYMBOL_ID_IS_CONCAT_SPREADABLE) return (Item){.item = s2it(heap_create_name("Symbol(Symbol.isConcatSpreadable)", 32))};
+    if (id == JS_SYMBOL_ID_MATCH_ALL)      return (Item){.item = s2it(heap_create_name("Symbol(Symbol.matchAll)", 23))};
+    if (id == JS_SYMBOL_ID_ASYNC_DISPOSE)  return (Item){.item = s2it(heap_create_name("Symbol(Symbol.asyncDispose)", 27))};
+    if (id == JS_SYMBOL_ID_DISPOSE)        return (Item){.item = s2it(heap_create_name("Symbol(Symbol.dispose)", 22))};
 
     // check registry
     if (js_symbol_registry) {
@@ -16957,6 +16976,9 @@ extern "C" Item js_symbol_get_description(Item sym) {
     if (id == JS_SYMBOL_ID_SPLIT)          return (Item){.item = s2it(heap_create_name("Symbol.split", 12))};
     if (id == JS_SYMBOL_ID_UNSCOPABLES)    return (Item){.item = s2it(heap_create_name("Symbol.unscopables", 18))};
     if (id == JS_SYMBOL_ID_IS_CONCAT_SPREADABLE) return (Item){.item = s2it(heap_create_name("Symbol.isConcatSpreadable", 24))};
+    if (id == JS_SYMBOL_ID_MATCH_ALL)      return (Item){.item = s2it(heap_create_name("Symbol.matchAll", 15))};
+    if (id == JS_SYMBOL_ID_ASYNC_DISPOSE)  return (Item){.item = s2it(heap_create_name("Symbol.asyncDispose", 19))};
+    if (id == JS_SYMBOL_ID_DISPOSE)        return (Item){.item = s2it(heap_create_name("Symbol.dispose", 14))};
 
     // check Symbol.for() registry
     if (js_symbol_registry) {
@@ -16997,8 +17019,12 @@ extern "C" Item js_symbol_well_known(Item name) {
             return js_symbol_builtin_method(0);
         if (s->len == 6 && strncmp(s->chars, "keyFor", 6) == 0)
             return js_symbol_builtin_method(1);
+        if (s->len == 12 && strncmp(s->chars, "asyncDispose", 12) == 0)
+            return js_make_symbol_item(JS_SYMBOL_ID_ASYNC_DISPOSE);
         if (s->len == 8 && strncmp(s->chars, "iterator", 8) == 0)
             return js_make_symbol_item(JS_SYMBOL_ID_ITERATOR);
+        if (s->len == 7 && strncmp(s->chars, "dispose", 7) == 0)
+            return js_make_symbol_item(JS_SYMBOL_ID_DISPOSE);
         if (s->len == 11 && strncmp(s->chars, "toPrimitive", 11) == 0)
             return js_make_symbol_item(JS_SYMBOL_ID_TO_PRIMITIVE);
         if (s->len == 11 && strncmp(s->chars, "hasInstance", 11) == 0)

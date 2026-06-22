@@ -1201,7 +1201,7 @@ run-radiant-baseline:
 	radiant_view_passed=0; radiant_view_failed=0; radiant_view_status="⏭️  SKIP"; \
 	page_passed=0; page_failed=0; page_status="⏭️  SKIP"; \
 	fuzzy_passed=0; fuzzy_failed=0; fuzzy_status="⏭️  SKIP"; \
-	render_passed=0; render_failed=0; render_status="⏭️  SKIP"; \
+	render_passed=0; render_failed=0; render_total=0; render_xpassed=0; render_xfailed=0; render_skipped=0; render_errors=0; render_regressions=0; render_details="not run"; render_status="⏭️  SKIP"; \
 	snapshot_passed=0; snapshot_failed=0; snapshot_status="⏭️  SKIP"; \
 	any_failed=0; \
 	layout_total_passed=0; layout_total_failed=0; layout_total_skipped=0; \
@@ -1326,12 +1326,24 @@ run-radiant-baseline:
 		echo "   workers: $(RADIANT_RENDER_JOBS)"; \
 		output=$$(cd test/render && LAMBDA_ROOT=$(CURDIR) node test_radiant_render.js -j $(RADIANT_RENDER_JOBS) --baseline 2>&1) || true; \
 		echo "$$output" | grep -E "PASS|FAIL|ERROR|Results:|Baseline Regressions|baseline tests passed" | tail -15; \
-		render_line=$$(echo "$$output" | grep "^Results:"); \
+		render_line=$$(echo "$$output" | grep "^Results:" | tail -1); \
 		render_passed=$$(echo "$$render_line" | grep -oE "^Results: [0-9]+" | grep -oE "[0-9]+" || echo "0"); \
-		render_passed=$${render_passed:-0}; \
+		render_total=$$(echo "$$render_line" | grep -oE "^Results: [0-9]+/[0-9]+" | grep -oE "/[0-9]+" | tr -d "/" || echo "0"); \
+		render_xpassed=$$(echo "$$render_line" | grep -oE "[0-9]+ new passes" | grep -oE "[0-9]+" || echo "0"); \
+		render_xfailed=$$(echo "$$render_line" | grep -oE "[0-9]+ expected failures" | grep -oE "[0-9]+" || echo "0"); \
+		render_skipped=$$(echo "$$render_line" | grep -oE "[0-9]+ skipped" | grep -oE "[0-9]+" || echo "0"); \
+		render_errors=$$(echo "$$render_line" | grep -oE "[0-9]+ errors" | grep -oE "[0-9]+" || echo "0"); \
+		render_passed=$${render_passed:-0}; render_total=$${render_total:-0}; render_xpassed=$${render_xpassed:-0}; render_xfailed=$${render_xfailed:-0}; render_skipped=$${render_skipped:-0}; render_errors=$${render_errors:-0}; \
+		render_details="$${render_passed}/$${render_total} passed"; \
+		if [ $$render_xpassed -gt 0 ]; then render_details="$$render_details, $$render_xpassed new passes"; fi; \
+		if [ $$render_xfailed -gt 0 ]; then render_details="$$render_details, $$render_xfailed expected failures"; fi; \
+		if [ $$render_skipped -gt 0 ]; then render_details="$$render_details, $$render_skipped skipped"; fi; \
+		if [ $$render_errors -gt 0 ]; then render_details="$$render_details, $$render_errors errors"; fi; \
 		render_failed=0; \
 		if echo "$$output" | grep -q "Baseline Regressions"; then \
-			render_failed=$$(echo "$$output" | grep "Baseline Regressions" | grep -oE "[0-9]+" | head -1); render_failed=$${render_failed:-0}; \
+			render_regressions=$$(echo "$$output" | grep "Baseline Regressions" | grep -oE "[0-9]+" | head -1); render_regressions=$${render_regressions:-0}; \
+			render_failed=$$render_regressions; \
+			render_details="$$render_details, $$render_regressions baseline regressions"; \
 			render_status="❌ FAIL"; any_failed=1; \
 		else \
 			render_status="✅ PASS"; \
@@ -1382,7 +1394,7 @@ run-radiant-baseline:
 	echo "   ├── Radiant View Cmd    $$radiant_view_status  ($$radiant_view_passed passed, $$radiant_view_failed failed) (test_radiant_view_gtest.exe)"; \
 	echo "   ├── View Page & Markdown $$page_status  ($$page_passed passed, $$page_failed failed) (test_page_load_gtest.exe)"; \
 	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed) (test_fuzzy_crash_gtest.exe)"; \
-	echo "   ├── Render Visual       $$render_status  ($$render_passed passed, $$render_failed failed) (test_radiant_render.js)"; \
+	echo "   ├── Render Visual       $$render_status  ($$render_details) (test_radiant_render.js --baseline)"; \
 	echo "   └── WPT CSS Syntax      $$wpt_syntax_status  ($$wpt_syntax_passed passed, $$wpt_syntax_failed failed) (test_wpt_css_syntax_gtest.exe)"; \
 	echo ""; \
 	echo "📊 Overall Results:"; \
@@ -2735,8 +2747,8 @@ capture-render:
 		exit 1; \
 	fi
 
-# test-render: Run render visual regression tests
-# Usage: make test-render [test=<test-name>] [pattern=<regex>] [threshold=<percent>] [suite=<suite>] [baseline=1] [update=1]
+# test-render: Run render visual regression tests, including baseline checks by default
+# Usage: make test-render [test=<test-name>] [pattern=<regex>] [threshold=<percent>] [suite=<suite>] [baseline=0] [update=1]
 test-render:
 	@echo "🎨 Running Radiant Render Tests"
 	@echo "================================"
@@ -2751,7 +2763,7 @@ test-render:
 		PATTERN_VAR="$(or $(pattern),$(PATTERN))"; \
 		THRESHOLD_VAR="$(or $(threshold),$(THRESHOLD))"; \
 		SUITE_VAR="$(or $(suite),$(SUITE))"; \
-		BASELINE_VAR="$(or $(baseline),$(BASELINE))"; \
+		BASELINE_VAR="$(or $(baseline),$(BASELINE),1)"; \
 		UPDATE_VAR="$(or $(update),$(UPDATE),$(update-baseline),$(UPDATE_BASELINE))"; \
 		if [ -n "$$TEST_VAR" ]; then \
 			ARGS="$$ARGS --test $$TEST_VAR"; \
