@@ -195,6 +195,8 @@ static __thread DomDocument* _js_current_document = nullptr;
 // as _js_current_document.
 static __thread DomDocument* _js_main_document = nullptr;
 static void js_dom_install_window_location_history_globals(void);
+static bool js_dom_apply_location_assignment(DomDocument* doc,
+                                             const char* next_url);
 
 static Item js_font_face_set_ready_then(Item callback) {
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
@@ -2389,16 +2391,11 @@ extern "C" Item js_document_proxy_get_property(Item prop_name) {
 extern "C" Item js_document_proxy_set_property(Item prop_name, Item value) {
     if (get_type_id(prop_name) == LMD_TYPE_STRING) {
         String* s = it2s(prop_name);
-        if (s && s->len == 4 && strncmp(s->chars, "href", 4) == 0) {
+        if ((s && s->len == 4 && strncmp(s->chars, "href", 4) == 0) ||
+            (s && s->len == 8 && strncmp(s->chars, "location", 8) == 0)) {
             const char* next_url = fn_to_cstr(value);
             DomDocument* doc = _js_current_document ? _js_current_document : _js_main_document;
-            if (doc && next_url && next_url[0]) {
-                if (doc->pending_navigation_url) {
-                    mem_free(doc->pending_navigation_url);
-                }
-                doc->pending_navigation_url = mem_strdup(next_url, MEM_CAT_DOM);
-                log_info("js_location_set_href: pending navigation to %s", next_url);
-            }
+            js_dom_apply_location_assignment(doc, next_url);
             return value;
         }
         if (s && s->len == 5 && strncmp(s->chars, "title", 5) == 0) {
@@ -2477,6 +2474,14 @@ static __thread int s_iframe_cache_count = 0;
 static IframeContentEntry* lookup_iframe_entry(DomElement* iframe) {
     for (int i = 0; i < s_iframe_cache_count; i++) {
         if (s_iframe_cache[i].iframe == iframe) return &s_iframe_cache[i];
+    }
+    return NULL;
+}
+
+static IframeContentEntry* lookup_iframe_entry_by_doc(DomDocument* doc) {
+    if (!doc) return NULL;
+    for (int i = 0; i < s_iframe_cache_count; i++) {
+        if (s_iframe_cache[i].doc == doc) return &s_iframe_cache[i];
     }
     return NULL;
 }
@@ -2612,6 +2617,75 @@ static DomDocument* create_foreign_html_doc(const char* title) {
     return fd;
 }
 
+static DomElement* document_body_element(DomDocument* doc) {
+    if (!doc || !doc->root) return nullptr;
+    DomNode* child = doc->root->first_child;
+    while (child) {
+        if (child->is_element()) {
+            DomElement* el = child->as_element();
+            if (el->tag_name && strcmp(el->tag_name, "body") == 0) {
+                return el;
+            }
+        }
+        child = child->next_sibling;
+    }
+    return nullptr;
+}
+
+static void clear_element_children_for_navigation(DomElement* elem) {
+    if (!elem) return;
+    while (elem->first_child) {
+        DomNode* child = elem->first_child;
+        dom_pre_remove(child);
+        elem->remove_child(child);
+    }
+}
+
+static void append_iframe_srcdoc_to_document(DomElement* iframe,
+                                             DomDocument* doc) {
+    if (!iframe || !doc || !doc->root) return;
+    const char* srcdoc = dom_element_get_attribute(iframe, "srcdoc");
+    if (!srcdoc || !*srcdoc) return;
+    DomElement* body = document_body_element(doc);
+    if (!body || !doc->pool || !doc->arena || !doc->input) return;
+
+    Html5Parser* parser = html5_fragment_parser_create(
+        doc->pool, doc->arena, doc->input);
+    if (!parser) return;
+    html5_fragment_parse(parser, srcdoc);
+    Element* body_elem = html5_fragment_get_body(parser);
+    if (!body_elem) return;
+    for (int64_t i = 0; i < body_elem->length; i++) {
+        TypeId t = get_type_id(body_elem->items[i]);
+        if (t == LMD_TYPE_ELEMENT) {
+            build_dom_tree_from_element(body_elem->items[i].element,
+                                        doc, body);
+        } else if (t == LMD_TYPE_STRING) {
+            String* s = it2s(body_elem->items[i]);
+            DomText* tn = dom_text_create(s, body);
+            if (tn) {
+                tn->parent = body;
+                if (!body->first_child) {
+                    body->first_child = tn;
+                    body->last_child = tn;
+                } else {
+                    DomNode* last = body->last_child;
+                    last->next_sibling = tn;
+                    tn->prev_sibling = last;
+                    body->last_child = tn;
+                }
+            }
+        }
+    }
+}
+
+static void reset_iframe_document_from_srcdoc(DomElement* iframe,
+                                              DomDocument* doc) {
+    DomElement* body = document_body_element(doc);
+    clear_element_children_for_navigation(body);
+    append_iframe_srcdoc_to_document(iframe, doc);
+}
+
 // Public: create a foreign HTML document, return wrapped Item.
 extern "C" Item js_create_foreign_html_doc(const char* title) {
     DomDocument* fd = create_foreign_html_doc(title ? title : "");
@@ -2631,58 +2705,9 @@ extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
         DomDocument* doc = create_foreign_html_doc("");
         if (!doc) return ItemNull;
         js_doc_mark_has_browsing_context(doc);
-        // If the iframe carries a `srcdoc` attribute, parse its HTML and
-        // append the parsed children to the foreign doc's <body>. This is
-        // what move-selection-range-into-different-root.tentative.html
-        // (and any other iframe-srcdoc test) relies on so getElementById
-        // on the contentDocument can resolve nodes.
-        const char* srcdoc = dom_element_get_attribute(iframe, "srcdoc");
-        if (srcdoc && *srcdoc && doc->root) {
-            // Locate the foreign doc's <body> (children of html: head, body).
-            DomElement* body = nullptr;
-            DomNode* child = doc->root->first_child;
-            while (child) {
-                if (child->is_element()) {
-                    DomElement* el = child->as_element();
-                    if (el->tag_name && strcmp(el->tag_name, "body") == 0) {
-                        body = el; break;
-                    }
-                }
-                child = child->next_sibling;
-            }
-            if (body && doc->pool && doc->arena && doc->input) {
-                Html5Parser* parser = html5_fragment_parser_create(
-                    doc->pool, doc->arena, doc->input);
-                if (parser) {
-                    html5_fragment_parse(parser, srcdoc);
-                    Element* body_elem = html5_fragment_get_body(parser);
-                    if (body_elem) {
-                        for (int64_t i = 0; i < body_elem->length; i++) {
-                            TypeId t = get_type_id(body_elem->items[i]);
-                            if (t == LMD_TYPE_ELEMENT) {
-                                build_dom_tree_from_element(
-                                    body_elem->items[i].element, doc, body);
-                            } else if (t == LMD_TYPE_STRING) {
-                                String* s = it2s(body_elem->items[i]);
-                                DomText* tn = dom_text_create(s, body);
-                                if (tn) {
-                                    tn->parent = body;
-                                    if (!body->first_child) {
-                                        body->first_child = tn;
-                                        body->last_child = tn;
-                                    } else {
-                                        DomNode* last = body->last_child;
-                                        last->next_sibling = tn;
-                                        tn->prev_sibling = last;
-                                        body->last_child = tn;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // Hydrate the iframe document from srcdoc so DOM queries resolve
+        // inside the browsing context.
+        append_iframe_srcdoc_to_document(iframe, doc);
         if (s_iframe_cache_count < IFRAME_CACHE_SIZE) {
             s_iframe_cache[s_iframe_cache_count].iframe = iframe;
             s_iframe_cache[s_iframe_cache_count].doc = doc;
@@ -2734,6 +2759,41 @@ static void _schedule_iframe_load(DomElement* iframe) {
         Item cb = js_new_function((void*)_iframe_load_drain, 0);
         js_setTimeout(cb, (Item){.item = i2it(0)});
     }
+}
+
+static Url* js_dom_resolve_navigation_url(DomDocument* doc,
+                                          const char* next_url) {
+    if (!next_url || !next_url[0]) return nullptr;
+    Url* resolved = doc && doc->url
+        ? url_parse_with_base(next_url, doc->url)
+        : url_parse(next_url);
+    if (!resolved || !url_is_valid(resolved)) {
+        if (resolved) url_destroy(resolved);
+        resolved = js_dom_make_fallback_url(next_url);
+    }
+    return resolved;
+}
+
+static bool js_dom_apply_location_assignment(DomDocument* doc,
+                                             const char* next_url) {
+    if (!doc || !next_url || !next_url[0]) return false;
+    Url* resolved = js_dom_resolve_navigation_url(doc, next_url);
+    if (!resolved) return false;
+
+    if (doc->url) url_destroy(doc->url);
+    doc->url = resolved;
+
+    IframeContentEntry* iframe_entry = lookup_iframe_entry_by_doc(doc);
+    if (iframe_entry && iframe_entry->iframe) {
+        reset_iframe_document_from_srcdoc(iframe_entry->iframe, doc);
+        _schedule_iframe_load(iframe_entry->iframe);
+        log_info("js_iframe_location_assignment: navigated iframe to %s",
+                 next_url);
+        return true;
+    }
+
+    log_info("js_location_assignment: navigated document to %s", next_url);
+    return true;
 }
 
 static DomElement* js_dom_find_iframe_by_name(DomNode* node, const char* target_name) {
@@ -4951,6 +5011,68 @@ static String* uppercase_tag_name(const char* tag_name) {
     String* result = heap_create_name(upper);
     if (upper != buf) mem_free(upper);
     return result;
+}
+
+static int64_t js_dom_text_measure(DomNode* node) {
+    if (!node) return 0;
+    if (node->is_text()) {
+        return (int64_t)dom_text_utf16_length(node->as_text());
+    }
+    if (!node->is_element()) return 0;
+    int64_t total = 0;
+    for (DomNode* child = node->as_element()->first_child; child;
+         child = child->next_sibling) {
+        total += js_dom_text_measure(child);
+    }
+    return total;
+}
+
+static bool js_dom_text_offset_before_node(DomNode* node, DomNode* target,
+                                           int64_t* offset) {
+    if (!node || !target || !offset) return false;
+    if (node == target) return true;
+    if (node->is_text()) {
+        *offset += (int64_t)dom_text_utf16_length(node->as_text());
+        return false;
+    }
+    if (!node->is_element()) return false;
+    for (DomNode* child = node->as_element()->first_child; child;
+         child = child->next_sibling) {
+        if (js_dom_text_offset_before_node(child, target, offset))
+            return true;
+    }
+    return false;
+}
+
+static DomElement* js_dom_inline_offset_scope(DomElement* elem) {
+    DomElement* fallback = elem && elem->parent && elem->parent->is_element()
+        ? elem->parent->as_element() : nullptr;
+    for (DomNode* current = elem ? elem->parent : nullptr; current;
+         current = current->parent) {
+        if (!current->is_element()) continue;
+        DomElement* current_elem = current->as_element();
+        const char* editable =
+            dom_element_get_attribute(current_elem, "contenteditable");
+        if (editable) return current_elem;
+        if (current_elem->tag_name &&
+            strcasecmp(current_elem->tag_name, "body") == 0) {
+            return current_elem;
+        }
+    }
+    return fallback;
+}
+
+static int64_t js_dom_synthetic_inline_offset_left(DomElement* elem) {
+    if (!elem) return 0;
+    DomElement* scope = js_dom_inline_offset_scope(elem);
+    if (!scope) return 0;
+    int64_t offset = 0;
+    if (!js_dom_text_offset_before_node((DomNode*)scope, (DomNode*)elem,
+                                        &offset)) {
+        return 0;
+    }
+    int64_t width = js_dom_text_measure((DomNode*)elem);
+    return offset > 0 || width > 0 ? offset : 0;
 }
 
 // ============================================================================
@@ -8009,6 +8131,12 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         return (Item){.item = i2it((int64_t)elem->y)};
     }
     if (strcmp(prop, "offsetLeft") == 0) {
+        if (elem->x == 0.0f) {
+            int64_t synthetic_left = js_dom_synthetic_inline_offset_left(elem);
+            if (synthetic_left > 0) {
+                return (Item){.item = i2it(synthetic_left)};
+            }
+        }
         return (Item){.item = i2it((int64_t)elem->x)};
     }
 
