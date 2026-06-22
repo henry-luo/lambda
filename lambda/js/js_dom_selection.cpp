@@ -113,6 +113,17 @@ static int item_to_int(Item v) {
     return 0;
 }
 
+static uint32_t selection_text_offset_from_item(DomNode* node, Item value) {
+    int offset = item_to_int(value);
+    if (!node || !node->is_text()) {
+        return offset < 0 ? 0 : (uint32_t)offset;
+    }
+    uint32_t length = dom_node_boundary_length(node);
+    if (offset < 0) return 0;
+    if ((uint32_t)offset > length) return length;
+    return (uint32_t)offset;
+}
+
 static bool item_to_bool(Item v) {
     TypeId t = get_type_id(v);
     if (t == LMD_TYPE_BOOL) return (v.item & 0xFF) != 0;
@@ -955,8 +966,14 @@ extern "C" Item js_selection_set_base_and_extent(Item anchor_node_v, Item anchor
         return make_undef();
     }
     const char* exc = nullptr;
-    DomBoundary anchor = { an, (uint32_t)item_to_int(anchor_off_v) };
-    DomBoundary focus = { fn, (uint32_t)item_to_int(focus_off_v) };
+    DomBoundary anchor = {
+        an,
+        selection_text_offset_from_item(an, anchor_off_v)
+    };
+    DomBoundary focus = {
+        fn,
+        selection_text_offset_from_item(fn, focus_off_v)
+    };
     if (!selection_state_set(s, &anchor, &focus, &exc)) {
         throw_from_dom_exc(exc, "setBaseAndExtent failed");
         return make_undef();
@@ -1213,6 +1230,7 @@ extern "C" Item js_dom_create_range(void) {
     }
     DomRange* r = dom_range_create(state);
     if (!r) return ItemNull;
+    dom_range_link_into_state(state, r);
     return build_range_object(r);
 }
 

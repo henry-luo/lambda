@@ -206,12 +206,30 @@ static std::string js_string_literal(const std::string& value) {
     return out;
 }
 
+static std::string html_attr_literal(const std::string& value) {
+    std::string out;
+    for (unsigned char c : value) {
+        switch (c) {
+        case '&': out += "&amp;"; break;
+        case '"': out += "&quot;"; break;
+        case '<': out += "&lt;"; break;
+        case '>': out += "&gt;"; break;
+        default: out += (char)c; break;
+        }
+    }
+    return out;
+}
+
 static std::string json_string_literal(const std::string& value) {
     return js_string_literal(value);
 }
 
 static bool contains_text(const std::string& text, const char* needle) {
     return text.find(needle) != std::string::npos;
+}
+
+static bool has_testharness_script(const std::string& html) {
+    return contains_text(html, "testharness.js");
 }
 
 static bool has_tag(const std::vector<std::string>& tags, const char* tag) {
@@ -284,6 +302,132 @@ static std::string strip_script_elements(const std::string& html) {
         pos = close + strlen("</script>");
     }
     return result;
+}
+
+static bool is_local_relative_url(const std::string& url) {
+    return !url.empty() && url.find("://") == std::string::npos &&
+        url[0] != '/' && url[0] != '#';
+}
+
+static std::string inline_local_iframe_sources(const std::string& html,
+                                               const std::string& html_dir) {
+    std::string result;
+    size_t pos = 0;
+    while (pos < html.size()) {
+        size_t tag_start = html.find("<iframe", pos);
+        if (tag_start == std::string::npos) {
+            result += html.substr(pos);
+            break;
+        }
+        result += html.substr(pos, tag_start - pos);
+        size_t tag_end = html.find('>', tag_start);
+        if (tag_end == std::string::npos) {
+            result += html.substr(tag_start);
+            break;
+        }
+        std::string tag = html.substr(tag_start, tag_end - tag_start + 1);
+        std::string src = extract_attr(tag, "src");
+        std::string srcdoc = extract_attr(tag, "srcdoc");
+        if (!srcdoc.empty() || !is_local_relative_url(src)) {
+            result += tag;
+            pos = tag_end + 1;
+            continue;
+        }
+        std::string full = normalize_relative_path(html_dir, src);
+        std::string body = read_file_contents(full.c_str());
+        if (body.empty()) {
+            result += tag;
+            pos = tag_end + 1;
+            continue;
+        }
+        result += tag.substr(0, tag.size() - 1);
+        result += " srcdoc=\"";
+        result += html_attr_literal(body);
+        result += "\">";
+        pos = tag_end + 1;
+    }
+    return result;
+}
+
+static std::vector<std::string> extract_element_ids(const std::string& html) {
+    std::vector<std::string> ids;
+    size_t pos = 0;
+    while (pos < html.size()) {
+        size_t tag_start = html.find('<', pos);
+        if (tag_start == std::string::npos) break;
+        size_t tag_end = html.find('>', tag_start);
+        if (tag_end == std::string::npos) break;
+        std::string tag = html.substr(tag_start, tag_end - tag_start + 1);
+        std::string id = extract_attr(tag, "id");
+        if (!id.empty()) {
+            bool seen = false;
+            for (const std::string& existing : ids) {
+                if (existing == id) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (!seen) ids.push_back(id);
+        }
+        pos = tag_end + 1;
+    }
+    return ids;
+}
+
+static bool is_js_identifier_name(const std::string& text) {
+    if (text.empty()) return false;
+    unsigned char first = (unsigned char)text[0];
+    if (!((first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z') ||
+          first == '_' || first == '$')) {
+        return false;
+    }
+    for (size_t i = 1; i < text.size(); i++) {
+        unsigned char c = (unsigned char)text[i];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+              (c >= '0' && c <= '9') || c == '_' || c == '$')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool scripts_define_function_named(const std::string& scripts,
+                                          const std::string& name) {
+    if (!is_js_identifier_name(name)) return false;
+    std::string needle = "function " + name;
+    if (contains_text(scripts, needle.c_str())) return true;
+    needle = "function\t" + name;
+    if (contains_text(scripts, needle.c_str())) return true;
+    needle = "async function " + name;
+    return contains_text(scripts, needle.c_str());
+}
+
+static std::string named_element_global_prelude(const std::string& html,
+                                                const std::string& scripts) {
+    std::vector<std::string> ids = extract_element_ids(html);
+    if (ids.empty()) return "";
+    std::string out;
+    out += "\n// ---- legacy named element globals ----\n";
+    for (const std::string& id : ids) {
+        if (scripts_define_function_named(scripts, id)) continue;
+        out += "try { globalThis[";
+        out += js_string_literal(id);
+        out += "] = document.getElementById(";
+        out += js_string_literal(id);
+        out += ") || globalThis[";
+        out += js_string_literal(id);
+        out += "]; } catch (_) {}\n";
+        if (is_js_identifier_name(id)) {
+            out += "try { var ";
+            out += id;
+            out += " = document.getElementById(";
+            out += js_string_literal(id);
+            out += ") || ";
+            out += id;
+            out += "; } catch (_) {}\n";
+        }
+    }
+    return out;
 }
 
 struct CapturedProcessOutput {
@@ -944,14 +1088,20 @@ static ChromeEditingResult run_chrome_editing_case(
     metadata += "_chrome_editing_expected_text = " +
         js_string_literal(expected_text) + ";\n";
 
-    std::string combined = harness + metadata + "\n" + scripts +
+    std::string temp_html_content =
+        inline_local_iframe_sources(strip_script_elements(html),
+            dir_of(p.html_path));
+    std::string named_element_prelude = has_testharness_script(html) ?
+        "" : named_element_global_prelude(temp_html_content, scripts);
+    std::string combined = harness + metadata + named_element_prelude +
+        "\n" + scripts +
         "\n_chrome_editing_print_summary();\n";
     std::string temp_js = std::string(TEMP_DIR) + "/chrome_editing_" +
         p.test_name + ".js";
     write_file_contents(temp_js.c_str(), combined);
     std::string temp_html = std::string(TEMP_DIR) + "/chrome_editing_" +
         p.test_name + ".html";
-    write_file_contents(temp_html.c_str(), strip_script_elements(html));
+    write_file_contents(temp_html.c_str(), temp_html_content);
 
     int exit_code = 0;
     CapturedProcessOutput captured_output = execute_js_with_doc(temp_js.c_str(),
