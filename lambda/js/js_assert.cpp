@@ -495,6 +495,16 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
             Item thrown_str = js_to_string_val(thrown);
             Item test_result = js_regex_test(error_expected, thrown_str);
             if (get_type_id(test_result) == LMD_TYPE_BOOL && it2b(test_result)) return true;
+            Item code = js_property_get(thrown, assert_make_string("code"));
+            if (get_type_id(code) == LMD_TYPE_STRING) {
+                test_result = js_regex_test(error_expected, code);
+                if (get_type_id(test_result) == LMD_TYPE_BOOL && it2b(test_result)) return true;
+            }
+            Item name = js_property_get(thrown, assert_make_string("name"));
+            if (get_type_id(name) == LMD_TYPE_STRING) {
+                test_result = js_regex_test(error_expected, name);
+                if (get_type_id(test_result) == LMD_TYPE_BOOL && it2b(test_result)) return true;
+            }
             throw_assertion_error("The input did not match the regular expression");
             return false;
         }
