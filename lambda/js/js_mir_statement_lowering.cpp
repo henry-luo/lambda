@@ -4047,7 +4047,10 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     // for-of: use lazy iterator protocol (v29)
     // Get iterator from iterable
-    MIR_reg_t iterator = jm_emit_get_iterator(mt, iterable);
+    MIR_reg_t iterator = is_for_await
+        ? jm_call_1(mt, "js_get_async_iterator", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable))
+        : jm_emit_get_iterator(mt, iterable);
     if (mt->for_of_depth < 32) {
         mt->for_of_iterators[mt->for_of_depth++] = iterator;
     }

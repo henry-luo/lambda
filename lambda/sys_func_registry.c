@@ -43,6 +43,7 @@ extern Item js_super_instance_method_get(Item receiver, Item key);
 extern Item js_super_property_set(Item receiver, Item key, Item value, int64_t strict);
 extern Item js_create_data_property(Item obj, Item name, Item value);
 extern bool js_for_in_key_is_live(Item object, Item key);
+extern Item js_get_async_iterator(Item iterable);
 extern Item js_async_iterator_step_result(Item iterator);
 extern int64_t js_iterator_result_done(Item result);
 extern Item js_iterator_result_value(Item result);
@@ -1817,6 +1818,7 @@ JitImport jit_runtime_imports[] = {
     {"js_iterable_to_array", FPTR(js_iterable_to_array)},
     // v29: Lazy iterator protocol for for-of
     {"js_get_iterator", FPTR(js_get_iterator)},
+    {"js_get_async_iterator", FPTR(js_get_async_iterator)},
     {"js_get_iterator_lazy", FPTR(js_get_iterator_lazy)},
     {"js_iterator_step", FPTR(js_iterator_step)},
     {"js_async_iterator_step_result", FPTR(js_async_iterator_step_result)},

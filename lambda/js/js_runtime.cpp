@@ -27635,6 +27635,25 @@ extern "C" Item js_get_iterator(Item iterable) {
     return js_get_iterator_impl(iterable, true);
 }
 
+extern "C" Item js_get_async_iterator(Item iterable) {
+    TypeId tid = get_type_id(iterable);
+    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT || tid == LMD_TYPE_ARRAY) {
+        Item iter_factory = js_property_get_str(iterable, "__sym_5", 7);
+        if (js_check_exception()) return ItemNull;
+        if (get_type_id(iter_factory) == LMD_TYPE_FUNC) {
+            Item iterator = js_call_function(iter_factory, iterable, NULL, 0);
+            if (js_check_exception()) return ItemNull;
+            TypeId it_tid = get_type_id(iterator);
+            if (it_tid != LMD_TYPE_MAP && it_tid != LMD_TYPE_ELEMENT && it_tid != LMD_TYPE_ARRAY) {
+                js_throw_type_error("async iterator is not an object");
+                return ItemNull;
+            }
+            return iterator;
+        }
+    }
+    return js_get_iterator(iterable);
+}
+
 extern "C" Item js_get_iterator_lazy(Item iterable) {
     return js_get_iterator_impl(iterable, false);
 }
