@@ -32,6 +32,9 @@ extern "C" int js_check_exception(void);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_ordinary_has_instance(Item left, Item right);
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
+extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item);
+extern "C" Item js_buffer_isBuffer(Item obj);
+extern "C" Item js_util_inspect(Item obj_item, Item options_item);
 extern Item js_current_this;
 extern "C" Item js_get_this(void);
 
@@ -823,6 +826,17 @@ static char js_stream_ascii_lower(char c) {
     return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
 }
 
+static Item js_stream_canonical_encoding(Item encoding) {
+    if (get_type_id(encoding) != LMD_TYPE_STRING) return encoding;
+    String* enc = it2s(encoding);
+    if (!enc) return encoding;
+    char lower[64];
+    int len = enc->len < (int)sizeof(lower) ? (int)enc->len : (int)sizeof(lower);
+    for (int i = 0; i < len; i++)
+        lower[i] = js_stream_ascii_lower(enc->chars[i]);
+    return make_string_item(lower, len);
+}
+
 static bool js_stream_encoding_equals(String* enc, const char* literal) {
     if (!enc || !literal) return false;
     int lit_len = (int)strlen(literal);
@@ -849,17 +863,98 @@ static bool js_stream_is_valid_encoding(Item encoding) {
            js_stream_encoding_equals(enc, "utf-16le");
 }
 
-static Item js_stream_throw_unknown_encoding(Item encoding) {
-    if (get_type_id(encoding) == LMD_TYPE_STRING) {
-        String* enc = it2s(encoding);
-        char msg[128];
-        int len = enc->len < 96 ? (int)enc->len : 96;
-        memcpy(msg, "Unknown encoding: ", 18);
-        memcpy(msg + 18, enc->chars, (size_t)len);
-        msg[18 + len] = '\0';
-        return js_throw_type_error_code("ERR_UNKNOWN_ENCODING", msg);
+static Item js_stream_unknown_encoding_label(Item encoding) {
+    if (get_type_id(encoding) == LMD_TYPE_STRING) return encoding;
+    TypeId tid = get_type_id(encoding);
+    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ARRAY || tid == LMD_TYPE_FUNC) {
+        Item inspected = js_util_inspect(encoding, make_js_undefined());
+        if (!js_check_exception() && get_type_id(inspected) == LMD_TYPE_STRING)
+            return inspected;
     }
-    return js_throw_type_error_code("ERR_UNKNOWN_ENCODING", "Unknown encoding");
+    Item coerced = js_to_string(encoding);
+    if (!js_check_exception() && get_type_id(coerced) == LMD_TYPE_STRING)
+        return coerced;
+    return make_string_item("");
+}
+
+static Item js_stream_throw_unknown_encoding(Item encoding) {
+    Item label = js_stream_unknown_encoding_label(encoding);
+    String* enc = get_type_id(label) == LMD_TYPE_STRING ? it2s(label) : NULL;
+    char msg[128];
+    int len = enc && enc->len < 96 ? (int)enc->len : (enc ? 96 : 0);
+    memcpy(msg, "Unknown encoding: ", 18);
+    if (enc && len > 0) memcpy(msg + 18, enc->chars, (size_t)len);
+    msg[18 + len] = '\0';
+    return js_throw_type_error_code("ERR_UNKNOWN_ENCODING", msg);
+}
+
+static Item js_stream_resolve_write_encoding(Item self, Item encoding) {
+    if (get_type_id(encoding) == LMD_TYPE_STRING) return encoding;
+    Item default_encoding = js_property_get(self, make_string_item("_defaultEncoding"));
+    if (get_type_id(default_encoding) == LMD_TYPE_STRING) return default_encoding;
+    return make_string_item("utf8");
+}
+
+static bool js_stream_writable_is_object_mode(Item self) {
+    Item state = js_property_get(self, key_writable_state);
+    return js_state_get_bool(state, "objectMode");
+}
+
+static bool js_stream_writable_should_decode_strings(Item self) {
+    Item decode_strings = js_property_get(self, make_string_item("_decodeStrings"));
+    return get_type_id(decode_strings) != LMD_TYPE_BOOL || it2b(decode_strings);
+}
+
+static bool js_stream_chunk_is_buffer(Item chunk) {
+    Item result = js_buffer_isBuffer(chunk);
+    return get_type_id(result) == LMD_TYPE_BOOL && it2b(result);
+}
+
+static bool js_stream_prepare_writable_chunk(Item self, Item* chunk, Item* encoding) {
+    if (js_stream_chunk_is_buffer(*chunk)) {
+        *encoding = make_string_item("buffer");
+        return true;
+    }
+
+    Item write_encoding = js_stream_resolve_write_encoding(self, *encoding);
+    if (get_type_id(*chunk) == LMD_TYPE_STRING &&
+        !js_stream_writable_is_object_mode(self)) {
+        if (!js_stream_is_valid_encoding(write_encoding)) {
+            js_stream_throw_unknown_encoding(write_encoding);
+            return false;
+        }
+        if (js_stream_writable_should_decode_strings(self)) {
+            Item buffer = js_buffer_from(*chunk, write_encoding, make_js_undefined());
+            if (js_check_exception()) return false;
+            if (buffer.item != 0 &&
+                get_type_id(buffer) != LMD_TYPE_UNDEFINED &&
+                get_type_id(buffer) != LMD_TYPE_NULL) {
+                *chunk = buffer;
+                *encoding = make_string_item("buffer");
+                return true;
+            }
+        }
+    }
+
+    *encoding = write_encoding;
+    return true;
+}
+
+extern "C" Item js_stream_setDefaultEncoding(Item self, Item encoding) {
+    ensure_keys();
+    Item next_encoding = encoding;
+    if (next_encoding.item == 0 ||
+        get_type_id(next_encoding) == LMD_TYPE_UNDEFINED ||
+        get_type_id(next_encoding) == LMD_TYPE_NULL) {
+        next_encoding = make_string_item("utf8");
+    }
+    if (get_type_id(next_encoding) != LMD_TYPE_STRING ||
+        !js_stream_is_valid_encoding(next_encoding)) {
+        return js_stream_throw_unknown_encoding(next_encoding);
+    }
+    js_property_set(self, make_string_item("_defaultEncoding"),
+                    js_stream_canonical_encoding(next_encoding));
+    return self;
 }
 
 static bool js_stream_item_is_number(Item item) {
@@ -1023,8 +1118,12 @@ static bool propagate_stream_options(Item obj, Item opts) {
             js_stream_throw_unknown_encoding(default_enc);
             return false;
         }
-        js_property_set(obj, make_string_item("_defaultEncoding"), default_enc);
+        js_property_set(obj, make_string_item("_defaultEncoding"),
+                        js_stream_canonical_encoding(default_enc));
     }
+    Item decode_strings = js_property_get(opts, make_string_item("decodeStrings"));
+    if (get_type_id(decode_strings) == LMD_TYPE_BOOL)
+        js_property_set(obj, make_string_item("_decodeStrings"), decode_strings);
     // readable/writable side switches used by Duplex options.
     Item readable = js_property_get(opts, make_string_item("readable"));
     if (get_type_id(readable) == LMD_TYPE_BOOL)
@@ -1085,6 +1184,9 @@ static Item js_readable_inst_isPaused(void) {
 }
 static Item js_stream_inst_setEncoding(Item encoding) {
     return js_stream_setEncoding(js_get_this(), encoding);
+}
+static Item js_stream_inst_setDefaultEncoding(Item encoding) {
+    return js_stream_setDefaultEncoding(js_get_this(), encoding);
 }
 static Item js_stream_inst_asyncIterator(void) {
     return js_stream_async_iterator(js_get_this());
@@ -1181,6 +1283,7 @@ extern "C" Item js_writable_write(Item self, Item chunk, Item encoding, Item cal
         return js_bool_item(false);
     }
 
+    if (!js_stream_prepare_writable_chunk(self, &chunk, &encoding)) return ItemNull;
     bool accepted = js_stream_begin_write(self, chunk);
 
     // if corked, buffer the write
@@ -1203,9 +1306,8 @@ extern "C" Item js_writable_write(Item self, Item chunk, Item encoding, Item cal
         write_handler = js_property_get(self, make_string_item("__write_handler__"));
     }
     if (get_type_id(write_handler) == LMD_TYPE_FUNC) {
-        Item write_encoding = get_type_id(encoding) == LMD_TYPE_STRING ? encoding : make_string_item("utf8");
         Item write_cb = js_stream_make_write_callback(self, callback);
-        Item args[3] = {chunk, write_encoding, write_cb};
+        Item args[3] = {chunk, encoding, write_cb};
         js_call_function(write_handler, self, args, 3);
     } else {
         // no _write method — throw ERR_METHOD_NOT_IMPLEMENTED
@@ -1442,7 +1544,7 @@ extern "C" Item js_writable_new(Item opts) {
     js_property_set(obj, make_string_item("cork"), js_new_function((void*)js_writable_inst_cork, 0));
     js_property_set(obj, make_string_item("uncork"), js_new_function((void*)js_writable_inst_uncork, 0));
     js_property_set(obj, make_string_item("setEncoding"), js_new_function((void*)js_stream_inst_setEncoding, 1));
-    js_property_set(obj, make_string_item("setDefaultEncoding"), js_new_function((void*)js_stream_inst_setEncoding, 1));
+    js_property_set(obj, make_string_item("setDefaultEncoding"), js_new_function((void*)js_stream_inst_setDefaultEncoding, 1));
 
     if (!propagate_stream_options(obj, opts)) return ItemNull;
     return obj;
@@ -1502,7 +1604,7 @@ extern "C" Item js_duplex_new(Item opts) {
     js_property_set(obj, make_string_item("cork"), js_new_function((void*)js_writable_inst_cork, 0));
     js_property_set(obj, make_string_item("uncork"), js_new_function((void*)js_writable_inst_uncork, 0));
     js_property_set(obj, make_string_item("setEncoding"), js_new_function((void*)js_stream_inst_setEncoding, 1));
-    js_property_set(obj, make_string_item("setDefaultEncoding"), js_new_function((void*)js_stream_inst_setEncoding, 1));
+    js_property_set(obj, make_string_item("setDefaultEncoding"), js_new_function((void*)js_stream_inst_setDefaultEncoding, 1));
     js_stream_install_async_iterator(obj);
 
     if (!propagate_stream_options(obj, opts)) return ItemNull;
@@ -1525,10 +1627,10 @@ extern "C" Item js_transform_write(Item self, Item chunk, Item encoding, Item ca
     // call _transform if set
     Item transform_fn = js_property_get(self, make_string_item("_transform"));
     if (get_type_id(transform_fn) == LMD_TYPE_FUNC) {
+        if (!js_stream_prepare_writable_chunk(self, &chunk, &encoding)) return ItemNull;
         bool accepted = js_stream_begin_write(self, chunk);
-        Item transform_encoding = get_type_id(encoding) == LMD_TYPE_STRING ? encoding : make_string_item("utf8");
         Item write_cb = js_stream_make_write_callback(self, callback);
-        Item args[3] = {chunk, transform_encoding, write_cb};
+        Item args[3] = {chunk, encoding, write_cb};
         Item result = js_call_function(transform_fn, self, args, 3);
         // if _transform returns data, push it
         if (result.item != 0 && get_type_id(result) != LMD_TYPE_UNDEFINED) {
@@ -1633,7 +1735,7 @@ extern "C" Item js_transform_new(Item opts) {
     js_property_set(obj, make_string_item("cork"), js_new_function((void*)js_writable_inst_cork, 0));
     js_property_set(obj, make_string_item("uncork"), js_new_function((void*)js_writable_inst_uncork, 0));
     js_property_set(obj, make_string_item("setEncoding"), js_new_function((void*)js_stream_inst_setEncoding, 1));
-    js_property_set(obj, make_string_item("setDefaultEncoding"), js_new_function((void*)js_stream_inst_setEncoding, 1));
+    js_property_set(obj, make_string_item("setDefaultEncoding"), js_new_function((void*)js_stream_inst_setDefaultEncoding, 1));
     js_stream_install_async_iterator(obj);
 
     if (!propagate_stream_options(obj, opts)) return ItemNull;
