@@ -31855,9 +31855,10 @@ extern "C" Item js_module_get(Item specifier) {
         return js_get_stream_namespace();
     }
     // stream/iter — internal stream iteration helpers
-    if (spec->len == 11 && memcmp(spec->chars, "stream/iter", 11) == 0) {
-        extern Item js_get_stream_namespace(void);
-        return js_get_stream_namespace();
+    if ((spec->len == 11 && memcmp(spec->chars, "stream/iter", 11) == 0) ||
+        (spec->len == 16 && memcmp(spec->chars, "node:stream/iter", 16) == 0)) {
+        extern Item js_get_stream_iter_namespace(void);
+        return js_get_stream_iter_namespace();
     }
     // node:net
     if ((spec->len == 3 && memcmp(spec->chars, "net", 3) == 0) ||
