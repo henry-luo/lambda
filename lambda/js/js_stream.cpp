@@ -53,6 +53,8 @@ extern "C" int64_t js_iterator_result_done(Item result);
 extern "C" Item js_iterator_result_value(Item result);
 extern Item js_current_this;
 extern "C" Item js_get_this(void);
+extern "C" Item js_writable_stream_new(void);
+extern "C" Item js_get_global_property(Item key);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -3882,6 +3884,17 @@ static Item stream_set_method(Item ns, const char* name, void* func_ptr, int par
     return fn;
 }
 
+static Item js_writable_toWeb(Item writable) {
+    Item web = js_writable_stream_new();
+    Item ctor = js_get_global_property(make_string_item("WritableStream"));
+    Item proto = js_property_get(ctor, make_string_item("prototype"));
+    if (get_type_id(proto) == LMD_TYPE_MAP || get_type_id(proto) == LMD_TYPE_ELEMENT) {
+        js_set_prototype(web, proto);
+    }
+    js_property_set(web, make_string_item("__node_stream__"), writable);
+    return web;
+}
+
 extern "C" Item js_get_stream_namespace(void) {
     if (stream_namespace.item != 0) return stream_namespace;
     ensure_keys();
@@ -3915,6 +3928,10 @@ extern "C" Item js_get_stream_namespace(void) {
     if (get_type_id(readable_constructor) == LMD_TYPE_FUNC) {
         js_property_set(readable_constructor, make_string_item("from"),
                         js_new_function((void*)js_readable_from, 1));
+    }
+    if (get_type_id(writable_constructor) == LMD_TYPE_FUNC) {
+        js_property_set(writable_constructor, make_string_item("toWeb"),
+                        js_new_function((void*)js_writable_toWeb, 1));
     }
 
     if (get_type_id(readable_constructor) == LMD_TYPE_FUNC &&
