@@ -32309,6 +32309,12 @@ extern "C" Item js_module_get(Item specifier) {
         }
         return internal_util_ns;
     }
+    // internal/streams/add-abort-signal — no-validate helper used by stream tests.
+    if ((spec->len == 33 && memcmp(spec->chars, "internal/streams/add-abort-signal", 33) == 0) ||
+        (spec->len == 36 && memcmp(spec->chars, "internal/streams/add-abort-signal.js", 36) == 0)) {
+        extern Item js_get_internal_stream_add_abort_signal_namespace(void);
+        return js_get_internal_stream_add_abort_signal_namespace();
+    }
     // internal/test/binding — provides internalBinding() for Node.js tests
     if ((spec->len == 21 && memcmp(spec->chars, "internal/test/binding", 21) == 0) ||
         (spec->len == 24 && memcmp(spec->chars, "internal/test/binding.js", 24) == 0)) {

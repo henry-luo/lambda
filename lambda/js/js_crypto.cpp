@@ -62,11 +62,50 @@ static int crypto_digest_bits_for_name(const char* digest, bool allow_sha1, bool
 }
 
 static bool crypto_normalize_string(Item item, char* out, int out_size, bool strip_dash);
+static mbedtls_md_type_t crypto_mbedtls_md_for_name(const char* alg);
+static bool crypto_digest_compute_bits(int bits, const uint8_t* data,
+                                       int offset, int length, uint8_t* out);
+
+static int crypto_digest_len_for_name(const char* alg) {
+    int bits = crypto_digest_bits_for_name_ext(alg, true, true, true);
+    int len = (int)digest_output_len_bits(bits);
+    if (len > 0) return len;
+
+    mbedtls_md_type_t md = crypto_mbedtls_md_for_name(alg);
+    const mbedtls_md_info_t* info = mbedtls_md_info_from_type(md);
+    if (!info) return 0;
+    return (int)mbedtls_md_get_size(info);
+}
+
+static bool crypto_digest_compute_name(const char* alg, const uint8_t* data, int data_len,
+                                       uint8_t* out, int* out_len) {
+    if (!out || !out_len) return false;
+    *out_len = 0;
+
+    int bits = crypto_digest_bits_for_name_ext(alg, true, true, true);
+    int len = (int)digest_output_len_bits(bits);
+    if (len > 0) {
+        if (!crypto_digest_compute_bits(bits, data, 0, data_len, out)) return false;
+        *out_len = len;
+        return true;
+    }
+
+    mbedtls_md_type_t md = crypto_mbedtls_md_for_name(alg);
+    const mbedtls_md_info_t* info = mbedtls_md_info_from_type(md);
+    if (!info) return false;
+    len = (int)mbedtls_md_get_size(info);
+    if (len <= 0 || len > 64) return false;
+    const uint8_t* input = data ? data : crypto_empty_bytes;
+    size_t input_len = data_len > 0 ? (size_t)data_len : 0;
+    if (mbedtls_md(info, input, input_len, out) != 0) return false;
+    *out_len = len;
+    return true;
+}
 
 static bool crypto_normalize_sign_verify_digest(Item alg_item, char* out, int out_size) {
     if (!out || out_size <= 0) return false;
     if (!crypto_normalize_string(alg_item, out, out_size, true)) return false;
-    if (crypto_digest_bits_for_name_ext(out, true, true, true) != 0) return true;
+    if (crypto_digest_len_for_name(out) != 0) return true;
 
     const char* digest = NULL;
     if (strncmp(out, "rsa", 3) == 0) {
@@ -79,7 +118,7 @@ static bool crypto_normalize_sign_verify_digest(Item alg_item, char* out, int ou
         digest = "sha1";
     }
 
-    if (digest && crypto_digest_bits_for_name_ext(digest, true, true, true) != 0) {
+    if (digest && crypto_digest_len_for_name(digest) != 0) {
         int len = (int)strlen(digest);
         if (len >= out_size) len = out_size - 1;
         memmove(out, digest, (size_t)len);
@@ -1334,7 +1373,21 @@ extern "C" Item js_hash_update(Item data_item, Item encoding_item) {
 extern "C" Item js_hash_digest(Item encoding_item) {
     Item self = js_get_current_this();
     Item ctx_item = js_property_get(self, make_string_item_crypto("__hash_ctx__"));
-    if (ctx_item.item == 0 || ctx_item.item == ITEM_NULL) return crypto_throw_hash_finalized();
+    if (ctx_item.item == 0 || ctx_item.item == ITEM_NULL) {
+        Item cached = js_property_get(self, make_string_item_crypto("__hash_stream_digest__"));
+        if (js_is_typed_array(cached)) {
+            char enc[32];
+            bool has_encoding = false;
+            if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) return ItemNull;
+            uint8_t* bytes = NULL;
+            int len = 0;
+            if (!extract_bytes(cached, &bytes, &len)) return crypto_throw_hash_finalized();
+            Item result = crypto_digest_output_for_encoding(bytes, len, enc, has_encoding);
+            mem_free(bytes);
+            return result;
+        }
+        return crypto_throw_hash_finalized();
+    }
     HashCtx* ctx = (HashCtx*)(uintptr_t)it2i(ctx_item);
     if (!ctx || ctx->finalized) return crypto_throw_hash_finalized();
 
@@ -1345,12 +1398,8 @@ extern "C" Item js_hash_digest(Item encoding_item) {
     uint8_t hash[64];
     int hash_len = 0;
 
-    int digest_bits = crypto_digest_bits_for_name_ext(ctx->alg, true, true, true);
-    hash_len = (int)digest_output_len_bits(digest_bits);
-    if (hash_len > 0) {
-        if (!crypto_digest_compute_bits(digest_bits, ctx->data, 0, ctx->data_len, hash)) {
-            hash_len = 0;
-        }
+    if (!crypto_digest_compute_name(ctx->alg, ctx->data, ctx->data_len, hash, &hash_len)) {
+        hash_len = 0;
     }
 
     hash_ctx_free(ctx);
@@ -1369,6 +1418,26 @@ extern "C" Item js_hash_end(Item data_item) {
     Item digest = js_hash_digest(make_string_item_crypto("buffer"));
     if (js_check_exception()) return ItemNull;
     js_property_set(self, make_string_item_crypto("__hash_read__"), digest);
+    js_property_set(self, make_string_item_crypto("__hash_stream_digest__"), digest);
+
+    Item emit_value = digest;
+    Item stream_encoding = js_property_get(self, make_string_item_crypto("__hash_stream_encoding__"));
+    if (get_type_id(stream_encoding) == LMD_TYPE_STRING) {
+        uint8_t* bytes = NULL;
+        int len = 0;
+        if (extract_bytes(digest, &bytes, &len)) {
+            emit_value = crypto_output_temp_bytes(bytes, len, stream_encoding);
+            mem_free(bytes);
+            if (js_check_exception()) return ItemNull;
+        }
+    }
+
+    Item data_cb = js_property_get(self, make_string_item_crypto("__hash_stream_data_cb__"));
+    if (get_type_id(data_cb) == LMD_TYPE_FUNC) {
+        Item args[1] = {emit_value};
+        js_call_function(data_cb, self, args, 1);
+        if (js_check_exception()) return ItemNull;
+    }
     return self;
 }
 
@@ -1380,17 +1449,48 @@ extern "C" Item js_hash_read(void) {
     return digest;
 }
 
-extern "C" Item js_crypto_createHash(Item alg_item) {
-    if (get_type_id(alg_item) != LMD_TYPE_STRING) return js_throw_invalid_arg_type("algorithm", "string", alg_item);
-    char alg_buf[16];
-    crypto_normalize_string(alg_item, alg_buf, sizeof(alg_buf), true);
-    if (crypto_digest_bits_for_name_ext(alg_buf, true, true, true) == 0) {
-        return js_throw_type_error("Digest method not supported");
+static Item js_hash_make_object(HashCtx* ctx);
+
+extern "C" Item js_hash_copy(Item options_item) {
+    (void)options_item;
+    Item self = js_get_current_this();
+    Item ctx_item = js_property_get(self, make_string_item_crypto("__hash_ctx__"));
+    if (ctx_item.item == 0 || ctx_item.item == ITEM_NULL) return crypto_throw_hash_finalized();
+    HashCtx* ctx = (HashCtx*)(uintptr_t)it2i(ctx_item);
+    if (!ctx || ctx->finalized) return crypto_throw_hash_finalized();
+
+    HashCtx* copy = (HashCtx*)mem_calloc(1, sizeof(HashCtx), MEM_CAT_JS_RUNTIME);
+    memcpy(copy->alg, ctx->alg, strlen(ctx->alg) + 1);
+    if (ctx->data_len > 0) {
+        copy->data = (uint8_t*)mem_alloc((size_t)ctx->data_len, MEM_CAT_JS_RUNTIME);
+        memcpy(copy->data, ctx->data, (size_t)ctx->data_len);
+        copy->data_len = ctx->data_len;
+        copy->data_cap = ctx->data_len;
     }
+    return js_hash_make_object(copy);
+}
 
-    HashCtx* ctx = (HashCtx*)mem_calloc(1, sizeof(HashCtx), MEM_CAT_JS_RUNTIME);
-    memcpy(ctx->alg, alg_buf, strlen(alg_buf) + 1);
+extern "C" Item js_hash_on(Item event_item, Item listener_item) {
+    Item self = js_get_current_this();
+    if (get_type_id(event_item) == LMD_TYPE_STRING && get_type_id(listener_item) == LMD_TYPE_FUNC) {
+        String* event = it2s(event_item);
+        if (event->len == 4 && memcmp(event->chars, "data", 4) == 0) {
+            js_property_set(self, make_string_item_crypto("__hash_stream_data_cb__"), listener_item);
+        }
+    }
+    return self;
+}
 
+extern "C" Item js_hash_setEncoding(Item encoding_item) {
+    Item self = js_get_current_this();
+    if (get_type_id(encoding_item) != LMD_TYPE_STRING) {
+        return js_throw_invalid_arg_type("encoding", "string", encoding_item);
+    }
+    js_property_set(self, make_string_item_crypto("__hash_stream_encoding__"), encoding_item);
+    return self;
+}
+
+static Item js_hash_make_object(HashCtx* ctx) {
     Item obj = js_new_object();
     crypto_link_instance_to_constructor(obj, "Hash");
     js_property_set(obj, make_string_item_crypto("__hash_ctx__"),
@@ -1405,7 +1505,29 @@ extern "C" Item js_crypto_createHash(Item alg_item) {
                     js_new_function((void*)js_hash_end, 1));
     js_property_set(obj, make_string_item_crypto("read"),
                     js_new_function((void*)js_hash_read, 0));
+    js_property_set(obj, make_string_item_crypto("copy"),
+                    js_new_function((void*)js_hash_copy, 1));
+    js_property_set(obj, make_string_item_crypto("on"),
+                    js_new_function((void*)js_hash_on, 2));
+    js_property_set(obj, make_string_item_crypto("once"),
+                    js_new_function((void*)js_hash_on, 2));
+    js_property_set(obj, make_string_item_crypto("setEncoding"),
+                    js_new_function((void*)js_hash_setEncoding, 1));
     return obj;
+}
+
+extern "C" Item js_crypto_createHash(Item alg_item) {
+    if (get_type_id(alg_item) != LMD_TYPE_STRING) return js_throw_invalid_arg_type("algorithm", "string", alg_item);
+    char alg_buf[16];
+    crypto_normalize_string(alg_item, alg_buf, sizeof(alg_buf), true);
+    if (crypto_digest_len_for_name(alg_buf) == 0) {
+        return js_throw_type_error("Digest method not supported");
+    }
+
+    HashCtx* ctx = (HashCtx*)mem_calloc(1, sizeof(HashCtx), MEM_CAT_JS_RUNTIME);
+    memcpy(ctx->alg, alg_buf, strlen(alg_buf) + 1);
+
+    return js_hash_make_object(ctx);
 }
 
 // ============================================================================
@@ -1458,6 +1580,10 @@ static mbedtls_md_type_t crypto_mbedtls_md_for_name(const char* alg) {
     if (strcmp(alg, "sha256") == 0) return MBEDTLS_MD_SHA256;
     if (strcmp(alg, "sha384") == 0) return MBEDTLS_MD_SHA384;
     if (strcmp(alg, "sha512") == 0) return MBEDTLS_MD_SHA512;
+    if (strcmp(alg, "sha3224") == 0 || strcmp(alg, "sha3-224") == 0) return MBEDTLS_MD_SHA3_224;
+    if (strcmp(alg, "sha3256") == 0 || strcmp(alg, "sha3-256") == 0) return MBEDTLS_MD_SHA3_256;
+    if (strcmp(alg, "sha3384") == 0 || strcmp(alg, "sha3-384") == 0) return MBEDTLS_MD_SHA3_384;
+    if (strcmp(alg, "sha3512") == 0 || strcmp(alg, "sha3-512") == 0) return MBEDTLS_MD_SHA3_512;
     return MBEDTLS_MD_NONE;
 }
 
@@ -1685,8 +1811,7 @@ extern "C" Item js_crypto_hash(Item alg_item, Item data_item, Item encoding_item
     }
     alg_buf[pos] = '\0';
 
-    int digest_bits = crypto_digest_bits_for_name_ext(alg_buf, true, true, true);
-    int hash_len = (int)digest_output_len_bits(digest_bits);
+    int hash_len = crypto_digest_len_for_name(alg_buf);
     if (hash_len <= 0 || hash_len > 64) {
         return js_throw_invalid_arg_value("algorithm", "is invalid", alg_item);
     }
@@ -1714,7 +1839,7 @@ extern "C" Item js_crypto_hash(Item alg_item, Item data_item, Item encoding_item
     }
 
     uint8_t hash[64];
-    bool ok = crypto_digest_compute_bits(digest_bits, data, 0, data_len, hash);
+    bool ok = crypto_digest_compute_name(alg_buf, data, data_len, hash, &hash_len);
     mem_free(data);
     if (!ok) return ItemNull;
 
