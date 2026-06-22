@@ -72,6 +72,7 @@ extern Item js_get_lexical_this_binding(void);
 extern Item js_resolve_lexical_this(Item this_val);
 extern void js_set_internal_class_name(Item obj, Item class_name);
 extern void js_mark_derived_constructor_func(Item fn_item);
+extern Item js_setImmediate_with_args(Item callback, Item args_array);
 
 // Symbol key check for typed array P9 guard (js_runtime.cpp)
 extern int64_t js_key_is_symbol_c(Item key);
@@ -1838,6 +1839,7 @@ JitImport jit_runtime_imports[] = {
     {"js_clearTimeout", FPTR(js_clearTimeout)},
     {"js_clearInterval", FPTR(js_clearInterval)},
     {"js_setImmediate", FPTR(js_setImmediate)},
+    {"js_setImmediate_with_args", FPTR(js_setImmediate_with_args)},
     {"js_clearImmediate", FPTR(js_clearImmediate)},
     {"js_requestAnimationFrame", FPTR(js_requestAnimationFrame)},
     {"js_cancelAnimationFrame", FPTR(js_cancelAnimationFrame)},

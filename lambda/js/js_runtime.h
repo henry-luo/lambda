@@ -896,6 +896,7 @@ Item js_setInterval(Item callback, Item delay);        // returns timer id
 void js_clearTimeout(Item timer_id);
 void js_clearInterval(Item timer_id);
 Item js_setImmediate(Item callback);                   // schedule for next tick
+Item js_setImmediate_with_args(Item callback, Item args_array);
 void js_clearImmediate(Item id);
 Item js_requestAnimationFrame(Item callback);          // schedule for next frame
 void js_cancelAnimationFrame(Item request_id);
