@@ -720,6 +720,16 @@ static void http_server_connection_cb(uv_stream_t* server, int status) {
 }
 
 // server.listen(port, [host], [callback])
+static Item js_http_server_listening_tick(Item self, Item on_listening, Item callback) {
+    if (get_type_id(on_listening) == LMD_TYPE_FUNC) {
+        js_call_function(on_listening, self, NULL, 0);
+    }
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        js_call_function(callback, self, NULL, 0);
+    }
+    return make_js_undefined();
+}
+
 extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item, Item callback) {
     Item handle_item = js_property_get(self, make_string_item("__server__"));
     if (handle_item.item == 0) return self;
@@ -768,11 +778,11 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
     js_property_set(self, make_string_item("listening"), (Item){.item = b2it(true)});
 
     Item on_listening = js_property_get(self, make_string_item("__on_listening__"));
-    if (get_type_id(on_listening) == LMD_TYPE_FUNC) {
-        js_call_function(on_listening, self, NULL, 0);
-    }
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
-        js_call_function(callback, self, NULL, 0);
+    if (get_type_id(on_listening) == LMD_TYPE_FUNC || get_type_id(callback) == LMD_TYPE_FUNC) {
+        Item bound_args[3] = { self, on_listening, callback };
+        Item tick = js_bind_function(js_new_function((void*)js_http_server_listening_tick, 3),
+                                     make_js_undefined(), bound_args, 3);
+        js_next_tick_enqueue(tick);
     }
 
     return self;
