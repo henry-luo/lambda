@@ -645,6 +645,7 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block);
 
 // ViewSpan bounding box computation
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false, struct FontHandle* fallback_fh = nullptr);
+bool inline_span_has_multiple_line_fragments(ViewSpan* span);
 
 // ============================================================================
 // CSS text-transform

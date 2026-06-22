@@ -149,6 +149,43 @@ static bool view_is_collapsed_whitespace_text(View* view, ViewSpan* span) {
     return text_is_all_collapsible_space(text, span);
 }
 
+static bool inline_text_view_has_multiple_line_fragments(View* view) {
+    if (!view || view->view_type != RDT_VIEW_TEXT) return false;
+    ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
+    TextRect* first = text->rect;
+    if (!first) return false;
+    for (TextRect* rect = first->next; rect; rect = rect->next) {
+        if (rect->line_number != first->line_number || rect->y != first->y) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static View* inline_span_first_line_fragment_child(ViewSpan* span) {
+    if (!span) return nullptr;
+    View* first = span->first_placed_child();
+    while (first && (first->view_type == RDT_VIEW_NONE || is_out_of_flow_child(first))) {
+        first = first->next();
+    }
+    return first;
+}
+
+bool inline_span_has_multiple_line_fragments(ViewSpan* span) {
+    View* first = inline_span_first_line_fragment_child(span);
+    if (!first) return false;
+    if (inline_text_view_has_multiple_line_fragments(first)) return true;
+
+    float first_y = first->y;
+    for (View* child = first->next(); child; child = child->next()) {
+        if (child->view_type == RDT_VIEW_NONE || is_out_of_flow_child(child)) continue;
+        if (child->y != first_y || inline_text_view_has_multiple_line_fragments(child)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool span_has_inline_axis_decoration(ViewSpan* span) {
     if (!span || !span->bound) return false;
     if (span->bound->margin.left != 0.0f || span->bound->margin.right != 0.0f ||
@@ -1687,34 +1724,14 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // CSS 2.1 §8.5.1: Detect multi-line by checking if children are on different lines.
     // Multi-line means the span's content itself spans multiple lines, requiring
     // left border+padding only on the first line fragment and right on the last.
-    bool span_is_multi_line = false;
-    {
-        View* first_content = span->first_child;
-        // skip nil-views and out-of-flow children
-        while (first_content && (first_content->view_type == RDT_VIEW_NONE || is_out_of_flow_child(first_content)))
-            first_content = first_content->next();
-        if (first_content) {
-            float first_y = first_content->y;
-            // Check 1: different DOM children on different y-positions
-            View* c = first_content->next();
-            while (c) {
-                if (c->view_type != RDT_VIEW_NONE && !is_out_of_flow_child(c)) {
-                    if (c->y != first_y) {
-                        span_is_multi_line = true;
-                        break;
-                    }
-                }
-                c = c->next();
-            }
-            // Check 2: advance_y moved during children layout, meaning a line
-            // break occurred while laying out this span's content (text wrapped).
-            // start_advance_y was captured before children layout, so if advance_y
-            // increased, a line_break() was called inside this span.
-            if (!span_is_multi_line) {
-                if (lycon->block.advance_y > start_advance_y) {
-                    span_is_multi_line = true;
-                }
-            }
+    bool span_is_multi_line = inline_span_has_multiple_line_fragments(span);
+    // Check 2: advance_y moved during children layout, meaning a line
+    // break occurred while laying out this span's content (text wrapped).
+    // start_advance_y was captured before children layout, so if advance_y
+    // increased, a line_break() was called inside this span.
+    if (!span_is_multi_line && inline_span_first_line_fragment_child(span)) {
+        if (lycon->block.advance_y > start_advance_y) {
+            span_is_multi_line = true;
         }
     }
 

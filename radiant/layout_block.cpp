@@ -2307,17 +2307,6 @@ static float apply_text_box_trim(ViewBlock* block) {
     return total_trim;
 }
 
-static bool inline_span_has_multiple_child_y(ViewSpan* span) {
-    if (!span) return false;
-    View* first = span->first_placed_child();
-    if (!first) return false;
-    float first_y = first->y;
-    for (View* child = first->next(); child; child = child->next()) {
-        if (child->view_type != RDT_VIEW_NONE && child->y != first_y) return true;
-    }
-    return false;
-}
-
 static bool block_recompute_view_is_out_of_flow(ViewBlock* block) {
     return block && block->position &&
         (block->position->position == CSS_VALUE_ABSOLUTE ||
@@ -2390,7 +2379,7 @@ static void recompute_inline_descendant_bounds(View* view, FontHandle* fallback_
         if (!inline_span_has_recomputable_child_box(span)) return;
         if (inline_span_has_inline_level_atomic_child_for_recompute(span)) return;
         if (inline_span_has_in_flow_block_child_for_recompute(span)) return;
-        compute_span_bounding_box(span, inline_span_has_multiple_child_y(span), fallback_fh);
+        compute_span_bounding_box(span, inline_span_has_multiple_line_fragments(span), fallback_fh);
     }
 }
 
