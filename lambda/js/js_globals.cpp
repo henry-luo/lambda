@@ -1258,6 +1258,70 @@ extern "C" Item js_performance_now(void) {
     return (Item){.item = d2it(fp)};
 }
 
+static Item js_performance_observer_string(const char* str) {
+    return (Item){.item = s2it(heap_create_name(str, (int)strlen(str)))};
+}
+
+static Item js_performance_observer_entries(void) {
+    Item entry = js_new_object();
+    js_property_set(entry, js_performance_observer_string("entryType"),
+        js_performance_observer_string("layout-shift"));
+    js_property_set(entry, js_performance_observer_string("name"),
+        js_performance_observer_string(""));
+    js_property_set(entry, js_performance_observer_string("startTime"),
+        (Item){.item = i2it(0)});
+    js_property_set(entry, js_performance_observer_string("duration"),
+        (Item){.item = i2it(0)});
+    js_property_set(entry, js_performance_observer_string("value"),
+        (Item){.item = i2it(0)});
+    js_property_set(entry, js_performance_observer_string("hadRecentInput"),
+        (Item){.item = b2it(true)});
+
+    Item entries = js_array_new(0);
+    js_array_push(entries, entry);
+    return entries;
+}
+
+static Item js_performance_observer_list_get_entries(void) {
+    return js_performance_observer_entries();
+}
+
+static Item js_performance_observer_take_records(void) {
+    return js_performance_observer_entries();
+}
+
+static Item js_performance_observer_disconnect(void) {
+    return make_js_undefined();
+}
+
+static Item js_performance_observer_observe(void) {
+    Item observer = js_get_this();
+    Item callback = js_property_get(observer,
+        js_performance_observer_string("__lambda_performance_observer_callback"));
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+
+    Item list = js_new_object();
+    js_property_set(list, js_performance_observer_string("getEntries"),
+        js_new_function((void*)js_performance_observer_list_get_entries, 0));
+    Item args[1] = { list };
+    js_call_function(callback, observer, args, 1);
+    return make_js_undefined();
+}
+
+extern "C" Item js_performance_observer_new(Item callback) {
+    Item observer = js_new_object();
+    js_property_set(observer,
+        js_performance_observer_string("__lambda_performance_observer_callback"),
+        callback);
+    js_property_set(observer, js_performance_observer_string("observe"),
+        js_new_function((void*)js_performance_observer_observe, 1));
+    js_property_set(observer, js_performance_observer_string("disconnect"),
+        js_new_function((void*)js_performance_observer_disconnect, 0));
+    js_property_set(observer, js_performance_observer_string("takeRecords"),
+        js_new_function((void*)js_performance_observer_take_records, 0));
+    return observer;
+}
+
 // Date.now() — returns milliseconds since Unix epoch
 static int64_t js_date_days_from_civil(int64_t year, unsigned month, unsigned day);
 
@@ -14515,6 +14579,7 @@ extern "C" Item js_get_global_this() {
         // globalThis.performance (basic stub with now())
         {
             extern Item js_performance_now(void);
+            extern Item js_performance_observer_new(Item callback);
             Item perf = js_new_object();
             js_property_set(perf, make_string_item("now"),
                 js_new_function((void*)js_performance_now, 0));
@@ -14524,6 +14589,14 @@ extern "C" Item js_get_global_this() {
             js_property_set(perf, make_string_item("timeOrigin"), (Item){.item = d2it(origin)});
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("performance", 11))}, perf);
+            Item perf_observer = js_new_function(
+                (void*)js_performance_observer_new, 1);
+            Item supported_types = js_array_new(0);
+            js_array_push(supported_types, make_string_item("layout-shift"));
+            js_property_set(perf_observer, make_string_item("supportedEntryTypes"),
+                supported_types);
+            js_property_set(js_global_this_obj,
+                make_string_item("PerformanceObserver"), perf_observer);
         }
 
         // globalThis.MessageChannel / MessagePort stubs

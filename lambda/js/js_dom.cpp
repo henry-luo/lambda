@@ -179,6 +179,7 @@ static Item js_document_default_view = {.item = ITEM_NULL};
 static Item js_document_title_value = {.item = ITEM_NULL};
 static bool js_document_design_mode = false;
 static bool js_document_open_invalid_for_exec_command = false;
+static bool js_document_style_with_css = false;
 static DomElement* js_document_active_element = nullptr;
 
 // Cached document.fonts object for the FontFaceSet ready shim.
@@ -736,6 +737,12 @@ static bool js_dom_exec_command_is_color_font(const char* cmd) {
         strcasecmp(cmd, "fontSize") == 0;
 }
 
+static bool js_dom_exec_command_is_style_mode(const char* cmd) {
+    if (!cmd) return false;
+    return strcasecmp(cmd, "styleWithCSS") == 0 ||
+        strcasecmp(cmd, "useCSS") == 0;
+}
+
 static bool js_dom_exec_command_is_cleanup_selection(const char* cmd) {
     if (!cmd) return false;
     return strcasecmp(cmd, "removeFormat") == 0 ||
@@ -815,7 +822,30 @@ static bool js_dom_exec_command_is_native(const char* cmd) {
 
 static bool js_dom_exec_command_is_supported(const char* cmd) {
     if (!cmd) return false;
-    return js_dom_exec_command_is_native(cmd);
+    return js_dom_exec_command_is_native(cmd) ||
+        js_dom_exec_command_is_style_mode(cmd);
+}
+
+static bool js_dom_exec_command_style_mode_arg(Item value, bool default_value) {
+    if (is_js_undefined(value) || value.item == ITEM_NULL) return default_value;
+    if (get_type_id(value) == LMD_TYPE_BOOL) return it2b(value);
+    const char* s = fn_to_cstr(value);
+    if (s && strcasecmp(s, "false") == 0) return false;
+    return true;
+}
+
+static Item js_dom_exec_command_style_mode(const char* cmd,
+                                           Item* args,
+                                           int argc) {
+    if (!js_dom_exec_command_is_style_mode(cmd)) return (Item){.item = ITEM_FALSE};
+    bool enabled = argc >= 3
+        ? js_dom_exec_command_style_mode_arg(args[2], true)
+        : true;
+    if (strcasecmp(cmd, "useCSS") == 0) enabled = !enabled;
+    js_document_style_with_css = enabled;
+    log_debug("js_dom_exec_command_style_mode: command=%s styleWithCSS=%d",
+              cmd ? cmd : "", js_document_style_with_css ? 1 : 0);
+    return (Item){.item = ITEM_TRUE};
 }
 
 static bool js_dom_exec_command_map_intent(const char* cmd,
@@ -1691,6 +1721,7 @@ extern "C" void js_dom_batch_reset() {
     js_document_title_value = (Item){.item = ITEM_NULL};
     js_document_design_mode = false;
     js_document_open_invalid_for_exec_command = false;
+    js_document_style_with_css = false;
     js_document_active_element = nullptr;
     js_document_fonts_value = (Item){.item = ITEM_NULL};
     _js_current_document = nullptr;
@@ -2009,6 +2040,8 @@ void js_dom_register_named_elements(DomElement* root) {
     register_named_elements_recursive(root, global);
 }
 
+static void js_dom_install_window_frames_global(void);
+
 // ============================================================================
 // DOM Context Management
 // ============================================================================
@@ -2036,6 +2069,7 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         }
         // install window.getSelection() global
         js_dom_selection_install_globals();
+        js_dom_install_window_frames_global();
         // install FormData constructor
         extern void js_formdata_install_globals(void);
         js_formdata_install_globals();
@@ -2793,6 +2827,39 @@ extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
 }
 extern "C" Item js_iframe_get_content_window(DomElement* iframe) {
     return js_iframe_get_content_document(iframe);
+}
+
+static void js_dom_collect_frame_windows(DomElement* elem, Item frames) {
+    if (!elem) return;
+    if (elem->tag_name && strcmp(elem->tag_name, "iframe") == 0) {
+        js_array_push(frames, js_iframe_get_content_window(elem));
+    }
+    DomNode* child = elem->first_child;
+    while (child) {
+        if (child->is_element()) {
+            js_dom_collect_frame_windows(child->as_element(), frames);
+        }
+        child = child->next_sibling;
+    }
+}
+
+static void js_dom_install_window_frames_global(void) {
+    Item frames = js_array_new(0);
+    DomDocument* doc = _js_main_document ? _js_main_document : _js_current_document;
+    if (doc && doc->root) {
+        js_dom_collect_frame_windows(doc->root, frames);
+    }
+    int64_t length = js_array_length(frames);
+    Item length_item = (Item){.item = i2it(length)};
+    Item global = js_get_global_this();
+    js_property_set(global, js_string_key("frames"), frames);
+    js_property_set(global, js_string_key("length"), length_item);
+
+    Item window = js_property_get(global, js_string_key("window"));
+    if (get_type_id(window) == LMD_TYPE_MAP) {
+        js_property_set(window, js_string_key("frames"), frames);
+        js_property_set(window, js_string_key("length"), length_item);
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -5209,9 +5276,27 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     if (strcmp(method, "reload") == 0) {
         return make_js_undefined();
     }
+    if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
+        return make_js_undefined();
+    }
 
     if (strcmp(method, "open") == 0) {
         js_document_open_invalid_for_exec_command = true;
+        DocState* state = doc->state ? doc->state : js_dom_current_state();
+        if (state) {
+            const char* exc = nullptr;
+            if (!state_store_set_selection(state, NULL, NULL, &exc)) {
+                log_debug("js_document_open: selection clear rejected: %s",
+                          exc ? exc : "?");
+            }
+        }
+        DomElement* body = document_body_element(doc);
+        if (body) {
+            clear_element_children_for_navigation(body);
+            js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
+                                   (DomNode*)body,
+                                   (DomNode*)body->parent);
+        }
         return js_get_document_object_value();
     }
     if (strcmp(method, "close") == 0) {
@@ -5536,6 +5621,9 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     if (strcmp(method, "execCommand") == 0) {
         const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
         js_dom_exec_command_call_preflight(args, argc);
+        if (js_dom_exec_command_is_style_mode(cmd)) {
+            return js_dom_exec_command_style_mode(cmd, args, argc);
+        }
         if (js_dom_exec_command_uses_helper_first(cmd)) {
             Item handled = js_dom_exec_command_call_helper(args, argc);
             if (js_is_truthy(handled)) return handled;
@@ -5560,7 +5648,9 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     if (strcmp(method, "queryCommandEnabled") == 0) {
         const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
         bool enabled = false;
-        if (cmd && js_dom_exec_command_is_native(cmd)) {
+        if (cmd && js_dom_exec_command_is_style_mode(cmd)) {
+            enabled = true;
+        } else if (cmd && js_dom_exec_command_is_native(cmd)) {
             enabled = js_document_design_mode ||
                 js_dom_exec_command_has_rich_target();
         }
@@ -5569,6 +5659,14 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     if (strcmp(method, "queryCommandIndeterm") == 0 ||
         strcmp(method, "queryCommandState") == 0) {
         const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
+        if (strcmp(method, "queryCommandState") == 0 &&
+            cmd && strcasecmp(cmd, "styleWithCSS") == 0) {
+            return (Item){.item = b2it(js_document_style_with_css)};
+        }
+        if (strcmp(method, "queryCommandState") == 0 &&
+            cmd && strcasecmp(cmd, "useCSS") == 0) {
+            return (Item){.item = ITEM_FALSE};
+        }
         if (strcmp(method, "queryCommandState") == 0 &&
             js_dom_exec_command_is_inline_format(cmd)) {
             return (Item){.item = b2it(js_dom_exec_command_query_inline_state(cmd))};
@@ -6006,6 +6104,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
         "createDocumentFragment", "importNode", "adoptNode",
         "open", "close", "write", "writeln",
         "addEventListener", "removeEventListener",
+        "focus", "blur",
         "createRange", "getSelection",
         "createEvent",
         // CE-6 (§9): legacy editing APIs we deliberately retain for feature
@@ -9899,6 +9998,14 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             return value;
         }
 
+        const char* string_attr = nullptr;
+        if (_is_string_reflected(elem, prop, &string_attr)) {
+            const char* s = js_dom_to_attr_cstr(value);
+            dom_element_set_attribute(elem, string_attr, s);
+            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            return value;
+        }
+
         // <input>.type setter — lowercase, fall back to "text" for unknown.
         if (strcmp(prop, "type") == 0 && _is_tag(elem, "input")) {
             const char* s = fn_to_cstr(value);
@@ -9917,48 +10024,15 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         }
     }
 
-    // generic property set — store as expando AND as HTML attribute when possible
-    // This allows `element.myProp = someObj` to be stored and retrieved as JS values,
-    // while still reflecting string/bool values to the DOM attributes.
-    TypeId val_type = get_type_id(value);
-
-    // always store in expando map for JS-level retrieval
+    // Generic property set: arbitrary JS properties on DOM nodes are expandos.
+    // Real attribute reflection is handled by the explicit reflected setters
+    // above, and setAttribute() remains the DOM attribute mutation path.
     {
         Item exp_map = expando_get_or_create_map((DomNode*)elem);
         if (exp_map.item != ITEM_NULL) {
             Item key = (Item){.item = s2it(heap_create_name(prop))};
             js_property_set(exp_map, key, value);
         }
-    }
-
-    // also reflect to HTML attributes for string/bool/number values
-    if (val_type == LMD_TYPE_BOOL) {
-        bool is_true = (value.item & 0xFF) != 0;
-        if (is_true) {
-            dom_element_set_attribute(elem, prop, "");
-        } else {
-            dom_element_remove_attribute(elem, prop);
-        }
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
-        return value;
-    }
-    char nbuf[64];
-    const char* val_str = nullptr;
-    if (val_type == LMD_TYPE_INT) {
-        snprintf(nbuf, sizeof(nbuf), "%lld", (long long)it2i(value));
-        val_str = nbuf;
-    } else if (val_type == LMD_TYPE_FLOAT) {
-        double dv = it2d(value);
-        long long iv = (long long)dv;
-        if ((double)iv == dv) snprintf(nbuf, sizeof(nbuf), "%lld", iv);
-        else snprintf(nbuf, sizeof(nbuf), "%g", dv);
-        val_str = nbuf;
-    } else {
-        val_str = fn_to_cstr(value);
-    }
-    if (val_str && *val_str) {
-        dom_element_set_attribute(elem, prop, val_str);
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
     }
     return value;
 }
@@ -11762,10 +11836,18 @@ static Item js_history_noop(Item arg) {
     return make_js_undefined();
 }
 
+static Item js_window_noop(void) {
+    return make_js_undefined();
+}
+
 static void js_dom_install_window_location_history_globals(void) {
     Item global = js_get_global_this();
     Item doc_proxy = js_get_document_object_value();
     js_property_set(global, js_string_key("location"), doc_proxy);
+    js_property_set(global, js_string_key("focus"),
+        js_new_function((void*)js_window_noop, 0));
+    js_property_set(global, js_string_key("blur"),
+        js_new_function((void*)js_window_noop, 0));
 
     Item history = js_new_object();
     js_property_set(history, js_string_key("pushState"),
@@ -11785,6 +11867,10 @@ static void js_dom_install_window_location_history_globals(void) {
     if (get_type_id(window) == LMD_TYPE_MAP) {
         js_property_set(window, js_string_key("location"), doc_proxy);
         js_property_set(window, js_string_key("history"), history);
+        js_property_set(window, js_string_key("focus"),
+            js_new_function((void*)js_window_noop, 0));
+        js_property_set(window, js_string_key("blur"),
+            js_new_function((void*)js_window_noop, 0));
     }
 }
 
