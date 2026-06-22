@@ -14500,6 +14500,18 @@ extern "C" Item js_get_global_this() {
                 js_new_function((void*)js_text_decoder_new, 1));
         }
 
+        // Web Streams constructors as globals
+        {
+            extern Item js_readable_stream_new(void);
+            extern Item js_writable_stream_new(void);
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("ReadableStream", 14))},
+                js_new_function((void*)js_readable_stream_new, 0));
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("WritableStream", 14))},
+                js_new_function((void*)js_writable_stream_new, 0));
+        }
+
         // globalThis.atob / globalThis.btoa
         {
             extern Item js_atob(Item);

@@ -72,6 +72,9 @@ static Item stats_proto = {0};
 extern "C" Item js_get_this(void);
 extern "C" Item js_date_new_from(Item value);
 extern "C" int js_check_exception(void);
+extern "C" Item js_readable_new(Item opts);
+extern "C" Item js_readable_push(Item self, Item chunk);
+extern "C" Item js_stream_destroy(Item self, Item err);
 
 extern "C" Item js_stats_isFile() {
     Item mode_val = js_property_get(js_get_this(), make_string_item("__mode"));
@@ -373,19 +376,46 @@ extern "C" Item js_fs_readstream_pipe(Item dest_item) {
     return dest_item;
 }
 
+static Item js_fs_readstream_close(void) {
+    return js_stream_destroy(js_get_this(), make_js_undefined());
+}
+
+static Item js_fs_readstream_end_later(Item stream) {
+    Item destroyed = js_property_get(stream, make_string_item("__destroyed__"));
+    if (get_type_id(destroyed) == LMD_TYPE_BOOL && it2b(destroyed)) {
+        return make_js_undefined();
+    }
+    js_readable_push(stream, ItemNull);
+    return make_js_undefined();
+}
+
 extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
     (void)options_item;
     if (get_type_id(path_item) != LMD_TYPE_STRING) {
         return js_throw_invalid_arg_type("path", "string", path_item);
     }
 
-    Item stream = js_new_object();
+    Item stream = js_readable_new(ItemNull);
+    if (stream.item == 0) return ItemNull;
     js_property_set(stream, make_string_item("__readstream_path__"), path_item);
     js_property_set(stream, make_string_item("__readstream_drained__"), (Item){.item = b2it(false)});
-    js_property_set(stream, make_string_item("readable"), (Item){.item = b2it(true)});
-    js_property_set(stream, make_string_item("on"), js_new_function((void*)js_fs_readstream_on, 2));
-    js_property_set(stream, make_string_item("once"), js_new_function((void*)js_fs_readstream_on, 2));
-    js_property_set(stream, make_string_item("pipe"), js_new_function((void*)js_fs_readstream_pipe, 1));
+    js_property_set(stream, make_string_item("close"), js_new_function((void*)js_fs_readstream_close, 0));
+
+    char path_buf[1024];
+    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+
+    Item chunk = js_fs_read_file_buffer(path);
+    if (js_check_exception()) {
+        Item err = js_clear_exception();
+        js_stream_destroy(stream, err);
+        return stream;
+    }
+
+    js_readable_push(stream, chunk);
+    Item end_fn = js_bind_function(js_new_function((void*)js_fs_readstream_end_later, 1),
+                                   make_js_undefined(), &stream, 1);
+    js_setImmediate(end_fn);
     return stream;
 }
 
