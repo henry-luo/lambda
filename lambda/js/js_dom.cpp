@@ -6776,7 +6776,7 @@ static Item _build_validity_state(DomElement* elem) {
                 char tmp[64]; size_t vl = strlen(val);
                 bool space_sep = false;
                 if (vl < sizeof(tmp)) {
-                    strcpy(tmp, val);
+                    snprintf(tmp, sizeof(tmp), "%s", val);
                     // require exactly one space or T at position 10
                     if (vl >= 11 && tmp[10] == ' ' && tmp[11] != ' ') {
                         tmp[10] = 'T'; space_sep = true;

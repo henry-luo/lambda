@@ -256,18 +256,18 @@ Item MarkEditor::get_version(int version_num) const {
 
 void MarkEditor::list_versions() const {
     if (mode_ != EDIT_MODE_IMMUTABLE) {
-        printf("Version control not available in inline mode\n");
+        printf("Version control not available in inline mode\n"); // PRINTF_OK: user-facing CLI output.
         return;
     }
 
     if (!version_head_) {
-        printf("No versions committed yet\n");
+        printf("No versions committed yet\n"); // PRINTF_OK: user-facing CLI output.
         return;
     }
 
     EditVersion* v = version_head_;
     while (v) {
-        printf("Version %d: %s %s\n",
+        printf("Version %d: %s %s\n", // PRINTF_OK: user-facing version listing.
                v->version_number,
                v->description ? v->description : "(no description)",
                v == current_version_ ? "<- current" : "");

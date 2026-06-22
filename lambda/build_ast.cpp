@@ -7819,7 +7819,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                     log_error("Error: failed to load module '%.*s' (resolved: %s, from: %s)",
                         (int)ast_node->module.length, ast_node->module.str, buf->str,
                         tp->reference ? tp->reference : "<unknown>");
-                    fprintf(stderr, "Error: Failed to import module '%.*s'\n"
+                    fprintf(stderr, "Error: Failed to import module '%.*s'\n" // PRINTF_OK: user-facing CLI import error.
                         "  Resolved path: %s\n  Importing script: %s\n",
                         (int)ast_node->module.length, ast_node->module.str, buf->str,
                         tp->reference ? tp->reference : "<unknown>");
@@ -7915,7 +7915,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                 #endif
                     log_error("Error: failed to load module '%.*s' (resolved: %s)",
                         (int)ast_node->module.length, ast_node->module.str, buf->str);
-                    fprintf(stderr, "Error: Failed to import module '%.*s'\n"
+                    fprintf(stderr, "Error: Failed to import module '%.*s'\n" // PRINTF_OK: user-facing CLI import error.
                         "  Resolved path: %s\n",
                         (int)ast_node->module.length, ast_node->module.str, buf->str);
                 #ifndef SIMPLE_SCHEMA_PARSER

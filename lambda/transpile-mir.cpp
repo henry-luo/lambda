@@ -6,6 +6,7 @@
 #include "template_registry.h"
 #include "js/js_runtime.h"
 #include "../lib/log.h"
+#include "../lib/lambda_alloca.h"
 #include "../lib/memtrack.h"
 #include "../lib/mem_factory.h"
 #include "../lib/url.h"
@@ -639,7 +640,7 @@ static MIR_reg_t emit_vararg_call(MirTranspiler* mt, const char* fn_name,
 
     // Build call: proto, import, [result], mandatory, varargs...
     int nops = (nres > 0 ? 3 : 2) + 1 + n_varargs; // +1 for mandatory arg
-    MIR_op_t* ops = (MIR_op_t*)alloca(nops * sizeof(MIR_op_t));
+    MIR_op_t* ops = LAMBDA_ALLOCA(nops, MIR_op_t);
     int oi = 0;
     ops[oi++] = MIR_new_ref_op(mt->ctx, proto);
     ops[oi++] = MIR_new_ref_op(mt->ctx, imp);
@@ -688,7 +689,7 @@ static MIR_reg_t emit_vararg_call_2(MirTranspiler* mt, const char* fn_name,
     }
 
     int nops = (nres > 0 ? 3 : 2) + 2 + n_varargs; // +2 for m1 and m2
-    MIR_op_t* ops = (MIR_op_t*)alloca(nops * sizeof(MIR_op_t));
+    MIR_op_t* ops = LAMBDA_ALLOCA(nops, MIR_op_t);
     int oi = 0;
     ops[oi++] = MIR_new_ref_op(mt->ctx, proto);
     ops[oi++] = MIR_new_ref_op(mt->ctx, imp);
@@ -4525,8 +4526,8 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
             MIR_T_P, MIR_new_reg_op(mt->ctx, emit_load_module_type_list(mt)));
     }
 
-    MIR_op_t* val_ops = (MIR_op_t*)alloca(val_count * sizeof(MIR_op_t));
-    int* val_root_slots = (int*)alloca(val_count * sizeof(int));
+    MIR_op_t* val_ops = LAMBDA_ALLOCA(val_count, MIR_op_t);
+    int* val_root_slots = LAMBDA_ALLOCA(val_count, int);
     item = map_node->item;
     int vi = 0;
     while (item) {
@@ -4604,8 +4605,8 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
         while (scan) { attr_count++; scan = scan->next; }
 
         // Evaluate attribute values
-        MIR_op_t* attr_ops = (MIR_op_t*)alloca(attr_count * sizeof(MIR_op_t));
-        int* attr_roots = (int*)alloca(attr_count * sizeof(int));
+        MIR_op_t* attr_ops = LAMBDA_ALLOCA(attr_count, MIR_op_t);
+        int* attr_roots = LAMBDA_ALLOCA(attr_count, int);
         for (int i = 0; i < attr_count; i++) attr_roots[i] = -1;
         int ai = 0;
         scan = item;
@@ -4656,8 +4657,8 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
                 AstNode* cscan = content_item;
                 while (cscan) { content_count++; cscan = cscan->next; }
 
-                MIR_op_t* content_ops = (MIR_op_t*)alloca(content_count * sizeof(MIR_op_t));
-                int* content_roots = (int*)alloca(content_count * sizeof(int));
+                MIR_op_t* content_ops = LAMBDA_ALLOCA(content_count, MIR_op_t);
+                int* content_roots = LAMBDA_ALLOCA(content_count, int);
                 for (int i = 0; i < content_count; i++) content_roots[i] = -1;
                 int ci = 0;
                 cscan = content_item;
@@ -6327,7 +6328,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             MIR_item_t imp = MIR_new_import(mt->ctx, sys_fn_name);
 
             int nops = 3 + ai;
-            MIR_op_t* ops = (MIR_op_t*)alloca(nops * sizeof(MIR_op_t));
+            MIR_op_t* ops = LAMBDA_ALLOCA(nops, MIR_op_t);
             ops[0] = MIR_new_ref_op(mt->ctx, proto);
             ops[1] = MIR_new_ref_op(mt->ctx, imp);
             MIR_reg_t result = new_reg(mt, "sys", mir_ret_type);
@@ -8509,7 +8510,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             return o;
         }
 
-        MIR_op_t* val_ops = (MIR_op_t*)alloca(val_count * sizeof(MIR_op_t));
+        MIR_op_t* val_ops = LAMBDA_ALLOCA(val_count, MIR_op_t);
         item = obj_lit->item;
         int vi = 0;
         while (item) {

@@ -224,7 +224,7 @@ static void event_log_editing_history_named(DocState* state,
                                             const EditingSurface* surface,
                                             const char* input_type_name,
                                             const char* action,
-                                            uint32_t depth,
+                                            uint32_t depth, // UNUSED_DEPTH_OK: undo-stack depth logged as a JSON field.
                                             uint32_t cursor,
                                             bool did_restore) {
     if (!state || !event_state_log_enabled(state->active_event_log)) return;
@@ -254,7 +254,7 @@ static void event_log_editing_history(DocState* state,
                                       const EditingSurface* surface,
                                       const InputIntent* intent,
                                       const char* action,
-                                      uint32_t depth,
+                                      uint32_t depth, // UNUSED_DEPTH_OK: forwarded to the JSON record below.
                                       uint32_t cursor,
                                       bool did_restore) {
     event_log_editing_history_named(state, surface,
@@ -265,7 +265,7 @@ static void event_log_editing_history(DocState* state,
 extern "C" void radiant_text_edit_history_notify(DomElement* elem,
                                                  const char* action,
                                                  const char* input_type,
-                                                 uint32_t depth,
+                                                 uint32_t depth, // UNUSED_DEPTH_OK: undo-stack depth (output data field via the log).
                                                  uint32_t cursor) {
     if (!elem || !tc_is_text_control(elem)) return;
     FormControlProp* form = elem->form;

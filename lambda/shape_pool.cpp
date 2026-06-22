@@ -1,6 +1,7 @@
 #include "shape_pool.hpp"
 #include "lambda-data.hpp"
 #include "../lib/log.h"
+#include "../lib/lambda_alloca.h"
 #include "../lib/string.h"
 #include <string.h>
 
@@ -286,8 +287,8 @@ ShapeEntry* shape_pool_get_element_shape(
     }
     
     // Build signature with element name + attributes
-    const char** sig_names = (const char**)alloca(signature_count * sizeof(char*));
-    TypeId* sig_types = (TypeId*)alloca(signature_count * sizeof(TypeId));
+    const char** sig_names = LAMBDA_ALLOCA(signature_count, const char*);
+    TypeId* sig_types = LAMBDA_ALLOCA(signature_count, TypeId);
     
     // First entry in signature is element name with special type marker
     sig_names[0] = element_name;

@@ -1785,7 +1785,7 @@ FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseC
     // If family not found, try lazy loading ALL placeholder fonts that match
     if (!family && db->all_fonts->length > 0) {
         #ifdef FONT_DEBUG_VERBOSE
-        printf("DEBUG: Family '%s' not found, attempting lazy loading\n", criteria->family_name);
+        log_debug("font_config: family '%s' not found, attempting lazy loading", criteria->family_name);
         #endif
 
         // Parse ALL placeholder fonts matching the requested family to get all variants

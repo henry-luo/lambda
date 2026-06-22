@@ -58,7 +58,7 @@ extern "C" void log_mem_stage(const char* stage) {
     if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &cnt) != KERN_SUCCESS) {
         return;
     }
-    fprintf(stderr, "[MEMSTAGE] %-28s footprint=%6lluMB peak=%6lluMB resident=%6lluMB\n",
+    fprintf(stderr, "[MEMSTAGE] %-28s footprint=%6lluMB peak=%6lluMB resident=%6lluMB\n", // PRINTF_OK: env-gated VIEW_MEM_STAGES dev profiler.
             stage,
             (unsigned long long)(info.phys_footprint / (1024 * 1024)),
             (unsigned long long)(info.ledger_phys_footprint_peak / (1024 * 1024)),

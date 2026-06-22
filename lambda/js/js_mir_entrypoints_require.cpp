@@ -1230,7 +1230,7 @@ char* js_wrap_cjs_source(const char* source, const char* filename) {
     int offset = snprintf(wrapped, total, prefix_fmt, filename_buf, dir_len, dir_str);
     memcpy(wrapped + offset, source, src_len);
     offset += (int)src_len;
-    strcpy(wrapped + offset, suffix);
+    snprintf(wrapped + offset, total - (size_t)offset, "%s", suffix);
     return wrapped;
 }
 

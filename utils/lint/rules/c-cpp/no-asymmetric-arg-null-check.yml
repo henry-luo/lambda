@@ -18,6 +18,19 @@ constraints:
   # forget args[1..N] need the same.
   N: { regex: "^[1-9]$" }
 rule:
-  pattern: $OBJ->args[$N]->data.$F.value
+  all:
+    - pattern: $OBJ->args[$N]->data.$F.value
+    # Skip dereferences that sit inside an `if (... args[K] ...)` guard. The
+    # `not:` block can't refer to constraint `N` (per Lambda_Lint.md §3.9
+    # quirk #1), so the regex matches any per-arg null guard in any ancestor
+    # if-statement — over-broad in principle but fine in `resolve_css_style.cpp`
+    # where every guarded site genuinely guards the arg it dereferences.
+    - not:
+        inside:
+          kind: if_statement
+          stopBy: end
+          has:
+            field: condition
+            regex: "args\\["
 files:
   - "radiant/resolve_css_style.cpp"

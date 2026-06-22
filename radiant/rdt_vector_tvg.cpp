@@ -5,6 +5,7 @@
 #include "rdt_vector.hpp"
 #include "render_svg_inline.hpp"
 #include "../lib/log.h"
+#include "../lib/lambda_alloca.h"
 #include "../lib/mem_factory.h"
 #include <thorvg_capi.h>
 #include "../lib/mem.h"
@@ -1268,7 +1269,7 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
         }
         Tvg_Gradient grad = tvg_linear_gradient_new();
         tvg_linear_gradient_set(grad, tx1, ty1, tx2, ty2);
-        Tvg_Color_Stop* tvg_stops = (Tvg_Color_Stop*)alloca(stop_count * sizeof(Tvg_Color_Stop));
+        Tvg_Color_Stop* tvg_stops = LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
         for (int i = 0; i < stop_count; i++) {
             tvg_stops[i].offset = stops[i].offset;
             tvg_stops[i].r = stops[i].r;
@@ -1308,7 +1309,7 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
     Tvg_Gradient grad = tvg_linear_gradient_new();
     tvg_linear_gradient_set(grad, x1, y1, x2, y2);
 
-    Tvg_Color_Stop* tvg_stops = (Tvg_Color_Stop*)alloca(stop_count * sizeof(Tvg_Color_Stop));
+    Tvg_Color_Stop* tvg_stops = LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
     for (int i = 0; i < stop_count; i++) {
         tvg_stops[i].offset = stops[i].offset;
         tvg_stops[i].r = stops[i].r;
@@ -1349,7 +1350,7 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
         }
         Tvg_Gradient grad = tvg_radial_gradient_new();
         tvg_radial_gradient_set(grad, tcx, tcy, tr, tcx, tcy, 0);
-        Tvg_Color_Stop* tvg_stops = (Tvg_Color_Stop*)alloca(stop_count * sizeof(Tvg_Color_Stop));
+        Tvg_Color_Stop* tvg_stops = LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
         for (int i = 0; i < stop_count; i++) {
             tvg_stops[i].offset = stops[i].offset;
             tvg_stops[i].r = stops[i].r;
@@ -1389,7 +1390,7 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
     Tvg_Gradient grad = tvg_radial_gradient_new();
     tvg_radial_gradient_set(grad, cx, cy, r, cx, cy, 0);
 
-    Tvg_Color_Stop* tvg_stops = (Tvg_Color_Stop*)alloca(stop_count * sizeof(Tvg_Color_Stop));
+    Tvg_Color_Stop* tvg_stops = LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
     for (int i = 0; i < stop_count; i++) {
         tvg_stops[i].offset = stops[i].offset;
         tvg_stops[i].r = stops[i].r;

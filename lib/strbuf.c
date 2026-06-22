@@ -67,8 +67,8 @@ bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity) {
     while (new_capacity < min_capacity) {
         // Check for overflow before doubling
         if (new_capacity > SIZE_MAX / 2) {
-            printf("DEBUG: Overflow detected in doubling loop - new_capacity=%zu, min_capacity=%zu\n",
-                   new_capacity, min_capacity);
+            log_debug("strbuf overflow detected in doubling loop - new_capacity=%zu, min_capacity=%zu",
+                      new_capacity, min_capacity);
             new_capacity = min_capacity; // Use minimum required instead of doubling
             break;
         }

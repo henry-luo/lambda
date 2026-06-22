@@ -5171,9 +5171,9 @@ void align_content(FlexContainerLayout* flex_layout) {
                 log_debug("ALIGN_STRETCH: container=%d, total_lines=%d, free=%d, extra_per_line=%d",
                           container_cross_size, total_lines_size, free_space, extra_per_line);
                 for (int i = 0; i < flex_layout->line_count; i++) {
-                    int old_size = flex_layout->lines[i].cross_size;
+                    float old_size = flex_layout->lines[i].cross_size;
                     flex_layout->lines[i].cross_size += extra_per_line;
-                    log_debug("ALIGN_STRETCH: line %d: %d + %d = %d",
+                    log_debug("ALIGN_STRETCH: line %d: %g + %d = %g",
                               i, old_size, extra_per_line, flex_layout->lines[i].cross_size);
                 }
             }

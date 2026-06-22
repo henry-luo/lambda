@@ -820,8 +820,8 @@ void jm_resolve_module_path(const char* base_file, const char* specifier, int sp
                        (len >= 4 && strcmp(out + len - 4, ".cjs") == 0) ||
                        (len >= 5 && strcmp(out + len - 5, ".json") == 0) ||
                        (len >= 3 && strcmp(out + len - 3, ".ls") == 0);
-        if (!has_ext && len + 3 < out_size) {
-            strcat(out, ".js");
+        if (!has_ext && len + 3 < (int)out_size) {
+            snprintf(out + len, out_size - (size_t)len, "%s", ".js");
         }
     }
 }

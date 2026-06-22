@@ -7,6 +7,7 @@
 extern "C" {
 #include "../lib/url.h"
 #include "../lib/memtrack.h"
+#include "../lib/lambda_alloca.h"
 #include "../lib/str.h"
 }
 #include <string.h>
@@ -437,7 +438,7 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
 
         FontFaceSource* sources = nullptr;
         if (src_count > 0) {
-            sources = (FontFaceSource*)alloca(src_count * sizeof(FontFaceSource));
+            sources = LAMBDA_ALLOCA(src_count, FontFaceSource);
             memset(sources, 0, src_count * sizeof(FontFaceSource));
 
             if (descriptor->src_entries && descriptor->src_count > 0) {

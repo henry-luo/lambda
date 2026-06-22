@@ -70,6 +70,10 @@ ignores:
   - "lib/log.c"                            # log infrastructure can't log itself
   - "lib/cmdedit.c"                        # command-line editor prompt + history
   - "lib/mempool.c"                        # POOLTRACE/POOLSTATS diagnostic mode
+  - "lib/hashmap.c"                        # all printfs are inside HASHMAP_TEST gate
+  - "lib/avl_tree.c"                       # printfs all in avl_tree_print debug helper
+  - "lib/test_utils_pool.c"                # test fixture setup
+  - "lib/test_utils_runtime.cpp"           # test fixture setup
   # Lambda's own s-expression dumper (Racket bridge).
   - "lambda/emit_sexpr.cpp"
   # PDF byte writer is by definition I/O-producing.

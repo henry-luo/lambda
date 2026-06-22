@@ -577,7 +577,7 @@ static bool dt_normalize_format(Item type_item, char* out, size_t out_cap) {
     out[s->len] = '\0';
     if (strcmp(out, "text") == 0) {
         if (out_cap < 11) return false;
-        strcpy(out, "text/plain");
+        snprintf(out, out_cap, "%s", "text/plain");
     }
     return true;
 }
