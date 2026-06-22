@@ -776,6 +776,7 @@ static Item js_dom_exec_command_call_helper(Item* args, int argc) {
     if (get_type_id(helper) == LMD_TYPE_FUNC) {
         Item guard_key = (Item){.item = s2it(heap_create_name("__lambda_execCommand_helper_fallback"))};
         Item prev_guard = js_get_global_property(guard_key);
+        if (js_is_truthy(prev_guard)) return (Item){.item = ITEM_FALSE};
         js_set_global_property(guard_key, (Item){.item = ITEM_TRUE}, 0);
         Item handled = js_call_function(helper, js_get_document_object_value(), args, argc);
         js_set_global_property(guard_key, prev_guard, 0);

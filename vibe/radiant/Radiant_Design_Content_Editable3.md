@@ -1,7 +1,8 @@
 # Radiant `contenteditable` 3 - structural Chrome editing corpus plan
 
 **Date:** 2026-06-18
-**Status:** Proposal from the first all-import Chrome editing corpus measurement.
+**Status:** Active implementation - CE3-0 structured artifacts landed; CE3-H
+harness parity is the next frontier.
 **Builds on:** `Radiant_Design_Content_Editable2.md`
 **Scope:** Turn the imported Chromium `editing/` corpus from a mostly skipped
 gauge into a staged structural conformance program for Radiant editing.
@@ -41,6 +42,73 @@ Additional signal from the log:
 The all-import result is not a quality gate yet. It is a map of missing
 capabilities. The failure count is dominated by harness and structural feature
 gaps, not one large single bug.
+
+### 1.1 Current CE3-0 snapshot
+
+**Updated:** 2026-06-22
+
+CE3-0 now emits structured artifacts for both the default RUNNABLE gauge and
+the all-import local gauge:
+
+- `temp/chrome_editing_results.jsonl`
+- `temp/chrome_editing_summary.json`
+
+The JSONL artifact records each case's relative path, bucket, flavor tags,
+outcome, classifier, assertion counts, exit code, timeout/abort flags, elapsed
+time, output size, and first failure line. The summary artifact records totals,
+classifier counts, bucket counts, and bucket/classifier cross-counts.
+
+Default RUNNABLE gauge:
+
+```bash
+./test/test_chrome_editing_gtest.exe --gtest_brief=1
+```
+
+| Result | Count |
+|---|---:|
+| Passed | 6 |
+| Skipped | 2745 |
+| Failed | 0 |
+
+All-import local gauge:
+
+```bash
+LAMBDA_CHROME_EDITING_RUN_ALL=1 \
+LAMBDA_CHROME_EDITING_TIMEOUT=5 \
+LAMBDA_CHROME_EDITING_JOBS=9 \
+./test/test_chrome_editing_gtest.exe --gtest_brief=1
+```
+
+| Result | Count |
+|---|---:|
+| Passed | 192 |
+| Skipped | 119 |
+| Failed | 2440 |
+
+Classifier summary from the all-import run:
+
+| Classifier | Count |
+|---|---:|
+| assertion mismatch | 1373 |
+| harness missing API | 510 |
+| unsupported internals | 268 |
+| passed | 192 |
+| no results | 138 |
+| process abort | 102 |
+| unsupported layout/visual | 70 |
+| skipped | 49 |
+| timeout | 35 |
+| unsupported shadow | 14 |
+
+Implementation note:
+
+- The two RUNNABLE deletion cases were failing with recursive
+  `document.execCommand()` helper fallback. Native `execCommand` now honors the
+  helper-fallback guard, so a JS helper can delegate back to the native command
+  once instead of re-entering itself.
+- Added a focused DOM JS regression for `delete` and `forwardDelete` helper
+  fallback, and refreshed the justify regression to match the current
+  `text-align` style mutation contract.
 
 ---
 
@@ -327,6 +395,15 @@ Exit:
 - final result table can be regenerated from a single command;
 - no failures are hidden by corrupt interleaved output.
 
+Implementation status:
+
+- **Landed 2026-06-22.** The runner writes `temp/chrome_editing_results.jsonl`
+  and `temp/chrome_editing_summary.json`, classifies every case, and preserves
+  the CI-safe default RUNNABLE mode.
+- The all-import command completes under the documented timeout/jobs settings.
+  The command still exits nonzero because all-import is a red local gauge, not
+  a quality gate.
+
 ### CE3-H - harness parity first
 
 **Goal:** reduce false negatives before engine work.
@@ -610,9 +687,9 @@ Phase gate:
 
 ## 6. Immediate Next Work
 
-1. **CE3-0:** make the runner emit structured result data for the all-import
-   run. The final summary is useful, but failure classification should not
-   require scraping interleaved console logs.
+1. **CE3-H:** drive the next harness work from
+   `temp/chrome_editing_summary.json`, starting with the 510
+   `harness_missing_api` cases and the 138 `no_results` cases.
 2. **CE3-H:** finish the portable `assert_selection` subset. This unlocks the
    clearest modern corpus pages and prevents harness errors from masking engine
    bugs.
@@ -620,7 +697,7 @@ Phase gate:
    layout-test pages from failing with missing helper functions.
 4. **CE3-S:** fix sample selection for documentElement/body-null, text controls,
    element/table boundaries, and backward selections.
-5. **CE3-I:** pick the top recurring DocState invariant from the 189 aborts and
+5. **CE3-I:** pick the top recurring DocState invariant from the 102 aborts and
    reduce it to a focused JS regression before broadening RUNNABLE.
 
 ---
