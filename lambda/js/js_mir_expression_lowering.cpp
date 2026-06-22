@@ -9591,9 +9591,27 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, id_val));
                 return jm_emit_null(mt);
             }
-            // setImmediate(callback) — schedule callback for next tick
+            // v14: setImmediate(callback, ...extra_args)
             if (nl == 12 && strncmp(n, "setImmediate", 12) == 0) {
                 MIR_reg_t cb = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                JsAstNode* extra = call->arguments ? call->arguments->next : NULL;
+                if (extra) {
+                    int ec = 0;
+                    MIR_reg_t ea[4];
+                    JsAstNode* e = extra;
+                    while (e && ec < 4) {
+                        ea[ec++] = jm_transpile_box_item(mt, e);
+                        e = e->next;
+                    }
+                    MIR_reg_t arr;
+                    if (ec == 1) arr = jm_call_1(mt, "js_pack_args_1", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]));
+                    else if (ec == 2) arr = jm_call_2(mt, "js_pack_args_2", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[1]));
+                    else if (ec == 3) arr = jm_call_3(mt, "js_pack_args_3", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[1]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[2]));
+                    else arr = jm_call_4(mt, "js_pack_args_4", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[1]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[2]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[3]));
+                    return jm_call_2(mt, "js_setImmediate_with_args", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cb),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, arr));
+                }
                 return jm_call_1(mt, "js_setImmediate", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cb));
             }

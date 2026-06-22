@@ -107,6 +107,7 @@ static bool js_stream_readable_accepts_more(Item self, Item buf);
 static bool js_stream_readable_buffer_has_string(Item buf);
 static Item js_stream_concat_decoded_chunks(Item buf, Item encoding);
 static bool js_stream_prepare_readable_chunk(Item self, Item* chunk, Item encoding);
+extern "C" Item js_readable_push(Item self, Item chunk);
 static void js_stream_flush_buffered_data(Item self);
 
 static void ensure_keys() {
@@ -416,6 +417,24 @@ static Item js_stream_after_write(Item self, Item callback, Item err) {
 static Item js_stream_make_write_callback(Item self, Item callback) {
     Item bound_args[2] = { self, callback };
     return js_bind_function(js_new_function((void*)js_stream_after_write, 3),
+                            make_js_undefined(), bound_args, 2);
+}
+
+static Item js_stream_after_transform_write(Item self, Item callback, Item err, Item data) {
+    ensure_keys();
+    bool has_error = js_stream_has_callback_error(err);
+    if (!has_error && data.item != 0 &&
+        get_type_id(data) != LMD_TYPE_UNDEFINED &&
+        get_type_id(data) != LMD_TYPE_NULL) {
+        js_readable_push(self, data);
+        if (js_check_exception()) return ItemNull;
+    }
+    return js_stream_after_write(self, callback, err);
+}
+
+static Item js_stream_make_transform_write_callback(Item self, Item callback) {
+    Item bound_args[2] = { self, callback };
+    return js_bind_function(js_new_function((void*)js_stream_after_transform_write, 4),
                             make_js_undefined(), bound_args, 2);
 }
 
@@ -2281,7 +2300,7 @@ extern "C" Item js_transform_write(Item self, Item chunk, Item encoding, Item ca
     if (get_type_id(transform_fn) == LMD_TYPE_FUNC) {
         if (!js_stream_prepare_writable_chunk(self, &chunk, &encoding)) return ItemNull;
         bool accepted = js_stream_begin_write(self, chunk);
-        Item write_cb = js_stream_make_write_callback(self, callback);
+        Item write_cb = js_stream_make_transform_write_callback(self, callback);
         Item args[3] = {chunk, encoding, write_cb};
         Item result = js_call_function(transform_fn, self, args, 3);
         // if _transform returns data, push it

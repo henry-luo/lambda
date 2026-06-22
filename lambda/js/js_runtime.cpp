@@ -11974,7 +11974,7 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     bound->builtin_id = orig->builtin_id;
     bound->flags = orig->flags; // preserve strict/arrow flags from original
     bound->flags |= JS_FUNC_FLAG_HAS_BOUND_THIS; // always mark as having bound this
-    bound->bound_this = bound_this;
+    bound->bound_this = (orig->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) ? orig->bound_this : bound_this;
     Item bound_item = (Item){.function = (Function*)bound};
     {
         Item target_key = (Item){.item = s2it(heap_create_name(JS_BOUND_TARGET_KEY, JS_BOUND_TARGET_KEY_LEN))};
@@ -11998,12 +11998,18 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
             bound->name = heap_create_name("bound ", 6);
         }
     }
-    if (bound_argc > 0 && bound_args) {
-        bound->bound_args = (Item*)pool_calloc(js_input->pool, bound_argc * sizeof(Item));
-        for (int i = 0; i < bound_argc; i++) {
-            bound->bound_args[i] = bound_args[i];
+    int orig_bound_argc = (orig->bound_args && orig->bound_argc > 0) ? orig->bound_argc : 0;
+    int new_bound_argc = (bound_argc > 0 && bound_args) ? bound_argc : 0;
+    int total_bound_argc = orig_bound_argc + new_bound_argc;
+    if (total_bound_argc > 0) {
+        bound->bound_args = (Item*)pool_calloc(js_input->pool, total_bound_argc * sizeof(Item));
+        for (int i = 0; i < orig_bound_argc; i++) {
+            bound->bound_args[i] = orig->bound_args[i];
         }
-        bound->bound_argc = bound_argc;
+        for (int i = 0; i < new_bound_argc; i++) {
+            bound->bound_args[orig_bound_argc + i] = bound_args[i];
+        }
+        bound->bound_argc = total_bound_argc;
     }
     {
         Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
