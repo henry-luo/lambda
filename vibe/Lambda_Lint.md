@@ -21,6 +21,7 @@ is in §5; per-phase design and tradeoffs in §3 (Phase 1), §6 (Phase 2), §7
 | §4 future rules | Tier-1 (high-confidence) shipped; broad rules shipped at `warning`; cross-language rules deferred pending user spec. See §5. |
 | **Phase 2 — alint structural engine** | **Shipped (§6).** `ls-test-has-golden` (CLAUDE rule 8) ports cleanly; manifest unification (Option 2) shipped. |
 | **Phase 3 — clang-tidy + libclang type-aware engine** | **Shipped (§7).** `int-cast-type-aware-decl` via tuned `bugprone-narrowing-conversions`, `int-cast-type-aware` via libclang AST walk. Hybrid: built-in for the cheap case, Python for the custom case. |
+| **Phase 4 — Retire cppcheck; hybrid unused-function check** | **Proposed (§8).** cppcheck's unique value reduces to its `unusedFunction` check. Replicate via ast-grep candidate set → ast-grep heuristic exclusions → libclang USR verification on the residue, then delete `make lint-cppcheck`. Tier placement (lint vs. lint-full) gated on measured runtime. |
 
 ## Background
 
@@ -1055,7 +1056,221 @@ investments, not the engine itself.
 
 ---
 
-## 8. Summary
+## 8. Phase 4 — Retire cppcheck; hybrid unused-function check
+
+### 8.1 Why this phase
+
+cppcheck is the last *separate* lint binary in the toolchain after Phase 3 —
+not part of `make lint` or `make lint-full`, scoped only to `lambda/`,
+never failing the build, produces its own XML report under
+`analysis-results-lint/`. Its position is the same `make tidy` was in before
+Phase 3 retired that target: a developer-reference tool, not a gate.
+
+The path forward is one of three:
+
+1. **Integrate cppcheck into `make lint`** — wire its XML output into the
+   unified NDJSON pipeline, add a `backend: cppcheck` family. The cost would
+   be similar to Phase 3's clang-tidy wiring; the benefit is bounded by
+   what cppcheck catches that the existing stack doesn't.
+2. **Keep cppcheck as-is** — leave it for developers who occasionally run it.
+   No new code, but a permanently-fragmented "what does `make lint` mean?"
+3. **Retire cppcheck entirely**, replicating its one unique capability
+   (`unusedFunction`) on the existing stack.
+
+§8.2 shows that nearly all of cppcheck's catches overlap with the
+clang-tidy `bugprone-*` / `clang-analyzer-*` families we already ship in
+Phase 3 — the only meaningful gap is dead-function detection. Path (3) is
+therefore the cleanest move: one new rule, one fewer toolchain dependency,
+one less artefact directory.
+
+### 8.2 cppcheck overlap audit
+
+Mapping cppcheck's check families to what's already in `make lint-full`:
+
+| cppcheck family | Example check | Already covered by | Notes |
+|---|---|---|---|
+| `error` | NULL deref, OOB array access, uninitialized read, double-free, leak | `tidy-clang-analyzer-core.*` | clang-analyzer is path-sensitive; cppcheck's value flow is shallower. Net: redundant. |
+| `warning` | Suspicious assignment, uninitialized var, comparison-vs-NULL after deref | `tidy-bugprone-*` + `tidy-clang-analyzer-*` | Significant overlap. Net: redundant. |
+| `style` | Redundant casts, redundant `else`, missing `override` | clang-tidy `readability-*` (currently disabled — too noisy) | Both have the same volume problem; cppcheck doesn't escape it. |
+| `performance` | `strlen` in loop bound, pass-by-value of big types | `tidy-bugprone-*` partial; `performance-*` (disabled) | Marginal unique value. |
+| `portability` | Implicit endianness, size-of-pointer assumptions | Not in our stack | Genuine gap — but the codebase is macOS/Linux focused, so the practical loss is small. |
+| `unusedFunction` | Dead functions across the whole tree | **Not in our stack** | **Genuine unique value.** Neither ast-grep, alint, nor clang-tidy ships a whole-program dead-function check. |
+| `missingInclude` | IWYU-style missing direct includes | `misc-include-cleaner` (disabled — too noisy) | Both have the noise problem. |
+
+After Phase 3 wired clang-tidy's bug-finding pass project-wide, the audit
+above is the proof that cppcheck's last load-bearing capability is exactly
+one: `unusedFunction`. Replicate that and cppcheck becomes deletable.
+
+### 8.3 The hybrid unused-function check
+
+Whole-program dead-function detection has the same shape problem as
+Phase 3's clang-tidy pass — *every* file has to be looked at to prove
+nothing calls a given function. The naive solution (libclang AST walker
+over the whole tree, two passes for definitions and references) costs the
+same ~3-4 minutes as Phase 3's bug-finding pass. We can do significantly
+better by exploiting an asymmetry: **ast-grep can cheaply prove "the name
+appears nowhere," but it cannot prove "the name is called"** (overloads,
+templates, macro-synthesized dispatch all confound it). The hybrid uses
+ast-grep for the cheap negative-proof step and falls back to libclang
+*only* for the residue.
+
+**Stage 1 — ast-grep candidate gathering** (~5 s):
+
+```bash
+# All function definition names
+ast-grep ... 'kind: function_definition, has: { kind: identifier, $NAME }'
+  → /tmp/defs.txt
+
+# All references: calls, address-of, initializer-list bare identifiers,
+# function-pointer-arg bare identifiers
+ast-grep ... 'any: [call_expression with $NAME; &$NAME;
+                    initializer_list with $NAME; argument_list with $NAME]'
+  → /tmp/refs.txt
+
+candidates = defs - refs                        # ~200-400 names
+```
+
+**Stage 2 — ast-grep heuristic exclusion** (~5 s). Each rule below knocks
+out a class of false positives without any semantic analysis:
+
+| Heuristic | Rule body | Filters out |
+|---|---|---|
+| Macro body contains the candidate's name | `kind: preproc_function_def, regex: $NAME` | Macro-synthesized calls |
+| Bare identifier inside `{ ... }` initializer | `kind: initializer_list, has: $NAME` | Function-pointer tables |
+| Definition has `__attribute__((used))` / `[[gnu::used]]` / `[[maybe_unused]]` | `kind: attribute, regex: 'used\|maybe_unused'` | Compiler-forced retention |
+| Definition `virtual` / followed by `override` / `final` | `kind: function_declarator, has: 'override\|final'` | vtable-dispatched |
+| Definition has `extern "C"` linkage | `kind: linkage_specification, regex: '"C"'` | External-linkage exports |
+| Definition is inside a `TEST(...)` / `TEST_F(...)` macro expansion | `kind: expansion_macro_invocation` | GTest registration |
+| Definition matches `operator<X>` pattern | `pattern: $RET operator $OP(...)` | Operator overloads (often implicit) |
+
+Expected reduction: 200-400 candidates → **~20-50** survivors.
+
+**Stage 3 — libclang USR verification** (~30-60 s, parallelized):
+
+```python
+# Pre-filter the file set: only parse files that even mention any
+# candidate name as a literal substring. Cheap grep across the tree.
+relevant_files = grep_files_containing_any(candidates)   # ~50-150 files
+
+for c in candidates:
+    if not any_use_found_via_libclang(c, relevant_files):
+        emit_finding(c, severity="warning", rule_id="unused-function")
+```
+
+Per candidate the libclang walk looks for:
+
+- `CallExpr` whose `cursor.referenced.spelling` matches
+- `UnaryOperator(&, DeclRefExpr)` whose referenced matches
+- `TemplateArgument` whose value matches (catches template-bound dispatch)
+- `cursor.kind` in `{CXX_DEDUCED_AUTO_TYPE, CXX_FUNCTIONAL_CAST_EXPR, ...}` for implicit calls
+
+Early-exit per candidate the moment any use is found. The grep pre-filter
+caps libclang's file count at ≤150 instead of 600 — the asymmetric exploit
+that makes the cost work.
+
+**Expected runtime envelope**:
+
+| Stage | Wall | Survivors |
+|---|---:|---:|
+| Stage 1 (gather) | ~5 s | ~300 |
+| Stage 2 (heuristics) | ~5 s | ~30-50 |
+| Stage 3 (libclang verify) | ~30-60 s | ~10-30 |
+| **Total** | **~1 min** | actionable unused set |
+
+That ~1 minute target informs the §8.4 tier-placement decision.
+
+### 8.4 Performance-gated tier placement
+
+Per project policy: `make lint` is the fast iterative gate (~8 s today);
+`make lint-full` is the comprehensive pre-merge gate (~4 min today). Where
+the unused-function check lands depends on its measured wall-clock once
+Stage 3 is implemented:
+
+| Measured runtime | Placement |
+|---|---|
+| **≤ 10 s** | `make lint` and `make lint-full` both. Fast enough that iteration speed isn't hurt. |
+| **> 10 s** | `make lint-full` only. `make lint` stays sub-10-s. Auto-enables under `--rule ^unused-function` (same pattern as `tidy-*` rules in §7). |
+
+The 10 s threshold is the cliff: anything that pushes `make lint` past 10 s
+materially changes how developers use it (it stops being a pre-commit
+reflex). The Stage 1+2 portion alone is well under 10 s and could in
+principle run in `lint` while Stage 3 runs only in `lint-full`, but
+splitting the check across tiers complicates the rule's meaning (does
+"unused-function: 0 findings" mean "verified clean" or "no Stage-3-verified
+clean"?). Better: ship as one indivisible check, place by total cost.
+
+The choice is empirical — only made after Stage 3 is implemented and
+benchmarked on the real codebase.
+
+### 8.5 Integration & migration plan
+
+Mirrors §7.4 plumbing. New scaffolding:
+
+```
+utils/lint/dead-code/
+├── stage1_candidates.sh        # ast-grep defs minus refs
+├── stage2_exclusions.sh        # 7 heuristic-exclusion ast-grep rules
+├── stage3_verify.py            # libclang USR walk over pre-filtered file set
+└── run_dead_code.sh            # orchestrator → unified NDJSON
+                                # rule_id: "unused-function"
+                                # backend: "hybrid"
+                                # suppress marker: UNUSED_FUNCTION_OK
+```
+
+Migration steps:
+
+1. **Implement Stage 1 + Stage 2.** Ship as standalone; measure how many
+   candidates survive on the real codebase. If the count is already small
+   enough that Stage 3 isn't useful (say <50), short-circuit Stage 3 and
+   ship as ast-grep-only.
+2. **Implement Stage 3.** Time the full pipeline.
+3. **Decide tier placement** per §8.4's 10 s rule.
+4. **Wire into `run.sh`** as the third clang-tidy-tier backend (next to
+   `tidy-*` and `int-cast-type-aware`). Same severity gate, same
+   suppression filter, same Report_NNN.* plumbing.
+5. **Add manifest entry** — one rule `unused-function`, category
+   `dead-code`, backend `hybrid`.
+6. **Retire cppcheck:**
+   - Delete the `lint-cppcheck:` Makefile target
+   - Remove from `.PHONY` and `make help`
+   - Delete `analysis-results-lint/` references
+   - Remove cppcheck from any CI configuration (none today — it was never
+     in CI gating to begin with)
+7. **Document.** Update [doc/dev/Lambda_Lint_Rules.md](../doc/dev/Lambda_Lint_Rules.md)
+   §5 with the new rule; remove cppcheck from §2 backends table; note in
+   the Appendix that Phase 4 retired cppcheck.
+
+The retirement is cheap precisely because cppcheck was never load-bearing
+in CI — no migration of CI configurations, no findings backlog to
+reconcile, no external consumers of `analysis-results-lint/`.
+
+### 8.6 Honest limitations
+
+The hybrid catches the bulk of mechanically-detectable dead functions. It
+will *not* catch:
+
+- **String-mediated dispatch**: `dlsym(handle, "foo")`, reflection-style
+  lookups, plugin systems where the function name lives in a string
+  literal at the call site. Same fundamental limitation as cppcheck.
+- **Build-time-only dispatch**: codegen scripts, parser-generator outputs
+  that produce call sites at build time but not at runtime.
+- **Functions called only through template-template parameters** computed
+  during compilation, where libclang's USR resolution can't follow the
+  binding statically.
+
+For any of these, the answer is the same as the rest of the lint stack:
+the `UNUSED_FUNCTION_OK` inline marker. Short allowlist kept in source,
+not in a hand-maintained config file.
+
+What the hybrid *does* handle that pure ast-grep cannot: overloaded
+functions where one signature is called and another isn't (USR
+distinguishes them), implicit calls (constructors, destructors, conversion
+operators that libclang surfaces), and template-instantiated functions
+whose binding is statically resolvable. That's why Stage 3 exists at all.
+
+---
+
+## 9. Summary
 
 **Phase 1 — ast-grep pattern engine** (shipped):
 
@@ -1110,13 +1325,34 @@ investments, not the engine itself.
   casts by design. Chose libclang Python over a clang-tidy plugin because (a) we
   already own the suppression and output formats, (b) no C++ build chain enters
   the lint pipeline, (c) libclang's C ABI is stable across LLVM versions.
-- Scoped to the same 19 layout files `no-int-cast-radiant` covers. Empirically
-  reclaims ~60% of `INT_CAST_OK` markers in that scope (per a strip test on
-  `layout_block.cpp`). Broader project-wide marker cleanup (the proposal's
-  "284 markers" figure) is a one-line scope expansion in `run_tidy.sh`.
-- Backend slot mirrors Phase 2's: NDJSON normalisation in `run.sh`, `backend:
-  clang-tidy` tag per finding, severity gate unchanged. `make lint ARGS=--list`
-  shows all three engines + the structural Python check.
+- **Project-wide bug-finding pass** added in the second wave: tuned subset of
+  `bugprone-* + clang-analyzer-* + cert-*` (with 6 noisy checks disabled) across
+  all `.cpp` under `lambda/` + `radiant/`. ~4 min wall-clock at 8-wide
+  parallelism — split off into `make lint-full` so the iterative `make lint`
+  (now ast-grep + alint only) stays sub-10-s.
+- Empirically reclaims ~60% of `INT_CAST_OK` markers in the layout subset
+  (per a strip test on `layout_block.cpp`). Same plumbing pattern as Phase 2:
+  NDJSON normalisation in `run.sh`, `backend: clang-tidy` tag per finding.
+
+**Phase 4 — Retire cppcheck; hybrid unused-function check** (proposed, §8):
+
+- **Retire `lint-cppcheck`** as the last separate lint binary in the toolchain.
+  An overlap audit (§8.2) shows nearly every cppcheck check family is already
+  covered by Phase 3's `tidy-bugprone-*` / `tidy-clang-analyzer-*`; the only
+  load-bearing unique capability is whole-program `unusedFunction`.
+- **Replace `unusedFunction` with a hybrid checker** (§8.3): ast-grep gathers
+  the candidate set (functions whose name appears in no non-definition
+  context), ast-grep applies 7 heuristic exclusion rules (macro-body, init-list,
+  `__attribute__((used))`, `virtual`/`override`, `extern "C"`, GTest macros,
+  operator-overloads), and libclang verifies the residue via USR resolution
+  over a grep-pre-filtered subset of files. Expected runtime ~1 min total —
+  candidate count drops from ~300 to ~30 before any libclang work happens.
+- **Tier placement is performance-gated**: ≤ 10 s measured → both `make lint`
+  and `make lint-full`; > 10 s → `lint-full` only with auto-enable under
+  `--rule ^unused-function`. Decision made empirically after Stage 3 lands.
+- Once the hybrid ships and cppcheck is deleted, the toolchain is **four
+  open-source backends** (ast-grep, alint, clang-tidy/libclang, Python
+  structural) — no remaining tool outside `make lint` / `lint-full`.
 
 ---
 

@@ -49,6 +49,11 @@ if [[ -f "$ROOT/utils/lint/tidy/run_tidy.sh" ]]; then
                 "tidy-bugprone" "tidy-clang-analyzer" "tidy-cert" >> "$discovered"
 fi
 
+# Hybrid backend (Phase 4 — unused-function check)
+if [[ -f "$ROOT/utils/lint/dead-code/run_unused_function.sh" ]]; then
+  printf '%s\n' "unused-function" >> "$discovered"
+fi
+
 # ---------- discover ids from manifest ----------
 manifest_ids=$(awk '/^  [a-z][a-z0-9-]*:$/{ sub(":",""); gsub(/ /,""); print }' "$MANIFEST")
 

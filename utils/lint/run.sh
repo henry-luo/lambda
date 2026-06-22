@@ -86,6 +86,10 @@ if (( LIST )); then
     echo "  int-cast-type-aware                utils/lint/tidy/explicit_cast_check.py"
     echo "  int-cast-type-aware-decl           utils/lint/tidy/run_tidy.sh + bugprone-narrowing-conversions"
   fi
+  if [[ -x "$ROOT/utils/lint/dead-code/run_unused_function.sh" ]]; then
+    echo "hybrid rules (Phase 4):"
+    echo "  unused-function                    utils/lint/dead-code/run_unused_function.sh"
+  fi
   echo "structural Python checks:"
   for entry in "${STRUCTURAL_CHECKS[@]}"; do echo "  ${entry%%:*}"; done
   if [[ -x "$ROOT/utils/lint/manifest_check.sh" ]]; then
@@ -160,6 +164,22 @@ fi
 
 if [[ -n "$TIDY_RAW" ]]; then
   RAW=$([[ -n "$RAW" ]] && printf '%s\n%s\n' "$RAW" "$TIDY_RAW" || printf '%s\n' "$TIDY_RAW")
+fi
+
+# ---------- hybrid backend: unused-function check (Phase 4) ----------
+# Stages 1+2 (ast-grep lexical analysis) — measured ~4 s on this codebase,
+# so runs in both the fast `make lint` and `make lint-full`.
+UNUSED_RAW=""
+UNUSED_SCRIPT="$ROOT/utils/lint/dead-code/run_unused_function.sh"
+if (( ! STRUCTURAL_ONLY )) && [[ -x "$UNUSED_SCRIPT" ]]; then
+  UNUSED_RAW=$("$UNUSED_SCRIPT" 2>/dev/null || true)
+  if [[ -n "$RULE_FILTER" && -n "$UNUSED_RAW" ]]; then
+    UNUSED_RAW=$(printf '%s\n' "$UNUSED_RAW" | jq -c "select(.ruleId | test(\"$RULE_FILTER\"))" 2>/dev/null || true)
+  fi
+fi
+
+if [[ -n "$UNUSED_RAW" ]]; then
+  RAW=$([[ -n "$RAW" ]] && printf '%s\n%s\n' "$RAW" "$UNUSED_RAW" || printf '%s\n' "$UNUSED_RAW")
 fi
 
 # ---------- suppression filter (jq) ----------

@@ -42,6 +42,7 @@ It is *not* a replacement for the orthogonal semantic gates (`tidy`,
 | **alint** | Filesystem *shape* and cross-file relations (sibling-file existence, file-graph integrity) | `.alint.yml` at repo root |
 | **clang-tidy + libclang** | (1) Project-wide bug-finding pass: `bugprone-* + clang-analyzer-* + cert-*` (minus the project's disabled-check list). (2) Explicit float→int cast check via libclang AST. | `utils/lint/tidy/run_tidy.sh` (orchestrator) + `utils/lint/tidy/explicit_cast_check.py` (libclang) |
 | **Structural Python** | Coverage invariants that aren't expressible in any pattern engine (e.g. "every enum value has a table row") | `utils/check_state_machine.py` |
+| **Hybrid** (Phase 4) | Whole-program dead-function detection. ast-grep enumerates function definitions; grep counts identifier occurrences; functions with codebase-count == 1 are candidates; heuristic exclusions filter the residue. | `utils/lint/dead-code/run_unused_function.sh` |
 
 A thin cross-engine **manifest** at `utils/lint/manifest.yml` indexes every
 rule with metadata (category, claude-md reference, tags). The
@@ -199,7 +200,28 @@ Informational rules — surface findings in reports but never fail the gate.
 | `todo-inventory` | ast-grep | info | TODO/FIXME/XXX/HACK markers in `lambda/` / `radiant/` / `lib/` C/C++ comments. |
 | `ls-todo-inventory` | ast-grep | info | Same, in `.ls` Lambda scripts. First rule against the registered `tree-sitter-lambda` grammar. |
 
-### 5.9 Project-wide bug-finding (clang-tidy families)
+### 5.9 Dead code (hybrid backend)
+
+Whole-program unused-function detection. Replaces the retired `lint-cppcheck`
+target's `unusedFunction` capability.
+
+| Rule | Backend | Sev. | Suppress | What it catches |
+|---|---|---|---|---|
+| `unused-function` | hybrid | warning | `UNUSED_FUNCTION_OK` | Function definitions whose name has codebase-count of 1 (appears only at the definition site, never as call / address-of / initializer-list reference), after heuristic exclusions (virtual/override/extern "C"/`__attribute__((used))`/operator overloads/well-known entry points). |
+
+**Implementation**: [utils/lint/dead-code/run_unused_function.sh](../../utils/lint/dead-code/run_unused_function.sh) — Stages 1+2 of the proposal §8.3 design. Stage 3 (libclang USR verification) deferred — lexical signal is already actionable; the ~60 s libclang cost isn't justified by the measured false-positive rate on this codebase.
+
+**Runtime**: ~4 s wall-clock (one consolidated ast-grep pass over 449 files with 5 rules separated by `---`, in parallel with a `grep` word-frequency count). Stays well under the 10 s threshold, so the check runs in *both* `make lint` and `make lint-full`.
+
+**False-positive classes** (where the lexical Stage 1+2 approach can't see the call):
+
+- Macro-synthesized calls: `#define DISPATCH(F) F(ctx)` then `DISPATCH(foo)`
+- String-mediated dispatch: `dlsym(h, "foo")`, reflection-style lookups
+- Template-template-parameter binding computed at compile time
+
+For any of these, the fix is the same as everywhere else in the lint stack: add `// UNUSED_FUNCTION_OK: <reason>` to the function's definition line. The marker is searchable and self-documenting.
+
+### 5.10 Project-wide bug-finding (clang-tidy families)
 
 A single backend pass runs `bugprone-* + clang-analyzer-* + cert-*` across
 every `.cpp` under `lambda/` + `radiant/` (~449 files, parallelized 8-wide).

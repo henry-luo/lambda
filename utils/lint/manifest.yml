@@ -260,6 +260,15 @@ rules:
     tags: [clang-tidy, family, security]
     note: "CERT C/C++ Secure Coding Standards (minus err33-c, err58-cpp, dcl37-c, dcl51-cpp which were too noisy on this codebase). Catches strtol-without-errno, C-style varargs, signed-char arithmetic UB, etc."
 
+  # ── hybrid (ast-grep + libclang) · Phase 4 ──────────────────────────────
+
+  unused-function:
+    backend: hybrid
+    file: utils/lint/dead-code/run_unused_function.sh
+    category: dead-code
+    tags: [hybrid, ast-grep, lexical]
+    note: "Stages 1+2 of the proposal §8.3 design (lexical analysis only). Stage 3 (libclang USR verification) deferred — lexical signal is already actionable on this codebase. ast-grep enumerates function definitions; grep counts identifier occurrences; functions with codebase-count == 1 are candidates. Heuristic exclusions (virtual/override/extern \"C\"/__attribute__((used))/operator overloads/UNUSED_FUNCTION_OK) applied via the same ast-grep pass."
+
   # ── alint · structural rules ────────────────────────────────────────────
 
   ls-test-has-golden:

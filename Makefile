@@ -495,7 +495,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-pdf-render test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint lint-full lint-cppcheck docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint lint-full docs intellisense analyze-binary \
 	    build-debug build-release build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    generate-premake clean-premake build-test build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline \
@@ -582,11 +582,10 @@ help:
 	@echo "  tidy-printf   - Convert printf/fprintf(stderr) to log_debug() using Clang AST"
 	@echo "                  Usage: make tidy-printf FILE='pattern' [DRY_RUN=1] [BACKUP=1]"
 	@echo "  format        - Format source code with clang-format"
-	@echo "  lint          - Unified policy linter, fast pass (ast-grep + alint + structural)"
-	@echo "                  Usage: make lint [ARGS='--rule <id>' | --report | --list]   ~6 s"
+	@echo "  lint          - Unified policy linter, fast pass (ast-grep + alint + hybrid + structural)"
+	@echo "                  Usage: make lint [ARGS='--rule <id>' | --report | --list]   ~10 s"
 	@echo "  lint-full     - Same plus the clang-tidy backend (slow, comprehensive)"
 	@echo "                  Usage: make lint-full [ARGS=--report]                         ~4 min"
-	@echo "  lint-cppcheck - Run cppcheck static analyzer (orthogonal semantic gate)"
 	@echo "  count-loc     - Count lines of code in the repository"
 	@echo "  cheatsheet    - Regenerate Lambda_Cheatsheet.pdf from Markdown (requires pandoc, xelatex)"
 	@echo "  bench-compile - Run C/C++ compilation performance benchmark"
@@ -1872,48 +1871,12 @@ format:
 		echo "clang-format not found. Install with: brew install clang-format"; \
 	fi
 
-lint-cppcheck:
-	@echo "Running comprehensive linter analysis..."
-	@mkdir -p analysis-results-lint
-	@if command -v cppcheck >/dev/null 2>&1; then \
-		echo "Running cppcheck with all checks enabled..."; \
-		cppcheck --enable=all --std=c++17 \
-		         --suppress=missingIncludeSystem \
-		         --suppress=unmatchedSuppression \
-		         --xml --xml-version=2 \
-		         --output-file=analysis-results-lint/cppcheck-report.xml \
-		         -i lambda/tree-sitter/ \
-		         -i lambda/tree-sitter-lambda/ \
-		         -i lambda/tree-sitter-javascript/ \
-		         lambda/ \
-		         2>&1 | tee analysis-results-lint/cppcheck-output.txt; \
-		echo ""; \
-		echo "Generating human-readable summary..."; \
-		cppcheck --enable=all --std=c++17 \
-		         --suppress=missingIncludeSystem \
-		         --suppress=unmatchedSuppression \
-		         -i lambda/tree-sitter/ \
-		         -i lambda/tree-sitter-lambda/ \
-		         -i lambda/tree-sitter-javascript/ \
-		         lambda/ \
-		         2>&1 | grep -E "(error|warning|style|performance|portability)" | \
-		         head -50 > analysis-results-lint/cppcheck-summary.txt || true; \
-		echo ""; \
-		echo "📊 Lint Analysis Complete:"; \
-		echo "  Full report: analysis-results-lint/cppcheck-report.xml"; \
-		echo "  Summary: analysis-results-lint/cppcheck-summary.txt"; \
-		echo "  Raw output: analysis-results-lint/cppcheck-output.txt"; \
-		echo ""; \
-		if [ -s analysis-results-lint/cppcheck-summary.txt ]; then \
-			echo "🔍 Top Issues Found:"; \
-			head -20 analysis-results-lint/cppcheck-summary.txt; \
-		else \
-			echo "✅ No major issues found in Lambda source code"; \
-		fi; \
-	else \
-		echo "cppcheck not found. Install with: brew install cppcheck"; \
-		exit 1; \
-	fi
+# lint-cppcheck was retired in Phase 4 (vibe/Lambda_Lint.md §8). cppcheck's
+# bug-finding overlap with the Phase 3 `bugprone-*` / `clang-analyzer-*`
+# families made it largely redundant; its only unique capability was
+# whole-program unusedFunction, replaced by the hybrid backend at
+# utils/lint/dead-code/run_unused_function.sh (rule_id: unused-function).
+# Install of cppcheck is no longer required.
 
 # Binary size analysis by library group
 analyze-binary:
