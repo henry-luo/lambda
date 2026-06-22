@@ -4363,8 +4363,6 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
             MIR_new_label_op(mt->ctx, l_no_delayed_ret),
             MIR_new_reg_op(mt->ctx, forit_has_return)));
-        // Close iterator before returning
-        jm_emit_iterator_close(mt, iterator);
         // Propagate return to outer try context if any
         if (mt->try_ctx_depth > 0) {
             JsTryContext* outer = &mt->try_ctx_stack[mt->try_ctx_depth - 1];
@@ -4453,6 +4451,12 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
     } else {
         // v18: bare return produces undefined, not null
         val = jm_emit_undefined(mt);
+    }
+
+    for (int i = mt->loop_depth - 1; i >= 0; i--) {
+        if (mt->loop_stack[i].iterator_to_close) {
+            jm_emit_iterator_close(mt, mt->loop_stack[i].iterator_to_close);
+        }
     }
 
     // v15: In generator/async state machines, return [value, -1] to signal done.

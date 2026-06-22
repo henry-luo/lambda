@@ -550,6 +550,7 @@ static Item js_stream_emit_end_tick(Item self) {
     js_property_set(self, key_end_pending, js_bool_item(false));
     js_stream_mark_readable_end_emitted(self);
     stream_emit(self, "end", NULL, 0);
+    js_stream_async_iterators_drain(self, make_js_undefined());
     return make_js_undefined();
 }
 
@@ -1163,7 +1164,7 @@ extern "C" Item js_readable_read_size(Item self, Item size_item) {
         return js_stream_decode_readable_chunk(self, exact);
     }
 
-    if (!js_item_is_true(js_property_get(self, key_end_pending))) {
+    if (blen == 0 && !js_item_is_true(js_property_get(self, key_end_pending))) {
         js_stream_call_read_if_needed(self, size_item);
         buf = js_property_get(self, key_buffer);
         if (get_type_id(buf) != LMD_TYPE_ARRAY) return ItemNull;
