@@ -2112,7 +2112,7 @@ FontDatabase* font_database_get_global() {
             if (g_global_font_db) {
                 // Set cache path for persistence
                 char cache_path[512];
-                snprintf(cache_path, sizeof(cache_path), "%s/.lambda_font_cache", getenv("HOME") ?: "/tmp");
+                snprintf(cache_path, sizeof(cache_path), "%s/.lambda_font_cache", getenv("HOME") ?: "/tmp");  // TMP_PATH_OK: cross-platform fallback when $HOME unset
                 font_database_set_cache_path(g_global_font_db, cache_path);
 
                 // Try to load from cache first

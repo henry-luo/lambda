@@ -1,0 +1,24 @@
+id: retained-field-write
+language: cpp
+severity: error
+message: >-
+  Direct write to a retained Radiant field. Lifetime-sensitive fields must be
+  assigned through the ownership helpers in radiant/retained_fields.hpp so that
+  pool/arena/long-lived storage never retains a layout-session allocation. Mark
+  audited exceptions with a trailing "// RETAINED_FIELD_OK: <reason>".
+metadata:
+  suppress: RETAINED_FIELD_OK
+rule:
+  any:
+    - pattern: $OBJ->tag_name = $V
+    - pattern: $OBJ->class_names = $V
+    - pattern: $OBJ->family = $V
+    - pattern: $OBJ->image = $V
+    - pattern: $OBJ->text_content = $V
+    - pattern: $OBJ->source_path = $V
+    - pattern: $OBJ->source_data = $V
+files:
+  - "radiant/**/*.{cpp,hpp}"
+  - "lambda/input/css/dom_element.{cpp,hpp}"
+ignores:
+  - "radiant/retained_fields.hpp"

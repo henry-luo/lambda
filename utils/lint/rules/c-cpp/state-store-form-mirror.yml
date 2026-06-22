@@ -1,0 +1,21 @@
+id: state-store-form-mirror
+language: cpp
+severity: error
+message: >-
+  External access to a FormControlProp mirror field. Form state must be read/written
+  through the StateStore projection, not the raw form-> mirror. Mark audited
+  exceptions with a trailing "// STATE_STORE_OK: <reason>".
+metadata:
+  suppress: STATE_STORE_OK
+constraints:
+  O:
+    regex: "(^form|->form)$"
+  F:
+    regex: "^(disabled|readonly|selected_index|hover_index|dropdown_open|checked|required|range_value|selection_start|selection_end|selection_direction)$"
+rule:
+  pattern: $O->$F
+files:
+  - "radiant/**/*.cpp"
+  - "lambda/js/**/*.cpp"
+ignores:
+  - "radiant/state_store.cpp"

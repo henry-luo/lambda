@@ -1,0 +1,226 @@
+# Lambda Lint — shared rule manifest (Phase 2 Option 2).
+#
+# A thin cross-engine index: one entry per shipped rule, keyed by id, carrying
+# cross-cutting metadata (backend, category, the CLAUDE.md rule it enforces,
+# tags) that the rule's native YAML (ast-grep or alint) does not express.
+#
+# This file is metadata only. The rule logic lives in:
+#   backend: ast-grep   → utils/lint/rules/c-cpp/<id>.yml
+#   backend: alint      → .alint.yml (rules[].id == <id>)
+#   backend: python     → utils/check_state_machine.py (or similar)
+#
+# Used by `utils/lint/run.sh --list` and the manifest smoke-check
+# (`utils/lint/manifest_check.sh`), which asserts every shipped rule has a
+# manifest entry and vice versa.
+#
+# Adding a new rule:
+#   1. Author the rule in its backend's native format.
+#   2. Add a manifest entry below.
+#   3. Run `make lint` — the smoke-check will fail if the two are out of sync.
+
+version: 1
+
+# Categories: short labels for grouping rules in --list and reports.
+#   memory-safety       allocation, lifetime, ownership
+#   layout-correctness  Radiant float vs int, CSS shorthand pitfalls
+#   state-store         Radiant StateStore migration invariants
+#   api-hygiene         std:: vs lib::, raw casts, item payloads
+#   debug-hygiene       printf vs log_*, /tmp vs ./temp/
+#   test-hygiene        test fixtures, goldens
+#   correctness         logic-bug bans (e.g. duplicate-OR)
+#   inventory           informational scans (TODO/FIXME, etc.)
+
+rules:
+
+  # ── ast-grep · pattern rules ────────────────────────────────────────────
+
+  no-raw-alloc:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-raw-alloc.yml
+    category: memory-safety
+    enforces: claude-md/rule-1
+    tags: [memory, mandatory]
+
+  no-int-cast-radiant:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-int-cast-radiant.yml
+    category: layout-correctness
+    enforces: claude-md/rule-11
+    tags: [radiant, float, mandatory]
+
+  no-radiant-view-cast-layout:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-radiant-view-cast-layout.yml
+    category: api-hygiene
+    tags: [radiant, casts, mandatory]
+
+  no-radiant-view-cast-render:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-radiant-view-cast-render.yml
+    category: api-hygiene
+    tags: [radiant, casts, mandatory]
+
+  retained-field-write:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/retained-field-write.yml
+    category: memory-safety
+    tags: [radiant, lifetime, mandatory]
+
+  no-item-payload-cast:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-item-payload-cast.yml
+    category: api-hygiene
+    tags: [lambda, item, mandatory]
+
+  css-temp-decl:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/css-temp-decl.yml
+    category: layout-correctness
+    tags: [css, lifetime, mandatory]
+
+  no-raw-css-value-stack:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-raw-css-value-stack.yml
+    category: layout-correctness
+    tags: [css, lifetime]
+
+  dup-typeid-or:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/dup-typeid-or.yml
+    category: correctness
+    tags: [lambda, copy-paste-bug, mandatory]
+
+  state-store-doc-state-write:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/state-store-doc-state-write.yml
+    category: state-store
+    tags: [radiant, migration, mandatory]
+
+  state-store-focus-globals:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/state-store-focus-globals.yml
+    category: state-store
+    tags: [radiant, migration, mandatory]
+
+  state-store-form-mirror:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/state-store-form-mirror.yml
+    category: state-store
+    tags: [radiant, migration, mandatory]
+
+  state-store-form-mirror-internal:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/state-store-form-mirror-internal.yml
+    category: state-store
+    tags: [radiant, migration, mandatory]
+
+  state-store-form-pseudo-cache:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/state-store-form-pseudo-cache.yml
+    category: state-store
+    tags: [radiant, migration, mandatory]
+
+  state-store-pseudo-state:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/state-store-pseudo-state.yml
+    category: state-store
+    tags: [radiant, migration, mandatory]
+
+  state-store-scroll-api:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/state-store-scroll-api.yml
+    category: state-store
+    tags: [radiant, migration, mandatory]
+
+  state-store-scroll-interaction:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/state-store-scroll-interaction.yml
+    category: state-store
+    tags: [radiant, migration, mandatory]
+
+  state-store-scroll-mirror:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/state-store-scroll-mirror.yml
+    category: state-store
+    tags: [radiant, migration, mandatory]
+
+  state-store-view-state-write:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/state-store-view-state-write.yml
+    category: state-store
+    tags: [radiant, migration, mandatory]
+
+  unsafe-string-scan:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/unsafe-string-scan.yml
+    category: correctness
+    tags: [strings, ub, mandatory]
+
+  no-tmp-path:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-tmp-path.yml
+    category: debug-hygiene
+    enforces: claude-md/rule-2
+    tags: [paths]
+
+  no-manual-refcnt:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-manual-refcnt.yml
+    category: memory-safety
+    tags: [gc, lifetime]
+
+  no-using-namespace-std-in-header:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-using-namespace-std-in-header.yml
+    category: api-hygiene
+    tags: [headers, namespaces]
+
+  no-unsafe-libc-str:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-unsafe-libc-str.yml
+    category: memory-safety
+    tags: [strings, overflow]
+
+  no-new-delete:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-new-delete.yml
+    category: memory-safety
+    tags: [allocation]
+
+  no-printf-debug:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-printf-debug.yml
+    category: debug-hygiene
+    enforces: claude-md/rule-4
+    tags: [logging]
+
+  no-std-containers:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-std-containers.yml
+    category: api-hygiene
+    enforces: claude-md/rule-3
+    tags: [containers]
+
+  todo-inventory:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/todo-inventory.yml
+    category: inventory
+    tags: [backlog]
+
+  # ── alint · structural rules ────────────────────────────────────────────
+
+  ls-test-has-golden:
+    backend: alint
+    file: .alint.yml#ls-test-has-golden
+    category: test-hygiene
+    enforces: claude-md/rule-8
+    tags: [test, structure]
+
+  # ── Python · residual structural checks ─────────────────────────────────
+
+  state-machine:
+    backend: python
+    file: utils/check_state_machine.py
+    category: correctness
+    tags: [radiant, state-machine, coverage]
+    note: "Parses C++ enum header + table source, asserts every enum value has a matching row. Neither ast-grep nor alint can express this; intentionally stays as Python."

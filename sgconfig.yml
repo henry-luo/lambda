@@ -1,0 +1,18 @@
+ruleDirs:
+  - utils/lint/rules
+languageGlobs:
+  cpp:
+    - "*.c"
+    - "*.h"
+    - "*.hpp"
+    - "*.mm"
+    - "*.cc"
+    - "*.cxx"
+# Register the existing tree-sitter-lambda grammar so .ls rules can be authored
+# alongside the C/C++ ones. The dylib is built by the lambda toolchain — rebuild
+# it with `make generate-grammar` if grammar.js changes.
+customLanguages:
+  lambda:
+    libraryPath: lambda/tree-sitter-lambda/libtree-sitter-lambda.dylib
+    extensions: [ls]
+    expandoChar: $

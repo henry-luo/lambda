@@ -495,7 +495,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-pdf-render test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-tag-or check-raw-alloc check-state-store check-state-machine check-radiant-casts check-radiant-ownership check-string-scan docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint lint-cppcheck docs intellisense analyze-binary \
 	    build-debug build-release build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    generate-premake clean-premake build-test build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline \
@@ -570,7 +570,6 @@ help:
 	@echo "  test-benchmark- Run performance benchmark tests"
 	@echo "  fuzz-lambda    - Run fuzzy tests (5 minutes, mutation + random generation)"
 	@echo "  fuzz-lambda-extended - Run extended fuzzy tests (1 hour)"
-	@echo "  check-state-machine - Validate Radiant state-machine schema coverage"
 	@echo "  test-integration - Run end-to-end integration tests"
 	@echo "  test-all      - Run complete test suite (all test types)"
 
@@ -585,9 +584,10 @@ help:
 	@echo "  tidy-fix      - Run clang-tidy with automatic fixes (interactive)"
 	@echo "  tidy-printf   - Convert printf/fprintf(stderr) to log_debug() using Clang AST"
 	@echo "                  Usage: make tidy-printf FILE='pattern' [DRY_RUN=1] [BACKUP=1]"
-	@echo "  check         - Run basic code checks (TODO/FIXME finder)"
 	@echo "  format        - Format source code with clang-format"
-	@echo "  lint          - Run linter (cppcheck) on source files"
+	@echo "  lint          - Unified project-policy linter (ast-grep + alint + structural)"
+	@echo "                  Usage: make lint [ARGS='--rule <id>' | --report | --list]"
+	@echo "  lint-cppcheck - Run cppcheck static analyzer (orthogonal semantic gate)"
 	@echo "  count-loc     - Count lines of code in the repository"
 	@echo "  cheatsheet    - Regenerate Lambda_Cheatsheet.pdf from Markdown (requires pandoc, xelatex)"
 	@echo "  bench-compile - Run C/C++ compilation performance benchmark"
@@ -1864,25 +1864,6 @@ analyze-direct:
 	@echo "Direct analysis complete. Check analysis-results-direct/ for HTML reports"
 	@ls -la analysis-results-direct/ 2>/dev/null || echo "No HTML reports generated (code may be clean)"
 
-check:
-	@echo "Running basic code checks..."
-	@echo "Checking for common issues in source files..."
-	@find lambda -name "*.c" -o -name "*.cpp" -o -name "*.h" | xargs -I {} sh -c 'echo "Checking: {}"; grep -n "TODO\|FIXME\|XXX" {} || true' 2>/dev/null
-	@echo "Basic checks complete."
-
-check-tag-or:
-	@echo "Checking for duplicate array TypeId OR conditions..."
-	@VIOLATIONS=$$(find lambda \( -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" \) -print0 \
-		| xargs -0 perl -ne 'while (/([A-Za-z_][A-Za-z0-9_]*(?:(?:->|\.|::)[A-Za-z_][A-Za-z0-9_]*)?(?:\(\))?)\s*==\s*LMD_TYPE_ARRAY\b\s*\|\|\s*\1\s*==\s*LMD_TYPE_ARRAY\b/g) { print "$$ARGV:$$.: duplicate $$1 == LMD_TYPE_ARRAY\n"; }' \
-		|| true); \
-	if [ -n "$$VIOLATIONS" ]; then \
-		echo "❌ Duplicate array TypeId OR checks found:"; \
-		echo "$$VIOLATIONS"; \
-		exit 1; \
-	else \
-		echo "✅ No duplicate array TypeId OR checks"; \
-	fi
-
 format:
 	@echo "Formatting source code..."
 	@if command -v clang-format >/dev/null 2>&1; then \
@@ -1892,7 +1873,7 @@ format:
 		echo "clang-format not found. Install with: brew install clang-format"; \
 	fi
 
-lint:
+lint-cppcheck:
 	@echo "Running comprehensive linter analysis..."
 	@mkdir -p analysis-results-lint
 	@if command -v cppcheck >/dev/null 2>&1; then \
@@ -1939,309 +1920,22 @@ lint:
 analyze-binary:
 	@python3 utils/analyze_binary.py lambda.exe -v
 
-# Check for raw malloc/calloc/realloc/free usage in lambda/ and radiant/ source files.
-# All allocations in lambda/radiant should use mem_alloc/mem_free from lib/memtrack.h.
-# Documented exceptions that need raw allocation should use raw_malloc/raw_free from lib/memtrack.h
-# and be marked with a comment: // RAWALLOC_OK: <reason>
-check-raw-alloc:
-	@echo "Checking for raw malloc/free usage in lambda/ and radiant/..."
-	@VIOLATIONS=$$(grep -rn '\bmalloc\s*(\|\bcalloc\s*(\|\brealloc\s*(\|\bfree\s*(\|\bstrdup\s*(\|\bstrndup\s*(' \
-		lambda/ radiant/ \
-		--include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' \
-		| grep -v 'tree-sitter' \
-		| grep -v 'mem_alloc\|mem_calloc\|mem_realloc\|mem_free\|mem_strdup\|mem_strndup' \
-		| grep -v 'raw_malloc\|raw_calloc\|raw_realloc\|raw_free\|raw_strdup' \
-		| grep -v 'arena_alloc\|arena_calloc\|pool_alloc\|pool_calloc' \
-		| grep -v 'rpmalloc\|rpfree\|rpcalloc\|rprealloc' \
-		| grep -v 'hashmap_free\|strbuf_free\|stringbuf_free\|arraylist_free\|mempool_free\|arena_free\|pool_free' \
-		| grep -v 'utf8proc_free\|curl_free\|xml_free\|yaml_free\|hb_free' \
-		| grep -v 'RAWALLOC_OK' \
-		| grep -v '^\s*//' \
-		| grep -v '//.*\(malloc\|calloc\|realloc\|free\|strdup\)' \
-		| grep -v '^\s*\*' \
-		| grep -v ':[0-9]*:\s*/\*\|:[0-9]*:\s*\*' \
-		| grep -v '^\s*#' \
-		| grep -v 'lambda-wasm-main.c' \
-		| grep -v 'windows_compat.h' \
-		|| true); \
-	if [ -n "$$VIOLATIONS" ]; then \
-		echo ""; \
-		echo "❌ Found raw allocation calls (use mem_alloc/mem_free or raw_malloc/raw_free + RAWALLOC_OK):"; \
-		echo "$$VIOLATIONS"; \
-		echo ""; \
-		VCOUNT=$$(echo "$$VIOLATIONS" | wc -l | tr -d ' '); \
-		echo "Total: $$VCOUNT violation(s)"; \
-		exit 1; \
-	else \
-		echo "✅ No raw allocation violations found"; \
-	fi
-
-# Check StateStore migration invariants that should not regress.
-check-state-store:
-	@echo "Checking StateStore/pseudo-state migration invariants..."
-	@VIOLATIONS=$$(grep -rnE 'dom_element_(set|clear|has|toggle)_pseudo_state|DomElement::pseudo_state|uint32_t pseudo_state;|typedef DocState StateStore' \
-		lambda/ radiant/ test/ \
-		--include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' \
-		| grep -v 'test/css/test_css_dom_integration.cpp' \
-		|| true); \
-	FORM_MIRROR_VIOLATIONS=$$(grep -rnE --include='*.cpp' '((form|[A-Za-z0-9_]+->form)->(disabled|readonly|selected_index|hover_index|dropdown_open|checked|required|range_value|selection_start|selection_end|selection_direction))' \
-		radiant/ lambda/js/ \
-		| grep -v 'radiant/state_store.cpp' \
-		|| true); \
-	STATE_STORE_FORM_MIRROR_ACCESS_VIOLATIONS=$$(grep -nE 'form->(disabled|readonly|selected_index|hover_index|dropdown_open|checked|required|range_value)' \
-		radiant/state_store.cpp \
-		|| true); \
-	TEXT_CONTROL_FOCUS_GLOBAL_VIOLATIONS=$$(grep -rnE 'g_active_element|g_last_focused_text_control|tc_active_element_slot|tc_last_focused_text_control_slot|_js_active_element|_js_last_focused_text_control' \
-		radiant/ lambda/js/ \
-		--include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' \
-		|| true); \
-	FORM_PSEUDO_CACHE_VIOLATIONS=$$(grep -rnE 'placeholder_shown|focus_visible' \
-		radiant/form_control.hpp \
-		|| true); \
-	SCROLL_MIRROR_VIOLATIONS=$$(grep -rnE --include='*.cpp' -- '->(h_scroll_position|v_scroll_position|h_max_scroll|v_max_scroll)' \
-		radiant/ \
-		| grep -v 'radiant/state_store.cpp' \
-		|| true); \
-	SCROLL_INTERACTION_MIRROR_VIOLATIONS=$$(grep -rnE --include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' -- '->(is_h_hovered|is_v_hovered|h_is_dragging|v_is_dragging|drag_start_x|drag_start_y|h_drag_start_scroll|v_drag_start_scroll)|bool[[:space:]]+is_h_hovered|float[[:space:]]+drag_start_x' \
-		radiant/ \
-		| grep -v 'radiant/state_store.cpp' \
-		| grep -v 'radiant/state_store.hpp' \
-		|| true); \
-	SCROLL_API_VIOLATIONS=$$(grep -rnE --include='*.cpp' --include='*.hpp' 'scroll_state_(attach|set_max|set_position|get_position)\(' \
-		radiant/ \
-		| grep -v 'radiant/state_store.cpp' \
-		|| true); \
-	VIEW_STATE_WRITE_VIOLATIONS=$$(grep -rnE --include='*.cpp' --include='*.hpp' -- '->data\.(form|scroll)\.[A-Za-z0-9_]+[[:space:]]*([+*/%-]?=|\+\+|--)|->flags\.(hovered|active|focused)[[:space:]]*([+*/%-]?=|\+\+|--)' \
-		radiant/ \
-		| grep -v 'radiant/state_store.cpp' \
-		|| true); \
-	DOC_STATE_WRITE_VIOLATIONS=$$(grep -rnE --include='*.cpp' --include='*.hpp' -- '(state|mstate|doc_state|new_state|st)->(hover_target|active_target|drag_target|is_dragging|drag_drop|open_dropdown|dropdown_x|dropdown_y|dropdown_width|dropdown_height|context_menu_target|context_menu_x|context_menu_y|context_menu_width|context_menu_height|context_menu_hover|scroll_x|scroll_y|zoom_level|is_dirty|needs_reflow|needs_repaint)[[:space:]]*([+*/%-]?=[^=]|\+\+|--)' \
-		radiant/ lambda/js/ \
-		| grep -v 'radiant/state_store.cpp' \
-		|| true); \
-	DOC_STATE_DRAG_DROP_VIOLATIONS=$$(grep -rnE --include='*.cpp' -- 'state->drag_drop[[:space:]]*=' \
-		radiant/ \
-		| grep -v 'radiant/state_store.cpp' \
-		|| true); \
-	if [ -n "$$FORM_MIRROR_VIOLATIONS" ]; then \
-		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External form mirror reads/writes:\n$$FORM_MIRROR_VIOLATIONS"; \
-	fi; \
-	if [ -n "$$STATE_STORE_FORM_MIRROR_ACCESS_VIOLATIONS" ]; then \
-		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}StateStore non-text form mirror access:\n$$STATE_STORE_FORM_MIRROR_ACCESS_VIOLATIONS"; \
-	fi; \
-	if [ -n "$$TEXT_CONTROL_FOCUS_GLOBAL_VIOLATIONS" ]; then \
-		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}Text-control focus globals/slot accessors:\n$$TEXT_CONTROL_FOCUS_GLOBAL_VIOLATIONS"; \
-	fi; \
-	if [ -n "$$FORM_PSEUDO_CACHE_VIOLATIONS" ]; then \
-		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}FormControlProp pseudo-state caches:\n$$FORM_PSEUDO_CACHE_VIOLATIONS"; \
-	fi; \
-	if [ -n "$$SCROLL_MIRROR_VIOLATIONS" ]; then \
-		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External scroll mirror reads/writes:\n$$SCROLL_MIRROR_VIOLATIONS"; \
-	fi; \
-	if [ -n "$$SCROLL_INTERACTION_MIRROR_VIOLATIONS" ]; then \
-		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}ScrollPane interaction-state mirrors:\n$$SCROLL_INTERACTION_MIRROR_VIOLATIONS"; \
-	fi; \
-	if [ -n "$$SCROLL_API_VIOLATIONS" ]; then \
-		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External pane-only scroll API usage:\n$$SCROLL_API_VIOLATIONS"; \
-	fi; \
-	if [ -n "$$VIEW_STATE_WRITE_VIOLATIONS" ]; then \
-		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External ViewState direct writes:\n$$VIEW_STATE_WRITE_VIOLATIONS"; \
-	fi; \
-	if [ -n "$$DOC_STATE_WRITE_VIOLATIONS" ]; then \
-		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External DocState direct writes:\n$$DOC_STATE_WRITE_VIOLATIONS"; \
-	fi; \
-	if [ -n "$$DOC_STATE_DRAG_DROP_VIOLATIONS" ]; then \
-		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External DocState drag_drop ownership writes:\n$$DOC_STATE_DRAG_DROP_VIOLATIONS"; \
-	fi; \
-	if [ -n "$$VIOLATIONS" ]; then \
-		echo "❌ StateStore migration invariant violations:"; \
-		echo "$$VIOLATIONS"; \
-		exit 1; \
-	else \
-		echo "✅ StateStore migration invariants hold"; \
-	fi
-
-# Check declarative Radiant state-machine coverage for fully migrated families.
-check-state-machine:
-	@$(PYTHON) utils/check_state_machine.py
-
-# Check for (int) casts in Radiant layout code that may truncate float dimensions.
-# All layout positions/sizes (x, y, width, height, padding, margin, border, gap,
-# offset) are float. Casting to int causes sub-pixel truncation bugs.
-# Intentional int casts (strlen, enum, repeat_count, etc.) must be marked with:
-#   // INT_CAST_OK: <reason>
-check-int-cast:
-	@echo "Checking for unmarked (int) casts in Radiant layout files..."
-	@VIOLATIONS=$$(grep -rn '(int)' \
-		radiant/layout_block.cpp radiant/layout_inline.cpp \
-		radiant/layout_text.cpp radiant/layout_positioned.cpp \
-		radiant/layout_flex.cpp radiant/layout_flex_multipass.cpp \
-		radiant/layout_flex_measurement.cpp \
-		radiant/layout_table.cpp radiant/layout_multicol.cpp \
-		radiant/layout_grid.cpp radiant/layout_grid_multipass.cpp \
-		radiant/layout_form.cpp radiant/layout_list.cpp \
-		radiant/layout_counters.cpp \
-		radiant/grid_sizing.cpp radiant/grid_positioning.cpp \
-		radiant/grid_utils.cpp \
-		radiant/intrinsic_sizing.cpp \
-		| grep -v '// INT_CAST_OK' \
-		| grep -v '^\s*//' \
-		| grep -v '^\s*\*' \
-		|| true); \
-	if [ -n "$$VIOLATIONS" ]; then \
-		echo ""; \
-		echo "❌ Found unmarked (int) casts (add '// INT_CAST_OK: <reason>' or remove the cast):"; \
-		echo "$$VIOLATIONS"; \
-		echo ""; \
-		VCOUNT=$$(echo "$$VIOLATIONS" | wc -l | tr -d ' '); \
-		echo "Total: $$VCOUNT unmarked cast(s)"; \
-		exit 1; \
-	else \
-		echo "✅ No unmarked (int) casts in Radiant layout files"; \
-	fi
-
-# Check for fragile CSS shorthand temporary-declaration patterns in Radiant CSS
-# resolution code (vibe/Memory_Safety_Template4.md §7). Shorthand expansion must
-# route longhand components through the lam::CssTempDecl / lam::CssTempListDecl<N>
-# helpers in radiant/css_temp_decl.hpp, not by hand-copying a CssDeclaration and
-# pointing its value at a narrower-scope stack CssValue.
-# Flagged patterns in radiant/resolve_css_style.cpp:
-#   - "CssDeclaration <name> = *decl" raw declaration copies
-#   - ".value = &<local>" address-of-stack assignments
-# Audited exceptions must be marked with a trailing "// CSS_TEMP_DECL_OK: <reason>".
-check-css-temp-decl:
-	@echo "Checking for fragile CSS shorthand temporary declarations..."
-	@VIOLATIONS=$$(grep -nE 'CssDeclaration[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*\*decl|\.value[[:space:]]*=[[:space:]]*&' \
-		radiant/resolve_css_style.cpp \
-		| grep -v 'CSS_TEMP_DECL_OK' \
-		|| true); \
-	if [ -n "$$VIOLATIONS" ]; then \
-		echo ""; \
-		echo "❌ Found raw CSS shorthand temporary declarations (use lam::CssTempDecl / lam::CssTempListDecl<N>, or mark with '// CSS_TEMP_DECL_OK: <reason>'):"; \
-		echo "$$VIOLATIONS"; \
-		echo ""; \
-		VCOUNT=$$(echo "$$VIOLATIONS" | wc -l | tr -d ' '); \
-		echo "Total: $$VCOUNT raw temporary declaration(s)"; \
-		exit 1; \
-	else \
-		echo "✅ No raw CSS shorthand temporary declarations in resolve_css_style.cpp"; \
-	fi
-
-# Check for unsafe open-coded string scanning (lib/str.h §17).
-# Flags strchr(set, *p) membership (matches '\0') and ctype on char* (UB for
-# bytes >= 0x80). Suppress intentional local parsers with a trailing
-# '// STR_SCAN_LOCAL_OK: <reason>' comment. Pass ARGS=--all for soft warnings.
-check-string-scan:
-	@python3 utils/check_string_scans.py $(ARGS)
-
-# Check for raw Lambda Item payload casts in migrated files.
-# New migrated Lambda runtime code should use lib/lambda_typed.hpp helpers such as
-# lam::as<>(), lam::require<>(), lam::visit(), ItemReader, and typed reader
-# constructors instead of masking tagged pointers by hand.
-check-item-cast:
-	@echo "Checking migrated Lambda files for raw Item payload casts..."
-	@VIOLATIONS=$$(grep -En '0x00FFFFFFFFFFFFFF|\([[:space:]]*(Array|ArrayNum|Map|VMap|Element|Object|String|Symbol|Binary|Decimal|DateTime|Range|Type|TypeType|Function|Container)[[:space:]]*\*[[:space:]]*\)[[:space:]]*[^;]*item\.item' \
-		lambda/mark_builder.cpp lambda/mark_reader.cpp lambda/print.cpp \
-		lambda/format/format-json.cpp \
-		| grep -v 'ITEM_CAST_OK' \
-		|| true); \
-	if [ -n "$$VIOLATIONS" ]; then \
-		echo ""; \
-		echo "❌ Found raw Item payload casts in migrated Lambda files:"; \
-		echo "$$VIOLATIONS"; \
-		echo ""; \
-		VCOUNT=$$(echo "$$VIOLATIONS" | wc -l | tr -d ' '); \
-		echo "Total: $$VCOUNT cast(s)"; \
-		exit 1; \
-	else \
-		echo "✅ No raw Item payload casts in migrated Lambda files"; \
-	fi
-
-# Check for unsafe pointer casts in migrated Radiant files.
-# Downcasts should go through lib/tagged.hpp helpers such as lam::view_as_*(),
-# lam::view_require_*(), lam::dom_as<>(), or lam::dom_require<>().
-check-radiant-casts:
-	@echo "Checking migrated Radiant files for unsafe View*/Dom* casts..."
-	@VIOLATIONS=$$({ grep -En '\([[:space:]]*(View|Dom)[A-Za-z0-9_]*[[:space:]]*\*[[:space:]]*\)[[:space:]]*([A-Za-z_&*]|\()' \
-		radiant/layout_alignment.cpp radiant/layout_inline.cpp \
-		radiant/layout_grid.cpp radiant/layout_grid_multipass.cpp \
-		radiant/layout_list.cpp radiant/layout_positioned.cpp \
-		radiant/layout_text.cpp radiant/layout_multicol.cpp \
-		radiant/layout_flex_measurement.cpp radiant/layout_flex_multipass.cpp \
-		radiant/layout_flex.cpp radiant/layout_block.cpp \
-		radiant/layout_table.cpp radiant/grid_baseline.hpp \
-		radiant/resolve_css_style.cpp; \
-		grep -En 'static_cast<[[:space:]]*View(Block|Text|Span|Element|Table|TableRow|TableCell|TableRowGroup|Marker)[[:space:]]*\*[[:space:]]*>' \
-		radiant/layout_alignment.cpp radiant/layout_inline.cpp \
-		radiant/layout_grid.cpp radiant/layout_grid_multipass.cpp \
-		radiant/layout_list.cpp radiant/layout_positioned.cpp \
-		radiant/layout_text.cpp radiant/layout_multicol.cpp \
-		radiant/layout_flex_measurement.cpp radiant/layout_flex_multipass.cpp \
-		radiant/layout_flex.cpp radiant/layout_block.cpp \
-		radiant/layout_table.cpp radiant/grid_baseline.hpp \
-		radiant/resolve_css_style.cpp; \
-		grep -En '\([[:space:]]*(View(Block|Text|Span|Element|Table|TableRow|TableCell|TableRowGroup|Marker)|Dom(Node|Element|Text|Comment))[[:space:]]*\*[[:space:]]*\)[[:space:]]*([A-Za-z_&*]|\()' \
-		radiant/render.cpp radiant/render_form.cpp radiant/render_img.cpp \
-		radiant/render_pdf.cpp radiant/render_svg.cpp radiant/render_svg_inline.cpp \
-		radiant/render_walk.cpp radiant/event.cpp radiant/event_sim.cpp \
-		radiant/view_pool.cpp radiant/state_store.cpp radiant/dom_range_resolver.cpp \
-		radiant/source_pos_bridge.cpp \
-		radiant/state_machine.cpp radiant/dom_range.cpp radiant/context_menu.cpp \
-		radiant/css_animation.cpp radiant/ui_context.cpp radiant/script_runner.cpp \
-		radiant/block_context.cpp radiant/resolve_htm_style.cpp radiant/grid_positioning.cpp \
-		radiant/intrinsic_sizing.cpp radiant/cmd_layout.cpp \
-		radiant/window.cpp radiant/webview_manager.cpp radiant/ime_mac.mm radiant/ime_win.cpp \
-		radiant/webdriver/webdriver_actions.cpp radiant/webdriver/webdriver_locator.cpp \
-		radiant/webdriver/webdriver_server.cpp; \
-		grep -En 'static_cast<[[:space:]]*(View(Block|Text|Span|Element|Table|TableRow|TableCell|TableRowGroup|Marker)|Dom(Element|Text|Comment))[[:space:]]*\*[[:space:]]*>' \
-		radiant/render.cpp radiant/render_form.cpp radiant/render_img.cpp \
-		radiant/render_pdf.cpp radiant/render_svg.cpp radiant/render_svg_inline.cpp \
-		radiant/render_walk.cpp radiant/event.cpp radiant/event_sim.cpp \
-		radiant/view_pool.cpp radiant/state_store.cpp radiant/dom_range_resolver.cpp \
-		radiant/source_pos_bridge.cpp \
-		radiant/state_machine.cpp radiant/dom_range.cpp radiant/context_menu.cpp \
-		radiant/css_animation.cpp radiant/ui_context.cpp radiant/script_runner.cpp \
-		radiant/block_context.cpp radiant/resolve_htm_style.cpp radiant/grid_positioning.cpp \
-		radiant/intrinsic_sizing.cpp radiant/cmd_layout.cpp \
-		radiant/window.cpp radiant/webview_manager.cpp radiant/ime_mac.mm radiant/ime_win.cpp \
-		radiant/webdriver/webdriver_actions.cpp radiant/webdriver/webdriver_locator.cpp \
-		radiant/webdriver/webdriver_server.cpp; } \
-		| grep -v 'RADIANT_CAST_OK' \
-		|| true); \
-	if [ -n "$$VIOLATIONS" ]; then \
-		echo ""; \
-		echo "❌ Found unsafe View*/Dom* casts in migrated Radiant files:"; \
-		echo "$$VIOLATIONS"; \
-		echo ""; \
-		VCOUNT=$$(echo "$$VIOLATIONS" | wc -l | tr -d ' '); \
-		echo "Total: $$VCOUNT cast(s)"; \
-		exit 1; \
-	else \
-		echo "✅ No unsafe View*/Dom* casts in migrated Radiant files"; \
-	fi
-
-# Check retained Radiant fields are written through ownership helpers.
-# This keeps lifetime-sensitive pointers grepable and blocks accidental
-# pool/arena/long-lived fields from retaining layout-session allocations.
-check-radiant-ownership:
-	@echo "Checking retained Radiant field assignments..."
-	@VIOLATIONS=$$(grep -REn -- '->(tag_name|class_names|family|image|text_content|source_path|source_data)[[:space:]]*=' \
-		radiant/*.cpp radiant/*.hpp lambda/input/css/dom_element.cpp lambda/input/css/dom_element.hpp \
-		| grep -v 'radiant/retained_fields.hpp' \
-		| grep -v 'lambda/input/css/dom_element.hpp:.*PersistentFieldRef' \
-		| grep -v 'lambda/input/css/dom_element.cpp:.*comment_node->tag_name' \
-		| grep -v 'radiant/render_svg_inline.cpp:.*source_path' \
-		| grep -v 'radiant/rdt_vector_tvg.cpp:.*source_path' \
-		|| true); \
-	if [ -n "$$VIOLATIONS" ]; then \
-		echo ""; \
-		echo "❌ Found direct writes to retained Radiant fields:"; \
-		echo "$$VIOLATIONS"; \
-		echo ""; \
-		exit 1; \
-	else \
-		echo "✅ Retained Radiant fields use ownership helpers"; \
-	fi
+# Unified project-policy linter.
+#
+# Runs every ast-grep rule under utils/lint/rules/ (applying each rule's
+# inline-suppression marker) plus the structural checks dispatched by run.sh
+# (currently utils/check_state_machine.py), and aggregates into one pass/fail
+# gate. This is the single entry point — no per-policy wrapper targets.
+#
+# Examples:
+#   make lint                                  # full sweep, CI gate
+#   make lint ARGS='--rule ^no-raw-alloc$$'    # one rule (or family regex)
+#   make lint ARGS='--structural-only'         # skip pattern rules
+#   make lint ARGS=--report                    # write Report_NNN.{md,json,tsv}
+#   make lint ARGS=--format=github             # GitHub Actions annotations
+#   utils/lint/run.sh --list                   # list all rule ids
+lint:
+	@utils/lint/run.sh $(ARGS)
 
 # Clang-tidy static analysis
 tidy:

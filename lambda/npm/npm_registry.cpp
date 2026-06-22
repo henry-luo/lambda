@@ -23,7 +23,7 @@ static const char* get_cache_dir(void) {
     if (g_cache_dir) return g_cache_dir;
     // ~/.lambda/cache/npm
     const char* home = getenv("HOME");
-    if (!home) home = "/tmp";  // fallback only for non-macOS
+    if (!home) home = "/tmp";  // TMP_PATH_OK: fallback only for non-macOS when $HOME unset
     static char cache_path[512];
     snprintf(cache_path, sizeof(cache_path), "%s/.lambda/cache/npm", home);
     file_ensure_dir(cache_path);

@@ -1,0 +1,18 @@
+id: state-store-scroll-mirror
+language: cpp
+severity: error
+message: >-
+  External access to a scroll-position mirror field. Scroll position/extent is
+  owned by the StateStore; read/write it through the scroll API, not the raw
+  mirror. Mark audited exceptions with a trailing "// STATE_STORE_OK: <reason>".
+metadata:
+  suppress: STATE_STORE_OK
+constraints:
+  F:
+    regex: "^(h_scroll_position|v_scroll_position|h_max_scroll|v_max_scroll)$"
+rule:
+  pattern: $O->$F
+files:
+  - "radiant/**/*.cpp"
+ignores:
+  - "radiant/state_store.cpp"

@@ -1,0 +1,17 @@
+id: no-int-cast-radiant
+language: cpp
+severity: error
+message: >-
+  Unmarked (int) cast in layout code truncates float dimensions (all layout
+  positions/sizes are float). Remove the cast, or mark a genuinely-integer cast
+  with a trailing "// INT_CAST_OK: <reason>".
+metadata:
+  suppress: INT_CAST_OK
+rule:
+  pattern: (int)$X
+files:
+  - "radiant/{layout_block,layout_inline,layout_text,layout_positioned}.cpp"
+  - "radiant/{layout_flex,layout_flex_multipass,layout_flex_measurement}.cpp"
+  - "radiant/{layout_table,layout_multicol,layout_grid,layout_grid_multipass}.cpp"
+  - "radiant/{layout_form,layout_list,layout_counters}.cpp"
+  - "radiant/{grid_sizing,grid_positioning,grid_utils,intrinsic_sizing}.cpp"

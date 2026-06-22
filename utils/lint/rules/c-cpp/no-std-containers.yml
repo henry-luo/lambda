@@ -1,0 +1,23 @@
+id: no-std-containers
+language: cpp
+severity: warning
+message: >-
+  std:: container used in Lambda/Radiant code. CLAUDE.md rule 3 requires
+  lib/ equivalents (Str, ArrayList, HashMap, etc.) — they're pool-aware and
+  GC-aware. Mark an audited exception with a trailing "// STD_CONTAINER_OK: <reason>".
+metadata:
+  suppress: STD_CONTAINER_OK
+rule:
+  # The qualified_identifier kind matches `std::string`, `std::vector`, etc.
+  # wherever they appear (declarations, params, returns, template heads). It
+  # correctly ignores comments and string literals.
+  kind: qualified_identifier
+  regex: "^std::(string|wstring|string_view|vector|map|unordered_map|set|unordered_set|list|deque)$"
+files:
+  - "lambda/**/*.{c,cpp,h,hpp}"
+  - "radiant/**/*.{c,cpp,h,hpp}"
+ignores:
+  - "**/tree-sitter*/**"
+  # The embedded JS engine wraps third-party regex/code that's transitively
+  # std::-typed; cleanup there is its own initiative.
+  - "lambda/js/**"

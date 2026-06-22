@@ -1,0 +1,22 @@
+id: state-store-scroll-interaction
+language: cpp
+severity: error
+message: >-
+  ScrollPane interaction-state mirror (hover/drag) reintroduced. This transient
+  interaction state belongs to the StateStore. Mark audited exceptions with a
+  trailing "// STATE_STORE_OK: <reason>".
+metadata:
+  suppress: STATE_STORE_OK
+constraints:
+  F:
+    regex: "^(is_h_hovered|is_v_hovered|h_is_dragging|v_is_dragging|drag_start_x|drag_start_y|h_drag_start_scroll|v_drag_start_scroll)$"
+rule:
+  any:
+    - pattern: $O->$F
+    - pattern: bool is_h_hovered
+    - pattern: float drag_start_x
+files:
+  - "radiant/**/*.{c,cpp,h,hpp}"
+ignores:
+  - "radiant/state_store.cpp"
+  - "radiant/state_store.hpp"

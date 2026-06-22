@@ -2443,7 +2443,7 @@ DomComment* dom_comment_create(Element* native_element, DomElement* parent_eleme
 
     // Set Lambda backing
     comment_node->native_element = native_element;
-    comment_node->tag_name = tag_name;  // Reference type name (no copy needed)
+    comment_node->tag_name = tag_name;  // RETAINED_FIELD_OK: interned reference type name, no allocation retained
 
     // Extract content from first String child (if exists)
     if (native_element->length > 0) {
@@ -2520,7 +2520,7 @@ DomComment* dom_comment_create_detached(Element* native_element, DomDocument* do
     comment_node->next_sibling = nullptr;
     comment_node->prev_sibling = nullptr;
     comment_node->native_element = native_element;
-    comment_node->tag_name = tag_name;
+    comment_node->tag_name = tag_name;  // RETAINED_FIELD_OK: interned reference type name, no allocation retained
 
     if (native_element->length > 0) {
         Item first_item = native_element->items[0];

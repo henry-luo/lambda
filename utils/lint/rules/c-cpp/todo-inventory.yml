@@ -1,0 +1,15 @@
+id: todo-inventory
+language: cpp
+severity: info
+message: >-
+  TODO/FIXME/XXX/HACK marker. Inventory-only — not a violation. Captured in the
+  lint report so backlog can be tracked.
+rule:
+  kind: comment
+  regex: '\b(TODO|FIXME|XXX|HACK)\b'
+files:
+  - "lambda/**/*.{c,cpp,h,hpp}"
+  - "radiant/**/*.{c,cpp,h,hpp}"
+  - "lib/**/*.{c,cpp,h,hpp}"
+ignores:
+  - "**/tree-sitter*/**"

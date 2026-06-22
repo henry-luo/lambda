@@ -907,7 +907,7 @@ const char* shell_get_temp_dir(void) {
     }
 #else
     const char* tmp = getenv("TMPDIR");
-    if (!tmp) tmp = "/tmp";
+    if (!tmp) tmp = "/tmp";  // TMP_PATH_OK: shell tmpdir fallback when $TMPDIR unset
     s_cached_temp = mem_strdup(tmp, MEM_CAT_TEMP);
 #endif
     return s_cached_temp;

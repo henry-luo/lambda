@@ -1644,7 +1644,7 @@ static RdtPicture* svg_picture_create(const char* data, int size, const char* so
     p->pool = pool;
     p->owns_pool = true;
     p->svg_root = svg_root;
-    p->source_path = source_path ? mem_strdup(source_path, MEM_CAT_RENDER) : nullptr;
+    p->source_path = source_path ? mem_strdup(source_path, MEM_CAT_RENDER) : nullptr;  // RETAINED_FIELD_OK: TVG picture-local field, mem_strdup-owned, not a retained DOM field
     p->width = w;
     p->height = h;
     p->has_transform = false;
@@ -1750,7 +1750,7 @@ RdtPicture* rdt_picture_dup(RdtPicture* pic) {
     p->pool = pic->pool;
     p->owns_pool = false;
     p->svg_root = pic->svg_root;
-    p->source_path = pic->source_path;
+    p->source_path = pic->source_path;  // RETAINED_FIELD_OK: TVG picture-local field, not a retained DOM field
     p->width = pic->width;
     p->height = pic->height;
     p->transform = pic->transform;

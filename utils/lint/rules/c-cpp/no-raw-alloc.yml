@@ -1,0 +1,25 @@
+id: no-raw-alloc
+language: cpp
+severity: error
+message: >-
+  Raw allocation call. Use mem_alloc/mem_calloc/mem_realloc/mem_free (or
+  raw_malloc/raw_free with a trailing "// RAWALLOC_OK: <reason>"), and
+  arena_alloc/pool_calloc for Lambda objects.
+metadata:
+  suppress: RAWALLOC_OK
+rule:
+  any:
+    - pattern: malloc($$$A)
+    - pattern: calloc($$$A)
+    - pattern: realloc($$$A)
+    - pattern: free($$$A)
+    - pattern: strdup($$$A)
+    - pattern: strndup($$$A)
+files:
+  # Scope matches the legacy check-raw-alloc exactly (.c/.cpp/.h/.hpp; no .mm).
+  - "lambda/**/*.{c,cpp,h,hpp}"
+  - "radiant/**/*.{c,cpp,h,hpp}"
+ignores:
+  - "**/tree-sitter*/**"
+  - "lambda/lambda-wasm-main.c"
+  - "**/windows_compat.h"

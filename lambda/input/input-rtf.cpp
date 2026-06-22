@@ -94,9 +94,9 @@ static String* parse_rtf_string(InputContext& ctx, const char **rtf, char delimi
                     stringbuf_append_char(sb, (char)char_code);
                     (*rtf)++; // Skip second hex digit
                 }
-            } else if (isalpha(**rtf)) {
+            } else if (isalpha((unsigned char)**rtf)) {
                 // Handle other control words by skipping them
-                while (**rtf && (isalnum(**rtf) || **rtf == '-')) {
+                while (**rtf && (isalnum((unsigned char)**rtf) || **rtf == '-')) {
                     (*rtf)++;
                 }
                 // Skip optional space after control word
@@ -131,7 +131,7 @@ static RTFControlWord parse_control_word(InputContext& ctx, const char **rtf) {
     stringbuf_reset(sb);
 
     // Parse keyword (letters only)
-    while (**rtf && isalpha(**rtf)) {
+    while (**rtf && isalpha((unsigned char)**rtf)) {
         stringbuf_append_char(sb, **rtf);
         (*rtf)++;
     }

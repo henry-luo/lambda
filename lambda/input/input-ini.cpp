@@ -71,7 +71,7 @@ static String* parse_key(InputContext& ctx, const char **ini) {
     stringbuf_reset(sb);
 
     // Read until '=' or whitespace
-    while (**ini && **ini != '=' && **ini != '\n' && **ini != '\r' && !isspace(**ini)) {
+    while (**ini && **ini != '=' && **ini != '\n' && **ini != '\r' && !isspace((unsigned char)**ini)) {
         stringbuf_append_char(sb, **ini);
         tracker.advance(1);
         (*ini)++;
@@ -129,7 +129,7 @@ static String* parse_raw_value(InputContext& ctx, const char **ini) {
             (*ini)++;
         }
         // trim trailing whitespace
-        while (sb->length > 0 && isspace(sb->str->chars[sb->length - 1])) {
+        while (sb->length > 0 && isspace((unsigned char)sb->str->chars[sb->length - 1])) {
             sb->length--;
         }
     }

@@ -57,7 +57,7 @@ static String* kv_parse_key(InputContext& ctx, const char** pos) {
     stringbuf_reset(sb);
 
     while (**pos && **pos != '=' && **pos != ':' &&
-           **pos != '\n' && **pos != '\r' && !isspace(**pos)) {
+           **pos != '\n' && **pos != '\r' && !isspace((unsigned char)**pos)) {
         stringbuf_append_char(sb, **pos);
         tracker.advance(1);
         (*pos)++;

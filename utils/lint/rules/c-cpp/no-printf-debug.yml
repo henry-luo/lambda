@@ -1,0 +1,30 @@
+id: no-printf-debug
+language: cpp
+severity: warning
+message: >-
+  printf/fprintf/std::cout used for diagnostics. CLAUDE.md rule 4 says use the
+  log_debug/log_info/log_error helpers in lib/log.h (they route through
+  log.txt, respect the log config, and start each line with a searchable
+  prefix). Excluded zones: lambda/cli/, lambda/repl/, lambda/main.cpp,
+  lambda/lambda-error.cpp, and any line carrying "// PRINTF_OK: <reason>".
+metadata:
+  suppress: PRINTF_OK
+rule:
+  any:
+    - pattern: printf($$$A)
+    - pattern: fprintf($$$A)
+    - pattern: std::cout << $$$A
+    - pattern: std::cerr << $$$A
+files:
+  - "lambda/**/*.{c,cpp}"
+  - "radiant/**/*.{c,cpp,mm}"
+  - "lib/**/*.{c,cpp}"
+ignores:
+  - "**/tree-sitter*/**"
+  - "lambda/cli/**"
+  - "lambda/repl/**"
+  - "lambda/main.cpp"
+  - "lambda/lambda-error.cpp"
+  - "lambda/lambda-help.cpp"
+  - "lambda/print.cpp"
+  # CLI/REPL entry points and tooling that legitimately write to stdout/stderr.

@@ -166,7 +166,7 @@ extern "C" Item js_os_tmpdir(void) {
     const char* temp = getenv("TMPDIR");
     if (!temp || !temp[0]) temp = getenv("TMP");
     if (!temp || !temp[0]) temp = getenv("TEMP");
-    if (!temp || !temp[0]) temp = "/tmp";
+    if (!temp || !temp[0]) temp = "/tmp";  // TMP_PATH_OK: JS os.tmpdir() OS-standard fallback
     // strip trailing slashes (but not if root "/")
     size_t len = strlen(temp);
     while (len > 1 && temp[len-1] == '/') len--;

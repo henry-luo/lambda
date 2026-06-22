@@ -4658,7 +4658,7 @@ static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_el
     ctx->style_rules = nullptr;
     ctx->style_rule_count = 0;
     ctx->style_rule_capacity = 0;
-    ctx->source_path = rdt_picture_get_source_path(pic);
+    ctx->source_path = rdt_picture_get_source_path(pic);  // RETAINED_FIELD_OK: render-context field, not a retained DOM field
     process_svg_root_resources(ctx, root);
     render_svg_use_target(ctx, use_elem, ref, href);
     if (ctx->style_rules) mem_free(ctx->style_rules);
@@ -4667,7 +4667,7 @@ static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_el
     ctx->style_rules = saved_rules;
     ctx->style_rule_count = saved_rule_count;
     ctx->style_rule_capacity = saved_rule_capacity;
-    ctx->source_path = saved_source_path;
+    ctx->source_path = saved_source_path;  // RETAINED_FIELD_OK: render-context field, not a retained DOM field
 
     rdt_picture_free(pic);
     log_debug("[SVG] external <use> rendered href='%s'", href);
@@ -5126,7 +5126,7 @@ void render_svg_build_subscene(PaintSvgSubscene* subscene,
     if (initial_stroke_color) subscene->stroke = *initial_stroke_color;
     subscene->stroke_none = initial_stroke_none;
     subscene->stroke_width = initial_stroke_width;
-    subscene->source_path = source_path;
+    subscene->source_path = source_path;  // RETAINED_FIELD_OK: subscene-local field, not a retained DOM field
     if (initial_opacity < 0.0f) initial_opacity = 0.0f;
     if (initial_opacity > 1.0f) initial_opacity = 1.0f;
     subscene->opacity = initial_opacity;
