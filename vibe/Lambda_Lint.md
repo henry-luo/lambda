@@ -1488,3 +1488,170 @@ this codebase. The existing four-tier stack (ast-grep / alint / clang-tidy +
 libclang / clang-analyzer) covers the analyses we actually need without the
 database-build overhead, the SARIF tooling chain, the QL learning curve, or
 the closed-source dependency.
+
+---
+
+## Appendix B — SonarQube: how it compares to our stack
+
+This appendix records why SonarQube was *not* part of any phase, and the
+specific edition/licensing constraint that makes the free option unusable
+for our codebase regardless of whether SonarQube would otherwise fit. The
+short version: SonarQube Community Edition is genuinely free, but
+**deliberately excludes C/C++ analysis** — and Lambda/Radiant is ~250k lines
+of C++, so the free tier covers approximately 0% of the work that matters.
+
+### B.1 What SonarQube is
+
+Built by **SonarSource** (Geneva, founded 2008 — older than both CodeQL and
+ast-grep). The product family ships across three deployment surfaces:
+
+- **SonarQube Server** — self-hosted Java/Postgres service. Per-language
+  scanners (`sonar-scanner`, build-system plugins, IDE plugins) run separately
+  and submit analysis reports to the server, which ingests, dedupes, and
+  tracks issue lifecycle in a web UI.
+- **SonarCloud** — SonarSource-hosted SaaS version of the server. Free for
+  public repos; paid for private.
+- **SonarLint** — in-IDE companion that runs a subset of rules locally for
+  fast feedback.
+
+The architectural defining property: **findings are stateful**. Issues have
+a lifecycle (open → confirmed → resolved → reopened), assignable to
+developers, with rules and quality gates evaluated against deltas
+("new-code-only") over time. That's the operational model — analyzers serve
+the dashboard, not the other way around. CodeQL ships queries and SARIF
+files; SonarQube ships an issue tracker that happens to have analyzers
+wired into it.
+
+### B.2 Components / stack
+
+Mostly closed for the language analyzers, partially open for the server:
+
+| Component | Source | Notes |
+|---|---|---|
+| **SonarQube Server** | Open-source (LGPL v3) for Community Edition; closed extensions in paid editions | Java + Postgres. Web UI + REST API. The platform itself is genuinely OSS at the bottom tier. |
+| **JavaScript / TypeScript analyzer** (SonarJS) | Open-source — wraps ESLint's parser | The ESLint base makes this analyzer relatively transparent. |
+| **Java analyzer** | Closed | Custom AST + symbol solver. |
+| **C / C++ / Objective-C analyzer** (SonarCFamily) | **Closed AND paid** — Developer Edition or higher only | Has its own preprocessor and analyzer. **Not in Community Edition at all.** |
+| **C# analyzer** | Open-source — Roslyn-backed | Roslyn gives them the AST. |
+| **Python / PHP / Ruby / Kotlin / Go / etc.** | Mix — some open, some closed; some paid only | 30+ languages total across the editions. |
+| **Rule authoring API** | Java SDK per analyzer | Custom rules in Java (and JS for SonarJS) per analyzer. |
+| **"Deep code understanding" dataflow** | Closed | Powers the security-hotspot / SAST tier in Developer Edition+. |
+| **SARIF output** | Yes | For interop with other tools and GitHub Code Scanning. |
+
+Implementation details for the closed analyzers are inferred from
+SonarSource engineering blog posts, job postings, and the visible structure
+of the scanner distributions — the same epistemic caveat as Appendix A for
+CodeQL.
+
+### B.3 Tier comparison vs. our stack (and CodeQL)
+
+| Capability | Our stack | CodeQL | SonarQube |
+|---|---|---|---|
+| Analysis model | Per-file patterns + filesystem shape + type-aware + dataflow | Compile to relational database → QL queries → SARIF | Per-file analyzers per language; server ingests + tracks lifecycle |
+| Out-of-box rule count | ~40 (ours) | Several hundred per language | ~6,000+ rules across 30+ languages |
+| Custom rule authoring | YAML (ast-grep / alint) + Python+libclang | QL (Datalog-flavoured) | Java SDK per analyzer |
+| Inter-procedural dataflow | clang-analyzer (C++ only) | First-class | Closed; in paid editions |
+| Taint analysis | Not in our stack | Industry-leading | Has it in Developer Edition+ |
+| **Issue-lifecycle tracking** | `Report_NNN.*` files | GitHub Code Scanning UI | **The headline feature — assign / confirm / mark won't-fix / track over time** |
+| Quality gates | `make lint` exit codes | GitHub branch-protection | Built-in, per-project configurable |
+| Deployment model | Single binaries + scripts | CLI + cloud | **Self-hosted server or SaaS — fundamentally different operational shape** |
+| Footprint | ~100 MB total | Hundreds of MB qlpacks + GB DBs | Multi-GB server + Postgres + scanner caches |
+| C / C++ analysis | Free (clang-tidy, libclang) | Free for OSS | **Paid only (Developer Edition+)** |
+| `.ls` Lambda script linting | tree-sitter-lambda registered | Would need a custom extractor | Would need a custom analyzer plugin |
+| License | All MIT / Apache | Free for OSS, paid for closed-source via GHAS | Community Edition free (limited languages); Developer ~$160/dev/year (10-seat floor); Enterprise much more |
+
+The three tools are not direct competitors — they answer different
+questions. CodeQL: "how do we find taint and complex vulnerabilities?"
+SonarQube: "how do we manage code-health debt across an organisation?"
+Our stack: "how do we stop bad patterns from landing in this codebase?"
+
+### B.4 What blocks adoption — the C/C++ paid-tier requirement
+
+For Lambda/Radiant the blocker is concrete and immediate:
+
+| Tree | Size | Coverage in SonarQube Community Edition |
+|---|---:|---|
+| `radiant/` | ~80k LOC of C++17 | **Not analysed** — SonarCFamily is paid-only |
+| `lambda/` (excl. js) | ~150k LOC of C++17 + C | **Not analysed** — same |
+| `lib/` | ~20k LOC of C/C++ | **Not analysed** — same |
+| Lambda `.ls` corpus | 3,000 scripts | Not analysed by *any* edition — no analyzer exists for our DSL |
+| Python utility scripts | small | Would be covered |
+| YAML configs | small | Would be covered |
+
+Net: roughly **0% of the C++ where the Radiant memory-safety audit actually
+found bugs** is in scope for the free tier. The exclusion is deliberate on
+SonarSource's part — C-family analysis is the cell with the highest pricing
+elasticity (regulated industries, embedded systems, automotive, finance),
+so it stays paid-only.
+
+**To get C/C++ coverage we'd pay roughly**:
+
+| Cost | What it is |
+|---|---|
+| Developer Edition license | ~$160/dev-seat/year × 10 seat minimum ≈ **$1,600/year floor** |
+| Server hosting | ~$30-50/month for a modest VPS running JVM + Postgres ≈ $400-600/year |
+| Admin overhead | A few hours/month for backups, Postgres schema migrations across SonarQube versions, user/role management, CI integration upkeep |
+| CI wall time | Each `sonar-scanner` run is its own step — typically minutes per scan; adds to PR cycle time |
+
+That ~$2k/year-plus-ops to replace tooling we currently run for $0 plus a
+few seconds per `make lint`. Even ignoring the rule-coverage comparison,
+the operational footprint inverts: our stack is "scripts that call
+binaries", SonarQube is "another service to keep running."
+
+Even if we accepted the cost, the *what-it-buys-us* comparison is unfavourable:
+
+- **Iteration cycle**: 10 s feedback in `make lint` becomes scan → upload → server-side analysis → wait for UI refresh — minutes per cycle.
+- **Custom rules**: Java plugin to the closed analyzer, deployed to the server, vs YAML / Python files in the same repo as the code.
+- **Where findings live**: `Report_NNN.{md,json,tsv}` files purpose-built for agent batch fixes vs a Web UI you have to scrape via REST API.
+- **Cost when not load-bearing**: zero for our stack vs continuous infra spend.
+
+The single area where SonarQube would genuinely add value is **multi-repo
+cross-project tracking** — a portfolio dashboard view across 5+ repos with
+shared discipline. That's not the current problem.
+
+### B.5 Adoption triggers
+
+Mirroring Appendix A.5's structure, SonarQube becomes a sensible addition
+when at least one of these holds:
+
+1. We grow to a **portfolio of 5+ repos** with shared lint discipline that
+   needs cross-repo tracking and assignment workflows. The portfolio
+   dashboard is hard to replicate with our per-repo `Report_NNN.*`.
+2. **Compliance or audit reporting** requires the dashboard-with-history
+   view (regulated industries, SOC-2 evidence, etc.) that neither GitHub
+   Code Scanning nor our `Report_NNN.*` satisfy.
+3. We add a **Java / Python / Kotlin** subsystem where SonarQube's bundled
+   rule sets cover what we'd otherwise have to author. (Bundled-coverage
+   value is highest for those languages; lower for niche ones like our
+   Lambda `.ls`.)
+4. A customer or auditor specifically asks for SonarQube reports as a
+   deliverable.
+
+Until then, the cost/benefit is not in SonarQube's favour for this
+codebase. The combination of (a) **C/C++ being paid-only**, (b) the
+server-hosting operational footprint, and (c) the issue-lifecycle UI
+solving a problem we don't have — none of these align with the current
+shape of the work.
+
+### B.6 Why we frame this as "free SonarQube doesn't work for us"
+
+"SonarQube Community Edition is free" is technically true and worth
+restating: it's a real, working, useful tool for **Java / JavaScript /
+Python / C# / Go shops with central dev-management needs**. For those
+projects it's a genuine option (just pay for hosting).
+
+For us, two strikes:
+
+1. **The free tier doesn't analyse our main language family.** SonarCFamily
+   is the analyzer we'd need and it's behind a paywall starting ~$1,600/year
+   minimum, ignoring hosting and ops.
+2. **The part it would cover** — our handful of Python utility scripts and
+   YAML configs — **is already a non-problem**. Those files are short, rarely
+   touched, and don't need a server-based dashboard.
+
+So when we say "we're not using SonarQube," the operative reason is
+**neither** "it doesn't catch the bugs" **nor** "we can't afford the paid
+edition" in isolation. It's that **the free option doesn't reach our code,
+and the paid option costs us money plus ops to replace tooling we already
+run for free**. The right time to revisit is when one of §B.5's triggers
+fires.
