@@ -196,13 +196,15 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
                               float x1, float y1, float x2, float y2,
                               const RdtGradientStop* stops, int stop_count,
                               RdtFillRule rule,
-                              const RdtMatrix* transform);
+                              const RdtMatrix* transform,
+                              const RdtMatrix* gradient_transform);
 
 void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
                               float cx, float cy, float r,
                               const RdtGradientStop* stops, int stop_count,
                               RdtFillRule rule,
-                              const RdtMatrix* transform);
+                              const RdtMatrix* transform,
+                              const RdtMatrix* gradient_transform);
 
 // ---------------------------------------------------------------------------
 // Clipping (alpha mask)

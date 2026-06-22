@@ -55,26 +55,57 @@ function TestTree({ onTestSelect, selectedTest }) {
       selectedTest?.testType === testType;
   }
 
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const isSearching = normalizedSearchQuery.length > 0;
+
+  function renderTestName(test, displayName = test) {
+    const label = isSearching
+      ? displayName.split(/([_./-])/).map((part, index) => (
+        <React.Fragment key={index}>
+          {part}
+          {part.length === 1 && '_./-'.includes(part) ? <wbr /> : null}
+        </React.Fragment>
+      ))
+      : displayName;
+
+    return (
+      <span
+        className={`test-name ${isSearching ? 'search-match' : ''}`}
+        title={test}
+      >
+        {label}
+      </span>
+    );
+  }
+
+  function testItemClass(category, test, testType) {
+    return [
+      'test-item',
+      isSearching ? 'search-result' : '',
+      isSelected(category, test, testType) ? 'selected' : ''
+    ].filter(Boolean).join(' ');
+  }
+
   const filteredLayoutCategories = layoutCategories.map(cat => {
-    if (!searchQuery) return cat;
+    if (!isSearching) return cat;
     const filteredTests = cat.tests.filter(test =>
-      test.toLowerCase().includes(searchQuery.toLowerCase())
+      test.toLowerCase().includes(normalizedSearchQuery)
     );
     return { ...cat, tests: filteredTests };
   }).filter(cat => cat.tests.length > 0);
 
   const filteredRenderDirs = renderDirs.map(d => {
-    if (!searchQuery) return d;
+    if (!isSearching) return d;
     const filteredTests = d.tests.filter(test =>
-      test.toLowerCase().includes(searchQuery.toLowerCase())
+      test.toLowerCase().includes(normalizedSearchQuery)
     );
     return { ...d, tests: filteredTests };
   }).filter(d => d.tests.length > 0);
 
   const filteredPdfRenderDirs = pdfRenderDirs.map(d => {
-    if (!searchQuery) return d;
+    if (!isSearching) return d;
     const filteredTests = d.tests.filter(test =>
-      test.toLowerCase().includes(searchQuery.toLowerCase())
+      test.toLowerCase().includes(normalizedSearchQuery)
     );
     return { ...d, tests: filteredTests };
   }).filter(d => d.tests.length > 0);
@@ -83,7 +114,7 @@ function TestTree({ onTestSelect, selectedTest }) {
   const totalPdfRenderTests = filteredPdfRenderDirs.reduce((sum, d) => sum + d.tests.length, 0);
 
   return (
-    <div className="test-tree">
+    <div className={`test-tree ${isSearching ? 'searching' : ''}`}>
       <div className="tree-header">
         <h3>Tests</h3>
         <input
@@ -110,7 +141,7 @@ function TestTree({ onTestSelect, selectedTest }) {
               <span className="test-count">({totalRenderTests})</span>
             </div>
 
-            {expandedSections.has('render') && filteredRenderDirs.map(d => (
+            {(expandedSections.has('render') || isSearching) && filteredRenderDirs.map(d => (
               <div key={d.dir} className="category">
                 <div
                   className="category-header"
@@ -123,16 +154,16 @@ function TestTree({ onTestSelect, selectedTest }) {
                   <span className="test-count">({d.tests.length})</span>
                 </div>
 
-                {expandedCategories.has(`render:${d.dir}`) && (
+                {(expandedCategories.has(`render:${d.dir}`) || isSearching) && (
                   <div className="test-list">
                     {d.tests.map(test => (
                       <div
                         key={test}
-                        className={`test-item ${isSelected('render', test, 'render') ? 'selected' : ''}`}
+                        className={testItemClass('render', test, 'render')}
                         onClick={() => handleTestSelect('render', test, 'render', d.dir)}
                       >
                         <span className="status-icon">⚪</span>
-                        <span className="test-name">{test}</span>
+                        {renderTestName(test)}
                       </div>
                     ))}
                   </div>
@@ -156,7 +187,7 @@ function TestTree({ onTestSelect, selectedTest }) {
               <span className="test-count">({totalPdfRenderTests})</span>
             </div>
 
-            {expandedSections.has('pdf-render') && filteredPdfRenderDirs.map(d => (
+            {(expandedSections.has('pdf-render') || isSearching) && filteredPdfRenderDirs.map(d => (
               <div key={d.dir} className="category">
                 <div
                   className="category-header"
@@ -169,16 +200,16 @@ function TestTree({ onTestSelect, selectedTest }) {
                   <span className="test-count">({d.tests.length})</span>
                 </div>
 
-                {expandedCategories.has(`pdf-render:${d.dir}`) && (
+                {(expandedCategories.has(`pdf-render:${d.dir}`) || isSearching) && (
                   <div className="test-list">
                     {d.tests.map(test => (
                       <div
                         key={test}
-                        className={`test-item ${isSelected('pdf-render', test, 'pdf-render') ? 'selected' : ''}`}
+                        className={testItemClass('pdf-render', test, 'pdf-render')}
                         onClick={() => handleTestSelect('pdf-render', test, 'pdf-render', d.dir)}
                       >
                         <span className="status-icon">⚪</span>
-                        <span className="test-name">{test}</span>
+                        {renderTestName(test)}
                       </div>
                     ))}
                   </div>
@@ -204,7 +235,7 @@ function TestTree({ onTestSelect, selectedTest }) {
               </span>
             </div>
 
-            {expandedSections.has('layout') && filteredLayoutCategories.map(cat => (
+            {(expandedSections.has('layout') || isSearching) && filteredLayoutCategories.map(cat => (
               <div key={cat.name} className="category">
                 <div
                   className="category-header"
@@ -217,16 +248,16 @@ function TestTree({ onTestSelect, selectedTest }) {
                   <span className="test-count">({cat.tests.length})</span>
                 </div>
 
-                {expandedCategories.has(cat.name) && (
+                {(expandedCategories.has(cat.name) || isSearching) && (
                   <div className="test-list">
                     {cat.tests.map(test => (
                       <div
                         key={test}
-                        className={`test-item ${isSelected(cat.name, test, 'layout') ? 'selected' : ''}`}
+                        className={testItemClass(cat.name, test, 'layout')}
                         onClick={() => handleTestSelect(cat.name, test, 'layout')}
                       >
                         <span className="status-icon">⚪</span>
-                        <span className="test-name">{test.endsWith('/index.html') ? test.slice(0, -'/index.html'.length) : test}</span>
+                        {renderTestName(test, test.endsWith('/index.html') ? test.slice(0, -'/index.html'.length) : test)}
                       </div>
                     ))}
                   </div>

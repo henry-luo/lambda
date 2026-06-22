@@ -141,6 +141,8 @@ typedef struct {
     RdtFillRule rule;
     bool has_transform;
     RdtMatrix transform;
+    bool has_gradient_transform;
+    RdtMatrix gradient_transform;
 } PaintFillLinearGradient;
 
 typedef struct {
@@ -153,6 +155,8 @@ typedef struct {
     RdtFillRule rule;
     bool has_transform;
     RdtMatrix transform;
+    bool has_gradient_transform;
+    RdtMatrix gradient_transform;
 } PaintFillRadialGradient;
 
 typedef struct {
@@ -468,11 +472,13 @@ void paint_stroke_path(PaintList* pl, RdtPath* path, Color color, float width,
 void paint_fill_linear_gradient(PaintList* pl, RdtPath* path,
                                 float x1, float y1, float x2, float y2,
                                 const RdtGradientStop* stops, int stop_count,
-                                RdtFillRule rule, const RdtMatrix* transform);
+                                RdtFillRule rule, const RdtMatrix* transform,
+                                const RdtMatrix* gradient_transform);
 void paint_fill_radial_gradient(PaintList* pl, RdtPath* path,
                                 float cx, float cy, float r,
                                 const RdtGradientStop* stops, int stop_count,
-                                RdtFillRule rule, const RdtMatrix* transform);
+                                RdtFillRule rule, const RdtMatrix* transform,
+                                const RdtMatrix* gradient_transform);
 void paint_draw_image(PaintList* pl, const uint32_t* pixels,
                       int src_w, int src_h, int src_stride,
                       float dst_x, float dst_y, float dst_w, float dst_h,

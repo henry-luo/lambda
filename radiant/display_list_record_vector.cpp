@@ -179,7 +179,8 @@ void dl_stroke_path(DisplayList* dl, RdtPath* path, Color color, float width,
 void dl_fill_linear_gradient(DisplayList* dl, RdtPath* path,
                              float x1, float y1, float x2, float y2,
                              const RdtGradientStop* stops, int stop_count,
-                             RdtFillRule rule, const RdtMatrix* transform) {
+                             RdtFillRule rule, const RdtMatrix* transform,
+                             const RdtMatrix* gradient_transform) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_FILL_LINEAR_GRADIENT;
     dl_record_set_path_bounds(item, path, transform, 1.0f);
@@ -193,12 +194,15 @@ void dl_fill_linear_gradient(DisplayList* dl, RdtPath* path,
     item->fill_linear_gradient.rule = rule;
     item->fill_linear_gradient.has_transform = (transform != nullptr);
     if (transform) item->fill_linear_gradient.transform = *transform;
+    item->fill_linear_gradient.has_gradient_transform = (gradient_transform != nullptr);
+    if (gradient_transform) item->fill_linear_gradient.gradient_transform = *gradient_transform;
 }
 
 void dl_fill_radial_gradient(DisplayList* dl, RdtPath* path,
                              float cx, float cy, float r,
                              const RdtGradientStop* stops, int stop_count,
-                             RdtFillRule rule, const RdtMatrix* transform) {
+                             RdtFillRule rule, const RdtMatrix* transform,
+                             const RdtMatrix* gradient_transform) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_FILL_RADIAL_GRADIENT;
     dl_record_set_path_bounds(item, path, transform, 1.0f);
@@ -211,6 +215,8 @@ void dl_fill_radial_gradient(DisplayList* dl, RdtPath* path,
     item->fill_radial_gradient.rule = rule;
     item->fill_radial_gradient.has_transform = (transform != nullptr);
     if (transform) item->fill_radial_gradient.transform = *transform;
+    item->fill_radial_gradient.has_gradient_transform = (gradient_transform != nullptr);
+    if (gradient_transform) item->fill_radial_gradient.gradient_transform = *gradient_transform;
 }
 
 void dl_draw_image(DisplayList* dl, const uint32_t* pixels,

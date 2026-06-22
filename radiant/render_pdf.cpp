@@ -1391,7 +1391,7 @@ static bool pdf_paint_fill_linear_gradient(PdfRenderContext* ctx,
                                gradient->x1, gradient->y1,
                                gradient->x2, gradient->y2,
                                gradient->stops, gradient->stop_count,
-                               RDT_FILL_WINDING, nullptr);
+                               RDT_FILL_WINDING, nullptr, nullptr);
     bool owns_payload = false;
     if (ctx && ctx->effect_fallback.active && list &&
         list->count == index + 1 && index >= 0 &&
@@ -1413,7 +1413,7 @@ static bool pdf_paint_fill_radial_gradient(PdfRenderContext* ctx,
     paint_fill_radial_gradient(list, gradient->path,
                                gradient->cx, gradient->cy, gradient->r,
                                gradient->stops, gradient->stop_count,
-                               RDT_FILL_WINDING, nullptr);
+                               RDT_FILL_WINDING, nullptr, nullptr);
     bool owns_payload = false;
     if (ctx && ctx->effect_fallback.active && list &&
         list->count == index + 1 && index >= 0 &&

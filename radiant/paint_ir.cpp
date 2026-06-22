@@ -526,7 +526,8 @@ void paint_stroke_path(PaintList* pl, RdtPath* path, Color color, float width,
 void paint_fill_linear_gradient(PaintList* pl, RdtPath* path,
                                 float x1, float y1, float x2, float y2,
                                 const RdtGradientStop* stops, int stop_count,
-                                RdtFillRule rule, const RdtMatrix* transform) {
+                                RdtFillRule rule, const RdtMatrix* transform,
+                                const RdtMatrix* gradient_transform) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_FILL_LINEAR_GRADIENT);
     if (!cmd) return;
     cmd->fill_linear_gradient.path = path;
@@ -539,12 +540,15 @@ void paint_fill_linear_gradient(PaintList* pl, RdtPath* path,
     cmd->fill_linear_gradient.rule = rule;
     cmd->fill_linear_gradient.has_transform = transform != nullptr;
     if (transform) cmd->fill_linear_gradient.transform = *transform;
+    cmd->fill_linear_gradient.has_gradient_transform = gradient_transform != nullptr;
+    if (gradient_transform) cmd->fill_linear_gradient.gradient_transform = *gradient_transform;
 }
 
 void paint_fill_radial_gradient(PaintList* pl, RdtPath* path,
                                 float cx, float cy, float r,
                                 const RdtGradientStop* stops, int stop_count,
-                                RdtFillRule rule, const RdtMatrix* transform) {
+                                RdtFillRule rule, const RdtMatrix* transform,
+                                const RdtMatrix* gradient_transform) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_FILL_RADIAL_GRADIENT);
     if (!cmd) return;
     cmd->fill_radial_gradient.path = path;
@@ -556,6 +560,8 @@ void paint_fill_radial_gradient(PaintList* pl, RdtPath* path,
     cmd->fill_radial_gradient.rule = rule;
     cmd->fill_radial_gradient.has_transform = transform != nullptr;
     if (transform) cmd->fill_radial_gradient.transform = *transform;
+    cmd->fill_radial_gradient.has_gradient_transform = gradient_transform != nullptr;
+    if (gradient_transform) cmd->fill_radial_gradient.gradient_transform = *gradient_transform;
 }
 
 void paint_draw_image(PaintList* pl, const uint32_t* pixels,
@@ -969,14 +975,16 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
             const PaintFillLinearGradient* p = &cmd->fill_linear_gradient;
             dl_fill_linear_gradient(dl, p->path, p->x1, p->y1, p->x2, p->y2,
                                     p->stops, p->stop_count, p->rule,
-                                    p->has_transform ? &p->transform : nullptr);
+                                    p->has_transform ? &p->transform : nullptr,
+                                    p->has_gradient_transform ? &p->gradient_transform : nullptr);
             break;
         }
         case PAINT_FILL_RADIAL_GRADIENT: {
             const PaintFillRadialGradient* p = &cmd->fill_radial_gradient;
             dl_fill_radial_gradient(dl, p->path, p->cx, p->cy, p->r,
                                     p->stops, p->stop_count, p->rule,
-                                    p->has_transform ? &p->transform : nullptr);
+                                    p->has_transform ? &p->transform : nullptr,
+                                    p->has_gradient_transform ? &p->gradient_transform : nullptr);
             break;
         }
         case PAINT_DRAW_IMAGE: {
@@ -1222,6 +1230,14 @@ static void paint_svg_append_matrix_attr(StrBuf* out, const RdtMatrix* matrix) {
     if (!matrix) return;
     strbuf_append_format(out, " transform=\"matrix(%.6g %.6g %.6g %.6g %.6g %.6g)\"",
                          matrix->e11, matrix->e21, matrix->e12,
+                         matrix->e22, matrix->e13, matrix->e23);
+}
+
+static void paint_svg_append_named_matrix_attr(StrBuf* out, const char* name,
+                                               const RdtMatrix* matrix) {
+    if (!matrix || !name) return;
+    strbuf_append_format(out, " %s=\"matrix(%.6g %.6g %.6g %.6g %.6g %.6g)\"",
+                         name, matrix->e11, matrix->e21, matrix->e12,
                          matrix->e22, matrix->e13, matrix->e23);
 }
 
@@ -1611,7 +1627,7 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
         }
         case PAINT_FILL_LINEAR_GRADIENT: {
             const PaintFillLinearGradient* p = &cmd->fill_linear_gradient;
-            if (!paint_svg_caps_allow_gradient(caps, p->has_transform) ||
+            if (!paint_svg_caps_allow_gradient(caps, p->has_transform || p->has_gradient_transform) ||
                 !p->stops || p->stop_count <= 0) {
                 paint_svg_note_unsupported(out, indent_level, cmd->op,
                                            emit_unsupported_comments, active_stats);
@@ -1630,8 +1646,11 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             paint_svg_indent(out, indent_level);
             strbuf_append_format(out,
                 "<defs><linearGradient id=\"paint-ir-linear-%d\" gradientUnits=\"userSpaceOnUse\" "
-                "x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\">\n",
+                "x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\"",
                 gradient_id, p->x1, p->y1, p->x2, p->y2);
+            paint_svg_append_named_matrix_attr(out, "gradientTransform",
+                                               p->has_gradient_transform ? &p->gradient_transform : nullptr);
+            strbuf_append_str(out, ">\n");
             paint_svg_append_gradient_stops(out, p->stops, p->stop_count,
                                             indent_level + 1);
             paint_svg_indent(out, indent_level);
@@ -1651,7 +1670,7 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
         }
         case PAINT_FILL_RADIAL_GRADIENT: {
             const PaintFillRadialGradient* p = &cmd->fill_radial_gradient;
-            if (!paint_svg_caps_allow_gradient(caps, p->has_transform) ||
+            if (!paint_svg_caps_allow_gradient(caps, p->has_transform || p->has_gradient_transform) ||
                 !p->stops || p->stop_count <= 0) {
                 paint_svg_note_unsupported(out, indent_level, cmd->op,
                                            emit_unsupported_comments, active_stats);
@@ -1670,8 +1689,11 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             paint_svg_indent(out, indent_level);
             strbuf_append_format(out,
                 "<defs><radialGradient id=\"paint-ir-radial-%d\" gradientUnits=\"userSpaceOnUse\" "
-                "cx=\"%.3f\" cy=\"%.3f\" r=\"%.3f\">\n",
+                "cx=\"%.3f\" cy=\"%.3f\" r=\"%.3f\"",
                 gradient_id, p->cx, p->cy, p->r);
+            paint_svg_append_named_matrix_attr(out, "gradientTransform",
+                                               p->has_gradient_transform ? &p->gradient_transform : nullptr);
+            strbuf_append_str(out, ">\n");
             paint_svg_append_gradient_stops(out, p->stops, p->stop_count,
                                             indent_level + 1);
             paint_svg_indent(out, indent_level);
