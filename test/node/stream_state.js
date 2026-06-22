@@ -54,6 +54,7 @@ readable.on('data', () => {
 
 const writable = new stream.Writable({
   write(chunk, encoding, cb) {
+    assert.strictEqual(writable._writableState.ending, false);
     assert.strictEqual(writable._writableState.ended, false);
     assert.strictEqual(writable.writableEnded, false);
     cb();
@@ -65,11 +66,13 @@ let sawFinish = false;
 let sawEndCallback = false;
 writable.on('prefinish', () => {
   sawPrefinish = true;
+  assert.strictEqual(writable._writableState.ending, true);
   assert.strictEqual(writable._writableState.ended, true);
   assert.strictEqual(writable.writableEnded, true);
 });
 writable.end('done', () => {
   sawEndCallback = true;
+  assert.strictEqual(writable._writableState.ending, true);
   assert.strictEqual(writable.writable, false);
   assert.strictEqual(writable.writableFinished, true);
 });
@@ -168,7 +171,7 @@ errorWritable.on('error', () => {
   sawWritableError = true;
 });
 
-process.nextTick(() => {
+process.nextTick(() => process.nextTick(() => {
   assert(sawData);
   assert(sawEnd);
   assert(sawReadableListening);
@@ -181,4 +184,4 @@ process.nextTick(() => {
   assert(sawEndCallback);
   assert(sawFinish);
   console.log('stream state ok');
-});
+}));

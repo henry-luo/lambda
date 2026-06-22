@@ -32315,6 +32315,12 @@ extern "C" Item js_module_get(Item specifier) {
         extern Item js_get_internal_stream_add_abort_signal_namespace(void);
         return js_get_internal_stream_add_abort_signal_namespace();
     }
+    // internal/streams/state — selected stream state helpers used by Node tests.
+    if ((spec->len == 22 && memcmp(spec->chars, "internal/streams/state", 22) == 0) ||
+        (spec->len == 25 && memcmp(spec->chars, "internal/streams/state.js", 25) == 0)) {
+        extern Item js_get_internal_stream_state_namespace(void);
+        return js_get_internal_stream_state_namespace();
+    }
     // internal/test/binding — provides internalBinding() for Node.js tests
     if ((spec->len == 21 && memcmp(spec->chars, "internal/test/binding", 21) == 0) ||
         (spec->len == 24 && memcmp(spec->chars, "internal/test/binding.js", 24) == 0)) {

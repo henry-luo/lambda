@@ -1,5 +1,12 @@
 const assert = require('assert');
-const { Duplex, Readable, Writable } = require('stream');
+const {
+  Duplex,
+  Readable,
+  Transform,
+  Writable,
+  getDefaultHighWaterMark,
+  setDefaultHighWaterMark
+} = require('stream');
 
 {
   const duplex = new Duplex({
@@ -27,6 +34,45 @@ const { Duplex, Readable, Writable } = require('stream');
   assert.strictEqual(duplex.readableHighWaterMark, 10);
   assert.strictEqual(duplex.writableObjectMode, true);
   assert.strictEqual(duplex.writableHighWaterMark, 100);
+}
+
+{
+  assert.strictEqual(getDefaultHighWaterMark(false), 16 * 1024);
+  assert.strictEqual(getDefaultHighWaterMark(true), 16);
+  setDefaultHighWaterMark(false, 32 * 1000);
+  setDefaultHighWaterMark(true, 32);
+
+  const writable = new Writable({ write() {} });
+  const readable = new Readable({ read() {} });
+  const transform = new Transform({ transform() {} });
+  assert.strictEqual(writable.writableHighWaterMark, 32 * 1000);
+  assert.strictEqual(readable.readableHighWaterMark, 32 * 1000);
+  assert.strictEqual(transform.writableHighWaterMark, 32 * 1000);
+  assert.strictEqual(transform.readableHighWaterMark, 32 * 1000);
+  assert.strictEqual(getDefaultHighWaterMark(false), 32 * 1000);
+  assert.strictEqual(getDefaultHighWaterMark(true), 32);
+
+  setDefaultHighWaterMark(false, 16 * 1024);
+  setDefaultHighWaterMark(true, 16);
+}
+
+{
+  const defaultHwm = getDefaultHighWaterMark(false);
+  const readableSplit = new Transform({ readableHighWaterMark: 123 });
+  const writableSplit = new Transform({ writableHighWaterMark: 456 });
+  const genericOverride = new Transform({
+    highWaterMark: 789,
+    readableHighWaterMark: 123,
+    writableHighWaterMark: 456
+  });
+  assert.strictEqual(readableSplit.readableHighWaterMark, 123);
+  assert.strictEqual(readableSplit.writableHighWaterMark, defaultHwm);
+  assert.strictEqual(writableSplit.readableHighWaterMark, defaultHwm);
+  assert.strictEqual(writableSplit.writableHighWaterMark, 456);
+  assert.strictEqual(genericOverride.readableHighWaterMark, 789);
+  assert.strictEqual(genericOverride.writableHighWaterMark, 789);
+  assert.strictEqual(new Readable({ readableHighWaterMark: 123, read() {} }).readableHighWaterMark, defaultHwm);
+  assert.strictEqual(new Writable({ writableHighWaterMark: 456, write() {} }).writableHighWaterMark, defaultHwm);
 }
 
 assert.throws(() => {
@@ -110,6 +156,22 @@ assert.throws(() => {
     assert.strictEqual(encoding, 'utf8');
   }, { defaultEncoding: 'hex', objectMode: true });
   writable.write({ foo: 'bar' }, 'utf8');
+}
+
+{
+  const writable = new Writable({ write() {} });
+  assert.throws(() => writable.write({}), { code: 'ERR_INVALID_ARG_TYPE' });
+  assert.throws(() => writable.write(false), { code: 'ERR_INVALID_ARG_TYPE' });
+  assert.throws(() => writable.write(undefined), { code: 'ERR_INVALID_ARG_TYPE' });
+  assert.throws(() => writable.write(null), { code: 'ERR_STREAM_NULL_VALUES' });
+}
+
+{
+  const writable = new Writable({ objectMode: true, write(chunk, encoding, cb) { cb(); } });
+  writable.write({});
+  writable.write(false);
+  writable.write(undefined);
+  assert.throws(() => writable.write(null), { code: 'ERR_STREAM_NULL_VALUES' });
 }
 
 console.log('stream constructor options ok');
