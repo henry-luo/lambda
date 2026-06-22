@@ -679,7 +679,8 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
                               float x1, float y1, float x2, float y2,
                               const RdtGradientStop* stops, int stop_count,
                               RdtFillRule rule,
-                              const RdtMatrix* transform) {
+                              const RdtMatrix* transform,
+                              const RdtMatrix* gradient_transform) {
     if (!vec || !vec->impl || !p || !stops || stop_count < 2) return;
     RdtVectorImpl* cg = vec->impl;
 
@@ -698,6 +699,9 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
     }
 
     CGGradientRef gradient = create_cg_gradient(cg->colorspace, stops, stop_count);
+    if (gradient_transform) {
+        CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(gradient_transform));
+    }
     CGContextDrawLinearGradient(cg->ctx, gradient,
         CGPointMake(x1, y1), CGPointMake(x2, y2),
         kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
@@ -710,7 +714,8 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
                               float cx, float cy, float r,
                               const RdtGradientStop* stops, int stop_count,
                               RdtFillRule rule,
-                              const RdtMatrix* transform) {
+                              const RdtMatrix* transform,
+                              const RdtMatrix* gradient_transform) {
     if (!vec || !vec->impl || !p || !stops || stop_count < 2) return;
     RdtVectorImpl* cg = vec->impl;
 
@@ -729,6 +734,9 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
     }
 
     CGGradientRef gradient = create_cg_gradient(cg->colorspace, stops, stop_count);
+    if (gradient_transform) {
+        CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(gradient_transform));
+    }
     CGContextDrawRadialGradient(cg->ctx, gradient,
         CGPointMake(cx, cy), 0,    // start center + radius
         CGPointMake(cx, cy), r,    // end center + radius

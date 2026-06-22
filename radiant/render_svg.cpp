@@ -853,7 +853,7 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
                                            gradient.x1, gradient.y1,
                                            gradient.x2, gradient.y2,
                                            gradient.stops, gradient.stop_count,
-                                           RDT_FILL_WINDING, nullptr);
+                                           RDT_FILL_WINDING, nullptr, nullptr);
                 svg_lower_paint_list(ctx);
                 rdt_path_free(gradient.path);
             }
@@ -870,7 +870,7 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
                 paint_fill_radial_gradient(svg_active_paint_list(ctx), gradient.path,
                                            gradient.cx, gradient.cy, gradient.r,
                                            gradient.stops, gradient.stop_count,
-                                           RDT_FILL_WINDING, nullptr);
+                                           RDT_FILL_WINDING, nullptr, nullptr);
                 svg_lower_paint_list(ctx);
                 rdt_path_free(gradient.path);
             }

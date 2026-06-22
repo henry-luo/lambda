@@ -133,6 +133,10 @@
   padding-left: 8px;
 }
 
+.test-tree.searching .test-list {
+  padding-left: 0;
+}
+
 .test-item {
   display: flex;
   align-items: center;
@@ -164,10 +168,34 @@
   text-align: center;
 }
 
+.test-item.search-result {
+  align-items: flex-start;
+  gap: 0;
+  padding: 5px 8px 6px 14px;
+}
+
+.test-item.search-result .status-icon {
+  display: none;
+}
+
 .test-name {
   flex: 1;
   color: #333333;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.test-name.search-match {
+  display: block;
+  width: 100%;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
+  font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+  font-size: 12px;
 }

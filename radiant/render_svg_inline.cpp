@@ -193,19 +193,22 @@ static inline void svg_stroke_path(SvgInlineRenderContext* ctx, RdtPath* path, C
 static inline void svg_fill_linear_gradient(SvgInlineRenderContext* ctx, RdtPath* path,
                                             float x1, float y1, float x2, float y2,
                                             const RdtGradientStop* stops, int count,
-                                            RdtFillRule rule, const RdtMatrix* xform) {
+                                            RdtFillRule rule, const RdtMatrix* xform,
+                                            const RdtMatrix* gradient_xform) {
     PaintRecordTarget target = svg_record_target(ctx);
     paint_record_fill_linear_gradient(&target, "svg_fill_linear_gradient",
                                       path, x1, y1, x2, y2,
-                                      stops, count, rule, xform);
+                                      stops, count, rule, xform, gradient_xform);
 }
 static inline void svg_fill_radial_gradient(SvgInlineRenderContext* ctx, RdtPath* path,
                                             float cx, float cy, float r,
                                             const RdtGradientStop* stops, int count,
-                                            RdtFillRule rule, const RdtMatrix* xform) {
+                                            RdtFillRule rule, const RdtMatrix* xform,
+                                            const RdtMatrix* gradient_xform) {
     PaintRecordTarget target = svg_record_target(ctx);
     paint_record_fill_radial_gradient(&target, "svg_fill_radial_gradient",
-                                      path, cx, cy, r, stops, count, rule, xform);
+                                      path, cx, cy, r, stops, count, rule, xform,
+                                      gradient_xform);
 }
 static inline void svg_draw_picture(SvgInlineRenderContext* ctx, RdtPicture* pic,
                                     uint8_t opacity, const RdtMatrix* xform) {
@@ -1342,25 +1345,32 @@ static void draw_gradient_fill(SvgInlineRenderContext* ctx, RdtPath* path, SvgGr
 
     if (def->is_radial) {
         float cx, cy, r;
+        RdtMatrix gradient_transform = rdt_matrix_identity();
+        const RdtMatrix* gradient_transform_ptr = nullptr;
         if (def->user_space) {
             cx = def->cx; cy = def->cy; r = def->r;
         } else {
-            cx = bx + def->cx * bw;
-            cy = by + def->cy * bh;
-            r  = def->r * (bw < bh ? bw : bh);
+            cx = def->cx; cy = def->cy; r = def->r;
+            gradient_transform = {bw, 0.0f, bx, 0.0f, bh, by, 0.0f, 0.0f, 1.0f};
+            gradient_transform_ptr = &gradient_transform;
         }
         svg_fill_radial_gradient(ctx, path, cx, cy, r,
-                                 stops, def->stop_count, fill_rule, transform);
+                                 stops, def->stop_count, fill_rule, transform,
+                                 gradient_transform_ptr);
     } else {
         float x1, y1, x2, y2;
+        RdtMatrix gradient_transform = rdt_matrix_identity();
+        const RdtMatrix* gradient_transform_ptr = nullptr;
         if (def->user_space) {
             x1 = def->x1; y1 = def->y1; x2 = def->x2; y2 = def->y2;
         } else {
-            x1 = bx + def->x1 * bw; y1 = by + def->y1 * bh;
-            x2 = bx + def->x2 * bw; y2 = by + def->y2 * bh;
+            x1 = def->x1; y1 = def->y1; x2 = def->x2; y2 = def->y2;
+            gradient_transform = {bw, 0.0f, bx, 0.0f, bh, by, 0.0f, 0.0f, 1.0f};
+            gradient_transform_ptr = &gradient_transform;
         }
         svg_fill_linear_gradient(ctx, path, x1, y1, x2, y2,
-                                 stops, def->stop_count, fill_rule, transform);
+                                 stops, def->stop_count, fill_rule, transform,
+                                 gradient_transform_ptr);
     }
 }
 
@@ -2940,7 +2950,6 @@ static const char* resolve_svg_radiant_font_family(const char* font_family,
                                                    const char* fallback_family,
                                                    bool allow_embedded_font) {
     if (!font_family || !font_ctx) return fallback_family ? fallback_family : font_family;
-    if (!allow_embedded_font) return fallback_family ? fallback_family : font_family;
 
     char family_list[512];
     strncpy(family_list, font_family, sizeof(family_list) - 1);
@@ -2975,9 +2984,15 @@ static const char* resolve_svg_radiant_font_family(const char* font_family,
         if (strcasecmp(start, "serif") == 0 || strcasecmp(start, "sans-serif") == 0 ||
             strcasecmp(start, "monospace") == 0 || strcasecmp(start, "cursive") == 0 ||
             strcasecmp(start, "fantasy") == 0) {
-            continue;
+            return mem_strdup(start, MEM_CAT_RENDER);
         }
-        if (font_face_find_internal(font_ctx, start, fw, slant)) {
+        if (font_face_find_internal(font_ctx, start, fw, slant) ||
+            font_family_exists(font_ctx, start)) {
+            return mem_strdup(start, MEM_CAT_RENDER);
+        }
+        char* platform_path = font_platform_find_fallback(start);
+        if (platform_path) {
+            mem_free(platform_path);
             return mem_strdup(start, MEM_CAT_RENDER);
         }
     }

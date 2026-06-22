@@ -649,7 +649,8 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             DlFillLinearGradient* r = &item->fill_linear_gradient;
             rdt_fill_linear_gradient(vec, r->path, r->x1, r->y1, r->x2, r->y2,
                                      r->stops, r->stop_count, r->rule,
-                                     r->has_transform ? &r->transform : nullptr);
+                                     r->has_transform ? &r->transform : nullptr,
+                                     r->has_gradient_transform ? &r->gradient_transform : nullptr);
 #ifndef NDEBUG
             items_drawn++;
 #endif
@@ -660,7 +661,8 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             DlFillRadialGradient* r = &item->fill_radial_gradient;
             rdt_fill_radial_gradient(vec, r->path, r->cx, r->cy, r->r,
                                      r->stops, r->stop_count, r->rule,
-                                     r->has_transform ? &r->transform : nullptr);
+                                     r->has_transform ? &r->transform : nullptr,
+                                     r->has_gradient_transform ? &r->gradient_transform : nullptr);
 #ifndef NDEBUG
             items_drawn++;
 #endif

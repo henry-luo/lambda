@@ -103,6 +103,8 @@ typedef struct {
     RdtFillRule rule;
     bool has_transform;
     RdtMatrix transform;
+    bool has_gradient_transform;
+    RdtMatrix gradient_transform;
 } DlFillLinearGradient;
 
 typedef struct {
@@ -113,6 +115,8 @@ typedef struct {
     RdtFillRule rule;
     bool has_transform;
     RdtMatrix transform;
+    bool has_gradient_transform;
+    RdtMatrix gradient_transform;
 } DlFillRadialGradient;
 
 typedef struct {
@@ -376,12 +380,14 @@ void dl_stroke_path(DisplayList* dl, RdtPath* path, Color color, float width,
 void dl_fill_linear_gradient(DisplayList* dl, RdtPath* path,
                              float x1, float y1, float x2, float y2,
                              const RdtGradientStop* stops, int stop_count,
-                             RdtFillRule rule, const RdtMatrix* transform);
+                             RdtFillRule rule, const RdtMatrix* transform,
+                             const RdtMatrix* gradient_transform);
 
 void dl_fill_radial_gradient(DisplayList* dl, RdtPath* path,
                              float cx, float cy, float r,
                              const RdtGradientStop* stops, int stop_count,
-                             RdtFillRule rule, const RdtMatrix* transform);
+                             RdtFillRule rule, const RdtMatrix* transform,
+                             const RdtMatrix* gradient_transform);
 
 void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,
