@@ -798,6 +798,7 @@ Item js_iterable_to_array(Item iterable);
  * js_iterator_close: Call iterator.return() for IteratorClose (on break/return).
  */
 Item js_get_iterator(Item iterable);
+Item js_get_async_iterator(Item iterable);
 Item js_get_iterator_lazy(Item iterable);
 Item js_iterator_step(Item iterator);
 Item js_iterator_close(Item iterator);

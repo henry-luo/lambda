@@ -1110,13 +1110,13 @@ before declaring the whole EC-3 tier complete.
   EC-3.
 - Added `editing_rich_default_justify(...)` for the conservative first justify
   mutation: find the supported block containing the selection focus and set its
-  legacy HTML `align` attribute to `left`, `center`, `right`, or `justify`.
-  Radiant's existing HTML resolver already maps this attribute into
-  `text-align`, so the DOM mutation connects to layout without inventing a
-  parallel style path.
+  inline `text-align` style to `left`, `center`, `right`, or `justify`.
+  `queryCommandState(...)` still accepts both the style form and legacy
+  `align` attributes so older fixture shapes remain readable.
 - `queryCommandSupported(...)` and `queryCommandEnabled(...)` now include the
   four justify commands. `queryCommandState(...)` returns true when the current
-  block's `align` attribute matches the queried command.
+  block's `text-align` style or legacy `align` attribute matches the queried
+  command.
 - Scope remains single-current-block only. Multi-block justification, implicit
   wrapping of bare host text, style-attribute normalization, list commands,
   indent/outdent, and undo history remain future EC-3 work.
