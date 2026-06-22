@@ -10,6 +10,7 @@
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/strbuf.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -2824,6 +2825,116 @@ static DomElement* rich_format_block_target(const EditingSurface* surface,
     return nullptr;
 }
 
+static const char* rich_skip_ascii_space(const char* p, const char* end) {
+    while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' ||
+                      *p == '\r' || *p == '\f')) {
+        p++;
+    }
+    return p;
+}
+
+static const char* rich_trim_ascii_space_end(const char* start,
+                                             const char* end) {
+    while (end > start && (end[-1] == ' ' || end[-1] == '\t' ||
+                          end[-1] == '\n' || end[-1] == '\r' ||
+                          end[-1] == '\f')) {
+        end--;
+    }
+    return end;
+}
+
+static bool rich_style_decl_is_text_align(const char* start,
+                                          const char* end) {
+    static const char prop[] = "text-align";
+    const char* p = rich_skip_ascii_space(start, end);
+    const char* colon = p;
+    while (colon < end && *colon != ':') colon++;
+    if (colon >= end) return false;
+    const char* name_end = rich_trim_ascii_space_end(p, colon);
+    size_t prop_len = sizeof(prop) - 1;
+    if ((size_t)(name_end - p) != prop_len) return false;
+    return strncasecmp(p, prop, prop_len) == 0;
+}
+
+static bool rich_set_text_align_style(DomElement* elem,
+                                      const char* align_value) {
+    if (!elem || !align_value || !align_value[0]) return false;
+    const char* old_style = dom_element_get_attribute(elem, "style");
+    size_t old_len = old_style ? strlen(old_style) : 0;
+    StrBuf* sb = strbuf_new_cap(old_len + strlen(align_value) + 32);
+    if (!sb) return false;
+
+    const char* p = old_style ? old_style : "";
+    const char* end = p + old_len;
+    while (p < end) {
+        const char* semi = p;
+        while (semi < end && *semi != ';') semi++;
+        const char* decl_start = rich_skip_ascii_space(p, semi);
+        const char* decl_end = rich_trim_ascii_space_end(decl_start, semi);
+        if (decl_start < decl_end &&
+            !rich_style_decl_is_text_align(decl_start, decl_end)) {
+            if (sb->length > 0) strbuf_append_char(sb, ' ');
+            strbuf_append_str_n(sb, decl_start,
+                (int)(decl_end - decl_start)); // INT_CAST_OK: inline style declaration slice.
+            strbuf_append_char(sb, ';');
+        }
+        p = semi < end ? semi + 1 : end;
+    }
+
+    if (sb->length > 0) strbuf_append_char(sb, ' ');
+    strbuf_append_str(sb, "text-align: ");
+    strbuf_append_str(sb, align_value);
+    strbuf_append_char(sb, ';');
+    bool ok = dom_element_set_attribute(elem, "style", sb->str ? sb->str : "");
+    strbuf_free(sb);
+    return ok;
+}
+
+static DomElement* rich_create_host_boundary_style_block(
+        DocState* state,
+        const EditingSurface* surface,
+        DomRange* range,
+        const char* align_value) {
+    if (!state || !surface || !surface->owner || !surface->owner->doc ||
+        !range || !align_value ||
+        range->start.node != range->end.node ||
+        range->start.offset != range->end.offset) {
+        return nullptr;
+    }
+
+    DomNode* owner_node = static_cast<DomNode*>(surface->owner);
+    if (range->start.node != owner_node) return nullptr;
+
+    MarkBuilder builder(surface->owner->doc->input);
+    Item block_item = builder.element("div").final();
+    Item br_item = builder.element("br").final();
+    if (get_type_id(block_item) != LMD_TYPE_ELEMENT ||
+        get_type_id(br_item) != LMD_TYPE_ELEMENT) {
+        return nullptr;
+    }
+
+    DomElement* block = dom_element_create(surface->owner->doc, "div",
+                                           block_item.element);
+    DomElement* br = dom_element_create(surface->owner->doc, "br",
+                                        br_item.element);
+    if (!block || !br) return nullptr;
+    if (!rich_set_text_align_style(block, align_value)) return nullptr;
+    if (!rich_transaction_append_child_for_edit(block, static_cast<DomNode*>(br))) {
+        return nullptr;
+    }
+
+    uint32_t child_idx = range->start.offset;
+    if (child_idx > dom_node_boundary_length(owner_node)) {
+        child_idx = dom_node_boundary_length(owner_node);
+    }
+    if (!rich_transaction_insert_child_for_edit(surface->owner,
+            static_cast<DomNode*>(block), child_idx)) {
+        return nullptr;
+    }
+    dom_mutation_post_insert(state, owner_node, static_cast<DomNode*>(block));
+    return block;
+}
+
 bool editing_rich_default_format_block(DocState* state,
                                        const EditingSurface* surface,
                                        const EditingIntent* intent,
@@ -2953,10 +3064,14 @@ bool editing_rich_default_justify(DocState* state,
     DomRange* range = state->dom_selection->ranges[0];
     DomElement* block = rich_format_block_target(surface, range);
     if (!block) {
-        log_debug("editing_rich_default_justify: no single block target");
-        return false;
+        block = rich_create_host_boundary_style_block(state, surface, range,
+                                                      align_value);
+        if (!block) {
+            log_debug("editing_rich_default_justify: no single block target");
+            return false;
+        }
     }
-    if (!dom_element_set_attribute(block, "align", align_value)) {
+    if (!rich_set_text_align_style(block, align_value)) {
         log_debug("editing_rich_default_justify: failed to set align=%s on <%s>",
                   align_value, block->node_name());
         return false;

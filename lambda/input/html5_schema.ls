@@ -10,6 +10,7 @@ type Language = string
 type Color = string
 type Number = string | int
 type Boolean = bool | 'true' | 'false' | ''
+type Hidden = Boolean | 'hidden' | 'until-found'
 
 // Common attribute groups
 type GlobalAttrs = {
@@ -19,7 +20,7 @@ type GlobalAttrs = {
     title: string?,
     lang: Language?,
     dir: 'ltr' | 'rtl' | 'auto'?,
-    hidden: Boolean?,
+    hidden: Hidden?,
     tabindex: int?,
     accesskey: string?,
     contenteditable: 'true' | 'false' | ''?,
