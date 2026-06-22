@@ -18,7 +18,7 @@ function runJustify(command, expectedAlign) {
   const center = document.queryCommandState("justifyCenter");
   const right = document.queryCommandState("justifyRight");
   const full = document.queryCommandState("justifyFull");
-  const expectedHtml = "<p align=\"" + expectedAlign + "\">abc</p>";
+  const expectedHtml = "<p style=\"text-align: " + expectedAlign + ";\">abc</p>";
 
   console.log(
     command +
