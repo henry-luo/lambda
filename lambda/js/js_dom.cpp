@@ -178,6 +178,7 @@ static Item js_document_default_view = {.item = ITEM_NULL};
 // Stored document.title value (same reason as defaultView)
 static Item js_document_title_value = {.item = ITEM_NULL};
 static bool js_document_design_mode = false;
+static bool js_document_open_invalid_for_exec_command = false;
 static DomElement* js_document_active_element = nullptr;
 
 // Cached document.fonts object for the FontFaceSet ready shim.
@@ -758,6 +759,11 @@ static bool js_dom_exec_command_uses_helper_first(const char* cmd) {
     if (!cmd) return false;
     return js_dom_exec_command_is_clipboard(cmd) ||
         strcasecmp(cmd, "selectAll") == 0 ||
+        strcasecmp(cmd, "insertText") == 0 ||
+        strcasecmp(cmd, "bold") == 0 ||
+        strcasecmp(cmd, "backColor") == 0 ||
+        strcasecmp(cmd, "foreColor") == 0 ||
+        strcasecmp(cmd, "hiliteColor") == 0 ||
         strcasecmp(cmd, "delete") == 0 ||
         strcasecmp(cmd, "forwardDelete") == 0 ||
         strcasecmp(cmd, "deleteForward") == 0 ||
@@ -776,6 +782,23 @@ static Item js_dom_exec_command_call_helper(Item* args, int argc) {
         return handled;
     }
     return (Item){.item = ITEM_FALSE};
+}
+
+static void js_dom_exec_command_call_preflight(Item* args, int argc) {
+    if (js_document_open_invalid_for_exec_command) {
+        Item open_key = (Item){.item = s2it(heap_create_name("__lambda_document_open_invalid_for_exec_command"))};
+        js_set_global_property(open_key, (Item){.item = ITEM_TRUE}, 0);
+    }
+    Item hook_key = (Item){.item = s2it(heap_create_name("__lambda_execCommand_preflight"))};
+    Item hook = js_get_global_property(hook_key);
+    if (get_type_id(hook) == LMD_TYPE_FUNC) {
+        js_call_function(hook, js_get_document_object_value(), args, argc);
+    }
+    if (js_document_open_invalid_for_exec_command) {
+        Item open_key = (Item){.item = s2it(heap_create_name("__lambda_document_open_invalid_for_exec_command"))};
+        js_set_global_property(open_key, (Item){.item = ITEM_FALSE}, 0);
+        js_document_open_invalid_for_exec_command = false;
+    }
 }
 
 static bool js_dom_exec_command_is_native(const char* cmd) {
@@ -1617,6 +1640,7 @@ extern "C" void js_dom_batch_reset() {
     js_document_default_view = (Item){.item = ITEM_NULL};
     js_document_title_value = (Item){.item = ITEM_NULL};
     js_document_design_mode = false;
+    js_document_open_invalid_for_exec_command = false;
     js_document_active_element = nullptr;
     js_document_fonts_value = (Item){.item = ITEM_NULL};
     _js_current_document = nullptr;
@@ -5128,6 +5152,15 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         return make_js_undefined();
     }
 
+    if (strcmp(method, "open") == 0) {
+        js_document_open_invalid_for_exec_command = true;
+        return js_get_document_object_value();
+    }
+    if (strcmp(method, "close") == 0) {
+        js_document_open_invalid_for_exec_command = false;
+        return make_js_undefined();
+    }
+
     // getElementById(id)
     if (strcmp(method, "getElementById") == 0) {
         if (argc < 1) return ItemNull;
@@ -5318,14 +5351,39 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
             return ItemNull;
         }
 
-        // create a text node and append to body
-        String* str = js_dom_create_document_string(doc, text, strlen(text));
-        DomText* text_node = dom_text_create_detached(str, doc);
-        if (text_node) {
-            ((DomNode*)body)->append_child((DomNode*)text_node);
-            dom_post_insert((DomNode*)body, (DomNode*)text_node);
-            log_debug("js_document_method: write '%s' appended to body", text);
+        const char* cursor = text;
+        while (*cursor) {
+            const char* br = nullptr;
+            for (const char* scan = cursor; *scan; scan++) {
+                if (*scan == '<' && strncasecmp(scan, "<br", 3) == 0) {
+                    const char* end = strchr(scan, '>');
+                    if (end) {
+                        br = scan;
+                        break;
+                    }
+                }
+            }
+            size_t text_len = br ? (size_t)(br - cursor) : strlen(cursor);
+            if (text_len > 0) {
+                String* str = js_dom_create_document_string(doc, cursor, text_len);
+                DomText* text_node = dom_text_create_detached(str, doc);
+                if (text_node) {
+                    ((DomNode*)body)->append_child((DomNode*)text_node);
+                    dom_post_insert((DomNode*)body, (DomNode*)text_node);
+                }
+            }
+            if (!br) break;
+            const char* br_end = strchr(br, '>');
+            MarkBuilder builder(doc->input);
+            Item br_item = builder.element("br").final();
+            DomElement* br_elem = dom_element_create(doc, "br", br_item.element);
+            if (br_elem) {
+                ((DomNode*)body)->append_child((DomNode*)br_elem);
+                dom_post_insert((DomNode*)body, (DomNode*)br_elem);
+            }
+            cursor = br_end ? br_end + 1 : br + 3;
         }
+        log_debug("js_document_method: write '%s' appended to body", text);
 
         return ItemNull;
     }
@@ -5419,6 +5477,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     // envelope as synthetic key input.
     if (strcmp(method, "execCommand") == 0) {
         const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
+        js_dom_exec_command_call_preflight(args, argc);
         if (js_dom_exec_command_uses_helper_first(cmd)) {
             Item handled = js_dom_exec_command_call_helper(args, argc);
             if (js_is_truthy(handled)) return handled;
@@ -5887,6 +5946,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
         "getElementsByName", "querySelector", "querySelectorAll",
         "createElement", "createElementNS", "createTextNode", "createComment",
         "createDocumentFragment", "importNode", "adoptNode",
+        "open", "close", "write", "writeln",
         "addEventListener", "removeEventListener",
         "createRange", "getSelection",
         "createEvent",
@@ -6047,6 +6107,12 @@ static bool js_text_control_set_raw_value(DomElement* elem, const char* new_val,
     f->current_value = buf;
     f->current_value_len = new_len;
     f->current_value_u16_len = tc_utf8_to_utf16_length(buf, new_len);
+    if (f->selection_start > f->current_value_u16_len)
+        f->selection_start = f->current_value_u16_len;
+    if (f->selection_end > f->current_value_u16_len)
+        f->selection_end = f->current_value_u16_len;
+    if (f->selection_start > f->selection_end)
+        f->selection_start = f->selection_end;
     f->tc_initialized = 1;
     f->value = buf;
 

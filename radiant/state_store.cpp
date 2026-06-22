@@ -4338,6 +4338,9 @@ void form_control_set_selection(DocState* state, View* view,
                 view_state->data.form.selection_start = form->selection_start;
                 view_state->data.form.selection_end = form->selection_end;
                 view_state->data.form.selection_direction = form->selection_direction;
+                if (form->current_value) {
+                    form_view_state_store_text_value(view_state, form);
+                }
             }
             sm_guard.commit();
             form_state_mark_dirty(state);
