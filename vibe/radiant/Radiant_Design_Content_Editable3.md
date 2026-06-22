@@ -164,10 +164,22 @@ Implementation note:
   `execCommand/forward-delete-no-scroll.html` cases now pass.
 - Current pressure-list verification:
   `env LAMBDA_CHROME_EDITING_TIMEOUT=5 LAMBDA_CHROME_EDITING_JOBS=9 ./test/test_chrome_editing_gtest.exe --gtest_brief=1`
-  runs 2751 imported cases as 321 passed / 2121 skipped / 309 failed. The
-  remaining failure surface is mostly `assertion_mismatch` (278), followed by
+  runs 2751 imported cases as 323 passed / 2121 skipped / 307 failed. The
+  remaining failure surface is mostly `assertion_mismatch` (276), followed by
   `unsupported_shadow` (14), `unsupported_layout_visual` (10),
   `unsupported_internals` (9), and `no_results` (8).
+- The second 641-entry pressure-fix pass added a headless DOM geometry fallback
+  for `offsetWidth`/`offsetHeight` from laid-out size, inline CSS dimensions, or
+  text length, then tightened the CE3 harness click-hit model for uneditable
+  inline children. `selection/mixed-editability-10.html` now passes all 10
+  assertions.
+- The third 641-entry pressure-fix pass tightened synthetic mouse hit-testing to
+  prefer the innermost element whose synthetic horizontal range contains the
+  pointer, and suppresses synthetic drag ranges when both endpoints are
+  `user-select: none`. `selection/mouse/drag_user_select_none.html` now passes,
+  leaving `selection/modify_move/move-by-character-005.html` as the only
+  selection `assertion_mismatch`; the selection bucket is 111 passed / 1270
+  skipped / 3 no-results / 1 assertion mismatch.
 
 ---
 

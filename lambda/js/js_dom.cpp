@@ -4635,6 +4635,46 @@ static void collect_text_content(DomNode* node, StrBuf* sb) {
     }
 }
 
+static float js_dom_parse_positive_css_dimension(const char* value) {
+    if (!value) return 0.0f;
+    while (js_dom_ascii_space(*value)) value++;
+    if (!*value) return 0.0f;
+    char* end = nullptr;
+    double parsed = strtod(value, &end);
+    if (end == value || parsed <= 0.0) return 0.0f;
+    while (end && js_dom_ascii_space(*end)) end++;
+    if (end && *end && strncasecmp(end, "px", 2) != 0) return 0.0f;
+    return (float)parsed;
+}
+
+static float js_dom_inline_css_dimension(DomElement* elem,
+                                         const char* prop_name) {
+    if (!elem || !prop_name) return 0.0f;
+    const char* style = dom_element_get_attribute(elem, "style");
+    char value[64];
+    if (!js_dom_style_decl_value(style, prop_name, value, sizeof(value))) {
+        return 0.0f;
+    }
+    return js_dom_parse_positive_css_dimension(value);
+}
+
+static int64_t js_dom_headless_dimension(DomElement* elem, bool width_axis) {
+    if (!elem) return 0;
+    float layout_value = width_axis ? elem->width : elem->height;
+    if (layout_value > 0.0f) return (int64_t)(layout_value + 0.5f);
+
+    float css_value = js_dom_inline_css_dimension(
+        elem, width_axis ? "width" : "height");
+    if (css_value > 0.0f) return (int64_t)(css_value + 0.5f);
+
+    StrBuf* text = strbuf_new_cap(32);
+    collect_text_content((DomNode*)elem, text);
+    size_t text_len = text ? text->length : 0;
+    if (text) strbuf_free(text);
+    if (width_axis) return text_len > 0 ? (int64_t)text_len : 1;
+    return 1;
+}
+
 // ============================================================================
 // Helper: recursive innerHTML serialization
 // ============================================================================
@@ -8329,10 +8369,10 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
 
     // offsetWidth / offsetHeight — border box dimensions
     if (strcmp(prop, "offsetWidth") == 0) {
-        return (Item){.item = i2it((int64_t)elem->width)};
+        return (Item){.item = i2it(js_dom_headless_dimension(elem, true))};
     }
     if (strcmp(prop, "offsetHeight") == 0) {
-        return (Item){.item = i2it((int64_t)elem->height)};
+        return (Item){.item = i2it(js_dom_headless_dimension(elem, false))};
     }
 
     // clientWidth / clientHeight — border box minus borders
