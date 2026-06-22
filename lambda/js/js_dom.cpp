@@ -1378,6 +1378,53 @@ static const char* js_dom_exec_command_justify_value(const char* cmd) {
     return nullptr;
 }
 
+static const char* js_dom_skip_ascii_space(const char* p, const char* end) {
+    while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' ||
+                      *p == '\r' || *p == '\f')) {
+        p++;
+    }
+    return p;
+}
+
+static const char* js_dom_trim_ascii_space_end(const char* start,
+                                               const char* end) {
+    while (end > start && (end[-1] == ' ' || end[-1] == '\t' ||
+                          end[-1] == '\n' || end[-1] == '\r' ||
+                          end[-1] == '\f')) {
+        end--;
+    }
+    return end;
+}
+
+static bool js_dom_style_text_align_equals(const char* style,
+                                           const char* expected) {
+    if (!style || !expected) return false;
+    const char* p = style;
+    const char* end = style + strlen(style);
+    while (p < end) {
+        const char* semi = p;
+        while (semi < end && *semi != ';') semi++;
+        const char* decl_start = js_dom_skip_ascii_space(p, semi);
+        const char* decl_end = js_dom_trim_ascii_space_end(decl_start, semi);
+        const char* colon = decl_start;
+        while (colon < decl_end && *colon != ':') colon++;
+        if (colon < decl_end) {
+            const char* name_end = js_dom_trim_ascii_space_end(decl_start, colon);
+            const char* value_start = js_dom_skip_ascii_space(colon + 1, decl_end);
+            const char* value_end = js_dom_trim_ascii_space_end(value_start, decl_end);
+            if ((size_t)(name_end - decl_start) == 10 &&
+                strncasecmp(decl_start, "text-align", 10) == 0 &&
+                (size_t)(value_end - value_start) == strlen(expected) &&
+                strncasecmp(value_start, expected,
+                    (size_t)(value_end - value_start)) == 0) {
+                return true;
+            }
+        }
+        p = semi < end ? semi + 1 : end;
+    }
+    return false;
+}
+
 static DomElement* js_dom_exec_command_query_block_element(void) {
     DocState* state = js_dom_testdriver_state();
     if (!state || !state->dom_selection ||
@@ -1417,6 +1464,8 @@ static bool js_dom_exec_command_query_justify_state(const char* cmd) {
     const char* expected = js_dom_exec_command_justify_value(cmd);
     DomElement* elem = js_dom_exec_command_query_block_element();
     if (!expected || !elem) return false;
+    const char* style = dom_element_get_attribute(elem, "style");
+    if (js_dom_style_text_align_equals(style, expected)) return true;
     const char* align = dom_element_get_attribute(elem, "align");
     return align && strcasecmp(align, expected) == 0;
 }
@@ -3640,6 +3689,14 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
     // convert camelCase JS property to CSS hyphenated property
     char css_prop[128];
     js_camel_to_css_prop(js_prop, css_prop, sizeof(css_prop));
+
+    if (strcmp(css_prop, "content-visibility") == 0) {
+        const char* hidden = dom_element_get_attribute(elem, "hidden");
+        if (hidden && strcasecmp(hidden, "until-found") == 0) {
+            return (Item){.item = s2it(heap_create_name("hidden"))};
+        }
+        return (Item){.item = s2it(heap_create_name(""))};
+    }
 
     // look up the CSS property ID
     CssPropertyId prop_id = css_property_id_from_name(css_prop);
@@ -7549,6 +7606,7 @@ static bool _is_bool_reflected(DomElement* elem, const char* prop) {
     bool select = strcasecmp(tag, "select") == 0;
     bool textarea = strcasecmp(tag, "textarea") == 0;
     bool form = strcasecmp(tag, "form") == 0;
+    bool details = strcasecmp(tag, "details") == 0;
     bool fieldset = strcasecmp(tag, "fieldset") == 0;
     bool option = strcasecmp(tag, "option") == 0;
     bool optgroup = strcasecmp(tag, "optgroup") == 0;
@@ -7561,6 +7619,7 @@ static bool _is_bool_reflected(DomElement* elem, const char* prop) {
     if (strcmp(prop, "noValidate") == 0) return form;
     if (strcmp(prop, "formNoValidate") == 0) return input || button;
     if (strcmp(prop, "autofocus") == 0) return true;
+    if (strcmp(prop, "open") == 0) return details;
     if (strcmp(prop, "defaultChecked") == 0) return input;
     if (strcmp(prop, "defaultSelected") == 0) return option;
     return false;
@@ -7936,8 +7995,8 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         return js_dom_get_inline_style_wrapper(elem);
     }
 
-    // textContent (recursive text extraction)
-    if (strcmp(prop, "textContent") == 0) {
+    // textContent / innerText (recursive text extraction)
+    if (strcmp(prop, "textContent") == 0 || strcmp(prop, "innerText") == 0) {
         StrBuf* sb = strbuf_new_cap(128);
         collect_text_content((DomNode*)elem, sb);
         String* result = heap_create_name(sb->str ? sb->str : "");
@@ -8580,6 +8639,9 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     }
     if (strcmp(prop, "noValidate") == 0 && _is_tag(elem, "form")) {
         return (Item){.item = b2it(dom_element_has_attribute(elem, "novalidate"))};
+    }
+    if (strcmp(prop, "open") == 0 && _is_tag(elem, "details")) {
+        return (Item){.item = b2it(dom_element_has_attribute(elem, "open"))};
     }
     // name attribute (all listed form controls and form/fieldset)
     if (strcmp(prop, "name") == 0 &&
@@ -9320,6 +9382,62 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             log_debug("js_dom_set_property: set id='%s' on <%s>",
                       id_str, elem->tag_name ? elem->tag_name : "?");
+        }
+        return value;
+    }
+
+    // innerText: replace children while preserving line breaks as <br> nodes.
+    if (strcmp(prop, "innerText") == 0) {
+        const char* text_str = fn_to_cstr(value);
+        if (text_str) {
+            DomNode* child = elem->first_child;
+            while (child) {
+                DomNode* next = child->next_sibling;
+                dom_pre_remove(child);
+                child->parent = nullptr;
+                child->next_sibling = nullptr;
+                child->prev_sibling = nullptr;
+                child = next;
+            }
+            elem->first_child = nullptr;
+            elem->last_child = nullptr;
+
+            const char* segment = text_str;
+            const char* p = text_str;
+            while (true) {
+                if (*p == '\n' || *p == '\r' || *p == '\0') {
+                    size_t segment_len = (size_t)(p - segment);
+                    if (segment_len > 0) {
+                        String* s = js_dom_create_document_string(
+                            elem->doc, segment, segment_len);
+                        DomText* text_node = dom_text_create(s, elem);
+                        if (text_node) {
+                            ((DomNode*)elem)->append_child((DomNode*)text_node);
+                            dom_post_insert((DomNode*)elem, (DomNode*)text_node);
+                        }
+                    }
+                    if (*p == '\0') break;
+                    MarkBuilder builder(elem->doc->input);
+                    Item br_item = builder.element("br").final();
+                    if (get_type_id(br_item) == LMD_TYPE_ELEMENT &&
+                        br_item.element) {
+                        DomElement* br_elem = dom_element_create(
+                            elem->doc, "br", br_item.element);
+                        if (br_elem) {
+                            ((DomNode*)elem)->append_child((DomNode*)br_elem);
+                            dom_post_insert((DomNode*)elem, (DomNode*)br_elem);
+                        }
+                    }
+                    if (*p == '\r' && p[1] == '\n') p++;
+                    p++;
+                    segment = p;
+                    continue;
+                }
+                p++;
+            }
+            log_debug("js_dom_set_property: set innerText on <%s>",
+                      elem->tag_name ? elem->tag_name : "?");
+            js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE, (DomNode*)elem, elem->parent);
         }
         return value;
     }
