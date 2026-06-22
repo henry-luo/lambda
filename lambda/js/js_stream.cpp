@@ -849,6 +849,16 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
         }
 
         js_property_set(self, key_end_pending, js_bool_item(true));
+        Item buf = js_property_get(self, key_buffer);
+        bool has_buffered = get_type_id(buf) == LMD_TYPE_ARRAY && js_array_length(buf) > 0;
+        if (has_buffered) {
+            Item flowing = js_property_get(self, key_flowing);
+            if (flowing.item != 0 && it2b(flowing)) {
+                js_stream_schedule_data_flush(self);
+            } else if (js_state_get_bool(state, "readableListening")) {
+                stream_emit(self, "readable", NULL, 0);
+            }
+        }
         js_stream_schedule_end(self);
         return js_bool_item(true);
     }
