@@ -2736,9 +2736,36 @@ static uint32_t view_state_clear_interaction_flag(DocState* state, const char* n
         } else if (strcmp(name, "active") == 0 && view_state->flags.active) {
             view_state->flags.active = 0;
             changed++;
+        } else if (strcmp(name, "focus") == 0 && view_state->flags.focused) {
+            view_state->flags.focused = 0;
+            changed++;
         }
     }
     return changed;
+}
+
+static uint32_t state_map_delete_entries_for_name(DocState* state, const char* name) {
+    if (!state || !state->state_map || !name) return 0;
+    const char* interned = intern_state_name(name);
+    uint32_t removed = 0;
+    bool found_entry = true;
+    while (found_entry) {
+        found_entry = false;
+        size_t iter = 0;
+        void* item = NULL;
+        while (hashmap_iter(state->state_map, &iter, &item)) {
+            StateEntry* entry = (StateEntry*)item;
+            if (!entry || !entry->key.name) continue;
+            if (entry->key.name != interned && strcmp(entry->key.name, interned) != 0) continue;
+            StateEntry query = { .key = { entry->key.node, interned } };
+            if (hashmap_delete(state->state_map, &query)) {
+                removed++;
+                found_entry = true;
+                break;
+            }
+        }
+    }
+    return removed;
 }
 
 static bool view_state_target_path_contains(View* target, View* candidate) {
@@ -2792,6 +2819,25 @@ static uint32_t view_state_sync_interaction_flag_path(DocState* state, DomNode* 
 static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode* root) {
     if (!state || !root) return 0;
     uint32_t changed = 0;
+
+    if (state->focus && state->focus->current &&
+        !view_state_tree_contains_view(root, state->focus->current)) {
+        View* old_focus = state->focus->current;
+        state->focus->previous = NULL;
+        state->focus->current = NULL;
+        state->focus->from_keyboard = false;
+        state->focus->from_mouse = false;
+        state->focus->focus_visible = false;
+        if (old_focus->is_element()) {
+            DomElement* elem = lam::dom_require_element(old_focus);
+            if (state->active_text_control == elem) state->active_text_control = NULL;
+            if (state->last_focused_text_control == elem) state->last_focused_text_control = NULL;
+        }
+        changed++;
+        changed += view_state_clear_interaction_flag(state, "focus");
+        changed += state_map_delete_entries_for_name(state, STATE_FOCUS_WITHIN);
+        changed += state_map_delete_entries_for_name(state, STATE_FOCUS_VISIBLE);
+    }
 
     if (state->hover_target && !view_state_tree_contains_view(root, state->hover_target)) {
         doc_state_log_view_target_transition(state, "hover.target", state->hover_target, NULL);

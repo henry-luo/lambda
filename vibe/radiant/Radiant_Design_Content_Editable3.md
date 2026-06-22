@@ -1,8 +1,9 @@
 # Radiant `contenteditable` 3 - structural Chrome editing corpus plan
 
 **Date:** 2026-06-18
-**Status:** Active implementation - CE3-0 structured artifacts landed; CE3-H
-harness parity is the next frontier.
+**Status:** Active implementation - CE3-0 structured artifacts and current
+all-import pass set promoted to RUNNABLE; CE3-H harness parity is the next
+frontier.
 **Builds on:** `Radiant_Design_Content_Editable2.md`
 **Scope:** Turn the imported Chromium `editing/` corpus from a mostly skipped
 gauge into a staged structural conformance program for Radiant editing.
@@ -37,7 +38,7 @@ Additional signal from the log:
 |---|---:|---|
 | `Abort trap` child exits | 189 | real engine/runtime invariant or crash surfaces |
 | timeout kills | 3 | imported pages can still hang without runner isolation |
-| default RUNNABLE gauge | 6 pass / 2745 skip | unchanged allowlist mode remains green |
+| initial default RUNNABLE gauge | 6 pass / 2745 skip | historical baseline before later RUNNABLE widening |
 
 The all-import result is not a quality gate yet. It is a map of missing
 capabilities. The failure count is dominated by harness and structural feature
@@ -48,7 +49,11 @@ gaps, not one large single bug.
 **Updated:** 2026-06-22
 
 CE3-0 now emits structured artifacts for both the default RUNNABLE gauge and
-the all-import local gauge:
+the all-import local gauge. The default gauge was widened from the six-case
+bootstrap allowlist to the 191-case green all-import pass-only snapshot from the
+imported corpus. The linked `lambda-test` HEAD now carries a broader 641-entry
+pressure `RUNNABLE` list with known failures; the table below records the last
+verified pass-only snapshot.
 
 - `temp/chrome_editing_results.jsonl`
 - `temp/chrome_editing_summary.json`
@@ -58,7 +63,7 @@ outcome, classifier, assertion counts, exit code, timeout/abort flags, elapsed
 time, output size, and first failure line. The summary artifact records totals,
 classifier counts, bucket counts, and bucket/classifier cross-counts.
 
-Default RUNNABLE gauge:
+Default RUNNABLE pass-only snapshot:
 
 ```bash
 ./test/test_chrome_editing_gtest.exe --gtest_brief=1
@@ -66,9 +71,28 @@ Default RUNNABLE gauge:
 
 | Result | Count |
 |---|---:|
-| Passed | 6 |
-| Skipped | 2745 |
+| Passed | 191 |
+| Skipped | 2560 |
 | Failed | 0 |
+
+Default RUNNABLE bucket coverage:
+
+| Bucket | Passed |
+|---|---:|
+| `(root)` | 1 |
+| caret | 4 |
+| deleting | 18 |
+| execCommand | 28 |
+| input | 5 |
+| inserting | 15 |
+| pasteboard | 14 |
+| selection | 93 |
+| shadow | 4 |
+| spelling | 2 |
+| style | 2 |
+| text-iterator | 2 |
+| undo | 1 |
+| unsupported-content | 2 |
 
 All-import local gauge:
 
@@ -81,23 +105,23 @@ LAMBDA_CHROME_EDITING_JOBS=9 \
 
 | Result | Count |
 |---|---:|
-| Passed | 192 |
+| Passed | 191 |
 | Skipped | 119 |
-| Failed | 2440 |
+| Failed | 2441 |
 
 Classifier summary from the all-import run:
 
 | Classifier | Count |
 |---|---:|
-| assertion mismatch | 1373 |
+| assertion mismatch | 1364 |
 | harness missing API | 510 |
-| unsupported internals | 268 |
-| passed | 192 |
+| passed | 191 |
+| unsupported internals | 176 |
 | no results | 138 |
+| timeout | 137 |
 | process abort | 102 |
 | unsupported layout/visual | 70 |
 | skipped | 49 |
-| timeout | 35 |
 | unsupported shadow | 14 |
 
 Implementation note:
@@ -109,6 +133,41 @@ Implementation note:
 - Added a focused DOM JS regression for `delete` and `forwardDelete` helper
   fallback, and refreshed the justify regression to match the current
   `text-align` style mutation contract.
+- The first RUNNABLE widening promoted the currently green structural smoke
+  slice into `test/editing/RUNNABLE`: `assert_selection.html`, plus passing
+  `deleting/`, `execCommand/`, `inserting/`, and small `selection/` cases that
+  require no visual, shadow, pasteboard, or platform-only harness surface.
+- The second RUNNABLE widening promoted the full current all-import pass set
+  into `test/editing/RUNNABLE`: 191 cases across caret, deletion,
+  `execCommand`, input, insertion, pasteboard, selection, shadow, spelling,
+  style, text-iterator, undo, and unsupported-content smoke buckets.
+- That pass-only gauge executed 191 cases cleanly with no failures, aborts, or
+  timeouts before the later broader pressure-list branch.
+- The inline-boundary `Selection.modify("extend", *, "lineboundary")` slice now
+  canonicalizes equivalent anchors at inline element edges. The focused import
+  family `selection/extend/extend_selection_01_*_lineboundary.html` passes all
+  8 files / 216 assertions. A wider exploratory wildcard was stopped after it
+  confirmed the next failures are a different block/bidi line-endpoint class in
+  later `extend_selection_*_lineboundary` files.
+- Opened a third RUNNABLE pressure batch in `test/editing/RUNNABLE`: 100 more
+  structural cases, made up of 44 `deleting/` merge/delete cases, 1
+  `editability/` style-with-CSS case, and 55 `execCommand/` format/indent/find
+  cases. This brings the live pressure list to 641 non-comment entries. It is
+  deliberately not a green gate; it is a triage surface for CE3-H and CE3-S.
+- The first 641-entry pressure-fix pass cleared the process-abort bucket by
+  fixing stale selection/focus cleanup around `document.open()` and detached
+  textarea state. The focused `editability/empty-document-stylewithcss.html`,
+  `inserting/insert-paragraph-empty-textarea.html`,
+  `selection/inactive-selection.html`,
+  `text_iterator/auto-expand-details-layout-shift.html`,
+  `text_iterator/beforematch-layout-shift.html`, and
+  `execCommand/forward-delete-no-scroll.html` cases now pass.
+- Current pressure-list verification:
+  `env LAMBDA_CHROME_EDITING_TIMEOUT=5 LAMBDA_CHROME_EDITING_JOBS=9 ./test/test_chrome_editing_gtest.exe --gtest_brief=1`
+  runs 2751 imported cases as 321 passed / 2121 skipped / 309 failed. The
+  remaining failure surface is mostly `assertion_mismatch` (278), followed by
+  `unsupported_shadow` (14), `unsupported_layout_visual` (10),
+  `unsupported_internals` (9), and `no_results` (8).
 
 ---
 
@@ -400,6 +459,8 @@ Implementation status:
 - **Landed 2026-06-22.** The runner writes `temp/chrome_editing_results.jsonl`
   and `temp/chrome_editing_summary.json`, classifies every case, and preserves
   the CI-safe default RUNNABLE mode.
+- **Updated 2026-06-22.** The default RUNNABLE allowlist was widened to 191
+  passing cases while keeping 0 failures in allowlist mode.
 - The all-import command completes under the documented timeout/jobs settings.
   The command still exits nonzero because all-import is a red local gauge, not
   a quality gate.
@@ -687,18 +748,21 @@ Phase gate:
 
 ## 6. Immediate Next Work
 
-1. **CE3-H:** drive the next harness work from
-   `temp/chrome_editing_summary.json`, starting with the 510
-   `harness_missing_api` cases and the 138 `no_results` cases.
-2. **CE3-H:** finish the portable `assert_selection` subset. This unlocks the
-   clearest modern corpus pages and prevents harness errors from masking engine
-   bugs.
+1. **CE3-H:** refresh the all-import local gauge, then drive the next harness
+   work from `temp/chrome_editing_summary.json`, starting with the 510
+   `harness_missing_api` cases and the 138 `no_results` cases from the
+   2026-06-22 all-import snapshot.
+2. **CE3-H:** continue the portable `assert_selection` subset from the
+   remaining block/bidi `lineboundary` endpoint failures. The inline-boundary
+   marker-canonicalization slice is green; the next slice is real line endpoint
+   movement across block children and newline text.
 3. **CE3-H:** port enough `editing.js` and `js-test.js` to stop simple old
    layout-test pages from failing with missing helper functions.
 4. **CE3-S:** fix sample selection for documentElement/body-null, text controls,
    element/table boundaries, and backward selections.
 5. **CE3-I:** pick the top recurring DocState invariant from the 102 aborts and
-   reduce it to a focused JS regression before broadening RUNNABLE.
+   reduce it to a focused JS regression before promoting additional pressure
+   cases into the pass-only green gauge.
 
 ---
 
@@ -715,7 +779,8 @@ tail of isolated test patches. The most valuable order is:
 5. deepen clipboard/history/geometry;
 6. harden invariants until all-import runs are stable.
 
-That sequence turns the current 113 / 2751 pass snapshot into a staged path
+That sequence turns the current 191-case pass-only gauge and the broader
+641-entry pressure surface into a staged path
 toward a large, meaningful Chrome editing pass rate while preserving the CE2
 contract: every edit still flows through the modern cancelable
 `beforeinput -> mutation -> input` pipeline.
