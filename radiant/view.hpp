@@ -1089,6 +1089,9 @@ typedef struct BlockProp {
     // Baseline positions (distance from border-box top to baseline).
     // Used for flex/inline-block baseline alignment (CSS 2.1 §10.8.1).
     float first_line_baseline;  // first line box baseline (for flex baseline)
+    // Transient layout state: nonzero when BFC float avoidance shifted this block down.
+    // Inline placement uses it to discard stale line cursors from floats above.
+    float bfc_float_avoidance_shift_y;
     CssEnum text_overflow;  // CSS_VALUE_CLIP (default 0) | CSS_VALUE_ELLIPSIS
     int line_clamp;         // -webkit-line-clamp: max visible lines (0 = no clamp)
 } BlockProp;
