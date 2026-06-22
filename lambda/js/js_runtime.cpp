@@ -17226,10 +17226,13 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             }
             // Buffer (Uint8Array) instance methods: dispatch through buffer prototype first
             // use map_get (own-property only) to avoid walking the prototype chain
-            // back to TypedArray.prototype, which would cause infinite recursion
+            // back to TypedArray.prototype, which would cause infinite recursion.
+            // Array.prototype methods called with a Buffer receiver remain generic
+            // and must not resolve to Buffer.prototype.slice().
             {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->element_type == JS_TYPED_UINT8 && ta->is_buffer) {
+                if (!js_dispatch_as_array_method &&
+                    ta && ta->element_type == JS_TYPED_UINT8 && ta->is_buffer) {
                     extern Item js_get_buffer_prototype(void);
                     Item buf_proto = js_get_buffer_prototype();
                     if (buf_proto.item != ITEM_NULL) {

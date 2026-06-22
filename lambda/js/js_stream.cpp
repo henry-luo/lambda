@@ -38,6 +38,7 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item);
 extern "C" Item js_buffer_isBuffer(Item obj);
 extern "C" Item js_buffer_concat(Item list, Item total_length_item);
 extern "C" Item js_buffer_toString(Item buf, Item encoding, Item start_item, Item end_item);
+extern "C" Item js_buffer_slice(Item buf, Item start_item, Item end_item);
 extern "C" Item js_util_inspect(Item obj_item, Item options_item);
 extern Item js_current_this;
 extern "C" Item js_get_this(void);
@@ -99,7 +100,10 @@ static int64_t js_stream_default_byte_hwm = 16 * 1024;
 static int64_t js_stream_default_object_hwm = 16;
 
 static Item js_stream_make_error_with_code(const char* code, const char* message);
-static bool js_stream_prepare_readable_chunk(Item self, Item* chunk);
+static bool js_stream_readable_is_object_mode(Item self);
+static int64_t js_stream_readable_chunk_length(Item self, Item chunk);
+static bool js_stream_prepare_readable_chunk(Item self, Item* chunk, Item encoding);
+static void js_stream_flush_buffered_data(Item self);
 
 static void ensure_keys() {
     if (keys_init) return;
@@ -411,6 +415,50 @@ static Item js_stream_make_write_callback(Item self, Item callback) {
                             make_js_undefined(), bound_args, 2);
 }
 
+static Item js_stream_after_writev(Item self, Item pending, Item err) {
+    ensure_keys();
+    Item state = js_property_get(self, key_writable_state);
+    bool need_drain = js_state_get_bool(state, "needDrain");
+    bool has_error = js_stream_has_callback_error(err);
+    js_property_set(self, make_string_item("_writing"), js_bool_item(false));
+    js_state_set_item(state, "length", (Item){.item = i2it(0)});
+    js_state_set_bool(state, "needDrain", false);
+    if (has_error) {
+        js_stream_set_writable_open(self, false);
+        js_stream_schedule_error(self, err);
+    }
+
+    if (get_type_id(pending) == LMD_TYPE_ARRAY) {
+        int64_t plen = js_array_length(pending);
+        for (int64_t i = 0; i < plen; i++) {
+            Item request = js_array_get_int(pending, i);
+            Item callback = js_property_get(request, make_string_item("callback"));
+            if (get_type_id(callback) == LMD_TYPE_FUNC) {
+                if (has_error) {
+                    js_call_function(callback, self, &err, 1);
+                } else {
+                    js_call_function(callback, self, NULL, 0);
+                }
+            }
+        }
+    }
+
+    if (!has_error && need_drain &&
+        !js_state_get_bool(state, "ended") &&
+        !js_item_is_true(js_property_get(self, key_destroyed)) &&
+        !js_item_is_true(js_property_get(self, key_finish_emitted))) {
+        stream_emit(self, "drain", NULL, 0);
+    }
+    if (!has_error) js_stream_flush_pending_writes(self);
+    return make_js_undefined();
+}
+
+static Item js_stream_make_writev_callback(Item self, Item pending) {
+    Item bound_args[2] = { self, pending };
+    return js_bind_function(js_new_function((void*)js_stream_after_writev, 3),
+                            make_js_undefined(), bound_args, 2);
+}
+
 static void js_stream_flush_pending_writes(Item self) {
     if (js_item_is_true(js_property_get(self, make_string_item("_writing")))) return;
 
@@ -423,17 +471,19 @@ static void js_stream_flush_pending_writes(Item self) {
     js_stream_set_buffered_request_count(self, 0);
 
     Item writev_fn = js_property_get(self, make_string_item("_writev"));
-    if (get_type_id(writev_fn) == LMD_TYPE_FUNC && plen > 1) {
-        Item noop_cb = js_new_function((void*)js_noop, 0);
-        Item args[2] = {pending, noop_cb};
-        js_call_function(writev_fn, self, args, 2);
-        return;
-    }
-
     Item write_handler = js_property_get(self, make_string_item("_write"));
     if (get_type_id(write_handler) != LMD_TYPE_FUNC) {
         write_handler = js_property_get(self, make_string_item("__write_handler__"));
     }
+    if (get_type_id(writev_fn) == LMD_TYPE_FUNC &&
+        (plen > 1 || get_type_id(write_handler) != LMD_TYPE_FUNC)) {
+        Item writev_cb = js_stream_make_writev_callback(self, pending);
+        Item args[2] = {pending, writev_cb};
+        js_property_set(self, make_string_item("_writing"), js_bool_item(true));
+        js_call_function(writev_fn, self, args, 2);
+        return;
+    }
+
     if (get_type_id(write_handler) != LMD_TYPE_FUNC) return;
 
     for (int64_t i = 0; i < plen; i++) {
@@ -452,6 +502,10 @@ static Item js_stream_emit_end_tick(Item self) {
     ensure_keys();
     if (js_item_is_true(js_property_get(self, key_destroyed)) ||
         js_item_is_true(js_property_get(self, key_end_emitted))) {
+        return make_js_undefined();
+    }
+    Item buf = js_property_get(self, key_buffer);
+    if (get_type_id(buf) == LMD_TYPE_ARRAY && js_array_length(buf) > 0) {
         return make_js_undefined();
     }
     js_property_set(self, key_end_pending, js_bool_item(false));
@@ -498,7 +552,23 @@ static void js_stream_schedule_error(Item self, Item err) {
     js_next_tick_enqueue(tick);
 }
 
-static void js_stream_call_read_if_needed(Item self) {
+static Item js_stream_after_destroy(Item self, Item err) {
+    ensure_keys();
+    if (js_stream_has_callback_error(err)) {
+        stream_emit(self, "error", &err, 1);
+    }
+    js_stream_schedule_close(self);
+    return make_js_undefined();
+}
+
+static int64_t js_stream_read_size_hint(Item self, Item size_item) {
+    if (get_type_id(size_item) == LMD_TYPE_INT && it2i(size_item) > 0)
+        return it2i(size_item);
+    Item state = js_property_get(self, key_readable_state);
+    return js_stream_state_get_int(state, "highWaterMark", js_stream_default_byte_hwm);
+}
+
+static void js_stream_call_read_if_needed(Item self, Item size_item) {
     if (js_item_is_true(js_property_get(self, key_destroyed)) ||
         js_item_is_true(js_property_get(self, key_end_pending)) ||
         js_item_is_true(js_property_get(self, key_end_emitted)) ||
@@ -509,25 +579,69 @@ static void js_stream_call_read_if_needed(Item self) {
     Item read_fn = js_property_get(self, make_string_item("_read"));
     if (get_type_id(read_fn) != LMD_TYPE_FUNC) return;
 
+    Item before_buf = js_property_get(self, key_buffer);
+    int64_t before_len = get_type_id(before_buf) == LMD_TYPE_ARRAY ? js_array_length(before_buf) : 0;
     js_property_set(self, key_reading, js_bool_item(true));
-    Item zero = (Item){.item = i2it(0)};
-    js_call_function(read_fn, self, &zero, 1);
-    js_property_set(self, key_reading, js_bool_item(false));
+    Item size = (Item){.item = i2it(js_stream_read_size_hint(self, size_item))};
+    js_call_function(read_fn, self, &size, 1);
+    Item after_buf = js_property_get(self, key_buffer);
+    int64_t after_len = get_type_id(after_buf) == LMD_TYPE_ARRAY ? js_array_length(after_buf) : 0;
+    if (after_len > before_len || js_item_is_true(js_property_get(self, key_end_pending))) {
+        js_property_set(self, key_reading, js_bool_item(false));
+    }
 
     if (js_item_is_true(js_property_get(self, key_end_pending))) {
-        js_stream_emit_end_tick(self);
+        Item flowing = js_property_get(self, key_flowing);
+        if (flowing.item != 0 && it2b(flowing)) {
+            js_stream_flush_buffered_data(self);
+        }
+        js_stream_schedule_end(self);
     }
 }
 
+static Item js_stream_call_read_tick(Item self) {
+    ensure_keys();
+    js_stream_call_read_if_needed(self, make_js_undefined());
+    return make_js_undefined();
+}
+
+static void js_stream_schedule_read(Item self) {
+    Item bound_args[1] = { self };
+    Item tick = js_bind_function(js_new_function((void*)js_stream_call_read_tick, 1),
+                                 make_js_undefined(), bound_args, 1);
+    js_next_tick_enqueue(tick);
+}
+
+static Item js_stream_decode_readable_chunk(Item self, Item chunk) {
+    if (js_stream_readable_is_object_mode(self)) return chunk;
+    Item encoding = js_property_get(self, make_string_item("_encoding"));
+    if (get_type_id(encoding) != LMD_TYPE_STRING) return chunk;
+    if (get_type_id(chunk) == LMD_TYPE_STRING) return chunk;
+    return js_buffer_toString(chunk, encoding, make_js_undefined(), make_js_undefined());
+}
+
 static void js_stream_flush_buffered_data(Item self) {
-    Item buf = js_property_get(self, key_buffer);
-    if (get_type_id(buf) == LMD_TYPE_ARRAY) {
+    for (;;) {
+        Item buf = js_property_get(self, key_buffer);
+        if (get_type_id(buf) != LMD_TYPE_ARRAY) return;
         int64_t blen = js_array_length(buf);
-        for (int64_t i = 0; i < blen; i++) {
-            Item chunk = js_array_get_int(buf, i);
-            stream_emit(self, "data", &chunk, 1);
+        if (blen <= 0) {
+            if (js_item_is_true(js_property_get(self, key_end_pending)) &&
+                !js_item_is_true(js_property_get(self, key_end_emitted))) {
+                js_stream_schedule_end(self);
+            }
+            return;
         }
-        js_property_set(self, key_buffer, js_array_new(0));
+
+        Item chunk = js_array_get_int(buf, 0);
+        Item next_buf = js_array_new(0);
+        for (int64_t i = 1; i < blen; i++) {
+            js_array_push(next_buf, js_array_get_int(buf, i));
+        }
+        js_property_set(self, key_buffer, next_buf);
+
+        Item emitted = js_stream_decode_readable_chunk(self, chunk);
+        stream_emit(self, "data", &emitted, 1);
     }
 }
 
@@ -537,7 +651,7 @@ static Item js_stream_flush_data_tick(Item self) {
         return make_js_undefined();
     }
     js_stream_flush_buffered_data(self);
-    js_stream_call_read_if_needed(self);
+    js_stream_call_read_if_needed(self, make_js_undefined());
     return make_js_undefined();
 }
 
@@ -574,6 +688,7 @@ extern "C" Item js_stream_on(Item self, Item event_item, Item listener) {
 
     if (is_readable_event) {
         js_state_set_bool(js_property_get(self, key_readable_state), "readableListening", true);
+        js_stream_call_read_if_needed(self, make_js_undefined());
     }
 
     if (is_data_event) {
@@ -583,7 +698,7 @@ extern "C" Item js_stream_on(Item self, Item event_item, Item listener) {
             js_stream_schedule_data_flush(self);
         } else {
             js_stream_flush_buffered_data(self);
-            js_stream_call_read_if_needed(self);
+            js_stream_call_read_if_needed(self, make_js_undefined());
         }
     }
     if (is_end_event &&
@@ -625,6 +740,56 @@ extern "C" Item js_stream_off(Item self, Item event_item, Item listener) {
     return self;
 }
 
+extern "C" Item js_stream_removeAllListeners(Item self, Item event_item) {
+    ensure_keys();
+    Item listeners_map = js_property_get(self, key_listeners);
+    if (get_type_id(listeners_map) != LMD_TYPE_MAP) return self;
+    if (event_item.item == 0 || get_type_id(event_item) == LMD_TYPE_UNDEFINED) {
+        js_property_set(self, key_listeners, js_new_object());
+        js_state_set_bool(js_property_get(self, key_readable_state), "readableListening", false);
+        js_stream_call_read_if_needed(self, make_js_undefined());
+        return self;
+    }
+    if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
+    js_property_set(listeners_map, event_item, js_array_new(0));
+    if (js_stream_string_equals(event_item, "readable")) {
+        js_state_set_bool(js_property_get(self, key_readable_state), "readableListening", false);
+        js_stream_call_read_if_needed(self, make_js_undefined());
+    }
+    return self;
+}
+
+static Item js_stream_once_wrapper(Item env_item, Item arg1) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item self = env[0];
+    Item event_item = env[1];
+    Item listener = env[2];
+    Item wrapper = env[3];
+    js_stream_off(self, event_item, wrapper);
+    if (get_type_id(listener) != LMD_TYPE_FUNC) return make_js_undefined();
+    if (arg1.item == 0 || get_type_id(arg1) == LMD_TYPE_UNDEFINED) {
+        return js_call_function(listener, self, NULL, 0);
+    }
+    return js_call_function(listener, self, &arg1, 1);
+}
+
+extern "C" Item js_stream_once(Item self, Item event_item, Item listener) {
+    ensure_keys();
+    if (get_type_id(event_item) != LMD_TYPE_STRING ||
+        get_type_id(listener) != LMD_TYPE_FUNC) {
+        return self;
+    }
+    Item* env = js_alloc_env(4);
+    env[0] = self;
+    env[1] = event_item;
+    env[2] = listener;
+    env[3] = make_js_undefined();
+    Item wrapper = js_new_closure((void*)js_stream_once_wrapper, 1, env, 4);
+    env[3] = wrapper;
+    return js_stream_on(self, event_item, wrapper);
+}
+
 // eventNames() — return currently registered event names.
 extern "C" Item js_stream_eventNames(Item self) {
     ensure_keys();
@@ -661,12 +826,13 @@ extern "C" Item js_stream_emit(Item self, Item event_item, Item arg1) {
 // Readable stream
 // =============================================================================
 
-// push(chunk) — add data to readable stream
-extern "C" Item js_readable_push(Item self, Item chunk) {
+// push(chunk[, encoding]) — add data to readable stream
+static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
     ensure_keys();
 
     // null signals end of stream
     if (chunk.item == 0 || get_type_id(chunk) == LMD_TYPE_NULL) {
+        js_property_set(self, key_reading, js_bool_item(false));
         if (js_item_is_true(js_property_get(self, key_destroyed)) ||
             js_item_is_true(js_property_get(self, key_end_pending)) ||
             js_item_is_true(js_property_get(self, key_end_emitted))) {
@@ -683,22 +849,25 @@ extern "C" Item js_readable_push(Item self, Item chunk) {
         }
 
         js_property_set(self, key_end_pending, js_bool_item(true));
-        if (!js_item_is_true(js_property_get(self, key_reading))) {
-            js_stream_schedule_end(self);
-        }
+        js_stream_schedule_end(self);
         return js_bool_item(true);
     }
 
-    if (!js_item_is_true(js_property_get(self, key_readable)) ||
-        js_item_is_true(js_property_get(self, key_end_pending)) ||
+    js_property_set(self, key_reading, js_bool_item(false));
+
+    if (js_item_is_true(js_property_get(self, key_end_pending)) ||
         js_item_is_true(js_property_get(self, key_end_emitted))) {
+        return js_throw_error_with_code("ERR_STREAM_PUSH_AFTER_EOF",
+                                        "stream.push() after EOF");
+    }
+    if (!js_item_is_true(js_property_get(self, key_readable))) {
         Item err = js_stream_make_error_with_code("ERR_STREAM_PUSH_AFTER_EOF",
             "stream.push() after EOF");
         js_stream_schedule_error(self, err);
         return js_bool_item(false);
     }
 
-    if (!js_stream_prepare_readable_chunk(self, &chunk)) return ItemNull;
+    if (!js_stream_prepare_readable_chunk(self, &chunk, encoding)) return ItemNull;
 
     Item pipe_dest = js_property_get(self, make_string_item("__pipe_dest__"));
     Item write_fn = js_property_get(pipe_dest, key_write);
@@ -706,27 +875,27 @@ extern "C" Item js_readable_push(Item self, Item chunk) {
         js_call_function(write_fn, pipe_dest, &chunk, 1);
     }
 
-    // if flowing, emit 'data' immediately
+    Item buf = js_property_get(self, key_buffer);
+    if (get_type_id(buf) != LMD_TYPE_ARRAY) {
+        buf = js_array_new(0);
+        js_property_set(self, key_buffer, buf);
+    }
+    js_array_push(buf, chunk);
     Item flowing = js_property_get(self, key_flowing);
     if (flowing.item != 0 && it2b(flowing)) {
-        stream_emit(self, "data", &chunk, 1);
-    } else {
-        // buffer it
-        Item buf = js_property_get(self, key_buffer);
-        if (get_type_id(buf) != LMD_TYPE_ARRAY) {
-            buf = js_array_new(0);
-            js_property_set(self, key_buffer, buf);
-        }
-        js_array_push(buf, chunk);
-        if (js_state_get_bool(js_property_get(self, key_readable_state), "readableListening")) {
-            stream_emit(self, "readable", NULL, 0);
-        }
+        js_stream_schedule_data_flush(self);
+    } else if (js_state_get_bool(js_property_get(self, key_readable_state), "readableListening")) {
+        stream_emit(self, "readable", NULL, 0);
     }
     return js_bool_item(true);
 }
 
+extern "C" Item js_readable_push(Item self, Item chunk) {
+    return js_readable_push_encoded(self, chunk, make_js_undefined());
+}
+
 // unshift(chunk) — prepend data to readable stream
-extern "C" Item js_readable_unshift(Item self, Item chunk) {
+extern "C" Item js_readable_unshift_encoded(Item self, Item chunk, Item encoding) {
     ensure_keys();
     if (chunk.item == 0 || get_type_id(chunk) == LMD_TYPE_NULL) {
         return js_readable_push(self, chunk);
@@ -738,7 +907,11 @@ extern "C" Item js_readable_unshift(Item self, Item chunk) {
         js_stream_schedule_error(self, err);
         return js_bool_item(false);
     }
-    if (!js_stream_prepare_readable_chunk(self, &chunk)) return ItemNull;
+    if (!js_stream_prepare_readable_chunk(self, &chunk, encoding)) return ItemNull;
+    if (!js_stream_readable_is_object_mode(self) &&
+        js_stream_readable_chunk_length(self, chunk) == 0) {
+        return js_bool_item(true);
+    }
 
     Item buf = js_property_get(self, key_buffer);
     if (get_type_id(buf) != LMD_TYPE_ARRAY) {
@@ -751,19 +924,115 @@ extern "C" Item js_readable_unshift(Item self, Item chunk) {
         js_array_push(new_buf, js_array_get_int(buf, i));
     }
     js_property_set(self, key_buffer, new_buf);
-    if (js_state_get_bool(js_property_get(self, key_readable_state), "readableListening")) {
+    if (js_item_is_true(js_property_get(self, key_end_pending)) &&
+        !js_item_is_true(js_property_get(self, key_end_emitted))) {
+        return js_bool_item(true);
+    }
+    Item flowing = js_property_get(self, key_flowing);
+    if (flowing.item != 0 && it2b(flowing)) {
+        if (js_stream_readable_is_object_mode(self) ||
+            js_item_is_true(js_property_get(self, key_capture_rejections))) {
+            js_stream_schedule_data_flush(self);
+        } else {
+            js_stream_flush_buffered_data(self);
+            js_stream_call_read_if_needed(self, make_js_undefined());
+        }
+    } else if (js_state_get_bool(js_property_get(self, key_readable_state), "readableListening")) {
         stream_emit(self, "readable", NULL, 0);
     }
     return js_bool_item(true);
 }
 
+extern "C" Item js_readable_unshift(Item self, Item chunk) {
+    return js_readable_unshift_encoded(self, chunk, make_js_undefined());
+}
+
+static int64_t js_stream_readable_chunk_length(Item self, Item chunk) {
+    Item state = js_property_get(self, key_readable_state);
+    if (js_state_get_bool(state, "objectMode")) return 1;
+    if (get_type_id(chunk) == LMD_TYPE_STRING) {
+        String* str = it2s(chunk);
+        return str ? (int64_t)str->len : 0;
+    }
+    Item byte_length = js_property_get(chunk, make_string_item("byteLength"));
+    if (get_type_id(byte_length) == LMD_TYPE_INT) return it2i(byte_length);
+    Item length = js_property_get(chunk, make_string_item("length"));
+    if (get_type_id(length) == LMD_TYPE_INT) return it2i(length);
+    return 0;
+}
+
+static Item js_readable_read_exact(Item self, Item buf, int64_t blen, int64_t want) {
+    if (want <= 0 || js_stream_readable_is_object_mode(self)) return ItemNull;
+
+    int64_t available = 0;
+    for (int64_t i = 0; i < blen; i++) {
+        available += js_stream_readable_chunk_length(self, js_array_get_int(buf, i));
+        if (available >= want) break;
+    }
+    if (available < want && !js_item_is_true(js_property_get(self, key_end_pending))) {
+        js_stream_call_read_if_needed(self, (Item){.item = i2it(want)});
+        return ItemNull;
+    }
+    if (available == 0) return ItemNull;
+    if (want > available) want = available;
+
+    Item parts = js_array_new(0);
+    Item new_buf = js_array_new(0);
+    int64_t remaining = want;
+    bool split = false;
+    for (int64_t i = 0; i < blen; i++) {
+        Item chunk = js_array_get_int(buf, i);
+        if (split) {
+            js_array_push(new_buf, chunk);
+            continue;
+        }
+        int64_t chunk_len = js_stream_readable_chunk_length(self, chunk);
+        if (chunk_len <= remaining) {
+            js_array_push(parts, chunk);
+            remaining -= chunk_len;
+            if (remaining == 0) split = true;
+            continue;
+        }
+        Item head = js_buffer_slice(chunk, (Item){.item = i2it(0)}, (Item){.item = i2it(remaining)});
+        Item tail = js_buffer_slice(chunk, (Item){.item = i2it(remaining)}, make_js_undefined());
+        js_array_push(parts, head);
+        js_array_push(new_buf, tail);
+        remaining = 0;
+        split = true;
+    }
+    js_property_set(self, key_buffer, new_buf);
+    if (js_array_length(new_buf) == 0) {
+        if (js_item_is_true(js_property_get(self, key_end_pending)))
+            js_stream_schedule_end(self);
+        else
+            js_stream_schedule_read(self);
+    }
+
+    int64_t part_count = js_array_length(parts);
+    if (part_count == 1) return js_array_get_int(parts, 0);
+    return js_buffer_concat(parts, (Item){.item = i2it(want)});
+}
+
 // read() — pull one chunk from buffer (non-flowing mode)
-extern "C" Item js_readable_read(Item self) {
+extern "C" Item js_readable_read_size(Item self, Item size_item) {
     ensure_keys();
     Item buf = js_property_get(self, key_buffer);
+    if (get_type_id(buf) != LMD_TYPE_ARRAY || js_array_length(buf) == 0) {
+        js_stream_call_read_if_needed(self, size_item);
+        buf = js_property_get(self, key_buffer);
+    }
     if (get_type_id(buf) != LMD_TYPE_ARRAY) return ItemNull;
     int64_t blen = js_array_length(buf);
     if (blen == 0) return ItemNull;
+
+    if (get_type_id(size_item) == LMD_TYPE_INT && it2i(size_item) > 0) {
+        Item exact = js_readable_read_exact(self, buf, blen, it2i(size_item));
+        if (exact.item == 0 || get_type_id(exact) == LMD_TYPE_NULL ||
+            get_type_id(exact) == LMD_TYPE_UNDEFINED) {
+            return ItemNull;
+        }
+        return js_stream_decode_readable_chunk(self, exact);
+    }
 
     Item encoding = js_property_get(self, make_string_item("_encoding"));
     if (get_type_id(encoding) == LMD_TYPE_STRING) {
@@ -772,6 +1041,10 @@ extern "C" Item js_readable_read(Item self) {
             : js_buffer_concat(buf, make_js_undefined());
         if (js_check_exception()) return ItemNull;
         js_property_set(self, key_buffer, js_array_new(0));
+        if (js_item_is_true(js_property_get(self, key_end_pending)))
+            js_stream_schedule_end(self);
+        else
+            js_stream_schedule_read(self);
         if (get_type_id(joined) == LMD_TYPE_STRING) return joined;
         return js_buffer_toString(joined, encoding, make_js_undefined(), make_js_undefined());
     }
@@ -783,7 +1056,17 @@ extern "C" Item js_readable_read(Item self) {
         js_array_push(new_buf, js_array_get_int(buf, i));
     }
     js_property_set(self, key_buffer, new_buf);
+    if (js_array_length(new_buf) == 0) {
+        if (js_item_is_true(js_property_get(self, key_end_pending)))
+            js_stream_schedule_end(self);
+        else
+            js_stream_schedule_read(self);
+    }
     return result;
+}
+
+extern "C" Item js_readable_read(Item self) {
+    return js_readable_read_size(self, make_js_undefined());
 }
 
 static Item js_stream_iterator_result(Item value, bool done) {
@@ -817,7 +1100,7 @@ static Item js_stream_async_iterator_next(Item iterator) {
                          js_item_is_true(js_property_get(stream, key_end_emitted)) ||
                          js_item_is_true(js_property_get(stream, key_ended));
     if (!readable_done) {
-        js_stream_call_read_if_needed(stream);
+        js_stream_call_read_if_needed(stream, make_js_undefined());
         chunk = js_readable_read(stream);
         if (chunk.item != 0 && get_type_id(chunk) != LMD_TYPE_NULL &&
             get_type_id(chunk) != LMD_TYPE_UNDEFINED) {
@@ -887,7 +1170,22 @@ extern "C" Item js_readable_pipe(Item self, Item dest) {
 // destroy([err]) — destroy stream
 extern "C" Item js_stream_destroy(Item self, Item err) {
     ensure_keys();
+    if (js_item_is_true(js_property_get(self, key_destroyed))) return self;
+    if (js_item_is_true(js_property_get(self, key_flowing))) {
+        js_stream_flush_buffered_data(self);
+    }
     js_stream_mark_destroyed(self);
+
+    Item destroy_fn = js_property_get(self, make_string_item("_destroy"));
+    if (get_type_id(destroy_fn) == LMD_TYPE_FUNC) {
+        Item destroy_cb = js_bind_function(js_new_function((void*)js_stream_after_destroy, 2),
+                                           make_js_undefined(), &self, 1);
+        Item destroy_err = js_stream_has_callback_error(err) ? err : make_js_undefined();
+        Item args[2] = { destroy_err, destroy_cb };
+        js_call_function(destroy_fn, self, args, 2);
+        if (!js_check_exception()) return self;
+    }
+
     if (err.item != 0 && get_type_id(err) != LMD_TYPE_UNDEFINED &&
         get_type_id(err) != LMD_TYPE_NULL) {
         stream_emit(self, "error", &err, 1);
@@ -911,7 +1209,7 @@ extern "C" Item js_readable_resume(Item self) {
         }
         js_property_set(self, key_buffer, js_array_new(0));
     }
-    js_stream_call_read_if_needed(self);
+    js_stream_call_read_if_needed(self, make_js_undefined());
     return self;
 }
 
@@ -1044,6 +1342,19 @@ static bool js_stream_readable_is_object_mode(Item self) {
     return js_state_get_bool(state, "objectMode");
 }
 
+static bool js_stream_encoding_items_equal(Item a, Item b) {
+    if (get_type_id(a) != LMD_TYPE_STRING || get_type_id(b) != LMD_TYPE_STRING)
+        return false;
+    Item ca = js_stream_canonical_encoding(a);
+    Item cb = js_stream_canonical_encoding(b);
+    if (get_type_id(ca) != LMD_TYPE_STRING || get_type_id(cb) != LMD_TYPE_STRING)
+        return false;
+    String* as = it2s(ca);
+    String* bs = it2s(cb);
+    return as && bs && as->len == bs->len &&
+           memcmp(as->chars, bs->chars, as->len) == 0;
+}
+
 static bool js_stream_convert_view_to_buffer(Item* chunk) {
     if (!js_stream_chunk_is_arraybuffer_view(*chunk) ||
         js_stream_chunk_is_buffer(*chunk)) {
@@ -1059,8 +1370,29 @@ static bool js_stream_convert_view_to_buffer(Item* chunk) {
     return true;
 }
 
-static bool js_stream_prepare_readable_chunk(Item self, Item* chunk) {
+static bool js_stream_prepare_readable_chunk(Item self, Item* chunk, Item encoding) {
     if (js_stream_readable_is_object_mode(self)) return true;
+    if (get_type_id(*chunk) == LMD_TYPE_STRING) {
+        Item chunk_encoding = encoding;
+        if (chunk_encoding.item == 0 ||
+            get_type_id(chunk_encoding) == LMD_TYPE_UNDEFINED ||
+            get_type_id(chunk_encoding) == LMD_TYPE_NULL) {
+            chunk_encoding = js_stream_resolve_write_encoding(self, chunk_encoding);
+        }
+        if (get_type_id(chunk_encoding) != LMD_TYPE_STRING ||
+            !js_stream_is_valid_encoding(chunk_encoding)) {
+            js_stream_throw_unknown_encoding(chunk_encoding);
+            return false;
+        }
+        Item stream_encoding = js_property_get(self, make_string_item("_encoding"));
+        if (js_stream_encoding_items_equal(chunk_encoding, stream_encoding)) {
+            return true;
+        }
+        Item buffer = js_buffer_from(*chunk, chunk_encoding, make_js_undefined());
+        if (js_check_exception()) return false;
+        *chunk = buffer;
+        return true;
+    }
     return js_stream_convert_view_to_buffer(chunk);
 }
 
@@ -1377,8 +1709,14 @@ extern "C" Item js_transform_end(Item self, Item chunk, Item callback);
 static Item js_stream_inst_on(Item event_item, Item listener) {
     return js_stream_on(js_get_this(), event_item, listener);
 }
+static Item js_stream_inst_once(Item event_item, Item listener) {
+    return js_stream_once(js_get_this(), event_item, listener);
+}
 static Item js_stream_inst_off(Item event_item, Item listener) {
     return js_stream_off(js_get_this(), event_item, listener);
+}
+static Item js_stream_inst_removeAllListeners(Item event_item) {
+    return js_stream_removeAllListeners(js_get_this(), event_item);
 }
 static Item js_stream_inst_emit(Item event_item, Item arg1) {
     return js_stream_emit(js_get_this(), event_item, arg1);
@@ -1386,14 +1724,14 @@ static Item js_stream_inst_emit(Item event_item, Item arg1) {
 static Item js_stream_inst_eventNames(void) {
     return js_stream_eventNames(js_get_this());
 }
-static Item js_readable_inst_push(Item chunk) {
-    return js_readable_push(js_get_this(), chunk);
+static Item js_readable_inst_push(Item chunk, Item encoding) {
+    return js_readable_push_encoded(js_get_this(), chunk, encoding);
 }
-static Item js_readable_inst_unshift(Item chunk) {
-    return js_readable_unshift(js_get_this(), chunk);
+static Item js_readable_inst_unshift(Item chunk, Item encoding) {
+    return js_readable_unshift_encoded(js_get_this(), chunk, encoding);
 }
-static Item js_readable_inst_read(void) {
-    return js_readable_read(js_get_this());
+static Item js_readable_inst_read(Item size_item) {
+    return js_readable_read_size(js_get_this(), size_item);
 }
 static Item js_readable_inst_pipe(Item dest) {
     return js_readable_pipe(js_get_this(), dest);
@@ -1471,13 +1809,15 @@ extern "C" Item js_readable_new(Item opts) {
     js_stream_init_readable_options(obj);
 
     js_property_set(obj, key_on, js_new_function((void*)js_stream_inst_on, 2));
+    js_property_set(obj, make_string_item("once"), js_new_function((void*)js_stream_inst_once, 2));
     js_property_set(obj, make_string_item("off"), js_new_function((void*)js_stream_inst_off, 2));
     js_property_set(obj, make_string_item("removeListener"), js_new_function((void*)js_stream_inst_off, 2));
+    js_property_set(obj, make_string_item("removeAllListeners"), js_new_function((void*)js_stream_inst_removeAllListeners, 1));
     js_property_set(obj, key_emit, js_new_function((void*)js_stream_inst_emit, 2));
     js_property_set(obj, make_string_item("eventNames"), js_new_function((void*)js_stream_inst_eventNames, 0));
-    js_property_set(obj, key_push, js_new_function((void*)js_readable_inst_push, 1));
-    js_property_set(obj, make_string_item("unshift"), js_new_function((void*)js_readable_inst_unshift, 1));
-    js_property_set(obj, key_read, js_new_function((void*)js_readable_inst_read, 0));
+    js_property_set(obj, key_push, js_new_function((void*)js_readable_inst_push, 2));
+    js_property_set(obj, make_string_item("unshift"), js_new_function((void*)js_readable_inst_unshift, 2));
+    js_property_set(obj, key_read, js_new_function((void*)js_readable_inst_read, 1));
     js_property_set(obj, key_pipe, js_new_function((void*)js_readable_inst_pipe, 1));
     js_property_set(obj, key_destroy, js_new_function((void*)js_stream_inst_destroy, 1));
     js_property_set(obj, make_string_item("resume"), js_new_function((void*)js_readable_inst_resume, 0));
@@ -1538,6 +1878,12 @@ extern "C" Item js_writable_write(Item self, Item chunk, Item encoding, Item cal
         js_property_set(self, make_string_item("_writing"), js_bool_item(true));
         js_call_function(write_handler, self, args, 3);
     } else {
+        Item writev_fn = js_property_get(self, make_string_item("_writev"));
+        if (get_type_id(writev_fn) == LMD_TYPE_FUNC) {
+            js_stream_buffer_write_request(self, chunk, encoding, callback);
+            js_stream_flush_pending_writes(self);
+            return js_bool_item(accepted);
+        }
         // no _write method — throw ERR_METHOD_NOT_IMPLEMENTED
         Item state = js_property_get(self, key_writable_state);
         js_state_set_item(state, "length", (Item){.item = i2it(0)});
@@ -1755,8 +2101,10 @@ extern "C" Item js_writable_new(Item opts) {
     js_stream_init_writable_options(obj);
 
     js_property_set(obj, key_on, js_new_function((void*)js_stream_inst_on, 2));
+    js_property_set(obj, make_string_item("once"), js_new_function((void*)js_stream_inst_once, 2));
     js_property_set(obj, make_string_item("off"), js_new_function((void*)js_stream_inst_off, 2));
     js_property_set(obj, make_string_item("removeListener"), js_new_function((void*)js_stream_inst_off, 2));
+    js_property_set(obj, make_string_item("removeAllListeners"), js_new_function((void*)js_stream_inst_removeAllListeners, 1));
     js_property_set(obj, key_emit, js_new_function((void*)js_stream_inst_emit, 2));
     js_property_set(obj, make_string_item("eventNames"), js_new_function((void*)js_stream_inst_eventNames, 0));
     js_property_set(obj, key_write, js_new_function((void*)js_writable_inst_write, 3));
@@ -1807,13 +2155,15 @@ extern "C" Item js_duplex_new(Item opts) {
 
     // Readable methods
     js_property_set(obj, key_on, js_new_function((void*)js_stream_inst_on, 2));
+    js_property_set(obj, make_string_item("once"), js_new_function((void*)js_stream_inst_once, 2));
     js_property_set(obj, make_string_item("off"), js_new_function((void*)js_stream_inst_off, 2));
     js_property_set(obj, make_string_item("removeListener"), js_new_function((void*)js_stream_inst_off, 2));
+    js_property_set(obj, make_string_item("removeAllListeners"), js_new_function((void*)js_stream_inst_removeAllListeners, 1));
     js_property_set(obj, key_emit, js_new_function((void*)js_stream_inst_emit, 2));
     js_property_set(obj, make_string_item("eventNames"), js_new_function((void*)js_stream_inst_eventNames, 0));
-    js_property_set(obj, key_push, js_new_function((void*)js_readable_inst_push, 1));
-    js_property_set(obj, make_string_item("unshift"), js_new_function((void*)js_readable_inst_unshift, 1));
-    js_property_set(obj, key_read, js_new_function((void*)js_readable_inst_read, 0));
+    js_property_set(obj, key_push, js_new_function((void*)js_readable_inst_push, 2));
+    js_property_set(obj, make_string_item("unshift"), js_new_function((void*)js_readable_inst_unshift, 2));
+    js_property_set(obj, key_read, js_new_function((void*)js_readable_inst_read, 1));
     js_property_set(obj, key_pipe, js_new_function((void*)js_readable_inst_pipe, 1));
     js_property_set(obj, make_string_item("resume"), js_new_function((void*)js_readable_inst_resume, 0));
     js_property_set(obj, make_string_item("pause"), js_new_function((void*)js_readable_inst_pause, 0));
@@ -1939,13 +2289,15 @@ extern "C" Item js_transform_new(Item opts) {
 
     // Readable methods
     js_property_set(obj, key_on, js_new_function((void*)js_stream_inst_on, 2));
+    js_property_set(obj, make_string_item("once"), js_new_function((void*)js_stream_inst_once, 2));
     js_property_set(obj, make_string_item("off"), js_new_function((void*)js_stream_inst_off, 2));
     js_property_set(obj, make_string_item("removeListener"), js_new_function((void*)js_stream_inst_off, 2));
+    js_property_set(obj, make_string_item("removeAllListeners"), js_new_function((void*)js_stream_inst_removeAllListeners, 1));
     js_property_set(obj, key_emit, js_new_function((void*)js_stream_inst_emit, 2));
     js_property_set(obj, make_string_item("eventNames"), js_new_function((void*)js_stream_inst_eventNames, 0));
-    js_property_set(obj, key_push, js_new_function((void*)js_readable_inst_push, 1));
-    js_property_set(obj, make_string_item("unshift"), js_new_function((void*)js_readable_inst_unshift, 1));
-    js_property_set(obj, key_read, js_new_function((void*)js_readable_inst_read, 0));
+    js_property_set(obj, key_push, js_new_function((void*)js_readable_inst_push, 2));
+    js_property_set(obj, make_string_item("unshift"), js_new_function((void*)js_readable_inst_unshift, 2));
+    js_property_set(obj, key_read, js_new_function((void*)js_readable_inst_read, 1));
     js_property_set(obj, key_pipe, js_new_function((void*)js_readable_inst_pipe, 1));
     js_property_set(obj, make_string_item("resume"), js_new_function((void*)js_readable_inst_resume, 0));
     js_property_set(obj, make_string_item("pause"), js_new_function((void*)js_readable_inst_pause, 0));
@@ -1996,13 +2348,83 @@ extern "C" Item js_passthrough_new(Item opts) {
 // pipeline(source, ...transforms, destination, callback) — pipe chain
 // =============================================================================
 
-extern "C" Item js_stream_pipeline(Item source, Item dest) {
+static bool js_stream_pipeline_source_ended(Item source) {
+    ensure_keys();
+    return js_item_is_true(js_property_get(source, key_end_emitted)) ||
+           js_item_is_true(js_property_get(source, key_end_pending)) ||
+           js_state_get_bool(js_property_get(source, key_readable_state), "endEmitted");
+}
+
+static Item js_stream_pipeline_call_once(Item* env, Item err) {
+    if (!env || js_item_is_true(env[3])) return make_js_undefined();
+    env[3] = js_bool_item(true);
+    Item callback = env[2];
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+    if (js_stream_has_error(err)) {
+        js_call_function(callback, ItemNull, &err, 1);
+    } else {
+        js_call_function(callback, ItemNull, NULL, 0);
+    }
+    return make_js_undefined();
+}
+
+static Item js_stream_pipeline_destroy_dest(Item dest, Item err) {
+    if (js_item_is_true(js_property_get(dest, key_destroyed))) return make_js_undefined();
+    Item destroy_fn = js_property_get(dest, key_destroy);
+    if (get_type_id(destroy_fn) != LMD_TYPE_FUNC) return make_js_undefined();
+    js_call_function(destroy_fn, dest, &err, 1);
+    return make_js_undefined();
+}
+
+static Item js_stream_pipeline_on_close(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item source = env[0];
+    if (js_stream_pipeline_source_ended(source)) {
+        return make_js_undefined();
+    }
+
+    Item err = js_stream_make_error_with_code("ERR_STREAM_PREMATURE_CLOSE",
+        "Premature close");
+    js_stream_pipeline_call_once(env, err);
+    js_stream_pipeline_destroy_dest(env[1], err);
+    return make_js_undefined();
+}
+
+static Item js_stream_pipeline_on_error(Item env_item, Item err) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    return js_stream_pipeline_call_once(env, err);
+}
+
+static Item js_stream_pipeline_on_finish(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    return js_stream_pipeline_call_once(env, make_js_undefined());
+}
+
+extern "C" Item js_stream_pipeline(Item source, Item dest, Item callback) {
     ensure_keys();
     // simplified two-argument pipeline (most common case)
     // for multi-step, chain pipe() calls
     Item pipe_fn = js_property_get(source, key_pipe);
     if (get_type_id(pipe_fn) == LMD_TYPE_FUNC) {
         js_call_function(pipe_fn, source, &dest, 1);
+    }
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        Item* env = js_alloc_env(4);
+        env[0] = source;
+        env[1] = dest;
+        env[2] = callback;
+        env[3] = js_bool_item(false);
+        Item source_close = js_new_closure((void*)js_stream_pipeline_on_close, 0, env, 4);
+        Item source_error = js_new_closure((void*)js_stream_pipeline_on_error, 1, env, 4);
+        Item dest_error = js_new_closure((void*)js_stream_pipeline_on_error, 1, env, 4);
+        Item dest_finish = js_new_closure((void*)js_stream_pipeline_on_finish, 0, env, 4);
+        js_stream_once(source, make_string_item("close"), source_close);
+        js_stream_once(source, make_string_item("error"), source_error);
+        js_stream_once(dest, make_string_item("error"), dest_error);
+        js_stream_once(dest, make_string_item("finish"), dest_finish);
     }
     return dest;
 }
@@ -2249,7 +2671,7 @@ extern "C" Item js_get_stream_namespace(void) {
         stream_set_method(stream_namespace, "Transform",   (void*)js_transform_new, 1);
     Item passthrough_constructor =
         stream_set_method(stream_namespace, "PassThrough", (void*)js_passthrough_new, 1);
-    stream_set_method(stream_namespace, "pipeline",    (void*)js_stream_pipeline, 2);
+    stream_set_method(stream_namespace, "pipeline",    (void*)js_stream_pipeline, 3);
     stream_set_method(stream_namespace, "finished",    (void*)js_stream_finished, 2);
     stream_set_method(stream_namespace, "addAbortSignal", (void*)js_stream_addAbortSignal, 2);
     stream_set_method(stream_namespace, "getDefaultHighWaterMark",
