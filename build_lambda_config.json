@@ -3847,10 +3847,10 @@
                         "icon": "⏱️"
                     },
                     {
-                        "source": "test/test_node_module_gtest.cpp",
-                        "name": "Node.js Module Tests",
+                        "source": "test/test_node_prelim_gtest.cpp",
+                        "name": "Node.js Preliminary Tests",
                         "dependencies": [],
-                        "binary": "test_node_module_gtest.exe",
+                        "binary": "test_node_prelim_gtest.exe",
                         "libraries": [
                             "gtest",
                             "gtest_main"

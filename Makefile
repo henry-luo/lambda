@@ -503,7 +503,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
 	    ensure-test262-gtest test262-baseline test262-full \
 	    test-ui-automation test-reactive-ui test-redex-baseline \
-	    node-baseline node-update-baseline
+	    node-baseline node-full node-update-baseline
 
 # Help target - shows available commands
 help:
@@ -1061,6 +1061,11 @@ node-shim-restore:
 # Node.js official test suite: run official Node.js tests from ref/node/test/parallel/
 node-baseline: build-test node-shim
 	@echo "Running Node.js official test suite..."
+	@LAMBDA_NODE_BASELINE_ONLY=1 ./test/test_node_gtest.exe --baseline-only
+
+# Node.js official: run full enabled official Node.js test sweep
+node-full: build-test node-shim
+	@echo "Running full Node.js official test suite..."
 	@./test/test_node_gtest.exe
 
 # Node.js official: update baseline with current passing set

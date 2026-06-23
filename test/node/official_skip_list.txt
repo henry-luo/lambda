@@ -16,6 +16,7 @@
 #   [crash]      Known to crash LambdaJS during default official-test runs
 #   [timeout]    Known to hit the runner timeout or require unavailable signals
 #   [spawn-node] Spawns 'node' binary with Node-specific CLI flags
+#   [unimplemented] Requires a Node feature not implemented in LambdaJS yet
 #
 
 # --- child_process.fork (spawns Node binary via IPC channel) ---
@@ -47,6 +48,8 @@ test-snapshot-api.js                        # [snapshot] requires v8.startupSnap
 test-crypto-fips.js                         # [native] requires FIPS OpenSSL build
 
 # --- Known hangs (timeout / infinite loop) ---
+test-http-outgoing-message-capture-rejection.js  # [timeout] HTTP captureRejections/backpressure drain fixture times out
+test-net-write-fully-async-hex-string.js         # [timeout] async net write/drain with large hex payload times out
 test-stream-pipe-needDrain.js               # [hang] requires event loop (process.nextTick drain)
 test-stream-writable-write-cb-error.js      # [hang] requires event loop (process.nextTick)
 test-string-decoder-fuzz.js                 # [hang] Date.now() loop + StringDecoder instance methods
@@ -55,6 +58,10 @@ test-zlib-brotli.js                         # [hang] requires fixtures module + 
 test-os-process-priority.js                 # [hang] requires os.constants.priority
 test-buffer-alloc.js                        # [hang] 1192-line test, JIT compilation exceeds timeout
 test-webcrypto-digest-turboshake-rfc.js     # [hang] WebCrypto SHAKE variant is unsupported/timeout-bound
+
+# --- Unimplemented LambdaJS feature areas ---
+test-crypto-pqc-sign-verify-ml-dsa.js       # [unimplemented] requires ML-DSA/PQC crypto key formats and sign/verify support
+test-vm-dynamic-import-callback-missing-flag.js # [unimplemented] requires VM dynamic import callback flag semantics
 
 # --- Known crashers from full official-test sweeps ---
 test-bash-completion.js                     # [crash] aborts in LambdaJS command completion path

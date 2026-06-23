@@ -157,9 +157,9 @@ static void run_node_sub_batch(
 
     char command[512];
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe js-test-batch --timeout=10 < \"%s\"", manifest_path);
+    snprintf(command, sizeof(command), "lambda.exe js-test-batch --no-log --timeout=10 < \"%s\"", manifest_path);
 #else
-    snprintf(command, sizeof(command), "./lambda.exe js-test-batch --timeout=10 < \"%s\"", manifest_path);
+    snprintf(command, sizeof(command), "./lambda.exe js-test-batch --no-log --timeout=10 < \"%s\"", manifest_path);
 #endif
 
     FILE* pipe = popen(command, "r");
@@ -380,7 +380,7 @@ TEST_P(NodeFileTest, Run) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    NodeModuleTests,
+    NodePrelimTests,
     NodeFileTest,
     testing::ValuesIn(discover_all_node_tests()),
     [](const testing::TestParamInfo<NodeTestParam>& info) {

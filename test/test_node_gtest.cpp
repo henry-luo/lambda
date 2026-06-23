@@ -18,12 +18,14 @@
 //   --update-baseline            Update baseline file with current passing set
 //   --timeout=<ms>               Per-test timeout in ms (default: 60000)
 //   --include-slow               Include tests listed in test/node/official_slow_list.txt
+//   --baseline-only              Run only tests listed in official_baseline.txt
 //
 // Usage:
 //   ./test/test_node_gtest.exe                    # run all enabled modules
 //   ./test/test_node_gtest.exe --modules=path,os  # run only path + os
 //   ./test/test_node_gtest.exe --update-baseline  # update baseline
 //   ./test/test_node_gtest.exe --include-slow     # also run slow-list tests
+//   ./test/test_node_gtest.exe --baseline-only    # fast regression gate
 //
 // =============================================================================
 
@@ -82,17 +84,35 @@ static const char* NODE_TEST_DIR   = "ref/node/test/parallel";
 static const char* BASELINE_FILE   = "test/node/official_baseline.txt";
 static const char* CRASHER_FILE    = "temp/_node_official_crashers.txt";
 static const char* SLOW_LIST_FILE  = "test/node/official_slow_list.txt";
+static const char* TIMING_FILE     = "temp/node_official_times.tsv";
 static const double SLOW_TEST_THRESHOLD_MS = 10000.0;
 static int         g_timeout_ms    = 60000;    // per-test timeout (60s for JIT compilation)
 static bool        g_update_baseline = false;
 static bool        g_include_slow = false;
+static bool        g_baseline_only = false;
 static double      g_node_run_wall_secs = 0.0;
+static std::chrono::steady_clock::time_point g_node_program_start;
 
 static int get_parallel_workers() {
     int cores = std::thread::hardware_concurrency();
     return (cores > 2) ? cores - 1 : 1;
 }
 static const int   PARALLEL_WORKERS  = get_parallel_workers();
+
+static void print_node_final_runtime() {
+    auto end = std::chrono::steady_clock::now();
+    double total_secs = std::chrono::duration<double>(end - g_node_program_start).count();
+    printf("\n[node-official] Total run time: %.1fs", total_secs);
+    if (g_node_run_wall_secs > 0.0) {
+        printf(" (test execution: %.1fs)", g_node_run_wall_secs);
+    }
+    printf("\n");
+}
+
+static bool env_requests_baseline_only() {
+    const char* value = getenv("LAMBDA_NODE_BASELINE_ONLY");
+    return value && value[0] != '\0' && strcmp(value, "0") != 0;
+}
 
 // =============================================================================
 // Feature modules — each can be enabled/disabled
@@ -397,6 +417,7 @@ static void load_slow_list() {
 static std::set<std::string>   g_baseline_passing;   // tests expected to pass
 static std::set<std::string>   g_enabled_prefixes;    // active module prefixes
 static bool                    g_prefixes_initialized = false;
+static bool                    g_baseline_loaded = false;
 
 // Initialize enabled prefixes with defaults (all enabled modules).
 // Called lazily on first use (before main() for INSTANTIATE_TEST_SUITE_P).
@@ -645,7 +666,8 @@ struct NodeOfficialParam {
     std::string test_name;     // sanitized for GTest: test_path_join
 };
 
-static std::vector<NodeOfficialParam> discover_node_official_tests(bool honor_slow_list = true) {
+static std::vector<NodeOfficialParam> discover_node_official_tests(bool honor_slow_list = true,
+                                                                   bool baseline_only = false) {
     ensure_prefixes_initialized();
     std::vector<NodeOfficialParam> tests;
     std::string dir_path = NODE_TEST_DIR;
@@ -694,6 +716,11 @@ static std::vector<NodeOfficialParam> discover_node_official_tests(bool honor_sl
         load_slow_list();
         if (honor_slow_list && !g_include_slow &&
             g_slow_tests.find(filename) != g_slow_tests.end()) {
+            continue;
+        }
+
+        if (baseline_only && !g_baseline_passing.empty() &&
+            g_baseline_passing.find(filename) == g_baseline_passing.end()) {
             continue;
         }
 
@@ -780,11 +807,85 @@ static double sum_node_elapsed_secs(const std::vector<std::string>& tests) {
     return (double)(total_ms / 1000.0L);
 }
 
+static const char* node_result_status(const NodeTestResult& r) {
+    if (r.timed_out) return "timeout";
+    if (r.exit_code > 128) return "crash";
+    if (r.passed) return "pass";
+    return "fail";
+}
+
+static void ensure_temp_dir() {
+#ifdef _WIN32
+    _mkdir("temp");
+#else
+    mkdir("temp", 0755);
+#endif
+}
+
+static void write_timing_report(const std::vector<NodeOfficialParam>& tests) {
+    ensure_temp_dir();
+
+    FILE* f = fopen(TIMING_FILE, "w");
+    if (!f) {
+        fprintf(stderr, "[node-official] ERROR: Cannot write timing file: %s\n", TIMING_FILE);
+        return;
+    }
+
+    fprintf(f, "test\tmodule\tstatus\texit_code\telapsed_ms\n");
+    for (auto& t : tests) {
+        auto it = g_test_results.find(t.filename);
+        if (it == g_test_results.end()) {
+            fprintf(f, "%s\t%s\tmissing\t-1\t0.000\n",
+                    t.filename.c_str(), t.module.c_str());
+            continue;
+        }
+        const auto& r = it->second;
+        fprintf(f, "%s\t%s\t%s\t%d\t%.3f\n",
+                t.filename.c_str(), t.module.c_str(), node_result_status(r),
+                r.exit_code, r.elapsed_ms);
+    }
+
+    fclose(f);
+    fprintf(stderr, "[node-official] Wrote per-test timings to %s\n", TIMING_FILE);
+}
+
+static void print_slowest_tests(const std::vector<NodeOfficialParam>& tests) {
+    std::vector<const NodeOfficialParam*> by_elapsed;
+    by_elapsed.reserve(tests.size());
+    for (auto& t : tests) {
+        if (g_test_results.find(t.filename) != g_test_results.end()) {
+            by_elapsed.push_back(&t);
+        }
+    }
+
+    std::sort(by_elapsed.begin(), by_elapsed.end(),
+              [](const NodeOfficialParam* a, const NodeOfficialParam* b) {
+                  const auto& ra = g_test_results[a->filename];
+                  const auto& rb = g_test_results[b->filename];
+                  return ra.elapsed_ms > rb.elapsed_ms;
+              });
+
+    size_t limit = by_elapsed.size() < 15 ? by_elapsed.size() : 15;
+    if (limit == 0) return;
+
+    printf("\n=== SLOWEST NODE OFFICIAL TESTS ===\n");
+    for (size_t i = 0; i < limit; i++) {
+        const auto* t = by_elapsed[i];
+        const auto& r = g_test_results[t->filename];
+        printf("  %6.2fs  %-8s  %s\n",
+               r.elapsed_ms / 1000.0, node_result_status(r), t->filename.c_str());
+    }
+    printf("  Full timing table: %s\n", TIMING_FILE);
+}
+
 // =============================================================================
 // Baseline file I/O
 // =============================================================================
 
 static void load_baseline() {
+    if (g_baseline_loaded) return;
+    g_baseline_loaded = true;
+
     FILE* f = fopen(BASELINE_FILE, "r");
     if (!f) {
         fprintf(stderr, "[node-official] No baseline file found (%s) — regression checking disabled\n",
@@ -801,6 +902,11 @@ static void load_baseline() {
     fclose(f);
     fprintf(stderr, "[node-official] Loaded baseline: %zu passing tests from %s\n",
             g_baseline_passing.size(), BASELINE_FILE);
+}
+
+static std::vector<NodeOfficialParam> discover_node_official_gtest_params() {
+    load_baseline();
+    return discover_node_official_tests(false, env_requests_baseline_only());
 }
 
 static void write_baseline(const std::vector<std::string>& passing,
@@ -880,13 +986,18 @@ static void write_slow_list_if_needed(const std::vector<NodeOfficialParam>& test
         auto it = g_test_results.find(t.filename);
         if (it == g_test_results.end()) continue;
         const auto& r = it->second;
-        if (r.timed_out || r.exit_code > 128) continue;
+        if (r.exit_code > 128 && !r.timed_out) continue;
         if (r.elapsed_ms <= SLOW_TEST_THRESHOLD_MS) continue;
         if (g_slow_tests.find(t.filename) != g_slow_tests.end()) continue;
 
         char reason[128];
-        snprintf(reason, sizeof(reason), "[slow] observed %.1fs (>10s)",
-                 r.elapsed_ms / 1000.0);
+        if (r.timed_out) {
+            snprintf(reason, sizeof(reason), "[timeout] observed %.1fs (>10s)",
+                     r.elapsed_ms / 1000.0);
+        } else {
+            snprintf(reason, sizeof(reason), "[slow] observed %.1fs (>10s)",
+                     r.elapsed_ms / 1000.0);
+        }
         g_slow_tests[t.filename] = reason;
         changed = true;
     }
@@ -929,7 +1040,7 @@ public:
         suite_executed = true;
 
         auto start = std::chrono::steady_clock::now();
-        auto tests = discover_node_official_tests();
+        auto tests = discover_node_official_tests(true, g_baseline_only);
         execute_all_tests(tests);
         auto end = std::chrono::steady_clock::now();
         g_node_run_wall_secs = std::chrono::duration<double>(end - start).count();
@@ -952,6 +1063,12 @@ TEST_P(NodeOfficialTest, Run) {
     // (may differ from discovery-time if --modules was specified at runtime)
     if (g_enabled_prefixes.find(p.module) == g_enabled_prefixes.end()) {
         GTEST_SKIP() << "Module not enabled: " << p.module;
+        return;
+    }
+
+    if (g_baseline_only && !g_baseline_passing.empty() &&
+        g_baseline_passing.find(p.filename) == g_baseline_passing.end()) {
+        GTEST_SKIP() << "Not in baseline: " << p.filename;
         return;
     }
 
@@ -997,7 +1114,7 @@ TEST_P(NodeOfficialTest, Run) {
 INSTANTIATE_TEST_SUITE_P(
     NodeOfficial,
     NodeOfficialTest,
-    testing::ValuesIn(discover_node_official_tests(false)),
+    testing::ValuesIn(discover_node_official_gtest_params()),
     [](const testing::TestParamInfo<NodeOfficialParam>& info) {
         return info.param.test_name;
     });
@@ -1011,7 +1128,7 @@ public:
     void OnTestSuiteEnd(const testing::TestSuite& suite) override {
         if (std::string(suite.name()).find("NodeOfficial") == std::string::npos) return;
 
-        auto tests = discover_node_official_tests();
+        auto tests = discover_node_official_tests(true, g_baseline_only);
         int total = (int)tests.size();
         int passed = 0, failed = 0, missing = 0, timed_out = 0, crashed = 0;
         std::vector<std::string> current_passing;
@@ -1070,6 +1187,9 @@ public:
         printf("║  Timed out:       %5d                          ║\n", timed_out);
         printf("║  Crashed:         %5d                          ║\n", crashed);
         printf("║  Runtime:         %5.1fs                         ║\n", g_node_run_wall_secs);
+        if (g_baseline_only) {
+            printf("║  Baseline-only:   %5s                          ║\n", "yes");
+        }
         if (!g_include_slow && !g_slow_tests.empty()) {
             printf("║  Slow excluded:   %5zu                          ║\n", g_slow_tests.size());
         }
@@ -1099,6 +1219,9 @@ public:
         }
 
         // update baseline if requested
+        write_timing_report(tests);
+        print_slowest_tests(tests);
+
         if (g_update_baseline && regressions.empty()) {
             write_baseline(current_passing, total, passed, failed, missing, timed_out,
                            crashed, g_baseline_passing.size(), regressions.size(),
@@ -1119,6 +1242,10 @@ public:
 // =============================================================================
 
 int main(int argc, char** argv) {
+    g_node_program_start = std::chrono::steady_clock::now();
+    atexit(print_node_final_runtime);
+    g_baseline_only = env_requests_baseline_only();
+
     testing::InitGoogleTest(&argc, argv);
 
     // parse custom arguments
@@ -1138,6 +1265,8 @@ int main(int argc, char** argv) {
             g_update_baseline = true;
         } else if (strcmp(argv[i], "--include-slow") == 0) {
             g_include_slow = true;
+        } else if (strcmp(argv[i], "--baseline-only") == 0) {
+            g_baseline_only = true;
         } else if (strncmp(argv[i], "--timeout=", 10) == 0) {
             g_timeout_ms = atoi(argv[i] + 10);
             if (g_timeout_ms < 1000) g_timeout_ms = 1000;
