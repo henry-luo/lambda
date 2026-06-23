@@ -88,25 +88,24 @@ A single struct covers all numeric element types. The element sub-type is stored
 // Element type enum — covers Lambda's existing types + all sized types
 enum EnumArrayNumElemType {
     // Lambda's standard numeric types (8 bytes/element each):
-    ELEM_INT = 0,        // 8 bytes  — int56-as-int64, current ARRAY_INT behavior
-    ELEM_FLOAT,          // 8 bytes  — double, current ARRAY_FLOAT behavior
+    ELEM_INT   = 0x00,   // 8 bytes  — int56-as-int64, current ARRAY_INT behavior
+    ELEM_FLOAT = 0x10,   // 8 bytes  — double, current ARRAY_FLOAT behavior
 
     // Sized integer types (compact storage):
-    ELEM_INT8,           // 1 byte   — maps to NUM_INT8
-    ELEM_INT16,          // 2 bytes  — maps to NUM_INT16
-    ELEM_INT32,          // 4 bytes  — maps to NUM_INT32
-    ELEM_UINT8,          // 1 byte   — maps to NUM_UINT8
-    ELEM_UINT16,         // 2 bytes  — maps to NUM_UINT16
-    ELEM_UINT32,         // 4 bytes  — maps to NUM_UINT32
+    ELEM_INT8   = 0x20,  // 1 byte   — maps to NUM_INT8
+    ELEM_INT16  = 0x30,  // 2 bytes  — maps to NUM_INT16
+    ELEM_INT32  = 0x40,  // 4 bytes  — maps to NUM_INT32
+    ELEM_INT64  = 0x50,  // 8 bytes  — current ARRAY_INT64 behavior
+
+    ELEM_UINT8  = 0x60,  // 1 byte   — maps to NUM_UINT8
+    ELEM_UINT16 = 0x70,  // 2 bytes  — maps to NUM_UINT16
+    ELEM_UINT32 = 0x80,  // 4 bytes  — maps to NUM_UINT32
+    ELEM_UINT64 = 0x90,  // 8 bytes
 
     // Sized float types (compact storage):
-    ELEM_FLOAT16,        // 2 bytes  — maps to NUM_FLOAT16
-    ELEM_FLOAT32,        // 4 bytes  — maps to NUM_FLOAT32
-
-    // Explicit 64-bit types (8 bytes/element):
-    ELEM_INT64,          // 8 bytes  — current ARRAY_INT64 behavior
-    ELEM_UINT64,         // 8 bytes
-    ELEM_FLOAT64,        // 8 bytes  — explicit f64 (same storage as ELEM_FLOAT, distinct type)
+    ELEM_FLOAT16 = 0xA0, // 2 bytes  — maps to NUM_FLOAT16
+    ELEM_FLOAT32 = 0xB0, // 4 bytes  — maps to NUM_FLOAT32
+    ELEM_FLOAT64 = 0xC0, // 8 bytes  — explicit f64 (same storage as ELEM_FLOAT, distinct type)
 
     ELEM_NUM_COUNT
 };
@@ -142,25 +141,28 @@ The `elem_type` field occupies the same offset as `Container.flags` (byte 1). Th
 ### 3. Element Width Table
 
 ```c
-// Bytes per element, indexed by ArrayNumElemType
-static const uint8_t ELEM_TYPE_SIZE[ELEM_NUM_COUNT] = {
-    8, // ELEM_INT     — int64_t (int56 stored as int64)
-    8, // ELEM_FLOAT   — double
-    1, // ELEM_INT8
-    2, // ELEM_INT16
-    4, // ELEM_INT32
-    1, // ELEM_UINT8
-    2, // ELEM_UINT16
-    4, // ELEM_UINT32
-    2, // ELEM_FLOAT16
-    4, // ELEM_FLOAT32
-    8, // ELEM_INT64
-    8, // ELEM_UINT64
-    8, // ELEM_FLOAT64
+// Bytes per element, indexed by (elem_type >> 4)
+static const uint8_t ELEM_TYPE_SIZE[16] = {
+    8, // 0x00 ELEM_INT     — int64_t (int56 stored as int64)
+    8, // 0x10 ELEM_FLOAT   — double
+    1, // 0x20 ELEM_INT8
+    2, // 0x30 ELEM_INT16
+    4, // 0x40 ELEM_INT32
+    8, // 0x50 ELEM_INT64
+    1, // 0x60 ELEM_UINT8
+    2, // 0x70 ELEM_UINT16
+    4, // 0x80 ELEM_UINT32
+    8, // 0x90 ELEM_UINT64
+    2, // 0xA0 ELEM_FLOAT16
+    4, // 0xB0 ELEM_FLOAT32
+    8, // 0xC0 ELEM_FLOAT64
+    0, // 0xD0 reserved
+    0, // 0xE0 reserved
+    0, // 0xF0 reserved
 };
 ```
 
-Memory usage: `length × ELEM_TYPE_SIZE[elem_type]` bytes.
+Memory usage: `length × ELEM_TYPE_SIZE[elem_type >> 4]` bytes.
 
 | Array Type | Element Size | 1000 elements | vs. generic `Array` |
 |-----------|-------------|--------------|---------------------|
@@ -830,7 +832,7 @@ NumPy's power comes from multi-dimensional arrays with shape/strides. Should Lam
 **Files modified (~22):** lambda.h, lambda.hpp, lambda-data.cpp, lambda-data-runtime.cpp, lambda-eval.cpp, lambda-eval-num.cpp, lambda-vector.cpp, lambda-mem.cpp *(not listed but touched)*, print.cpp, transpile.cpp, transpile-mir.cpp, transpile-call.cpp, build_ast.cpp, mark_builder.cpp, mark_editor.cpp, mark_reader.cpp *(not listed but touched)*, input/input.cpp, js/js_runtime.cpp, validator/validate.cpp, validator/validate_pattern.cpp, template_registry.cpp, lib/gc_heap.c
 
 **Key design decisions during implementation:**
-- `EnumArrayNumElemType` values stored in upper nibble of `Container::flags` byte: `ELEM_INT=0x00`, `ELEM_FLOAT=0x10`, `ELEM_INT64=0x20`. Lower nibble preserves `is_content`/`is_spreadable`/`is_heap`/`is_data_migrated` flag bits.
+- `EnumArrayNumElemType` values stored in upper nibble of `Container::flags` byte using contiguous high-nibble tags in declaration order: `ELEM_INT=0x00`, `ELEM_FLOAT=0x10`, `ELEM_INT8=0x20`, ..., `ELEM_FLOAT64=0xC0`. Lower nibble preserves `is_content`/`is_spreadable`/`is_heap`/`is_data_migrated` flag bits.
 - `get_elem_type()` = `(ArrayNumElemType)(flags & 0xF0)` — masks upper nibble only.
 - Enum shift: `LMD_TYPE_ARRAY_NUM=16` occupies the old `ARRAY_INT` slot. `ARRAY` and all subsequent types shifted down by 2 (old `ARRAY_INT64=17` and `ARRAY_FLOAT=18` slots freed).
 - `ELEM_INT` arrays from literal `[1,2,3]` behave as "content" in `take`/`drop`/`slice`/`reverse` (returning generic Lists with `is_content=1`), matching old `ARRAY_INT` fallback behavior. `ELEM_INT64`/`ELEM_FLOAT` arrays from `sort`/arithmetic return typed `ArrayNum` (value types, displayed with brackets).
@@ -846,9 +848,9 @@ NumPy's power comes from multi-dimensional arrays with shape/strides. Should Lam
 - ✅ Extend `ensure_sized_array()` for `ARRAY_NUM` coercion from generic arrays
 - ✅ Support `int[]`, `float[]`, `i8[]`, `u8[]`, `f32[]` etc. in type annotations
 - ✅ Extend `build_base_type()` to recognize all numeric array types
-- ✅ `EnumArrayNumElemType` expanded to 14 values with compact storage (1/2/4 bytes per element)
+- ✅ `EnumArrayNumElemType` expanded to 13 element tags with compact storage (1/2/4 bytes per element)
 - ✅ `ELEM_TYPE_SIZE[16]` lookup table for byte widths
-- ✅ `array_num_get()` handles all 14 elem_types including compact types
+- ✅ `array_num_get()` handles all 13 elem_types including compact types
 - ✅ `array_num_set_item()` generic setter with dispatch on elem_type
 - ✅ `item_to_int_value()` / `item_to_float_value()` helpers for NUM_SIZED extraction
 - ✅ `fn_join` (concat) updated to use `ELEM_TYPE_SIZE` and `data` pointer for compact arrays

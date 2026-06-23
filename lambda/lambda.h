@@ -149,25 +149,24 @@ enum EnumArrayNumElemType {
     // Lambda's standard numeric types (8 bytes/element each):
     ELEM_INT   = 0x00,   // 8 bytes  — int56-as-int64 (was ARRAY_INT)
     ELEM_FLOAT = 0x10,   // 8 bytes  — double (was ARRAY_FLOAT)
-    ELEM_INT64 = 0x20,   // 8 bytes  — int64 (was ARRAY_INT64)
 
     // Compact sized integer types:
-    ELEM_INT8    = 0x30,  // 1 byte   — maps to NUM_INT8
-    ELEM_INT16   = 0x40,  // 2 bytes  — maps to NUM_INT16
-    ELEM_INT32   = 0x50,  // 4 bytes  — maps to NUM_INT32
+    ELEM_INT8    = 0x20,  // 1 byte   — maps to NUM_INT8
+    ELEM_INT16   = 0x30,  // 2 bytes  — maps to NUM_INT16
+    ELEM_INT32   = 0x40,  // 4 bytes  — maps to NUM_INT32
+    ELEM_INT64   = 0x50,  // 8 bytes  — int64 (was ARRAY_INT64)
+
     ELEM_UINT8   = 0x60,  // 1 byte   — maps to NUM_UINT8
     ELEM_UINT16  = 0x70,  // 2 bytes  — maps to NUM_UINT16
     ELEM_UINT32  = 0x80,  // 4 bytes  — maps to NUM_UINT32
+    ELEM_UINT64  = 0x90,  // 8 bytes  — maps to NUM_UINT64
 
     // Compact sized float types:
-    ELEM_FLOAT16 = 0x90,  // 2 bytes  — maps to NUM_FLOAT16
-    ELEM_FLOAT32 = 0xA0,  // 4 bytes  — maps to NUM_FLOAT32
-
-    // Explicit 64-bit types:
-    ELEM_UINT64  = 0xB0,  // 8 bytes
+    ELEM_FLOAT16 = 0xA0,  // 2 bytes  — maps to NUM_FLOAT16
+    ELEM_FLOAT32 = 0xB0,  // 4 bytes  — maps to NUM_FLOAT32
     ELEM_FLOAT64 = 0xC0,  // 8 bytes  — explicit f64 (same storage as ELEM_FLOAT)
 
-    ELEM_NUM_COUNT = 14
+    ELEM_NUM_COUNT = 13
 };
 typedef uint8_t ArrayNumElemType;
 
@@ -175,16 +174,16 @@ typedef uint8_t ArrayNumElemType;
 static const uint8_t ELEM_TYPE_SIZE[16] = {
     8, // 0x00 ELEM_INT     — int64_t
     8, // 0x10 ELEM_FLOAT   — double
-    8, // 0x20 ELEM_INT64   — int64_t
-    1, // 0x30 ELEM_INT8
-    2, // 0x40 ELEM_INT16
-    4, // 0x50 ELEM_INT32
+    1, // 0x20 ELEM_INT8
+    2, // 0x30 ELEM_INT16
+    4, // 0x40 ELEM_INT32
+    8, // 0x50 ELEM_INT64   — int64_t
     1, // 0x60 ELEM_UINT8
     2, // 0x70 ELEM_UINT16
     4, // 0x80 ELEM_UINT32
-    2, // 0x90 ELEM_FLOAT16
-    4, // 0xA0 ELEM_FLOAT32
-    8, // 0xB0 ELEM_UINT64
+    8, // 0x90 ELEM_UINT64
+    2, // 0xA0 ELEM_FLOAT16
+    4, // 0xB0 ELEM_FLOAT32
     8, // 0xC0 ELEM_FLOAT64
     0, // 0xD0 reserved
     0, // 0xE0 reserved
