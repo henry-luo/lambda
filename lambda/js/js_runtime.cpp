@@ -31253,6 +31253,81 @@ static Item js_stub_noop_object(void) {
     return js_new_object();
 }
 
+#define JS_MAX_ALS_INSTANCES 256
+static Item js_als_instances[JS_MAX_ALS_INSTANCES];
+static int js_als_instance_count = 0;
+
+static Item js_als_store_key(void) {
+    return (Item){.item = s2it(heap_create_name("_store", 6))};
+}
+
+static void js_als_register_instance(Item instance) {
+    for (int i = 0; i < js_als_instance_count; i++) {
+        if (js_als_instances[i].item == instance.item) return;
+    }
+    if (js_als_instance_count < JS_MAX_ALS_INSTANCES) {
+        js_als_instances[js_als_instance_count++] = instance;
+    }
+}
+
+extern "C" Item js_als_capture_context(void) {
+    Item context = js_array_new(0);
+    Item store_key = js_als_store_key();
+    for (int i = 0; i < js_als_instance_count; i++) {
+        Item instance = js_als_instances[i];
+        if (instance.item == 0) continue;
+        Item pair = js_array_new(0);
+        js_array_push(pair, instance);
+        js_array_push(pair, js_property_get(instance, store_key));
+        js_array_push(context, pair);
+    }
+    return context;
+}
+
+extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg) {
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return (Item){.item = ITEM_JS_UNDEFINED};
+    if (get_type_id(context) != LMD_TYPE_ARRAY) {
+        if (has_arg) {
+            Item args[1] = { arg1 };
+            return js_call_function(callback, this_val, args, 1);
+        }
+        return js_call_function(callback, this_val, nullptr, 0);
+    }
+
+    Item store_key = js_als_store_key();
+    Item previous = js_array_new(0);
+    int64_t len = js_array_length(context);
+    for (int64_t i = 0; i < len; i++) {
+        Item pair = js_array_get_int(context, i);
+        if (get_type_id(pair) != LMD_TYPE_ARRAY || js_array_length(pair) < 2) continue;
+        Item instance = js_array_get_int(pair, 0);
+        Item store = js_array_get_int(pair, 1);
+        Item saved = js_array_new(0);
+        js_array_push(saved, instance);
+        js_array_push(saved, js_property_get(instance, store_key));
+        js_array_push(previous, saved);
+        js_property_set(instance, store_key, store);
+    }
+
+    Item result;
+    if (has_arg) {
+        Item args[1] = { arg1 };
+        result = js_call_function(callback, this_val, args, 1);
+    } else {
+        result = js_call_function(callback, this_val, nullptr, 0);
+    }
+
+    int64_t previous_len = js_array_length(previous);
+    for (int64_t i = previous_len - 1; i >= 0; i--) {
+        Item saved = js_array_get_int(previous, i);
+        if (get_type_id(saved) != LMD_TYPE_ARRAY || js_array_length(saved) < 2) continue;
+        Item instance = js_array_get_int(saved, 0);
+        Item store = js_array_get_int(saved, 1);
+        js_property_set(instance, store_key, store);
+    }
+    return result;
+}
+
 // AsyncLocalStorage: constructor creates an object with run/getStore/enterWith/disable
 static Item js_als_constructor(Item options) {
     Item self = js_get_this();
@@ -31272,35 +31347,37 @@ static Item js_als_constructor(Item options) {
         js_throw_type_error("The \"options\" argument must be of type object.");
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
-    js_property_set(self, (Item){.item = s2it(heap_create_name("_store", 6))}, default_val);
+    js_property_set(self, js_als_store_key(), default_val);
     js_property_set(self, (Item){.item = s2it(heap_create_name("_defaultValue", 13))}, default_val);
     js_property_set(self, (Item){.item = s2it(heap_create_name("name", 4))}, name_val);
+    js_als_register_instance(self);
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
 static Item js_als_run(Item store, Item callback) {
     Item self = js_get_this();
-    Item old = js_property_get(self, (Item){.item = s2it(heap_create_name("_store", 6))});
-    js_property_set(self, (Item){.item = s2it(heap_create_name("_store", 6))}, store);
+    Item store_key = js_als_store_key();
+    Item old = js_property_get(self, store_key);
+    js_property_set(self, store_key, store);
     Item result = js_call_function(callback, (Item){.item = ITEM_JS_UNDEFINED}, nullptr, 0);
-    js_property_set(self, (Item){.item = s2it(heap_create_name("_store", 6))}, old);
+    js_property_set(self, store_key, old);
     return result;
 }
 
 static Item js_als_getStore(void) {
     Item self = js_get_this();
-    return js_property_get(self, (Item){.item = s2it(heap_create_name("_store", 6))});
+    return js_property_get(self, js_als_store_key());
 }
 
 static Item js_als_enterWith(Item store) {
     Item self = js_get_this();
-    js_property_set(self, (Item){.item = s2it(heap_create_name("_store", 6))}, store);
+    js_property_set(self, js_als_store_key(), store);
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
 static Item js_als_disable(void) {
     Item self = js_get_this();
-    js_property_set(self, (Item){.item = s2it(heap_create_name("_store", 6))}, (Item){.item = ITEM_JS_UNDEFINED});
+    js_property_set(self, js_als_store_key(), (Item){.item = ITEM_JS_UNDEFINED});
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
@@ -32976,6 +33053,8 @@ void js_deep_batch_reset() {
     js_promise_count = 0;
     memset(js_async_contexts, 0, sizeof(js_async_contexts));
     js_async_context_count = 0;
+    memset(js_als_instances, 0, sizeof(js_als_instances));
+    js_als_instance_count = 0;
     js_async_hooks_enabled_count = 0;
     js_async_resolved_value = (Item){0};
     js_reset_transient_call_state();

@@ -54,6 +54,8 @@ extern "C" Item js_get_async_iterator(Item iterable);
 extern "C" Item js_async_iterator_step_result(Item iterator);
 extern "C" int64_t js_iterator_result_done(Item result);
 extern "C" Item js_iterator_result_value(Item result);
+extern "C" Item js_als_capture_context(void);
+extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
 extern Item js_current_this;
 extern "C" Item js_get_this(void);
 extern "C" Item js_writable_stream_new(void);
@@ -3883,6 +3885,42 @@ extern "C" Item js_readable_from(Item iterable) {
 // ─── stream.finished(stream, callback) ──────────────────────────────────────
 // Detect when a stream is no longer readable/writable/errored. Calls callback
 // when the stream is consumed or an error occurs.
+static Item js_stream_finished_wrapper_key(void) {
+    return make_string_item("__lambda_stream_finished_context_callback__");
+}
+
+static Item js_stream_finished_context_callback(Item env_item, Item err) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item callback = env[0];
+    Item context = env[1];
+    int64_t has_arg = js_stream_has_error(err) ? 1 : 0;
+    return js_als_context_call(context, callback, js_get_this(), err, has_arg);
+}
+
+static Item js_stream_finished_context_wrapper(Item callback) {
+    Item context = js_als_capture_context();
+    if (get_type_id(context) != LMD_TYPE_ARRAY || js_array_length(context) <= 0) {
+        return callback;
+    }
+    Item* env = js_alloc_env(2);
+    env[0] = callback;
+    env[1] = context;
+    Item wrapper = js_new_closure((void*)js_stream_finished_context_callback, 1, env, 2);
+    js_property_set(callback, js_stream_finished_wrapper_key(), wrapper);
+    return wrapper;
+}
+
+static void js_stream_finished_call_now(Item callback) {
+    Item context = js_als_capture_context();
+    Item args[1] = { ItemNull };
+    if (get_type_id(context) == LMD_TYPE_ARRAY && js_array_length(context) > 0) {
+        js_als_context_call(context, callback, ItemNull, ItemNull, 1);
+        return;
+    }
+    js_call_function(callback, ItemNull, args, 1);
+}
+
 extern "C" Item js_stream_finished(Item stream, Item callback) {
     ensure_keys();
     if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
@@ -3895,10 +3933,11 @@ extern "C" Item js_stream_finished(Item stream, Item callback) {
 
     if (is_done) {
         // call callback immediately with no error
-        Item args[1] = { ItemNull };
-        js_call_function(callback, ItemNull, args, 1);
+        js_stream_finished_call_now(callback);
         return make_js_undefined();
     }
+
+    Item registered_callback = js_stream_finished_context_wrapper(callback);
 
     // register on stream-local events; stream_emit() reads this listener table.
     Item end_event = make_string_item("end");
@@ -3906,10 +3945,10 @@ extern "C" Item js_stream_finished(Item stream, Item callback) {
     Item error_event = make_string_item("error");
     Item close_event = make_string_item("close");
 
-    js_stream_on(stream, end_event, callback);
-    js_stream_on(stream, finish_event, callback);
-    js_stream_on(stream, error_event, callback);
-    js_stream_on(stream, close_event, callback);
+    js_stream_on(stream, end_event, registered_callback);
+    js_stream_on(stream, finish_event, registered_callback);
+    js_stream_on(stream, error_event, registered_callback);
+    js_stream_on(stream, close_event, registered_callback);
 
     return make_js_undefined();
 }
@@ -4161,6 +4200,13 @@ static void js_stream_finished_cleanup(Item stream, Item callback) {
     js_stream_off(stream, make_string_item("finish"), callback);
     js_stream_off(stream, make_string_item("error"), callback);
     js_stream_off(stream, make_string_item("close"), callback);
+    Item wrapper = js_property_get(callback, js_stream_finished_wrapper_key());
+    if (get_type_id(wrapper) == LMD_TYPE_FUNC && wrapper.item != callback.item) {
+        js_stream_off(stream, make_string_item("end"), wrapper);
+        js_stream_off(stream, make_string_item("finish"), wrapper);
+        js_stream_off(stream, make_string_item("error"), wrapper);
+        js_stream_off(stream, make_string_item("close"), wrapper);
+    }
 }
 
 static Item js_stream_promises_finished_callback(Item env_item, Item err) {
