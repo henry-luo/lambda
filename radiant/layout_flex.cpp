@@ -717,7 +717,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                                 const char* text = (const char*)dom_child->text_data();
                                 if (!text) continue;
                                 size_t text_len = strlen(text);
-                                char normalized[2048];
+                                static thread_local char normalized[2048];  // LARGE_ARRAY_OK: static buffer — not on call stack.
                                 size_t out_pos = 0;
                                 bool in_ws = true;
                                 for (size_t i = 0; i < text_len && out_pos < sizeof(normalized) - 1; i++) {
@@ -1091,7 +1091,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         size_t text_len = strlen(text);
                         // Normalize whitespace: collapse consecutive spaces, trim leading/trailing
                         // This matches CSS white-space: normal behavior
-                        char normalized_buffer[2048];
+                        static thread_local char normalized_buffer[2048];  // LARGE_ARRAY_OK: static buffer — not on call stack.
                         size_t out_pos = 0;
                         bool in_whitespace = true;  // Start as if preceded by whitespace (trims leading)
                         for (size_t i = 0; i < text_len && out_pos < sizeof(normalized_buffer) - 1; i++) {

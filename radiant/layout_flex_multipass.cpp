@@ -1387,7 +1387,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     // spaces/tabs/newlines to a single space, trim leading/trailing.
                     const char* measure_text = text;
                     size_t measure_len = strlen(text);
-                    char normalized_buf[4096];
+                    static thread_local char normalized_buf[4096];  // LARGE_ARRAY_OK: static buffer — not on call stack.
                     if (collapse_ws && measure_len > 0) {
                         size_t j = 0;
                         bool in_space = true; // true to trim leading whitespace

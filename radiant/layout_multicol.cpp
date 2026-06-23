@@ -123,7 +123,9 @@ struct ColumnFragment {
 };
 
 struct ColumnGroup {
-    ColumnFragment fragments[MAX_MULTICOL_BLOCKS];
+    // fragments points into lycon->scratch; allocate with multicol_group_alloc_fragments,
+    // free with scratch_free after multicol_group_finish. Capacity is MAX_MULTICOL_BLOCKS.
+    ColumnFragment* fragments;
     int fragment_count;
     int column_count;
     float column_width;
@@ -197,6 +199,7 @@ static void multicol_store_layout_fragments(
     float fragment_visual_width
 );
 static void multicol_project_fragmented_descendants(
+    LayoutContext* lycon,
     ViewBlock* child,
     float fragment_height,
     int column_count,
@@ -758,6 +761,7 @@ static float multicol_normalize_inline_x(float x, float origin_x, float pitch) {
 }
 
 static bool multicol_project_fragmented_inline_descendants(
+    LayoutContext* lycon,
     ViewBlock* child,
     float fragment_height,
     int parent_column_count,
@@ -767,15 +771,19 @@ static bool multicol_project_fragmented_inline_descendants(
 ) {
     if (!child || fragment_height <= 0 || parent_column_count <= 0) return false;
 
-    InlineFragmentItem items[2048];
+    // 2048 InlineFragmentItem (~56 B) ≈ 112 KiB — too large for stack; allocate from scratch arena (LIFO).
+    constexpr int MAX_INLINE_FRAGMENT_ITEMS = 2048;
+    InlineFragmentItem* items = (InlineFragmentItem*)scratch_alloc(&lycon->scratch,
+        MAX_INLINE_FRAGMENT_ITEMS * sizeof(InlineFragmentItem));
+    if (!items) return false;
     int item_count = 0;
 
     View* descendant = child->first_placed_child();
-    while (descendant && item_count < 2048) {
+    while (descendant && item_count < MAX_INLINE_FRAGMENT_ITEMS) {
         if (descendant->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(descendant);
             TextRect* rect = text->rect;
-            while (rect && item_count < 2048) {
+            while (rect && item_count < MAX_INLINE_FRAGMENT_ITEMS) {
                 if (rect->width <= 0 && rect->length > 0) {
                     rect = rect->next;
                     continue;
@@ -805,7 +813,10 @@ static bool multicol_project_fragmented_inline_descendants(
         descendant = descendant->next();
     }
 
-    if (item_count == 0) return false;
+    if (item_count == 0) {
+        scratch_free(&lycon->scratch, items);
+        return false;
+    }
 
     float first_line_y = items[0].original_y;
     float current_line_y = first_line_y;
@@ -878,10 +889,12 @@ static bool multicol_project_fragmented_inline_descendants(
 
     log_debug("[MULTICOL] Projected %d inline continuation items across %d line slots",
               item_count, lines_per_fragment);
+    scratch_free(&lycon->scratch, items);
     return true;
 }
 
 static void multicol_project_fragmented_descendants(
+    LayoutContext* lycon,
     ViewBlock* child,
     float fragment_height,
     int column_count,
@@ -896,7 +909,7 @@ static void multicol_project_fragmented_descendants(
     if (row_gap < 0) row_gap = 0;
 
     bool projected_inline = multicol_project_fragmented_inline_descendants(
-        child, fragment_height, column_count, column_width, column_gap, row_gap);
+        lycon, child, fragment_height, column_count, column_width, column_gap, row_gap);
 
     bool child_is_multicol = child->multicol && is_multicol_container(child);
     int inner_column_count = 1;
@@ -991,7 +1004,7 @@ static void multicol_project_fragmented_descendants(
                     if (inner_column_count > 1) {
                         descendant_split_height = block_split_height / inner_column_count;
                     }
-                    multicol_project_fragmented_descendants(descendant_block,
+                    multicol_project_fragmented_descendants(lycon, descendant_block,
                         fragment_height, total_column_slots,
                         inner_column_width, inner_column_gap, descendant_split_height);
                     descendant_fragmented = true;
@@ -1152,6 +1165,7 @@ static void multicol_store_layout_fragments(
 }
 
 static float multicol_fragmented_child_union(
+    LayoutContext* lycon,
     ViewBlock* container,
     ViewBlock* child,
     float item_height,
@@ -1186,12 +1200,13 @@ static float multicol_fragmented_child_union(
     if (child->width < union_width) child->width = union_width;
     child->height = union_height;
     child->content_height = union_height;
-    multicol_project_fragmented_descendants(child, fragment_height, column_count, column_width, column_gap, fragment_height);
+    multicol_project_fragmented_descendants(lycon, child, fragment_height, column_count, column_width, column_gap, fragment_height);
     if (out_used_columns) *out_used_columns = used_columns;
     return union_height;
 }
 
 static float multicol_split_child_around_spanners(
+    LayoutContext* lycon,
     ViewBlock* container,
     ViewBlock* child,
     int column_count,
@@ -1210,7 +1225,10 @@ static float multicol_split_child_around_spanners(
         bool break_after_column;
     };
 
-    ChildInfo children[MAX_MULTICOL_BLOCKS];
+    // MAX_MULTICOL_BLOCKS = 1024 → ChildInfo[] ≈ 24 KiB; move to scratch arena (LIFO).
+    ChildInfo* children = (ChildInfo*)scratch_calloc(&lycon->scratch,
+        MAX_MULTICOL_BLOCKS * sizeof(ChildInfo));
+    if (!children) return child->height;
     int child_count = 0;
     View* descendant = child->first_placed_child();
     while (descendant && child_count < MAX_MULTICOL_BLOCKS) {
@@ -1235,7 +1253,10 @@ static float multicol_split_child_around_spanners(
         descendant = descendant->next();
     }
 
-    if (child_count == 0) return child->height;
+    if (child_count == 0) {
+        scratch_free(&lycon->scratch, children);
+        return child->height;
+    }
 
     float child_origin_y = child->y;
     float current_y = child_origin_y;
@@ -1254,6 +1275,26 @@ static float multicol_split_child_around_spanners(
         }
         content_offset_x += child->bound->padding.left;
         leading_fragment_border_height += child->bound->padding.top;
+    }
+
+    // Per-group scratch buffers shared across all groups in this child:
+    // MAX_MULTICOL_BLOCKS = 1024 → ~10 KiB total. Allocated once before the loop, freed after.
+    float* group_heights = (float*)scratch_alloc(&lycon->scratch,
+        MAX_MULTICOL_BLOCKS * sizeof(float));
+    bool* group_break_before = (bool*)scratch_alloc(&lycon->scratch,
+        MAX_MULTICOL_BLOCKS * sizeof(bool));
+    bool* group_break_after = (bool*)scratch_alloc(&lycon->scratch,
+        MAX_MULTICOL_BLOCKS * sizeof(bool));
+    // ColumnFragment[MAX_MULTICOL_BLOCKS] ≈ 32 KiB — backs ColumnGroup::fragments.
+    ColumnFragment* fragments_buf = (ColumnFragment*)scratch_calloc(&lycon->scratch,
+        MAX_MULTICOL_BLOCKS * sizeof(ColumnFragment));
+    if (!group_heights || !group_break_before || !group_break_after || !fragments_buf) {
+        if (fragments_buf) scratch_free(&lycon->scratch, fragments_buf);
+        if (group_break_after) scratch_free(&lycon->scratch, group_break_after);
+        if (group_break_before) scratch_free(&lycon->scratch, group_break_before);
+        if (group_heights) scratch_free(&lycon->scratch, group_heights);
+        scratch_free(&lycon->scratch, children);
+        return child->height;
     }
 
     int i = 0;
@@ -1281,9 +1322,6 @@ static float multicol_split_child_around_spanners(
 
         int group_start = i;
         float group_total_height = 0;
-        float group_heights[MAX_MULTICOL_BLOCKS];
-        bool group_break_before[MAX_MULTICOL_BLOCKS];
-        bool group_break_after[MAX_MULTICOL_BLOCKS];
         int group_item_count = 0;
         while (i < child_count && !children[i].spans_all) {
             group_total_height += children[i].height;
@@ -1308,6 +1346,7 @@ static float multicol_split_child_around_spanners(
 
         ColumnGroup group;
         FragmentedFlowCursor cursor;
+        group.fragments = fragments_buf;  // Backing store from outer scratch alloc.
         multicol_group_init(&group, container, target_height, column_count, column_width, column_gap);
         multicol_cursor_init(&cursor, &group);
 
@@ -1335,7 +1374,7 @@ static float multicol_split_child_around_spanners(
                 children[j].height > target_height) {
                 int used_columns = 1;
                 placed_height = multicol_fragmented_child_union(
-                    container, block_child, children[j].height, target_height,
+                    lycon, container, block_child, children[j].height, target_height,
                     column_count, column_width, column_gap, &used_columns);
                 if (used_columns > group.fragment_count) {
                     group.fragment_count = used_columns;
@@ -1434,6 +1473,12 @@ static float multicol_split_child_around_spanners(
 
     log_debug("[MULTICOL] Split child %s around descendant spanners: height=%.1f used_cols=%d",
               child->node_name(), new_height, used_column_count);
+    // LIFO free in reverse order of allocation.
+    scratch_free(&lycon->scratch, fragments_buf);
+    scratch_free(&lycon->scratch, group_break_after);
+    scratch_free(&lycon->scratch, group_break_before);
+    scratch_free(&lycon->scratch, group_heights);
+    scratch_free(&lycon->scratch, children);
     return flow_height;
 }
 
@@ -1731,7 +1776,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                 if (!multicol_is_out_of_flow(child_block) &&
                     multicol_has_direct_spanner_child(child_block)) {
                     float flow_height = multicol_split_child_around_spanners(
-                        block, child_block, 1, available_width, gap);
+                        lycon, block, child_block, 1, available_width, gap);
                     float child_extent = child_block->y + flow_height;
                     if (child_extent > max_flow_extent) {
                         max_flow_extent = child_extent;
@@ -1810,7 +1855,13 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         bool break_before_column;
         bool break_after_column;
     };
-    BlockInfo blocks[MAX_MULTICOL_BLOCKS];
+    // MAX_MULTICOL_BLOCKS = 1024 → BlockInfo[] ≈ 32 KiB; move to scratch arena (LIFO).
+    BlockInfo* blocks = (BlockInfo*)scratch_calloc(&lycon->scratch,
+        MAX_MULTICOL_BLOCKS * sizeof(BlockInfo));
+    if (!blocks) {
+        log_error("[MULTICOL] Failed to allocate blocks array");
+        return;
+    }
     int block_count = 0;
 
     child = block->first_child;
@@ -2032,6 +2083,26 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     float max_column_height = 0;  // running Y offset for the entire container
     float prev_margin_bottom = 0; // for margin collapsing between consecutive spanners
 
+    // Per-group scratch buffers shared across all column groups: ~10 KiB total.
+    // ColumnFragment[MAX_MULTICOL_BLOCKS] ≈ 32 KiB — backs ColumnGroup::fragments.
+    float* group_heights_buf = (float*)scratch_alloc(&lycon->scratch,
+        MAX_MULTICOL_BLOCKS * sizeof(float));
+    bool* group_break_before_buf = (bool*)scratch_alloc(&lycon->scratch,
+        MAX_MULTICOL_BLOCKS * sizeof(bool));
+    bool* group_break_after_buf = (bool*)scratch_alloc(&lycon->scratch,
+        MAX_MULTICOL_BLOCKS * sizeof(bool));
+    ColumnFragment* fragments_buf = (ColumnFragment*)scratch_calloc(&lycon->scratch,
+        MAX_MULTICOL_BLOCKS * sizeof(ColumnFragment));
+    if (!group_heights_buf || !group_break_before_buf || !group_break_after_buf || !fragments_buf) {
+        log_error("[MULTICOL] Failed to allocate group scratch buffers");
+        if (fragments_buf) scratch_free(&lycon->scratch, fragments_buf);
+        if (group_break_after_buf) scratch_free(&lycon->scratch, group_break_after_buf);
+        if (group_break_before_buf) scratch_free(&lycon->scratch, group_break_before_buf);
+        if (group_heights_buf) scratch_free(&lycon->scratch, group_heights_buf);
+        scratch_free(&lycon->scratch, blocks);
+        return;
+    }
+
     int i = 0;
     while (i < block_count) {
         // --- Spanner: place at full width ---
@@ -2076,9 +2147,10 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         // Use ceiling to avoid underfilling the last column.
         group_balanced = ceilf(group_balanced);
         float group_target = multicol_group_target_height(block, group_balanced, group_total_height);
-        float group_heights[MAX_MULTICOL_BLOCKS];
-        bool group_break_before[MAX_MULTICOL_BLOCKS];
-        bool group_break_after[MAX_MULTICOL_BLOCKS];
+        // Reuse the outer-scope scratch buffers (allocated once before the i-loop).
+        float* group_heights = group_heights_buf;
+        bool* group_break_before = group_break_before_buf;
+        bool* group_break_after = group_break_after_buf;
         int group_item_count = 0;
         for (int gi = group_start; gi < group_end && group_item_count < MAX_MULTICOL_BLOCKS; gi++) {
             group_heights[group_item_count] = blocks[gi].height;
@@ -2096,6 +2168,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         // Distribute this group's blocks across columns
         ColumnGroup group;
         FragmentedFlowCursor cursor;
+        group.fragments = fragments_buf;  // Backing store from outer scratch alloc.
         multicol_group_init(&group, block, group_target, column_count, column_width, gap);
         multicol_cursor_init(&cursor, &group);
 
@@ -2122,14 +2195,14 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
 
             if (multicol_has_direct_spanner_child(cb)) {
                 placed_height = multicol_split_child_around_spanners(
-                    block, cb, column_count, column_width, gap);
+                    lycon, block, cb, column_count, column_width, gap);
                 log_debug("[MULTICOL] Split nested spanner child %s, height=%.1f",
                           cb->node_name(), placed_height);
             } else if (multicol_should_fragment_monolithic_child(block, cb, info.height, group_target) ||
                        info.height > group_target) {
                 int used_columns = 1;
                 placed_height = multicol_fragmented_child_union(
-                    block, cb, info.height, group_target, column_count, column_width, gap, &used_columns);
+                    lycon, block, cb, info.height, group_target, column_count, column_width, gap, &used_columns);
                 if (used_columns > group.fragment_count) {
                     group.fragment_count = used_columns;
                 }
@@ -2193,4 +2266,11 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
 
     log_debug("[MULTICOL] Final layout: %d columns, max height=%.1f, block height=%.1f",
               column_count, max_column_height, block->height);
+
+    // LIFO free in reverse order of allocation.
+    scratch_free(&lycon->scratch, fragments_buf);
+    scratch_free(&lycon->scratch, group_break_after_buf);
+    scratch_free(&lycon->scratch, group_break_before_buf);
+    scratch_free(&lycon->scratch, group_heights_buf);
+    scratch_free(&lycon->scratch, blocks);
 }

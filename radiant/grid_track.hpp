@@ -456,7 +456,7 @@ struct EnhancedGridTrack {
  * Capacity is MAX_GRID_TRACKS which safely handles 16×16 grids with all gaps.
  */
 struct TrackArray {
-    EnhancedGridTrack data[MAX_GRID_TRACKS];
+    EnhancedGridTrack data[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: fixed-capacity struct field; bound = MAX_GRID_TRACKS (64) × ~64 B ≈ 4 KiB; layout-pass scratch.
     size_t count;
 
     TrackArray() : count(0) {}
@@ -487,7 +487,7 @@ struct TrackArray {
  * Fixed-capacity array of track indices (size_t).
  */
 struct IndexArray {
-    size_t data[MAX_GRID_TRACKS];
+    size_t data[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: fixed-capacity struct field; bound = MAX_GRID_TRACKS (64) × 8 B = 512 B; layout-pass scratch.
     size_t count;
 
     IndexArray() : count(0) {}

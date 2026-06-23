@@ -5577,7 +5577,7 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
 
                 const char* measure_text = (const char*)text;
                 size_t measure_len = text_len;
-                static char normalized_buffer[4096];  // Static buffer for normalized text
+                static char normalized_buffer[4096];  // LARGE_ARRAY_OK: static buffer — not on call stack.
 
                 // Track if original text has leading/trailing whitespace (before normalization)
                 bool original_has_leading_ws = (text_len > 0 && is_all_whitespace((const char*)text, 1));

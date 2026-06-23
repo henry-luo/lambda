@@ -226,7 +226,7 @@ struct GridItemInfo {
 #define MAX_GRID_ITEMS 256
 #endif
 struct ItemInfoArray {
-    GridItemInfo data[MAX_GRID_ITEMS];
+    GridItemInfo data[MAX_GRID_ITEMS];  // LARGE_ARRAY_OK: fixed-capacity struct field; bound = MAX_GRID_ITEMS (256) × ~24 B ≈ 6 KiB; layout-pass scratch.
     size_t count;
     ItemInfoArray() : count(0) {}
     size_t size() const { return count; }

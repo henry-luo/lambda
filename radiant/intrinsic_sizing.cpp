@@ -3735,7 +3735,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 bool preserve_newlines = preserve_spaces || (ws == CSS_VALUE_PRE_LINE);
                 bool preserve_space_after_table_cell = false;
 
-                char normalized_buffer[2048];
+                static thread_local char normalized_buffer[2048];  // LARGE_ARRAY_OK: static buffer — not on call stack.
                 size_t out_pos = 0;
 
                 if (preserve_spaces) {
@@ -5030,7 +5030,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 	            CssEnum ws_val = get_white_space_value(node);
 	            const char* measure_text = text;
 	            size_t measure_len = text_len;
-	            char normalized_text[4096];
+	            static thread_local char normalized_text[4096];  // LARGE_ARRAY_OK: static buffer — not on call stack.
 	            if (intrinsic_height_should_collapse_whitespace(ws_val)) {
 	                measure_len = normalize_intrinsic_height_text(text, text_len,
 	                                                              normalized_text,
