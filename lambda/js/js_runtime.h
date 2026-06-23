@@ -811,6 +811,8 @@ Item js_iterator_collect_rest(Item iterator);
 Item js_promise_create(Item executor);           // new Promise((resolve, reject) => ...)
 Item js_promise_resolve(Item value);             // Promise.resolve(value)
 Item js_promise_reject(Item reason);             // Promise.reject(reason)
+const char* js_promise_state_name(Item promise); // "pending", "fulfilled", "rejected", or NULL
+int js_promise_pending_count(void);
 Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
 Item js_promise_catch(Item promise, Item on_rejected);
 Item js_promise_finally(Item promise, Item on_finally);

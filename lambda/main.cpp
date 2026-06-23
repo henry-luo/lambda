@@ -327,6 +327,32 @@ static void default_render_cmd_to_interp(void) {
     }
 }
 
+static char* read_stdin_source(size_t* out_len) {
+    size_t cap = 4096;
+    size_t len = 0;
+    char* buf = (char*)mem_alloc(cap + 1, MEM_CAT_SYSTEM);
+    if (!buf) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+    for (;;) {
+        if (len == cap) {
+            cap *= 2;
+            buf = (char*)mem_realloc(buf, cap + 1, MEM_CAT_SYSTEM);
+            if (!buf) {
+                if (out_len) *out_len = 0;
+                return NULL;
+            }
+        }
+        size_t n = fread(buf + len, 1, cap - len, stdin);
+        len += n;
+        if (n == 0) break;
+    }
+    buf[len] = '\0';
+    if (out_len) *out_len = len;
+    return buf;
+}
+
 // External function declarations
 extern "C" {
     #include "../lib/url.h"
@@ -1594,17 +1620,20 @@ int main(int argc, char *argv[]) {
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda JavaScript Transpiler v1.0\n\n");
             printf("Usage: %s js [file.js] [--document page.html]\n", argv[0]);
+            printf("       %s js -e <script>\n", argv[0]);
             printf("\nDescription:\n");
             printf("  The 'js' command runs the JavaScript transpiler.\n");
             printf("  If no file is provided, it runs built-in test cases.\n");
             printf("  If a file is provided, it transpiles and executes the JavaScript.\n");
             printf("\nOptions:\n");
             printf("  -h, --help              Show this help message\n");
+            printf("  -e, --eval <script>     Evaluate JavaScript source text\n");
             printf("  --document <file.html>  Load HTML document for DOM API access\n");
             printf("  --diagnose              Enable extra JS fast-path diagnostic logging\n");
             printf("\nExamples:\n");
             printf("  %s js                             # Run built-in tests\n", argv[0]);
             printf("  %s js test.js                     # Transpile and run test.js\n", argv[0]);
+            printf("  %s js -e \"console.log(1)\"          # Evaluate inline JavaScript\n", argv[0]);
             printf("  %s js script.js --document page.html  # Run JS with DOM access\n", argv[0]);
             return lambda_main_finish(0);
         }
@@ -1616,14 +1645,31 @@ int main(int argc, char *argv[]) {
         lambda_stack_init();
 
         bool js_had_error = false;
+        int js_exit_code = 0;
 
         if (argc >= 3) {
             // Parse arguments: js [options] file.js [--document page.html]
             const char* js_file = NULL;
             const char* html_file = NULL;
+            const char* eval_source_arg = NULL;
+            bool eval_mode = false;
+            bool input_type_module = false;
+            int js_file_arg_index = -1;
+            int eval_option_index = -1;
             for (int i = 2; i < argc; i++) {
                 if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) {
                     html_file = argv[++i];
+                } else if (strcmp(argv[i], "--input-type=module") == 0) {
+                    input_type_module = true;
+                } else if (!js_file && (strcmp(argv[i], "-e") == 0 || strcmp(argv[i], "--eval") == 0)) {
+                    if (i + 1 >= argc) {
+                        printf("Error: Option '%s' requires an argument\n", argv[i]);
+                        runtime_cleanup(&runtime);
+                        return lambda_main_finish(1);
+                    }
+                    eval_mode = true;
+                    eval_option_index = i;
+                    eval_source_arg = argv[++i];
                 } else if (strcmp(argv[i], "--mir-interp") == 0) {
                     g_mir_interp_mode = 1;
                 } else if (strcmp(argv[i], "--diagnose") == 0) {
@@ -1632,18 +1678,40 @@ int main(int argc, char *argv[]) {
                 } else if (strncmp(argv[i], "--opt-level=", 12) == 0) {
                     int level = atoi(argv[i] + 12);
                     if (level >= 0 && level <= 3) g_js_mir_optimize_level = (unsigned int)level;
-                } else if (argv[i][0] != '-') {
-                    if (!js_file) js_file = argv[i];
+                } else if (strcmp(argv[i], "--no-log") == 0) {
+                    // already handled early in main()
+                } else if (argv[i][0] != '-' && !eval_mode) {
+                    if (!js_file) {
+                        js_file = argv[i];
+                        js_file_arg_index = i;
+                    }
                 }
             }
-            if (!js_file) js_file = argv[2];  // fallback
 
             size_t js_source_len = 0;
-            char* js_source = read_binary_file(js_file, &js_source_len);
-            if (!js_source) {
-                printf("Error: Could not read file '%s'\n", js_file);
-                runtime_cleanup(&runtime);
-                return lambda_main_finish(1);
+            char* js_source = NULL;
+            if (eval_mode) {
+                js_file = "[eval]";
+                js_source_len = strlen(eval_source_arg);
+                js_source = (char*)mem_alloc(js_source_len + 1, MEM_CAT_SYSTEM);
+                memcpy(js_source, eval_source_arg, js_source_len);
+                js_source[js_source_len] = '\0';
+            } else if (input_type_module && !js_file) {
+                js_file = "[stdin]";
+                js_source = read_stdin_source(&js_source_len);
+                if (!js_source) {
+                    printf("Error: Could not read stdin\n");
+                    runtime_cleanup(&runtime);
+                    return lambda_main_finish(1);
+                }
+            } else {
+                if (!js_file) js_file = argv[2];  // fallback
+                js_source = read_binary_file(js_file, &js_source_len);
+                if (!js_source) {
+                    printf("Error: Could not read file '%s'\n", js_file);
+                    runtime_cleanup(&runtime);
+                    return lambda_main_finish(1);
+                }
             }
 
             // If --document is provided, load HTML and set up DOM context
@@ -1730,21 +1798,37 @@ int main(int argc, char *argv[]) {
                 js_argc_store = 0;
                 js_exec_argc_store = 0;
                 js_argv_store[js_argc_store++] = argv[0]; // lambda.exe
-                js_argv_store[js_argc_store++] = js_file; // script path
+                if (!eval_mode) {
+                    js_argv_store[js_argc_store++] = js_file; // script path
+                }
                 for (int i = 2; i < argc && js_exec_argc_store < 32; i++) {
-                    if (argv[i] == js_file || strcmp(argv[i], js_file) == 0) break;
                     if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
+                    if (strcmp(argv[i], "--input-type=module") == 0) continue;
                     if (strcmp(argv[i], "--mir-interp") == 0) continue;
                     if (strcmp(argv[i], "--diagnose") == 0) continue;
                     if (strncmp(argv[i], "--opt-level=", 12) == 0) continue;
+                    if (strcmp(argv[i], "--no-log") == 0) continue;
+                    if (eval_mode && i == eval_option_index) {
+                        js_exec_argv_store[js_exec_argc_store++] = argv[i];
+                        if (i + 1 < argc && js_exec_argc_store < 32) {
+                            js_exec_argv_store[js_exec_argc_store++] = argv[i + 1];
+                        }
+                        i++;
+                        continue;
+                    }
+                    if (!eval_mode && (i == js_file_arg_index || argv[i] == js_file || strcmp(argv[i], js_file) == 0)) break;
                     if (argv[i][0] == '-') js_exec_argv_store[js_exec_argc_store++] = argv[i];
                 }
                 // Pass remaining non-option arguments
                 for (int i = 2; i < argc && js_argc_store < 64; i++) {
                     if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
+                    if (strcmp(argv[i], "--input-type=module") == 0) continue;
                     if (strcmp(argv[i], "--mir-interp") == 0) continue;
                     if (strcmp(argv[i], "--diagnose") == 0) continue;
-                    if (argv[i] == js_file) continue; // already added
+                    if (strncmp(argv[i], "--opt-level=", 12) == 0) continue;
+                    if (strcmp(argv[i], "--no-log") == 0) continue;
+                    if (eval_mode && i == eval_option_index) { i++; continue; }
+                    if (!eval_mode && (i == js_file_arg_index || argv[i] == js_file)) continue; // already added
                     if (argv[i][0] == '-') continue;
                     js_argv_store[js_argc_store++] = argv[i];
                 }
@@ -1766,6 +1850,14 @@ int main(int argc, char *argv[]) {
             }
 
             Item result = transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file);
+            if (input_type_module) {
+                const char* promise_state = js_promise_state_name(result);
+                if ((promise_state && strcmp(promise_state, "pending") == 0) ||
+                    js_promise_pending_count() > 0) {
+                    js_had_error = true;
+                    js_exit_code = 13;
+                }
+            }
 
             if (tune6_timing) {
                 JsMirPhaseTiming t; js_mir_get_last_phase_timing(&t);
@@ -1805,7 +1897,7 @@ int main(int argc, char *argv[]) {
         }
 
         runtime_cleanup(&runtime);
-        return lambda_main_finish(js_had_error ? 1 : 0);
+        return lambda_main_finish(js_exit_code ? js_exit_code : (js_had_error ? 1 : 0));
     }
 
 #ifdef LAMBDA_PYTHON

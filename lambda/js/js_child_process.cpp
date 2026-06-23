@@ -155,6 +155,11 @@ static bool should_spawn_lambda_js_mode(const char* file, Item args) {
         Item arg = js_array_get_int(args, i);
         if (get_type_id(arg) != LMD_TYPE_STRING) continue;
         String* s = it2s(arg);
+        if ((s->len == 2 && memcmp(s->chars, "-e", 2) == 0) ||
+            (s->len == 6 && memcmp(s->chars, "--eval", 6) == 0) ||
+            (s->len == 19 && memcmp(s->chars, "--input-type=module", 19) == 0)) {
+            return true;
+        }
         if (s->len > 0 && s->chars[0] == '-') continue;
         return item_has_js_extension(arg);
     }
@@ -488,6 +493,7 @@ extern "C" Item js_cp_execSync(Item command_item, Item options_item) {
 
 typedef struct JsSpawnProcess {
     uv_process_t process;
+    uv_pipe_t    stdin_pipe;
     uv_pipe_t    stdout_pipe;
     uv_pipe_t    stderr_pipe;
     Item         js_object;    // the JS object returned to user
@@ -495,9 +501,15 @@ typedef struct JsSpawnProcess {
     bool         process_exited;
     int          handles_closed;
     int          handles_expected;
+    bool         stdin_pipe_active;
     bool         stdout_pipe_active;
     bool         stderr_pipe_active;
 } JsSpawnProcess;
+
+typedef struct SpawnWriteReq {
+    uv_write_t req;
+    char* data;
+} SpawnWriteReq;
 
 static void spawn_emit_event(Item obj, const char* event, Item* args, int argc) {
     char key_buf[64];
@@ -562,6 +574,40 @@ static void spawn_handle_close_cb(uv_handle_t* handle) {
     }
 }
 
+static void spawn_stdin_write_cb(uv_write_t* req, int status) {
+    SpawnWriteReq* wr = (SpawnWriteReq*)req;
+    JsSpawnProcess* sp = (JsSpawnProcess*)req->handle->data;
+    if (wr->data) mem_free(wr->data);
+    mem_free(wr);
+    (void)status;
+    if (sp && sp->stdin_pipe_active) {
+        sp->stdin_pipe_active = false;
+        uv_close((uv_handle_t*)&sp->stdin_pipe, spawn_handle_close_cb);
+    }
+}
+
+static Item js_spawn_stdin_end(Item env_item, Item chunk) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
+    if (!sp || !sp->stdin_pipe_active) return make_js_undefined();
+
+    if (get_type_id(chunk) == LMD_TYPE_STRING) {
+        String* s = it2s(chunk);
+        SpawnWriteReq* wr = (SpawnWriteReq*)mem_calloc(1, sizeof(SpawnWriteReq), MEM_CAT_JS_RUNTIME);
+        wr->data = (char*)mem_alloc(s->len, MEM_CAT_JS_RUNTIME);
+        memcpy(wr->data, s->chars, s->len);
+        uv_buf_t buf = uv_buf_init(wr->data, (unsigned int)s->len);
+        int r = uv_write(&wr->req, (uv_stream_t*)&sp->stdin_pipe, &buf, 1, spawn_stdin_write_cb);
+        if (r == 0) return make_js_undefined();
+        if (wr->data) mem_free(wr->data);
+        mem_free(wr);
+    }
+
+    sp->stdin_pipe_active = false;
+    uv_close((uv_handle_t*)&sp->stdin_pipe, spawn_handle_close_cb);
+    return make_js_undefined();
+}
+
 // emit 'data' event on a stream object
 static void spawn_emit_data(Item stream_obj, const char* data, int len) {
     Item data_str = make_string_item(data, len);
@@ -613,6 +659,10 @@ static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
     spawn_emit_event(sp->js_object, "exit", args, 2);
     spawn_emit_event(sp->js_object, "close", args, 2);
 
+    if (sp->stdin_pipe_active) {
+        sp->stdin_pipe_active = false;
+        uv_close((uv_handle_t*)&sp->stdin_pipe, spawn_handle_close_cb);
+    }
     uv_close((uv_handle_t*)process, spawn_handle_close_cb);
 }
 
@@ -960,8 +1010,19 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     sp->js_object = obj;
 
     sp->handles_expected = 1;
+    sp->stdin_pipe_active = req.stdio_mode[0] == 0;
     sp->stdout_pipe_active = req.stdio_mode[1] == 0;
     sp->stderr_pipe_active = req.stdio_mode[2] == 0;
+    if (sp->stdin_pipe_active) {
+        uv_pipe_init(loop, &sp->stdin_pipe, 0);
+        sp->stdin_pipe.data = sp;
+        sp->handles_expected++;
+        Item stdin_obj = js_property_get(obj, make_string_item("stdin"));
+        Item* stdin_env = js_alloc_env(1);
+        stdin_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+        js_property_set(stdin_obj, make_string_item("end"),
+                        js_new_closure((void*)js_spawn_stdin_end, 1, stdin_env, 1));
+    }
     if (sp->stdout_pipe_active) {
         uv_pipe_init(loop, &sp->stdout_pipe, 0);
         sp->stdout_pipe.data = sp;
@@ -975,8 +1036,15 @@ extern "C" Item js_cp_spawn(Item rest_args) {
 
     uv_stdio_container_t stdio[3];
     memset(stdio, 0, sizeof(stdio));
-    stdio[0].flags = req.stdio_mode[0] == 1 ? UV_INHERIT_FD : UV_IGNORE;
-    if (req.stdio_mode[0] == 1) stdio[0].data.fd = 0;
+    if (req.stdio_mode[0] == 1) {
+        stdio[0].flags = UV_INHERIT_FD;
+        stdio[0].data.fd = 0;
+    } else if (req.stdio_mode[0] == 2) {
+        stdio[0].flags = UV_IGNORE;
+    } else {
+        stdio[0].flags = (uv_stdio_flags)(UV_CREATE_PIPE | UV_READABLE_PIPE);
+        stdio[0].data.stream = (uv_stream_t*)&sp->stdin_pipe;
+    }
     if (req.stdio_mode[1] == 1) {
         stdio[1].flags = UV_INHERIT_FD;
         stdio[1].data.fd = 1;

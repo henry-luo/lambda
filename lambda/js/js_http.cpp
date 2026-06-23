@@ -1019,6 +1019,60 @@ static Item js_http_econnreset_error(Item err) {
     return result;
 }
 
+static void js_http_free_client_req(JsHttpClientReq* creq) {
+    if (!creq) return;
+    if (creq->send_buf) mem_free(creq->send_buf);
+    if (creq->recv_buf) mem_free(creq->recv_buf);
+    mem_free(creq);
+}
+
+static void js_http_close_client_req(JsHttpClientReq* creq) {
+    if (!creq) return;
+    if (!uv_is_closing((uv_handle_t*)&creq->tcp)) {
+        uv_close((uv_handle_t*)&creq->tcp, [](uv_handle_t* h) {
+            js_http_free_client_req((JsHttpClientReq*)h->data);
+        });
+    }
+}
+
+extern "C" Item js_http_agent_socket_error_tick(Item req_obj, Item err) {
+    Item handle_item = js_property_get(req_obj, make_string_item("__client__"));
+    JsHttpClientReq* creq = handle_item.item ? (JsHttpClientReq*)(uintptr_t)it2i(handle_item) : NULL;
+    if (!creq || creq->destroyed) return make_js_undefined();
+
+    creq->destroyed = true;
+    js_property_set(req_obj, make_string_item("destroyed"), (Item){.item = b2it(true)});
+
+    Item on_err = js_property_get(req_obj, make_string_item("__on_error__"));
+    if (get_type_id(on_err) == LMD_TYPE_FUNC) {
+        js_call_function(on_err, req_obj, &err, 1);
+        js_microtask_flush();
+    }
+
+    Item on_close = js_property_get(req_obj, make_string_item("__on_close__"));
+    if (get_type_id(on_close) == LMD_TYPE_FUNC) {
+        js_call_function(on_close, req_obj, NULL, 0);
+        js_microtask_flush();
+    }
+
+    js_http_close_client_req(creq);
+    return make_js_undefined();
+}
+
+extern "C" Item js_http_agent_socket_cb(Item req_obj, Item err, Item socket) {
+    TypeId err_type = get_type_id(err);
+    if (err.item != 0 && err_type != LMD_TYPE_UNDEFINED && err_type != LMD_TYPE_NULL) {
+        Item bound_args[2] = { req_obj, err };
+        Item tick = js_bind_function(js_new_function((void*)js_http_agent_socket_error_tick, 2),
+                                     make_js_undefined(), bound_args, 2);
+        js_setImmediate(tick);
+        return make_js_undefined();
+    }
+
+    js_property_set(req_obj, make_string_item("socket"), socket);
+    return make_js_undefined();
+}
+
 static void js_http_emit_client_response(JsHttpClientReq* creq, Item res) {
     if (!creq || creq->response_emitted) return;
     creq->response_emitted = true;
@@ -1423,8 +1477,24 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
                     js_new_function((void*)js_http_client_inst_on, 3));
     js_property_set(obj, make_string_item("destroy"),
                     js_new_function((void*)js_http_client_inst_destroy, 2));
+    js_property_set(obj, make_string_item("destroyed"), (Item){.item = b2it(false)});
 
     creq->js_object = obj;
+
+    if (get_type_id(options_item) == LMD_TYPE_MAP) {
+        Item agent = js_property_get(options_item, make_string_item("agent"));
+        if (get_type_id(agent) == LMD_TYPE_MAP) {
+            Item create_socket = js_property_get(agent, make_string_item("createSocket"));
+            if (get_type_id(create_socket) == LMD_TYPE_FUNC) {
+                Item cb_arg = obj;
+                Item cb = js_bind_function(js_new_function((void*)js_http_agent_socket_cb, 3),
+                                           make_js_undefined(), &cb_arg, 1);
+                Item args[3] = { obj, options_item, cb };
+                js_call_function(create_socket, agent, args, 3);
+                return obj;
+            }
+        }
+    }
 
     // connect
     struct sockaddr_in addr;

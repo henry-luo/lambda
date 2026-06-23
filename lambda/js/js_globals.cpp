@@ -10618,6 +10618,25 @@ static bool js_deep_equal_compare(Item a, Item b, int depth) {
         return true;
     }
 
+    if (js_is_typed_array(a) || js_is_typed_array(b)) {
+        if (!js_is_typed_array(a) || !js_is_typed_array(b)) return false;
+        JsTypedArray* arr_a = js_get_typed_array_ptr(a.map);
+        JsTypedArray* arr_b = js_get_typed_array_ptr(b.map);
+        if (!arr_a || !arr_b) return false;
+        if (arr_a->element_type != arr_b->element_type) return false;
+        if (js_typed_array_is_out_of_bounds_item(a) || js_typed_array_is_out_of_bounds_item(b)) {
+            return false;
+        }
+        int bytes_a = js_typed_array_byte_length(a);
+        int bytes_b = js_typed_array_byte_length(b);
+        if (bytes_a != bytes_b) return false;
+        if (bytes_a == 0) return true;
+        void* data_a = js_typed_array_current_data_ptr(a);
+        void* data_b = js_typed_array_current_data_ptr(b);
+        if (!data_a || !data_b) return false;
+        return memcmp(data_a, data_b, (size_t)bytes_a) == 0;
+    }
+
     // both objects/maps: structural comparison
     if (ta == LMD_TYPE_MAP && tb == LMD_TYPE_MAP) {
         Item keys_a = js_object_keys(a);
@@ -14074,8 +14093,35 @@ extern "C" Item js_abort_signal_addEventListener(Item event, Item handler) {
     return make_js_undefined();
 }
 
+static bool js_abort_listener_type_matches(Item a, Item b) {
+    if (a.item == b.item) return true;
+    if (get_type_id(a) != LMD_TYPE_STRING || get_type_id(b) != LMD_TYPE_STRING) return false;
+    String* as = it2s(a);
+    String* bs = it2s(b);
+    return as->len == bs->len && memcmp(as->chars, bs->chars, as->len) == 0;
+}
+
 // signal.removeEventListener
 extern "C" Item js_abort_signal_removeEventListener(Item event, Item handler) {
+    Item self = js_get_this();
+    Item listeners = js_property_get(self, make_string_item("__listeners__"));
+    if (get_type_id(listeners) != LMD_TYPE_ARRAY) return make_js_undefined();
+
+    Item filtered = js_array_new(0);
+    int64_t len = js_array_length(listeners);
+    bool removed = false;
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(listeners, i);
+        Item type = js_property_get(entry, make_string_item("type"));
+        Item entry_handler = js_property_get(entry, make_string_item("handler"));
+        if (!removed && js_abort_listener_type_matches(type, event) &&
+            entry_handler.item == handler.item) {
+            removed = true;
+            continue;
+        }
+        js_array_push(filtered, entry);
+    }
+    js_property_set(self, make_string_item("__listeners__"), filtered);
     return make_js_undefined();
 }
 
@@ -14403,6 +14449,12 @@ extern "C" Item js_message_channel_new(void) {
 // forward declaration for populating globalThis with constructors
 extern "C" Item js_get_constructor(Item name_item);
 
+static Item js_global_gc(void) {
+    extern void heap_gc_collect(void);
+    heap_gc_collect();
+    return make_js_undefined();
+}
+
 extern "C" Item js_get_global_this() {
     if (js_global_this_obj.item == 0) {
         js_global_this_obj = js_new_object();
@@ -14500,11 +14552,14 @@ extern "C" Item js_get_global_this() {
             {"queueMicrotask", 14, 1},
             // Web API globals
             {"structuredClone", 15, 1}, {"fetch", 5, 2},
+            {"gc", 2, 0},
             {NULL, 0, 0}
         };
         for (int i = 0; global_fns[i].name; i++) {
             Item name_item = (Item){.item = s2it(heap_create_name(global_fns[i].name, global_fns[i].len))};
-            Item fn = js_get_global_builtin_fn(name_item, (Item){.item = i2it(global_fns[i].param_count)});
+            Item fn = (global_fns[i].len == 2 && strncmp(global_fns[i].name, "gc", 2) == 0)
+                ? js_new_function((void*)js_global_gc, 0)
+                : js_get_global_builtin_fn(name_item, (Item){.item = i2it(global_fns[i].param_count)});
             js_property_set(js_global_this_obj, name_item, fn);
         }
 
