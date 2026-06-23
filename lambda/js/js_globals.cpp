@@ -17128,6 +17128,26 @@ extern "C" Item js_symbol_well_known(Item name) {
 
 extern "C" Item js_url_search_params_new(Item init);
 
+static char* js_url_string_to_cstr(String* s) {
+    if (!s) return NULL;
+    size_t cap = (size_t)s->len * 3 + 1;
+    char* out = (char*)mem_alloc(cap, MEM_CAT_JS_RUNTIME);
+    if (!out) return NULL;
+    size_t pos = 0;
+    for (int i = 0; i < (int)s->len; i++) {
+        unsigned char ch = (unsigned char)s->chars[i];
+        if (ch == '\0') {
+            out[pos++] = '%';
+            out[pos++] = '0';
+            out[pos++] = '0';
+        } else {
+            out[pos++] = (char)ch;
+        }
+    }
+    out[pos] = '\0';
+    return out;
+}
+
 static Item js_url_to_object(Url* url) {
     if (!url || !url->is_valid) {
         if (url) url_destroy(url);
@@ -17203,7 +17223,10 @@ extern "C" Item js_url_construct(Item input) {
     String* s = it2s(input);
     if (!s || s->len == 0) return ItemNull;
 
-    Url* url = url_parse(s->chars);
+    char* input_str = js_url_string_to_cstr(s);
+    if (!input_str) return ItemNull;
+    Url* url = url_parse(input_str);
+    mem_free(input_str);
     return js_url_to_object(url);
 }
 
@@ -17222,12 +17245,21 @@ extern "C" Item js_url_construct_with_base(Item input, Item base) {
     String* s = it2s(input);
     if (!s) return ItemNull;
 
-    Url* base_url = url_parse(base_str->chars);
+    char* base_cstr = js_url_string_to_cstr(base_str);
+    if (!base_cstr) return ItemNull;
+    Url* base_url = url_parse(base_cstr);
+    mem_free(base_cstr);
     if (!base_url || !base_url->is_valid) {
         if (base_url) url_destroy(base_url);
         return ItemNull;
     }
-    Url* url = url_parse_with_base(s->chars, base_url);
+    char* input_cstr = js_url_string_to_cstr(s);
+    if (!input_cstr) {
+        url_destroy(base_url);
+        return ItemNull;
+    }
+    Url* url = url_parse_with_base(input_cstr, base_url);
+    mem_free(input_cstr);
     url_destroy(base_url);
     return js_url_to_object(url);
 }
