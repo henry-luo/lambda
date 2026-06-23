@@ -62,6 +62,13 @@ static void js_define_property_reject_false_type_error(const char* message) {
     js_throw_value(js_new_error_with_name(tn, msg));
 }
 
+static bool js_define_property_has_existing_own(Item obj, Item key) {
+    if (it2b(js_has_own_property(obj, key))) return true;
+    Item existing_desc = js_object_get_own_property_descriptor(obj, key);
+    if (js_check_exception()) return false;
+    return get_type_id(existing_desc) == LMD_TYPE_MAP;
+}
+
 static bool js_global_is_bigint(Item value) {
     if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
     Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
@@ -7256,7 +7263,8 @@ extern "C" Item js_reflect_define_property(Item obj, Item key, Item desc) {
         if (js_check_exception()) return ItemNull;
         if (ta_define_handled) return (Item){.item = b2it(ta_define_ok)};
     }
-    if (!js_is_truthy(js_object_is_extensible(obj)) && !it2b(js_has_own_property(obj, key))) {
+    if (!js_is_truthy(js_object_is_extensible(obj)) &&
+        !js_define_property_has_existing_own(obj, key)) {
         return (Item){.item = b2it(false)};
     }
     bool prev_reflect_mode = js_reflect_define_property_mode;
@@ -8238,8 +8246,9 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
         if (!js_is_truthy(is_ext)) {
             // Coerce name for property existence check
             Item check_name = js_to_property_key(name);
-            Item has = js_has_own_property(obj, check_name);
-            if (!it2b(has)) {
+            bool has_existing = js_define_property_has_existing_own(obj, check_name);
+            if (js_check_exception()) return obj;
+            if (!has_existing) {
                 // Phase-5D: legacy __get_<name> probe removed. js_has_own_property
                 // already returns true for IS_ACCESSOR shape entries.
                 Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};

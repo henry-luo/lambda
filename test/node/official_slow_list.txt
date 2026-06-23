@@ -1,0 +1,9 @@
+# Node.js Official Test Slow List
+#
+# Tests listed here took longer than 10s in the LambdaJS Node official runner.
+# They are excluded by default to keep normal regression runs fast.
+# Run with --include-slow to include these tests.
+#
+# Format: test-filename.js  # reason
+# Lines starting with # are comments. Blank lines are ignored.
+#
