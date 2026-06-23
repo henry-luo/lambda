@@ -159,6 +159,9 @@ static bool needs_float_result(Item a, Item b) {
 
 // Generic template for scalar-vector binary operation
 // op: 0=add, 1=sub, 2=mul, 3=div, 4=mod, 5=pow
+// forward decl — defined after vec_scalar_op
+static Item vec_broadcast_op(ArrayNum* a, ArrayNum* b, int op);
+
 static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
     int64_t len = vector_length(vec);
     TypeId vec_type = get_type_id(vec);
@@ -177,6 +180,19 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
     if (std::isnan(scalar_val)) {
         log_error("vec_scalar_op: non-numeric scalar type %s", get_type_name(scalar_type));
         return ItemError;
+    }
+
+    // N-D arrays: wrap scalar as a 1-element ArrayNum and route through the
+    // broadcast op so the result preserves the input's shape (e.g. mat + 10
+    // → same shape as mat).  The 1-element wrapper broadcasts to all positions.
+    if (vec_type == LMD_TYPE_ARRAY_NUM && vec.array_num->is_ndim) {
+        bool sint = is_scalar_numeric(scalar_type) && scalar_type != LMD_TYPE_FLOAT;
+        ArrayNum* swrap = array_num_new(sint ? ELEM_INT64 : ELEM_FLOAT, 1);
+        if (!swrap) return ItemError;
+        if (sint) swrap->items[0] = (int64_t)scalar_val;
+        else      swrap->float_items[0] = scalar_val;
+        return scalar_first ? vec_broadcast_op(swrap, vec.array_num, op)
+                            : vec_broadcast_op(vec.array_num, swrap, op);
     }
 
     // determine result type
@@ -322,6 +338,197 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
 }
 
 //==============================================================================
+// N-D Shape Broadcasting
+//==============================================================================
+//
+// NumPy-style rules:
+//   - Right-align dimensions; pad shorter operand with leading 1s.
+//   - At each axis, dims must be equal OR one of them must be 1.
+//   - A size-1 dim is "stretched" by setting its effective stride to 0,
+//     so the same element is read for all indices on that axis.
+//
+// Element access uses pre-adjusted data pointers — owned 1-D arrays start at
+// base->data; subviews carry offset baked into their data pointer; reshape
+// keeps data = base->data with stride metadata.  So `data[flat_offset]` always
+// resolves correctly when flat_offset is computed via effective strides.
+
+// Read shape and strides into caller-provided arrays. Returns ndim.
+// For 1-D owned arrays, returns ndim=1 with shp[0]=length, str[0]=1.
+static int get_shape_strides(ArrayNum* arr, int64_t* shp, int64_t* str) {
+    if (arr->is_ndim && arr->extra) {
+        ArrayNumShape* s = (ArrayNumShape*)(uintptr_t)arr->extra;
+        int64_t* sd = array_num_shape_dims(s);
+        int64_t* ss = array_num_shape_strides(s);
+        for (int i = 0; i < s->ndim; i++) { shp[i] = sd[i]; str[i] = ss[i]; }
+        return s->ndim;
+    }
+    shp[0] = arr->length;
+    str[0] = 1;
+    return 1;
+}
+
+// Compute broadcast output shape from two operand shapes.
+// Outputs broadcast shape into out_shp[] and effective strides for each operand
+// into eff_str_a[] and eff_str_b[] (with 0 for stretched size-1 axes).
+// Returns output ndim, or -1 if shapes are incompatible.
+static int compute_broadcast_shape(
+    int ndim_a, const int64_t* shp_a, const int64_t* str_a,
+    int ndim_b, const int64_t* shp_b, const int64_t* str_b,
+    int64_t* out_shp, int64_t* eff_str_a, int64_t* eff_str_b) {
+    int out_ndim = (ndim_a > ndim_b) ? ndim_a : ndim_b;
+    for (int axis = 0; axis < out_ndim; axis++) {
+        // right-align: out axis 0 = leading; align from the right
+        int a_axis = ndim_a - out_ndim + axis;
+        int b_axis = ndim_b - out_ndim + axis;
+        int64_t dim_a = (a_axis >= 0) ? shp_a[a_axis] : 1;
+        int64_t dim_b = (b_axis >= 0) ? shp_b[b_axis] : 1;
+        int64_t stride_a = (a_axis >= 0) ? str_a[a_axis] : 0;
+        int64_t stride_b = (b_axis >= 0) ? str_b[b_axis] : 0;
+        if (dim_a == dim_b) {
+            out_shp[axis] = dim_a;
+            eff_str_a[axis] = stride_a;
+            eff_str_b[axis] = stride_b;
+        } else if (dim_a == 1) {
+            out_shp[axis] = dim_b;
+            eff_str_a[axis] = 0;        // stretched
+            eff_str_b[axis] = stride_b;
+        } else if (dim_b == 1) {
+            out_shp[axis] = dim_a;
+            eff_str_a[axis] = stride_a;
+            eff_str_b[axis] = 0;        // stretched
+        } else {
+            return -1;  // incompatible: dims differ and neither is 1
+        }
+    }
+    return out_ndim;
+}
+
+// Read one numeric element from an ArrayNum at a flat-byte offset (in elements).
+// Handles all ELEM_* element kinds, converting to double for uniform processing.
+static inline double read_arr_elem_as_double(ArrayNum* arr, int64_t off) {
+    switch (arr->get_elem_type()) {
+        case ELEM_INT:   case ELEM_INT64:  return (double)arr->items[off];
+        case ELEM_FLOAT: case ELEM_FLOAT64: return arr->float_items[off];
+        case ELEM_INT8:    return (double)((int8_t*)arr->data)[off];
+        case ELEM_INT16:   return (double)((int16_t*)arr->data)[off];
+        case ELEM_INT32:   return (double)((int32_t*)arr->data)[off];
+        case ELEM_UINT8:   return (double)((uint8_t*)arr->data)[off];
+        case ELEM_UINT16:  return (double)((uint16_t*)arr->data)[off];
+        case ELEM_UINT32:  return (double)((uint32_t*)arr->data)[off];
+        case ELEM_FLOAT32: return (double)((float*)arr->data)[off];
+        case ELEM_UINT64:  return (double)((uint64_t*)arr->data)[off];
+        case ELEM_BOOL:    return ((uint8_t*)arr->data)[off] ? 1.0 : 0.0;
+        default:           return 0.0;
+    }
+}
+
+// Returns true if elem_type stores integers (not floats).
+static inline bool elem_is_int(ArrayNumElemType e) {
+    switch (e) {
+        case ELEM_FLOAT: case ELEM_FLOAT16: case ELEM_FLOAT32: case ELEM_FLOAT64:
+            return false;
+        default: return true;
+    }
+}
+
+// Allocate an N-D ArrayNum with the given shape and elem_type, plus shape side-table.
+// Used to materialize broadcast op results.
+static ArrayNum* alloc_ndim_arraynum(ArrayNumElemType etype, int ndim, const int64_t* shape) {
+    int64_t total = 1;
+    for (int i = 0; i < ndim; i++) total *= shape[i];
+    ArrayNum* arr = array_num_new(etype, total);
+    if (!arr || ndim == 1) return arr;
+    // attach shape side-table
+    size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)ndim * sizeof(int64_t);
+    ArrayNumShape* s = (ArrayNumShape*)heap_data_calloc(shape_bytes);
+    if (!s) return arr;  // best-effort: keep as 1-D
+    s->ndim = (uint8_t)ndim;
+    s->is_c_contig = 1;
+    s->is_f_contig = (ndim == 1) ? 1 : 0;
+    s->offset = 0;
+    s->base = NULL;  // owned, no base
+    int64_t* sd = array_num_shape_dims(s);
+    int64_t* ss = array_num_shape_strides(s);
+    int64_t stride = 1;
+    for (int i = ndim - 1; i >= 0; i--) {
+        sd[i] = shape[i];
+        ss[i] = stride;
+        stride *= shape[i];
+    }
+    arr->is_ndim = 1;
+    arr->extra = (int64_t)(uintptr_t)s;
+    return arr;
+}
+
+// Broadcast binary op: walk output shape with strided iterator, fetch from each
+// operand via effective strides, compute op, store. Uses double internally; for
+// int-result paths, casts back to int64 at the end.
+static Item vec_broadcast_op(ArrayNum* a, ArrayNum* b, int op) {
+    int64_t shp_a[32], str_a[32], shp_b[32], str_b[32];
+    int ndim_a = get_shape_strides(a, shp_a, str_a);
+    int ndim_b = get_shape_strides(b, shp_b, str_b);
+
+    int64_t out_shp[32], eff_a[32], eff_b[32];
+    int out_ndim = compute_broadcast_shape(ndim_a, shp_a, str_a, ndim_b, shp_b, str_b,
+                                            out_shp, eff_a, eff_b);
+    if (out_ndim < 0) {
+        // build a small diagnostic of the two shapes
+        log_error("vec_broadcast_op: incompatible shapes for op %d (ndim %d vs %d)",
+                  op, ndim_a, ndim_b);
+        return ItemError;
+    }
+
+    int64_t total = 1;
+    for (int i = 0; i < out_ndim; i++) total *= out_shp[i];
+
+    // Result element type: float if either operand is float OR op is div/pow
+    bool result_is_float = !elem_is_int(a->get_elem_type()) ||
+                           !elem_is_int(b->get_elem_type()) ||
+                           op == 3 || op == 5;
+    ArrayNumElemType result_etype = result_is_float ? ELEM_FLOAT : ELEM_INT64;
+    ArrayNum* result = alloc_ndim_arraynum(result_etype, out_ndim, out_shp);
+    if (!result) return ItemError;
+
+    // Walk all output positions using an N-D index counter.
+    int64_t idx[32] = {0};
+    for (int64_t k = 0; k < total; k++) {
+        // compute operand offsets via dot product of current idx with effective strides
+        int64_t off_a = 0, off_b = 0;
+        for (int axis = 0; axis < out_ndim; axis++) {
+            off_a += idx[axis] * eff_a[axis];
+            off_b += idx[axis] * eff_b[axis];
+        }
+        double va = read_arr_elem_as_double(a, off_a);
+        double vb = read_arr_elem_as_double(b, off_b);
+        double res;
+        switch (op) {
+            case 0: res = va + vb; break;
+            case 1: res = va - vb; break;
+            case 2: res = va * vb; break;
+            case 3: res = va / vb; break;
+            case 4: res = fmod(va, vb); break;
+            case 5: res = pow(va, vb); break;
+            default: res = NAN; break;
+        }
+        if (result_is_float) result->float_items[k] = res;
+        else                  result->items[k] = (int64_t)res;
+
+        // increment N-D index counter (last axis fastest)
+        for (int axis = out_ndim - 1; axis >= 0; axis--) {
+            idx[axis]++;
+            if (idx[axis] < out_shp[axis]) break;
+            idx[axis] = 0;
+        }
+    }
+    return { .array_num = result };
+}
+
+// True iff either ArrayNum carries n-d shape metadata.
+static inline bool either_is_ndim(ArrayNum* a, ArrayNum* b) {
+    return (a && a->is_ndim) || (b && b->is_ndim);
+}
+
+//==============================================================================
 // Vector-Vector Operations
 //==============================================================================
 
@@ -341,7 +548,18 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         return { .array = list() };
     }
 
-    // single-element broadcasting
+    // N-D shape broadcasting: when either operand carries shape metadata, dispatch
+    // through the broadcast path which respects shape rules (right-align, size-1
+    // dims stretch).  Falls back to length match for the all-1-D case.
+    if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* a = vec_a.array_num;
+        ArrayNum* b = vec_b.array_num;
+        if (either_is_ndim(a, b)) {
+            return vec_broadcast_op(a, b, op);
+        }
+    }
+
+    // single-element broadcasting (1-D length-1)
     if (len_a == 1 && len_b > 1) {
         Item scalar = vector_get(vec_a, 0);
         return vec_scalar_op(vec_b, scalar, op, true);

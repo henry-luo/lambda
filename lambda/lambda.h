@@ -1427,6 +1427,7 @@ extern "C" {
     Item fn_reshape(Item arr, Item shape);         // returns view with new shape (contiguous required)
     Item fn_shape(Item arr);                       // returns shape as a list
     Item fn_ndim(Item arr);                        // returns number of dimensions (int)
+    int64_t array_num_iter_count(ArrayNum* arr);   // shape[0] for N-D, length for 1-D
     Item fn_zip(Item a, Item b);
     Item fn_range3(Item start, Item end, Item step);
     Item fn_math_quantile(Item a, Item p);

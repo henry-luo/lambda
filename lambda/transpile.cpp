@@ -2421,9 +2421,12 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 strbuf_append_str(tp->code_buf, arr_decl);
                 transpile_expr(tp, loop_node->as);
 
-                // Start the loop
+                // Start the loop.  For ArrayNum the iteration count is shape[0]
+                // for N-D arrays (yields leading-axis slices) or length for 1-D.
+                // array_num_iter_count handles both via runtime check.
                 strbuf_append_str(tp->code_buf,
                     is_range ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long idx=rng->start; idx<=rng->end; idx++) {\n " :
+                    is_typed_array ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { int64_t _ilen = array_num_iter_count(arr); for (int64_t idx=0; idx<_ilen; idx++) {\n " :
                     is_any_array ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { for (int idx=0; idx<arr->length; idx++) {\n " :
                     ";\n int ilen = fn_len(it);\n for (int idx=0; idx<ilen; idx++) {\n ");
 

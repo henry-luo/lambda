@@ -1030,10 +1030,12 @@ static inline Item seq_get_element(Item item, TypeId tid, int64_t i) {
 }
 
 // helper: get length from any sequence type
+// For N-D ArrayNum, returns shape[0] (leading-axis count, NumPy-compatible).
+// 1-D ArrayNum returns total length.
 static inline int64_t seq_get_length(Item item, TypeId tid) {
     switch (tid) {
     case LMD_TYPE_ARRAY:        return item.array->length;
-    case LMD_TYPE_ARRAY_NUM:   return item.array_num->length;
+    case LMD_TYPE_ARRAY_NUM:   return array_num_iter_count(item.array_num);
     case LMD_TYPE_RANGE:       return item.range->length;
     default:                   return -1;
     }
@@ -2811,7 +2813,7 @@ int64_t fn_len(Item item) {
         size = item.range->length;
         break;
     case LMD_TYPE_ARRAY_NUM:
-        size = item.array_num->length;
+        size = array_num_iter_count(item.array_num);
         break;
     case LMD_TYPE_MAP: {
         size = 0;

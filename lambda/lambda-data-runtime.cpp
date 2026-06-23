@@ -159,11 +159,87 @@ ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
     return arr;
 }
 
+// Returns the iteration count for for-in / index loops:
+//   - 1-D / non-ndim arrays: total element count (length)
+//   - N-D arrays: shape[0] (leading axis), so for-in yields leading-axis slices
+int64_t array_num_iter_count(ArrayNum* arr) {
+    if (!arr) return 0;
+    if (arr->is_ndim && arr->extra) {
+        ArrayNumShape* s = (ArrayNumShape*)(uintptr_t)arr->extra;
+        if (s && s->ndim >= 1) return array_num_shape_dims(s)[0];
+    }
+    return arr->length;
+}
+
+// Build a leading-axis view of an N-D ArrayNum at `row_idx`.
+// Result is ndim-1 dimensional; for ndim==2 it's 1-D, for ndim==3 it's 2-D, etc.
+// The row view aliases the parent's data; its data pointer is adjusted so
+// element 0 of the row is element row_idx along axis 0 of the parent.
+static Item make_leading_axis_view(ArrayNum* parent, int64_t row_idx) {
+    ArrayNumShape* pshape = (ArrayNumShape*)(uintptr_t)parent->extra;
+    if (!pshape || pshape->ndim < 2) return ItemNull;
+    int64_t* pdims = array_num_shape_dims(pshape);
+    int64_t* pstrs = array_num_shape_strides(pshape);
+    if (row_idx < 0 || row_idx >= pdims[0]) return ItemNull;
+
+    int new_ndim = pshape->ndim - 1;
+    int64_t row_len = 1;
+    for (int i = 1; i < pshape->ndim; i++) row_len *= pdims[i];
+
+    ArrayNumElemType etype = parent->get_elem_type();
+    int elem_size = ELEM_TYPE_SIZE[etype >> 4];
+
+    ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    if (!view) return ItemNull;
+    view->type_id = LMD_TYPE_ARRAY_NUM;
+    view->set_elem_type(etype);
+    view->is_ndim = 1;
+    view->is_view = 1;
+    int64_t base_elem_offset = row_idx * pstrs[0];
+    view->data = (void*)((char*)parent->data + base_elem_offset * (size_t)elem_size);
+    view->length = row_len;
+    view->capacity = row_len;
+
+    // shape side-table for the row view
+    size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)new_ndim * sizeof(int64_t);
+    ArrayNumShape* rshape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
+    if (!rshape) return ItemNull;
+    rshape->ndim = (uint8_t)new_ndim;
+    rshape->is_c_contig = pshape->is_c_contig;  // inherits contig if parent was
+    rshape->is_f_contig = 0;
+    rshape->offset = base_elem_offset;
+    // base ref: prefer the parent's own base (if it's itself a view), else the parent.
+    // This keeps the original data owner alive across nested views.
+    rshape->base = pshape->base ? pshape->base : (void*)parent;
+    int64_t* rdims = array_num_shape_dims(rshape);
+    int64_t* rstrs = array_num_shape_strides(rshape);
+    for (int i = 0; i < new_ndim; i++) {
+        rdims[i] = pdims[i + 1];
+        rstrs[i] = pstrs[i + 1];
+    }
+    view->extra = (int64_t)(uintptr_t)rshape;
+
+    // pin the actual data owner
+    Container* owner = (Container*)rshape->base;
+    if (owner) owner->is_pinned = 1;
+    return { .array_num = view };
+}
+
 // Unified ArrayNum getter — dispatches on elem_type
 Item array_num_get(ArrayNum *array, int64_t index) {
     if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
     if (array->type_id != LMD_TYPE_ARRAY_NUM)
         return array_get((Array*)array, index);
+
+    // N-D arrays: return a leading-axis view instead of a scalar element
+    if (array->is_ndim && array->extra) {
+        ArrayNumShape* s = (ArrayNumShape*)(uintptr_t)array->extra;
+        if (s && s->ndim >= 2) {
+            return make_leading_axis_view(array, index);
+        }
+        // ndim==1: continue to scalar dispatch below, using shape[0] for bounds
+    }
+
     if (index < 0 || index >= array->length) {
         return ItemNull;
     }
