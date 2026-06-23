@@ -47,6 +47,7 @@ extern "C" Item js_to_string(Item value);
 extern "C" Item js_symbol_for(Item key);
 extern "C" Item js_promise_with_resolvers(void);
 extern "C" Item js_promise_resolve(Item value);
+extern "C" Item js_promise_reject(Item reason);
 extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
 extern "C" Item js_setTimeout(Item callback, Item delay);
 extern "C" Item js_get_async_iterator(Item iterable);
@@ -171,6 +172,11 @@ static void ensure_keys() {
 
 static inline Item js_bool_item(bool value) {
     return (Item){.item = b2it(value)};
+}
+
+static void js_readable_clear_pipe(Item self) {
+    js_property_set(self, make_string_item("__piped__"), js_bool_item(false));
+    js_property_set(self, make_string_item("__pipe_dest__"), make_js_undefined());
 }
 
 static bool js_item_is_true(Item item) {
@@ -400,11 +406,25 @@ static void js_stream_maybe_capture_rejection(Item self, const char* event, Item
 
 static void stream_emit(Item self, const char* event, Item* args, int argc) {
     Item listeners_map = js_property_get(self, key_listeners);
-    if (get_type_id(listeners_map) != LMD_TYPE_MAP) return;
+    if (get_type_id(listeners_map) != LMD_TYPE_MAP) {
+        if (event && strcmp(event, "error") == 0 && args && argc > 0) {
+            js_process_emit(make_string_item("uncaughtException"), args[0]);
+        }
+        return;
+    }
     Item event_key = make_string_item(event);
     Item arr = js_property_get(listeners_map, event_key);
-    if (get_type_id(arr) != LMD_TYPE_ARRAY) return;
+    if (get_type_id(arr) != LMD_TYPE_ARRAY) {
+        if (event && strcmp(event, "error") == 0 && args && argc > 0) {
+            js_process_emit(make_string_item("uncaughtException"), args[0]);
+        }
+        return;
+    }
     int64_t len = js_array_length(arr);
+    if (len == 0 && event && strcmp(event, "error") == 0 && args && argc > 0) {
+        js_process_emit(make_string_item("uncaughtException"), args[0]);
+        return;
+    }
     for (int64_t i = 0; i < len; i++) {
         Item listener = js_array_get_int(arr, i);
         if (get_type_id(listener) == LMD_TYPE_FUNC) {
@@ -921,6 +941,25 @@ extern "C" Item js_stream_eventNames(Item self) {
     return result;
 }
 
+extern "C" Item js_stream_listenerCount(Item self, Item event_item, Item listener) {
+    ensure_keys();
+    if (get_type_id(event_item) != LMD_TYPE_STRING) return (Item){.item = i2it(0)};
+    Item listeners_map = js_property_get(self, key_listeners);
+    if (get_type_id(listeners_map) != LMD_TYPE_MAP) return (Item){.item = i2it(0)};
+    Item arr = js_property_get(listeners_map, event_item);
+    if (get_type_id(arr) != LMD_TYPE_ARRAY) return (Item){.item = i2it(0)};
+    int64_t len = js_array_length(arr);
+    if (listener.item == 0 || get_type_id(listener) == LMD_TYPE_UNDEFINED) {
+        return (Item){.item = i2it(len)};
+    }
+    int64_t count = 0;
+    for (int64_t i = 0; i < len; i++) {
+        Item current = js_array_get_int(arr, i);
+        if (current.item == listener.item) count++;
+    }
+    return (Item){.item = i2it(count)};
+}
+
 // emit(event, ...args)
 extern "C" Item js_stream_emit(Item self, Item event_item, Item arg1) {
     ensure_keys();
@@ -955,9 +994,13 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
         Item state = js_property_get(self, key_readable_state);
         js_state_set_bool(state, "ended", true);
         Item pipe_dest = js_property_get(self, make_string_item("__pipe_dest__"));
-        Item end_fn = js_property_get(pipe_dest, key_end);
-        if (get_type_id(end_fn) == LMD_TYPE_FUNC) {
-            js_call_function(end_fn, pipe_dest, NULL, 0);
+        if (js_item_is_true(js_property_get(pipe_dest, key_destroyed))) {
+            js_readable_clear_pipe(self);
+        } else {
+            Item end_fn = js_property_get(pipe_dest, key_end);
+            if (get_type_id(end_fn) == LMD_TYPE_FUNC) {
+                js_call_function(end_fn, pipe_dest, NULL, 0);
+            }
         }
 
         js_property_set(self, key_end_pending, js_bool_item(true));
@@ -993,6 +1036,10 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
     if (!js_stream_prepare_readable_chunk(self, &chunk, encoding)) return ItemNull;
 
     Item pipe_dest = js_property_get(self, make_string_item("__pipe_dest__"));
+    if (js_item_is_true(js_property_get(pipe_dest, key_destroyed))) {
+        js_readable_clear_pipe(self);
+        return js_bool_item(false);
+    }
     Item write_fn = js_property_get(pipe_dest, key_write);
     if (get_type_id(write_fn) == LMD_TYPE_FUNC) {
         Item result = js_call_function(write_fn, pipe_dest, &chunk, 1);
@@ -2339,6 +2386,15 @@ extern "C" Item js_readable_pipe(Item self, Item dest) {
         js_stream_set_readable_buffer(self, js_array_new(0));
     }
 
+    if (js_item_is_true(js_property_get(self, key_end_pending)) ||
+        js_item_is_true(js_property_get(self, key_ended)) ||
+        js_state_get_bool(js_property_get(self, key_readable_state), "ended")) {
+        Item end_fn = js_property_get(dest, key_end);
+        if (get_type_id(end_fn) == LMD_TYPE_FUNC) {
+            js_call_function(end_fn, dest, NULL, 0);
+        }
+    }
+
     // register data handler to forward
     // store that pipe is active via marker
     js_property_set(self, make_string_item("__piped__"), (Item){.item = b2it(true)});
@@ -2935,6 +2991,9 @@ static Item js_stream_inst_emit(Item event_item, Item arg1) {
 static Item js_stream_inst_eventNames(void) {
     return js_stream_eventNames(js_get_this());
 }
+static Item js_stream_inst_listenerCount(Item event_item, Item listener) {
+    return js_stream_listenerCount(js_get_this(), event_item, listener);
+}
 static Item js_readable_inst_push(Item chunk, Item encoding) {
     return js_readable_push_encoded(js_get_this(), chunk, encoding);
 }
@@ -3032,6 +3091,7 @@ extern "C" Item js_readable_new(Item opts) {
     js_property_set(obj, make_string_item("removeAllListeners"), js_new_function((void*)js_stream_inst_removeAllListeners, 1));
     js_property_set(obj, key_emit, js_new_function((void*)js_stream_inst_emit, 2));
     js_property_set(obj, make_string_item("eventNames"), js_new_function((void*)js_stream_inst_eventNames, 0));
+    js_property_set(obj, make_string_item("listenerCount"), js_new_function((void*)js_stream_inst_listenerCount, 2));
     js_property_set(obj, key_push, js_new_function((void*)js_readable_inst_push, 2));
     js_property_set(obj, make_string_item("unshift"), js_new_function((void*)js_readable_inst_unshift, 2));
     js_property_set(obj, key_read, js_new_function((void*)js_readable_inst_read, 1));
@@ -3337,6 +3397,7 @@ extern "C" Item js_writable_new(Item opts) {
     js_property_set(obj, make_string_item("removeAllListeners"), js_new_function((void*)js_stream_inst_removeAllListeners, 1));
     js_property_set(obj, key_emit, js_new_function((void*)js_stream_inst_emit, 2));
     js_property_set(obj, make_string_item("eventNames"), js_new_function((void*)js_stream_inst_eventNames, 0));
+    js_property_set(obj, make_string_item("listenerCount"), js_new_function((void*)js_stream_inst_listenerCount, 2));
     js_property_set(obj, key_write, js_new_function((void*)js_writable_inst_write, 3));
     js_property_set(obj, key_end, js_new_function((void*)js_writable_inst_end, 2));
     js_property_set(obj, key_destroy, js_new_function((void*)js_stream_inst_destroy, 1));
@@ -3394,6 +3455,7 @@ extern "C" Item js_duplex_new(Item opts) {
     js_property_set(obj, make_string_item("removeAllListeners"), js_new_function((void*)js_stream_inst_removeAllListeners, 1));
     js_property_set(obj, key_emit, js_new_function((void*)js_stream_inst_emit, 2));
     js_property_set(obj, make_string_item("eventNames"), js_new_function((void*)js_stream_inst_eventNames, 0));
+    js_property_set(obj, make_string_item("listenerCount"), js_new_function((void*)js_stream_inst_listenerCount, 2));
     js_property_set(obj, key_push, js_new_function((void*)js_readable_inst_push, 2));
     js_property_set(obj, make_string_item("unshift"), js_new_function((void*)js_readable_inst_unshift, 2));
     js_property_set(obj, key_read, js_new_function((void*)js_readable_inst_read, 1));
@@ -3552,6 +3614,7 @@ extern "C" Item js_transform_new(Item opts) {
     js_property_set(obj, make_string_item("removeAllListeners"), js_new_function((void*)js_stream_inst_removeAllListeners, 1));
     js_property_set(obj, key_emit, js_new_function((void*)js_stream_inst_emit, 2));
     js_property_set(obj, make_string_item("eventNames"), js_new_function((void*)js_stream_inst_eventNames, 0));
+    js_property_set(obj, make_string_item("listenerCount"), js_new_function((void*)js_stream_inst_listenerCount, 2));
     js_property_set(obj, key_push, js_new_function((void*)js_readable_inst_push, 2));
     js_property_set(obj, make_string_item("unshift"), js_new_function((void*)js_readable_inst_unshift, 2));
     js_property_set(obj, key_read, js_new_function((void*)js_readable_inst_read, 1));
@@ -3612,16 +3675,36 @@ static bool js_stream_pipeline_source_ended(Item source) {
            js_state_get_bool(js_property_get(source, key_readable_state), "endEmitted");
 }
 
-static Item js_stream_pipeline_call_once(Item* env, Item err) {
-    if (!env || js_item_is_true(env[3])) return make_js_undefined();
-    env[3] = js_bool_item(true);
+static Item js_stream_pipeline_invoke_callback(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
     Item callback = env[2];
     if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+    Item err = env[8];
     if (js_stream_has_error(err)) {
         js_call_function(callback, ItemNull, &err, 1);
     } else {
         js_call_function(callback, ItemNull, NULL, 0);
     }
+    if (js_check_exception()) {
+        Item thrown = js_clear_exception();
+        js_process_emit(make_string_item("uncaughtException"), thrown);
+    }
+    return make_js_undefined();
+}
+
+static Item js_stream_pipeline_call_once(Item* env, Item err) {
+    if (!env || js_item_is_true(env[3])) return make_js_undefined();
+    env[3] = js_bool_item(true);
+    Item dest = env[1];
+    if (js_item_is_true(js_property_get(dest, key_readable))) {
+        js_stream_off(dest, make_string_item("error"), env[6]);
+        js_stream_off(dest, make_string_item("finish"), env[7]);
+    }
+    Item callback = env[2];
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+    env[8] = err;
+    js_next_tick_enqueue(js_new_closure((void*)js_stream_pipeline_invoke_callback, 0, env, 9));
     return make_js_undefined();
 }
 
@@ -3662,28 +3745,37 @@ static Item js_stream_pipeline_on_finish(Item env_item) {
 
 extern "C" Item js_stream_pipeline(Item source, Item dest, Item callback) {
     ensure_keys();
+    Item actual_dest = dest;
+    if (get_type_id(dest) == LMD_TYPE_FUNC && get_type_id(callback) == LMD_TYPE_FUNC) {
+        actual_dest = js_passthrough_new(make_js_undefined());
+    }
     // simplified two-argument pipeline (most common case)
     // for multi-step, chain pipe() calls
     Item pipe_fn = js_property_get(source, key_pipe);
     if (get_type_id(pipe_fn) == LMD_TYPE_FUNC) {
-        js_call_function(pipe_fn, source, &dest, 1);
+        js_call_function(pipe_fn, source, &actual_dest, 1);
     }
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
-        Item* env = js_alloc_env(4);
+        Item* env = js_alloc_env(9);
         env[0] = source;
-        env[1] = dest;
+        env[1] = actual_dest;
         env[2] = callback;
         env[3] = js_bool_item(false);
-        Item source_close = js_new_closure((void*)js_stream_pipeline_on_close, 0, env, 4);
-        Item source_error = js_new_closure((void*)js_stream_pipeline_on_error, 1, env, 4);
-        Item dest_error = js_new_closure((void*)js_stream_pipeline_on_error, 1, env, 4);
-        Item dest_finish = js_new_closure((void*)js_stream_pipeline_on_finish, 0, env, 4);
+        Item source_close = js_new_closure((void*)js_stream_pipeline_on_close, 0, env, 9);
+        Item source_error = js_new_closure((void*)js_stream_pipeline_on_error, 1, env, 9);
+        Item dest_error = js_new_closure((void*)js_stream_pipeline_on_error, 1, env, 9);
+        Item dest_finish = js_new_closure((void*)js_stream_pipeline_on_finish, 0, env, 9);
+        env[4] = source_close;
+        env[5] = source_error;
+        env[6] = dest_error;
+        env[7] = dest_finish;
+        env[8] = make_js_undefined();
         js_stream_once(source, make_string_item("close"), source_close);
         js_stream_once(source, make_string_item("error"), source_error);
-        js_stream_once(dest, make_string_item("error"), dest_error);
-        js_stream_once(dest, make_string_item("finish"), dest_finish);
+        js_stream_on(actual_dest, make_string_item("error"), dest_error);
+        js_stream_on(actual_dest, make_string_item("finish"), dest_finish);
     }
-    return dest;
+    return actual_dest;
 }
 
 static Item js_readable_from_pump(Item env_item);
@@ -3808,17 +3900,16 @@ extern "C" Item js_stream_finished(Item stream, Item callback) {
         return make_js_undefined();
     }
 
-    // register on 'end', 'finish', 'error', 'close' events
-    extern Item js_ee_on(Item, Item, Item);
+    // register on stream-local events; stream_emit() reads this listener table.
     Item end_event = make_string_item("end");
     Item finish_event = make_string_item("finish");
     Item error_event = make_string_item("error");
     Item close_event = make_string_item("close");
 
-    js_ee_on(stream, end_event, callback);
-    js_ee_on(stream, finish_event, callback);
-    js_ee_on(stream, error_event, callback);
-    js_ee_on(stream, close_event, callback);
+    js_stream_on(stream, end_event, callback);
+    js_stream_on(stream, finish_event, callback);
+    js_stream_on(stream, error_event, callback);
+    js_stream_on(stream, close_event, callback);
 
     return make_js_undefined();
 }
@@ -3986,6 +4077,7 @@ static void js_stream_install_state_accessors(Item readable_ctor, Item writable_
 // =============================================================================
 
 static Item stream_namespace = {0};
+static Item stream_promises_namespace = {0};
 
 static Item stream_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);
@@ -3993,6 +4085,159 @@ static Item stream_set_method(Item ns, const char* name, void* func_ptr, int par
     js_set_function_name(fn, key);
     js_property_set(ns, key, fn);
     return fn;
+}
+
+static Item js_stream_promisify_custom_symbol(void) {
+    return js_symbol_for(make_string_item("nodejs.util.promisify.custom"));
+}
+
+static Item js_stream_promises_callback(Item env_item, Item err) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env || js_item_is_true(env[2])) return make_js_undefined();
+    env[2] = js_bool_item(true);
+
+    Item resolve = env[0];
+    Item reject = env[1];
+    Item callback = js_stream_has_error(err) ? reject : resolve;
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        Item value = js_stream_has_error(err) ? err : make_js_undefined();
+        js_call_function(callback, make_js_undefined(), &value, 1);
+    }
+    return make_js_undefined();
+}
+
+static Item js_stream_promises_pipeline(Item rest_args) {
+    int64_t argc = js_array_length(rest_args);
+    if (argc < 2) {
+        return js_promise_reject(js_stream_make_type_error_with_code("ERR_MISSING_ARGS",
+            "The \"streams\" argument is required"));
+    }
+
+    Item capability = js_promise_with_resolvers();
+    Item promise = js_property_get(capability, make_string_item("promise"));
+    Item* env = js_alloc_env(3);
+    env[0] = js_property_get(capability, make_string_item("resolve"));
+    env[1] = js_property_get(capability, make_string_item("reject"));
+    env[2] = js_bool_item(false);
+    Item callback = js_new_closure((void*)js_stream_promises_callback, 1, env, 3);
+
+    Item source = js_array_get_int(rest_args, 0);
+    Item dest = js_array_get_int(rest_args, argc - 1);
+    js_stream_pipeline(source, dest, callback);
+    if (js_check_exception()) {
+        Item err = js_clear_exception();
+        Item reject = env[1];
+        if (get_type_id(reject) == LMD_TYPE_FUNC) {
+            js_call_function(reject, make_js_undefined(), &err, 1);
+        }
+    }
+    return promise;
+}
+
+static bool js_stream_finished_parse_options(Item options, bool* cleanup) {
+    *cleanup = false;
+    if (options.item == 0 || get_type_id(options) == LMD_TYPE_UNDEFINED ||
+        get_type_id(options) == LMD_TYPE_NULL) {
+        return true;
+    }
+    if (get_type_id(options) != LMD_TYPE_MAP && get_type_id(options) != LMD_TYPE_ELEMENT) {
+        js_throw_invalid_arg_type("options", "object", options);
+        return false;
+    }
+    Item cleanup_item = js_property_get(options, make_string_item("cleanup"));
+    if (cleanup_item.item == 0 || get_type_id(cleanup_item) == LMD_TYPE_UNDEFINED) {
+        return true;
+    }
+    if (get_type_id(cleanup_item) != LMD_TYPE_BOOL) {
+        js_throw_invalid_arg_type("options.cleanup", "boolean", cleanup_item);
+        return false;
+    }
+    *cleanup = it2b(cleanup_item);
+    return true;
+}
+
+static void js_stream_finished_cleanup(Item stream, Item callback) {
+    js_stream_off(stream, make_string_item("end"), callback);
+    js_stream_off(stream, make_string_item("finish"), callback);
+    js_stream_off(stream, make_string_item("error"), callback);
+    js_stream_off(stream, make_string_item("close"), callback);
+}
+
+static Item js_stream_promises_finished_callback(Item env_item, Item err) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env || js_item_is_true(env[4])) return make_js_undefined();
+    env[4] = js_bool_item(true);
+
+    Item stream = env[0];
+    Item callback = env[1];
+    bool cleanup = js_item_is_true(env[2]);
+    if (cleanup) {
+        js_stream_finished_cleanup(stream, callback);
+    }
+
+    Item event_error = err;
+    if (!js_stream_has_error(event_error)) {
+        Item stored_error = js_property_get(stream, make_string_item("__error__"));
+        if (js_stream_has_error(stored_error)) event_error = stored_error;
+    }
+
+    Item resolve = env[3];
+    Item reject = env[5];
+    Item fn = js_stream_has_error(event_error) ? reject : resolve;
+    if (get_type_id(fn) == LMD_TYPE_FUNC) {
+        Item value = js_stream_has_error(event_error) ? event_error : make_js_undefined();
+        js_call_function(fn, make_js_undefined(), &value, 1);
+    }
+    return make_js_undefined();
+}
+
+static Item js_stream_promises_finished(Item rest_args) {
+    int64_t argc = js_array_length(rest_args);
+    if (argc < 1) {
+        return js_promise_reject(js_stream_make_type_error_with_code("ERR_MISSING_ARGS",
+            "The \"stream\" argument is required"));
+    }
+
+    Item stream = js_array_get_int(rest_args, 0);
+    Item options = argc > 1 ? js_array_get_int(rest_args, 1) : make_js_undefined();
+    bool cleanup = false;
+    if (!js_stream_finished_parse_options(options, &cleanup)) return ItemNull;
+
+    Item capability = js_promise_with_resolvers();
+    Item promise = js_property_get(capability, make_string_item("promise"));
+    Item* env = js_alloc_env(6);
+    env[0] = stream;
+    env[1] = make_js_undefined();
+    env[2] = js_bool_item(cleanup);
+    env[3] = js_property_get(capability, make_string_item("resolve"));
+    env[4] = js_bool_item(false);
+    env[5] = js_property_get(capability, make_string_item("reject"));
+    Item callback = js_new_closure((void*)js_stream_promises_finished_callback, 1, env, 6);
+    env[1] = callback;
+
+    js_stream_finished(stream, callback);
+    if (js_check_exception()) {
+        Item err = js_clear_exception();
+        Item reject = env[5];
+        if (get_type_id(reject) == LMD_TYPE_FUNC) {
+            js_call_function(reject, make_js_undefined(), &err, 1);
+        }
+    }
+    return promise;
+}
+
+extern "C" Item js_get_stream_promises_namespace(void) {
+    if (stream_promises_namespace.item != 0) return stream_promises_namespace;
+    ensure_keys();
+
+    stream_promises_namespace = js_new_object();
+    Item pipeline = stream_set_method(stream_promises_namespace, "pipeline",
+                                      (void*)js_stream_promises_pipeline, -1);
+    Item finished = stream_set_method(stream_promises_namespace, "finished",
+                                      (void*)js_stream_promises_finished, -1);
+    js_set_function_name(pipeline, make_string_item("pipeline"));
+    js_set_function_name(finished, make_string_item("finished"));
+    return stream_promises_namespace;
 }
 
 static Item js_writable_toWeb(Item writable) {
@@ -4022,13 +4267,21 @@ extern "C" Item js_get_stream_namespace(void) {
         stream_set_method(stream_namespace, "Transform",   (void*)js_transform_new, 1);
     Item passthrough_constructor =
         stream_set_method(stream_namespace, "PassThrough", (void*)js_passthrough_new, 1);
-    stream_set_method(stream_namespace, "pipeline",    (void*)js_stream_pipeline, 3);
-    stream_set_method(stream_namespace, "finished",    (void*)js_stream_finished, 2);
+    Item pipeline_fn = stream_set_method(stream_namespace, "pipeline", (void*)js_stream_pipeline, 3);
+    Item finished_fn = stream_set_method(stream_namespace, "finished", (void*)js_stream_finished, 2);
     stream_set_method(stream_namespace, "addAbortSignal", (void*)js_stream_addAbortSignal, 2);
     stream_set_method(stream_namespace, "getDefaultHighWaterMark",
                       (void*)js_stream_getDefaultHighWaterMark, 1);
     stream_set_method(stream_namespace, "setDefaultHighWaterMark",
                       (void*)js_stream_setDefaultHighWaterMark, 2);
+
+    Item promises_ns = js_get_stream_promises_namespace();
+    js_property_set(stream_namespace, make_string_item("promises"), promises_ns);
+    Item custom_key = js_stream_promisify_custom_symbol();
+    js_property_set(pipeline_fn, custom_key, js_property_get(promises_ns, make_string_item("pipeline")));
+    js_property_set(finished_fn, custom_key, js_property_get(promises_ns, make_string_item("finished")));
+    js_mark_non_enumerable(pipeline_fn, custom_key);
+    js_mark_non_enumerable(finished_fn, custom_key);
 
     // Stream — base class (alias for EventEmitter with pipe method)
     // In Node.js, stream.Stream inherits from EventEmitter
