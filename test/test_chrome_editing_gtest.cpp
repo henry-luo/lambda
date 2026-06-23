@@ -230,6 +230,52 @@ static bool contains_text(const std::string& text, const char* needle) {
     return text.find(needle) != std::string::npos;
 }
 
+static void replace_all_text(std::string& text, const char* needle,
+                             const char* replacement) {
+    size_t pos = 0;
+    size_t needle_len = strlen(needle);
+    size_t replacement_len = strlen(replacement);
+    while ((pos = text.find(needle, pos)) != std::string::npos) {
+        text.replace(pos, needle_len, replacement);
+        pos += replacement_len;
+    }
+}
+
+static bool is_js_identifier_char(unsigned char c) {
+    return isalnum(c) || c == '_' || c == '$';
+}
+
+static void replace_standalone_get_selection_calls(std::string& text) {
+    static const char* needle = "getSelection()";
+    static const char* replacement =
+        "globalThis.__chrome_wrapped_get_selection_ce3()";
+    size_t pos = 0;
+    size_t needle_len = strlen(needle);
+    size_t replacement_len = strlen(replacement);
+    while ((pos = text.find(needle, pos)) != std::string::npos) {
+        if (pos > 0) {
+            unsigned char previous = (unsigned char)text[pos - 1];
+            if (previous == '.' || is_js_identifier_char(previous)) {
+                pos += needle_len;
+                continue;
+            }
+        }
+        text.replace(pos, needle_len, replacement);
+        pos += replacement_len;
+    }
+}
+
+static std::string normalize_chrome_editing_script(std::string source) {
+    replace_all_text(source, "window.getSelection()",
+                     "globalThis.__chrome_wrapped_get_selection_ce3()");
+    replace_all_text(source, "document.getSelection()",
+                     "globalThis.__chrome_wrapped_get_selection_ce3()");
+    replace_standalone_get_selection_calls(source);
+    replace_all_text(source, "element.getClientRects()[0]",
+                     "_chrome_first_client_rect_ce3(element)");
+    return source;
+}
+
 static bool has_tag(const std::vector<std::string>& tags, const char* tag) {
     for (const std::string& candidate : tags) {
         if (candidate == tag) return true;
@@ -263,7 +309,7 @@ static std::string extract_scripts(const std::string& html,
                 std::string body = read_file_contents(full.c_str());
                 if (!body.empty()) {
                     result += "\n// ---- inlined " + src + " ----\n";
-                    result += body;
+                    result += normalize_chrome_editing_script(body);
                     result += "\n";
                 }
             }
@@ -273,7 +319,8 @@ static std::string extract_scripts(const std::string& html,
 
         size_t close = html.find("</script>", tag_end);
         if (close == std::string::npos) break;
-        result += html.substr(tag_end + 1, close - tag_end - 1);
+        result += normalize_chrome_editing_script(
+            html.substr(tag_end + 1, close - tag_end - 1));
         result += "\n";
         pos = close + strlen("</script>");
     }
