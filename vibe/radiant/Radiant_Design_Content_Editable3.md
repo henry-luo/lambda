@@ -164,11 +164,11 @@ Implementation note:
   `execCommand/forward-delete-no-scroll.html` cases now pass.
 - Current pressure-list verification as of 2026-06-23:
   `env LAMBDA_CHROME_EDITING_TIMEOUT=5 LAMBDA_CHROME_EDITING_JOBS=9 ./test/test_chrome_editing_gtest.exe --gtest_brief=1`
-  runs 2751 imported cases as 310 passed / 2218 skipped / 223 failed. The
-  remaining failure surface is mostly `assertion_mismatch` (194), followed by
-  `unsupported_shadow` (14), `unsupported_internals` (8),
-  `unsupported_layout_visual` (7), `no_results` (6), and
-  `harness_missing_api` (1). The run has 0 aborts and 0 timeouts.
+  runs 2751 imported cases as 446 passed / 1666 skipped / 639 failed. The
+  remaining failure surface is mostly `assertion_mismatch` (546), followed by
+  `no_results` (41), `unsupported_internals` (23),
+  `unsupported_layout_visual` (16), `harness_missing_api` (15), and
+  `unsupported_shadow` (14). The run has 0 aborts and 0 timeouts.
 - The second and third pressure-fix passes added a headless DOM geometry
   fallback for `offsetWidth`/`offsetHeight` from laid-out size, inline CSS
   dimensions, or text length, then tightened the CE3 harness click-hit model for
@@ -200,6 +200,104 @@ Implementation note:
   normalizes the serialized `class`/`contenteditable` pair order, clearing
   `deleting/backspace_after_contenteditable_false_elements.html` 2/2. The
   async no-result selection cases still need deeper event-loop/load work.
+- The seventh pressure-fix pass filled in the CE3 `internals.settings`
+  password-echo setters used by
+  `input/selectall-in-input-with-text-security.html`, clearing the final
+  `harness_missing_api` classifier. It also treats `ul`/`ol` as block
+  containers in the text-dump walker, so retained list-item text inside a list
+  is visible to dump-baseline comparisons; `deleting/4866671.html` now passes.
+- The eighth pressure-fix pass added CE3 structural `createLink` handling for
+  collapsed carets, same-text selections, inline image ranges, and selected
+  descendants inside lists/tables. It also splits existing anchors when
+  relinking or unlinking a selected text run, preserving `href`, `id`, and
+  `name` fragments according to Chrome's command behavior. The focused
+  `execCommand/createLink.html` and `execCommand/apply-style-id-name.html`
+  cases now pass.
+- The ninth pressure-fix pass moved deletion handling from isolated fixtures
+  to shared block-boundary normalization. Selected line deletes now merge or
+  preserve empty-line `<br>` placeholders through a common range-delete path,
+  and collapsed/boundary deletes merge paragraphs into headings, `pre`, list
+  items, or Mac table cells while unwrapping after tables for non-Mac editing
+  behavior. The pass also corrected single-dump `Markup.dump()` formatting,
+  normalizes legacy `font face` fragments to Chrome-style spans during merges,
+  removes leading inline `<br>` nodes before typed text, and begins run-based
+  whitespace collapse after deletes. The focused `deleting/delete-line-*`
+  cluster, `deleting/5890684.html`,
+  `deleting/delete-line-break-before-underlined-content.html`,
+  `deleting/delete-line-break-between-paragraphs-with-same-style.html`,
+  `execCommand/delete-line-and-insert-text-in-font-inside-blockquote.html`,
+  `deleting/backspace-merge-into-block.html`,
+  `deleting/backspace-merge-into-list-item.html`,
+  `deleting/backspace-merge-two-paragraphs.html`, `deleting/5032066.html`, and
+  `deleting/delete-leading-ws-001.html` now pass.
+- The tenth pressure-fix pass added structural list outdent handling for nested
+  and malformed sibling-list shapes. `execCommand("Outdent")` now promotes a
+  selected nested `<li>` after its parent item, preserves the promoted item's
+  contents, moves following siblings into the promoted item's child list, and
+  prunes empty wrapper lists/list items. The focused
+  `execCommand/4916583.html`, `execCommand/4928635.html`,
+  `execCommand/5575101-1.html`, `execCommand/5575101-2.html`, and
+  `execCommand/5575101-3.html` cases now pass.
+- The eleventh pressure-fix pass added a shared CE3 justify/alignment command
+  path. `justifyCenter`/`justifyRight` now wrap selected line fragments in
+  `div style="text-align: ...;"`, reuse preceding inline style wrappers for
+  selected replaced controls, and realign an already aligned paragraph without
+  losing its block wrapper. The focused `execCommand/align-in-span.html`,
+  `execCommand/apply-style-empty-paragraph-start-crash.html`, and
+  `execCommand/5062376.html` cases now pass. The empty editable
+  `execCommand/25256.html` filler-`br` case remains a separate root-cause item.
+- The twelfth pressure-fix pass added shared CE3 command handling for
+  structural `indent`, list creation around replaced blocks, and
+  `InsertNewlineInQuotedContent`. Indenting now wraps the selected block in the
+  Chrome-compatible blockquote style or nests an empty first list item into a
+  same-kind child list; list creation now wraps a selected `<hr>` in a new
+  `ul`/`ol` list item; quoted-content newlines now split an ordered list inside
+  a blockquote and preserve the second list's `start` attribute. The focused
+  `execCommand/4580583-1.html`, `execCommand/create-list-with-hr.html`,
+  `execCommand/5138441.html`, and
+  `execCommand/crash-indenting-list-item.html` cases now pass.
+- The thirteenth pressure pass expanded the live `RUNNABLE` surface from 641
+  to 1102 non-comment entries. The new batch opens 461 additional high-value
+  command/input/insertion/style/undo fixtures, including the remaining
+  `execCommand` insert-list, insert-paragraph, outdent, query, remove-format,
+  toggle-style, input, `inserting/`, `style/`, and undo crash-redo clusters.
+  The runner now also prefers the explicit non-skipped `RUNNABLE`
+  entry when deduplicating against the directory scan, which unlocks the
+  previously listed deletion/format pressure entries that were still being
+  reported as skipped. The verified run reduced skipped cases by 552.
+- The fourteenth pressure-fix pass moved structural `execCommand` families to
+  helper-first dispatch with native fallback, and fixed the DOM
+  `contentEditable` setter so boolean assignments such as
+  `element.contentEditable = true` install the `contenteditable` attribute
+  instead of leaving the element at `inherit`. The CE3 alignment helper now
+  styles existing single-line blocks directly, wraps loose visual lines,
+  treats `blockquote` as a block boundary, preserves serialized inline style
+  attributes, restores selection to the transformed line end, and handles
+  `<br>` placeholders at line starts. The focused
+  `style/create-block-for-style-*`, `style/block-style-001.html`,
+  `style/block-style-003.html`, `execCommand/justify.html`,
+  `execCommand/justify_block_starts_with_image.html`, and
+  `execCommand/apply_style/justify_right_ul_br_crash.html` cases now pass.
+- The fifteenth pressure-fix pass added a shared CE3 `insertParagraph` DOM
+  fallback for headless contenteditable hosts. It splits simple blocks into
+  sibling paragraphs, preserves cloned inline wrappers such as `<b>` across the
+  split, keeps line-edge spaces non-breaking, consumes block placeholder
+  `<br>` nodes when typing into a newly split paragraph, leaves inline
+  placeholders intact, and handles table edit hosts and empty paragraph
+  insertion around direct host text. The representative paragraph batch moved
+  to 17/24 passing, including `execCommand/5569741.html`,
+  `execCommand/insert-paragraph-in-inline-list-item.html`,
+  `execCommand/insert_paragraph/inside-div.html`,
+  `inserting/editable-inline-element.html`, `inserting/insert-div-009.html`,
+  `inserting/insert-div-010.html`, `inserting/insert-div-018.html`,
+  `inserting/insert-div-019.html`, `inserting/insert-div-020.html`,
+  `inserting/insert-div-022.html`, `inserting/insert-div-025.html`,
+  `inserting/insert_div_with_attr.html`,
+  `inserting/insert_div_with_style.html`,
+  `inserting/insert_paragraph_and_style.html`,
+  `inserting/insert-paragraph-copy-style.html`,
+  `inserting/insertparagraph-seperator-on-non-selectable-node.html`, and
+  `style/block-styles-007.html`.
 
 ---
 
