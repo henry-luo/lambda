@@ -1443,6 +1443,8 @@ static void finalize_batch_execute_timing_summary(
 
 // Forward declarations for globals used in prepare phase
 static std::set<std::string> g_baseline_passing;
+static std::string g_baseline_ref_test262_commit;
+static bool g_baseline_loaded = false;
 static std::set<std::string> g_known_partial;
 static std::unordered_map<std::string, std::string> g_partial_tags;  // test_name → original tag (e.g. "CRASH_139")
 static std::set<std::string> g_known_slow_tests;  // tests >3s elapsed in previous run
@@ -1942,6 +1944,77 @@ static std::string get_lambda_test_git_commit_hash() {
     return hash.empty() ? "unknown" : hash;
 }
 
+static std::string get_ref_test262_git_commit_hash() {
+    std::string hash;
+    FILE* fp = popen("git -C ref/test262 rev-parse HEAD 2>/dev/null", "r");
+    if (fp) {
+        char buf[128];
+        if (fgets(buf, sizeof(buf), fp)) {
+            hash = buf;
+            while (!hash.empty() && (hash.back() == '\n' || hash.back() == '\r'))
+                hash.pop_back();
+        }
+        pclose(fp);
+    }
+    return hash.empty() ? "unknown" : hash;
+}
+
+static bool parse_baseline_header_value(const char* line, const char* key, std::string& out) {
+    size_t key_len = strlen(key);
+    if (strncmp(line, key, key_len) != 0) return false;
+    const char* start = line + key_len;
+    while (*start == ' ' || *start == '\t') start++;
+    const char* end = start + strlen(start);
+    while (end > start && (end[-1] == '\n' || end[-1] == '\r' ||
+           end[-1] == ' ' || end[-1] == '\t')) {
+        end--;
+    }
+    out.assign(start, (size_t)(end - start));
+    return true;
+}
+
+static bool git_hash_matches(const std::string& recorded, const std::string& current) {
+    if (recorded.empty() || current.empty()) return false;
+    if (recorded == "unknown" || current == "unknown") return false;
+    size_t common = std::min(recorded.size(), current.size());
+    if (common < 7) return false;
+    return strncmp(recorded.c_str(), current.c_str(), common) == 0;
+}
+
+static bool verify_ref_test262_commit_matches_baseline(const char* baseline_path) {
+    if (!g_baseline_loaded) return true;
+
+    std::string current = get_ref_test262_git_commit_hash();
+    if (g_baseline_ref_test262_commit.empty()) {
+        fprintf(stderr,
+                "[test262] Warning: %s does not record a ref/test262 commit; "
+                "run --update-baseline to capture the current Test262 snapshot (%s).\n",
+                baseline_path, current.c_str());
+        return true;
+    }
+
+    if (git_hash_matches(g_baseline_ref_test262_commit, current)) {
+        fprintf(stderr, "[test262] Verified ref/test262 commit: %s\n", current.c_str());
+        return true;
+    }
+
+    if (g_update_baseline) {
+        fprintf(stderr,
+                "[test262] Warning: ref/test262 commit differs from baseline "
+                "(baseline=%s current=%s); --update-baseline will rewrite the recorded snapshot.\n",
+                g_baseline_ref_test262_commit.c_str(), current.c_str());
+        return true;
+    }
+
+    fprintf(stderr,
+            "[test262] ERROR: ref/test262 checkout does not match %s.\n"
+            "[test262] ERROR: baseline ref/test262 commit: %s\n"
+            "[test262] ERROR: current  ref/test262 commit: %s\n"
+            "[test262] ERROR: checkout the recorded Test262 snapshot or run --update-baseline intentionally.\n",
+            baseline_path, g_baseline_ref_test262_commit.c_str(), current.c_str());
+    return false;
+}
+
 static const char* get_test_gtest_build_mode() {
 #ifdef NDEBUG
     return "release";
@@ -2040,6 +2113,7 @@ static void write_baseline_file(const char* path, std::vector<std::string>& pass
     if (!f) return;
     std::string commit = get_git_commit_hash();
     std::string lambda_test_commit = get_lambda_test_git_commit_hash();
+    std::string ref_test262_commit = get_ref_test262_git_commit_hash();
     std::sort(passing.begin(), passing.end());
     double all_test_elapsed_secs = sum_test_elapsed_secs();
     double baseline_test_elapsed_secs = sum_test_elapsed_secs(passing);
@@ -2049,6 +2123,7 @@ static void write_baseline_file(const char* path, std::vector<std::string>& pass
     fprintf(f, "# The update gate admits only fully passing tests: batch-safe, non-crashing, non-regressing, and under the slow-test threshold.\n");
     fprintf(f, "# Commit: %s\n", commit.c_str());
     fprintf(f, "# lambda-test commit: %s\n", lambda_test_commit.c_str());
+    fprintf(f, "# ref/test262 commit: %s\n", ref_test262_commit.c_str());
     fprintf(f, "# Lambda runtime build: %s\n", get_lambda_runtime_build_mode());
     fprintf(f, "# GTest binary build: %s\n", get_test_gtest_build_mode());
     fprintf(f, "# Host OS: %s\n", get_host_os_summary().c_str());
@@ -4347,16 +4422,25 @@ int main(int argc, char** argv) {
         if (f) {
             char line[512];
             while (fgets(line, sizeof(line), f)) {
-                // Skip comments and empty lines
-                if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') continue;
+                if (line[0] == '#') {
+                    parse_baseline_header_value(line, "# ref/test262 commit:",
+                                                g_baseline_ref_test262_commit);
+                    continue;
+                }
+                // Skip empty lines
+                if (line[0] == '\n' || line[0] == '\r') continue;
                 // Trim trailing newline
                 size_t len = strlen(line);
                 while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = '\0';
                 if (len > 0) g_baseline_passing.insert(std::string(line, len));
             }
             fclose(f);
+            g_baseline_loaded = true;
             fprintf(stderr, "[test262] Loaded baseline: %zu passing tests from %s\n",
                     g_baseline_passing.size(), BASELINE_FILE);
+            if (!verify_ref_test262_commit_matches_baseline(BASELINE_FILE)) {
+                return 1;
+            }
         } else {
             fprintf(stderr, "[test262] No baseline file found (%s) — regression checking disabled\n",
                     BASELINE_FILE);

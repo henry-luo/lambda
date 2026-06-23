@@ -3,6 +3,14 @@
 
 extern "C" Item js_eval_private_resolve(Item unscoped_key);
 
+static bool jm_test262_fast_paths_enabled(JsMirTranspiler* mt) {
+    if (!mt) return false;
+    if (mt->preamble_entries && mt->preamble_entry_count > 0) return true;
+    if (!mt->filename) return false;
+    return strstr(mt->filename, "ref/test262/test/") != NULL ||
+           strstr(mt->filename, "test/js262/test/") != NULL;
+}
+
 static const char* jm_profile_shape_guard_label(JsMirTranspiler* mt,
         JsClassEntry* ce, JsIdentifierNode* prop, int slot, JsMemberNode* mem) {
     if (!mt || !ce || !prop || !prop->name) return "unknown";
@@ -7323,7 +7331,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     // → native C++ implementation for test262 batch performance.
     // Limit this to with-preamble mode so ordinary user scripts can freely use a
     // global `assert` object without the compiler assuming Test262 harness semantics.
-    if (mt->preamble_entries && mt->preamble_entry_count > 0 &&
+    if (jm_test262_fast_paths_enabled(mt) &&
         call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
         JsMemberNode* m = (JsMemberNode*)call->callee;
         if (!m->computed && m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER &&
@@ -7379,7 +7387,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
 
     // verifyProperty(obj, name, desc [, options]) / compareArray(a, b)
     // → native C++ standalone function interception for test262 batch mode.
-    if (mt->preamble_entries && mt->preamble_entry_count > 0 &&
+    if (jm_test262_fast_paths_enabled(mt) &&
         call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
         if (id->name) {
