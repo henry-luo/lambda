@@ -93,6 +93,8 @@ static bool        g_baseline_only = false;
 static double      g_node_run_wall_secs = 0.0;
 static std::chrono::steady_clock::time_point g_node_program_start;
 
+static bool g_node_gtest_filter_active = false;
+
 static int get_parallel_workers() {
     int cores = std::thread::hardware_concurrency();
     return (cores > 2) ? cores - 1 : 1;
@@ -666,6 +668,87 @@ struct NodeOfficialParam {
     std::string test_name;     // sanitized for GTest: test_path_join
 };
 
+static std::vector<NodeOfficialParam> g_node_executed_params;
+
+static bool node_gtest_glob_matches(const char* pattern, const char* text) {
+    if (!pattern || !text) return false;
+
+    const char* star = nullptr;
+    const char* star_text = nullptr;
+    while (*text) {
+        if (*pattern == '?' || *pattern == *text) {
+            pattern++;
+            text++;
+        } else if (*pattern == '*') {
+            star = pattern++;
+            star_text = text;
+        } else if (star) {
+            pattern = star + 1;
+            text = ++star_text;
+        } else {
+            return false;
+        }
+    }
+    while (*pattern == '*') pattern++;
+    return *pattern == '\0';
+}
+
+static bool node_gtest_filter_list_matches(const std::string& list,
+                                           const std::string& full_name) {
+    if (list.empty()) return false;
+
+    size_t start = 0;
+    while (start <= list.size()) {
+        size_t end = list.find(':', start);
+        std::string pattern = (end == std::string::npos)
+            ? list.substr(start)
+            : list.substr(start, end - start);
+        if (!pattern.empty() &&
+            node_gtest_glob_matches(pattern.c_str(), full_name.c_str())) {
+            return true;
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return false;
+}
+
+static std::string node_gtest_full_name(const NodeOfficialParam& p) {
+    return std::string("NodeOfficial/NodeOfficialTest.Run/") + p.test_name;
+}
+
+static bool node_gtest_filter_matches_param(const NodeOfficialParam& p) {
+    std::string filter = ::testing::GTEST_FLAG(filter);
+    if (filter.empty() || filter == "*") return true;
+
+    size_t dash = filter.find('-');
+    std::string positive = dash == std::string::npos ? filter : filter.substr(0, dash);
+    std::string negative = dash == std::string::npos ? "" : filter.substr(dash + 1);
+    if (positive.empty()) positive = "*";
+
+    std::string full_name = node_gtest_full_name(p);
+    if (!node_gtest_filter_list_matches(positive, full_name)) return false;
+    if (!negative.empty() && node_gtest_filter_list_matches(negative, full_name)) return false;
+    return true;
+}
+
+static std::vector<NodeOfficialParam> filter_node_official_tests_for_gtest(
+        const std::vector<NodeOfficialParam>& tests) {
+    std::string filter = ::testing::GTEST_FLAG(filter);
+    g_node_gtest_filter_active = !(filter.empty() || filter == "*");
+    if (!g_node_gtest_filter_active) return tests;
+
+    std::vector<NodeOfficialParam> selected;
+    for (const auto& t : tests) {
+        if (node_gtest_filter_matches_param(t)) {
+            selected.push_back(t);
+        }
+    }
+    fprintf(stderr, "[node-official] GTest filter selected %zu/%zu tests\n",
+            selected.size(), tests.size());
+    return selected;
+}
+
 static std::vector<NodeOfficialParam> discover_node_official_tests(bool honor_slow_list = true,
                                                                    bool baseline_only = false) {
     ensure_prefixes_initialized();
@@ -1041,6 +1124,8 @@ public:
 
         auto start = std::chrono::steady_clock::now();
         auto tests = discover_node_official_tests(true, g_baseline_only);
+        tests = filter_node_official_tests_for_gtest(tests);
+        g_node_executed_params = tests;
         execute_all_tests(tests);
         auto end = std::chrono::steady_clock::now();
         g_node_run_wall_secs = std::chrono::duration<double>(end - start).count();
@@ -1128,7 +1213,9 @@ public:
     void OnTestSuiteEnd(const testing::TestSuite& suite) override {
         if (std::string(suite.name()).find("NodeOfficial") == std::string::npos) return;
 
-        auto tests = discover_node_official_tests(true, g_baseline_only);
+        auto tests = g_node_gtest_filter_active
+            ? g_node_executed_params
+            : discover_node_official_tests(true, g_baseline_only);
         int total = (int)tests.size();
         int passed = 0, failed = 0, missing = 0, timed_out = 0, crashed = 0;
         std::vector<std::string> current_passing;
@@ -1222,7 +1309,9 @@ public:
         write_timing_report(tests);
         print_slowest_tests(tests);
 
-        if (g_update_baseline && regressions.empty()) {
+        if (g_update_baseline && g_node_gtest_filter_active) {
+            fprintf(stderr, "[node-official] NOT updating baseline: GTest filter is active\n");
+        } else if (g_update_baseline && regressions.empty()) {
             write_baseline(current_passing, total, passed, failed, missing, timed_out,
                            crashed, g_baseline_passing.size(), regressions.size(),
                            improvements.size());
