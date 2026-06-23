@@ -126,6 +126,13 @@ fn box_with_type(bx, atom_type) => {
     element: bx.element,
     height: bx.height,
     depth: bx.depth,
+    // preserve full-precision raw extent through the bin->ord reclassification:
+    // dropping it poisons the cell hbox's raw propagation, forcing the array's
+    // per-row height/depth onto the already-rounded values and double-rounding
+    // the cell (e.g. dcases row jot: 1.81+1.25+0.3 ceil2-tips to 3.37 vs the
+    // single-rounded 1.805+1.25001+0.3 -> 3.36).
+    height_raw: bx.height_raw,
+    depth_raw: bx.depth_raw,
     render_height: bx.render_height,
     render_depth: bx.render_depth,
     render_total: bx.render_total,

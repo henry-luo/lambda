@@ -187,6 +187,76 @@ std::vector<LambdaTestInfo> discover_all_tests() {
 // Global test list (populated before main)
 static std::vector<LambdaTestInfo> g_lambda_tests;
 
+// GTest filters match the full parameterized test name:
+// AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/<test_name>
+static bool lambda_filter_wildcard_match(const char* pattern, const char* text) {
+    while (*pattern) {
+        if (*pattern == '*') {
+            pattern++;
+            if (*pattern == '\0') return true;
+            while (*text) {
+                if (lambda_filter_wildcard_match(pattern, text)) return true;
+                text++;
+            }
+            return lambda_filter_wildcard_match(pattern, text);
+        }
+        if (*pattern == '?') {
+            if (*text == '\0') return false;
+            pattern++;
+            text++;
+            continue;
+        }
+        if (*pattern != *text) return false;
+        pattern++;
+        text++;
+    }
+    return *text == '\0';
+}
+
+static bool lambda_filter_pattern_list_matches(
+    const char* patterns, const char* patterns_end, const char* full_name)
+{
+    const char* pat = patterns;
+    while (pat < patterns_end) {
+        const char* pat_end = pat;
+        while (pat_end < patterns_end && *pat_end != ':') pat_end++;
+
+        if (pat_end > pat) {
+            char pattern[512];
+            size_t len = (size_t)(pat_end - pat);
+            if (len >= sizeof(pattern)) len = sizeof(pattern) - 1;
+            memcpy(pattern, pat, len);
+            pattern[len] = '\0';
+            if (lambda_filter_wildcard_match(pattern, full_name)) return true;
+        }
+
+        pat = pat_end + 1;
+    }
+    return false;
+}
+
+static bool lambda_script_matches_gtest_filter(const LambdaTestInfo& test, const char* filter) {
+    if (!filter || filter[0] == '\0') filter = "*";
+
+    char full_name[512];
+    snprintf(full_name, sizeof(full_name),
+             "AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/%s",
+             test.test_name.c_str());
+
+    const char* negative_patterns = strchr(filter, '-');
+    const char* positive_end = negative_patterns ? negative_patterns : filter + strlen(filter);
+    bool positive_match = positive_end == filter ||
+        lambda_filter_pattern_list_matches(filter, positive_end, full_name);
+    if (!positive_match) return false;
+
+    if (negative_patterns) {
+        const char* negative_start = negative_patterns + 1;
+        const char* negative_end = filter + strlen(filter);
+        if (lambda_filter_pattern_list_matches(negative_start, negative_end, full_name)) return false;
+    }
+    return true;
+}
+
 //==============================================================================
 // Parameterized Test Class for Lambda Scripts (Batch Mode)
 //==============================================================================
@@ -199,14 +269,12 @@ public:
     static void SetUpTestSuite() {
         if (batch_executed) return;
 
-        // Batch ALL scripts regardless of shard index.
-        // GTest sharding controls which TEST_P instances run, but the batch
-        // must contain results for all of them because GTest's shard index
-        // space (which includes non-parameterized tests like LambdaNegativeTests)
-        // differs from g_lambda_tests indices, causing misalignment.
+        char gtest_filter[512];
+        snprintf(gtest_filter, sizeof(gtest_filter), "%s", ::testing::GTEST_FLAG(filter).c_str());
         std::vector<std::string> scripts;
         std::vector<bool> procs;
         for (const auto& test : g_lambda_tests) {
+            if (!lambda_script_matches_gtest_filter(test, gtest_filter)) continue;
             scripts.push_back(test.script_path);
             procs.push_back(test.is_procedural);
         }

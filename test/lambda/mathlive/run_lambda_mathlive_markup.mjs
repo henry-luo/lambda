@@ -13,9 +13,15 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
-const SNAPSHOT_PATHS = [
-  path.join(__dirname, '__snapshots__', 'markup.test.ts.snap'),
-  path.join(__dirname, '__snapshots__', 'lambda_input_markup.snap'),
+const SNAPSHOT_FIXTURES = [
+  {
+    source: 'mathlive',
+    path: path.join(__dirname, '__snapshots__', 'markup.test.ts.snap'),
+  },
+  {
+    source: 'lambda-input',
+    path: path.join(__dirname, '__snapshots__', 'lambda_input_markup.snap'),
+  },
 ];
 const TEMP_DIR = path.join(PROJECT_ROOT, 'temp');
 const DEFAULT_SCRIPT_PATH = path.join(
@@ -39,6 +45,7 @@ function parseArgs(argv) {
     report: DEFAULT_REPORT_PATH,
     baseline: DEFAULT_BASELINE_PATH,
     noBaseline: false,
+    fixtureSource: 'all',
     jobs: defaultJobCount(),
   };
 
@@ -53,6 +60,7 @@ function parseArgs(argv) {
     else if (arg === '--script') opts.script = path.resolve(argv[++i] ?? '');
     else if (arg === '--report') opts.report = path.resolve(argv[++i] ?? '');
     else if (arg === '--baseline') opts.baseline = path.resolve(argv[++i] ?? '');
+    else if (arg === '--fixture-source') opts.fixtureSource = argv[++i] ?? '';
     else if (arg === '--jobs') opts.jobs = Number(argv[++i] ?? '0');
     else if (arg === '--help' || arg === '-h') {
       printHelp();
@@ -73,6 +81,15 @@ function defaultJobCount() {
   return Math.max(1, os.cpus().length - 1);
 }
 
+function selectedSnapshotFixtures(source) {
+  if (source === 'all') return SNAPSHOT_FIXTURES;
+  const fixtures = SNAPSHOT_FIXTURES.filter((fixture) => fixture.source === source);
+  if (fixtures.length === 0) {
+    throw new Error(`unknown --fixture-source: ${source}`);
+  }
+  return fixtures;
+}
+
 function printHelp() {
   console.log(`Usage: node test/lambda/mathlive/run_lambda_mathlive_markup.mjs [options]
 
@@ -83,6 +100,8 @@ Options:
   --strict          Exit non-zero if any extracted case mismatches
   --baseline PATH   Passed-case baseline path, default test/lambda/mathlive/baseline.txt
   --no-baseline     Do not check passed-case baseline regressions
+  --fixture-source SOURCE
+                    Snapshot source: mathlive, lambda-input, or all (default)
   --lambda PATH     Lambda executable path, default ./lambda.exe
   --script PATH     Generated Lambda batch script path, default ./temp/...
   --report PATH     JSON report path, default ./temp/...
@@ -491,9 +510,10 @@ function buildBaselineReport(results, baselineSet, baselinePath) {
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
-  const snapshotText = SNAPSHOT_PATHS
-    .filter((p) => fs.existsSync(p))
-    .map((p) => fs.readFileSync(p, 'utf8'))
+  const snapshotFixtures = selectedSnapshotFixtures(opts.fixtureSource)
+    .filter((fixture) => fs.existsSync(fixture.path));
+  const snapshotText = snapshotFixtures
+    .map((fixture) => fs.readFileSync(fixture.path, 'utf8'))
     .join('\n');
   let cases = buildCases(parseSnapshots(snapshotText));
 
@@ -520,9 +540,9 @@ async function main() {
   const baseline = buildBaselineReport(results, baselineSet, opts.baseline);
   const report = {
     generatedScript: path.relative(PROJECT_ROOT, opts.script),
-    sourceSnapshots: SNAPSHOT_PATHS
-      .filter((p) => fs.existsSync(p))
-      .map((p) => path.relative(PROJECT_ROOT, p)),
+    fixtureSource: opts.fixtureSource,
+    sourceSnapshots: snapshotFixtures
+      .map((fixture) => path.relative(PROJECT_ROOT, fixture.path)),
     baseline,
     jobs: Math.min(opts.jobs, cases.length),
     summary,
