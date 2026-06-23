@@ -4427,20 +4427,17 @@ static bool has_spreadable_item(AstNode *item) {
 // must all be the same shape and numeric element type.  Spreadables disqualify.
 static int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
                                ArrayNumElemType* elem_type_out) {
-    if (!node) { log_debug("NDIM-DET: node null"); return 0; }
-    if (node->node_type != AST_NODE_ARRAY) {
-        log_debug("NDIM-DET: not AST_NODE_ARRAY (type=%d)", node->node_type);
-        return 0;
+    // Unwrap AST_NODE_PRIMARY wrappers (inner literals arrive wrapped)
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        node = ((AstPrimaryNode*)node)->expr;
     }
+    if (!node || node->node_type != AST_NODE_ARRAY) return 0;
     AstArrayNode* arr = (AstArrayNode*)node;
     TypeArray* type = (TypeArray*)arr->type;
-    if (!type) { log_debug("NDIM-DET: no type"); return 0; }
-    if (type->length <= 0) { log_debug("NDIM-DET: length=%lld", (long long)type->length); return 0; }
-    if (!type->nested) { log_debug("NDIM-DET: no nested type"); return 0; }
-    if (has_spreadable_item(arr->item)) { log_debug("NDIM-DET: has spreadable"); return 0; }
+    if (!type || type->length <= 0 || !type->nested) return 0;
+    if (has_spreadable_item(arr->item)) return 0;
 
     TypeId nid = type->nested->type_id;
-    log_debug("NDIM-DET: outer length=%lld, nested type_id=%d", (long long)type->length, nid);
     // Numeric leaf — this is a 1-D base case
     if (nid == LMD_TYPE_INT)   { shape_out[0] = type->length; *elem_type_out = ELEM_INT;   return 1; }
     if (nid == LMD_TYPE_INT64) { shape_out[0] = type->length; *elem_type_out = ELEM_INT64; return 1; }
@@ -4480,6 +4477,9 @@ static int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
 // leaf element to arr via array_num_set_item at sequential flat indices.
 // Recursive: for inner arrays, descends; for numeric leaves, emits the set call.
 static void emit_ndim_leaves(Transpiler* tp, AstNode* node, int64_t* flat_idx_io) {
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
     if (!node || node->node_type != AST_NODE_ARRAY) return;
     AstArrayNode* arr = (AstArrayNode*)node;
     TypeArray* type = (TypeArray*)arr->type;

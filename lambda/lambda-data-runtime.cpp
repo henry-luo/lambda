@@ -705,6 +705,137 @@ Array* array_spreadable() {
     return arr;
 }
 
+// Dynamic N-D promotion: when every element of `arr` is an ArrayNum of the
+// same elem_type and length, promote the whole structure to a single N-D
+// ArrayNum.  Returns the new ArrayNum on success, or NULL if promotion isn't
+// applicable (heterogeneous children, jagged, mixed types, empty, etc.).
+//
+// Used by array_end to catch nested-literal cases the static AST detector
+// missed (let-bound rows, function-returned rows, etc.).
+// Determine whether the child item is a "row-like" numeric sequence (ArrayNum
+// or generic Array of homogeneous numerics) and extract its length / etype.
+// Returns true on success with rt_length set; etype defaults to LMD_TYPE_INT
+// (caller may widen later when scanning siblings).
+static bool row_summary(Item it, ArrayNumElemType* etype_out, int64_t* len_out, bool* is_arr_num) {
+    TypeId tid = get_type_id(it);
+    if (tid == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* a = it.array_num;
+        if (!a || a->is_view) return false;
+        *etype_out = a->get_elem_type();
+        *len_out = a->length;
+        *is_arr_num = true;
+        return true;
+    }
+    if (tid == LMD_TYPE_ARRAY) {
+        Array* a = it.array;
+        if (!a || a->is_spreadable || a->is_content) return false;
+        if (a->length == 0) return false;
+        // Scan items: all must be numeric; if any is float, etype = ELEM_FLOAT, else ELEM_INT64
+        bool any_float = false;
+        for (int64_t i = 0; i < a->length; i++) {
+            TypeId it_tid = get_type_id(a->items[i]);
+            if (it_tid == LMD_TYPE_FLOAT) any_float = true;
+            else if (it_tid != LMD_TYPE_INT && it_tid != LMD_TYPE_INT64) return false;
+        }
+        *etype_out = any_float ? ELEM_FLOAT : ELEM_INT64;
+        *len_out = a->length;
+        *is_arr_num = false;
+        return true;
+    }
+    return false;
+}
+
+// Write one element of the source row to the promoted N-D ArrayNum's data buffer
+// at position flat_idx.  Handles both ArrayNum source (typed read) and generic
+// Array source (Item-unboxed read).
+static void write_row_into_ndim(ArrayNum* dst, ArrayNumElemType etype, int64_t flat_idx,
+                                 Item src_item) {
+    TypeId tid = get_type_id(src_item);
+    if (tid == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* src = src_item.array_num;
+        int elem_size = ELEM_TYPE_SIZE[etype >> 4];
+        memcpy((char*)dst->data + flat_idx * elem_size, src->data, (size_t)src->length * elem_size);
+    } else if (tid == LMD_TYPE_ARRAY) {
+        Array* src = src_item.array;
+        for (int64_t j = 0; j < src->length; j++) {
+            array_num_set_item(dst, flat_idx + j, src->items[j]);
+        }
+    }
+}
+
+static ArrayNum* try_promote_to_ndim(Array* arr) {
+    if (!arr || arr->length < 2) return NULL;
+    if (arr->is_spreadable || arr->is_content) return NULL;
+
+    // First child sets the shape/etype; subsequent must match
+    ArrayNumElemType etype;
+    int64_t inner_len;
+    bool first_is_arr_num;
+    if (!row_summary(arr->items[0], &etype, &inner_len, &first_is_arr_num)) return NULL;
+    if (inner_len == 0) return NULL;
+
+    // For now we only fold 1-D rows.  If the first row is N-D ArrayNum we require
+    // all rows to share the same multi-dim shape; this catches the common
+    // [tensor1, tensor2] → (N+1)-D case but stays conservative.
+    int64_t shape_stack[32];
+    int out_ndim;
+    shape_stack[0] = arr->length;
+
+    if (first_is_arr_num && arr->items[0].array_num->is_ndim && arr->items[0].array_num->extra) {
+        ArrayNum* fa = arr->items[0].array_num;
+        ArrayNumShape* fs = (ArrayNumShape*)(uintptr_t)fa->extra;
+        if (!fs || fs->ndim < 1 || fs->ndim > 30) return NULL;
+        int64_t* fd = array_num_shape_dims(fs);
+        for (int i = 0; i < fs->ndim; i++) shape_stack[1 + i] = fd[i];
+        out_ndim = 1 + fs->ndim;
+        // Verify all siblings match shape and elem_type
+        for (int64_t i = 1; i < arr->length; i++) {
+            ArrayNumElemType e2; int64_t l2; bool an2;
+            if (!row_summary(arr->items[i], &e2, &l2, &an2)) return NULL;
+            if (e2 != etype) return NULL;
+            if (!an2) return NULL;  // need full N-D match, generic Array can't carry N-D
+            ArrayNum* sa = arr->items[i].array_num;
+            if (!sa->is_ndim || !sa->extra) return NULL;
+            ArrayNumShape* ss = (ArrayNumShape*)(uintptr_t)sa->extra;
+            if (!ss || ss->ndim != fs->ndim) return NULL;
+            int64_t* sd = array_num_shape_dims(ss);
+            for (int j = 0; j < fs->ndim; j++) if (sd[j] != fd[j]) return NULL;
+        }
+    } else {
+        // 1-D rows: each sibling must be the same length, same (or compatible) elem_type
+        shape_stack[1] = inner_len;
+        out_ndim = 2;
+        bool any_float = (etype == ELEM_FLOAT || etype == ELEM_FLOAT64);
+        for (int64_t i = 1; i < arr->length; i++) {
+            ArrayNumElemType e2; int64_t l2; bool an2;
+            if (!row_summary(arr->items[i], &e2, &l2, &an2)) return NULL;
+            if (l2 != inner_len) return NULL;
+            // widen to float if any row is float
+            if (e2 == ELEM_FLOAT || e2 == ELEM_FLOAT64) any_float = true;
+            else if (e2 != etype && e2 != ELEM_INT && e2 != ELEM_INT64) {
+                // refuse exotic compact mixes for simplicity
+                return NULL;
+            }
+        }
+        if (any_float) etype = ELEM_FLOAT;
+        else if (etype == ELEM_INT) etype = ELEM_INT64;  // standardize int promotion to INT64 for storage
+    }
+
+    // Allocate promoted N-D ArrayNum
+    int64_t total = 1;
+    for (int i = 0; i < out_ndim; i++) total *= shape_stack[i];
+    ArrayNum* promoted = array_num_new_ndim(etype, total, out_ndim, shape_stack);
+    if (!promoted) return NULL;
+
+    // Fill: each row writes inner_len elements at offset i*inner_len
+    int64_t flat_idx = 0;
+    for (int64_t i = 0; i < arr->length; i++) {
+        write_row_into_ndim(promoted, etype, flat_idx, arr->items[i]);
+        flat_idx += inner_len;
+    }
+    return promoted;
+}
+
 // finalize spreadable array - returns array as Item (no flattening)
 // returns spreadable null for empty arrays so they can be skipped when spreading
 Item array_end(Array* arr) {
@@ -712,6 +843,9 @@ Item array_end(Array* arr) {
         // return spreadable null - will be skipped when added to collections
         return {.item = ITEM_NULL_SPREADABLE};
     }
+    // Dynamic N-D promotion: when children are uniform ArrayNums, fold into a tensor
+    ArrayNum* nd = try_promote_to_ndim(arr);
+    if (nd) return {.array_num = nd};
     return {.array = arr};
 }
 

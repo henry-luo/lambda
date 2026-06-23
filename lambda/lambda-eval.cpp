@@ -2891,11 +2891,22 @@ int64_t fn_len(Item item) {
 
 extern "C" int64_t fn_len_l(List* list) {
     if (!list) return 0;
+    // Runtime check: nested numeric literals may have been auto-promoted from
+    // List/Array to N-D ArrayNum (the JIT dispatched based on static type).
+    if (list->type_id == LMD_TYPE_ARRAY_NUM) {
+        return array_num_iter_count((ArrayNum*)list);
+    }
     return list->length;
 }
 
 extern "C" int64_t fn_len_a(Array* arr) {
     if (!arr) return 0;
+    // Runtime check: static type may say Array but actual could be ArrayNum
+    // (e.g. nested literals auto-promoted to N-D). For N-D ArrayNum, return
+    // shape[0] (leading axis) to match NumPy semantics.
+    if (arr->type_id == LMD_TYPE_ARRAY_NUM) {
+        return array_num_iter_count((ArrayNum*)arr);
+    }
     return arr->length;
 }
 

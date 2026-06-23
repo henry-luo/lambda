@@ -3671,18 +3671,20 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
 // (mirror of detect_ndim_literal in transpile.cpp).  Returns ndim on success.
 static int mir_detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
                                     ArrayNumElemType* elem_type_out) {
+    // Unwrap AST_NODE_PRIMARY wrappers (inner literals [1,2] arrive wrapped)
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
     if (!node || node->node_type != AST_NODE_ARRAY) return 0;
     AstArrayNode* arr = (AstArrayNode*)node;
     TypeArray* type = (TypeArray*)arr->type;
     if (!type || type->length <= 0 || !type->nested) return 0;
-    // disqualify if any child is for-expr / spread / pipe (would need runtime construction)
-    {
-        AstNode* it = arr->item;
-        while (it) {
-            if (it->node_type == AST_NODE_FOR_EXPR || it->node_type == AST_NODE_SPREAD ||
-                it->node_type == AST_NODE_PIPE || it->node_type == AST_NODE_ASSIGN) return 0;
-            it = it->next;
-        }
+    // Disqualify if any child requires runtime construction
+    AstNode* it = arr->item;
+    while (it) {
+        if (it->node_type == AST_NODE_FOR_EXPR || it->node_type == AST_NODE_SPREAD ||
+            it->node_type == AST_NODE_PIPE || it->node_type == AST_NODE_ASSIGN) return 0;
+        it = it->next;
     }
     TypeId nid = type->nested->type_id;
     if (nid == LMD_TYPE_INT)   { shape_out[0] = type->length; *elem_type_out = ELEM_INT;   return 1; }
@@ -3721,6 +3723,10 @@ static int mir_detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_nd
 // Emit MIR that walks nested literal leaves in row-major order, calling
 // array_num_set_item for each leaf at sequential flat indices.
 static void mir_emit_ndim_leaves(MirTranspiler* mt, AstNode* node, MIR_reg_t arr_reg, int* flat_idx_io) {
+    // Unwrap AST_NODE_PRIMARY to reach the inner array node
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
     if (!node || node->node_type != AST_NODE_ARRAY) return;
     AstArrayNode* arr = (AstArrayNode*)node;
     TypeArray* type = (TypeArray*)arr->type;
