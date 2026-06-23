@@ -338,6 +338,13 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
     if (tid == LMD_TYPE_UNDEFINED) return make_string_item("undefined");
     if (tid == LMD_TYPE_NULL) return make_string_item("null");
 
+    if (js_class_id(obj_item) == JS_CLASS_PROMISE) {
+        const char* state = js_promise_state_name(obj_item);
+        if (state && strcmp(state, "pending") == 0) return make_string_item("Promise { <pending> }");
+        if (state && strcmp(state, "fulfilled") == 0) return make_string_item("Promise { <fulfilled> }");
+        if (state && strcmp(state, "rejected") == 0) return make_string_item("Promise { <rejected> }");
+    }
+
     // Strings: wrap in single quotes (Node.js style)
     if (tid == LMD_TYPE_STRING) {
         String* s = it2s(obj_item);
@@ -730,6 +737,97 @@ extern "C" Item js_util_callbackify(Item fn) {
     Item wrapper = js_new_closure((void*)js_util_callbackified_function, -1, env, 1);
     js_set_function_name(wrapper, make_string_item("callbackified"));
     return wrapper;
+}
+
+// =============================================================================
+// util.aborted(signal, resource)
+// =============================================================================
+
+static bool js_util_is_abort_signal(Item signal) {
+    return js_class_id(signal) == JS_CLASS_ABORT_SIGNAL;
+}
+
+static bool js_util_is_resource_object(Item resource) {
+    TypeId type = get_type_id(resource);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_OBJECT ||
+           type == LMD_TYPE_FUNC || type == LMD_TYPE_VMAP || type == LMD_TYPE_ELEMENT;
+}
+
+static Item js_util_invalid_arg_rejection(const char* name, const char* expected) {
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+             "The \"%s\" argument must be of type %s.", name, expected);
+    Item error = js_new_error_with_name(make_string_item("TypeError"), make_string_item(msg));
+    js_property_set(error, make_string_item("code"), make_string_item("ERR_INVALID_ARG_TYPE"));
+    return js_promise_reject(error);
+}
+
+static Item js_util_aborted_on_abort(Item env_item, Item event_item) {
+    (void)event_item;
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+
+    Item signal = env[0];
+    Item resolve = env[1];
+    Item handler = env[2];
+
+    Item remove_fn = js_property_get(signal, make_string_item("removeEventListener"));
+    if (get_type_id(remove_fn) == LMD_TYPE_FUNC) {
+        Item remove_args[2] = { make_string_item("abort"), handler };
+        js_call_function(remove_fn, signal, remove_args, 2);
+        if (js_check_exception()) js_clear_exception();
+    }
+
+    if (get_type_id(resolve) == LMD_TYPE_FUNC) {
+        Item resolve_args[1] = { make_js_undefined() };
+        js_call_function(resolve, make_js_undefined(), resolve_args, 1);
+        if (js_check_exception()) js_clear_exception();
+    }
+    return make_js_undefined();
+}
+
+static Item js_util_aborted_executor(Item env_item, Item resolve, Item reject) {
+    (void)reject;
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+
+    Item signal = env[0];
+    Item aborted = js_property_get(signal, make_string_item("aborted"));
+    if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
+        Item resolve_args[1] = { make_js_undefined() };
+        js_call_function(resolve, make_js_undefined(), resolve_args, 1);
+        if (js_check_exception()) js_clear_exception();
+        return make_js_undefined();
+    }
+
+    Item* handler_env = js_alloc_env(3);
+    handler_env[0] = signal;
+    handler_env[1] = resolve;
+    handler_env[2] = make_js_undefined();
+    Item handler = js_new_closure((void*)js_util_aborted_on_abort, 1, handler_env, 3);
+    handler_env[2] = handler;
+
+    Item add_fn = js_property_get(signal, make_string_item("addEventListener"));
+    if (get_type_id(add_fn) == LMD_TYPE_FUNC) {
+        Item add_args[2] = { make_string_item("abort"), handler };
+        js_call_function(add_fn, signal, add_args, 2);
+        if (js_check_exception()) js_clear_exception();
+    }
+    return make_js_undefined();
+}
+
+extern "C" Item js_util_aborted(Item signal, Item resource) {
+    if (!js_util_is_abort_signal(signal)) {
+        return js_util_invalid_arg_rejection("signal", "AbortSignal");
+    }
+    if (!js_util_is_resource_object(resource)) {
+        return js_util_invalid_arg_rejection("resource", "object");
+    }
+
+    Item* env = js_alloc_env(1);
+    env[0] = signal;
+    Item executor = js_new_closure((void*)js_util_aborted_executor, 2, env, 1);
+    return js_promise_create(executor);
 }
 
 // =============================================================================
@@ -1434,6 +1532,7 @@ extern "C" Item js_get_util_namespace(void) {
         js_property_set(promisify_fn, make_string_item("custom"), js_util_promisify_custom_symbol());
     }
     js_util_set_method(util_namespace, "callbackify",         (void*)js_util_callbackify, 1);
+    js_util_set_method(util_namespace, "aborted",             (void*)js_util_aborted, 2);
     js_util_set_method(util_namespace, "deprecate",           (void*)js_util_deprecate, 2);
     js_util_set_method(util_namespace, "inherits",            (void*)js_util_inherits, 2);
     js_util_set_method(util_namespace, "isDeepStrictEqual",   (void*)js_util_isDeepStrictEqual, 2);

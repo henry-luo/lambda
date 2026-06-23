@@ -28160,6 +28160,23 @@ static JsPromise* js_get_promise(Item promise_obj) {
     return &js_promises[idx];
 }
 
+extern "C" const char* js_promise_state_name(Item promise_obj) {
+    JsPromise* p = js_get_promise(promise_obj);
+    if (!p) return NULL;
+    if (p->state == JS_PROMISE_PENDING) return "pending";
+    if (p->state == JS_PROMISE_FULFILLED) return "fulfilled";
+    if (p->state == JS_PROMISE_REJECTED) return "rejected";
+    return NULL;
+}
+
+extern "C" int js_promise_pending_count(void) {
+    int count = 0;
+    for (int i = 0; i < js_promise_count; i++) {
+        if (js_promises[i].state == JS_PROMISE_PENDING) count++;
+    }
+    return count;
+}
+
 // Forward declaration — js_promise_settle is called recursively from microtask runner
 static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result);
 static void js_promise_resolve_with_value(JsPromise* p, Item value);
