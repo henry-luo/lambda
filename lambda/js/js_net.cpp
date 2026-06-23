@@ -22,6 +22,7 @@
 
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" void js_clearTimeout(Item timer_id);
+extern "C" Item js_buffer_from_bytes(const char* data, int len);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -389,7 +390,7 @@ static int utf8_complete_prefix_len(const char* data, int len) {
 static bool socket_make_read_data(JsSocket* sock, const char* data, int len, Item* out_data) {
     if (!out_data) return false;
     if (!socket_uses_utf8_encoding(sock)) {
-        *out_data = make_string_item(data, len);
+        *out_data = js_buffer_from_bytes(data, len);
         return true;
     }
 

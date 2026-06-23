@@ -63,6 +63,18 @@ static Item create_buffer(int size) {
     return buffer;
 }
 
+extern "C" Item js_buffer_from_bytes(const char* data, int len) {
+    if (len < 0) len = 0;
+    Item buf = create_buffer(len);
+    int buf_len = 0;
+    uint8_t* dst = buffer_data(buf, &buf_len);
+    if (dst && data && len > 0) {
+        int copy_len = len < buf_len ? len : buf_len;
+        memcpy(dst, data, (size_t)copy_len);
+    }
+    return buf;
+}
+
 static uint32_t buffer_next_utf8_codepoint(const char* str, int len, int* index) {
     if (!str || !index || *index >= len) return 0;
     int i = *index;
