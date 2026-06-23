@@ -45,6 +45,7 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 
 static const uint8_t crypto_empty_bytes[1] = {0};
 static Item crypto_namespace = {0};
+#define JS_CRYPTO_MAX_LIVE_CONTEXTS 4096
 
 static int crypto_digest_bits_for_name_ext(const char* digest, bool allow_md5, bool allow_sha1, bool allow_sha224) {
     if (!digest) return 0;
@@ -1164,8 +1165,35 @@ struct HmacCtx {
     int data_cap;
 };
 
+static HmacCtx* crypto_live_hmac_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
+static int crypto_live_hmac_context_count = 0;
+
+static void crypto_track_hmac_context(HmacCtx* ctx) {
+    if (!ctx) return;
+    for (int i = 0; i < crypto_live_hmac_context_count; i++) {
+        if (crypto_live_hmac_contexts[i] == ctx) return;
+    }
+    if (crypto_live_hmac_context_count < JS_CRYPTO_MAX_LIVE_CONTEXTS) {
+        crypto_live_hmac_contexts[crypto_live_hmac_context_count++] = ctx;
+    }
+}
+
+static void crypto_untrack_hmac_context(HmacCtx* ctx) {
+    if (!ctx) return;
+    for (int i = 0; i < crypto_live_hmac_context_count; i++) {
+        if (crypto_live_hmac_contexts[i] == ctx) {
+            crypto_live_hmac_contexts[i] =
+                crypto_live_hmac_contexts[crypto_live_hmac_context_count - 1];
+            crypto_live_hmac_contexts[crypto_live_hmac_context_count - 1] = NULL;
+            crypto_live_hmac_context_count--;
+            return;
+        }
+    }
+}
+
 static void hmac_ctx_free(HmacCtx* ctx) {
     if (!ctx) return;
+    crypto_untrack_hmac_context(ctx);
     if (ctx->key) mem_free(ctx->key);
     if (ctx->data) mem_free(ctx->data);
     mem_free(ctx);
@@ -1281,6 +1309,7 @@ extern "C" Item js_crypto_createHmac(Item alg_item, Item key_item) {
     }
 
     HmacCtx* ctx = (HmacCtx*)mem_calloc(1, sizeof(HmacCtx), MEM_CAT_JS_RUNTIME);
+    crypto_track_hmac_context(ctx);
     memcpy(ctx->alg, alg_buf, strlen(alg_buf) + 1);
     ctx->key = key;
     ctx->key_len = key_len;
@@ -1312,8 +1341,35 @@ struct HashCtx {
     bool finalized;
 };
 
+static HashCtx* crypto_live_hash_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
+static int crypto_live_hash_context_count = 0;
+
+static void crypto_track_hash_context(HashCtx* ctx) {
+    if (!ctx) return;
+    for (int i = 0; i < crypto_live_hash_context_count; i++) {
+        if (crypto_live_hash_contexts[i] == ctx) return;
+    }
+    if (crypto_live_hash_context_count < JS_CRYPTO_MAX_LIVE_CONTEXTS) {
+        crypto_live_hash_contexts[crypto_live_hash_context_count++] = ctx;
+    }
+}
+
+static void crypto_untrack_hash_context(HashCtx* ctx) {
+    if (!ctx) return;
+    for (int i = 0; i < crypto_live_hash_context_count; i++) {
+        if (crypto_live_hash_contexts[i] == ctx) {
+            crypto_live_hash_contexts[i] =
+                crypto_live_hash_contexts[crypto_live_hash_context_count - 1];
+            crypto_live_hash_contexts[crypto_live_hash_context_count - 1] = NULL;
+            crypto_live_hash_context_count--;
+            return;
+        }
+    }
+}
+
 static void hash_ctx_free(HashCtx* ctx) {
     if (!ctx) return;
+    crypto_untrack_hash_context(ctx);
     if (ctx->data) mem_free(ctx->data);
     mem_free(ctx);
 }
@@ -1460,6 +1516,7 @@ extern "C" Item js_hash_copy(Item options_item) {
     if (!ctx || ctx->finalized) return crypto_throw_hash_finalized();
 
     HashCtx* copy = (HashCtx*)mem_calloc(1, sizeof(HashCtx), MEM_CAT_JS_RUNTIME);
+    crypto_track_hash_context(copy);
     memcpy(copy->alg, ctx->alg, strlen(ctx->alg) + 1);
     if (ctx->data_len > 0) {
         copy->data = (uint8_t*)mem_alloc((size_t)ctx->data_len, MEM_CAT_JS_RUNTIME);
@@ -1525,6 +1582,7 @@ extern "C" Item js_crypto_createHash(Item alg_item) {
     }
 
     HashCtx* ctx = (HashCtx*)mem_calloc(1, sizeof(HashCtx), MEM_CAT_JS_RUNTIME);
+    crypto_track_hash_context(ctx);
     memcpy(ctx->alg, alg_buf, strlen(alg_buf) + 1);
 
     return js_hash_make_object(ctx);
@@ -1543,8 +1601,35 @@ struct SignVerifyCtx {
     int data_cap;
 };
 
+static SignVerifyCtx* crypto_live_sign_verify_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
+static int crypto_live_sign_verify_context_count = 0;
+
+static void crypto_track_sign_verify_context(SignVerifyCtx* ctx) {
+    if (!ctx) return;
+    for (int i = 0; i < crypto_live_sign_verify_context_count; i++) {
+        if (crypto_live_sign_verify_contexts[i] == ctx) return;
+    }
+    if (crypto_live_sign_verify_context_count < JS_CRYPTO_MAX_LIVE_CONTEXTS) {
+        crypto_live_sign_verify_contexts[crypto_live_sign_verify_context_count++] = ctx;
+    }
+}
+
+static void crypto_untrack_sign_verify_context(SignVerifyCtx* ctx) {
+    if (!ctx) return;
+    for (int i = 0; i < crypto_live_sign_verify_context_count; i++) {
+        if (crypto_live_sign_verify_contexts[i] == ctx) {
+            crypto_live_sign_verify_contexts[i] =
+                crypto_live_sign_verify_contexts[crypto_live_sign_verify_context_count - 1];
+            crypto_live_sign_verify_contexts[crypto_live_sign_verify_context_count - 1] = NULL;
+            crypto_live_sign_verify_context_count--;
+            return;
+        }
+    }
+}
+
 static void sign_verify_ctx_free(SignVerifyCtx* ctx) {
     if (!ctx) return;
+    crypto_untrack_sign_verify_context(ctx);
     if (ctx->data) mem_free(ctx->data);
     mem_free(ctx);
 }
@@ -1767,6 +1852,7 @@ static Item js_crypto_create_sign_verify(Item alg_item, bool verify_mode) {
     }
 
     SignVerifyCtx* ctx = (SignVerifyCtx*)mem_calloc(1, sizeof(SignVerifyCtx), MEM_CAT_JS_RUNTIME);
+    crypto_track_sign_verify_context(ctx);
     memcpy(ctx->alg, alg_buf, strlen(alg_buf) + 1);
     ctx->verify_mode = verify_mode;
 
@@ -3212,6 +3298,32 @@ struct CipherCtx {
     bool auto_padding;
 };
 
+static CipherCtx* crypto_live_cipher_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
+static int crypto_live_cipher_context_count = 0;
+
+static void crypto_track_cipher_context(CipherCtx* ctx) {
+    if (!ctx) return;
+    for (int i = 0; i < crypto_live_cipher_context_count; i++) {
+        if (crypto_live_cipher_contexts[i] == ctx) return;
+    }
+    if (crypto_live_cipher_context_count < JS_CRYPTO_MAX_LIVE_CONTEXTS) {
+        crypto_live_cipher_contexts[crypto_live_cipher_context_count++] = ctx;
+    }
+}
+
+static void crypto_untrack_cipher_context(CipherCtx* ctx) {
+    if (!ctx) return;
+    for (int i = 0; i < crypto_live_cipher_context_count; i++) {
+        if (crypto_live_cipher_contexts[i] == ctx) {
+            crypto_live_cipher_contexts[i] =
+                crypto_live_cipher_contexts[crypto_live_cipher_context_count - 1];
+            crypto_live_cipher_contexts[crypto_live_cipher_context_count - 1] = NULL;
+            crypto_live_cipher_context_count--;
+            return;
+        }
+    }
+}
+
 static void cipher_ctx_append_data(CipherCtx* ctx, const uint8_t* buf, int len) {
     if (!ctx || len <= 0) return;
     int need = ctx->data_len + len;
@@ -3234,6 +3346,7 @@ static void cipher_ctx_append_data(CipherCtx* ctx, const uint8_t* buf, int len) 
 
 static void cipher_ctx_free(CipherCtx* ctx) {
     if (!ctx) return;
+    crypto_untrack_cipher_context(ctx);
     if (ctx->use_gcm) mbedtls_gcm_free(&ctx->gcm);
     else if (!ctx->use_kw) mbedtls_cipher_free(&ctx->cipher);
     if (ctx->key) mem_free(ctx->key);
@@ -3851,6 +3964,7 @@ static Item create_cipher_object(const char* alg, bool encrypting,
     }
 
     CipherCtx* ctx = (CipherCtx*)mem_calloc(1, sizeof(CipherCtx), MEM_CAT_JS_RUNTIME);
+    crypto_track_cipher_context(ctx);
     int alen = (int)strlen(alg);
     if (alen > 31) alen = 31;
     memcpy(ctx->alg, alg, (size_t)alen);
@@ -4999,6 +5113,23 @@ extern "C" Item js_get_crypto_namespace(void) {
     return crypto_namespace;
 }
 
+static void crypto_reset_live_contexts(void) {
+    while (crypto_live_cipher_context_count > 0) {
+        cipher_ctx_free(crypto_live_cipher_contexts[crypto_live_cipher_context_count - 1]);
+    }
+    while (crypto_live_sign_verify_context_count > 0) {
+        sign_verify_ctx_free(
+            crypto_live_sign_verify_contexts[crypto_live_sign_verify_context_count - 1]);
+    }
+    while (crypto_live_hash_context_count > 0) {
+        hash_ctx_free(crypto_live_hash_contexts[crypto_live_hash_context_count - 1]);
+    }
+    while (crypto_live_hmac_context_count > 0) {
+        hmac_ctx_free(crypto_live_hmac_contexts[crypto_live_hmac_context_count - 1]);
+    }
+}
+
 extern "C" void js_crypto_reset(void) {
+    crypto_reset_live_contexts();
     crypto_namespace = (Item){0};
 }

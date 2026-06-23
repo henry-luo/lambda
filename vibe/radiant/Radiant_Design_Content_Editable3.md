@@ -162,24 +162,44 @@ Implementation note:
   `text_iterator/auto-expand-details-layout-shift.html`,
   `text_iterator/beforematch-layout-shift.html`, and
   `execCommand/forward-delete-no-scroll.html` cases now pass.
-- Current pressure-list verification:
+- Current pressure-list verification as of 2026-06-23:
   `env LAMBDA_CHROME_EDITING_TIMEOUT=5 LAMBDA_CHROME_EDITING_JOBS=9 ./test/test_chrome_editing_gtest.exe --gtest_brief=1`
-  runs 2751 imported cases as 323 passed / 2121 skipped / 307 failed. The
-  remaining failure surface is mostly `assertion_mismatch` (276), followed by
-  `unsupported_shadow` (14), `unsupported_layout_visual` (10),
-  `unsupported_internals` (9), and `no_results` (8).
-- The second 641-entry pressure-fix pass added a headless DOM geometry fallback
-  for `offsetWidth`/`offsetHeight` from laid-out size, inline CSS dimensions, or
-  text length, then tightened the CE3 harness click-hit model for uneditable
-  inline children. `selection/mixed-editability-10.html` now passes all 10
-  assertions.
-- The third 641-entry pressure-fix pass tightened synthetic mouse hit-testing to
-  prefer the innermost element whose synthetic horizontal range contains the
-  pointer, and suppresses synthetic drag ranges when both endpoints are
-  `user-select: none`. `selection/mouse/drag_user_select_none.html` now passes,
-  leaving `selection/modify_move/move-by-character-005.html` as the only
-  selection `assertion_mismatch`; the selection bucket is 111 passed / 1270
-  skipped / 3 no-results / 1 assertion mismatch.
+  runs 2751 imported cases as 310 passed / 2218 skipped / 223 failed. The
+  remaining failure surface is mostly `assertion_mismatch` (194), followed by
+  `unsupported_shadow` (14), `unsupported_internals` (8),
+  `unsupported_layout_visual` (7), `no_results` (6), and
+  `harness_missing_api` (1). The run has 0 aborts and 0 timeouts.
+- The second and third pressure-fix passes added a headless DOM geometry
+  fallback for `offsetWidth`/`offsetHeight` from laid-out size, inline CSS
+  dimensions, or text length, then tightened the CE3 harness click-hit model for
+  uneditable inline children and `user-select: none` drag endpoints.
+- The fourth pressure-fix pass corrected collapsed-whitespace character
+  navigation symmetry in native `Selection.modify("move", *, "character")` and
+  tightened the CE3 harness's element-boundary character shim so inline wrappers
+  with text descendants are not treated as atomic children. The focused
+  `selection/modify_move/move-by-character-005.html` case now passes 1/1.
+- The fifth pressure-fix pass split native character extension from caret
+  movement across collapsed whitespace runs, preserving Chrome's range-focus
+  offset after the first source space while keeping caret movement canonical.
+  It also made CE3 harness failure diagnostics first-line friendly, fixed
+  right-edge clicks around `contenteditable=false` inline children, and changed
+  synthetic mouse lookup to prefer the element whose horizontal box contains the
+  pointer. The focused
+  `selection/modify_extend/extend_by_character.html`,
+  `selection/mixed-editability-10.html`, and
+  `selection/mouse/drag_user_select_none.html` cases now pass. The current
+  selection bucket is 112 passed / 1270 skipped / 3 no-results / 0 assertion
+  mismatches; the remaining selection cases are no-result/reporting issues:
+  `selection/longpress-selection-in-iframe-removed-crash.html`,
+  `selection/mouse/drags_within_user-select_combos.html`, and
+  `selection/selection-crash.html`.
+- The sixth pressure-fix pass restored the legacy multiline
+  `_chrome_assertion_message()` string expected by `assert_selection.html`,
+  while keeping flattened first-line failure logging for the GTest runner. It
+  also added collapsed forward-delete removal for the next sibling element and
+  normalizes the serialized `class`/`contenteditable` pair order, clearing
+  `deleting/backspace_after_contenteditable_false_elements.html` 2/2. The
+  async no-result selection cases still need deeper event-loop/load work.
 
 ---
 
