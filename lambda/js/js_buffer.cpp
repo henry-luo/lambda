@@ -16,6 +16,7 @@
 #include "../../lib/mem.h"
 #include "../../lib/hex.h"
 #include "../../lib/base64.h"
+#include "../../lib/utf.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -99,6 +100,106 @@ static int buffer_utf8_codepoint_count(const char* str, int len) {
         count++;
     }
     return count;
+}
+
+static int buffer_utf8_encoded_len(const char* chars, int byte_len) {
+    int out_len = 0;
+    for (int i = 0; i < byte_len; ) {
+        unsigned char lead = (unsigned char)chars[i];
+        int cp_len = 1;
+        if (lead >= 0xF0 && i + 4 <= byte_len) cp_len = 4;
+        else if (lead >= 0xE0 && i + 3 <= byte_len) cp_len = 3;
+        else if (lead >= 0xC0 && i + 2 <= byte_len) cp_len = 2;
+
+        if (cp_len == 3 && lead == 0xED && i + 2 < byte_len) {
+            unsigned char second = (unsigned char)chars[i + 1];
+            bool high = second >= 0xA0 && second <= 0xAF;
+            bool low = second >= 0xB0 && second <= 0xBF;
+            if (high) {
+                int next = i + 3;
+                if (next + 2 < byte_len && (unsigned char)chars[next] == 0xED) {
+                    unsigned char next_second = (unsigned char)chars[next + 1];
+                    if (next_second >= 0xB0 && next_second <= 0xBF) {
+                        out_len += 4;
+                        i += 6;
+                        continue;
+                    }
+                }
+                out_len += 3;
+                i += 3;
+                continue;
+            }
+            if (low) {
+                out_len += 3;
+                i += 3;
+                continue;
+            }
+        }
+
+        out_len += cp_len;
+        i += cp_len;
+    }
+    return out_len;
+}
+
+static uint16_t buffer_decode_wtf8_unit(const char* chars, int pos) {
+    unsigned char b0 = (unsigned char)chars[pos];
+    unsigned char b1 = (unsigned char)chars[pos + 1];
+    unsigned char b2 = (unsigned char)chars[pos + 2];
+    return (uint16_t)(((uint16_t)(b0 & 0x0F) << 12) |
+                      ((uint16_t)(b1 & 0x3F) << 6) |
+                      (uint16_t)(b2 & 0x3F));
+}
+
+static void buffer_write_replacement(uint8_t* out, int* pos) {
+    out[(*pos)++] = 0xEF;
+    out[(*pos)++] = 0xBF;
+    out[(*pos)++] = 0xBD;
+}
+
+static void buffer_write_utf8_encoded(const char* chars, int byte_len, uint8_t* out) {
+    int out_pos = 0;
+    for (int i = 0; i < byte_len; ) {
+        unsigned char lead = (unsigned char)chars[i];
+        int cp_len = 1;
+        if (lead >= 0xF0 && i + 4 <= byte_len) cp_len = 4;
+        else if (lead >= 0xE0 && i + 3 <= byte_len) cp_len = 3;
+        else if (lead >= 0xC0 && i + 2 <= byte_len) cp_len = 2;
+
+        if (cp_len == 3 && lead == 0xED && i + 2 < byte_len) {
+            unsigned char second = (unsigned char)chars[i + 1];
+            bool high = second >= 0xA0 && second <= 0xAF;
+            bool low = second >= 0xB0 && second <= 0xBF;
+            if (high) {
+                int next = i + 3;
+                if (next + 2 < byte_len && (unsigned char)chars[next] == 0xED) {
+                    unsigned char next_second = (unsigned char)chars[next + 1];
+                    if (next_second >= 0xB0 && next_second <= 0xBF) {
+                        uint16_t hi = buffer_decode_wtf8_unit(chars, i);
+                        uint16_t lo = buffer_decode_wtf8_unit(chars, next);
+                        uint32_t cp = 0x10000 + (((uint32_t)hi - 0xD800) << 10) +
+                                      ((uint32_t)lo - 0xDC00);
+                        char encoded[4];
+                        size_t n = utf8_encode(cp, encoded);
+                        for (size_t j = 0; j < n; j++) out[out_pos++] = (uint8_t)encoded[j];
+                        i += 6;
+                        continue;
+                    }
+                }
+                buffer_write_replacement(out, &out_pos);
+                i += 3;
+                continue;
+            }
+            if (low) {
+                buffer_write_replacement(out, &out_pos);
+                i += 3;
+                continue;
+            }
+        }
+
+        for (int j = 0; j < cp_len; j++) out[out_pos++] = (uint8_t)chars[i + j];
+        i += cp_len;
+    }
 }
 
 // Helper: format "Received type <type> (<value>)" suffix for ERR_INVALID_ARG_TYPE errors
@@ -395,13 +496,13 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
             return buf;
         }
 
-        // default: utf-8
-        int byte_len = (int)s->len;
+        // default: utf-8 with WHATWG replacement semantics for WTF-8 surrogate halves
+        int byte_len = buffer_utf8_encoded_len(s->chars, (int)s->len);
         Item buf = create_buffer(byte_len);
         int buf_byte_len = 0;
         uint8_t* bdata = buffer_data(buf, &buf_byte_len);
         if (bdata && byte_len > 0) {
-            memcpy(bdata, s->chars, byte_len);
+            buffer_write_utf8_encoded(s->chars, (int)s->len, bdata);
         }
         return buf;
     }
@@ -848,7 +949,7 @@ extern "C" Item js_buffer_byteLength(Item str_item, Item enc_item) {
             return (Item){.item = i2it(utf8_codepoint_count(s->chars, (int)s->len) * 2)};
         }
         // utf8 (default, or unrecognized encoding)
-        return (Item){.item = i2it((int64_t)s->len)};
+        return (Item){.item = i2it((int64_t)buffer_utf8_encoded_len(s->chars, (int)s->len))};
     }
     if (js_is_typed_array(str_item)) {
         int blen = 0;

@@ -10618,6 +10618,25 @@ static bool js_deep_equal_compare(Item a, Item b, int depth) {
         return true;
     }
 
+    if (js_is_typed_array(a) || js_is_typed_array(b)) {
+        if (!js_is_typed_array(a) || !js_is_typed_array(b)) return false;
+        JsTypedArray* arr_a = js_get_typed_array_ptr(a.map);
+        JsTypedArray* arr_b = js_get_typed_array_ptr(b.map);
+        if (!arr_a || !arr_b) return false;
+        if (arr_a->element_type != arr_b->element_type) return false;
+        if (js_typed_array_is_out_of_bounds_item(a) || js_typed_array_is_out_of_bounds_item(b)) {
+            return false;
+        }
+        int bytes_a = js_typed_array_byte_length(a);
+        int bytes_b = js_typed_array_byte_length(b);
+        if (bytes_a != bytes_b) return false;
+        if (bytes_a == 0) return true;
+        void* data_a = js_typed_array_current_data_ptr(a);
+        void* data_b = js_typed_array_current_data_ptr(b);
+        if (!data_a || !data_b) return false;
+        return memcmp(data_a, data_b, (size_t)bytes_a) == 0;
+    }
+
     // both objects/maps: structural comparison
     if (ta == LMD_TYPE_MAP && tb == LMD_TYPE_MAP) {
         Item keys_a = js_object_keys(a);

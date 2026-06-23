@@ -821,6 +821,24 @@ static bool js_util_dataview_bytes_equal(Item a, Item b) {
     return memcmp(adata, bdata, alen) == 0;
 }
 
+static bool js_util_typed_array_bytes_equal(Item a, Item b) {
+    JsTypedArray* av = js_get_typed_array_ptr(a.map);
+    JsTypedArray* bv = js_get_typed_array_ptr(b.map);
+    if (!av || !bv) return false;
+    if (av->element_type != bv->element_type) return false;
+    if (js_typed_array_is_out_of_bounds_item(a) || js_typed_array_is_out_of_bounds_item(b)) {
+        return false;
+    }
+    int alen = js_typed_array_byte_length(a);
+    int blen = js_typed_array_byte_length(b);
+    if (alen != blen) return false;
+    if (alen == 0) return true;
+    void* adata = js_typed_array_current_data_ptr(a);
+    void* bdata = js_typed_array_current_data_ptr(b);
+    if (!adata || !bdata) return false;
+    return memcmp(adata, bdata, (size_t)alen) == 0;
+}
+
 extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
     // use strict equality for primitives
     Item eq = js_strict_equal(a, b);
@@ -835,6 +853,13 @@ extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
     if (a_dataview || b_dataview) {
         return (Item){.item = b2it(a_dataview && b_dataview &&
                                   js_util_dataview_bytes_equal(a, b))};
+    }
+
+    bool a_typed_array = js_is_typed_array(a);
+    bool b_typed_array = js_is_typed_array(b);
+    if (a_typed_array || b_typed_array) {
+        return (Item){.item = b2it(a_typed_array && b_typed_array &&
+                                  js_util_typed_array_bytes_equal(a, b))};
     }
 
     if (ta == LMD_TYPE_ARRAY) {

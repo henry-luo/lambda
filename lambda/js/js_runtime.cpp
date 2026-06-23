@@ -32673,15 +32673,116 @@ extern "C" Item js_text_encoder_new(void) {
     return obj;
 }
 
+static int js_text_encoder_utf8_len(const char* chars, int byte_len) {
+    int out_len = 0;
+    for (int i = 0; i < byte_len; ) {
+        unsigned char lead = (unsigned char)chars[i];
+        int cp_len = 1;
+        if (lead >= 0xF0 && i + 4 <= byte_len) cp_len = 4;
+        else if (lead >= 0xE0 && i + 3 <= byte_len) cp_len = 3;
+        else if (lead >= 0xC0 && i + 2 <= byte_len) cp_len = 2;
+
+        if (cp_len == 3 && lead == 0xED && i + 2 < byte_len) {
+            unsigned char second = (unsigned char)chars[i + 1];
+            bool high = second >= 0xA0 && second <= 0xAF;
+            bool low = second >= 0xB0 && second <= 0xBF;
+            if (high) {
+                int next = i + 3;
+                if (next + 2 < byte_len && (unsigned char)chars[next] == 0xED) {
+                    unsigned char next_second = (unsigned char)chars[next + 1];
+                    if (next_second >= 0xB0 && next_second <= 0xBF) {
+                        out_len += 4;
+                        i += 6;
+                        continue;
+                    }
+                }
+                out_len += 3;
+                i += 3;
+                continue;
+            }
+            if (low) {
+                out_len += 3;
+                i += 3;
+                continue;
+            }
+        }
+
+        out_len += cp_len;
+        i += cp_len;
+    }
+    return out_len;
+}
+
+static uint16_t js_text_encoder_decode_wtf8_unit(const char* chars, int pos) {
+    unsigned char b0 = (unsigned char)chars[pos];
+    unsigned char b1 = (unsigned char)chars[pos + 1];
+    unsigned char b2 = (unsigned char)chars[pos + 2];
+    return (uint16_t)(((uint16_t)(b0 & 0x0F) << 12) |
+                      ((uint16_t)(b1 & 0x3F) << 6) |
+                      (uint16_t)(b2 & 0x3F));
+}
+
+static void js_text_encoder_write_replacement(uint8_t* out, int* pos) {
+    out[(*pos)++] = 0xEF;
+    out[(*pos)++] = 0xBF;
+    out[(*pos)++] = 0xBD;
+}
+
+static void js_text_encoder_write_utf8(const char* chars, int byte_len, uint8_t* out) {
+    int out_pos = 0;
+    for (int i = 0; i < byte_len; ) {
+        unsigned char lead = (unsigned char)chars[i];
+        int cp_len = 1;
+        if (lead >= 0xF0 && i + 4 <= byte_len) cp_len = 4;
+        else if (lead >= 0xE0 && i + 3 <= byte_len) cp_len = 3;
+        else if (lead >= 0xC0 && i + 2 <= byte_len) cp_len = 2;
+
+        if (cp_len == 3 && lead == 0xED && i + 2 < byte_len) {
+            unsigned char second = (unsigned char)chars[i + 1];
+            bool high = second >= 0xA0 && second <= 0xAF;
+            bool low = second >= 0xB0 && second <= 0xBF;
+            if (high) {
+                int next = i + 3;
+                if (next + 2 < byte_len && (unsigned char)chars[next] == 0xED) {
+                    unsigned char next_second = (unsigned char)chars[next + 1];
+                    if (next_second >= 0xB0 && next_second <= 0xBF) {
+                        uint16_t hi = js_text_encoder_decode_wtf8_unit(chars, i);
+                        uint16_t lo = js_text_encoder_decode_wtf8_unit(chars, next);
+                        uint32_t cp = 0x10000 + (((uint32_t)hi - 0xD800) << 10) +
+                                      ((uint32_t)lo - 0xDC00);
+                        char encoded[4];
+                        size_t n = utf8_encode(cp, encoded);
+                        for (size_t j = 0; j < n; j++) out[out_pos++] = (uint8_t)encoded[j];
+                        i += 6;
+                        continue;
+                    }
+                }
+                js_text_encoder_write_replacement(out, &out_pos);
+                i += 3;
+                continue;
+            }
+            if (low) {
+                js_text_encoder_write_replacement(out, &out_pos);
+                i += 3;
+                continue;
+            }
+        }
+
+        for (int j = 0; j < cp_len; j++) out[out_pos++] = (uint8_t)chars[i + j];
+        i += cp_len;
+    }
+}
+
 extern "C" Item js_text_encoder_encode(Item encoder, Item str) {
     (void)encoder;
-    if (get_type_id(str) != LMD_TYPE_STRING) return js_array_new(0);
+    if (get_type_id(str) != LMD_TYPE_STRING) return js_typed_array_new(JS_TYPED_UINT8, 0);
     String* s = it2s(str);
-    if (!s || s->len == 0) return js_array_new(0);
-    // Create array of byte values
-    Item result = js_array_new(0);
-    for (int i = 0; i < (int)s->len; i++) {
-        js_array_push_item_direct(result.array, (Item){.item = i2it((unsigned char)s->chars[i])});
+    if (!s || s->len == 0) return js_typed_array_new(JS_TYPED_UINT8, 0);
+    int byte_len = js_text_encoder_utf8_len(s->chars, (int)s->len);
+    Item result = js_typed_array_new(JS_TYPED_UINT8, byte_len);
+    JsTypedArray* ta = js_get_typed_array_ptr(result.map);
+    if (ta && ta->data && byte_len > 0) {
+        js_text_encoder_write_utf8(s->chars, (int)s->len, (uint8_t*)ta->data);
     }
     return result;
 }
