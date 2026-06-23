@@ -362,7 +362,7 @@ $(RE2_LIB):
 	@echo "re2 library built: $(RE2_LIB)"
 
 # Build MIR JIT library (clone, patch, compile)
-$(MIR_LIB):
+$(MIR_LIB): $(MIR_PATCH)
 	@echo "Building MIR library..."
 	@if [ ! -d "$(MIR_BUILD_DIR)" ]; then \
 		echo "Cloning MIR repository..."; \
