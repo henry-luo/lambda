@@ -9,12 +9,16 @@
 #include "js_event_loop.h"
 #include "js_typed_array.h"
 #include "js_error_codes.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/uv_loop.h"
 
 #include <cstring>
+#include <math.h>
+#include <errno.h>
+#include <sys/stat.h>
 #include "../../lib/mem.h"
 #include "../../lib/file.h"
 #ifdef _WIN32
@@ -41,6 +45,180 @@ static const char* item_to_cstr(Item value, char* buf, int buf_size) {
     return buf;
 }
 
+static bool fs_string_has_nul(String* s) {
+    if (!s) return false;
+    for (int i = 0; i < (int)s->len; i++) {
+        if (s->chars[i] == '\0') return true;
+    }
+    return false;
+}
+
+static const char* fs_path_to_cstr(Item value, const char* name, char* buf, int buf_size) {
+    bool from_url = false;
+    if (get_type_id(value) == LMD_TYPE_MAP && js_class_id(value) == JS_CLASS_URL) {
+        Item protocol = js_property_get(value, (Item){.item = s2it(heap_create_name("protocol", 8))});
+        if (get_type_id(protocol) != LMD_TYPE_STRING ||
+            it2s(protocol)->len < 5 || memcmp(it2s(protocol)->chars, "file:", 5) != 0) {
+            js_throw_type_error_code("ERR_INVALID_URL_SCHEME", "The URL must be of scheme file");
+            return NULL;
+        }
+        value = js_property_get(value, (Item){.item = s2it(heap_create_name("pathname", 8))});
+        from_url = true;
+    }
+    if (get_type_id(value) != LMD_TYPE_STRING) {
+        js_throw_invalid_arg_type(name, "string or an instance of Buffer or URL", value);
+        return NULL;
+    }
+    String* s = it2s(value);
+    if (fs_string_has_nul(s)) {
+        js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
+            "The argument 'path' must be a string, Uint8Array, or URL without null bytes.");
+        return NULL;
+    }
+    if (from_url) {
+        for (int i = 0; i + 2 < (int)s->len; i++) {
+            if (s->chars[i] == '%' && s->chars[i + 1] == '0' && s->chars[i + 2] == '0') {
+                js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
+                    "The argument 'path' must be a string, Uint8Array, or URL without null bytes.");
+                return NULL;
+            }
+        }
+    }
+    return item_to_cstr(value, buf, buf_size);
+}
+
+static bool fs_validate_int_range(Item value, const char* name, int64_t min, int64_t max, int64_t* out) {
+    TypeId type = get_type_id(value);
+    if (type != LMD_TYPE_INT && type != LMD_TYPE_FLOAT) {
+        js_throw_invalid_arg_type(name, "number", value);
+        return false;
+    }
+    double number = type == LMD_TYPE_INT ? (double)it2i(value) : it2d(value);
+    if (!isfinite(number) || number != floor(number)) {
+        char msg[256];
+        const char* received = NULL;
+        if (type == LMD_TYPE_FLOAT) {
+            if (isnan(number)) received = "NaN";
+            else if (number == INFINITY) received = "Infinity";
+            else if (number == -INFINITY) received = "-Infinity";
+        }
+        if (received) {
+            snprintf(msg, sizeof(msg),
+                "The value of \"%s\" is out of range. It must be an integer. Received %s",
+                name, received);
+            js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
+        } else {
+            js_throw_out_of_range(name, "an integer", value);
+        }
+        return false;
+    }
+    if (number < (double)min || number > (double)max) {
+        char range[64];
+        snprintf(range, sizeof(range), ">= %lld && <= %lld", (long long)min, (long long)max);
+        js_throw_out_of_range(name, range, value);
+        return false;
+    }
+    *out = (int64_t)number;
+    return true;
+}
+
+static bool fs_validate_fd(Item value, int* out_fd) {
+    int64_t fd = 0;
+    if (!fs_validate_int_range(value, "fd", 0, 2147483647LL, &fd)) return false;
+    *out_fd = (int)fd;
+    return true;
+}
+
+static bool fs_validate_uint32(Item value, const char* name, uint32_t* out) {
+    int64_t number = 0;
+    if (!fs_validate_int_range(value, name, 0, 4294967295LL, &number)) return false;
+    *out = (uint32_t)number;
+    return true;
+}
+
+static bool fs_validate_mode(Item value, uint32_t* out) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(value);
+        if (!s || s->len == 0) {
+            return false;
+        }
+        uint32_t mode = 0;
+        for (int i = 0; i < (int)s->len; i++) {
+            char ch = s->chars[i];
+            if (ch < '0' || ch > '7') {
+                js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The argument 'mode' must be a 32-bit unsigned integer or an octal string.");
+                return false;
+            }
+            mode = (mode << 3) + (uint32_t)(ch - '0');
+        }
+        *out = mode;
+        return true;
+    }
+    return fs_validate_uint32(value, "mode", out);
+}
+
+static bool fs_validate_uid_gid(Item value, const char* name, int* out) {
+    int64_t number = 0;
+    if (!fs_validate_int_range(value, name, -1, 4294967295LL, &number)) return false;
+    *out = (int)number;
+    return true;
+}
+
+static bool fs_validate_offset_length(Item offset_item, Item length_item, int byte_length,
+                                      int* out_offset, int* out_length) {
+    int64_t offset = 0, length = byte_length;
+    TypeId offset_type = get_type_id(offset_item);
+    TypeId length_type = get_type_id(length_item);
+    if (offset_type != LMD_TYPE_UNDEFINED && offset_type != LMD_TYPE_NULL) {
+        if (offset_type != LMD_TYPE_INT && offset_type != LMD_TYPE_FLOAT) {
+            js_throw_invalid_arg_type("offset", "number", offset_item);
+            return false;
+        }
+        double number = offset_type == LMD_TYPE_INT ? (double)it2i(offset_item) : it2d(offset_item);
+        if (!isfinite(number) || number != floor(number)) {
+            js_throw_out_of_range("offset", "an integer", offset_item);
+            return false;
+        }
+        if (number < 0) {
+            js_throw_out_of_range("offset", ">= 0", offset_item);
+            return false;
+        }
+        offset = (int64_t)number;
+    }
+    if (length_type != LMD_TYPE_UNDEFINED && length_type != LMD_TYPE_NULL) {
+        if (length_type != LMD_TYPE_INT && length_type != LMD_TYPE_FLOAT) {
+            js_throw_invalid_arg_type("length", "number", length_item);
+            return false;
+        }
+        double number = length_type == LMD_TYPE_INT ? (double)it2i(length_item) : it2d(length_item);
+        if (!isfinite(number) || number != floor(number)) {
+            js_throw_out_of_range("length", "an integer", length_item);
+            return false;
+        }
+        if (number < 0) {
+            js_throw_out_of_range("length", ">= 0", length_item);
+            return false;
+        }
+        length = (int64_t)number;
+    }
+    if (offset > byte_length) {
+        char range[64];
+        snprintf(range, sizeof(range), "<= %d", byte_length);
+        js_throw_out_of_range("offset", range, offset_item);
+        return false;
+    }
+    if (length > byte_length - offset) {
+        char range[64];
+        snprintf(range, sizeof(range), "<= %lld", (long long)(byte_length - offset));
+        js_throw_out_of_range("length", range, length_item);
+        return false;
+    }
+    *out_offset = (int)offset;
+    *out_length = (int)length;
+    return true;
+}
+
 // Helper: create a string Item from a C string
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -53,6 +231,34 @@ static Item make_string_item(const char* str) {
     return make_string_item(str, (int)strlen(str));
 }
 
+static bool fs_parse_access_mode(Item mode_item, bool has_mode, int* out_mode) {
+    *out_mode = 0;
+    if (!has_mode || get_type_id(mode_item) == LMD_TYPE_UNDEFINED) return true;
+
+    TypeId mode_type = get_type_id(mode_item);
+    if (mode_type == LMD_TYPE_INT) {
+        int64_t value = it2i(mode_item);
+        if (value < 0 || value > 7) {
+            js_throw_out_of_range("mode", ">= 0 && <= 7", mode_item);
+            return false;
+        }
+        *out_mode = (int)value;
+        return true;
+    }
+    if (mode_type == LMD_TYPE_FLOAT) {
+        double value = it2d(mode_item);
+        if (!isfinite(value) || value < 0 || value > 7 || value != (double)(int)value) {
+            js_throw_out_of_range("mode", ">= 0 && <= 7", mode_item);
+            return false;
+        }
+        *out_mode = (int)value;
+        return true;
+    }
+
+    js_throw_invalid_arg_type("mode", "number", mode_item);
+    return false;
+}
+
 // Helper: get raw data pointer and length from a Buffer (typed array) Item
 static uint8_t* buffer_data(Item buf, int* out_len) {
     if (!js_is_typed_array(buf)) { *out_len = 0; return NULL; }
@@ -61,6 +267,40 @@ static uint8_t* buffer_data(Item buf, int* out_len) {
     if (!ta || !ta->data) { *out_len = 0; return NULL; }
     *out_len = ta->byte_length;
     return (uint8_t*)ta->data;
+}
+
+static const char* fs_typed_array_name(JsTypedArray* ta) {
+    if (!ta) return "Uint8Array";
+    if (ta->is_buffer) return "Buffer";
+    switch (ta->element_type) {
+        case JS_TYPED_INT8: return "Int8Array";
+        case JS_TYPED_UINT8: return "Uint8Array";
+        case JS_TYPED_INT16: return "Int16Array";
+        case JS_TYPED_UINT16: return "Uint16Array";
+        case JS_TYPED_INT32: return "Int32Array";
+        case JS_TYPED_UINT32: return "Uint32Array";
+        case JS_TYPED_FLOAT32: return "Float32Array";
+        case JS_TYPED_FLOAT64: return "Float64Array";
+        case JS_TYPED_UINT8_CLAMPED: return "Uint8ClampedArray";
+        case JS_TYPED_BIGINT64: return "BigInt64Array";
+        case JS_TYPED_BIGUINT64: return "BigUint64Array";
+        default: return "Uint8Array";
+    }
+}
+
+static JsTypedArray* fs_get_typed_array(Item buffer_item) {
+    if (!js_is_typed_array(buffer_item)) return NULL;
+    Map* map = buffer_item.map;
+    if (!map) return NULL;
+    return (JsTypedArray*)map->data;
+}
+
+static Item fs_throw_empty_read_buffer(JsTypedArray* ta) {
+    char msg[160];
+    snprintf(msg, sizeof(msg),
+             "The argument 'buffer' is empty and cannot be written. Received %s(0) []",
+             fs_typed_array_name(ta));
+    return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
 }
 
 // =============================================================================
@@ -72,9 +312,12 @@ static Item stats_proto = {0};
 extern "C" Item js_get_this(void);
 extern "C" Item js_date_new_from(Item value);
 extern "C" int js_check_exception(void);
+extern "C" Item js_clear_exception(void);
 extern "C" Item js_readable_new(Item opts);
 extern "C" Item js_readable_push(Item self, Item chunk);
 extern "C" Item js_stream_destroy(Item self, Item err);
+extern Item js_promise_resolve(Item value);
+extern Item js_promise_reject(Item reason);
 
 extern "C" Item js_stats_isFile() {
     Item mode_val = js_property_get(js_get_this(), make_string_item("__mode"));
@@ -184,10 +427,8 @@ static Item make_stats_object(const uv_stat_t* st) {
 // Returns file contents as a string (assumes UTF-8)
 extern "C" Item js_fs_readFileSync(Item path_item, Item encoding_item) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) {
-        return js_throw_invalid_arg_type("path", "string", path_item);
-    }
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     uv_fs_t req;
     int fd = uv_fs_open(NULL, &req, path, UV_FS_O_RDONLY, 0, NULL);
@@ -309,8 +550,8 @@ static Item js_fs_readstream_drain(Item stream) {
 
     Item path_item = js_property_get(stream, make_string_item("__readstream_path__"));
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     Item chunk = js_fs_read_file_buffer(path);
     if (js_check_exception()) return ItemNull;
@@ -353,8 +594,8 @@ extern "C" Item js_fs_readstream_pipe(Item dest_item) {
     Item stream = js_get_this();
     Item path_item = js_property_get(stream, make_string_item("__readstream_path__"));
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     Item chunk = js_fs_read_file_buffer(path);
     if (js_check_exception()) return ItemNull;
@@ -391,19 +632,15 @@ static Item js_fs_readstream_end_later(Item stream) {
 
 extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
     (void)options_item;
-    if (get_type_id(path_item) != LMD_TYPE_STRING) {
-        return js_throw_invalid_arg_type("path", "string", path_item);
-    }
+    char path_buf[1024];
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     Item stream = js_readable_new(ItemNull);
     if (stream.item == 0) return ItemNull;
     js_property_set(stream, make_string_item("__readstream_path__"), path_item);
     js_property_set(stream, make_string_item("__readstream_drained__"), (Item){.item = b2it(false)});
     js_property_set(stream, make_string_item("close"), js_new_function((void*)js_fs_readstream_close, 0));
-
-    char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
 
     Item chunk = js_fs_read_file_buffer(path);
     if (js_check_exception()) {
@@ -422,10 +659,8 @@ extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
 // fs.writeFileSync(path, data)
 extern "C" Item js_fs_writeFileSync(Item path_item, Item data_item) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) {
-        return js_throw_invalid_arg_type("path", "string", path_item);
-    }
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     // convert data to string
     Item str_item = js_to_string(data_item);
@@ -460,6 +695,9 @@ extern "C" Item js_fs_writeFileSync(Item path_item, Item data_item) {
 
 // fs.existsSync(path) → bool
 extern "C" Item js_fs_existsSync(Item path_item) {
+    if (get_type_id(path_item) == LMD_TYPE_STRING && fs_string_has_nul(it2s(path_item))) {
+        return (Item){.item = b2it(false)};
+    }
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path) return (Item){.item = b2it(false)};
@@ -473,8 +711,8 @@ extern "C" Item js_fs_existsSync(Item path_item) {
 // fs.unlinkSync(path) — delete a file
 extern "C" Item js_fs_unlinkSync(Item path_item) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     uv_fs_t req;
     int r = uv_fs_unlink(NULL, &req, path, NULL);
@@ -488,8 +726,8 @@ extern "C" Item js_fs_unlinkSync(Item path_item) {
 // fs.mkdirSync(path[, options])
 extern "C" Item js_fs_mkdirSync(Item path_item, Item options) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     int mode = 0777;
     bool recursive = false;
@@ -550,15 +788,8 @@ extern "C" Item js_fs_mkdir_async(Item path_item, Item options_or_cb, Item callb
 
     // perform the operation synchronously
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) {
-        if (get_type_id(callback) == LMD_TYPE_FUNC) {
-            Item err = make_string_item("EINVAL: invalid path");
-            Item args[1] = {err};
-            js_call_function(callback, ItemNull, args, 1);
-        }
-        return make_js_undefined();
-    }
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     int mode = 0777;
     bool recursive = false;
@@ -613,8 +844,8 @@ extern "C" Item js_fs_mkdir_async(Item path_item, Item options_or_cb, Item callb
 // fs.rmdirSync(path)
 extern "C" Item js_fs_rmdirSync(Item path_item) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     uv_fs_t req;
     int r = uv_fs_rmdir(NULL, &req, path, NULL);
@@ -628,10 +859,10 @@ extern "C" Item js_fs_rmdirSync(Item path_item) {
 // fs.renameSync(oldPath, newPath)
 extern "C" Item js_fs_renameSync(Item old_path_item, Item new_path_item) {
     char old_buf[1024], new_buf[1024];
-    const char* old_path = item_to_cstr(old_path_item, old_buf, sizeof(old_buf));
-    const char* new_path = item_to_cstr(new_path_item, new_buf, sizeof(new_buf));
-    if (!old_path) return js_throw_invalid_arg_type("oldPath", "string", old_path_item);
-    if (!new_path) return js_throw_invalid_arg_type("newPath", "string", new_path_item);
+    const char* old_path = fs_path_to_cstr(old_path_item, "oldPath", old_buf, sizeof(old_buf));
+    if (!old_path) return ItemNull;
+    const char* new_path = fs_path_to_cstr(new_path_item, "newPath", new_buf, sizeof(new_buf));
+    if (!new_path) return ItemNull;
 
     uv_fs_t req;
     int r = uv_fs_rename(NULL, &req, old_path, new_path, NULL);
@@ -645,8 +876,8 @@ extern "C" Item js_fs_renameSync(Item old_path_item, Item new_path_item) {
 // fs.readdirSync(path) → Array<string>
 extern "C" Item js_fs_readdirSync(Item path_item) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     uv_fs_t req;
     int n = uv_fs_scandir(NULL, &req, path, 0, NULL);
@@ -669,8 +900,8 @@ extern "C" Item js_fs_readdirSync(Item path_item) {
 // fs.statSync(path) → Stats object with isFile(), isDirectory(), etc.
 extern "C" Item js_fs_statSync(Item path_item) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     uv_fs_t req;
     int r = uv_fs_stat(NULL, &req, path, NULL);
@@ -687,8 +918,8 @@ extern "C" Item js_fs_statSync(Item path_item) {
 // fs.appendFileSync(path, data)
 extern "C" Item js_fs_appendFileSync(Item path_item, Item data_item) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     Item str_item = js_to_string(data_item);
     if (get_type_id(str_item) != LMD_TYPE_STRING) return ItemNull;
@@ -718,10 +949,10 @@ extern "C" Item js_fs_appendFileSync(Item path_item, Item data_item) {
 // fs.copyFileSync(src, dest)
 extern "C" Item js_fs_copyFileSync(Item src_item, Item dest_item) {
     char src_buf[1024], dest_buf[1024];
-    const char* src = item_to_cstr(src_item, src_buf, sizeof(src_buf));
-    const char* dest = item_to_cstr(dest_item, dest_buf, sizeof(dest_buf));
-    if (!src) return js_throw_invalid_arg_type("src", "string", src_item);
-    if (!dest) return js_throw_invalid_arg_type("dest", "string", dest_item);
+    const char* src = fs_path_to_cstr(src_item, "src", src_buf, sizeof(src_buf));
+    if (!src) return ItemNull;
+    const char* dest = fs_path_to_cstr(dest_item, "dest", dest_buf, sizeof(dest_buf));
+    if (!dest) return ItemNull;
 
     uv_fs_t req;
     int r = uv_fs_copyfile(NULL, &req, src, dest, 0, NULL);
@@ -735,8 +966,8 @@ extern "C" Item js_fs_copyFileSync(Item src_item, Item dest_item) {
 // fs.realpathSync(path) → string
 extern "C" Item js_fs_realpathSync(Item path_item) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     uv_fs_t req;
     int r = uv_fs_realpath(NULL, &req, path, NULL);
@@ -754,13 +985,11 @@ extern "C" Item js_fs_realpathSync(Item path_item) {
 // mode: fs.constants.F_OK (0), R_OK (4), W_OK (2), X_OK (1)
 extern "C" Item js_fs_accessSync(Item path_item, Item mode_item) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
-    int mode = 0; // F_OK by default
-    if (get_type_id(mode_item) == LMD_TYPE_INT) {
-        mode = (int)it2i(mode_item);
-    }
+    int mode = 0;
+    if (!fs_parse_access_mode(mode_item, true, &mode)) return ItemNull;
 
     uv_fs_t req;
     int r = uv_fs_access(NULL, &req, path, mode, NULL);
@@ -774,8 +1003,8 @@ extern "C" Item js_fs_accessSync(Item path_item, Item mode_item) {
 // fs.rmSync(path[, options]) — remove file or directory (optionally recursive)
 extern "C" Item js_fs_rmSync(Item path_item, Item options_item) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     bool recursive = false;
     if (get_type_id(options_item) == LMD_TYPE_MAP) {
@@ -831,16 +1060,14 @@ extern "C" Item js_fs_mkdtempSync(Item prefix_item) {
 // fs.chmodSync(path, mode)
 extern "C" Item js_fs_chmodSync(Item path_item, Item mode_item) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
-    int mode = 0;
-    if (get_type_id(mode_item) == LMD_TYPE_INT) {
-        mode = (int)it2i(mode_item);
-    }
+    uint32_t mode = 0;
+    if (!fs_validate_mode(mode_item, &mode)) return ItemNull;
 
     uv_fs_t req;
-    int r = uv_fs_chmod(NULL, &req, path, mode, NULL);
+    int r = uv_fs_chmod(NULL, &req, path, (int)mode, NULL);
     uv_fs_req_cleanup(&req);
     if (r < 0) {
         log_error("fs: chmodSync: '%s': %s", path, uv_strerror(r));
@@ -848,13 +1075,98 @@ extern "C" Item js_fs_chmodSync(Item path_item, Item mode_item) {
     return make_js_undefined();
 }
 
+extern "C" Item js_fs_fchmodSync(Item fd_item, Item mode_item) {
+    int fd = 0;
+    if (!fs_validate_fd(fd_item, &fd)) return ItemNull;
+    uint32_t mode = 0;
+    if (!fs_validate_mode(mode_item, &mode)) return ItemNull;
+    uv_fs_t req;
+    int r = uv_fs_fchmod(NULL, &req, fd, (int)mode, NULL);
+    uv_fs_req_cleanup(&req);
+    if (r < 0) return js_throw_system_error(r, "fchmod", NULL);
+    return make_js_undefined();
+}
+
+extern "C" Item js_fs_lchmodSync(Item path_item, Item mode_item) {
+    char path_buf[1024];
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+    uint32_t mode = 0;
+    if (!fs_validate_mode(mode_item, &mode)) return ItemNull;
+#ifdef __APPLE__
+    int r = lchmod(path, (mode_t)mode);
+    if (r != 0) return js_throw_system_error(uv_translate_sys_error(errno), "lchmod", path);
+    return make_js_undefined();
+#else
+    uv_fs_t req;
+    int r = uv_fs_chmod(NULL, &req, path, (int)mode, NULL);
+    uv_fs_req_cleanup(&req);
+    if (r < 0) return js_throw_system_error(r, "lchmod", path);
+    return make_js_undefined();
+#endif
+}
+
+extern "C" Item js_fs_chownSync(Item path_item, Item uid_item, Item gid_item) {
+    char path_buf[1024];
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+    int uid = 0, gid = 0;
+    if (!fs_validate_uid_gid(uid_item, "uid", &uid)) return ItemNull;
+    if (!fs_validate_uid_gid(gid_item, "gid", &gid)) return ItemNull;
+    uv_fs_t req;
+    int r = uv_fs_chown(NULL, &req, path, uid, gid, NULL);
+    uv_fs_req_cleanup(&req);
+    if (r < 0) return js_throw_system_error(r, "chown", path);
+    return make_js_undefined();
+}
+
+extern "C" Item js_fs_lchownSync(Item path_item, Item uid_item, Item gid_item) {
+    char path_buf[1024];
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+    int uid = 0, gid = 0;
+    if (!fs_validate_uid_gid(uid_item, "uid", &uid)) return ItemNull;
+    if (!fs_validate_uid_gid(gid_item, "gid", &gid)) return ItemNull;
+    uv_fs_t req;
+    int r = uv_fs_lchown(NULL, &req, path, uid, gid, NULL);
+    uv_fs_req_cleanup(&req);
+    if (r < 0) return js_throw_system_error(r, "lchown", path);
+    return make_js_undefined();
+}
+
+extern "C" Item js_fs_fchownSync(Item fd_item, Item uid_item, Item gid_item) {
+    int fd = 0;
+    if (!fs_validate_fd(fd_item, &fd)) return ItemNull;
+    int uid = 0, gid = 0;
+    if (!fs_validate_uid_gid(uid_item, "uid", &uid)) return ItemNull;
+    if (!fs_validate_uid_gid(gid_item, "gid", &gid)) return ItemNull;
+    uv_fs_t req;
+    int r = uv_fs_fchown(NULL, &req, fd, uid, gid, NULL);
+    uv_fs_req_cleanup(&req);
+    if (r < 0) return js_throw_system_error(r, "fchown", NULL);
+    return make_js_undefined();
+}
+
+extern "C" Item js_fs_linkSync(Item existing_item, Item new_item) {
+    char existing_buf[1024], new_buf[1024];
+    const char* existing = fs_path_to_cstr(existing_item, "existingPath", existing_buf, sizeof(existing_buf));
+    if (!existing) return ItemNull;
+    const char* new_path = fs_path_to_cstr(new_item, "newPath", new_buf, sizeof(new_buf));
+    if (!new_path) return ItemNull;
+    uv_fs_t req;
+    int r = uv_fs_link(NULL, &req, existing, new_path, NULL);
+    uv_fs_req_cleanup(&req);
+    if (r < 0) return js_throw_system_error(r, "link", existing);
+    return make_js_undefined();
+}
+
 // fs.symlinkSync(target, path)
 extern "C" Item js_fs_symlinkSync(Item target_item, Item path_item) {
     char target_buf[1024], path_buf[1024];
-    const char* target = item_to_cstr(target_item, target_buf, sizeof(target_buf));
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!target) return js_throw_invalid_arg_type("target", "string", target_item);
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* target = fs_path_to_cstr(target_item, "target", target_buf, sizeof(target_buf));
+    if (!target) return ItemNull;
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     uv_fs_t req;
     int r = uv_fs_symlink(NULL, &req, target, path, 0, NULL);
@@ -868,8 +1180,8 @@ extern "C" Item js_fs_symlinkSync(Item target_item, Item path_item) {
 // fs.readlinkSync(path) → string
 extern "C" Item js_fs_readlinkSync(Item path_item) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     uv_fs_t req;
     int r = uv_fs_readlink(NULL, &req, path, NULL);
@@ -886,8 +1198,8 @@ extern "C" Item js_fs_readlinkSync(Item path_item) {
 // fs.lstatSync(path) — like statSync but doesn't follow symlinks
 extern "C" Item js_fs_lstatSync(Item path_item) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     uv_fs_t req;
     int r = uv_fs_lstat(NULL, &req, path, NULL);
@@ -997,8 +1309,8 @@ static void on_fs_open_for_read(uv_fs_t* req) {
 // fs.readFile(path, callback)
 extern "C" Item js_fs_readFile(Item path_item, Item callback) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     JsFsReq* fsreq = (JsFsReq*)mem_calloc(1, sizeof(JsFsReq), MEM_CAT_JS_RUNTIME);
     if (!fsreq) return ItemNull;
@@ -1060,8 +1372,8 @@ static void on_fs_open_for_write(uv_fs_t* req) {
 // fs.writeFile(path, data, callback)
 extern "C" Item js_fs_writeFile(Item path_item, Item data_item, Item callback) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
 
     Item str_item = js_to_string(data_item);
     if (get_type_id(str_item) != LMD_TYPE_STRING) return ItemNull;
@@ -1088,13 +1400,9 @@ extern "C" Item js_fs_writeFile(Item path_item, Item data_item, Item callback) {
 // =============================================================================
 
 extern "C" Item js_fs_truncateSync(Item path_item, Item len_item) {
-    if (get_type_id(path_item) != LMD_TYPE_STRING) return js_throw_invalid_arg_type("path", "string", path_item);
-    String* ps = it2s(path_item);
     char path[PATH_MAX];
-    int plen = (int)ps->len;
-    if (plen >= (int)sizeof(path)) plen = (int)sizeof(path) - 1;
-    memcpy(path, ps->chars, plen);
-    path[plen] = '\0';
+    const char* p = fs_path_to_cstr(path_item, "path", path, sizeof(path));
+    if (!p) return ItemNull;
 
     int64_t length = 0;
     if (get_type_id(len_item) == LMD_TYPE_INT) length = it2i(len_item);
@@ -1120,8 +1428,8 @@ extern "C" Item js_fs_truncateSync(Item path_item, Item len_item) {
 
 extern "C" Item js_fs_openSync(Item path_item, Item flags_item, Item mode_item) {
     char path[PATH_MAX];
-    const char* p = item_to_cstr(path_item, path, sizeof(path));
-    if (!p) return js_throw_invalid_arg_type("path", "string", path_item);
+    const char* p = fs_path_to_cstr(path_item, "path", path, sizeof(path));
+    if (!p) return ItemNull;
 
     int flags = UV_FS_O_RDONLY;
     if (get_type_id(flags_item) == LMD_TYPE_STRING) {
@@ -1149,8 +1457,8 @@ extern "C" Item js_fs_openSync(Item path_item, Item flags_item, Item mode_item) 
 }
 
 extern "C" Item js_fs_closeSync(Item fd_item) {
-    if (get_type_id(fd_item) != LMD_TYPE_INT) return ItemNull;
-    int fd = (int)it2i(fd_item);
+    int fd = 0;
+    if (!fs_validate_fd(fd_item, &fd)) return ItemNull;
     uv_fs_t req;
     uv_fs_close(lambda_uv_loop(), &req, fd, NULL);
     uv_fs_req_cleanup(&req);
@@ -1158,18 +1466,19 @@ extern "C" Item js_fs_closeSync(Item fd_item) {
 }
 
 extern "C" Item js_fs_readSync(Item fd_item, Item buffer_item, Item offset_item, Item length_item, Item position_item) {
-    if (get_type_id(fd_item) != LMD_TYPE_INT) return (Item){.item = i2it(0)};
-    int fd = (int)it2i(fd_item);
+    int fd = 0;
+    if (!fs_validate_fd(fd_item, &fd)) return ItemNull;
 
-    int blen = 0;
-    uint8_t* data = buffer_data(buffer_item, &blen);
-    if (!data) return (Item){.item = i2it(0)};
+    JsTypedArray* ta = fs_get_typed_array(buffer_item);
+    if (!ta) return js_throw_invalid_arg_type("buffer", "Buffer, TypedArray, or DataView", buffer_item);
+    int blen = js_typed_array_byte_length(buffer_item);
+    uint8_t* data = (uint8_t*)js_typed_array_current_data_ptr(buffer_item);
 
     int offset = 0, length = blen;
-    if (get_type_id(offset_item) == LMD_TYPE_INT) offset = (int)it2i(offset_item);
-    if (get_type_id(length_item) == LMD_TYPE_INT) length = (int)it2i(length_item);
-    if (offset + length > blen) length = blen - offset;
+    if (!fs_validate_offset_length(offset_item, length_item, blen, &offset, &length)) return ItemNull;
+    if (blen == 0 && length > 0) return fs_throw_empty_read_buffer(ta);
     if (length <= 0) return (Item){.item = i2it(0)};
+    if (!data) return (Item){.item = i2it(0)};
 
     int64_t position = -1;
     if (get_type_id(position_item) == LMD_TYPE_INT) position = it2i(position_item);
@@ -1182,9 +1491,47 @@ extern "C" Item js_fs_readSync(Item fd_item, Item buffer_item, Item offset_item,
     return (Item){.item = i2it((int64_t)nread)};
 }
 
+extern "C" Item js_fs_read(Item fd_item, Item buffer_item, Item offset_item, Item length_item, Item position_item, Item callback) {
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "function", callback);
+    }
+
+    Item bytes_read = js_fs_readSync(fd_item, buffer_item, offset_item, length_item, position_item);
+    if (js_check_exception()) return ItemNull;
+
+    Item args[3] = {ItemNull, bytes_read, buffer_item};
+    js_call_function(callback, ItemNull, args, 3);
+    return make_js_undefined();
+}
+
+static Item js_fs_filehandle_read(Item buffer_item, Item offset_item, Item length_item, Item position_item) {
+    Item self = js_get_this();
+    Item fd_item = js_property_get(self, make_string_item("__fd"));
+    Item bytes_read = js_fs_readSync(fd_item, buffer_item, offset_item, length_item, position_item);
+    if (js_check_exception()) {
+        Item err = js_clear_exception();
+        return js_promise_reject(err);
+    }
+
+    Item result = js_new_object();
+    js_property_set(result, make_string_item("bytesRead"), bytes_read);
+    js_property_set(result, make_string_item("buffer"), buffer_item);
+    return js_promise_resolve(result);
+}
+
+static Item js_fs_filehandle_close(void) {
+    Item self = js_get_this();
+    Item fd_item = js_property_get(self, make_string_item("__fd"));
+    if (get_type_id(fd_item) == LMD_TYPE_INT) {
+        js_fs_closeSync(fd_item);
+        js_property_set(self, make_string_item("__fd"), make_js_undefined());
+    }
+    return js_promise_resolve(make_js_undefined());
+}
+
 extern "C" Item js_fs_writeSync(Item fd_item, Item data_item, Item offset_item, Item length_item, Item position_item) {
-    if (get_type_id(fd_item) != LMD_TYPE_INT) return (Item){.item = i2it(0)};
-    int fd = (int)it2i(fd_item);
+    int fd = 0;
+    if (!fs_validate_fd(fd_item, &fd)) return ItemNull;
 
     // data can be a string or a Buffer
     const char* write_buf = NULL;
@@ -1205,9 +1552,7 @@ extern "C" Item js_fs_writeSync(Item fd_item, Item data_item, Item offset_item, 
     if (!write_buf) return (Item){.item = i2it(0)};
 
     int offset = 0, length = write_len;
-    if (get_type_id(offset_item) == LMD_TYPE_INT) offset = (int)it2i(offset_item);
-    if (get_type_id(length_item) == LMD_TYPE_INT) length = (int)it2i(length_item);
-    if (offset + length > write_len) length = write_len - offset;
+    if (!fs_validate_offset_length(offset_item, length_item, write_len, &offset, &length)) return ItemNull;
     if (length <= 0) return (Item){.item = i2it(0)};
 
     int64_t position = -1;
@@ -1222,8 +1567,8 @@ extern "C" Item js_fs_writeSync(Item fd_item, Item data_item, Item offset_item, 
 }
 
 extern "C" Item js_fs_fstatSync(Item fd_item) {
-    if (get_type_id(fd_item) != LMD_TYPE_INT) return ItemNull;
-    int fd = (int)it2i(fd_item);
+    int fd = 0;
+    if (!fs_validate_fd(fd_item, &fd)) return ItemNull;
     uv_fs_t req;
     int r = uv_fs_fstat(lambda_uv_loop(), &req, fd, NULL);
     if (r < 0) { uv_fs_req_cleanup(&req); return ItemNull; }
@@ -1261,34 +1606,36 @@ static Item make_fs_error(int uv_err, const char* path) {
 // fs.access(path[, mode], callback)
 static Item js_fs_access_async(Item path_item, Item mode_or_cb, Item callback_item) {
     Item callback = callback_item;
-    int mode = 0; // F_OK
+    Item mode_item = mode_or_cb;
+    bool has_mode = true;
     if (get_type_id(mode_or_cb) == LMD_TYPE_FUNC) {
         callback = mode_or_cb;
+        mode_item = make_js_undefined();
+        has_mode = false;
     } else {
-        if (get_type_id(mode_or_cb) == LMD_TYPE_INT) mode = (int)it2i(mode_or_cb);
+        has_mode = get_type_id(mode_or_cb) != LMD_TYPE_UNDEFINED;
     }
+
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "function", callback);
+    }
+
+    int mode = 0;
+    if (!fs_parse_access_mode(mode_item, has_mode, &mode)) return ItemNull;
+
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) {
-        if (get_type_id(callback) == LMD_TYPE_FUNC) {
-            Item err = make_fs_error(UV_EINVAL, NULL);
-            Item args[1] = {err};
-            js_call_function(callback, ItemNull, args, 1);
-        }
-        return make_js_undefined();
-    }
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
     uv_fs_t req;
     int r = uv_fs_access(NULL, &req, path, mode, NULL);
     uv_fs_req_cleanup(&req);
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
-        if (r < 0) {
-            Item err = make_fs_error(r, path);
-            Item args[1] = {err};
-            js_call_function(callback, ItemNull, args, 1);
-        } else {
-            Item args[1] = {ItemNull};
-            js_call_function(callback, ItemNull, args, 1);
-        }
+    if (r < 0) {
+        Item err = make_fs_error(r, path);
+        Item args[1] = {err};
+        js_call_function(callback, ItemNull, args, 1);
+    } else {
+        Item args[1] = {ItemNull};
+        js_call_function(callback, ItemNull, args, 1);
     }
     return make_js_undefined();
 }
@@ -1301,6 +1648,7 @@ static Item js_fs_stat_async(Item path_item, Item opts_or_cb, Item callback_item
     }
     // Reuse statSync to build the stat result
     Item stat_result = js_fs_statSync(path_item);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
         if (stat_result.item == ITEM_NULL || get_type_id(stat_result) == LMD_TYPE_NULL) {
             char path_buf[1024];
@@ -1323,6 +1671,7 @@ static Item js_fs_lstat_async(Item path_item, Item opts_or_cb, Item callback_ite
         callback = opts_or_cb;
     }
     Item stat_result = js_fs_lstatSync(path_item);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
         if (stat_result.item == ITEM_NULL || get_type_id(stat_result) == LMD_TYPE_NULL) {
             char path_buf[1024];
@@ -1347,6 +1696,7 @@ static Item js_fs_open_async(Item path_item, Item flags_item, Item mode_or_cb, I
         mode_item = make_js_undefined();
     }
     Item fd = js_fs_openSync(path_item, flags_item, mode_item);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
         if (fd.item == ITEM_NULL || get_type_id(fd) == LMD_TYPE_NULL) {
             char path_buf[1024];
@@ -1374,46 +1724,21 @@ static Item js_fs_close_async(Item fd_item, Item callback) {
 
 // fs.chmod(path, mode, callback)
 static Item js_fs_chmod_async(Item path_item, Item mode_item, Item callback) {
-    char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) {
-        if (get_type_id(callback) == LMD_TYPE_FUNC) {
-            Item err = make_fs_error(UV_EINVAL, NULL);
-            Item args[1] = {err};
-            js_call_function(callback, ItemNull, args, 1);
-        }
-        return make_js_undefined();
-    }
-    int mode = 0;
-    if (get_type_id(mode_item) == LMD_TYPE_INT) mode = (int)it2i(mode_item);
-    uv_fs_t req;
-    int r = uv_fs_chmod(NULL, &req, path, mode, NULL);
-    uv_fs_req_cleanup(&req);
+    Item result = js_fs_chmodSync(path_item, mode_item);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
-        if (r < 0) {
-            Item err = make_fs_error(r, path);
-            Item args[1] = {err};
-            js_call_function(callback, ItemNull, args, 1);
-        } else {
-            Item args[1] = {ItemNull};
-            js_call_function(callback, ItemNull, args, 1);
-        }
+        Item args[1] = {ItemNull};
+        js_call_function(callback, ItemNull, args, 1);
     }
+    (void)result;
     return make_js_undefined();
 }
 
 // fs.unlink(path, callback)
 static Item js_fs_unlink_async(Item path_item, Item callback) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) {
-        if (get_type_id(callback) == LMD_TYPE_FUNC) {
-            Item err = make_fs_error(UV_EINVAL, NULL);
-            Item args[1] = {err};
-            js_call_function(callback, ItemNull, args, 1);
-        }
-        return make_js_undefined();
-    }
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
     uv_fs_t req;
     int r = uv_fs_unlink(NULL, &req, path, NULL);
     uv_fs_req_cleanup(&req);
@@ -1434,7 +1759,10 @@ static Item js_fs_unlink_async(Item path_item, Item callback) {
 // NOTE: callback signature is (exists) not (err, exists)
 static Item js_fs_exists_async(Item path_item, Item callback) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    const char* path = NULL;
+    if (!(get_type_id(path_item) == LMD_TYPE_STRING && fs_string_has_nul(it2s(path_item)))) {
+        path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    }
     bool exists = false;
     if (path) {
         uv_fs_t req;
@@ -1452,6 +1780,7 @@ static Item js_fs_exists_async(Item path_item, Item callback) {
 // fs.rename(oldPath, newPath, callback)
 static Item js_fs_rename_async(Item old_item, Item new_item, Item callback) {
     js_fs_renameSync(old_item, new_item);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
         Item args[1] = {ItemNull};
         js_call_function(callback, ItemNull, args, 1);
@@ -1466,6 +1795,7 @@ static Item js_fs_readdir_async(Item path_item, Item opts_or_cb, Item callback_i
         callback = opts_or_cb;
     }
     Item result = js_fs_readdirSync(path_item);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
         if (result.item == ITEM_NULL || get_type_id(result) == LMD_TYPE_NULL) {
             char path_buf[1024];
@@ -1528,6 +1858,29 @@ static Item fs_promise_wrap_result(Item result) {
     return js_promise_resolve(result);
 }
 
+static void fs_append_async_access_stack(Item err) {
+    if (get_type_id(err) != LMD_TYPE_MAP) return;
+
+    Item stack_key = make_string_item("stack");
+    Item stack_item = js_property_get(err, stack_key);
+    const char* async_frame = "\n    at async Object.access";
+    char stack_buf[2048];
+
+    if (get_type_id(stack_item) == LMD_TYPE_STRING) {
+        String* stack = it2s(stack_item);
+        int len = (int)stack->len;
+        int max_len = (int)sizeof(stack_buf) - (int)strlen(async_frame) - 1;
+        if (len > max_len) len = max_len;
+        memcpy(stack_buf, stack->chars, (size_t)len);
+        stack_buf[len] = '\0';
+        snprintf(stack_buf + len, sizeof(stack_buf) - (size_t)len, "%s", async_frame);
+    } else {
+        snprintf(stack_buf, sizeof(stack_buf), "%s", async_frame + 1);
+    }
+
+    js_property_set(err, stack_key, make_string_item(stack_buf));
+}
+
 extern "C" Item js_fs_readFile_promise(Item path, Item opts) {
     Item result = js_fs_readFileSync(path, opts);
     return fs_promise_wrap_result(result);
@@ -1555,7 +1908,12 @@ extern "C" Item js_fs_mkdir_promise(Item path, Item opts) {
 
 extern "C" Item js_fs_access_promise(Item path, Item mode) {
     Item result = js_fs_accessSync(path, mode);
-    return fs_promise_wrap_result(result);
+    if (js_check_exception()) {
+        Item err = js_clear_exception();
+        fs_append_async_access_stack(err);
+        return js_promise_reject(err);
+    }
+    return js_promise_resolve(result);
 }
 
 extern "C" Item js_fs_unlink_promise(Item path) {
@@ -1574,12 +1932,39 @@ extern "C" Item js_fs_readdir_promise(Item path) {
 }
 
 extern "C" Item js_fs_open_promise(Item path, Item flags, Item mode) {
-    Item result = js_fs_openSync(path, flags, mode);
-    return fs_promise_wrap_result(result);
+    Item fd = js_fs_openSync(path, flags, mode);
+    if (js_check_exception()) {
+        Item err = js_clear_exception();
+        return js_promise_reject(err);
+    }
+    if (get_type_id(fd) != LMD_TYPE_INT) {
+        return js_promise_reject(js_new_error(make_string_item("open failed")));
+    }
+
+    Item handle = js_new_object();
+    js_property_set(handle, make_string_item("__fd"), fd);
+    js_property_set(handle, make_string_item("fd"), fd);
+    js_property_set(handle, make_string_item("read"),
+                    js_new_function((void*)js_fs_filehandle_read, 4));
+    js_property_set(handle, make_string_item("close"),
+                    js_new_function((void*)js_fs_filehandle_close, 0));
+    js_property_set(handle, make_string_item("__sym_14"),
+                    js_new_function((void*)js_fs_filehandle_close, 0));
+    return js_promise_resolve(handle);
 }
 
 extern "C" Item js_fs_chmod_promise(Item path, Item mode) {
     Item result = js_fs_chmodSync(path, mode);
+    return fs_promise_wrap_result(result);
+}
+
+extern "C" Item js_fs_chown_promise(Item path, Item uid, Item gid) {
+    Item result = js_fs_chownSync(path, uid, gid);
+    return fs_promise_wrap_result(result);
+}
+
+extern "C" Item js_fs_lchown_promise(Item path, Item uid, Item gid) {
+    Item result = js_fs_lchownSync(path, uid, gid);
     return fs_promise_wrap_result(result);
 }
 
@@ -1614,15 +1999,8 @@ extern "C" Item js_fs_symlink_promise(Item target, Item path) {
 
 static Item js_fs_rmdir_async(Item path_item, Item callback) {
     char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) {
-        if (get_type_id(callback) == LMD_TYPE_FUNC) {
-            Item err = make_fs_error(UV_EINVAL, NULL);
-            Item args[1] = {err};
-            js_call_function(callback, ItemNull, args, 1);
-        }
-        return make_js_undefined();
-    }
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
     uv_fs_t req;
     int r = uv_fs_rmdir(NULL, &req, path, NULL);
     uv_fs_req_cleanup(&req);
@@ -1640,6 +2018,7 @@ static Item js_fs_copyFile_async(Item src_item, Item dest_item, Item flags_or_cb
         cb = flags_or_cb;
     }
     Item result = js_fs_copyFileSync(src_item, dest_item);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         Item args[1] = { get_type_id(result) == LMD_TYPE_NULL ? ItemNull : ItemNull };
         js_call_function(cb, ItemNull, args, 1);
@@ -1650,6 +2029,7 @@ static Item js_fs_copyFile_async(Item src_item, Item dest_item, Item flags_or_cb
 static Item js_fs_realpath_async(Item path_item, Item opts_or_cb, Item callback) {
     Item cb = (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) ? opts_or_cb : callback;
     Item result = js_fs_realpathSync(path_item);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         if (get_type_id(result) == LMD_TYPE_STRING) {
             Item args[2] = {ItemNull, result};
@@ -1666,6 +2046,7 @@ static Item js_fs_realpath_async(Item path_item, Item opts_or_cb, Item callback)
 static Item js_fs_mkdtemp_async(Item prefix_item, Item opts_or_cb, Item callback) {
     Item cb = (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) ? opts_or_cb : callback;
     Item result = js_fs_mkdtempSync(prefix_item);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         if (get_type_id(result) == LMD_TYPE_STRING) {
             Item args[2] = {ItemNull, result};
@@ -1682,6 +2063,7 @@ static Item js_fs_mkdtemp_async(Item prefix_item, Item opts_or_cb, Item callback
 static Item js_fs_readlink_async(Item path_item, Item opts_or_cb, Item callback) {
     Item cb = (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) ? opts_or_cb : callback;
     Item result = js_fs_readlinkSync(path_item);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         if (get_type_id(result) == LMD_TYPE_STRING) {
             Item args[2] = {ItemNull, result};
@@ -1698,6 +2080,7 @@ static Item js_fs_readlink_async(Item path_item, Item opts_or_cb, Item callback)
 static Item js_fs_symlink_async(Item target_item, Item path_item, Item type_or_cb, Item callback) {
     Item cb = (get_type_id(type_or_cb) == LMD_TYPE_FUNC) ? type_or_cb : callback;
     js_fs_symlinkSync(target_item, path_item);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         Item args[1] = { ItemNull };
         js_call_function(cb, ItemNull, args, 1);
@@ -1709,6 +2092,7 @@ static Item js_fs_truncate_async(Item path_item, Item len_or_cb, Item callback) 
     Item cb = (get_type_id(len_or_cb) == LMD_TYPE_FUNC) ? len_or_cb : callback;
     Item len = (get_type_id(len_or_cb) == LMD_TYPE_FUNC) ? (Item){.item = i2it(0)} : len_or_cb;
     js_fs_truncateSync(path_item, len);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         Item args[1] = { ItemNull };
         js_call_function(cb, ItemNull, args, 1);
@@ -1719,6 +2103,7 @@ static Item js_fs_truncate_async(Item path_item, Item len_or_cb, Item callback) 
 static Item js_fs_appendFile_async(Item path_item, Item data_item, Item opts_or_cb, Item callback) {
     Item cb = (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) ? opts_or_cb : callback;
     js_fs_appendFileSync(path_item, data_item);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         Item args[1] = { ItemNull };
         js_call_function(cb, ItemNull, args, 1);
@@ -1727,87 +2112,161 @@ static Item js_fs_appendFile_async(Item path_item, Item data_item, Item opts_or_
 }
 
 static Item js_fs_fchmod_async(Item fd_item, Item mode_item, Item callback) {
-    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
-    int fd = (int)it2i(js_to_number(fd_item));
-    int mode = (int)it2i(js_to_number(mode_item));
-    uv_fs_t req;
-    int r = uv_fs_fchmod(NULL, &req, fd, mode, NULL);
-    uv_fs_req_cleanup(&req);
-    Item args[1] = { r < 0 ? make_fs_error(r, NULL) : ItemNull };
-    js_call_function(callback, ItemNull, args, 1);
+    Item result = js_fs_fchmodSync(fd_item, mode_item);
+    if (js_check_exception()) return ItemNull;
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        Item args[1] = {ItemNull};
+        js_call_function(callback, ItemNull, args, 1);
+    }
+    (void)result;
+    return make_js_undefined();
+}
+
+static Item js_fs_lchmod_async(Item path_item, Item mode_item, Item callback) {
+    Item result = js_fs_lchmodSync(path_item, mode_item);
+    if (js_check_exception()) return ItemNull;
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        Item args[1] = {ItemNull};
+        js_call_function(callback, ItemNull, args, 1);
+    }
+    (void)result;
     return make_js_undefined();
 }
 
 static Item js_fs_fchown_async(Item fd_item, Item uid_item, Item gid_item, Item callback) {
-    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
-    int fd = (int)it2i(js_to_number(fd_item));
-    int uid = (int)it2i(js_to_number(uid_item));
-    int gid = (int)it2i(js_to_number(gid_item));
-    uv_fs_t req;
-    int r = uv_fs_fchown(NULL, &req, fd, uid, gid, NULL);
-    uv_fs_req_cleanup(&req);
-    Item args[1] = { r < 0 ? make_fs_error(r, NULL) : ItemNull };
-    js_call_function(callback, ItemNull, args, 1);
+    Item result = js_fs_fchownSync(fd_item, uid_item, gid_item);
+    if (js_check_exception()) return ItemNull;
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        Item args[1] = {ItemNull};
+        js_call_function(callback, ItemNull, args, 1);
+    }
+    (void)result;
     return make_js_undefined();
 }
 
 static Item js_fs_lchown_async(Item path_item, Item uid_item, Item gid_item, Item callback) {
-    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
-    char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) {
-        Item err = make_fs_error(UV_EINVAL, NULL);
-        Item args[1] = {err};
-        js_call_function(callback, ItemNull, args, 1);
-        return make_js_undefined();
-    }
-    int uid = (int)it2i(js_to_number(uid_item));
-    int gid = (int)it2i(js_to_number(gid_item));
-    uv_fs_t req;
-    int r = uv_fs_lchown(NULL, &req, path, uid, gid, NULL);
-    uv_fs_req_cleanup(&req);
-    Item args[1] = { r < 0 ? make_fs_error(r, path) : ItemNull };
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return js_throw_invalid_arg_type("callback", "function", callback);
+    Item result = js_fs_lchownSync(path_item, uid_item, gid_item);
+    if (js_check_exception()) return ItemNull;
+    Item args[1] = {ItemNull};
     js_call_function(callback, ItemNull, args, 1);
+    (void)result;
     return make_js_undefined();
 }
 
 static Item js_fs_chown_async(Item path_item, Item uid_item, Item gid_item, Item callback) {
-    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
-    char path_buf[1024];
-    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) {
-        Item err = make_fs_error(UV_EINVAL, NULL);
-        Item args[1] = {err};
-        js_call_function(callback, ItemNull, args, 1);
-        return make_js_undefined();
-    }
-    int uid = (int)it2i(js_to_number(uid_item));
-    int gid = (int)it2i(js_to_number(gid_item));
-    uv_fs_t req;
-    int r = uv_fs_chown(NULL, &req, path, uid, gid, NULL);
-    uv_fs_req_cleanup(&req);
-    Item args[1] = { r < 0 ? make_fs_error(r, path) : ItemNull };
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return js_throw_invalid_arg_type("callback", "function", callback);
+    Item result = js_fs_chownSync(path_item, uid_item, gid_item);
+    if (js_check_exception()) return ItemNull;
+    Item args[1] = {ItemNull};
     js_call_function(callback, ItemNull, args, 1);
+    (void)result;
     return make_js_undefined();
 }
 
 static Item js_fs_link_async(Item existing_item, Item new_item, Item callback) {
     if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
-    char existing_buf[1024], new_buf[1024];
-    const char* existing = item_to_cstr(existing_item, existing_buf, sizeof(existing_buf));
-    const char* new_path = item_to_cstr(new_item, new_buf, sizeof(new_buf));
-    if (!existing || !new_path) {
-        Item err = make_fs_error(UV_EINVAL, NULL);
-        Item args[1] = {err};
-        js_call_function(callback, ItemNull, args, 1);
-        return make_js_undefined();
-    }
-    uv_fs_t req;
-    int r = uv_fs_link(NULL, &req, existing, new_path, NULL);
-    uv_fs_req_cleanup(&req);
-    Item args[1] = { r < 0 ? make_fs_error(r, existing) : ItemNull };
+    Item result = js_fs_linkSync(existing_item, new_item);
+    if (js_check_exception()) return ItemNull;
+    Item args[1] = {ItemNull};
     js_call_function(callback, ItemNull, args, 1);
+    (void)result;
     return make_js_undefined();
+}
+
+static Item js_fs_watcher_close(void) {
+    return make_js_undefined();
+}
+
+static Item js_fs_watcher_ref(void) {
+    return js_get_this();
+}
+
+static Item js_fs_watcher_unref(void) {
+    return js_get_this();
+}
+
+static Item js_fs_make_watcher(void) {
+    Item watcher = js_new_object();
+    js_property_set(watcher, make_string_item("close"), js_new_function((void*)js_fs_watcher_close, 0));
+    js_property_set(watcher, make_string_item("ref"), js_new_function((void*)js_fs_watcher_ref, 0));
+    js_property_set(watcher, make_string_item("unref"), js_new_function((void*)js_fs_watcher_unref, 0));
+    return watcher;
+}
+
+static Item js_fs_watch(Item path_item, Item options_or_listener, Item listener_item) {
+    (void)options_or_listener;
+    (void)listener_item;
+    char path_buf[1024];
+    const char* path = fs_path_to_cstr(path_item, "filename", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+    return js_fs_make_watcher();
+}
+
+static Item js_fs_watchFile(Item path_item, Item options_or_listener, Item listener_item) {
+    Item listener = listener_item;
+    if (get_type_id(options_or_listener) == LMD_TYPE_FUNC) listener = options_or_listener;
+    if (get_type_id(listener) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("listener", "function", listener);
+    }
+    char path_buf[1024];
+    const char* path = fs_path_to_cstr(path_item, "filename", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+    return js_fs_make_watcher();
+}
+
+static Item js_fs_unwatchFile(Item path_item, Item listener_item) {
+    (void)listener_item;
+    char path_buf[1024];
+    const char* path = fs_path_to_cstr(path_item, "filename", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+    return make_js_undefined();
+}
+
+static Item js_fs_utimesSync(Item path_item, Item atime_item, Item mtime_item) {
+    (void)atime_item;
+    (void)mtime_item;
+    char path_buf[1024];
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+    return make_js_undefined();
+}
+
+static Item js_fs_utimes_async(Item path_item, Item atime_item, Item mtime_item, Item callback) {
+    Item result = js_fs_utimesSync(path_item, atime_item, mtime_item);
+    if (js_check_exception()) return ItemNull;
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        Item args[1] = {ItemNull};
+        js_call_function(callback, ItemNull, args, 1);
+    }
+    (void)result;
+    return make_js_undefined();
+}
+
+extern "C" Item js_internal_fs_validateOffsetLengthRead(Item offset_item, Item length_item, Item byte_length_item) {
+    int64_t byte_length = 0;
+    if (!fs_validate_int_range(byte_length_item, "byteLength", 0, 2147483647LL, &byte_length)) return ItemNull;
+    int offset = 0, length = 0;
+    if (!fs_validate_offset_length(offset_item, length_item, (int)byte_length, &offset, &length)) return ItemNull;
+    return make_js_undefined();
+}
+
+extern "C" Item js_internal_fs_validateOffsetLengthWrite(Item offset_item, Item length_item, Item byte_length_item) {
+    int64_t byte_length = 0;
+    if (!fs_validate_int_range(byte_length_item, "byteLength", 0, 2147483647LL, &byte_length)) return ItemNull;
+    int offset = 0, length = 0;
+    if (!fs_validate_offset_length(offset_item, length_item, (int)byte_length, &offset, &length)) return ItemNull;
+    return make_js_undefined();
+}
+
+extern "C" Item js_get_internal_fs_utils_namespace(void) {
+    Item ns = js_new_object();
+    js_property_set(ns, make_string_item("validateOffsetLengthRead"),
+                    js_new_function((void*)js_internal_fs_validateOffsetLengthRead, 3));
+    js_property_set(ns, make_string_item("validateOffsetLengthWrite"),
+                    js_new_function((void*)js_internal_fs_validateOffsetLengthWrite, 3));
+    js_property_set(ns, make_string_item("default"), ns);
+    return ns;
 }
 
 extern "C" Item js_get_fs_namespace(void) {
@@ -1852,10 +2311,15 @@ extern "C" Item js_get_fs_namespace(void) {
     js_fs_set_method(fs_namespace, "truncate",        (void*)js_fs_truncate_async, 3);
     js_fs_set_method(fs_namespace, "appendFile",      (void*)js_fs_appendFile_async, 4);
     js_fs_set_method(fs_namespace, "fchmod",          (void*)js_fs_fchmod_async, 3);
+    js_fs_set_method(fs_namespace, "lchmod",          (void*)js_fs_lchmod_async, 3);
     js_fs_set_method(fs_namespace, "fchown",          (void*)js_fs_fchown_async, 4);
     js_fs_set_method(fs_namespace, "lchown",          (void*)js_fs_lchown_async, 4);
     js_fs_set_method(fs_namespace, "chown",           (void*)js_fs_chown_async, 4);
     js_fs_set_method(fs_namespace, "link",            (void*)js_fs_link_async, 3);
+    js_fs_set_method(fs_namespace, "watch",           (void*)js_fs_watch, 3);
+    js_fs_set_method(fs_namespace, "watchFile",       (void*)js_fs_watchFile, 3);
+    js_fs_set_method(fs_namespace, "unwatchFile",     (void*)js_fs_unwatchFile, 2);
+    js_fs_set_method(fs_namespace, "utimes",          (void*)js_fs_utimes_async, 4);
 
     // additional sync methods
     js_fs_set_method(fs_namespace, "copyFileSync",    (void*)js_fs_copyFileSync, 2);
@@ -1864,14 +2328,22 @@ extern "C" Item js_get_fs_namespace(void) {
     js_fs_set_method(fs_namespace, "rmSync",          (void*)js_fs_rmSync, 2);
     js_fs_set_method(fs_namespace, "mkdtempSync",     (void*)js_fs_mkdtempSync, 1);
     js_fs_set_method(fs_namespace, "chmodSync",       (void*)js_fs_chmodSync, 2);
+    js_fs_set_method(fs_namespace, "fchmodSync",      (void*)js_fs_fchmodSync, 2);
+    js_fs_set_method(fs_namespace, "lchmodSync",      (void*)js_fs_lchmodSync, 2);
+    js_fs_set_method(fs_namespace, "chownSync",       (void*)js_fs_chownSync, 3);
+    js_fs_set_method(fs_namespace, "lchownSync",      (void*)js_fs_lchownSync, 3);
+    js_fs_set_method(fs_namespace, "fchownSync",      (void*)js_fs_fchownSync, 3);
     js_fs_set_method(fs_namespace, "symlinkSync",     (void*)js_fs_symlinkSync, 2);
     js_fs_set_method(fs_namespace, "readlinkSync",    (void*)js_fs_readlinkSync, 1);
     js_fs_set_method(fs_namespace, "lstatSync",       (void*)js_fs_lstatSync, 1);
     js_fs_set_method(fs_namespace, "truncateSync",    (void*)js_fs_truncateSync, 2);
+    js_fs_set_method(fs_namespace, "utimesSync",      (void*)js_fs_utimesSync, 3);
+    js_fs_set_method(fs_namespace, "linkSync",        (void*)js_fs_linkSync, 2);
 
     // file descriptor operations
     js_fs_set_method(fs_namespace, "openSync",        (void*)js_fs_openSync, 3);
     js_fs_set_method(fs_namespace, "closeSync",       (void*)js_fs_closeSync, 1);
+    js_fs_set_method(fs_namespace, "read",            (void*)js_fs_read, 6);
     js_fs_set_method(fs_namespace, "readSync",        (void*)js_fs_readSync, 5);
     js_fs_set_method(fs_namespace, "writeSync",       (void*)js_fs_writeSync, 5);
     js_fs_set_method(fs_namespace, "fstatSync",       (void*)js_fs_fstatSync, 1);
@@ -1956,6 +2428,8 @@ extern "C" Item js_get_fs_namespace(void) {
         js_fs_set_method(promises, "readdir",     (void*)js_fs_readdir_promise, 1);
         js_fs_set_method(promises, "open",        (void*)js_fs_open_promise, 3);
         js_fs_set_method(promises, "chmod",       (void*)js_fs_chmod_promise, 2);
+        js_fs_set_method(promises, "chown",       (void*)js_fs_chown_promise, 3);
+        js_fs_set_method(promises, "lchown",      (void*)js_fs_lchown_promise, 3);
         js_fs_set_method(promises, "realpath",    (void*)js_fs_realpath_promise, 1);
         js_fs_set_method(promises, "copyFile",    (void*)js_fs_copyFile_promise, 2);
         js_fs_set_method(promises, "mkdtemp",     (void*)js_fs_mkdtemp_promise, 1);

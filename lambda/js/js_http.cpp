@@ -1786,6 +1786,35 @@ static Item js_http_client_inst_setHeader(Item maybe_self, Item name_item, Item 
     return js_http_client_setHeader(self, maybe_self, name_item);
 }
 
+static Item http_client_make_request_object(JsHttpClientReq* creq,
+                                            const char* method,
+                                            const char* path) {
+    Item obj = js_new_object();
+    js_class_stamp(obj, JS_CLASS_CLIENT_REQUEST);
+    if (creq) {
+        js_property_set(obj, make_string_item("__client__"),
+                        (Item){.item = i2it((int64_t)(uintptr_t)creq)});
+    }
+    js_property_set(obj, make_string_item("path"),
+                    make_string_item((path && path[0]) ? path : "/"));
+    js_property_set(obj, make_string_item("method"),
+                    make_string_item((method && method[0]) ? method : "GET"));
+    js_property_set(obj, make_string_item("write"),
+                    js_new_function((void*)js_http_client_inst_write, 2));
+    js_property_set(obj, make_string_item("end"),
+                    js_new_function((void*)js_http_client_inst_end, 2));
+    js_property_set(obj, make_string_item("on"),
+                    js_new_function((void*)js_http_client_inst_on, 3));
+    js_property_set(obj, make_string_item("once"),
+                    js_new_function((void*)js_http_client_inst_on, 3));
+    js_property_set(obj, make_string_item("setHeader"),
+                    js_new_function((void*)js_http_client_inst_setHeader, 3));
+    js_property_set(obj, make_string_item("destroy"),
+                    js_new_function((void*)js_http_client_inst_destroy, 2));
+    js_property_set(obj, make_string_item("destroyed"), (Item){.item = b2it(false)});
+    return obj;
+}
+
 static bool http_client_validate_header_pair(Item name_item, Item value_item) {
     if (get_type_id(name_item) != LMD_TYPE_STRING) return true;
     String* name = it2s(name_item);
@@ -1958,16 +1987,20 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
         Item m = js_property_get(options_item, make_string_item("method"));
         if (get_type_id(m) == LMD_TYPE_STRING) {
             String* ms = it2s(m);
-            int len = (int)ms->len < 15 ? (int)ms->len : 15;
-            memcpy(method_buf, ms->chars, (size_t)len);
-            method_buf[len] = '\0';
+            if (ms->len > 0) {
+                int len = (int)ms->len < 15 ? (int)ms->len : 15;
+                memcpy(method_buf, ms->chars, (size_t)len);
+                method_buf[len] = '\0';
+            }
         }
         Item pa = js_property_get(options_item, make_string_item("path"));
         if (get_type_id(pa) == LMD_TYPE_STRING) {
             String* ps = it2s(pa);
-            int len = (int)ps->len < 4095 ? (int)ps->len : 4095;
-            memcpy(path_buf, ps->chars, (size_t)len);
-            path_buf[len] = '\0';
+            if (ps->len > 0) {
+                int len = (int)ps->len < 4095 ? (int)ps->len : 4095;
+                memcpy(path_buf, ps->chars, (size_t)len);
+                path_buf[len] = '\0';
+            }
         }
     } else if (get_type_id(options_item) == LMD_TYPE_STRING) {
         // simple string URL — parse host:port/path
@@ -2086,25 +2119,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
     creq->send_buf = (char*)mem_alloc(rlen, MEM_CAT_JS_RUNTIME);
     memcpy(creq->send_buf, req_str, rlen);
 
-    // create JS ClientRequest object
-    Item obj = js_new_object();
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(obj, JS_CLASS_CLIENT_REQUEST);  // A3-T3b
-    js_property_set(obj, make_string_item("__client__"),
-                    (Item){.item = i2it((int64_t)(uintptr_t)creq)});
-    js_property_set(obj, make_string_item("write"),
-                    js_new_function((void*)js_http_client_inst_write, 2));
-    js_property_set(obj, make_string_item("end"),
-                    js_new_function((void*)js_http_client_inst_end, 2));
-    js_property_set(obj, make_string_item("on"),
-                    js_new_function((void*)js_http_client_inst_on, 3));
-    js_property_set(obj, make_string_item("once"),
-                    js_new_function((void*)js_http_client_inst_on, 3));
-    js_property_set(obj, make_string_item("setHeader"),
-                    js_new_function((void*)js_http_client_inst_setHeader, 3));
-    js_property_set(obj, make_string_item("destroy"),
-                    js_new_function((void*)js_http_client_inst_destroy, 2));
-    js_property_set(obj, make_string_item("destroyed"), (Item){.item = b2it(false)});
+    Item obj = http_client_make_request_object(creq, method_buf, path_buf);
 
     creq->js_object = obj;
 
@@ -2244,6 +2259,34 @@ extern "C" Item js_http_agent_createConnection(Item options) {
     return js_net_createConnection(options, ItemNull);
 }
 
+extern "C" Item js_http_ClientRequest(Item options_item) {
+    char method_buf[16] = "GET";
+    char path_buf[4096] = "/";
+
+    if (get_type_id(options_item) == LMD_TYPE_MAP) {
+        Item m = js_property_get(options_item, make_string_item("method"));
+        if (get_type_id(m) == LMD_TYPE_STRING) {
+            String* ms = it2s(m);
+            if (ms->len > 0) {
+                int len = (int)ms->len < 15 ? (int)ms->len : 15;
+                memcpy(method_buf, ms->chars, (size_t)len);
+                method_buf[len] = '\0';
+            }
+        }
+        Item pa = js_property_get(options_item, make_string_item("path"));
+        if (get_type_id(pa) == LMD_TYPE_STRING) {
+            String* ps = it2s(pa);
+            if (ps->len > 0) {
+                int len = (int)ps->len < 4095 ? (int)ps->len : 4095;
+                memcpy(path_buf, ps->chars, (size_t)len);
+                path_buf[len] = '\0';
+            }
+        }
+    }
+
+    return http_client_make_request_object(NULL, method_buf, path_buf);
+}
+
 // new http.Agent(options) constructor
 extern "C" Item js_http_Agent(Item options) {
     Item agent = js_new_object();
@@ -2346,7 +2389,7 @@ extern "C" Item js_get_http_namespace(void) {
     // Stub constructors for IncomingMessage, ServerResponse, ClientRequest, OutgoingMessage
     http_set_method(http_namespace, "IncomingMessage", (void*)js_http_stub_ctor, 0);
     http_set_method(http_namespace, "ServerResponse",  (void*)js_http_stub_ctor, 0);
-    http_set_method(http_namespace, "ClientRequest",   (void*)js_http_stub_ctor, 0);
+    http_set_method(http_namespace, "ClientRequest",   (void*)js_http_ClientRequest, 1);
     http_set_method(http_namespace, "OutgoingMessage",  (void*)js_http_stub_ctor, 0);
 
     Item default_key = make_string_item("default");

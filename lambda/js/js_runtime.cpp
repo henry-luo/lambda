@@ -32488,6 +32488,12 @@ extern "C" Item js_module_get(Item specifier) {
         }
         return fsp_ns;
     }
+    // internal/fs/utils — selected helpers used by official fs tests
+    if ((spec->len == 17 && memcmp(spec->chars, "internal/fs/utils", 17) == 0) ||
+        (spec->len == 20 && memcmp(spec->chars, "internal/fs/utils.js", 20) == 0)) {
+        extern Item js_get_internal_fs_utils_namespace(void);
+        return js_get_internal_fs_utils_namespace();
+    }
     // node:dns/promises — promise-based DNS API
     if ((spec->len == 12 && memcmp(spec->chars, "dns/promises", 12) == 0) ||
         (spec->len == 17 && memcmp(spec->chars, "node:dns/promises", 17) == 0)) {
