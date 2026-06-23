@@ -6333,6 +6333,11 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
                     MIR_new_reg_op(mt->ctx, boxed)));
             }
+            if (var->from_env && var->env_reg != 0 && var->env_slot >= 0) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, boxed)));
+            }
         } else {
             // Boxed variable — direct read from env
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -6341,6 +6346,11 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
             if (var->in_scope_env && var->scope_env_reg != 0 && var->scope_env_slot >= 0) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, var->reg)));
+            }
+            if (var->from_env && var->env_reg != 0 && var->env_slot >= 0) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
                     MIR_new_reg_op(mt->ctx, var->reg)));
             }
         }
@@ -7358,6 +7368,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, actual_reg),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, expected_reg),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
+                    if (strcmp(native_fn, "js_assert_throws") == 0) {
+                        jm_readback_closure_env(mt);
+                    }
                     return jm_emit_undefined(mt);
                 }
             }
