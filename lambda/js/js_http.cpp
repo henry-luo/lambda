@@ -1786,6 +1786,47 @@ static Item js_http_client_inst_setHeader(Item maybe_self, Item name_item, Item 
     return js_http_client_setHeader(self, maybe_self, name_item);
 }
 
+static bool http_client_validate_header_pair(Item name_item, Item value_item) {
+    if (get_type_id(name_item) != LMD_TYPE_STRING) return true;
+    String* name = it2s(name_item);
+    if (http_header_name_equals(name, "host", 4) &&
+        get_type_id(value_item) == LMD_TYPE_ARRAY) {
+        js_throw_invalid_arg_type("options.headers.host", "string", value_item);
+        return false;
+    }
+    return true;
+}
+
+static bool http_client_validate_headers(Item headers_item) {
+    if (get_type_id(headers_item) == LMD_TYPE_MAP) {
+        Item keys = js_object_keys(headers_item);
+        int64_t nkeys = js_array_length(keys);
+        for (int64_t i = 0; i < nkeys; i++) {
+            Item k = js_array_get_int(keys, i);
+            if (!http_client_validate_header_pair(k, js_property_get(headers_item, k))) {
+                return false;
+            }
+        }
+    } else if (get_type_id(headers_item) == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(headers_item);
+        for (int64_t i = 0; i < len; i++) {
+            Item entry = js_array_get_int(headers_item, i);
+            if (get_type_id(entry) == LMD_TYPE_ARRAY && js_array_length(entry) >= 2) {
+                if (!http_client_validate_header_pair(js_array_get_int(entry, 0),
+                                                      js_array_get_int(entry, 1))) {
+                    return false;
+                }
+            } else if (i + 1 < len) {
+                if (!http_client_validate_header_pair(entry, js_array_get_int(headers_item, i + 1))) {
+                    return false;
+                }
+                i++;
+            }
+        }
+    }
+    return true;
+}
+
 static int http_client_append_header_line(char* req_str, int rlen, int cap,
                                           Item name_item, Item value_item,
                                           bool* has_content_length) {
@@ -1981,6 +2022,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
         custom_headers = js_property_get(options_item, make_string_item("headers"));
         auth_item = js_property_get(options_item, make_string_item("auth"));
     }
+    if (!http_client_validate_headers(custom_headers)) return ItemNull;
 
     int rlen = snprintf(req_str, sizeof(req_str),
         "%s %s HTTP/1.1\r\n", method_buf, path_buf);
