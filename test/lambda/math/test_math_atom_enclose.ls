@@ -78,7 +78,7 @@ let smb = enc.render_phantom(smb_node, base_ctx, mock_render)
 "24. smash b depth:"; smb.depth
 
 // ---- \smash[t] (zero height only) ----
-let smt_node = {cmd: "\\smash", content: <group "m">, options: "t"}
+let smt_node = {cmd: "\\smash", content: <group "g">, options: "t"}
 let smt = enc.render_phantom(smt_node, base_ctx, mock_render)
 "25. smash t height:"; smt.height
 "26. smash t depth > 0:"; (smt.depth > 0)
