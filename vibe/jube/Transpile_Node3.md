@@ -26,7 +26,7 @@ Lambda's Node.js layer passes **1,414 of 3,527** official parallel tests (40.1%)
 | **child_process & REPL** (Phase 11) | 🔴 Not started | fork/IPC/signal gaps remain. |
 | **zlib streaming** (Phase 12) | 🔴 Not started | Blocked by Phase 7 (streams). |
 | **Buffer & util hardening** (Phase 13) | 🟡 Partial | `util.stripVTControlCharacters` ✅, `util._extend` ✅, `util.debug` ✅, `assert.ifError` fixed ✅. Buffer error code sites ~60% complete. |
-| **Test infrastructure** (Phase 14) | 🟢 Done | External `test/node/skip_list.txt` (26 entries) with GTest runtime loading ✅. |
+| **Test infrastructure** (Phase 14) | 🟢 Done | External `test/node/official_skip_list.txt` with GTest runtime loading ✅. |
 
 #### Specific Fixes Landed (since plan creation)
 
@@ -42,7 +42,7 @@ Lambda's Node.js layer passes **1,414 of 3,527** official parallel tests (40.1%)
 | `newListener`/`removeListener` events, `_events`/`_eventsCount` | `js_events.cpp` | (prerequisite for event tests) |
 | `util.stripVTControlCharacters`, `util._extend`, `util.debug` | `js_util.cpp` | (prerequisite for util tests) |
 | `assert.ifError` null/undefined handling | `js_assert.cpp` | (correctness fix) |
-| External skip list + GTest integration | `skip_list.txt`, `test_node_official_gtest.cpp` | Infra improvement |
+| External skip list + GTest integration | `official_skip_list.txt`, `test_node_official_gtest.cpp` | Infra improvement |
 
 ---
 

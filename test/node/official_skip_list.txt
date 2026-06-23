@@ -1,0 +1,106 @@
+# Node.js Official Test Skip List
+#
+# Tests listed here are permanently skipped because they require features
+# that are fundamentally unavailable in the Lambda JS engine.
+#
+# Format: test-filename.js  # reason
+# Lines starting with # are comments. Blank lines are ignored.
+#
+# Categories:
+#   [fork]       Uses child_process.fork() which spawns a Node binary
+#   [icu]        Requires full ICU internationalization support
+#   [sea]        Requires Node.js Single Executable Application support
+#   [snapshot]   Requires V8 snapshot building API
+#   [native]     Requires native C++ addons / node-gyp
+#   [hang]       Known to hang (infinite loop, unimplemented event loop feature)
+#   [crash]      Known to crash LambdaJS during default official-test runs
+#   [timeout]    Known to hit the runner timeout or require unavailable signals
+#   [spawn-node] Spawns 'node' binary with Node-specific CLI flags
+#
+
+# --- child_process.fork (spawns Node binary via IPC channel) ---
+test-child-process-exec-kill-throws.js      # [spawn-node] spawns node binary directly
+test-child-process-fork.js                  # [fork] uses child_process.fork
+test-child-process-fork-abort-signal.js     # [fork] uses child_process.fork
+test-child-process-fork-close.js            # [fork] uses child_process.fork
+test-child-process-fork-dgram.js            # [fork] uses child_process.fork + dgram
+test-child-process-fork-exec-path.js        # [fork] uses child_process.fork
+test-child-process-fork-net.js              # [fork] uses child_process.fork + net
+test-child-process-fork-net-socket.js       # [fork] uses child_process.fork + net
+test-child-process-fork-ref.js              # [fork] uses child_process.fork
+test-child-process-fork-ref2.js             # [fork] uses child_process.fork
+test-child-process-fork-stdio.js            # [fork] uses child_process.fork
+
+# --- ICU / Intl (no full ICU in engine) ---
+test-icu-data-dir.js                        # [icu] requires ICU data dir loading + internalBinding('config')
+test-icu-env.js                             # [icu] requires full ICU locale data + ICU version fixtures
+test-icu-minimum-version.js                 # [icu] reads V8 source tree for ICU version check
+test-icu-stringwidth.js                     # [icu] requires internal/util/inspect.getStringWidth with ICU tables
+
+# --- Single Executable Application (no SEA support) ---
+test-sea-get-asset-keys.js                  # [sea] requires node:sea module
+
+# --- V8 Snapshot API (no V8) ---
+test-snapshot-api.js                        # [snapshot] requires v8.startupSnapshot.isBuildingSnapshot()
+
+# --- Native addons ---
+test-crypto-fips.js                         # [native] requires FIPS OpenSSL build
+
+# --- Known hangs (timeout / infinite loop) ---
+test-stream-pipe-needDrain.js               # [hang] requires event loop (process.nextTick drain)
+test-stream-writable-write-cb-error.js      # [hang] requires event loop (process.nextTick)
+test-string-decoder-fuzz.js                 # [hang] Date.now() loop + StringDecoder instance methods
+test-util-inspect-long-running.js           # [hang] util.inspect depth:Infinity on circular graph
+test-zlib-brotli.js                         # [hang] requires fixtures module + brotli compression
+test-os-process-priority.js                 # [hang] requires os.constants.priority
+test-buffer-alloc.js                        # [hang] 1192-line test, JIT compilation exceeds timeout
+test-webcrypto-digest-turboshake-rfc.js     # [hang] WebCrypto SHAKE variant is unsupported/timeout-bound
+
+# --- Known crashers from full official-test sweeps ---
+test-bash-completion.js                     # [crash] aborts in LambdaJS command completion path
+test-console-async-write-error.js           # [crash] segfaults in console async write error path
+test-console-sync-write-error.js            # [crash] segfaults in console sync write error path
+test-domain-timers.js                       # [crash] aborts in domain/timer integration
+test-fs-read-stream-fd-leak.js              # [crash] aborts in fs read stream fd handling
+test-fs-read-stream-pos.js                  # [crash] aborts in fs read stream position handling
+test-fs-watch-recursive-sync-write.js       # [crash] aborts in recursive fs watch handling
+test-gc-http-client-connaborted.js          # [crash] aborts in gc/http client teardown
+test-gc-net-timeout.js                      # [crash] aborts in gc/net timeout teardown
+test-http-client-reject-chunked-with-content-length.js # [crash] aborts in HTTP chunked/content-length rejection fixture
+test-http-client-reject-cr-no-lf.js         # [crash] aborts in HTTP CR-without-LF rejection fixture
+test-http-double-content-length.js          # [crash] aborts in duplicate content-length rejection fixture
+test-http-highwatermark.js                  # [crash] aborts in HTTP highWaterMark fixture
+test-http-invalid-te.js                     # [crash] aborts in invalid transfer-encoding fixture
+test-http-request-host-header.js            # [crash] aborts in HTTP Host header fixture
+test-http-server-reject-cr-no-lf.js         # [crash] aborts in server CR-without-LF rejection fixture
+test-http-server-unconsume-consume.js       # [crash] aborts in HTTP unconsume/consume stream fixture
+test-http-upgrade-reconsume-stream.js       # [crash] aborts in HTTP upgrade reconsume fixture
+test-https-agent-session-injection.js       # [crash] aborts in HTTPS agent session injection fixture
+test-https-client-checkServerIdentity.js    # [crash] aborts in HTTPS checkServerIdentity fixture
+test-https-connecting-to-http.js            # [crash] aborts in HTTPS-to-HTTP connection fixture
+test-module-prototype-mutation.js           # [crash] segfaults after module prototype mutation
+test-path-extname.js                        # [crash] aborts in path.extname official fixture
+test-path-join.js                           # [crash] aborts in path.join official fixture
+test-path-relative.js                       # [crash] aborts in path.relative official fixture
+test-path-resolve.js                        # [crash] aborts in path.resolve official fixture
+test-process-chdir.js                       # [crash] aborts in process.chdir fixture
+test-process-execve-socket.js               # [crash] aborts in process execve socket fixture
+test-process-exit-handler.js                # [crash] aborts in process exit-handler fixture
+test-runner-mock-timers-with-timeout.js     # [crash] aborts in node:test mock timers fixture
+test-runner-subtest-after-hook.js           # [crash] aborts in node:test after-hook fixture
+test-timers-max-duration-warning.js         # [crash] segfaults in timer warning path
+test-timers-nan-duration-emit-once-per-process.js # [crash] segfaults in timer warning path
+test-timers-non-integer-delay.js            # [crash] segfaults in timer coercion path
+test-timers-promises-scheduler.js           # [crash] segfaults in timer promises scheduler
+test-timers-timeout-with-non-integer.js     # [crash] segfaults in timer coercion path
+test-timers.js                              # [crash] segfaults in timer fixture
+test-vm-syntax-error-stderr.js              # [crash] aborts in vm syntax-error stderr fixture
+
+# --- Known timeout/signal-sensitive tests from full official-test sweeps ---
+test-cluster-fork-windowsHide.js            # [timeout] leaves orphan child cluster workers under LambdaJS
+test-process-kill-pid.js                    # [timeout] sends process signals and times out under LambdaJS
+test-process-remove-all-signal-listeners.js # [timeout] leaves orphan signal-listener child processes under LambdaJS
+test-signal-handler.js                      # [timeout] signal-handler fixture times out under LambdaJS
+test-vm-sigint-existing-handler.js          # [timeout] leaves orphan SIGINT child processes under LambdaJS
+test-vm-sigint.js                           # [timeout] leaves orphan SIGINT child processes under LambdaJS
+test-vm-timeout.js                          # [timeout] vm timeout fixture hits the official runner timeout

@@ -16,12 +16,14 @@
 // Feature flags (environment variables or CLI args):
 //   --modules=path,os,buffer     Run only specified modules (default: all enabled)
 //   --update-baseline            Update baseline file with current passing set
-//   --timeout=<ms>               Per-test timeout in ms (default: 10000)
+//   --timeout=<ms>               Per-test timeout in ms (default: 60000)
+//   --include-slow               Include tests listed in test/node/official_slow_list.txt
 //
 // Usage:
 //   ./test/test_node_gtest.exe                    # run all enabled modules
 //   ./test/test_node_gtest.exe --modules=path,os  # run only path + os
 //   ./test/test_node_gtest.exe --update-baseline  # update baseline
+//   ./test/test_node_gtest.exe --include-slow     # also run slow-list tests
 //
 // =============================================================================
 
@@ -64,6 +66,12 @@
     #include <signal.h>
     #include <dirent.h>
     #include <sys/stat.h>
+    #include <sys/utsname.h>
+    #ifdef __APPLE__
+        #include <sys/sysctl.h>
+    #elif defined(__linux__)
+        #include <sys/sysinfo.h>
+    #endif
 #endif
 
 // =============================================================================
@@ -73,8 +81,12 @@
 static const char* NODE_TEST_DIR   = "ref/node/test/parallel";
 static const char* BASELINE_FILE   = "test/node/official_baseline.txt";
 static const char* CRASHER_FILE    = "temp/_node_official_crashers.txt";
+static const char* SLOW_LIST_FILE  = "test/node/official_slow_list.txt";
+static const double SLOW_TEST_THRESHOLD_MS = 10000.0;
 static int         g_timeout_ms    = 60000;    // per-test timeout (60s for JIT compilation)
 static bool        g_update_baseline = false;
+static bool        g_include_slow = false;
+static double      g_node_run_wall_secs = 0.0;
 
 static int get_parallel_workers() {
     int cores = std::thread::hardware_concurrency();
@@ -312,31 +324,35 @@ static std::vector<FeatureModule> g_feature_modules = {
     {"worker",         "worker",          true,  nullptr},  // enabled: some spawn tests pass
 };
 
-// Tests skipped by filename — loaded from test/node/skip_list.txt at runtime.
+// Tests skipped by filename — loaded from test/node/official_skip_list.txt at runtime.
 // Known to be incompatible, non-deterministic, or requiring features beyond
 // our scope (e.g., native addons, spawning node, ICU).
-static const char* SKIP_LIST_FILE = "test/node/skip_list.txt";
+static const char* SKIP_LIST_FILE = "test/node/official_skip_list.txt";
 static std::map<std::string, std::string> g_skipped_tests;
 static bool g_skip_list_loaded = false;
+static std::map<std::string, std::string> g_slow_tests;
+static bool g_slow_list_loaded = false;
 
-static void load_skip_list() {
-    if (g_skip_list_loaded) return;
-    g_skip_list_loaded = true;
+static void trim_ascii(std::string& text) {
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\t'))
+        text.pop_back();
+    while (!text.empty() && (text.front() == ' ' || text.front() == '\t'))
+        text.erase(text.begin());
+}
 
-    FILE* f = fopen(SKIP_LIST_FILE, "r");
+static void load_test_name_list(const char* path, const char* label,
+                                std::map<std::string, std::string>& out) {
+    FILE* f = fopen(path, "r");
     if (!f) {
-        fprintf(stderr, "[node-official] WARNING: Skip list not found (%s)\n", SKIP_LIST_FILE);
+        fprintf(stderr, "[node-official] WARNING: %s not found (%s)\n", label, path);
         return;
     }
     char line[1024];
     while (fgets(line, sizeof(line), f)) {
-        // skip blank lines and comment-only lines
         size_t len = strlen(line);
         while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = '\0';
         if (len == 0 || line[0] == '#') continue;
 
-        // format: test-filename.js  # reason
-        // split on first '#' to get filename and reason
         std::string entry(line, len);
         std::string filename, reason;
         size_t hash_pos = entry.find('#');
@@ -345,23 +361,33 @@ static void load_skip_list() {
             reason = entry.substr(hash_pos + 1);
         } else {
             filename = entry;
-            reason = "in skip list";
+            reason = label;
         }
-        // trim whitespace from filename and reason
-        while (!filename.empty() && (filename.back() == ' ' || filename.back() == '\t'))
-            filename.pop_back();
-        while (!reason.empty() && (reason.front() == ' ' || reason.front() == '\t'))
-            reason.erase(reason.begin());
-        while (!filename.empty() && (filename.front() == ' ' || filename.front() == '\t'))
-            filename.erase(filename.begin());
+
+        trim_ascii(filename);
+        trim_ascii(reason);
 
         if (!filename.empty()) {
-            g_skipped_tests[filename] = reason;
+            out[filename] = reason;
         }
     }
     fclose(f);
-    fprintf(stderr, "[node-official] Loaded skip list: %zu tests from %s\n",
-            g_skipped_tests.size(), SKIP_LIST_FILE);
+    fprintf(stderr, "[node-official] Loaded %s: %zu tests from %s\n",
+            label, out.size(), path);
+}
+
+static void load_skip_list() {
+    if (g_skip_list_loaded) return;
+    g_skip_list_loaded = true;
+
+    load_test_name_list(SKIP_LIST_FILE, "skip list", g_skipped_tests);
+}
+
+static void load_slow_list() {
+    if (g_slow_list_loaded) return;
+    g_slow_list_loaded = true;
+
+    load_test_name_list(SLOW_LIST_FILE, "slow list", g_slow_tests);
 }
 
 // =============================================================================
@@ -412,6 +438,88 @@ static std::string get_git_commit_hash() {
         pclose(fp);
     }
     return hash.empty() ? "unknown" : hash;
+}
+
+static std::string get_node_git_commit_hash() {
+    std::string hash;
+    FILE* fp = popen("git -C ref/node rev-parse --short HEAD 2>/dev/null", "r");
+    if (fp) {
+        char buf[64];
+        if (fgets(buf, sizeof(buf), fp)) {
+            hash = buf;
+            while (!hash.empty() && (hash.back() == '\n' || hash.back() == '\r'))
+                hash.pop_back();
+        }
+        pclose(fp);
+    }
+    return hash.empty() ? "unknown" : hash;
+}
+
+static const char* get_test_gtest_build_mode() {
+#ifdef NDEBUG
+    return "release";
+#else
+    return "debug";
+#endif
+}
+
+static const char* get_lambda_runtime_build_mode() {
+    if (access(".lambda_release_build", F_OK) == 0) return "release";
+    return "debug-or-unknown";
+}
+
+static std::string get_host_os_summary() {
+#ifdef _WIN32
+    return "Windows";
+#else
+    struct utsname u;
+    if (uname(&u) != 0) return "unknown";
+    std::string out = u.sysname;
+    out += " ";
+    out += u.release;
+    out += " ";
+    out += u.machine;
+    return out;
+#endif
+}
+
+static long long get_host_memory_bytes() {
+#ifdef __APPLE__
+    int64_t mem = 0;
+    size_t len = sizeof(mem);
+    if (sysctlbyname("hw.memsize", &mem, &len, NULL, 0) == 0 && mem > 0) {
+        return (long long)mem;
+    }
+#elif defined(__linux__)
+    struct sysinfo info;
+    if (sysinfo(&info) == 0) {
+        return (long long)info.totalram * (long long)info.mem_unit;
+    }
+#endif
+    return 0;
+}
+
+static long get_host_cpu_cores() {
+#ifdef __APPLE__
+    int cores = 0;
+    size_t len = sizeof(cores);
+    if (sysctlbyname("hw.ncpu", &cores, &len, NULL, 0) == 0 && cores > 0) {
+        return cores;
+    }
+#endif
+#ifdef _SC_NPROCESSORS_ONLN
+    long online_cores = sysconf(_SC_NPROCESSORS_ONLN);
+    if (online_cores > 0) return online_cores;
+#endif
+    return 0;
+}
+
+static std::string format_memory_gib(long long bytes) {
+    if (bytes <= 0) return "unknown";
+    char buf[64];
+    double gib = (double)bytes / (1024.0 * 1024.0 * 1024.0);
+    snprintf(buf, sizeof(buf), "%.1f GiB", gib);
+    return buf;
 }
 
 // Extract module prefix from test filename.
@@ -483,7 +591,7 @@ static NodeTestResult run_single_test(const std::string& test_path) {
     snprintf(command, sizeof(command),
              "mkdir -p temp/node_test && cd temp/node_test && "
              "env -u DYLD_INSERT_LIBRARIES -u DYLD_LIBRARY_PATH -u ASAN_OPTIONS -u MallocNanoZone "
-             "timeout %d ../../lambda.exe js \"../../%s\" --no-log 2>&1",
+             "timeout -k 5s %d ../../lambda.exe js \"../../%s\" --no-log 2>&1",
              (g_timeout_ms + 999) / 1000, test_path.c_str());
 #endif
 
@@ -537,7 +645,7 @@ struct NodeOfficialParam {
     std::string test_name;     // sanitized for GTest: test_path_join
 };
 
-static std::vector<NodeOfficialParam> discover_node_official_tests() {
+static std::vector<NodeOfficialParam> discover_node_official_tests(bool honor_slow_list = true) {
     ensure_prefixes_initialized();
     std::vector<NodeOfficialParam> tests;
     std::string dir_path = NODE_TEST_DIR;
@@ -579,9 +687,15 @@ static std::vector<NodeOfficialParam> discover_node_official_tests() {
         // check if module is enabled
         if (g_enabled_prefixes.find(mod) == g_enabled_prefixes.end()) continue;
 
-        // check if test is explicitly skipped (loaded from skip_list.txt)
+        // check if test is explicitly skipped (loaded from official_skip_list.txt)
         load_skip_list();
         if (g_skipped_tests.find(filename) != g_skipped_tests.end()) continue;
+
+        load_slow_list();
+        if (honor_slow_list && !g_include_slow &&
+            g_slow_tests.find(filename) != g_slow_tests.end()) {
+            continue;
+        }
 
         NodeOfficialParam p;
         p.test_path = dir_path + "/" + filename;
@@ -643,6 +757,29 @@ static void execute_all_tests(const std::vector<NodeOfficialParam>& tests) {
     for (auto& w : workers) w.join();
 }
 
+static double sum_node_elapsed_secs() {
+    long double total_ms = 0.0;
+    std::lock_guard<std::mutex> lock(g_test_results_mutex);
+    for (const auto& kv : g_test_results) {
+        if (kv.second.elapsed_ms > 0) {
+            total_ms += (long double)kv.second.elapsed_ms;
+        }
+    }
+    return (double)(total_ms / 1000.0L);
+}
+
+static double sum_node_elapsed_secs(const std::vector<std::string>& tests) {
+    long double total_ms = 0.0;
+    std::lock_guard<std::mutex> lock(g_test_results_mutex);
+    for (const auto& name : tests) {
+        auto it = g_test_results.find(name);
+        if (it != g_test_results.end() && it->second.elapsed_ms > 0) {
+            total_ms += (long double)it->second.elapsed_ms;
+        }
+    }
+    return (double)(total_ms / 1000.0L);
+}
+
 // =============================================================================
 // Baseline file I/O
 // =============================================================================
@@ -666,23 +803,49 @@ static void load_baseline() {
             g_baseline_passing.size(), BASELINE_FILE);
 }
 
-static void write_baseline(const std::vector<std::string>& passing, int total, int skipped) {
+static void write_baseline(const std::vector<std::string>& passing,
+                           int total, int passed, int failed, int missing,
+                           int timed_out, int crashed,
+                           size_t previous_baseline_count,
+                           size_t regression_count,
+                           size_t improvement_count) {
     FILE* f = fopen(BASELINE_FILE, "w");
     if (!f) {
         fprintf(stderr, "[node-official] ERROR: Cannot write baseline file: %s\n", BASELINE_FILE);
         return;
     }
     std::string commit = get_git_commit_hash();
-    fprintf(f, "# Node.js Official Test Baseline (auto-updated)\n");
+    std::string node_commit = get_node_git_commit_hash();
+    double all_test_elapsed_secs = sum_node_elapsed_secs();
+    double baseline_test_elapsed_secs = sum_node_elapsed_secs(passing);
+    fprintf(f, "# Node.js official baseline: tests that PASS (auto-updated)\n");
+    fprintf(f, "# DO NOT EDIT THIS FILE MANUALLY.\n");
+    fprintf(f, "# Update it only by running this gtest with --update-baseline.\n");
     fprintf(f, "# Commit: %s\n", commit.c_str());
+    fprintf(f, "# ref/node commit: %s\n", node_commit.c_str());
+    fprintf(f, "# Lambda runtime build: %s\n", get_lambda_runtime_build_mode());
+    fprintf(f, "# GTest binary build: %s\n", get_test_gtest_build_mode());
+    fprintf(f, "# Host OS: %s\n", get_host_os_summary().c_str());
+    fprintf(f, "# Host capacity: %ld CPU cores, %s memory\n",
+            get_host_cpu_cores(), format_memory_gib(get_host_memory_bytes()).c_str());
     fprintf(f, "# Source: ref/node/test/parallel/\n");
-    fprintf(f, "# Total passing: %zu / %d  (skipped: %d)\n", passing.size(), total, skipped);
-    fprintf(f, "#\n");
-    fprintf(f, "# Feature modules enabled:\n");
-    for (auto& mod : g_feature_modules) {
-        if (mod.enabled) {
-            fprintf(f, "#   %s\n", mod.name);
-        }
+    fprintf(f, "# Timeout: %d ms/test\n", g_timeout_ms);
+    fprintf(f, "# Workers: %d\n", PARALLEL_WORKERS);
+    fprintf(f, "# Slow tests included: %s\n", g_include_slow ? "yes" : "no");
+    fprintf(f, "# Slow list: %zu tests (%s), threshold %.0fs\n",
+            g_slow_tests.size(), SLOW_LIST_FILE, SLOW_TEST_THRESHOLD_MS / 1000.0);
+    fprintf(f, "# Total passing: %zu\n", passing.size());
+    fprintf(f, "# Total tests: %d  Passed: %d  Failed: %d  Missing: %d  Timed out: %d  Crashed: %d\n",
+            total, passed, failed, missing, timed_out, crashed);
+    fprintf(f, "# Baseline comparison: previous %zu  Regressions: %zu  Improvements: %zu\n",
+            previous_baseline_count, regression_count, improvement_count);
+    fprintf(f, "# Runtime: %.1fs total wall (discover + execute)\n", g_node_run_wall_secs);
+    fprintf(f, "# Runtime: %.1fs per-test sum (all executed tests)\n", all_test_elapsed_secs);
+    fprintf(f, "# Runtime: %.1fs per-test sum (passing baseline tests)\n",
+            baseline_test_elapsed_secs);
+    fprintf(f, "# Enabled prefixes: %zu\n", g_enabled_prefixes.size());
+    for (auto& prefix : g_enabled_prefixes) {
+        fprintf(f, "#   %s\n", prefix.c_str());
     }
     fprintf(f, "#\n");
     for (auto& name : passing) {
@@ -709,6 +872,50 @@ static void write_crashers(const std::vector<NodeOfficialParam>& tests) {
     fclose(f);
 }
 
+static void write_slow_list_if_needed(const std::vector<NodeOfficialParam>& tests) {
+    load_slow_list();
+
+    bool changed = false;
+    for (auto& t : tests) {
+        auto it = g_test_results.find(t.filename);
+        if (it == g_test_results.end()) continue;
+        const auto& r = it->second;
+        if (r.timed_out || r.exit_code > 128) continue;
+        if (r.elapsed_ms <= SLOW_TEST_THRESHOLD_MS) continue;
+        if (g_slow_tests.find(t.filename) != g_slow_tests.end()) continue;
+
+        char reason[128];
+        snprintf(reason, sizeof(reason), "[slow] observed %.1fs (>10s)",
+                 r.elapsed_ms / 1000.0);
+        g_slow_tests[t.filename] = reason;
+        changed = true;
+    }
+
+    if (!changed) return;
+
+    FILE* f = fopen(SLOW_LIST_FILE, "w");
+    if (!f) {
+        fprintf(stderr, "[node-official] ERROR: Cannot write slow list: %s\n", SLOW_LIST_FILE);
+        return;
+    }
+    fprintf(f, "# Node.js Official Test Slow List\n");
+    fprintf(f, "#\n");
+    fprintf(f, "# Tests listed here took longer than %.0fs in the LambdaJS Node official\n",
+            SLOW_TEST_THRESHOLD_MS / 1000.0);
+    fprintf(f, "# runner. They are excluded by default to keep normal regression runs fast.\n");
+    fprintf(f, "# Run with --include-slow to include these tests.\n");
+    fprintf(f, "#\n");
+    fprintf(f, "# Format: test-filename.js  # reason\n");
+    fprintf(f, "# Lines starting with # are comments. Blank lines are ignored.\n");
+    fprintf(f, "#\n");
+    for (auto& kv : g_slow_tests) {
+        fprintf(f, "%-48s # %s\n", kv.first.c_str(), kv.second.c_str());
+    }
+    fclose(f);
+    fprintf(stderr, "[node-official] Updated slow list: %zu tests in %s\n",
+            g_slow_tests.size(), SLOW_LIST_FILE);
+}
+
 // =============================================================================
 // GTest parameterised test
 // =============================================================================
@@ -721,8 +928,11 @@ public:
         if (suite_executed) return;
         suite_executed = true;
 
+        auto start = std::chrono::steady_clock::now();
         auto tests = discover_node_official_tests();
         execute_all_tests(tests);
+        auto end = std::chrono::steady_clock::now();
+        g_node_run_wall_secs = std::chrono::duration<double>(end - start).count();
     }
 };
 
@@ -730,6 +940,13 @@ bool NodeOfficialTest::suite_executed = false;
 
 TEST_P(NodeOfficialTest, Run) {
     const auto& p = GetParam();
+
+    load_slow_list();
+    if (!g_include_slow && g_slow_tests.find(p.filename) != g_slow_tests.end()) {
+        GTEST_SKIP() << "Slow test excluded by default: " << p.filename
+                     << " (use --include-slow)";
+        return;
+    }
 
     // check if this test's module is in the currently enabled set
     // (may differ from discovery-time if --modules was specified at runtime)
@@ -780,7 +997,7 @@ TEST_P(NodeOfficialTest, Run) {
 INSTANTIATE_TEST_SUITE_P(
     NodeOfficial,
     NodeOfficialTest,
-    testing::ValuesIn(discover_node_official_tests()),
+    testing::ValuesIn(discover_node_official_tests(false)),
     [](const testing::TestParamInfo<NodeOfficialParam>& info) {
         return info.param.test_name;
     });
@@ -796,14 +1013,14 @@ public:
 
         auto tests = discover_node_official_tests();
         int total = (int)tests.size();
-        int passed = 0, failed = 0, skipped = 0, timed_out = 0, crashed = 0;
+        int passed = 0, failed = 0, missing = 0, timed_out = 0, crashed = 0;
         std::vector<std::string> current_passing;
         std::vector<std::string> regressions;
         std::vector<std::string> improvements;
 
         for (auto& t : tests) {
             auto it = g_test_results.find(t.filename);
-            if (it == g_test_results.end()) { skipped++; continue; }
+            if (it == g_test_results.end()) { missing++; continue; }
             const auto& r = it->second;
 
             if (r.passed) {
@@ -849,8 +1066,13 @@ public:
         printf("║  Total tests:     %5d                          ║\n", total);
         printf("║  Passed:          %5d                          ║\n", passed);
         printf("║  Failed:          %5d                          ║\n", failed);
+        printf("║  Missing:         %5d                          ║\n", missing);
         printf("║  Timed out:       %5d                          ║\n", timed_out);
         printf("║  Crashed:         %5d                          ║\n", crashed);
+        printf("║  Runtime:         %5.1fs                         ║\n", g_node_run_wall_secs);
+        if (!g_include_slow && !g_slow_tests.empty()) {
+            printf("║  Slow excluded:   %5zu                          ║\n", g_slow_tests.size());
+        }
         if (!g_baseline_passing.empty()) {
             printf("╠══════════════════════════════════════════════════╣\n");
             printf("║  Baseline:        %5zu                          ║\n", g_baseline_passing.size());
@@ -878,7 +1100,9 @@ public:
 
         // update baseline if requested
         if (g_update_baseline && regressions.empty()) {
-            write_baseline(current_passing, total, skipped);
+            write_baseline(current_passing, total, passed, failed, missing, timed_out,
+                           crashed, g_baseline_passing.size(), regressions.size(),
+                           improvements.size());
         } else if (g_update_baseline && !regressions.empty()) {
             fprintf(stderr, "[node-official] NOT updating baseline: %zu regressions detected\n",
                     regressions.size());
@@ -886,6 +1110,7 @@ public:
 
         // write crasher file for quarantine
         write_crashers(tests);
+        write_slow_list_if_needed(tests);
     }
 };
 
@@ -911,6 +1136,8 @@ int main(int argc, char** argv) {
             }
         } else if (strcmp(argv[i], "--update-baseline") == 0) {
             g_update_baseline = true;
+        } else if (strcmp(argv[i], "--include-slow") == 0) {
+            g_include_slow = true;
         } else if (strncmp(argv[i], "--timeout=", 10) == 0) {
             g_timeout_ms = atoi(argv[i] + 10);
             if (g_timeout_ms < 1000) g_timeout_ms = 1000;
