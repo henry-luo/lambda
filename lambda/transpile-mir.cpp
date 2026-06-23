@@ -3667,6 +3667,82 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
 // Array expressions
 // ============================================================================
 
+// Recursively determine if an AstArrayNode represents an N-D numeric literal
+// (mirror of detect_ndim_literal in transpile.cpp).  Returns ndim on success.
+static int mir_detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
+                                    ArrayNumElemType* elem_type_out) {
+    if (!node || node->node_type != AST_NODE_ARRAY) return 0;
+    AstArrayNode* arr = (AstArrayNode*)node;
+    TypeArray* type = (TypeArray*)arr->type;
+    if (!type || type->length <= 0 || !type->nested) return 0;
+    // disqualify if any child is for-expr / spread / pipe (would need runtime construction)
+    {
+        AstNode* it = arr->item;
+        while (it) {
+            if (it->node_type == AST_NODE_FOR_EXPR || it->node_type == AST_NODE_SPREAD ||
+                it->node_type == AST_NODE_PIPE || it->node_type == AST_NODE_ASSIGN) return 0;
+            it = it->next;
+        }
+    }
+    TypeId nid = type->nested->type_id;
+    if (nid == LMD_TYPE_INT)   { shape_out[0] = type->length; *elem_type_out = ELEM_INT;   return 1; }
+    if (nid == LMD_TYPE_INT64) { shape_out[0] = type->length; *elem_type_out = ELEM_INT64; return 1; }
+    if (nid == LMD_TYPE_FLOAT) { shape_out[0] = type->length; *elem_type_out = ELEM_FLOAT; return 1; }
+    if (nid == LMD_TYPE_NUM_SIZED) {
+        shape_out[0] = type->length;
+        *elem_type_out = num_sized_to_elem_type(type_num_sized_kind(type->nested));
+        return 1;
+    }
+    if (nid == LMD_TYPE_ARRAY) {
+        if (max_ndim <= 1) return 0;
+        int64_t inner_shape[32];
+        ArrayNumElemType inner_etype;
+        int inner_ndim = mir_detect_ndim_literal(arr->item, inner_shape, max_ndim - 1, &inner_etype);
+        if (inner_ndim == 0) return 0;
+        AstNode* sib = arr->item->next;
+        while (sib) {
+            int64_t sib_shape[32];
+            ArrayNumElemType sib_etype;
+            int sib_ndim = mir_detect_ndim_literal(sib, sib_shape, max_ndim - 1, &sib_etype);
+            if (sib_ndim != inner_ndim || sib_etype != inner_etype) return 0;
+            for (int i = 0; i < sib_ndim; i++) {
+                if (sib_shape[i] != inner_shape[i]) return 0;
+            }
+            sib = sib->next;
+        }
+        shape_out[0] = type->length;
+        for (int i = 0; i < inner_ndim; i++) shape_out[i + 1] = inner_shape[i];
+        *elem_type_out = inner_etype;
+        return inner_ndim + 1;
+    }
+    return 0;
+}
+
+// Emit MIR that walks nested literal leaves in row-major order, calling
+// array_num_set_item for each leaf at sequential flat indices.
+static void mir_emit_ndim_leaves(MirTranspiler* mt, AstNode* node, MIR_reg_t arr_reg, int* flat_idx_io) {
+    if (!node || node->node_type != AST_NODE_ARRAY) return;
+    AstArrayNode* arr = (AstArrayNode*)node;
+    TypeArray* type = (TypeArray*)arr->type;
+    bool inner_is_array = type && type->nested && type->nested->type_id == LMD_TYPE_ARRAY;
+    AstNode* item = arr->item;
+    while (item) {
+        if (inner_is_array) {
+            mir_emit_ndim_leaves(mt, item, arr_reg, flat_idx_io);
+        } else {
+            MIR_reg_t val = transpile_expr(mt, item);
+            TypeId val_tid = get_effective_type(mt, item);
+            MIR_reg_t boxed = emit_box(mt, val, val_tid);
+            emit_call_void_3(mt, "array_num_set_item",
+                MIR_T_P, MIR_new_reg_op(mt->ctx, arr_reg),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(*flat_idx_io)),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+            (*flat_idx_io)++;
+        }
+        item = item->next;
+    }
+}
+
 static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
     // Check if any child is a for-expression, spread, or let binding
     bool has_spreadable = false;
@@ -3689,6 +3765,42 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
 
     // push scope to contain let bindings within the array
     if (has_let) push_scope(mt);
+
+    // Static N-D detection: nested numeric literals like [[1,2],[3,4]] become a
+    // single N-D ArrayNum with shape metadata, not an Array of ArrayNums.
+    // Detection recurses through inner arrays; all must have same shape & elem_type.
+    if (!any_spread && !has_let) {
+        int64_t shape[32];
+        ArrayNumElemType n_etype;
+        int ndim = mir_detect_ndim_literal((AstNode*)arr_node, shape, 32, &n_etype);
+        if (ndim >= 2) {
+            int64_t total = 1;
+            for (int i = 0; i < ndim; i++) total *= shape[i];
+
+            // Allocate a heap_data buffer for the dims array (ndim * int64_t).
+            int64_t dims_bytes = (int64_t)ndim * (int64_t)sizeof(int64_t);
+            MIR_reg_t dims_ptr = emit_call_1(mt, "heap_data_calloc", MIR_T_P,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, dims_bytes));
+            // Store each dim into dims_ptr[i]
+            for (int i = 0; i < ndim; i++) {
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, (MIR_disp_t)(i * (int)sizeof(int64_t)),
+                                   dims_ptr, 0, 1),
+                    MIR_new_int_op(mt->ctx, shape[i])));
+            }
+            // Call helper to build the N-D ArrayNum with shape metadata.
+            MIR_reg_t arr = emit_call_4(mt, "array_num_new_ndim", MIR_T_P,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)n_etype),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, total),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ndim),
+                MIR_T_P,   MIR_new_reg_op(mt->ctx, dims_ptr));
+            // Fill leaves in row-major flat order.
+            int flat_idx = 0;
+            mir_emit_ndim_leaves(mt, (AstNode*)arr_node, arr, &flat_idx);
+            if (has_let) pop_scope(mt);
+            return arr;
+        }
+    }
 
     // Detect homogeneous typed arrays (ArrayInt, ArrayFloat) to match C transpiler behavior.
     // Vector functions (concat, take, drop, reverse, etc.) dispatch based on runtime type_id,

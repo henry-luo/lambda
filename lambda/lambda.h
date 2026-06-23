@@ -1428,6 +1428,7 @@ extern "C" {
     Item fn_shape(Item arr);                       // returns shape as a list
     Item fn_ndim(Item arr);                        // returns number of dimensions (int)
     int64_t array_num_iter_count(ArrayNum* arr);   // shape[0] for N-D, length for 1-D
+    ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim, int64_t* dims);
     Item fn_zip(Item a, Item b);
     Item fn_range3(Item start, Item end, Item step);
     Item fn_math_quantile(Item a, Item p);

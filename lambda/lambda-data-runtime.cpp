@@ -159,6 +159,35 @@ ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
     return arr;
 }
 
+// Allocate an N-D ArrayNum: data buffer sized for `total` elements, plus a
+// shape side-table with C-contiguous strides computed from `dims[0..ndim-1]`.
+// Used by both the C transpiler and the MIR transpiler to materialize nested
+// numeric literals like [[1,2],[3,4]] as a single tensor.
+ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim, int64_t* dims) {
+    if (ndim < 1 || ndim > 32) return NULL;
+    ArrayNum* arr = array_num_new(elem_type, total);
+    if (!arr) return NULL;
+    size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)ndim * sizeof(int64_t);
+    ArrayNumShape* s = (ArrayNumShape*)heap_data_calloc(shape_bytes);
+    if (!s) return arr;  // best-effort: keep as 1-D
+    s->ndim = (uint8_t)ndim;
+    s->is_c_contig = 1;
+    s->is_f_contig = (ndim == 1) ? 1 : 0;
+    s->offset = 0;
+    s->base = NULL;  // owned
+    int64_t* sd = array_num_shape_dims(s);
+    int64_t* ss = array_num_shape_strides(s);
+    int64_t stride = 1;
+    for (int i = ndim - 1; i >= 0; i--) {
+        sd[i] = dims[i];
+        ss[i] = stride;
+        stride *= dims[i];
+    }
+    arr->is_ndim = 1;
+    arr->extra = (int64_t)(uintptr_t)s;
+    return arr;
+}
+
 // Returns the iteration count for for-in / index loops:
 //   - 1-D / non-ndim arrays: total element count (length)
 //   - N-D arrays: shape[0] (leading axis), so for-in yields leading-axis slices
