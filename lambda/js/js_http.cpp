@@ -17,6 +17,7 @@
 #include "../../lib/log.h"
 #include "../../lib/uv_loop.h"
 #include "../../lib/mem.h"
+#include "../../lib/base64.h"
 
 #include <cstring>
 #include <cstdio>
@@ -1705,6 +1706,55 @@ extern "C" Item js_http_client_destroy(Item self, Item err_item) {
     return self;
 }
 
+static int http_client_append_header_line(char* req_str, int rlen, int cap,
+                                          Item name_item, Item value_item,
+                                          bool* has_content_length);
+
+static void http_client_insert_pending_header(JsHttpClientReq* creq, const char* line, int line_len) {
+    if (!creq || creq->sent || !creq->send_buf || line_len <= 0) return;
+    int insert_at = creq->send_head_len;
+    if (insert_at >= 2 &&
+        creq->send_buf[insert_at - 2] == '\r' &&
+        creq->send_buf[insert_at - 1] == '\n') {
+        insert_at -= 2;
+    } else if (creq->send_len >= 2 &&
+               creq->send_buf[creq->send_len - 2] == '\r' &&
+               creq->send_buf[creq->send_len - 1] == '\n') {
+        insert_at = creq->send_len - 2;
+    }
+
+    int new_len = creq->send_len + line_len;
+    char* next = (char*)mem_alloc(new_len, MEM_CAT_JS_RUNTIME);
+    memcpy(next, creq->send_buf, (size_t)insert_at);
+    memcpy(next + insert_at, line, (size_t)line_len);
+    memcpy(next + insert_at + line_len, creq->send_buf + insert_at,
+           (size_t)(creq->send_len - insert_at));
+    mem_free(creq->send_buf);
+    creq->send_buf = next;
+    creq->send_len = new_len;
+    creq->send_head_len += line_len;
+}
+
+extern "C" Item js_http_client_setHeader(Item self, Item name_item, Item value_item) {
+    Item name = http_validate_header_name(name_item);
+    if (name.item == 0) return self;
+    Item value = http_validate_header_value(name, value_item);
+    if (value.item == 0) return self;
+
+    Item handle_item = js_property_get(self, make_string_item("__client__"));
+    if (handle_item.item == 0) return self;
+    JsHttpClientReq* creq = (JsHttpClientReq*)(uintptr_t)it2i(handle_item);
+    if (!creq || creq->sent) return self;
+
+    char lines[4096];
+    bool has_content_length = creq->has_content_length;
+    int len = http_client_append_header_line(lines, 0, (int)sizeof(lines), name, value,
+                                             &has_content_length);
+    if (has_content_length) creq->has_content_length = true;
+    http_client_insert_pending_header(creq, lines, len);
+    return self;
+}
+
 static Item js_http_client_inst_write(Item maybe_self, Item data_item) {
     Item self = js_http_receiver(maybe_self, "__client__");
     return js_http_client_write(self, self.item == maybe_self.item ? data_item : maybe_self);
@@ -1726,6 +1776,14 @@ static Item js_http_client_inst_on(Item maybe_self, Item event_item, Item callba
 static Item js_http_client_inst_destroy(Item maybe_self, Item err_item) {
     Item self = js_http_receiver(maybe_self, "__client__");
     return js_http_client_destroy(self, self.item == maybe_self.item ? err_item : maybe_self);
+}
+
+static Item js_http_client_inst_setHeader(Item maybe_self, Item name_item, Item value_item) {
+    Item self = js_http_receiver(maybe_self, "__client__");
+    if (self.item == maybe_self.item) {
+        return js_http_client_setHeader(self, name_item, value_item);
+    }
+    return js_http_client_setHeader(self, maybe_self, name_item);
 }
 
 static int http_client_append_header_line(char* req_str, int rlen, int cap,
@@ -1798,10 +1856,49 @@ static int http_client_append_headers(char* req_str, int rlen, int cap,
     return rlen;
 }
 
+static bool http_client_headers_have_name(Item headers_item, const char* name, int name_len) {
+    if (get_type_id(headers_item) == LMD_TYPE_MAP) {
+        Item keys = js_object_keys(headers_item);
+        int64_t nkeys = js_array_length(keys);
+        for (int64_t i = 0; i < nkeys; i++) {
+            Item k = js_array_get_int(keys, i);
+            if (get_type_id(k) == LMD_TYPE_STRING && http_header_name_equals(it2s(k), name, name_len)) {
+                return true;
+            }
+        }
+    } else if (get_type_id(headers_item) == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(headers_item);
+        for (int64_t i = 0; i < len; i++) {
+            Item entry = js_array_get_int(headers_item, i);
+            Item k = entry;
+            if (get_type_id(entry) == LMD_TYPE_ARRAY && js_array_length(entry) >= 1) {
+                k = js_array_get_int(entry, 0);
+            }
+            if (get_type_id(k) == LMD_TYPE_STRING && http_header_name_equals(it2s(k), name, name_len)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static int http_client_append_basic_auth(char* req_str, int rlen, int cap, Item auth_item) {
+    if (get_type_id(auth_item) != LMD_TYPE_STRING) return rlen;
+    String* auth = it2s(auth_item);
+    size_t out_len = base64_encoded_len(auth->len, BASE64_STD);
+    char* out = (char*)mem_alloc(out_len + 1, MEM_CAT_JS_RUNTIME);
+    size_t written = base64_encode((const uint8_t*)auth->chars, auth->len, out, BASE64_STD);
+    out[written] = '\0';
+    rlen += snprintf(req_str + rlen, cap - rlen, "Authorization: Basic %.*s\r\n",
+                     (int)written, out);
+    mem_free(out);
+    return rlen;
+}
+
 // http.request(options, callback)
 extern "C" Item js_http_request(Item options_item, Item callback) {
     int port = 80;
-    char host_buf[256] = "127.0.0.1";
+    char host_buf[256] = "localhost";
     char method_buf[16] = "GET";
     char path_buf[4096] = "/";
 
@@ -1870,6 +1967,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
     bool set_default_headers = true;
     bool set_host = true;
     Item custom_headers = make_js_undefined();
+    Item auth_item = make_js_undefined();
     if (get_type_id(options_item) == LMD_TYPE_MAP) {
         bool explicit_set_host = false;
         Item sdh = js_property_get(options_item, make_string_item("setDefaultHeaders"));
@@ -1881,6 +1979,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
         }
         if (!set_default_headers && !explicit_set_host) set_host = false;
         custom_headers = js_property_get(options_item, make_string_item("headers"));
+        auth_item = js_property_get(options_item, make_string_item("auth"));
     }
 
     int rlen = snprintf(req_str, sizeof(req_str),
@@ -1908,11 +2007,17 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
     }
 
     if (set_default_headers) {
-        rlen += snprintf(req_str + rlen, sizeof(req_str) - rlen, "Connection: close\r\n");
+        rlen += snprintf(req_str + rlen, sizeof(req_str) - rlen, "Connection: keep-alive\r\n");
     }
 
     rlen = http_client_append_headers(req_str, rlen, (int)sizeof(req_str),
                                       custom_headers, &has_content_length);
+
+    if (!has_headers_array &&
+        get_type_id(auth_item) == LMD_TYPE_STRING &&
+        !http_client_headers_have_name(custom_headers, "authorization", 13)) {
+        rlen = http_client_append_basic_auth(req_str, rlen, (int)sizeof(req_str), auth_item);
+    }
 
     if (set_default_headers &&
         (strcmp(method_buf, "POST") == 0 || strcmp(method_buf, "PUT") == 0) &&
@@ -1951,6 +2056,10 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
                     js_new_function((void*)js_http_client_inst_end, 2));
     js_property_set(obj, make_string_item("on"),
                     js_new_function((void*)js_http_client_inst_on, 3));
+    js_property_set(obj, make_string_item("once"),
+                    js_new_function((void*)js_http_client_inst_on, 3));
+    js_property_set(obj, make_string_item("setHeader"),
+                    js_new_function((void*)js_http_client_inst_setHeader, 3));
     js_property_set(obj, make_string_item("destroy"),
                     js_new_function((void*)js_http_client_inst_destroy, 2));
     js_property_set(obj, make_string_item("destroyed"), (Item){.item = b2it(false)});
