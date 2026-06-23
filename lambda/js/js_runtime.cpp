@@ -31399,6 +31399,36 @@ static Item js_als_disable(void) {
 }
 
 static int js_async_hooks_enabled_count = 0;
+static Item js_async_hooks_root_resource = {0};
+static Item js_async_hooks_current_resource = {0};
+
+static Item js_async_hooks_ensure_root_resource(void) {
+    if (js_async_hooks_root_resource.item == 0) {
+        js_async_hooks_root_resource = js_new_object();
+        heap_register_gc_root(&js_async_hooks_root_resource.item);
+    }
+    return js_async_hooks_root_resource;
+}
+
+extern "C" Item js_async_hooks_get_current_resource(void) {
+    if (js_async_hooks_current_resource.item != 0) return js_async_hooks_current_resource;
+    return js_async_hooks_ensure_root_resource();
+}
+
+extern "C" Item js_async_hooks_enter_resource(Item resource) {
+    Item previous = js_async_hooks_current_resource;
+    if (resource.item == 0 || resource.item == ITEM_NULL ||
+        get_type_id(resource) == LMD_TYPE_UNDEFINED) {
+        js_async_hooks_current_resource = js_async_hooks_ensure_root_resource();
+    } else {
+        js_async_hooks_current_resource = resource;
+    }
+    return previous;
+}
+
+extern "C" void js_async_hooks_restore_resource(Item previous) {
+    js_async_hooks_current_resource = previous;
+}
 
 // AsyncResource stub
 static Item js_ar_constructor(Item type) {
@@ -31469,7 +31499,7 @@ static Item js_ah_triggerAsyncId(void) {
 }
 
 static Item js_ah_executionAsyncResource(void) {
-    return js_new_object();
+    return js_async_hooks_get_current_resource();
 }
 
 static Item js_internal_async_enabledHooksExist(void) {
@@ -32085,9 +32115,12 @@ extern "C" Item js_module_get(Item specifier) {
             extern void js_clearTimeout(Item);
             extern void js_clearInterval(Item);
             extern Item js_setImmediate(Item);
+            extern void js_timer_install_promisify_custom(Item fn_item);
             timers_ns = js_new_object();
+            Item timeout_fn = js_new_function((void*)js_setTimeout, 2);
+            js_timer_install_promisify_custom(timeout_fn);
             js_property_set(timers_ns, (Item){.item = s2it(heap_create_name("setTimeout", 10))},
-                            js_new_function((void*)js_setTimeout, 2));
+                            timeout_fn);
             js_property_set(timers_ns, (Item){.item = s2it(heap_create_name("setInterval", 11))},
                             js_new_function((void*)js_setInterval, 2));
             js_property_set(timers_ns, (Item){.item = s2it(heap_create_name("clearTimeout", 12))},
@@ -33174,6 +33207,8 @@ void js_deep_batch_reset() {
     memset(js_als_instances, 0, sizeof(js_als_instances));
     js_als_instance_count = 0;
     js_async_hooks_enabled_count = 0;
+    js_async_hooks_root_resource = (Item){0};
+    js_async_hooks_current_resource = (Item){0};
     js_async_resolved_value = (Item){0};
     js_reset_transient_call_state();
     // generator proto caches point into old heap — must reset

@@ -71,6 +71,24 @@ static bool jm_function_has_direct_body_function_binding(JsFunctionNode* fn, con
     return false;
 }
 
+static JsFunctionNode* jm_function_find_direct_body_function_binding(JsFunctionNode* fn, const char* vname) {
+    if (!fn || !vname || !fn->body ||
+        fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
+        return NULL;
+    }
+    JsBlockNode* body = (JsBlockNode*)fn->body;
+    for (JsAstNode* stmt = body->statements; stmt; stmt = stmt->next) {
+        if (stmt->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+        JsFunctionNode* decl = (JsFunctionNode*)stmt;
+        if (!decl->name) continue;
+        char name[128];
+        snprintf(name, sizeof(name), "_js_%.*s",
+            (int)decl->name->len, decl->name->chars);
+        if (strcmp(name, vname) == 0) return decl;
+    }
+    return NULL;
+}
+
 static bool jm_param_tree_has_assignment_pattern(JsAstNode* node) {
     for (JsAstNode* cur = node; cur; cur = cur->next) {
         switch (cur->node_type) {
@@ -1548,9 +1566,21 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     JsNameSetEntry* ns = (JsNameSetEntry*)litem;
                     if (!jm_find_var(mt, ns->name)) {
                         MIR_reg_t vr = jm_new_reg(mt, ns->name, MIR_T_I64);
+                        MIR_reg_t initial = 0;
+                        JsFunctionNode* direct_fn =
+                            jm_function_find_direct_body_function_binding(fn, ns->name);
+                        if (direct_fn) {
+                            JsFuncCollected* direct_fc = jm_find_collected_func(mt, direct_fn);
+                            if (direct_fc && direct_fc->func_item) {
+                                initial = jm_create_func_or_closure(mt, direct_fc);
+                            }
+                        }
+                        if (!initial) {
+                            initial = jm_emit_null(mt);
+                        }
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, vr),
-                            MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+                            MIR_new_reg_op(mt->ctx, initial)));
                         JsVarScopeEntry entry;
                         memset(&entry, 0, sizeof(entry));
                         snprintf(entry.name, sizeof(entry.name), "%s", ns->name);

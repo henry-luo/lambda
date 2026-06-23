@@ -572,7 +572,7 @@ static Item js_util_promisified_function(Item env_item, Item rest_args) {
     return js_promise_create(executor);
 }
 
-static Item js_util_promisify_custom_symbol(void) {
+extern "C" Item js_util_promisify_custom_symbol(void) {
     return js_symbol_for(make_string_item("nodejs.util.promisify.custom"));
 }
 

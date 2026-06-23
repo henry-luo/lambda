@@ -12081,6 +12081,14 @@ int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, bool has
     return env_size;
 }
 
+static bool jm_closure_has_scope_env_slot(JsFuncCollected* fc) {
+    if (!fc) return false;
+    for (int ci = 0; ci < fc->capture_count; ci++) {
+        if (fc->captures[ci].scope_env_slot >= 0) return true;
+    }
+    return false;
+}
+
 static void jm_promote_capture_to_scope_env(JsMirTranspiler* mt, JsMirVarEntry* var, int slot) {
     if (!mt || !var || mt->scope_env_reg == 0 || slot < 0) return;
     var->in_scope_env = true;
@@ -12185,7 +12193,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, mt->scope_env_slot_count));
         } else {
             // Fallback: allocate own env and copy values (per-closure env, not shared).
-            bool has_remapped = (fc->captures[0].scope_env_slot >= 0);
+            bool has_remapped = jm_closure_has_scope_env_slot(fc);
             int env_alloc_size = jm_closure_env_alloc_size(mt, fc, has_remapped);
 
             // Detect self-capture: if the function references its own name, we must
@@ -12417,7 +12425,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 }
             }
         } else {
-            bool has_remapped = (fc->captures[0].scope_env_slot >= 0);
+            bool has_remapped = jm_closure_has_scope_env_slot(fc);
             int env_alloc_size = jm_closure_env_alloc_size(mt, fc, has_remapped);
 
             // Detect self-capture via assignment target hint:

@@ -4616,7 +4616,8 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 // The non-direct (block-scoped) Annex B case still needs the
                 // recreate-and-rebind because Phase 3 did NOT hoist it.
                 bool is_direct = jm_statement_function_decl_is_direct_binding(fn_decl);
-                if (existing && is_direct) {
+                bool async_state_machine_body = mt->in_generator && mt->in_async;
+                if (existing && is_direct && !async_state_machine_body) {
                     // Skip recreation; existing already holds the hoisted closure.
                     jm_scope_env_mark_and_writeback(mt, fn_vname, existing->reg);
                     break;

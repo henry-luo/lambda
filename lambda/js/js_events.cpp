@@ -37,6 +37,8 @@ static Item once_key;         // "__once__"
 static Item max_listeners_key; // "__maxListeners__"
 static Item new_listener_key; // "newListener"
 static Item remove_listener_key; // "removeListener"
+static Item listener_fn_key; // "__listener_fn__"
+static Item listener_context_key; // "__listener_als_context__"
 static bool keys_initialized = false;
 
 static void ensure_keys() {
@@ -46,7 +48,41 @@ static void ensure_keys() {
     max_listeners_key = make_string_item("__maxListeners__");
     new_listener_key = make_string_item("newListener");
     remove_listener_key = make_string_item("removeListener");
+    listener_fn_key = make_string_item("__listener_fn__");
+    listener_context_key = make_string_item("__listener_als_context__");
     keys_initialized = true;
+}
+
+extern "C" Item js_als_capture_context(void);
+extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
+
+static bool is_listener_record(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    Item fn = js_property_get(value, listener_fn_key);
+    return get_type_id(fn) == LMD_TYPE_FUNC;
+}
+
+static Item listener_record_fn(Item value) {
+    if (is_listener_record(value)) return js_property_get(value, listener_fn_key);
+    return value;
+}
+
+static Item listener_record_context(Item value) {
+    if (is_listener_record(value)) return js_property_get(value, listener_context_key);
+    return ItemNull;
+}
+
+static Item make_listener_record(Item listener) {
+    Item record = js_new_object();
+    js_property_set(record, listener_fn_key, listener);
+    js_property_set(record, listener_context_key, js_als_capture_context());
+    return record;
+}
+
+static bool listener_matches(Item stored, Item listener) {
+    if (stored.item == listener.item) return true;
+    Item fn = listener_record_fn(stored);
+    return fn.item == listener.item;
 }
 
 // Get or create the __events__ map on an emitter object
@@ -81,7 +117,7 @@ static bool is_once_listener(Item emitter, Item fn) {
     int64_t len = js_array_length(set);
     for (int64_t i = 0; i < len; i++) {
         Item f = js_array_get_int(set, i);
-        if (f.item == fn.item) return true;
+        if (f.item == fn.item || listener_matches(f, listener_record_fn(fn))) return true;
     }
     return false;
 }
@@ -127,7 +163,7 @@ static void emit_new_listener(Item emitter, Item event_name, Item listener) {
     if (nl_len == 0) return;
     Item args[2] = {event_name, listener};
     for (int64_t i = 0; i < nl_len; i++) {
-        Item fn = js_array_get_int(nl_arr, i);
+        Item fn = listener_record_fn(js_array_get_int(nl_arr, i));
         js_call_function(fn, emitter, args, 2);
     }
 }
@@ -146,7 +182,7 @@ static void emit_remove_listener(Item emitter, Item event_name, Item listener) {
     if (rl_len == 0) return;
     Item args[2] = {event_name, listener};
     for (int64_t i = 0; i < rl_len; i++) {
-        Item fn = js_array_get_int(rl_arr, i);
+        Item fn = listener_record_fn(js_array_get_int(rl_arr, i));
         js_call_function(fn, emitter, args, 2);
     }
 }
@@ -157,7 +193,7 @@ extern "C" Item js_ee_on(Item emitter, Item event_name, Item listener) {
     if (emitter.item == 0) return ItemNull;
     emit_new_listener(emitter, event_name, listener);
     Item arr = get_listeners_array(emitter, event_name);
-    js_array_push(arr, listener);
+    js_array_push(arr, make_listener_record(listener));
     update_events_count(emitter);
     return emitter;
 }
@@ -168,10 +204,11 @@ extern "C" Item js_ee_once(Item emitter, Item event_name, Item listener) {
     if (emitter.item == 0) return ItemNull;
     emit_new_listener(emitter, event_name, listener);
     Item arr = get_listeners_array(emitter, event_name);
-    js_array_push(arr, listener);
+    Item record = make_listener_record(listener);
+    js_array_push(arr, record);
     // mark this function as once
     Item set = get_once_set(emitter);
-    js_array_push(set, listener);
+    js_array_push(set, record);
     update_events_count(emitter);
     return emitter;
 }
@@ -188,7 +225,8 @@ extern "C" Item js_ee_off(Item emitter, Item event_name, Item listener) {
     // find last occurrence
     for (int64_t i = len - 1; i >= 0; i--) {
         Item f = js_array_get_int(arr, i);
-        if (f.item == listener.item) {
+        if (listener_matches(f, listener)) {
+            Item original = listener_record_fn(f);
             // rebuild array without this element
             Item new_arr = js_array_new(0);
             for (int64_t j = 0; j < len; j++) {
@@ -196,7 +234,7 @@ extern "C" Item js_ee_off(Item emitter, Item event_name, Item listener) {
             }
             js_property_set(map, event_name, new_arr);
             update_events_count(emitter);
-            emit_remove_listener(emitter, event_name, listener);
+            emit_remove_listener(emitter, event_name, original);
             break;
         }
     }
@@ -293,7 +331,9 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
             Item new_set = js_array_new(0);
             for (int64_t j = 0; j < slen; j++) {
                 Item f = js_array_get_int(set, j);
-                if (f.item != fn.item) js_array_push(new_set, f);
+                if (f.item != fn.item && !listener_matches(f, listener_record_fn(fn))) {
+                    js_array_push(new_set, f);
+                }
             }
             js_property_set(emitter, once_key, new_set);
         }
@@ -301,9 +341,17 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
 
     // Now call all listeners from the snapshot
     for (int64_t i = 0; i < len; i++) {
-        Item fn = js_array_get_int(snapshot, i);
+        Item entry = js_array_get_int(snapshot, i);
+        Item fn = listener_record_fn(entry);
+        Item context = listener_record_context(entry);
 
-        js_call_function(fn, emitter, args, (int)argc);
+        if (argc == 0) {
+            js_als_context_call(context, fn, emitter, ItemNull, 0);
+        } else if (argc == 1) {
+            js_als_context_call(context, fn, emitter, args[0], 1);
+        } else {
+            js_call_function(fn, emitter, args, (int)argc);
+        }
     }
 
     return (Item){.item = b2it(true)};
@@ -325,7 +373,8 @@ extern "C" Item js_ee_removeAllListeners(Item emitter, Item event_name) {
         if (arr.item != 0 && get_type_id(arr) != LMD_TYPE_UNDEFINED) {
             int64_t len = js_array_length(arr);
             for (int64_t i = len - 1; i >= 0; i--) {
-                emit_remove_listener(emitter, event_name, js_array_get_int(arr, i));
+                emit_remove_listener(emitter, event_name,
+                    listener_record_fn(js_array_get_int(arr, i)));
             }
         }
         js_property_set(map, event_name, js_array_new(0));
@@ -347,18 +396,46 @@ extern "C" Item js_ee_listeners(Item emitter, Item event_name) {
     int64_t len = js_array_length(arr);
     Item copy = js_array_new(0);
     for (int64_t i = 0; i < len; i++) {
-        js_array_push(copy, js_array_get_int(arr, i));
+        js_array_push(copy, listener_record_fn(js_array_get_int(arr, i)));
     }
     return copy;
 }
 
 // ─── emitter.listenerCount(event [, listener]) ─────────────────────────────
+static bool event_name_matches(Item a, Item b) {
+    if (a.item == b.item) return true;
+    if (get_type_id(a) != LMD_TYPE_STRING || get_type_id(b) != LMD_TYPE_STRING) return false;
+    String* as = it2s(a);
+    String* bs = it2s(b);
+    return as->len == bs->len && memcmp(as->chars, bs->chars, as->len) == 0;
+}
+
+static Item event_target_listener_count(Item emitter, Item event_name, Item listener) {
+    Item listeners = js_property_get(emitter, make_string_item("__listeners__"));
+    if (get_type_id(listeners) != LMD_TYPE_ARRAY) return (Item){.item = i2it(0)};
+
+    bool match_listener = listener.item != 0 && get_type_id(listener) != LMD_TYPE_UNDEFINED;
+    int64_t count = 0;
+    int64_t len = js_array_length(listeners);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(listeners, i);
+        Item type = js_property_get(entry, make_string_item("type"));
+        if (!event_name_matches(type, event_name)) continue;
+        if (match_listener) {
+            Item handler = js_property_get(entry, make_string_item("handler"));
+            if (handler.item != listener.item) continue;
+        }
+        count++;
+    }
+    return (Item){.item = i2it(count)};
+}
+
 extern "C" Item js_ee_listenerCount(Item emitter, Item event_name, Item listener) {
     if (emitter.item == 0) return (Item){.item = i2it(0)};
     Item map = get_events_map(emitter);
     Item arr = js_property_get(map, event_name);
     if (arr.item == 0 || get_type_id(arr) == LMD_TYPE_UNDEFINED) {
-        return (Item){.item = i2it(0)};
+        return event_target_listener_count(emitter, event_name, listener);
     }
     int64_t len = js_array_length(arr);
     // if no specific listener requested, return total count
@@ -369,7 +446,7 @@ extern "C" Item js_ee_listenerCount(Item emitter, Item event_name, Item listener
     int64_t count = 0;
     for (int64_t i = 0; i < len; i++) {
         Item f = js_array_get_int(arr, i);
-        if (f.item == listener.item) count++;
+        if (listener_matches(f, listener)) count++;
     }
     return (Item){.item = i2it(count)};
 }
@@ -425,7 +502,7 @@ extern "C" Item js_ee_prependListener(Item emitter, Item event_name, Item listen
     // rebuild with listener at front
     int64_t len = js_array_length(arr);
     Item new_arr = js_array_new((int)(len + 1));
-    js_array_push(new_arr, listener);
+    js_array_push(new_arr, make_listener_record(listener));
     for (int64_t i = 0; i < len; i++) {
         js_array_push(new_arr, js_array_get_int(arr, i));
     }
@@ -442,7 +519,8 @@ extern "C" Item js_ee_prependOnceListener(Item emitter, Item event_name, Item li
     Item arr = get_listeners_array(emitter, event_name);
     int64_t len = js_array_length(arr);
     Item new_arr = js_array_new((int)(len + 1));
-    js_array_push(new_arr, listener);
+    Item record = make_listener_record(listener);
+    js_array_push(new_arr, record);
     for (int64_t i = 0; i < len; i++) {
         js_array_push(new_arr, js_array_get_int(arr, i));
     }
@@ -450,7 +528,7 @@ extern "C" Item js_ee_prependOnceListener(Item emitter, Item event_name, Item li
     js_property_set(map, event_name, new_arr);
     // mark as once
     Item set = get_once_set(emitter);
-    js_array_push(set, listener);
+    js_array_push(set, record);
     update_events_count(emitter);
     return emitter;
 }
