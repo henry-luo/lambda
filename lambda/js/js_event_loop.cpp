@@ -421,19 +421,42 @@ static double item_to_ms(Item delay) {
 // Timeout/Immediate object helpers
 // =============================================================================
 
-// Timeout.ref() — no-op, returns this
+static JsTimerHandle* find_timer_handle(Item timer_id);
+
+static Item timeout_this_or_arg(Item this_val) {
+    if (get_type_id(this_val) == LMD_TYPE_MAP || get_type_id(this_val) == LMD_TYPE_INT) {
+        return this_val;
+    }
+    return js_get_this();
+}
+
+// Timeout.ref()
 extern "C" Item js_timeout_ref(Item this_val) {
-    return this_val;
+    Item self = timeout_this_or_arg(this_val);
+    JsTimerHandle* th = find_timer_handle(self);
+    if (th && !uv_is_closing((uv_handle_t*)&th->timer)) {
+        uv_ref((uv_handle_t*)&th->timer);
+    }
+    return self;
 }
 
-// Timeout.unref() — no-op, returns this
+// Timeout.unref()
 extern "C" Item js_timeout_unref(Item this_val) {
-    return this_val;
+    Item self = timeout_this_or_arg(this_val);
+    JsTimerHandle* th = find_timer_handle(self);
+    if (th && !uv_is_closing((uv_handle_t*)&th->timer)) {
+        uv_unref((uv_handle_t*)&th->timer);
+    }
+    return self;
 }
 
-// Timeout.hasRef() — always true
+// Timeout.hasRef()
 extern "C" Item js_timeout_hasRef(Item this_val) {
-    return (Item){.item = b2it(true)};
+    Item self = timeout_this_or_arg(this_val);
+    JsTimerHandle* th = find_timer_handle(self);
+    bool has_ref = th && !uv_is_closing((uv_handle_t*)&th->timer) &&
+        uv_has_ref((uv_handle_t*)&th->timer);
+    return (Item){.item = b2it(has_ref)};
 }
 
 // Timeout.refresh() — no-op, returns this
@@ -485,6 +508,16 @@ static int64_t extract_timer_id(Item timer_id) {
         if (get_type_id(id) == LMD_TYPE_INT) return it2i(id);
     }
     return -1;
+}
+
+static JsTimerHandle* find_timer_handle(Item timer_id) {
+    int64_t id = extract_timer_id(timer_id);
+    if (id < 0) return NULL;
+    for (int i = 0; i < timer_handle_count; i++) {
+        JsTimerHandle* th = timer_handles[i];
+        if (th && th->id == id && !th->closing) return th;
+    }
+    return NULL;
 }
 
 extern "C" Item js_setTimeout(Item callback, Item delay) {
