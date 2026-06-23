@@ -1725,6 +1725,96 @@ static void reset_foreign_document_cache(); // forward declaration
 // Phase 6E: text-control helpers are shared with Radiant event/render paths.
 #include "../../radiant/text_control.hpp"
 #define tc_is_text_control_elem(e)      tc_is_text_control(e)
+
+static bool js_dom_select_all_text_control_enabled(DomElement* elem) {
+    if (!elem || !tc_is_text_control_elem(elem)) return false;
+    tc_ensure_init(elem);
+    FormControlProp* form = elem->form;
+    return form && form->current_value_u16_len > 0;
+}
+
+static bool js_dom_select_all_node_has_text(DomNode* node) {
+    if (!node) return false;
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        return text && text->text && text->length > 0;
+    }
+    if (!node->is_element()) return false;
+
+    DomElement* elem = node->as_element();
+    if (!elem) return false;
+    if (tc_is_text_control_elem(elem)) {
+        return js_dom_select_all_text_control_enabled(elem);
+    }
+    const char* tag = elem->tag_name;
+    if (tag &&
+        (strcasecmp(tag, "script") == 0 ||
+         strcasecmp(tag, "style") == 0 ||
+         strcasecmp(tag, "noscript") == 0)) {
+        return false;
+    }
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (js_dom_select_all_node_has_text(child)) return true;
+    }
+    return false;
+}
+
+static bool js_dom_select_all_enabled(DocState* state) {
+    if (!state) return false;
+
+    View* focused = focus_get(state);
+    if (focused && focused->is_element()) {
+        DomElement* elem = ((DomNode*)focused)->as_element();
+        if (tc_is_text_control_elem(elem)) {
+            return js_dom_select_all_text_control_enabled(elem);
+        }
+    }
+    if (js_document_active_element && tc_is_text_control_elem(js_document_active_element)) {
+        return js_dom_select_all_text_control_enabled(js_document_active_element);
+    }
+
+    int fallback_offset = 0;
+    View* target = js_dom_testdriver_current_target(state, &fallback_offset);
+    if (target && target->is_element()) {
+        DomElement* elem = ((DomNode*)target)->as_element();
+        if (tc_is_text_control_elem(elem)) {
+            return js_dom_select_all_text_control_enabled(elem);
+        }
+    }
+
+    EditingSurface surface;
+    if (target && js_dom_testdriver_rich_surface(target, &surface) &&
+        surface.owner) {
+        return js_dom_select_all_node_has_text((DomNode*)surface.owner);
+    }
+
+    if (js_document_design_mode && _js_current_document && _js_current_document->root) {
+        return js_dom_select_all_node_has_text((DomNode*)_js_current_document->root);
+    }
+    return false;
+}
+
+extern "C" void* js_dom_current_active_text_control(void) {
+    DocState* state = js_dom_current_state();
+    if (state) {
+        View* focused = focus_get(state);
+        if (focused && focused->is_element()) {
+            DomElement* elem = ((DomNode*)focused)->as_element();
+            if (tc_is_text_control_elem(elem)) return elem;
+        }
+        DomElement* elem = tc_get_active_element(state);
+        if (elem && tc_is_text_control_elem(elem)) return elem;
+        elem = tc_get_last_focused_text_control(state);
+        if (elem && tc_is_text_control_elem(elem)) return elem;
+    }
+    if (js_document_active_element &&
+        (!_js_current_document || js_document_active_element->doc == _js_current_document) &&
+        tc_is_text_control_elem(js_document_active_element)) {
+        return js_document_active_element;
+    }
+    return nullptr;
+}
+
 extern "C" void js_dom_batch_reset() {
     DocState* state = js_dom_current_state();
     js_dom_selection_reset();
@@ -4486,13 +4576,14 @@ static void js_dom_focus_set_selection_for_element(DocState* state, DomElement* 
     if (!state || !elem) return;
     const char* exc = nullptr;
     if (tc_is_text_control_elem(elem) && elem->parent) {
-        uint32_t index = dom_node_child_index((DomNode*)elem);
-        if (index != UINT32_MAX) {
-            DomBoundary boundary = { elem->parent, index };
-            if (!state_store_set_selection(state, &boundary, &boundary, &exc)) {
-                log_debug("js_dom_focus_selection_text_control_failed: %s",
-                          exc ? exc : "unknown");
-            }
+        tc_ensure_init(elem);
+        FormControlProp* form = elem->form;
+        tc_set_active_element(state, elem);
+        tc_set_last_focused_text_control(state, elem);
+        if (form) {
+            state_store_set_text_control_selection(state, elem,
+                form->selection_start, form->selection_end,
+                form->selection_direction);
         }
         return;
     }
@@ -5704,6 +5795,8 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         bool enabled = false;
         if (cmd && js_dom_exec_command_is_style_mode(cmd)) {
             enabled = true;
+        } else if (cmd && strcasecmp(cmd, "selectAll") == 0) {
+            enabled = js_dom_select_all_enabled(js_dom_testdriver_state());
         } else if (cmd && js_dom_exec_command_is_native(cmd)) {
             enabled = js_document_design_mode ||
                 js_dom_exec_command_has_rich_target();
