@@ -147,7 +147,7 @@ ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
     ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!arr) return NULL;
     arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->flags = elem_type;  // elem_type stored in Container::flags byte
+    arr->set_elem_type(elem_type);  // stored in map_kind byte (byte 2)
     int elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
     size_t bytes;
     if (length > 0 && lam::checked_mul((size_t)length, (size_t)elem_size, &bytes)) {
@@ -204,7 +204,7 @@ Item array_num_get(ArrayNum *array, int64_t index) {
 ArrayNum* array_int() {
     ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->flags = ELEM_INT;
+    arr->set_elem_type(ELEM_INT);
     return arr;
 }
 
@@ -256,7 +256,7 @@ int64_t array_int_get_raw(ArrayNum *array, int64_t index) {
 ArrayNum* array_int64() {
     ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->flags = ELEM_INT64;
+    arr->set_elem_type(ELEM_INT64);
     return arr;
 }
 
@@ -306,7 +306,7 @@ int64_t array_int64_get_raw(ArrayNum *array, int64_t index) {
 ArrayNum* array_float() {
     ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->flags = ELEM_FLOAT;
+    arr->set_elem_type(ELEM_FLOAT);
     return arr;
 }
 
@@ -318,7 +318,7 @@ ArrayNum* array_float_new(int64_t length) {
 ArrayNum* array_float_fill(ArrayNum *arr, int count, ...) {
     if (count > 0) {
         arr->type_id = LMD_TYPE_ARRAY_NUM;
-        arr->flags = ELEM_FLOAT;
+        arr->set_elem_type(ELEM_FLOAT);
         size_t bytes;
         if (lam::checked_mul((size_t)count, sizeof(double), &bytes)) {
             arr->float_items = (double*)heap_data_alloc(bytes);
@@ -360,6 +360,10 @@ void array_float_set(ArrayNum *arr, int64_t index, double value) {
     if (!arr || index < 0 || index >= arr->capacity) {
         return;  // Invalid access, do nothing
     }
+    if (arr->is_view) {
+        log_error("array_float_set: cannot mutate a view; copy() first");
+        return;
+    }
     arr->float_items[index] = value;
     // Update length if we're setting beyond current length
     if (index >= arr->length) {
@@ -369,6 +373,10 @@ void array_float_set(ArrayNum *arr, int64_t index, double value) {
 
 void array_int_set(ArrayNum *arr, int64_t index, int64_t value) {
     if (!arr || index < 0 || index >= arr->capacity) {
+        return;
+    }
+    if (arr->is_view) {
+        log_error("array_int_set: cannot mutate a view; copy() first");
         return;
     }
     arr->items[index] = value;
@@ -381,6 +389,10 @@ void array_int_set(ArrayNum *arr, int64_t index, int64_t value) {
 void array_float_set_item(ArrayNum *arr, int64_t index, Item value) {
     if (!arr || index < 0 || index >= arr->capacity) {
         return;  // Invalid access, do nothing
+    }
+    if (arr->is_view) {
+        log_error("array_float_set_item: cannot mutate a view; copy() first");
+        return;
     }
 
     double dval = 0.0;
@@ -463,6 +475,10 @@ static double item_to_float_value(Item value) {
 // Generic setter for all ArrayNum elem_types, dispatches on elem_type
 void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
     if (!arr || index < 0 || index >= arr->capacity) return;
+    if (arr->is_view) {
+        log_error("array_num_set_item: cannot mutate a view; copy() first");
+        return;
+    }
     switch (arr->get_elem_type()) {
     case ELEM_INT:
         arr->items[index] = item_to_int_value(value);

@@ -862,7 +862,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         if (!new_arr) return ItemNull;
 
         new_arr->type_id = LMD_TYPE_ARRAY_NUM;
-        new_arr->flags = arr->flags;  // copy elem_type (stored in flags byte)
+        new_arr->set_elem_type(arr->get_elem_type());  // copy elem_type from map_kind byte
         new_arr->capacity = new_arr->length = arr->length;
         new_arr->items = (int64_t*)((char*)new_arr + sizeof(ArrayNum));
         memcpy(new_arr->items, arr->items, arr->length * elem_size);

@@ -8210,13 +8210,20 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             // Inline ArrayNum int store (only for ELEM_INT / ELEM_INT64, not ELEM_FLOAT)
             emit_label(mt, l_fast);
             {
-                // Check flags upper nibble: ELEM_FLOAT=0x10 → fall back to fn_array_set
+                // Reject views (flags bit 5 = is_view): fall back to fn_array_set which logs the error.
                 MIR_reg_t flags_byte = new_reg(mt, "flgb", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, flags_byte),
                     MIR_new_mem_op(mt->ctx, MIR_T_U8, 1, arr_ptr, 0, 1)));
+                MIR_reg_t is_view_bit = new_reg(mt, "isvw", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, is_view_bit),
+                    MIR_new_reg_op(mt->ctx, flags_byte), MIR_new_int_op(mt->ctx, 0x20)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_slow),
+                    MIR_new_reg_op(mt->ctx, is_view_bit)));
+                // elem_type lives in map_kind byte at offset 2 (was flags upper nibble pre-Phase2b)
+                // ELEM_FLOAT=0x10 → fall back to fn_array_set; ELEM_INT=0x00 and ELEM_INT64=0x50 take fast path
                 MIR_reg_t etype = new_reg(mt, "etyp", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, etype),
-                    MIR_new_reg_op(mt->ctx, flags_byte), MIR_new_int_op(mt->ctx, 0xF0)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, etype),
+                    MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, arr_ptr, 0, 1)));
                 MIR_reg_t is_float = new_reg(mt, "isfl", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_float),
                     MIR_new_reg_op(mt->ctx, etype), MIR_new_int_op(mt->ctx, 0x10)));
@@ -8293,6 +8300,16 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             MIR_label_t l_ok = new_label(mt);
             MIR_label_t l_oob = new_label(mt);
             MIR_label_t l_end = new_label(mt);
+
+            // Reject views (flags bit 5 = is_view): fall back to fn_array_set
+            MIR_reg_t fflags = new_reg(mt, "fflg", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, fflags),
+                MIR_new_mem_op(mt->ctx, MIR_T_U8, 1, arr_ptr, 0, 1)));
+            MIR_reg_t fview = new_reg(mt, "fvw", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, fview),
+                MIR_new_reg_op(mt->ctx, fflags), MIR_new_int_op(mt->ctx, 0x20)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+                MIR_new_reg_op(mt->ctx, fview)));
 
             // Bounds check
             MIR_reg_t arr_len = new_reg(mt, "aflen", MIR_T_I64);

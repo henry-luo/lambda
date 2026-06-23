@@ -271,7 +271,7 @@ Item fn_join(Item left, Item right) {
                 int64_t total = la->length + ra->length;
                 ArrayNum *result = (ArrayNum *)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
                 result->type_id = LMD_TYPE_ARRAY_NUM;
-                result->flags = la->get_elem_type();
+                result->set_elem_type(la->get_elem_type());
                 result->length = total;  result->capacity = total;
                 uint64_t result_root = (uint64_t)(uintptr_t)result;
                 heap_register_gc_root(&result_root);
@@ -4721,6 +4721,10 @@ void fn_array_set(Array* arr, int64_t index, Item value) {
     }
     case LMD_TYPE_ARRAY_NUM: {
         ArrayNum* num_arr = (ArrayNum*)arr;
+        if (num_arr->is_view) {
+            log_error("fn_array_set: cannot mutate a view; copy() first");
+            return;
+        }
         TypeId val_type = get_type_id(value);
         ArrayNumElemType etype = num_arr->get_elem_type();
         if (etype == ELEM_FLOAT) {

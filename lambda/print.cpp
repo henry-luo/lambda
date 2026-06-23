@@ -597,10 +597,57 @@ struct PrintItemVisitor {
         strbuf_append_char(strbuf, ']');
     }
 
+    // Print one element of an ArrayNum at a flat byte offset (into data buffer).
+    void print_array_num_elem(StrBuf* sb, ArrayNum* array, ArrayNumElemType et, int64_t flat_idx) const {
+        if (et == ELEM_FLOAT || et == ELEM_FLOAT64) {
+            print_double(sb, array->float_items[flat_idx]);
+        } else if (et == ELEM_INT || et == ELEM_INT64) {
+            strbuf_append_format(sb, "%lld", array->items[flat_idx]);
+        } else {
+            Item val = read_compact_elem(array, flat_idx);
+            print_item(sb, val, depth + 1, indent);
+        }
+    }
+
+    // Recursive N-D printer: walks shape[axis..ndim-1] from a base flat index.
+    void print_array_num_nd(StrBuf* sb, ArrayNum* array, ArrayNumElemType et,
+                            int64_t* shp, int64_t* str, uint8_t ndim,
+                            int axis, int64_t base_idx) const {
+        strbuf_append_char(sb, '[');
+        int64_t dim = shp[axis];
+        int64_t stride = str[axis];
+        if (axis == ndim - 1) {
+            for (int64_t i = 0; i < dim; i++) {
+                if (i) strbuf_append_str(sb, ", ");
+                print_array_num_elem(sb, array, et, base_idx + i * stride);
+            }
+        } else {
+            for (int64_t i = 0; i < dim; i++) {
+                if (i) strbuf_append_str(sb, ", ");
+                print_array_num_nd(sb, array, et, shp, str, ndim, axis + 1, base_idx + i * stride);
+            }
+        }
+        strbuf_append_char(sb, ']');
+    }
+
     void operator()(lam::ItemOf<LMD_TYPE_ARRAY_NUM> item) const {
-        strbuf_append_char(strbuf, '[');
         ArrayNum* array = item.ptr();
         ArrayNumElemType et = array->get_elem_type();
+
+        // N-D path: traverse via shape/strides for nested output
+        if (array->is_ndim && array->extra) {
+            ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)array->extra;
+            if (shape && shape->ndim >= 2) {
+                print_array_num_nd(strbuf, array, et,
+                                   array_num_shape_dims(shape),
+                                   array_num_shape_strides(shape),
+                                   shape->ndim, 0, 0);
+                return;
+            }
+        }
+
+        // 1-D flat path (also for ndim=1 owned and views)
+        strbuf_append_char(strbuf, '[');
         if (et == ELEM_FLOAT || et == ELEM_FLOAT64) {
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_str(strbuf, ", ");

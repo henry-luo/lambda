@@ -2316,6 +2316,224 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
     }
 }
 
+// ============================================================================
+// view(arr, start, end) — read-only view sharing arr's storage.
+// Allocates a new ArrayNum whose data pointer is base->data + start*elem_size.
+// The view's shape side-table holds a reference to the base, keeping it alive
+// across GC; the base is also pinned so its data buffer cannot be relocated.
+// Mutation through the view raises an error (see fn_array_set / array_num_set_item).
+// ============================================================================
+Item fn_subview(Item vec, Item start_item, Item end_item) {
+    GUARD_ERROR3(vec, start_item, end_item);
+    TypeId type = get_type_id(vec);
+    if (type != LMD_TYPE_ARRAY_NUM) {
+        log_error("fn_view: only typed arrays (ArrayNum) can be viewed; got type %d", type);
+        return ItemError;
+    }
+    ArrayNum* base = vec.array_num;
+    if (!base) return ItemError;
+    if (!base->is_heap) {
+        log_error("fn_view: cannot view arena-backed array; copy() first to get a heap array");
+        return ItemError;
+    }
+    TypeId st = get_type_id(start_item);
+    TypeId et = get_type_id(end_item);
+    if ((st != LMD_TYPE_INT && st != LMD_TYPE_INT64) ||
+        (et != LMD_TYPE_INT && et != LMD_TYPE_INT64)) {
+        log_error("fn_view: start and end must be integers");
+        return ItemError;
+    }
+    int64_t start = (st == LMD_TYPE_INT) ? start_item.get_int56() : start_item.get_int64();
+    int64_t end   = (et == LMD_TYPE_INT) ? end_item.get_int56()   : end_item.get_int64();
+    int64_t len = base->length;
+    if (start < 0) start = len + start;
+    if (end < 0) end = len + end;
+    if (start < 0) start = 0;
+    if (end > len) end = len;
+    if (start > end) start = end;
+    int64_t view_len = end - start;
+
+    ArrayNumElemType etype = base->get_elem_type();
+    int elem_size = ELEM_TYPE_SIZE[etype >> 4];
+
+    ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    if (!view) return ItemError;
+    view->type_id = LMD_TYPE_ARRAY_NUM;
+    view->set_elem_type(etype);
+    view->is_ndim = 1;
+    view->is_view = 1;
+    // pre-adjusted data pointer — element 0 of view is element `start` of base
+    view->data = (void*)((char*)base->data + start * (size_t)elem_size);
+    view->length = view_len;
+    view->capacity = view_len;
+
+    // allocate shape side-table: ndim=1, base ref, offset for diagnostics, shape[0]=len, strides[0]=1
+    size_t shape_bytes = sizeof(ArrayNumShape) + 2 * sizeof(int64_t);
+    ArrayNumShape* shape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
+    if (!shape) return ItemError;
+    shape->ndim = 1;
+    shape->is_c_contig = 1;
+    shape->is_f_contig = 1;
+    shape->offset = start;
+    shape->base = (void*)base;
+    shape->data[0] = view_len;  // shape[0]
+    shape->data[1] = 1;          // strides[0] in elements
+    view->extra = (int64_t)(uintptr_t)shape;
+
+    // pin the base so its data buffer cannot be relocated by GC compaction
+    base->is_pinned = 1;
+    return { .array_num = view };
+}
+
+// ============================================================================
+// reshape(arr, shape_list) — view with new dimensionality.
+// Source must be C-contiguous (any owned 1-D array, or another C-contiguous view).
+// shape_list is an array of int dimensions whose product must equal arr->length.
+// Returns a view sharing arr's storage, with new shape and row-major strides.
+// ============================================================================
+Item fn_reshape(Item vec, Item shape_item) {
+    GUARD_ERROR2(vec, shape_item);
+    TypeId vt = get_type_id(vec);
+    if (vt != LMD_TYPE_ARRAY_NUM) {
+        log_error("fn_reshape: source must be a typed numeric array, got type %d", vt);
+        return ItemError;
+    }
+    ArrayNum* base = vec.array_num;
+    if (!base) return ItemError;
+    if (!base->is_heap) {
+        log_error("fn_reshape: cannot reshape arena-backed array; copy() first");
+        return ItemError;
+    }
+    // contiguous check: owned 1-D array is contiguous; existing view must have is_c_contig set
+    if (base->is_view || base->is_ndim) {
+        ArrayNumShape* bshape = (ArrayNumShape*)(uintptr_t)base->extra;
+        if (!bshape || !bshape->is_c_contig) {
+            log_error("fn_reshape: source must be C-contiguous (use copy() to materialize first)");
+            return ItemError;
+        }
+    }
+
+    // collect new shape from shape_item
+    int64_t st_len = vector_length(shape_item);
+    if (st_len < 0) {
+        log_error("fn_reshape: shape argument must be a vector of integers");
+        return ItemError;
+    }
+    if (st_len < 1 || st_len > 32) {
+        log_error("fn_reshape: ndim must be in [1, 32], got %lld", (long long)st_len);
+        return ItemError;
+    }
+
+    // read dims, validate, compute product
+    int64_t total = 1;
+    int64_t dims_stack[32];
+    for (int64_t i = 0; i < st_len; i++) {
+        Item d = vector_get(shape_item, i);
+        TypeId dt = get_type_id(d);
+        int64_t dim;
+        if (dt == LMD_TYPE_INT) dim = d.get_int56();
+        else if (dt == LMD_TYPE_INT64) dim = d.get_int64();
+        else {
+            log_error("fn_reshape: shape entries must be integers");
+            return ItemError;
+        }
+        if (dim < 0) {
+            log_error("fn_reshape: shape entries must be non-negative, got %lld at axis %lld",
+                      (long long)dim, (long long)i);
+            return ItemError;
+        }
+        dims_stack[i] = dim;
+        total *= dim;
+    }
+    if (total != base->length) {
+        log_error("fn_reshape: shape product (%lld) does not match array length (%lld)",
+                  (long long)total, (long long)base->length);
+        return ItemError;
+    }
+
+    ArrayNumElemType etype = base->get_elem_type();
+
+    // allocate the view header
+    ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    if (!view) return ItemError;
+    view->type_id = LMD_TYPE_ARRAY_NUM;
+    view->set_elem_type(etype);
+    view->is_ndim = 1;
+    view->is_view = 1;
+    view->data = base->data;            // alias entire data
+    view->length = base->length;
+    view->capacity = base->length;
+
+    // allocate shape side-table: header + shape[ndim] + strides[ndim]
+    size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)st_len * sizeof(int64_t);
+    ArrayNumShape* shape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
+    if (!shape) return ItemError;
+    shape->ndim = (uint8_t)st_len;
+    shape->is_c_contig = 1;
+    shape->is_f_contig = (st_len == 1) ? 1 : 0;
+    shape->offset = 0;
+    shape->base = (void*)base;
+
+    // copy shape and compute C-contiguous strides
+    int64_t* shp = array_num_shape_dims(shape);
+    int64_t* str = array_num_shape_strides(shape);
+    for (int64_t i = 0; i < st_len; i++) shp[i] = dims_stack[i];
+    int64_t stride = 1;
+    for (int64_t i = st_len - 1; i >= 0; i--) {
+        str[i] = stride;
+        stride *= dims_stack[i];
+    }
+    view->extra = (int64_t)(uintptr_t)shape;
+
+    base->is_pinned = 1;
+    return { .array_num = view };
+}
+
+// shape(arr) - returns a list of dimensions; for 1-D returns [length]
+Item fn_shape(Item vec) {
+    GUARD_ERROR1(vec);
+    TypeId vt = get_type_id(vec);
+    if (vt != LMD_TYPE_ARRAY_NUM) {
+        log_error("fn_shape: expected typed numeric array, got type %d", vt);
+        return ItemError;
+    }
+    ArrayNum* arr = vec.array_num;
+    if (!arr) return ItemError;
+    List* result = list();
+    if (arr->is_ndim && arr->extra) {
+        ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
+        int64_t* shp = array_num_shape_dims(shape);
+        for (int64_t i = 0; i < shape->ndim; i++) list_push(result, push_l(shp[i]));
+    } else {
+        list_push(result, push_l(arr->length));
+    }
+    return { .array = result };
+}
+
+// ndim(arr) - returns number of dimensions
+Item fn_ndim(Item vec) {
+    GUARD_ERROR1(vec);
+    TypeId vt = get_type_id(vec);
+    if (vt != LMD_TYPE_ARRAY_NUM) return push_l(0);
+    ArrayNum* arr = vec.array_num;
+    if (!arr) return push_l(0);
+    if (arr->is_ndim && arr->extra) {
+        ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
+        return push_l((int64_t)shape->ndim);
+    }
+    return push_l(1);
+}
+
+// is_view(arr) - returns true if arr is a view over another array
+Item fn_is_view(Item vec) {
+    GUARD_ERROR1(vec);
+    TypeId type = get_type_id(vec);
+    if (type != LMD_TYPE_ARRAY_NUM) {
+        return { .item = b2it(BOOL_FALSE) };
+    }
+    return { .item = b2it(vec.array_num->is_view ? BOOL_TRUE : BOOL_FALSE) };
+}
+
 // zip(v1, v2) - pair elements into tuples
 Item fn_zip(Item a, Item b) {
     GUARD_ERROR2(a, b);

@@ -853,9 +853,25 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     case LMD_TYPE_BINARY_:
     case LMD_TYPE_DECIMAL_:
     case LMD_TYPE_RANGE_:
-    case LMD_TYPE_ARRAY_NUM_:
     case LMD_TYPE_PATH_:
         break;
+
+    case LMD_TYPE_ARRAY_NUM_: {
+        // Owned 1-D arrays have no outgoing pointers; views (is_view bit 5) hold
+        // a base reference via the shape side-table in `extra` (offset 24).
+        uint8_t* p = (uint8_t*)obj;
+        uint8_t flags = p[1];
+        if (flags & 0x20) {  // CONTAINER_FLAG_IS_VIEW = bit 5
+            void* shape_ptr = (void*)(uintptr_t)(*(int64_t*)(p + 24));
+            if (shape_ptr) {
+                // ArrayNumShape layout: { uint8_t ndim, 1-byte flag-byte, int64_t offset, void* base, ... }
+                // base lives at offset 16 within the shape struct (1 + 1 + pad to 8 + 8)
+                uint64_t base = *(uint64_t*)((uint8_t*)shape_ptr + 16);
+                gc_mark_possible_item(gc, base);
+            }
+        }
+        break;
+    }
 
     case LMD_TYPE_ARRAY_: {
         // Array: items is an Item* array
@@ -1186,10 +1202,23 @@ static void gc_compact_data(gc_heap_t* gc) {
         }
         case LMD_TYPE_ARRAY_NUM_: {
             uint8_t* p = (uint8_t*)obj;
+            uint8_t flags = p[1];
+            // Skip relocation when:
+            //   is_view  (bit 5): data is borrowed from base array; we must not move it
+            //   is_pinned (bit 6): a live view references this base; moving it would break the view
+            if (flags & 0x60) break;
             void** items_slot = (void**)(p + 8);
             int64_t capacity = *(int64_t*)(p + 32);
             if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
-                size_t size = capacity * 8;  // all elem types are 8 bytes (int64_t or double)
+                // Element width lives in map_kind byte at offset 2 (upper nibble = ELEM_* tag).
+                // ELEM_TYPE_SIZE table is keyed by (elem_type >> 4).
+                static const uint8_t ELEM_SIZE_IDX[16] = {
+                    8, 8, 1, 2, 4, 8, 1, 2, 4, 8, 2, 4, 8, 1, 0, 0
+                };
+                uint8_t elem_type = p[2];
+                size_t elem_bytes = ELEM_SIZE_IDX[(elem_type >> 4) & 0xF];
+                if (elem_bytes == 0) elem_bytes = 8;  // safe default
+                size_t size = (size_t)capacity * elem_bytes;
                 void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot, size);
                 if (new_items) {
                     *items_slot = new_items;

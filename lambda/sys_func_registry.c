@@ -339,6 +339,21 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_SLICE, "slice", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_slice", FPTR(fn_slice), NULL, NULL, false, 0},
 
+    {SYSFUNC_VIEW, "subview", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_subview", FPTR(fn_subview), NULL, NULL, false, 0},
+
+    {SYSFUNC_IS_VIEW, "is_view", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_is_view", FPTR(fn_is_view), NULL, NULL, false, 0},
+
+    {SYSFUNC_RESHAPE, "reshape", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_reshape", FPTR(fn_reshape), NULL, NULL, false, 0},
+
+    {SYSFUNC_SHAPE, "shape", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_shape", FPTR(fn_shape), NULL, NULL, false, 0},
+
+    {SYSFUNC_NDIM, "ndim", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_ndim", FPTR(fn_ndim), NULL, NULL, false, 0},
+
     {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_all", FPTR(fn_all), NULL, NULL, false, 0},
 

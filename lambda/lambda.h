@@ -285,6 +285,11 @@ typedef enum SysFunc {
     SYSFUNC_JUSTNOW,
     SYSFUNC_SET,
     SYSFUNC_SLICE,
+    SYSFUNC_VIEW,             // subview(arr, start, end) - read-only view sharing arr's storage
+    SYSFUNC_IS_VIEW,          // is_view(arr) - check if arr is a view
+    SYSFUNC_RESHAPE,          // reshape(arr, shape_list) - view with new shape
+    SYSFUNC_SHAPE,            // shape(arr) - list of dimensions
+    SYSFUNC_NDIM,             // ndim(arr) - number of dimensions
     SYSFUNC_ALL,
     SYSFUNC_ANY,
     SYSFUNC_MIN1,
@@ -530,13 +535,19 @@ struct Container {
     union {
         uint8_t flags;
         struct {
-            uint8_t is_content:1;    // whether it is a content list, or value list
-            uint8_t is_spreadable:1; // whether this array should be spread when added to collections
-            uint8_t is_heap:1;       // whether allocated from runtime heap (vs arena for input docs)
-            uint8_t is_data_migrated:1; // data buffer migrated from input pool to runtime pool (for mutated markup containers)
+            // lifecycle / allocation flags (lower nibble)
+            uint8_t is_content:1;        // whether it is a content list, or value list
+            uint8_t is_spreadable:1;     // whether this array should be spread when added to collections
+            uint8_t is_heap:1;           // whether allocated from runtime heap (vs arena for input docs)
+            uint8_t is_data_migrated:1;  // data buffer migrated from input pool to runtime pool (for mutated markup containers)
+            // layout / storage flags (upper nibble)
+            uint8_t is_ndim:1;           // bit 4: has shape side-table in `extra` (n-d owned array)
+            uint8_t is_view:1;           // bit 5: aliases another container's storage (implies is_ndim)
+            uint8_t is_pinned:1;         // bit 6: has live views; data buffer must not be relocated by compactor
+            uint8_t flags_reserved:1;    // bit 7: reserved for future use
         };
     };
-    uint8_t map_kind;      // MapKind tag (0 = plain, upper 4 bits of flags byte)
+    uint8_t map_kind;      // MapKind tag (0 = plain, only used for map/object/element)
     uint8_t padding[5];  // padding to align to 8 bytes
 };
 
@@ -576,7 +587,7 @@ struct Container {
             void* data;            // for compact types (ELEM_INT8, ELEM_UINT8, etc.)
         };
         int64_t length;  // number of elements
-        int64_t extra;   // count of extra elements stored at end
+        int64_t extra;   // for is_ndim/is_view: ArrayNumShape* in this slot; else count of extra elements
         int64_t capacity;  // allocated capacity
     };
 
@@ -632,6 +643,28 @@ struct Container {
     };
 
 #endif
+
+// ============================================================================
+// ArrayNumShape — side table for N-D arrays and views.
+// Pointer stored in ArrayNum.extra when Container.is_ndim or is_view is set.
+// Layout:
+//   [header fields ...]
+//   int64_t shape[ndim]      — element count per dimension
+//   int64_t strides[ndim]    — stride per dimension, in *elements* (not bytes)
+// Allocated via pool/heap, freed in ArrayNum finalizer.
+// ============================================================================
+typedef struct ArrayNumShape {
+    uint8_t  ndim;            // number of dimensions (1..32)
+    uint8_t  is_c_contig:1;   // contiguous in row-major
+    uint8_t  is_f_contig:1;   // contiguous in column-major
+    uint8_t  reserved:6;
+    int64_t  offset;          // element offset within base->data (0 for owned)
+    void*    base;            // Container* — non-NULL for views; NULL for owned N-D arrays
+    int64_t  data[];          // shape[ndim] followed by strides[ndim] — total 2*ndim entries
+} ArrayNumShape;
+
+static inline int64_t* array_num_shape_dims(ArrayNumShape* s) { return s->data; }
+static inline int64_t* array_num_shape_strides(ArrayNumShape* s) { return s->data + s->ndim; }
 
 Range* range();
 long range_get(Range *range, int64_t index);
@@ -1389,6 +1422,11 @@ extern "C" {
     Item fn_clip(Item a, Item lo, Item hi);
     Item fn_all(Item a);
     Item fn_any(Item a);
+    Item fn_subview(Item arr, Item start, Item end);  // read-only view over arr[start..end]
+    Item fn_is_view(Item arr);                     // returns true if arr is a view
+    Item fn_reshape(Item arr, Item shape);         // returns view with new shape (contiguous required)
+    Item fn_shape(Item arr);                       // returns shape as a list
+    Item fn_ndim(Item arr);                        // returns number of dimensions (int)
     Item fn_zip(Item a, Item b);
     Item fn_range3(Item start, Item end, Item step);
     Item fn_math_quantile(Item a, Item p);

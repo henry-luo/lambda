@@ -352,17 +352,19 @@ struct List : Container {
 };
 
 struct ArrayNum : Container {
-    // Container::flags byte: upper 4 bits = elem_type, lower 4 bits = Container flags
+    // Container::map_kind byte (byte 2) holds the elem_type for ArrayNum.
+    // Container::flags upper nibble is reserved for layout flags (is_ndim/is_view/is_pinned).
     union {
         int64_t* items;        // for ELEM_INT, ELEM_INT64
         double* float_items;   // for ELEM_FLOAT
         void* data;            // for compact types (ELEM_INT8, ELEM_UINT8, etc.)
     };
     int64_t length;
-    int64_t extra;  // count of extra items
+    int64_t extra;  // for is_ndim/is_view: ArrayNumShape*; else count of extra elements
     int64_t capacity;
 
-    ArrayNumElemType get_elem_type() const { return (ArrayNumElemType)(flags & 0xF0); }
+    ArrayNumElemType get_elem_type() const { return (ArrayNumElemType)map_kind; }
+    void set_elem_type(ArrayNumElemType e) { map_kind = (uint8_t)e; }
 };
 
 struct Map : Container {
