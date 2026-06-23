@@ -83,6 +83,7 @@
 static const char* NODE_TEST_DIR   = "ref/node/test/parallel";
 static const char* BASELINE_FILE   = "test/node/official_baseline.txt";
 static const char* CRASHER_FILE    = "temp/_node_official_crashers.txt";
+static const char* FAILURE_OUTPUT_FILE = "temp/node_official_failures.log";
 static const char* SLOW_LIST_FILE  = "test/node/official_slow_list.txt";
 static const char* TIMING_FILE     = "temp/node_official_times.tsv";
 static const double SLOW_TEST_THRESHOLD_MS = 10000.0;
@@ -1089,6 +1090,21 @@ static void write_crashers(const std::vector<NodeOfficialParam>& tests) {
     fclose(f);
 }
 
+static void write_failure_outputs(const std::vector<NodeOfficialParam>& tests) {
+    FILE* f = fopen(FAILURE_OUTPUT_FILE, "w");
+    if (!f) return;
+    for (auto& t : tests) {
+        auto it = g_test_results.find(t.filename);
+        if (it == g_test_results.end()) continue;
+        const auto& r = it->second;
+        if (r.passed) continue;
+        fprintf(f, "===== %s exit=%d timed_out=%s elapsed=%.3fms =====\n",
+                t.filename.c_str(), r.exit_code, r.timed_out ? "yes" : "no", r.elapsed_ms);
+        fprintf(f, "%s\n", r.output.c_str());
+    }
+    fclose(f);
+}
+
 static void write_slow_list_if_needed(const std::vector<NodeOfficialParam>& tests) {
     load_slow_list();
 
@@ -1350,6 +1366,7 @@ public:
 
         // write crasher file for quarantine
         write_crashers(tests);
+        write_failure_outputs(tests);
         write_slow_list_if_needed(tests);
     }
 };

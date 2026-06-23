@@ -2885,13 +2885,19 @@ extern "C" Item js_process_cpuUsage(void) {
     return result;
 }
 
+static int js_process_umask_value = 0022;
+
 // process.umask([mask]) — get/set file mode creation mask
 extern "C" Item js_process_umask(Item mask_item) {
 #ifndef _WIN32
     TypeId tid = get_type_id(mask_item);
     if (tid == LMD_TYPE_INT) {
         int64_t val = it2i(mask_item);
-        mode_t old = umask((mode_t)val);
+        if (val < 0 || val > 0777) {
+            return js_throw_range_error_code("ERR_INVALID_ARG_VALUE", "The argument 'mask' is invalid");
+        }
+        int old = js_process_umask_value;
+        js_process_umask_value = (int)val;
         return (Item){.item = i2it((int64_t)old)};
     }
     if (tid == LMD_TYPE_STRING) {
@@ -2908,7 +2914,8 @@ extern "C" Item js_process_umask(Item mask_item) {
                 // invalid octal string
                 return js_throw_range_error_code("ERR_INVALID_ARG_VALUE", "The argument 'mask' is invalid");
             }
-            mode_t old = umask((mode_t)val);
+            int old = js_process_umask_value;
+            js_process_umask_value = (int)val;
             return (Item){.item = i2it((int64_t)old)};
         }
     }
@@ -2916,10 +2923,7 @@ extern "C" Item js_process_umask(Item mask_item) {
         // invalid type
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", "The \"mask\" argument must be of type number or string");
     }
-    // no arg: get current and restore
-    mode_t current = umask(0);
-    umask(current);
-    return (Item){.item = i2it((int64_t)current)};
+    return (Item){.item = i2it((int64_t)js_process_umask_value)};
 #else
     return (Item){.item = i2it(0)};
 #endif
