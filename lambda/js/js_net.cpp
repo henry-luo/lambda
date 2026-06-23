@@ -8,6 +8,7 @@
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_class.h"
+#include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -50,7 +51,21 @@ typedef struct JsSocket {
     bool      connected;
     bool      destroyed;
     bool      connect_pending;
+    bool      is_server_side;
+    bool      reading;
+    bool      finished;
+    int64_t   bytes_read;
+    int64_t   bytes_written;
+    int64_t   buffer_size;
 } JsSocket;
+
+typedef struct SocketWriteReq {
+    uv_write_t req;
+    char*      data;
+    size_t     len;
+    JsSocket*  sock;
+    Item       callback;
+} SocketWriteReq;
 
 static JsSocket* socket_from_object(Item self) {
     TypeId type = get_type_id(self);
@@ -69,6 +84,17 @@ static void socket_set_listener(Item obj, const char* event, Item callback) {
 }
 
 static void socket_close_now(JsSocket* sock);
+static Item make_uv_error(int status, const char* syscall, const char* host, int port);
+
+static void socket_update_io_counters(JsSocket* sock) {
+    if (!sock) return;
+    js_property_set(sock->js_object, make_string_item("bytesRead"),
+                    (Item){.item = i2it(sock->bytes_read)});
+    js_property_set(sock->js_object, make_string_item("bytesWritten"),
+                    (Item){.item = i2it(sock->bytes_written)});
+    js_property_set(sock->js_object, make_string_item("bufferSize"),
+                    (Item){.item = i2it(sock->buffer_size)});
+}
 
 // emit event on socket JS object
 static void socket_emit(Item obj, const char* event, Item* args, int argc) {
@@ -79,6 +105,61 @@ static void socket_emit(Item obj, const char* event, Item* args, int argc) {
         js_call_function(cb, obj, args, argc);
         js_microtask_flush();
     }
+}
+
+static void socket_pipe_data(Item obj, Item data) {
+    Item dest = js_property_get(obj, make_string_item("__pipe_dest__"));
+    if (dest.item == 0 || dest.item == ITEM_NULL || is_undefined_item(dest)) return;
+    Item write_fn = js_property_get(dest, make_string_item("write"));
+    if (is_callable(write_fn)) {
+        js_call_function(write_fn, dest, &data, 1);
+        js_microtask_flush();
+    }
+}
+
+static void socket_pipe_end(Item obj) {
+    Item dest = js_property_get(obj, make_string_item("__pipe_dest__"));
+    if (dest.item == 0 || dest.item == ITEM_NULL || is_undefined_item(dest)) return;
+    Item end_fn = js_property_get(dest, make_string_item("end"));
+    if (is_callable(end_fn)) {
+        js_call_function(end_fn, dest, NULL, 0);
+        js_microtask_flush();
+    }
+}
+
+static void socket_emit_finish_once(JsSocket* sock) {
+    if (!sock || sock->finished) return;
+    sock->finished = true;
+    socket_emit(sock->js_object, "finish", NULL, 0);
+}
+
+static bool socket_allow_half_open(Item obj) {
+    Item value = js_property_get(obj, make_string_item("allowHalfOpen"));
+    return get_type_id(value) == LMD_TYPE_BOOL && it2b(value);
+}
+
+static void socket_finish_on_remote_end(JsSocket* sock) {
+    if (!sock || socket_allow_half_open(sock->js_object)) return;
+    socket_emit_finish_once(sock);
+}
+
+static bool socket_get_write_bytes(Item item, const char** out_data, size_t* out_len) {
+    if (get_type_id(item) == LMD_TYPE_STRING) {
+        String* s = it2s(item);
+        *out_data = s->chars;
+        *out_len = s->len;
+        return true;
+    }
+    if (js_is_typed_array(item)) {
+        if (js_typed_array_is_out_of_bounds_item(item)) return false;
+        int byte_len = js_typed_array_byte_length(item);
+        void* data = js_typed_array_current_data_ptr(item);
+        if (byte_len > 0 && !data) return false;
+        *out_data = (const char*)data;
+        *out_len = (size_t)byte_len;
+        return true;
+    }
+    return false;
 }
 
 // on(event, callback) — store as __on_<event>__
@@ -92,58 +173,90 @@ extern "C" Item js_socket_on(Item event_item, Item callback) {
     return self;
 }
 
-// write(data) — write to socket
-extern "C" Item js_socket_write(Item data_item) {
-    Item self = js_get_this();
-    JsSocket* sock = socket_from_object(self);
+static Item socket_write_data(Item self, JsSocket* sock, Item data_item, Item callback) {
     if (!sock || sock->destroyed) return (Item){.item = b2it(false)};
 
     const char* data = NULL;
     size_t data_len = 0;
-    if (get_type_id(data_item) == LMD_TYPE_STRING) {
-        String* s = it2s(data_item);
-        data = s->chars;
-        data_len = s->len;
-    } else {
+    if (!socket_get_write_bytes(data_item, &data, &data_len)) {
         return (Item){.item = b2it(false)};
     }
 
-    uv_buf_t buf = uv_buf_init((char*)data, (unsigned int)data_len);
-    uv_write_t* req = (uv_write_t*)mem_calloc(1, sizeof(uv_write_t), MEM_CAT_JS_RUNTIME);
+    SocketWriteReq* wreq = (SocketWriteReq*)mem_calloc(1, sizeof(SocketWriteReq), MEM_CAT_JS_RUNTIME);
     // copy data since it may be GC'd
     char* copy = (char*)mem_alloc(data_len, MEM_CAT_JS_RUNTIME);
     memcpy(copy, data, data_len);
-    buf = uv_buf_init(copy, (unsigned int)data_len);
-    req->data = copy;
+    uv_buf_t buf = uv_buf_init(copy, (unsigned int)data_len);
+    wreq->data = copy;
+    wreq->len = data_len;
+    wreq->sock = sock;
+    wreq->callback = callback;
+    wreq->req.data = wreq;
 
-    int r = uv_write(req, (uv_stream_t*)&sock->tcp, &buf, 1,
+    sock->bytes_written += (int64_t)data_len;
+    sock->buffer_size += (int64_t)data_len;
+    socket_update_io_counters(sock);
+
+    int r = uv_write(&wreq->req, (uv_stream_t*)&sock->tcp, &buf, 1,
         [](uv_write_t* req, int status) {
-            if (req->data) mem_free(req->data);
-            mem_free(req);
+            SocketWriteReq* wreq = (SocketWriteReq*)req->data;
+            if (!wreq) return;
+            if (wreq->sock) {
+                wreq->sock->buffer_size -= (int64_t)wreq->len;
+                if (wreq->sock->buffer_size < 0) wreq->sock->buffer_size = 0;
+                socket_update_io_counters(wreq->sock);
+            }
+            if (is_callable(wreq->callback)) {
+                if (status == 0) {
+                    js_call_function(wreq->callback, make_undefined_item(), NULL, 0);
+                } else {
+                    Item err = make_uv_error(status, "write", NULL, -1);
+                    js_call_function(wreq->callback, make_undefined_item(), &err, 1);
+                }
+                js_microtask_flush();
+            }
+            if (wreq->data) mem_free(wreq->data);
+            mem_free(wreq);
         });
 
     if (r != 0) {
+        sock->bytes_written -= (int64_t)data_len;
+        sock->buffer_size -= (int64_t)data_len;
+        if (sock->bytes_written < 0) sock->bytes_written = 0;
+        if (sock->buffer_size < 0) sock->buffer_size = 0;
+        socket_update_io_counters(sock);
         mem_free(copy);
-        mem_free(req);
+        mem_free(wreq);
         return (Item){.item = b2it(false)};
     }
 
     return (Item){.item = b2it(true)};
 }
 
+// write(data[, callback]) — write to socket
+extern "C" Item js_socket_write(Item data_item, Item callback) {
+    Item self = js_get_this();
+    JsSocket* sock = socket_from_object(self);
+    return socket_write_data(self, sock, data_item, callback);
+}
+
 // end() — half-close (shutdown write side)
 extern "C" Item js_socket_end(Item data_item) {
     Item self = js_get_this();
-    if (!is_undefined_item(data_item) && data_item.item != ITEM_NULL) {
-        js_socket_write(data_item);
-    }
     JsSocket* sock = socket_from_object(self);
+    if (!is_undefined_item(data_item) && data_item.item != ITEM_NULL) {
+        socket_write_data(self, sock, data_item, make_undefined_item());
+    }
     if (!sock || sock->destroyed) return self;
 
     uv_shutdown_t* sreq = (uv_shutdown_t*)mem_calloc(1, sizeof(uv_shutdown_t), MEM_CAT_JS_RUNTIME);
     sreq->data = sock;
     uv_shutdown(sreq, (uv_stream_t*)&sock->tcp,
         [](uv_shutdown_t* req, int status) {
+            JsSocket* sock = (JsSocket*)req->data;
+            if (sock && !sock->destroyed) {
+                socket_emit_finish_once(sock);
+            }
             mem_free(req);
         });
 
@@ -169,6 +282,7 @@ extern "C" Item js_socket_destroy(Item error_item) {
 static void socket_close_now(JsSocket* sock) {
     if (!sock) return;
     if (!uv_is_closing((uv_handle_t*)&sock->tcp)) {
+        sock->reading = false;
         uv_close((uv_handle_t*)&sock->tcp, [](uv_handle_t* handle) {
             JsSocket* s = (JsSocket*)handle->data;
             if (s) {
@@ -216,9 +330,55 @@ static Item js_socket_setNoDelay(Item noDelay) {
 // Socket.ref() / Socket.unref() — stub
 static Item js_socket_ref(void) { return js_get_this(); }
 static Item js_socket_unref(void) { return js_get_this(); }
+static Item js_socket_cork(void) { return js_get_this(); }
+static Item js_socket_uncork(void) { return js_get_this(); }
 
-// Socket.resume() — readable stream compatibility shim
-static Item js_socket_resume(void) { return js_get_this(); }
+static Item js_socket_setEncoding(Item encoding) {
+    Item self = js_get_this();
+    js_property_set(self, make_string_item("__encoding__"), encoding);
+    return self;
+}
+
+static Item js_socket_pipe(Item dest) {
+    Item self = js_get_this();
+    js_property_set(self, make_string_item("__pipe_dest__"), dest);
+    return dest;
+}
+
+static void client_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf);
+static void client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf);
+static void server_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf);
+static void server_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf);
+
+static bool socket_start_read(JsSocket* sock) {
+    if (!sock || sock->destroyed || sock->reading) return false;
+    if (uv_is_closing((uv_handle_t*)&sock->tcp)) return false;
+
+    uv_alloc_cb alloc_cb = sock->is_server_side ? server_alloc_cb : client_alloc_cb;
+    uv_read_cb read_cb = sock->is_server_side ? server_client_read_cb : client_read_cb;
+    int r = uv_read_start((uv_stream_t*)&sock->tcp, alloc_cb, read_cb);
+    if (r == 0) sock->reading = true;
+    return r == 0;
+}
+
+// Socket.resume() — restart libuv reads after pause().
+static Item js_socket_resume(void) {
+    Item self = js_get_this();
+    JsSocket* sock = socket_from_object(self);
+    socket_start_read(sock);
+    return self;
+}
+
+// Socket.pause() — stop libuv reads until the socket is destroyed/resumed.
+static Item js_socket_pause(void) {
+    Item self = js_get_this();
+    JsSocket* sock = socket_from_object(self);
+    if (sock && !sock->destroyed) {
+        int r = uv_read_stop((uv_stream_t*)&sock->tcp);
+        if (r == 0) sock->reading = false;
+    }
+    return self;
+}
 
 // Socket.address() — return local address info
 static Item js_socket_address(void) {
@@ -260,7 +420,7 @@ static Item make_socket_object(JsSocket* sock) {
     js_property_set(obj, make_string_item("on"),
                     js_new_function((void*)js_socket_on, 2));
     js_property_set(obj, make_string_item("write"),
-                    js_new_function((void*)js_socket_write, 1));
+                    js_new_function((void*)js_socket_write, 2));
     js_property_set(obj, make_string_item("end"),
                     js_new_function((void*)js_socket_end, 1));
     js_property_set(obj, make_string_item("destroy"),
@@ -269,6 +429,9 @@ static Item make_socket_object(JsSocket* sock) {
     js_property_set(obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
     js_property_set(obj, make_string_item("writable"), (Item){.item = ITEM_TRUE});
     js_property_set(obj, make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
+    js_property_set(obj, make_string_item("bytesRead"), (Item){.item = i2it(0)});
+    js_property_set(obj, make_string_item("bytesWritten"), (Item){.item = i2it(0)});
+    js_property_set(obj, make_string_item("bufferSize"), (Item){.item = i2it(0)});
     js_property_set(obj, make_string_item("_handle"), ItemNull);
     js_property_set(obj, make_string_item("allowHalfOpen"), (Item){.item = ITEM_FALSE});
     // Additional Socket methods
@@ -280,12 +443,22 @@ static Item make_socket_object(JsSocket* sock) {
                     js_new_function((void*)js_socket_setKeepAlive, 2));
     js_property_set(obj, make_string_item("setNoDelay"),
                     js_new_function((void*)js_socket_setNoDelay, 1));
+    js_property_set(obj, make_string_item("setEncoding"),
+                    js_new_function((void*)js_socket_setEncoding, 1));
+    js_property_set(obj, make_string_item("pipe"),
+                    js_new_function((void*)js_socket_pipe, 1));
     js_property_set(obj, make_string_item("ref"),
                     js_new_function((void*)js_socket_ref, 0));
     js_property_set(obj, make_string_item("unref"),
                     js_new_function((void*)js_socket_unref, 0));
+    js_property_set(obj, make_string_item("cork"),
+                    js_new_function((void*)js_socket_cork, 0));
+    js_property_set(obj, make_string_item("uncork"),
+                    js_new_function((void*)js_socket_uncork, 0));
     js_property_set(obj, make_string_item("resume"),
                     js_new_function((void*)js_socket_resume, 0));
+    js_property_set(obj, make_string_item("pause"),
+                    js_new_function((void*)js_socket_pause, 0));
     js_property_set(obj, make_string_item("address"),
                     js_new_function((void*)js_socket_address, 0));
     sock->js_object = obj;
@@ -538,13 +711,24 @@ static void client_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t
 static void client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
     JsSocket* sock = (JsSocket*)stream->data;
     if (nread > 0 && sock) {
+        sock->bytes_read += (int64_t)nread;
+        socket_update_io_counters(sock);
         Item data = make_string_item(buf->base, (int)nread);
         socket_emit(sock->js_object, "data", &data, 1);
+        socket_pipe_data(sock->js_object, data);
     }
     if (buf->base) mem_free(buf->base);
     if (nread < 0) {
         if (sock) {
+            sock->reading = false;
+            if (nread != UV_EOF) {
+                Item err = make_uv_error((int)nread, "read", NULL, -1);
+                socket_emit(sock->js_object, "error", &err, 1);
+                if (sock->destroyed) return;
+            }
             socket_emit(sock->js_object, "end", NULL, 0);
+            socket_pipe_end(sock->js_object);
+            socket_finish_on_remote_end(sock);
             if (!sock->destroyed) {
                 sock->destroyed = true;
                 uv_close((uv_handle_t*)stream, [](uv_handle_t* h) {
@@ -700,7 +884,7 @@ static void client_connect_cb(uv_connect_t* req, int status) {
     socket_emit(sock->js_object, "connect", NULL, 0);
 
     // start reading
-    uv_read_start((uv_stream_t*)&sock->tcp, client_alloc_cb, client_read_cb);
+    socket_start_read(sock);
 }
 
 static Item create_socket_for_connect(const NetConnectOptions* options) {
@@ -757,6 +941,8 @@ typedef struct JsServer {
     uv_tcp_t tcp;
     Item     js_object;
     Item     connection_handler;
+    bool     closed;
+    bool     listen_pending;
 } JsServer;
 
 static void server_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
@@ -767,12 +953,23 @@ static void server_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t
 static void server_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
     JsSocket* sock = (JsSocket*)stream->data;
     if (nread > 0 && sock) {
+        sock->bytes_read += (int64_t)nread;
+        socket_update_io_counters(sock);
         Item data = make_string_item(buf->base, (int)nread);
         socket_emit(sock->js_object, "data", &data, 1);
+        socket_pipe_data(sock->js_object, data);
     }
     if (buf->base) mem_free(buf->base);
     if (nread < 0 && sock && !sock->destroyed) {
+        sock->reading = false;
+        if (nread != UV_EOF) {
+            Item err = make_uv_error((int)nread, "read", NULL, -1);
+            socket_emit(sock->js_object, "error", &err, 1);
+            if (sock->destroyed) return;
+        }
         socket_emit(sock->js_object, "end", NULL, 0);
+        socket_pipe_end(sock->js_object);
+        socket_finish_on_remote_end(sock);
         sock->destroyed = true;
         uv_close((uv_handle_t*)stream, [](uv_handle_t* h) {
             JsSocket* s = (JsSocket*)h->data;
@@ -799,6 +996,7 @@ static void server_connection_cb(uv_stream_t* server, int status) {
     if (uv_accept(server, (uv_stream_t*)&client->tcp) == 0) {
         Item client_obj = make_socket_object(client);
         client->connected = true;
+        client->is_server_side = true;
 
         // call connection handler
         if (get_type_id(srv->connection_handler) == LMD_TYPE_FUNC) {
@@ -812,12 +1010,49 @@ static void server_connection_cb(uv_stream_t* server, int status) {
             js_call_function(on_conn, srv->js_object, &client_obj, 1);
         }
 
-        uv_read_start((uv_stream_t*)&client->tcp, server_alloc_cb, server_client_read_cb);
+        socket_start_read(client);
     } else {
         uv_close((uv_handle_t*)&client->tcp, [](uv_handle_t* h) {
             mem_free(h->data);
         });
     }
+}
+
+static Item js_server_emit_listening_scheduled(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_undefined_item();
+
+    Item self = env[0];
+    Item callback = env[1];
+    Item handle_item = js_property_get(self, make_string_item("__server__"));
+    if (handle_item.item == 0 || handle_item.item == ITEM_NULL || is_undefined_item(handle_item)) {
+        return make_undefined_item();
+    }
+
+    JsServer* srv = (JsServer*)(uintptr_t)it2i(handle_item);
+    if (!srv || srv->closed || !srv->listen_pending) return make_undefined_item();
+
+    srv->listen_pending = false;
+    Item on_listening = js_property_get(self, make_string_item("__on_listening__"));
+    if (is_callable(on_listening)) {
+        js_call_function(on_listening, self, NULL, 0);
+    }
+    if (is_callable(callback)) {
+        js_call_function(callback, self, NULL, 0);
+    }
+    js_microtask_flush();
+    return make_undefined_item();
+}
+
+static void server_schedule_listening(Item self, JsServer* srv, Item callback) {
+    if (!srv || srv->closed) return;
+    srv->listen_pending = true;
+
+    Item* env = js_alloc_env(2);
+    env[0] = self;
+    env[1] = callback;
+    Item fn = js_new_closure((void*)js_server_emit_listening_scheduled, 0, env, 2);
+    js_next_tick_enqueue(fn);
 }
 
 // server.listen(port, [host], [callback])
@@ -852,15 +1087,7 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
         return self;
     }
 
-    // emit 'listening'
-    Item on_listening = js_property_get(self, make_string_item("__on_listening__"));
-    if (is_callable(on_listening)) {
-        js_call_function(on_listening, self, NULL, 0);
-    }
-    if (is_callable(callback)) {
-        js_call_function(callback, self, NULL, 0);
-    }
-
+    server_schedule_listening(self, srv, callback);
     return self;
 }
 
@@ -917,6 +1144,8 @@ extern "C" Item js_server_close(Item callback) {
     if (handle_item.item == 0) return self;
     JsServer* srv = (JsServer*)(uintptr_t)it2i(handle_item);
     if (!srv) return self;
+    srv->closed = true;
+    srv->listen_pending = false;
     if (is_callable(callback)) {
         js_property_set(self, make_string_item("__on_close__"), callback);
     }
