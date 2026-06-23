@@ -1005,7 +1005,9 @@ static std::vector<ChromeEditingParam> discover_chrome_editing_tests() {
                  const ChromeEditingParam& b) {
                   if (a.test_name != b.test_name)
                       return a.test_name < b.test_name;
-                  return a.rel_path < b.rel_path;
+                  if (a.rel_path != b.rel_path) return a.rel_path < b.rel_path;
+                  if (a.skip != b.skip) return !a.skip;
+                  return false;
               });
     params.erase(std::unique(params.begin(), params.end(),
                  [](const ChromeEditingParam& a, const ChromeEditingParam& b) {

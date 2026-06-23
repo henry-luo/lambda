@@ -767,6 +767,20 @@ static bool js_dom_exec_command_uses_helper_first(const char* cmd) {
     return js_dom_exec_command_is_clipboard(cmd) ||
         strcasecmp(cmd, "selectAll") == 0 ||
         strcasecmp(cmd, "insertText") == 0 ||
+        strcasecmp(cmd, "insertHTML") == 0 ||
+        strcasecmp(cmd, "insertParagraph") == 0 ||
+        strcasecmp(cmd, "insertLineBreak") == 0 ||
+        strcasecmp(cmd, "formatBlock") == 0 ||
+        strcasecmp(cmd, "justifyLeft") == 0 ||
+        strcasecmp(cmd, "justifyCenter") == 0 ||
+        strcasecmp(cmd, "justifyRight") == 0 ||
+        strcasecmp(cmd, "justifyFull") == 0 ||
+        strcasecmp(cmd, "indent") == 0 ||
+        strcasecmp(cmd, "outdent") == 0 ||
+        strcasecmp(cmd, "insertOrderedList") == 0 ||
+        strcasecmp(cmd, "insertUnorderedList") == 0 ||
+        strcasecmp(cmd, "createLink") == 0 ||
+        strcasecmp(cmd, "unlink") == 0 ||
         strcasecmp(cmd, "bold") == 0 ||
         strcasecmp(cmd, "backColor") == 0 ||
         strcasecmp(cmd, "foreColor") == 0 ||
@@ -9450,7 +9464,12 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
     // log and ignore; the proper raise will be wired through the JS
     // DOMException machinery in a follow-up.
     if (strcmp(prop, "contentEditable") == 0) {
-        const char* s = fn_to_cstr(value);
+        const char* s = nullptr;
+        if (get_type_id(value) == LMD_TYPE_BOOL) {
+            s = it2b(value) ? "true" : "false";
+        } else {
+            s = fn_to_cstr(value);
+        }
         if (!s) s = "";
         if (*s == '\0') {
             dom_element_remove_attribute(elem, "contenteditable");
