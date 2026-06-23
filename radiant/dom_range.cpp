@@ -1591,9 +1591,8 @@ static DomText* prev_text_before(DomNode* n);
 // (script, style, head, title, noscript, template, iframe). Selection.modify
 // must skip text in these — otherwise `move backward by word` from the body
 // can wander into <script> source.
-static bool is_in_non_selectable_subtree(const DomText* t) {
-    if (!t) return false;
-    for (DomNode* p = t->parent; p; p = p->parent) {
+static bool node_is_in_non_selectable_subtree(const DomNode* n) {
+    for (const DomNode* p = n; p; p = p->parent) {
         if (!p->is_element()) continue;
         const char* tag = p->as_element()->tag_name;
         if (!tag) continue;
@@ -1612,6 +1611,11 @@ static bool is_in_non_selectable_subtree(const DomText* t) {
         }
     }
     return false;
+}
+
+static bool is_in_non_selectable_subtree(const DomText* t) {
+    return t ? node_is_in_non_selectable_subtree(static_cast<const DomNode*>(t))
+             : false;
 }
 
 static DomText* next_text_after_impl(DomNode* n) {
@@ -2327,9 +2331,18 @@ static DomNode* last_in_subtree(DomNode* n) {
     return n;
 }
 
+static bool cp_is_common_word_separator(uint32_t cp) {
+    return cp == 0x00B7 ||  // middle dot
+        cp == 0x2022 ||     // bullet
+        cp == 0x2023 ||     // triangular bullet
+        cp == 0x2043 ||     // hyphen bullet
+        cp == 0x2219;       // bullet operator
+}
+
 // True if codepoint is "word-like": letter/digit/underscore. Simple ASCII +
-// non-ASCII-letter heuristic (any byte >= 0x80 treated as letter).
+// non-ASCII-letter heuristic, with common separator punctuation excluded.
 static bool cp_is_wordlike(uint32_t cp) {
+    if (cp_is_common_word_separator(cp)) return false;
     if (cp < 0x80) {
         return (cp >= '0' && cp <= '9') ||
                (cp >= 'A' && cp <= 'Z') ||
@@ -2574,6 +2587,82 @@ static DomNode* child_at_offset(DomElement* e, uint32_t offset) {
     DomNode* c = e->first_child;
     for (uint32_t i = 0; c && i < offset; i++) c = c->next_sibling;
     return c;
+}
+
+static bool node_is_atomic_caret_stop(DomNode* n) {
+    if (!n || !n->is_element()) return false;
+    DomElement* e = n->as_element();
+    const char* ce = dom_element_get_attribute(e, "contenteditable");
+    if (ce && tag_ieq(ce, "false")) return true;
+    const char* tag = e->tag_name;
+    return tag_ieq(tag, "img") ||
+        tag_ieq(tag, "input") ||
+        tag_ieq(tag, "textarea") ||
+        tag_ieq(tag, "select") ||
+        tag_ieq(tag, "button") ||
+        tag_ieq(tag, "object") ||
+        tag_ieq(tag, "embed") ||
+        tag_ieq(tag, "iframe");
+}
+
+static bool node_is_selectable_atomic_caret_stop(DomNode* n,
+                                                 DomElement* host) {
+    if (!node_is_atomic_caret_stop(n)) return false;
+    if (node_is_in_non_selectable_subtree(n)) return false;
+    if (host && !node_is_descendant_of(n, host)) return false;
+    if (node_is_false_island_for_host(n, host)) {
+        if (!n->is_element()) return false;
+        const char* ce = dom_element_get_attribute(n->as_element(),
+                                                   "contenteditable");
+        if (!ce || !tag_ieq(ce, "false")) return false;
+    }
+    return true;
+}
+
+static DomBoundary boundary_before_node(DomNode* n) {
+    if (!n || !n->parent) return DomBoundary{ n, 0 };
+    return DomBoundary{ n->parent, dom_node_child_index(n) };
+}
+
+static DomBoundary boundary_after_node(DomNode* n) {
+    if (!n || !n->parent) return DomBoundary{ n, 0 };
+    return DomBoundary{ n->parent, dom_node_child_index(n) + 1 };
+}
+
+static DomNode* atomic_caret_stop_after_boundary(DomBoundary b,
+                                                 DomElement* host) {
+    if (!b.node) return nullptr;
+    if (b.node->is_text()) {
+        DomText* t = b.node->as_text();
+        if (b.offset < dom_text_utf16_length(t)) return nullptr;
+        DomNode* next = b.node->next_sibling;
+        return node_is_selectable_atomic_caret_stop(next, host) ? next
+                                                               : nullptr;
+    }
+    if (b.node->is_element()) {
+        DomNode* next = child_at_offset(b.node->as_element(), b.offset);
+        return node_is_selectable_atomic_caret_stop(next, host) ? next
+                                                               : nullptr;
+    }
+    return nullptr;
+}
+
+static DomNode* atomic_caret_stop_before_boundary(DomBoundary b,
+                                                  DomElement* host) {
+    if (!b.node) return nullptr;
+    if (b.node->is_text()) {
+        if (b.offset > 0) return nullptr;
+        DomNode* prev = b.node->prev_sibling;
+        return node_is_selectable_atomic_caret_stop(prev, host) ? prev
+                                                               : nullptr;
+    }
+    if (b.node->is_element()) {
+        if (b.offset == 0) return nullptr;
+        DomNode* prev = child_at_offset(b.node->as_element(), b.offset - 1);
+        return node_is_selectable_atomic_caret_stop(prev, host) ? prev
+                                                               : nullptr;
+    }
+    return nullptr;
 }
 
 static DomText* first_modify_text_in(DomNode* n, DomElement* host) {
@@ -2836,7 +2925,50 @@ static bool codepoint_is_collapsible_space(ModifyCodepoint cp) {
     return cp.found && cp_is_html_space(cp.cp) && !text_preserves_whitespace(cp.text);
 }
 
+static bool codepoint_is_word_separator(uint32_t cp) {
+    return cp != 0 && !cp_is_html_space(cp) && !cp_is_wordlike(cp);
+}
+
+static bool same_boundary(DomBoundary a, DomBoundary b) {
+    return a.node == b.node && a.offset == b.offset;
+}
+
+static DomBoundary forward_word_separator_boundary(DomBoundary b,
+                                                   DomElement* host,
+                                                   bool* found) {
+    if (found) *found = false;
+    if (!cp_is_wordlike(cp_before(b))) return b;
+
+    DomText* raw_next = raw_next_text_from_boundary(b);
+    if (raw_next && static_cast<DomNode*>(raw_next) != b.node) {
+        ModifyCodepoint first = make_codepoint(raw_next, 0);
+        if (codepoint_is_word_separator(first.cp)) {
+            if (found) *found = true;
+            return boundary_before_codepoint(first);
+        }
+    }
+
+    DomBoundary scan = b;
+    for (int safety = 0; safety < 100000; safety++) {
+        ModifyCodepoint next = next_modify_codepoint(scan, host);
+        if (!next.found) return b;
+        if (cp_is_wordlike(next.cp)) return b;
+        DomBoundary before = boundary_before_codepoint(next);
+        DomBoundary after = boundary_after_codepoint(next);
+        if (codepoint_is_word_separator(next.cp) && !same_boundary(before, b)) {
+            if (found) *found = true;
+            return before;
+        }
+        if (same_boundary(after, scan)) return b;
+        scan = after;
+    }
+    return b;
+}
+
 static DomBoundary move_one_visible_char_forward(DomBoundary b, DomElement* host) {
+    DomNode* atomic = atomic_caret_stop_after_boundary(b, host);
+    if (atomic) return boundary_after_node(atomic);
+
     ModifyCodepoint next = next_modify_codepoint(b, host);
     if (!next.found) return b;
     if (next_step_crosses_br(b, host)) {
@@ -2864,6 +2996,9 @@ static DomBoundary move_one_visible_char_forward(DomBoundary b, DomElement* host
 }
 
 static DomBoundary move_one_visible_char_backward(DomBoundary b, DomElement* host) {
+    DomNode* atomic = atomic_caret_stop_before_boundary(b, host);
+    if (atomic) return boundary_before_node(atomic);
+
     ModifyCodepoint prev = prev_modify_codepoint(b, host);
     if (!prev.found) return b;
     if (prev_step_crosses_br(b, host)) {
@@ -2893,11 +3028,33 @@ static DomBoundary move_one_visible_char(DomBoundary b, int dir) {
                    : move_one_visible_char_backward(b, host);
 }
 
+static bool subtree_has_selectable_atomic_stop(DomNode* node,
+                                               DomElement* host) {
+    if (!node) return false;
+    if (node_is_selectable_atomic_caret_stop(node, host)) return true;
+    if (!node->is_element()) return false;
+    for (DomNode* child = node->as_element()->first_child; child;
+            child = child->next_sibling) {
+        if (subtree_has_selectable_atomic_stop(child, host)) return true;
+    }
+    return false;
+}
+
+static bool host_has_selectable_atomic_stop(DomElement* host) {
+    return host && subtree_has_selectable_atomic_stop(static_cast<DomNode*>(host),
+                                                     host);
+}
+
 static DomBoundary extend_one_visible_char_forward(DomBoundary b, DomElement* host) {
+    DomNode* atomic = atomic_caret_stop_after_boundary(b, host);
+    if (atomic) return boundary_after_node(atomic);
+
     ModifyCodepoint next = next_modify_codepoint(b, host);
     if (!next.found) return b;
     if (next_step_crosses_br(b, host)) {
-        return boundary_before_codepoint(next);
+        return host_has_selectable_atomic_stop(host)
+            ? boundary_before_codepoint(next)
+            : boundary_after_codepoint(next);
     }
     if (next_step_enters_false_island(b, host)) {
         return boundary_before_codepoint(next);
@@ -2908,6 +3065,23 @@ static DomBoundary extend_one_visible_char_forward(DomBoundary b, DomElement* ho
 
     ModifyCodepoint prev = prev_modify_codepoint(b, host);
     if (!codepoint_is_collapsible_space(prev)) {
+        if (b.node && b.node->is_text() && next.text != b.node->as_text() &&
+                b.offset >= dom_text_utf16_length(b.node->as_text())) {
+            DomBoundary scan = b;
+            bool found_nonspace = false;
+            for (int safety = 0; safety < 100000; safety++) {
+                ModifyCodepoint probe = next_modify_codepoint(scan, host);
+                if (!probe.found) break;
+                DomBoundary after = boundary_after_codepoint(probe);
+                if (!codepoint_is_collapsible_space(probe)) {
+                    found_nonspace = true;
+                    break;
+                }
+                if (after.node == scan.node && after.offset == scan.offset) break;
+                scan = after;
+            }
+            if (!found_nonspace) return b;
+        }
         return boundary_after_codepoint(next);
     }
 
@@ -2927,10 +3101,41 @@ static DomBoundary extend_one_visible_char_forward(DomBoundary b, DomElement* ho
     return last;
 }
 
+static DomBoundary extend_one_visible_char_backward(DomBoundary b, DomElement* host) {
+    DomNode* atomic = atomic_caret_stop_before_boundary(b, host);
+    if (atomic) return boundary_before_node(atomic);
+
+    ModifyCodepoint prev = prev_modify_codepoint(b, host);
+    if (!prev.found) return b;
+    if (prev_step_crosses_br(b, host)) {
+        return host_has_selectable_atomic_stop(host)
+            ? boundary_after_codepoint(prev)
+            : boundary_before_codepoint(prev);
+    }
+    if (prev_step_enters_false_island(b, host)) {
+        return boundary_after_codepoint(prev);
+    }
+    if (!codepoint_is_collapsible_space(prev)) {
+        return boundary_before_codepoint(prev);
+    }
+
+    DomBoundary result = boundary_before_codepoint(prev);
+    DomBoundary scan = result;
+    for (int safety = 0; safety < 100000; safety++) {
+        prev = prev_modify_codepoint(scan, host);
+        if (!prev.found || !codepoint_is_collapsible_space(prev)) return result;
+        DomBoundary before = boundary_before_codepoint(prev);
+        if (before.node == scan.node && before.offset == scan.offset) return result;
+        result = before;
+        scan = before;
+    }
+    return result;
+}
+
 static DomBoundary extend_one_visible_char(DomBoundary b, int dir) {
     DomElement* host = editing_host_of(b.node);
     return dir > 0 ? extend_one_visible_char_forward(b, host)
-                   : move_one_visible_char_backward(b, host);
+                   : extend_one_visible_char_backward(b, host);
 }
 
 static bool effective_dir_is_rtl(DomNode* n) {
@@ -2956,10 +3161,40 @@ static DomBoundary subtree_edge_boundary(DomNode* root, int edge_dir,
     return DomBoundary{ root, edge_dir > 0 ? dom_node_boundary_length(root) : 0 };
 }
 
+static bool element_is_contenteditable_false(DomElement* e) {
+    if (!e || !dom_element_has_attribute(e, "contenteditable")) return false;
+    const char* ce = dom_element_get_attribute(e, "contenteditable");
+    return ce && tag_ieq(ce, "false");
+}
+
+static DomElement* nested_false_island_root(DomNode* node,
+                                            DomElement* inner_host) {
+    if (!node || !inner_host) return nullptr;
+    DomNode* cur = node->is_text() ? node->parent : node;
+    for (int safety = 0; cur && safety < 100000; safety++, cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* elem = cur->as_element();
+        if (!element_is_contenteditable_false(elem)) continue;
+
+        EditingHost outer;
+        if (!editing_host_lookup(static_cast<DomNode*>(elem), &outer)) continue;
+        if (!outer.host || outer.host == inner_host) continue;
+        if (!outer.target_in_false_island) continue;
+        return elem;
+    }
+    return nullptr;
+}
+
 static DomBoundary editing_host_line_boundary(DomBoundary focus,
                                               DomElement* host,
                                               int edge_dir) {
     if (!host) return focus;
+    DomElement* false_island = nested_false_island_root(focus.node, host);
+    if (false_island) {
+        return edge_dir > 0 ? boundary_after_node(static_cast<DomNode*>(false_island))
+                            : boundary_before_node(static_cast<DomNode*>(false_island));
+    }
+
     DomText* start = focus.node && focus.node->is_text()
         ? focus.node->as_text() : nullptr;
     if (!start || !node_is_descendant_of(static_cast<DomNode*>(start), host)) {
@@ -3005,6 +3240,18 @@ static DomBoundary editing_host_line_boundary(DomBoundary focus,
 static DomBoundary move_one_word(DomBoundary b, int dir) {
     DomBoundary cur = b;
     DomElement* host = editing_host_of(b.node);
+    if (dir > 0) {
+        ModifyCodepoint first = next_modify_codepoint(b, host);
+        if (first.found && first.offset == 0 &&
+                codepoint_is_word_separator(first.cp) &&
+                same_boundary(boundary_before_codepoint(first), b)) {
+            return boundary_after_codepoint(first);
+        }
+        bool found_separator = false;
+        DomBoundary separator = forward_word_separator_boundary(b, host,
+                                                               &found_separator);
+        if (found_separator) return separator;
+    }
     // phase 1: skip non-word
     while (true) {
         uint32_t cp = (dir > 0) ? cp_after(cur) : cp_before(cur);
@@ -3027,6 +3274,23 @@ static DomBoundary move_one_word(DomBoundary b, int dir) {
         if (host && !node_is_descendant_of(next.node, host)) return cur;
         cur = next;
     }
+}
+
+static DomBoundary normalize_forward_word_anchor(DomBoundary anchor) {
+    if (!anchor.node || !anchor.node->is_text()) return anchor;
+    DomText* text = anchor.node->as_text();
+    if (anchor.offset != dom_text_utf16_length(text)) return anchor;
+    if (!text_preserves_whitespace(text)) return anchor;
+
+    DomNode* cur = static_cast<DomNode*>(text);
+    while (cur && cur->parent) {
+        if (cur->next_sibling) return boundary_after_node(cur);
+        DomElement* parent = cur->parent->is_element()
+            ? cur->parent->as_element() : nullptr;
+        if (parent && tag_is_block(parent->tag_name)) break;
+        cur = cur->parent;
+    }
+    return anchor;
 }
 
 DomBoundary dom_boundary_move(DomBoundary b, DomModGranularity gran, int32_t count) {
@@ -3126,6 +3390,8 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
     if (!r) return true;
     DomBoundary anchor = dom_selection_anchor_boundary(s);
     DomBoundary focus = dom_selection_focus_boundary(s);
+    bool word_like = gran == DOM_MOD_WORD && !line_like &&
+        !line_boundary_like && !paragraph_like && !paragraph_boundary;
     DomBoundary new_focus;
     if (paragraph_boundary) {
         // Move to the start (backward) or end (forward) of the nearest
@@ -3220,6 +3486,9 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
     }
 
     if (extend) {
+        if (word_like && dir > 0) {
+            anchor = normalize_forward_word_anchor(anchor);
+        }
         const char* exc = nullptr;
         dom_selection_set_base_and_extent(s, anchor.node, anchor.offset,
                                               new_focus.node, new_focus.offset, &exc);

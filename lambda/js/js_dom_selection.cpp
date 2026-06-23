@@ -31,6 +31,7 @@
 #include "../../lib/memtrack.h"
 
 #include "../../radiant/dom_range.hpp"
+#include "../../radiant/dom_range_resolver.hpp"
 #include "../../radiant/state_store.hpp"
 #include "../../radiant/form_control.hpp"
 #include <cstring>
@@ -54,6 +55,10 @@ static inline Item make_bool(bool v) {
 
 static inline Item make_int(int64_t v) {
     return (Item){.item = i2it(v)};
+}
+
+static inline Item make_number_from_float(float v) {
+    return (Item){.item = i2it((int64_t)v)};
 }
 
 static inline Item make_str(const char* s) {
@@ -218,6 +223,10 @@ static bool selection_is_native_property(const char* p) {
         strcmp(p, "anchorOffset") == 0 ||
         strcmp(p, "focusNode") == 0 ||
         strcmp(p, "focusOffset") == 0 ||
+        strcmp(p, "baseNode") == 0 ||
+        strcmp(p, "baseOffset") == 0 ||
+        strcmp(p, "extentNode") == 0 ||
+        strcmp(p, "extentOffset") == 0 ||
         strcmp(p, "isCollapsed") == 0 ||
         strcmp(p, "rangeCount") == 0 ||
         strcmp(p, "type") == 0 ||
@@ -563,6 +572,72 @@ extern "C" Item js_range_to_string(void) {
     return js_dom_range_to_string_value(js_get_this());
 }
 
+struct RangeClientRectCollector {
+    Item array;
+    uint32_t count;
+    float left;
+    float top;
+    float right;
+    float bottom;
+};
+
+static Item js_dom_make_rect(float x, float y, float w, float h) {
+    Item rect = js_new_object();
+    js_property_set(rect, make_key("x"), make_number_from_float(x));
+    js_property_set(rect, make_key("y"), make_number_from_float(y));
+    js_property_set(rect, make_key("left"), make_number_from_float(x));
+    js_property_set(rect, make_key("top"), make_number_from_float(y));
+    js_property_set(rect, make_key("right"), make_number_from_float(x + w));
+    js_property_set(rect, make_key("bottom"), make_number_from_float(y + h));
+    js_property_set(rect, make_key("width"), make_number_from_float(w));
+    js_property_set(rect, make_key("height"), make_number_from_float(h));
+    return rect;
+}
+
+static void js_range_collect_rect(float x, float y, float w, float h,
+                                  void* userdata) {
+    RangeClientRectCollector* collector =
+        (RangeClientRectCollector*)userdata;
+    if (!collector) return;
+    js_array_push(collector->array, js_dom_make_rect(x, y, w, h));
+    if (collector->count == 0) {
+        collector->left = x;
+        collector->top = y;
+        collector->right = x + w;
+        collector->bottom = y + h;
+    } else {
+        if (x < collector->left) collector->left = x;
+        if (y < collector->top) collector->top = y;
+        if (x + w > collector->right) collector->right = x + w;
+        if (y + h > collector->bottom) collector->bottom = y + h;
+    }
+    collector->count++;
+}
+
+static RangeClientRectCollector js_range_collect_client_rects(DomRange* r) {
+    RangeClientRectCollector collector;
+    memset(&collector, 0, sizeof(collector));
+    collector.array = js_array_new(0);
+    if (!r) return collector;
+    if (!dom_range_resolve_layout(r)) return collector;
+    dom_range_for_each_rect(r, nullptr, js_range_collect_rect, &collector);
+    return collector;
+}
+
+extern "C" Item js_range_get_client_rects(void) {
+    RangeClientRectCollector collector =
+        js_range_collect_client_rects(range_from_this());
+    return collector.array;
+}
+
+extern "C" Item js_range_get_bounding_client_rect(void) {
+    RangeClientRectCollector collector =
+        js_range_collect_client_rects(range_from_this());
+    if (collector.count == 0) return js_dom_make_rect(0, 0, 0, 0);
+    return js_dom_make_rect(collector.left, collector.top,
+        collector.right - collector.left, collector.bottom - collector.top);
+}
+
 extern "C" Item js_dom_range_to_string_value(Item obj) {
     DomRange* r = range_from(obj);
     if (!r) return make_str("");
@@ -653,6 +728,7 @@ struct RangeMethods {
     Item collapse, selectNode, selectNodeContents;
     Item cloneRange, compareBoundaryPoints, comparePoint;
     Item isPointInRange, intersectsNode, detach, toString;
+    Item getClientRects, getBoundingClientRect;
     Item deleteContents, extractContents, cloneContents;
     Item insertNode, surroundContents;
     bool inited;
@@ -677,6 +753,8 @@ static void init_range_methods() {
     _range_methods.intersectsNode        = js_new_function((void*)js_range_intersects_node, 1);
     _range_methods.detach                = js_new_function((void*)js_range_detach, 0);
     _range_methods.toString              = js_new_function((void*)js_range_to_string, 0);
+    _range_methods.getClientRects        = js_new_function((void*)js_range_get_client_rects, 0);
+    _range_methods.getBoundingClientRect = js_new_function((void*)js_range_get_bounding_client_rect, 0);
     _range_methods.deleteContents        = js_new_function((void*)js_range_delete_contents, 0);
     _range_methods.extractContents       = js_new_function((void*)js_range_extract_contents, 0);
     _range_methods.cloneContents         = js_new_function((void*)js_range_clone_contents, 0);
@@ -730,6 +808,8 @@ extern "C" Item js_dom_range_get_property(Item obj, Item key) {
     if (strcmp(p, "intersectsNode") == 0)        return _range_methods.intersectsNode;
     if (strcmp(p, "detach") == 0)                return _range_methods.detach;
     if (strcmp(p, "toString") == 0)              return _range_methods.toString;
+    if (strcmp(p, "getClientRects") == 0)        return _range_methods.getClientRects;
+    if (strcmp(p, "getBoundingClientRect") == 0) return _range_methods.getBoundingClientRect;
     if (strcmp(p, "deleteContents") == 0)        return _range_methods.deleteContents;
     if (strcmp(p, "extractContents") == 0)       return _range_methods.extractContents;
     if (strcmp(p, "cloneContents") == 0)         return _range_methods.cloneContents;
@@ -1155,11 +1235,23 @@ extern "C" Item js_dom_selection_get_property(Item obj, Item key) {
     }
     if (strcmp(p, "anchorOffset") == 0)
         return make_int((int64_t)dom_selection_anchor_offset(s));
+    if (strcmp(p, "baseNode") == 0) {
+        DomNode* n = dom_selection_anchor_node(s);
+        return n ? js_dom_wrap_element(n) : ItemNull;
+    }
+    if (strcmp(p, "baseOffset") == 0)
+        return make_int((int64_t)dom_selection_anchor_offset(s));
     if (strcmp(p, "focusNode") == 0) {
         DomNode* n = dom_selection_focus_node(s);
         return n ? js_dom_wrap_element(n) : ItemNull;
     }
     if (strcmp(p, "focusOffset") == 0)
+        return make_int((int64_t)dom_selection_focus_offset(s));
+    if (strcmp(p, "extentNode") == 0) {
+        DomNode* n = dom_selection_focus_node(s);
+        return n ? js_dom_wrap_element(n) : ItemNull;
+    }
+    if (strcmp(p, "extentOffset") == 0)
         return make_int((int64_t)dom_selection_focus_offset(s));
     if (strcmp(p, "isCollapsed") == 0)
         return make_bool(dom_selection_is_collapsed(s));
@@ -1401,6 +1493,8 @@ extern "C" void js_dom_selection_install_globals(void) {
     js_property_set(range_proto, make_key("intersectsNode"),        _range_methods.intersectsNode);
     js_property_set(range_proto, make_key("detach"),                _range_methods.detach);
     js_property_set(range_proto, make_key("toString"),              _range_methods.toString);
+    js_property_set(range_proto, make_key("getClientRects"),        _range_methods.getClientRects);
+    js_property_set(range_proto, make_key("getBoundingClientRect"), _range_methods.getBoundingClientRect);
     js_property_set(range_proto, make_key("deleteContents"),        _range_methods.deleteContents);
     js_property_set(range_proto, make_key("extractContents"),       _range_methods.extractContents);
     js_property_set(range_proto, make_key("cloneContents"),         _range_methods.cloneContents);
