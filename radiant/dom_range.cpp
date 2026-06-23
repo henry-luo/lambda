@@ -2845,9 +2845,7 @@ static DomBoundary move_one_visible_char_forward(DomBoundary b, DomElement* host
     if (next_step_enters_false_island(b, host)) {
         return boundary_before_codepoint(next);
     }
-    ModifyCodepoint prev = prev_modify_codepoint(b, host);
-    if (!codepoint_is_collapsible_space(next) ||
-        !codepoint_is_collapsible_space(prev)) {
+    if (!codepoint_is_collapsible_space(next)) {
         return boundary_after_codepoint(next);
     }
 
@@ -2857,7 +2855,7 @@ static DomBoundary move_one_visible_char_forward(DomBoundary b, DomElement* host
         next = next_modify_codepoint(scan, host);
         if (!next.found) return last;
         DomBoundary after = boundary_after_codepoint(next);
-        if (!codepoint_is_collapsible_space(next)) return after;
+        if (!codepoint_is_collapsible_space(next)) return last;
         if (after.node == scan.node && after.offset == scan.offset) return last;
         last = after;
         scan = after;
@@ -2892,6 +2890,46 @@ static DomBoundary move_one_visible_char_backward(DomBoundary b, DomElement* hos
 static DomBoundary move_one_visible_char(DomBoundary b, int dir) {
     DomElement* host = editing_host_of(b.node);
     return dir > 0 ? move_one_visible_char_forward(b, host)
+                   : move_one_visible_char_backward(b, host);
+}
+
+static DomBoundary extend_one_visible_char_forward(DomBoundary b, DomElement* host) {
+    ModifyCodepoint next = next_modify_codepoint(b, host);
+    if (!next.found) return b;
+    if (next_step_crosses_br(b, host)) {
+        return boundary_before_codepoint(next);
+    }
+    if (next_step_enters_false_island(b, host)) {
+        return boundary_before_codepoint(next);
+    }
+    if (!codepoint_is_collapsible_space(next)) {
+        return boundary_after_codepoint(next);
+    }
+
+    ModifyCodepoint prev = prev_modify_codepoint(b, host);
+    if (!codepoint_is_collapsible_space(prev)) {
+        return boundary_after_codepoint(next);
+    }
+
+    DomBoundary scan = b;
+    DomBoundary last = b;
+    for (int safety = 0; safety < 100000; safety++) {
+        next = next_modify_codepoint(scan, host);
+        if (!next.found) return last;
+        DomBoundary after = boundary_after_codepoint(next);
+        if (!codepoint_is_collapsible_space(next)) {
+            return after;
+        }
+        if (after.node == scan.node && after.offset == scan.offset) return last;
+        last = after;
+        scan = after;
+    }
+    return last;
+}
+
+static DomBoundary extend_one_visible_char(DomBoundary b, int dir) {
+    DomElement* host = editing_host_of(b.node);
+    return dir > 0 ? extend_one_visible_char_forward(b, host)
                    : move_one_visible_char_backward(b, host);
 }
 
@@ -3175,7 +3213,8 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
             new_focus = focus;
         }
     } else if (gran == DOM_MOD_CHARACTER) {
-        new_focus = move_one_visible_char(focus, dir);
+        new_focus = extend ? extend_one_visible_char(focus, dir)
+                           : move_one_visible_char(focus, dir);
     } else {
         new_focus = dom_boundary_move(focus, gran, dir);
     }
