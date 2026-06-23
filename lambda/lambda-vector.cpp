@@ -83,6 +83,7 @@ static Item vector_get(Item item, int64_t index) {
                     return { .item = u64_to_item(heap_val) };
                 }
                 case ELEM_FLOAT64: return push_d(((double*)arr->data)[index]);
+                case ELEM_BOOL:    return { .item = b2it(((uint8_t*)arr->data)[index] ? BOOL_TRUE : BOOL_FALSE) };
                 default:           return ItemError;
             }
         }
@@ -1542,6 +1543,117 @@ Item fn_trunc(Item item) {
         return push_d(trunc(val));
     }
     return vec_unary_math(item, trunc, "fn_trunc");
+}
+
+// item_to_bool: coerce an item to a boolean for any()/all() reductions
+// true: non-zero number, true bool, non-empty string
+// false: 0, false, null, empty string
+static inline bool item_to_bool(Item v) {
+    TypeId t = get_type_id(v);
+    switch (t) {
+        case LMD_TYPE_BOOL:  return v.bool_val == BOOL_TRUE;
+        case LMD_TYPE_INT:   return v.get_int56() != 0;
+        case LMD_TYPE_INT64: return v.get_int64() != 0;
+        case LMD_TYPE_FLOAT: { double d = v.get_double(); return d != 0.0 && !std::isnan(d); }
+        case LMD_TYPE_NULL:  return false;
+        default:             return true;  // non-null compound values count as truthy
+    }
+}
+
+// all(vec) - true iff every element is truthy; true for empty vector
+Item fn_all(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_NULL) return (Item){ .item = b2it(BOOL_TRUE) };
+    int64_t len = vector_length(item);
+    if (len < 0) {
+        log_error("fn_all: expected vector-like input, got type %d", type);
+        return ItemError;
+    }
+    // ELEM_BOOL fast path
+    if (type == LMD_TYPE_ARRAY_NUM && item.array_num->get_elem_type() == ELEM_BOOL) {
+        uint8_t* data = (uint8_t*)item.array_num->data;
+        for (int64_t i = 0; i < len; i++) {
+            if (!data[i]) return (Item){ .item = b2it(BOOL_FALSE) };
+        }
+        return (Item){ .item = b2it(BOOL_TRUE) };
+    }
+    for (int64_t i = 0; i < len; i++) {
+        if (!item_to_bool(vector_get(item, i))) return (Item){ .item = b2it(BOOL_FALSE) };
+    }
+    return (Item){ .item = b2it(BOOL_TRUE) };
+}
+
+// any(vec) - true iff at least one element is truthy; false for empty vector
+Item fn_any(Item item) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_NULL) return (Item){ .item = b2it(BOOL_FALSE) };
+    int64_t len = vector_length(item);
+    if (len < 0) {
+        log_error("fn_any: expected vector-like input, got type %d", type);
+        return ItemError;
+    }
+    // ELEM_BOOL fast path
+    if (type == LMD_TYPE_ARRAY_NUM && item.array_num->get_elem_type() == ELEM_BOOL) {
+        uint8_t* data = (uint8_t*)item.array_num->data;
+        for (int64_t i = 0; i < len; i++) {
+            if (data[i]) return (Item){ .item = b2it(BOOL_TRUE) };
+        }
+        return (Item){ .item = b2it(BOOL_FALSE) };
+    }
+    for (int64_t i = 0; i < len; i++) {
+        if (item_to_bool(vector_get(item, i))) return (Item){ .item = b2it(BOOL_TRUE) };
+    }
+    return (Item){ .item = b2it(BOOL_FALSE) };
+}
+
+// clip(x, lo, hi) - clamp element-wise to [lo, hi]
+// scalar x: returns scalar; vector x: returns ArrayNum (float result)
+// lo/hi must be scalar numerics
+Item fn_clip(Item item, Item lo_item, Item hi_item) {
+    GUARD_ERROR3(item, lo_item, hi_item);
+    TypeId lo_type = get_type_id(lo_item);
+    TypeId hi_type = get_type_id(hi_item);
+    if (!is_scalar_numeric(lo_type) || !is_scalar_numeric(hi_type)) {
+        log_error("fn_clip: lo and hi must be scalar numerics");
+        return ItemError;
+    }
+    double lo = item_to_double(lo_item);
+    double hi = item_to_double(hi_item);
+    if (lo > hi) {
+        log_error("fn_clip: lo (%g) must be <= hi (%g)", lo, hi);
+        return ItemError;
+    }
+    TypeId type = get_type_id(item);
+    if (is_scalar_numeric(type)) {
+        double val = item_to_double(item);
+        if (std::isnan(val)) return push_d(NAN);
+        if (val < lo) val = lo;
+        else if (val > hi) val = hi;
+        return push_d(val);
+    }
+    int64_t len = vector_length(item);
+    if (len < 0) {
+        log_error("fn_clip: expected numeric or vector input, got type %d", type);
+        return ItemError;
+    }
+    if (len == 0) {
+        ArrayNum* result = array_float_new(0);
+        return { .array_num = result };
+    }
+    ArrayNum* result = array_float_new(len);
+    for (int64_t i = 0; i < len; i++) {
+        double val = item_to_double(vector_get(item, i));
+        if (std::isnan(val)) {
+            result->float_items[i] = NAN;
+        } else {
+            if (val < lo) val = lo;
+            else if (val > hi) val = hi;
+            result->float_items[i] = val;
+        }
+    }
+    return { .array_num = result };
 }
 
 // hypot(y, x) - Euclidean distance sqrt(y*y + x*x)

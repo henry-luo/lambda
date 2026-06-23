@@ -340,10 +340,10 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, C_ARG_ITEM, "fn_slice", FPTR(fn_slice), NULL, NULL, false, 0},
 
     {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_all", NULL, NULL, NULL, false, 0},  // unimplemented
+     C_RET_ITEM, C_ARG_ITEM, "fn_all", FPTR(fn_all), NULL, NULL, false, 0},
 
     {SYSFUNC_ANY, "any", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_any", NULL, NULL, NULL, false, 0},  // unimplemented
+     C_RET_ITEM, C_ARG_ITEM, "fn_any", FPTR(fn_any), NULL, NULL, false, 0},
 
     // min/max — 1-arg is method-eligible, 2-arg is not
     {SYSFUNC_MIN1, "min", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
@@ -385,6 +385,9 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_sign", FPTR(fn_sign), NULL, NULL, false, 0},
+
+    {SYSFUNC_CLIP, "clip", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_clip", FPTR(fn_clip), NULL, NULL, false, 0},
 
     // ========================================================================
     // I/O functions — can_raise=true for functions that may fail

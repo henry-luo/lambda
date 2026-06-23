@@ -194,6 +194,8 @@ Item array_num_get(ArrayNum *array, int64_t index) {
     }
     case ELEM_FLOAT64:
         return push_d(((double*)array->data)[index]);
+    case ELEM_BOOL:
+        return (Item){.item = b2it(((uint8_t*)array->data)[index] ? BOOL_TRUE : BOOL_FALSE)};
     default:
         return ItemNull;
     }
@@ -501,6 +503,21 @@ void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
     case ELEM_FLOAT64:
         ((double*)arr->data)[index] = item_to_float_value(value);
         break;
+    case ELEM_BOOL: {
+        TypeId vt = get_type_id(value);
+        uint8_t b;
+        if (vt == LMD_TYPE_BOOL) {
+            b = (value.bool_val == BOOL_TRUE) ? 1 : 0;
+        } else if (vt == LMD_TYPE_INT || vt == LMD_TYPE_INT64) {
+            b = item_to_int_value(value) ? 1 : 0;
+        } else if (vt == LMD_TYPE_FLOAT) {
+            b = item_to_float_value(value) != 0.0 ? 1 : 0;
+        } else {
+            b = 0;
+        }
+        ((uint8_t*)arr->data)[index] = b;
+        break;
+    }
     default:
         return;
     }

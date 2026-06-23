@@ -57,16 +57,28 @@ struct ArrayNumShape {
 };
 ```
 
-The pointer to `ArrayNumShape` is stored in the `extra` field (currently `count of extra items at end`, which is never meaningful for N-D arrays — so reuse, not extend). Alternative: add a `void* meta` field — adds 8 bytes to every `ArrayNum`. **Recommendation**: reuse `extra` since the semantic of "extra items" doesn't apply to N-D and the 1-D fast path can keep treating it as a count.
+**Storage location (confirmed):** the pointer to `ArrayNumShape` is stored in `ArrayNum.extra`. The existing semantic of `extra` (count of overflow items at end) is never meaningful for N-D arrays, so the slot is reused — no struct growth, no impact on the 1-D fast path. The N-D dispatch is gated by `Container.flags.is_view` for views, and by a separate `flags.is_ndim` bit (introduced in §2) for owned N-D arrays.
 
 `length` for N-D arrays = `product(shape)`. `strides[i]` is the number of *elements* (not bytes) to skip when incrementing index `i`; bytes per element is already in `ELEM_TYPE_SIZE`.
 
 ### Construction
 
-Two paths into N-D:
+Two paths into N-D, **both implicit — no new `tensor(...)` builtin**:
 
 1. **From a 1-D array via `reshape`** — `reshape(arr, [2, 3, 4])`. If the source is C-contiguous, the result is a view (§2). Otherwise it materializes.
-2. **From nested literal syntax** — `[[1, 2], [3, 4]]`. Currently this constructs a generic `Array` of `ArrayNum`. The build_ast pass (in [lambda/build_ast.cpp](../lambda/build_ast.cpp)) should detect when every inner array has the same length and `elem_type` and emit a single N-D `ArrayNum` instead. A new sysfunc `tensor([[…], […]])` provides an explicit form if literal detection is too fragile.
+
+2. **Nested literal syntax `[[1, 2], [3, 4]]` is auto-detected as N-D.** Two-stage detection:
+   - **Static (AST builder)**: [lambda/build_ast.cpp](../lambda/build_ast.cpp) walks the literal. If every inner array has the same length and homogeneous numeric `elem_type`, the AST node carries an `is_ndim_candidate` flag and shape `(outer_len, inner_len, …)`. The transpiler emits a single N-D `ArrayNum` allocation + flat fill, not a nested `Array` of `ArrayNum`.
+   - **Dynamic (runtime construction)**: When the structure isn't statically resolvable (e.g. `[row1, row2, row3]` where `row1` etc. are runtime-computed `ArrayNum`s), the array constructor at runtime checks: if all children are `ArrayNum` of the same `elem_type` and equal length, **promote to N-D `ArrayNum`** by allocating a contiguous buffer and copying rows in. Otherwise fall back to the current generic `Array of Items` behavior.
+
+   The runtime check costs one pass over the children at construction time. For homogeneous numeric matrices, the payoff is large: contiguous storage, vectorized ops without per-row dispatch. For irregular content, the fall-back path is unchanged from today.
+
+   Edge cases (handled by the fall-back to generic `Array`):
+   - Mixed inner lengths (jagged) — stays heterogeneous.
+   - Mixed `elem_type` across rows — stays heterogeneous (could promote with type-coercion, but that's surprising; keep it explicit).
+   - Mixed inner types (some `ArrayNum`, some scalar) — stays heterogeneous.
+
+   No syntactic distinction — `[[1, 2], [3, 4]]` is the only N-D literal. Whether it's actually stored as 2-D `ArrayNum` or as `Array of ArrayNum` depends on detection success; the user-visible value semantics are equivalent under indexing and iteration.
 
 ### Operations to extend
 
@@ -117,77 +129,174 @@ The `ArrayNumShape*` stored in `extra` becomes reachable from the GC trace path 
 
 `ArrayNum` instances whose `data`/`items`/`float_items` pointer aliases another `ArrayNum`'s buffer (or any externally owned numeric buffer). No copy on slice; lifetime tied to the source.
 
-### Flag vs. new ELEM enum — recommendation
+### Flag bits live in `Container.flags` upper nibble (now free)
 
-**Use a flag bit, not a new `ELEM_*` enum.** Reasoning:
+A view is a generic concept that should apply to any container, not just `ArrayNum`. A future `Array` view (slice of a generic Item list) wants the same semantics: aliased storage, base-ref liveness, mutation rejection. So the view flag belongs in `Container.flags` so any container can carry it.
 
-| Option | Pros | Cons |
-|---|---|---|
-| New `ELEM_*` variants (e.g. `ELEM_VIEW_FLOAT32`) | Self-describing in one byte | Doubles the enum (13 → 26), every dispatch site must handle both forms, view-ness is orthogonal to element kind so this conflates two axes |
-| Flag bit in the elem_type byte's low nibble | Element kind stays one value; view-ness is independent; one bit covers all 13 element types | Adds one bit-check to ops that care about ownership (free, resize); op-on-data code paths see no change |
-
-The op-on-data code paths (arithmetic, reductions, indexing) only care about `elem_type` and the data pointer — they're unchanged. The only paths that branch on view-ness are:
-
-- **Free / GC reclamation** — view doesn't own its buffer; must not `free(data)`, must drop ref on base.
-- **Mutation attempts** — `array_*_set`, `fill`, in-place sort: must raise an error or COW.
-- **Resize / capacity** — meaningless for views; rejected.
-
-### Storage
-
-A view needs two additions over a normal `ArrayNum`:
+`Container` has been refactored to make the upper nibble of `flags` available: `map_kind` moved out of the bitfield into its own byte at offset 2, and the explicit padding bytes were added to lock down the layout. Current state at [lambda.h:524-537](../lambda/lambda.h#L524):
 
 ```c
-// applies when ARRAY_NUM_FLAG_VIEW is set in elem_type byte
-struct ArrayNumViewMeta {
-    ArrayNum* base;       // ref-counted source array (for GC liveness)
-    int64_t   byte_offset; // bytes into base->data where this view begins
+struct Container {
+    TypeId type_id;            // byte 0
+    union {
+        uint8_t flags;          // byte 1 — only lower nibble currently used
+        struct {
+            uint8_t is_content:1;       // bit 0
+            uint8_t is_spreadable:1;    // bit 1
+            uint8_t is_heap:1;          // bit 2
+            uint8_t is_data_migrated:1; // bit 3
+            // bits 4-7: FREE (was map_kind, now moved to its own byte)
+        };
+    };
+    uint8_t map_kind;          // byte 2 — per-type discriminator (map_kind / elem_type / unused)
+    uint8_t padding[5];        // bytes 3-7 — explicit padding to 8-byte alignment
+};
+// first 8-byte-aligned field in derived types lives at offset 8 — unchanged
+```
+
+Per-derived-type byte 2:
+- `Map` / `Object` / `Element`: `map_kind` (MapKind enum)
+- `ArrayNum`: `elem_type` (ArrayNumElemType enum)
+- `Range` / `List`: unused (no per-type discriminator needed)
+
+The view, n-dim, and pin flags are **orthogonal to container type** (any of these properties could apply to any container), so they belong in the type-agnostic `flags` byte, not in byte 2. With the upper nibble freed, no new byte is needed — extend the existing bitfield:
+
+```c
+struct Container {
+    TypeId type_id;
+    union {
+        uint8_t flags;
+        struct {
+            // — lifecycle / allocation flags (lower nibble) —
+            uint8_t is_content:1;       // bit 0
+            uint8_t is_spreadable:1;    // bit 1
+            uint8_t is_heap:1;          // bit 2
+            uint8_t is_data_migrated:1; // bit 3
+            // — layout / storage flags (upper nibble, freed by map_kind move) —
+            uint8_t is_ndim:1;          // bit 4  shape side-table in `extra`
+            uint8_t is_view:1;          // bit 5  aliases another container's storage (implies is_ndim)
+            uint8_t is_pinned:1;        // bit 6  has live views; data buffer must not be relocated by compactor
+            uint8_t flags_reserved:1;   // bit 7  reserved for future use
+        };
+    };
+    uint8_t map_kind;
+    uint8_t padding[5];
 };
 ```
 
-Stored in the same slot as `ArrayNumShape` from §1 (in `extra`), since:
-- A view is necessarily n-D (it has shape/strides matching the slice geometry, even when ndim=1).
-- A view with `ndim=1` and unit stride is just a windowed slice — still benefits from carrying offset and base pointer.
+**Zero new fields, zero ABI impact.** Bit reads stay in the same byte; hot-path checks become `if (flags & VIEW_MASK)` against existing memory. The GC's hardcoded `p[1]` read covers all four new bits.
 
-So views always set both flags: `ARRAY_NUM_FLAG_VIEW | ARRAY_NUM_FLAG_NDIM`. The shape/strides table grows two fields:
+#### Where is the padding I claimed?
+
+The 6 bytes of implicit padding I referred to earlier (between byte 1 and the first 8-byte-aligned field at offset 8) are now **explicit** in the refactored layout. The user's refactor materialized them as `uint8_t map_kind` at byte 2 + `uint8_t padding[5]` at bytes 3-7. The total header size stays 8 bytes; the first field at offset 8 (pointer or int64_t in derived structs) is unchanged. The GC's hardcoded byte-offset reads at [gc_heap.c:872-875](../lib/gc/gc_heap.c#L872) keep working:
+
+```c
+void* items_ptr = *(void**)(p + 8);
+int64_t length  = *(int64_t*)(p + 16);
+int64_t extra   = *(int64_t*)(p + 24);
+int64_t capacity= *(int64_t*)(p + 32);
+```
+
+The refactor is already landed (per your note "i've update Container and derived types, to make padding explicit"). Adding the new flag bits is a bitfield-only change — no struct size change, no offset change, no audit of `sizeof()` consumers needed.
+
+### Per-element-type view granularity
+
+Within `ArrayNum`, the view flag is orthogonal to `elem_type` — a view of any element kind (int8 / float32 / …) uses the same `is_view` flag in `Container.flags`, same shape side-table, same base-ref machinery. No `ELEM_VIEW_*` variants needed.
+
+### What changes in code
+
+- **Op-on-data paths** (arithmetic, reductions, indexing): unchanged — they only care about `elem_type` and the data pointer.
+- **Branches on view-ness** — the only paths that need to check `is_view`:
+  - **Free / GC reclamation**: view doesn't own its buffer; must not `free(data)`, must drop ref on base.
+  - **Mutation attempts** (`array_*_set`, `fill`, in-place sort): raise `ItemError`.
+  - **Resize / capacity**: meaningless for views; rejected.
+
+### Storage
+
+Per §1, view metadata lives in the shape side-table, which is stored in the `extra` field of `ArrayNum`. A view is necessarily n-D — even when `ndim=1`, it needs to carry the base pointer and offset. So views always allocate a shape struct (set the n-d flag in `elem_type` byte), and set `Container.is_view = 1`:
 
 ```c
 struct ArrayNumShape {
     uint8_t  ndim;
     uint8_t  is_c_contig:1;
     uint8_t  is_f_contig:1;
-    uint8_t  is_view:1;        // ← when set, the next two fields are meaningful
-    int64_t  offset;            // element offset within base->data
-    ArrayNum* base;             // NULL for owned arrays
+    int64_t  offset;            // element offset within base->data (only meaningful for views)
+    Container* base;            // NULL for owned arrays; set when the parent Container has is_view=1
     int64_t  shape[];
     // strides[] follow
 };
 ```
 
-`base` participates in reference counting through Lambda's existing `Container.ref_cnt` mechanism — incremented when the view is created, decremented on view drop.
+`base` is typed as `Container*` rather than `ArrayNum*` so the same shape struct can describe views of generic `Array` in the future (Phase 2d). `base` participates in GC tracing (see GC interaction below) and in `Container.ref_cnt`.
 
 ### Construction
 
 Views appear from:
 
 - **`slice(arr, start, end)`** — currently copies (`SYSFUNC_SLICE`). With contiguous source: returns a view. Add `slice(arr, start, end, copy: true)` for explicit copy.
-- **Strided slicing `arr[start:end:step]`** (new syntax extension in [grammar.js](../lambda/tree-sitter-lambda/grammar.js)). Always view-able since stride is recordable.
+- **Range-indexed slicing `arr[start to end]`** — reuses Lambda's existing `to` range syntax ([grammar.js:340](../lambda/tree-sitter-lambda/grammar.js#L340), `range: $ => seq($._expr, 'to', $._expr)`). When `arr[range]` is evaluated and `arr` is `ArrayNum` (or `Array` in Phase 2d), the indexer returns a view spanning the range's elements. No new syntax required.
 - **Reshape on contiguous source** (§1).
 - **Transpose** (§1).
 - **`view(buffer, elem_type, shape)`** — explicit view over an externally-owned buffer (used by Phase 5 for `JsArrayBuffer`).
 
-### Mutability
+**Strided / step slicing — design only, no implementation in this proposal.** When needed in the future, it will be exposed as a sysfunc:
 
-Views are **read-only by default**. Rationale: most slice consumers don't mutate, COW is surprising for performance-sensitive code, and a separate mutable-view path can be added later without breaking the read-only contract. Attempted writes through a view raise `ItemError` with a clear message.
+```lambda
+slice(arr, range, step)   // e.g. slice(arr, 0 to 10, 2) → every 2nd element, indices 0,2,4,6,8,10
+```
 
-If the user wants a writable copy of a view: `copy(view)`.
+The implementation reuses the same view machinery (a view with non-unit stride is just a stride value > element-size in the shape side-table; the existing `is_c_contig` bit becomes false). No grammar change. This is captured as a forward-compatible design choice — Phase 2 does not ship it, but the view machinery is built so a future step-aware `slice` requires only sysfunc-level work, not core changes.
 
-A future `mut_view` form (Phase 1b) can grant write-through if needed for in-place algorithms.
+### Mutability — read-only only in this phase
 
-### Liveness
+Views are **read-only**. Period — no COW, no opt-in mutable form in Phase 2. Attempted writes through a view raise `ItemError` with a clear message. If the user wants a writable copy: `copy(view)`.
 
-The simplest correct rule: a view holds a ref on its base array. As long as any view exists, the base buffer is kept alive. This matches NumPy's `arr.base` semantics. Releasing the last view drops the base.
+Mutable views and mutable typed arrays in general are explicitly **deferred to Phase 2d** (the final phase of this proposal's roadmap). Rationale:
 
-For external buffers (Phase 5: `JsArrayBuffer`), the base ref points to a wrapper that owns the buffer and survives detachment checks.
+- Lambda's functional core treats values as immutable; mutation primitives are scoped to specific contexts (markup editing, `MarkEditor`).
+- Read-only views cover the dominant use cases: slicing, reshape, transpose, JS interop without copy.
+- A clean read-only-first design lets us validate the GC/liveness machinery (see GC interaction below) before adding mutation hazards.
+- When mutable views land, they reuse all the view machinery — just lift the write-rejection check.
+
+### Liveness — interaction with parser-produced typed arrays (`is_heap` audit)
+
+A view holds a ref on its base array; as long as any view exists, the base buffer is kept alive. This matches NumPy's `arr.base` semantics. But this only works if the base is **GC-managed**, which is exactly what `Container.is_heap` distinguishes.
+
+#### Existing `is_heap` semantics — audit results
+
+Eight total references in the tree. Two **setters**, three **readers**, three **declarations/comments**:
+
+**Setters** — `is_heap = 1` is *only* applied by the GC-backed allocators:
+- [lambda-mem.cpp:382](../lambda/lambda-mem.cpp#L382) in `heap_calloc`: any container allocated via `heap_calloc` gets `is_heap = 1` (skipping `LMD_TYPE_FUNC` and `LMD_TYPE_TYPE` which have different byte-1 layouts).
+- [lambda-mem.cpp:400](../lambda/lambda-mem.cpp#L400) in `heap_calloc_class`: same logic for the JIT bump-pointer fast path.
+- [transpile-mir.cpp:4357](../lambda/transpile-mir.cpp#L4357): MIR-emitted JIT code that newly heap-allocates a container.
+
+**Readers** — all in [lambda-eval.cpp](../lambda/lambda-eval.cpp) `map_rebuild_for_type_change`:
+- Line 4919: `bool use_pool = !container->is_heap;` — markup containers (input-arena) get rebuilt via runtime pool (not GC zone), to avoid corrupting input pool memory.
+- Line 5036: `if (container->is_heap) { /* old_data in GC data zone — reclaimed by GC */ }` — vs. the `is_data_migrated` / pool path for non-heap.
+- The header comment at [line 4844](../lambda/lambda-eval.cpp#L4844) spells out the rule: *"For markup containers (`!is_heap`), uses runtime pool instead of calloc/free to avoid corrupting input pool memory."*
+
+**Parser allocation pattern** — parsers never call `heap_calloc`. They go through `arena_alloc` against the input arena. Confirmed at [mark_builder.cpp:861](../lambda/mark_builder.cpp#L861) for `ArrayNum` specifically:
+
+```cpp
+ArrayNum* new_arr = (ArrayNum*)arena_alloc(arena_, size);
+```
+
+So **`is_heap` defaults to 0 for parser-produced `ArrayNum`** (zero-initialized via the arena's calloc semantics; never explicitly set). This matches your direction #2 — no code change needed to enforce it.
+
+#### View implications
+
+Because parser arrays live in an input arena that dies independently of the GC, a view onto them is structurally dangerous: when the arena is dropped, the view's `data` pointer dangles. The view's `base` ref (which only participates in GC tracing) does not extend the arena's lifetime.
+
+**Decision: views on `is_heap = 0` bases are rejected.** The view constructor checks `base->is_heap`; if zero, it raises `ItemError` with a message like `"cannot view arena-backed array; copy() first"`. Rationale:
+
+- **Auto-copy on view-create** would silently turn a `view()` into a `copy()`, hiding cost and breaking the "view shares storage" mental model.
+- **Promote-then-view** (copy to heap, swap base, redirect arena reference) is correct but complex, and changes a parser-output value's identity in confusing ways.
+- **Explicit rejection** surfaces the arena boundary: user writes `slice(copy(parsed_arr), 1 to 5)` once they know they want a view. Common pipeline patterns that consume the parsed array eagerly (`sum(parsed_arr)`, `parsed_arr |> map(...)`) never trip this path because they iterate in place, no view created.
+
+This decision keeps `is_heap = 0` for parsers (your direction #2) without requiring the view machinery to grapple with arena lifecycles.
+
+For external buffers (deferred §5: `JsArrayBuffer`), the base ref will point to a heap-allocated wrapper that owns the buffer — that wrapper has `is_heap = 1`, so views work normally.
 
 ### GC interaction — this is the load-bearing change
 
@@ -195,15 +304,17 @@ Views introduce a dependency the current GC does not model. Today, `LMD_TYPE_ARR
 
 #### 5a. Tracing — view marks its base
 
-`LMD_TYPE_ARRAY_NUM_` moves out of the no-trace list. The trace function reads the elem_type byte and, when `ARRAY_NUM_FLAG_NDIM` is set, dereferences `extra` to find the `ArrayNumShape`. If `is_view` is set on the shape, the trace marks `shape->base` as a GC root:
+`LMD_TYPE_ARRAY_NUM_` moves out of the no-trace list. The trace function reads `Container.flags` (the existing byte 1) and, when `is_view` (bit 5) is set, dereferences `extra` to find the `ArrayNumShape`, then marks `shape->base` as a GC root:
 
 ```c
+#define CONTAINER_FLAG_IS_VIEW   (1u << 5)   // bit 5 of Container.flags
+
 case LMD_TYPE_ARRAY_NUM_: {
     uint8_t* p = (uint8_t*)obj;
-    uint8_t elem_byte = p[1];
-    if (elem_byte & ARRAY_NUM_FLAG_NDIM) {
-        ArrayNumShape* shape = *(ArrayNumShape**)(p + 24);  // extra slot
-        if (shape && shape->is_view && shape->base) {
+    uint8_t flags = p[1];                                    // existing flags byte
+    if (flags & CONTAINER_FLAG_IS_VIEW) {
+        ArrayNumShape* shape = *(ArrayNumShape**)(p + 24);   // extra slot
+        if (shape && shape->base) {
             gc_mark_object(gc, (gc_header_t*)shape->base);
         }
     }
@@ -211,7 +322,7 @@ case LMD_TYPE_ARRAY_NUM_: {
 }
 ```
 
-The 1-D owned path stays in the no-trace fast path (flag bit not set).
+The 1-D owned path and non-view N-D arrays stay in the no-trace fast path (`is_view` bit not set). When a future generic-`Array` view lands (Phase 2d), `LMD_TYPE_ARRAY_` similarly reads `flags & CONTAINER_FLAG_IS_VIEW` and traces `shape->base` before doing its existing Item-array trace.
 
 #### 5b. Finalization — view never frees its aliased buffer
 
@@ -234,9 +345,11 @@ Three options:
 | **(b) Interior offsets** | View stores `{base, byte_offset}`, computes data pointer per access via `base->data + byte_offset`. | One add per element access in tight loops; defeats the cached-pointer benefit. | Reject — kills hot-loop perf. |
 | **(c) Patch views** | Compactor maintains a `base → views[]` back-reference and patches each view's `data` after moving. | Extra pointer storage on every viewed-base; complex during concurrent ops. | Reject — too much machinery for the use case. |
 
-The pin bit lives in `ArrayNum.elem_type` byte's low nibble (one more flag bit alongside `ARRAY_NUM_FLAG_NDIM` and `ARRAY_NUM_FLAG_VIEW`). Set on first view creation; never cleared (cleared would require view-count tracking, which adds machinery for no real benefit — pinned arrays simply stop being relocated, which is fine).
+The pin bit lives in `Container.flags` bit 6 (`is_pinned`), set on the **base** when a view is first created. Never cleared — clearing would require view-count tracking, which adds machinery for no real benefit; pinned arrays simply stop being relocated, which is fine for the lifetime of the process.
 
-A side effect worth calling out: while the data buffer is pinned, the `ArrayNum` *container* (the header) can still move freely. Only the `data`/`items`/`float_items` pointer's *target* is pinned. The pin bit is read by the compaction path, not by tracing.
+A side effect worth calling out: while the data buffer is pinned, the `ArrayNum` *container header* can still move freely. Only the `data`/`items`/`float_items` pointer's *target* is pinned. The pin bit is read by the compaction path, not by tracing.
+
+Phase 2d generic-Array views work identically: a viewed `Array` sets `is_pinned`, and the compactor skips relocation of its `items` buffer.
 
 #### 5d. The shape side-table itself
 
@@ -353,7 +466,12 @@ Make pipe (`arr |> filter(p) |> map(f) |> sum`) execute on `ArrayNum` *without b
 
 5. **Pipe (`|>`) fusion** — the simplest level: each pipe stage that takes an `ArrayNum` and produces an `ArrayNum` runs as one tight loop. Stage fusion across pipes (e.g. `arr |> map(f) |> filter(p)` becoming one pass) is a future optimization; the immediate win is just not boxing between stages.
 
-6. **Boolean mask indexing** (new): `arr[mask]` where `mask` is a `bool[]` (currently absent — would need a `ELEM_BOOL` or repurpose `ELEM_UINT8` with `0`/`1` values, see Phase 5 alignment). For Phase 2, defer; add it once boolean arrays exist.
+6. **Boolean mask indexing** (new): `arr[mask]` where `mask` is a `bool[]`. This requires a new element kind `ELEM_BOOL` (14th in the enum, 1 byte per element). Distinct from `ELEM_UINT8` because:
+   - Reductions like `any(mask)` / `all(mask)` want bool-specific semantics.
+   - Output formatters print `true`/`false`, not `0`/`1`.
+   - Coercion rules differ (any non-zero source → `true`, not just `1`).
+
+   Mask indexing returns a new `ArrayNum` (not a view — non-contiguous selection can't alias). Adding `ELEM_BOOL` is straightforward — it slots into existing dispatch the same way the compact integer types did.
 
 ### Iteration protocol
 
@@ -370,13 +488,25 @@ Item array_num_iter_next(ArrayNumIter* it);  // returns ItemError on exhaustion
 
 Used by `filter`, `some`, `every`, `for-in`, comprehensions. The cached `elem_type` avoids re-dispatching per element.
 
-For N-D arrays (§1), iteration semantics need a decision: does `for row in matrix` yield rows or scalars? **Recommendation**: matches NumPy — `for x in nd_arr` iterates the leading axis, so each `x` is an `(ndim-1)`-D view. Scalar iteration requires `for x in flatten(arr)`.
+For N-D arrays (§1), iteration semantics: **`for x in nd_arr` iterates the leading axis**, so each `x` is an `(ndim-1)`-D view (matches NumPy). Scalar iteration over an N-D array requires `for x in flatten(arr)`. For 1-D, `for x in arr` continues to yield scalars as today.
 
 ---
 
-## 5. Phase 2: Unify LambdaJS Typed Arrays with ArrayNum
+## 5. JS TypedArray Unification — Design Kept, Implementation Deferred
 
-### Current duplication
+**Status: design preserved, implementation explicitly deferred to a later release.**
+
+Per your direction, the unification of `JsTypedArray`/`JsArrayBuffer`/`JsDataView` onto `ArrayNum` is no longer part of this proposal's deliverables. The design below remains as the **target architecture** so that Phase 2a–2c choices stay JS-compatible. Specific constraints carried forward:
+
+- **View semantics must support views over externally-owned buffers**, not just other `ArrayNum`s. The `base` field is typed `Container*` (not `ArrayNum*`) precisely so a future JS-buffer wrapper can serve as base.
+- **Read-only-by-default** matches JS semantics for views into detached buffers and aligns with the eventual `Uint8Array.prototype.slice()` return-a-copy / `subarray()` return-a-view distinction.
+- **Element coercion lives at API boundaries, not in ArrayNum ops.** Lambda keeps strict numeric semantics; the JS wrapper applies truncation / clamping / NaN-coercion before delegating writes.
+- **`ELEM_UINT8_CLAMPED`** is *not* added in this proposal but reserved as element kind #15 (or kind #14 if `ELEM_BOOL` doesn't ship). The flag-only alternative (re-using `ELEM_UINT8` with a `clamped` flag) is rejected because the arithmetic semantics genuinely differ and a per-op clamp branch hurts the hot loop.
+- **`gc_native_seen_t` dedup pattern** already used by `gc_finalize_arraybuffer`/`gc_finalize_typed_array` is reusable for shared-buffer finalization.
+
+The duplication table, element-type map, target architecture diagram, migration order, and compatibility/risk discussion below remain as **the spec for future work**.
+
+### Current duplication (still applies)
 
 | Concern | Lambda `ArrayNum` | LambdaJS `JsTypedArray` |
 |---|---|---|
@@ -456,28 +586,49 @@ Concretely:
 Phase 2a — independent, ship in any order:
    §3 (vectorize scalar math)       — ~1 week, low risk
    §4 (iteration sites)             — ~1 week, mostly transpiler work
+   ELEM_BOOL                         — small, can land alongside §3 or §4
 
 Phase 2b — sequential:
-   §2 (views) + GC upgrade          — ~3 weeks; GC tracer/finalizer/compactor
+   §2 (views) + GC upgrade           — ~3 weeks; GC tracer/finalizer/compactor
                                        all need extending (see §2 GC interaction).
-                                       The latent compact-elem compaction bug
-                                       gets fixed in the same pass.
-   §1 (n-d)                         — ~3 weeks, broadcasting + format/output;
+                                       New flag bits go into Container.flags upper
+                                       nibble (already freed by the recent map_kind
+                                       move); no struct size change. The latent
+                                       compact-elem compaction bug gets fixed in
+                                       the same pass.
+   §1 (n-d)                          — ~3 weeks, broadcasting + format/output;
                                        reuses the shape side-table slot §2 added.
 
-Phase 2c — depends on 2a + 2b:
-   §5 (JS unification)              — ~3 weeks; mostly mechanical once primitives exist
+Phase 2c — optional polish:
+   ELEM_BOOL mask-indexing UX        — once §2 views are stable
+
+Phase 2d — deferred to a future release (NOT in this proposal):
+   Mutable views / mutable typed arrays
+   Generic `Array` views (extending §2 view machinery to LMD_TYPE_ARRAY)
+   JS TypedArray unification (§5 design preserved but not implemented now)
 ```
 
 Each phase keeps the 1-D, owned-buffer fast path identical to today, so existing benchmarks should not regress.
 
 ## Open questions
 
-1. **Element-type byte layout** — §2's GC interaction needs three flag bits in the low nibble: `ARRAY_NUM_FLAG_NDIM`, `ARRAY_NUM_FLAG_VIEW`, `ARRAY_NUM_FLAG_PINNED`. Container already uses 4 boolean flags there (`is_content`, `is_spreadable`, `is_heap`, `is_data_migrated`). For `ArrayNum`, `is_spreadable` and `is_content` are arguably meaningless; reclaiming them gets us to 3 free bits. Decision needed before any of §1/§2 lands.
-2. **Mutable views** — defer or include? Read-only is safer; mutable enables in-place algorithms (e.g. `arr[i:j] = arr[k:l]`). Recommendation: defer to Phase 2d.
-3. **`ELEM_BOOL`** — needed for boolean mask indexing in §4. Adding a 14th element type vs. repurposing `ELEM_UINT8` with `{0, 1}` invariant. Recommendation: dedicated `ELEM_BOOL` with 1-byte storage, separate from `ELEM_UINT8` because reductions (`any`, `all`) and bool-specific output formatting want type clarity.
-4. **`tensor(...)` literal sugar vs. nested `[]`** — auto-detection of nested literals as N-D is convenient but fragile (one mixed-length inner row ruins it). Explicit `tensor(...)` is clearer for the language; nested literals stay as `Array of ArrayNum`. Recommendation: ship explicit form first, add auto-detect later if user feedback wants it.
-5. **N-D iteration semantics** — `for x in nd_arr` yields leading-axis slices (NumPy semantics) vs. yields scalars (current 1-D semantics). The first is more consistent with NumPy; the second is what existing user code expects. Recommendation: leading-axis slices for N-D, scalars for 1-D — they're consistent with `arr[i]` returning a slice for N-D and a scalar for 1-D.
+All open questions from prior rounds have been resolved. Implementation can proceed against the spec as written.
+
+## Resolved (per your decisions)
+
+- ✅ `ArrayNumShape*` stored in `ArrayNum.extra` (your #1).
+- ✅ View flag lives in `Container.flags` upper nibble (`is_view` bit 5), applies to any container — Array gets views in Phase 2d (your #2 of first round). After the `map_kind` move, the upper nibble of `flags` is free for `is_ndim`/`is_view`/`is_pinned` — no new byte needed.
+- ✅ JS unification design preserved as future spec; implementation deferred (your #3 of first round). Phase 2 design constraints listed in §5.
+- ✅ `is_heap` flag remains meaningful for ArrayNum; parser-produced typed arrays leave it at 0 (your #4 of first round, confirmed via audit in §2 Liveness — parsers use `arena_alloc`, never `heap_calloc`). Views on `is_heap = 0` bases are rejected with explicit error.
+- ✅ Mutable views/arrays deferred to Phase 2d (your #5 of first round).
+- ✅ `ELEM_BOOL` added as a new 14th element kind (your #6 of first round).
+- ✅ N-D `for x in arr` yields leading-axis slices, NumPy-style (your #7 of first round).
+- ✅ Slicing syntax: `arr[start to end]` using existing range grammar (your #8 of first round).
+- ✅ Step in slicing: design only as `slice(arr, range, step)` sysfunc, **no implementation in this proposal** (your #1 of second round).
+- ✅ N-D construction: auto-detect at AST builder (static) and runtime (dynamic). **No `tensor(...)` builtin** (your #3 of second round).
+- ✅ No `flags2` byte. The `Container` refactor moved `map_kind` to byte 2 and made padding explicit (`uint8_t padding[5]` at bytes 3-7), freeing the upper nibble of the existing `flags` byte for `is_ndim`/`is_view`/`is_pinned` + 1 reserved bit (your #4 of second round + final clarification).
+- ✅ N-D promotion at runtime: **eager**. Homogeneous numeric children → promoted to N-D `ArrayNum` at construction time, single contiguous memcpy. No lazy promote-on-first-op (your #1 of third round).
+- ✅ Pin clearing: **deferred to future**. Once set on a base by first view creation, `is_pinned` is never cleared in this proposal. Pinned-fragmentation as a real issue is a future concern; if it bites, add view-count tracking then (your #2 of third round).
 
 ## Non-goals
 
@@ -487,6 +638,8 @@ Each phase keeps the 1-D, owned-buffer fast path identical to today, so existing
 - Complex numbers (`ELEM_COMPLEX64/128`) — would compose cleanly with this design but is its own proposal.
 - Sparse arrays.
 - Memory-mapped file backing — falls out almost free once views over external buffers exist (§5 enables it), but no first-class API in this proposal.
+- Mutable views (Phase 2d).
+- JS TypedArray runtime unification (Phase 2d; design preserved in §5).
 
 ## Success criteria
 
@@ -498,4 +651,5 @@ Each phase keeps the 1-D, owned-buffer fast path identical to today, so existing
    - `arr |> filter(x -> x > 0) |> sum` runs without intermediate `Array` boxing (verify via debug counter).
    - JS `Float32Array` shares storage with Lambda `ArrayNum f32` view (Phase 5).
 3. 1-D arithmetic benchmark (`a + b` for length-1M `f64[]`) does not regress measurably vs. Phase 1 baseline.
-4. Memory: a 1-D owned `ArrayNum` allocation footprint is unchanged from today.
+4. Memory: a 1-D owned `ArrayNum` allocation footprint is unchanged from today (new flag bits go into the existing `flags` byte; the shape side-table is only allocated for N-D or view arrays).
+5. Container ABI: `sizeof(Container)`, `sizeof(Array)`, `sizeof(Map)`, `sizeof(Element)`, `sizeof(ArrayNum)` are unchanged by this proposal (new flags occupy already-free bits in `flags`; the recent `map_kind`-move refactor has its own static_asserts).

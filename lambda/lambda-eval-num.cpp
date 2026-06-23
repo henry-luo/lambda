@@ -1588,6 +1588,48 @@ Item fn_neg(Item item) {
     else if (item._type_id == LMD_TYPE_UINT64) {
         return push_l(-(int64_t)item.get_uint64());
     }
+    else if (get_type_id(item) == LMD_TYPE_ARRAY_NUM ||
+             get_type_id(item) == LMD_TYPE_ARRAY ||
+             get_type_id(item) == LMD_TYPE_RANGE) {
+        TypeId t = get_type_id(item);
+        int64_t len = (t == LMD_TYPE_ARRAY_NUM) ? item.array_num->length :
+                      (t == LMD_TYPE_ARRAY) ? item.array->length :
+                      item.range->length;
+        if (len == 0) {
+            ArrayNum* result = array_float_new(0);
+            return { .array_num = result };
+        }
+        ArrayNum* result = array_float_new(len);
+        for (int64_t i = 0; i < len; i++) {
+            Item elem;
+            if (t == LMD_TYPE_ARRAY_NUM) {
+                ArrayNum* arr = item.array_num;
+                ArrayNumElemType et = arr->get_elem_type();
+                if (et == ELEM_FLOAT) { result->float_items[i] = -arr->float_items[i]; continue; }
+                if (et == ELEM_INT || et == ELEM_INT64) {
+                    result->float_items[i] = -(double)arr->items[i]; continue;
+                }
+                // compact elements: fall through to generic via array_num_get
+                elem = array_num_get(arr, i);
+            } else if (t == LMD_TYPE_ARRAY) {
+                elem = item.array->items[i];
+            } else {
+                elem = (Item){ .item = i2it(item.range->start + i) };
+            }
+            TypeId et = get_type_id(elem);
+            if (et == LMD_TYPE_INT) {
+                result->float_items[i] = -(double)elem.get_int56();
+            } else if (et == LMD_TYPE_INT64) {
+                result->float_items[i] = -(double)elem.get_int64();
+            } else if (et == LMD_TYPE_FLOAT) {
+                result->float_items[i] = -elem.get_double();
+            } else {
+                log_error("neg: non-numeric element at index %ld, type: %d", i, et);
+                return ItemError;
+            }
+        }
+        return { .array_num = result };
+    }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         // Cast string/symbol to number, then negate
         const char* chars = item.get_chars();

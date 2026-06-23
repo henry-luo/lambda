@@ -166,7 +166,10 @@ enum EnumArrayNumElemType {
     ELEM_FLOAT32 = 0xB0,  // 4 bytes  — maps to NUM_FLOAT32
     ELEM_FLOAT64 = 0xC0,  // 8 bytes  — explicit f64 (same storage as ELEM_FLOAT)
 
-    ELEM_NUM_COUNT = 13
+    // Boolean type (1 byte/element):
+    ELEM_BOOL    = 0xD0,  // 1 byte   — bool values, distinct from UINT8 for any()/all() semantics
+
+    ELEM_NUM_COUNT = 14
 };
 typedef uint8_t ArrayNumElemType;
 
@@ -185,7 +188,7 @@ static const uint8_t ELEM_TYPE_SIZE[16] = {
     2, // 0xA0 ELEM_FLOAT16
     4, // 0xB0 ELEM_FLOAT32
     8, // 0xC0 ELEM_FLOAT64
-    0, // 0xD0 reserved
+    1, // 0xD0 ELEM_BOOL
     0, // 0xE0 reserved
     0, // 0xF0 reserved
 };
@@ -368,6 +371,7 @@ typedef enum SysFunc {
     SYSFUNC_HYPOT,
     SYSFUNC_LOG1P,
     SYSFUNC_SIGN,
+    SYSFUNC_CLIP,           // clip(x, lo, hi) - element-wise clamp to [lo, hi]
     // random number generation
     SYSFUNC_RANDOM,
     // vector manipulation functions
@@ -530,9 +534,10 @@ struct Container {
             uint8_t is_spreadable:1; // whether this array should be spread when added to collections
             uint8_t is_heap:1;       // whether allocated from runtime heap (vs arena for input docs)
             uint8_t is_data_migrated:1; // data buffer migrated from input pool to runtime pool (for mutated markup containers)
-            uint8_t map_kind:4;      // MapKind tag (0 = plain, upper 4 bits of flags byte)
         };
     };
+    uint8_t map_kind;      // MapKind tag (0 = plain, upper 4 bits of flags byte)
+    uint8_t padding[5];  // padding to align to 8 bytes
 };
 
 // List/Array flags (stored in List.flags / Array.flags field)
@@ -541,6 +546,7 @@ struct Container {
     struct Range {
         TypeId type_id;
         uint8_t flags;
+        uint8_t padding[6];  // padding to align to 8 bytes
         //---------------------
         int64_t start;  // inclusive start
         int64_t end;    // inclusive end
@@ -550,6 +556,7 @@ struct Container {
     struct List {
         TypeId type_id;
         uint8_t flags;
+        uint8_t padding[6];  // padding to align to 8 bytes
         //---------------------
         Item* items;  // pointer to items
         int64_t length;  // number of items
@@ -559,7 +566,9 @@ struct Container {
 
     struct ArrayNum {
         TypeId type_id;
+        uint8_t flags;
         uint8_t elem_type;     // ArrayNumElemType (replaces flags for typed arrays)
+        uint8_t padding[5];  // padding to align to 8 bytes
         //---------------------
         union {
             int64_t* items;        // for ELEM_INT, ELEM_INT64
@@ -587,6 +596,8 @@ struct Container {
     struct Map {
         TypeId type_id;
         uint8_t flags;
+        uint8_t map_kind;
+        uint8_t padding[5];  // padding to align to 8 bytes
         //---------------------
         void* type;       // TypeMap* — shape/type info
         void* data;       // packed data struct of the map fields
@@ -596,6 +607,8 @@ struct Container {
     struct Object {
         TypeId type_id;
         uint8_t flags;
+        uint8_t map_kind;
+        uint8_t padding[5];  // padding to align to 8 bytes
         //---------------------
         void* type;       // TypeObject* — shape + methods + type_name
         void* data;       // packed field data (same layout as Map)
@@ -605,6 +618,8 @@ struct Container {
     struct Element {
         TypeId type_id;
         uint8_t flags;
+        uint8_t map_kind;
+        uint8_t padding[5];  // padding to align to 8 bytes
         //---------------------
         Item* items;       // list content items
         int64_t length;    // number of content items
@@ -1371,6 +1386,9 @@ extern "C" {
     Item fn_take(Item a, Item n);
     Item fn_drop(Item a, Item n);
     Item fn_slice(Item a, Item start, Item end);
+    Item fn_clip(Item a, Item lo, Item hi);
+    Item fn_all(Item a);
+    Item fn_any(Item a);
     Item fn_zip(Item a, Item b);
     Item fn_range3(Item start, Item end, Item step);
     Item fn_math_quantile(Item a, Item p);

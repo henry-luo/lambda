@@ -4424,6 +4424,29 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     bool is_int64_array = type->nested && type->nested->type_id == LMD_TYPE_INT64;
     bool is_float_array = type->nested && type->nested->type_id == LMD_TYPE_FLOAT;
     bool is_sized_array = type->nested && type->nested->type_id == LMD_TYPE_NUM_SIZED;
+    bool is_bool_array = type->nested && type->nested->type_id == LMD_TYPE_BOOL && type->length > 0;
+
+    // bool array: use ELEM_BOOL compact storage via array_num_new + array_num_set_item
+    if (is_bool_array && !has_spreadable_item(array_node->item)) {
+        strbuf_append_str(tp->code_buf, "({ArrayNum* arr = array_num_new(");
+        strbuf_append_int(tp->code_buf, (int)ELEM_BOOL);
+        strbuf_append_str(tp->code_buf, ",");
+        strbuf_append_int(tp->code_buf, type->length);
+        strbuf_append_str(tp->code_buf, ");\n");
+        int idx = 0;
+        AstNode* item = array_node->item;
+        while (item) {
+            strbuf_append_str(tp->code_buf, " array_num_set_item(arr,");
+            strbuf_append_int(tp->code_buf, idx);
+            strbuf_append_str(tp->code_buf, ",");
+            transpile_box_item(tp, item);
+            strbuf_append_str(tp->code_buf, ");\n");
+            idx++;
+            item = item->next;
+        }
+        strbuf_append_str(tp->code_buf, " arr; })");
+        return;
+    }
 
     // for arrays with spreadable items (for-expressions, spread, pipe), use push path
     if (!is_int_array && !is_int64_array && !is_float_array && !is_sized_array && has_spreadable_item(array_node->item)) {
