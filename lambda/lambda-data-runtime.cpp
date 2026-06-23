@@ -41,7 +41,7 @@ extern "C" SymbolKeyList* symbol_key_list_new(int64_t initial_capacity) {
     if (initial_capacity < 0) initial_capacity = 0;
     void* raw = mem_alloc(sizeof(LambdaSymbolKeyList), MEM_CAT_CONTAINER);
     if (!raw) return nullptr;
-    return new (raw) LambdaSymbolKeyList((size_t)initial_capacity);
+    return new (raw) LambdaSymbolKeyList((size_t)initial_capacity); // NEW_DELETE_OK: single audited boundary for LambdaSymbolKeyList construction inside symbol_key_list_new factory.
 }
 
 extern "C" bool symbol_key_list_append(SymbolKeyList* keys_ptr, Symbol* symbol) {

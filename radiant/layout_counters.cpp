@@ -32,7 +32,7 @@ CounterContext* counter_context_create(Arena* arena) {
     ctx->current_scope = nullptr;
     void* stack_mem = mem_alloc(sizeof(lam::ArrayList<CounterScope*>), MEM_CAT_LAYOUT);
     if (!stack_mem) return nullptr;
-    ctx->scope_stack = new (stack_mem) lam::ArrayList<CounterScope*>(MEM_CAT_LAYOUT, 16);
+    ctx->scope_stack = new (stack_mem) lam::ArrayList<CounterScope*>(MEM_CAT_LAYOUT, 16); // NEW_DELETE_OK: single audited construction of scope_stack inside counter_context_create init.
 
     // Create root scope
     counter_push_scope(ctx);

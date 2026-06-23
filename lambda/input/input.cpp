@@ -11,6 +11,7 @@
 #include "../../lib/log.h"  // add logging support
 #include "../../lib/memtrack.h"
 #include "../../lib/file.h"
+#include <new>
 
 // Include Target API
 extern "C" {
@@ -1024,10 +1025,27 @@ InputManager::~InputManager() {
     decimal_ctx = nullptr;
 }
 
+//------------------------------------------------------------------------------
+// Heap factory (audited boundary for `new InputManager` / `delete mgr`)
+//------------------------------------------------------------------------------
+
+InputManager* input_manager_create() {
+    InputManager* mgr = (InputManager*)mem_alloc(sizeof(InputManager), MEM_CAT_INPUT_OTHER);
+    if (!mgr) return nullptr;
+    new (mgr) InputManager(); // NEW_DELETE_OK: single audited construction boundary for InputManager singleton.
+    return mgr;
+}
+
+void input_manager_destroy(InputManager* mgr) {
+    if (!mgr) return;
+    mgr->~InputManager(); // NEW_DELETE_OK: paired with input_manager_create.
+    mem_free(mgr);
+}
+
 mpd_context_t* InputManager::decimal_context() {
     // Lazy initialization of singleton
     if (!g_input_manager) {
-        g_input_manager = new InputManager();
+        g_input_manager = input_manager_create();
     }
     if (!g_input_manager) return nullptr;
     return g_input_manager->decimal_ctx;
@@ -1037,7 +1055,7 @@ mpd_context_t* InputManager::decimal_context() {
 Input* InputManager::create_input(Url* abs_url) {
     // Lazy initialization of singleton
     if (!g_input_manager) {
-        g_input_manager = new InputManager();
+        g_input_manager = input_manager_create();
     }
     if (!g_input_manager) return nullptr;
     return g_input_manager->create_input_instance(abs_url);
@@ -1066,7 +1084,7 @@ Input* InputManager::create_input_instance(Url* abs_url) {
 // Destroy the global instance
 void InputManager::destroy_global() {
     if (g_input_manager) {
-        delete g_input_manager;
+        input_manager_destroy(g_input_manager);
         g_input_manager = nullptr;
     }
 }

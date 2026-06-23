@@ -6036,7 +6036,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
     }
 
     // Create metadata structure
-    TableMetadata* meta = new TableMetadata(&lycon->scratch, columns, rows);
+    TableMetadata* meta = table_metadata_create(&lycon->scratch, columns, rows);
 
     // Second pass: assign column indices, measure widths, and track collapsed rows
     int current_row = 0;
@@ -9376,7 +9376,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     arraylist_free(ordered_elements);
 
     // Cleanup - TableMetadata destructor handles grid_occupied and col_widths
-    delete meta;
+    table_metadata_destroy(meta);
     scratch_free(&lycon->scratch, col_x_positions);
 
     #undef GRID

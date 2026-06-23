@@ -253,41 +253,18 @@ struct FormControlProp {
     uint32_t preedit_len;
     uint32_t preedit_caret;
 
-    // Constructor
-    FormControlProp() : state_ref(nullptr), form_state_ref(nullptr), scroll_state_ref(nullptr),
-        control_type(FORM_CONTROL_NONE), input_type(nullptr),
-        value(nullptr), placeholder(nullptr), name(nullptr),
-        size(FormDefaults::TEXT_SIZE_CHARS), cols(FormDefaults::TEXTAREA_COLS),
-        rows(FormDefaults::TEXTAREA_ROWS), maxlength(-1),
-        range_min(0), range_max(100), range_step(1), range_value(0.5f),
-        disabled(0), readonly(0), checked(0), required(0), autofocus(0), multiple(0),
-        dropdown_open(0), appearance_none(0), selected_index(-1), option_count(0), hover_index(-1), select_size(0),
-        intrinsic_width(0), intrinsic_height(0),
-        placeholder_font(nullptr), placeholder_color_r(0), placeholder_color_g(0),
-        placeholder_color_b(0), placeholder_color_a(0),
-        placeholder_opacity(1.0f), placeholder_has_color(0), placeholder_has_opacity(0),
-        heap_allocated(0),
-        flex_grow(0), flex_shrink(1), flex_basis(-1), flex_basis_is_percent(0),
-        current_value(nullptr), current_value_len(0), current_value_u16_len(0),
-        selection_start(0), selection_end(0), selection_direction(0),
-        tc_initialized(0), tc_sc_pending(0),
-        tc_sc_next_pending(nullptr),
-        custom_validity_msg(nullptr),
-        value_at_focus(nullptr), value_at_focus_len(0), history(nullptr),
-        scroll_x(0.0f), scroll_y(0.0f), caret_blink_t(0.0f),
-        caret_on(1), password_reveal_active(0),
-        password_reveal_start(0), password_reveal_end(0),
-        password_reveal_elapsed(0.0),
-        preedit_utf8(nullptr), preedit_len(0), preedit_caret(0) {}
-
-    ~FormControlProp() {
-        if (current_value) { mem_free(current_value); current_value = nullptr; }
-        if (custom_validity_msg) { mem_free(custom_validity_msg); custom_validity_msg = nullptr; }
-        if (value_at_focus) { mem_free(value_at_focus); value_at_focus = nullptr; }
-        if (history) { te_history_free((EditHistory*)history); history = nullptr; }
-        if (preedit_utf8) { mem_free(preedit_utf8); preedit_utf8 = nullptr; }
-    }
+    // FormControlProp is a POD (no C++ ctor/dtor) per the C+ convention; use
+    // form_control_prop_init / form_control_prop_release for lifecycle.
 };
+
+// Apply the non-zero default field values. Memory pointed to by `f` must be
+// either zeroed (e.g. from pool_calloc / mem_calloc) or freshly-allocated
+// scratch — this function only assigns the non-zero defaults.
+void form_control_prop_init(FormControlProp* f);
+
+// Release owned heap pointers (current_value, custom_validity_msg,
+// value_at_focus, history, preedit_utf8). Does NOT free `f` itself.
+void form_control_prop_release(FormControlProp* f);
 
 // Release a form-control property attached to a DOM element. This is used by
 // both layout-owned views and JS-created detached nodes.

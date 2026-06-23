@@ -72,6 +72,15 @@ public:
     MarkBuilder& operator=(MarkBuilder&&) = delete;
 
     // ============================================================================
+    // Factory Functions (audited boundary for heap allocation)
+    // ============================================================================
+    // Use these instead of `new MarkBuilder(...)` / `delete builder` in callers
+    // that need a heap-allocated MarkBuilder. Stack allocation is still preferred.
+
+    friend MarkBuilder* mark_builder_create(Input* input);
+    friend void mark_builder_destroy(MarkBuilder* builder);
+
+    // ============================================================================
     // Name Creation Methods (always use name_pool for deduplication)
     // ============================================================================
 
@@ -623,5 +632,13 @@ public:
     Item final();
     lam::ItemOf<LMD_TYPE_ARRAY> finalTyped();
 };
+
+// ============================================================================
+// MarkBuilder Heap Factory (audited boundary)
+// ============================================================================
+// Single audited construction site for `new MarkBuilder` / `delete builder`.
+// Use these instead of raw new/delete in user code.
+MarkBuilder* mark_builder_create(Input* input);
+void mark_builder_destroy(MarkBuilder* builder);
 
 #endif // LAMBDA_MARK_BUILDER_HPP

@@ -19,6 +19,7 @@
 #include "../../utf_string.h"
 #include "lib/log.h"
 #include <cstring>
+#include <new>
 #include "../../../lib/mem.h"
 
 namespace lambda {
@@ -52,6 +53,24 @@ MarkupParser::MarkupParser(Input* input, const ParseConfig& cfg)
 MarkupParser::~MarkupParser() {
     freeLines();
     // html5_parser_ is pool-managed, no explicit cleanup needed
+}
+
+//------------------------------------------------------------------------------
+// Heap factory (audited boundary for `new MarkupParser` / `delete parser`)
+//------------------------------------------------------------------------------
+
+MarkupParser* markup_parser_create(Input* input, const ParseConfig& cfg) {
+    if (!input) return nullptr;
+    MarkupParser* parser = (MarkupParser*)mem_alloc(sizeof(MarkupParser), MEM_CAT_INPUT_MARKUP);
+    if (!parser) return nullptr;
+    new (parser) MarkupParser(input, cfg); // NEW_DELETE_OK: single audited construction boundary for MarkupParser.
+    return parser;
+}
+
+void markup_parser_destroy(MarkupParser* parser) {
+    if (!parser) return;
+    parser->~MarkupParser(); // NEW_DELETE_OK: paired with markup_parser_create.
+    mem_free(parser);
 }
 
 void MarkupParser::resetState() {
@@ -759,9 +778,9 @@ extern "C" Item input_markup_modular(Input* input, const char* content) {
     cfg.resolve_refs = true;
 
     // Allocate on heap - MarkupParser is too large for the stack (~460KB link_defs_ array)
-    MarkupParser* parser = new MarkupParser(input, cfg);
+    MarkupParser* parser = markup_parser_create(input, cfg);
     Item result = parser->parseContent(content);
-    delete parser;
+    markup_parser_destroy(parser);
 
     if (result.item == ITEM_ERROR) {
         log_error("input_markup_modular: parsing failed");
@@ -795,15 +814,15 @@ extern "C" Item input_markup_commonmark(Input* input, const char* content) {
 
 
     // Allocate on heap - MarkupParser is too large for the stack (~460KB link_defs_ array)
-    MarkupParser* parser = new MarkupParser(input, cfg);
-    
+    MarkupParser* parser = markup_parser_create(input, cfg);
+
     Item result = parser->parseContent(content);
 
     if (result.item == ITEM_ERROR) {
         log_error("input_markup_commonmark: parsing failed");
     }
 
-    delete parser;
+    markup_parser_destroy(parser);
     return result;
 }
 
@@ -856,13 +875,13 @@ extern "C" Item input_markup_with_format(Input* input, const char* content, Mark
     cfg.resolve_refs = true;
 
     // Allocate on heap - MarkupParser is too large for the stack (~460KB link_defs_ array)
-    MarkupParser* parser = new MarkupParser(input, cfg);
+    MarkupParser* parser = markup_parser_create(input, cfg);
     Item result = parser->parseContent(content);
 
     if (result.item == ITEM_ERROR) {
         log_error("input_markup_with_format: parsing failed");
     }
 
-    delete parser;
+    markup_parser_destroy(parser);
     return result;
 }

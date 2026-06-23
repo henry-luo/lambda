@@ -594,16 +594,18 @@ static Item py_re_match(Item pattern, Item string) {
 
     int ngroups = re.NumberOfCapturingGroups();
     re2::StringPiece input(str_s->chars, str_s->len);
-    re2::StringPiece* groups = ngroups > 0 ? new re2::StringPiece[ngroups] : nullptr;
+    re2::StringPiece* groups = ngroups > 0
+        ? (re2::StringPiece*)mem_calloc(ngroups, sizeof(re2::StringPiece), MEM_CAT_PARSER)
+        : nullptr;
     re2::StringPiece full_match;
 
     // re.match: anchored at start
     if (!re.Match(input, 0, str_s->len, re2::RE2::ANCHOR_START, &full_match, ngroups + 1)) {
-        delete[] groups;
+        mem_free(groups);
         return ItemNull;
     }
     // re-run to capture sub-groups
-    re2::StringPiece* all_groups = new re2::StringPiece[ngroups + 1];
+    re2::StringPiece* all_groups = (re2::StringPiece*)mem_calloc(ngroups + 1, sizeof(re2::StringPiece), MEM_CAT_PARSER);
     re.Match(input, 0, str_s->len, re2::RE2::ANCHOR_START, all_groups, ngroups + 1);
 
     char full_buf[4096];
@@ -618,8 +620,8 @@ static Item py_re_match(Item pattern, Item string) {
     Item m = make_match_object(str_s->chars, start, end, full_buf,
                                &re, input, all_groups + 1, ngroups);
     attach_match_methods(m);
-    delete[] all_groups;
-    delete[] groups;
+    mem_free(all_groups);
+    mem_free(groups);
     return m;
 }
 
@@ -634,11 +636,11 @@ static Item py_re_search(Item pattern, Item string) {
 
     int ngroups = re.NumberOfCapturingGroups();
     re2::StringPiece input(str_s->chars, str_s->len);
-    re2::StringPiece* all_groups = new re2::StringPiece[ngroups + 1];
+    re2::StringPiece* all_groups = (re2::StringPiece*)mem_calloc(ngroups + 1, sizeof(re2::StringPiece), MEM_CAT_PARSER);
 
     // re.search: unanchored
     if (!re.Match(input, 0, str_s->len, re2::RE2::UNANCHORED, all_groups, ngroups + 1)) {
-        delete[] all_groups;
+        mem_free(all_groups);
         return ItemNull;
     }
 
@@ -654,7 +656,7 @@ static Item py_re_search(Item pattern, Item string) {
     Item m = make_match_object(str_s->chars, start, end, full_buf,
                                &re, input, all_groups + 1, ngroups);
     attach_match_methods(m);
-    delete[] all_groups;
+    mem_free(all_groups);
     return m;
 }
 
@@ -673,9 +675,9 @@ static Item py_re_findall(Item pattern, Item string) {
 
     size_t pos = 0;
     while (pos <= (size_t)str_s->len) {
-        re2::StringPiece* groups = new re2::StringPiece[ngroups + 1];
+        re2::StringPiece* groups = (re2::StringPiece*)mem_calloc(ngroups + 1, sizeof(re2::StringPiece), MEM_CAT_PARSER);
         if (!re.Match(input, pos, str_s->len, re2::RE2::UNANCHORED, groups, ngroups + 1)) {
-            delete[] groups;
+            mem_free(groups);
             break;
         }
 
@@ -712,7 +714,7 @@ static Item py_re_findall(Item pattern, Item string) {
         size_t match_end = (size_t)(groups[0].data() - str_s->chars) + groups[0].size();
         if (match_end == pos) match_end++; // prevent infinite loop on zero-width match
         pos = match_end;
-        delete[] groups;
+        mem_free(groups);
     }
 
     return result;

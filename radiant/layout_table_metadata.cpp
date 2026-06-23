@@ -1,4 +1,6 @@
 #include "layout_table_metadata.hpp"
+#include "../lib/memtrack.h"
+#include <new>
 
 TableMetadata::TableMetadata(ScratchArena* scratch, int cols, int rows)
     : column_count(cols), row_count(rows), grid_occupied(nullptr),
@@ -42,4 +44,21 @@ TableMetadata::~TableMetadata() {
     scratch_free(sa, col_single_min_widths);
     scratch_free(sa, col_widths);
     scratch_free(sa, grid_occupied);
+}
+
+//------------------------------------------------------------------------------
+// Heap factory (audited boundary for `new TableMetadata` / `delete meta`)
+//------------------------------------------------------------------------------
+
+TableMetadata* table_metadata_create(ScratchArena* scratch, int cols, int rows) {
+    TableMetadata* meta = (TableMetadata*)mem_alloc(sizeof(TableMetadata), MEM_CAT_LAYOUT);
+    if (!meta) return nullptr;
+    new (meta) TableMetadata(scratch, cols, rows); // NEW_DELETE_OK: single audited construction boundary for TableMetadata.
+    return meta;
+}
+
+void table_metadata_destroy(TableMetadata* meta) {
+    if (!meta) return;
+    meta->~TableMetadata(); // NEW_DELETE_OK: paired with table_metadata_create.
+    mem_free(meta);
 }

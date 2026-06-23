@@ -14,6 +14,7 @@ extern "C" Item rb_call_spaceship(Item left, Item right);
 #include "../../lib/mem.h"
 #include <cmath>
 #include <re2/re2.h>
+#include "../re2_wrapper.hpp"
 
 // push_d boxes a double into an Item via GC nursery allocation (C linkage)
 extern "C" Item push_d(double dval);
@@ -1201,13 +1202,9 @@ extern "C" Item rb_regex_new(Item pattern) {
     if (!s) return (Item){.item = ITEM_NULL};
 
     // create RE2 regex
-    std::string pat(s->chars, s->len);
-    re2::RE2::Options opts;
-    opts.set_log_errors(false);
-    re2::RE2* re = new re2::RE2(pat, opts);
-    if (!re->ok()) {
-        log_error("rb: Regexp compile error: %s", re->error().c_str());
-        delete re;
+    re2::RE2* re = re2_compile(s->chars, s->len);
+    if (!re) {
+        log_error("rb: Regexp compile error for pattern of length %zu", (size_t)s->len);
         return (Item){.item = ITEM_NULL};
     }
 
@@ -1251,12 +1248,9 @@ extern "C" Item rb_regex_match(Item regex, Item str) {
     } else if (get_type_id(regex) == LMD_TYPE_STRING) {
         // string pattern — compile inline
         String* pat = it2s(regex);
-        std::string p(pat->chars, pat->len);
-        re2::RE2::Options opts;
-        opts.set_log_errors(false);
-        re = new re2::RE2(p, opts);
+        re = re2_compile(pat->chars, pat->len);
+        if (!re) return (Item){.item = ITEM_NULL};
         owns_re = true;
-        if (!re->ok()) { delete re; return (Item){.item = ITEM_NULL}; }
     } else {
         return (Item){.item = ITEM_NULL};
     }
@@ -1264,7 +1258,7 @@ extern "C" Item rb_regex_match(Item regex, Item str) {
     re2::StringPiece input(s->chars, s->len);
     re2::StringPiece match;
     bool found = re->Match(input, 0, s->len, re2::RE2::UNANCHORED, &match, 1);
-    if (owns_re) delete re;
+    if (owns_re) re2_release(re);
     if (!found) return (Item){.item = ITEM_NULL};
 
     return (Item){.item = s2it(heap_create_name(match.data(), match.size()))};
@@ -1283,18 +1277,15 @@ extern "C" Item rb_regex_test(Item regex, Item str) {
         re = rb_get_re2(regex);
     } else if (get_type_id(regex) == LMD_TYPE_STRING) {
         String* pat = it2s(regex);
-        std::string p(pat->chars, pat->len);
-        re2::RE2::Options opts;
-        opts.set_log_errors(false);
-        re = new re2::RE2(p, opts);
+        re = re2_compile(pat->chars, pat->len);
+        if (!re) return (Item){.item = b2it(BOOL_FALSE)};
         owns_re = true;
-        if (!re->ok()) { delete re; return (Item){.item = b2it(BOOL_FALSE)}; }
     } else {
         return (Item){.item = b2it(BOOL_FALSE)};
     }
 
     bool found = re2::RE2::PartialMatch(re2::StringPiece(s->chars, s->len), *re);
-    if (owns_re) delete re;
+    if (owns_re) re2_release(re);
     return (Item){.item = b2it(found ? BOOL_TRUE : BOOL_FALSE)};
 }
 
@@ -1311,12 +1302,9 @@ extern "C" Item rb_regex_scan(Item regex, Item str) {
         re = rb_get_re2(regex);
     } else if (get_type_id(regex) == LMD_TYPE_STRING) {
         String* pat = it2s(regex);
-        std::string p(pat->chars, pat->len);
-        re2::RE2::Options opts;
-        opts.set_log_errors(false);
-        re = new re2::RE2(p, opts);
+        re = re2_compile(pat->chars, pat->len);
+        if (!re) return rb_array_new();
         owns_re = true;
-        if (!re->ok()) { delete re; return rb_array_new(); }
     } else {
         return rb_array_new();
     }
@@ -1334,7 +1322,7 @@ extern "C" Item rb_regex_scan(Item regex, Item str) {
         if (new_pos == pos) new_pos++; // avoid infinite loop on zero-length match
         pos = new_pos;
     }
-    if (owns_re) delete re;
+    if (owns_re) re2_release(re);
     return arr;
 }
 
@@ -1353,20 +1341,17 @@ extern "C" Item rb_regex_gsub(Item regex, Item str, Item replacement) {
         re = rb_get_re2(regex);
     } else if (get_type_id(regex) == LMD_TYPE_STRING) {
         String* pat = it2s(regex);
-        std::string p(pat->chars, pat->len);
-        re2::RE2::Options opts;
-        opts.set_log_errors(false);
-        re = new re2::RE2(p, opts);
+        re = re2_compile(pat->chars, pat->len);
+        if (!re) return str;
         owns_re = true;
-        if (!re->ok()) { delete re; return str; }
     } else {
         return str;
     }
 
-    std::string result(s->chars, s->len);
-    std::string repl(r->chars, r->len);
+    std::string result(s->chars, s->len);  // STD_CONTAINER_OK: RE2::GlobalReplace requires std::string* in/out buffer.
+    std::string repl(r->chars, r->len);    // STD_CONTAINER_OK: RE2::GlobalReplace replacement arg is std::string.
     re2::RE2::GlobalReplace(&result, *re, repl);
-    if (owns_re) delete re;
+    if (owns_re) re2_release(re);
     return (Item){.item = s2it(heap_create_name(result.c_str(), result.size()))};
 }
 
@@ -1385,19 +1370,16 @@ extern "C" Item rb_regex_sub(Item regex, Item str, Item replacement) {
         re = rb_get_re2(regex);
     } else if (get_type_id(regex) == LMD_TYPE_STRING) {
         String* pat = it2s(regex);
-        std::string p(pat->chars, pat->len);
-        re2::RE2::Options opts;
-        opts.set_log_errors(false);
-        re = new re2::RE2(p, opts);
+        re = re2_compile(pat->chars, pat->len);
+        if (!re) return str;
         owns_re = true;
-        if (!re->ok()) { delete re; return str; }
     } else {
         return str;
     }
 
-    std::string result(s->chars, s->len);
-    std::string repl(r->chars, r->len);
+    std::string result(s->chars, s->len);  // STD_CONTAINER_OK: RE2::Replace requires std::string* in/out buffer.
+    std::string repl(r->chars, r->len);    // STD_CONTAINER_OK: RE2::Replace replacement arg is std::string.
     re2::RE2::Replace(&result, *re, repl);
-    if (owns_re) delete re;
+    if (owns_re) re2_release(re);
     return (Item){.item = s2it(heap_create_name(result.c_str(), result.size()))};
 }

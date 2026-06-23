@@ -5,6 +5,7 @@
 #include "../lib/arena.h"
 #include <string.h>
 #include <stdlib.h>
+#include <new>
 #include "../lib/memtrack.h"
 
 // Maximum number of batch updates supported
@@ -35,7 +36,7 @@ MarkEditor::MarkEditor(Input* input, EditMode mode)
     , next_version_num_(0)
 {
     // Create builder for constructing new structures
-    builder_ = new MarkBuilder(input);
+    builder_ = mark_builder_create(input);
 
     log_debug("MarkEditor created: mode=%s",
         mode == EDIT_MODE_INLINE ? "inline" : "immutable");
@@ -49,11 +50,29 @@ MarkEditor::~MarkEditor() {
 
     // Clean up builder
     if (builder_) {
-        delete builder_;
+        mark_builder_destroy(builder_);
         builder_ = nullptr;
     }
 
     log_debug("MarkEditor destroyed");
+}
+
+//------------------------------------------------------------------------------
+// Heap factory (audited boundary for `new MarkEditor` / `delete editor`)
+//------------------------------------------------------------------------------
+
+MarkEditor* mark_editor_create(Input* input, EditMode mode) {
+    if (!input) return nullptr;
+    MarkEditor* editor = (MarkEditor*)mem_alloc(sizeof(MarkEditor), MEM_CAT_EVAL);
+    if (!editor) return nullptr;
+    new (editor) MarkEditor(input, mode); // NEW_DELETE_OK: single audited construction boundary for MarkEditor.
+    return editor;
+}
+
+void mark_editor_destroy(MarkEditor* editor) {
+    if (!editor) return;
+    editor->~MarkEditor(); // NEW_DELETE_OK: paired with mark_editor_create.
+    mem_free(editor);
 }
 
 //==============================================================================

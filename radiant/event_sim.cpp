@@ -1974,10 +1974,10 @@ static bool replay_parse_json_line(const char* jsonl_file, const char* line,
     if (!input) return false;
     parse_json(input, line);
     if (input->root.item == 0) return false;
-    MarkReader* doc = new MarkReader(input->root);
+    MarkReader* doc = mark_reader_create(input->root);
     ItemReader root = doc->getRoot();
     if (!root.isMap()) {
-        delete doc;
+        mark_reader_destroy(doc);
         return false;
     }
     *out_root = root;
@@ -2106,7 +2106,7 @@ char* event_sim_replay_document_path(const char* jsonl_file) {
                     doc_path = replay_document_path_from_url(document.get("url").cstring());
                 }
             }
-            delete doc;
+            mark_reader_destroy(doc);
         }
         line = next ? next + 1 : NULL;
     }
@@ -2167,7 +2167,7 @@ EventSimContext* event_sim_load_replay_log(const char* jsonl_file) {
                 } else if (type && strcmp(type, "state.snapshot") == 0) {
                     replay_parse_expected_snapshot(ctx, root_map);
                 }
-                delete doc;
+                mark_reader_destroy(doc);
             } else {
                 log_warn("event_sim: skipped invalid replay JSONL line %d", line_no);
             }

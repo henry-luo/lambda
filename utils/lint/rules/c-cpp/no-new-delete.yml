@@ -10,15 +10,7 @@ metadata:
   suppress: NEW_DELETE_OK
 rule:
   any:
-    # Plain `new T(...)` / `new T[N]` — the heap-allocation shape this rule
-    # was designed to ban. Placement-new (`new (storage) T(...)`) IS the
-    # correct pattern for pool/arena-managed construction and is excluded.
-    - all:
-        - kind: new_expression
-        - not:
-            pattern: new ($$$STORAGE) $TYPE($$$ARGS)
-        - not:
-            pattern: new ($$$STORAGE) $TYPE
+    - kind: new_expression
     - kind: delete_expression
 files:
   # Scope to lambda/ (excluding the embedded JS engine, which legitimately uses

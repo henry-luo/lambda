@@ -1,8 +1,10 @@
 #include "mark_reader.hpp"
 #include "lambda-data.hpp"
 #include "../lib/stringbuf.h"
+#include "../lib/memtrack.h"
 #include <cstring>
 #include <cstdlib>
+#include <new>
 
 // ==============================================================================
 // MarkReader Implementation
@@ -10,6 +12,23 @@
 
 MarkReader::MarkReader(Item root)
     : root_(root) {
+}
+
+//------------------------------------------------------------------------------
+// Heap factory (audited boundary for `new MarkReader` / `delete reader`)
+//------------------------------------------------------------------------------
+
+MarkReader* mark_reader_create(Item root) {
+    MarkReader* reader = (MarkReader*)mem_alloc(sizeof(MarkReader), MEM_CAT_EVAL);
+    if (!reader) return nullptr;
+    new (reader) MarkReader(root); // NEW_DELETE_OK: single audited construction boundary for MarkReader.
+    return reader;
+}
+
+void mark_reader_destroy(MarkReader* reader) {
+    if (!reader) return;
+    reader->~MarkReader(); // NEW_DELETE_OK: paired with mark_reader_create.
+    mem_free(reader);
 }
 
 ItemReader MarkReader::getRoot() const {

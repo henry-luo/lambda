@@ -97,6 +97,15 @@ public:
     Item root() const { return root_; }
 };
 
+// ============================================================================
+// MarkReader Heap Factory (audited boundary)
+// ============================================================================
+// Single audited construction site for `new MarkReader` / `delete reader`.
+// Stack allocation is still preferred — use these factories only when a
+// MarkReader needs to outlive a function scope (e.g. opaque ownership transfer).
+MarkReader* mark_reader_create(Item root);
+void mark_reader_destroy(MarkReader* reader);
+
 // ==============================================================================
 // ItemReader - Type-Safe Item Wrapper
 // ==============================================================================
