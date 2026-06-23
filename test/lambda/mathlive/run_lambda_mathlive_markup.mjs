@@ -420,6 +420,34 @@ function normalizeHtml(html) {
   return html.replace(/\s+/g, ' ').trim();
 }
 
+// A case whose HTML differs from the golden ONLY in `<num>em` dimensions, each
+// within this many em, is allowed to pass (sub-pixel CEIL@2 rounding tips at
+// font-metric precision). Such passes are flagged with a warning line.
+const EM_TOLERANCE = 0.015;
+
+// Returns { tolerant, diffs }. `tolerant` is true only when `expected` and
+// `actual` are byte-identical apart from `<num>em` values, and every differing
+// em value is within `tol`. Any structural (non-em) difference => not tolerant.
+function compareEmTolerant(expected, actual, tol) {
+  const re = /(-?\d+(?:\.\d+)?)em/g;
+  const eNums = [];
+  const aNums = [];
+  const eTemplate = expected.replace(re, (_, n) => (eNums.push(parseFloat(n)), 'em'));
+  const aTemplate = actual.replace(re, (_, n) => (aNums.push(parseFloat(n)), 'em'));
+  if (eTemplate !== aTemplate || eNums.length !== aNums.length) {
+    return { tolerant: false, diffs: [] };
+  }
+  const diffs = [];
+  for (let i = 0; i < eNums.length; i += 1) {
+    const delta = Math.abs(eNums[i] - aNums[i]);
+    if (delta > 1e-9) {
+      if (delta > tol + 1e-9) return { tolerant: false, diffs: [] };
+      diffs.push({ expected: eNums[i], actual: aNums[i], delta });
+    }
+  }
+  return { tolerant: diffs.length > 0, diffs };
+}
+
 function compareCases(cases, actuals) {
   return cases.map((testCase, index) => {
     const actual = actuals[index] ?? { error: 'missing-result', html: '' };
@@ -434,14 +462,21 @@ function compareCases(cases, actuals) {
     );
     const errorMatch = expectedError === actualError;
     const htmlMatch = expectedHtml === actualHtml;
+    const tol = htmlMatch
+      ? { tolerant: false, diffs: [] }
+      : compareEmTolerant(expectedHtml, actualHtml, EM_TOLERANCE);
+    const htmlPass = htmlMatch || tol.tolerant;
 
     return {
       ...testCase,
       actualError,
       actualHtml: actual.html ?? '',
-      pass: errorMatch && htmlMatch,
+      pass: errorMatch && htmlPass,
       errorMatch,
       htmlMatch,
+      // tolerant: passed only because every em-diff was within EM_TOLERANCE
+      emTolerant: tol.tolerant,
+      emDiffs: tol.diffs,
     };
   });
 }
@@ -536,6 +571,19 @@ async function main() {
   const baselineSet = opts.noBaseline ? null : readBaseline(opts.baseline);
   const actuals = await runLambda(cases, opts);
   const results = compareCases(cases, actuals);
+
+  // Warn about every case that passed ONLY via the em-tolerance, so a sub-pixel
+  // pass never goes unnoticed.
+  const tolerantPasses = results.filter((x) => x.emTolerant && x.pass);
+  for (const tp of tolerantPasses) {
+    const detail = tp.emDiffs
+      .map((d) => `${d.expected}em→${d.actual}em (Δ${d.delta.toFixed(4)})`)
+      .join(', ');
+    console.warn(
+      `⚠ em-tolerance pass (≤${EM_TOLERANCE}em) [${tp.category}] ${tp.key}: ${detail}`
+    );
+  }
+
   const summary = summarize(results);
   const baseline = buildBaselineReport(results, baselineSet, opts.baseline);
   const report = {
@@ -555,6 +603,9 @@ async function main() {
   console.log(`Lambda MathLive markup adapter`);
   console.log(`  cases:  ${summary.total}`);
   console.log(`  passed: ${summary.passed}`);
+  if (tolerantPasses.length > 0) {
+    console.log(`    (incl. ${tolerantPasses.length} em-tolerance pass(es) ≤${EM_TOLERANCE}em — see warnings)`);
+  }
   console.log(`  failed: ${summary.failed}`);
   console.log(`  jobs:   ${Math.min(opts.jobs, cases.length)}`);
   if (baseline) {

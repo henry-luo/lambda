@@ -402,7 +402,11 @@ fn dyn_walk(rows, sizes, pstrut, i, cur, mn, mx, tops) {
         let mn1 = if (i == 0) mn else min(mn, cp1)
         let mx1 = if (i == 0) mx else max(mx, cp1)
         let top = 0.0 - pstrut - cp1 - rows[i][1]
-        let cp2 = cp1 + rows[i][0] + rows[i][1]
+        // match MathLive makeRows float order EXACTLY: `currPos += height + depth`
+        // groups (h+d) FIRST, then adds to currPos. Left-assoc (cp1+h)+d gives a
+        // different IEEE result that ceil2-tips a row top (dcases row1 -2.1 vs
+        // golden -2.09).
+        let cp2 = cp1 + (rows[i][0] + rows[i][1])
         dyn_walk(rows, sizes, pstrut, i + 1, cp2, min(mn1, cp2), max(mx1, cp2),
                  tops ++ [util.ceil_em2(top)])
     }
@@ -625,15 +629,25 @@ fn wrap_with_delimiters(table_box, ld, rd) {
     let cd = if (table_box.depth_raw != null) table_box.depth_raw else table_box.depth
     let box_h = max(ch, max(delim_ext_h(left_box), delim_ext_h(right_box)))
     let box_d = max(cd, max(delim_ext_d(left_box), delim_ext_d(right_box)))
+    // A tall `{` brace (render_total > 4.0) is built as a STACKED multi-piece
+    // delimiter (render_brace_mult_delim) whose segments are laid out with
+    // CEIL@2 CSS tops, so its bounding box spans the SEPARATELY-rounded content
+    // extent: the surrounding strut emits ceil2(h)+ceil2(-d), not the once-
+    // rounded ceil2(h+d) that a single sized glyph (cases/Bmatrix) gives.
+    // Expose the pre-rounded extent as *_raw so the use_raw strut sums them
+    // without re-tipping (dcases 3.46 + 2.95 = 6.41, not ceil2(6.41001) = 6.42).
+    let stacked_brace = ld == "{" and table_box.render_total != null and table_box.render_total > 4.0
+    let h_raw = if (stacked_brace) util.ceil_em2(box_h) else box_h
+    let d_raw = if (stacked_brace) 0.0 - util.ceil_em2(0.0 - box_d) else box_d
     {
         element: <span style: "display:inline-block";
             for child in children { child }
         >,
         height: util.ceil_em2(box_h),
         depth: 0.0 - util.ceil_em2(0.0 - box_d),
-        height_raw: box_h,
-        depth_raw: box_d,
-        render_total: util.ceil_em2(box_h + box_d),
+        height_raw: h_raw,
+        depth_raw: d_raw,
+        render_total: util.ceil_em2(h_raw + d_raw),
         width: total_width,
         type: "ord",
         italic: 0.0,
