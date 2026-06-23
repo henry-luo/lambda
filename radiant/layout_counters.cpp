@@ -741,11 +741,11 @@ int counter_format_value(int value, uint32_t style, char* buffer, size_t buffer_
             }
             return 0;
 
-        case CSS_VALUE_SQUARE: // black square "▪"
+        case CSS_VALUE_SQUARE: // black square "■"
             if (buffer_size >= 4) {
                 buffer[0] = '\xE2';
                 buffer[1] = '\x96';
-                buffer[2] = '\xAA';
+                buffer[2] = '\xA0';
                 buffer[3] = '\0';
                 return 3;
             }
