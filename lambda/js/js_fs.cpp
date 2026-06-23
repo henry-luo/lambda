@@ -18,6 +18,7 @@
 #include <cstring>
 #include <math.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include "../../lib/mem.h"
 #include "../../lib/file.h"
@@ -85,6 +86,76 @@ static const char* fs_path_to_cstr(Item value, const char* name, char* buf, int 
         }
     }
     return item_to_cstr(value, buf, buf_size);
+}
+
+static bool fs_string_equals(String* s, const char* lit) {
+    if (!s || !lit) return false;
+    size_t len = strlen(lit);
+    return s->len == len && memcmp(s->chars, lit, len) == 0;
+}
+
+static bool fs_is_valid_encoding(String* s) {
+    return fs_string_equals(s, "utf8") || fs_string_equals(s, "utf-8") ||
+           fs_string_equals(s, "buffer") || fs_string_equals(s, "ascii") ||
+           fs_string_equals(s, "base64") || fs_string_equals(s, "base64url") ||
+           fs_string_equals(s, "hex") || fs_string_equals(s, "latin1") ||
+           fs_string_equals(s, "binary") || fs_string_equals(s, "ucs2") ||
+           fs_string_equals(s, "ucs-2") || fs_string_equals(s, "utf16le") ||
+           fs_string_equals(s, "utf-16le");
+}
+
+static bool fs_validate_encoding_item(Item encoding_item) {
+    TypeId type = get_type_id(encoding_item);
+    if (type == LMD_TYPE_UNDEFINED || type == LMD_TYPE_NULL) return true;
+    if (type != LMD_TYPE_STRING) return true;
+    String* s = it2s(encoding_item);
+    if (fs_is_valid_encoding(s)) return true;
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+             "The argument 'encoding' is invalid encoding. Received '%.*s'",
+             (int)s->len, s->chars);
+    js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
+    return false;
+}
+
+static bool fs_validate_encoding_options(Item options_item) {
+    TypeId type = get_type_id(options_item);
+    if (type == LMD_TYPE_UNDEFINED || type == LMD_TYPE_NULL) return true;
+    if (type == LMD_TYPE_STRING) return fs_validate_encoding_item(options_item);
+    if (type == LMD_TYPE_MAP) {
+        Item encoding = js_property_get(options_item, (Item){.item = s2it(heap_create_name("encoding", 8))});
+        return fs_validate_encoding_item(encoding);
+    }
+    return true;
+}
+
+static bool fs_validate_watch_options(Item options_item) {
+    if (!fs_validate_encoding_options(options_item)) return false;
+    if (get_type_id(options_item) != LMD_TYPE_MAP) return true;
+
+    Item ignore = js_property_get(options_item, (Item){.item = s2it(heap_create_name("ignore", 6))});
+    TypeId type = get_type_id(ignore);
+    if (type == LMD_TYPE_UNDEFINED || type == LMD_TYPE_NULL) return true;
+    if (type == LMD_TYPE_STRING) {
+        if (it2s(ignore)->len == 0) {
+            return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The property 'options.ignore' is invalid. Received ''"), false;
+        }
+        return true;
+    }
+    if (type == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(ignore);
+        for (int64_t i = 0; i < len; i++) {
+            Item entry = js_array_get_int(ignore, i);
+            if (get_type_id(entry) != LMD_TYPE_STRING) {
+                return js_throw_invalid_arg_type("options.ignore", "string or an array of strings", entry), false;
+            }
+            if (it2s(entry)->len == 0) {
+                return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The property 'options.ignore' is invalid. Received ''"), false;
+            }
+        }
+        return true;
+    }
+    return js_throw_invalid_arg_type("options.ignore", "string or an array of strings", ignore), false;
 }
 
 static bool fs_validate_int_range(Item value, const char* name, int64_t min, int64_t max, int64_t* out) {
@@ -426,6 +497,7 @@ static Item make_stats_object(const uv_stat_t* st) {
 // fs.readFileSync(path[, encoding])
 // Returns file contents as a string (assumes UTF-8)
 extern "C" Item js_fs_readFileSync(Item path_item, Item encoding_item) {
+    if (!fs_validate_encoding_options(encoding_item)) return ItemNull;
     char path_buf[1024];
     const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
@@ -631,7 +703,7 @@ static Item js_fs_readstream_end_later(Item stream) {
 }
 
 extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
-    (void)options_item;
+    if (!fs_validate_encoding_options(options_item)) return ItemNull;
     char path_buf[1024];
     const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
@@ -656,8 +728,18 @@ extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
     return stream;
 }
 
+extern "C" Item js_fs_createWriteStream(Item path_item, Item options_item) {
+    if (!fs_validate_encoding_options(options_item)) return ItemNull;
+    char path_buf[1024];
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+    (void)path;
+    return js_new_object();
+}
+
 // fs.writeFileSync(path, data)
-extern "C" Item js_fs_writeFileSync(Item path_item, Item data_item) {
+extern "C" Item js_fs_writeFileSync(Item path_item, Item data_item, Item options_item) {
+    if (!fs_validate_encoding_options(options_item)) return ItemNull;
     char path_buf[1024];
     const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
@@ -874,7 +956,8 @@ extern "C" Item js_fs_renameSync(Item old_path_item, Item new_path_item) {
 }
 
 // fs.readdirSync(path) → Array<string>
-extern "C" Item js_fs_readdirSync(Item path_item) {
+extern "C" Item js_fs_readdirSync(Item path_item, Item options_item) {
+    if (!fs_validate_encoding_options(options_item)) return ItemNull;
     char path_buf[1024];
     const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
@@ -916,7 +999,8 @@ extern "C" Item js_fs_statSync(Item path_item) {
 }
 
 // fs.appendFileSync(path, data)
-extern "C" Item js_fs_appendFileSync(Item path_item, Item data_item) {
+extern "C" Item js_fs_appendFileSync(Item path_item, Item data_item, Item options_item) {
+    if (!fs_validate_encoding_options(options_item)) return ItemNull;
     char path_buf[1024];
     const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
@@ -964,7 +1048,8 @@ extern "C" Item js_fs_copyFileSync(Item src_item, Item dest_item) {
 }
 
 // fs.realpathSync(path) → string
-extern "C" Item js_fs_realpathSync(Item path_item) {
+extern "C" Item js_fs_realpathSync(Item path_item, Item options_item) {
+    if (!fs_validate_encoding_options(options_item)) return ItemNull;
     char path_buf[1024];
     const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
@@ -1036,9 +1121,10 @@ extern "C" Item js_fs_rmSync(Item path_item, Item options_item) {
 }
 
 // fs.mkdtempSync(prefix) → string
-extern "C" Item js_fs_mkdtempSync(Item prefix_item) {
+extern "C" Item js_fs_mkdtempSync(Item prefix_item, Item options_item) {
+    if (!fs_validate_encoding_options(options_item)) return ItemNull;
     char prefix_buf[1024];
-    const char* prefix = item_to_cstr(prefix_item, prefix_buf, sizeof(prefix_buf));
+    const char* prefix = fs_path_to_cstr(prefix_item, "prefix", prefix_buf, sizeof(prefix_buf));
     if (!prefix) return ItemNull;
 
     // Node.js appends XXXXXX to the user-provided prefix for mkdtemp template
@@ -1178,7 +1264,8 @@ extern "C" Item js_fs_symlinkSync(Item target_item, Item path_item) {
 }
 
 // fs.readlinkSync(path) → string
-extern "C" Item js_fs_readlinkSync(Item path_item) {
+extern "C" Item js_fs_readlinkSync(Item path_item, Item options_item) {
+    if (!fs_validate_encoding_options(options_item)) return ItemNull;
     char path_buf[1024];
     const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
@@ -1217,6 +1304,8 @@ extern "C" Item js_fs_lstatSync(Item path_item) {
 // Asynchronous File Operations (callback-style)
 // =============================================================================
 
+static Item make_fs_error(int uv_err, const char* path);
+
 typedef struct JsFsReq {
     uv_fs_t req;
     Item callback;        // JS callback: (err, data) => ...
@@ -1237,7 +1326,7 @@ static void on_fs_read_complete(uv_fs_t* req) {
 
     if (result < 0) {
         if (get_type_id(fsreq->callback) == LMD_TYPE_FUNC) {
-            Item err = make_string_item(uv_strerror(result));
+            Item err = make_fs_error(result, fsreq->path);
             Item args[2] = {err, ItemNull};
             js_call_function(fsreq->callback, ItemNull, args, 2);
         }
@@ -1261,7 +1350,7 @@ static void on_fs_open_for_read(uv_fs_t* req) {
 
     if (fd < 0) {
         if (get_type_id(fsreq->callback) == LMD_TYPE_FUNC) {
-            Item err = make_string_item(uv_strerror(fd));
+            Item err = make_fs_error(fd, fsreq->path);
             Item args[2] = {err, ItemNull};
             js_call_function(fsreq->callback, ItemNull, args, 2);
         }
@@ -1306,8 +1395,15 @@ static void on_fs_open_for_read(uv_fs_t* req) {
     uv_fs_read(lambda_uv_loop(), &fsreq->req, fd, &buf, 1, 0, on_fs_read_complete);
 }
 
-// fs.readFile(path, callback)
-extern "C" Item js_fs_readFile(Item path_item, Item callback) {
+// fs.readFile(path[, options], callback)
+extern "C" Item js_fs_readFile(Item path_item, Item options_or_cb, Item callback_item) {
+    Item callback = callback_item;
+    if (get_type_id(options_or_cb) == LMD_TYPE_FUNC) {
+        callback = options_or_cb;
+    } else if (!fs_validate_encoding_options(options_or_cb)) {
+        return ItemNull;
+    }
+
     char path_buf[1024];
     const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
@@ -1369,8 +1465,15 @@ static void on_fs_open_for_write(uv_fs_t* req) {
     uv_fs_write(lambda_uv_loop(), &fsreq->req, fd, &buf, 1, 0, on_fs_write_complete);
 }
 
-// fs.writeFile(path, data, callback)
-extern "C" Item js_fs_writeFile(Item path_item, Item data_item, Item callback) {
+// fs.writeFile(path, data[, options], callback)
+extern "C" Item js_fs_writeFile(Item path_item, Item data_item, Item options_or_cb, Item callback_item) {
+    Item callback = callback_item;
+    if (get_type_id(options_or_cb) == LMD_TYPE_FUNC) {
+        callback = options_or_cb;
+    } else if (!fs_validate_encoding_options(options_or_cb)) {
+        return ItemNull;
+    }
+
     char path_buf[1024];
     const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
@@ -1794,7 +1897,7 @@ static Item js_fs_readdir_async(Item path_item, Item opts_or_cb, Item callback_i
     if (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) {
         callback = opts_or_cb;
     }
-    Item result = js_fs_readdirSync(path_item);
+    Item result = js_fs_readdirSync(path_item, opts_or_cb);
     if (js_check_exception()) return ItemNull;
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
         if (result.item == ITEM_NULL || get_type_id(result) == LMD_TYPE_NULL) {
@@ -1887,7 +1990,7 @@ extern "C" Item js_fs_readFile_promise(Item path, Item opts) {
 }
 
 extern "C" Item js_fs_writeFile_promise(Item path, Item data) {
-    Item result = js_fs_writeFileSync(path, data);
+    Item result = js_fs_writeFileSync(path, data, make_js_undefined());
     return fs_promise_wrap_result(result);
 }
 
@@ -1927,7 +2030,7 @@ extern "C" Item js_fs_rename_promise(Item oldpath, Item newpath) {
 }
 
 extern "C" Item js_fs_readdir_promise(Item path) {
-    Item result = js_fs_readdirSync(path);
+    Item result = js_fs_readdirSync(path, make_js_undefined());
     return fs_promise_wrap_result(result);
 }
 
@@ -1969,7 +2072,7 @@ extern "C" Item js_fs_lchown_promise(Item path, Item uid, Item gid) {
 }
 
 extern "C" Item js_fs_realpath_promise(Item path) {
-    Item result = js_fs_realpathSync(path);
+    Item result = js_fs_realpathSync(path, make_js_undefined());
     return fs_promise_wrap_result(result);
 }
 
@@ -1979,7 +2082,7 @@ extern "C" Item js_fs_copyFile_promise(Item src, Item dest) {
 }
 
 extern "C" Item js_fs_mkdtemp_promise(Item prefix) {
-    Item result = js_fs_mkdtempSync(prefix);
+    Item result = js_fs_mkdtempSync(prefix, make_js_undefined());
     return fs_promise_wrap_result(result);
 }
 
@@ -2028,7 +2131,7 @@ static Item js_fs_copyFile_async(Item src_item, Item dest_item, Item flags_or_cb
 
 static Item js_fs_realpath_async(Item path_item, Item opts_or_cb, Item callback) {
     Item cb = (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) ? opts_or_cb : callback;
-    Item result = js_fs_realpathSync(path_item);
+    Item result = js_fs_realpathSync(path_item, opts_or_cb);
     if (js_check_exception()) return ItemNull;
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         if (get_type_id(result) == LMD_TYPE_STRING) {
@@ -2045,7 +2148,7 @@ static Item js_fs_realpath_async(Item path_item, Item opts_or_cb, Item callback)
 
 static Item js_fs_mkdtemp_async(Item prefix_item, Item opts_or_cb, Item callback) {
     Item cb = (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) ? opts_or_cb : callback;
-    Item result = js_fs_mkdtempSync(prefix_item);
+    Item result = js_fs_mkdtempSync(prefix_item, opts_or_cb);
     if (js_check_exception()) return ItemNull;
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         if (get_type_id(result) == LMD_TYPE_STRING) {
@@ -2062,7 +2165,7 @@ static Item js_fs_mkdtemp_async(Item prefix_item, Item opts_or_cb, Item callback
 
 static Item js_fs_readlink_async(Item path_item, Item opts_or_cb, Item callback) {
     Item cb = (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) ? opts_or_cb : callback;
-    Item result = js_fs_readlinkSync(path_item);
+    Item result = js_fs_readlinkSync(path_item, opts_or_cb);
     if (js_check_exception()) return ItemNull;
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         if (get_type_id(result) == LMD_TYPE_STRING) {
@@ -2102,7 +2205,7 @@ static Item js_fs_truncate_async(Item path_item, Item len_or_cb, Item callback) 
 
 static Item js_fs_appendFile_async(Item path_item, Item data_item, Item opts_or_cb, Item callback) {
     Item cb = (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) ? opts_or_cb : callback;
-    js_fs_appendFileSync(path_item, data_item);
+    js_fs_appendFileSync(path_item, data_item, opts_or_cb);
     if (js_check_exception()) return ItemNull;
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         Item args[1] = { ItemNull };
@@ -2195,8 +2298,11 @@ static Item js_fs_make_watcher(void) {
 }
 
 static Item js_fs_watch(Item path_item, Item options_or_listener, Item listener_item) {
-    (void)options_or_listener;
     (void)listener_item;
+    if (get_type_id(options_or_listener) != LMD_TYPE_FUNC &&
+        !fs_validate_watch_options(options_or_listener)) {
+        return ItemNull;
+    }
     char path_buf[1024];
     const char* path = fs_path_to_cstr(path_item, "filename", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
@@ -2243,6 +2349,44 @@ static Item js_fs_utimes_async(Item path_item, Item atime_item, Item mtime_item,
     return make_js_undefined();
 }
 
+static Item js_fs_toUnixTimestamp(Item value) {
+    TypeId type = get_type_id(value);
+    double number = 0.0;
+    if (type == LMD_TYPE_INT) {
+        number = (double)it2i(value);
+    } else if (type == LMD_TYPE_FLOAT) {
+        number = it2d(value);
+    } else if (type == LMD_TYPE_STRING) {
+        char buf[128];
+        String* s = it2s(value);
+        int len = (int)s->len;
+        if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
+        memcpy(buf, s->chars, (size_t)len);
+        buf[len] = '\0';
+        char* end = NULL;
+        number = strtod(buf, &end);
+        if (end == buf || *end != '\0') {
+            return js_throw_invalid_arg_type("time", "number", value);
+        }
+    } else {
+        return js_throw_invalid_arg_type("time", "number", value);
+    }
+    if (!isfinite(number)) {
+        return js_throw_invalid_arg_type("time", "number", value);
+    }
+    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+    *fp = number;
+    return (Item){.item = d2it(fp)};
+}
+
+static Item js_fs_opendirSync(Item path_item, Item options_item) {
+    if (!fs_validate_encoding_options(options_item)) return ItemNull;
+    char path_buf[1024];
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+    return js_new_object();
+}
+
 extern "C" Item js_internal_fs_validateOffsetLengthRead(Item offset_item, Item length_item, Item byte_length_item) {
     int64_t byte_length = 0;
     if (!fs_validate_int_range(byte_length_item, "byteLength", 0, 2147483647LL, &byte_length)) return ItemNull;
@@ -2276,20 +2420,23 @@ extern "C" Item js_get_fs_namespace(void) {
 
     // synchronous methods
     js_fs_set_method(fs_namespace, "readFileSync",    (void*)js_fs_readFileSync, 2);
-    js_fs_set_method(fs_namespace, "writeFileSync",   (void*)js_fs_writeFileSync, 2);
+    js_fs_set_method(fs_namespace, "writeFileSync",   (void*)js_fs_writeFileSync, 3);
     js_fs_set_method(fs_namespace, "existsSync",      (void*)js_fs_existsSync, 1);
     js_fs_set_method(fs_namespace, "unlinkSync",      (void*)js_fs_unlinkSync, 1);
     js_fs_set_method(fs_namespace, "mkdirSync",       (void*)js_fs_mkdirSync, 2);
     js_fs_set_method(fs_namespace, "rmdirSync",       (void*)js_fs_rmdirSync, 1);
     js_fs_set_method(fs_namespace, "renameSync",      (void*)js_fs_renameSync, 2);
-    js_fs_set_method(fs_namespace, "readdirSync",     (void*)js_fs_readdirSync, 1);
+    js_fs_set_method(fs_namespace, "readdirSync",     (void*)js_fs_readdirSync, 2);
     js_fs_set_method(fs_namespace, "statSync",        (void*)js_fs_statSync, 1);
-    js_fs_set_method(fs_namespace, "appendFileSync",  (void*)js_fs_appendFileSync, 2);
+    js_fs_set_method(fs_namespace, "appendFileSync",  (void*)js_fs_appendFileSync, 3);
     js_fs_set_method(fs_namespace, "createReadStream",(void*)js_fs_createReadStream, 2);
+    js_fs_set_method(fs_namespace, "createWriteStream",(void*)js_fs_createWriteStream, 2);
+    js_fs_set_method(fs_namespace, "ReadStream",      (void*)js_fs_createReadStream, 2);
+    js_fs_set_method(fs_namespace, "WriteStream",     (void*)js_fs_createWriteStream, 2);
 
     // asynchronous (callback) methods
-    js_fs_set_method(fs_namespace, "readFile",        (void*)js_fs_readFile, 2);
-    js_fs_set_method(fs_namespace, "writeFile",       (void*)js_fs_writeFile, 3);
+    js_fs_set_method(fs_namespace, "readFile",        (void*)js_fs_readFile, 3);
+    js_fs_set_method(fs_namespace, "writeFile",       (void*)js_fs_writeFile, 4);
     js_fs_set_method(fs_namespace, "mkdir",           (void*)js_fs_mkdir_async, 3);
     js_fs_set_method(fs_namespace, "access",          (void*)js_fs_access_async, 3);
     js_fs_set_method(fs_namespace, "stat",            (void*)js_fs_stat_async, 3);
@@ -2323,10 +2470,10 @@ extern "C" Item js_get_fs_namespace(void) {
 
     // additional sync methods
     js_fs_set_method(fs_namespace, "copyFileSync",    (void*)js_fs_copyFileSync, 2);
-    js_fs_set_method(fs_namespace, "realpathSync",    (void*)js_fs_realpathSync, 1);
+    js_fs_set_method(fs_namespace, "realpathSync",    (void*)js_fs_realpathSync, 2);
     js_fs_set_method(fs_namespace, "accessSync",      (void*)js_fs_accessSync, 2);
     js_fs_set_method(fs_namespace, "rmSync",          (void*)js_fs_rmSync, 2);
-    js_fs_set_method(fs_namespace, "mkdtempSync",     (void*)js_fs_mkdtempSync, 1);
+    js_fs_set_method(fs_namespace, "mkdtempSync",     (void*)js_fs_mkdtempSync, 2);
     js_fs_set_method(fs_namespace, "chmodSync",       (void*)js_fs_chmodSync, 2);
     js_fs_set_method(fs_namespace, "fchmodSync",      (void*)js_fs_fchmodSync, 2);
     js_fs_set_method(fs_namespace, "lchmodSync",      (void*)js_fs_lchmodSync, 2);
@@ -2334,11 +2481,13 @@ extern "C" Item js_get_fs_namespace(void) {
     js_fs_set_method(fs_namespace, "lchownSync",      (void*)js_fs_lchownSync, 3);
     js_fs_set_method(fs_namespace, "fchownSync",      (void*)js_fs_fchownSync, 3);
     js_fs_set_method(fs_namespace, "symlinkSync",     (void*)js_fs_symlinkSync, 2);
-    js_fs_set_method(fs_namespace, "readlinkSync",    (void*)js_fs_readlinkSync, 1);
+    js_fs_set_method(fs_namespace, "readlinkSync",    (void*)js_fs_readlinkSync, 2);
     js_fs_set_method(fs_namespace, "lstatSync",       (void*)js_fs_lstatSync, 1);
     js_fs_set_method(fs_namespace, "truncateSync",    (void*)js_fs_truncateSync, 2);
     js_fs_set_method(fs_namespace, "utimesSync",      (void*)js_fs_utimesSync, 3);
     js_fs_set_method(fs_namespace, "linkSync",        (void*)js_fs_linkSync, 2);
+    js_fs_set_method(fs_namespace, "opendirSync",     (void*)js_fs_opendirSync, 2);
+    js_fs_set_method(fs_namespace, "_toUnixTimestamp",(void*)js_fs_toUnixTimestamp, 1);
 
     // file descriptor operations
     js_fs_set_method(fs_namespace, "openSync",        (void*)js_fs_openSync, 3);

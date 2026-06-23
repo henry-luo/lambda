@@ -1061,7 +1061,7 @@ node-shim-restore:
 # Node.js official test suite: run official Node.js tests from ref/node/test/parallel/
 node-baseline: build-test node-shim
 	@echo "Running Node.js official test suite..."
-	@LAMBDA_NODE_BASELINE_ONLY=1 ./test/test_node_gtest.exe --baseline-only
+	@./test/test_node_gtest.exe --baseline-only
 
 # Node.js official: run full enabled official Node.js test sweep
 node-full: build-test node-shim

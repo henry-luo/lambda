@@ -7,11 +7,14 @@
 # Format: test-filename.js  # reason
 # Lines starting with # are comments. Blank lines are ignored.
 #
+test-child-process-execfilesync-maxbuf.js        # [timeout] observed 60.0s (>10s)
 test-child-process-execsync-maxbuf.js            # [slow] observed 60.0s (>10s)
 test-compile-cache-success.js                    # [slow] observed 17.8s (>10s)
 test-crypto-cipheriv-decipheriv.js               # [timeout] observed 60.0s (>10s)
 test-http-pipeline-flood.js                      # [slow] observed 65.8s (>10s)
 test-module-main-extension-lookup.js             # [timeout] observed 60.0s (>10s)
+test-module-main-fail.js                         # [timeout] observed 60.0s (>10s)
+test-module-main-preserve-symlinks-fail.js       # [timeout] observed 60.0s (>10s)
 test-module-wrap.js                              # [timeout] observed 60.0s (>10s)
 test-module-wrapper.js                           # [timeout] observed 60.0s (>10s)
 test-net-write-fully-async-buffer.js             # [timeout] observed 10.1s (>10s)

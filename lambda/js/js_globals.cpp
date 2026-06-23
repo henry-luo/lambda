@@ -1184,6 +1184,15 @@ extern "C" Item js_process_stdin_read(void) {
     return (Item){.item = s2it(s)};
 }
 
+extern "C" Item js_process_stdin_destroy(void) {
+    return make_js_undefined();
+}
+
+extern "C" Item js_process_stdin_setRawMode(Item mode_item) {
+    (void)mode_item;
+    return make_js_undefined();
+}
+
 extern "C" Item js_process_hrtime_bigint(void) {
     // Return nanosecond-precision monotonic time as BigInt (per Node.js spec)
     extern Item bigint_from_string(const char* str, int len);
@@ -2569,6 +2578,10 @@ static Item build_process_stdin(void) {
     Item stdin_obj = js_new_object();
     Item read_fn = js_new_function((void*)js_process_stdin_read, 0);
     js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("read", 4))}, read_fn);
+    js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("destroy", 7))},
+        js_new_function((void*)js_process_stdin_destroy, 0));
+    js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("setRawMode", 10))},
+        js_new_function((void*)js_process_stdin_setRawMode, 1));
     js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("fd", 2))}, (Item){.item = i2it(0)});
     js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("isTTY", 5))},
         (Item){.item = b2it(isatty(0))});

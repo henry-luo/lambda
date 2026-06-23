@@ -589,7 +589,7 @@ static std::string extract_module_prefix(const std::string& filename) {
 // Test execution — run a single test with timeout
 // =============================================================================
 
-static NodeTestResult run_single_test(const std::string& test_path) {
+static NodeTestResult run_single_test(const std::string& test_path, size_t ordinal) {
     NodeTestResult result;
     result.test_name = test_path;
     result.timed_out = false;
@@ -597,14 +597,15 @@ static NodeTestResult run_single_test(const std::string& test_path) {
     // extract just filename for display
     size_t slash = test_path.rfind('/');
     std::string filename = (slash != std::string::npos) ? test_path.substr(slash + 1) : test_path;
-
+    unsigned int node_common_port = 10000u + (unsigned int)(ordinal * 10u);
     auto start = std::chrono::steady_clock::now();
 
     // Build command with timeout.
     // Strip ASAN-related env vars: the gtest binary is ASAN-instrumented but
     // lambda.exe is not. ASAN sets MallocNanoZone=0 which can cause malloc
     // corruption in non-ASAN binaries.
-    // Run inside temp/node_test/ so garbage files don't pollute project root.
+    // Run inside a per-test temp/node_test/ subdirectory so parallel tests do not
+    // share cwd-created fixtures.
     char command[2048];
 #ifdef _WIN32
     snprintf(command, sizeof(command),
@@ -612,9 +613,11 @@ static NodeTestResult run_single_test(const std::string& test_path) {
              test_path.c_str());
 #else
     snprintf(command, sizeof(command),
-             "mkdir -p temp/node_test && cd temp/node_test && "
+             "mkdir -p \"temp/node_test/%s\" && cd \"temp/node_test/%s\" && "
              "env -u DYLD_INSERT_LIBRARIES -u DYLD_LIBRARY_PATH -u ASAN_OPTIONS -u MallocNanoZone "
-             "timeout -k 5s %d ../../lambda.exe js \"../../%s\" --no-log 2>&1",
+             "-u LAMBDA_NODE_BASELINE_ONLY NODE_COMMON_PORT=%u "
+             "timeout -k 5s %d ../../../lambda.exe js \"../../../%s\" --no-log 2>&1",
+             filename.c_str(), filename.c_str(), node_common_port,
              (g_timeout_ms + 999) / 1000, test_path.c_str());
 #endif
 
@@ -666,6 +669,7 @@ struct NodeOfficialParam {
     std::string filename;      // test-path-join.js
     std::string module;        // "path"
     std::string test_name;     // sanitized for GTest: test_path_join
+    size_t ordinal;            // stable index in the executed discovery set
 };
 
 static std::vector<NodeOfficialParam> g_node_executed_params;
@@ -811,6 +815,7 @@ static std::vector<NodeOfficialParam> discover_node_official_tests(bool honor_sl
         p.test_path = dir_path + "/" + filename;
         p.filename  = filename;
         p.module    = mod;
+        p.ordinal   = tests.size();
 
         // sanitize test name for GTest
         std::string base = filename.substr(0, filename.size() - 3); // strip .js
@@ -838,11 +843,41 @@ static std::vector<NodeOfficialParam> discover_node_official_tests(bool honor_sl
 static std::unordered_map<std::string, NodeTestResult> g_test_results;
 static std::mutex g_test_results_mutex;
 
+static bool node_test_requires_serial(const NodeOfficialParam& t) {
+    return t.module == "child-process" ||
+           t.module == "cluster" ||
+           t.module == "http" ||
+           t.module == "https" ||
+           t.module == "net" ||
+           t.module == "timers" ||
+           t.module == "tls";
+}
+
+static void execute_one_test(const NodeOfficialParam& t) {
+    NodeTestResult result = run_single_test(t.test_path, t.ordinal);
+    std::lock_guard<std::mutex> lock(g_test_results_mutex);
+    g_test_results[t.filename] = std::move(result);
+}
+
 static void execute_all_tests(const std::vector<NodeOfficialParam>& tests) {
     if (tests.empty()) return;
 
-    fprintf(stderr, "[node-official] Running %zu tests with %d workers...\n",
-            tests.size(), PARALLEL_WORKERS);
+    std::vector<NodeOfficialParam> parallel_tests;
+    std::vector<NodeOfficialParam> serial_tests;
+    for (const auto& t : tests) {
+        if (node_test_requires_serial(t)) {
+            serial_tests.push_back(t);
+        } else {
+            parallel_tests.push_back(t);
+        }
+    }
+
+    fprintf(stderr, "[node-official] Running %zu serial tests, then %zu tests with %d workers...\n",
+            serial_tests.size(), parallel_tests.size(), PARALLEL_WORKERS);
+
+    for (const auto& t : serial_tests) {
+        execute_one_test(t);
+    }
 
     std::atomic<size_t> next_index{0};
     std::vector<std::thread> workers;
@@ -851,15 +886,8 @@ static void execute_all_tests(const std::vector<NodeOfficialParam>& tests) {
         workers.emplace_back([&]() {
             while (true) {
                 size_t idx = next_index.fetch_add(1);
-                if (idx >= tests.size()) break;
-
-                const auto& t = tests[idx];
-                NodeTestResult result = run_single_test(t.test_path);
-
-                {
-                    std::lock_guard<std::mutex> lock(g_test_results_mutex);
-                    g_test_results[t.filename] = std::move(result);
-                }
+                if (idx >= parallel_tests.size()) break;
+                execute_one_test(parallel_tests[idx]);
             }
         });
     }
