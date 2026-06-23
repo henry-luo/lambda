@@ -860,6 +860,33 @@ TEST_F(DomRangeTest, SelectionModifyMoveCharacter) {
     EXPECT_EQ(dom_selection_anchor_offset(&sel), 2u);
 }
 
+TEST_F(DomRangeTest, SelectionModifyMoveCharacterCollapsesWhitespaceRun) {
+    hello->text = "F    and";
+    hello->length = 9;
+
+    DomSelection sel{};
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 0, &exc));
+    ASSERT_TRUE(dom_range_set_end(r, hello, 0, &exc));
+    dom_selection_add_range(&sel, r);
+
+    ASSERT_TRUE(dom_selection_modify(&sel, "move", "forward", "character", &exc));
+    EXPECT_EQ(dom_selection_focus_offset(&sel), 1u);
+    ASSERT_TRUE(dom_selection_modify(&sel, "move", "forward", "character", &exc));
+    EXPECT_EQ(dom_selection_focus_offset(&sel), 5u);
+    ASSERT_TRUE(dom_selection_modify(&sel, "move", "forward", "character", &exc));
+    EXPECT_EQ(dom_selection_focus_offset(&sel), 6u);
+    ASSERT_TRUE(dom_selection_modify(&sel, "move", "backward", "character", &exc));
+    EXPECT_EQ(dom_selection_focus_offset(&sel), 5u);
+    ASSERT_TRUE(dom_selection_modify(&sel, "move", "backward", "character", &exc));
+    EXPECT_EQ(dom_selection_focus_offset(&sel), 1u);
+
+    hello->text = "hello";
+    hello->length = 5;
+}
+
 TEST_F(DomRangeTest, SelectionModifyExtendCharacter) {
     DomSelection sel{};
     DomRange* r = dom_range_create(state);
@@ -871,6 +898,29 @@ TEST_F(DomRangeTest, SelectionModifyExtendCharacter) {
     EXPECT_TRUE(dom_selection_modify(&sel, "extend", "forward", "character", &exc));
     EXPECT_EQ(dom_selection_anchor_offset(&sel), 1u);
     EXPECT_EQ(dom_selection_focus_offset(&sel), 2u);
+}
+
+TEST_F(DomRangeTest, SelectionModifyExtendForwardEntersCollapsedWhitespaceRun) {
+    hello->text = "f    oo   bar    baz";
+    hello->length = 20;
+
+    DomSelection sel{};
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 5, &exc));
+    ASSERT_TRUE(dom_range_set_end(r, hello, 5, &exc));
+    dom_selection_add_range(&sel, r);
+
+    for (int i = 0; i < 7; i++) {
+        ASSERT_TRUE(dom_selection_modify(&sel, "extend", "forward",
+                                         "character", &exc));
+    }
+    EXPECT_EQ(dom_selection_anchor_offset(&sel), 5u);
+    EXPECT_EQ(dom_selection_focus_offset(&sel), 14u);
+
+    hello->text = "hello";
+    hello->length = 5;
 }
 
 TEST_F(DomRangeTest, SelectionModifyEmptySelectionNoOp) {
