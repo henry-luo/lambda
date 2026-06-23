@@ -230,10 +230,6 @@ static bool contains_text(const std::string& text, const char* needle) {
     return text.find(needle) != std::string::npos;
 }
 
-static bool has_testharness_script(const std::string& html) {
-    return contains_text(html, "testharness.js");
-}
-
 static bool has_tag(const std::vector<std::string>& tags, const char* tag) {
     for (const std::string& candidate : tags) {
         if (candidate == tag) return true;
@@ -1225,8 +1221,8 @@ static ChromeEditingResult run_chrome_editing_case(
     std::string temp_html_content =
         inline_local_iframe_sources(strip_script_elements(html),
             dir_of(p.html_path));
-    std::string named_element_prelude = has_testharness_script(html) ?
-        "" : named_element_global_prelude(temp_html_content, scripts);
+    std::string named_element_prelude =
+        named_element_global_prelude(temp_html_content, scripts);
     std::string combined = harness + metadata + named_element_prelude +
         "\n" + scripts +
         "\n_chrome_editing_print_summary();\n";
