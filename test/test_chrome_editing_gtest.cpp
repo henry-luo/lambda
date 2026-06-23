@@ -45,10 +45,12 @@ static const char* EDITING_ROOT = "test/editing";
 static const char* HARNESS_PATH = "test/editing/resources/chrome-editing-harness.js";
 static const char* HARNESS_PATCH_PATH = "test/editing/chrome_editing_ce3_harness_patch.js";
 static const char* RUNNABLE_PATH = "test/editing/RUNNABLE";
+static const char* BASELINE_PATH = "test/editing/baseline.txt";
 static const char* TEMP_DIR = "temp";
 static const char* RESULT_ARTIFACT_PATH = "temp/chrome_editing_results.jsonl";
 static const char* SUMMARY_ARTIFACT_PATH = "temp/chrome_editing_summary.json";
 static const size_t DEFAULT_CAPTURED_OUTPUT_LIMIT = 128 * 1024;
+static const size_t BASELINE_REGRESSION_PRINT_LIMIT = 80;
 
 static bool starts_with(const char* text, const char* prefix) {
     return strncmp(text, prefix, strlen(prefix)) == 0;
@@ -699,6 +701,87 @@ static std::string outcome_for_result(const ChromeEditingResult& result) {
     return "pass";
 }
 
+static bool result_passed(const ChromeEditingResult& result) {
+    return !result.skipped && !result.failed;
+}
+
+struct ChromeEditingBaselineRegression {
+    std::string rel_path;
+    std::string outcome;
+    std::string classifier;
+};
+
+struct ChromeEditingBaselineReport {
+    int expected_count;
+    int covered_count;
+    std::vector<ChromeEditingBaselineRegression> regressions;
+};
+
+static std::vector<std::string> load_baseline_files() {
+    std::vector<std::string> paths;
+    std::string content = read_file_contents(BASELINE_PATH);
+    size_t pos = 0;
+    while (pos <= content.size()) {
+        size_t eol = content.find('\n', pos);
+        if (eol == std::string::npos) eol = content.size();
+        std::string line = trim_ascii(content.substr(pos, eol - pos));
+        if (!line.empty() && line[0] != '#') paths.push_back(line);
+        pos = eol + 1;
+        if (eol == content.size()) break;
+    }
+    std::sort(paths.begin(), paths.end());
+    paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
+    return paths;
+}
+
+static const std::vector<std::string>& chrome_editing_baseline_files() {
+    static const std::vector<std::string> baseline = load_baseline_files();
+    return baseline;
+}
+
+static bool is_baseline_file(const std::string& rel_path,
+                             const std::vector<std::string>& baseline) {
+    return std::binary_search(baseline.begin(), baseline.end(), rel_path);
+}
+
+static const ChromeEditingResult* find_result_by_rel_path(
+        const std::vector<ChromeEditingResult>& results,
+        const std::string& rel_path) {
+    for (const ChromeEditingResult& result : results) {
+        if (result.param.rel_path == rel_path) return &result;
+    }
+    return nullptr;
+}
+
+static ChromeEditingBaselineReport build_baseline_report(
+        const std::vector<ChromeEditingResult>& results) {
+    const std::vector<std::string>& baseline = chrome_editing_baseline_files();
+    ChromeEditingBaselineReport report;
+    report.expected_count = (int)baseline.size();
+    report.covered_count = 0;
+    for (const std::string& rel_path : baseline) {
+        const ChromeEditingResult* result = find_result_by_rel_path(results,
+            rel_path);
+        if (!result) {
+            ChromeEditingBaselineRegression regression;
+            regression.rel_path = rel_path;
+            regression.outcome = "missing";
+            regression.classifier = "not_run";
+            report.regressions.push_back(regression);
+            continue;
+        }
+        report.covered_count++;
+        if (!result_passed(*result)) {
+            ChromeEditingBaselineRegression regression;
+            regression.rel_path = rel_path;
+            regression.outcome = outcome_for_result(*result);
+            regression.classifier = result->classifier;
+            report.regressions.push_back(regression);
+        }
+    }
+    return report;
+}
+
 static std::string result_to_jsonl(const ChromeEditingResult& result) {
     std::string json = "{";
     json += "\"rel_path\":" + json_string_literal(result.param.rel_path);
@@ -804,8 +887,31 @@ static void append_bucket_counter_array(
     json += "]";
 }
 
+static void append_baseline_summary(std::string& json,
+                                    const ChromeEditingBaselineReport& report) {
+    json += ",\n  \"baseline\": {";
+    json += "\n    \"path\":" + json_string_literal(BASELINE_PATH);
+    json += ",\n    \"expected\":" + std::to_string(report.expected_count);
+    json += ",\n    \"covered\":" + std::to_string(report.covered_count);
+    json += ",\n    \"regressions\":" +
+        std::to_string(report.regressions.size());
+    json += ",\n    \"regression_details\": [";
+    for (size_t i = 0; i < report.regressions.size(); i++) {
+        if (i) json += ",";
+        json += "\n      {\"rel_path\":" +
+            json_string_literal(report.regressions[i].rel_path) +
+            ",\"outcome\":" +
+            json_string_literal(report.regressions[i].outcome) +
+            ",\"classifier\":" +
+            json_string_literal(report.regressions[i].classifier) + "}";
+    }
+    if (!report.regressions.empty()) json += "\n    ";
+    json += "]\n  }";
+}
+
 static void write_summary_artifact(const std::vector<ChromeEditingResult>& results,
-                                   double total_seconds) {
+                                   double total_seconds,
+                                   const ChromeEditingBaselineReport& baseline) {
     int passed = 0;
     int failed = 0;
     int skipped = 0;
@@ -854,6 +960,7 @@ static void write_summary_artifact(const std::vector<ChromeEditingResult>& resul
     json += ",\n  \"abort_count\":" + std::to_string(aborts);
     json += ",\n  \"timeout_count\":" + std::to_string(timeouts);
     json += ",\n  \"seconds\":" + std::to_string(total_seconds);
+    append_baseline_summary(json, baseline);
     append_counter_array(json, "classifiers", classifier_counters);
     append_counter_array(json, "buckets", bucket_counters);
     append_bucket_counter_array(json, "bucket_classifiers",
@@ -878,6 +985,31 @@ static void print_classifier_summary(const std::vector<ChromeEditingResult>& res
     for (const ChromeEditingCounter& counter : counters) {
         printf("[----------]   %-28s %d\n", counter.name.c_str(),
                counter.count);
+    }
+}
+
+static void print_baseline_report(const ChromeEditingBaselineReport& report) {
+    printf("[----------] Chrome editing baseline: %s (%d expected, %d covered)\n",
+           BASELINE_PATH, report.expected_count, report.covered_count);
+    if (report.regressions.empty()) {
+        printf("[----------] Chrome editing baseline regressions: 0\n");
+        return;
+    }
+
+    printf("[  FAILED  ] %zu Chrome editing baseline regressions.\n",
+           report.regressions.size());
+    size_t printed = std::min(report.regressions.size(),
+        BASELINE_REGRESSION_PRINT_LIMIT);
+    for (size_t i = 0; i < printed; i++) {
+        const ChromeEditingBaselineRegression& regression =
+            report.regressions[i];
+        printf("[ REGRESS  ] %s -> %s (%s)\n",
+               regression.rel_path.c_str(), regression.outcome.c_str(),
+               regression.classifier.c_str());
+    }
+    if (printed < report.regressions.size()) {
+        printf("[----------] ... %zu more baseline regressions omitted\n",
+               report.regressions.size() - printed);
     }
 }
 
@@ -1169,8 +1301,16 @@ class ChromeEditingTest :
     public testing::TestWithParam<ChromeEditingParam> {};
 
 static void report_gtest_result(const ChromeEditingResult& result) {
+    bool baseline_expected = is_baseline_file(result.param.rel_path,
+        chrome_editing_baseline_files());
+    if (baseline_expected && !result_passed(result)) {
+        ADD_FAILURE() << "Chrome editing baseline regression: "
+            << result.param.rel_path << " is listed in " << BASELINE_PATH
+            << " but now reports " << outcome_for_result(result)
+            << " (" << result.classifier << ")";
+    }
     if (result.skipped) {
-        GTEST_SKIP() << result.skip_reason;
+        if (!baseline_expected) GTEST_SKIP() << result.skip_reason;
         return;
     }
     printf("  %s: %d/%d passed\n", result.param.rel_path.c_str(),
@@ -1275,8 +1415,9 @@ static int run_parallel_suite() {
         if (result.skipped) skipped++;
         else if (result.failed) failures++;
     }
+    ChromeEditingBaselineReport baseline = build_baseline_report(results);
     write_result_artifact(results);
-    write_summary_artifact(results, total_seconds);
+    write_summary_artifact(results, total_seconds, baseline);
 
     printf("[==========] %zu Chrome editing cases ran. (%.0f ms total)\n",
            params.size(), total_seconds * 1000.0);
@@ -1284,9 +1425,10 @@ static int run_parallel_suite() {
     if (skipped > 0) printf("[  SKIPPED ] %d tests.\n", skipped);
     if (failures > 0) printf("[  FAILED  ] %d tests.\n", failures);
     print_classifier_summary(results);
+    print_baseline_report(baseline);
     printf("[----------] Chrome editing summary artifact: %s\n",
            SUMMARY_ARTIFACT_PATH);
-    return failures == 0 ? 0 : 1;
+    return failures == 0 && baseline.regressions.empty() ? 0 : 1;
 }
 
 int main(int argc, char** argv) {

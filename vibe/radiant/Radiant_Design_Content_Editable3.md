@@ -164,10 +164,10 @@ Implementation note:
   `execCommand/forward-delete-no-scroll.html` cases now pass.
 - Current pressure-list verification as of 2026-06-23:
   `env LAMBDA_CHROME_EDITING_TIMEOUT=5 LAMBDA_CHROME_EDITING_JOBS=9 ./test/test_chrome_editing_gtest.exe --gtest_brief=1`
-  runs 2751 imported cases as 446 passed / 1666 skipped / 639 failed. The
-  remaining failure surface is mostly `assertion_mismatch` (546), followed by
-  `no_results` (41), `unsupported_internals` (23),
-  `unsupported_layout_visual` (16), `harness_missing_api` (15), and
+  runs 2751 imported cases as 469 passed / 1665 skipped / 617 failed. The
+  remaining failure surface is mostly `assertion_mismatch` (524), followed by
+  `no_results` (41), `unsupported_internals` (24),
+  `unsupported_layout_visual` (15), `harness_missing_api` (14), and
   `unsupported_shadow` (14). The run has 0 aborts and 0 timeouts.
 - The second and third pressure-fix passes added a headless DOM geometry
   fallback for `offsetWidth`/`offsetHeight` from laid-out size, inline CSS
@@ -298,6 +298,57 @@ Implementation note:
   `inserting/insert-paragraph-copy-style.html`,
   `inserting/insertparagraph-seperator-on-non-selectable-node.html`, and
   `style/block-styles-007.html`.
+- The sixteenth pressure-fix pass added shared CE3 replacement and line-break
+  insertion behavior. `insertHTML` and `insertText` now delete selected ranges
+  before inserting, preserve selected inline wrappers when Chrome keeps them,
+  serialize anchor `href` before `id`, and use a marker-based
+  `insertAdjacentHTML` path so real fragments such as tables, images, and
+  inline formatting survive instead of being stripped to text. `insertLineBreak`
+  now inserts `<br>` nodes with Chrome-style trailing placeholders, splits
+  `white-space: pre` inline spans without placing `<br>` inside tab spans, and
+  normalizes spaces after breaks. `InsertNewlineInQuotedContent` now splits
+  blockquotes with `Range.extractContents()`, prunes empty extracted wrappers,
+  and keeps nested quoted content in the correct quote level. A follow-up
+  insertHTML normalization pass routes plaintext-only hosts to text insertion,
+  unwraps span-wrapped block fragments, flattens single no-attribute div
+  wrappers in text runs, removes stale trailing placeholder breaks after block
+  insertion, and normalizes NBSP before inserted HTML. The focused green batch
+  now includes `execCommand/insertHTML.html`, `inserting/4875189-1.html`,
+  `inserting/4875189-2.html`, `inserting/4959067.html`,
+  `inserting/insert_br.html`, `inserting/insert_br_at_end_of_block.html`,
+  `inserting/insert_br_at_tabspan.html`,
+  `inserting/insert_line_break_at_end_of_anonymous_block.html`,
+  `inserting/insert_line_break_with_tab_span.html`,
+  `inserting/insert-br-quoted-001.html`, `inserting/5418891.html`,
+  `inserting/5510537.html`, `inserting/insert_div_text_into_text.html`,
+  `inserting/insert_html_at_end_of_paragraph.html`,
+  `inserting/insert_input_element.html`,
+  `inserting/prevent-block-nesting-01.html`, and
+  `inserting/insert_div_before_br_at_end.html`.
+- The seventeenth pressure-fix pass structurally widened CE3 list-command
+  behavior instead of fixture-patching isolated cases. Shared
+  `insertOrderedList`/`insertUnorderedList` handling now switches selected list
+  ranges while preserving caret/range endpoints, unlistifies same-type list
+  commands, moves malformed loose list text out of matching lists, wraps fully
+  selected inline anchors as list items, splits selected `<br>`-separated
+  inline runs into multiple list items, expands partial line selections to
+  paragraph boundaries while restoring original marker offsets, normalizes
+  select-all nested list conversion with adjacent-list/orphan-`li` merging, and
+  lifts child list shells for `Outdent`. Empty-host paragraph insertion now
+  preserves the first empty paragraph before the caret paragraph. The list
+  family gauge moved to 27/36 fixture-level passing, with newly green coverage
+  including `execCommand/insert-lists-inside-another-list.html` 12/12,
+  `execCommand/insert-list-items-inside-another-list.html` 10/10,
+  `execCommand/remove-list-items.html` 7/7,
+  `execCommand/switch-list-type.html` 5/5,
+  `execCommand/insert_list_with_underline.html` 2/2,
+  `execCommand/insert-list-with-id.html`,
+  `execCommand/insert-list-with-noneditable-content.html`,
+  `execCommand/insert-list-with-progress-crash.html`,
+  `execCommand/switch-list-type-with-orphaned-li.html`, and
+  `execCommand/remove-list-item-1.html`. The full pressure verification now
+  runs 2751 imported cases as 495 passed / 1665 skipped / 591 failed, reducing
+  the failure surface by 26 from the previous 469 / 1665 / 617 run.
 
 ---
 
