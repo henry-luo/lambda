@@ -252,8 +252,6 @@ extern "C" Item js_buffer_alloc(Item size_item, Item fill_item) {
         return js_throw_range_error_code("ERR_OUT_OF_RANGE",
             "The value of \"size\" is out of range.");
     }
-    if (size > 1048576) size = 1048576; // practical limit
-
     Item buf = create_buffer((int)size);
     // alloc zero-fills by default via typed_array_new
 
@@ -548,7 +546,10 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
     // array of numbers
     if (tid == LMD_TYPE_ARRAY && js_array_length(data) >= 0) {
         int64_t arr_len = js_array_length(data);
-        if (arr_len > 1048576) arr_len = 1048576;
+        if (arr_len > 2147483647) {
+            return js_throw_range_error_code("ERR_OUT_OF_RANGE",
+                "The value of \"length\" is out of range.");
+        }
         Item buf = create_buffer((int)arr_len);
         int buf_byte_len = 0;
         uint8_t* bdata = buffer_data(buf, &buf_byte_len);
@@ -617,7 +618,10 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
         if (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) {
             int64_t arr_len = (lt == LMD_TYPE_INT) ? it2i(len_val) : (int64_t)it2d(len_val);
             if (arr_len < 0) arr_len = 0;
-            if (arr_len > 1048576) arr_len = 1048576;
+            if (arr_len > 2147483647) {
+                return js_throw_range_error_code("ERR_OUT_OF_RANGE",
+                    "The value of \"length\" is out of range.");
+            }
             Item buf = create_buffer((int)arr_len);
             int buf_byte_len = 0;
             uint8_t* bdata = buffer_data(buf, &buf_byte_len);
@@ -724,8 +728,6 @@ extern "C" Item js_buffer_concat(Item list, Item total_length_item) {
         buffer_data(buf, &blen);
         total += blen;
     }
-    if (total > 1048576) total = 1048576;
-
     Item result = create_buffer(total);
     int dst_len = 0;
     uint8_t* dst = buffer_data(result, &dst_len);
@@ -1545,7 +1547,6 @@ extern "C" Item js_buffer_allocUnsafe(Item size_item) {
         return js_throw_range_error_code("ERR_OUT_OF_RANGE",
             "The value of \"size\" is out of range.");
     }
-    if (size > 1048576) size = 1048576;
     return create_buffer((int)size); // no zero-fill guarantee
 }
 
@@ -2481,10 +2482,6 @@ extern "C" Item js_buffer_allocUnsafeSlow(Item size_item) {
             "The \"size\" argument must be of type number.");
     }
     if (size < 0 || size > 2147483647) {
-        return js_throw_range_error_code("ERR_OUT_OF_RANGE",
-            "The value of \"size\" is out of range.");
-    }
-    if (size > 1048576) {
         return js_throw_range_error_code("ERR_OUT_OF_RANGE",
             "The value of \"size\" is out of range.");
     }

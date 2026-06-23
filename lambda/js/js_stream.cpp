@@ -108,6 +108,8 @@ static Item key_finish_emitted;
 static Item key_close_emitted;
 static Item key_capture_rejections;
 static Item key_auto_destroy;
+static Item key_listener_fn;
+static Item key_listener_context;
 static bool keys_init = false;
 static Item stream_readable_prototype = {0};
 static Item stream_writable_prototype = {0};
@@ -169,6 +171,8 @@ static void ensure_keys() {
     key_close_emitted = make_string_item("__close_emitted__");
     key_capture_rejections = make_string_item("__capture_rejections__");
     key_auto_destroy = make_string_item("__auto_destroy__");
+    key_listener_fn = make_string_item("__stream_listener_fn__");
+    key_listener_context = make_string_item("__stream_listener_als_context__");
     keys_init = true;
 }
 
@@ -190,6 +194,35 @@ static bool js_stream_string_equals(Item item, const char* literal) {
     String* str = it2s(item);
     size_t len = strlen(literal);
     return str->len == len && memcmp(str->chars, literal, len) == 0;
+}
+
+static bool js_stream_is_listener_record(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    Item fn = js_property_get(value, key_listener_fn);
+    return get_type_id(fn) == LMD_TYPE_FUNC;
+}
+
+static Item js_stream_listener_fn(Item value) {
+    if (js_stream_is_listener_record(value)) return js_property_get(value, key_listener_fn);
+    return value;
+}
+
+static Item js_stream_listener_context(Item value) {
+    if (js_stream_is_listener_record(value)) return js_property_get(value, key_listener_context);
+    return ItemNull;
+}
+
+static Item js_stream_make_listener_record(Item listener) {
+    Item record = js_new_object();
+    js_property_set(record, key_listener_fn, listener);
+    js_property_set(record, key_listener_context, js_als_capture_context());
+    return record;
+}
+
+static bool js_stream_listener_matches(Item stored, Item listener) {
+    if (stored.item == listener.item) return true;
+    Item fn = js_stream_listener_fn(stored);
+    return fn.item == listener.item;
 }
 
 static void js_state_set_bool(Item state, const char* name, bool value) {
@@ -428,9 +461,18 @@ static void stream_emit(Item self, const char* event, Item* args, int argc) {
         return;
     }
     for (int64_t i = 0; i < len; i++) {
-        Item listener = js_array_get_int(arr, i);
+        Item entry = js_array_get_int(arr, i);
+        Item listener = js_stream_listener_fn(entry);
+        Item context = js_stream_listener_context(entry);
         if (get_type_id(listener) == LMD_TYPE_FUNC) {
-            Item result = js_call_function(listener, self, args, argc);
+            Item result;
+            if (argc == 0) {
+                result = js_als_context_call(context, listener, self, ItemNull, 0);
+            } else if (argc == 1) {
+                result = js_als_context_call(context, listener, self, args[0], 1);
+            } else {
+                result = js_call_function(listener, self, args, argc);
+            }
             js_stream_maybe_capture_rejection(self, event, result);
         }
     }
@@ -812,7 +854,7 @@ extern "C" Item js_stream_on(Item self, Item event_item, Item listener) {
         arr = js_array_new(0);
         js_property_set(listeners_map, event_item, arr);
     }
-    js_array_push(arr, listener);
+    js_array_push(arr, js_stream_make_listener_record(listener));
 
     // if adding 'data' listener to readable, start flowing mode
     bool is_data_event = js_stream_string_equals(event_item, "data");
@@ -865,7 +907,7 @@ extern "C" Item js_stream_off(Item self, Item event_item, Item listener) {
     int64_t len = js_array_length(arr);
     for (int64_t i = 0; i < len; i++) {
         Item current = js_array_get_int(arr, i);
-        if (current.item != listener.item) js_array_push(next, current);
+        if (!js_stream_listener_matches(current, listener)) js_array_push(next, current);
     }
     js_property_set(listeners_map, event_item, next);
     if (js_stream_string_equals(event_item, "readable") && js_array_length(next) == 0) {

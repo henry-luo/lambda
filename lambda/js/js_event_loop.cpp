@@ -25,6 +25,12 @@
 #include <signal.h>
 
 extern __thread EvalContext* context;
+extern "C" Item js_async_hooks_get_current_resource(void);
+extern "C" Item js_async_hooks_enter_resource(Item resource);
+extern "C" void js_async_hooks_restore_resource(Item previous);
+extern "C" Item js_util_promisify_custom_symbol(void);
+extern "C" Item js_als_capture_context(void);
+extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
 
 // =============================================================================
 // Task Queues
@@ -35,10 +41,14 @@ extern __thread EvalContext* context;
 #define TASK_FLUSH_SAFETY_LIMIT (MICROTASK_CAPACITY * 8)
 
 static Item next_tick_ring[MICROTASK_CAPACITY];
+static Item next_tick_resource_ring[MICROTASK_CAPACITY];
+static Item next_tick_als_ring[MICROTASK_CAPACITY];
 static int  next_tick_head = 0;
 static int  next_tick_tail = 0;
 static int  next_tick_count = 0;
 static Item microtask_ring[MICROTASK_CAPACITY];
+static Item microtask_resource_ring[MICROTASK_CAPACITY];
+static Item microtask_als_ring[MICROTASK_CAPACITY];
 static int  microtask_head = 0;   // read index
 static int  microtask_tail = 0;   // write index
 static int  microtask_count = 0;
@@ -65,14 +75,20 @@ static void next_tick_push(Item cb) {
         return;
     }
     next_tick_ring[next_tick_tail] = cb;
+    next_tick_resource_ring[next_tick_tail] = js_async_hooks_get_current_resource();
+    next_tick_als_ring[next_tick_tail] = js_als_capture_context();
     next_tick_tail = (next_tick_tail + 1) % MICROTASK_CAPACITY;
     next_tick_count++;
 }
 
-static Item next_tick_pop() {
+static Item next_tick_pop(Item* out_resource, Item* out_als_context) {
     if (next_tick_count == 0) return ItemNull;
     Item cb = next_tick_ring[next_tick_head];
+    if (out_resource) *out_resource = next_tick_resource_ring[next_tick_head];
+    if (out_als_context) *out_als_context = next_tick_als_ring[next_tick_head];
     next_tick_ring[next_tick_head] = ItemNull;
+    next_tick_resource_ring[next_tick_head] = ItemNull;
+    next_tick_als_ring[next_tick_head] = ItemNull;
     next_tick_head = (next_tick_head + 1) % MICROTASK_CAPACITY;
     next_tick_count--;
     return cb;
@@ -84,14 +100,20 @@ static void microtask_push(Item cb) {
         return;
     }
     microtask_ring[microtask_tail] = cb;
+    microtask_resource_ring[microtask_tail] = js_async_hooks_get_current_resource();
+    microtask_als_ring[microtask_tail] = js_als_capture_context();
     microtask_tail = (microtask_tail + 1) % MICROTASK_CAPACITY;
     microtask_count++;
 }
 
-static Item microtask_pop() {
+static Item microtask_pop(Item* out_resource, Item* out_als_context) {
     if (microtask_count == 0) return ItemNull;
     Item cb = microtask_ring[microtask_head];
+    if (out_resource) *out_resource = microtask_resource_ring[microtask_head];
+    if (out_als_context) *out_als_context = microtask_als_ring[microtask_head];
     microtask_ring[microtask_head] = ItemNull;
+    microtask_resource_ring[microtask_head] = ItemNull;
+    microtask_als_ring[microtask_head] = ItemNull;
     microtask_head = (microtask_head + 1) % MICROTASK_CAPACITY;
     microtask_count--;
     return cb;
@@ -125,16 +147,24 @@ extern "C" void js_microtask_flush(void) {
     while ((next_tick_count > 0 || microtask_count > 0) &&
            safety < TASK_FLUSH_SAFETY_LIMIT) {
         while (next_tick_count > 0 && safety < TASK_FLUSH_SAFETY_LIMIT) {
-            Item cb = next_tick_pop();
+            Item resource = ItemNull;
+            Item als_context = ItemNull;
+            Item cb = next_tick_pop(&resource, &als_context);
             if (get_type_id(cb) == LMD_TYPE_FUNC) {
-                js_call_function(cb, ItemNull, NULL, 0);
+                Item previous_resource = js_async_hooks_enter_resource(resource);
+                js_als_context_call(als_context, cb, ItemNull, ItemNull, 0);
+                js_async_hooks_restore_resource(previous_resource);
             }
             safety++;
         }
         while (microtask_count > 0 && safety < TASK_FLUSH_SAFETY_LIMIT) {
-            Item cb = microtask_pop();
+            Item resource = ItemNull;
+            Item als_context = ItemNull;
+            Item cb = microtask_pop(&resource, &als_context);
             if (get_type_id(cb) == LMD_TYPE_FUNC) {
-                js_call_function(cb, ItemNull, NULL, 0);
+                Item previous_resource = js_async_hooks_enter_resource(resource);
+                js_als_context_call(als_context, cb, ItemNull, ItemNull, 0);
+                js_async_hooks_restore_resource(previous_resource);
             }
             safety++;
         }
@@ -245,6 +275,8 @@ typedef struct JsTimerHandle {
     uv_timer_t timer;
     int64_t    id;
     Item       callback;
+    Item       async_resource;
+    Item       als_context;
     bool       is_interval;
     Item       extra_args[8];   // extra args to pass to callback
     int        extra_count;     // number of extra args
@@ -275,6 +307,8 @@ typedef struct JsTimerRuntimeScope {
 
 static void timer_capture_runtime(JsTimerHandle* th) {
     if (!th) return;
+    th->async_resource = js_async_hooks_get_current_resource();
+    th->als_context = js_als_capture_context();
     if (context) {
         th->runtime_heap = context->heap;
         th->runtime_nursery = context->nursery;
@@ -345,6 +379,8 @@ static void timer_unregister_gc_roots(JsTimerHandle *th) {
     JsTimerRuntimeScope scope;
     if (timer_runtime_enter(th, &scope)) {
         heap_unregister_gc_root(&th->callback.item);
+        heap_unregister_gc_root(&th->async_resource.item);
+        heap_unregister_gc_root(&th->als_context.item);
         for (int j = 0; j < th->extra_count; j++) {
             heap_unregister_gc_root(&th->extra_args[j].item);
         }
@@ -375,6 +411,8 @@ static void timer_register_gc_roots(JsTimerHandle *th) {
     JsTimerRuntimeScope scope;
     if (!timer_runtime_enter(th, &scope)) return;
     heap_register_gc_root(&th->callback.item);
+    heap_register_gc_root(&th->async_resource.item);
+    heap_register_gc_root(&th->als_context.item);
     for (int j = 0; j < th->extra_count; j++) {
         heap_register_gc_root(&th->extra_args[j].item);
     }
@@ -393,13 +431,20 @@ static void timer_fire_cb(uv_timer_t *handle) {
     JsTimerHandle *th = (JsTimerHandle *)handle->data;
     JsTimerRuntimeScope scope;
     if (timer_runtime_enter(th, &scope)) {
+        Item previous_resource = js_async_hooks_enter_resource(th->async_resource);
         if (get_type_id(th->callback) == LMD_TYPE_FUNC) {
             if (th->extra_count > 0) {
-                js_call_function(th->callback, ItemNull, th->extra_args, th->extra_count);
+                if (th->extra_count == 1) {
+                    js_als_context_call(th->als_context, th->callback, ItemNull,
+                                        th->extra_args[0], 1);
+                } else {
+                    js_call_function(th->callback, ItemNull, th->extra_args, th->extra_count);
+                }
             } else {
-                js_call_function(th->callback, ItemNull, NULL, 0);
+                js_als_context_call(th->als_context, th->callback, ItemNull, ItemNull, 0);
             }
         }
+        js_async_hooks_restore_resource(previous_resource);
         timer_runtime_exit(&scope);
     } else {
         log_error("event_loop: timer fired without captured JS runtime");
@@ -890,6 +935,17 @@ extern "C" Item js_setTimeout_promise(Item delay, Item value, Item options) {
     return promise;
 }
 
+extern "C" Item js_setTimeout_promisified(Item delay, Item value) {
+    Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+    return js_setTimeout_promise(delay, value, undef);
+}
+
+extern "C" void js_timer_install_promisify_custom(Item fn_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    Item custom_fn = js_new_function((void*)js_setTimeout_promisified, 2);
+    js_property_set(fn_item, js_util_promisify_custom_symbol(), custom_fn);
+}
+
 // setImmediate(value, options) → Promise that resolves to value immediately
 extern "C" Item js_setImmediate_promise(Item value, Item options) {
     extern Item js_promise_with_resolvers(void);
@@ -992,6 +1048,8 @@ extern "C" void js_event_loop_cancel_document_timers(void* dom_doc) {
         th->runtime_doc = nullptr;
         timer_unregister_gc_roots(th);
         th->callback = ItemNull;
+        th->async_resource = ItemNull;
+        th->als_context = ItemNull;
         for (int j = 0; j < th->extra_count; j++) {
             th->extra_args[j] = ItemNull;
         }
@@ -1019,6 +1077,8 @@ extern "C" void js_event_loop_abandon_document_timers(void* dom_doc) {
         th->runtime_pool = nullptr;
         th->roots_registered = false;
         th->callback = ItemNull;
+        th->async_resource = ItemNull;
+        th->als_context = ItemNull;
         for (int j = 0; j < th->extra_count; j++) {
             th->extra_args[j] = ItemNull;
         }
@@ -1040,7 +1100,11 @@ extern "C" void js_event_loop_init(void) {
 
     // reset task queues — zero ring buffers to prevent GC scanning stale Items
     memset(next_tick_ring, 0, sizeof(next_tick_ring));
+    memset(next_tick_resource_ring, 0, sizeof(next_tick_resource_ring));
+    memset(next_tick_als_ring, 0, sizeof(next_tick_als_ring));
     memset(microtask_ring, 0, sizeof(microtask_ring));
+    memset(microtask_resource_ring, 0, sizeof(microtask_resource_ring));
+    memset(microtask_als_ring, 0, sizeof(microtask_als_ring));
     memset(raf_callback_ring, 0, sizeof(raf_callback_ring));
     next_tick_head = 0;
     next_tick_tail = 0;
@@ -1063,7 +1127,11 @@ extern "C" void js_event_loop_init(void) {
     static bool statics_rooted = false;
     if (!statics_rooted) {
         heap_register_gc_root_range((uint64_t*)next_tick_ring, MICROTASK_CAPACITY);
+        heap_register_gc_root_range((uint64_t*)next_tick_resource_ring, MICROTASK_CAPACITY);
+        heap_register_gc_root_range((uint64_t*)next_tick_als_ring, MICROTASK_CAPACITY);
         heap_register_gc_root_range((uint64_t*)microtask_ring, MICROTASK_CAPACITY);
+        heap_register_gc_root_range((uint64_t*)microtask_resource_ring, MICROTASK_CAPACITY);
+        heap_register_gc_root_range((uint64_t*)microtask_als_ring, MICROTASK_CAPACITY);
         heap_register_gc_root_range((uint64_t*)raf_callback_ring, RAF_CAPACITY);
         statics_rooted = true;
     }
@@ -1092,7 +1160,11 @@ extern "C" void js_event_loop_shutdown(void) {
     }
 
     memset(next_tick_ring, 0, sizeof(next_tick_ring));
+    memset(next_tick_resource_ring, 0, sizeof(next_tick_resource_ring));
+    memset(next_tick_als_ring, 0, sizeof(next_tick_als_ring));
     memset(microtask_ring, 0, sizeof(microtask_ring));
+    memset(microtask_resource_ring, 0, sizeof(microtask_resource_ring));
+    memset(microtask_als_ring, 0, sizeof(microtask_als_ring));
     memset(raf_callback_ring, 0, sizeof(raf_callback_ring));
     memset(raf_id_ring, 0, sizeof(raf_id_ring));
     next_tick_head = 0;

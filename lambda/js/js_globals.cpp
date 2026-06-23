@@ -14560,6 +14560,10 @@ extern "C" Item js_get_global_this() {
             Item fn = (global_fns[i].len == 2 && strncmp(global_fns[i].name, "gc", 2) == 0)
                 ? js_new_function((void*)js_global_gc, 0)
                 : js_get_global_builtin_fn(name_item, (Item){.item = i2it(global_fns[i].param_count)});
+            if (global_fns[i].len == 10 && strncmp(global_fns[i].name, "setTimeout", 10) == 0) {
+                extern void js_timer_install_promisify_custom(Item fn_item);
+                js_timer_install_promisify_custom(fn);
+            }
             js_property_set(js_global_this_obj, name_item, fn);
         }
 
