@@ -381,6 +381,7 @@ typedef struct JsHttpServer {
     Item      request_handler;     // callback(req, res)
     Item      incoming_message_ctor;
     Item      server_response_ctor;
+    bool      reject_nonstandard_body_writes;
     int       connection_count;
 } JsHttpServer;
 
@@ -406,6 +407,7 @@ static uv_stream_t* http_conn_stream(JsHttpConn* conn) {
 
 static void http_server_note_conn_closed(JsHttpConn* conn);
 static void http_conn_close_now(JsHttpConn* conn);
+static bool http_conn_write_bytes(JsHttpConn* conn, Item data_item, bool close_after);
 
 typedef struct HttpResponseWriteReq {
     char* data;
@@ -427,6 +429,29 @@ static void http_response_emit(Item self, const char* event, Item* args, int arg
         js_call_function(cb, self, args, argc);
         if (flush_tasks) js_microtask_flush();
     }
+}
+
+static Item http_error_with_code(const char* code, const char* message) {
+    Item err = js_new_error(make_string_item(message));
+    js_property_set(err, make_string_item("code"), make_string_item(code));
+    return err;
+}
+
+static Item http_response_error_tick(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item res = env[0];
+    Item err = env[1];
+    http_response_emit(res, "error", &err, 1, true);
+    return make_js_undefined();
+}
+
+static void http_response_schedule_error(Item res, Item err) {
+    Item* env = js_alloc_env(2);
+    env[0] = res;
+    env[1] = err;
+    Item tick = js_new_closure((void*)http_response_error_tick, 0, env, 2);
+    js_next_tick_enqueue(tick);
 }
 
 static bool http_item_bytes(Item item, const char** data, int* len) {
@@ -592,7 +617,8 @@ static Item http_lowercase_header_name(Item name_item) {
 }
 
 static Item http_validate_header_name(Item name_item) {
-    Item name = http_item_to_header_string(name_item);
+    Item name = get_type_id(name_item) == LMD_TYPE_UNDEFINED ?
+        make_string_item("undefined") : http_item_to_header_string(name_item);
     if (get_type_id(name_item) != LMD_TYPE_STRING || !http_is_valid_header_token(name)) {
         char msg[512];
         if (get_type_id(name) == LMD_TYPE_STRING) {
@@ -619,7 +645,7 @@ static Item http_validate_header_value(Item name_item, Item value_item) {
         }
         return js_throw_type_error_code("ERR_HTTP_INVALID_HEADER_VALUE", msg);
     }
-    return http_item_to_header_string(value_item);
+    return value_item;
 }
 
 static Item http_response_raw_headers(Item self) {
@@ -652,11 +678,100 @@ static void http_raw_headers_append(Item self, Item name, Item value) {
     js_array_push(raw, value);
 }
 
+static Item http_invalid_header_name_arg(Item name_item) {
+    return js_throw_invalid_arg_type("name", "string", name_item);
+}
+
+static bool http_validate_header_name_arg(Item name_item) {
+    return get_type_id(name_item) == LMD_TYPE_STRING;
+}
+
+static Item http_headers_get_names(Item self, bool raw_names) {
+    Item result = js_array_new(0);
+    if (raw_names) {
+        Item raw = js_property_get(self, make_string_item("__raw_headers__"));
+        if (get_type_id(raw) != LMD_TYPE_ARRAY) return result;
+        int64_t len = js_array_length(raw);
+        for (int64_t i = 0; i + 1 < len; i += 2) {
+            Item raw_name = js_array_get_int(raw, i);
+            if (get_type_id(raw_name) == LMD_TYPE_STRING) js_array_push(result, raw_name);
+        }
+        return result;
+    }
+    Item headers = js_property_get(self, make_string_item("__headers__"));
+    if (get_type_id(headers) != LMD_TYPE_MAP) return result;
+    Item keys = js_object_keys(headers);
+    int64_t len = js_array_length(keys);
+    for (int64_t i = 0; i < len; i++) {
+        Item key = js_array_get_int(keys, i);
+        Item value = js_property_get(headers, key);
+        TypeId type = get_type_id(value);
+        if (type != LMD_TYPE_UNDEFINED && type != LMD_TYPE_NULL) js_array_push(result, key);
+    }
+    return result;
+}
+
+static bool http_response_header_has_token(Item self, const char* name, const char* token) {
+    Item headers = js_property_get(self, make_string_item("__headers__"));
+    if (get_type_id(headers) != LMD_TYPE_MAP) return false;
+    Item value = js_property_get(headers, make_string_item(name));
+    if (get_type_id(value) != LMD_TYPE_STRING) return false;
+    String* s = it2s(value);
+    if (!s) return false;
+    char buf[512];
+    int len = (int)s->len < (int)sizeof(buf) - 1 ? (int)s->len : (int)sizeof(buf) - 1;
+    memcpy(buf, s->chars, (size_t)len);
+    buf[len] = '\0';
+    return http_header_has_token(buf, token);
+}
+
+static bool http_header_value_is_array(Item value) {
+    return get_type_id(value) == LMD_TYPE_ARRAY;
+}
+
+static int http_append_header_value(char* resp_buf, int pos, int cap, Item name, Item value) {
+    if (get_type_id(name) != LMD_TYPE_STRING) return pos;
+    String* ks = it2s(name);
+    if (http_header_value_is_array(value)) {
+        int64_t len = js_array_length(value);
+        if (http_header_name_equals(ks, "set-cookie", 10)) {
+            for (int64_t i = 0; i < len; i++) {
+                Item part = http_item_to_header_string(js_array_get_int(value, i));
+                if (get_type_id(part) != LMD_TYPE_STRING) continue;
+                String* ps = it2s(part);
+                pos += snprintf(resp_buf + pos, cap - pos,
+                                "%.*s: %.*s\r\n", (int)ks->len, ks->chars,
+                                (int)ps->len, ps->chars);
+            }
+            return pos;
+        }
+        char value_buf[4096];
+        int vpos = 0;
+        for (int64_t i = 0; i < len; i++) {
+            Item part = http_item_to_header_string(js_array_get_int(value, i));
+            if (get_type_id(part) != LMD_TYPE_STRING) continue;
+            String* ps = it2s(part);
+            if (i > 0) vpos += snprintf(value_buf + vpos, sizeof(value_buf) - vpos, ", ");
+            vpos += snprintf(value_buf + vpos, sizeof(value_buf) - vpos,
+                             "%.*s", (int)ps->len, ps->chars);
+        }
+        return pos + snprintf(resp_buf + pos, cap - pos,
+                              "%.*s: %.*s\r\n", (int)ks->len, ks->chars,
+                              vpos, value_buf);
+    }
+    Item string_value = http_item_to_header_string(value);
+    if (get_type_id(string_value) != LMD_TYPE_STRING) return pos;
+    String* vs = it2s(string_value);
+    return pos + snprintf(resp_buf + pos, cap - pos,
+                          "%.*s: %.*s\r\n", (int)ks->len, ks->chars,
+                          (int)vs->len, vs->chars);
+}
+
 static void http_response_set_header_pair(Item self, Item name_item, Item value_item) {
     Item name = http_validate_header_name(name_item);
-    if (name.item == 0) return;
+    if (js_check_exception() || name.item == 0) return;
     Item value = http_validate_header_value(name, value_item);
-    if (value.item == 0) return;
+    if (js_check_exception() || value.item == 0) return;
 
     Item headers = js_property_get(self, make_string_item("__headers__"));
     if (get_type_id(headers) != LMD_TYPE_MAP) {
@@ -670,9 +785,9 @@ static void http_response_set_header_pair(Item self, Item name_item, Item value_
 
 static void http_response_append_raw_header_pair(Item self, Item name_item, Item value_item) {
     Item name = http_validate_header_name(name_item);
-    if (name.item == 0) return;
+    if (js_check_exception() || name.item == 0) return;
     Item value = http_validate_header_value(name, value_item);
-    if (value.item == 0) return;
+    if (js_check_exception() || value.item == 0) return;
 
     Item headers = js_property_get(self, make_string_item("__headers__"));
     if (get_type_id(headers) != LMD_TYPE_MAP) {
@@ -703,11 +818,9 @@ static int http_response_append_headers(char* resp_buf, int pos, int cap, Item s
         for (int64_t i = 0; i + 1 < len; i += 2) {
             Item k = js_array_get_int(raw, i);
             Item v = js_array_get_int(raw, i + 1);
-            if (get_type_id(k) == LMD_TYPE_STRING && get_type_id(v) == LMD_TYPE_STRING) {
+            if (get_type_id(k) == LMD_TYPE_STRING) {
                 String* ks = it2s(k);
-                String* vs = it2s(v);
-                pos += snprintf(resp_buf + pos, cap - pos,
-                                "%.*s: %.*s\r\n", (int)ks->len, ks->chars, (int)vs->len, vs->chars);
+                pos = http_append_header_value(resp_buf, pos, cap, k, v);
                 if (http_header_name_equals(ks, "content-length", 14)) *has_content_length = true;
                 if (http_header_name_equals(ks, "content-type", 12)) *has_content_type = true;
                 if (http_header_name_equals(ks, "connection", 10)) *has_connection = true;
@@ -728,11 +841,11 @@ static int http_response_append_headers(char* resp_buf, int pos, int cap, Item s
         for (int64_t i = 0; i < nkeys; i++) {
             Item k = js_array_get_int(keys, i);
             Item v = js_property_get(headers, k);
-            if (get_type_id(k) == LMD_TYPE_STRING && get_type_id(v) == LMD_TYPE_STRING) {
+            TypeId value_type = get_type_id(v);
+            if (get_type_id(k) == LMD_TYPE_STRING &&
+                value_type != LMD_TYPE_UNDEFINED && value_type != LMD_TYPE_NULL) {
                 String* ks = it2s(k);
-                String* vs = it2s(v);
-                pos += snprintf(resp_buf + pos, cap - pos,
-                                "%.*s: %.*s\r\n", (int)ks->len, ks->chars, (int)vs->len, vs->chars);
+                pos = http_append_header_value(resp_buf, pos, cap, k, v);
                 if (http_header_name_equals(ks, "content-length", 14)) *has_content_length = true;
                 if (http_header_name_equals(ks, "content-type", 12)) *has_content_type = true;
                 if (http_header_name_equals(ks, "connection", 10)) *has_connection = true;
@@ -759,11 +872,13 @@ static Item http_response_writeHead(Item self, Item status_item, Item reason_or_
     js_property_set(self, make_string_item("statusCode"), (Item){.item = i2it(status)});
 
     Item headers_arg = reason_or_headers;
+    Item status_message_item = make_string_item(http_status_text(status));
     if (get_type_id(reason_or_headers) == LMD_TYPE_STRING) {
         js_property_set(self, make_string_item("statusMessage"), reason_or_headers);
+        status_message_item = reason_or_headers;
         headers_arg = headers_item;
     } else {
-        js_property_set(self, make_string_item("statusMessage"), make_string_item(http_status_text(status)));
+        js_property_set(self, make_string_item("statusMessage"), status_message_item);
         TypeId reason_type = get_type_id(reason_or_headers);
         if ((reason_type == LMD_TYPE_UNDEFINED || reason_type == LMD_TYPE_NULL) &&
             (get_type_id(headers_item) == LMD_TYPE_ARRAY || get_type_id(headers_item) == LMD_TYPE_MAP)) {
@@ -816,6 +931,8 @@ static Item http_response_writeHead(Item self, Item status_item, Item reason_or_
     }
 
     js_property_set(self, make_string_item("__write_head_called__"), (Item){.item = b2it(true)});
+    js_property_set(self, make_string_item("__write_head_status__"), (Item){.item = i2it(status)});
+    js_property_set(self, make_string_item("__write_head_status_message__"), status_message_item);
     js_property_set(self, make_string_item("headersSent"), (Item){.item = b2it(true)});
     return self;
 }
@@ -836,23 +953,27 @@ extern "C" Item js_http_res_setHeader(Item self, Item name_item, Item value_item
 
 // response.getHeader(name)
 extern "C" Item js_http_res_getHeader(Item self, Item name_item) {
+    if (!http_validate_header_name_arg(name_item)) return http_invalid_header_name_arg(name_item);
     Item headers = js_property_get(self, make_string_item("__headers__"));
     if (get_type_id(headers) != LMD_TYPE_MAP) return make_js_undefined();
-    if (get_type_id(name_item) == LMD_TYPE_STRING) {
-        return js_property_get(headers, http_lowercase_header_name(name_item));
-    }
-    return make_js_undefined();
+    return js_property_get(headers, http_lowercase_header_name(name_item));
 }
 
 // response.getHeaders()
 extern "C" Item js_http_res_getHeaders(Item self) {
     Item headers = js_property_get(self, make_string_item("__headers__"));
-    if (get_type_id(headers) != LMD_TYPE_MAP) return js_new_object();
+    if (get_type_id(headers) != LMD_TYPE_MAP) {
+        Item empty = js_new_object();
+        js_set_prototype(empty, ItemNull);
+        return empty;
+    }
+    js_set_prototype(headers, ItemNull);
     return headers;
 }
 
 // response.removeHeader(name)
 extern "C" Item js_http_res_removeHeader(Item self, Item name_item) {
+    if (!http_validate_header_name_arg(name_item)) return http_invalid_header_name_arg(name_item);
     if (http_response_headers_committed(self)) {
         return js_throw_error_with_code("ERR_HTTP_HEADERS_SENT",
                                         "Cannot remove headers after they are sent to the client");
@@ -866,8 +987,35 @@ extern "C" Item js_http_res_removeHeader(Item self, Item name_item) {
     return self;
 }
 
+extern "C" Item js_http_res_getHeaderNames(Item self) {
+    return http_headers_get_names(self, false);
+}
+
+extern "C" Item js_http_res_getRawHeaderNames(Item self) {
+    return http_headers_get_names(self, true);
+}
+
+extern "C" Item js_http_res_hasHeader(Item self, Item name_item) {
+    if (!http_validate_header_name_arg(name_item)) return http_invalid_header_name_arg(name_item);
+    Item value = js_http_res_getHeader(self, name_item);
+    TypeId type = get_type_id(value);
+    return (Item){.item = b2it(type != LMD_TYPE_UNDEFINED && type != LMD_TYPE_NULL)};
+}
+
 // response.write(chunk) — accumulate body data
 extern "C" Item js_http_res_write(Item self, Item chunk_item, Item encoding_item) {
+    bool reject_body = http_response_bool_prop(self, "__reject_nonstandard_body_writes__");
+    int status = http_response_int_prop(self, "statusCode");
+    bool head_request = false;
+    Item method = js_property_get(self, make_string_item("__request_method__"));
+    if (get_type_id(method) == LMD_TYPE_STRING) {
+        String* ms = it2s(method);
+        head_request = ms->len == 4 && memcmp(ms->chars, "HEAD", 4) == 0;
+    }
+    if (reject_body && (head_request || status == 204 || status == 304)) {
+        return js_throw_error_with_code("ERR_HTTP_BODY_NOT_ALLOWED",
+                                        "Adding content for this request method or response status is not allowed.");
+    }
     http_response_append_body_encoded(self, chunk_item, encoding_item);
     js_property_set(self, make_string_item("__has_body_write__"), (Item){.item = b2it(true)});
     js_property_set(self, make_string_item("__headers_sent__"), (Item){.item = b2it(true)});
@@ -898,8 +1046,21 @@ static void http_response_flush(Item self) {
 
     // get status code
     Item status_item = js_property_get(self, make_string_item("statusCode"));
+    Item committed_status = js_property_get(self, make_string_item("__write_head_status__"));
+    if (get_type_id(committed_status) == LMD_TYPE_INT) status_item = committed_status;
     int status = 200;
     if (get_type_id(status_item) == LMD_TYPE_INT) status = (int)it2i(status_item);
+    Item committed_status_message = js_property_get(self, make_string_item("__write_head_status_message__"));
+    const char* status_message = http_response_status_message(self, status);
+    char committed_message_buf[128];
+    if (get_type_id(committed_status_message) == LMD_TYPE_STRING) {
+        String* cms = it2s(committed_status_message);
+        int msg_len = (int)cms->len < (int)sizeof(committed_message_buf) - 1 ?
+            (int)cms->len : (int)sizeof(committed_message_buf) - 1;
+        memcpy(committed_message_buf, cms->chars, (size_t)msg_len);
+        committed_message_buf[msg_len] = '\0';
+        status_message = committed_message_buf;
+    }
 
     // build response
     char resp_buf[65536];
@@ -907,7 +1068,7 @@ static void http_response_flush(Item self) {
 
     // status line
     pos += snprintf(resp_buf + pos, sizeof(resp_buf) - pos,
-                    "HTTP/1.1 %d %s\r\n", status, http_response_status_message(self, status));
+                    "HTTP/1.1 %d %s\r\n", status, status_message);
 
     // body
     Item body = js_property_get(self, make_string_item("__body__"));
@@ -938,10 +1099,14 @@ static void http_response_flush(Item self) {
         String* vs = it2s(req_version);
         request_http_10 = vs->len == 8 && memcmp(vs->chars, "HTTP/1.0", 8) == 0;
     }
-    bool chunked_body = used_send && !request_http_10 && !has_content_length;
-
     bool has_body_write = http_response_bool_prop(self, "__has_body_write__");
-    if (!has_content_length && !used_send && (!has_body_write || !request_http_10)) {
+    bool keep_alive_max_null = http_response_bool_prop(self, "__keep_alive_max_null__");
+    bool explicit_chunked_body = has_transfer_encoding &&
+        http_response_header_has_token(self, "transfer-encoding", "chunked");
+    bool chunked_body = (used_send || explicit_chunked_body ||
+                         (has_body_write && keep_alive_max_null)) &&
+                        !request_http_10 && !has_content_length;
+    if (!has_content_length && !chunked_body && !used_send && (!has_body_write || !request_http_10)) {
         pos += snprintf(resp_buf + pos, sizeof(resp_buf) - pos,
                         "Content-Length: %d\r\n", body_len);
         has_content_length = true;
@@ -950,7 +1115,12 @@ static void http_response_flush(Item self) {
         pos += snprintf(resp_buf + pos, sizeof(resp_buf) - pos,
                         "Content-Type: text/plain\r\n");
     }
-    if (!has_date) {
+    bool send_date = true;
+    Item send_date_item = js_property_get(self, make_string_item("sendDate"));
+    if (get_type_id(send_date_item) == LMD_TYPE_BOOL && !it2b(send_date_item)) {
+        send_date = false;
+    }
+    if (send_date && !has_date) {
         char date_buf[64];
         time_t now = time(NULL);
         struct tm tm_utc;
@@ -972,20 +1142,35 @@ static void http_response_flush(Item self) {
         pos += snprintf(resp_buf + pos, sizeof(resp_buf) - pos,
                         close_after ? "Connection: close\r\n" : "Connection: keep-alive\r\n");
     }
+    int keep_alive_max = http_response_int_prop(self, "__keep_alive_max__");
+    if (!close_after && !has_keep_alive) {
+        if (keep_alive_max > 0) {
+            pos += snprintf(resp_buf + pos, sizeof(resp_buf) - pos,
+                            "Keep-Alive: timeout=65, max=%d\r\n", keep_alive_max);
+        } else {
+            pos += snprintf(resp_buf + pos, sizeof(resp_buf) - pos,
+                            "Keep-Alive: timeout=65\r\n");
+        }
+    }
     if (chunked_body && !has_transfer_encoding) {
         pos += snprintf(resp_buf + pos, sizeof(resp_buf) - pos,
                         "Transfer-Encoding: chunked\r\n");
-    }
-    int keep_alive_max = http_response_int_prop(self, "__keep_alive_max__");
-    if (!close_after && keep_alive_max > 0 && !has_keep_alive) {
-        pos += snprintf(resp_buf + pos, sizeof(resp_buf) - pos,
-                        "Keep-Alive: timeout=65, max=%d\r\n", keep_alive_max);
     }
     pos += snprintf(resp_buf + pos, sizeof(resp_buf) - pos, "\r\n");
 
     char* output_body = (char*)body_data;
     int output_body_len = body_len;
-    if (chunked_body) {
+    bool suppress_body = false;
+    Item method_item = js_property_get(self, make_string_item("__request_method__"));
+    if (get_type_id(method_item) == LMD_TYPE_STRING) {
+        String* ms = it2s(method_item);
+        suppress_body = ms->len == 4 && memcmp(ms->chars, "HEAD", 4) == 0;
+    }
+    if (status == 204 || status == 304) suppress_body = true;
+    if (suppress_body) {
+        output_body_len = 0;
+    }
+    if (chunked_body && !suppress_body) {
         Item chunks = js_property_get(self, make_string_item("__chunks__"));
         int chunk_cap = body_len + 64;
         if (get_type_id(chunks) == LMD_TYPE_ARRAY) {
@@ -1087,6 +1272,22 @@ extern "C" Item js_http_res_end(Item self, Item data_item, Item callback_item) {
         callback = data_item;
         data_item = make_js_undefined();
     }
+    bool already_ended = http_response_bool_prop(self, "writableEnded") ||
+                         http_response_bool_prop(self, "finished");
+    if (already_ended) {
+        TypeId data_type = get_type_id(data_item);
+        bool has_data = data_item.item != 0 && data_item.item != ITEM_NULL &&
+                        data_type != LMD_TYPE_UNDEFINED && data_type != LMD_TYPE_NULL;
+        Item err = has_data ?
+            http_error_with_code("ERR_STREAM_WRITE_AFTER_END", "write after end") :
+            http_error_with_code("ERR_STREAM_ALREADY_FINISHED", "Cannot call end after a stream was finished");
+        if (js_http_is_callable(callback)) {
+            js_call_function(callback, make_js_undefined(), &err, 1);
+            js_microtask_flush();
+        }
+        if (has_data) http_response_schedule_error(self, err);
+        return self;
+    }
     if (js_http_is_callable(callback)) {
         js_property_set(self, make_string_item("__end_callback__"), callback);
     } else {
@@ -1128,6 +1329,19 @@ static Item js_http_res_inst_getHeaders(Item maybe_self) {
     return js_http_res_getHeaders(js_http_receiver(maybe_self, "__conn__"));
 }
 
+static Item js_http_res_inst_getHeaderNames(Item maybe_self) {
+    return js_http_res_getHeaderNames(js_http_receiver(maybe_self, "__conn__"));
+}
+
+static Item js_http_res_inst_getRawHeaderNames(Item maybe_self) {
+    return js_http_res_getRawHeaderNames(js_http_receiver(maybe_self, "__conn__"));
+}
+
+static Item js_http_res_inst_hasHeader(Item maybe_self, Item name_item) {
+    Item self = js_http_receiver(maybe_self, "__conn__");
+    return js_http_res_hasHeader(self, self.item == maybe_self.item ? name_item : maybe_self);
+}
+
 static Item js_http_res_inst_removeHeader(Item maybe_self, Item name_item) {
     Item self = js_http_receiver(maybe_self, "__conn__");
     return js_http_res_removeHeader(self, self.item == maybe_self.item ? name_item : maybe_self);
@@ -1160,6 +1374,16 @@ static Item js_http_res_inst_flushHeaders(Item maybe_self) {
     return self;
 }
 
+static Item js_http_res_inst_writeContinue(Item maybe_self) {
+    Item self = js_http_receiver(maybe_self, "__conn__");
+    Item handle_item = js_property_get(self, make_string_item("__conn__"));
+    if (get_type_id(handle_item) == LMD_TYPE_INT) {
+        JsHttpConn* conn = (JsHttpConn*)(uintptr_t)it2i(handle_item);
+        http_conn_write_bytes(conn, make_string_item("HTTP/1.1 100 Continue\r\n\r\n"), false);
+    }
+    return self;
+}
+
 static Item js_http_res_inst_on(Item maybe_self, Item event_item, Item callback) {
     Item self = js_http_receiver(maybe_self, "__conn__");
     if (self.item != maybe_self.item) {
@@ -1189,6 +1413,8 @@ static Item make_response_object(JsHttpConn* conn) {
     js_property_set(res, make_string_item("__write_head_called__"), (Item){.item = b2it(false)});
     js_property_set(res, make_string_item("__used_send__"), (Item){.item = b2it(false)});
     js_property_set(res, make_string_item("__has_body_write__"), (Item){.item = b2it(false)});
+    js_property_set(res, make_string_item("__reject_nonstandard_body_writes__"),
+                    (Item){.item = b2it(conn && conn->server && conn->server->reject_nonstandard_body_writes)});
     js_property_set(res, make_string_item("headersSent"), (Item){.item = b2it(false)});
     js_property_set(res, make_string_item("__raw_headers__"), js_array_new(0));
     js_property_set(res, make_string_item("__chunks__"), js_array_new(0));
@@ -1208,6 +1434,12 @@ static Item make_response_object(JsHttpConn* conn) {
                     js_new_function((void*)js_http_res_inst_getHeader, 2));
     js_property_set(res, make_string_item("getHeaders"),
                     js_new_function((void*)js_http_res_inst_getHeaders, 1));
+    js_property_set(res, make_string_item("getHeaderNames"),
+                    js_new_function((void*)js_http_res_inst_getHeaderNames, 1));
+    js_property_set(res, make_string_item("getRawHeaderNames"),
+                    js_new_function((void*)js_http_res_inst_getRawHeaderNames, 1));
+    js_property_set(res, make_string_item("hasHeader"),
+                    js_new_function((void*)js_http_res_inst_hasHeader, 2));
     js_property_set(res, make_string_item("removeHeader"),
                     js_new_function((void*)js_http_res_inst_removeHeader, 2));
     js_property_set(res, make_string_item("write"),
@@ -1218,6 +1450,8 @@ static Item make_response_object(JsHttpConn* conn) {
                     js_new_function((void*)js_http_res_inst_end, 3));
     js_property_set(res, make_string_item("flushHeaders"),
                     js_new_function((void*)js_http_res_inst_flushHeaders, 1));
+    js_property_set(res, make_string_item("writeContinue"),
+                    js_new_function((void*)js_http_res_inst_writeContinue, 1));
     js_property_set(res, make_string_item("on"),
                     js_new_function((void*)js_http_res_inst_on, 3));
 
@@ -1468,6 +1702,12 @@ static int http_server_max_requests(JsHttpServer* srv) {
     return 0;
 }
 
+static bool http_server_max_requests_is_null(JsHttpServer* srv) {
+    if (!srv) return false;
+    Item value = js_property_get(srv->js_object, make_string_item("maxRequestsPerSocket"));
+    return get_type_id(value) == LMD_TYPE_NULL;
+}
+
 static bool http_is_alpha(char c) {
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
 }
@@ -1524,6 +1764,11 @@ static bool http_request_wants_keep_alive(ParsedRequest* req, bool has_buffered_
     return has_buffered_request;
 }
 
+static bool http_request_has_expect_continue(ParsedRequest* req) {
+    const char* expect = http_request_header(req, "expect");
+    return expect && http_header_has_token(expect, "100-continue");
+}
+
 static Item http_response_for_request(JsHttpConn* conn, ParsedRequest* req, bool force_close,
                                       bool over_max, bool has_buffered_request) {
     Item res_obj = make_response_object(conn);
@@ -1533,8 +1778,12 @@ static Item http_response_for_request(JsHttpConn* conn, ParsedRequest* req, bool
     if (over_max) close_after = true;
     js_property_set(res_obj, make_string_item("__close_after_response__"), (Item){.item = b2it(close_after)});
     js_property_set(res_obj, make_string_item("__keep_alive_max__"), (Item){.item = i2it(max_requests)});
+    js_property_set(res_obj, make_string_item("__keep_alive_max_null__"),
+                    (Item){.item = b2it(http_server_max_requests_is_null(conn ? conn->server : NULL))});
     js_property_set(res_obj, make_string_item("__request_http_version__"),
                     req ? make_string_item(req->http_version) : make_string_item("HTTP/1.1"));
+    js_property_set(res_obj, make_string_item("__request_method__"),
+                    req ? make_string_item(req->method) : make_string_item("GET"));
     return res_obj;
 }
 
@@ -1616,7 +1865,8 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
             if (parse_http_request(conn->recv_buf, conn->recv_len, &req, &consumed) != 0) {
                 break;
             }
-            if (!req.body_complete) {
+            bool expect_continue = http_request_has_expect_continue(&req);
+            if (!req.body_complete && !expect_continue) {
                 break;
             }
             if (consumed <= 0 || consumed > conn->recv_len) break;
@@ -1629,9 +1879,13 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                 http_server_send_service_unavailable(conn);
             } else if (srv) {
                 Item on_req = js_property_get(srv->js_object, make_string_item("__on_request__"));
+                Item on_continue = expect_continue ?
+                    js_property_get(srv->js_object, make_string_item("__on_checkContinue__")) :
+                    make_js_undefined();
                 bool has_handler = get_type_id(srv->request_handler) == LMD_TYPE_FUNC;
                 bool has_request_event = get_type_id(on_req) == LMD_TYPE_FUNC;
-                if (!has_handler && !has_request_event) {
+                bool has_check_continue = get_type_id(on_continue) == LMD_TYPE_FUNC;
+                if (!has_check_continue && !has_handler && !has_request_event) {
                     int remaining = conn->recv_len - consumed;
                     if (remaining > 0) memmove(conn->recv_buf, conn->recv_buf + consumed, (size_t)remaining);
                     conn->recv_len = remaining;
@@ -1646,19 +1900,29 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                 }
 
                 Item args[2] = { req_obj, res_obj };
-                if (has_handler) {
+                if (has_check_continue) {
                     Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                    js_call_function(srv->request_handler, srv->js_object, args, 2);
+                    js_call_function(on_continue, srv->js_object, args, 2);
                     js_async_hooks_restore_resource(previous_resource);
                     js_microtask_flush();
-                }
+                } else {
+                    if (expect_continue) {
+                        http_conn_write_bytes(conn, make_string_item("HTTP/1.1 100 Continue\r\n\r\n"), false);
+                    }
+                    if (has_handler) {
+                        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
+                        js_call_function(srv->request_handler, srv->js_object, args, 2);
+                        js_async_hooks_restore_resource(previous_resource);
+                        js_microtask_flush();
+                    }
 
-                // emit 'request' event
-                if (has_request_event && (!has_handler || on_req.item != srv->request_handler.item)) {
-                    Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                    js_call_function(on_req, srv->js_object, args, 2);
-                    js_async_hooks_restore_resource(previous_resource);
-                    js_microtask_flush();
+                    // emit 'request' event
+                    if (has_request_event && (!has_handler || on_req.item != srv->request_handler.item)) {
+                        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
+                        js_call_function(on_req, srv->js_object, args, 2);
+                        js_async_hooks_restore_resource(previous_resource);
+                        js_microtask_flush();
+                    }
                 }
             }
             int remaining = conn->recv_len - consumed;
@@ -1676,13 +1940,18 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
             int consumed = 0;
             if (parse_http_request(conn->recv_buf, conn->recv_len, &req, &consumed) == 0 &&
                 consumed > 0 && consumed <= conn->recv_len) {
+                bool expect_continue = http_request_has_expect_continue(&req);
                 JsHttpServer* srv = conn->server;
                 conn->request_count++;
                 if (srv) {
                     Item on_req = js_property_get(srv->js_object, make_string_item("__on_request__"));
+                    Item on_continue = expect_continue ?
+                        js_property_get(srv->js_object, make_string_item("__on_checkContinue__")) :
+                        make_js_undefined();
                     bool has_handler = get_type_id(srv->request_handler) == LMD_TYPE_FUNC;
                     bool has_request_event = get_type_id(on_req) == LMD_TYPE_FUNC;
-                    if (has_handler || has_request_event) {
+                    bool has_check_continue = get_type_id(on_continue) == LMD_TYPE_FUNC;
+                    if (has_check_continue || has_handler || has_request_event) {
                         if (conn->async_resource.item == 0) conn->async_resource = js_new_object();
                         Item req_obj = make_request_object(conn, &req);
                         Item res_obj = http_response_for_request(conn, &req, true, false, false);
@@ -1691,17 +1960,27 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                             conn->request_body_remaining = req.content_length - req.body_len;
                         }
                         Item args[2] = { req_obj, res_obj };
-                        if (has_handler) {
+                        if (has_check_continue) {
                             Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                            js_call_function(srv->request_handler, srv->js_object, args, 2);
+                            js_call_function(on_continue, srv->js_object, args, 2);
                             js_async_hooks_restore_resource(previous_resource);
                             js_microtask_flush();
-                        }
-                        if (has_request_event && (!has_handler || on_req.item != srv->request_handler.item)) {
-                            Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                            js_call_function(on_req, srv->js_object, args, 2);
-                            js_async_hooks_restore_resource(previous_resource);
-                            js_microtask_flush();
+                        } else {
+                            if (expect_continue) {
+                                http_conn_write_bytes(conn, make_string_item("HTTP/1.1 100 Continue\r\n\r\n"), false);
+                            }
+                            if (has_handler) {
+                                Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
+                                js_call_function(srv->request_handler, srv->js_object, args, 2);
+                                js_async_hooks_restore_resource(previous_resource);
+                                js_microtask_flush();
+                            }
+                            if (has_request_event && (!has_handler || on_req.item != srv->request_handler.item)) {
+                                Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
+                                js_call_function(on_req, srv->js_object, args, 2);
+                                js_async_hooks_restore_resource(previous_resource);
+                                js_microtask_flush();
+                            }
                         }
                     }
                 }
@@ -1712,7 +1991,9 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
         }
         http_conn_destroy_unfinished_request(conn);
         uv_read_stop(stream);
-        if (conn->request_count == 0) {
+        if (conn->request_count == 0 ||
+            (conn->recv_len == 0 && (conn->current_request.item == 0 ||
+             get_type_id(conn->current_request) == LMD_TYPE_UNDEFINED))) {
             http_conn_close_now(conn);
         }
     }
@@ -1991,6 +2272,9 @@ extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler
     srv->request_handler = handler;
     srv->incoming_message_ctor = incoming_ctor;
     srv->server_response_ctor = response_ctor;
+    Item reject_body = js_property_get(options_or_handler, make_string_item("rejectNonStandardBodyWrites"));
+    srv->reject_nonstandard_body_writes =
+        get_type_id(reject_body) == LMD_TYPE_BOOL && it2b(reject_body);
 
     Item obj = js_new_object();
     // T5b: legacy `__class_name__` string write retired.
@@ -2035,6 +2319,7 @@ typedef struct JsHttpClientReq {
     int        recv_cap;
     int        response_hdr_size;
     int        response_delivered;
+    char       method[16];
     bool       response_emitted;
     bool       response_ended;
     bool       destroyed;
@@ -2052,6 +2337,65 @@ static void http_client_sync_header_property(JsHttpClientReq* creq, Item req_obj
     if (!creq || !creq->send_buf || creq->send_head_len <= 0 || req_obj.item == 0) return;
     js_property_set(req_obj, make_string_item("_header"),
                     make_string_item(creq->send_buf, creq->send_head_len));
+}
+
+static void http_client_metadata_ensure(Item req_obj, Item* out_headers, Item* out_raw) {
+    Item headers = js_property_get(req_obj, make_string_item("__headers__"));
+    if (get_type_id(headers) != LMD_TYPE_MAP) {
+        headers = js_new_object();
+        js_property_set(req_obj, make_string_item("__headers__"), headers);
+    }
+    Item raw = js_property_get(req_obj, make_string_item("__raw_headers__"));
+    if (get_type_id(raw) != LMD_TYPE_ARRAY) {
+        raw = js_array_new(0);
+        js_property_set(req_obj, make_string_item("__raw_headers__"), raw);
+    }
+    if (out_headers) *out_headers = headers;
+    if (out_raw) *out_raw = raw;
+}
+
+static void http_client_metadata_set(Item req_obj, Item raw_name, Item value) {
+    if (get_type_id(raw_name) != LMD_TYPE_STRING) return;
+    Item headers;
+    http_client_metadata_ensure(req_obj, &headers, NULL);
+    Item lower = http_lowercase_header_name(raw_name);
+    js_property_set(headers, lower, value);
+    http_raw_headers_remove_name(req_obj, raw_name);
+    Item raw;
+    http_client_metadata_ensure(req_obj, NULL, &raw);
+    js_array_push(raw, raw_name);
+    js_array_push(raw, value);
+}
+
+static void http_client_metadata_from_headers(Item req_obj, Item headers_item) {
+    if (get_type_id(headers_item) == LMD_TYPE_MAP) {
+        Item keys = js_object_keys(headers_item);
+        int64_t nkeys = js_array_length(keys);
+        for (int64_t i = 0; i < nkeys; i++) {
+            Item k = js_array_get_int(keys, i);
+            http_client_metadata_set(req_obj, k, js_property_get(headers_item, k));
+        }
+    } else if (get_type_id(headers_item) == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(headers_item);
+        for (int64_t i = 0; i < len; i++) {
+            Item entry = js_array_get_int(headers_item, i);
+            if (get_type_id(entry) == LMD_TYPE_ARRAY && js_array_length(entry) >= 2) {
+                http_client_metadata_set(req_obj, js_array_get_int(entry, 0),
+                                         js_array_get_int(entry, 1));
+            } else if (i + 1 < len) {
+                http_client_metadata_set(req_obj, entry, js_array_get_int(headers_item, i + 1));
+                i++;
+            }
+        }
+    }
+}
+
+static Item js_http_client_getHeaderNames(Item self) {
+    return http_headers_get_names(self, false);
+}
+
+static Item js_http_client_getRawHeaderNames(Item self) {
+    return http_headers_get_names(self, true);
 }
 
 static void http_client_emit(Item req_obj, const char* event) {
@@ -2403,10 +2747,76 @@ static int js_http_response_content_length(Item headers) {
     return result;
 }
 
+static bool js_http_response_has_header_token(Item headers, const char* name, const char* token) {
+    if (get_type_id(headers) != LMD_TYPE_MAP) return false;
+    Item value = js_property_get(headers, make_string_item(name));
+    if (get_type_id(value) != LMD_TYPE_STRING) return false;
+    String* s = it2s(value);
+    if (!s) return false;
+    char buf[512];
+    int len = (int)s->len < (int)sizeof(buf) - 1 ? (int)s->len : (int)sizeof(buf) - 1;
+    memcpy(buf, s->chars, (size_t)len);
+    buf[len] = '\0';
+    return http_header_has_token(buf, token);
+}
+
+static int http_chunk_hex_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static int http_decode_chunked_body(const char* data, int len, char* out,
+                                    int* consumed, bool* complete) {
+    int pos = 0;
+    int out_len = 0;
+    if (consumed) *consumed = 0;
+    if (complete) *complete = false;
+    while (pos < len) {
+        int line_start = pos;
+        int line_end = -1;
+        for (int i = pos; i + 1 < len; i++) {
+            if (data[i] == '\r' && data[i + 1] == '\n') {
+                line_end = i;
+                break;
+            }
+        }
+        if (line_end < 0) return out_len;
+        int size = 0;
+        bool saw_digit = false;
+        for (int i = line_start; i < line_end; i++) {
+            if (data[i] == ';') break;
+            int v = http_chunk_hex_value(data[i]);
+            if (v < 0) return out_len;
+            saw_digit = true;
+            size = size * 16 + v;
+        }
+        if (!saw_digit) return out_len;
+        pos = line_end + 2;
+        if (size == 0) {
+            if (pos + 1 >= len) return out_len;
+            if (data[pos] != '\r' || data[pos + 1] != '\n') return out_len;
+            pos += 2;
+            if (consumed) *consumed = pos;
+            if (complete) *complete = true;
+            return out_len;
+        }
+        if (pos + size + 2 > len) return out_len;
+        if (out && size > 0) memcpy(out + out_len, data + pos, (size_t)size);
+        out_len += size;
+        pos += size;
+        if (data[pos] != '\r' || data[pos + 1] != '\n') return out_len;
+        pos += 2;
+    }
+    return out_len;
+}
+
 static void js_http_client_finish_response_if_complete(JsHttpClientReq* creq, Item res,
                                                        Item headers, int body_len) {
     if (!creq || creq->response_ended) return;
     int content_length = js_http_response_content_length(headers);
+    if (strcmp(creq->method, "HEAD") == 0) content_length = 0;
     if (content_length < 0 || body_len < content_length) return;
     js_readable_push(res, ItemNull);
     creq->response_ended = true;
@@ -2430,6 +2840,14 @@ static bool js_http_client_try_emit_response(JsHttpClientReq* creq) {
         return false;
     }
 
+    if (status_code == 100) {
+        int remaining = creq->recv_len - hdr_size;
+        if (remaining > 0) memmove(creq->recv_buf, creq->recv_buf + hdr_size, (size_t)remaining);
+        creq->recv_len = remaining;
+        http_client_emit(creq->js_object, "continue");
+        return js_http_client_try_emit_response(creq);
+    }
+
     Item res = js_readable_new(ItemNull);
     // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(res, JS_CLASS_INCOMING_MESSAGE);  // A3-T3b
@@ -2443,20 +2861,47 @@ static bool js_http_client_try_emit_response(JsHttpClientReq* creq) {
                     js_new_function((void*)js_http_client_res_destroy, 2));
 
     int body_len = creq->recv_len - hdr_size;
-    if (body_len > 0) {
-        Item body = make_string_item(creq->recv_buf + hdr_size, body_len);
+    bool chunked = strcmp(creq->method, "HEAD") != 0 &&
+        js_http_response_has_header_token(headers, "transfer-encoding", "chunked");
+    bool chunked_complete = false;
+    char* decoded_body = NULL;
+    int decoded_body_len = 0;
+    if (chunked && body_len > 0) {
+        decoded_body = (char*)mem_alloc(body_len + 1, MEM_CAT_JS_RUNTIME);
+        int chunked_consumed = 0;
+        decoded_body_len = http_decode_chunked_body(creq->recv_buf + hdr_size, body_len,
+                                                    decoded_body, &chunked_consumed,
+                                                    &chunked_complete);
+        decoded_body[decoded_body_len] = '\0';
+    }
+    int emitted_body_len = chunked ? decoded_body_len : body_len;
+    if (emitted_body_len > 0) {
+        Item body = chunked ?
+            make_string_item(decoded_body, emitted_body_len) :
+            make_string_item(creq->recv_buf + hdr_size, emitted_body_len);
         Item body_chunks = js_array_new(0);
         js_array_push(body_chunks, body);
         js_property_set(res, make_string_item("__chunks__"), body_chunks);
         js_property_set(res, make_string_item("body"), body);
         js_readable_push(res, body);
     }
+    if (decoded_body) mem_free(decoded_body);
 
     creq->response = res;
     creq->response_hdr_size = hdr_size;
     creq->response_delivered = creq->recv_len;
     js_http_emit_client_response(creq, res);
-    js_http_client_finish_response_if_complete(creq, res, headers, body_len);
+    if (chunked) {
+        if (chunked_complete) {
+            js_readable_push(res, ItemNull);
+            creq->response_ended = true;
+            creq->destroyed = true;
+            js_property_set(creq->js_object, make_string_item("destroyed"), (Item){.item = b2it(true)});
+            js_http_close_client_req(creq);
+        }
+    } else {
+        js_http_client_finish_response_if_complete(creq, res, headers, body_len);
+    }
     return true;
 }
 
@@ -2852,6 +3297,7 @@ extern "C" Item js_http_client_setHeader(Item self, Item name_item, Item value_i
                                              &has_content_length);
     if (has_content_length) creq->has_content_length = true;
     http_client_insert_pending_header(creq, lines, len);
+    http_client_metadata_set(self, name, value_item);
     return self;
 }
 
@@ -2886,6 +3332,14 @@ static Item js_http_client_inst_setHeader(Item maybe_self, Item name_item, Item 
     return js_http_client_setHeader(self, maybe_self, name_item);
 }
 
+static Item js_http_client_inst_getHeaderNames(Item maybe_self) {
+    return js_http_client_getHeaderNames(js_http_receiver(maybe_self, "__client__"));
+}
+
+static Item js_http_client_inst_getRawHeaderNames(Item maybe_self) {
+    return js_http_client_getRawHeaderNames(js_http_receiver(maybe_self, "__client__"));
+}
+
 static Item http_client_make_request_object(JsHttpClientReq* creq,
                                             const char* method,
                                             const char* path) {
@@ -2910,6 +3364,10 @@ static Item http_client_make_request_object(JsHttpClientReq* creq,
                     js_new_function((void*)js_http_client_inst_on, 3));
     js_property_set(obj, make_string_item("setHeader"),
                     js_new_function((void*)js_http_client_inst_setHeader, 3));
+    js_property_set(obj, make_string_item("getHeaderNames"),
+                    js_new_function((void*)js_http_client_inst_getHeaderNames, 1));
+    js_property_set(obj, make_string_item("getRawHeaderNames"),
+                    js_new_function((void*)js_http_client_inst_getRawHeaderNames, 1));
     js_property_set(obj, make_string_item("destroy"),
                     js_new_function((void*)js_http_client_inst_destroy, 2));
     js_property_set(obj, make_string_item("destroyed"), (Item){.item = b2it(false)});
@@ -3261,6 +3719,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
     bool has_content_length = false;
     bool has_headers_array = get_type_id(custom_headers) == LMD_TYPE_ARRAY;
     bool has_connection_header = http_client_headers_have_name(custom_headers, "connection", 10);
+    bool has_expect_header = http_client_headers_have_name(custom_headers, "expect", 6);
 
     if (set_default_headers && set_host && !has_headers_array) {
         if (port == 80) {
@@ -3295,7 +3754,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
 
     if (set_default_headers &&
         (strcmp(method_buf, "POST") == 0 || strcmp(method_buf, "PUT") == 0) &&
-        !has_content_length) {
+        !has_content_length && !has_expect_header) {
         rlen += snprintf(req_str + rlen, sizeof(req_str) - rlen, "Content-Length: 0\r\n");
         has_content_length = true;
     }
@@ -3315,6 +3774,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
     creq->send_len = rlen;
     creq->send_head_len = rlen;
     creq->has_content_length = has_content_length;
+    snprintf(creq->method, sizeof(creq->method), "%s", method_buf);
     creq->send_buf = (char*)mem_alloc(rlen, MEM_CAT_JS_RUNTIME);
     memcpy(creq->send_buf, req_str, rlen);
 
@@ -3322,6 +3782,19 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
 
     creq->js_object = obj;
     http_client_sync_header_property(creq, obj);
+    http_client_metadata_from_headers(obj, custom_headers);
+    if (set_host && !http_client_headers_have_name(custom_headers, "host", 4)) {
+        char host_meta[320];
+        int host_meta_len = 0;
+        if (port == 80) {
+            host_meta_len = snprintf(host_meta, sizeof(host_meta), "%s", host_buf);
+        } else {
+            host_meta_len = snprintf(host_meta, sizeof(host_meta), "%s:%d", host_buf, port);
+        }
+        if (host_meta_len < 0) host_meta_len = 0;
+        if (host_meta_len >= (int)sizeof(host_meta)) host_meta_len = (int)sizeof(host_meta) - 1;
+        http_client_metadata_set(obj, make_string_item("Host"), make_string_item(host_meta, host_meta_len));
+    }
     bool abort_before_connect = false;
     TypeId signal_type = get_type_id(signal_item);
     if (signal_item.item != 0 &&
