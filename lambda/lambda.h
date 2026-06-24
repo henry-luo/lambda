@@ -290,6 +290,12 @@ typedef enum SysFunc {
     SYSFUNC_RESHAPE,          // reshape(arr, shape_list) - view with new shape
     SYSFUNC_SHAPE,            // shape(arr) - list of dimensions
     SYSFUNC_NDIM,             // ndim(arr) - number of dimensions
+    SYSFUNC_TRANSPOSE,        // transpose(arr) - view with reversed axes (zero-copy)
+    SYSFUNC_FLATTEN,          // flatten(arr) - owned 1-D contiguous copy
+    SYSFUNC_RAVEL,            // ravel(arr) - 1-D view if contiguous, else copy
+    SYSFUNC_MATMUL,           // matmul(a, b) - matrix product (2-D·2-D, 1-D dot)
+    SYSFUNC_CONCAT,           // concat(a, b) - join along axis 0
+    SYSFUNC_STACK,            // stack(a, b) - stack along a new leading axis
     SYSFUNC_ALL,
     SYSFUNC_ANY,
     SYSFUNC_MIN1,
@@ -1427,6 +1433,12 @@ extern "C" {
     Item fn_reshape(Item arr, Item shape);         // returns view with new shape (contiguous required)
     Item fn_shape(Item arr);                       // returns shape as a list
     Item fn_ndim(Item arr);                        // returns number of dimensions (int)
+    Item fn_transpose(Item arr);                   // view with reversed axes
+    Item fn_flatten(Item arr);                     // owned 1-D contiguous copy
+    Item fn_ravel(Item arr);                       // 1-D view if contiguous, else copy
+    Item fn_matmul(Item a, Item b);                // matrix product
+    Item fn_concat(Item a, Item b);                // join along axis 0
+    Item fn_stack(Item a, Item b);                 // stack along new leading axis
     int64_t array_num_iter_count(ArrayNum* arr);   // shape[0] for N-D, length for 1-D
     ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim, int64_t* dims);
     Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices);   // multi-dim scalar read

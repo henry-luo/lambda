@@ -129,7 +129,9 @@ Same rules as 1-D (already in `lambda-vector.cpp`): result element type is the w
 
 ### Format / output
 
-`format-json` and `format-yaml` (in [lambda/format/](../lambda/format/)) need to emit nested arrays for N-D. The current 1-D path prints `[1, 2, 3]`; N-D becomes nested per shape. Output `repr` should include shape for debug printing: `<arr_num f32 shape=(2,3) [[1, 2, 3], [4, 5, 6]]>`.
+`format-json` and `format-yaml` (in [lambda/format/](../lambda/format/)) need to emit nested arrays for N-D. The current 1-D path prints `[1, 2, 3]`; N-D becomes nested per shape. **Status: done** — all formatters serialize typed arrays (1-D and N-D) transparently through the unified Mark Reader (see Appendix A).
+
+**Debug repr with shape annotation — DEFERRED to future.** A NumPy-style self-describing repr that annotates element type, shape, and view-ness inline — e.g. `<arr_num f32 shape=(2,3) [[1, 2, 3], [4, 5, 6]]>` or `<arr_num i8 view shape=(4,) [2, 3, 4, 5]>` — would aid debugging by disambiguating a typed `ArrayNum` from a generic `Array`-of-arrays and surfacing `elem_type`/shape/contiguity at a glance. This is **separate** from the normal serialization path (which must stay clean for roundtrip) — it belongs to a REPL/inspect mode or a `repr()`/`debug()` sysfunc gated on a debug flag. It is purely developer-ergonomics: correctness, performance, and roundtrip are unaffected, and `shape()`/`ndim()` already expose the same information programmatically. Deferred as the lowest-leverage item; a small self-contained addition (a formatting branch reading `elem_type` + the shape side-table) when wanted.
 
 ### Memory cost
 
@@ -721,6 +723,7 @@ All open questions from prior rounds have been resolved. Implementation can proc
 - Memory-mapped file backing — falls out almost free once views over external buffers exist (§5 enables it), but no first-class API in this proposal.
 - Mutable views (Phase 2d).
 - JS TypedArray runtime unification (Phase 2d; design preserved in §5).
+- Debug repr with shape annotation (`<arr_num f32 shape=(2,3) …>`) — deferred; see Format / output. Developer-ergonomics only, separate from serialization.
 
 ## Success criteria
 

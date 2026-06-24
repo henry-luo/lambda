@@ -354,6 +354,24 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_NDIM, "ndim", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_ndim", FPTR(fn_ndim), NULL, NULL, false, 0},
 
+    {SYSFUNC_TRANSPOSE, "transpose", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_transpose", FPTR(fn_transpose), NULL, NULL, false, 0},
+
+    {SYSFUNC_FLATTEN, "flatten", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_flatten", FPTR(fn_flatten), NULL, NULL, false, 0},
+
+    {SYSFUNC_RAVEL, "ravel", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_ravel", FPTR(fn_ravel), NULL, NULL, false, 0},
+
+    {SYSFUNC_MATMUL, "matmul", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_matmul", FPTR(fn_matmul), NULL, NULL, false, 0},
+
+    {SYSFUNC_CONCAT, "concat", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_concat", FPTR(fn_concat), NULL, NULL, false, 0},
+
+    {SYSFUNC_STACK, "stack", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_stack", FPTR(fn_stack), NULL, NULL, false, 0},
+
     {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_all", FPTR(fn_all), NULL, NULL, false, 0},
 

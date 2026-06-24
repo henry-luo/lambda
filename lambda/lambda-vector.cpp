@@ -2742,6 +2742,276 @@ Item fn_ndim(Item vec) {
     return push_l(1);
 }
 
+// ============================================================================
+// N-D structural ops: transpose / flatten / ravel / matmul / concat / stack
+// ============================================================================
+
+// Is the array's data laid out C-contiguously (a flat scan preserves C-order)?
+static bool arr_num_is_c_contig(ArrayNum* a) {
+    if (!(a->is_ndim && a->extra)) return true;   // plain 1-D owned/subview
+    return ((ArrayNumShape*)(uintptr_t)a->extra)->is_c_contig;
+}
+
+// Copy `src`'s elements into `dst` starting at flat index `dst_base`, in C-order,
+// converting to dst's elem_type.  Fast path: raw memcpy when same type & contiguous.
+static void arr_num_copy_into(ArrayNum* src, ArrayNum* dst, int64_t dst_base) {
+    ArrayNumElemType det = dst->get_elem_type();
+    if (src->get_elem_type() == det && arr_num_is_c_contig(src)) {
+        int es = ELEM_TYPE_SIZE[det >> 4];
+        memcpy((char*)dst->data + (size_t)dst_base * es, src->data, (size_t)src->length * es);
+        return;
+    }
+    // per-element conversion, walking src in C-order via shape/strides
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(src, shp, str);
+    int64_t idx[32] = {0};
+    int64_t off = 0;
+    bool dst_float = !elem_is_int(det);
+    for (int64_t i = 0; i < src->length; i++) {
+        double v = read_arr_elem_as_double(src, off);
+        array_num_set_item(dst, dst_base + i, dst_float ? push_d(v) : push_l((int64_t)v));
+        for (int ax = ndim - 1; ax >= 0; ax--) {
+            idx[ax]++; off += str[ax];
+            if (idx[ax] < shp[ax]) break;
+            idx[ax] = 0; off -= shp[ax] * str[ax];
+        }
+    }
+}
+
+// transpose(arr) - view with reversed axes (zero-copy; non-contiguous result)
+Item fn_transpose(Item vec) {
+    GUARD_ERROR1(vec);
+    if (get_type_id(vec) != LMD_TYPE_ARRAY_NUM) {
+        log_error("fn_transpose: expected typed numeric array");
+        return ItemError;
+    }
+    ArrayNum* base = vec.array_num;
+    if (!base) return ItemError;
+    // 1-D (or no shape table): transpose is identity
+    if (!(base->is_ndim && base->extra)) return vec;
+    ArrayNumShape* bs = (ArrayNumShape*)(uintptr_t)base->extra;
+    int ndim = bs->ndim;
+    if (ndim < 2) return vec;
+    if (!base->is_heap) {
+        log_error("fn_transpose: cannot view arena-backed array; copy() first");
+        return ItemError;
+    }
+    int64_t* bshp = array_num_shape_dims(bs);
+    int64_t* bstr = array_num_shape_strides(bs);
+
+    ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    if (!view) return ItemError;
+    view->type_id = LMD_TYPE_ARRAY_NUM;
+    view->set_elem_type(base->get_elem_type());
+    view->is_ndim = 1;
+    view->is_view = 1;
+    view->data = base->data;
+    view->length = base->length;
+    view->capacity = base->length;
+
+    size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)ndim * sizeof(int64_t);
+    ArrayNumShape* s = (ArrayNumShape*)heap_data_calloc(shape_bytes);
+    if (!s) return ItemError;
+    s->ndim = (uint8_t)ndim;
+    s->offset = 0;
+    s->base = (void*)base;
+    int64_t* shp = array_num_shape_dims(s);
+    int64_t* str = array_num_shape_strides(s);
+    for (int i = 0; i < ndim; i++) {       // reverse axes
+        shp[i] = bshp[ndim - 1 - i];
+        str[i] = bstr[ndim - 1 - i];
+    }
+    s->is_c_contig = 0;
+    s->is_f_contig = bs->is_c_contig;       // transpose of C-contig is F-contig
+    view->extra = (int64_t)(uintptr_t)s;
+    base->is_pinned = 1;
+    return { .array_num = view };
+}
+
+// flatten(arr) - owned 1-D contiguous copy (C-order)
+Item fn_flatten(Item vec) {
+    GUARD_ERROR1(vec);
+    if (get_type_id(vec) != LMD_TYPE_ARRAY_NUM) {
+        log_error("fn_flatten: expected typed numeric array");
+        return ItemError;
+    }
+    ArrayNum* base = vec.array_num;
+    if (!base) return ItemError;
+    ArrayNum* result = array_num_new(base->get_elem_type(), base->length);
+    if (!result || base->length == 0) return { .array_num = result };
+    arr_num_copy_into(base, result, 0);
+    return { .array_num = result };
+}
+
+// ravel(arr) - 1-D view if C-contiguous (zero-copy), else a flattened copy
+Item fn_ravel(Item vec) {
+    GUARD_ERROR1(vec);
+    if (get_type_id(vec) != LMD_TYPE_ARRAY_NUM) {
+        log_error("fn_ravel: expected typed numeric array");
+        return ItemError;
+    }
+    ArrayNum* base = vec.array_num;
+    if (!base) return ItemError;
+    if (!(arr_num_is_c_contig(base) && base->is_heap)) {
+        return fn_flatten(vec);
+    }
+    // contiguous → a 1-D view with a shape side-table (carries base ref for GC)
+    ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    if (!view) return ItemError;
+    view->type_id = LMD_TYPE_ARRAY_NUM;
+    view->set_elem_type(base->get_elem_type());
+    view->is_ndim = 1;
+    view->is_view = 1;
+    view->data = base->data;
+    view->length = base->length;
+    view->capacity = base->length;
+    size_t shape_bytes = sizeof(ArrayNumShape) + 2 * sizeof(int64_t);
+    ArrayNumShape* s = (ArrayNumShape*)heap_data_calloc(shape_bytes);
+    if (!s) return ItemError;
+    s->ndim = 1;
+    s->is_c_contig = 1;
+    s->is_f_contig = 1;
+    s->offset = 0;
+    s->base = (void*)base;
+    array_num_shape_dims(s)[0] = base->length;
+    array_num_shape_strides(s)[0] = 1;
+    view->extra = (int64_t)(uintptr_t)s;
+    base->is_pinned = 1;
+    return { .array_num = view };
+}
+
+// matmul(a, b) - matrix product. Supports 1-D·1-D (dot scalar), 2-D·2-D,
+// 1-D·2-D and 2-D·1-D (vector-matrix). int·int → int64, else float.
+Item fn_matmul(Item a_item, Item b_item) {
+    GUARD_ERROR2(a_item, b_item);
+    if (get_type_id(a_item) != LMD_TYPE_ARRAY_NUM || get_type_id(b_item) != LMD_TYPE_ARRAY_NUM) {
+        log_error("fn_matmul: both operands must be typed numeric arrays");
+        return ItemError;
+    }
+    ArrayNum* A = a_item.array_num;
+    ArrayNum* B = b_item.array_num;
+    int64_t a_shp[32], a_str[32], b_shp[32], b_str[32];
+    int a_ndim = get_shape_strides(A, a_shp, a_str);
+    int b_ndim = get_shape_strides(B, b_shp, b_str);
+    bool rf = !elem_is_int(A->get_elem_type()) || !elem_is_int(B->get_elem_type());
+    ArrayNumElemType ret_et = rf ? ELEM_FLOAT : ELEM_INT64;
+
+    if (a_ndim == 1 && b_ndim == 1) {           // dot product → scalar
+        if (a_shp[0] != b_shp[0]) { log_error("fn_matmul: length mismatch %lld vs %lld", (long long)a_shp[0], (long long)b_shp[0]); return ItemError; }
+        double sum = 0;
+        for (int64_t k = 0; k < a_shp[0]; k++)
+            sum += read_arr_elem_as_double(A, k * a_str[0]) * read_arr_elem_as_double(B, k * b_str[0]);
+        return rf ? push_d(sum) : push_l((int64_t)sum);
+    }
+    if (a_ndim == 2 && b_ndim == 2) {           // (m,k)·(k,n) → (m,n)
+        int64_t m = a_shp[0], k = a_shp[1], n = b_shp[1];
+        if (k != b_shp[0]) { log_error("fn_matmul: inner dim mismatch %lld vs %lld", (long long)k, (long long)b_shp[0]); return ItemError; }
+        int64_t out_shape[2] = { m, n };
+        ArrayNum* R = alloc_ndim_arraynum(ret_et, 2, out_shape);
+        if (!R) return ItemError;
+        for (int64_t i = 0; i < m; i++)
+            for (int64_t j = 0; j < n; j++) {
+                double sum = 0;
+                for (int64_t p = 0; p < k; p++)
+                    sum += read_arr_elem_as_double(A, i * a_str[0] + p * a_str[1])
+                         * read_arr_elem_as_double(B, p * b_str[0] + j * b_str[1]);
+                if (rf) R->float_items[i * n + j] = sum; else R->items[i * n + j] = (int64_t)sum;
+            }
+        return { .array_num = R };
+    }
+    if (a_ndim == 1 && b_ndim == 2) {           // (k)·(k,n) → (n)
+        int64_t k = a_shp[0], n = b_shp[1];
+        if (k != b_shp[0]) { log_error("fn_matmul: dim mismatch"); return ItemError; }
+        ArrayNum* R = array_num_new(ret_et, n);
+        if (!R) return ItemError;
+        for (int64_t j = 0; j < n; j++) {
+            double sum = 0;
+            for (int64_t p = 0; p < k; p++)
+                sum += read_arr_elem_as_double(A, p * a_str[0]) * read_arr_elem_as_double(B, p * b_str[0] + j * b_str[1]);
+            if (rf) R->float_items[j] = sum; else R->items[j] = (int64_t)sum;
+        }
+        return { .array_num = R };
+    }
+    if (a_ndim == 2 && b_ndim == 1) {           // (m,k)·(k) → (m)
+        int64_t m = a_shp[0], k = a_shp[1];
+        if (k != b_shp[0]) { log_error("fn_matmul: dim mismatch"); return ItemError; }
+        ArrayNum* R = array_num_new(ret_et, m);
+        if (!R) return ItemError;
+        for (int64_t i = 0; i < m; i++) {
+            double sum = 0;
+            for (int64_t p = 0; p < k; p++)
+                sum += read_arr_elem_as_double(A, i * a_str[0] + p * a_str[1]) * read_arr_elem_as_double(B, p * b_str[0]);
+            if (rf) R->float_items[i] = sum; else R->items[i] = (int64_t)sum;
+        }
+        return { .array_num = R };
+    }
+    log_error("fn_matmul: only 1-D and 2-D operands supported (got %d-D and %d-D)", a_ndim, b_ndim);
+    return ItemError;
+}
+
+// helper: pick the result elem_type for a binary join (concat/stack)
+static ArrayNumElemType join_result_etype(ArrayNum* a, ArrayNum* b) {
+    if (!elem_is_int(a->get_elem_type()) || !elem_is_int(b->get_elem_type())) return ELEM_FLOAT;
+    if (a->get_elem_type() == b->get_elem_type()) return a->get_elem_type();
+    return ELEM_INT64;
+}
+
+// concat(a, b) - join two arrays along axis 0. Trailing dims must match.
+Item fn_concat(Item a_item, Item b_item) {
+    GUARD_ERROR2(a_item, b_item);
+    if (get_type_id(a_item) != LMD_TYPE_ARRAY_NUM || get_type_id(b_item) != LMD_TYPE_ARRAY_NUM) {
+        log_error("fn_concat: both operands must be typed numeric arrays");
+        return ItemError;
+    }
+    ArrayNum* A = a_item.array_num;
+    ArrayNum* B = b_item.array_num;
+    int64_t a_shp[32], a_str[32], b_shp[32], b_str[32];
+    int a_ndim = get_shape_strides(A, a_shp, a_str);
+    int b_ndim = get_shape_strides(B, b_shp, b_str);
+    if (a_ndim != b_ndim) { log_error("fn_concat: ndim mismatch (%d vs %d)", a_ndim, b_ndim); return ItemError; }
+    for (int ax = 1; ax < a_ndim; ax++)
+        if (a_shp[ax] != b_shp[ax]) { log_error("fn_concat: trailing dim %d mismatch (%lld vs %lld)", ax, (long long)a_shp[ax], (long long)b_shp[ax]); return ItemError; }
+
+    ArrayNumElemType ret_et = join_result_etype(A, B);
+    int64_t out_shape[32];
+    out_shape[0] = a_shp[0] + b_shp[0];
+    for (int ax = 1; ax < a_ndim; ax++) out_shape[ax] = a_shp[ax];
+    ArrayNum* R = (a_ndim >= 2) ? alloc_ndim_arraynum(ret_et, a_ndim, out_shape)
+                                : array_num_new(ret_et, out_shape[0]);
+    if (!R) return ItemError;
+    arr_num_copy_into(A, R, 0);
+    arr_num_copy_into(B, R, A->length);
+    return { .array_num = R };
+}
+
+// stack(a, b) - stack two equally-shaped arrays along a new leading axis.
+Item fn_stack(Item a_item, Item b_item) {
+    GUARD_ERROR2(a_item, b_item);
+    if (get_type_id(a_item) != LMD_TYPE_ARRAY_NUM || get_type_id(b_item) != LMD_TYPE_ARRAY_NUM) {
+        log_error("fn_stack: both operands must be typed numeric arrays");
+        return ItemError;
+    }
+    ArrayNum* A = a_item.array_num;
+    ArrayNum* B = b_item.array_num;
+    int64_t a_shp[32], a_str[32], b_shp[32], b_str[32];
+    int a_ndim = get_shape_strides(A, a_shp, a_str);
+    int b_ndim = get_shape_strides(B, b_shp, b_str);
+    if (a_ndim != b_ndim) { log_error("fn_stack: ndim mismatch (%d vs %d)", a_ndim, b_ndim); return ItemError; }
+    for (int ax = 0; ax < a_ndim; ax++)
+        if (a_shp[ax] != b_shp[ax]) { log_error("fn_stack: shape mismatch at axis %d (%lld vs %lld)", ax, (long long)a_shp[ax], (long long)b_shp[ax]); return ItemError; }
+    if (a_ndim + 1 > 32) { log_error("fn_stack: result ndim exceeds 32"); return ItemError; }
+
+    ArrayNumElemType ret_et = join_result_etype(A, B);
+    int64_t out_shape[32];
+    out_shape[0] = 2;
+    for (int ax = 0; ax < a_ndim; ax++) out_shape[ax + 1] = a_shp[ax];
+    ArrayNum* R = alloc_ndim_arraynum(ret_et, a_ndim + 1, out_shape);
+    if (!R) return ItemError;
+    arr_num_copy_into(A, R, 0);
+    arr_num_copy_into(B, R, A->length);
+    return { .array_num = R };
+}
+
 // is_view(arr) - returns true if arr is a view over another array
 Item fn_is_view(Item vec) {
     GUARD_ERROR1(vec);
