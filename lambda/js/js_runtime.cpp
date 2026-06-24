@@ -12193,6 +12193,8 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     bound->env_size = orig->env_size;
     bound->with_env = orig->with_env;
     bound->with_env_depth = orig->with_env_depth;
+    bound->module_vars = orig->module_vars;
+    bound->source_text = orig->source_text;
     bound->prototype = orig->prototype; // ES spec: bound functions use target's prototype for [[Construct]]
     bound->builtin_id = orig->builtin_id;
     bound->flags = orig->flags; // preserve strict/arrow flags from original
@@ -19131,6 +19133,23 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                         return js_call_function(ts_fn, obj, args, argc);
                     }
                 }
+                // Buffer prototype: Uint8Array (Buffer) instances use buffer toString.
+                // This must run before generic prototype lookup, because Uint8Array also
+                // inherits Array toString through the runtime's shared typed-array path.
+                if (js_is_typed_array(obj)) {
+                    JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
+                    if (ta && ta->element_type == JS_TYPED_UINT8 && ta->is_buffer) {
+                        extern Item js_get_buffer_prototype(void);
+                        Item buf_proto = js_get_buffer_prototype();
+                        if (buf_proto.item != ITEM_NULL) {
+                            Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
+                            Item ts_fn = map_get(buf_proto.map, ts_key);
+                            if (ts_fn.item != ITEM_NULL && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
+                                return js_call_function(ts_fn, obj, args, argc);
+                            }
+                        }
+                    }
+                }
                 {
                     Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
                     Item ts_fn = js_prototype_lookup(obj, ts_key);
@@ -19153,22 +19172,6 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                         return js_call_function(fn, obj, args, argc);
                     }
                     return js_throw_not_callable("toString");
-                }
-                // Buffer prototype: Uint8Array (Buffer) instances use buffer toString
-                // use map_get (own-property only) to avoid prototype chain recursion
-                if (js_is_typed_array(obj)) {
-                    JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                    if (ta && ta->element_type == JS_TYPED_UINT8) {
-                        extern Item js_get_buffer_prototype(void);
-                        Item buf_proto = js_get_buffer_prototype();
-                        if (buf_proto.item != ITEM_NULL) {
-                            Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
-                            Item ts_fn = map_get(buf_proto.map, ts_key);
-                            if (ts_fn.item != ITEM_NULL && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
-                                return js_call_function(ts_fn, obj, args, argc);
-                            }
-                        }
-                    }
                 }
                 // v20: Error.prototype.toString — "name: message" format.
                 {
@@ -31643,8 +31646,8 @@ static Item js_async_hooks_root_resource = {0};
 static Item js_async_hooks_current_resource = {0};
 static int64_t js_async_hooks_next_id = 2;
 
-#define JS_ASYNC_HOOK_MAX 64
-#define JS_ASYNC_PENDING_DESTROY_MAX 512
+#define JS_ASYNC_HOOK_MAX 256
+#define JS_ASYNC_PENDING_DESTROY_MAX 1024
 static Item js_async_hooks[JS_ASYNC_HOOK_MAX];
 static int js_async_hook_count = 0;
 static Item js_async_pending_destroy_resources[JS_ASYNC_PENDING_DESTROY_MAX];

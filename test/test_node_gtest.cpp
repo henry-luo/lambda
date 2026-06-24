@@ -85,6 +85,7 @@ static const char* BASELINE_FILE   = "test/node/official_baseline.txt";
 static const char* CRASHER_FILE    = "temp/_node_official_crashers.txt";
 static const char* FAILURE_OUTPUT_FILE = "temp/node_official_failures.log";
 static const char* SLOW_LIST_FILE  = "test/node/official_slow_list.txt";
+static const char* SERIAL_LIST_FILE = "test/node/official_serial_list.txt";
 static const char* TIMING_FILE     = "temp/node_official_times.tsv";
 static const double SLOW_TEST_THRESHOLD_MS = 10000.0;
 static int         g_timeout_ms    = 60000;    // per-test timeout (60s for JIT compilation)
@@ -355,6 +356,8 @@ static std::map<std::string, std::string> g_skipped_tests;
 static bool g_skip_list_loaded = false;
 static std::map<std::string, std::string> g_slow_tests;
 static bool g_slow_list_loaded = false;
+static std::map<std::string, std::string> g_serial_tests;
+static bool g_serial_list_loaded = false;
 
 static void trim_ascii(std::string& text) {
     while (!text.empty() && (text.back() == ' ' || text.back() == '\t'))
@@ -411,6 +414,13 @@ static void load_slow_list() {
     g_slow_list_loaded = true;
 
     load_test_name_list(SLOW_LIST_FILE, "slow list", g_slow_tests);
+}
+
+static void load_serial_list() {
+    if (g_serial_list_loaded) return;
+    g_serial_list_loaded = true;
+
+    load_test_name_list(SERIAL_LIST_FILE, "serial list", g_serial_tests);
 }
 
 // =============================================================================
@@ -590,6 +600,33 @@ static std::string extract_module_prefix(const std::string& filename) {
 // Test execution — run a single test with timeout
 // =============================================================================
 
+static std::string extract_supported_node_flags(const std::string& test_path) {
+    std::ifstream in(test_path);
+    if (!in.is_open()) return "";
+
+    std::string line;
+    for (int i = 0; i < 8 && std::getline(in, line); i++) {
+        const std::string marker = "// Flags:";
+        size_t pos = line.find(marker);
+        if (pos == std::string::npos) continue;
+
+        std::string flags = line.substr(pos + marker.size());
+        std::istringstream ss(flags);
+        std::string tok;
+        std::string supported;
+        while (ss >> tok) {
+            if (tok == "--expose-gc" || tok == "--expose_gc") {
+                if (supported.find("--expose-gc") == std::string::npos) {
+                    supported += " --expose-gc";
+                }
+            }
+        }
+        return supported;
+    }
+
+    return "";
+}
+
 static NodeTestResult run_single_test(const std::string& test_path, size_t ordinal) {
     NodeTestResult result;
     result.test_name = test_path;
@@ -599,6 +636,7 @@ static NodeTestResult run_single_test(const std::string& test_path, size_t ordin
     size_t slash = test_path.rfind('/');
     std::string filename = (slash != std::string::npos) ? test_path.substr(slash + 1) : test_path;
     unsigned int node_common_port = 10000u + (unsigned int)(ordinal * 10u);
+    std::string node_flags = extract_supported_node_flags(test_path);
     auto start = std::chrono::steady_clock::now();
 
     // Build command with timeout.
@@ -610,17 +648,17 @@ static NodeTestResult run_single_test(const std::string& test_path, size_t ordin
     char command[2048];
 #ifdef _WIN32
     snprintf(command, sizeof(command),
-             "cd temp\\node_test && ..\\..\\lambda.exe js \"../../%s\" --no-log 2>&1",
-             test_path.c_str());
+             "cd temp\\node_test && ..\\..\\lambda.exe js \"../../%s\"%s --no-log 2>&1",
+             test_path.c_str(), node_flags.c_str());
 #else
     snprintf(command, sizeof(command),
              "mkdir -p \"temp/node_test/%s\" && cd \"temp/node_test/%s\" && "
              "ln -sfn \"../../../ref/node/test\" test && "
              "env -u DYLD_INSERT_LIBRARIES -u DYLD_LIBRARY_PATH -u ASAN_OPTIONS -u MallocNanoZone "
              "-u LAMBDA_NODE_BASELINE_ONLY NODE_COMMON_PORT=%u TEST_THREAD_ID=%u "
-             "timeout -k 5s %d ../../../lambda.exe js \"../../../%s\" --no-log 2>&1",
+             "timeout -k 5s %d ../../../lambda.exe js \"../../../%s\"%s --no-log 2>&1",
              filename.c_str(), filename.c_str(), node_common_port, (unsigned int)ordinal,
-             (g_timeout_ms + 999) / 1000, test_path.c_str());
+             (g_timeout_ms + 999) / 1000, test_path.c_str(), node_flags.c_str());
 #endif
 
     FILE* pipe = popen(command, "r");
@@ -848,13 +886,8 @@ static bool g_node_socket_preflight_failed = false;
 static std::string g_node_socket_preflight_message;
 
 static bool node_test_requires_serial(const NodeOfficialParam& t) {
-    return t.module == "child-process" ||
-           t.module == "cluster" ||
-           t.module == "http" ||
-           t.module == "https" ||
-           t.module == "net" ||
-           t.module == "timers" ||
-           t.module == "tls";
+    load_serial_list();
+    return g_serial_tests.find(t.filename) != g_serial_tests.end();
 }
 
 static bool node_test_needs_socket_preflight(const NodeOfficialParam& t) {

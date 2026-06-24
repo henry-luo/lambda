@@ -3198,9 +3198,16 @@ extern "C" Item js_process_setUncaughtExceptionCaptureCallback(Item fn) {
     return make_js_undefined();
 }
 
-// process.getActiveResourcesInfo() — stub returns empty array
+extern "C" Item js_net_get_active_handles(void);
+extern "C" Item js_net_get_active_resources_info(void);
+
+extern "C" Item js_process_getActiveHandles(void) {
+    return js_net_get_active_handles();
+}
+
+// process.getActiveResourcesInfo()
 extern "C" Item js_process_getActiveResourcesInfo(void) {
-    return js_array_new(0);
+    return js_net_get_active_resources_info();
 }
 
 // process.setSourceMapsEnabled(val) — stub no-op
@@ -3287,6 +3294,7 @@ extern "C" Item js_get_process_object_value(void) {
         js_process_set_method(js_process_object, "availableMemory", (void*)js_process_availableMemory, 0);
         js_process_set_method(js_process_object, "hasUncaughtExceptionCaptureCallback", (void*)js_process_hasUncaughtExceptionCaptureCallback, 0);
         js_process_set_method(js_process_object, "setUncaughtExceptionCaptureCallback", (void*)js_process_setUncaughtExceptionCaptureCallback, 1);
+        js_process_set_method(js_process_object, "_getActiveHandles", (void*)js_process_getActiveHandles, 0);
         js_process_set_method(js_process_object, "getActiveResourcesInfo", (void*)js_process_getActiveResourcesInfo, 0);
         js_process_set_method(js_process_object, "setSourceMapsEnabled", (void*)js_process_setSourceMapsEnabled, 1);
         if (getenv("LAMBDA_JS_IPC")) {

@@ -23,6 +23,7 @@
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" void js_clearTimeout(Item timer_id);
 extern "C" Item js_buffer_from_bytes(const char* data, int len);
+extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -61,6 +62,67 @@ static double net_number_value(Item value) {
 
 typedef struct PendingSocketWrite PendingSocketWrite;
 typedef struct JsServer JsServer;
+
+static Item make_string_item(const char* str);
+
+#define NET_ACTIVE_SOCKET_MAX 512
+#define NET_ACTIVE_SERVER_MAX 128
+static Item net_active_sockets[NET_ACTIVE_SOCKET_MAX];
+static Item net_active_servers[NET_ACTIVE_SERVER_MAX];
+static bool net_active_roots_registered = false;
+
+static void net_active_register_roots(void) {
+    if (net_active_roots_registered) return;
+    heap_register_gc_root_range((uint64_t*)net_active_sockets, NET_ACTIVE_SOCKET_MAX);
+    heap_register_gc_root_range((uint64_t*)net_active_servers, NET_ACTIVE_SERVER_MAX);
+    net_active_roots_registered = true;
+}
+
+static void net_active_add(Item* list, int max, Item obj) {
+    if (!obj.item) return;
+    net_active_register_roots();
+    for (int i = 0; i < max; i++) {
+        if (list[i].item == obj.item) return;
+    }
+    for (int i = 0; i < max; i++) {
+        if (list[i].item == 0) {
+            list[i] = obj;
+            return;
+        }
+    }
+}
+
+static void net_active_remove(Item* list, int max, Item obj) {
+    if (!obj.item) return;
+    for (int i = 0; i < max; i++) {
+        if (list[i].item == obj.item) {
+            list[i] = (Item){0};
+            return;
+        }
+    }
+}
+
+extern "C" Item js_net_get_active_handles(void) {
+    Item arr = js_array_new(0);
+    for (int i = 0; i < NET_ACTIVE_SERVER_MAX; i++) {
+        if (net_active_servers[i].item) js_array_push(arr, net_active_servers[i]);
+    }
+    for (int i = 0; i < NET_ACTIVE_SOCKET_MAX; i++) {
+        if (net_active_sockets[i].item) js_array_push(arr, net_active_sockets[i]);
+    }
+    return arr;
+}
+
+extern "C" Item js_net_get_active_resources_info(void) {
+    Item arr = js_array_new(0);
+    for (int i = 0; i < NET_ACTIVE_SERVER_MAX; i++) {
+        if (net_active_servers[i].item) js_array_push(arr, make_string_item("TCPServerWrap"));
+    }
+    for (int i = 0; i < NET_ACTIVE_SOCKET_MAX; i++) {
+        if (net_active_sockets[i].item) js_array_push(arr, make_string_item("TCPSocketWrap"));
+    }
+    return arr;
+}
 
 typedef struct JsSocket {
     uv_tcp_t tcp;
@@ -940,6 +1002,7 @@ static void socket_close_now(JsSocket* sock) {
         uv_close((uv_handle_t*)&sock->tcp, [](uv_handle_t* handle) {
             JsSocket* s = (JsSocket*)handle->data;
             if (s) {
+                net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, s->js_object);
                 js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
                 socket_emit(s->js_object, "close", NULL, 0);
                 socket_note_closed(s);
@@ -967,6 +1030,7 @@ static void socket_close_reset_now(JsSocket* sock) {
         int r = uv_tcp_close_reset(&sock->tcp, [](uv_handle_t* handle) {
             JsSocket* s = (JsSocket*)handle->data;
             if (s) {
+                    net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, s->js_object);
                     js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
                     socket_emit(s->js_object, "close", NULL, 0);
                     socket_note_closed(s);
@@ -981,6 +1045,7 @@ static void socket_close_reset_now(JsSocket* sock) {
             uv_close((uv_handle_t*)&sock->tcp, [](uv_handle_t* handle) {
                 JsSocket* s = (JsSocket*)handle->data;
                 if (s) {
+                    net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, s->js_object);
                     js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
                     socket_emit(s->js_object, "close", NULL, 0);
                     socket_note_closed(s);
@@ -1298,6 +1363,15 @@ static Item make_socket_object(JsSocket* sock, bool expose_handle) {
     js_property_set(obj, make_string_item("bytesRead"), (Item){.item = i2it(0)});
     js_property_set(obj, make_string_item("bytesWritten"), (Item){.item = i2it(0)});
     js_property_set(obj, make_string_item("bufferSize"), (Item){.item = i2it(0)});
+    Item hwm = (Item){.item = i2it(sock->high_water_mark)};
+    Item readable_state = js_new_object();
+    js_property_set(readable_state, make_string_item("highWaterMark"), hwm);
+    Item writable_state = js_new_object();
+    js_property_set(writable_state, make_string_item("highWaterMark"), hwm);
+    js_property_set(obj, make_string_item("_readableState"), readable_state);
+    js_property_set(obj, make_string_item("_writableState"), writable_state);
+    js_property_set(obj, make_string_item("readableHighWaterMark"), hwm);
+    js_property_set(obj, make_string_item("writableHighWaterMark"), hwm);
     js_property_set(obj, make_string_item("connecting"), (Item){.item = ITEM_FALSE});
     js_property_set(obj, make_string_item("_connecting"), (Item){.item = ITEM_FALSE});
     js_property_set(obj, make_string_item("pending"), (Item){.item = ITEM_TRUE});
@@ -1342,6 +1416,7 @@ static Item make_socket_object(JsSocket* sock, bool expose_handle) {
     js_property_set(obj, make_string_item("address"),
                     js_new_function((void*)js_socket_address, 0));
     sock->js_object = obj;
+    net_active_add(net_active_sockets, NET_ACTIVE_SOCKET_MAX, obj);
     return obj;
 }
 
@@ -2732,6 +2807,7 @@ extern "C" Item js_server_close(Item callback) {
         uv_close((uv_handle_t*)&srv->tcp, [](uv_handle_t* h) {
             JsServer* s = (JsServer*)h->data;
             if (s) {
+                net_active_remove(net_active_servers, NET_ACTIVE_SERVER_MAX, s->js_object);
                 Item on_close = js_property_get(s->js_object, make_string_item("__on_close__"));
                 if (is_callable(on_close)) {
                     js_call_function(on_close, s->js_object, NULL, 0);
@@ -2815,6 +2891,7 @@ extern "C" Item js_net_createServer(Item rest_args) {
                     (Item){.item = b2it(srv->allow_half_open)});
 
     srv->js_object = obj;
+    net_active_add(net_active_servers, NET_ACTIVE_SERVER_MAX, obj);
     return obj;
 }
 
@@ -2991,6 +3068,8 @@ extern "C" void js_net_reset(void) {
     net_namespace = (Item){0};
     net_socket_prototype = (Item){0};
     net_server_prototype = (Item){0};
+    memset(net_active_sockets, 0, sizeof(net_active_sockets));
+    memset(net_active_servers, 0, sizeof(net_active_servers));
     net_default_auto_select_family = false;
     net_auto_select_family_timeout = 250;
 }
