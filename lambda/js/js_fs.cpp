@@ -136,6 +136,17 @@ static bool fs_validate_encoding_options(Item options_item) {
     return true;
 }
 
+static bool fs_read_file_should_return_buffer(Item options_item) {
+    TypeId type = get_type_id(options_item);
+    if (type == LMD_TYPE_UNDEFINED || type == LMD_TYPE_NULL) return true;
+    if (type == LMD_TYPE_STRING) return fs_string_equals(it2s(options_item), "buffer");
+    if (type == LMD_TYPE_MAP) {
+        Item encoding = js_property_get(options_item, (Item){.item = s2it(heap_create_name("encoding", 8))});
+        return fs_read_file_should_return_buffer(encoding);
+    }
+    return true;
+}
+
 static bool fs_validate_watch_options(Item options_item) {
     if (!fs_validate_encoding_options(options_item)) return false;
     if (get_type_id(options_item) != LMD_TYPE_MAP) return true;
@@ -414,6 +425,10 @@ extern "C" Item bigint_from_string(const char* str, int len);
 extern "C" Item js_buffer_alloc(Item size_item, Item fill_item);
 extern "C" int64_t bigint_to_int64(Item bi);
 extern "C" Item js_array_is_array(Item value);
+extern "C" Item js_fs_openSync(Item path_item, Item flags_item, Item mode_item);
+extern "C" Item js_fs_closeSync(Item fd_item);
+
+static Item fs_namespace = {0};
 
 static bool fs_is_nullish(Item value) {
     TypeId type = get_type_id(value);
@@ -590,6 +605,8 @@ static Item make_stats_object(const uv_stat_t* st) {
 // Synchronous File Operations
 // =============================================================================
 
+static Item js_fs_read_file_buffer(const char* path);
+
 // fs.readFileSync(path[, encoding])
 // Returns file contents as a string (assumes UTF-8)
 extern "C" Item js_fs_readFileSync(Item path_item, Item encoding_item) {
@@ -597,6 +614,9 @@ extern "C" Item js_fs_readFileSync(Item path_item, Item encoding_item) {
     char path_buf[1024];
     const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
+    if (fs_read_file_should_return_buffer(encoding_item)) {
+        return js_fs_read_file_buffer(path);
+    }
 
     uv_fs_t req;
     int fd = uv_fs_open(NULL, &req, path, UV_FS_O_RDONLY, 0, NULL);
@@ -824,13 +844,268 @@ extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
     return stream;
 }
 
+static bool fs_item_bytes(Item item, const char** data, int* len) {
+    if (!data || !len) return false;
+    *data = NULL;
+    *len = 0;
+    if (get_type_id(item) == LMD_TYPE_STRING) {
+        String* s = it2s(item);
+        *data = s->chars;
+        *len = (int)s->len;
+        return true;
+    }
+    if (js_is_typed_array(item)) {
+        if (js_typed_array_is_out_of_bounds_item(item)) return false;
+        int byte_len = js_typed_array_byte_length(item);
+        void* ptr = js_typed_array_current_data_ptr(item);
+        if (byte_len > 0 && !ptr) return false;
+        *data = (const char*)ptr;
+        *len = byte_len;
+        return true;
+    }
+    return false;
+}
+
+static void js_fs_writestream_call_write_hook(Item stream, Item fd_item);
+
+static Item js_fs_writestream_write(Item chunk_item) {
+    Item stream = js_get_this();
+    const char* data = NULL;
+    int len = 0;
+    if (!fs_item_bytes(chunk_item, &data, &len)) return (Item){.item = b2it(false)};
+
+    Item fd_item = js_property_get(stream, make_string_item("fd"));
+    int fd = 0;
+    bool close_after_write = false;
+    if (get_type_id(fd_item) == LMD_TYPE_INT) {
+        fd = (int)it2i(fd_item);
+    } else {
+        Item path_item = js_property_get(stream, make_string_item("__writestream_path__"));
+        char path_buf[1024];
+        const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+        if (!path) return (Item){.item = b2it(false)};
+
+        uv_fs_t open_req;
+        fd = uv_fs_open(NULL, &open_req, path,
+                        UV_FS_O_WRONLY | UV_FS_O_CREAT | UV_FS_O_APPEND, 0644, NULL);
+        uv_fs_req_cleanup(&open_req);
+        if (fd < 0) return (Item){.item = b2it(false)};
+        close_after_write = true;
+    }
+
+    if (len > 0) {
+        int64_t position = -1;
+        Item position_item = js_property_get(stream, make_string_item("__writestream_position__"));
+        if (get_type_id(position_item) == LMD_TYPE_INT) {
+            position = it2i(position_item);
+        }
+        uv_buf_t buf = uv_buf_init((char*)data, (unsigned int)len);
+        uv_fs_t write_req;
+        uv_fs_write(NULL, &write_req, fd, &buf, 1, position, NULL);
+        uv_fs_req_cleanup(&write_req);
+        if (position >= 0) {
+            js_property_set(stream, make_string_item("__writestream_position__"),
+                            (Item){.item = i2it(position + len)});
+        }
+    }
+    js_fs_writestream_call_write_hook(stream, fd_item);
+
+    if (close_after_write) {
+        uv_fs_t close_req;
+        uv_fs_close(NULL, &close_req, fd, NULL);
+        uv_fs_req_cleanup(&close_req);
+    }
+    return (Item){.item = b2it(true)};
+}
+
+static void js_fs_writestream_emit_finish(Item stream) {
+    Item cb = js_property_get(stream, make_string_item("__writestream_finish_cb__"));
+    if (get_type_id(cb) == LMD_TYPE_FUNC) {
+        js_call_function(cb, stream, NULL, 0);
+        js_microtask_flush();
+    }
+}
+
+static void js_fs_writestream_emit_close(Item stream) {
+    Item cb = js_property_get(stream, make_string_item("__writestream_close_cb__"));
+    if (get_type_id(cb) == LMD_TYPE_FUNC) {
+        js_call_function(cb, stream, NULL, 0);
+        js_microtask_flush();
+    }
+}
+
+static Item js_fs_writestream_close_noop(Item err_item) {
+    (void)err_item;
+    return make_js_undefined();
+}
+
+static Item js_fs_writestream_open_hook_cb(Item err_item, Item fd_item) {
+    (void)err_item;
+    if (get_type_id(fd_item) == LMD_TYPE_INT) {
+        js_fs_closeSync(fd_item);
+    }
+    return make_js_undefined();
+}
+
+static Item js_fs_writestream_io_hook_cb(Item err_item, Item value_item, Item data_item) {
+    (void)err_item;
+    (void)value_item;
+    (void)data_item;
+    return make_js_undefined();
+}
+
+static Item js_fs_writestream_hooks(Item stream) {
+    Item hooks = js_property_get(stream, make_string_item("__writestream_fs_hooks__"));
+    return get_type_id(hooks) == LMD_TYPE_MAP ? hooks : make_js_undefined();
+}
+
+static void js_fs_writestream_call_open_hook(Item stream, Item path_item, Item flags, Item mode) {
+    Item hooks = js_fs_writestream_hooks(stream);
+    if (get_type_id(hooks) != LMD_TYPE_MAP) return;
+    Item open_fn = js_property_get(hooks, make_string_item("open"));
+    if (get_type_id(open_fn) != LMD_TYPE_FUNC) return;
+    Item cb = js_new_function((void*)js_fs_writestream_open_hook_cb, 2);
+    Item args[4] = {path_item, flags, mode, cb};
+    js_call_function(open_fn, hooks, args, 4);
+}
+
+static void js_fs_writestream_call_write_hook(Item stream, Item fd_item) {
+    Item hooks = js_fs_writestream_hooks(stream);
+    if (get_type_id(hooks) != LMD_TYPE_MAP || get_type_id(fd_item) != LMD_TYPE_INT) return;
+    Item writev_fn = js_property_get(hooks, make_string_item("writev"));
+    if (get_type_id(writev_fn) == LMD_TYPE_FUNC) return;
+    Item write_fn = js_property_get(hooks, make_string_item("write"));
+    if (get_type_id(write_fn) != LMD_TYPE_FUNC) return;
+    Item cb = js_new_function((void*)js_fs_writestream_io_hook_cb, 3);
+    Item args[4] = {fd_item, make_string_item("", 0), (Item){.item = i2it(0)}, cb};
+    js_call_function(write_fn, hooks, args, 4);
+}
+
+static void js_fs_writestream_call_writev_hook(Item stream) {
+    Item hooks = js_fs_writestream_hooks(stream);
+    if (get_type_id(hooks) != LMD_TYPE_MAP) return;
+    Item writev_fn = js_property_get(hooks, make_string_item("writev"));
+    if (get_type_id(writev_fn) != LMD_TYPE_FUNC) return;
+    Item fd_item = js_property_get(stream, make_string_item("fd"));
+    if (get_type_id(fd_item) != LMD_TYPE_INT) return;
+    Item cb = js_new_function((void*)js_fs_writestream_io_hook_cb, 3);
+    Item args[3] = {fd_item, js_array_new(0), cb};
+    js_call_function(writev_fn, hooks, args, 3);
+}
+
+static void js_fs_writestream_close_if_needed(Item stream) {
+    Item fd_item = js_property_get(stream, make_string_item("fd"));
+    if (get_type_id(fd_item) != LMD_TYPE_INT) return;
+
+    Item auto_close = js_property_get(stream, make_string_item("__writestream_auto_close__"));
+    if (get_type_id(auto_close) == LMD_TYPE_BOOL && !it2b(auto_close)) return;
+
+    Item hooks = js_fs_writestream_hooks(stream);
+    Item close_fn = get_type_id(hooks) == LMD_TYPE_MAP ?
+        js_property_get(hooks, make_string_item("close")) :
+        js_property_get(fs_namespace, make_string_item("close"));
+    if (get_type_id(close_fn) == LMD_TYPE_FUNC) {
+        Item noop = js_new_function((void*)js_fs_writestream_close_noop, 1);
+        Item args[2] = {fd_item, noop};
+        js_call_function(close_fn, fs_namespace, args, 2);
+    } else {
+        js_fs_closeSync(fd_item);
+    }
+    js_property_set(stream, make_string_item("fd"), ItemNull);
+    js_property_set(stream, make_string_item("closed"), (Item){.item = b2it(true)});
+    js_fs_writestream_emit_close(stream);
+}
+
+static Item js_fs_writestream_end(Item chunk_item) {
+    Item stream = js_get_this();
+    TypeId chunk_type = get_type_id(chunk_item);
+    if (chunk_type != LMD_TYPE_UNDEFINED && chunk_item.item != ITEM_NULL) {
+        js_fs_writestream_write(chunk_item);
+    }
+    js_fs_writestream_call_writev_hook(stream);
+    js_property_set(stream, make_string_item("__writestream_finished__"), (Item){.item = b2it(true)});
+    js_fs_writestream_emit_finish(stream);
+    js_fs_writestream_close_if_needed(stream);
+    return stream;
+}
+
+static Item js_fs_writestream_on(Item event_item, Item callback_item) {
+    Item stream = js_get_this();
+    if (get_type_id(event_item) != LMD_TYPE_STRING || get_type_id(callback_item) != LMD_TYPE_FUNC) {
+        return stream;
+    }
+    String* event = it2s(event_item);
+    if (event->len == 6 && memcmp(event->chars, "finish", 6) == 0) {
+        js_property_set(stream, make_string_item("__writestream_finish_cb__"), callback_item);
+        Item finished = js_property_get(stream, make_string_item("__writestream_finished__"));
+        if (get_type_id(finished) == LMD_TYPE_BOOL && it2b(finished)) {
+            js_fs_writestream_emit_finish(stream);
+        }
+    } else if (event->len == 5 && memcmp(event->chars, "close", 5) == 0) {
+        js_property_set(stream, make_string_item("__writestream_close_cb__"), callback_item);
+        Item closed = js_property_get(stream, make_string_item("closed"));
+        if (get_type_id(closed) == LMD_TYPE_BOOL && it2b(closed)) {
+            js_fs_writestream_emit_close(stream);
+        }
+    }
+    return stream;
+}
+
 extern "C" Item js_fs_createWriteStream(Item path_item, Item options_item) {
     if (!fs_validate_encoding_options(options_item)) return ItemNull;
-    char path_buf[1024];
-    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    (void)path;
-    return js_new_object();
+    Item stream = js_new_object();
+    js_property_set(stream, make_string_item("__writestream_path__"), path_item);
+    js_property_set(stream, make_string_item("__writestream_finished__"), (Item){.item = b2it(false)});
+    js_property_set(stream, make_string_item("__writestream_auto_close__"), (Item){.item = b2it(true)});
+    js_property_set(stream, make_string_item("closed"), (Item){.item = b2it(false)});
+    js_property_set(stream, make_string_item("fd"), ItemNull);
+
+    Item flags = make_string_item("w");
+    Item mode = make_js_undefined();
+    if (get_type_id(options_item) == LMD_TYPE_MAP) {
+        Item flags_opt = js_property_get(options_item, make_string_item("flags"));
+        if (get_type_id(flags_opt) == LMD_TYPE_STRING || get_type_id(flags_opt) == LMD_TYPE_INT) {
+            flags = flags_opt;
+        }
+        Item mode_opt = js_property_get(options_item, make_string_item("mode"));
+        if (get_type_id(mode_opt) == LMD_TYPE_INT) mode = mode_opt;
+        Item auto_close = js_property_get(options_item, make_string_item("autoClose"));
+        if (get_type_id(auto_close) == LMD_TYPE_BOOL) {
+            js_property_set(stream, make_string_item("__writestream_auto_close__"), auto_close);
+        }
+        Item hooks = js_property_get(options_item, make_string_item("fs"));
+        if (get_type_id(hooks) == LMD_TYPE_MAP) {
+            js_property_set(stream, make_string_item("__writestream_fs_hooks__"), hooks);
+        }
+        Item fd_opt = js_property_get(options_item, make_string_item("fd"));
+        if (get_type_id(fd_opt) == LMD_TYPE_INT) {
+            js_property_set(stream, make_string_item("fd"), fd_opt);
+        }
+        Item start_opt = js_property_get(options_item, make_string_item("start"));
+        if (get_type_id(start_opt) == LMD_TYPE_INT) {
+            js_property_set(stream, make_string_item("__writestream_position__"), start_opt);
+        }
+    }
+
+    Item fd_item = js_property_get(stream, make_string_item("fd"));
+    if (get_type_id(fd_item) != LMD_TYPE_INT) {
+        char path_buf[1024];
+        const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+        if (!path) return ItemNull;
+        fd_item = js_fs_openSync(path_item, flags, mode);
+        if (get_type_id(fd_item) == LMD_TYPE_INT) {
+            js_property_set(stream, make_string_item("fd"), fd_item);
+        }
+    }
+    js_fs_writestream_call_open_hook(stream, path_item, flags, mode);
+
+    js_property_set(stream, make_string_item("write"),
+                    js_new_function((void*)js_fs_writestream_write, 1));
+    js_property_set(stream, make_string_item("end"),
+                    js_new_function((void*)js_fs_writestream_end, 1));
+    js_property_set(stream, make_string_item("on"),
+                    js_new_function((void*)js_fs_writestream_on, 2));
+    return stream;
 }
 
 // fs.writeFileSync(path, data)
@@ -2428,7 +2703,6 @@ static Item js_fs_fstat_async(Item fd_item, Item opts_or_cb, Item callback_item)
 // fs Module Namespace Object
 // =============================================================================
 
-static Item fs_namespace = {0};
 static Item fs_internal_promises_namespace = {0};
 
 static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count) {

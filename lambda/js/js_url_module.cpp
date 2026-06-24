@@ -159,10 +159,42 @@ extern "C" Item js_url_parse_legacy(Item url_item) {
 
     Item result = url_to_js_object(url);
     // legacy fields
-    js_property_set(result, make_string_item("path"),
-        js_property_get(result, make_string_item("pathname")));
+    const char* pathname = url_get_pathname(url);
+    const char* search = url_get_search(url);
+    if (pathname && search && search[0] != '\0') {
+        char path_buf[4096];
+        int path_len = snprintf(path_buf, sizeof(path_buf), "%s%s", pathname, search);
+        if (path_len < 0) path_len = 0;
+        if (path_len >= (int)sizeof(path_buf)) path_len = (int)sizeof(path_buf) - 1;
+        js_property_set(result, make_string_item("path"), make_string_item(path_buf, path_len));
+    } else {
+        js_property_set(result, make_string_item("path"),
+            js_property_get(result, make_string_item("pathname")));
+    }
     js_property_set(result, make_string_item("query"),
         js_property_get(result, make_string_item("search")));
+    const char* username = url_get_username(url);
+    const char* password = url_get_password(url);
+    if (username && username[0] != '\0') {
+        char auth_buf[1024];
+        int auth_len = 0;
+        if (password && password[0] != '\0') {
+            auth_len = snprintf(auth_buf, sizeof(auth_buf), "%s:%s", username, password);
+        } else {
+            auth_len = snprintf(auth_buf, sizeof(auth_buf), "%s", username);
+        }
+        if (auth_len < 0) auth_len = 0;
+        if (auth_len >= (int)sizeof(auth_buf)) auth_len = (int)sizeof(auth_buf) - 1;
+        size_t decoded_len = 0;
+        char* decoded = url_decode_component(auth_buf, (size_t)auth_len, &decoded_len);
+        if (decoded) {
+            js_property_set(result, make_string_item("auth"),
+                            make_string_item(decoded, (int)decoded_len));
+            mem_free(decoded);
+        } else {
+            js_property_set(result, make_string_item("auth"), make_string_item(auth_buf, auth_len));
+        }
+    }
     js_property_set(result, make_string_item("slashes"),
         (Item){.item = i2it(1)});
 
