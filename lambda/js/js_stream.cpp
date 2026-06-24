@@ -1120,7 +1120,13 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
     Item flowing = js_property_get(self, key_flowing);
     js_stream_async_iterators_drain(self, make_js_undefined());
     if (flowing.item != 0 && it2b(flowing)) {
-        js_stream_schedule_data_flush(self);
+        if (js_stream_readable_is_object_mode(self) ||
+            js_item_is_true(js_property_get(self, key_capture_rejections))) {
+            js_stream_schedule_data_flush(self);
+        } else {
+            js_stream_flush_buffered_data(self);
+            js_stream_call_read_if_needed(self, make_js_undefined());
+        }
     } else if (js_state_get_bool(js_property_get(self, key_readable_state), "readableListening")) {
         stream_emit(self, "readable", NULL, 0);
     }

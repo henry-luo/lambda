@@ -5317,7 +5317,11 @@ extern "C" Item js_console_clear_fn(void) {
             extern bool js_is_truthy(Item val);
             if (js_is_truthy(isTTY)) {
                 // ESC[1;1H ESC[0J — move cursor to 1,1 and clear screen down
-                js_console_write_to_stdout("\x1b[1;1H\x1b[0J", 10);
+                Item write_fn = js_property_get_str(stdout_obj, "write", 5);
+                if (get_type_id(write_fn) == LMD_TYPE_FUNC) {
+                    Item seq = (Item){.item = s2it(heap_create_name("\x1b[1;1H\x1b[0J", 10))};
+                    js_call_function(write_fn, stdout_obj, &seq, 1);
+                }
             }
         }
     }
