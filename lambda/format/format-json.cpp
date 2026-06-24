@@ -181,6 +181,8 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
             ctx.write_text("null");
         }
     } else if (item.isArray() || item.isList()) {
+        // isArray() now covers typed ArrayNum (1-D / N-D) too — the reader walks
+        // it transparently, so the same path handles every array backing.
         ArrayReader arr = item.asArray();
         format_array_reader_with_indent(ctx, arr, indent);
     } else if (item.isMap()) {

@@ -5160,6 +5160,43 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
 }
 
 static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
+    // Multi-dim path: arr[i, j, k] — when there's more than one index, dispatch
+    // to the runtime array_num_at_nd helper.  Indices are stored into a small
+    // heap-data buffer and the helper computes the stride-walking offset.
+    if (field_node->field && field_node->field->next) {
+        // Count indices
+        int ndim = 0;
+        for (AstNode* it = field_node->field; it; it = it->next) ndim++;
+        // Allocate a heap_data buffer for ndim * int64_t
+        int64_t buf_bytes = (int64_t)ndim * (int64_t)sizeof(int64_t);
+        MIR_reg_t idx_buf = emit_call_1(mt, "heap_data_calloc", MIR_T_P,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, buf_bytes));
+        // Transpile each index and store into idx_buf
+        int slot = 0;
+        for (AstNode* it = field_node->field; it; it = it->next) {
+            MIR_reg_t val = transpile_expr(mt, it);
+            TypeId vt = get_effective_type(mt, it);
+            if (vt != LMD_TYPE_INT && vt != LMD_TYPE_INT64) {
+                // unbox boxed Item to int64
+                val = emit_unbox(mt, val, LMD_TYPE_INT);
+            }
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                               (MIR_disp_t)(slot * (int)sizeof(int64_t)),
+                               idx_buf, 0, 1),
+                MIR_new_reg_op(mt->ctx, val)));
+            slot++;
+        }
+        // Get the object as ArrayNum* (unbox the container Item)
+        MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
+        MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
+        // Call array_num_at_nd(arr, ndim, indices) → Item
+        return emit_call_3(mt, "array_num_at_nd", MIR_T_I64,
+            MIR_T_P,   MIR_new_reg_op(mt->ctx, arr_ptr),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ndim),
+            MIR_T_P,   MIR_new_reg_op(mt->ctx, idx_buf));
+    }
+
     TypeId idx_tid = get_effective_type(mt, field_node->field);
     TypeId obj_tid = get_effective_type(mt, field_node->object);
 
@@ -8159,7 +8196,41 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         return transpile_assign_stam(mt, (AstAssignStamNode*)node);
     case AST_NODE_INDEX_ASSIGN_STAM: {
         // arr[i] = val → inline store for ArrayInt, or fn_array_set fallback
+        // arr[i, j, k] = val → dispatch to array_num_set_nd runtime helper
         AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
+
+        // Multi-dim path: more than one chained index
+        if (ca->key && ca->key->next) {
+            int ndim = 0;
+            for (AstNode* it = ca->key; it; it = it->next) ndim++;
+            int64_t buf_bytes = (int64_t)ndim * (int64_t)sizeof(int64_t);
+            MIR_reg_t idx_buf = emit_call_1(mt, "heap_data_calloc", MIR_T_P,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, buf_bytes));
+            int slot = 0;
+            for (AstNode* it = ca->key; it; it = it->next) {
+                MIR_reg_t val = transpile_expr(mt, it);
+                TypeId vt = get_effective_type(mt, it);
+                if (vt != LMD_TYPE_INT && vt != LMD_TYPE_INT64) {
+                    val = emit_unbox(mt, val, LMD_TYPE_INT);
+                }
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                   (MIR_disp_t)(slot * (int)sizeof(int64_t)),
+                                   idx_buf, 0, 1),
+                    MIR_new_reg_op(mt->ctx, val)));
+                slot++;
+            }
+            MIR_reg_t obj_item = transpile_expr(mt, ca->object);
+            MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
+            MIR_reg_t boxed_val = transpile_box_item(mt, ca->value);
+            // use emit_call_4 (returns void treated as I64) since no emit_call_void_4 exists
+            (void)emit_call_4(mt, "array_num_set_nd", MIR_T_I64,
+                MIR_T_P,   MIR_new_reg_op(mt->ctx, arr_ptr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ndim),
+                MIR_T_P,   MIR_new_reg_op(mt->ctx, idx_buf),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+            return (MIR_reg_t)0;
+        }
 
         // ==================================================================
         // Phase 4: Edit bridge — route through MarkEditor in edit handlers

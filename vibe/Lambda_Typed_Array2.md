@@ -75,10 +75,29 @@ Two paths into N-D, **both implicit — no new `tensor(...)` builtin**:
 
    Edge cases (handled by the fall-back to generic `Array`):
    - Mixed inner lengths (jagged) — stays heterogeneous.
-   - Mixed `elem_type` across rows — stays heterogeneous (could promote with type-coercion, but that's surprising; keep it explicit).
+   - Mixed `elem_type` across rows — promoted with widening to `ELEM_FLOAT` if any row is float; otherwise the int rows widen to `ELEM_INT64` for storage.
    - Mixed inner types (some `ArrayNum`, some scalar) — stays heterogeneous.
 
    No syntactic distinction — `[[1, 2], [3, 4]]` is the only N-D literal. Whether it's actually stored as 2-D `ArrayNum` or as `Array of ArrayNum` depends on detection success; the user-visible value semantics are equivalent under indexing and iteration.
+
+   #### Memory cost of dynamic promotion
+
+   Dynamic promotion is **not free** — it allocates a fresh contiguous buffer and copies each row's data into it. The two (or more) original row buffers remain separate allocations, since NumPy-style N-D requires a single contiguous block of memory (`arr[i, j]` resolves to `data[i*strides[0] + j*strides[1]]`, which is only meaningful if the data lives in one buffer).
+
+   Concretely, when `try_promote_to_ndim` succeeds on `[r1, r2]` where each `r` is a length-`n` `ArrayNum`:
+   - **Allocates**: one new `ArrayNum` header (~40 bytes) + one contiguous data buffer of `2 * n * elem_size` bytes + one `ArrayNumShape` side-table (~40 bytes).
+   - **Copies**: `memcpy` each row's `elem_size * n` bytes into the new buffer (same-type rows). For mixed int/float rows, falls back to per-element conversion via `array_num_set_item`.
+   - **Peak memory**: ~2× the data size during promotion (original rows + new contiguous block). Steady-state drops back to ~1× once the original rows become unreferenced and the GC reclaims them.
+   - **Time**: O(N) total elements — a single tight memcpy per row, fast in absolute terms but not zero.
+
+   **This matches NumPy's behavior exactly.** `np.array([r1, r2])` always copies; there is no zero-copy way to view two separate 1-D buffers as one 2-D ndarray because strides can only address into one contiguous block. The same constraint applies here.
+
+   **Why this cost is acceptable:**
+   - Static AST detection (the `[[1, 2], [3, 4]]` literal case) skips the copy entirely — the transpiler allocates the contiguous buffer once and fills directly, with no intermediate row arrays.
+   - Dynamic promotion only fires when downstream code is likely to benefit: vectorized arithmetic, broadcasting, reductions, and math funcs all run materially faster on the contiguous form than on `Array of ArrayNum` (which would dispatch per row through `vector_get`/`array_num_get` boxing).
+   - For users who want to avoid the copy (e.g. building a list of arrays for non-numeric purposes), the heterogeneous fall-back path is unchanged.
+
+   **Future optimization (out of scope):** a lazy-promotion variant could defer the copy until the first vectorized op observes the structure, avoiding work for build-and-discard patterns. Skipping it for now since the eager copy is simpler and the steady-state memory is the same either way.
 
 ### Operations to extend
 
@@ -120,6 +139,68 @@ Same rules as 1-D (already in `lambda-vector.cpp`): result element type is the w
 ### GC note (forward reference)
 
 The `ArrayNumShape*` stored in `extra` becomes reachable from the GC trace path when `ARRAY_NUM_FLAG_NDIM` is set. For pure N-D arrays (no view) the shape carries no GC roots — the trace function reads the flag and skips. For views, the shape carries `base`, which must be marked. Full details in §2 / GC interaction.
+
+### First-class multi-dim indexing: `arr[i, j, k]`
+
+Once N-D `ArrayNum` exists, the natural follow-on is multi-dim indexing syntax. Comma-separated indices inside `[...]` resolve to a single scalar via stride-walking offset calculation, rather than allocating intermediate view objects for each level of chaining.
+
+#### Prior art
+
+First-class multi-dim subscript is the de facto standard in scientific and array-oriented languages:
+
+| Language | Syntax | Notes |
+|---|---|---|
+| Python + NumPy | `arr[i, j, k]` | Comma forms a tuple passed to `__getitem__((i, j, k))` |
+| Julia | `arr[i, j, k]` | Native, with `CartesianIndex` optimizations |
+| R | `arr[i, j, k]` | First-class for matrices/arrays |
+| MATLAB / Octave | `arr(i, j, k)` | Function-call-style (parens instead of brackets) |
+| Fortran | `arr(i, j, k)` | The original mathematical syntax (column-major) |
+| Mathematica | `arr[[i, j, k]]` | Double brackets for part extraction |
+| **C++23** | `arr[i, j, k]` | New in C++23 (P2128 "multidimensional subscript operator") |
+| C# | `arr[i, j, k]` | For `int[,,]` rectangular arrays; distinct from `[i][j][k]` jagged |
+| Swift / Kotlin / D | `arr[i, j, k]` | Subscript operator with multiple params |
+| Rust (ndarray) | `arr[(i, j, k)]` | Explicit tuple index |
+
+Notably **C++23 adopted it after 30+ years** of relying on `arr[i][j][k]` chaining, validating that the syntax is worth the small grammar cost even in legacy C-family languages. Languages without first-class multi-dim indexing (JavaScript, Go, Lua, Ruby) commonly cite it as a pain point for numerical code.
+
+#### Advantages over `arr[i][j][k]`
+
+Both forms are functionally equivalent for reads on Lambda's N-D `ArrayNum`. The difference is in **what happens at runtime**:
+
+**`arr[i][j][k]` chained access on a 3-D `ArrayNum`:**
+1. `arr[i]` allocates a new `ArrayNum` view header (~40B) + `ArrayNumShape` side-table (~40B) → ~80B for one intermediate view.
+2. `[j]` allocates another view → another ~80B.
+3. `[k]` finally computes `data[k]` and returns the scalar.
+4. Result: **~160B of view-object allocation per scalar access**, plus 2 extra dereferences and 2 GC roots to track.
+
+**`arr[i, j, k]` direct multi-dim access:**
+1. Single offset calc: `i*strides[0] + j*strides[1] + k*strides[2]`.
+2. Read scalar from `data[offset]`. **Zero allocations.**
+
+Concrete impact:
+
+| Pattern | Chained `[i][j][k]` cost | Multi-dim `[i, j, k]` cost |
+|---|---|---|
+| Single scalar read | ~160B view alloc (3-D) | 0 bytes |
+| Tight loop `for k: arr[i, j, k]` | per-iteration view churn | one offset add per iter |
+| Mutation `mat[i, j] = v` | **not possible** — intermediate view is read-only | direct write at offset |
+
+The mutation gap is the load-bearing reason to add this syntax. Without `arr[i, j, k] = v`, there is no way to mutate a single N-D tensor element — the intermediate view returned by `mat[i]` is read-only (per §2), so `mat[i][j] = v` is rejected. A first-class multi-dim subscript lets us add element-level writes cleanly.
+
+Additional ergonomic and forward-looking benefits:
+- **NumPy / Julia / R user familiarity** — Lambda's data-processing audience (per `CLAUDE.md`: *"data processing, document transformation, mathematical computation"*) expects this syntax.
+- **Fancy indexing path** — once the parser accepts multi-arg subscripts, future extensions like boolean mask indexing (`arr[mask]`) or integer-array indexing (`arr[[0, 2, 5]]`) compose naturally on the same grammar form.
+- **Negative indices** — `arr[-1, -1]` becomes a clean shorthand for "last row, last column"; chained `arr[-1][-1]` requires two view allocations to get there.
+
+#### Implementation plan
+
+1. **Grammar** ([lambda/tree-sitter-lambda/grammar.js](../lambda/tree-sitter-lambda/grammar.js)): extend `index_expr` to allow a comma-separated list of expressions inside the `[...]`. Regenerate parser via `make generate-grammar`. The single-index form `arr[i]` is unchanged; the multi-arg form is purely additive.
+2. **AST** ([lambda/build_ast.cpp](../lambda/build_ast.cpp)): `AstIndexNode` stores the index expressions as a linked list. For 1-arg, behavior is identical to today.
+3. **Transpiler / runtime**: when the indexed object has runtime type `LMD_TYPE_ARRAY_NUM` and the index count matches `ndim`, dispatch to a new `array_num_at_nd(arr, idx0, idx1, ..., idxN)` runtime helper that computes the offset and returns the scalar. For mismatched arity (e.g. partial index on N-D), fall back to a slower path that returns a view of the sub-tensor.
+4. **Mutation**: a parallel `arr[i, j, k] = v` assignment dispatches to `array_num_set_nd(arr, idx0, ..., idxN, value)`. View targets are rejected (consistent with §2's read-only-view rule).
+5. **Negative indices**: each index is wrapped with `< 0 ? len + idx : idx` per axis, matching existing 1-D `arr[i]` behavior.
+
+The implementation is contained — grammar adds one alternative production, AST gets a linked-list index chain (already used for other multi-arg nodes), and the runtime helper is a stride-dot-product loop.
 
 ---
 
@@ -653,3 +734,26 @@ All open questions from prior rounds have been resolved. Implementation can proc
 3. 1-D arithmetic benchmark (`a + b` for length-1M `f64[]`) does not regress measurably vs. Phase 1 baseline.
 4. Memory: a 1-D owned `ArrayNum` allocation footprint is unchanged from today (new flag bits go into the existing `flags` byte; the shape side-table is only allocated for N-D or view arrays).
 5. Container ABI: `sizeof(Container)`, `sizeof(Array)`, `sizeof(Map)`, `sizeof(Element)`, `sizeof(ArrayNum)` are unchanged by this proposal (new flags occupy already-free bits in `flags`; the recent `map_kind`-move refactor has its own static_asserts).
+
+---
+
+## Appendix A — Mark Reader design guidelines
+
+> These guidelines govern the `MarkReader` family (`ItemReader`, `ArrayReader`, `MapReader`, `ElementReader`) — the read-only traversal layer over the Mark/Lambda data tree used by formatters, validators, and other consumers. They are recorded here while the typed-array work motivates them; they belong in a dedicated Mark Reader design doc and should be moved there.
+
+**G1 — The external Reader API exposes only the four logical shapes: array, map, item, scalar.**
+Consumers see a uniform tree of *arrays*, *maps*, *items*, and *scalars*. They are never exposed to physical-representation details — whether an array is a generic `Array` of boxed `Item`s or a typed `ArrayNum` (1-D, N-D, compact element widths, views) is entirely hidden behind the reader. A typed `ArrayNum` answers `isArray()`/`asArray()` like any array; its elements arrive as ordinary scalar items or, for N-D, as nested arrays. No `ELEM_*`, no shape/stride, no `isArrayNum()` leaks into consumer code. This keeps formatters/validators representation-agnostic: one code path handles every backing type, and new physical representations can be added under the reader without touching a single consumer.
+
+**G2 — Traversal is allocation-free: stack only, no dynamic allocation.**
+Reading and walking the tree must not heap-allocate. Readers are small stack value types; any per-element cursor state (e.g. a typed-array slab descriptor) lives inline in the reader by value, not on the heap. Leaf scalars are produced without boxing — packed inline into the `Item` representation, or returned as an `Item` that points directly into the existing data buffer. This makes traversal cheap and side-effect-free (no GC pressure, no pinning, no pool churn) so the readers are safe to use on hot paths. The one tolerated exception is an explicit *materialization* request outside the traversal contract (e.g. asking `item()` for a real boxed `Item` of a sub-tensor that has no standalone heap object); such a call may allocate and is documented as off the zero-allocation path. Formatters stay on the zero-allocation path by traversing via `asArray()`/`get()`, never forcing materialization.
+
+**G3 — The data tree is held static for the duration of a read/traversal.**
+A reader assumes the underlying Mark/Lambda tree is immutable while it is being read. This is what licenses G2: a reader may hand out `Item`s that point into a live data buffer, and cursors that reference a parent container, knowing those targets will not move, mutate, or be freed mid-traversal. Concurrent mutation of a tree being read is a usage error, not a supported pattern. (This mirrors the typed-array "stable during formatting" assumption used elsewhere in this proposal.)
+
+### Conformance of the ArrayNum reader support — implemented & verified
+
+`ArrayNum` traverses through the existing `ArrayReader`/`ItemReader` (in `lambda/mark_reader.{hpp,cpp}`). The 13-way `elem_type` dispatch lives in exactly one place (`arr_num_leaf_item` in `mark_reader.cpp`); the per-formatter copies (json/yaml/toml) were deleted. `print.cpp` (Mark notation) is intentionally left on its own direct walker for logging speed. The design satisfies all three guidelines:
+
+- **G1 ✓** — `isArray()` reports `true` for typed arrays; `asArray()` returns an `ArrayReader` that abstracts generic and typed alike. The internal `ArrayNumView` slab cursor is a *private* reader member; `ELEM_*` dispatch lives entirely inside `ArrayReader::get()`. No consumer references `ArrayNum`. A survey of all 18 `isArray()` call sites confirms every one iterates through the reader interface (none does raw `array()->items[]`), so all formatters (json, yaml, toml, xml, html, latex, text, kv, markup) and validators gain typed-array support without change.
+- **G2 ✓** — N-D sub-tensors are represented by a by-value `ArrayNumView { base, offset, axis }` carried inline in the reader — no heap `ArrayNum`/shape is allocated. Leaf scalars pack inline (`i2it`, `b2it`, `f16_to_item`, `f32_to_item`, sized ints) or, for 8-byte `float`/`int64`/`uint64`, the `Item` points into the live array buffer. Zero allocation across the whole traversal. The `item()`-on-a-sub-tensor fallback is the documented G2 exception (graceful, may materialize); formatters never hit it because they recurse via `asArray()`.
+- **G3 ✓** — The buffer-pointing leaf `Item`s and the `base`-referencing cursors are valid precisely because the tree is static during the read, exactly as G3 requires.

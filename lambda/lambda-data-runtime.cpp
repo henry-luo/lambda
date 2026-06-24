@@ -188,6 +188,94 @@ ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim
     return arr;
 }
 
+// Read a single scalar from ArrayNum's flat data buffer at the given offset.
+// Bypasses array_num_get's leading-axis-view logic — used by multi-dim access
+// where we've already computed the flat scalar offset via stride math.
+static Item array_num_read_scalar_at(ArrayNum* array, int64_t offset) {
+    if (!array || offset < 0) return ItemNull;
+    switch (array->get_elem_type()) {
+        case ELEM_INT:     return (Item){.item = i2it(array->items[offset])};
+        case ELEM_INT64:   return push_l(array->items[offset]);
+        case ELEM_FLOAT:   return push_d(array->float_items[offset]);
+        case ELEM_INT8:    return (Item){.item = i8_to_item(((int8_t*)array->data)[offset])};
+        case ELEM_INT16:   return (Item){.item = i16_to_item(((int16_t*)array->data)[offset])};
+        case ELEM_INT32:   return (Item){.item = i32_to_item(((int32_t*)array->data)[offset])};
+        case ELEM_UINT8:   return (Item){.item = u8_to_item(((uint8_t*)array->data)[offset])};
+        case ELEM_UINT16:  return (Item){.item = u16_to_item(((uint16_t*)array->data)[offset])};
+        case ELEM_UINT32:  return (Item){.item = u32_to_item(((uint32_t*)array->data)[offset])};
+        case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)array->data)[offset]))};
+        case ELEM_FLOAT32: return (Item){.item = f32_to_item(((float*)array->data)[offset])};
+        case ELEM_UINT64: {
+            uint64_t val = ((uint64_t*)array->data)[offset];
+            uint64_t* heap_val = (uint64_t*)heap_calloc(sizeof(uint64_t), LMD_TYPE_UINT64);
+            *heap_val = val;
+            return (Item){.item = u64_to_item(heap_val)};
+        }
+        case ELEM_FLOAT64: return push_d(((double*)array->data)[offset]);
+        case ELEM_BOOL:    return (Item){.item = b2it(((uint8_t*)array->data)[offset] ? BOOL_TRUE : BOOL_FALSE)};
+        default:           return ItemNull;
+    }
+}
+
+// Multi-dim scalar access: arr[i, j, k] on N-D ArrayNum.
+// Walks strides to compute a flat offset, then reads the scalar at that offset.
+// Negative indices are interpreted relative to the corresponding axis length.
+// On any out-of-range index or dim mismatch, returns ItemNull.
+Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices) {
+    if (!arr || ndim < 1) return ItemNull;
+    // 1-D access: arr[i] when arr is 1-D
+    if (!arr->is_ndim) {
+        if (ndim != 1) return ItemNull;  // can't multi-dim a 1-D array
+        int64_t i = indices[0];
+        if (i < 0) i += arr->length;
+        if (i < 0 || i >= arr->length) return ItemNull;
+        return array_num_read_scalar_at(arr, i);
+    }
+    // N-D access via stride dot product
+    ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
+    if (!shape || shape->ndim != ndim) return ItemNull;
+    int64_t* shp = array_num_shape_dims(shape);
+    int64_t* str = array_num_shape_strides(shape);
+    int64_t offset = 0;
+    for (int ax = 0; ax < ndim; ax++) {
+        int64_t i = indices[ax];
+        if (i < 0) i += shp[ax];
+        if (i < 0 || i >= shp[ax]) return ItemNull;
+        offset += i * str[ax];
+    }
+    return array_num_read_scalar_at(arr, offset);
+}
+
+// Multi-dim write: arr[i, j, k] = value on N-D ArrayNum.
+// Rejected on views (read-only).  Out-of-range indices silently no-op.
+void array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value) {
+    if (!arr || ndim < 1) return;
+    if (arr->is_view) {
+        log_error("array_num_set_nd: cannot mutate a view; copy() first");
+        return;
+    }
+    if (!arr->is_ndim) {
+        if (ndim != 1) return;
+        int64_t i = indices[0];
+        if (i < 0) i += arr->length;
+        if (i < 0 || i >= arr->length) return;
+        array_num_set_item(arr, i, value);
+        return;
+    }
+    ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
+    if (!shape || shape->ndim != ndim) return;
+    int64_t* shp = array_num_shape_dims(shape);
+    int64_t* str = array_num_shape_strides(shape);
+    int64_t offset = 0;
+    for (int ax = 0; ax < ndim; ax++) {
+        int64_t i = indices[ax];
+        if (i < 0) i += shp[ax];
+        if (i < 0 || i >= shp[ax]) return;
+        offset += i * str[ax];
+    }
+    array_num_set_item(arr, offset, value);
+}
+
 // Returns the iteration count for for-in / index loops:
 //   - 1-D / non-ndim arrays: total element count (length)
 //   - N-D arrays: shape[0] (leading axis), so for-in yields leading-axis slices
@@ -747,14 +835,25 @@ static bool row_summary(Item it, ArrayNumElemType* etype_out, int64_t* len_out, 
 
 // Write one element of the source row to the promoted N-D ArrayNum's data buffer
 // at position flat_idx.  Handles both ArrayNum source (typed read) and generic
-// Array source (Item-unboxed read).
+// Array source (Item-unboxed read).  When the source elem_type differs from
+// the destination etype (e.g. int row stored into a float-widened tensor),
+// converts element-by-element via the Item path; same-type rows memcpy.
 static void write_row_into_ndim(ArrayNum* dst, ArrayNumElemType etype, int64_t flat_idx,
                                  Item src_item) {
     TypeId tid = get_type_id(src_item);
     if (tid == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* src = src_item.array_num;
-        int elem_size = ELEM_TYPE_SIZE[etype >> 4];
-        memcpy((char*)dst->data + flat_idx * elem_size, src->data, (size_t)src->length * elem_size);
+        if (src->get_elem_type() == etype) {
+            // same elem_type — byte-copy is safe
+            int elem_size = ELEM_TYPE_SIZE[etype >> 4];
+            memcpy((char*)dst->data + flat_idx * elem_size, src->data,
+                   (size_t)src->length * elem_size);
+        } else {
+            // type mismatch (e.g. int row into float tensor): convert per element
+            for (int64_t j = 0; j < src->length; j++) {
+                array_num_set_item(dst, flat_idx + j, array_num_get(src, j));
+            }
+        }
     } else if (tid == LMD_TYPE_ARRAY) {
         Array* src = src_item.array;
         for (int64_t j = 0; j < src->length; j++) {

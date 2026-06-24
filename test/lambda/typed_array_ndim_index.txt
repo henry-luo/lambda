@@ -1,0 +1,44 @@
+'=== 2-D read ==='
+1
+2
+3
+4
+5
+6
+'=== chained equivalent ==='
+1
+6
+'=== arithmetic ==='
+7
+15
+'=== 3-D read ==='
+1
+4
+6
+7
+8
+'=== negative indices ==='
+6
+1
+1
+5
+'=== float matrix ==='
+1.5
+2.5
+3.5
+4.5
+6
+'=== reshape source ==='
+10
+30
+50
+60
+10
+60
+'=== composition ==='
+15
+15
+'=== out of range ==='
+'=== dim mismatch ==='
+[1, 2]
+'=== mutation (see typed_array_ndim_write.txt for proc test) ==='

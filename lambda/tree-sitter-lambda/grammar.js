@@ -443,9 +443,15 @@ module.exports = grammar({
       optional(field('propagate', '^')),
     )),
 
+    // Indexing: arr[i] for 1-D / chained, or arr[i, j, k] for N-D multi-dim
+    // (NumPy/Julia/R/C++23 style; comma-separated indices resolve to a single
+    // stride-walking offset on N-D ArrayNum).
     index_expr: $ => prec.right(100, seq(
       field('object', $.primary_expr),
-      '[', field('field', $._expr), ']',
+      '[',
+      field('field', $._expr),
+      repeat(seq(',', field('field', $._expr))),
+      ']',
     )),
 
     // Query expression: expr?T (recursive) or expr.?T (direct)

@@ -1073,6 +1073,8 @@ JitImport jit_runtime_imports[] = {
     {"array_int_set", FPTR(array_int_set)},
     {"array_num_new", FPTR(array_num_new)},
     {"array_num_new_ndim", FPTR(array_num_new_ndim)},
+    {"array_num_at_nd", FPTR(array_num_at_nd)},
+    {"array_num_set_nd", FPTR(array_num_set_nd)},
     {"array_num_set_item", FPTR(array_num_set_item)},
 
     // ========================================================================
