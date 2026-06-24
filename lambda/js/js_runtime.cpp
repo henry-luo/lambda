@@ -13565,7 +13565,24 @@ static bool js_regex_lookahead_has_capture(const char* pattern, int pattern_len,
     return false;
 }
 
-static bool js_regex_needs_backtrack(const char* pattern, int pattern_len) {
+static bool js_regex_has_unescaped_anchor(const char* pattern, int pattern_len) {
+    bool in_class = false;
+    for (int i = 0; i < pattern_len; i++) {
+        char c = pattern[i];
+        if (c == '\\') {
+            if (i + 1 < pattern_len) i++;
+            continue;
+        }
+        if (c == '[') { in_class = true; continue; }
+        if (c == ']' && in_class) { in_class = false; continue; }
+        if (!in_class && (c == '^' || c == '$')) return true;
+    }
+    return false;
+}
+
+static bool js_regex_needs_backtrack(const char* pattern, int pattern_len, bool multiline) {
+    if (multiline && js_regex_has_unescaped_anchor(pattern, pattern_len)) return true;
+
     bool in_class = false;
     // group stack: per open group, track whether its body contains a bounded
     // optional ('?') and whether it contains an unbounded quantifier ('*'/'+').
@@ -14499,7 +14516,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     // preprocessing drops forward backreferences and rewrites named groups — so
     // those constructs survive into the pattern the backtracker compiles.
     bool route_to_bt = (special_property_kind == 0) &&
-        js_regex_needs_backtrack(effective_pattern, effective_pattern_len);
+        js_regex_needs_backtrack(effective_pattern, effective_pattern_len, compile_info.multiline);
     const char* bt_pattern = effective_pattern;
     int bt_pattern_len = effective_pattern_len;
 
