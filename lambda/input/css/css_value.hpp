@@ -16,6 +16,7 @@ typedef enum CssEnumGroup {
     CSS_VALUE_GROUP_SYSTEM_COLOR,        // Canvas, CanvasText, LinkText, etc.
     CSS_VALUE_GROUP_COLOR_FUNCTION,      // rgb, rgba, hsl, hsla, hwb, lab, lch, oklab, oklch, color
     CSS_VALUE_GROUP_CURSOR,              // hand, pointer, text, wait, progress, grab, grabbing, move
+    CSS_VALUE_GROUP_CARET_SHAPE,         // auto, bar, block, underscore
     CSS_VALUE_GROUP_DIRECTION,           // ltr, rtl
     CSS_VALUE_GROUP_DISPLAY_OUTSIDE,     // block, inline, run-in
     CSS_VALUE_GROUP_DISPLAY_INSIDE,      // flow, flow-root, table, flex, grid, ruby
@@ -309,6 +310,8 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_GRAB,
     CSS_VALUE_GRABBING,
     CSS_VALUE_MOVE,
+    CSS_VALUE_BAR,
+    CSS_VALUE_UNDERSCORE,
     CSS_VALUE_LTR,
     CSS_VALUE_RTL,
     CSS_VALUE_BLOCK,

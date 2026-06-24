@@ -6,6 +6,7 @@
 #include "transform.hpp"
 #include "state_store.hpp"
 #include "form_control.hpp"
+#include "rdt_video.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
@@ -191,6 +192,15 @@ static void release_embedded_document(DomElement* elem) {
     free_document(embedded_doc);
 }
 
+static void release_media_prop(EmbedProp* embed) {
+    if (!embed || !embed->video) {
+        return;
+    }
+
+    rdt_video_destroy(embed->video);
+    embed->video = nullptr;
+}
+
 static void release_grid_prop(GridProp* grid) {
     if (!grid) {
         return;
@@ -220,8 +230,45 @@ static void release_embed_prop(DomElement* elem) {
         return;
     }
 
+    release_media_prop(elem->embed);
     release_embedded_document(elem);
     release_grid_prop(elem->embed->grid);
+}
+
+static bool release_should_walk_dom_children(DomElement* elem) {
+    if (!elem) {
+        return false;
+    }
+
+    uintptr_t tag = elem->tag_id;
+    switch (tag) {
+        case HTM_TAG_AREA:
+        case HTM_TAG_BASE:
+        case HTM_TAG_BR:
+        case HTM_TAG_COL:
+        case HTM_TAG_EMBED:
+        case HTM_TAG_HR:
+        case HTM_TAG_IMG:
+        case HTM_TAG_INPUT:
+        case HTM_TAG_LINK:
+        case HTM_TAG_META:
+        case HTM_TAG_PARAM:
+        case HTM_TAG_SOURCE:
+        case HTM_TAG_TRACK:
+        case HTM_TAG_WBR:
+            return false;
+        default:
+            break;
+    }
+
+    if (elem->display.inner == RDT_DISPLAY_REPLACED) {
+        // Select and textarea keep real DOM children used for option/text state.
+        // Other replaced elements render external content or fallback outside the
+        // normal child layout tree, so their child slots are not view-owned.
+        return tag == HTM_TAG_SELECT || tag == HTM_TAG_TEXTAREA;
+    }
+
+    return true;
 }
 
 static void release_view_owned_resources_in_node(DomNode* node) {
@@ -231,11 +278,13 @@ static void release_view_owned_resources_in_node(DomNode* node) {
 
     if (node->is_element()) {
         DomElement* elem = node->as_element();
-        DomNode* child = elem->first_child;
-        while (child) {
-            DomNode* next = child->next_sibling;
-            release_view_owned_resources_in_node(child);
-            child = next;
+        if (release_should_walk_dom_children(elem)) {
+            DomNode* child = elem->first_child;
+            while (child) {
+                DomNode* next = child->next_sibling;
+                release_view_owned_resources_in_node(child);
+                child = next;
+            }
         }
 
         if (elem->font) {

@@ -37,11 +37,15 @@
 #include "../../radiant/text_control.hpp"
 #include <cstring>
 #include <cstdlib>
+#include <cstdio>
 
 extern __thread EvalContext* context;
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
 extern "C" void* js_dom_current_active_text_control(void);
+extern "C" bool js_doc_has_browsing_context(void* doc);
+
+static Item js_dom_flush_selectionchange(Item this_val, Item* args, int argc);
 
 // ============================================================================
 // Helpers
@@ -390,11 +394,18 @@ static DomDocument* node_owning_doc(DomNode* n) {
     return nullptr;
 }
 
-// Returns true iff `n` is reachable from the selection's associated document —
-// i.e. either it is/contains that document's stub itself or it has the
-// document's root as an ancestor. Used by addRange/setBaseAndExtent/etc. to
-// mirror the spec's "must be in the same tree" abort behaviour (rangeCount
-// stays 0 instead of throwing).
+static bool node_is_document_fragment(DomNode* n) {
+    if (!n || !n->is_element()) return false;
+    DomElement* elem = n->as_element();
+    return elem && elem->tag_name &&
+        strcmp(elem->tag_name, "#document-fragment") == 0;
+}
+
+// Returns true iff `n` is reachable from the selection's associated document.
+// Shadow roots are parentless document fragments in our native DOM, so walk
+// through their native host pointer before applying the document-root test.
+// Plain detached DocumentFragments still abort, matching Selection's "same
+// tree" behavior.
 //
 // Important: the selection's document may NOT be the thread-local active
 // document — e.g. when JS holds a reference to an iframe's
@@ -419,6 +430,14 @@ static bool node_in_selection_doc(DomNode* n, DomSelection* s) {
     DomNode* root = (DomNode*)sel_doc->root;
     DomNode* cur = n;
     while (cur) {
+        if (node_is_document_fragment(cur)) {
+            DomElement* frag = cur->as_element();
+            if (frag && frag->shadow_host && frag->doc == sel_doc) {
+                cur = (DomNode*)frag->shadow_host;
+                continue;
+            }
+            return false;
+        }
         if (cur == doc_stub) return true;
         if (root && cur == root) return true;
         cur = cur->parent;
@@ -654,6 +673,9 @@ static RangeClientRectCollector js_range_collect_client_rects(DomRange* r) {
     memset(&collector, 0, sizeof(collector));
     collector.array = js_array_new(0);
     if (!r) return collector;
+    DomDocument* doc = node_owning_doc(r->start.node);
+    if (!doc) doc = node_owning_doc(r->end.node);
+    if (doc && !js_dom_force_layout_for_geometry(doc)) return collector;
     if (!dom_range_resolve_layout(r)) return collector;
     dom_range_for_each_rect(r, nullptr, js_range_collect_rect, &collector);
     return collector;
@@ -1038,7 +1060,17 @@ extern "C" Item js_selection_collapse_to_end(void) {
 extern "C" Item js_selection_extend(Item node_v, Item offset_v) {
     DomSelection* s = selection_from_this(); if (!s) return make_undef();
     DomNode* n = node_arg(node_v);
-    if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    TypeId node_type = get_type_id(node_v);
+    if (!n) {
+        if (node_type == LMD_TYPE_UNDEFINED) {
+            throw_dom_exception("TypeError",
+                                "Failed to execute 'extend' on 'Selection': 1 argument required, but only 0 present.");
+        } else {
+            throw_dom_exception("TypeError",
+                                "Failed to execute 'extend' on 'Selection': parameter 1 is not of type 'Node'.");
+        }
+        return make_undef();
+    }
     // Per spec: if node's root is not the document, abort (no-op).
     if (!node_in_active_document(n)) {
         return make_undef();
@@ -1053,9 +1085,13 @@ extern "C" Item js_selection_extend(Item node_v, Item offset_v) {
         return make_undef();
     }
     uint32_t off = (uint32_t)item_to_int(offset_v);
-    if (off > dom_node_boundary_length(n)) {
-        throw_dom_exception("IndexSizeError",
-                            "Selection.extend: offset is out of bounds");
+    uint32_t node_len = dom_node_boundary_length(n);
+    if (off > node_len) {
+        char msg[160];
+        snprintf(msg, sizeof(msg),
+                 "Failed to execute 'extend' on 'Selection': The offset %u is larger than the node's length (%u).",
+                 off, node_len);
+        throw_dom_exception("IndexSizeError", msg);
         return make_undef();
     }
     const char* exc = nullptr;
@@ -1097,6 +1133,12 @@ extern "C" Item js_selection_set_base_and_extent(Item anchor_node_v, Item anchor
             return make_undef();
         }
         selection_sync_props(js_get_this(), s);
+        return make_undef();
+    }
+    if ((an && an->node_type == DOM_NODE_DOCTYPE) ||
+        (fn && fn->node_type == DOM_NODE_DOCTYPE)) {
+        throw_dom_exception("InvalidNodeTypeError",
+                            "setBaseAndExtent: node must not be a DocumentType");
         return make_undef();
     }
     if (an && !fn && get_type_id(focus_node_v) == LMD_TYPE_NULL) {
@@ -1174,7 +1216,11 @@ extern "C" Item js_selection_select_all_children(Item node_v) {
 extern "C" Item js_selection_contains_node(Item node_v, Item allow_partial_v) {
     DomSelection* s = selection_from_this(); if (!s) return make_bool(false);
     DomNode* n = node_arg(node_v);
-    if (!n) return make_bool(false);
+    if (!n) {
+        throw_dom_exception("TypeError",
+                            "Failed to execute 'containsNode' on 'Selection': parameter 1 is not of type 'Node'.");
+        return make_undef();
+    }
     bool partial = false;
     TypeId t = get_type_id(allow_partial_v);
     if (t != LMD_TYPE_NULL && t != LMD_TYPE_UNDEFINED) partial = item_to_bool(allow_partial_v);
@@ -1484,7 +1530,32 @@ extern "C" void* js_dom_unwrap_selection(Item item) {
 
 // Trampoline so we can register getSelection as a global function with arity 0.
 extern "C" Item js_global_get_selection(void) {
+    Item self = js_get_this();
+    void* foreign = js_get_foreign_doc(self);
+    if (foreign && js_doc_has_browsing_context(foreign)) {
+        void* prev = js_dom_swap_active_document(foreign);
+        Item selection = js_dom_get_selection();
+        js_dom_restore_active_document(prev);
+        return selection;
+    }
     return js_dom_get_selection();
+}
+
+static Item js_bound_document_get_selection(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    DomDocument* doc = env ? (DomDocument*)(uintptr_t)env[0].item : nullptr;
+    if (!doc || !js_doc_has_browsing_context(doc)) return ItemNull;
+    void* prev = js_dom_swap_active_document(doc);
+    Item selection = js_dom_get_selection();
+    js_dom_restore_active_document(prev);
+    return selection;
+}
+
+extern "C" Item js_dom_get_selection_function_for_document(void* doc) {
+    Item* env = js_alloc_env(1);
+    if (!env) return js_new_function((void*)js_global_get_selection, 0);
+    env[0] = (Item){.item = (uint64_t)(uintptr_t)doc};
+    return js_new_closure((void*)js_bound_document_get_selection, 0, env, 1);
 }
 
 extern "C" void js_dom_selection_install_globals(void) {
@@ -1500,6 +1571,10 @@ extern "C" void js_dom_selection_install_globals(void) {
         // window is already a real object — install getSelection on it too
         js_property_set(existing, make_key("getSelection"), fn);
     }
+    Item flush_fn = js_new_function((void*)js_dom_flush_selectionchange, 0);
+    js_property_set(global, make_key("__lambdaFlushSelectionChange"), flush_fn);
+    if (get_type_id(existing) == LMD_TYPE_MAP)
+        js_property_set(existing, make_key("__lambdaFlushSelectionChange"), flush_fn);
 
     // Install placeholder Selection / Range constructors so `instanceof Selection`
     // and feature-detection (`window.Selection`) succeed. The constructors are
@@ -1599,6 +1674,7 @@ static Item _wpt_selectionchange_fire(Item this_val, Item* args, int argc) {
     DomDocument* doc = (DomDocument*)js_dom_get_document();
     if (!doc || !doc->state) return ItemNull;
     DocState* state = doc->state;
+    if (!state->selectionchange_pending) return ItemNull;
     state->selectionchange_pending = false;
     state->selection_event_seq = state->selection_mutation_seq;
     Item ev = js_create_event("selectionchange", /*bubbles=*/false,
@@ -1606,6 +1682,10 @@ static Item _wpt_selectionchange_fire(Item this_val, Item* args, int argc) {
     Item doc_item = js_get_document_object_value();
     js_dom_dispatch_event(doc_item, ev);
     return ItemNull;
+}
+
+static Item js_dom_flush_selectionchange(Item this_val, Item* args, int argc) {
+    return _wpt_selectionchange_fire(this_val, args, argc);
 }
 
 extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {

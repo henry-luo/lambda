@@ -22,6 +22,11 @@ enum EditingClampPolicy {
     EDITING_CLAMP_SKIP_TEXT_CONTROLS
 };
 
+enum EditingPointBehavior {
+    EDITING_POINT_BEHAVIOR_DEFAULT = 0,
+    EDITING_POINT_BEHAVIOR_MAC
+};
+
 struct EditingBoundary {
     EditingBoundaryKind kind;
     EditingSurface surface;
@@ -60,7 +65,9 @@ bool editing_geometry_hit_test_boundary(UiContext* uicon,
                                         float vx,
                                         float vy,
                                         EditingClampPolicy policy,
-                                        EditingBoundary* out);
+                                        EditingBoundary* out,
+                                        EditingPointBehavior behavior =
+                                            EDITING_POINT_BEHAVIOR_DEFAULT);
 
 bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
                                                     DomElement* elem,

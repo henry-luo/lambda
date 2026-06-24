@@ -2867,7 +2867,7 @@ static char* generate_error_page_html(const char* url, const char* error_title, 
  */
 DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     int viewport_width, int viewport_height, Pool* pool, const char* html_source = nullptr,
-    bool track_source_lines = false) {
+    bool track_source_lines = false, bool execute_scripts = true) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
@@ -3146,80 +3146,85 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     apply_inline_styles_to_tree(dom_root, html_root, pool);
     log_mem_stage("load_html: after_inline_attrs");
 
-    // Step 2d: Execute <script> elements (inline + external) and body onload handlers
-    // Scripts run after inline style application so JS style changes override HTML attrs.
-    // Scripts run before stylesheet cascade so JS DOM mutations (className changes,
-    // appendChild, removeChild, etc.) take effect before styles are resolved.
-    // getComputedStyle can query parsed stylesheets via on-demand matching.
     dom_doc->root = dom_root;  // set root for JS DOM API access
-    log_mem_stage("load_html: before_scripts");
-    execute_document_scripts(html_root, dom_doc, pool, html_url);
-    log_mem_stage("load_html: after_scripts");
 
-    if (!dom_doc->pending_navigation_url) {
-        char* refresh_url = find_meta_refresh_url(html_root);
-        if (refresh_url && refresh_url[0]) {
-            dom_doc->pending_navigation_url = refresh_url;
-            log_info("meta_refresh_navigation: pending navigation to %s", refresh_url);
-        } else if (refresh_url) {
-            mem_free(refresh_url);
-        }
-    }
+    if (execute_scripts) {
+        // Step 2d: Execute <script> elements (inline + external) and body onload handlers
+        // Scripts run after inline style application so JS style changes override HTML attrs.
+        // Scripts run before stylesheet cascade so JS DOM mutations (className changes,
+        // appendChild, removeChild, etc.) take effect before styles are resolved.
+        // getComputedStyle can query parsed stylesheets via on-demand matching.
+        log_mem_stage("load_html: before_scripts");
+        execute_document_scripts(html_root, dom_doc, pool, html_url);
+        log_mem_stage("load_html: after_scripts");
 
-    // Log JS DOM mutations — cascade will pick these up since it runs after scripts
-    if (dom_doc->js_mutation_count > 0) {
-        log_info("execute_document_scripts: %d DOM mutations from JS, CSS cascade will re-resolve",
-                 dom_doc->js_mutation_count);
-
-        // Re-collect inline <style> stylesheets from the DomElement* tree to pick up:
-        // 1. Dynamically-added <style> elements (e.g. first-letter-dynamic-001)
-        // 2. <style disabled> elements that should be skipped (e.g. table-anonymous-objects-015)
-        // NOTE: Only <style> elements are rescanned. <link> stylesheets from the
-        // initial collection are preserved — they don't change due to JS mutations.
-        int rescan_inline_count = 0;
-        CssStylesheet** rescan_inline_sheets = nullptr;
-        collect_inline_styles_from_dom(dom_root, css_engine, pool, &rescan_inline_sheets, &rescan_inline_count);
-
-        int old_inline_only = inline_stylesheet_count - linked_stylesheet_count;
-        if (rescan_inline_count != old_inline_only) {
-            log_info("[CSS] Re-scan found %d inline <style> stylesheets (was %d before JS)",
-                     rescan_inline_count, old_inline_only);
-        }
-
-        // Merge: linked stylesheets (first N entries) + rescanned inline stylesheets
-        int merged_count = linked_stylesheet_count + rescan_inline_count;
-        CssStylesheet** merged_sheets = (CssStylesheet**)pool_alloc(pool, merged_count * sizeof(CssStylesheet*));
-
-        // Copy linked stylesheets from original array (indices 0..linked_stylesheet_count-1)
-        for (int i = 0; i < linked_stylesheet_count; i++) {
-            merged_sheets[i] = inline_stylesheets[i];
-        }
-        // Copy rescanned inline <style> stylesheets
-        for (int i = 0; i < rescan_inline_count; i++) {
-            merged_sheets[linked_stylesheet_count + i] = rescan_inline_sheets[i];
-        }
-
-        inline_stylesheets = merged_sheets;
-        inline_stylesheet_count = merged_count;
-
-        // Update DomDocument stylesheet cache for getComputedStyle
-        int new_total = merged_count + (external_stylesheet ? 1 : 0);
-        dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, new_total * sizeof(CssStylesheet*));
-        dom_doc->stylesheet_count = 0;
-        dom_doc->stylesheet_capacity = new_total;
-        if (external_stylesheet) {
-            dom_doc->stylesheets[dom_doc->stylesheet_count++] = external_stylesheet;
-        }
-        for (int i = 0; i < merged_count; i++) {
-            if (merged_sheets[i]) {
-                dom_doc->stylesheets[dom_doc->stylesheet_count++] = merged_sheets[i];
+        if (!dom_doc->pending_navigation_url) {
+            char* refresh_url = find_meta_refresh_url(html_root);
+            if (refresh_url && refresh_url[0]) {
+                dom_doc->pending_navigation_url = refresh_url;
+                log_info("meta_refresh_navigation: pending navigation to %s", refresh_url);
+            } else if (refresh_url) {
+                mem_free(refresh_url);
             }
         }
-    }
 
-    // Step 2e: Install inline event handler attributes into EventTarget slots.
-    // Must happen after execute_document_scripts so function definitions are available.
-    collect_and_compile_event_handlers(dom_doc);
+        // Log JS DOM mutations — cascade will pick these up since it runs after scripts
+        if (dom_doc->js_mutation_count > 0) {
+            log_info("execute_document_scripts: %d DOM mutations from JS, CSS cascade will re-resolve",
+                     dom_doc->js_mutation_count);
+
+            // Re-collect inline <style> stylesheets from the DomElement* tree to pick up:
+            // 1. Dynamically-added <style> elements (e.g. first-letter-dynamic-001)
+            // 2. <style disabled> elements that should be skipped (e.g. table-anonymous-objects-015)
+            // NOTE: Only <style> elements are rescanned. <link> stylesheets from the
+            // initial collection are preserved — they don't change due to JS mutations.
+            int rescan_inline_count = 0;
+            CssStylesheet** rescan_inline_sheets = nullptr;
+            collect_inline_styles_from_dom(dom_root, css_engine, pool, &rescan_inline_sheets, &rescan_inline_count);
+
+            int old_inline_only = inline_stylesheet_count - linked_stylesheet_count;
+            if (rescan_inline_count != old_inline_only) {
+                log_info("[CSS] Re-scan found %d inline <style> stylesheets (was %d before JS)",
+                         rescan_inline_count, old_inline_only);
+            }
+
+            // Merge: linked stylesheets (first N entries) + rescanned inline stylesheets
+            int merged_count = linked_stylesheet_count + rescan_inline_count;
+            CssStylesheet** merged_sheets = (CssStylesheet**)pool_alloc(pool, merged_count * sizeof(CssStylesheet*));
+
+            // Copy linked stylesheets from original array (indices 0..linked_stylesheet_count-1)
+            for (int i = 0; i < linked_stylesheet_count; i++) {
+                merged_sheets[i] = inline_stylesheets[i];
+            }
+            // Copy rescanned inline <style> stylesheets
+            for (int i = 0; i < rescan_inline_count; i++) {
+                merged_sheets[linked_stylesheet_count + i] = rescan_inline_sheets[i];
+            }
+
+            inline_stylesheets = merged_sheets;
+            inline_stylesheet_count = merged_count;
+
+            // Update DomDocument stylesheet cache for getComputedStyle
+            int new_total = merged_count + (external_stylesheet ? 1 : 0);
+            dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, new_total * sizeof(CssStylesheet*));
+            dom_doc->stylesheet_count = 0;
+            dom_doc->stylesheet_capacity = new_total;
+            if (external_stylesheet) {
+                dom_doc->stylesheets[dom_doc->stylesheet_count++] = external_stylesheet;
+            }
+            for (int i = 0; i < merged_count; i++) {
+                if (merged_sheets[i]) {
+                    dom_doc->stylesheets[dom_doc->stylesheet_count++] = merged_sheets[i];
+                }
+            }
+        }
+
+        // Step 2e: Install inline event handler attributes into EventTarget slots.
+        // Must happen after execute_document_scripts so function definitions are available.
+        collect_and_compile_event_handlers(dom_doc);
+    } else {
+        log_debug("[Lambda CSS] Skipping document script execution for caller-managed JS");
+    }
 
     // Step 6: Apply CSS cascade (external + <style> elements)
     SelectorMatcher* matcher = selector_matcher_create(pool);

@@ -46,12 +46,15 @@
 #include "../radiant/graph_theme.hpp"
 #include "../radiant/state_store.hpp"
 #include "../radiant/clipboard.hpp"
+#include "../radiant/font_face.h"
+#include "../radiant/render_export_support.hpp"
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
 #include "input/css/css_style.hpp"   // css_property_system_init
 #include "input/css/css_engine.hpp"  // CssEngine for CSS extraction
 #include "input/input-graph.h"
 #include "js/js_event_loop.h"        // v14: event loop drain
 #include "js/js_runtime.h"           // v16: js_check_exception for exit code
+#include "js/js_dom.h"               // JS DOM document/session bridge
 #include "js/js_transpiler.hpp"      // JsPreambleState for js-test-batch
 #ifdef LAMBDA_PYTHON
 #include "py/py_transpiler.hpp"      // Python transpiler
@@ -76,6 +79,55 @@ static bool js_test262_global_flag_is_true(const char* name) {
     Item key = (Item){.item = s2it(heap_create_name(name))};
     Item value = js_get_global_property(key);
     return value.item == (ITEM_TRUE);
+}
+
+static const int JS_DOCUMENT_VIEWPORT_WIDTH = 800;
+static const int JS_DOCUMENT_VIEWPORT_HEIGHT = 600;
+
+struct JsDocumentSession {
+    UiContext uicon;
+    bool initialized;
+};
+
+static void js_document_session_init(JsDocumentSession* session) {
+    if (!session) return;
+    memset(session, 0, sizeof(JsDocumentSession));
+}
+
+static bool js_document_session_start(JsDocumentSession* session, DomDocument* dom_doc) {
+    if (!session || !dom_doc) return false;
+    if (ui_context_init(&session->uicon, true) != 0) {
+        log_error("[JS-DOM-LAYOUT] failed to initialize headless UI context");
+        return false;
+    }
+    session->initialized = true;
+    session->uicon.document = dom_doc;
+    js_dom_set_ui_context(&session->uicon);
+    session->uicon.window_width = JS_DOCUMENT_VIEWPORT_WIDTH;
+    session->uicon.window_height = JS_DOCUMENT_VIEWPORT_HEIGHT;
+    session->uicon.viewport_width = JS_DOCUMENT_VIEWPORT_WIDTH;
+    session->uicon.viewport_height = JS_DOCUMENT_VIEWPORT_HEIGHT;
+
+    if (!radiant_document_ensure_state(dom_doc, "js_document_initial_layout")) {
+        log_error("[JS-DOM-LAYOUT] failed to ensure DocState");
+        return false;
+    }
+
+    if (!dom_doc->view_tree || !dom_doc->view_tree->root) {
+        process_document_font_faces(&session->uicon, dom_doc);
+        layout_html_doc(&session->uicon, dom_doc, false);
+    }
+
+    return true;
+}
+
+static void js_document_session_finish(JsDocumentSession* session) {
+    if (!session || !session->initialized) return;
+
+    js_dom_set_ui_context(nullptr);
+    session->uicon.document = nullptr;
+    ui_context_cleanup(&session->uicon);
+    js_document_session_init(session);
 }
 
 static void js_test262_hot_context_create(EvalContext* batch_context) {
@@ -295,13 +347,9 @@ extern void lambda_repl_cleanup();
 void transpile_ast_root(Transpiler* tp, AstScript *script);
 
 // DOM functions from radiant (for JS --document support)
-extern Element* get_html_root_element(Input* input);
-extern DomDocument* dom_document_create(Input* input);
-extern DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
-extern CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count, int* linked_count_out = nullptr);
-extern const char* detect_html_charset(const char* html, size_t len);
-extern char* convert_charset_to_utf8(const char* content, size_t content_len, const char* from_charset);
-extern const char* g_css_document_charset;
+extern DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
+    int viewport_width, int viewport_height, Pool* pool, const char* html_source,
+    bool track_source_lines, bool execute_scripts);
 
 // MIR JIT optimization level for JS (from transpile_js_mir.cpp)
 extern unsigned int g_js_mir_optimize_level;
@@ -1640,6 +1688,8 @@ int main(int argc, char *argv[]) {
 
         Runtime runtime;
         runtime_init(&runtime);
+        JsDocumentSession js_document_session;
+        js_document_session_init(&js_document_session);
 
         // Initialize stack bounds for GC conservative scanning
         lambda_stack_init();
@@ -1719,74 +1769,42 @@ int main(int argc, char *argv[]) {
                 // Make relative fetch() URLs resolve against the document's
                 // directory (so WPT tests can load sibling resources from disk).
                 js_fetch_set_base_path(html_file);
-                // Parse HTML into Lambda Element tree
-                char* html_content = read_text_file(html_file);
-                if (!html_content) {
-                    printf("Error: Could not read HTML file '%s'\n", html_file);
+
+                Url* cwd = get_current_dir();
+                Url* html_url = parse_url(cwd, html_file);
+                if (cwd) url_destroy(cwd);
+
+                Pool* doc_pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "js.document");
+                if (!html_url || !doc_pool) {
+                    printf("Error: Could not initialize DOM document for '%s'\n", html_file);
+                    if (html_url) url_destroy(html_url);
+                    if (doc_pool) pool_destroy(doc_pool);
                     mem_free(js_source);
                     runtime_cleanup(&runtime);
                     return lambda_main_finish(1);
                 }
 
-                // Detect non-UTF-8 charset and convert HTML if needed
-                const char* doc_charset = nullptr;
-                {
-                    size_t html_len = strlen(html_content);
-                    doc_charset = detect_html_charset(html_content, html_len);
-                    if (doc_charset) {
-                        char* utf8_html = convert_charset_to_utf8(html_content, html_len, doc_charset);
-                        if (utf8_html) {
-                            mem_free(html_content);
-                            html_content = utf8_html;
-                        }
-                    }
+                DomDocument* dom_doc = load_lambda_html_doc(
+                    html_url, NULL, JS_DOCUMENT_VIEWPORT_WIDTH,
+                    JS_DOCUMENT_VIEWPORT_HEIGHT, doc_pool, nullptr, false, false);
+                if (!dom_doc) {
+                    printf("Error: Could not load HTML document '%s'\n", html_file);
+                    url_destroy(html_url);
+                    pool_destroy(doc_pool);
+                    mem_free(js_source);
+                    runtime_cleanup(&runtime);
+                    return lambda_main_finish(1);
                 }
 
-                // Use heap-allocated String* for type param (flexible array member)
-                String* html_type = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_SYSTEM);
-                html_type->len = 4;
-                memcpy(html_type->chars, "html", 5);  // includes null terminator
-                Input* input = input_from_source(html_content, NULL, html_type, NULL);
-                mem_free(html_content);
-                mem_free(html_type);
-
-                if (input) {
-                    Element* html_root = get_html_root_element(input);
-                    if (html_root) {
-                        DomDocument* dom_doc = dom_document_create(input);
-                        if (dom_doc) {
-                            Url* cwd = get_current_dir();
-                            dom_doc->url = parse_url(cwd, html_file);
-                            if (cwd) url_destroy(cwd);
-                            dom_doc->document_charset = doc_charset;
-                            // init CSS property system before building DOM tree
-                            // so inline style parsing resolves property IDs correctly
-                            css_property_system_init(dom_doc->pool);
-                            DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, NULL);
-                            if (dom_root) {
-                                dom_doc->root = dom_root;
-                                dom_doc->html_root = html_root;
-
-                                // Extract and parse CSS from <style> elements
-                                // so document.styleSheets and <style>.sheet work
-                                CssEngine* css_engine = css_engine_create(dom_doc->pool);
-                                if (css_engine) {
-                                    int sheet_count = 0;
-                                    g_css_document_charset = doc_charset;
-                                    CssStylesheet** sheets = extract_and_collect_css(
-                                        html_root, css_engine, html_file, dom_doc->pool, &sheet_count);
-                                    g_css_document_charset = nullptr;
-                                    dom_doc->stylesheets = sheets;
-                                    dom_doc->stylesheet_count = sheet_count;
-                                    log_debug("JS document: extracted %d stylesheet(s)", sheet_count);
-                                }
-
-                                runtime.dom_doc = (void*)dom_doc;
-                                log_debug("Loaded HTML document: root=<%s>", dom_root->tag_name);
-                            }
-                        }
-                    }
+                runtime.dom_doc = (void*)dom_doc;
+                if (!js_document_session_start(&js_document_session, dom_doc)) {
+                    printf("Error: Could not initialize DOM layout for '%s'\n", html_file);
+                    mem_free(js_source);
+                    runtime_cleanup(&runtime);
+                    js_document_session_finish(&js_document_session);
+                    return lambda_main_finish(1);
                 }
+                log_debug("Loaded HTML document for JS: %s", html_file);
             }
 
             // Set up process.argv C-level storage (actual Lambda array built lazily)
@@ -1897,6 +1915,7 @@ int main(int argc, char *argv[]) {
         }
 
         runtime_cleanup(&runtime);
+        js_document_session_finish(&js_document_session);
         return lambda_main_finish(js_exit_code ? js_exit_code : (js_had_error ? 1 : 0));
     }
 
