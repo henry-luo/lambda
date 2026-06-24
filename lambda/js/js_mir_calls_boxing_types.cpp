@@ -1169,6 +1169,32 @@ static bool jm_has_outer_binding_before_depth(JsMirTranspiler* mt, const char* n
     return false;
 }
 
+static bool jm_scope_env_name_matches_binding(const char* scope_name, const char* name,
+        JsAstNode* binding_node) {
+    if (!scope_name || !name) return false;
+    if (strcmp(scope_name, name) == 0) return true;
+    const char* at = strchr(scope_name, '@');
+    if (!at) return false;
+    size_t base_len = (size_t)(at - scope_name);
+    if (strlen(name) != base_len || strncmp(scope_name, name, base_len) != 0) return false;
+    if (!binding_node || ts_node_is_null(binding_node->node)) return false;
+    char key[128];
+    snprintf(key, sizeof(key), "%s@%u:%u", name,
+        ts_node_start_byte(binding_node->node), ts_node_end_byte(binding_node->node));
+    return strcmp(scope_name, key) == 0;
+}
+
+static JsFuncCollected* jm_current_scope_env_func(JsMirTranspiler* mt) {
+    if (!mt) return NULL;
+    int fi = mt->current_func_index;
+    if (fi < 0) {
+        if (!mt->module_scope_env_active) return NULL;
+        return &mt->module_fc;
+    }
+    if (fi >= mt->func_count) return NULL;
+    return &mt->func_entries[fi];
+}
+
 // Helper: if a variable is in the current function's scope env, mark it and write-back.
 // Called after jm_set_var or assignment to propagate value to shared scope env.
 void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_reg_t val_reg, TypeId type_id) {
@@ -1188,16 +1214,8 @@ void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_
     // Check if this var name is in the current function's scope env.
     // Js57 Track A: in module body (current_func_index == -1), use the synthetic
     // module_fc set up at js_main entry so top-level closures share lexical state.
-    int fi = mt->current_func_index;
-    JsFuncCollected* fc;
-    if (fi < 0) {
-        if (!mt->module_scope_env_active) return;
-        fc = &mt->module_fc;
-    } else if (fi >= mt->func_count) {
-        return;
-    } else {
-        fc = &mt->func_entries[fi];
-    }
+    JsFuncCollected* fc = jm_current_scope_env_func(mt);
+    if (!fc) return;
     if (!fc->has_scope_env) return;
     for (int s = 0; s < fc->scope_env_count; s++) {
         if (strcmp(name, fc->scope_env_names[s]) == 0) {
@@ -1244,6 +1262,35 @@ void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_
 
             return;
         }
+    }
+}
+
+void jm_scope_env_mark_and_writeback_binding(JsMirTranspiler* mt, const char* name,
+        JsAstNode* binding_node, MIR_reg_t val_reg, TypeId type_id) {
+    if (!mt || mt->scope_env_reg == 0) return;
+    JsMirVarEntry* active_var = jm_find_var(mt, name);
+    if (active_var && active_var->in_scope_env && active_var->scope_env_reg == mt->scope_env_reg &&
+        active_var->scope_env_slot >= 0) {
+        jm_scope_env_mark_and_writeback(mt, name, val_reg, type_id);
+        return;
+    }
+    JsFuncCollected* fc = jm_current_scope_env_func(mt);
+    if (!fc || !fc->has_scope_env) return;
+    for (int s = 0; s < fc->scope_env_count; s++) {
+        if (!jm_scope_env_name_matches_binding(fc->scope_env_names[s], name, binding_node)) continue;
+        JsMirVarEntry* var = jm_find_var(mt, name);
+        if (var) {
+            var->in_scope_env = true;
+            var->scope_env_slot = s;
+            var->scope_env_reg = mt->scope_env_reg;
+        }
+        MIR_reg_t val = val_reg;
+        if (jm_is_native_type(type_id))
+            val = jm_box_native(mt, val_reg, type_id);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, s * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+            MIR_new_reg_op(mt->ctx, val)));
+        return;
     }
 }
 

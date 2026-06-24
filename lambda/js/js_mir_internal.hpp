@@ -238,6 +238,8 @@ bool jm_const_fold_enabled();
 bool jm_try_fold_const(JsAstNode* node, JsFoldVal* out);
 bool jm_is_native_type(TypeId tid);
 void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY);
+void jm_scope_env_mark_and_writeback_binding(JsMirTranspiler* mt, const char* name,
+    JsAstNode* binding_node, MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY);
 MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MIR_reg_t val, JsAstNode* expr);
 MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                                          TypeId expr_type, TypeId target_type);

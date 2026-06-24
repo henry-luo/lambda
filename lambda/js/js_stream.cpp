@@ -106,6 +106,7 @@ static Item key_writable_state;
 static Item key_end_pending;
 static Item key_end_emitted;
 static Item key_reading;
+static Item key_reading_sync;
 static Item key_paused;
 static Item key_finish_emitted;
 static Item key_close_emitted;
@@ -169,6 +170,7 @@ static void ensure_keys() {
     key_end_pending = make_string_item("__end_pending__");
     key_end_emitted = make_string_item("__end_emitted__");
     key_reading = make_string_item("__reading__");
+    key_reading_sync = make_string_item("__reading_sync__");
     key_paused = make_string_item("__paused__");
     key_finish_emitted = make_string_item("__finish_emitted__");
     key_close_emitted = make_string_item("__close_emitted__");
@@ -761,8 +763,10 @@ static void js_stream_call_read_if_needed(Item self, Item size_item) {
     Item before_buf = js_property_get(self, key_buffer);
     int64_t before_len = get_type_id(before_buf) == LMD_TYPE_ARRAY ? js_array_length(before_buf) : 0;
     js_property_set(self, key_reading, js_bool_item(true));
+    js_property_set(self, key_reading_sync, js_bool_item(true));
     Item size = (Item){.item = i2it(js_stream_read_size_hint(self, size_item))};
     js_call_function(read_fn, self, &size, 1);
+    js_property_set(self, key_reading_sync, js_bool_item(false));
     Item after_buf = js_property_get(self, key_buffer);
     int64_t after_len = get_type_id(after_buf) == LMD_TYPE_ARRAY ? js_array_length(after_buf) : 0;
     if (after_len > before_len || js_item_is_true(js_property_get(self, key_end_pending))) {
@@ -877,7 +881,9 @@ extern "C" Item js_stream_on(Item self, Item event_item, Item listener) {
             js_stream_schedule_data_flush(self);
         } else {
             js_stream_flush_buffered_data(self);
-            js_stream_call_read_if_needed(self, make_js_undefined());
+            if (!js_item_is_true(js_property_get(self, key_reading_sync))) {
+                js_stream_call_read_if_needed(self, make_js_undefined());
+            }
         }
     }
     if (is_end_event &&
@@ -1120,13 +1126,7 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
     Item flowing = js_property_get(self, key_flowing);
     js_stream_async_iterators_drain(self, make_js_undefined());
     if (flowing.item != 0 && it2b(flowing)) {
-        if (js_stream_readable_is_object_mode(self) ||
-            js_item_is_true(js_property_get(self, key_capture_rejections))) {
-            js_stream_schedule_data_flush(self);
-        } else {
-            js_stream_flush_buffered_data(self);
-            js_stream_call_read_if_needed(self, make_js_undefined());
-        }
+        js_stream_schedule_data_flush(self);
     } else if (js_state_get_bool(js_property_get(self, key_readable_state), "readableListening")) {
         stream_emit(self, "readable", NULL, 0);
     }
@@ -1174,13 +1174,7 @@ extern "C" Item js_readable_unshift_encoded(Item self, Item chunk, Item encoding
     }
     Item flowing = js_property_get(self, key_flowing);
     if (flowing.item != 0 && it2b(flowing)) {
-        if (js_stream_readable_is_object_mode(self) ||
-            js_item_is_true(js_property_get(self, key_capture_rejections))) {
-            js_stream_schedule_data_flush(self);
-        } else {
-            js_stream_flush_buffered_data(self);
-            js_stream_call_read_if_needed(self, make_js_undefined());
-        }
+        js_stream_schedule_data_flush(self);
     } else if (js_state_get_bool(js_property_get(self, key_readable_state), "readableListening")) {
         stream_emit(self, "readable", NULL, 0);
     }
@@ -3132,6 +3126,7 @@ extern "C" Item js_readable_new(Item opts) {
     js_property_set(obj, key_end_pending, js_bool_item(false));
     js_property_set(obj, key_end_emitted, js_bool_item(false));
     js_property_set(obj, key_reading, js_bool_item(false));
+    js_property_set(obj, key_reading_sync, js_bool_item(false));
     js_property_set(obj, key_paused, js_bool_item(false));
     js_property_set(obj, key_close_emitted, js_bool_item(false));
     js_property_set(obj, key_auto_destroy, js_bool_item(true));

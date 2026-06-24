@@ -12180,6 +12180,26 @@ static bool jm_closure_has_scope_env_slot(JsFuncCollected* fc) {
     return false;
 }
 
+static int jm_find_var_scope_depth_for_expr(JsMirTranspiler* mt, const char* name) {
+    if (!mt || !name) return -1;
+    for (int depth = mt->scope_depth; depth >= 0 && depth < 64; depth--) {
+        if (!mt->var_scopes[depth]) continue;
+        JsVarScopeEntry key;
+        memset(&key, 0, sizeof(key));
+        snprintf(key.name, sizeof(key.name), "%s", name);
+        if (hashmap_get(mt->var_scopes[depth], &key)) return depth;
+    }
+    return -1;
+}
+
+static bool jm_capture_is_current_loop_lexical(JsMirTranspiler* mt, const char* name, JsMirVarEntry* var) {
+    if (!mt || !name || !var || !var->is_let_const || mt->iteration_depth <= 0) return false;
+    if (mt->allow_loop_let_scope_env_for_immediate_call) return false;
+    if (mt->loop_scope_depth < 0) return true;
+    int depth = jm_find_var_scope_depth_for_expr(mt, name);
+    return depth >= mt->loop_scope_depth;
+}
+
 static void jm_promote_capture_to_scope_env(JsMirTranspiler* mt, JsMirVarEntry* var, int slot) {
     if (!mt || !var || mt->scope_env_reg == 0 || slot < 0) return;
     var->in_scope_env = true;
@@ -12239,8 +12259,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             if (cv && mt->scope_env_reg != 0 && fc->captures[ci].scope_env_slot >= 0 &&
                 (!cv->in_scope_env || cv->scope_env_reg != mt->scope_env_reg ||
                  cv->scope_env_slot != fc->captures[ci].scope_env_slot) &&
-                (mt->iteration_depth <= 0 || !cv->is_let_const ||
-                 mt->allow_loop_let_scope_env_for_immediate_call)) {
+                !jm_capture_is_current_loop_lexical(mt, fc->captures[ci].name, cv)) {
                 jm_promote_capture_to_scope_env(mt, cv, fc->captures[ci].scope_env_slot);
             }
         }
@@ -12275,7 +12294,10 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             !mt->allow_loop_let_scope_env_for_immediate_call) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
-                if (cv && cv->is_let_const) { use_scope_env = false; break; }
+                if (jm_capture_is_current_loop_lexical(mt, fc->captures[ci].name, cv)) {
+                    use_scope_env = false;
+                    break;
+                }
             }
         }
         if (use_scope_env) {
@@ -12444,8 +12466,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 cv && mt->scope_env_reg != 0 && fc->captures[ci].scope_env_slot >= 0 &&
                 (!cv->in_scope_env || cv->scope_env_reg != mt->scope_env_reg ||
                  cv->scope_env_slot != fc->captures[ci].scope_env_slot) &&
-                (mt->iteration_depth <= 0 || !cv->is_let_const ||
-                 mt->allow_loop_let_scope_env_for_immediate_call)) {
+                !jm_capture_is_current_loop_lexical(mt, fc->captures[ci].name, cv)) {
                 jm_promote_capture_to_scope_env(mt, cv, fc->captures[ci].scope_env_slot);
             }
             if (cv && cv->is_let_const) {
@@ -12473,7 +12494,10 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
             !mt->allow_loop_let_scope_env_for_immediate_call) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
-                if (cv && cv->is_let_const) { use_scope_env = false; break; }
+                if (jm_capture_is_current_loop_lexical(mt, fc->captures[ci].name, cv)) {
+                    use_scope_env = false;
+                    break;
+                }
             }
         }
         if (use_scope_env) {

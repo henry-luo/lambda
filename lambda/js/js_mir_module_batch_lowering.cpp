@@ -54,6 +54,146 @@ static void jm_note_module_block_lexical_name(struct hashmap* seen, struct hashm
     }
 }
 
+static bool jm_child_can_use_parent_scope_env(JsFuncCollected* parent, JsFuncCollected* child) {
+    (void)parent;
+    return child != NULL;
+}
+
+static void jm_count_lexical_pattern_name_for_slot(JsAstNode* pat, const char* name, int* count) {
+    if (!pat || !name || !count) return;
+    if (pat->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* id = (JsIdentifierNode*)pat;
+        if (!id->name) return;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        if (strcmp(vname, name) == 0) (*count)++;
+        return;
+    }
+    if (pat->node_type == JS_AST_NODE_ARRAY_PATTERN || pat->node_type == JS_AST_NODE_ARRAY_EXPRESSION) {
+        JsArrayNode* arr = (JsArrayNode*)pat;
+        for (JsAstNode* e = arr->elements; e; e = e->next) {
+            jm_count_lexical_pattern_name_for_slot(e, name, count);
+        }
+        return;
+    }
+    if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN || pat->node_type == JS_AST_NODE_OBJECT_EXPRESSION) {
+        JsObjectNode* obj = (JsObjectNode*)pat;
+        for (JsAstNode* p = obj->properties; p; p = p->next) {
+            jm_count_lexical_pattern_name_for_slot(p, name, count);
+        }
+        return;
+    }
+    if (pat->node_type == JS_AST_NODE_PROPERTY) {
+        jm_count_lexical_pattern_name_for_slot(((JsPropertyNode*)pat)->value, name, count);
+        return;
+    }
+    if (pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+        jm_count_lexical_pattern_name_for_slot(((JsAssignmentPatternNode*)pat)->left, name, count);
+        return;
+    }
+    if (pat->node_type == JS_AST_NODE_REST_ELEMENT ||
+        pat->node_type == JS_AST_NODE_REST_PROPERTY ||
+        pat->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+        jm_count_lexical_pattern_name_for_slot(((JsSpreadElementNode*)pat)->argument, name, count);
+    }
+}
+
+static void jm_count_lexical_binding_name_for_slot(JsAstNode* node, const char* name, int* count) {
+    if (!node || !name || !count) return;
+    switch (node->node_type) {
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        for (JsAstNode* s = ((JsBlockNode*)node)->statements; s; s = s->next) {
+            jm_count_lexical_binding_name_for_slot(s, name, count);
+        }
+        return;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+        if (vd->kind != JS_VAR_LET && vd->kind != JS_VAR_CONST) return;
+        for (JsAstNode* d = vd->declarations; d; d = d->next) {
+            if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                jm_count_lexical_pattern_name_for_slot(((JsVariableDeclaratorNode*)d)->id, name, count);
+            }
+        }
+        return;
+    }
+    case JS_AST_NODE_IF_STATEMENT:
+        jm_count_lexical_binding_name_for_slot(((JsIfNode*)node)->consequent, name, count);
+        jm_count_lexical_binding_name_for_slot(((JsIfNode*)node)->alternate, name, count);
+        return;
+    case JS_AST_NODE_FOR_STATEMENT:
+        jm_count_lexical_binding_name_for_slot(((JsForNode*)node)->init, name, count);
+        jm_count_lexical_binding_name_for_slot(((JsForNode*)node)->body, name, count);
+        return;
+    case JS_AST_NODE_FOR_OF_STATEMENT:
+    case JS_AST_NODE_FOR_IN_STATEMENT:
+        jm_count_lexical_binding_name_for_slot(((JsForOfNode*)node)->left, name, count);
+        jm_count_lexical_binding_name_for_slot(((JsForOfNode*)node)->body, name, count);
+        return;
+    case JS_AST_NODE_WHILE_STATEMENT:
+        jm_count_lexical_binding_name_for_slot(((JsWhileNode*)node)->body, name, count);
+        return;
+    case JS_AST_NODE_DO_WHILE_STATEMENT:
+        jm_count_lexical_binding_name_for_slot(((JsDoWhileNode*)node)->body, name, count);
+        return;
+    case JS_AST_NODE_TRY_STATEMENT:
+        jm_count_lexical_binding_name_for_slot(((JsTryNode*)node)->block, name, count);
+        jm_count_lexical_binding_name_for_slot(((JsTryNode*)node)->handler, name, count);
+        jm_count_lexical_binding_name_for_slot(((JsTryNode*)node)->finalizer, name, count);
+        return;
+    case JS_AST_NODE_CATCH_CLAUSE:
+        jm_count_lexical_pattern_name_for_slot(((JsCatchNode*)node)->param, name, count);
+        jm_count_lexical_binding_name_for_slot(((JsCatchNode*)node)->body, name, count);
+        return;
+    case JS_AST_NODE_SWITCH_STATEMENT:
+        for (JsAstNode* c = ((JsSwitchNode*)node)->cases; c; c = c->next) {
+            jm_count_lexical_binding_name_for_slot(c, name, count);
+        }
+        return;
+    case JS_AST_NODE_SWITCH_CASE:
+        for (JsAstNode* s = ((JsSwitchCaseNode*)node)->consequent; s; s = s->next) {
+            jm_count_lexical_binding_name_for_slot(s, name, count);
+        }
+        return;
+    case JS_AST_NODE_LABELED_STATEMENT:
+        jm_count_lexical_binding_name_for_slot(((JsLabeledStatementNode*)node)->body, name, count);
+        return;
+    default:
+        return;
+    }
+}
+
+static bool jm_parent_has_duplicate_lexical_slot_name(JsFuncCollected* parent, const char* name) {
+    if (!parent || !parent->node || !parent->node->body || !name) return false;
+    int count = 0;
+    jm_count_lexical_binding_name_for_slot(parent->node->body, name, &count);
+    return count > 1;
+}
+
+static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode* target,
+    const char* name, char* out_key);
+
+static const char* jm_capture_scope_env_slot_key(JsFuncCollected* parent, JsFuncCollected* child,
+        JsCaptureEntry* cap) {
+    if (!cap) return "";
+    if (jm_parent_has_duplicate_lexical_slot_name(parent, cap->name)) {
+        if (!cap->scope_env_key[0] || strcmp(cap->scope_env_key, cap->name) == 0) {
+            char derived_key[128];
+            memset(derived_key, 0, sizeof(derived_key));
+            JsAstNode* root = parent && parent->node ? parent->node->body : NULL;
+            JsAstNode* target = child && child->node ? (JsAstNode*)child->node : NULL;
+            if (root && target &&
+                jm_find_enclosing_lexical_key_for_target(root, target, cap->name, derived_key)) {
+                snprintf(cap->scope_env_key, sizeof(cap->scope_env_key), "%s", derived_key);
+            }
+        }
+        if (cap->scope_env_key[0] && strcmp(cap->scope_env_key, cap->name) != 0) {
+            return cap->scope_env_key;
+        }
+    }
+    return cap->name;
+}
+
 static void jm_note_module_block_lexical_pattern(struct hashmap* seen, struct hashmap* duplicate_consts,
         JsAstNode* pat, int var_kind) {
     if (!pat) return;
@@ -576,6 +716,45 @@ static bool jm_ast_node_contains_target(JsAstNode* node, JsAstNode* target) {
     return ns <= ts && te <= ne;
 }
 
+static bool jm_lexical_pattern_matches_name_key(JsAstNode* pat, const char* name, char out_key[128]) {
+    if (!pat || !name || !out_key) return false;
+    switch (pat->node_type) {
+    case JS_AST_NODE_IDENTIFIER: {
+        JsIdentifierNode* id = (JsIdentifierNode*)pat;
+        if (!id->name) return false;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        if (strcmp(vname, name) != 0) return false;
+        uint32_t start = ts_node_is_null(pat->node) ? 0 : ts_node_start_byte(pat->node);
+        uint32_t end = ts_node_is_null(pat->node) ? 0 : ts_node_end_byte(pat->node);
+        snprintf(out_key, 128, "%s@%u:%u", name, start, end);
+        return true;
+    }
+    case JS_AST_NODE_ARRAY_PATTERN:
+    case JS_AST_NODE_ARRAY_EXPRESSION:
+        for (JsAstNode* e = ((JsArrayNode*)pat)->elements; e; e = e->next) {
+            if (jm_lexical_pattern_matches_name_key(e, name, out_key)) return true;
+        }
+        return false;
+    case JS_AST_NODE_OBJECT_PATTERN:
+    case JS_AST_NODE_OBJECT_EXPRESSION:
+        for (JsAstNode* p = ((JsObjectNode*)pat)->properties; p; p = p->next) {
+            if (jm_lexical_pattern_matches_name_key(p, name, out_key)) return true;
+        }
+        return false;
+    case JS_AST_NODE_PROPERTY:
+        return jm_lexical_pattern_matches_name_key(((JsPropertyNode*)pat)->value, name, out_key);
+    case JS_AST_NODE_ASSIGNMENT_PATTERN:
+        return jm_lexical_pattern_matches_name_key(((JsAssignmentPatternNode*)pat)->left, name, out_key);
+    case JS_AST_NODE_REST_ELEMENT:
+    case JS_AST_NODE_REST_PROPERTY:
+    case JS_AST_NODE_SPREAD_ELEMENT:
+        return jm_lexical_pattern_matches_name_key(((JsSpreadElementNode*)pat)->argument, name, out_key);
+    default:
+        return false;
+    }
+}
+
 static bool jm_lexical_decl_matches_name(JsAstNode* stmt, const char* name, char out_key[128]) {
     if (!stmt || !name || !out_key) return false;
     if (stmt->node_type != JS_AST_NODE_VARIABLE_DECLARATION) return false;
@@ -584,15 +763,7 @@ static bool jm_lexical_decl_matches_name(JsAstNode* stmt, const char* name, char
     for (JsAstNode* d = var->declarations; d; d = d->next) {
         if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
         JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
-        if (!decl->id || decl->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
-        JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
-        char vname[128];
-        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
-        if (strcmp(vname, name) != 0) continue;
-        uint32_t start = ts_node_is_null(decl->id->node) ? 0 : ts_node_start_byte(decl->id->node);
-        uint32_t end = ts_node_is_null(decl->id->node) ? 0 : ts_node_end_byte(decl->id->node);
-        snprintf(out_key, 128, "%s@%u:%u", name, start, end);
-        return true;
+        if (jm_lexical_pattern_matches_name_key(decl->id, name, out_key)) return true;
     }
     return false;
 }
@@ -3769,6 +3940,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 JsFuncCollected* child = &mt->func_entries[ci];
                 if (child->parent_index != fi) continue;
                 if (child->capture_count == 0) continue;
+                if (!jm_child_can_use_parent_scope_env(parent_fc, child)) continue;
 
                 // Determine child's NFE self-name (if any)
                 char child_self_name[128] = {0};
@@ -3781,6 +3953,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 bool has_nfe_self_capture = false;
                 for (int k = 0; k < child->capture_count; k++) {
                     const char* cname = child->captures[k].name;
+                    const char* slot_key = jm_capture_scope_env_slot_key(parent_fc, child, &child->captures[k]);
                     // Skip true NFE self-captures (child is a function expression, not declaration).
                     // Name alone is not enough: minified bundles often have an
                     // outer binding and an NFE self binding with the same name.
@@ -3789,7 +3962,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         has_nfe_self_capture = true;
                         continue;
                     }
-                    jm_name_set_add(scope_vars, cname);
+                    jm_name_set_add(scope_vars, slot_key);
                 }
                 if (has_nfe_self_capture) nfe_extra_count++;
             }
@@ -3809,6 +3982,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         JsFuncCollected* child = &mt->func_entries[ci];
                         if (child->parent_index != fi) continue;
                         if (child->capture_count == 0) continue;
+                        if (!jm_child_can_use_parent_scope_env(parent_fc, child)) continue;
 
                         char child_self_name2[128] = {0};
                         if (child->node && child->node->name) {
@@ -3819,14 +3993,15 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         bool is_child_nfe2 = (child->node && child->node->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION);
                         for (int k = 0; k < child->capture_count; k++) {
                             const char* cname = child->captures[k].name;
+                            const char* slot_key = jm_capture_scope_env_slot_key(parent_fc, child, &child->captures[k]);
                             // Same skip as first pass: true NFE self-captures only.
                             if (child_self_name2[0] && strcmp(cname, child_self_name2) == 0
                                 && is_child_nfe2 && child->captures[k].is_nfe_binding) {
                                 continue;
                             }
-                            if (!jm_name_set_has(scope_vars, cname)) {
-                                jm_name_set_add(scope_vars, cname);
-                                snprintf(parent_fc->scope_env_names[fill_idx], 64, "%s", cname);
+                            if (!jm_name_set_has(scope_vars, slot_key)) {
+                                jm_name_set_add(scope_vars, slot_key);
+                                snprintf(parent_fc->scope_env_names[fill_idx], 64, "%s", slot_key);
                                 fill_idx++;
                             }
                         }
@@ -3841,6 +4016,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 for (int ci = 0; ci < mt->func_count; ci++) {
                     JsFuncCollected* child = &mt->func_entries[ci];
                     if (child->parent_index != fi) continue;
+                    if (!jm_child_can_use_parent_scope_env(parent_fc, child)) continue;
                     if (!child->node || !child->node->name) continue;
                     char csn[128];
                     snprintf(csn, sizeof(csn), "_js_%.*s",
@@ -3877,6 +4053,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         JsFuncCollected* child = &mt->func_entries[ci];
                         if (child->parent_index != fi) continue;
                         if (child->capture_count == 0) continue;
+                        if (!jm_child_can_use_parent_scope_env(parent_fc, child)) continue;
 
                         // Build child's NFE self-name to skip during remap
                         char child_self_remap[128] = {0};
@@ -3894,8 +4071,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 continue;
                             }
                             // Find this capture's slot in the normal portion of scope env
+                            const char* slot_key = jm_capture_scope_env_slot_key(parent_fc, child, &child->captures[k]);
                             for (int s = 0; s < normal_slot_count; s++) {
-                                if (strcmp(child->captures[k].name, parent_fc->scope_env_names[s]) == 0) {
+                                if (strcmp(slot_key, parent_fc->scope_env_names[s]) == 0) {
                                     child->captures[k].scope_env_slot = s;
                                     break;
                                 }
