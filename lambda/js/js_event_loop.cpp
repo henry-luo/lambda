@@ -28,6 +28,8 @@ extern __thread EvalContext* context;
 extern "C" Item js_async_hooks_get_current_resource(void);
 extern "C" Item js_async_hooks_enter_resource(Item resource);
 extern "C" void js_async_hooks_restore_resource(Item previous);
+extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_len);
+extern "C" void js_async_hooks_emit_destroy_resource(Item resource);
 extern "C" Item js_util_promisify_custom_symbol(void);
 extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
@@ -293,6 +295,7 @@ typedef struct JsTimerHandle {
 static JsTimerHandle *timer_handles[MAX_TIMER_HANDLES];
 static int timer_handle_count = 0;
 static int64_t next_timer_id = 1;
+static bool timer_force_shutdown = false;
 
 static void close_all_timer_handles(void);
 
@@ -307,7 +310,7 @@ typedef struct JsTimerRuntimeScope {
 
 static void timer_capture_runtime(JsTimerHandle* th) {
     if (!th) return;
-    th->async_resource = js_async_hooks_get_current_resource();
+    th->async_resource = js_async_hooks_create_resource("Timeout", 7);
     th->als_context = js_als_capture_context();
     if (context) {
         th->runtime_heap = context->heap;
@@ -423,6 +426,13 @@ static void timer_register_gc_roots(JsTimerHandle *th) {
 static void timer_close_handle(JsTimerHandle *th) {
     if (!th || th->closing) return;
     th->closing = true;
+    if (!timer_force_shutdown) {
+        JsTimerRuntimeScope scope;
+        if (timer_runtime_enter(th, &scope)) {
+            js_async_hooks_emit_destroy_resource(th->async_resource);
+            timer_runtime_exit(&scope);
+        }
+    }
     uv_timer_stop(&th->timer);
     uv_close((uv_handle_t *)&th->timer, timer_close_cb);
 }
@@ -1146,6 +1156,7 @@ extern "C" void js_event_loop_init(void) {
 extern "C" void js_event_loop_shutdown(void) {
     uv_loop_t* loop = lambda_uv_loop();
 
+    timer_force_shutdown = true;
     close_all_timer_handles();
     if (loop) {
         int safety = MAX_TIMER_HANDLES + 16;
@@ -1153,6 +1164,7 @@ extern "C" void js_event_loop_shutdown(void) {
             uv_run(loop, UV_RUN_NOWAIT);
         }
     }
+    timer_force_shutdown = false;
 
     if (timer_handle_count > 0) {
         log_error("event_loop: shutdown left %d timer handle(s) pending close",

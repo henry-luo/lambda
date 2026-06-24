@@ -32,6 +32,7 @@ extern "C" bool js_dom_item_is_selection(Item item);
 extern "C" Item js_dom_range_get_prototype_value(void);
 extern "C" Item js_dom_selection_get_prototype_value(void);
 extern "C" Item js_internal_binding(Item name);
+extern "C" void js_async_hooks_after_gc(void);
 extern double js_get_number(Item value);
 
 #define JS_FUNC_FLAG_HAS_BOUND_THIS_G 16
@@ -14469,6 +14470,7 @@ extern "C" Item js_get_constructor(Item name_item);
 static Item js_global_gc(void) {
     extern void heap_gc_collect(void);
     heap_gc_collect();
+    js_async_hooks_after_gc();
     return make_js_undefined();
 }
 

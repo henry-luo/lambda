@@ -1158,6 +1158,18 @@ bool jm_push_typeof_narrow(JsMirTranspiler* mt, JsIdentifierNode* id, TypeId nar
     return true;
 }
 
+static bool jm_branch_assigns_identifier(JsAstNode* branch, JsIdentifierNode* id) {
+    if (!branch || !id || !id->name) return false;
+    char vname[128];
+    snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+    struct hashmap* assigned = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    jm_collect_func_assignments(branch, assigned);
+    bool assigns = jm_name_set_has(assigned, vname);
+    hashmap_free(assigned);
+    return assigns;
+}
+
 static void jm_init_if_clause_function_binding(JsMirTranspiler* mt, JsAstNode* stmt) {
     if (!stmt || stmt->node_type != JS_AST_NODE_FUNCTION_DECLARATION) return;
     JsFunctionNode* fn = (JsFunctionNode*)stmt;
@@ -1258,7 +1270,8 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
     if (if_node->consequent) {
         // Phase 3.5: narrow variable type inside the consequent when typeof guard matched
         bool consequent_narrowed = false;
-        if (typeof_id && !typeof_negate)
+        if (typeof_id && !typeof_negate &&
+            !jm_branch_assigns_identifier(if_node->consequent, typeof_id))
             consequent_narrowed = jm_push_typeof_narrow(mt, typeof_id, typeof_narrowed_type);
 
         if (if_node->consequent->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
@@ -1286,7 +1299,8 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
     if (if_node->alternate) {
         // Phase 3.5: narrow variable type inside the alternate when typeof !== guard matched
         bool alternate_narrowed = false;
-        if (typeof_id && typeof_negate)
+        if (typeof_id && typeof_negate &&
+            !jm_branch_assigns_identifier(if_node->alternate, typeof_id))
             alternate_narrowed = jm_push_typeof_narrow(mt, typeof_id, typeof_narrowed_type);
 
         if (if_node->alternate->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
