@@ -419,6 +419,31 @@ static int boundary_legacy_offset(const DomBoundary* boundary) {
     return (int)boundary->offset;
 }
 
+static void expected_legacy_caret_projection(DomSelection* selection,
+                                             const DomBoundary* focus,
+                                             View** out_view,
+                                             int* out_offset) {
+    View* view = focus && focus->node ? static_cast<View*>(focus->node) : NULL;
+    int offset = boundary_legacy_offset(focus);
+
+    if (selection && selection->range_count > 0 &&
+        dom_selection_is_collapsed(selection)) {
+        DomRange* range = selection->ranges[0];
+        if (range && (range->layout_valid || dom_range_resolve_layout(range))) {
+            bool focus_at_end = selection->direction != DOM_SEL_DIR_BACKWARD;
+            View* resolved_view = static_cast<View*>(
+                focus_at_end ? range->end_view : range->start_view);
+            if (resolved_view) {
+                view = resolved_view;
+                offset = focus_at_end ? range->end_byte_offset : range->start_byte_offset;
+            }
+        }
+    }
+
+    if (out_view) *out_view = view;
+    if (out_offset) *out_offset = offset;
+}
+
 static View* focus_validation_root(View* view) {
     View* root = view;
     while (root && root->parent) {
@@ -960,8 +985,12 @@ static void validate_selection_invariants(DocState* state,
     }
 
     if (state->caret && selection_collapsed) {
-        if (static_cast<DomNode*>(state->caret->view) != focus.node ||
-            state->caret->char_offset != boundary_legacy_offset(&focus)) {
+        View* expected_caret_view = NULL;
+        int expected_caret_offset = 0;
+        expected_legacy_caret_projection(selection, &focus,
+            &expected_caret_view, &expected_caret_offset);
+        if (state->caret->view != expected_caret_view ||
+            state->caret->char_offset != expected_caret_offset) {
             report_fail(report, "legacy caret projection is stale");
         }
     }

@@ -51,6 +51,12 @@ extern "C" __attribute__((weak)) void state_store_refresh_caret_projection(
     // weak fallback for test targets without state_store
 }
 
+extern "C" bool state_store_editing_behavior_is_windows(struct DocState* state);
+extern "C" __attribute__((weak)) bool state_store_editing_behavior_is_windows(
+        struct DocState* /*state*/) {
+    return false;
+}
+
 __attribute__((weak)) bool tc_is_text_control(DomElement* /*elem*/) {
     return false;
 }
@@ -535,6 +541,44 @@ bool dom_range_intersects_node(const DomRange* r, DomNode* node) {
     return true;
 }
 
+static bool dom_node_selection_bounds(DomNode* node, DomBoundary* before, DomBoundary* after) {
+    if (!node || !before || !after) return false;
+    if (node->is_text() || node->is_comment()) {
+        before->node = node;
+        before->offset = 0;
+        after->node = node;
+        after->offset = dom_node_boundary_length(node);
+        return true;
+    }
+    if (!node->parent) return false;
+    uint32_t index = dom_node_child_index(node);
+    if (index == UINT32_MAX) return false;
+    before->node = node->parent;
+    before->offset = index;
+    after->node = node->parent;
+    after->offset = index + 1;
+    return true;
+}
+
+static bool dom_selection_bounds_intersect(const DomRange* r,
+                                           const DomBoundary* before,
+                                           const DomBoundary* after) {
+    if (!r || !before || !after) return false;
+    DomBoundaryOrder after_start = dom_boundary_compare(after, &r->start);
+    if (after_start == DOM_BOUNDARY_DISJOINT ||
+        after_start == DOM_BOUNDARY_BEFORE ||
+        after_start == DOM_BOUNDARY_EQUAL) {
+        return false;
+    }
+    DomBoundaryOrder before_end = dom_boundary_compare(before, &r->end);
+    if (before_end == DOM_BOUNDARY_DISJOINT ||
+        before_end == DOM_BOUNDARY_AFTER ||
+        before_end == DOM_BOUNDARY_EQUAL) {
+        return false;
+    }
+    return true;
+}
+
 DomRange* dom_range_clone(const DomRange* r) {
     if (!r) return NULL;
     DomRange* c = dom_range_create(r->state);
@@ -843,14 +887,11 @@ bool dom_selection_select_all_children(DomSelection* s, DomNode* node, const cha
 bool dom_selection_contains_node(const DomSelection* s, DomNode* node, bool allow_partial) {
     if (!s || !node || s->range_count == 0) return false;
     const DomRange* r = s->ranges[0];
-    if (!node->parent) return false;
-    DomBoundary before = { node->parent, dom_node_child_index(node) };
-    DomBoundary after  = { node->parent, dom_node_child_index(node) + 1 };
-    if (allow_partial) {
-        // intersects: !(after < start) && !(before > end)
-        if (dom_boundary_compare(&after,  &r->start) == DOM_BOUNDARY_BEFORE) return false;
-        if (dom_boundary_compare(&before, &r->end)   == DOM_BOUNDARY_AFTER)  return false;
-        return true;
+    DomBoundary before;
+    DomBoundary after;
+    if (!dom_node_selection_bounds(node, &before, &after)) return false;
+    if (allow_partial || node->is_text() || node->is_comment()) {
+        return dom_selection_bounds_intersect(r, &before, &after);
     }
     // full containment: start <= before AND after <= end
     DomBoundaryOrder s_ord = dom_boundary_compare(&r->start, &before);
@@ -927,6 +968,87 @@ static void adjust_one_endpoint_for_remove(DomBoundary* b,
     }
 }
 
+static bool removed_node_is_atomic_selection_boundary(const DomNode* child) {
+    if (!child || !child->is_element()) return false;
+    const DomElement* elem = child->as_element();
+    if (!elem) return false;
+    uintptr_t tag = elem->tag();
+    return tag == HTM_TAG_IFRAME ||
+        tag == HTM_TAG_IMG ||
+        tag == HTM_TAG_HR ||
+        tag == HTM_TAG_INPUT ||
+        tag == HTM_TAG_SELECT ||
+        tag == HTM_TAG_TEXTAREA ||
+        tag == HTM_TAG_VIDEO ||
+        tag == HTM_TAG_CANVAS ||
+        tag == HTM_TAG_EMBED ||
+        tag == HTM_TAG_OBJECT ||
+        tag == HTM_TAG_AUDIO ||
+        tag == HTM_TAG_BUTTON;
+}
+
+static DomText* last_text_descendant_for_selection(DomNode* node) {
+    if (!node) return nullptr;
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        return text && dom_text_utf16_length(text) > 0 ? text : nullptr;
+    }
+    if (!node->is_element()) return nullptr;
+    DomElement* elem = node->as_element();
+    if (!elem) return nullptr;
+    for (DomNode* child = elem->last_child; child; child = child->prev_sibling) {
+        DomText* found = last_text_descendant_for_selection(child);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
+static DomText* previous_text_before_removed_child(DomNode* child) {
+    if (!child) return nullptr;
+    for (DomNode* sibling = child->prev_sibling; sibling;
+         sibling = sibling->prev_sibling) {
+        DomText* found = last_text_descendant_for_selection(sibling);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
+static void normalize_selection_endpoint_after_atomic_remove(
+        DomBoundary* b, DomNode* parent, uint32_t index,
+        DomText* previous_text, bool* out_changed) {
+    if (!b || !parent || !previous_text) return;
+    if (b->node != parent || b->offset != index) return;
+    b->node = (DomNode*)previous_text;
+    b->offset = dom_text_utf16_length(previous_text);
+    if (out_changed) *out_changed = true;
+}
+
+static void normalize_selection_after_atomic_remove(DocState* state,
+                                                    DomNode* parent,
+                                                    DomNode* child,
+                                                    uint32_t index) {
+    if (!state || !parent || !removed_node_is_atomic_selection_boundary(child)) {
+        return;
+    }
+    DomSelection* s = dom_range_state_selection(state);
+    if (!s || s->range_count == 0 || !s->ranges[0]) return;
+    DomText* previous_text = previous_text_before_removed_child(child);
+    if (!previous_text) return;
+
+    DomRange* r = s->ranges[0];
+    bool start_changed = false;
+    bool end_changed = false;
+    normalize_selection_endpoint_after_atomic_remove(
+        &r->start, parent, index, previous_text, &start_changed);
+    normalize_selection_endpoint_after_atomic_remove(
+        &r->end, parent, index, previous_text, &end_changed);
+    if (!start_changed && !end_changed) return;
+
+    if (start_changed) enforce_range_invariant(r, /*start_was_set=*/true);
+    if (end_changed) enforce_range_invariant(r, /*start_was_set=*/false);
+    r->layout_valid = false;
+}
+
 void dom_mutation_pre_remove(DocState* state, DomNode* child) {
     if (!state || !child || !child->parent) return;
     DomNode* parent = child->parent;
@@ -941,6 +1063,7 @@ void dom_mutation_pre_remove(DocState* state, DomNode* child) {
             r->layout_valid = false;
         }
     }
+    normalize_selection_after_atomic_remove(state, parent, child, index);
     resync_selection_after_mutation(state);
 }
 
@@ -979,7 +1102,7 @@ void dom_mutation_text_replace_data(DocState* state, DomText* text,
         uint32_t ro = b->offset;
         if (ro <= offset) return;                    // before the edit window
         if (ro <= offset + count) {                  // within deleted span
-            b->offset = offset + replacement_len;    // collapse to end of insertion
+            b->offset = offset;                      // collapse to start of insertion
             return;
         }
         // after the deleted span: shift by net delta
@@ -1984,9 +2107,7 @@ static bool elem_subtree_content_visibility_hidden(const DomElement* e) {
 // wins. `auto` resolves to the parent's value; for the document root,
 // `auto` resolves to `text` (the UA default for non-form content). Returns
 // CSS_VALUE_NONE / CSS_VALUE_TEXT / CSS_VALUE_ALL / CSS_VALUE_CONTAIN.
-static CssEnum effective_user_select(const DomNode* n) {
-    const DomElement* e = (n && n->parent && n->parent->is_element())
-                          ? n->parent->as_element() : nullptr;
+static CssEnum effective_user_select_from_element(const DomElement* e) {
     while (e) {
         CssEnum kw = specified_keyword(e, CSS_PROPERTY_USER_SELECT);
         if (kw != 0 && kw != CSS_VALUE_AUTO) return kw;
@@ -1994,6 +2115,16 @@ static CssEnum effective_user_select(const DomNode* n) {
         e = (parent && parent->is_element()) ? parent->as_element() : nullptr;
     }
     return CSS_VALUE_TEXT;
+}
+
+static CssEnum effective_user_select(const DomNode* n) {
+    const DomElement* e = nullptr;
+    if (n && n->is_element()) {
+        e = n->as_element();
+    } else if (n && n->parent && n->parent->is_element()) {
+        e = n->parent->as_element();
+    }
+    return effective_user_select_from_element(e);
 }
 
 // True iff `t` should be excluded from a Selection.toString() result by CSS.
@@ -2029,6 +2160,333 @@ static bool text_excluded_for_rendered_stringify(const DomText* t) {
     }
 
     return false;
+}
+
+static bool select_all_ascii_space(unsigned char c) {
+    return c == ' ' || c == '\n' || c == '\r' || c == '\t' || c == '\f';
+}
+
+static uint32_t select_all_utf8_step(const DomText* text,
+                                     size_t byte_offset,
+                                     uint32_t* out_u16_step) {
+    if (out_u16_step) *out_u16_step = 1;
+    if (!text || !text->text || byte_offset >= text->length) return 0;
+    const unsigned char* data = (const unsigned char*)text->text;
+    unsigned char b = data[byte_offset];
+    if (b < 0x80) return 1;
+    if ((b & 0xE0) == 0xC0 && byte_offset + 1 < text->length) return 2;
+    if ((b & 0xF0) == 0xE0 && byte_offset + 2 < text->length) return 3;
+    if ((b & 0xF8) == 0xF0 && byte_offset + 3 < text->length) {
+        if (out_u16_step) *out_u16_step = 2;
+        return 4;
+    }
+    return 1;
+}
+
+static bool select_all_text_start_offset(DomText* text, uint32_t* out_offset) {
+    if (out_offset) *out_offset = 0;
+    if (!text || !text->text || text->length == 0) return false;
+    uint32_t u16 = 0;
+    for (size_t i = 0; i < text->length;) {
+        unsigned char b = (unsigned char)text->text[i];
+        uint32_t u16_step = 1;
+        uint32_t byte_step = select_all_utf8_step(text, i, &u16_step);
+        if (byte_step == 0) break;
+        if (b >= 0x80 || !select_all_ascii_space(b)) {
+            if (out_offset) *out_offset = u16;
+            return true;
+        }
+        i += byte_step;
+        u16 += u16_step;
+    }
+    return false;
+}
+
+static bool select_all_text_end_offset(DomText* text, uint32_t* out_offset) {
+    if (out_offset) *out_offset = 0;
+    if (!text || !text->text || text->length == 0) return false;
+    bool found = false;
+    uint32_t u16 = 0;
+    uint32_t last_end = 0;
+    for (size_t i = 0; i < text->length;) {
+        unsigned char b = (unsigned char)text->text[i];
+        uint32_t u16_step = 1;
+        uint32_t byte_step = select_all_utf8_step(text, i, &u16_step);
+        if (byte_step == 0) break;
+        if (b >= 0x80 || !select_all_ascii_space(b)) {
+            found = true;
+            last_end = u16 + u16_step;
+        }
+        i += byte_step;
+        u16 += u16_step;
+    }
+    if (!found) return false;
+    if (out_offset) *out_offset = last_end;
+    return true;
+}
+
+static bool select_all_skip_subtree(DomElement* elem) {
+    if (!elem) return false;
+    if (effective_user_select(static_cast<DomNode*>(elem)) == CSS_VALUE_NONE) {
+        return true;
+    }
+    const char* tag = elem->tag_name;
+    return tag_ieq(tag, "script") || tag_ieq(tag, "style") ||
+        tag_ieq(tag, "noscript");
+}
+
+static bool select_all_atomic_node(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    const char* tag = node->as_element()->tag_name;
+    return tag_ieq(tag, "br") || tag_ieq(tag, "hr") ||
+        tag_ieq(tag, "table") || tag_ieq(tag, "iframe") ||
+        tag_ieq(tag, "object") || tag_ieq(tag, "select");
+}
+
+static bool select_all_atomic_boundary(DomNode* node, bool after,
+                                       DomBoundary* out) {
+    if (!node || !node->parent || !out) return false;
+    uint32_t idx = dom_node_child_index(node);
+    if (idx == UINT32_MAX) return false;
+    out->node = node->parent;
+    out->offset = after ? idx + 1 : idx;
+    return true;
+}
+
+static DomElement* nearest_user_select_all_element(DomNode* node) {
+    DomNode* cur = node && node->is_text() ? node->parent : node;
+    for (int safety = 0; cur && safety < 100000; safety++, cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* elem = cur->as_element();
+        CssEnum kw = specified_keyword(elem, CSS_PROPERTY_USER_SELECT);
+        if (kw == CSS_VALUE_ALL) return elem;
+        if (kw != 0 && kw != CSS_VALUE_AUTO) return nullptr;
+    }
+    return nullptr;
+}
+
+static bool first_user_select_all_boundary(DomNode* root, DomBoundary* out) {
+    if (!root || !out) return false;
+    if (root->is_text()) {
+        if (dom_node_boundary_length(root) == 0) return false;
+        out->node = root;
+        out->offset = 0;
+        return true;
+    }
+    if (!root->is_element()) return false;
+    DomElement* elem = root->as_element();
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (child->is_text()) {
+            if (dom_node_boundary_length(child) > 0) {
+                out->node = child;
+                out->offset = 0;
+                return true;
+            }
+            continue;
+        }
+        if (!child->is_element()) continue;
+        if (select_all_atomic_node(child)) {
+            return select_all_atomic_boundary(child, false, out);
+        }
+        if (first_user_select_all_boundary(child, out)) return true;
+    }
+    return false;
+}
+
+static bool last_user_select_all_boundary(DomNode* root, DomBoundary* out) {
+    if (!root || !out) return false;
+    if (root->is_text()) {
+        uint32_t len = dom_node_boundary_length(root);
+        if (len == 0) return false;
+        out->node = root;
+        out->offset = len;
+        return true;
+    }
+    if (!root->is_element()) return false;
+    DomElement* elem = root->as_element();
+    for (DomNode* child = elem->last_child; child; child = child->prev_sibling) {
+        if (child->is_text()) {
+            uint32_t len = dom_node_boundary_length(child);
+            if (len > 0) {
+                out->node = child;
+                out->offset = len;
+                return true;
+            }
+            continue;
+        }
+        if (!child->is_element()) continue;
+        if (select_all_atomic_node(child)) {
+            return select_all_atomic_boundary(child, true, out);
+        }
+        if (last_user_select_all_boundary(child, out)) return true;
+    }
+    return false;
+}
+
+static bool user_select_all_content_boundaries(DomElement* elem,
+                                               DomBoundary* out_start,
+                                               DomBoundary* out_end) {
+    if (!elem || !out_start || !out_end) return false;
+    DomNode* root = static_cast<DomNode*>(elem);
+    DomBoundary start = { root, 0 };
+    DomBoundary end = { root, dom_node_boundary_length(root) };
+    first_user_select_all_boundary(root, &start);
+    last_user_select_all_boundary(root, &end);
+    *out_start = start;
+    *out_end = end;
+    return true;
+}
+
+static bool user_select_all_range_for_node_internal(DomNode* node,
+                                                    DomElement** out_elem,
+                                                    DomBoundary* out_start,
+                                                    DomBoundary* out_end) {
+    if (out_elem) *out_elem = nullptr;
+    if (!node || !out_start || !out_end) return false;
+    DomElement* elem = nearest_user_select_all_element(node);
+    if (!elem) return false;
+    if (!user_select_all_content_boundaries(elem, out_start, out_end)) {
+        return false;
+    }
+    if (out_elem) *out_elem = elem;
+    return true;
+}
+
+static bool first_select_all_boundary(DomNode* root, DomBoundary* out) {
+    if (!root || !out) return false;
+    if (root->is_text()) {
+        uint32_t start = 0;
+        if (!select_all_text_start_offset(root->as_text(), &start)) return false;
+        out->node = root;
+        out->offset = start;
+        return true;
+    }
+    if (!root->is_element()) return false;
+    DomElement* elem = root->as_element();
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (child->is_text()) {
+            uint32_t start = 0;
+            if (select_all_text_start_offset(child->as_text(), &start)) {
+                out->node = child;
+                out->offset = start;
+                return true;
+            }
+            continue;
+        }
+        if (!child->is_element()) continue;
+        DomElement* child_elem = child->as_element();
+        if (select_all_skip_subtree(child_elem)) continue;
+        if (select_all_atomic_node(child)) {
+            return select_all_atomic_boundary(child, false, out);
+        }
+        if (first_select_all_boundary(child, out)) return true;
+    }
+    return false;
+}
+
+static bool last_select_all_boundary(DomNode* root, DomBoundary* out) {
+    if (!root || !out) return false;
+    if (root->is_text()) {
+        uint32_t end = 0;
+        if (!select_all_text_end_offset(root->as_text(), &end)) return false;
+        out->node = root;
+        out->offset = end;
+        return true;
+    }
+    if (!root->is_element()) return false;
+    DomElement* elem = root->as_element();
+    DomBoundary trailing_br_boundary = { nullptr, 0 };
+    bool has_trailing_br_boundary = false;
+    for (DomNode* child = elem->last_child; child; child = child->prev_sibling) {
+        if (child->is_text()) {
+            uint32_t end = 0;
+            if (select_all_text_end_offset(child->as_text(), &end)) {
+                if (has_trailing_br_boundary) {
+                    DomNode* next = child->next_sibling;
+                    if (node_is_br(next) &&
+                            select_all_atomic_boundary(next, true, out)) {
+                        return true;
+                    }
+                    *out = trailing_br_boundary;
+                    return true;
+                }
+                out->node = child;
+                out->offset = end;
+                return true;
+            }
+            continue;
+        }
+        if (!child->is_element()) continue;
+        DomElement* child_elem = child->as_element();
+        if (select_all_skip_subtree(child_elem)) continue;
+        if (node_is_br(child)) {
+            if (select_all_atomic_boundary(child, false,
+                                           &trailing_br_boundary)) {
+                has_trailing_br_boundary = true;
+            }
+            continue;
+        }
+        if (select_all_atomic_node(child)) {
+            if (has_trailing_br_boundary) {
+                *out = trailing_br_boundary;
+                return true;
+            }
+            return select_all_atomic_boundary(child, true, out);
+        }
+        if (last_select_all_boundary(child, out)) {
+            if (has_trailing_br_boundary) *out = trailing_br_boundary;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool dom_selection_compute_select_all_boundaries(DomNode* root,
+                                                 DomBoundary* out_start,
+                                                 DomBoundary* out_end) {
+    if (!root || !out_start || !out_end) return false;
+    DomBoundary start = { root, 0 };
+    DomBoundary end = { root, dom_node_boundary_length(root) };
+    first_select_all_boundary(root, &start);
+    last_select_all_boundary(root, &end);
+    *out_start = start;
+    *out_end = end;
+    return true;
+}
+
+bool dom_selection_user_select_all_range_for_node(DomNode* node,
+                                                  DomBoundary* out_start,
+                                                  DomBoundary* out_end) {
+    return user_select_all_range_for_node_internal(node, nullptr,
+                                                  out_start, out_end);
+}
+
+static bool triple_click_cell_tag(uintptr_t tag) {
+    return tag == HTM_TAG_TD || tag == HTM_TAG_TH;
+}
+
+static DomElement* nearest_triple_click_cell(DomNode* node) {
+    DomNode* cur = node && node->is_text() ? node->parent : node;
+    for (int safety = 0; cur && safety < 100000; safety++, cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* elem = cur->as_element();
+        if (!elem) continue;
+        if (triple_click_cell_tag(elem->tag())) return elem;
+        if (elem->tag() == HTM_TAG_TR || elem->tag() == HTM_TAG_TABLE) {
+            return nullptr;
+        }
+    }
+    return nullptr;
+}
+
+bool dom_selection_triple_click_range_for_node(DomNode* node,
+                                               DomBoundary* out_start,
+                                               DomBoundary* out_end) {
+    if (!node || !out_start || !out_end) return false;
+    DomElement* cell = nearest_triple_click_cell(node);
+    if (!cell) return false;
+    return dom_selection_compute_select_all_boundaries(
+        static_cast<DomNode*>(cell), out_start, out_end);
 }
 
 // True iff the HTML UA stylesheet implicitly sets `white-space: pre` on this
@@ -2502,32 +2960,6 @@ static DomBoundary move_one_char(DomBoundary b, int dir) {
     }
 }
 
-// Probe codepoint immediately AFTER the boundary (looking forward).
-// Returns 0 if at document end.
-static uint32_t cp_after(DomBoundary b) {
-    if (!b.node) return 0;
-    if (b.node->is_text()) {
-        DomText* t = b.node->as_text();
-        uint32_t total = dom_text_utf16_length(t);
-        if (b.offset < total) {
-            uint32_t step = 1;
-            return cp_at_u16(t, b.offset, &step);
-        }
-        DomText* nx = next_text_after(static_cast<DomNode*>(t));
-        if (!nx) return 0;
-        uint32_t step = 1;
-        return cp_at_u16(nx, 0, &step);
-    }
-    // element: find first text in next position
-    DomBoundary nb = move_one_char(b, +1);
-    if (nb.node == b.node && nb.offset == b.offset) return 0;
-    if (nb.node && nb.node->is_text()) {
-        uint32_t step = 1;
-        return cp_at_u16(nb.node->as_text(), nb.offset, &step);
-    }
-    return ' ';  // treat element edges as non-word (boundary)
-}
-
 // Probe codepoint immediately BEFORE the boundary.
 static uint32_t cp_before(DomBoundary b) {
     if (!b.node) return 0;
@@ -2933,6 +3365,61 @@ static bool same_boundary(DomBoundary a, DomBoundary b) {
     return a.node == b.node && a.offset == b.offset;
 }
 
+static bool boundary_between_inclusive(DomBoundary b,
+                                       DomBoundary start,
+                                       DomBoundary end) {
+    DomBoundaryOrder after_start = dom_boundary_compare(&b, &start);
+    DomBoundaryOrder before_end = dom_boundary_compare(&b, &end);
+    bool ge_start = after_start == DOM_BOUNDARY_AFTER ||
+        after_start == DOM_BOUNDARY_EQUAL;
+    bool le_end = before_end == DOM_BOUNDARY_BEFORE ||
+        before_end == DOM_BOUNDARY_EQUAL;
+    return ge_start && le_end;
+}
+
+// Coarse UAX #9 first-strong direction for visual edge collapse. This mirrors
+// the form-control geometry heuristic, but works on DOM Range text.
+static int cp_bidi_strong_direction(uint32_t cp) {
+    if (cp == 0x200E) return -1;                // LRM
+    if (cp == 0x200F || cp == 0x061C) return 1; // RLM / ALM
+    if (cp >= 0x0590 && cp <= 0x08FF) return 1;
+    if (cp >= 0xFB50 && cp <= 0xFDFF) return 1;
+    if (cp >= 0xFE70 && cp <= 0xFEFF) return 1;
+
+    if ((cp >= 0x0041 && cp <= 0x005A) ||
+        (cp >= 0x0061 && cp <= 0x007A)) return -1;
+    if (cp >= 0x00C0 && cp <= 0x02AF) return -1;
+    if (cp >= 0x0370 && cp <= 0x052F) return -1;
+    if (cp >= 0x0900 && cp <= 0x0DFF) return -1;
+    if (cp >= 0x0E01 && cp <= 0x0E5B) return -1;
+    if (cp >= 0x0E81 && cp <= 0x0EDF) return -1;
+    if (cp >= 0x10A0 && cp <= 0x11FF) return -1;
+    if (cp >= 0x3040 && cp <= 0x30FF) return -1;
+    if (cp >= 0x4E00 && cp <= 0x9FFF) return -1;
+    if (cp >= 0xAC00 && cp <= 0xD7AF) return -1;
+    return 0;
+}
+
+static int range_first_strong_direction(DomRange* r) {
+    if (!r || !r->start.node || !r->end.node) return 0;
+    DomElement* host = editing_host_of(r->start.node);
+    DomBoundary scan = r->start;
+    for (int safety = 0; safety < 100000; safety++) {
+        ModifyCodepoint cp = next_modify_codepoint(scan, host);
+        if (!cp.found) return 0;
+        DomBoundary before = boundary_before_codepoint(cp);
+        if (dom_boundary_compare(&before, &r->end) != DOM_BOUNDARY_BEFORE) {
+            return 0;
+        }
+        int strong = cp_bidi_strong_direction(cp.cp);
+        if (strong != 0) return strong;
+        DomBoundary after = boundary_after_codepoint(cp);
+        if (same_boundary(after, scan)) return 0;
+        scan = after;
+    }
+    return 0;
+}
+
 static DomBoundary forward_word_separator_boundary(DomBoundary b,
                                                    DomElement* host,
                                                    bool* found) {
@@ -3149,6 +3636,54 @@ static bool effective_dir_is_rtl(DomNode* n) {
     return false;
 }
 
+static int visual_direction_to_logical_dir(DomBoundary focus, bool right) {
+    bool rtl = effective_dir_is_rtl(focus.node);
+    if (right) return rtl ? -1 : +1;
+    return rtl ? +1 : -1;
+}
+
+static bool visual_cross_run_boundary(DomBoundary focus, int logical_dir,
+                                      DomElement* host,
+                                      DomBoundary* out_boundary,
+                                      DomBoundary* out_anchor_boundary) {
+    if (!focus.node || !out_boundary) return false;
+    bool base_rtl = effective_dir_is_rtl(focus.node);
+    DomBoundary scan = focus;
+    bool skipped_space = false;
+    DomBoundary anchor_boundary = { nullptr, 0 };
+
+    for (int safety = 0; safety < 100000; safety++) {
+        ModifyCodepoint cp = logical_dir > 0
+            ? next_modify_codepoint(scan, host)
+            : prev_modify_codepoint(scan, host);
+        if (!cp.found) return false;
+
+        DomBoundary before = boundary_before_codepoint(cp);
+        DomBoundary after = boundary_after_codepoint(cp);
+        bool same_text = focus.node && focus.node->is_text() &&
+            static_cast<DomNode*>(cp.text) == focus.node;
+
+        if (!codepoint_is_collapsible_space(cp)) {
+            bool target_rtl = effective_dir_is_rtl(static_cast<DomNode*>(cp.text));
+            if (target_rtl != base_rtl && (!same_text || skipped_space)) {
+                *out_boundary = logical_dir > 0 ? before : after;
+                if (out_anchor_boundary && anchor_boundary.node) {
+                    *out_anchor_boundary = anchor_boundary;
+                }
+                return true;
+            }
+            return false;
+        }
+
+        DomBoundary next_scan = logical_dir > 0 ? after : before;
+        if (same_boundary(next_scan, scan)) return false;
+        anchor_boundary = next_scan;
+        skipped_space = true;
+        scan = next_scan;
+    }
+    return false;
+}
+
 static DomBoundary subtree_edge_boundary(DomNode* root, int edge_dir,
                                          DomElement* host) {
     if (!root) return DomBoundary{ nullptr, 0 };
@@ -3240,6 +3775,20 @@ static DomBoundary editing_host_line_boundary(DomBoundary focus,
 static DomBoundary move_one_word(DomBoundary b, int dir) {
     DomBoundary cur = b;
     DomElement* host = editing_host_of(b.node);
+    DomNode* atomic = dir > 0 ? atomic_caret_stop_after_boundary(b, host)
+                              : atomic_caret_stop_before_boundary(b, host);
+    if (atomic) {
+        return dir > 0 ? boundary_after_node(atomic)
+                       : boundary_before_node(atomic);
+    }
+    if (dir > 0 && next_step_enters_false_island(b, host)) {
+        ModifyCodepoint next = next_modify_codepoint(b, host);
+        return next.found ? boundary_before_codepoint(next) : b;
+    }
+    if (dir < 0 && prev_step_enters_false_island(b, host)) {
+        ModifyCodepoint prev = prev_modify_codepoint(b, host);
+        return prev.found ? boundary_after_codepoint(prev) : b;
+    }
     if (dir > 0) {
         ModifyCodepoint first = next_modify_codepoint(b, host);
         if (first.found && first.offset == 0 &&
@@ -3254,24 +3803,29 @@ static DomBoundary move_one_word(DomBoundary b, int dir) {
     }
     // phase 1: skip non-word
     while (true) {
-        uint32_t cp = (dir > 0) ? cp_after(cur) : cp_before(cur);
-        if (cp == 0) return cur;
-        if (cp_is_wordlike(cp)) break;
-        DomBoundary next = move_one_char(cur, dir);
+        ModifyCodepoint cp = dir > 0 ? next_modify_codepoint(cur, host)
+                                     : prev_modify_codepoint(cur, host);
+        if (!cp.found) return cur;
+        if (cp_is_wordlike(cp.cp)) break;
+        DomBoundary next = dir > 0 ? boundary_after_codepoint(cp)
+                                   : boundary_before_codepoint(cp);
         if (next.node == cur.node && next.offset == cur.offset) return cur;
-        if (host && !node_is_descendant_of(next.node, host)) return cur;
         cur = next;
     }
     // phase 2: consume word characters of the same script class.
-    int run_class = cp_script_class((dir > 0) ? cp_after(cur) : cp_before(cur));
+    ModifyCodepoint first_cp = dir > 0 ? next_modify_codepoint(cur, host)
+                                       : prev_modify_codepoint(cur, host);
+    if (!first_cp.found) return cur;
+    int run_class = cp_script_class(first_cp.cp);
     while (true) {
-        uint32_t cp = (dir > 0) ? cp_after(cur) : cp_before(cur);
-        if (cp == 0) return cur;
-        if (!cp_is_wordlike(cp)) return cur;
-        if (cp_script_class(cp) != run_class) return cur;
-        DomBoundary next = move_one_char(cur, dir);
+        ModifyCodepoint cp = dir > 0 ? next_modify_codepoint(cur, host)
+                                     : prev_modify_codepoint(cur, host);
+        if (!cp.found) return cur;
+        if (!cp_is_wordlike(cp.cp)) return cur;
+        if (cp_script_class(cp.cp) != run_class) return cur;
+        DomBoundary next = dir > 0 ? boundary_after_codepoint(cp)
+                                   : boundary_before_codepoint(cp);
         if (next.node == cur.node && next.offset == cur.offset) return cur;
-        if (host && !node_is_descendant_of(next.node, host)) return cur;
         cur = next;
     }
 }
@@ -3291,6 +3845,382 @@ static DomBoundary normalize_forward_word_anchor(DomBoundary anchor) {
         cur = cur->parent;
     }
     return anchor;
+}
+
+static DomBoundary windows_extend_rtl_word_left_focus(DomBoundary focus,
+                                                      DomBoundary new_focus,
+                                                      DomElement* host) {
+    if (!focus.node || !new_focus.node) return new_focus;
+    if (!effective_dir_is_rtl(focus.node)) return new_focus;
+    DomBoundaryOrder order = dom_boundary_compare(&focus, &new_focus);
+    if (order != DOM_BOUNDARY_BEFORE) return new_focus;
+
+    ModifyCodepoint next = next_modify_codepoint(new_focus, host);
+    if (!codepoint_is_collapsible_space(next)) return new_focus;
+    DomBoundary before = boundary_before_codepoint(next);
+    if (!same_boundary(before, new_focus)) return new_focus;
+    return boundary_after_codepoint(next);
+}
+
+static uint32_t soft_line_step_for_text(DomText* text) {
+    uint32_t len = dom_text_utf16_length(text);
+    if (len == 0) return 1;
+    for (DomNode* cur = text ? text->parent : nullptr; cur; cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* elem = cur->as_element();
+        if (elem->width <= 0.0f) continue;
+        float approx = elem->width / 16.0f;
+        if (approx < 1.0f) approx = 1.0f;
+        uint32_t step = (uint32_t)approx;
+        if (step > 0) return step;
+    }
+    return len < 16 ? len : 16;
+}
+
+static DomBoundary move_within_text_by_soft_line(DomText* text,
+                                                 uint32_t offset,
+                                                 int dir) {
+    if (!text) return DomBoundary{ nullptr, 0 };
+    uint32_t len = dom_text_utf16_length(text);
+    uint32_t step = soft_line_step_for_text(text);
+    uint32_t next = offset;
+    if (dir > 0) {
+        next = offset + step;
+        if (next > len || next < offset) next = len;
+    } else {
+        next = offset > step ? offset - step : 0;
+    }
+    return DomBoundary{ static_cast<DomNode*>(text), next };
+}
+
+struct DomLineStop {
+    DomBoundary boundary;
+};
+
+struct DomLineStopList {
+    DomLineStop stops[512];
+    uint32_t count;
+};
+
+static bool text_is_space_or_nbsp_only(DomText* text) {
+    if (!text || !text->text || text->length == 0) return false;
+    const unsigned char* p = (const unsigned char*)text->text;
+    size_t i = 0;
+    while (i < text->length) {
+        unsigned char c = p[i];
+        if (c == ' ' || c == '\n' || c == '\r' || c == '\t' || c == '\f') {
+            i++;
+            continue;
+        }
+        if (c == 0xC2 && i + 1 < text->length && p[i + 1] == 0xA0) {
+            i += 2;
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
+static bool line_stop_same(DomBoundary a, DomBoundary b) {
+    return a.node == b.node && a.offset == b.offset;
+}
+
+static bool line_stop_append(DomLineStopList* list, DomBoundary boundary) {
+    if (!list || !boundary.node) return false;
+    if (!dom_boundary_is_valid(&boundary)) return false;
+    if (list->count > 0 &&
+            line_stop_same(list->stops[list->count - 1].boundary, boundary)) {
+        return true;
+    }
+    if (list->count >= sizeof(list->stops) / sizeof(list->stops[0])) {
+        return false;
+    }
+    list->stops[list->count++].boundary = boundary;
+    return true;
+}
+
+static bool element_tag_is(DomElement* elem, const char* tag) {
+    return elem && elem->tag_name && tag_ieq(elem->tag_name, tag);
+}
+
+static bool node_tag_is(DomNode* node, const char* tag) {
+    return node && node->is_element() && element_tag_is(node->as_element(), tag);
+}
+
+static bool element_is_hidden_input(DomElement* elem) {
+    if (!element_tag_is(elem, "input")) return false;
+    const char* type = dom_element_get_attribute(elem, "type");
+    return type && tag_ieq(type, "hidden");
+}
+
+static bool node_is_visible_line_control(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    DomElement* elem = node->as_element();
+    if (element_is_hidden_input(elem)) return false;
+    return element_tag_is(elem, "input") ||
+        element_tag_is(elem, "textarea") ||
+        element_tag_is(elem, "select") ||
+        element_tag_is(elem, "button");
+}
+
+static bool line_node_is_ignorable(DomNode* node) {
+    if (!node) return true;
+    if (node->is_text()) return text_is_ws_only(node->as_text());
+    if (!node->is_element()) return false;
+    DomElement* elem = node->as_element();
+    return element_is_hidden_input(elem) ||
+        element_tag_is(elem, "script") ||
+        element_tag_is(elem, "style") ||
+        element_tag_is(elem, "template") ||
+        element_tag_is(elem, "noscript");
+}
+
+static bool element_has_br_descendant(DomElement* elem) {
+    if (!elem) return false;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (node_is_br(child)) return true;
+        if (child->is_element() && element_has_br_descendant(child->as_element())) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static uint32_t first_visible_child_offset(DomElement* elem) {
+    if (!elem) return 0;
+    uint32_t offset = 0;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (!line_node_is_ignorable(child)) return offset;
+        offset++;
+    }
+    return offset;
+}
+
+static DomNode* next_non_ignorable_sibling(DomNode* node) {
+    for (DomNode* sibling = node ? node->next_sibling : nullptr;
+            sibling; sibling = sibling->next_sibling) {
+        if (!line_node_is_ignorable(sibling)) return sibling;
+    }
+    return nullptr;
+}
+
+static DomBoundary normalize_line_forward_anchor(DomBoundary anchor) {
+    if (!anchor.node || !anchor.node->is_element()) return anchor;
+    DomElement* elem = anchor.node->as_element();
+    uint32_t offset = anchor.offset;
+    while (true) {
+        DomNode* child = child_at_offset(elem, offset);
+        if (!child || !child->is_text() || !text_is_ws_only(child->as_text())) break;
+        offset++;
+    }
+    anchor.offset = offset;
+    return anchor;
+}
+
+static void collect_inline_br_line_stops(DomElement* elem,
+                                         DomLineStopList* list) {
+    if (!elem || !list) return;
+    line_stop_append(list, DomBoundary{
+        static_cast<DomNode*>(elem),
+        first_visible_child_offset(elem)
+    });
+    uint32_t offset = 0;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (node_is_br(child)) {
+            line_stop_append(list, DomBoundary{
+                static_cast<DomNode*>(elem),
+                offset + 1
+            });
+        } else if (child->is_element() &&
+                element_has_br_descendant(child->as_element())) {
+            collect_inline_br_line_stops(child->as_element(), list);
+        }
+        offset++;
+    }
+}
+
+static bool collect_first_cell_line_stop(DomElement* cell,
+                                         DomElement* host,
+                                         DomLineStopList* list) {
+    if (!cell || !list) return false;
+    DomText* first = first_modify_text_in(static_cast<DomNode*>(cell), host);
+    if (first) {
+        uint32_t off = text_is_space_or_nbsp_only(first)
+            ? dom_text_utf16_length(first) : 0;
+        return line_stop_append(list, DomBoundary{
+            static_cast<DomNode*>(first),
+            off
+        });
+    }
+    uint32_t offset = first_visible_child_offset(cell);
+    DomNode* child = child_at_offset(cell, offset);
+    if (child && node_is_visible_line_control(child)) {
+        return line_stop_append(list, DomBoundary{
+            static_cast<DomNode*>(cell),
+            offset
+        });
+    }
+    return false;
+}
+
+static void collect_table_cell_line_stops(DomElement* cell,
+                                          DomElement* host,
+                                          DomLineStopList* list) {
+    if (!cell || !list) return;
+    bool added_first = false;
+    uint32_t offset = 0;
+    for (DomNode* child = cell->first_child; child; child = child->next_sibling) {
+        if (line_node_is_ignorable(child)) {
+            offset++;
+            continue;
+        }
+        if (child->is_element() && element_has_br_descendant(child->as_element())) {
+            collect_inline_br_line_stops(child->as_element(), list);
+            added_first = true;
+        } else if (node_is_visible_line_control(child) && !added_first) {
+            line_stop_append(list, DomBoundary{
+                static_cast<DomNode*>(cell),
+                offset
+            });
+            added_first = true;
+        } else if (node_is_br(child)) {
+            line_stop_append(list, DomBoundary{
+                static_cast<DomNode*>(cell),
+                offset + 1
+            });
+            added_first = true;
+        } else if (!added_first) {
+            added_first = collect_first_cell_line_stop(cell, host, list);
+        }
+        offset++;
+    }
+    if (!added_first) collect_first_cell_line_stop(cell, host, list);
+}
+
+static void collect_table_row_line_stops(DomElement* row,
+                                         DomElement* host,
+                                         DomLineStopList* list) {
+    if (!row || !list) return;
+    for (DomNode* child = row->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* elem = child->as_element();
+        if (element_tag_is(elem, "td") || element_tag_is(elem, "th")) {
+            collect_table_cell_line_stops(elem, host, list);
+        } else {
+            collect_table_row_line_stops(elem, host, list);
+        }
+    }
+}
+
+static void collect_table_line_stops(DomElement* table,
+                                     DomElement* host,
+                                     DomLineStopList* list) {
+    if (!table || !list) return;
+    for (DomNode* child = table->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* elem = child->as_element();
+        if (element_tag_is(elem, "tr")) {
+            collect_table_row_line_stops(elem, host, list);
+        } else {
+            collect_table_line_stops(elem, host, list);
+        }
+    }
+}
+
+static void collect_host_line_stops(DomElement* root,
+                                    DomElement* host,
+                                    DomLineStopList* list) {
+    if (!root || !list) return;
+    uint32_t offset = 0;
+    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
+        if (line_node_is_ignorable(child)) {
+            offset++;
+            continue;
+        }
+        if (child->is_element() && element_tag_is(child->as_element(), "table")) {
+            collect_table_line_stops(child->as_element(), host, list);
+            DomNode* next = next_non_ignorable_sibling(child);
+            if (!node_tag_is(next, "table")) {
+                line_stop_append(list, DomBoundary{
+                    static_cast<DomNode*>(root),
+                    offset + 1
+                });
+            }
+        } else if (node_is_br(child)) {
+            line_stop_append(list, DomBoundary{
+                static_cast<DomNode*>(root),
+                offset + 1
+            });
+        } else if (child->is_element() &&
+                element_has_br_descendant(child->as_element())) {
+            collect_inline_br_line_stops(child->as_element(), list);
+        } else if (child->is_element()) {
+            DomText* last = last_modify_text_in(child, host);
+            if (last) {
+                line_stop_append(list, DomBoundary{
+                    static_cast<DomNode*>(last),
+                    dom_text_utf16_length(last)
+                });
+            } else {
+                line_stop_append(list, DomBoundary{
+                    static_cast<DomNode*>(root),
+                    offset
+                });
+            }
+        } else if (child->is_text()) {
+            DomText* text = child->as_text();
+            line_stop_append(list, DomBoundary{
+                static_cast<DomNode*>(text),
+                text_is_space_or_nbsp_only(text) ? dom_text_utf16_length(text) : 0
+            });
+        }
+        offset++;
+    }
+}
+
+static bool line_stop_list_move(DomBoundary focus,
+                                DomElement* host,
+                                int dir,
+                                DomBoundary* out) {
+    if (!focus.node || !out) return false;
+    DomElement* root = host;
+    if (!root) {
+        DomNode* doc_root = root_of(focus.node);
+        root = doc_root && doc_root->is_element() ? doc_root->as_element() : nullptr;
+    }
+    if (!root) return false;
+
+    DomLineStopList list;
+    memset(&list, 0, sizeof(list));
+    collect_host_line_stops(root, host, &list);
+    if (list.count == 0) return false;
+
+    int32_t exact = -1;
+    int32_t previous = -1;
+    int32_t next = -1;
+    for (uint32_t i = 0; i < list.count; i++) {
+        DomBoundary stop = list.stops[i].boundary;
+        if (line_stop_same(stop, focus)) {
+            exact = (int32_t)i;
+            break;
+        }
+        DomBoundaryOrder order = dom_boundary_compare(&stop, &focus);
+        if (order == DOM_BOUNDARY_BEFORE) previous = (int32_t)i;
+        else if (order == DOM_BOUNDARY_AFTER && next < 0) next = (int32_t)i;
+    }
+
+    int32_t target = -1;
+    if (exact >= 0) {
+        target = dir > 0 ? exact + 1 : exact - 1;
+    } else {
+        target = dir > 0 ? next : previous;
+    }
+    if (target < 0 || (uint32_t)target >= list.count) {
+        *out = focus;
+        return true;
+    }
+    *out = list.stops[target].boundary;
+    return true;
 }
 
 DomBoundary dom_boundary_move(DomBoundary b, DomModGranularity gran, int32_t count) {
@@ -3356,6 +4286,7 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
     // Parse granularity
     DomModGranularity gran;
     bool line_like = false;
+    bool sentence_like = false;
     bool line_boundary_like = false;
     bool paragraph_like = false;     // "paragraph" — jump past current block
     bool paragraph_boundary = false; // "paragraphboundary" — go to start/end of current block
@@ -3370,7 +4301,7 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
         paragraph_boundary = true;
         gran = DOM_MOD_CHARACTER;
     }
-    else if (strieq(granularity, "line") || strieq(granularity, "sentence")) {
+    else if (strieq(granularity, "line")) {
         // Without a real layout-aware iterator we approximate line/paragraph
         // motion by stepping to the previous/next text node in document order
         // and clamping the offset to that text node's length. This is enough
@@ -3378,6 +4309,10 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
         // text node corresponds to a single visual line.
         line_like = true;
         gran = DOM_MOD_CHARACTER;  // unused when line_like is true
+    }
+    else if (strieq(granularity, "sentence")) {
+        sentence_like = true;
+        gran = DOM_MOD_CHARACTER;
     }
     else if (strieq(granularity, "lineboundary") ||
              strieq(granularity, "sentenceboundary")) {
@@ -3391,7 +4326,23 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
     DomBoundary anchor = dom_selection_anchor_boundary(s);
     DomBoundary focus = dom_selection_focus_boundary(s);
     bool word_like = gran == DOM_MOD_WORD && !line_like &&
-        !line_boundary_like && !paragraph_like && !paragraph_boundary;
+        !sentence_like && !line_boundary_like && !paragraph_like &&
+        !paragraph_boundary;
+    bool left = direction && strieq(direction, "left");
+    bool right = direction && strieq(direction, "right");
+    int actual_dir = dir;
+    if (!extend && !dom_range_collapsed(r) && (left || right) &&
+            gran == DOM_MOD_CHARACTER && !line_like && !sentence_like &&
+            !line_boundary_like && !paragraph_like && !paragraph_boundary) {
+        int strong = range_first_strong_direction(r);
+        bool rtl = strong != 0 ? strong > 0 : effective_dir_is_rtl(r->start.node);
+        bool to_end = (right && !rtl) || (left && rtl);
+        DomBoundary edge = to_end ? r->end : r->start;
+        const char* exc = nullptr;
+        dom_selection_collapse(s, edge.node, edge.offset, &exc);
+        if (exc) { if (out_exception) *out_exception = exc; return false; }
+        return true;
+    }
     DomBoundary new_focus;
     if (paragraph_boundary) {
         // Move to the start (backward) or end (forward) of the nearest
@@ -3444,12 +4395,48 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
             }
             new_focus = subtree_edge_boundary(root, edge_dir, nullptr);
         }
+    } else if (sentence_like) {
+        DomText* tx = focus.node && focus.node->is_text()
+            ? focus.node->as_text() : nullptr;
+        DomElement* host = editing_host_of(focus.node);
+        if (tx) {
+            uint32_t len = dom_text_utf16_length(tx);
+            if (dir > 0) {
+                if (focus.offset < len) {
+                    new_focus = DomBoundary{ static_cast<DomNode*>(tx), len };
+                } else {
+                    DomText* next = next_modify_text_after(
+                        static_cast<DomNode*>(tx), host);
+                    new_focus = next ? DomBoundary{ static_cast<DomNode*>(next), 0 }
+                                     : focus;
+                }
+            } else {
+                if (focus.offset > 0) {
+                    new_focus = DomBoundary{ static_cast<DomNode*>(tx), 0 };
+                } else {
+                    DomText* prev = prev_modify_text_before(
+                        static_cast<DomNode*>(tx), host);
+                    new_focus = prev ? DomBoundary{
+                            static_cast<DomNode*>(prev),
+                            dom_text_utf16_length(prev) } : focus;
+                }
+            }
+        } else {
+            new_focus = focus;
+        }
     } else if (line_like) {
         DomNode* base = focus.node;
         DomText* tx = nullptr;
         if (base && base->is_text()) tx = base->as_text();
         DomText* target = nullptr;
-        if (tx) {
+        DomElement* host = editing_host_of(focus.node);
+        DomBoundary structural_line = { nullptr, 0 };
+        if (extend && dir > 0) {
+            anchor = normalize_line_forward_anchor(anchor);
+        }
+        if (line_stop_list_move(focus, host, dir, &structural_line)) {
+            new_focus = structural_line;
+        } else if (tx) {
             // Walk past whitespace-only text nodes (typical between block-level
             // siblings) so the visual "line" we land on contains real text.
             DomText* it = tx;
@@ -3470,23 +4457,75 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
                 }
                 if (!ws_only) { target = it; break; }
             }
-        }
-        if (target) {
-            uint32_t tlen = dom_text_utf16_length(target);
-            uint32_t off = focus.offset > tlen ? tlen : focus.offset;
-            new_focus = DomBoundary{ static_cast<DomNode*>(target), off };
         } else {
             new_focus = focus;
         }
+        if (!structural_line.node && target) {
+            uint32_t tlen = dom_text_utf16_length(target);
+            uint32_t off = focus.offset > tlen ? tlen : focus.offset;
+            new_focus = DomBoundary{ static_cast<DomNode*>(target), off };
+        } else if (!structural_line.node && tx) {
+            new_focus = move_within_text_by_soft_line(tx, focus.offset, dir);
+        }
     } else if (gran == DOM_MOD_CHARACTER) {
-        new_focus = extend ? extend_one_visible_char(focus, dir)
-                           : move_one_visible_char(focus, dir);
+        int move_dir = dir;
+        if (left || right) move_dir = visual_direction_to_logical_dir(focus, right);
+        actual_dir = move_dir;
+        DomBoundary visual_edge = { nullptr, 0 };
+        DomBoundary visual_anchor = { nullptr, 0 };
+        DomElement* host = editing_host_of(focus.node);
+        if ((left || right) &&
+                visual_cross_run_boundary(focus, move_dir, host,
+                    &visual_edge, extend ? &visual_anchor : nullptr)) {
+            new_focus = visual_edge;
+            if (extend && visual_anchor.node) anchor = visual_anchor;
+        } else {
+            new_focus = extend ? extend_one_visible_char(focus, move_dir)
+                               : move_one_visible_char(focus, move_dir);
+        }
+    } else if (gran == DOM_MOD_WORD && (left || right)) {
+        int move_dir = visual_direction_to_logical_dir(focus, right);
+        actual_dir = move_dir;
+        DomBoundary visual_edge = { nullptr, 0 };
+        DomBoundary visual_anchor = { nullptr, 0 };
+        DomElement* host = editing_host_of(focus.node);
+        if (visual_cross_run_boundary(focus, move_dir, host,
+                &visual_edge, extend ? &visual_anchor : nullptr)) {
+            new_focus = visual_edge;
+            if (extend && visual_anchor.node) anchor = visual_anchor;
+        } else {
+            new_focus = move_one_word(focus, move_dir);
+        }
+        if (extend && left && state_store_editing_behavior_is_windows(s->state)) {
+            new_focus = windows_extend_rtl_word_left_focus(focus, new_focus,
+                                                           host);
+        }
     } else {
         new_focus = dom_boundary_move(focus, gran, dir);
     }
 
     if (extend) {
-        if (word_like && dir > 0) {
+        DomElement* all_elem = nullptr;
+        DomBoundary all_start = { nullptr, 0 };
+        DomBoundary all_end = { nullptr, 0 };
+        if (user_select_all_range_for_node_internal(focus.node, &all_elem,
+                &all_start, &all_end) &&
+                boundary_between_inclusive(focus, all_start, all_end)) {
+            if (actual_dir > 0 && !same_boundary(focus, all_end)) {
+                anchor = all_start;
+                new_focus = all_end;
+            } else if (actual_dir < 0 && same_boundary(anchor, all_start) &&
+                    same_boundary(focus, all_end) && all_elem) {
+                DomBoundary before_all =
+                    boundary_before_node(static_cast<DomNode*>(all_elem));
+                anchor = before_all;
+                new_focus = before_all;
+            } else if (actual_dir < 0 && !same_boundary(focus, all_start)) {
+                anchor = all_end;
+                new_focus = all_start;
+            }
+        }
+        if (word_like && actual_dir > 0) {
             anchor = normalize_forward_word_anchor(anchor);
         }
         const char* exc = nullptr;

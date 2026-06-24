@@ -903,6 +903,7 @@ DocState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     state->lifecycle = DOC_LIFECYCLE_UNINITIALIZED;
     state->version = 1;
     state->zoom_level = 1.0f;
+    state->editing_behavior = EDITING_BEHAVIOR_MAC;
 
     // Create dedicated arena for state allocations
     state->arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "state.arena");
@@ -1029,12 +1030,49 @@ DocState* state_store_doc_state(StateStore* store) {
 
 static uint32_t view_state_detach_node(DocState* state, DomNode* node);
 
+static void state_store_detach_selection_for_unload(DocState* state) {
+    if (!state) return;
+
+    DomSelection* ds = state->dom_selection;
+    if (ds) {
+        while (ds->range_count > 0) {
+            DomRange* r = ds->ranges[--ds->range_count];
+            ds->ranges[ds->range_count] = NULL;
+            dom_range_release(r);
+        }
+        ds->associated_doc_root = NULL;
+        ds->direction = DOM_SEL_DIR_NONE;
+    }
+
+    state_store_note_selection_mutation(state);
+    state_store_refresh_editing_selection_shadow(state);
+    state->selection_projection_seq = state->selection_mutation_seq;
+    state->selection_event_seq = state->selection_mutation_seq;
+    state->selectionchange_pending = false;
+    state->selection_layout_dirty = false;
+    state->tc_selectionchange_head = NULL;
+    state->tc_selectionchange_drain_scheduled = false;
+    state->active_text_control = NULL;
+    state->last_focused_text_control = NULL;
+
+    if (state->selection) {
+        memset(state->selection, 0, sizeof(*state->selection));
+        state->selection->is_collapsed = true;
+    }
+    if (state->caret) {
+        memset(state->caret, 0, sizeof(*state->caret));
+        state->caret->visible = false;
+    }
+    selection_finish_active_gesture(state);
+}
+
 void state_store_destroy(DomDocument* document) {
     if (!document) return;
     StateStore* store = document->state_store;
     DocState* state = store ? store->doc_state : document->state;
     if (state) {
         state_begin_batch(state);
+        state_store_detach_selection_for_unload(state);
         doc_state_set_hover_target(state, NULL);
         doc_state_set_active_target(state, NULL);
         focus_clear(state);
@@ -1292,6 +1330,28 @@ extern "C" bool state_store_modify_selection(DocState* state,
 
     return dom_selection_modify(selection, alter, direction, granularity,
                                 out_exception);
+}
+
+extern "C" void state_store_set_editing_behavior(DocState* state,
+                                                  const char* behavior) {
+    if (!state) return;
+    if (!behavior || behavior[0] == '\0' || strcasecmp(behavior, "mac") == 0) {
+        state->editing_behavior = EDITING_BEHAVIOR_MAC;
+    } else if (strcasecmp(behavior, "win") == 0 ||
+            strcasecmp(behavior, "windows") == 0) {
+        state->editing_behavior = EDITING_BEHAVIOR_WIN;
+    } else if (strcasecmp(behavior, "unix") == 0 ||
+            strcasecmp(behavior, "linux") == 0) {
+        state->editing_behavior = EDITING_BEHAVIOR_UNIX;
+    } else if (strcasecmp(behavior, "android") == 0) {
+        state->editing_behavior = EDITING_BEHAVIOR_ANDROID;
+    } else {
+        state->editing_behavior = EDITING_BEHAVIOR_MAC;
+    }
+}
+
+extern "C" bool state_store_editing_behavior_is_windows(DocState* state) {
+    return state && state->editing_behavior == EDITING_BEHAVIOR_WIN;
 }
 
 static bool selection_boundary_is_text_control(const DomBoundary* boundary) {
@@ -1838,9 +1898,6 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
         return;
     }
 
-    bool seq_current = state->selection_projection_seq == state->selection_mutation_seq;
-    if (seq_current && !state->selection_layout_dirty) return;
-
     state_store_refresh_editing_selection_shadow(state);
     DomSelection* ds = state->dom_selection;
     if (!ds) return;
@@ -1917,19 +1974,9 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
 
     {
         CaretState* caret = state->caret;
-        // A collapsed DOM Selection can project its focus onto a non-editable
-        // element (e.g. <body> via Selection.collapse). Such a position has no
-        // rendered insertion point, so the legacy caret must not be marked
-        // visible there — a visible caret is only valid inside editable content
-        // (a text control, or a text node within editable flow). Marking it
-        // visible on a non-text-control element violates the DocState
-        // interaction invariant ("visible element caret target is not editable").
-        bool caret_can_render = !foc_view ||
-            !foc_view->is_element() ||
-            tc_is_text_control(lam::dom_require_element(foc_view));
         caret->view        = foc_view;
         caret->char_offset = foc_off;
-        caret->visible     = dom_collapsed && caret_can_render;
+        caret->visible     = false;
         caret->blink_time  = 0;
 
         // Resolve layout cache (x/y/height) via the resolver. Best-effort:
@@ -1944,7 +1991,20 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
                 bool focus_at_end = (ds->direction != DOM_SEL_DIR_BACKWARD);
                 float abs_x = focus_at_end ? r->end_x : r->start_x;
                 float abs_y = focus_at_end ? r->end_y : r->start_y;
-                caret_local_from_absolute(foc_view, abs_x, abs_y,
+                View* resolved_caret_view = focus_at_end
+                    ? static_cast<View*>(r->end_view)
+                    : static_cast<View*>(r->start_view);
+                int resolved_caret_offset = focus_at_end
+                    ? r->end_byte_offset : r->start_byte_offset;
+                if (dom_collapsed && resolved_caret_view) {
+                    caret->view = resolved_caret_view;
+                    caret->char_offset = resolved_caret_offset;
+                }
+                bool caret_can_render = !caret->view ||
+                    !caret->view->is_element() ||
+                    tc_is_text_control(lam::dom_require_element(caret->view));
+                caret->visible = dom_collapsed && caret_can_render;
+                caret_local_from_absolute(caret->view, abs_x, abs_y,
                                           &caret->x, &caret->y);
                 caret->height = focus_at_end ? r->end_height : r->start_height;
                 // Mirror into selection start/end for legacy renderer.
@@ -3798,9 +3858,14 @@ bool state_has(DocState* state, void* node, const char* name) {
 
 static bool s_in_batch = false;
 
+static void state_sync_selection_before_assert(DocState* state);
+static void state_sync_dirty_flags_before_assert(DocState* state);
+
 static void state_assert_after_mutation(DocState* state, const char* context) {
     if (!state) return;
     if (state->transition_depth > 0 || state->active_cascade_depth > 0 || s_in_batch) return;
+    state_sync_selection_before_assert(state);
+    state_sync_dirty_flags_before_assert(state);
     radiant_state_assert_valid(state, context);
 }
 
@@ -6562,9 +6627,23 @@ void selection_project_focus_visual(DocState* state, float x, float y, float hei
     state->needs_repaint = true;
 }
 
+void selection_begin_non_pointer_extend(DocState* state, View* view, int offset) {
+    if (!state || !view) return;
+    if (!selection_has(state)) {
+        state_store_legacy_selection_set(state, view, offset, offset);
+    }
+    if (state->selection) {
+        state->selection->is_selecting = true;
+    }
+    state->editing.pointer_selecting = false;
+    state->editing.drag_anchor_view = NULL;
+    state->editing.drag_anchor_offset = 0;
+    state->editing.drag_mode = EDITING_DRAG_CHAR;
+}
+
 void selection_finish_active_gesture(DocState* state) {
-    if (!state || !state->selection) return;
-    state->selection->is_selecting = false;
+    if (!state) return;
+    if (state->selection) state->selection->is_selecting = false;
     state->editing.pointer_selecting = false;
     state->editing.drag_anchor_view = NULL;
     state->editing.drag_anchor_offset = 0;

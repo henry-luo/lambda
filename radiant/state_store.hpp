@@ -195,6 +195,13 @@ typedef struct SelectionState SelectionState;
 typedef struct FocusState FocusState;
 typedef struct RetainedDisplayListCache RetainedDisplayListCache;
 
+typedef enum EditingBehavior {
+    EDITING_BEHAVIOR_MAC = 0,
+    EDITING_BEHAVIOR_WIN,
+    EDITING_BEHAVIOR_UNIX,
+    EDITING_BEHAVIOR_ANDROID
+} EditingBehavior;
+
 /**
  * Mouse cursor state
  */
@@ -379,6 +386,7 @@ typedef struct DocState {
     bool                 tc_selectionchange_drain_scheduled;
     DomElement*          active_text_control;
     DomElement*          last_focused_text_control;
+    EditingBehavior      editing_behavior;
     FocusState* focus;             // focus state with navigation info
     CursorState* cursor;           // mouse cursor state
     View* hover_target;            // currently hovered element
@@ -647,6 +655,8 @@ bool state_store_modify_selection(DocState* state,
                                   const char** out_exception);
 bool state_store_delete_selection_from_document(DocState* state,
                                                 const char** out_exception);
+void state_store_set_editing_behavior(DocState* state, const char* behavior);
+bool state_store_editing_behavior_is_windows(DocState* state);
 void state_store_set_text_control_selection(DocState* state,
                                             DomElement* control,
                                             uint32_t start_u16,
@@ -729,6 +739,7 @@ void caret_project_visual_from_selection(DocState* state, float x, float y, floa
  */
 void selection_project_anchor_visual_from_caret(DocState* state, float x, float y, float height);
 void selection_project_focus_visual(DocState* state, float x, float y, float height);
+void selection_begin_non_pointer_extend(DocState* state, View* view, int offset);
 void selection_finish_active_gesture(DocState* state);
 
 /**

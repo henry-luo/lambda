@@ -296,6 +296,8 @@ struct DomElement : DomNode {
     bool float_prelaid;          // Flag to skip float during normal flow (pre-laid in float pass)
     // document reference (provides Arena and Input*)
     DomDocument* doc;            // Parent document (provides arena and input)
+    DomElement* shadow_host;     // Non-null when this document fragment is a shadow root
+    DomElement* shadow_root;     // Non-null when this element hosts a shadow root
 
     // CSS custom properties (CSS variables)
     struct CssCustomProp* css_variables;  // Hashmap of --var-name: value
@@ -363,6 +365,10 @@ struct DomElement : DomNode {
     float content_width, content_height;  // width and height of the child content including padding
     BlockProp* blk;  // block specific style properties
     ScrollProp* scroller;  // handles overflow
+    float pending_element_scroll_x;
+    float pending_element_scroll_y;
+    bool has_pending_element_scroll_x;
+    bool has_pending_element_scroll_y;
     // block content related properties for flexbox, image, iframe
     EmbedProp* embed;
     // positioning properties for CSS positioning
@@ -400,7 +406,7 @@ struct DomElement : DomNode {
         before_styles(nullptr), after_styles(nullptr), first_letter_styles(nullptr),
         marker_styles(nullptr), placeholder_styles(nullptr),
         style_version(0), needs_style_recompute(false), styles_resolved(false), float_prelaid(false),
-        doc(nullptr), css_variables(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE},
+        doc(nullptr), shadow_host(nullptr), shadow_root(nullptr), css_variables(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE},
         font(nullptr), bound(nullptr), in_line(nullptr),
         has_inline_fragment_union(false),
         inline_fragment_min_x(0), inline_fragment_max_x(0),
@@ -416,7 +422,10 @@ struct DomElement : DomNode {
         split_inline_fragment_min_y(0), split_inline_fragment_max_y(0),
         item_prop_type(ITEM_PROP_NONE), fi(nullptr),
         content_width(0), content_height(0),
-        blk(nullptr), scroller(nullptr), embed(nullptr), position(nullptr),
+        blk(nullptr), scroller(nullptr),
+        pending_element_scroll_x(0), pending_element_scroll_y(0),
+        has_pending_element_scroll_x(false), has_pending_element_scroll_y(false),
+        embed(nullptr), position(nullptr),
         transform(nullptr), filter(nullptr), backdrop_filter(nullptr), multicol(nullptr),
         layout_fragments(nullptr), layout_fragment_count(0), pseudo(nullptr),
         vpath(nullptr), layout_cache(nullptr),

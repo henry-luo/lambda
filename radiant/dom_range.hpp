@@ -262,6 +262,25 @@ bool dom_selection_set_base_and_extent(DomSelection* s,
 bool dom_selection_select_all_children(DomSelection* s, DomNode* node, const char** out_exception);
 bool dom_selection_contains_node(const DomSelection* s, DomNode* node, bool allow_partial);
 
+// Browser-style selectAll boundary discovery used by editing commands.
+// Trims whitespace-only edge text, skips non-selectable subtrees, and treats
+// rendered atomic nodes such as <br> and <table> as selectable edge stops.
+bool dom_selection_compute_select_all_boundaries(DomNode* root,
+                                                 DomBoundary* out_start,
+                                                 DomBoundary* out_end);
+
+// If `node` is inside an effective user-select: all subtree, returns the
+// selectable content range for the nearest such element.
+bool dom_selection_user_select_all_range_for_node(DomNode* node,
+                                                  DomBoundary* out_start,
+                                                  DomBoundary* out_end);
+
+// Browser-style triple-click range discovery for rich editable content.
+// For table cells, the range is constrained to the hit cell's selectable text.
+bool dom_selection_triple_click_range_for_node(DomNode* node,
+                                               DomBoundary* out_start,
+                                               DomBoundary* out_end);
+
 // ============================================================================
 // Live-range list management (called by mutation hooks; minimal stubs in
 // Phase 1 — full implementation in a later phase).

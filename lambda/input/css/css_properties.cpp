@@ -346,6 +346,7 @@ static CssProperty property_definitions[] = {
     // User Interface Properties
     {CSS_PROPERTY_RESIZE, "resize", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_CARET_COLOR, "caret-color", PROP_TYPE_COLOR, PROP_INHERIT_YES, "auto", true, false, NULL, 0, validate_color, NULL},
+    {CSS_PROPERTY_CARET_SHAPE, "caret-shape", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_NAV_INDEX, "nav-index", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_integer, NULL},
     {CSS_PROPERTY_NAV_UP, "nav-up", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_NAV_RIGHT, "nav-right", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},

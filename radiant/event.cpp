@@ -2353,12 +2353,12 @@ static bool dispatch_rich_select_all_default(EventContext* evcon,
 
     const char* exc = nullptr;
     DomNode* owner_node = static_cast<DomNode*>(owner);
-    uint32_t child_count = 0;
-    for (DomNode* child = owner->first_child; child; child = child->next_sibling) {
-        child_count++;
+    DomBoundary start;
+    DomBoundary end;
+    if (!dom_selection_compute_select_all_boundaries(owner_node, &start, &end)) {
+        start = { owner_node, 0 };
+        end = { owner_node, dom_node_boundary_length(owner_node) };
     }
-    DomBoundary start = { owner_node, 0 };
-    DomBoundary end = { owner_node, child_count };
     if (!state_store_set_selection(state, &start, &end, &exc)) {
         log_debug("dispatch_rich_select_all_default: rejected: %s",
                   exc ? exc : "?");

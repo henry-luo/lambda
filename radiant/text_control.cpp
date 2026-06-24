@@ -175,12 +175,42 @@ static char* tc_initial_value(DomElement* elem, uint32_t* out_len) {
     return out;
 }
 
+static void tc_materialize_current_value(DomElement* elem, FormControlProp* f) {
+    if (!elem || !f || f->current_value) return;
+    uint32_t len = 0;
+    f->current_value = tc_initial_value(elem, &len);
+    f->current_value_len = len;
+    f->current_value_u16_len = tc_utf8_to_utf16_length(f->current_value, len);
+    f->value = f->current_value;
+}
+
+static void tc_clamp_selection_to_current_value(FormControlProp* f) {
+    if (!f) return;
+    if (f->selection_start > f->current_value_u16_len) {
+        f->selection_start = f->current_value_u16_len;
+    }
+    if (f->selection_end > f->current_value_u16_len) {
+        f->selection_end = f->current_value_u16_len;
+    }
+    if (f->selection_end < f->selection_start) {
+        f->selection_end = f->selection_start;
+    }
+    if (f->selection_direction > 2) f->selection_direction = 0;
+}
+
 // ---- public: lazy init + writes ----------------------------------------
 
 void tc_ensure_init(DomElement* elem) {
     if (!tc_is_text_control(elem)) return;
     FormControlProp* f = tc_get_or_create_form(elem);
-    if (f->tc_initialized) return;
+    if (f->tc_initialized) {
+        tc_materialize_current_value(elem, f);
+        tc_clamp_selection_to_current_value(f);
+        if (!f->value || f->value != f->current_value) {
+            f->value = f->current_value;
+        }
+        return;
+    }
     DocState* state = f->state_ref
         ? f->state_ref
         : (elem && elem->doc ? (DocState*)elem->doc->state : nullptr);
@@ -188,10 +218,7 @@ void tc_ensure_init(DomElement* elem) {
     bool restored = form_control_restore_text_control_state(state, (View*)elem);
     if (!restored) {
         if (!f->current_value) {
-            uint32_t len = 0;
-            f->current_value = tc_initial_value(elem, &len);
-            f->current_value_len = len;
-            f->current_value_u16_len = tc_utf8_to_utf16_length(f->current_value, len);
+            tc_materialize_current_value(elem, f);
         } else {
             f->current_value_u16_len = tc_utf8_to_utf16_length(
                 f->current_value, f->current_value_len);

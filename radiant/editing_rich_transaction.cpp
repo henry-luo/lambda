@@ -2504,8 +2504,12 @@ bool editing_rich_default_select_all(DocState* state,
     }
 
     DomNode* owner_node = static_cast<DomNode*>(surface->owner);
-    DomBoundary start = { owner_node, 0 };
-    DomBoundary end = { owner_node, dom_node_boundary_length(owner_node) };
+    DomBoundary start;
+    DomBoundary end;
+    if (!dom_selection_compute_select_all_boundaries(owner_node, &start, &end)) {
+        start = { owner_node, 0 };
+        end = { owner_node, dom_node_boundary_length(owner_node) };
+    }
     const char* exc = nullptr;
     if (!state_store_set_selection(state, &start, &end, &exc)) {
         log_debug("editing_rich_default_select_all: selection rejected: %s",
@@ -2518,8 +2522,7 @@ bool editing_rich_default_select_all(DocState* state,
         log_mutation(state, surface, intent, "selectAll",
                      0, 0, start.offset, end.offset, log_user);
     }
-    log_debug("editing_rich_default_select_all: selected %u children",
-              end.offset);
+    log_debug("editing_rich_default_select_all: selected native boundaries");
     return true;
 }
 
