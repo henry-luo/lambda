@@ -290,6 +290,12 @@ typedef enum SysFunc {
     SYSFUNC_RESHAPE,          // reshape(arr, shape_list) - view with new shape
     SYSFUNC_SHAPE,            // shape(arr) - list of dimensions
     SYSFUNC_NDIM,             // ndim(arr) - number of dimensions
+    SYSFUNC_SUM2,             // sum(arr, axis) - reduce along axis
+    SYSFUNC_AVG2,             // avg(arr, axis) - mean along axis
+    SYSFUNC_PROD2,            // math.prod(arr, axis)
+    SYSFUNC_MEAN2,            // math.mean(arr, axis)
+    SYSFUNC_CUMSUM2,          // math.cumsum(arr, axis)
+    SYSFUNC_CUMPROD2,         // math.cumprod(arr, axis)
     SYSFUNC_TRANSPOSE,        // transpose(arr) - view with reversed axes (zero-copy)
     SYSFUNC_FLATTEN,          // flatten(arr) - owned 1-D contiguous copy
     SYSFUNC_RAVEL,            // ravel(arr) - 1-D view if contiguous, else copy
@@ -1478,6 +1484,24 @@ extern "C" {
     Item fn_url_resolve(Item base, Item relative);
     Item fn_split(Item str, Item sep);
     Item fn_split3(Item str, Item sep, Item keep_delim);
+    Item fn_array_split(Item arr, int64_t n, int64_t axis);  // split typed array into n parts along axis
+    // axis-aware reductions (2-arg): collapse `axis` of a typed N-D array
+    Item fn_sum_axis(Item arr, Item axis);
+    Item fn_avg_axis(Item arr, Item axis);
+    Item fn_prod_axis(Item arr, Item axis);
+    Item fn_cumsum_axis(Item arr, Item axis);    // running sum along axis (no collapse)
+    Item fn_cumprod_axis(Item arr, Item axis);   // running product along axis (no collapse)
+    Item fn_min_axis(Item arr, Item axis);       // min along axis (via min(arr, axis) / min(arr, axis:N))
+    Item fn_max_axis(Item arr, Item axis);       // max along axis
+    Item fn_mask_index(Item arr, Item mask);     // arr[mask] — boolean mask selection
+    Item vec_cmp(Item a, Item b, int op);        // vectorized a OP b → ELEM_BOOL mask (op = operator-OPERATOR_EQ)
+    // overload wrappers (the sysfunc dispatcher resolves fn_<name><argcount>)
+    Item fn_sum1(Item arr);            Item fn_sum2(Item arr, Item axis);
+    Item fn_avg1(Item arr);            Item fn_avg2(Item arr, Item axis);
+    Item fn_math_prod1(Item arr);      Item fn_math_prod2(Item arr, Item axis);
+    Item fn_math_mean1(Item arr);      Item fn_math_mean2(Item arr, Item axis);
+    Item fn_math_cumsum1(Item arr);    Item fn_math_cumsum2(Item arr, Item axis);
+    Item fn_math_cumprod1(Item arr);   Item fn_math_cumprod2(Item arr, Item axis);
     Item fn_split2(Item str, Item sep);  // overloaded alias for fn_split
     int64_t fn_ord(Item str);           // ord(str) - Unicode code point of first character
     int64_t fn_ord_str(String* str);    // native String* variant

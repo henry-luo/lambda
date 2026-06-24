@@ -523,6 +523,72 @@ static Item vec_broadcast_op(ArrayNum* a, ArrayNum* b, int op) {
     return { .array_num = result };
 }
 
+// ============================================================================
+// Vectorized comparisons: a OP b (a > 0, a == b, …) → ELEM_BOOL mask array.
+// op codes are (operator - OPERATOR_EQ): 0=EQ 1=NE 2=LT 3=LE 4=GT 5=GE.
+// Used to produce boolean masks for arr[mask] indexing.
+// ============================================================================
+static inline bool cmp_apply(double a, double b, int op) {
+    switch (op) {
+        case 0: return a == b;
+        case 1: return a != b;
+        case 2: return a <  b;
+        case 3: return a <= b;
+        case 4: return a >  b;
+        case 5: return a >= b;
+    }
+    return false;
+}
+
+// element-wise comparison of two typed arrays (NumPy broadcast) → ELEM_BOOL array
+static Item vec_cmp_broadcast(ArrayNum* a, ArrayNum* b, int op) {
+    int64_t shp_a[32], str_a[32], shp_b[32], str_b[32];
+    int ndim_a = get_shape_strides(a, shp_a, str_a);
+    int ndim_b = get_shape_strides(b, shp_b, str_b);
+    int64_t out_shp[32], eff_a[32], eff_b[32];
+    int out_ndim = compute_broadcast_shape(ndim_a, shp_a, str_a, ndim_b, shp_b, str_b,
+                                           out_shp, eff_a, eff_b);
+    if (out_ndim < 0) { log_error("vec_cmp: incompatible shapes"); return ItemError; }
+    int64_t total = 1;
+    for (int i = 0; i < out_ndim; i++) total *= out_shp[i];
+    ArrayNum* result = alloc_ndim_arraynum(ELEM_BOOL, out_ndim, out_shp);
+    if (!result) return ItemError;
+    uint8_t* out = (uint8_t*)result->data;
+    int64_t idx[32] = {0};
+    for (int64_t k = 0; k < total; k++) {
+        int64_t oa = 0, ob = 0;
+        for (int ax = 0; ax < out_ndim; ax++) { oa += idx[ax] * eff_a[ax]; ob += idx[ax] * eff_b[ax]; }
+        out[k] = cmp_apply(read_arr_elem_as_double(a, oa), read_arr_elem_as_double(b, ob), op) ? 1 : 0;
+        for (int ax = out_ndim - 1; ax >= 0; ax--) { idx[ax]++; if (idx[ax] < out_shp[ax]) break; idx[ax] = 0; }
+    }
+    return { .array_num = result };
+}
+
+// a OP b where at least one operand is a typed numeric array → bool mask.
+Item vec_cmp(Item a, Item b, int op) {
+    GUARD_ERROR2(a, b);
+    bool a_arr = (get_type_id(a) == LMD_TYPE_ARRAY_NUM);
+    bool b_arr = (get_type_id(b) == LMD_TYPE_ARRAY_NUM);
+    if (a_arr && b_arr) return vec_cmp_broadcast(a.array_num, b.array_num, op);
+    if (a_arr || b_arr) {
+        // array vs scalar: wrap the scalar as a 1-element array and broadcast
+        Item scalar = a_arr ? b : a;
+        TypeId st = get_type_id(scalar);
+        if (!is_scalar_numeric(st)) {
+            log_error("vec_cmp: cannot compare array with non-numeric %s", get_type_name(st));
+            return ItemError;
+        }
+        double sv = item_to_double(scalar);
+        bool sint = (st != LMD_TYPE_FLOAT);
+        ArrayNum* sw = array_num_new(sint ? ELEM_INT64 : ELEM_FLOAT, 1);
+        if (!sw) return ItemError;
+        if (sint) sw->items[0] = (int64_t)sv; else sw->float_items[0] = sv;
+        return a_arr ? vec_cmp_broadcast(a.array_num, sw, op)
+                     : vec_cmp_broadcast(sw, b.array_num, op);
+    }
+    return ItemError;  // neither operand is an array (transpiler should not route here)
+}
+
 // True iff either ArrayNum carries n-d shape metadata.
 static inline bool either_is_ndim(ArrayNum* a, ArrayNum* b) {
     return (a && a->is_ndim) || (b && b->is_ndim);
@@ -3011,6 +3077,362 @@ Item fn_stack(Item a_item, Item b_item) {
     arr_num_copy_into(B, R, A->length);
     return { .array_num = R };
 }
+
+// Extract the slice src[..., axis in [lo, hi), ...] into a new owned C-contiguous
+// ArrayNum.  Walks the output shape in C-order, mapping each position to the
+// source flat offset (handles non-contiguous/strided/transposed sources).
+static ArrayNum* arr_num_slice_axis(ArrayNum* src, int ndim, int64_t* shp, int64_t* str,
+                                    int axis, int64_t lo, int64_t hi) {
+    int64_t out_shape[32];
+    for (int d = 0; d < ndim; d++) out_shape[d] = shp[d];
+    out_shape[axis] = hi - lo;
+    int64_t total = 1;
+    for (int d = 0; d < ndim; d++) total *= out_shape[d];
+
+    ArrayNumElemType et = src->get_elem_type();
+    ArrayNum* result = (ndim >= 2) ? alloc_ndim_arraynum(et, ndim, out_shape)
+                                   : array_num_new(et, out_shape[0]);
+    if (!result || total == 0) return result;
+
+    int elem_size = ELEM_TYPE_SIZE[et >> 4];
+    int64_t idx[32] = {0};
+    int64_t src_off = lo * str[axis];   // bake in the axis offset of the chunk
+    for (int64_t i = 0; i < total; i++) {
+        memcpy((char*)result->data + (size_t)i * elem_size,
+               (char*)src->data + (size_t)src_off * elem_size, elem_size);
+        for (int d = ndim - 1; d >= 0; d--) {
+            idx[d]++; src_off += str[d];
+            if (idx[d] < out_shape[d]) break;
+            idx[d] = 0; src_off -= out_shape[d] * str[d];
+        }
+    }
+    return result;
+}
+
+// split(arr, n, axis) - divide a typed array into n equal sub-arrays along
+// `axis` (axis length must be divisible by n).  Returns a list of n sub-arrays.
+Item fn_array_split(Item arr_item, int64_t n, int64_t axis) {
+    GUARD_ERROR1(arr_item);
+    if (get_type_id(arr_item) != LMD_TYPE_ARRAY_NUM) {
+        log_error("split: expected typed numeric array");
+        return ItemError;
+    }
+    ArrayNum* arr = arr_item.array_num;
+    if (!arr) return ItemError;
+    if (n <= 0) { log_error("split: section count must be positive, got %lld", (long long)n); return ItemError; }
+
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(arr, shp, str);
+    if (axis < 0) axis += ndim;
+    if (axis < 0 || axis >= ndim) {
+        log_error("split: axis %lld out of range for %d-D array", (long long)axis, ndim);
+        return ItemError;
+    }
+    if (shp[axis] % n != 0) {
+        log_error("split: axis %lld length %lld not divisible by %lld sections",
+                  (long long)axis, (long long)shp[axis], (long long)n);
+        return ItemError;
+    }
+    int64_t chunk = shp[axis] / n;
+
+    List* result = list();
+    for (int64_t c = 0; c < n; c++) {
+        ArrayNum* part = arr_num_slice_axis(arr, ndim, shp, str, (int)axis, c * chunk, (c + 1) * chunk);
+        if (!part) return ItemError;
+        list_push(result, (Item){ .array_num = part });
+    }
+    return { .array = result };
+}
+
+// ============================================================================
+// Axis-aware reductions: sum/avg/prod (collapse) and cumsum/cumprod (running).
+// One shared strided "lane" walker drives them all — for each output position
+// (all coords except `axis`), the elements along `axis` form a lane.
+// ============================================================================
+enum ReduceOp { RED_SUM, RED_PROD, RED_MIN, RED_MAX, RED_AVG };
+
+// Reduce one lane: elements at base_off, base_off+stride, … (len of them).
+static double reduce_lane(ArrayNum* arr, int64_t base_off, int64_t stride, int64_t len, int op) {
+    if (len <= 0) return (op == RED_PROD) ? 1.0 : 0.0;
+    double acc = read_arr_elem_as_double(arr, base_off);
+    for (int64_t k = 1; k < len; k++) {
+        double v = read_arr_elem_as_double(arr, base_off + k * stride);
+        switch (op) {
+            case RED_SUM: case RED_AVG: acc += v; break;
+            case RED_PROD:              acc *= v; break;
+            case RED_MIN: if (v < acc)  acc = v;  break;
+            case RED_MAX: if (v > acc)  acc = v;  break;
+        }
+    }
+    if (op == RED_AVG) acc /= (double)len;
+    return acc;
+}
+
+// Read the axis argument as an int64 (returns INT64_MIN sentinel on bad type).
+static int64_t parse_axis(Item axis_item) {
+    TypeId t = get_type_id(axis_item);
+    if (t == LMD_TYPE_INT)   return axis_item.get_int56();
+    if (t == LMD_TYPE_INT64) return axis_item.get_int64();
+    return INT64_MIN;
+}
+
+// Collapse `axis` of a typed array via the reduction op.  Result is an
+// (ndim-1)-D ArrayNum, or a scalar Item when the input is 1-D.
+static Item array_num_reduce_axis(Item arr_item, Item axis_item, int op, const char* name) {
+    GUARD_ERROR1(arr_item);
+    if (get_type_id(arr_item) != LMD_TYPE_ARRAY_NUM) {
+        log_error("%s(arr, axis): axis reduction requires a typed numeric array", name);
+        return ItemError;
+    }
+    int64_t axis = parse_axis(axis_item);
+    if (axis == INT64_MIN) { log_error("%s: axis must be an integer", name); return ItemError; }
+    ArrayNum* arr = arr_item.array_num;
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(arr, shp, str);
+    if (axis < 0) axis += ndim;
+    if (axis < 0 || axis >= ndim) {
+        log_error("%s: axis %lld out of range for %d-D array", name, (long long)axis, ndim);
+        return ItemError;
+    }
+    int64_t axis_len = shp[axis], axis_str = str[axis];
+    bool result_float = !elem_is_int(arr->get_elem_type()) || op == RED_AVG;
+
+    // 1-D input → scalar
+    if (ndim == 1) {
+        double acc = reduce_lane(arr, 0, axis_str, axis_len, op);
+        return result_float ? push_d(acc) : push_l((int64_t)acc);
+    }
+
+    // build output shape and the non-axis dims/strides (same order)
+    int64_t out_shape[32], na_shape[32], na_str[32];
+    int out_ndim = 0;
+    for (int d = 0; d < ndim; d++) {
+        if (d == axis) continue;
+        out_shape[out_ndim] = shp[d];
+        na_shape[out_ndim]  = shp[d];
+        na_str[out_ndim]    = str[d];
+        out_ndim++;
+    }
+    int64_t out_total = 1;
+    for (int d = 0; d < out_ndim; d++) out_total *= out_shape[d];
+
+    ArrayNumElemType ret_et = result_float ? ELEM_FLOAT : ELEM_INT64;
+    ArrayNum* result = (out_ndim >= 2) ? alloc_ndim_arraynum(ret_et, out_ndim, out_shape)
+                                       : array_num_new(ret_et, out_shape[0]);
+    if (!result) return ItemError;
+
+    int64_t idx[32] = {0};
+    int64_t base_off = 0;
+    for (int64_t o = 0; o < out_total; o++) {
+        double acc = reduce_lane(arr, base_off, axis_str, axis_len, op);
+        if (result_float) result->float_items[o] = acc;
+        else              result->items[o] = (int64_t)acc;
+        for (int d = out_ndim - 1; d >= 0; d--) {
+            idx[d]++; base_off += na_str[d];
+            if (idx[d] < na_shape[d]) break;
+            idx[d] = 0; base_off -= na_shape[d] * na_str[d];
+        }
+    }
+    return { .array_num = result };
+}
+
+// Running scan along `axis` (cumsum/cumprod) — same-shape owned result.
+static Item array_num_cumulative_axis(Item arr_item, Item axis_item, bool is_prod, const char* name) {
+    GUARD_ERROR1(arr_item);
+    if (get_type_id(arr_item) != LMD_TYPE_ARRAY_NUM) {
+        log_error("%s(arr, axis): requires a typed numeric array", name);
+        return ItemError;
+    }
+    int64_t axis = parse_axis(axis_item);
+    if (axis == INT64_MIN) { log_error("%s: axis must be an integer", name); return ItemError; }
+    ArrayNum* arr = arr_item.array_num;
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(arr, shp, str);
+    if (axis < 0) axis += ndim;
+    if (axis < 0 || axis >= ndim) {
+        log_error("%s: axis %lld out of range for %d-D array", name, (long long)axis, ndim);
+        return ItemError;
+    }
+    bool result_float = !elem_is_int(arr->get_elem_type());
+    ArrayNumElemType ret_et = result_float ? ELEM_FLOAT : ELEM_INT64;
+
+    // result: same shape, owned C-contiguous
+    int64_t full_shape[32];
+    for (int d = 0; d < ndim; d++) full_shape[d] = shp[d];
+    ArrayNum* result = (ndim >= 2) ? alloc_ndim_arraynum(ret_et, ndim, full_shape)
+                                   : array_num_new(ret_et, shp[0]);
+    if (!result) return ItemError;
+
+    // result C-order strides
+    int64_t res_str[32];
+    { int64_t s = 1; for (int d = ndim - 1; d >= 0; d--) { res_str[d] = s; s *= shp[d]; } }
+
+    int64_t axis_len = shp[axis], src_axis_str = str[axis], res_axis_str = res_str[axis];
+
+    // non-axis dims + their source / result strides
+    int64_t na_shape[32], na_src[32], na_res[32];
+    int na_ndim = 0;
+    for (int d = 0; d < ndim; d++) {
+        if (d == axis) continue;
+        na_shape[na_ndim] = shp[d];
+        na_src[na_ndim]   = str[d];
+        na_res[na_ndim]   = res_str[d];
+        na_ndim++;
+    }
+    int64_t na_total = 1;
+    for (int d = 0; d < na_ndim; d++) na_total *= na_shape[d];
+
+    int64_t idx[32] = {0};
+    int64_t src_base = 0, res_base = 0;
+    for (int64_t lane = 0; lane < na_total; lane++) {
+        double running = is_prod ? 1.0 : 0.0;
+        for (int64_t a = 0; a < axis_len; a++) {
+            double v = read_arr_elem_as_double(arr, src_base + a * src_axis_str);
+            running = is_prod ? running * v : running + v;
+            int64_t ro = res_base + a * res_axis_str;
+            if (result_float) result->float_items[ro] = running;
+            else              result->items[ro] = (int64_t)running;
+        }
+        for (int d = na_ndim - 1; d >= 0; d--) {
+            idx[d]++; src_base += na_src[d]; res_base += na_res[d];
+            if (idx[d] < na_shape[d]) break;
+            idx[d] = 0; src_base -= na_shape[d] * na_src[d]; res_base -= na_shape[d] * na_res[d];
+        }
+    }
+    return { .array_num = result };
+}
+
+Item fn_min_axis(Item arr, Item axis)     { return array_num_reduce_axis(arr, axis, RED_MIN,  "min");  }
+Item fn_max_axis(Item arr, Item axis)     { return array_num_reduce_axis(arr, axis, RED_MAX,  "max");  }
+
+// ============================================================================
+// Boolean mask indexing:  arr[mask]  where mask is an ELEM_BOOL ArrayNum.
+//   • full mask (mask.shape == arr.shape): flatten-select → 1-D of kept elements
+//   • 1-D mask of length arr.shape[0]:    leading-axis select → (k, *trailing)
+// Result keeps arr's element type; raw bytes are copied (exact, no float round-trip).
+// Strided sources (views/transpose) handled.
+// ============================================================================
+Item fn_mask_index(Item arr_item, Item mask_item) {
+    GUARD_ERROR2(arr_item, mask_item);
+    if (get_type_id(arr_item) != LMD_TYPE_ARRAY_NUM ||
+        get_type_id(mask_item) != LMD_TYPE_ARRAY_NUM) {
+        log_error("arr[mask]: both array and mask must be typed numeric arrays");
+        return ItemError;
+    }
+    ArrayNum* arr = arr_item.array_num;
+    ArrayNum* mask = mask_item.array_num;
+    if (mask->get_elem_type() != ELEM_BOOL) {
+        log_error("arr[mask]: the index array must be boolean (got non-bool elements)");
+        return ItemError;
+    }
+    int64_t a_shape[32], a_str[32], m_shape[32], m_str[32];
+    int a_ndim = get_shape_strides(arr, a_shape, a_str);
+    int m_ndim = get_shape_strides(mask, m_shape, m_str);
+    ArrayNumElemType et = arr->get_elem_type();
+    size_t esz = ELEM_TYPE_SIZE[et >> 4];
+
+    // ---- full mask: identical shape → flatten-select ----
+    bool same_shape = (m_ndim == a_ndim);
+    for (int d = 0; same_shape && d < a_ndim; d++)
+        if (m_shape[d] != a_shape[d]) same_shape = false;
+    if (same_shape) {
+        int64_t total = 1;
+        for (int d = 0; d < a_ndim; d++) total *= a_shape[d];
+        // pass 1: count selected
+        int64_t k = 0;
+        { int64_t idx[32] = {0}, mk_off = 0;
+          for (int64_t o = 0; o < total; o++) {
+            if (read_arr_elem_as_double(mask, mk_off) != 0.0) k++;
+            for (int d = a_ndim - 1; d >= 0; d--) {
+                idx[d]++; mk_off += m_str[d];
+                if (idx[d] < a_shape[d]) break;
+                idx[d] = 0; mk_off -= m_shape[d] * m_str[d];
+            }
+          } }
+        ArrayNum* result = array_num_new(et, k);
+        if (!result) return ItemError;
+        // pass 2: copy kept elements
+        char* dbase = (char*)result->data;
+        char* sbase = (char*)arr->data;
+        { int64_t idx[32] = {0}, a_off = 0, mk_off = 0, w = 0;
+          for (int64_t o = 0; o < total; o++) {
+            if (read_arr_elem_as_double(mask, mk_off) != 0.0) {
+                memcpy(dbase + (size_t)w * esz, sbase + (size_t)a_off * esz, esz); w++;
+            }
+            for (int d = a_ndim - 1; d >= 0; d--) {
+                idx[d]++; a_off += a_str[d]; mk_off += m_str[d];
+                if (idx[d] < a_shape[d]) break;
+                idx[d] = 0; a_off -= a_shape[d] * a_str[d]; mk_off -= m_shape[d] * m_str[d];
+            }
+          } }
+        return { .array_num = result };
+    }
+
+    // ---- 1-D mask along the leading axis ----
+    if (m_ndim == 1 && m_shape[0] == a_shape[0]) {
+        int64_t k = 0;
+        for (int64_t i = 0; i < a_shape[0]; i++)
+            if (read_arr_elem_as_double(mask, i * m_str[0]) != 0.0) k++;
+
+        if (a_ndim == 1) {
+            ArrayNum* result = array_num_new(et, k);
+            if (!result) return ItemError;
+            char* dbase = (char*)result->data;
+            char* sbase = (char*)arr->data;
+            int64_t w = 0;
+            for (int64_t i = 0; i < a_shape[0]; i++)
+                if (read_arr_elem_as_double(mask, i * m_str[0]) != 0.0)
+                    memcpy(dbase + (size_t)(w++) * esz, sbase + (size_t)(i * a_str[0]) * esz, esz);
+            return { .array_num = result };
+        }
+        // N-D: result shape (k, arr.shape[1..]); copy each kept leading-axis slab
+        int64_t out_shape[32]; out_shape[0] = k;
+        int64_t slab = 1;
+        for (int d = 1; d < a_ndim; d++) { out_shape[d] = a_shape[d]; slab *= a_shape[d]; }
+        ArrayNum* result = alloc_ndim_arraynum(et, a_ndim, out_shape);
+        if (!result) return ItemError;
+        char* dbase = (char*)result->data;
+        char* sbase = (char*)arr->data;
+        int64_t w = 0;
+        for (int64_t i = 0; i < a_shape[0]; i++) {
+            if (read_arr_elem_as_double(mask, i * m_str[0]) == 0.0) continue;
+            int64_t tidx[32] = {0}, s_off = i * a_str[0];
+            for (int64_t e = 0; e < slab; e++) {
+                memcpy(dbase + (size_t)(w * slab + e) * esz, sbase + (size_t)s_off * esz, esz);
+                for (int d = a_ndim - 1; d >= 1; d--) {
+                    tidx[d]++; s_off += a_str[d];
+                    if (tidx[d] < a_shape[d]) break;
+                    tidx[d] = 0; s_off -= a_shape[d] * a_str[d];
+                }
+            }
+            w++;
+        }
+        return { .array_num = result };
+    }
+
+    log_error("arr[mask]: mask shape is incompatible with the array");
+    return ItemError;
+}
+Item fn_sum_axis(Item arr, Item axis)     { return array_num_reduce_axis(arr, axis, RED_SUM,  "sum");  }
+Item fn_avg_axis(Item arr, Item axis)     { return array_num_reduce_axis(arr, axis, RED_AVG,  "avg");  }
+Item fn_prod_axis(Item arr, Item axis)    { return array_num_reduce_axis(arr, axis, RED_PROD, "prod"); }
+Item fn_cumsum_axis(Item arr, Item axis)  { return array_num_cumulative_axis(arr, axis, false, "cumsum");  }
+Item fn_cumprod_axis(Item arr, Item axis) { return array_num_cumulative_axis(arr, axis, true,  "cumprod"); }
+
+// Overload wrappers — the sysfunc dispatcher resolves to fn_<name><argcount>.
+// The 1-arg forms delegate to the existing whole-array reductions.
+Item fn_sum1(Item arr)            { return fn_sum(arr); }
+Item fn_sum2(Item arr, Item ax)   { return fn_sum_axis(arr, ax); }
+Item fn_avg1(Item arr)            { return fn_avg(arr); }
+Item fn_avg2(Item arr, Item ax)   { return fn_avg_axis(arr, ax); }
+Item fn_math_prod1(Item arr)      { return fn_math_prod(arr); }
+Item fn_math_prod2(Item arr, Item ax)   { return fn_prod_axis(arr, ax); }
+Item fn_math_mean1(Item arr)      { return fn_math_mean(arr); }
+Item fn_math_mean2(Item arr, Item ax)   { return fn_avg_axis(arr, ax); }
+Item fn_math_cumsum1(Item arr)    { return fn_math_cumsum(arr); }
+Item fn_math_cumsum2(Item arr, Item ax) { return fn_cumsum_axis(arr, ax); }
+Item fn_math_cumprod1(Item arr)   { return fn_math_cumprod(arr); }
+Item fn_math_cumprod2(Item arr, Item ax){ return fn_cumprod_axis(arr, ax); }
 
 // is_view(arr) - returns true if arr is a view over another array
 Item fn_is_view(Item vec) {

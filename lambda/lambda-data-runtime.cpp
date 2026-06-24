@@ -935,6 +935,41 @@ static ArrayNum* try_promote_to_ndim(Array* arr) {
     return promoted;
 }
 
+// Promote a flat array whose elements are ALL numeric scalars into a 1-D typed
+// ArrayNum (compact storage).  Returns NULL if any element is non-numeric.
+// This is what makes pipe-map (`arr | ~*2`) and numeric comprehensions
+// (`[for (x in arr) x*2]`) produce typed results — both finalize via array_end.
+static ArrayNum* try_promote_scalars_to_1d(Array* arr) {
+    int64_t n = arr->length;
+    bool any_float = false;
+    int64_t bool_count = 0, num_count = 0;
+    for (int64_t i = 0; i < n; i++) {
+        TypeId t = get_type_id(arr->items[i]);
+        if (t == LMD_TYPE_BOOL) {
+            bool_count++;
+        } else if (t == LMD_TYPE_FLOAT) {
+            any_float = true; num_count++;
+        } else if (t == LMD_TYPE_NUM_SIZED) {
+            NumSizedType st = arr->items[i].get_num_type();
+            if (st == NUM_FLOAT16 || st == NUM_FLOAT32) any_float = true;
+            num_count++;
+        } else if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) {
+            num_count++;
+        } else {
+            return NULL;  // a non-numeric, non-bool element — keep generic
+        }
+    }
+    // all-bool → ELEM_BOOL (mask); all-numeric → int/float; mixed → keep generic
+    ArrayNumElemType et;
+    if (bool_count == n)     et = ELEM_BOOL;
+    else if (num_count == n) et = any_float ? ELEM_FLOAT : ELEM_INT64;
+    else return NULL;
+    ArrayNum* result = array_num_new(et, n);
+    if (!result) return NULL;
+    for (int64_t i = 0; i < n; i++) array_num_set_item(result, i, arr->items[i]);
+    return result;
+}
+
 // finalize spreadable array - returns array as Item (no flattening)
 // returns spreadable null for empty arrays so they can be skipped when spreading
 Item array_end(Array* arr) {
@@ -945,6 +980,13 @@ Item array_end(Array* arr) {
     // Dynamic N-D promotion: when children are uniform ArrayNums, fold into a tensor
     ArrayNum* nd = try_promote_to_ndim(arr);
     if (nd) return {.array_num = nd};
+    // 1-D promotion: when every child is a numeric scalar, fold into a typed array.
+    // Skip markup content lists and spreadable results (the latter must stay a
+    // generic List so a parent array can flatten them via array_push_spread).
+    if (!arr->is_content && !arr->is_spreadable && arr->length >= 1) {
+        ArrayNum* flat = try_promote_scalars_to_1d(arr);
+        if (flat) return {.array_num = flat};
+    }
     return {.array = arr};
 }
 

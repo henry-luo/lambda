@@ -2516,6 +2516,10 @@ Item fn_index(Item item, Item index_item) {
             }
             return ItemNull;
         }
+        // boolean mask index: arr[mask] — select elements where mask is true
+        if (index_type == LMD_TYPE_ARRAY_NUM && item_type == LMD_TYPE_ARRAY_NUM) {
+            return fn_mask_index(item, index_item);
+        }
         // for VMap, support arbitrary key types (int, float, etc.)
         TypeId item_type = get_type_id(item);
         if (item_type == LMD_TYPE_VMAP) {
@@ -3696,6 +3700,16 @@ Item fn_split(Item str_item, Item sep_item) {
     TypeId str_type = get_type_id(str_item);
     TypeId sep_type = get_type_id(sep_item);
 
+    // typed array split: split(arr, n) → n equal parts along axis 0
+    if (str_type == LMD_TYPE_ARRAY_NUM) {
+        if (sep_type != LMD_TYPE_INT && sep_type != LMD_TYPE_INT64) {
+            log_error("split: section count must be an integer");
+            return ItemError;
+        }
+        int64_t n = (sep_type == LMD_TYPE_INT) ? sep_item.get_int56() : sep_item.get_int64();
+        return fn_array_split(str_item, n, 0);
+    }
+
     // null string splits to empty list
     if (str_type == LMD_TYPE_NULL) { List* e = list(); e->is_content = 1; return {.array = e}; }
 
@@ -3833,11 +3847,24 @@ Item fn_split(Item str_item, Item sep_item) {
 }
 
 // split(str, sep, keep_delim) - 3-arg version with keep_delim boolean
+// split(arr, n, axis) - typed array split into n equal parts along axis
 Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     GUARD_ERROR1(str_item);
     TypeId str_type = get_type_id(str_item);
     TypeId sep_type = get_type_id(sep_item);
     TypeId keep_type = get_type_id(keep_item);
+
+    // typed array split with explicit axis: split(arr, n, axis)
+    if (str_type == LMD_TYPE_ARRAY_NUM) {
+        if ((sep_type != LMD_TYPE_INT && sep_type != LMD_TYPE_INT64) ||
+            (keep_type != LMD_TYPE_INT && keep_type != LMD_TYPE_INT64)) {
+            log_error("split: section count and axis must be integers");
+            return ItemError;
+        }
+        int64_t n    = (sep_type == LMD_TYPE_INT) ? sep_item.get_int56() : sep_item.get_int64();
+        int64_t axis = (keep_type == LMD_TYPE_INT) ? keep_item.get_int56() : keep_item.get_int64();
+        return fn_array_split(str_item, n, axis);
+    }
 
     bool keep_delim = (keep_type == LMD_TYPE_BOOL && it2b(keep_item));
 

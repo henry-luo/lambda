@@ -898,6 +898,12 @@ Item fn_ceil(Item item) {
 
 Item fn_min2(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
+    // axis reduction: min(arr, axis) — the scalar pairwise path never accepted an
+    // array first arg, so an ArrayNum here unambiguously means an axis reduce.
+    // (Also reached by min(arr, axis: N) — the named value lands in this slot.)
+    if (get_type_id(item_a) == LMD_TYPE_ARRAY_NUM) {
+        return fn_min_axis(item_a, item_b);
+    }
     // two argument scalar min case
     double a_val = 0.0, b_val = 0.0;
     bool is_float = false;
@@ -1104,6 +1110,10 @@ Item fn_min1(Item item_a) {
 
 Item fn_max2(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
+    // axis reduction: max(arr, axis) — see fn_min2 note.
+    if (get_type_id(item_a) == LMD_TYPE_ARRAY_NUM) {
+        return fn_max_axis(item_a, item_b);
+    }
     // two argument max case
     double a_val = 0.0, b_val = 0.0;
     bool is_float = false;

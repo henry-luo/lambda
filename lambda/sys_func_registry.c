@@ -392,11 +392,17 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, C_ARG_ITEM, "fn_max2", FPTR(fn_max2), "fn_max2_u", NPTR(fn_max2_u), true, 2},
 
     // Aggregation functions — method-eligible on collections
-    {SYSFUNC_SUM, "sum", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_sum", FPTR(fn_sum), NULL, NULL, false, 0},
+    {SYSFUNC_SUM, "sum", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_sum1", FPTR(fn_sum1), NULL, NULL, false, 0},
 
-    {SYSFUNC_AVG, "avg", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_avg", FPTR(fn_avg), NULL, NULL, false, 0},
+    {SYSFUNC_SUM2, "sum", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_sum2", FPTR(fn_sum2), NULL, NULL, false, 0},
+
+    {SYSFUNC_AVG, "avg", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_avg1", FPTR(fn_avg1), NULL, NULL, false, 0},
+
+    {SYSFUNC_AVG2, "avg", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_avg2", FPTR(fn_avg2), NULL, NULL, false, 0},
 
     // ========================================================================
     // Math functions — method-eligible on numbers
@@ -509,14 +515,23 @@ SysFuncInfo sys_func_defs[] = {
     // ========================================================================
     // Vector/array functions — math module
     // ========================================================================
-    {SYSFUNC_PROD, "math_prod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_prod", FPTR(fn_math_prod), NULL, NULL, false, 0},
+    {SYSFUNC_PROD, "math_prod", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_prod1", FPTR(fn_math_prod1), NULL, NULL, false, 0},
 
-    {SYSFUNC_CUMSUM, "math_cumsum", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_cumsum", FPTR(fn_math_cumsum), NULL, NULL, false, 0},
+    {SYSFUNC_PROD2, "math_prod", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_prod2", FPTR(fn_math_prod2), NULL, NULL, false, 0},
 
-    {SYSFUNC_CUMPROD, "math_cumprod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_cumprod", FPTR(fn_math_cumprod), NULL, NULL, false, 0},
+    {SYSFUNC_CUMSUM, "math_cumsum", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_cumsum1", FPTR(fn_math_cumsum1), NULL, NULL, false, 0},
+
+    {SYSFUNC_CUMSUM2, "math_cumsum", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_cumsum2", FPTR(fn_math_cumsum2), NULL, NULL, false, 0},
+
+    {SYSFUNC_CUMPROD, "math_cumprod", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_cumprod1", FPTR(fn_math_cumprod1), NULL, NULL, false, 0},
+
+    {SYSFUNC_CUMPROD2, "math_cumprod", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_cumprod2", FPTR(fn_math_cumprod2), NULL, NULL, false, 0},
 
     {SYSFUNC_ARGMIN, "argmin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_argmin", FPTR(fn_argmin), NULL, NULL, false, 0},
@@ -536,8 +551,11 @@ SysFuncInfo sys_func_defs[] = {
     // ========================================================================
     // Statistical functions — math module
     // ========================================================================
-    {SYSFUNC_MEAN, "math_mean", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_mean", FPTR(fn_math_mean), NULL, NULL, false, 0},
+    {SYSFUNC_MEAN, "math_mean", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_mean1", FPTR(fn_math_mean1), NULL, NULL, false, 0},
+
+    {SYSFUNC_MEAN2, "math_mean", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_mean2", FPTR(fn_math_mean2), NULL, NULL, false, 0},
 
     {SYSFUNC_MEDIAN, "math_median", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_math_median", FPTR(fn_math_median), NULL, NULL, false, 0},
@@ -1185,6 +1203,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_gt", FPTR(fn_gt)},
     {"fn_le", FPTR(fn_le)},
     {"fn_ge", FPTR(fn_ge)},
+    {"vec_cmp", FPTR(vec_cmp)},
     {"fn_not", FPTR(fn_not)},
     {"fn_and", FPTR(fn_and)},
     {"fn_or", FPTR(fn_or)},

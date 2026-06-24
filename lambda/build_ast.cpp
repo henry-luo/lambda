@@ -3198,6 +3198,15 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         ast_node->op == OPERATOR_IS || ast_node->op == OPERATOR_IN) {
         type_id = LMD_TYPE_BOOL;
 
+        // vectorized comparison: an ordering comparison (< <= > >=) with a numeric
+        // array operand yields an element-wise boolean mask (ARRAY_NUM), not a
+        // scalar bool. ==/!= keep their existing (structural / cross-type) semantics.
+        if (ast_node->op >= OPERATOR_LT && ast_node->op <= OPERATOR_GE &&
+            (left_type == LMD_TYPE_ARRAY_NUM || left_type == LMD_TYPE_ARRAY ||
+             right_type == LMD_TYPE_ARRAY_NUM || right_type == LMD_TYPE_ARRAY)) {
+            type_id = LMD_TYPE_ARRAY_NUM;
+        }
+
         // static type check for equality/inequality: catch comparisons between
         // incompatible concrete types where one side is a literal
         // e.g. name(x) == "paragraph" — symbol vs string literal, always false

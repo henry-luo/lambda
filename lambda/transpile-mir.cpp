@@ -1838,6 +1838,17 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
 // Binary expressions
 // ============================================================================
 
+// True iff a comparison `lt OP rt` should produce a vectorized ELEM_BOOL mask.
+// Only ordering ops (< <= > >=) with an array operand vectorize. ==/!= keep their
+// existing semantics: structural for array-vs-array, cross-type error for
+// array-vs-scalar (so `42 == [42]` stays an error, not a [true] mask).
+static inline bool comparison_vectorizes(int op, TypeId lt, TypeId rt) {
+    if (op < OPERATOR_LT || op > OPERATOR_GE) return false;
+    bool l_arr = (lt == LMD_TYPE_ARRAY_NUM || lt == LMD_TYPE_ARRAY);
+    bool r_arr = (rt == LMD_TYPE_ARRAY_NUM || rt == LMD_TYPE_ARRAY);
+    return l_arr || r_arr;
+}
+
 // Get effective runtime type for a node. If the node is an identifier whose
 // variable is stored as boxed (ANY) — e.g. optional params — return ANY instead
 // of the AST-declared type. This prevents native op dispatch on boxed values.
@@ -1881,7 +1892,12 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             if (!idx_is_type && idx_unwrapped->type && idx_unwrapped->type->type_id == LMD_TYPE_TYPE)
                 idx_is_type = true;
         }
-        if (!idx_is_type) {
+        // Boolean mask index a[mask] returns an ARRAY, not a scalar element — skip
+        // the elem_type optimization. (A multi-dim a[i,j] has an integer first
+        // index, so an ARRAY_NUM index uniquely identifies a mask.)
+        TypeId field_eff = fn->field ? get_effective_type(mt, fn->field) : LMD_TYPE_ANY;
+        bool idx_is_mask = (field_eff == LMD_TYPE_ARRAY_NUM || field_eff == LMD_TYPE_ARRAY);
+        if (!idx_is_type && !idx_is_mask) {
             // Unwrap PRIMARY around the object to find the IDENT
             AstNode* obj_unwrapped = fn->object;
             while (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_PRIMARY)
@@ -1952,6 +1968,9 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         // and later dereferenced as a pointer → SIGSEGV.
         {
             int op_ck = bi->op;
+            // vectorized comparison with an array operand yields an ELEM_BOOL mask
+            // array, not a scalar bool.
+            if (comparison_vectorizes(op_ck, lt, rt)) return LMD_TYPE_ARRAY_NUM;
             if (op_ck >= OPERATOR_EQ && op_ck <= OPERATOR_GE) return LMD_TYPE_BOOL;
             if (op_ck == OPERATOR_IS || op_ck == OPERATOR_IS_NAN || op_ck == OPERATOR_IN)
                 return LMD_TYPE_BOOL;
@@ -2081,6 +2100,21 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
 
     TypeId left_tid = get_effective_type(mt, bi->left);
     TypeId right_tid = get_effective_type(mt, bi->right);
+
+    // Vectorized comparison → element-wise ELEM_BOOL mask (boxed Item).
+    // Ordering (< <= > >=): vectorize when any operand is an array.
+    // Equality (== !=): vectorize only array-vs-numeric-scalar — array-vs-array
+    // (and array-vs-ANY) keep structural-equality semantics. (Numeric array
+    // literals are statically ARRAY; ARRAY_NUM is the runtime form. vec_cmp
+    // validates the runtime type and errors on non-numeric arrays.)
+    if (comparison_vectorizes(bi->op, left_tid, right_tid)) {
+        MIR_reg_t boxl = transpile_box_item(mt, bi->left);
+        MIR_reg_t boxr = transpile_box_item(mt, bi->right);
+        return emit_call_3(mt, "vec_cmp", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(bi->op - OPERATOR_EQ)));
+    }
 
     // IDIV and MOD: native fast paths when operand types are known
     // Note: INT64 excluded from native path — transpile_expr returns inconsistent
@@ -5232,6 +5266,17 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
     }
 
+    // Boolean mask index: arr[mask] — when the index is a typed array, defer to
+    // fn_index which routes ELEM_BOOL masks to the gather path. (Int fast paths
+    // below would otherwise try to unbox the array as a scalar index.)
+    if (idx_tid == LMD_TYPE_ARRAY_NUM) {
+        MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
+        MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
+        return emit_call_2(mt, "fn_index", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
+    }
+
     // Extract elem_type for ARRAY_NUM objects (used by fast paths below)
     TypeId obj_elem_type = LMD_TYPE_ANY;
     if (obj_tid == LMD_TYPE_ARRAY_NUM) {
@@ -7885,9 +7930,13 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
 
         // Enumerate ALL cases where transpile_binary returns native values:
 
-        // 1. Comparisons (EQ-GE) always return native bool (both native MIR and fn_eq/fn_lt/etc.)
+        // 1. Comparisons (EQ-GE) return native bool — EXCEPT vectorized comparisons
+        // (an array operand), which return an already-boxed ELEM_BOOL mask Item.
         bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE);
         if (is_cmp) {
+            if (comparison_vectorizes(op, lt, rt)) {
+                return val;  // already a boxed mask Item from vec_cmp
+            }
             return emit_box_bool(mt, val);
         }
 

@@ -20,6 +20,7 @@ static Item read_compact_elem(ArrayNum* arr, int i) {
     case ELEM_FLOAT32: return (Item){.item = f32_to_item(((float*)arr->data)[i])};
     case ELEM_UINT64:  return (Item){.item = i2it((int64_t)((uint64_t*)arr->data)[i])};
     case ELEM_FLOAT64: return (Item){.item = i2it((int64_t)((double*)arr->data)[i])};
+    case ELEM_BOOL:    return (Item){.item = b2it(((uint8_t*)arr->data)[i] ? BOOL_TRUE : BOOL_FALSE)};
     default:           return ItemNull;
     }
 }

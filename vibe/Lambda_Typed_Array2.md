@@ -5,13 +5,31 @@
 The Phase 1 work (see [Lambda_Typed_Array.md](Lambda_Typed_Array.md)) is **landed and operational**:
 
 - `LMD_TYPE_ARRAY_NUM` unifies the former `ARRAY_INT` / `ARRAY_INT64` / `ARRAY_FLOAT` into one type.
-- `ArrayNum.elem_type` (upper 4 bits of the byte at `Container.flags`) selects one of 13 element kinds: `ELEM_INT`, `ELEM_INT64`, `ELEM_FLOAT`, `ELEM_INT{8,16,32}`, `ELEM_UINT{8,16,32}`, `ELEM_FLOAT{16,32}`, `ELEM_UINT64`, `ELEM_FLOAT64`. Lower 4 bits remain Container boolean flags (`is_content`, `is_spreadable`, `is_heap`, `is_data_migrated`).
+- `ArrayNum.elem_type` selects the element kind. **(Updated during Phase 2: `elem_type` now occupies its own dedicated byte — `map_kind`, byte 2 of the `Container` header — not the upper nibble of `flags`. The move freed the upper nibble of `flags` for the `is_ndim`/`is_view`/`is_pinned` bits §2 needs; see "Resolved" below.)** The kinds are `ELEM_INT`, `ELEM_INT64`, `ELEM_FLOAT`, `ELEM_INT{8,16,32}`, `ELEM_UINT{8,16,32}`, `ELEM_FLOAT{16,32}`, `ELEM_UINT64`, `ELEM_FLOAT64`, and (added in Phase 2) `ELEM_BOOL` — 14 in all. `ELEM_TYPE_SIZE[elem_type >> 4]` gives bytes per element. The `flags` byte keeps the lower-nibble booleans (`is_content`, `is_spreadable`, `is_heap`, `is_data_migrated`) and gains the upper-nibble view/shape bits.
 - Storage is a tagged union: `int64_t* items` (ELEM_INT/INT64), `double* float_items` (ELEM_FLOAT), or `void* data` (compact elements). Bytes per element are looked up from `ELEM_TYPE_SIZE[elem_type >> 4]`.
 - **Vectorized arithmetic is already implemented** in [lambda-vector.cpp](../lambda/lambda-vector.cpp) — `+`, `-`, `*`, `/`, `%`, `^` work element-wise between `ArrayNum`/`ArrayNum`, `ArrayNum`/`scalar`, and `ArrayNum`/`Range`/`Array` across all 13 element kinds, with scalar broadcast and type promotion.
 - Aggregations: `sum`, `avg`, `min`, `max`, `abs` (array form), `cumsum`, `cumprod`, `argmin`, `argmax`, `dot`, `sort`, `fill`, `slice` dispatch on `LMD_TYPE_ARRAY_NUM`.
 - `for`, `in`, `index_of` already iterate `ArrayNum` (see [lambda-eval.cpp:3037, 3203, 3288](../lambda/lambda-eval.cpp)).
 
 In parallel, **LambdaJS carries a second, independent typed-array stack**: `JsTypedArray`, `JsArrayBuffer`, `JsDataView` ([js/js_typed_array.h](../lambda/js/js_typed_array.h)). It implements 11 element types (the 8 standard JS ones plus `Uint8ClampedArray`, `BigInt64Array`, `BigUint64Array`), with ArrayBuffer/DataView, `subarray`, `slice`, `set`, `fill`, `reverse`, length-tracking views over resizable buffers, and atomics. **This duplicates much of what `ArrayNum` should provide** and is the long-term consolidation target of Phase 5 in this proposal.
+
+## Implementation status (Phase 2 — landed)
+
+**Phases 1–4 of this proposal are implemented and operational on the MIR Direct backend. Baseline: 3224/3224 (`make test-lambda-baseline`).** Phase 5 (JS unification) remains deliberately deferred.
+
+| Area | Status | Notes |
+|---|---|---|
+| **§1 N-D arrays** | ✅ done | `ArrayNumShape` side-table in `extra`; `reshape`, `transpose`(+`perm`), `flatten`/`ravel`, `concat`/`stack` (binary), `split(arr, n[, axis])`, `matmul`. NumPy broadcasting for all element-wise ops. Nested-literal `[[1,2],[3,4]]` auto-detected as N-D both statically (AST builder) and dynamically (runtime `array_end`). N-D `for x in arr` yields leading-axis slices. |
+| **First-class `arr[i, j, k]`** | ✅ done | Grammar accepts comma-separated subscripts; walks strides via `array_num_at_nd` / `array_num_set_nd`. Partial index returns a leading-axis view. |
+| **Axis reductions** | ✅ done | `sum`/`avg`/`math.mean`/`math.prod`(arr, axis) collapse; `min`/`max`(arr, axis \| axis: N); `math.cumsum`/`math.cumprod`(arr, axis) run along the axis. Negative axes + non-contiguous (transposed) sources. |
+| **§2 Read-only views** | ✅ done | `is_ndim`/`is_view`/`is_pinned` in `Container.flags` upper nibble; zero-copy views with base ref for liveness; GC tracer marks `shape->base`, compactor skips views/pinned. Latent `capacity*8` compact-elem compaction bug fixed (now `capacity * ELEM_TYPE_SIZE[..]`). Views are read-only; mutation rejected at both the runtime and MIR fast paths. |
+| **§3 Vectorized scalar math** | ✅ done | Unary numeric sysfuncs broadcast over `ArrayNum`/`Range`; `clip(arr, lo, hi)` added; `all`/`any` over bool arrays. |
+| **§4 Iteration sites** | ✅ done | Pipe-map (`arr \| ~*2`), bracketed comprehension (`[for (x in arr) …]`) and bracketed filter (`[for (x in arr where p) x]`) produce typed `ArrayNum` via a single `array_end` promotion. |
+| **`ELEM_BOOL` + masks** | ✅ done | 14th element kind; bool literals `[true, false, …]` promote to `ELEM_BOOL` typed arrays; boolean mask indexing `arr[mask]`; vectorized **ordering** comparisons (`a > 0`, `a > b`) produce masks → the `a[a > 0]` filter idiom. `==`/`!=` left structural (see operations table). |
+| **Format / output** | ✅ done | JSON/YAML/TOML formatters route `ArrayNum` (1-D and N-D) through the unified Mark `ArrayReader` — no per-formatter scalar helpers. `print.cpp` keeps its own fast N-D walker for logging. |
+| **§5 JS unification** | ⏸ deferred | Design preserved (§5); implementation explicitly out of this phase. |
+
+Per-operation detail and remaining gaps are tracked in the tables and per-section notes below.
 
 ## Scope of this proposal
 
@@ -35,12 +53,13 @@ Promote `ArrayNum` from a flat numeric vector to an n-dimensional tensor while k
 
 ### Storage
 
-Two-track layout, gated by one flag bit in the `elem_type` byte:
+Two-track layout, gated by a flag bit. **(As implemented, the gating bits live in the upper nibble of the `Container.flags` byte — `is_ndim` and `is_view` — not in the `elem_type` byte. `elem_type` got its own dedicated `map_kind` byte, which freed the `flags` nibble. The original sketch below shows the intent; "Storage location (confirmed)" two paragraphs down describes the shipped layout.)**
 
 ```c
-// reuse one of the lower-4-bit flag slots in the elem_type byte
-#define ARRAY_NUM_FLAG_NDIM   0x01   // (currently unused bit in Container.flags)
-#define ARRAY_NUM_FLAG_VIEW   0x02   // see §2
+// shipped: bits in the upper nibble of Container.flags (elem_type moved to map_kind)
+//   is_ndim   — owned N-D array (shape side-table in `extra`)
+//   is_view   — zero-copy view aliasing another buffer (see §2)
+//   is_pinned — base whose storage a view aliases (skipped by the compactor)
 ```
 
 - **1-D path (no flag set)** — current `ArrayNum` layout unchanged. `length` is the only dimension. No allocation, dispatch, or per-element overhead added.
@@ -103,15 +122,18 @@ Two paths into N-D, **both implicit — no new `tensor(...)` builtin**:
 
 | Op | Current | N-D extension |
 |---|---|---|
-| Element access `arr[i]` | 1-D index | `arr[i, j, k]` walks strides; partial index returns a view (a row, slab, etc.) |
-| Arithmetic `+ - * / % ^` | Length-matched vectors | **Broadcasting**: shapes align from the right; size-1 dims stretch; missing leading dims treated as 1. NumPy semantics. |
-| Reductions `sum/avg/min/max/cumsum/cumprod` | Whole array | Add optional `axis` argument: `sum(arr, axis: 0)`. Default keeps whole-array behavior. |
-| `reshape(arr, shape)` | — | Returns view if contiguous, else copy. Total element count must match. |
-| `transpose(arr)` / `transpose(arr, perm)` | — | View with permuted shape/strides. |
-| `flatten(arr)` | — | Copy as 1-D. `ravel(arr)` returns view if already contiguous. |
-| `expand_dims`, `squeeze` | — | Cheap view ops on shape/strides. |
-| `concat`, `stack`, `split` | — | New sysfuncs; require axis arg. |
-| `dot` | 1-D · 1-D scalar | Extend to `matmul` for 2-D · 2-D, with the usual broadcasting prefix rules. |
+| Element access `arr[i]` / `arr[i, j, k]` | **done** | `arr[i, j, k]` walks strides via `array_num_at_nd`; partial index returns a leading-axis view (a row, slab, etc.). `arr[i, j, k] = v` writes via `array_num_set_nd`. |
+| Boolean mask index `arr[mask]` | **done** | `mask` is an `ELEM_BOOL` array. Same-shape mask → flatten-select (`m[m > 2]` → 1-D of kept elements, row-major). 1-D mask of length `shape[0]` → leading-axis row select → `(k, *trailing)`. Result keeps `arr`'s element type (raw byte copy); strided sources (views/transpose) handled. Bool literals `[true, false, …]` now promote to `ELEM_BOOL` typed arrays. |
+| Comparisons `< <= > >=` | **done** | Element-wise over arrays → `ELEM_BOOL` mask (`a > 0`, `a > b`, broadcast + N-D). `a[a > 0]` is the canonical filter idiom. `==`/`!=` are **not** vectorized — they keep structural-equality / cross-type-error semantics (`[1,2,3] == [1,2,3]` is `true`; `42 == [42]` is an error). MIR backend (default). Note: a bare `a > 0` statement needs parens — `(a > 0)` — due to the `<`/`>` markup ambiguity; inside `arr[...]` no parens are needed. |
+| Arithmetic `+ - * / % ^` | **done** | **Broadcasting**: shapes align from the right; size-1 dims stretch; missing leading dims treated as 1. NumPy semantics, N-D + scalar. |
+| Reductions `sum/avg/min/max/prod/mean/cumsum/cumprod` | **done** | Optional `axis` arg collapses that axis: `sum(arr, axis)`, `avg`/`math.mean`, `math.prod`, `min`/`max`. `cumsum`/`cumprod` run *along* the axis (no collapse). Whole-array (1-arg) forms unchanged. `sum`/`avg`/`prod`/`mean`/`cumsum`/`cumprod` use the free 2-arg slot (now arity-overloaded). `min`/`max` dispatch on first-arg type — `min(arr, axis)` and `min(arr, axis: N)` both work; scalar pairwise `min(a, b)` is preserved (the array-first slot was unused). Negative axes and non-contiguous (transposed) sources handled. |
+| `reshape(arr, shape)` | **done** | Returns view if contiguous, else copy. Total element count must match. Also `shape(arr)`, `ndim(arr)`, `view`/`subview`, `is_view`. |
+| `transpose(arr)` / `transpose(arr, perm)` | **done** | View with permuted shape/strides (zero-copy). |
+| `flatten(arr)` | **done** | Copy as 1-D. `ravel(arr)` returns a view if already contiguous, else copies. |
+| `expand_dims`, `squeeze` | — *not yet* | Cheap view ops on shape/strides — remaining future work. |
+| `concat`, `stack` | **done (binary)** | `concat(a,b)` (axis 0), `stack(a,b)` (new leading axis). **Variadic `concat(a,b,c,…)` / `stack(a,b,c,…)` and an explicit `axis` arg are deferred to future** — good-to-have. Binary `concat` chains for 3+; binary `stack` can't faithfully stack N>2 (use the `[a,b,c]` nested-literal auto-promotion, which is effectively n-ary stack today). |
+| `split` | **done** | `split(arr, n)` splits into `n` equal parts along axis 0; `split(arr, n, axis)` along the given axis (axis length must be divisible by `n`). Returns a list of `n` sub-arrays. Dispatches on first-arg type so string `split` is unaffected. Non-contiguous sources (e.g. a transpose) are gathered correctly. |
+| `dot` / `matmul` | **done** | `matmul(a,b)` for 2-D·2-D, 1-D·1-D (dot), and vector–matrix mixed cases; int·int→int64 else float. |
 
 ### Broadcasting
 
@@ -455,6 +477,8 @@ After unification, `JsArrayBuffer`'s `data` becomes the base storage that an `Ar
 
 ## 3. Vectorized Scalar Math
 
+> **Status: implemented.** The unary numeric sysfunc family broadcasts over `ArrayNum`/`Range`; `clip(arr, lo, hi)` landed as a new sysfunc; `all`/`any` reduce bool arrays. The ✓ marks in the table below are now shipped, not just in-scope.
+
 ### Goal
 
 Every unary numeric sysfunc that today takes a single `Item` and returns one should also accept an `ArrayNum` (or `Range`, or homogeneous `Array`) and return a new `ArrayNum` with the same `elem_type` (or promoted appropriately).
@@ -520,11 +544,24 @@ Out of scope for this proposal but the loops are SIMD-friendly. A follow-up can 
 
 ## 4. Iteration Sites — Pipe, Where, For, Comprehensions
 
+> **Status: pipe-map, bracketed comprehension, and bracketed filter now produce typed `ArrayNum` results** — implemented via a single promotion in `array_end` (see "How typed results are produced" below). `for-in`, `in`, `index_of` already iterate `ArrayNum`.
+
 ### Current state
 
 - `for x in arr` already works (eval.cpp dispatches on `LMD_TYPE_ARRAY_NUM`).
 - `in` / `index_of` already iterate `ArrayNum`.
-- `where` (filter), `some`, `every`, `map`, `reduce`: dispatch needs auditing — `SYSFUNC_REDUCE` exists; mapping a function over `ArrayNum` likely falls through to generic `Array` path, which boxes every element.
+- **Pipe map** (`arr | ~*2`), **bracketed comprehension** (`[for (x in arr) body]`), and **bracketed filter** (`[for (x in arr where p) x]`) all produce a typed `ArrayNum` when every produced element is a numeric scalar.
+
+### How typed results are produced (implemented)
+
+Lambda's pipe and bracketed comprehensions both finalize their constructed array through `array_end` (on the MIR/default path). Rather than special-casing each syntax in the transpiler, a single runtime promotion in [`array_end`](../lambda/lambda-data-runtime.cpp) folds a freshly-built array into a typed `ArrayNum`:
+
+- **N-D promotion** (`try_promote_to_ndim`) — when all children are uniform `ArrayNum`s → an (N+1)-D tensor.
+- **1-D promotion** (`try_promote_scalars_to_1d`) — when all children are numeric scalars (`int`/`int64`/`float`/sized) → a 1-D `ArrayNum`, widening to `ELEM_FLOAT` if any element is float, else `ELEM_INT64`.
+
+Both are gated on `!is_content && !is_spreadable`: markup content lists stay generic, and **spreadable for-expression results must stay a generic `List`** so a parent array can flatten them via `array_push_spread` (the bare `for (x in arr) …` generator form remains generic for exactly this reason; the bracketed `[for …]` form — whose outer array is not spreadable — gets promoted).
+
+This unifies map/filter/comprehension typing in one place: `arr | ~*2`, `[for (x in arr) x*10]`, and `[for (x in arr where x>2) x]` all yield typed arrays that compose with `sum`/`reshape`/`matmul`/broadcasting without re-boxing. Filter preserves the subset as numeric scalars, which the same promotion folds back to typed.
 
 ### Goal
 
@@ -577,7 +614,7 @@ For N-D arrays (§1), iteration semantics: **`for x in nd_arr` iterates the lead
 
 ## 5. JS TypedArray Unification — Design Kept, Implementation Deferred
 
-**Status: design preserved, implementation explicitly deferred to a later release.**
+**Status: design preserved, implementation explicitly deferred to a later release.** → Now expanded into its own proposal: [Lambda_Typed_Array3.md](Lambda_Typed_Array3.md), written against the as-built state of both stacks (the GC moving/non-moving constraint that decides the architecture is resolved there). The sketch below remains for context.
 
 Per your direction, the unification of `JsTypedArray`/`JsArrayBuffer`/`JsDataView` onto `ArrayNum` is no longer part of this proposal's deliverables. The design below remains as the **target architecture** so that Phase 2a–2c choices stay JS-compatible. Specific constraints carried forward:
 
@@ -663,35 +700,38 @@ Concretely:
 
 ---
 
-## Implementation order (recommended)
+## Implementation order (as executed)
 
 ```
-Phase 2a — independent, ship in any order:
-   §3 (vectorize scalar math)       — ~1 week, low risk
-   §4 (iteration sites)             — ~1 week, mostly transpiler work
-   ELEM_BOOL                         — small, can land alongside §3 or §4
+Phase 2a — DONE:
+   §3 (vectorize scalar math)        ✅ unary numeric family + clip + all/any
+   §4 (iteration sites)              ✅ pipe-map / comprehension / filter → typed
+   ELEM_BOOL                          ✅ 14th element kind
 
-Phase 2b — sequential:
-   §2 (views) + GC upgrade           — ~3 weeks; GC tracer/finalizer/compactor
-                                       all need extending (see §2 GC interaction).
-                                       New flag bits go into Container.flags upper
-                                       nibble (already freed by the recent map_kind
-                                       move); no struct size change. The latent
-                                       compact-elem compaction bug gets fixed in
-                                       the same pass.
-   §1 (n-d)                          — ~3 weeks, broadcasting + format/output;
-                                       reuses the shape side-table slot §2 added.
+Phase 2b — DONE:
+   §2 (views) + GC upgrade            ✅ is_ndim/is_view/is_pinned in flags upper
+                                        nibble (freed by the map_kind move); GC
+                                        tracer/finalizer/compactor extended; the
+                                        latent compact-elem (capacity*8) bug fixed.
+   §1 (n-d)                           ✅ shape side-table, broadcasting, reshape/
+                                        transpose/flatten/ravel, arr[i,j,k], axis
+                                        reductions, matmul/concat/stack/split,
+                                        nested-literal auto-promotion, format/output.
 
-Phase 2c — optional polish:
-   ELEM_BOOL mask-indexing UX        — once §2 views are stable
+Phase 2c — DONE:
+   ELEM_BOOL mask-indexing UX         ✅ arr[mask] + vectorized ordering comparisons
+                                        (a > 0) ship the full `a[a > 0]` filter idiom.
 
 Phase 2d — deferred to a future release (NOT in this proposal):
+   expand_dims / squeeze              — cheap view ops, not yet implemented
+   Integer-array fancy indexing       — arr[[0, 2, 5]] (gather), not yet implemented
+   Variadic concat / stack + axis arg — binary forms shipped; n-ary deferred
    Mutable views / mutable typed arrays
    Generic `Array` views (extending §2 view machinery to LMD_TYPE_ARRAY)
    JS TypedArray unification (§5 design preserved but not implemented now)
 ```
 
-Each phase keeps the 1-D, owned-buffer fast path identical to today, so existing benchmarks should not regress.
+Each phase keeps the 1-D, owned-buffer fast path identical to today, so existing benchmarks should not regress. The full suite stands at **3224/3224** (`make test-lambda-baseline`).
 
 ## Open questions
 
