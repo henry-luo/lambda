@@ -52,6 +52,29 @@ void jm_name_set_add_kind(struct hashmap* set, const char* name, int kind) {
     hashmap_set(set, &e);
 }
 
+static void jm_name_set_add_ref(struct hashmap* set, const char* name, JsIdentifierNode* id) {
+    JsNameSetEntry e;
+    memset(&e, 0, sizeof(e));
+    snprintf(e.name, sizeof(e.name), "%s", name);
+    if (id && id->entry && id->entry->node) {
+        JsAstNode* def = (JsAstNode*)id->entry->node;
+        if (!ts_node_is_null(def->node)) {
+            e.binding_start = ts_node_start_byte(def->node);
+            e.binding_end = ts_node_end_byte(def->node);
+        }
+    }
+    JsNameSetEntry* existing = (JsNameSetEntry*)hashmap_get(set, &e);
+    if (existing) {
+        if ((existing->binding_start == 0 && existing->binding_end == 0) &&
+            (e.binding_start != 0 || e.binding_end != 0)) {
+            existing->binding_start = e.binding_start;
+            existing->binding_end = e.binding_end;
+        }
+        return;
+    }
+    hashmap_set(set, &e);
+}
+
 bool jm_name_set_has(struct hashmap* set, const char* name) {
     JsNameSetEntry key;
     memset(&key, 0, sizeof(key));
@@ -768,7 +791,7 @@ void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs) {
         if (id->name) {
             char name[128];
             snprintf(name, sizeof(name), "_js_%.*s", (int)id->name->len, id->name->chars);
-            jm_name_set_add(refs, name);
+            jm_name_set_add_ref(refs, name, id);
         }
         break;
     }
@@ -1719,6 +1742,12 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         {
             jm_ensure_captures_capacity(fc);
             snprintf(fc->captures[fc->capture_count].name, 128, "%s", ref->name);
+            if (ref->binding_start != 0 || ref->binding_end != 0) {
+                snprintf(fc->captures[fc->capture_count].scope_env_key, 128,
+                    "%s@%u:%u", ref->name, ref->binding_start, ref->binding_end);
+            } else {
+                snprintf(fc->captures[fc->capture_count].scope_env_key, 128, "%s", ref->name);
+            }
             fc->captures[fc->capture_count].scope_env_slot = -1;
             fc->captures[fc->capture_count].grandparent_slot = -1;
             fc->captures[fc->capture_count].is_let_const = false;
@@ -1753,6 +1782,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     if (has_self_ref && self_name[0] && (fc->parent_index >= 0 || is_func_expr || is_block_func_decl)) {
         jm_ensure_captures_capacity(fc);
         snprintf(fc->captures[fc->capture_count].name, 128, "%s", self_name);
+        snprintf(fc->captures[fc->capture_count].scope_env_key, 128, "%s", self_name);
         fc->captures[fc->capture_count].scope_env_slot = -1;
         fc->captures[fc->capture_count].grandparent_slot = -1;
         fc->captures[fc->capture_count].is_let_const = false;
@@ -1768,6 +1798,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     if (fn->is_arrow && jm_name_set_has(refs, "_js_this")) {
         jm_ensure_captures_capacity(fc);
         snprintf(fc->captures[fc->capture_count].name, 128, "_js_this");
+        snprintf(fc->captures[fc->capture_count].scope_env_key, 128, "_js_this");
         fc->captures[fc->capture_count].scope_env_slot = -1;
         fc->captures[fc->capture_count].grandparent_slot = -1;
         fc->captures[fc->capture_count].is_let_const = false;
@@ -1784,6 +1815,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     if (fn->is_arrow && jm_name_set_has(refs, "_js_new.target")) {
         jm_ensure_captures_capacity(fc);
         snprintf(fc->captures[fc->capture_count].name, 128, "_js_new.target");
+        snprintf(fc->captures[fc->capture_count].scope_env_key, 128, "_js_new.target");
         fc->captures[fc->capture_count].scope_env_slot = -1;
         fc->captures[fc->capture_count].grandparent_slot = -1;
         fc->captures[fc->capture_count].is_let_const = false;
@@ -1797,6 +1829,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     if (fn->is_arrow && jm_name_set_has(refs, "_js_arguments")) {
         jm_ensure_captures_capacity(fc);
         snprintf(fc->captures[fc->capture_count].name, 128, "_js_arguments");
+        snprintf(fc->captures[fc->capture_count].scope_env_key, 128, "_js_arguments");
         fc->captures[fc->capture_count].scope_env_slot = -1;
         fc->captures[fc->capture_count].grandparent_slot = -1;
         fc->captures[fc->capture_count].is_let_const = false;

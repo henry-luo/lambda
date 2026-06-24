@@ -115,6 +115,8 @@ struct JsNameSetEntry {
     char name[128];
     int var_kind;  // v20 TDZ: 0=var, 1=let, 2=const (mirrors JsVarKind)
     bool from_func_decl;  // true if this name came from a nested function declaration
+    uint32_t binding_start; // source range of the resolved defining binding, if known
+    uint32_t binding_end;
 };
 
 static const uint64_t ITEM_NULL_VAL  = (uint64_t)LMD_TYPE_NULL << 56;
@@ -193,6 +195,7 @@ struct JsLoopLabels {
 // Capture entry for closure analysis
 struct JsCaptureEntry {
     char name[128];      // variable name (with _js_ prefix)
+    char scope_env_key[128]; // binding identity for shared env slots; name when not needed
     int scope_env_slot;  // slot in parent's scope env (-1 if not remapped)
     int grandparent_slot; // v29: for transitive captures in mixed scope envs, read from
                           // grandparent env (stored in parent env slot 0). -1 if not transitive.
@@ -384,6 +387,7 @@ struct JsMirTranspiler {
     int label_counter;
 
     // Collected functions (pre-pass)
+    JsAstNode* root_node;
     JsFuncCollected func_entries[JS_MIR_MAX_COLLECTED_FUNCTIONS];
     int func_count;
     bool func_collection_overflow_logged;

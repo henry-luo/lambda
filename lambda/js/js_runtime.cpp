@@ -31854,6 +31854,85 @@ static Item js_async_context_frame_current(void) {
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
+static int js_internal_inspect_utf8_next(const char* s, int len, int* index) {
+    unsigned char c = (unsigned char)s[*index];
+    if (c < 0x80) {
+        (*index)++;
+        return c;
+    }
+    if ((c & 0xE0) == 0xC0 && *index + 1 < len) {
+        int cp = ((c & 0x1F) << 6) | ((unsigned char)s[*index + 1] & 0x3F);
+        *index += 2;
+        return cp;
+    }
+    if ((c & 0xF0) == 0xE0 && *index + 2 < len) {
+        int cp = ((c & 0x0F) << 12) |
+                 (((unsigned char)s[*index + 1] & 0x3F) << 6) |
+                 ((unsigned char)s[*index + 2] & 0x3F);
+        *index += 3;
+        return cp;
+    }
+    if ((c & 0xF8) == 0xF0 && *index + 3 < len) {
+        int cp = ((c & 0x07) << 18) |
+                 (((unsigned char)s[*index + 1] & 0x3F) << 12) |
+                 (((unsigned char)s[*index + 2] & 0x3F) << 6) |
+                 ((unsigned char)s[*index + 3] & 0x3F);
+        *index += 4;
+        return cp;
+    }
+    (*index)++;
+    return c;
+}
+
+static int js_internal_inspect_codepoint_width(int cp) {
+    if (cp <= 0x1F || (cp >= 0x7F && cp <= 0x9F)) return 0;
+    if ((cp >= 0x0300 && cp <= 0x036F) || cp == 0x20DD ||
+        cp == 0x200D || cp == 0x200E || cp == 0x200F ||
+        (cp >= 0xFE00 && cp <= 0xFE0F)) {
+        return 0;
+    }
+    if ((cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2E80 && cp <= 0xA4CF) ||
+        (cp >= 0xAC00 && cp <= 0xD7A3) || (cp >= 0x1F000 && cp <= 0x1FAFF)) {
+        return 2;
+    }
+    return 1;
+}
+
+static bool js_internal_inspect_is_csi_final(char c) {
+    return c >= 0x40 && c <= 0x7E;
+}
+
+extern "C" Item js_internal_util_inspect_strip_vt(Item value) {
+    Item str_item = js_to_string(value);
+    if (get_type_id(str_item) != LMD_TYPE_STRING) return str_item;
+    String* s = it2s(str_item);
+    char* out = (char*)heap_alloc(s->len + 1, LMD_TYPE_STRING);
+    int pos = 0;
+    for (int i = 0; i < (int)s->len; i++) {
+        if (s->chars[i] == '\x1b' && i + 1 < (int)s->len && s->chars[i + 1] == '[') {
+            i += 2;
+            while (i < (int)s->len && !js_internal_inspect_is_csi_final(s->chars[i])) i++;
+            continue;
+        }
+        out[pos++] = s->chars[i];
+    }
+    String* result = heap_create_name(out, pos);
+    return (Item){.item = s2it(result)};
+}
+
+extern "C" Item js_internal_util_inspect_get_string_width(Item value) {
+    Item stripped = js_internal_util_inspect_strip_vt(value);
+    if (get_type_id(stripped) != LMD_TYPE_STRING) return (Item){.item = i2it(0)};
+    String* s = it2s(stripped);
+    int width = 0;
+    int i = 0;
+    while (i < (int)s->len) {
+        int cp = js_internal_inspect_utf8_next(s->chars, (int)s->len, &i);
+        width += js_internal_inspect_codepoint_width(cp);
+    }
+    return (Item){.item = i2it(width)};
+}
+
 extern "C" Item js_get_internal_async_hooks_namespace(void) {
     static Item iah_ns = {0};
     static uint64_t iah_epoch = (uint64_t)-1;
@@ -32850,6 +32929,27 @@ extern "C" Item js_module_get(Item specifier) {
         }
         return internal_util_ns;
     }
+    // internal/util/inspect — selected string-width helpers for readline tests
+    if ((spec->len == 21 && memcmp(spec->chars, "internal/util/inspect", 21) == 0) ||
+        (spec->len == 24 && memcmp(spec->chars, "internal/util/inspect.js", 24) == 0)) {
+        static Item internal_util_inspect_ns = {0};
+        static uint64_t internal_util_inspect_epoch = (uint64_t)-1;
+        if (internal_util_inspect_ns.item == 0 || internal_util_inspect_epoch != js_heap_epoch) {
+            internal_util_inspect_epoch = js_heap_epoch;
+            internal_util_inspect_ns = js_new_object();
+            heap_register_gc_root(&internal_util_inspect_ns.item);
+            js_property_set(internal_util_inspect_ns,
+                (Item){.item = s2it(heap_create_name("getStringWidth", 14))},
+                js_new_function((void*)js_internal_util_inspect_get_string_width, 1));
+            js_property_set(internal_util_inspect_ns,
+                (Item){.item = s2it(heap_create_name("stripVTControlCharacters", 24))},
+                js_new_function((void*)js_internal_util_inspect_strip_vt, 1));
+            js_property_set(internal_util_inspect_ns,
+                (Item){.item = s2it(heap_create_name("default", 7))},
+                internal_util_inspect_ns);
+        }
+        return internal_util_inspect_ns;
+    }
     // internal/async_hooks — selected helpers used by stream/async tests.
     if ((spec->len == 20 && memcmp(spec->chars, "internal/async_hooks", 20) == 0) ||
         (spec->len == 23 && memcmp(spec->chars, "internal/async_hooks.js", 23) == 0)) {
@@ -32933,8 +33033,8 @@ extern "C" Item js_module_get(Item specifier) {
     // readline/promises, node:readline/promises
     if ((spec->len == 17 && memcmp(spec->chars, "readline/promises", 17) == 0) ||
         (spec->len == 22 && memcmp(spec->chars, "node:readline/promises", 22) == 0)) {
-        extern Item js_get_readline_namespace(void);
-        return js_get_readline_namespace();
+        extern Item js_get_readline_promises_namespace(void);
+        return js_get_readline_promises_namespace();
     }
     // node:punycode — deprecated but some tests import it
     if ((spec->len == 8 && memcmp(spec->chars, "punycode", 8) == 0) ||
@@ -33006,9 +33106,9 @@ extern "C" Item js_module_is_builtin(Item id) {
         "assert", "buffer", "child_process", "cluster", "console", "crypto", "dns",
         "diagnostics_channel", "domain", "events", "fs", "http", "https",
         "module", "net", "os", "path", "perf_hooks", "process", "punycode",
-        "querystring", "readline", "repl", "stream", "string_decoder",
+        "querystring", "readline", "readline/promises", "repl", "stream", "string_decoder",
         "timers", "tls", "tty", "url", "util", "v8", "vm", "worker_threads", "zlib",
-        "async_hooks"
+        "async_hooks", "internal/util", "internal/util/inspect"
     };
     int n = sizeof(builtins) / sizeof(builtins[0]);
     for (int i = 0; i < n; i++) {

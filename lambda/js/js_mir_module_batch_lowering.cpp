@@ -41,15 +41,14 @@ static void jm_collect_for_init_lexical_names(JsAstNode* node, struct hashmap* n
 
 static void jm_note_module_block_lexical_name(struct hashmap* seen, struct hashmap* duplicate_consts,
         const char* name, int var_kind) {
+    (void)var_kind;
     if (!name || !seen || !duplicate_consts) return;
     JsNameSetEntry key;
     memset(&key, 0, sizeof(key));
     snprintf(key.name, sizeof(key.name), "%s", name);
     JsNameSetEntry* existing = (JsNameSetEntry*)hashmap_get(seen, &key);
     if (existing) {
-        if (var_kind == JS_VAR_CONST || existing->var_kind == JS_VAR_CONST) {
-            jm_name_set_add(duplicate_consts, name);
-        }
+        jm_name_set_add(duplicate_consts, name);
     } else {
         jm_name_set_add_kind(seen, name, var_kind);
     }
@@ -577,6 +576,89 @@ static bool jm_ast_node_contains_target(JsAstNode* node, JsAstNode* target) {
     return ns <= ts && te <= ne;
 }
 
+static bool jm_lexical_decl_matches_name(JsAstNode* stmt, const char* name, char out_key[128]) {
+    if (!stmt || !name || !out_key) return false;
+    if (stmt->node_type != JS_AST_NODE_VARIABLE_DECLARATION) return false;
+    JsVariableDeclarationNode* var = (JsVariableDeclarationNode*)stmt;
+    if (var->kind != JS_VAR_LET && var->kind != JS_VAR_CONST) return false;
+    for (JsAstNode* d = var->declarations; d; d = d->next) {
+        if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
+        if (!decl->id || decl->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
+        JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        if (strcmp(vname, name) != 0) continue;
+        uint32_t start = ts_node_is_null(decl->id->node) ? 0 : ts_node_start_byte(decl->id->node);
+        uint32_t end = ts_node_is_null(decl->id->node) ? 0 : ts_node_end_byte(decl->id->node);
+        snprintf(out_key, 128, "%s@%u:%u", name, start, end);
+        return true;
+    }
+    return false;
+}
+
+static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode* target,
+        const char* name, char out_key[128]) {
+    if (!node || !target || !name || !out_key) return false;
+    if (node == target) return false;
+    if (!jm_ast_node_contains_target(node, target)) {
+        return jm_find_enclosing_lexical_key_for_target(node->next, target, name, out_key);
+    }
+
+    bool found_here = false;
+    switch (node->node_type) {
+    case JS_AST_NODE_PROGRAM: {
+        JsProgramNode* program = (JsProgramNode*)node;
+        for (JsAstNode* s = program->body; s; s = s->next) {
+            if (jm_lexical_decl_matches_name(s, name, out_key)) found_here = true;
+            if (jm_ast_node_contains_target(s, target) &&
+                jm_find_enclosing_lexical_key_for_target(s, target, name, out_key)) return true;
+        }
+        return found_here;
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* block = (JsBlockNode*)node;
+        for (JsAstNode* s = block->statements; s; s = s->next) {
+            if (jm_lexical_decl_matches_name(s, name, out_key)) found_here = true;
+            if (jm_ast_node_contains_target(s, target) &&
+                jm_find_enclosing_lexical_key_for_target(s, target, name, out_key)) return true;
+        }
+        return found_here;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* var = (JsVariableDeclarationNode*)node;
+        for (JsAstNode* d = var->declarations; d; d = d->next) {
+            if (jm_find_enclosing_lexical_key_for_target(d, target, name, out_key)) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)node;
+        return jm_find_enclosing_lexical_key_for_target(decl->init, target, name, out_key);
+    }
+    case JS_AST_NODE_CLASS_DECLARATION:
+    case JS_AST_NODE_CLASS_EXPRESSION: {
+        JsClassNode* cls = (JsClassNode*)node;
+        if (jm_find_enclosing_lexical_key_for_target(cls->superclass, target, name, out_key)) return true;
+        return jm_find_enclosing_lexical_key_for_target(cls->body, target, name, out_key);
+    }
+    case JS_AST_NODE_FIELD_DEFINITION: {
+        JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)node;
+        if (field->computed &&
+            jm_find_enclosing_lexical_key_for_target(field->key, target, name, out_key)) return true;
+        return jm_find_enclosing_lexical_key_for_target(field->value, target, name, out_key);
+    }
+    case JS_AST_NODE_METHOD_DEFINITION: {
+        JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)node;
+        if (method->computed &&
+            jm_find_enclosing_lexical_key_for_target(method->key, target, name, out_key)) return true;
+        return jm_find_enclosing_lexical_key_for_target(method->value, target, name, out_key);
+    }
+    default:
+        return false;
+    }
+}
+
 static void jm_collect_pattern_names_kind(JsAstNode* pat, struct hashmap* names, int var_kind) {
     if (!pat || !names) return;
     struct hashmap* tmp = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
@@ -929,14 +1011,14 @@ void jm_resolve_module_path(const char* base_file, const char* specifier, int sp
             "fs", "fs/promises", "child_process", "path", "path/posix", "path/win32",
             "os", "url", "util", "util/types",
             "process", "querystring", "events", "buffer",
-            "crypto", "dns", "dns/promises", "zlib", "readline",
+            "crypto", "dns", "dns/promises", "zlib", "readline", "readline/promises",
             "stream", "stream/promises", "stream/web", "stream/consumers", "stream/iter",
             "net", "tls", "http", "https",
             "string_decoder", "assert", "assert/strict",
             "timers", "timers/promises", "console", "module",
             "worker_threads", "cluster", "vm", "v8", "tty", "perf_hooks",
             "diagnostics_channel", "async_hooks", "domain",
-            "internal/util", "internal/async_hooks", "internal/async_context_frame",
+            "internal/util", "internal/util/inspect", "internal/async_hooks", "internal/async_context_frame",
             "internal/test/binding", "internal/streams/add-abort-signal",
             "internal/streams/state", NULL
         };
@@ -2249,6 +2331,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         log_error("js-mir: expected program node");
         return;
     }
+    mt->root_node = root;
 
     JsProgramNode* program = (JsProgramNode*)root;
 
@@ -3607,6 +3690,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         // Add as capture to parent
                         jm_ensure_captures_capacity(parent);
                         snprintf(parent->captures[parent->capture_count].name, 128, "%s", cap_name);
+                        snprintf(parent->captures[parent->capture_count].scope_env_key, 128, "%s",
+                            child->captures[ci].scope_env_key[0] ? child->captures[ci].scope_env_key : cap_name);
                         parent->captures[parent->capture_count].scope_env_slot = -1;
                         parent->captures[parent->capture_count].grandparent_slot = -1;
                         parent->captures[parent->capture_count].is_let_const = child->captures[ci].is_let_const;
@@ -3880,15 +3965,36 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (mc && mc->const_type == MCONST_MODVAR) return false;
             }
             if (jm_name_set_has(for_init_lets, name)) return false;
-            // The synthetic module scope env is keyed by capture name. Sibling
-            // duplicate const block bindings are distinct immutable JS bindings;
-            // keep those as private closure captures so later blocks cannot
-            // overwrite an earlier closure's const object.
-            if (jm_name_set_has(duplicate_module_block_const_lexicals, name)) return false;
             if (strcmp(name, "_js_this") == 0 ||
                 strcmp(name, "_js_new.target") == 0 ||
                 strcmp(name, "_js_arguments") == 0) return false;
             return true;
+        };
+
+        auto capture_slot_key = [&](JsFuncCollected* child, JsCaptureEntry* cap) -> const char* {
+            if (!cap) return "";
+            if (jm_name_set_has(duplicate_module_block_const_lexicals, cap->name) &&
+                cap->scope_env_key[0]) {
+                char derived_key[128];
+                memset(derived_key, 0, sizeof(derived_key));
+                JsAstNode* target = child && child->node ? (JsAstNode*)child->node : NULL;
+                bool found_key = jm_find_enclosing_lexical_key_for_target((JsAstNode*)program,
+                    target, cap->name, derived_key);
+                if (!found_key && target) {
+                    for (int ci = 0; ci < mt->class_count; ci++) {
+                        JsClassEntry* ce = &mt->class_entries[ci];
+                        if (!ce->node || !jm_ast_node_contains_target((JsAstNode*)ce->node, target)) continue;
+                        found_key = jm_find_enclosing_lexical_key_for_target((JsAstNode*)program,
+                            (JsAstNode*)ce->node, cap->name, derived_key);
+                        if (found_key) break;
+                    }
+                }
+                if (found_key) {
+                    snprintf(cap->scope_env_key, sizeof(cap->scope_env_key), "%s", derived_key);
+                }
+                return cap->scope_env_key;
+            }
+            return cap->name;
         };
 
         // P7a: a closure participates in the module scope env only when EVERY
@@ -3920,12 +4026,12 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             JsFuncCollected* child = &mt->func_entries[ci];
             if (child->parent_index != -1) continue;
             if (child->capture_count == 0) continue;
-            if (!closure_qualifies(child)) continue;
-            for (int k = 0; k < child->capture_count; k++) {
-                if (!include_capture(child, k)) continue;
-                jm_name_set_add(scope_vars, child->captures[k].name);
+                if (!closure_qualifies(child)) continue;
+                for (int k = 0; k < child->capture_count; k++) {
+                    if (!include_capture(child, k)) continue;
+                    jm_name_set_add(scope_vars, capture_slot_key(child, &child->captures[k]));
+                }
             }
-        }
 
         int total = (int)hashmap_count(scope_vars);
         if (total > 0) {
@@ -3945,10 +4051,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (!closure_qualifies(child)) continue;
                 for (int k = 0; k < child->capture_count; k++) {
                     if (!include_capture(child, k)) continue;
-                    if (!jm_name_set_has(scope_vars, child->captures[k].name)) {
-                        jm_name_set_add(scope_vars, child->captures[k].name);
+                    const char* key = capture_slot_key(child, &child->captures[k]);
+                    if (!jm_name_set_has(scope_vars, key)) {
+                        jm_name_set_add(scope_vars, key);
                         snprintf(mt->module_fc.scope_env_names[fill_idx], 64,
-                            "%s", child->captures[k].name);
+                            "%s", key);
                         fill_idx++;
                     }
                 }
@@ -3964,8 +4071,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (!closure_qualifies(child)) continue;
                 for (int k = 0; k < child->capture_count; k++) {
                     if (!include_capture(child, k)) continue;
+                    const char* key = capture_slot_key(child, &child->captures[k]);
                     for (int s = 0; s < total; s++) {
-                        if (strcmp(child->captures[k].name, mt->module_fc.scope_env_names[s]) == 0) {
+                        if (strcmp(key, mt->module_fc.scope_env_names[s]) == 0) {
                             child->captures[k].scope_env_slot = s;
                             break;
                         }
