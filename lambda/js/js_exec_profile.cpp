@@ -73,6 +73,13 @@ static JsExecProfileSlot g_js_exec_profile_slots[JS_EXEC_PROF_EVENT_COUNT] = {
     {"shape_slot_guard", 0, 0, 0, 0},
     {"shape_guard_hit", 0, 0, 0, 0},
     {"shape_guard_miss", 0, 0, 0, 0},
+    {"load_ic_probe", 0, 0, 0, 0},
+    {"load_ic_hit_mono", 0, 0, 0, 0},
+    {"load_ic_hit_poly", 0, 0, 0, 0},
+    {"load_ic_miss", 0, 0, 0, 0},
+    {"load_ic_install_mono", 0, 0, 0, 0},
+    {"load_ic_install_poly", 0, 0, 0, 0},
+    {"load_ic_megamorphic", 0, 0, 0, 0},
     {"box_float", 0, 0, 0, 0},
     {"unbox_int", 0, 0, 0, 0},
     {"unbox_float", 0, 0, 0, 0},
@@ -279,7 +286,8 @@ static JsExecProfileEvent js_exec_profile_event_for_runtime_call(const char* fn_
         strcmp(fn_name, "js_set_module_var") == 0) {
         return JS_EXEC_PROF_PROPERTY_SET;
     }
-    if (strcmp(fn_name, "js_property_access") == 0) return JS_EXEC_PROF_PROPERTY_ACCESS;
+    if (strcmp(fn_name, "js_property_access") == 0 ||
+        strcmp(fn_name, "js_property_access_named_ic") == 0) return JS_EXEC_PROF_PROPERTY_ACCESS;
     if (strcmp(fn_name, "js_array_get_int") == 0) return JS_EXEC_PROF_ARRAY_GET_INT;
     if (strcmp(fn_name, "js_array_set_int") == 0) return JS_EXEC_PROF_ARRAY_SET_INT;
     if (strcmp(fn_name, "js_array_push") == 0) return JS_EXEC_PROF_ARRAY_PUSH;

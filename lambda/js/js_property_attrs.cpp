@@ -200,6 +200,7 @@ extern "C" void js_shape_entry_update_flags(Item obj, const char* name, int name
         se = js_find_shape_entry(obj, name, name_len);
         if (!se) return;
     }
+    js_map_promote_descriptor_kind(js_obj_underlying_map(obj));
     se->flags = new_flags;
 }
 

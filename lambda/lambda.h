@@ -519,6 +519,7 @@ enum MapKind {
                                // — bypasses Phase 4 accessor-marker intercept.
     MAP_KIND_CSS_NAMESPACE = 12, // CSS namespace object; ordinary shape-backed
                                  // properties plus CSS-specific method dispatch.
+    MAP_KIND_DESC       = 13, // regular JS/Lambda object with descriptor metadata
 };
 
 // Array and List struct defintions needed for for-loop
