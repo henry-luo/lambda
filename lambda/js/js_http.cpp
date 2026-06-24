@@ -25,6 +25,7 @@
 
 extern "C" Item js_readable_new(Item opts);
 extern "C" Item js_readable_push(Item self, Item chunk);
+extern "C" Item js_stream_on(Item self, Item event_item, Item listener);
 extern "C" Item js_stream_destroy(Item self, Item err);
 extern "C" Item js_async_hooks_enter_resource(Item resource);
 extern "C" void js_async_hooks_restore_resource(Item previous);
@@ -501,17 +502,38 @@ static Item http_response_writeHead(Item self, Item status_item, Item reason_or_
 
     if (get_type_id(headers_arg) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(headers_arg);
-        if ((len & 1) != 0) {
-            return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
-                                            "The argument 'headers' must be an even-length array");
+        bool pair_array = false;
+        if (len > 0 && get_type_id(js_array_get_int(headers_arg, 0)) == LMD_TYPE_ARRAY) {
+            pair_array = true;
         }
-        for (int64_t i = 0; i + 1 < len; i += 2) {
-            http_raw_headers_remove_name(self, js_array_get_int(headers_arg, i));
-        }
-        for (int64_t i = 0; i + 1 < len; i += 2) {
-            http_response_append_raw_header_pair(self,
-                js_array_get_int(headers_arg, i),
-                js_array_get_int(headers_arg, i + 1));
+        if (pair_array) {
+            for (int64_t i = 0; i < len; i++) {
+                Item pair = js_array_get_int(headers_arg, i);
+                if (get_type_id(pair) != LMD_TYPE_ARRAY || js_array_length(pair) < 2) {
+                    return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
+                                                    "The argument 'headers' must be an array of name-value pairs");
+                }
+                http_raw_headers_remove_name(self, js_array_get_int(pair, 0));
+            }
+            for (int64_t i = 0; i < len; i++) {
+                Item pair = js_array_get_int(headers_arg, i);
+                http_response_append_raw_header_pair(self,
+                    js_array_get_int(pair, 0),
+                    js_array_get_int(pair, 1));
+            }
+        } else {
+            if ((len & 1) != 0) {
+                return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
+                                                "The argument 'headers' must be an even-length array");
+            }
+            for (int64_t i = 0; i + 1 < len; i += 2) {
+                http_raw_headers_remove_name(self, js_array_get_int(headers_arg, i));
+            }
+            for (int64_t i = 0; i + 1 < len; i += 2) {
+                http_response_append_raw_header_pair(self,
+                    js_array_get_int(headers_arg, i),
+                    js_array_get_int(headers_arg, i + 1));
+            }
         }
     } else if (get_type_id(headers_arg) == LMD_TYPE_MAP) {
         Item keys = js_object_keys(headers_arg);
@@ -991,13 +1013,20 @@ static void http_server_connection_cb(uv_stream_t* server, int status) {
 }
 
 // server.listen(port, [host], [callback])
-static Item js_http_server_listening_tick(Item self, Item on_listening, Item callback) {
+static Item js_http_server_listening_tick(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+
+    Item self = env[0];
+    Item callback = env[1];
+    Item on_listening = js_property_get(self, make_string_item("__on_listening__"));
     if (get_type_id(on_listening) == LMD_TYPE_FUNC) {
         js_call_function(on_listening, self, NULL, 0);
     }
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
         js_call_function(callback, self, NULL, 0);
     }
+    js_microtask_flush();
     return make_js_undefined();
 }
 
@@ -1048,13 +1077,11 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
     // store listening address info
     js_property_set(self, make_string_item("listening"), (Item){.item = b2it(true)});
 
-    Item on_listening = js_property_get(self, make_string_item("__on_listening__"));
-    if (get_type_id(on_listening) == LMD_TYPE_FUNC || get_type_id(callback) == LMD_TYPE_FUNC) {
-        Item bound_args[3] = { self, on_listening, callback };
-        Item tick = js_bind_function(js_new_function((void*)js_http_server_listening_tick, 3),
-                                     make_js_undefined(), bound_args, 3);
-        js_next_tick_enqueue(tick);
-    }
+    Item* env = js_alloc_env(2);
+    env[0] = self;
+    env[1] = callback;
+    Item tick = js_new_closure((void*)js_http_server_listening_tick, 0, env, 2);
+    js_next_tick_enqueue(tick);
 
     return self;
 }
@@ -1297,9 +1324,21 @@ static int parse_http_response_head(const char* data, int data_len,
         }
         lc_name[nlen] = '\0';
 
-        js_property_set(*headers_obj,
-            make_string_item(lc_name, nlen),
-            make_string_item(vstart, vlen));
+        Item key = make_string_item(lc_name, nlen);
+        Item value = make_string_item(vstart, vlen);
+        if (nlen == 10 && memcmp(lc_name, "set-cookie", 10) == 0) {
+            Item existing = js_property_get(*headers_obj, key);
+            if (get_type_id(existing) == LMD_TYPE_ARRAY) {
+                js_array_push(existing, value);
+            } else {
+                Item cookies = js_array_new(0);
+                if (get_type_id(existing) == LMD_TYPE_STRING) js_array_push(cookies, existing);
+                js_array_push(cookies, value);
+                js_property_set(*headers_obj, key, cookies);
+            }
+        } else {
+            js_property_set(*headers_obj, key, value);
+        }
 
         p = line_end + 2;
     }
@@ -1309,19 +1348,7 @@ static int parse_http_response_head(const char* data, int data_len,
 
 // response.on(event, cb) for client responses
 extern "C" Item js_http_client_res_on(Item self2, Item ev2, Item cb2) {
-    if (get_type_id(ev2) != LMD_TYPE_STRING) return self2;
-    String* evs = it2s(ev2);
-    // for 'data' event, immediately call with body if available
-    if (evs->len == 4 && memcmp(evs->chars, "data", 4) == 0) {
-        Item body = js_property_get(self2, make_string_item("body"));
-        if (get_type_id(body) == LMD_TYPE_STRING) {
-            js_call_function(cb2, self2, &body, 1);
-        }
-    } else if (evs->len == 3 && memcmp(evs->chars, "end", 3) == 0) {
-        // immediately call end
-        js_call_function(cb2, self2, NULL, 0);
-    }
-    return self2;
+    return js_stream_on(self2, ev2, cb2);
 }
 
 static Item js_http_econnreset_error(Item err) {

@@ -2516,6 +2516,10 @@ extern "C" Item js_readable_resume(Item self) {
             stream_emit(self, "data", &chunk, 1);
         }
         js_stream_set_readable_buffer(self, js_array_new(0));
+        if (js_item_is_true(js_property_get(self, key_end_pending)) &&
+            !js_item_is_true(js_property_get(self, key_end_emitted))) {
+            js_stream_schedule_end(self);
+        }
     }
     js_stream_call_read_if_needed(self, make_js_undefined());
     return self;
