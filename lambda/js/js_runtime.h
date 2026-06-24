@@ -20,6 +20,12 @@ static inline bool js_map_kind_uses_default_object_to_primitive(uint8_t map_kind
            map_kind == MAP_KIND_FOREIGN_DOC;
 }
 
+static inline bool js_map_kind_is_ordinary_shape(uint8_t map_kind) {
+    return map_kind == MAP_KIND_PLAIN || map_kind == MAP_KIND_DESC;
+}
+
+void js_map_promote_descriptor_kind(Map* m);
+
 // Sentinel value for dense array holes. Uses type tag 0x7E (unused), so it
 // cannot collide with any valid JS value. Ordinary object deletes use
 // JSPD_DELETED shape bits instead of storing this raw value in map slots.
@@ -34,6 +40,28 @@ static inline bool js_map_kind_uses_default_object_to_primitive(uint8_t map_kind
 // Generated Unicode identifier tests declare thousands of top-level vars; keep
 // this above those rows so they stay on the indexed binding path.
 #define JS_MAX_MODULE_VARS 16384
+
+#define JS_LOAD_IC_POLY_MAX 4
+#define JS_LOAD_IC_EMPTY 0
+#define JS_LOAD_IC_MONO 1
+#define JS_LOAD_IC_POLY 2
+#define JS_LOAD_IC_MEGAMORPHIC 3
+
+typedef struct JsLoadICEntry {
+    void* shape;
+    void* entry;
+    int64_t byte_offset;
+} JsLoadICEntry;
+
+typedef struct JsLoadIC {
+    uint8_t state;
+    uint8_t count;
+    uint16_t miss_count;
+    const char* name;
+    int name_len;
+    uint64_t key_item;
+    JsLoadICEntry entries[JS_LOAD_IC_POLY_MAX];
+} JsLoadIC;
 
 // =============================================================================
 // Type Conversion Functions
@@ -123,6 +151,7 @@ Item js_property_set_v(Item object, Item key, Item value, int64_t strict);
 Item js_private_property_set(Item object, Item key, Item value, int64_t strict);
 Item js_create_data_property(Item object, Item key, Item value);
 Item js_property_access(Item object, Item key);
+Item js_property_access_named_ic(Item object, const char* name, int64_t name_len, JsLoadIC* ic);
 
 // =============================================================================
 // Array Functions

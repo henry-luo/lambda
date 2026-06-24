@@ -13,6 +13,15 @@ static bool jm_test262_fast_paths_enabled(JsMirTranspiler* mt) {
            strstr(mt->filename, "test/js262/test/") != NULL;
 }
 
+static bool jm_load_ic_enabled() {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char* flag = getenv("LAMBDA_JS_LOAD_IC");
+        enabled = (!flag || flag[0] == '\0' || strcmp(flag, "0") != 0) ? 1 : 0;
+    }
+    return enabled != 0;
+}
+
 static const char* jm_profile_shape_guard_label(JsMirTranspiler* mt,
         JsClassEntry* ce, JsIdentifierNode* prop, int slot, JsMemberNode* mem) {
     if (!mt || !ce || !prop || !prop->name) return "unknown";
@@ -11588,6 +11597,30 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
             MIR_new_reg_op(mt->ctx, val)));
         jm_emit_label(mt, l_end);
         return result;
+    }
+
+    if (jm_load_ic_enabled() &&
+        !mem->computed &&
+        mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
+        String* key_name = jm_resolve_private_name(mt, (JsAstNode*)mem->property, prop->name);
+        if (key_name && !jm_is_private_name(key_name) &&
+                mt->tp && mt->tp->ast_pool) {
+            JsLoadIC* ic = (JsLoadIC*)pool_calloc(mt->tp->ast_pool, sizeof(JsLoadIC));
+            if (ic) {
+                ic->state = JS_LOAD_IC_EMPTY;
+                ic->name = key_name->chars;
+                ic->name_len = (int)key_name->len;
+                ic->key_item = s2it(key_name);
+                MIR_reg_t val = jm_call_4(mt, "js_property_access_named_ic", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)key_name->chars),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)key_name->len),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ic));
+                jm_emit_exc_propagate_check(mt);
+                return val;
+            }
+        }
     }
 
     MIR_reg_t key;

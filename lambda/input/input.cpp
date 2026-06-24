@@ -258,6 +258,9 @@ bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
         prev = shape_entry;
     }
     map_type->byte_size = byte_offset;
+    if (shape_flags != 0 && mp->map_kind == MAP_KIND_PLAIN) {
+        mp->map_kind = MAP_KIND_DESC;
+    }
     return true;
 }
 

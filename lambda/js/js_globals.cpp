@@ -15405,6 +15405,7 @@ static bool js_define_global_var_property_fast_absent(Item global, Item key, Ite
     ShapeEntry* se = tm ? tm->last : NULL;
     if (se && se->name && (int)se->name->length == (int)str->len &&
             memcmp(se->name->str, str->chars, (size_t)str->len) == 0) {
+        js_map_promote_descriptor_kind(global.map);
         jspd_set_configurable(se, false);
     } else {
         js_attr_set_configurable(global, str->chars, (int)str->len, false);

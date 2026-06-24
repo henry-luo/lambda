@@ -48,6 +48,7 @@ static inline Item js_props_accessor_result(Item value) {
 // forward-declare here so the kernels below can build name keys.
 extern "C++" String* heap_create_name(const char* name, size_t len);
 extern void fn_map_set(Item map_item, Item key, Item value);
+extern Item _map_read_field(ShapeEntry* field, void* map_data);
 
 // Mirror of JsFuncProps from js_globals.cpp / js_runtime.cpp — used here to
 // reach `properties_map`. Layout MUST stay in sync.
@@ -121,6 +122,16 @@ extern "C" JsShapeSlotStatus js_own_shape_slot_status(Item object,
 
     ShapeEntry* se = js_find_shape_entry(object, name, name_len);
     if (out_se) *out_se = se;
+
+    if (se && m->data && se->byte_offset >= 0 &&
+        se->byte_offset <= (int64_t)m->data_cap - (int64_t)sizeof(void*)) {
+        Item slot = _map_read_field(se, m->data);
+        if (out_slot) *out_slot = slot;
+        if (jspd_is_deleted(se)) return JS_SHAPE_SLOT_DELETED;
+        if (js_props_is_deleted_sentinel(slot)) return JS_SHAPE_SLOT_DELETED;
+        if (jspd_is_accessor(se)) return JS_SHAPE_SLOT_ACCESSOR;
+        return JS_SHAPE_SLOT_DATA;
+    }
 
     bool found = false;
     Item slot = js_map_get_fast_ext(m, name, name_len, &found);
@@ -345,9 +356,6 @@ extern "C" bool js_ordinary_delete(Item object, const char* name, int name_len) 
 
     return js_shape_mark_deleted_own(object, name, name_len, /*create_if_missing=*/false);
 }
-
-// External: defined in lambda-data-runtime.cpp (C++ linkage).
-extern Item _map_read_field(ShapeEntry* field, void* map_data);
 
 extern "C" JsResolveFieldStatus js_ordinary_resolve_shape_value(ShapeEntry* e,
                                                                   Map* m,

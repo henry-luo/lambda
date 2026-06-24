@@ -48,6 +48,10 @@ extern "C" Item js_dom_get_selection_function_for_document(void* doc);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
+extern "C" void js_map_promote_descriptor_kind(Map* m) {
+    if (m && m->map_kind == MAP_KIND_PLAIN) m->map_kind = MAP_KIND_DESC;
+}
+
 #ifdef LAMBDA_JS_EXEC_PROFILE
 extern "C" Item js_profiled_push_d(double dval) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_BOX_FLOAT);
@@ -3727,7 +3731,7 @@ extern "C" Item js_property_get(Item object, Item key) {
             }
         }
         // MapKind fast path: plain objects (95%+ of accesses) skip all exotic checks
-        if (m->map_kind != MAP_KIND_PLAIN && !private_internal_property_key) {
+        if (!js_map_kind_is_ordinary_shape(m->map_kind) && !private_internal_property_key) {
             Item exotic_result = ItemNull;
             if (js_try_exotic_property_get(object, key, &exotic_result)) return exotic_result;
         }
@@ -5502,7 +5506,7 @@ static Item js_property_set_map(Item object, Item key, Item value) {
         }
     }
     // MapKind fast path: skip exotic checks for plain objects
-    if (m->map_kind != MAP_KIND_PLAIN && !private_internal_property_key) {
+    if (!js_map_kind_is_ordinary_shape(m->map_kind) && !private_internal_property_key) {
         Item exotic_result = ItemNull;
         if (js_try_exotic_property_set(object, key, &value, &exotic_result)) return exotic_result;
     }
@@ -6381,6 +6385,153 @@ extern "C" Item js_property_get_str(Item object, const char* key, int key_len) {
     // create string key and delegate to js_property_get
     Item str_key = (Item){.item = s2it(heap_create_name(key, key_len))};
     return js_property_get(object, str_key);
+}
+
+static inline bool js_load_ic_offset_ok(Map* m, int64_t byte_offset) {
+    if (!m || !m->data || byte_offset < 0) return false;
+    if ((byte_offset % (int64_t)sizeof(void*)) != 0) return false;
+    return byte_offset <= (int64_t)m->data_cap - (int64_t)sizeof(void*);
+}
+
+static inline bool js_load_ic_name_matches(ShapeEntry* entry,
+        const char* name, int name_len) {
+    if (!entry || !entry->name || !entry->name->str || !name || name_len < 0) return false;
+    if (entry->name->str == name && entry->name->length == (size_t)name_len) return true;
+    return entry->name->length == (size_t)name_len &&
+        memcmp(entry->name->str, name, (size_t)name_len) == 0;
+}
+
+static inline bool js_load_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
+        Item* out_value) {
+    if (!m || !cached || !cached->shape || !cached->entry) return false;
+    if (m->type != cached->shape) return false;
+    if (!js_load_ic_offset_ok(m, cached->byte_offset)) return false;
+    ShapeEntry* entry = (ShapeEntry*)cached->entry;
+    if (out_value) *out_value = _map_read_field(entry, m->data);
+    return true;
+}
+
+static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
+        JsLoadICEntry* out_entry, Item* out_value) {
+    if (!out_entry || !out_value || !name || name_len < 0) return false;
+    if (get_type_id(object) != LMD_TYPE_MAP) return false;
+    Map* m = object.map;
+    if (!m || m->map_kind != MAP_KIND_PLAIN || !m->data) return false;
+    TypeMap* tm = (TypeMap*)m->type;
+    if (!tm || !typemap_ptr_is_plausible(tm) || !tm->shape) return false;
+
+    ShapeEntry* entry = js_find_shape_entry(object, name, name_len);
+    if (!js_load_ic_name_matches(entry, name, name_len)) return false;
+    if (entry->flags != 0) {
+        js_map_promote_descriptor_kind(m);
+        return false;
+    }
+    if (!js_load_ic_offset_ok(m, entry->byte_offset)) return false;
+
+    Item value = _map_read_field(entry, m->data);
+    if (js_is_deleted_sentinel(value)) {
+        js_map_promote_descriptor_kind(m);
+        return false;
+    }
+
+    out_entry->shape = m->type;
+    out_entry->entry = entry;
+    out_entry->byte_offset = entry->byte_offset;
+    *out_value = value;
+    return true;
+}
+
+static inline bool js_load_ic_key_matches(JsLoadIC* ic, const char* name, int name_len) {
+    if (!ic || !name || name_len < 0) return false;
+    if (!ic->name) return true;
+    if (ic->name == name && ic->name_len == name_len) return true;
+    return ic->name_len == name_len && memcmp(ic->name, name, (size_t)name_len) == 0;
+}
+
+static Item js_property_access_named_ic_slow(Item object, const char* name,
+        int name_len, JsLoadIC* ic) {
+    if (ic && ic->key_item != 0) {
+        Item key = (Item){.item = ic->key_item};
+        return js_property_access(object, key);
+    }
+    if (!name || name_len < 0) return js_property_access(object, make_js_undefined());
+    Item key = (Item){.item = s2it(heap_create_name(name, (size_t)name_len))};
+    return js_property_access(object, key);
+}
+
+extern "C" Item js_property_access_named_ic(Item object, const char* name,
+        int64_t name_len64, JsLoadIC* ic) {
+    js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_PROBE);
+    if (!ic || !name || name_len64 < 0 || name_len64 > 2147483647LL) {
+        return js_property_access_named_ic_slow(object, name, 0, ic);
+    }
+    int name_len = (int)name_len64;
+    if (!js_load_ic_key_matches(ic, name, name_len)) {
+        return js_property_access_named_ic_slow(object, name, name_len, ic);
+    }
+
+    Map* m = NULL;
+    if (get_type_id(object) == LMD_TYPE_MAP) m = object.map;
+    if (m && m->map_kind == MAP_KIND_PLAIN && m->data) {
+        Item value = ItemNull;
+        if (ic->state == JS_LOAD_IC_MONO) {
+            if (js_load_ic_try_hit_entry(m, &ic->entries[0], &value)) {
+                js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_HIT_MONO);
+                return value;
+            }
+        } else if (ic->state == JS_LOAD_IC_POLY) {
+            int count = ic->count;
+            if (count > JS_LOAD_IC_POLY_MAX) count = JS_LOAD_IC_POLY_MAX;
+            for (int i = 0; i < count; i++) {
+                if (js_load_ic_try_hit_entry(m, &ic->entries[i], &value)) {
+                    js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_HIT_POLY);
+                    return value;
+                }
+            }
+        } else if (ic->state == JS_LOAD_IC_MEGAMORPHIC) {
+            js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_MEGAMORPHIC);
+            return js_property_access_named_ic_slow(object, name, name_len, ic);
+        }
+    }
+
+    js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_MISS);
+    if (ic->miss_count != 0xffffu) ic->miss_count++;
+
+    if (ic->state != JS_LOAD_IC_MEGAMORPHIC) {
+        JsLoadICEntry entry;
+        memset(&entry, 0, sizeof(entry));
+        Item value = ItemNull;
+        if (js_load_ic_build_entry(object, name, name_len, &entry, &value)) {
+            if (!ic->name) {
+                ic->name = name;
+                ic->name_len = name_len;
+            }
+            for (int i = 0; i < ic->count && i < JS_LOAD_IC_POLY_MAX; i++) {
+                if (ic->entries[i].shape == entry.shape) {
+                    ic->entries[i] = entry;
+                    return value;
+                }
+            }
+            if (ic->state == JS_LOAD_IC_EMPTY || ic->count == 0) {
+                ic->entries[0] = entry;
+                ic->count = 1;
+                ic->state = JS_LOAD_IC_MONO;
+                js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_INSTALL_MONO);
+                return value;
+            }
+            if (ic->count < JS_LOAD_IC_POLY_MAX) {
+                ic->entries[ic->count++] = entry;
+                ic->state = JS_LOAD_IC_POLY;
+                js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_INSTALL_POLY);
+                return value;
+            }
+            ic->state = JS_LOAD_IC_MEGAMORPHIC;
+            js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_MEGAMORPHIC);
+            return value;
+        }
+    }
+
+    return js_property_access_named_ic_slow(object, name, name_len, ic);
 }
 
 // Convert a UTF-16 unit index to the corresponding byte offset in a UTF-8 string.
@@ -7927,7 +8078,8 @@ static bool js_has_property(Item obj, Item key) {
     // object like {2:2, length:20} doesn't reach Object.prototype, so Object.prototype[k] values
     // captured before getters can fire don't corrupt array-method snapshots.
     Item proto;
-    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map->map_kind == MAP_KIND_PLAIN) {
+    if (get_type_id(obj) == LMD_TYPE_MAP &&
+        js_map_kind_is_ordinary_shape(obj.map->map_kind)) {
         proto = js_get_prototype(obj);  // only explicit __proto__; ItemNull for plain object literals
     } else {
         proto = js_get_prototype_of(obj);  // arrays, functions, typed arrays, Objects with __proto__
@@ -7970,7 +8122,8 @@ static Item js_array_like_to_array(Item obj) {
         // v37: For plain MAPs without __proto__, js_has_property/js_property_get
         // skip Object.prototype. If property is missing or undefined here, check
         // Object.prototype manually (unless it's an own setter-only accessor).
-        bool plain_map = (get_type_id(obj) == LMD_TYPE_MAP && obj.map->map_kind == MAP_KIND_PLAIN);
+        bool plain_map = (get_type_id(obj) == LMD_TYPE_MAP &&
+            js_map_kind_is_ordinary_shape(obj.map->map_kind));
         bool is_own_setter_only = false;
         if (plain_map) {
             // Stage A1.5: a setter-only accessor (getter == ItemNull) shadows
@@ -22501,7 +22654,7 @@ static Item js_array_generic_pop(Item object) {
 static bool js_array_method_has_property(Item object, Item key) {
     if (js_has_property(object, key)) return true;
     if (get_type_id(object) == LMD_TYPE_MAP && object.map &&
-        object.map->map_kind == MAP_KIND_PLAIN) {
+        js_map_kind_is_ordinary_shape(object.map->map_kind)) {
         Map* obj_proto = js_resolve_object_prototype();
         if (obj_proto && object.map != obj_proto) {
             Item op_item = (Item){.map = obj_proto};
