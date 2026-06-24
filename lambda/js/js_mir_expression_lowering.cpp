@@ -82,6 +82,10 @@ static const char* jm_profile_property_set_label(JsMirTranspiler* mt, JsMemberNo
     return interned->chars;
 }
 
+static const char* jm_profile_load_ic_label(JsMirTranspiler* mt, JsMemberNode* mem) {
+    return jm_profile_property_set_label(mt, mem);
+}
+
 static void jm_emit_profile_property_set_site(JsMirTranspiler* mt, JsMemberNode* member) {
     if (!JS_EXEC_PROFILE_ENABLED || js_exec_profile_mode() <= 0 || !member || member->computed ||
             !member->property || member->property->node_type != JS_AST_NODE_IDENTIFIER) {
@@ -11612,6 +11616,9 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                 ic->name = key_name->chars;
                 ic->name_len = (int)key_name->len;
                 ic->key_item = s2it(key_name);
+                if (JS_EXEC_PROFILE_ENABLED && js_exec_profile_mode() > 0) {
+                    ic->profile_label = jm_profile_load_ic_label(mt, mem);
+                }
                 MIR_reg_t val = jm_call_4(mt, "js_property_access_named_ic", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)key_name->chars),
