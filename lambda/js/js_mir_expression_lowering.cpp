@@ -6358,6 +6358,12 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
         }
         if (var->from_block_func_decl) continue;
         int slot = mt->last_closure_capture_slots[i] >= 0 ? mt->last_closure_capture_slots[i] : i;
+        MIR_reg_t read_env = mt->last_closure_env_reg;
+        if (mt->last_closure_capture_is_transitive[i] &&
+                var->from_env && var->env_reg != 0 && var->env_slot >= 0) {
+            read_env = var->env_reg;
+            slot = var->env_slot;
+        }
         // Js56 P2: BOOL vars are stored BOXED (var-decl falls into the
         // generic boxed branch — there is no native-bool fast path), so they
         // need the same MOV-only readback as object types even though
@@ -6371,7 +6377,7 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
             MIR_reg_t boxed = jm_new_reg(mt, "envrd", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, boxed),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->last_closure_env_reg, 0, 1)));
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), read_env, 0, 1)));
             if (var->type_id == LMD_TYPE_FLOAT) {
                 MIR_reg_t unboxed = jm_emit_unbox_float(mt, boxed);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
@@ -6395,7 +6401,7 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
             // Boxed variable — direct read from env
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, var->reg),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->last_closure_env_reg, 0, 1)));
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), read_env, 0, 1)));
             if (var->in_scope_env && var->scope_env_reg != 0 && var->scope_env_slot >= 0) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
@@ -12166,6 +12172,8 @@ static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
             sizeof(mt->last_closure_capture_names[ci]), "%s", fc->captures[ci].name);
         mt->last_closure_capture_slots[ci] =
             use_capture_slots ? fc->captures[ci].scope_env_slot : ci;
+        mt->last_closure_capture_is_transitive[ci] =
+            fc->captures[ci].grandparent_slot >= 0;
         mt->last_closure_capture_is_nfe[ci] = fc->captures[ci].is_nfe_binding;
     }
     mt->last_closure_has_env = count > 0;
