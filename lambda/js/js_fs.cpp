@@ -10,6 +10,7 @@
 #include "js_typed_array.h"
 #include "js_error_codes.h"
 #include "js_class.h"
+#include "js_property_attrs.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -20,6 +21,9 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#ifndef _WIN32
+#include <sys/statvfs.h>
+#endif
 #include "../../lib/mem.h"
 #include "../../lib/file.h"
 #ifdef _WIN32
@@ -28,6 +32,9 @@
 #define S_IFSOCK 0xC000
 #endif
 #endif
+
+extern "C" Item js_util_custom_promisify_args_symbol(void);
+extern "C" Item js_util_promisify_custom_symbol(void);
 
 // Helper: make JS undefined value
 static inline Item make_js_undefined() {
@@ -125,6 +132,17 @@ static bool fs_validate_encoding_options(Item options_item) {
     if (type == LMD_TYPE_MAP) {
         Item encoding = js_property_get(options_item, (Item){.item = s2it(heap_create_name("encoding", 8))});
         return fs_validate_encoding_item(encoding);
+    }
+    return true;
+}
+
+static bool fs_read_file_should_return_buffer(Item options_item) {
+    TypeId type = get_type_id(options_item);
+    if (type == LMD_TYPE_UNDEFINED || type == LMD_TYPE_NULL) return true;
+    if (type == LMD_TYPE_STRING) return fs_string_equals(it2s(options_item), "buffer");
+    if (type == LMD_TYPE_MAP) {
+        Item encoding = js_property_get(options_item, (Item){.item = s2it(heap_create_name("encoding", 8))});
+        return fs_read_file_should_return_buffer(encoding);
     }
     return true;
 }
@@ -238,10 +256,14 @@ static bool fs_validate_uid_gid(Item value, const char* name, int* out) {
 
 static bool fs_validate_offset_length(Item offset_item, Item length_item, int byte_length,
                                       int* out_offset, int* out_length) {
-    int64_t offset = 0, length = byte_length;
+    int64_t offset = 0, length = -1;
     TypeId offset_type = get_type_id(offset_item);
     TypeId length_type = get_type_id(length_item);
     if (offset_type != LMD_TYPE_UNDEFINED && offset_type != LMD_TYPE_NULL) {
+        if (offset_type == LMD_TYPE_INT && it2i(offset_item) <= -(int64_t)JS_SYMBOL_BASE) {
+            js_throw_invalid_arg_type("offset", "number", offset_item);
+            return false;
+        }
         if (offset_type != LMD_TYPE_INT && offset_type != LMD_TYPE_FLOAT) {
             js_throw_invalid_arg_type("offset", "number", offset_item);
             return false;
@@ -258,6 +280,10 @@ static bool fs_validate_offset_length(Item offset_item, Item length_item, int by
         offset = (int64_t)number;
     }
     if (length_type != LMD_TYPE_UNDEFINED && length_type != LMD_TYPE_NULL) {
+        if (length_type == LMD_TYPE_INT && it2i(length_item) <= -(int64_t)JS_SYMBOL_BASE) {
+            js_throw_invalid_arg_type("length", "number", length_item);
+            return false;
+        }
         if (length_type != LMD_TYPE_INT && length_type != LMD_TYPE_FLOAT) {
             js_throw_invalid_arg_type("length", "number", length_item);
             return false;
@@ -278,6 +304,9 @@ static bool fs_validate_offset_length(Item offset_item, Item length_item, int by
         snprintf(range, sizeof(range), "<= %d", byte_length);
         js_throw_out_of_range("offset", range, offset_item);
         return false;
+    }
+    if (length < 0) {
+        length = byte_length - offset;
     }
     if (length > byte_length - offset) {
         char range[64];
@@ -301,6 +330,8 @@ static Item make_string_item(const char* str) {
     if (!str) return ItemNull;
     return make_string_item(str, (int)strlen(str));
 }
+
+static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count);
 
 static bool fs_parse_access_mode(Item mode_item, bool has_mode, int* out_mode) {
     *out_mode = 0;
@@ -389,6 +420,86 @@ extern "C" Item js_readable_push(Item self, Item chunk);
 extern "C" Item js_stream_destroy(Item self, Item err);
 extern Item js_promise_resolve(Item value);
 extern Item js_promise_reject(Item reason);
+extern "C" Item bigint_from_int64(int64_t val);
+extern "C" Item bigint_from_string(const char* str, int len);
+extern "C" Item js_buffer_alloc(Item size_item, Item fill_item);
+extern "C" int64_t bigint_to_int64(Item bi);
+extern "C" Item js_array_is_array(Item value);
+extern "C" Item js_fs_openSync(Item path_item, Item flags_item, Item mode_item);
+extern "C" Item js_fs_closeSync(Item fd_item);
+
+static Item fs_namespace = {0};
+
+static bool fs_is_nullish(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_UNDEFINED || type == LMD_TYPE_NULL;
+}
+
+static bool fs_is_bigint(Item value) {
+    if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
+    Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
+    return dec && dec->unlimited == DECIMAL_BIGINT;
+}
+
+static bool fs_is_options_object(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP || js_is_typed_array(value)) return false;
+    Item is_array = js_array_is_array(value);
+    return is_array.item != b2it(true);
+}
+
+static bool fs_read_position_to_int64(Item position_item, int64_t* out_position) {
+    if (fs_is_nullish(position_item)) {
+        *out_position = -1;
+        return true;
+    }
+    if (fs_is_bigint(position_item)) {
+        int64_t position = bigint_to_int64(position_item);
+        if (position < -1) {
+            js_throw_out_of_range("position", ">= -1", position_item);
+            return false;
+        }
+        *out_position = position;
+        return true;
+    }
+    return fs_validate_int_range(position_item, "position", -1, INT64_MAX, out_position);
+}
+
+static bool fs_read_parse_options(Item options_item, Item fallback_buffer,
+                                  Item* out_buffer, Item* out_offset,
+                                  Item* out_length, Item* out_position) {
+    Item buffer = fallback_buffer;
+    Item offset = make_js_undefined();
+    Item length = make_js_undefined();
+    Item position = make_js_undefined();
+
+    if (fs_is_options_object(options_item)) {
+        Item option_buffer = js_property_get(options_item, make_string_item("buffer"));
+        if (!fs_is_nullish(option_buffer)) buffer = option_buffer;
+        offset = js_property_get(options_item, make_string_item("offset"));
+        length = js_property_get(options_item, make_string_item("length"));
+        position = js_property_get(options_item, make_string_item("position"));
+    }
+
+    if (fs_is_nullish(buffer)) {
+        buffer = js_buffer_alloc((Item){.item = i2it(16384)}, make_js_undefined());
+    }
+    if (fs_is_nullish(offset)) offset = (Item){.item = i2it(0)};
+    if (fs_is_nullish(length) && fs_get_typed_array(buffer)) {
+        int byte_length = js_typed_array_byte_length(buffer);
+        int64_t offset_value = 0;
+        if (get_type_id(offset) == LMD_TYPE_INT) {
+            offset_value = it2i(offset);
+        } else if (get_type_id(offset) == LMD_TYPE_FLOAT) {
+            offset_value = (int64_t)it2d(offset);
+        }
+        length = (Item){.item = i2it(byte_length - offset_value)};
+    }
+    *out_buffer = buffer;
+    *out_offset = offset;
+    *out_length = length;
+    *out_position = position;
+    return true;
+}
 
 extern "C" Item js_stats_isFile() {
     Item mode_val = js_property_get(js_get_this(), make_string_item("__mode"));
@@ -494,6 +605,8 @@ static Item make_stats_object(const uv_stat_t* st) {
 // Synchronous File Operations
 // =============================================================================
 
+static Item js_fs_read_file_buffer(const char* path);
+
 // fs.readFileSync(path[, encoding])
 // Returns file contents as a string (assumes UTF-8)
 extern "C" Item js_fs_readFileSync(Item path_item, Item encoding_item) {
@@ -501,6 +614,9 @@ extern "C" Item js_fs_readFileSync(Item path_item, Item encoding_item) {
     char path_buf[1024];
     const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
+    if (fs_read_file_should_return_buffer(encoding_item)) {
+        return js_fs_read_file_buffer(path);
+    }
 
     uv_fs_t req;
     int fd = uv_fs_open(NULL, &req, path, UV_FS_O_RDONLY, 0, NULL);
@@ -728,13 +844,268 @@ extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
     return stream;
 }
 
+static bool fs_item_bytes(Item item, const char** data, int* len) {
+    if (!data || !len) return false;
+    *data = NULL;
+    *len = 0;
+    if (get_type_id(item) == LMD_TYPE_STRING) {
+        String* s = it2s(item);
+        *data = s->chars;
+        *len = (int)s->len;
+        return true;
+    }
+    if (js_is_typed_array(item)) {
+        if (js_typed_array_is_out_of_bounds_item(item)) return false;
+        int byte_len = js_typed_array_byte_length(item);
+        void* ptr = js_typed_array_current_data_ptr(item);
+        if (byte_len > 0 && !ptr) return false;
+        *data = (const char*)ptr;
+        *len = byte_len;
+        return true;
+    }
+    return false;
+}
+
+static void js_fs_writestream_call_write_hook(Item stream, Item fd_item);
+
+static Item js_fs_writestream_write(Item chunk_item) {
+    Item stream = js_get_this();
+    const char* data = NULL;
+    int len = 0;
+    if (!fs_item_bytes(chunk_item, &data, &len)) return (Item){.item = b2it(false)};
+
+    Item fd_item = js_property_get(stream, make_string_item("fd"));
+    int fd = 0;
+    bool close_after_write = false;
+    if (get_type_id(fd_item) == LMD_TYPE_INT) {
+        fd = (int)it2i(fd_item);
+    } else {
+        Item path_item = js_property_get(stream, make_string_item("__writestream_path__"));
+        char path_buf[1024];
+        const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+        if (!path) return (Item){.item = b2it(false)};
+
+        uv_fs_t open_req;
+        fd = uv_fs_open(NULL, &open_req, path,
+                        UV_FS_O_WRONLY | UV_FS_O_CREAT | UV_FS_O_APPEND, 0644, NULL);
+        uv_fs_req_cleanup(&open_req);
+        if (fd < 0) return (Item){.item = b2it(false)};
+        close_after_write = true;
+    }
+
+    if (len > 0) {
+        int64_t position = -1;
+        Item position_item = js_property_get(stream, make_string_item("__writestream_position__"));
+        if (get_type_id(position_item) == LMD_TYPE_INT) {
+            position = it2i(position_item);
+        }
+        uv_buf_t buf = uv_buf_init((char*)data, (unsigned int)len);
+        uv_fs_t write_req;
+        uv_fs_write(NULL, &write_req, fd, &buf, 1, position, NULL);
+        uv_fs_req_cleanup(&write_req);
+        if (position >= 0) {
+            js_property_set(stream, make_string_item("__writestream_position__"),
+                            (Item){.item = i2it(position + len)});
+        }
+    }
+    js_fs_writestream_call_write_hook(stream, fd_item);
+
+    if (close_after_write) {
+        uv_fs_t close_req;
+        uv_fs_close(NULL, &close_req, fd, NULL);
+        uv_fs_req_cleanup(&close_req);
+    }
+    return (Item){.item = b2it(true)};
+}
+
+static void js_fs_writestream_emit_finish(Item stream) {
+    Item cb = js_property_get(stream, make_string_item("__writestream_finish_cb__"));
+    if (get_type_id(cb) == LMD_TYPE_FUNC) {
+        js_call_function(cb, stream, NULL, 0);
+        js_microtask_flush();
+    }
+}
+
+static void js_fs_writestream_emit_close(Item stream) {
+    Item cb = js_property_get(stream, make_string_item("__writestream_close_cb__"));
+    if (get_type_id(cb) == LMD_TYPE_FUNC) {
+        js_call_function(cb, stream, NULL, 0);
+        js_microtask_flush();
+    }
+}
+
+static Item js_fs_writestream_close_noop(Item err_item) {
+    (void)err_item;
+    return make_js_undefined();
+}
+
+static Item js_fs_writestream_open_hook_cb(Item err_item, Item fd_item) {
+    (void)err_item;
+    if (get_type_id(fd_item) == LMD_TYPE_INT) {
+        js_fs_closeSync(fd_item);
+    }
+    return make_js_undefined();
+}
+
+static Item js_fs_writestream_io_hook_cb(Item err_item, Item value_item, Item data_item) {
+    (void)err_item;
+    (void)value_item;
+    (void)data_item;
+    return make_js_undefined();
+}
+
+static Item js_fs_writestream_hooks(Item stream) {
+    Item hooks = js_property_get(stream, make_string_item("__writestream_fs_hooks__"));
+    return get_type_id(hooks) == LMD_TYPE_MAP ? hooks : make_js_undefined();
+}
+
+static void js_fs_writestream_call_open_hook(Item stream, Item path_item, Item flags, Item mode) {
+    Item hooks = js_fs_writestream_hooks(stream);
+    if (get_type_id(hooks) != LMD_TYPE_MAP) return;
+    Item open_fn = js_property_get(hooks, make_string_item("open"));
+    if (get_type_id(open_fn) != LMD_TYPE_FUNC) return;
+    Item cb = js_new_function((void*)js_fs_writestream_open_hook_cb, 2);
+    Item args[4] = {path_item, flags, mode, cb};
+    js_call_function(open_fn, hooks, args, 4);
+}
+
+static void js_fs_writestream_call_write_hook(Item stream, Item fd_item) {
+    Item hooks = js_fs_writestream_hooks(stream);
+    if (get_type_id(hooks) != LMD_TYPE_MAP || get_type_id(fd_item) != LMD_TYPE_INT) return;
+    Item writev_fn = js_property_get(hooks, make_string_item("writev"));
+    if (get_type_id(writev_fn) == LMD_TYPE_FUNC) return;
+    Item write_fn = js_property_get(hooks, make_string_item("write"));
+    if (get_type_id(write_fn) != LMD_TYPE_FUNC) return;
+    Item cb = js_new_function((void*)js_fs_writestream_io_hook_cb, 3);
+    Item args[4] = {fd_item, make_string_item("", 0), (Item){.item = i2it(0)}, cb};
+    js_call_function(write_fn, hooks, args, 4);
+}
+
+static void js_fs_writestream_call_writev_hook(Item stream) {
+    Item hooks = js_fs_writestream_hooks(stream);
+    if (get_type_id(hooks) != LMD_TYPE_MAP) return;
+    Item writev_fn = js_property_get(hooks, make_string_item("writev"));
+    if (get_type_id(writev_fn) != LMD_TYPE_FUNC) return;
+    Item fd_item = js_property_get(stream, make_string_item("fd"));
+    if (get_type_id(fd_item) != LMD_TYPE_INT) return;
+    Item cb = js_new_function((void*)js_fs_writestream_io_hook_cb, 3);
+    Item args[3] = {fd_item, js_array_new(0), cb};
+    js_call_function(writev_fn, hooks, args, 3);
+}
+
+static void js_fs_writestream_close_if_needed(Item stream) {
+    Item fd_item = js_property_get(stream, make_string_item("fd"));
+    if (get_type_id(fd_item) != LMD_TYPE_INT) return;
+
+    Item auto_close = js_property_get(stream, make_string_item("__writestream_auto_close__"));
+    if (get_type_id(auto_close) == LMD_TYPE_BOOL && !it2b(auto_close)) return;
+
+    Item hooks = js_fs_writestream_hooks(stream);
+    Item close_fn = get_type_id(hooks) == LMD_TYPE_MAP ?
+        js_property_get(hooks, make_string_item("close")) :
+        js_property_get(fs_namespace, make_string_item("close"));
+    if (get_type_id(close_fn) == LMD_TYPE_FUNC) {
+        Item noop = js_new_function((void*)js_fs_writestream_close_noop, 1);
+        Item args[2] = {fd_item, noop};
+        js_call_function(close_fn, fs_namespace, args, 2);
+    } else {
+        js_fs_closeSync(fd_item);
+    }
+    js_property_set(stream, make_string_item("fd"), ItemNull);
+    js_property_set(stream, make_string_item("closed"), (Item){.item = b2it(true)});
+    js_fs_writestream_emit_close(stream);
+}
+
+static Item js_fs_writestream_end(Item chunk_item) {
+    Item stream = js_get_this();
+    TypeId chunk_type = get_type_id(chunk_item);
+    if (chunk_type != LMD_TYPE_UNDEFINED && chunk_item.item != ITEM_NULL) {
+        js_fs_writestream_write(chunk_item);
+    }
+    js_fs_writestream_call_writev_hook(stream);
+    js_property_set(stream, make_string_item("__writestream_finished__"), (Item){.item = b2it(true)});
+    js_fs_writestream_emit_finish(stream);
+    js_fs_writestream_close_if_needed(stream);
+    return stream;
+}
+
+static Item js_fs_writestream_on(Item event_item, Item callback_item) {
+    Item stream = js_get_this();
+    if (get_type_id(event_item) != LMD_TYPE_STRING || get_type_id(callback_item) != LMD_TYPE_FUNC) {
+        return stream;
+    }
+    String* event = it2s(event_item);
+    if (event->len == 6 && memcmp(event->chars, "finish", 6) == 0) {
+        js_property_set(stream, make_string_item("__writestream_finish_cb__"), callback_item);
+        Item finished = js_property_get(stream, make_string_item("__writestream_finished__"));
+        if (get_type_id(finished) == LMD_TYPE_BOOL && it2b(finished)) {
+            js_fs_writestream_emit_finish(stream);
+        }
+    } else if (event->len == 5 && memcmp(event->chars, "close", 5) == 0) {
+        js_property_set(stream, make_string_item("__writestream_close_cb__"), callback_item);
+        Item closed = js_property_get(stream, make_string_item("closed"));
+        if (get_type_id(closed) == LMD_TYPE_BOOL && it2b(closed)) {
+            js_fs_writestream_emit_close(stream);
+        }
+    }
+    return stream;
+}
+
 extern "C" Item js_fs_createWriteStream(Item path_item, Item options_item) {
     if (!fs_validate_encoding_options(options_item)) return ItemNull;
-    char path_buf[1024];
-    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    (void)path;
-    return js_new_object();
+    Item stream = js_new_object();
+    js_property_set(stream, make_string_item("__writestream_path__"), path_item);
+    js_property_set(stream, make_string_item("__writestream_finished__"), (Item){.item = b2it(false)});
+    js_property_set(stream, make_string_item("__writestream_auto_close__"), (Item){.item = b2it(true)});
+    js_property_set(stream, make_string_item("closed"), (Item){.item = b2it(false)});
+    js_property_set(stream, make_string_item("fd"), ItemNull);
+
+    Item flags = make_string_item("w");
+    Item mode = make_js_undefined();
+    if (get_type_id(options_item) == LMD_TYPE_MAP) {
+        Item flags_opt = js_property_get(options_item, make_string_item("flags"));
+        if (get_type_id(flags_opt) == LMD_TYPE_STRING || get_type_id(flags_opt) == LMD_TYPE_INT) {
+            flags = flags_opt;
+        }
+        Item mode_opt = js_property_get(options_item, make_string_item("mode"));
+        if (get_type_id(mode_opt) == LMD_TYPE_INT) mode = mode_opt;
+        Item auto_close = js_property_get(options_item, make_string_item("autoClose"));
+        if (get_type_id(auto_close) == LMD_TYPE_BOOL) {
+            js_property_set(stream, make_string_item("__writestream_auto_close__"), auto_close);
+        }
+        Item hooks = js_property_get(options_item, make_string_item("fs"));
+        if (get_type_id(hooks) == LMD_TYPE_MAP) {
+            js_property_set(stream, make_string_item("__writestream_fs_hooks__"), hooks);
+        }
+        Item fd_opt = js_property_get(options_item, make_string_item("fd"));
+        if (get_type_id(fd_opt) == LMD_TYPE_INT) {
+            js_property_set(stream, make_string_item("fd"), fd_opt);
+        }
+        Item start_opt = js_property_get(options_item, make_string_item("start"));
+        if (get_type_id(start_opt) == LMD_TYPE_INT) {
+            js_property_set(stream, make_string_item("__writestream_position__"), start_opt);
+        }
+    }
+
+    Item fd_item = js_property_get(stream, make_string_item("fd"));
+    if (get_type_id(fd_item) != LMD_TYPE_INT) {
+        char path_buf[1024];
+        const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+        if (!path) return ItemNull;
+        fd_item = js_fs_openSync(path_item, flags, mode);
+        if (get_type_id(fd_item) == LMD_TYPE_INT) {
+            js_property_set(stream, make_string_item("fd"), fd_item);
+        }
+    }
+    js_fs_writestream_call_open_hook(stream, path_item, flags, mode);
+
+    js_property_set(stream, make_string_item("write"),
+                    js_new_function((void*)js_fs_writestream_write, 1));
+    js_property_set(stream, make_string_item("end"),
+                    js_new_function((void*)js_fs_writestream_end, 1));
+    js_property_set(stream, make_string_item("on"),
+                    js_new_function((void*)js_fs_writestream_on, 2));
+    return stream;
 }
 
 // fs.writeFileSync(path, data)
@@ -996,6 +1367,65 @@ extern "C" Item js_fs_statSync(Item path_item) {
     Item obj = make_stats_object(&req.statbuf);
     uv_fs_req_cleanup(&req);
     return obj;
+}
+
+static bool fs_options_bigint(Item options_item) {
+    if (get_type_id(options_item) != LMD_TYPE_MAP) return false;
+    Item bigint = js_property_get(options_item, make_string_item("bigint"));
+    return js_is_truthy(bigint);
+}
+
+static Item fs_statfs_number(uint64_t value, bool bigint) {
+    if (bigint) {
+        if (value <= (uint64_t)INT64_MAX) return bigint_from_int64((int64_t)value);
+        char buf[32];
+        int len = snprintf(buf, sizeof(buf), "%llu", (unsigned long long)value);
+        return bigint_from_string(buf, len);
+    }
+    if (value > (uint64_t)INT64_MAX) value = (uint64_t)INT64_MAX;
+    return (Item){.item = i2it((int64_t)value)};
+}
+
+static Item make_statfs_object(uint64_t type, uint64_t bsize, uint64_t frsize,
+                               uint64_t blocks, uint64_t bfree, uint64_t bavail,
+                               uint64_t files, uint64_t ffree, bool bigint) {
+    Item obj = js_new_object();
+    js_property_set(obj, make_string_item("type"), fs_statfs_number(type, bigint));
+    js_property_set(obj, make_string_item("bsize"), fs_statfs_number(bsize, bigint));
+    js_property_set(obj, make_string_item("frsize"), fs_statfs_number(frsize, bigint));
+    js_property_set(obj, make_string_item("blocks"), fs_statfs_number(blocks, bigint));
+    js_property_set(obj, make_string_item("bfree"), fs_statfs_number(bfree, bigint));
+    js_property_set(obj, make_string_item("bavail"), fs_statfs_number(bavail, bigint));
+    js_property_set(obj, make_string_item("files"), fs_statfs_number(files, bigint));
+    js_property_set(obj, make_string_item("ffree"), fs_statfs_number(ffree, bigint));
+    return obj;
+}
+
+// fs.statfsSync(path[, options])
+extern "C" Item js_fs_statfsSync(Item path_item, Item options_item) {
+    char path_buf[1024];
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+
+    bool bigint = fs_options_bigint(options_item);
+#ifdef _WIN32
+    return make_statfs_object(0, 4096, 4096, 0, 0, 0, 0, 0, bigint);
+#else
+    struct statvfs vfs;
+    if (statvfs(path, &vfs) != 0) {
+        return js_throw_system_error(uv_translate_sys_error(errno), "statfs", path);
+    }
+    uint64_t frsize = vfs.f_frsize ? (uint64_t)vfs.f_frsize : (uint64_t)vfs.f_bsize;
+    return make_statfs_object(0,
+                              (uint64_t)vfs.f_bsize,
+                              frsize,
+                              (uint64_t)vfs.f_blocks,
+                              (uint64_t)vfs.f_bfree,
+                              (uint64_t)vfs.f_bavail,
+                              (uint64_t)vfs.f_files,
+                              (uint64_t)vfs.f_ffree,
+                              bigint);
+#endif
 }
 
 // fs.appendFileSync(path, data)
@@ -1572,19 +2002,34 @@ extern "C" Item js_fs_readSync(Item fd_item, Item buffer_item, Item offset_item,
     int fd = 0;
     if (!fs_validate_fd(fd_item, &fd)) return ItemNull;
 
-    JsTypedArray* ta = fs_get_typed_array(buffer_item);
-    if (!ta) return js_throw_invalid_arg_type("buffer", "Buffer, TypedArray, or DataView", buffer_item);
-    int blen = js_typed_array_byte_length(buffer_item);
-    uint8_t* data = (uint8_t*)js_typed_array_current_data_ptr(buffer_item);
+    Item read_buffer = buffer_item;
+    Item read_offset = offset_item;
+    Item read_length = length_item;
+    Item read_position = position_item;
+    bool options_form = fs_is_nullish(length_item) && fs_is_nullish(position_item);
+    if (options_form) {
+        if (!fs_is_options_object(offset_item) && !fs_is_nullish(offset_item)) {
+            return js_throw_invalid_arg_type("options", "object", offset_item);
+        }
+        if (!fs_read_parse_options(offset_item, buffer_item, &read_buffer,
+                                   &read_offset, &read_length, &read_position)) {
+            return ItemNull;
+        }
+    }
+
+    JsTypedArray* ta = fs_get_typed_array(read_buffer);
+    if (!ta) return js_throw_invalid_arg_type("buffer", "Buffer, TypedArray, or DataView", read_buffer);
+    int blen = js_typed_array_byte_length(read_buffer);
+    uint8_t* data = (uint8_t*)js_typed_array_current_data_ptr(read_buffer);
 
     int offset = 0, length = blen;
-    if (!fs_validate_offset_length(offset_item, length_item, blen, &offset, &length)) return ItemNull;
+    if (!fs_validate_offset_length(read_offset, read_length, blen, &offset, &length)) return ItemNull;
     if (blen == 0 && length > 0) return fs_throw_empty_read_buffer(ta);
     if (length <= 0) return (Item){.item = i2it(0)};
     if (!data) return (Item){.item = i2it(0)};
 
     int64_t position = -1;
-    if (get_type_id(position_item) == LMD_TYPE_INT) position = it2i(position_item);
+    if (!fs_read_position_to_int64(read_position, &position)) return ItemNull;
 
     uv_buf_t buf = uv_buf_init((char*)(data + offset), length);
     uv_fs_t req;
@@ -1595,22 +2040,84 @@ extern "C" Item js_fs_readSync(Item fd_item, Item buffer_item, Item offset_item,
 }
 
 extern "C" Item js_fs_read(Item fd_item, Item buffer_item, Item offset_item, Item length_item, Item position_item, Item callback) {
+    if (get_type_id(position_item) == LMD_TYPE_FUNC) {
+        callback = position_item;
+        position_item = make_js_undefined();
+    } else if (get_type_id(length_item) == LMD_TYPE_FUNC) {
+        callback = length_item;
+        length_item = make_js_undefined();
+        position_item = make_js_undefined();
+    } else if (get_type_id(offset_item) == LMD_TYPE_FUNC) {
+        callback = offset_item;
+        offset_item = make_js_undefined();
+        length_item = make_js_undefined();
+        position_item = make_js_undefined();
+    } else if (get_type_id(buffer_item) == LMD_TYPE_FUNC) {
+        callback = buffer_item;
+        buffer_item = make_js_undefined();
+        offset_item = make_js_undefined();
+        length_item = make_js_undefined();
+        position_item = make_js_undefined();
+    }
     if (get_type_id(callback) != LMD_TYPE_FUNC) {
         return js_throw_invalid_arg_type("callback", "function", callback);
     }
 
-    Item bytes_read = js_fs_readSync(fd_item, buffer_item, offset_item, length_item, position_item);
+    Item read_buffer = buffer_item;
+    Item read_offset = offset_item;
+    Item read_length = length_item;
+    Item read_position = position_item;
+    bool second_arg_is_options = !fs_get_typed_array(buffer_item) &&
+                                 (fs_is_options_object(buffer_item) || fs_is_nullish(buffer_item));
+    bool third_arg_is_options = fs_get_typed_array(buffer_item) &&
+                                (fs_is_options_object(offset_item) || fs_is_nullish(offset_item)) &&
+                                fs_is_nullish(length_item) && fs_is_nullish(position_item);
+    if (second_arg_is_options) {
+        if (!fs_read_parse_options(buffer_item, make_js_undefined(), &read_buffer,
+                                   &read_offset, &read_length, &read_position)) {
+            return ItemNull;
+        }
+    } else if (third_arg_is_options) {
+        if (!fs_read_parse_options(offset_item, buffer_item, &read_buffer,
+                                   &read_offset, &read_length, &read_position)) {
+            return ItemNull;
+        }
+    }
+
+    Item bytes_read = js_fs_readSync(fd_item, read_buffer, read_offset, read_length, read_position);
     if (js_check_exception()) return ItemNull;
 
-    Item args[3] = {ItemNull, bytes_read, buffer_item};
-    js_call_function(callback, ItemNull, args, 3);
+    Item args[3] = {ItemNull, bytes_read, read_buffer};
+    js_call_function(callback, make_js_undefined(), args, 3);
     return make_js_undefined();
 }
 
 static Item js_fs_filehandle_read(Item buffer_item, Item offset_item, Item length_item, Item position_item) {
     Item self = js_get_this();
     Item fd_item = js_property_get(self, make_string_item("__fd"));
-    Item bytes_read = js_fs_readSync(fd_item, buffer_item, offset_item, length_item, position_item);
+    Item read_buffer = buffer_item;
+    Item read_offset = offset_item;
+    Item read_length = length_item;
+    Item read_position = position_item;
+    bool first_arg_is_options = !fs_get_typed_array(buffer_item) &&
+                                (fs_is_options_object(buffer_item) || fs_is_nullish(buffer_item));
+    bool second_arg_is_options = fs_get_typed_array(buffer_item) &&
+                                 (fs_is_options_object(offset_item) || fs_is_nullish(offset_item)) &&
+                                 fs_is_nullish(length_item) && fs_is_nullish(position_item);
+    if (first_arg_is_options) {
+        if (!fs_read_parse_options(buffer_item, make_js_undefined(), &read_buffer,
+                                   &read_offset, &read_length, &read_position)) {
+            Item err = js_clear_exception();
+            return js_promise_reject(err);
+        }
+    } else if (second_arg_is_options) {
+        if (!fs_read_parse_options(offset_item, buffer_item, &read_buffer,
+                                   &read_offset, &read_length, &read_position)) {
+            Item err = js_clear_exception();
+            return js_promise_reject(err);
+        }
+    }
+    Item bytes_read = js_fs_readSync(fd_item, read_buffer, read_offset, read_length, read_position);
     if (js_check_exception()) {
         Item err = js_clear_exception();
         return js_promise_reject(err);
@@ -1618,7 +2125,7 @@ static Item js_fs_filehandle_read(Item buffer_item, Item offset_item, Item lengt
 
     Item result = js_new_object();
     js_property_set(result, make_string_item("bytesRead"), bytes_read);
-    js_property_set(result, make_string_item("buffer"), buffer_item);
+    js_property_set(result, make_string_item("buffer"), read_buffer);
     return js_promise_resolve(result);
 }
 
@@ -1630,6 +2137,49 @@ static Item js_fs_filehandle_close(void) {
         js_property_set(self, make_string_item("__fd"), make_js_undefined());
     }
     return js_promise_resolve(make_js_undefined());
+}
+
+static Item fs_filehandle_ctor = {0};
+static Item fs_filehandle_proto = {0};
+
+static Item js_fs_filehandle_illegal_constructor(void) {
+    return js_throw_type_error("FileHandle is not constructible");
+}
+
+static Item js_fs_filehandle_fd_getter(void) {
+    Item self = js_get_this();
+    return js_property_get(self, make_string_item("__fd"));
+}
+
+static Item fs_get_filehandle_prototype(void) {
+    if (fs_filehandle_proto.item != 0) return fs_filehandle_proto;
+
+    fs_filehandle_proto = js_new_object();
+    Item fd_getter = js_new_function((void*)js_fs_filehandle_fd_getter, 0);
+    js_install_native_accessor(fs_filehandle_proto, make_string_item("fd"), fd_getter,
+                               ItemNull, JSPD_NON_ENUMERABLE);
+    js_fs_set_method(fs_filehandle_proto, "read", (void*)js_fs_filehandle_read, 4);
+    js_fs_set_method(fs_filehandle_proto, "close", (void*)js_fs_filehandle_close, 0);
+    js_property_set(fs_filehandle_proto, make_string_item("__sym_14"),
+                    js_new_function((void*)js_fs_filehandle_close, 0));
+    return fs_filehandle_proto;
+}
+
+static Item fs_get_filehandle_constructor(void) {
+    if (fs_filehandle_ctor.item != 0) return fs_filehandle_ctor;
+
+    Item proto = fs_get_filehandle_prototype();
+    fs_filehandle_ctor = js_new_function((void*)js_fs_filehandle_illegal_constructor, 0);
+    js_property_set(fs_filehandle_ctor, make_string_item("prototype"), proto);
+    js_property_set(proto, make_string_item("constructor"), fs_filehandle_ctor);
+    return fs_filehandle_ctor;
+}
+
+static Item fs_create_filehandle(Item fd) {
+    Item handle = js_new_object();
+    js_set_prototype(handle, fs_get_filehandle_prototype());
+    js_property_set(handle, make_string_item("__fd"), fd);
+    return handle;
 }
 
 extern "C" Item js_fs_writeSync(Item fd_item, Item data_item, Item offset_item, Item length_item, Item position_item) {
@@ -1667,6 +2217,203 @@ extern "C" Item js_fs_writeSync(Item fd_item, Item data_item, Item offset_item, 
     uv_fs_req_cleanup(&req);
     if (nwritten < 0) return (Item){.item = i2it(0)};
     return (Item){.item = i2it((int64_t)nwritten)};
+}
+
+static bool fs_write_parse_options(Item options_item, Item data_item,
+                                   Item* out_offset, Item* out_length, Item* out_position) {
+    Item offset = make_js_undefined();
+    Item length = make_js_undefined();
+    Item position = make_js_undefined();
+    if (fs_is_options_object(options_item)) {
+        offset = js_property_get(options_item, make_string_item("offset"));
+        length = js_property_get(options_item, make_string_item("length"));
+        position = js_property_get(options_item, make_string_item("position"));
+    }
+    if (fs_is_nullish(offset)) offset = (Item){.item = i2it(0)};
+    if (fs_is_nullish(length)) {
+        int byte_length = js_typed_array_byte_length(data_item);
+        int64_t offset_value = 0;
+        if (get_type_id(offset) == LMD_TYPE_INT) {
+            offset_value = it2i(offset);
+        } else if (get_type_id(offset) == LMD_TYPE_FLOAT) {
+            offset_value = (int64_t)it2d(offset);
+        }
+        length = (Item){.item = i2it(byte_length - offset_value)};
+    }
+    *out_offset = offset;
+    *out_length = length;
+    *out_position = position;
+    return true;
+}
+
+extern "C" Item js_fs_write(Item fd_item, Item data_item, Item offset_item,
+                            Item length_item, Item position_item, Item callback_item) {
+    Item callback = callback_item;
+    if (get_type_id(position_item) == LMD_TYPE_FUNC) {
+        callback = position_item;
+        position_item = make_js_undefined();
+    } else if (get_type_id(length_item) == LMD_TYPE_FUNC) {
+        callback = length_item;
+        length_item = make_js_undefined();
+        position_item = make_js_undefined();
+    } else if (get_type_id(offset_item) == LMD_TYPE_FUNC) {
+        callback = offset_item;
+        offset_item = make_js_undefined();
+        length_item = make_js_undefined();
+        position_item = make_js_undefined();
+    }
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "function", callback);
+    }
+
+    Item write_offset = offset_item;
+    Item write_length = length_item;
+    Item write_position = position_item;
+
+    if (fs_get_typed_array(data_item)) {
+        bool options_form = (fs_is_options_object(offset_item) || fs_is_nullish(offset_item)) &&
+                            fs_is_nullish(length_item) && fs_is_nullish(position_item);
+        if (options_form) {
+            if (!fs_write_parse_options(offset_item, data_item, &write_offset,
+                                        &write_length, &write_position)) {
+                return ItemNull;
+            }
+        }
+    } else if (get_type_id(data_item) == LMD_TYPE_STRING) {
+        write_offset = (Item){.item = i2it(0)};
+        write_length = make_js_undefined();
+        write_position = offset_item;
+        if (fs_is_nullish(write_position) || get_type_id(write_position) == LMD_TYPE_FUNC) {
+            write_position = make_js_undefined();
+        }
+        if (!fs_validate_encoding_item(length_item)) return ItemNull;
+    } else {
+        return js_throw_invalid_arg_type("buffer", "Buffer, TypedArray, DataView, or string", data_item);
+    }
+
+    Item bytes_written = js_fs_writeSync(fd_item, data_item, write_offset, write_length, write_position);
+    if (js_check_exception()) return ItemNull;
+
+    Item args[3] = {ItemNull, bytes_written, data_item};
+    js_call_function(callback, make_js_undefined(), args, 3);
+    return make_js_undefined();
+}
+
+extern "C" Item js_fs_readvSync(Item fd_item, Item buffers_item, Item position_item) {
+    int fd = 0;
+    if (!fs_validate_fd(fd_item, &fd)) return ItemNull;
+    if (get_type_id(buffers_item) != LMD_TYPE_ARRAY) {
+        return js_throw_invalid_arg_type("buffers", "ArrayBufferView[]", buffers_item);
+    }
+
+    int64_t count64 = js_array_length(buffers_item);
+    if (count64 <= 0) return (Item){.item = i2it(0)};
+    if (count64 > 1024) {
+        js_throw_out_of_range("buffers.length", "<= 1024", (Item){.item = i2it(count64)});
+        return ItemNull;
+    }
+
+    uv_buf_t* bufs = (uv_buf_t*)alloca((size_t)count64 * sizeof(uv_buf_t));
+    for (int64_t i = 0; i < count64; i++) {
+        Item buffer = js_array_get_int(buffers_item, i);
+        JsTypedArray* ta = fs_get_typed_array(buffer);
+        if (!ta) return js_throw_invalid_arg_type("buffers", "ArrayBufferView[]", buffer);
+        int blen = js_typed_array_byte_length(buffer);
+        uint8_t* data = (uint8_t*)js_typed_array_current_data_ptr(buffer);
+        bufs[i] = uv_buf_init((char*)data, blen);
+    }
+
+    int64_t position = -1;
+    if (!fs_read_position_to_int64(position_item, &position)) return ItemNull;
+
+    uv_fs_t req;
+    int nread = uv_fs_read(lambda_uv_loop(), &req, fd, bufs, (unsigned int)count64, position, NULL);
+    uv_fs_req_cleanup(&req);
+    if (nread < 0) return (Item){.item = i2it(0)};
+    return (Item){.item = i2it((int64_t)nread)};
+}
+
+extern "C" Item js_fs_readv(Item fd_item, Item buffers_item, Item position_item, Item callback_item) {
+    Item callback = callback_item;
+    Item position = position_item;
+    if (get_type_id(position_item) == LMD_TYPE_FUNC) {
+        callback = position_item;
+        position = make_js_undefined();
+    }
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "function", callback);
+    }
+    Item bytes_read = js_fs_readvSync(fd_item, buffers_item, position);
+    if (js_check_exception()) return ItemNull;
+    Item args[3] = {ItemNull, bytes_read, buffers_item};
+    js_call_function(callback, make_js_undefined(), args, 3);
+    return make_js_undefined();
+}
+
+extern "C" Item js_fs_writevSync(Item fd_item, Item buffers_item, Item position_item) {
+    int fd = 0;
+    if (!fs_validate_fd(fd_item, &fd)) return ItemNull;
+    if (get_type_id(buffers_item) != LMD_TYPE_ARRAY) {
+        return js_throw_invalid_arg_type("buffers", "ArrayBufferView[]", buffers_item);
+    }
+
+    int64_t count64 = js_array_length(buffers_item);
+    if (count64 <= 0) return (Item){.item = i2it(0)};
+    if (count64 > 1024) {
+        js_throw_out_of_range("buffers.length", "<= 1024", (Item){.item = i2it(count64)});
+        return ItemNull;
+    }
+
+    uv_buf_t* bufs = (uv_buf_t*)alloca((size_t)count64 * sizeof(uv_buf_t));
+    for (int64_t i = 0; i < count64; i++) {
+        Item buffer = js_array_get_int(buffers_item, i);
+        int blen = 0;
+        uint8_t* data = buffer_data(buffer, &blen);
+        if (!data && !js_is_typed_array(buffer)) {
+            return js_throw_invalid_arg_type("buffers", "ArrayBufferView[]", buffer);
+        }
+        bufs[i] = uv_buf_init((char*)data, blen);
+    }
+
+    int64_t position = -1;
+    if (get_type_id(position_item) == LMD_TYPE_INT) {
+        position = it2i(position_item);
+    } else if (get_type_id(position_item) != LMD_TYPE_UNDEFINED &&
+               get_type_id(position_item) != LMD_TYPE_NULL) {
+        return js_throw_invalid_arg_type("position", "number", position_item);
+    }
+
+    uv_fs_t req;
+    int nwritten = uv_fs_write(lambda_uv_loop(), &req, fd, bufs, (unsigned int)count64, position, NULL);
+    uv_fs_req_cleanup(&req);
+    if (nwritten < 0) return (Item){.item = i2it(0)};
+    return (Item){.item = i2it((int64_t)nwritten)};
+}
+
+extern "C" Item js_fs_writev(Item fd_item, Item buffers_item, Item position_item, Item callback_item) {
+    Item callback = callback_item;
+    Item position = position_item;
+    if (get_type_id(position_item) == LMD_TYPE_FUNC) {
+        callback = position_item;
+        position = make_js_undefined();
+    }
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "function", callback);
+    }
+    Item bytes_written = js_fs_writevSync(fd_item, buffers_item, position);
+    if (js_check_exception()) return ItemNull;
+    Item args[3] = {ItemNull, bytes_written, buffers_item};
+    js_call_function(callback, make_js_undefined(), args, 3);
+    return make_js_undefined();
+}
+
+static Item js_fs_exists_promisified(Item path_item) {
+    Item exists = js_fs_existsSync(path_item);
+    if (js_check_exception()) {
+        js_clear_exception();
+        exists = (Item){.item = b2it(false)};
+    }
+    return js_promise_resolve(exists);
 }
 
 extern "C" Item js_fs_fstatSync(Item fd_item) {
@@ -1787,6 +2534,24 @@ static Item js_fs_lstat_async(Item path_item, Item opts_or_cb, Item callback_ite
             js_call_function(callback, ItemNull, args, 2);
         }
     }
+    return make_js_undefined();
+}
+
+// fs.statfs(path[, options], callback)
+static Item js_fs_statfs_async(Item path_item, Item opts_or_cb, Item callback_item) {
+    Item callback = callback_item;
+    Item options = opts_or_cb;
+    if (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) {
+        callback = opts_or_cb;
+        options = make_js_undefined();
+    }
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "function", callback);
+    }
+    Item result = js_fs_statfsSync(path_item, options);
+    if (js_check_exception()) return ItemNull;
+    Item args[2] = {ItemNull, result};
+    js_call_function(callback, make_js_undefined(), args, 2);
     return make_js_undefined();
 }
 
@@ -1938,12 +2703,25 @@ static Item js_fs_fstat_async(Item fd_item, Item opts_or_cb, Item callback_item)
 // fs Module Namespace Object
 // =============================================================================
 
-static Item fs_namespace = {0};
+static Item fs_internal_promises_namespace = {0};
 
-static void js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
+static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);
     Item fn = js_new_function(func_ptr, param_count);
     js_property_set(ns, key, fn);
+    return fn;
+}
+
+static void js_fs_set_custom_promisify_args(Item fn, const char* name1, const char* name2) {
+    Item names = js_array_new(0);
+    js_array_push(names, make_string_item(name1));
+    if (name2) js_array_push(names, make_string_item(name2));
+    js_property_set(fn, js_util_custom_promisify_args_symbol(), names);
+}
+
+static void js_fs_set_custom_promisify(Item fn, void* func_ptr, int param_count) {
+    Item custom = js_new_function(func_ptr, param_count);
+    js_property_set(fn, js_util_promisify_custom_symbol(), custom);
 }
 
 // ─── fs.promises wrapper functions ─────────────────────────────────────────
@@ -2044,15 +2822,7 @@ extern "C" Item js_fs_open_promise(Item path, Item flags, Item mode) {
         return js_promise_reject(js_new_error(make_string_item("open failed")));
     }
 
-    Item handle = js_new_object();
-    js_property_set(handle, make_string_item("__fd"), fd);
-    js_property_set(handle, make_string_item("fd"), fd);
-    js_property_set(handle, make_string_item("read"),
-                    js_new_function((void*)js_fs_filehandle_read, 4));
-    js_property_set(handle, make_string_item("close"),
-                    js_new_function((void*)js_fs_filehandle_close, 0));
-    js_property_set(handle, make_string_item("__sym_14"),
-                    js_new_function((void*)js_fs_filehandle_close, 0));
+    Item handle = fs_create_filehandle(fd);
     return js_promise_resolve(handle);
 }
 
@@ -2136,11 +2906,11 @@ static Item js_fs_realpath_async(Item path_item, Item opts_or_cb, Item callback)
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         if (get_type_id(result) == LMD_TYPE_STRING) {
             Item args[2] = {ItemNull, result};
-            js_call_function(cb, ItemNull, args, 2);
+            js_call_function(cb, make_js_undefined(), args, 2);
         } else {
             Item err = make_fs_error(UV_ENOENT, NULL);
             Item args[1] = {err};
-            js_call_function(cb, ItemNull, args, 1);
+            js_call_function(cb, make_js_undefined(), args, 1);
         }
     }
     return make_js_undefined();
@@ -2440,18 +3210,21 @@ extern "C" Item js_get_fs_namespace(void) {
     js_fs_set_method(fs_namespace, "mkdir",           (void*)js_fs_mkdir_async, 3);
     js_fs_set_method(fs_namespace, "access",          (void*)js_fs_access_async, 3);
     js_fs_set_method(fs_namespace, "stat",            (void*)js_fs_stat_async, 3);
+    js_fs_set_method(fs_namespace, "statfs",          (void*)js_fs_statfs_async, 3);
     js_fs_set_method(fs_namespace, "lstat",           (void*)js_fs_lstat_async, 3);
     js_fs_set_method(fs_namespace, "open",            (void*)js_fs_open_async, 4);
     js_fs_set_method(fs_namespace, "close",           (void*)js_fs_close_async, 2);
     js_fs_set_method(fs_namespace, "chmod",           (void*)js_fs_chmod_async, 3);
     js_fs_set_method(fs_namespace, "unlink",          (void*)js_fs_unlink_async, 2);
-    js_fs_set_method(fs_namespace, "exists",          (void*)js_fs_exists_async, 2);
+    Item exists_fn = js_fs_set_method(fs_namespace, "exists",          (void*)js_fs_exists_async, 2);
+    js_fs_set_custom_promisify(exists_fn, (void*)js_fs_exists_promisified, 1);
     js_fs_set_method(fs_namespace, "rename",          (void*)js_fs_rename_async, 3);
     js_fs_set_method(fs_namespace, "readdir",         (void*)js_fs_readdir_async, 3);
     js_fs_set_method(fs_namespace, "fstat",           (void*)js_fs_fstat_async, 3);
     js_fs_set_method(fs_namespace, "rmdir",           (void*)js_fs_rmdir_async, 2);
     js_fs_set_method(fs_namespace, "copyFile",        (void*)js_fs_copyFile_async, 4);
-    js_fs_set_method(fs_namespace, "realpath",        (void*)js_fs_realpath_async, 3);
+    Item realpath_fn = js_fs_set_method(fs_namespace, "realpath",        (void*)js_fs_realpath_async, 3);
+    js_property_set(realpath_fn, make_string_item("native"), realpath_fn);
     js_fs_set_method(fs_namespace, "mkdtemp",         (void*)js_fs_mkdtemp_async, 3);
     js_fs_set_method(fs_namespace, "readlink",        (void*)js_fs_readlink_async, 3);
     js_fs_set_method(fs_namespace, "symlink",         (void*)js_fs_symlink_async, 4);
@@ -2470,7 +3243,9 @@ extern "C" Item js_get_fs_namespace(void) {
 
     // additional sync methods
     js_fs_set_method(fs_namespace, "copyFileSync",    (void*)js_fs_copyFileSync, 2);
-    js_fs_set_method(fs_namespace, "realpathSync",    (void*)js_fs_realpathSync, 2);
+    Item realpath_sync_fn = js_fs_set_method(fs_namespace, "realpathSync",    (void*)js_fs_realpathSync, 2);
+    js_property_set(realpath_sync_fn, make_string_item("native"), realpath_sync_fn);
+    js_fs_set_method(fs_namespace, "statfsSync",      (void*)js_fs_statfsSync, 2);
     js_fs_set_method(fs_namespace, "accessSync",      (void*)js_fs_accessSync, 2);
     js_fs_set_method(fs_namespace, "rmSync",          (void*)js_fs_rmSync, 2);
     js_fs_set_method(fs_namespace, "mkdtempSync",     (void*)js_fs_mkdtempSync, 2);
@@ -2492,9 +3267,18 @@ extern "C" Item js_get_fs_namespace(void) {
     // file descriptor operations
     js_fs_set_method(fs_namespace, "openSync",        (void*)js_fs_openSync, 3);
     js_fs_set_method(fs_namespace, "closeSync",       (void*)js_fs_closeSync, 1);
-    js_fs_set_method(fs_namespace, "read",            (void*)js_fs_read, 6);
+    Item read_fn = js_fs_set_method(fs_namespace, "read",            (void*)js_fs_read, 6);
+    js_fs_set_custom_promisify_args(read_fn, "bytesRead", "buffer");
     js_fs_set_method(fs_namespace, "readSync",        (void*)js_fs_readSync, 5);
+    Item write_fn = js_fs_set_method(fs_namespace, "write",           (void*)js_fs_write, 6);
+    js_fs_set_custom_promisify_args(write_fn, "bytesWritten", "buffer");
     js_fs_set_method(fs_namespace, "writeSync",       (void*)js_fs_writeSync, 5);
+    Item readv_fn = js_fs_set_method(fs_namespace, "readv",           (void*)js_fs_readv, 4);
+    js_fs_set_custom_promisify_args(readv_fn, "bytesRead", "buffers");
+    js_fs_set_method(fs_namespace, "readvSync",       (void*)js_fs_readvSync, 3);
+    Item writev_fn = js_fs_set_method(fs_namespace, "writev",          (void*)js_fs_writev, 4);
+    js_fs_set_custom_promisify_args(writev_fn, "bytesWritten", "buffer");
+    js_fs_set_method(fs_namespace, "writevSync",      (void*)js_fs_writevSync, 3);
     js_fs_set_method(fs_namespace, "fstatSync",       (void*)js_fs_fstatSync, 1);
 
     // fs.constants — null prototype per Node.js spec
@@ -2598,7 +3382,26 @@ extern "C" Item js_get_fs_namespace(void) {
     return fs_namespace;
 }
 
+extern "C" Item js_get_fs_promises_namespace(void) {
+    Item fs = js_get_fs_namespace();
+    return js_property_get(fs, make_string_item("promises"));
+}
+
+extern "C" Item js_get_internal_fs_promises_namespace(void) {
+    if (fs_internal_promises_namespace.item != 0) return fs_internal_promises_namespace;
+
+    fs_internal_promises_namespace = js_new_object();
+    js_property_set(fs_internal_promises_namespace, make_string_item("FileHandle"),
+                    fs_get_filehandle_constructor());
+    js_property_set(fs_internal_promises_namespace, make_string_item("default"),
+                    fs_internal_promises_namespace);
+    return fs_internal_promises_namespace;
+}
+
 // Reset fs namespace (for re-initialization between runs)
 extern "C" void js_fs_reset(void) {
     fs_namespace = (Item){0};
+    fs_internal_promises_namespace = (Item){0};
+    fs_filehandle_ctor = (Item){0};
+    fs_filehandle_proto = (Item){0};
 }

@@ -106,6 +106,42 @@ static Item url_to_js_object(Url* url) {
     return obj;
 }
 
+static Item url_parse_legacy_path_only(const char* url_str) {
+    if (!url_str) return ItemNull;
+
+    const char* hash = strchr(url_str, '#');
+    const char* query = strchr(url_str, '?');
+    if (hash && query && hash < query) query = NULL;
+
+    const char* path_end = url_str + strlen(url_str);
+    if (query && query < path_end) path_end = query;
+    if (hash && hash < path_end) path_end = hash;
+
+    int pathname_len = (int)(path_end - url_str);
+    int search_len = query ? (int)((hash && hash > query ? hash : url_str + strlen(url_str)) - query) : 0;
+    int hash_len = hash ? (int)strlen(hash) : 0;
+    int path_len = pathname_len + search_len;
+
+    Item obj = js_new_object();
+    js_class_stamp(obj, JS_CLASS_URL);
+    js_property_set(obj, make_string_item("href"), make_string_item(url_str));
+    js_property_set(obj, make_string_item("origin"), make_string_item(""));
+    js_property_set(obj, make_string_item("protocol"), make_string_item(""));
+    js_property_set(obj, make_string_item("username"), make_string_item(""));
+    js_property_set(obj, make_string_item("password"), make_string_item(""));
+    js_property_set(obj, make_string_item("host"), make_string_item(""));
+    js_property_set(obj, make_string_item("hostname"), make_string_item(""));
+    js_property_set(obj, make_string_item("port"), make_string_item(""));
+    js_property_set(obj, make_string_item("pathname"), make_string_item(url_str, pathname_len));
+    js_property_set(obj, make_string_item("search"), search_len > 0 ? make_string_item(query, search_len) : make_string_item(""));
+    js_property_set(obj, make_string_item("hash"), hash_len > 0 ? make_string_item(hash, hash_len) : make_string_item(""));
+    js_property_set(obj, make_string_item("searchParams"), js_new_object());
+    js_property_set(obj, make_string_item("path"), make_string_item(url_str, path_len));
+    js_property_set(obj, make_string_item("query"), search_len > 0 ? make_string_item(query, search_len) : make_string_item(""));
+    js_property_set(obj, make_string_item("slashes"), (Item){.item = b2it(false)});
+    return obj;
+}
+
 // =============================================================================
 // URL Functions
 // =============================================================================
@@ -155,14 +191,46 @@ extern "C" Item js_url_parse_legacy(Item url_item) {
     if (!url_str) return ItemNull;
 
     Url* url = url_parse(url_str);
-    if (!url) return ItemNull;
+    if (!url) return url_parse_legacy_path_only(url_str);
 
     Item result = url_to_js_object(url);
     // legacy fields
-    js_property_set(result, make_string_item("path"),
-        js_property_get(result, make_string_item("pathname")));
+    const char* pathname = url_get_pathname(url);
+    const char* search = url_get_search(url);
+    if (pathname && search && search[0] != '\0') {
+        char path_buf[4096];
+        int path_len = snprintf(path_buf, sizeof(path_buf), "%s%s", pathname, search);
+        if (path_len < 0) path_len = 0;
+        if (path_len >= (int)sizeof(path_buf)) path_len = (int)sizeof(path_buf) - 1;
+        js_property_set(result, make_string_item("path"), make_string_item(path_buf, path_len));
+    } else {
+        js_property_set(result, make_string_item("path"),
+            js_property_get(result, make_string_item("pathname")));
+    }
     js_property_set(result, make_string_item("query"),
         js_property_get(result, make_string_item("search")));
+    const char* username = url_get_username(url);
+    const char* password = url_get_password(url);
+    if (username && username[0] != '\0') {
+        char auth_buf[1024];
+        int auth_len = 0;
+        if (password && password[0] != '\0') {
+            auth_len = snprintf(auth_buf, sizeof(auth_buf), "%s:%s", username, password);
+        } else {
+            auth_len = snprintf(auth_buf, sizeof(auth_buf), "%s", username);
+        }
+        if (auth_len < 0) auth_len = 0;
+        if (auth_len >= (int)sizeof(auth_buf)) auth_len = (int)sizeof(auth_buf) - 1;
+        size_t decoded_len = 0;
+        char* decoded = url_decode_component(auth_buf, (size_t)auth_len, &decoded_len);
+        if (decoded) {
+            js_property_set(result, make_string_item("auth"),
+                            make_string_item(decoded, (int)decoded_len));
+            mem_free(decoded);
+        } else {
+            js_property_set(result, make_string_item("auth"), make_string_item(auth_buf, auth_len));
+        }
+    }
     js_property_set(result, make_string_item("slashes"),
         (Item){.item = i2it(1)});
 

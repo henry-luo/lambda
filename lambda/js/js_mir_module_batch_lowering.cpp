@@ -4130,6 +4130,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // Mixed scope env: add parent env link at the LAST slot (no shifting needed)
         parent_fc->has_parent_env_link = true;
         int parent_env_link_slot = parent_fc->scope_env_count; // last slot = parent env pointer
+        (void)parent_env_link_slot;
         // scope_env_names was allocated with +2 extra slots for this
         snprintf(parent_fc->scope_env_names[parent_fc->scope_env_count], 64, "__parent_env__");
         parent_fc->scope_env_count++;
@@ -4169,9 +4170,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 // Only for captures the parent reads from its own parent's scope env
                 for (int pc = 0; pc < parent_fc->capture_count; pc++) {
                     if (strcmp(child->captures[k].name, parent_fc->captures[pc].name) == 0) {
-                        if (parent_fc->captures[pc].scope_env_slot < 0) break; // module var, skip
                         // This is transitive — child should read from grandparent env
-                        child->captures[k].grandparent_slot = parent_fc->captures[pc].scope_env_slot;
+                        int grandparent_slot = parent_fc->captures[pc].scope_env_slot;
+                        if (grandparent_slot < 0) {
+                            // Parent closures that do not use a shared scope env
+                            // store captures densely by capture index.
+                            grandparent_slot = pc;
+                        }
+                        child->captures[k].grandparent_slot = grandparent_slot;
                         log_debug("js-mir: Phase 1.7c: capture '%s' in '%s' → grandparent slot %d (parent env at slot %d)",
                             child->captures[k].name, child->name, child->captures[k].grandparent_slot, parent_env_link_slot);
                         break;

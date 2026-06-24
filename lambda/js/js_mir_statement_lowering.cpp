@@ -32,6 +32,7 @@ typedef struct JsMirLastClosureSnapshot {
     bool preserve_after_readback;
     char capture_names[JS_MIR_LAST_CLOSURE_CAPTURE_MAX][128];
     int capture_slots[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    bool capture_is_transitive[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool capture_is_nfe[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
 } JsMirLastClosureSnapshot;
 
@@ -51,6 +52,7 @@ static void jm_save_last_closure_snapshot(JsMirTranspiler* mt, JsMirLastClosureS
         snprintf(snapshot->capture_names[i], sizeof(snapshot->capture_names[i]),
             "%s", mt->last_closure_capture_names[i]);
         snapshot->capture_slots[i] = mt->last_closure_capture_slots[i];
+        snapshot->capture_is_transitive[i] = mt->last_closure_capture_is_transitive[i];
         snapshot->capture_is_nfe[i] = mt->last_closure_capture_is_nfe[i];
     }
 }
@@ -73,6 +75,7 @@ static void jm_restore_last_closure_snapshot(JsMirTranspiler* mt,
         snprintf(mt->last_closure_capture_names[i],
             sizeof(mt->last_closure_capture_names[i]), "%s", snapshot->capture_names[i]);
         mt->last_closure_capture_slots[i] = snapshot->capture_slots[i];
+        mt->last_closure_capture_is_transitive[i] = snapshot->capture_is_transitive[i];
         mt->last_closure_capture_is_nfe[i] = snapshot->capture_is_nfe[i];
     }
 }

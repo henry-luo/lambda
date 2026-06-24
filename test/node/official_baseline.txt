@@ -646,8 +646,12 @@ test-fs-open-numeric-flags.js
 test-fs-opendir.js
 test-fs-operations-with-surrogate-pairs.js
 test-fs-options-immutable.js
+test-fs-promises-exists.js
+test-fs-promises-file-handle-aggregate-errors.js
 test-fs-promises-file-handle-append-file.js
 test-fs-promises-file-handle-chmod.js
+test-fs-promises-file-handle-close-errors.js
+test-fs-promises-file-handle-op-errors.js
 test-fs-promises-file-handle-pull.js
 test-fs-promises-file-handle-read-worker.js
 test-fs-promises-file-handle-read.js
@@ -667,9 +671,11 @@ test-fs-promises-write-optional-params.js
 test-fs-promises-writefile-typedarray.js
 test-fs-promises-writefile-with-fd.js
 test-fs-promises-writefile.js
+test-fs-promisified.js
 test-fs-read-file-assert-encoding.js
 test-fs-read-file-sync-hostname.js
 test-fs-read-file-sync.js
+test-fs-read-optional-params.js
 test-fs-read-promises-optional-params.js
 test-fs-read-stream-autoClose.js
 test-fs-read-stream-double-close.js
@@ -680,6 +686,7 @@ test-fs-read-stream-file-handle.js
 test-fs-read-stream-patch-open.js
 test-fs-read-stream-resume.js
 test-fs-read-zero-length.js
+test-fs-readSync-optional-params.js
 test-fs-readdir-pipe.js
 test-fs-readdir-recursive.js
 test-fs-readdir-types-symlinks.js
@@ -700,9 +707,11 @@ test-fs-readfile.js
 test-fs-readfilesync-enoent.js
 test-fs-readfilesync-pipe-large.js
 test-fs-readlink-type-check.js
+test-fs-readv-promisify.js
 test-fs-readv-promises.js
 test-fs-readv-sync.js
 test-fs-readv.js
+test-fs-realpath-native.js
 test-fs-realpath-on-substed-drive.js
 test-fs-realpath-pipe.js
 test-fs-rename-type-check.js
@@ -713,6 +722,7 @@ test-fs-rmdir-throws-on-file.js
 test-fs-rmdir-type-check.js
 test-fs-sir-writes-alot.js
 test-fs-stat-bigint.js
+test-fs-statfs.js
 test-fs-stream-construct-compat-error-read.js
 test-fs-stream-construct-compat-error-write.js
 test-fs-stream-construct-compat-graceful-fs.js
@@ -779,6 +789,7 @@ test-fs-write-file-typedarrays.js
 test-fs-write-file.js
 test-fs-write-negativeoffset.js
 test-fs-write-no-fd.js
+test-fs-write-optional-params.js
 test-fs-write-reuse-callback.js
 test-fs-write-stream-autoclose-option.js
 test-fs-write-stream-change-open.js
