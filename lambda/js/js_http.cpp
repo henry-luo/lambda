@@ -1498,6 +1498,8 @@ static void http_request_headers_append(Item headers, const char* name, const ch
     }
 }
 
+static Item http_conn_socket_object(JsHttpConn* conn);
+
 static Item make_request_object(JsHttpConn* conn, ParsedRequest* req) {
     Item msg = js_readable_new(ItemNull);
     // T5b: legacy `__class_name__` string write retired.
@@ -1519,6 +1521,11 @@ static Item make_request_object(JsHttpConn* conn, ParsedRequest* req) {
     js_property_set(msg, make_string_item("httpVersion"), make_string_item(version_string));
     js_property_set(msg, make_string_item("httpVersionMajor"), (Item){.item = i2it(http_major)});
     js_property_set(msg, make_string_item("httpVersionMinor"), (Item){.item = i2it(http_minor)});
+    if (conn) {
+        Item socket = http_conn_socket_object(conn);
+        js_property_set(msg, make_string_item("socket"), socket);
+        js_property_set(msg, make_string_item("connection"), socket);
+    }
 
     // headers as lowercase-key object
     Item headers = js_new_object();
@@ -1698,6 +1705,15 @@ static Item http_conn_socket_object(JsHttpConn* conn) {
     js_property_set(obj, make_string_item("destroy"),
                     js_new_function((void*)js_http_conn_socket_destroy, 1));
     js_property_set(obj, make_string_item("destroyed"), (Item){.item = b2it(false)});
+    Item hwm = (Item){.item = i2it(16 * 1024)};
+    Item readable_state = js_new_object();
+    js_property_set(readable_state, make_string_item("highWaterMark"), hwm);
+    Item writable_state = js_new_object();
+    js_property_set(writable_state, make_string_item("highWaterMark"), hwm);
+    js_property_set(obj, make_string_item("_readableState"), readable_state);
+    js_property_set(obj, make_string_item("_writableState"), writable_state);
+    js_property_set(obj, make_string_item("readableHighWaterMark"), hwm);
+    js_property_set(obj, make_string_item("writableHighWaterMark"), hwm);
     conn->socket_object = obj;
     return obj;
 }

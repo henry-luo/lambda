@@ -1363,6 +1363,15 @@ static Item make_socket_object(JsSocket* sock, bool expose_handle) {
     js_property_set(obj, make_string_item("bytesRead"), (Item){.item = i2it(0)});
     js_property_set(obj, make_string_item("bytesWritten"), (Item){.item = i2it(0)});
     js_property_set(obj, make_string_item("bufferSize"), (Item){.item = i2it(0)});
+    Item hwm = (Item){.item = i2it(sock->high_water_mark)};
+    Item readable_state = js_new_object();
+    js_property_set(readable_state, make_string_item("highWaterMark"), hwm);
+    Item writable_state = js_new_object();
+    js_property_set(writable_state, make_string_item("highWaterMark"), hwm);
+    js_property_set(obj, make_string_item("_readableState"), readable_state);
+    js_property_set(obj, make_string_item("_writableState"), writable_state);
+    js_property_set(obj, make_string_item("readableHighWaterMark"), hwm);
+    js_property_set(obj, make_string_item("writableHighWaterMark"), hwm);
     js_property_set(obj, make_string_item("connecting"), (Item){.item = ITEM_FALSE});
     js_property_set(obj, make_string_item("_connecting"), (Item){.item = ITEM_FALSE});
     js_property_set(obj, make_string_item("pending"), (Item){.item = ITEM_TRUE});

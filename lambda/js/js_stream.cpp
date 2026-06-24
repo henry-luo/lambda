@@ -56,6 +56,9 @@ extern "C" int64_t js_iterator_result_done(Item result);
 extern "C" Item js_iterator_result_value(Item result);
 extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
+extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_len);
+extern "C" Item js_async_hooks_enter_resource(Item resource);
+extern "C" void js_async_hooks_restore_resource(Item previous);
 extern Item js_current_this;
 extern "C" Item js_get_this(void);
 extern "C" Item js_writable_stream_new(void);
@@ -3940,31 +3943,43 @@ static Item js_stream_finished_context_callback(Item env_item, Item err) {
     if (!env) return make_js_undefined();
     Item callback = env[0];
     Item context = env[1];
+    Item resource = env[2];
     int64_t has_arg = js_stream_has_error(err) ? 1 : 0;
-    return js_als_context_call(context, callback, js_get_this(), err, has_arg);
+    Item previous = js_async_hooks_enter_resource(resource);
+    Item result;
+    if (get_type_id(context) == LMD_TYPE_ARRAY && js_array_length(context) > 0) {
+        result = js_als_context_call(context, callback, js_get_this(), err, has_arg);
+    } else {
+        Item args[1] = {err};
+        result = js_call_function(callback, js_get_this(), args, (int)has_arg);
+    }
+    js_async_hooks_restore_resource(previous);
+    return result;
 }
 
 static Item js_stream_finished_context_wrapper(Item callback) {
     Item context = js_als_capture_context();
-    if (get_type_id(context) != LMD_TYPE_ARRAY || js_array_length(context) <= 0) {
-        return callback;
-    }
-    Item* env = js_alloc_env(2);
+    Item resource = js_async_hooks_create_resource("STREAM_END_OF_STREAM", 20);
+    Item* env = js_alloc_env(3);
     env[0] = callback;
     env[1] = context;
-    Item wrapper = js_new_closure((void*)js_stream_finished_context_callback, 1, env, 2);
+    env[2] = resource;
+    Item wrapper = js_new_closure((void*)js_stream_finished_context_callback, 1, env, 3);
     js_property_set(callback, js_stream_finished_wrapper_key(), wrapper);
     return wrapper;
 }
 
 static void js_stream_finished_call_now(Item callback) {
     Item context = js_als_capture_context();
-    Item args[1] = { ItemNull };
+    Item resource = js_async_hooks_create_resource("STREAM_END_OF_STREAM", 20);
+    Item previous = js_async_hooks_enter_resource(resource);
     if (get_type_id(context) == LMD_TYPE_ARRAY && js_array_length(context) > 0) {
         js_als_context_call(context, callback, ItemNull, ItemNull, 1);
+        js_async_hooks_restore_resource(previous);
         return;
     }
-    js_call_function(callback, ItemNull, args, 1);
+    js_call_function(callback, ItemNull, NULL, 0);
+    js_async_hooks_restore_resource(previous);
 }
 
 extern "C" Item js_stream_finished(Item stream, Item callback) {
