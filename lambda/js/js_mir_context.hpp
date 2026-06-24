@@ -329,6 +329,8 @@ struct JsClassEntry {
     JsAstNode* static_blocks[8];            // static { ... } block bodies
     int static_block_count;
     void** shape_cache_ptr;                 // §7: per-class shape cache slot (NULL until allocated)
+    bool ctor_shape_composed;               // Tune11 P5: inherited ctor fields merged
+    bool ctor_shape_compose_failed;         // Tune11 P5: fell back to dynamic parent writes
 };
 
 // Try/catch context for handling return-in-try and exception flow
