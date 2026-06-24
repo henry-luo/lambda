@@ -34,12 +34,14 @@
 #include "../../radiant/dom_range_resolver.hpp"
 #include "../../radiant/state_store.hpp"
 #include "../../radiant/form_control.hpp"
+#include "../../radiant/text_control.hpp"
 #include <cstring>
 #include <cstdlib>
 
 extern __thread EvalContext* context;
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
+extern "C" void* js_dom_current_active_text_control(void);
 
 // ============================================================================
 // Helpers
@@ -330,6 +332,8 @@ static Item js_object_for_selection(DomSelection* s) {
 // ============================================================================
 
 static DomNode* node_arg(Item v) {
+    TypeId type = get_type_id(v);
+    if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) return nullptr;
     void* p = js_dom_unwrap_element(v);
     if (!p) {
         Item doc_obj = js_get_document_object_value();
@@ -344,6 +348,37 @@ static DomNode* node_arg(Item v) {
         }
     }
     return (DomNode*)p;
+}
+
+static DomElement* active_text_control_for_selection(DomSelection* s) {
+    if (!s || !s->state) return nullptr;
+    DocState* state = s->state;
+    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
+        state->sel.control && tc_is_text_control(state->sel.control)) {
+        return state->sel.control;
+    }
+    DomElement* control = tc_get_active_element(state);
+    if (control && tc_is_text_control(control)) return control;
+    control = tc_get_last_focused_text_control(state);
+    if (control && tc_is_text_control(control)) return control;
+    View* focused = focus_get(state);
+    if (focused && focused->is_element()) {
+        DomElement* elem = focused->as_element();
+        if (elem && tc_is_text_control(elem)) return elem;
+    }
+    DomElement* current = (DomElement*)js_dom_current_active_text_control();
+    if (current && tc_is_text_control(current)) {
+        DocState* current_state = current->doc ? (DocState*)current->doc->state : nullptr;
+        if (!current_state || current_state == state) return current;
+    }
+    return nullptr;
+}
+
+static DocState* state_for_text_control_selection(DomSelection* s,
+                                                  DomElement* control) {
+    DocState* state = control && control->doc ?
+        (DocState*)control->doc->state : nullptr;
+    return state ? state : (s ? s->state : nullptr);
 }
 
 // Resolve the DomDocument owning `n` by walking up to the nearest DomElement.
@@ -948,6 +983,17 @@ extern "C" Item js_selection_set_position(Item node_v, Item offset_v) {
 
 extern "C" Item js_selection_collapse_to_start(void) {
     DomSelection* s = selection_from_this(); if (!s) return make_undef();
+    DomElement* control = active_text_control_for_selection(s);
+    if (control) {
+        tc_ensure_init(control);
+        FormControlProp* form = control->form;
+        uint32_t start = form ? form->selection_start : 0;
+        DocState* state = state_for_text_control_selection(s, control);
+        state_store_set_text_control_selection(state, control,
+            start, start, 0);
+        selection_sync_props(js_get_this(), s);
+        return make_undef();
+    }
     if (s->range_count == 0 || !s->ranges[0]) {
         throw_from_dom_exc("InvalidStateError", "collapseToStart failed");
         return make_undef();
@@ -964,6 +1010,17 @@ extern "C" Item js_selection_collapse_to_start(void) {
 
 extern "C" Item js_selection_collapse_to_end(void) {
     DomSelection* s = selection_from_this(); if (!s) return make_undef();
+    DomElement* control = active_text_control_for_selection(s);
+    if (control) {
+        tc_ensure_init(control);
+        FormControlProp* form = control->form;
+        uint32_t end = form ? form->selection_end : 0;
+        DocState* state = state_for_text_control_selection(s, control);
+        state_store_set_text_control_selection(state, control,
+            end, end, 0);
+        selection_sync_props(js_get_this(), s);
+        return make_undef();
+    }
     if (s->range_count == 0 || !s->ranges[0]) {
         throw_from_dom_exc("InvalidStateError", "collapseToEnd failed");
         return make_undef();
@@ -1033,6 +1090,26 @@ extern "C" Item js_selection_set_base_and_extent(Item anchor_node_v, Item anchor
     }
     DomNode* an = node_arg(anchor_node_v);
     DomNode* fn = node_arg(focus_node_v);
+    if (!an && get_type_id(anchor_node_v) == LMD_TYPE_NULL) {
+        const char* exc = nullptr;
+        if (!selection_state_clear(s, &exc)) {
+            throw_from_dom_exc(exc, "setBaseAndExtent clear failed");
+            return make_undef();
+        }
+        selection_sync_props(js_get_this(), s);
+        return make_undef();
+    }
+    if (an && !fn && get_type_id(focus_node_v) == LMD_TYPE_NULL) {
+        uint32_t off = selection_text_offset_from_item(an, anchor_off_v);
+        const char* exc = nullptr;
+        DomBoundary caret = { an, off };
+        if (!selection_state_set(s, &caret, &caret, &exc)) {
+            throw_from_dom_exc(exc, "setBaseAndExtent collapse failed");
+            return make_undef();
+        }
+        selection_sync_props(js_get_this(), s);
+        return make_undef();
+    }
     if (!an || !fn) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
     // Per spec: if either node isn't a descendant of the document, abort
     // (selection is left empty — do not add a range).
