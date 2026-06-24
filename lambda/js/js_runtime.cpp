@@ -40,6 +40,8 @@ extern "C" Item js_new_async_function_from_string(Item* args, int argc);
 extern "C" Item js_new_generator_function_from_string(Item* args, int argc, int is_async);
 extern "C" Item js_get_constructor(Item name_item);
 extern "C" Item js_get_fs_namespace(void);
+extern "C" Item js_get_fs_promises_namespace(void);
+extern "C" Item js_get_internal_fs_promises_namespace(void);
 extern "C" Item js_get_os_namespace(void);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
@@ -32451,42 +32453,12 @@ extern "C" Item js_module_get(Item specifier) {
     // node:fs/promises — wrap fs sync methods as promise-returning functions
     if ((spec->len == 11 && memcmp(spec->chars, "fs/promises", 11) == 0) ||
         (spec->len == 16 && memcmp(spec->chars, "node:fs/promises", 16) == 0)) {
-        static Item fsp_ns = {0};
-        static uint64_t fsp_epoch = (uint64_t)-1;
-        if (fsp_ns.item == 0 || fsp_epoch != js_heap_epoch) {
-            fsp_epoch = js_heap_epoch;
-            // get the fs namespace and wrap sync methods as promise-returning functions
-            extern Item js_get_fs_namespace(void);
-            Item fs_ns = js_get_fs_namespace();
-            fsp_ns = js_new_object();
-            heap_register_gc_root(&fsp_ns.item);
-            // For each sync method, create a promise wrapper
-            // For now, expose the fs namespace methods directly — tests mostly care that the module exists
-            static const char* methods[] = {
-                "readFile", "writeFile", "appendFile", "copyFile", "rename", "unlink",
-                "mkdir", "rmdir", "readdir", "stat", "lstat", "access", "chmod",
-                "realpath", "rm", "mkdtemp", "symlink", "readlink", "truncate", NULL
-            };
-            for (int i = 0; methods[i]; i++) {
-                Item method_key = (Item){.item = s2it(heap_create_name(methods[i], strlen(methods[i])))};
-                // try to get the sync version name (e.g. "readFileSync" from "readFile")
-                char sync_name[64];
-                snprintf(sync_name, sizeof(sync_name), "%sSync", methods[i]);
-                Item sync_key = (Item){.item = s2it(heap_create_name(sync_name, strlen(sync_name)))};
-                Item sync_fn = js_property_get(fs_ns, sync_key);
-                if (get_type_id(sync_fn) == LMD_TYPE_FUNC) {
-                    js_property_set(fsp_ns, method_key, sync_fn);
-                }
-            }
-            // Also expose open, constants
-            Item constants_key = (Item){.item = s2it(heap_create_name("constants", 9))};
-            Item constants = js_property_get(fs_ns, constants_key);
-            if (get_type_id(constants) != LMD_TYPE_UNDEFINED && get_type_id(constants) != LMD_TYPE_NULL) {
-                js_property_set(fsp_ns, constants_key, constants);
-            }
-            js_property_set(fsp_ns, (Item){.item = s2it(heap_create_name("default", 7))}, fsp_ns);
-        }
-        return fsp_ns;
+        return js_get_fs_promises_namespace();
+    }
+    // internal/fs/promises — FileHandle constructor surface used by official tests.
+    if ((spec->len == 20 && memcmp(spec->chars, "internal/fs/promises", 20) == 0) ||
+        (spec->len == 23 && memcmp(spec->chars, "internal/fs/promises.js", 23) == 0)) {
+        return js_get_internal_fs_promises_namespace();
     }
     // internal/fs/utils — selected helpers used by official fs tests
     if ((spec->len == 17 && memcmp(spec->chars, "internal/fs/utils", 17) == 0) ||

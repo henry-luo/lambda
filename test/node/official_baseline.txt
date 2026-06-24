@@ -646,8 +646,12 @@ test-fs-open-numeric-flags.js
 test-fs-opendir.js
 test-fs-operations-with-surrogate-pairs.js
 test-fs-options-immutable.js
+test-fs-promises-exists.js
+test-fs-promises-file-handle-aggregate-errors.js
 test-fs-promises-file-handle-append-file.js
 test-fs-promises-file-handle-chmod.js
+test-fs-promises-file-handle-close-errors.js
+test-fs-promises-file-handle-op-errors.js
 test-fs-promises-file-handle-pull.js
 test-fs-promises-file-handle-read-worker.js
 test-fs-promises-file-handle-read.js

@@ -10,6 +10,7 @@
 #include "js_typed_array.h"
 #include "js_error_codes.h"
 #include "js_class.h"
+#include "js_property_attrs.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -307,6 +308,8 @@ static Item make_string_item(const char* str) {
     if (!str) return ItemNull;
     return make_string_item(str, (int)strlen(str));
 }
+
+static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count);
 
 static bool fs_parse_access_mode(Item mode_item, bool has_mode, int* out_mode) {
     *out_mode = 0;
@@ -1839,6 +1842,49 @@ static Item js_fs_filehandle_close(void) {
     return js_promise_resolve(make_js_undefined());
 }
 
+static Item fs_filehandle_ctor = {0};
+static Item fs_filehandle_proto = {0};
+
+static Item js_fs_filehandle_illegal_constructor(void) {
+    return js_throw_type_error("FileHandle is not constructible");
+}
+
+static Item js_fs_filehandle_fd_getter(void) {
+    Item self = js_get_this();
+    return js_property_get(self, make_string_item("__fd"));
+}
+
+static Item fs_get_filehandle_prototype(void) {
+    if (fs_filehandle_proto.item != 0) return fs_filehandle_proto;
+
+    fs_filehandle_proto = js_new_object();
+    Item fd_getter = js_new_function((void*)js_fs_filehandle_fd_getter, 0);
+    js_install_native_accessor(fs_filehandle_proto, make_string_item("fd"), fd_getter,
+                               ItemNull, JSPD_NON_ENUMERABLE);
+    js_fs_set_method(fs_filehandle_proto, "read", (void*)js_fs_filehandle_read, 4);
+    js_fs_set_method(fs_filehandle_proto, "close", (void*)js_fs_filehandle_close, 0);
+    js_property_set(fs_filehandle_proto, make_string_item("__sym_14"),
+                    js_new_function((void*)js_fs_filehandle_close, 0));
+    return fs_filehandle_proto;
+}
+
+static Item fs_get_filehandle_constructor(void) {
+    if (fs_filehandle_ctor.item != 0) return fs_filehandle_ctor;
+
+    Item proto = fs_get_filehandle_prototype();
+    fs_filehandle_ctor = js_new_function((void*)js_fs_filehandle_illegal_constructor, 0);
+    js_property_set(fs_filehandle_ctor, make_string_item("prototype"), proto);
+    js_property_set(proto, make_string_item("constructor"), fs_filehandle_ctor);
+    return fs_filehandle_ctor;
+}
+
+static Item fs_create_filehandle(Item fd) {
+    Item handle = js_new_object();
+    js_set_prototype(handle, fs_get_filehandle_prototype());
+    js_property_set(handle, make_string_item("__fd"), fd);
+    return handle;
+}
+
 extern "C" Item js_fs_writeSync(Item fd_item, Item data_item, Item offset_item, Item length_item, Item position_item) {
     int fd = 0;
     if (!fs_validate_fd(fd_item, &fd)) return ItemNull;
@@ -2164,6 +2210,7 @@ static Item js_fs_fstat_async(Item fd_item, Item opts_or_cb, Item callback_item)
 // =============================================================================
 
 static Item fs_namespace = {0};
+static Item fs_internal_promises_namespace = {0};
 
 static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);
@@ -2270,15 +2317,7 @@ extern "C" Item js_fs_open_promise(Item path, Item flags, Item mode) {
         return js_promise_reject(js_new_error(make_string_item("open failed")));
     }
 
-    Item handle = js_new_object();
-    js_property_set(handle, make_string_item("__fd"), fd);
-    js_property_set(handle, make_string_item("fd"), fd);
-    js_property_set(handle, make_string_item("read"),
-                    js_new_function((void*)js_fs_filehandle_read, 4));
-    js_property_set(handle, make_string_item("close"),
-                    js_new_function((void*)js_fs_filehandle_close, 0));
-    js_property_set(handle, make_string_item("__sym_14"),
-                    js_new_function((void*)js_fs_filehandle_close, 0));
+    Item handle = fs_create_filehandle(fd);
     return js_promise_resolve(handle);
 }
 
@@ -2828,7 +2867,26 @@ extern "C" Item js_get_fs_namespace(void) {
     return fs_namespace;
 }
 
+extern "C" Item js_get_fs_promises_namespace(void) {
+    Item fs = js_get_fs_namespace();
+    return js_property_get(fs, make_string_item("promises"));
+}
+
+extern "C" Item js_get_internal_fs_promises_namespace(void) {
+    if (fs_internal_promises_namespace.item != 0) return fs_internal_promises_namespace;
+
+    fs_internal_promises_namespace = js_new_object();
+    js_property_set(fs_internal_promises_namespace, make_string_item("FileHandle"),
+                    fs_get_filehandle_constructor());
+    js_property_set(fs_internal_promises_namespace, make_string_item("default"),
+                    fs_internal_promises_namespace);
+    return fs_internal_promises_namespace;
+}
+
 // Reset fs namespace (for re-initialization between runs)
 extern "C" void js_fs_reset(void) {
     fs_namespace = (Item){0};
+    fs_internal_promises_namespace = (Item){0};
+    fs_filehandle_ctor = (Item){0};
+    fs_filehandle_proto = (Item){0};
 }
