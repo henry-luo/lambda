@@ -85,6 +85,7 @@ static const char* BASELINE_FILE   = "test/node/official_baseline.txt";
 static const char* CRASHER_FILE    = "temp/_node_official_crashers.txt";
 static const char* FAILURE_OUTPUT_FILE = "temp/node_official_failures.log";
 static const char* SLOW_LIST_FILE  = "test/node/official_slow_list.txt";
+static const char* SERIAL_LIST_FILE = "test/node/official_serial_list.txt";
 static const char* TIMING_FILE     = "temp/node_official_times.tsv";
 static const double SLOW_TEST_THRESHOLD_MS = 10000.0;
 static int         g_timeout_ms    = 60000;    // per-test timeout (60s for JIT compilation)
@@ -355,6 +356,8 @@ static std::map<std::string, std::string> g_skipped_tests;
 static bool g_skip_list_loaded = false;
 static std::map<std::string, std::string> g_slow_tests;
 static bool g_slow_list_loaded = false;
+static std::map<std::string, std::string> g_serial_tests;
+static bool g_serial_list_loaded = false;
 
 static void trim_ascii(std::string& text) {
     while (!text.empty() && (text.back() == ' ' || text.back() == '\t'))
@@ -411,6 +414,13 @@ static void load_slow_list() {
     g_slow_list_loaded = true;
 
     load_test_name_list(SLOW_LIST_FILE, "slow list", g_slow_tests);
+}
+
+static void load_serial_list() {
+    if (g_serial_list_loaded) return;
+    g_serial_list_loaded = true;
+
+    load_test_name_list(SERIAL_LIST_FILE, "serial list", g_serial_tests);
 }
 
 // =============================================================================
@@ -876,13 +886,8 @@ static bool g_node_socket_preflight_failed = false;
 static std::string g_node_socket_preflight_message;
 
 static bool node_test_requires_serial(const NodeOfficialParam& t) {
-    return t.module == "child-process" ||
-           t.module == "cluster" ||
-           t.module == "http" ||
-           t.module == "https" ||
-           t.module == "net" ||
-           t.module == "timers" ||
-           t.module == "tls";
+    load_serial_list();
+    return g_serial_tests.find(t.filename) != g_serial_tests.end();
 }
 
 static bool node_test_needs_socket_preflight(const NodeOfficialParam& t) {
