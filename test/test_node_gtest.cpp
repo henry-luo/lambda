@@ -617,9 +617,9 @@ static NodeTestResult run_single_test(const std::string& test_path, size_t ordin
              "mkdir -p \"temp/node_test/%s\" && cd \"temp/node_test/%s\" && "
              "ln -sfn \"../../../ref/node/test\" test && "
              "env -u DYLD_INSERT_LIBRARIES -u DYLD_LIBRARY_PATH -u ASAN_OPTIONS -u MallocNanoZone "
-             "-u LAMBDA_NODE_BASELINE_ONLY NODE_COMMON_PORT=%u "
+             "-u LAMBDA_NODE_BASELINE_ONLY NODE_COMMON_PORT=%u TEST_THREAD_ID=%u "
              "timeout -k 5s %d ../../../lambda.exe js \"../../../%s\" --no-log 2>&1",
-             filename.c_str(), filename.c_str(), node_common_port,
+             filename.c_str(), filename.c_str(), node_common_port, (unsigned int)ordinal,
              (g_timeout_ms + 999) / 1000, test_path.c_str());
 #endif
 
