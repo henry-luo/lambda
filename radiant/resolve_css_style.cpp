@@ -5434,6 +5434,24 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_CARET_SHAPE: {
+            log_debug("[CSS] Processing caret-shape property");
+            if (!span->in_line) {
+                span->in_line = alloc_inline_prop(lycon);
+            }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum shape = value->data.keyword;
+                if (shape == CSS_VALUE_AUTO || shape == CSS_VALUE_BAR ||
+                    shape == CSS_VALUE_BLOCK || shape == CSS_VALUE_UNDERSCORE) {
+                    span->in_line->caret_shape = shape;
+                    const CssEnumInfo* info = css_enum_info(shape);
+                    log_debug("[CSS] Caret-shape: %s -> 0x%04X",
+                        info ? info->name : "unknown", shape);
+                }
+            }
+            break;
+        }
+
         // ===== GROUP 2: Box Model Basics =====
 
         case CSS_PROPERTY_WIDTH: {

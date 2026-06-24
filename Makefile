@@ -1213,6 +1213,24 @@ run-radiant-baseline:
 	layout_overall_status="✅ PASS"; \
 	mkdir -p temp; \
 	> temp/_layout_baseline_results.txt; \
+	run_with_progress() { \
+		label="$$1"; log_file="$$2"; shift 2; \
+		rm -f "$$log_file"; \
+		"$$@" > "$$log_file" 2>&1 & \
+		child_pid=$$!; elapsed=0; \
+		while kill -0 $$child_pid 2>/dev/null; do \
+			sleep 10; elapsed=$$((elapsed + 10)); \
+			if kill -0 $$child_pid 2>/dev/null; then \
+				latest=$$(grep -E '^\[ RUN      \]|^\[[[:space:]]*[0-9]+/[0-9]+\]|^\[  PASSED  \]|^\[  FAILED  \]|PASS|FAIL|Results:' "$$log_file" | tail -1); \
+				if [ -n "$$latest" ]; then \
+					echo "   ... $$label ($${elapsed}s): $$latest"; \
+				else \
+					echo "   ... $$label ($${elapsed}s)"; \
+				fi; \
+			fi; \
+		done; \
+		wait $$child_pid; \
+	}; \
 	\
 	echo ""; \
 	echo "=============================================================="; \
@@ -1276,7 +1294,8 @@ run-radiant-baseline:
 	echo ""; \
 	echo "📦 UI Automation Tests:"; \
 	if [ -f "test/test_ui_automation_gtest.exe" ]; then \
-		output=$$(./test/test_ui_automation_gtest.exe 2>&1) || true; \
+		run_with_progress "UI Automation" "temp/_radiant_ui_automation.log" ./test/test_ui_automation_gtest.exe || true; \
+		output=$$(cat "temp/_radiant_ui_automation.log"); \
 		echo "$$output" | grep -E "^\[|tests executed" | tail -5; \
 		ui_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		ui_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | tail -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
@@ -1289,7 +1308,8 @@ run-radiant-baseline:
 	echo ""; \
 	echo "📦 Radiant View Command Tests:"; \
 	if [ -f "test/test_radiant_view_gtest.exe" ]; then \
-		output=$$(./test/test_radiant_view_gtest.exe 2>&1) || true; \
+		run_with_progress "Radiant View Cmd" "temp/_radiant_view_cmd.log" ./test/test_radiant_view_gtest.exe || true; \
+		output=$$(cat "temp/_radiant_view_cmd.log"); \
 		echo "$$output" | grep -E "^\[|tests executed" | tail -5; \
 		radiant_view_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		radiant_view_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | tail -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
@@ -1302,7 +1322,8 @@ run-radiant-baseline:
 	echo ""; \
 	echo "📦 View Page and Markdown (Headless) Tests:"; \
 	if [ -f "test/test_page_load_gtest.exe" ]; then \
-		output=$$(./test/test_page_load_gtest.exe 2>&1) || true; \
+		run_with_progress "View Page & Markdown" "temp/_radiant_page_load.log" ./test/test_page_load_gtest.exe || true; \
+		output=$$(cat "temp/_radiant_page_load.log"); \
 		echo "$$output" | grep -E "^\[|pages loaded" | tail -5; \
 		page_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		page_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | tail -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
@@ -1329,7 +1350,8 @@ run-radiant-baseline:
 	echo "📦 Render Visual Tests:"; \
 	if [ -f "test/render/test_radiant_render.js" ]; then \
 		echo "   workers: $(RADIANT_RENDER_JOBS)"; \
-		output=$$(cd test/render && LAMBDA_ROOT=$(CURDIR) node test_radiant_render.js -j $(RADIANT_RENDER_JOBS) --baseline 2>&1) || true; \
+		run_with_progress "Render Visual" "temp/_radiant_render_visual.log" sh -c 'cd test/render && LAMBDA_ROOT="$(CURDIR)" node test_radiant_render.js -j $(RADIANT_RENDER_JOBS) --baseline' || true; \
+		output=$$(cat "temp/_radiant_render_visual.log"); \
 		echo "$$output" | grep -E "PASS|FAIL|ERROR|Results:|Baseline Regressions|baseline tests passed" | tail -15; \
 		render_line=$$(echo "$$output" | grep "^Results:" | tail -1); \
 		render_passed=$$(echo "$$render_line" | grep -oE "^Results: [0-9]+" | grep -oE "[0-9]+" || echo "0"); \
@@ -1361,7 +1383,8 @@ run-radiant-baseline:
 	echo ""; \
 	echo "📦 WPT CSS Syntax Conformance:"; \
 	if [ -f "test/test_wpt_css_syntax_gtest.exe" ]; then \
-		output=$$(./test/test_wpt_css_syntax_gtest.exe 2>&1) || true; \
+		run_with_progress "WPT CSS Syntax" "temp/_radiant_wpt_css_syntax.log" ./test/test_wpt_css_syntax_gtest.exe || true; \
+		output=$$(cat "temp/_radiant_wpt_css_syntax.log"); \
 		echo "$$output" | grep -E "^\[  PASSED|^\[  FAILED|^\[  SKIPPED" | tail -5; \
 		wpt_syntax_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		wpt_syntax_failed=$$(echo "$$output" | grep -E "^[0-9]+ FAILED TEST" | grep -oE "^[0-9]+" || echo "0"); \

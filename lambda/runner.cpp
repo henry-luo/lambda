@@ -1456,6 +1456,8 @@ void runtime_cleanup(Runtime* runtime) {
     js_eval_preamble_cache_reset();
     js_fetch_reset();
 
+    bool event_loop_cleaned = false;
+
     // Destroy retained execution state (heap, nursery, name_pool)
     if (runtime->heap) {
         // Set the thread-local context so heap_destroy can access context->heap
@@ -1466,6 +1468,10 @@ void runtime_cleanup(Runtime* runtime) {
         tmp_ctx.nursery = runtime->nursery;
         tmp_ctx.result = ItemNull;
         context = &tmp_ctx;
+
+        js_event_loop_shutdown();
+        lambda_uv_cleanup();
+        event_loop_cleaned = true;
 
         js_dom_shutdown();
         if (runtime->dom_doc) {
@@ -1500,8 +1506,10 @@ void runtime_cleanup(Runtime* runtime) {
             runtime->dom_doc = NULL;
         }
     }
-    js_event_loop_shutdown();
-    lambda_uv_cleanup();
+    if (!event_loop_cleaned) {
+        js_event_loop_shutdown();
+        lambda_uv_cleanup();
+    }
     lambda_stack_cleanup();
     if (runtime->scripts) {
         for (int i = 0; i < runtime->scripts->length; i++) {

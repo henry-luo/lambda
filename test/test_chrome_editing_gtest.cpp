@@ -241,6 +241,74 @@ static void replace_all_text(std::string& text, const char* needle,
     }
 }
 
+static bool js_source_position_is_code(const std::string& text, size_t target) {
+    bool in_single = false;
+    bool in_double = false;
+    bool in_template = false;
+    bool in_line_comment = false;
+    bool in_block_comment = false;
+    bool escaped = false;
+    for (size_t i = 0; i < target && i < text.size(); i++) {
+        char c = text[i];
+        char next = (i + 1 < text.size()) ? text[i + 1] : '\0';
+        if (in_line_comment) {
+            if (c == '\n' || c == '\r') in_line_comment = false;
+            continue;
+        }
+        if (in_block_comment) {
+            if (c == '*' && next == '/') {
+                in_block_comment = false;
+                i++;
+            }
+            continue;
+        }
+        if (in_single || in_double || in_template) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (c == '\\') {
+                escaped = true;
+                continue;
+            }
+            if (in_single && c == '\'') in_single = false;
+            else if (in_double && c == '"') in_double = false;
+            else if (in_template && c == '`') in_template = false;
+            continue;
+        }
+        if (c == '/' && next == '/') {
+            in_line_comment = true;
+            i++;
+        } else if (c == '/' && next == '*') {
+            in_block_comment = true;
+            i++;
+        } else if (c == '\'') {
+            in_single = true;
+        } else if (c == '"') {
+            in_double = true;
+        } else if (c == '`') {
+            in_template = true;
+        }
+    }
+    return !in_single && !in_double && !in_template &&
+        !in_line_comment && !in_block_comment;
+}
+
+static void replace_all_text_in_code(std::string& text, const char* needle,
+                                     const char* replacement) {
+    size_t pos = 0;
+    size_t needle_len = strlen(needle);
+    size_t replacement_len = strlen(replacement);
+    while ((pos = text.find(needle, pos)) != std::string::npos) {
+        if (!js_source_position_is_code(text, pos)) {
+            pos += needle_len;
+            continue;
+        }
+        text.replace(pos, needle_len, replacement);
+        pos += replacement_len;
+    }
+}
+
 static bool is_js_identifier_char(unsigned char c) {
     return isalnum(c) || c == '_' || c == '$';
 }
@@ -253,6 +321,10 @@ static void replace_standalone_get_selection_calls(std::string& text) {
     size_t needle_len = strlen(needle);
     size_t replacement_len = strlen(replacement);
     while ((pos = text.find(needle, pos)) != std::string::npos) {
+        if (!js_source_position_is_code(text, pos)) {
+            pos += needle_len;
+            continue;
+        }
         if (pos > 0) {
             unsigned char previous = (unsigned char)text[pos - 1];
             if (previous == '.' || is_js_identifier_char(previous)) {
@@ -266,10 +338,10 @@ static void replace_standalone_get_selection_calls(std::string& text) {
 }
 
 static std::string normalize_chrome_editing_script(std::string source) {
-    replace_all_text(source, "window.getSelection()",
-                     "globalThis.__chrome_wrapped_get_selection_ce3()");
-    replace_all_text(source, "document.getSelection()",
-                     "globalThis.__chrome_wrapped_get_selection_ce3()");
+    replace_all_text_in_code(source, "window.getSelection()",
+                             "globalThis.__chrome_wrapped_get_selection_ce3()");
+    replace_all_text_in_code(source, "document.getSelection()",
+                             "globalThis.__chrome_wrapped_get_selection_ce3()");
     replace_standalone_get_selection_calls(source);
     replace_all_text(source, "element.getClientRects()[0]",
                      "_chrome_first_client_rect_ce3(element)");
@@ -447,6 +519,37 @@ static bool scripts_define_function_named(const std::string& scripts,
     return contains_text(scripts, needle.c_str());
 }
 
+static bool is_reserved_chrome_editing_global(const std::string& name) {
+    static const char* reserved[] = {
+        "console",
+        "debug",
+        "description",
+        "finishJSTest",
+        "internals",
+        "shouldBe",
+        "shouldBeEqualToString",
+        "shouldBeFalse",
+        "shouldBeGreaterThanOrEqual",
+        "shouldBeLessThanOrEqual",
+        "shouldBeNaN",
+        "shouldBeNotEqualToString",
+        "shouldBeNull",
+        "shouldBeTrue",
+        "shouldBeUndefined",
+        "shouldNotBe",
+        "successfullyParsed",
+        "test",
+        "testFailed",
+        "testPassed",
+        "testRunner",
+        "eventSender"
+    };
+    for (const char* reserved_name : reserved) {
+        if (name == reserved_name) return true;
+    }
+    return false;
+}
+
 static std::string named_element_global_prelude(const std::string& html,
                                                 const std::string& scripts) {
     std::vector<std::string> ids = extract_element_ids(html);
@@ -454,22 +557,36 @@ static std::string named_element_global_prelude(const std::string& html,
     std::string out;
     out += "\n// ---- legacy named element globals ----\n";
     for (const std::string& id : ids) {
+        if (is_reserved_chrome_editing_global(id)) continue;
         if (scripts_define_function_named(scripts, id)) continue;
-        out += "try { globalThis[";
+        bool identifier_name = is_js_identifier_name(id);
+        out += "try { if (";
+        if (identifier_name) {
+            out += "typeof ";
+            out += id;
+            out += " === \"undefined\" && ";
+        }
+        out += "(globalThis[";
+        out += js_string_literal(id);
+        out += "] === undefined || globalThis[";
+        out += js_string_literal(id);
+        out += "] === null)) globalThis[";
         out += js_string_literal(id);
         out += "] = document.getElementById(";
         out += js_string_literal(id);
         out += ") || globalThis[";
         out += js_string_literal(id);
         out += "]; } catch (_) {}\n";
-        if (is_js_identifier_name(id)) {
-            out += "try { var ";
-            out += id;
-            out += " = document.getElementById(";
+        if (identifier_name) {
+            out += "try { if (globalThis[";
             out += js_string_literal(id);
-            out += ") || ";
+            out += "] && globalThis[";
+            out += js_string_literal(id);
+            out += "].nodeType) { var ";
             out += id;
-            out += "; } catch (_) {}\n";
+            out += " = globalThis[";
+            out += js_string_literal(id);
+            out += "]; } } catch (_) {}\n";
         }
     }
     return out;

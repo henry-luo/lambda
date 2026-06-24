@@ -39,6 +39,9 @@ static Item make_string_item(const char* str) {
 extern "C" Item js_get_current_this(void);
 
 // Helper: get raw data pointer and length from a typed array Item
+static const int64_t JS_BUFFER_MAX_LENGTH = (1LL << 30) - 1;
+static const int64_t JS_BUFFER_MAX_STRING_LENGTH = (1LL << 28) - 16;
+
 static uint8_t* buffer_data(Item buf, int* out_len) {
     if (!js_is_typed_array(buf)) { *out_len = 0; return NULL; }
     // use js_get_typed_array_ptr to handle both original (data_cap==0)
@@ -250,7 +253,7 @@ extern "C" Item js_buffer_alloc(Item size_item, Item fill_item) {
     if (tid == LMD_TYPE_INT) size = it2i(size_item);
     else if (tid == LMD_TYPE_FLOAT) {
         double d = it2d(size_item);
-        if (d != d || d < 0 || d > 2147483647) {
+        if (d != d || d < 0 || d > JS_BUFFER_MAX_LENGTH) {
             return js_throw_range_error_code("ERR_OUT_OF_RANGE",
                 "The value of \"size\" is out of range.");
         }
@@ -260,7 +263,7 @@ extern "C" Item js_buffer_alloc(Item size_item, Item fill_item) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"size\" argument must be of type number.");
     }
-    if (size < 0 || size > 2147483647) {
+    if (size < 0 || size > JS_BUFFER_MAX_LENGTH) {
         return js_throw_range_error_code("ERR_OUT_OF_RANGE",
             "The value of \"size\" is out of range.");
     }
@@ -1545,7 +1548,7 @@ extern "C" Item js_buffer_allocUnsafe(Item size_item) {
     if (tid == LMD_TYPE_INT) size = it2i(size_item);
     else if (tid == LMD_TYPE_FLOAT) {
         double d = it2d(size_item);
-        if (d != d || d < 0 || d > 2147483647) {
+        if (d != d || d < 0 || d > JS_BUFFER_MAX_LENGTH) {
             return js_throw_range_error_code("ERR_OUT_OF_RANGE",
                 "The value of \"size\" is out of range.");
         }
@@ -1555,7 +1558,7 @@ extern "C" Item js_buffer_allocUnsafe(Item size_item) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"size\" argument must be of type number.");
     }
-    if (size < 0 || size > 2147483647) {
+    if (size < 0 || size > JS_BUFFER_MAX_LENGTH) {
         return js_throw_range_error_code("ERR_OUT_OF_RANGE",
             "The value of \"size\" is out of range.");
     }
@@ -2820,17 +2823,17 @@ extern "C" Item js_get_buffer_namespace(void) {
     {
         Item constants_obj = js_new_object();
         js_property_set(constants_obj, make_string_item("MAX_LENGTH"),
-            (Item){.item = i2it((int64_t)(1LL << 31) - 1)}); // 2GB - 1
+            (Item){.item = i2it(JS_BUFFER_MAX_LENGTH)});
         js_property_set(constants_obj, make_string_item("MAX_STRING_LENGTH"),
-            (Item){.item = i2it((int64_t)(1LL << 28) - 16)}); // ~256MB
+            (Item){.item = i2it(JS_BUFFER_MAX_STRING_LENGTH)});
         js_property_set(buffer_namespace, make_string_item("constants"), constants_obj);
     }
 
     // buffer.kMaxLength, buffer.kStringMaxLength — legacy aliases
     js_property_set(buffer_namespace, make_string_item("kMaxLength"),
-        (Item){.item = i2it((int64_t)(1LL << 31) - 1)});
+        (Item){.item = i2it(JS_BUFFER_MAX_LENGTH)});
     js_property_set(buffer_namespace, make_string_item("kStringMaxLength"),
-        (Item){.item = i2it((int64_t)(1LL << 28) - 16)});
+        (Item){.item = i2it(JS_BUFFER_MAX_STRING_LENGTH)});
 
     // buffer.SlowBuffer — legacy, alias for allocUnsafeSlow
     js_property_set(buffer_namespace, make_string_item("SlowBuffer"),

@@ -4,7 +4,6 @@
 #include "render_export_support.hpp"
 #include "scroller.hpp"
 #include "animation.h"
-#include "rdt_video.h"
 #include "webview.h"
 #include "state_store.hpp"
 #include "form_control.hpp"
@@ -212,33 +211,6 @@ extern "C" void radiant_state_request_repaint(DocState* state) {
     }
 }
 
-// walk a view tree and destroy heap-allocated video resources
-// must be called before view_pool_destroy to avoid leaking RdtVideo*
-static void destroy_video_in_view(View* view) {
-    if (!view) return;
-    if (view->view_type >= RDT_VIEW_INLINE_BLOCK && view->is_element()) {
-        ViewBlock* blk = lam::view_require_block(view);
-        if (blk->embed && blk->embed->video) {
-            rdt_video_destroy((RdtVideo*)blk->embed->video);
-            blk->embed->video = nullptr;
-        }
-    }
-    // recurse into children if this is an element
-    if (view->is_element()) {
-        DomElement* elem = view->as_element();
-        DomNode* child = elem->first_child;
-        while (child) {
-            destroy_video_in_view(child);
-            child = child->next_sibling;
-        }
-    }
-}
-
-static void destroy_video_resources(ViewTree* tree) {
-    if (!tree || !tree->root) return;
-    destroy_video_in_view(tree->root);
-}
-
 static void destroy_form_props_in_dom(DomNode* node) {
     if (!node || !node->is_element()) return;
     DomElement* elem = node->as_element();
@@ -266,13 +238,11 @@ void free_document(DomDocument* doc) {
 
     radiant_document_destroy_state(doc);
 
-    destroy_form_props_in_dom((DomNode*)doc->root);
+    if (!doc->view_tree) {
+        destroy_form_props_in_dom((DomNode*)doc->root);
+    }
 
     if (doc->view_tree) {
-        // destroy video resources before bulk-freeing the pool
-        // (RdtVideo* and poster ImageSurface* are heap-allocated, not pool-allocated)
-        destroy_video_resources(doc->view_tree);
-
         // Check if doc->pool is the same as view_tree->pool to avoid double-free
         if (doc->pool == doc->view_tree->pool) {
             doc->pool = nullptr;  // Pool will be destroyed by view_pool_destroy

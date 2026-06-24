@@ -17,10 +17,12 @@
 #include "form_control.hpp"
 #include "render_svg_inline.hpp"
 #include "render_export_support.hpp"
+#include "scroller.hpp"
 #include "state_store.hpp"
 #include "webview.h"
 
 #include "../lib/log.h"
+#include "../lib/mem_factory.h"
 #include "../lib/strbuf.h"
 #include "../lib/str.h"
 #include "../lib/font/font.h"
@@ -36,6 +38,9 @@
 using namespace std::chrono;
 
 extern void adjust_text_bounds(ViewText* text);
+extern DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
+    int viewport_width, int viewport_height, Pool* pool, const char* html_source,
+    bool track_source_lines, bool execute_scripts);
 
 static bool line_has_prior_flow_content(const Linebox* line) {
     return line &&
@@ -3026,6 +3031,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         float v_max = flow_height > block->height ? flow_height - block->height : 0.0f;
         scroll_state_set_max_for_view(state, static_cast<View*>(block),
             block->scroller->pane, h_max, v_max);
+        scroll_apply_pending_element_scroll(block);
     }
 }
 
@@ -3058,6 +3064,85 @@ static void resolve_table_auto_margins_after_shrink(ViewBlock* block, float cont
               block->bound->margin.left, block->bound->margin.right, block->x);
 }
 
+static Url* clone_document_url_for_iframe(LayoutContext* lycon) {
+    DomDocument* parent_doc = lycon && lycon->ui_context ?
+        lycon->ui_context->document : nullptr;
+    const char* href = parent_doc && parent_doc->url ?
+        url_get_href(parent_doc->url) : nullptr;
+    Url* cloned = href && *href ? url_parse(href) : nullptr;
+    if (cloned && cloned->is_valid) return cloned;
+    if (cloned) url_destroy(cloned);
+    return get_current_dir();
+}
+
+static DomDocument* load_iframe_srcdoc_doc(LayoutContext* lycon,
+                                           const char* srcdoc,
+                                           int viewport_width,
+                                           int viewport_height) {
+    if (!srcdoc || !*srcdoc) return nullptr;
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "iframe_srcdoc");
+    if (!pool) {
+        log_error("iframe_srcdoc_load: failed to create memory pool");
+        return nullptr;
+    }
+    Url* base_url = clone_document_url_for_iframe(lycon);
+    if (!base_url) {
+        log_error("iframe_srcdoc_load: failed to create base URL");
+        pool_destroy(pool);
+        return nullptr;
+    }
+    DomDocument* doc = load_lambda_html_doc(base_url, nullptr,
+        viewport_width, viewport_height, pool, srcdoc, false, true);
+    if (!doc) {
+        url_destroy(base_url);
+        pool_destroy(pool);
+        log_debug("iframe_srcdoc_load: failed to load srcdoc document");
+    }
+    return doc;
+}
+
+static DomDocument* load_iframe_src_doc(LayoutContext* lycon,
+                                        const char* src,
+                                        int viewport_width,
+                                        int viewport_height) {
+    if (!lycon || !lycon->ui_context || !lycon->ui_context->document ||
+        !lycon->ui_context->document->url || !src || !*src) {
+        return nullptr;
+    }
+    size_t src_len = strlen(src);
+    StrBuf* src_buf = strbuf_new_cap(src_len);
+    strbuf_append_str_n(src_buf, src, src_len);
+    DomDocument* doc = load_html_doc(lycon->ui_context->document->url,
+        src_buf->str, viewport_width, viewport_height, 1.0f);
+    strbuf_free(src_buf);
+    return doc;
+}
+
+static void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
+                                       int iframe_width, int iframe_height) {
+    if (!lycon || !lycon->ui_context || !doc || !doc->html_root) return;
+    DomDocument* parent_doc = lycon->ui_context->document;
+    float saved_window_width = lycon->ui_context->window_width;
+    float saved_window_height = lycon->ui_context->window_height;
+    int saved_viewport_width = lycon->ui_context->viewport_width;
+    int saved_viewport_height = lycon->ui_context->viewport_height;
+
+    lycon->ui_context->document = doc;
+    lycon->ui_context->window_width = (float)iframe_width;
+    lycon->ui_context->window_height = (float)iframe_height;
+    lycon->ui_context->viewport_width = iframe_width;
+    lycon->ui_context->viewport_height = iframe_height;
+
+    process_document_font_faces(lycon->ui_context, doc);
+    layout_html_doc(lycon->ui_context, doc, false);
+
+    lycon->ui_context->document = parent_doc;
+    lycon->ui_context->window_width = saved_window_width;
+    lycon->ui_context->window_height = saved_window_height;
+    lycon->ui_context->viewport_width = saved_viewport_width;
+    lycon->ui_context->viewport_height = saved_viewport_height;
+}
+
 void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
     DomDocument* doc = NULL;
     log_debug("layout iframe");
@@ -3071,26 +3156,28 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
     }
 
     if (!(block->embed && block->embed->doc)) {
-        // load iframe document
-        const char *value = block->get_attribute("src");
-        if (value) {
-            size_t value_len = strlen(value);
-            StrBuf* src = strbuf_new_cap(value_len);
-            strbuf_append_str_n(src, value, value_len);
-            // Use iframe's actual dimensions as viewport, not window dimensions
-            // This ensures the embedded document layouts to fit within the iframe
-            int iframe_width = block->width > 0 ? (int)block->width : lycon->ui_context->window_width; // INT_CAST_OK: iframe viewport expects int
-            int iframe_height = block->height > 0 ? (int)block->height : lycon->ui_context->window_height; // INT_CAST_OK: iframe viewport expects int
-            log_debug("load iframe doc src: %s (iframe viewport=%dx%d, depth=%d)", src->str, iframe_width, iframe_height, iframe_depth);
+        const char* srcdoc = block->get_attribute("srcdoc");
+        const char* src = block->get_attribute("src");
+        if ((srcdoc && *srcdoc) || (src && *src)) {
+            int iframe_width = block->width > 0 ?
+                (int)block->width : (int)lycon->ui_context->window_width; // INT_CAST_OK: iframe viewport expects int
+            int iframe_height = block->height > 0 ?
+                (int)block->height : (int)lycon->ui_context->window_height; // INT_CAST_OK: iframe viewport expects int
+            log_debug("load iframe doc %s: %s (iframe viewport=%dx%d, depth=%d)",
+                (srcdoc && *srcdoc) ? "srcdoc" : "src",
+                (srcdoc && *srcdoc) ? "(inline)" : src,
+                iframe_width, iframe_height, iframe_depth);
 
             // Increment depth before loading
             iframe_depth++;
 
-            // Load iframe document - pixel_ratio from ui_context is still used internally
-            doc = load_html_doc(lycon->ui_context->document->url, src->str,
-                iframe_width, iframe_height,
-                1.0f);  // Layout in CSS logical pixels
-            strbuf_free(src);
+            if (srcdoc && *srcdoc) {
+                doc = load_iframe_srcdoc_doc(lycon, srcdoc,
+                    iframe_width, iframe_height);
+            } else {
+                doc = load_iframe_src_doc(lycon, src,
+                    iframe_width, iframe_height);
+            }
             if (!doc) {
                 log_debug("failed to load iframe document");
                 iframe_depth--;
@@ -3099,41 +3186,12 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                 radiant_document_ensure_state(doc, "layout_iframe");
                 if (!(block->embed)) block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
                 block->embed->doc = doc; // assign loaded document to embed property
-                if (doc->html_root) {
-                    log_debug("IFRAME TRACE: about to layout iframe document");
-                    // Save parent document and window/viewport dimensions
-                    DomDocument* parent_doc = lycon->ui_context->document;
-                    float saved_window_width = lycon->ui_context->window_width;
-                    float saved_window_height = lycon->ui_context->window_height;
-                    int saved_viewport_width = lycon->ui_context->viewport_width;
-                    int saved_viewport_height = lycon->ui_context->viewport_height;
-
-                    // Temporarily set window/viewport dimensions to iframe size
-                    // Both window_ and viewport_ must match so layout_init picks up iframe dims
-                    lycon->ui_context->document = doc;
-                    lycon->ui_context->window_width = (float)iframe_width;
-                    lycon->ui_context->window_height = (float)iframe_height;
-                    lycon->ui_context->viewport_width = iframe_width;
-                    lycon->ui_context->viewport_height = iframe_height;
-
-                    // Process @font-face rules before layout (critical for custom fonts like Computer Modern)
-                    process_document_font_faces(lycon->ui_context, doc);
-
-                    layout_html_doc(lycon->ui_context, doc, false);
-
-                    // Restore parent document and window/viewport dimensions
-                    lycon->ui_context->document = parent_doc;
-                    lycon->ui_context->window_width = saved_window_width;
-                    lycon->ui_context->window_height = saved_window_height;
-                    lycon->ui_context->viewport_width = saved_viewport_width;
-                    lycon->ui_context->viewport_height = saved_viewport_height;
-                    log_debug("IFRAME TRACE: finished layout iframe document");
-                }
+                layout_iframe_embedded_doc(lycon, doc, iframe_width, iframe_height);
                 iframe_depth--;
                 // embedded documents may already provide a pre-laid-out view tree
             }
         } else {
-            log_debug("iframe has no src attribute");
+            log_debug("iframe has no srcdoc or src attribute");
         }
     }
     else {
@@ -3141,14 +3199,11 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
     }
     if (doc && doc->view_tree && doc->view_tree->root) {
         ViewBlock* root = lam::view_require_block(doc->view_tree->root);
-        log_debug("IFRAME TRACE: iframe embedded doc root->content_width=%.1f, root->content_height=%.1f",
-            root->content_width, root->content_height);
         // For PDF and other pre-laid-out documents, use width/height if content_width/height are 0
         float iframe_width = root->content_width > 0 ? root->content_width : root->width;
         float iframe_height = root->content_height > 0 ? root->content_height : root->height;
         lycon->block.max_width = iframe_width;
         lycon->block.advance_y = iframe_height;
-        log_debug("IFRAME TRACE: set lycon->block.advance_y = %.1f from iframe_height", lycon->block.advance_y);
 
         // Disable inner doc's viewport scroller — the iframe container handles scrolling.
         // Otherwise we get double scrolling/clipping (inner root + outer iframe block).
@@ -3175,7 +3230,6 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                                            NULL, NULL, &h_max, NULL);
         scroll_state_set_max_for_view(state, static_cast<View*>(block), block->scroller->pane, h_max, v_max);
     }
-    log_debug("IFRAME TRACE: after finalize_block_flow, iframe block->content_height=%.1f", block->content_height);
 }
 
 /**

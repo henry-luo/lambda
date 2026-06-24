@@ -768,7 +768,7 @@ bool editing_controller_handle_rich_navigation(EventContext* evcon,
     switch (key_event->key) {
         case RDT_KEY_LEFT:
             if (shift) {
-                if (!selection_has(state)) state_store_legacy_selection_start(state, caret_view, caret_offset);
+                selection_begin_non_pointer_extend(state, caret_view, caret_offset);
                 int new_offset = text_data
                     ? utf8_offset_by_chars(text_data, caret_offset, -1)
                     : caret_offset - 1;
@@ -776,6 +776,7 @@ bool editing_controller_handle_rich_navigation(EventContext* evcon,
                 editing_controller_selection_snapshot(evcon, state, hooks,
                                                       caret_view,
                                                       "extendBackward");
+                selection_finish_active_gesture(state);
             } else {
                 state_store_legacy_selection_clear(state);
                 state_store_legacy_caret_move(state, ctrl ? -10 : -1);
@@ -788,7 +789,7 @@ bool editing_controller_handle_rich_navigation(EventContext* evcon,
 
         case RDT_KEY_RIGHT:
             if (shift) {
-                if (!selection_has(state)) state_store_legacy_selection_start(state, caret_view, caret_offset);
+                selection_begin_non_pointer_extend(state, caret_view, caret_offset);
                 int new_offset = text_data
                     ? utf8_offset_by_chars(text_data, caret_offset, 1)
                     : caret_offset + 1;
@@ -796,6 +797,7 @@ bool editing_controller_handle_rich_navigation(EventContext* evcon,
                 editing_controller_selection_snapshot(evcon, state, hooks,
                                                       caret_view,
                                                       "extendForward");
+                selection_finish_active_gesture(state);
             } else {
                 state_store_legacy_selection_clear(state);
                 state_store_legacy_caret_move(state, ctrl ? 10 : 1);
@@ -808,11 +810,12 @@ bool editing_controller_handle_rich_navigation(EventContext* evcon,
 
         case RDT_KEY_UP:
             if (shift) {
-                if (!selection_has(state)) state_store_legacy_selection_start(state, caret_view, caret_offset);
+                selection_begin_non_pointer_extend(state, caret_view, caret_offset);
                 state_store_legacy_caret_move_line(state, -1, evcon->ui_context);
                 editing_controller_extend_to_moved_caret(evcon, state, caret_view,
                                                          &caret_offset, hooks,
                                                          "extendLineBackward");
+                selection_finish_active_gesture(state);
             } else {
                 state_store_legacy_selection_clear(state);
                 state_store_legacy_caret_move_line(state, -1, evcon->ui_context);
@@ -824,11 +827,12 @@ bool editing_controller_handle_rich_navigation(EventContext* evcon,
 
         case RDT_KEY_DOWN:
             if (shift) {
-                if (!selection_has(state)) state_store_legacy_selection_start(state, caret_view, caret_offset);
+                selection_begin_non_pointer_extend(state, caret_view, caret_offset);
                 state_store_legacy_caret_move_line(state, 1, evcon->ui_context);
                 editing_controller_extend_to_moved_caret(evcon, state, caret_view,
                                                          &caret_offset, hooks,
                                                          "extendLineForward");
+                selection_finish_active_gesture(state);
             } else {
                 state_store_legacy_selection_clear(state);
                 state_store_legacy_caret_move_line(state, 1, evcon->ui_context);
@@ -840,12 +844,13 @@ bool editing_controller_handle_rich_navigation(EventContext* evcon,
 
         case RDT_KEY_HOME:
             if (shift) {
-                if (!selection_has(state)) state_store_legacy_selection_start(state, caret_view, caret_offset);
+                selection_begin_non_pointer_extend(state, caret_view, caret_offset);
                 state_store_legacy_caret_move_to(state, cmd ? 2 : 0);
                 editing_controller_extend_to_moved_caret(evcon, state, caret_view,
                                                          &caret_offset, hooks,
                                                          cmd ? "extendDocumentStart"
                                                              : "extendLineStart");
+                selection_finish_active_gesture(state);
             } else {
                 state_store_legacy_selection_clear(state);
                 state_store_legacy_caret_move_to(state, cmd ? 2 : 0);
@@ -858,12 +863,13 @@ bool editing_controller_handle_rich_navigation(EventContext* evcon,
 
         case RDT_KEY_END:
             if (shift) {
-                if (!selection_has(state)) state_store_legacy_selection_start(state, caret_view, caret_offset);
+                selection_begin_non_pointer_extend(state, caret_view, caret_offset);
                 state_store_legacy_caret_move_to(state, cmd ? 3 : 1);
                 editing_controller_extend_to_moved_caret(evcon, state, caret_view,
                                                          &caret_offset, hooks,
                                                          cmd ? "extendDocumentEnd"
                                                              : "extendLineEnd");
+                selection_finish_active_gesture(state);
             } else {
                 state_store_legacy_selection_clear(state);
                 state_store_legacy_caret_move_to(state, cmd ? 3 : 1);

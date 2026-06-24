@@ -65,10 +65,7 @@ static void editing_geometry_viewport_xy(View* view, float* out_x, float* out_y)
     while (p) {
         x += p->x;
         y += p->y;
-        if (p != origin &&
-            (p->view_type == RDT_VIEW_BLOCK ||
-             p->view_type == RDT_VIEW_INLINE_BLOCK ||
-             p->view_type == RDT_VIEW_LIST_ITEM)) {
+        if (p != origin && p->is_block()) {
             ViewBlock* block = lam::view_require_block(p);
             if (block->scroller && block->scroller->pane) {
                 float scroll_x = 0.0f;
@@ -97,9 +94,7 @@ static bool editing_geometry_find_document_offset(View* view,
     float here_x = base_x + view->x;
     float here_y = base_y + view->y;
 
-    if ((view->view_type == RDT_VIEW_BLOCK ||
-         view->view_type == RDT_VIEW_INLINE_BLOCK ||
-         view->view_type == RDT_VIEW_LIST_ITEM) &&
+    if (view->is_block() &&
         view->is_element()) {
         ViewBlock* block = lam::view_require_block(view);
         if (block->embed && block->embed->doc) {
@@ -165,22 +160,25 @@ static void editing_geometry_text_block_abs_xy(ViewText* text, float* out_x, flo
     float x = 0.0f, y = 0.0f;
     if (text) {
         for (View* p = text->parent; p; p = p->parent) {
-            if (p->view_type == RDT_VIEW_BLOCK ||
-                p->view_type == RDT_VIEW_INLINE_BLOCK ||
-                p->view_type == RDT_VIEW_LIST_ITEM) {
+            if (p->is_block()) {
                 x += p->x;
                 y += p->y;
+                ViewBlock* block = lam::view_require_block(p);
+                if (block->scroller && block->scroller->pane) {
+                    float scroll_x = 0.0f;
+                    float scroll_y = 0.0f;
+                    DocState* state = block->doc ? block->doc->state : NULL;
+                    scroll_state_get_position_for_view(state,
+                        static_cast<View*>(block), block->scroller->pane,
+                        &scroll_x, &scroll_y, NULL, NULL);
+                    x -= scroll_x;
+                    y -= scroll_y;
+                }
             }
         }
     }
     if (out_x) *out_x = x;
     if (out_y) *out_y = y;
-}
-
-static uint32_t editing_geometry_text_len(DomElement* elem) {
-    if (!elem || !elem->form) return 0;
-    tc_ensure_init(elem);
-    return elem->form->current_value_len;
 }
 
 static bool editing_geometry_text_metrics(UiContext* uicon, ViewBlock* block,
@@ -211,6 +209,66 @@ static bool editing_geometry_text_metrics(UiContext* uicon, ViewBlock* block,
     }
     if (out_width) *out_width = width;
     return true;
+}
+
+// HTML dir=auto / UAX #9 first-strong direction for form-control geometry.
+// Returns 1 for RTL, -1 for LTR, 0 for neutral/not found.
+static int editing_geometry_bidi_strong_class(uint32_t cp) {
+    if (cp == 0x200E) return -1; // LRM
+    if (cp == 0x200F || cp == 0x061C) return 1; // RLM / ALM
+    if (cp >= 0x0590 && cp <= 0x08FF) return 1;
+    if (cp >= 0xFB50 && cp <= 0xFDFF) return 1;
+    if (cp >= 0xFE70 && cp <= 0xFEFF) return 1;
+
+    if ((cp >= 0x0041 && cp <= 0x005A) ||
+        (cp >= 0x0061 && cp <= 0x007A)) return -1;
+    if (cp >= 0x00C0 && cp <= 0x02AF) return -1;
+    if (cp >= 0x0370 && cp <= 0x052F) return -1;
+    if (cp >= 0x0900 && cp <= 0x0DFF) return -1;
+    if (cp >= 0x0E01 && cp <= 0x0E5B) return -1;
+    if (cp >= 0x0E81 && cp <= 0x0EDF) return -1;
+    if (cp >= 0x10A0 && cp <= 0x11FF) return -1;
+    if (cp >= 0x3040 && cp <= 0x30FF) return -1;
+    if (cp >= 0x4E00 && cp <= 0x9FFF) return -1;
+    if (cp >= 0xAC00 && cp <= 0xD7AF) return -1;
+    return 0;
+}
+
+static int editing_geometry_first_strong_direction(const char* text,
+                                                   uint32_t len) {
+    if (!text || len == 0) return 0;
+    const char* p = text;
+    const char* end = text + len;
+    while (p < end) {
+        uint32_t cp = 0;
+        int bytes = str_utf8_decode(p, (size_t)(end - p), &cp);
+        if (bytes <= 0) {
+            p++;
+            continue;
+        }
+        int cls = editing_geometry_bidi_strong_class(cp);
+        if (cls != 0) return cls;
+        p += bytes;
+    }
+    return 0;
+}
+
+static bool editing_geometry_text_control_line_is_rtl(DomElement* elem,
+                                                      ViewBlock* block,
+                                                      const char* value,
+                                                      uint32_t line_start,
+                                                      uint32_t line_len) {
+    const char* dir = elem ? elem->get_attribute("dir") : NULL;
+    if (dir) {
+        if (strcasecmp(dir, "rtl") == 0) return true;
+        if (strcasecmp(dir, "ltr") == 0) return false;
+        if (strcasecmp(dir, "auto") == 0) {
+            int first = editing_geometry_first_strong_direction(
+                value ? value + line_start : NULL, line_len);
+            if (first != 0) return first > 0;
+        }
+    }
+    return block && block->blk && block->blk->direction == CSS_VALUE_RTL;
 }
 
 static uint32_t editing_geometry_line_offset_for_x(UiContext* uicon,
@@ -394,11 +452,18 @@ bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
                                                     float vy,
                                                     uint32_t* out_offset) {
     (void)vy;
-    if (!elem || !tc_is_text_control(elem) || !elem->form || !out_offset) return false;
+    if (!elem || !tc_is_text_control(elem) || !out_offset) return false;
+    tc_ensure_init(elem);
+    if (!elem->form) return false;
 
     ViewBlock* block = lam::view_require_block(elem);
-    const char* value = elem->form->current_value ? elem->form->current_value : elem->form->value;
-    uint32_t value_len = editing_geometry_text_len(elem);
+    const char* value = elem->form->current_value
+        ? elem->form->current_value
+        : elem->form->value;
+    uint32_t value_len = value
+        ? (elem->form->current_value ? elem->form->current_value_len
+            : (uint32_t)strlen(value))
+        : 0;
 
     float abs_x = 0.0f, abs_y = 0.0f;
     editing_geometry_viewport_xy(static_cast<View*>(block), &abs_x, &abs_y);
@@ -412,6 +477,8 @@ bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
     float padding = block->bound ? block->bound->padding.left :
         (elem->form->control_type == FORM_CONTROL_TEXTAREA
             ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
+    float content_w = block->width - 2.0f * (border + padding);
+    if (content_w < 0.0f) content_w = 0.0f;
     float rel_x = vx - abs_x - border - padding + elem->form->scroll_x;
     if (rel_x < 0.0f) rel_x = 0.0f;
 
@@ -423,14 +490,24 @@ bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
         uint32_t line_start = 0, line_len = 0;
         editing_geometry_textarea_line_for_y(value, value_len, rel_y, line_height,
                                              &line_start, &line_len);
+        if (editing_geometry_text_control_line_is_rtl(elem, block, value,
+                line_start, line_len)) {
+            rel_x = content_w - rel_x;
+            if (rel_x < 0.0f) rel_x = 0.0f;
+        }
         *out_offset = editing_geometry_line_offset_for_x(uicon, block, value,
                                                          line_start, line_len,
                                                          rel_x);
         return true;
     }
 
+    if (editing_geometry_text_control_line_is_rtl(elem, block, value, 0,
+            value_len)) {
+        rel_x = content_w - rel_x;
+        if (rel_x < 0.0f) rel_x = 0.0f;
+    }
     *out_offset = editing_geometry_line_offset_for_x(uicon, block, value, 0,
-                                                     value_len, rel_x);
+        value_len, rel_x);
     return true;
 }
 
@@ -463,13 +540,110 @@ bool editing_geometry_text_control_boundary_from_point(UiContext* uicon,
     return true;
 }
 
+struct EditingRichTextExtents {
+    DomText* first_text;
+    DomText* last_text;
+    float min_top;
+    float max_bottom;
+    bool has_rect;
+};
+
+static void editing_rich_text_extents_init(EditingRichTextExtents* extents) {
+    if (!extents) return;
+    extents->first_text = nullptr;
+    extents->last_text = nullptr;
+    extents->min_top = 0.0f;
+    extents->max_bottom = 0.0f;
+    extents->has_rect = false;
+}
+
+static void editing_rich_text_extents_add_rect(EditingRichTextExtents* extents,
+                                               DomText* text,
+                                               float top,
+                                               float bottom) {
+    if (!extents || !text) return;
+    if (!extents->first_text) extents->first_text = text;
+    extents->last_text = text;
+    if (!extents->has_rect) {
+        extents->min_top = top;
+        extents->max_bottom = bottom;
+        extents->has_rect = true;
+        return;
+    }
+    if (top < extents->min_top) extents->min_top = top;
+    if (bottom > extents->max_bottom) extents->max_bottom = bottom;
+}
+
+static void editing_collect_rich_text_extents(DomNode* node,
+                                              EditingRichTextExtents* extents) {
+    if (!node || !extents) return;
+    if (node->is_text()) {
+        DomText* text = lam::dom_require_text(node);
+        if (!text || dom_text_utf16_length(text) == 0) return;
+        ViewText* text_view = lam::view_as<RDT_VIEW_TEXT>(text);
+        if (!text_view) return;
+        float text_x = 0.0f;
+        float text_y = 0.0f;
+        editing_geometry_text_block_abs_xy(text_view, &text_x, &text_y);
+        (void)text_x;
+        for (TextRect* rect = text->rect; rect; rect = rect->next) {
+            if (rect->height <= 0.0f) continue;
+            editing_rich_text_extents_add_rect(extents, text,
+                text_y + rect->y, text_y + rect->y + rect->height);
+        }
+        return;
+    }
+    if (!node->is_element()) return;
+    DomElement* elem = lam::dom_require_element(node);
+    if (tc_is_text_control(elem)) return;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        editing_collect_rich_text_extents(child, extents);
+    }
+}
+
+static bool editing_mac_padding_boundary_for_point(const EditingSurface* surface,
+                                                   float vx,
+                                                   float vy,
+                                                   DomBoundary* out) {
+    if (!surface || !surface->owner || !out) return false;
+    View* owner_view = static_cast<View*>(surface->owner);
+    float owner_x = 0.0f;
+    float owner_y = 0.0f;
+    editing_geometry_viewport_xy(owner_view, &owner_x, &owner_y);
+    if (vx < owner_x || vx >= owner_x + owner_view->width ||
+        vy < owner_y || vy >= owner_y + owner_view->height) {
+        return false;
+    }
+
+    EditingRichTextExtents extents;
+    editing_rich_text_extents_init(&extents);
+    editing_collect_rich_text_extents(static_cast<DomNode*>(surface->owner),
+                                      &extents);
+    if (!extents.has_rect || !extents.first_text || !extents.last_text) {
+        return false;
+    }
+
+    if (vy < extents.min_top) {
+        out->node = static_cast<DomNode*>(extents.first_text);
+        out->offset = 0;
+        return true;
+    }
+    if (vy >= extents.max_bottom) {
+        out->node = static_cast<DomNode*>(extents.last_text);
+        out->offset = dom_text_utf16_length(extents.last_text);
+        return true;
+    }
+    return false;
+}
+
 bool editing_geometry_hit_test_boundary(UiContext* uicon,
                                         View* root_view,
                                         const EditingSurface* surface,
                                         float vx,
                                         float vy,
                                         EditingClampPolicy policy,
-                                        EditingBoundary* out) {
+                                        EditingBoundary* out,
+                                        EditingPointBehavior behavior) {
     if (!out) return false;
     editing_boundary_clear(out);
     if (!surface) return false;
@@ -481,6 +655,13 @@ bool editing_geometry_hit_test_boundary(UiContext* uicon,
 
     if (!editing_surface_is_rich(surface) || !root_view) return false;
     DomBoundary hit = dom_hit_test_to_boundary(root_view, vx, vy);
+    if (behavior == EDITING_POINT_BEHAVIOR_MAC && hit.node &&
+        hit.node->is_text()) {
+        DomBoundary mac_hit = { nullptr, 0 };
+        if (editing_mac_padding_boundary_for_point(surface, vx, vy, &mac_hit)) {
+            hit = mac_hit;
+        }
+    }
     if (!hit.node) return false;
     if (policy == EDITING_CLAMP_SKIP_TEXT_CONTROLS &&
         editing_geometry_node_inside_text_control(hit.node)) {
@@ -523,15 +704,22 @@ bool editing_geometry_text_control_caret_rect(UiContext* uicon,
     float padding = block->bound ? block->bound->padding.left :
         (elem->form->control_type == FORM_CONTROL_TEXTAREA
             ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
+    float content_x = block->x + border + padding;
+    float content_w = block->width - 2.0f * (border + padding);
+    if (content_w < 0.0f) content_w = 0.0f;
 
     float text_width = 0.0f;
     uint32_t line_start = 0;
+    uint32_t line_len = value_len;
     if (elem->form->control_type == FORM_CONTROL_TEXTAREA && value) {
         uint32_t scan = 0;
         while (scan < offset) {
             if (value[scan] == '\n') line_start = scan + 1;
             scan++;
         }
+        uint32_t line_end = line_start;
+        while (line_end < value_len && value[line_end] != '\n') line_end++;
+        line_len = line_end - line_start;
         editing_geometry_text_metrics(uicon, block, value + line_start,
                                       offset - line_start, &text_width);
     } else {
@@ -549,7 +737,10 @@ bool editing_geometry_text_control_caret_rect(UiContext* uicon,
         }
     }
 
-    out->x = block->x + border + padding + text_width;
+    bool rtl_line = editing_geometry_text_control_line_is_rtl(elem, block,
+        value, line_start, line_len);
+    out->x = rtl_line ? content_x + content_w - text_width
+                      : content_x + text_width;
     out->y = block->y + border + padding + line_y;
     if (elem->form->control_type == FORM_CONTROL_TEXT) {
         out->y = block->y + border + (block->height - 2.0f * border - font_size) / 2.0f;

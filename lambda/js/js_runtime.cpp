@@ -43,6 +43,8 @@ extern "C" Item js_get_fs_namespace(void);
 extern "C" Item js_get_fs_promises_namespace(void);
 extern "C" Item js_get_internal_fs_promises_namespace(void);
 extern "C" Item js_get_os_namespace(void);
+extern "C" bool js_doc_has_browsing_context(void* doc);
+extern "C" Item js_dom_get_selection_function_for_document(void* doc);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
@@ -2953,6 +2955,13 @@ static bool js_upgrade_native_backed_map_for_properties(Map* m, const char* tag_
     return true;
 }
 
+static bool js_property_key_equals(Item key, const char* name, uint32_t name_len) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* str_key = it2s(key);
+    return str_key && str_key->len == name_len &&
+        strncmp(str_key->chars, name, name_len) == 0;
+}
+
 static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) {
     Map* m = object.map;
     switch (m->map_kind) {
@@ -3214,7 +3223,21 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
         *out_result = js_document_proxy_get_property(key);
         return true;
     case MAP_KIND_FOREIGN_DOC: {
-        void* prev = js_dom_swap_active_document(js_get_foreign_doc(object));
+        void* foreign_doc = js_get_foreign_doc(object);
+        if (foreign_doc && js_doc_has_browsing_context(foreign_doc)) {
+            if (js_property_key_equals(key, "defaultView", 11) ||
+                js_property_key_equals(key, "document", 8) ||
+                js_property_key_equals(key, "window", 6) ||
+                js_property_key_equals(key, "self", 4)) {
+                *out_result = object;
+                return true;
+            }
+            if (js_property_key_equals(key, "getSelection", 12)) {
+                *out_result = js_dom_get_selection_function_for_document(foreign_doc);
+                return true;
+            }
+        }
+        void* prev = js_dom_swap_active_document(foreign_doc);
         Item r = js_document_proxy_get_property(key);
         js_dom_restore_active_document(prev);
         *out_result = r;
@@ -13718,7 +13741,24 @@ static bool js_regex_lookahead_has_capture(const char* pattern, int pattern_len,
     return false;
 }
 
-static bool js_regex_needs_backtrack(const char* pattern, int pattern_len) {
+static bool js_regex_has_unescaped_anchor(const char* pattern, int pattern_len) {
+    bool in_class = false;
+    for (int i = 0; i < pattern_len; i++) {
+        char c = pattern[i];
+        if (c == '\\') {
+            if (i + 1 < pattern_len) i++;
+            continue;
+        }
+        if (c == '[') { in_class = true; continue; }
+        if (c == ']' && in_class) { in_class = false; continue; }
+        if (!in_class && (c == '^' || c == '$')) return true;
+    }
+    return false;
+}
+
+static bool js_regex_needs_backtrack(const char* pattern, int pattern_len, bool multiline) {
+    if (multiline && js_regex_has_unescaped_anchor(pattern, pattern_len)) return true;
+
     bool in_class = false;
     // group stack: per open group, track whether its body contains a bounded
     // optional ('?') and whether it contains an unbounded quantifier ('*'/'+').
@@ -14652,7 +14692,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     // preprocessing drops forward backreferences and rewrites named groups — so
     // those constructs survive into the pattern the backtracker compiles.
     bool route_to_bt = (special_property_kind == 0) &&
-        js_regex_needs_backtrack(effective_pattern, effective_pattern_len);
+        js_regex_needs_backtrack(effective_pattern, effective_pattern_len, compile_info.multiline);
     const char* bt_pattern = effective_pattern;
     int bt_pattern_len = effective_pattern_len;
 
@@ -31556,6 +31596,26 @@ static Item js_als_disable(void) {
 static int js_async_hooks_enabled_count = 0;
 static Item js_async_hooks_root_resource = {0};
 static Item js_async_hooks_current_resource = {0};
+static int64_t js_async_hooks_next_id = 2;
+
+#define JS_ASYNC_HOOK_MAX 64
+#define JS_ASYNC_PENDING_DESTROY_MAX 512
+static Item js_async_hooks[JS_ASYNC_HOOK_MAX];
+static int js_async_hook_count = 0;
+static Item js_async_pending_destroy_resources[JS_ASYNC_PENDING_DESTROY_MAX];
+static int js_async_pending_destroy_count = 0;
+static bool js_async_hooks_roots_registered = false;
+
+static Item js_async_hooks_key(const char* name) {
+    return (Item){.item = s2it(heap_create_name(name, (int)strlen(name)))};
+}
+
+static void js_async_hooks_register_roots(void) {
+    if (js_async_hooks_roots_registered) return;
+    heap_register_gc_root_range((uint64_t*)js_async_hooks, JS_ASYNC_HOOK_MAX);
+    heap_register_gc_root_range((uint64_t*)js_async_pending_destroy_resources, JS_ASYNC_PENDING_DESTROY_MAX);
+    js_async_hooks_roots_registered = true;
+}
 
 static Item js_async_hooks_ensure_root_resource(void) {
     if (js_async_hooks_root_resource.item == 0) {
@@ -31585,26 +31645,147 @@ extern "C" void js_async_hooks_restore_resource(Item previous) {
     js_async_hooks_current_resource = previous;
 }
 
-// AsyncResource stub
-static Item js_ar_constructor(Item type) {
+static void js_async_hooks_add_hook(Item hook) {
+    js_async_hooks_register_roots();
+    for (int i = 0; i < js_async_hook_count; i++) {
+        if (js_async_hooks[i].item == hook.item) return;
+    }
+    if (js_async_hook_count < JS_ASYNC_HOOK_MAX) {
+        js_async_hooks[js_async_hook_count++] = hook;
+    }
+}
+
+static bool js_async_hook_is_enabled(Item hook) {
+    Item enabled = js_property_get(hook, js_async_hooks_key("__lambda_async_hook_enabled__"));
+    return get_type_id(enabled) == LMD_TYPE_BOOL && it2b(enabled);
+}
+
+static void js_async_hooks_emit_init(int64_t async_id, Item type, int64_t trigger_id, Item resource) {
+    if (js_async_hooks_enabled_count <= 0) return;
+    Item callback_key = js_async_hooks_key("__lambda_async_hook_callbacks__");
+    Item init_key = js_async_hooks_key("init");
+    for (int i = 0; i < js_async_hook_count; i++) {
+        Item hook = js_async_hooks[i];
+        if (hook.item == 0 || !js_async_hook_is_enabled(hook)) continue;
+        Item callbacks = js_property_get(hook, callback_key);
+        Item callback = js_property_get(callbacks, init_key);
+        if (get_type_id(callback) != LMD_TYPE_FUNC) continue;
+        Item args[4] = {
+            (Item){.item = i2it(async_id)},
+            type,
+            (Item){.item = i2it(trigger_id)},
+            resource
+        };
+        js_call_function(callback, hook, args, 4);
+    }
+}
+
+static void js_async_hooks_emit_destroy_id(int64_t async_id) {
+    if (js_async_hooks_enabled_count <= 0) return;
+    Item callback_key = js_async_hooks_key("__lambda_async_hook_callbacks__");
+    Item destroy_key = js_async_hooks_key("destroy");
+    for (int i = 0; i < js_async_hook_count; i++) {
+        Item hook = js_async_hooks[i];
+        if (hook.item == 0 || !js_async_hook_is_enabled(hook)) continue;
+        Item callbacks = js_property_get(hook, callback_key);
+        Item callback = js_property_get(callbacks, destroy_key);
+        if (get_type_id(callback) != LMD_TYPE_FUNC) continue;
+        Item arg = (Item){.item = i2it(async_id)};
+        js_call_function(callback, hook, &arg, 1);
+    }
+}
+
+static int64_t js_async_resource_id(Item resource) {
+    Item id = js_property_get(resource, js_async_hooks_key("__lambda_async_id__"));
+    if (get_type_id(id) == LMD_TYPE_INT) return it2i(id);
+    return 1;
+}
+
+static void js_async_resource_emit_destroy(Item resource) {
+    if (resource.item == 0 || resource.item == ITEM_NULL ||
+        get_type_id(resource) == LMD_TYPE_UNDEFINED) {
+        return;
+    }
+    Item destroyed_key = js_async_hooks_key("__lambda_async_resource_destroyed__");
+    Item destroyed = js_property_get(resource, destroyed_key);
+    if (get_type_id(destroyed) == LMD_TYPE_BOOL && it2b(destroyed)) return;
+    js_property_set(resource, destroyed_key, (Item){.item = b2it(true)});
+    js_async_hooks_emit_destroy_id(js_async_resource_id(resource));
+}
+
+static void js_async_hooks_queue_destroy(Item resource) {
+    js_async_hooks_register_roots();
+    if (js_async_pending_destroy_count >= JS_ASYNC_PENDING_DESTROY_MAX) return;
+    js_async_pending_destroy_resources[js_async_pending_destroy_count++] = resource;
+}
+
+extern "C" void js_async_hooks_after_gc(void) {
+    int count = js_async_pending_destroy_count;
+    js_async_pending_destroy_count = 0;
+    for (int i = 0; i < count; i++) {
+        Item resource = js_async_pending_destroy_resources[i];
+        js_async_pending_destroy_resources[i] = (Item){0};
+        js_async_resource_emit_destroy(resource);
+    }
+}
+
+extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_len) {
+    Item resource = js_new_object();
+    Item type = (Item){.item = s2it(heap_create_name(type_chars, type_len))};
+    int64_t async_id = js_async_hooks_next_id++;
+    int64_t trigger_id = js_async_resource_id(js_async_hooks_get_current_resource());
+    js_property_set(resource, js_async_hooks_key("type"), type);
+    js_property_set(resource, js_async_hooks_key("__lambda_async_id__"), (Item){.item = i2it(async_id)});
+    js_property_set(resource, js_async_hooks_key("__lambda_trigger_async_id__"), (Item){.item = i2it(trigger_id)});
+    js_property_set(resource, js_async_hooks_key("__lambda_async_resource_destroyed__"), (Item){.item = b2it(false)});
+    js_async_hooks_emit_init(async_id, type, trigger_id, resource);
+    return resource;
+}
+
+extern "C" void js_async_hooks_emit_destroy_resource(Item resource) {
+    js_async_resource_emit_destroy(resource);
+}
+
+// AsyncResource
+static Item js_ar_constructor(Item type, Item options) {
     Item self = js_get_this();
-    js_property_set(self, (Item){.item = s2it(heap_create_name("type", 4))}, type);
+    int64_t async_id = js_async_hooks_next_id++;
+    int64_t trigger_id = js_async_resource_id(js_async_hooks_get_current_resource());
+    bool require_manual_destroy = false;
+    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT) {
+        Item manual = js_property_get(options, js_async_hooks_key("requireManualDestroy"));
+        require_manual_destroy = js_is_truthy(manual);
+    }
+    js_property_set(self, js_async_hooks_key("type"), type);
+    js_property_set(self, js_async_hooks_key("__lambda_async_id__"), (Item){.item = i2it(async_id)});
+    js_property_set(self, js_async_hooks_key("__lambda_trigger_async_id__"), (Item){.item = i2it(trigger_id)});
+    js_property_set(self, js_async_hooks_key("__lambda_async_resource_destroyed__"), (Item){.item = b2it(false)});
+    js_async_hooks_emit_init(async_id, type, trigger_id, self);
+    if (!require_manual_destroy) js_async_hooks_queue_destroy(self);
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
 static Item js_ar_runInAsyncScope(Item fn, Item thisArg) {
-    return js_call_function(fn, thisArg, nullptr, 0);
+    Item self = js_get_this();
+    Item previous = js_async_hooks_enter_resource(self);
+    Item result = js_call_function(fn, thisArg, nullptr, 0);
+    js_async_hooks_restore_resource(previous);
+    return result;
 }
 
 static Item js_ar_emitDestroy(void) {
-    return js_get_this();
+    Item self = js_get_this();
+    js_async_resource_emit_destroy(self);
+    return self;
 }
 
 static Item js_ar_asyncId(void) {
-    return (Item){.item = i2it(1)};
+    return (Item){.item = i2it(js_async_resource_id(js_get_this()))};
 }
 
 static Item js_ar_triggerAsyncId_method(void) {
+    Item trigger_id = js_property_get(js_get_this(), js_async_hooks_key("__lambda_trigger_async_id__"));
+    if (get_type_id(trigger_id) == LMD_TYPE_INT) return trigger_id;
     return (Item){.item = i2it(0)};
 }
 
@@ -31636,8 +31817,10 @@ static Item js_ah_disable(void) {
 }
 
 static Item js_ah_createHook(Item callbacks) {
-    (void)callbacks;
     Item hook = js_new_object();
+    js_async_hooks_add_hook(hook);
+    js_property_set(hook, js_async_hooks_key("__lambda_async_hook_callbacks__"), callbacks);
+    js_property_set(hook, js_async_hooks_key("__lambda_async_hook_enabled__"), (Item){.item = b2it(false)});
     js_property_set(hook, (Item){.item = s2it(heap_create_name("enable", 6))},
                     js_new_function((void*)js_ah_enable, 0));
     js_property_set(hook, (Item){.item = s2it(heap_create_name("disable", 7))},
@@ -31646,10 +31829,13 @@ static Item js_ah_createHook(Item callbacks) {
 }
 
 static Item js_ah_executionAsyncId(void) {
-    return (Item){.item = i2it(1)};
+    return (Item){.item = i2it(js_async_resource_id(js_async_hooks_get_current_resource()))};
 }
 
 static Item js_ah_triggerAsyncId(void) {
+    Item trigger_id = js_property_get(js_async_hooks_get_current_resource(),
+                                      js_async_hooks_key("__lambda_trigger_async_id__"));
+    if (get_type_id(trigger_id) == LMD_TYPE_INT) return trigger_id;
     return (Item){.item = i2it(0)};
 }
 
@@ -31738,7 +31924,7 @@ extern "C" Item js_get_async_hooks_namespace(void) {
                         js_new_function((void*)js_ar_bind, 1));
         js_property_set(ar_class, (Item){.item = s2it(heap_create_name("prototype", 9))}, ar_proto);
         js_property_set(ar_class, (Item){.item = s2it(heap_create_name("__instance_proto__", 18))}, ar_proto);
-        Item ar_ctor_fn = js_new_function((void*)js_ar_constructor, 1);
+        Item ar_ctor_fn = js_new_function((void*)js_ar_constructor, 2);
         js_property_set(ar_class, (Item){.item = s2it(heap_create_name("__ctor__", 8))}, ar_ctor_fn);
         js_function_set_prototype(ar_ctor_fn, ar_proto);
 
@@ -33340,6 +33526,11 @@ void js_deep_batch_reset() {
     js_async_hooks_enabled_count = 0;
     js_async_hooks_root_resource = (Item){0};
     js_async_hooks_current_resource = (Item){0};
+    js_async_hooks_next_id = 2;
+    memset(js_async_hooks, 0, sizeof(js_async_hooks));
+    js_async_hook_count = 0;
+    memset(js_async_pending_destroy_resources, 0, sizeof(js_async_pending_destroy_resources));
+    js_async_pending_destroy_count = 0;
     js_async_resolved_value = (Item){0};
     js_reset_transient_call_state();
     // generator proto caches point into old heap — must reset

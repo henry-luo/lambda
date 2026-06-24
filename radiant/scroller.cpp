@@ -187,6 +187,30 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
     }
 }
 
+void scroll_apply_pending_element_scroll(ViewBlock* block) {
+    if (!block || !block->scroller || !block->scroller->pane) return;
+    DomElement* elem = static_cast<DomElement*>(block);
+    if (!elem->has_pending_element_scroll_x &&
+        !elem->has_pending_element_scroll_y) {
+        return;
+    }
+
+    DocState* state = elem->doc ? (DocState*)elem->doc->state : nullptr;
+    float current_x = 0.0f;
+    float current_y = 0.0f;
+    scroll_state_get_position_for_view(state, static_cast<View*>(block),
+        block->scroller->pane, &current_x, &current_y, NULL, NULL);
+    float target_x = elem->has_pending_element_scroll_x
+        ? elem->pending_element_scroll_x : current_x;
+    float target_y = elem->has_pending_element_scroll_y
+        ? elem->pending_element_scroll_y : current_y;
+
+    scroll_state_set_position_for_view(state, static_cast<View*>(block),
+        block->scroller->pane, target_x, target_y, false);
+    elem->has_pending_element_scroll_x = false;
+    elem->has_pending_element_scroll_y = false;
+}
+
 void scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp) {
     ScrollEvent* event = &evcon->event.scroll;
     // GLFW gives scroll deltas that are pre-adjusted to match the user's OS scrolling preference
@@ -377,6 +401,7 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
         float h_max = content_width > block->width ? content_width - block->width : 0.0f;
         float v_max = content_height > block->height ? content_height - block->height : 0.0f;
         scroll_state_set_max_for_view(state, (View*)block, block->scroller->pane, h_max, v_max);
+        scroll_apply_pending_element_scroll(block);
         scroll_state_get_position_for_view(state, (View*)block, block->scroller->pane,
                                            NULL, NULL, &h_max, &v_max);
         log_debug("update_scroller: h_max_scroll=%.1f, v_max_scroll=%.1f",

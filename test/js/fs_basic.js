@@ -15,7 +15,7 @@ if (fs.existsSync("./temp/fs_testdir")) {
 
 // Test 1: writeFileSync + readFileSync
 fs.writeFileSync("./temp/fs_test1.txt", "hello world");
-var content = fs.readFileSync("./temp/fs_test1.txt");
+var content = fs.readFileSync("./temp/fs_test1.txt", "utf8");
 console.log(content);
 
 // Test 2: existsSync
@@ -30,7 +30,7 @@ console.log(stat.isDirectory());
 
 // Test 4: appendFileSync
 fs.appendFileSync("./temp/fs_test1.txt", " appended");
-var content2 = fs.readFileSync("./temp/fs_test1.txt");
+var content2 = fs.readFileSync("./temp/fs_test1.txt", "utf8");
 console.log(content2);
 
 // Test 5: readdirSync

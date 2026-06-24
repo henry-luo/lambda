@@ -426,6 +426,7 @@ struct JsMirTranspiler {
     int last_closure_capture_count;
     char last_closure_capture_names[JS_MIR_LAST_CLOSURE_CAPTURE_MAX][128];
     int last_closure_capture_slots[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    bool last_closure_capture_is_transitive[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool last_closure_capture_is_nfe[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool last_closure_has_env;
     bool allow_loop_let_scope_env_for_immediate_call;

@@ -3,6 +3,8 @@
 
 extern "C" Item js_eval_private_resolve(Item unscoped_key);
 
+MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc);
+
 static bool jm_test262_fast_paths_enabled(JsMirTranspiler* mt) {
     if (!mt) return false;
     if (mt->preamble_entries && mt->preamble_entry_count > 0) return true;
@@ -134,6 +136,20 @@ static bool jm_function_decl_entry_is_direct_binding(JsFunctionNode* fn) {
     return !ts_node_is_null(body) &&
         ts_node_start_byte(body) == ts_node_start_byte(parent) &&
         ts_node_end_byte(body) == ts_node_end_byte(parent);
+}
+
+static JsFuncCollected* jm_find_direct_function_decl_by_vname(JsMirTranspiler* mt, const char* vname) {
+    if (!mt || !vname) return NULL;
+    for (int i = 0; i < mt->func_count; i++) {
+        JsFuncCollected* fc = &mt->func_entries[i];
+        JsFunctionNode* fn = fc->node;
+        if (!fn || !fn->name || fn->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+        if (!jm_function_decl_entry_is_direct_binding(fn)) continue;
+        char fname[128];
+        snprintf(fname, sizeof(fname), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+        if (strcmp(fname, vname) == 0) return fc;
+    }
+    return NULL;
 }
 
 static bool jm_ts_node_is_function_boundary(const char* type) {
@@ -1246,6 +1262,35 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                 }
                 MIR_reg_t mv = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+                JsFuncCollected* direct_func = jm_find_direct_function_decl_by_vname(mt, mc->name);
+                if (direct_func && direct_func->func_item && !direct_func->is_reassigned) {
+                    MIR_reg_t is_undef = jm_new_reg(mt, "func_decl_undef", MIR_T_I64);
+                    MIR_reg_t result = jm_new_reg(mt, "func_decl_val", MIR_T_I64);
+                    MIR_label_t use_existing = jm_new_label(mt);
+                    MIR_label_t done = jm_new_label(mt);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                        MIR_new_reg_op(mt->ctx, is_undef),
+                        MIR_new_reg_op(mt->ctx, mv),
+                        MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                        MIR_new_label_op(mt->ctx, use_existing),
+                        MIR_new_reg_op(mt->ctx, is_undef)));
+                    MIR_reg_t fn_reg = jm_create_func_or_closure(mt, direct_func);
+                    jm_call_void_2(mt, "js_set_module_var",
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, result),
+                        MIR_new_reg_op(mt->ctx, fn_reg)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                        MIR_new_label_op(mt->ctx, done)));
+                    jm_emit_label(mt, use_existing);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, result),
+                        MIR_new_reg_op(mt->ctx, mv)));
+                    jm_emit_label(mt, done);
+                    return jm_apply_with_identifier_fallback(mt, id, result);
+                }
                 if (mc->is_nested_func_hoist && !mc->is_iife_var) {
                     const char* js_name = mc->name;
                     if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
@@ -6322,6 +6367,12 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
         }
         if (var->from_block_func_decl) continue;
         int slot = mt->last_closure_capture_slots[i] >= 0 ? mt->last_closure_capture_slots[i] : i;
+        MIR_reg_t read_env = mt->last_closure_env_reg;
+        if (mt->last_closure_capture_is_transitive[i] &&
+                var->from_env && var->env_reg != 0 && var->env_slot >= 0) {
+            read_env = var->env_reg;
+            slot = var->env_slot;
+        }
         // Js56 P2: BOOL vars are stored BOXED (var-decl falls into the
         // generic boxed branch — there is no native-bool fast path), so they
         // need the same MOV-only readback as object types even though
@@ -6335,7 +6386,7 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
             MIR_reg_t boxed = jm_new_reg(mt, "envrd", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, boxed),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->last_closure_env_reg, 0, 1)));
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), read_env, 0, 1)));
             if (var->type_id == LMD_TYPE_FLOAT) {
                 MIR_reg_t unboxed = jm_emit_unbox_float(mt, boxed);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
@@ -6359,7 +6410,7 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
             // Boxed variable — direct read from env
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, var->reg),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->last_closure_env_reg, 0, 1)));
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), read_env, 0, 1)));
             if (var->in_scope_env && var->scope_env_reg != 0 && var->scope_env_slot >= 0) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
@@ -12154,6 +12205,8 @@ static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
             sizeof(mt->last_closure_capture_names[ci]), "%s", fc->captures[ci].name);
         mt->last_closure_capture_slots[ci] =
             use_capture_slots ? fc->captures[ci].scope_env_slot : ci;
+        mt->last_closure_capture_is_transitive[ci] =
+            fc->captures[ci].grandparent_slot >= 0;
         mt->last_closure_capture_is_nfe[ci] = fc->captures[ci].is_nfe_binding;
     }
     mt->last_closure_has_env = count > 0;

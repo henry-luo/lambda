@@ -319,11 +319,10 @@ UrlError url_parse_into(const char* input, Url* url) {
         const char* at_sign = NULL;
         const char* colon_port = NULL;
 
-        // Look for @ sign (credentials)
+        // Look for the last @ sign. Earlier @ bytes belong to userinfo.
         for (const char* p = current; p < authority_end; p++) {
             if (*p == '@') {
                 at_sign = p;
-                break;
             }
         }
 

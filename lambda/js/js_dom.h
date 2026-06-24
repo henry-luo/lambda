@@ -35,6 +35,24 @@ void js_dom_set_document(void* dom_doc);
  * @return DomDocument* cast to void*, or NULL if no document is set
  */
 void* js_dom_get_document(void);
+
+/**
+ * Set the current Radiant UiContext for JS DOM layout/geometry queries.
+ * The pointer is borrowed from the active JS document session.
+ */
+void js_dom_set_ui_context(void* ui_context);
+
+/**
+ * Get the current Radiant UiContext.
+ */
+void* js_dom_get_ui_context(void);
+
+/**
+ * Ensure the document has a current layout tree before DOM geometry queries.
+ * Returns false when no UI/layout context is active.
+ */
+bool js_dom_force_layout_for_geometry(void* dom_doc);
+
 // Lazy DomElement* with tag "#document" used so JS Range/Selection APIs can
 // accept `document` (or a foreign-doc wrapper) as a node container.
 void* js_dom_get_or_create_doc_node(void* dom_doc);

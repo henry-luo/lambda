@@ -565,6 +565,7 @@ typedef struct FlexItemProp {
 
 struct InlineProp {
     CssEnum cursor;
+    CssEnum caret_shape;
     Color color;
     bool has_color;
     Color svg_fill_color;

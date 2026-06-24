@@ -13,6 +13,6 @@
     {"type": "type", "target": {"selector": "#surface"}, "text": "Q"},
     {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertText|Q"},
-    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "seedQ"}
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "Q"}
   ]
 }

@@ -40,13 +40,16 @@
 #include "../../radiant/form_control.hpp"
 #include "../../radiant/state_store.hpp"
 #include "../../radiant/dom_range.hpp"
+#include "../../radiant/dom_range_resolver.hpp"
 #include "../../radiant/editing.hpp"
 #include "../../radiant/editing_dispatch.hpp"
+#include "../../radiant/editing_geometry.hpp"
 #include "../../radiant/editing_intent.hpp"
 #include "../../radiant/editing_rich_transaction.hpp"
 #include "../../radiant/editing_target_range.hpp"
 #include "../../radiant/clipboard.hpp"
 #include "../../radiant/handler.hpp"
+#include "../../radiant/render_export_support.hpp"
 #include "../input/html5/html5_parser.h"
 
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
@@ -86,6 +89,7 @@ extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
 extern "C" Item js_eventtarget_dispatch(Item event_item);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
 extern "C" void js_throw_value(Item error);
+extern "C" Item js_dom_get_selection_function_for_document(void* doc);
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId prop_id, int pseudo_type);
 static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name);
@@ -181,6 +185,17 @@ static bool js_document_design_mode = false;
 static bool js_document_open_invalid_for_exec_command = false;
 static bool js_document_style_with_css = false;
 static DomElement* js_document_active_element = nullptr;
+static Item js_dom_document_element_from_point(DomDocument* doc,
+                                               Item x_arg,
+                                               Item y_arg);
+static void js_dom_absolute_node_position(DomNode* node,
+                                          float* out_x,
+                                          float* out_y);
+static void js_dom_viewport_node_position(DomNode* node,
+                                          float* out_x,
+                                          float* out_y);
+static DomElement* js_dom_offset_parent_element(DomElement* elem);
+static int64_t js_dom_offset_coordinate(DomElement* elem, bool x_axis);
 
 // Cached document.fonts object for the FontFaceSet ready shim.
 static Item js_document_fonts_value = {.item = ITEM_NULL};
@@ -190,6 +205,7 @@ static Item js_document_fonts_value = {.item = ITEM_NULL};
 // ============================================================================
 
 static __thread DomDocument* _js_current_document = nullptr;
+static __thread UiContext* _js_current_ui_context = nullptr;
 // The "main" document — the one bound by js_dom_set_document at page load.
 // Foreign documents created via document.implementation.create*Document are
 // distinct: they have a null defaultView and getSelection() returns null per
@@ -349,6 +365,81 @@ static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATI
     if (st) view_state_prune_orphans(st);
 }
 
+static void js_dom_reset_mutation_records(DomDocument* doc) {
+    if (!doc) return;
+    doc->js_mutation_count = 0;
+    doc->js_mutation_sequence = 0;
+    doc->js_mutation_kind_mask = 0;
+    doc->js_mutation_record_count = 0;
+    doc->js_mutation_record_overflow = 0;
+}
+
+static void js_dom_clear_view_pool_pointers(DomNode* node) {
+    for (DomNode* cur = node; cur; cur = cur->next_sibling) {
+        if (cur->is_element()) {
+            DomElement* elem = cur->as_element();
+            elem->font = nullptr;
+            elem->bound = nullptr;
+            elem->in_line = nullptr;
+            elem->blk = nullptr;
+            elem->scroller = nullptr;
+            elem->embed = nullptr;
+            elem->position = nullptr;
+            elem->transform = nullptr;
+            elem->filter = nullptr;
+            elem->backdrop_filter = nullptr;
+            elem->multicol = nullptr;
+            elem->pseudo = nullptr;
+            elem->vpath = nullptr;
+            elem->layout_cache = nullptr;
+            elem->view_type = RDT_VIEW_NONE;
+            elem->content_width = 0.0f;
+            elem->content_height = 0.0f;
+            elem->has_cached_intrinsic_widths = false;
+            elem->styles_resolved = false;
+            elem->float_prelaid = false;
+            elem->fi = nullptr;
+            elem->item_prop_type = DomElement::ITEM_PROP_NONE;
+            if (elem->first_child) {
+                js_dom_clear_view_pool_pointers(elem->first_child);
+            }
+        } else if (cur->is_text()) {
+            DomText* text = cur->as_text();
+            text->rect = nullptr;
+            text->font = nullptr;
+            text->view_type = RDT_VIEW_NONE;
+        }
+    }
+}
+
+static bool js_dom_ensure_layout_for_geometry(DomDocument* doc) {
+    if (!doc || !_js_current_ui_context) return false;
+    if (doc->view_tree && doc->view_tree->root &&
+        doc->js_mutation_count == 0) {
+        return true;
+    }
+
+    if (doc->view_tree) {
+        view_pool_destroy(doc->view_tree);
+        mem_free(doc->view_tree);
+        doc->view_tree = nullptr;
+    }
+    if (doc->root) {
+        js_dom_clear_view_pool_pointers(static_cast<DomNode*>(doc->root));
+    }
+
+    DomDocument* saved_doc = _js_current_ui_context->document;
+    _js_current_ui_context->document = doc;
+    layout_html_doc(_js_current_ui_context, doc, false);
+    _js_current_ui_context->document = saved_doc;
+    js_dom_reset_mutation_records(doc);
+    return doc->view_tree && doc->view_tree->root;
+}
+
+extern "C" bool js_dom_force_layout_for_geometry(void* dom_doc) {
+    return js_dom_ensure_layout_for_geometry((DomDocument*)dom_doc);
+}
+
 // ----------------------------------------------------------------------------
 // Phase 3: live-range mutation envelopes — thin wrappers that bail when no
 // per-document DocState (and thus no live ranges) is attached. All DOM
@@ -365,6 +456,15 @@ static DocState* js_dom_testdriver_state() {
         radiant_document_ensure_state(_js_current_document, "js_dom_testdriver_key");
     }
     return _js_current_document->state;
+}
+
+extern "C" Item js_dom_set_editing_behavior(Item behavior_item) {
+    DocState* state = js_dom_testdriver_state();
+    if (!state) return make_js_undefined();
+    Item behavior_str = js_to_string(behavior_item);
+    const char* behavior = fn_to_cstr(behavior_str);
+    state_store_set_editing_behavior(state, behavior);
+    return make_js_undefined();
 }
 
 static bool js_dom_testdriver_selection_noncollapsed(DocState* state) {
@@ -765,7 +865,6 @@ static bool js_dom_exec_command_is_history(const char* cmd) {
 static bool js_dom_exec_command_uses_helper_first(const char* cmd) {
     if (!cmd) return false;
     return js_dom_exec_command_is_clipboard(cmd) ||
-        strcasecmp(cmd, "selectAll") == 0 ||
         strcasecmp(cmd, "insertText") == 0 ||
         strcasecmp(cmd, "insertHTML") == 0 ||
         strcasecmp(cmd, "insertParagraph") == 0 ||
@@ -1123,6 +1222,12 @@ static Item js_dom_exec_command_native(Item* args, int argc) {
     DocState* state = js_dom_testdriver_state();
     if (!state) return (Item){.item = ITEM_FALSE};
 
+    if (cmd && strcasecmp(cmd, "copy") == 0) {
+        bool copied = js_dom_exec_command_copy_selection_to_clipboard(
+            state, "js_dom_exec_command_copy");
+        return (Item){.item = b2it(copied)};
+    }
+
     int fallback_offset = 0;
     View* target = js_dom_testdriver_current_target(state, &fallback_offset);
     if (!target) return (Item){.item = ITEM_FALSE};
@@ -1130,12 +1235,6 @@ static Item js_dom_exec_command_native(Item* args, int argc) {
     EditingSurface surface;
     if (!js_dom_testdriver_rich_surface(target, &surface)) {
         return (Item){.item = ITEM_FALSE};
-    }
-
-    if (cmd && strcasecmp(cmd, "copy") == 0) {
-        bool copied = js_dom_exec_command_copy_selection_to_clipboard(
-            state, "js_dom_exec_command_copy");
-        return (Item){.item = b2it(copied)};
     }
 
     const char* value = argc >= 3 ? fn_to_cstr(args[2]) : "";
@@ -1590,6 +1689,25 @@ static inline void dom_pre_remove(DomNode* child) {
 
         View* focused = focus_get(st);
         if (focused && js_dom_node_contains(child, (DomNode*)focused)) {
+            if (focused->is_element()) {
+                DomElement* focused_elem = ((DomNode*)focused)->as_element();
+                const char* tag = focused_elem ? focused_elem->tag_name : nullptr;
+                if (tag &&
+                    (strcasecmp(tag, "textarea") == 0 ||
+                     strcasecmp(tag, "input") == 0) &&
+                    child->parent) {
+                    uint32_t index = dom_node_child_index(child);
+                    if (index != UINT32_MAX) {
+                        DomBoundary boundary = { child->parent, index };
+                        const char* exc = nullptr;
+                        if (!state_store_set_selection(
+                                st, &boundary, &boundary, &exc)) {
+                            log_debug("dom_pre_remove_text_control_selection_handoff_failed: %s",
+                                      exc ? exc : "unknown");
+                        }
+                    }
+                }
+            }
             focus_clear_preserve_selection(st);
         } else {
             View* caret_view = caret_get_view(st);
@@ -1731,6 +1849,81 @@ static bool js_dom_select_all_text_control_enabled(DomElement* elem) {
     tc_ensure_init(elem);
     FormControlProp* form = elem->form;
     return form && form->current_value_u16_len > 0;
+}
+
+static DomElement* js_dom_focused_text_control_for_select_all(DocState* state) {
+    if (state) {
+        View* focused = focus_get(state);
+        if (focused && focused->is_element()) {
+            DomElement* elem = focused->as_element();
+            if (elem && tc_is_text_control_elem(elem)) return elem;
+            return nullptr;
+        }
+    }
+    if (js_document_active_element &&
+        (!_js_current_document || js_document_active_element->doc == _js_current_document) &&
+        tc_is_text_control_elem(js_document_active_element)) {
+        return js_document_active_element;
+    }
+    DomElement* active = state ? tc_get_active_element(state) : nullptr;
+    if (active && tc_is_text_control_elem(active)) return active;
+    return nullptr;
+}
+
+static bool js_dom_collapse_document_selection_before_node(DocState* state,
+                                                           DomNode* node) {
+    if (!state || !node || !node->parent) return false;
+    uint32_t index = dom_node_child_index(node);
+    if (index == UINT32_MAX) return false;
+    DomBoundary caret = { node->parent, index };
+    const char* exc = nullptr;
+    if (!state_store_set_selection(state, &caret, &caret, &exc)) {
+        log_debug("js_dom_select_all_text_control_dom_collapse_failed: %s",
+                  exc ? exc : "unknown");
+        return false;
+    }
+    return true;
+}
+
+static bool js_dom_exec_command_select_all_text_control(DocState* state) {
+    if (!state) return false;
+    DomElement* elem = js_dom_focused_text_control_for_select_all(state);
+    if (!elem) return false;
+    tc_ensure_init(elem);
+    FormControlProp* form = elem->form;
+    if (!form) return false;
+
+    js_dom_collapse_document_selection_before_node(state, static_cast<DomNode*>(elem));
+    form_control_set_selection(state, static_cast<View*>(elem), 0,
+                               form->current_value_u16_len, 0);
+    log_debug("js_dom_select_all_text_control: len=%u",
+              form->current_value_u16_len);
+    return true;
+}
+
+static bool js_dom_select_all_should_target_document(DocState* state) {
+    if (!state || !state->dom_selection ||
+        state->dom_selection->range_count == 0 ||
+        !dom_selection_is_collapsed(state->dom_selection)) {
+        return false;
+    }
+
+    View* focused = focus_get(state);
+    if (!focused && js_document_active_element &&
+        (!_js_current_document || js_document_active_element->doc == _js_current_document)) {
+        focused = static_cast<View*>(js_document_active_element);
+    }
+    if (!focused || !focused->is_element()) return false;
+
+    DomElement* elem = focused->as_element();
+    if (!elem || tc_is_text_control_elem(elem)) return false;
+
+    EditingSurface surface;
+    if (editing_surface_from_target(focused, &surface) &&
+        editing_surface_is_rich(&surface)) {
+        return false;
+    }
+    return true;
 }
 
 static bool js_dom_select_all_node_has_text(DomNode* node) {
@@ -2189,12 +2382,22 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         Item global = js_get_global_this();
         js_property_set(global, js_string_key("__lambda_testdriver_key"),
             js_new_function((void*)js_dom_testdriver_key, 5));
+        js_property_set(global, js_string_key("__lambda_set_editing_behavior"),
+            js_new_function((void*)js_dom_set_editing_behavior, 1));
     }
     log_debug("js_dom_set_document: set document=%p", dom_doc);
 }
 
 extern "C" void* js_dom_get_document(void) {
     return (void*)_js_current_document;
+}
+
+extern "C" void js_dom_set_ui_context(void* ui_context) {
+    _js_current_ui_context = (UiContext*)ui_context;
+}
+
+extern "C" void* js_dom_get_ui_context(void) {
+    return (void*)_js_current_ui_context;
 }
 
 // ============================================================================
@@ -2527,6 +2730,41 @@ static Item js_dom_select_method(Item elem_item) {
     return js_dom_element_method(self, method, NULL, 0);
 }
 
+static Item js_dom_get_bounding_client_rect_method(Item elem_item) {
+    Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("getBoundingClientRect"))};
+    return js_dom_element_method(self, method, NULL, 0);
+}
+
+static Item js_dom_get_client_rects_method(Item elem_item) {
+    Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("getClientRects"))};
+    return js_dom_element_method(self, method, NULL, 0);
+}
+
+static Item js_dom_text_control_caret_bounds_method(Item elem_item) {
+    Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("__lambdaTextControlCaretBounds"))};
+    return js_dom_element_method(self, method, NULL, 0);
+}
+
+static Item js_dom_text_control_boundary_from_point_method(Item elem_item,
+                                                           Item x,
+                                                           Item y) {
+    Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("__lambdaTextControlBoundaryFromPoint"))};
+    Item args[2] = { x, y };
+    return js_dom_element_method(self, method, args, 2);
+}
+
+static Item js_dom_boundary_from_point_method(Item elem_item, Item x, Item y,
+                                              Item behavior) {
+    Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("__lambdaBoundaryFromPoint"))};
+    Item args[3] = { x, y, behavior };
+    return js_dom_element_method(self, method, args, 3);
+}
+
 // ============================================================================
 // Document Proxy Object
 // ============================================================================
@@ -2650,7 +2888,11 @@ extern "C" Item js_document_proxy_set_property(Item prop_name, Item value) {
 // Cached so repeated calls for the same DomDocument* return the same wrapper
 // (required for `===` identity comparisons).
 static const int FOREIGN_DOC_CACHE_SIZE = 16;
-struct ForeignDocCacheEntry { DomDocument* doc; uint64_t item; };
+struct ForeignDocCacheEntry {
+    DomDocument* doc;
+    uint64_t item;
+    bool owns_doc;
+};
 static __thread ForeignDocCacheEntry s_foreign_doc_cache[FOREIGN_DOC_CACHE_SIZE] = {};
 static __thread int s_foreign_doc_cache_count = 0;
 
@@ -2679,6 +2921,7 @@ extern "C" void js_doc_mark_has_browsing_context(void* doc) {
 struct IframeContentEntry {
     DomElement* iframe;
     DomDocument* doc;
+    bool owns_doc;
 };
 static const int IFRAME_CACHE_SIZE = 32;
 static __thread IframeContentEntry s_iframe_cache[IFRAME_CACHE_SIZE] = {};
@@ -2723,18 +2966,24 @@ static void reset_foreign_document_cache() {
 
     for (int i = 0; i < s_foreign_doc_cache_count; i++) {
         heap_unregister_gc_root(&s_foreign_doc_cache[i].item);
-        destroy_cached_doc_once(
-            destroyed_docs, &destroyed_doc_count, s_foreign_doc_cache[i].doc);
+        if (s_foreign_doc_cache[i].owns_doc) {
+            destroy_cached_doc_once(
+                destroyed_docs, &destroyed_doc_count, s_foreign_doc_cache[i].doc);
+        }
         s_foreign_doc_cache[i].doc = nullptr;
         s_foreign_doc_cache[i].item = 0;
+        s_foreign_doc_cache[i].owns_doc = false;
     }
     s_foreign_doc_cache_count = 0;
 
     for (int i = 0; i < s_iframe_cache_count; i++) {
-        destroy_cached_doc_once(
-            destroyed_docs, &destroyed_doc_count, s_iframe_cache[i].doc);
+        if (s_iframe_cache[i].owns_doc) {
+            destroy_cached_doc_once(
+                destroyed_docs, &destroyed_doc_count, s_iframe_cache[i].doc);
+        }
         s_iframe_cache[i].iframe = nullptr;
         s_iframe_cache[i].doc = nullptr;
+        s_iframe_cache[i].owns_doc = false;
     }
     s_iframe_cache_count = 0;
 
@@ -2744,10 +2993,11 @@ static void reset_foreign_document_cache() {
     s_doc_with_window_count = 0;
 }
 
-static Item wrap_foreign_doc(DomDocument* doc) {
+static Item wrap_foreign_doc_owned(DomDocument* doc, bool owns_doc) {
     // Look up cache first.
     for (int i = 0; i < s_foreign_doc_cache_count; i++) {
         if (s_foreign_doc_cache[i].doc == doc) {
+            if (!owns_doc) s_foreign_doc_cache[i].owns_doc = false;
             return (Item){.item = s_foreign_doc_cache[i].item};
         }
     }
@@ -2761,10 +3011,15 @@ static Item wrap_foreign_doc(DomDocument* doc) {
     if (s_foreign_doc_cache_count < FOREIGN_DOC_CACHE_SIZE) {
         s_foreign_doc_cache[s_foreign_doc_cache_count].doc = doc;
         s_foreign_doc_cache[s_foreign_doc_cache_count].item = it.item;
+        s_foreign_doc_cache[s_foreign_doc_cache_count].owns_doc = owns_doc;
         heap_register_gc_root(&s_foreign_doc_cache[s_foreign_doc_cache_count].item);
         s_foreign_doc_cache_count++;
     }
     return it;
+}
+
+static Item wrap_foreign_doc(DomDocument* doc) {
+    return wrap_foreign_doc_owned(doc, true);
 }
 
 // Returns the foreign-doc wrapper for `doc` if one exists, else ItemNull.
@@ -2844,6 +3099,33 @@ static DomElement* document_body_element(DomDocument* doc) {
     return nullptr;
 }
 
+static bool js_dom_exec_command_select_all_document(DomDocument* doc) {
+    if (!doc) return false;
+    DocState* state = doc->state ?
+        doc->state : radiant_document_ensure_state(doc, "js_dom_select_all");
+    if (!state) return false;
+    DomElement* body = document_body_element(doc);
+    if (!body) return false;
+
+    DomBoundary start;
+    DomBoundary end;
+    if (!dom_selection_compute_select_all_boundaries((DomNode*)body,
+                                                     &start, &end)) {
+        start.node = (DomNode*)body;
+        start.offset = 0;
+        end.node = (DomNode*)body;
+        end.offset = dom_node_boundary_length((DomNode*)body);
+    }
+
+    const char* exc = nullptr;
+    bool ok = state_store_set_selection(state, &start, &end, &exc);
+    if (!ok) {
+        log_debug("js_dom_exec_select_all_document_failed: %s",
+                  exc ? exc : "unknown");
+    }
+    return ok;
+}
+
 static void clear_element_children_for_navigation(DomElement* elem) {
     if (!elem) return;
     while (elem->first_child) {
@@ -2914,6 +3196,17 @@ extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
     if (!iframe) return ItemNull;
     IframeContentEntry* e = lookup_iframe_entry(iframe);
     if (!e) {
+        DomDocument* embedded_doc = iframe->embed ? iframe->embed->doc : nullptr;
+        if (embedded_doc) {
+            js_doc_mark_has_browsing_context(embedded_doc);
+            if (s_iframe_cache_count < IFRAME_CACHE_SIZE) {
+                s_iframe_cache[s_iframe_cache_count].iframe = iframe;
+                s_iframe_cache[s_iframe_cache_count].doc = embedded_doc;
+                s_iframe_cache[s_iframe_cache_count].owns_doc = false;
+                s_iframe_cache_count++;
+            }
+            return wrap_foreign_doc_owned(embedded_doc, false);
+        }
         DomDocument* doc = create_foreign_html_doc("");
         if (!doc) return ItemNull;
         js_doc_mark_has_browsing_context(doc);
@@ -2923,11 +3216,12 @@ extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
         if (s_iframe_cache_count < IFRAME_CACHE_SIZE) {
             s_iframe_cache[s_iframe_cache_count].iframe = iframe;
             s_iframe_cache[s_iframe_cache_count].doc = doc;
+            s_iframe_cache[s_iframe_cache_count].owns_doc = true;
             s_iframe_cache_count++;
         }
         return wrap_foreign_doc(doc);
     }
-    return wrap_foreign_doc(e->doc);
+    return wrap_foreign_doc_owned(e->doc, e->owns_doc);
 }
 extern "C" Item js_iframe_get_content_window(DomElement* iframe) {
     return js_iframe_get_content_document(iframe);
@@ -3143,24 +3437,22 @@ extern "C" Item js_create_foreign_xml_doc(const char* qualified_name) {
     return wrap_foreign_doc(fd);
 }
 
-// Public: create a DocumentType stub. We model it as a plain DOM element with
-// tag "!DOCTYPE" so that node-style operations (parent/sibling) still work.
+// Public: create a DocumentType node. Doctype shares the DomComment storage
+// shape, but carries DOM_NODE_DOCTYPE so Range/Selection validation can reject
+// it by node type instead of tag-name heuristics.
 extern "C" Item js_create_doctype_node(const char* name,
                                         const char* public_id,
                                         const char* system_id) {
     DomDocument* doc = _js_current_document;
     if (!doc) return ItemNull;
     MarkBuilder builder(doc->input);
-    Item item = builder.element("!DOCTYPE").final();
+    Item item = builder.element("!DOCTYPE").text(name ? name : "").final();
     Element* e = item.element;
-    DomElement* dt = dom_element_create(doc, "!DOCTYPE", e);
+    DomComment* dt = dom_comment_create_detached(e, doc);
     if (!dt) return ItemNull;
-    Item wrapped = js_dom_wrap_element(dt);
-    // Attach name/publicId/systemId as DOM attributes for property access.
-    if (name)      js_dom_set_property(wrapped, (Item){.item = s2it(heap_create_name("name"))},      (Item){.item = s2it(heap_create_name(name))});
-    if (public_id) js_dom_set_property(wrapped, (Item){.item = s2it(heap_create_name("publicId"))},  (Item){.item = s2it(heap_create_name(public_id))});
-    if (system_id) js_dom_set_property(wrapped, (Item){.item = s2it(heap_create_name("systemId"))},  (Item){.item = s2it(heap_create_name(system_id))});
-    return wrapped;
+    (void)public_id;
+    (void)system_id;
+    return js_dom_wrap_element(dt);
 }
 
 // Save the current document and switch to the supplied foreign doc.
@@ -4471,6 +4763,15 @@ static bool js_dom_is_script_focusable(DomElement* elem) {
     return false;
 }
 
+static void js_dom_dispatch_focus_events(DomElement* elem) {
+    if (!elem) return;
+    Item elem_item = js_dom_wrap_element(elem);
+    Item focus_event = js_create_native_focus_event("focus", ItemNull);
+    js_dom_dispatch_event(elem_item, focus_event);
+    Item focusin_event = js_create_native_focus_event("focusin", ItemNull);
+    js_dom_dispatch_event(elem_item, focusin_event);
+}
+
 static void js_dom_clear_focus_if_disabled_now(DomElement* changed_elem) {
     if (!changed_elem) return;
     DocState* state = changed_elem->doc ? changed_elem->doc->state : js_dom_current_state();
@@ -4572,6 +4873,19 @@ static bool js_dom_find_initial_editing_boundary(DomElement* elem,
     return false;
 }
 
+static bool js_dom_selection_is_inside_element(DomSelection* selection,
+                                               DomElement* elem) {
+    if (!selection || !elem || selection->range_count == 0 ||
+        !selection->ranges[0]) {
+        return false;
+    }
+    DomRange* range = selection->ranges[0];
+    DomNode* root = (DomNode*)elem;
+    return range->start.node && range->end.node &&
+        js_dom_node_contains(root, range->start.node) &&
+        js_dom_node_contains(root, range->end.node);
+}
+
 static void js_dom_focus_set_selection_for_element(DocState* state, DomElement* elem) {
     if (!state || !elem) return;
     const char* exc = nullptr;
@@ -4590,7 +4904,7 @@ static void js_dom_focus_set_selection_for_element(DocState* state, DomElement* 
 
     if (js_dom_is_editing_host(elem)) {
         DomSelection* existing = state->dom_selection;
-        if (existing && existing->range_count > 0 && existing->ranges[0]) {
+        if (js_dom_selection_is_inside_element(existing, elem)) {
             return;
         }
         DomBoundary boundary = { (DomNode*)elem, 0 };
@@ -4609,8 +4923,10 @@ extern "C" void js_dom_focus_if_editing_host_for_selection(void* dom_node) {
     if (!js_dom_is_editing_host(elem)) return;
     if (!js_dom_is_script_focusable(elem)) return;
     DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+    View* old_focus = state ? focus_get(state) : nullptr;
     js_document_active_element = elem;
     focus_set(state, (View*)elem, false);
+    if (old_focus != (View*)elem) js_dom_dispatch_focus_events(elem);
 }
 
 static void js_dom_throw_syntax_error(const char* message) {
@@ -4974,6 +5290,12 @@ static void js_dom_collapse_selection_before_child_replace(DomElement* elem,
     DocState* state = js_dom_state_for_nodes((DomNode*)elem, nullptr);
     if (!state || !state->dom_selection ||
         state->dom_selection->range_count == 0) {
+        return;
+    }
+    DomRange* selected_range = state->dom_selection->ranges[0];
+    if (!selected_range ||
+        (!js_dom_node_contains((DomNode*)elem, selected_range->start.node) &&
+         !js_dom_node_contains((DomNode*)elem, selected_range->end.node))) {
         return;
     }
 
@@ -5458,6 +5780,12 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         return found ? js_dom_wrap_element(found) : ItemNull;
     }
 
+    if (strcmp(method, "elementFromPoint") == 0) {
+        Item x_arg = argc >= 1 ? args[0] : (Item){.item = i2it(0)};
+        Item y_arg = argc >= 2 ? args[1] : (Item){.item = i2it(0)};
+        return js_dom_document_element_from_point(doc, x_arg, y_arg);
+    }
+
     // getElementsByClassName(className)
     if (strcmp(method, "getElementsByClassName") == 0) {
         if (argc < 1) return ItemNull;
@@ -5768,6 +6096,34 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         js_dom_exec_command_call_preflight(args, argc);
         if (js_dom_exec_command_is_style_mode(cmd)) {
             return js_dom_exec_command_style_mode(cmd, args, argc);
+        }
+        if (cmd && strcasecmp(cmd, "selectAll") == 0 &&
+            _js_current_document == _js_main_document &&
+            js_document_active_element &&
+            _is_tag(js_document_active_element, "iframe")) {
+            Item frame_doc_item = js_iframe_get_content_document(
+                js_document_active_element);
+            DomDocument* frame_doc =
+                (DomDocument*)js_get_foreign_doc(frame_doc_item);
+            if (frame_doc &&
+                js_dom_exec_command_select_all_document(frame_doc)) {
+                return (Item){.item = ITEM_TRUE};
+            }
+        }
+        if (cmd && strcasecmp(cmd, "selectAll") == 0 &&
+            _js_current_document && _js_current_document != _js_main_document &&
+            js_dom_exec_command_select_all_document(_js_current_document)) {
+            return (Item){.item = ITEM_TRUE};
+        }
+        if (cmd && strcasecmp(cmd, "selectAll") == 0) {
+            DocState* state = js_dom_testdriver_state();
+            if (js_dom_exec_command_select_all_text_control(state)) {
+                return (Item){.item = ITEM_TRUE};
+            }
+            if (js_dom_select_all_should_target_document(state) &&
+                js_dom_exec_command_select_all_document(_js_current_document)) {
+                return (Item){.item = ITEM_TRUE};
+            }
         }
         if (js_dom_exec_command_uses_helper_first(cmd)) {
             Item handled = js_dom_exec_command_call_helper(args, argc);
@@ -6231,6 +6587,8 @@ extern "C" Item js_document_get_property(Item prop_name) {
         return js_new_function((void*)js_eventtarget_remove_listener, 3);
     if (strcmp(prop, "dispatchEvent") == 0)
         return js_new_function((void*)js_eventtarget_dispatch, 1);
+    if (strcmp(prop, "getSelection") == 0)
+        return js_dom_get_selection_function_for_document((void*)doc);
 
     DomDocument* expando_doc = _js_current_document ? _js_current_document : _js_main_document;
     void* stub_v = js_dom_get_or_create_doc_node(expando_doc);
@@ -6246,7 +6604,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     // Document method names accessed as properties return ITEM_TRUE for feature detection
     static const char* doc_methods[] = {
         "getElementById", "getElementsByTagName", "getElementsByClassName",
-        "getElementsByName", "querySelector", "querySelectorAll",
+        "getElementsByName", "elementFromPoint", "querySelector", "querySelectorAll",
         "createElement", "createElementNS", "createTextNode", "createComment",
         "createDocumentFragment", "importNode", "adoptNode",
         "open", "close", "write", "writeln",
@@ -8338,14 +8696,6 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         return js_get_document_object_value();
     }
 
-    // contentDocument / contentWindow — for iframe elements, return the main
-    // document proxy so scripts like `iframe.contentDocument.createElement()`
-    // work without crashing.  Not a real sub-document, but sufficient for
-    // crash-safety tests and simple DOM manipulation.
-    if (strcmp(prop, "contentDocument") == 0 || strcmp(prop, "contentWindow") == 0) {
-        return js_get_document_object_value();
-    }
-
     // firstChild (any node type, not just elements)
     if (strcmp(prop, "firstChild") == 0) {
         DomNode* child = elem->first_child;
@@ -8500,9 +8850,17 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
 
     // offsetTop / offsetLeft — position relative to offsetParent
     if (strcmp(prop, "offsetTop") == 0) {
+        if (_is_tag(elem, "body") || _is_tag(elem, "html"))
+            return (Item){.item = i2it(0)};
+        if (elem->doc && js_dom_ensure_layout_for_geometry(elem->doc))
+            return (Item){.item = i2it(js_dom_offset_coordinate(elem, false))};
         return (Item){.item = i2it((int64_t)elem->y)};
     }
     if (strcmp(prop, "offsetLeft") == 0) {
+        if (_is_tag(elem, "body") || _is_tag(elem, "html"))
+            return (Item){.item = i2it(0)};
+        if (elem->doc && js_dom_ensure_layout_for_geometry(elem->doc))
+            return (Item){.item = i2it(js_dom_offset_coordinate(elem, true))};
         if (elem->x == 0.0f) {
             int64_t synthetic_left = js_dom_synthetic_inline_offset_left(elem);
             if (synthetic_left > 0) {
@@ -8514,22 +8872,8 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
 
     // offsetParent — nearest positioned ancestor (or body)
     if (strcmp(prop, "offsetParent") == 0) {
-        DomNode* p = elem->parent;
-        while (p) {
-            if (p->is_element()) {
-                DomElement* pe = p->as_element();
-                // body is always an offsetParent
-                if (pe->tag_name && strcasecmp(pe->tag_name, "body") == 0) {
-                    return js_dom_wrap_element(pe);
-                }
-                // positioned element (not static)
-                if (pe->position && pe->position->position != CSS_VALUE_STATIC) {
-                    return js_dom_wrap_element(pe);
-                }
-            }
-            p = p->parent;
-        }
-        return ItemNull;
+        DomElement* parent = js_dom_offset_parent_element(elem);
+        return parent ? js_dom_wrap_element(parent) : ItemNull;
     }
 
     // scrollWidth / scrollHeight — total scrollable content size
@@ -8549,11 +8893,17 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         if (elem->scroller && elem->scroller->pane) {
             return (Item){.item = i2it((int64_t)elem->scroller->pane->v_scroll_position)};
         }
+        if (elem->has_pending_element_scroll_y) {
+            return (Item){.item = i2it((int64_t)elem->pending_element_scroll_y)};
+        }
         return (Item){.item = i2it(0)};
     }
     if (strcmp(prop, "scrollLeft") == 0) {
         if (elem->scroller && elem->scroller->pane) {
             return (Item){.item = i2it((int64_t)elem->scroller->pane->h_scroll_position)};
+        }
+        if (elem->has_pending_element_scroll_x) {
+            return (Item){.item = i2it((int64_t)elem->pending_element_scroll_x)};
         }
         return (Item){.item = i2it(0)};
     }
@@ -9324,6 +9674,31 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         return js_bind_function(js_new_function((void*)js_dom_select_method, 1),
             make_js_undefined(), bound_args, 1);
     }
+    if (strcmp(prop, "getBoundingClientRect") == 0) {
+        Item bound_args[1] = { elem_item };
+        return js_bind_function(js_new_function((void*)js_dom_get_bounding_client_rect_method, 1),
+            make_js_undefined(), bound_args, 1);
+    }
+    if (strcmp(prop, "getClientRects") == 0) {
+        Item bound_args[1] = { elem_item };
+        return js_bind_function(js_new_function((void*)js_dom_get_client_rects_method, 1),
+            make_js_undefined(), bound_args, 1);
+    }
+    if (strcmp(prop, "__lambdaTextControlCaretBounds") == 0) {
+        Item bound_args[1] = { elem_item };
+        return js_bind_function(js_new_function((void*)js_dom_text_control_caret_bounds_method, 1),
+            make_js_undefined(), bound_args, 1);
+    }
+    if (strcmp(prop, "__lambdaTextControlBoundaryFromPoint") == 0) {
+        Item bound_args[1] = { elem_item };
+        return js_bind_function(js_new_function((void*)js_dom_text_control_boundary_from_point_method, 3),
+            make_js_undefined(), bound_args, 1);
+    }
+    if (strcmp(prop, "__lambdaBoundaryFromPoint") == 0) {
+        Item bound_args[1] = { elem_item };
+        return js_bind_function(js_new_function((void*)js_dom_boundary_from_point_method, 4),
+            make_js_undefined(), bound_args, 1);
+    }
     if (strcmp(prop, "setSelectionRange") == 0)
         return js_bind_function(js_new_function((void*)js_text_control_set_selection_range, 3),
             elem_item, NULL, 0);
@@ -9347,6 +9722,8 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         "remove", "getBoundingClientRect", "getElementsByTagName",
         "getElementsByClassName", "compareDocumentPosition",
         "append", "prepend", "getClientRects", "focus", "blur",
+        "__lambdaTextControlCaretBounds", "__lambdaTextControlBoundaryFromPoint",
+        "__lambdaBoundaryFromPoint",
         "toString",
         "setSelectionRange", "select",
         "submit", "reset", "checkValidity", "reportValidity", "requestSubmit",
@@ -9470,8 +9847,11 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
     const char* prop = fn_to_cstr(prop_name);
     if (!prop) return ItemNull;
 
-    // text node .data property
-    if (node->is_text() && strcmp(prop, "data") == 0) {
+    // text node CharacterData aliases
+    if (node->is_text() &&
+        (strcmp(prop, "data") == 0 ||
+         strcmp(prop, "nodeValue") == 0 ||
+         strcmp(prop, "textContent") == 0)) {
         DomText* text_node = node->as_text();
         const char* new_text = fn_to_cstr(value);
         if (new_text) {
@@ -9518,15 +9898,35 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         }
 
         if (elem->scroller && elem->scroller->pane) {
+            float current_x = 0.0f;
+            float current_y = 0.0f;
+            DocState* state = elem->doc ? elem->doc->state : nullptr;
+            scroll_state_get_position_for_view(state, static_cast<View*>(elem),
+                elem->scroller->pane, &current_x, &current_y, NULL, NULL);
             if (is_vertical) {
-                elem->scroller->pane->v_scroll_position = scroll_value;
+                scroll_state_set_position_for_view(state, static_cast<View*>(elem),
+                    elem->scroller->pane, current_x, scroll_value, false);
+                elem->has_pending_element_scroll_y = false;
             } else {
-                elem->scroller->pane->h_scroll_position = scroll_value;
+                scroll_state_set_position_for_view(state, static_cast<View*>(elem),
+                    elem->scroller->pane, scroll_value, current_y, false);
+                elem->has_pending_element_scroll_x = false;
             }
             log_debug("js_dom_set_property: set %s=%.1f on <%s>",
                       prop, scroll_value, elem->tag_name ? elem->tag_name : "?");
             return value;
         }
+
+        if (is_vertical) {
+            elem->pending_element_scroll_y = scroll_value;
+            elem->has_pending_element_scroll_y = true;
+        } else {
+            elem->pending_element_scroll_x = scroll_value;
+            elem->has_pending_element_scroll_x = true;
+        }
+        log_debug("js_dom_set_property: pending element %s=%.1f on <%s>",
+                  prop, scroll_value, elem->tag_name ? elem->tag_name : "?");
+        return value;
     }
 
     if (strcmp(prop, "srcdoc") == 0 && _is_tag(elem, "iframe")) {
@@ -10401,6 +10801,491 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
 // Element Method Dispatcher
 // ============================================================================
 
+static void js_dom_set_number_property(Item object, const char* name,
+                                       float value) {
+    Item key = (Item){.item = s2it(heap_create_name(name))};
+    js_property_set(object, key, push_d((double)value));
+}
+
+static Item js_dom_make_rect_object(float x, float y, float width,
+                                    float height) {
+    Item rect = js_new_object();
+    js_dom_set_number_property(rect, "x", x);
+    js_dom_set_number_property(rect, "y", y);
+    js_dom_set_number_property(rect, "top", y);
+    js_dom_set_number_property(rect, "left", x);
+    js_dom_set_number_property(rect, "right", x + width);
+    js_dom_set_number_property(rect, "bottom", y + height);
+    js_dom_set_number_property(rect, "width", width);
+    js_dom_set_number_property(rect, "height", height);
+    return rect;
+}
+
+static void js_dom_absolute_node_position(DomNode* node,
+                                          float* out_x,
+                                          float* out_y) {
+    float x = 0.0f;
+    float y = 0.0f;
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        x += cur->x;
+        y += cur->y;
+    }
+    if (out_x) *out_x = x;
+    if (out_y) *out_y = y;
+}
+
+static DomElement* js_dom_offset_parent_element(DomElement* elem) {
+    if (!elem) return nullptr;
+    DomNode* p = elem->parent;
+    while (p) {
+        if (p->is_element()) {
+            DomElement* pe = p->as_element();
+            if (pe->tag_name && strcasecmp(pe->tag_name, "body") == 0)
+                return pe;
+            if (pe->tag_name &&
+                (strcasecmp(pe->tag_name, "table") == 0 ||
+                 strcasecmp(pe->tag_name, "td") == 0 ||
+                 strcasecmp(pe->tag_name, "th") == 0)) {
+                return pe;
+            }
+            if (pe->position && pe->position->position != CSS_VALUE_STATIC)
+                return pe;
+        }
+        p = p->parent;
+    }
+    return nullptr;
+}
+
+static int64_t js_dom_offset_coordinate(DomElement* elem, bool x_axis) {
+    if (!elem) return 0;
+    float abs_x = 0.0f;
+    float abs_y = 0.0f;
+    js_dom_absolute_node_position((DomNode*)elem, &abs_x, &abs_y);
+    float value = x_axis ? abs_x : abs_y;
+
+    DomElement* offset_parent = js_dom_offset_parent_element(elem);
+    if (offset_parent) {
+        if (!offset_parent->tag_name ||
+            strcasecmp(offset_parent->tag_name, "body") != 0) {
+            float parent_x = 0.0f;
+            float parent_y = 0.0f;
+            js_dom_absolute_node_position((DomNode*)offset_parent, &parent_x,
+                                          &parent_y);
+            value -= x_axis ? parent_x : parent_y;
+        }
+    }
+    return (int64_t)value;
+}
+
+static void js_dom_scroll_offset_for_node(DomNode* node,
+                                          float* out_x,
+                                          float* out_y) {
+    if (out_x) *out_x = 0.0f;
+    if (out_y) *out_y = 0.0f;
+    if (!node || !node->is_element()) return;
+    if (!node->is_block()) {
+        return;
+    }
+    DomElement* elem = node->as_element();
+    if (!elem || !elem->scroller || !elem->scroller->pane) return;
+    if (out_x) *out_x = elem->scroller->pane->h_scroll_position;
+    if (out_y) *out_y = elem->scroller->pane->v_scroll_position;
+}
+
+static void js_dom_viewport_node_position(DomNode* node,
+                                          float* out_x,
+                                          float* out_y) {
+    float x = 0.0f;
+    float y = 0.0f;
+    DomNode* origin = node;
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        x += cur->x;
+        y += cur->y;
+        if (cur != origin) {
+            float scroll_x = 0.0f;
+            float scroll_y = 0.0f;
+            js_dom_scroll_offset_for_node(cur, &scroll_x, &scroll_y);
+            x -= scroll_x;
+            y -= scroll_y;
+        }
+    }
+    if (out_x) *out_x = x;
+    if (out_y) *out_y = y;
+}
+
+static bool js_dom_point_in_box(float px, float py,
+                                float x, float y,
+                                float w, float h) {
+    return w > 0.0f && h > 0.0f &&
+        x <= px && px < x + w &&
+        y <= py && py < y + h;
+}
+
+static bool js_dom_text_contains_point(DomText* text,
+                                       float abs_x,
+                                       float abs_y,
+                                       float px,
+                                       float py) {
+    if (!text) return false;
+    for (TextRect* rect = text->rect; rect; rect = rect->next) {
+        if (js_dom_point_in_box(px, py, abs_x + rect->x, abs_y + rect->y,
+                rect->width, rect->height)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool js_dom_element_from_point_skips_subtree(DomElement* elem) {
+    if (!elem || !elem->tag_name) return false;
+    return _is_tag(elem, "head") ||
+        _is_tag(elem, "style") ||
+        _is_tag(elem, "script") ||
+        _is_tag(elem, "title") ||
+        _is_tag(elem, "meta") ||
+        _is_tag(elem, "link") ||
+        _is_tag(elem, "base") ||
+        _is_tag(elem, "noscript") ||
+        _is_tag(elem, "template");
+}
+
+static float js_dom_shadow_node_synthetic_width(DomNode* node) {
+    if (!node) return 0.0f;
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        return text && text->length > 0 ? (float)text->length : 0.0f;
+    }
+    if (!node->is_element()) return 0.0f;
+    int64_t width = js_dom_headless_dimension(node->as_element(), true);
+    return width > 0 ? (float)width : 1.0f;
+}
+
+static float js_dom_shadow_node_synthetic_height(DomNode* node) {
+    if (!node) return 0.0f;
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        return text && text->length > 0 ? 1.0f : 0.0f;
+    }
+    if (!node->is_element()) return 0.0f;
+    int64_t height = js_dom_headless_dimension(node->as_element(), false);
+    return height > 0 ? (float)height : 1.0f;
+}
+
+static bool js_dom_is_document_fragment_element(DomElement* elem) {
+    return elem && elem->tag_name &&
+        strcmp(elem->tag_name, "#document-fragment") == 0;
+}
+
+static DomElement* js_dom_shadow_element_from_point_walk(DomNode* node,
+                                                         float abs_x,
+                                                         float abs_y,
+                                                         float px,
+                                                         float py) {
+    if (!node) return nullptr;
+    float node_x = abs_x + node->x;
+    float node_y = abs_y + node->y;
+
+    if (node->is_text()) {
+        if (js_dom_point_in_box(px, py, node_x, node_y,
+                js_dom_shadow_node_synthetic_width(node),
+                js_dom_shadow_node_synthetic_height(node)) &&
+            node->parent && node->parent->is_element()) {
+            return node->parent->as_element();
+        }
+        return nullptr;
+    }
+    if (!node->is_element()) return nullptr;
+
+    DomElement* elem = node->as_element();
+    if (js_dom_element_from_point_skips_subtree(elem)) return nullptr;
+
+    DomElement* best = nullptr;
+    float child_x = node_x;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        DomElement* hit = js_dom_shadow_element_from_point_walk(child, child_x,
+            node_y, px, py);
+        if (hit) best = hit;
+        child_x += js_dom_shadow_node_synthetic_width(child);
+    }
+    if (best) return best;
+    if (js_dom_is_document_fragment_element(elem)) return nullptr;
+
+    return js_dom_point_in_box(px, py, node_x, node_y,
+        js_dom_shadow_node_synthetic_width(node),
+        js_dom_shadow_node_synthetic_height(node)) ? elem : nullptr;
+}
+
+static DomElement* js_dom_element_from_point_walk(DomNode* node,
+                                                  float abs_x,
+                                                  float abs_y,
+                                                  float px,
+                                                  float py) {
+    if (!node || !node->view_type) return nullptr;
+    float node_x = abs_x + node->x;
+    float node_y = abs_y + node->y;
+
+    if (node->is_text()) {
+        return js_dom_text_contains_point(node->as_text(), abs_x, abs_y,
+            px, py) && node->parent && node->parent->is_element()
+            ? node->parent->as_element() : nullptr;
+    }
+    if (!node->is_element()) return nullptr;
+
+    DomElement* elem = node->as_element();
+    if (js_dom_element_from_point_skips_subtree(elem)) return nullptr;
+    if (elem->shadow_root) {
+        DomElement* shadow_hit = js_dom_shadow_element_from_point_walk(
+            (DomNode*)elem->shadow_root, node_x, node_y, px, py);
+        if (shadow_hit) return shadow_hit;
+    }
+
+    float child_base_x = node_x;
+    float child_base_y = node_y;
+    float scroll_x = 0.0f;
+    float scroll_y = 0.0f;
+    js_dom_scroll_offset_for_node(node, &scroll_x, &scroll_y);
+    child_base_x -= scroll_x;
+    child_base_y -= scroll_y;
+
+    for (DomNode* child = elem->last_child; child; child = child->prev_sibling) {
+        DomElement* hit = js_dom_element_from_point_walk(child, child_base_x,
+            child_base_y, px, py);
+        if (hit) return hit;
+    }
+
+    float hit_width = node->width;
+    float hit_height = node->height;
+    if (js_dom_is_editing_host(elem)) {
+        if (hit_width <= 0.0f) {
+            hit_width = (float)js_dom_headless_dimension(elem, true);
+        }
+        if (hit_height <= 0.0f) {
+            hit_height = (float)js_dom_headless_dimension(elem, false);
+        }
+    }
+
+    return js_dom_point_in_box(px, py, node_x, node_y, hit_width,
+        hit_height) ? elem : nullptr;
+}
+
+static DomElement* js_dom_shadow_element_from_document_point_walk(DomNode* node,
+                                                                  float px,
+                                                                  float py) {
+    if (!node || !node->is_element()) return nullptr;
+    DomElement* elem = node->as_element();
+    if (js_dom_element_from_point_skips_subtree(elem)) return nullptr;
+
+    for (DomNode* child = elem->last_child; child; child = child->prev_sibling) {
+        DomElement* hit = js_dom_shadow_element_from_document_point_walk(child,
+            px, py);
+        if (hit) return hit;
+    }
+    if (!elem->shadow_root) return nullptr;
+
+    float host_x = 0.0f;
+    float host_y = 0.0f;
+    js_dom_viewport_node_position((DomNode*)elem, &host_x, &host_y);
+    DomElement* hit = js_dom_shadow_element_from_point_walk((DomNode*)elem->shadow_root,
+        host_x, host_y, px, py);
+    if (hit) return hit;
+    if (host_x != 0.0f || host_y != 0.0f) {
+        // Shadow descendants in headless editing tests expose synthetic
+        // offsetLeft/offsetTop before Radiant has real shadow layout boxes.
+        return js_dom_shadow_element_from_point_walk(
+            (DomNode*)elem->shadow_root, 0.0f, 0.0f, px, py);
+    }
+    return nullptr;
+}
+
+static Item js_dom_document_element_from_point(DomDocument* doc,
+                                               Item x_arg,
+                                               Item y_arg);
+
+static float js_dom_item_to_float(Item value) {
+    Item numeric = js_to_number(value);
+    TypeId type = get_type_id(numeric);
+    if (type == LMD_TYPE_FLOAT) return (float)it2d(numeric);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
+        return (float)it2i(numeric);
+    }
+    return 0.0f;
+}
+
+static Item js_dom_make_plain_boundary_object(DomBoundary boundary) {
+    if (!boundary.node) return ItemNull;
+    Item out = js_new_object();
+    js_property_set(out, js_string_key("node"),
+        js_dom_wrap_element(boundary.node));
+    js_property_set(out, js_string_key("offset"),
+        (Item){.item = i2it((int64_t)boundary.offset)});
+    return out;
+}
+
+static Item js_dom_make_boundary_object(DomBoundary boundary) {
+    Item out = js_dom_make_plain_boundary_object(boundary);
+    if (get_type_id(out) != LMD_TYPE_MAP) return out;
+
+    DomBoundary all_start;
+    DomBoundary all_end;
+    if (dom_selection_user_select_all_range_for_node(boundary.node,
+            &all_start, &all_end)) {
+        js_property_set(out, js_string_key("selectAllStart"),
+            js_dom_make_plain_boundary_object(all_start));
+        js_property_set(out, js_string_key("selectAllEnd"),
+            js_dom_make_plain_boundary_object(all_end));
+    }
+    DomBoundary triple_start;
+    DomBoundary triple_end;
+    if (dom_selection_triple_click_range_for_node(boundary.node,
+            &triple_start, &triple_end)) {
+        js_property_set(out, js_string_key("tripleClickStart"),
+            js_dom_make_plain_boundary_object(triple_start));
+        js_property_set(out, js_string_key("tripleClickEnd"),
+            js_dom_make_plain_boundary_object(triple_end));
+    }
+    return out;
+}
+
+static bool js_dom_boundary_inside_text_control(DomBoundary boundary) {
+    for (DomNode* node = boundary.node; node; node = node->parent) {
+        if (node->is_element() && tc_is_text_control_elem(node->as_element())) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static Item js_dom_boundary_from_point(DomElement* elem,
+                                       Item x_arg,
+                                       Item y_arg,
+                                       Item behavior_arg) {
+    if (!elem || !elem->doc || !_js_current_ui_context ||
+        !js_dom_ensure_layout_for_geometry(elem->doc) ||
+        !elem->doc->view_tree || !elem->doc->view_tree->root) {
+        return ItemNull;
+    }
+
+    float x = js_dom_item_to_float(x_arg);
+    float y = js_dom_item_to_float(y_arg);
+    EditingSurface surface;
+    if (editing_surface_from_target(static_cast<View*>(elem), &surface) &&
+        editing_surface_is_rich(&surface)) {
+        EditingBoundary hit;
+        editing_boundary_clear(&hit);
+        EditingPointBehavior behavior = EDITING_POINT_BEHAVIOR_DEFAULT;
+        const char* behavior_text = fn_to_cstr(behavior_arg);
+        if (behavior_text && strcasecmp(behavior_text, "mac") == 0) {
+            behavior = EDITING_POINT_BEHAVIOR_MAC;
+        }
+        if (editing_geometry_hit_test_boundary(_js_current_ui_context,
+                elem->doc->view_tree->root, &surface, x, y,
+                EDITING_CLAMP_SKIP_TEXT_CONTROLS, &hit, behavior) &&
+            hit.kind == EDITING_BOUNDARY_DOM &&
+            hit.dom.node) {
+            return js_dom_make_boundary_object(hit.dom);
+        }
+    }
+
+    DomBoundary boundary = dom_hit_test_to_boundary(
+        elem->doc->view_tree->root, x, y);
+    if (!boundary.node || js_dom_boundary_inside_text_control(boundary)) {
+        return ItemNull;
+    }
+    return js_dom_make_boundary_object(boundary);
+}
+
+static Item js_dom_document_element_from_point(DomDocument* doc,
+                                               Item x_arg,
+                                               Item y_arg) {
+    if (!doc || !_js_current_ui_context ||
+        !js_dom_ensure_layout_for_geometry(doc) ||
+        !doc->view_tree || !doc->view_tree->root) {
+        return ItemNull;
+    }
+
+    float x = js_dom_item_to_float(x_arg);
+    float y = js_dom_item_to_float(y_arg);
+    DomElement* shadow_hit = js_dom_shadow_element_from_document_point_walk(
+        static_cast<DomNode*>(doc->root), x, y);
+    if (shadow_hit) return js_dom_wrap_element(shadow_hit);
+
+    DomElement* hit = js_dom_element_from_point_walk(
+        static_cast<DomNode*>(doc->view_tree->root),
+        0.0f, 0.0f, x, y);
+    return hit ? js_dom_wrap_element(hit) : ItemNull;
+}
+
+static Item js_dom_text_control_caret_bounds(DomElement* elem) {
+    if (!elem || !tc_is_text_control_elem(elem) || !_js_current_ui_context) {
+        return ItemNull;
+    }
+
+    DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+    if (!state && elem->doc) {
+        state = radiant_document_ensure_state(elem->doc,
+            "js_dom_text_control_caret_bounds");
+    }
+
+    tc_ensure_init(elem);
+    FormControlProp* form = elem->form;
+    if (!form) return ItemNull;
+
+    uint32_t start_u16 = 0;
+    uint32_t end_u16 = 0;
+    uint8_t direction = 0;
+    form_control_get_selection(state, static_cast<View*>(elem),
+        &start_u16, &end_u16, &direction);
+    uint32_t focus_u16 = direction == 2 ? start_u16 : end_u16;
+
+    const char* value = form->current_value ? form->current_value : form->value;
+    uint32_t value_len = form->current_value_len;
+    uint32_t focus_utf8 = tc_utf16_to_utf8_offset(value ? value : "",
+        value_len, focus_u16);
+
+    EditingCaretRect rect;
+    editing_caret_rect_clear(&rect);
+    if (!editing_geometry_text_control_caret_rect(_js_current_ui_context,
+            elem, focus_utf8, &rect) || !rect.valid) {
+        return ItemNull;
+    }
+    return js_dom_make_rect_object(rect.x, rect.y, rect.width, rect.height);
+}
+
+static Item js_dom_text_control_boundary_from_point(DomElement* elem,
+                                                    Item x_arg,
+                                                    Item y_arg) {
+    if (!elem || !tc_is_text_control_elem(elem) || !_js_current_ui_context ||
+        !elem->doc || !js_dom_ensure_layout_for_geometry(elem->doc)) {
+        return ItemNull;
+    }
+
+    EditingBoundary hit;
+    editing_boundary_clear(&hit);
+    if (!editing_geometry_text_control_boundary_from_point(
+            _js_current_ui_context, elem, js_dom_item_to_float(x_arg),
+            js_dom_item_to_float(y_arg), &hit) ||
+        hit.kind != EDITING_BOUNDARY_TEXT_CONTROL) {
+        return ItemNull;
+    }
+
+    tc_ensure_init(elem);
+    FormControlProp* form = elem->form;
+    const char* value = form && form->current_value
+        ? form->current_value
+        : (form ? form->value : "");
+    uint32_t value_len = form ? form->current_value_len : 0;
+    uint32_t offset_u16 = tc_utf8_to_utf16_offset(value ? value : "",
+        value_len, hit.offset);
+
+    Item out = js_new_object();
+    js_property_set(out, js_string_key("node"), js_dom_wrap_element(elem));
+    js_property_set(out, js_string_key("offset"),
+        (Item){.item = i2it((int64_t)offset_u16)});
+    js_property_set(out, js_string_key("byteOffset"),
+        (Item){.item = i2it((int64_t)hit.offset)});
+    return out;
+}
+
 extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* args, int argc) {
     DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
     if (!node) {
@@ -10494,15 +11379,13 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         Item frag_item = builder.element("#document-fragment").final();
         Element* frag_elem = frag_item.element;
         DomElement* frag = dom_element_create(elem->doc, "#document-fragment", frag_elem);
+        frag->shadow_host = elem;
+        elem->shadow_root = frag;
         Item root = js_dom_wrap_element(frag);
 
         js_property_set(root, (Item){.item = s2it(heap_create_name("host"))}, elem_item);
         js_property_set(root, (Item){.item = s2it(heap_create_name("mode"))},
             (Item){.item = s2it(heap_create_name(mode))});
-        js_property_set(root, (Item){.item = s2it(heap_create_name("innerHTML"))},
-            (Item){.item = s2it(heap_create_name(""))});
-        js_property_set(root, (Item){.item = s2it(heap_create_name("nodeType"))},
-            (Item){.item = i2it(11)});
         js_property_set(root, (Item){.item = s2it(heap_create_name("delegatesFocus"))},
             (Item){.item = b2it(delegates_focus)});
 
@@ -11150,35 +12033,12 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
     // getBoundingClientRect() — returns {top, left, right, bottom, width, height}
     // Walks parent chain to compute absolute position.
     if (strcmp(method, "getBoundingClientRect") == 0) {
+        if (elem->doc) js_dom_ensure_layout_for_geometry(elem->doc);
         float abs_x = 0, abs_y = 0;
-        DomNode* n = (DomNode*)elem;
-        while (n) {
-            abs_x += n->x;
-            abs_y += n->y;
-            n = n->parent;
-        }
+        js_dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
         float w = elem->width;
         float h = elem->height;
-
-        Item rect = js_new_object();
-        Item k;
-        k = (Item){.item = s2it(heap_create_name("x"))};
-        js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_x)});
-        k = (Item){.item = s2it(heap_create_name("y"))};
-        js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_y)});
-        k = (Item){.item = s2it(heap_create_name("top"))};
-        js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_y)});
-        k = (Item){.item = s2it(heap_create_name("left"))};
-        js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_x)});
-        k = (Item){.item = s2it(heap_create_name("right"))};
-        js_property_set(rect, k, (Item){.item = i2it((int64_t)(abs_x + w))});
-        k = (Item){.item = s2it(heap_create_name("bottom"))};
-        js_property_set(rect, k, (Item){.item = i2it((int64_t)(abs_y + h))});
-        k = (Item){.item = s2it(heap_create_name("width"))};
-        js_property_set(rect, k, (Item){.item = i2it((int64_t)w)});
-        k = (Item){.item = s2it(heap_create_name("height"))};
-        js_property_set(rect, k, (Item){.item = i2it((int64_t)h)});
-        return rect;
+        return js_dom_make_rect_object(abs_x, abs_y, w, h);
     }
 
     // compareDocumentPosition(otherNode) — returns bitmask per W3C DOM spec
@@ -11274,14 +12134,10 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
 
     // getClientRects() — returns array containing single DOMRect (same as getBoundingClientRect)
     if (strcmp(method, "getClientRects") == 0) {
+        if (elem->doc) js_dom_ensure_layout_for_geometry(elem->doc);
         // compute absolute position
         float abs_x = 0, abs_y = 0;
-        DomNode* n2 = (DomNode*)elem;
-        while (n2) {
-            abs_x += n2->x;
-            abs_y += n2->y;
-            n2 = n2->parent;
-        }
+        js_dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
         float w = elem->width;
         float h = elem->height;
         // create the DOMRect
@@ -11309,14 +12165,33 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         return arr;
     }
 
+    if (strcmp(method, "__lambdaTextControlCaretBounds") == 0 &&
+        tc_is_text_control_elem(elem)) {
+        return js_dom_text_control_caret_bounds(elem);
+    }
+    if (strcmp(method, "__lambdaTextControlBoundaryFromPoint") == 0 &&
+        tc_is_text_control_elem(elem)) {
+        Item x_arg = argc >= 1 ? args[0] : (Item){.item = i2it(0)};
+        Item y_arg = argc >= 2 ? args[1] : (Item){.item = i2it(0)};
+        return js_dom_text_control_boundary_from_point(elem, x_arg, y_arg);
+    }
+    if (strcmp(method, "__lambdaBoundaryFromPoint") == 0) {
+        Item x_arg = argc >= 1 ? args[0] : (Item){.item = i2it(0)};
+        Item y_arg = argc >= 2 ? args[1] : (Item){.item = i2it(0)};
+        Item behavior_arg = argc >= 3 ? args[2] : make_js_undefined();
+        return js_dom_boundary_from_point(elem, x_arg, y_arg, behavior_arg);
+    }
+
     // focus() / blur() — stubs for headless mode
     if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
         DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
         if (strcmp(method, "focus") == 0) {
             if (js_dom_is_script_focusable(elem)) {
+                View* old_focus = state ? focus_get(state) : nullptr;
                 js_document_active_element = elem;
                 focus_set(state, (View*)elem, false);
                 js_dom_focus_set_selection_for_element(state, elem);
+                if (old_focus != (View*)elem) js_dom_dispatch_focus_events(elem);
             }
         } else {
             if (js_document_active_element == elem) js_document_active_element = nullptr;
