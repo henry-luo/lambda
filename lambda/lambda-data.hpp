@@ -266,6 +266,15 @@ typedef struct TypeMap : Type {
     // re-cloning. The original blueprint TypeMap (referenced by call-site
     // shape caches) keeps is_private_clone=false and stays immutable.
     bool is_private_clone;
+    // P4 (JS): true when this TypeMap is a canonical constructor shape shared
+    // by multiple instances from one `new` callsite. Structural mutations and
+    // incompatible established-slot retags must clone before mutating entries.
+    bool is_shared_constructor_shape;
+    // P5 (JS): parent->child transition targets are also shared across
+    // instances. They are not constructor roots, but must obey the same detach
+    // rules before descriptor or incompatible type mutation.
+    bool is_transition_shared_shape;
+    struct TypeMapTransition* transitions;
     // A3-T1 (JS): typed class identity (JsClass enum, declared in js/js_class.h).
     // Zero-init = JS_CLASS_NONE so existing TypeMaps stay opaque to the new
     // dispatch path. Stamped via `js_class_set_for_map` (which clones the
@@ -273,6 +282,15 @@ typedef struct TypeMap : Type {
     // shape cache). Read via `js_class_get(Item)`.
     uint8_t js_class;
 } TypeMap;
+
+typedef struct TypeMapTransition {
+    const char* name;
+    uint32_t name_len;
+    TypeId value_type;
+    uint8_t flags;
+    TypeMap* target;
+    struct TypeMapTransition* next;
+} TypeMapTransition;
 
 // A1: FNV-1a 32-bit hash for property name lookup.
 // Thin alias over lib/hash.h so the algorithm choice lives in one place.

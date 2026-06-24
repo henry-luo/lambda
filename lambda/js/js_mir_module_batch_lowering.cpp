@@ -514,6 +514,187 @@ static MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntr
     return jm_transpile_box_item(mt, (JsAstNode*)&tmp_id);
 }
 
+static int jm_ctor_prop_find_raw(const char** ptrs, const int* lens, int count,
+        const char* name, int name_len) {
+    if (!ptrs || !lens || !name || name_len <= 0) return -1;
+    for (int i = 0; i < count; i++) {
+        if (lens[i] == name_len && ptrs[i] &&
+            strncmp(ptrs[i], name, (size_t)name_len) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static bool jm_ctor_prop_append_raw(const char** dst_ptrs, int* dst_lens,
+        int* dst_ta_types, TypeId* dst_types, int* dst_param_idx, int* dst_count,
+        const char* name, int name_len, int ta_type, TypeId field_type,
+        int param_idx, bool inherited) {
+    if (!dst_ptrs || !dst_lens || !dst_ta_types || !dst_types || !dst_param_idx ||
+        !dst_count || !name || name_len <= 0) {
+        return true;
+    }
+    int idx = jm_ctor_prop_find_raw(dst_ptrs, dst_lens, *dst_count, name, name_len);
+    if (idx >= 0) {
+        if (ta_type >= 0) dst_ta_types[idx] = ta_type;
+        if (field_type != LMD_TYPE_NULL) dst_types[idx] = field_type;
+        if (!inherited && param_idx >= 0) dst_param_idx[idx] = param_idx;
+        return true;
+    }
+    if (*dst_count >= 16) return false;
+    idx = *dst_count;
+    dst_ptrs[idx] = name;
+    dst_lens[idx] = name_len;
+    dst_ta_types[idx] = ta_type;
+    dst_types[idx] = field_type;
+    dst_param_idx[idx] = inherited ? -1 : param_idx;
+    *dst_count = idx + 1;
+    return true;
+}
+
+static bool jm_ctor_prop_append_from_fc(const char** dst_ptrs, int* dst_lens,
+        int* dst_ta_types, TypeId* dst_types, int* dst_param_idx, int* dst_count,
+        JsFuncCollected* src_fc, bool inherited) {
+    if (!src_fc) return true;
+    for (int i = 0; i < src_fc->ctor_prop_count; i++) {
+        if (!jm_ctor_prop_append_raw(dst_ptrs, dst_lens, dst_ta_types,
+                dst_types, dst_param_idx, dst_count,
+                src_fc->ctor_prop_ptrs[i], src_fc->ctor_prop_lens[i],
+                src_fc->ctor_prop_ta_types[i], src_fc->ctor_prop_types[i],
+                src_fc->ctor_prop_param_idx[i], inherited)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static JsFuncCollected* jm_nearest_ctor_shape_fc(JsClassEntry* ce) {
+    for (JsClassEntry* p = ce; p; p = p->superclass) {
+        if (p->constructor && p->constructor->fc &&
+            p->constructor->fc->ctor_prop_count > 0) {
+            return p->constructor->fc;
+        }
+    }
+    return NULL;
+}
+
+static void jm_disable_ctor_shape_chain(JsClassEntry* ce) {
+    for (JsClassEntry* p = ce; p; p = p->superclass) {
+        if (p->constructor && p->constructor->fc) {
+            p->constructor->fc->ctor_prop_count = 0;
+        }
+        p->ctor_shape_compose_failed = true;
+    }
+}
+
+static bool jm_compose_derived_ctor_shape(JsClassEntry* ce, int depth) {
+    if (!ce) return true;
+    if (ce->ctor_shape_composed) return !ce->ctor_shape_compose_failed;
+    ce->ctor_shape_composed = true;
+    if (depth > 32) {
+        ce->ctor_shape_compose_failed = true;
+        return false;
+    }
+    if (ce->superclass && !jm_compose_derived_ctor_shape(ce->superclass, depth + 1)) {
+        ce->ctor_shape_compose_failed = true;
+        return false;
+    }
+    if (!ce->superclass) return true;
+
+    JsFuncCollected* parent_fc = jm_nearest_ctor_shape_fc(ce->superclass);
+    if (!parent_fc || parent_fc->ctor_prop_count <= 0) return true;
+
+    if (ce->instance_field_count > 0) {
+        log_debug("Tune11-P5: disabling inherited ctor shape for '%.*s' because instance fields are present",
+            ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "");
+        ce->ctor_shape_compose_failed = true;
+        return false;
+    }
+
+    if (!ce->constructor || !ce->constructor->fc) {
+        log_debug("Tune11-P5: disabling inherited ctor shape for '%.*s' because it has an implicit constructor",
+            ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "");
+        ce->ctor_shape_compose_failed = true;
+        return false;
+    }
+
+    JsFuncCollected* fc = ce->constructor->fc;
+    const char* own_ptrs[16];
+    int own_lens[16];
+    int own_ta_types[16];
+    TypeId own_types[16];
+    int own_param_idx[16];
+    int own_count = fc->ctor_prop_count;
+    if (own_count < 0) own_count = 0;
+    if (own_count > 16) own_count = 16;
+    for (int i = 0; i < own_count; i++) {
+        own_ptrs[i] = fc->ctor_prop_ptrs[i];
+        own_lens[i] = fc->ctor_prop_lens[i];
+        own_ta_types[i] = fc->ctor_prop_ta_types[i];
+        own_types[i] = fc->ctor_prop_types[i];
+        own_param_idx[i] = fc->ctor_prop_param_idx[i];
+    }
+
+    const char* merged_ptrs[16];
+    int merged_lens[16];
+    int merged_ta_types[16];
+    TypeId merged_types[16];
+    int merged_param_idx[16];
+    int merged_count = 0;
+    memset(merged_ptrs, 0, sizeof(merged_ptrs));
+    memset(merged_lens, 0, sizeof(merged_lens));
+    memset(merged_ta_types, -1, sizeof(merged_ta_types));
+    memset(merged_types, 0, sizeof(merged_types));
+    memset(merged_param_idx, -1, sizeof(merged_param_idx));
+
+    bool ok = jm_ctor_prop_append_from_fc(merged_ptrs, merged_lens,
+        merged_ta_types, merged_types, merged_param_idx, &merged_count,
+        parent_fc, true);
+    for (int i = 0; ok && i < own_count; i++) {
+        ok = jm_ctor_prop_append_raw(merged_ptrs, merged_lens,
+            merged_ta_types, merged_types, merged_param_idx, &merged_count,
+            own_ptrs[i], own_lens[i], own_ta_types[i], own_types[i],
+            own_param_idx[i], false);
+    }
+    if (!ok) {
+        log_debug("Tune11-P5: disabling inherited ctor shape for '%.*s' because merged field count exceeds 16",
+            ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "");
+        ce->ctor_shape_compose_failed = true;
+        return false;
+    }
+
+    fc->ctor_prop_count = merged_count;
+    for (int i = 0; i < merged_count; i++) {
+        fc->ctor_prop_ptrs[i] = merged_ptrs[i];
+        fc->ctor_prop_lens[i] = merged_lens[i];
+        fc->ctor_prop_ta_types[i] = merged_ta_types[i];
+        fc->ctor_prop_types[i] = merged_types[i];
+        fc->ctor_prop_param_idx[i] = merged_param_idx[i];
+    }
+    log_debug("Tune11-P5: composed ctor shape for '%.*s' with %d inherited+own props",
+        ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "",
+        merged_count);
+    return true;
+}
+
+static void jm_compose_derived_ctor_shapes(JsMirTranspiler* mt) {
+    if (!mt) return;
+    for (int i = 0; i < mt->class_count; i++) {
+        JsClassEntry* ce = &mt->class_entries[i];
+        if (ce->superclass && !jm_compose_derived_ctor_shape(ce, 0)) {
+            jm_disable_ctor_shape_chain(ce);
+        }
+    }
+    for (int i = 0; i < mt->class_count; i++) {
+        JsClassEntry* ce = &mt->class_entries[i];
+        if (ce->constructor && ce->constructor->fc &&
+            ce->constructor->fc->ctor_prop_count > 0 &&
+            !ce->shape_cache_ptr) {
+            ce->shape_cache_ptr = (void**)mem_calloc(1, sizeof(void*), MEM_CAT_JS_RUNTIME);
+        }
+    }
+}
+
 static void jm_emit_class_instance_field_metadata_for_decl(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce) {
     if (!mt || !ce) return;
     int metadata_count = 0;
@@ -3377,43 +3558,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         }
     }
 
-    // Disable P3 (shaped slot writes) for constructors of classes in inheritance
-    // hierarchies where the parent constructor has field assignments.
-    // When a child calls super(), the parent constructor's property writes
-    // can change the object shape, making the child's P3 slot indices incorrect.
-    // However, if the parent has NO constructor fields (e.g., abstract Benchmark base
-    // class), the child's shape is self-contained and P3 is safe.
-    for (int i = 0; i < mt->class_count; i++) {
-        JsClassEntry* ce = &mt->class_entries[i];
-        if (ce->superclass) {
-            bool parent_has_ctor_fields = ce->superclass->constructor &&
-                ce->superclass->constructor->fc &&
-                ce->superclass->constructor->fc->ctor_prop_count > 0;
-            // Disable P3 for the superclass constructor if it has fields
-            // (child's pre-shaped object conflicts with parent's field writes)
-            if (parent_has_ctor_fields) {
-                log_debug("js-mir: disabling P3 for superclass constructor '%.*s' (parent of '%.*s')",
-                    (int)(ce->superclass->name ? ce->superclass->name->len : 0),
-                    ce->superclass->name ? ce->superclass->name->chars : "<anon>",
-                    (int)(ce->name ? ce->name->len : 0),
-                    ce->name ? ce->name->chars : "<anon>");
-                ce->superclass->constructor->fc->ctor_prop_count = 0;
-            }
-            // Disable P3 for the child class constructor ONLY when parent has fields.
-            // If parent has no ctor fields (e.g., Benchmark), child's shape indices are
-            // self-contained and safe for P1/P2 native slot access.
-            if (parent_has_ctor_fields &&
-                ce->constructor && ce->constructor->fc &&
-                ce->constructor->fc->ctor_prop_count > 0) {
-                log_debug("js-mir: disabling P3 for child constructor '%.*s' (extends '%.*s' with fields)",
-                    (int)(ce->name ? ce->name->len : 0),
-                    ce->name ? ce->name->chars : "<anon>",
-                    (int)(ce->superclass->name ? ce->superclass->name->len : 0),
-                    ce->superclass->name ? ce->superclass->name->chars : "<anon>");
-                ce->constructor->fc->ctor_prop_count = 0;
-            }
-        }
-    }
+    // Tune11 P5 composes inherited constructor-shape metadata after type
+    // propagation below. Until then, keep parent/child constructor metadata
+    // intact so the composed shape can preserve base-first slot order.
 
     // Assign module variable indexes for static class fields
     for (int ci = 0; ci < mt->class_count; ci++) {
@@ -4668,6 +4815,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             mem_free(cevi);
         }
     }
+
+    // Tune11 P5: derived constructors allocate a final base+derived shape up
+    // front. Parent fields stay first, so super() can use parent slot indices;
+    // derived this.x writes use the composed slot list.
+    jm_compose_derived_ctor_shapes(mt);
 
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];

@@ -1,7 +1,7 @@
 # Transpile JS Tune11 Proposal: Plain-Map Property Access ICs
 
 Date: 2026-06-24
-Status: implemented first slice; js262 clean
+Status: P1/P2/P4/P5 slices implemented; P6a cached intrinsic prototypes implemented; js262 clean
 
 Primary sources:
 
@@ -18,7 +18,7 @@ Reduce the cost of compiled named property reads and writes such as `a.b` and
 `a.b = v` on ordinary plain maps without changing JavaScript property
 semantics.
 
-This pass has four implementation candidates:
+This pass has six implementation candidates:
 
 0. Split ordinary maps into descriptor-free `MAP_KIND_PLAIN` and
    descriptor-bearing `MAP_KIND_DESC`.
@@ -28,13 +28,22 @@ This pass has four implementation candidates:
 3. Add a callsite inline cache for compiled non-computed member writes to
    existing own data properties, with both monomorphic and small polymorphic
    states.
+4. Canonicalize constructor pre-shaped TypeMaps so same-layout class instances
+   share one shape identity instead of forcing callsites megamorphic.
+5. Add inherited-shape support for derived classes: shared shape transitions
+   for dynamic post-super additions, plus compiler-side combined derived
+   pre-shaping for explicit derived constructors whose `super()` target is
+   statically known.
 
 The candidates must be measured and accepted separately where possible. P0 is
 the invariant that lets P2 and P3 have cheap hit paths. P1 is a narrow runtime
 cleanup. P2 is a larger compiler/runtime fast path and must keep a complete
 fallback to the current `js_property_access()` behavior. P3 builds on the same
 plain-map invariant for writes, but must keep the full `[[Set]]` path for every
-case that is not a proven own data-property update.
+case that is not a proven own data-property update. P4 fixes direct constructor
+pre-shape reuse. P5 handles the inheritance case exposed by Richards: derived
+constructors can still create equivalent but non-shared final `TypeMap*` values
+while extending the base-class shape after `super()`.
 
 ## Implementation Update: 2026-06-24
 
@@ -55,8 +64,27 @@ This first slice has been implemented:
 - moved descriptor/accessor/deleted validation to IC install time;
 - removed the bad pointer-sized alignment and pointer-sized bounds checks from
   `js_load_ic_offset_ok()`; debug builds still check `byte_offset < data_cap`;
+- implemented P4 constructor-shape reuse for cached pre-shaped JS class
+  instances, with detach guards for structural and incompatible established-slot
+  type mutations;
+- implemented the P5 compiler-side combined derived pre-shaping slice for
+  explicit derived constructors: inherited constructor field metadata is merged
+  base-first into the derived constructor metadata, so `new Derived(...)`
+  allocates the final base+derived shape before `super()` runs;
+- implemented the P6a cached intrinsic prototype slice: generic prototype
+  walking now resolves built-in prototype objects through
+  `js_get_intrinsic_prototype_for_class()` instead of repeatedly synthesizing
+  `Object.prototype`, `Function.prototype`, and other built-in prototypes via
+  constructor `.prototype` property reads;
 - added the runtime flag `LAMBDA_JS_LOAD_IC=0` to disable the new load IC path
-  for A/B measurement and emergency gating.
+  and `LAMBDA_JS_SHARED_CTOR_SHAPE=0` to disable constructor TypeMap sharing for
+  A/B measurement and emergency gating.
+
+The load-IC check fix is complete: release fast hits no longer reject compact
+boolean/object fields merely because the cached byte offset is not
+pointer-aligned or does not leave room for an assumed 8-byte field. The
+post-fix Richards profile confirms this was the right guard to remove:
+`miss_offset` fell from 2,958,200 probes to 0.
 
 The helper keeps the old semantic path as the miss/fallback path, so inherited
 properties, accessors, deleted slots, builtin fallback, primitives, and exotic
@@ -850,7 +878,672 @@ For focused profiling, record the site label, state, hit/miss counts, and the
 number of fallback stores caused by absent properties versus descriptor/exotic
 cases.
 
-## P4: Follow-Up IC Performance Improvements
+## P4: Reuse Constructor Pre-Shaped TypeMaps
+
+### Current issue
+
+The post-fix Richards profile shows that hot own-field reads are now installable
+but still become megamorphic almost immediately:
+
+| Site | Probes | Hits | Installs | Megamorphic |
+|------|-------:|-----:|---------:|------------:|
+| `this.taskHolding_@140:12` | 533,550 | 6 | 4 | 533,540 |
+| `this.packetPending_@140:35` | 505,750 | 6 | 4 | 505,740 |
+| `this.taskWaiting_@140:58` | 300,300 | 13 | 4 | 300,283 |
+
+This is not a semantic polymorphism problem. In Richards, `Scheduler.schedule()`
+calls `this.currentTask.isTaskHoldingOrWaiting()`, and `currentTask` rotates
+through `TaskControlBlock` instances. `TaskControlBlock` extends `TaskState`, so
+the inherited method repeatedly reads the same logical fields:
+
+```js
+isTaskHoldingOrWaiting() {
+  return this.taskHolding_ || (!this.packetPending_ && this.taskWaiting_);
+}
+```
+
+The current constructor pre-shaping path builds equivalent but non-shared
+shapes:
+
+1. direct `new Class(...)` lowering calls
+   `js_constructor_create_object_shaped_cached()` when a class has collected
+   `this.prop` constructor fields;
+2. that helper calls `js_constructor_create_object_shaped()`;
+3. `js_constructor_create_object_shaped()` calls `js_new_object_with_shape()`;
+4. `js_new_object_with_shape()` allocates a fresh `TypeMap` and fresh
+   `ShapeEntry` chain on every instance;
+5. the "cached" helper records the first `TypeMap*` in `*shape_cache`, but it
+   does not reuse it for later instances.
+
+The load IC currently guards by exact `TypeMap*`:
+
+```cpp
+if (m->type != cached->shape) return false;
+```
+
+So five same-layout `TaskControlBlock` objects look like five different shapes.
+With `JS_LOAD_IC_POLY_MAX == 4`, the fifth shape makes the callsite
+megamorphic.
+
+### Proposed implementation
+
+Make constructor pre-shaped instances share a canonical shape identity.
+
+Add a helper that allocates a new object using an existing canonical
+constructor `TypeMap*`:
+
+```cpp
+extern "C" Item js_new_object_with_typemap(TypeMap* tm);
+```
+
+It should:
+
+- allocate a fresh `Map`;
+- allocate a fresh zeroed `data` buffer sized from `tm->byte_size`;
+- assign `m->type = tm`;
+- leave the canonical `TypeMap` and its `ShapeEntry` chain immutable;
+- preserve `MAP_KIND_PLAIN` for descriptor-free instances.
+
+Then update `js_constructor_create_object_shaped_cached()`:
+
+1. if `*shape_cache == NULL`, build the shape once with
+   `js_constructor_create_object_shaped()` and store its `TypeMap*` as the
+   canonical constructor shape;
+2. if `*shape_cache != NULL`, create the instance with
+   `js_new_object_with_typemap((TypeMap*)*shape_cache)`;
+3. still apply the constructor/prototype path exactly as today.
+
+### Required detach rules
+
+Sharing a `TypeMap*` is correct only if every path that mutates shape metadata
+first detaches the receiver from the canonical shape.
+
+Must detach before:
+
+- adding a new own property with `map_put`;
+- deleting or resurrecting a property in a way that reorders entries;
+- mutating `ShapeEntry::flags`;
+- installing or clearing accessors;
+- changing `ShapeEntry::type` for a shared constructor shape;
+- marking class/builtin metadata on the `TypeMap`.
+
+Existing descriptor helpers already use the clone-before-flag-mutation path, but
+normal `fn_map_set()` can update `ShapeEntry::type` on constructor-shaped
+objects. P4 must either:
+
+- use a stable generic slot type for constructor pre-shaped entries so writes do
+  not need to mutate `ShapeEntry::type`; or
+- make `fn_map_set()` detach when it would change `ShapeEntry::type` on a
+  shared constructor `TypeMap`.
+
+The second option is narrower but may reduce sharing after mixed-type field
+writes. The first option is more compatible with shared shapes but must preserve
+GC tracing for object/container values stored in generic 8-byte slots.
+
+### Shape metadata
+
+Add an explicit shared-shape marker rather than overloading
+`is_private_clone`:
+
+```cpp
+bool is_shared_constructor_shape;
+```
+
+Rules:
+
+- canonical constructor TypeMaps have `is_shared_constructor_shape == true`;
+- detached per-object clones have `is_private_clone == true` and
+  `is_shared_constructor_shape == false`;
+- ICs may continue to key on `TypeMap*` once constructors actually reuse the
+  canonical pointer;
+- descriptor-bearing clones promote to `MAP_KIND_DESC` as today.
+
+If adding a field is too invasive, a conservative first slice can identify
+shared constructor shapes by `slot_entries != NULL && !is_private_clone`, but an
+explicit flag is easier to audit and safer long term.
+
+### Expected profile signal
+
+For Richards:
+
+- `this.taskHolding_@140:12`, `this.packetPending_@140:35`, and
+  `this.taskWaiting_@140:58` should stop becoming megamorphic after four
+  installs;
+- mono/poly hits should dominate those sites after warmup;
+- `megamorphic` share should drop sharply from the current 98.8%;
+- AWFY Richards should finally show a wall-time effect from the load IC.
+
+### Correctness constraints
+
+- Do not share data buffers.
+- Do not mutate canonical `ShapeEntry` flags/types without detaching.
+- Do not let one instance's added/deleted/descriptor property affect siblings.
+- Preserve `__proto__` and class prototype behavior. If `js_set_prototype()`
+  still stores `__json_own_proto__` / `__proto__` as own fields, that shape
+  mutation must detach or become part of the canonical constructor shape before
+  sharing begins.
+- Preserve GC tracing for values in shared constructor slots.
+- Preserve existing direct shaped-slot class-field lowering that relies on
+  `slot_entries` and stable slot indexes.
+
+### Implementation result: 2026-06-24
+
+Implemented P4 as the conservative shared-shape slice:
+
+- added `TypeMap::is_shared_constructor_shape`;
+- added `js_new_object_with_typemap(TypeMap*)` and changed
+  `js_constructor_create_object_shaped_cached()` to reuse the cached
+  constructor `TypeMap*` after the first instance;
+- included `__json_own_proto__` and `__proto__` in the cached constructor shape
+  so direct class construction does not immediately detach every instance during
+  `js_set_prototype()`;
+- kept `fn_map_set()` and shaped-slot stores allowed to establish the initial
+  non-null slot type on the canonical shape, but made them clone first when an
+  already-established non-null shared slot would be retagged to a different
+  non-null type;
+- made `map_put()` and bulk undefined property insertion clone before extending
+  a shared constructor shape;
+- made descriptor/class metadata clone paths clear
+  `is_shared_constructor_shape` on private clones;
+- made map rebuilds clear `is_shared_constructor_shape`;
+- added `LAMBDA_JS_SHARED_CTOR_SHAPE=0` as an A/B kill switch.
+
+Verification:
+
+```bash
+make build
+make release
+./lambda.exe js test/benchmark/awfy/richards2_bundle.js --no-log
+LAMBDA_JS_SHARED_CTOR_SHAPE=0 ./lambda.exe js test/benchmark/awfy/richards2_bundle.js --no-log
+make test262-baseline
+python3 test/benchmark/run_benchmarks.py -s jetstream -b richards,deltablue -e lambdajs -n 3 --no-save
+env LAMBDA_JS_SHARED_CTOR_SHAPE=0 python3 test/benchmark/run_benchmarks.py -s jetstream -b richards,deltablue -e lambdajs -n 3 --no-save
+```
+
+Results:
+
+| Check | Result |
+|-------|--------|
+| AWFY `richards2_bundle.js`, P4 on | `Richards: PASS`, `__TIMING__:8296.369125` |
+| AWFY `richards2_bundle.js`, P4 off | `Richards: PASS`, `__TIMING__:8280.76675` |
+| js262 baseline | 40,261 / 40,261 fully passed, 0 regressions, 113.2s |
+| JetStream LambdaJS `richards`, P4 on/off | 1.00 s / 970 ms median of 3 |
+| JetStream LambdaJS `deltablue`, P4 on/off | 2.78 s / 2.77 s median of 3 |
+
+The first implementation is correctness-clean but performance-neutral in the
+focused release benchmark. That suggests the remaining cost is not only
+direct-constructor equivalent-shape megamorphism. Reprofiling showed many
+Richards `this.*` inherited-method sites still become megamorphic because
+derived constructors extend the base shape after `super()` and create equivalent
+but non-shared final `TypeMap*` values. P5 should make those derived shape
+extensions canonical before P6 spends effort on inlining the IC helper path.
+
+## P5: Shape Transitions for Derived Constructor Shapes
+
+### Current issue
+
+P4 canonicalizes the `TypeMap*` created by one direct constructor pre-shape
+cache. That works when all fields are known before allocation. It does not fully
+solve derived constructors:
+
+```js
+class TaskState {
+  constructor() {
+    this.packetPending_ = false;
+    this.taskWaiting_ = false;
+    this.taskHolding_ = false;
+  }
+}
+
+class TaskControlBlock extends TaskState {
+  constructor(link, identity, priority, input, state, handle, fn) {
+    super();
+    this.link = link;
+    this.identity = identity;
+    this.priority = priority;
+    this.input = input;
+    this.handle = handle;
+    this.function = fn;
+  }
+}
+```
+
+`super()` creates a `TaskState`-shaped object. The derived constructor then adds
+fields one by one. Today, adding a field to a shared constructor shape detaches
+or clones before extending. That preserves correctness, but each instance can
+walk the same extension sequence and still end with an equivalent yet distinct
+final `TypeMap*`.
+
+The load IC keys on exact `TypeMap*`, so equivalent derived instances still look
+polymorphic/megamorphic:
+
+```cpp
+if (m->type != cached->shape) return false;
+```
+
+Raising `JS_LOAD_IC_POLY_MAX` from 4 to 8 was tested as a diagnostic. It
+increased poly hits but made AWFY Richards slower, because the hot sites still
+went mostly megamorphic and paid a larger scan cost.
+
+### Proposed implementation
+
+Introduce a shape-transition cache on `TypeMap`. Instead of cloning blindly when
+adding a property to a shared constructor-derived shape, ask the current shape
+for a canonical child shape:
+
+```text
+base_shape + added_property_name + property_kind/layout -> child_shape
+```
+
+For the example above, the runtime should build and reuse one transition chain:
+
+```text
+TaskStateShape
+  -- add link     --> TaskControlBlockShape1
+  -- add identity --> TaskControlBlockShape2
+  -- add priority --> TaskControlBlockShape3
+  -- add input    --> TaskControlBlockShape4
+  -- add handle   --> TaskControlBlockShape5
+  -- add function --> TaskControlBlockFinalShape
+```
+
+Every `TaskControlBlock` instance that adds the same fields in the same order
+reuses the same child `TypeMap*` sequence. Then inherited method reads such as
+`TaskState.isTaskHoldingOrWaiting()` see one stable final receiver shape instead
+of many same-layout shapes.
+
+Add a small transition list or hash to `TypeMap`, for example:
+
+```cpp
+typedef struct TypeMapTransition {
+    const char* name;
+    uint32_t name_len;
+    TypeId value_type;
+    uint8_t flags;
+    TypeMap* target;
+    TypeMapTransition* next;
+} TypeMapTransition;
+```
+
+Transition lookup key for the first slice:
+
+- interned/namepool property name pointer plus length, with memcmp fallback if
+  needed;
+- descriptor flags, initially only `flags == 0`;
+- storage/layout type used to create the new `ShapeEntry`;
+- ordinary map kind, initially only `MAP_KIND_PLAIN`.
+
+On missing own-property add in the JS map path:
+
+1. if receiver is an ordinary plain map whose `TypeMap` is shared constructor or
+   transition-shared;
+2. and the new property is a normal own data property with default descriptor
+   flags;
+3. look for a transition from the current `TypeMap`;
+4. if found, switch `m->type` to the transition target and grow/copy `m->data`
+   as needed;
+5. if not found, allocate one child `TypeMap` by appending a `ShapeEntry`, build
+   its hash/slot entries, mark it transition-shared, record the transition, and
+   switch the receiver to it.
+
+This is a family search, but it should be implemented as direct parent-to-child
+transitions rather than a linear scan over all known derived shapes. The common
+case becomes one hash/list lookup on shape extension, not a per-property-read
+search.
+
+### Metadata and lifetime
+
+The transition target is a canonical shape and must obey the same immutability
+rules as P4 shared constructor shapes. Add or reuse explicit metadata:
+
+- `is_shared_constructor_shape`: existing direct-constructor canonical shape;
+- `is_transition_shared_shape`: optional new marker for child shapes produced
+  by transition reuse, or fold both into a more general `is_shared_js_shape`;
+- `is_private_clone`: remains the marker for instance-local mutable clones.
+
+Transition storage must live in the same long-lived pool as the source
+`TypeMap`, not in a transient stack or per-call allocation. ICs can keep raw
+`TypeMap*` only while the pool lifetime matches compiled-code lifetime, as in
+the existing P2/P4 assumptions.
+
+### Required detach rules
+
+Transition targets are shared. They must detach before any operation that can
+mutate shape metadata or instance-specific structure:
+
+- adding a property for which no default-data transition is allowed;
+- deleting or resurrecting a property;
+- descriptor/accessor flag mutation;
+- changing prototype if prototype is still represented by own shape entries;
+- changing an established slot type when the transition target's
+  `ShapeEntry::type` would be mutated incompatibly;
+- class/builtin metadata stamping.
+
+If the property add is semantically non-default, promote or detach and use the
+existing slow path. P5 should not try to share descriptor-bearing derived
+shapes.
+
+### Ambitious future enhancement: combined derived pre-shaping
+
+The stronger version is to avoid transition walking during construction:
+
+1. during AST/build or MIR lowering, compute the full constructor field list for
+   a derived class by combining:
+   - the base constructor's pre-shaped fields known at the `super()` target;
+   - the derived constructor's own `this.field` assignments after `super()`;
+2. allocate the final derived `TypeMap*` up front;
+3. let `super()` initialize the base slots in that final layout;
+4. let the derived constructor initialize the suffix slots without shape
+   extension.
+
+This could make `TaskControlBlock` instances start directly on
+`TaskControlBlockFinalShape`, eliminating both transition overhead and
+intermediate shape churn.
+
+Keep this as future work because it is semantically trickier:
+
+- `super()` target can be dynamic or side-effectful;
+- base constructors can return replacement objects;
+- derived field order must preserve observable property order;
+- conditional `this.field` writes cannot always be pre-shaped safely;
+- prototype and private-field initialization must remain spec-correct.
+
+The transition cache is the conservative implementation step. Combined derived
+pre-shaping is a later compiler optimization once transition-sharing proves the
+shape-family model is correct.
+
+### Implementation update: direct transitions landed
+
+P5 direct TypeMap transitions are implemented as of 2026-06-25:
+
+- `TypeMap` now carries `is_transition_shared_shape` plus a
+  parent-local `TypeMapTransition` list keyed by property name, value storage
+  type, and descriptor flags.
+- `map_put()` now transitions shared JS plain-map shapes on default data
+  property extension instead of always cloning the shared constructor shape.
+- transition targets clone the parent shape chain, append one new
+  `ShapeEntry`, rebuild hash/slot entries, and are marked transition-shared.
+- transition-shared shapes use the same detach rules as constructor-shared
+  shapes before descriptor mutation or incompatible established-slot retag.
+- appending after pre-shaped constructor slots preserves `map_type->byte_size`
+  as the new field offset. This avoids deriving offsets from the current last
+  entry type, which may have retagged from pointer-sized `null` to a smaller
+  storage type such as `bool`.
+- the feature is runtime-gated by `LAMBDA_JS_SHAPE_TRANSITIONS=0` for
+  comparison or emergency disable.
+
+Correctness result:
+
+```text
+make release
+make test262-baseline
+
+Fully passed: 40261 / 40261
+Regressions: 0
+```
+
+Richards profile result:
+
+```text
+default transitions:
+  Richards: PASS
+  __TIMING__:8315.586542  (profile binary)
+  load_ic_probe       4094400
+  load_ic_hit_mono    1137191
+  load_ic_hit_poly       6748
+  load_ic_miss             109
+  load_ic_megamorphic 2950370
+
+LAMBDA_JS_SHAPE_TRANSITIONS=0:
+  Richards: PASS
+  __TIMING__:8325.612708  (profile binary)
+  load_ic_probe       4094400
+  load_ic_hit_mono    1137191
+  load_ic_hit_poly       6748
+  load_ic_miss             109
+  load_ic_megamorphic 2950370
+```
+
+Release wall-time result:
+
+```text
+default transitions, 3 runs:
+  6892.127166 ms
+  6878.720167 ms
+  6881.177625 ms
+  median 6881.177625 ms
+
+LAMBDA_JS_SHAPE_TRANSITIONS=0, 3 runs:
+  6885.305875 ms
+  6898.373375 ms
+  6879.531500 ms
+  median 6885.305875 ms
+```
+
+Conclusion: the direct transition primitive is correctness-clean, but it does
+not change Richards' hot IC profile. The remaining Richards issue is not fixed
+by the generic `map_put()` extension path alone. The hot inherited-method sites
+still become megamorphic, so the next useful P5 slice should be the compiler
+enhancement below: combine inherited constructor field metadata for derived
+classes and allocate the final derived shape up front when `super()` is
+statically known and safe.
+
+### Implementation update: combined derived pre-shaping landed
+
+P5 compiler-side combined derived pre-shaping is implemented as of
+2026-06-25 for explicit derived constructors.
+
+The lowering pass now:
+
+- keeps parent and child constructor field metadata intact through superclass
+  resolution;
+- after constructor call-site type propagation, recursively composes derived
+  constructor metadata parent-first;
+- copies inherited fields into the derived constructor metadata with
+  `param_idx = -1`, then appends or overrides the derived constructor's own
+  `this.field` writes;
+- allocates the final base+derived constructor shape up front for direct
+  `new Derived(...)` sites;
+- preserves parent slot indices, so `super()` can still use the parent
+  shaped-slot writes while derived writes target the suffix slots.
+
+The conservative fallback keeps correctness ahead of breadth:
+
+- implicit derived constructors are not combined yet. If a class has inherited
+  constructor fields but no explicit constructor metadata holder, the compiler
+  disables the affected constructor-shape metadata so default constructor,
+  bound constructor, and `new.target` behavior stay on the runtime path;
+- instance fields still disable inherited constructor-shape composition because
+  field initializers run outside the simple constructor-body slot model;
+- merged constructor field lists above 16 fields fall back to dynamic property
+  writes.
+
+The implicit-constructor fallback was required by js262. Without it,
+`language/statements/class/subclass/default-constructor-2.js` regressed for a
+bound default derived constructor that must preserve the final prototype and
+forward constructor arguments. The direct repro is now clean:
+
+```bash
+./lambda.exe js test/js262/test/language/statements/class/subclass/default-constructor-2.js --no-log
+```
+
+Correctness result after the fallback:
+
+```text
+make release
+make test262-baseline
+
+Fully passed: 40261 / 40261
+Failed: 0
+Regressions: 0
+Total wall: 126.3s
+Batch execute: 126.0s
+```
+
+Final Richards profile with `lambda-profile.exe`:
+
+```text
+Richards: PASS
+__TIMING__:7427.206084  (profile binary)
+
+load_ic_probe         1840050
+load_ic_hit_mono      1840026
+load_ic_hit_poly            0
+load_ic_miss               24
+load_ic_install_mono       24
+load_ic_megamorphic         0
+```
+
+The old hot inherited-method misses are gone from the final per-site profile:
+`this.taskHolding_@140:12`, `this.packetPending_@140:35`, and
+`this.taskWaiting_@140:58` no longer appear as megamorphic load-IC sites.
+
+Release Richards wall-time remains noise-sensitive on this machine. The final
+three direct release runs after the js262/profile rebuild were:
+
+```text
+Richards: PASS, 6896.355333 ms
+Richards: PASS, 6862.769541 ms
+Richards: PASS, 6874.921041 ms
+median 6874.921041 ms
+```
+
+Focused `./test/benchmark` LambdaJS pass, median of 3 runs, no JSON write:
+
+```bash
+python3 test/benchmark/run_benchmarks.py -e lambdajs \
+  -s awfy,jetstream -b richards,deltablue,cube3d,splay -n 3 --no-save
+```
+
+| Benchmark | LambdaJS median |
+|-----------|----------------:|
+| `awfy/richards` | 6.61s |
+| `awfy/deltablue` | 4.67s |
+| `jetstream/cube3d` | 72.85s |
+| `jetstream/richards` | 801ms |
+| `jetstream/splay` | 1.58s |
+| `jetstream/deltablue` | 2.27s |
+
+Conclusion: combined pre-shaping fixes the Richards IC-shape pathology. It
+does not yet justify a broad wall-time speedup claim because the helper-call IC
+still costs enough that release medians are roughly neutral on the focused
+property-heavy benchmarks. The next performance slice should inline the
+monomorphic IC hit path in MIR before widening the optimization surface.
+
+## P6a: Cached Intrinsic Prototype Objects
+
+Implemented as of 2026-06-25.
+
+After P5 fixed Richards' shape pathology, profiling showed that a large amount
+of remaining time was still spent in the generic prototype path. The hot pattern
+was not a user property lookup problem at every callsite. Instead,
+`js_get_implicit_proto()` and `js_get_prototype_of()` repeatedly reconstructed
+intrinsic prototypes by:
+
+1. resolving the built-in constructor, such as `Object` or `Function`;
+2. reading the public `.prototype` property through `js_property_get()`;
+3. repeating that work during ordinary prototype-chain walking.
+
+For Richards this produced a giant `FUNC.prototype` profile count and inflated
+the top-level `property_get` event even after the load IC was hitting. The
+implemented fix adds `js_get_intrinsic_prototype_for_class(int class_id)` in
+`js_globals.cpp`. It lazily initializes a built-in prototype through the
+existing constructor setup path once, then caches and returns the direct
+prototype object for subsequent internal prototype-chain walks.
+
+The cache covers the currently constructor-backed built-in classes:
+
+- core JS intrinsics: Object, Array, Function, String, Number, Boolean, Symbol,
+  BigInt, Date, RegExp, Promise;
+- Error and NativeError families;
+- collections and weak collections;
+- ArrayBuffer, SharedArrayBuffer, DataView, and `%TypedArray%.prototype`;
+- supported event/static-range constructors.
+
+The cache is deliberately used only for internal intrinsic prototype lookup.
+Public property access to `Ctor.prototype` still uses normal property
+semantics, and unsupported or non-constructor-backed classes fall back to the
+existing null/slow behavior.
+
+Runtime paths updated:
+
+- `js_resolve_object_prototype()` now reads cached `%Object.prototype%`;
+- `js_get_implicit_proto()` now maps the object's `JsClass` byte directly to a
+  cached intrinsic prototype;
+- `js_get_prototype_of()` uses the same intrinsic cache for primitives, arrays,
+  functions, class objects, and plain objects;
+- js262 constructor/prototype snapshot bootstrap initializes all cached
+  intrinsic prototypes that participate in snapshot/restore.
+
+Richards result:
+
+| Measurement | Before cached prototype | After cached prototype | Change |
+|-------------|------------------------:|-----------------------:|-------:|
+| `property_get` calls, profiled Richards | 22,859,349 | 9,338,966 | -13,520,383 (-59.1%) |
+| Profile binary `__TIMING__` | 7460.707625 ms | 5715.201042 ms | -1745.506583 ms (-23.4%) |
+| Clean release `__TIMING__` | median 6874.921041 ms | 5276.281209 ms | -1598.639832 ms (-23.3%) |
+
+Post-cache Richards IC profile stayed healthy:
+
+```text
+Richards: PASS
+__TIMING__:5715.201042  (profile binary)
+
+property_get          9338966 calls, 4720.326 ms self
+property_access       2584251 calls, 105.774 ms self
+property_set           865321 calls, 102.880 ms self
+load_ic_probe         1840050
+load_ic_hit_mono      1840026
+load_ic_miss               24
+load_ic_install_mono       24
+load_ic_megamorphic         0
+```
+
+Correctness gate:
+
+```text
+make release
+make build-release-profile
+make test262-baseline
+
+Fully passed: 40261 / 40261
+Failed: 0
+Regressions: 0
+```
+
+Conclusion: cached intrinsic prototypes produce the first clear Richards
+wall-time win after the callsite IC/shape-sharing work. The win comes from
+removing redundant built-in prototype property reads in the remaining generic
+prototype path, not from changing IC hit behavior. This makes future IC inlining
+work cleaner: the own-slot IC no longer has to compensate for an unrelated
+intrinsic-prototype lookup tax on every inherited fallback.
+
+### Expected profile signal
+
+For Richards after P5:
+
+- hot `TaskState` inherited-method sites should stop becoming megamorphic:
+  `this.taskHolding_@140:12`, `this.packetPending_@140:35`,
+  `this.taskWaiting_@140:58`;
+- `install_poly` should stop at the real number of semantic receiver classes,
+  not the number of same-layout instances;
+- `load_ic_hit_mono + load_ic_hit_poly` should dominate probes on stable
+  derived object sites;
+- increasing `JS_LOAD_IC_POLY_MAX` should no longer be needed for Richards.
+
+### Correctness constraints
+
+- Preserve property insertion order.
+- Do not share data buffers.
+- Do not let added properties, values, descriptors, deletes, or prototype
+  mutations leak between instances.
+- Preserve `Object.keys`, `for...in`, `getOwnPropertyNames`, and descriptor
+  order.
+- Preserve GC tracing for all slot values in transition-shared shapes.
+- Preserve existing P4 direct constructor sharing and shaped-slot lowering.
+- Keep descriptor/accessor/exotic/proxy cases on the current semantic path.
+
+## P6: Follow-Up IC Performance Improvements
 
 The current load IC is helper-call based. That kept the first slice small and
 safe, but the quiet-machine rerun shows the helper overhead can erase the slot
@@ -964,6 +1657,56 @@ Each candidate must be accepted independently.
 5. Run focused property-write-heavy benchmarks with profiler counters.
 6. Run the benchmark suite before accepting any broad claim.
 
+### P4 acceptance
+
+1. Implement canonical constructor TypeMap reuse behind a feature flag, for
+   example `LAMBDA_JS_SHARED_CTOR_SHAPE=0`.
+2. Add explicit detach-before-mutate coverage for:
+   - adding a new own property after construction;
+   - changing an existing field to a different slot type;
+   - `Object.defineProperty` descriptor flag changes;
+   - accessor install and clearing;
+   - delete and resurrection;
+   - `Object.setPrototypeOf` / `__proto__` changes;
+   - class/builtin metadata stamping.
+3. Add focused smoke tests with two instances of the same class proving:
+   - ordinary field writes do not leak values between instances;
+   - adding a field to one instance does not expose it on the other;
+   - descriptor changes on one instance do not affect the other;
+   - prototype changes on one instance do not affect the other;
+   - existing shaped-slot reads/writes still see the correct slots.
+4. Run JS gtests and js262.
+5. Reprofile direct constructor-shaped sites and confirm equivalent instances
+   share the cached constructor `TypeMap*` until instance-local mutation
+   detaches them.
+6. Run focused property-heavy benchmarks and the full benchmark suite before
+   accepting any broad performance claim.
+
+### P5 acceptance
+
+1. Implement shared shape transitions behind a feature flag, for example
+   `LAMBDA_JS_SHAPE_TRANSITIONS=0`.
+2. Add transition lookup only for default-data own-property additions on
+   ordinary plain maps.
+3. Keep descriptor/accessor/delete/prototype/exotic cases on the existing
+   detach or slow path.
+4. Add focused smoke tests proving:
+   - two derived instances that add the same fields in the same order share the
+     final `TypeMap*`;
+   - adding a unique field to one derived instance does not expose it on the
+     other;
+   - descriptor changes on one instance detach and do not affect siblings;
+   - deletion/resurrection on one instance detaches and preserves property
+     order;
+   - `Object.keys`, `for...in`, and `getOwnPropertyNames` preserve insertion
+     order through transitions.
+5. Run JS gtests and js262.
+6. Reprofile Richards `# Load IC sites` and confirm the hot inherited
+   `TaskState` / derived `TaskControlBlock` sites no longer become megamorphic
+   after the first few installs.
+7. Run focused property-heavy benchmarks and the full benchmark suite before
+   accepting any broad performance claim.
+
 ## Performance Impact Checks
 
 Performance checks must use a release build. Do not use debug builds for
@@ -1045,9 +1788,10 @@ Record:
 Use profiler runs to prove the mechanism, not as final wall-time evidence:
 
 ```bash
-JS_EXEC_PROFILE=time JS_EXEC_PROFILE_OUT=temp/tune11_richards_ic.tsv ./lambda.exe js test/benchmark/awfy/richards2_bundle.js --no-log
-JS_EXEC_PROFILE=time JS_EXEC_PROFILE_OUT=temp/tune11_deltablue_ic.tsv ./lambda.exe js test/benchmark/awfy/deltablue2_bundle.js --no-log
-JS_EXEC_PROFILE=time JS_EXEC_PROFILE_OUT=temp/tune11_cube3d_ic.tsv ./lambda.exe js test/benchmark/jetstream/3d-cube.js --no-log
+make build-release-profile
+JS_EXEC_PROFILE=time JS_EXEC_PROFILE_OUT=temp/tune11_richards_ic.tsv ./lambda-profile.exe js test/benchmark/awfy/richards2_bundle.js --no-log
+JS_EXEC_PROFILE=time JS_EXEC_PROFILE_OUT=temp/tune11_deltablue_ic.tsv ./lambda-profile.exe js test/benchmark/awfy/deltablue2_bundle.js --no-log
+JS_EXEC_PROFILE=time JS_EXEC_PROFILE_OUT=temp/tune11_cube3d_ic.tsv ./lambda-profile.exe js test/benchmark/jetstream/3d-cube.js --no-log
 ```
 
 Expected profile signal for P2:
@@ -1065,6 +1809,29 @@ Expected profile signal for P3:
 - fallback reasons show absent/inherited/accessor/exotic stores remain on the
   semantic path;
 - wall time improves in non-profile release runs, not only in profiler output.
+
+Expected profile signal for P4:
+
+- constructor-shaped instances of one class report the same canonical
+  `TypeMap*` until an instance-local shape mutation detaches them;
+- detached instances remain visible as additional shapes but do not corrupt
+  sibling instances;
+- full release benchmark numbers show the profile win survives outside
+  profiler builds.
+
+Expected profile signal for P5:
+
+- explicit derived constructors allocate a shared final base+derived
+  `TypeMap*` up front when the inherited field metadata is safe to compose;
+- transition-created derived instances still report the same final `TypeMap*`
+  when they add the same post-`super()` fields in the same order;
+- Richards hot inherited-method sites such as `this.taskHolding_@140:12`,
+  `this.packetPending_@140:35`, and `this.taskWaiting_@140:58` shift from
+  megamorphic probes to mono/poly hits;
+- transition misses are rare on stable constructor paths and concentrated in
+  true instance-local mutations;
+- full release benchmark numbers show the profile win survives outside
+  profiler builds.
 
 ## Keep / Revert Criteria
 
@@ -1098,6 +1865,34 @@ Keep P3 if:
 - focused benchmark medians improve;
 - full `./test/benchmark` LambdaJS pass is neutral or positive overall.
 
+Keep P4 if:
+
+- js262 has zero regressions;
+- JS gtests pass;
+- shared constructor TypeMaps are immutable unless the receiver detaches first;
+- instance-local field additions, deletes, descriptor changes, type changes,
+  and prototype changes do not leak across siblings;
+- existing shaped-slot class-field reads/writes keep working;
+- direct constructor-shaped field sites are no longer mostly megamorphic;
+- focused benchmark medians improve;
+- full `./test/benchmark` LambdaJS pass is neutral or positive overall.
+
+Keep P5 if:
+
+- js262 has zero regressions;
+- JS gtests pass;
+- transition-shared TypeMaps are immutable unless the receiver detaches first;
+- composed derived constructor metadata preserves parent-first slot order and
+  falls back for implicit constructors, instance fields, and oversized field
+  lists;
+- instance-local field additions, deletes, descriptor changes, type changes,
+  and prototype changes do not leak across siblings;
+- property insertion/enumeration order is unchanged;
+- Richards per-site IC profile shows the hot inherited `TaskState` /
+  `TaskControlBlock` field sites are no longer mostly megamorphic;
+- focused benchmark medians improve;
+- full `./test/benchmark` LambdaJS pass is neutral or positive overall.
+
 Revert or gate P2 if:
 
 - it creates any js262 regression;
@@ -1119,6 +1914,30 @@ Revert or gate P3 if:
 - it increases benchmark wall time despite reducing setter call counts;
 - most hot store sites become megamorphic or miss-heavy.
 
+Revert or gate P4 if:
+
+- it creates any js262 regression;
+- one instance's value, added property, descriptor, delete, type metadata, or
+  prototype mutation leaks to another instance;
+- GC tracing becomes incorrect for values stored in shared constructor slots;
+- any descriptor-bearing ordinary map remains incorrectly tagged
+  `MAP_KIND_PLAIN`;
+- shaped-slot class-field lowering reads or writes the wrong slot;
+- it fails to reduce megamorphic probes on direct constructor-shaped sites;
+- it increases benchmark wall time despite improving IC hit rates.
+
+Revert or gate P5 if:
+
+- it creates any js262 regression;
+- one instance's value, added property, descriptor, delete, type metadata, or
+  prototype mutation leaks to another instance;
+- property insertion or enumeration order changes;
+- GC tracing becomes incorrect for values stored in transition-shared slots;
+- descriptor/accessor/proxy/exotic cases are incorrectly shared through a
+  plain-data transition;
+- Richards inherited-method sites remain mostly megamorphic;
+- it increases benchmark wall time despite improving IC hit rates.
+
 ## Open Questions
 
 1. Should the next load-IC slice inline the monomorphic guard in MIR immediately,
@@ -1135,3 +1954,15 @@ Revert or gate P3 if:
    after all flags are cleared, or is monotonic promotion preferable forever?
 6. Should P3 share entry structs/state constants with P2, or stay separate until
    store semantics and profiling are stable?
+7. Should P4 reuse one canonical `TypeMap*` directly, or introduce a separate
+   canonical shape-id so ICs can match same-layout constructor instances without
+   sharing mutable `ShapeEntry` metadata?
+8. Should constructor pre-shaped slots use a stable generic GC-traceable type,
+   or should every `ShapeEntry::type` change detach from the shared constructor
+   shape first?
+9. Should P5 use a simple per-TypeMap transition list first, or add a hashed
+   transition table immediately for classes with many conditional field
+   additions?
+10. When is combined derived pre-shaping safe enough to replace runtime
+   transition walking for derived constructors with statically known `super()`
+   targets and unconditional post-`super()` field writes?

@@ -3062,11 +3062,13 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         // so that P3 (js_set_shaped_slot) and P4 (js_get_shaped_slot) can use slot-indexed access.
         // Skip pre-shaping when instance fields are present: field inits run before ctor body
         // and use js_property_set which manages the shape dynamically.
-        // Note: P3 is disabled for constructors of superclasses (see superclass resolution pass)
-        // so that super() calls use js_property_set which works on any object shape.
+        // Tune11 P5: derived constructors receive composed base-first metadata,
+        // so super() and derived this.x writes agree on slot indices.
         MIR_reg_t obj;
 
-        // Find ctor_fc with ctor_props: check own constructor first
+        // Find ctor_fc with ctor_props: explicit constructors own the composed
+        // metadata. Implicit derived constructors stay on the runtime construct
+        // path so bound/new.target semantics are preserved.
         JsFuncCollected* ctor_fc = NULL;
         if (ce->constructor && ce->constructor->fc &&
             ce->constructor->fc->ctor_prop_count > 0) {

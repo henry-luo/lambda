@@ -74,14 +74,9 @@ Map* js_resolve_object_prototype() {
     if (js_cached_object_proto) return js_cached_object_proto;
     if (js_resolving_object_proto) return NULL;
     js_resolving_object_proto = true;
-    extern Item js_get_constructor(Item name_item);
-    Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
-    if (get_type_id(obj_ctor) == LMD_TYPE_FUNC) {
-        Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-        Item obj_proto = js_property_get(obj_ctor, proto_key);
-        if (get_type_id(obj_proto) == LMD_TYPE_MAP) {
-            js_cached_object_proto = obj_proto.map;
-        }
+    Item obj_proto = js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
+    if (get_type_id(obj_proto) == LMD_TYPE_MAP) {
+        js_cached_object_proto = obj_proto.map;
     }
     js_resolving_object_proto = false;
     return js_cached_object_proto;
