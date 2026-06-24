@@ -5,6 +5,7 @@
  * Registered as built-in module 'readline' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -23,6 +24,12 @@ extern "C" Item js_readline_completion_rejected(Item rl_item, Item err_item);
 extern "C" Item js_stream_on(Item self, Item event_item, Item listener);
 extern "C" void js_enqueue_promise_job(Item job);
 extern "C" int64_t js_key_is_symbol_c(Item key);
+extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest);
+extern "C" int js_check_exception(void);
+extern "C" Item js_promise_with_resolvers(void);
+extern "C" Item js_throw_error_with_code(const char* code, const char* message);
+extern "C" Item js_new_error_with_name(Item error_name, Item message);
+extern "C" void js_set_function_name(Item fn_item, Item name_item);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -131,6 +138,34 @@ static int readline_codepoint_width(int cp) {
     return 1;
 }
 
+static int readline_utf8_expected_len(unsigned char c) {
+    if (c < 0x80) return 1;
+    if ((c & 0xE0) == 0xC0) return 2;
+    if ((c & 0xF0) == 0xE0) return 3;
+    if ((c & 0xF8) == 0xF0) return 4;
+    return 1;
+}
+
+static bool readline_utf8_has_continuation(const char* s, int start, int len, int count) {
+    if (start + count > len) return false;
+    for (int i = 1; i < count; i++) {
+        if ((((unsigned char)s[start + i]) & 0xC0) != 0x80) return false;
+    }
+    return true;
+}
+
+static int readline_complete_utf8_prefix_len(const char* s, int len) {
+    int i = 0;
+    int complete = 0;
+    while (i < len) {
+        int need = readline_utf8_expected_len((unsigned char)s[i]);
+        if (need > 1 && !readline_utf8_has_continuation(s, i, len, need)) break;
+        i += need;
+        complete = i;
+    }
+    return complete;
+}
+
 static int readline_display_width(String* s, int byte_limit) {
     if (!s) return 0;
     int len = (int)s->len;
@@ -141,6 +176,104 @@ static int readline_display_width(String* s, int byte_limit) {
         width += readline_codepoint_width(cp);
     }
     return width;
+}
+
+static Item readline_decode_input_text(Item rl, Item data_item) {
+    if (get_type_id(data_item) == LMD_TYPE_STRING) return data_item;
+    if (!js_is_typed_array(data_item) && get_type_id(data_item) != LMD_TYPE_ARRAY) {
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+
+    char buf[8192];
+    int pos = 0;
+    Item pending = readline_get(rl, "__utf8_pending__");
+    if (get_type_id(pending) == LMD_TYPE_STRING) {
+        String* s = it2s(pending);
+        int n = s && s->len < sizeof(buf) ? (int)s->len : (int)sizeof(buf);
+        if (s && n > 0) {
+            memcpy(buf, s->chars, n);
+            pos = n;
+        }
+    }
+
+    Item length_item = js_property_get(data_item, make_string_item("length"));
+    int64_t len = get_type_id(length_item) == LMD_TYPE_INT ? it2i(length_item) : js_array_length(data_item);
+    for (int64_t i = 0; i < len && pos < (int)sizeof(buf); i++) {
+        Item byte_item = js_array_get_int(data_item, i);
+        if (get_type_id(byte_item) != LMD_TYPE_INT) {
+            byte_item = js_property_get(data_item, (Item){.item = i2it(i)});
+        }
+        if (get_type_id(byte_item) != LMD_TYPE_INT) continue;
+        buf[pos++] = (char)(it2i(byte_item) & 0xff);
+    }
+
+    int complete = readline_complete_utf8_prefix_len(buf, pos);
+    if (complete < pos) {
+        readline_set(rl, "__utf8_pending__", make_string_item(buf + complete, pos - complete));
+    } else {
+        readline_set(rl, "__utf8_pending__", (Item){.item = ITEM_JS_UNDEFINED});
+    }
+    if (complete <= 0) return make_string_item("", 0);
+    return make_string_item(buf, complete);
+}
+
+static void readline_display_position_update(String* s, int byte_limit, int columns,
+                                             int tab_size, int* rows, int* line_cols) {
+    if (!s || !rows || !line_cols) return;
+    int len = (int)s->len;
+    if (byte_limit >= 0 && byte_limit < len) len = byte_limit;
+    int i = 0;
+    while (i < len) {
+        char c = s->chars[i];
+        if (c == '\n') {
+            if (columns > 0 && *line_cols > 0) {
+                *rows += (*line_cols - 1) / columns;
+            }
+            (*rows)++;
+            *line_cols = 0;
+            i++;
+            continue;
+        }
+        if (c == '\t') {
+            int size = tab_size > 0 ? tab_size : 8;
+            int add = size - (*line_cols % size);
+            *line_cols += add;
+            i++;
+            continue;
+        }
+        int before = i;
+        int cp = readline_utf8_next(s->chars, len, &i);
+        if (i <= before) i = before + 1;
+        *line_cols += readline_codepoint_width(cp);
+    }
+}
+
+static void readline_display_position_finish(int rows, int line_cols, int columns,
+                                             int* out_rows, int* out_cols) {
+    int cols = line_cols;
+    if (columns > 0) {
+        rows += line_cols / columns;
+        cols = line_cols % columns;
+    }
+    if (out_rows) *out_rows = rows;
+    if (out_cols) *out_cols = cols;
+}
+
+static int readline_prev_char_index(String* s, int cursor) {
+    if (!s || cursor <= 0) return 0;
+    if (cursor > (int)s->len) cursor = (int)s->len;
+    int i = cursor - 1;
+    while (i > 0 && (((unsigned char)s->chars[i] & 0xC0) == 0x80)) i--;
+    return i;
+}
+
+static int readline_next_char_index(String* s, int cursor) {
+    if (!s) return 0;
+    if (cursor < 0) cursor = 0;
+    if (cursor >= (int)s->len) return (int)s->len;
+    int i = cursor;
+    readline_utf8_next(s->chars, (int)s->len, &i);
+    return i;
 }
 
 static void readline_output_write(Item rl, Item data) {
@@ -177,11 +310,139 @@ static void readline_completion_output_write_empty(Item rl, int count) {
     }
 }
 
+static Item readline_abort_error(void) {
+    return js_new_error_with_name(make_string_item("AbortError"),
+                                  make_string_item("The operation was aborted"));
+}
+
+static Item readline_error_with_code(const char* code, const char* message) {
+    Item err = js_new_error_with_name(make_string_item("Error"), make_string_item(message));
+    readline_set(err, "code", make_string_item(code));
+    return err;
+}
+
+static void readline_reject_later(Item reject, Item err) {
+    if (get_type_id(reject) != LMD_TYPE_FUNC) return;
+    Item args[1] = {err};
+    Item job = js_bind_function(reject, ItemNull, args, 1);
+    js_enqueue_promise_job(job);
+}
+
+static Item readline_rejected_promise(Item err) {
+    Item capability = js_promise_with_resolvers();
+    Item reject = readline_get(capability, "reject");
+    readline_reject_later(reject, err);
+    return readline_get(capability, "promise");
+}
+
+static void readline_clear_question(Item rl) {
+    Item signal = readline_get(rl, "__question_signal__");
+    Item listener = readline_get(rl, "__question_abort_listener__");
+    if (get_type_id(signal) == LMD_TYPE_MAP && get_type_id(listener) == LMD_TYPE_FUNC) {
+        Item remove_fn = readline_get(signal, "removeEventListener");
+        if (get_type_id(remove_fn) == LMD_TYPE_FUNC) {
+            Item args[2] = {make_string_item("abort"), listener};
+            js_call_function(remove_fn, signal, args, 2);
+        }
+    }
+    readline_set(rl, "__question_callback__", (Item){.item = ITEM_JS_UNDEFINED});
+    readline_set(rl, "__question_resolve__", (Item){.item = ITEM_JS_UNDEFINED});
+    readline_set(rl, "__question_reject__", (Item){.item = ITEM_JS_UNDEFINED});
+    readline_set(rl, "__question_prompt__", (Item){.item = ITEM_JS_UNDEFINED});
+    readline_set(rl, "__question_signal__", (Item){.item = ITEM_JS_UNDEFINED});
+    readline_set(rl, "__question_abort_listener__", (Item){.item = ITEM_JS_UNDEFINED});
+}
+
+extern "C" Item js_readline_question_on_abort(Item rl_item) {
+    Item reject = readline_get(rl_item, "__question_reject__");
+    readline_clear_question(rl_item);
+    if (get_type_id(reject) == LMD_TYPE_FUNC) {
+        Item err = readline_abort_error();
+        js_call_function(reject, ItemNull, &err, 1);
+    }
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static bool readline_abort_pending_question(Item rl, bool close_interface) {
+    bool pending = get_type_id(readline_get(rl, "__question_callback__")) == LMD_TYPE_FUNC ||
+                   get_type_id(readline_get(rl, "__question_resolve__")) == LMD_TYPE_FUNC;
+    if (!pending) return false;
+    Item reject = readline_get(rl, "__question_reject__");
+    readline_clear_question(rl);
+    if (get_type_id(reject) == LMD_TYPE_FUNC) {
+        Item err = readline_abort_error();
+        js_call_function(reject, ItemNull, &err, 1);
+    }
+    if (close_interface) {
+        readline_set(rl, "closed", (Item){.item = ITEM_TRUE});
+    }
+    return true;
+}
+
+static bool readline_crlf_delay_is_infinite(Item rl) {
+    Item delay = readline_get(rl, "crlfDelay");
+    if (get_type_id(delay) != LMD_TYPE_FLOAT) return false;
+    double v = it2d(delay);
+    return v > 1.0e100;
+}
+
+static bool readline_register_question_signal(Item rl, Item signal) {
+    if (get_type_id(signal) != LMD_TYPE_MAP) return true;
+    Item aborted = readline_get(signal, "aborted");
+    if (aborted.item == ITEM_TRUE) return false;
+    Item add_fn = readline_get(signal, "addEventListener");
+    if (get_type_id(add_fn) == LMD_TYPE_FUNC) {
+        Item bound_arg = rl;
+        Item listener = js_bind_function(js_new_function((void*)js_readline_question_on_abort, 1),
+                                         ItemNull, &bound_arg, 1);
+        js_set_function_name(listener, make_string_item("onAbort"));
+        Item args[2] = {make_string_item("abort"), listener};
+        js_call_function(add_fn, signal, args, 2);
+        readline_set(rl, "__question_signal__", signal);
+        readline_set(rl, "__question_abort_listener__", listener);
+    }
+    return true;
+}
+
 static void readline_emit_line(Item rl, Item line) {
+    Item question_cb = readline_get(rl, "__question_callback__");
+    if (get_type_id(question_cb) == LMD_TYPE_FUNC) {
+        readline_clear_question(rl);
+        js_call_function(question_cb, rl, &line, 1);
+        return;
+    }
+    Item question_resolve = readline_get(rl, "__question_resolve__");
+    if (get_type_id(question_resolve) == LMD_TYPE_FUNC) {
+        readline_clear_question(rl);
+        js_call_function(question_resolve, ItemNull, &line, 1);
+        return;
+    }
     Item cb = readline_get(rl, "__on_line__");
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         js_call_function(cb, rl, &line, 1);
     }
+}
+
+static void readline_emit_history(Item rl, Item history) {
+    Item cb = readline_get(rl, "__on_history__");
+    if (get_type_id(cb) == LMD_TYPE_FUNC) {
+        js_call_function(cb, rl, &history, 1);
+    }
+}
+
+static bool readline_string_items_equal(Item a, Item b) {
+    if (get_type_id(a) != LMD_TYPE_STRING || get_type_id(b) != LMD_TYPE_STRING) return false;
+    String* sa = it2s(a);
+    String* sb = it2s(b);
+    return sa && sb && sa->len == sb->len && memcmp(sa->chars, sb->chars, (size_t)sa->len) == 0;
+}
+
+static bool readline_string_item_starts_with(Item value_item, Item prefix_item) {
+    if (get_type_id(value_item) != LMD_TYPE_STRING || get_type_id(prefix_item) != LMD_TYPE_STRING) return false;
+    String* value = it2s(value_item);
+    String* prefix = it2s(prefix_item);
+    return value && prefix && value->len >= prefix->len &&
+           memcmp(value->chars, prefix->chars, (size_t)prefix->len) == 0;
 }
 
 static void readline_set_line(Item rl, const char* chars, int len) {
@@ -200,10 +461,13 @@ static void readline_append_line(Item rl, const char* chars, int len) {
     Item old_item = readline_get(rl, "line");
     String* old = get_type_id(old_item) == LMD_TYPE_STRING ? it2s(old_item) : NULL;
     int old_len = old ? (int)old->len : 0;
+    int cursor = it2i(readline_get(rl, "cursor"));
+    if (cursor < 0) cursor = 0;
+    if (cursor > old_len) cursor = old_len;
     char buf[8192];
     int pos = 0;
-    if (old && old_len > 0) {
-        int n = old_len < (int)sizeof(buf) ? old_len : (int)sizeof(buf);
+    if (old && cursor > 0) {
+        int n = cursor < (int)sizeof(buf) ? cursor : (int)sizeof(buf);
         memcpy(buf, old->chars, n);
         pos = n;
     }
@@ -212,7 +476,14 @@ static void readline_append_line(Item rl, const char* chars, int len) {
         memcpy(buf + pos, chars, n);
         pos += n;
     }
+    if (old && cursor < old_len && pos < (int)sizeof(buf)) {
+        int tail = old_len - cursor;
+        int n = tail < (int)sizeof(buf) - pos ? tail : (int)sizeof(buf) - pos;
+        memcpy(buf + pos, old->chars + cursor, n);
+        pos += n;
+    }
     readline_set_line(rl, buf, pos);
+    readline_set(rl, "cursor", (Item){.item = i2it(cursor + len)});
 }
 
 static int readline_is_word_char(char c) {
@@ -278,16 +549,19 @@ static void readline_delete_word_forward(Item rl) {
     readline_set(rl, "cursor", (Item){.item = i2it(cursor)});
 }
 
-static void readline_backspace(Item rl) {
+static void readline_delete_word_backward(Item rl) {
     Item line_item = readline_get(rl, "line");
     if (get_type_id(line_item) != LMD_TYPE_STRING) return;
     String* s = it2s(line_item);
     int cursor = it2i(readline_get(rl, "cursor"));
-    if (cursor <= 0) return;
+    int start = cursor;
+    while (start > 0 && s->chars[start - 1] == ' ') start--;
+    while (start > 0 && readline_is_word_char(s->chars[start - 1])) start--;
+    if (start == cursor) return;
     char buf[8192];
     int pos = 0;
-    if (cursor - 1 > 0) {
-        int n = cursor - 1 < (int)sizeof(buf) ? cursor - 1 : (int)sizeof(buf);
+    if (start > 0) {
+        int n = start < (int)sizeof(buf) ? start : (int)sizeof(buf);
         memcpy(buf, s->chars, n);
         pos = n;
     }
@@ -298,10 +572,126 @@ static void readline_backspace(Item rl) {
         pos += n;
     }
     readline_set_line(rl, buf, pos);
-    readline_set(rl, "cursor", (Item){.item = i2it(cursor - 1)});
+    readline_set(rl, "cursor", (Item){.item = i2it(start)});
+}
+
+static void readline_delete_range(Item rl, int start, int end) {
+    Item line_item = readline_get(rl, "line");
+    if (get_type_id(line_item) != LMD_TYPE_STRING) return;
+    String* s = it2s(line_item);
+    if (start < 0) start = 0;
+    if (end > (int)s->len) end = (int)s->len;
+    if (end <= start) return;
+    char buf[8192];
+    int pos = 0;
+    if (start > 0) {
+        int n = start < (int)sizeof(buf) ? start : (int)sizeof(buf);
+        memcpy(buf, s->chars, n);
+        pos = n;
+    }
+    if (end < (int)s->len && pos < (int)sizeof(buf)) {
+        int tail = (int)s->len - end;
+        int n = tail < (int)sizeof(buf) - pos ? tail : (int)sizeof(buf) - pos;
+        memcpy(buf + pos, s->chars + end, n);
+        pos += n;
+    }
+    readline_set_line(rl, buf, pos);
+    readline_set(rl, "cursor", (Item){.item = i2it(start)});
+}
+
+static Item readline_slice_line(Item rl, int start, int end) {
+    Item line_item = readline_get(rl, "line");
+    if (get_type_id(line_item) != LMD_TYPE_STRING) return make_string_item("", 0);
+    String* s = it2s(line_item);
+    if (start < 0) start = 0;
+    if (end > (int)s->len) end = (int)s->len;
+    if (end <= start) return make_string_item("", 0);
+    return make_string_item(s->chars + start, end - start);
+}
+
+static void readline_store_kill(Item rl, Item kill) {
+    Item current = readline_get(rl, "__kill_buffer__");
+    if (get_type_id(current) == LMD_TYPE_STRING) {
+        readline_set(rl, "__kill_prev__", current);
+    }
+    readline_set(rl, "__kill_buffer__", kill);
+}
+
+static void readline_stack_push(Item rl, const char* name, Item value) {
+    Item stack = readline_get(rl, name);
+    if (get_type_id(stack) != LMD_TYPE_ARRAY) {
+        stack = js_array_new(0);
+        readline_set(rl, name, stack);
+    }
+    js_array_push(stack, value);
+}
+
+static Item readline_stack_pop(Item rl, const char* name) {
+    Item stack = readline_get(rl, name);
+    if (get_type_id(stack) != LMD_TYPE_ARRAY) return (Item){.item = ITEM_JS_UNDEFINED};
+    int64_t len = js_array_length(stack);
+    if (len <= 0) return (Item){.item = ITEM_JS_UNDEFINED};
+    Item value = js_array_get_int(stack, len - 1);
+    Item next = js_array_new(0);
+    for (int64_t i = 0; i < len - 1; i++) {
+        js_array_push(next, js_array_get_int(stack, i));
+    }
+    readline_set(rl, name, next);
+    return value;
+}
+
+static void readline_remember_undo(Item rl) {
+    Item line = readline_get(rl, "line");
+    if (get_type_id(line) == LMD_TYPE_STRING) {
+        readline_stack_push(rl, "__undo_stack__", line);
+        readline_set(rl, "__redo_stack__", js_array_new(0));
+    }
+}
+
+static void readline_undo(Item rl) {
+    Item previous = readline_stack_pop(rl, "__undo_stack__");
+    if (get_type_id(previous) != LMD_TYPE_STRING) return;
+    Item current = readline_get(rl, "line");
+    if (get_type_id(current) == LMD_TYPE_STRING) {
+        readline_stack_push(rl, "__redo_stack__", current);
+    }
+    readline_set_line_item(rl, previous);
+}
+
+static void readline_redo(Item rl) {
+    Item next = readline_stack_pop(rl, "__redo_stack__");
+    if (get_type_id(next) != LMD_TYPE_STRING) return;
+    Item current = readline_get(rl, "line");
+    if (get_type_id(current) == LMD_TYPE_STRING) {
+        readline_stack_push(rl, "__undo_stack__", current);
+    }
+    readline_set_line_item(rl, next);
+}
+
+static void readline_backspace(Item rl) {
+    Item line_item = readline_get(rl, "line");
+    if (get_type_id(line_item) != LMD_TYPE_STRING) return;
+    String* s = it2s(line_item);
+    int cursor = it2i(readline_get(rl, "cursor"));
+    if (cursor <= 0) return;
+    int start = readline_prev_char_index(s, cursor);
+    readline_delete_range(rl, start, cursor);
+    readline_set(rl, "__history_index__", (Item){.item = i2it(-1)});
+    readline_set(rl, "historyIndex", (Item){.item = i2it(-1)});
+    readline_set(rl, "__history_search__", readline_get(rl, "line"));
+}
+
+static void readline_delete_right(Item rl) {
+    Item line_item = readline_get(rl, "line");
+    if (get_type_id(line_item) != LMD_TYPE_STRING) return;
+    String* s = it2s(line_item);
+    int cursor = it2i(readline_get(rl, "cursor"));
+    int end = readline_next_char_index(s, cursor);
+    readline_delete_range(rl, cursor, end);
 }
 
 static void readline_history_add(Item rl, Item line) {
+    if (readline_get(rl, "terminal").item == ITEM_FALSE) return;
     if (get_type_id(line) != LMD_TYPE_STRING) return;
     String* s = it2s(line);
     if (!s || s->len == 0) return;
@@ -312,13 +702,18 @@ static void readline_history_add(Item rl, Item line) {
     int64_t limit = 30;
     Item size_item = readline_get(rl, "historySize");
     if (get_type_id(size_item) == LMD_TYPE_INT) limit = it2i(size_item);
+    if (limit <= 0) return;
+    bool remove_duplicates = readline_get(rl, "removeHistoryDuplicates").item == ITEM_TRUE;
     int64_t old_len = js_array_length(history);
     for (int64_t i = 0; i < old_len && js_array_length(next) < limit; i++) {
         Item old_line = js_array_get_int(history, i);
+        if (remove_duplicates && readline_string_items_equal(old_line, line)) continue;
         if (get_type_id(old_line) == LMD_TYPE_STRING) js_array_push(next, old_line);
     }
     readline_set(rl, "history", next);
     readline_set(rl, "__history_index__", (Item){.item = i2it(-1)});
+    readline_set(rl, "historyIndex", (Item){.item = i2it(-1)});
+    readline_emit_history(rl, next);
 }
 
 static void readline_history_move(Item rl, int delta) {
@@ -328,13 +723,65 @@ static void readline_history_move(Item rl, int delta) {
     if (len <= 0) return;
     Item index_item = readline_get(rl, "__history_index__");
     int index = get_type_id(index_item) == LMD_TYPE_INT ? it2i(index_item) : -1;
+    Item search_item = readline_get(rl, "__history_search__");
+    bool has_search = get_type_id(search_item) == LMD_TYPE_STRING;
+    if (has_search && delta < 0) {
+        int start = index < 0 ? 0 : index + 1;
+        int found = -1;
+        for (int i = start; i < len; i++) {
+            if (readline_string_item_starts_with(js_array_get_int(history, i), search_item)) {
+                found = i;
+                break;
+            }
+        }
+        if (found >= 0) {
+            index = found;
+            readline_set_line_item(rl, js_array_get_int(history, index));
+        } else {
+            index = (int)len;
+            readline_set_line_item(rl, search_item);
+        }
+        readline_set(rl, "__history_index__", (Item){.item = i2it(index)});
+        readline_set(rl, "historyIndex", (Item){.item = i2it(index)});
+        return;
+    }
+    if (has_search && delta > 0 && index < 0) {
+        readline_set(rl, "__history_index__", (Item){.item = i2it(-1)});
+        readline_set(rl, "historyIndex", (Item){.item = i2it(-1)});
+        return;
+    }
     if (delta < 0) {
         if (index + 1 < len) index++;
+        Item current_line = readline_get(rl, "line");
+        while (index + 1 < len &&
+               readline_string_items_equal(js_array_get_int(history, index), current_line)) {
+            index++;
+        }
     } else if (delta > 0) {
-        if (index > 0) index--;
+        if (index > 0) {
+            index--;
+        } else if (index == 0) {
+            index = -1;
+        }
     }
     readline_set(rl, "__history_index__", (Item){.item = i2it(index)});
+    readline_set(rl, "historyIndex", (Item){.item = i2it(index)});
     if (index >= 0 && index < len) readline_set_line_item(rl, js_array_get_int(history, index));
+}
+
+static bool readline_emit_keypress(Item rl, char c) {
+    Item input = readline_get(rl, "input");
+    if (get_type_id(input) != LMD_TYPE_MAP) return true;
+    Item ch = make_string_item(&c, 1);
+    Item key = js_new_object();
+    readline_set(key, "name", ch);
+    Item args = js_array_new(0);
+    js_array_push(args, ch);
+    js_array_push(args, key);
+    readline_set(rl, "__synth_keypress__", (Item){.item = ITEM_TRUE});
+    js_ee_emit(input, make_string_item("keypress"), args);
+    readline_set(rl, "__synth_keypress__", (Item){.item = ITEM_FALSE});
+    return !js_check_exception();
 }
 
 static void readline_append_chars(char* buf, int buf_size, int* pos, const char* chars, int len) {
@@ -565,28 +1012,87 @@ extern "C" Item js_readline_completion_rejected(Item rl_item, Item err_item) {
 // readline.question(prompt, callback) — ask question, call back with answer
 // =============================================================================
 
-extern "C" Item js_readline_question(Item prompt_item, Item callback_item) {
+extern "C" Item js_readline_question(Item prompt_item, Item options_or_callback, Item callback_item) {
     Item self = js_get_current_this();
-    // print prompt
-    if (get_type_id(prompt_item) == LMD_TYPE_STRING) {
-        String* s = it2s(prompt_item);
-        fwrite(s->chars, 1, s->len, stdout);
-        fflush(stdout);
+    Item callback = callback_item;
+    Item signal = (Item){.item = ITEM_JS_UNDEFINED};
+    if (get_type_id(options_or_callback) == LMD_TYPE_FUNC) {
+        callback = options_or_callback;
+    } else if (get_type_id(options_or_callback) == LMD_TYPE_MAP) {
+        signal = readline_get(options_or_callback, "signal");
+    }
+    if (readline_get(self, "closed").item == ITEM_TRUE) {
+        if (readline_get(self, "__promises_mode__").item == ITEM_TRUE) {
+            return readline_rejected_promise(readline_error_with_code(
+                "ERR_USE_AFTER_CLOSE", "readline interface is closed"));
+        }
+        return js_throw_error_with_code("ERR_USE_AFTER_CLOSE", "readline interface is closed");
     }
 
-    // read one line
-    char buf[4096];
-    if (fgets(buf, sizeof(buf), stdin)) {
-        // trim trailing newline
-        size_t len = strlen(buf);
-        while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r')) len--;
-        
-        if (get_type_id(callback_item) == LMD_TYPE_FUNC) {
-            Item answer = make_string_item(buf, (int)len);
-            js_call_function(callback_item, ItemNull, &answer, 1);
-        }
+    if (get_type_id(prompt_item) == LMD_TYPE_STRING) {
+        readline_output_write(self, prompt_item);
+        readline_set(self, "__question_prompt__", prompt_item);
     }
+
+    if (get_type_id(readline_get(self, "__question_callback__")) == LMD_TYPE_FUNC ||
+        get_type_id(readline_get(self, "__question_resolve__")) == LMD_TYPE_FUNC) {
+        return self;
+    }
+
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        if (!readline_register_question_signal(self, signal)) {
+            readline_clear_question(self);
+            return self;
+        }
+        readline_set(self, "__question_callback__", callback);
+        return self;
+    }
+
+    if (readline_get(self, "__promises_mode__").item == ITEM_TRUE) {
+        Item capability = js_promise_with_resolvers();
+        readline_set(self, "__question_resolve__", readline_get(capability, "resolve"));
+        readline_set(self, "__question_reject__", readline_get(capability, "reject"));
+        if (!readline_register_question_signal(self, signal)) {
+            Item reject = readline_get(capability, "reject");
+            readline_clear_question(self);
+            Item err = readline_abort_error();
+            readline_reject_later(reject, err);
+        }
+        return readline_get(capability, "promise");
+    }
+
     return self;
+}
+
+extern "C" Item js_readline_question_promisified(Item prompt_item, Item options_item) {
+    Item self = js_get_current_this();
+    Item capability = js_promise_with_resolvers();
+    Item promise = readline_get(capability, "promise");
+    Item resolve = readline_get(capability, "resolve");
+    Item reject = readline_get(capability, "reject");
+    if (readline_get(self, "closed").item == ITEM_TRUE) {
+        Item err = readline_error_with_code("ERR_USE_AFTER_CLOSE", "readline interface is closed");
+        readline_reject_later(reject, err);
+        return promise;
+    }
+    if (get_type_id(readline_get(self, "__question_callback__")) == LMD_TYPE_FUNC ||
+        get_type_id(readline_get(self, "__question_resolve__")) == LMD_TYPE_FUNC) {
+        return promise;
+    }
+    if (get_type_id(prompt_item) == LMD_TYPE_STRING) {
+        readline_output_write(self, prompt_item);
+        readline_set(self, "__question_prompt__", prompt_item);
+    }
+    readline_set(self, "__question_resolve__", resolve);
+    readline_set(self, "__question_reject__", reject);
+    Item signal = get_type_id(options_item) == LMD_TYPE_MAP ?
+        readline_get(options_item, "signal") : (Item){.item = ITEM_JS_UNDEFINED};
+    if (!readline_register_question_signal(self, signal)) {
+        readline_clear_question(self);
+        Item err = readline_abort_error();
+        readline_reject_later(reject, err);
+    }
+    return promise;
 }
 
 // =============================================================================
@@ -595,6 +1101,7 @@ extern "C" Item js_readline_question(Item prompt_item, Item callback_item) {
 
 extern "C" Item js_readline_close(void) {
     Item self = js_get_current_this();
+    readline_set(self, "closed", (Item){.item = ITEM_TRUE});
     // emit 'close' event
     Item on_close = js_property_get(self, make_string_item("__on_close__"));
     if (get_type_id(on_close) == LMD_TYPE_FUNC) {
@@ -609,9 +1116,23 @@ extern "C" Item js_readline_getCursorPos(void) {
     Item line_item = readline_get(self, "line");
     String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
     int cursor = it2i(readline_get(self, "cursor"));
-    int cols = readline_display_width(line, cursor);
+    Item columns_item = readline_get(readline_get(self, "output"), "columns");
+    int columns = get_type_id(columns_item) == LMD_TYPE_INT ? it2i(columns_item) : 0;
+    int rows = 0;
+    int line_cols = 0;
+    Item tab_size_item = readline_get(self, "tabSize");
+    int tab_size = get_type_id(tab_size_item) == LMD_TYPE_INT ? it2i(tab_size_item) : 8;
+    Item prompt_item = readline_get(self, "__question_prompt__");
+    if (get_type_id(prompt_item) != LMD_TYPE_STRING) {
+        prompt_item = readline_get(self, "__prompt__");
+    }
+    String* prompt = get_type_id(prompt_item) == LMD_TYPE_STRING ? it2s(prompt_item) : NULL;
+    readline_display_position_update(prompt, -1, columns, tab_size, &rows, &line_cols);
+    readline_display_position_update(line, cursor, columns, tab_size, &rows, &line_cols);
+    int cols = 0;
+    readline_display_position_finish(rows, line_cols, columns, &rows, &cols);
     readline_set(result, "cols", (Item){.item = i2it(cols)});
-    readline_set(result, "rows", (Item){.item = i2it(0)});
+    readline_set(result, "rows", (Item){.item = i2it(rows)});
     return result;
 }
 
@@ -629,15 +1150,45 @@ extern "C" Item js_readline_getPrompt(void) {
 extern "C" Item js_readline_prompt(void) {
     Item self = js_get_current_this();
     Item prompt = readline_get(self, "__prompt__");
-    if (get_type_id(prompt) == LMD_TYPE_STRING) readline_output_write(self, prompt);
+    if (get_type_id(prompt) == LMD_TYPE_STRING) {
+        if (readline_get(self, "terminal").item == ITEM_TRUE) {
+            readline_output_write(self, make_string_item("\x1b[1G", 4));
+            readline_output_write(self, make_string_item("\x1b[0J", 4));
+            readline_output_write(self, prompt);
+            String* prompt_str = it2s(prompt);
+            int width = readline_display_width(prompt_str, -1);
+            char cursor[32];
+            int cursor_len = snprintf(cursor, sizeof(cursor), "\x1b[%dG", width + 1);
+            readline_output_write(self, make_string_item(cursor, cursor_len));
+        } else {
+            readline_output_write(self, prompt);
+        }
+    }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
 static Item js_readline_write_impl(Item self, Item data_item, Item key_item) {
+    if (readline_get(self, "closed").item == ITEM_TRUE) {
+        return js_throw_error_with_code("ERR_USE_AFTER_CLOSE", "readline interface is closed");
+    }
     if (get_type_id(key_item) == LMD_TYPE_MAP) {
         Item name_item = readline_get(key_item, "name");
         Item ctrl_item = readline_get(key_item, "ctrl");
         Item meta_item = readline_get(key_item, "meta");
+        Item shift_item = readline_get(key_item, "shift");
+        Item sequence_item = readline_get(key_item, "sequence");
+        String* sequence = get_type_id(sequence_item) == LMD_TYPE_STRING ? it2s(sequence_item) : NULL;
+        if (sequence && sequence->len == 1) {
+            unsigned char c = (unsigned char)sequence->chars[0];
+            if (c == 0x1F) {
+                readline_undo(self);
+                return (Item){.item = ITEM_JS_UNDEFINED};
+            }
+            if (c == 0x1E) {
+                readline_redo(self);
+                return (Item){.item = ITEM_JS_UNDEFINED};
+            }
+        }
         String* name = get_type_id(name_item) == LMD_TYPE_STRING ? it2s(name_item) : NULL;
         if (name && name->len == 1) {
             char c = name->chars[0];
@@ -647,39 +1198,123 @@ static Item js_readline_write_impl(Item self, Item data_item, Item key_item) {
                 String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
                 readline_set(self, "cursor", (Item){.item = i2it(line ? (int)line->len : 0)});
             } else if (c == 'u' && ctrl_item.item == ITEM_TRUE) {
+                Item line_item = readline_get(self, "line");
+                String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
+                readline_store_kill(self, line ? make_string_item(line->chars, (int)line->len) : make_string_item("", 0));
                 readline_set_line(self, "", 0);
+            } else if (c == 'y' && ctrl_item.item == ITEM_TRUE) {
+                Item kill = readline_get(self, "__kill_buffer__");
+                if (get_type_id(kill) == LMD_TYPE_STRING) {
+                    String* s = it2s(kill);
+                    int start = it2i(readline_get(self, "cursor"));
+                    readline_append_line(self, s->chars, (int)s->len);
+                    readline_set(self, "__last_yank_start__", (Item){.item = i2it(start)});
+                    readline_set(self, "__last_yank_end__", (Item){.item = i2it(start + (int)s->len)});
+                }
+            } else if (c == 'y' && meta_item.item == ITEM_TRUE) {
+                Item prev = readline_get(self, "__kill_prev__");
+                if (get_type_id(prev) == LMD_TYPE_STRING) {
+                    int start = it2i(readline_get(self, "__last_yank_start__"));
+                    int end = it2i(readline_get(self, "__last_yank_end__"));
+                    readline_delete_range(self, start, end);
+                    String* s = it2s(prev);
+                    readline_append_line(self, s->chars, (int)s->len);
+                    readline_set(self, "__last_yank_end__", (Item){.item = i2it(start + (int)s->len)});
+                }
+            } else if (c == 'w' && ctrl_item.item == ITEM_TRUE) {
+                readline_delete_word_backward(self);
+            } else if (c == 'b' && ctrl_item.item == ITEM_TRUE) {
+                Item line_item = readline_get(self, "line");
+                String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
+                int cursor = it2i(readline_get(self, "cursor"));
+                readline_set(self, "cursor", (Item){.item = i2it(readline_prev_char_index(line, cursor))});
+            } else if (c == 'f' && ctrl_item.item == ITEM_TRUE) {
+                Item line_item = readline_get(self, "line");
+                String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
+                int cursor = it2i(readline_get(self, "cursor"));
+                readline_set(self, "cursor", (Item){.item = i2it(readline_next_char_index(line, cursor))});
+            } else if (c == 'c' && ctrl_item.item == ITEM_TRUE) {
+                if (!readline_abort_pending_question(self, true)) {
+                    readline_set(self, "closed", (Item){.item = ITEM_TRUE});
+                }
+            } else if (c == 'k' && ctrl_item.item == ITEM_TRUE) {
+                Item line_item = readline_get(self, "line");
+                String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
+                int cursor = it2i(readline_get(self, "cursor"));
+                int end = line ? (int)line->len : cursor;
+                if (cursor < end) {
+                    readline_remember_undo(self);
+                    readline_store_kill(self, readline_slice_line(self, cursor, end));
+                    readline_delete_range(self, cursor, end);
+                }
             } else if (c == 'f' && meta_item.item == ITEM_TRUE) {
                 readline_move_word_forward(self);
             } else if (c == 'b' && meta_item.item == ITEM_TRUE) {
                 readline_move_word_backward(self);
             } else if (c == 'd' && meta_item.item == ITEM_TRUE) {
                 readline_delete_word_forward(self);
+            } else if (c == 'd' && ctrl_item.item == ITEM_TRUE) {
+                if (!readline_abort_pending_question(self, false)) {
+                    readline_delete_right(self);
+                }
+            } else if (c == 'h' && ctrl_item.item == ITEM_TRUE) {
+                readline_backspace(self);
+            } else if (c == 'n' && ctrl_item.item == ITEM_TRUE) {
+                readline_history_move(self, 1);
+            } else if (c == 'p' && ctrl_item.item == ITEM_TRUE) {
+                readline_history_move(self, -1);
             }
         } else if (name && name->len == 2 && memcmp(name->chars, "up", 2) == 0) {
             readline_history_move(self, -1);
         } else if (name && name->len == 4 && memcmp(name->chars, "down", 4) == 0) {
             readline_history_move(self, 1);
         } else if (name && name->len == 9 && memcmp(name->chars, "backspace", 9) == 0) {
-            readline_backspace(self);
+            if (ctrl_item.item == ITEM_TRUE && shift_item.item == ITEM_TRUE) {
+                int cursor = it2i(readline_get(self, "cursor"));
+                readline_store_kill(self, readline_slice_line(self, 0, cursor));
+                readline_delete_range(self, 0, cursor);
+            } else if (ctrl_item.item == ITEM_TRUE || meta_item.item == ITEM_TRUE) readline_delete_word_backward(self);
+            else readline_backspace(self);
+        } else if (name && name->len == 6 && memcmp(name->chars, "delete", 6) == 0) {
+            if (ctrl_item.item == ITEM_TRUE && shift_item.item == ITEM_TRUE) {
+                Item line_item = readline_get(self, "line");
+                String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
+                int cursor = it2i(readline_get(self, "cursor"));
+                int end = line ? (int)line->len : cursor;
+                readline_store_kill(self, readline_slice_line(self, cursor, end));
+                readline_delete_range(self, cursor, end);
+            } else if (ctrl_item.item == ITEM_TRUE || meta_item.item == ITEM_TRUE) readline_delete_word_forward(self);
+            else readline_delete_right(self);
         } else if (name && name->len == 4 && memcmp(name->chars, "left", 4) == 0) {
+            Item line_item = readline_get(self, "line");
+            String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
             int cursor = it2i(readline_get(self, "cursor"));
-            if (cursor > 0) readline_set(self, "cursor", (Item){.item = i2it(cursor - 1)});
+            if (ctrl_item.item == ITEM_TRUE || meta_item.item == ITEM_TRUE) readline_move_word_backward(self);
+            else if (cursor > 0) readline_set(self, "cursor", (Item){.item = i2it(readline_prev_char_index(line, cursor))});
         } else if (name && name->len == 5 && memcmp(name->chars, "right", 5) == 0) {
             Item line_item = readline_get(self, "line");
             String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
             int cursor = it2i(readline_get(self, "cursor"));
-            if (line && cursor < (int)line->len) readline_set(self, "cursor", (Item){.item = i2it(cursor + 1)});
+            if (ctrl_item.item == ITEM_TRUE || meta_item.item == ITEM_TRUE) readline_move_word_forward(self);
+            else if (line && cursor < (int)line->len) readline_set(self, "cursor", (Item){.item = i2it(readline_next_char_index(line, cursor))});
+            readline_set(self, "__history_index__", (Item){.item = i2it(-1)});
+            readline_set(self, "historyIndex", (Item){.item = i2it(-1)});
+            readline_set(self, "__history_search__", (Item){.item = ITEM_JS_UNDEFINED});
         }
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
 
+    data_item = readline_decode_input_text(self, data_item);
     if (get_type_id(data_item) != LMD_TYPE_STRING) return (Item){.item = ITEM_JS_UNDEFINED};
     String* s = it2s(data_item);
     if (!s) return (Item){.item = ITEM_JS_UNDEFINED};
     int start = 0;
+    bool saw_cr_in_chunk = false;
     for (int i = 0; i < (int)s->len; i++) {
         char c = s->chars[i];
+        if (!readline_emit_keypress(self, c)) return ItemNull;
         if (c == '\t') {
+            readline_set(self, "__saw_cr__", (Item){.item = ITEM_FALSE});
             if (get_type_id(readline_get(self, "completer")) != LMD_TYPE_FUNC) {
                 continue;
             }
@@ -691,6 +1326,14 @@ static Item js_readline_write_impl(Item self, Item data_item, Item key_item) {
             readline_handle_tab(self);
             start = i + 1;
         } else if (c == '\n') {
+            bool suppress_lf = saw_cr_in_chunk ||
+                (readline_get(self, "__saw_cr__").item == ITEM_TRUE && readline_crlf_delay_is_infinite(self));
+            readline_set(self, "__saw_cr__", (Item){.item = ITEM_FALSE});
+            if (suppress_lf) {
+                start = i + 1;
+                saw_cr_in_chunk = false;
+                continue;
+            }
             if (i > start) {
                 Item chunk = make_string_item(s->chars + start, i - start);
                 readline_append_line(self, s->chars + start, i - start);
@@ -700,16 +1343,27 @@ static Item js_readline_write_impl(Item self, Item data_item, Item key_item) {
             Item line = readline_get(self, "line");
             readline_emit_line(self, line);
             readline_history_add(self, line);
+            readline_set(self, "__history_search__", (Item){.item = ITEM_JS_UNDEFINED});
             readline_set_line(self, "", 0);
             start = i + 1;
         } else if (c == '\r') {
+            readline_set(self, "__saw_cr__", (Item){.item = ITEM_TRUE});
+            saw_cr_in_chunk = true;
             if (i > start) {
                 Item chunk = make_string_item(s->chars + start, i - start);
                 readline_append_line(self, s->chars + start, i - start);
                 readline_output_write(self, chunk);
             }
             readline_output_write(self, make_string_item("\r", 1));
+            Item line = readline_get(self, "line");
+            readline_emit_line(self, line);
+            readline_history_add(self, line);
+            readline_set(self, "__history_search__", (Item){.item = ITEM_JS_UNDEFINED});
+            readline_set_line(self, "", 0);
             start = i + 1;
+        } else {
+            readline_set(self, "__saw_cr__", (Item){.item = ITEM_FALSE});
+            saw_cr_in_chunk = false;
         }
     }
     if (start < (int)s->len) {
@@ -732,10 +1386,12 @@ extern "C" Item js_readline_input_data(Item data_item) {
 }
 
 extern "C" Item js_readline_bound_input_data(Item rl, Item data_item) {
+    if (readline_get(rl, "closed").item == ITEM_TRUE) return (Item){.item = ITEM_JS_UNDEFINED};
     return js_readline_write_impl(rl, data_item, (Item){.item = ITEM_JS_UNDEFINED});
 }
 
 extern "C" Item js_readline_deferred_input_data(Item rl, Item data_item) {
+    if (readline_get(rl, "closed").item == ITEM_TRUE) return (Item){.item = ITEM_JS_UNDEFINED};
     return js_readline_write_impl(rl, data_item, (Item){.item = ITEM_JS_UNDEFINED});
 }
 
@@ -781,6 +1437,7 @@ extern "C" Item js_readline_bound_input_emit(Item rl, Item event_item, Item data
     if (get_type_id(event_item) == LMD_TYPE_STRING) {
         String* ev = it2s(event_item);
         if (ev && ev->len == 4 && memcmp(ev->chars, "data", 4) == 0) {
+            if (readline_get(rl, "closed").item == ITEM_TRUE) return (Item){.item = ITEM_TRUE};
             if (readline_get(rl, "__promises_mode__").item == ITEM_TRUE) {
                 readline_enqueue_input_data(rl, data_item);
             } else {
@@ -793,6 +1450,9 @@ extern "C" Item js_readline_bound_input_emit(Item rl, Item event_item, Item data
 }
 
 extern "C" Item js_readline_bound_keypress(Item rl, Item data_item, Item key_item) {
+    if (readline_get(rl, "__synth_keypress__").item == ITEM_TRUE) {
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
     return js_readline_write_impl(rl, data_item, key_item);
 }
 
@@ -845,6 +1505,13 @@ extern "C" Item js_readline_createInterface(Item options_item) {
             return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
                 "The \"history\" argument must be an array");
         }
+        if (get_type_id(history) == LMD_TYPE_ARRAY) {
+            readline_set(rl, "history", history);
+        }
+        Item remove_history_duplicates = js_property_get(options_item, make_string_item("removeHistoryDuplicates"));
+        if (get_type_id(remove_history_duplicates) == LMD_TYPE_BOOL) {
+            readline_set(rl, "removeHistoryDuplicates", remove_history_duplicates);
+        }
         Item history_size = js_property_get(options_item, make_string_item("historySize"));
         if (readline_has_own(options_item, "historySize") && get_type_id(history_size) != LMD_TYPE_UNDEFINED) {
             TypeId history_size_type = get_type_id(history_size);
@@ -885,6 +1552,7 @@ extern "C" Item js_readline_createInterface(Item options_item) {
                 return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
                     "The \"tabSize\" argument must be of type number");
             }
+            readline_set(rl, "tabSize", tab_size);
         }
         Item signal = js_property_get(options_item, make_string_item("signal"));
         if (readline_has_own(options_item, "signal") && get_type_id(signal) != LMD_TYPE_UNDEFINED) {
@@ -916,9 +1584,17 @@ extern "C" Item js_readline_createInterface(Item options_item) {
     js_property_set(rl, make_string_item("__prompt__"), prompt_val);
     readline_set_line(rl, "", 0);
     readline_set(rl, "__tab_count__", (Item){.item = i2it(0)});
-    readline_set(rl, "history", js_array_new(0));
-    readline_set(rl, "historySize", (Item){.item = i2it(30)});
+    if (get_type_id(readline_get(rl, "history")) != LMD_TYPE_ARRAY) {
+        readline_set(rl, "history", js_array_new(0));
+    }
+    if (get_type_id(readline_get(rl, "historySize")) == LMD_TYPE_UNDEFINED) {
+        readline_set(rl, "historySize", (Item){.item = i2it(30)});
+    }
+    if (get_type_id(readline_get(rl, "tabSize")) == LMD_TYPE_UNDEFINED) {
+        readline_set(rl, "tabSize", (Item){.item = i2it(8)});
+    }
     readline_set(rl, "__history_index__", (Item){.item = i2it(-1)});
+    readline_set(rl, "historyIndex", (Item){.item = i2it(-1)});
     if (readline_create_promises_mode) {
         readline_set(rl, "__promises_mode__", (Item){.item = ITEM_TRUE});
     }
@@ -929,8 +1605,10 @@ extern "C" Item js_readline_createInterface(Item options_item) {
     }
 
     // methods
-    js_property_set(rl, make_string_item("question"),
-                    js_new_function((void*)js_readline_question, 2));
+    Item question_fn = js_new_function((void*)js_readline_question, 3);
+    js_property_set(question_fn, js_symbol_for(make_string_item("nodejs.util.promisify.custom")),
+                    js_new_function((void*)js_readline_question_promisified, 2));
+    js_property_set(rl, make_string_item("question"), question_fn);
     js_property_set(rl, make_string_item("close"),
                     js_new_function((void*)js_readline_close, 0));
     js_property_set(rl, make_string_item("on"),
@@ -953,8 +1631,8 @@ extern "C" Item js_readline_createInterface(Item options_item) {
         bool promises_mode = readline_get(rl, "__promises_mode__").item == ITEM_TRUE;
         Item listener = ItemNull;
         if (promises_mode) {
-            Item write_method = readline_get(rl, "write");
-            listener = js_bind_function(write_method, rl, NULL, 0);
+            Item listener_base = js_new_function((void*)js_readline_bound_input_data, 2);
+            listener = js_bind_function(listener_base, ItemNull, bound_args, 1);
         } else {
             Item listener_base = js_new_function((void*)js_readline_bound_input_data, 2);
             listener = js_bind_function(listener_base, ItemNull, bound_args, 1);
@@ -979,8 +1657,8 @@ extern "C" Item js_readline_createInterface(Item options_item) {
         if (output.item != input.item) {
             Item write_fn = ItemNull;
             if (promises_mode) {
-                Item write_method = readline_get(rl, "write");
-                write_fn = js_bind_function(write_method, rl, NULL, 0);
+                Item write_base = js_new_function((void*)js_readline_bound_input_data, 2);
+                write_fn = js_bind_function(write_base, ItemNull, bound_args, 1);
             } else {
                 Item write_base = js_new_function((void*)js_readline_bound_input_data, 2);
                 write_fn = js_bind_function(write_base, ItemNull, bound_args, 1);

@@ -269,10 +269,12 @@ extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item messa
 
     // validate thrown against expected
     if (exp_type == LMD_TYPE_FUNC) {
-        // Error class: check instanceof
-        Item result = js_instanceof(thrown, error_expected);
-        if (get_type_id(result) == LMD_TYPE_BOOL && it2b(result)) {
-            return make_js_undefined();
+        Item proto = js_property_get(error_expected, assert_make_string("prototype"));
+        if (get_type_id(proto) == LMD_TYPE_MAP) {
+            Item result = js_instanceof(thrown, error_expected);
+            if (get_type_id(result) == LMD_TYPE_BOOL && it2b(result)) {
+                return make_js_undefined();
+            }
         }
         // maybe it's a validation function — call it with thrown
         Item validate_result = js_call_function(error_expected, make_js_undefined(), &thrown, 1);
