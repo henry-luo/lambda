@@ -1,7 +1,7 @@
 # Transpile JS Tune11 Proposal: Plain-Map Property Access ICs
 
 Date: 2026-06-24
-Status: P1/P2/P4/P5 slices implemented; js262 clean
+Status: P1/P2/P4/P5 slices implemented; P6a cached intrinsic prototypes implemented; js262 clean
 
 Primary sources:
 
@@ -71,6 +71,11 @@ This first slice has been implemented:
   explicit derived constructors: inherited constructor field metadata is merged
   base-first into the derived constructor metadata, so `new Derived(...)`
   allocates the final base+derived shape before `super()` runs;
+- implemented the P6a cached intrinsic prototype slice: generic prototype
+  walking now resolves built-in prototype objects through
+  `js_get_intrinsic_prototype_for_class()` instead of repeatedly synthesizing
+  `Object.prototype`, `Function.prototype`, and other built-in prototypes via
+  constructor `.prototype` property reads;
 - added the runtime flag `LAMBDA_JS_LOAD_IC=0` to disable the new load IC path
   and `LAMBDA_JS_SHARED_CTOR_SHAPE=0` to disable constructor TypeMap sharing for
   A/B measurement and emergency gating.
@@ -1424,6 +1429,94 @@ does not yet justify a broad wall-time speedup claim because the helper-call IC
 still costs enough that release medians are roughly neutral on the focused
 property-heavy benchmarks. The next performance slice should inline the
 monomorphic IC hit path in MIR before widening the optimization surface.
+
+## P6a: Cached Intrinsic Prototype Objects
+
+Implemented as of 2026-06-25.
+
+After P5 fixed Richards' shape pathology, profiling showed that a large amount
+of remaining time was still spent in the generic prototype path. The hot pattern
+was not a user property lookup problem at every callsite. Instead,
+`js_get_implicit_proto()` and `js_get_prototype_of()` repeatedly reconstructed
+intrinsic prototypes by:
+
+1. resolving the built-in constructor, such as `Object` or `Function`;
+2. reading the public `.prototype` property through `js_property_get()`;
+3. repeating that work during ordinary prototype-chain walking.
+
+For Richards this produced a giant `FUNC.prototype` profile count and inflated
+the top-level `property_get` event even after the load IC was hitting. The
+implemented fix adds `js_get_intrinsic_prototype_for_class(int class_id)` in
+`js_globals.cpp`. It lazily initializes a built-in prototype through the
+existing constructor setup path once, then caches and returns the direct
+prototype object for subsequent internal prototype-chain walks.
+
+The cache covers the currently constructor-backed built-in classes:
+
+- core JS intrinsics: Object, Array, Function, String, Number, Boolean, Symbol,
+  BigInt, Date, RegExp, Promise;
+- Error and NativeError families;
+- collections and weak collections;
+- ArrayBuffer, SharedArrayBuffer, DataView, and `%TypedArray%.prototype`;
+- supported event/static-range constructors.
+
+The cache is deliberately used only for internal intrinsic prototype lookup.
+Public property access to `Ctor.prototype` still uses normal property
+semantics, and unsupported or non-constructor-backed classes fall back to the
+existing null/slow behavior.
+
+Runtime paths updated:
+
+- `js_resolve_object_prototype()` now reads cached `%Object.prototype%`;
+- `js_get_implicit_proto()` now maps the object's `JsClass` byte directly to a
+  cached intrinsic prototype;
+- `js_get_prototype_of()` uses the same intrinsic cache for primitives, arrays,
+  functions, class objects, and plain objects;
+- js262 constructor/prototype snapshot bootstrap initializes all cached
+  intrinsic prototypes that participate in snapshot/restore.
+
+Richards result:
+
+| Measurement | Before cached prototype | After cached prototype | Change |
+|-------------|------------------------:|-----------------------:|-------:|
+| `property_get` calls, profiled Richards | 22,859,349 | 9,338,966 | -13,520,383 (-59.1%) |
+| Profile binary `__TIMING__` | 7460.707625 ms | 5715.201042 ms | -1745.506583 ms (-23.4%) |
+| Clean release `__TIMING__` | median 6874.921041 ms | 5276.281209 ms | -1598.639832 ms (-23.3%) |
+
+Post-cache Richards IC profile stayed healthy:
+
+```text
+Richards: PASS
+__TIMING__:5715.201042  (profile binary)
+
+property_get          9338966 calls, 4720.326 ms self
+property_access       2584251 calls, 105.774 ms self
+property_set           865321 calls, 102.880 ms self
+load_ic_probe         1840050
+load_ic_hit_mono      1840026
+load_ic_miss               24
+load_ic_install_mono       24
+load_ic_megamorphic         0
+```
+
+Correctness gate:
+
+```text
+make release
+make build-release-profile
+make test262-baseline
+
+Fully passed: 40261 / 40261
+Failed: 0
+Regressions: 0
+```
+
+Conclusion: cached intrinsic prototypes produce the first clear Richards
+wall-time win after the callsite IC/shape-sharing work. The win comes from
+removing redundant built-in prototype property reads in the remaining generic
+prototype path, not from changing IC hit behavior. This makes future IC inlining
+work cleaner: the own-slot IC no longer has to compensate for an unrelated
+intrinsic-prototype lookup tax on every inherited fallback.
 
 ### Expected profile signal
 

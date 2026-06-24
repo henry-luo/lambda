@@ -196,6 +196,7 @@ void js_mark_async_func(Item fn_item);
 void js_mark_derived_constructor_func(Item fn_item);
 void js_mark_eval_initializer_func_if_active(Item fn_item);
 Item js_get_constructor(Item name_item);
+Item js_get_intrinsic_prototype_for_class(int class_id);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
 Item js_apply_constructor(Item constructor, Item args_array);

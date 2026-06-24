@@ -39,6 +39,7 @@ extern "C" Item js_new_string_wrapper(Item arg);
 extern "C" Item js_new_async_function_from_string(Item* args, int argc);
 extern "C" Item js_new_generator_function_from_string(Item* args, int argc, int is_async);
 extern "C" Item js_get_constructor(Item name_item);
+extern "C" Item js_get_intrinsic_prototype_for_class(int class_id);
 extern "C" Item js_get_fs_namespace(void);
 extern "C" Item js_get_fs_promises_namespace(void);
 extern "C" Item js_get_internal_fs_promises_namespace(void);
@@ -26514,35 +26515,21 @@ static Item js_get_implicit_proto(Item object) {
     bool own_instance_proto = false;
     js_map_get_fast_ext(m, "__instance_proto__", 18, &own_instance_proto);
     if (own_instance_proto) {
-        Item func_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
-        if (get_type_id(func_ctor) != LMD_TYPE_FUNC) return ItemNull;
-        Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-        Item func_proto = js_property_get(func_ctor, proto_key);
+        Item func_proto = js_get_intrinsic_prototype_for_class(JS_CLASS_FUNCTION);
         if (get_type_id(func_proto) != LMD_TYPE_MAP) return ItemNull;
         return func_proto;
     }
     // No own __proto__ slot — synthesize from class identity.
-    const char* cls = "Object";
-    int cls_len = 6;
     JsClass jc = js_class_id(object);
-    if (jc != JS_CLASS_NONE) {
-        const char* nm = js_class_to_name(jc);
-        if (nm) { cls = nm; cls_len = (int)strlen(nm); }
-    }
-    // Look up the constructor and read its `.prototype` property.
-    Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name(cls, cls_len))});
-    if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
-    Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-    Item proto = js_property_get(ctor, proto_key);
+    JsClass proto_class = jc != JS_CLASS_NONE ? jc : JS_CLASS_OBJECT;
+    Item proto = js_get_intrinsic_prototype_for_class(proto_class);
     if (get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
     if (proto.map == m) {
         // `object` IS the constructor's prototype object itself.
         // For Object.prototype → top of chain. For Date.prototype, RegExp.prototype,
         // etc. → continue walking to Object.prototype.
-        if (cls_len == 6 && strncmp(cls, "Object", 6) == 0) return ItemNull;
-        Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
-        if (get_type_id(obj_ctor) != LMD_TYPE_FUNC) return ItemNull;
-        Item op = js_property_get(obj_ctor, proto_key);
+        if (proto_class == JS_CLASS_OBJECT) return ItemNull;
+        Item op = js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
         if (get_type_id(op) != LMD_TYPE_MAP || op.map == m) return ItemNull;
         return op;
     }
