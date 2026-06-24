@@ -6388,9 +6388,14 @@ extern "C" Item js_property_get_str(Item object, const char* key, int key_len) {
 }
 
 static inline bool js_load_ic_offset_ok(Map* m, int64_t byte_offset) {
+#ifdef NDEBUG
+    (void)m;
+    (void)byte_offset;
+    return true;
+#else
     if (!m || !m->data || byte_offset < 0) return false;
-    if ((byte_offset % (int64_t)sizeof(void*)) != 0) return false;
-    return byte_offset <= (int64_t)m->data_cap - (int64_t)sizeof(void*);
+    return byte_offset < (int64_t)m->data_cap;
+#endif
 }
 
 static inline bool js_load_ic_name_matches(ShapeEntry* entry,
@@ -6412,25 +6417,55 @@ static inline bool js_load_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
 }
 
 static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
-        JsLoadICEntry* out_entry, Item* out_value) {
+        JsLoadICEntry* out_entry, Item* out_value, JsLoadICProfileReason* out_reason) {
+    if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
     if (!out_entry || !out_value || !name || name_len < 0) return false;
-    if (get_type_id(object) != LMD_TYPE_MAP) return false;
-    Map* m = object.map;
-    if (!m || m->map_kind != MAP_KIND_PLAIN || !m->data) return false;
-    TypeMap* tm = (TypeMap*)m->type;
-    if (!tm || !typemap_ptr_is_plausible(tm) || !tm->shape) return false;
-
-    ShapeEntry* entry = js_find_shape_entry(object, name, name_len);
-    if (!js_load_ic_name_matches(entry, name, name_len)) return false;
-    if (entry->flags != 0) {
-        js_map_promote_descriptor_kind(m);
+    if (get_type_id(object) != LMD_TYPE_MAP) {
+        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_MAP;
         return false;
     }
-    if (!js_load_ic_offset_ok(m, entry->byte_offset)) return false;
+    Map* m = object.map;
+    if (!m) {
+        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_MAP;
+        return false;
+    }
+    if (m->map_kind != MAP_KIND_PLAIN) {
+        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_PLAIN;
+        return false;
+    }
+    if (!m->data) {
+        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NO_DATA;
+        return false;
+    }
+    TypeMap* tm = (TypeMap*)m->type;
+    if (!tm || !typemap_ptr_is_plausible(tm) || !tm->shape) {
+        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_BAD_TYPEMAP;
+        return false;
+    }
+
+    ShapeEntry* entry = js_find_shape_entry(object, name, name_len);
+    if (!entry) {
+        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
+        return false;
+    }
+    if (!js_load_ic_name_matches(entry, name, name_len)) {
+        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NAME;
+        return false;
+    }
+    if (entry->flags != 0) {
+        js_map_promote_descriptor_kind(m);
+        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_FLAGS;
+        return false;
+    }
+    if (!js_load_ic_offset_ok(m, entry->byte_offset)) {
+        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_OFFSET;
+        return false;
+    }
 
     Item value = _map_read_field(entry, m->data);
     if (js_is_deleted_sentinel(value)) {
         js_map_promote_descriptor_kind(m);
+        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_DELETED;
         return false;
     }
 
@@ -6462,11 +6497,13 @@ static Item js_property_access_named_ic_slow(Item object, const char* name,
 extern "C" Item js_property_access_named_ic(Item object, const char* name,
         int64_t name_len64, JsLoadIC* ic) {
     js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_PROBE);
+    js_profile_load_ic_site(ic ? ic->profile_label : NULL, JS_LOAD_IC_SITE_PROBE);
     if (!ic || !name || name_len64 < 0 || name_len64 > 2147483647LL) {
         return js_property_access_named_ic_slow(object, name, 0, ic);
     }
     int name_len = (int)name_len64;
     if (!js_load_ic_key_matches(ic, name, name_len)) {
+        js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_MISS_KEY);
         return js_property_access_named_ic_slow(object, name, name_len, ic);
     }
 
@@ -6477,6 +6514,7 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
         if (ic->state == JS_LOAD_IC_MONO) {
             if (js_load_ic_try_hit_entry(m, &ic->entries[0], &value)) {
                 js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_HIT_MONO);
+                js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_HIT_MONO);
                 return value;
             }
         } else if (ic->state == JS_LOAD_IC_POLY) {
@@ -6485,11 +6523,13 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
             for (int i = 0; i < count; i++) {
                 if (js_load_ic_try_hit_entry(m, &ic->entries[i], &value)) {
                     js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_HIT_POLY);
+                    js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_HIT_POLY);
                     return value;
                 }
             }
         } else if (ic->state == JS_LOAD_IC_MEGAMORPHIC) {
             js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_MEGAMORPHIC);
+            js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_MEGAMORPHIC);
             return js_property_access_named_ic_slow(object, name, name_len, ic);
         }
     }
@@ -6501,7 +6541,8 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
         JsLoadICEntry entry;
         memset(&entry, 0, sizeof(entry));
         Item value = ItemNull;
-        if (js_load_ic_build_entry(object, name, name_len, &entry, &value)) {
+        JsLoadICProfileReason miss_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
+        if (js_load_ic_build_entry(object, name, name_len, &entry, &value, &miss_reason)) {
             if (!ic->name) {
                 ic->name = name;
                 ic->name_len = name_len;
@@ -6517,18 +6558,22 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
                 ic->count = 1;
                 ic->state = JS_LOAD_IC_MONO;
                 js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_INSTALL_MONO);
+                js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_INSTALL_MONO);
                 return value;
             }
             if (ic->count < JS_LOAD_IC_POLY_MAX) {
                 ic->entries[ic->count++] = entry;
                 ic->state = JS_LOAD_IC_POLY;
                 js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_INSTALL_POLY);
+                js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_INSTALL_POLY);
                 return value;
             }
             ic->state = JS_LOAD_IC_MEGAMORPHIC;
             js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_MEGAMORPHIC);
+            js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_MEGAMORPHIC);
             return value;
         }
+        js_profile_load_ic_site(ic->profile_label, miss_reason);
     }
 
     return js_property_access_named_ic_slow(object, name, name_len, ic);

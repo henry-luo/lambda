@@ -58,6 +58,7 @@ typedef struct JsLoadIC {
     uint8_t count;
     uint16_t miss_count;
     const char* name;
+    const char* profile_label;
     int name_len;
     uint64_t key_item;
     JsLoadICEntry entries[JS_LOAD_IC_POLY_MAX];

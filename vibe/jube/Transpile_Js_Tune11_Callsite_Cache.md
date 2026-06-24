@@ -1,4 +1,4 @@
-# Transpile JS Tune11 Proposal: Plain-Map Property Lookup ICs
+# Transpile JS Tune11 Proposal: Plain-Map Property Access ICs
 
 Date: 2026-06-24
 Status: implemented first slice; js262 clean
@@ -14,21 +14,27 @@ Primary sources:
 
 ## Goal
 
-Reduce the cost of compiled named property reads such as `a.b` on ordinary
-plain maps without changing JavaScript property semantics.
+Reduce the cost of compiled named property reads and writes such as `a.b` and
+`a.b = v` on ordinary plain maps without changing JavaScript property
+semantics.
 
-This pass has three implementation candidates:
+This pass has four implementation candidates:
 
 0. Split ordinary maps into descriptor-free `MAP_KIND_PLAIN` and
    descriptor-bearing `MAP_KIND_DESC`.
 1. Remove the duplicate shape lookup in `js_own_shape_slot_status()`.
 2. Add a callsite inline cache for compiled non-computed member reads, with both
    monomorphic and small polymorphic states.
+3. Add a callsite inline cache for compiled non-computed member writes to
+   existing own data properties, with both monomorphic and small polymorphic
+   states.
 
 The candidates must be measured and accepted separately where possible. P0 is
-the invariant that lets P2 have a cheap hit path. P1 is a narrow runtime
+the invariant that lets P2 and P3 have cheap hit paths. P1 is a narrow runtime
 cleanup. P2 is a larger compiler/runtime fast path and must keep a complete
-fallback to the current `js_property_access()` behavior.
+fallback to the current `js_property_access()` behavior. P3 builds on the same
+plain-map invariant for writes, but must keep the full `[[Set]]` path for every
+case that is not a proven own data-property update.
 
 ## Implementation Update: 2026-06-24
 
@@ -45,8 +51,10 @@ This first slice has been implemented:
 - added helper-based callsite load IC support for compiled fixed-name member
   reads, with monomorphic, polymorphic, and megamorphic states;
 - kept IC fast hits plain-map-only and reduced the fast-hit guard to receiver
-  map, `MAP_KIND_PLAIN`, data pointer, shape pointer, and byte-offset bounds;
+  map, `MAP_KIND_PLAIN`, data pointer, and shape pointer in release builds;
 - moved descriptor/accessor/deleted validation to IC install time;
+- removed the bad pointer-sized alignment and pointer-sized bounds checks from
+  `js_load_ic_offset_ok()`; debug builds still check `byte_offset < data_cap`;
 - added the runtime flag `LAMBDA_JS_LOAD_IC=0` to disable the new load IC path
   for A/B measurement and emergency gating.
 
@@ -87,11 +95,11 @@ Back-to-back js262 results:
 
 | Mode | Fully passed | Failed | Regressions | Total wall | Batch execute |
 |------|-------------:|-------:|------------:|-----------:|--------------:|
-| `LAMBDA_JS_LOAD_IC=0` | 40261 / 40261 | 0 | 0 | 92.7s | 92.3s |
-| Load IC enabled | 40261 / 40261 | 0 | 0 | 94.5s | 94.1s |
+| `LAMBDA_JS_LOAD_IC=0` | 40261 / 40261 | 0 | 0 | 109.4s | 109.0s |
+| Load IC enabled | 40261 / 40261 | 0 | 0 | 110.5s | 110.1s |
 
 The js262 correctness gate is clean. The back-to-back timing delta is about
-+1.8s / +1.9% wall time for the helper-based IC version. This does not show a
++1.1s / +1.0% wall time for the helper-based IC version. This does not show a
 suite-level win, and suggests the helper-call overhead can outweigh the current
 fast path on js262-shaped workloads.
 
@@ -100,8 +108,8 @@ fast path on js262-shaped workloads.
 Full LambdaJS benchmark sweep, one run per benchmark, no JSON write:
 
 ```bash
-env LAMBDA_JS_LOAD_IC=0 python3 test/benchmark/run_benchmarks.py -e lambdajs -n 1 --no-save > temp/tune11_bench_full_noic.txt 2>&1
-python3 test/benchmark/run_benchmarks.py -e lambdajs -n 1 --no-save > temp/tune11_bench_full_ic.txt 2>&1
+env LAMBDA_JS_LOAD_IC=0 python3 test/benchmark/run_benchmarks.py -e lambdajs -n 1 --no-save > temp/tune11_offsetfix_bench_full_noic.txt 2>&1
+python3 test/benchmark/run_benchmarks.py -e lambdajs -n 1 --no-save > temp/tune11_offsetfix_bench_full_ic.txt 2>&1
 ```
 
 Result: 62 benchmarks were attempted in each mode; 58 reported timings in each
@@ -112,50 +120,196 @@ mode. Existing heavy LambdaJS timeout/failure cases in this run were:
 - `jetstream/navier_stokes`;
 - `jetstream/hashmap`.
 
-Across the 58 common timed results, `geomean(no-IC time / IC time) = 1.0036`,
-or a +0.36% one-run speedup for IC enabled. That is effectively neutral at this
+Across the 58 common timed results, `geomean(no-IC time / IC time) = 0.9988`,
+or a -0.12% one-run delta for IC enabled. That is effectively neutral at this
 sample size.
 
 Notable full-sweep rows:
 
 | Benchmark | Load IC | No load IC | Delta |
 |-----------|--------:|-----------:|------:|
-| `awfy/richards` | 6.71s | 6.64s | -1.0% |
-| `awfy/deltablue` | 3.71s | 3.67s | -1.1% |
-| `jetstream/cube3d` | 65.70s | 67.53s | +2.8% |
-| `jetstream/richards` | 835ms | 806ms | -3.5% |
-| `jetstream/splay` | 1.58s | 1.57s | -0.6% |
-| `jetstream/deltablue` | 2.28s | 2.27s | -0.4% |
-| `jetstream/crypto_sha1` | 243ms | 244ms | +0.4% |
-| `jetstream/raytrace3d` | 2.42s | 2.47s | +2.1% |
+| `awfy/richards` | 6.90s | 6.89s | -0.1% |
+| `awfy/deltablue` | 3.81s | 3.81s | 0.0% |
+| `jetstream/cube3d` | 69.93s | 73.56s | +5.2% |
+| `jetstream/richards` | 832ms | 834ms | +0.2% |
+| `jetstream/splay` | 1.65s | 1.65s | 0.0% |
+| `jetstream/deltablue` | 2.36s | 2.42s | +2.5% |
+| `jetstream/crypto_sha1` | 250ms | 251ms | +0.4% |
+| `jetstream/raytrace3d` | 2.50s | 2.53s | +1.2% |
 
 Focused property-heavy A/B, three-run medians, no JSON write:
 
 ```bash
-env LAMBDA_JS_LOAD_IC=0 python3 test/benchmark/run_benchmarks.py -e lambdajs -n 3 --no-save -s awfy,jetstream -b richards,deltablue,splay,cube3d,crypto_sha1,raytrace3d > temp/tune11_bench_focus_noic.txt 2>&1
-python3 test/benchmark/run_benchmarks.py -e lambdajs -n 3 --no-save -s awfy,jetstream -b richards,deltablue,splay,cube3d,crypto_sha1,raytrace3d > temp/tune11_bench_focus_ic.txt 2>&1
+env LAMBDA_JS_LOAD_IC=0 python3 test/benchmark/run_benchmarks.py -e lambdajs -n 3 --no-save -s awfy,jetstream -b richards,deltablue,splay,cube3d,crypto_sha1,raytrace3d > temp/tune11_offsetfix_bench_focus_noic.txt 2>&1
+python3 test/benchmark/run_benchmarks.py -e lambdajs -n 3 --no-save -s awfy,jetstream -b richards,deltablue,splay,cube3d,crypto_sha1,raytrace3d > temp/tune11_offsetfix_bench_focus_ic.txt 2>&1
 ```
 
 | Benchmark | Load IC | No load IC | Delta |
 |-----------|--------:|-----------:|------:|
-| `awfy/richards` | 6.72s | 6.61s | -1.6% |
-| `awfy/deltablue` | 3.71s | 3.67s | -1.1% |
-| `jetstream/cube3d` | 66.14s | 65.06s | -1.6% |
-| `jetstream/richards` | 815ms | 806ms | -1.1% |
-| `jetstream/splay` | 1.58s | 1.58s | 0.0% |
-| `jetstream/deltablue` | 2.27s | 2.26s | -0.4% |
-| `jetstream/crypto_sha1` | 240ms | 241ms | +0.4% |
-| `jetstream/raytrace3d` | 2.40s | 2.38s | -0.8% |
+| `awfy/richards` | 6.90s | 6.90s | 0.0% |
+| `awfy/deltablue` | 3.81s | 3.81s | 0.0% |
+| `jetstream/cube3d` | 71.86s | 72.40s | +0.7% |
+| `jetstream/richards` | 829ms | 833ms | +0.5% |
+| `jetstream/splay` | 1.65s | 1.66s | +0.6% |
+| `jetstream/deltablue` | 2.33s | 2.36s | +1.3% |
+| `jetstream/crypto_sha1` | 248ms | 250ms | +0.8% |
+| `jetstream/raytrace3d` | 2.49s | 2.54s | +2.0% |
 
-Focused geomean across the eight common results was -0.79% for IC enabled.
+Focused geomean across the eight common results was +0.74% for IC enabled.
+
+### Load IC Hit-Rate Profile
+
+Profile build command:
+
+```bash
+make build-release-profile
+```
+
+Focused profiler runs:
+
+```bash
+JS_EXEC_PROFILE=time JS_EXEC_PROFILE_OUT=temp/tune11_richards_ic_profile.tsv ./lambda-profile.exe js test/benchmark/awfy/richards2_bundle.js --no-log
+LAMBDA_JS_LOAD_IC=0 JS_EXEC_PROFILE_OUT=temp/tune11_richards_noic_profile.tsv JS_EXEC_PROFILE=time ./lambda-profile.exe js test/benchmark/awfy/richards2_bundle.js --no-log
+JS_EXEC_PROFILE=time JS_EXEC_PROFILE_OUT=temp/tune11_deltablue_ic_profile.tsv ./lambda-profile.exe js test/benchmark/awfy/deltablue2_bundle.js --no-log
+LAMBDA_JS_LOAD_IC=0 JS_EXEC_PROFILE_OUT=temp/tune11_deltablue_noic_profile.tsv JS_EXEC_PROFILE=time ./lambda-profile.exe js test/benchmark/awfy/deltablue2_bundle.js --no-log
+```
+
+Observed load-IC aggregate counters:
+
+| Benchmark | Probes | Mono hits | Poly hits | Misses | Megamorphic | Fast-hit rate |
+|-----------|-------:|----------:|----------:|-------:|------------:|--------------:|
+| `awfy/richards` | 4,094,400 | 4,844 | 34,642 | 2,958,295 | 1,096,638 | 0.96% |
+| `awfy/deltablue` | 2,529,102 | 100 | 1,978 | 2,381,224 | 145,816 | 0.08% |
+
+This proves the IC fast path is reachable, but the current insertion policy is
+too broad. It sends many named member reads through `js_property_access_named_ic`
+even when the receiver/property pair cannot install a plain-own-data entry.
+
+Likely low-hit-rate causes:
+
+- inherited properties and prototype methods: common JS patterns such as
+  `obj.method` miss because the first implementation caches only own data
+  properties;
+- descriptor-bearing maps: function objects, class/prototype objects, array
+  companion maps, and any object promoted to `MAP_KIND_DESC` are intentionally
+  excluded;
+- exotic and builtin receivers: typed arrays, DOM/CSSOM, process/env-like maps,
+  strings/primitives, and builtin fallback cases still enter the helper if they
+  reach the final named-member fallback;
+- semantic misses do not currently disable a site: `miss_count` increments, but
+  a site that repeatedly sees absent/inherited/descriptor/exotic cases can stay
+  cache-empty and keep probing forever;
+- megamorphic sites still pay the helper call before immediately falling back.
+
+The most important next step is per-site load-IC profiling with fallback reason
+counts. Aggregate counters show the problem, but they do not yet identify which
+sites should be disabled, inlined, or given a different cache shape.
+
+#### Richards Per-Site Breakdown
+
+A profiling-only `# Load IC sites` section was added to the execution profiler
+to split probes by site and miss reason.
+
+Richards total by reason:
+
+| Reason | Count | Share of probes |
+|--------|------:|----------------:|
+| `probe` | 4,094,400 | 100.0% |
+| `miss_offset` | 2,958,200 | 72.3% |
+| `megamorphic` | 1,096,638 | 26.8% |
+| `hit_mono + hit_poly` | 39,486 | 1.0% |
+| `install_mono + install_poly` | 76 | 0.0% |
+
+Top `miss_offset` sites:
+
+| Site | Probes | Meaning |
+|------|-------:|---------|
+| `this.taskHolding_@140:12` | 533,550 | `TaskState.isTaskHoldingOrWaiting()` boolean field |
+| `this.packetPending_@140:35` | 505,750 | `TaskState.isTaskHoldingOrWaiting()` boolean field |
+| `this.packetPending_@144:12` | 328,650 | `TaskState.isWaitingWithPacket()` boolean field |
+| `this.handle@246:35` | 328,650 | `TaskControlBlock.runTask()` function/handle field |
+| `this.taskWaiting_@140:58` | 300,300 | `TaskState.isTaskHoldingOrWaiting()` boolean field |
+
+For these sites, the receiver is a plain map and the own `ShapeEntry` is found,
+but `js_load_ic_offset_ok()` rejects the entry before install. The current IC
+requires pointer-sized alignment even though the normal map reader,
+`_map_read_field`, can read fields according to `ShapeEntry::type`. In Richards
+this rejects many compact boolean/object fields that are otherwise hot own
+properties.
+
+Post check-fix rerun:
+
+```bash
+JS_EXEC_PROFILE=time JS_EXEC_PROFILE_OUT=temp/tune11_richards_offsetfix_ic_profile.tsv ./lambda-profile.exe js test/benchmark/awfy/richards2_bundle.js --no-log
+```
+
+Richards total by reason after removing pointer-sized alignment and
+pointer-sized bounds checks from the release fast path:
+
+| Reason | Count | Share of probes |
+|--------|------:|----------------:|
+| `probe` | 4,094,400 | 100.0% |
+| `miss_offset` | 0 | 0.0% |
+| `megamorphic` | 4,047,008 | 98.8% |
+| `hit_mono + hit_poly` | 47,244 | 1.2% |
+| `install_mono + install_poly` | 148 | 0.0% |
+
+The offset check was therefore a real false-negative guard: the hot boolean
+field sites are now installable. However, those same sites still go
+megamorphic almost immediately because the IC currently keys on `TypeMap*` and
+the benchmark creates many same-layout objects with distinct `TypeMap`
+instances.
+
+Selected post-fix hot sites:
+
+| Site | Probes | Hits | Installs | Miss offset | Megamorphic |
+|------|-------:|-----:|---------:|------------:|------------:|
+| `this.taskHolding_@140:12` | 533,550 | 6 | 4 | 0 | 533,540 |
+| `this.packetPending_@140:35` | 505,750 | 6 | 4 | 0 | 505,740 |
+| `this.taskWaiting_@140:58` | 300,300 | 13 | 4 | 0 | 300,283 |
+
+Top megamorphic sites:
+
+| Site | Probes | Hits | Installs | Megamorphic |
+|------|-------:|-----:|---------:|------------:|
+| `message.link@237:20` | 116,300 | 0 | 4 | 116,296 |
+| `packet.identity@430:29` | 116,100 | 0 | 4 | 116,096 |
+| `dataRecord.workIn@309:38` | 116,400 | 4,652 | 4 | 111,744 |
+| `workPacket_.datum@312:21` | 101,300 | 4,048 | 4 | 97,248 |
+| `dataRecord.pending@282:41` | 92,500 | 3,696 | 4 | 88,800 |
+
+These sites do install valid own data entries, but the IC keys only on
+`TypeMap*`. Constructor-shaped objects currently allocate fresh `TypeMap`
+instances, so same-layout objects can look like different shapes. After four
+observed shapes, the site becomes megamorphic and falls back forever. The
+existing class-shaped slot paths already work around this with structural shape
+guards; the general callsite IC does not yet.
+
+Richards-specific conclusions:
+
+- The largest win is not widening the IC to prototypes. For this benchmark, the
+  bulk of failed probes are hot own fields.
+- `js_load_ic_offset_ok()` must not require pointer-sized alignment or
+  pointer-sized bounds. The release fast path now trusts the installed
+  `ShapeEntry` and shape guard; debug builds keep a narrow `byte_offset <
+  data_cap` assertion-style check.
+- Add a structural same-layout hit path for constructor-shaped objects:
+  cached slot/name plus `slot_entries` or `js_shape_slot_guard`, then direct
+  `_map_read_field`.
+- Improve MIR class-field lowering so boolean/object `this.field` reads such as
+  `TaskState` state flags use `js_get_shaped_slot` instead of reaching the
+  generic named-load IC.
+- Do not simply raise `JS_LOAD_IC_POLY_MAX`; per-object `TypeMap*` churn would
+  only delay megamorphic fallback and increase scan cost.
 
 Interpretation:
 
 - correctness is the decisive result for this slice: js262 has zero
   regressions with the IC enabled;
-- full-suite benchmark impact is effectively neutral in a one-run sweep;
-- focused property-heavy medians are slightly negative for the current
-  helper-call IC;
+- full-suite benchmark impact is effectively neutral in a one-run sweep after
+  the offset check fix;
+- focused property-heavy medians are slightly positive after the offset check
+  fix;
 - the current helper-call IC does not yet produce a defensible broad benchmark
   win;
 - a follow-up should inline at least the monomorphic fast guard in MIR before
@@ -519,6 +673,232 @@ Add a small `# Load IC sites` profiler section with:
 This mirrors the useful Tune10 shape-guard evidence and prevents accepting a
 patch that only looks good in aggregate call counts.
 
+## P3: Callsite Inline Cache for Compiled `a.b = v`
+
+### Definition
+
+A store callsite inline cache stores the existing own data-property slot for a
+specific compiled named property write.
+
+For:
+
+```js
+point.x = next;
+```
+
+the `point.x` store site can remember that a particular `TypeMap*` has own data
+property `"x"` at a specific byte offset. On later executions, the site checks
+the receiver shape pointer and writes the field directly.
+
+This phase should start narrower than the load IC. It should optimize only
+updates to an existing own data property on `MAP_KIND_PLAIN`. Property creation
+and semantic edge cases stay on `js_property_set()` / `js_property_set_v()`.
+
+### Scope
+
+Apply the store IC only to compiled assignment/update sites where the property
+name is fixed:
+
+- include: `a.b = v`
+- include: compound assignment after the read value is computed, such as
+  `a.b += v`
+- include: update assignment after the old value is computed, such as `a.b++`
+- exclude initially: `a[b] = v`, `a?.b = v`, `super.b = v`, private fields,
+  computed property names, destructuring stores, and class/static-field
+  lowering paths
+- preserve strict/sloppy behavior by falling back unless the fast path is a
+  known successful own data-property write
+
+The IC should replace only the final general named-property setter fallback in
+assignment lowering. It must not change earlier special paths for globals,
+module bindings, private fields, super properties, typed arrays, DOM/CSSOM
+objects, or other exotics.
+
+### Runtime structure
+
+Use a separate fixed-size store IC structure. It can share the same entry shape
+as the load IC, but keeping the type separate avoids mixing read and write
+state while the semantics are being proven.
+
+```cpp
+#define JS_STORE_IC_POLY_MAX 4
+
+typedef struct JsStoreICEntry {
+    TypeMap* shape;
+    ShapeEntry* entry;
+    int64_t byte_offset;
+} JsStoreICEntry;
+
+typedef struct JsStoreIC {
+    uint8_t state;      // empty, mono, poly, megamorphic
+    uint8_t count;      // number of populated entries
+    uint16_t miss_count;
+    const char* name;   // interned/namepool property chars
+    int name_len;
+    Item key_item;      // optional cached string Item if lifetime/rooting is safe
+    JsStoreICEntry entries[JS_STORE_IC_POLY_MAX];
+} JsStoreIC;
+```
+
+Add a separate runtime flag, for example `LAMBDA_JS_STORE_IC=0`, so load and
+store ICs can be measured and disabled independently.
+
+### Runtime helper
+
+Add a helper shaped like:
+
+```cpp
+extern "C" Item js_property_set_named_ic(
+    Item object, const char* name, int name_len, Item value,
+    int64_t strict, JsStoreIC* ic);
+```
+
+Fast hit checks after P0:
+
+1. receiver is `LMD_TYPE_MAP`;
+2. `map_kind == MAP_KIND_PLAIN`;
+3. `m->data != NULL`;
+4. `m->type == entry.shape`;
+5. cached `ShapeEntry*` is non-null;
+6. cached byte offset is in `m->data_cap`.
+
+On hit, write `value` directly to the cached slot and return `value`.
+
+The install/miss path performs the heavier validation before it installs or
+uses a new entry:
+
+- the receiver is a plain map;
+- the shape entry exists as an own property before the write;
+- the requested name matches the shape entry;
+- `ShapeEntry::flags == 0`;
+- byte offset is within `m->data_cap`.
+
+Do not install for:
+
+- absent properties or property creation;
+- inherited properties, including inherited setters;
+- accessors;
+- deleted slots;
+- descriptor-bearing maps;
+- arrays and typed arrays;
+- Proxy, DOM, CSSOM, ArrayBuffer, DataView, process.env, document proxy,
+  iterator, array companion maps, or any other non-plain map kind;
+- primitive wrappers and strings;
+- any case that would throw or depend on strict/sloppy `[[Set]]` failure
+  behavior.
+
+The helper fallback remains the current setter:
+
+- strict store: `js_property_set_v(object, key, value, 1)`;
+- sloppy store: `js_property_set(object, key, value)`.
+
+### IC state machine
+
+Use the same empty / monomorphic / polymorphic / megamorphic state machine as
+P2. A shape hit writes directly. A shape miss can install a new entry only if
+the receiver already has an own plain data property with the fixed name. If the
+site sees too many receiver shapes or too many semantic misses, mark it
+megamorphic and skip probing.
+
+### Invalidations and safety
+
+The store IC should also be guard-based rather than mutation-invalidation
+based.
+
+Safe cases:
+
+- ordinary writes to the same own data property keep the same shape and slot;
+- adding/removing properties changes shape or promotes the map out of
+  `MAP_KIND_PLAIN`, so the guard fails;
+- descriptor mutation, accessor install, delete, freeze, seal, and
+  prevent-extension paths must promote to `MAP_KIND_DESC` before the fast path
+  can be trusted;
+- strict/sloppy differences are irrelevant on a proven successful own data
+  write, but every failing or ambiguous write must use the old setter.
+
+Required reset is the same as P2: any IC storing raw `TypeMap*` or
+`ShapeEntry*` must be scoped to the compiled-code lifetime or cleared when the
+runtime heap/batch state is reset.
+
+### MIR integration
+
+In assignment lowering:
+
+1. keep existing special cases first;
+2. when the target is a non-computed named member write, allocate a per-site
+   `JsStoreIC`;
+3. emit `js_property_set_named_ic(obj, name_chars, name_len, value, strict,
+   ic_ptr)`;
+4. keep `js_property_set()` / `js_property_set_v()` as the helper slow path.
+
+For compound/update assignments, the existing read side can still use P2. P3
+only replaces the final store after the new value is computed.
+
+### Profiling counters
+
+Add store-side counters separate from load counters:
+
+- `store_ic_probe`
+- `store_ic_hit_mono`
+- `store_ic_hit_poly`
+- `store_ic_miss`
+- `store_ic_install_mono`
+- `store_ic_install_poly`
+- `store_ic_megamorphic`
+
+For focused profiling, record the site label, state, hit/miss counts, and the
+number of fallback stores caused by absent properties versus descriptor/exotic
+cases.
+
+## P4: Follow-Up IC Performance Improvements
+
+The current load IC is helper-call based. That kept the first slice small and
+safe, but the quiet-machine rerun shows the helper overhead can erase the slot
+lookup savings. Before expecting broad wins, optimize the IC implementation
+itself:
+
+1. Inline the monomorphic fast guard in MIR.
+   - Load `ic->state`, cached shape, and cached byte offset directly from the
+     per-site IC.
+   - Check receiver map, `MAP_KIND_PLAIN`, data pointer, shape pointer, and
+     bounds in MIR.
+   - Read or write the slot directly on hit.
+   - Call the helper only on miss, empty/poly/megamorphic states, or ambiguous
+     receiver cases.
+2. Keep the polymorphic fast path small.
+   - Inline only mono first if code size is a concern.
+   - If poly is inlined, scan at most four entries and keep the miss branch
+     compact.
+3. Avoid probing megamorphic sites.
+   - Once a site is marked megamorphic, skip the IC helper and call the old
+     property path directly.
+   - This avoids adding an extra helper call on sites the IC has already
+     rejected.
+4. Disable semantically uncacheable sites.
+   - Use `miss_count` to mark a site megamorphic or uncacheable after repeated
+     absent/inherited/descriptor/exotic misses with no installs.
+   - Keep a distinct "uncacheable" state if useful, so shape-megamorphic sites
+     can be separated from never-cacheable semantic sites.
+5. Make IC enablement profile-aware.
+   - Keep counters cheap enough for normal builds or compile them behind the
+     existing profiler mode.
+   - Disable or bypass sites with low hit rate, high miss count, or frequent
+     descriptor/exotic misses.
+6. Reduce slow-path key work.
+   - Reuse the interned/namepool key item where lifetime and rooting are
+     already proven.
+   - Avoid rebuilding boxed string keys on every miss.
+7. Split helper variants by known strictness and operation.
+   - For store ICs, emit separate strict/sloppy helper calls or pass a constant
+     strict flag that MIR can fold.
+   - Keep the hot successful own-data write path free of strict/sloppy
+     branching.
+8. Use profiler output to choose targets.
+   - Prioritize sites with high probe count, stable receiver shape, and high
+     own-data hit rate.
+   - Do not broaden ICs for inherited/accessor/builtin-heavy sites until the
+     plain own-data path is a measured win.
+
 ## Acceptance Plan
 
 Each candidate must be accepted independently.
@@ -560,6 +940,28 @@ Each candidate must be accepted independently.
    - Proxy and DOM/typed-array non-plain objects falling back.
 4. Run JS gtests and js262.
 5. Run focused property-heavy benchmarks with profiler counters.
+6. Run the benchmark suite before accepting any broad claim.
+
+### P3 acceptance
+
+1. Implement helper-only store IC with profiler counters and
+   `LAMBDA_JS_STORE_IC=0`.
+2. Keep the old setter path intact.
+3. Run focused smoke tests that cover:
+   - existing own data-property update;
+   - strict and sloppy existing own data-property update;
+   - accessor setter;
+   - inherited setter;
+   - inherited read-only/non-writable property;
+   - absent property creation;
+   - non-extensible receiver with absent property;
+   - `Object.defineProperty` data-to-accessor and writable-to-non-writable
+     transitions;
+   - delete after cache population;
+   - object shape change after cache population;
+   - Proxy and DOM/typed-array non-plain objects falling back.
+4. Run JS gtests and js262.
+5. Run focused property-write-heavy benchmarks with profiler counters.
 6. Run the benchmark suite before accepting any broad claim.
 
 ## Performance Impact Checks
@@ -655,6 +1057,15 @@ Expected profile signal for P2:
 - megamorphic sites are visible and do not keep probing forever;
 - wall time improves in non-profile release runs, not only in profiler output.
 
+Expected profile signal for P3:
+
+- `property_set` / `property_set_v` call counts decrease at hot member-write
+  sites;
+- store IC hit counts dominate misses on stable write sites;
+- fallback reasons show absent/inherited/accessor/exotic stores remain on the
+  semantic path;
+- wall time improves in non-profile release runs, not only in profiler output.
+
 ## Keep / Revert Criteria
 
 Keep P1 if:
@@ -675,6 +1086,18 @@ Keep P2 if:
 - focused benchmark medians improve;
 - full `./test/benchmark` LambdaJS pass is neutral or positive overall.
 
+Keep P3 if:
+
+- js262 has zero regressions;
+- JS gtests pass;
+- descriptor promotion is in place before store IC enablement;
+- focused semantic tests cover strict/sloppy writes, accessors, inherited
+  setters, absent properties, non-extensible receivers, deletes, descriptor
+  transitions, shape changes, and exotics;
+- store IC hit rates are high on stable property-write sites;
+- focused benchmark medians improve;
+- full `./test/benchmark` LambdaJS pass is neutral or positive overall.
+
 Revert or gate P2 if:
 
 - it creates any js262 regression;
@@ -685,10 +1108,21 @@ Revert or gate P2 if:
 - it increases benchmark wall time despite reducing call counts;
 - most hot sites become megamorphic or miss-heavy.
 
+Revert or gate P3 if:
+
+- it creates any js262 regression;
+- it changes strict/sloppy `[[Set]]` behavior;
+- it bypasses accessors, inherited setters, non-writable properties, or
+  non-extensible failure behavior;
+- any descriptor-bearing ordinary map remains incorrectly tagged
+  `MAP_KIND_PLAIN`;
+- it increases benchmark wall time despite reducing setter call counts;
+- most hot store sites become megamorphic or miss-heavy.
+
 ## Open Questions
 
-1. Should the first P2 implementation use only a runtime helper, or should it
-   inline the monomorphic guard in MIR immediately?
+1. Should the next load-IC slice inline the monomorphic guard in MIR immediately,
+   now that the helper-only version is neutral to slightly negative?
 2. Where should per-site IC storage live so raw `TypeMap*` / `ShapeEntry*`
    pointers are cleared on heap reset and remain valid for compiled-code
    lifetime?
@@ -699,3 +1133,5 @@ Revert or gate P2 if:
    key on slow path until lifetime/rooting is proven?
 5. Should future work ever downgrade a descriptor map back to `MAP_KIND_PLAIN`
    after all flags are cleared, or is monotonic promotion preferable forever?
+6. Should P3 share entry structs/state constants with P2, or stay separate until
+   store semantics and profiling are stable?
