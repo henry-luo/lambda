@@ -377,16 +377,20 @@ static int parse_http_request(const char* data, int data_len, ParsedRequest* req
 
 typedef struct JsHttpServer {
     uv_tcp_t  tcp;
+    uv_pipe_t pipe;
     Item      js_object;
     Item      request_handler;     // callback(req, res)
     Item      incoming_message_ctor;
     Item      server_response_ctor;
     bool      reject_nonstandard_body_writes;
+    bool      is_pipe;
+    bool      handle_initialized;
     int       connection_count;
 } JsHttpServer;
 
 typedef struct JsHttpConn {
     uv_tcp_t     tcp;
+    uv_pipe_t    pipe;
     JsHttpServer* server;
     Item         async_resource;
     Item         socket_object;
@@ -398,11 +402,12 @@ typedef struct JsHttpConn {
     int          request_body_remaining;
     bool         destroyed;
     bool         read_ended;
+    bool         is_pipe;
 } JsHttpConn;
 
 static uv_stream_t* http_conn_stream(JsHttpConn* conn) {
     if (!conn) return NULL;
-    return (uv_stream_t*)&conn->tcp;
+    return conn->is_pipe ? (uv_stream_t*)&conn->pipe : (uv_stream_t*)&conn->tcp;
 }
 
 static void http_server_note_conn_closed(JsHttpConn* conn);
@@ -1555,10 +1560,12 @@ static Item make_request_object(JsHttpConn* conn, ParsedRequest* req) {
 
 static uv_stream_t* http_server_stream(JsHttpServer* srv) {
     if (!srv) return NULL;
-    return (uv_stream_t*)&srv->tcp;
+    if (!srv->handle_initialized) return NULL;
+    return srv->is_pipe ? (uv_stream_t*)&srv->pipe : (uv_stream_t*)&srv->tcp;
 }
 
 static uv_handle_t* http_server_handle(JsHttpServer* srv) {
+    if (!srv || !srv->handle_initialized) return NULL;
     return (uv_handle_t*)http_server_stream(srv);
 }
 
@@ -2007,8 +2014,14 @@ static void http_server_connection_cb(uv_stream_t* server, int status) {
     uv_loop_t* loop = server->loop;
 
     JsHttpConn* conn = (JsHttpConn*)mem_calloc(1, sizeof(JsHttpConn), MEM_CAT_JS_RUNTIME);
-    uv_tcp_init(loop, &conn->tcp);
-    conn->tcp.data = conn;
+    conn->is_pipe = srv->is_pipe;
+    if (conn->is_pipe) {
+        uv_pipe_init(loop, &conn->pipe, 0);
+        conn->pipe.data = conn;
+    } else {
+        uv_tcp_init(loop, &conn->tcp);
+        conn->tcp.data = conn;
+    }
     conn->server = srv;
     conn->recv_cap = 8192;
     conn->recv_buf = (char*)mem_alloc(conn->recv_cap, MEM_CAT_JS_RUNTIME);
@@ -2049,10 +2062,20 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
     if (!srv) return self;
 
     int port = 80;
+    bool use_pipe = false;
+    char pipe_path[4096];
+    pipe_path[0] = '\0';
     if (get_type_id(port_item) == LMD_TYPE_FUNC) {
         callback = port_item;
         host_item = make_js_undefined();
         port = 0;
+    } else if (get_type_id(port_item) == LMD_TYPE_STRING) {
+        String* path = it2s(port_item);
+        int len = (int)path->len < (int)sizeof(pipe_path) - 1 ?
+            (int)path->len : (int)sizeof(pipe_path) - 1;
+        memcpy(pipe_path, path->chars, (size_t)len);
+        pipe_path[len] = '\0';
+        use_pipe = true;
     } else if (port_item.item == 0 ||
                get_type_id(port_item) == LMD_TYPE_UNDEFINED ||
                get_type_id(port_item) == LMD_TYPE_NULL) {
@@ -2071,9 +2094,22 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
         host_buf[len] = '\0';
     }
 
-    struct sockaddr_in addr;
-    uv_ip4_addr(host_buf, port, &addr);
-    int r = uv_tcp_bind(&srv->tcp, (const struct sockaddr*)&addr, 0);
+    int r = 0;
+    srv->is_pipe = use_pipe;
+    if (use_pipe) {
+        uv_pipe_init(lambda_uv_loop(), &srv->pipe, 0);
+        srv->pipe.data = srv;
+        srv->handle_initialized = true;
+        remove(pipe_path);
+        r = uv_pipe_bind(&srv->pipe, pipe_path);
+    } else {
+        struct sockaddr_in addr;
+        uv_tcp_init(lambda_uv_loop(), &srv->tcp);
+        srv->tcp.data = srv;
+        srv->handle_initialized = true;
+        uv_ip4_addr(host_buf, port, &addr);
+        r = uv_tcp_bind(&srv->tcp, (const struct sockaddr*)&addr, 0);
+    }
     if (r != 0) {
         log_error("http: server bind failed: %s", uv_strerror(r));
         Item err = js_new_error(make_string_item(uv_strerror(r)));
@@ -2110,9 +2146,25 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
 // server.close([callback])
 extern "C" Item js_http_server_close(Item self, Item callback) {
     Item handle_item = js_property_get(self, make_string_item("__server__"));
-    if (handle_item.item == 0) return self;
+    if (handle_item.item == 0 ||
+        get_type_id(handle_item) == LMD_TYPE_NULL ||
+        get_type_id(handle_item) == LMD_TYPE_UNDEFINED) {
+        if (get_type_id(callback) == LMD_TYPE_FUNC) {
+            Item err = http_error_with_code("ERR_SERVER_NOT_RUNNING", "Server is not running.");
+            js_call_function(callback, self, &err, 1);
+            js_microtask_flush();
+        }
+        return self;
+    }
     JsHttpServer* srv = (JsHttpServer*)(uintptr_t)it2i(handle_item);
-    if (!srv) return self;
+    if (!srv || !srv->handle_initialized) {
+        if (get_type_id(callback) == LMD_TYPE_FUNC) {
+            Item err = http_error_with_code("ERR_SERVER_NOT_RUNNING", "Server is not running.");
+            js_call_function(callback, self, &err, 1);
+            js_microtask_flush();
+        }
+        return self;
+    }
 
     js_property_set(self, make_string_item("listening"), (Item){.item = b2it(false)});
 
@@ -2202,6 +2254,10 @@ static Item js_http_server_inst_listen(Item maybe_self, Item port_item, Item hos
 }
 
 static Item js_http_server_inst_close(Item maybe_self, Item callback) {
+    Item this_obj = js_get_this();
+    if (js_class_id(this_obj) == JS_CLASS_SERVER) {
+        return js_http_server_close(this_obj, maybe_self);
+    }
     Item self = js_http_receiver(maybe_self, "__server__");
     return js_http_server_close(self, self.item == maybe_self.item ? callback : maybe_self);
 }
@@ -2267,8 +2323,6 @@ extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler
     }
 
     JsHttpServer* srv = (JsHttpServer*)mem_calloc(1, sizeof(JsHttpServer), MEM_CAT_JS_RUNTIME);
-    uv_tcp_init(loop, &srv->tcp);
-    srv->tcp.data = srv;
     srv->request_handler = handler;
     srv->incoming_message_ctor = incoming_ctor;
     srv->server_response_ctor = response_ctor;
@@ -2307,6 +2361,7 @@ extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler
 
 typedef struct JsHttpClientReq {
     uv_tcp_t   tcp;
+    uv_pipe_t  pipe;
     Item       js_object;        // the ClientRequest object
     Item       callback;          // response callback
     Item       als_context;
@@ -2327,6 +2382,7 @@ typedef struct JsHttpClientReq {
     bool       end_called;
     bool       connected;
     bool       has_content_length;
+    bool       is_pipe;
     bool       abort_handler_set;
     bool       abort_scheduled;
     Item       abort_signal;
@@ -2425,7 +2481,7 @@ static void http_client_schedule_finish(Item req_obj) {
 
 static uv_stream_t* http_client_stream(JsHttpClientReq* creq) {
     if (!creq) return NULL;
-    return (uv_stream_t*)&creq->tcp;
+    return creq->is_pipe ? (uv_stream_t*)&creq->pipe : (uv_stream_t*)&creq->tcp;
 }
 
 static uv_handle_t* http_client_handle(JsHttpClientReq* creq) {
@@ -2816,7 +2872,9 @@ static void js_http_client_finish_response_if_complete(JsHttpClientReq* creq, It
                                                        Item headers, int body_len) {
     if (!creq || creq->response_ended) return;
     int content_length = js_http_response_content_length(headers);
-    if (strcmp(creq->method, "HEAD") == 0) content_length = 0;
+    Item status_item = js_property_get(res, make_string_item("statusCode"));
+    int status = get_type_id(status_item) == LMD_TYPE_INT ? (int)it2i(status_item) : 0;
+    if (strcmp(creq->method, "HEAD") == 0 || status == 204 || status == 304) content_length = 0;
     if (content_length < 0 || body_len < content_length) return;
     js_readable_push(res, ItemNull);
     creq->response_ended = true;
@@ -3617,8 +3675,20 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
     char host_buf[256] = "localhost";
     char method_buf[16] = "GET";
     char path_buf[4096] = "/";
+    char socket_path[4096];
+    socket_path[0] = '\0';
+    bool use_pipe = false;
 
     if (get_type_id(options_item) == LMD_TYPE_MAP) {
+        Item spath = js_property_get(options_item, make_string_item("socketPath"));
+        if (get_type_id(spath) == LMD_TYPE_STRING) {
+            String* ss = it2s(spath);
+            int len = (int)ss->len < (int)sizeof(socket_path) - 1 ?
+                (int)ss->len : (int)sizeof(socket_path) - 1;
+            memcpy(socket_path, ss->chars, (size_t)len);
+            socket_path[len] = '\0';
+            use_pipe = true;
+        }
         Item p = js_property_get(options_item, make_string_item("port"));
         http_client_parse_port(p, &port);
         Item h = js_property_get(options_item, make_string_item("hostname"));
@@ -3763,8 +3833,14 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
 
     // create client request
     JsHttpClientReq* creq = (JsHttpClientReq*)mem_calloc(1, sizeof(JsHttpClientReq), MEM_CAT_JS_RUNTIME);
-    uv_tcp_init(loop, &creq->tcp);
-    creq->tcp.data = creq;
+    creq->is_pipe = use_pipe;
+    if (use_pipe) {
+        uv_pipe_init(loop, &creq->pipe, 0);
+        creq->pipe.data = creq;
+    } else {
+        uv_tcp_init(loop, &creq->tcp);
+        creq->tcp.data = creq;
+    }
     creq->callback = callback;
     creq->als_context = js_als_capture_context();
     creq->recv_cap = 16384;
@@ -3822,10 +3898,15 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
     uv_connect_t* conn = (uv_connect_t*)mem_calloc(1, sizeof(uv_connect_t), MEM_CAT_JS_RUNTIME);
     conn->data = creq;
 
-    struct sockaddr_in addr;
-    const char* connect_host = strcmp(host_buf, "localhost") == 0 ? "127.0.0.1" : host_buf;
-    uv_ip4_addr(connect_host, port, &addr);
-    int r = uv_tcp_connect(conn, &creq->tcp, (const struct sockaddr*)&addr, http_client_connect_cb);
+    int r = 0;
+    if (use_pipe) {
+        uv_pipe_connect(conn, &creq->pipe, socket_path, http_client_connect_cb);
+    } else {
+        struct sockaddr_in addr;
+        const char* connect_host = strcmp(host_buf, "localhost") == 0 ? "127.0.0.1" : host_buf;
+        uv_ip4_addr(connect_host, port, &addr);
+        r = uv_tcp_connect(conn, &creq->tcp, (const struct sockaddr*)&addr, http_client_connect_cb);
+    }
     if (r != 0) {
         log_error("http: request connect failed: %s", uv_strerror(r));
         mem_free(conn);

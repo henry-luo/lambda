@@ -12148,6 +12148,8 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     bound->env_size = orig->env_size;
     bound->with_env = orig->with_env;
     bound->with_env_depth = orig->with_env_depth;
+    bound->module_vars = orig->module_vars;
+    bound->source_text = orig->source_text;
     bound->prototype = orig->prototype; // ES spec: bound functions use target's prototype for [[Construct]]
     bound->builtin_id = orig->builtin_id;
     bound->flags = orig->flags; // preserve strict/arrow flags from original
@@ -31598,8 +31600,8 @@ static Item js_async_hooks_root_resource = {0};
 static Item js_async_hooks_current_resource = {0};
 static int64_t js_async_hooks_next_id = 2;
 
-#define JS_ASYNC_HOOK_MAX 64
-#define JS_ASYNC_PENDING_DESTROY_MAX 512
+#define JS_ASYNC_HOOK_MAX 256
+#define JS_ASYNC_PENDING_DESTROY_MAX 1024
 static Item js_async_hooks[JS_ASYNC_HOOK_MAX];
 static int js_async_hook_count = 0;
 static Item js_async_pending_destroy_resources[JS_ASYNC_PENDING_DESTROY_MAX];
