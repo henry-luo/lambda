@@ -671,6 +671,7 @@ test-fs-promises-write-optional-params.js
 test-fs-promises-writefile-typedarray.js
 test-fs-promises-writefile-with-fd.js
 test-fs-promises-writefile.js
+test-fs-promisified.js
 test-fs-read-file-assert-encoding.js
 test-fs-read-file-sync-hostname.js
 test-fs-read-file-sync.js
@@ -706,6 +707,7 @@ test-fs-readfile.js
 test-fs-readfilesync-enoent.js
 test-fs-readfilesync-pipe-large.js
 test-fs-readlink-type-check.js
+test-fs-readv-promisify.js
 test-fs-readv-promises.js
 test-fs-readv-sync.js
 test-fs-readv.js

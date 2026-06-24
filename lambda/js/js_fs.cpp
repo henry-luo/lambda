@@ -33,6 +33,9 @@
 #endif
 #endif
 
+extern "C" Item js_util_custom_promisify_args_symbol(void);
+extern "C" Item js_util_promisify_custom_symbol(void);
+
 // Helper: make JS undefined value
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
@@ -2021,6 +2024,123 @@ extern "C" Item js_fs_write(Item fd_item, Item data_item, Item offset_item,
     return make_js_undefined();
 }
 
+extern "C" Item js_fs_readvSync(Item fd_item, Item buffers_item, Item position_item) {
+    int fd = 0;
+    if (!fs_validate_fd(fd_item, &fd)) return ItemNull;
+    if (get_type_id(buffers_item) != LMD_TYPE_ARRAY) {
+        return js_throw_invalid_arg_type("buffers", "ArrayBufferView[]", buffers_item);
+    }
+
+    int64_t count64 = js_array_length(buffers_item);
+    if (count64 <= 0) return (Item){.item = i2it(0)};
+    if (count64 > 1024) {
+        js_throw_out_of_range("buffers.length", "<= 1024", (Item){.item = i2it(count64)});
+        return ItemNull;
+    }
+
+    uv_buf_t* bufs = (uv_buf_t*)alloca((size_t)count64 * sizeof(uv_buf_t));
+    for (int64_t i = 0; i < count64; i++) {
+        Item buffer = js_array_get_int(buffers_item, i);
+        JsTypedArray* ta = fs_get_typed_array(buffer);
+        if (!ta) return js_throw_invalid_arg_type("buffers", "ArrayBufferView[]", buffer);
+        int blen = js_typed_array_byte_length(buffer);
+        uint8_t* data = (uint8_t*)js_typed_array_current_data_ptr(buffer);
+        bufs[i] = uv_buf_init((char*)data, blen);
+    }
+
+    int64_t position = -1;
+    if (!fs_read_position_to_int64(position_item, &position)) return ItemNull;
+
+    uv_fs_t req;
+    int nread = uv_fs_read(lambda_uv_loop(), &req, fd, bufs, (unsigned int)count64, position, NULL);
+    uv_fs_req_cleanup(&req);
+    if (nread < 0) return (Item){.item = i2it(0)};
+    return (Item){.item = i2it((int64_t)nread)};
+}
+
+extern "C" Item js_fs_readv(Item fd_item, Item buffers_item, Item position_item, Item callback_item) {
+    Item callback = callback_item;
+    Item position = position_item;
+    if (get_type_id(position_item) == LMD_TYPE_FUNC) {
+        callback = position_item;
+        position = make_js_undefined();
+    }
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "function", callback);
+    }
+    Item bytes_read = js_fs_readvSync(fd_item, buffers_item, position);
+    if (js_check_exception()) return ItemNull;
+    Item args[3] = {ItemNull, bytes_read, buffers_item};
+    js_call_function(callback, make_js_undefined(), args, 3);
+    return make_js_undefined();
+}
+
+extern "C" Item js_fs_writevSync(Item fd_item, Item buffers_item, Item position_item) {
+    int fd = 0;
+    if (!fs_validate_fd(fd_item, &fd)) return ItemNull;
+    if (get_type_id(buffers_item) != LMD_TYPE_ARRAY) {
+        return js_throw_invalid_arg_type("buffers", "ArrayBufferView[]", buffers_item);
+    }
+
+    int64_t count64 = js_array_length(buffers_item);
+    if (count64 <= 0) return (Item){.item = i2it(0)};
+    if (count64 > 1024) {
+        js_throw_out_of_range("buffers.length", "<= 1024", (Item){.item = i2it(count64)});
+        return ItemNull;
+    }
+
+    uv_buf_t* bufs = (uv_buf_t*)alloca((size_t)count64 * sizeof(uv_buf_t));
+    for (int64_t i = 0; i < count64; i++) {
+        Item buffer = js_array_get_int(buffers_item, i);
+        int blen = 0;
+        uint8_t* data = buffer_data(buffer, &blen);
+        if (!data && !js_is_typed_array(buffer)) {
+            return js_throw_invalid_arg_type("buffers", "ArrayBufferView[]", buffer);
+        }
+        bufs[i] = uv_buf_init((char*)data, blen);
+    }
+
+    int64_t position = -1;
+    if (get_type_id(position_item) == LMD_TYPE_INT) {
+        position = it2i(position_item);
+    } else if (get_type_id(position_item) != LMD_TYPE_UNDEFINED &&
+               get_type_id(position_item) != LMD_TYPE_NULL) {
+        return js_throw_invalid_arg_type("position", "number", position_item);
+    }
+
+    uv_fs_t req;
+    int nwritten = uv_fs_write(lambda_uv_loop(), &req, fd, bufs, (unsigned int)count64, position, NULL);
+    uv_fs_req_cleanup(&req);
+    if (nwritten < 0) return (Item){.item = i2it(0)};
+    return (Item){.item = i2it((int64_t)nwritten)};
+}
+
+extern "C" Item js_fs_writev(Item fd_item, Item buffers_item, Item position_item, Item callback_item) {
+    Item callback = callback_item;
+    Item position = position_item;
+    if (get_type_id(position_item) == LMD_TYPE_FUNC) {
+        callback = position_item;
+        position = make_js_undefined();
+    }
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "function", callback);
+    }
+    Item bytes_written = js_fs_writevSync(fd_item, buffers_item, position);
+    if (js_check_exception()) return ItemNull;
+    Item args[3] = {ItemNull, bytes_written, buffers_item};
+    js_call_function(callback, make_js_undefined(), args, 3);
+    return make_js_undefined();
+}
+
+static Item js_fs_exists_promisified(Item path_item) {
+    Item exists = js_fs_existsSync(path_item);
+    if (js_check_exception()) {
+        js_clear_exception();
+        exists = (Item){.item = b2it(false)};
+    }
+    return js_promise_resolve(exists);
+}
+
 extern "C" Item js_fs_fstatSync(Item fd_item) {
     int fd = 0;
     if (!fs_validate_fd(fd_item, &fd)) return ItemNull;
@@ -2316,6 +2436,18 @@ static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int para
     Item fn = js_new_function(func_ptr, param_count);
     js_property_set(ns, key, fn);
     return fn;
+}
+
+static void js_fs_set_custom_promisify_args(Item fn, const char* name1, const char* name2) {
+    Item names = js_array_new(0);
+    js_array_push(names, make_string_item(name1));
+    if (name2) js_array_push(names, make_string_item(name2));
+    js_property_set(fn, js_util_custom_promisify_args_symbol(), names);
+}
+
+static void js_fs_set_custom_promisify(Item fn, void* func_ptr, int param_count) {
+    Item custom = js_new_function(func_ptr, param_count);
+    js_property_set(fn, js_util_promisify_custom_symbol(), custom);
 }
 
 // ─── fs.promises wrapper functions ─────────────────────────────────────────
@@ -2810,7 +2942,8 @@ extern "C" Item js_get_fs_namespace(void) {
     js_fs_set_method(fs_namespace, "close",           (void*)js_fs_close_async, 2);
     js_fs_set_method(fs_namespace, "chmod",           (void*)js_fs_chmod_async, 3);
     js_fs_set_method(fs_namespace, "unlink",          (void*)js_fs_unlink_async, 2);
-    js_fs_set_method(fs_namespace, "exists",          (void*)js_fs_exists_async, 2);
+    Item exists_fn = js_fs_set_method(fs_namespace, "exists",          (void*)js_fs_exists_async, 2);
+    js_fs_set_custom_promisify(exists_fn, (void*)js_fs_exists_promisified, 1);
     js_fs_set_method(fs_namespace, "rename",          (void*)js_fs_rename_async, 3);
     js_fs_set_method(fs_namespace, "readdir",         (void*)js_fs_readdir_async, 3);
     js_fs_set_method(fs_namespace, "fstat",           (void*)js_fs_fstat_async, 3);
@@ -2860,10 +2993,18 @@ extern "C" Item js_get_fs_namespace(void) {
     // file descriptor operations
     js_fs_set_method(fs_namespace, "openSync",        (void*)js_fs_openSync, 3);
     js_fs_set_method(fs_namespace, "closeSync",       (void*)js_fs_closeSync, 1);
-    js_fs_set_method(fs_namespace, "read",            (void*)js_fs_read, 6);
+    Item read_fn = js_fs_set_method(fs_namespace, "read",            (void*)js_fs_read, 6);
+    js_fs_set_custom_promisify_args(read_fn, "bytesRead", "buffer");
     js_fs_set_method(fs_namespace, "readSync",        (void*)js_fs_readSync, 5);
-    js_fs_set_method(fs_namespace, "write",           (void*)js_fs_write, 6);
+    Item write_fn = js_fs_set_method(fs_namespace, "write",           (void*)js_fs_write, 6);
+    js_fs_set_custom_promisify_args(write_fn, "bytesWritten", "buffer");
     js_fs_set_method(fs_namespace, "writeSync",       (void*)js_fs_writeSync, 5);
+    Item readv_fn = js_fs_set_method(fs_namespace, "readv",           (void*)js_fs_readv, 4);
+    js_fs_set_custom_promisify_args(readv_fn, "bytesRead", "buffers");
+    js_fs_set_method(fs_namespace, "readvSync",       (void*)js_fs_readvSync, 3);
+    Item writev_fn = js_fs_set_method(fs_namespace, "writev",          (void*)js_fs_writev, 4);
+    js_fs_set_custom_promisify_args(writev_fn, "bytesWritten", "buffer");
+    js_fs_set_method(fs_namespace, "writevSync",      (void*)js_fs_writevSync, 3);
     js_fs_set_method(fs_namespace, "fstatSync",       (void*)js_fs_fstatSync, 1);
 
     // fs.constants — null prototype per Node.js spec
