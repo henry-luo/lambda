@@ -615,6 +615,7 @@ static NodeTestResult run_single_test(const std::string& test_path, size_t ordin
 #else
     snprintf(command, sizeof(command),
              "mkdir -p \"temp/node_test/%s\" && cd \"temp/node_test/%s\" && "
+             "ln -sfn \"../../../ref/node/test\" test && "
              "env -u DYLD_INSERT_LIBRARIES -u DYLD_LIBRARY_PATH -u ASAN_OPTIONS -u MallocNanoZone "
              "-u LAMBDA_NODE_BASELINE_ONLY NODE_COMMON_PORT=%u "
              "timeout -k 5s %d ../../../lambda.exe js \"../../../%s\" --no-log 2>&1",
@@ -843,6 +844,8 @@ static std::vector<NodeOfficialParam> discover_node_official_tests(bool honor_sl
 
 static std::unordered_map<std::string, NodeTestResult> g_test_results;
 static std::mutex g_test_results_mutex;
+static bool g_node_socket_preflight_failed = false;
+static std::string g_node_socket_preflight_message;
 
 static bool node_test_requires_serial(const NodeOfficialParam& t) {
     return t.module == "child-process" ||
@@ -852,6 +855,76 @@ static bool node_test_requires_serial(const NodeOfficialParam& t) {
            t.module == "net" ||
            t.module == "timers" ||
            t.module == "tls";
+}
+
+static bool node_test_needs_socket_preflight(const NodeOfficialParam& t) {
+    return t.module == "http" ||
+           t.module == "https" ||
+           t.module == "net" ||
+           t.module == "tls";
+}
+
+static bool node_tests_need_socket_preflight(const std::vector<NodeOfficialParam>& tests) {
+    for (const auto& t : tests) {
+        if (node_test_needs_socket_preflight(t)) return true;
+    }
+    return false;
+}
+
+static bool run_node_socket_preflight(std::string& message) {
+#ifdef _WIN32
+    (void)message;
+    return true;
+#else
+    const char* command =
+        "mkdir -p \"temp/node_test/_preflight_socket\" && "
+        "cd \"temp/node_test/_preflight_socket\" && "
+        "env -u DYLD_INSERT_LIBRARIES -u DYLD_LIBRARY_PATH -u ASAN_OPTIONS -u MallocNanoZone "
+        "-u LAMBDA_NODE_BASELINE_ONLY NODE_COMMON_PORT=9900 "
+        "timeout -k 2s 10 ../../../lambda.exe js -e "
+        "\"const net=require('net');"
+        "const s=net.createServer();"
+        "s.on('error',(e)=>{console.error('NODE_SOCKET_PREFLIGHT_ERROR',e&&e.code,e&&e.address,e&&e.port);process.exit(1);});"
+        "s.listen(0,()=>s.close(()=>process.exit(0)));\" --no-log 2>&1";
+
+    FILE* pipe = popen(command, "r");
+    if (!pipe) {
+        message = "could not execute socket preflight command";
+        return false;
+    }
+
+    std::string output;
+    char buffer[1024];
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        output += buffer;
+    }
+
+    int status = pclose(pipe);
+    int exit_code = -1;
+#ifdef _WIN32
+    exit_code = status;
+#else
+    if (status != -1) {
+        if (WIFEXITED(status)) {
+            exit_code = WEXITSTATUS(status);
+        } else if (WIFSIGNALED(status)) {
+            exit_code = 128 + WTERMSIG(status);
+        }
+    }
+#endif
+    if (exit_code == 0) return true;
+
+    std::ostringstream ss;
+    ss << "local socket preflight failed before running Node official socket tests (exit "
+       << exit_code << ").\n"
+       << "The current execution sandbox may block net.createServer().listen(0), "
+       << "which would produce false EPERM regressions for http/https/net/tls tests.\n"
+       << "Run the harness from a network-capable context, or use the approved/escalated "
+       << "command path for ./test/test_node_gtest.exe.\n"
+       << "Preflight output:\n" << output;
+    message = ss.str();
+    return false;
+#endif
 }
 
 static void execute_one_test(const NodeOfficialParam& t) {
@@ -1170,6 +1243,17 @@ public:
         auto tests = discover_node_official_tests(true, g_baseline_only);
         tests = filter_node_official_tests_for_gtest(tests);
         g_node_executed_params = tests;
+        if (node_tests_need_socket_preflight(tests)) {
+            std::string message;
+            if (!run_node_socket_preflight(message)) {
+                g_node_socket_preflight_failed = true;
+                g_node_socket_preflight_message = message;
+                fprintf(stderr, "[node-official] ERROR: %s\n", message.c_str());
+                ADD_FAILURE() << message;
+                return;
+            }
+            fprintf(stderr, "[node-official] Local socket preflight passed\n");
+        }
         execute_all_tests(tests);
         auto end = std::chrono::steady_clock::now();
         g_node_run_wall_secs = std::chrono::duration<double>(end - start).count();
@@ -1180,6 +1264,11 @@ bool NodeOfficialTest::suite_executed = false;
 
 TEST_P(NodeOfficialTest, Run) {
     const auto& p = GetParam();
+
+    if (g_node_socket_preflight_failed) {
+        GTEST_SKIP() << "Node socket preflight failed; see setup diagnostic above.";
+        return;
+    }
 
     load_slow_list();
     if (!g_include_slow && g_slow_tests.find(p.filename) != g_slow_tests.end()) {
@@ -1256,6 +1345,12 @@ class NodeOfficialReportListener : public testing::EmptyTestEventListener {
 public:
     void OnTestSuiteEnd(const testing::TestSuite& suite) override {
         if (std::string(suite.name()).find("NodeOfficial") == std::string::npos) return;
+
+        if (g_node_socket_preflight_failed) {
+            printf("\n[node-official] Node official run aborted before test execution: socket preflight failed.\n");
+            printf("[node-official] See the preflight diagnostic above for the required execution mode.\n");
+            return;
+        }
 
         auto tests = g_node_gtest_filter_active
             ? g_node_executed_params

@@ -20,6 +20,9 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#ifndef _WIN32
+#include <sys/statvfs.h>
+#endif
 #include "../../lib/mem.h"
 #include "../../lib/file.h"
 #ifdef _WIN32
@@ -238,7 +241,7 @@ static bool fs_validate_uid_gid(Item value, const char* name, int* out) {
 
 static bool fs_validate_offset_length(Item offset_item, Item length_item, int byte_length,
                                       int* out_offset, int* out_length) {
-    int64_t offset = 0, length = byte_length;
+    int64_t offset = 0, length = -1;
     TypeId offset_type = get_type_id(offset_item);
     TypeId length_type = get_type_id(length_item);
     if (offset_type != LMD_TYPE_UNDEFINED && offset_type != LMD_TYPE_NULL) {
@@ -278,6 +281,9 @@ static bool fs_validate_offset_length(Item offset_item, Item length_item, int by
         snprintf(range, sizeof(range), "<= %d", byte_length);
         js_throw_out_of_range("offset", range, offset_item);
         return false;
+    }
+    if (length < 0) {
+        length = byte_length - offset;
     }
     if (length > byte_length - offset) {
         char range[64];
@@ -389,6 +395,71 @@ extern "C" Item js_readable_push(Item self, Item chunk);
 extern "C" Item js_stream_destroy(Item self, Item err);
 extern Item js_promise_resolve(Item value);
 extern Item js_promise_reject(Item reason);
+extern "C" Item bigint_from_int64(int64_t val);
+extern "C" Item bigint_from_string(const char* str, int len);
+extern "C" Item js_buffer_alloc(Item size_item, Item fill_item);
+extern "C" int64_t bigint_to_int64(Item bi);
+extern "C" Item js_array_is_array(Item value);
+
+static bool fs_is_nullish(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_UNDEFINED || type == LMD_TYPE_NULL;
+}
+
+static bool fs_is_bigint(Item value) {
+    if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
+    Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
+    return dec && dec->unlimited == DECIMAL_BIGINT;
+}
+
+static bool fs_is_options_object(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP || js_is_typed_array(value)) return false;
+    Item is_array = js_array_is_array(value);
+    return is_array.item != b2it(true);
+}
+
+static bool fs_read_position_to_int64(Item position_item, int64_t* out_position) {
+    if (fs_is_nullish(position_item)) {
+        *out_position = -1;
+        return true;
+    }
+    if (fs_is_bigint(position_item)) {
+        int64_t position = bigint_to_int64(position_item);
+        if (position < -1) {
+            js_throw_out_of_range("position", ">= -1", position_item);
+            return false;
+        }
+        *out_position = position;
+        return true;
+    }
+    return fs_validate_int_range(position_item, "position", -1, INT64_MAX, out_position);
+}
+
+static bool fs_read_parse_options(Item options_item, Item fallback_buffer,
+                                  Item* out_buffer, Item* out_offset,
+                                  Item* out_length, Item* out_position) {
+    Item buffer = fallback_buffer;
+    Item offset = make_js_undefined();
+    Item length = make_js_undefined();
+    Item position = make_js_undefined();
+
+    if (fs_is_options_object(options_item)) {
+        Item option_buffer = js_property_get(options_item, make_string_item("buffer"));
+        if (!fs_is_nullish(option_buffer)) buffer = option_buffer;
+        offset = js_property_get(options_item, make_string_item("offset"));
+        length = js_property_get(options_item, make_string_item("length"));
+        position = js_property_get(options_item, make_string_item("position"));
+    }
+
+    if (fs_is_nullish(buffer)) {
+        buffer = js_buffer_alloc((Item){.item = i2it(16384)}, make_js_undefined());
+    }
+    *out_buffer = buffer;
+    *out_offset = offset;
+    *out_length = length;
+    *out_position = position;
+    return true;
+}
 
 extern "C" Item js_stats_isFile() {
     Item mode_val = js_property_get(js_get_this(), make_string_item("__mode"));
@@ -998,6 +1069,65 @@ extern "C" Item js_fs_statSync(Item path_item) {
     return obj;
 }
 
+static bool fs_options_bigint(Item options_item) {
+    if (get_type_id(options_item) != LMD_TYPE_MAP) return false;
+    Item bigint = js_property_get(options_item, make_string_item("bigint"));
+    return js_is_truthy(bigint);
+}
+
+static Item fs_statfs_number(uint64_t value, bool bigint) {
+    if (bigint) {
+        if (value <= (uint64_t)INT64_MAX) return bigint_from_int64((int64_t)value);
+        char buf[32];
+        int len = snprintf(buf, sizeof(buf), "%llu", (unsigned long long)value);
+        return bigint_from_string(buf, len);
+    }
+    if (value > (uint64_t)INT64_MAX) value = (uint64_t)INT64_MAX;
+    return (Item){.item = i2it((int64_t)value)};
+}
+
+static Item make_statfs_object(uint64_t type, uint64_t bsize, uint64_t frsize,
+                               uint64_t blocks, uint64_t bfree, uint64_t bavail,
+                               uint64_t files, uint64_t ffree, bool bigint) {
+    Item obj = js_new_object();
+    js_property_set(obj, make_string_item("type"), fs_statfs_number(type, bigint));
+    js_property_set(obj, make_string_item("bsize"), fs_statfs_number(bsize, bigint));
+    js_property_set(obj, make_string_item("frsize"), fs_statfs_number(frsize, bigint));
+    js_property_set(obj, make_string_item("blocks"), fs_statfs_number(blocks, bigint));
+    js_property_set(obj, make_string_item("bfree"), fs_statfs_number(bfree, bigint));
+    js_property_set(obj, make_string_item("bavail"), fs_statfs_number(bavail, bigint));
+    js_property_set(obj, make_string_item("files"), fs_statfs_number(files, bigint));
+    js_property_set(obj, make_string_item("ffree"), fs_statfs_number(ffree, bigint));
+    return obj;
+}
+
+// fs.statfsSync(path[, options])
+extern "C" Item js_fs_statfsSync(Item path_item, Item options_item) {
+    char path_buf[1024];
+    const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+
+    bool bigint = fs_options_bigint(options_item);
+#ifdef _WIN32
+    return make_statfs_object(0, 4096, 4096, 0, 0, 0, 0, 0, bigint);
+#else
+    struct statvfs vfs;
+    if (statvfs(path, &vfs) != 0) {
+        return js_throw_system_error(uv_translate_sys_error(errno), "statfs", path);
+    }
+    uint64_t frsize = vfs.f_frsize ? (uint64_t)vfs.f_frsize : (uint64_t)vfs.f_bsize;
+    return make_statfs_object(0,
+                              (uint64_t)vfs.f_bsize,
+                              frsize,
+                              (uint64_t)vfs.f_blocks,
+                              (uint64_t)vfs.f_bfree,
+                              (uint64_t)vfs.f_bavail,
+                              (uint64_t)vfs.f_files,
+                              (uint64_t)vfs.f_ffree,
+                              bigint);
+#endif
+}
+
 // fs.appendFileSync(path, data)
 extern "C" Item js_fs_appendFileSync(Item path_item, Item data_item, Item options_item) {
     if (!fs_validate_encoding_options(options_item)) return ItemNull;
@@ -1572,19 +1702,34 @@ extern "C" Item js_fs_readSync(Item fd_item, Item buffer_item, Item offset_item,
     int fd = 0;
     if (!fs_validate_fd(fd_item, &fd)) return ItemNull;
 
-    JsTypedArray* ta = fs_get_typed_array(buffer_item);
-    if (!ta) return js_throw_invalid_arg_type("buffer", "Buffer, TypedArray, or DataView", buffer_item);
-    int blen = js_typed_array_byte_length(buffer_item);
-    uint8_t* data = (uint8_t*)js_typed_array_current_data_ptr(buffer_item);
+    Item read_buffer = buffer_item;
+    Item read_offset = offset_item;
+    Item read_length = length_item;
+    Item read_position = position_item;
+    bool options_form = fs_is_nullish(length_item) && fs_is_nullish(position_item);
+    if (options_form) {
+        if (!fs_is_options_object(offset_item) && !fs_is_nullish(offset_item)) {
+            return js_throw_invalid_arg_type("options", "object", offset_item);
+        }
+        if (!fs_read_parse_options(offset_item, buffer_item, &read_buffer,
+                                   &read_offset, &read_length, &read_position)) {
+            return ItemNull;
+        }
+    }
+
+    JsTypedArray* ta = fs_get_typed_array(read_buffer);
+    if (!ta) return js_throw_invalid_arg_type("buffer", "Buffer, TypedArray, or DataView", read_buffer);
+    int blen = js_typed_array_byte_length(read_buffer);
+    uint8_t* data = (uint8_t*)js_typed_array_current_data_ptr(read_buffer);
 
     int offset = 0, length = blen;
-    if (!fs_validate_offset_length(offset_item, length_item, blen, &offset, &length)) return ItemNull;
+    if (!fs_validate_offset_length(read_offset, read_length, blen, &offset, &length)) return ItemNull;
     if (blen == 0 && length > 0) return fs_throw_empty_read_buffer(ta);
     if (length <= 0) return (Item){.item = i2it(0)};
     if (!data) return (Item){.item = i2it(0)};
 
     int64_t position = -1;
-    if (get_type_id(position_item) == LMD_TYPE_INT) position = it2i(position_item);
+    if (!fs_read_position_to_int64(read_position, &position)) return ItemNull;
 
     uv_buf_t buf = uv_buf_init((char*)(data + offset), length);
     uv_fs_t req;
@@ -1595,22 +1740,84 @@ extern "C" Item js_fs_readSync(Item fd_item, Item buffer_item, Item offset_item,
 }
 
 extern "C" Item js_fs_read(Item fd_item, Item buffer_item, Item offset_item, Item length_item, Item position_item, Item callback) {
+    if (get_type_id(position_item) == LMD_TYPE_FUNC) {
+        callback = position_item;
+        position_item = make_js_undefined();
+    } else if (get_type_id(length_item) == LMD_TYPE_FUNC) {
+        callback = length_item;
+        length_item = make_js_undefined();
+        position_item = make_js_undefined();
+    } else if (get_type_id(offset_item) == LMD_TYPE_FUNC) {
+        callback = offset_item;
+        offset_item = make_js_undefined();
+        length_item = make_js_undefined();
+        position_item = make_js_undefined();
+    } else if (get_type_id(buffer_item) == LMD_TYPE_FUNC) {
+        callback = buffer_item;
+        buffer_item = make_js_undefined();
+        offset_item = make_js_undefined();
+        length_item = make_js_undefined();
+        position_item = make_js_undefined();
+    }
     if (get_type_id(callback) != LMD_TYPE_FUNC) {
         return js_throw_invalid_arg_type("callback", "function", callback);
     }
 
-    Item bytes_read = js_fs_readSync(fd_item, buffer_item, offset_item, length_item, position_item);
+    Item read_buffer = buffer_item;
+    Item read_offset = offset_item;
+    Item read_length = length_item;
+    Item read_position = position_item;
+    bool second_arg_is_options = !fs_get_typed_array(buffer_item) &&
+                                 (fs_is_options_object(buffer_item) || fs_is_nullish(buffer_item));
+    bool third_arg_is_options = fs_get_typed_array(buffer_item) &&
+                                (fs_is_options_object(offset_item) || fs_is_nullish(offset_item)) &&
+                                fs_is_nullish(length_item) && fs_is_nullish(position_item);
+    if (second_arg_is_options) {
+        if (!fs_read_parse_options(buffer_item, make_js_undefined(), &read_buffer,
+                                   &read_offset, &read_length, &read_position)) {
+            return ItemNull;
+        }
+    } else if (third_arg_is_options) {
+        if (!fs_read_parse_options(offset_item, buffer_item, &read_buffer,
+                                   &read_offset, &read_length, &read_position)) {
+            return ItemNull;
+        }
+    }
+
+    Item bytes_read = js_fs_readSync(fd_item, read_buffer, read_offset, read_length, read_position);
     if (js_check_exception()) return ItemNull;
 
-    Item args[3] = {ItemNull, bytes_read, buffer_item};
-    js_call_function(callback, ItemNull, args, 3);
+    Item args[3] = {ItemNull, bytes_read, read_buffer};
+    js_call_function(callback, make_js_undefined(), args, 3);
     return make_js_undefined();
 }
 
 static Item js_fs_filehandle_read(Item buffer_item, Item offset_item, Item length_item, Item position_item) {
     Item self = js_get_this();
     Item fd_item = js_property_get(self, make_string_item("__fd"));
-    Item bytes_read = js_fs_readSync(fd_item, buffer_item, offset_item, length_item, position_item);
+    Item read_buffer = buffer_item;
+    Item read_offset = offset_item;
+    Item read_length = length_item;
+    Item read_position = position_item;
+    bool first_arg_is_options = !fs_get_typed_array(buffer_item) &&
+                                (fs_is_options_object(buffer_item) || fs_is_nullish(buffer_item));
+    bool second_arg_is_options = fs_get_typed_array(buffer_item) &&
+                                 (fs_is_options_object(offset_item) || fs_is_nullish(offset_item)) &&
+                                 fs_is_nullish(length_item) && fs_is_nullish(position_item);
+    if (first_arg_is_options) {
+        if (!fs_read_parse_options(buffer_item, make_js_undefined(), &read_buffer,
+                                   &read_offset, &read_length, &read_position)) {
+            Item err = js_clear_exception();
+            return js_promise_reject(err);
+        }
+    } else if (second_arg_is_options) {
+        if (!fs_read_parse_options(offset_item, buffer_item, &read_buffer,
+                                   &read_offset, &read_length, &read_position)) {
+            Item err = js_clear_exception();
+            return js_promise_reject(err);
+        }
+    }
+    Item bytes_read = js_fs_readSync(fd_item, read_buffer, read_offset, read_length, read_position);
     if (js_check_exception()) {
         Item err = js_clear_exception();
         return js_promise_reject(err);
@@ -1618,7 +1825,7 @@ static Item js_fs_filehandle_read(Item buffer_item, Item offset_item, Item lengt
 
     Item result = js_new_object();
     js_property_set(result, make_string_item("bytesRead"), bytes_read);
-    js_property_set(result, make_string_item("buffer"), buffer_item);
+    js_property_set(result, make_string_item("buffer"), read_buffer);
     return js_promise_resolve(result);
 }
 
@@ -1790,6 +1997,24 @@ static Item js_fs_lstat_async(Item path_item, Item opts_or_cb, Item callback_ite
     return make_js_undefined();
 }
 
+// fs.statfs(path[, options], callback)
+static Item js_fs_statfs_async(Item path_item, Item opts_or_cb, Item callback_item) {
+    Item callback = callback_item;
+    Item options = opts_or_cb;
+    if (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) {
+        callback = opts_or_cb;
+        options = make_js_undefined();
+    }
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "function", callback);
+    }
+    Item result = js_fs_statfsSync(path_item, options);
+    if (js_check_exception()) return ItemNull;
+    Item args[2] = {ItemNull, result};
+    js_call_function(callback, make_js_undefined(), args, 2);
+    return make_js_undefined();
+}
+
 // fs.open(path, flags[, mode], callback)
 static Item js_fs_open_async(Item path_item, Item flags_item, Item mode_or_cb, Item callback_item) {
     Item callback = callback_item;
@@ -1940,10 +2165,11 @@ static Item js_fs_fstat_async(Item fd_item, Item opts_or_cb, Item callback_item)
 
 static Item fs_namespace = {0};
 
-static void js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
+static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);
     Item fn = js_new_function(func_ptr, param_count);
     js_property_set(ns, key, fn);
+    return fn;
 }
 
 // ─── fs.promises wrapper functions ─────────────────────────────────────────
@@ -2136,11 +2362,11 @@ static Item js_fs_realpath_async(Item path_item, Item opts_or_cb, Item callback)
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         if (get_type_id(result) == LMD_TYPE_STRING) {
             Item args[2] = {ItemNull, result};
-            js_call_function(cb, ItemNull, args, 2);
+            js_call_function(cb, make_js_undefined(), args, 2);
         } else {
             Item err = make_fs_error(UV_ENOENT, NULL);
             Item args[1] = {err};
-            js_call_function(cb, ItemNull, args, 1);
+            js_call_function(cb, make_js_undefined(), args, 1);
         }
     }
     return make_js_undefined();
@@ -2440,6 +2666,7 @@ extern "C" Item js_get_fs_namespace(void) {
     js_fs_set_method(fs_namespace, "mkdir",           (void*)js_fs_mkdir_async, 3);
     js_fs_set_method(fs_namespace, "access",          (void*)js_fs_access_async, 3);
     js_fs_set_method(fs_namespace, "stat",            (void*)js_fs_stat_async, 3);
+    js_fs_set_method(fs_namespace, "statfs",          (void*)js_fs_statfs_async, 3);
     js_fs_set_method(fs_namespace, "lstat",           (void*)js_fs_lstat_async, 3);
     js_fs_set_method(fs_namespace, "open",            (void*)js_fs_open_async, 4);
     js_fs_set_method(fs_namespace, "close",           (void*)js_fs_close_async, 2);
@@ -2451,7 +2678,8 @@ extern "C" Item js_get_fs_namespace(void) {
     js_fs_set_method(fs_namespace, "fstat",           (void*)js_fs_fstat_async, 3);
     js_fs_set_method(fs_namespace, "rmdir",           (void*)js_fs_rmdir_async, 2);
     js_fs_set_method(fs_namespace, "copyFile",        (void*)js_fs_copyFile_async, 4);
-    js_fs_set_method(fs_namespace, "realpath",        (void*)js_fs_realpath_async, 3);
+    Item realpath_fn = js_fs_set_method(fs_namespace, "realpath",        (void*)js_fs_realpath_async, 3);
+    js_property_set(realpath_fn, make_string_item("native"), realpath_fn);
     js_fs_set_method(fs_namespace, "mkdtemp",         (void*)js_fs_mkdtemp_async, 3);
     js_fs_set_method(fs_namespace, "readlink",        (void*)js_fs_readlink_async, 3);
     js_fs_set_method(fs_namespace, "symlink",         (void*)js_fs_symlink_async, 4);
@@ -2470,7 +2698,9 @@ extern "C" Item js_get_fs_namespace(void) {
 
     // additional sync methods
     js_fs_set_method(fs_namespace, "copyFileSync",    (void*)js_fs_copyFileSync, 2);
-    js_fs_set_method(fs_namespace, "realpathSync",    (void*)js_fs_realpathSync, 2);
+    Item realpath_sync_fn = js_fs_set_method(fs_namespace, "realpathSync",    (void*)js_fs_realpathSync, 2);
+    js_property_set(realpath_sync_fn, make_string_item("native"), realpath_sync_fn);
+    js_fs_set_method(fs_namespace, "statfsSync",      (void*)js_fs_statfsSync, 2);
     js_fs_set_method(fs_namespace, "accessSync",      (void*)js_fs_accessSync, 2);
     js_fs_set_method(fs_namespace, "rmSync",          (void*)js_fs_rmSync, 2);
     js_fs_set_method(fs_namespace, "mkdtempSync",     (void*)js_fs_mkdtempSync, 2);

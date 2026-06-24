@@ -670,6 +670,7 @@ test-fs-promises-writefile.js
 test-fs-read-file-assert-encoding.js
 test-fs-read-file-sync-hostname.js
 test-fs-read-file-sync.js
+test-fs-read-optional-params.js
 test-fs-read-promises-optional-params.js
 test-fs-read-stream-autoClose.js
 test-fs-read-stream-double-close.js
@@ -680,6 +681,7 @@ test-fs-read-stream-file-handle.js
 test-fs-read-stream-patch-open.js
 test-fs-read-stream-resume.js
 test-fs-read-zero-length.js
+test-fs-readSync-optional-params.js
 test-fs-readdir-pipe.js
 test-fs-readdir-recursive.js
 test-fs-readdir-types-symlinks.js
@@ -703,6 +705,7 @@ test-fs-readlink-type-check.js
 test-fs-readv-promises.js
 test-fs-readv-sync.js
 test-fs-readv.js
+test-fs-realpath-native.js
 test-fs-realpath-on-substed-drive.js
 test-fs-realpath-pipe.js
 test-fs-rename-type-check.js
@@ -713,6 +716,7 @@ test-fs-rmdir-throws-on-file.js
 test-fs-rmdir-type-check.js
 test-fs-sir-writes-alot.js
 test-fs-stat-bigint.js
+test-fs-statfs.js
 test-fs-stream-construct-compat-error-read.js
 test-fs-stream-construct-compat-error-write.js
 test-fs-stream-construct-compat-graceful-fs.js
