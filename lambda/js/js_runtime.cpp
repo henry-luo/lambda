@@ -33763,10 +33763,43 @@ extern "C" Item js_module_get(Item specifier) {
             heap_register_gc_root(&tty_ns.item);
             js_property_set(tty_ns, (Item){.item = s2it(heap_create_name("isatty", 6))},
                             js_new_function((void*)js_stub_noop, 1));
+            Item write_stream_fn = js_new_function((void*)js_stub_noop_object, 1);
+            Item read_stream_fn = js_new_function((void*)js_stub_noop_object, 1);
             js_property_set(tty_ns, (Item){.item = s2it(heap_create_name("WriteStream", 11))},
-                            js_new_function((void*)js_stub_noop_object, 1));
+                            write_stream_fn);
             js_property_set(tty_ns, (Item){.item = s2it(heap_create_name("ReadStream", 10))},
-                            js_new_function((void*)js_stub_noop_object, 1));
+                            read_stream_fn);
+
+            Item write_stream_proto = js_new_object();
+            Item read_stream_proto = js_new_object();
+            js_property_set(write_stream_fn, (Item){.item = s2it(heap_create_name("prototype", 9))},
+                            write_stream_proto);
+            js_property_set(read_stream_fn, (Item){.item = s2it(heap_create_name("prototype", 9))},
+                            read_stream_proto);
+            js_property_set(write_stream_proto, (Item){.item = s2it(heap_create_name("constructor", 11))},
+                            write_stream_fn);
+            js_property_set(read_stream_proto, (Item){.item = s2it(heap_create_name("constructor", 11))},
+                            read_stream_fn);
+            js_mark_non_enumerable(write_stream_proto,
+                                   (Item){.item = s2it(heap_create_name("constructor", 11))});
+            js_mark_non_enumerable(read_stream_proto,
+                                   (Item){.item = s2it(heap_create_name("constructor", 11))});
+            js_function_set_prototype(write_stream_fn, write_stream_proto);
+            js_function_set_prototype(read_stream_fn, read_stream_proto);
+
+            extern Item js_get_net_namespace(void);
+            Item net_ns = js_get_net_namespace();
+            Item socket_fn = js_property_get(net_ns, (Item){.item = s2it(heap_create_name("Socket", 6))});
+            Item socket_proto = js_property_get(socket_fn,
+                                                (Item){.item = s2it(heap_create_name("prototype", 9))});
+            if (get_type_id(socket_fn) == LMD_TYPE_FUNC) {
+                js_set_prototype(write_stream_fn, socket_fn);
+                js_set_prototype(read_stream_fn, socket_fn);
+            }
+            if (get_type_id(socket_proto) == LMD_TYPE_MAP) {
+                js_set_prototype(write_stream_proto, socket_proto);
+                js_set_prototype(read_stream_proto, socket_proto);
+            }
             js_property_set(tty_ns, (Item){.item = s2it(heap_create_name("default", 7))}, tty_ns);
         }
         return tty_ns;

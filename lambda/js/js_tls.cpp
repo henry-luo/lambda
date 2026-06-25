@@ -18,6 +18,9 @@
 
 #include <cstring>
 
+extern "C" void js_function_set_prototype(Item fn_item, Item proto);
+extern "C" Item js_get_net_namespace(void);
+
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
     String* s = heap_create_name(str, (size_t)(len > 0 ? len : 0));
@@ -825,10 +828,27 @@ extern "C" Item js_tls_createServer(Item options_item, Item handler) {
 
 static Item tls_namespace = {0};
 
-static void tls_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
+static Item tls_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);
     Item fn = js_new_function(func_ptr, param_count);
     js_property_set(ns, key, fn);
+    return fn;
+}
+
+static Item tls_constructor_prototype(Item ctor, JsClass cls) {
+    Item proto_key = make_string_item("prototype");
+    Item proto = js_property_get(ctor, proto_key);
+    if (get_type_id(proto) != LMD_TYPE_MAP) {
+        proto = js_new_object();
+        js_property_set(ctor, proto_key, proto);
+    }
+    js_class_stamp(proto, cls);
+    js_property_set(proto, make_string_item("constructor"), ctor);
+    js_mark_non_enumerable(proto, make_string_item("constructor"));
+    if (get_type_id(ctor) == LMD_TYPE_FUNC) {
+        js_function_set_prototype(ctor, proto);
+    }
+    return proto;
 }
 
 extern "C" Item js_get_tls_namespace(void) {
@@ -839,8 +859,29 @@ extern "C" Item js_get_tls_namespace(void) {
     tls_set_method(tls_namespace, "connect",             (void*)js_tls_connect, -1);
     tls_set_method(tls_namespace, "createServer",        (void*)js_tls_createServer, 2);
     tls_set_method(tls_namespace, "createSecureContext",  (void*)js_tls_createSecureContext, 1);
-    tls_set_method(tls_namespace, "Server",              (void*)js_tls_createServer, 2); // alias
-    tls_set_method(tls_namespace, "TLSSocket",           (void*)js_tls_TLSSocket, 2);
+    Item server_fn = tls_set_method(tls_namespace, "Server", (void*)js_tls_createServer, 2); // alias
+    Item tls_socket_fn = tls_set_method(tls_namespace, "TLSSocket", (void*)js_tls_TLSSocket, 2);
+
+    Item tls_socket_proto = tls_constructor_prototype(tls_socket_fn, JS_CLASS_TLS_SOCKET);
+    Item net_ns = js_get_net_namespace();
+    Item net_socket_fn = js_property_get(net_ns, make_string_item("Socket"));
+    Item net_socket_proto = js_property_get(net_socket_fn, make_string_item("prototype"));
+    if (get_type_id(net_socket_fn) == LMD_TYPE_FUNC) {
+        js_set_prototype(tls_socket_fn, net_socket_fn);
+    }
+    if (get_type_id(net_socket_proto) == LMD_TYPE_MAP) {
+        js_set_prototype(tls_socket_proto, net_socket_proto);
+    }
+
+    Item server_proto = tls_constructor_prototype(server_fn, JS_CLASS_SERVER);
+    Item net_server_fn = js_property_get(net_ns, make_string_item("Server"));
+    Item net_server_proto = js_property_get(net_server_fn, make_string_item("prototype"));
+    if (get_type_id(net_server_fn) == LMD_TYPE_FUNC) {
+        js_set_prototype(server_fn, net_server_fn);
+    }
+    if (get_type_id(net_server_proto) == LMD_TYPE_MAP) {
+        js_set_prototype(server_proto, net_server_proto);
+    }
 
     // TLS constants
     js_property_set(tls_namespace, make_string_item("DEFAULT_MIN_VERSION"),
