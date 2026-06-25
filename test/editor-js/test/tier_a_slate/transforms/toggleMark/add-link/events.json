@@ -1,0 +1,3 @@
+[
+  { "type": "command", "name": "toggleMark", "args": { "mark": "link", "value": "https://example.com/docs" } }
+]

@@ -39,7 +39,7 @@ import {
 import { stepApply } from '../../src/model/step.js'
 import { txBegin, txSetSelection, txStep } from '../../src/model/transaction.js'
 import type { EditorState } from '../../src/commands/types.js'
-import type { MarkDict, Selection, SourcePath, Step, Transaction } from '../../src/model/types.js'
+import type { AttrValue, MarkDict, Selection, SourcePath, Step, Transaction } from '../../src/model/types.js'
 
 // ---------------------------------------------------------------------------
 // Event union
@@ -89,7 +89,10 @@ const COMMANDS: Record<string, CommandHandler> = {
   formatBold:            (s)    => cmdFormatBold(s),
   formatItalic:          (s)    => cmdFormatItalic(s),
   formatUnderline:       (s)    => cmdFormatUnderline(s),
-  toggleMark:            (s, a) => cmdToggleMark(s, asStr(a, 'mark')),
+  toggleMark:            (s, a) => {
+    const value: AttrValue = 'value' in a ? (a['value'] as AttrValue) : true
+    return cmdToggleMark(s, asStr(a, 'mark'), value)
+  },
   setBlockType:          (s, a) => cmdSetBlockType(s, asStr(a, 'tag')),
   selectAll:             (s)    => cmdSelectAll(s),
 
