@@ -12,9 +12,9 @@
 # Workers: 9
 # Slow tests included: no
 # Slow list: 30 tests (test/node/official_slow_list.txt), threshold 10s
-# Total passing: 1613
-# Total tests: 3556  Passed: 1613  Failed: 1943  Missing: 0  Timed out: 0  Crashed: 15
-# Baseline comparison: previous 1612  Regressions: 0  Improvements: 1
+# Total passing: 1616
+# Total tests: 3556  Passed: 1616  Failed: 1940  Missing: 0  Timed out: 0  Crashed: 15
+# Baseline comparison: previous 1613  Regressions: 0  Improvements: 3
 # Runtime: 370.9s total wall (discover + execute)
 # Runtime: 3311.2s per-test sum (all executed tests)
 # Runtime: 868.0s per-test sum (passing baseline tests)
@@ -1086,6 +1086,7 @@ test-net-better-error-messages-listen-path.js
 test-net-better-error-messages-listen.js
 test-net-binary.js
 test-net-bind-twice.js
+test-net-blocklist.js
 test-net-buffersize.js
 test-net-bytes-read.js
 test-net-bytes-stats.js
@@ -1134,6 +1135,7 @@ test-net-listen-handle-in-cluster-2.js
 test-net-listen-invalid-port.js
 test-net-listen-ipv6only.js
 test-net-local-address-port.js
+test-net-negative-zero.js
 test-net-normalize-args.js
 test-net-onread-static-buffer.js
 test-net-perf_hooks.js
@@ -1148,6 +1150,7 @@ test-net-remote-address-port.js
 test-net-remote-address.js
 test-net-reuseport.js
 test-net-server-capture-rejection.js
+test-net-server-blocklist.js
 test-net-server-close-before-calling-lookup-callback.js
 test-net-server-close.js
 test-net-server-drop-connections.js
