@@ -664,6 +664,9 @@ static std::string extract_supported_node_flags(const std::string& test_path) {
                 if (supported.find("--expose-gc") == std::string::npos) {
                     supported += " --expose-gc";
                 }
+            } else if (tok.find("--network-family-autoselection-attempt-timeout=") == 0) {
+                supported += " ";
+                supported += tok;
             }
         }
         return supported;

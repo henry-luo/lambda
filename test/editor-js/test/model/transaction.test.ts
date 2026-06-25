@@ -92,9 +92,15 @@ describe('model/transaction — invert', () => {
 })
 
 describe('model/transaction — selMap + txMapPos', () => {
-  it('selMap on AllSelection is identity', () => {
+  it('selMap on TextSelection across leaves shifts both endpoints', () => {
     const step = stepReplaceText([0, 0], 0, 0, 'X')
-    expect(selMap(step, { kind: 'all' })).toEqual({ kind: 'all' })
+    const sel = { kind: 'text' as const, anchor: pos([0, 0], 0), head: pos([0, 0], 2) }
+    const mapped = selMap(step, sel)
+    expect(mapped.kind).toBe('text')
+    if (mapped.kind === 'text') {
+      // anchor at offset 0 stays; head at offset 2 shifts by +1 (one char inserted before it)
+      expect(mapped.head.offset).toBe(3)
+    }
   })
 
   it('txMapPos chains stepMaps', () => {

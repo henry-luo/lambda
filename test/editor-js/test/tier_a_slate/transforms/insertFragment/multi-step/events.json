@@ -1,0 +1,8 @@
+[
+  { "type": "command", "name": "insertText", "args": { "text": " " } },
+  { "type": "command", "name": "insertText", "args": { "text": "w" } },
+  { "type": "command", "name": "insertText", "args": { "text": "o" } },
+  { "type": "command", "name": "insertText", "args": { "text": "r" } },
+  { "type": "command", "name": "insertText", "args": { "text": "l" } },
+  { "type": "command", "name": "insertText", "args": { "text": "d" } }
+]

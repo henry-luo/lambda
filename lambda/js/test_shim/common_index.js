@@ -60,6 +60,10 @@ function platformTimeout(ms) {
   return ms;
 }
 
+const net = require('net');
+net.setDefaultAutoSelectFamilyAttemptTimeout(
+  platformTimeout(net.getDefaultAutoSelectFamilyAttemptTimeout() * 5));
+
 const buildType = 'Release';
 
 // ---- mustCall / mustNotCall / mustSucceed ----
@@ -593,7 +597,7 @@ const common = {
     return false;
   },
   get defaultAutoSelectFamilyAttemptTimeout() {
-    return 2500;
+    return require('net').getDefaultAutoSelectFamilyAttemptTimeout();
   },
   get parseTestMetadata() {
     return function() { return { flags: [], envs: {} }; };

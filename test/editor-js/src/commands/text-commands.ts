@@ -12,14 +12,14 @@
 // fixtures are ported.
 
 import { isText, lastIndex, nodeAt, parentPath } from '../model/doc.js'
-import { allSelection, pos } from '../model/source-pos.js'
+import { pos, textSelection } from '../model/source-pos.js'
 import {
   hasMark,
-  stepAddMark,
-  stepRemoveMark,
   stepReplace,
   stepReplaceText,
-  stepSetNodeType
+  stepSetNodeType,
+  withMark,
+  withoutMark
 } from '../model/step.js'
 import {
   txBegin,
@@ -30,7 +30,7 @@ import {
 import { defaultSplitBlock, isBlockTag } from '../model/schema.js'
 import { caret, caretAt, isText as selIsText, selCollapsed, selHi, selLo, selSingleLeaf } from './sel.js'
 import type { EditorState } from './types.js'
-import type { Mark, TextLeaf, Transaction } from '../model/types.js'
+import type { AttrValue, MarkDict, TextLeaf, Transaction } from '../model/types.js'
 
 // ---------------------------------------------------------------------------
 // Common: delete a range within a single text leaf
@@ -214,42 +214,77 @@ export function cmdDeleteForward(state: EditorState): Transaction | null {
 // ---------------------------------------------------------------------------
 // cmdToggleMark — toggle a single mark over a text-range selection.
 //
-// Simplified: same-leaf only. If every char in range has the mark, remove it
-// from the whole leaf; else add it to the whole leaf. (Slate's mark fixtures
-// test more nuanced behaviour; expand when we port them.)
+// For a same-leaf range selection, splits the leaf into up to three pieces
+// (before, target, after) and toggles the mark on the target middle leaf
+// via a single `replace` step. Adjacent same-mark leaves remain mergeable
+// post-toggle but no merging happens inside this step — that's the
+// renderer / parser's job.
+//
+// For a collapsed selection, updates stored_marks instead so the next typed
+// character picks up the mark (PM/Slate idiom).
 // ---------------------------------------------------------------------------
 
-export function cmdToggleMark(state: EditorState, mark: Mark): Transaction | null {
+export function cmdToggleMark(state: EditorState, name: string, value: AttrValue = true): Transaction | null {
   const sel = state.selection
   if (sel === null) return null
   if (!selIsText(sel)) return null
 
-  // Empty selection → stored-mark toggle (caller-side state mutation).
-  if (selCollapsed(sel)) return cmdToggleStoredMark(state, mark)
-
+  if (selCollapsed(sel)) return cmdToggleStoredMark(state, name, value)
   if (!selSingleLeaf(sel)) return null
+
   const lo = selLo(sel)
+  const hi = selHi(sel)
   const leaf = nodeAt(state.doc, lo.path)
   if (leaf === null || !isText(leaf)) return null
 
-  const present = hasMark(leaf.marks, mark)
+  const targetText = leaf.text.slice(lo.offset, hi.offset)
+  if (targetText.length === 0) return null
+
+  // Decide: is the mark currently present on the whole target range?
+  // (Range is within a single leaf, so the answer is just "does the leaf have it?")
+  const present = hasMark(leaf.marks, name)
+  const newMarks: MarkDict = present
+    ? withoutMark(leaf.marks, name)
+    : withMark(leaf.marks, name, value)
+
+  const beforeText = leaf.text.slice(0, lo.offset)
+  const afterText  = leaf.text.slice(hi.offset)
+  const newLeaves: TextLeaf[] = []
+  if (beforeText.length > 0) newLeaves.push({ kind: 'text', text: beforeText, marks: leaf.marks })
+  newLeaves.push({ kind: 'text', text: targetText, marks: newMarks })
+  if (afterText.length  > 0) newLeaves.push({ kind: 'text', text: afterText,  marks: leaf.marks })
+
+  const blockPath = parentPath(lo.path)
+  const leafIdx = lastIndex(lo.path)
   let tx = txBegin(state.doc, sel)
-  tx = txStep(tx, present ? stepRemoveMark(lo.path, mark) : stepAddMark(lo.path, mark))
+  tx = txStep(tx, stepReplace(blockPath, leafIdx, leafIdx + 1, newLeaves))
+  // Selection endpoints follow the parser's "marker at boundary attaches to
+  // previous leaf at its end" convention (Inline_Formatting §4.4):
+  //   - anchor: if a before-leaf exists, end of before-leaf; else start of middle
+  //   - head:   end of middle-leaf (consistent with markers placed OUTSIDE the span wrapper)
+  // This means the new TextSelection bit-equals what the parser produces if
+  // the same doc is round-tripped through render → HTML → parse.
+  const middleIdx = leafIdx + (beforeText.length > 0 ? 1 : 0)
+  const anchorPos = beforeText.length > 0
+    ? pos([...blockPath, leafIdx], beforeText.length)
+    : pos([...blockPath, middleIdx], 0)
+  const headPos = pos([...blockPath, middleIdx], targetText.length)
+  tx = txSetSelection(tx, { kind: 'text', anchor: anchorPos, head: headPos })
   return tx
 }
 
-export function cmdToggleStoredMark(state: EditorState, mark: Mark): Transaction | null {
-  const cur = state.stored_marks ?? []
-  const next = hasMark(cur, mark) ? cur.filter(m => m !== mark) : [...cur, mark]
+export function cmdToggleStoredMark(state: EditorState, name: string, value: AttrValue = true): Transaction | null {
+  const cur: MarkDict = state.stored_marks ?? {}
+  const next: MarkDict = hasMark(cur, name) ? withoutMark(cur, name) : withMark(cur, name, value)
   let tx = txBegin(state.doc, state.selection)
   tx = txSetMeta(tx, 'storedMarks', next)
   tx = txSetMeta(tx, 'addToHistory', false)
   return tx
 }
 
-export function cmdFormatBold(state: EditorState):       Transaction | null { return cmdToggleMark(state, 'strong') }
-export function cmdFormatItalic(state: EditorState):     Transaction | null { return cmdToggleMark(state, 'em') }
-export function cmdFormatUnderline(state: EditorState):  Transaction | null { return cmdToggleMark(state, 'u') }
+export function cmdFormatBold(state: EditorState):       Transaction | null { return cmdToggleMark(state, 'bold') }
+export function cmdFormatItalic(state: EditorState):     Transaction | null { return cmdToggleMark(state, 'italic') }
+export function cmdFormatUnderline(state: EditorState):  Transaction | null { return cmdToggleMark(state, 'underline') }
 export function cmdFormatCode(state: EditorState):       Transaction | null { return cmdToggleMark(state, 'code') }
 
 // ---------------------------------------------------------------------------
@@ -273,11 +308,16 @@ export function cmdSetBlockType(state: EditorState, tag: string): Transaction | 
 
 // ---------------------------------------------------------------------------
 // cmdSelectAll
+//
+// Per Inline_Formatting design doc §11: AllSelection was dropped. "Select
+// all" is a TextSelection spanning the doc-root boundaries — same state,
+// fewer concepts.
 // ---------------------------------------------------------------------------
 
 export function cmdSelectAll(state: EditorState): Transaction | null {
+  const sel = textSelection(pos([], 0), pos([], state.doc.content.length))
   let tx = txBegin(state.doc, state.selection)
-  tx = txSetSelection(tx, allSelection())
+  tx = txSetSelection(tx, sel)
   tx = txSetMeta(tx, 'addToHistory', false)
   return tx
 }

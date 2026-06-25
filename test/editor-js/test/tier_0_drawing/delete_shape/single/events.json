@@ -1,0 +1,7 @@
+[
+  {
+    "type": "command",
+    "name": "deleteShapes",
+    "args": { "shape_paths": [[0, 0, 0]] }
+  }
+]

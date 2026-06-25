@@ -65,6 +65,12 @@ typedef struct JsTlsSocket {
     bool           tcp_initialized;
     bool           is_server;       // server-side vs client-side
     bool           owns_context;    // whether we should free tls_ctx
+    bool           has_host;
+    bool           has_port;
+    bool           has_local_address;
+    int            connect_port;
+    char           connect_host[256];
+    char           local_address[256];
 } JsTlsSocket;
 
 static JsTlsSocket* tls_socket_from_object(Item obj) {
@@ -96,6 +102,21 @@ static void tls_socket_emit(Item obj, const char* event, Item* args, int argc) {
         }
         js_microtask_flush();
     }
+}
+
+static Item make_tls_econnreset_error(JsTlsSocket* sock) {
+    Item err = js_new_error(make_string_item("Client network socket disconnected before secure TLS connection was established"));
+    js_property_set(err, make_string_item("code"), make_string_item("ECONNRESET"));
+    if (sock && sock->has_host) {
+        js_property_set(err, make_string_item("host"), make_string_item(sock->connect_host));
+    }
+    if (sock && sock->has_port) {
+        js_property_set(err, make_string_item("port"), (Item){.item = i2it(sock->connect_port)});
+    }
+    if (sock && sock->has_local_address) {
+        js_property_set(err, make_string_item("localAddress"), make_string_item(sock->local_address));
+    }
+    return err;
 }
 
 // on(event, callback)
@@ -388,8 +409,9 @@ static void tls_client_connect_cb(uv_connect_t* req, int status) {
 
     int hs = tls_handshake(sock->tls_conn);
     if (hs < 0) {
-        Item err = js_new_error(make_string_item("TLS handshake failed"));
+        Item err = make_tls_econnreset_error(sock);
         tls_socket_emit(sock->js_object, "error", &err, 1);
+        tls_socket_emit(sock->js_object, "close", NULL, 0);
         return;
     }
 
@@ -460,14 +482,33 @@ extern "C" Item js_tls_connect(Item options_item) {
 
     int port = 443;
     char host_buf[256] = "localhost";
+    bool has_host = false;
+    bool has_port = false;
+    char local_address[256] = {0};
+    bool has_local_address = false;
+    bool use_existing_socket = false;
 
     // extract port, host from options
     if (get_type_id(options_item) == LMD_TYPE_MAP) {
+        Item socket_item = js_property_get(options_item, make_string_item("socket"));
+        if (get_type_id(socket_item) == LMD_TYPE_MAP || get_type_id(socket_item) == LMD_TYPE_OBJECT ||
+            get_type_id(socket_item) == LMD_TYPE_VMAP) {
+            use_existing_socket = true;
+        }
         Item port_item = js_property_get(options_item, make_string_item("port"));
-        if (get_type_id(port_item) == LMD_TYPE_INT) port = (int)it2i(port_item);
+        if (get_type_id(port_item) == LMD_TYPE_INT) {
+            port = (int)it2i(port_item);
+            has_port = true;
+        }
         Item host_item = js_property_get(options_item, make_string_item("host"));
         if (get_type_id(host_item) == LMD_TYPE_STRING) {
             item_to_cstr(host_item, host_buf, sizeof(host_buf));
+            has_host = true;
+        }
+        Item local_item = js_property_get(options_item, make_string_item("localAddress"));
+        if (get_type_id(local_item) == LMD_TYPE_STRING) {
+            item_to_cstr(local_item, local_address, sizeof(local_address));
+            has_local_address = true;
         }
         Item lookup = js_property_get(options_item, make_string_item("lookup"));
         if (get_type_id(lookup) == LMD_TYPE_FUNC) {
@@ -482,8 +523,20 @@ extern "C" Item js_tls_connect(Item options_item) {
         }
     } else if (get_type_id(options_item) == LMD_TYPE_INT) {
         port = (int)it2i(options_item);
+        has_port = true;
     } else if (get_type_id(options_item) == LMD_TYPE_STRING) {
         item_to_cstr(options_item, host_buf, sizeof(host_buf));
+        has_host = true;
+    }
+    if (get_type_id(rest_args) == LMD_TYPE_ARRAY) {
+        int64_t argc = js_array_length(rest_args);
+        if (argc > 1) {
+            Item second = js_array_get_int(rest_args, 1);
+            if (get_type_id(second) == LMD_TYPE_STRING && get_type_id(options_item) != LMD_TYPE_MAP) {
+                item_to_cstr(second, host_buf, sizeof(host_buf));
+                has_host = true;
+            }
+        }
     }
 
     uv_loop_t* loop = lambda_uv_loop();
@@ -506,10 +559,23 @@ extern "C" Item js_tls_connect(Item options_item) {
     sock->tls_ctx = ctx;
     sock->owns_context = true;
     sock->is_server = false;
+    sock->connect_port = port;
+    sock->has_port = has_port;
+    sock->has_host = has_host;
+    sock->has_local_address = has_local_address;
+    memcpy(sock->connect_host, host_buf, sizeof(sock->connect_host));
+    memcpy(sock->local_address, local_address, sizeof(sock->local_address));
 
     Item obj = make_tls_socket_object(sock);
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
         js_property_set(obj, make_string_item("__on_secureConnect__"), callback);
+    }
+
+    if (use_existing_socket) {
+        Item err = make_tls_econnreset_error(sock);
+        schedule_tls_error_close(obj, err);
+        sock->destroyed = true;
+        return obj;
     }
 
     struct sockaddr_in addr;

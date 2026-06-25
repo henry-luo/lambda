@@ -12,9 +12,9 @@
 # Workers: 9
 # Slow tests included: no
 # Slow list: 30 tests (test/node/official_slow_list.txt), threshold 10s
-# Total passing: 1612
-# Total tests: 3556  Passed: 1612  Failed: 1944  Missing: 0  Timed out: 0  Crashed: 15
-# Baseline comparison: previous 1612  Regressions: 0  Improvements: 0
+# Total passing: 1621
+# Total tests: 3556  Passed: 1621  Failed: 1935  Missing: 0  Timed out: 0  Crashed: 15
+# Baseline comparison: previous 1619  Regressions: 0  Improvements: 2
 # Runtime: 370.9s total wall (discover + execute)
 # Runtime: 3311.2s per-test sum (all executed tests)
 # Runtime: 868.0s per-test sum (passing baseline tests)
@@ -1079,6 +1079,8 @@ test-module-symlinked-peer-modules.js
 test-net-access-byteswritten.js
 test-net-after-close.js
 test-net-allow-half-open.js
+test-net-autoselectfamily-attempt-timeout-cli-option.js
+test-net-autoselectfamily-attempt-timeout-default-value.js
 test-net-autoselectfamily-commandline-option.js
 test-net-autoselectfamily-default.js
 test-net-autoselectfamily-ipv4first.js
@@ -1086,6 +1088,7 @@ test-net-better-error-messages-listen-path.js
 test-net-better-error-messages-listen.js
 test-net-binary.js
 test-net-bind-twice.js
+test-net-blocklist.js
 test-net-buffersize.js
 test-net-bytes-read.js
 test-net-bytes-stats.js
@@ -1131,8 +1134,10 @@ test-net-listen-close-server-callback-is-not-function.js
 test-net-listen-close-server.js
 test-net-listen-error.js
 test-net-listen-handle-in-cluster-2.js
+test-net-listen-invalid-port.js
 test-net-listen-ipv6only.js
 test-net-local-address-port.js
+test-net-negative-zero.js
 test-net-normalize-args.js
 test-net-onread-static-buffer.js
 test-net-perf_hooks.js
@@ -1147,6 +1152,7 @@ test-net-remote-address-port.js
 test-net-remote-address.js
 test-net-reuseport.js
 test-net-server-capture-rejection.js
+test-net-server-blocklist.js
 test-net-server-close-before-calling-lookup-callback.js
 test-net-server-close.js
 test-net-server-drop-connections.js
@@ -1160,8 +1166,11 @@ test-net-server-unref.js
 test-net-settimeout.js
 test-net-socket-byteswritten.js
 test-net-socket-close-after-end.js
+test-net-socket-connect-invalid-autoselectfamily.js
+test-net-socket-connect-invalid-autoselectfamilyattempttimeout.js
 test-net-socket-connect-without-cb.js
 test-net-socket-connecting.js
+test-net-socket-constructor.js
 test-net-socket-destroy-send.js
 test-net-socket-destroy-twice.js
 test-net-socket-end-before-connect.js
@@ -1182,6 +1191,7 @@ test-net-timeout-no-handle.js
 test-net-writable.js
 test-net-write-after-close.js
 test-net-write-after-end-nt.js
+test-net-write-arguments.js
 test-net-write-cb-on-destroy-before-connect.js
 test-net-write-connect-write.js
 test-net-write-slow.js
@@ -1816,7 +1826,6 @@ test-worker-terminate-unrefed.js
 test-worker-track-unmanaged-fds.js
 test-worker-voluntarily-exit-followed-by-addition.js
 test-worker-voluntarily-exit-followed-by-throw.js
-test-wrap-js-stream-destroy.js
 test-zlib-brotli-from-brotli.js
 test-zlib-empty-buffer.js
 test-zlib-flush.js

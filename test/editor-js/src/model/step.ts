@@ -32,7 +32,7 @@ import type {
   AttrValue,
   Child,
   Doc,
-  Mark,
+  MarkDict,
   RemoveMarkStep,
   ReplaceAroundStep,
   ReplaceStep,
@@ -69,12 +69,12 @@ export function stepReplaceAround(
   return { kind: 'replace_around', parent, from, to, gap_from, gap_to, slice, insert }
 }
 
-export function stepAddMark(path: SourcePath, mark: Mark): AddMarkStep {
-  return { kind: 'add_mark', path, mark }
+export function stepAddMark(path: SourcePath, name: string, value: AttrValue = true): AddMarkStep {
+  return { kind: 'add_mark', path, name, value }
 }
 
-export function stepRemoveMark(path: SourcePath, mark: Mark): RemoveMarkStep {
-  return { kind: 'remove_mark', path, mark }
+export function stepRemoveMark(path: SourcePath, name: string): RemoveMarkStep {
+  return { kind: 'remove_mark', path, name }
 }
 
 export function stepSetAttr(path: SourcePath, name: string, value: AttrValue): SetAttrStep {
@@ -86,19 +86,35 @@ export function stepSetNodeType(path: SourcePath, tag: string): SetNodeTypeStep 
 }
 
 // ---------------------------------------------------------------------------
-// Mark helpers
+// Mark helpers — marks is a flat dict (see Inline_Formatting design §2)
 // ---------------------------------------------------------------------------
 
-export function hasMark(marks: Mark[], m: Mark): boolean {
-  return marks.indexOf(m) >= 0
+export function hasMark(marks: MarkDict, name: string): boolean {
+  return name in marks
 }
 
-export function withMark(marks: Mark[], m: Mark): Mark[] {
-  return hasMark(marks, m) ? marks : [...marks, m]
+export function withMark(marks: MarkDict, name: string, value: AttrValue = true): MarkDict {
+  return { ...marks, [name]: value }
 }
 
-export function withoutMark(marks: Mark[], m: Mark): Mark[] {
-  return marks.filter(x => x !== m)
+export function withoutMark(marks: MarkDict, name: string): MarkDict {
+  if (!(name in marks)) return marks
+  const out: MarkDict = {}
+  for (const k of Object.keys(marks)) {
+    if (k !== name) out[k] = marks[k] as AttrValue
+  }
+  return out
+}
+
+// Deep-equal-ish — used by normalization to merge adjacent same-mark text runs.
+export function marksEqual(a: MarkDict, b: MarkDict): boolean {
+  const ka = Object.keys(a), kb = Object.keys(b)
+  if (ka.length !== kb.length) return false
+  for (const k of ka) {
+    if (!(k in b)) return false
+    if (a[k] !== b[k]) return false   // shallow comparison sufficient for v1
+  }
+  return true
 }
 
 // ---------------------------------------------------------------------------
@@ -131,7 +147,7 @@ function applyAddMark(step: AddMarkStep, doc: Doc): Doc {
   return replaceNodeAt(doc, step.path, {
     kind: 'text',
     text: leaf.text,
-    marks: withMark(leaf.marks, step.mark)
+    marks: withMark(leaf.marks, step.name, step.value)
   })
 }
 
@@ -141,7 +157,7 @@ function applyRemoveMark(step: RemoveMarkStep, doc: Doc): Doc {
   return replaceNodeAt(doc, step.path, {
     kind: 'text',
     text: leaf.text,
-    marks: withoutMark(leaf.marks, step.mark)
+    marks: withoutMark(leaf.marks, step.name)
   })
 }
 
@@ -226,8 +242,13 @@ export function stepInvert(step: Step, before: Doc): Step {
     case 'replace_text':   return invertReplaceText(step, before)
     case 'replace':        return invertReplace(step, before)
     case 'replace_around': return invertReplaceAround(step, before)
-    case 'add_mark':       return stepRemoveMark(step.path, step.mark)
-    case 'remove_mark':    return stepAddMark(step.path, step.mark)
+    case 'add_mark':       return stepRemoveMark(step.path, step.name)
+    case 'remove_mark': {
+      const leaf = nodeAt(before, step.path)
+      if (!isText(leaf)) throw new Error('invert remove_mark: not a text leaf')
+      const prev = leaf.marks[step.name]
+      return stepAddMark(step.path, step.name, prev ?? true)
+    }
     case 'set_attr':       return invertSetAttr(step, before)
     case 'set_node_type':  return invertSetNodeType(step, before)
   }

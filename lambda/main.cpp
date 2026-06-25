@@ -1894,7 +1894,7 @@ int main(int argc, char *argv[]) {
                         i++;
                         continue;
                     }
-                    if (!eval_mode && (i == js_file_arg_index || argv[i] == js_file || strcmp(argv[i], js_file) == 0)) break;
+                    if (!eval_mode && (i == js_file_arg_index || argv[i] == js_file || strcmp(argv[i], js_file) == 0)) continue;
                     if (argv[i][0] == '-') js_exec_argv_store[js_exec_argc_store++] = argv[i];
                 }
                 // Pass remaining non-option arguments

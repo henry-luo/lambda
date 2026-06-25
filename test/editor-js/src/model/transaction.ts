@@ -94,7 +94,6 @@ export function txGetMeta(tx: Transaction, name: string): AttrValue | null {
 
 export function selMap(step: Step, sel: Selection): Selection {
   switch (sel.kind) {
-    case 'all':  return sel
     case 'text': return textSelection(stepMap(step, sel.anchor), stepMap(step, sel.head))
     case 'node': return selMapNode(step, sel.path)
     case 'multi-node': {

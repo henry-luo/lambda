@@ -1,0 +1,3 @@
+[
+  { "type": "command", "name": "setBlockType", "args": { "tag": "h2" } }
+]

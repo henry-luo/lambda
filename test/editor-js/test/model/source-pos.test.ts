@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import { node, text } from '../../src/model/doc.js'
 import { resolvedParentTag } from '../helpers/narrow.js'
 import {
-  allSelection,
   multiNodeSelection,
   nodeSelection,
   pathCompare,
@@ -104,8 +103,9 @@ describe('model/source-pos — selectionToString', () => {
     node('p', [text('world')])
   ])
 
-  it('AllSelection returns full doc text', () => {
-    expect(selectionToString(doc, allSelection())).toBe('helloworld')
+  it('TextSelection spanning the doc returns full doc text (replaces AllSelection)', () => {
+    const sel = textSelection(pos([], 0), pos([], doc.content.length))
+    expect(selectionToString(doc, sel)).toBe('helloworld')
   })
 
   it('NodeSelection returns the node\'s text', () => {

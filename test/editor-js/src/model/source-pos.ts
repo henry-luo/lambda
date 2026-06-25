@@ -8,7 +8,6 @@
 
 import { isNode, isText } from './doc.js'
 import type {
-  AllSelection,
   Child,
   Doc,
   MultiNodeSelection,
@@ -35,10 +34,6 @@ export function textSelection(anchor: SourcePos, head: SourcePos): TextSelection
 
 export function nodeSelection(path: SourcePath): NodeSelection {
   return { kind: 'node', path }
-}
-
-export function allSelection(): AllSelection {
-  return { kind: 'all' }
 }
 
 export function multiNodeSelection(paths: SourcePath[]): MultiNodeSelection {
@@ -233,7 +228,6 @@ export function nodeText(n: Child): string {
 }
 
 export function selectionToString(doc: Doc, sel: Selection): string {
-  if (sel.kind === 'all') return nodeText(doc)
   if (sel.kind === 'node') {
     const r = resolvePos(doc, pos(sel.path, 0))
     return r.found && r.node !== null ? nodeText(r.node) : ''
@@ -246,13 +240,25 @@ export function selectionToString(doc: Doc, sel: Selection): string {
     }
     return out
   }
-  // text selection
+  // text selection (covers "select all" too — anchor/head sit at doc boundaries)
   const lo = posMin(sel.anchor, sel.head)
   const hi = posMax(sel.anchor, sel.head)
   if (pathEqual(lo.path, hi.path)) {
     const r = resolvePos(doc, lo)
-    const t = r.found && r.node !== null ? treeText(r.node) : null
-    return t === null ? '' : t.slice(lo.offset, hi.offset)
+    if (r.found && r.node !== null) {
+      const t = treeText(r.node)
+      if (t !== null) return t.slice(lo.offset, hi.offset)
+      // Non-leaf same-path range — lo/hi.offset are CHILD INDICES into
+      // r.node.content. Concatenate the selected children's nodeText.
+      if (isNode(r.node)) {
+        let out = ''
+        for (let i = lo.offset; i < hi.offset && i < r.node.content.length; i++) {
+          out += nodeText(r.node.content[i] as Child)
+        }
+        return out
+      }
+    }
+    return ''
   }
   return selectionTextAcrossLeaves(doc, lo, hi)
 }

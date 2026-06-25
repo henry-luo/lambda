@@ -22,7 +22,7 @@ import { txGetMeta } from '../model/transaction.js'
 import type {
   Doc,
   History,
-  Mark,
+  MarkDict,
   Selection,
   Transaction
 } from '../model/types.js'
@@ -32,7 +32,7 @@ export interface EditorViewState {
   doc: Doc
   schema: Schema
   selection: Selection | null
-  stored_marks: Mark[] | null
+  stored_marks: MarkDict | null
   history: History
 }
 
@@ -68,7 +68,7 @@ export function editorReducer(state: EditorViewState, action: EditorAction): Edi
         doc: tx.doc_after,
         schema: state.schema,
         selection: tx.sel_after,
-        stored_marks: (stored as Mark[] | null) ?? state.stored_marks,
+        stored_marks: (stored as MarkDict | null) ?? state.stored_marks,
         history: hist
       }
     }
