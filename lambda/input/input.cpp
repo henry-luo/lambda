@@ -24,8 +24,6 @@ extern "C" {
 
 __thread Context* input_context = NULL;
 
-extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
-
 ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry) {
     ShapeEntry* shape_entry = NULL;
     if (key) {
@@ -224,6 +222,52 @@ static ShapeEntry* clone_shape_chain_for_transition(Pool* pool, TypeMap* parent,
     return first;
 }
 
+static TypeMap* map_clone_typemap_for_mutation(Map* mp, Input* input) {
+    if (!mp || !input || !input->pool) return NULL;
+    TypeMap* tm = (TypeMap*)mp->type;
+    if (!tm) return NULL;
+    if (tm->is_private_clone) return tm;
+
+    Pool* pool = input->pool;
+    TypeMap* clone = (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    if (!clone) return NULL;
+    clone->length = tm->length;
+    clone->byte_size = tm->byte_size;
+    clone->type_index = tm->type_index;
+    clone->has_named_shape = tm->has_named_shape;
+    clone->struct_name = tm->struct_name;
+    clone->is_private_clone = true;
+    clone->is_shared_constructor_shape = false;
+    clone->is_transition_shared_shape = false;
+    clone->transitions = NULL;
+    clone->js_class = tm->js_class;
+
+    ShapeEntry* last_clone = NULL;
+    clone->shape = clone_shape_chain_for_transition(pool, tm, &last_clone);
+    if (tm->shape && !clone->shape) return NULL;
+    clone->last = last_clone;
+
+    typemap_hash_build(clone, pool);
+
+    if (tm->slot_entries && tm->slot_count > 0) {
+        ShapeEntry** entries = (ShapeEntry**)pool_calloc(pool,
+            (size_t)tm->slot_count * sizeof(ShapeEntry*));
+        if (entries) {
+            ShapeEntry* e = clone->shape;
+            for (int i = 0; i < tm->slot_count && e; i++, e = e->next) {
+                entries[i] = e;
+            }
+            clone->slot_entries = entries;
+            clone->slot_count = tm->slot_count;
+        }
+    }
+
+    mp->type = clone;
+    log_debug("map_clone_typemap_for_mutation: cloned TypeMap %p -> %p for Map %p",
+        (void*)tm, (void*)clone, (void*)mp);
+    return clone;
+}
+
 static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
         TypeId type_id, Input* input, ShapeEntry** out_entry) {
     if (out_entry) *out_entry = NULL;
@@ -330,8 +374,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
                 return;
             }
         }
-        Item obj = (Item){.map = mp};
-        TypeMap* clone = js_typemap_clone_for_mutation_pub(obj);
+        TypeMap* clone = map_clone_typemap_for_mutation(mp, input);
         if (clone) map_type = clone;
     }
 
@@ -387,8 +430,7 @@ bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
     }
     if (!map_type) return false;
     if (map_type_is_shared_js_shape(map_type)) {
-        Item obj = (Item){.map = mp};
-        TypeMap* clone = js_typemap_clone_for_mutation_pub(obj);
+        TypeMap* clone = map_clone_typemap_for_mutation(mp, input);
         if (clone) map_type = clone;
     }
 
