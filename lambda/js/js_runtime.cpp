@@ -2514,6 +2514,7 @@ extern "C" Item js_new_object_with_shape(const char** prop_names, const int* pro
         nv->str = key_str->chars;
         nv->length = key_str->len;
         se->name = nv;
+        se->name_id = typemap_name_id(nv->str, (int)nv->length);
         se->type = type_info[LMD_TYPE_NULL].type;
         se->byte_offset = i * (int)sizeof(void*);  // 8-byte slots
         se->next = NULL;
@@ -6787,8 +6788,8 @@ static inline bool js_load_ic_offset_ok(Map* m, int64_t byte_offset) {
 }
 
 static inline bool js_load_ic_name_matches(ShapeEntry* entry,
-        const char* name, int name_len) {
-    return typemap_shape_name_equals(entry, name, name_len);
+        const char* name, int name_len, uint32_t name_id) {
+    return typemap_shape_name_equals_id(entry, name, name_len, name_id);
 }
 
 static inline bool js_named_ic_array_name_allowed(const char* name, int name_len) {
@@ -6835,6 +6836,7 @@ static inline bool js_load_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
 }
 
 static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
+        uint32_t name_id,
         JsLoadICEntry* out_entry, Item* out_value, JsLoadICProfileReason* out_reason) {
     if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
     if (!out_entry || !out_value || !name || name_len < 0) return false;
@@ -6854,12 +6856,12 @@ static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
         return false;
     }
 
-    ShapeEntry* entry = js_find_shape_entry(object, name, name_len);
+    ShapeEntry* entry = typemap_hash_lookup_by_id(tm, name, name_len, name_id);
     if (!entry) {
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
         return false;
     }
-    if (!js_load_ic_name_matches(entry, name, name_len)) {
+    if (!js_load_ic_name_matches(entry, name, name_len, name_id)) {
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NAME;
         return false;
     }
@@ -6889,12 +6891,14 @@ static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
     return true;
 }
 
-static inline bool js_load_ic_key_matches(JsLoadIC* ic, const char* name, int name_len) {
+static inline bool js_load_ic_key_matches(JsLoadIC* ic, const char* name,
+        int name_len, uint32_t* out_name_id) {
     if (!ic || !name || name_len < 0) return false;
     if (!ic->name) return true;
-    uint32_t name_id = typemap_name_id(name, name_len);
-    if (ic->name_id != 0 && name_id != 0 && ic->name_id != name_id) return false;
     if (ic->name == name && ic->name_len == name_len) return true;
+    uint32_t name_id = typemap_name_id(name, name_len);
+    if (out_name_id) *out_name_id = name_id;
+    if (ic->name_id != 0 && name_id != 0 && ic->name_id != name_id) return false;
     return ic->name_len == name_len && memcmp(ic->name, name, (size_t)name_len) == 0;
 }
 
@@ -6917,10 +6921,12 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
         return js_property_access_named_ic_slow(object, name, 0, ic);
     }
     int name_len = (int)name_len64;
-    if (!js_load_ic_key_matches(ic, name, name_len)) {
+    uint32_t name_id = ic->name_id;
+    if (!js_load_ic_key_matches(ic, name, name_len, &name_id)) {
         js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_MISS_KEY);
         return js_property_access_named_ic_slow(object, name, name_len, ic);
     }
+    if (name_id == 0) name_id = typemap_name_id(name, name_len);
 
     uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
     Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
@@ -6957,11 +6963,12 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
         memset(&entry, 0, sizeof(entry));
         Item value = ItemNull;
         JsLoadICProfileReason miss_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
-        if (js_load_ic_build_entry(object, name, name_len, &entry, &value, &miss_reason)) {
+        if (js_load_ic_build_entry(object, name, name_len, name_id,
+                &entry, &value, &miss_reason)) {
             if (!ic->name) {
                 ic->name = name;
                 ic->name_len = name_len;
-                ic->name_id = entry.name_id ? entry.name_id : typemap_name_id(name, name_len);
+                ic->name_id = entry.name_id ? entry.name_id : name_id;
             }
             for (int i = 0; i < ic->count && i < JS_LOAD_IC_POLY_MAX; i++) {
                 if (ic->entries[i].shape == entry.shape &&
@@ -6996,12 +7003,14 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
     return js_property_access_named_ic_slow(object, name, name_len, ic);
 }
 
-static inline bool js_store_ic_key_matches(JsStoreIC* ic, const char* name, int name_len) {
+static inline bool js_store_ic_key_matches(JsStoreIC* ic, const char* name,
+        int name_len, uint32_t* out_name_id) {
     if (!ic || !name || name_len < 0) return false;
     if (!ic->name) return true;
-    uint32_t name_id = typemap_name_id(name, name_len);
-    if (ic->name_id != 0 && name_id != 0 && ic->name_id != name_id) return false;
     if (ic->name == name && ic->name_len == name_len) return true;
+    uint32_t name_id = typemap_name_id(name, name_len);
+    if (out_name_id) *out_name_id = name_id;
+    if (ic->name_id != 0 && name_id != 0 && ic->name_id != name_id) return false;
     return ic->name_len == name_len && memcmp(ic->name, name, (size_t)name_len) == 0;
 }
 
@@ -7113,6 +7122,7 @@ static inline bool js_store_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
 }
 
 static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
+        uint32_t name_id,
         Item value, JsLoadICEntry* out_entry, JsStoreICProfileReason* out_reason) {
     if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
     if (!out_entry || !name || name_len < 0) return false;
@@ -7132,12 +7142,12 @@ static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
         return false;
     }
 
-    ShapeEntry* entry = js_find_shape_entry(object, name, name_len);
+    ShapeEntry* entry = typemap_hash_lookup_by_id(tm, name, name_len, name_id);
     if (!entry) {
         if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
         return false;
     }
-    if (!js_load_ic_name_matches(entry, name, name_len)) {
+    if (!js_load_ic_name_matches(entry, name, name_len, name_id)) {
         if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NAME;
         return false;
     }
@@ -7167,12 +7177,13 @@ static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
 }
 
 static void js_store_ic_install(JsStoreIC* ic, const char* name, int name_len,
+        uint32_t name_id,
         JsLoadICEntry* entry) {
     if (!ic || !entry || !entry->shape) return;
     if (!ic->name) {
         ic->name = name;
         ic->name_len = name_len;
-        ic->name_id = entry->name_id ? entry->name_id : typemap_name_id(name, name_len);
+        ic->name_id = entry->name_id ? entry->name_id : name_id;
     }
     for (int i = 0; i < ic->count && i < JS_STORE_IC_POLY_MAX; i++) {
         if (ic->entries[i].shape == entry->shape &&
@@ -7209,10 +7220,12 @@ extern "C" Item js_property_set_named_ic(Item object, const char* name,
         return js_property_set_named_ic_slow(object, name, 0, value, strict, ic);
     }
     int name_len = (int)name_len64;
-    if (!js_store_ic_key_matches(ic, name, name_len)) {
+    uint32_t name_id = ic->name_id;
+    if (!js_store_ic_key_matches(ic, name, name_len, &name_id)) {
         js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_MISS_KEY);
         return js_property_set_named_ic_slow(object, name, name_len, value, strict, ic);
     }
+    if (name_id == 0) name_id = typemap_name_id(name, name_len);
 
     uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
     Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
@@ -7259,8 +7272,9 @@ extern "C" Item js_property_set_named_ic(Item object, const char* name,
     JsLoadICEntry entry;
     memset(&entry, 0, sizeof(entry));
     JsStoreICProfileReason miss_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
-    if (js_store_ic_build_entry(object, name, name_len, value, &entry, &miss_reason)) {
-        js_store_ic_install(ic, name, name_len, &entry);
+    if (js_store_ic_build_entry(object, name, name_len, name_id,
+            value, &entry, &miss_reason)) {
+        js_store_ic_install(ic, name, name_len, name_id, &entry);
     } else {
         js_profile_store_ic_site(ic->profile_label, miss_reason);
     }
