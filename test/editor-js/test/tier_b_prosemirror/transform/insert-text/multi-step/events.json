@@ -1,0 +1,4 @@
+[
+  { "type": "command", "name": "insertText", "args": { "text": " " } },
+  { "type": "command", "name": "insertText", "args": { "text": "there" } }
+]
