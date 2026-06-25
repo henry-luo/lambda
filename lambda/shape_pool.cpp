@@ -171,6 +171,7 @@ static ShapeEntry* create_shape_chain(Arena* arena, const char** field_names,
             nv = NULL;
         }
         entry->name = nv;
+        entry->name_id = nv ? typemap_name_id(nv->str, (int)nv->length) : 0;
         entry->type = type_info[field_types[i]].type;
         entry->byte_offset = byte_offset;
         entry->next = NULL;

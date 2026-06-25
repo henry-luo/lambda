@@ -49,6 +49,7 @@ extern "C" Item js_dom_get_selection_function_for_document(void* doc);
 extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
+static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value);
 
 extern "C" void js_map_promote_descriptor_kind(Map* m) {
     if (m && m->map_kind == MAP_KIND_PLAIN) m->map_kind = MAP_KIND_DESC;
@@ -2513,6 +2514,7 @@ extern "C" Item js_new_object_with_shape(const char** prop_names, const int* pro
         nv->str = key_str->chars;
         nv->length = key_str->len;
         se->name = nv;
+        se->name_id = typemap_name_id(nv->str, (int)nv->length);
         se->type = type_info[LMD_TYPE_NULL].type;
         se->byte_offset = i * (int)sizeof(void*);  // 8-byte slots
         se->next = NULL;
@@ -4186,8 +4188,14 @@ extern "C" Item js_property_get(Item object, Item key) {
             if (object.array->items[idx].item != JS_DELETED_SENTINEL_VAL) {
                 return object.array->items[idx];
             }
+            Item sparse_val = ItemNull;
+            if (js_array_sparse_get(object.array, idx, &sparse_val)) return sparse_val;
             // hole — fall through to prototype chain lookup below
         } else {
+            if (idx_d == idx_d && idx >= 0) {
+                Item sparse_val = ItemNull;
+                if (js_array_sparse_get(object.array, idx, &sparse_val)) return sparse_val;
+            }
             // Arguments overflow: numeric index stored in companion map
             if (idx_d == idx_d && idx >= 0 && object.array->is_content == 1 && object.array->extra != 0) {
                 char idx_buf[32];
@@ -5011,14 +5019,125 @@ static Item js_property_set_on_primitive_base(Item object, Item key, Item value)
     return value;
 }
 
-static Map* js_array_ensure_props_map(Array* arr) {
+typedef struct JsArraySparseHashEntry {
+    int64_t index;
+    Item value;
+} JsArraySparseHashEntry;
+
+static uint64_t js_array_sparse_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const JsArraySparseHashEntry* entry = (const JsArraySparseHashEntry*)item;
+    return hashmap_sip(&entry->index, sizeof(entry->index), seed0, seed1);
+}
+
+static int js_array_sparse_compare(const void* left, const void* right, void* udata) {
+    (void)udata;
+    const JsArraySparseHashEntry* a = (const JsArraySparseHashEntry*)left;
+    const JsArraySparseHashEntry* b = (const JsArraySparseHashEntry*)right;
+    return (a->index > b->index) - (a->index < b->index);
+}
+
+static SparseArrayMap* js_array_sparse_from_map(Map* map) {
+    if (!map || map->map_kind != MAP_KIND_ARRAY_SPARSE) return NULL;
+    return (SparseArrayMap*)map;
+}
+
+static SparseArrayMap* js_array_ensure_sparse_map(Array* arr) {
     if (!arr) return NULL;
-    if (arr->extra == 0) {
-        Item obj = js_new_object();
-        obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-        arr->extra = (int64_t)(uintptr_t)obj.map;
+    Map* existing = arr->extra != 0 ? (Map*)(uintptr_t)arr->extra : NULL;
+    if (existing && existing->map_kind == MAP_KIND_ARRAY_SPARSE) {
+        return (SparseArrayMap*)existing;
     }
-    return (Map*)(uintptr_t)arr->extra;
+
+    SparseArrayMap* sm = (SparseArrayMap*)heap_calloc(sizeof(SparseArrayMap), LMD_TYPE_MAP);
+    if (!sm) return NULL;
+    Map* base = (Map*)sm;
+    if (existing) {
+        *base = *existing;
+    } else {
+        base->type_id = LMD_TYPE_MAP;
+        base->type = &EmptyMap;
+    }
+    base->map_kind = MAP_KIND_ARRAY_SPARSE;
+    sm->sparse_indices = NULL;
+    sm->sparse_version = 1;
+    arr->extra = (int64_t)(uintptr_t)sm;
+    return sm;
+}
+
+static bool js_array_sparse_ensure_table(SparseArrayMap* sm) {
+    if (!sm) return false;
+    if (sm->sparse_indices) return true;
+    sm->sparse_indices = hashmap_new(sizeof(JsArraySparseHashEntry), 16, 0, 0,
+        js_array_sparse_hash, js_array_sparse_compare, NULL, NULL);
+    return sm->sparse_indices != NULL;
+}
+
+static bool js_array_sparse_get_from_map(Map* map, int64_t index, Item* out_value) {
+    SparseArrayMap* sm = js_array_sparse_from_map(map);
+    if (!sm || !sm->sparse_indices || index < 0) return false;
+    JsArraySparseHashEntry probe;
+    probe.index = index;
+    probe.value = ItemNull;
+    const JsArraySparseHashEntry* found =
+        (const JsArraySparseHashEntry*)hashmap_get(sm->sparse_indices, &probe);
+    if (!found) return false;
+    if (out_value) *out_value = found->value;
+    return true;
+}
+
+static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value) {
+    if (!arr || arr->extra == 0) return false;
+    return js_array_sparse_get_from_map((Map*)(uintptr_t)arr->extra, index, out_value);
+}
+
+static bool js_array_sparse_set(Item array_item, int64_t index, Item value) {
+    if (get_type_id(array_item) != LMD_TYPE_ARRAY || index < 0) return false;
+    SparseArrayMap* sm = js_array_ensure_sparse_map(array_item.array);
+    if (!js_array_sparse_ensure_table(sm)) return false;
+    JsArraySparseHashEntry entry;
+    entry.index = index;
+    entry.value = value;
+    hashmap_set(sm->sparse_indices, &entry);
+    if (hashmap_oom(sm->sparse_indices)) return false;
+    sm->sparse_version++;
+    return true;
+}
+
+static bool js_array_sparse_delete(Array* arr, int64_t index) {
+    if (!arr || arr->extra == 0 || index < 0) return false;
+    SparseArrayMap* sm = js_array_sparse_from_map((Map*)(uintptr_t)arr->extra);
+    if (!sm || !sm->sparse_indices) return false;
+    JsArraySparseHashEntry probe;
+    probe.index = index;
+    probe.value = ItemNull;
+    const void* removed = hashmap_delete(sm->sparse_indices, &probe);
+    if (removed) {
+        sm->sparse_version++;
+        return true;
+    }
+    return false;
+}
+
+extern "C" int64_t js_array_sparse_delete_index(Item array, int64_t index) {
+    if (get_type_id(array) != LMD_TYPE_ARRAY) return 0;
+    return js_array_sparse_delete(array.array, index) ? 1 : 0;
+}
+
+extern "C" int64_t js_array_sparse_has_index(Item array, int64_t index) {
+    if (get_type_id(array) != LMD_TYPE_ARRAY) return 0;
+    Item value = ItemNull;
+    return js_array_sparse_get(array.array, index, &value) ? 1 : 0;
+}
+
+extern "C" Item js_array_sparse_get_index(Item array, int64_t index) {
+    if (get_type_id(array) != LMD_TYPE_ARRAY) return make_js_undefined();
+    Item value = ItemNull;
+    return js_array_sparse_get(array.array, index, &value) ? value : make_js_undefined();
+}
+
+static inline bool js_array_dense_present(Array* arr, int64_t index) {
+    return arr && index >= 0 && index < arr->length && index < arr->capacity &&
+        arr->items[index].item != JS_DELETED_SENTINEL_VAL;
 }
 
 static const int64_t JS_ARRAY_DENSE_GAP_ALWAYS_OK = 10000;
@@ -5090,13 +5209,7 @@ static void js_array_store_sparse_property(Item array_item, int64_t index, Item 
     // post-length slots holding stale pointer values that happen to be
     // non-zero — those decode as `[object Object]` in JS-land otherwise.
     js_array_stamp_dense_tail_holes(arr);
-    Map* pm = js_array_ensure_props_map(arr);
-    if (!pm) return;
-    char idx_buf[32];
-    int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
-    Item map_item = (Item){.map = pm};
-    Item str_key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
-    js_property_set(map_item, str_key, value);
+    if (!js_array_sparse_set(array_item, index, value)) return;
     if (update_length && index <= 0xFFFFFFFELL && arr->length <= index) {
         arr->length = index + 1;
     }
@@ -5161,6 +5274,22 @@ static Item js_array_numeric_key_to_property_key(Item key) {
 static void js_array_delete_sparse_indices_from(lam::GcPtr<Array> arr, int64_t new_len) {
     if (!arr || arr->extra == 0) return;
     Map* pm = (Map*)(uintptr_t)arr->extra;
+    SparseArrayMap* sm = js_array_sparse_from_map(pm);
+    if (sm && sm->sparse_indices) {
+        size_t iter = 0;
+        void* item = NULL;
+        while (hashmap_iter(sm->sparse_indices, &iter, &item)) {
+            JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
+            if (entry->index >= new_len) {
+                JsArraySparseHashEntry probe;
+                probe.index = entry->index;
+                probe.value = ItemNull;
+                hashmap_delete(sm->sparse_indices, &probe);
+                sm->sparse_version++;
+                iter = 0;
+            }
+        }
+    }
     if (!pm || !pm->type) return;
     TypeMap* tm = (TypeMap*)pm->type;
     Item map_item = (Item){.map = pm};
@@ -5210,7 +5339,7 @@ static bool js_func_has_own_property_map_key(Item object, const char* name, int 
 static bool js_array_companion_has_numeric_slot(Array* arr, int64_t index) {
     if (!arr || arr->extra == 0 || index < 0) return false;
     Map* pm = (Map*)(uintptr_t)arr->extra;
-    if (!pm || pm->map_kind != MAP_KIND_ARRAY_PROPS) return false;
+    if (!pm || !map_kind_is_array_props(pm->map_kind)) return false;
     TypeMap* tm = (TypeMap*)pm->type;
     if (!tm || !tm->has_array_index_shape) return false;
     char idx_buf[32];
@@ -5234,6 +5363,7 @@ static inline bool js_array_fast_own_dense_set(Item object, int64_t index, Item 
     if (index < 0 || index >= arr->length || index >= arr->capacity) return false;
     if (arr->items[index].item == JS_DELETED_SENTINEL_VAL) return false;
     if (js_array_companion_has_numeric_slot(arr, index)) return false;
+    js_array_sparse_delete(arr, index);
     arr->items[index] = value;
     return true;
 }
@@ -5312,7 +5442,7 @@ static bool js_array_companion_try_write_existing_data(Item object, const char* 
     Array* arr = object.array;
     if (!arr || arr->extra == 0) return false;
     Map* pm = (Map*)(uintptr_t)arr->extra;
-    if (!pm || pm->map_kind != MAP_KIND_ARRAY_PROPS || !pm->data) return false;
+    if (!pm || !map_kind_is_array_props(pm->map_kind) || !pm->data) return false;
 
     Item pm_item = (Item){.map = pm};
     ShapeEntry* entry = NULL;
@@ -6658,8 +6788,8 @@ static inline bool js_load_ic_offset_ok(Map* m, int64_t byte_offset) {
 }
 
 static inline bool js_load_ic_name_matches(ShapeEntry* entry,
-        const char* name, int name_len) {
-    return typemap_shape_name_equals(entry, name, name_len);
+        const char* name, int name_len, uint32_t name_id) {
+    return typemap_shape_name_equals_id(entry, name, name_len, name_id);
 }
 
 static inline bool js_named_ic_array_name_allowed(const char* name, int name_len) {
@@ -6689,7 +6819,7 @@ static inline Map* js_named_ic_receiver_map(Item object, const char* name, int n
 static inline bool js_named_ic_receiver_map_is_fast(Map* m, uint8_t receiver_kind) {
     if (!m || !m->data) return false;
     if (receiver_kind == JS_NAMED_IC_RECEIVER_ARRAY_PROPS) {
-        return m->map_kind == MAP_KIND_ARRAY_PROPS;
+        return map_kind_is_array_props(m->map_kind);
     }
     return receiver_kind == JS_NAMED_IC_RECEIVER_MAP && m->map_kind == MAP_KIND_PLAIN;
 }
@@ -6706,6 +6836,7 @@ static inline bool js_load_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
 }
 
 static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
+        uint32_t name_id,
         JsLoadICEntry* out_entry, Item* out_value, JsLoadICProfileReason* out_reason) {
     if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
     if (!out_entry || !out_value || !name || name_len < 0) return false;
@@ -6725,12 +6856,12 @@ static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
         return false;
     }
 
-    ShapeEntry* entry = js_find_shape_entry(object, name, name_len);
+    ShapeEntry* entry = typemap_hash_lookup_by_id(tm, name, name_len, name_id);
     if (!entry) {
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
         return false;
     }
-    if (!js_load_ic_name_matches(entry, name, name_len)) {
+    if (!js_load_ic_name_matches(entry, name, name_len, name_id)) {
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NAME;
         return false;
     }
@@ -6760,12 +6891,14 @@ static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
     return true;
 }
 
-static inline bool js_load_ic_key_matches(JsLoadIC* ic, const char* name, int name_len) {
+static inline bool js_load_ic_key_matches(JsLoadIC* ic, const char* name,
+        int name_len, uint32_t* out_name_id) {
     if (!ic || !name || name_len < 0) return false;
     if (!ic->name) return true;
-    uint32_t name_id = typemap_name_id(name, name_len);
-    if (ic->name_id != 0 && name_id != 0 && ic->name_id != name_id) return false;
     if (ic->name == name && ic->name_len == name_len) return true;
+    uint32_t name_id = typemap_name_id(name, name_len);
+    if (out_name_id) *out_name_id = name_id;
+    if (ic->name_id != 0 && name_id != 0 && ic->name_id != name_id) return false;
     return ic->name_len == name_len && memcmp(ic->name, name, (size_t)name_len) == 0;
 }
 
@@ -6788,10 +6921,12 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
         return js_property_access_named_ic_slow(object, name, 0, ic);
     }
     int name_len = (int)name_len64;
-    if (!js_load_ic_key_matches(ic, name, name_len)) {
+    uint32_t name_id = ic->name_id;
+    if (!js_load_ic_key_matches(ic, name, name_len, &name_id)) {
         js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_MISS_KEY);
         return js_property_access_named_ic_slow(object, name, name_len, ic);
     }
+    if (name_id == 0) name_id = typemap_name_id(name, name_len);
 
     uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
     Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
@@ -6828,11 +6963,12 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
         memset(&entry, 0, sizeof(entry));
         Item value = ItemNull;
         JsLoadICProfileReason miss_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
-        if (js_load_ic_build_entry(object, name, name_len, &entry, &value, &miss_reason)) {
+        if (js_load_ic_build_entry(object, name, name_len, name_id,
+                &entry, &value, &miss_reason)) {
             if (!ic->name) {
                 ic->name = name;
                 ic->name_len = name_len;
-                ic->name_id = entry.name_id ? entry.name_id : typemap_name_id(name, name_len);
+                ic->name_id = entry.name_id ? entry.name_id : name_id;
             }
             for (int i = 0; i < ic->count && i < JS_LOAD_IC_POLY_MAX; i++) {
                 if (ic->entries[i].shape == entry.shape &&
@@ -6867,12 +7003,14 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
     return js_property_access_named_ic_slow(object, name, name_len, ic);
 }
 
-static inline bool js_store_ic_key_matches(JsStoreIC* ic, const char* name, int name_len) {
+static inline bool js_store_ic_key_matches(JsStoreIC* ic, const char* name,
+        int name_len, uint32_t* out_name_id) {
     if (!ic || !name || name_len < 0) return false;
     if (!ic->name) return true;
-    uint32_t name_id = typemap_name_id(name, name_len);
-    if (ic->name_id != 0 && name_id != 0 && ic->name_id != name_id) return false;
     if (ic->name == name && ic->name_len == name_len) return true;
+    uint32_t name_id = typemap_name_id(name, name_len);
+    if (out_name_id) *out_name_id = name_id;
+    if (ic->name_id != 0 && name_id != 0 && ic->name_id != name_id) return false;
     return ic->name_len == name_len && memcmp(ic->name, name, (size_t)name_len) == 0;
 }
 
@@ -6984,6 +7122,7 @@ static inline bool js_store_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
 }
 
 static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
+        uint32_t name_id,
         Item value, JsLoadICEntry* out_entry, JsStoreICProfileReason* out_reason) {
     if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
     if (!out_entry || !name || name_len < 0) return false;
@@ -7003,12 +7142,12 @@ static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
         return false;
     }
 
-    ShapeEntry* entry = js_find_shape_entry(object, name, name_len);
+    ShapeEntry* entry = typemap_hash_lookup_by_id(tm, name, name_len, name_id);
     if (!entry) {
         if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
         return false;
     }
-    if (!js_load_ic_name_matches(entry, name, name_len)) {
+    if (!js_load_ic_name_matches(entry, name, name_len, name_id)) {
         if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NAME;
         return false;
     }
@@ -7038,12 +7177,13 @@ static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
 }
 
 static void js_store_ic_install(JsStoreIC* ic, const char* name, int name_len,
+        uint32_t name_id,
         JsLoadICEntry* entry) {
     if (!ic || !entry || !entry->shape) return;
     if (!ic->name) {
         ic->name = name;
         ic->name_len = name_len;
-        ic->name_id = entry->name_id ? entry->name_id : typemap_name_id(name, name_len);
+        ic->name_id = entry->name_id ? entry->name_id : name_id;
     }
     for (int i = 0; i < ic->count && i < JS_STORE_IC_POLY_MAX; i++) {
         if (ic->entries[i].shape == entry->shape &&
@@ -7080,10 +7220,12 @@ extern "C" Item js_property_set_named_ic(Item object, const char* name,
         return js_property_set_named_ic_slow(object, name, 0, value, strict, ic);
     }
     int name_len = (int)name_len64;
-    if (!js_store_ic_key_matches(ic, name, name_len)) {
+    uint32_t name_id = ic->name_id;
+    if (!js_store_ic_key_matches(ic, name, name_len, &name_id)) {
         js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_MISS_KEY);
         return js_property_set_named_ic_slow(object, name, name_len, value, strict, ic);
     }
+    if (name_id == 0) name_id = typemap_name_id(name, name_len);
 
     uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
     Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
@@ -7130,8 +7272,9 @@ extern "C" Item js_property_set_named_ic(Item object, const char* name,
     JsLoadICEntry entry;
     memset(&entry, 0, sizeof(entry));
     JsStoreICProfileReason miss_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
-    if (js_store_ic_build_entry(object, name, name_len, value, &entry, &miss_reason)) {
-        js_store_ic_install(ic, name, name_len, &entry);
+    if (js_store_ic_build_entry(object, name, name_len, name_id,
+            value, &entry, &miss_reason)) {
+        js_store_ic_install(ic, name, name_len, name_id, &entry);
     } else {
         js_profile_store_ic_site(ic->profile_label, miss_reason);
     }
@@ -7702,10 +7845,14 @@ extern "C" Item js_array_get(Item array, Item index) {
             return make_js_undefined();
         }
         if (status == JS_SHAPE_SLOT_DATA) {
-            bool dense_present = idx < arr->length && idx < arr->capacity &&
-                arr->items[idx].item != JS_DELETED_SENTINEL_VAL;
+            bool dense_present = js_array_dense_present(arr, idx);
             if (!dense_present) return slot_val;
         }
+    }
+
+    if (idx >= 0 && !js_array_dense_present(arr, idx)) {
+        Item sparse_val = ItemNull;
+        if (js_array_sparse_get(arr, idx, &sparse_val)) return sparse_val;
     }
 
     if (idx >= 0 && idx < arr->length && idx < arr->capacity) {
@@ -7732,7 +7879,7 @@ extern "C" Item js_string_get_int(Item str_item, int64_t index) {
 extern "C" Item js_array_get_int(Item array, int64_t index) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_ARRAY_GET_INT);
     if (get_type_id(array) == LMD_TYPE_ARRAY) {
-        if (index < 0) {
+        if (index < 0 || index > 0xFFFFFFFELL) {
             char idx_buf[32];
             int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
             Item key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
@@ -7765,10 +7912,13 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
             Item sparse_val = ItemNull;
             JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, &sparse_val, NULL);
             if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
-                bool dense_present = index < arr->length && index < arr->capacity &&
-                    arr->items[index].item != JS_DELETED_SENTINEL_VAL;
+                bool dense_present = js_array_dense_present(arr, index);
                 if (!dense_present) return sparse_val;
             }
+        }
+        if (!js_array_dense_present(arr, index)) {
+            Item sparse_val = ItemNull;
+            if (js_array_sparse_get(arr, index, &sparse_val)) return sparse_val;
         }
         if (index >= 0 && index < arr->length && index < arr->capacity) {
             // v25: check for deleted sentinel (array hole) — fall through to prototype chain
@@ -7823,7 +7973,7 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
         }
         return js_property_set(array, (Item){.item = i2it(index)}, value);
     }
-    if (index < 0) {
+    if (index < 0 || index > 0xFFFFFFFELL) {
         char idx_buf[32];
         int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
         Item key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
@@ -7939,6 +8089,7 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
         }
     }
     if (index >= 0 && index < arr->length && index < arr->capacity) {
+        js_array_sparse_delete(arr, index);
         arr->items[index] = value;
     } else if (index >= 0) {
         if (!js_is_extensible(array)) return value;
@@ -8131,6 +8282,7 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
 
     if (idx >= 0 && idx < arr->length && idx < arr->capacity) {
         JS_PROPERTY_SET_BRANCH("array_set_dense_write");
+        js_array_sparse_delete(arr, idx);
         arr->items[idx] = value;
     } else if (idx >= 0) {
         if (!js_is_extensible(array)) return value;
@@ -22483,10 +22635,13 @@ static inline Item js_array_element(Item arr_item, int64_t idx) {
         }
         // AT-3: legacy __get_<idx> marker fallback retired.
         if (status == JS_SHAPE_SLOT_DATA) {
-            bool dense_present = idx >= 0 && idx < arr->length && idx < arr->capacity &&
-                arr->items[idx].item != JS_DELETED_SENTINEL_VAL;
+            bool dense_present = js_array_dense_present(arr, idx);
             if (!dense_present) return slot_val;
         }
+    }
+    if (!js_array_dense_present(arr, idx)) {
+        Item sparse_val = ItemNull;
+        if (js_array_sparse_get(arr, idx, &sparse_val)) return sparse_val;
     }
     // J39-7: spec [[Get]] for index >= length returns undefined (after array
     // mutation during iteration, find/forEach/map etc. may visit indices that
@@ -22732,6 +22887,11 @@ static bool js_array_has_element(Item arr, lam::GcPtr<Array> a, int64_t idx, Ite
             *out = slot_val;
             return true;
         }
+        Item sparse_val = ItemNull;
+        if (js_array_sparse_get_from_map(props, idx, &sparse_val)) {
+            *out = sparse_val;
+            return true;
+        }
         // AT-3: legacy __get_<idx>/__set_<idx> marker fallback retired (post-AT-1
         // the intercept routes companion-map accessor writes through IS_ACCESSOR
         // shape entry probed above).
@@ -22760,6 +22920,7 @@ typedef struct JsArraySparseKeyCursor {
     TypeMap* type;
     ShapeEntry* shape;
     int64_t type_length;
+    int64_t sparse_version;
     int64_t* keys;
     int count;
     int capacity;
@@ -22778,6 +22939,7 @@ static void js_array_sparse_key_cursor_init(JsArraySparseKeyCursor* cursor) {
     cursor->type = NULL;
     cursor->shape = NULL;
     cursor->type_length = 0;
+    cursor->sparse_version = 0;
     cursor->keys = NULL;
     cursor->count = 0;
     cursor->capacity = 0;
@@ -22796,12 +22958,17 @@ static bool js_array_sparse_key_cursor_rebuild(JsArraySparseKeyCursor* cursor, l
     TypeMap* tm = (props && props->type) ? (TypeMap*)props->type : NULL;
     ShapeEntry* shape = tm ? tm->shape : NULL;
     int64_t type_length = tm ? tm->length : 0;
+    SparseArrayMap* sm = js_array_sparse_from_map(props);
+    int64_t sparse_version = sm ? sm->sparse_version : 0;
 
     int count = 0;
     for (ShapeEntry* se = shape; se; se = se->next) {
         if (!se->name) continue;
         int64_t idx = -1;
         if (js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) count++;
+    }
+    if (sm && sm->sparse_indices) {
+        count += (int)hashmap_count(sm->sparse_indices);
     }
     if (count > cursor->capacity) {
         int64_t* new_keys = (int64_t*)mem_alloc((size_t)count * sizeof(int64_t), MEM_CAT_JS_RUNTIME);
@@ -22818,6 +22985,15 @@ static bool js_array_sparse_key_cursor_rebuild(JsArraySparseKeyCursor* cursor, l
         if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
         cursor->keys[pos++] = idx;
     }
+    if (sm && sm->sparse_indices) {
+        size_t iter = 0;
+        void* item = NULL;
+        while (hashmap_iter(sm->sparse_indices, &iter, &item)) {
+            JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
+            if (entry->value.item == JS_DELETED_SENTINEL_VAL) continue;
+            cursor->keys[pos++] = entry->index;
+        }
+    }
     if (pos > 1) qsort(cursor->keys, (size_t)pos, sizeof(int64_t), js_array_sparse_key_cmp);
     int unique = 0;
     for (int i = 0; i < pos; i++) {
@@ -22829,6 +23005,7 @@ static bool js_array_sparse_key_cursor_rebuild(JsArraySparseKeyCursor* cursor, l
     cursor->type = tm;
     cursor->shape = shape;
     cursor->type_length = type_length;
+    cursor->sparse_version = sparse_version;
     cursor->count = unique;
     cursor->ready = true;
     return true;
@@ -22840,8 +23017,11 @@ static bool js_array_sparse_key_cursor_refresh(JsArraySparseKeyCursor* cursor, l
     TypeMap* tm = (props && props->type) ? (TypeMap*)props->type : NULL;
     ShapeEntry* shape = tm ? tm->shape : NULL;
     int64_t type_length = tm ? tm->length : 0;
+    SparseArrayMap* sm = js_array_sparse_from_map(props);
+    int64_t sparse_version = sm ? sm->sparse_version : 0;
     if (cursor->ready && cursor->props == props && cursor->type == tm &&
-            cursor->shape == shape && cursor->type_length == type_length) {
+            cursor->shape == shape && cursor->type_length == type_length &&
+            cursor->sparse_version == sparse_version) {
         return true;
     }
     return js_array_sparse_key_cursor_rebuild(cursor, a);
@@ -22869,6 +23049,11 @@ static int js_array_sparse_key_upper_bound(int64_t* keys, int count, int64_t tar
 
 static bool js_array_sparse_key_has_current_slot(Map* props, int64_t idx) {
     if (!props) return false;
+    Item sparse_val = ItemNull;
+    if (js_array_sparse_get_from_map(props, idx, &sparse_val) &&
+            sparse_val.item != JS_DELETED_SENTINEL_VAL) {
+        return true;
+    }
     char idx_buf[32];
     int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
     Item pm_item = (Item){.map = props};
@@ -22910,6 +23095,18 @@ static bool js_array_find_next_own_element(Item arr, lam::GcPtr<Array> a, int64_
                 if (jspd_is_deleted(se)) continue;
                 Item val = _map_read_field(se, props->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) continue;
+                if (best_extra < 0 || idx < best_extra) best_extra = idx;
+            }
+        }
+        SparseArrayMap* sm = js_array_sparse_from_map(props);
+        if (sm && sm->sparse_indices) {
+            size_t iter = 0;
+            void* item = NULL;
+            while (hashmap_iter(sm->sparse_indices, &iter, &item)) {
+                JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
+                int64_t idx = entry->index;
+                if (idx < start || idx >= len) continue;
+                if (entry->value.item == JS_DELETED_SENTINEL_VAL) continue;
                 if (best_extra < 0 || idx < best_extra) best_extra = idx;
             }
         }
@@ -23007,6 +23204,18 @@ static bool js_array_find_prev_own_element(Item arr, lam::GcPtr<Array> a, int64_
                 if (idx > start || idx < 0) continue;
                 Item val = _map_read_field(se, props->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) continue;
+                if (best_extra < 0 || idx > best_extra) best_extra = idx;
+            }
+        }
+        SparseArrayMap* sm = js_array_sparse_from_map(props);
+        if (sm && sm->sparse_indices) {
+            size_t iter = 0;
+            void* item = NULL;
+            while (hashmap_iter(sm->sparse_indices, &iter, &item)) {
+                JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
+                int64_t idx = entry->index;
+                if (idx > start || idx < 0) continue;
+                if (entry->value.item == JS_DELETED_SENTINEL_VAL) continue;
                 if (best_extra < 0 || idx > best_extra) best_extra = idx;
             }
         }
@@ -24888,6 +25097,19 @@ includes_slow_path:
                 js_create_data_property_or_throw(result, sparse_idx - start, sparse_val);
                 if (js_exception_pending) return make_js_undefined();
             }
+            SparseArrayMap* sm = js_array_sparse_from_map(pm);
+            if (sm && sm->sparse_indices) {
+                size_t iter = 0;
+                void* item = NULL;
+                while (hashmap_iter(sm->sparse_indices, &iter, &item)) {
+                    JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
+                    int64_t sparse_idx = entry->index;
+                    if (sparse_idx < start || sparse_idx >= end || sparse_idx < dense_end) continue;
+                    if (entry->value.item == JS_DELETED_SENTINEL_VAL) continue;
+                    js_create_data_property_or_throw(result, sparse_idx - start, entry->value);
+                    if (js_exception_pending) return make_js_undefined();
+                }
+            }
         }
         Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
         js_property_set(result, len_key, (Item){.item = i2it(count)});
@@ -25571,6 +25793,20 @@ includes_slow_path:
                     if (!found || elem.item == JS_DELETED_SENTINEL_VAL) continue;
                     if (it2b(js_strict_equal(elem, search_val)) && sparse_idx > best_sparse) {
                         best_sparse = sparse_idx;
+                    }
+                }
+                SparseArrayMap* sm = js_array_sparse_from_map(pm);
+                if (sm && sm->sparse_indices) {
+                    size_t iter = 0;
+                    void* item = NULL;
+                    while (hashmap_iter(sm->sparse_indices, &iter, &item)) {
+                        JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
+                        int64_t sparse_idx = entry->index;
+                        if (sparse_idx > from || sparse_idx < a->capacity) continue;
+                        if (entry->value.item == JS_DELETED_SENTINEL_VAL) continue;
+                        if (it2b(js_strict_equal(entry->value, search_val)) && sparse_idx > best_sparse) {
+                            best_sparse = sparse_idx;
+                        }
                     }
                 }
                 if (best_sparse >= 0) return (Item){.item = i2it(best_sparse)};

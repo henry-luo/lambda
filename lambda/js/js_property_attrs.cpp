@@ -299,7 +299,7 @@ static bool js_attr_ensure_array_shape_entry(Item obj, const char* name, int nam
         if (!pm) return false;
         target = (Item){.map = pm};
     } else if (type == LMD_TYPE_MAP && obj.map &&
-               obj.map->map_kind == MAP_KIND_ARRAY_PROPS) {
+               map_kind_is_array_props(obj.map->map_kind)) {
         target = obj;
     } else {
         return false;
@@ -319,6 +319,9 @@ static bool js_attr_ensure_array_shape_entry(Item obj, const char* name, int nam
         if (idx >= 0 && idx < arr->length && idx < arr->capacity &&
             arr->items[idx].item != JS_DELETED_SENTINEL_VAL) {
             slot_value = arr->items[idx];
+            slot_found = true;
+        } else if (idx >= 0 && js_array_sparse_has_index(obj, idx)) {
+            slot_value = js_array_sparse_get_index(obj, idx);
             slot_found = true;
         }
     }

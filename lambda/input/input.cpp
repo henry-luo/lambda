@@ -39,6 +39,7 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntr
         str_copy[key->len] = '\0';
         nv->str = str_copy;  nv->length = key->len;
         shape_entry->name = nv;
+        shape_entry->name_id = typemap_name_id(nv->str, (int)nv->length);
         shape_entry->type = type_info[type_id].type;
     } else {
         // no key, for nested map
@@ -225,6 +226,7 @@ static ShapeEntry* clone_shape_chain_for_transition(Pool* pool, TypeMap* parent,
         dst->next = NULL;
         dst->ns = src->ns;
         dst->default_value = src->default_value;
+        dst->name_id = src->name_id;
         dst->flags = src->flags;
         if (!first) first = dst;
         if (prev) prev->next = dst;
@@ -296,6 +298,10 @@ static bool map_transition_prefix_matches_parent(TypeMap* parent, TypeMap* targe
         if (!target_entry) return false;
         if (target_entry->name != parent_entry->name) {
             if (!target_entry->name || !parent_entry->name) return false;
+            uint32_t parent_name_id = typemap_shape_entry_name_id(parent_entry);
+            uint32_t target_name_id = typemap_shape_entry_name_id(target_entry);
+            if (parent_name_id != 0 && target_name_id != 0 &&
+                    parent_name_id != target_name_id) return false;
             if (target_entry->name->length != parent_entry->name->length) return false;
             if (memcmp(target_entry->name->str, parent_entry->name->str,
                     parent_entry->name->length) != 0) {
@@ -317,8 +323,10 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
         TypeId type_id, Input* input, ShapeEntry** out_entry) {
     if (out_entry) *out_entry = NULL;
     if (!parent || !key || !input || !input->pool || !input->type_list) return NULL;
+    uint32_t key_name_id = typemap_name_id(key->chars, (int)key->len);
     for (TypeMapTransition* tr = parent->transitions; tr; tr = tr->next) {
         if (tr->value_type != type_id || tr->flags != 0 || !tr->target) continue;
+        if (tr->name_id != 0 && key_name_id != 0 && tr->name_id != key_name_id) continue;
         if (tr->name == key->chars && tr->name_len == (uint32_t)key->len) {
             if (map_transition_prefix_matches_parent(parent, tr->target)) {
                 if (out_entry) *out_entry = tr->target->last;
@@ -383,6 +391,7 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
     if (!tr) return child;
     tr->name = added->name ? added->name->str : NULL;
     tr->name_len = added->name ? (uint32_t)added->name->length : 0;
+    tr->name_id = added->name_id;
     tr->value_type = type_id;
     tr->flags = 0;
     tr->target = child;
@@ -398,7 +407,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     // note: key could be null for nested map
     TypeMap *map_type = (TypeMap*)mp->type;
     TypeId type_id = get_type_id(value);
-    bool array_index_shape = mp->map_kind == MAP_KIND_ARRAY_PROPS &&
+    bool array_index_shape = map_kind_is_array_props(mp->map_kind) &&
         map_key_is_array_index_name(key);
     if (map_type == &EmptyMap) {
         // alloc map type and data chunk

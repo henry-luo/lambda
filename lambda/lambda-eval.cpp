@@ -4888,6 +4888,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         nv->str = e->name->str;
         nv->length = e->name->length;
         ne->name = nv;
+        ne->name_id = e->name_id ? e->name_id : typemap_name_id(nv->str, (int)nv->length);
         ne->type = type_info[ft].type;
         ne->byte_offset = preserve_slot_layout ? e->byte_offset : byte_offset;
         ne->next = NULL;

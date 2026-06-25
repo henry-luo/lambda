@@ -4,6 +4,7 @@
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
 #include "../lib/arraylist.h"
+#include "../lib/hashmap.h"
 #include "../lib/gc/gc_heap.h"
 #include "mem_factory_rt.h"
 #include "js/js_runtime.h"
@@ -103,6 +104,14 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
         }
         map->data = NULL;
         break;
+    case MAP_KIND_ARRAY_SPARSE: {
+        SparseArrayMap* sm = (SparseArrayMap*)map;
+        if (sm->sparse_indices && !gc_native_seen_seen_or_add(seen_native, sm->sparse_indices)) {
+            hashmap_free(sm->sparse_indices);
+        }
+        sm->sparse_indices = NULL;
+        break;
+    }
     default:
         break;
     }

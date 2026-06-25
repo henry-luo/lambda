@@ -290,6 +290,7 @@ typedef struct TypeMap : Type {
 typedef struct TypeMapTransition {
     const char* name;
     uint32_t name_len;
+    uint32_t name_id;
     TypeId value_type;
     uint8_t flags;
     TypeMap* target;
@@ -371,27 +372,36 @@ static inline void typemap_hash_prepare(TypeMap* tm, Pool* pool, int64_t expecte
     }
 }
 
-static inline bool typemap_shape_name_equals(ShapeEntry* e, const char* key, int key_len) {
+static inline bool typemap_shape_name_equals_id(ShapeEntry* e, const char* key,
+        int key_len, uint32_t key_id) {
     if (!e || !e->name || !e->name->str || !key || key_len < 0) return false;
     uint32_t entry_id = typemap_shape_entry_name_id(e);
-    uint32_t key_id = typemap_name_id(key, key_len);
     if (entry_id != 0 && key_id != 0 && entry_id != key_id) return false;
     if (e->name->str == key && e->name->length == (size_t)key_len) return true;
     return e->name->length == (size_t)key_len &&
            memcmp(e->name->str, key, (size_t)key_len) == 0;
 }
 
+static inline bool typemap_shape_name_equals(ShapeEntry* e, const char* key, int key_len) {
+    return typemap_shape_name_equals_id(e, key, key_len, typemap_name_id(key, key_len));
+}
+
 // Canonical shape-chain lookup. Keeps last-writer-wins semantics for duplicate
 // names and covers entries that were not inserted into the fixed inline hash.
-static inline ShapeEntry* typemap_shape_lookup_last(TypeMap* tm, const char* key, int key_len) {
+static inline ShapeEntry* typemap_shape_lookup_last_by_id(TypeMap* tm,
+        const char* key, int key_len, uint32_t key_id) {
     if (!tm) return NULL;
     ShapeEntry* found = NULL;
     for (ShapeEntry* e = tm->shape; e; e = e->next) {
-        if (typemap_shape_name_equals(e, key, key_len)) {
+        if (typemap_shape_name_equals_id(e, key, key_len, key_id)) {
             found = e;
         }
     }
     return found;
+}
+
+static inline ShapeEntry* typemap_shape_lookup_last(TypeMap* tm, const char* key, int key_len) {
+    return typemap_shape_lookup_last_by_id(tm, key, key_len, typemap_name_id(key, key_len));
 }
 
 // A1: Insert a ShapeEntry into the TypeMap hash table (open addressing, linear probe).
@@ -444,24 +454,29 @@ static inline void typemap_hash_insert_owned(TypeMap* tm, ShapeEntry* entry, Poo
 // Returns the ShapeEntry or NULL if not found.
 // A6: Uses pointer comparison first (interned strings via name pool share
 // the same char* pointer), falling back to memcmp only on pointer mismatch.
-static inline ShapeEntry* typemap_hash_lookup(TypeMap* tm, const char* key, int key_len) {
+static inline ShapeEntry* typemap_hash_lookup_by_id(TypeMap* tm, const char* key,
+        int key_len, uint32_t key_id) {
     if (!tm || !key || key_len < 0) return NULL;
+    if (key_id == 0) key_id = typemap_name_id(key, key_len);
     int capacity = typemap_hash_capacity(tm);
     ShapeEntry** slots = typemap_hash_slots(tm);
     if (!slots || capacity <= 0 || tm->field_count == 0 || tm->field_count >= (uint16_t)capacity) {
-        return typemap_shape_lookup_last(tm, key, key_len);
+        return typemap_shape_lookup_last_by_id(tm, key, key_len, key_id);
     }
-    uint32_t h = typemap_name_id(key, key_len);
-    uint32_t idx = h & ((uint32_t)capacity - 1);
+    uint32_t idx = key_id & ((uint32_t)capacity - 1);
     for (int probe = 0; probe < capacity; probe++) {
         uint32_t slot = (idx + (uint32_t)probe) & ((uint32_t)capacity - 1);
         ShapeEntry* e = slots[slot];
         if (!e) return NULL;  // empty slot → not found
-        if (typemap_shape_name_equals(e, key, key_len)) {
+        if (typemap_shape_name_equals_id(e, key, key_len, key_id)) {
             return e;
         }
     }
     return NULL;
+}
+
+static inline ShapeEntry* typemap_hash_lookup(TypeMap* tm, const char* key, int key_len) {
+    return typemap_hash_lookup_by_id(tm, key, key_len, typemap_name_id(key, key_len));
 }
 
 typedef struct TypeElmt : TypeMap {

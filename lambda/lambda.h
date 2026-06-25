@@ -460,6 +460,7 @@ typedef ArrayNum ArrayInt;    // compat alias: int56 arrays (elem_type == ELEM_I
 typedef ArrayNum ArrayInt64;  // compat alias: int64 arrays (elem_type == ELEM_INT64)
 typedef ArrayNum ArrayFloat;  // compat alias: float arrays (elem_type == ELEM_FLOAT)
 typedef struct Map Map;
+typedef struct SparseArrayMap SparseArrayMap;
 typedef struct VMap VMap;
 typedef struct Element Element;
 typedef struct Object Object;
@@ -520,7 +521,12 @@ enum MapKind {
     MAP_KIND_CSS_NAMESPACE = 12, // CSS namespace object; ordinary shape-backed
                                  // properties plus CSS-specific method dispatch.
     MAP_KIND_DESC       = 13, // regular JS/Lambda object with descriptor metadata
+    MAP_KIND_ARRAY_SPARSE = 14, // array companion map plus numeric sparse hash table
 };
+
+static inline bool map_kind_is_array_props(uint8_t map_kind) {
+    return map_kind == MAP_KIND_ARRAY_PROPS || map_kind == MAP_KIND_ARRAY_SPARSE;
+}
 
 // Array and List struct defintions needed for for-loop
 struct Container {
@@ -593,6 +599,12 @@ struct Container {
         void* type;       // TypeMap* — shape/type info
         void* data;       // packed data struct of the map fields
         int data_cap;     // capacity of the data buffer
+    };
+
+    struct SparseArrayMap {
+        struct Map base;              // must remain first; arr->extra is cast to Map*
+        struct hashmap* sparse_indices; // numeric sparse array data entries
+        int64_t sparse_version;       // increments on numeric sparse mutations
     };
 
     struct Object {
