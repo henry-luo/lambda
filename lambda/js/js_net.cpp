@@ -395,6 +395,8 @@ static void socket_update_io_counters(JsSocket* sock) {
                     (Item){.item = i2it(sock->bytes_written)});
     js_property_set(sock->js_object, make_string_item("bufferSize"),
                     (Item){.item = i2it(sock->buffer_size)});
+    js_property_set(sock->js_object, make_string_item("writableLength"),
+                    (Item){.item = i2it(sock->buffer_size)});
 }
 
 static void socket_update_state_properties(JsSocket* sock) {
@@ -1408,20 +1410,47 @@ static Item js_socket_connect(Item rest_args) {
     return js_socket_connect_args(self, rest_args);
 }
 
-static Item js_socket_setKeepAlive(Item enable, Item delay) {
+static bool socket_keep_alive_seconds(Item value, int* out_secs) {
+    if (!out_secs) return false;
+    if (is_undefined_item(value) || value.item == ITEM_NULL) return false;
+    Item num = js_to_number(value);
+    double d = net_number_value(num);
+    *out_secs = d > 0 ? (int)(d / 1000.0) : 0;
+    return true;
+}
+
+static Item js_socket_setKeepAlive(Item rest_args) {
     Item self = js_get_this();
     JsSocket* sock = socket_from_object(self);
-    bool enable_bool = js_is_truthy(enable);
-    bool has_delay = !is_undefined_item(delay) && delay.item != ITEM_NULL;
-    int delay_secs = 0;
-    if (has_delay) {
-        Item num = js_to_number(delay);
-        double d = net_number_value(num);
-        delay_secs = d > 0 ? (int)(d / 1000.0) : 0;
+    int64_t argc64 = js_array_length(rest_args);
+    int argc = argc64 > 16 ? 16 : (int)argc64;
+    Item first = argc > 0 ? js_array_get_int(rest_args, 0) : make_undefined_item();
+    Item delay = argc > 1 ? js_array_get_int(rest_args, 1) : make_undefined_item();
+    Item interval = argc > 2 ? js_array_get_int(rest_args, 2) : make_undefined_item();
+    Item count = argc > 3 ? js_array_get_int(rest_args, 3) : make_undefined_item();
+
+    bool options_object = net_is_object_like(first);
+    bool enable_bool = false;
+    if (options_object) {
+        Item opt_enable = js_property_get(first, make_string_item("enable"));
+        enable_bool = js_is_truthy(opt_enable);
+        delay = js_property_get(first, make_string_item("initialDelay"));
+        interval = js_property_get(first, make_string_item("interval"));
+        count = js_property_get(first, make_string_item("count"));
+    } else {
+        enable_bool = js_is_truthy(first);
     }
+
+    bool has_delay = !is_undefined_item(delay) && delay.item != ITEM_NULL;
+    bool has_interval = !is_undefined_item(interval) && interval.item != ITEM_NULL;
+    int delay_secs = 0;
+    int interval_secs = 0;
+    if (has_delay) socket_keep_alive_seconds(delay, &delay_secs);
+    if (has_interval) socket_keep_alive_seconds(interval, &interval_secs);
     if (sock) {
         if (sock->keep_alive_requested == enable_bool &&
-            (!has_delay || sock->keep_alive_delay_secs == delay_secs)) {
+            (!has_delay || sock->keep_alive_delay_secs == delay_secs) &&
+            !has_interval && (is_undefined_item(count) || count.item == ITEM_NULL)) {
             return self;
         }
         sock->keep_alive_requested = enable_bool;
@@ -1433,8 +1462,14 @@ static Item js_socket_setKeepAlive(Item enable, Item delay) {
         Item fn = js_property_get(handle, make_string_item("setKeepAlive"));
         if (is_callable(fn)) {
             Item raw_delay = has_delay ? (Item){.item = i2it(delay_secs)} : delay;
-            Item args[2] = { (Item){.item = b2it(enable_bool)}, raw_delay };
-            js_call_function(fn, handle, args, 2);
+            Item raw_interval = has_interval ? (Item){.item = i2it(interval_secs)} : interval;
+            Item args[4] = {
+                (Item){.item = b2it(enable_bool)},
+                raw_delay,
+                raw_interval,
+                count
+            };
+            js_call_function(fn, handle, args, 4);
             js_microtask_flush();
         }
     }
@@ -1601,6 +1636,57 @@ static Item js_socket_pipe(Item dest) {
     return dest;
 }
 
+static bool socket_has_js_read_handle(JsSocket* sock, Item* out_handle) {
+    if (!sock || !sock->js_object.item) return false;
+    Item handle = js_property_get(sock->js_object, make_string_item("_handle"));
+    if (!net_is_object_like(handle)) return false;
+    Item native_handle = js_property_get(handle, make_string_item("__socket_handle__"));
+    if (get_type_id(native_handle) == LMD_TYPE_INT) return false;
+    Item read_start = js_property_get(handle, make_string_item("readStart"));
+    if (!is_callable(read_start)) return false;
+    if (out_handle) *out_handle = handle;
+    return true;
+}
+
+static Item js_socket_js_handle_close_done(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_undefined_item();
+    Item self = env[0];
+    JsSocket* sock = socket_from_object(self);
+    if (sock && !sock->destroyed) {
+        sock->destroyed = true;
+        socket_update_readable(sock, false);
+        socket_update_writable(sock, false);
+        socket_update_state_properties(sock);
+    }
+    socket_emit(self, "close", NULL, 0);
+    return make_undefined_item();
+}
+
+static Item js_socket_js_handle_onread(void) {
+    Item handle = js_get_this();
+    Item self = js_property_get(handle, make_string_item("__socket_object__"));
+    JsSocket* sock = socket_from_object(self);
+    if (!sock || sock->remote_ended) return make_undefined_item();
+
+    sock->remote_ended = true;
+    sock->reading = false;
+    socket_update_readable(sock, false);
+    socket_emit(self, "end", NULL, 0);
+
+    Item* env = js_alloc_env(1);
+    env[0] = self;
+    Item close_done = js_new_closure((void*)js_socket_js_handle_close_done, 0, env, 1);
+    Item close_fn = js_property_get(handle, make_string_item("close"));
+    if (is_callable(close_fn)) {
+        js_call_function(close_fn, handle, &close_done, 1);
+        js_microtask_flush();
+    } else {
+        js_socket_js_handle_close_done((Item){.item = i2it((int64_t)(uintptr_t)env)});
+    }
+    return make_undefined_item();
+}
+
 static void client_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf);
 static void client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf);
 static void server_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf);
@@ -1608,6 +1694,14 @@ static void server_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_b
 
 static bool socket_start_read(JsSocket* sock) {
     if (!sock || sock->destroyed || sock->reading) return false;
+    Item js_handle = make_undefined_item();
+    if (socket_has_js_read_handle(sock, &js_handle)) {
+        Item read_start = js_property_get(js_handle, make_string_item("readStart"));
+        sock->reading = true;
+        js_call_function(read_start, js_handle, NULL, 0);
+        js_microtask_flush();
+        return true;
+    }
     if (uv_is_closing((uv_handle_t*)&sock->tcp)) return false;
 
     uv_alloc_cb alloc_cb = sock->is_server_side ? server_alloc_cb : client_alloc_cb;
@@ -1761,6 +1855,7 @@ static Item make_socket_object(JsSocket* sock, bool expose_handle) {
     js_property_set(obj, make_string_item("bytesRead"), (Item){.item = i2it(0)});
     js_property_set(obj, make_string_item("bytesWritten"), (Item){.item = i2it(0)});
     js_property_set(obj, make_string_item("bufferSize"), (Item){.item = i2it(0)});
+    js_property_set(obj, make_string_item("writableLength"), (Item){.item = i2it(0)});
     Item hwm = (Item){.item = i2it(sock->high_water_mark)};
     Item readable_state = js_new_object();
     js_property_set(readable_state, make_string_item("highWaterMark"), hwm);
@@ -1788,7 +1883,7 @@ static Item make_socket_object(JsSocket* sock, bool expose_handle) {
     js_property_set(obj, make_string_item("connect"),
                     js_new_function((void*)js_socket_connect, -1));
     js_property_set(obj, make_string_item("setKeepAlive"),
-                    js_new_function((void*)js_socket_setKeepAlive, 2));
+                    js_new_function((void*)js_socket_setKeepAlive, -1));
     js_property_set(obj, make_string_item("setNoDelay"),
                     js_new_function((void*)js_socket_setNoDelay, 1));
     js_property_set(obj, make_string_item("setEncoding"),
@@ -4386,6 +4481,12 @@ extern "C" Item js_net_Socket(Item options) {
         if (get_type_id(handle) == LMD_TYPE_MAP || get_type_id(handle) == LMD_TYPE_OBJECT ||
             get_type_id(handle) == LMD_TYPE_VMAP) {
             js_property_set(obj, make_string_item("_handle"), handle);
+            Item native_handle = js_property_get(handle, make_string_item("__socket_handle__"));
+            if (get_type_id(native_handle) != LMD_TYPE_INT) {
+                js_property_set(handle, make_string_item("__socket_object__"), obj);
+                js_property_set(handle, make_string_item("onread"),
+                                js_new_function((void*)js_socket_js_handle_onread, 0));
+            }
             sock->handle_exposed = true;
         }
         Item readable = js_property_get(options, make_string_item("readable"));

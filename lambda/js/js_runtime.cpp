@@ -33560,6 +33560,31 @@ extern "C" Item js_internal_binding(Item name) {
         return cares_obj;
     }
 
+    if (s->len == 11 && memcmp(s->chars, "stream_wrap", 11) == 0) {
+        static Item stream_wrap_obj = {0};
+        static uint64_t stream_wrap_epoch = (uint64_t)-1;
+        if (stream_wrap_obj.item == 0 || stream_wrap_epoch != js_heap_epoch) {
+            stream_wrap_epoch = js_heap_epoch;
+            stream_wrap_obj = js_new_object();
+            heap_register_gc_root(&stream_wrap_obj.item);
+
+            Item stream_base_state = js_new_object();
+            js_property_set(stream_wrap_obj,
+                (Item){.item = s2it(heap_create_name("streamBaseState", 15))},
+                stream_base_state);
+            js_property_set(stream_wrap_obj,
+                (Item){.item = s2it(heap_create_name("kReadBytesOrError", 17))},
+                (Item){.item = i2it(0)});
+            js_property_set(stream_wrap_obj,
+                (Item){.item = s2it(heap_create_name("kArrayBufferOffset", 18))},
+                (Item){.item = i2it(1)});
+            js_property_set(stream_wrap_obj,
+                (Item){.item = s2it(heap_create_name("ShutdownWrap", 12))},
+                js_new_function((void*)js_stub_noop_object, 0));
+        }
+        return stream_wrap_obj;
+    }
+
     if (s->len == 2 && memcmp(s->chars, "fs", 2) == 0) {
         extern Item js_get_internal_fs_binding_namespace(void);
         return js_get_internal_fs_binding_namespace();

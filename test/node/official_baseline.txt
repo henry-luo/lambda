@@ -12,9 +12,9 @@
 # Workers: 9
 # Slow tests included: no
 # Slow list: 30 tests (test/node/official_slow_list.txt), threshold 10s
-# Total passing: 1639
-# Total tests: 3556  Passed: 1639  Failed: 1917  Missing: 0  Timed out: 0  Crashed: 15
-# Baseline comparison: previous 1632  Regressions: 0  Improvements: 7
+# Total passing: 1641
+# Total tests: 3556  Passed: 1641  Failed: 1915  Missing: 0  Timed out: 0  Crashed: 15
+# Baseline comparison: previous 1639  Regressions: 0  Improvements: 2
 # Runtime: 370.9s total wall (discover + execute)
 # Runtime: 3311.2s per-test sum (all executed tests)
 # Runtime: 868.0s per-test sum (passing baseline tests)
@@ -1127,12 +1127,14 @@ test-net-dns-lookup.js
 test-net-during-close.js
 test-net-eaddrinuse.js
 test-net-end-destroyed.js
+test-net-end-close.js
 test-net-end-without-connect.js
 test-net-error-twice.js
 test-net-isip.js
 test-net-isipv4.js
 test-net-isipv6.js
 test-net-keepalive.js
+test-net-keepalive-interval-count.js
 test-net-large-string.js
 test-net-listen-after-destroying-stdin.js
 test-net-listen-close-server-callback-is-not-function.js
