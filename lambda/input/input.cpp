@@ -235,6 +235,10 @@ static ShapeEntry* clone_shape_chain_for_transition(Pool* pool, TypeMap* parent,
     return first;
 }
 
+// js constructor/pre-shape caches share TypeMap instances across many Maps.
+// generic map writers append ShapeEntry nodes, so detach before mutating a
+// shared shape; otherwise one object can leak fields or slot metadata into
+// sibling objects and cause order-dependent Node baseline regressions.
 static TypeMap* map_clone_typemap_for_mutation(Map* mp, Input* input) {
     if (!mp || !input || !input->pool) return NULL;
     TypeMap* tm = (TypeMap*)mp->type;
@@ -264,6 +268,8 @@ static TypeMap* map_clone_typemap_for_mutation(Map* mp, Input* input) {
     typemap_hash_build(clone, pool);
 
     if (tm->slot_entries && tm->slot_count > 0) {
+        // rebuild slot_entries against cloned ShapeEntry nodes so fast slot
+        // access never points back into the shared blueprint shape.
         ShapeEntry** entries = (ShapeEntry**)pool_calloc(pool,
             (size_t)tm->slot_count * sizeof(ShapeEntry*));
         if (entries) {
@@ -392,6 +398,8 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
                 return;
             }
         }
+        // transition lookup is the fast path; if no compatible transition
+        // exists, clone before appending a new ShapeEntry to this map only.
         TypeMap* clone = map_clone_typemap_for_mutation(mp, input);
         if (clone) map_type = clone;
     }
@@ -449,6 +457,8 @@ bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
     }
     if (!map_type) return false;
     if (map_type_is_shared_js_shape(map_type)) {
+        // bulk appends still mutate the shape chain, so they need the same
+        // detach behavior as single-property map_put.
         TypeMap* clone = map_clone_typemap_for_mutation(mp, input);
         if (clone) map_type = clone;
     }

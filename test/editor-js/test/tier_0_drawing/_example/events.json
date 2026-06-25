@@ -1,0 +1,17 @@
+{
+  "name": "drag_rect",
+  "description": "Click into drawing, select S1, drag it from (100,100) to (180,150). Expects S1.x=130, S1.y=100.",
+  "initialMode": "flow",
+  "events": [
+    { "type": "pointerdown", "target": "shape:S1", "canvasX": 100, "canvasY": 100, "buttons": 1, "mods": [] },
+    { "type": "pointermove", "canvasX": 150, "canvasY": 130, "buttons": 1, "mods": [] },
+    { "type": "pointermove", "canvasX": 180, "canvasY": 150, "buttons": 1, "mods": [] },
+    { "type": "pointerup",   "canvasX": 180, "canvasY": 150, "buttons": 0, "mods": [] }
+  ],
+  "asserts": {
+    "finalMode": "canvas",
+    "selection": { "kind": "node", "path": "shape:S1" },
+    "historyDepth": 1,
+    "inverseRestoresInput": true
+  }
+}

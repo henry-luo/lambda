@@ -1,0 +1,30 @@
+{
+  "name": "@lambda/editor-js",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "JS reference implementation of the Lambda/Radiant rich editor (Stage 4: text + inline drawings). Used to verify the Stage-4 design and grow the test corpus before the Lambda port.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.1.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^25.0.1",
+    "parse5": "^7.2.1",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  }
+}
