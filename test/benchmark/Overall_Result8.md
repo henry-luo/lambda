@@ -169,17 +169,17 @@ These broad slowdowns do not match the GC sweep change shape, so they should be 
 
 ### JetStream
 
-| Benchmark | LambdaJS (ms) | Node.js (ms) | Ratio |
-|---|---:|---:|---:|
-| nbody | 904 | 5.91 | 152.90x |
-| cube3d | 3873 | 19.0 | 203.51x |
-| navier_stokes | --- | 14.3 | --- |
-| richards | --- | 8.75 | --- |
-| splay | 1540 | 20.8 | 74.01x |
-| deltablue | 2090 | 10.5 | 199.35x |
-| hashmap | --- | 15.7 | --- |
-| crypto_sha1 | 258 | 9.55 | 27.06x |
-| raytrace3d | 2272 | 19.7 | 115.43x |
+| Benchmark     | LambdaJS (ms) | Node.js (ms) |   Ratio |
+| ------------- | ------------: | -----------: | ------: |
+| nbody         |           904 |         5.91 | 152.90x |
+| cube3d        |          3873 |         19.0 | 203.51x |
+| navier_stokes |           --- |         14.3 |     --- |
+| richards      |           --- |         8.75 |     --- |
+| splay         |          1540 |         20.8 |  74.01x |
+| deltablue     |          2090 |         10.5 | 199.35x |
+| hashmap       |           --- |         15.7 |     --- |
+| crypto_sha1   |           258 |         9.55 |  27.06x |
+| raytrace3d    |          2272 |         19.7 | 115.43x |
 
 ---
 

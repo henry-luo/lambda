@@ -288,6 +288,31 @@ static TypeMap* map_clone_typemap_for_mutation(Map* mp, Input* input) {
     return clone;
 }
 
+static bool map_transition_prefix_matches_parent(TypeMap* parent, TypeMap* target) {
+    if (!parent || !target) return false;
+    ShapeEntry* parent_entry = parent->shape;
+    ShapeEntry* target_entry = target->shape;
+    while (parent_entry) {
+        if (!target_entry) return false;
+        if (target_entry->name != parent_entry->name) {
+            if (!target_entry->name || !parent_entry->name) return false;
+            if (target_entry->name->length != parent_entry->name->length) return false;
+            if (memcmp(target_entry->name->str, parent_entry->name->str,
+                    parent_entry->name->length) != 0) {
+                return false;
+            }
+        }
+        if (target_entry->type != parent_entry->type ||
+                target_entry->byte_offset != parent_entry->byte_offset ||
+                target_entry->flags != parent_entry->flags) {
+            return false;
+        }
+        parent_entry = parent_entry->next;
+        target_entry = target_entry->next;
+    }
+    return true;
+}
+
 static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
         TypeId type_id, Input* input, ShapeEntry** out_entry) {
     if (out_entry) *out_entry = NULL;
@@ -295,13 +320,19 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
     for (TypeMapTransition* tr = parent->transitions; tr; tr = tr->next) {
         if (tr->value_type != type_id || tr->flags != 0 || !tr->target) continue;
         if (tr->name == key->chars && tr->name_len == (uint32_t)key->len) {
-            if (out_entry) *out_entry = tr->target->last;
-            return tr->target;
+            if (map_transition_prefix_matches_parent(parent, tr->target)) {
+                if (out_entry) *out_entry = tr->target->last;
+                return tr->target;
+            }
+            continue;
         }
         if (tr->name_len == (uint32_t)key->len &&
                 memcmp(tr->name, key->chars, key->len) == 0) {
-            if (out_entry) *out_entry = tr->target->last;
-            return tr->target;
+            if (map_transition_prefix_matches_parent(parent, tr->target)) {
+                if (out_entry) *out_entry = tr->target->last;
+                return tr->target;
+            }
+            continue;
         }
     }
 
