@@ -11259,20 +11259,25 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
             }
-            // Ordinary JS Arrays can still be exotic: sparse indices,
-            // companion-map descriptors, prototype numeric accessors, and
-            // backing-store growth all affect reads. The inline helper checks
-            // the dense-array invariants first and falls back to the runtime.
+            // Ordinary JS Arrays can still be exotic: sparse numeric hash
+            // entries, companion-map descriptors, prototype numeric accessors,
+            // and backing-store growth all affect reads. Keep variable-index
+            // reads on the runtime path for now so sparse arrays stay correct
+            // after rehash-style backing-store replacement.
             JsMirVarEntry* arr_var = jm_get_js_array_var(mt, mem->object);
             if (arr_var) {
-                return jm_transpile_array_get_inline(mt, arr_var->reg, idx_native,
-                    arr_var->hoisted_data_reg, arr_var->hoisted_len_reg);
+                MIR_reg_t key_item = jm_box_int_reg(mt, idx_native);
+                return jm_call_2(mt, "js_property_access", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_var->reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_item));
             }
-            // A4: Unknown array type — use js_array_get_int runtime call.
+            // A4: Unknown array type — use the generic property path so sparse
+            // numeric hash entries and companion descriptors are honored.
             MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
-            return jm_call_2(mt, "js_array_get_int", MIR_T_I64,
+            MIR_reg_t key_item = jm_box_int_reg(mt, idx_native);
+            return jm_call_2(mt, "js_property_access", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_item));
         }
     }
 

@@ -398,7 +398,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     // note: key could be null for nested map
     TypeMap *map_type = (TypeMap*)mp->type;
     TypeId type_id = get_type_id(value);
-    bool array_index_shape = mp->map_kind == MAP_KIND_ARRAY_PROPS &&
+    bool array_index_shape = map_kind_is_array_props(mp->map_kind) &&
         map_key_is_array_index_name(key);
     if (map_type == &EmptyMap) {
         // alloc map type and data chunk

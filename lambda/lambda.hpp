@@ -375,6 +375,11 @@ struct Map : Container {
     bool has_field(const char* field_name) const;
 };
 
+struct SparseArrayMap : Map {
+    struct hashmap* sparse_indices;  // numeric sparse array data entries
+    int64_t sparse_version;          // increments on numeric sparse mutations
+};
+
 struct Element : List {
     // attributes map
     void* type;  // attr type/shape
