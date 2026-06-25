@@ -1,0 +1,4 @@
+[
+  { "type": "command", "name": "bringToFront", "args": { "shape_path": [0, 0, 0] } },
+  { "type": "command", "name": "sendToBack",   "args": { "shape_path": [0, 0, 2] } }
+]

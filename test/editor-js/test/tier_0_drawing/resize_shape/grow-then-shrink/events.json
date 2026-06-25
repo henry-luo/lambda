@@ -1,0 +1,4 @@
+[
+  { "type": "command", "name": "resizeShape", "args": { "shape_path": [0, 0, 0], "width": 250, "height": 200 } },
+  { "type": "command", "name": "resizeShape", "args": { "shape_path": [0, 0, 0], "width": 60, "height": 40 } }
+]

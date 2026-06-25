@@ -1,0 +1,13 @@
+[
+  {"type":"command","name":"insertShape","args":{"drawing_path":[0],"layer_index":0,"kind":"rect","x":10,"y":0,"width":50,"height":50}},
+  {"type":"command","name":"insertShape","args":{"drawing_path":[0],"layer_index":0,"kind":"rect","x":20,"y":0,"width":50,"height":50}},
+  {"type":"command","name":"insertShape","args":{"drawing_path":[0],"layer_index":0,"kind":"rect","x":30,"y":0,"width":50,"height":50}},
+  {"type":"command","name":"insertShape","args":{"drawing_path":[0],"layer_index":0,"kind":"rect","x":40,"y":0,"width":50,"height":50}},
+  {"type":"command","name":"insertShape","args":{"drawing_path":[0],"layer_index":0,"kind":"rect","x":50,"y":0,"width":50,"height":50}},
+  {"type":"command","name":"insertShape","args":{"drawing_path":[0],"layer_index":0,"kind":"rect","x":60,"y":0,"width":50,"height":50}},
+  {"type":"command","name":"insertShape","args":{"drawing_path":[0],"layer_index":0,"kind":"rect","x":70,"y":0,"width":50,"height":50}},
+  {"type":"command","name":"insertShape","args":{"drawing_path":[0],"layer_index":0,"kind":"rect","x":80,"y":0,"width":50,"height":50}},
+  {"type":"command","name":"insertShape","args":{"drawing_path":[0],"layer_index":0,"kind":"rect","x":90,"y":0,"width":50,"height":50}},
+  {"type":"command","name":"insertShape","args":{"drawing_path":[0],"layer_index":0,"kind":"rect","x":100,"y":0,"width":50,"height":50}},
+  {"type":"command","name":"insertShape","args":{"drawing_path":[0],"layer_index":0,"kind":"rect","x":110,"y":0,"width":50,"height":50}}
+]

@@ -1,0 +1,12 @@
+[
+  {
+    "type": "command",
+    "name": "insertShape",
+    "args": {
+      "drawing_path": [0],
+      "layer_index": 0,
+      "kind": "line",
+      "x": 50, "y": 10, "width": 0, "height": 200
+    }
+  }
+]

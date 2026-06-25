@@ -1,0 +1,4 @@
+[
+  { "type": "command", "name": "toggleMark", "args": { "mark": "underline" } },
+  { "type": "command", "name": "toggleMark", "args": { "mark": "strikethrough" } }
+]

@@ -179,6 +179,10 @@ function buildShapeFromArgs(a: Record<string, unknown>) {
     const fy = asNumOpt(a, 'from_y'); if (fy !== undefined) o.from_y = fy
     const tx = asNumOpt(a, 'to_x');   if (tx !== undefined) o.to_x   = tx
     const ty = asNumOpt(a, 'to_y');   if (ty !== undefined) o.to_y   = ty
+    if (typeof a['from_shape'] === 'string') o.from_shape = a['from_shape']
+    if (typeof a['to_shape']   === 'string') o.to_shape   = a['to_shape']
+    const r = a['routing']
+    if (r === 'straight' || r === 'orthogonal' || r === 'curved') o.routing = r
     return makeConnector(o)
   }
   return null

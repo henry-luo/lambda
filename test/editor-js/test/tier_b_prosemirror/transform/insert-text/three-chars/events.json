@@ -1,0 +1,5 @@
+[
+  {"type":"command","name":"insertText","args":{"text":"b"}},
+  {"type":"command","name":"insertText","args":{"text":"c"}},
+  {"type":"command","name":"insertText","args":{"text":"d"}}
+]

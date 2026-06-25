@@ -1,0 +1,14 @@
+[
+  {
+    "type": "command",
+    "name": "rotateShape",
+    "args": {
+      "shape_path": [
+        0,
+        0,
+        0
+      ],
+      "angle": 120
+    }
+  }
+]

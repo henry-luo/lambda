@@ -1,0 +1,4 @@
+[
+  { "type": "intent", "intent": { "type": "deleteContentBackward" } },
+  { "type": "intent", "intent": { "type": "insertText", "text": "p" } }
+]

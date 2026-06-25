@@ -1,0 +1,5 @@
+[
+  { "type": "command", "name": "setShapeAttr", "args": { "shape_path": [0, 0, 0], "name": "fill",   "value": "#ffcc00" } },
+  { "type": "command", "name": "setShapeAttr", "args": { "shape_path": [0, 0, 0], "name": "stroke", "value": "#cc0000" } },
+  { "type": "command", "name": "setShapeAttr", "args": { "shape_path": [0, 0, 0], "name": "stroke-width", "value": 2 } }
+]

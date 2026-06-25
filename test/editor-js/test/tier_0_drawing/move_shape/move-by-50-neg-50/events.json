@@ -1,0 +1,17 @@
+[
+  {
+    "type": "command",
+    "name": "moveShapes",
+    "args": {
+      "shape_paths": [
+        [
+          0,
+          0,
+          0
+        ]
+      ],
+      "dx": 50,
+      "dy": -50
+    }
+  }
+]
