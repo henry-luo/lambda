@@ -11,6 +11,9 @@
 #include "../../lib/log.h"  // add logging support
 #include "../../lib/memtrack.h"
 #include "../../lib/file.h"
+#include <limits.h>
+#include <stdlib.h>
+#include <string.h>
 
 // Include Target API
 extern "C" {
@@ -53,49 +56,35 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntr
     return shape_entry;
 }
 
-// Internal helper function - not exported in header but accessible to mark_builder.cpp
-void map_put(Map* mp, String* key, Item value, Input *input) {
-    // note: key could be null for nested map
-    TypeMap *map_type = (TypeMap*)mp->type;
-    if (map_type == &EmptyMap) {
-        // alloc map type and data chunk
-        map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
-        if (!map_type) { return; }
-        mp->type = map_type;
-        arraylist_append(input->type_list, map_type);
-        map_type->type_index = input->type_list->length - 1;
-        int byte_cap = 64;
-        mp->data = pool_calloc(input->pool, byte_cap);  mp->data_cap = byte_cap;
-        if (!mp->data) return;
+static bool map_type_is_shared_js_shape(TypeMap* map_type) {
+    return map_type &&
+        (map_type->is_shared_constructor_shape || map_type->is_transition_shared_shape);
+}
+
+static bool js_shape_transitions_enabled() {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char* flag = getenv("LAMBDA_JS_SHAPE_TRANSITIONS");
+        enabled = (!flag || strcmp(flag, "0") != 0) ? 1 : 0;
     }
+    return enabled != 0;
+}
 
-    TypeId type_id = get_type_id(value);
-    ShapeEntry* shape_entry = alloc_shape_entry(input->pool, key, type_id, map_type->last);
-    if (!map_type->shape) { map_type->shape = shape_entry; }
-    map_type->last = shape_entry;
-    map_type->length++;
-
-    // A1: populate/grow property hash table for O(1) property lookup
-    typemap_hash_insert_owned(map_type, shape_entry, input->pool);
-
-    // ensure data capacity
-    int bsize = type_info[type_id].byte_size;
-    int byte_offset = shape_entry->byte_offset + bsize;
-    if (byte_offset > mp->data_cap) { // resize map data
-        // mp->data_cap could be 0 (e.g. zero-byte-size maps from map_with_data)
-        int byte_cap = MAX(mp->data_cap, byte_offset) * 2;
-        void* new_data = pool_calloc(input->pool, byte_cap);
-        if (!new_data) return;
-        if (mp->data) {
-            memcpy(new_data, mp->data, byte_offset - bsize);
-            pool_free(input->pool, mp->data);
-        }
-        mp->data = new_data;  mp->data_cap = byte_cap;
+static bool map_key_is_array_index_name(String* key) {
+    if (!key || key->len <= 0 || key->len > 10) return false;
+    if (key->len > 1 && key->chars[0] == '0') return false;
+    uint64_t index = 0;
+    for (size_t i = 0; i < key->len; i++) {
+        char c = key->chars[i];
+        if (c < '0' || c > '9') return false;
+        index = index * 10 + (uint64_t)(c - '0');
+        if (index > 0xFFFFFFFEULL) return false;
     }
-    map_type->byte_size = byte_offset;
+    return true;
+}
 
-    // store the value
-    void* field_ptr = (char*)mp->data + byte_offset - bsize;
+static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
+    if (!field_ptr) return false;
     switch (type_id) {
     case LMD_TYPE_NULL:
     case LMD_TYPE_UNDEFINED:
@@ -144,10 +133,10 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         break;
     case LMD_TYPE_ANY: {
         Item item = value;
-        TypeId type_id = get_type_id(item);
-        log_debug("set field of ANY type to type: %d", type_id);
-        TypedItem titem = {.type_id = type_id, .item = item.item};
-        switch (type_id) {
+        TypeId item_type_id = get_type_id(item);
+        log_debug("set field of ANY type to type: %d", item_type_id);
+        TypedItem titem = {.type_id = item_type_id, .item = item.item};
+        switch (item_type_id) {
         case LMD_TYPE_NULL:
         case LMD_TYPE_UNDEFINED:
             break; // no extra work needed
@@ -186,7 +175,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
             titem.path = item.path;
             break;
         default:
-            log_error("unknown type %d in set_fields", type_id);
+            log_error("unknown type %d in set_fields", item_type_id);
             // set as ERROR
             titem = {.type_id = LMD_TYPE_ERROR};
         }
@@ -196,8 +185,259 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     }
     default:
         log_debug("unknown type %d\n", value._type_id);
-        return;
+        return false;
     }
+    return true;
+}
+
+static bool map_ensure_data_capacity_for_end(Map* mp, Pool* pool,
+        int64_t byte_end, int64_t copy_bytes) {
+    if (!mp || !pool || byte_end < 0 || byte_end > INT_MAX) return false;
+    if (mp->data && byte_end <= mp->data_cap) return true;
+    int byte_cap = MAX(mp->data_cap, (int)byte_end) * 2;
+    if (byte_cap < 64) byte_cap = 64;
+    void* new_data = pool_calloc(pool, byte_cap);
+    if (!new_data) return false;
+    if (mp->data) {
+        if (copy_bytes < 0) copy_bytes = 0;
+        if (copy_bytes > mp->data_cap) copy_bytes = mp->data_cap;
+        if (copy_bytes > 0) memcpy(new_data, mp->data, (size_t)copy_bytes);
+        pool_free(pool, mp->data);
+    }
+    mp->data = new_data;
+    mp->data_cap = byte_cap;
+    return true;
+}
+
+static ShapeEntry* clone_shape_chain_for_transition(Pool* pool, TypeMap* parent,
+        ShapeEntry** out_last) {
+    if (out_last) *out_last = NULL;
+    if (!pool || !parent) return NULL;
+    ShapeEntry* first = NULL;
+    ShapeEntry* prev = NULL;
+    ShapeEntry* last = NULL;
+    for (ShapeEntry* src = parent->shape; src; src = src->next) {
+        ShapeEntry* dst = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry));
+        if (!dst) return NULL;
+        dst->name = src->name;
+        dst->type = src->type;
+        dst->byte_offset = src->byte_offset;
+        dst->next = NULL;
+        dst->ns = src->ns;
+        dst->default_value = src->default_value;
+        dst->flags = src->flags;
+        if (!first) first = dst;
+        if (prev) prev->next = dst;
+        prev = dst;
+        last = dst;
+    }
+    if (out_last) *out_last = last;
+    return first;
+}
+
+// js constructor/pre-shape caches share TypeMap instances across many Maps.
+// generic map writers append ShapeEntry nodes, so detach before mutating a
+// shared shape; otherwise one object can leak fields or slot metadata into
+// sibling objects and cause order-dependent Node baseline regressions.
+static TypeMap* map_clone_typemap_for_mutation(Map* mp, Input* input) {
+    if (!mp || !input || !input->pool) return NULL;
+    TypeMap* tm = (TypeMap*)mp->type;
+    if (!tm) return NULL;
+    if (tm->is_private_clone) return tm;
+
+    Pool* pool = input->pool;
+    TypeMap* clone = (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    if (!clone) return NULL;
+    clone->length = tm->length;
+    clone->byte_size = tm->byte_size;
+    clone->type_index = tm->type_index;
+    clone->has_named_shape = tm->has_named_shape;
+    clone->struct_name = tm->struct_name;
+    clone->is_private_clone = true;
+    clone->is_shared_constructor_shape = false;
+    clone->is_transition_shared_shape = false;
+    clone->transitions = NULL;
+    clone->js_class = tm->js_class;
+    clone->has_array_index_shape = tm->has_array_index_shape;
+
+    ShapeEntry* last_clone = NULL;
+    clone->shape = clone_shape_chain_for_transition(pool, tm, &last_clone);
+    if (tm->shape && !clone->shape) return NULL;
+    clone->last = last_clone;
+
+    typemap_hash_build(clone, pool);
+
+    if (tm->slot_entries && tm->slot_count > 0) {
+        // rebuild slot_entries against cloned ShapeEntry nodes so fast slot
+        // access never points back into the shared blueprint shape.
+        ShapeEntry** entries = (ShapeEntry**)pool_calloc(pool,
+            (size_t)tm->slot_count * sizeof(ShapeEntry*));
+        if (entries) {
+            ShapeEntry* e = clone->shape;
+            for (int i = 0; i < tm->slot_count && e; i++, e = e->next) {
+                entries[i] = e;
+            }
+            clone->slot_entries = entries;
+            clone->slot_count = tm->slot_count;
+        }
+    }
+
+    mp->type = clone;
+    log_debug("map_clone_typemap_for_mutation: cloned TypeMap %p -> %p for Map %p",
+        (void*)tm, (void*)clone, (void*)mp);
+    return clone;
+}
+
+static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
+        TypeId type_id, Input* input, ShapeEntry** out_entry) {
+    if (out_entry) *out_entry = NULL;
+    if (!parent || !key || !input || !input->pool || !input->type_list) return NULL;
+    for (TypeMapTransition* tr = parent->transitions; tr; tr = tr->next) {
+        if (tr->value_type != type_id || tr->flags != 0 || !tr->target) continue;
+        if (tr->name == key->chars && tr->name_len == (uint32_t)key->len) {
+            if (out_entry) *out_entry = tr->target->last;
+            return tr->target;
+        }
+        if (tr->name_len == (uint32_t)key->len &&
+                memcmp(tr->name, key->chars, key->len) == 0) {
+            if (out_entry) *out_entry = tr->target->last;
+            return tr->target;
+        }
+    }
+
+    TypeMap* child = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    if (!child) return NULL;
+
+    ShapeEntry* last_clone = NULL;
+    ShapeEntry* first = clone_shape_chain_for_transition(input->pool, parent, &last_clone);
+    if (parent->shape && !first) return NULL;
+    ShapeEntry* added = alloc_shape_entry(input->pool, key, type_id, last_clone);
+    if (!added) return NULL;
+    added->byte_offset = parent->byte_size;
+    if (!first) first = added;
+
+    child->shape = first;
+    child->last = added;
+    child->length = parent->length + 1;
+    child->byte_size = added->byte_offset + type_info[type_id].byte_size;
+    child->has_named_shape = parent->has_named_shape;
+    child->struct_name = parent->struct_name;
+    child->is_private_clone = false;
+    child->is_shared_constructor_shape = false;
+    child->is_transition_shared_shape = true;
+    child->transitions = NULL;
+    child->js_class = parent->js_class;
+    child->has_array_index_shape = parent->has_array_index_shape;
+
+    typemap_hash_build(child, input->pool);
+
+    if (child->length > 0 && child->length <= 64) {
+        ShapeEntry** entries = (ShapeEntry**)pool_calloc(input->pool,
+            (size_t)child->length * sizeof(ShapeEntry*));
+        if (entries) {
+            ShapeEntry* e = first;
+            for (int i = 0; i < (int)child->length && e; i++, e = e->next) {
+                entries[i] = e;
+            }
+            child->slot_entries = entries;
+            child->slot_count = (int)child->length;
+        }
+    }
+
+    arraylist_append(input->type_list, child);
+    child->type_index = input->type_list->length - 1;
+
+    TypeMapTransition* tr = (TypeMapTransition*)pool_calloc(input->pool,
+        sizeof(TypeMapTransition));
+    if (!tr) return child;
+    tr->name = added->name ? added->name->str : NULL;
+    tr->name_len = added->name ? (uint32_t)added->name->length : 0;
+    tr->value_type = type_id;
+    tr->flags = 0;
+    tr->target = child;
+    tr->next = parent->transitions;
+    parent->transitions = tr;
+
+    if (out_entry) *out_entry = added;
+    return child;
+}
+
+// Internal helper function - not exported in header but accessible to mark_builder.cpp
+void map_put(Map* mp, String* key, Item value, Input *input) {
+    // note: key could be null for nested map
+    TypeMap *map_type = (TypeMap*)mp->type;
+    TypeId type_id = get_type_id(value);
+    bool array_index_shape = mp->map_kind == MAP_KIND_ARRAY_PROPS &&
+        map_key_is_array_index_name(key);
+    if (map_type == &EmptyMap) {
+        // alloc map type and data chunk
+        map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+        if (!map_type) { return; }
+        mp->type = map_type;
+        arraylist_append(input->type_list, map_type);
+        map_type->type_index = input->type_list->length - 1;
+        map_type->has_array_index_shape = array_index_shape;
+        int byte_cap = 64;
+        mp->data = pool_calloc(input->pool, byte_cap);  mp->data_cap = byte_cap;
+        if (!mp->data) return;
+    } else if (map_type_is_shared_js_shape(map_type)) {
+        if (key && mp->map_kind == MAP_KIND_PLAIN && js_shape_transitions_enabled()) {
+            ShapeEntry* transition_entry = NULL;
+            TypeMap* transition_type = map_transition_target_for_add(map_type, key,
+                type_id, input, &transition_entry);
+            if (transition_type && transition_entry) {
+                int bsize = type_info[type_id].byte_size;
+                int64_t byte_end = transition_entry->byte_offset + bsize;
+                if (!map_ensure_data_capacity_for_end(mp, input->pool, byte_end,
+                        map_type->byte_size)) {
+                    return;
+                }
+                mp->type = transition_type;
+                map_store_field_value((char*)mp->data + transition_entry->byte_offset,
+                    type_id, value);
+                return;
+            }
+        }
+        // transition lookup is the fast path; if no compatible transition
+        // exists, clone before appending a new ShapeEntry to this map only.
+        TypeMap* clone = map_clone_typemap_for_mutation(mp, input);
+        if (clone) map_type = clone;
+    }
+
+    ShapeEntry* shape_entry = alloc_shape_entry(input->pool, key, type_id, map_type->last);
+    if (map_type->slot_entries && map_type->slot_count > 0 &&
+            shape_entry->byte_offset < map_type->byte_size) {
+        shape_entry->byte_offset = map_type->byte_size;
+    }
+    if (!map_type->shape) { map_type->shape = shape_entry; }
+    map_type->last = shape_entry;
+    map_type->length++;
+    if (array_index_shape) map_type->has_array_index_shape = true;
+
+    // A1: populate/grow property hash table for O(1) property lookup
+    typemap_hash_insert_owned(map_type, shape_entry, input->pool);
+
+    // ensure data capacity
+    int bsize = type_info[type_id].byte_size;
+    int64_t byte_offset64 = shape_entry->byte_offset + bsize;
+    if (byte_offset64 > INT_MAX) return;
+    int byte_offset = (int)byte_offset64;
+    if (byte_offset > mp->data_cap) { // resize map data
+        // mp->data_cap could be 0 (e.g. zero-byte-size maps from map_with_data)
+        int byte_cap = MAX(mp->data_cap, byte_offset) * 2;
+        void* new_data = pool_calloc(input->pool, byte_cap);
+        if (!new_data) return;
+        if (mp->data) {
+            memcpy(new_data, mp->data, byte_offset - bsize);
+            pool_free(input->pool, mp->data);
+        }
+        mp->data = new_data;  mp->data_cap = byte_cap;
+    }
+    map_type->byte_size = byte_offset;
+
+    // store the value
+    void* field_ptr = (char*)mp->data + byte_offset - bsize;
+    map_store_field_value(field_ptr, type_id, value);
 }
 
 bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
@@ -216,6 +456,12 @@ bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
         map_type->type_index = input->type_list->length - 1;
     }
     if (!map_type) return false;
+    if (map_type_is_shared_js_shape(map_type)) {
+        // bulk appends still mutate the shape chain, so they need the same
+        // detach behavior as single-property map_put.
+        TypeMap* clone = map_clone_typemap_for_mutation(mp, input);
+        if (clone) map_type = clone;
+    }
 
     int bsize = type_info[LMD_TYPE_UNDEFINED].byte_size;
     int64_t old_byte_size = map_type->byte_size;

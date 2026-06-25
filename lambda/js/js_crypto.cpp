@@ -23,6 +23,7 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 #include "../../lib/base64.h"
 #include "../../lib/uuid.h"
 #include "../../lib/digest.h"
+#include "../../lib/utf.h"
 #include <mbedtls/bignum.h>
 #include <mbedtls/ecp.h>
 #include <mbedtls/md.h>
@@ -286,6 +287,8 @@ static inline Item make_js_undefined_crypto() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
 }
 
+static const int64_t CRYPTO_BUFFER_MAX_LENGTH = (1LL << 30) - 1;
+
 static bool crypto_item_is_undefined(Item item) {
     return item.item == ITEM_JS_UNDEFINED || get_type_id(item) == LMD_TYPE_UNDEFINED;
 }
@@ -384,8 +387,8 @@ static Item crypto_throw_size_out_of_range(Item actual) {
     crypto_format_number_for_error(actual, actual_buf, sizeof(actual_buf));
     char msg[192];
     snprintf(msg, sizeof(msg),
-        "The value of \"size\" is out of range. It must be >= 0 && <= 2147483647. Received %s",
-        actual_buf);
+        "The value of \"size\" is out of range. It must be >= 0 && <= %lld. Received %s",
+        (long long)CRYPTO_BUFFER_MAX_LENGTH, actual_buf);
     return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
 }
 
@@ -404,7 +407,7 @@ static bool crypto_size_to_int(Item size_item, int* out_size) {
         return false;
     }
 
-    if (value != value || value < 0.0 || value > 2147483647.0) {
+    if (value != value || value < 0.0 || value > (double)CRYPTO_BUFFER_MAX_LENGTH) {
         crypto_throw_size_out_of_range(size_item);
         return false;
     }
@@ -557,7 +560,7 @@ extern "C" Item js_crypto_randomFillSync(Item target_item, Item offset_item, Ite
     if (!crypto_to_int_index(offset_item, 0, byte_len, &offset, "offset")) return ItemNull;
 
     int size = byte_len - offset;
-    if (!crypto_to_int_index(size_item, size, 2147483647, &size, "size")) return ItemNull;
+    if (!crypto_to_int_index(size_item, size, (int)CRYPTO_BUFFER_MAX_LENGTH, &size, "size")) return ItemNull;
     int64_t end = (int64_t)offset + (int64_t)size;
     if (end > byte_len) {
         return crypto_throw_size_offset_out_of_range(byte_len, end);
@@ -944,6 +947,15 @@ static Item bytes_to_base64_string(const uint8_t* bytes, int len) {
     return result;
 }
 
+static Item bytes_to_base64url_string(const uint8_t* bytes, int len) {
+    size_t out_len = base64_encoded_len((size_t)len, BASE64_URL);
+    char* out = (char*)mem_alloc(out_len + 1, MEM_CAT_JS_RUNTIME);
+    base64_encode(bytes ? bytes : crypto_empty_bytes, (size_t)len, out, BASE64_URL);
+    Item result = make_string_item_crypto(out);
+    mem_free(out);
+    return result;
+}
+
 static void crypto_append_utf8_codepoint(char* out, int out_cap, int* pos, uint32_t cp) {
     if (!out || !pos || *pos >= out_cap - 1) return;
     if (cp < 0x80) {
@@ -1073,6 +1085,106 @@ static uint32_t crypto_next_utf8_codepoint(const char* str, int len, int* index)
     return ch;
 }
 
+static int crypto_utf8_encoded_len(const char* chars, int byte_len) {
+    int out_len = 0;
+    for (int i = 0; i < byte_len; ) {
+        unsigned char lead = (unsigned char)chars[i];
+        int cp_len = 1;
+        if (lead >= 0xF0 && i + 4 <= byte_len) cp_len = 4;
+        else if (lead >= 0xE0 && i + 3 <= byte_len) cp_len = 3;
+        else if (lead >= 0xC0 && i + 2 <= byte_len) cp_len = 2;
+
+        if (cp_len == 3 && lead == 0xED && i + 2 < byte_len) {
+            unsigned char second = (unsigned char)chars[i + 1];
+            bool high = second >= 0xA0 && second <= 0xAF;
+            bool low = second >= 0xB0 && second <= 0xBF;
+            if (high) {
+                int next = i + 3;
+                if (next + 2 < byte_len && (unsigned char)chars[next] == 0xED) {
+                    unsigned char next_second = (unsigned char)chars[next + 1];
+                    if (next_second >= 0xB0 && next_second <= 0xBF) {
+                        out_len += 4;
+                        i += 6;
+                        continue;
+                    }
+                }
+                out_len += 3;
+                i += 3;
+                continue;
+            }
+            if (low) {
+                out_len += 3;
+                i += 3;
+                continue;
+            }
+        }
+
+        out_len += cp_len;
+        i += cp_len;
+    }
+    return out_len;
+}
+
+static uint16_t crypto_decode_wtf8_unit(const char* chars, int pos) {
+    unsigned char b0 = (unsigned char)chars[pos];
+    unsigned char b1 = (unsigned char)chars[pos + 1];
+    unsigned char b2 = (unsigned char)chars[pos + 2];
+    return (uint16_t)(((uint16_t)(b0 & 0x0F) << 12) |
+                      ((uint16_t)(b1 & 0x3F) << 6) |
+                      (uint16_t)(b2 & 0x3F));
+}
+
+static void crypto_write_replacement(uint8_t* out, int* pos) {
+    out[(*pos)++] = 0xEF;
+    out[(*pos)++] = 0xBF;
+    out[(*pos)++] = 0xBD;
+}
+
+static void crypto_write_utf8_encoded(const char* chars, int byte_len, uint8_t* out) {
+    int out_pos = 0;
+    for (int i = 0; i < byte_len; ) {
+        unsigned char lead = (unsigned char)chars[i];
+        int cp_len = 1;
+        if (lead >= 0xF0 && i + 4 <= byte_len) cp_len = 4;
+        else if (lead >= 0xE0 && i + 3 <= byte_len) cp_len = 3;
+        else if (lead >= 0xC0 && i + 2 <= byte_len) cp_len = 2;
+
+        if (cp_len == 3 && lead == 0xED && i + 2 < byte_len) {
+            unsigned char second = (unsigned char)chars[i + 1];
+            bool high = second >= 0xA0 && second <= 0xAF;
+            bool low = second >= 0xB0 && second <= 0xBF;
+            if (high) {
+                int next = i + 3;
+                if (next + 2 < byte_len && (unsigned char)chars[next] == 0xED) {
+                    unsigned char next_second = (unsigned char)chars[next + 1];
+                    if (next_second >= 0xB0 && next_second <= 0xBF) {
+                        uint16_t hi = crypto_decode_wtf8_unit(chars, i);
+                        uint16_t lo = crypto_decode_wtf8_unit(chars, next);
+                        uint32_t cp = 0x10000 + (((uint32_t)hi - 0xD800) << 10) +
+                                      ((uint32_t)lo - 0xDC00);
+                        char encoded[4];
+                        size_t n = utf8_encode(cp, encoded);
+                        for (size_t j = 0; j < n; j++) out[out_pos++] = (uint8_t)encoded[j];
+                        i += 6;
+                        continue;
+                    }
+                }
+                crypto_write_replacement(out, &out_pos);
+                i += 3;
+                continue;
+            }
+            if (low) {
+                crypto_write_replacement(out, &out_pos);
+                i += 3;
+                continue;
+            }
+        }
+
+        for (int j = 0; j < cp_len; j++) out[out_pos++] = (uint8_t)chars[i + j];
+        i += cp_len;
+    }
+}
+
 static int crypto_utf8_codepoint_count(const char* str, int len) {
     int count = 0;
     int index = 0;
@@ -1092,10 +1204,11 @@ static bool crypto_string_bytes_for_encoding(String* s, const char* enc, bool ha
 
     if (!has_encoding || !enc || enc[0] == '\0' ||
         strcmp(enc, "utf8") == 0 || strcmp(enc, "utf-8") == 0) {
-        size_t alloc_len = s->len > 0 ? s->len : 1;
+        int byte_len = crypto_utf8_encoded_len(s->chars, (int)s->len);
+        size_t alloc_len = byte_len > 0 ? (size_t)byte_len : 1;
         *out = (uint8_t*)mem_alloc(alloc_len, MEM_CAT_JS_RUNTIME);
-        if (s->len > 0) memcpy(*out, s->chars, s->len);
-        *out_len = (int)s->len;
+        if (byte_len > 0) crypto_write_utf8_encoded(s->chars, (int)s->len, *out);
+        *out_len = byte_len;
         return true;
     }
 
@@ -1905,16 +2018,24 @@ extern "C" Item js_crypto_hash(Item alg_item, Item data_item, Item encoding_item
     const char* enc = "hex";
     char enc_buf[32];
     if (!crypto_item_is_undefined(encoding_item)) {
-        if (get_type_id(encoding_item) != LMD_TYPE_STRING) {
+        Item output_encoding_item = encoding_item;
+        if (get_type_id(encoding_item) == LMD_TYPE_MAP) {
+            output_encoding_item = js_property_get(encoding_item, make_string_item_crypto("outputEncoding"));
+            if (crypto_item_is_undefined(output_encoding_item)) {
+                output_encoding_item = make_string_item_crypto("hex");
+            }
+        }
+        if (get_type_id(output_encoding_item) != LMD_TYPE_STRING) {
             return js_throw_invalid_arg_type("outputEncoding", "string", encoding_item);
         }
-        String* s = it2s(encoding_item);
+        String* s = it2s(output_encoding_item);
         int len = (int)s->len < (int)sizeof(enc_buf) - 1 ? (int)s->len : (int)sizeof(enc_buf) - 1;
         memcpy(enc_buf, s->chars, (size_t)len);
         enc_buf[len] = '\0';
         enc = enc_buf;
-        if (strcmp(enc, "hex") != 0 && strcmp(enc, "base64") != 0 && strcmp(enc, "buffer") != 0) {
-            return js_throw_invalid_arg_value("outputEncoding", "is invalid", encoding_item);
+        if (strcmp(enc, "hex") != 0 && strcmp(enc, "base64") != 0 &&
+            strcmp(enc, "base64url") != 0 && strcmp(enc, "buffer") != 0) {
+            return js_throw_invalid_arg_value("outputEncoding", "is invalid", output_encoding_item);
         }
     }
 
@@ -1929,13 +2050,8 @@ extern "C" Item js_crypto_hash(Item alg_item, Item data_item, Item encoding_item
     mem_free(data);
     if (!ok) return ItemNull;
 
-    if (strcmp(enc, "hex") == 0) return bytes_to_hex_string(hash, hash_len);
-    if (strcmp(enc, "base64") == 0) return bytes_to_base64_string(hash, hash_len);
-
-    Item result = js_typed_array_new(JS_TYPED_UINT8, hash_len);
-    JsTypedArray* ta = (JsTypedArray*)result.map->data;
-    if (ta && ta->data) memcpy(ta->data, hash, (size_t)hash_len);
-    return result;
+    if (strcmp(enc, "base64url") == 0) return bytes_to_base64url_string(hash, hash_len);
+    return crypto_digest_output_for_encoding(hash, hash_len, enc, true);
 }
 
 // ============================================================================
@@ -3424,11 +3540,7 @@ static bool extract_bytes(Item item, uint8_t** out, int* out_len) {
 
     if (get_type_id(item) == LMD_TYPE_STRING) {
         String* s = it2s(item);
-        size_t alloc_len = s->len > 0 ? s->len : 1;
-        *out = (uint8_t*)mem_alloc(alloc_len, MEM_CAT_JS_RUNTIME);
-        if (s->len > 0) memcpy(*out, s->chars, s->len);
-        *out_len = (int)s->len;
-        return true;
+        return crypto_string_bytes_for_encoding(s, "utf8", true, out, out_len);
     } else if (js_is_typed_array(item)) {
         const uint8_t* buf; int len;
         if (get_uint8_buffer(item, &buf, &len)) {
@@ -4282,8 +4394,10 @@ static bool crypto_hkdf_length_from_item(Item length_item, int* out_len) {
     else if (type == LMD_TYPE_FLOAT) value = it2d(length_item);
     else value = (double)it2l(length_item);
 
-    if (value != value || value < 0.0 || value > 2147483647.0) {
-        js_throw_out_of_range("length", ">= 0 && <= 2147483647", length_item);
+    if (value != value || value < 0.0 || value > (double)CRYPTO_BUFFER_MAX_LENGTH) {
+        char range[64];
+        snprintf(range, sizeof(range), ">= 0 && <= %lld", (long long)CRYPTO_BUFFER_MAX_LENGTH);
+        js_throw_out_of_range("length", range, length_item);
         return false;
     }
     *out_len = (int)value;

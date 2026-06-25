@@ -1,0 +1,13 @@
+# Node.js Official Test Serial List
+#
+# Tests listed here are run before the worker pool because they have an observed
+# cross-test conflict that cannot be isolated by per-test cwd, NODE_COMMON_PORT,
+# or TEST_THREAD_ID.
+#
+# Keep this list small and filename-specific. Do not add whole module prefixes.
+#
+# Format: test-filename.js  # reason
+# Lines starting with # are comments. Blank lines are ignored.
+
+test-http-head-request.js  # [parallel-conflict] passes alone but failed during fully parallel baseline run
+test-https-agent-session-eviction.js  # [parallel-conflict] passes alone but crashed during parallel baseline run

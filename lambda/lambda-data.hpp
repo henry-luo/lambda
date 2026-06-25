@@ -231,6 +231,7 @@ typedef struct ShapeEntry {
     struct ShapeEntry* next;
     Target* ns;  // namespace target (NULL for unqualified fields)
     struct AstNode* default_value;  // default value expression (NULL if none)
+    uint32_t name_id;  // Tune12 P3: stable non-zero name fingerprint, 0 = unset
     uint8_t flags;  // JSPD_* flags; 0 = JS default (data, writable/enum/config)
 } ShapeEntry;
 
@@ -266,18 +267,53 @@ typedef struct TypeMap : Type {
     // re-cloning. The original blueprint TypeMap (referenced by call-site
     // shape caches) keeps is_private_clone=false and stays immutable.
     bool is_private_clone;
+    // P4 (JS): true when this TypeMap is a canonical constructor shape shared
+    // by multiple instances from one `new` callsite. Structural mutations and
+    // incompatible established-slot retags must clone before mutating entries.
+    bool is_shared_constructor_shape;
+    // P5 (JS): parent->child transition targets are also shared across
+    // instances. They are not constructor roots, but must obey the same detach
+    // rules before descriptor or incompatible type mutation.
+    bool is_transition_shared_shape;
+    struct TypeMapTransition* transitions;
     // A3-T1 (JS): typed class identity (JsClass enum, declared in js/js_class.h).
     // Zero-init = JS_CLASS_NONE so existing TypeMaps stay opaque to the new
     // dispatch path. Stamped via `js_class_set_for_map` (which clones the
     // TypeMap first to avoid cross-instance contamination via the per-callsite
     // shape cache). Read via `js_class_get(Item)`.
     uint8_t js_class;
+    // Tune12 P1b: true when an array companion map contains numeric own shape
+    // entries. Pure named companions can still use direct dense element writes.
+    bool has_array_index_shape;
 } TypeMap;
+
+typedef struct TypeMapTransition {
+    const char* name;
+    uint32_t name_len;
+    TypeId value_type;
+    uint8_t flags;
+    TypeMap* target;
+    struct TypeMapTransition* next;
+} TypeMapTransition;
 
 // A1: FNV-1a 32-bit hash for property name lookup.
 // Thin alias over lib/hash.h so the algorithm choice lives in one place.
 static inline uint32_t typemap_fnv1a(const char* key, int len) {
     return hash_fnv1a_32(key, (size_t)len);
+}
+
+static inline uint32_t typemap_name_id(const char* key, int len) {
+    if (!key || len < 0) return 0;
+    uint32_t id = typemap_fnv1a(key, len);
+    return id ? id : 1;
+}
+
+static inline uint32_t typemap_shape_entry_name_id(ShapeEntry* entry) {
+    if (!entry || !entry->name || !entry->name->str) return 0;
+    if (entry->name_id == 0) {
+        entry->name_id = typemap_name_id(entry->name->str, (int)entry->name->length);
+    }
+    return entry->name_id;
 }
 
 static inline bool typemap_ptr_is_plausible(void* p) {
@@ -337,6 +373,9 @@ static inline void typemap_hash_prepare(TypeMap* tm, Pool* pool, int64_t expecte
 
 static inline bool typemap_shape_name_equals(ShapeEntry* e, const char* key, int key_len) {
     if (!e || !e->name || !e->name->str || !key || key_len < 0) return false;
+    uint32_t entry_id = typemap_shape_entry_name_id(e);
+    uint32_t key_id = typemap_name_id(key, key_len);
+    if (entry_id != 0 && key_id != 0 && entry_id != key_id) return false;
     if (e->name->str == key && e->name->length == (size_t)key_len) return true;
     return e->name->length == (size_t)key_len &&
            memcmp(e->name->str, key, (size_t)key_len) == 0;
@@ -362,7 +401,7 @@ static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
     ShapeEntry** slots = typemap_hash_slots(tm);
     int capacity = typemap_hash_capacity(tm);
     if (!slots || capacity <= 0) return;
-    uint32_t h = typemap_fnv1a(entry->name->str, (int)entry->name->length);
+    uint32_t h = typemap_shape_entry_name_id(entry);
     uint32_t idx = h & ((uint32_t)capacity - 1);
     for (int probe = 0; probe < capacity; probe++) {
         uint32_t slot = (idx + (uint32_t)probe) & ((uint32_t)capacity - 1);
@@ -412,7 +451,7 @@ static inline ShapeEntry* typemap_hash_lookup(TypeMap* tm, const char* key, int 
     if (!slots || capacity <= 0 || tm->field_count == 0 || tm->field_count >= (uint16_t)capacity) {
         return typemap_shape_lookup_last(tm, key, key_len);
     }
-    uint32_t h = typemap_fnv1a(key, key_len);
+    uint32_t h = typemap_name_id(key, key_len);
     uint32_t idx = h & ((uint32_t)capacity - 1);
     for (int probe = 0; probe < capacity; probe++) {
         uint32_t slot = (idx + (uint32_t)probe) & ((uint32_t)capacity - 1);

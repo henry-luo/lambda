@@ -50,6 +50,7 @@ extern "C" Path* path_extend(Pool* pool, Path* base, const char* segment);
 extern "C" Path* path_concat(Pool* pool, Path* base, Path* suffix);
 extern "C" PathScheme path_get_scheme(Path* path);
 extern "C" bool path_is_absolute(Path* path);
+extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
 
 // External typeset function
 
@@ -4999,6 +5000,9 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_mt->has_named_shape = old_map_type->has_named_shape;
         new_mt->struct_name = old_map_type->struct_name;
         new_mt->is_private_clone = old_map_type->is_private_clone;
+        new_mt->is_shared_constructor_shape = false;
+        new_mt->is_transition_shared_shape = false;
+        new_mt->transitions = NULL;
         new_mt->js_class = old_map_type->js_class;
 
         // Populate/grow hash table for O(1) property lookup.
@@ -5055,6 +5059,48 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
 // map/element field assignment: obj.field = val
 // Supports in-place update (same type), numeric coercion (INT↔FLOAT, INT↔INT64),
 // and shape rebuild for type changes (e.g. int→string, null→container).
+static bool map_shared_ctor_shape_should_detach_for_type(TypeMap* tm,
+        TypeId field_type, TypeId value_type) {
+    if (!tm || (!tm->is_shared_constructor_shape && !tm->is_transition_shared_shape)) return false;
+    if (field_type == value_type) return false;
+    if (field_type == LMD_TYPE_NULL || value_type == LMD_TYPE_NULL) return false;
+    return true;
+}
+
+static ShapeEntry* map_find_shape_entry(TypeMap* tm, const char* key_cstr, size_t key_len) {
+    if (!tm || !key_cstr) return NULL;
+    if (key_len <= INT_MAX) {
+        ShapeEntry* hit = typemap_hash_lookup(tm, key_cstr, (int)key_len);
+        if (hit) return hit;
+    }
+    ShapeEntry* entry = tm->shape;
+    while (entry) {
+        if (entry->name && entry->name->str && entry->name->length == key_len &&
+                (entry->name->str == key_cstr ||
+                    memcmp(entry->name->str, key_cstr, key_len) == 0)) {
+            return entry;
+        }
+        entry = entry->next;
+    }
+    return NULL;
+}
+
+static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
+        TypeMap** map_type_slot, void** type_slot, const char* key_cstr,
+        size_t key_len, ShapeEntry* entry, TypeId value_type) {
+    if (!map_type_slot || !*map_type_slot || !entry || !entry->type) return entry;
+    TypeId field_type = entry->type->type_id;
+    if (!map_shared_ctor_shape_should_detach_for_type(*map_type_slot, field_type, value_type)) {
+        return entry;
+    }
+    TypeMap* clone = js_typemap_clone_for_mutation_pub(map_item);
+    if (!clone) return entry;
+    *map_type_slot = clone;
+    if (type_slot) *type_slot = clone;
+    ShapeEntry* refreshed = map_find_shape_entry(clone, key_cstr, key_len);
+    return refreshed ? refreshed : entry;
+}
+
 void fn_map_set(Item map_item, Item key, Item value) {
     TypeId map_type_id = get_type_id(map_item);
 
@@ -5138,6 +5184,10 @@ void fn_map_set(Item map_item, Item key, Item value) {
         }
         if (name_matches) {
             TypeId field_type = entry->type->type_id;
+            entry = map_detach_shared_ctor_shape_for_type(map_item, &map_type,
+                type_slot, key_cstr, key_len, entry, value_type);
+            if (!entry || !entry->type) return;
+            field_type = entry->type->type_id;
             void* field_ptr = (char*)*data_slot + entry->byte_offset;
 
             if (field_type == value_type) {

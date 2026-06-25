@@ -41,18 +41,157 @@ static void jm_collect_for_init_lexical_names(JsAstNode* node, struct hashmap* n
 
 static void jm_note_module_block_lexical_name(struct hashmap* seen, struct hashmap* duplicate_consts,
         const char* name, int var_kind) {
+    (void)var_kind;
     if (!name || !seen || !duplicate_consts) return;
     JsNameSetEntry key;
     memset(&key, 0, sizeof(key));
     snprintf(key.name, sizeof(key.name), "%s", name);
     JsNameSetEntry* existing = (JsNameSetEntry*)hashmap_get(seen, &key);
     if (existing) {
-        if (var_kind == JS_VAR_CONST || existing->var_kind == JS_VAR_CONST) {
-            jm_name_set_add(duplicate_consts, name);
-        }
+        jm_name_set_add(duplicate_consts, name);
     } else {
         jm_name_set_add_kind(seen, name, var_kind);
     }
+}
+
+static bool jm_child_can_use_parent_scope_env(JsFuncCollected* parent, JsFuncCollected* child) {
+    (void)parent;
+    return child != NULL;
+}
+
+static void jm_count_lexical_pattern_name_for_slot(JsAstNode* pat, const char* name, int* count) {
+    if (!pat || !name || !count) return;
+    if (pat->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* id = (JsIdentifierNode*)pat;
+        if (!id->name) return;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        if (strcmp(vname, name) == 0) (*count)++;
+        return;
+    }
+    if (pat->node_type == JS_AST_NODE_ARRAY_PATTERN || pat->node_type == JS_AST_NODE_ARRAY_EXPRESSION) {
+        JsArrayNode* arr = (JsArrayNode*)pat;
+        for (JsAstNode* e = arr->elements; e; e = e->next) {
+            jm_count_lexical_pattern_name_for_slot(e, name, count);
+        }
+        return;
+    }
+    if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN || pat->node_type == JS_AST_NODE_OBJECT_EXPRESSION) {
+        JsObjectNode* obj = (JsObjectNode*)pat;
+        for (JsAstNode* p = obj->properties; p; p = p->next) {
+            jm_count_lexical_pattern_name_for_slot(p, name, count);
+        }
+        return;
+    }
+    if (pat->node_type == JS_AST_NODE_PROPERTY) {
+        jm_count_lexical_pattern_name_for_slot(((JsPropertyNode*)pat)->value, name, count);
+        return;
+    }
+    if (pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+        jm_count_lexical_pattern_name_for_slot(((JsAssignmentPatternNode*)pat)->left, name, count);
+        return;
+    }
+    if (pat->node_type == JS_AST_NODE_REST_ELEMENT ||
+        pat->node_type == JS_AST_NODE_REST_PROPERTY ||
+        pat->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+        jm_count_lexical_pattern_name_for_slot(((JsSpreadElementNode*)pat)->argument, name, count);
+    }
+}
+
+static void jm_count_lexical_binding_name_for_slot(JsAstNode* node, const char* name, int* count) {
+    if (!node || !name || !count) return;
+    switch (node->node_type) {
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        for (JsAstNode* s = ((JsBlockNode*)node)->statements; s; s = s->next) {
+            jm_count_lexical_binding_name_for_slot(s, name, count);
+        }
+        return;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+        if (vd->kind != JS_VAR_LET && vd->kind != JS_VAR_CONST) return;
+        for (JsAstNode* d = vd->declarations; d; d = d->next) {
+            if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                jm_count_lexical_pattern_name_for_slot(((JsVariableDeclaratorNode*)d)->id, name, count);
+            }
+        }
+        return;
+    }
+    case JS_AST_NODE_IF_STATEMENT:
+        jm_count_lexical_binding_name_for_slot(((JsIfNode*)node)->consequent, name, count);
+        jm_count_lexical_binding_name_for_slot(((JsIfNode*)node)->alternate, name, count);
+        return;
+    case JS_AST_NODE_FOR_STATEMENT:
+        jm_count_lexical_binding_name_for_slot(((JsForNode*)node)->init, name, count);
+        jm_count_lexical_binding_name_for_slot(((JsForNode*)node)->body, name, count);
+        return;
+    case JS_AST_NODE_FOR_OF_STATEMENT:
+    case JS_AST_NODE_FOR_IN_STATEMENT:
+        jm_count_lexical_binding_name_for_slot(((JsForOfNode*)node)->left, name, count);
+        jm_count_lexical_binding_name_for_slot(((JsForOfNode*)node)->body, name, count);
+        return;
+    case JS_AST_NODE_WHILE_STATEMENT:
+        jm_count_lexical_binding_name_for_slot(((JsWhileNode*)node)->body, name, count);
+        return;
+    case JS_AST_NODE_DO_WHILE_STATEMENT:
+        jm_count_lexical_binding_name_for_slot(((JsDoWhileNode*)node)->body, name, count);
+        return;
+    case JS_AST_NODE_TRY_STATEMENT:
+        jm_count_lexical_binding_name_for_slot(((JsTryNode*)node)->block, name, count);
+        jm_count_lexical_binding_name_for_slot(((JsTryNode*)node)->handler, name, count);
+        jm_count_lexical_binding_name_for_slot(((JsTryNode*)node)->finalizer, name, count);
+        return;
+    case JS_AST_NODE_CATCH_CLAUSE:
+        jm_count_lexical_pattern_name_for_slot(((JsCatchNode*)node)->param, name, count);
+        jm_count_lexical_binding_name_for_slot(((JsCatchNode*)node)->body, name, count);
+        return;
+    case JS_AST_NODE_SWITCH_STATEMENT:
+        for (JsAstNode* c = ((JsSwitchNode*)node)->cases; c; c = c->next) {
+            jm_count_lexical_binding_name_for_slot(c, name, count);
+        }
+        return;
+    case JS_AST_NODE_SWITCH_CASE:
+        for (JsAstNode* s = ((JsSwitchCaseNode*)node)->consequent; s; s = s->next) {
+            jm_count_lexical_binding_name_for_slot(s, name, count);
+        }
+        return;
+    case JS_AST_NODE_LABELED_STATEMENT:
+        jm_count_lexical_binding_name_for_slot(((JsLabeledStatementNode*)node)->body, name, count);
+        return;
+    default:
+        return;
+    }
+}
+
+static bool jm_parent_has_duplicate_lexical_slot_name(JsFuncCollected* parent, const char* name) {
+    if (!parent || !parent->node || !parent->node->body || !name) return false;
+    int count = 0;
+    jm_count_lexical_binding_name_for_slot(parent->node->body, name, &count);
+    return count > 1;
+}
+
+static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode* target,
+    const char* name, char* out_key);
+
+static const char* jm_capture_scope_env_slot_key(JsFuncCollected* parent, JsFuncCollected* child,
+        JsCaptureEntry* cap) {
+    if (!cap) return "";
+    if (jm_parent_has_duplicate_lexical_slot_name(parent, cap->name)) {
+        if (!cap->scope_env_key[0] || strcmp(cap->scope_env_key, cap->name) == 0) {
+            char derived_key[128];
+            memset(derived_key, 0, sizeof(derived_key));
+            JsAstNode* root = parent && parent->node ? parent->node->body : NULL;
+            JsAstNode* target = child && child->node ? (JsAstNode*)child->node : NULL;
+            if (root && target &&
+                jm_find_enclosing_lexical_key_for_target(root, target, cap->name, derived_key)) {
+                snprintf(cap->scope_env_key, sizeof(cap->scope_env_key), "%s", derived_key);
+            }
+        }
+        if (cap->scope_env_key[0] && strcmp(cap->scope_env_key, cap->name) != 0) {
+            return cap->scope_env_key;
+        }
+    }
+    return cap->name;
 }
 
 static void jm_note_module_block_lexical_pattern(struct hashmap* seen, struct hashmap* duplicate_consts,
@@ -375,6 +514,387 @@ static MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntr
     return jm_transpile_box_item(mt, (JsAstNode*)&tmp_id);
 }
 
+static int jm_ctor_prop_find_raw(const char** ptrs, const int* lens, int count,
+        const char* name, int name_len) {
+    if (!ptrs || !lens || !name || name_len <= 0) return -1;
+    for (int i = 0; i < count; i++) {
+        if (lens[i] == name_len && ptrs[i] &&
+            strncmp(ptrs[i], name, (size_t)name_len) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static bool jm_ctor_prop_append_raw(const char** dst_ptrs, int* dst_lens,
+        int* dst_ta_types, TypeId* dst_types, int* dst_param_idx, int* dst_count,
+        const char* name, int name_len, int ta_type, TypeId field_type,
+        int param_idx, bool inherited) {
+    if (!dst_ptrs || !dst_lens || !dst_ta_types || !dst_types || !dst_param_idx ||
+        !dst_count || !name || name_len <= 0) {
+        return true;
+    }
+    int idx = jm_ctor_prop_find_raw(dst_ptrs, dst_lens, *dst_count, name, name_len);
+    if (idx >= 0) {
+        if (ta_type >= 0) dst_ta_types[idx] = ta_type;
+        if (field_type != LMD_TYPE_NULL) dst_types[idx] = field_type;
+        if (!inherited && param_idx >= 0) dst_param_idx[idx] = param_idx;
+        return true;
+    }
+    if (*dst_count >= 16) return false;
+    idx = *dst_count;
+    dst_ptrs[idx] = name;
+    dst_lens[idx] = name_len;
+    dst_ta_types[idx] = ta_type;
+    dst_types[idx] = field_type;
+    dst_param_idx[idx] = inherited ? -1 : param_idx;
+    *dst_count = idx + 1;
+    return true;
+}
+
+static bool jm_ctor_prop_append_from_fc(const char** dst_ptrs, int* dst_lens,
+        int* dst_ta_types, TypeId* dst_types, int* dst_param_idx, int* dst_count,
+        JsFuncCollected* src_fc, bool inherited) {
+    if (!src_fc) return true;
+    for (int i = 0; i < src_fc->ctor_prop_count; i++) {
+        if (!jm_ctor_prop_append_raw(dst_ptrs, dst_lens, dst_ta_types,
+                dst_types, dst_param_idx, dst_count,
+                src_fc->ctor_prop_ptrs[i], src_fc->ctor_prop_lens[i],
+                src_fc->ctor_prop_ta_types[i], src_fc->ctor_prop_types[i],
+                src_fc->ctor_prop_param_idx[i], inherited)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static JsFuncCollected* jm_nearest_ctor_shape_fc(JsClassEntry* ce) {
+    for (JsClassEntry* p = ce; p; p = p->superclass) {
+        if (p->constructor && p->constructor->fc &&
+            p->constructor->fc->ctor_prop_count > 0) {
+            return p->constructor->fc;
+        }
+    }
+    return NULL;
+}
+
+static void jm_disable_ctor_shape_chain(JsClassEntry* ce) {
+    for (JsClassEntry* p = ce; p; p = p->superclass) {
+        if (p->constructor && p->constructor->fc) {
+            p->constructor->fc->ctor_prop_count = 0;
+        }
+        p->ctor_shape_compose_failed = true;
+    }
+}
+
+static bool jm_compose_derived_ctor_shape(JsClassEntry* ce, int depth) {
+    if (!ce) return true;
+    if (ce->ctor_shape_composed) return !ce->ctor_shape_compose_failed;
+    ce->ctor_shape_composed = true;
+    if (depth > 32) {
+        ce->ctor_shape_compose_failed = true;
+        return false;
+    }
+    if (ce->superclass && !jm_compose_derived_ctor_shape(ce->superclass, depth + 1)) {
+        ce->ctor_shape_compose_failed = true;
+        return false;
+    }
+    if (!ce->superclass) return true;
+
+    JsFuncCollected* parent_fc = jm_nearest_ctor_shape_fc(ce->superclass);
+    if (!parent_fc || parent_fc->ctor_prop_count <= 0) return true;
+
+    if (ce->instance_field_count > 0) {
+        log_debug("Tune11-P5: disabling inherited ctor shape for '%.*s' because instance fields are present",
+            ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "");
+        ce->ctor_shape_compose_failed = true;
+        return false;
+    }
+
+    if (!ce->constructor || !ce->constructor->fc) {
+        log_debug("Tune11-P5: disabling inherited ctor shape for '%.*s' because it has an implicit constructor",
+            ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "");
+        ce->ctor_shape_compose_failed = true;
+        return false;
+    }
+
+    JsFuncCollected* fc = ce->constructor->fc;
+    const char* own_ptrs[16];
+    int own_lens[16];
+    int own_ta_types[16];
+    TypeId own_types[16];
+    int own_param_idx[16];
+    int own_count = fc->ctor_prop_count;
+    if (own_count < 0) own_count = 0;
+    if (own_count > 16) own_count = 16;
+    for (int i = 0; i < own_count; i++) {
+        own_ptrs[i] = fc->ctor_prop_ptrs[i];
+        own_lens[i] = fc->ctor_prop_lens[i];
+        own_ta_types[i] = fc->ctor_prop_ta_types[i];
+        own_types[i] = fc->ctor_prop_types[i];
+        own_param_idx[i] = fc->ctor_prop_param_idx[i];
+    }
+
+    const char* merged_ptrs[16];
+    int merged_lens[16];
+    int merged_ta_types[16];
+    TypeId merged_types[16];
+    int merged_param_idx[16];
+    int merged_count = 0;
+    memset(merged_ptrs, 0, sizeof(merged_ptrs));
+    memset(merged_lens, 0, sizeof(merged_lens));
+    memset(merged_ta_types, -1, sizeof(merged_ta_types));
+    memset(merged_types, 0, sizeof(merged_types));
+    memset(merged_param_idx, -1, sizeof(merged_param_idx));
+
+    bool ok = jm_ctor_prop_append_from_fc(merged_ptrs, merged_lens,
+        merged_ta_types, merged_types, merged_param_idx, &merged_count,
+        parent_fc, true);
+    for (int i = 0; ok && i < own_count; i++) {
+        ok = jm_ctor_prop_append_raw(merged_ptrs, merged_lens,
+            merged_ta_types, merged_types, merged_param_idx, &merged_count,
+            own_ptrs[i], own_lens[i], own_ta_types[i], own_types[i],
+            own_param_idx[i], false);
+    }
+    if (!ok) {
+        log_debug("Tune11-P5: disabling inherited ctor shape for '%.*s' because merged field count exceeds 16",
+            ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "");
+        ce->ctor_shape_compose_failed = true;
+        return false;
+    }
+
+    fc->ctor_prop_count = merged_count;
+    for (int i = 0; i < merged_count; i++) {
+        fc->ctor_prop_ptrs[i] = merged_ptrs[i];
+        fc->ctor_prop_lens[i] = merged_lens[i];
+        fc->ctor_prop_ta_types[i] = merged_ta_types[i];
+        fc->ctor_prop_types[i] = merged_types[i];
+        fc->ctor_prop_param_idx[i] = merged_param_idx[i];
+    }
+    log_debug("Tune11-P5: composed ctor shape for '%.*s' with %d inherited+own props",
+        ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "",
+        merged_count);
+    return true;
+}
+
+static void jm_compose_derived_ctor_shapes(JsMirTranspiler* mt) {
+    if (!mt) return;
+    for (int i = 0; i < mt->class_count; i++) {
+        JsClassEntry* ce = &mt->class_entries[i];
+        if (ce->superclass && !jm_compose_derived_ctor_shape(ce, 0)) {
+            jm_disable_ctor_shape_chain(ce);
+        }
+    }
+    for (int i = 0; i < mt->class_count; i++) {
+        JsClassEntry* ce = &mt->class_entries[i];
+        if (ce->constructor && ce->constructor->fc &&
+            ce->constructor->fc->ctor_prop_count > 0 &&
+            !ce->shape_cache_ptr) {
+            ce->shape_cache_ptr = (void**)mem_calloc(1, sizeof(void*), MEM_CAT_JS_RUNTIME);
+        }
+    }
+}
+
+static bool jm_func_ctor_name_matches(JsFuncCollected* fc, const char* name, int name_len) {
+    if (!fc || !fc->node || !fc->node->name || !name || name_len <= 0) return false;
+    return (int)fc->node->name->len == name_len &&
+        strncmp(fc->node->name->chars, name, (size_t)name_len) == 0;
+}
+
+static JsFuncCollected* jm_find_function_ctor_fc(JsMirTranspiler* mt,
+        const char* name, int name_len) {
+    if (!mt || !name || name_len <= 0) return NULL;
+    for (int i = 0; i < mt->func_count; i++) {
+        JsFuncCollected* fc = &mt->func_entries[i];
+        if (!fc->node || fc->is_class_method || fc->is_reassigned) continue;
+        if (fc->node->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+        if (jm_func_ctor_name_matches(fc, name, name_len)) return fc;
+    }
+    return NULL;
+}
+
+static bool jm_inherits_call_parent_name(JsAstNode* stmt, const char* child,
+        int child_len, const char** out_parent, int* out_parent_len) {
+    if (!stmt || !child || child_len <= 0 || !out_parent || !out_parent_len) return false;
+    if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
+        JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
+        stmt = es->expression;
+    }
+    if (!stmt || stmt->node_type != JS_AST_NODE_CALL_EXPRESSION) return false;
+    JsCallNode* call = (JsCallNode*)stmt;
+    if (!call->callee || call->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return false;
+    JsMemberNode* mem = (JsMemberNode*)call->callee;
+    if (mem->computed || !mem->object || !mem->property) return false;
+    if (mem->object->node_type != JS_AST_NODE_IDENTIFIER ||
+            mem->property->node_type != JS_AST_NODE_IDENTIFIER) {
+        return false;
+    }
+    JsIdentifierNode* obj = (JsIdentifierNode*)mem->object;
+    JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
+    if (!obj->name || !prop->name || !call->arguments) return false;
+    if ((int)obj->name->len != child_len ||
+            strncmp(obj->name->chars, child, (size_t)child_len) != 0) {
+        return false;
+    }
+    if (prop->name->len != 12 ||
+            strncmp(prop->name->chars, "inheritsFrom", 12) != 0) {
+        return false;
+    }
+    if (call->arguments->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    JsIdentifierNode* parent = (JsIdentifierNode*)call->arguments;
+    if (!parent->name || parent->name->len <= 0) return false;
+    *out_parent = parent->name->chars;
+    *out_parent_len = (int)parent->name->len;
+    return true;
+}
+
+static bool jm_find_inherits_parent_name(JsMirTranspiler* mt, const char* child,
+        int child_len, const char** out_parent, int* out_parent_len) {
+    if (!mt || !mt->root_node || mt->root_node->node_type != JS_AST_NODE_PROGRAM) return false;
+    JsProgramNode* program = (JsProgramNode*)mt->root_node;
+    for (JsAstNode* stmt = program->body; stmt; stmt = stmt->next) {
+        if (jm_inherits_call_parent_name(stmt, child, child_len, out_parent, out_parent_len)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool jm_resolve_func_ctor_parent_name(JsMirTranspiler* mt, JsFuncCollected* fc,
+        const char** out_parent, int* out_parent_len) {
+    if (!mt || !fc || !out_parent || !out_parent_len || !fc->ctor_has_super_call) return false;
+    if (fc->ctor_super_via_self_prop) {
+        if (!jm_func_ctor_name_matches(fc, fc->ctor_super_name_ptr, fc->ctor_super_name_len)) {
+            return false;
+        }
+        return jm_find_inherits_parent_name(mt, fc->ctor_super_name_ptr,
+            fc->ctor_super_name_len, out_parent, out_parent_len);
+    }
+
+    const char* inherited_parent = NULL;
+    int inherited_parent_len = 0;
+    if (!fc->node || !fc->node->name ||
+            !jm_find_inherits_parent_name(mt, fc->node->name->chars,
+                (int)fc->node->name->len, &inherited_parent, &inherited_parent_len)) {
+        return false;
+    }
+    if (inherited_parent_len != fc->ctor_super_name_len ||
+            strncmp(inherited_parent, fc->ctor_super_name_ptr,
+                (size_t)fc->ctor_super_name_len) != 0) {
+        return false;
+    }
+
+    *out_parent = fc->ctor_super_name_ptr;
+    *out_parent_len = fc->ctor_super_name_len;
+    return *out_parent && *out_parent_len > 0;
+}
+
+static void jm_disable_func_ctor_shape(JsFuncCollected* fc, const char* reason) {
+    if (!fc) return;
+    fc->ctor_prop_count = 0;
+    fc->func_ctor_shape_compose_failed = true;
+    log_debug("Tune12-P2b: disabling function ctor shape for '%s': %s",
+        fc->name, reason ? reason : "unknown");
+}
+
+static bool jm_compose_function_ctor_shape(JsMirTranspiler* mt,
+        JsFuncCollected* fc, int depth) {
+    if (!mt || !fc) return true;
+    if (fc->func_ctor_shape_composed) return !fc->func_ctor_shape_compose_failed;
+    fc->func_ctor_shape_composed = true;
+    if (fc->ctor_has_dynamic_this_call) {
+        jm_disable_func_ctor_shape(fc, "dynamic .call(this) pattern");
+        return false;
+    }
+    if (!fc->ctor_has_super_call) return true;
+    if (depth > 32) {
+        jm_disable_func_ctor_shape(fc, "inheritance depth exceeded");
+        return false;
+    }
+
+    const char* parent_name = NULL;
+    int parent_len = 0;
+    if (!jm_resolve_func_ctor_parent_name(mt, fc, &parent_name, &parent_len)) {
+        jm_disable_func_ctor_shape(fc, "unresolved parent constructor");
+        return false;
+    }
+    JsFuncCollected* parent_fc = jm_find_function_ctor_fc(mt, parent_name, parent_len);
+    if (!parent_fc) {
+        jm_disable_func_ctor_shape(fc, "parent constructor is not a stable function declaration");
+        return false;
+    }
+    if (!jm_compose_function_ctor_shape(mt, parent_fc, depth + 1)) {
+        jm_disable_func_ctor_shape(fc, "parent constructor shape unavailable");
+        return false;
+    }
+
+    const char* own_ptrs[16];
+    int own_lens[16];
+    int own_ta_types[16];
+    TypeId own_types[16];
+    int own_param_idx[16];
+    int own_count = fc->ctor_prop_count;
+    if (own_count < 0) own_count = 0;
+    if (own_count > 16) own_count = 16;
+    for (int i = 0; i < own_count; i++) {
+        own_ptrs[i] = fc->ctor_prop_ptrs[i];
+        own_lens[i] = fc->ctor_prop_lens[i];
+        own_ta_types[i] = fc->ctor_prop_ta_types[i];
+        own_types[i] = fc->ctor_prop_types[i];
+        own_param_idx[i] = fc->ctor_prop_param_idx[i];
+    }
+
+    const char* merged_ptrs[16];
+    int merged_lens[16];
+    int merged_ta_types[16];
+    TypeId merged_types[16];
+    int merged_param_idx[16];
+    int merged_count = 0;
+    memset(merged_ptrs, 0, sizeof(merged_ptrs));
+    memset(merged_lens, 0, sizeof(merged_lens));
+    memset(merged_ta_types, -1, sizeof(merged_ta_types));
+    memset(merged_types, 0, sizeof(merged_types));
+    memset(merged_param_idx, -1, sizeof(merged_param_idx));
+
+    bool ok = jm_ctor_prop_append_from_fc(merged_ptrs, merged_lens,
+        merged_ta_types, merged_types, merged_param_idx, &merged_count,
+        parent_fc, true);
+    for (int i = 0; ok && i < own_count; i++) {
+        ok = jm_ctor_prop_append_raw(merged_ptrs, merged_lens,
+            merged_ta_types, merged_types, merged_param_idx, &merged_count,
+            own_ptrs[i], own_lens[i], own_ta_types[i], own_types[i],
+            own_param_idx[i], false);
+    }
+    if (!ok) {
+        jm_disable_func_ctor_shape(fc, "merged field count exceeds 16");
+        return false;
+    }
+
+    fc->ctor_prop_count = merged_count;
+    for (int i = 0; i < merged_count; i++) {
+        fc->ctor_prop_ptrs[i] = merged_ptrs[i];
+        fc->ctor_prop_lens[i] = merged_lens[i];
+        fc->ctor_prop_ta_types[i] = merged_ta_types[i];
+        fc->ctor_prop_types[i] = merged_types[i];
+        fc->ctor_prop_param_idx[i] = merged_param_idx[i];
+    }
+    log_debug("Tune12-P2b: composed function ctor shape for '%s' with %d inherited+own props",
+        fc->name, merged_count);
+    return true;
+}
+
+static void jm_compose_function_ctor_shapes(JsMirTranspiler* mt) {
+    if (!mt) return;
+    for (int i = 0; i < mt->func_count; i++) {
+        JsFuncCollected* fc = &mt->func_entries[i];
+        if (!fc->node || fc->is_class_method || fc->is_reassigned) continue;
+        if (fc->node->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+        if (!jm_compose_function_ctor_shape(mt, fc, 0)) {
+            fc->func_ctor_shape_compose_failed = true;
+        }
+    }
+}
+
 static void jm_emit_class_instance_field_metadata_for_decl(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce) {
     if (!mt || !ce) return;
     int metadata_count = 0;
@@ -575,6 +1095,120 @@ static bool jm_ast_node_contains_target(JsAstNode* node, JsAstNode* target) {
     uint32_t ts = ts_node_start_byte(target->node);
     uint32_t te = ts_node_end_byte(target->node);
     return ns <= ts && te <= ne;
+}
+
+static bool jm_lexical_pattern_matches_name_key(JsAstNode* pat, const char* name, char out_key[128]) {
+    if (!pat || !name || !out_key) return false;
+    switch (pat->node_type) {
+    case JS_AST_NODE_IDENTIFIER: {
+        JsIdentifierNode* id = (JsIdentifierNode*)pat;
+        if (!id->name) return false;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        if (strcmp(vname, name) != 0) return false;
+        uint32_t start = ts_node_is_null(pat->node) ? 0 : ts_node_start_byte(pat->node);
+        uint32_t end = ts_node_is_null(pat->node) ? 0 : ts_node_end_byte(pat->node);
+        snprintf(out_key, 128, "%s@%u:%u", name, start, end);
+        return true;
+    }
+    case JS_AST_NODE_ARRAY_PATTERN:
+    case JS_AST_NODE_ARRAY_EXPRESSION:
+        for (JsAstNode* e = ((JsArrayNode*)pat)->elements; e; e = e->next) {
+            if (jm_lexical_pattern_matches_name_key(e, name, out_key)) return true;
+        }
+        return false;
+    case JS_AST_NODE_OBJECT_PATTERN:
+    case JS_AST_NODE_OBJECT_EXPRESSION:
+        for (JsAstNode* p = ((JsObjectNode*)pat)->properties; p; p = p->next) {
+            if (jm_lexical_pattern_matches_name_key(p, name, out_key)) return true;
+        }
+        return false;
+    case JS_AST_NODE_PROPERTY:
+        return jm_lexical_pattern_matches_name_key(((JsPropertyNode*)pat)->value, name, out_key);
+    case JS_AST_NODE_ASSIGNMENT_PATTERN:
+        return jm_lexical_pattern_matches_name_key(((JsAssignmentPatternNode*)pat)->left, name, out_key);
+    case JS_AST_NODE_REST_ELEMENT:
+    case JS_AST_NODE_REST_PROPERTY:
+    case JS_AST_NODE_SPREAD_ELEMENT:
+        return jm_lexical_pattern_matches_name_key(((JsSpreadElementNode*)pat)->argument, name, out_key);
+    default:
+        return false;
+    }
+}
+
+static bool jm_lexical_decl_matches_name(JsAstNode* stmt, const char* name, char out_key[128]) {
+    if (!stmt || !name || !out_key) return false;
+    if (stmt->node_type != JS_AST_NODE_VARIABLE_DECLARATION) return false;
+    JsVariableDeclarationNode* var = (JsVariableDeclarationNode*)stmt;
+    if (var->kind != JS_VAR_LET && var->kind != JS_VAR_CONST) return false;
+    for (JsAstNode* d = var->declarations; d; d = d->next) {
+        if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
+        if (jm_lexical_pattern_matches_name_key(decl->id, name, out_key)) return true;
+    }
+    return false;
+}
+
+static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode* target,
+        const char* name, char out_key[128]) {
+    if (!node || !target || !name || !out_key) return false;
+    if (node == target) return false;
+    if (!jm_ast_node_contains_target(node, target)) {
+        return jm_find_enclosing_lexical_key_for_target(node->next, target, name, out_key);
+    }
+
+    bool found_here = false;
+    switch (node->node_type) {
+    case JS_AST_NODE_PROGRAM: {
+        JsProgramNode* program = (JsProgramNode*)node;
+        for (JsAstNode* s = program->body; s; s = s->next) {
+            if (jm_lexical_decl_matches_name(s, name, out_key)) found_here = true;
+            if (jm_ast_node_contains_target(s, target) &&
+                jm_find_enclosing_lexical_key_for_target(s, target, name, out_key)) return true;
+        }
+        return found_here;
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* block = (JsBlockNode*)node;
+        for (JsAstNode* s = block->statements; s; s = s->next) {
+            if (jm_lexical_decl_matches_name(s, name, out_key)) found_here = true;
+            if (jm_ast_node_contains_target(s, target) &&
+                jm_find_enclosing_lexical_key_for_target(s, target, name, out_key)) return true;
+        }
+        return found_here;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* var = (JsVariableDeclarationNode*)node;
+        for (JsAstNode* d = var->declarations; d; d = d->next) {
+            if (jm_find_enclosing_lexical_key_for_target(d, target, name, out_key)) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)node;
+        return jm_find_enclosing_lexical_key_for_target(decl->init, target, name, out_key);
+    }
+    case JS_AST_NODE_CLASS_DECLARATION:
+    case JS_AST_NODE_CLASS_EXPRESSION: {
+        JsClassNode* cls = (JsClassNode*)node;
+        if (jm_find_enclosing_lexical_key_for_target(cls->superclass, target, name, out_key)) return true;
+        return jm_find_enclosing_lexical_key_for_target(cls->body, target, name, out_key);
+    }
+    case JS_AST_NODE_FIELD_DEFINITION: {
+        JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)node;
+        if (field->computed &&
+            jm_find_enclosing_lexical_key_for_target(field->key, target, name, out_key)) return true;
+        return jm_find_enclosing_lexical_key_for_target(field->value, target, name, out_key);
+    }
+    case JS_AST_NODE_METHOD_DEFINITION: {
+        JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)node;
+        if (method->computed &&
+            jm_find_enclosing_lexical_key_for_target(method->key, target, name, out_key)) return true;
+        return jm_find_enclosing_lexical_key_for_target(method->value, target, name, out_key);
+    }
+    default:
+        return false;
+    }
 }
 
 static void jm_collect_pattern_names_kind(JsAstNode* pat, struct hashmap* names, int var_kind) {
@@ -929,14 +1563,14 @@ void jm_resolve_module_path(const char* base_file, const char* specifier, int sp
             "fs", "fs/promises", "child_process", "path", "path/posix", "path/win32",
             "os", "url", "util", "util/types",
             "process", "querystring", "events", "buffer",
-            "crypto", "dns", "dns/promises", "zlib", "readline",
+            "crypto", "dns", "dns/promises", "zlib", "readline", "readline/promises",
             "stream", "stream/promises", "stream/web", "stream/consumers", "stream/iter",
             "net", "tls", "http", "https",
             "string_decoder", "assert", "assert/strict",
             "timers", "timers/promises", "console", "module",
             "worker_threads", "cluster", "vm", "v8", "tty", "perf_hooks",
             "diagnostics_channel", "async_hooks", "domain",
-            "internal/util", "internal/async_hooks", "internal/async_context_frame",
+            "internal/util", "internal/util/inspect", "internal/async_hooks", "internal/async_context_frame",
             "internal/test/binding", "internal/streams/add-abort-signal",
             "internal/streams/state", NULL
         };
@@ -2249,6 +2883,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         log_error("js-mir: expected program node");
         return;
     }
+    mt->root_node = root;
 
     JsProgramNode* program = (JsProgramNode*)root;
 
@@ -3123,43 +3758,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         }
     }
 
-    // Disable P3 (shaped slot writes) for constructors of classes in inheritance
-    // hierarchies where the parent constructor has field assignments.
-    // When a child calls super(), the parent constructor's property writes
-    // can change the object shape, making the child's P3 slot indices incorrect.
-    // However, if the parent has NO constructor fields (e.g., abstract Benchmark base
-    // class), the child's shape is self-contained and P3 is safe.
-    for (int i = 0; i < mt->class_count; i++) {
-        JsClassEntry* ce = &mt->class_entries[i];
-        if (ce->superclass) {
-            bool parent_has_ctor_fields = ce->superclass->constructor &&
-                ce->superclass->constructor->fc &&
-                ce->superclass->constructor->fc->ctor_prop_count > 0;
-            // Disable P3 for the superclass constructor if it has fields
-            // (child's pre-shaped object conflicts with parent's field writes)
-            if (parent_has_ctor_fields) {
-                log_debug("js-mir: disabling P3 for superclass constructor '%.*s' (parent of '%.*s')",
-                    (int)(ce->superclass->name ? ce->superclass->name->len : 0),
-                    ce->superclass->name ? ce->superclass->name->chars : "<anon>",
-                    (int)(ce->name ? ce->name->len : 0),
-                    ce->name ? ce->name->chars : "<anon>");
-                ce->superclass->constructor->fc->ctor_prop_count = 0;
-            }
-            // Disable P3 for the child class constructor ONLY when parent has fields.
-            // If parent has no ctor fields (e.g., Benchmark), child's shape indices are
-            // self-contained and safe for P1/P2 native slot access.
-            if (parent_has_ctor_fields &&
-                ce->constructor && ce->constructor->fc &&
-                ce->constructor->fc->ctor_prop_count > 0) {
-                log_debug("js-mir: disabling P3 for child constructor '%.*s' (extends '%.*s' with fields)",
-                    (int)(ce->name ? ce->name->len : 0),
-                    ce->name ? ce->name->chars : "<anon>",
-                    (int)(ce->superclass->name ? ce->superclass->name->len : 0),
-                    ce->superclass->name ? ce->superclass->name->chars : "<anon>");
-                ce->constructor->fc->ctor_prop_count = 0;
-            }
-        }
-    }
+    // Tune11 P5 composes inherited constructor-shape metadata after type
+    // propagation below. Until then, keep parent/child constructor metadata
+    // intact so the composed shape can preserve base-first slot order.
 
     // Assign module variable indexes for static class fields
     for (int ci = 0; ci < mt->class_count; ci++) {
@@ -3607,6 +4208,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         // Add as capture to parent
                         jm_ensure_captures_capacity(parent);
                         snprintf(parent->captures[parent->capture_count].name, 128, "%s", cap_name);
+                        snprintf(parent->captures[parent->capture_count].scope_env_key, 128, "%s",
+                            child->captures[ci].scope_env_key[0] ? child->captures[ci].scope_env_key : cap_name);
                         parent->captures[parent->capture_count].scope_env_slot = -1;
                         parent->captures[parent->capture_count].grandparent_slot = -1;
                         parent->captures[parent->capture_count].is_let_const = child->captures[ci].is_let_const;
@@ -3684,6 +4287,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 JsFuncCollected* child = &mt->func_entries[ci];
                 if (child->parent_index != fi) continue;
                 if (child->capture_count == 0) continue;
+                if (!jm_child_can_use_parent_scope_env(parent_fc, child)) continue;
 
                 // Determine child's NFE self-name (if any)
                 char child_self_name[128] = {0};
@@ -3696,6 +4300,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 bool has_nfe_self_capture = false;
                 for (int k = 0; k < child->capture_count; k++) {
                     const char* cname = child->captures[k].name;
+                    const char* slot_key = jm_capture_scope_env_slot_key(parent_fc, child, &child->captures[k]);
                     // Skip true NFE self-captures (child is a function expression, not declaration).
                     // Name alone is not enough: minified bundles often have an
                     // outer binding and an NFE self binding with the same name.
@@ -3704,7 +4309,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         has_nfe_self_capture = true;
                         continue;
                     }
-                    jm_name_set_add(scope_vars, cname);
+                    jm_name_set_add(scope_vars, slot_key);
                 }
                 if (has_nfe_self_capture) nfe_extra_count++;
             }
@@ -3724,6 +4329,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         JsFuncCollected* child = &mt->func_entries[ci];
                         if (child->parent_index != fi) continue;
                         if (child->capture_count == 0) continue;
+                        if (!jm_child_can_use_parent_scope_env(parent_fc, child)) continue;
 
                         char child_self_name2[128] = {0};
                         if (child->node && child->node->name) {
@@ -3734,14 +4340,15 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         bool is_child_nfe2 = (child->node && child->node->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION);
                         for (int k = 0; k < child->capture_count; k++) {
                             const char* cname = child->captures[k].name;
+                            const char* slot_key = jm_capture_scope_env_slot_key(parent_fc, child, &child->captures[k]);
                             // Same skip as first pass: true NFE self-captures only.
                             if (child_self_name2[0] && strcmp(cname, child_self_name2) == 0
                                 && is_child_nfe2 && child->captures[k].is_nfe_binding) {
                                 continue;
                             }
-                            if (!jm_name_set_has(scope_vars, cname)) {
-                                jm_name_set_add(scope_vars, cname);
-                                snprintf(parent_fc->scope_env_names[fill_idx], 64, "%s", cname);
+                            if (!jm_name_set_has(scope_vars, slot_key)) {
+                                jm_name_set_add(scope_vars, slot_key);
+                                snprintf(parent_fc->scope_env_names[fill_idx], 64, "%s", slot_key);
                                 fill_idx++;
                             }
                         }
@@ -3756,6 +4363,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 for (int ci = 0; ci < mt->func_count; ci++) {
                     JsFuncCollected* child = &mt->func_entries[ci];
                     if (child->parent_index != fi) continue;
+                    if (!jm_child_can_use_parent_scope_env(parent_fc, child)) continue;
                     if (!child->node || !child->node->name) continue;
                     char csn[128];
                     snprintf(csn, sizeof(csn), "_js_%.*s",
@@ -3792,6 +4400,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         JsFuncCollected* child = &mt->func_entries[ci];
                         if (child->parent_index != fi) continue;
                         if (child->capture_count == 0) continue;
+                        if (!jm_child_can_use_parent_scope_env(parent_fc, child)) continue;
 
                         // Build child's NFE self-name to skip during remap
                         char child_self_remap[128] = {0};
@@ -3809,8 +4418,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 continue;
                             }
                             // Find this capture's slot in the normal portion of scope env
+                            const char* slot_key = jm_capture_scope_env_slot_key(parent_fc, child, &child->captures[k]);
                             for (int s = 0; s < normal_slot_count; s++) {
-                                if (strcmp(child->captures[k].name, parent_fc->scope_env_names[s]) == 0) {
+                                if (strcmp(slot_key, parent_fc->scope_env_names[s]) == 0) {
                                     child->captures[k].scope_env_slot = s;
                                     break;
                                 }
@@ -3880,15 +4490,36 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (mc && mc->const_type == MCONST_MODVAR) return false;
             }
             if (jm_name_set_has(for_init_lets, name)) return false;
-            // The synthetic module scope env is keyed by capture name. Sibling
-            // duplicate const block bindings are distinct immutable JS bindings;
-            // keep those as private closure captures so later blocks cannot
-            // overwrite an earlier closure's const object.
-            if (jm_name_set_has(duplicate_module_block_const_lexicals, name)) return false;
             if (strcmp(name, "_js_this") == 0 ||
                 strcmp(name, "_js_new.target") == 0 ||
                 strcmp(name, "_js_arguments") == 0) return false;
             return true;
+        };
+
+        auto capture_slot_key = [&](JsFuncCollected* child, JsCaptureEntry* cap) -> const char* {
+            if (!cap) return "";
+            if (jm_name_set_has(duplicate_module_block_const_lexicals, cap->name) &&
+                cap->scope_env_key[0]) {
+                char derived_key[128];
+                memset(derived_key, 0, sizeof(derived_key));
+                JsAstNode* target = child && child->node ? (JsAstNode*)child->node : NULL;
+                bool found_key = jm_find_enclosing_lexical_key_for_target((JsAstNode*)program,
+                    target, cap->name, derived_key);
+                if (!found_key && target) {
+                    for (int ci = 0; ci < mt->class_count; ci++) {
+                        JsClassEntry* ce = &mt->class_entries[ci];
+                        if (!ce->node || !jm_ast_node_contains_target((JsAstNode*)ce->node, target)) continue;
+                        found_key = jm_find_enclosing_lexical_key_for_target((JsAstNode*)program,
+                            (JsAstNode*)ce->node, cap->name, derived_key);
+                        if (found_key) break;
+                    }
+                }
+                if (found_key) {
+                    snprintf(cap->scope_env_key, sizeof(cap->scope_env_key), "%s", derived_key);
+                }
+                return cap->scope_env_key;
+            }
+            return cap->name;
         };
 
         // P7a: a closure participates in the module scope env only when EVERY
@@ -3920,12 +4551,12 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             JsFuncCollected* child = &mt->func_entries[ci];
             if (child->parent_index != -1) continue;
             if (child->capture_count == 0) continue;
-            if (!closure_qualifies(child)) continue;
-            for (int k = 0; k < child->capture_count; k++) {
-                if (!include_capture(child, k)) continue;
-                jm_name_set_add(scope_vars, child->captures[k].name);
+                if (!closure_qualifies(child)) continue;
+                for (int k = 0; k < child->capture_count; k++) {
+                    if (!include_capture(child, k)) continue;
+                    jm_name_set_add(scope_vars, capture_slot_key(child, &child->captures[k]));
+                }
             }
-        }
 
         int total = (int)hashmap_count(scope_vars);
         if (total > 0) {
@@ -3945,10 +4576,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (!closure_qualifies(child)) continue;
                 for (int k = 0; k < child->capture_count; k++) {
                     if (!include_capture(child, k)) continue;
-                    if (!jm_name_set_has(scope_vars, child->captures[k].name)) {
-                        jm_name_set_add(scope_vars, child->captures[k].name);
+                    const char* key = capture_slot_key(child, &child->captures[k]);
+                    if (!jm_name_set_has(scope_vars, key)) {
+                        jm_name_set_add(scope_vars, key);
                         snprintf(mt->module_fc.scope_env_names[fill_idx], 64,
-                            "%s", child->captures[k].name);
+                            "%s", key);
                         fill_idx++;
                     }
                 }
@@ -3964,8 +4596,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (!closure_qualifies(child)) continue;
                 for (int k = 0; k < child->capture_count; k++) {
                     if (!include_capture(child, k)) continue;
+                    const char* key = capture_slot_key(child, &child->captures[k]);
                     for (int s = 0; s < total; s++) {
-                        if (strcmp(child->captures[k].name, mt->module_fc.scope_env_names[s]) == 0) {
+                        if (strcmp(key, mt->module_fc.scope_env_names[s]) == 0) {
                             child->captures[k].scope_env_slot = s;
                             break;
                         }
@@ -4382,6 +5015,16 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             mem_free(cevi);
         }
     }
+
+    // Tune12 P2b: prototype-style constructor functions allocate a final
+    // base+derived shape when Ctor.inheritsFrom(Base) and the constructor's
+    // static superConstructor.call(this, ...) pattern agree.
+    jm_compose_function_ctor_shapes(mt);
+
+    // Tune11 P5: derived constructors allocate a final base+derived shape up
+    // front. Parent fields stay first, so super() can use parent slot indices;
+    // derived this.x writes use the composed slot list.
+    jm_compose_derived_ctor_shapes(mt);
 
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];

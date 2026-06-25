@@ -63,6 +63,7 @@ JsMirTranspiler* jm_create_mir_transpiler(
         js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
     mt->scope_depth = 0;
     mt->var_hoist_depth = -1;
+    mt->loop_scope_depth = -1;
     mt->collect_parent_func_index = -1;
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;

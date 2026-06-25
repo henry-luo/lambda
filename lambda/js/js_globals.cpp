@@ -2545,6 +2545,14 @@ static Item build_process_env(void) {
             }
         }
     }
+    const char* path_env = getenv("PATH");
+    if (path_env && path_env[0]) {
+        Item path_key = (Item){.item = s2it(heap_create_name("PATH", 4))};
+        if (!it2b(js_has_own_property(env, path_key))) {
+            Item path_val = (Item){.item = s2it(heap_create_name(path_env, strlen(path_env)))};
+            js_property_set(env, path_key, path_val);
+        }
+    }
     // Skip Node.js flag-checking in common test module — Lambda doesn't support V8 flags
     js_property_set(env,
         (Item){.item = s2it(heap_create_name("NODE_SKIP_FLAG_CHECK", 20))},
@@ -3198,9 +3206,16 @@ extern "C" Item js_process_setUncaughtExceptionCaptureCallback(Item fn) {
     return make_js_undefined();
 }
 
-// process.getActiveResourcesInfo() — stub returns empty array
+extern "C" Item js_net_get_active_handles(void);
+extern "C" Item js_net_get_active_resources_info(void);
+
+extern "C" Item js_process_getActiveHandles(void) {
+    return js_net_get_active_handles();
+}
+
+// process.getActiveResourcesInfo()
 extern "C" Item js_process_getActiveResourcesInfo(void) {
-    return js_array_new(0);
+    return js_net_get_active_resources_info();
 }
 
 // process.setSourceMapsEnabled(val) — stub no-op
@@ -3287,6 +3302,7 @@ extern "C" Item js_get_process_object_value(void) {
         js_process_set_method(js_process_object, "availableMemory", (void*)js_process_availableMemory, 0);
         js_process_set_method(js_process_object, "hasUncaughtExceptionCaptureCallback", (void*)js_process_hasUncaughtExceptionCaptureCallback, 0);
         js_process_set_method(js_process_object, "setUncaughtExceptionCaptureCallback", (void*)js_process_setUncaughtExceptionCaptureCallback, 1);
+        js_process_set_method(js_process_object, "_getActiveHandles", (void*)js_process_getActiveHandles, 0);
         js_process_set_method(js_process_object, "getActiveResourcesInfo", (void*)js_process_getActiveResourcesInfo, 0);
         js_process_set_method(js_process_object, "setSourceMapsEnabled", (void*)js_process_setSourceMapsEnabled, 1);
         if (getenv("LAMBDA_JS_IPC")) {
@@ -5309,7 +5325,11 @@ extern "C" Item js_console_clear_fn(void) {
             extern bool js_is_truthy(Item val);
             if (js_is_truthy(isTTY)) {
                 // ESC[1;1H ESC[0J — move cursor to 1,1 and clear screen down
-                js_console_write_to_stdout("\x1b[1;1H\x1b[0J", 10);
+                Item write_fn = js_property_get_str(stdout_obj, "write", 5);
+                if (get_type_id(write_fn) == LMD_TYPE_FUNC) {
+                    Item seq = (Item){.item = s2it(heap_create_name("\x1b[1;1H\x1b[0J", 10))};
+                    js_call_function(write_fn, stdout_obj, &seq, 1);
+                }
             }
         }
     }
@@ -6238,24 +6258,19 @@ extern "C" Item js_get_prototype_of(Item object) {
     // ES6: ToObject for primitives
     TypeId ot = get_type_id(object);
     if (ot == LMD_TYPE_STRING) {
-        Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name("String", 6))});
-        return js_property_get(ctor, (Item){.item = s2it(heap_create_name("prototype", 9))});
+        return js_get_intrinsic_prototype_for_class(JS_CLASS_STRING);
     }
     if (ot == LMD_TYPE_INT && it2i(object) <= -(int64_t)JS_SYMBOL_BASE) {
-        Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Symbol", 6))});
-        return js_property_get(ctor, (Item){.item = s2it(heap_create_name("prototype", 9))});
+        return js_get_intrinsic_prototype_for_class(JS_CLASS_SYMBOL);
     }
     if (ot == LMD_TYPE_INT || ot == LMD_TYPE_FLOAT) {
-        Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Number", 6))});
-        return js_property_get(ctor, (Item){.item = s2it(heap_create_name("prototype", 9))});
+        return js_get_intrinsic_prototype_for_class(JS_CLASS_NUMBER);
     }
     if (ot == LMD_TYPE_BOOL) {
-        Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Boolean", 7))});
-        return js_property_get(ctor, (Item){.item = s2it(heap_create_name("prototype", 9))});
+        return js_get_intrinsic_prototype_for_class(JS_CLASS_BOOLEAN);
     }
     if (ot == LMD_TYPE_DECIMAL && js_global_is_bigint(object)) {
-        Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name("BigInt", 6))});
-        return js_property_get(ctor, (Item){.item = s2it(heap_create_name("prototype", 9))});
+        return js_get_intrinsic_prototype_for_class(JS_CLASS_BIGINT);
     }
     if (!js_require_object_type(object, "getPrototypeOf")) return ItemNull;
     if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
@@ -6263,21 +6278,11 @@ extern "C" Item js_get_prototype_of(Item object) {
     // v18g: Arrays → return Array.prototype (or custom if set via Object.setPrototypeOf)
     if (get_type_id(object) == LMD_TYPE_ARRAY) {
         if (js_is_arguments_exotic_array_for_proto(object)) {
-            Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
-            if (get_type_id(obj_ctor) == LMD_TYPE_FUNC) {
-                Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-                return js_property_get(obj_ctor, proto_key);
-            }
-            return ItemNull;
+            return js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
         }
         Item custom_proto = js_array_get_custom_proto(object);
         if (custom_proto.item != ItemNull.item) return custom_proto;
-        Item arr_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Array", 5))});
-        if (get_type_id(arr_ctor) == LMD_TYPE_FUNC) {
-            Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-            return js_property_get(arr_ctor, proto_key);
-        }
-        return ItemNull;
+        return js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY);
     }
     // Functions → return Function.prototype (or Error for NativeError constructors)
     if (get_type_id(object) == LMD_TYPE_FUNC) {
@@ -6319,12 +6324,7 @@ extern "C" Item js_get_prototype_of(Item object) {
                 return js_get_async_function_prototype();
             }
         }
-        Item func_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
-        if (get_type_id(func_ctor) == LMD_TYPE_FUNC) {
-            Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-            return js_property_get(func_ctor, proto_key);
-        }
-        return ItemNull;
+        return js_get_intrinsic_prototype_for_class(JS_CLASS_FUNCTION);
     }
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
 
@@ -6345,12 +6345,7 @@ extern "C" Item js_get_prototype_of(Item object) {
             // Check for __proto__ first (set by extends)
             Item raw = js_get_prototype(object);
             if (raw.item != ItemNull.item) return raw;
-            Item func_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
-            if (get_type_id(func_ctor) == LMD_TYPE_FUNC) {
-                Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-                return js_property_get(func_ctor, proto_key);
-            }
-            return ItemNull;
+            return js_get_intrinsic_prototype_for_class(JS_CLASS_FUNCTION);
         }
     }
 
@@ -6363,14 +6358,10 @@ extern "C" Item js_get_prototype_of(Item object) {
     }
 
     // No __proto__ found — return Object.prototype for plain objects
-    Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
-    if (get_type_id(obj_ctor) == LMD_TYPE_FUNC) {
-        Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-        Item obj_proto = js_property_get(obj_ctor, proto_key);
-        // if object IS Object.prototype itself, return null (end of chain)
-        if (get_type_id(obj_proto) == LMD_TYPE_MAP && obj_proto.map == object.map) {
-            return ItemNull;
-        }
+    Item obj_proto = js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
+    // if object IS Object.prototype itself, return null (end of chain)
+    if (get_type_id(obj_proto) == LMD_TYPE_MAP) {
+        if (obj_proto.map == object.map) return ItemNull;
         return obj_proto;
     }
     return ItemNull;
@@ -16018,11 +16009,18 @@ enum JsConstructorId {
 };
 
 static Item js_constructor_cache[JS_CTOR_MAX];
+static Item js_intrinsic_proto_cache[JS_CLASS__COUNT];
+static bool js_intrinsic_proto_resolving[JS_CLASS__COUNT];
 static bool js_ctor_cache_init = false;
 static void js_typed_array_base_reset();
 
 // Forward declaration: snapshot mechanism preserves ctor identity across batch resets.
 extern "C" bool js_proto_snapshot_is_valid();
+
+static void js_intrinsic_proto_cache_reset() {
+    memset(js_intrinsic_proto_cache, 0, sizeof(js_intrinsic_proto_cache));
+    memset(js_intrinsic_proto_resolving, 0, sizeof(js_intrinsic_proto_resolving));
+}
 
 void js_ctor_cache_reset() {
     // If snapshot is valid, the harness preamble has already cached references to
@@ -16031,6 +16029,7 @@ void js_ctor_cache_reset() {
     // the harness-cached references. Skip the reset; snapshot/restore handles state.
     if (js_proto_snapshot_is_valid()) return;
     memset(js_constructor_cache, 0, sizeof(js_constructor_cache));
+    js_intrinsic_proto_cache_reset();
     js_ctor_cache_init = false;
     js_typed_array_base_reset();
 }
@@ -16285,17 +16284,24 @@ extern "C" Item js_get_typed_array_base();
 extern "C" Item js_get_typed_array_per_type_proto(int element_type);
 
 static void js_proto_snapshot_bootstrap_constructors() {
-    static const struct { const char* name; int len; } ctor_names[] = {
-        {"Object", 6}, {"Array", 5}, {"Function", 8},
-        {NULL, 0}
+    static const int intrinsic_classes[] = {
+        JS_CLASS_OBJECT, JS_CLASS_ARRAY, JS_CLASS_FUNCTION,
+        JS_CLASS_STRING, JS_CLASS_NUMBER, JS_CLASS_BOOLEAN,
+        JS_CLASS_SYMBOL, JS_CLASS_BIGINT, JS_CLASS_ERROR,
+        JS_CLASS_TYPE_ERROR, JS_CLASS_RANGE_ERROR, JS_CLASS_REFERENCE_ERROR,
+        JS_CLASS_SYNTAX_ERROR, JS_CLASS_URI_ERROR, JS_CLASS_EVAL_ERROR,
+        JS_CLASS_AGGREGATE_ERROR, JS_CLASS_REGEXP, JS_CLASS_DATE,
+        JS_CLASS_PROMISE, JS_CLASS_MAP, JS_CLASS_SET, JS_CLASS_WEAK_MAP,
+        JS_CLASS_WEAK_SET, JS_CLASS_WEAK_REF, JS_CLASS_FINALIZATION_REGISTRY,
+        JS_CLASS_ARRAY_BUFFER, JS_CLASS_SHARED_ARRAY_BUFFER, JS_CLASS_DATA_VIEW,
+        JS_CLASS_EVENT, JS_CLASS_CUSTOM_EVENT, JS_CLASS_EVENT_TARGET,
+        JS_CLASS_UI_EVENT, JS_CLASS_FOCUS_EVENT, JS_CLASS_MOUSE_EVENT,
+        JS_CLASS_WHEEL_EVENT, JS_CLASS_KEYBOARD_EVENT, JS_CLASS_COMPOSITION_EVENT,
+        JS_CLASS_INPUT_EVENT, JS_CLASS_POINTER_EVENT, JS_CLASS_STATIC_RANGE,
+        0
     };
-    Item prototype_key = make_string_item("prototype");
-    for (int i = 0; ctor_names[i].name; i++) {
-        Item name = (Item){.item = s2it(heap_create_name(ctor_names[i].name, ctor_names[i].len))};
-        Item ctor = js_get_constructor(name);
-        if (get_type_id(ctor) == LMD_TYPE_FUNC) {
-            js_property_get(ctor, prototype_key);
-        }
+    for (int i = 0; intrinsic_classes[i]; i++) {
+        js_get_intrinsic_prototype_for_class(intrinsic_classes[i]);
     }
     js_get_typed_array_base();
     for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
@@ -16417,6 +16423,7 @@ extern "C" bool js_proto_snapshot_is_valid() {
 // snapshot rather than restore from stale pointers.
 extern "C" void js_proto_snapshot_invalidate() {
     js_proto_snapshot_valid = false;
+    js_intrinsic_proto_cache_reset();
     for (int i = 0; i < JS_CTOR_MAX; i++) {
         js_ctor_snapshots[i].valid = false;
         js_ctor_snapshots[i].proto_map.m = NULL;
@@ -16803,6 +16810,90 @@ extern "C" Item js_get_constructor(Item name_item) {
         }
     }
     return make_js_undefined();
+}
+
+static bool js_intrinsic_proto_ctor_name_for_class(JsClass cls, const char** out_name, int* out_len) {
+    const char* name = NULL;
+    int len = 0;
+    switch (cls) {
+        case JS_CLASS_OBJECT:                name = "Object"; len = 6; break;
+        case JS_CLASS_ARRAY:                 name = "Array"; len = 5; break;
+        case JS_CLASS_FUNCTION:              name = "Function"; len = 8; break;
+        case JS_CLASS_STRING:                name = "String"; len = 6; break;
+        case JS_CLASS_NUMBER:                name = "Number"; len = 6; break;
+        case JS_CLASS_BOOLEAN:               name = "Boolean"; len = 7; break;
+        case JS_CLASS_SYMBOL:                name = "Symbol"; len = 6; break;
+        case JS_CLASS_BIGINT:                name = "BigInt"; len = 6; break;
+        case JS_CLASS_ERROR:                 name = "Error"; len = 5; break;
+        case JS_CLASS_TYPE_ERROR:            name = "TypeError"; len = 9; break;
+        case JS_CLASS_RANGE_ERROR:           name = "RangeError"; len = 10; break;
+        case JS_CLASS_REFERENCE_ERROR:       name = "ReferenceError"; len = 14; break;
+        case JS_CLASS_SYNTAX_ERROR:          name = "SyntaxError"; len = 11; break;
+        case JS_CLASS_URI_ERROR:             name = "URIError"; len = 8; break;
+        case JS_CLASS_EVAL_ERROR:            name = "EvalError"; len = 9; break;
+        case JS_CLASS_AGGREGATE_ERROR:       name = "AggregateError"; len = 14; break;
+        case JS_CLASS_REGEXP:                name = "RegExp"; len = 6; break;
+        case JS_CLASS_DATE:                  name = "Date"; len = 4; break;
+        case JS_CLASS_PROMISE:               name = "Promise"; len = 7; break;
+        case JS_CLASS_MAP:                   name = "Map"; len = 3; break;
+        case JS_CLASS_SET:                   name = "Set"; len = 3; break;
+        case JS_CLASS_WEAK_MAP:              name = "WeakMap"; len = 7; break;
+        case JS_CLASS_WEAK_SET:              name = "WeakSet"; len = 7; break;
+        case JS_CLASS_WEAK_REF:              name = "WeakRef"; len = 7; break;
+        case JS_CLASS_FINALIZATION_REGISTRY: name = "FinalizationRegistry"; len = 20; break;
+        case JS_CLASS_ARRAY_BUFFER:          name = "ArrayBuffer"; len = 11; break;
+        case JS_CLASS_SHARED_ARRAY_BUFFER:   name = "SharedArrayBuffer"; len = 17; break;
+        case JS_CLASS_DATA_VIEW:             name = "DataView"; len = 8; break;
+        case JS_CLASS_EVENT:                 name = "Event"; len = 5; break;
+        case JS_CLASS_CUSTOM_EVENT:          name = "CustomEvent"; len = 11; break;
+        case JS_CLASS_EVENT_TARGET:          name = "EventTarget"; len = 11; break;
+        case JS_CLASS_UI_EVENT:              name = "UIEvent"; len = 7; break;
+        case JS_CLASS_FOCUS_EVENT:           name = "FocusEvent"; len = 10; break;
+        case JS_CLASS_MOUSE_EVENT:           name = "MouseEvent"; len = 10; break;
+        case JS_CLASS_WHEEL_EVENT:           name = "WheelEvent"; len = 10; break;
+        case JS_CLASS_KEYBOARD_EVENT:        name = "KeyboardEvent"; len = 13; break;
+        case JS_CLASS_COMPOSITION_EVENT:     name = "CompositionEvent"; len = 16; break;
+        case JS_CLASS_INPUT_EVENT:           name = "InputEvent"; len = 10; break;
+        case JS_CLASS_POINTER_EVENT:         name = "PointerEvent"; len = 12; break;
+        case JS_CLASS_STATIC_RANGE:          name = "StaticRange"; len = 11; break;
+        default: break;
+    }
+    if (!name) return false;
+    *out_name = name;
+    *out_len = len;
+    return true;
+}
+
+static Item js_get_constructor_intrinsic_prototype(Item ctor) {
+    if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
+    JsCtor* fn = (JsCtor*)ctor.function;
+    if (fn && get_type_id(fn->prototype) == LMD_TYPE_MAP) return fn->prototype;
+    Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+    Item proto = js_property_get(ctor, proto_key);
+    if (get_type_id(proto) == LMD_TYPE_MAP) return proto;
+    if (fn && get_type_id(fn->prototype) == LMD_TYPE_MAP) return fn->prototype;
+    return ItemNull;
+}
+
+extern "C" Item js_get_intrinsic_prototype_for_class(int class_id) {
+    if (class_id <= (int)JS_CLASS_NONE || class_id >= (int)JS_CLASS__COUNT) return ItemNull;
+    JsClass cls = (JsClass)class_id;
+    if (cls == JS_CLASS_TYPED_ARRAY) return js_get_typed_array_base_proto();
+    Item cached = js_intrinsic_proto_cache[class_id];
+    if (cached.item != 0) return cached;
+    if (js_intrinsic_proto_resolving[class_id]) return ItemNull;
+    const char* name = NULL;
+    int len = 0;
+    if (!js_intrinsic_proto_ctor_name_for_class(cls, &name, &len)) return ItemNull;
+    js_intrinsic_proto_resolving[class_id] = true;
+    Item ctor_name = (Item){.item = s2it(heap_create_name(name, len))};
+    Item ctor = js_get_constructor(ctor_name);
+    Item proto = js_get_constructor_intrinsic_prototype(ctor);
+    if (get_type_id(proto) == LMD_TYPE_MAP) {
+        js_intrinsic_proto_cache[class_id] = proto;
+    }
+    js_intrinsic_proto_resolving[class_id] = false;
+    return proto;
 }
 
 // =============================================================================

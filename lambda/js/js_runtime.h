@@ -42,15 +42,24 @@ void js_map_promote_descriptor_kind(Map* m);
 #define JS_MAX_MODULE_VARS 16384
 
 #define JS_LOAD_IC_POLY_MAX 4
+#define JS_STORE_IC_POLY_MAX 4
 #define JS_LOAD_IC_EMPTY 0
 #define JS_LOAD_IC_MONO 1
 #define JS_LOAD_IC_POLY 2
 #define JS_LOAD_IC_MEGAMORPHIC 3
+#define JS_STORE_IC_EMPTY 0
+#define JS_STORE_IC_MONO 1
+#define JS_STORE_IC_POLY 2
+#define JS_STORE_IC_MEGAMORPHIC 3
+#define JS_NAMED_IC_RECEIVER_MAP 0
+#define JS_NAMED_IC_RECEIVER_ARRAY_PROPS 1
 
 typedef struct JsLoadICEntry {
     void* shape;
     void* entry;
     int64_t byte_offset;
+    uint32_t name_id;
+    uint8_t receiver_kind;
 } JsLoadICEntry;
 
 typedef struct JsLoadIC {
@@ -58,10 +67,24 @@ typedef struct JsLoadIC {
     uint8_t count;
     uint16_t miss_count;
     const char* name;
+    const char* profile_label;
     int name_len;
+    uint32_t name_id;
     uint64_t key_item;
     JsLoadICEntry entries[JS_LOAD_IC_POLY_MAX];
 } JsLoadIC;
+
+typedef struct JsStoreIC {
+    uint8_t state;
+    uint8_t count;
+    uint16_t miss_count;
+    const char* name;
+    const char* profile_label;
+    int name_len;
+    uint32_t name_id;
+    uint64_t key_item;
+    JsLoadICEntry entries[JS_STORE_IC_POLY_MAX];
+} JsStoreIC;
 
 // =============================================================================
 // Type Conversion Functions
@@ -152,6 +175,8 @@ Item js_private_property_set(Item object, Item key, Item value, int64_t strict);
 Item js_create_data_property(Item object, Item key, Item value);
 Item js_property_access(Item object, Item key);
 Item js_property_access_named_ic(Item object, const char* name, int64_t name_len, JsLoadIC* ic);
+Item js_property_set_named_ic(Item object, const char* name, int64_t name_len, Item value,
+    int64_t strict, JsStoreIC* ic);
 
 // =============================================================================
 // Array Functions
@@ -195,6 +220,7 @@ void js_mark_async_func(Item fn_item);
 void js_mark_derived_constructor_func(Item fn_item);
 void js_mark_eval_initializer_func_if_active(Item fn_item);
 Item js_get_constructor(Item name_item);
+Item js_get_intrinsic_prototype_for_class(int class_id);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
 Item js_apply_constructor(Item constructor, Item args_array);

@@ -465,7 +465,7 @@ static void timer_fire_cb(uv_timer_t *handle) {
 }
 static double item_to_ms(Item delay) {
     if (get_type_id(delay) == LMD_TYPE_FLOAT) {
-        return *((double *)delay.item);
+        return it2d(delay);
     } else if (get_type_id(delay) == LMD_TYPE_INT) {
         return (double)it2i(delay);
     }
@@ -883,7 +883,7 @@ extern "C" Item js_setTimeout_promise(Item delay, Item value, Item options) {
 
     double ms = item_to_ms(delay);
     // emit process 'warning' for NaN delay (Node.js compat)
-    if (get_type_id(delay) == LMD_TYPE_FLOAT && isnan(*((double *)delay.item))) {
+    if (get_type_id(delay) == LMD_TYPE_FLOAT && isnan(it2d(delay))) {
         extern Item js_process_emit(Item event_name, Item arg1);
         Item warning_obj = js_new_object();
         js_property_set(warning_obj,

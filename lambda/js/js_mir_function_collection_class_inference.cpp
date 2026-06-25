@@ -1562,6 +1562,79 @@ TypeId jm_detect_ctor_field_type(JsAstNode* rhs) {
     return LMD_TYPE_NULL;
 }
 
+static bool jm_ident_name_is(String* name, const char* text, int text_len) {
+    return name && text && text_len >= 0 && (int)name->len == text_len &&
+        strncmp(name->chars, text, (size_t)text_len) == 0;
+}
+
+static bool jm_ctor_call_first_arg_is_this(JsCallNode* call) {
+    if (!call || !call->arguments) return false;
+    JsAstNode* arg = call->arguments;
+    if (arg->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    JsIdentifierNode* id = (JsIdentifierNode*)arg;
+    return jm_ident_name_is(id->name, "this", 4);
+}
+
+static bool jm_ctor_super_prop_name(String* name) {
+    return jm_ident_name_is(name, "superConstructor", 16) ||
+        jm_ident_name_is(name, "super_", 6);
+}
+
+static void jm_note_ctor_super_call(JsFuncCollected* fc, bool via_self_prop,
+        String* name) {
+    if (!fc || !name || name->len <= 0) return;
+    if (fc->ctor_has_super_call) {
+        if (fc->ctor_super_via_self_prop != via_self_prop ||
+                fc->ctor_super_name_len != (int)name->len ||
+                strncmp(fc->ctor_super_name_ptr, name->chars, (size_t)name->len) != 0) {
+            fc->ctor_has_dynamic_this_call = true;
+        }
+        return;
+    }
+    fc->ctor_has_super_call = true;
+    fc->ctor_super_via_self_prop = via_self_prop;
+    fc->ctor_super_name_ptr = name->chars;
+    fc->ctor_super_name_len = (int)name->len;
+}
+
+static void jm_scan_ctor_super_call(JsFuncCollected* fc, JsCallNode* call) {
+    if (!fc || !call || !jm_ctor_call_first_arg_is_this(call)) return;
+    if (!call->callee || call->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return;
+    JsMemberNode* call_member = (JsMemberNode*)call->callee;
+    if (call_member->computed || !call_member->property ||
+            call_member->property->node_type != JS_AST_NODE_IDENTIFIER) {
+        fc->ctor_has_dynamic_this_call = true;
+        return;
+    }
+    JsIdentifierNode* call_prop = (JsIdentifierNode*)call_member->property;
+    if (!jm_ident_name_is(call_prop->name, "call", 4)) return;
+
+    if (call_member->object &&
+            call_member->object->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* base = (JsIdentifierNode*)call_member->object;
+        jm_note_ctor_super_call(fc, false, base->name);
+        return;
+    }
+
+    if (call_member->object &&
+            call_member->object->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        JsMemberNode* super_member = (JsMemberNode*)call_member->object;
+        if (!super_member->computed && super_member->object &&
+                super_member->object->node_type == JS_AST_NODE_IDENTIFIER &&
+                super_member->property &&
+                super_member->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* owner = (JsIdentifierNode*)super_member->object;
+            JsIdentifierNode* prop = (JsIdentifierNode*)super_member->property;
+            if (jm_ctor_super_prop_name(prop->name)) {
+                jm_note_ctor_super_call(fc, true, owner->name);
+                return;
+            }
+        }
+    }
+
+    fc->ctor_has_dynamic_this_call = true;
+}
+
 // A5: Scan constructor body for this.property = expr assignment patterns.
 // Records property names in order so we can pre-build the object shape.
 void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
@@ -1576,6 +1649,9 @@ void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
         }
         if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
             JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
+            if (es->expression && es->expression->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+                jm_scan_ctor_super_call(fc, (JsCallNode*)es->expression);
+            }
             if (es->expression && es->expression->node_type == JS_AST_NODE_ASSIGNMENT_EXPRESSION) {
                 JsAssignmentNode* asgn = (JsAssignmentNode*)es->expression;
                 if (asgn->op == JS_OP_ASSIGN && asgn->left &&

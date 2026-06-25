@@ -331,6 +331,41 @@ static Item make_string_item(const char* str) {
     return make_string_item(str, (int)strlen(str));
 }
 
+static Item internal_fs_binding_namespace = {0};
+static Item internal_fs_default_fstat = {0};
+
+extern "C" Item js_fs_fstatSync(Item fd_item);
+extern int js_check_exception(void);
+extern Item js_clear_exception(void);
+
+static Item js_internal_fs_fstat(Item fd_item) {
+    return js_fs_fstatSync(fd_item);
+}
+
+extern "C" Item js_get_internal_fs_binding_namespace(void) {
+    if (internal_fs_binding_namespace.item == 0) {
+        internal_fs_binding_namespace = js_new_object();
+        heap_register_gc_root(&internal_fs_binding_namespace.item);
+        internal_fs_default_fstat = js_new_function((void*)js_internal_fs_fstat, 1);
+        heap_register_gc_root(&internal_fs_default_fstat.item);
+        js_property_set(internal_fs_binding_namespace, make_string_item("fstat"), internal_fs_default_fstat);
+        js_property_set(internal_fs_binding_namespace, make_string_item("default"), internal_fs_binding_namespace);
+    }
+    return internal_fs_binding_namespace;
+}
+
+static void fs_maybe_call_internal_fstat_hook(int fd) {
+    if (internal_fs_binding_namespace.item == 0) return;
+    Item fstat = js_property_get(internal_fs_binding_namespace, make_string_item("fstat"));
+    if (fstat.item == internal_fs_default_fstat.item) return;
+    if (get_type_id(fstat) != LMD_TYPE_FUNC) return;
+    Item fd_item = (Item){.item = i2it((int64_t)fd)};
+    js_call_function(fstat, internal_fs_binding_namespace, &fd_item, 1);
+    if (js_check_exception()) {
+        js_clear_exception();
+    }
+}
+
 static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count);
 
 static bool fs_parse_access_mode(Item mode_item, bool has_mode, int* out_mode) {
@@ -369,6 +404,21 @@ static uint8_t* buffer_data(Item buf, int* out_len) {
     if (!ta || !ta->data) { *out_len = 0; return NULL; }
     *out_len = ta->byte_length;
     return (uint8_t*)ta->data;
+}
+
+static Item fs_buffer_from_bytes(const char* data, int len) {
+    if (len < 0) len = 0;
+    Item chunk = js_typed_array_new(JS_TYPED_UINT8, len);
+    if (js_is_typed_array(chunk)) {
+        JsTypedArray* ta = (JsTypedArray*)chunk.map->data;
+        if (ta) {
+            ta->is_buffer = true;
+            if (ta->data && data && len > 0) {
+                memcpy(ta->data, data, (size_t)len);
+            }
+        }
+    }
+    return chunk;
 }
 
 static const char* fs_typed_array_name(JsTypedArray* ta) {
@@ -627,6 +677,7 @@ extern "C" Item js_fs_readFileSync(Item path_item, Item encoding_item) {
 
     // stat to get file size
     uv_fs_t stat_req;
+    fs_maybe_call_internal_fstat_hook(fd);
     int r = uv_fs_fstat(NULL, &stat_req, fd, NULL);
     if (r < 0) {
         uv_fs_req_cleanup(&stat_req);
@@ -678,6 +729,7 @@ static Item js_fs_read_file_buffer(const char* path) {
     if (fd < 0) return js_throw_system_error(fd, "open", path);
 
     uv_fs_t stat_req;
+    fs_maybe_call_internal_fstat_hook(fd);
     int r = uv_fs_fstat(NULL, &stat_req, fd, NULL);
     if (r < 0) {
         uv_fs_req_cleanup(&stat_req);
@@ -712,13 +764,7 @@ static Item js_fs_read_file_buffer(const char* path) {
         return js_throw_system_error(bytes_read, "read", path);
     }
 
-    Item chunk = js_typed_array_new(JS_TYPED_UINT8, bytes_read);
-    if (js_is_typed_array(chunk)) {
-        JsTypedArray* ta = (JsTypedArray*)chunk.map->data;
-        if (ta && ta->data && bytes_read > 0) {
-            memcpy(ta->data, data, (size_t)bytes_read);
-        }
-    }
+    Item chunk = fs_buffer_from_bytes(data, bytes_read);
     mem_free(data);
     return chunk;
 }
@@ -867,9 +913,21 @@ static bool fs_item_bytes(Item item, const char** data, int* len) {
 }
 
 static void js_fs_writestream_call_write_hook(Item stream, Item fd_item);
+static void js_fs_writestream_schedule_open(Item stream);
+static void js_fs_writestream_schedule_drain(Item stream);
+static Item js_fs_writestream_write_after_end_error(void);
 
-static Item js_fs_writestream_write(Item chunk_item) {
+static Item js_fs_writestream_write(Item chunk_item, Item callback_item) {
     Item stream = js_get_this();
+    Item finished = js_property_get(stream, make_string_item("__writestream_finished__"));
+    if (get_type_id(finished) == LMD_TYPE_BOOL && it2b(finished)) {
+        if (get_type_id(callback_item) == LMD_TYPE_FUNC) {
+            Item err = js_fs_writestream_write_after_end_error();
+            js_call_function(callback_item, stream, &err, 1);
+        }
+        return (Item){.item = b2it(false)};
+    }
+
     const char* data = NULL;
     int len = 0;
     if (!fs_item_bytes(chunk_item, &data, &len)) return (Item){.item = b2it(false)};
@@ -909,13 +967,22 @@ static Item js_fs_writestream_write(Item chunk_item) {
         }
     }
     js_fs_writestream_call_write_hook(stream, fd_item);
+    Item bytes_written = js_property_get(stream, make_string_item("bytesWritten"));
+    int64_t total = (get_type_id(bytes_written) == LMD_TYPE_INT) ? it2i(bytes_written) : 0;
+    total += len;
+    js_property_set(stream, make_string_item("bytesWritten"), (Item){.item = i2it(total)});
+
+    Item hwm_item = js_property_get(stream, make_string_item("__writestream_high_water_mark__"));
+    int64_t high_water_mark = (get_type_id(hwm_item) == LMD_TYPE_INT) ? it2i(hwm_item) : 16384;
+    bool needs_drain = high_water_mark > 0 && total >= high_water_mark;
+    if (needs_drain) js_fs_writestream_schedule_drain(stream);
 
     if (close_after_write) {
         uv_fs_t close_req;
         uv_fs_close(NULL, &close_req, fd, NULL);
         uv_fs_req_cleanup(&close_req);
     }
-    return (Item){.item = b2it(true)};
+    return (Item){.item = b2it(!needs_drain)};
 }
 
 static void js_fs_writestream_emit_finish(Item stream) {
@@ -932,6 +999,51 @@ static void js_fs_writestream_emit_close(Item stream) {
         js_call_function(cb, stream, NULL, 0);
         js_microtask_flush();
     }
+}
+
+static Item js_fs_writestream_emit_open_tick(Item stream) {
+    js_property_set(stream, make_string_item("__writestream_opened__"), (Item){.item = b2it(true)});
+    Item cb = js_property_get(stream, make_string_item("__writestream_open_cb__"));
+    Item fd_item = js_property_get(stream, make_string_item("fd"));
+    if (get_type_id(cb) == LMD_TYPE_FUNC) {
+        Item args[1] = {fd_item};
+        js_call_function(cb, stream, args, 1);
+        js_microtask_flush();
+    }
+    return make_js_undefined();
+}
+
+static void js_fs_writestream_schedule_open(Item stream) {
+    Item bound_args[1] = {stream};
+    Item tick = js_bind_function(js_new_function((void*)js_fs_writestream_emit_open_tick, 1),
+                                 make_js_undefined(), bound_args, 1);
+    js_next_tick_enqueue(tick);
+}
+
+static Item js_fs_writestream_emit_drain_tick(Item stream) {
+    js_property_set(stream, make_string_item("__writestream_drain_pending__"), (Item){.item = b2it(false)});
+    Item cb = js_property_get(stream, make_string_item("__writestream_drain_cb__"));
+    if (get_type_id(cb) == LMD_TYPE_FUNC) {
+        js_call_function(cb, stream, NULL, 0);
+        js_microtask_flush();
+    }
+    return make_js_undefined();
+}
+
+static void js_fs_writestream_schedule_drain(Item stream) {
+    Item pending = js_property_get(stream, make_string_item("__writestream_drain_pending__"));
+    if (get_type_id(pending) == LMD_TYPE_BOOL && it2b(pending)) return;
+    js_property_set(stream, make_string_item("__writestream_drain_pending__"), (Item){.item = b2it(true)});
+    Item bound_args[1] = {stream};
+    Item tick = js_bind_function(js_new_function((void*)js_fs_writestream_emit_drain_tick, 1),
+                                 make_js_undefined(), bound_args, 1);
+    js_next_tick_enqueue(tick);
+}
+
+static Item js_fs_writestream_write_after_end_error(void) {
+    Item err = js_new_error(make_string_item("write after end"));
+    js_property_set(err, make_string_item("code"), make_string_item("ERR_STREAM_WRITE_AFTER_END"));
+    return err;
 }
 
 static Item js_fs_writestream_close_noop(Item err_item) {
@@ -1020,7 +1132,7 @@ static Item js_fs_writestream_end(Item chunk_item) {
     Item stream = js_get_this();
     TypeId chunk_type = get_type_id(chunk_item);
     if (chunk_type != LMD_TYPE_UNDEFINED && chunk_item.item != ITEM_NULL) {
-        js_fs_writestream_write(chunk_item);
+        js_fs_writestream_write(chunk_item, make_js_undefined());
     }
     js_fs_writestream_call_writev_hook(stream);
     js_property_set(stream, make_string_item("__writestream_finished__"), (Item){.item = b2it(true)});
@@ -1041,6 +1153,18 @@ static Item js_fs_writestream_on(Item event_item, Item callback_item) {
         if (get_type_id(finished) == LMD_TYPE_BOOL && it2b(finished)) {
             js_fs_writestream_emit_finish(stream);
         }
+    } else if (event->len == 4 && memcmp(event->chars, "open", 4) == 0) {
+        js_property_set(stream, make_string_item("__writestream_open_cb__"), callback_item);
+        Item opened = js_property_get(stream, make_string_item("__writestream_opened__"));
+        if (get_type_id(opened) == LMD_TYPE_BOOL && it2b(opened)) {
+            Item fd_item = js_property_get(stream, make_string_item("fd"));
+            Item args[1] = {fd_item};
+            js_call_function(callback_item, stream, args, 1);
+        }
+    } else if (event->len == 5 && memcmp(event->chars, "drain", 5) == 0) {
+        js_property_set(stream, make_string_item("__writestream_drain_cb__"), callback_item);
+    } else if (event->len == 5 && memcmp(event->chars, "error", 5) == 0) {
+        js_property_set(stream, make_string_item("__writestream_error_cb__"), callback_item);
     } else if (event->len == 5 && memcmp(event->chars, "close", 5) == 0) {
         js_property_set(stream, make_string_item("__writestream_close_cb__"), callback_item);
         Item closed = js_property_get(stream, make_string_item("closed"));
@@ -1057,7 +1181,11 @@ extern "C" Item js_fs_createWriteStream(Item path_item, Item options_item) {
     js_property_set(stream, make_string_item("__writestream_path__"), path_item);
     js_property_set(stream, make_string_item("__writestream_finished__"), (Item){.item = b2it(false)});
     js_property_set(stream, make_string_item("__writestream_auto_close__"), (Item){.item = b2it(true)});
+    js_property_set(stream, make_string_item("__writestream_opened__"), (Item){.item = b2it(false)});
+    js_property_set(stream, make_string_item("__writestream_drain_pending__"), (Item){.item = b2it(false)});
+    js_property_set(stream, make_string_item("__writestream_high_water_mark__"), (Item){.item = i2it(16384)});
     js_property_set(stream, make_string_item("closed"), (Item){.item = b2it(false)});
+    js_property_set(stream, make_string_item("bytesWritten"), (Item){.item = i2it(0)});
     js_property_set(stream, make_string_item("fd"), ItemNull);
 
     Item flags = make_string_item("w");
@@ -1072,6 +1200,10 @@ extern "C" Item js_fs_createWriteStream(Item path_item, Item options_item) {
         Item auto_close = js_property_get(options_item, make_string_item("autoClose"));
         if (get_type_id(auto_close) == LMD_TYPE_BOOL) {
             js_property_set(stream, make_string_item("__writestream_auto_close__"), auto_close);
+        }
+        Item hwm = js_property_get(options_item, make_string_item("highWaterMark"));
+        if (get_type_id(hwm) == LMD_TYPE_INT) {
+            js_property_set(stream, make_string_item("__writestream_high_water_mark__"), hwm);
         }
         Item hooks = js_property_get(options_item, make_string_item("fs"));
         if (get_type_id(hooks) == LMD_TYPE_MAP) {
@@ -1098,9 +1230,12 @@ extern "C" Item js_fs_createWriteStream(Item path_item, Item options_item) {
         }
     }
     js_fs_writestream_call_open_hook(stream, path_item, flags, mode);
+    if (get_type_id(js_property_get(stream, make_string_item("fd"))) == LMD_TYPE_INT) {
+        js_fs_writestream_schedule_open(stream);
+    }
 
     js_property_set(stream, make_string_item("write"),
-                    js_new_function((void*)js_fs_writestream_write, 1));
+                    js_new_function((void*)js_fs_writestream_write, 2));
     js_property_set(stream, make_string_item("end"),
                     js_new_function((void*)js_fs_writestream_end, 1));
     js_property_set(stream, make_string_item("on"),
@@ -2728,6 +2863,8 @@ static void js_fs_set_custom_promisify(Item fn, void* func_ptr, int param_count)
 // Each wraps the sync version, returning a resolved/rejected Promise
 extern Item js_promise_resolve(Item value);
 extern Item js_promise_reject(Item reason);
+extern "C" Item js_promise_with_resolvers(void);
+extern "C" void js_next_tick_enqueue(Item callback);
 extern int js_check_exception(void);
 extern Item js_clear_exception(void);
 
@@ -2737,6 +2874,76 @@ static Item fs_promise_wrap_result(Item result) {
         return js_promise_reject(err);
     }
     return js_promise_resolve(result);
+}
+
+static bool fs_options_has_signal(Item options, Item* signal_out) {
+    if (signal_out) *signal_out = make_js_undefined();
+    TypeId opt_type = get_type_id(options);
+    if (opt_type != LMD_TYPE_MAP && opt_type != LMD_TYPE_OBJECT) return false;
+    Item signal = js_property_get(options, make_string_item("signal"));
+    if (get_type_id(signal) == LMD_TYPE_UNDEFINED || get_type_id(signal) == LMD_TYPE_NULL) return false;
+    if (signal_out) *signal_out = signal;
+    return true;
+}
+
+static bool fs_is_abort_signal(Item signal) {
+    TypeId sig_type = get_type_id(signal);
+    if (sig_type != LMD_TYPE_MAP && sig_type != LMD_TYPE_OBJECT) return false;
+    Item aborted = js_property_get(signal, make_string_item("aborted"));
+    Item add_event = js_property_get(signal, make_string_item("addEventListener"));
+    return get_type_id(aborted) == LMD_TYPE_BOOL && get_type_id(add_event) == LMD_TYPE_FUNC;
+}
+
+static bool fs_signal_aborted(Item signal) {
+    Item aborted = js_property_get(signal, make_string_item("aborted"));
+    return get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted);
+}
+
+static Item fs_make_abort_error(Item signal) {
+    Item err = js_new_object();
+    js_class_stamp(err, JS_CLASS_ABORT_ERROR);
+    js_property_set(err, make_string_item("name"), make_string_item("AbortError"));
+    js_property_set(err, make_string_item("code"), make_string_item("ABORT_ERR"));
+    js_property_set(err, make_string_item("message"), make_string_item("The operation was aborted"));
+    if (get_type_id(signal) == LMD_TYPE_MAP || get_type_id(signal) == LMD_TYPE_OBJECT) {
+        Item reason = js_property_get(signal, make_string_item("reason"));
+        if (get_type_id(reason) != LMD_TYPE_UNDEFINED && get_type_id(reason) != LMD_TYPE_NULL) {
+            js_property_set(err, make_string_item("cause"), reason);
+        }
+    }
+    return err;
+}
+
+static Item fs_make_invalid_signal_error(void) {
+    Item err = js_new_error_with_name(
+        make_string_item("TypeError"),
+        make_string_item("The \"options.signal\" property must be an instance of AbortSignal."));
+    js_property_set(err, make_string_item("code"), make_string_item("ERR_INVALID_ARG_TYPE"));
+    return err;
+}
+
+static Item fs_readFile_promise_deferred(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    Item path = env[0];
+    Item opts = env[1];
+    Item signal = env[2];
+    Item resolve_fn = env[3];
+    Item reject_fn = env[4];
+
+    if (fs_signal_aborted(signal)) {
+        Item err = fs_make_abort_error(signal);
+        js_call_function(reject_fn, make_js_undefined(), &err, 1);
+        return make_js_undefined();
+    }
+
+    Item result = js_fs_readFileSync(path, opts);
+    if (js_check_exception()) {
+        Item err = js_clear_exception();
+        js_call_function(reject_fn, make_js_undefined(), &err, 1);
+    } else {
+        js_call_function(resolve_fn, make_js_undefined(), &result, 1);
+    }
+    return make_js_undefined();
 }
 
 static void fs_append_async_access_stack(Item err) {
@@ -2763,6 +2970,30 @@ static void fs_append_async_access_stack(Item err) {
 }
 
 extern "C" Item js_fs_readFile_promise(Item path, Item opts) {
+    Item signal = make_js_undefined();
+    if (fs_options_has_signal(opts, &signal)) {
+        if (!fs_is_abort_signal(signal)) {
+            return js_promise_reject(fs_make_invalid_signal_error());
+        }
+        if (fs_signal_aborted(signal)) {
+            return js_promise_reject(fs_make_abort_error(signal));
+        }
+
+        Item capability = js_promise_with_resolvers();
+        Item promise = js_property_get(capability, make_string_item("promise"));
+        Item resolve_fn = js_property_get(capability, make_string_item("resolve"));
+        Item reject_fn = js_property_get(capability, make_string_item("reject"));
+        Item* env = js_alloc_env(5);
+        env[0] = path;
+        env[1] = opts;
+        env[2] = signal;
+        env[3] = resolve_fn;
+        env[4] = reject_fn;
+        Item callback = js_new_closure((void*)fs_readFile_promise_deferred, 0, env, 5);
+        js_next_tick_enqueue(callback);
+        return promise;
+    }
+
     Item result = js_fs_readFileSync(path, opts);
     return fs_promise_wrap_result(result);
 }

@@ -26,7 +26,7 @@ static Item make_string_item(const char* str) {
 }
 
 // Forward decls from js_http.cpp
-extern "C" Item js_http_createServer(Item handler);
+extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler);
 extern "C" Item js_http_request(Item options_item, Item callback);
 extern "C" Item js_http_get(Item options_item, Item callback);
 
@@ -40,7 +40,7 @@ extern "C" Item js_https_createServer(Item options, Item handler) {
     // layer is integrated via tls.createServer wrapping
     // In a full implementation, this would pipe TLS sockets into HTTP parsing
     // For basic compatibility, we create the server and note it's HTTPS
-    Item server = js_http_createServer(handler);
+    Item server = js_http_createServer(options, handler);
     if (server.item != 0) {
         js_property_set(server, make_string_item("__is_https__"),
                         (Item){.item = b2it(true)});

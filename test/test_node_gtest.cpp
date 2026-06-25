@@ -85,6 +85,7 @@ static const char* BASELINE_FILE   = "test/node/official_baseline.txt";
 static const char* CRASHER_FILE    = "temp/_node_official_crashers.txt";
 static const char* FAILURE_OUTPUT_FILE = "temp/node_official_failures.log";
 static const char* SLOW_LIST_FILE  = "test/node/official_slow_list.txt";
+static const char* SERIAL_LIST_FILE = "test/node/official_serial_list.txt";
 static const char* TIMING_FILE     = "temp/node_official_times.tsv";
 static const double SLOW_TEST_THRESHOLD_MS = 10000.0;
 static int         g_timeout_ms    = 60000;    // per-test timeout (60s for JIT compilation)
@@ -115,6 +116,43 @@ static void print_node_final_runtime() {
 static bool env_requests_baseline_only() {
     const char* value = getenv("LAMBDA_NODE_BASELINE_ONLY");
     return value && value[0] != '\0' && strcmp(value, "0") != 0;
+}
+
+static const char* node_child_path_value() {
+    const char* path = getenv("PATH");
+    if (path && path[0]) return path;
+
+    return "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+}
+
+static const char* node_timeout_command_value() {
+#ifndef _WIN32
+    if (access("/opt/homebrew/bin/timeout", X_OK) == 0) return "/opt/homebrew/bin/timeout";
+    if (access("/usr/local/bin/timeout", X_OK) == 0) return "/usr/local/bin/timeout";
+    if (access("/usr/bin/timeout", X_OK) == 0) return "/usr/bin/timeout";
+    if (access("/bin/timeout", X_OK) == 0) return "/bin/timeout";
+#endif
+    return "timeout";
+}
+
+static void shell_quote_single(const char* src, char* dst, size_t dst_size) {
+    if (!dst || dst_size == 0) return;
+    size_t pos = 0;
+    dst[pos++] = '\'';
+    if (src) {
+        for (size_t i = 0; src[i] && pos + 5 < dst_size; i++) {
+            if (src[i] == '\'') {
+                dst[pos++] = '\'';
+                dst[pos++] = '\\';
+                dst[pos++] = '\'';
+                dst[pos++] = '\'';
+            } else {
+                dst[pos++] = src[i];
+            }
+        }
+    }
+    if (pos + 1 < dst_size) dst[pos++] = '\'';
+    dst[pos < dst_size ? pos : dst_size - 1] = '\0';
 }
 
 // =============================================================================
@@ -355,6 +393,8 @@ static std::map<std::string, std::string> g_skipped_tests;
 static bool g_skip_list_loaded = false;
 static std::map<std::string, std::string> g_slow_tests;
 static bool g_slow_list_loaded = false;
+static std::map<std::string, std::string> g_serial_tests;
+static bool g_serial_list_loaded = false;
 
 static void trim_ascii(std::string& text) {
     while (!text.empty() && (text.back() == ' ' || text.back() == '\t'))
@@ -413,6 +453,13 @@ static void load_slow_list() {
     load_test_name_list(SLOW_LIST_FILE, "slow list", g_slow_tests);
 }
 
+static void load_serial_list() {
+    if (g_serial_list_loaded) return;
+    g_serial_list_loaded = true;
+
+    load_test_name_list(SERIAL_LIST_FILE, "serial list", g_serial_tests);
+}
+
 // =============================================================================
 // Global state
 // =============================================================================
@@ -437,6 +484,14 @@ static void ensure_prefixes_initialized() {
 struct NodeTestResult {
     std::string test_name;     // filename without .js
     std::string output;        // stdout+stderr captured
+    std::string command;       // exact shell command used for replay
+    std::string cwd;           // per-test working directory
+    std::string child_path;    // PATH passed to the child lambda process
+    std::string timeout_cmd;   // timeout executable resolved by the harness
+    std::string node_flags;    // supported Node flags forwarded to lambda
+    unsigned int node_common_port;
+    unsigned int test_thread_id;
+    int raw_status;
     int exit_code;
     bool passed;               // exit_code == 0 && no "Uncaught"
     bool timed_out;
@@ -590,15 +645,50 @@ static std::string extract_module_prefix(const std::string& filename) {
 // Test execution — run a single test with timeout
 // =============================================================================
 
+static std::string extract_supported_node_flags(const std::string& test_path) {
+    std::ifstream in(test_path);
+    if (!in.is_open()) return "";
+
+    std::string line;
+    for (int i = 0; i < 8 && std::getline(in, line); i++) {
+        const std::string marker = "// Flags:";
+        size_t pos = line.find(marker);
+        if (pos == std::string::npos) continue;
+
+        std::string flags = line.substr(pos + marker.size());
+        std::istringstream ss(flags);
+        std::string tok;
+        std::string supported;
+        while (ss >> tok) {
+            if (tok == "--expose-gc" || tok == "--expose_gc") {
+                if (supported.find("--expose-gc") == std::string::npos) {
+                    supported += " --expose-gc";
+                }
+            }
+        }
+        return supported;
+    }
+
+    return "";
+}
+
 static NodeTestResult run_single_test(const std::string& test_path, size_t ordinal) {
     NodeTestResult result;
     result.test_name = test_path;
     result.timed_out = false;
+    result.raw_status = -1;
 
     // extract just filename for display
     size_t slash = test_path.rfind('/');
     std::string filename = (slash != std::string::npos) ? test_path.substr(slash + 1) : test_path;
     unsigned int node_common_port = 10000u + (unsigned int)(ordinal * 10u);
+    std::string node_flags = extract_supported_node_flags(test_path);
+    result.node_flags = node_flags;
+    result.node_common_port = node_common_port;
+    result.test_thread_id = (unsigned int)ordinal;
+    result.child_path = node_child_path_value();
+    result.timeout_cmd = node_timeout_command_value();
+    result.cwd = "temp/node_test/" + filename;
     auto start = std::chrono::steady_clock::now();
 
     // Build command with timeout.
@@ -607,21 +697,26 @@ static NodeTestResult run_single_test(const std::string& test_path, size_t ordin
     // corruption in non-ASAN binaries.
     // Run inside a per-test temp/node_test/ subdirectory so parallel tests do not
     // share cwd-created fixtures.
-    char command[2048];
+    char command[8192];
+    char path_env[4096];
+    char timeout_cmd[1024];
+    shell_quote_single(result.child_path.c_str(), path_env, sizeof(path_env));
+    shell_quote_single(result.timeout_cmd.c_str(), timeout_cmd, sizeof(timeout_cmd));
 #ifdef _WIN32
     snprintf(command, sizeof(command),
-             "cd temp\\node_test && ..\\..\\lambda.exe js \"../../%s\" --no-log 2>&1",
-             test_path.c_str());
+             "cd temp\\node_test && ..\\..\\lambda.exe js \"../../%s\"%s --no-log 2>&1",
+             test_path.c_str(), node_flags.c_str());
 #else
     snprintf(command, sizeof(command),
              "mkdir -p \"temp/node_test/%s\" && cd \"temp/node_test/%s\" && "
              "ln -sfn \"../../../ref/node/test\" test && "
              "env -u DYLD_INSERT_LIBRARIES -u DYLD_LIBRARY_PATH -u ASAN_OPTIONS -u MallocNanoZone "
-             "-u LAMBDA_NODE_BASELINE_ONLY NODE_COMMON_PORT=%u TEST_THREAD_ID=%u "
-             "timeout -k 5s %d ../../../lambda.exe js \"../../../%s\" --no-log 2>&1",
-             filename.c_str(), filename.c_str(), node_common_port, (unsigned int)ordinal,
-             (g_timeout_ms + 999) / 1000, test_path.c_str());
+             "-u LAMBDA_NODE_BASELINE_ONLY PATH=%s TERM=xterm-256color NODE_COMMON_PORT=%u TEST_THREAD_ID=%u "
+             "%s -k 5s %d ../../../lambda.exe js \"../../../%s\"%s --no-log 2>&1",
+             filename.c_str(), filename.c_str(), path_env, node_common_port, (unsigned int)ordinal,
+             timeout_cmd, (g_timeout_ms + 999) / 1000, test_path.c_str(), node_flags.c_str());
 #endif
+    result.command = command;
 
     FILE* pipe = popen(command, "r");
     if (!pipe) {
@@ -638,6 +733,7 @@ static NodeTestResult run_single_test(const std::string& test_path, size_t ordin
     }
 
     int status = pclose(pipe);
+    result.raw_status = status;
     result.exit_code = WEXITSTATUS(status);
 
     auto end = std::chrono::steady_clock::now();
@@ -848,13 +944,8 @@ static bool g_node_socket_preflight_failed = false;
 static std::string g_node_socket_preflight_message;
 
 static bool node_test_requires_serial(const NodeOfficialParam& t) {
-    return t.module == "child-process" ||
-           t.module == "cluster" ||
-           t.module == "http" ||
-           t.module == "https" ||
-           t.module == "net" ||
-           t.module == "timers" ||
-           t.module == "tls";
+    load_serial_list();
+    return g_serial_tests.find(t.filename) != g_serial_tests.end();
 }
 
 static bool node_test_needs_socket_preflight(const NodeOfficialParam& t) {
@@ -876,16 +967,22 @@ static bool run_node_socket_preflight(std::string& message) {
     (void)message;
     return true;
 #else
-    const char* command =
+    char path_env[4096];
+    char timeout_cmd[1024];
+    shell_quote_single(node_child_path_value(), path_env, sizeof(path_env));
+    shell_quote_single(node_timeout_command_value(), timeout_cmd, sizeof(timeout_cmd));
+    char command[8192];
+    snprintf(command, sizeof(command),
         "mkdir -p \"temp/node_test/_preflight_socket\" && "
         "cd \"temp/node_test/_preflight_socket\" && "
         "env -u DYLD_INSERT_LIBRARIES -u DYLD_LIBRARY_PATH -u ASAN_OPTIONS -u MallocNanoZone "
-        "-u LAMBDA_NODE_BASELINE_ONLY NODE_COMMON_PORT=9900 "
-        "timeout -k 2s 10 ../../../lambda.exe js -e "
+        "-u LAMBDA_NODE_BASELINE_ONLY PATH=%s NODE_COMMON_PORT=9900 "
+        "%s -k 2s 10 ../../../lambda.exe js -e "
         "\"const net=require('net');"
         "const s=net.createServer();"
         "s.on('error',(e)=>{console.error('NODE_SOCKET_PREFLIGHT_ERROR',e&&e.code,e&&e.address,e&&e.port);process.exit(1);});"
-        "s.listen(0,()=>s.close(()=>process.exit(0)));\" --no-log 2>&1";
+        "s.listen(0,()=>s.close(()=>process.exit(0)));\" --no-log 2>&1",
+        path_env, timeout_cmd);
 
     FILE* pipe = popen(command, "r");
     if (!pipe) {
@@ -1173,6 +1270,15 @@ static void write_failure_outputs(const std::vector<NodeOfficialParam>& tests) {
         if (r.passed) continue;
         fprintf(f, "===== %s exit=%d timed_out=%s elapsed=%.3fms =====\n",
                 t.filename.c_str(), r.exit_code, r.timed_out ? "yes" : "no", r.elapsed_ms);
+        fprintf(f, "raw_status=%d\n", r.raw_status);
+        fprintf(f, "module=%s ordinal=%zu node_common_port=%u test_thread_id=%u\n",
+                t.module.c_str(), t.ordinal, r.node_common_port, r.test_thread_id);
+        fprintf(f, "cwd=%s\n", r.cwd.c_str());
+        fprintf(f, "timeout_cmd=%s\n", r.timeout_cmd.c_str());
+        fprintf(f, "node_flags=%s\n", r.node_flags.empty() ? "(none)" : r.node_flags.c_str());
+        fprintf(f, "child_PATH=%s\n", r.child_path.c_str());
+        fprintf(f, "command=%s\n", r.command.c_str());
+        fprintf(f, "--- output ---\n");
         fprintf(f, "%s\n", r.output.c_str());
     }
     fclose(f);

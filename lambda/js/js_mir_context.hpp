@@ -115,6 +115,8 @@ struct JsNameSetEntry {
     char name[128];
     int var_kind;  // v20 TDZ: 0=var, 1=let, 2=const (mirrors JsVarKind)
     bool from_func_decl;  // true if this name came from a nested function declaration
+    uint32_t binding_start; // source range of the resolved defining binding, if known
+    uint32_t binding_end;
 };
 
 static const uint64_t ITEM_NULL_VAL  = (uint64_t)LMD_TYPE_NULL << 56;
@@ -193,6 +195,7 @@ struct JsLoopLabels {
 // Capture entry for closure analysis
 struct JsCaptureEntry {
     char name[128];      // variable name (with _js_ prefix)
+    char scope_env_key[128]; // binding identity for shared env slots; name when not needed
     int scope_env_slot;  // slot in parent's scope env (-1 if not remapped)
     int grandparent_slot; // v29: for transitive captures in mixed scope envs, read from
                           // grandparent env (stored in parent env slot 0). -1 if not transitive.
@@ -248,6 +251,14 @@ struct JsFuncCollected {
     int ctor_prop_ta_types[16];     // typed array type for each prop (-1 = not a typed array)
     TypeId ctor_prop_types[16];     // P1: detected field type from constructor init (LMD_TYPE_NULL = unknown)
     int ctor_prop_param_idx[16];    // P4b: maps property → constructor param index (-1 = not a param)
+    void** ctor_shape_cache_ptr;    // Tune12 P2: per-function constructor shape cache slot
+    bool ctor_has_super_call;       // Tune12 P2b: constructor calls a static parent with this
+    bool ctor_super_via_self_prop;  // true for Ctor.superConstructor.call(this,...)
+    bool ctor_has_dynamic_this_call; // true for unrecognized fn.call(this,...) in ctor body
+    const char* ctor_super_name_ptr; // direct parent name, or self name for self.superConstructor
+    int ctor_super_name_len;
+    bool func_ctor_shape_composed;
+    bool func_ctor_shape_compose_failed;
 };
 
 // Free dynamically allocated scope_env_names for all func_entries
@@ -260,6 +271,10 @@ static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_coun
         if (func_entries[i].captures) {
             mem_free(func_entries[i].captures);
             func_entries[i].captures = NULL;
+        }
+        if (func_entries[i].ctor_shape_cache_ptr) {
+            mem_free(func_entries[i].ctor_shape_cache_ptr);
+            func_entries[i].ctor_shape_cache_ptr = NULL;
         }
     }
 }
@@ -329,6 +344,8 @@ struct JsClassEntry {
     JsAstNode* static_blocks[8];            // static { ... } block bodies
     int static_block_count;
     void** shape_cache_ptr;                 // §7: per-class shape cache slot (NULL until allocated)
+    bool ctor_shape_composed;               // Tune11 P5: inherited ctor fields merged
+    bool ctor_shape_compose_failed;         // Tune11 P5: fell back to dynamic parent writes
 };
 
 // Try/catch context for handling return-in-try and exception flow
@@ -371,6 +388,7 @@ struct JsMirTranspiler {
     JsLoopLabels loop_stack[32];
     int loop_depth;
     int iteration_depth;
+    int loop_scope_depth;
 
     // Active for-of iterator stack for return cleanup
     MIR_reg_t for_of_iterators[32];
@@ -384,6 +402,7 @@ struct JsMirTranspiler {
     int label_counter;
 
     // Collected functions (pre-pass)
+    JsAstNode* root_node;
     JsFuncCollected func_entries[JS_MIR_MAX_COLLECTED_FUNCTIONS];
     int func_count;
     bool func_collection_overflow_logged;

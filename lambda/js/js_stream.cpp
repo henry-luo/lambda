@@ -56,6 +56,9 @@ extern "C" int64_t js_iterator_result_done(Item result);
 extern "C" Item js_iterator_result_value(Item result);
 extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
+extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_len);
+extern "C" Item js_async_hooks_enter_resource(Item resource);
+extern "C" void js_async_hooks_restore_resource(Item previous);
 extern Item js_current_this;
 extern "C" Item js_get_this(void);
 extern "C" Item js_writable_stream_new(void);
@@ -103,6 +106,7 @@ static Item key_writable_state;
 static Item key_end_pending;
 static Item key_end_emitted;
 static Item key_reading;
+static Item key_reading_sync;
 static Item key_paused;
 static Item key_finish_emitted;
 static Item key_close_emitted;
@@ -166,6 +170,7 @@ static void ensure_keys() {
     key_end_pending = make_string_item("__end_pending__");
     key_end_emitted = make_string_item("__end_emitted__");
     key_reading = make_string_item("__reading__");
+    key_reading_sync = make_string_item("__reading_sync__");
     key_paused = make_string_item("__paused__");
     key_finish_emitted = make_string_item("__finish_emitted__");
     key_close_emitted = make_string_item("__close_emitted__");
@@ -758,8 +763,10 @@ static void js_stream_call_read_if_needed(Item self, Item size_item) {
     Item before_buf = js_property_get(self, key_buffer);
     int64_t before_len = get_type_id(before_buf) == LMD_TYPE_ARRAY ? js_array_length(before_buf) : 0;
     js_property_set(self, key_reading, js_bool_item(true));
+    js_property_set(self, key_reading_sync, js_bool_item(true));
     Item size = (Item){.item = i2it(js_stream_read_size_hint(self, size_item))};
     js_call_function(read_fn, self, &size, 1);
+    js_property_set(self, key_reading_sync, js_bool_item(false));
     Item after_buf = js_property_get(self, key_buffer);
     int64_t after_len = get_type_id(after_buf) == LMD_TYPE_ARRAY ? js_array_length(after_buf) : 0;
     if (after_len > before_len || js_item_is_true(js_property_get(self, key_end_pending))) {
@@ -838,6 +845,12 @@ static void js_stream_schedule_data_flush(Item self) {
     js_next_tick_enqueue(tick);
 }
 
+extern "C" void js_stream_flush_data_now(Item self) {
+    ensure_keys();
+    if (js_item_is_true(js_property_get(self, key_destroyed))) return;
+    js_stream_flush_buffered_data(self);
+}
+
 // on(event, listener)
 extern "C" Item js_stream_on(Item self, Item event_item, Item listener) {
     ensure_keys();
@@ -874,7 +887,9 @@ extern "C" Item js_stream_on(Item self, Item event_item, Item listener) {
             js_stream_schedule_data_flush(self);
         } else {
             js_stream_flush_buffered_data(self);
-            js_stream_call_read_if_needed(self, make_js_undefined());
+            if (!js_item_is_true(js_property_get(self, key_reading_sync))) {
+                js_stream_call_read_if_needed(self, make_js_undefined());
+            }
         }
     }
     if (is_end_event &&
@@ -1165,13 +1180,7 @@ extern "C" Item js_readable_unshift_encoded(Item self, Item chunk, Item encoding
     }
     Item flowing = js_property_get(self, key_flowing);
     if (flowing.item != 0 && it2b(flowing)) {
-        if (js_stream_readable_is_object_mode(self) ||
-            js_item_is_true(js_property_get(self, key_capture_rejections))) {
-            js_stream_schedule_data_flush(self);
-        } else {
-            js_stream_flush_buffered_data(self);
-            js_stream_call_read_if_needed(self, make_js_undefined());
-        }
+        js_stream_schedule_data_flush(self);
     } else if (js_state_get_bool(js_property_get(self, key_readable_state), "readableListening")) {
         stream_emit(self, "readable", NULL, 0);
     }
@@ -3123,6 +3132,7 @@ extern "C" Item js_readable_new(Item opts) {
     js_property_set(obj, key_end_pending, js_bool_item(false));
     js_property_set(obj, key_end_emitted, js_bool_item(false));
     js_property_set(obj, key_reading, js_bool_item(false));
+    js_property_set(obj, key_reading_sync, js_bool_item(false));
     js_property_set(obj, key_paused, js_bool_item(false));
     js_property_set(obj, key_close_emitted, js_bool_item(false));
     js_property_set(obj, key_auto_destroy, js_bool_item(true));
@@ -3940,31 +3950,43 @@ static Item js_stream_finished_context_callback(Item env_item, Item err) {
     if (!env) return make_js_undefined();
     Item callback = env[0];
     Item context = env[1];
+    Item resource = env[2];
     int64_t has_arg = js_stream_has_error(err) ? 1 : 0;
-    return js_als_context_call(context, callback, js_get_this(), err, has_arg);
+    Item previous = js_async_hooks_enter_resource(resource);
+    Item result;
+    if (get_type_id(context) == LMD_TYPE_ARRAY && js_array_length(context) > 0) {
+        result = js_als_context_call(context, callback, js_get_this(), err, has_arg);
+    } else {
+        Item args[1] = {err};
+        result = js_call_function(callback, js_get_this(), args, (int)has_arg);
+    }
+    js_async_hooks_restore_resource(previous);
+    return result;
 }
 
 static Item js_stream_finished_context_wrapper(Item callback) {
     Item context = js_als_capture_context();
-    if (get_type_id(context) != LMD_TYPE_ARRAY || js_array_length(context) <= 0) {
-        return callback;
-    }
-    Item* env = js_alloc_env(2);
+    Item resource = js_async_hooks_create_resource("STREAM_END_OF_STREAM", 20);
+    Item* env = js_alloc_env(3);
     env[0] = callback;
     env[1] = context;
-    Item wrapper = js_new_closure((void*)js_stream_finished_context_callback, 1, env, 2);
+    env[2] = resource;
+    Item wrapper = js_new_closure((void*)js_stream_finished_context_callback, 1, env, 3);
     js_property_set(callback, js_stream_finished_wrapper_key(), wrapper);
     return wrapper;
 }
 
 static void js_stream_finished_call_now(Item callback) {
     Item context = js_als_capture_context();
-    Item args[1] = { ItemNull };
+    Item resource = js_async_hooks_create_resource("STREAM_END_OF_STREAM", 20);
+    Item previous = js_async_hooks_enter_resource(resource);
     if (get_type_id(context) == LMD_TYPE_ARRAY && js_array_length(context) > 0) {
         js_als_context_call(context, callback, ItemNull, ItemNull, 1);
+        js_async_hooks_restore_resource(previous);
         return;
     }
-    js_call_function(callback, ItemNull, args, 1);
+    js_call_function(callback, ItemNull, NULL, 0);
+    js_async_hooks_restore_resource(previous);
 }
 
 extern "C" Item js_stream_finished(Item stream, Item callback) {
