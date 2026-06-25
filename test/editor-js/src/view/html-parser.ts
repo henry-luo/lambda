@@ -8,7 +8,7 @@
 // trimmed so that test fixtures can be indented for readability without
 // affecting the parsed text content. Inter-text whitespace is preserved.
 
-import { isNode, node, nodeAttrs, text } from '../model/doc.js'
+import { isNode, isText, node, nodeAttrs, text } from '../model/doc.js'
 import { pos, textSelection } from '../model/source-pos.js'
 import type {
   AttrValue,
@@ -18,7 +18,8 @@ import type {
   Node,
   Selection,
   SourcePath,
-  SourcePos
+  SourcePos,
+  TextLeaf
 } from '../model/types.js'
 import type { Schema } from '../model/schema.js'
 import { isMarkTag } from '../model/schema.js'
@@ -56,13 +57,19 @@ export function parseHtmlToDoc(html: string, schema: Schema): ParseResult {
     anchorPath: null, anchorOffset: null,
     focusPath: null, focusOffset: null
   }
-  const doc = root === null
-    ? // No <doc> wrapper — synthesize one around the body's content
-      walkBlockContainer(body, 'doc', [], state)
+  const rawDoc = root === null
+    ? walkBlockContainer(body, 'doc', [], state)
     : (walkBlockContainer(root, 'doc', [], state) as Doc)
 
+  // Slate-style normalization: merge adjacent text leaves that share marks.
+  // Marker positions recorded against pre-merge leaves are translated to
+  // their post-merge equivalents.
+  const markers = collectMarkers(state)
+  const normalized = normalizeNode(rawDoc, [], markers)
+  applyMarkers(state, markers)
+
   const selection = buildSelection(state)
-  return { doc, selection }
+  return { doc: normalized, selection }
 }
 
 function findDocRoot(body: Element): Element | null {
@@ -197,6 +204,106 @@ function buildSelection(st: ParseState): Selection | null {
     )
   }
   return null
+}
+
+// ---------------------------------------------------------------------------
+// Normalization — merge adjacent same-mark text leaves; translate markers
+// ---------------------------------------------------------------------------
+
+interface MutableMarker {
+  kind: 'cursor' | 'anchor' | 'focus'
+  path: SourcePath
+  offset: number
+}
+
+function collectMarkers(st: ParseState): MutableMarker[] {
+  const out: MutableMarker[] = []
+  if (st.cursorPath !== null && st.cursorOffset !== null)
+    out.push({ kind: 'cursor', path: st.cursorPath, offset: st.cursorOffset })
+  if (st.anchorPath !== null && st.anchorOffset !== null)
+    out.push({ kind: 'anchor', path: st.anchorPath, offset: st.anchorOffset })
+  if (st.focusPath !== null && st.focusOffset !== null)
+    out.push({ kind: 'focus', path: st.focusPath, offset: st.focusOffset })
+  return out
+}
+
+function applyMarkers(st: ParseState, markers: MutableMarker[]): void {
+  for (const m of markers) {
+    if (m.kind === 'cursor') { st.cursorPath = m.path; st.cursorOffset = m.offset }
+    if (m.kind === 'anchor') { st.anchorPath = m.path; st.anchorOffset = m.offset }
+    if (m.kind === 'focus')  { st.focusPath  = m.path; st.focusOffset  = m.offset }
+  }
+}
+
+function marksEqual(a: Mark[], b: Mark[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+// Walk down, recursing first, then merging adjacent text runs in this node's
+// content and translating marker paths/offsets through the merge.
+function normalizeNode(n: Node, path: SourcePath, markers: MutableMarker[]): Node {
+  // Recurse into block children first.
+  const recursed: Child[] = []
+  for (let i = 0; i < n.content.length; i++) {
+    const c = n.content[i] as Child
+    if (isNode(c)) {
+      recursed.push(normalizeNode(c, [...path, i], markers))
+    } else {
+      recursed.push(c)
+    }
+  }
+
+  // Merge adjacent same-mark text leaves.
+  const merged: Child[] = []
+  // idxMap[oldChildIdx] = { newIdx, charShift }
+  const idxMap: { newIdx: number; charShift: number }[] = []
+  let i = 0
+  while (i < recursed.length) {
+    const c = recursed[i] as Child
+    if (!isText(c)) {
+      idxMap.push({ newIdx: merged.length, charShift: 0 })
+      merged.push(c)
+      i++
+      continue
+    }
+    const runMarks = c.marks
+    let buf = c.text
+    const startNewIdx = merged.length
+    idxMap.push({ newIdx: startNewIdx, charShift: 0 })
+    let j = i + 1
+    while (j < recursed.length) {
+      const cj = recursed[j] as Child
+      if (!isText(cj) || !marksEqual(cj.marks, runMarks)) break
+      idxMap.push({ newIdx: startNewIdx, charShift: buf.length })
+      buf += cj.text
+      j++
+    }
+    merged.push({ kind: 'text', text: buf, marks: runMarks } as TextLeaf)
+    i = j
+  }
+
+  // Translate markers whose path passes through this container.
+  for (const m of markers) {
+    if (m.path.length <= path.length) continue
+    let prefixMatches = true
+    for (let k = 0; k < path.length; k++) {
+      if (m.path[k] !== path[k]) { prefixMatches = false; break }
+    }
+    if (!prefixMatches) continue
+    const childIdx = m.path[path.length] as number
+    if (childIdx < 0 || childIdx >= idxMap.length) continue
+    const mapping = idxMap[childIdx] as { newIdx: number; charShift: number }
+    m.path = [...path, mapping.newIdx, ...m.path.slice(path.length + 1)]
+    // If the marker lands directly on this container's text leaf, shift the
+    // offset by the position the old leaf occupies inside the merged run.
+    if (m.path.length === path.length + 1) {
+      m.offset += mapping.charShift
+    }
+  }
+
+  return { kind: 'node', tag: n.tag, attrs: n.attrs, content: merged }
 }
 
 // ---------------------------------------------------------------------------
