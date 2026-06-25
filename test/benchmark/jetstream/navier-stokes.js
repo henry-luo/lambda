@@ -28,8 +28,8 @@
 
 var solver = null;
 var nsFrameCounter = 0;
-var NAVIER_STOKES_SIZE = 32;
-var NAVIER_STOKES_ITERATIONS = 10;
+var NAVIER_STOKES_SIZE = 128;
+var NAVIER_STOKES_ITERATIONS = 20;
 
 function runNavierStokes()
 {
