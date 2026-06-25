@@ -13,17 +13,17 @@
 // unit offsets natively. A future Lambda port will need a UTF-16↔UTF-8 adapter
 // at the boundary; the algorithm is identical.
 
-import type { Attr, AttrValue, Child, Doc, Mark, Node, SourcePath, TextLeaf } from './types.js'
+import type { Attr, AttrValue, Child, Doc, MarkDict, Node, SourcePath, TextLeaf } from './types.js'
 
 // ---------------------------------------------------------------------------
 // Constructors
 // ---------------------------------------------------------------------------
 
 export function text(s: string): TextLeaf {
-  return { kind: 'text', text: s, marks: [] }
+  return { kind: 'text', text: s, marks: {} }
 }
 
-export function textMarked(s: string, marks: Mark[]): TextLeaf {
+export function textMarked(s: string, marks: MarkDict): TextLeaf {
   return { kind: 'text', text: s, marks }
 }
 

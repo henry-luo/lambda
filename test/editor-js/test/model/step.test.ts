@@ -18,14 +18,20 @@ import {
   withoutMark
 } from '../../src/model/step.js'
 
-describe('model/step — mark helpers', () => {
-  it('hasMark / withMark / withoutMark', () => {
-    expect(hasMark(['strong'], 'strong')).toBe(true)
-    expect(hasMark(['em'], 'strong')).toBe(false)
-    expect(withMark(['em'], 'strong')).toEqual(['em', 'strong'])
-    expect(withMark(['em', 'strong'], 'strong')).toEqual(['em', 'strong'])  // idempotent
-    expect(withoutMark(['em', 'strong'], 'strong')).toEqual(['em'])
-    expect(withoutMark(['em'], 'strong')).toEqual(['em'])
+describe('model/step — mark helpers (dict)', () => {
+  it('hasMark / withMark / withoutMark on dict', () => {
+    expect(hasMark({ bold: true }, 'bold')).toBe(true)
+    expect(hasMark({ italic: true }, 'bold')).toBe(false)
+    expect(withMark({ italic: true }, 'bold')).toEqual({ italic: true, bold: true })
+    // withMark overwrites existing value
+    expect(withMark({ italic: true, bold: true }, 'bold')).toEqual({ italic: true, bold: true })
+    expect(withoutMark({ italic: true, bold: true }, 'bold')).toEqual({ italic: true })
+    expect(withoutMark({ italic: true }, 'bold')).toEqual({ italic: true })
+  })
+
+  it('withMark accepts value marks', () => {
+    expect(withMark({}, 'color', '#ff0000')).toEqual({ color: '#ff0000' })
+    expect(withMark({}, 'link', 'https://example.com')).toEqual({ link: 'https://example.com' })
   })
 })
 
@@ -133,18 +139,32 @@ describe('model/step — add_mark / remove_mark', () => {
   const doc = node('doc', [node('p', [text('hi')])])
 
   it('add then remove', () => {
-    const add = stepAddMark([0, 0], 'strong')
+    const add = stepAddMark([0, 0], 'bold')
     const r1 = stepApply(add, doc)
-    expect(marksAt(r1, [0, 0])).toEqual(['strong'])
+    expect(marksAt(r1, [0, 0])).toEqual({ bold: true })
 
-    const rem = stepRemoveMark([0, 0], 'strong')
+    const rem = stepRemoveMark([0, 0], 'bold')
     const r2 = stepApply(rem, r1)
-    expect(marksAt(r2, [0, 0])).toEqual([])
+    expect(marksAt(r2, [0, 0])).toEqual({})
   })
 
   it('invert(add_mark) is remove_mark', () => {
-    const add = stepAddMark([0, 0], 'strong')
+    const add = stepAddMark([0, 0], 'bold')
     expect(stepInvert(add, doc).kind).toBe('remove_mark')
+  })
+
+  it('add value-mark (color) round-trips', () => {
+    const add = stepAddMark([0, 0], 'color', '#ff0000')
+    const r1 = stepApply(add, doc)
+    expect(marksAt(r1, [0, 0])).toEqual({ color: '#ff0000' })
+    // invert remove_mark from r1 needs to know prev value
+    const rem = stepRemoveMark([0, 0], 'color')
+    const r2 = stepApply(rem, r1)
+    expect(marksAt(r2, [0, 0])).toEqual({})
+    const reAdd = stepInvert(rem, r1) as any
+    expect(reAdd.kind).toBe('add_mark')
+    expect(reAdd.name).toBe('color')
+    expect(reAdd.value).toBe('#ff0000')
   })
 })
 

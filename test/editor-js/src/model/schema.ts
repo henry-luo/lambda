@@ -198,7 +198,7 @@ function validateChild(c: Child, schema: Schema, path: number[], errors: Validat
   if (entry.marks === 'none') {
     for (let i = 0; i < c.content.length; i++) {
       const child = c.content[i] as Child
-      if (isText(child) && child.marks.length > 0) {
+      if (isText(child) && Object.keys(child.marks).length > 0) {
         errors.push({ path: [...path, i], message: `marks not allowed in <${c.tag}>` })
       }
     }

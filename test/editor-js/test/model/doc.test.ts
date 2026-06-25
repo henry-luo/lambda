@@ -24,13 +24,13 @@ import {
 import { tagAt, textAt } from '../helpers/narrow.js'
 
 describe('model/doc — constructors', () => {
-  it('text() creates a text leaf with empty marks', () => {
-    expect(text('hello')).toEqual({ kind: 'text', text: 'hello', marks: [] })
+  it('text() creates a text leaf with empty marks dict', () => {
+    expect(text('hello')).toEqual({ kind: 'text', text: 'hello', marks: {} })
   })
 
   it('textMarked() preserves marks', () => {
-    expect(textMarked('hi', ['strong', 'em']))
-      .toEqual({ kind: 'text', text: 'hi', marks: ['strong', 'em'] })
+    expect(textMarked('hi', { bold: true, italic: true }))
+      .toEqual({ kind: 'text', text: 'hi', marks: { bold: true, italic: true } })
   })
 
   it('node() and nodeAttrs() create nodes', () => {

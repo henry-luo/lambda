@@ -8,8 +8,6 @@
 // Document model
 // ---------------------------------------------------------------------------
 
-export type Mark = string
-
 export type AttrValue =
   | string
   | number
@@ -23,10 +21,18 @@ export interface Attr {
   value: AttrValue
 }
 
+// Per `vibe/Radiant_Editor_Inline_Formatting.md`: marks are a flat dictionary
+// keyed by canonical mark name (bold, italic, color, link, code, …). Presence
+// of a key means "applied"; for boolean marks the value is `true`, for value
+// marks (color, link) the value is the mark's data.
+export interface MarkDict {
+  [name: string]: AttrValue
+}
+
 export interface TextLeaf {
   kind: 'text'
   text: string
-  marks: Mark[]
+  marks: MarkDict
 }
 
 export interface Node {
@@ -61,16 +67,14 @@ export interface NodeSelection {
   path: SourcePath
 }
 
-export interface AllSelection {
-  kind: 'all'
-}
-
 export interface MultiNodeSelection {
   kind: 'multi-node'
   paths: SourcePath[]
 }
 
-export type Selection = TextSelection | NodeSelection | AllSelection | MultiNodeSelection
+// `AllSelection` was dropped per Inline_Formatting design doc §11. "Select all"
+// is a TextSelection at the doc-root boundaries.
+export type Selection = TextSelection | NodeSelection | MultiNodeSelection
 
 // ---------------------------------------------------------------------------
 // Step model — seven kinds, discriminated union on `kind`
@@ -106,13 +110,14 @@ export interface ReplaceAroundStep {
 export interface AddMarkStep {
   kind: 'add_mark'
   path: SourcePath
-  mark: Mark
+  name: string         // mark name (e.g., 'bold', 'color', 'link')
+  value: AttrValue     // boolean true for booleans, or string/object for value marks
 }
 
 export interface RemoveMarkStep {
   kind: 'remove_mark'
   path: SourcePath
-  mark: Mark
+  name: string         // mark name to remove (value comes from doc at invert time)
 }
 
 export interface SetAttrStep {

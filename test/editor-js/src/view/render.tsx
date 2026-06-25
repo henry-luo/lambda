@@ -6,7 +6,7 @@
 // mark wrappers (strong/em/...) nest around the span.
 
 import { isText } from '../model/doc.js'
-import type { Attr, Child, Doc, Mark, Node, SourcePath } from '../model/types.js'
+import type { Attr, Child, Doc, MarkDict, Node, SourcePath } from '../model/types.js'
 import { stringifyPath } from './dom-bridge.js'
 import { DrawingView } from './drawing/DrawingView.js'
 import * as React from 'react'
@@ -76,20 +76,43 @@ function attrsToProps(attrs: Attr[]): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 interface TextLeafProps {
-  leaf: { kind: 'text'; text: string; marks: Mark[] }
+  leaf: { kind: 'text'; text: string; marks: MarkDict }
   path: SourcePath
 }
 
+// Renderer — per Inline_Formatting design §7. Walks the mark dict and emits
+// a SINGLE wrapping element (no nesting). Semantic marks (link, code) win
+// over <span>; style marks contribute a `style` attribute as a React style
+// object (which React serializes to kebab-case CSS in HTML output).
 function RenderTextLeaf({ leaf, path }: TextLeafProps): React.ReactElement {
-  // The data-source-path goes on the innermost span; mark wrappers are
-  // purely visual. This keeps DOM boundary → SourcePos mapping unambiguous.
-  let inner: React.ReactElement = (
-    <span data-source-path={stringifyPath(path)} data-tag="text">
-      {leaf.text.length === 0 ? '​' : leaf.text}
-    </span>
-  )
-  for (const m of leaf.marks) {
-    inner = React.createElement(m, {}, inner)
+  const tag = pickWrapperTag(leaf.marks)
+  const props: Record<string, unknown> = {
+    'data-source-path': stringifyPath(path),
+    'data-tag': 'text'
   }
-  return inner
+  const style = computeStyleObject(leaf.marks)
+  if (Object.keys(style).length > 0) props['style'] = style
+  if (tag === 'a' && typeof leaf.marks['link'] === 'string') props['href'] = leaf.marks['link']
+  const child = leaf.text.length === 0 ? '​' : leaf.text
+  return React.createElement(tag, props, child)
+}
+
+function pickWrapperTag(marks: MarkDict): string {
+  if ('link' in marks) return 'a'
+  if ('code' in marks) return 'code'
+  return 'span'
+}
+
+function computeStyleObject(marks: MarkDict): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (marks['bold']           === true) out['fontWeight'] = 'bold'
+  if (marks['italic']         === true) out['fontStyle']  = 'italic'
+  if (marks['underline']      === true && marks['strikethrough'] === true) out['textDecoration'] = 'underline line-through'
+  else if (marks['underline'] === true) out['textDecoration'] = 'underline'
+  else if (marks['strikethrough'] === true) out['textDecoration'] = 'line-through'
+  if (typeof marks['color']        === 'string') out['color']           = marks['color']
+  if (typeof marks['background']   === 'string') out['backgroundColor'] = marks['background']
+  if (typeof marks['fontFamily']   === 'string') out['fontFamily']      = marks['fontFamily']
+  if (typeof marks['fontSize']     === 'string') out['fontSize']        = marks['fontSize']
+  return out
 }

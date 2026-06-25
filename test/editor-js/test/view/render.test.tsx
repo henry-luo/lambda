@@ -18,12 +18,34 @@ describe('view/render — Doc → React → HTML', () => {
     expect(html).toContain('hello')
   })
 
-  it('renders text with marks as nested elements', () => {
+  it('renders text with marks as a single non-nested <span style>', () => {
     const html = renderToStaticMarkup(
-      renderDoc(node('doc', [node('p', [textMarked('bold', ['strong'])])]))
+      renderDoc(node('doc', [node('p', [textMarked('bold', { bold: true })])]))
     )
-    expect(html).toContain('<strong>')
-    expect(html).toContain('<span data-source-path="0,0"')
+    expect(html).toContain('font-weight:bold')
+    expect(html).toContain('data-source-path="0,0"')
+    expect(html).not.toContain('<strong>')
+    expect(html).not.toContain('<em>')
+  })
+
+  it('renders a link mark as <a href>', () => {
+    const html = renderToStaticMarkup(
+      renderDoc(node('doc', [node('p', [textMarked('click', { link: 'https://example.com' })])]))
+    )
+    expect(html).toContain('<a')
+    expect(html).toContain('href="https://example.com"')
+  })
+
+  it('renders multiple style marks combined in one style attr', () => {
+    const html = renderToStaticMarkup(
+      renderDoc(node('doc', [node('p', [textMarked('x', { bold: true, italic: true, color: '#f00' })])]))
+    )
+    // single <span> wrapper, multiple style decls
+    const spans = html.match(/<span/g) ?? []
+    expect(spans.length).toBe(1)
+    expect(html).toContain('font-weight:bold')
+    expect(html).toContain('font-style:italic')
+    expect(html).toContain('color:#f00')
   })
 
   it('renders attributes', () => {

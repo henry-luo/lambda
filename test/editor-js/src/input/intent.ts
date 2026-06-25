@@ -24,7 +24,7 @@ import {
 } from '../commands/text-commands.js'
 import { txSetMeta } from '../model/transaction.js'
 import type { EditorState } from '../commands/types.js'
-import type { Mark, Transaction } from '../model/types.js'
+import type { Transaction } from '../model/types.js'
 
 // ---------------------------------------------------------------------------
 // Input intent union
@@ -40,7 +40,7 @@ export type InputIntent =
   | { type: 'formatItalic' }
   | { type: 'formatUnderline' }
   | { type: 'formatCode' }
-  | { type: 'formatToggleMark',     mark: Mark }
+  | { type: 'formatToggleMark',     mark: string }
   | { type: 'formatBlockType',      tag: string }
   | { type: 'selectAll' }
 

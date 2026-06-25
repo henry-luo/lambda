@@ -35,10 +35,10 @@ describe('input/dispatchIntent — text editing', () => {
     expect(textAt(tx.doc_after, [0, 0])).toBe('hell')
   })
 
-  it('formatBold toggles strong', () => {
+  it('formatBold toggles bold', () => {
     const s = state([node('p', [text('hi')])], textSelection(pos([0, 0], 0), pos([0, 0], 2)))
     const tx = dispatchIntent(s, { type: 'formatBold' })!
-    expect((tx.doc_after.content[0] as any).content[0].marks).toEqual(['strong'])
+    expect((tx.doc_after.content[0] as any).content[0].marks).toEqual({ bold: true })
   })
 
   it('formatBlockType retags the block', () => {
@@ -47,10 +47,14 @@ describe('input/dispatchIntent — text editing', () => {
     expect((tx.doc_after.content[0] as any).tag).toBe('h1')
   })
 
-  it('selectAll sets AllSelection', () => {
+  it('selectAll sets TextSelection at doc boundaries', () => {
     const s = state([node('p', [text('x')])], caret([0, 0], 0))
     const tx = dispatchIntent(s, { type: 'selectAll' })!
-    expect(tx.sel_after).toEqual({ kind: 'all' })
+    expect(tx.sel_after).toEqual({
+      kind: 'text',
+      anchor: { path: [], offset: 0 },
+      head:   { path: [], offset: 1 }
+    })
   })
 
   it('returns null when no command applies (e.g., deleteBackward at start)', () => {
@@ -69,7 +73,7 @@ describe('input/dispatchIntent — text editing', () => {
       { type: 'formatItalic' },
       { type: 'formatUnderline' },
       { type: 'formatCode' },
-      { type: 'formatToggleMark', mark: 'strong' },
+      { type: 'formatToggleMark', mark: 'bold' },
       { type: 'formatBlockType', tag: 'h1' },
       { type: 'selectAll' }
     ]
