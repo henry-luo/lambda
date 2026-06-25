@@ -5,7 +5,10 @@
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/sort.h"
+#include "../lib/image.h"
 #include <cmath>
+#include <cstring>
+#include <cstdlib>
 #include <type_traits>
 
 // SIMD vectorization hint for the contiguous numeric kernels below.  Uses each
@@ -521,6 +524,25 @@ static inline double read_arr_elem_as_double(ArrayNum* arr, int64_t off) {
         case ELEM_UINT64:  return (double)((uint64_t*)arr->data)[off];
         case ELEM_BOOL:    return ((uint8_t*)arr->data)[off] ? 1.0 : 0.0;
         default:           return 0.0;
+    }
+}
+
+// Write a double into element `off`, rounding + clamping to the elem type's range
+// (the counterpart to read_arr_elem_as_double).  Float types store the value raw.
+static inline void write_arr_elem_from_double(ArrayNum* arr, int64_t off, double v) {
+    switch (arr->get_elem_type()) {
+        case ELEM_INT:   case ELEM_INT64:   arr->items[off] = (int64_t)llround(v); return;
+        case ELEM_FLOAT: case ELEM_FLOAT64: arr->float_items[off] = v; return;
+        case ELEM_FLOAT32: ((float*)arr->data)[off] = (float)v; return;
+        case ELEM_INT8:   { long r = llround(v); ((int8_t*)arr->data)[off]   = (int8_t)(r < -128 ? -128 : r > 127 ? 127 : r); return; }
+        case ELEM_UINT8:  { long r = llround(v); ((uint8_t*)arr->data)[off]  = (uint8_t)(r < 0 ? 0 : r > 255 ? 255 : r); return; }
+        case ELEM_INT16:  { long r = llround(v); ((int16_t*)arr->data)[off]  = (int16_t)(r < -32768 ? -32768 : r > 32767 ? 32767 : r); return; }
+        case ELEM_UINT16: { long r = llround(v); ((uint16_t*)arr->data)[off] = (uint16_t)(r < 0 ? 0 : r > 65535 ? 65535 : r); return; }
+        case ELEM_INT32:  ((int32_t*)arr->data)[off]  = (int32_t)llround(v); return;
+        case ELEM_UINT32: { long long r = llround(v); ((uint32_t*)arr->data)[off] = (uint32_t)(r < 0 ? 0 : r); return; }
+        case ELEM_UINT64: ((uint64_t*)arr->data)[off] = (uint64_t)(v < 0 ? 0 : v); return;
+        case ELEM_BOOL:   ((uint8_t*)arr->data)[off] = (v != 0.0) ? 1 : 0; return;
+        default:          return;
     }
 }
 
@@ -3889,6 +3911,511 @@ Item fn_median_filter(Item img, Item ksize) { return stencil_box_op(img, ksize, 
 // pooling: non-overlapping top-left windows (stride = ksize, pad = 0) downsample.
 Item fn_maxpool(Item img, Item ksize)       { return stencil_box_op(img, ksize, STENCIL_MAX,  stencil_ksize_arg(ksize), 0); }
 Item fn_avgpool(Item img, Item ksize)       { return stencil_box_op(img, ksize, STENCIL_MEAN, stencil_ksize_arg(ksize), 0); }
+
+//==============================================================================
+// Image I/O bridge (Typed Array 4, Scope 1.1)
+//
+// Convention (matches scikit-image img_as_float / img_as_ubyte):
+//   - ubyte image: ELEM_UINT8, samples in [0, 255]
+//   - float image: ELEM_FLOAT, samples in [0, 1]
+// load() yields an (H, W, 4) RGBA ubyte image; the per-channel stencil ops and
+// elementwise kernels then operate on it (work in float via as_float for filters
+// that need fractional values, convert back with as_ubyte before save).
+//==============================================================================
+
+// Convert every element of `in` into a fresh contiguous ArrayNum of `out_etype`,
+// computing v = read*scale, optionally rounded and clamped to [lo, hi].  Walks an
+// N-D odometer so views (non-contiguous crops) convert correctly.  out_etype is
+// ELEM_FLOAT or ELEM_UINT8 (the two image representations).
+static Item array_num_convert(ArrayNum* in, ArrayNumElemType out_etype, double scale,
+                              bool clamp_round, double lo, double hi) {
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(in, shp, str);
+    if (ndim < 1) return ItemError;
+    ArrayNum* out = alloc_ndim_arraynum(out_etype, ndim, shp);
+    if (!out) return ItemError;
+    int64_t total = 1;
+    for (int d = 0; d < ndim; d++) total *= shp[d];
+    double*  fout = (out_etype == ELEM_FLOAT) ? out->float_items : NULL;
+    uint8_t* bout = (out_etype == ELEM_UINT8) ? (uint8_t*)out->data : NULL;
+    int64_t idx[32]; for (int d = 0; d < ndim; d++) idx[d] = 0;
+    for (int64_t lin = 0; lin < total; lin++) {
+        int64_t off = 0;
+        for (int d = 0; d < ndim; d++) off += idx[d] * str[d];
+        double v = read_arr_elem_as_double(in, off) * scale;
+        if (clamp_round) { v = round(v); if (v < lo) v = lo; if (v > hi) v = hi; }
+        if (fout) fout[lin] = v; else if (bout) bout[lin] = (uint8_t)v;
+        for (int d = ndim - 1; d >= 0; d--) { if (++idx[d] < shp[d]) break; idx[d] = 0; }
+    }
+    return { .array_num = out };
+}
+
+// load(path) -> (H, W, 4) ELEM_UINT8 RGBA image.
+Item fn_load(Item path_item) {
+    if (get_type_id(path_item) != LMD_TYPE_STRING) {
+        log_error("load: expects a string file path"); return ItemError;
+    }
+    String* path = path_item.get_string();
+    if (!path || path->len == 0) { log_error("load: empty path"); return ItemError; }
+    int w = 0, h = 0, ch = 0;
+    unsigned char* buf = image_load(path->chars, &w, &h, &ch, 0);  // always decodes to RGBA
+    if (!buf) { log_error("load: failed to read image %s", path->chars); return ItemError; }
+    int64_t shape[3] = { h, w, 4 };
+    ArrayNum* out = alloc_ndim_arraynum(ELEM_UINT8, 3, shape);
+    if (!out) { image_free(buf); return ItemError; }
+    memcpy(out->data, buf, (size_t)h * (size_t)w * 4);
+    image_free(buf);
+    return { .array_num = out };
+}
+
+// save(img, path) -> writes a PNG; true on success.  Accepts 2-D (H,W) grayscale
+// or 3-D (H,W,C) with C in {1,3,4}; float images are taken as [0,1] and scaled to
+// [0,255], integer images are clamped directly.
+Item fn_save(Item arr_item, Item path_item) {
+    if (get_type_id(arr_item) != LMD_TYPE_ARRAY_NUM) {
+        log_error("save: expects an image (typed numeric array)"); return ItemError;
+    }
+    if (get_type_id(path_item) != LMD_TYPE_STRING) {
+        log_error("save: expects a string file path"); return ItemError;
+    }
+    String* path = path_item.get_string();
+    if (!path || path->len == 0) { log_error("save: empty path"); return ItemError; }
+    ArrayNum* in = arr_item.array_num;
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(in, shp, str);
+    int64_t H, W, C;
+    if (ndim == 2)      { H = shp[0]; W = shp[1]; C = 1; }
+    else if (ndim == 3) { H = shp[0]; W = shp[1]; C = shp[2]; }
+    else { log_error("save: image must be 2-D (H,W) or 3-D (H,W,C)"); return ItemError; }
+    if (C != 1 && C != 3 && C != 4) {
+        log_error("save: channel count must be 1, 3, or 4 (got %lld)", (long long)C); return ItemError;
+    }
+    // gather to a contiguous ubyte buffer (float [0,1] -> [0,255], int clamped)
+    bool src_float = !elem_is_int(in->get_elem_type());
+    Item ub = array_num_convert(in, ELEM_UINT8, src_float ? 255.0 : 1.0, true, 0.0, 255.0);
+    if (get_type_id(ub) != LMD_TYPE_ARRAY_NUM) return ItemError;
+    int ok = image_save_png(path->chars, (const unsigned char*)ub.array_num->data,
+                            (int)W, (int)H, (int)C);
+    if (!ok) { log_error("save: failed to write %s", path->chars); return ItemError; }
+    return { .item = b2it(BOOL_TRUE) };
+}
+
+// as_float(img): ubyte [0,255] -> float [0,1] (passthrough if already float).
+Item fn_as_float(Item arr_item) {
+    if (get_type_id(arr_item) != LMD_TYPE_ARRAY_NUM) {
+        log_error("as_float: expects a typed numeric array"); return ItemError;
+    }
+    ArrayNum* in = arr_item.array_num;
+    double scale;
+    switch (in->get_elem_type()) {
+        case ELEM_UINT8:    scale = 1.0 / 255.0;   break;
+        case ELEM_UINT16:   scale = 1.0 / 65535.0; break;
+        case ELEM_FLOAT: case ELEM_FLOAT32: case ELEM_FLOAT64: scale = 1.0; break;  // passthrough
+        default:            scale = 1.0 / 255.0;   break;  // assume 8-bit image range
+    }
+    return array_num_convert(in, ELEM_FLOAT, scale, false, 0.0, 0.0);
+}
+
+// as_ubyte(img): float [0,1] -> ubyte [0,255] (clamp+round; int images clamped).
+Item fn_as_ubyte(Item arr_item) {
+    if (get_type_id(arr_item) != LMD_TYPE_ARRAY_NUM) {
+        log_error("as_ubyte: expects a typed numeric array"); return ItemError;
+    }
+    ArrayNum* in = arr_item.array_num;
+    bool src_float = !elem_is_int(in->get_elem_type());
+    return array_num_convert(in, ELEM_UINT8, src_float ? 255.0 : 1.0, true, 0.0, 255.0);
+}
+
+//==============================================================================
+// Point, colour, and geometric image ops (Typed Array 4, Scope 1.2)
+//
+// Point/colour ops preserve shape and element type (ubyte stays ubyte with
+// clamp+round, float stays float).  Geometric ops rearrange pixels into a fresh
+// owned copy.  "white" is the saturated value for the representation: 255 for
+// ubyte (65535 for u16), 1.0 for float — so the ops behave correctly in either.
+//==============================================================================
+
+static inline double image_white(ArrayNumElemType et) {
+    switch (et) {
+        case ELEM_UINT16: return 65535.0;
+        case ELEM_FLOAT: case ELEM_FLOAT32: case ELEM_FLOAT64: return 1.0;
+        default:          return 255.0;
+    }
+}
+
+// Apply a per-element transform, preserving shape and elem type.  Walks an N-D
+// odometer (so views map correctly); output is contiguous, written linearly.
+template<typename Fn>
+static Item array_num_point_op(ArrayNum* in, Fn fn) {
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(in, shp, str);
+    if (ndim < 1) return ItemError;
+    ArrayNum* out = alloc_ndim_arraynum(in->get_elem_type(), ndim, shp);
+    if (!out) return ItemError;
+    int64_t total = 1; for (int d = 0; d < ndim; d++) total *= shp[d];
+    int64_t idx[32]; for (int d = 0; d < ndim; d++) idx[d] = 0;
+    for (int64_t lin = 0; lin < total; lin++) {
+        int64_t off = 0; for (int d = 0; d < ndim; d++) off += idx[d] * str[d];
+        write_arr_elem_from_double(out, lin, fn(read_arr_elem_as_double(in, off)));
+        for (int d = ndim - 1; d >= 0; d--) { if (++idx[d] < shp[d]) break; idx[d] = 0; }
+    }
+    return { .array_num = out };
+}
+
+// invert(img): photographic negative, white - v.
+Item fn_invert(Item img) {
+    if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("invert: expects an image array"); return ItemError; }
+    double white = image_white(img.array_num->get_elem_type());
+    return array_num_point_op(img.array_num, [white](double v){ return white - v; });
+}
+
+// gamma(img, g): gamma correction, white * (v/white)^g.
+Item fn_gamma(Item img, Item gamma_item) {
+    if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("gamma: expects an image array"); return ItemError; }
+    double g = item_to_double(gamma_item);
+    if (!(g > 0.0)) { log_error("gamma: exponent must be positive"); return ItemError; }
+    double white = image_white(img.array_num->get_elem_type());
+    return array_num_point_op(img.array_num, [white, g](double v){ return white * pow(v / white, g); });
+}
+
+// threshold(img, t): binarize — v >= t -> white, else 0.
+Item fn_threshold(Item img, Item t_item) {
+    if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("threshold: expects an image array"); return ItemError; }
+    double t = item_to_double(t_item);
+    double white = image_white(img.array_num->get_elem_type());
+    return array_num_point_op(img.array_num, [t, white](double v){ return v >= t ? white : 0.0; });
+}
+
+// grayscale(img): (H,W,C>=3) -> (H,W) via Rec.601 luma; (H,W) or C<3 copied.
+Item fn_grayscale(Item img) {
+    if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("grayscale: expects an image array"); return ItemError; }
+    ArrayNum* in = img.array_num;
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(in, shp, str);
+    if (ndim == 2) return array_num_point_op(in, [](double v){ return v; });  // already 1-channel
+    if (ndim != 3) { log_error("grayscale: image must be 2-D (H,W) or 3-D (H,W,C)"); return ItemError; }
+    int64_t H = shp[0], W = shp[1], C = shp[2];
+    int64_t oshape[2] = { H, W };
+    ArrayNum* out = alloc_ndim_arraynum(in->get_elem_type(), 2, oshape);
+    if (!out) return ItemError;
+    int64_t lin = 0;
+    for (int64_t i = 0; i < H; i++) {
+        for (int64_t j = 0; j < W; j++) {
+            int64_t base = i * str[0] + j * str[1];
+            double gray;
+            if (C >= 3) {
+                gray = 0.299 * read_arr_elem_as_double(in, base)
+                     + 0.587 * read_arr_elem_as_double(in, base + str[2])
+                     + 0.114 * read_arr_elem_as_double(in, base + 2 * str[2]);
+            } else {
+                gray = read_arr_elem_as_double(in, base);  // single channel
+            }
+            write_arr_elem_from_double(out, lin++, gray);
+        }
+    }
+    return { .array_num = out };
+}
+
+// Copy in[si, sj, :] for every output position, given a coordinate remap; the
+// shared engine behind flip / rot90 / crop.  `out` must be a fresh contiguous
+// (oH, oW[, C]) array; src(i,j) yields the input row/col for output (i,j).
+template<typename Remap>
+static Item array_num_remap(ArrayNum* in, int ndim, const int64_t* str, int64_t C,
+                            ArrayNum* out, int64_t oH, int64_t oW, Remap src) {
+    int64_t lin = 0;
+    for (int64_t i = 0; i < oH; i++) {
+        for (int64_t j = 0; j < oW; j++) {
+            int64_t si, sj; src(i, j, &si, &sj);
+            int64_t base = si * str[0] + sj * str[1];
+            for (int64_t c = 0; c < C; c++) {
+                int64_t off = base + ((ndim == 3) ? c * str[2] : 0);
+                write_arr_elem_from_double(out, lin++, read_arr_elem_as_double(in, off));
+            }
+        }
+    }
+    return { .array_num = out };
+}
+
+// flip(img, axis): axis 0 = vertical (reverse rows), 1 = horizontal (reverse cols).
+Item fn_flip(Item img, Item axis_item) {
+    if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("flip: expects an image array"); return ItemError; }
+    ArrayNum* in = img.array_num;
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(in, shp, str);
+    if (ndim != 2 && ndim != 3) { log_error("flip: image must be 2-D or 3-D"); return ItemError; }
+    int64_t axis = (int64_t)item_to_double(axis_item);
+    if (axis != 0 && axis != 1) { log_error("flip: axis must be 0 (vertical) or 1 (horizontal)"); return ItemError; }
+    int64_t H = shp[0], W = shp[1], C = (ndim == 3) ? shp[2] : 1;
+    ArrayNum* out = alloc_ndim_arraynum(in->get_elem_type(), ndim, shp);
+    if (!out) return ItemError;
+    return array_num_remap(in, ndim, str, C, out, H, W,
+        [axis, H, W](int64_t i, int64_t j, int64_t* si, int64_t* sj) {
+            *si = (axis == 0) ? (H - 1 - i) : i;
+            *sj = (axis == 1) ? (W - 1 - j) : j;
+        });
+}
+
+// rot90(img, k): rotate counter-clockwise by 90*k degrees (k mod 4); odd k swaps H/W.
+Item fn_rot90(Item img, Item k_item) {
+    if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("rot90: expects an image array"); return ItemError; }
+    ArrayNum* in = img.array_num;
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(in, shp, str);
+    if (ndim != 2 && ndim != 3) { log_error("rot90: image must be 2-D or 3-D"); return ItemError; }
+    int64_t k = ((int64_t)item_to_double(k_item)) % 4; if (k < 0) k += 4;
+    int64_t H = shp[0], W = shp[1], C = (ndim == 3) ? shp[2] : 1;
+    int64_t oH = (k & 1) ? W : H, oW = (k & 1) ? H : W;
+    int64_t oshape[3] = { oH, oW, C };
+    ArrayNum* out = alloc_ndim_arraynum(in->get_elem_type(), ndim, oshape);
+    if (!out) return ItemError;
+    return array_num_remap(in, ndim, str, C, out, oH, oW,
+        [k, H, W](int64_t i, int64_t j, int64_t* si, int64_t* sj) {
+            switch (k) {
+                case 1:  *si = j;         *sj = W - 1 - i; break;  // CCW
+                case 2:  *si = H - 1 - i; *sj = W - 1 - j; break;  // 180
+                case 3:  *si = H - 1 - j; *sj = i;         break;  // CW
+                default: *si = i;         *sj = j;         break;  // 0
+            }
+        });
+}
+
+// crop(img, rows, cols): owned copy of the inclusive region rows[r0..r1], cols[c0..c1]
+// (rows/cols are ranges, e.g. crop(img, 0 to 9, 5 to 20)); bounds are clamped.
+Item fn_crop(Item img, Item rrange, Item crange) {
+    if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("crop: expects an image array"); return ItemError; }
+    if (get_type_id(rrange) != LMD_TYPE_RANGE || get_type_id(crange) != LMD_TYPE_RANGE) {
+        log_error("crop: row/col selectors must be ranges, e.g. crop(img, 0 to 9, 0 to 9)");
+        return ItemError;
+    }
+    ArrayNum* in = img.array_num;
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(in, shp, str);
+    if (ndim != 2 && ndim != 3) { log_error("crop: image must be 2-D or 3-D"); return ItemError; }
+    int64_t H = shp[0], W = shp[1], C = (ndim == 3) ? shp[2] : 1;
+    int64_t r0 = rrange.range->start, r1 = rrange.range->end;
+    int64_t c0 = crange.range->start, c1 = crange.range->end;
+    if (r0 < 0) r0 = 0;  if (c0 < 0) c0 = 0;
+    if (r1 > H - 1) r1 = H - 1;  if (c1 > W - 1) c1 = W - 1;
+    if (r1 < r0 || c1 < c0) { log_error("crop: empty region"); return ItemError; }
+    int64_t oH = r1 - r0 + 1, oW = c1 - c0 + 1;
+    int64_t oshape[3] = { oH, oW, C };
+    ArrayNum* out = alloc_ndim_arraynum(in->get_elem_type(), ndim, oshape);
+    if (!out) return ItemError;
+    return array_num_remap(in, ndim, str, C, out, oH, oW,
+        [r0, c0](int64_t i, int64_t j, int64_t* si, int64_t* sj) { *si = r0 + i; *sj = c0 + j; });
+}
+
+//==============================================================================
+// Histogram / Otsu, connected components, and resize / warp (Typed Array 4, §1.4-1.6)
+//==============================================================================
+
+// histogram(img, bins) -> 1-D int counts.  Integer images use bincount (bin = the
+// value); float images bin linearly over [0,1).  Out-of-range values clamp to the
+// edge bins.  Basis for otsu and region-area measurement.
+Item fn_histogram(Item img, Item bins_item) {
+    if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("histogram: expects a numeric array"); return ItemError; }
+    int64_t bins = (int64_t)item_to_double(bins_item);
+    if (bins < 1) { log_error("histogram: bins must be >= 1"); return ItemError; }
+    ArrayNum* in = img.array_num;
+    bool is_float = !elem_is_int(in->get_elem_type());
+    ArrayNum* counts = array_num_new(ELEM_INT, bins);
+    if (!counts) return ItemError;
+    for (int64_t i = 0; i < bins; i++) counts->items[i] = 0;
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(in, shp, str);
+    int64_t total = 1; for (int d = 0; d < ndim; d++) total *= shp[d];
+    int64_t idx[32]; for (int d = 0; d < ndim; d++) idx[d] = 0;
+    for (int64_t n = 0; n < total; n++) {
+        int64_t off = 0; for (int d = 0; d < ndim; d++) off += idx[d] * str[d];
+        double v = read_arr_elem_as_double(in, off);
+        int64_t bin = is_float ? (int64_t)floor(v * bins) : (int64_t)llround(v);
+        if (bin < 0) bin = 0; else if (bin >= bins) bin = bins - 1;
+        counts->items[bin]++;
+        for (int d = ndim - 1; d >= 0; d--) { if (++idx[d] < shp[d]) break; idx[d] = 0; }
+    }
+    return { .array_num = counts };
+}
+
+// otsu(img) -> threshold value that maximizes between-class variance (256-bin).
+// Foreground is `img > otsu(img)`.  Returns a value on the image's scale (0..255
+// for ubyte/int, 0..1 for float); on a flat variance plateau the centre is taken.
+Item fn_otsu(Item img) {
+    if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("otsu: expects a numeric array"); return ItemError; }
+    ArrayNum* in = img.array_num;
+    const int64_t BINS = 256;
+    bool is_float = !elem_is_int(in->get_elem_type());
+    int64_t h[256]; for (int i = 0; i < BINS; i++) h[i] = 0;
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(in, shp, str);
+    int64_t total = 1; for (int d = 0; d < ndim; d++) total *= shp[d];
+    int64_t idx[32]; for (int d = 0; d < ndim; d++) idx[d] = 0;
+    for (int64_t n = 0; n < total; n++) {
+        int64_t off = 0; for (int d = 0; d < ndim; d++) off += idx[d] * str[d];
+        double v = read_arr_elem_as_double(in, off);
+        int64_t bin = is_float ? (int64_t)floor(v * BINS) : (int64_t)llround(v);
+        if (bin < 0) bin = 0; else if (bin >= BINS) bin = BINS - 1;
+        h[bin]++;
+        for (int d = ndim - 1; d >= 0; d--) { if (++idx[d] < shp[d]) break; idx[d] = 0; }
+    }
+    double sum_all = 0; for (int i = 0; i < BINS; i++) sum_all += (double)i * h[i];
+    double max_var = -1.0, sumB = 0; int64_t wB = 0, plateau_sum = 0, plateau_cnt = 0;
+    for (int t = 0; t < BINS; t++) {
+        wB += h[t];
+        if (wB == 0) continue;
+        int64_t wF = total - wB;
+        if (wF == 0) break;
+        sumB += (double)t * h[t];
+        double mB = sumB / (double)wB, mF = (sum_all - sumB) / (double)wF;
+        double var = (double)wB * (double)wF * (mB - mF) * (mB - mF);
+        if (var > max_var)      { max_var = var; plateau_sum = t; plateau_cnt = 1; }
+        else if (var == max_var) { plateau_sum += t; plateau_cnt++; }
+    }
+    int64_t best_t = plateau_cnt ? plateau_sum / plateau_cnt : 0;
+    double white = image_white(in->get_elem_type());
+    double thresh = (double)best_t / (double)(BINS - 1) * white;
+    return push_d(thresh);
+}
+
+// label(mask) -> 2-D int image with 4-connected components numbered 1..N (0 = back-
+// ground).  Any nonzero input pixel is foreground.  Region areas are then just
+// histogram(labels, max(labels)+1); the component count is max(labels).
+Item fn_label(Item mask_item) {
+    if (get_type_id(mask_item) != LMD_TYPE_ARRAY_NUM) { log_error("label: expects a 2-D mask array"); return ItemError; }
+    ArrayNum* in = mask_item.array_num;
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(in, shp, str);
+    if (ndim != 2) { log_error("label: mask must be 2-D (H,W)"); return ItemError; }
+    int64_t H = shp[0], W = shp[1];
+    int64_t oshape[2] = { H, W };
+    ArrayNum* out = alloc_ndim_arraynum(ELEM_INT, 2, oshape);
+    if (!out) return ItemError;
+    int64_t* lab = out->items;
+    for (int64_t i = 0; i < H * W; i++) lab[i] = 0;
+    int64_t* stack = (int64_t*)malloc(sizeof(int64_t) * (size_t)H * (size_t)W);
+    if (!stack) { log_error("label: out of memory"); return ItemError; }
+    const int64_t di[4] = { -1, 1, 0, 0 }, dj[4] = { 0, 0, -1, 1 };
+    int64_t next = 1;
+    for (int64_t i = 0; i < H; i++) {
+        for (int64_t j = 0; j < W; j++) {
+            int64_t oidx = i * W + j;
+            if (lab[oidx] != 0) continue;
+            if (read_arr_elem_as_double(in, i * str[0] + j * str[1]) == 0.0) continue;
+            int64_t sp = 0; stack[sp++] = oidx; lab[oidx] = next;        // flood fill
+            while (sp > 0) {
+                int64_t cur = stack[--sp], ci = cur / W, cj = cur % W;
+                for (int k = 0; k < 4; k++) {
+                    int64_t ni = ci + di[k], nj = cj + dj[k];
+                    if (ni < 0 || ni >= H || nj < 0 || nj >= W) continue;
+                    int64_t nidx = ni * W + nj;
+                    if (lab[nidx] != 0) continue;
+                    if (read_arr_elem_as_double(in, ni * str[0] + nj * str[1]) == 0.0) continue;
+                    lab[nidx] = next; stack[sp++] = nidx;
+                }
+            }
+            next++;
+        }
+    }
+    free(stack);
+    return { .array_num = out };
+}
+
+// Bilinear sample of channel `c` at fractional (y, x).  edge_clamp replicates the
+// border (for resize); otherwise positions outside the image return 0 (for warp).
+static inline double bilinear_sample(ArrayNum* in, double y, double x, int64_t c,
+                                     int64_t H, int64_t W, int ndim, const int64_t* str,
+                                     bool edge_clamp) {
+    if (!edge_clamp && (y < -0.5 || y > (double)H - 0.5 || x < -0.5 || x > (double)W - 0.5))
+        return 0.0;
+    int64_t y0 = (int64_t)floor(y), x0 = (int64_t)floor(x);
+    double fy = y - (double)y0, fx = x - (double)x0;
+    auto cl = [](int64_t v, int64_t n) { return v < 0 ? (int64_t)0 : v >= n ? n - 1 : v; };
+    int64_t cy0 = cl(y0, H), cy1 = cl(y0 + 1, H), cx0 = cl(x0, W), cx1 = cl(x0 + 1, W);
+    int64_t cc = (ndim == 3) ? c * str[2] : 0;
+    double p00 = read_arr_elem_as_double(in, cy0 * str[0] + cx0 * str[1] + cc);
+    double p01 = read_arr_elem_as_double(in, cy0 * str[0] + cx1 * str[1] + cc);
+    double p10 = read_arr_elem_as_double(in, cy1 * str[0] + cx0 * str[1] + cc);
+    double p11 = read_arr_elem_as_double(in, cy1 * str[0] + cx1 * str[1] + cc);
+    return (p00 * (1 - fx) + p01 * fx) * (1 - fy) + (p10 * (1 - fx) + p11 * fx) * fy;
+}
+
+// Gather an output image by mapping each (oi, oj) to a fractional source (sy, sx)
+// and bilinearly sampling.  The engine behind resize / rotate / affine_warp.
+template<typename Map>
+static Item bilinear_gather(ArrayNum* in, int ndim, const int64_t* str, int64_t H, int64_t W,
+                            int64_t C, int64_t oH, int64_t oW, bool edge_clamp, Map map) {
+    int64_t oshape[3] = { oH, oW, C };
+    ArrayNum* out = alloc_ndim_arraynum(in->get_elem_type(), ndim, oshape);
+    if (!out) return ItemError;
+    int64_t lin = 0;
+    for (int64_t oi = 0; oi < oH; oi++) {
+        for (int64_t oj = 0; oj < oW; oj++) {
+            double sy, sx; map(oi, oj, &sy, &sx);
+            for (int64_t c = 0; c < C; c++)
+                write_arr_elem_from_double(out, lin++, bilinear_sample(in, sy, sx, c, H, W, ndim, str, edge_clamp));
+        }
+    }
+    return { .array_num = out };
+}
+
+// resize(img, new_h, new_w) -> bilinear-resampled image (half-pixel-centre mapping).
+Item fn_resize(Item img, Item h_item, Item w_item) {
+    if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("resize: expects an image array"); return ItemError; }
+    ArrayNum* in = img.array_num;
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(in, shp, str);
+    if (ndim != 2 && ndim != 3) { log_error("resize: image must be 2-D or 3-D"); return ItemError; }
+    int64_t nH = (int64_t)item_to_double(h_item), nW = (int64_t)item_to_double(w_item);
+    if (nH < 1 || nW < 1) { log_error("resize: target dimensions must be >= 1"); return ItemError; }
+    int64_t H = shp[0], W = shp[1], C = (ndim == 3) ? shp[2] : 1;
+    double sH = (double)H / (double)nH, sW = (double)W / (double)nW;
+    return bilinear_gather(in, ndim, str, H, W, C, nH, nW, true,
+        [sH, sW](int64_t oi, int64_t oj, double* sy, double* sx) {
+            *sy = ((double)oi + 0.5) * sH - 0.5;
+            *sx = ((double)oj + 0.5) * sW - 0.5;
+        });
+}
+
+// rotate(img, deg) -> same-size image rotated counter-clockwise about its centre,
+// bilinearly sampled; pixels mapping outside the source are 0.
+Item fn_rotate(Item img, Item deg_item) {
+    if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("rotate: expects an image array"); return ItemError; }
+    ArrayNum* in = img.array_num;
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(in, shp, str);
+    if (ndim != 2 && ndim != 3) { log_error("rotate: image must be 2-D or 3-D"); return ItemError; }
+    int64_t H = shp[0], W = shp[1], C = (ndim == 3) ? shp[2] : 1;
+    const double PI = 3.14159265358979323846;
+    double th = item_to_double(deg_item) * PI / 180.0;
+    double ct = cos(th), st = sin(th), cy = (double)(H - 1) / 2.0, cx = (double)(W - 1) / 2.0;
+    return bilinear_gather(in, ndim, str, H, W, C, H, W, false,
+        [ct, st, cy, cx](int64_t oi, int64_t oj, double* sy, double* sx) {
+            double dy = (double)oi - cy, dx = (double)oj - cx;   // inverse rotation R(-th)
+            *sy = cy + dy * ct + dx * st;
+            *sx = cx - dy * st + dx * ct;
+        });
+}
+
+// affine_warp(img, M) -> same-size image gathered through a 2x3 affine matrix:
+// [src_x, src_y]^T = M . [oj, oi, 1]^T.  Identity [[1,0,0],[0,1,0]] is a no-op.
+Item fn_affine_warp(Item img, Item m_item) {
+    if (get_type_id(img) != LMD_TYPE_ARRAY_NUM || get_type_id(m_item) != LMD_TYPE_ARRAY_NUM) {
+        log_error("affine_warp: expects an image and a 2x3 numeric matrix"); return ItemError;
+    }
+    ArrayNum* in = img.array_num; ArrayNum* M = m_item.array_num;
+    int64_t shp[32], str[32], mshp[32], mstr[32];
+    int ndim = get_shape_strides(in, shp, str);
+    int mndim = get_shape_strides(M, mshp, mstr);
+    if (ndim != 2 && ndim != 3) { log_error("affine_warp: image must be 2-D or 3-D"); return ItemError; }
+    if (mndim != 2 || mshp[0] != 2 || mshp[1] != 3) { log_error("affine_warp: matrix must be 2x3"); return ItemError; }
+    int64_t H = shp[0], W = shp[1], C = (ndim == 3) ? shp[2] : 1;
+    double a = read_arr_elem_as_double(M, 0), b = read_arr_elem_as_double(M, mstr[1]), c0 = read_arr_elem_as_double(M, 2 * mstr[1]);
+    double d = read_arr_elem_as_double(M, mstr[0]), e = read_arr_elem_as_double(M, mstr[0] + mstr[1]), f = read_arr_elem_as_double(M, mstr[0] + 2 * mstr[1]);
+    return bilinear_gather(in, ndim, str, H, W, C, H, W, false,
+        [a, b, c0, d, e, f](int64_t oi, int64_t oj, double* sy, double* sx) {
+            *sx = a * (double)oj + b * (double)oi + c0;
+            *sy = d * (double)oj + e * (double)oi + f;
+        });
+}
 
 // Overload wrappers — the sysfunc dispatcher resolves to fn_<name><argcount>.
 // The 1-arg forms delegate to the existing whole-array reductions.

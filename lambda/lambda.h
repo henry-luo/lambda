@@ -310,6 +310,26 @@ typedef enum SysFunc {
     SYSFUNC_MEDIAN_FILT,      // median_filter(img, ksize) - rank (median) filter
     SYSFUNC_MAXPOOL,          // maxpool(img, ksize) - strided max pooling
     SYSFUNC_AVGPOOL,          // avgpool(img, ksize) - strided mean pooling
+    // image I/O bridge
+    SYSFUNC_LOAD_IMAGE,       // load(path) - decode PNG/JPEG/GIF to (H,W,4) ubyte
+    SYSFUNC_SAVE_IMAGE,       // save(img, path) - encode an image to PNG
+    SYSFUNC_AS_FLOAT,         // as_float(img) - ubyte [0,255] -> float [0,1]
+    SYSFUNC_AS_UBYTE,         // as_ubyte(img) - float [0,1] -> ubyte [0,255]
+    // point / colour / geometric image ops
+    SYSFUNC_INVERT,           // invert(img) - photographic negative
+    SYSFUNC_GAMMA,            // gamma(img, g) - gamma correction
+    SYSFUNC_THRESHOLD,        // threshold(img, t) - binarize at t
+    SYSFUNC_GRAYSCALE,        // grayscale(img) - RGB -> luma (H,W)
+    SYSFUNC_FLIP,             // flip(img, axis) - mirror along axis 0/1
+    SYSFUNC_ROT90,            // rot90(img, k) - rotate CCW by 90*k
+    SYSFUNC_CROP,             // crop(img, rows, cols) - region copy
+    // histogram / segmentation / resize / warp
+    SYSFUNC_HISTOGRAM,        // histogram(img, bins) - value counts
+    SYSFUNC_OTSU,             // otsu(img) - optimal threshold value
+    SYSFUNC_LABEL,            // label(mask) - 4-connected components
+    SYSFUNC_RESIZE,           // resize(img, h, w) - bilinear resample
+    SYSFUNC_ROTATE,           // rotate(img, deg) - bilinear rotation
+    SYSFUNC_AFFINE_WARP,      // affine_warp(img, M) - 2x3 affine gather
     SYSFUNC_ALL,
     SYSFUNC_ANY,
     SYSFUNC_MIN1,
@@ -1480,6 +1500,26 @@ extern "C" {
     Item fn_median_filter(Item img, Item ksize);   // rank (median) filter
     Item fn_maxpool(Item img, Item ksize);         // strided max pooling
     Item fn_avgpool(Item img, Item ksize);         // strided mean pooling
+    // image I/O bridge: load/save PNG-JPEG-GIF, ubyte[0,255] <-> float[0,1]
+    Item fn_load(Item path);                       // decode to (H,W,4) ubyte RGBA
+    Item fn_save(Item img, Item path);             // encode an image to PNG
+    Item fn_as_float(Item img);                    // ubyte [0,255] -> float [0,1]
+    Item fn_as_ubyte(Item img);                    // float [0,1] -> ubyte [0,255]
+    // point / colour / geometric image ops
+    Item fn_invert(Item img);                      // photographic negative
+    Item fn_gamma(Item img, Item g);               // gamma correction
+    Item fn_threshold(Item img, Item t);           // binarize at threshold t
+    Item fn_grayscale(Item img);                   // RGB -> luma, (H,W,C)->(H,W)
+    Item fn_flip(Item img, Item axis);             // mirror along axis 0 (vert) / 1 (horiz)
+    Item fn_rot90(Item img, Item k);               // rotate CCW by 90*k degrees
+    Item fn_crop(Item img, Item rows, Item cols);  // owned copy of an inclusive region
+    // histogram / segmentation / resize / warp
+    Item fn_histogram(Item img, Item bins);        // 1-D value counts
+    Item fn_otsu(Item img);                        // optimal threshold value
+    Item fn_label(Item mask);                      // 4-connected component labels
+    Item fn_resize(Item img, Item h, Item w);      // bilinear resample
+    Item fn_rotate(Item img, Item deg);            // bilinear rotation about centre
+    Item fn_affine_warp(Item img, Item m);         // 2x3 affine coordinate gather
     int64_t array_num_iter_count(ArrayNum* arr);   // shape[0] for N-D, length for 1-D
     ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim, int64_t* dims);
     Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices);   // multi-dim scalar read

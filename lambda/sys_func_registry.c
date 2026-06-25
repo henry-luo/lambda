@@ -388,6 +388,46 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_AVGPOOL, "avgpool", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_avgpool", FPTR(fn_avgpool), NULL, NULL, false, 0},
 
+    // image I/O bridge
+    {SYSFUNC_LOAD_IMAGE, "load", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_load", FPTR(fn_load), NULL, NULL, false, 0},
+    {SYSFUNC_SAVE_IMAGE, "save", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_BOOL, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_save", FPTR(fn_save), NULL, NULL, false, 0},
+    {SYSFUNC_AS_FLOAT, "as_float", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_as_float", FPTR(fn_as_float), NULL, NULL, false, 0},
+    {SYSFUNC_AS_UBYTE, "as_ubyte", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_as_ubyte", FPTR(fn_as_ubyte), NULL, NULL, false, 0},
+
+    // point / colour / geometric image ops
+    {SYSFUNC_INVERT, "invert", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_invert", FPTR(fn_invert), NULL, NULL, false, 0},
+    {SYSFUNC_GAMMA, "gamma", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_gamma", FPTR(fn_gamma), NULL, NULL, false, 0},
+    {SYSFUNC_THRESHOLD, "threshold", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_threshold", FPTR(fn_threshold), NULL, NULL, false, 0},
+    {SYSFUNC_GRAYSCALE, "grayscale", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_grayscale", FPTR(fn_grayscale), NULL, NULL, false, 0},
+    {SYSFUNC_FLIP, "flip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_flip", FPTR(fn_flip), NULL, NULL, false, 0},
+    {SYSFUNC_ROT90, "rot90", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_rot90", FPTR(fn_rot90), NULL, NULL, false, 0},
+    {SYSFUNC_CROP, "crop", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_crop", FPTR(fn_crop), NULL, NULL, false, 0},
+
+    // histogram / segmentation / resize / warp
+    {SYSFUNC_HISTOGRAM, "histogram", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_histogram", FPTR(fn_histogram), NULL, NULL, false, 0},
+    {SYSFUNC_OTSU, "otsu", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_otsu", FPTR(fn_otsu), NULL, NULL, false, 0},
+    {SYSFUNC_LABEL, "label", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_label", FPTR(fn_label), NULL, NULL, false, 0},
+    {SYSFUNC_RESIZE, "resize", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_resize", FPTR(fn_resize), NULL, NULL, false, 0},
+    {SYSFUNC_ROTATE, "rotate", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_rotate", FPTR(fn_rotate), NULL, NULL, false, 0},
+    {SYSFUNC_AFFINE_WARP, "affine_warp", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_affine_warp", FPTR(fn_affine_warp), NULL, NULL, false, 0},
+
     {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_all", FPTR(fn_all), NULL, NULL, false, 0},
 
