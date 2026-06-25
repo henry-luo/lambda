@@ -5,6 +5,7 @@
 #include "../lib/memtrack.h"
 #include "../lib/checked_math.hpp"
 #include "../lib/arena.h"  // for arena_owns() and arena_realloc()
+#include "js/js_exec_profile_weak.h"
 
 #ifndef LAMBDA_STATIC
 // ui_mode helper: copy GC-heap string into result arena as fat DomText node
@@ -429,6 +430,7 @@ const char* fn_to_cstr(Item itm) {
 } // extern "C"
 
 void expand_list(List *list, Arena* arena = nullptr) {
+    JS_WEAK_PROPERTY_SET_BRANCH("expand_list_total");
     // P8 fix: do NOT bump list->capacity until the new buffer has been allocated
     // and populated. If heap_data_alloc triggers GC, gc_compact_data reads
     // (capacity, items) as a pair to memcpy `capacity * sizeof(Item)` bytes out
@@ -461,8 +463,13 @@ void expand_list(List *list, Arena* arena = nullptr) {
         // tree (siblings of a retransformed subtree).  Freeing it allows the
         // arena to recycle that memory for new DomElement allocations, which
         // overwrites the items data and causes use-after-free crashes.
-        Item* new_items = (Item*)arena_alloc(arena, new_capacity * sizeof(Item));
+        Item* new_items;
+        {
+            JS_WEAK_PROPERTY_SET_BRANCH("expand_list_arena_alloc");
+            new_items = (Item*)arena_alloc(arena, new_capacity * sizeof(Item));
+        }
         if (new_items && old_items) {
+            JS_WEAK_PROPERTY_SET_BRANCH("expand_list_arena_copy");
             memcpy(new_items, old_items, prev_capacity * sizeof(Item));
         }
         list->items = new_items;
@@ -478,7 +485,11 @@ void expand_list(List *list, Arena* arena = nullptr) {
         }
         uint64_t list_root = (uint64_t)(uintptr_t)list;
         heap_register_gc_root(&list_root);
-        Item* new_items = (Item*)heap_data_alloc(new_size);
+        Item* new_items;
+        {
+            JS_WEAK_PROPERTY_SET_BRANCH("expand_list_heap_alloc");
+            new_items = (Item*)heap_data_alloc(new_size);
+        }
         list = (List*)(uintptr_t)list_root;
         if (!new_items) {
             heap_unregister_gc_root(&list_root);
@@ -492,6 +503,7 @@ void expand_list(List *list, Arena* arena = nullptr) {
         // we haven't bumped list->capacity yet.
         old_items = list->items;
         if (old_items && old_size > 0) {
+            JS_WEAK_PROPERTY_SET_BRANCH("expand_list_heap_copy");
             memcpy(new_items, old_items, old_size);
         }
         // Publish both the new buffer pointer and the new capacity atomically

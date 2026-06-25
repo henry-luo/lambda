@@ -103,6 +103,9 @@ void js_exec_profile_count(JsExecProfileEvent event);
 void js_exec_profile_note_mir_call(const char* fn_name);
 void js_exec_profile_dump(void);
 void js_profile_property_set_site(const char* label);
+uint64_t js_profile_property_set_branch_enter(const char* label);
+void js_profile_property_set_branch_leave(const char* label, uint64_t token);
+void js_profile_property_set_branch_add_count(const char* label, uint64_t count);
 void js_profile_load_ic_site(const char* label, JsLoadICProfileReason reason);
 void js_profile_store_ic_site(const char* label, JsStoreICProfileReason reason);
 #else
@@ -125,6 +128,18 @@ static inline void js_exec_profile_count(JsExecProfileEvent event) { (void)event
 static inline void js_exec_profile_note_mir_call(const char* fn_name) { (void)fn_name; }
 static inline void js_exec_profile_dump(void) {}
 static inline void js_profile_property_set_site(const char* label) { (void)label; }
+static inline uint64_t js_profile_property_set_branch_enter(const char* label) {
+    (void)label;
+    return 0;
+}
+static inline void js_profile_property_set_branch_leave(const char* label, uint64_t token) {
+    (void)label;
+    (void)token;
+}
+static inline void js_profile_property_set_branch_add_count(const char* label, uint64_t count) {
+    (void)label;
+    (void)count;
+}
 static inline void js_profile_load_ic_site(const char* label, JsLoadICProfileReason reason) {
     (void)label;
     (void)reason;
@@ -159,8 +174,28 @@ struct JsExecProfileScope {
 #define JS_EXEC_PROFILE_CONCAT(a, b) JS_EXEC_PROFILE_CONCAT_INNER(a, b)
 #define JS_EXEC_PROFILE_SCOPE(event_id) \
     JsExecProfileScope JS_EXEC_PROFILE_CONCAT(_js_exec_profile_scope_, __LINE__)(event_id)
+
+struct JsPropertySetBranchScope {
+    const char* label;
+    uint64_t token;
+
+    explicit JsPropertySetBranchScope(const char* branch_label) : label(branch_label), token(0) {
+        int mode = g_js_exec_profile_mode;
+        if (mode == 0) return;
+        if (mode < 0) mode = js_exec_profile_mode();
+        if (mode > 0) token = js_profile_property_set_branch_enter(label);
+    }
+
+    ~JsPropertySetBranchScope() {
+        if (token != 0) js_profile_property_set_branch_leave(label, token);
+    }
+};
+
+#define JS_PROPERTY_SET_BRANCH(label) \
+    JsPropertySetBranchScope JS_EXEC_PROFILE_CONCAT(_js_property_set_branch_scope_, __LINE__)(label)
 #else
 #define JS_EXEC_PROFILE_SCOPE(event_id) ((void)0)
+#define JS_PROPERTY_SET_BRANCH(label) ((void)0)
 #endif
 
 #endif

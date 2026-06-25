@@ -349,23 +349,19 @@ def _detect_jetstream_run_function(js_path):
 
 
 def make_jetstream_ljs_wrapper(bench_name, js_path):
-    """Create LambdaJS wrapper for JetStream benchmark (strips ES6 class, adds timing)."""
-    run_expr = _detect_jetstream_run_function(js_path)
-    if run_expr is None:
-        return None
+    """Create LambdaJS wrapper for JetStream benchmark (adds timing)."""
     os.makedirs("temp", exist_ok=True)
     wrapper = os.path.join("temp", f"_ljs_jetstream_{bench_name}.js")
     with open(js_path) as f:
         code = f.read()
-    # strip the class Benchmark { ... } block at the end
-    code = re.sub(r'\nclass Benchmark \{[^}]+\}\s*$', '', code, flags=re.DOTALL)
     code = code.replace("'use strict';", "")
     code = code.replace('"use strict";', "")
     with open(wrapper, "w") as f:
         f.write(code)
         f.write("\n// Timing wrapper\n")
+        f.write("var _benchmark = new Benchmark();\n")
         f.write("var _t0 = performance.now();\n")
-        f.write(f"for (var _i = 0; _i < 8; _i++) {{ {run_expr}; }}\n")
+        f.write("_benchmark.runIteration();\n")
         f.write("var _t1 = performance.now();\n")
         f.write('console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
     return wrapper

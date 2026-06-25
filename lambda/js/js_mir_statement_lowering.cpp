@@ -2784,19 +2784,17 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_reg_t array = jm_call_1(mt, "js_array_new", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)arg_count));
             // first_arg is already evaluated; set it at index 0
-            MIR_reg_t bidx0 = jm_box_int_const(mt, 0);
-            jm_call_3(mt, "js_array_set", MIR_T_I64,
+            jm_call_3(mt, "js_array_define_dense_element_direct", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, array),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, bidx0),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, first_arg));
             // evaluate and set remaining args
             JsAstNode* arg = call->arguments->next;
             for (int idx = 1; arg; idx++, arg = arg->next) {
-                MIR_reg_t bidx = jm_box_int_const(mt, idx);
                 MIR_reg_t val = jm_transpile_box_item(mt, arg);
-                jm_call_3(mt, "js_array_set", MIR_T_I64,
+                jm_call_3(mt, "js_array_define_dense_element_direct", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, array),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, bidx),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, idx),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
             return array;

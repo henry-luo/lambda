@@ -53,6 +53,12 @@ typedef struct JsExecProfilePropertySetSite {
     uint64_t count;
 } JsExecProfilePropertySetSite;
 
+typedef struct JsExecProfilePropertySetBranch {
+    char label[96];
+    uint64_t calls;
+    uint64_t inclusive_ns;
+} JsExecProfilePropertySetBranch;
+
 typedef struct JsExecProfileLoadICSite {
     char label[128];
     uint64_t counts[JS_LOAD_IC_SITE_REASON_COUNT];
@@ -108,12 +114,14 @@ static JsExecProfileFrame g_js_exec_profile_stack[4096];
 static JsExecProfileMirCall g_js_exec_profile_mir_calls[1024];
 static JsExecProfileShapeGuardSite g_js_exec_profile_shape_guard_sites[128];
 static JsExecProfilePropertySetSite g_js_exec_profile_property_set_sites[256];
+static JsExecProfilePropertySetBranch g_js_exec_profile_property_set_branches[64];
 static JsExecProfileLoadICSite g_js_exec_profile_load_ic_sites[512];
 static JsExecProfileStoreICSite g_js_exec_profile_store_ic_sites[512];
 static int g_js_exec_profile_stack_depth = 0;
 static int g_js_exec_profile_mir_call_count = 0;
 static int g_js_exec_profile_shape_guard_site_count = 0;
 static int g_js_exec_profile_property_set_site_count = 0;
+static int g_js_exec_profile_property_set_branch_count = 0;
 static int g_js_exec_profile_load_ic_site_count = 0;
 static int g_js_exec_profile_store_ic_site_count = 0;
 static int g_js_exec_profile_registered = 0;
@@ -189,6 +197,7 @@ void js_exec_profile_reset(void) {
     g_js_exec_profile_mir_call_count = 0;
     g_js_exec_profile_shape_guard_site_count = 0;
     g_js_exec_profile_property_set_site_count = 0;
+    g_js_exec_profile_property_set_branch_count = 0;
     g_js_exec_profile_load_ic_site_count = 0;
     g_js_exec_profile_store_ic_site_count = 0;
 }
@@ -332,6 +341,50 @@ extern "C" void js_profile_property_set_site(const char* label) {
     memset(site, 0, sizeof(*site));
     strncpy(site->label, safe_label, sizeof(site->label) - 1);
     site->count = 1;
+}
+
+static JsExecProfilePropertySetBranch* js_exec_profile_property_set_branch(const char* label) {
+    const char* safe_label = (label && label[0]) ? label : "unknown";
+    for (int i = 0; i < g_js_exec_profile_property_set_branch_count; i++) {
+        JsExecProfilePropertySetBranch* branch = &g_js_exec_profile_property_set_branches[i];
+        if (strcmp(branch->label, safe_label) == 0) return branch;
+    }
+    if (g_js_exec_profile_property_set_branch_count >=
+            (int)(sizeof(g_js_exec_profile_property_set_branches) / sizeof(g_js_exec_profile_property_set_branches[0]))) {
+        return NULL;
+    }
+    JsExecProfilePropertySetBranch* branch =
+        &g_js_exec_profile_property_set_branches[g_js_exec_profile_property_set_branch_count++];
+    memset(branch, 0, sizeof(*branch));
+    strncpy(branch->label, safe_label, sizeof(branch->label) - 1);
+    return branch;
+}
+
+extern "C" uint64_t js_profile_property_set_branch_enter(const char* label) {
+    int mode = g_js_exec_profile_mode >= 0 ? g_js_exec_profile_mode : js_exec_profile_mode();
+    if (mode <= 0) return 0;
+    JsExecProfilePropertySetBranch* branch = js_exec_profile_property_set_branch(label);
+    if (!branch) return 0;
+    branch->calls++;
+    if (mode < 2) return 1;
+    return time_now_ns();
+}
+
+extern "C" void js_profile_property_set_branch_leave(const char* label, uint64_t token) {
+    int mode = g_js_exec_profile_mode >= 0 ? g_js_exec_profile_mode : js_exec_profile_mode();
+    if (mode < 2 || token == 0) return;
+    JsExecProfilePropertySetBranch* branch = js_exec_profile_property_set_branch(label);
+    if (!branch) return;
+    uint64_t now = time_now_ns();
+    if (now >= token) branch->inclusive_ns += now - token;
+}
+
+extern "C" void js_profile_property_set_branch_add_count(const char* label, uint64_t count) {
+    int mode = g_js_exec_profile_mode >= 0 ? g_js_exec_profile_mode : js_exec_profile_mode();
+    if (mode <= 0 || count == 0) return;
+    JsExecProfilePropertySetBranch* branch = js_exec_profile_property_set_branch(label);
+    if (!branch) return;
+    branch->calls += count;
 }
 
 extern "C" void js_profile_load_ic_site(const char* label, JsLoadICProfileReason reason) {
@@ -487,6 +540,22 @@ void js_exec_profile_dump(void) {
             strbuf_append_str(buf, site->label);
             strbuf_append_char(buf, '\t');
             strbuf_append_uint64(buf, site->count);
+            strbuf_append_char(buf, '\n');
+        }
+    }
+    if (g_js_exec_profile_property_set_branch_count > 0) {
+        strbuf_append_str(buf, "\n# Property set branches\n");
+        strbuf_append_str(buf, "property_set_branch\tcalls\tinclusive_ms\tavg_ns\n");
+        for (int i = 0; i < g_js_exec_profile_property_set_branch_count; i++) {
+            JsExecProfilePropertySetBranch* branch = &g_js_exec_profile_property_set_branches[i];
+            uint64_t avg_ns = branch->calls ? branch->inclusive_ns / branch->calls : 0;
+            strbuf_append_str(buf, branch->label);
+            strbuf_append_char(buf, '\t');
+            strbuf_append_uint64(buf, branch->calls);
+            strbuf_append_char(buf, '\t');
+            strbuf_append_format(buf, "%.3f", (double)branch->inclusive_ns / 1000000.0);
+            strbuf_append_char(buf, '\t');
+            strbuf_append_uint64(buf, avg_ns);
             strbuf_append_char(buf, '\n');
         }
     }
