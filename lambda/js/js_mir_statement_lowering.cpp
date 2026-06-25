@@ -171,6 +171,65 @@ static bool jm_assignment_targets_name(JsAstNode* left, const char* bare_name, i
         strncmp(id->name->chars, bare_name, bare_len) == 0;
 }
 
+static bool jm_scope_env_name_matches_binding_in_statement(const char* scope_name,
+        const char* name, JsAstNode* binding_node) {
+    if (!scope_name || !name) return false;
+    if (strcmp(scope_name, name) == 0) return true;
+    const char* at = strchr(scope_name, '@');
+    if (!at) return false;
+    size_t base_len = (size_t)(at - scope_name);
+    if (strlen(name) != base_len || strncmp(scope_name, name, base_len) != 0) return false;
+    if (!binding_node || ts_node_is_null(binding_node->node)) return false;
+    char key[128];
+    snprintf(key, sizeof(key), "%s@%u:%u", name,
+        ts_node_start_byte(binding_node->node), ts_node_end_byte(binding_node->node));
+    return strcmp(scope_name, key) == 0;
+}
+
+static void jm_scope_env_mark_pattern_bindings(JsMirTranspiler* mt, JsAstNode* pat) {
+    if (!mt || !pat) return;
+    switch (pat->node_type) {
+    case JS_AST_NODE_IDENTIFIER: {
+        JsIdentifierNode* id = (JsIdentifierNode*)pat;
+        if (!id->name) return;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        JsMirVarEntry* ve = jm_find_var(mt, vname);
+        if (ve) {
+            jm_scope_env_mark_and_writeback_binding(mt, vname, pat, ve->reg, ve->type_id);
+        }
+        return;
+    }
+    case JS_AST_NODE_ARRAY_PATTERN:
+    case JS_AST_NODE_ARRAY_EXPRESSION: {
+        for (JsAstNode* e = ((JsArrayNode*)pat)->elements; e; e = e->next) {
+            jm_scope_env_mark_pattern_bindings(mt, e);
+        }
+        return;
+    }
+    case JS_AST_NODE_OBJECT_PATTERN:
+    case JS_AST_NODE_OBJECT_EXPRESSION: {
+        for (JsAstNode* p = ((JsObjectNode*)pat)->properties; p; p = p->next) {
+            jm_scope_env_mark_pattern_bindings(mt, p);
+        }
+        return;
+    }
+    case JS_AST_NODE_PROPERTY:
+        jm_scope_env_mark_pattern_bindings(mt, ((JsPropertyNode*)pat)->value);
+        return;
+    case JS_AST_NODE_ASSIGNMENT_PATTERN:
+        jm_scope_env_mark_pattern_bindings(mt, ((JsAssignmentPatternNode*)pat)->left);
+        return;
+    case JS_AST_NODE_REST_ELEMENT:
+    case JS_AST_NODE_REST_PROPERTY:
+    case JS_AST_NODE_SPREAD_ELEMENT:
+        jm_scope_env_mark_pattern_bindings(mt, ((JsSpreadElementNode*)pat)->argument);
+        return;
+    default:
+        return;
+    }
+}
+
 static bool jm_mutable_native_var_needs_boxing_walk(JsMirTranspiler* mt,
         JsAstNode* node, const char* bare_name, int bare_len, TypeId native_type) {
     if (!node || !bare_name || bare_len <= 0) return false;
@@ -648,7 +707,8 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         JsFuncCollected* fc = mt->current_fc;
                         if (fc && fc->has_scope_env && fc->scope_env_names) {
                             for (int s = 0; s < fc->scope_env_count; s++) {
-                                if (strcmp(vname, fc->scope_env_names[s]) == 0) {
+                                if (jm_scope_env_name_matches_binding_in_statement(
+                                        fc->scope_env_names[s], vname, d->id)) {
                                     log_debug("v24: widening scope-env var '%s' from %d to ANY", vname, init_type);
                                     init_type = LMD_TYPE_ANY;
                                     break;
@@ -685,7 +745,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             }
                         }
                         jm_write_env_backing_if_needed(mt, jm_find_var(mt, vname), reg, LMD_TYPE_INT);
-                        jm_scope_env_mark_and_writeback(mt, vname, reg, LMD_TYPE_INT);
+                        jm_scope_env_mark_and_writeback_binding(mt, vname, d->id, reg, LMD_TYPE_INT);
                         jm_write_last_closure_capture_if_matching(mt, vname, reg, LMD_TYPE_INT);
                         if (var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST) {
                             MIR_reg_t boxed_reg = jm_box_int_reg(mt, reg);
@@ -713,7 +773,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             }
                         }
                         jm_write_env_backing_if_needed(mt, jm_find_var(mt, vname), reg, LMD_TYPE_FLOAT);
-                        jm_scope_env_mark_and_writeback(mt, vname, reg, LMD_TYPE_FLOAT);
+                        jm_scope_env_mark_and_writeback_binding(mt, vname, d->id, reg, LMD_TYPE_FLOAT);
                         jm_write_last_closure_capture_if_matching(mt, vname, reg, LMD_TYPE_FLOAT);
                         if (var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST) {
                             MIR_reg_t boxed_reg = jm_box_float(mt, reg);
@@ -743,7 +803,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             }
                         }
                         jm_write_env_backing_if_needed(mt, jm_find_var(mt, vname), reg, init_type);
-                        jm_scope_env_mark_and_writeback(mt, vname, reg, init_type);
+                        jm_scope_env_mark_and_writeback_binding(mt, vname, d->id, reg, init_type);
                         jm_write_last_closure_capture_if_matching(mt, vname, reg, init_type);
                         jm_declare_evalscript_global_lexical_if_needed(mt, var, id, val);
                         jm_define_global_var_property_for_main_var(mt, var, id, val);
@@ -929,7 +989,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             }
                         }
                         jm_write_env_backing_if_needed(mt, jm_find_var(mt, vname), reg, LMD_TYPE_ANY);
-                        jm_scope_env_mark_and_writeback(mt, vname, reg);
+                        jm_scope_env_mark_and_writeback_binding(mt, vname, d->id, reg);
                     }
                 }
 
@@ -972,6 +1032,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                 // v20: array destructuring via recursive helper
                 MIR_reg_t src = d->init ? jm_transpile_box_item(mt, d->init) : jm_emit_null(mt);
                 jm_emit_array_destructure(mt, d->id, src);
+                jm_scope_env_mark_pattern_bindings(mt, d->id);
                 // v28: Write destructured bindings to scope_env for closure capture (no reload marking)
                 if (mt->scope_env_reg != 0 && mt->current_fc && mt->current_fc->has_scope_env) {
                     JsFuncCollected* se_fc = mt->current_fc;
@@ -1027,6 +1088,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                 // v20: object destructuring via recursive helper
                 MIR_reg_t src = d->init ? jm_transpile_box_item(mt, d->init) : jm_emit_null(mt);
                 jm_emit_object_destructure(mt, d->id, src);
+                jm_scope_env_mark_pattern_bindings(mt, d->id);
                 // v28: Write destructured bindings to scope_env for closure capture.
                 // Unlike jm_scope_env_mark_and_writeback, we do NOT set in_scope_env=true
                 // on the variable because that would cause jm_scope_env_reload_vars to
@@ -3834,6 +3896,8 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     jm_clear_last_closure_snapshot(mt);
 
     jm_push_scope(mt);
+    int saved_loop_scope_depth = mt->loop_scope_depth;
+    mt->loop_scope_depth = mt->scope_depth;
 
     // Eval completion: Let V = undefined (spec §14.7.5.8 ForIn/OfBodyEvaluation)
     jm_eval_cptn_reset(mt);
@@ -3880,6 +3944,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     if (!var_name && !destr_pattern && !obj_destr_pattern && !lhs_ref_node && !lhs_call_target) {
         log_error("js-mir: for-of/for-in missing loop variable");
+        mt->loop_scope_depth = saved_loop_scope_depth;
         jm_pop_scope(mt);
         jm_restore_last_closure_snapshot(mt, &saved_last_closure);
         return;
@@ -4237,6 +4302,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         jm_emit_label(mt, l_end);
         if (mt->iteration_depth > 0) mt->iteration_depth--;
         if (mt->loop_depth > 0) mt->loop_depth--;
+        mt->loop_scope_depth = saved_loop_scope_depth;
         jm_pop_scope(mt);
         jm_restore_last_closure_snapshot(mt, &saved_last_closure);
         return;
@@ -4583,6 +4649,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     if (mt->for_of_depth > 0) mt->for_of_depth--;
     if (mt->iteration_depth > 0) mt->iteration_depth--;
     if (mt->loop_depth > 0) mt->loop_depth--;
+    mt->loop_scope_depth = saved_loop_scope_depth;
     jm_pop_scope(mt);
 
     // Js55 P19: restore last-closure tracking saved at entry.
