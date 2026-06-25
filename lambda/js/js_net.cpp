@@ -21,12 +21,15 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
+extern __thread EvalContext* context;
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" void js_clearTimeout(Item timer_id);
 extern "C" Item js_buffer_from_bytes(const char* data, int len);
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
 extern "C" Item js_throw_invalid_arg_type(const char* name, const char* expected, Item actual);
 extern "C" Item js_throw_out_of_range(const char* name, const char* range, Item actual);
+extern "C" Item js_timeout_ref(Item this_val);
+extern "C" Item js_timeout_unref(Item this_val);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -1112,6 +1115,10 @@ static Item js_socket_setTimeout(Item msecs, Item callback) {
             sock->timeout_timer = timer;
             sock->timeout_timer_active = true;
             js_property_set(self, make_string_item("__timeout_timer__"), timer);
+            if (!uv_is_closing((uv_handle_t*)&sock->tcp) &&
+                !uv_has_ref((uv_handle_t*)&sock->tcp)) {
+                js_timeout_unref(timer);
+            }
         }
     }
     return self;
@@ -1141,6 +1148,7 @@ static Item js_socket_ref(void) {
     JsSocket* sock = socket_from_object(self);
     if (sock && !uv_is_closing((uv_handle_t*)&sock->tcp)) {
         uv_ref((uv_handle_t*)&sock->tcp);
+        if (sock->timeout_timer_active) js_timeout_ref(sock->timeout_timer);
     }
     return self;
 }
@@ -1150,6 +1158,7 @@ static Item js_socket_unref(void) {
     JsSocket* sock = socket_from_object(self);
     if (sock && !uv_is_closing((uv_handle_t*)&sock->tcp)) {
         uv_unref((uv_handle_t*)&sock->tcp);
+        if (sock->timeout_timer_active) js_timeout_unref(sock->timeout_timer);
     }
     return self;
 }
@@ -2559,6 +2568,13 @@ static void server_connection_cb(uv_stream_t* server, int status) {
     client->tcp.data = client;
 
     if (uv_accept(server, (uv_stream_t*)&client->tcp) == 0) {
+        if (!context || !context->heap) {
+            uv_close((uv_handle_t*)&client->tcp, [](uv_handle_t* h) {
+                mem_free(h->data);
+            });
+            return;
+        }
+
         int max_connections = server_max_connections(srv);
         if (max_connections >= 0 && srv->connection_count >= max_connections) {
             server_emit_drop(srv, client);
