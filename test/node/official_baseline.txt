@@ -12,9 +12,9 @@
 # Workers: 9
 # Slow tests included: no
 # Slow list: 30 tests (test/node/official_slow_list.txt), threshold 10s
-# Total passing: 1621
-# Total tests: 3556  Passed: 1621  Failed: 1935  Missing: 0  Timed out: 0  Crashed: 15
-# Baseline comparison: previous 1619  Regressions: 0  Improvements: 2
+# Total passing: 1632
+# Total tests: 3556  Passed: 1632  Failed: 1924  Missing: 0  Timed out: 0  Crashed: 15
+# Baseline comparison: previous 1627  Regressions: 0  Improvements: 5
 # Runtime: 370.9s total wall (discover + execute)
 # Runtime: 3311.2s per-test sum (all executed tests)
 # Runtime: 868.0s per-test sum (passing baseline tests)
@@ -1086,6 +1086,8 @@ test-net-autoselectfamily-default.js
 test-net-autoselectfamily-ipv4first.js
 test-net-better-error-messages-listen-path.js
 test-net-better-error-messages-listen.js
+test-net-better-error-messages-port-hostname.js
+test-net-better-error-messages-path.js
 test-net-binary.js
 test-net-bind-twice.js
 test-net-blocklist.js
@@ -1103,6 +1105,7 @@ test-net-connect-buffer2.js
 test-net-connect-call-socket-connect.js
 test-net-connect-destroy.js
 test-net-connect-immediate-destroy.js
+test-net-connect-immediate-finish.js
 test-net-connect-keepalive.js
 test-net-connect-memleak.js
 test-net-connect-no-arg.js
@@ -1111,11 +1114,13 @@ test-net-connect-options-fd.js
 test-net-connect-options-invalid.js
 test-net-connect-options-ipv6.js
 test-net-connect-options-path.js
+test-net-connect-options-port.js
 test-net-connect-paused-connection.js
 test-net-connect-reset-after-destroy.js
 test-net-connect-reset-before-connected.js
 test-net-connect-reset-until-connected.js
 test-net-connect-reset.js
+test-net-dns-custom-lookup.js
 test-net-dns-error.js
 test-net-dns-lookup-skip.js
 test-net-dns-lookup.js
@@ -1136,10 +1141,12 @@ test-net-listen-error.js
 test-net-listen-handle-in-cluster-2.js
 test-net-listen-invalid-port.js
 test-net-listen-ipv6only.js
+test-net-listening.js
 test-net-local-address-port.js
 test-net-negative-zero.js
 test-net-normalize-args.js
 test-net-onread-static-buffer.js
+test-net-pause-resume-connecting.js
 test-net-perf_hooks.js
 test-net-persistent-keepalive.js
 test-net-persistent-nodelay.js
@@ -1153,11 +1160,14 @@ test-net-remote-address.js
 test-net-reuseport.js
 test-net-server-capture-rejection.js
 test-net-server-blocklist.js
+test-net-server-call-listen-multiple-times.js
 test-net-server-close-before-calling-lookup-callback.js
 test-net-server-close.js
 test-net-server-drop-connections.js
 test-net-server-listen-handle.js
+test-net-server-listen-options.js
 test-net-server-listen-path.js
+test-net-server-listen-remove-callback.js
 test-net-server-max-connections-close-makes-more-available.js
 test-net-server-reset.js
 test-net-server-try-ports.js
@@ -1176,6 +1186,7 @@ test-net-socket-destroy-twice.js
 test-net-socket-end-before-connect.js
 test-net-socket-end-callback.js
 test-net-socket-local-address.js
+test-net-socket-no-halfopen-enforcer.js
 test-net-socket-ready-without-cb.js
 test-net-socket-reset-send.js
 test-net-socket-reset-twice.js
