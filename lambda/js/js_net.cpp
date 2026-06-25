@@ -17,6 +17,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <math.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 
@@ -24,6 +25,8 @@ extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" void js_clearTimeout(Item timer_id);
 extern "C" Item js_buffer_from_bytes(const char* data, int len);
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
+extern "C" Item js_throw_invalid_arg_type(const char* name, const char* expected, Item actual);
+extern "C" Item js_throw_out_of_range(const char* name, const char* range, Item actual);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -1077,18 +1080,27 @@ static Item js_socket_timeout_fire(Item env_item) {
 // Socket.setTimeout(msecs, callback) — set idle timeout
 static Item js_socket_setTimeout(Item msecs, Item callback) {
     Item self = js_get_this();
-    // Store timeout value; if callback provided, add as 'timeout' listener
+    TypeId delay_type = get_type_id(msecs);
+    if (delay_type != LMD_TYPE_INT && delay_type != LMD_TYPE_INT64 && delay_type != LMD_TYPE_FLOAT) {
+        return js_throw_invalid_arg_type("msecs", "number", msecs);
+    }
+    Item delay_num = js_to_number(msecs);
+    double delay = net_number_value(delay_num);
+    if (!isfinite(delay) || delay < 0) {
+        return js_throw_out_of_range("msecs", "a non-negative finite number", msecs);
+    }
+    if (!is_undefined_item(callback) && !is_callable(callback)) {
+        return js_throw_invalid_arg_type("callback", "function", callback);
+    }
+
     js_property_set(self, make_string_item("timeout"), msecs);
     if (is_callable(callback)) {
-        // Register 'timeout' listener
         Item args[] = { make_string_item("timeout"), callback };
         Item on_fn = js_property_get(self, make_string_item("on"));
         if (is_callable(on_fn)) {
             js_call_function(on_fn, self, args, 2);
         }
     }
-    Item delay_num = js_to_number(msecs);
-    double delay = net_number_value(delay_num);
     JsSocket* sock = socket_from_object(self);
     socket_clear_timeout(sock);
     if (delay > 0) {
