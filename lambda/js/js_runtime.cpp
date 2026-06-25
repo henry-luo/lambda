@@ -6490,6 +6490,15 @@ extern "C" Item js_property_get_str(Item object, const char* key, int key_len) {
     return js_property_get(object, str_key);
 }
 
+static bool js_array_named_ic_enabled() {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char* flag = getenv("LAMBDA_JS_ARRAY_NAMED_IC");
+        enabled = (!flag || flag[0] == '\0' || strcmp(flag, "0") != 0) ? 1 : 0;
+    }
+    return enabled != 0;
+}
+
 static inline bool js_load_ic_offset_ok(Map* m, int64_t byte_offset) {
 #ifdef NDEBUG
     (void)m;
@@ -6509,9 +6518,42 @@ static inline bool js_load_ic_name_matches(ShapeEntry* entry,
         memcmp(entry->name->str, name, (size_t)name_len) == 0;
 }
 
+static inline bool js_named_ic_array_name_allowed(const char* name, int name_len) {
+    if (!name || name_len <= 0) return false;
+    if (name_len == 6 && memcmp(name, "length", 6) == 0) return false;
+    int64_t index = -1;
+    return !js_array_parse_index_name(name, name_len, &index);
+}
+
+static inline Map* js_named_ic_receiver_map(Item object, const char* name, int name_len,
+        uint8_t* out_receiver_kind) {
+    TypeId type = get_type_id(object);
+    if (type == LMD_TYPE_MAP) {
+        if (out_receiver_kind) *out_receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
+        return object.map;
+    }
+    if (type == LMD_TYPE_ARRAY && js_array_named_ic_enabled() &&
+            js_named_ic_array_name_allowed(name, name_len)) {
+        Array* arr = object.array;
+        if (!arr || arr->extra == 0) return NULL;
+        if (out_receiver_kind) *out_receiver_kind = JS_NAMED_IC_RECEIVER_ARRAY_PROPS;
+        return (Map*)(uintptr_t)arr->extra;
+    }
+    return NULL;
+}
+
+static inline bool js_named_ic_receiver_map_is_fast(Map* m, uint8_t receiver_kind) {
+    if (!m || !m->data) return false;
+    if (receiver_kind == JS_NAMED_IC_RECEIVER_ARRAY_PROPS) {
+        return m->map_kind == MAP_KIND_ARRAY_PROPS;
+    }
+    return receiver_kind == JS_NAMED_IC_RECEIVER_MAP && m->map_kind == MAP_KIND_PLAIN;
+}
+
 static inline bool js_load_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
-        Item* out_value) {
+        uint8_t receiver_kind, Item* out_value) {
     if (!m || !cached || !cached->shape || !cached->entry) return false;
+    if (cached->receiver_kind != receiver_kind) return false;
     if (m->type != cached->shape) return false;
     if (!js_load_ic_offset_ok(m, cached->byte_offset)) return false;
     ShapeEntry* entry = (ShapeEntry*)cached->entry;
@@ -6523,21 +6565,14 @@ static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
         JsLoadICEntry* out_entry, Item* out_value, JsLoadICProfileReason* out_reason) {
     if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
     if (!out_entry || !out_value || !name || name_len < 0) return false;
-    if (get_type_id(object) != LMD_TYPE_MAP) {
-        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_MAP;
-        return false;
-    }
-    Map* m = object.map;
+    uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
+    Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
     if (!m) {
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_MAP;
         return false;
     }
-    if (m->map_kind != MAP_KIND_PLAIN) {
+    if (!js_named_ic_receiver_map_is_fast(m, receiver_kind)) {
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_PLAIN;
-        return false;
-    }
-    if (!m->data) {
-        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NO_DATA;
         return false;
     }
     TypeMap* tm = (TypeMap*)m->type;
@@ -6556,7 +6591,7 @@ static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
         return false;
     }
     if (entry->flags != 0) {
-        js_map_promote_descriptor_kind(m);
+        if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP) js_map_promote_descriptor_kind(m);
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_FLAGS;
         return false;
     }
@@ -6567,7 +6602,7 @@ static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
 
     Item value = _map_read_field(entry, m->data);
     if (js_is_deleted_sentinel(value)) {
-        js_map_promote_descriptor_kind(m);
+        if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP) js_map_promote_descriptor_kind(m);
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_DELETED;
         return false;
     }
@@ -6575,6 +6610,7 @@ static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
     out_entry->shape = m->type;
     out_entry->entry = entry;
     out_entry->byte_offset = entry->byte_offset;
+    out_entry->receiver_kind = receiver_kind;
     *out_value = value;
     return true;
 }
@@ -6610,12 +6646,12 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
         return js_property_access_named_ic_slow(object, name, name_len, ic);
     }
 
-    Map* m = NULL;
-    if (get_type_id(object) == LMD_TYPE_MAP) m = object.map;
-    if (m && m->map_kind == MAP_KIND_PLAIN && m->data) {
+    uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
+    Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
+    if (js_named_ic_receiver_map_is_fast(m, receiver_kind)) {
         Item value = ItemNull;
         if (ic->state == JS_LOAD_IC_MONO) {
-            if (js_load_ic_try_hit_entry(m, &ic->entries[0], &value)) {
+            if (js_load_ic_try_hit_entry(m, &ic->entries[0], receiver_kind, &value)) {
                 js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_HIT_MONO);
                 js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_HIT_MONO);
                 return value;
@@ -6624,7 +6660,7 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
             int count = ic->count;
             if (count > JS_LOAD_IC_POLY_MAX) count = JS_LOAD_IC_POLY_MAX;
             for (int i = 0; i < count; i++) {
-                if (js_load_ic_try_hit_entry(m, &ic->entries[i], &value)) {
+                if (js_load_ic_try_hit_entry(m, &ic->entries[i], receiver_kind, &value)) {
                     js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_HIT_POLY);
                     js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_HIT_POLY);
                     return value;
@@ -6651,7 +6687,8 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
                 ic->name_len = name_len;
             }
             for (int i = 0; i < ic->count && i < JS_LOAD_IC_POLY_MAX; i++) {
-                if (ic->entries[i].shape == entry.shape) {
+                if (ic->entries[i].shape == entry.shape &&
+                        ic->entries[i].receiver_kind == entry.receiver_kind) {
                     ic->entries[i] = entry;
                     return value;
                 }
@@ -6680,6 +6717,273 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
     }
 
     return js_property_access_named_ic_slow(object, name, name_len, ic);
+}
+
+static inline bool js_store_ic_key_matches(JsStoreIC* ic, const char* name, int name_len) {
+    if (!ic || !name || name_len < 0) return false;
+    if (!ic->name) return true;
+    if (ic->name == name && ic->name_len == name_len) return true;
+    return ic->name_len == name_len && memcmp(ic->name, name, (size_t)name_len) == 0;
+}
+
+static Item js_property_set_named_ic_slow(Item object, const char* name,
+        int name_len, Item value, int64_t strict, JsStoreIC* ic) {
+    if (ic && ic->key_item != 0) {
+        Item key = (Item){.item = ic->key_item};
+        return js_property_set_v(object, key, value, strict);
+    }
+    if (!name || name_len < 0) return js_property_set_v(object, make_js_undefined(), value, strict);
+    Item key = (Item){.item = s2it(heap_create_name(name, (size_t)name_len))};
+    return js_property_set_v(object, key, value, strict);
+}
+
+static inline bool js_store_ic_can_write_same_slot(ShapeEntry* entry, Item value,
+        JsStoreICProfileReason* out_reason) {
+    if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_TYPE;
+    if (!entry || !entry->type) return false;
+    TypeId field_type = entry->type->type_id;
+    TypeId value_type = get_type_id(value);
+    if (field_type == value_type) return true;
+    if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) return true;
+    if (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT) return true;
+    return false;
+}
+
+static inline bool js_store_ic_write_same_slot(ShapeEntry* entry, void* data,
+        Item value, JsStoreICProfileReason* out_reason) {
+    if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_TYPE;
+    if (!entry || !entry->type || !data) return false;
+    TypeId field_type = entry->type->type_id;
+    TypeId value_type = get_type_id(value);
+    void* field_ptr = (char*)data + entry->byte_offset;
+
+    if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) {
+        *(double*)field_ptr = (double)value.get_int56();
+        return true;
+    }
+    if (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT) {
+        *(int64_t*)field_ptr = value.get_int56();
+        return true;
+    }
+    if (field_type != value_type) return false;
+
+    switch (value_type) {
+    case LMD_TYPE_NULL:
+        *(void**)field_ptr = NULL;
+        return true;
+    case LMD_TYPE_UNDEFINED:
+        *(bool*)field_ptr = false;
+        return true;
+    case LMD_TYPE_BOOL:
+        *(bool*)field_ptr = value.bool_val;
+        return true;
+    case LMD_TYPE_INT:
+        *(int64_t*)field_ptr = value.get_int56();
+        return true;
+    case LMD_TYPE_INT64:
+        *(int64_t*)field_ptr = value.get_int64();
+        return true;
+    case LMD_TYPE_FLOAT:
+        *(double*)field_ptr = value.get_double();
+        return true;
+    case LMD_TYPE_DTIME:
+        *(DateTime*)field_ptr = value.get_datetime();
+        return true;
+    case LMD_TYPE_STRING:
+        *(String**)field_ptr = value.get_safe_string();
+        return true;
+    case LMD_TYPE_SYMBOL:
+        *(Symbol**)field_ptr = value.get_safe_symbol();
+        return true;
+    case LMD_TYPE_BINARY:
+        *(String**)field_ptr = value.get_safe_binary();
+        return true;
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_RANGE:
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
+        *(Container**)field_ptr = value.container;
+        return true;
+    case LMD_TYPE_FUNC: case LMD_TYPE_VMAP: case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_TYPE: case LMD_TYPE_PATH:
+        *(void**)field_ptr = (void*)(uintptr_t)(value.item & 0x00FFFFFFFFFFFFFFULL);
+        return true;
+    default:
+        return false;
+    }
+}
+
+static inline bool js_store_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
+        uint8_t receiver_kind, Item value, JsStoreICProfileReason* out_reason) {
+    if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
+    if (!m || !cached || !cached->shape || !cached->entry) return false;
+    if (cached->receiver_kind != receiver_kind) {
+        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_MAP;
+        return false;
+    }
+    if (m->type != cached->shape) {
+        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_BAD_TYPEMAP;
+        return false;
+    }
+    if (!js_load_ic_offset_ok(m, cached->byte_offset)) {
+        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_OFFSET;
+        return false;
+    }
+    ShapeEntry* entry = (ShapeEntry*)cached->entry;
+    if (!js_store_ic_write_same_slot(entry, m->data, value, out_reason)) return false;
+    return true;
+}
+
+static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
+        Item value, JsLoadICEntry* out_entry, JsStoreICProfileReason* out_reason) {
+    if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
+    if (!out_entry || !name || name_len < 0) return false;
+    uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
+    Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
+    if (!m) {
+        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_MAP;
+        return false;
+    }
+    if (!js_named_ic_receiver_map_is_fast(m, receiver_kind)) {
+        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_PLAIN;
+        return false;
+    }
+    TypeMap* tm = (TypeMap*)m->type;
+    if (!tm || !typemap_ptr_is_plausible(tm) || !tm->shape) {
+        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_BAD_TYPEMAP;
+        return false;
+    }
+
+    ShapeEntry* entry = js_find_shape_entry(object, name, name_len);
+    if (!entry) {
+        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
+        return false;
+    }
+    if (!js_load_ic_name_matches(entry, name, name_len)) {
+        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NAME;
+        return false;
+    }
+    if (entry->flags != 0) {
+        if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP) js_map_promote_descriptor_kind(m);
+        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_FLAGS;
+        return false;
+    }
+    if (!js_load_ic_offset_ok(m, entry->byte_offset)) {
+        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_OFFSET;
+        return false;
+    }
+    Item old_value = _map_read_field(entry, m->data);
+    if (js_is_deleted_sentinel(old_value)) {
+        if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP) js_map_promote_descriptor_kind(m);
+        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_DELETED;
+        return false;
+    }
+    if (!js_store_ic_can_write_same_slot(entry, value, out_reason)) return false;
+
+    out_entry->shape = m->type;
+    out_entry->entry = entry;
+    out_entry->byte_offset = entry->byte_offset;
+    out_entry->receiver_kind = receiver_kind;
+    return true;
+}
+
+static void js_store_ic_install(JsStoreIC* ic, const char* name, int name_len,
+        JsLoadICEntry* entry) {
+    if (!ic || !entry || !entry->shape) return;
+    if (!ic->name) {
+        ic->name = name;
+        ic->name_len = name_len;
+    }
+    for (int i = 0; i < ic->count && i < JS_STORE_IC_POLY_MAX; i++) {
+        if (ic->entries[i].shape == entry->shape &&
+                ic->entries[i].receiver_kind == entry->receiver_kind) {
+            ic->entries[i] = *entry;
+            return;
+        }
+    }
+    if (ic->state == JS_STORE_IC_EMPTY || ic->count == 0) {
+        ic->entries[0] = *entry;
+        ic->count = 1;
+        ic->state = JS_STORE_IC_MONO;
+        js_exec_profile_count(JS_EXEC_PROF_STORE_IC_INSTALL_MONO);
+        js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_INSTALL_MONO);
+        return;
+    }
+    if (ic->count < JS_STORE_IC_POLY_MAX) {
+        ic->entries[ic->count++] = *entry;
+        ic->state = JS_STORE_IC_POLY;
+        js_exec_profile_count(JS_EXEC_PROF_STORE_IC_INSTALL_POLY);
+        js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_INSTALL_POLY);
+        return;
+    }
+    ic->state = JS_STORE_IC_MEGAMORPHIC;
+    js_exec_profile_count(JS_EXEC_PROF_STORE_IC_MEGAMORPHIC);
+    js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_MEGAMORPHIC);
+}
+
+extern "C" Item js_property_set_named_ic(Item object, const char* name,
+        int64_t name_len64, Item value, int64_t strict, JsStoreIC* ic) {
+    js_exec_profile_count(JS_EXEC_PROF_STORE_IC_PROBE);
+    js_profile_store_ic_site(ic ? ic->profile_label : NULL, JS_STORE_IC_SITE_PROBE);
+    if (!ic || !name || name_len64 < 0 || name_len64 > 2147483647LL) {
+        return js_property_set_named_ic_slow(object, name, 0, value, strict, ic);
+    }
+    int name_len = (int)name_len64;
+    if (!js_store_ic_key_matches(ic, name, name_len)) {
+        js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_MISS_KEY);
+        return js_property_set_named_ic_slow(object, name, name_len, value, strict, ic);
+    }
+
+    uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
+    Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
+    if (js_named_ic_receiver_map_is_fast(m, receiver_kind)) {
+        JsStoreICProfileReason hit_miss = JS_STORE_IC_SITE_MISS_NOT_FOUND;
+        if (ic->state == JS_STORE_IC_MONO) {
+            if (js_store_ic_try_hit_entry(m, &ic->entries[0], receiver_kind, value, &hit_miss)) {
+                if (ic->key_item != 0) {
+                    Item key = (Item){.item = ic->key_item};
+                    js_sync_global_var_module_binding(object, key, value);
+                }
+                js_exec_profile_count(JS_EXEC_PROF_STORE_IC_HIT_MONO);
+                js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_HIT_MONO);
+                return value;
+            }
+        } else if (ic->state == JS_STORE_IC_POLY) {
+            int count = ic->count;
+            if (count > JS_STORE_IC_POLY_MAX) count = JS_STORE_IC_POLY_MAX;
+            for (int i = 0; i < count; i++) {
+                if (js_store_ic_try_hit_entry(m, &ic->entries[i], receiver_kind, value, &hit_miss)) {
+                    if (ic->key_item != 0) {
+                        Item key = (Item){.item = ic->key_item};
+                        js_sync_global_var_module_binding(object, key, value);
+                    }
+                    js_exec_profile_count(JS_EXEC_PROF_STORE_IC_HIT_POLY);
+                    js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_HIT_POLY);
+                    return value;
+                }
+            }
+        } else if (ic->state == JS_STORE_IC_MEGAMORPHIC) {
+            js_exec_profile_count(JS_EXEC_PROF_STORE_IC_MEGAMORPHIC);
+            js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_MEGAMORPHIC);
+            return js_property_set_named_ic_slow(object, name, name_len, value, strict, ic);
+        }
+        js_profile_store_ic_site(ic->profile_label, hit_miss);
+    }
+
+    js_exec_profile_count(JS_EXEC_PROF_STORE_IC_MISS);
+    if (ic->miss_count != 0xffffu) ic->miss_count++;
+
+    Item result = js_property_set_named_ic_slow(object, name, name_len, value, strict, ic);
+    if (js_exception_pending || ic->state == JS_STORE_IC_MEGAMORPHIC) return result;
+
+    JsLoadICEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    JsStoreICProfileReason miss_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
+    if (js_store_ic_build_entry(object, name, name_len, value, &entry, &miss_reason)) {
+        js_store_ic_install(ic, name, name_len, &entry);
+    } else {
+        js_profile_store_ic_site(ic->profile_label, miss_reason);
+    }
+    return result;
 }
 
 // Convert a UTF-16 unit index to the corresponding byte offset in a UTF-8 string.

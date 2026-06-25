@@ -251,6 +251,7 @@ struct JsFuncCollected {
     int ctor_prop_ta_types[16];     // typed array type for each prop (-1 = not a typed array)
     TypeId ctor_prop_types[16];     // P1: detected field type from constructor init (LMD_TYPE_NULL = unknown)
     int ctor_prop_param_idx[16];    // P4b: maps property → constructor param index (-1 = not a param)
+    void** ctor_shape_cache_ptr;    // Tune12 P2: per-function constructor shape cache slot
 };
 
 // Free dynamically allocated scope_env_names for all func_entries
@@ -263,6 +264,10 @@ static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_coun
         if (func_entries[i].captures) {
             mem_free(func_entries[i].captures);
             func_entries[i].captures = NULL;
+        }
+        if (func_entries[i].ctor_shape_cache_ptr) {
+            mem_free(func_entries[i].ctor_shape_cache_ptr);
+            func_entries[i].ctor_shape_cache_ptr = NULL;
         }
     }
 }

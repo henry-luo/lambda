@@ -1,7 +1,7 @@
 # Transpile JS Tune11 Proposal: Plain-Map Property Access ICs
 
 Date: 2026-06-24
-Status: P1/P2/P4/P5 slices implemented; P6a cached intrinsic prototypes implemented; js262 clean
+Status: P1/P2/P3/P4/P5 slices implemented; P6a cached intrinsic prototypes implemented; js262 clean
 
 Primary sources:
 
@@ -59,9 +59,16 @@ This first slice has been implemented:
   already-found `ShapeEntry` slot directly when data/offset validation passes;
 - added helper-based callsite load IC support for compiled fixed-name member
   reads, with monomorphic, polymorphic, and megamorphic states;
+- added helper-based callsite store IC support for compiled fixed-name member
+  writes, with separate monomorphic, polymorphic, and megamorphic state from the
+  load IC;
 - kept IC fast hits plain-map-only and reduced the fast-hit guard to receiver
   map, `MAP_KIND_PLAIN`, data pointer, and shape pointer in release builds;
 - moved descriptor/accessor/deleted validation to IC install time;
+- kept store IC fast writes conservative: install only after the ordinary setter
+  has handled semantic checks, cache only existing own data slots on
+  `MAP_KIND_PLAIN`, and fast-write only same-slot in-place value types
+  (`field_type == value_type`, plus `float <- int` and `int64 <- int`);
 - removed the bad pointer-sized alignment and pointer-sized bounds checks from
   `js_load_ic_offset_ok()`; debug builds still check `byte_offset < data_cap`;
 - implemented P4 constructor-shape reuse for cached pre-shaped JS class
@@ -77,8 +84,24 @@ This first slice has been implemented:
   `Object.prototype`, `Function.prototype`, and other built-in prototypes via
   constructor `.prototype` property reads;
 - added the runtime flag `LAMBDA_JS_LOAD_IC=0` to disable the new load IC path
-  and `LAMBDA_JS_SHARED_CTOR_SHAPE=0` to disable constructor TypeMap sharing for
-  A/B measurement and emergency gating.
+  `LAMBDA_JS_STORE_IC=0` to disable the new store IC path, and
+  `LAMBDA_JS_SHARED_CTOR_SHAPE=0` to disable constructor TypeMap sharing for A/B
+  measurement and emergency gating.
+
+P3 implementation note (2026-06-25):
+
+- `js_property_set_named_ic()` now backs compiled non-computed member stores.
+  It probes only plain-map receivers, verifies shape identity, and writes the
+  cached slot directly on monomorphic or polymorphic hits.
+- Misses use the existing `js_property_set_v()` path first. The cache refresh
+  then inspects the resulting object and installs only if the final slot is an
+  existing own descriptor-free data property that can accept the current value
+  without TypeMap rebuild/detach.
+- Store-side profiler counters and per-site reason tables were added separately
+  from load IC counters.
+- Verification so far: release `make test262-baseline` passed with 40,261 /
+  40,261 fully passing and 0 regressions. Focused profile/benchmark acceptance
+  remains before claiming a performance win.
 
 The load-IC check fix is complete: release fast hits no longer reject compact
 boolean/object fields merely because the cached byte offset is not
