@@ -375,6 +375,11 @@ static void socket_pipe_end(Item obj) {
     }
 }
 
+static void socket_emit_close(Item obj, bool had_error) {
+    Item args[1] = { (Item){.item = b2it(had_error)} };
+    socket_emit(obj, "close", args, 1);
+}
+
 static void socket_emit_finish_once(JsSocket* sock) {
     if (!sock || sock->finished) return;
     sock->finished = true;
@@ -1014,7 +1019,7 @@ static void socket_close_now(JsSocket* sock) {
             if (s) {
                 net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, s->js_object);
                 js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
-                socket_emit(s->js_object, "close", NULL, 0);
+                socket_emit_close(s->js_object, false);
                 socket_note_closed(s);
                 if (s->connect_pending) {
                     s->free_after_connect_pending = true;
@@ -1042,7 +1047,7 @@ static void socket_close_reset_now(JsSocket* sock) {
             if (s) {
                     net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, s->js_object);
                     js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
-                    socket_emit(s->js_object, "close", NULL, 0);
+                    socket_emit_close(s->js_object, false);
                     socket_note_closed(s);
                     if (s->connect_pending) {
                         s->free_after_connect_pending = true;
@@ -1057,7 +1062,7 @@ static void socket_close_reset_now(JsSocket* sock) {
                 if (s) {
                     net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, s->js_object);
                     js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
-                    socket_emit(s->js_object, "close", NULL, 0);
+                    socket_emit_close(s->js_object, false);
                     socket_note_closed(s);
                     if (s->connect_pending) {
                         s->free_after_connect_pending = true;
@@ -2366,11 +2371,40 @@ static Item create_socket_for_connect(const NetConnectOptions* options) {
     return obj;
 }
 
+static JsSocket* socket_reattach_for_connect(Item self) {
+    TypeId self_type = get_type_id(self);
+    if (self_type != LMD_TYPE_MAP && self_type != LMD_TYPE_OBJECT && self_type != LMD_TYPE_VMAP) {
+        return NULL;
+    }
+
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) return NULL;
+
+    JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
+    sock->high_water_mark = 16 * 1024;
+    sock->js_object = self;
+    uv_tcp_init(loop, &sock->tcp);
+    sock->tcp.data = sock;
+
+    js_property_set(self, make_string_item("__handle__"),
+                    (Item){.item = i2it((int64_t)(uintptr_t)sock)});
+    js_property_set(self, make_string_item("_handle"), make_socket_handle_object(sock));
+    sock->handle_exposed = true;
+    js_property_set(self, make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
+    js_property_set(self, make_string_item("readable"), (Item){.item = ITEM_TRUE});
+    js_property_set(self, make_string_item("writable"), (Item){.item = ITEM_TRUE});
+    socket_update_io_counters(sock);
+    socket_update_state_properties(sock);
+    net_active_add(net_active_sockets, NET_ACTIVE_SOCKET_MAX, self);
+    return sock;
+}
+
 static Item js_socket_connect_args(Item self, Item rest_args) {
     NetConnectOptions options;
     if (!normalize_connect_args(rest_args, &options)) return ItemNull;
 
     JsSocket* sock = socket_from_object(self);
+    if (!sock) sock = socket_reattach_for_connect(self);
     if (!sock || sock->destroyed) return self;
     if (options.allow_half_open) {
         js_property_set(self, make_string_item("allowHalfOpen"), (Item){.item = ITEM_TRUE});
