@@ -20,6 +20,10 @@
 #include <math.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/types.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 extern __thread EvalContext* context;
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
@@ -80,6 +84,7 @@ static double net_number_value(Item value) {
 
 typedef struct PendingSocketWrite PendingSocketWrite;
 typedef struct JsServer JsServer;
+typedef struct JsBoundSocket JsBoundSocket;
 
 static Item make_string_item(const char* str);
 
@@ -169,6 +174,7 @@ typedef struct JsSocket {
     bool      onread_external_alloc;
     bool      auto_select_family;
     bool      handle_closed_by_user;
+    bool      adopted_bound_socket;
     int64_t   bytes_read;
     int64_t   bytes_written;
     int64_t   buffer_size;
@@ -194,6 +200,13 @@ typedef struct JsSocket {
     PendingSocketWrite* pending_writes_tail;
     JsServer* owner_server;
 } JsSocket;
+
+struct JsBoundSocket {
+    uv_tcp_t tcp;
+    Item     js_object;
+    bool     closed;
+    bool     adopted;
+};
 
 typedef struct SocketWriteReq {
     uv_write_t req;
@@ -915,7 +928,8 @@ static Item socket_submit_write(JsSocket* sock, char* copy, size_t data_len,
         return (Item){.item = b2it(false)};
     }
 
-    return (Item){.item = b2it(sock->buffer_size <= sock->high_water_mark)};
+    size_t write_queue_size = uv_stream_get_write_queue_size((uv_stream_t*)&sock->tcp);
+    return (Item){.item = b2it((int64_t)write_queue_size <= sock->high_water_mark)};
 }
 
 static void socket_queue_write(JsSocket* sock, char* copy, size_t data_len, Item callback) {
@@ -2155,6 +2169,207 @@ static bool validate_host_string(Item value, const char* name) {
     return true;
 }
 
+static JsBoundSocket* bound_socket_from_item(Item self) {
+    if (!net_is_object_like(self)) return NULL;
+    Item handle_item = js_property_get(self, make_string_item("__bound_socket_handle__"));
+    if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
+    return (JsBoundSocket*)(uintptr_t)it2i(handle_item);
+}
+
+static Item bound_socket_throw_adopted(void) {
+    return js_throw_error_with_code("ERR_SOCKET_HANDLE_ADOPTED",
+                                    "Socket handle has been adopted");
+}
+
+static void bound_socket_close_fd(JsBoundSocket* bound) {
+    if (!bound || bound->closed) return;
+    uv_os_fd_t fd;
+    if (uv_fileno((const uv_handle_t*)&bound->tcp, &fd) == 0) {
+#ifndef _WIN32
+        close((int)fd);
+#endif
+    }
+    bound->closed = true;
+}
+
+static int bound_socket_dup_fd(JsBoundSocket* bound) {
+    if (!bound || bound->closed || bound->adopted) return -1;
+    uv_os_fd_t fd;
+    if (uv_fileno((const uv_handle_t*)&bound->tcp, &fd) != 0) return -1;
+#ifdef _WIN32
+    return -1;
+#else
+    int dup_fd = dup((int)fd);
+    if (dup_fd >= 0) {
+        bound->adopted = true;
+        bound_socket_close_fd(bound);
+    }
+    return dup_fd;
+#endif
+}
+
+static Item js_bound_socket_address(void) {
+    Item self = js_get_this();
+    JsBoundSocket* bound = bound_socket_from_item(self);
+    if (!bound) return ItemNull;
+    if (bound->adopted) return bound_socket_throw_adopted();
+    if (bound->closed) return ItemNull;
+
+    struct sockaddr_storage addr;
+    int addrlen = sizeof(addr);
+    int r = uv_tcp_getsockname(&bound->tcp, (struct sockaddr*)&addr, &addrlen);
+    if (r != 0) return ItemNull;
+
+    Item result = js_new_object();
+    if (addr.ss_family == AF_INET) {
+        struct sockaddr_in* a4 = (struct sockaddr_in*)&addr;
+        char ip[64];
+        uv_ip4_name(a4, ip, sizeof(ip));
+        js_property_set(result, make_string_item("address"), make_string_item(ip));
+        js_property_set(result, make_string_item("family"), make_string_item("IPv4"));
+        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a4->sin_port))});
+    } else if (addr.ss_family == AF_INET6) {
+        struct sockaddr_in6* a6 = (struct sockaddr_in6*)&addr;
+        char ip[128];
+        uv_ip6_name(a6, ip, sizeof(ip));
+        js_property_set(result, make_string_item("address"), make_string_item(ip));
+        js_property_set(result, make_string_item("family"), make_string_item("IPv6"));
+        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a6->sin6_port))});
+    }
+    return result;
+}
+
+static Item js_bound_socket_fd(void) {
+    Item self = js_get_this();
+    JsBoundSocket* bound = bound_socket_from_item(self);
+    if (!bound) return (Item){.item = i2it(-1)};
+    if (bound->adopted) return bound_socket_throw_adopted();
+    if (bound->closed) return (Item){.item = i2it(-1)};
+
+    uv_os_fd_t fd;
+    if (uv_fileno((const uv_handle_t*)&bound->tcp, &fd) != 0) return (Item){.item = i2it(-1)};
+    return (Item){.item = i2it((int64_t)fd)};
+}
+
+static Item js_bound_socket_close(void) {
+    Item self = js_get_this();
+    JsBoundSocket* bound = bound_socket_from_item(self);
+    if (!bound) return make_undefined_item();
+    if (bound->adopted) return bound_socket_throw_adopted();
+    bound_socket_close_fd(bound);
+    return make_undefined_item();
+}
+
+static bool bound_socket_has_live_listener(const struct sockaddr* addr, int addrlen) {
+    if (!addr || addrlen <= 0) return false;
+#ifdef _WIN32
+    return false;
+#else
+    int fd = socket(addr->sa_family, SOCK_STREAM, 0);
+    if (fd < 0) return false;
+    int r = connect(fd, addr, (socklen_t)addrlen);
+    close(fd);
+    return r == 0;
+#endif
+}
+
+extern "C" Item js_net_BoundSocket(Item options) {
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) return ItemNull;
+
+    if (!is_undefined_item(options) && options.item != ITEM_NULL && !net_is_object_like(options)) {
+        js_throw_invalid_arg_type("options", "Object", options);
+        return ItemNull;
+    }
+
+    int port = 0;
+    char host_buf[256] = "0.0.0.0";
+    bool ipv6_only = false;
+    bool reuse_port = false;
+
+    if (net_is_object_like(options)) {
+        Item host = js_property_get(options, make_string_item("host"));
+        if (!is_undefined_item(host) && host.item != ITEM_NULL) {
+            if (!copy_string_item(host, host_buf, (int)sizeof(host_buf))) {
+                js_throw_invalid_arg_type("options.host", "string", host);
+                return ItemNull;
+            }
+            if (!validate_host_string(host, "options.host")) return ItemNull;
+        }
+        Item port_item = js_property_get(options, make_string_item("port"));
+        if (!is_undefined_item(port_item) && port_item.item != ITEM_NULL) {
+            if (!parse_port(port_item, &port)) return ItemNull;
+        }
+        Item opt_ipv6_only = js_property_get(options, make_string_item("ipv6Only"));
+        ipv6_only = get_type_id(opt_ipv6_only) == LMD_TYPE_BOOL && it2b(opt_ipv6_only);
+        Item opt_reuse_port = js_property_get(options, make_string_item("reusePort"));
+        reuse_port = get_type_id(opt_reuse_port) == LMD_TYPE_BOOL && it2b(opt_reuse_port);
+        if ((is_undefined_item(host) || host.item == ITEM_NULL) && ipv6_only) {
+            memcpy(host_buf, "::", 3);
+        }
+    }
+
+    struct sockaddr_storage addr;
+    int flags = 0;
+#ifdef UV_TCP_REUSEPORT
+    if (reuse_port) flags |= UV_TCP_REUSEPORT;
+#else
+    if (reuse_port) {
+        js_throw_error_with_code("ENOSYS", "reusePort is not supported");
+        return ItemNull;
+    }
+#endif
+
+    int addrlen = 0;
+    int r = uv_ip4_addr(host_buf, port, (struct sockaddr_in*)&addr);
+    if (r != 0) {
+        r = uv_ip6_addr(host_buf, port, (struct sockaddr_in6*)&addr);
+        if (r == 0 && ipv6_only) flags |= UV_TCP_IPV6ONLY;
+        if (r == 0) addrlen = sizeof(struct sockaddr_in6);
+    } else {
+        addrlen = sizeof(struct sockaddr_in);
+    }
+    if (r != 0) {
+        js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The property 'options.host' is invalid");
+        return ItemNull;
+    }
+    if (!reuse_port && port > 0 &&
+        bound_socket_has_live_listener((const struct sockaddr*)&addr, addrlen)) {
+        Item err = make_uv_error(UV_EADDRINUSE, "bind", host_buf, port);
+        js_throw_value(err);
+        return ItemNull;
+    }
+
+    JsBoundSocket* bound = (JsBoundSocket*)mem_calloc(1, sizeof(JsBoundSocket), MEM_CAT_JS_RUNTIME);
+    r = uv_tcp_init(loop, &bound->tcp);
+    if (r != 0) {
+        mem_free(bound);
+        return js_throw_error_with_code(uv_err_name(r), uv_strerror(r));
+    }
+    bound->tcp.data = bound;
+    uv_unref((uv_handle_t*)&bound->tcp);
+
+    r = uv_tcp_bind(&bound->tcp, (const struct sockaddr*)&addr, (unsigned int)flags);
+    if (r != 0) {
+        Item err = make_uv_error(r, "bind", host_buf, port);
+        mem_free(bound);
+        js_throw_value(err);
+        return ItemNull;
+    }
+
+    Item obj = js_new_object();
+    js_property_set(obj, make_string_item("__bound_socket_handle__"),
+                    (Item){.item = i2it((int64_t)(uintptr_t)bound)});
+    js_property_set(obj, make_string_item("address"),
+                    js_new_function((void*)js_bound_socket_address, 0));
+    js_property_set(obj, make_string_item("fd"),
+                    js_new_function((void*)js_bound_socket_fd, 0));
+    js_property_set(obj, make_string_item("close"),
+                    js_new_function((void*)js_bound_socket_close, 0));
+    bound->js_object = obj;
+    return obj;
+}
+
 static bool net_string_equals_ascii_ci(const char* a, const char* b) {
     if (!a || !b) return false;
     while (*a && *b) {
@@ -3354,6 +3569,11 @@ static Item js_socket_connect_args(Item self, Item rest_args) {
     JsSocket* sock = socket_from_object(self);
     if (!sock) sock = socket_reattach_for_connect(self);
     if (!sock || sock->destroyed) return self;
+    if (sock->adopted_bound_socket && (options.has_local_address || options.has_local_port)) {
+        return js_throw_type_error_code(
+            "ERR_INVALID_ARG_VALUE",
+            "The argument 'options' cannot set localAddress or localPort when a bound handle is used");
+    }
     if (options.allow_half_open) {
         js_property_set(self, make_string_item("allowHalfOpen"), (Item){.item = ITEM_TRUE});
     }
@@ -3583,6 +3803,7 @@ static int server_max_connections(JsServer* srv) {
     Item max_item = js_property_get(srv->js_object, make_string_item("maxConnections"));
     if (get_type_id(max_item) == LMD_TYPE_INT) return (int)it2i(max_item);
     if (get_type_id(max_item) == LMD_TYPE_INT64) return (int)it2l(max_item);
+    if (get_type_id(max_item) == LMD_TYPE_FLOAT) return (int)it2d(max_item);
     return -1;
 }
 
@@ -3996,10 +4217,84 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
     bool reuse_port = false;
     bool listen_signal_aborted = false;
 
+    JsBoundSocket* bound_listen = bound_socket_from_item(port_item);
+    if (bound_listen) {
+        if (bound_listen->closed || bound_listen->adopted) {
+            return bound_socket_throw_adopted();
+        }
+        int fd = bound_socket_dup_fd(bound_listen);
+        if (fd < 0) {
+            Item err = make_uv_error(UV_EBADF, "listen", NULL, -1);
+            server_schedule_error(self, err);
+            return self;
+        }
+        int open_r = uv_tcp_open(&srv->tcp, (uv_os_sock_t)fd);
+        if (open_r != 0) {
+#ifndef _WIN32
+            close(fd);
+#endif
+            Item err = make_uv_error(open_r, "listen", NULL, -1);
+            server_schedule_error(self, err);
+            return self;
+        }
+        int listen_r = uv_listen((uv_stream_t*)&srv->tcp, 128, server_connection_cb);
+        if (listen_r != 0) {
+            Item err = make_uv_error(listen_r, "listen", NULL, -1);
+            server_schedule_error(self, err);
+            return self;
+        }
+        net_active_add(net_active_servers, NET_ACTIVE_SERVER_MAX, self);
+        server_update_connection_key(self, srv, 0);
+        js_property_set(self, make_string_item("listening"), (Item){.item = ITEM_TRUE});
+        server_schedule_listening(self, srv, callback);
+        return self;
+    }
+
     TypeId port_type = get_type_id(port_item);
     if (port_type == LMD_TYPE_MAP || port_type == LMD_TYPE_OBJECT || port_type == LMD_TYPE_VMAP) {
         bool has_port = net_object_has_key(port_item, "port");
         bool has_path = net_object_has_key(port_item, "path");
+        bool has_fd = net_object_has_key(port_item, "fd");
+        if (has_fd) {
+            Item fd_item = js_property_get(port_item, make_string_item("fd"));
+            TypeId fd_type = get_type_id(fd_item);
+            bool valid_fd_number = false;
+            int64_t fd_value = 0;
+            if (fd_type == LMD_TYPE_INT) {
+                fd_value = it2i(fd_item);
+                valid_fd_number = true;
+            } else if (fd_type == LMD_TYPE_INT64) {
+                fd_value = it2l(fd_item);
+                valid_fd_number = true;
+            }
+            if (!valid_fd_number) {
+                js_throw_invalid_arg_type("options.fd", "number", fd_item);
+                return self;
+            }
+            if (fd_value < 0) {
+                js_throw_type_error_code(
+                    "ERR_INVALID_ARG_VALUE",
+                    "The argument 'options' must have the property \"port\" or \"path\". Received an instance of Object");
+                return self;
+            }
+            int open_r = uv_tcp_open(&srv->tcp, (uv_os_sock_t)fd_value);
+            if (open_r != 0) {
+                Item err = make_uv_error(open_r, "listen", NULL, -1);
+                server_schedule_error(self, err);
+                return self;
+            }
+            int listen_r = uv_listen((uv_stream_t*)&srv->tcp, 128, server_connection_cb);
+            if (listen_r != 0) {
+                Item err = make_uv_error(listen_r, "listen", NULL, -1);
+                server_schedule_error(self, err);
+                return self;
+            }
+            net_active_add(net_active_servers, NET_ACTIVE_SERVER_MAX, self);
+            server_update_connection_key(self, srv, 0);
+            js_property_set(self, make_string_item("listening"), (Item){.item = ITEM_TRUE});
+            server_schedule_listening(self, srv, callback);
+            return self;
+        }
         if (!has_port && !has_path) {
             js_throw_type_error_code(
                 "ERR_INVALID_ARG_VALUE",
@@ -4473,12 +4768,35 @@ extern "C" Item js_net_Socket(Item options) {
     uv_tcp_init(loop, &sock->tcp);
     sock->tcp.data = sock;
 
+    Item bound_handle = make_undefined_item();
+    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT ||
+        get_type_id(options) == LMD_TYPE_VMAP) {
+        bound_handle = js_property_get(options, make_string_item("handle"));
+        JsBoundSocket* bound = bound_socket_from_item(bound_handle);
+        if (bound) {
+            int fd = bound_socket_dup_fd(bound);
+            if (fd < 0 || uv_tcp_open(&sock->tcp, (uv_os_sock_t)fd) != 0) {
+#ifndef _WIN32
+                if (fd >= 0) close(fd);
+#endif
+                mem_free(sock);
+                js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
+                                         "The property 'options.handle' is invalid");
+                return ItemNull;
+            }
+            sock->adopted_bound_socket = true;
+        }
+    }
+
     uv_unref((uv_handle_t*)&sock->tcp);
     Item obj = make_socket_object(sock, false);
     if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT ||
         get_type_id(options) == LMD_TYPE_VMAP) {
         Item handle = js_property_get(options, make_string_item("handle"));
-        if (get_type_id(handle) == LMD_TYPE_MAP || get_type_id(handle) == LMD_TYPE_OBJECT ||
+        if (sock->adopted_bound_socket) {
+            js_property_set(obj, make_string_item("_handle"), make_socket_handle_object(sock));
+            sock->handle_exposed = true;
+        } else if (get_type_id(handle) == LMD_TYPE_MAP || get_type_id(handle) == LMD_TYPE_OBJECT ||
             get_type_id(handle) == LMD_TYPE_VMAP) {
             js_property_set(obj, make_string_item("_handle"), handle);
             Item native_handle = js_property_get(handle, make_string_item("__socket_handle__"));
@@ -4693,6 +5011,7 @@ extern "C" Item js_get_net_namespace(void) {
     net_set_method(net_namespace, "connect",          (void*)js_net_createConnection, -1); // alias
     Item socket_fn = net_set_method(net_namespace, "Socket", (void*)js_net_Socket, 1);
     Item block_list_fn = net_set_method(net_namespace, "BlockList", (void*)js_net_BlockList, 1);
+    Item bound_socket_fn = net_set_method(net_namespace, "BoundSocket", (void*)js_net_BoundSocket, 1);
     Item stream_fn = net_set_method(net_namespace, "Stream", (void*)js_net_Socket, 1); // legacy alias
     Item server_fn = net_set_method(net_namespace, "Server", (void*)js_net_createServer, -1); // alias
     net_set_method(net_namespace, "isIP",             (void*)js_net_isIP, 1);
@@ -4709,6 +5028,7 @@ extern "C" Item js_get_net_namespace(void) {
     net_set_method(net_namespace, "_normalizeArgs", (void*)js_net_normalizeArgs, 1);
     js_property_set(block_list_fn, make_string_item("isBlockList"),
                     js_new_function((void*)js_block_list_isBlockList, 1));
+    net_constructor_prototype(bound_socket_fn, JS_CLASS_OBJECT);
 
     Item default_key = make_string_item("default");
     js_property_set(net_namespace, default_key, net_namespace);

@@ -12,9 +12,9 @@
 # Workers: 9
 # Slow tests included: no
 # Slow list: 30 tests (test/node/official_slow_list.txt), threshold 10s
-# Total passing: 1641
-# Total tests: 3556  Passed: 1641  Failed: 1915  Missing: 0  Timed out: 0  Crashed: 15
-# Baseline comparison: previous 1639  Regressions: 0  Improvements: 2
+# Total passing: 1645
+# Total tests: 3556  Passed: 1645  Failed: 1911  Missing: 0  Timed out: 0  Crashed: 15
+# Baseline comparison: previous 1644  Regressions: 0  Improvements: 1
 # Runtime: 370.9s total wall (discover + execute)
 # Runtime: 3311.2s per-test sum (all executed tests)
 # Runtime: 868.0s per-test sum (passing baseline tests)
@@ -1091,6 +1091,7 @@ test-net-better-error-messages-path.js
 test-net-binary.js
 test-net-bind-twice.js
 test-net-blocklist.js
+test-net-boundsocket.js
 test-net-buffersize.js
 test-net-bytes-read.js
 test-net-bytes-stats.js
@@ -1140,6 +1141,7 @@ test-net-listen-after-destroying-stdin.js
 test-net-listen-close-server-callback-is-not-function.js
 test-net-listen-close-server.js
 test-net-listen-error.js
+test-net-listen-fd0.js
 test-net-listen-handle-in-cluster-2.js
 test-net-listen-invalid-port.js
 test-net-listen-ipv6only.js
@@ -1175,6 +1177,7 @@ test-net-server-listen-options.js
 test-net-server-listen-path.js
 test-net-server-listen-remove-callback.js
 test-net-server-max-connections-close-makes-more-available.js
+test-net-server-max-connections.js
 test-net-server-nodelay.js
 test-net-server-options.js
 test-net-server-pause-on-connect.js
@@ -1207,6 +1210,7 @@ test-net-socket-write-after-close.js
 test-net-socket-write-error.js
 test-net-stream.js
 test-net-sync-cork.js
+test-net-throttle.js
 test-net-timeout-no-handle.js
 test-net-writable.js
 test-net-write-after-close.js
