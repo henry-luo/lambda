@@ -54,6 +54,15 @@ static bool is_callable(Item item) {
     return get_type_id(item) == LMD_TYPE_FUNC;
 }
 
+static Item net_normalized_args_key(void) {
+    return make_string_item("__lambda_net_normalized_args__");
+}
+
+static bool net_is_normalized_args(Item value) {
+    if (get_type_id(value) != LMD_TYPE_ARRAY) return false;
+    return js_is_truthy(js_property_get(value, net_normalized_args_key()));
+}
+
 static double net_number_value(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_INT) return (double)it2i(value);
@@ -1142,9 +1151,28 @@ static Item js_socket_setKeepAlive(Item enable, Item delay) {
     return js_get_this();
 }
 
-// Socket.setNoDelay(noDelay) — stub
+// Socket.setNoDelay([noDelay])
 static Item js_socket_setNoDelay(Item noDelay) {
-    return js_get_this();
+    Item self = js_get_this();
+    JsSocket* sock = socket_from_object(self);
+    bool enable = is_undefined_item(noDelay) ? true : js_is_truthy(noDelay);
+    if (sock) {
+        if (sock->no_delay_requested == enable) return self;
+        sock->no_delay_requested = enable;
+    } else if (!enable) {
+        return self;
+    }
+
+    Item handle = js_property_get(self, make_string_item("_handle"));
+    if (handle.item != 0 && handle.item != ITEM_NULL && !is_undefined_item(handle)) {
+        Item fn = js_property_get(handle, make_string_item("setNoDelay"));
+        if (is_callable(fn)) {
+            Item arg = (Item){.item = b2it(enable)};
+            js_call_function(fn, handle, &arg, 1);
+            js_microtask_flush();
+        }
+    }
+    return self;
 }
 
 // Socket.ref() / Socket.unref() — stub
@@ -1595,6 +1623,26 @@ static bool copy_string_item(Item value, char* out, int out_size) {
     return true;
 }
 
+static bool string_item_has_nul(Item value) {
+    if (get_type_id(value) != LMD_TYPE_STRING) return false;
+    String* s = it2s(value);
+    for (int64_t i = 0; i < s->len; i++) {
+        if (s->chars[i] == '\0') return true;
+    }
+    return false;
+}
+
+static bool validate_host_string(Item value, const char* name) {
+    if (string_item_has_nul(value)) {
+        char msg[128];
+        snprintf(msg, sizeof(msg),
+                 "The property '%s' must be a string without null bytes.", name);
+        js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
+        return false;
+    }
+    return true;
+}
+
 static int net_keep_alive_delay_secs(Item value) {
     if (is_undefined_item(value) || value.item == ITEM_NULL) return 0;
     Item num = js_to_number(value);
@@ -1658,6 +1706,7 @@ static bool normalize_options_object(Item options, NetConnectOptions* out) {
             js_throw_invalid_arg_type("options.host", "string", host);
             return false;
         }
+        if (!validate_host_string(host, "options.host")) return false;
     }
 
     Item family = js_property_get(options, make_string_item("family"));
@@ -1748,6 +1797,17 @@ static bool normalize_connect_args(Item rest_args, NetConnectOptions* out) {
     }
 
     Item first = js_array_get_int(rest_args, 0);
+    if (argc == 1 && get_type_id(first) == LMD_TYPE_ARRAY) {
+        if (!net_is_normalized_args(first)) {
+            throw_missing_connect_args();
+            return false;
+        }
+        rest_args = first;
+        argc64 = js_array_length(rest_args);
+        argc = argc64 > 16 ? 16 : (int)argc64;
+        first = js_array_get_int(rest_args, 0);
+    }
+
     if (is_undefined_item(first)) {
         throw_missing_connect_args();
         return false;
@@ -1775,6 +1835,7 @@ static bool normalize_connect_args(Item rest_args, NetConnectOptions* out) {
                 js_throw_invalid_arg_type("host", "string", second);
                 return false;
             }
+            if (!validate_host_string(second, "host")) return false;
         }
     }
     if (argc > 2) {
@@ -3050,6 +3111,20 @@ extern "C" Item js_net_Socket(Item options) {
     Item obj = make_socket_object(sock, false);
     if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT ||
         get_type_id(options) == LMD_TYPE_VMAP) {
+        Item handle = js_property_get(options, make_string_item("handle"));
+        if (get_type_id(handle) == LMD_TYPE_MAP || get_type_id(handle) == LMD_TYPE_OBJECT ||
+            get_type_id(handle) == LMD_TYPE_VMAP) {
+            js_property_set(obj, make_string_item("_handle"), handle);
+            sock->handle_exposed = true;
+        }
+        Item readable = js_property_get(options, make_string_item("readable"));
+        if (get_type_id(readable) == LMD_TYPE_BOOL) {
+            js_property_set(obj, make_string_item("readable"), readable);
+        }
+        Item writable = js_property_get(options, make_string_item("writable"));
+        if (get_type_id(writable) == LMD_TYPE_BOOL) {
+            js_property_set(obj, make_string_item("writable"), writable);
+        }
         Item signal = js_property_get(options, make_string_item("signal"));
         if (!is_undefined_item(signal) && signal.item != ITEM_NULL) {
             socket_configure_abort_signal(sock, signal);
@@ -3110,6 +3185,57 @@ static Item js_net_setDefaultAutoSelectFamilyAttemptTimeout(Item timeout_item) {
     return (Item){.item = ITEM_UNDEFINED};
 }
 
+static Item js_net_normalizeArgs(Item input) {
+    Item result = js_array_new(0);
+    Item options = js_new_object();
+    Item callback = ItemNull;
+
+    if (get_type_id(input) == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(input);
+        if (len > 0) {
+            Item first = js_array_get_int(input, 0);
+            if (get_type_id(first) == LMD_TYPE_MAP ||
+                get_type_id(first) == LMD_TYPE_OBJECT ||
+                get_type_id(first) == LMD_TYPE_VMAP) {
+                options = first;
+            } else if (!is_undefined_item(first) && first.item != ITEM_NULL) {
+                js_property_set(options, make_string_item("port"), first);
+            }
+        }
+        if (len > 1) {
+            Item second = js_array_get_int(input, 1);
+            if (is_callable(second)) {
+                callback = second;
+            } else if (!is_undefined_item(second) && second.item != ITEM_NULL &&
+                       get_type_id(options) == LMD_TYPE_MAP) {
+                js_property_set(options, make_string_item("host"), second);
+            }
+        }
+        if (len > 2) {
+            Item third = js_array_get_int(input, 2);
+            if (is_callable(third)) callback = third;
+        }
+    }
+
+    js_array_push(result, options);
+    js_array_push(result, callback);
+    js_property_set(result, net_normalized_args_key(), (Item){.item = ITEM_TRUE});
+    return result;
+}
+
+extern "C" Item js_get_internal_net_namespace(void) {
+    static Item internal_net_namespace = {0};
+    if (internal_net_namespace.item != 0) return internal_net_namespace;
+
+    internal_net_namespace = js_new_object();
+    heap_register_gc_root(&internal_net_namespace.item);
+    js_property_set(internal_net_namespace, make_string_item("normalizedArgsSymbol"),
+                    net_normalized_args_key());
+    js_property_set(internal_net_namespace, make_string_item("kReinitializeHandle"),
+                    make_string_item("kReinitializeHandle"));
+    return internal_net_namespace;
+}
+
 extern "C" Item js_get_net_namespace(void) {
     if (net_namespace.item != 0) return net_namespace;
 
@@ -3132,6 +3258,7 @@ extern "C" Item js_get_net_namespace(void) {
                    (void*)js_net_getDefaultAutoSelectFamilyAttemptTimeout, 0);
     net_set_method(net_namespace, "setDefaultAutoSelectFamilyAttemptTimeout",
                    (void*)js_net_setDefaultAutoSelectFamilyAttemptTimeout, 1);
+    net_set_method(net_namespace, "_normalizeArgs", (void*)js_net_normalizeArgs, 1);
 
     Item default_key = make_string_item("default");
     js_property_set(net_namespace, default_key, net_namespace);

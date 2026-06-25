@@ -33379,6 +33379,12 @@ extern "C" Item js_module_get(Item specifier) {
         extern Item js_get_net_namespace(void);
         return js_get_net_namespace();
     }
+    // internal/net
+    if ((spec->len == 12 && memcmp(spec->chars, "internal/net", 12) == 0) ||
+        (spec->len == 15 && memcmp(spec->chars, "internal/net.js", 15) == 0)) {
+        extern Item js_get_internal_net_namespace(void);
+        return js_get_internal_net_namespace();
+    }
     // node:tls
     if ((spec->len == 3 && memcmp(spec->chars, "tls", 3) == 0) ||
         (spec->len == 6 && memcmp(spec->chars, "tls.js", 6) == 0) ||
