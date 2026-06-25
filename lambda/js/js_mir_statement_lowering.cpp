@@ -2568,6 +2568,15 @@ static MIR_reg_t jm_emit_dynamic_new_expr(JsMirTranspiler* mt, JsCallNode* call,
         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
 }
 
+static bool jm_func_ctor_shape_enabled() {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char* flag = getenv("LAMBDA_JS_FUNC_CTOR_SHAPE");
+        enabled = (!flag || flag[0] == '\0' || strcmp(flag, "0") != 0) ? 1 : 0;
+    }
+    return enabled != 0;
+}
+
 MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     if (!call->callee) return jm_emit_null(mt);
 
@@ -3546,21 +3555,22 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         JsFunctionNode* fn = NULL;
         if (ntype == JS_AST_NODE_FUNCTION_DECLARATION) {
             fn = (JsFunctionNode*)entry->node;
-        } else if (ntype == JS_AST_NODE_VARIABLE_DECLARATOR) {
-            JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)entry->node;
-            if (decl->init && (decl->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-                               decl->init->node_type == JS_AST_NODE_ARROW_FUNCTION))
-                fn = (JsFunctionNode*)decl->init;
         }
         if (fn) ctor_fc = jm_find_collected_func(mt, fn);
     }
 
-    if (!ctor_fc || ctor_fc->ctor_prop_count <= 0) {
+    if (!jm_func_ctor_shape_enabled() || !ctor_fc || ctor_fc->is_reassigned ||
+            ctor_fc->is_class_method || ctor_fc->ctor_has_dynamic_this_call ||
+            ctor_fc->func_ctor_shape_compose_failed || ctor_fc->ctor_prop_count <= 0) {
         MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
         return jm_call_3(mt, "js_new_from_class_object", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
             MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
             MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+    }
+
+    if (!ctor_fc->ctor_shape_cache_ptr) {
+        ctor_fc->ctor_shape_cache_ptr = (void**)mem_calloc(1, sizeof(void*), MEM_CAT_JS_RUNTIME);
     }
 
     // the early return above guarantees ctor_fc has shaped properties here,
@@ -3586,13 +3596,24 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_lens[i])));
         }
 
-        obj = jm_call_4(mt, "js_constructor_create_object_shaped", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, names_arr),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, lens_arr),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
-        log_debug("A5: new %.*s using pre-shaped object with %d props",
-                  ctor_len, ctor_name, ctor_fc->ctor_prop_count);
+        if (ctor_fc->ctor_shape_cache_ptr) {
+            obj = jm_call_5(mt, "js_constructor_create_object_shaped_cached", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, names_arr),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, lens_arr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ctor_fc->ctor_shape_cache_ptr));
+            log_debug("Tune12-P2: new %.*s using shape-cached function ctor object with %d props",
+                      ctor_len, ctor_name, ctor_fc->ctor_prop_count);
+        } else {
+            obj = jm_call_4(mt, "js_constructor_create_object_shaped", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, names_arr),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, lens_arr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
+            log_debug("A5: new %.*s using pre-shaped object with %d props",
+                      ctor_len, ctor_name, ctor_fc->ctor_prop_count);
+        }
     }
 
     MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);

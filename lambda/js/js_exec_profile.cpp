@@ -58,6 +58,11 @@ typedef struct JsExecProfileLoadICSite {
     uint64_t counts[JS_LOAD_IC_SITE_REASON_COUNT];
 } JsExecProfileLoadICSite;
 
+typedef struct JsExecProfileStoreICSite {
+    char label[128];
+    uint64_t counts[JS_STORE_IC_SITE_REASON_COUNT];
+} JsExecProfileStoreICSite;
+
 int g_js_exec_profile_mode = -1;
 
 static JsExecProfileSlot g_js_exec_profile_slots[JS_EXEC_PROF_EVENT_COUNT] = {
@@ -85,6 +90,13 @@ static JsExecProfileSlot g_js_exec_profile_slots[JS_EXEC_PROF_EVENT_COUNT] = {
     {"load_ic_install_mono", 0, 0, 0, 0},
     {"load_ic_install_poly", 0, 0, 0, 0},
     {"load_ic_megamorphic", 0, 0, 0, 0},
+    {"store_ic_probe", 0, 0, 0, 0},
+    {"store_ic_hit_mono", 0, 0, 0, 0},
+    {"store_ic_hit_poly", 0, 0, 0, 0},
+    {"store_ic_miss", 0, 0, 0, 0},
+    {"store_ic_install_mono", 0, 0, 0, 0},
+    {"store_ic_install_poly", 0, 0, 0, 0},
+    {"store_ic_megamorphic", 0, 0, 0, 0},
     {"box_float", 0, 0, 0, 0},
     {"unbox_int", 0, 0, 0, 0},
     {"unbox_float", 0, 0, 0, 0},
@@ -97,11 +109,13 @@ static JsExecProfileMirCall g_js_exec_profile_mir_calls[1024];
 static JsExecProfileShapeGuardSite g_js_exec_profile_shape_guard_sites[128];
 static JsExecProfilePropertySetSite g_js_exec_profile_property_set_sites[256];
 static JsExecProfileLoadICSite g_js_exec_profile_load_ic_sites[512];
+static JsExecProfileStoreICSite g_js_exec_profile_store_ic_sites[512];
 static int g_js_exec_profile_stack_depth = 0;
 static int g_js_exec_profile_mir_call_count = 0;
 static int g_js_exec_profile_shape_guard_site_count = 0;
 static int g_js_exec_profile_property_set_site_count = 0;
 static int g_js_exec_profile_load_ic_site_count = 0;
+static int g_js_exec_profile_store_ic_site_count = 0;
 static int g_js_exec_profile_registered = 0;
 
 static const char* g_js_load_ic_reason_names[JS_LOAD_IC_SITE_REASON_COUNT] = {
@@ -118,6 +132,26 @@ static const char* g_js_load_ic_reason_names[JS_LOAD_IC_SITE_REASON_COUNT] = {
     "miss_flags",
     "miss_offset",
     "miss_deleted",
+    "install_mono",
+    "install_poly",
+    "megamorphic",
+};
+
+static const char* g_js_store_ic_reason_names[JS_STORE_IC_SITE_REASON_COUNT] = {
+    "probe",
+    "hit_mono",
+    "hit_poly",
+    "miss_key",
+    "miss_not_map",
+    "miss_not_plain",
+    "miss_no_data",
+    "miss_bad_typemap",
+    "miss_not_found",
+    "miss_name",
+    "miss_flags",
+    "miss_offset",
+    "miss_deleted",
+    "miss_type",
     "install_mono",
     "install_poly",
     "megamorphic",
@@ -156,6 +190,7 @@ void js_exec_profile_reset(void) {
     g_js_exec_profile_shape_guard_site_count = 0;
     g_js_exec_profile_property_set_site_count = 0;
     g_js_exec_profile_load_ic_site_count = 0;
+    g_js_exec_profile_store_ic_site_count = 0;
 }
 
 static void js_exec_profile_note_mir_call_name(const char* fn_name) {
@@ -321,6 +356,28 @@ extern "C" void js_profile_load_ic_site(const char* label, JsLoadICProfileReason
     site->counts[reason] = 1;
 }
 
+extern "C" void js_profile_store_ic_site(const char* label, JsStoreICProfileReason reason) {
+    int mode = g_js_exec_profile_mode >= 0 ? g_js_exec_profile_mode : js_exec_profile_mode();
+    if (mode <= 0 || reason < 0 || reason >= JS_STORE_IC_SITE_REASON_COUNT) return;
+    const char* safe_label = (label && label[0]) ? label : "unknown";
+    for (int i = 0; i < g_js_exec_profile_store_ic_site_count; i++) {
+        JsExecProfileStoreICSite* site = &g_js_exec_profile_store_ic_sites[i];
+        if (strcmp(site->label, safe_label) == 0) {
+            site->counts[reason]++;
+            return;
+        }
+    }
+    if (g_js_exec_profile_store_ic_site_count >=
+            (int)(sizeof(g_js_exec_profile_store_ic_sites) / sizeof(g_js_exec_profile_store_ic_sites[0]))) {
+        return;
+    }
+    JsExecProfileStoreICSite* site =
+        &g_js_exec_profile_store_ic_sites[g_js_exec_profile_store_ic_site_count++];
+    memset(site, 0, sizeof(*site));
+    strncpy(site->label, safe_label, sizeof(site->label) - 1);
+    site->counts[reason] = 1;
+}
+
 static JsExecProfileEvent js_exec_profile_event_for_runtime_call(const char* fn_name) {
     if (!fn_name) return JS_EXEC_PROF_OTHER_RUNTIME_CALL;
     if (strcmp(fn_name, "js_property_get") == 0 ||
@@ -331,6 +388,7 @@ static JsExecProfileEvent js_exec_profile_event_for_runtime_call(const char* fn_
     }
     if (strcmp(fn_name, "js_property_set") == 0 ||
         strcmp(fn_name, "js_property_set_v") == 0 ||
+        strcmp(fn_name, "js_property_set_named_ic") == 0 ||
         strcmp(fn_name, "js_super_property_set") == 0 ||
         strcmp(fn_name, "js_set_module_var") == 0) {
         return JS_EXEC_PROF_PROPERTY_SET;
@@ -444,6 +502,24 @@ void js_exec_profile_dump(void) {
             JsExecProfileLoadICSite* site = &g_js_exec_profile_load_ic_sites[i];
             strbuf_append_str(buf, site->label);
             for (int j = 0; j < JS_LOAD_IC_SITE_REASON_COUNT; j++) {
+                strbuf_append_char(buf, '\t');
+                strbuf_append_uint64(buf, site->counts[j]);
+            }
+            strbuf_append_char(buf, '\n');
+        }
+    }
+    if (g_js_exec_profile_store_ic_site_count > 0) {
+        strbuf_append_str(buf, "\n# Store IC sites\n");
+        strbuf_append_str(buf, "store_ic_site");
+        for (int i = 0; i < JS_STORE_IC_SITE_REASON_COUNT; i++) {
+            strbuf_append_char(buf, '\t');
+            strbuf_append_str(buf, g_js_store_ic_reason_names[i]);
+        }
+        strbuf_append_char(buf, '\n');
+        for (int i = 0; i < g_js_exec_profile_store_ic_site_count; i++) {
+            JsExecProfileStoreICSite* site = &g_js_exec_profile_store_ic_sites[i];
+            strbuf_append_str(buf, site->label);
+            for (int j = 0; j < JS_STORE_IC_SITE_REASON_COUNT; j++) {
                 strbuf_append_char(buf, '\t');
                 strbuf_append_uint64(buf, site->counts[j]);
             }

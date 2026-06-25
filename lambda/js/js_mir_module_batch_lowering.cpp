@@ -695,6 +695,206 @@ static void jm_compose_derived_ctor_shapes(JsMirTranspiler* mt) {
     }
 }
 
+static bool jm_func_ctor_name_matches(JsFuncCollected* fc, const char* name, int name_len) {
+    if (!fc || !fc->node || !fc->node->name || !name || name_len <= 0) return false;
+    return (int)fc->node->name->len == name_len &&
+        strncmp(fc->node->name->chars, name, (size_t)name_len) == 0;
+}
+
+static JsFuncCollected* jm_find_function_ctor_fc(JsMirTranspiler* mt,
+        const char* name, int name_len) {
+    if (!mt || !name || name_len <= 0) return NULL;
+    for (int i = 0; i < mt->func_count; i++) {
+        JsFuncCollected* fc = &mt->func_entries[i];
+        if (!fc->node || fc->is_class_method || fc->is_reassigned) continue;
+        if (fc->node->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+        if (jm_func_ctor_name_matches(fc, name, name_len)) return fc;
+    }
+    return NULL;
+}
+
+static bool jm_inherits_call_parent_name(JsAstNode* stmt, const char* child,
+        int child_len, const char** out_parent, int* out_parent_len) {
+    if (!stmt || !child || child_len <= 0 || !out_parent || !out_parent_len) return false;
+    if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
+        JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
+        stmt = es->expression;
+    }
+    if (!stmt || stmt->node_type != JS_AST_NODE_CALL_EXPRESSION) return false;
+    JsCallNode* call = (JsCallNode*)stmt;
+    if (!call->callee || call->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return false;
+    JsMemberNode* mem = (JsMemberNode*)call->callee;
+    if (mem->computed || !mem->object || !mem->property) return false;
+    if (mem->object->node_type != JS_AST_NODE_IDENTIFIER ||
+            mem->property->node_type != JS_AST_NODE_IDENTIFIER) {
+        return false;
+    }
+    JsIdentifierNode* obj = (JsIdentifierNode*)mem->object;
+    JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
+    if (!obj->name || !prop->name || !call->arguments) return false;
+    if ((int)obj->name->len != child_len ||
+            strncmp(obj->name->chars, child, (size_t)child_len) != 0) {
+        return false;
+    }
+    if (prop->name->len != 12 ||
+            strncmp(prop->name->chars, "inheritsFrom", 12) != 0) {
+        return false;
+    }
+    if (call->arguments->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    JsIdentifierNode* parent = (JsIdentifierNode*)call->arguments;
+    if (!parent->name || parent->name->len <= 0) return false;
+    *out_parent = parent->name->chars;
+    *out_parent_len = (int)parent->name->len;
+    return true;
+}
+
+static bool jm_find_inherits_parent_name(JsMirTranspiler* mt, const char* child,
+        int child_len, const char** out_parent, int* out_parent_len) {
+    if (!mt || !mt->root_node || mt->root_node->node_type != JS_AST_NODE_PROGRAM) return false;
+    JsProgramNode* program = (JsProgramNode*)mt->root_node;
+    for (JsAstNode* stmt = program->body; stmt; stmt = stmt->next) {
+        if (jm_inherits_call_parent_name(stmt, child, child_len, out_parent, out_parent_len)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool jm_resolve_func_ctor_parent_name(JsMirTranspiler* mt, JsFuncCollected* fc,
+        const char** out_parent, int* out_parent_len) {
+    if (!mt || !fc || !out_parent || !out_parent_len || !fc->ctor_has_super_call) return false;
+    if (fc->ctor_super_via_self_prop) {
+        if (!jm_func_ctor_name_matches(fc, fc->ctor_super_name_ptr, fc->ctor_super_name_len)) {
+            return false;
+        }
+        return jm_find_inherits_parent_name(mt, fc->ctor_super_name_ptr,
+            fc->ctor_super_name_len, out_parent, out_parent_len);
+    }
+
+    const char* inherited_parent = NULL;
+    int inherited_parent_len = 0;
+    if (!fc->node || !fc->node->name ||
+            !jm_find_inherits_parent_name(mt, fc->node->name->chars,
+                (int)fc->node->name->len, &inherited_parent, &inherited_parent_len)) {
+        return false;
+    }
+    if (inherited_parent_len != fc->ctor_super_name_len ||
+            strncmp(inherited_parent, fc->ctor_super_name_ptr,
+                (size_t)fc->ctor_super_name_len) != 0) {
+        return false;
+    }
+
+    *out_parent = fc->ctor_super_name_ptr;
+    *out_parent_len = fc->ctor_super_name_len;
+    return *out_parent && *out_parent_len > 0;
+}
+
+static void jm_disable_func_ctor_shape(JsFuncCollected* fc, const char* reason) {
+    if (!fc) return;
+    fc->ctor_prop_count = 0;
+    fc->func_ctor_shape_compose_failed = true;
+    log_debug("Tune12-P2b: disabling function ctor shape for '%s': %s",
+        fc->name, reason ? reason : "unknown");
+}
+
+static bool jm_compose_function_ctor_shape(JsMirTranspiler* mt,
+        JsFuncCollected* fc, int depth) {
+    if (!mt || !fc) return true;
+    if (fc->func_ctor_shape_composed) return !fc->func_ctor_shape_compose_failed;
+    fc->func_ctor_shape_composed = true;
+    if (fc->ctor_has_dynamic_this_call) {
+        jm_disable_func_ctor_shape(fc, "dynamic .call(this) pattern");
+        return false;
+    }
+    if (!fc->ctor_has_super_call) return true;
+    if (depth > 32) {
+        jm_disable_func_ctor_shape(fc, "inheritance depth exceeded");
+        return false;
+    }
+
+    const char* parent_name = NULL;
+    int parent_len = 0;
+    if (!jm_resolve_func_ctor_parent_name(mt, fc, &parent_name, &parent_len)) {
+        jm_disable_func_ctor_shape(fc, "unresolved parent constructor");
+        return false;
+    }
+    JsFuncCollected* parent_fc = jm_find_function_ctor_fc(mt, parent_name, parent_len);
+    if (!parent_fc) {
+        jm_disable_func_ctor_shape(fc, "parent constructor is not a stable function declaration");
+        return false;
+    }
+    if (!jm_compose_function_ctor_shape(mt, parent_fc, depth + 1)) {
+        jm_disable_func_ctor_shape(fc, "parent constructor shape unavailable");
+        return false;
+    }
+
+    const char* own_ptrs[16];
+    int own_lens[16];
+    int own_ta_types[16];
+    TypeId own_types[16];
+    int own_param_idx[16];
+    int own_count = fc->ctor_prop_count;
+    if (own_count < 0) own_count = 0;
+    if (own_count > 16) own_count = 16;
+    for (int i = 0; i < own_count; i++) {
+        own_ptrs[i] = fc->ctor_prop_ptrs[i];
+        own_lens[i] = fc->ctor_prop_lens[i];
+        own_ta_types[i] = fc->ctor_prop_ta_types[i];
+        own_types[i] = fc->ctor_prop_types[i];
+        own_param_idx[i] = fc->ctor_prop_param_idx[i];
+    }
+
+    const char* merged_ptrs[16];
+    int merged_lens[16];
+    int merged_ta_types[16];
+    TypeId merged_types[16];
+    int merged_param_idx[16];
+    int merged_count = 0;
+    memset(merged_ptrs, 0, sizeof(merged_ptrs));
+    memset(merged_lens, 0, sizeof(merged_lens));
+    memset(merged_ta_types, -1, sizeof(merged_ta_types));
+    memset(merged_types, 0, sizeof(merged_types));
+    memset(merged_param_idx, -1, sizeof(merged_param_idx));
+
+    bool ok = jm_ctor_prop_append_from_fc(merged_ptrs, merged_lens,
+        merged_ta_types, merged_types, merged_param_idx, &merged_count,
+        parent_fc, true);
+    for (int i = 0; ok && i < own_count; i++) {
+        ok = jm_ctor_prop_append_raw(merged_ptrs, merged_lens,
+            merged_ta_types, merged_types, merged_param_idx, &merged_count,
+            own_ptrs[i], own_lens[i], own_ta_types[i], own_types[i],
+            own_param_idx[i], false);
+    }
+    if (!ok) {
+        jm_disable_func_ctor_shape(fc, "merged field count exceeds 16");
+        return false;
+    }
+
+    fc->ctor_prop_count = merged_count;
+    for (int i = 0; i < merged_count; i++) {
+        fc->ctor_prop_ptrs[i] = merged_ptrs[i];
+        fc->ctor_prop_lens[i] = merged_lens[i];
+        fc->ctor_prop_ta_types[i] = merged_ta_types[i];
+        fc->ctor_prop_types[i] = merged_types[i];
+        fc->ctor_prop_param_idx[i] = merged_param_idx[i];
+    }
+    log_debug("Tune12-P2b: composed function ctor shape for '%s' with %d inherited+own props",
+        fc->name, merged_count);
+    return true;
+}
+
+static void jm_compose_function_ctor_shapes(JsMirTranspiler* mt) {
+    if (!mt) return;
+    for (int i = 0; i < mt->func_count; i++) {
+        JsFuncCollected* fc = &mt->func_entries[i];
+        if (!fc->node || fc->is_class_method || fc->is_reassigned) continue;
+        if (fc->node->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+        if (!jm_compose_function_ctor_shape(mt, fc, 0)) {
+            fc->func_ctor_shape_compose_failed = true;
+        }
+    }
+}
+
 static void jm_emit_class_instance_field_metadata_for_decl(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce) {
     if (!mt || !ce) return;
     int metadata_count = 0;
@@ -4815,6 +5015,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             mem_free(cevi);
         }
     }
+
+    // Tune12 P2b: prototype-style constructor functions allocate a final
+    // base+derived shape when Ctor.inheritsFrom(Base) and the constructor's
+    // static superConstructor.call(this, ...) pattern agree.
+    jm_compose_function_ctor_shapes(mt);
 
     // Tune11 P5: derived constructors allocate a final base+derived shape up
     // front. Parent fields stay first, so super() can use parent slot indices;

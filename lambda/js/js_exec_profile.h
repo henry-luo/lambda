@@ -31,6 +31,13 @@ typedef enum JsExecProfileEvent {
     JS_EXEC_PROF_LOAD_IC_INSTALL_MONO,
     JS_EXEC_PROF_LOAD_IC_INSTALL_POLY,
     JS_EXEC_PROF_LOAD_IC_MEGAMORPHIC,
+    JS_EXEC_PROF_STORE_IC_PROBE,
+    JS_EXEC_PROF_STORE_IC_HIT_MONO,
+    JS_EXEC_PROF_STORE_IC_HIT_POLY,
+    JS_EXEC_PROF_STORE_IC_MISS,
+    JS_EXEC_PROF_STORE_IC_INSTALL_MONO,
+    JS_EXEC_PROF_STORE_IC_INSTALL_POLY,
+    JS_EXEC_PROF_STORE_IC_MEGAMORPHIC,
     JS_EXEC_PROF_BOX_FLOAT,
     JS_EXEC_PROF_UNBOX_INT,
     JS_EXEC_PROF_UNBOX_FLOAT,
@@ -59,6 +66,27 @@ typedef enum JsLoadICProfileReason {
     JS_LOAD_IC_SITE_REASON_COUNT
 } JsLoadICProfileReason;
 
+typedef enum JsStoreICProfileReason {
+    JS_STORE_IC_SITE_PROBE = 0,
+    JS_STORE_IC_SITE_HIT_MONO,
+    JS_STORE_IC_SITE_HIT_POLY,
+    JS_STORE_IC_SITE_MISS_KEY,
+    JS_STORE_IC_SITE_MISS_NOT_MAP,
+    JS_STORE_IC_SITE_MISS_NOT_PLAIN,
+    JS_STORE_IC_SITE_MISS_NO_DATA,
+    JS_STORE_IC_SITE_MISS_BAD_TYPEMAP,
+    JS_STORE_IC_SITE_MISS_NOT_FOUND,
+    JS_STORE_IC_SITE_MISS_NAME,
+    JS_STORE_IC_SITE_MISS_FLAGS,
+    JS_STORE_IC_SITE_MISS_OFFSET,
+    JS_STORE_IC_SITE_MISS_DELETED,
+    JS_STORE_IC_SITE_MISS_TYPE,
+    JS_STORE_IC_SITE_INSTALL_MONO,
+    JS_STORE_IC_SITE_INSTALL_POLY,
+    JS_STORE_IC_SITE_MEGAMORPHIC,
+    JS_STORE_IC_SITE_REASON_COUNT
+} JsStoreICProfileReason;
+
 #ifdef LAMBDA_JS_EXEC_PROFILE
 #define JS_EXEC_PROFILE_ENABLED 1
 #define JS_PROFILED_PUSH_D_NAME "js_profiled_push_d"
@@ -76,6 +104,7 @@ void js_exec_profile_note_mir_call(const char* fn_name);
 void js_exec_profile_dump(void);
 void js_profile_property_set_site(const char* label);
 void js_profile_load_ic_site(const char* label, JsLoadICProfileReason reason);
+void js_profile_store_ic_site(const char* label, JsStoreICProfileReason reason);
 #else
 #define JS_EXEC_PROFILE_ENABLED 0
 #define JS_PROFILED_PUSH_D_NAME "push_d"
@@ -97,6 +126,10 @@ static inline void js_exec_profile_note_mir_call(const char* fn_name) { (void)fn
 static inline void js_exec_profile_dump(void) {}
 static inline void js_profile_property_set_site(const char* label) { (void)label; }
 static inline void js_profile_load_ic_site(const char* label, JsLoadICProfileReason reason) {
+    (void)label;
+    (void)reason;
+}
+static inline void js_profile_store_ic_site(const char* label, JsStoreICProfileReason reason) {
     (void)label;
     (void)reason;
 }
