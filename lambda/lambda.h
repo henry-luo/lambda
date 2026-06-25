@@ -302,6 +302,14 @@ typedef enum SysFunc {
     SYSFUNC_MATMUL,           // matmul(a, b) - matrix product (2-D·2-D, 1-D dot)
     SYSFUNC_CONCAT,           // concat(a, b) - join along axis 0
     SYSFUNC_STACK,            // stack(a, b) - stack along a new leading axis
+    // image stencil engine (N-D windowed neighbourhood ops over ArrayNum)
+    SYSFUNC_CONVOLVE,         // convolve(img, kernel) - weighted-sum (correlation)
+    SYSFUNC_BLUR,             // blur(img, ksize) - box (mean) blur
+    SYSFUNC_ERODE,            // erode(img, ksize) - morphological min
+    SYSFUNC_DILATE,           // dilate(img, ksize) - morphological max
+    SYSFUNC_MEDIAN_FILT,      // median_filter(img, ksize) - rank (median) filter
+    SYSFUNC_MAXPOOL,          // maxpool(img, ksize) - strided max pooling
+    SYSFUNC_AVGPOOL,          // avgpool(img, ksize) - strided mean pooling
     SYSFUNC_ALL,
     SYSFUNC_ANY,
     SYSFUNC_MIN1,
@@ -1456,6 +1464,22 @@ extern "C" {
     Item fn_matmul(Item a, Item b);                // matrix product
     Item fn_concat(Item a, Item b);                // join along axis 0
     Item fn_stack(Item a, Item b);                 // stack along new leading axis
+
+    // image stencil engine: slide a Kh×Kw window over the spatial dims of `in`
+    // (2-D H×W, or 3-D H×W×C applied per-channel) and reduce at each position.
+    // op: 0=DOT 1=MIN 2=MAX 3=MEDIAN 4=MEAN.  border: 0=CONSTANT 1=EDGE 2=REFLECT
+    // 3=WRAP.  pad_h/pad_w: window-start offset from each output's input position
+    // (negative → centred at Kh/2, Kw/2 for same-size filtering; 0 → top-left for
+    // pooling).  Result is ELEM_FLOAT.  Covers convolution/morphology/rank/pooling.
+    Item array_num_stencil(Item in, Item kernel, int op, int border, double border_value,
+                           int64_t stride_h, int64_t stride_w, int64_t pad_h, int64_t pad_w);
+    Item fn_convolve(Item img, Item kernel);       // weighted-sum correlation (DOT)
+    Item fn_blur(Item img, Item ksize);            // box (mean) blur
+    Item fn_erode(Item img, Item ksize);           // morphological min
+    Item fn_dilate(Item img, Item ksize);          // morphological max
+    Item fn_median_filter(Item img, Item ksize);   // rank (median) filter
+    Item fn_maxpool(Item img, Item ksize);         // strided max pooling
+    Item fn_avgpool(Item img, Item ksize);         // strided mean pooling
     int64_t array_num_iter_count(ArrayNum* arr);   // shape[0] for N-D, length for 1-D
     ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim, int64_t* dims);
     Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices);   // multi-dim scalar read

@@ -372,6 +372,22 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_STACK, "stack", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_stack", FPTR(fn_stack), NULL, NULL, false, 0},
 
+    // image stencil engine (windowed neighbourhood ops over ArrayNum)
+    {SYSFUNC_CONVOLVE, "convolve", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_convolve", FPTR(fn_convolve), NULL, NULL, false, 0},
+    {SYSFUNC_BLUR, "blur", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_blur", FPTR(fn_blur), NULL, NULL, false, 0},
+    {SYSFUNC_ERODE, "erode", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_erode", FPTR(fn_erode), NULL, NULL, false, 0},
+    {SYSFUNC_DILATE, "dilate", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_dilate", FPTR(fn_dilate), NULL, NULL, false, 0},
+    {SYSFUNC_MEDIAN_FILT, "median_filter", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_median_filter", FPTR(fn_median_filter), NULL, NULL, false, 0},
+    {SYSFUNC_MAXPOOL, "maxpool", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_maxpool", FPTR(fn_maxpool), NULL, NULL, false, 0},
+    {SYSFUNC_AVGPOOL, "avgpool", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_avgpool", FPTR(fn_avgpool), NULL, NULL, false, 0},
+
     {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_all", FPTR(fn_all), NULL, NULL, false, 0},
 

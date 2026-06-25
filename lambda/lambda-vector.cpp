@@ -3735,6 +3735,161 @@ Item fn_prod_axis(Item arr, Item axis)    { return array_num_reduce_axis(arr, ax
 Item fn_cumsum_axis(Item arr, Item axis)  { return array_num_cumulative_axis(arr, axis, false, "cumsum");  }
 Item fn_cumprod_axis(Item arr, Item axis) { return array_num_cumulative_axis(arr, axis, true,  "cumprod"); }
 
+//==============================================================================
+// Image stencil engine — windowed neighbourhood ops over ArrayNum
+//
+// Slide a Kh×Kw window (centred on each output's input position) over the spatial
+// dims of `in` (2-D H×W, or 3-D H×W×C applied per-channel) and reduce at each
+// output position.  Border positions outside `in` are filled per `border`.
+// Output is ELEM_FLOAT.  Convolution (blur/sharpen/sobel), morphology
+// (erode/dilate), rank filters (median) and pooling all reduce to this primitive.
+//==============================================================================
+
+enum StencilOp  { STENCIL_DOT = 0, STENCIL_MIN = 1, STENCIL_MAX = 2, STENCIL_MEDIAN = 3, STENCIL_MEAN = 4 };
+enum BorderMode { BORDER_CONSTANT = 0, BORDER_EDGE = 1, BORDER_REFLECT = 2, BORDER_WRAP = 3 };
+
+// Resolve an out-of-bounds index `i` into [0,n) per the border mode; returns -1 to
+// signal "use the constant border value" (BORDER_CONSTANT, or degenerate n<=0).
+static inline int64_t stencil_border_index(int64_t i, int64_t n, int border) {
+    if (n <= 0) return -1;
+    if (i >= 0 && i < n) return i;
+    switch (border) {
+        case BORDER_EDGE:    return (i < 0) ? 0 : n - 1;
+        case BORDER_REFLECT: {                          // reflect w/o repeating the edge
+            if (n == 1) return 0;
+            int64_t p = 2 * (n - 1);
+            int64_t m = ((i % p) + p) % p;
+            return (m < n) ? m : p - m;
+        }
+        case BORDER_WRAP:    return ((i % n) + n) % n;
+        default:             return -1;                 // BORDER_CONSTANT
+    }
+}
+
+// Sample in[ii, jj, c] with border handling; returns `bval` when off-image under
+// BORDER_CONSTANT.
+static inline double stencil_sample(ArrayNum* in, int64_t ii, int64_t jj, int64_t c,
+                                    int64_t H, int64_t W, int ndim, const int64_t* str,
+                                    int border, double bval) {
+    int64_t ri = stencil_border_index(ii, H, border);
+    int64_t rj = stencil_border_index(jj, W, border);
+    if (ri < 0 || rj < 0) return bval;
+    int64_t off = ri * str[0] + rj * str[1] + ((ndim == 3) ? c * str[2] : 0);
+    return read_arr_elem_as_double(in, off);
+}
+
+#define STENCIL_MEDIAN_CAP 4096
+
+Item array_num_stencil(Item in_item, Item kernel_item, int op, int border,
+                       double border_value, int64_t stride_h, int64_t stride_w,
+                       int64_t pad_h, int64_t pad_w) {
+    GUARD_ERROR2(in_item, kernel_item);
+    if (get_type_id(in_item) != LMD_TYPE_ARRAY_NUM || get_type_id(kernel_item) != LMD_TYPE_ARRAY_NUM) {
+        log_error("stencil: input and kernel must be typed numeric arrays");
+        return ItemError;
+    }
+    ArrayNum* in = in_item.array_num;
+    ArrayNum* ker = kernel_item.array_num;
+    int64_t ishp[32], istr[32], kshp[32], kstr[32];
+    int indim = get_shape_strides(in, ishp, istr);
+    int kndim = get_shape_strides(ker, kshp, kstr);
+    if ((indim != 2 && indim != 3) || kndim != 2) {
+        log_error("stencil: input must be 2-D (H,W) or 3-D (H,W,C); kernel 2-D (Kh,Kw)");
+        return ItemError;
+    }
+    if (stride_h < 1) stride_h = 1;
+    if (stride_w < 1) stride_w = 1;
+    int64_t H = ishp[0], W = ishp[1], C = (indim == 3) ? ishp[2] : 1;
+    int64_t Kh = kshp[0], Kw = kshp[1];
+    int64_t ph = (pad_h < 0) ? Kh / 2 : pad_h;   // centred (Kh/2) vs top-left (0)
+    int64_t pw = (pad_w < 0) ? Kw / 2 : pad_w;
+    if (Kh * Kw > STENCIL_MEDIAN_CAP && op == STENCIL_MEDIAN) {
+        log_error("stencil: median kernel too large (%lld > %d)", (long long)(Kh * Kw), STENCIL_MEDIAN_CAP);
+        return ItemError;
+    }
+    int64_t oH = (H + stride_h - 1) / stride_h, oW = (W + stride_w - 1) / stride_w;
+    int64_t oshape[3]; oshape[0] = oH; oshape[1] = oW; if (indim == 3) oshape[2] = C;
+    ArrayNum* out = alloc_ndim_arraynum(ELEM_FLOAT, indim, oshape);
+    if (!out) return ItemError;
+
+    double* dst = out->float_items;          // contiguous, row-major (…, oj, c)
+    int64_t w = 0;
+    double medbuf[STENCIL_MEDIAN_CAP];
+    for (int64_t oi = 0; oi < oH; oi++) {
+        int64_t ci = oi * stride_h;
+        for (int64_t oj = 0; oj < oW; oj++) {
+            int64_t cj = oj * stride_w;
+            for (int64_t c = 0; c < C; c++) {
+                double acc = 0.0, mn = 0.0, mx = 0.0, sum = 0.0;
+                int64_t cnt = 0, mlen = 0;
+                for (int64_t ki = 0; ki < Kh; ki++) {
+                    int64_t ii = ci + ki - ph;
+                    for (int64_t kj = 0; kj < Kw; kj++) {
+                        double kval = read_arr_elem_as_double(ker, ki * kstr[0] + kj * kstr[1]);
+                        double sval = stencil_sample(in, ii, cj + kj - pw, c, H, W, indim, istr, border, border_value);
+                        if (op == STENCIL_DOT) { acc += kval * sval; continue; }
+                        if (kval == 0.0) continue;       // structuring element: 0 = not part of window
+                        if (cnt == 0) { mn = mx = sval; } else { if (sval < mn) mn = sval; if (sval > mx) mx = sval; }
+                        sum += sval; cnt++;
+                        if (op == STENCIL_MEDIAN && mlen < STENCIL_MEDIAN_CAP) medbuf[mlen++] = sval;
+                    }
+                }
+                double res;
+                switch (op) {
+                    case STENCIL_DOT:    res = acc; break;
+                    case STENCIL_MIN:    res = (cnt > 0) ? mn : 0.0; break;
+                    case STENCIL_MAX:    res = (cnt > 0) ? mx : 0.0; break;
+                    case STENCIL_MEAN:   res = (cnt > 0) ? sum / (double)cnt : 0.0; break;
+                    case STENCIL_MEDIAN:
+                        if (mlen == 0) { res = 0.0; break; }
+                        insertion_sort(medbuf, (size_t)mlen, sizeof(double), cmp_double_asc, NULL);
+                        res = (mlen & 1) ? medbuf[mlen / 2]
+                                         : (medbuf[mlen / 2 - 1] + medbuf[mlen / 2]) / 2.0;
+                        break;
+                    default:             res = 0.0; break;
+                }
+                dst[w++] = res;
+            }
+        }
+    }
+    return { .array_num = out };
+}
+
+// Build a ksize×ksize kernel of ones (box weights / full structuring element).
+static ArrayNum* stencil_box_kernel(int64_t ksize) {
+    if (ksize < 1) ksize = 1;
+    int64_t shape[2] = { ksize, ksize };
+    ArrayNum* k = alloc_ndim_arraynum(ELEM_FLOAT, 2, shape);
+    if (k) for (int64_t i = 0; i < ksize * ksize; i++) k->float_items[i] = 1.0;
+    return k;
+}
+
+static int64_t stencil_ksize_arg(Item ksize_item) {
+    TypeId t = get_type_id(ksize_item);
+    if (t == LMD_TYPE_INT)   return ksize_item.get_int56();
+    if (t == LMD_TYPE_INT64) return ksize_item.get_int64();
+    return 3;  // sensible default
+}
+
+// thin wrappers — each is a single stencil call (the whole toolkit stands on these).
+Item fn_convolve(Item img, Item kernel) {
+    return array_num_stencil(img, kernel, STENCIL_DOT, BORDER_EDGE, 0.0, 1, 1, -1, -1);  // centred
+}
+// op over a ksize×ksize box.  stride==1 → same-size centred filter; stride==ksize →
+// non-overlapping top-left pooling.
+static Item stencil_box_op(Item img, Item ksize_item, int op, int64_t stride, int64_t pad) {
+    ArrayNum* ker = stencil_box_kernel(stencil_ksize_arg(ksize_item));
+    if (!ker) return ItemError;
+    return array_num_stencil(img, Item{ .array_num = ker }, op, BORDER_EDGE, 0.0, stride, stride, pad, pad);
+}
+Item fn_blur(Item img, Item ksize)          { return stencil_box_op(img, ksize, STENCIL_MEAN,   1, -1); }
+Item fn_erode(Item img, Item ksize)         { return stencil_box_op(img, ksize, STENCIL_MIN,    1, -1); }
+Item fn_dilate(Item img, Item ksize)        { return stencil_box_op(img, ksize, STENCIL_MAX,    1, -1); }
+Item fn_median_filter(Item img, Item ksize) { return stencil_box_op(img, ksize, STENCIL_MEDIAN, 1, -1); }
+// pooling: non-overlapping top-left windows (stride = ksize, pad = 0) downsample.
+Item fn_maxpool(Item img, Item ksize)       { return stencil_box_op(img, ksize, STENCIL_MAX,  stencil_ksize_arg(ksize), 0); }
+Item fn_avgpool(Item img, Item ksize)       { return stencil_box_op(img, ksize, STENCIL_MEAN, stencil_ksize_arg(ksize), 0); }
+
 // Overload wrappers — the sysfunc dispatcher resolves to fn_<name><argcount>.
 // The 1-arg forms delegate to the existing whole-array reductions.
 Item fn_sum1(Item arr)            { return fn_sum(arr); }
