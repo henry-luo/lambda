@@ -1,0 +1,5 @@
+[
+  {"type":"command","name":"deleteContentBackward"},
+  {"type":"command","name":"deleteContentForward"},
+  {"type":"command","name":"deleteContentBackward"}
+]

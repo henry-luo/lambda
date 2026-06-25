@@ -1,0 +1,9 @@
+[
+  {"type":"command","name":"setShapeAttr","args":{"shape_path":[0,0,0],"name":"fill","value":"#100000"}},
+  {"type":"command","name":"setShapeAttr","args":{"shape_path":[0,0,0],"name":"fill","value":"#200000"}},
+  {"type":"command","name":"setShapeAttr","args":{"shape_path":[0,0,0],"name":"fill","value":"#300000"}},
+  {"type":"command","name":"setShapeAttr","args":{"shape_path":[0,0,0],"name":"fill","value":"#400000"}},
+  {"type":"command","name":"setShapeAttr","args":{"shape_path":[0,0,0],"name":"fill","value":"#500000"}},
+  {"type":"command","name":"setShapeAttr","args":{"shape_path":[0,0,0],"name":"fill","value":"#600000"}},
+  {"type":"command","name":"setShapeAttr","args":{"shape_path":[0,0,0],"name":"fill","value":"#700000"}}
+]

@@ -11,6 +11,7 @@
 #include "gc_heap.h"
 #include "../log.h"
 #include "../memtrack.h"
+#include "../hashmap.h"
 #include "../../lambda/js/js_exec_profile_weak.h"
 #include <stdlib.h>
 #include <string.h>
@@ -231,6 +232,42 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 
 #define MAP_KIND_ITERATOR_ 6
 #define MAP_KIND_PROXY_    9
+#define MAP_KIND_ARRAY_SPARSE_ 14
+
+typedef struct GcJsArraySparseHashEntry {
+    int64_t index;
+    uint64_t value;
+} GcJsArraySparseHashEntry;
+
+void gc_mark_item(gc_heap_t* gc, uint64_t item);
+
+// SparseArrayMap extends Map; on 64-bit the base Map occupies 32 bytes.
+#define GC_SPARSE_ARRAY_MAP_HASH_OFFSET 32
+
+static struct hashmap** gc_sparse_array_map_table_slot(void* map_obj) {
+    if (!map_obj) return NULL;
+    return (struct hashmap**)((uint8_t*)map_obj + GC_SPARSE_ARRAY_MAP_HASH_OFFSET);
+}
+
+static void gc_trace_sparse_array_map_entries(gc_heap_t* gc, void* map_obj) {
+    struct hashmap** slot = gc_sparse_array_map_table_slot(map_obj);
+    struct hashmap* table = slot ? *slot : NULL;
+    if (!table) return;
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(table, &iter, &item)) {
+        GcJsArraySparseHashEntry* entry = (GcJsArraySparseHashEntry*)item;
+        gc_mark_item(gc, entry->value);
+    }
+}
+
+static void gc_free_sparse_array_map_entries(void* map_obj) {
+    struct hashmap** slot = gc_sparse_array_map_table_slot(map_obj);
+    struct hashmap* table = slot ? *slot : NULL;
+    if (!table) return;
+    hashmap_free(table);
+    *slot = NULL;
+}
 
 // ============================================================================
 // Lifecycle
@@ -907,6 +944,9 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
             }
             break;
         }
+        if (tag == LMD_TYPE_MAP_ && map_kind == MAP_KIND_ARRAY_SPARSE_) {
+            gc_trace_sparse_array_map_entries(gc, obj);
+        }
         if (!type_ptr || !data_ptr) break;
 
         // Walk shape entries to find Item fields
@@ -1316,6 +1356,9 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
     else if (tag == LMD_TYPE_MAP_) {
         uint8_t* p = (uint8_t*)obj;
         uint8_t map_kind = p[1] >> 4;
+        if (map_kind == MAP_KIND_ARRAY_SPARSE_) {
+            gc_free_sparse_array_map_entries(obj);
+        }
         if (map_kind == MAP_KIND_ITERATOR_ || map_kind == MAP_KIND_PROXY_) {
             void* data = *(void**)(p + 16);
             if (data) {

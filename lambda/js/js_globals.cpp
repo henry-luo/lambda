@@ -5950,6 +5950,7 @@ extern "C" Item js_in(Item key, Item object) {
             Item pm_item = (Item){.map = pm};
             JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, (int)strlen(idx_buf), NULL, NULL);
             if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) return (Item){.item = b2it(true)};
+            if (js_array_sparse_has_index(object, idx)) return (Item){.item = b2it(true)};
         }
         // Walk prototype chain for numeric keys (inherited indexed properties)
         if (idx >= 0) {
@@ -11128,6 +11129,9 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
                         if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
                             return (Item){.item = b2it(true)};
                         }
+                        if (js_array_sparse_has_index(obj, idx)) {
+                            return (Item){.item = b2it(true)};
+                        }
                         // AT-3: legacy __get_X/__set_X marker fallback retired
                         // (post-AT-1 IS_ACCESSOR shape probe above always succeeds).
                     }
@@ -11142,6 +11146,9 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
                 Item pm_item = (Item){.map = pm};
                 JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, ks->chars, (int)ks->len, NULL, NULL);
                 if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
+                    return (Item){.item = b2it(true)};
+                }
+                if (js_array_sparse_has_index(obj, idx)) {
                     return (Item){.item = b2it(true)};
                 }
                 // AT-3: legacy __get_X/__set_X marker fallback retired.
@@ -13212,6 +13219,7 @@ static Item js_delete_array_property(Item obj, Item key) {
         if (idx < arr->capacity) {
             arr->items[idx] = (Item){.item = JS_DELETED_SENTINEL_VAL};
         }
+        js_array_sparse_delete_index(obj, idx);
         // Arguments exotic objects: deleting a mapped index breaks the
         // ParameterMap link, so later re-defining the index must not
         // update the formal parameter binding.

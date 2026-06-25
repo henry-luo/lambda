@@ -1,0 +1,17 @@
+[
+  {
+    "type": "command",
+    "name": "deleteShapes",
+    "args": { "shape_paths": [[0, 0, 0], [0, 0, 2]] }
+  },
+  {
+    "type": "command",
+    "name": "insertShape",
+    "args": {
+      "drawing_path": [0],
+      "layer_index": 0,
+      "kind": "rect",
+      "x": 300, "y": 50, "width": 80, "height": 80
+    }
+  }
+]

@@ -117,7 +117,7 @@ These broad slowdowns do not match the GC sweep change shape, so they should be 
 | storage    |          31.9 |        0.649 |  49.24x |
 | mandelbrot |          1473 |         32.3 |  45.58x |
 | nbody      |           429 |         5.93 |  72.29x |
-| richards   |          6142 |         48.2 | 127.45x |
+| richards   |          61fikktip42 |         48.2 | 127.45x |
 | json       |          99.7 |         3.00 |  33.26x |
 | deltablue  |          4435 |         13.1 | 339.04x |
 | havlak     |           --- |          112 |     --- |

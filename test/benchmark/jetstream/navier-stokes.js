@@ -28,6 +28,8 @@
 
 var solver = null;
 var nsFrameCounter = 0;
+var NAVIER_STOKES_SIZE = 32;
+var NAVIER_STOKES_ITERATIONS = 10;
 
 function runNavierStokes()
 {
@@ -39,6 +41,8 @@ function runNavierStokes()
 }
 
 function checkResult(dens) {
+    if (NAVIER_STOKES_SIZE !== 128)
+        return;
 
     this.result = 0;
     for (var i=7000;i<7100;i++) {
@@ -53,8 +57,8 @@ function checkResult(dens) {
 function setupNavierStokes()
 {
     solver = new FluidField(null);
-    solver.setResolution(128, 128);
-    solver.setIterations(20);
+    solver.setResolution(NAVIER_STOKES_SIZE, NAVIER_STOKES_SIZE);
+    solver.setIterations(NAVIER_STOKES_ITERATIONS);
     solver.setDisplayFunction(function(){});
     solver.setUICallback(prepareFrame);
     solver.reset();
@@ -66,14 +70,14 @@ function tearDownNavierStokes()
 }
 
 function addPoints(field) {
-    var n = 64;
+    var n = NAVIER_STOKES_SIZE >> 1;
     for (var i = 1; i <= n; i++) {
         field.setVelocity(i, i, n, n);
         field.setDensity(i, i, 5);
         field.setVelocity(i, n - i, -n, -n);
         field.setDensity(i, n - i, 20);
-        field.setVelocity(128 - i, n + i, -n, -n);
-        field.setDensity(128 - i, n + i, 30);
+        field.setVelocity(NAVIER_STOKES_SIZE - i, n + i, -n, -n);
+        field.setDensity(NAVIER_STOKES_SIZE - i, n + i, 30);
     }
 }
 

@@ -628,7 +628,7 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
         // array companion map with IS_ACCESSOR set there.
         bool is_array_exotic = (get_type_id(object) == LMD_TYPE_ARRAY) ||
             (get_type_id(object) == LMD_TYPE_MAP && object.map &&
-             object.map->map_kind == MAP_KIND_ARRAY_PROPS);
+             map_kind_is_array_props(object.map->map_kind));
 
         if (is_array_exotic) {
             // Numeric (index) array properties: use the companion map digit

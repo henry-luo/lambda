@@ -261,6 +261,42 @@ Implemented on 2026-06-25:
   compact ID to reject mismatches while retaining pointer/length/string
   comparison as the authoritative equality check.
 
+Follow-up implemented after the initial P3 slice:
+
+- added `typemap_hash_lookup_by_id()` and `typemap_shape_name_equals_id()` so
+  callers that already have a property `name_id` can avoid recomputing the
+  FNV/name fingerprint during TypeMap lookup;
+- reordered named load/store IC key checks so the stable fixed-name pointer hit
+  path returns before hashing the name, while still using `name_id` and string
+  comparison for non-identical pointers and collision safety;
+- changed named load/store IC install probes to look up the `ShapeEntry`
+  directly from the resolved receiver `Map` with the precomputed `name_id`;
+- added `TypeMapTransition::name_id`, using it as an early reject for shared
+  constructor/transition shape growth before falling back to pointer/length and
+  string comparison;
+- eagerly populates `ShapeEntry::name_id` when shape entries are created or
+  cloned in the input writer, shape pool, JS pre-shaped object allocator, and
+  type-change rebuild path.
+
+Name-id fix summary:
+
+- `name_id` is now treated as a cached comparison accelerator, not as the sole
+  authority for property identity. Every externally visible equality decision
+  still falls back to pointer/length/string comparison so hash collisions remain
+  safe.
+- Hot fixed-name IC hit checks avoid computing `name_id` when the compiled
+  property site reuses the same name pointer. This removes avoidable FNV work
+  from the common monomorphic hit path.
+- IC install/build code now reuses a single `name_id` through receiver TypeMap
+  lookup instead of redispatching through object property lookup and hashing
+  the property name again.
+- Shape transition lookup stores the added property's `name_id` and uses it as
+  an early reject before byte comparison, which keeps constructor/shared-shape
+  growth from doing unnecessary string checks.
+- Shape-entry allocation, cloning, pre-shaped JS object allocation, and
+  type-change rebuild all preserve or eagerly compute `name_id`, so later IC
+  install and transition paths do not pay lazy initialization costs.
+
 Verification:
 
 - `make build` passed.
@@ -278,6 +314,13 @@ Verification:
 - `make test262-baseline` passed: 40,261 / 40,261 fully passing, 0
   regressions, 2,628 skipped.
 - `git diff --check` passed.
+- after the name-id follow-up, `make release` passed.
+- after the name-id follow-up, the original JetStream hashmap one-shot release
+  run was `10.70s` versus the previous local `10.78s`. Treat this as a small
+  or noisy improvement; it confirms the fix is safe but does not remove the
+  main hashmap bottleneck.
+- after the name-id follow-up, `make test262-baseline` passed again: 40,261 /
+  40,261 fully passing, 0 regressions, 2,628 skipped.
 
 Profile A/B on `temp/profile_jetstream_deltablue.js` with
 `JS_EXEC_PROFILE=2`:
@@ -814,6 +857,21 @@ first step:
 - keep pointer/length/string comparison as fallback;
 - add debug assertions that name id and string identity agree.
 
+Runtime paths covered by the name-id follow-up:
+
+- TypeMap hash lookup exposes a by-id variant so IC install/build paths and
+  future descriptor ICs do not recompute the name hash after the callsite
+  already computed or cached it.
+- Fixed-name IC hit checks test pointer/length identity before computing
+  `name_id`, because compiled property sites usually reuse the same name
+  pointer after the first install.
+- Shape-transition lookup stores the transition key's `name_id` and uses it as
+  an early reject before byte comparison; this helps repeated growth from
+  shared constructor shapes and transition shapes.
+- Shape-entry clones and pre-shaped constructor entries copy or eagerly compute
+  `name_id`, so cloned/shared shapes do not pay lazy initialization in later IC
+  installs.
+
 Expected impact:
 
 This is probably a modest standalone win. Its real value is reducing miss and
@@ -986,7 +1044,10 @@ transition lookup without regressing js262 or benchmark timings.
 2. Should function-constructor shape metadata share the class metadata structs,
    or should it be represented separately and merged only at allocation time?
 3. Should `name_id` be stored directly in `Name`/`String`, or should there be a
-   side table to avoid changing the broader string representation?
+   side table to avoid changing the broader string representation? Current P3
+   answer: keep it on `ShapeEntry`, IC metadata, and transition metadata only.
+   That captures the hot property paths without changing the broader string
+   representation.
 4. Should descriptor own-data IC be read-only first, or should a descriptor
    store IC be added in the same phase?
 5. How narrow should the first call IC be: direct local calls only, or method

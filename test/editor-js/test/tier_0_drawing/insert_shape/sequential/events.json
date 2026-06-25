@@ -1,0 +1,17 @@
+[
+  {
+    "type": "command",
+    "name": "insertShape",
+    "args": { "drawing_path": [0], "layer_index": 0, "kind": "rect", "x": 10, "y": 10, "width": 40, "height": 40 }
+  },
+  {
+    "type": "command",
+    "name": "insertShape",
+    "args": { "drawing_path": [0], "layer_index": 0, "kind": "rect", "x": 60, "y": 10, "width": 40, "height": 40 }
+  },
+  {
+    "type": "command",
+    "name": "insertShape",
+    "args": { "drawing_path": [0], "layer_index": 0, "kind": "rect", "x": 110, "y": 10, "width": 40, "height": 40 }
+  }
+]

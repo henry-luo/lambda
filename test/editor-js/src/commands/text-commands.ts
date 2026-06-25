@@ -37,10 +37,20 @@ import type { AttrValue, MarkDict, TextLeaf, Transaction } from '../model/types.
 // ---------------------------------------------------------------------------
 
 function deleteRangeInLeaf(state: EditorState, from: import('../model/types.js').SourcePos, to: import('../model/types.js').SourcePos): Transaction | null {
+  const leaf = nodeAt(state.doc, from.path)
+  if (leaf === null || !isText(leaf)) return null
   const sel = state.selection
-  const step = stepReplaceText(from.path, from.offset, to.offset, '')
   let tx = txBegin(state.doc, sel)
-  tx = txStep(tx, step)
+  // If the entire text leaf is being emptied, drop the leaf via `replace`
+  // rather than leaving an empty leaf via `replace_text`. Matches the
+  // parser's round-trip representation of an empty block.
+  if (from.offset === 0 && to.offset === leaf.text.length) {
+    const blockPath = parentPath(from.path)
+    const leafIdx = lastIndex(from.path)
+    tx = txStep(tx, stepReplace(blockPath, leafIdx, leafIdx + 1, []))
+    return txSetSelection(tx, caret(pos(blockPath, leafIdx)))
+  }
+  tx = txStep(tx, stepReplaceText(from.path, from.offset, to.offset, ''))
   return txSetSelection(tx, caret(pos(from.path, from.offset)))
 }
 
