@@ -7,7 +7,7 @@ import type {
   Attr,
   Child,
   Doc,
-  Mark,
+  MarkDict,
   Node,
   ResolvedPos,
   SourcePath,
@@ -39,7 +39,7 @@ export function attrsAt(doc: Doc, path: SourcePath): Attr[] {
   return asNode(nodeAt(doc, path)).attrs
 }
 
-export function marksAt(doc: Doc, path: SourcePath): Mark[] {
+export function marksAt(doc: Doc, path: SourcePath): MarkDict {
   return asText(nodeAt(doc, path)).marks
 }
 

@@ -85,9 +85,9 @@ describe('commands/cmdInsertLineBreak', () => {
     // expect: [text("hel"), <br>, text("lo")]
     const p = tx.doc_after.content[0] as any
     expect(p.content.length).toBe(3)
-    expect(p.content[0]).toEqual({ kind: 'text', text: 'hel', marks: [] })
+    expect(p.content[0]).toEqual({ kind: 'text', text: 'hel', marks: {} })
     expect(p.content[1].tag).toBe('br')
-    expect(p.content[2]).toEqual({ kind: 'text', text: 'lo', marks: [] })
+    expect(p.content[2]).toEqual({ kind: 'text', text: 'lo', marks: {} })
   })
 })
 
@@ -120,28 +120,45 @@ describe('commands/cmdDeleteForward', () => {
   })
 })
 
-describe('commands/cmdFormatBold (toggleMark)', () => {
-  it('adds strong mark to selected range', () => {
+describe('commands/cmdFormatBold (toggleMark with leaf-split)', () => {
+  it('splits a leaf and bolds the middle when range is partial', () => {
+    // "hello", select offsets 1..4 → before "h", target "ell", after "o"
     const s = state('doc', [node('p', [text('hello')])], textSelection(pos([0, 0], 1), pos([0, 0], 4)))
     const tx = cmdFormatBold(s)!
-    expect(marksAt(tx.doc_after, [0, 0])).toEqual(['strong'])
+    // 3 sub-leaves
+    const p = tx.doc_after.content[0] as any
+    expect(p.content.length).toBe(3)
+    expect(p.content[0].text).toBe('h')
+    expect(p.content[1].text).toBe('ell')
+    expect(p.content[2].text).toBe('o')
+    expect(p.content[1].marks).toEqual({ bold: true })
+    expect(p.content[0].marks).toEqual({})
+    expect(p.content[2].marks).toEqual({})
+  })
+
+  it('full-leaf range becomes a single bolded leaf (no split)', () => {
+    const s = state('doc', [node('p', [text('hi')])], textSelection(pos([0, 0], 0), pos([0, 0], 2)))
+    const tx = cmdFormatBold(s)!
+    const p = tx.doc_after.content[0] as any
+    expect(p.content.length).toBe(1)
+    expect(p.content[0].marks).toEqual({ bold: true })
   })
 
   it('toggles off when already present', () => {
     const s = state(
       'doc',
-      [node('p', [{ kind: 'text' as const, text: 'hi', marks: ['strong'] }])],
+      [node('p', [{ kind: 'text' as const, text: 'hi', marks: { bold: true } }])],
       textSelection(pos([0, 0], 0), pos([0, 0], 2))
     )
     const tx = cmdFormatBold(s)!
-    expect(marksAt(tx.doc_after, [0, 0])).toEqual([])
+    expect(marksAt(tx.doc_after, [0, 0])).toEqual({})
   })
 
   it('collapsed selection → stored-mark toggle (no doc change)', () => {
     const s = state('doc', [node('p', [text('x')])], caret([0, 0], 1))
     const tx = cmdFormatBold(s)!
     expect(tx.steps).toEqual([])
-    expect(tx.meta.find(m => m.name === 'storedMarks')?.value).toEqual(['strong'])
+    expect(tx.meta.find(m => m.name === 'storedMarks')?.value).toEqual({ bold: true })
   })
 })
 
@@ -160,10 +177,14 @@ describe('commands/cmdSetBlockType', () => {
 })
 
 describe('commands/cmdSelectAll', () => {
-  it('sets selection to AllSelection', () => {
-    const s = state('doc', [node('p', [text('x')])], caret([0, 0], 0))
+  it('sets selection to TextSelection spanning the doc-root boundaries', () => {
+    const s = state('doc', [node('p', [text('x')]), node('p', [text('y')])], caret([0, 0], 0))
     const tx = cmdSelectAll(s)!
-    expect(tx.sel_after).toEqual({ kind: 'all' })
+    expect(tx.sel_after).toEqual({
+      kind: 'text',
+      anchor: { path: [], offset: 0 },
+      head:   { path: [], offset: 2 }
+    })
     expect(tx.steps).toEqual([])
     expect(tx.meta.find(m => m.name === 'addToHistory')?.value).toBe(false)
   })

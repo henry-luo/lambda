@@ -25,17 +25,56 @@ describe('view/html-parser — basic parsing', () => {
     expect(textAt(doc, [1, 0])).toBe('b')
   })
 
-  it('parses marks (strong, em) as nested mark nodes', () => {
+  it('flattens <strong> into a text leaf with marks={bold:true}', () => {
     const { doc } = parseHtmlToDoc(
       '<doc><p>hi <strong>bold</strong> end</p></doc>',
       html5SubsetSchema
     )
     const p = doc.content[0] as any
+    // three FLAT text leaves, no nested element
     expect(p.content.length).toBe(3)
-    expect(p.content[0]).toMatchObject({ kind: 'text', text: 'hi ' })
-    expect(p.content[1]).toMatchObject({ kind: 'node', tag: 'strong' })
-    expect(p.content[1].content[0]).toMatchObject({ kind: 'text', text: 'bold' })
-    expect(p.content[2]).toMatchObject({ kind: 'text', text: ' end' })
+    expect(p.content[0]).toEqual({ kind: 'text', text: 'hi ',  marks: {} })
+    expect(p.content[1]).toEqual({ kind: 'text', text: 'bold', marks: { bold: true } })
+    expect(p.content[2]).toEqual({ kind: 'text', text: ' end', marks: {} })
+  })
+
+  it('flattens nested <em><strong> into one leaf with both marks', () => {
+    const { doc } = parseHtmlToDoc(
+      '<doc><p><em>italic <strong>bold</strong> end</em></p></doc>',
+      html5SubsetSchema
+    )
+    const p = doc.content[0] as any
+    expect(p.content.length).toBe(3)
+    expect(p.content[0]).toEqual({ kind: 'text', text: 'italic ', marks: { italic: true } })
+    expect(p.content[1]).toEqual({ kind: 'text', text: 'bold',    marks: { italic: true, bold: true } })
+    expect(p.content[2]).toEqual({ kind: 'text', text: ' end',    marks: { italic: true } })
+  })
+
+  it('parses <span style="font-weight:bold"> into marks={bold:true}', () => {
+    const { doc } = parseHtmlToDoc(
+      '<doc><p><span style="font-weight: bold">bold</span></p></doc>',
+      html5SubsetSchema
+    )
+    const p = doc.content[0] as any
+    expect(p.content[0]).toEqual({ kind: 'text', text: 'bold', marks: { bold: true } })
+  })
+
+  it('parses multiple CSS declarations into combined marks', () => {
+    const { doc } = parseHtmlToDoc(
+      '<doc><p><span style="font-weight: bold; color: #ff0000">x</span></p></doc>',
+      html5SubsetSchema
+    )
+    const p = doc.content[0] as any
+    expect(p.content[0]).toEqual({ kind: 'text', text: 'x', marks: { bold: true, color: '#ff0000' } })
+  })
+
+  it('parses <a href> into marks={link: href}', () => {
+    const { doc } = parseHtmlToDoc(
+      '<doc><p><a href="https://example.com">click</a></p></doc>',
+      html5SubsetSchema
+    )
+    const p = doc.content[0] as any
+    expect(p.content[0]).toEqual({ kind: 'text', text: 'click', marks: { link: 'https://example.com' } })
   })
 
   it('parses cursor marker → collapsed TextSelection', () => {

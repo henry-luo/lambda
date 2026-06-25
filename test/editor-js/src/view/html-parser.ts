@@ -8,13 +8,13 @@
 // trimmed so that test fixtures can be indented for readability without
 // affecting the parsed text content. Inter-text whitespace is preserved.
 
-import { isNode, isText, node, nodeAttrs, text } from '../model/doc.js'
+import { isNode, isText, node, nodeAttrs } from '../model/doc.js'
 import { pos, textSelection } from '../model/source-pos.js'
 import type {
   AttrValue,
   Child,
   Doc,
-  Mark,
+  MarkDict,
   Node,
   Selection,
   SourcePath,
@@ -23,8 +23,64 @@ import type {
 } from '../model/types.js'
 import type { Schema } from '../model/schema.js'
 import { isMarkTag } from '../model/schema.js'
+import { marksEqual } from '../model/step.js'
 
 const MARKER_TAGS = new Set(['cursor', 'anchor', 'focus'])
+
+// Tags treated as inline marks per Inline_Formatting §6.1. These elements are
+// flattened during parse: the wrapping element disappears and the mark gets
+// pushed down into every descendant text leaf's marks dict.
+const MARK_TAGS = new Set(['strong', 'b', 'em', 'i', 'u', 's', 'del', 'sub', 'sup', 'code', 'a', 'span'])
+
+function tagToMarks(el: Element): MarkDict {
+  const tag = el.tagName.toLowerCase()
+  const out: MarkDict = {}
+  switch (tag) {
+    case 'strong': case 'b':   out['bold']          = true; break
+    case 'em':     case 'i':   out['italic']        = true; break
+    case 'u':                  out['underline']     = true; break
+    case 's':      case 'del': out['strikethrough'] = true; break
+    case 'sub':                out['subscript']     = true; break
+    case 'sup':                out['superscript']   = true; break
+    case 'code':               out['code']          = true; break
+    case 'a': {
+      const href = el.getAttribute('href') ?? ''
+      out['link'] = href
+      break
+    }
+    // 'span' contributes only via its style attribute (handled below)
+  }
+  const styleAttr = el.getAttribute('style')
+  if (styleAttr !== null && styleAttr.length > 0) {
+    Object.assign(out, parseStyleAttr(styleAttr))
+  }
+  return out
+}
+
+function parseStyleAttr(style: string): MarkDict {
+  const out: MarkDict = {}
+  for (const decl of style.split(';')) {
+    const colon = decl.indexOf(':')
+    if (colon < 0) continue
+    const prop = decl.slice(0, colon).trim().toLowerCase()
+    const val  = decl.slice(colon + 1).trim()
+    if (val.length === 0) continue
+    if (prop === 'font-weight') {
+      const num = parseInt(val, 10)
+      if (val === 'bold' || val === 'bolder' || (Number.isFinite(num) && num >= 600)) out['bold'] = true
+    }
+    else if (prop === 'font-style' && val === 'italic') out['italic'] = true
+    else if (prop === 'text-decoration' || prop === 'text-decoration-line') {
+      if (/underline/.test(val))    out['underline']     = true
+      if (/line-through/.test(val)) out['strikethrough'] = true
+    }
+    else if (prop === 'color')            out['color']      = val
+    else if (prop === 'background-color') out['background'] = val
+    else if (prop === 'font-family')      out['fontFamily'] = val
+    else if (prop === 'font-size')        out['fontSize']   = val
+  }
+  return out
+}
 
 export interface ParseResult {
   doc: Doc
@@ -66,6 +122,10 @@ export function parseHtmlToDoc(html: string, schema: Schema): ParseResult {
   // their post-merge equivalents.
   const markers = collectMarkers(state)
   const normalized = normalizeNode(rawDoc, [], markers)
+  // Then push markers off non-leaf boundaries into adjacent text leaves so
+  // that `<p><cursor></cursor>text</p>` resolves to path=[…,0],offset=0
+  // rather than path=[…],offset=0 (matches command output semantics).
+  preferLeafAnchor(normalized, markers)
   applyMarkers(state, markers)
 
   const selection = buildSelection(state)
@@ -87,38 +147,41 @@ function walkBlockContainer(el: Element, tag: string, path: SourcePath, st: Pars
   const attrs = readAttrs(el)
   const content: Child[] = []
   for (let i = 0; i < el.childNodes.length; i++) {
-    walkChild(el.childNodes[i] as ChildNode, [...path, content.length], content, st, /*isInline*/ false)
+    walkChild(el.childNodes[i] as ChildNode, [...path, content.length], content, st, /*isInline*/ false, /*markCtx*/ {})
   }
   return attrs.length === 0
     ? node(tag, content)
     : nodeAttrs(tag, attrs, content)
 }
 
-function walkInlineContainer(el: Element, tag: string, path: SourcePath, st: ParseState): Node {
+function walkInlineContainer(el: Element, tag: string, path: SourcePath, st: ParseState, markCtx: MarkDict): Node {
   const attrs = readAttrs(el)
   const content: Child[] = []
   for (let i = 0; i < el.childNodes.length; i++) {
-    walkChild(el.childNodes[i] as ChildNode, [...path, content.length], content, st, /*isInline*/ true)
+    walkChild(el.childNodes[i] as ChildNode, [...path, content.length], content, st, /*isInline*/ true, markCtx)
   }
   return attrs.length === 0
     ? node(tag, content)
     : nodeAttrs(tag, attrs, content)
 }
 
-// `path` here is the path the produced child WOULD have if accepted (the index
-// is content.length at call time). Markers update state but don't push.
+// `path` is the path the produced child WOULD have if accepted (the index is
+// content.length at call time). Markers update state but don't push. Mark
+// elements (strong, em, span style, …) are FLATTENED: the wrapping element
+// disappears, its mark contribution is pushed into descendant text leaves.
 function walkChild(
   childNode: ChildNode,
   path: SourcePath,
   content: Child[],
   st: ParseState,
-  isInline: boolean
+  isInline: boolean,
+  markCtx: MarkDict
 ): void {
   if (childNode.nodeType === 3 /* TEXT_NODE */) {
     const raw = (childNode as Text).data
     const trimmed = isInline ? raw : trimBlockWhitespace(raw)
     if (trimmed.length === 0) return
-    content.push(text(trimmed))
+    content.push({ kind: 'text', text: trimmed, marks: { ...markCtx } })
     return
   }
   if (childNode.nodeType !== 1 /* ELEMENT_NODE */) return
@@ -127,9 +190,6 @@ function walkChild(
   const tag = el.tagName.toLowerCase()
 
   if (MARKER_TAGS.has(tag)) {
-    // Record a marker at the current position. If at the boundary between
-    // text leaves, prefer attaching to the previous leaf if any; else use a
-    // non-leaf boundary (child index = current content.length).
     const last = content[content.length - 1]
     if (last !== undefined && last.kind === 'text') {
       const leafPath: SourcePath = [...path.slice(0, -1), content.length - 1]
@@ -141,23 +201,46 @@ function walkChild(
     return
   }
 
-  // Heuristic: a mark element (strong, em, etc.) is "inline" but its content
-  // is inline. A block element's content is block-or-inline depending on
-  // schema.
-  const schemaIsMark = isMarkTag(st.schema, tag)
-  const child = schemaIsMark
-    ? walkInlineContainer(el, tag, path, st)
-    : walkInlineOrBlock(el, tag, path, st, isInline)
-  content.push(child)
-}
+  // Flatten mark elements: recurse into children with the mark merged into
+  // `markCtx`, pushing produced text leaves directly into the OUTER content.
+  if (MARK_TAGS.has(tag)) {
+    const merged = { ...markCtx, ...tagToMarks(el) }
+    for (let i = 0; i < el.childNodes.length; i++) {
+      walkChild(
+        el.childNodes[i] as ChildNode,
+        [...path.slice(0, -1), content.length],
+        content,
+        st,
+        /*isInline*/ true,
+        merged
+      )
+    }
+    return
+  }
 
-function walkInlineOrBlock(el: Element, tag: string, path: SourcePath, st: ParseState, isInline: boolean): Node {
-  // If the parent's content is inline, descendants are inline. Otherwise
-  // descend as block (block children may contain block-or-inline as the
-  // schema permits — the validator catches violations).
-  return isInline
-    ? walkInlineContainer(el, tag, path, st)
+  // Non-mark element — recurse as block or inline container per parent's
+  // role. The schema check on isMarkTag continues to handle any unknown
+  // mark-role tags declared in user schemas.
+  const schemaIsMark = isMarkTag(st.schema, tag)
+  if (schemaIsMark) {
+    const merged = { ...markCtx, ...tagToMarks(el) }
+    for (let i = 0; i < el.childNodes.length; i++) {
+      walkChild(
+        el.childNodes[i] as ChildNode,
+        [...path.slice(0, -1), content.length],
+        content,
+        st,
+        /*isInline*/ true,
+        merged
+      )
+    }
+    return
+  }
+
+  const child = isInline
+    ? walkInlineContainer(el, tag, path, st, markCtx)
     : walkBlockContainer(el, tag, path, st)
+  content.push(child)
 }
 
 // ---------------------------------------------------------------------------
@@ -235,11 +318,7 @@ function applyMarkers(st: ParseState, markers: MutableMarker[]): void {
   }
 }
 
-function marksEqual(a: Mark[], b: Mark[]): boolean {
-  if (a.length !== b.length) return false
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
-  return true
-}
+// `marksEqual` is imported from `model/step.js`.
 
 // Walk down, recursing first, then merging adjacent text runs in this node's
 // content and translating marker paths/offsets through the merge.
@@ -304,6 +383,48 @@ function normalizeNode(n: Node, path: SourcePath, markers: MutableMarker[]): Nod
   }
 
   return { kind: 'node', tag: n.tag, attrs: n.attrs, content: merged }
+}
+
+// Slide markers anchored at non-leaf boundaries into adjacent text leaves
+// where applicable. This normalizes selection representation so that
+// `<p><cursor></cursor>text</p>` and `<p>text<cursor></cursor></p>` both end
+// up with a path that points INTO a text leaf — matching what commands
+// produce when they set the post-edit caret.
+function preferLeafAnchor(doc: Node, markers: MutableMarker[]): void {
+  for (const m of markers) {
+    const parent = nodeAtMutable(doc, m.path)
+    if (parent === null || !isNode(parent)) continue
+    const idx = m.offset
+    // Marker pointing inside an existing text leaf at child index `idx`
+    if (idx < parent.content.length) {
+      const next = parent.content[idx] as Child
+      if (isText(next)) {
+        m.path = [...m.path, idx]
+        m.offset = 0
+        continue
+      }
+    }
+    if (idx > 0) {
+      const prev = parent.content[idx - 1] as Child
+      if (isText(prev)) {
+        m.path = [...m.path, idx - 1]
+        m.offset = prev.text.length
+        continue
+      }
+    }
+    // else: leave the marker at the non-leaf boundary
+  }
+}
+
+function nodeAtMutable(doc: Node, path: SourcePath): Node | null {
+  let cur: Child = doc
+  for (let i = 0; i < path.length; i++) {
+    if (!isNode(cur)) return null
+    const idx = path[i] as number
+    if (idx >= cur.content.length) return null
+    cur = cur.content[idx] as Child
+  }
+  return isNode(cur) ? cur : null
 }
 
 // ---------------------------------------------------------------------------
@@ -413,12 +534,23 @@ function stringifyAttr(v: AttrValue): string {
   return JSON.stringify(v)
 }
 
-// Marks helper used by the leaf serializer.
-export function serializeMarkedText(t: string, marks: Mark[]): string {
-  if (marks.length === 0) return escapeText(t)
-  let out = escapeText(t)
-  for (const m of marks) {
-    out = `<${m}>${out}</${m}>`
-  }
-  return out
+// Marks helper used by the leaf serializer (fixture-mode output per
+// Inline_Formatting §7.1). Emits a single non-nested wrapper.
+export function serializeMarkedText(t: string, marks: MarkDict): string {
+  if (Object.keys(marks).length === 0) return escapeText(t)
+  const style: string[] = []
+  if (marks['bold']           === true) style.push('font-weight: bold')
+  if (marks['italic']         === true) style.push('font-style: italic')
+  if (marks['underline']      === true && marks['strikethrough'] === true) style.push('text-decoration: underline line-through')
+  else if (marks['underline'] === true) style.push('text-decoration: underline')
+  else if (marks['strikethrough'] === true) style.push('text-decoration: line-through')
+  if (typeof marks['color']        === 'string') style.push(`color: ${marks['color']}`)
+  if (typeof marks['background']   === 'string') style.push(`background-color: ${marks['background']}`)
+  if (typeof marks['fontFamily']   === 'string') style.push(`font-family: ${marks['fontFamily']}`)
+  if (typeof marks['fontSize']     === 'string') style.push(`font-size: ${marks['fontSize']}`)
+  const styleAttr = style.length > 0 ? ` style="${escapeAttr(style.join('; '))}"` : ''
+  const inner = escapeText(t)
+  if ('link' in marks && typeof marks['link'] === 'string') return `<a href="${escapeAttr(marks['link'])}"${styleAttr}>${inner}</a>`
+  if (marks['code'] === true) return `<code${styleAttr}>${inner}</code>`
+  return `<span${styleAttr}>${inner}</span>`
 }

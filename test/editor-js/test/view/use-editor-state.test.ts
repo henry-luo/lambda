@@ -67,12 +67,12 @@ describe('view/use-editor-state — reducer', () => {
       sel_before: s0.selection,
       sel_after: s0.selection,
       meta: [
-        { name: 'storedMarks', value: ['strong'] as any },
+        { name: 'storedMarks', value: { bold: true } as any },
         { name: 'addToHistory', value: false as any }
       ]
     }
     const s1 = editorReducer(s0, { type: 'apply', tx })
-    expect(s1.stored_marks).toEqual(['strong'])
+    expect(s1.stored_marks).toEqual({ bold: true })
     expect(s1.history.undo.length).toBe(0)  // not pushed
   })
 })

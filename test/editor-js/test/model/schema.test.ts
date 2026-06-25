@@ -110,7 +110,7 @@ describe('model/schema — validateDoc catches errors', () => {
   it('marks="none" rejects marked text inside hr (atomic; no children expected)', () => {
     const d = node('doc', [
       node('blockquote', [
-        node('p', [textMarked('plain', ['strong'])])
+        node('p', [textMarked('plain', { bold: true })])
       ])
     ])
     // p has marks: 'all' so this is fine

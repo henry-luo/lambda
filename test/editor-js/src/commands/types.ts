@@ -6,7 +6,7 @@
 
 import type {
   Doc,
-  Mark,
+  MarkDict,
   Selection,
   Transaction
 } from '../model/types.js'
@@ -16,11 +16,11 @@ export interface EditorState {
   doc: Doc
   schema: Schema
   selection: Selection | null
-  stored_marks: Mark[] | null
+  stored_marks: MarkDict | null
 }
 
 export type Command = (state: EditorState) => Transaction | null
 
 export type StringCommand = (state: EditorState, text: string) => Transaction | null
-export type MarkCommand   = (state: EditorState, mark: Mark) => Transaction | null
+export type MarkCommand   = (state: EditorState, name: string) => Transaction | null
 export type TagCommand    = (state: EditorState, tag: string) => Transaction | null
