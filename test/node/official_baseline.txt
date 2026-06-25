@@ -12,8 +12,8 @@
 # Workers: 9
 # Slow tests included: no
 # Slow list: 30 tests (test/node/official_slow_list.txt), threshold 10s
-# Total passing: 1645
-# Total tests: 3556  Passed: 1645  Failed: 1911  Missing: 0  Timed out: 0  Crashed: 15
+# Total passing: 1651
+# Total tests: 3556  Passed: 1651  Failed: 1905  Missing: 0  Timed out: 0  Crashed: 15
 # Baseline comparison: previous 1644  Regressions: 0  Improvements: 1
 # Runtime: 370.9s total wall (discover + execute)
 # Runtime: 3311.2s per-test sum (all executed tests)
@@ -1498,17 +1498,23 @@ test-stream-ispaused.js
 test-stream-iter-broadcast-backpressure.js
 test-stream-iter-broadcast-basic.js
 test-stream-iter-broadcast-coverage.js
+test-stream-iter-consumers-bytes.js
 test-stream-iter-consumers-merge.js
+test-stream-iter-consumers-tap.js
+test-stream-iter-consumers-text.js
 test-stream-iter-cross-realm.js
 test-stream-iter-disabled.js
 test-stream-iter-duplex.js
+test-stream-iter-from-async.js
 test-stream-iter-from-coverage.js
+test-stream-iter-from-sync.js
 test-stream-iter-namespace.js
 test-stream-iter-pipeto-edge.js
 test-stream-iter-pipeto-signal.js
 test-stream-iter-pipeto-writev.js
 test-stream-iter-pipeto.js
 test-stream-iter-pull-async.js
+test-stream-iter-pull-sync.js
 test-stream-iter-push-backpressure.js
 test-stream-iter-push-basic.js
 test-stream-iter-push-writer.js
