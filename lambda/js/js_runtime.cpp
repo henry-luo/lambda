@@ -5420,6 +5420,22 @@ static bool js_array_companion_has_array_index_shape(Array* arr) {
     return tm && tm->has_array_index_shape;
 }
 
+// Fast path for reading an existing own dense data element of a normal Array.
+// This is intentionally narrower than js_array_get_int(): it only handles the
+// plain own-slot case and lets holes, sparse entries, accessors, arguments, and
+// prototype numeric lookups use the semantic path.
+static inline bool js_array_fast_own_dense_get(Item object, int64_t index, Item* out) {
+    if (get_type_id(object) != LMD_TYPE_ARRAY || !out) return false;
+    Array* arr = object.array;
+    if (!arr || arr->is_content == 1) return false;
+    if (index < 0 || index >= arr->length || index >= arr->capacity) return false;
+    Item value = arr->items[index];
+    if (value.item == JS_DELETED_SENTINEL_VAL) return false;
+    if (js_array_companion_has_numeric_slot(arr, index)) return false;
+    *out = value;
+    return true;
+}
+
 // Fast path for writing an existing own dense data element of a normal Array.
 // Per ES OrdinarySet, an own writable data property is written directly without
 // consulting accessors, the prototype chain, or typed-array proto exotics. When
@@ -5427,13 +5443,15 @@ static bool js_array_companion_has_array_index_shape(Array* arr) {
 // can override the dense element semantics for this index; pure named companions
 // such as `Q.LinePixels` should not kick dense writes back to the generic setter.
 static inline bool js_array_fast_own_dense_set(Item object, int64_t index, Item value) {
-    if (get_type_id(object) != LMD_TYPE_ARRAY) return false;
+    assert (get_type_id(object) == LMD_TYPE_ARRAY && index >= 0);
     Array* arr = object.array;
     if (arr->is_content == 1) return false;
-    if (index < 0 || index >= arr->length || index >= arr->capacity) return false;
+    if (index >= arr->length || index >= arr->capacity) return false;
     if (arr->items[index].item == JS_DELETED_SENTINEL_VAL) return false;
-    if (js_array_companion_has_numeric_slot(arr, index)) return false;
-    js_array_sparse_delete(arr, index);
+    if (arr->extra) {
+        if (js_array_companion_has_numeric_slot(arr, index)) return false;
+        js_array_sparse_delete(arr, index);
+    }
     arr->items[index] = value;
     return true;
 }
@@ -6506,6 +6524,14 @@ extern "C" Item js_property_access(Item object, Item key) {
 
     // v18: throw TypeError when accessing properties on null or undefined
     TypeId type = get_type_id(object);
+
+    if (type == LMD_TYPE_ARRAY && get_type_id(key) == LMD_TYPE_INT) {
+        Item dense_value = ItemNull;
+        int64_t idx = it2i(key);
+        if (js_array_fast_own_dense_get(object, idx, &dense_value)) {
+            return dense_value;
+        }
+    }
 
     // TRACE: detect .col1 on non-MAP
     if (trace_enabled && type != LMD_TYPE_MAP && type != LMD_TYPE_NULL && type != LMD_TYPE_UNDEFINED &&

@@ -3,9 +3,10 @@
 Date: 2026-06-25
 Status: P1 array named-property IC, P1b array companion-map store
 stabilization, P2 function-constructor shape cache, P2b prototype inheritance
-composition, P3 name-id metadata, HashMap sparse-array P1/P2, and Cube3D
-append/store-path profiling implemented; GC sweep ownership classification
-tuned; P4-P5 remain proposals
+composition, P3 name-id metadata, HashMap sparse-array P1/P2,
+Navier-Stokes dense array get fast path, and Cube3D append/store-path
+profiling implemented; GC sweep ownership classification tuned; P4-P5 remain
+proposals
 
 Primary sources:
 
@@ -25,6 +26,9 @@ Primary sources:
   - `temp/profile_jetstream_cube3d_gc_phases.tsv`
   - `temp/profile_jetstream_cube3d_gc_sweep_counts.tsv`
   - `temp/profile_jetstream_cube3d_gc_sweep_flag_no_poc.tsv`
+- Navier-Stokes dense array get follow-up artifacts:
+  - `temp/profile_jetstream_navier_stokes.tsv`
+  - `temp/profile_jetstream_navier_stokes_dense_get_fast.tsv`
 
 ## Goal
 
@@ -400,6 +404,61 @@ Result:
 - previous local hashmap after the name-id follow-up: `10.70s`;
 - current P1/P2 sparse-array result: `9.47s`;
 - delta: about 11.5% faster on original JetStream hashmap.
+
+## Implementation Update: Navier-Stokes Dense Array Get Fast Path
+
+Implemented on 2026-06-25:
+
+- increased the JetStream `navier_stokes` JS benchmark load from `32x32` to
+  `128x128`, matching the existing checksum path and giving a profile sample
+  long enough to diagnose;
+- added `js_array_fast_own_dense_get()` as a deliberately narrow runtime fast
+  path for `array[int]` reads in `js_property_access()`;
+- the fast path returns `arr->items[idx]` directly only for normal Array
+  receivers with `idx >= 0`, `idx < length`, `idx < capacity`, a non-hole dense
+  slot, and no numeric companion descriptor/accessor for that index;
+- arguments/content arrays, holes, sparse entries, numeric accessors,
+  descriptor-shadowed indexes, and prototype numeric lookups still fall through
+  to the semantic path.
+
+Reason:
+
+- the `128x128` Navier-Stokes profile showed computed dense array reads going
+  through `js_property_access()` and then `js_property_get()` because many
+  index expressions are arithmetic-derived and lower as boxed property keys;
+- using `js_array_get_int()` would still pay companion/prototype/sparse
+  semantic checks, so the useful fast path is the plain dense-own read case.
+
+Profile effect:
+
+```text
+                                  before        after
+release median of 3                222 ms       149 ms
+profile timing                  403.394 ms   258.542 ms
+property_get calls              2,105,925       1,821
+property_get self_ms              106.303       0.789
+property_access self_ms            83.078      40.852
+```
+
+Remaining hot path:
+
+- generic array stores are now the main Navier-Stokes runtime target:
+  `property_set` still sees about `906k` calls, with about `229k` generic
+  `top_array` calls in the profiled run;
+- `array_set_ta_proto_numeric` and the numeric conversion/prototype preamble
+  remain visible inside those generic array stores.
+
+Verification:
+
+- `make build` passed.
+- `./lambda.exe js temp/tune12_array_dense_get_fast_smoke.js --no-log`
+  passed.
+- `./lambda.exe js temp/tune12_array_dense_get_fast_edges.js --no-log`
+  passed.
+- `make release` passed.
+- `make test262-baseline` passed: 40,261 / 40,261 fully passing, 0
+  regressions, 2,628 skipped.
+- `git diff --check` passed.
 
 ## Implementation Update: Cube3D Append/Store Path and GC Bottleneck
 
