@@ -2343,7 +2343,16 @@ static Item js_stream_consumer_json_finish(Item chunks) {
 static Item js_stream_consumer_arrayBuffer_finish(Item chunks) {
     Item buf = js_stream_consumer_buffer_from_array(chunks);
     if (js_check_exception()) return ItemNull;
-    return js_property_get(buf, make_string_item("buffer"));
+    if (!js_is_typed_array(buf)) return js_property_get(buf, make_string_item("buffer"));
+    int byte_length = js_typed_array_byte_length(buf);
+    if (byte_length < 0) byte_length = 0;
+    Item array_buffer = js_arraybuffer_new(byte_length);
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(array_buffer);
+    void* src = js_typed_array_current_data_ptr(buf);
+    if (ab && ab->data && src && byte_length > 0) {
+        memcpy(ab->data, src, (size_t)byte_length);
+    }
+    return array_buffer;
 }
 
 static Item js_stream_consumer_bytes_finish(Item chunks) {
@@ -2796,11 +2805,94 @@ static Item js_stream_iter_tap(Item callback) {
     return js_new_closure((void*)js_stream_iter_tap_async_callback, 1, env, 1);
 }
 
-static Item js_stream_iter_pullSync(Item source, Item transform) {
+static bool js_stream_iter_is_transform_object(Item transform, Item* method) {
+    TypeId tid = get_type_id(transform);
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ELEMENT) return false;
+    Item fn = js_property_get(transform, make_string_item("transform"));
+    if (get_type_id(fn) != LMD_TYPE_FUNC) return false;
+    if (method) *method = fn;
+    return true;
+}
+
+static bool js_stream_iter_transform_is_present(Item transform) {
+    return transform.item != 0 && get_type_id(transform) != LMD_TYPE_UNDEFINED;
+}
+
+static bool js_stream_iter_validate_transform(Item transform) {
+    if (!js_stream_iter_transform_is_present(transform)) return true;
+    if (get_type_id(transform) == LMD_TYPE_FUNC) return true;
+    if (js_stream_iter_is_transform_object(transform, NULL)) return true;
+    js_throw_invalid_arg_type("transform", "function or transform object", transform);
+    return false;
+}
+
+static void js_stream_iter_append_transform_value(Item output, Item value) {
+    TypeId tid = get_type_id(value);
+    if (value.item == 0 || tid == LMD_TYPE_UNDEFINED || tid == LMD_TYPE_NULL) return;
+    js_array_push(output, value);
+}
+
+static Item js_stream_iter_transform_input(Item chunks) {
+    Item input = js_array_new(0);
+    int64_t len = get_type_id(chunks) == LMD_TYPE_ARRAY ? js_array_length(chunks) : 0;
+    for (int64_t i = 0; i < len; i++) {
+        js_array_push(input, js_array_get_int(chunks, i));
+    }
+    js_array_push(input, ItemNull);
+    return input;
+}
+
+static Item js_stream_iter_apply_stateless_transform(Item chunks, Item transform) {
+    Item output = js_array_new(0);
+    int64_t len = get_type_id(chunks) == LMD_TYPE_ARRAY ? js_array_length(chunks) : 0;
+    for (int64_t i = 0; i < len; i++) {
+        Item batch = js_array_get_int(chunks, i);
+        Item result = js_call_function(transform, make_js_undefined(), &batch, 1);
+        if (js_check_exception()) return ItemNull;
+        js_stream_iter_append_transform_value(output, result);
+    }
+    Item flush = ItemNull;
+    Item flush_result = js_call_function(transform, make_js_undefined(), &flush, 1);
+    if (js_check_exception()) return ItemNull;
+    js_stream_iter_append_transform_value(output, flush_result);
+    return output;
+}
+
+static Item js_stream_iter_apply_stateful_transform(Item chunks, Item transform_obj, Item method) {
+    Item input = js_stream_iter_transform_input(chunks);
+    Item result = js_call_function(method, transform_obj, &input, 1);
+    if (js_check_exception()) return ItemNull;
+    Item iterator = js_get_iterator(result);
+    if (js_check_exception()) return ItemNull;
+    Item output = js_array_new(0);
+    while (true) {
+        Item value = js_iterator_step(iterator);
+        if (js_check_exception()) return ItemNull;
+        if (value.item == JS_ITER_DONE_SENTINEL) break;
+        js_stream_iter_append_transform_value(output, value);
+    }
+    return output;
+}
+
+static Item js_stream_iter_apply_sync_transform(Item chunks, Item transform) {
+    if (!js_stream_iter_transform_is_present(transform)) return chunks;
+    if (!js_stream_iter_validate_transform(transform)) return ItemNull;
+    if (get_type_id(transform) == LMD_TYPE_FUNC)
+        return js_stream_iter_apply_stateless_transform(chunks, transform);
+    Item method = make_js_undefined();
+    if (js_stream_iter_is_transform_object(transform, &method))
+        return js_stream_iter_apply_stateful_transform(chunks, transform, method);
+    return chunks;
+}
+
+static Item js_stream_iter_pullSync(Item source, Item transform1, Item transform2, Item transform3,
+                                    Item transform4, Item transform5, Item transform6, Item transform7) {
     Item chunks = js_stream_iter_sync_array(source);
     if (js_check_exception()) return ItemNull;
-    if (get_type_id(transform) == LMD_TYPE_FUNC) {
-        chunks = js_call_function(transform, make_js_undefined(), &chunks, 1);
+    Item transforms[7] = { transform1, transform2, transform3, transform4,
+                           transform5, transform6, transform7 };
+    for (int i = 0; i < 7; i++) {
+        chunks = js_stream_iter_apply_sync_transform(chunks, transforms[i]);
         if (js_check_exception()) return ItemNull;
     }
     return chunks;
@@ -5359,7 +5451,7 @@ extern "C" Item js_get_stream_iter_namespace(void) {
     stream_set_method(stream_iter_namespace, "from", (void*)js_stream_iter_from, 1);
     stream_set_method(stream_iter_namespace, "fromSync", (void*)js_stream_iter_fromSync, 1);
     stream_set_method(stream_iter_namespace, "pull", (void*)js_stream_iter_pull, 2);
-    stream_set_method(stream_iter_namespace, "pullSync", (void*)js_stream_iter_pullSync, 2);
+    stream_set_method(stream_iter_namespace, "pullSync", (void*)js_stream_iter_pullSync, 8);
     stream_set_method(stream_iter_namespace, "push", (void*)js_stream_iter_push, 1);
     stream_set_method(stream_iter_namespace, "ondrain", (void*)js_stream_iter_ondrain, 1);
     stream_set_method(stream_iter_namespace, "text", (void*)js_stream_iter_text_consume, 2);
