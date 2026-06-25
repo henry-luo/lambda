@@ -12,9 +12,9 @@
 # Workers: 9
 # Slow tests included: no
 # Slow list: 30 tests (test/node/official_slow_list.txt), threshold 10s
-# Total passing: 1619
-# Total tests: 3556  Passed: 1619  Failed: 1937  Missing: 0  Timed out: 0  Crashed: 15
-# Baseline comparison: previous 1617  Regressions: 0  Improvements: 2
+# Total passing: 1621
+# Total tests: 3556  Passed: 1621  Failed: 1935  Missing: 0  Timed out: 0  Crashed: 15
+# Baseline comparison: previous 1619  Regressions: 0  Improvements: 2
 # Runtime: 370.9s total wall (discover + execute)
 # Runtime: 3311.2s per-test sum (all executed tests)
 # Runtime: 868.0s per-test sum (passing baseline tests)
@@ -1079,6 +1079,8 @@ test-module-symlinked-peer-modules.js
 test-net-access-byteswritten.js
 test-net-after-close.js
 test-net-allow-half-open.js
+test-net-autoselectfamily-attempt-timeout-cli-option.js
+test-net-autoselectfamily-attempt-timeout-default-value.js
 test-net-autoselectfamily-commandline-option.js
 test-net-autoselectfamily-default.js
 test-net-autoselectfamily-ipv4first.js

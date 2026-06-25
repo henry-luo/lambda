@@ -1471,7 +1471,8 @@ static Item net_socket_prototype = {0};
 static Item net_server_prototype = {0};
 static Item net_socket_connect_fn = {0};
 static bool net_default_auto_select_family = false;
-static int net_auto_select_family_timeout = 250; // Node.js default
+static int net_auto_select_family_timeout = 500; // Node.js default
+static bool net_cli_options_applied = false;
 
 typedef struct NetBlockListEntry {
     int family;
@@ -1975,6 +1976,43 @@ static bool net_parse_auto_select_timeout(Item value, const char* name, int* out
     }
     *out_timeout = d < 10.0 ? 10 : (int)d;
     return true;
+}
+
+static bool net_string_starts_with(Item value, const char* prefix) {
+    if (get_type_id(value) != LMD_TYPE_STRING || !prefix) return false;
+    String* s = it2s(value);
+    size_t len = strlen(prefix);
+    return s->len >= (int64_t)len && memcmp(s->chars, prefix, len) == 0;
+}
+
+static void net_apply_cli_options(void) {
+    if (net_cli_options_applied) return;
+    net_cli_options_applied = true;
+
+    Item exec_argv = js_get_process_exec_argv();
+    if (get_type_id(exec_argv) != LMD_TYPE_ARRAY) return;
+
+    const char* timeout_prefix = "--network-family-autoselection-attempt-timeout=";
+    int64_t len = js_array_length(exec_argv);
+    for (int64_t i = 0; i < len; i++) {
+        Item arg = js_array_get_int(exec_argv, i);
+        if (net_string_starts_with(arg, "--no-network-family-autoselection")) {
+            net_default_auto_select_family = false;
+        } else if (net_string_starts_with(arg, timeout_prefix)) {
+            String* s = it2s(arg);
+            const char* start = s->chars + strlen(timeout_prefix);
+            char* end = NULL;
+            long timeout = strtol(start, &end, 10);
+            if (end && end > start && end == s->chars + s->len && timeout > 0) {
+                Item timeout_item = (Item){.item = i2it(timeout)};
+                int parsed_timeout = 0;
+                if (net_parse_auto_select_timeout(timeout_item,
+                        "network-family-autoselection-attempt-timeout", &parsed_timeout)) {
+                    net_auto_select_family_timeout = parsed_timeout;
+                }
+            }
+        }
+    }
 }
 
 static bool option_is_true(Item options, const char* name) {
@@ -3810,6 +3848,8 @@ extern "C" Item js_get_internal_net_namespace(void) {
 extern "C" Item js_get_net_namespace(void) {
     if (net_namespace.item != 0) return net_namespace;
 
+    net_apply_cli_options();
+
     net_namespace = js_new_object();
 
     Item create_server_fn = net_set_method(net_namespace, "createServer", (void*)js_net_createServer, -1);
@@ -3862,7 +3902,8 @@ extern "C" void js_net_reset(void) {
     memset(net_active_sockets, 0, sizeof(net_active_sockets));
     memset(net_active_servers, 0, sizeof(net_active_servers));
     net_default_auto_select_family = false;
-    net_auto_select_family_timeout = 250;
+    net_auto_select_family_timeout = 500;
+    net_cli_options_applied = false;
     memset(net_block_list_instances, 0, sizeof(net_block_list_instances));
     net_block_list_instance_count = 0;
 }
