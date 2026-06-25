@@ -331,6 +331,41 @@ static Item make_string_item(const char* str) {
     return make_string_item(str, (int)strlen(str));
 }
 
+static Item internal_fs_binding_namespace = {0};
+static Item internal_fs_default_fstat = {0};
+
+extern "C" Item js_fs_fstatSync(Item fd_item);
+extern int js_check_exception(void);
+extern Item js_clear_exception(void);
+
+static Item js_internal_fs_fstat(Item fd_item) {
+    return js_fs_fstatSync(fd_item);
+}
+
+extern "C" Item js_get_internal_fs_binding_namespace(void) {
+    if (internal_fs_binding_namespace.item == 0) {
+        internal_fs_binding_namespace = js_new_object();
+        heap_register_gc_root(&internal_fs_binding_namespace.item);
+        internal_fs_default_fstat = js_new_function((void*)js_internal_fs_fstat, 1);
+        heap_register_gc_root(&internal_fs_default_fstat.item);
+        js_property_set(internal_fs_binding_namespace, make_string_item("fstat"), internal_fs_default_fstat);
+        js_property_set(internal_fs_binding_namespace, make_string_item("default"), internal_fs_binding_namespace);
+    }
+    return internal_fs_binding_namespace;
+}
+
+static void fs_maybe_call_internal_fstat_hook(int fd) {
+    if (internal_fs_binding_namespace.item == 0) return;
+    Item fstat = js_property_get(internal_fs_binding_namespace, make_string_item("fstat"));
+    if (fstat.item == internal_fs_default_fstat.item) return;
+    if (get_type_id(fstat) != LMD_TYPE_FUNC) return;
+    Item fd_item = (Item){.item = i2it((int64_t)fd)};
+    js_call_function(fstat, internal_fs_binding_namespace, &fd_item, 1);
+    if (js_check_exception()) {
+        js_clear_exception();
+    }
+}
+
 static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count);
 
 static bool fs_parse_access_mode(Item mode_item, bool has_mode, int* out_mode) {
@@ -642,6 +677,7 @@ extern "C" Item js_fs_readFileSync(Item path_item, Item encoding_item) {
 
     // stat to get file size
     uv_fs_t stat_req;
+    fs_maybe_call_internal_fstat_hook(fd);
     int r = uv_fs_fstat(NULL, &stat_req, fd, NULL);
     if (r < 0) {
         uv_fs_req_cleanup(&stat_req);
@@ -693,6 +729,7 @@ static Item js_fs_read_file_buffer(const char* path) {
     if (fd < 0) return js_throw_system_error(fd, "open", path);
 
     uv_fs_t stat_req;
+    fs_maybe_call_internal_fstat_hook(fd);
     int r = uv_fs_fstat(NULL, &stat_req, fd, NULL);
     if (r < 0) {
         uv_fs_req_cleanup(&stat_req);
@@ -2826,6 +2863,8 @@ static void js_fs_set_custom_promisify(Item fn, void* func_ptr, int param_count)
 // Each wraps the sync version, returning a resolved/rejected Promise
 extern Item js_promise_resolve(Item value);
 extern Item js_promise_reject(Item reason);
+extern "C" Item js_promise_with_resolvers(void);
+extern "C" void js_next_tick_enqueue(Item callback);
 extern int js_check_exception(void);
 extern Item js_clear_exception(void);
 
@@ -2835,6 +2874,76 @@ static Item fs_promise_wrap_result(Item result) {
         return js_promise_reject(err);
     }
     return js_promise_resolve(result);
+}
+
+static bool fs_options_has_signal(Item options, Item* signal_out) {
+    if (signal_out) *signal_out = make_js_undefined();
+    TypeId opt_type = get_type_id(options);
+    if (opt_type != LMD_TYPE_MAP && opt_type != LMD_TYPE_OBJECT) return false;
+    Item signal = js_property_get(options, make_string_item("signal"));
+    if (get_type_id(signal) == LMD_TYPE_UNDEFINED || get_type_id(signal) == LMD_TYPE_NULL) return false;
+    if (signal_out) *signal_out = signal;
+    return true;
+}
+
+static bool fs_is_abort_signal(Item signal) {
+    TypeId sig_type = get_type_id(signal);
+    if (sig_type != LMD_TYPE_MAP && sig_type != LMD_TYPE_OBJECT) return false;
+    Item aborted = js_property_get(signal, make_string_item("aborted"));
+    Item add_event = js_property_get(signal, make_string_item("addEventListener"));
+    return get_type_id(aborted) == LMD_TYPE_BOOL && get_type_id(add_event) == LMD_TYPE_FUNC;
+}
+
+static bool fs_signal_aborted(Item signal) {
+    Item aborted = js_property_get(signal, make_string_item("aborted"));
+    return get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted);
+}
+
+static Item fs_make_abort_error(Item signal) {
+    Item err = js_new_object();
+    js_class_stamp(err, JS_CLASS_ABORT_ERROR);
+    js_property_set(err, make_string_item("name"), make_string_item("AbortError"));
+    js_property_set(err, make_string_item("code"), make_string_item("ABORT_ERR"));
+    js_property_set(err, make_string_item("message"), make_string_item("The operation was aborted"));
+    if (get_type_id(signal) == LMD_TYPE_MAP || get_type_id(signal) == LMD_TYPE_OBJECT) {
+        Item reason = js_property_get(signal, make_string_item("reason"));
+        if (get_type_id(reason) != LMD_TYPE_UNDEFINED && get_type_id(reason) != LMD_TYPE_NULL) {
+            js_property_set(err, make_string_item("cause"), reason);
+        }
+    }
+    return err;
+}
+
+static Item fs_make_invalid_signal_error(void) {
+    Item err = js_new_error_with_name(
+        make_string_item("TypeError"),
+        make_string_item("The \"options.signal\" property must be an instance of AbortSignal."));
+    js_property_set(err, make_string_item("code"), make_string_item("ERR_INVALID_ARG_TYPE"));
+    return err;
+}
+
+static Item fs_readFile_promise_deferred(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    Item path = env[0];
+    Item opts = env[1];
+    Item signal = env[2];
+    Item resolve_fn = env[3];
+    Item reject_fn = env[4];
+
+    if (fs_signal_aborted(signal)) {
+        Item err = fs_make_abort_error(signal);
+        js_call_function(reject_fn, make_js_undefined(), &err, 1);
+        return make_js_undefined();
+    }
+
+    Item result = js_fs_readFileSync(path, opts);
+    if (js_check_exception()) {
+        Item err = js_clear_exception();
+        js_call_function(reject_fn, make_js_undefined(), &err, 1);
+    } else {
+        js_call_function(resolve_fn, make_js_undefined(), &result, 1);
+    }
+    return make_js_undefined();
 }
 
 static void fs_append_async_access_stack(Item err) {
@@ -2861,6 +2970,30 @@ static void fs_append_async_access_stack(Item err) {
 }
 
 extern "C" Item js_fs_readFile_promise(Item path, Item opts) {
+    Item signal = make_js_undefined();
+    if (fs_options_has_signal(opts, &signal)) {
+        if (!fs_is_abort_signal(signal)) {
+            return js_promise_reject(fs_make_invalid_signal_error());
+        }
+        if (fs_signal_aborted(signal)) {
+            return js_promise_reject(fs_make_abort_error(signal));
+        }
+
+        Item capability = js_promise_with_resolvers();
+        Item promise = js_property_get(capability, make_string_item("promise"));
+        Item resolve_fn = js_property_get(capability, make_string_item("resolve"));
+        Item reject_fn = js_property_get(capability, make_string_item("reject"));
+        Item* env = js_alloc_env(5);
+        env[0] = path;
+        env[1] = opts;
+        env[2] = signal;
+        env[3] = resolve_fn;
+        env[4] = reject_fn;
+        Item callback = js_new_closure((void*)fs_readFile_promise_deferred, 0, env, 5);
+        js_next_tick_enqueue(callback);
+        return promise;
+    }
+
     Item result = js_fs_readFileSync(path, opts);
     return fs_promise_wrap_result(result);
 }

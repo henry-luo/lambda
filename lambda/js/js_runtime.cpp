@@ -33173,6 +33173,11 @@ extern "C" Item js_internal_binding(Item name) {
         return cares_obj;
     }
 
+    if (s->len == 2 && memcmp(s->chars, "fs", 2) == 0) {
+        extern Item js_get_internal_fs_binding_namespace(void);
+        return js_get_internal_fs_binding_namespace();
+    }
+
     // internalBinding('config')
     if (s->len == 6 && memcmp(s->chars, "config", 6) == 0) {
         Item cfg = js_new_object();
