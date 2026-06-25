@@ -1,7 +1,9 @@
 # Transpile JS Tune12 Proposal: Array Named Properties and Prototype Constructor Shapes
 
 Date: 2026-06-25
-Status: P1 array named-property IC and P2 function-constructor shape cache implemented; P3-P5 remain proposals
+Status: P1 array named-property IC, P1b array companion-map store
+stabilization, P2 function-constructor shape cache, P2b prototype inheritance
+composition, and P3 name-id metadata implemented; P4-P5 remain proposals
 
 Primary sources:
 
@@ -103,6 +105,73 @@ The remaining `megamorphic` counts at these sites come from the current
 four-entry polymorphic limit after array companion-map participation starts;
 they are not `miss_not_map` rejections.
 
+## Implementation Update: P1b Array Companion-Map Store Stabilization
+
+Implemented on 2026-06-25:
+
+- added an in-place same-size write path for existing own data slots in array
+  companion maps, keeping stable companion-map shapes for updates such as
+  `Q.LastPx = value`;
+- preserved writable-property checks before the in-place update and falls back
+  to the generic property setter when the value cannot fit the existing field
+  slot;
+- allowed direct dense writes to existing array elements even when the array has
+  a pure named-property companion map;
+- added `TypeMap::has_array_index_shape` for `MAP_KIND_ARRAY_PROPS`, so dense
+  writes only probe the companion map for numeric override slots when such a
+  numeric companion shape has ever been added;
+- made the in-place companion write defer to the generic descriptor-aware setter
+  while `Object.defineProperty` is internally replacing a non-writable data slot
+  with accessor storage;
+- tried widening the load/store IC polymorphic limit from 4 to 8, which removed
+  Cube3D megamorphic IC counters in the profile build but did not improve
+  release timing, so that change was not kept.
+
+Verification:
+
+- `make build` passed.
+- `./lambda.exe js temp/tune12_array_named_ic_smoke.js --no-log` passed.
+- `./lambda.exe js temp/tune12_func_ctor_shape_smoke.js --no-log` passed.
+- `./lambda.exe js temp/tune12_func_ctor_inheritance_smoke.js --no-log` passed.
+- `./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/tune12_defineproperty_regressions.txt --run-async --async-list=test/js262/test262_baseline.txt --jobs=1`
+  passed for the two `Object.defineProperty` accessor-conversion regressions
+  caught during the first full gate attempt.
+- `make build-release-profile` passed.
+- `make build-release` passed.
+- `make test262-baseline` passed: 40,261 / 40,261 fully passing, 0
+  regressions, 2,628 skipped.
+
+Profile snapshots on `temp/profile_jetstream_cube3d.js` with
+`JS_EXEC_PROFILE=2`:
+
+```text
+before P1b current snapshot:
+property_set calls=378825 self_ms=69925.369
+load_ic_megamorphic=118400
+store_ic_megamorphic=15946
+
+after same-size companion slot update:
+property_set calls=358873 self_ms=69644.525
+load_ic_megamorphic=83312
+store_ic_megamorphic=10956
+
+after dense-extra fast path plus has_array_index_shape:
+property_set calls=358873 self_ms=72596.228
+load_ic_megamorphic=83312
+store_ic_megamorphic=10956
+```
+
+The instrumented profile still attributes almost all Cube3D runtime to
+`property_set`, so the next useful slice should continue inside the generic
+store helper rather than increasing IC width.
+
+Release one-shot timing:
+
+```text
+before has_array_index_shape guard: jetstream/cube3d 77.86s
+after P1b store-path slice:        jetstream/cube3d 72.68s
+```
+
 ## Implementation Update: P2 Function Constructor Shape Cache
 
 Implemented on 2026-06-25:
@@ -167,6 +236,76 @@ this.v2@413:50          megamorphic=263820         still megamorphic=263820
 The large store-IC improvement confirms that declaration-backed function
 constructors now share constructor shapes. The remaining two load sites are
 prototype-inheritance composition work, not a failure to use the P2 cache.
+
+## Implementation Update: P2b Prototype Inheritance Composition and P3 Name IDs
+
+Implemented on 2026-06-25:
+
+- extended function-constructor scanning to identify conservative
+  `Ctor.superConstructor.call(this, ...)`, `Ctor.super_.call(this, ...)`, and
+  direct parent `.call(this, ...)` patterns;
+- required `Ctor.inheritsFrom(Base)` to agree with the static super-call target
+  before composing inherited constructor fields;
+- composed base-first function-constructor field metadata before MIR emission,
+  so the existing cached `new Ctor(...)` path allocates the final shape;
+- marked unknown `.call(this, ...)` patterns as dynamic and forced the generic
+  constructor path instead of using an own-only partial shape;
+- added `ShapeEntry::name_id` plus load/store IC `name_id` metadata, using the
+  compact ID to reject mismatches while retaining pointer/length/string
+  comparison as the authoritative equality check.
+
+Verification:
+
+- `make build` passed.
+- `./lambda.exe js temp/tune12_func_ctor_shape_smoke.js --no-log` passed.
+- `LAMBDA_JS_FUNC_CTOR_SHAPE=0 ./lambda.exe js temp/tune12_func_ctor_shape_smoke.js --no-log`
+  passed.
+- `./lambda.exe js temp/tune12_func_ctor_inheritance_smoke.js --no-log`
+  passed.
+- `LAMBDA_JS_FUNC_CTOR_SHAPE=0 ./lambda.exe js temp/tune12_func_ctor_inheritance_smoke.js --no-log`
+  passed.
+- `./lambda.exe js test/benchmark/jetstream/deltablue.js --no-log` passed.
+- `./lambda.exe js test/benchmark/awfy/deltablue2_bundle.js --no-log`
+  passed with `DeltaBlue: PASS`.
+- `make build-release-profile` passed.
+- `make test262-baseline` passed: 40,261 / 40,261 fully passing, 0
+  regressions, 2,628 skipped.
+- `git diff --check` passed.
+
+Profile A/B on `temp/profile_jetstream_deltablue.js` with
+`JS_EXEC_PROFILE=2`:
+
+```text
+enabled:  JS_EXEC_PROFILE_OUT=temp/tune12_profile_jetstream_deltablue_p2b_p3.tsv
+disabled: JS_EXEC_PROFILE_OUT=temp/tune12_profile_jetstream_deltablue_p2b_p3_off.tsv
+```
+
+Aggregate IC counters:
+
+```text
+                       enabled      disabled
+load_ic_hit_mono      2432746        640543
+load_ic_hit_poly      1091658         79933
+load_ic_megamorphic         0       2803686
+store_ic_hit_mono      336876           442
+store_ic_hit_poly        9637          1536
+store_ic_megamorphic        0        344466
+```
+
+Hot site deltas:
+
+```text
+site                    disabled behavior          enabled behavior
+this.elms@70:10 load    megamorphic=360532         hit_mono=360539
+this.direction@413:11   megamorphic=274320         hit_mono=11699 hit_poly=262639
+this.v2@413:50          megamorphic=263820         hit_mono=11199 hit_poly=252639
+expr.value@525:3 store  megamorphic=203996         hit_mono=203999
+out.mark@187:3 store    megamorphic=10136          hit_mono=10139
+```
+
+Instrumentation wall time was effectively neutral in the profile run
+(`7936.456` enabled vs `7951.168` disabled), so the profile should be read as
+hot-path attribution rather than benchmark timing.
 
 ## Profile Snapshot
 

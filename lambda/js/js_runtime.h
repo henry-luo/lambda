@@ -58,6 +58,7 @@ typedef struct JsLoadICEntry {
     void* shape;
     void* entry;
     int64_t byte_offset;
+    uint32_t name_id;
     uint8_t receiver_kind;
 } JsLoadICEntry;
 
@@ -68,6 +69,7 @@ typedef struct JsLoadIC {
     const char* name;
     const char* profile_label;
     int name_len;
+    uint32_t name_id;
     uint64_t key_item;
     JsLoadICEntry entries[JS_LOAD_IC_POLY_MAX];
 } JsLoadIC;
@@ -79,6 +81,7 @@ typedef struct JsStoreIC {
     const char* name;
     const char* profile_label;
     int name_len;
+    uint32_t name_id;
     uint64_t key_item;
     JsLoadICEntry entries[JS_STORE_IC_POLY_MAX];
 } JsStoreIC;

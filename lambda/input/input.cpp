@@ -70,6 +70,19 @@ static bool js_shape_transitions_enabled() {
     return enabled != 0;
 }
 
+static bool map_key_is_array_index_name(String* key) {
+    if (!key || key->len <= 0 || key->len > 10) return false;
+    if (key->len > 1 && key->chars[0] == '0') return false;
+    uint64_t index = 0;
+    for (size_t i = 0; i < key->len; i++) {
+        char c = key->chars[i];
+        if (c < '0' || c > '9') return false;
+        index = index * 10 + (uint64_t)(c - '0');
+        if (index > 0xFFFFFFFEULL) return false;
+    }
+    return true;
+}
+
 static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
     if (!field_ptr) return false;
     switch (type_id) {
@@ -241,6 +254,7 @@ static TypeMap* map_clone_typemap_for_mutation(Map* mp, Input* input) {
     clone->is_transition_shared_shape = false;
     clone->transitions = NULL;
     clone->js_class = tm->js_class;
+    clone->has_array_index_shape = tm->has_array_index_shape;
 
     ShapeEntry* last_clone = NULL;
     clone->shape = clone_shape_chain_for_transition(pool, tm, &last_clone);
@@ -307,6 +321,7 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
     child->is_transition_shared_shape = true;
     child->transitions = NULL;
     child->js_class = parent->js_class;
+    child->has_array_index_shape = parent->has_array_index_shape;
 
     typemap_hash_build(child, input->pool);
 
@@ -346,6 +361,8 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     // note: key could be null for nested map
     TypeMap *map_type = (TypeMap*)mp->type;
     TypeId type_id = get_type_id(value);
+    bool array_index_shape = mp->map_kind == MAP_KIND_ARRAY_PROPS &&
+        map_key_is_array_index_name(key);
     if (map_type == &EmptyMap) {
         // alloc map type and data chunk
         map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
@@ -353,6 +370,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         mp->type = map_type;
         arraylist_append(input->type_list, map_type);
         map_type->type_index = input->type_list->length - 1;
+        map_type->has_array_index_shape = array_index_shape;
         int byte_cap = 64;
         mp->data = pool_calloc(input->pool, byte_cap);  mp->data_cap = byte_cap;
         if (!mp->data) return;
@@ -386,6 +404,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     if (!map_type->shape) { map_type->shape = shape_entry; }
     map_type->last = shape_entry;
     map_type->length++;
+    if (array_index_shape) map_type->has_array_index_shape = true;
 
     // A1: populate/grow property hash table for O(1) property lookup
     typemap_hash_insert_owned(map_type, shape_entry, input->pool);

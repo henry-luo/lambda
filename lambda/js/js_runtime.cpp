@@ -5207,22 +5207,128 @@ static bool js_func_has_own_property_map_key(Item object, const char* name, int 
     return status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR;
 }
 
-// Fast path for writing an existing own dense data element of a plain Array.
+static bool js_array_companion_has_numeric_slot(Array* arr, int64_t index) {
+    if (!arr || arr->extra == 0 || index < 0) return false;
+    Map* pm = (Map*)(uintptr_t)arr->extra;
+    if (!pm || pm->map_kind != MAP_KIND_ARRAY_PROPS) return false;
+    TypeMap* tm = (TypeMap*)pm->type;
+    if (!tm || !tm->has_array_index_shape) return false;
+    char idx_buf[32];
+    int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
+    Item pm_item = (Item){.map = pm};
+    JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, NULL, NULL);
+    return status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR ||
+           status == JS_SHAPE_SLOT_DELETED;
+}
+
+// Fast path for writing an existing own dense data element of a normal Array.
 // Per ES OrdinarySet, an own writable data property is written directly without
-// consulting accessors, the prototype chain, or typed-array proto exotics — so
-// none of those checks are observable here. arr->extra==0 guarantees the array
-// carries no indexed accessor / non-writable / sparse descriptors (those all live
-// in the companion map), and is_content!=1 excludes the arguments-exotic object,
-// so every present dense slot is a plain writable data property. Returns true
-// when it handled the store. Keeps array-heavy loops off the slow runtime path.
+// consulting accessors, the prototype chain, or typed-array proto exotics. When
+// a JS array also has named companion properties, only numeric companion entries
+// can override the dense element semantics for this index; pure named companions
+// such as `Q.LinePixels` should not kick dense writes back to the generic setter.
 static inline bool js_array_fast_own_dense_set(Item object, int64_t index, Item value) {
     if (get_type_id(object) != LMD_TYPE_ARRAY) return false;
     Array* arr = object.array;
-    if (arr->extra != 0 || arr->is_content == 1) return false;
+    if (arr->is_content == 1) return false;
     if (index < 0 || index >= arr->length || index >= arr->capacity) return false;
     if (arr->items[index].item == JS_DELETED_SENTINEL_VAL) return false;
+    if (js_array_companion_has_numeric_slot(arr, index)) return false;
     arr->items[index] = value;
     return true;
+}
+
+static bool js_array_companion_write_same_size_slot(ShapeEntry* entry, void* data,
+        Item value) {
+    if (!entry || !entry->type || !data) return false;
+    TypeId field_type = entry->type->type_id;
+    TypeId value_type = get_type_id(value);
+    int field_size = type_info[field_type].byte_size;
+    int value_size = type_info[value_type].byte_size;
+    if (field_size != value_size) return false;
+
+    void* field_ptr = (char*)data + entry->byte_offset;
+    if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) {
+        *(double*)field_ptr = (double)value.get_int56();
+        return true;
+    }
+    if (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT) {
+        *(int64_t*)field_ptr = value.get_int56();
+        return true;
+    }
+
+    switch (value_type) {
+    case LMD_TYPE_NULL:
+        *(void**)field_ptr = NULL;
+        break;
+    case LMD_TYPE_UNDEFINED:
+        *(bool*)field_ptr = false;
+        break;
+    case LMD_TYPE_BOOL:
+        *(bool*)field_ptr = value.bool_val;
+        break;
+    case LMD_TYPE_INT:
+        *(int64_t*)field_ptr = value.get_int56();
+        break;
+    case LMD_TYPE_INT64:
+        *(int64_t*)field_ptr = value.get_int64();
+        break;
+    case LMD_TYPE_FLOAT:
+        *(double*)field_ptr = value.get_double();
+        break;
+    case LMD_TYPE_DTIME:
+        *(DateTime*)field_ptr = value.get_datetime();
+        break;
+    case LMD_TYPE_STRING:
+        *(String**)field_ptr = value.get_safe_string();
+        break;
+    case LMD_TYPE_SYMBOL:
+        *(Symbol**)field_ptr = value.get_safe_symbol();
+        break;
+    case LMD_TYPE_BINARY:
+        *(String**)field_ptr = value.get_safe_binary();
+        break;
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_RANGE:
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
+        *(Container**)field_ptr = value.container;
+        break;
+    case LMD_TYPE_FUNC: case LMD_TYPE_VMAP: case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_TYPE: case LMD_TYPE_PATH:
+        *(void**)field_ptr = (void*)(uintptr_t)(value.item & 0x00FFFFFFFFFFFFFFULL);
+        break;
+    default:
+        return false;
+    }
+    if (value_type != LMD_TYPE_NULL) {
+        entry->type = type_info[value_type].type;
+    }
+    return true;
+}
+
+static bool js_array_companion_try_write_existing_data(Item object, const char* name,
+        int name_len, Item value) {
+    if (get_type_id(object) != LMD_TYPE_ARRAY || !name || name_len <= 0) return false;
+    Array* arr = object.array;
+    if (!arr || arr->extra == 0) return false;
+    Map* pm = (Map*)(uintptr_t)arr->extra;
+    if (!pm || pm->map_kind != MAP_KIND_ARRAY_PROPS || !pm->data) return false;
+
+    Item pm_item = (Item){.map = pm};
+    ShapeEntry* entry = NULL;
+    JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, name, name_len, NULL, &entry);
+    if (status != JS_SHAPE_SLOT_DATA || !entry || !entry->type) return false;
+    if (!js_props_query_writable(pm, entry, name, name_len)) {
+        if (js_skip_accessor_dispatch) return false;
+        js_strict_throw_property_error("assign to read only", name, name_len);
+        return true;
+    }
+    int value_size = type_info[get_type_id(value)].byte_size;
+    if (entry->byte_offset < 0 || value_size <= 0 ||
+            entry->byte_offset + value_size > (int64_t)pm->data_cap) {
+        return false;
+    }
+    return js_array_companion_write_same_size_slot(entry, pm->data, value);
 }
 
 static Item js_property_set_array(Item object, Item key, Item value) {
@@ -5328,6 +5434,11 @@ static Item js_property_set_array(Item object, Item key, Item value) {
                 // store in companion map
                 Array* arr = object.array;
                 Map* pm;
+                if (own_data_prop &&
+                        js_array_companion_try_write_existing_data(object, sk->chars,
+                            (int)sk->len, value)) {
+                    return value;
+                }
                 if (arr->extra == 0) {
                     Item obj = js_new_object();
                     obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
@@ -6512,10 +6623,7 @@ static inline bool js_load_ic_offset_ok(Map* m, int64_t byte_offset) {
 
 static inline bool js_load_ic_name_matches(ShapeEntry* entry,
         const char* name, int name_len) {
-    if (!entry || !entry->name || !entry->name->str || !name || name_len < 0) return false;
-    if (entry->name->str == name && entry->name->length == (size_t)name_len) return true;
-    return entry->name->length == (size_t)name_len &&
-        memcmp(entry->name->str, name, (size_t)name_len) == 0;
+    return typemap_shape_name_equals(entry, name, name_len);
 }
 
 static inline bool js_named_ic_array_name_allowed(const char* name, int name_len) {
@@ -6610,6 +6718,7 @@ static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
     out_entry->shape = m->type;
     out_entry->entry = entry;
     out_entry->byte_offset = entry->byte_offset;
+    out_entry->name_id = typemap_shape_entry_name_id(entry);
     out_entry->receiver_kind = receiver_kind;
     *out_value = value;
     return true;
@@ -6618,6 +6727,8 @@ static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
 static inline bool js_load_ic_key_matches(JsLoadIC* ic, const char* name, int name_len) {
     if (!ic || !name || name_len < 0) return false;
     if (!ic->name) return true;
+    uint32_t name_id = typemap_name_id(name, name_len);
+    if (ic->name_id != 0 && name_id != 0 && ic->name_id != name_id) return false;
     if (ic->name == name && ic->name_len == name_len) return true;
     return ic->name_len == name_len && memcmp(ic->name, name, (size_t)name_len) == 0;
 }
@@ -6685,6 +6796,7 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
             if (!ic->name) {
                 ic->name = name;
                 ic->name_len = name_len;
+                ic->name_id = entry.name_id ? entry.name_id : typemap_name_id(name, name_len);
             }
             for (int i = 0; i < ic->count && i < JS_LOAD_IC_POLY_MAX; i++) {
                 if (ic->entries[i].shape == entry.shape &&
@@ -6722,6 +6834,8 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
 static inline bool js_store_ic_key_matches(JsStoreIC* ic, const char* name, int name_len) {
     if (!ic || !name || name_len < 0) return false;
     if (!ic->name) return true;
+    uint32_t name_id = typemap_name_id(name, name_len);
+    if (ic->name_id != 0 && name_id != 0 && ic->name_id != name_id) return false;
     if (ic->name == name && ic->name_len == name_len) return true;
     return ic->name_len == name_len && memcmp(ic->name, name, (size_t)name_len) == 0;
 }
@@ -6882,6 +6996,7 @@ static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
     out_entry->shape = m->type;
     out_entry->entry = entry;
     out_entry->byte_offset = entry->byte_offset;
+    out_entry->name_id = typemap_shape_entry_name_id(entry);
     out_entry->receiver_kind = receiver_kind;
     return true;
 }
@@ -6892,6 +7007,7 @@ static void js_store_ic_install(JsStoreIC* ic, const char* name, int name_len,
     if (!ic->name) {
         ic->name = name;
         ic->name_len = name_len;
+        ic->name_id = entry->name_id ? entry->name_id : typemap_name_id(name, name_len);
     }
     for (int i = 0; i < ic->count && i < JS_STORE_IC_POLY_MAX; i++) {
         if (ic->entries[i].shape == entry->shape &&

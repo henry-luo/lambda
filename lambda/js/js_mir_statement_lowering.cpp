@@ -3560,7 +3560,8 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     }
 
     if (!jm_func_ctor_shape_enabled() || !ctor_fc || ctor_fc->is_reassigned ||
-            ctor_fc->is_class_method || ctor_fc->ctor_prop_count <= 0) {
+            ctor_fc->is_class_method || ctor_fc->ctor_has_dynamic_this_call ||
+            ctor_fc->func_ctor_shape_compose_failed || ctor_fc->ctor_prop_count <= 0) {
         MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
         return jm_call_3(mt, "js_new_from_class_object", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),

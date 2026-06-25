@@ -252,6 +252,13 @@ struct JsFuncCollected {
     TypeId ctor_prop_types[16];     // P1: detected field type from constructor init (LMD_TYPE_NULL = unknown)
     int ctor_prop_param_idx[16];    // P4b: maps property → constructor param index (-1 = not a param)
     void** ctor_shape_cache_ptr;    // Tune12 P2: per-function constructor shape cache slot
+    bool ctor_has_super_call;       // Tune12 P2b: constructor calls a static parent with this
+    bool ctor_super_via_self_prop;  // true for Ctor.superConstructor.call(this,...)
+    bool ctor_has_dynamic_this_call; // true for unrecognized fn.call(this,...) in ctor body
+    const char* ctor_super_name_ptr; // direct parent name, or self name for self.superConstructor
+    int ctor_super_name_len;
+    bool func_ctor_shape_composed;
+    bool func_ctor_shape_compose_failed;
 };
 
 // Free dynamically allocated scope_env_names for all func_entries
