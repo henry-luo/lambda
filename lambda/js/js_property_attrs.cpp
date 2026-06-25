@@ -285,6 +285,23 @@ static Map* js_attr_ensure_array_props_map(Array* arr) {
     return (Map*)(uintptr_t)arr->extra;
 }
 
+static void js_attr_mark_array_index_shape(Item target, const char* name, int name_len) {
+    if (!js_attrs_name_is_digits(name, name_len)) return;
+    Map* props = NULL;
+    if (get_type_id(target) == LMD_TYPE_ARRAY) {
+        Array* arr = target.array;
+        if (!arr || arr->extra == 0) return;
+        props = (Map*)(uintptr_t)arr->extra;
+    } else if (get_type_id(target) == LMD_TYPE_MAP) {
+        props = target.map;
+    }
+    if (!props || !map_kind_is_array_props(props->map_kind)) {
+        return;
+    }
+    TypeMap* tm = (TypeMap*)props->type;
+    if (tm) tm->has_array_index_shape = true;
+}
+
 static bool js_attr_ensure_array_shape_entry(Item obj, const char* name, int name_len) {
     if (!name || name_len <= 0 || name_len >= 240) return false;
     if (!js_attrs_name_is_digits(name, name_len) &&
@@ -305,7 +322,10 @@ static bool js_attr_ensure_array_shape_entry(Item obj, const char* name, int nam
         return false;
     }
 
-    if (js_find_shape_entry(target, name, name_len)) return true;
+    if (js_find_shape_entry(target, name, name_len)) {
+        js_attr_mark_array_index_shape(target, name, name_len);
+        return true;
+    }
 
     Item name_item = (Item){.item = s2it(heap_create_name(name, (size_t)name_len))};
     Item slot_value = (Item){.item = ITEM_JS_UNDEFINED};
@@ -332,6 +352,7 @@ static bool js_attr_ensure_array_shape_entry(Item obj, const char* name, int nam
         js_property_set(target, name_item, slot_value);
     }
     if (!js_find_shape_entry(target, name, name_len)) return false;
+    js_attr_mark_array_index_shape(target, name, name_len);
     if (arr && js_attrs_name_is_digits(name, name_len)) {
         int64_t idx = js_attrs_parse_index_name(name, name_len);
         if (idx >= 0 && idx < arr->length && idx < arr->capacity) {
@@ -436,10 +457,12 @@ static inline void js_attr_apply_shape_flags(Item obj, const char* name, int nam
     ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
     if (se) {
         js_shape_entry_update_flags(obj, name, name_len, set_mask, clear_mask);
+        js_attr_mark_array_index_shape(obj, name, name_len);
         return;
     }
     if (js_attr_ensure_array_shape_entry(obj, name, name_len)) {
         js_shape_entry_update_flags(obj, name, name_len, set_mask, clear_mask);
+        js_attr_mark_array_index_shape(obj, name, name_len);
     }
 }
 
@@ -611,6 +634,7 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
     if (attrs & JSPD_NON_ENUMERABLE)   set_mask |= JSPD_NON_ENUMERABLE;
     if (attrs & JSPD_NON_CONFIGURABLE) set_mask |= JSPD_NON_CONFIGURABLE;
     js_shape_entry_update_flags(obj, ns->chars, (int)ns->len, set_mask, JSPD_DELETED);
+    js_attr_mark_array_index_shape(obj, ns->chars, (int)ns->len);
 }
 
 // Phase-5C: 4-arg MIR-friendly wrapper. Returns `obj` so transpiler call sites
