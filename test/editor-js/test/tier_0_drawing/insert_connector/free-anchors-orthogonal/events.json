@@ -1,0 +1,13 @@
+[
+  {
+    "type": "command",
+    "name": "insertShape",
+    "args": {
+      "drawing_path": [0],
+      "layer_index": 0,
+      "kind": "connector",
+      "from_x": 20, "from_y": 30, "to_x": 200, "to_y": 150,
+      "routing": "orthogonal"
+    }
+  }
+]

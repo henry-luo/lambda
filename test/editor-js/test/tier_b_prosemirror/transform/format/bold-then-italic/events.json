@@ -1,0 +1,4 @@
+[
+  { "type": "intent", "intent": { "type": "formatBold" } },
+  { "type": "intent", "intent": { "type": "formatItalic" } }
+]

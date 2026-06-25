@@ -1,0 +1,5 @@
+[
+  {"type":"command","name":"insertText","args":{"text":"XYZ"}},
+  {"type":"command","name":"deleteContentBackward"},
+  {"type":"command","name":"deleteContentBackward"}
+]

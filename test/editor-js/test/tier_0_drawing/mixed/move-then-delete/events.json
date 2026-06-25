@@ -1,0 +1,12 @@
+[
+  {
+    "type": "command",
+    "name": "moveShapes",
+    "args": { "shape_paths": [[0, 0, 0]], "dx": 40, "dy": 30 }
+  },
+  {
+    "type": "command",
+    "name": "deleteShapes",
+    "args": { "shape_paths": [[0, 0, 0]] }
+  }
+]

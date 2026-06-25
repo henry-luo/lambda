@@ -1,0 +1,10 @@
+[
+  {
+    "type": "set_selection",
+    "selection": {
+      "kind": "text",
+      "anchor": { "path": [0, 0], "offset": 4 },
+      "head":   { "path": [0, 0], "offset": 2 }
+    }
+  }
+]

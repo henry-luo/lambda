@@ -1,0 +1,4 @@
+[
+  { "type": "command", "name": "toggleMark", "args": { "mark": "bold" } },
+  { "type": "command", "name": "toggleMark", "args": { "mark": "bold" } }
+]
