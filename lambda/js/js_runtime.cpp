@@ -33869,11 +33869,11 @@ extern "C" Item js_module_get(Item specifier) {
         extern Item js_get_stream_promises_namespace(void);
         return js_get_stream_promises_namespace();
     }
-    // stream/web, node:stream/web — return stream namespace (contains ReadableStream etc.)
+    // stream/web, node:stream/web
     if ((spec->len == 10 && memcmp(spec->chars, "stream/web", 10) == 0) ||
         (spec->len == 15 && memcmp(spec->chars, "node:stream/web", 15) == 0)) {
-        extern Item js_get_stream_namespace(void);
-        return js_get_stream_namespace();
+        extern Item js_get_stream_web_namespace(void);
+        return js_get_stream_web_namespace();
     }
     // stream/consumers, node:stream/consumers — return stream namespace
     if ((spec->len == 16 && memcmp(spec->chars, "stream/consumers", 16) == 0) ||

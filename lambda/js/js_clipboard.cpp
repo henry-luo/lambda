@@ -56,6 +56,7 @@ extern "C" Item js_clipboard_item_get_type(Item type_item);
 extern "C" Item js_blob_text(void);
 extern "C" Item js_blob_array_buffer(void);
 extern "C" Item js_blob_slice(Item start_item, Item end_item, Item type_item);
+extern "C" JsArrayBuffer* js_get_arraybuffer_ptr_item(Item val);
 
 // Local helpers --------------------------------------------------------------
 static inline Item make_str(const char* s) {
@@ -125,8 +126,7 @@ static void blob_append_part(StrBuf* sb, Item part) {
     }
     // ArrayBuffer / TypedArray / DataView — append raw bytes verbatim.
     if (js_is_arraybuffer(part)) {
-        Map* m = part.map;
-        JsArrayBuffer* ab = (JsArrayBuffer*)m->data;
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(part);
         if (ab && ab->data && ab->byte_length > 0 && !ab->detached) {
             strbuf_append_str_n(sb, (const char*)ab->data, (size_t)ab->byte_length);
         }
@@ -224,8 +224,7 @@ extern "C" Item js_blob_array_buffer(void) {
     // Build a real ArrayBuffer (native typed-array module) and copy bytes in.
     Item buf = js_arraybuffer_new((int)n);
     if (t && n > 0 && get_type_id(buf) == LMD_TYPE_MAP) {
-        Map* m = buf.map;
-        JsArrayBuffer* ab = (JsArrayBuffer*)m->data;
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(buf);
         if (ab && ab->data) memcpy(ab->data, t, n);
     }
     return js_promise_resolve(buf);
