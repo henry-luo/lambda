@@ -12,9 +12,9 @@
 # Workers: 9
 # Slow tests included: no
 # Slow list: 30 tests (test/node/official_slow_list.txt), threshold 10s
-# Total passing: 1632
-# Total tests: 3556  Passed: 1632  Failed: 1924  Missing: 0  Timed out: 0  Crashed: 15
-# Baseline comparison: previous 1627  Regressions: 0  Improvements: 5
+# Total passing: 1639
+# Total tests: 3556  Passed: 1639  Failed: 1917  Missing: 0  Timed out: 0  Crashed: 15
+# Baseline comparison: previous 1632  Regressions: 0  Improvements: 7
 # Runtime: 370.9s total wall (discover + execute)
 # Runtime: 3311.2s per-test sum (all executed tests)
 # Runtime: 868.0s per-test sum (passing baseline tests)
@@ -1142,10 +1142,12 @@ test-net-listen-handle-in-cluster-2.js
 test-net-listen-invalid-port.js
 test-net-listen-ipv6only.js
 test-net-listening.js
+test-net-localerror.js
 test-net-local-address-port.js
 test-net-negative-zero.js
 test-net-normalize-args.js
 test-net-onread-static-buffer.js
+test-net-options-lookup.js
 test-net-pause-resume-connecting.js
 test-net-perf_hooks.js
 test-net-persistent-keepalive.js
@@ -1164,11 +1166,16 @@ test-net-server-call-listen-multiple-times.js
 test-net-server-close-before-calling-lookup-callback.js
 test-net-server-close.js
 test-net-server-drop-connections.js
+test-net-server-keepalive.js
 test-net-server-listen-handle.js
+test-net-server-listen-options-signal.js
 test-net-server-listen-options.js
 test-net-server-listen-path.js
 test-net-server-listen-remove-callback.js
 test-net-server-max-connections-close-makes-more-available.js
+test-net-server-nodelay.js
+test-net-server-options.js
+test-net-server-pause-on-connect.js
 test-net-server-reset.js
 test-net-server-try-ports.js
 test-net-server-unref-persistent.js
