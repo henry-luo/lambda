@@ -707,7 +707,8 @@ static bool js_define_property_validate_nonconfigurable_update(
 static void js_define_property_apply_validated_descriptor(Item obj, Item name,
                                                           Item descriptor,
                                                           bool is_arguments_exotic,
-                                                          bool is_new_property) {
+                                                          bool is_new_property,
+                                                          bool existing_accessor) {
     // Stage A2.4: route storage through unified kernel
     // `js_define_own_property_from_descriptor` (in js_props.cpp).
     //
@@ -747,7 +748,8 @@ static void js_define_property_apply_validated_descriptor(Item obj, Item name,
     if (is_arguments_exotic && nm_len == 6 && strncmp(nm_chars, "length", 6) == 0) {
         define_target = (Item){.map = (Map*)(uintptr_t)obj.array->extra};
     }
-    js_define_own_property_from_descriptor(define_target, nm_chars, nm_len, &pd, is_new_property);
+    js_define_own_property_from_descriptor(define_target, nm_chars, nm_len, &pd,
+        is_new_property, existing_accessor);
 }
 
 // ES2020 §9.1.6.3 ValidateAndApplyPropertyDescriptor
@@ -789,7 +791,8 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
     }
 
     js_define_property_apply_validated_descriptor(
-        obj, name, descriptor, is_arguments_exotic, existing_state.is_new_property);
+        obj, name, descriptor, is_arguments_exotic, existing_state.is_new_property,
+        existing_state.existing_accessor);
     return obj;
 }
 
@@ -11384,7 +11387,8 @@ extern "C" Item js_object_freeze(Item obj) {
                 pd.flags |= JS_PD_HAS_WRITABLE;  // writable=false (bit cleared)
             }
             js_define_own_property_from_descriptor(obj,
-                str_key->chars, (int)str_key->len, &pd, /*is_new_property*/false);
+                str_key->chars, (int)str_key->len, &pd, /*is_new_property*/false,
+                has_existing && js_pd_is_accessor(&existing));
         }
     }
     Item key = (Item){.item = s2it(heap_create_name("__frozen__", 10))};
@@ -11529,7 +11533,8 @@ extern "C" Item js_object_seal(Item obj) {
             memset(&pd, 0, sizeof(pd));
             pd.flags |= JS_PD_HAS_CONFIGURABLE;  // configurable=false (bit cleared)
             js_define_own_property_from_descriptor(obj,
-                str_key->chars, (int)str_key->len, &pd, /*is_new_property*/false);
+                str_key->chars, (int)str_key->len, &pd, /*is_new_property*/false,
+                /*existing_accessor*/false);
         }
     }
     Item sealed_k = (Item){.item = s2it(heap_create_name("__sealed__", 10))};
@@ -15382,7 +15387,8 @@ extern "C" void js_define_global_var_property(Item key, Item value) {
     // Keep the descriptor path authoritative for global `var`: pre-inserting
     // undefined makes the property look existing, which skips the
     // non-configurable attribute required by CreateGlobalVarBinding.
-    js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd, is_new_property);
+    js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd,
+        is_new_property, /*existing_accessor*/false);
     if (js_global_var_cached_defined_count < 64) {
         js_global_var_cached_defined_keys[js_global_var_cached_defined_count++] = key;
     }
@@ -15495,7 +15501,8 @@ extern "C" void js_define_global_eval_var_property(Item key, Item value) {
         map_put(global.map, str, value, js_input);
         is_new_property = false;
     }
-    js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd, is_new_property);
+    js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd,
+        is_new_property, /*existing_accessor*/false);
 }
 
 extern "C" void js_define_global_function_property(Item key, Item value) {
@@ -15519,7 +15526,8 @@ extern "C" void js_define_global_function_property(Item key, Item value) {
             JS_PD_HAS_CONFIGURABLE | JS_PD_WRITABLE | JS_PD_ENUMERABLE;
         js_pd_set_configurable(&pd, false);
     }
-    js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd, is_new_property);
+    js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd,
+        is_new_property, has_existing && js_pd_is_accessor(&existing));
 }
 
 extern "C" void js_evalscript_check_global_var_decl(Item key) {

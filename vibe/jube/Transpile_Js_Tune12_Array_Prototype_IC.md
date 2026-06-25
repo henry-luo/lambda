@@ -3,8 +3,9 @@
 Date: 2026-06-25
 Status: P1 array named-property IC, P1b array companion-map store
 stabilization, P2 function-constructor shape cache, P2b prototype inheritance
-composition, P3 name-id metadata, and Cube3D append/store-path profiling
-implemented; GC sweep ownership classification tuned; P4-P5 remain proposals
+composition, P3 name-id metadata, HashMap sparse-array P1/P2, and Cube3D
+append/store-path profiling implemented; GC sweep ownership classification
+tuned; P4-P5 remain proposals
 
 Primary sources:
 
@@ -356,6 +357,49 @@ out.mark@187:3 store    megamorphic=10136          hit_mono=10139
 Instrumentation wall time was effectively neutral in the profile run
 (`7936.456` enabled vs `7951.168` disabled), so the profile should be read as
 hot-path attribution rather than benchmark timing.
+
+## Implementation Update: HashMap Sparse-Array P1/P2
+
+Implemented on 2026-06-25:
+
+- added adaptive promotion from `SparseArrayMap` numeric sparse hash storage
+  back to holey dense storage when a normal array becomes dense enough:
+  `length <= 262144`, sparse count >= `4096`, and sparse density >= 25%;
+- kept promotion conservative: arguments/content arrays are excluded, and
+  every sparse entry must be within the current array length before migration;
+- migrated sparse entries into a fresh dense item backing, preserved existing
+  dense slots, installed the dense backing, and released the sparse numeric
+  hash once promotion succeeds;
+- added `TypeMap::has_array_index_shape` use on array companion maps so hot
+  numeric array get/set paths skip digit-string companion-map probes until a
+  numeric descriptor/accessor shape has actually been installed;
+- marked numeric companion shapes when descriptor flags/accessors are created
+  or updated, preserving array-index semantics for `Object.defineProperty`;
+- fixed descriptor conversion safety for accessor-to-data updates across plain
+  objects, array/arguments companion maps, and function `properties_map` slots
+  by raw-replacing the `JsAccessorPair` slot before clearing
+  `JSPD_IS_ACCESSOR`.
+
+Verification:
+
+- `make build` passed.
+- `./lambda.exe js temp/tune12_sparse_promote_smoke.js --no-log` passed.
+- `./lambda.exe js temp/tune12_array_index_descriptor_smoke.js --no-log`
+  passed.
+- `./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/tune12_array_descriptor_regressions.txt --run-async --async-list=test/js262/test262_baseline.txt --jobs=1 --js-timeout=60`
+  passed: 2 / 2.
+- `./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/tune12_remaining_regressions.txt --run-async --async-list=test/js262/test262_baseline.txt --jobs=1 --js-timeout=60`
+  passed: 3 / 3.
+- `make test262-baseline` passed: 40,261 / 40,261 fully passing, 0
+  regressions, 2,628 skipped.
+- release benchmark with profiling instrumentation disabled:
+  `jetstream/hashmap` median of 3 = `9.47s`.
+
+Result:
+
+- previous local hashmap after the name-id follow-up: `10.70s`;
+- current P1/P2 sparse-array result: `9.47s`;
+- delta: about 11.5% faster on original JetStream hashmap.
 
 ## Implementation Update: Cube3D Append/Store Path and GC Bottleneck
 
