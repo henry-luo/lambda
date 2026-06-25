@@ -207,6 +207,12 @@ typedef struct SocketShutdownReq {
     Item          callback;
 } SocketShutdownReq;
 
+typedef struct SocketBlockedErrorReq {
+    uv_timer_t timer;
+    JsSocket*  sock;
+    char       address[INET6_ADDRSTRLEN];
+} SocketBlockedErrorReq;
+
 struct PendingSocketWrite {
     char* data;
     size_t len;
@@ -1467,6 +1473,31 @@ static Item net_socket_connect_fn = {0};
 static bool net_default_auto_select_family = false;
 static int net_auto_select_family_timeout = 250; // Node.js default
 
+typedef struct NetBlockListEntry {
+    int family;
+    int prefix;
+    uint32_t addr4;
+    unsigned char addr6[16];
+} NetBlockListEntry;
+
+#define NET_BLOCK_LIST_MAX 128
+#define NET_BLOCK_LIST_INSTANCE_MAX 256
+
+typedef struct NetBlockList {
+    int count;
+    NetBlockListEntry entries[NET_BLOCK_LIST_MAX];
+} NetBlockList;
+
+static NetBlockList net_block_list_instances[NET_BLOCK_LIST_INSTANCE_MAX];
+static int net_block_list_instance_count = 0;
+
+static NetBlockList* net_block_list_alloc(void) {
+    if (net_block_list_instance_count >= NET_BLOCK_LIST_INSTANCE_MAX) return NULL;
+    NetBlockList* list = &net_block_list_instances[net_block_list_instance_count++];
+    memset(list, 0, sizeof(NetBlockList));
+    return list;
+}
+
 static Item make_socket_handle_object(JsSocket* sock) {
     Item handle = js_new_object();
     js_property_set(handle, make_string_item("__socket_handle__"),
@@ -1589,6 +1620,8 @@ typedef struct NetConnectOptions {
     bool has_onread;
     Item lookup;
     bool has_lookup;
+    Item block_list;
+    bool has_block_list;
     bool auto_select_family;
     bool auto_select_family_set;
     bool allow_half_open;
@@ -1607,6 +1640,8 @@ typedef struct NetResolveReq {
     char local_address[256];
     bool auto_select_family;
     Item lookup;
+    Item block_list;
+    bool has_block_list;
 } NetResolveReq;
 
 static void client_connect_cb(uv_connect_t* req, int status);
@@ -1741,6 +1776,177 @@ static bool validate_host_string(Item value, const char* name) {
     return true;
 }
 
+static bool net_string_equals_ascii_ci(const char* a, const char* b) {
+    if (!a || !b) return false;
+    while (*a && *b) {
+        char ca = *a;
+        char cb = *b;
+        if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
+        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
+        if (ca != cb) return false;
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static NetBlockList* net_block_list_from_item(Item self) {
+    TypeId type = get_type_id(self);
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return NULL;
+    Item handle_item = js_property_get(self, make_string_item("__net_block_list__"));
+    if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
+    return (NetBlockList*)(uintptr_t)it2i(handle_item);
+}
+
+static bool net_block_list_type_family(Item type_item, int* family) {
+    if (!family) return false;
+    if (is_undefined_item(type_item) || type_item.item == ITEM_NULL) return true;
+    char type_buf[16];
+    if (!copy_string_item(type_item, type_buf, (int)sizeof(type_buf))) return false;
+    if (net_string_equals_ascii_ci(type_buf, "ipv4")) {
+        *family = 4;
+        return true;
+    }
+    if (net_string_equals_ascii_ci(type_buf, "ipv6")) {
+        *family = 6;
+        return true;
+    }
+    return false;
+}
+
+static bool net_block_list_parse_address(Item address_item, Item type_item, NetBlockListEntry* entry) {
+    if (!entry) return false;
+    char address[INET6_ADDRSTRLEN];
+    if (!copy_string_item(address_item, address, (int)sizeof(address))) return false;
+
+    int requested_family = 0;
+    if (!net_block_list_type_family(type_item, &requested_family)) return false;
+
+    struct sockaddr_in addr4;
+    if ((requested_family == 0 || requested_family == 4) &&
+        uv_ip4_addr(address, 0, &addr4) == 0) {
+        memset(entry, 0, sizeof(NetBlockListEntry));
+        entry->family = 4;
+        entry->prefix = 32;
+        entry->addr4 = ntohl(addr4.sin_addr.s_addr);
+        return true;
+    }
+
+    struct sockaddr_in6 addr6;
+    if ((requested_family == 0 || requested_family == 6) &&
+        uv_ip6_addr(address, 0, &addr6) == 0) {
+        memset(entry, 0, sizeof(NetBlockListEntry));
+        entry->family = 6;
+        entry->prefix = 128;
+        memcpy(entry->addr6, addr6.sin6_addr.s6_addr, sizeof(entry->addr6));
+        return true;
+    }
+
+    return false;
+}
+
+static bool net_block_list_parse_prefix(Item prefix_item, int family, int* prefix) {
+    if (!prefix) return false;
+    Item number = js_to_number(prefix_item);
+    double value = net_number_value(number);
+    int max_prefix = family == 6 ? 128 : 32;
+    if (value != value || value < 0 || value > max_prefix || value != (int)value) return false;
+    *prefix = (int)value;
+    return true;
+}
+
+static bool net_block_list_match_ipv4(uint32_t addr, uint32_t rule_addr, int prefix) {
+    if (prefix <= 0) return true;
+    uint32_t mask = prefix == 32 ? 0xffffffffu : (0xffffffffu << (32 - prefix));
+    return (addr & mask) == (rule_addr & mask);
+}
+
+static bool net_block_list_match_ipv6(const unsigned char* addr, const unsigned char* rule_addr, int prefix) {
+    if (prefix <= 0) return true;
+    int whole_bytes = prefix / 8;
+    int rem_bits = prefix % 8;
+    for (int i = 0; i < whole_bytes; i++) {
+        if (addr[i] != rule_addr[i]) return false;
+    }
+    if (rem_bits == 0) return true;
+    unsigned char mask = (unsigned char)(0xffu << (8 - rem_bits));
+    return (addr[whole_bytes] & mask) == (rule_addr[whole_bytes] & mask);
+}
+
+static bool net_block_list_check_parsed(NetBlockList* list, const NetBlockListEntry* address) {
+    if (!list || !address) return false;
+    for (int i = 0; i < list->count; i++) {
+        NetBlockListEntry* rule = &list->entries[i];
+        if (rule->family != address->family) continue;
+        if (address->family == 4 &&
+            net_block_list_match_ipv4(address->addr4, rule->addr4, rule->prefix)) {
+            return true;
+        }
+        if (address->family == 6 &&
+            net_block_list_match_ipv6(address->addr6, rule->addr6, rule->prefix)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool net_block_list_blocks_item(Item list_item, const char* address, int family) {
+    NetBlockList* list = net_block_list_from_item(list_item);
+    if (!list || !address || !address[0]) return false;
+    NetBlockListEntry parsed;
+    Item type_item = make_undefined_item();
+    if (family == 4) type_item = make_string_item("ipv4");
+    else if (family == 6) type_item = make_string_item("ipv6");
+    if (!net_block_list_parse_address(make_string_item(address), type_item, &parsed)) return false;
+    return net_block_list_check_parsed(list, &parsed);
+}
+
+static Item make_ip_blocked_error(const char* address) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "IP address %s is blocked", address ? address : "");
+    Item err = js_new_error(make_string_item(msg));
+    js_property_set(err, make_string_item("code"), make_string_item("ERR_IP_BLOCKED"));
+    if (address && address[0]) js_property_set(err, make_string_item("address"), make_string_item(address));
+    return err;
+}
+
+static void socket_emit_ip_blocked_timer_cb(uv_timer_t* timer) {
+    SocketBlockedErrorReq* req = timer ? (SocketBlockedErrorReq*)timer->data : NULL;
+    if (!req) return;
+    JsSocket* sock = req->sock;
+    if (sock && !sock->destroyed) {
+        Item err = make_ip_blocked_error(req->address);
+        socket_fail_pending_writes(sock, err);
+        socket_emit(sock->js_object, "error", &err, 1);
+        socket_close_now(sock);
+    }
+    uv_timer_stop(timer);
+    uv_close((uv_handle_t*)timer, [](uv_handle_t* handle) {
+        SocketBlockedErrorReq* done = handle ? (SocketBlockedErrorReq*)handle->data : NULL;
+        if (done) mem_free(done);
+    });
+}
+
+static void socket_fail_ip_blocked(JsSocket* sock, const char* address) {
+    if (!sock || sock->destroyed) return;
+    sock->connect_pending = false;
+    socket_update_state_properties(sock);
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) return;
+    SocketBlockedErrorReq* req =
+        (SocketBlockedErrorReq*)mem_calloc(1, sizeof(SocketBlockedErrorReq), MEM_CAT_JS_RUNTIME);
+    req->sock = sock;
+    if (address) {
+        snprintf(req->address, sizeof(req->address), "%s", address);
+    }
+    if (uv_timer_init(loop, &req->timer) != 0) {
+        mem_free(req);
+        return;
+    }
+    req->timer.data = req;
+    uv_timer_start(&req->timer, socket_emit_ip_blocked_timer_cb, 0, 0);
+}
+
 static int net_keep_alive_delay_secs(Item value) {
     if (is_undefined_item(value) || value.item == ITEM_NULL) return 0;
     Item num = js_to_number(value);
@@ -1856,6 +2062,12 @@ static bool normalize_options_object(Item options, NetConnectOptions* out) {
         out->has_lookup = true;
     }
 
+    Item block_list = js_property_get(options, make_string_item("blockList"));
+    if (!is_undefined_item(block_list) && block_list.item != ITEM_NULL) {
+        out->block_list = block_list;
+        out->has_block_list = net_block_list_from_item(block_list) != NULL;
+    }
+
     Item auto_select = js_property_get(options, make_string_item("autoSelectFamily"));
     if (get_type_id(auto_select) == LMD_TYPE_BOOL) {
         out->auto_select_family = it2b(auto_select);
@@ -1883,6 +2095,8 @@ static bool normalize_connect_args(Item rest_args, NetConnectOptions* out) {
     out->has_onread = false;
     out->lookup = make_undefined_item();
     out->has_lookup = false;
+    out->block_list = make_undefined_item();
+    out->has_block_list = false;
     out->auto_select_family = false;
     out->auto_select_family_set = false;
     out->allow_half_open = false;
@@ -2026,10 +2240,13 @@ static void socket_record_auto_attempt(JsSocket* sock, const char* host, int por
 
 static bool socket_connect_auto_next(JsSocket* sock) {
     if (!sock || sock->destroyed) return false;
+    Item block_list = sock->js_object.item ?
+        js_property_get(sock->js_object, make_string_item("__block_list__")) : make_undefined_item();
     while (sock->auto_addr_index < sock->auto_addr_count) {
         int index = sock->auto_addr_index++;
         const char* host = sock->auto_addrs[index];
         int family = sock->auto_families[index];
+        if (net_block_list_blocks_item(block_list, host, family)) continue;
         socket_record_auto_attempt(sock, host, sock->connect_port);
         if (family == 6) {
             struct sockaddr_in6 addr6;
@@ -2188,6 +2405,15 @@ static Item net_lookup_complete(Item env_item, Item rest_args) {
             mem_free(nr);
             return make_undefined_item();
         }
+        if (nr->has_block_list) {
+            for (int i = 0; i < sock->auto_addr_count; i++) {
+                if (net_block_list_blocks_item(nr->block_list, sock->auto_addrs[i], sock->auto_families[i])) {
+                    socket_fail_ip_blocked(sock, sock->auto_addrs[i]);
+                    mem_free(nr);
+                    return make_undefined_item();
+                }
+            }
+        }
     } else if (net_copy_lookup_address(value, first_addr, (int)sizeof(first_addr), &first_family)) {
         Item lookup_args[4] = {
             ItemNull,
@@ -2196,6 +2422,12 @@ static Item net_lookup_complete(Item env_item, Item rest_args) {
             make_string_item(nr->host)
         };
         socket_emit(sock->js_object, "lookup", lookup_args, 4);
+
+        if (nr->has_block_list && net_block_list_blocks_item(nr->block_list, first_addr, first_family)) {
+            socket_fail_ip_blocked(sock, first_addr);
+            mem_free(nr);
+            return make_undefined_item();
+        }
 
         int r = 0;
         if (first_family == 6) {
@@ -2296,6 +2528,14 @@ static void net_resolve_cb(uv_getaddrinfo_t* req, int status, struct addrinfo* r
     options.has_local_port = nr->has_local_port;
     options.local_port = nr->local_port;
     memcpy(options.local_address, nr->local_address, sizeof(options.local_address));
+    options.block_list = nr->block_list;
+    options.has_block_list = nr->has_block_list;
+    if (nr->has_block_list && net_block_list_blocks_item(nr->block_list, addr_str, family)) {
+        socket_fail_ip_blocked(sock, addr_str);
+        uv_freeaddrinfo(res);
+        mem_free(nr);
+        return;
+    }
     int bind_r = socket_bind_local(sock, &options, selected->ai_family);
     if (bind_r != 0) {
         sock->connect_pending = false;
@@ -2343,6 +2583,8 @@ static int socket_start_connect(JsSocket* sock, const NetConnectOptions* options
         memcpy(nr->local_address, options->local_address, sizeof(nr->local_address));
         nr->auto_select_family = auto_select_family;
         nr->lookup = options->lookup;
+        nr->block_list = options->block_list;
+        nr->has_block_list = options->has_block_list;
 
         sock->connect_pending = true;
         sock->auto_select_family = auto_select_family;
@@ -2374,6 +2616,10 @@ static int socket_start_connect(JsSocket* sock, const NetConnectOptions* options
     struct sockaddr_in addr4;
     if ((options->family == 0 || options->family == 4) &&
         uv_ip4_addr(options->host, options->port, &addr4) == 0) {
+        if (options->has_block_list && net_block_list_blocks_item(options->block_list, options->host, 4)) {
+            socket_fail_ip_blocked(sock, options->host);
+            return 0;
+        }
         int bind_r = socket_bind_local(sock, options, AF_INET);
         if (bind_r != 0) return bind_r;
         return socket_connect_resolved(sock, (const struct sockaddr*)&addr4);
@@ -2382,6 +2628,10 @@ static int socket_start_connect(JsSocket* sock, const NetConnectOptions* options
     struct sockaddr_in6 addr6;
     if ((options->family == 0 || options->family == 6) &&
         uv_ip6_addr(options->host, options->port, &addr6) == 0) {
+        if (options->has_block_list && net_block_list_blocks_item(options->block_list, options->host, 6)) {
+            socket_fail_ip_blocked(sock, options->host);
+            return 0;
+        }
         int bind_r = socket_bind_local(sock, options, AF_INET6);
         if (bind_r != 0) return bind_r;
         return socket_connect_resolved(sock, (const struct sockaddr*)&addr6);
@@ -2400,6 +2650,8 @@ static int socket_start_connect(JsSocket* sock, const NetConnectOptions* options
     nr->local_port = options->local_port;
     memcpy(nr->local_address, options->local_address, sizeof(nr->local_address));
     nr->auto_select_family = auto_select_family;
+    nr->block_list = options->block_list;
+    nr->has_block_list = options->has_block_list;
     snprintf(nr->service, sizeof(nr->service), "%d", options->port);
     nr->req.data = nr;
 
@@ -2424,6 +2676,9 @@ static void socket_store_connect_options(JsSocket* sock, const NetConnectOptions
     sock->keep_alive_requested = options->keep_alive;
     sock->no_delay_requested = options->no_delay;
     sock->keep_alive_delay_secs = options->keep_alive_delay_secs;
+    if (sock->js_object.item && options->has_block_list) {
+        js_property_set(sock->js_object, make_string_item("__block_list__"), options->block_list);
+    }
 }
 
 static void socket_apply_connect_options(JsSocket* sock) {
@@ -2624,7 +2879,9 @@ struct JsServer {
     bool     close_requested;
     bool     handle_closed;
     bool     close_event_emitted;
+    bool     has_block_list;
     int      connection_count;
+    Item     block_list;
 };
 
 static void server_maybe_finish_close(JsServer* srv) {
@@ -2787,6 +3044,29 @@ static void server_connection_cb(uv_stream_t* server, int status) {
                 mem_free(h->data);
             });
             return;
+        }
+
+        if (srv->has_block_list) {
+            struct sockaddr_storage peer_addr;
+            int peer_len = sizeof(peer_addr);
+            char peer_ip[INET6_ADDRSTRLEN];
+            int peer_family = 0;
+            peer_ip[0] = '\0';
+            if (uv_tcp_getpeername(&client->tcp, (struct sockaddr*)&peer_addr, &peer_len) == 0) {
+                if (peer_addr.ss_family == AF_INET) {
+                    uv_ip4_name((const struct sockaddr_in*)&peer_addr, peer_ip, sizeof(peer_ip));
+                    peer_family = 4;
+                } else if (peer_addr.ss_family == AF_INET6) {
+                    uv_ip6_name((const struct sockaddr_in6*)&peer_addr, peer_ip, sizeof(peer_ip));
+                    peer_family = 6;
+                }
+            }
+            if (peer_ip[0] && net_block_list_blocks_item(srv->block_list, peer_ip, peer_family)) {
+                uv_close((uv_handle_t*)&client->tcp, [](uv_handle_t* h) {
+                    mem_free(h->data);
+                });
+                return;
+            }
         }
 
         int max_connections = server_max_connections(srv);
@@ -3164,6 +3444,12 @@ extern "C" Item js_net_createServer(Item rest_args) {
         get_type_id(options) == LMD_TYPE_VMAP) {
         Item allow_half_open = js_property_get(options, make_string_item("allowHalfOpen"));
         srv->allow_half_open = get_type_id(allow_half_open) == LMD_TYPE_BOOL && it2b(allow_half_open);
+        Item block_list = js_property_get(options, make_string_item("blockList"));
+        if (!is_undefined_item(block_list) && block_list.item != ITEM_NULL &&
+            net_block_list_from_item(block_list) != NULL) {
+            srv->block_list = block_list;
+            srv->has_block_list = true;
+        }
     }
 
     Item obj = js_new_object();
@@ -3190,6 +3476,9 @@ extern "C" Item js_net_createServer(Item rest_args) {
                     js_new_function((void*)js_server_getConnections, 1));
     js_property_set(obj, make_string_item("allowHalfOpen"),
                     (Item){.item = b2it(srv->allow_half_open)});
+    if (srv->has_block_list) {
+        js_property_set(obj, make_string_item("__block_list__"), srv->block_list);
+    }
 
     srv->js_object = obj;
     net_active_add(net_active_servers, NET_ACTIVE_SERVER_MAX, obj);
@@ -3287,6 +3576,70 @@ extern "C" Item js_net_Socket(Item options) {
             socket_configure_onread(sock, onread);
         }
     }
+    return obj;
+}
+
+static Item js_block_list_addAddress(Item address, Item type) {
+    Item self = js_get_this();
+    NetBlockList* list = net_block_list_from_item(self);
+    if (!list) return self;
+    if (list->count >= NET_BLOCK_LIST_MAX) return self;
+
+    NetBlockListEntry entry;
+    if (!net_block_list_parse_address(address, type, &entry)) {
+        js_throw_invalid_arg_type("address", "valid IP address", address);
+        return self;
+    }
+    list->entries[list->count++] = entry;
+    return self;
+}
+
+static Item js_block_list_addSubnet(Item address, Item prefix, Item type) {
+    Item self = js_get_this();
+    NetBlockList* list = net_block_list_from_item(self);
+    if (!list) return self;
+    if (list->count >= NET_BLOCK_LIST_MAX) return self;
+
+    NetBlockListEntry entry;
+    if (!net_block_list_parse_address(address, type, &entry)) {
+        js_throw_invalid_arg_type("address", "valid IP address", address);
+        return self;
+    }
+    if (!net_block_list_parse_prefix(prefix, entry.family, &entry.prefix)) {
+        js_throw_out_of_range("prefix", entry.family == 6 ? ">= 0 && <= 128" : ">= 0 && <= 32", prefix);
+        return self;
+    }
+    list->entries[list->count++] = entry;
+    return self;
+}
+
+static Item js_block_list_check(Item address, Item type) {
+    Item self = js_get_this();
+    NetBlockList* list = net_block_list_from_item(self);
+    if (!list) return (Item){.item = ITEM_FALSE};
+    NetBlockListEntry entry;
+    if (!net_block_list_parse_address(address, type, &entry)) return (Item){.item = ITEM_FALSE};
+    return (Item){.item = b2it(net_block_list_check_parsed(list, &entry))};
+}
+
+static Item js_block_list_isBlockList(Item value) {
+    return (Item){.item = b2it(net_block_list_from_item(value) != NULL)};
+}
+
+extern "C" Item js_net_BlockList(Item options) {
+    (void)options;
+    NetBlockList* list = net_block_list_alloc();
+    Item obj = js_new_object();
+    if (list) {
+        js_property_set(obj, make_string_item("__net_block_list__"),
+                        (Item){.item = i2it((int64_t)(uintptr_t)list)});
+    }
+    js_property_set(obj, make_string_item("addAddress"),
+                    js_new_function((void*)js_block_list_addAddress, 2));
+    js_property_set(obj, make_string_item("addSubnet"),
+                    js_new_function((void*)js_block_list_addSubnet, 3));
+    js_property_set(obj, make_string_item("check"),
+                    js_new_function((void*)js_block_list_check, 2));
     return obj;
 }
 
@@ -3398,6 +3751,7 @@ extern "C" Item js_get_net_namespace(void) {
     net_set_method(net_namespace, "createConnection", (void*)js_net_createConnection, -1);
     net_set_method(net_namespace, "connect",          (void*)js_net_createConnection, -1); // alias
     Item socket_fn = net_set_method(net_namespace, "Socket", (void*)js_net_Socket, 1);
+    Item block_list_fn = net_set_method(net_namespace, "BlockList", (void*)js_net_BlockList, 1);
     Item stream_fn = net_set_method(net_namespace, "Stream", (void*)js_net_Socket, 1); // legacy alias
     Item server_fn = net_set_method(net_namespace, "Server", (void*)js_net_createServer, -1); // alias
     net_set_method(net_namespace, "isIP",             (void*)js_net_isIP, 1);
@@ -3412,6 +3766,8 @@ extern "C" Item js_get_net_namespace(void) {
     net_set_method(net_namespace, "setDefaultAutoSelectFamilyAttemptTimeout",
                    (void*)js_net_setDefaultAutoSelectFamilyAttemptTimeout, 1);
     net_set_method(net_namespace, "_normalizeArgs", (void*)js_net_normalizeArgs, 1);
+    js_property_set(block_list_fn, make_string_item("isBlockList"),
+                    js_new_function((void*)js_block_list_isBlockList, 1));
 
     Item default_key = make_string_item("default");
     js_property_set(net_namespace, default_key, net_namespace);
@@ -3442,4 +3798,6 @@ extern "C" void js_net_reset(void) {
     memset(net_active_servers, 0, sizeof(net_active_servers));
     net_default_auto_select_family = false;
     net_auto_select_family_timeout = 250;
+    memset(net_block_list_instances, 0, sizeof(net_block_list_instances));
+    net_block_list_instance_count = 0;
 }
