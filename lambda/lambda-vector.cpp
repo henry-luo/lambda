@@ -6,6 +6,19 @@
 #include "../lib/memtrack.h"
 #include "../lib/sort.h"
 #include <cmath>
+#include <type_traits>
+
+// SIMD vectorization hint for the contiguous numeric kernels below.  Uses each
+// compiler's native loop-vectorization pragma so there is no OpenMP runtime or
+// flag dependency (fits the C+ convention); the actual vector ISA comes from
+// the release build's -O3 -march=native.  At -O0 (debug) it is a harmless hint.
+#if defined(__clang__)
+  #define LMD_VEC_LOOP _Pragma("clang loop vectorize(enable) interleave(enable)")
+#elif defined(__GNUC__)
+  #define LMD_VEC_LOOP _Pragma("GCC ivdep")
+#else
+  #define LMD_VEC_LOOP
+#endif
 
 static int cmp_double_asc(const void* a, const void* b, void* udata) {
     (void)udata;
@@ -154,6 +167,77 @@ static bool needs_float_result(Item a, Item b) {
 }
 
 //==============================================================================
+// Contiguous elementwise kernels (auto-vectorization targets)
+//
+// Each kernel is a single straight-line, __restrict-qualified loop with the op
+// selected at compile time via `if constexpr`, so the op-switch lives OUTSIDE
+// the loop body and the compiler can auto-vectorize.  Only the vectorizable ops
+// live here (add/sub/mul, and div for floating types); mod/pow/integer-div stay
+// on scalar loops at the call sites.  Op encoding: 0=add 1=sub 2=mul 3=div.
+//==============================================================================
+
+// d[i] = a[i] OP b[i]
+template <typename T, int OP>
+static inline void k_vv(const T* __restrict a, const T* __restrict b,
+                        T* __restrict d, int64_t n) {
+    LMD_VEC_LOOP
+    for (int64_t i = 0; i < n; i++) {
+        if      constexpr (OP == 0) d[i] = a[i] + b[i];
+        else if constexpr (OP == 1) d[i] = a[i] - b[i];
+        else if constexpr (OP == 2) d[i] = a[i] * b[i];
+        else if constexpr (OP == 3) d[i] = a[i] / b[i];
+    }
+}
+
+// d[i] = a[i] OP s   (vector ⊕ scalar)
+template <typename T, int OP>
+static inline void k_vs(const T* __restrict a, T s, T* __restrict d, int64_t n) {
+    LMD_VEC_LOOP
+    for (int64_t i = 0; i < n; i++) {
+        if      constexpr (OP == 0) d[i] = a[i] + s;
+        else if constexpr (OP == 1) d[i] = a[i] - s;
+        else if constexpr (OP == 2) d[i] = a[i] * s;
+        else if constexpr (OP == 3) d[i] = a[i] / s;
+    }
+}
+
+// d[i] = s OP a[i]   (scalar ⊕ vector — direction matters for sub/div)
+template <typename T, int OP>
+static inline void k_sv(T s, const T* __restrict a, T* __restrict d, int64_t n) {
+    LMD_VEC_LOOP
+    for (int64_t i = 0; i < n; i++) {
+        if      constexpr (OP == 0) d[i] = s + a[i];
+        else if constexpr (OP == 1) d[i] = s - a[i];
+        else if constexpr (OP == 2) d[i] = s * a[i];
+        else if constexpr (OP == 3) d[i] = s / a[i];
+    }
+}
+
+// widening kernel: int64 dst = (T)a OP (T)b, preserving Lambda's non-wrapping
+// integer-widening semantics for small int/uint element types.  The widening
+// load + native op auto-vectorizes; the int64 result type is unchanged from the
+// existing per-element-double path it replaces.
+template <typename T, int OP>
+static inline void k_vv_widen(const T* __restrict a, const T* __restrict b,
+                              int64_t* __restrict d, int64_t n) {
+    LMD_VEC_LOOP
+    for (int64_t i = 0; i < n; i++) {
+        if      constexpr (OP == 0) d[i] = (int64_t)a[i] + (int64_t)b[i];
+        else if constexpr (OP == 1) d[i] = (int64_t)a[i] - (int64_t)b[i];
+        else if constexpr (OP == 2) d[i] = (int64_t)a[i] * (int64_t)b[i];
+    }
+}
+
+// element-type predicates for selecting the contiguous same-type fast paths.
+static inline bool is_double_elem(ArrayNumElemType et) {
+    return et == ELEM_FLOAT || et == ELEM_FLOAT64;  // both store double (union-aliased)
+}
+static inline bool is_small_int_elem(ArrayNumElemType et) {
+    return et == ELEM_INT8 || et == ELEM_INT16 || et == ELEM_INT32 ||
+           et == ELEM_UINT8 || et == ELEM_UINT16 || et == ELEM_UINT32;
+}
+
+//==============================================================================
 // Vector-Scalar Operations (scalar op vector, or vector op scalar)
 //==============================================================================
 
@@ -198,63 +282,81 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
     // determine result type
     bool use_float = needs_float_result(vec, scalar) || op == 3; // div always float
 
-    // fast path for ELEM_INT64 arrays
-    if (vec_type == LMD_TYPE_ARRAY_NUM && vec.array_num->get_elem_type() == ELEM_INT64 && !use_float && op != 3 && op != 5) {
-        ArrayNum* arr = vec.array_num;
+    // fast path for ELEM_INT64 / ELEM_INT arrays (both store in `items`).
+    // Branch-hoisted: op selected outside the loop so each case is a vectorizable
+    // kernel; mod (op 4) keeps its div-by-zero guard on a scalar loop.
+    if (vec_type == LMD_TYPE_ARRAY_NUM && !use_float && op != 3 && op != 5 &&
+        (vec.array_num->get_elem_type() == ELEM_INT64 || vec.array_num->get_elem_type() == ELEM_INT)) {
+        ArrayNumElemType et = vec.array_num->get_elem_type();
+        const int64_t* __restrict src = vec.array_num->items;
         int64_t sval = (int64_t)scalar_val;
-        ArrayNum* result = array_int64_new(len);
-        for (int64_t i = 0; i < len; i++) {
-            int64_t elem = arr->items[i];
-            switch (op) {
-                case 0: result->items[i] = scalar_first ? sval + elem : elem + sval; break;
-                case 1: result->items[i] = scalar_first ? sval - elem : elem - sval; break;
-                case 2: result->items[i] = scalar_first ? sval * elem : elem * sval; break;
-                case 4: result->items[i] = scalar_first ? (elem != 0 ? sval % elem : 0)
-                                                        : (sval != 0 ? elem % sval : 0); break;
-                default: result->items[i] = elem; break;
-            }
+        ArrayNum* result = (et == ELEM_INT64) ? array_int64_new(len) : array_num_new(ELEM_INT, len);
+        int64_t* __restrict dst = result->items;
+        switch (op) {
+            case 0: k_vs<int64_t, 0>(src, sval, dst, len); break;  // commutative
+            case 1: if (scalar_first) k_sv<int64_t, 1>(sval, src, dst, len);
+                    else              k_vs<int64_t, 1>(src, sval, dst, len); break;
+            case 2: k_vs<int64_t, 2>(src, sval, dst, len); break;  // commutative
+            case 4: for (int64_t i = 0; i < len; i++) {
+                        int64_t elem = src[i];
+                        dst[i] = scalar_first ? (elem != 0 ? sval % elem : 0)
+                                              : (sval != 0 ? elem % sval : 0);
+                    } break;
+            default: for (int64_t i = 0; i < len; i++) dst[i] = src[i]; break;
         }
         return { .array_num = result };
     }
 
-    // fast path for ELEM_INT arrays (packed int56)
-    if (vec_type == LMD_TYPE_ARRAY_NUM && vec.array_num->get_elem_type() == ELEM_INT && !use_float && op != 3 && op != 5) {
-        ArrayNum* arr = vec.array_num;
-        int64_t sval = (int64_t)scalar_val;
-        ArrayNum* result = array_num_new(ELEM_INT, len);
-        for (int64_t i = 0; i < len; i++) {
-            int64_t elem = arr->items[i];
-            switch (op) {
-                case 0: result->items[i] = scalar_first ? sval + elem : elem + sval; break;
-                case 1: result->items[i] = scalar_first ? sval - elem : elem - sval; break;
-                case 2: result->items[i] = scalar_first ? sval * elem : elem * sval; break;
-                case 4: result->items[i] = scalar_first ? (elem != 0 ? sval % elem : 0)
-                                                        : (sval != 0 ? elem % sval : 0); break;
-                default: result->items[i] = elem; break;
-            }
-        }
-        return { .array_num = result };
-    }
-
-    // fast path for ELEM_FLOAT32 compact arrays
+    // fast path for ELEM_FLOAT32 compact arrays — branch-hoisted, __restrict
+    // kernels for add/sub/mul/div; fmod/pow stay on scalar loops.
     if (vec_type == LMD_TYPE_ARRAY_NUM && vec.array_num->get_elem_type() == ELEM_FLOAT32) {
-        ArrayNum* arr = vec.array_num;
+        const float* __restrict src = (const float*)vec.array_num->data;
         float sval = (float)scalar_val;
         ArrayNum* result = array_num_new(ELEM_FLOAT32, len);
-        float* src = (float*)arr->data;
-        float* dst = (float*)result->data;
-        for (int64_t i = 0; i < len; i++) {
-            float a = scalar_first ? sval : src[i];
-            float b = scalar_first ? src[i] : sval;
-            switch (op) {
-                case 0: dst[i] = a + b; break;
-                case 1: dst[i] = a - b; break;
-                case 2: dst[i] = a * b; break;
-                case 3: dst[i] = a / b; break;
-                case 4: dst[i] = fmodf(a, b); break;
-                case 5: dst[i] = powf(a, b); break;
-                default: dst[i] = src[i]; break;
-            }
+        float* __restrict dst = (float*)result->data;
+        switch (op) {
+            case 0: k_vs<float, 0>(src, sval, dst, len); break;
+            case 1: if (scalar_first) k_sv<float, 1>(sval, src, dst, len);
+                    else              k_vs<float, 1>(src, sval, dst, len); break;
+            case 2: k_vs<float, 2>(src, sval, dst, len); break;
+            case 3: if (scalar_first) k_sv<float, 3>(sval, src, dst, len);
+                    else              k_vs<float, 3>(src, sval, dst, len); break;
+            case 4: for (int64_t i = 0; i < len; i++) {
+                        float a = scalar_first ? sval : src[i], b = scalar_first ? src[i] : sval;
+                        dst[i] = fmodf(a, b);
+                    } break;
+            case 5: for (int64_t i = 0; i < len; i++) {
+                        float a = scalar_first ? sval : src[i], b = scalar_first ? src[i] : sval;
+                        dst[i] = powf(a, b);
+                    } break;
+            default: for (int64_t i = 0; i < len; i++) dst[i] = src[i]; break;
+        }
+        return { .array_num = result };
+    }
+
+    // fast path for double-storage arrays (ELEM_FLOAT / ELEM_FLOAT64) — branch-hoisted,
+    // __restrict kernels for add/sub/mul/div; fmod/pow stay on scalar loops.
+    if (vec_type == LMD_TYPE_ARRAY_NUM && is_double_elem(vec.array_num->get_elem_type())) {
+        const double* __restrict src = (const double*)vec.array_num->data;
+        double sval = scalar_val;
+        ArrayNum* result = array_float_new(len);
+        double* __restrict dst = result->float_items;
+        switch (op) {
+            case 0: k_vs<double, 0>(src, sval, dst, len); break;
+            case 1: if (scalar_first) k_sv<double, 1>(sval, src, dst, len);
+                    else              k_vs<double, 1>(src, sval, dst, len); break;
+            case 2: k_vs<double, 2>(src, sval, dst, len); break;
+            case 3: if (scalar_first) k_sv<double, 3>(sval, src, dst, len);
+                    else              k_vs<double, 3>(src, sval, dst, len); break;
+            case 4: for (int64_t i = 0; i < len; i++) {
+                        double a = scalar_first ? sval : src[i], b = scalar_first ? src[i] : sval;
+                        dst[i] = fmod(a, b);
+                    } break;
+            case 5: for (int64_t i = 0; i < len; i++) {
+                        double a = scalar_first ? sval : src[i], b = scalar_first ? src[i] : sval;
+                        dst[i] = pow(a, b);
+                    } break;
+            default: for (int64_t i = 0; i < len; i++) dst[i] = src[i]; break;
         }
         return { .array_num = result };
     }
@@ -644,62 +746,101 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
     int64_t len = len_a;
     bool use_float = needs_float_result(vec_a, vec_b) || op == 3;
 
-    // fast path: both ELEM_INT64
-    if (type_a == LMD_TYPE_ARRAY_NUM && vec_a.array_num->get_elem_type() == ELEM_INT64 &&
-        type_b == LMD_TYPE_ARRAY_NUM && vec_b.array_num->get_elem_type() == ELEM_INT64 &&
-        !use_float && op != 3 && op != 5) {
-        ArrayNum* a = vec_a.array_num;
-        ArrayNum* b = vec_b.array_num;
-        ArrayNum* result = array_int64_new(len);
-        for (int64_t i = 0; i < len; i++) {
-            switch (op) {
-                case 0: result->items[i] = a->items[i] + b->items[i]; break;
-                case 1: result->items[i] = a->items[i] - b->items[i]; break;
-                case 2: result->items[i] = a->items[i] * b->items[i]; break;
-                case 4: result->items[i] = b->items[i] != 0 ? a->items[i] % b->items[i] : 0; break;
-                default: result->items[i] = a->items[i]; break;
-            }
+    // fast path: both ELEM_INT64 or both ELEM_INT (same type, stored in `items`).
+    // Branch-hoisted: op selected outside the loop; mod keeps its scalar guard.
+    if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM &&
+        !use_float && op != 3 && op != 5 &&
+        vec_a.array_num->get_elem_type() == vec_b.array_num->get_elem_type() &&
+        (vec_a.array_num->get_elem_type() == ELEM_INT64 || vec_a.array_num->get_elem_type() == ELEM_INT)) {
+        ArrayNumElemType et = vec_a.array_num->get_elem_type();
+        const int64_t* __restrict a = vec_a.array_num->items;
+        const int64_t* __restrict b = vec_b.array_num->items;
+        ArrayNum* result = (et == ELEM_INT64) ? array_int64_new(len) : array_num_new(ELEM_INT, len);
+        int64_t* __restrict dst = result->items;
+        switch (op) {
+            case 0: k_vv<int64_t, 0>(a, b, dst, len); break;
+            case 1: k_vv<int64_t, 1>(a, b, dst, len); break;
+            case 2: k_vv<int64_t, 2>(a, b, dst, len); break;
+            case 4: for (int64_t i = 0; i < len; i++) dst[i] = b[i] != 0 ? a[i] % b[i] : 0; break;
+            default: for (int64_t i = 0; i < len; i++) dst[i] = a[i]; break;
         }
         return { .array_num = result };
     }
 
-    // fast path: both ELEM_INT (packed int56)
-    if (type_a == LMD_TYPE_ARRAY_NUM && vec_a.array_num->get_elem_type() == ELEM_INT &&
-        type_b == LMD_TYPE_ARRAY_NUM && vec_b.array_num->get_elem_type() == ELEM_INT &&
-        !use_float && op != 3 && op != 5) {
-        ArrayNum* a = vec_a.array_num;
-        ArrayNum* b = vec_b.array_num;
-        ArrayNum* result = array_num_new(ELEM_INT, len);
-        for (int64_t i = 0; i < len; i++) {
-            switch (op) {
-                case 0: result->items[i] = a->items[i] + b->items[i]; break;
-                case 1: result->items[i] = a->items[i] - b->items[i]; break;
-                case 2: result->items[i] = a->items[i] * b->items[i]; break;
-                case 4: result->items[i] = b->items[i] != 0 ? a->items[i] % b->items[i] : 0; break;
-                default: result->items[i] = a->items[i]; break;
-            }
-        }
-        return { .array_num = result };
-    }
-
-    // fast path: both ELEM_FLOAT32
+    // fast path: both ELEM_FLOAT32 — branch-hoisted, __restrict kernels for
+    // add/sub/mul/div; fmod/pow stay on scalar loops.
     if (type_a == LMD_TYPE_ARRAY_NUM && vec_a.array_num->get_elem_type() == ELEM_FLOAT32 &&
         type_b == LMD_TYPE_ARRAY_NUM && vec_b.array_num->get_elem_type() == ELEM_FLOAT32) {
-        float* sa = (float*)vec_a.array_num->data;
-        float* sb = (float*)vec_b.array_num->data;
+        const float* __restrict sa = (const float*)vec_a.array_num->data;
+        const float* __restrict sb = (const float*)vec_b.array_num->data;
         ArrayNum* result = array_num_new(ELEM_FLOAT32, len);
-        float* dst = (float*)result->data;
-        for (int64_t i = 0; i < len; i++) {
-            switch (op) {
-                case 0: dst[i] = sa[i] + sb[i]; break;
-                case 1: dst[i] = sa[i] - sb[i]; break;
-                case 2: dst[i] = sa[i] * sb[i]; break;
-                case 3: dst[i] = sa[i] / sb[i]; break;
-                case 4: dst[i] = fmodf(sa[i], sb[i]); break;
-                case 5: dst[i] = powf(sa[i], sb[i]); break;
-                default: dst[i] = sa[i]; break;
-            }
+        float* __restrict dst = (float*)result->data;
+        switch (op) {
+            case 0: k_vv<float, 0>(sa, sb, dst, len); break;
+            case 1: k_vv<float, 1>(sa, sb, dst, len); break;
+            case 2: k_vv<float, 2>(sa, sb, dst, len); break;
+            case 3: k_vv<float, 3>(sa, sb, dst, len); break;
+            case 4: for (int64_t i = 0; i < len; i++) dst[i] = fmodf(sa[i], sb[i]); break;
+            case 5: for (int64_t i = 0; i < len; i++) dst[i] = powf(sa[i], sb[i]); break;
+            default: for (int64_t i = 0; i < len; i++) dst[i] = sa[i]; break;
         }
+        return { .array_num = result };
+    }
+
+    // fast path: both double-storage (ELEM_FLOAT / ELEM_FLOAT64) — branch-hoisted,
+    // __restrict kernels for add/sub/mul/div; fmod/pow stay on scalar loops.
+    if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM &&
+        is_double_elem(vec_a.array_num->get_elem_type()) &&
+        is_double_elem(vec_b.array_num->get_elem_type())) {
+        const double* __restrict sa = (const double*)vec_a.array_num->data;
+        const double* __restrict sb = (const double*)vec_b.array_num->data;
+        ArrayNum* result = array_float_new(len);
+        double* __restrict dst = result->float_items;
+        switch (op) {
+            case 0: k_vv<double, 0>(sa, sb, dst, len); break;
+            case 1: k_vv<double, 1>(sa, sb, dst, len); break;
+            case 2: k_vv<double, 2>(sa, sb, dst, len); break;
+            case 3: k_vv<double, 3>(sa, sb, dst, len); break;
+            case 4: for (int64_t i = 0; i < len; i++) dst[i] = fmod(sa[i], sb[i]); break;
+            case 5: for (int64_t i = 0; i < len; i++) dst[i] = pow(sa[i], sb[i]); break;
+            default: for (int64_t i = 0; i < len; i++) dst[i] = sa[i]; break;
+        }
+        return { .array_num = result };
+    }
+
+    // fast path: both the same small int/uint type — native contiguous read,
+    // widening to an int64 result.  Matches the per-element-double path's
+    // non-wrapping semantics exactly, but the widening load + native op vectorizes.
+    if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM &&
+        !use_float && op != 3 && op != 5 &&
+        vec_a.array_num->get_elem_type() == vec_b.array_num->get_elem_type() &&
+        is_small_int_elem(vec_a.array_num->get_elem_type())) {
+        ArrayNumElemType et = vec_a.array_num->get_elem_type();
+        const void* pa = vec_a.array_num->data;
+        const void* pb = vec_b.array_num->data;
+        ArrayNum* result = array_int64_new(len);
+        int64_t* __restrict dst = result->items;
+        #define LMD_WIDEN_VV(CT) \
+            switch (op) { \
+                case 0: k_vv_widen<CT, 0>((const CT*)pa, (const CT*)pb, dst, len); break; \
+                case 1: k_vv_widen<CT, 1>((const CT*)pa, (const CT*)pb, dst, len); break; \
+                case 2: k_vv_widen<CT, 2>((const CT*)pa, (const CT*)pb, dst, len); break; \
+                case 4: { const CT* a = (const CT*)pa; const CT* b = (const CT*)pb; \
+                          for (int64_t i = 0; i < len; i++) { int64_t bi = (int64_t)b[i]; \
+                              dst[i] = bi != 0 ? (int64_t)a[i] % bi : 0; } } break; \
+                default: { const CT* a = (const CT*)pa; \
+                           for (int64_t i = 0; i < len; i++) dst[i] = (int64_t)a[i]; } break; \
+            }
+        switch (et) {
+            case ELEM_INT8:   LMD_WIDEN_VV(int8_t);   break;
+            case ELEM_INT16:  LMD_WIDEN_VV(int16_t);  break;
+            case ELEM_INT32:  LMD_WIDEN_VV(int32_t);  break;
+            case ELEM_UINT8:  LMD_WIDEN_VV(uint8_t);  break;
+            case ELEM_UINT16: LMD_WIDEN_VV(uint16_t); break;
+            case ELEM_UINT32: LMD_WIDEN_VV(uint32_t); break;
+            default: break;
+        }
+        #undef LMD_WIDEN_VV
         return { .array_num = result };
     }
 
@@ -2243,8 +2384,9 @@ Item fn_sort2(Item item, Item dir_item) {
         // sort indices by key values using generic comparison (fn_lt/fn_gt)
         for (int64_t i = 0; i < len - 1; i++) {
             for (int64_t j = 0; j < len - i - 1; j++) {
-                Bool cmp = descending ? fn_lt(key_vals[indices[j]], key_vals[indices[j + 1]])
-                                      : fn_gt(key_vals[indices[j]], key_vals[indices[j + 1]]);
+                // sort keys are scalars — use the raw 3-state scalar comparison
+                Bool cmp = descending ? fn_lt_scalar(key_vals[indices[j]], key_vals[indices[j + 1]])
+                                      : fn_gt_scalar(key_vals[indices[j]], key_vals[indices[j + 1]]);
                 if (cmp == BOOL_TRUE) {
                     int64_t tmp = indices[j];
                     indices[j] = indices[j + 1];
@@ -2646,6 +2788,7 @@ Item fn_subview(Item vec, Item start_item, Item end_item) {
     view->set_elem_type(etype);
     view->is_ndim = 1;
     view->is_view = 1;
+    view->is_mutable_view = 1;  // writable through to base in procedural code (Scope 3)
     // pre-adjusted data pointer — element 0 of view is element `start` of base
     view->data = (void*)((char*)base->data + start * (size_t)elem_size);
     view->length = view_len;
@@ -2744,6 +2887,7 @@ Item fn_reshape(Item vec, Item shape_item) {
     view->set_elem_type(etype);
     view->is_ndim = 1;
     view->is_view = 1;
+    view->is_mutable_view = 1;  // writable through to base in procedural code (Scope 3)
     view->data = base->data;            // alias entire data
     view->length = base->length;
     view->capacity = base->length;
@@ -2871,6 +3015,7 @@ Item fn_transpose(Item vec) {
     view->set_elem_type(base->get_elem_type());
     view->is_ndim = 1;
     view->is_view = 1;
+    view->is_mutable_view = 1;  // writable through to base in procedural code (Scope 3)
     view->data = base->data;
     view->length = base->length;
     view->capacity = base->length;
@@ -2928,6 +3073,7 @@ Item fn_ravel(Item vec) {
     view->set_elem_type(base->get_elem_type());
     view->is_ndim = 1;
     view->is_view = 1;
+    view->is_mutable_view = 1;  // writable through to base in procedural code (Scope 3)
     view->data = base->data;
     view->length = base->length;
     view->capacity = base->length;
@@ -3151,9 +3297,76 @@ Item fn_array_split(Item arr_item, int64_t n, int64_t axis) {
 // ============================================================================
 enum ReduceOp { RED_SUM, RED_PROD, RED_MIN, RED_MAX, RED_AVG };
 
+// Contiguous (stride==1) typed reduction over a native element type.  Reads
+// elements directly (no per-element type switch) so the loop vectorizes.  The
+// accumulation order and double conversion are identical to the strided walker
+// (first element seeds the accumulator, folded in element order, in double), so
+// results are bit-identical.  min/max and integer folds are associative and
+// vectorize; the float sum/prod left-fold stays scalar (no reassociation).
+template <typename T, int OP>
+static double k_reduce_contig(const T* __restrict a, int64_t n) {
+    double acc = (double)a[0];
+    if constexpr (OP == RED_MIN || OP == RED_MAX) {
+        LMD_VEC_LOOP
+        for (int64_t i = 1; i < n; i++) {
+            double v = (double)a[i];
+            if constexpr (OP == RED_MIN) { if (v < acc) acc = v; }
+            else                         { if (v > acc) acc = v; }
+        }
+    } else {  // SUM / AVG / PROD — strict left-fold in double
+        for (int64_t i = 1; i < n; i++) {
+            double v = (double)a[i];
+            if constexpr (OP == RED_PROD) acc *= v;
+            else                          acc += v;
+        }
+        if constexpr (OP == RED_AVG) acc /= (double)n;
+    }
+    return acc;
+}
+
+// element types the contiguous reducer covers (FLOAT16/BOOL fall back to strided).
+static inline bool is_contig_reducible(ArrayNumElemType et) {
+    return et == ELEM_INT || et == ELEM_INT64 || et == ELEM_FLOAT || et == ELEM_FLOAT64 ||
+           et == ELEM_FLOAT32 || et == ELEM_INT8 || et == ELEM_INT16 || et == ELEM_INT32 ||
+           et == ELEM_UINT8 || et == ELEM_UINT16 || et == ELEM_UINT32 || et == ELEM_UINT64;
+}
+
+// Dispatch a contiguous reduction over `len` elements starting at element index
+// `base_off` of arr->data, selecting the kernel by element type and op.  Caller
+// must ensure the element type is contig-reducible.
+static double reduce_contig_dispatch(ArrayNum* arr, int64_t base_off, int64_t len, int op) {
+    #define LMD_RED(CT) do { const CT* p = (const CT*)arr->data + base_off; \
+        switch (op) { \
+            case RED_SUM:  return k_reduce_contig<CT, RED_SUM>(p, len); \
+            case RED_PROD: return k_reduce_contig<CT, RED_PROD>(p, len); \
+            case RED_MIN:  return k_reduce_contig<CT, RED_MIN>(p, len); \
+            case RED_MAX:  return k_reduce_contig<CT, RED_MAX>(p, len); \
+            case RED_AVG:  return k_reduce_contig<CT, RED_AVG>(p, len); \
+        } } while (0)
+    switch (arr->get_elem_type()) {
+        case ELEM_INT: case ELEM_INT64:     LMD_RED(int64_t);  break;
+        case ELEM_FLOAT: case ELEM_FLOAT64: LMD_RED(double);   break;
+        case ELEM_FLOAT32:                  LMD_RED(float);    break;
+        case ELEM_INT8:                     LMD_RED(int8_t);   break;
+        case ELEM_INT16:                    LMD_RED(int16_t);  break;
+        case ELEM_INT32:                    LMD_RED(int32_t);  break;
+        case ELEM_UINT8:                    LMD_RED(uint8_t);  break;
+        case ELEM_UINT16:                   LMD_RED(uint16_t); break;
+        case ELEM_UINT32:                   LMD_RED(uint32_t); break;
+        case ELEM_UINT64:                   LMD_RED(uint64_t); break;
+        default: break;
+    }
+    #undef LMD_RED
+    return (op == RED_PROD) ? 1.0 : 0.0;  // unreachable for contig-reducible types
+}
+
 // Reduce one lane: elements at base_off, base_off+stride, … (len of them).
 static double reduce_lane(ArrayNum* arr, int64_t base_off, int64_t stride, int64_t len, int op) {
     if (len <= 0) return (op == RED_PROD) ? 1.0 : 0.0;
+    // contiguous fast path: a unit-stride lane over a native type vectorizes.
+    if (stride == 1 && is_contig_reducible(arr->get_elem_type())) {
+        return reduce_contig_dispatch(arr, base_off, len, op);
+    }
     double acc = read_arr_elem_as_double(arr, base_off);
     for (int64_t k = 1; k < len; k++) {
         double v = read_arr_elem_as_double(arr, base_off + k * stride);
@@ -3165,6 +3378,43 @@ static double reduce_lane(ArrayNum* arr, int64_t base_off, int64_t stride, int64
         }
     }
     if (op == RED_AVG) acc /= (double)len;
+    return acc;
+}
+
+// Whole-array reduction → double accumulator, correct for every element type.
+// Owned arrays (contiguous in storage) use the vectorized contiguous kernel;
+// strided views (and FLOAT16/BOOL) fall back to a correct n-d strided walk.
+double array_num_reduce_double(ArrayNum* arr, int op) {
+    if (!arr) return (op == RED_PROD) ? 1.0 : 0.0;
+    int64_t n = arr->length;
+    if (n <= 0) return (op == RED_PROD) ? 1.0 : 0.0;
+    ArrayNumElemType et = arr->get_elem_type();
+    // owned arrays are contiguous in their storage buffer (1-D or row-major n-d).
+    if (!arr->is_view && is_contig_reducible(et)) {
+        return reduce_contig_dispatch(arr, 0, n, op);
+    }
+    // strided / view / FLOAT16 / BOOL: walk every element in row-major logical
+    // order via the shape side-table, reading each by its true type.
+    int64_t shp[32], str[32];
+    int ndim = get_shape_strides(arr, shp, str);
+    int64_t idx[32] = {0};
+    int64_t off = 0;
+    double acc = read_arr_elem_as_double(arr, 0);
+    for (int64_t cnt = 1; cnt < n; cnt++) {
+        for (int d = ndim - 1; d >= 0; d--) {
+            idx[d]++; off += str[d];
+            if (idx[d] < shp[d]) break;
+            idx[d] = 0; off -= shp[d] * str[d];
+        }
+        double v = read_arr_elem_as_double(arr, off);
+        switch (op) {
+            case RED_SUM: case RED_AVG: acc += v; break;
+            case RED_PROD:              acc *= v; break;
+            case RED_MIN: if (v < acc)  acc = v;  break;
+            case RED_MAX: if (v > acc)  acc = v;  break;
+        }
+    }
+    if (op == RED_AVG) acc /= (double)n;
     return acc;
 }
 
@@ -3413,6 +3663,72 @@ Item fn_mask_index(Item arr_item, Item mask_item) {
     log_error("arr[mask]: mask shape is incompatible with the array");
     return ItemError;
 }
+
+// arr[mask] = scalar | values — masked in-place write, the write-counterpart to
+// fn_mask_index.  `mask` is a bool ArrayNum the same shape as `arr`.  Reached only
+// from procedural index-assign statements (so it is procedural by construction).
+// Scalar RHS fills every selected element; array RHS is consumed in order.
+void fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
+    if (get_type_id(arr_item) != LMD_TYPE_ARRAY_NUM) {
+        log_error("arr[idx] = v: masked assignment requires a typed numeric array target");
+        return;
+    }
+    ArrayNum* arr = arr_item.array_num;
+    if (arr->is_view && !arr->is_mutable_view) {
+        log_error("arr[mask] = v: cannot mutate a read-only view; copy() first");
+        return;
+    }
+    TypeId it = get_type_id(idx_item);
+    // plain integer index — element write (this path is reached when the index is
+    // dynamically typed (ANY), e.g. an index variable, that turns out to be an int).
+    if (it == LMD_TYPE_INT || it == LMD_TYPE_INT64) {
+        int64_t i = (it == LMD_TYPE_INT) ? idx_item.get_int56() : idx_item.get_int64();
+        if (i < 0) i += arr->length;
+        if (i >= 0 && i < arr->length) array_num_set_item(arr, i, val_item);
+        return;
+    }
+    if (it == LMD_TYPE_RANGE) {
+        // range slicing is not an indexing read either (use subview); keep the
+        // write side consistent rather than inventing write-only slice semantics.
+        log_error("arr[a to b] = v: range slice-assignment is not supported; use subview/element writes");
+        return;
+    }
+    if (it != LMD_TYPE_ARRAY_NUM || idx_item.array_num->get_elem_type() != ELEM_BOOL) {
+        log_error("arr[idx] = v: index must be a boolean mask (got %s)", get_type_name(it));
+        return;
+    }
+    ArrayNum* mask = idx_item.array_num;
+    int64_t a_shape[32], a_str[32], m_shape[32], m_str[32];
+    int a_ndim = get_shape_strides(arr, a_shape, a_str);
+    int m_ndim = get_shape_strides(mask, m_shape, m_str);
+    bool same = (m_ndim == a_ndim);
+    for (int d = 0; same && d < a_ndim; d++) if (m_shape[d] != a_shape[d]) same = false;
+    if (!same) {
+        log_error("arr[mask] = v: mask shape must match the array shape");
+        return;
+    }
+    int64_t total = 1;
+    for (int d = 0; d < a_ndim; d++) total *= a_shape[d];
+    bool block = (get_type_id(val_item) == LMD_TYPE_ARRAY_NUM);
+    ArrayNum* vals = block ? val_item.array_num : nullptr;
+    int64_t idx[32] = {0}, a_off = 0, m_off = 0, w = 0;
+    for (int64_t o = 0; o < total; o++) {
+        if (read_arr_elem_as_double(mask, m_off) != 0.0) {
+            Item v;
+            if (block) {
+                if (w >= vals->length) break;  // array RHS exhausted
+                v = vector_get({ .array_num = vals }, w++);
+            } else { v = val_item; }
+            array_num_set_item(arr, a_off, v);
+        }
+        for (int d = a_ndim - 1; d >= 0; d--) {
+            idx[d]++; a_off += a_str[d]; m_off += m_str[d];
+            if (idx[d] < a_shape[d]) break;
+            idx[d] = 0; a_off -= a_shape[d] * a_str[d]; m_off -= m_shape[d] * m_str[d];
+        }
+    }
+}
+
 Item fn_sum_axis(Item arr, Item axis)     { return array_num_reduce_axis(arr, axis, RED_SUM,  "sum");  }
 Item fn_avg_axis(Item arr, Item axis)     { return array_num_reduce_axis(arr, axis, RED_AVG,  "avg");  }
 Item fn_prod_axis(Item arr, Item axis)    { return array_num_reduce_axis(arr, axis, RED_PROD, "prod"); }

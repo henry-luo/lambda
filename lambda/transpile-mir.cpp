@@ -1859,6 +1859,11 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         AstPrimaryNode* pri = (AstPrimaryNode*)node;
         if (pri->expr) return get_effective_type(mt, pri->expr);
     }
+    // transpile_match always boxes each arm's body into the result slot, so a match
+    // result is a boxed Item regardless of its declared (arm-union) type. Report ANY
+    // so callers treat it as a boxed Item (box/unbox correctly) instead of assuming a
+    // raw native register — otherwise a match returning ints gets double-boxed.
+    if (node->node_type == AST_NODE_MATCH_EXPR) return LMD_TYPE_ANY;
     TypeId tid = node->type ? node->type->type_id : LMD_TYPE_ANY;
     if (node->node_type == AST_NODE_ARRAY &&
         (tid == LMD_TYPE_NULL || tid == LMD_TYPE_RAW_POINTER || tid == LMD_TYPE_ANY)) {
@@ -1961,19 +1966,27 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         TypeId lt = get_effective_type(mt, bi->left);
         TypeId rt = get_effective_type(mt, bi->right);
 
-        // Comparisons ALWAYS return bool regardless of operand types.
-        // Must check BEFORE the ANY short-circuit below, because comparison
-        // operators (fn_eq/fn_gt/etc.) return Bool (uint8_t 0/1), not Item.
-        // If we returned ANY, the raw 0/1 would be stored as a boxed Item
-        // and later dereferenced as a pointer → SIGSEGV.
+        // Comparison result type — must mirror transpile_binary's native-vs-fallback
+        // decision (which uses these same lt/rt), so consumers read the result with
+        // the right representation:
+        //   • vectorized (array operand)  → ARRAY_NUM mask
+        //   • fn_eq/fn_ne (still Bool)     → BOOL (raw uint8)
+        //   • LT-GE, both native numeric   → BOOL (native MIR comparison → raw 0/1)
+        //   • LT-GE, otherwise             → ANY  (fn_lt/gt/le/ge fallback → boxed bool / mask Item)
+        // EQ/NE/IS/IN stay Bool. (Returning ANY for a raw-0/1 native bool would be
+        // unsafe — it would be boxed then dereferenced as a pointer — hence the
+        // native cases keep BOOL.)
         {
             int op_ck = bi->op;
-            // vectorized comparison with an array operand yields an ELEM_BOOL mask
-            // array, not a scalar bool.
             if (comparison_vectorizes(op_ck, lt, rt)) return LMD_TYPE_ARRAY_NUM;
-            if (op_ck >= OPERATOR_EQ && op_ck <= OPERATOR_GE) return LMD_TYPE_BOOL;
-            if (op_ck == OPERATOR_IS || op_ck == OPERATOR_IS_NAN || op_ck == OPERATOR_IN)
+            if (op_ck == OPERATOR_EQ || op_ck == OPERATOR_NE ||
+                op_ck == OPERATOR_IS || op_ck == OPERATOR_IS_NAN || op_ck == OPERATOR_IN)
                 return LMD_TYPE_BOOL;
+            if (op_ck >= OPERATOR_LT && op_ck <= OPERATOR_GE) {
+                bool l_native = (lt == LMD_TYPE_INT || lt == LMD_TYPE_INT64 || lt == LMD_TYPE_FLOAT);
+                bool r_native = (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64 || rt == LMD_TYPE_FLOAT);
+                return (l_native && r_native) ? LMD_TYPE_BOOL : LMD_TYPE_ANY;
+            }
         }
 
         if (lt == LMD_TYPE_ANY || rt == LMD_TYPE_ANY) return LMD_TYPE_ANY;
@@ -2626,11 +2639,11 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr));
 
-    // Comparison functions (fn_eq/fn_ne/fn_lt/fn_gt/fn_le/fn_ge) return Bool
-    // (uint8_t) but we declare MIR_T_I64 as return type. On some ABIs the
-    // upper bytes of the return register may contain garbage. Mask to 0xFF
-    // to ensure a clean 0/1 value that can be safely used as a native bool.
-    if (bi->op >= OPERATOR_EQ && bi->op <= OPERATOR_GE) {
+    // fn_eq/fn_ne still return Bool (uint8_t) but we declare MIR_T_I64 as the
+    // return type; on some ABIs the upper bytes may be garbage, so mask to 0xFF
+    // for a clean native bool.  Ordered comparisons (fn_lt/fn_gt/fn_le/fn_ge) now
+    // return an Item (boxed bool or element-wise mask) — leave it unmasked.
+    if (bi->op == OPERATOR_EQ || bi->op == OPERATOR_NE) {
         MIR_reg_t clean = new_reg(mt, "cmask", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, clean),
             MIR_new_reg_op(mt->ctx, result),
@@ -7930,14 +7943,23 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
 
         // Enumerate ALL cases where transpile_binary returns native values:
 
-        // 1. Comparisons (EQ-GE) return native bool — EXCEPT vectorized comparisons
-        // (an array operand), which return an already-boxed ELEM_BOOL mask Item.
+        // 1. Comparison results. Must mirror transpile_binary's native-vs-fallback
+        // decision (same lt/rt):
+        //   • vectorized (array operand)  → already a boxed ELEM_BOOL mask Item
+        //   • EQ/NE                        → native Bool (uint8) → box it
+        //   • LT-GE, both native numeric   → native MIR comparison → box it
+        //   • LT-GE, otherwise             → fn_lt/gt/le/ge already returned a boxed
+        //                                    Item (boxed bool or mask) → return as-is
         bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE);
         if (is_cmp) {
             if (comparison_vectorizes(op, lt, rt)) {
                 return val;  // already a boxed mask Item from vec_cmp
             }
-            return emit_box_bool(mt, val);
+            if (op == OPERATOR_EQ || op == OPERATOR_NE) return emit_box_bool(mt, val);
+            bool l_native = (lt == LMD_TYPE_INT || lt == LMD_TYPE_INT64 || lt == LMD_TYPE_FLOAT);
+            bool r_native = (rt == LMD_TYPE_INT || rt == LMD_TYPE_INT64 || rt == LMD_TYPE_FLOAT);
+            if (l_native && r_native) return emit_box_bool(mt, val);
+            return val;  // fn_lt/gt/le/ge fallback already returned a boxed Item
         }
 
         // 1b. IS, IS_NAN, and IN also return native Bool from fn_is/fn_in/fn_is_nan
@@ -8279,6 +8301,24 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 MIR_T_P,   MIR_new_reg_op(mt->ctx, idx_buf),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
             return (MIR_reg_t)0;
+        }
+
+        // Masked / slice assignment: arr[mask] = v (mask is a typed bool array),
+        // arr[a to b] = v (range), or a dynamically-typed (ANY) index — e.g. a
+        // comparison-on-view mask held with static type ANY.  Route to the runtime
+        // helper, which dispatches on the index's actual type (int / range / mask).
+        if (ca->key && !ca->key->next) {
+            TypeId key_tid = get_effective_type(mt, ca->key);
+            if (key_tid == LMD_TYPE_ARRAY_NUM || key_tid == LMD_TYPE_RANGE || key_tid == LMD_TYPE_ANY) {
+                MIR_reg_t arr_item = transpile_box_item(mt, ca->object);
+                MIR_reg_t key_item = transpile_box_item(mt, ca->key);
+                MIR_reg_t val_item = transpile_box_item(mt, ca->value);
+                (void)emit_call_3(mt, "fn_index_assign", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_item),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_item),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val_item));
+                return (MIR_reg_t)0;
+            }
         }
 
         // ==================================================================

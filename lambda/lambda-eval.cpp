@@ -1262,7 +1262,9 @@ Bool fn_ne(Item a_item, Item b_item) {
 }
 
 // 3-state value/ordered comparison
-Bool fn_lt(Item a_item, Item b_item) {
+// Scalar 3-state ordered comparison (BOOL_TRUE/BOOL_FALSE/BOOL_ERROR).  The
+// public fn_lt/fn_gt/fn_le/fn_ge wrappers add vectorized array dispatch on top.
+Bool fn_lt_scalar(Item a_item, Item b_item) {
     if (a_item._type_id != b_item._type_id) {
         // null comparison with any type returns false for ordered comparisons
         if (a_item._type_id == LMD_TYPE_NULL || b_item._type_id == LMD_TYPE_NULL) {
@@ -1316,8 +1318,7 @@ Bool fn_lt(Item a_item, Item b_item) {
     return BOOL_ERROR;
 }
 
-// 3-state value/ordered comparison
-Bool fn_gt(Item a_item, Item b_item) {
+Bool fn_gt_scalar(Item a_item, Item b_item) {
     if (a_item._type_id != b_item._type_id) {
         // null comparison with any type returns false for ordered comparisons
         if (a_item._type_id == LMD_TYPE_NULL || b_item._type_id == LMD_TYPE_NULL) {
@@ -1371,16 +1372,36 @@ Bool fn_gt(Item a_item, Item b_item) {
     return BOOL_ERROR;
 }
 
-Bool fn_le(Item a_item, Item b_item) {
-    Bool result = fn_gt(a_item, b_item);
-    if (result == BOOL_ERROR) return BOOL_ERROR;
-    return !result;
+// Ordered comparisons now return Item (Any): an ARRAY_NUM operand yields an
+// element-wise boolean mask via vec_cmp (mirroring fn_add → vec_add), otherwise
+// the scalar comparison boxed as a bool Item.  vec_cmp op codes are the operator
+// minus OPERATOR_EQ: LT=2, LE=3, GT=4, GE=5.  (fn_eq/fn_ne stay Bool — not vectorized.)
+Item fn_lt(Item a_item, Item b_item) {
+    if (get_type_id(a_item) == LMD_TYPE_ARRAY_NUM || get_type_id(b_item) == LMD_TYPE_ARRAY_NUM)
+        return vec_cmp(a_item, b_item, 2);
+    Bool r = fn_lt_scalar(a_item, b_item);
+    return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r) };
 }
 
-Bool fn_ge(Item a_item, Item b_item) {
-    Bool result = fn_lt(a_item, b_item);
-    if (result == BOOL_ERROR) return BOOL_ERROR;
-    return !result;
+Item fn_gt(Item a_item, Item b_item) {
+    if (get_type_id(a_item) == LMD_TYPE_ARRAY_NUM || get_type_id(b_item) == LMD_TYPE_ARRAY_NUM)
+        return vec_cmp(a_item, b_item, 4);
+    Bool r = fn_gt_scalar(a_item, b_item);
+    return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r) };
+}
+
+Item fn_le(Item a_item, Item b_item) {
+    if (get_type_id(a_item) == LMD_TYPE_ARRAY_NUM || get_type_id(b_item) == LMD_TYPE_ARRAY_NUM)
+        return vec_cmp(a_item, b_item, 3);
+    Bool r = fn_gt_scalar(a_item, b_item);   // a <= b  ==  !(a > b)
+    return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r ? BOOL_FALSE : BOOL_TRUE) };
+}
+
+Item fn_ge(Item a_item, Item b_item) {
+    if (get_type_id(a_item) == LMD_TYPE_ARRAY_NUM || get_type_id(b_item) == LMD_TYPE_ARRAY_NUM)
+        return vec_cmp(a_item, b_item, 5);
+    Bool r = fn_lt_scalar(a_item, b_item);   // a >= b  ==  !(a < b)
+    return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r ? BOOL_FALSE : BOOL_TRUE) };
 }
 
 Bool fn_not(Item item) {
@@ -4762,8 +4783,15 @@ void fn_array_set(Array* arr, int64_t index, Item value) {
     case LMD_TYPE_ARRAY_NUM: {
         ArrayNum* num_arr = (ArrayNum*)arr;
         if (num_arr->is_view) {
-            log_error("fn_array_set: cannot mutate a view; copy() first");
-            return;
+            if (!num_arr->is_mutable_view) {
+                log_error("fn_array_set: cannot mutate a read-only view; copy() first");
+                return;
+            }
+            // mutable view: write through via the element setter, which coerces to
+            // the element type, handles every compact type, and never detaches the
+            // view's aliased storage (data is pre-offset, so data[index] hits base).
+            array_num_set_item(num_arr, index, value);
+            break;
         }
         TypeId val_type = get_type_id(value);
         ArrayNumElemType etype = num_arr->get_elem_type();

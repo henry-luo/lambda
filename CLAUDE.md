@@ -148,6 +148,7 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 
 ### Debugging a Crash
 1. Check `./log.txt` for execution trace
+2. Inspect the transpiled MIR — debug builds dump the JIT'd MIR to `temp/mir_dump.txt`; read it to debug Lambda script transpilation/codegen issues (boxing, type, comparison representation)
 
 ## Lambda Language Documentation
 - `doc/Lambda_Reference.md` — Language overview and quick reference

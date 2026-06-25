@@ -250,10 +250,12 @@ Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices) {
 // Rejected on views (read-only).  Out-of-range indices silently no-op.
 void array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value) {
     if (!arr || ndim < 1) return;
-    if (arr->is_view) {
-        log_error("array_num_set_nd: cannot mutate a view; copy() first");
+    if (arr->is_view && !arr->is_mutable_view) {
+        log_error("array_num_set_nd: cannot mutate a read-only view; copy() first");
         return;
     }
+    // mutable view: the strided offset computed below lands in the base buffer
+    // (data is pre-offset / strides span the base), so the write goes through.
     if (!arr->is_ndim) {
         if (ndim != 1) return;
         int64_t i = indices[0];
@@ -312,6 +314,7 @@ static Item make_leading_axis_view(ArrayNum* parent, int64_t row_idx) {
     view->set_elem_type(etype);
     view->is_ndim = 1;
     view->is_view = 1;
+    view->is_mutable_view = 1;  // leading-axis row view is writable through to base (Scope 3)
     int64_t base_elem_offset = row_idx * pstrs[0];
     view->data = (void*)((char*)parent->data + base_elem_offset * (size_t)elem_size);
     view->length = row_len;
@@ -668,8 +671,8 @@ static double item_to_float_value(Item value) {
 // Generic setter for all ArrayNum elem_types, dispatches on elem_type
 void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
     if (!arr || index < 0 || index >= arr->capacity) return;
-    if (arr->is_view) {
-        log_error("array_num_set_item: cannot mutate a view; copy() first");
+    if (arr->is_view && !arr->is_mutable_view) {
+        log_error("array_num_set_item: cannot mutate a read-only view; copy() first");
         return;
     }
     switch (arr->get_elem_type()) {

@@ -1112,6 +1112,7 @@ JitImport jit_runtime_imports[] = {
     {"array_num_at_nd", FPTR(array_num_at_nd)},
     {"array_num_set_nd", FPTR(array_num_set_nd)},
     {"array_num_set_item", FPTR(array_num_set_item)},
+    {"fn_index_assign", FPTR(fn_index_assign)},
 
     // ========================================================================
     // List operations

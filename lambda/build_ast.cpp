@@ -3198,13 +3198,21 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         ast_node->op == OPERATOR_IS || ast_node->op == OPERATOR_IN) {
         type_id = LMD_TYPE_BOOL;
 
-        // vectorized comparison: an ordering comparison (< <= > >=) with a numeric
-        // array operand yields an element-wise boolean mask (ARRAY_NUM), not a
-        // scalar bool. ==/!= keep their existing (structural / cross-type) semantics.
-        if (ast_node->op >= OPERATOR_LT && ast_node->op <= OPERATOR_GE &&
-            (left_type == LMD_TYPE_ARRAY_NUM || left_type == LMD_TYPE_ARRAY ||
-             right_type == LMD_TYPE_ARRAY_NUM || right_type == LMD_TYPE_ARRAY)) {
-            type_id = LMD_TYPE_ARRAY_NUM;
+        // Ordering comparisons (< <= > >=) now return Item from fn_lt/gt/le/ge, so
+        // their result representation depends on the operand types — mirror the
+        // transpiler's native-vs-fallback decision so consumers read it correctly:
+        //   • numeric-array operand  → ARRAY_NUM (element-wise mask via vec_cmp)
+        //   • both native numeric    → BOOL      (native MIR comparison → raw bool)
+        //   • anything else (ANY/...) → ANY       (fn_lt fallback → boxed bool / mask Item)
+        // ==/!= keep their Bool (structural / cross-type) semantics.
+        if (ast_node->op >= OPERATOR_LT && ast_node->op <= OPERATOR_GE) {
+            bool l_arr = (left_type == LMD_TYPE_ARRAY_NUM || left_type == LMD_TYPE_ARRAY);
+            bool r_arr = (right_type == LMD_TYPE_ARRAY_NUM || right_type == LMD_TYPE_ARRAY);
+            bool l_native = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT);
+            bool r_native = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64 || right_type == LMD_TYPE_FLOAT);
+            if (l_arr || r_arr)            type_id = LMD_TYPE_ARRAY_NUM;
+            else if (l_native && r_native) type_id = LMD_TYPE_BOOL;
+            else                           type_id = LMD_TYPE_ANY;
         }
 
         // static type check for equality/inequality: catch comparisons between

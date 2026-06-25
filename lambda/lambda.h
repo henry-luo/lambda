@@ -556,7 +556,7 @@ struct Container {
             uint8_t is_ndim:1;           // bit 4: has shape side-table in `extra` (n-d owned array)
             uint8_t is_view:1;           // bit 5: aliases another container's storage (implies is_ndim)
             uint8_t is_pinned:1;         // bit 6: has live views; data buffer must not be relocated by compactor
-            uint8_t flags_reserved:1;    // bit 7: reserved for future use
+            uint8_t is_mutable_view:1;   // bit 7: a view writable through to its base (procedural in-place updates)
         };
     };
     uint8_t map_kind;      // MapKind tag (0 = plain, only used for map/object/element)
@@ -1281,10 +1281,15 @@ extern "C" {
     Bool fn_ne(Item a, Item b);
     Bool fn_str_eq_ptr(String* a, String* b);
     Bool fn_sym_eq_ptr(Symbol* a, Symbol* b);
-    Bool fn_lt(Item a, Item b);
-    Bool fn_gt(Item a, Item b);
-    Bool fn_le(Item a, Item b);
-    Bool fn_ge(Item a, Item b);
+    // Ordered comparisons return Item (Any): a boolean mask when an operand is an
+    // ARRAY_NUM (vectorized), else a boxed scalar bool. The *_scalar helpers expose
+    // the raw 3-state scalar comparison for callers that only compare scalars.
+    Bool fn_lt_scalar(Item a, Item b);
+    Bool fn_gt_scalar(Item a, Item b);
+    Item fn_lt(Item a, Item b);
+    Item fn_gt(Item a, Item b);
+    Item fn_le(Item a, Item b);
+    Item fn_ge(Item a, Item b);
     Bool fn_not(Item a);
     Bool fn_is(Item a, Item b);
     Bool fn_is_nan(Item a);  // IEEE NaN check: expr is nan
@@ -1300,6 +1305,12 @@ extern "C" {
     Item vec_div(Item a, Item b);
     Item vec_mod(Item a, Item b);
     Item vec_pow(Item a, Item b);
+
+    // whole-array typed reduction → double accumulator, correct for every element
+    // type (the per-type fn_sum/min/max paths only handled INT/INT64/FLOAT).  op
+    // codes match ReduceOp.  Contiguous arrays use the vectorized kernel.
+    enum { ARRAY_RED_SUM = 0, ARRAY_RED_PROD = 1, ARRAY_RED_MIN = 2, ARRAY_RED_MAX = 3, ARRAY_RED_AVG = 4 };
+    double array_num_reduce_double(ArrayNum* arr, int op);
 
     // vector system functions (math module)
     Item fn_math_prod(Item a);
@@ -1494,6 +1505,7 @@ extern "C" {
     Item fn_min_axis(Item arr, Item axis);       // min along axis (via min(arr, axis) / min(arr, axis:N))
     Item fn_max_axis(Item arr, Item axis);       // max along axis
     Item fn_mask_index(Item arr, Item mask);     // arr[mask] — boolean mask selection
+    void fn_index_assign(Item arr, Item idx, Item val);  // arr[mask] = v — masked write (procedural in-place)
     Item vec_cmp(Item a, Item b, int op);        // vectorized a OP b → ELEM_BOOL mask (op = operator-OPERATOR_EQ)
     // overload wrappers (the sysfunc dispatcher resolves fn_<name><argcount>)
     Item fn_sum1(Item arr);            Item fn_sum2(Item arr, Item axis);
