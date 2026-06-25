@@ -8,22 +8,27 @@
 import { isText } from '../model/doc.js'
 import type { Attr, Child, Doc, Mark, Node, SourcePath } from '../model/types.js'
 import { stringifyPath } from './dom-bridge.js'
+import { DrawingView } from './drawing/DrawingView.js'
 import * as React from 'react'
 
 interface RenderProps {
+  doc: Doc
   child: Child
   path: SourcePath
 }
 
 export function renderDoc(doc: Doc): React.ReactElement {
-  return <RenderNode child={doc} path={[]} />
+  return <RenderNode doc={doc} child={doc} path={[]} />
 }
 
-function RenderNode({ child, path }: RenderProps): React.ReactElement {
+function RenderNode({ doc, child, path }: RenderProps): React.ReactElement {
   if (isText(child)) {
     return <RenderTextLeaf leaf={child} path={path} />
   }
-  return <RenderElement node={child} path={path} />
+  if (child.tag === 'drawing') {
+    return <DrawingView doc={doc} node={child} path={path} />
+  }
+  return <RenderElement doc={doc} node={child} path={path} />
 }
 
 // ---------------------------------------------------------------------------
@@ -31,11 +36,12 @@ function RenderNode({ child, path }: RenderProps): React.ReactElement {
 // ---------------------------------------------------------------------------
 
 interface RenderElementProps {
+  doc: Doc
   node: Node
   path: SourcePath
 }
 
-function RenderElement({ node, path }: RenderElementProps): React.ReactElement {
+function RenderElement({ doc, node, path }: RenderElementProps): React.ReactElement {
   const tag = node.tag === 'doc' ? 'div' : node.tag
   const props: Record<string, unknown> = {
     'data-source-path': stringifyPath(path),
@@ -48,7 +54,7 @@ function RenderElement({ node, path }: RenderElementProps): React.ReactElement {
   const children = node.content.length === 0
     ? null
     : node.content.map((c, i) => (
-        <RenderNode key={i} child={c} path={[...path, i]} />
+        <RenderNode key={i} doc={doc} child={c} path={[...path, i]} />
       ))
   return React.createElement(tag, props, children)
 }

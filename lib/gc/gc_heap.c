@@ -11,8 +11,19 @@
 #include "gc_heap.h"
 #include "../log.h"
 #include "../memtrack.h"
+#include "../../lambda/js/js_exec_profile_weak.h"
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef LAMBDA_JS_EXEC_PROFILE
+#define GC_PROFILE_ENTER(label) js_weak_profile_property_set_branch_enter(label)
+#define GC_PROFILE_LEAVE(label, token) js_weak_profile_property_set_branch_leave(label, token)
+#define GC_PROFILE_COUNT(label, count) js_weak_profile_property_set_branch_add_count(label, count)
+#else
+#define GC_PROFILE_ENTER(label) 0
+#define GC_PROFILE_LEAVE(label, token) ((void)(token))
+#define GC_PROFILE_COUNT(label, count) ((void)(count))
+#endif
 
 // Hook to release a memory-context node when a registered heap is destroyed.
 // Installed by the allocator factory (lambda/mem_factory_rt.cpp); NULL when unused.
@@ -515,7 +526,8 @@ void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
     // Initialize header in-place (memory is pre-zeroed from block allocation)
     gc_header_t* header = (gc_header_t*)cursor;
     header->type_tag = type_tag;
-    // gc_flags = 0, marked = 0 — already zero from memset
+    header->gc_flags = GC_FLAG_BUMP;
+    header->marked = 0;
     header->alloc_size = (uint32_t)alloc_size;
 
     // Link into all_objects list
@@ -747,17 +759,6 @@ static void* item_to_ptr(uint64_t item) {
 }
 
 // check if a pointer is to a GC-managed OBJECT (has GCHeader)
-static int gc_bump_block_owns(gc_heap_t* gc, void* ptr) {
-    if (!gc || !ptr) return 0;
-    uint8_t* p = (uint8_t*)ptr;
-    gc_bump_block_t* block = gc->bump_blocks;
-    while (block) {
-        if (p >= block->base && p < block->base + block->size) return 1;
-        block = block->next;
-    }
-    return 0;
-}
-
 static int gc_bump_block_owns_exact(gc_heap_t* gc, void* ptr) {
     if (!gc || !ptr) return 0;
     uint8_t* p = (uint8_t*)ptr;
@@ -1332,21 +1333,33 @@ static void gc_sweep(gc_heap_t* gc) {
     gc_header_t* prev = NULL;
     size_t freed_count = 0;
     size_t freed_bytes = 0;
+    size_t walked_count = 0;
+    size_t alive_count = 0;
+    size_t already_freed_count = 0;
+    size_t bump_owned_count = 0;
+    size_t object_zone_owned_count = 0;
+    size_t large_owned_count = 0;
     while (current) {
+        walked_count++;
         gc_header_t* next_obj = current->next;
 
         if (current->gc_flags & GC_FLAG_FREED) {
+            already_freed_count++;
             // already freed — unlink from list and return to free list
             if (prev) prev->next = next_obj;
             else gc->all_objects = next_obj;
-            // return to object zone free list for reuse
-            if (gc_bump_block_owns(gc, (void*)(current + 1))) {
-                // bump-block objects are reclaimed only by unlinking; block memory is pool-owned
-            } else if (gc_object_zone_owns(gc->object_zone, (void*)(current + 1))) {
-                gc_object_zone_free(gc->object_zone, current);
-            } else if (current->gc_flags & GC_FLAG_LARGE) {
+            // all_objects only contains headers produced by the GC allocation
+            // paths, so header flags are enough to classify the owner.
+            if (current->gc_flags & GC_FLAG_LARGE) {
+                large_owned_count++;
                 gc_large_object_remove(gc, current);
                 free(current);
+            } else if (current->gc_flags & GC_FLAG_BUMP) {
+                bump_owned_count++;
+                // bump-block objects are reclaimed only by unlinking; block memory is pool-owned
+            } else {
+                object_zone_owned_count++;
+                gc_object_zone_free(gc->object_zone, current);
             }
             current = next_obj;
             continue;
@@ -1354,6 +1367,7 @@ static void gc_sweep(gc_heap_t* gc) {
 
         if (current->marked) {
             // alive — reset mark for next cycle
+            alive_count++;
             current->marked = 0;
             prev = current;
         } else {
@@ -1367,17 +1381,19 @@ static void gc_sweep(gc_heap_t* gc) {
             freed_bytes += sizeof(gc_header_t) + current->alloc_size;
             freed_count++;
 
-            // return to object zone free list
-            if (gc_bump_block_owns(gc, (void*)(current + 1))) {
-                // bump-block objects are reclaimed only by unlinking; block memory is pool-owned
-            } else if (gc_object_zone_owns(gc->object_zone, (void*)(current + 1))) {
-                gc_object_zone_free(gc->object_zone, current);
-            } else if (current->gc_flags & GC_FLAG_LARGE) {
+            // return to the owning allocation arena.
+            if (current->gc_flags & GC_FLAG_LARGE) {
+                large_owned_count++;
                 // large objects allocated with malloc — free directly
                 gc_large_object_remove(gc, current);
                 free(current);
+            } else if (current->gc_flags & GC_FLAG_BUMP) {
+                bump_owned_count++;
+                // bump-block objects are reclaimed only by unlinking; block memory is pool-owned
+            } else {
+                object_zone_owned_count++;
+                gc_object_zone_free(gc->object_zone, current);
             }
-            // pool-allocated objects (bump blocks): freed in bulk on pool_destroy
         }
 
         current = next_obj;
@@ -1386,6 +1402,15 @@ static void gc_sweep(gc_heap_t* gc) {
     gc->object_count -= freed_count;
     gc->total_allocated -= freed_bytes;
     gc->bytes_collected += freed_bytes;
+
+    GC_PROFILE_COUNT("gc_sweep_walked_objects", walked_count);
+    GC_PROFILE_COUNT("gc_sweep_alive_objects", alive_count);
+    GC_PROFILE_COUNT("gc_sweep_dead_objects", freed_count);
+    GC_PROFILE_COUNT("gc_sweep_already_freed", already_freed_count);
+    GC_PROFILE_COUNT("gc_sweep_bump_owned", bump_owned_count);
+    GC_PROFILE_COUNT("gc_sweep_object_zone_owned", object_zone_owned_count);
+    GC_PROFILE_COUNT("gc_sweep_large_owned", large_owned_count);
+    GC_PROFILE_COUNT("gc_sweep_freed_bytes", freed_bytes);
 
     log_debug("gc_sweep: freed %zu objects (%zu bytes), %zu remain",
               freed_count, freed_bytes, gc->object_count);
@@ -1482,16 +1507,29 @@ void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
         log_debug("gc_collect: skipping re-entrant collection");
         return;
     }
+    uint64_t gc_total_token = GC_PROFILE_ENTER("gc_collect_total");
     gc->collecting = 1;
 
     log_debug("gc_collect: starting collection #%zu (%zu objects, %zu bytes, data_zone=%zu)",
               gc->collections + 1, gc->object_count, gc->total_allocated,
               gc_data_zone_used(gc->data_zone));
 
+    size_t bump_block_count = 0;
+    for (gc_bump_block_t* block = gc->bump_blocks; block; block = block->next) {
+        bump_block_count++;
+    }
+    GC_PROFILE_COUNT("gc_collect_start_objects", gc->object_count);
+    GC_PROFILE_COUNT("gc_collect_bump_blocks", bump_block_count);
+    if (gc->object_zone) {
+        GC_PROFILE_COUNT("gc_collect_range_count", gc->object_zone->range_count);
+        GC_PROFILE_COUNT("gc_collect_slab_count", gc->object_zone->slab_count);
+    }
+
     // reset mark stack
     gc->mark_top = 0;
 
     // Phase 1a: Mark registered root slots (BSS globals, context->result, etc.)
+    uint64_t gc_roots_token = GC_PROFILE_ENTER("gc_mark_roots");
     for (int i = 0; i < gc->root_slot_count; i++) {
         if (gc->root_slots[i]) {
             gc_mark_item(gc, *gc->root_slots[i]);
@@ -1508,18 +1546,24 @@ void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
             }
         }
     }
+    GC_PROFILE_LEAVE("gc_mark_roots", gc_roots_token);
 
     // Phase 1b: Mark explicit extra roots (caller-provided Items)
+    uint64_t gc_extra_roots_token = GC_PROFILE_ENTER("gc_mark_extra_roots");
     if (extra_roots && extra_count > 0) {
         for (int i = 0; i < extra_count; i++) {
             gc_mark_item(gc, extra_roots[i]);
         }
     }
+    GC_PROFILE_LEAVE("gc_mark_extra_roots", gc_extra_roots_token);
 
     // Phase 1c: Conservative stack scan
+    uint64_t gc_stack_token = GC_PROFILE_ENTER("gc_scan_stack");
     gc_scan_stack(gc, stack_base, stack_current);
+    GC_PROFILE_LEAVE("gc_scan_stack", gc_stack_token);
 
     // Phase 1d: Process mark stack (trace gray objects until empty)
+    uint64_t gc_trace_token = GC_PROFILE_ENTER("gc_trace_objects");
 #ifndef NDEBUG
     int traced_count = 0;
 #endif
@@ -1531,6 +1575,7 @@ void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
 #endif
         // tracing may have pushed more objects; continue until empty
     }
+    GC_PROFILE_LEAVE("gc_trace_objects", gc_trace_token);
     log_debug("gc_collect: traced %d objects total", traced_count);
 
     // Measure nursery and tenured usage before compaction for adaptive threshold
@@ -1538,13 +1583,19 @@ void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
     size_t tenured_before = gc_data_zone_used(gc->tenured_data);
 
     // Phase 2: Compact — copy surviving data zone buffers to tenured
+    uint64_t gc_compact_token = GC_PROFILE_ENTER("gc_compact_data");
     gc_compact_data(gc);
+    GC_PROFILE_LEAVE("gc_compact_data", gc_compact_token);
 
     // Phase 3: Sweep — free dead objects, return to free lists
+    uint64_t gc_sweep_token = GC_PROFILE_ENTER("gc_sweep");
     gc_sweep(gc);
+    GC_PROFILE_LEAVE("gc_sweep", gc_sweep_token);
 
     // Phase 4: Reset nursery data zone (all surviving data copied to tenured)
+    uint64_t gc_reset_token = GC_PROFILE_ENTER("gc_data_zone_reset");
     gc_data_zone_reset(gc->data_zone);
+    GC_PROFILE_LEAVE("gc_data_zone_reset", gc_reset_token);
 
     gc->collections++;
     gc->collecting = 0;
@@ -1578,4 +1629,5 @@ void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
 
     log_debug("gc_collect: collection #%zu complete, %zu objects remain, %zu bytes collected total",
               gc->collections, gc->object_count, gc->bytes_collected);
+    GC_PROFILE_LEAVE("gc_collect_total", gc_total_token);
 }

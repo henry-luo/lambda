@@ -9480,11 +9480,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ac));
                     JsAstNode* arg = call->arguments;
                     for (int idx = 0; arg; idx++, arg = arg->next) {
-                        MIR_reg_t bidx = jm_box_int_const(mt, idx);
                         MIR_reg_t val = jm_transpile_box_item(mt, arg);
-                        jm_call_3(mt, "js_array_set", MIR_T_I64,
+                        jm_call_3(mt, "js_array_define_dense_element_direct", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, array),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, bidx),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, idx),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                     }
                     return array;
@@ -11823,21 +11822,14 @@ MIR_reg_t jm_transpile_array(JsMirTranspiler* mt, JsArrayNode* arr) {
                 index++;
                 continue;
             }
-            // NOTE: the boxed index register MUST be created AFTER the element's
-            // post-yield restore. If `elem` contains a yield and we created `idx`
-            // here, the MIR reg would be uninitialised on resume (state-machine
-            // dispatch jumps over its initialising MOV) and the array_set would
-            // store to garbage offset 0, clobbering earlier elements. So build
-            // `idx` lazily just before the store, where any yield is already done.
             MIR_reg_t val = jm_transpile_box_item(mt, elem);
             if (arr_spill_slot >= 0 && jm_has_yield(elem)) {
                 // Restore array ref after yield
                 jm_gen_spill_load(mt, array, arr_spill_slot);
             }
-            MIR_reg_t idx = jm_box_int_const(mt, index);
-            jm_call_3(mt, "js_array_set", MIR_T_I64,
+            jm_call_3(mt, "js_array_define_dense_element_direct", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, array),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, index),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             elem = elem->next;
             index++;

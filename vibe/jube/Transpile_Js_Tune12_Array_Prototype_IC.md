@@ -3,7 +3,8 @@
 Date: 2026-06-25
 Status: P1 array named-property IC, P1b array companion-map store
 stabilization, P2 function-constructor shape cache, P2b prototype inheritance
-composition, and P3 name-id metadata implemented; P4-P5 remain proposals
+composition, P3 name-id metadata, and Cube3D append/store-path profiling
+implemented; GC sweep ownership classification tuned; P4-P5 remain proposals
 
 Primary sources:
 
@@ -17,6 +18,12 @@ Primary sources:
   - `temp/profile_cube3d.tsv`
   - `temp/profile_awfy_deltablue.tsv`
   - `temp/profile_jetstream_deltablue.tsv`
+- Cube3D append/store and GC follow-up artifacts:
+  - `temp/profile_jetstream_cube3d_inline_poc.tsv`
+  - `temp/profile_jetstream_cube3d_expand_gc.tsv`
+  - `temp/profile_jetstream_cube3d_gc_phases.tsv`
+  - `temp/profile_jetstream_cube3d_gc_sweep_counts.tsv`
+  - `temp/profile_jetstream_cube3d_gc_sweep_flag_no_poc.tsv`
 
 ## Goal
 
@@ -306,6 +313,177 @@ out.mark@187:3 store    megamorphic=10136          hit_mono=10139
 Instrumentation wall time was effectively neutral in the profile run
 (`7936.456` enabled vs `7951.168` disabled), so the profile should be read as
 hot-path attribution rather than benchmark timing.
+
+## Implementation Update: Cube3D Append/Store Path and GC Bottleneck
+
+Implemented and profiled on 2026-06-25:
+
+- split the dense array store profile branches so append-at-length is tracked
+  separately from true gap expansion;
+- kept `array_set_expand_dense` as the true gap-fill path and routed
+  `idx == length` through `array_set_append_dense`;
+- added experimental runtime helpers
+  `js_array_set_append_or_dense_int_fast()` and
+  `js_array_set_append_or_dense_item_fast()` for append/dense stores, but did
+  not keep MIR emission through those helpers after timing showed a regression;
+- added an intentionally unsafe inline-MIR POC for computed
+  `array[index] = value` stores to measure the ceiling of bypassing the
+  property setter call. This POC checks only enough to avoid obvious
+  out-of-capacity dense writes and is not a correctness candidate. The active
+  POC emission was removed after measurement.
+
+The append/gap split clarified the profile:
+
+```text
+before split:
+array_set_expand_dense    ~250560 calls
+
+after split:
+array_set_append_dense     249736 calls
+array_set_expand_dense       1664 calls
+```
+
+The runtime-helper emission proved that many hot stores could be intercepted,
+but it did not improve release timing:
+
+```text
+last release baseline without helper emission:  __TIMING__:73048.933
+runtime helper emission:                       __TIMING__:75973.906
+runtime helper repeat:                         __TIMING__:84736.769
+```
+
+The inline-MIR POC also intercepted a large part of the computed array-store
+traffic, but remained effectively flat to slightly worse in release timing:
+
+```text
+release inline-MIR POC:       __TIMING__:73419.631
+profile inline-MIR POC:       __TIMING__:72729.762
+
+property_set                  165881 calls
+array_set_append_dense         65640 calls
+array_set_expand_dense          1664 calls
+array_push_direct_expand       66945 calls
+```
+
+The key finding is that the apparent `array_push_direct_expand` hot path is
+mostly where GC is triggered, not where array copying or hole stamping is
+expensive. Phase-level profiling showed:
+
+```text
+array_push_direct_expand       66945 calls   67720.301 ms
+expand_list_heap_alloc         66946 calls   67706.725 ms
+heap_data_alloc                66952 calls   67703.766 ms
+heap_gc_collect                    1 call    67702.025 ms
+gc_collect_total                   1 call    67702.023 ms
+gc_sweep                           1 call    67084.194 ms
+
+array_push_expand_stamp_holes  66945 calls       2.050 ms
+expand_list_heap_copy            248 calls       0.041 ms
+gc_compact_data                    1 call        5.998 ms
+```
+
+The sweep-count profile shows why the single GC dominates Cube3D:
+
+```text
+gc_collect_start_objects      4450856
+gc_sweep_walked_objects       4450856
+gc_sweep_alive_objects           5938
+gc_sweep_dead_objects         4444918
+gc_sweep_object_zone_owned    4420580
+gc_collect_slab_count            8838
+gc_collect_range_count           8839
+gc_sweep_freed_bytes        110323710
+```
+
+Diagnosis: `array_push_direct_expand` is not spending meaningful time copying
+old array items or stamping newly allocated slots with holes. It triggers
+`heap_data_alloc()`, which triggers one very large GC, and that GC spends almost
+all of its time in `gc_sweep()`. The likely next tuning target is sweep
+ownership classification: the sweep loop checks whether each dead object belongs
+to bump blocks, object-zone slabs, or large allocations, and the object-zone
+ownership path has to classify millions of objects across thousands of slabs.
+
+This means the next Cube3D tuning slice should move from array store lowering
+to GC sweep ownership classification. Further append-store work is unlikely to
+pay off until the one-collection `gc_sweep` cost is removed or made much
+cheaper.
+
+### GC sweep ownership tuning
+
+Implemented on 2026-06-25. The root cause was not array growth itself. Cube3D
+allocated about 4.45M GC-tracked objects, then triggered one collection from the
+array/data allocation path. Before tuning, `gc_sweep()` had to decide, for each
+dead header, whether the object came from a bump block, an object-zone slab, or a
+large allocation. That ownership test was expensive because the object-zone path
+had to classify millions of dead objects against thousands of slabs.
+
+The tuning moved ownership classification to allocation time:
+
+- added `GC_FLAG_BUMP` to GC headers and set it at bump-pointer allocation
+  time;
+- changed `gc_sweep()` to classify ownership from header flags:
+  `GC_FLAG_LARGE`, `GC_FLAG_BUMP`, or object-zone by default;
+- removed the per-object sweep dependency on `gc_bump_block_owns()` and
+  `gc_object_zone_owns()`, avoiding millions of ownership searches across
+  thousands of slabs;
+- kept the diagnostic profile counters for GC phase and sweep-count attribution
+  under `LAMBDA_JS_EXEC_PROFILE`.
+
+The core code shape is:
+
+```text
+gc_heap_bump_alloc():
+  header->gc_flags = GC_FLAG_BUMP
+
+gc_sweep():
+  if GC_FLAG_LARGE: free large allocation
+  else if GC_FLAG_BUMP: unlink only; memory is pool-owned
+  else: return header to object-zone free list
+```
+
+Before tuning:
+
+```text
+array_push_direct_expand       66945 calls   67720.301 ms
+expand_list_heap_alloc         66946 calls   67706.725 ms
+heap_data_alloc                66952 calls   67703.766 ms
+heap_gc_collect                    1 call    67702.025 ms
+gc_collect_total                   1 call    67702.023 ms
+gc_sweep                           1 call    67084.194 ms
+```
+
+Cleaned-state profile after removing the unsafe inline-MIR POC:
+
+```text
+release Cube3D:               __TIMING__:3752.527
+profile Cube3D:               __TIMING__:4082.316
+
+property_set                  358873 calls   1064.084 ms
+array_set_append_dense        249736 calls    646.464 ms
+array_push_direct_expand       66945 calls    638.016 ms
+heap_gc_collect                    1 call     619.050 ms
+gc_collect_total                   1 call     619.048 ms
+gc_trace_objects                   1 call     592.056 ms
+gc_compact_data                    1 call      11.937 ms
+gc_sweep                           1 call       9.816 ms
+```
+
+The sweep now still walks the same 4,450,856 objects, but ownership
+classification is no longer the bottleneck:
+
+```text
+gc_sweep_walked_objects       4450856
+gc_sweep_dead_objects         4444918
+gc_sweep_bump_owned             24338
+gc_sweep_object_zone_owned    4420580
+gc_sweep_freed_bytes        110323710
+```
+
+Current Cube3D bottleneck after this slice: the one GC is still visible, but
+its time is now mostly object tracing/mark processing (`gc_trace_objects`),
+while regular `property_set` self time is down to the low-second range in the
+instrumented run. The prior `array_push_direct_expand` attribution was an
+ownership-classification artifact, not array growth cost.
 
 ## Profile Snapshot
 
