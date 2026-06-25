@@ -1955,6 +1955,28 @@ static int net_keep_alive_delay_secs(Item value) {
     return (int)(d / 1000.0);
 }
 
+static bool net_parse_auto_select_timeout(Item value, const char* name, int* out_timeout) {
+    if (!out_timeout) return false;
+    TypeId type = get_type_id(value);
+    double d = 0.0;
+    if (type == LMD_TYPE_INT) {
+        d = (double)it2i(value);
+    } else if (type == LMD_TYPE_INT64) {
+        d = (double)it2l(value);
+    } else if (type == LMD_TYPE_FLOAT) {
+        d = it2d(value);
+    } else {
+        js_throw_invalid_arg_type(name, "number", value);
+        return false;
+    }
+    if (d != d || d == 1.0 / 0.0 || d == -1.0 / 0.0 || d <= 0) {
+        js_throw_out_of_range(name, ">= 1", value);
+        return false;
+    }
+    *out_timeout = d < 10.0 ? 10 : (int)d;
+    return true;
+}
+
 static bool option_is_true(Item options, const char* name) {
     Item value = js_property_get(options, make_string_item(name));
     return get_type_id(value) == LMD_TYPE_BOOL && it2b(value);
@@ -2069,9 +2091,23 @@ static bool normalize_options_object(Item options, NetConnectOptions* out) {
     }
 
     Item auto_select = js_property_get(options, make_string_item("autoSelectFamily"));
+    if (!is_undefined_item(auto_select) && auto_select.item != ITEM_NULL &&
+        get_type_id(auto_select) != LMD_TYPE_BOOL) {
+        js_throw_invalid_arg_type("options.autoSelectFamily", "boolean", auto_select);
+        return false;
+    }
     if (get_type_id(auto_select) == LMD_TYPE_BOOL) {
         out->auto_select_family = it2b(auto_select);
         out->auto_select_family_set = true;
+    }
+
+    Item auto_select_timeout = js_property_get(options, make_string_item("autoSelectFamilyAttemptTimeout"));
+    if (!is_undefined_item(auto_select_timeout) && auto_select_timeout.item != ITEM_NULL) {
+        int parsed_timeout = 0;
+        if (!net_parse_auto_select_timeout(auto_select_timeout,
+                "options.autoSelectFamilyAttemptTimeout", &parsed_timeout)) {
+            return false;
+        }
     }
     return true;
 }
@@ -3537,6 +3573,31 @@ extern "C" Item js_net_Socket(Item options) {
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return ItemNull;
 
+    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT ||
+        get_type_id(options) == LMD_TYPE_VMAP) {
+        Item fd = js_property_get(options, make_string_item("fd"));
+        if (!is_undefined_item(fd) && fd.item != ITEM_NULL) {
+            TypeId fd_type = get_type_id(fd);
+            bool valid_fd_number = false;
+            int64_t fd_value = 0;
+            if (fd_type == LMD_TYPE_INT) {
+                fd_value = it2i(fd);
+                valid_fd_number = true;
+            } else if (fd_type == LMD_TYPE_INT64) {
+                fd_value = it2l(fd);
+                valid_fd_number = true;
+            }
+            if (!valid_fd_number) {
+                js_throw_invalid_arg_type("options.fd", "number", fd);
+                return ItemNull;
+            }
+            if (fd_value < 0) {
+                js_throw_out_of_range("options.fd", ">= 0", fd);
+                return ItemNull;
+            }
+        }
+    }
+
     JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
     sock->high_water_mark = 16 * 1024;
     if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT ||
@@ -3686,8 +3747,12 @@ static Item js_net_setDefaultAutoSelectFamily(Item enabled_item) {
 }
 
 static Item js_net_setDefaultAutoSelectFamilyAttemptTimeout(Item timeout_item) {
-    if (get_type_id(timeout_item) == LMD_TYPE_INT)
-        net_auto_select_family_timeout = (int)it2i(timeout_item);
+    int parsed_timeout = 0;
+    if (!net_parse_auto_select_timeout(timeout_item,
+            "defaultAutoSelectFamilyAttemptTimeout", &parsed_timeout)) {
+        return ItemNull;
+    }
+    net_auto_select_family_timeout = parsed_timeout;
     return (Item){.item = ITEM_UNDEFINED};
 }
 

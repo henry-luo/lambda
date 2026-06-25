@@ -32155,6 +32155,45 @@ static Item js_stub_noop_object(void) {
     return js_new_object();
 }
 
+static bool js_runtime_string_equals(Item value, const char* expected) {
+    if (get_type_id(value) != LMD_TYPE_STRING || !expected) return false;
+    String* s = it2s(value);
+    size_t len = strlen(expected);
+    return s->len == (int64_t)len && memcmp(s->chars, expected, len) == 0;
+}
+
+static Item js_cluster_worker_on(Item event_item, Item callback) {
+    Item self = js_get_this();
+    if (js_runtime_string_equals(event_item, "exit") && get_type_id(callback) == LMD_TYPE_FUNC) {
+        Item args[2] = {
+            (Item){.item = i2it(0)},
+            ItemNull
+        };
+        js_call_function(callback, self, args, 2);
+    }
+    return self;
+}
+
+static Item js_cluster_fork(void) {
+    Item worker = js_new_object();
+    js_property_set(worker, (Item){.item = s2it(heap_create_name("id", 2))},
+                    (Item){.item = i2it(1)});
+    js_property_set(worker, (Item){.item = s2it(heap_create_name("process", 7))},
+                    js_new_object());
+    Item on_fn = js_new_function((void*)js_cluster_worker_on, 2);
+    js_property_set(worker, (Item){.item = s2it(heap_create_name("on", 2))}, on_fn);
+    js_property_set(worker, (Item){.item = s2it(heap_create_name("once", 4))}, on_fn);
+    return worker;
+}
+
+static Item js_cluster_setup_primary(Item options) {
+    (void)options;
+    Item self = js_get_this();
+    js_property_set(self, (Item){.item = s2it(heap_create_name("fork", 4))},
+                    js_new_function((void*)js_cluster_fork, 0));
+    return make_js_undefined();
+}
+
 static Item js_repl_key(const char* name) {
     return (Item){.item = s2it(heap_create_name(name, strlen(name)))};
 }
@@ -33732,6 +33771,10 @@ extern "C" Item js_module_get(Item specifier) {
                             (Item){.item = ITEM_TRUE});
             js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isWorker", 8))},
                             (Item){.item = ITEM_FALSE});
+            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("setupPrimary", 12))},
+                            js_new_function((void*)js_cluster_setup_primary, 1));
+            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("setupMaster", 11))},
+                            js_new_function((void*)js_cluster_setup_primary, 1));
             js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("default", 7))}, cl_ns);
         }
         return cl_ns;

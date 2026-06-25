@@ -12,9 +12,9 @@
 # Workers: 9
 # Slow tests included: no
 # Slow list: 30 tests (test/node/official_slow_list.txt), threshold 10s
-# Total passing: 1616
-# Total tests: 3556  Passed: 1616  Failed: 1940  Missing: 0  Timed out: 0  Crashed: 15
-# Baseline comparison: previous 1613  Regressions: 0  Improvements: 3
+# Total passing: 1619
+# Total tests: 3556  Passed: 1619  Failed: 1937  Missing: 0  Timed out: 0  Crashed: 15
+# Baseline comparison: previous 1617  Regressions: 0  Improvements: 2
 # Runtime: 370.9s total wall (discover + execute)
 # Runtime: 3311.2s per-test sum (all executed tests)
 # Runtime: 868.0s per-test sum (passing baseline tests)
@@ -1164,8 +1164,11 @@ test-net-server-unref.js
 test-net-settimeout.js
 test-net-socket-byteswritten.js
 test-net-socket-close-after-end.js
+test-net-socket-connect-invalid-autoselectfamily.js
+test-net-socket-connect-invalid-autoselectfamilyattempttimeout.js
 test-net-socket-connect-without-cb.js
 test-net-socket-connecting.js
+test-net-socket-constructor.js
 test-net-socket-destroy-send.js
 test-net-socket-destroy-twice.js
 test-net-socket-end-before-connect.js
