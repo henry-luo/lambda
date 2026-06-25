@@ -5333,6 +5333,7 @@ static bool js_array_companion_try_write_existing_data(Item object, const char* 
 
 static Item js_property_set_array(Item object, Item key, Item value) {
     if (js_property_key_needs_object_to_key(key)) {
+        JS_PROPERTY_SET_BRANCH("array_object_key_to_property_key");
         key = js_to_property_key(key);
         if (js_check_exception()) return value;
     }
@@ -5341,7 +5342,9 @@ static Item js_property_set_array(Item object, Item key, Item value) {
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* str_key = it2s(key);
         if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
+            JS_PROPERTY_SET_BRANCH("array_length");
             if (js_runtime_is_arguments_exotic(object)) {
+                JS_PROPERTY_SET_BRANCH("array_length_arguments_companion");
                 js_property_set(js_arguments_companion_item(object), key, value);
                 return value;
             }
@@ -5420,12 +5423,17 @@ static Item js_property_set_array(Item object, Item key, Item value) {
                     if (se0 && !jspd_is_accessor(se0)) own_data_prop = true;
                 }
                 if (!own_data_prop && !js_skip_accessor_dispatch) {
+                    JS_PROPERTY_SET_BRANCH("array_named_proto_check");
                     Item lookup_root = js_get_prototype(object);
                     if (lookup_root.item == ItemNull.item) lookup_root = js_get_prototype_of(object);
                     JsSetterDispatchStatus st = js_ordinary_set_via_accessor(
                         lookup_root, sk->chars, (int)sk->len, value, object);
-                    if (st == JS_SET_DISPATCHED) return value;
+                    if (st == JS_SET_DISPATCHED) {
+                        JS_PROPERTY_SET_BRANCH("array_named_proto_dispatched");
+                        return value;
+                    }
                     if (st == JS_SET_NO_SETTER) {
+                        JS_PROPERTY_SET_BRANCH("array_named_proto_no_setter");
                         js_strict_throw_property_error("set property which has only a getter on",
                                                        sk->chars, (int)sk->len);
                         return value;
@@ -5437,6 +5445,7 @@ static Item js_property_set_array(Item object, Item key, Item value) {
                 if (own_data_prop &&
                         js_array_companion_try_write_existing_data(object, sk->chars,
                             (int)sk->len, value)) {
+                    JS_PROPERTY_SET_BRANCH("array_named_inplace");
                     return value;
                 }
                 if (arr->extra == 0) {
@@ -5446,6 +5455,7 @@ static Item js_property_set_array(Item object, Item key, Item value) {
                 }
                 pm = (Map*)(uintptr_t)arr->extra;
                 Item map_item = (Item){.map = pm};
+                JS_PROPERTY_SET_BRANCH("array_named_companion_generic");
                 js_property_set(map_item, key, value);
                 return value;
             }
@@ -5456,22 +5466,26 @@ static Item js_property_set_array(Item object, Item key, Item value) {
         const char* prop_name = it2b(key) ? "true" : "false";
         int prop_len = it2b(key) ? 4 : 5;
         Item prop_key = (Item){.item = s2it(heap_create_name(prop_name, prop_len))};
+        JS_PROPERTY_SET_BRANCH("array_key_bool_to_named");
         js_property_set(object, prop_key, value);
         return value;
     }
     if (key_tid == LMD_TYPE_NULL) {
         Item prop_key = (Item){.item = s2it(heap_create_name("null", 4))};
+        JS_PROPERTY_SET_BRANCH("array_key_null_to_named");
         js_property_set(object, prop_key, value);
         return value;
     }
     if (key_tid == LMD_TYPE_UNDEFINED) {
         Item prop_key = (Item){.item = s2it(heap_create_name("undefined", 9))};
+        JS_PROPERTY_SET_BRANCH("array_key_undefined_to_named");
         js_property_set(object, prop_key, value);
         return value;
     }
     if ((key_tid == LMD_TYPE_INT || key_tid == LMD_TYPE_INT64 || key_tid == LMD_TYPE_FLOAT) && !js_key_is_symbol(key) &&
         !js_array_key_is_index(key, NULL)) {
         Item prop_key = js_array_numeric_key_to_property_key(key);
+        JS_PROPERTY_SET_BRANCH("array_numeric_to_named");
         js_property_set(object, prop_key, value);
         return value;
     }
@@ -5491,17 +5505,20 @@ static Item js_property_set_array(Item object, Item key, Item value) {
                 if (status == JS_SHAPE_SLOT_ACCESSOR) {
                     JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
                     if (pair && pair->setter.item != ItemNull.item) {
+                        JS_PROPERTY_SET_BRANCH("array_numeric_companion_accessor");
                         Item args[1] = { value };
                         js_call_function(pair->setter, object, args, 1);
                         return value;
                     }
                     // getter-only accessor: strict TypeError, sloppy no-op.
+                    JS_PROPERTY_SET_BRANCH("array_numeric_companion_getter_only");
                     js_strict_throw_property_error("set property which has only a getter on",
                                                    idx_buf, idx_len);
                     return value;
                 }
                 if (_se_idx) {
                     Item idx_key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
+                    JS_PROPERTY_SET_BRANCH("array_numeric_companion_data");
                     js_property_set(pm_item, idx_key, value);
                     return value;
                 }
@@ -5528,6 +5545,7 @@ static Item js_property_set_array(Item object, Item key, Item value) {
             char idx_buf[32];
             snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
             Item str_key = (Item){.item = s2it(heap_create_name(idx_buf, (int)strlen(idx_buf)))};
+            JS_PROPERTY_SET_BRANCH("array_arguments_extra_index");
             js_property_set(map_item, str_key, value);
             return value;
         }
@@ -5548,6 +5566,7 @@ static Item js_property_set_array(Item object, Item key, Item value) {
             if (!own_index_present) {
                 Item arr_proto = js_get_prototype_of(object);
                 if (js_is_proxy(arr_proto)) {
+                    JS_PROPERTY_SET_BRANCH("array_numeric_proto_proxy");
                     js_proxy_trap_set_with_receiver(arr_proto, prop_key, value, object);
                     return value;
                 }
@@ -5557,11 +5576,13 @@ static Item js_property_set_array(Item object, Item key, Item value) {
                     if (ap) {
                         if (ap->setter.item != ItemNull.item &&
                             get_type_id(ap->setter) == LMD_TYPE_FUNC) {
+                            JS_PROPERTY_SET_BRANCH("array_numeric_proto_accessor");
                             Item set_args[1] = { value };
                             js_call_function(ap->setter, object, set_args, 1);
                             return value;
                         }
                         if (js_strict_mode) {
+                            JS_PROPERTY_SET_BRANCH("array_numeric_proto_getter_only");
                             js_strict_throw_property_error(
                                 "set property which has only a getter on",
                                 idx_buf, idx_len);
@@ -5572,6 +5593,7 @@ static Item js_property_set_array(Item object, Item key, Item value) {
             }
         }
     }
+    JS_PROPERTY_SET_BRANCH("array_numeric_regular");
     return js_array_set(object, key, value);
 }
 
@@ -6065,7 +6087,10 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     // which is all no-op for a non-negative integer key on such an array.
     if (get_type_id(object) == LMD_TYPE_ARRAY && get_type_id(key) == LMD_TYPE_INT) {
         int64_t kidx = it2i(key);
-        if (kidx >= 0 && js_array_fast_own_dense_set(object, kidx, value)) return value;
+        if (kidx >= 0 && js_array_fast_own_dense_set(object, kidx, value)) {
+            JS_PROPERTY_SET_BRANCH("top_array_int_dense_fast");
+            return value;
+        }
     }
     // process.env: symbol keys throw TypeError (before symbol-to-key conversion)
     if (js_key_is_symbol(key) && get_type_id(object) == LMD_TYPE_MAP &&
@@ -6087,6 +6112,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     TypeId type = get_type_id(object);
 
     if (object.item == ITEM_NULL || object.item == ITEM_JS_UNDEFINED) {
+        JS_PROPERTY_SET_BRANCH("top_nullish");
         return js_throw_type_error("Cannot set property on null or undefined");
     }
     if (get_type_id(key) == LMD_TYPE_STRING) {
@@ -6101,6 +6127,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         }
     }
     if (js_is_property_reference_primitive(type, object)) {
+        JS_PROPERTY_SET_BRANCH("top_primitive");
         return js_property_set_on_primitive_base(object, key, value);
     }
     if (js_is_symbol(object)) {
@@ -6114,6 +6141,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             }
             js_strict_throw_property_error("add property", prop_name, prop_len);
         }
+        JS_PROPERTY_SET_BRANCH("top_symbol");
         return value;
     }
     if (type == LMD_TYPE_MAP && get_type_id(key) == LMD_TYPE_STRING) {
@@ -6121,7 +6149,10 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         Item resolved_private_key = js_eval_initializer_resolve_private_key(object, private_key);
         if (resolved_private_key.item != ItemNull.item) key = resolved_private_key;
     }
-    if (js_ta_proto_chain_set(object, key, value)) return value;
+    if (js_ta_proto_chain_set(object, key, value)) {
+        JS_PROPERTY_SET_BRANCH("top_ta_proto_chain");
+        return value;
+    }
 
     // v95: If __sym_1 (Symbol.iterator) is ever set on a map, note it for Array.prototype override detection
     if (!g_array_sym_iter_ever_set && type == LMD_TYPE_MAP && get_type_id(key) == LMD_TYPE_STRING) {
@@ -6132,6 +6163,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
 
     // Array: result[i] = val or arr.length = n
     if (type == LMD_TYPE_ARRAY) {
+        JS_PROPERTY_SET_BRANCH("top_array");
         return js_property_set_array(object, key, value);
     }
 
@@ -6152,20 +6184,24 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     idx = -1;
                 }
             }
+            JS_PROPERTY_SET_BRANCH("top_typed_array_numeric");
             return js_typed_array_set(object, (Item){.item = i2it(idx)}, value);
         }
         // fall through for non-numeric string keys (e.g. __proto__)
     }
 
     if (type == LMD_TYPE_MAP) {
+        JS_PROPERTY_SET_BRANCH("top_map");
         return js_property_set_map(object, key, value);
     }
 
     // Function: setting .prototype on a function (constructor pattern)
     if (type == LMD_TYPE_FUNC) {
+        JS_PROPERTY_SET_BRANCH("top_function");
         return js_property_set_function(object, key, value);
     }
 
+    JS_PROPERTY_SET_BRANCH("top_other");
     return value;
 }
 
@@ -7450,6 +7486,7 @@ extern "C" Item js_get_length_item(Item object) {
 // but JS uses arr->extra for companion property maps. Direct store avoids this conflict.
 extern "C" void js_array_push_item_direct(Array* arr, Item value) {
     if (arr->length + 2 > arr->capacity) {
+        JS_PROPERTY_SET_BRANCH("array_push_direct_expand");
         // Save/restore extra: JS uses arr->extra as a companion-map pointer,
         // but expand_list interprets it as an extra-item count at buffer end.
         int64_t saved_extra = arr->extra;
@@ -7465,6 +7502,7 @@ extern "C" void js_array_push_item_direct(Array* arr, Item value) {
         // so subsequent dense scans correctly treat them as empty until they
         // are explicitly assigned.
         if (arr->items && arr->capacity > old_capacity) {
+            JS_PROPERTY_SET_BRANCH("array_push_expand_stamp_holes");
             Item hole = lam::hole_sentinel_item();
             for (int64_t i = old_capacity; i < arr->capacity; i++) {
                 arr->items[i] = hole;
@@ -7774,6 +7812,7 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
 
 // P10e: Fast array set with native int index
 static bool js_array_length_is_non_writable(Item arr);
+static bool js_proto_chain_has_numeric_keys(Item arr);
 
 extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_ARRAY_SET_INT);
@@ -7921,18 +7960,66 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
             js_array_store_sparse_property(array, index, value, true);
             return value;
         }
-        // Expand array: fill gaps with holes (deleted sentinel), then set the value
-        Item hole = lam::hole_sentinel_item();
-        while (arr->length < index) {
-            js_array_push_item_direct(arr, hole);
-        }
         if (index == arr->length) {
+            JS_PROPERTY_SET_BRANCH("array_set_append_dense");
             js_array_push_item_direct(arr, value);
         } else {
-            arr->items[index] = value;
+            // Expand array: fill gaps with holes (deleted sentinel), then set the value
+            JS_PROPERTY_SET_BRANCH("array_set_expand_dense");
+            Item hole = lam::hole_sentinel_item();
+            while (arr->length < index) {
+                js_array_push_item_direct(arr, hole);
+            }
+            if (index == arr->length) {
+                js_array_push_item_direct(arr, value);
+            } else {
+                arr->items[index] = value;
+            }
         }
     }
     return value;
+}
+
+extern "C" int64_t js_array_set_append_or_dense_int_fast(Item array, int64_t index, Item value) {
+    if (get_type_id(array) != LMD_TYPE_ARRAY || index < 0) return 0;
+    Array* arr = array.array;
+    if (arr->is_content == 1) return 0;
+
+    if (index < arr->length && index < arr->capacity &&
+            arr->items[index].item != JS_DELETED_SENTINEL_VAL &&
+            !js_array_companion_has_numeric_slot(arr, index)) {
+        arr->items[index] = value;
+        return 1;
+    }
+
+    if (index != arr->length) return 0;
+    if (js_array_companion_has_numeric_slot(arr, index)) return 0;
+    if (!js_is_extensible(array)) return 0;
+    if (js_array_length_is_non_writable(array)) return 0;
+    if (!js_skip_accessor_dispatch) {
+        Item arr_proto = js_get_prototype_of(array);
+        if (js_is_proxy(arr_proto) || js_proto_chain_has_numeric_keys(array)) return 0;
+    }
+    JS_PROPERTY_SET_BRANCH("array_set_append_dense_fast");
+    js_array_push_item_direct(arr, value);
+    return 1;
+}
+
+extern "C" int64_t js_array_set_append_or_dense_item_fast(Item array, Item index, Item value) {
+    int64_t idx = 0;
+    if (!js_array_key_is_index(index, &idx)) return 0;
+    return js_array_set_append_or_dense_int_fast(array, idx, value);
+}
+
+extern "C" Item js_array_define_dense_element_direct(Item array, int64_t index, Item value) {
+    if (get_type_id(array) != LMD_TYPE_ARRAY || index < 0) return value;
+    Array* arr = array.array;
+    if (index < arr->length && index < arr->capacity) {
+        arr->items[index] = value;
+        return value;
+    }
+    Item index_item = (Item){.item = i2it((int)index)};
+    return js_array_set(array, index_item, value);
 }
 
 extern "C" Item js_array_set(Item array, Item index, Item value) {
@@ -7944,6 +8031,7 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
     // Route to companion map.
     TypeId itid = get_type_id(index);
     if (itid == LMD_TYPE_BOOL) {
+        JS_PROPERTY_SET_BRANCH("array_set_bool_to_companion");
         Array* arr = array.array;
         if (arr->extra == 0) {
             Item obj = js_new_object();
@@ -7961,6 +8049,7 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
 
     if (itid == LMD_TYPE_MAP || itid == LMD_TYPE_ARRAY ||
         itid == LMD_TYPE_ELEMENT || itid == LMD_TYPE_FUNC) {
+        JS_PROPERTY_SET_BRANCH("array_set_object_key_to_property_key");
         index = js_to_property_key(index);
         if (js_check_exception()) return value;
         itid = get_type_id(index);
@@ -7969,22 +8058,32 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
     if ((itid == LMD_TYPE_STRING || itid == LMD_TYPE_INT || itid == LMD_TYPE_FLOAT) &&
         !js_key_is_symbol(index) && !js_array_key_is_index(index, NULL)) {
         Item prop_key = (itid == LMD_TYPE_STRING) ? index : js_array_numeric_key_to_property_key(index);
+        JS_PROPERTY_SET_BRANCH("array_set_non_index_to_property");
         js_property_set(array, prop_key, value);
         return value;
     }
 
     // v23: validate that the key is a valid numeric array index (not "foo", "__nw_0" etc.)
     // js_get_number on non-numeric strings returns NaN; (int64_t)NaN is UB in C/C++
-    double idx_d = js_get_number(index);
+    double idx_d = 0.0;
+    {
+        JS_PROPERTY_SET_BRANCH("array_set_to_number");
+        idx_d = js_get_number(index);
+    }
     if (idx_d != idx_d) { // NaN check — non-numeric key
+        JS_PROPERTY_SET_BRANCH("array_set_nan_index");
         return value; // silently ignore non-numeric keys on arrays
     }
     int64_t idx = (int64_t)idx_d;
     Array* arr = array.array;
     bool ta_proto_no_op = false;
-    js_array_ta_proto_numeric_set(array, index, &ta_proto_no_op);
+    {
+        JS_PROPERTY_SET_BRANCH("array_set_ta_proto_numeric");
+        js_array_ta_proto_numeric_set(array, index, &ta_proto_no_op);
+    }
     if (ta_proto_no_op) return value;
     if (idx >= arr->length && js_array_length_is_non_writable(array)) {
+        JS_PROPERTY_SET_BRANCH("array_set_length_nonwritable");
         if (js_strict_mode) {
             return js_throw_type_error("Cannot assign to read only property 'length' of array");
         }
@@ -7993,6 +8092,7 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
 
     // Check companion-map descriptor state before writing.
     if (arr->extra != 0 && idx >= 0 && idx < arr->length) {
+        JS_PROPERTY_SET_BRANCH("array_set_companion_probe");
         Map* pm = (Map*)(uintptr_t)arr->extra;
         char idx_buf[32];
         int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
@@ -8005,6 +8105,7 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
         if (_se_idx && !jspd_is_accessor(_se_idx) &&
             status == JS_SHAPE_SLOT_DATA) {
             Item str_key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
+            JS_PROPERTY_SET_BRANCH("array_set_companion_data");
             js_property_set(pm_item, str_key, value);
             return value;
         }
@@ -8023,41 +8124,52 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
         char idx_buf[32];
         snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
         Item str_key = (Item){.item = s2it(heap_create_name(idx_buf, (int)strlen(idx_buf)))};
+        JS_PROPERTY_SET_BRANCH("array_set_arguments_extra_index");
         js_property_set(map_item, str_key, value);
         return value;
     }
 
     if (idx >= 0 && idx < arr->length && idx < arr->capacity) {
+        JS_PROPERTY_SET_BRANCH("array_set_dense_write");
         arr->items[idx] = value;
     } else if (idx >= 0) {
         if (!js_is_extensible(array)) return value;
         if (idx >= arr->capacity) {
             int64_t capacity_gap = idx - arr->capacity;
             if (idx < arr->length || capacity_gap > SPARSE_GAP_MAX) {
+                JS_PROPERTY_SET_BRANCH("array_set_sparse_capacity_gap");
                 js_array_store_sparse_property(array, idx, value, idx <= 0xFFFFFFFELL);
                 return value;
             }
         }
         if (idx < arr->length && idx >= arr->capacity) {
+            JS_PROPERTY_SET_BRANCH("array_set_sparse_beyond_capacity");
             js_array_store_sparse_property(array, idx, value, false);
             return value;
         }
         if (js_array_should_store_sparse_for_index(arr, idx)) {
+            JS_PROPERTY_SET_BRANCH("array_set_sparse_policy");
             log_debug("js_array_set: sparse index %lld (gap %lld), skipping dense expansion",
                       (long long)idx,
                       (long long)(idx >= arr->length ? idx - arr->length : 0));
             js_array_store_sparse_property(array, idx, value, idx <= 0xFFFFFFFELL);
             return value;
         }
-        // Expand array: fill gaps with holes (deleted sentinel), then set the value
-        Item hole = lam::hole_sentinel_item();
-        while (arr->length < idx) {
-            js_array_push_item_direct(arr, hole);
-        }
         if (idx == arr->length) {
+            JS_PROPERTY_SET_BRANCH("array_set_append_dense");
             js_array_push_item_direct(arr, value);
         } else {
-            arr->items[idx] = value;
+            // Expand array: fill gaps with holes (deleted sentinel), then set the value
+            JS_PROPERTY_SET_BRANCH("array_set_expand_dense");
+            Item hole = lam::hole_sentinel_item();
+            while (arr->length < idx) {
+                js_array_push_item_direct(arr, hole);
+            }
+            if (idx == arr->length) {
+                js_array_push_item_direct(arr, value);
+            } else {
+                arr->items[idx] = value;
+            }
         }
     }
 
