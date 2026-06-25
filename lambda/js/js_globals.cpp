@@ -2545,6 +2545,14 @@ static Item build_process_env(void) {
             }
         }
     }
+    const char* path_env = getenv("PATH");
+    if (path_env && path_env[0]) {
+        Item path_key = (Item){.item = s2it(heap_create_name("PATH", 4))};
+        if (!it2b(js_has_own_property(env, path_key))) {
+            Item path_val = (Item){.item = s2it(heap_create_name(path_env, strlen(path_env)))};
+            js_property_set(env, path_key, path_val);
+        }
+    }
     // Skip Node.js flag-checking in common test module — Lambda doesn't support V8 flags
     js_property_set(env,
         (Item){.item = s2it(heap_create_name("NODE_SKIP_FLAG_CHECK", 20))},

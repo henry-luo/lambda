@@ -33,6 +33,7 @@ extern "C" Item js_promise_with_resolvers(void);
 extern "C" Item js_throw_error_with_code(const char* code, const char* message);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
 extern "C" void js_set_function_name(Item fn_item, Item name_item);
+extern "C" void js_stream_flush_data_now(Item self);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -296,6 +297,7 @@ static void readline_output_write(Item rl, Item data) {
     Item write_fn = readline_get(output, "write");
     if (get_type_id(write_fn) == LMD_TYPE_FUNC) {
         js_call_function(write_fn, output, &data, 1);
+        js_stream_flush_data_now(output);
     }
 }
 

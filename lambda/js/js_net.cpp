@@ -491,6 +491,10 @@ static bool socket_make_read_data(JsSocket* sock, const char* data, int len, Ite
 
 static void socket_emit_read_data(JsSocket* sock, const char* data, int len) {
     if (!sock || len <= 0) return;
+    Item data_cb = js_property_get(sock->js_object, make_string_item("__on_data__"));
+    Item pipe_dest = js_property_get(sock->js_object, make_string_item("__pipe_dest__"));
+    bool has_pipe = pipe_dest.item != 0 && pipe_dest.item != ITEM_NULL && !is_undefined_item(pipe_dest);
+    if (!is_callable(data_cb) && !has_pipe) return;
     Item chunk = ItemNull;
     if (!socket_make_read_data(sock, data, len, &chunk)) return;
     socket_emit(sock->js_object, "data", &chunk, 1);
@@ -2382,15 +2386,38 @@ struct JsServer {
     bool     closed;
     bool     listen_pending;
     bool     allow_half_open;
+    bool     close_requested;
+    bool     handle_closed;
+    bool     close_event_emitted;
     int      connection_count;
 };
 
+static void server_maybe_finish_close(JsServer* srv) {
+    if (!srv || !srv->close_requested || !srv->handle_closed) return;
+    if (srv->connection_count > 0) return;
+
+    // the listening handle can close before accepted sockets finish closing.
+    // keep JsServer alive until all owner_server links are detached, or socket
+    // close callbacks can decrement connection_count through a freed pointer.
+    net_active_remove(net_active_servers, NET_ACTIVE_SERVER_MAX, srv->js_object);
+    if (!srv->close_event_emitted) {
+        srv->close_event_emitted = true;
+        Item on_close = js_property_get(srv->js_object, make_string_item("__on_close__"));
+        if (is_callable(on_close)) {
+            js_call_function(on_close, srv->js_object, NULL, 0);
+        }
+    }
+    mem_free(srv);
+}
+
 static void socket_note_closed(JsSocket* sock) {
     if (!sock || !sock->owner_server) return;
-    if (sock->owner_server->connection_count > 0) {
-        sock->owner_server->connection_count--;
+    JsServer* srv = sock->owner_server;
+    if (srv->connection_count > 0) {
+        srv->connection_count--;
     }
     sock->owner_server = NULL;
+    server_maybe_finish_close(srv);
 }
 
 static void server_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
@@ -2798,21 +2825,19 @@ extern "C" Item js_server_close(Item callback) {
     JsServer* srv = (JsServer*)(uintptr_t)it2i(handle_item);
     if (!srv) return self;
     srv->closed = true;
+    srv->close_requested = true;
     srv->listen_pending = false;
     if (is_callable(callback)) {
         js_property_set(self, make_string_item("__on_close__"), callback);
     }
+    js_property_set(self, make_string_item("__server__"), ItemNull);
 
     if (!uv_is_closing((uv_handle_t*)&srv->tcp)) {
         uv_close((uv_handle_t*)&srv->tcp, [](uv_handle_t* h) {
             JsServer* s = (JsServer*)h->data;
             if (s) {
-                net_active_remove(net_active_servers, NET_ACTIVE_SERVER_MAX, s->js_object);
-                Item on_close = js_property_get(s->js_object, make_string_item("__on_close__"));
-                if (is_callable(on_close)) {
-                    js_call_function(on_close, s->js_object, NULL, 0);
-                }
-                mem_free(s);
+                s->handle_closed = true;
+                server_maybe_finish_close(s);
             }
         });
     }

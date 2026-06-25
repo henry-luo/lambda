@@ -23,6 +23,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <pthread.h>
 #ifdef __APPLE__
 #include <mach/mach.h>
 #endif
@@ -56,6 +57,7 @@
 #include "js/js_runtime.h"           // v16: js_check_exception for exit code
 #include "js/js_dom.h"               // JS DOM document/session bridge
 #include "js/js_transpiler.hpp"      // JsPreambleState for js-test-batch
+#include "../lib/uv_loop.h"          // JS worker cleanup for libuv loop
 #ifdef LAMBDA_PYTHON
 #include "py/py_transpiler.hpp"      // Python transpiler
 #endif
@@ -129,6 +131,64 @@ static void js_document_session_finish(JsDocumentSession* session) {
     ui_context_cleanup(&session->uicon);
     js_document_session_init(session);
 }
+
+#if !defined(_WIN32)
+static const size_t JS_CLI_STACK_SIZE = 256 * 1024 * 1024;
+
+struct JsCliRunArgs {
+    Runtime* runtime;
+    const char* source;
+    size_t source_len;
+    const char* filename;
+    Item result;
+};
+
+static void* js_cli_run_on_stack_thread(void* arg) {
+    JsCliRunArgs* run_args = (JsCliRunArgs*)arg;
+    lambda_stack_init();
+    run_args->result = transpile_js_to_mir_len(
+        run_args->runtime, run_args->source, run_args->source_len, run_args->filename);
+    js_event_loop_shutdown();
+    lambda_uv_cleanup();
+    return NULL;
+}
+
+static Item js_cli_transpile_with_execution_stack(
+    Runtime* runtime, const char* source, size_t source_len, const char* filename) {
+    JsCliRunArgs run_args;
+    memset(&run_args, 0, sizeof(run_args));
+    run_args.runtime = runtime;
+    run_args.source = source;
+    run_args.source_len = source_len;
+    run_args.filename = filename;
+    run_args.result = ItemNull;
+
+    pthread_attr_t attr;
+    if (pthread_attr_init(&attr) != 0) {
+        log_error("js-cli-stack: pthread_attr_init failed");
+        return transpile_js_to_mir_len(runtime, source, source_len, filename);
+    }
+    if (pthread_attr_setstacksize(&attr, JS_CLI_STACK_SIZE) != 0) {
+        log_error("js-cli-stack: pthread_attr_setstacksize failed");
+        pthread_attr_destroy(&attr);
+        return transpile_js_to_mir_len(runtime, source, source_len, filename);
+    }
+
+    pthread_t thread;
+    int create_rc = pthread_create(&thread, &attr, js_cli_run_on_stack_thread, &run_args);
+    pthread_attr_destroy(&attr);
+    if (create_rc != 0) {
+        log_error("js-cli-stack: pthread_create failed");
+        return transpile_js_to_mir_len(runtime, source, source_len, filename);
+    }
+    int join_rc = pthread_join(thread, NULL);
+    if (join_rc != 0) {
+        log_error("js-cli-stack: pthread_join failed");
+        return ItemError;
+    }
+    return run_args.result;
+}
+#endif
 
 static void js_test262_hot_context_create(EvalContext* batch_context) {
     memset(batch_context, 0, sizeof(EvalContext));
@@ -1867,7 +1927,13 @@ int main(int argc, char *argv[]) {
                 js_mir_volume_counters_reset();
             }
 
+#if !defined(_WIN32)
+            Item result = html_file
+                ? transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file)
+                : js_cli_transpile_with_execution_stack(&runtime, js_source, js_source_len, js_file);
+#else
             Item result = transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file);
+#endif
             if (input_type_module) {
                 const char* promise_state = js_promise_state_name(result);
                 if ((promise_state && strcmp(promise_state, "pending") == 0) ||

@@ -845,6 +845,12 @@ static void js_stream_schedule_data_flush(Item self) {
     js_next_tick_enqueue(tick);
 }
 
+extern "C" void js_stream_flush_data_now(Item self) {
+    ensure_keys();
+    if (js_item_is_true(js_property_get(self, key_destroyed))) return;
+    js_stream_flush_buffered_data(self);
+}
+
 // on(event, listener)
 extern "C" Item js_stream_on(Item self, Item event_item, Item listener) {
     ensure_keys();
