@@ -35,7 +35,7 @@ for (let i = 0; i < args.length; i++) {
     else if (arg === '--parallel')         parallelExecution = true;
     else if (arg === '-h' || arg === '--help') {
         console.log(`Usage: node test/test_run.js [OPTIONS]
-  --target=SUITE       Run only tests from specified suite (library, input, mir, lambda, validator, radiant, jube)
+  --target=SUITE       Run only tests from specified suite (library, input, mir, lambda, validator, radiant, jube, extended)
   --exclude-target=S   Exclude tests from specified suite (e.g. jube)
   --category=CAT       Run only tests from specified category (baseline, extended)
   --raw                Show raw test output without formatting
@@ -66,8 +66,8 @@ const SCRIPT_TESTS = [
     {
         baseName: 'run_lambda_mathlive_markup',
         script: 'test/lambda/mathlive/run_lambda_mathlive_markup.mjs',
-        suite: 'lambda',
-        category: 'baseline',
+        suite: 'extended',
+        category: 'extended',
         displayName: 'Lambda MathLive Markup Baseline',
         icon: '🔢',
         runner: 'node',
