@@ -342,7 +342,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
         bool is_parent_horizontal = is_main_axis_horizontal(pa_flex);
 
         // Check if this item should stretch (based on align-items or align-self)
-        int align_type = ((int)flex_container->fi->align_self != ALIGN_AUTO) ? // INT_CAST_OK: enum comparison
+        int align_type = ((int)flex_container->fi->align_self != ALIGN_AUTO) ?
                          flex_container->fi->align_self : pa_flex->align_items;
         bool should_stretch = (align_type == ALIGN_STRETCH);
 
@@ -1387,7 +1387,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     // spaces/tabs/newlines to a single space, trim leading/trailing.
                     const char* measure_text = text;
                     size_t measure_len = strlen(text);
-                    char normalized_buf[4096];
+                    static thread_local char normalized_buf[4096];  // LARGE_ARRAY_OK: static buffer — not on call stack.
                     if (collapse_ws && measure_len > 0) {
                         size_t j = 0;
                         bool in_space = true; // true to trim leading whitespace
@@ -2262,7 +2262,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                                 ViewElement* fi = lam::view_require_element(stretch_item);
 
                                 bool has_item_explicit_height = (fi->blk && fi->blk->given_height >= 0);
-                                int align_type = (fi->fi && (int)fi->fi->align_self != ALIGN_AUTO) ? // INT_CAST_OK: enum comparison
+                                int align_type = (fi->fi && (int)fi->fi->align_self != ALIGN_AUTO) ?
                                                  fi->fi->align_self : flex->align_items;
                                 bool will_stretch = (align_type == ALIGN_STRETCH);
                                 if (!has_item_explicit_height && will_stretch) {

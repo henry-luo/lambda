@@ -1,0 +1,22 @@
+id: no-unsafe-libc-str
+language: cpp
+severity: warning
+message: >-
+  Classic-overflow libc string function (`strcpy`/`strcat`/`sprintf`/`gets`).
+  Prefer the bounded variant (`strncpy`/`strncat`/`snprintf`) or, better, the
+  StringBuf / Str helpers in lib/. Mark an audited exception with a trailing
+  "// UNSAFE_LIBC_OK: <reason>".
+metadata:
+  suppress: UNSAFE_LIBC_OK
+rule:
+  any:
+    - pattern: strcpy($$$A)
+    - pattern: strcat($$$A)
+    - pattern: sprintf($$$A)
+    - pattern: gets($$$A)
+files:
+  - "lambda/**/*.{c,cpp,h,hpp}"
+  - "radiant/**/*.{c,cpp,h,hpp}"
+  - "lib/**/*.{c,cpp,h,hpp}"
+ignores:
+  - "**/tree-sitter*/**"

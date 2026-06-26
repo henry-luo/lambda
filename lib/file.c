@@ -153,7 +153,7 @@ bool create_dir(const char* dir_path) {
     // Create a mutable copy of the path for manipulation
     char* path_copy = mem_strdup(dir_path, MEM_CAT_TEMP);
     if (!path_copy) {
-        fprintf(stderr, "Memory allocation failed for path copy\n");
+        log_error("file: memory allocation failed for path copy");
         return false;
     }
     
@@ -179,7 +179,7 @@ bool create_dir(const char* dir_path) {
     ret = mkdir(dir_path, 0755);
     #endif
     if (ret) {
-        fprintf(stderr, "Failed to create directory %s: %s\n", dir_path, strerror(errno));
+        log_error("file: failed to create directory %s: %s", dir_path, strerror(errno));
         return false;
     }
     return true;

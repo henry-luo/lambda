@@ -1,0 +1,15 @@
+id: no-using-namespace-std-in-header
+language: cpp
+severity: error
+message: >-
+  `using namespace std;` in a header poisons every translation unit that
+  includes it. Use fully-qualified names, narrow `using` declarations, or move
+  the using directive into the .cpp.
+rule:
+  pattern: using namespace std;
+files:
+  - "lambda/**/*.{h,hpp}"
+  - "radiant/**/*.{h,hpp}"
+  - "lib/**/*.{h,hpp}"
+ignores:
+  - "**/tree-sitter*/**"

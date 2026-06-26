@@ -34,18 +34,14 @@ pub fn render_math(ast, options) {
     let h = if (result_box.render_height != null) result_box.render_height else result_box.height
     let d = if (result_box.render_depth != null) result_box.render_depth else result_box.depth
     let raw_total = if (result_box.render_total != null) result_box.render_total else h + d
-    let total = if (result_box.strut_total != null) result_box.strut_total else max(raw_total, h + d)
+    let total = max(raw_total, h + d)
     // Full-precision values: only used when the box's whole subtree exposed
-    // raw metrics (no fractions/scripts/composite layout boxes inside). The
-    // strut then emits CEIL@2 of the raw sum, matching MathLive's toString()
-    // emission rule and closing the 0.01em drift cluster. Skip the path when
-    // an explicit strut_total override is present (set by left/right
-    // delimiters and similar wrappers that compute their own strut height).
+    // raw metrics (no non-raw composite layout boxes inside). The strut then
+    // emits CEIL@2 of the raw sum, matching MathLive's toString() emission rule
+    // and rounding once.
     let h_raw = result_box.height_raw
     let d_raw = result_box.depth_raw
-    let use_raw = h_raw != null and d_raw != null and
-                  result_box.strut_total == null and
-                  result_box.strut_depth_em == null
+    let use_raw = h_raw != null and d_raw != null
     let h_em = if (use_raw) util.fmt_em_ceil2(h_raw) else util.fmt_em(h)
     let latex_el = if (d == 0.0) {
         <span class: css.LATEX;
@@ -55,14 +51,10 @@ pub fn render_math(ast, options) {
     } else {
         let total_em = if (use_raw)
             util.fmt_em_ceil2(h_raw + d_raw)
-        else if (result_box.strut_total != null)
-            util.fmt_fixed(total, 2) ++ "em"
         else
             util.fmt_em(total)
         let depth_em = if (use_raw)
             util.fmt_em_ceil2(0.0 - d_raw)
-        else if (result_box.strut_depth_em != null)
-            result_box.strut_depth_em
         else if (abs(total - 1.21) < 0.001 and abs(d - 0.345) < 0.001)
             "-0.35em"
         else

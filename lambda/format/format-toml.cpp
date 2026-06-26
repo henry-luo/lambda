@@ -52,6 +52,8 @@ static void format_item_reader(TomlContext& ctx, ItemReader item, const char* pa
     } else if (item.isString()) {
         ctx.emit("%Q", item.asString());
     } else if (item.isArray() || item.isList()) {
+        // isArray() covers typed ArrayNum (1-D / N-D) too; the reader walks it
+        // transparently via get(i), so one path handles every array backing.
         ArrayReader arr = item.asArray();
         if (arr.length() > 0) {
             ctx.write_char('[');

@@ -1,5 +1,6 @@
 #include "js_mir_internal.hpp"
 #include "js_exec_profile.h"
+#include "../../lib/lambda_alloca.h"
 
 extern "C" Item js_eval_private_resolve(Item unscoped_key);
 
@@ -6419,7 +6420,7 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
         if (mt->last_closure_capture_is_nfe[i]) continue;
         JsMirVarEntry* var = jm_find_var(mt, mt->last_closure_capture_names[i]);
         if (!var) {
-            if (getenv("JS56_READBACK_TRACE")) fprintf(stderr, "  skip: var '%s' not found\n", mt->last_closure_capture_names[i]);
+            if (getenv("JS56_READBACK_TRACE")) fprintf(stderr, "  skip: var '%s' not found\n", mt->last_closure_capture_names[i]); // PRINTF_OK: env-gated dev tracer.
             continue;
         }
         if (var->from_block_func_decl) continue;
@@ -8744,7 +8745,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     // emit native direct call (same pattern as identifier native call)
                     char p7_name[160];
                     snprintf(p7_name, sizeof(p7_name), "%s_n_p7%d", p7_fc->name, mt->label_counter++);
-                    MIR_var_t* p7_pargs = (MIR_var_t*)alloca(p7_fc->param_count * sizeof(MIR_var_t));
+                    MIR_var_t* p7_pargs = LAMBDA_ALLOCA(p7_fc->param_count, MIR_var_t);
                     for (int i = 0; i < p7_fc->param_count; i++) {
                         MIR_type_t mtype = (p7_fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
                         p7_pargs[i] = {mtype, "a", 0};
@@ -8752,7 +8753,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_type_t p7_ret = (p7_fc->return_type == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
                     MIR_item_t p7_proto = MIR_new_proto_arr(mt->ctx, p7_name, 1, &p7_ret, p7_fc->param_count, p7_pargs);
                     int p7_nops = 3 + p7_fc->param_count;
-                    MIR_op_t* p7_ops = (MIR_op_t*)alloca(p7_nops * sizeof(MIR_op_t));
+                    MIR_op_t* p7_ops = LAMBDA_ALLOCA(p7_nops, MIR_op_t);
                     int p7_oi = 0;
                     p7_ops[p7_oi++] = MIR_new_ref_op(mt->ctx, p7_proto);
                     p7_ops[p7_oi++] = MIR_new_ref_op(mt->ctx, p7_fc->native_func_item);
@@ -9046,7 +9047,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         // Args may reference 'this' (e.g., object.add(name, this.readValue()))
                         // and must see the original 'this', not the P3 receiver.
                         jm_clear_last_closure_tracking(mt);
-                        MIR_reg_t* p3_arg_regs = (MIR_reg_t*)alloca(p3_param_count * sizeof(MIR_reg_t));
+                        MIR_reg_t* p3_arg_regs = LAMBDA_ALLOCA(p3_param_count, MIR_reg_t);
                         JsAstNode* p3_arg = call->arguments;
                         for (int i = 0; i < p3_param_count; i++) {
                             if (p3_arg) {
@@ -9073,7 +9074,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         // Build proto + call ops
                         char p3_pname[160];
                         snprintf(p3_pname, sizeof(p3_pname), "%s_p3_%d", p3_method->fc->name, mt->label_counter++);
-                        MIR_var_t* p3_pargs = (MIR_var_t*)alloca(p3_param_count * sizeof(MIR_var_t));
+                        MIR_var_t* p3_pargs = LAMBDA_ALLOCA(p3_param_count, MIR_var_t);
                         for (int i = 0; i < p3_param_count; i++) {
                             p3_pargs[i] = {MIR_T_I64, "a", 0};
                         }
@@ -9081,7 +9082,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         MIR_item_t p3_proto = MIR_new_proto_arr(mt->ctx, p3_pname, 1, p3_ret, p3_param_count, p3_pargs);
 
                         int p3_nops = 3 + p3_param_count;
-                        MIR_op_t* p3_ops = (MIR_op_t*)alloca(p3_nops * sizeof(MIR_op_t));
+                        MIR_op_t* p3_ops = LAMBDA_ALLOCA(p3_nops, MIR_op_t);
                         int p3_oi = 0;
                         p3_ops[p3_oi++] = MIR_new_ref_op(mt->ctx, p3_proto);
                         p3_ops[p3_oi++] = MIR_new_ref_op(mt->ctx, p3_method->fc->func_item);
@@ -10045,7 +10046,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         // Native direct call
                         char p_name[160];
                         snprintf(p_name, sizeof(p_name), "%s_n_cp%d", fc->name, mt->label_counter++);
-                        MIR_var_t* p_args = (MIR_var_t*)alloca(fc->param_count * sizeof(MIR_var_t));
+                        MIR_var_t* p_args = LAMBDA_ALLOCA(fc->param_count, MIR_var_t);
                         for (int i = 0; i < fc->param_count; i++) {
                             MIR_type_t mtype = (fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
                             p_args[i] = {mtype, "a", 0};
@@ -10055,7 +10056,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             fc->param_count, p_args);
 
                         int nops = 3 + fc->param_count;
-                        MIR_op_t* ops = (MIR_op_t*)alloca(nops * sizeof(MIR_op_t));
+                        MIR_op_t* ops = LAMBDA_ALLOCA(nops, MIR_op_t);
                         int oi = 0;
                         ops[oi++] = MIR_new_ref_op(mt->ctx, proto);
                         ops[oi++] = MIR_new_ref_op(mt->ctx, fc->native_func_item);
@@ -10111,7 +10112,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 // Build proto for this call site
                 char p_name[160];
                 snprintf(p_name, sizeof(p_name), "%s_cp%d", fc->name, mt->label_counter++);
-                MIR_var_t* p_args = (MIR_var_t*)alloca(param_count * sizeof(MIR_var_t));
+                MIR_var_t* p_args = LAMBDA_ALLOCA(param_count, MIR_var_t);
                 for (int i = 0; i < param_count; i++) {
                     p_args[i] = {MIR_T_I64, "a", 0};
                 }
@@ -10120,7 +10121,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
 
                 // Build call operands: proto, func_ref, result, args...
                 int nops = 3 + param_count;
-                MIR_op_t* ops = (MIR_op_t*)alloca(nops * sizeof(MIR_op_t));
+                MIR_op_t* ops = LAMBDA_ALLOCA(nops, MIR_op_t);
                 int oi = 0;
                 ops[oi++] = MIR_new_ref_op(mt->ctx, proto);
                 ops[oi++] = MIR_new_ref_op(mt->ctx, fc->func_item);
@@ -11967,6 +11968,104 @@ MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
 }
 
 // Conditional expression (ternary)
+struct JsMirBranchState {
+    MIR_item_t current_func_item;
+    MIR_func_t current_func;
+    JsFuncCollected* current_fc;
+    JsClassEntry* current_class;
+    int current_func_index;
+    MIR_reg_t scope_env_reg;
+    int scope_env_slot_count;
+    int scope_depth;
+    bool scopes_saved;
+    struct hashmap* original_var_scopes[64];
+    struct hashmap* cloned_var_scopes[64];
+};
+
+static struct hashmap* jm_clone_var_scope_map(struct hashmap* src) {
+    if (!src) return NULL;
+    size_t count = hashmap_count(src);
+    size_t cap = count + 8;
+    if (cap < 16) cap = 16;
+    struct hashmap* dst = hashmap_new(sizeof(JsVarScopeEntry), cap, 0, 0,
+        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
+    if (!dst) return NULL;
+
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(src, &iter, &item)) {
+        hashmap_set(dst, item);
+    }
+    return dst;
+}
+
+static void jm_free_branch_state(JsMirBranchState* state);
+
+static void jm_save_branch_state(JsMirTranspiler* mt, JsMirBranchState* state) {
+    memset(state, 0, sizeof(*state));
+    state->current_func_item = mt->current_func_item;
+    state->current_func = mt->current_func;
+    state->current_fc = mt->current_fc;
+    state->current_class = mt->current_class;
+    state->current_func_index = mt->current_func_index;
+    state->scope_env_reg = mt->scope_env_reg;
+    state->scope_env_slot_count = mt->scope_env_slot_count;
+    state->scope_depth = mt->scope_depth;
+    state->scopes_saved = true;
+
+    for (int i = 0; i < 64; i++) {
+        state->original_var_scopes[i] = mt->var_scopes[i];
+    }
+    for (int i = 0; i <= mt->scope_depth && i < 64; i++) {
+        state->cloned_var_scopes[i] = jm_clone_var_scope_map(mt->var_scopes[i]);
+        if (mt->var_scopes[i] && !state->cloned_var_scopes[i]) {
+            state->scopes_saved = false;
+            log_error("js-mir: failed to snapshot conditional scope %d", i);
+            break;
+        }
+    }
+    if (!state->scopes_saved) {
+        jm_free_branch_state(state);
+        return;
+    }
+    for (int i = 0; i <= mt->scope_depth && i < 64; i++) {
+        mt->var_scopes[i] = state->cloned_var_scopes[i];
+    }
+}
+
+static void jm_free_branch_state(JsMirBranchState* state) {
+    if (!state) return;
+    for (int i = 0; i < 64; i++) {
+        if (state->cloned_var_scopes[i]) {
+            hashmap_free(state->cloned_var_scopes[i]);
+            state->cloned_var_scopes[i] = NULL;
+        }
+    }
+}
+
+static void jm_restore_branch_state(JsMirTranspiler* mt, JsMirBranchState* state) {
+    if (!state) return;
+
+    mt->current_func_item = state->current_func_item;
+    mt->current_func = state->current_func;
+    mt->current_fc = state->current_fc;
+    mt->current_class = state->current_class;
+    mt->current_func_index = state->current_func_index;
+    mt->scope_env_reg = state->scope_env_reg;
+    mt->scope_env_slot_count = state->scope_env_slot_count;
+    mt->scope_depth = state->scope_depth;
+
+    if (!state->scopes_saved) return;
+    for (int i = 0; i <= state->scope_depth && i < 64; i++) {
+        if (mt->var_scopes[i] && mt->var_scopes[i] != state->cloned_var_scopes[i] &&
+                mt->var_scopes[i] != state->original_var_scopes[i]) {
+            hashmap_free(mt->var_scopes[i]);
+        }
+        mt->var_scopes[i] = state->original_var_scopes[i];
+    }
+    jm_free_branch_state(state);
+}
+
 MIR_reg_t jm_transpile_conditional(JsMirTranspiler* mt, JsConditionalNode* cond) {
     MIR_reg_t truthy = jm_transpile_condition(mt, cond->test);
 
@@ -11977,13 +12076,22 @@ MIR_reg_t jm_transpile_conditional(JsMirTranspiler* mt, JsConditionalNode* cond)
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_false),
         MIR_new_reg_op(mt->ctx, truthy)));
 
+    JsMirBranchState branch_state;
+    jm_save_branch_state(mt, &branch_state);
+    jm_push_scope(mt);
     MIR_reg_t cons = jm_transpile_box_item(mt, cond->consequent);
+    while (mt->scope_depth > branch_state.scope_depth) jm_pop_scope(mt);
+    jm_restore_branch_state(mt, &branch_state);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, cons)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
     jm_emit_label(mt, l_false);
+    jm_save_branch_state(mt, &branch_state);
+    jm_push_scope(mt);
     MIR_reg_t alt = jm_transpile_box_item(mt, cond->alternate);
+    while (mt->scope_depth > branch_state.scope_depth) jm_pop_scope(mt);
+    jm_restore_branch_state(mt, &branch_state);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, alt)));
 

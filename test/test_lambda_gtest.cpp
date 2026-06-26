@@ -1,6 +1,6 @@
 //==============================================================================
 // Lambda Script Tests - Auto-Discovery Based (MIR Direct path)
-// 
+//
 // This file auto-discovers and tests Lambda scripts against expected outputs
 // using the MIR Direct transpilation path (default JIT).
 //==============================================================================
@@ -160,13 +160,13 @@ static bool should_skip_c2mir_test(const std::string& test_name) {
 std::vector<LambdaTestInfo> discover_all_tests() {
     std::vector<LambdaTestInfo> all_tests;
     bool use_c2mir = getenv("LAMBDA_USE_C2MIR") != nullptr;
-    
+
     // Discover functional script tests
     for (size_t i = 0; i < NUM_FUNCTIONAL_TEST_DIRECTORIES; i++) {
         std::vector<LambdaTestInfo> dir_tests = discover_tests_in_directory(FUNCTIONAL_TEST_DIRECTORIES[i], false);
         all_tests.insert(all_tests.end(), dir_tests.begin(), dir_tests.end());
     }
-    
+
     // Discover procedural script tests
     for (size_t i = 0; i < NUM_PROCEDURAL_TEST_DIRECTORIES; i++) {
         std::vector<LambdaTestInfo> dir_tests = discover_tests_in_directory(PROCEDURAL_TEST_DIRECTORIES[i], true);
@@ -187,6 +187,76 @@ std::vector<LambdaTestInfo> discover_all_tests() {
 // Global test list (populated before main)
 static std::vector<LambdaTestInfo> g_lambda_tests;
 
+// GTest filters match the full parameterized test name:
+// AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/<test_name>
+static bool lambda_filter_wildcard_match(const char* pattern, const char* text) {
+    while (*pattern) {
+        if (*pattern == '*') {
+            pattern++;
+            if (*pattern == '\0') return true;
+            while (*text) {
+                if (lambda_filter_wildcard_match(pattern, text)) return true;
+                text++;
+            }
+            return lambda_filter_wildcard_match(pattern, text);
+        }
+        if (*pattern == '?') {
+            if (*text == '\0') return false;
+            pattern++;
+            text++;
+            continue;
+        }
+        if (*pattern != *text) return false;
+        pattern++;
+        text++;
+    }
+    return *text == '\0';
+}
+
+static bool lambda_filter_pattern_list_matches(
+    const char* patterns, const char* patterns_end, const char* full_name)
+{
+    const char* pat = patterns;
+    while (pat < patterns_end) {
+        const char* pat_end = pat;
+        while (pat_end < patterns_end && *pat_end != ':') pat_end++;
+
+        if (pat_end > pat) {
+            char pattern[512];
+            size_t len = (size_t)(pat_end - pat);
+            if (len >= sizeof(pattern)) len = sizeof(pattern) - 1;
+            memcpy(pattern, pat, len);
+            pattern[len] = '\0';
+            if (lambda_filter_wildcard_match(pattern, full_name)) return true;
+        }
+
+        pat = pat_end + 1;
+    }
+    return false;
+}
+
+static bool lambda_script_matches_gtest_filter(const LambdaTestInfo& test, const char* filter) {
+    if (!filter || filter[0] == '\0') filter = "*";
+
+    char full_name[512];
+    snprintf(full_name, sizeof(full_name),
+             "AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/%s",
+             test.test_name.c_str());
+
+    const char* negative_patterns = strchr(filter, '-');
+    const char* positive_end = negative_patterns ? negative_patterns : filter + strlen(filter);
+    bool positive_match = positive_end == filter ||
+        lambda_filter_pattern_list_matches(filter, positive_end, full_name);
+    if (!positive_match) return false;
+
+    if (negative_patterns) {
+        const char* negative_start = negative_patterns + 1;
+        const char* negative_end = filter + strlen(filter);
+        if (lambda_filter_pattern_list_matches(negative_start, negative_end, full_name)) return false;
+    }
+    return true;
+}
+
 //==============================================================================
 // Parameterized Test Class for Lambda Scripts (Batch Mode)
 //==============================================================================
@@ -199,14 +269,12 @@ public:
     static void SetUpTestSuite() {
         if (batch_executed) return;
 
-        // Batch ALL scripts regardless of shard index.
-        // GTest sharding controls which TEST_P instances run, but the batch
-        // must contain results for all of them because GTest's shard index
-        // space (which includes non-parameterized tests like LambdaNegativeTests)
-        // differs from g_lambda_tests indices, causing misalignment.
+        char gtest_filter[512];
+        snprintf(gtest_filter, sizeof(gtest_filter), "%s", ::testing::GTEST_FLAG(filter).c_str());
         std::vector<std::string> scripts;
         std::vector<bool> procs;
         for (const auto& test : g_lambda_tests) {
+            if (!lambda_script_matches_gtest_filter(test, gtest_filter)) continue;
             scripts.push_back(test.script_path);
             procs.push_back(test.is_procedural);
         }
@@ -229,6 +297,13 @@ TEST_P(LambdaScriptTest, ExecuteAndCompare) {
         << "Script not found in batch results: " << info.script_path;
 
     const BatchResult& br = it->second;
+    char elapsed_us_buf[64];
+    snprintf(elapsed_us_buf, sizeof(elapsed_us_buf), "%lld", br.elapsed_us);
+    RecordProperty("lambda_script_elapsed_us", elapsed_us_buf);
+    char elapsed_ms_buf[64];
+    snprintf(elapsed_ms_buf, sizeof(elapsed_ms_buf), "%.3f", (double)br.elapsed_us / 1000.0);
+    RecordProperty("lambda_script_elapsed_ms", elapsed_ms_buf);
+
     ASSERT_EQ(br.status, 0) << "Script execution failed: " << info.script_path;
 
     // Extract output (handle ##### Script marker)
@@ -289,23 +364,84 @@ void test_lambda_script_expects_error(const char* script_path) {
 
     int exit_code = pclose(pipe);
     (void)exit_code;  // exit code may be 0 even with errors
-    
+
     // Should contain error messages (type_error, [ERR!], or error[E...])
     bool has_error_msg = output.find("type_error") != std::string::npos ||
                          output.find("[ERR!]") != std::string::npos ||
                          output.find("error[E") != std::string::npos;
     EXPECT_TRUE(has_error_msg) << "Expected error messages in output for: " << script_path
                                << "\nOutput was: " << output;
-    
+
     // Should NOT contain crash indicators
-    EXPECT_EQ(output.find("Segmentation fault"), std::string::npos) 
+    EXPECT_EQ(output.find("Segmentation fault"), std::string::npos)
         << "Transpiler crashed on: " << script_path;
-    EXPECT_EQ(output.find("SIGABRT"), std::string::npos) 
+    EXPECT_EQ(output.find("SIGABRT"), std::string::npos)
         << "Transpiler aborted on: " << script_path;
 }
 
 TEST(LambdaNegativeTests, test_func_param_type_errors) {
     test_lambda_script_expects_error("test/lambda/negative/func_param_negative.ls");
+}
+
+static void patch_lambda_gtest_json_case_times() {
+    std::string output = ::testing::GTEST_FLAG(output);
+    const char* json_prefix = "json:";
+    if (output.compare(0, strlen(json_prefix), json_prefix) != 0) return;
+
+    std::string json_path = output.substr(strlen(json_prefix));
+    if (json_path.empty()) return;
+
+    FILE* file = fopen(json_path.c_str(), "rb");
+    if (!file) return;
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    if (file_size <= 0) {
+        fclose(file);
+        return;
+    }
+
+    std::string json;
+    json.resize((size_t)file_size);
+    size_t read_size = fread(&json[0], 1, (size_t)file_size, file);
+    fclose(file);
+    if (read_size != (size_t)file_size) return;
+
+    const char* elapsed_key = "\"lambda_script_elapsed_us\": \"";
+    const char* time_key = "\"time\": \"";
+    size_t pos = 0;
+    bool changed = false;
+    while ((pos = json.find(elapsed_key, pos)) != std::string::npos) {
+        size_t value_start = pos + strlen(elapsed_key);
+        size_t value_end = json.find('"', value_start);
+        if (value_end == std::string::npos) break;
+
+        long long elapsed_us = atoll(json.c_str() + value_start);
+        size_t next_pos = value_end;
+        if (elapsed_us > 0) {
+            size_t time_pos = json.rfind(time_key, pos);
+            if (time_pos != std::string::npos) {
+                size_t time_value_start = time_pos + strlen(time_key);
+                size_t time_value_end = json.find('"', time_value_start);
+                if (time_value_end != std::string::npos && time_value_end < pos) {
+                    char time_buf[64];
+                    snprintf(time_buf, sizeof(time_buf), "%.3fs", (double)elapsed_us / 1000000.0);
+                    size_t old_len = time_value_end - time_value_start;
+                    json.replace(time_value_start, old_len, time_buf);
+                    long diff = (long)strlen(time_buf) - (long)old_len;
+                    next_pos = (size_t)((long)next_pos + diff);
+                    changed = true;
+                }
+            }
+        }
+        pos = next_pos;
+    }
+
+    if (!changed) return;
+    file = fopen(json_path.c_str(), "wb");
+    if (!file) return;
+    fwrite(json.c_str(), 1, json.size(), file);
+    fclose(file);
 }
 
 //==============================================================================
@@ -315,13 +451,13 @@ TEST(LambdaNegativeTests, test_func_param_type_errors) {
 int main(int argc, char **argv) {
     // Discover all lambda script tests before initializing Google Test
     g_lambda_tests = discover_all_tests();
-    
+
     printf("Discovered %zu lambda script tests:\n", g_lambda_tests.size());
     for (const auto& test : g_lambda_tests) {
         printf("  - %s\n", test.test_name.c_str());
     }
     printf("\n");
-    
+
     ::testing::InitGoogleTest(&argc, argv);
 
     // In batch mode (no filter), disable logging for speed.
@@ -341,5 +477,7 @@ int main(int argc, char **argv) {
 #endif
     }
 
-    return RUN_ALL_TESTS();
+    int result = RUN_ALL_TESTS();
+    patch_lambda_gtest_json_case_times();
+    return result;
 }

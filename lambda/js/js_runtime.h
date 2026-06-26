@@ -192,6 +192,7 @@ Item js_array_set_int(Item array, int64_t index, Item value);
 int64_t js_array_sparse_delete_index(Item array, int64_t index);
 int64_t js_array_sparse_has_index(Item array, int64_t index);
 Item js_array_sparse_get_index(Item array, int64_t index);
+int64_t js_array_sparse_collect_indices(Item array, int64_t start, int64_t end, int64_t* indices, int64_t cap);
 int64_t js_array_set_append_or_dense_int_fast(Item array, int64_t index, Item value);
 int64_t js_array_set_append_or_dense_item_fast(Item array, Item index, Item value);
 Item js_array_define_dense_element_direct(Item array, int64_t index, Item value);

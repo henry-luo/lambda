@@ -1000,7 +1000,7 @@ static bool measure_shaped_simple_latin_run(LayoutContext* lycon, const unsigned
     }
     if (run_end - str < 2) return false;
 
-    int byte_len = (int)(run_end - str); // INT_CAST_OK: text byte count
+    int byte_len = (int)(run_end - str);
     TextExtents ext = font_measure_text(handle, (const char*)str, byte_len);
     if (ext.glyph_count <= 0 && ext.width <= 0.0f) return false;
 
@@ -3193,7 +3193,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     // the explicit break element must terminate the current line.
                     do { str++; } while (is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r')));
                     rect->width = 0.0f;
-                    rect->length = (int)(str - text_start - rect->start_index); // INT_CAST_OK: text byte length
+                    rect->length = (int)(str - text_start - rect->start_index);
                     lycon->line.trailing_space_width = 0.0f;
                     lycon->line.has_space = true;
                     if (wrap_lines && !lycon->line.is_line_start) {
@@ -3315,7 +3315,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                                     continuation_cp = *continuation;
                                     continuation_bytes = 1;
                                 }
-                                text_len = (int)(continuation + continuation_bytes - text_start - rect->start_index); // INT_CAST_OK: text byte count
+                                text_len = (int)(continuation + continuation_bytes - text_start - rect->start_index);
                                 soft_hyphen_leading_width = measure_current_glyph_advance(lycon, continuation_cp, trim_cjk_spacing);
                                 str = (unsigned char*)continuation + continuation_bytes;
                             } else {
@@ -3802,7 +3802,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                                 continuation_cp = *continuation;
                                 continuation_bytes = 1;
                             }
-                            text_len = (int)(continuation + continuation_bytes - text_start - rect->start_index); // INT_CAST_OK: text byte count
+                            text_len = (int)(continuation + continuation_bytes - text_start - rect->start_index);
                             soft_hyphen_leading_width = measure_current_glyph_advance(lycon, continuation_cp, trim_cjk_spacing);
                             str = (unsigned char*)continuation + continuation_bytes;
                         } else {

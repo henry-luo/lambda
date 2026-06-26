@@ -1,6 +1,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #ifndef _WIN32
 #include <pthread.h>
 #include <unistd.h>    // for sysconf
@@ -97,9 +98,11 @@ char* lambda_home_path(const char* rel) {
 // Zero overhead when disabled — all gated by profile_enabled flag.
 
 #define PROFILE_MAX_SCRIPTS 64
+#define PROFILE_MAX_IMPORT_LEVELS 64
+#define PROFILE_PATH_MAX 512
 
 typedef struct PhaseProfile {
-    const char* script_path;
+    char script_path[PROFILE_PATH_MAX];
     double parse_ms;
     double ast_ms;
     double transpile_ms;
@@ -108,12 +111,28 @@ typedef struct PhaseProfile {
     double c2mir_ms;
     double mir_gen_ms;
     int code_len;
+    int worker_thread;
+    unsigned long thread_id;
 } PhaseProfile;
+
+typedef struct ImportLevelProfile {
+    int level;
+    int modules;
+    int jobs;
+    int threads;
+    int cpu_cap;
+    double elapsed_ms;
+} ImportLevelProfile;
 
 bool profile_enabled = false;
 bool profile_checked = false;
 PhaseProfile profile_data[PROFILE_MAX_SCRIPTS];
 int profile_count = 0;
+ImportLevelProfile import_level_profile_data[PROFILE_MAX_IMPORT_LEVELS];
+int import_level_profile_count = 0;
+#ifndef _WIN32
+static pthread_mutex_t profile_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 bool is_profile_enabled() {
     if (!profile_checked) {
@@ -143,21 +162,73 @@ double elapsed_ms_val(profile_time_t t0, profile_time_t t1) {
 }
 #endif
 
+static unsigned long profile_current_thread_id() {
+#ifdef _WIN32
+    return (unsigned long)GetCurrentThreadId();
+#else
+    return (unsigned long)(uintptr_t)pthread_self();
+#endif
+}
+
+static void profile_set_script_path(PhaseProfile* profile, const char* script_path) {
+    if (!profile) return;
+    if (!script_path) script_path = "";
+    size_t len = strlen(script_path);
+    if (len >= PROFILE_PATH_MAX) len = PROFILE_PATH_MAX - 1;
+    memcpy(profile->script_path, script_path, len);
+    profile->script_path[len] = '\0';
+}
+
+static void profile_record_phase(const PhaseProfile* profile) {
+    if (!profile) return;
+#ifndef _WIN32
+    pthread_mutex_lock(&profile_mutex);
+#endif
+    if (profile_count < PROFILE_MAX_SCRIPTS) {
+        profile_data[profile_count++] = *profile;
+    }
+#ifndef _WIN32
+    pthread_mutex_unlock(&profile_mutex);
+#endif
+}
+
+static void profile_record_import_level(const ImportLevelProfile* profile) {
+    if (!profile) return;
+#ifndef _WIN32
+    pthread_mutex_lock(&profile_mutex);
+#endif
+    if (import_level_profile_count < PROFILE_MAX_IMPORT_LEVELS) {
+        import_level_profile_data[import_level_profile_count++] = *profile;
+    }
+#ifndef _WIN32
+    pthread_mutex_unlock(&profile_mutex);
+#endif
+}
+
 void profile_dump_to_file() {
     if (!profile_enabled || profile_count == 0) return;
     create_dir_recursive("temp");
     FILE* f = fopen("temp/phase_profile.txt", "w");
     if (!f) return;
     fprintf(f, "# Phase-Level Profile (LAMBDA_PROFILE=1)\n");
-    fprintf(f, "# script | parse | ast | transpile | jit_init | file_write | c2mir | mir_gen | total | code_len\n");
+    fprintf(f, "# script | parse | ast | transpile | jit_init | file_write | c2mir | mir_gen | total | code_len | worker | thread_id\n");
     for (int i = 0; i < profile_count; i++) {
         PhaseProfile* p = &profile_data[i];
         double total = p->parse_ms + p->ast_ms + p->transpile_ms +
                        p->jit_init_ms + p->file_write_ms + p->c2mir_ms + p->mir_gen_ms;
-        fprintf(f, "%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%d\n",
+        fprintf(f, "%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%d\t%d\t%lu\n",
                 p->script_path, p->parse_ms, p->ast_ms, p->transpile_ms,
                 p->jit_init_ms, p->file_write_ms, p->c2mir_ms, p->mir_gen_ms,
-                total, p->code_len);
+                total, p->code_len, p->worker_thread, p->thread_id);
+    }
+    if (import_level_profile_count > 0) {
+        fprintf(f, "\n# Parallel Import Levels\n");
+        fprintf(f, "# level | modules | jobs | threads | cpu_cap | elapsed_ms\n");
+        for (int i = 0; i < import_level_profile_count; i++) {
+            ImportLevelProfile* p = &import_level_profile_data[i];
+            fprintf(f, "%d\t%d\t%d\t%d\t%d\t%.3f\n",
+                    p->level, p->modules, p->jobs, p->threads, p->cpu_cap, p->elapsed_ms);
+        }
     }
     fclose(f);
 }
@@ -442,9 +513,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     log_notice("Start transpiling %s...", script_path);
     win_timer start, end;
 
-    // Phase profiling: use high-res timer for release-accurate timing
-    // Skip profiling for worker threads (parallel module compilation) to avoid data races
-    bool profiling = is_profile_enabled() && profile_count < PROFILE_MAX_SCRIPTS && !tls_parser;
+    // Phase profiling: use high-res timer for release-accurate timing.
+    bool profiling = is_profile_enabled();
     profile_time_t p0, p1, p2;
     if (profiling) profile_get_time(&p0);
 
@@ -528,16 +598,20 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                                       profiling ? &mir_transpile_ms : NULL,
                                       profiling ? &mir_gen_ms : NULL);
         if (profiling) {
-            PhaseProfile* prof = &profile_data[profile_count++];
-            prof->script_path = script_path;
-            prof->parse_ms = elapsed_ms_val(p0, p1);
-            prof->ast_ms = elapsed_ms_val(p1, p2);
-            prof->transpile_ms = mir_transpile_ms;
-            prof->jit_init_ms = mir_jit_init_ms;
-            prof->file_write_ms = 0;
-            prof->c2mir_ms = 0;
-            prof->mir_gen_ms = mir_gen_ms;
-            prof->code_len = 0;
+            PhaseProfile prof;
+            memset(&prof, 0, sizeof(prof));
+            profile_set_script_path(&prof, script_path);
+            prof.parse_ms = elapsed_ms_val(p0, p1);
+            prof.ast_ms = elapsed_ms_val(p1, p2);
+            prof.transpile_ms = mir_transpile_ms;
+            prof.jit_init_ms = mir_jit_init_ms;
+            prof.file_write_ms = 0;
+            prof.c2mir_ms = 0;
+            prof.mir_gen_ms = mir_gen_ms;
+            prof.code_len = 0;
+            prof.worker_thread = tls_parser ? 1 : 0;
+            prof.thread_id = profile_current_thread_id();
+            profile_record_phase(&prof);
         }
         return;
     }
@@ -608,16 +682,20 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
     // Record profiling data
     if (profiling) {
-        PhaseProfile* prof = &profile_data[profile_count++];
-        prof->script_path = script_path;
-        prof->parse_ms = elapsed_ms_val(p0, p1);
-        prof->ast_ms = elapsed_ms_val(p1, p2);
-        prof->transpile_ms = elapsed_ms_val(p2, p3);
-        prof->jit_init_ms = elapsed_ms_val(p3, p4);
-        prof->file_write_ms = elapsed_ms_val(p4, p5);
-        prof->c2mir_ms = elapsed_ms_val(p5, p6);
-        prof->mir_gen_ms = elapsed_ms_val(p6, p7);
-        prof->code_len = profile_code_len;
+        PhaseProfile prof;
+        memset(&prof, 0, sizeof(prof));
+        profile_set_script_path(&prof, script_path);
+        prof.parse_ms = elapsed_ms_val(p0, p1);
+        prof.ast_ms = elapsed_ms_val(p1, p2);
+        prof.transpile_ms = elapsed_ms_val(p2, p3);
+        prof.jit_init_ms = elapsed_ms_val(p3, p4);
+        prof.file_write_ms = elapsed_ms_val(p4, p5);
+        prof.c2mir_ms = elapsed_ms_val(p5, p6);
+        prof.mir_gen_ms = elapsed_ms_val(p6, p7);
+        prof.code_len = profile_code_len;
+        prof.worker_thread = tls_parser ? 1 : 0;
+        prof.thread_id = profile_current_thread_id();
+        profile_record_phase(&prof);
     }
 
     // Build debug info table for stack traces (after MIR_link has assigned addresses)
@@ -949,6 +1027,10 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
                 continue;
             }
 
+            bool level_profiling = is_profile_enabled();
+            profile_time_t level_start, level_end;
+            if (level_profiling) profile_get_time(&level_start);
+            int threads_used = 1;
             if (actual == 1) {
                 // single module — compile in-place without thread overhead
                 tls_parser = lambda_parser();
@@ -958,6 +1040,7 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
             } else {
                 // parallel compilation via lib/thread_pool. 8MB worker stacks
                 // accommodate the transpiler's deep recursion.
+                threads_used = actual;
                 ThreadPool* tp = tp_create_with_stack(actual, 8 * 1024 * 1024);
                 if (tp) {
                     for (int i = 0; i < actual; i++) {
@@ -966,6 +1049,18 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
                     tp_wait_all(tp);
                     tp_destroy(tp);
                 }
+            }
+            if (level_profiling) {
+                profile_get_time(&level_end);
+                ImportLevelProfile level_profile;
+                memset(&level_profile, 0, sizeof(level_profile));
+                level_profile.level = level;
+                level_profile.modules = batch_count;
+                level_profile.jobs = actual;
+                level_profile.threads = threads_used;
+                level_profile.cpu_cap = (int)ncpus;
+                level_profile.elapsed_ms = elapsed_ms_val(level_start, level_end);
+                profile_record_import_level(&level_profile);
             }
             mem_free(args);
         }

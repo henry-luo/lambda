@@ -363,7 +363,7 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
     options.set_log_errors(false);
     // UTF8 is the default encoding
 
-    re2::RE2* re2 = new re2::RE2(regex->str, options);
+    re2::RE2* re2 = new re2::RE2(regex->str, options); // NEW_DELETE_OK: audited RE2 boundary; freed by pattern_destroy().
 
     if (!re2->ok()) {
         if (error_msg) {
@@ -372,7 +372,7 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
             snprintf(error_buffer, sizeof(error_buffer), "%s", re2->error().c_str());
             *error_msg = error_buffer;
         }
-        delete re2;
+        delete re2; // NEW_DELETE_OK: paired with new above on compile failure.
         strbuf_free(regex);
         return nullptr;
     }
@@ -427,13 +427,34 @@ bool pattern_partial_match(TypePattern* pattern, String* str) {
 // Destroy a compiled pattern
 void pattern_destroy(TypePattern* pattern) {
     if (pattern && pattern->re2) {
-        delete pattern->re2;
+        delete pattern->re2; // NEW_DELETE_OK: paired with new at re2_wrapper.cpp::compile_pattern_ast.
         pattern->re2 = nullptr;
     }
     if (pattern && pattern->re2_unanchored) {
-        delete pattern->re2_unanchored;
+        delete pattern->re2_unanchored; // NEW_DELETE_OK: paired with new at re2_wrapper.cpp::pattern_get_unanchored.
         pattern->re2_unanchored = nullptr;
     }
+}
+
+// One-shot RE2 helpers — see re2_wrapper.hpp. These are the C+-convention
+// boundary: rb_runtime/py_stdlib/etc. call these instead of `new re2::RE2`
+// so the new/delete stays inside the wrapper.
+re2::RE2* re2_compile(const char* pattern, size_t pattern_len) {
+    if (!pattern) return nullptr;
+    std::string pat(pattern, pattern_len); // STD_CONTAINER_OK: re2::RE2 ctor takes std::string.
+    re2::RE2::Options opts;
+    opts.set_log_errors(false);
+    re2::RE2* re = new re2::RE2(pat, opts); // NEW_DELETE_OK: audited RE2 C-ABI boundary; see re2_release().
+    if (!re->ok()) {
+        delete re; // NEW_DELETE_OK: paired with new above on failure.
+        return nullptr;
+    }
+    return re;
+}
+
+void re2_release(re2::RE2* re) {
+    if (!re) return;
+    delete re; // NEW_DELETE_OK: paired with new in re2_compile().
 }
 
 // Get or create unanchored RE2 for partial matching operations.
@@ -449,16 +470,16 @@ re2::RE2* pattern_get_unanchored(TypePattern* pattern) {
         log_error("pattern_get_unanchored: unexpected source format: %s", src);
         return nullptr;
     }
-    std::string unanchored(src + 1, len - 2);
+    std::string unanchored(src + 1, len - 2); // STD_CONTAINER_OK: re2::RE2 ctor takes std::string.
 
     re2::RE2::Options opts;
     opts.set_log_errors(false);
-    pattern->re2_unanchored = new re2::RE2(unanchored, opts);
+    pattern->re2_unanchored = new re2::RE2(unanchored, opts); // NEW_DELETE_OK: audited RE2 boundary; freed by pattern_destroy().
 
     if (!pattern->re2_unanchored->ok()) {
         log_error("pattern_get_unanchored: failed to compile unanchored regex: %s",
                   pattern->re2_unanchored->error().c_str());
-        delete pattern->re2_unanchored;
+        delete pattern->re2_unanchored; // NEW_DELETE_OK: paired with new above on compile failure.
         pattern->re2_unanchored = nullptr;
         return nullptr;
     }
@@ -583,7 +604,7 @@ String* pattern_replace_all(TypePattern* pattern, const char* str, size_t str_le
     re2::RE2* re = pattern_get_unanchored(pattern);
     if (!re) return nullptr;
 
-    std::string input(str, str_len);
+    std::string input(str, str_len); // STD_CONTAINER_OK: RE2::GlobalReplace requires std::string* in/out buffer.
     re2::StringPiece replacement(repl, repl_len);
     RE2::GlobalReplace(&input, *re, replacement);
 

@@ -1,0 +1,19 @@
+id: state-store-scroll-api
+language: cpp
+severity: error
+message: >-
+  Pane-only scroll API used outside the StateStore. scroll_state_* must be called
+  through the StateStore-mediated path. Mark audited exceptions with a trailing
+  "// STATE_STORE_OK: <reason>".
+metadata:
+  suppress: STATE_STORE_OK
+rule:
+  any:
+    - pattern: scroll_state_attach($$$A)
+    - pattern: scroll_state_set_max($$$A)
+    - pattern: scroll_state_set_position($$$A)
+    - pattern: scroll_state_get_position($$$A)
+files:
+  - "radiant/**/*.{cpp,hpp}"
+ignores:
+  - "radiant/state_store.cpp"

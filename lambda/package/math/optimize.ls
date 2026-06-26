@@ -85,8 +85,6 @@ pub fn coalesce(bx) {
         width: bx.width,
         type: bx.type,
         italic: bx.italic,
-        skew: bx.skew,
-        strut_total: bx.strut_total,
-        strut_depth_em: bx.strut_depth_em
+        skew: bx.skew
     }
 }

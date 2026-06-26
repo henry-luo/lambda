@@ -10,7 +10,6 @@
 #include "../lib/strbuf.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
-#include <new>          // placement new
 #include <strings.h>    // strcasecmp
 #include <string.h>
 
@@ -68,10 +67,40 @@ bool tc_is_text_control(DomElement* elem) {
     return false;
 }
 
+void form_control_prop_init(FormControlProp* f) {
+    // Pre-zeroed (pool_calloc / mem_calloc) memory is assumed. Apply only
+    // the non-zero defaults — every other field is intentionally zero.
+    f->control_type = FORM_CONTROL_NONE;
+    f->size = FormDefaults::TEXT_SIZE_CHARS;
+    f->cols = FormDefaults::TEXTAREA_COLS;
+    f->rows = FormDefaults::TEXTAREA_ROWS;
+    f->maxlength = -1;
+    f->range_max = 100;
+    f->range_step = 1;
+    f->range_value = 0.5f;
+    f->selected_index = -1;
+    f->hover_index = -1;
+    f->placeholder_opacity = 1.0f;
+    f->flex_shrink = 1;
+    f->flex_basis = -1;
+    f->caret_on = 1;
+}
+
+void form_control_prop_release(FormControlProp* f) {
+    if (!f) return;
+    if (f->current_value) { mem_free(f->current_value); f->current_value = nullptr; }
+    if (f->custom_validity_msg) { mem_free(f->custom_validity_msg); f->custom_validity_msg = nullptr; }
+    if (f->value_at_focus) { mem_free(f->value_at_focus); f->value_at_focus = nullptr; }
+    if (f->history) { te_history_free((EditHistory*)f->history); f->history = nullptr; }
+    if (f->preedit_utf8) { mem_free(f->preedit_utf8); f->preedit_utf8 = nullptr; }
+}
+
 FormControlProp* tc_get_or_create_form(DomElement* elem) {
     if (elem->form && elem->item_prop_type == DomElement::ITEM_PROP_FORM)
         return elem->form;
-    FormControlProp* f = new FormControlProp();
+    FormControlProp* f = (FormControlProp*)mem_calloc(1, sizeof(FormControlProp), MEM_CAT_LAYOUT);
+    if (!f) return nullptr;
+    form_control_prop_init(f);
     f->heap_allocated = 1;
     f->state_ref = elem && elem->doc ? (DocState*)elem->doc->state : nullptr;
     if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
@@ -94,10 +123,9 @@ void form_control_release_prop(DomElement* elem) {
         font_prop_release_handle(form->placeholder_font);
         form->placeholder_font = nullptr;
     }
+    form_control_prop_release(form);
     if (form->heap_allocated) {
-        delete form;
-    } else {
-        form->~FormControlProp();
+        mem_free(form);
     }
     elem->form = nullptr;
     elem->item_prop_type = DomElement::ITEM_PROP_NONE;

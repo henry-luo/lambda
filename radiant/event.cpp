@@ -238,7 +238,7 @@ static void event_log_editing_history_named(DocState* state,
                                             const EditingSurface* surface,
                                             const char* input_type_name,
                                             const char* action,
-                                            uint32_t depth,
+                                            uint32_t depth, // UNUSED_DEPTH_OK: undo-stack depth logged as a JSON field.
                                             uint32_t cursor,
                                             bool did_restore) {
     if (!state || !event_state_log_enabled(state->active_event_log)) return;
@@ -268,7 +268,7 @@ static void event_log_editing_history(DocState* state,
                                       const EditingSurface* surface,
                                       const InputIntent* intent,
                                       const char* action,
-                                      uint32_t depth,
+                                      uint32_t depth, // UNUSED_DEPTH_OK: forwarded to the JSON record below.
                                       uint32_t cursor,
                                       bool did_restore) {
     event_log_editing_history_named(state, surface,
@@ -279,7 +279,7 @@ static void event_log_editing_history(DocState* state,
 extern "C" void radiant_text_edit_history_notify(DomElement* elem,
                                                  const char* action,
                                                  const char* input_type,
-                                                 uint32_t depth,
+                                                 uint32_t depth, // UNUSED_DEPTH_OK: undo-stack depth (output data field via the log).
                                                  uint32_t cursor) {
     if (!elem || !tc_is_text_control(elem)) return;
     FormControlProp* form = elem->form;
@@ -664,9 +664,8 @@ static void clear_document_interaction_state_before_detach(DomDocument* doc) {
     doc_state_set_drag_state(state, NULL, false);
     doc_state_clear_drag_drop(state);
 
-    state->open_dropdown = NULL;
-    state->context_menu_target = NULL;
-    state->context_menu_hover = -1;
+    doc_state_close_dropdown(state, NULL);
+    doc_state_close_context_menu(state);
     state->active_text_control = NULL;
     state->last_focused_text_control = NULL;
 }
@@ -2316,10 +2315,8 @@ static void rich_select_all_sync_descendant_text_controls(DocState* state,
         FormControlProp* form = elem->form;
         if (!form) return;
         uint32_t len = form->current_value_u16_len;
-        form->selection_start = 0;
-        form->selection_end = len;
-        form->selection_direction = len > 0 ? 1 : 0;
-        form_control_sync_text_control_state(state, static_cast<View*>(elem));
+        form_control_set_selection(state, static_cast<View*>(elem),
+                                   0, len, (uint8_t)(len > 0 ? 1 : 0));
         return;
     }
 
@@ -3372,7 +3369,7 @@ extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
                                                drop_text, html_payload);
     }
     if (owned_payload) mem_free(owned_payload);
-    state->needs_repaint = true;
+    doc_state_request_repaint(state);
     return ok;
 }
 
@@ -3701,7 +3698,7 @@ extern "C" bool radiant_editing_focused_caret_rect(UiContext* uicon,
         uint32_t offset = caret_offset > 0
             ? (uint32_t)caret_offset : 0; // INT_CAST_OK: caret offset is clamped non-negative for byte-offset geometry.
         if (!editing_geometry_dom_text_caret_rect(uicon,
-                static_cast<DomText*>(caret_view), offset, &rect)) {
+                lam::dom_require_text(caret_view), offset, &rect)) {
             return false;
         }
     }
@@ -4249,7 +4246,7 @@ static bool post_html_handler_incremental_rebuild(
             state->dirty_tracker.full_repaint = true;
             doc_state_mark_dirty(state);
         }
-        state->needs_repaint = true;
+        doc_state_request_repaint(state);
         doc_state_clear_reflow(state);
         reflow_clear(state);
     }
@@ -6294,7 +6291,7 @@ void update_caret_visual_position(UiContext* uicon, DocState* state) {
         }
 
         EditingCaretRect caret_rect;
-        if (editing_geometry_dom_text_caret_rect(uicon, static_cast<DomText*>(text),
+        if (editing_geometry_dom_text_caret_rect(uicon, text,
                 caret_offset < 0 ? 0 : (uint32_t)caret_offset,
                 &caret_rect)) {
             caret_x = caret_rect.x;
@@ -6714,7 +6711,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 } else {
                     EditingBoundary hit_boundary;
                     if (editing_geometry_dom_text_boundary_from_point(evcon.ui_context,
-                            static_cast<DomText*>(text), rect,
+                            text, rect,
                             (float)motion->x, (float)motion->y,
                             &hit_boundary)) {
                         char_offset = (int)hit_boundary.offset; // INT_CAST_OK: editor selection offsets are byte-index ints
@@ -6960,7 +6957,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (!evcon.target_text_offset_valid) {
                     EditingBoundary hit_boundary;
                     if (editing_geometry_dom_text_boundary_from_point(evcon.ui_context,
-                            static_cast<DomText*>(text), rect,
+                            text, rect,
                             (float)btn_event->x, (float)btn_event->y,
                             &hit_boundary)) {
                         char_offset = (int)hit_boundary.offset; // INT_CAST_OK: editor selection offsets are byte-index ints
@@ -7331,7 +7328,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     } else {
                         EditingBoundary hit_boundary;
                         if (editing_geometry_dom_text_boundary_from_point(evcon.ui_context,
-                                static_cast<DomText*>(text), evcon.target_text_rect,
+                                text, evcon.target_text_rect,
                                 (float)btn_event->x, (float)btn_event->y,
                                 &hit_boundary)) {
                             collapse_offset = (int)hit_boundary.offset; // INT_CAST_OK: editor selection offsets are byte-index ints

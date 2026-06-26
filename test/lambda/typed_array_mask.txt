@@ -1,0 +1,39 @@
+'=== comparison vs scalar ==='
+[true, false, true, false, true]
+[false, true, false, true, false]
+[false, false, true, false, true]
+[false, true, false, true, false]
+'=== comparison vs array (broadcast) ==='
+[false, false, true, false, true]
+[true, true, false, true, false]
+'=== 2-D comparison ==='
+[[false, true], [true, false]]
+'=== float ==='
+[true, true, false]
+'=== canonical idiom a[a > 0] ==='
+[1, 3, 5]
+[-2, -4]
+[3, 5]
+'=== mask with array comparison ==='
+[3, 5]
+'=== literal bool mask ==='
+[10, 30, 50]
+[]
+'=== full-shape mask on 2-D → flatten-select ==='
+[5, 3]
+[1, 2]
+'=== 1-D mask on 2-D → row select ==='
+[[1, 5]]
+[[3, 2]]
+'=== reductions over masked ==='
+9
+3
+-6
+5
+'=== reusable mask applied to two arrays ==='
+[35, 40]
+'=== float mask result preserves float ==='
+[1.5, 2.5]
+'=== structural equality preserved ==='
+true
+true

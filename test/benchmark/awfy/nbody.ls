@@ -42,8 +42,7 @@ pn advance(bx, by, bz, bvx, bvy, bvz, bmass, dt) {
 }
 
 pn energy(bx, by, bz, bvx, bvy, bvz, bmass) {
-    // Initialize as Item-typed zero (not double) to avoid transpiler type mismatch
-    var e = bx[0] - bx[0]
+    var e = 0.0
     var i = 0
     while (i < 5) {
         var ke = bvx[i] * bvx[i] + bvy[i] * bvy[i] + bvz[i] * bvz[i]
@@ -64,10 +63,9 @@ pn energy(bx, by, bz, bvx, bvy, bvz, bmass) {
 }
 
 pn offset_momentum(bvx, bvy, bvz, bmass) {
-    // Use Item-typed zeros to avoid double/Item mismatch
-    var px = bvx[0] - bvx[0]
-    var py = bvy[0] - bvy[0]
-    var pz = bvz[0] - bvz[0]
+    var px = 0.0
+    var py = 0.0
+    var pz = 0.0
     var i = 0
     while (i < 5) {
         px = px + bvx[i] * bmass[i]

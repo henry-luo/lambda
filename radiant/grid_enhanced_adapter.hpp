@@ -227,7 +227,7 @@ inline void copy_enhanced_tracks_to_old(
         // Build (fractional_part, index) pairs and sort descending
         // Use a simple selection approach to keep code minimal
         struct FracEntry { float frac; int idx; };
-        FracEntry fracs[MAX_GRID_TRACKS];
+        FracEntry fracs[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 8 B = 512 B; layout-pass scratch.
         size_t frac_count = 0;
         fracs[0] = {};  // suppress potential uninitialized warning
         for (int i = 0; i < copy_count; i++) {
@@ -970,7 +970,7 @@ inline void run_enhanced_track_sizing(
         // This covers: bare % tracks, fit-content(%), and minmax(*, %) tracks.
         enum class PctKind : uint8_t { BarePercent, FitContentPercent, MaxPercent };
         struct PctColInfo { int idx; float pct; PctKind kind; MinTrackSizingFunction orig_min; };
-        PctColInfo pct_col_infos[MAX_GRID_TRACKS];
+        PctColInfo pct_col_infos[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × ~16 B = 1 KiB; layout-pass scratch.
         size_t pct_col_count = 0;
         if (col_available < 0.0f) {
             for (int i = 0; i < (int)col_tracks.size(); i++) {
@@ -1029,8 +1029,8 @@ inline void run_enhanced_track_sizing(
                 if (per_auto > 0.0f) {
                     // Find per-track min-content and max-content floors from single-span items
                     // For scroll containers, the effective minimum is 0 (CSS Grid §6.6)
-                    float track_min_floor[MAX_GRID_TRACKS];
-                    float track_max_floor[MAX_GRID_TRACKS];
+                    float track_min_floor[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 4 B = 256 B; layout-pass scratch.
+                    float track_max_floor[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 4 B = 256 B; layout-pass scratch.
                     size_t n_col = col_tracks.size();
                     for (size_t i = 0; i < n_col; ++i) { track_min_floor[i] = 0.0f; track_max_floor[i] = 0.0f; }
                     for (const auto& contrib : col_contributions) {
@@ -1200,7 +1200,7 @@ inline void run_enhanced_track_sizing(
         // during intrinsic sizing, then re-resolved against the determined container height.
         enum class RowPctKind : uint8_t { BarePercent, FitContentPercent, MaxPercent };
         struct PctRowInfo { int idx; float pct; RowPctKind kind; MinTrackSizingFunction orig_min; };
-        PctRowInfo pct_row_infos[MAX_GRID_TRACKS];
+        PctRowInfo pct_row_infos[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × ~16 B = 1 KiB; layout-pass scratch.
         size_t pct_row_count = 0;
         bool needs_row_second_pass = false;
 

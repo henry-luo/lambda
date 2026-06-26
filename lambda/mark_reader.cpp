@@ -1,8 +1,10 @@
 #include "mark_reader.hpp"
 #include "lambda-data.hpp"
 #include "../lib/stringbuf.h"
+#include "../lib/memtrack.h"
 #include <cstring>
 #include <cstdlib>
+#include <new>
 
 // ==============================================================================
 // MarkReader Implementation
@@ -10,6 +12,23 @@
 
 MarkReader::MarkReader(Item root)
     : root_(root) {
+}
+
+//------------------------------------------------------------------------------
+// Heap factory (audited boundary for `new MarkReader` / `delete reader`)
+//------------------------------------------------------------------------------
+
+MarkReader* mark_reader_create(Item root) {
+    MarkReader* reader = (MarkReader*)mem_alloc(sizeof(MarkReader), MEM_CAT_EVAL);
+    if (!reader) return nullptr;
+    new (reader) MarkReader(root); // NEW_DELETE_OK: single audited construction boundary for MarkReader.
+    return reader;
+}
+
+void mark_reader_destroy(MarkReader* reader) {
+    if (!reader) return;
+    reader->~MarkReader(); // NEW_DELETE_OK: paired with mark_reader_create.
+    mem_free(reader);
 }
 
 ItemReader MarkReader::getRoot() const {
@@ -71,8 +90,18 @@ ItemReader::ItemReader(ConstItem item)
     : item_(*(Item*)&item), cached_type_(item.type_id()) {
 }
 
+ItemReader::ItemReader(const ArrayNumView& view)
+    : item_({.item = ITEM_NULL}), cached_type_(LMD_TYPE_ARRAY_NUM), view_(view) {
+}
+
+// True when a NUM_SIZED item carries a float sub-type (f16/f32).
+static inline bool num_sized_is_float(Item it) {
+    NumSizedType st = it.get_num_type();
+    return st == NUM_FLOAT16 || st == NUM_FLOAT32;
+}
+
 bool ItemReader::isNull() const {
-    return is<LMD_TYPE_NULL>();
+    return !view_.valid() && is<LMD_TYPE_NULL>();
 }
 
 bool ItemReader::isString() const {
@@ -84,11 +113,15 @@ bool ItemReader::isSymbol() const {
 }
 
 bool ItemReader::isInt() const {
-    return is<LMD_TYPE_INT>() || is<LMD_TYPE_INT64>();
+    if (is<LMD_TYPE_INT>() || is<LMD_TYPE_INT64>()) return true;
+    // sized integers (i8..u32) are integral too
+    return cached_type_ == LMD_TYPE_NUM_SIZED && !num_sized_is_float(item_);
 }
 
 bool ItemReader::isFloat() const {
-    return is<LMD_TYPE_FLOAT>();
+    if (is<LMD_TYPE_FLOAT>()) return true;
+    // sized floats (f16/f32) are floating-point
+    return cached_type_ == LMD_TYPE_NUM_SIZED && num_sized_is_float(item_);
 }
 
 bool ItemReader::isBool() const {
@@ -104,7 +137,9 @@ bool ItemReader::isMap() const {
 }
 
 bool ItemReader::isArray() const {
-    return is<LMD_TYPE_ARRAY>();
+    // A typed ArrayNum (1-D or N-D, or an internal slab view) presents as an
+    // array — consumers traverse it uniformly via asArray() (guideline G1).
+    return is<LMD_TYPE_ARRAY>() || cached_type_ == LMD_TYPE_ARRAY_NUM || view_.valid();
 }
 
 bool ItemReader::isList() const {
@@ -130,6 +165,8 @@ int64_t ItemReader::asInt() const {
         return val.value();
     } else if (auto long_val = asItem<LMD_TYPE_INT64>()) {
         return *long_val.ptr();
+    } else if (cached_type_ == LMD_TYPE_NUM_SIZED) {
+        return item_.get_num_sized_as_int64();
     }
     return 0;
 }
@@ -146,6 +183,7 @@ int32_t ItemReader::asInt32() const {
 
 double ItemReader::asFloat() const {
     if (auto val = asItem<LMD_TYPE_FLOAT>()) { return *val.ptr(); }
+    if (cached_type_ == LMD_TYPE_NUM_SIZED) { return item_.get_num_sized_as_double(); }
     return NAN;
 }
 
@@ -180,6 +218,13 @@ MapReader ItemReader::asMap() const {
 }
 
 ArrayReader ItemReader::asArray() const {
+    if (view_.valid()) {
+        return ArrayReader(view_);                    // already a typed slab
+    }
+    if (cached_type_ == LMD_TYPE_ARRAY_NUM) {
+        // top-level typed array → slab cursor rooted at axis 0, offset 0
+        return ArrayReader(ArrayNumView{ item_.array_num, 0, 0 });
+    }
     if (auto arr = asItem<LMD_TYPE_ARRAY>()) {
         return ArrayReader(*arr);
     }
@@ -366,14 +411,71 @@ ArrayReader::ArrayReader(lam::ItemOf<LMD_TYPE_ARRAY> array)
     : ArrayReader(array.ptr()) {
 }
 
+ArrayReader::ArrayReader(const ArrayNumView& view)
+    : array_(nullptr), view_(view) {
+}
+
 ArrayReader ArrayReader::fromItem(Item item) {
     if (auto array = lam::as<LMD_TYPE_ARRAY>(item)) {
         return ArrayReader(*array);
     }
+    if (item.type_id() == LMD_TYPE_ARRAY_NUM) {
+        return ArrayReader(ArrayNumView{ item.array_num, 0, 0 });
+    }
     return ArrayReader();  // Invalid
 }
 
+// ----------------------------------------------------------------------------
+// Typed-array (ArrayNum) traversal helpers — guideline G2 (no allocation):
+// leaf scalars pack inline (sized/bool/int56) or, for 8-byte float/int64/uint64,
+// the Item points directly into the live data buffer (valid under G3, the
+// static-tree assumption).  The 13-way elem_type dispatch lives only here.
+// ----------------------------------------------------------------------------
+
+// Resolve a typed array's shape side-table (null for a plain 1-D array).
+static inline ArrayNumShape* arr_num_shape(const ArrayNum* a) {
+    return (a->is_ndim && a->extra) ? (ArrayNumShape*)(uintptr_t)a->extra : nullptr;
+}
+
+// Build a real Item for the scalar at flat element offset `off`.  No allocation.
+static Item arr_num_leaf_item(ArrayNum* a, int64_t off) {
+    switch (a->get_elem_type()) {
+        case ELEM_INT:     return Item{ .item = i2it(a->items[off]) };
+        case ELEM_INT64:   return Item{ .item = l2it(&a->items[off]) };
+        case ELEM_FLOAT:
+        case ELEM_FLOAT64: return Item{ .item = d2it(&a->float_items[off]) };
+        case ELEM_INT8:    return Item{ .item = i8_to_item(((int8_t*)a->data)[off]) };
+        case ELEM_INT16:   return Item{ .item = i16_to_item(((int16_t*)a->data)[off]) };
+        case ELEM_INT32:   return Item{ .item = i32_to_item(((int32_t*)a->data)[off]) };
+        case ELEM_UINT8:   return Item{ .item = u8_to_item(((uint8_t*)a->data)[off]) };
+        case ELEM_UINT16:  return Item{ .item = u16_to_item(((uint16_t*)a->data)[off]) };
+        case ELEM_UINT32:  return Item{ .item = u32_to_item(((uint32_t*)a->data)[off]) };
+        // uint64 has no dedicated formatter path; reinterpret the live 8 bytes as
+        // int64 (correct for values <= INT64_MAX; the rare huge value is acceptable)
+        case ELEM_UINT64:  return Item{ .item = l2it((int64_t*)&((uint64_t*)a->data)[off]) };
+        case ELEM_FLOAT16: return Item{ .item = f16_to_item(f16_bits_to_f32(((uint16_t*)a->data)[off])) };
+        case ELEM_FLOAT32: return Item{ .item = f32_to_item(((float*)a->data)[off]) };
+        case ELEM_BOOL:    return Item{ .item = b2it(((uint8_t*)a->data)[off] ? BOOL_TRUE : BOOL_FALSE) };
+        default:           return Item{ .item = ITEM_NULL };
+    }
+}
+
 ItemReader ArrayReader::get(int64_t index) const {
+    if (view_.valid()) {
+        ArrayNum* base = view_.base;
+        ArrayNumShape* s = arr_num_shape(base);
+        int      ndim    = s ? s->ndim : 1;
+        int64_t  dimlen  = s ? array_num_shape_dims(s)[view_.axis] : base->length;
+        if (index < 0 || index >= dimlen) return ItemReader();
+        int64_t  stride  = s ? array_num_shape_strides(s)[view_.axis] : 1;
+        int64_t  off     = view_.offset + index * stride;
+        if (view_.axis == ndim - 1) {
+            // leaf scalar → real Item (no allocation)
+            return ItemReader(arr_num_leaf_item(base, off).to_const());
+        }
+        // non-leaf → child slab cursor at the next axis
+        return ItemReader(ArrayNumView{ base, off, (uint8_t)(view_.axis + 1) });
+    }
     if (!array_ || index < 0 || index >= array_->length) {
         return ItemReader();
     }
@@ -381,6 +483,10 @@ ItemReader ArrayReader::get(int64_t index) const {
 }
 
 int64_t ArrayReader::length() const {
+    if (view_.valid()) {
+        ArrayNumShape* s = arr_num_shape(view_.base);
+        return s ? array_num_shape_dims(s)[view_.axis] : view_.base->length;
+    }
     return array_ ? array_->length : 0;
 }
 
@@ -394,10 +500,9 @@ ArrayReader::Iterator::Iterator(const ArrayReader* reader)
 }
 
 bool ArrayReader::Iterator::next(ItemReader* item) {
-    if (!reader_->array_ || index_ >= reader_->array_->length) {
+    if (!reader_ || index_ >= reader_->length()) {
         return false;
     }
-
     *item = reader_->get(index_++);
     return true;
 }

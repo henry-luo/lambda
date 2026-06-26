@@ -20,7 +20,8 @@ pub fn display_context() {
         phantom: false,
         script_container: false,
         fraction_child: false,
-        colorbox_content: false
+        colorbox_content: false,
+        frac_gstyle: null
     }
 }
 
@@ -35,7 +36,8 @@ pub fn text_context() {
         phantom: false,
         script_container: false,
         fraction_child: false,
-        colorbox_content: false
+        colorbox_content: false,
+        frac_gstyle: null
     }
 }
 
@@ -61,7 +63,14 @@ pub fn derive(ctx, overrides) {
         script_container: if (overrides.script_container != null) overrides.script_container else ctx.script_container,
         fraction_child: if (overrides.fraction_child != null) overrides.fraction_child else ctx.fraction_child,
         colorbox_content: if (overrides.colorbox_content != null) overrides.colorbox_content else ctx.colorbox_content,
-        text_embedded: if (overrides.text_embedded != null) overrides.text_embedded else ctx.text_embedded
+        text_embedded: if (overrides.text_embedded != null) overrides.text_embedded else ctx.text_embedded,
+        // frac_gstyle is ONE-SHOT: a fraction sets the MathLive geometry style
+        // (display/text/script/scriptscript) on its numerator/denominator
+        // contexts so a directly-nested fraction renders with the correct
+        // geometry. It is NOT inherited — every other derive resets it to null,
+        // so a fraction reached via a subscript/group falls back to the
+        // style-based heuristic instead of an inherited (wrong) geometry.
+        frac_gstyle: overrides.frac_gstyle
     }
 }
 

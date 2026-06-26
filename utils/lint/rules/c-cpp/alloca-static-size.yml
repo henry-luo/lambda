@@ -1,0 +1,53 @@
+id: alloca-static-size
+language: cpp
+severity: warning
+message: >-
+  `alloca()` called with a non-static size. Stack allocation must be bounded
+  at compile time — dynamic sizes (runtime variables, multiplication by a
+  variable, function calls) risk silent stack overflow. Replace with a
+  fixed-size buffer (`char buf[256]`), heap allocation, or arena/pool. Mark
+  an audited exception (e.g. a thin wrapper macro) with a trailing
+  "// ALLOCA_OK: <reason>".
+metadata:
+  suppress: ALLOCA_OK
+# CAVEAT — ast-grep cannot evaluate constness. The rule is a *syntactic
+# heuristic* that matches the common bad shapes; a fully-precise version
+# (constexpr / #define awareness) belongs to clang-tidy. False negatives
+# (cast-prefixed runtime args, complex expressions) are acceptable; the
+# rule still surfaces the bulk of the bug class.
+#
+# Bad shapes flagged:
+#   alloca(lowercase_var)              alloca(size)
+#   alloca(lowercase * sizeof(T))      alloca(n * sizeof(MIR_op_t))
+#   alloca(sizeof(T) * lowercase)      alloca(sizeof(Item) * argc)
+#
+# Static shapes allowed (silently OK because the rule never matches them):
+#   alloca(42)                         number literal
+#   alloca(sizeof(T))                  pure sizeof
+#   alloca(N * sizeof(T))   where N is a number literal
+#   alloca(sizeof(T) * N)   where N is a number literal
+#   alloca(ALLCAPS_CONST)              convention: ALLCAPS = constant
+constraints:
+  # Lowercase identifier = almost certainly a runtime variable.
+  N1: { regex: "^[a-z][a-zA-Z0-9_]*$" }
+  N2: { regex: "^[a-z][a-zA-Z0-9_]*$" }
+  X:  { regex: "^[a-z][a-zA-Z0-9_]*$" }
+rule:
+  any:
+    # alloca(var * sizeof(T))
+    - pattern:
+        context: "void f() { alloca($N1 * sizeof($T)); }"
+        selector: call_expression
+    # alloca(sizeof(T) * var)
+    - pattern:
+        context: "void f() { alloca(sizeof($T) * $N2); }"
+        selector: call_expression
+    # alloca(var)     — bare lowercase identifier
+    - pattern: alloca($X)
+files:
+  - "lambda/**/*.{c,cpp,h,hpp}"
+  - "radiant/**/*.{c,cpp,h,hpp}"
+ignores:
+  - "**/tree-sitter*/**"
+  - "lambda/lambda-wasm-main.c"
+  - "**/windows_compat.h"

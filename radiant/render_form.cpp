@@ -549,7 +549,7 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
         if (!has_preedit && !is_password) {
             EditingCaretRect caret_rect;
             if (editing_geometry_text_control_caret_rect(rdcon->ui_context,
-                    static_cast<DomElement*>(block), (uint32_t)caret_byte,
+                    block, (uint32_t)caret_byte,
                     &caret_rect)) {
                 float border_css = form_control_border_left_width(block,
                     has_css_border, use_default_border);
@@ -617,7 +617,7 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
             paint.use_text_origin = true;
             used_shared_selection =
                 editing_geometry_text_control_for_each_selection_rect(rdcon->ui_context,
-                    static_cast<DomElement*>(block), a8_src, b8_src,
+                    block, a8_src, b8_src,
                     paint_text_control_selection_rect, &paint);
         }
         if (!used_shared_selection) {
@@ -1354,7 +1354,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
         paint.scroll_x = form ? form->scroll_x * s : 0.0f;
         paint.scroll_y = form ? form->scroll_y * s : 0.0f;
         editing_geometry_text_control_for_each_selection_rect(rdcon->ui_context,
-            static_cast<DomElement*>(block), (uint32_t)active_sel_start,
+            block, (uint32_t)active_sel_start,
             (uint32_t)active_sel_end, paint_text_control_selection_rect, &paint);
     }
 
@@ -1490,7 +1490,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
             if (!has_preedit) {
                 EditingCaretRect caret_rect;
                 if (editing_geometry_text_control_caret_rect(rdcon->ui_context,
-                        static_cast<DomElement*>(block), (uint32_t)caret_off,
+                        block, (uint32_t)caret_off,
                         &caret_rect)) {
                     float border_css = form_control_border_left_width(block,
                         has_css_border, use_default_border);

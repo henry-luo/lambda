@@ -36,3 +36,10 @@ struct TableMetadata {
         return grid_occupied[row * column_count + col];
     }
 };
+
+// ============================================================================
+// TableMetadata Heap Factory (audited boundary)
+// ============================================================================
+// Single audited construction site for `new TableMetadata` / `delete meta`.
+TableMetadata* table_metadata_create(ScratchArena* scratch, int cols, int rows);
+void table_metadata_destroy(TableMetadata* meta);

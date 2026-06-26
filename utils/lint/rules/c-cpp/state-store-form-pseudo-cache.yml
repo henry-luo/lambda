@@ -1,0 +1,15 @@
+id: state-store-form-pseudo-cache
+language: cpp
+severity: error
+message: >-
+  FormControlProp pseudo-state cache field reintroduced. placeholder_shown /
+  focus_visible are derived from the StateStore and must not be cached on the
+  form control. Mark audited exceptions with a trailing "// STATE_STORE_OK: <reason>".
+metadata:
+  suppress: STATE_STORE_OK
+rule:
+  any:
+    - { kind: identifier, regex: "^(placeholder_shown|focus_visible)$" }
+    - { kind: field_identifier, regex: "^(placeholder_shown|focus_visible)$" }
+files:
+  - "radiant/form_control.hpp"

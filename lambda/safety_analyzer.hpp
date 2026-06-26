@@ -134,6 +134,13 @@ private:
 // Global safety analyzer instance
 extern SafetyAnalyzer* g_safety_analyzer;
 
+// ============================================================================
+// SafetyAnalyzer Heap Factory (audited boundary)
+// ============================================================================
+// Single audited construction site for `new SafetyAnalyzer`. The singleton is
+// process-lifetime and intentionally leaked at shutdown — no destroy is needed.
+SafetyAnalyzer* safety_analyzer_create();
+
 /**
  * Initialize the global safety analyzer.
  */

@@ -11,6 +11,8 @@
 #include "js_exec_profile.h"
 #include "../../lib/lambda_typed.hpp"
 #include "../../lib/gc/gc_heap.h"
+#include "../../lib/lambda_alloca.h"
+#include "../../lib/memtrack.h"
 
 extern "C" Item js_to_property_key(Item key);
 extern __thread EvalContext* context;
@@ -1755,7 +1757,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 // merge bound_args + args
                 if (fn->bound_args && fn->bound_argc > 0) {
                     eff_argc = fn->bound_argc + argc;
-                    merged_buf = (Item*)alloca(eff_argc * sizeof(Item));
+                    merged_buf = LAMBDA_ALLOCA(eff_argc, Item);
                     for (int i = 0; i < fn->bound_argc; i++) merged_buf[i] = fn->bound_args[i];
                     for (int i = 0; i < argc; i++) merged_buf[fn->bound_argc + i] = args ? args[i] : ItemNull;
                     eff_args = merged_buf;
@@ -2649,8 +2651,8 @@ static Item js_class_create_shaped_instance_object(Item class_item) {
     if (!found || get_type_id(names) != LMD_TYPE_ARRAY) return js_new_object();
     int64_t raw_count = js_array_length(names);
     if (raw_count <= 0 || raw_count > 64) return js_new_object();
-    const char** prop_names = (const char**)alloca((int)raw_count * sizeof(const char*));
-    int* prop_lens = (int*)alloca((int)raw_count * sizeof(int));
+    const char** prop_names = LAMBDA_ALLOCA((int)raw_count, const char*);
+    int* prop_lens = LAMBDA_ALLOCA((int)raw_count, int);
     int count = 0;
     for (int64_t i = 0; i < raw_count; i++) {
         Item name_item = js_array_get(names, (Item){.item = i2it(i)});
@@ -5118,6 +5120,12 @@ static bool js_array_sparse_delete(Array* arr, int64_t index) {
     return false;
 }
 
+static int js_array_sparse_index_cmp(const void* left, const void* right) {
+    int64_t a = *(const int64_t*)left;
+    int64_t b = *(const int64_t*)right;
+    return (a > b) - (a < b);
+}
+
 static int64_t js_array_sparse_count(SparseArrayMap* sm) {
     if (!sm || !sm->sparse_indices) return 0;
     return (int64_t)hashmap_count(sm->sparse_indices);
@@ -5138,6 +5146,31 @@ extern "C" Item js_array_sparse_get_index(Item array, int64_t index) {
     if (get_type_id(array) != LMD_TYPE_ARRAY) return make_js_undefined();
     Item value = ItemNull;
     return js_array_sparse_get(array.array, index, &value) ? value : make_js_undefined();
+}
+
+extern "C" int64_t js_array_sparse_collect_indices(Item array, int64_t start, int64_t end, int64_t* indices, int64_t cap) {
+    if (get_type_id(array) != LMD_TYPE_ARRAY || !array.array || array.array->extra == 0) return 0;
+    if (start < 0) start = 0;
+    if (end < start) return 0;
+    SparseArrayMap* sm = js_array_sparse_from_map((Map*)(uintptr_t)array.array->extra);
+    if (!sm || !sm->sparse_indices) return 0;
+
+    int64_t count = 0;
+    int64_t written = 0;
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(sm->sparse_indices, &iter, &item)) {
+        JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
+        if (!entry) continue;
+        if (entry->index < start || entry->index >= end) continue;
+        if (entry->value.item == JS_DELETED_SENTINEL_VAL) continue;
+        if (indices && written < cap) indices[written++] = entry->index;
+        count++;
+    }
+    if (indices && written > 1) {
+        qsort(indices, (size_t)written, sizeof(int64_t), js_array_sparse_index_cmp);
+    }
+    return count;
 }
 
 static inline bool js_array_dense_present(Array* arr, int64_t index) {
@@ -8515,7 +8548,7 @@ extern "C" void js_console_log(Item value) {
     Item str = js_to_string(value);
     if (get_type_id(str) == LMD_TYPE_STRING) {
         String* s = it2s(str);
-        printf("%.*s\n", (int)s->len, s->chars);
+        printf("%.*s\n", (int)s->len, s->chars); // PRINTF_OK: implements JS console.log stdout write.
     }
 }
 
@@ -12547,7 +12580,7 @@ extern "C" Item js_super_call_native(Item callee, Item this_val, Item* args, int
 
 extern "C" Item js_super_apply_native(Item callee, Item this_val, Item args_array) {
     int argc = js_array_length(args_array);
-    Item* args = argc > 0 ? (Item*)alloca(argc * sizeof(Item)) : NULL;
+    Item* args = argc > 0 ? LAMBDA_ALLOCA(argc, Item) : NULL;
     for (int i = 0; i < argc; i++) {
         args[i] = js_array_get(args_array, (Item){.item = i2it(i)});
     }
@@ -12576,7 +12609,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             if (found && get_type_id(call_fn) == LMD_TYPE_FUNC) {
                 // Rebuild args: [this_val, ...args] → call_fn(func_item, this_val, ...args)
                 int new_argc = arg_count + 1;
-                Item* new_args = (Item*)alloca(new_argc * sizeof(Item));
+                Item* new_args = LAMBDA_ALLOCA(new_argc, Item);
                 new_args[0] = this_val;
                 for (int i = 0; i < arg_count; i++) new_args[i + 1] = args[i];
                 return js_call_function(call_fn, func_item, new_args, new_argc);
@@ -12758,7 +12791,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         if (fn->bound_args || (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)) {
             Item effective_this = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) ? fn->bound_this : this_val;
             int total_argc = fn->bound_argc + arg_count;
-            Item* merged_args = (Item*)alloca(total_argc * sizeof(Item));
+            Item* merged_args = LAMBDA_ALLOCA(total_argc, Item);
             for (int i = 0; i < fn->bound_argc; i++) {
                 merged_args[i] = fn->bound_args[i];
             }
@@ -12804,7 +12837,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             }
         }
         int total_argc = fn->bound_argc + arg_count;
-        Item* merged_args = (Item*)alloca(total_argc * sizeof(Item));
+        Item* merged_args = LAMBDA_ALLOCA(total_argc, Item);
         for (int i = 0; i < fn->bound_argc; i++) {
             merged_args[i] = fn->bound_args[i];
         }
@@ -12976,7 +13009,7 @@ extern "C" Item js_apply_function(Item func_item, Item this_val, Item args_array
     if (get_type_id(args_array) == LMD_TYPE_ARRAY) {
         argc = (int)args_array.array->length;
         if (argc > 0) {
-            args = (Item*)alloca(argc * sizeof(Item));
+            args = LAMBDA_ALLOCA(argc, Item);
             for (int i = 0; i < argc; i++) {
                 Item idx = {.item = i2it(i)};
                 args[i] = js_array_get(args_array, idx);
@@ -12991,7 +13024,7 @@ extern "C" Item js_apply_function(Item func_item, Item this_val, Item args_array
         if (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) {
             argc = (lt == LMD_TYPE_INT) ? (int)it2i(len_val) : (int)it2d(len_val);
             if (argc > 0) {
-                args = (Item*)alloca(argc * sizeof(Item));
+                args = LAMBDA_ALLOCA(argc, Item);
                 for (int i = 0; i < argc; i++) {
                     char idx_buf[16];
                     snprintf(idx_buf, sizeof(idx_buf), "%d", i);
@@ -13012,7 +13045,7 @@ extern "C" Item js_apply_constructor(Item constructor, Item args_array) {
     if (get_type_id(args_array) == LMD_TYPE_ARRAY) {
         argc = (int)args_array.array->length;
         if (argc > 0) {
-            args = (Item*)alloca(argc * sizeof(Item));
+            args = LAMBDA_ALLOCA(argc, Item);
             for (int i = 0; i < argc; i++) {
                 Item idx = {.item = i2it(i)};
                 args[i] = js_array_get(args_array, idx);
@@ -13026,7 +13059,7 @@ extern "C" Item js_apply_constructor(Item constructor, Item args_array) {
         if (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) {
             argc = (lt == LMD_TYPE_INT) ? (int)it2i(len_val) : (int)it2d(len_val);
             if (argc > 0) {
-                args = (Item*)alloca(argc * sizeof(Item));
+                args = LAMBDA_ALLOCA(argc, Item);
                 for (int i = 0; i < argc; i++) {
                     char idx_buf[16];
                     snprintf(idx_buf, sizeof(idx_buf), "%d", i);
@@ -13058,7 +13091,7 @@ static Item js_bound_class_construct_stub(Item env_item, Item rest_array) {
     if (get_type_id(rest_array) == LMD_TYPE_ARRAY) {
         argc = (int)js_array_length(rest_array);
         if (argc > 0) {
-            args = (Item*)alloca(argc * sizeof(Item));
+            args = LAMBDA_ALLOCA(argc, Item);
             for (int i = 0; i < argc; i++) {
                 args[i] = js_array_get(rest_array, (Item){.item = i2it(i)});
             }
@@ -15469,7 +15502,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         if (js_regex_wrapper_rewrite_v_flag_classes_c(vpat, vpat_len, &rewritten, &rewritten_len)
             && rewritten) {
             v_processed.assign(rewritten, rewritten_len);
-            free(rewritten);
+            mem_free(rewritten);
             effective_pattern = v_processed.c_str();
             effective_pattern_len = (int)v_processed.size();
         }
@@ -20578,7 +20611,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
                 Item groups_obj = js_build_groups_object(rd, matches, ngroups);
                 bool has_groups = (groups_obj.item != make_js_undefined().item);
                 int fn_argc = ngroups + 2 + (has_groups ? 1 : 0);
-                Item* fn_args = (Item*)alloca(fn_argc * sizeof(Item));
+                Item* fn_args = LAMBDA_ALLOCA(fn_argc, Item);
                 for (int i = 0; i < ngroups; i++) {
                     if (matches[i].data()) {
                         fn_args[i] = (Item){.item = s2it(heap_strcpy(
@@ -25733,6 +25766,8 @@ includes_slow_path:
                 Item val = _map_read_field(se, pm->data);
                 if (val.item != JS_DELETED_SENTINEL_VAL) sparse_count++;
             }
+            sparse_count += (int)js_array_sparse_collect_indices(
+                arr, a->capacity, a->length, NULL, 0);
         }
         int64_t* sparse_indices = sparse_count > 0 ?
             (int64_t*)mem_alloc((size_t)sparse_count * sizeof(int64_t), MEM_CAT_JS_RUNTIME) : NULL;
@@ -25752,6 +25787,15 @@ includes_slow_path:
                 if (val.item == JS_DELETED_SENTINEL_VAL) continue;
                 sparse_indices[sparse_pos] = idx;
                 sparse_values[sparse_pos] = val;
+                sparse_pos++;
+            }
+            int64_t hash_count = js_array_sparse_collect_indices(
+                arr, a->capacity, a->length,
+                sparse_indices ? sparse_indices + sparse_pos : NULL,
+                sparse_count - sparse_pos);
+            for (int64_t hi = 0; hi < hash_count && sparse_pos < sparse_count; hi++) {
+                int64_t idx = sparse_indices[sparse_pos];
+                sparse_values[sparse_pos] = js_array_sparse_get_index(arr, idx);
                 sparse_pos++;
             }
         }
@@ -26124,7 +26168,7 @@ extern "C" Item js_method_call_apply(Item obj, Item method_name, Item args_array
     Item* args = NULL;
     if (get_type_id(args_array) == LMD_TYPE_ARRAY && args_array.array->length > 0) {
         argc = (int)args_array.array->length;
-        args = (Item*)alloca(argc * sizeof(Item));
+        args = LAMBDA_ALLOCA(argc, Item);
         for (int i = 0; i < argc; i++) {
             Item idx = {.item = i2it(i)};
             args[i] = js_array_get(args_array, idx);
@@ -26905,7 +26949,7 @@ extern "C" Item js_math_apply(Item method_name, Item args_array) {
     if (argc == 0) {
         return js_math_method(method_name, NULL, 0);
     }
-    Item* args = (Item*)alloca(argc * sizeof(Item));
+    Item* args = LAMBDA_ALLOCA(argc, Item);
     for (int i = 0; i < argc; i++) {
         Item idx = {.item = i2it(i)};
         args[i] = js_array_get(args_array, idx);

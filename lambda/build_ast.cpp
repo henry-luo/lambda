@@ -1219,6 +1219,32 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
         ast_node->field = build_expr(tp, field_node);
     }
 
+    // For index_expr, collect additional comma-separated field children into a
+    // chain via ->next, enabling multi-dim subscripts like arr[i, j, k].
+    if (node_type == AST_NODE_INDEX_EXPR && ast_node->field) {
+        AstNode* tail = ast_node->field;
+        TSTreeCursor cur = ts_tree_cursor_new(array_node);
+        bool ok = ts_tree_cursor_goto_first_child(&cur);
+        bool seen_first = false;
+        while (ok) {
+            TSSymbol fid = ts_tree_cursor_current_field_id(&cur);
+            if (fid == FIELD_FIELD) {
+                if (!seen_first) {
+                    seen_first = true;  // first FIELD_FIELD was already built above
+                } else {
+                    TSNode extra_field = ts_tree_cursor_current_node(&cur);
+                    AstNode* next_idx = build_expr(tp, extra_field);
+                    if (next_idx) {
+                        tail->next = next_idx;
+                        tail = next_idx;
+                    }
+                }
+            }
+            ok = ts_tree_cursor_goto_next_sibling(&cur);
+        }
+        ts_tree_cursor_delete(&cur);
+    }
+
     // defensive check: if either object or field building failed, return error
     if (!ast_node->object || !ast_node->field) {
         record_semantic_error(tp, array_node, ERR_SYNTAX_ERROR,
@@ -3171,6 +3197,23 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         ast_node->op == OPERATOR_GT || ast_node->op == OPERATOR_GE ||
         ast_node->op == OPERATOR_IS || ast_node->op == OPERATOR_IN) {
         type_id = LMD_TYPE_BOOL;
+
+        // Ordering comparisons (< <= > >=) now return Item from fn_lt/gt/le/ge, so
+        // their result representation depends on the operand types — mirror the
+        // transpiler's native-vs-fallback decision so consumers read it correctly:
+        //   • numeric-array operand  → ARRAY_NUM (element-wise mask via vec_cmp)
+        //   • both native numeric    → BOOL      (native MIR comparison → raw bool)
+        //   • anything else (ANY/...) → ANY       (fn_lt fallback → boxed bool / mask Item)
+        // ==/!= keep their Bool (structural / cross-type) semantics.
+        if (ast_node->op >= OPERATOR_LT && ast_node->op <= OPERATOR_GE) {
+            bool l_arr = (left_type == LMD_TYPE_ARRAY_NUM || left_type == LMD_TYPE_ARRAY);
+            bool r_arr = (right_type == LMD_TYPE_ARRAY_NUM || right_type == LMD_TYPE_ARRAY);
+            bool l_native = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT);
+            bool r_native = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64 || right_type == LMD_TYPE_FLOAT);
+            if (l_arr || r_arr)            type_id = LMD_TYPE_ARRAY_NUM;
+            else if (l_native && r_native) type_id = LMD_TYPE_BOOL;
+            else                           type_id = LMD_TYPE_ANY;
+        }
 
         // static type check for equality/inequality: catch comparisons between
         // incompatible concrete types where one side is a literal
@@ -6254,9 +6297,29 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         TSNode obj_node = ts_node_child_by_field_id(target_node, FIELD_OBJECT);
         ast_node->object = build_expr(tp, obj_node);
 
-        // build index expression
+        // build index expression(s) — multi-dim arr[i, j, k] = v chains keys via ->next
         TSNode idx_node = ts_node_child_by_field_id(target_node, FIELD_FIELD);
         ast_node->key = build_expr(tp, idx_node);
+        if (ast_node->key) {
+            AstNode* tail = ast_node->key;
+            TSTreeCursor cur = ts_tree_cursor_new(target_node);
+            bool ok = ts_tree_cursor_goto_first_child(&cur);
+            bool seen_first = false;
+            while (ok) {
+                TSSymbol fid = ts_tree_cursor_current_field_id(&cur);
+                if (fid == FIELD_FIELD) {
+                    if (!seen_first) {
+                        seen_first = true;
+                    } else {
+                        TSNode extra = ts_tree_cursor_current_node(&cur);
+                        AstNode* next_idx = build_expr(tp, extra);
+                        if (next_idx) { tail->next = next_idx; tail = next_idx; }
+                    }
+                }
+                ok = ts_tree_cursor_goto_next_sibling(&cur);
+            }
+            ts_tree_cursor_delete(&cur);
+        }
 
         // build value expression
         ast_node->value = build_expr(tp, value_node);
@@ -7819,7 +7882,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                     log_error("Error: failed to load module '%.*s' (resolved: %s, from: %s)",
                         (int)ast_node->module.length, ast_node->module.str, buf->str,
                         tp->reference ? tp->reference : "<unknown>");
-                    fprintf(stderr, "Error: Failed to import module '%.*s'\n"
+                    fprintf(stderr, "Error: Failed to import module '%.*s'\n" // PRINTF_OK: user-facing CLI import error.
                         "  Resolved path: %s\n  Importing script: %s\n",
                         (int)ast_node->module.length, ast_node->module.str, buf->str,
                         tp->reference ? tp->reference : "<unknown>");
@@ -7915,7 +7978,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                 #endif
                     log_error("Error: failed to load module '%.*s' (resolved: %s)",
                         (int)ast_node->module.length, ast_node->module.str, buf->str);
-                    fprintf(stderr, "Error: Failed to import module '%.*s'\n"
+                    fprintf(stderr, "Error: Failed to import module '%.*s'\n" // PRINTF_OK: user-facing CLI import error.
                         "  Resolved path: %s\n",
                         (int)ast_node->module.length, ast_node->module.str, buf->str);
                 #ifndef SIMPLE_SCHEMA_PARSER

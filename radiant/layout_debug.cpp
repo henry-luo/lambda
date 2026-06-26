@@ -116,7 +116,7 @@ void layout_debug_vlog(LayoutContext* lycon, LayoutDebugCategory category,
                        const DomNode* node, const char* format, va_list args) {
     if (!layout_debug_enabled(lycon, category) || !format) return;
 
-    char message[1024];
+    static thread_local char message[1024];  // LARGE_ARRAY_OK: static buffer — not on call stack.
     vsnprintf(message, sizeof(message), format, args);
     log_debug("[%s] %s %s", category_name(category),
               node ? node->source_loc() : "-", message);

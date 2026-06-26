@@ -35,7 +35,7 @@ for (let i = 0; i < args.length; i++) {
     else if (arg === '--parallel')         parallelExecution = true;
     else if (arg === '-h' || arg === '--help') {
         console.log(`Usage: node test/test_run.js [OPTIONS]
-  --target=SUITE       Run only tests from specified suite (library, input, mir, lambda, validator, radiant, jube)
+  --target=SUITE       Run only tests from specified suite (library, input, mir, lambda, validator, radiant, jube, extended)
   --exclude-target=S   Exclude tests from specified suite (e.g. jube)
   --category=CAT       Run only tests from specified category (baseline, extended)
   --raw                Show raw test output without formatting
@@ -66,8 +66,8 @@ const SCRIPT_TESTS = [
     {
         baseName: 'run_lambda_mathlive_markup',
         script: 'test/lambda/mathlive/run_lambda_mathlive_markup.mjs',
-        suite: 'lambda',
-        category: 'baseline',
+        suite: 'extended',
+        category: 'extended',
         displayName: 'Lambda MathLive Markup Baseline',
         icon: '🔢',
         runner: 'node',
@@ -352,6 +352,59 @@ function formatDuration(ms) {
     return minutes > 0 ? `${minutes}m${seconds.toString().padStart(2, '0')}s` : `${seconds}s`;
 }
 
+function getTestProperty(tc, key) {
+    if (tc && Object.prototype.hasOwnProperty.call(tc, key)) return tc[key];
+    if (!Array.isArray(tc.properties)) return null;
+    const prop = tc.properties.find(p => p && p.key === key);
+    return prop ? prop.value : null;
+}
+
+function getCapturedCaseDurationMs(tc) {
+    const elapsedUs = Number(getTestProperty(tc, 'lambda_script_elapsed_us'));
+    if (Number.isFinite(elapsedUs) && elapsedUs > 0) return elapsedUs / 1000;
+    const elapsedMs = Number(getTestProperty(tc, 'lambda_script_elapsed_ms'));
+    if (Number.isFinite(elapsedMs) && elapsedMs > 0) return elapsedMs;
+    return 0;
+}
+
+function formatSecondsForGtest(ms) {
+    return `${(ms / 1000).toFixed(3)}s`;
+}
+
+function normalizeGtestCaseTimes(jsonFile) {
+    try {
+        if (!fs.existsSync(jsonFile)) return;
+        const data = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
+        let changed = false;
+
+        for (const suite of (data.testsuites || [])) {
+            let suiteCaseMs = 0;
+            let suiteHasCaptured = false;
+            for (const tc of (suite.testsuite || [])) {
+                const capturedMs = getCapturedCaseDurationMs(tc);
+                if (capturedMs > 0) {
+                    tc.time = formatSecondsForGtest(capturedMs);
+                    suiteCaseMs += capturedMs;
+                    suiteHasCaptured = true;
+                    changed = true;
+                } else {
+                    suiteCaseMs += parseDurationMs(tc.time);
+                }
+            }
+            if (suiteHasCaptured) {
+                suite.time = formatSecondsForGtest(suiteCaseMs);
+                suite.lambda_captured_case_time_ms = Math.round(suiteCaseMs);
+            }
+        }
+
+        if (changed) {
+            fs.writeFileSync(jsonFile, JSON.stringify(data, null, 2));
+        }
+    } catch (_) {
+        // Keep the original gtest JSON if normalization cannot parse it.
+    }
+}
+
 function testArtifactLabel(testInfo) {
     if (testInfo.runner === 'node') return testInfo.script;
     return `${testInfo.baseName}.exe`;
@@ -421,7 +474,11 @@ function runTest(testInfo) {
 
         if (testInfo.runner === 'node') {
             command = 'node';
-            testArgs = appendArgValue(testInfo.args || [], '--report', jsonFile);
+            let scriptArgs = testInfo.args || [];
+            if (baseName === 'run_lambda_mathlive_markup' && targetCategory === 'baseline') {
+                scriptArgs = appendArgValue(scriptArgs, '--fixture-source', 'mathlive');
+            }
+            testArgs = appendArgValue(scriptArgs, '--report', jsonFile);
             spawnArgs = [scriptPath, ...testArgs];
         } else if (baseName === 'lambda_test_runner') {
             const tapFile = path.join(TEST_OUTPUT_DIR, `${baseName}_results.tap`);
@@ -524,6 +581,9 @@ function runTest(testInfo) {
             }
 
             // Parse result JSON
+            if (testInfo.isGtest) {
+                normalizeGtestCaseTimes(jsonFile);
+            }
             const result = parseTestResults(baseName, jsonFile, timedOut);
             resolve(result);
         });
@@ -569,6 +629,8 @@ function parseTestResults(baseName, jsonFile, timedOut) {
 
     let passed = 0, failed = 0, total = 0;
     let failedTests = [];
+    let caseTimings = [];
+    let capturedCaseDurationMs = 0;
 
     if (baseName === 'lambda_test_runner') {
         // Custom Lambda runner format
@@ -610,6 +672,15 @@ function parseTestResults(baseName, jsonFile, timedOut) {
         if (Array.isArray(data.testsuites)) {
             for (const suite of data.testsuites) {
                 for (const tc of (suite.testsuite || [])) {
+                    const capturedMs = getCapturedCaseDurationMs(tc);
+                    const durationMs = capturedMs > 0 ? capturedMs : parseDurationMs(tc.time);
+                    if (durationMs > 0) {
+                        caseTimings.push({
+                            name: `${suite.name}.${tc.name}`,
+                            duration_ms: durationMs,
+                        });
+                        if (capturedMs > 0) capturedCaseDurationMs += capturedMs;
+                    }
                     const failureCount = Array.isArray(tc.failures) ?
                         tc.failures.length : (tc.failures || 0);
                     if (failureCount > 0) {
@@ -646,6 +717,8 @@ function parseTestResults(baseName, jsonFile, timedOut) {
         passed, failed, total,
         status: failed === 0 ? '✅ PASS' : '❌ FAIL',
         failedTests,
+        caseTimings: caseTimings.sort((a, b) => b.duration_ms - a.duration_ms),
+        capturedCaseDurationMs,
         timedOut: false,
     };
 }
@@ -774,6 +847,7 @@ function displayResults(config, results) {
 
     let totalTests = 0, totalPassed = 0, totalFailed = 0;
     const allFailedTests = [];
+    const allCaseTimings = [];
 
     // Load input baseline results if available
     let inputResults = null;
@@ -797,6 +871,13 @@ function displayResults(config, results) {
             suiteTotal  += t.result.total;
             suiteDurationMs += t.result.durationMs || 0;
             allFailedTests.push(...t.result.failedTests);
+            for (const caseTiming of (t.result.caseTimings || [])) {
+                allCaseTimings.push({
+                    test_binary: t.baseName,
+                    test: caseTiming.name,
+                    duration_ms: caseTiming.duration_ms,
+                });
+            }
         }
 
         totalTests  += suiteTotal;
@@ -812,6 +893,10 @@ function displayResults(config, results) {
         total_passed: totalPassed,
         total_failed: totalFailed,
         failed_test_names: allFailedTests,
+        top_slow_tests: allCaseTimings
+            .slice()
+            .sort((a, b) => b.duration_ms - a.duration_ms)
+            .slice(0, 20),
         level1_test_suites: allSuites.map(key => {
             const s = suiteMap.get(key);
             let sp = 0, sf = 0, st = 0, sd = 0;
@@ -820,7 +905,11 @@ function displayResults(config, results) {
         }),
         level2_c_tests: [...results.entries()].map(([bn, e]) => ({
             name: e.testInfo.displayName, suite: e.testInfo.suite,
-            total: e.total, passed: e.passed, failed: e.failed, duration_ms: e.durationMs || 0, status: e.status,
+            total: e.total, passed: e.passed, failed: e.failed,
+            duration_ms: e.durationMs || 0,
+            captured_case_duration_ms: e.capturedCaseDurationMs || 0,
+            status: e.status,
+            top_slow_tests: (e.caseTimings || []).slice(0, 20),
         })),
     };
 
@@ -898,6 +987,16 @@ function displayResults(config, results) {
         console.log('🔍 Failed Tests:');
         for (const name of allFailedTests) {
             console.log(`   ❌ ${name}`);
+        }
+    }
+
+    if (allCaseTimings.length > 0) {
+        console.log('');
+        console.log('⏱️  Slowest Individual Tests:');
+        const slow = allCaseTimings.slice().sort((a, b) => b.duration_ms - a.duration_ms).slice(0, 10);
+        for (let i = 0; i < slow.length; i++) {
+            const t = slow[i];
+            console.log(`   ${String(i + 1).padStart(2, ' ')}. ${formatDuration(t.duration_ms)} ${t.test_binary}: ${t.test}`);
         }
     }
 

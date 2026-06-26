@@ -8,7 +8,7 @@
 // --- Vector (chunked, 16 elements per chunk, up to 256 capacity) ---
 
 pn vec_new() {
-    var v = { chunks: [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null], sz: 0 }
+    var v = { chunks: fill(16, null), sz: 0 }
     return v
 }
 
@@ -20,7 +20,7 @@ pn vec_add(v, item) {
     var ck = cks[ci]
     if (ck == null) {
         var _n = 0
-        ck = [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
+        ck = fill(16, null)
         cks[ci] = ck
     }
     var _d = 0

@@ -8,6 +8,7 @@
 #include "../lambda-data.hpp"
 #include "../mark_reader.hpp"
 #include "../../lib/log.h"
+#include "../../lib/lambda_alloca.h"
 #include "../../lib/strbuf.h"
 
 #include <cstring>
@@ -603,8 +604,8 @@ extern "C" Item rb_array_sort_by(Item array, Item block) {
     Array* arr = it2arr(array);
     if (!arr || arr->length <= 1) return array;
     int64_t n = arr->length;
-    Item* keys = (Item*)alloca(sizeof(Item) * n);
-    Item* elems = (Item*)alloca(sizeof(Item) * n);
+    Item* keys = LAMBDA_ALLOCA(n, Item);
+    Item* elems = LAMBDA_ALLOCA(n, Item);
     for (int64_t i = 0; i < n; i++) {
         elems[i] = arr->items[i];
         keys[i] = rb_block_call_1(block, arr->items[i]);

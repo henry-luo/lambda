@@ -762,6 +762,69 @@ static DomText* rich_transaction_live_text_at_index(DomElement* parent,
     return fallback;
 }
 
+static DomNode* rich_transaction_live_child_at_index(DomElement* parent,
+                                                     int64_t child_idx,
+                                                     DomNode* fallback) {
+    if (!parent || child_idx < 0) return fallback;
+    int64_t idx = 0;
+    for (DomNode* child = parent->first_child; child;
+         child = child->next_sibling, idx++) {
+        if (idx == child_idx) return child;
+    }
+    return fallback;
+}
+
+static DomText* rich_create_detached_text(DomDocument* doc,
+                                          const char* data,
+                                          uint32_t data_len);
+static bool rich_transaction_insert_child_for_edit(DomElement* parent,
+                                                   DomNode* child,
+                                                   uint32_t child_idx);
+
+static DomText* rich_transaction_split_text_for_edit(DocState* state,
+                                                     DomElement* parent,
+                                                     DomText* text,
+                                                     uint32_t byte_offset,
+                                                     uint32_t utf16_offset) {
+    if (!parent || !parent->doc || !text || !text->native_string) {
+        return nullptr;
+    }
+    int64_t text_idx = dom_text_get_child_index(text);
+    if (text_idx < 0) return nullptr;
+
+    const char* old_text = text->text ? text->text : "";
+    uint32_t old_len = text->length > 0
+        ? (uint32_t)text->length
+        : (uint32_t)strlen(old_text);
+    if (byte_offset > old_len) return nullptr;
+
+    DomText* right = rich_create_detached_text(parent->doc,
+        old_text + byte_offset, old_len - byte_offset);
+    if (!right) return nullptr;
+
+    char* left = (char*)mem_alloc((size_t)byte_offset + 1, MEM_CAT_TEMP);
+    if (!left) return nullptr;
+    if (byte_offset > 0) memcpy(left, old_text, byte_offset);
+    left[byte_offset] = '\0';
+    bool updated = dom_text_set_content(text, left);
+    mem_free(left);
+    if (!updated) return nullptr;
+
+    DomText* live_left = rich_transaction_live_text_at_index(parent, text_idx,
+                                                             text);
+    if (!rich_transaction_insert_child_for_edit(parent, static_cast<DomNode*>(right),
+            (uint32_t)(text_idx + 1))) {
+        return nullptr;
+    }
+    DomNode* live_right_node = rich_transaction_live_child_at_index(parent,
+        text_idx + 1, static_cast<DomNode*>(right));
+    DomText* live_right = live_right_node && live_right_node->is_text()
+        ? lam::dom_require_text(live_right_node)
+        : right;
+    if (state) dom_mutation_text_split(state, live_left, live_right, utf16_offset);
+    return live_right;
+}
+
 static uint32_t rich_transaction_child_count(DomElement* parent) {
     uint32_t count = 0;
     if (!parent) return 0;
@@ -1239,6 +1302,7 @@ static bool rich_transaction_join_previous_trailing_br_block(
     DomText* caret_text = prev_text;
     uint32_t caret_offset_after = prev_len;
     if (br_idx == 1) {
+        int64_t prev_idx = dom_text_get_child_index(prev_text);
         size_t joined_len = (size_t)prev_len + (size_t)current_len;
         char* joined = (char*)mem_alloc(joined_len + 1, MEM_CAT_TEMP);
         if (!joined) return false;
@@ -1248,6 +1312,8 @@ static bool rich_transaction_join_previous_trailing_br_block(
         bool updated = dom_text_set_content(prev_text, joined);
         mem_free(joined);
         if (!updated) return false;
+        caret_text = rich_transaction_live_text_at_index(
+            prev_block, prev_idx, prev_text);
     } else {
         DomNode* moving_child = current_content.child;
         if (!moving_child || !current_node->remove_child(moving_child)) {
@@ -1264,6 +1330,11 @@ static bool rich_transaction_join_previous_trailing_br_block(
     dom_mutation_pre_remove(state, current_node);
     if (!rich_transaction_remove_child_for_edit(parent, current_node)) {
         return false;
+    }
+    if (br_idx != 1) {
+        int64_t appended_idx = (int64_t)rich_transaction_child_count(prev_block) - 1;
+        caret_text = rich_transaction_live_text_at_index(
+            prev_block, appended_idx, caret_text);
     }
     if (!rich_transaction_collapse_text_caret(state, caret_text,
             caret_offset_after)) {
@@ -1343,12 +1414,15 @@ static bool rich_transaction_join_previous_empty_br_block(
     if (!rich_transaction_remove_child_for_edit(parent, current_node)) {
         return false;
     }
-    if (!rich_transaction_collapse_text_caret(state, text, 0)) {
+    int64_t appended_idx = (int64_t)rich_transaction_child_count(prev_block) - 1;
+    DomText* live_text = rich_transaction_live_text_at_index(
+        prev_block, appended_idx, text);
+    if (!rich_transaction_collapse_text_caret(state, live_text, 0)) {
         return false;
     }
 
     EditingSurface live_surface;
-    if (editing_surface_from_target(static_cast<View*>(text),
+    if (editing_surface_from_target(static_cast<View*>(live_text),
             &live_surface) && editing_surface_is_rich(&live_surface)) {
         editing_interaction_set_active_surface(state, &live_surface);
         if (log_mutation) {
@@ -1512,13 +1586,12 @@ static bool rich_transaction_join_parent_text_with_child_block(
     mem_free(joined);
     if (!updated) return false;
 
-    DomText* live_prev_text =
-        rich_transaction_live_text_at_index(parent, prev_idx, prev_text);
-
     dom_mutation_pre_remove(state, current_node);
     if (!rich_transaction_remove_child_for_edit(parent, current_node)) {
         return false;
     }
+    DomText* live_prev_text =
+        rich_transaction_live_text_at_index(parent, prev_idx, prev_text);
     if (!rich_transaction_collapse_text_caret(state, live_prev_text,
             prev_keep_len)) {
         return false;
@@ -2504,12 +2577,8 @@ bool editing_rich_default_select_all(DocState* state,
     }
 
     DomNode* owner_node = static_cast<DomNode*>(surface->owner);
-    DomBoundary start;
-    DomBoundary end;
-    if (!dom_selection_compute_select_all_boundaries(owner_node, &start, &end)) {
-        start = { owner_node, 0 };
-        end = { owner_node, dom_node_boundary_length(owner_node) };
-    }
+    DomBoundary start = { owner_node, 0 };
+    DomBoundary end = { owner_node, dom_node_boundary_length(owner_node) };
     const char* exc = nullptr;
     if (!state_store_set_selection(state, &start, &end, &exc)) {
         log_debug("editing_rich_default_select_all: selection rejected: %s",
@@ -3375,7 +3444,17 @@ static DomText* rich_create_detached_text(DomDocument* doc,
     MarkBuilder builder(doc->input);
     String* s = builder.createDomTextString(data, data_len);
     if (!s) return nullptr;
-    return dom_text_create_detached(s, doc);
+    DomText* text = string_to_dom_text(s);
+    if (!text) return nullptr;
+    text->node_type = DOM_NODE_TEXT;
+    text->parent = nullptr;
+    text->next_sibling = nullptr;
+    text->prev_sibling = nullptr;
+    text->native_string = s;
+    text->text = s->chars;
+    text->length = s->len;
+    text->content_type = DOM_TEXT_STRING;
+    return text;
 }
 
 static DomNode* rich_create_formatted_insert_node(
@@ -3455,6 +3534,8 @@ static bool rich_split_format_wrapper_for_plain_insert(
                 static_cast<DomNode*>(right_wrapper), insert_right_at)) {
             return false;
         }
+        dom_mutation_post_insert(state, static_cast<DomNode*>(parent),
+                                 static_cast<DomNode*>(right_wrapper));
     }
 
     bool wrapper_empty = !wrapper->first_child;
@@ -3509,7 +3590,8 @@ static bool rich_insert_text_with_typing_state(
     } else if (start >= old_len) {
         reference = static_cast<DomNode*>(text)->next_sibling;
     } else {
-        DomText* right = dom_text_split_at(state, text, split_u16);
+        DomText* right = rich_transaction_split_text_for_edit(state, parent,
+            text, start, split_u16);
         if (!right) return false;
         reference = static_cast<DomNode*>(right);
     }
@@ -3552,15 +3634,37 @@ static bool rich_insert_text_with_typing_state(
     }
     dom_mutation_post_insert(state, static_cast<DomNode*>(insert_parent),
                              inserted);
+    DomElement* normalized_inserted = nullptr;
     if (inserted->is_element()) {
-        rich_format_normalize_adjacent(state, lam::dom_require_element(inserted));
+        normalized_inserted = rich_format_normalize_adjacent(state,
+            lam::dom_require_element(inserted));
     }
 
-    if (!rich_transaction_collapse_text_caret(state, inserted_text, data_len)) {
+    DomText* live_inserted_text = inserted_text;
+    if (!live_inserted_text->parent) {
+        DomNode* live_inserted =
+            normalized_inserted && normalized_inserted !=
+                lam::dom_require_element(inserted)
+            ? static_cast<DomNode*>(normalized_inserted)
+            : rich_transaction_live_child_at_index(insert_parent, insert_idx,
+                  normalized_inserted ? static_cast<DomNode*>(normalized_inserted)
+                                      : inserted);
+        if (live_inserted) {
+            if (live_inserted->is_text()) {
+                live_inserted_text = lam::dom_require_text(live_inserted);
+            } else {
+                DomText* descendant = editing_rich_find_text_descendant(
+                    live_inserted, true);
+                if (descendant) live_inserted_text = descendant;
+            }
+        }
+    }
+
+    if (!rich_transaction_collapse_text_caret(state, live_inserted_text, data_len)) {
         return false;
     }
     EditingSurface live_surface;
-    if (editing_surface_from_target(static_cast<View*>(inserted_text),
+    if (editing_surface_from_target(static_cast<View*>(live_inserted_text),
             &live_surface) && editing_surface_is_rich(&live_surface)) {
         editing_interaction_set_active_surface(state, &live_surface);
     } else {

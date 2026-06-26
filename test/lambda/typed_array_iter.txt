@@ -1,0 +1,61 @@
+'=== for-in int array ==='
+1
+2
+3
+4
+'=== for-in float array ==='
+1.5
+2.5
+3.5
+'=== for-in bool array (ELEM_BOOL) ==='
+true
+false
+true
+'=== for-in compact i8 array ==='
+1
+2
+3
+'=== for-in compact f32 array ==='
+1.5
+2.5
+3.5
+'=== where on int array ==='
+3
+4
+5
+'=== where on float array ==='
+2.5
+3.5
+'=== where + body transform ==='
+30
+40
+50
+'=== pipe sum ==='
+15
+7.5
+55
+'=== pipe avg ==='
+3
+2.5
+'=== pipe min/max ==='
+1
+9
+'=== pipe all/any (bool array) ==='
+true
+false
+false
+true
+'=== pipe len ==='
+5
+2
+0
+'=== chained operations ==='
+15
+10
+true
+false
+'=== predicate chains ==='
+true
+false
+true
+false

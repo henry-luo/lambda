@@ -1,0 +1,27 @@
+id: state-store-doc-state-write
+language: cpp
+severity: error
+message: >-
+  External write to a DocState ownership field. These fields are owned by the
+  StateStore and must be mutated through its API, not assigned directly. Mark
+  audited exceptions with a trailing "// STATE_STORE_OK: <reason>".
+metadata:
+  suppress: STATE_STORE_OK
+constraints:
+  O:
+    regex: "^(state|mstate|doc_state|new_state|st)$"
+  F:
+    regex: "^(hover_target|active_target|drag_target|is_dragging|drag_drop|open_dropdown|dropdown_x|dropdown_y|dropdown_width|dropdown_height|context_menu_target|context_menu_x|context_menu_y|context_menu_width|context_menu_height|context_menu_hover|scroll_x|scroll_y|zoom_level|is_dirty|needs_reflow|needs_repaint)$"
+rule:
+  any:
+    - all:
+        - kind: assignment_expression
+        - has: { field: left, pattern: $O->$F }
+    - all:
+        - kind: update_expression
+        - has: { pattern: $O->$F }
+files:
+  - "radiant/**/*.{cpp,hpp}"
+  - "lambda/js/**/*.{cpp,hpp}"
+ignores:
+  - "radiant/state_store.cpp"

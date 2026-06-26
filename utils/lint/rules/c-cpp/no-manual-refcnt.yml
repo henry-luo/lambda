@@ -1,0 +1,23 @@
+id: no-manual-refcnt
+language: cpp
+severity: error
+message: >-
+  Direct mutation of `->ref_cnt`. Use the GC API (gc_borrow / gc_retain /
+  gc_release / equivalent) so retain/release stays paired and the collector's
+  invariants hold. Mark an audited exception with a trailing
+  "// REFCNT_OK: <reason>".
+metadata:
+  suppress: REFCNT_OK
+rule:
+  any:
+    - pattern: $X->ref_cnt++
+    - pattern: $X->ref_cnt--
+    - pattern: ++$X->ref_cnt
+    - pattern: --$X->ref_cnt
+    - pattern: $X->ref_cnt += $N
+    - pattern: $X->ref_cnt -= $N
+files:
+  - "lambda/**/*.{c,cpp,h,hpp}"
+  - "radiant/**/*.{c,cpp,h,hpp}"
+ignores:
+  - "**/tree-sitter*/**"

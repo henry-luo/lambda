@@ -63,11 +63,29 @@ static ValidationResult* validate_array_num_occurrence(
 ) {
     ValidationResult* result = create_validation_result(validator->get_pool());
 
-    int count = arr_num ? (int)arr_num->length : 0;
+    // For N-D arrays use the leading-axis count (shape[0]) to match the
+    // logical row-count of nested-array semantics.  Pattern (int*)[2+] means
+    // "at least 2 inner arrays of ints" — a 2-D ArrayNum with shape[0]=2 satisfies that.
+    int count = 0;
+    bool is_ndim = false;
+    if (arr_num) {
+        is_ndim = arr_num->is_ndim;
+        if (is_ndim && arr_num->extra) {
+            ArrayNumShape* s = (ArrayNumShape*)(uintptr_t)arr_num->extra;
+            if (s && s->ndim >= 1) {
+                count = (int)array_num_shape_dims(s)[0];
+            } else {
+                count = (int)arr_num->length;
+            }
+        } else {
+            count = (int)arr_num->length;
+        }
+    }
     CountConstraint constraint = get_count_constraint(type_unary);
 
-    log_debug("[PATTERN] ArrayNum occurrence: count=%d, min=%d, max=%d, elem_type=%d",
-              count, constraint.min, constraint.max, arr_num ? (int)arr_num->get_elem_type() : -1);
+    log_debug("[PATTERN] ArrayNum occurrence: count=%d, ndim=%d, min=%d, max=%d, elem_type=%d",
+              count, is_ndim, constraint.min, constraint.max,
+              arr_num ? (int)arr_num->get_elem_type() : -1);
 
     // Check count constraints
     if (!check_count_constraint(count, constraint, result, validator, "Array")) {
@@ -80,6 +98,36 @@ static ValidationResult* validate_array_num_occurrence(
         result->valid = false;
         add_constraint_error_fmt(result, validator,
             "ArrayNum elements have no operand type to match");
+        return result;
+    }
+
+    // N-D ArrayNum: leading-axis slices are themselves arrays.  Validate by
+    // treating each "row" as a (ndim-1)-D ArrayNum and checking against
+    // operand_type recursively.  The simplest sufficient check: if operand_type
+    // is itself an occurrence/unary (e.g. int*), and the leaf elem_type matches
+    // the inner numeric type, the structure matches.
+    if (is_ndim) {
+        ArrayNumElemType etype = arr_num->get_elem_type();
+        TypeId leaf_tid = (etype == ELEM_FLOAT || etype == ELEM_FLOAT64) ? LMD_TYPE_FLOAT :
+                          (etype == ELEM_BOOL) ? LMD_TYPE_BOOL :
+                          LMD_TYPE_INT;
+        // Walk down through nested unary/occurrence wrappers to find the leaf type.
+        Type* cur = operand_type;
+        while (cur && cur->kind == TYPE_KIND_UNARY) {
+            TypeUnary* tu = (TypeUnary*)cur;
+            Type* inner = unwrap_type(tu->operand);
+            if (!inner) break;
+            cur = inner;
+        }
+        if (cur && (cur->type_id == leaf_tid ||
+                    (leaf_tid == LMD_TYPE_INT && cur->type_id == LMD_TYPE_INT64))) {
+            result->valid = true;
+        } else {
+            result->valid = false;
+            add_constraint_error_fmt(result, validator,
+                "N-D ArrayNum element type mismatch (leaf=%d, expected=%d)",
+                leaf_tid, cur ? cur->type_id : -1);
+        }
         return result;
     }
 

@@ -39,7 +39,7 @@ template<typename List>
 static inline List* graph_list_new(size_t initial_capacity) {
     void* raw = mem_alloc(sizeof(List), MEM_CAT_LAYOUT);
     if (!raw) return nullptr;
-    return new (raw) List(MEM_CAT_LAYOUT, initial_capacity);
+    return new (raw) List(MEM_CAT_LAYOUT, initial_capacity); // NEW_DELETE_OK: single audited boundary for List construction inside graph_list_new factory.
 }
 
 template<typename List>
@@ -61,7 +61,7 @@ typedef lam::PersistentList<Point2DList, lam::LayoutSessionDomain> PersistentPoi
 static inline PersistentPoint2DList* point2d_list_new(size_t initial_capacity) {
     void* raw = mem_alloc(sizeof(PersistentPoint2DList), MEM_CAT_LAYOUT);
     if (!raw) return nullptr;
-    return new (raw) PersistentPoint2DList(MEM_CAT_LAYOUT, initial_capacity);
+    return new (raw) PersistentPoint2DList(MEM_CAT_LAYOUT, initial_capacity); // NEW_DELETE_OK: single audited boundary for PersistentPoint2DList construction inside point2d_list_new factory.
 }
 
 static inline void point2d_list_free(PersistentPoint2DList* list) {

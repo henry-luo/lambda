@@ -2828,6 +2828,41 @@ static uint32_t state_map_delete_entries_for_name(DocState* state, const char* n
     return removed;
 }
 
+static uint32_t state_map_set_bool_no_assert(DocState* state, void* node,
+                                             const char* name, bool value) {
+    if (!state || !state->state_map || !node || !name) return 0;
+    bool old_value = state_get_bool(state, node, name);
+    const char* interned = intern_state_name(name);
+    if (!value) {
+        StateEntry query = { .key = { node, interned } };
+        return hashmap_delete(state->state_map, &query) ? 1 : 0;
+    }
+
+    StateEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.key.node = node;
+    entry.key.name = interned;
+    entry.value = { .item = ITEM_TRUE };
+    entry.last_modified = state->version;
+    hashmap_set(state->state_map, &entry);
+    return old_value ? 0 : 1;
+}
+
+static uint32_t state_map_sync_focus_path(DocState* state, View* focused,
+                                          bool focus_visible) {
+    if (!state || !focused) return 0;
+    uint32_t changed = 0;
+    changed += state_map_delete_entries_for_name(state, STATE_FOCUS_WITHIN);
+    changed += state_map_delete_entries_for_name(state, STATE_FOCUS_VISIBLE);
+    for (View* node = focused; node; node = static_cast<View*>(node->parent)) {
+        changed += state_map_set_bool_no_assert(state, node, STATE_FOCUS_WITHIN, true);
+    }
+    if (focus_visible) {
+        changed += state_map_set_bool_no_assert(state, focused, STATE_FOCUS_VISIBLE, true);
+    }
+    return changed;
+}
+
 static bool view_state_target_path_contains(View* target, View* candidate) {
     for (View* node = target; node; node = static_cast<View*>(node->parent)) {
         if (node == candidate) return true;
@@ -2967,6 +3002,11 @@ static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode*
     if (stale_active_surface || stale_composition_surface) {
         doc_state_clear_editing_interaction_surface(state);
         changed++;
+    }
+    if (state->focus && state->focus->current &&
+        view_state_tree_contains_view(root, state->focus->current)) {
+        (void)state_map_sync_focus_path(state, state->focus->current,
+            state->focus->focus_visible);
     }
 
     return changed;
@@ -7527,6 +7567,28 @@ static void focus_set_within_chain(DocState* state, View* view, bool set) {
     }
 }
 
+static View* focus_pseudo_root(View* view) {
+    View* root = view;
+    while (root && root->parent) {
+        root = static_cast<View*>(root->parent);
+    }
+    return root;
+}
+
+static void focus_clear_pseudo_subtree(DocState* state, View* node) {
+    if (!state || !node) return;
+    focus_set_pseudo(state, node, STATE_FOCUS, PSEUDO_STATE_FOCUS, false);
+    focus_set_pseudo(state, node, STATE_FOCUS_VISIBLE,
+                     PSEUDO_STATE_FOCUS_VISIBLE, false);
+    focus_set_pseudo(state, node, STATE_FOCUS_WITHIN,
+                     PSEUDO_STATE_FOCUS_WITHIN, false);
+    if (!node->is_element()) return;
+    DomElement* elem = lam::dom_require_element(node);
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        focus_clear_pseudo_subtree(state, static_cast<View*>(child));
+    }
+}
+
 static void focus_write_optional_ref(JsonWriter* w, const char* key, View* view) {
     event_state_log_write_node_ref(w, key, (const DomNode*)view);
 }
@@ -7656,12 +7718,13 @@ void focus_set(DocState* state, View* view, bool from_keyboard) {
     focus->from_mouse = !from_keyboard;
     focus->focus_visible = from_keyboard;  // :focus-visible only for keyboard
 
-    // Update :focus pseudo-state on old element
-    if (old_focus && old_focus != view) {
-        focus_set_pseudo(state, old_focus, STATE_FOCUS, PSEUDO_STATE_FOCUS, false);
-        focus_set_pseudo(state, old_focus, STATE_FOCUS_VISIBLE,
-                         PSEUDO_STATE_FOCUS_VISIBLE, false);
-        focus_set_within_chain(state, old_focus, false);
+    View* old_root = focus_pseudo_root(old_focus);
+    View* new_root = focus_pseudo_root(view);
+    if (old_root) {
+        focus_clear_pseudo_subtree(state, old_root);
+    }
+    if (new_root && new_root != old_root) {
+        focus_clear_pseudo_subtree(state, new_root);
     }
 
     // Update :focus pseudo-state on new element

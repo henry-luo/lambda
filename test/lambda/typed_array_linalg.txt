@@ -1,0 +1,47 @@
+'=== matmul 2x2 ==='
+[[19, 22], [43, 50]]
+[2, 2]
+'=== matmul 2x3 . 3x2 ==='
+[[58, 64], [139, 154]]
+[2, 2]
+'=== matmul float ==='
+[[7, 10], [15, 22]]
+'=== matmul identity ==='
+[[1, 2], [3, 4]]
+'=== dot (1-D . 1-D) ==='
+32
+'=== vector . matrix (1-D . 2-D) ==='
+[7, 10]
+'=== matrix . vector (2-D . 1-D) ==='
+[3, 7]
+'=== matmul on transposed operand ==='
+error
+[[50, 68], [122, 167]]
+'=== concat 1-D ==='
+[1, 2, 3, 4, 5]
+'=== concat 2-D (stack rows) ==='
+[[1, 2], [3, 4], [5, 6]]
+[3, 2]
+'=== concat 2-D (multiple rows each) ==='
+[[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+'=== concat with type promotion ==='
+[1, 2, 3.5, 4.5]
+'=== concat dim mismatch -> error ==='
+error
+'=== stack 1-D -> 2-D ==='
+[[1, 2, 3], [4, 5, 6]]
+[2, 3]
+'=== stack 2-D -> 3-D ==='
+[[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
+[2, 2, 2]
+'=== stack shape mismatch -> error ==='
+error
+'=== matmul then reduce ==='
+134
+'=== concat then matmul ==='
+[[35, 44], [44, 56]]
+'=== stack then transpose ==='
+[[1, 4], [2, 5], [3, 6]]
+'=== errors ==='
+error
+error

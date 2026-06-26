@@ -5,6 +5,7 @@
 #include "rdt_vector.hpp"
 #include "render_svg_inline.hpp"
 #include "../lib/log.h"
+#include "../lib/lambda_alloca.h"
 #include "../lib/mem_factory.h"
 #include <thorvg_capi.h>
 #include "../lib/mem.h"
@@ -1272,7 +1273,7 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
         }
         Tvg_Gradient grad = tvg_linear_gradient_new();
         tvg_linear_gradient_set(grad, tx1, ty1, tx2, ty2);
-        Tvg_Color_Stop* tvg_stops = (Tvg_Color_Stop*)alloca(stop_count * sizeof(Tvg_Color_Stop));
+        Tvg_Color_Stop* tvg_stops = LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
         for (int i = 0; i < stop_count; i++) {
             tvg_stops[i].offset = stops[i].offset;
             tvg_stops[i].r = stops[i].r;
@@ -1313,7 +1314,7 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
     Tvg_Gradient grad = tvg_linear_gradient_new();
     tvg_linear_gradient_set(grad, x1, y1, x2, y2);
 
-    Tvg_Color_Stop* tvg_stops = (Tvg_Color_Stop*)alloca(stop_count * sizeof(Tvg_Color_Stop));
+    Tvg_Color_Stop* tvg_stops = LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
     for (int i = 0; i < stop_count; i++) {
         tvg_stops[i].offset = stops[i].offset;
         tvg_stops[i].r = stops[i].r;
@@ -1364,7 +1365,7 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
         }
         Tvg_Gradient grad = tvg_radial_gradient_new();
         tvg_radial_gradient_set(grad, tcx, tcy, tr, tcx, tcy, 0);
-        Tvg_Color_Stop* tvg_stops = (Tvg_Color_Stop*)alloca(stop_count * sizeof(Tvg_Color_Stop));
+        Tvg_Color_Stop* tvg_stops = LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
         for (int i = 0; i < stop_count; i++) {
             tvg_stops[i].offset = stops[i].offset;
             tvg_stops[i].r = stops[i].r;
@@ -1405,7 +1406,7 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
     Tvg_Gradient grad = tvg_radial_gradient_new();
     tvg_radial_gradient_set(grad, cx, cy, r, cx, cy, 0);
 
-    Tvg_Color_Stop* tvg_stops = (Tvg_Color_Stop*)alloca(stop_count * sizeof(Tvg_Color_Stop));
+    Tvg_Color_Stop* tvg_stops = LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
     for (int i = 0; i < stop_count; i++) {
         tvg_stops[i].offset = stops[i].offset;
         tvg_stops[i].r = stops[i].r;
@@ -1666,7 +1667,7 @@ static RdtPicture* svg_picture_create(const char* data, int size, const char* so
     p->pool = pool;
     p->owns_pool = true;
     p->svg_root = svg_root;
-    p->source_path = source_path ? mem_strdup(source_path, MEM_CAT_RENDER) : nullptr;
+    p->source_path = source_path ? mem_strdup(source_path, MEM_CAT_RENDER) : nullptr;  // RETAINED_FIELD_OK: TVG picture-local field, mem_strdup-owned, not a retained DOM field
     p->width = w;
     p->height = h;
     p->has_transform = false;
@@ -1772,7 +1773,7 @@ RdtPicture* rdt_picture_dup(RdtPicture* pic) {
     p->pool = pic->pool;
     p->owns_pool = false;
     p->svg_root = pic->svg_root;
-    p->source_path = pic->source_path;
+    p->source_path = pic->source_path;  // RETAINED_FIELD_OK: TVG picture-local field, not a retained DOM field
     p->width = pic->width;
     p->height = pic->height;
     p->transform = pic->transform;

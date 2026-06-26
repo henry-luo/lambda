@@ -52,7 +52,7 @@ static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char 
 
             // Validate we have 4 hex digits
             for (int i = 0; i < 4; i++) {
-                if (!isxdigit(*(*toml + i))) {
+                if (!isxdigit((unsigned char)*(*toml + i))) {
                     ctx.addError(esc_loc, "Invalid \\u escape sequence: expected 4 hex digits");
                     return false;
                 }
@@ -73,7 +73,7 @@ static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char 
                     // validate next 4 hex digits
                     bool valid_low = true;
                     for (int i = 0; i < 4; i++) {
-                        if (!isxdigit(*(*toml + 2 + i))) {
+                        if (!isxdigit((unsigned char)*(*toml + 2 + i))) {
                             valid_low = false;
                             break;
                         }
@@ -113,7 +113,7 @@ static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char 
 
             // Validate we have 8 hex digits
             for (int i = 0; i < 8; i++) {
-                if (!isxdigit(*(*toml + i))) {
+                if (!isxdigit((unsigned char)*(*toml + i))) {
                     ctx.addError(esc_loc, "Invalid \\U escape sequence: expected 8 hex digits");
                     return false;
                 }
@@ -204,7 +204,7 @@ static String* parse_bare_key(InputContext& ctx, const char **toml) {
     SourceLocation key_loc = tracker.location();
 
     // Bare keys can contain A-Z, a-z, 0-9, -, _ (including pure numeric keys)
-    while (**toml && (isalnum(**toml) || **toml == '-' || **toml == '_')) {
+    while (**toml && (isalnum((unsigned char)**toml) || **toml == '-' || **toml == '_')) {
         (*toml)++;
         tracker.advance(1);
     }
@@ -797,7 +797,7 @@ static Item parse_value(InputContext& ctx, const char **toml, int *line_num, int
             return (Item){.item = s2it(str)};
         }
         case 't':
-            if (strncmp(*toml, "true", 4) == 0 && !isalnum(*(*toml + 4))) {
+            if (strncmp(*toml, "true", 4) == 0 && !isalnum((unsigned char)*(*toml + 4))) {
                 *toml += 4;
                 tracker.advance(4);
                 return {.item = b2it(true)};
@@ -805,7 +805,7 @@ static Item parse_value(InputContext& ctx, const char **toml, int *line_num, int
             ctx.addError(value_loc, "Invalid boolean: expected 'true'");
             return {.item = ITEM_ERROR};
         case 'f':
-            if (strncmp(*toml, "false", 5) == 0 && !isalnum(*(*toml + 5))) {
+            if (strncmp(*toml, "false", 5) == 0 && !isalnum((unsigned char)*(*toml + 5))) {
                 *toml += 5;
                 tracker.advance(5);
                 return {.item = b2it(false)};
@@ -825,13 +825,13 @@ static Item parse_value(InputContext& ctx, const char **toml, int *line_num, int
             ctx.addError(value_loc, "Invalid value starting with 'n'");
             return {.item = ITEM_ERROR};
         case '-':
-            if (*((*toml) + 1) == 'i' || *((*toml) + 1) == 'n' || isdigit(*((*toml) + 1))) {
+            if (*((*toml) + 1) == 'i' || *((*toml) + 1) == 'n' || isdigit((unsigned char)*((*toml) + 1))) {
                 return parse_number(ctx, toml);
             }
             ctx.addError(value_loc, "Invalid negative number");
             return {.item = ITEM_ERROR};
         case '+':
-            if (isdigit(*((*toml) + 1))) {
+            if (isdigit((unsigned char)*((*toml) + 1))) {
                 return parse_number(ctx, toml);
             }
             ctx.addError(value_loc, "Invalid positive number");

@@ -1177,6 +1177,8 @@ extern "C" Item js_selection_set_base_and_extent(Item anchor_node_v, Item anchor
         throw_from_dom_exc(exc, "setBaseAndExtent failed");
         return make_undef();
     }
+    extern void js_dom_focus_if_editing_host_for_selection(void* dom_node);
+    js_dom_focus_if_editing_host_for_selection((void*)fn);
     selection_sync_props(js_get_this(), s);
     return make_undef();
 }

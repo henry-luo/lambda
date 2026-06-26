@@ -1144,7 +1144,7 @@ static int find_first_letter_boundary(const unsigned char* text, int text_len) {
     }
 
     if (!found_letter) return 0;
-    return (int)(after_letter - content_start); // INT_CAST_OK: pointer diff is character count
+    return (int)(after_letter - content_start);
 }
 
 /**
@@ -1256,7 +1256,7 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
     if (!*p) return;
 
-    int ws_offset = (int)(p - text_data); // INT_CAST_OK: pointer diff is char offset
+    int ws_offset = (int)(p - text_data);
     int boundary = find_first_letter_boundary(p, text_len - ws_offset);
     if (boundary <= 0) {
         log_debug("%s [FIRST-LETTER] No letter found in text", block->source_loc());

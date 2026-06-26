@@ -2,6 +2,7 @@
  * JavaScript runtime function object wrappers for Lambda.
  */
 #include "js_runtime_internal.hpp"
+#include "../../lib/memtrack.h"
 
 // =============================================================================
 // Function object wrappers
@@ -75,7 +76,7 @@ static bool   js_args_registered = false; // registered with the current GC heap
 extern "C" Item* js_args_push(int count) {
     if (count <= 0) return NULL;
     if (!js_args_stack) {
-        js_args_stack = (Item*)calloc(JS_ARGS_STACK_CAP, sizeof(Item));
+        js_args_stack = (Item*)mem_calloc(JS_ARGS_STACK_CAP, sizeof(Item), MEM_CAT_JS_RUNTIME);
         if (!js_args_stack) { log_error("js_args_push: stack alloc failed"); return NULL; }
     }
     if (!js_args_registered) {

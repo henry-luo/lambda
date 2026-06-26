@@ -3,6 +3,7 @@
 #include "render_painter.hpp"
 #include "render_state.hpp"
 #include "../lib/log.h"
+#include "../lib/lambda_alloca.h"
 #include <math.h>
 
 // ---------------------------------------------------------------------------
@@ -606,7 +607,7 @@ static bool render_border_image_gradient(RenderContext* rdcon, BorderProp* borde
         0.0f, 0.0f);
 
     int stop_count = gradient->stop_count;
-    RdtGradientStop* stops = (RdtGradientStop*)alloca(stop_count * sizeof(RdtGradientStop));
+    RdtGradientStop* stops = LAMBDA_ALLOCA(stop_count, RdtGradientStop);
     for (int i = 0; i < stop_count; i++) {
         GradientStop* stop = &gradient->stops[i];
         float pos = stop->position >= 0.0f

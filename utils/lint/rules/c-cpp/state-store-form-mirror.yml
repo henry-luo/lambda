@@ -1,0 +1,29 @@
+id: state-store-form-mirror
+language: cpp
+severity: error
+message: >-
+  External write to a FormControlProp mirror field. Form-state writes must go
+  through the StateStore projection so the store version bumps and observers
+  fire — reads of mirror fields are the by-design fast path and are not
+  flagged. Mark audited write exceptions with a trailing
+  "// STATE_STORE_OK: <reason>".
+metadata:
+  suppress: STATE_STORE_OK
+constraints:
+  O:
+    regex: "(^form|->form)$"
+  F:
+    regex: "^(disabled|readonly|selected_index|hover_index|dropdown_open|checked|required|range_value|selection_start|selection_end|selection_direction)$"
+rule:
+  any:
+    - all:
+        - kind: assignment_expression
+        - has: { field: left, pattern: $O->$F }
+    - all:
+        - kind: update_expression
+        - has: { pattern: $O->$F }
+files:
+  - "radiant/**/*.cpp"
+  - "lambda/js/**/*.cpp"
+ignores:
+  - "radiant/state_store.cpp"

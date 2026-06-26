@@ -230,7 +230,7 @@ struct GridItemContribution {
 
 // Fixed-capacity array of GridItemContribution
 struct ContribArray {
-    GridItemContribution data[MAX_GRID_ITEMS];
+    GridItemContribution data[MAX_GRID_ITEMS];  // LARGE_ARRAY_OK: fixed-capacity struct field; bound = MAX_GRID_ITEMS (256) × ~56 B ≈ 14 KiB; parent struct is short-lived (single layout pass).
     size_t count;
     ContribArray() : count(0) {}
     size_t size() const { return count; }
@@ -994,8 +994,8 @@ inline void resolve_intrinsic_track_sizes(
     // for span=1 items, or to cover remaining content for spanning items.
     {
         // Track per-track max_content from span=1 items for fit-content clamping
-        float fc_span1_max[MAX_GRID_TRACKS];
-        float fc_max_growth[MAX_GRID_TRACKS];
+        float fc_span1_max[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 4 B = 256 B; layout-pass scratch.
+        float fc_max_growth[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 4 B = 256 B; layout-pass scratch.
         for (size_t i = 0; i < tracks.size(); ++i) { fc_span1_max[i] = -1.0f; fc_max_growth[i] = -1.0f; }
         for (const auto& contrib : contributions) {
             if (contrib.crosses_flexible_track) continue;
@@ -1094,7 +1094,7 @@ inline void resolve_intrinsic_track_sizes(
 
         // Gather flex tracks to update and their respective contribution floors
         struct FlexEntry { size_t idx; float contribution; float flex_factor; };
-        FlexEntry flex_entries[MAX_GRID_TRACKS];
+        FlexEntry flex_entries[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 16 B = 1 KiB; layout-pass scratch.
         size_t fe_count = 0;
         float total_flex_factor = 0.0f;
         for (size_t i = contrib.track_start; i < p3_end; ++i) {
@@ -1269,7 +1269,7 @@ inline void expand_flexible_tracks(
 
         // Save Phase 3 base_sizes as min floors for Pass 2
         size_t n = tracks.size();
-        float phase3_base[MAX_GRID_TRACKS];
+        float phase3_base[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 4 B = 256 B; layout-pass scratch.
         for (size_t i = 0; i < n; ++i) phase3_base[i] = 0.0f;
         for (size_t i = 0; i < n; ++i) {
             if (tracks[i].is_flexible()) phase3_base[i] = tracks[i].base_size;
@@ -1299,7 +1299,7 @@ inline void expand_flexible_tracks(
             float span_gap = (span_count > 1) ? (span_count - 1) * gap : 0.0f;
 
             struct FlexInfo { size_t idx; float flex; float base; };
-            FlexInfo flex_infos[MAX_GRID_TRACKS];
+            FlexInfo flex_infos[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 16 B = 1 KiB; layout-pass scratch.
             size_t fi_count = 0;
             for (size_t i = contrib.track_start; i < p_end; ++i) {
                 if (tracks[i].is_flexible()) {
@@ -1313,7 +1313,7 @@ inline void expand_flexible_tracks(
             float target = contrib.max_content_contribution - span_gap;
             // Iterative "Find the Size of an fr" sub-algorithm (§12.7.1)
             float fr_result = 0.0f;
-            bool inflexible[MAX_GRID_TRACKS];
+            bool inflexible[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 1 B = 64 B; layout-pass scratch.
             for (size_t fi = 0; fi < fi_count; ++fi) inflexible[fi] = false;
             for (;;) {
                 float leftover = target - non_flex_size;
@@ -1383,8 +1383,8 @@ inline void expand_flexible_tracks(
     // recompute the fr size from the remaining unfrozen tracks. Repeat until stable.
 
     size_t n = tracks.size();
-    float min_floor[MAX_GRID_TRACKS];
-    bool frozen[MAX_GRID_TRACKS];
+    float min_floor[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 4 B = 256 B; layout-pass scratch.
+    bool frozen[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 1 B = 64 B; layout-pass scratch.
     for (size_t i = 0; i < n; ++i) { min_floor[i] = 0.0f; frozen[i] = false; }
 
     for (size_t i = 0; i < n; ++i) {

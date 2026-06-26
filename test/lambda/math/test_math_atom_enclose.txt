@@ -1,7 +1,7 @@
 "===== MATH ATOM ENCLOSE TESTS =====1. boxed type:ord2. boxed has border:"
 true
 "3. boxed extra height:"
-false
+true
 "4. boxed extra width:"
 true
 "5. llap width:"
