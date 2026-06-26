@@ -194,12 +194,29 @@ export function cmdInsertLineBreak(state: EditorState): Transaction | null {
 }
 
 // ---------------------------------------------------------------------------
+// cmdDeleteNode — remove a NodeSelection's target (an image, table, drawing,
+// or any selectable block addressed as a unit). Caret lands at the gap.
+// ---------------------------------------------------------------------------
+
+export function cmdDeleteNode(state: EditorState): Transaction | null {
+  const sel = state.selection
+  if (sel === null || sel.kind !== 'node') return null
+  if (sel.path.length === 0) return null
+  const parent = parentPath(sel.path)
+  const idx = lastIndex(sel.path)
+  let tx = txBegin(state.doc, sel)
+  tx = txStep(tx, stepReplace(parent, idx, idx + 1, []))
+  return txSetSelection(tx, caret(pos(parent, idx)))
+}
+
+// ---------------------------------------------------------------------------
 // cmdDeleteBackward / cmdDeleteForward (single-leaf happy path)
 // ---------------------------------------------------------------------------
 
 export function cmdDeleteBackward(state: EditorState): Transaction | null {
   const sel = state.selection
   if (sel === null) return null
+  if (sel.kind === 'node') return cmdDeleteNode(state)
   if (!selIsText(sel)) return null
   if (!selCollapsed(sel)) return deleteSelectionSimple(state)
   if (!selSingleLeaf(sel)) return null
@@ -211,6 +228,7 @@ export function cmdDeleteBackward(state: EditorState): Transaction | null {
 export function cmdDeleteForward(state: EditorState): Transaction | null {
   const sel = state.selection
   if (sel === null) return null
+  if (sel.kind === 'node') return cmdDeleteNode(state)
   if (!selIsText(sel)) return null
   if (!selCollapsed(sel)) return deleteSelectionSimple(state)
   if (!selSingleLeaf(sel)) return null

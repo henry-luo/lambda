@@ -201,6 +201,16 @@ function walkChild(
     return
   }
 
+  // Flatten the implicit <tbody> that browsers' HTML parser inserts into
+  // tables. Our model keeps tables as `table > tr` (matching Lambda); the
+  // <tbody>'s rows are lifted directly into the parent table.
+  if (tag === 'tbody') {
+    for (let i = 0; i < el.childNodes.length; i++) {
+      walkChild(el.childNodes[i] as ChildNode, [...path.slice(0, -1), content.length], content, st, false, markCtx)
+    }
+    return
+  }
+
   // Flatten mark elements: recurse into children with the mark merged into
   // `markCtx`, pushing produced text leaves directly into the OUTER content.
   if (MARK_TAGS.has(tag)) {

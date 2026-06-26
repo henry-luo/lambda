@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lambda Editor — WYSIWYG Test Page</title>
+    <style>
+      :root {
+        --border: #e2e8f0;
+        --bg: #ffffff;
+        --bar: #f8fafc;
+        --accent: #2563eb;
+        --text: #0f172a;
+        --muted: #64748b;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        color: var(--text);
+        background: #eef2f7;
+        padding: 24px;
+      }
+      #root { max-width: 860px; margin: 0 auto; }
+
+      .rdt-shell {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--bg);
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 8px 24px rgba(15, 23, 42, 0.06);
+        overflow: hidden;
+      }
+
+      /* Toolbar */
+      .rdt-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: wrap;
+        padding: 8px 10px;
+        background: var(--bar);
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        z-index: 5;
+      }
+      .rdt-btn {
+        min-width: 30px;
+        height: 30px;
+        padding: 0 8px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text);
+        font-size: 14px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .rdt-btn:hover:not(:disabled) { background: #e2e8f0; }
+      .rdt-btn.is-active { background: #dbeafe; border-color: #bfdbfe; color: var(--accent); }
+      .rdt-btn:disabled { opacity: 0.4; cursor: default; }
+      .rdt-block {
+        height: 30px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: #fff;
+        padding: 0 8px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      .rdt-sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
+      .rdt-color {
+        position: relative; width: 30px; height: 30px; border-radius: 6px;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-weight: 700; cursor: pointer;
+      }
+      .rdt-color:hover { background: #e2e8f0; }
+      .rdt-color input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+      /* Editing surface */
+      .rdt-surface { padding: 28px 32px; min-height: 360px; outline: none; line-height: 1.6; }
+      .rdt-surface:focus { outline: none; }
+
+      /* Document content */
+      .rdt-editor h1 { font-size: 26px; margin: 0 0 14px; line-height: 1.25; }
+      .rdt-editor h2 { font-size: 19px; margin: 26px 0 10px; }
+      .rdt-editor h3 { font-size: 16px; margin: 20px 0 8px; }
+      .rdt-editor p { margin: 0 0 12px; }
+      .rdt-editor a { color: var(--accent); }
+      .rdt-editor code {
+        background: #f1f5f9; border-radius: 4px; padding: 1px 5px;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
+      }
+      .rdt-editor blockquote {
+        margin: 12px 0; padding: 4px 16px; border-left: 4px solid #cbd5e1;
+        color: var(--muted); background: #f8fafc; border-radius: 0 6px 6px 0;
+      }
+      .rdt-editor ul, .rdt-editor ol { margin: 0 0 14px; padding-left: 26px; }
+      .rdt-editor li { margin: 3px 0; }
+      .rdt-editor figure { margin: 12px 0; }
+      .rdt-editor figcaption { color: var(--muted); font-size: 13px; margin-top: 6px; }
+      .rdt-editor img { max-width: 100%; border-radius: 8px; display: block; }
+      .rdt-editor table {
+        border-collapse: collapse; margin: 8px 0 16px; width: 100%;
+      }
+      .rdt-editor th, .rdt-editor td {
+        border: 1px solid var(--border); padding: 7px 11px; text-align: left; font-size: 14px;
+      }
+      .rdt-editor th { background: #f8fafc; font-weight: 600; }
+      .rdt-drawing {
+        margin: 10px 0 18px; border: 1px solid var(--border);
+        border-radius: 8px; overflow: hidden;
+      }
+
+      /* Status bar */
+      .rdt-status {
+        display: flex; justify-content: space-between; gap: 16px;
+        padding: 6px 12px; font-size: 12px; color: var(--muted);
+        background: var(--bar); border-top: 1px solid var(--border);
+      }
+      .rdt-status code { font-family: ui-monospace, Menlo, monospace; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./full.tsx"></script>
+  </body>
+</html>
