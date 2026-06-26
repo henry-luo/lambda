@@ -27,7 +27,7 @@ type Planner = {currentMark: int, nextCid: int}
 // --- Vector (chunked 16x16=256) ---
 
 pn vec_new() {
-    var v: Vec = { chunks: [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null], sz: 0 }
+    var v: Vec = { chunks: fill(16, null), sz: 0 }
     return v
 }
 
@@ -39,7 +39,7 @@ pn vec_add(v: Vec, item) {
     var ck = cks[ci]
     if (ck == null) {
         var _n: int = 0
-        ck = [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
+        ck = fill(16, null)
         cks[ci] = ck
     }
     var _d: int = 0

@@ -1,0 +1,27 @@
+id: large-stack-array
+language: cpp
+severity: info
+message: >-
+  Large fixed-size array (1024+ elements or `MAX_*` constant) on the stack.
+  Each call recursing through this function pushes another full-size frame —
+  nested recursion can exhaust the stack (e.g. layout_multicol's `fragments[1024]`
+  + `children[1024]` + 3×`[1024]` height/break arrays per frame ≈ 70 KB).
+  Prefer allocation from a pool/arena, or cap recursion depth at the call site.
+  Mark audited fixed-size buffers (parser line buffers, etc.) with a trailing
+  "// LARGE_ARRAY_OK: <reason>".
+metadata:
+  suppress: LARGE_ARRAY_OK
+rule:
+  kind: array_declarator
+  # Matches literal sizes 1024+ as powers of two, plus the codebase's MAX_*
+  # SCREAMING_SNAKE_CASE constants (mostly resolve to 1024+).
+  regex: "\\[(1024|2048|4096|8192|16384|32768|65536|MAX_[A-Z_]+)\\b"
+# Scoped to layout/intrinsic-sizing/grid where recursion is the structural
+# concern (proposal §4.2 / Radiant audit findings #14, #15). General-purpose
+# parser/network buffers don't have the same risk profile.
+files:
+  - "radiant/layout_*.cpp"
+  - "radiant/layout_*.hpp"
+  - "radiant/intrinsic_sizing.cpp"
+  - "radiant/grid_*.cpp"
+  - "radiant/grid_*.hpp"

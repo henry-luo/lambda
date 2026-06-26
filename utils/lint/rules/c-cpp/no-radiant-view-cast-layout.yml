@@ -1,0 +1,31 @@
+id: no-radiant-view-cast-layout
+language: cpp
+severity: error
+message: >-
+  Unsafe View*/Dom* cast in layout code. Route downcasts through lib/tagged.hpp
+  helpers (lam::view_as_*/view_require_*/dom_as<>/dom_require<>), or mark an
+  audited exception with a trailing "// RADIANT_CAST_OK: <reason>".
+metadata:
+  suppress: RADIANT_CAST_OK
+# Layout group. C-casts to any View*/Dom* type are flagged (broad); static_casts
+# only to leaf View subtypes.
+constraints:
+  CC:
+    regex: "^(View|Dom)[A-Za-z0-9_]*$"
+  SC:
+    regex: "^View(Block|Text|Span|Element|Table|TableRow|TableCell|TableRowGroup|Marker)$"
+rule:
+  all:
+    - any:
+        - pattern: ($CC *)$X
+        - pattern: static_cast<$SC *>($X)
+    # legacy regex used a single `*`; exclude pointer-to-pointer (e.g. (View**)alloc)
+    - not:
+        pattern: ($DP **)$DX
+files:
+  - "radiant/{layout_alignment,layout_inline,layout_grid,layout_grid_multipass}.cpp"
+  - "radiant/{layout_list,layout_positioned,layout_text,layout_multicol}.cpp"
+  - "radiant/{layout_flex_measurement,layout_flex_multipass,layout_flex,layout_block}.cpp"
+  - "radiant/layout_table.cpp"
+  - "radiant/grid_baseline.hpp"
+  - "radiant/resolve_css_style.cpp"

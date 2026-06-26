@@ -11,6 +11,8 @@
 #include "js_exec_profile.h"
 #include "../../lib/lambda_typed.hpp"
 #include "../../lib/gc/gc_heap.h"
+#include "../../lib/lambda_alloca.h"
+#include "../../lib/memtrack.h"
 
 extern "C" Item js_to_property_key(Item key);
 extern __thread EvalContext* context;
@@ -1755,7 +1757,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 // merge bound_args + args
                 if (fn->bound_args && fn->bound_argc > 0) {
                     eff_argc = fn->bound_argc + argc;
-                    merged_buf = (Item*)alloca(eff_argc * sizeof(Item));
+                    merged_buf = LAMBDA_ALLOCA(eff_argc, Item);
                     for (int i = 0; i < fn->bound_argc; i++) merged_buf[i] = fn->bound_args[i];
                     for (int i = 0; i < argc; i++) merged_buf[fn->bound_argc + i] = args ? args[i] : ItemNull;
                     eff_args = merged_buf;
@@ -2649,8 +2651,8 @@ static Item js_class_create_shaped_instance_object(Item class_item) {
     if (!found || get_type_id(names) != LMD_TYPE_ARRAY) return js_new_object();
     int64_t raw_count = js_array_length(names);
     if (raw_count <= 0 || raw_count > 64) return js_new_object();
-    const char** prop_names = (const char**)alloca((int)raw_count * sizeof(const char*));
-    int* prop_lens = (int*)alloca((int)raw_count * sizeof(int));
+    const char** prop_names = LAMBDA_ALLOCA((int)raw_count, const char*);
+    int* prop_lens = LAMBDA_ALLOCA((int)raw_count, int);
     int count = 0;
     for (int64_t i = 0; i < raw_count; i++) {
         Item name_item = js_array_get(names, (Item){.item = i2it(i)});
@@ -8546,7 +8548,7 @@ extern "C" void js_console_log(Item value) {
     Item str = js_to_string(value);
     if (get_type_id(str) == LMD_TYPE_STRING) {
         String* s = it2s(str);
-        printf("%.*s\n", (int)s->len, s->chars);
+        printf("%.*s\n", (int)s->len, s->chars); // PRINTF_OK: implements JS console.log stdout write.
     }
 }
 
@@ -12578,7 +12580,7 @@ extern "C" Item js_super_call_native(Item callee, Item this_val, Item* args, int
 
 extern "C" Item js_super_apply_native(Item callee, Item this_val, Item args_array) {
     int argc = js_array_length(args_array);
-    Item* args = argc > 0 ? (Item*)alloca(argc * sizeof(Item)) : NULL;
+    Item* args = argc > 0 ? LAMBDA_ALLOCA(argc, Item) : NULL;
     for (int i = 0; i < argc; i++) {
         args[i] = js_array_get(args_array, (Item){.item = i2it(i)});
     }
@@ -12607,7 +12609,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             if (found && get_type_id(call_fn) == LMD_TYPE_FUNC) {
                 // Rebuild args: [this_val, ...args] → call_fn(func_item, this_val, ...args)
                 int new_argc = arg_count + 1;
-                Item* new_args = (Item*)alloca(new_argc * sizeof(Item));
+                Item* new_args = LAMBDA_ALLOCA(new_argc, Item);
                 new_args[0] = this_val;
                 for (int i = 0; i < arg_count; i++) new_args[i + 1] = args[i];
                 return js_call_function(call_fn, func_item, new_args, new_argc);
@@ -12789,7 +12791,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         if (fn->bound_args || (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)) {
             Item effective_this = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) ? fn->bound_this : this_val;
             int total_argc = fn->bound_argc + arg_count;
-            Item* merged_args = (Item*)alloca(total_argc * sizeof(Item));
+            Item* merged_args = LAMBDA_ALLOCA(total_argc, Item);
             for (int i = 0; i < fn->bound_argc; i++) {
                 merged_args[i] = fn->bound_args[i];
             }
@@ -12835,7 +12837,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             }
         }
         int total_argc = fn->bound_argc + arg_count;
-        Item* merged_args = (Item*)alloca(total_argc * sizeof(Item));
+        Item* merged_args = LAMBDA_ALLOCA(total_argc, Item);
         for (int i = 0; i < fn->bound_argc; i++) {
             merged_args[i] = fn->bound_args[i];
         }
@@ -13007,7 +13009,7 @@ extern "C" Item js_apply_function(Item func_item, Item this_val, Item args_array
     if (get_type_id(args_array) == LMD_TYPE_ARRAY) {
         argc = (int)args_array.array->length;
         if (argc > 0) {
-            args = (Item*)alloca(argc * sizeof(Item));
+            args = LAMBDA_ALLOCA(argc, Item);
             for (int i = 0; i < argc; i++) {
                 Item idx = {.item = i2it(i)};
                 args[i] = js_array_get(args_array, idx);
@@ -13022,7 +13024,7 @@ extern "C" Item js_apply_function(Item func_item, Item this_val, Item args_array
         if (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) {
             argc = (lt == LMD_TYPE_INT) ? (int)it2i(len_val) : (int)it2d(len_val);
             if (argc > 0) {
-                args = (Item*)alloca(argc * sizeof(Item));
+                args = LAMBDA_ALLOCA(argc, Item);
                 for (int i = 0; i < argc; i++) {
                     char idx_buf[16];
                     snprintf(idx_buf, sizeof(idx_buf), "%d", i);
@@ -13043,7 +13045,7 @@ extern "C" Item js_apply_constructor(Item constructor, Item args_array) {
     if (get_type_id(args_array) == LMD_TYPE_ARRAY) {
         argc = (int)args_array.array->length;
         if (argc > 0) {
-            args = (Item*)alloca(argc * sizeof(Item));
+            args = LAMBDA_ALLOCA(argc, Item);
             for (int i = 0; i < argc; i++) {
                 Item idx = {.item = i2it(i)};
                 args[i] = js_array_get(args_array, idx);
@@ -13057,7 +13059,7 @@ extern "C" Item js_apply_constructor(Item constructor, Item args_array) {
         if (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) {
             argc = (lt == LMD_TYPE_INT) ? (int)it2i(len_val) : (int)it2d(len_val);
             if (argc > 0) {
-                args = (Item*)alloca(argc * sizeof(Item));
+                args = LAMBDA_ALLOCA(argc, Item);
                 for (int i = 0; i < argc; i++) {
                     char idx_buf[16];
                     snprintf(idx_buf, sizeof(idx_buf), "%d", i);
@@ -13089,7 +13091,7 @@ static Item js_bound_class_construct_stub(Item env_item, Item rest_array) {
     if (get_type_id(rest_array) == LMD_TYPE_ARRAY) {
         argc = (int)js_array_length(rest_array);
         if (argc > 0) {
-            args = (Item*)alloca(argc * sizeof(Item));
+            args = LAMBDA_ALLOCA(argc, Item);
             for (int i = 0; i < argc; i++) {
                 args[i] = js_array_get(rest_array, (Item){.item = i2it(i)});
             }
@@ -15500,7 +15502,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         if (js_regex_wrapper_rewrite_v_flag_classes_c(vpat, vpat_len, &rewritten, &rewritten_len)
             && rewritten) {
             v_processed.assign(rewritten, rewritten_len);
-            free(rewritten);
+            mem_free(rewritten);
             effective_pattern = v_processed.c_str();
             effective_pattern_len = (int)v_processed.size();
         }
@@ -20609,7 +20611,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
                 Item groups_obj = js_build_groups_object(rd, matches, ngroups);
                 bool has_groups = (groups_obj.item != make_js_undefined().item);
                 int fn_argc = ngroups + 2 + (has_groups ? 1 : 0);
-                Item* fn_args = (Item*)alloca(fn_argc * sizeof(Item));
+                Item* fn_args = LAMBDA_ALLOCA(fn_argc, Item);
                 for (int i = 0; i < ngroups; i++) {
                     if (matches[i].data()) {
                         fn_args[i] = (Item){.item = s2it(heap_strcpy(
@@ -26166,7 +26168,7 @@ extern "C" Item js_method_call_apply(Item obj, Item method_name, Item args_array
     Item* args = NULL;
     if (get_type_id(args_array) == LMD_TYPE_ARRAY && args_array.array->length > 0) {
         argc = (int)args_array.array->length;
-        args = (Item*)alloca(argc * sizeof(Item));
+        args = LAMBDA_ALLOCA(argc, Item);
         for (int i = 0; i < argc; i++) {
             Item idx = {.item = i2it(i)};
             args[i] = js_array_get(args_array, idx);
@@ -26947,7 +26949,7 @@ extern "C" Item js_math_apply(Item method_name, Item args_array) {
     if (argc == 0) {
         return js_math_method(method_name, NULL, 0);
     }
-    Item* args = (Item*)alloca(argc * sizeof(Item));
+    Item* args = LAMBDA_ALLOCA(argc, Item);
     for (int i = 0; i < argc; i++) {
         Item idx = {.item = i2it(i)};
         args[i] = js_array_get(args_array, idx);

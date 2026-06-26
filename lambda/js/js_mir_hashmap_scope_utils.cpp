@@ -115,11 +115,11 @@ void jm_opcode_hist_dump(MIR_context_t ctx, const char* label) {
     for (int i = 0; i < n; i++)
         for (int j = i + 1; j < n; j++)
             if (g_jm_opcode_hist[idx[j]] > g_jm_opcode_hist[idx[i]]) { int t = idx[i]; idx[i] = idx[j]; idx[j] = t; }
-    printf("JS_MIR_OPCODE_HIST label=%s total_emitted=%ld distinct_opcodes=%d\n", label ? label : "", total, n);
+    printf("JS_MIR_OPCODE_HIST label=%s total_emitted=%ld distinct_opcodes=%d\n", label ? label : "", total, n); // PRINTF_OK: env-gated JIT opcode-histogram dump.
     int top = n < 25 ? n : 25;
     for (int i = 0; i < top; i++) {
         const char* name = MIR_insn_name(ctx, (MIR_insn_code_t)idx[i]);
-        printf("  %-12s %10ld  %5.1f%%\n", name ? name : "?", g_jm_opcode_hist[idx[i]],
+        printf("  %-12s %10ld  %5.1f%%\n", name ? name : "?", g_jm_opcode_hist[idx[i]], // PRINTF_OK: env-gated JIT histogram row.
                total ? 100.0 * (double)g_jm_opcode_hist[idx[i]] / (double)total : 0.0);
     }
     fflush(stdout);

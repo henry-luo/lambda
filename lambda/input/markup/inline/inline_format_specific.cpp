@@ -133,7 +133,7 @@ Item parse_rst_trailing_underscore_reference(MarkupParser* parser, const char** 
 
     // Find start of reference (word before underscore)
     const char* ref_start = pos - 1;
-    while (ref_start > current_line && !isspace(*(ref_start - 1))) {
+    while (ref_start > current_line && !isspace((unsigned char)*(ref_start - 1))) {
         ref_start--;
     }
 

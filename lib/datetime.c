@@ -147,7 +147,7 @@ bool datetime_is_valid(DateTime* dt) {
 
 /* Helper function to skip whitespace */
 static void skip_whitespace(const char** str) {
-    while (**str && isspace(**str)) (*str)++;
+    while (**str && isspace((unsigned char)**str)) (*str)++;
 }
 
 /* Helper function to parse integer with specific width for int32_t */
@@ -156,7 +156,7 @@ static bool parse_int(const char** str, int width, int32_t* result) {
 
     *result = 0;
     for (int i = 0; i < width; i++) {
-        if (!isdigit(**str)) return false;
+        if (!isdigit((unsigned char)**str)) return false;
         *result = *result * 10 + (**str - '0');
         (*str)++;
     }
@@ -210,7 +210,7 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
 
     /* Lambda format: Try to parse as time-only first (starts with digit digit:) */
     if (format == DATETIME_PARSE_LAMBDA &&
-        isdigit((*ptr)[0]) && isdigit((*ptr)[1]) && (*ptr)[2] == ':') {
+        isdigit((unsigned char)(*ptr)[0]) && isdigit((unsigned char)(*ptr)[1]) && (*ptr)[2] == ':') {
 
         /* Time only format: HH:MM:SS.sss with optional timezone */
         int32_t hour, minute = 0, second = 0;
@@ -274,7 +274,7 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
     }
 
     /* Parse year (required, 4 digits) */
-    if (!isdigit(**ptr)) return false;
+    if (!isdigit((unsigned char)**ptr)) return false;
     int32_t year;
     if (!parse_int(ptr, 4, &year)) return false;
     if (negative_year) year = -year;
@@ -363,7 +363,7 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
                 /* ISO8601: variable width milliseconds (normalize to 3 digits) */
                 int millis_width = 0;
                 millisecond = 0;
-                while (isdigit(**ptr) && millis_width < 3) {
+                while (isdigit((unsigned char)**ptr) && millis_width < 3) {
                     millisecond = millisecond * 10 + (**ptr - '0');
                     (*ptr)++;
                     millis_width++;

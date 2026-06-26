@@ -58,7 +58,7 @@ Item pn_print(Item item) {
     log_debug("pn_print: %d", type_id);
     String *str = fn_string(item);
     if (str) {
-        printf("%s", str->chars);
+        printf("%s", str->chars); // PRINTF_OK: Lambda's procedural print() builtin.
     }
     return ItemNull;
 }

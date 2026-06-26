@@ -12,13 +12,27 @@
 #include "safety_analyzer.hpp"
 #include "ast.hpp"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
+#include <new>
 
 // Global safety analyzer instance
 SafetyAnalyzer* g_safety_analyzer = nullptr;
 
+//------------------------------------------------------------------------------
+// Heap factory (audited boundary for `new SafetyAnalyzer`)
+// Process-lifetime singleton — intentionally leaked at shutdown, no destroy.
+//------------------------------------------------------------------------------
+
+SafetyAnalyzer* safety_analyzer_create() {
+    SafetyAnalyzer* analyzer = (SafetyAnalyzer*)mem_alloc(sizeof(SafetyAnalyzer), MEM_CAT_SYSTEM);
+    if (!analyzer) return nullptr;
+    new (analyzer) SafetyAnalyzer(); // NEW_DELETE_OK: single audited construction boundary for SafetyAnalyzer process-lifetime singleton.
+    return analyzer;
+}
+
 void init_safety_analyzer() {
     if (!g_safety_analyzer) {
-        g_safety_analyzer = new SafetyAnalyzer();
+        g_safety_analyzer = safety_analyzer_create();
     }
 }
 

@@ -49,6 +49,20 @@ class ElementReader;  // Forward declaration
 class MapReader;
 class ArrayReader;
 
+// ----------------------------------------------------------------------------
+// ArrayNumView — INTERNAL stack descriptor of a typed-array (ArrayNum) slab:
+// either a whole 1-D array, or one axis-level of an N-D tensor.  Carried by
+// value inside ItemReader/ArrayReader so typed arrays traverse exactly like
+// generic arrays with zero heap allocation (Appendix A guidelines G1/G2/G3 in
+// vibe/Lambda_Typed_Array2.md).  Never surfaced to reader consumers.
+// ----------------------------------------------------------------------------
+struct ArrayNumView {
+    ArrayNum* base = nullptr;   // underlying typed array (must stay static during read)
+    int64_t   offset = 0;       // flat element offset of this slab's origin
+    uint8_t   axis = 0;         // current axis within base's shape
+    bool valid() const { return base != nullptr; }
+};
+
 // ==============================================================================
 // MarkReader - Document Root Reader
 // ==============================================================================
@@ -97,6 +111,15 @@ public:
     Item root() const { return root_; }
 };
 
+// ============================================================================
+// MarkReader Heap Factory (audited boundary)
+// ============================================================================
+// Single audited construction site for `new MarkReader` / `delete reader`.
+// Stack allocation is still preferred — use these factories only when a
+// MarkReader needs to outlive a function scope (e.g. opaque ownership transfer).
+MarkReader* mark_reader_create(Item root);
+void mark_reader_destroy(MarkReader* reader);
+
 // ==============================================================================
 // ItemReader - Type-Safe Item Wrapper
 // ==============================================================================
@@ -109,6 +132,12 @@ class ItemReader {
 private:
     Item item_;
     TypeId cached_type_;
+    ArrayNumView view_;  // INTERNAL: set when this reader denotes a typed-array slab
+
+    // Construct a reader denoting an ArrayNum slab (used by ArrayReader::get for
+    // N-D sub-tensors).  Presents as an array via isArray()/asArray().
+    explicit ItemReader(const ArrayNumView& view);
+    friend class ArrayReader;
 
 public:
     // Lifecycle (value type semantics)
@@ -122,8 +151,9 @@ public:
     ItemReader(ItemReader&&) = default;
     ItemReader& operator=(ItemReader&&) = default;
 
-    // Type checking
-    TypeId getType() const { return cached_type_; }
+    // Type checking — a typed-array slab reports as LMD_TYPE_ARRAY_NUM, but
+    // consumers should only need isArray()/asArray() (it presents as an array).
+    TypeId getType() const { return view_.valid() ? (TypeId)LMD_TYPE_ARRAY_NUM : cached_type_; }
 
     template<TypeId Tag>
     lam::ItemMatch<Tag> asItem() const { return lam::as<Tag>(item_); }
@@ -139,7 +169,7 @@ public:
     bool isBool() const;
     bool isElement() const;
     bool isMap() const;
-    bool isArray() const;
+    bool isArray() const;           // true for generic Array AND typed ArrayNum (1-D / N-D)
     bool isList() const;
     bool isDatetime() const;
 
@@ -158,8 +188,11 @@ public:
     // Convenience
     const char* cstring() const;  // Returns nullptr if not a string
 
-    // Accessors
-    Item item() const { return item_; }
+    // Accessors.  For a typed-array slab there is no standalone heap Item; we
+    // return the base array as a graceful fallback (the documented G2 exception
+    // — off the zero-allocation traversal path).  Consumers traverse via
+    // asArray(), so this is only hit by non-traversal misuse.
+    Item item() const { return view_.valid() ? Item{ .array_num = view_.base } : item_; }
 };
 
 // ==============================================================================
@@ -249,7 +282,8 @@ public:
  */
 class ArrayReader {
 private:
-    Array* array_;
+    Array* array_;       // generic Array backing (null when typed)
+    ArrayNumView view_;  // INTERNAL: typed-array slab backing (valid when typed)
 
 public:
     // Lifecycle (value type semantics)
@@ -257,8 +291,9 @@ public:
     explicit ArrayReader(Array* array);
     explicit ArrayReader(lam::GcPtr<Array> array);
     explicit ArrayReader(lam::ItemOf<LMD_TYPE_ARRAY> array);
+    explicit ArrayReader(const ArrayNumView& view);  // typed-array slab
 
-    // Create from Item with type validation
+    // Create from Item with type validation (accepts Array and ArrayNum)
     static ArrayReader fromItem(Item item);
 
     ~ArrayReader() = default;
@@ -291,7 +326,7 @@ public:
 
     // Accessors
     Array* array() const { return array_; }
-    bool isValid() const { return array_ != nullptr; }
+    bool isValid() const { return array_ != nullptr || view_.valid(); }
 };
 
 /**

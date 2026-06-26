@@ -316,120 +316,33 @@ fn text_has_tall_delim(text) {
 }
 
 fn text_height(text) {
-    // Short-body italic letters (Math-Italic cmmi metrics: height ≈ 0.43056)
-    if (text == "x" or text == "o" or text == "m" or text == "n" or
-        text == "a" or text == "c" or text == "e" or text == "r" or
-        text == "s" or text == "u" or text == "v" or text == "w" or
-        text == "z" or
-        // Descender short-body letters (height 0.44, depth 0.19 separately)
-        text == "g" or text == "y" or text == "p" or text == "q") 0.44
-    // Greek lowercase — heights from MathLive Math-Italic probe.
-    // Short body (0.44): α γ η ι κ μ ν ο π ρ σ τ υ χ ω ϵ ϕ ϱ
-    else if (text == "α" or text == "γ" or text == "η" or text == "ι" or
-             text == "κ" or text == "μ" or text == "ν" or text == "ο" or
-             text == "π" or text == "ρ" or text == "σ" or text == "τ" or
-             text == "υ" or text == "χ" or text == "ω" or
-             text == "ε" or text == "φ" or text == "ϱ" or text == "ϕ" or
-             text == "ϵ") 0.44
-    // Tall body (0.7): β δ ε ζ θ λ ξ φ ψ ϑ
-    else if (text == "β" or text == "δ" or text == "ζ" or
-             text == "θ" or text == "λ" or text == "ξ" or
-             text == "ψ" or text == "ϑ") 0.7
-    // Greek uppercase: cmr/Main-Regular height 0.69
-    else if (text == "Γ" or text == "Δ" or text == "Θ" or text == "Λ" or
-             text == "Π" or text == "Σ" or text == "Υ" or text == "Φ" or
-             text == "Ψ" or text == "Ω" or text == "Ξ") 0.69
-    // Specific math symbols with non-default heights
-    else if (text == "ℏ" or text == "∇") 0.69
-    else if (text == "⊂" or text == "⊃" or text == "⊆" or text == "⊇") 0.54
-    else if (text == "∪" or text == "∩") 0.56
-    else if (text == "△" or text == "▽") 0.55
-    // Relation symbols (Main-Regular/cmsy heights vary)
-    else if (text == "≈" or text == "≃" or text == "≡") 0.49
-    else if (text == "∼") 0.37
-    else if (text == "≅") 0.59
+    // Latin/greek letter heights (lower + UPPER) now come from metrics_data
+    // (Math-Italic / Main-Regular); those per-letter heuristics were dead —
+    // text_height_for() looks up metrics_data first. Most per-symbol height
+    // heuristics were likewise dead (cmr/ams/mathit classes the tables cover).
+    // Only render paths that BYPASS the lookup remain below — context-font
+    // fallbacks (nleq/ngeq/diagonal arrows resolve to the ambient mathit, which
+    // lacks these glyphs), bare punctuation, the +/− skip, and ASCII </> .
+    if (text == "▽") 0.55
     else if (text == ".") 0.11
     else if (text == ",") 0.11
     else if (text == ":") 0.44
-    // AMS arrows
-    else if (text == "↞" or text == "↠") 0.53
-    else if (text == "⇝") 0.38
-    else if (text == "⇚" or text == "⇛") 0.64
-    // Doubled relations
-    else if (text == "⟹" or text == "⟺" or text == "⟸") 0.53
-    // Models / bowtie / asymp
-    else if (text == "⊨") 0.75
-    else if (text == "⋈") 0.51
-    else if (text == "≍") 0.47
-    else if (text == "≐") 0.67
-    // Boxed operators
-    else if (text == "⊞" or text == "⊟" or text == "⊠" or text == "⊡") 0.68
-    // Negated relations
     else if (text == "≰" or text == "≱") 0.8
     else if (text == "≮" or text == "≯") 0.71
-    // Binary operators (±, ∓): cmsy h=0.59
-    else if (text == "±" or text == "∓") 0.59
-    // Small circles/dots/stars
-    else if (text == "∘" or text == "•") 0.45
-    else if (text == "⋆" or text == "∗") 0.47
-    // Daggers
+    else if (text == "•") 0.45
     else if (text == "†" or text == "‡") 0.7
-    // Square set operations
-    else if (text == "⊑" or text == "⊒") 0.64
-    // Setminus
-    else if (text == "∖") 0.75
-    // Diamond
     else if (text == "⋄") 0.45
-    // Suits (cmsy)
-    else if (text == "♡" or text == "♠" or text == "♣" or text == "♢") 0.7
-    // Flat / sharp / natural
-    else if (text == "♭") 0.75
-    else if (text == "♯" or text == "♮") 0.7
-    // Re / Im
-    else if (text == "ℜ" or text == "ℑ") 0.7
-    // Weierstrass p
-    else if (text == "℘") 0.44
-    // Beth / gimel / daleth
-    else if (text == "ℶ" or text == "ℷ" or text == "ℸ") 0.69
-    // Tall vertical arrows + nmid: cmsy height 0.75
-    else if (text == "↕" or text == "⇕" or text == "∤") 0.75
+    else if (text == "ℸ") 0.69
     else if (text == "+" or text == "−") 0.69
-    // Mid-height math operators (cmsy/cmr metrics ≈ 0.55-0.63em)
-    else if (text == "⋅" or text == "∗" or text == "⋆" or text == "∘" or
-             text == "∙" or text == "⋄") 0.55
-    // X-height symbols (cmr/cmsy ≈ 0.44em)
-    else if (text == "∞" or text == "∝") 0.44
-    // Relations: cmsy M68/M80 metrics ≈ 0.64em
-    else if (text == "≤" or text == "≥" or text == "≪" or text == "≫" or
-             text == "≺" or text == "≻" or text == "⪯" or text == "⪰" or
-             text == "<" or text == ">") 0.64
-    // Horizontal arrows: cmr metric M12 = [-0.13, 0.37, ...] — height 0.37
-    else if (text == "→" or text == "←" or text == "↔" or
-             text == "⇒" or text == "⇐" or text == "⇔" or
-             text == "⟶" or text == "⟵" or text == "⟷" or
-             text == "⟹" or text == "⟸" or text == "⟺" or
-             text == "↦" or text == "⟼" or
-             text == "↪" or text == "↩" or
-             text == "↗" or text == "↖" or text == "↘" or text == "↙") 0.37
-    else if (text == "■" or text == "▲") 0.68
+    else if (text == "<" or text == ">") 0.64
+    // Diagonal arrows resolve to the ambient (mathit) font, not covered
+    else if (text == "↗" or text == "↖" or text == "↘" or text == "↙") 0.37
     else if (is_number_text(text)) 0.65
     else if (text_has_tall_delim(text)) 0.75
-    // Uppercase Latin letters (cmr Main-Regular height 0.69141 ≈ 0.69)
-    else if (len(text) == 1 and text >= "A" and text <= "Z") 0.69
-    // Specific lowercase letter heights (cmmi Math-Italic)
-    else if (text == "t") 0.62
-    else if (text == "i") 0.66
-    // Multi-char operator names — cmr metrics for letters that compose them.
-    // Probed against MathLive's actual rendering. Without these, the default
-    // 0.7 over-estimates strut height for cos/log/sin/etc.
-    else if (text == "sin" or text == "sinh" or text == "csc" or
-             text == "lim" or text == "liminf" or text == "limsup" or
-             text == "min" or text == "max" or text == "deg" or text == "dim") 0.67
-    else if (text == "cos" or text == "cosh" or text == "sec" or
-             text == "sec" or text == "ker" or text == "hom" or text == "arg") 0.44
-    else if (text == "tan" or text == "tanh" or text == "ln") 0.62
-    else if (text == "log" or text == "exp" or text == "det" or
-             text == "gcd" or text == "lg" or text == "Pr") 0.7
+    // Multi-char operator names (sin/cos/log/…) were DEAD here: they render as
+    // text_box(name, css.CMR, "mop"), so text_height_for() takes the
+    // max_char_height(name, "cmr", …) path and only uses this function as the
+    // (never-reached) fallback — every composing letter is in the cmr table.
     else met.DEFAULT_CHAR_HEIGHT
 }
 
@@ -440,75 +353,23 @@ fn text_depth(text) {
     // For descender letters (g/j/p/q/y/f/Q, plus multi-char strings like
     // "log"/"lim sup"), use cmmi descent ≈ 0.19444.
     else if (text_has_descender(text)) 0.19
-    // Up/down arrows: cmsy depth 0.19
-    else if (text == "↑" or text == "↓" or text == "⇑" or text == "⇓") 0.19
-    // Vertical bi-directional arrows + nmid have deeper descent 0.25
-    else if (text == "↕" or text == "⇕" or text == "∤") 0.25
-    // Dotless i/j (cmmi M118 depth 0.19)
-    else if (text == "ı" or text == "ȷ") 0.19
-    // Set membership / perpendicular: cmsy depth ≈ 0.2
-    else if (text == "∈" or text == "∋" or text == "∉" or
-             text == "⊥" or text == "⊤") 0.2
-    // Subset relations: cmsy depth ≈ 0.13
-    else if (text == "⊂" or text == "⊃" or text == "⊆" or text == "⊇") 0.13
-    // Much-less-than / much-greater-than: cmsy depth ≈ 0.03
-    else if (text == "≪" or text == "≫") 0.03
-    // Two-head arrows (AMS): depth 0.01
-    else if (text == "↞" or text == "↠") 0.01
-    // Doubled-line arrows (AMS): depth 0.13
-    else if (text == "⇚" or text == "⇛") 0.13
-    // Long implies/iff: depth 0.02
-    else if (text == "⟹" or text == "⟺" or text == "⟸") 0.02
-    // Negated relations: deeper descent
+    // Dotless i/j (cmmi M118): raw descent 0.19444 → CEIL@2 0.20 in the
+    // bottom strut (single-round; matches \imath/\jmath golden 0.90 / -0.20).
+    // ı/ȷ have no metrics_data entry, so this heuristic IS reached.
+    else if (text == "ı" or text == "ȷ") 0.2
+    // The remaining per-symbol depths now come from metrics_data; only render
+    // paths that bypass the lookup stay below: ∈/∉/⊥/⊤, ≰/≱/≮/≯, daggers /
+    // wreath / sqcup, and diagonal arrows resolve to the ambient (mathit)
+    // font that lacks these glyphs; • is emitted bare.
+    else if (text == "∈" or text == "∉" or text == "⊥" or text == "⊤") 0.2
     else if (text == "≰" or text == "≱") 0.3
     else if (text == "≮" or text == "≯") 0.2
-    // Models with stem descent
-    else if (text == "⊨") 0.24
-    // Squiggly-arrow: negative depth
-    else if (text == "⇝") 0.0 - 0.14
-    else if (text == "≍") 0.0 - 0.04
-    else if (text == "≐") 0.0 - 0.14
-    // Daggers/wreath: depth 0.19/0.2
     else if (text == "†" or text == "‡" or
-             text == "⊓" or text == "⊔" or text == "⨿" or text == "≀" or
-             text == "∖") 0.19
-    // Pm/Mp: depth 0.08 (matches +)
-    else if (text == "±" or text == "∓") 0.08
-    // Small symbols with negative depth
-    else if (text == "∘" or text == "•") 0.0 - 0.06
-    else if (text == "⋆" or text == "∗") 0.0 - 0.04
-    // Square set operations
-    else if (text == "⊑" or text == "⊒") 0.13
-    // Suits and music symbols: depth 0.12 (♡♠♣) or 0.19 (♯♮)
-    else if (text == "♡" or text == "♠" or text == "♣" or text == "♢") 0.12
-    else if (text == "♯" or text == "♮") 0.19
-    // Diamond: negative depth
+             text == "⊔" or text == "⨿" or text == "≀") 0.19
+    else if (text == "•") 0.0 - 0.06
     else if (text == "⋄") 0.0 - 0.06
-    // wp (℘): descender 0.19
-    else if (text == "℘") 0.19
-    // Greek lowercase descenders (Math-Italic depths ≈ 0.19-0.2).
-    else if (text == "β" or text == "γ" or text == "η" or text == "ζ" or
-             text == "μ" or text == "ξ" or text == "ρ" or text == "φ" or
-             text == "χ" or text == "ψ" or text == "ϕ" or text == "ϱ") 0.19
-    // epsilon has slightly deeper descent (0.2)
-    else if (text == "ε") 0.2
-    // Relations with NEGATIVE depth (sit above baseline). MathLive emits a
-    // bottom strut with positive vertical-align for these.
-    else if (text == "≈") 0.0 - 0.02
-    else if (text == "∼") 0.0 - 0.14
-    else if (text == "≃" or text == "≡") 0.0 - 0.04
-    else if (text == "≅") 0.0 - 0.03
-    // Horizontal arrows have NEGATIVE depth -0.13 in cmr (M12) — they sit
-    // entirely above the baseline. The bottom strut accommodates this with
-    // a positive vertical-align (height:h+d = 0.37+(-0.13) = 0.24em,
-    // vertical-align:-d = 0.13em).
-    else if (text == "→" or text == "←" or text == "↔" or
-             text == "⇒" or text == "⇐" or text == "⇔" or
-             text == "⟶" or text == "⟵" or text == "⟷" or
-             text == "⟹" or text == "⟸" or text == "⟺" or
-             text == "↦" or text == "⟼" or
-             text == "↪" or text == "↩" or
-             text == "↗" or text == "↖" or text == "↘" or text == "↙") 0.0 - 0.14
+    // Diagonal arrows (nearrow/nwarrow/searrow/swarrow) — negative depth
+    else if (text == "↗" or text == "↖" or text == "↘" or text == "↙") 0.0 - 0.14
     // Binary operators that have depth in MathLive's cmr metrics
     // (+, −, ÷, ×, =, <, >, etc. have depth ≈ 0.08319).
     else if (is_operator_with_depth(text)) 0.08
@@ -614,7 +475,6 @@ pub fn hbox(boxes) {
             else if (v.render_total != null) v.render_total
             else hbox_render_height_of(v, suppress_operator_height) +
                  hbox_render_depth_of(v, suppress_text_depth)))
-    let strut_depth_em = first_strut_depth_em(valid, 0)
     // Full-precision raw max: propagated for strut emission only. If ANY
     // child lacks a raw value (e.g. composite boxes from fractions/scripts),
     // we conservatively skip propagation and fall back to rounded values
@@ -646,8 +506,6 @@ pub fn hbox(boxes) {
         type: "ord",
         italic: 0.0,
         skew: 0.0,
-        strut_total: if (len(valid) == 1) valid[0].strut_total else null,
-        strut_depth_em: strut_depth_em,
         is_fraction: if (len(valid) == 1) valid[0].is_fraction else null,
         is_script_radical: has_script_radical(valid, 0)
     }
@@ -701,12 +559,6 @@ fn collect_elements(valid, i, acc) {
         (let v = valid[i],
          let next = acc ++ elements_of(v),
          collect_elements(valid, i + 1, next))
-}
-
-fn first_strut_depth_em(items, i) {
-    if (i >= len(items)) null
-    else if (items[i].strut_depth_em != null) items[i].strut_depth_em
-    else first_strut_depth_em(items, i + 1)
 }
 
 fn has_suppress_hbox_text_depth(items, i) {
@@ -856,8 +708,6 @@ pub fn with_class(bx, cls) => {
     render_total: bx.render_total,
     left_right_render_depth: bx.left_right_render_depth,
     left_right_render_total: bx.left_right_render_total,
-    strut_total: bx.strut_total,
-    strut_depth_em: bx.strut_depth_em,
     width: bx.width,
     type: bx.type,
     italic: bx.italic,

@@ -466,7 +466,7 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
     } else if (!is_bullet_marker) {
         char marker_text[64];
         int marker_len = counter_format(lycon->counter_context, "list-item", marker_style, marker_text, sizeof(marker_text));
-        if (marker_len > 0 && marker_len + 2 < (int)sizeof(marker_text)) { // INT_CAST_OK: size comparison
+        if (marker_len > 0 && marker_len + 2 < (int)sizeof(marker_text)) {
             marker_text[marker_len] = '.';
             marker_text[marker_len + 1] = ' ';
             marker_text[marker_len + 2] = '\0';

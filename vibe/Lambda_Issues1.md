@@ -72,14 +72,28 @@ Note: unary `-` on literals (e.g. `-1.0`) works.
 **Pattern**: `var e = bx[0] - bx[0]` to produce a zero that has the same runtime
 type as array element reads.
 
-**Why**: Writing `var e = 0.0` gives a float literal, but subsequent accumulation
-with array elements (which return `Item` type in untyped arrays) causes a JIT type
-mismatch. Using `bx[0] - bx[0]` ensures `e` is Item-typed zero, compatible with
-later arithmetic on array-read results.
+**Why (historical)**: Writing `var e = 0.0` was believed to cause a JIT type
+mismatch with subsequent accumulation of `Item`-typed array reads, so the
+self-subtraction produced an `Item`-typed zero instead.
+
+**Status**: **RESOLVED**. All sites now use `var e = 0.0` / `var px = 0.0`.
+
+Investigation showed the workaround was obsolete *and* masked a deeper engine
+bug. The real fault was in procedural (`pn`) untyped-parameter type inference
+(`transpile-mir.cpp`, `infer_param_type`): a param used only in true division
+`dt / (d2 * dist)` — with no float literal elsewhere in the body — was
+speculatively inferred as `int`, so the call site inserted a truncating `it2i`
+coercion (`0.01 → 0`). In `nbody.advance()` this zeroed `mag`, killing every
+velocity update and producing a wrong energy (`1690750` vs the correct
+`1690876`). The fix: a tracked param participating in `/` now marks
+`INFER_FLOAT_CONTEXT` (Lambda's `/` always yields float, e.g. `4/2 → 2.0`),
+suppressing the unsound `int` narrowing. Untyped `nbody.ls` now passes; lambda
+baseline 3232/3232, no regressions.
 
 **Files affected**:
-- `awfy/nbody.ls` — `var e = bx[0] - bx[0]`
-- `awfy/nbody2.ls` — same
+- `awfy/nbody.ls` — was `var e = bx[0] - bx[0]`, `var px/py/pz = bvx[0] - bvx[0]`
+- `awfy/nbody2.ls` — same (typed `float[]` variant)
+- `lambda/transpile-mir.cpp` — engine fix (param-inference float-division guard)
 
 ---
 
@@ -88,18 +102,36 @@ later arithmetic on array-read results.
 **Pattern**: Literal arrays of nulls like `[null,null,null,...,null]` for 2, 4, 6, 16,
 or 32 elements.
 
-**Why**: These serve as chunk buffers for hand-rolled growable arrays (Vec/Arr
-abstractions). `fill(16, null)` would be more concise but caused runtime hangs in
-hot-path functions like `null16()`/`null32()` during testing. Literal null arrays work
-reliably.
+**Why (historical)**: These serve as chunk buffers for hand-rolled growable arrays
+(Vec/Arr abstractions). `fill(16, null)` was reported to cause runtime hangs in
+hot-path functions like `null16()`/`null32()`, so literal null arrays were used.
 
-**Files affected**:
-- `awfy/cd.ls`, `awfy/cd2.ls` — `null16()`, `null32()`, `vxy = [null, null]`
+**Status**: **MOSTLY RESOLVED**. `fill(n, null)` no longer hangs and is now used in
+11 of the 13 affected files, each verified byte-for-byte identical to the literal
+version (passing benchmarks stay passing; pre-existing failures are unchanged).
+
+**Exception — `awfy/cd.ls` / `awfy/cd2.ls` keep the literals.** Converting CD to
+`fill(n, null)` triggers a **heap-use-after-free** (ASan abort) — but the fault is
+*not* in `fill`. An all-null literal is never promoted (`try_promote_scalars_to_1d`
+bails on the non-numeric `null`), so `fill` and the literal build the same generic
+`Array`. The crash is in an *unrelated* numeric array-literal promotion
+(`array_end → try_promote_scalars_to_1d → array_num_new → gc_collect → gc_sweep`)
+that frees a JIT local still live in a pending `ck == null` comparison (`fn_eq`).
+`fill`'s different allocation timing merely exposes this **latent JIT GC-rooting
+gap** (locals not rooted across an `array_end` that can GC). It is not minimally
+reproducible and the fix belongs in the JIT root-frame machinery — tracked
+separately. CD therefore retains literal null arrays until that GC bug is fixed.
+
+**Files converted to `fill(n, null)`**:
 - `awfy/havlak.ls`, `awfy/havlak2.ls` — `null16()`, `null32()`
-- `awfy/json.ls`, `awfy/json2.ls` — `chunks: [null,...,null]` in map literals
-- `awfy/deltablue.ls`, `awfy/deltablue2.ls` — same chunked pattern
-- `awfy/storage.ls`, `awfy/storage2.ls` — `[null, null, null, null]`
-- `awfy/richards.ls`, `awfy/richards2.ls` — `[null, null, null, null, null, null]`
+- `awfy/json.ls`, `awfy/json2.ls` — `chunks: fill(16, null)` in `vec_new`/`vec_add`
+- `awfy/deltablue2.ls` — chunked `Vec` buffers
+- `awfy/storage.ls`, `awfy/storage2.ls` — `fill(4, null)`
+- `awfy/richards.ls`, `awfy/richards2.ls` — `task_table = fill(6, null)`
+- `jetstream/richards.ls`, `jetstream/richards2.ls` — `blocks = fill(6, null)`
+
+**Kept as literals (GC-bug exception)**:
+- `awfy/cd.ls`, `awfy/cd2.ls` — `null16()`, `null32()`, `vxy = [null, null]`
 
 ---
 
@@ -141,16 +173,45 @@ arrays (`int[]`) avoid this, but untyped arrays always need the cast.
 
 **Pattern**: Counter-based `while` loops instead of `for i in 0 to n-1 { ... }`.
 
-**Why**: `for i in start to end { ... }` in `pn` (procedural) functions causes runtime
-errors. All benchmarks are procedural (`pn`), so they must use `while` loops.
+**Why (historical)**: `for i in start to end { ... }` statement loops in `pn` failed —
+but with a MIR codegen error, not a generic "runtime error".
 
-**Files affected**: All benchmark files (~30+). Example:
+**Status**: **FIXED (engine) + partially converted.** Two engine bugs were found and
+fixed; `for i in start to end { ... }` statement loops now work in `pn`, including
+loops whose body assigns through the loop variable as an array index.
+
+Root causes (both in the JIT, exposed only by *statement-form* for-loops with an
+array-index-assignment body — `for i in a to b { arr[i] = v }`):
+1. **`transpile_for` boxed the body result unconditionally.** A pure-statement body
+   (e.g. `arr[i] = v`) produces no value — transpile returns reg 0 (the invalid-reg
+   sentinel) — and `emit_box(reg 0)` raised MIR's *"undeclared reg 0"* error. Fix:
+   substitute a null Item when the body result is reg 0 (`transpile-mir.cpp`,
+   `transpile_for`).
+2. **`fn_index_assign` rejected generic arrays.** A range loop variable is statically
+   typed ANY, so `arr[i] = v` routes through `fn_index_assign`, which only accepted
+   typed numeric (`ArrayNum`) targets and errored *"masked assignment requires a typed
+   numeric array target"* for a generic `[null,...]` array. Fix: handle a generic
+   `Array` + plain-int index as an ordinary element write via `fn_array_set`
+   (`lambda-vector.cpp`).
+
+Regression test: `test/lambda/proc/proc_for_range.ls`.
+
+**Converted (verified identical PASS output):** `awfy/sieve.ls`, `sieve2.ls`,
+`bounce.ls`, `bounce2.ls`, `queens.ls`, `queens2.ls`, `storage.ls`, `storage2.ls` —
+the clean `var i = 0; while (i < n) { … i = i + 1 }` counter loops became
+`for i in 0 to n - 1 { … }`. `storage` exercises fix #2 (generic chunk array).
+
+**Left as `while` (not simple unit-step ranges — convert case-by-case):** loops with a
+non-unit step (`k = k + i` in the sieve inner loop), decrementing counters
+(`while (i >= 0) { … i = i - 1 }` in `permute`/`towers`), and the macro-benchmarks with
+break/continue and nested mutable counter state (`cd`, `havlak`, `deltablue`, and the
+`r7rs`/`beng` numeric kernels).
+
+Example conversion:
 ```lambda
 var i = 0
-while (i < n) {
-    // ...
-    i = i + 1
-}
+while (i < n) { /* ... */ i = i + 1 }   // before
+for i in 0 to n - 1 { /* ... */ }       // after
 ```
 
 ---

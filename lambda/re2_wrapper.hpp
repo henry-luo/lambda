@@ -110,3 +110,19 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node);
  * @param str String to escape
  */
 void escape_regex_literal(StrBuf* regex, String* str);
+
+// -----------------------------------------------------------------------
+// One-shot RE2 helpers — the C+-convention-friendly entry point for
+// callers (rb_runtime, py_stdlib, etc.) that need an ad-hoc compiled
+// RE2 without going through TypePattern. The wrapper internalizes the
+// `new`/`delete` so call sites stay free of C++ allocation.
+// -----------------------------------------------------------------------
+
+// Compile a regex from raw chars. Caller owns the returned pointer and
+// must release it via re2_release(). Returns nullptr on compile failure
+// (the wrapper already drops the half-built RE2; the caller does not
+// need to delete on failure).
+re2::RE2* re2_compile(const char* pattern, size_t pattern_len);
+
+// Release a re2::RE2* obtained from re2_compile(). NULL-tolerant.
+void re2_release(re2::RE2* re);

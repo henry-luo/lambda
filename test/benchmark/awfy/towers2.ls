@@ -3,10 +3,6 @@
 
 type TState = {moves: int}
 
-pn make_array(n: int, val) {
-    return fill(n, val)
-}
-
 pn push_disk(piles: int[], tops: int[], disk_size: int, pile: int) {
     let t: int = tops[pile]
     piles[pile * 14 + t] = disk_size
@@ -38,7 +34,7 @@ pn move_disks(piles: int[], tops: int[], state: TState, disks: int, from_pile: i
 }
 
 pn benchmark() {
-    var piles:int[] = make_array(42, 0)
+    var piles:int[] = fill(42, 0)
     var tops:int[] = [0, 0, 0]
     var i: int = 12
     while (i >= 0) {

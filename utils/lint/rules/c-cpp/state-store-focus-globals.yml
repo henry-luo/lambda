@@ -1,0 +1,15 @@
+id: state-store-focus-globals
+language: cpp
+severity: error
+message: >-
+  Text-control focus global / slot accessor. Active-element and focused-text-control
+  state lives in the StateStore; do not reintroduce module globals or slot accessors.
+  Mark audited exceptions with a trailing "// STATE_STORE_OK: <reason>".
+metadata:
+  suppress: STATE_STORE_OK
+rule:
+  kind: identifier
+  regex: "^(g_active_element|g_last_focused_text_control|tc_active_element_slot|tc_last_focused_text_control_slot|_js_active_element|_js_last_focused_text_control)$"
+files:
+  - "radiant/**/*.{c,cpp,h,hpp}"
+  - "lambda/js/**/*.{c,cpp,h,hpp}"

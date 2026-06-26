@@ -1,0 +1,52 @@
+'=== creation & is_view ==='
+false
+true
+[20, 30, 40]
+3
+[10, 20, 30, 40, 50]
+'=== indexing ==='
+20
+30
+40
+'=== negative indices ==='
+[8, 9]
+[1, 2, 3, 4, 5, 6, 7, 8, 9]
+[6, 7, 8, 9, 10]
+'=== empty view ==='
+[]
+0
+0
+'=== full-array view ==='
+55
+10
+'=== float views ==='
+[2.5, 3.5, 4.5]
+10.5
+3.5
+'=== view of view ==='
+[200, 300, 400, 500]
+[300, 400]
+true
+true
+'=== arithmetic ==='
+[3, 4, 5, 6]
+[20, 30, 40, 50]
+[3, 5, 7, 9]
+'=== vectorized math ==='
+[2, 3, 4]
+[2, 3, 4]
+'=== reductions ==='
+30
+6
+4
+8
+'=== for-in over view ==='
+300
+400
+500
+'=== composition ==='
+10
+[1, 1, 1]
+'=== errors ==='
+error
+error

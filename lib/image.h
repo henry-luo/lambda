@@ -41,6 +41,11 @@ unsigned char* image_load_from_memory_scaled(const unsigned char* data, size_t l
 // Free image data returned by image_load or image_load_from_memory
 void image_free(unsigned char* data);
 
+// Save an 8-bit, row-contiguous image buffer (`channels` bytes/pixel) to a PNG file.
+// channels: 1=grayscale, 3=RGB, 4=RGBA. Returns 1 on success, 0 on failure.
+int image_save_png(const char* filename, const unsigned char* data,
+                   int width, int height, int channels);
+
 // Get image dimensions without decoding pixel data (header-only read)
 // Returns 1 on success, 0 on failure
 int image_get_dimensions(const char* filename, int* width, int* height);

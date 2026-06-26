@@ -9,6 +9,7 @@
 #include "../lambda-data.hpp"
 #include "../module_registry.h"
 #include "../../lib/log.h"
+#include "../../lib/lambda_alloca.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/hashmap.h"
@@ -1592,7 +1593,7 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
 
                 // call initialize with self + args
                 int nargs = 1 + call->arg_count; // self + user args
-                MIR_var_t* init_params = (MIR_var_t*)alloca(sizeof(MIR_var_t) * nargs);
+                MIR_var_t* init_params = LAMBDA_ALLOCA(nargs, MIR_var_t);
                 for (int i = 0; i < nargs; i++) {
                     init_params[i] = {MIR_T_I64, "a", 0};
                 }
@@ -1605,7 +1606,7 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
 
                 MIR_reg_t init_result = rm_new_reg(mt, "ir", MIR_T_I64);
                 int nops = 3 + nargs;
-                MIR_op_t* ops = (MIR_op_t*)alloca(sizeof(MIR_op_t) * nops);
+                MIR_op_t* ops = LAMBDA_ALLOCA(nops, MIR_op_t);
                 ops[0] = MIR_new_ref_op(mt->ctx, proto);
                 ops[1] = MIR_new_reg_op(mt->ctx, fptr);
                 ops[2] = MIR_new_reg_op(mt->ctx, init_result);
@@ -1804,7 +1805,7 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
                 // call method(self, args..., [block])
                 bool has_block = (call->block != NULL);
                 int nargs = 1 + call->arg_count + (has_block ? 1 : 0);
-                MIR_var_t* call_params = (MIR_var_t*)alloca(sizeof(MIR_var_t) * nargs);
+                MIR_var_t* call_params = LAMBDA_ALLOCA(nargs, MIR_var_t);
                 for (int i = 0; i < nargs; i++) {
                     call_params[i] = {MIR_T_I64, "a", 0};
                 }
@@ -1814,7 +1815,7 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
                 MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, &res_t, nargs, call_params);
 
                 int nops = 3 + nargs;
-                MIR_op_t* ops = (MIR_op_t*)alloca(sizeof(MIR_op_t) * nops);
+                MIR_op_t* ops = LAMBDA_ALLOCA(nops, MIR_op_t);
                 ops[0] = MIR_new_ref_op(mt->ctx, proto);
                 ops[1] = MIR_new_reg_op(mt->ctx, fptr);
                 ops[2] = MIR_new_reg_op(mt->ctx, builtin_result);
@@ -2033,7 +2034,7 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
             int nops = 3 + nargs; // proto + func_ref + result + args
 
             // build prototype for the call
-            MIR_var_t* param_vars = nargs > 0 ? (MIR_var_t*)alloca(sizeof(MIR_var_t) * nargs) : NULL;
+            MIR_var_t* param_vars = nargs > 0 ? LAMBDA_ALLOCA(nargs, MIR_var_t) : NULL;
             for (int i = 0; i < nargs; i++) {
                 param_vars[i] = {MIR_T_I64, "a", 0};
             }
@@ -2046,7 +2047,7 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
             MIR_reg_t result = rm_new_reg(mt, "cr", MIR_T_I64);
 
             // build ops array for MIR_new_insn_arr
-            MIR_op_t* ops = (MIR_op_t*)alloca(sizeof(MIR_op_t) * (size_t)nops);
+            MIR_op_t* ops = LAMBDA_ALLOCA(nops, MIR_op_t);
             ops[0] = MIR_new_ref_op(mt->ctx, proto);
             ops[1] = MIR_new_ref_op(mt->ctx, fentry->func_item);
             ops[2] = MIR_new_reg_op(mt->ctx, result);
@@ -3566,12 +3567,12 @@ static void rm_compile_block(RbMirTranspiler* mt, RbBlockCollected* bc) {
     // closures get _rb__env as hidden first parameter
     int mir_param_count = nparams + (bc->is_closure ? 1 : 0);
     MIR_var_t* params = mir_param_count > 0 ?
-        (MIR_var_t*)alloca(sizeof(MIR_var_t) * mir_param_count) : NULL;
+        LAMBDA_ALLOCA(mir_param_count, MIR_var_t) : NULL;
     int offset = 0;
 
     if (bc->is_closure) {
         char* env_name = (char*)pool_alloc(mt->tp->ast_pool, 16);
-        strcpy(env_name, "_rb__env");
+        strcpy(env_name, "_rb__env"); // UNSAFE_LIBC_OK: dst allocated 16 bytes for 9-byte literal
         params[0] = {MIR_T_I64, env_name, 0};
         offset = 1;
     }
@@ -3591,7 +3592,7 @@ static void rm_compile_block(RbMirTranspiler* mt, RbBlockCollected* bc) {
             snprintf(pname, sizeof(pname), "_rb_bp%d", i);
         }
         char* stable_name = (char*)pool_alloc(mt->tp->ast_pool, strlen(pname) + 1);
-        strcpy(stable_name, pname);
+        strcpy(stable_name, pname); // UNSAFE_LIBC_OK: dst allocated with strlen(pname)+1
         params[i + offset] = {MIR_T_I64, stable_name, 0};
         p = p->next;
     }
@@ -3718,11 +3719,11 @@ static void rm_compile_class_method(RbMirTranspiler* mt, RbFuncCollected* fc,
     int user_params = fc->param_count - (method_has_block ? 1 : 0);
     int total_params = 1 + user_params + (method_has_block ? 1 : 0);
 
-    MIR_var_t* params = (MIR_var_t*)alloca(sizeof(MIR_var_t) * total_params);
+    MIR_var_t* params = LAMBDA_ALLOCA(total_params, MIR_var_t);
 
     // first param: self
     char* self_name = (char*)pool_alloc(mt->tp->ast_pool, 16);
-    strcpy(self_name, "_rb_self");
+    strcpy(self_name, "_rb_self"); // UNSAFE_LIBC_OK: dst allocated 16 bytes for 9-byte literal
     params[0] = {MIR_T_I64, self_name, 0};
 
     // user params
@@ -3739,7 +3740,7 @@ static void rm_compile_class_method(RbMirTranspiler* mt, RbFuncCollected* fc,
             snprintf(pname, sizeof(pname), "_rb_p%d", i);
         }
         char* stable_name = (char*)pool_alloc(mt->tp->ast_pool, strlen(pname) + 1);
-        strcpy(stable_name, pname);
+        strcpy(stable_name, pname); // UNSAFE_LIBC_OK: dst allocated with strlen(pname)+1
         params[1 + i] = {MIR_T_I64, stable_name, 0};
         p = p->next;
     }
@@ -3747,7 +3748,7 @@ static void rm_compile_class_method(RbMirTranspiler* mt, RbFuncCollected* fc,
     // &block parameter
     if (method_has_block) {
         char* block_name = (char*)pool_alloc(mt->tp->ast_pool, 16);
-        strcpy(block_name, "_rb__block");
+        strcpy(block_name, "_rb__block"); // UNSAFE_LIBC_OK: dst allocated 16 bytes for 11-byte literal
         params[total_params - 1] = {MIR_T_I64, block_name, 0};
     }
 
@@ -4355,7 +4356,7 @@ static void rm_compile_function(RbMirTranspiler* mt, RbFuncCollected* fc) {
     bool func_has_block = fc->has_block_param;
     int user_params = fc->param_count - (func_has_block ? 1 : 0);
     int nparams = user_params + (func_has_block ? 1 : 0);
-    MIR_var_t* params = nparams > 0 ? (MIR_var_t*)alloca(sizeof(MIR_var_t) * nparams) : NULL;
+    MIR_var_t* params = nparams > 0 ? LAMBDA_ALLOCA(nparams, MIR_var_t) : NULL;
 
     RbAstNode* p = meth->params;
     int pi = 0;
@@ -4368,14 +4369,14 @@ static void rm_compile_function(RbMirTranspiler* mt, RbFuncCollected* fc) {
                 pp->name ? (int)pp->name->len : 0,
                 pp->name ? pp->name->chars : "p");
             char* stable_name = (char*)pool_alloc(mt->tp->ast_pool, strlen(pname) + 1);
-            strcpy(stable_name, pname);
+            strcpy(stable_name, pname); // UNSAFE_LIBC_OK: dst allocated with strlen(pname)+1
             params[pi] = {MIR_T_I64, stable_name, 0};
             pi++;
         } else {
             char pname[128];
             snprintf(pname, sizeof(pname), "_rb_p%d", pi);
             char* stable_name = (char*)pool_alloc(mt->tp->ast_pool, strlen(pname) + 1);
-            strcpy(stable_name, pname);
+            strcpy(stable_name, pname); // UNSAFE_LIBC_OK: dst allocated with strlen(pname)+1
             params[pi] = {MIR_T_I64, stable_name, 0};
             pi++;
         }
@@ -4385,7 +4386,7 @@ static void rm_compile_function(RbMirTranspiler* mt, RbFuncCollected* fc) {
     // &block parameter at the end
     if (func_has_block) {
         char* block_name = (char*)pool_alloc(mt->tp->ast_pool, 16);
-        strcpy(block_name, "_rb__block");
+        strcpy(block_name, "_rb__block"); // UNSAFE_LIBC_OK: dst allocated 16 bytes for 11-byte literal
         params[nparams - 1] = {MIR_T_I64, block_name, 0};
     }
 

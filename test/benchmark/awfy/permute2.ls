@@ -3,10 +3,6 @@
 
 type PState = {count: int}
 
-pn make_array(n: int, val) {
-    return fill(n, val)
-}
-
 pn swap(v: int[], i: int, j: int) {
     var tmp = v[i]
     v[i] = v[j]
@@ -30,7 +26,7 @@ pn permute(state: PState, v: int[], n: int) {
 
 pn benchmark() {
     let state = {count: 0}
-    var v:int[] = make_array(6, 0)
+    var v:int[] = fill(6, 0)
     permute(state, v, 6)
     return state.count
 }

@@ -352,6 +352,15 @@ private:
 };
 
 // ============================================================================
+// MarkupParser Heap Factory (audited boundary)
+// ============================================================================
+// Single audited construction site for `new MarkupParser` / `delete parser`.
+// Heap allocation is required because MarkupParser is too large for the stack
+// (~460 KB link_defs_ array).
+MarkupParser* markup_parser_create(Input* input, const ParseConfig& cfg = ParseConfig());
+void markup_parser_destroy(MarkupParser* parser);
+
+// ============================================================================
 // Block Parser Function Signatures
 // ============================================================================
 

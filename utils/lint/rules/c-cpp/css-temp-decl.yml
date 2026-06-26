@@ -1,0 +1,16 @@
+id: css-temp-decl
+language: cpp
+severity: error
+message: >-
+  Fragile CSS shorthand temporary declaration. Route longhand components through
+  lam::CssTempDecl / lam::CssTempListDecl<N> (radiant/css_temp_decl.hpp), not by
+  copying a CssDeclaration or pointing .value at a narrower-scope stack CssValue.
+  Mark audited exceptions with a trailing "// CSS_TEMP_DECL_OK: <reason>".
+metadata:
+  suppress: CSS_TEMP_DECL_OK
+rule:
+  any:
+    - pattern: CssDeclaration $N = *decl
+    - pattern: $OBJ.value = &$V
+files:
+  - "radiant/resolve_css_style.cpp"

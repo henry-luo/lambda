@@ -274,7 +274,7 @@ pn scheduler_schedule(sched: Scheduler, blocks) {
 
 pn run_richards() bool {
     var sched: Scheduler = create_scheduler()
-    var blocks = [null, null, null, null, null, null]
+    var blocks = fill(6, null)
 
     scheduler_add_idle_task(sched, blocks, ID_IDLE, 0, null, COUNT)
 

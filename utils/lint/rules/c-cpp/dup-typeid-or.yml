@@ -1,0 +1,13 @@
+id: dup-typeid-or
+language: cpp
+severity: error
+message: >-
+  Duplicate `$X == LMD_TYPE_ARRAY` on both sides of `||` — almost certainly a
+  copy-paste bug; the second operand was meant to be a different type
+  (e.g. LMD_TYPE_LIST / LMD_TYPE_ARRAY_INT).
+rule:
+  pattern: $X == LMD_TYPE_ARRAY || $X == LMD_TYPE_ARRAY
+files:
+  - "lambda/**/*.{c,cpp,h,hpp}"
+ignores:
+  - "**/tree-sitter*/**"

@@ -39,6 +39,7 @@ extern double js_get_number(Item value);
 
 #include "../format/format.h"
 #include "../../lib/log.h"
+#include "../../lib/lambda_alloca.h"
 #include "../../lib/url.h"
 #include "../../lib/base64.h"
 #include "../../lib/hex.h"
@@ -2618,7 +2619,7 @@ extern "C" Item js_process_nextTick(Item rest_args) {
         // bind extra args: callback.bind(undefined, arg1, arg2, ...)
         extern Item js_bind_function(Item func, Item this_val, Item* args, int arg_count);
         int extra = argc - 1;
-        Item* bound_args = (Item*)alloca(extra * sizeof(Item));
+        Item* bound_args = LAMBDA_ALLOCA(extra, Item);
         for (int i = 0; i < extra; i++) {
             bound_args[i] = js_array_get_int(rest_args, i + 1);
         }
@@ -4518,7 +4519,7 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
             while (*digits_p == '0' && *(digits_p + 1)) digits_p++;
             char norm[16];
             snprintf(norm, sizeof(norm), "e%c%s", sign, digits_p);
-            strcpy(e, norm);
+            snprintf(e, sizeof(buf) - (size_t)(e - buf), "%s", norm);
         }
         return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
     }
@@ -8637,7 +8638,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                     // Collect extra integer indices from shape, sort ascending.
                     int extra_idx_count = 0;
                     int extra_idx_capacity = 8;
-                    int* extra_idx = (int*)alloca(extra_idx_capacity * sizeof(int));
+                    int* extra_idx = LAMBDA_ALLOCA(extra_idx_capacity, int);
                     {
                         ShapeEntry* se = _tm ? _tm->shape : NULL;
                         while (se) {
@@ -8655,7 +8656,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                                     if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
                                         if (extra_idx_count >= extra_idx_capacity) {
                                             int new_cap = extra_idx_capacity * 2;
-                                            int* nb = (int*)alloca(new_cap * sizeof(int));
+                                            int* nb = LAMBDA_ALLOCA(new_cap, int);
                                             memcpy(nb, extra_idx, extra_idx_count * sizeof(int));
                                             extra_idx = nb;
                                             extra_idx_capacity = new_cap;
@@ -9213,12 +9214,12 @@ extern "C" Item js_object_keys(Item object) {
 
     // Temporary storage for index keys: pairs of (numeric_index, Item_string)
     int idx_cap = 16, idx_count = 0;
-    int64_t* idx_vals = (int64_t*)alloca(idx_cap * sizeof(int64_t));
-    Item* idx_items = (Item*)alloca(idx_cap * sizeof(Item));
+    int64_t* idx_vals = LAMBDA_ALLOCA(idx_cap, int64_t);
+    Item* idx_items = LAMBDA_ALLOCA(idx_cap, Item);
 
     // Non-index keys in insertion order
     int str_cap = 16, str_count = 0;
-    Item* str_items = (Item*)alloca(str_cap * sizeof(Item));
+    Item* str_items = LAMBDA_ALLOCA(str_cap, Item);
 
     // Main pass: collect enumerable own properties
     bool is_error_object = js_class_id((Item){.map = m}) == JS_CLASS_ERROR;
@@ -9425,8 +9426,8 @@ extern "C" Item js_for_in_keys(Item object) {
 
     // v20: separate index keys and string keys for spec-compliant ordering
     int idx_cap = 16, idx_count = 0;
-    int64_t* idx_vals = (int64_t*)alloca(idx_cap * sizeof(int64_t));
-    Item* idx_items = (Item*)alloca(idx_cap * sizeof(Item));
+    int64_t* idx_vals = LAMBDA_ALLOCA(idx_cap, int64_t);
+    Item* idx_items = LAMBDA_ALLOCA(idx_cap, Item);
 
     Item str_result = js_array_new(0); // non-index string keys in creation order
 
@@ -9440,8 +9441,8 @@ extern "C" Item js_for_in_keys(Item object) {
         if (ta_len > idx_cap) {
             int new_cap = idx_cap;
             while (new_cap < ta_len) new_cap *= 2;
-            int64_t* new_vals = (int64_t*)alloca(new_cap * sizeof(int64_t));
-            Item* new_items = (Item*)alloca(new_cap * sizeof(Item));
+            int64_t* new_vals = LAMBDA_ALLOCA(new_cap, int64_t);
+            Item* new_items = LAMBDA_ALLOCA(new_cap, Item);
             idx_vals = new_vals;
             idx_items = new_items;
             idx_cap = new_cap;
@@ -12349,7 +12350,7 @@ extern "C" Item js_json_parse(Item str_item) {
     }
 
     // null-terminate for the parser
-    char* buf = (char*)alloca(s->len + 1);
+    char* buf = LAMBDA_ALLOCA(s->len + 1, char);
     memcpy(buf, s->chars, s->len);
     buf[s->len] = '\0';
 
@@ -12563,7 +12564,7 @@ static bool js_json_validate_raw_text(String* s) {
         log_error("json rawJSON validation: no input context");
         return false;
     }
-    char* buf = (char*)alloca(s->len + 1);
+    char* buf = LAMBDA_ALLOCA(s->len + 1, char);
     memcpy(buf, s->chars, s->len);
     buf[s->len] = '\0';
     bool ok = false;

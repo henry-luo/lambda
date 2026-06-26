@@ -1,0 +1,35 @@
+id: unsafe-string-scan
+language: cpp
+severity: error
+message: >-
+  Unsafe open-coded string scan. strchr(set, *p) matches '\0', and ctype on a
+  raw char* is UB for bytes >= 0x80. Use the NUL-safe helpers in lib/str.h §17
+  (str_char_in_set / str_char_is_*) or cast to (unsigned char). Mark intentional
+  local parsers with a trailing "// STR_SCAN_LOCAL_OK: <reason>".
+metadata:
+  suppress: STR_SCAN_LOCAL_OK
+constraints:
+  FN:
+    regex: "^(isspace|isdigit|isalnum|isalpha|isupper|islower|isxdigit|ispunct|iscntrl|isprint|isgraph|isblank)$"
+rule:
+  any:
+    # strchr(<set>, *p) — membership test that also matches the '\0' terminator.
+    - pattern: strchr($SET, *$P)
+    # ctype on a raw deref/index; the (unsigned char) cast form is a different
+    # AST node and is therefore not matched. The deref form needs an `if`
+    # context so the standalone pattern parses as a call, not a declaration.
+    - pattern:
+        context: "if ($FN(*$P)) {}"
+        selector: call_expression
+    - pattern: $FN($P[$I])
+files:
+  - "lambda/**/*.{c,cpp,h,hpp}"
+  - "radiant/**/*.{c,cpp,h,hpp}"
+  - "lib/**/*.{c,cpp,h,hpp}"
+ignores:
+  - "**/tree-sitter*/**"
+  - "**/sqlite/**"
+  - "**/*sqlite*"
+  - "lib/str.c"
+  - "lib/str.h"
+  - "lib/strview.c"

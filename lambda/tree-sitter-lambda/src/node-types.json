@@ -2153,7 +2153,7 @@
     "named": true,
     "fields": {
       "field": {
-        "multiple": false,
+        "multiple": true,
         "required": true,
         "types": [
           {

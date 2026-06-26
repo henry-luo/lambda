@@ -2051,7 +2051,7 @@ static void collect_handlers_recursive(DomElement* elem,
 
             // store func_name on pool for later lookup
             char* stored_name = (char*)pool_alloc(handlers->pool, strlen(func_name) + 1);
-            strcpy(stored_name, func_name);
+            strcpy(stored_name, func_name); // UNSAFE_LIBC_OK: dst allocated with strlen(func_name)+1
             handler->function_name = stored_name;
 
             // Link into collection: find existing chain or create new.

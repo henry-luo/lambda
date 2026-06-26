@@ -6,6 +6,7 @@
 #include "render_state.hpp"
 #include "clip_shape.h"
 #include "../lib/log.h"
+#include "../lib/lambda_alloca.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
 #include "../lambda/input/css/css_value.hpp"
@@ -369,7 +370,7 @@ static void render_linear_gradient_tile(RenderContext* rdcon, ViewBlock* view,
             int end_rep = (int)ceilf((1.0f - first_pos) / unit);
             int num_reps = end_rep - start_rep;
             int max_stops = num_reps * stop_count;
-            RdtGradientStop* rep_stops = (RdtGradientStop*)alloca(max_stops * sizeof(RdtGradientStop));
+            RdtGradientStop* rep_stops = LAMBDA_ALLOCA(max_stops, RdtGradientStop);
             int idx = 0;
             for (int r = start_rep; r < end_rep; r++) {
                 for (int i = 0; i < stop_count; i++) {

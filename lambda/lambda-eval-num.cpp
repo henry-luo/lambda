@@ -898,6 +898,12 @@ Item fn_ceil(Item item) {
 
 Item fn_min2(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
+    // axis reduction: min(arr, axis) — the scalar pairwise path never accepted an
+    // array first arg, so an ArrayNum here unambiguously means an axis reduce.
+    // (Also reached by min(arr, axis: N) — the named value lands in this slot.)
+    if (get_type_id(item_a) == LMD_TYPE_ARRAY_NUM) {
+        return fn_min_axis(item_a, item_b);
+    }
     // two argument scalar min case
     double a_val = 0.0, b_val = 0.0;
     bool is_float = false;
@@ -998,22 +1004,22 @@ Item fn_min1(Item item_a) {
                 }
             }
             return push_d(min_val);
-        } else if (et == ELEM_INT64) {
+        } else if (et == ELEM_INT64 || et == ELEM_INT) {
+            // INT/INT64 store in `items`: exact int64 min.
             int64_t min_val = arr->items[0];
             for (size_t i = 1; i < (size_t)arr->length; i++) {
-                if (arr->items[i] < min_val) {
-                    min_val = arr->items[i];
-                }
+                if (arr->items[i] < min_val) min_val = arr->items[i];
             }
-            return push_l(min_val);
+            return (et == ELEM_INT64) ? push_l(min_val) : (Item) { .item = i2it(min_val) };
         } else {
-            int64_t min_val = arr->items[0];
-            for (size_t i = 1; i < (size_t)arr->length; i++) {
-                if (arr->items[i] < min_val) {
-                    min_val = arr->items[i];
-                }
+            // compact element types (i8/u8/i16/u16/i32/u32/f32/f16/f64): read by true type.
+            double acc = array_num_reduce_double(arr, ARRAY_RED_MIN);
+            if (et == ELEM_FLOAT32 || et == ELEM_FLOAT16 || et == ELEM_FLOAT64) {
+                return push_d(acc);
             }
-            return { .item = i2it(min_val) };
+            int64_t v = (int64_t)acc;
+            return (v > INT_MAX || v < INT_MIN) ? push_l(v)
+                                                : (Item) { .item = i2it((int32_t)v) };
         }
     }
     else if (type_id == LMD_TYPE_ARRAY) {
@@ -1104,6 +1110,10 @@ Item fn_min1(Item item_a) {
 
 Item fn_max2(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
+    // axis reduction: max(arr, axis) — see fn_min2 note.
+    if (get_type_id(item_a) == LMD_TYPE_ARRAY_NUM) {
+        return fn_max_axis(item_a, item_b);
+    }
     // two argument max case
     double a_val = 0.0, b_val = 0.0;
     bool is_float = false;
@@ -1196,22 +1206,22 @@ Item fn_max1(Item item_a) {
                 }
             }
             return push_d(max_val);
-        } else if (et == ELEM_INT64) {
+        } else if (et == ELEM_INT64 || et == ELEM_INT) {
+            // INT/INT64 store in `items`: exact int64 max.
             int64_t max_val = arr->items[0];
             for (size_t i = 1; i < (size_t)arr->length; i++) {
-                if (arr->items[i] > max_val) {
-                    max_val = arr->items[i];
-                }
+                if (arr->items[i] > max_val) max_val = arr->items[i];
             }
-            return push_l(max_val);
+            return (et == ELEM_INT64) ? push_l(max_val) : (Item) { .item = i2it(max_val) };
         } else {
-            int64_t max_val = arr->items[0];
-            for (size_t i = 1; i < (size_t)arr->length; i++) {
-                if (arr->items[i] > max_val) {
-                    max_val = arr->items[i];
-                }
+            // compact element types (i8/u8/i16/u16/i32/u32/f32/f16/f64): read by true type.
+            double acc = array_num_reduce_double(arr, ARRAY_RED_MAX);
+            if (et == ELEM_FLOAT32 || et == ELEM_FLOAT16 || et == ELEM_FLOAT64) {
+                return push_d(acc);
             }
-            return { .item = i2it(max_val) };
+            int64_t v = (int64_t)acc;
+            return (v > INT_MAX || v < INT_MIN) ? push_l(v)
+                                                : (Item) { .item = i2it((int32_t)v) };
         }
     }
     else if (type_id == LMD_TYPE_ARRAY) {
@@ -1346,7 +1356,8 @@ Item fn_sum(Item item) {
                 sum += arr->float_items[i];
             }
             return push_d(sum);
-        } else {
+        } else if (et == ELEM_INT || et == ELEM_INT64) {
+            // INT/INT64 store in `items`: exact int64 accumulation.
             if (arr->length == 0) {
                 return (Item) { .item = i2it(0) };
             }
@@ -1355,6 +1366,16 @@ Item fn_sum(Item item) {
                 sum += arr->items[i];
             }
             return push_l(sum);
+        } else {
+            // compact element types (i8/u8/i16/u16/i32/u32/f32/f16/f64): the
+            // generic reducer reads each element by its true type and vectorizes.
+            double acc = array_num_reduce_double(arr, ARRAY_RED_SUM);
+            if (et == ELEM_FLOAT32 || et == ELEM_FLOAT16 || et == ELEM_FLOAT64) {
+                return push_d(acc);
+            }
+            int64_t s = (int64_t)acc;
+            return (s > INT_MAX || s < INT_MIN) ? push_l(s)
+                                                : (Item) { .item = i2it((int32_t)s) };
         }
     }
     else if (type_id == LMD_TYPE_ARRAY) {
@@ -1449,18 +1470,9 @@ Item fn_avg(Item item) {
         if (!arr || arr->length == 0) {
             return ItemError;
         }
-        double sum = 0.0;
-        ArrayNumElemType et = arr->get_elem_type();
-        if (et == ELEM_FLOAT) {
-            for (size_t i = 0; i < (size_t)arr->length; i++) {
-                sum += arr->float_items[i];
-            }
-        } else {
-            for (size_t i = 0; i < (size_t)arr->length; i++) {
-                sum += (double)arr->items[i];
-            }
-        }
-        return push_d(sum / (double)arr->length);
+        // generic reducer reads every element type correctly (the old else
+        // branch mis-read compact buffers via `items`); bit-identical for FLOAT/INT.
+        return push_d(array_num_reduce_double(arr, ARRAY_RED_AVG));
     }
     else if (type_id == LMD_TYPE_ARRAY) {
         List* list = item.array;
@@ -1587,6 +1599,48 @@ Item fn_neg(Item item) {
     }
     else if (item._type_id == LMD_TYPE_UINT64) {
         return push_l(-(int64_t)item.get_uint64());
+    }
+    else if (get_type_id(item) == LMD_TYPE_ARRAY_NUM ||
+             get_type_id(item) == LMD_TYPE_ARRAY ||
+             get_type_id(item) == LMD_TYPE_RANGE) {
+        TypeId t = get_type_id(item);
+        int64_t len = (t == LMD_TYPE_ARRAY_NUM) ? item.array_num->length :
+                      (t == LMD_TYPE_ARRAY) ? item.array->length :
+                      item.range->length;
+        if (len == 0) {
+            ArrayNum* result = array_float_new(0);
+            return { .array_num = result };
+        }
+        ArrayNum* result = array_float_new(len);
+        for (int64_t i = 0; i < len; i++) {
+            Item elem;
+            if (t == LMD_TYPE_ARRAY_NUM) {
+                ArrayNum* arr = item.array_num;
+                ArrayNumElemType et = arr->get_elem_type();
+                if (et == ELEM_FLOAT) { result->float_items[i] = -arr->float_items[i]; continue; }
+                if (et == ELEM_INT || et == ELEM_INT64) {
+                    result->float_items[i] = -(double)arr->items[i]; continue;
+                }
+                // compact elements: fall through to generic via array_num_get
+                elem = array_num_get(arr, i);
+            } else if (t == LMD_TYPE_ARRAY) {
+                elem = item.array->items[i];
+            } else {
+                elem = (Item){ .item = i2it(item.range->start + i) };
+            }
+            TypeId et = get_type_id(elem);
+            if (et == LMD_TYPE_INT) {
+                result->float_items[i] = -(double)elem.get_int56();
+            } else if (et == LMD_TYPE_INT64) {
+                result->float_items[i] = -(double)elem.get_int64();
+            } else if (et == LMD_TYPE_FLOAT) {
+                result->float_items[i] = -elem.get_double();
+            } else {
+                log_error("neg: non-numeric element at index %ld, type: %d", i, et);
+                return ItemError;
+            }
+        }
+        return { .array_num = result };
     }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         // Cast string/symbol to number, then negate

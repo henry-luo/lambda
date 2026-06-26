@@ -71,6 +71,22 @@ void format_number(StringBuf* sb, Item item) {
         } else {
             stringbuf_append_str(sb, "null");
         }
+    } else if (type == LMD_TYPE_NUM_SIZED) {
+        // inline sized numerics (i8..u32 packed as int; f16/f32 as float)
+        NumSizedType st = item.get_num_type();
+        char num_buf[32];
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
+            double d = item.get_num_sized_as_double();
+            if (isnan(d) || isinf(d)) {
+                stringbuf_append_str(sb, "null");
+            } else {
+                snprintf(num_buf, sizeof(num_buf), "%.15g", d);
+                stringbuf_append_str(sb, num_buf);
+            }
+        } else {
+            snprintf(num_buf, sizeof(num_buf), "%" PRId64, item.get_num_sized_as_int64());
+            stringbuf_append_str(sb, num_buf);
+        }
     } else {
         // fallback for unknown numeric types
         stringbuf_append_str(sb, "0");

@@ -387,9 +387,9 @@ ArrayList* file_glob(const char* pattern) {
         if (!path) continue;
         if (prefix_len > 0) {
             memcpy(path, pattern, prefix_len);
-            strcpy(path + prefix_len, fd.cFileName);
+            strcpy(path + prefix_len, fd.cFileName); // UNSAFE_LIBC_OK: dst allocated with prefix_len+strlen(fd.cFileName)+1
         } else {
-            strcpy(path, fd.cFileName);
+            strcpy(path, fd.cFileName); // UNSAFE_LIBC_OK: dst allocated with strlen(fd.cFileName)+1
         }
         arraylist_append(list, path);
     } while (FindNextFileA(hFind, &fd));

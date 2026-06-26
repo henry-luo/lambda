@@ -2421,9 +2421,12 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 strbuf_append_str(tp->code_buf, arr_decl);
                 transpile_expr(tp, loop_node->as);
 
-                // Start the loop
+                // Start the loop.  For ArrayNum the iteration count is shape[0]
+                // for N-D arrays (yields leading-axis slices) or length for 1-D.
+                // array_num_iter_count handles both via runtime check.
                 strbuf_append_str(tp->code_buf,
                     is_range ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long idx=rng->start; idx<=rng->end; idx++) {\n " :
+                    is_typed_array ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { int64_t _ilen = array_num_iter_count(arr); for (int64_t idx=0; idx<_ilen; idx++) {\n " :
                     is_any_array ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { for (int idx=0; idx<arr->length; idx++) {\n " :
                     ";\n int ilen = fn_len(it);\n for (int idx=0; idx<ilen; idx++) {\n ");
 
@@ -4418,12 +4421,166 @@ static bool has_spreadable_item(AstNode *item) {
     return false;
 }
 
+// Recursively determine if an AstArrayNode represents an N-D numeric literal
+// (e.g. [[1,2,3],[4,5,6]]).  Returns ndim (>=1) on success with shape and
+// elem_type filled in; returns 0 if not an N-D-eligible literal.  Inner items
+// must all be the same shape and numeric element type.  Spreadables disqualify.
+static int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
+                               ArrayNumElemType* elem_type_out) {
+    // Unwrap AST_NODE_PRIMARY wrappers (inner literals arrive wrapped)
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (!node || node->node_type != AST_NODE_ARRAY) return 0;
+    AstArrayNode* arr = (AstArrayNode*)node;
+    TypeArray* type = (TypeArray*)arr->type;
+    if (!type || type->length <= 0 || !type->nested) return 0;
+    if (has_spreadable_item(arr->item)) return 0;
+
+    TypeId nid = type->nested->type_id;
+    // Numeric leaf — this is a 1-D base case
+    if (nid == LMD_TYPE_INT)   { shape_out[0] = type->length; *elem_type_out = ELEM_INT;   return 1; }
+    if (nid == LMD_TYPE_INT64) { shape_out[0] = type->length; *elem_type_out = ELEM_INT64; return 1; }
+    if (nid == LMD_TYPE_FLOAT) { shape_out[0] = type->length; *elem_type_out = ELEM_FLOAT; return 1; }
+    if (nid == LMD_TYPE_NUM_SIZED) {
+        shape_out[0] = type->length;
+        *elem_type_out = num_sized_to_elem_type(type_num_sized_kind(type->nested));
+        return 1;
+    }
+    // Nested array — recurse on first item and verify all siblings match
+    if (nid == LMD_TYPE_ARRAY) {
+        if (max_ndim <= 1) return 0;
+        int64_t inner_shape[32];
+        ArrayNumElemType inner_etype;
+        int inner_ndim = detect_ndim_literal(arr->item, inner_shape, max_ndim - 1, &inner_etype);
+        if (inner_ndim == 0) return 0;
+        AstNode* sib = arr->item->next;
+        while (sib) {
+            int64_t sib_shape[32];
+            ArrayNumElemType sib_etype;
+            int sib_ndim = detect_ndim_literal(sib, sib_shape, max_ndim - 1, &sib_etype);
+            if (sib_ndim != inner_ndim || sib_etype != inner_etype) return 0;
+            for (int i = 0; i < sib_ndim; i++) {
+                if (sib_shape[i] != inner_shape[i]) return 0;
+            }
+            sib = sib->next;
+        }
+        shape_out[0] = type->length;
+        for (int i = 0; i < inner_ndim; i++) shape_out[i + 1] = inner_shape[i];
+        *elem_type_out = inner_etype;
+        return inner_ndim + 1;
+    }
+    return 0;
+}
+
+// Emit code that walks the nested literal tree in row-major order, writing each
+// leaf element to arr via array_num_set_item at sequential flat indices.
+// Recursive: for inner arrays, descends; for numeric leaves, emits the set call.
+static void emit_ndim_leaves(Transpiler* tp, AstNode* node, int64_t* flat_idx_io) {
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (!node || node->node_type != AST_NODE_ARRAY) return;
+    AstArrayNode* arr = (AstArrayNode*)node;
+    TypeArray* type = (TypeArray*)arr->type;
+    bool inner_is_array = type && type->nested && type->nested->type_id == LMD_TYPE_ARRAY;
+    AstNode* item = arr->item;
+    while (item) {
+        if (inner_is_array) {
+            emit_ndim_leaves(tp, item, flat_idx_io);
+        } else {
+            // numeric leaf — set via boxed Item (handles all elem_types via dispatch)
+            strbuf_append_str(tp->code_buf, " array_num_set_item(arr,");
+            strbuf_append_int(tp->code_buf, (int)(*flat_idx_io));
+            strbuf_append_str(tp->code_buf, ",");
+            transpile_box_item(tp, item);
+            strbuf_append_str(tp->code_buf, ");\n");
+            (*flat_idx_io)++;
+        }
+        item = item->next;
+    }
+}
+
 void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     TypeArray *type = (TypeArray*)array_node->type;
     bool is_int_array = type->nested && type->nested->type_id == LMD_TYPE_INT;
     bool is_int64_array = type->nested && type->nested->type_id == LMD_TYPE_INT64;
     bool is_float_array = type->nested && type->nested->type_id == LMD_TYPE_FLOAT;
     bool is_sized_array = type->nested && type->nested->type_id == LMD_TYPE_NUM_SIZED;
+    bool is_bool_array = type->nested && type->nested->type_id == LMD_TYPE_BOOL && type->length > 0;
+
+    // Static N-D detection: nested numeric literals like [[1,2],[3,4]] become
+    // a single N-D ArrayNum with shape metadata, instead of an Array of ArrayNums.
+    // Only fires when EVERY inner array has matching shape & elem_type (validated
+    // recursively at compile time).
+    {
+        int64_t shape[32];
+        ArrayNumElemType etype;
+        int ndim = detect_ndim_literal((AstNode*)array_node, shape, 32, &etype);
+        if (ndim >= 2) {
+            int64_t total = 1;
+            for (int i = 0; i < ndim; i++) total *= shape[i];
+            // Allocate the flat ArrayNum
+            strbuf_append_str(tp->code_buf, "({ ArrayNum* arr = array_num_new(");
+            strbuf_append_int(tp->code_buf, (int)etype);
+            strbuf_append_str(tp->code_buf, ",");
+            strbuf_append_format(tp->code_buf, "%lld", (long long)total);
+            strbuf_append_str(tp->code_buf, ");\n");
+            // Fill leaves in row-major order
+            int64_t flat_idx = 0;
+            emit_ndim_leaves(tp, (AstNode*)array_node, &flat_idx);
+            // Attach shape side-table (allocated via heap_data_calloc, owned)
+            // Total bytes: header + 2 * ndim * int64_t (shape then strides)
+            size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)ndim * sizeof(int64_t);
+            strbuf_append_str(tp->code_buf, " { ArrayNumShape* s = (ArrayNumShape*)heap_data_calloc(");
+            strbuf_append_format(tp->code_buf, "%llu", (unsigned long long)shape_bytes);
+            strbuf_append_str(tp->code_buf, ");\n");
+            strbuf_append_format(tp->code_buf, " s->ndim = %d;\n", ndim);
+            strbuf_append_str(tp->code_buf, " s->is_c_contig = 1;\n");
+            strbuf_append_str(tp->code_buf, " s->offset = 0;\n");
+            strbuf_append_str(tp->code_buf, " s->base = NULL;\n");
+            // Compute strides (row-major C order)
+            int64_t strides[32];
+            int64_t stride = 1;
+            for (int i = ndim - 1; i >= 0; i--) {
+                strides[i] = stride;
+                stride *= shape[i];
+            }
+            for (int i = 0; i < ndim; i++) {
+                strbuf_append_format(tp->code_buf, " s->data[%d] = %lld;\n", i, (long long)shape[i]);
+            }
+            for (int i = 0; i < ndim; i++) {
+                strbuf_append_format(tp->code_buf, " s->data[%d] = %lld;\n",
+                                     ndim + i, (long long)strides[i]);
+            }
+            strbuf_append_str(tp->code_buf, " arr->is_ndim = 1;\n");
+            strbuf_append_str(tp->code_buf, " arr->extra = (int64_t)(uintptr_t)s;\n");
+            strbuf_append_str(tp->code_buf, " } arr; })");
+            return;
+        }
+    }
+
+    // bool array: use ELEM_BOOL compact storage via array_num_new + array_num_set_item
+    if (is_bool_array && !has_spreadable_item(array_node->item)) {
+        strbuf_append_str(tp->code_buf, "({ArrayNum* arr = array_num_new(");
+        strbuf_append_int(tp->code_buf, (int)ELEM_BOOL);
+        strbuf_append_str(tp->code_buf, ",");
+        strbuf_append_int(tp->code_buf, type->length);
+        strbuf_append_str(tp->code_buf, ");\n");
+        int idx = 0;
+        AstNode* item = array_node->item;
+        while (item) {
+            strbuf_append_str(tp->code_buf, " array_num_set_item(arr,");
+            strbuf_append_int(tp->code_buf, idx);
+            strbuf_append_str(tp->code_buf, ",");
+            transpile_box_item(tp, item);
+            strbuf_append_str(tp->code_buf, ");\n");
+            idx++;
+            item = item->next;
+        }
+        strbuf_append_str(tp->code_buf, " arr; })");
+        return;
+    }
 
     // for arrays with spreadable items (for-expressions, spread, pipe), use push path
     if (!is_int_array && !is_int64_array && !is_float_array && !is_sized_array && has_spreadable_item(array_node->item)) {

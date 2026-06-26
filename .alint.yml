@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# Lambda/Radiant structural lint rules.
+#
+# This is Phase 2 of the lint stack — see vibe/Lambda_Lint.md §6. ast-grep
+# handles pattern rules over source-file *contents* (utils/lint/rules/c-cpp/);
+# alint handles rules about the filesystem *shape*: sibling-file requirements,
+# cross-file value relations, file-graph integrity. Both backends are dispatched
+# by utils/lint/run.sh and contribute to the same Report_NNN.{md,json,tsv}.
+#
+# Run via `make lint`, or directly: `alint check` / `alint list` / `alint explain <id>`.
+
+version: 1
+
+rules:
+  # ────────────────────────────────────────────────────────────────────────
+  # Test hygiene
+  # ────────────────────────────────────────────────────────────────────────
+
+  - id: ls-test-has-golden
+    kind: for_each_file
+    # `!`-prefixed entries subtract from the include set (alint glob syntax).
+    # Excluded by convention — these are not standalone runnable test scripts:
+    #   _*.ls          underscore-prefixed fixtures/helpers
+    #   mod_*.ls       Lambda module-import files
+    #   schema_*.ls    validator schema fixtures (data, not tests)
+    #   validator/**   validator suite uses its own driver / fixture conventions
+    select:
+      - "test/lambda/**/*.ls"
+      - "!test/lambda/**/_*.ls"
+      - "!test/lambda/**/mod_*.ls"
+      - "!test/lambda/**/schema_*.ls"
+      - "!test/lambda/validator/**"
+    require:
+      - kind: file_exists
+        paths: "{dir}/{stem}.txt"
+    level: warning
+    message: >-
+      Lambda test script has no sibling expected-output `.txt`. CLAUDE.md rule
+      8: every `*.ls` test must ship its `*.txt` golden alongside. If this
+      script is not a standalone test (module / fixture / playground), give it
+      a `_`, `mod_`, or `schema_` prefix so the exclusion list catches it.

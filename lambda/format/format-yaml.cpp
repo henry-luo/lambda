@@ -68,6 +68,7 @@ static void format_yaml_string(YamlContext& ctx, String* str) {
     }
 }
 
+
 // format array items for YAML using ArrayReader
 static void format_array_reader(YamlContext& ctx, const ArrayReader& arr, int indent_level) {
     if (!arr.isValid() || arr.isEmpty()) {

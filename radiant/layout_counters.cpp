@@ -32,7 +32,7 @@ CounterContext* counter_context_create(Arena* arena) {
     ctx->current_scope = nullptr;
     void* stack_mem = mem_alloc(sizeof(lam::ArrayList<CounterScope*>), MEM_CAT_LAYOUT);
     if (!stack_mem) return nullptr;
-    ctx->scope_stack = new (stack_mem) lam::ArrayList<CounterScope*>(MEM_CAT_LAYOUT, 16);
+    ctx->scope_stack = new (stack_mem) lam::ArrayList<CounterScope*>(MEM_CAT_LAYOUT, 16); // NEW_DELETE_OK: single audited construction of scope_stack inside counter_context_create init.
 
     // Create root scope
     counter_push_scope(ctx);
@@ -287,7 +287,7 @@ static void parse_counter_spec(const char* spec,
             } else if (long_value < INT_MIN) {
                 value = INT_MIN;
             } else {
-                value = (int)long_value; // INT_CAST_OK: counter value is integer
+                value = (int)long_value;
             }
 
             // Move pointer past the parsed number
@@ -615,7 +615,7 @@ static int int_to_lower_greek(int value, char* buffer, size_t buffer_size) {
         temp[temp_len++] = (char)(0xCE + (greek_letters[idx] >= 0x03C0 ? 1 : 0));
         temp[temp_len++] = (char)(0x80 + (greek_letters[idx] & 0x3F));
         value = value / count - 1;
-    } while (value >= 0 && temp_len < (int)sizeof(temp) - 2); // INT_CAST_OK: size comparison
+    } while (value >= 0 && temp_len < (int)sizeof(temp) - 2);
 
     // Reverse pairs
     int len = 0;

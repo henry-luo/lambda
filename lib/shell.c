@@ -163,17 +163,19 @@ static ShellResult shell_exec_win32(const char* program, const char** args,
         return result;
     }
     cmdline[0] = '\0';
+    size_t cmdcap = cmdlen + 1;
     for (int i = 0; args && args[i]; i++) {
-        if (i > 0) strcat(cmdline, " ");
+        size_t dlen = strlen(cmdline);
+        if (i > 0) { snprintf(cmdline + dlen, cmdcap - dlen, " "); dlen = strlen(cmdline); }
         if (i == 2 && args[0] && args[1] &&
             strcmp(args[0], "cmd") == 0 && strcmp(args[1], "/c") == 0) {
-            strcat(cmdline, args[i]);
+            snprintf(cmdline + dlen, cmdcap - dlen, "%s", args[i]);
             continue;
         }
         // simple quoting — wrap each arg in double quotes
-        strcat(cmdline, "\"");
-        strcat(cmdline, args[i]);
-        strcat(cmdline, "\"");
+        snprintf(cmdline + dlen, cmdcap - dlen, "\""); dlen = strlen(cmdline);
+        snprintf(cmdline + dlen, cmdcap - dlen, "%s", args[i]); dlen = strlen(cmdline);
+        snprintf(cmdline + dlen, cmdcap - dlen, "\"");
     }
 
     WinPipe stdout_pipe = {0}, stderr_pipe = {0};
@@ -465,11 +467,13 @@ ShellProcess* shell_spawn(const char* program, const char** args,
     char* cmdline = (char*)mem_alloc(cmdlen + 1, MEM_CAT_TEMP);
     if (!cmdline) { mem_free(proc); return NULL; }
     cmdline[0] = '\0';
+    size_t cmdcap = cmdlen + 1;
     for (int i = 0; args[i]; i++) {
-        if (i > 0) strcat(cmdline, " ");
-        strcat(cmdline, "\"");
-        strcat(cmdline, args[i]);
-        strcat(cmdline, "\"");
+        size_t dlen = strlen(cmdline);
+        if (i > 0) { snprintf(cmdline + dlen, cmdcap - dlen, " "); dlen = strlen(cmdline); }
+        snprintf(cmdline + dlen, cmdcap - dlen, "\""); dlen = strlen(cmdline);
+        snprintf(cmdline + dlen, cmdcap - dlen, "%s", args[i]); dlen = strlen(cmdline);
+        snprintf(cmdline + dlen, cmdcap - dlen, "\"");
     }
 
     WinPipe stdout_pipe = {0}, stderr_pipe = {0};
@@ -907,7 +911,7 @@ const char* shell_get_temp_dir(void) {
     }
 #else
     const char* tmp = getenv("TMPDIR");
-    if (!tmp) tmp = "/tmp";
+    if (!tmp) tmp = "/tmp";  // TMP_PATH_OK: shell tmpdir fallback when $TMPDIR unset
     s_cached_temp = mem_strdup(tmp, MEM_CAT_TEMP);
 #endif
     return s_cached_temp;

@@ -376,7 +376,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         height_assigned_by_parent = true;
                     }
                 } else if (parent_is_row) {
-                    int effective_align = (int)container->fi->align_self != ALIGN_AUTO ? // INT_CAST_OK: enum comparison
+                    int effective_align = (int)container->fi->align_self != ALIGN_AUTO ?
                         container->fi->align_self :
                         (parent_block && parent_block->embed && parent_block->embed->flex ?
                             parent_block->embed->flex->align_items : ALIGN_STRETCH);
@@ -717,7 +717,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                                 const char* text = (const char*)dom_child->text_data();
                                 if (!text) continue;
                                 size_t text_len = strlen(text);
-                                char normalized[2048];
+                                static thread_local char normalized[2048];  // LARGE_ARRAY_OK: static buffer — not on call stack.
                                 size_t out_pos = 0;
                                 bool in_ws = true;
                                 for (size_t i = 0; i < text_len && out_pos < sizeof(normalized) - 1; i++) {
@@ -1091,7 +1091,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         size_t text_len = strlen(text);
                         // Normalize whitespace: collapse consecutive spaces, trim leading/trailing
                         // This matches CSS white-space: normal behavior
-                        char normalized_buffer[2048];
+                        static thread_local char normalized_buffer[2048];  // LARGE_ARRAY_OK: static buffer — not on call stack.
                         size_t out_pos = 0;
                         bool in_whitespace = true;  // Start as if preceded by whitespace (trims leading)
                         for (size_t i = 0; i < text_len && out_pos < sizeof(normalized_buffer) - 1; i++) {
@@ -1830,12 +1830,12 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
                 bool is_baseline_item = false;
                 {
-                    int align = (has_flex_item_prop(item) && (int)item->fi->align_self != ALIGN_AUTO) ? // INT_CAST_OK: enum comparison
+                    int align = (has_flex_item_prop(item) && (int)item->fi->align_self != ALIGN_AUTO) ?
                         item->fi->align_self : flex_layout->align_items;
                     is_baseline_item = (align == ALIGN_BASELINE || align == CSS_VALUE_BASELINE);
                 }
                 log_debug("%s Phase 9a: item %d: is_baseline_item=%d, height=%.0f", container->source_loc(),
-                          j, (int)is_baseline_item, item->height); // INT_CAST_OK: bool for log
+                          j, (int)is_baseline_item, item->height);
 
                 if (is_baseline_item && is_main_axis_horizontal(flex_layout)) {
                     has_baseline = true;
@@ -1916,7 +1916,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         if (!has_baseline_child) {
             for (int i = 0; i < first_line->item_count; i++) {
                 ViewElement* item = lam::view_as_element(first_line->items[i]);
-                if (has_flex_item_prop(item) && (int)item->fi->align_self == ALIGN_BASELINE) { // INT_CAST_OK: enum comparison
+                if (has_flex_item_prop(item) && (int)item->fi->align_self == ALIGN_BASELINE) {
                     has_baseline_child = true;
                     break;
                 }
@@ -2461,7 +2461,7 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
             // 1. Parent is column flex (cross-axis is width)
             // 2. align-items is stretch (or auto which defaults to stretch)
             // 3. Item has no explicit align-self override
-            int align_type = (has_flex_item_prop(item) && (int)item->fi->align_self != ALIGN_AUTO) ? // INT_CAST_OK: enum comparison
+            int align_type = (has_flex_item_prop(item) && (int)item->fi->align_self != ALIGN_AUTO) ?
                              item->fi->align_self : flex_layout->align_items;
             bool should_stretch = (align_type == ALIGN_STRETCH);
 
@@ -2736,7 +2736,7 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
         }
 
         // determine alignment type for this item
-        int align_type = ((int)item->fi->align_self != ALIGN_AUTO) ? // INT_CAST_OK: enum comparison
+        int align_type = ((int)item->fi->align_self != ALIGN_AUTO) ?
                          item->fi->align_self : flex_layout->align_items;
         bool is_stretch = (align_type == ALIGN_STRETCH);
 
@@ -3164,7 +3164,7 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
     // below the size that would maintain the aspect-ratio at the established cross size).
     // This only applies when the main-axis minimum is AUTO (not explicitly set by CSS).
     if (item->fi && item->fi->aspect_ratio > 0) {
-        int align_type = ((int)item->fi->align_self != ALIGN_AUTO) ? // INT_CAST_OK: enum comparison
+        int align_type = ((int)item->fi->align_self != ALIGN_AUTO) ?
                          item->fi->align_self : (flex_layout ? flex_layout->align_items : ALIGN_STRETCH);
         bool is_stretch = (align_type == ALIGN_STRETCH);
         if (is_stretch && flex_layout && flex_layout->cross_axis_size > 0) {
@@ -3645,7 +3645,7 @@ float find_max_baseline(FlexLineInfo* line, int container_align_items) {
 
         // Check if this item participates in baseline alignment
         // Either via align-self: baseline OR container's align-items: baseline (and no override)
-        int align_self = has_flex_item_prop(item) ? (int)item->fi->align_self : ALIGN_AUTO; // INT_CAST_OK: enum value
+        int align_self = has_flex_item_prop(item) ? (int)item->fi->align_self : ALIGN_AUTO;
         bool uses_baseline = (align_self == ALIGN_BASELINE) ||
                             (align_self == ALIGN_AUTO && container_align_items == ALIGN_BASELINE);
 
@@ -3702,7 +3702,7 @@ void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container) 
             FlexLineInfo* line = &flex_layout->lines[i];
             for (int j = 0; j < line->item_count; j++) {
                 ViewElement* item = lam::view_as_element(line->items[j]);
-                if (has_flex_item_prop(item) && (int)item->fi->align_self == ALIGN_BASELINE) { // INT_CAST_OK: enum comparison
+                if (has_flex_item_prop(item) && (int)item->fi->align_self == ALIGN_BASELINE) {
                     has_baseline_alignment = true;
                     break;
                 }
@@ -3739,7 +3739,7 @@ void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container) 
 
             // Check if this item uses baseline alignment
             // NOTE: fi may be NULL for items that inherit alignment from container
-            int align_self = (has_flex_item_prop(item) && (int)item->fi->align_self != ALIGN_AUTO) ? // INT_CAST_OK: enum comparison
+            int align_self = (has_flex_item_prop(item) && (int)item->fi->align_self != ALIGN_AUTO) ?
                 item->fi->align_self : ALIGN_AUTO;
             bool uses_baseline = (align_self == ALIGN_BASELINE) ||
                                 (align_self == ALIGN_AUTO && flex_layout->align_items == ALIGN_BASELINE);
@@ -3821,7 +3821,7 @@ void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container) 
         for (int i = 0; i < line->item_count; i++) {
             ViewElement* item = lam::view_as_element(line->items[i]);
             if (!item) continue;
-            int align_self = (has_flex_item_prop(item) && (int)item->fi->align_self != ALIGN_AUTO) ? // INT_CAST_OK: enum comparison
+            int align_self = (has_flex_item_prop(item) && (int)item->fi->align_self != ALIGN_AUTO) ?
                 item->fi->align_self : flex_layout->align_items;
             bool is_baseline_item = (align_self == ALIGN_BASELINE || align_self == CSS_VALUE_BASELINE);
             if (is_baseline_item) {
@@ -4784,7 +4784,7 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
             log_debug("ALIGN_SELF_FORM - item %d: using container align_items=%d", i, align_type);
         } else {
             // CRITICAL FIX: Use align values directly - they're now stored as Lexbor constants
-            align_type = (int)item->fi->align_self != ALIGN_AUTO ? item->fi->align_self : flex_layout->align_items; // INT_CAST_OK: enum comparison
+            align_type = (int)item->fi->align_self != ALIGN_AUTO ? item->fi->align_self : flex_layout->align_items;
             log_debug("ALIGN_SELF_RAW - item %d: align_self=%d, ALIGN_AUTO=%d, flex_align_items=%d",
                    i, item->fi->align_self, ALIGN_AUTO, flex_layout->align_items);
         }
@@ -5171,9 +5171,9 @@ void align_content(FlexContainerLayout* flex_layout) {
                 log_debug("ALIGN_STRETCH: container=%d, total_lines=%d, free=%d, extra_per_line=%d",
                           container_cross_size, total_lines_size, free_space, extra_per_line);
                 for (int i = 0; i < flex_layout->line_count; i++) {
-                    int old_size = flex_layout->lines[i].cross_size;
+                    float old_size = flex_layout->lines[i].cross_size;
                     flex_layout->lines[i].cross_size += extra_per_line;
-                    log_debug("ALIGN_STRETCH: line %d: %d + %d = %d",
+                    log_debug("ALIGN_STRETCH: line %d: %g + %d = %g",
                               i, old_size, extra_per_line, flex_layout->lines[i].cross_size);
                 }
             }
@@ -5512,7 +5512,7 @@ static bool item_will_stretch(ViewElement* item, FlexContainerLayout* flex_layou
     if (!has_flex_item_prop(item)) return false;
 
     // Get effective align-self (uses align-items if auto)
-    int align_type = (int)item->fi->align_self != ALIGN_AUTO ? // INT_CAST_OK: enum comparison
+    int align_type = (int)item->fi->align_self != ALIGN_AUTO ?
                      item->fi->align_self : flex_layout->align_items;
 
     return align_type == ALIGN_STRETCH;
@@ -5572,7 +5572,7 @@ static void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
             // Check if this item participates in baseline alignment
             bool is_baseline = false;
             if (has_flex_item_prop(item)) {
-                int align = (int)item->fi->align_self != ALIGN_AUTO ? // INT_CAST_OK: enum comparison
+                int align = (int)item->fi->align_self != ALIGN_AUTO ?
                     item->fi->align_self : flex_layout->align_items;
                 is_baseline = (align == ALIGN_BASELINE || align == CSS_VALUE_BASELINE);
             }

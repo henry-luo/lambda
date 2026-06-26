@@ -18,6 +18,7 @@
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/lambda_alloca.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/strbuf.h"
@@ -756,7 +757,7 @@ extern "C" Item bash_glob_quote_str(Item str) {
     // build escaped string
     size_t slen = strlen(s);
     size_t cap = slen * 2 + 1;
-    char* out = (char*)alloca(cap);
+    char* out = LAMBDA_ALLOCA(cap, char);
     size_t j = 0;
     for (size_t i = 0; i < slen; i++) {
         if (s[i] == '\\' || s[i] == '*' || s[i] == '?' || s[i] == '[') {

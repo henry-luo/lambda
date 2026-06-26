@@ -6,6 +6,7 @@
 #include "mark_editor.hpp"
 #include "mark_reader.hpp"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include <string.h>
 
 // forward declaration: runtime context (defined in mir.c)
@@ -495,18 +496,17 @@ EditSession* edit_session_new_with_input(void* input_ptr, Item root, EditSchema*
         return NULL;
     }
     input->root = root;
-    EditSession* session = new EditSession;
+    EditSession* session = (EditSession*)mem_calloc(1, sizeof(EditSession), MEM_CAT_EVAL);
     if (!session) {
         log_error("edit_session_new_with_input: failed to allocate session");
         return NULL;
     }
-    memset(session, 0, sizeof(EditSession));
     session->input = input;
     session->schema = schema;
-    session->editor = new MarkEditor(input, EDIT_MODE_IMMUTABLE);
+    session->editor = mark_editor_create(input, EDIT_MODE_IMMUTABLE);
     if (!session->editor) {
         log_error("edit_session_new_with_input: failed to allocate MarkEditor");
-        delete session;
+        mem_free(session);
         return NULL;
     }
     edit_session_init_pos(session);
@@ -517,10 +517,10 @@ EditSession* edit_session_new_with_input(void* input_ptr, Item root, EditSchema*
 void edit_session_destroy(EditSession* session) {
     if (!session) { return; }
     if (session->editor) {
-        delete session->editor;
+        mark_editor_destroy(session->editor);
         session->editor = NULL;
     }
-    delete session;
+    mem_free(session);
     log_debug("edit_session_destroy: rich-text session destroyed");
 }
 
@@ -635,7 +635,7 @@ void edit_session_subscribe(EditSession* session, EditEventKind kind, EditCallba
 int edit_bridge_init(void* input_ptr) {
     if (s_editor) {
         log_debug("edit_bridge_init: editor already active, destroying old");
-        delete s_editor;
+        mark_editor_destroy(s_editor);
         s_editor = NULL;
     }
     Input* input = (Input*)input_ptr;
@@ -658,14 +658,14 @@ int edit_bridge_init(void* input_ptr) {
         s_editor_input = input;
         log_debug("edit_bridge_init: created Input from runtime pool");
     }
-    s_editor = new MarkEditor(input, EDIT_MODE_INLINE);
+    s_editor = mark_editor_create(input, EDIT_MODE_INLINE);
     log_debug("edit_bridge_init: editor created (inline mode)");
     return 0;
 }
 
 void edit_bridge_destroy(void) {
     if (s_editor) {
-        delete s_editor;
+        mark_editor_destroy(s_editor);
         s_editor = NULL;
         log_debug("edit_bridge_destroy: editor destroyed");
     }

@@ -167,6 +167,64 @@ static unsigned char* load_png(const char* filename, int* width, int* height, in
     return image_data;
 }
 
+// Save an 8-bit, row-contiguous image buffer (`channels` bytes/pixel) to a PNG file.
+// channels: 1=grayscale, 3=RGB, 4=RGBA.  Returns 1 on success, 0 on failure.
+int image_save_png(const char* filename, const unsigned char* data,
+                   int width, int height, int channels) {
+    if (!filename || !data || width <= 0 || height <= 0) {
+        log_error("image_save_png: invalid parameters");
+        return 0;
+    }
+    int color_type;
+    switch (channels) {
+        case 1:  color_type = PNG_COLOR_TYPE_GRAY; break;
+        case 3:  color_type = PNG_COLOR_TYPE_RGB;  break;
+        case 4:  color_type = PNG_COLOR_TYPE_RGBA; break;
+        default:
+            log_error("image_save_png: unsupported channel count %d (want 1, 3, or 4)", channels);
+            return 0;
+    }
+    FILE* fp = fopen(filename, "wb");
+    if (!fp) { log_error("image_save_png: cannot open %s for writing", filename); return 0; }
+
+    png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!png_ptr) { fclose(fp); return 0; }
+    png_infop info_ptr = png_create_info_struct(png_ptr);
+    if (!info_ptr) { png_destroy_write_struct(&png_ptr, NULL); fclose(fp); return 0; }
+
+    png_bytep* row_pointers = NULL;
+    if (setjmp(png_jmpbuf(png_ptr))) {
+        log_error("image_save_png: libpng error while writing %s", filename);
+        if (row_pointers) mem_free(row_pointers);
+        png_destroy_write_struct(&png_ptr, &info_ptr);
+        fclose(fp);
+        return 0;
+    }
+    png_init_io(png_ptr, fp);
+    png_set_IHDR(png_ptr, info_ptr, width, height, 8, color_type,
+                 PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+    png_write_info(png_ptr, info_ptr);
+
+    row_pointers = mem_alloc(sizeof(png_bytep) * height, MEM_CAT_IMAGE);
+    if (!row_pointers) {
+        png_destroy_write_struct(&png_ptr, &info_ptr);
+        fclose(fp);
+        return 0;
+    }
+    size_t row_bytes = (size_t)width * channels;
+    for (int y = 0; y < height; y++) {
+        // libpng does not write through these pointers, so dropping const is safe
+        row_pointers[y] = (png_bytep)(data + (size_t)y * row_bytes);
+    }
+    png_write_image(png_ptr, row_pointers);
+    png_write_end(png_ptr, NULL);
+
+    mem_free(row_pointers);
+    png_destroy_write_struct(&png_ptr, &info_ptr);
+    fclose(fp);
+    return 1;
+}
+
 // Load JPEG image using TurboJPEG
 static unsigned char* load_jpeg(const char* filename, int* width, int* height, int* channels, int req_channels) {
     (void)req_channels; // Mark as unused for compatibility

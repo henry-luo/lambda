@@ -225,7 +225,7 @@ static inline bool clip_shape_rect_inside(ClipShape* cs, float x, float y, float
 }
 
 // Test if an axis-aligned rect is entirely inside ALL clip shapes in the stack.
-static inline bool clip_shapes_rect_inside(ClipShape** shapes, int depth,
+static inline bool clip_shapes_rect_inside(ClipShape** shapes, int depth, // UNUSED_DEPTH_OK: stack size (loop bound), not a recursion depth.
     float x, float y, float w, float h) {
     for (int i = 0; i < depth; i++) {
         if (!clip_shape_rect_inside(shapes[i], x, y, w, h)) return false;
@@ -235,7 +235,7 @@ static inline bool clip_shapes_rect_inside(ClipShape** shapes, int depth,
 
 // Compute the tightest scanline [left, right] at row y across ALL clip shapes.
 // Intersects with [base_left, base_right] from the axis-aligned clip.
-static inline void clip_shapes_scanline_bounds(ClipShape** shapes, int depth,
+static inline void clip_shapes_scanline_bounds(ClipShape** shapes, int depth, // UNUSED_DEPTH_OK: stack size (loop bound), not a recursion depth.
     float y, int base_left, int base_right, int* out_left, int* out_right) {
     int left = base_left, right = base_right;
     for (int i = 0; i < depth; i++) {

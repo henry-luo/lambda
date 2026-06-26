@@ -1,0 +1,22 @@
+id: no-new-delete
+language: cpp
+severity: warning
+message: >-
+  Raw `new`/`delete` in pool/arena-managed code. Lambda/Radiant objects live in
+  the GC nursery, arenas, or mem pools — use pool_alloc/arena_alloc/mem_alloc
+  helpers, or placement-new into pool-owned storage. Mark an audited exception
+  with a trailing "// NEW_DELETE_OK: <reason>".
+metadata:
+  suppress: NEW_DELETE_OK
+rule:
+  any:
+    - kind: new_expression
+    - kind: delete_expression
+files:
+  # Scope to lambda/ (excluding the embedded JS engine, which legitimately uses
+  # `new` for JS object construction) and radiant/.
+  - "lambda/**/*.{cpp,hpp}"
+  - "radiant/**/*.{cpp,hpp}"
+ignores:
+  - "**/tree-sitter*/**"
+  - "lambda/js/**"

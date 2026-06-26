@@ -506,13 +506,13 @@ static String* parse_pdf_name(InputContext& ctx, const char **pdf) {
     int max_chars = 100; // Safety limit for name length
 
     while (**pdf && char_count < max_chars &&
-           !isspace(**pdf) && **pdf != '/' && **pdf != '(' && **pdf != ')' &&
+           !isspace((unsigned char)**pdf) && **pdf != '/' && **pdf != '(' && **pdf != ')' &&
            **pdf != '<' && **pdf != '>' && **pdf != '[' && **pdf != ']' &&
            **pdf != '{' && **pdf != '}' && **pdf != '%' && **pdf != '\0') {
         if (**pdf == '#') {
             // hex escape in name
             (*pdf)++; // skip #
-            if (isxdigit(**pdf) && isxdigit(*(*pdf + 1))) {
+            if (isxdigit((unsigned char)**pdf) && isxdigit((unsigned char)*(*pdf + 1))) {
                 char hex_string[3] = {**pdf, *(*pdf + 1), '\0'};
                 int char_value = (int)strtol(hex_string, NULL, 16);
                 stringbuf_append_char(sb, (char)char_value);
@@ -592,10 +592,10 @@ static String* parse_pdf_string(InputContext& ctx, const char **pdf) {
         int max_chars = 100000; // Safety limit - increased for real PDFs
 
         while (**pdf && **pdf != '>' && char_count < max_chars) {
-            if (isxdigit(**pdf)) {
+            if (isxdigit((unsigned char)**pdf)) {
                 char hex_char = **pdf;
                 (*pdf)++;
-                if (isxdigit(**pdf)) {
+                if (isxdigit((unsigned char)**pdf)) {
                     char hex_string[3] = {hex_char, **pdf, '\0'};
                     int char_value = (int)strtol(hex_string, NULL, 16);
                     stringbuf_append_char(sb, (char)char_value);
@@ -660,16 +660,16 @@ static Item parse_pdf_object(InputContext& ctx, const char **pdf, int depth) {
         result = {.item = ITEM_NULL}; // Signal end of stream
     }
     // check for null
-    else if (strncmp(*pdf, "null", 4) == 0 && (!isalnum(*(*pdf + 4)))) {
+    else if (strncmp(*pdf, "null", 4) == 0 && (!isalnum((unsigned char)*(*pdf + 4)))) {
         *pdf += 4;
         result = {.item = ITEM_NULL};
     }
     // check for boolean values
-    else if (strncmp(*pdf, "true", 4) == 0 && (!isalnum(*(*pdf + 4)))) {
+    else if (strncmp(*pdf, "true", 4) == 0 && (!isalnum((unsigned char)*(*pdf + 4)))) {
         *pdf += 4;
         result = {.item = b2it(true)};
     }
-    else if (strncmp(*pdf, "false", 5) == 0 && (!isalnum(*(*pdf + 5)))) {
+    else if (strncmp(*pdf, "false", 5) == 0 && (!isalnum((unsigned char)*(*pdf + 5)))) {
         *pdf += 5;
         result = {.item = b2it(false)};
     }
@@ -1059,11 +1059,11 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
             if (strncmp(*pdf, "trailer", 7) == 0) break;
 
             // Try to parse a subsection header (starting_obj_num count)
-            if (isdigit(**pdf)) {
+            if (isdigit((unsigned char)**pdf)) {
                 int start_num = strtol(*pdf, (char**)pdf, 10);
                 skip_pdf_whitespace_and_comments(pdf);
 
-                if (isdigit(**pdf)) {
+                if (isdigit((unsigned char)**pdf)) {
                     int count = strtol(*pdf, (char**)pdf, 10);
                     skip_pdf_whitespace_and_comments(pdf);
 
@@ -1072,11 +1072,11 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                         skip_pdf_whitespace_and_comments(pdf);
 
                         // Parse entry: offset generation flag
-                        if (isdigit(**pdf)) {
+                        if (isdigit((unsigned char)**pdf)) {
                             int offset = strtol(*pdf, (char**)pdf, 10);
                             skip_pdf_whitespace_and_comments(pdf);
 
-                            if (isdigit(**pdf)) {
+                            if (isdigit((unsigned char)**pdf)) {
                                 strtol(*pdf, (char**)pdf, 10);
                                 skip_pdf_whitespace_and_comments(pdf);
 

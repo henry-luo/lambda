@@ -14,7 +14,7 @@ These rules MUST be followed. Violations are considered errors.
 8. After adding a new Lambda unit test script `*.ls`, ALWAYS add the corresponding expected result `*.txt` file.
 9. Follow C++17 standard. Start each log line with a distinct prefix/phrase for easy searching.
 10. **NEVER use debug build for performance testing**. Use release build (`make release`).
-11. **In `radiant/` layout code, NEVER use `int` for position/dimension variables**. All layout dimensions are `float`. If an `(int)` cast is truly needed (e.g., string length, repeat count), mark it with `// INT_CAST_OK: <reason>`. Run `make check-int-cast` to verify.
+11. **In `radiant/` layout code, NEVER use `int` for position/dimension variables**. All layout dimensions are `float`. If an `(int)` cast is truly needed (e.g., string length, repeat count), mark it with `// INT_CAST_OK: <reason>`. Run `make lint ARGS='--rule ^no-int-cast-radiant$'` to verify (or `make lint` for the full sweep).
 
 | DON'T | DO |
 |-------|-----|
@@ -148,6 +148,7 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 
 ### Debugging a Crash
 1. Check `./log.txt` for execution trace
+2. Inspect the transpiled MIR — debug builds dump the JIT'd MIR to `temp/mir_dump.txt`; read it to debug Lambda script transpilation/codegen issues (boxing, type, comparison representation)
 
 ## Lambda Language Documentation
 - `doc/Lambda_Reference.md` — Language overview and quick reference

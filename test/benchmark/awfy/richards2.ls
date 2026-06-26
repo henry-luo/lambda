@@ -386,7 +386,7 @@ pn schedule(sched, task_table) {
 pn benchmark() {
     // Scheduler state
     var sched = { qpc: 0, hc: 0, ct: null, cti: 0, tl: null }
-    var task_table = [null, null, null, null, null, null]
+    var task_table = fill(6, null)
 
     // createIdler(IDLER, 0, null, createRunning)
     // createRunning: pp=false, tw=false, th=false
