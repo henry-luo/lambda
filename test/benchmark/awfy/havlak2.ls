@@ -15,12 +15,12 @@ let BB_DEAD = 5
 // Helpers
 // =====================================================
 pn null16() {
-    var a = [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
+    var a = fill(16, null)
     return a
 }
 
 pn null32() {
-    var a = [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
+    var a = fill(32, null)
     return a
 }
 

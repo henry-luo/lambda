@@ -102,18 +102,36 @@ baseline 3232/3232, no regressions.
 **Pattern**: Literal arrays of nulls like `[null,null,null,...,null]` for 2, 4, 6, 16,
 or 32 elements.
 
-**Why**: These serve as chunk buffers for hand-rolled growable arrays (Vec/Arr
-abstractions). `fill(16, null)` would be more concise but caused runtime hangs in
-hot-path functions like `null16()`/`null32()` during testing. Literal null arrays work
-reliably.
+**Why (historical)**: These serve as chunk buffers for hand-rolled growable arrays
+(Vec/Arr abstractions). `fill(16, null)` was reported to cause runtime hangs in
+hot-path functions like `null16()`/`null32()`, so literal null arrays were used.
 
-**Files affected**:
-- `awfy/cd.ls`, `awfy/cd2.ls` — `null16()`, `null32()`, `vxy = [null, null]`
+**Status**: **MOSTLY RESOLVED**. `fill(n, null)` no longer hangs and is now used in
+11 of the 13 affected files, each verified byte-for-byte identical to the literal
+version (passing benchmarks stay passing; pre-existing failures are unchanged).
+
+**Exception — `awfy/cd.ls` / `awfy/cd2.ls` keep the literals.** Converting CD to
+`fill(n, null)` triggers a **heap-use-after-free** (ASan abort) — but the fault is
+*not* in `fill`. An all-null literal is never promoted (`try_promote_scalars_to_1d`
+bails on the non-numeric `null`), so `fill` and the literal build the same generic
+`Array`. The crash is in an *unrelated* numeric array-literal promotion
+(`array_end → try_promote_scalars_to_1d → array_num_new → gc_collect → gc_sweep`)
+that frees a JIT local still live in a pending `ck == null` comparison (`fn_eq`).
+`fill`'s different allocation timing merely exposes this **latent JIT GC-rooting
+gap** (locals not rooted across an `array_end` that can GC). It is not minimally
+reproducible and the fix belongs in the JIT root-frame machinery — tracked
+separately. CD therefore retains literal null arrays until that GC bug is fixed.
+
+**Files converted to `fill(n, null)`**:
 - `awfy/havlak.ls`, `awfy/havlak2.ls` — `null16()`, `null32()`
-- `awfy/json.ls`, `awfy/json2.ls` — `chunks: [null,...,null]` in map literals
-- `awfy/deltablue.ls`, `awfy/deltablue2.ls` — same chunked pattern
-- `awfy/storage.ls`, `awfy/storage2.ls` — `[null, null, null, null]`
-- `awfy/richards.ls`, `awfy/richards2.ls` — `[null, null, null, null, null, null]`
+- `awfy/json.ls`, `awfy/json2.ls` — `chunks: fill(16, null)` in `vec_new`/`vec_add`
+- `awfy/deltablue2.ls` — chunked `Vec` buffers
+- `awfy/storage.ls`, `awfy/storage2.ls` — `fill(4, null)`
+- `awfy/richards.ls`, `awfy/richards2.ls` — `task_table = fill(6, null)`
+- `jetstream/richards.ls`, `jetstream/richards2.ls` — `blocks = fill(6, null)`
+
+**Kept as literals (GC-bug exception)**:
+- `awfy/cd.ls`, `awfy/cd2.ls` — `null16()`, `null32()`, `vxy = [null, null]`
 
 ---
 

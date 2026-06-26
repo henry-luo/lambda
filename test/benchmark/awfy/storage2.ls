@@ -16,7 +16,7 @@ pn build_tree_depth(state: SState, depth: int, seed_arr: int[]) {
     if (depth == 1) {
         return fill((random_next(seed_arr) % 10) + 1, 0)
     }
-    var arr = [null, null, null, null]
+    var arr = fill(4, null)
     var i: int = 0
     while (i < 4) {
         arr[i] = build_tree_depth(state, depth - 1, seed_arr)
