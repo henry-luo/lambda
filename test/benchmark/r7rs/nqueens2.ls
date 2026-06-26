@@ -2,10 +2,6 @@
 // Count all solutions to N-Queens problem
 // Adapted from r7rs-benchmarks/src/nqueens.scm: nqueens(8) = 92 (scaled down)
 
-pn make_array(n: int, val) {
-    return fill(n, val)
-}
-
 pn ok(row: int, dist: int, placed: int[], placed_len: int) {
     if (dist > placed_len) {
         return 1
@@ -32,7 +28,7 @@ pn solve(candidates: int[], cand_len: int, rest: int[], rest_len: int, placed: i
     var count: int = 0
 
     if (ok(row, 1, placed, placed_len) == 1) {
-        var new_cands:int[] = make_array(cand_len - 1 + rest_len, 0)
+        var new_cands:int[] = fill(cand_len - 1 + rest_len, 0)
         var ni: int = 0
         var ci: int = 1
         while (ci < cand_len) {
@@ -47,10 +43,10 @@ pn solve(candidates: int[], cand_len: int, rest: int[], rest_len: int, placed: i
             ri = ri + 1
         }
         placed[placed_len] = row
-        count = count + solve(new_cands, ni, make_array(1, 0), 0, placed, placed_len + 1)
+        count = count + solve(new_cands, ni, fill(1, 0), 0, placed, placed_len + 1)
     }
 
-    var new_rest:int[] = make_array(rest_len + 1, 0)
+    var new_rest:int[] = fill(rest_len + 1, 0)
     var ri2: int = 0
     while (ri2 < rest_len) {
         new_rest[ri2] = rest[ri2]
@@ -58,7 +54,7 @@ pn solve(candidates: int[], cand_len: int, rest: int[], rest_len: int, placed: i
     }
     new_rest[rest_len] = row
 
-    var new_cands2:int[] = make_array(cand_len - 1, 0)
+    var new_cands2:int[] = fill(cand_len - 1, 0)
     var ci2: int = 1
     var ni2: int = 0
     while (ci2 < cand_len) {
@@ -72,14 +68,14 @@ pn solve(candidates: int[], cand_len: int, rest: int[], rest_len: int, placed: i
 }
 
 pn nqueens(n: int) {
-    var candidates:int[] = make_array(n, 0)
+    var candidates:int[] = fill(n, 0)
     var i: int = 0
     while (i < n) {
         candidates[i] = i + 1
         i = i + 1
     }
-    var placed:int[] = make_array(n, 0)
-    var empty:int[] = make_array(1, 0)
+    var placed:int[] = fill(n, 0)
+    var empty:int[] = fill(1, 0)
     return solve(candidates, n, empty, 0, placed, 0)
 }
 

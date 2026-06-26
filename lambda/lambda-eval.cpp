@@ -272,7 +272,7 @@ Item fn_join(Item left, Item right) {
                 int64_t total = la->length + ra->length;
                 ArrayNum *result = (ArrayNum *)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
                 result->type_id = LMD_TYPE_ARRAY_NUM;
-                result->flags = la->get_elem_type();
+                result->set_elem_type(la->get_elem_type());
                 result->length = total;  result->capacity = total;
                 uint64_t result_root = (uint64_t)(uintptr_t)result;
                 heap_register_gc_root(&result_root);
@@ -1031,10 +1031,12 @@ static inline Item seq_get_element(Item item, TypeId tid, int64_t i) {
 }
 
 // helper: get length from any sequence type
+// For N-D ArrayNum, returns shape[0] (leading-axis count, NumPy-compatible).
+// 1-D ArrayNum returns total length.
 static inline int64_t seq_get_length(Item item, TypeId tid) {
     switch (tid) {
     case LMD_TYPE_ARRAY:        return item.array->length;
-    case LMD_TYPE_ARRAY_NUM:   return item.array_num->length;
+    case LMD_TYPE_ARRAY_NUM:   return array_num_iter_count(item.array_num);
     case LMD_TYPE_RANGE:       return item.range->length;
     default:                   return -1;
     }
@@ -1261,7 +1263,9 @@ Bool fn_ne(Item a_item, Item b_item) {
 }
 
 // 3-state value/ordered comparison
-Bool fn_lt(Item a_item, Item b_item) {
+// Scalar 3-state ordered comparison (BOOL_TRUE/BOOL_FALSE/BOOL_ERROR).  The
+// public fn_lt/fn_gt/fn_le/fn_ge wrappers add vectorized array dispatch on top.
+Bool fn_lt_scalar(Item a_item, Item b_item) {
     if (a_item._type_id != b_item._type_id) {
         // null comparison with any type returns false for ordered comparisons
         if (a_item._type_id == LMD_TYPE_NULL || b_item._type_id == LMD_TYPE_NULL) {
@@ -1315,8 +1319,7 @@ Bool fn_lt(Item a_item, Item b_item) {
     return BOOL_ERROR;
 }
 
-// 3-state value/ordered comparison
-Bool fn_gt(Item a_item, Item b_item) {
+Bool fn_gt_scalar(Item a_item, Item b_item) {
     if (a_item._type_id != b_item._type_id) {
         // null comparison with any type returns false for ordered comparisons
         if (a_item._type_id == LMD_TYPE_NULL || b_item._type_id == LMD_TYPE_NULL) {
@@ -1370,16 +1373,36 @@ Bool fn_gt(Item a_item, Item b_item) {
     return BOOL_ERROR;
 }
 
-Bool fn_le(Item a_item, Item b_item) {
-    Bool result = fn_gt(a_item, b_item);
-    if (result == BOOL_ERROR) return BOOL_ERROR;
-    return !result;
+// Ordered comparisons now return Item (Any): an ARRAY_NUM operand yields an
+// element-wise boolean mask via vec_cmp (mirroring fn_add → vec_add), otherwise
+// the scalar comparison boxed as a bool Item.  vec_cmp op codes are the operator
+// minus OPERATOR_EQ: LT=2, LE=3, GT=4, GE=5.  (fn_eq/fn_ne stay Bool — not vectorized.)
+Item fn_lt(Item a_item, Item b_item) {
+    if (get_type_id(a_item) == LMD_TYPE_ARRAY_NUM || get_type_id(b_item) == LMD_TYPE_ARRAY_NUM)
+        return vec_cmp(a_item, b_item, 2);
+    Bool r = fn_lt_scalar(a_item, b_item);
+    return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r) };
 }
 
-Bool fn_ge(Item a_item, Item b_item) {
-    Bool result = fn_lt(a_item, b_item);
-    if (result == BOOL_ERROR) return BOOL_ERROR;
-    return !result;
+Item fn_gt(Item a_item, Item b_item) {
+    if (get_type_id(a_item) == LMD_TYPE_ARRAY_NUM || get_type_id(b_item) == LMD_TYPE_ARRAY_NUM)
+        return vec_cmp(a_item, b_item, 4);
+    Bool r = fn_gt_scalar(a_item, b_item);
+    return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r) };
+}
+
+Item fn_le(Item a_item, Item b_item) {
+    if (get_type_id(a_item) == LMD_TYPE_ARRAY_NUM || get_type_id(b_item) == LMD_TYPE_ARRAY_NUM)
+        return vec_cmp(a_item, b_item, 3);
+    Bool r = fn_gt_scalar(a_item, b_item);   // a <= b  ==  !(a > b)
+    return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r ? BOOL_FALSE : BOOL_TRUE) };
+}
+
+Item fn_ge(Item a_item, Item b_item) {
+    if (get_type_id(a_item) == LMD_TYPE_ARRAY_NUM || get_type_id(b_item) == LMD_TYPE_ARRAY_NUM)
+        return vec_cmp(a_item, b_item, 5);
+    Bool r = fn_lt_scalar(a_item, b_item);   // a >= b  ==  !(a < b)
+    return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r ? BOOL_FALSE : BOOL_TRUE) };
 }
 
 Bool fn_not(Item item) {
@@ -2515,6 +2538,10 @@ Item fn_index(Item item, Item index_item) {
             }
             return ItemNull;
         }
+        // boolean mask index: arr[mask] — select elements where mask is true
+        if (index_type == LMD_TYPE_ARRAY_NUM && item_type == LMD_TYPE_ARRAY_NUM) {
+            return fn_mask_index(item, index_item);
+        }
         // for VMap, support arbitrary key types (int, float, etc.)
         TypeId item_type = get_type_id(item);
         if (item_type == LMD_TYPE_VMAP) {
@@ -2812,7 +2839,7 @@ int64_t fn_len(Item item) {
         size = item.range->length;
         break;
     case LMD_TYPE_ARRAY_NUM:
-        size = item.array_num->length;
+        size = array_num_iter_count(item.array_num);
         break;
     case LMD_TYPE_MAP: {
         size = 0;
@@ -2890,11 +2917,22 @@ int64_t fn_len(Item item) {
 
 extern "C" int64_t fn_len_l(List* list) {
     if (!list) return 0;
+    // Runtime check: nested numeric literals may have been auto-promoted from
+    // List/Array to N-D ArrayNum (the JIT dispatched based on static type).
+    if (list->type_id == LMD_TYPE_ARRAY_NUM) {
+        return array_num_iter_count((ArrayNum*)list);
+    }
     return list->length;
 }
 
 extern "C" int64_t fn_len_a(Array* arr) {
     if (!arr) return 0;
+    // Runtime check: static type may say Array but actual could be ArrayNum
+    // (e.g. nested literals auto-promoted to N-D). For N-D ArrayNum, return
+    // shape[0] (leading axis) to match NumPy semantics.
+    if (arr->type_id == LMD_TYPE_ARRAY_NUM) {
+        return array_num_iter_count((ArrayNum*)arr);
+    }
     return arr->length;
 }
 
@@ -3684,6 +3722,16 @@ Item fn_split(Item str_item, Item sep_item) {
     TypeId str_type = get_type_id(str_item);
     TypeId sep_type = get_type_id(sep_item);
 
+    // typed array split: split(arr, n) → n equal parts along axis 0
+    if (str_type == LMD_TYPE_ARRAY_NUM) {
+        if (sep_type != LMD_TYPE_INT && sep_type != LMD_TYPE_INT64) {
+            log_error("split: section count must be an integer");
+            return ItemError;
+        }
+        int64_t n = (sep_type == LMD_TYPE_INT) ? sep_item.get_int56() : sep_item.get_int64();
+        return fn_array_split(str_item, n, 0);
+    }
+
     // null string splits to empty list
     if (str_type == LMD_TYPE_NULL) { List* e = list(); e->is_content = 1; return {.array = e}; }
 
@@ -3821,11 +3869,24 @@ Item fn_split(Item str_item, Item sep_item) {
 }
 
 // split(str, sep, keep_delim) - 3-arg version with keep_delim boolean
+// split(arr, n, axis) - typed array split into n equal parts along axis
 Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     GUARD_ERROR1(str_item);
     TypeId str_type = get_type_id(str_item);
     TypeId sep_type = get_type_id(sep_item);
     TypeId keep_type = get_type_id(keep_item);
+
+    // typed array split with explicit axis: split(arr, n, axis)
+    if (str_type == LMD_TYPE_ARRAY_NUM) {
+        if ((sep_type != LMD_TYPE_INT && sep_type != LMD_TYPE_INT64) ||
+            (keep_type != LMD_TYPE_INT && keep_type != LMD_TYPE_INT64)) {
+            log_error("split: section count and axis must be integers");
+            return ItemError;
+        }
+        int64_t n    = (sep_type == LMD_TYPE_INT) ? sep_item.get_int56() : sep_item.get_int64();
+        int64_t axis = (keep_type == LMD_TYPE_INT) ? keep_item.get_int56() : keep_item.get_int64();
+        return fn_array_split(str_item, n, axis);
+    }
 
     bool keep_delim = (keep_type == LMD_TYPE_BOOL && it2b(keep_item));
 
@@ -4722,6 +4783,17 @@ void fn_array_set(Array* arr, int64_t index, Item value) {
     }
     case LMD_TYPE_ARRAY_NUM: {
         ArrayNum* num_arr = (ArrayNum*)arr;
+        if (num_arr->is_view) {
+            if (!num_arr->is_mutable_view) {
+                log_error("fn_array_set: cannot mutate a read-only view; copy() first");
+                return;
+            }
+            // mutable view: write through via the element setter, which coerces to
+            // the element type, handles every compact type, and never detaches the
+            // view's aliased storage (data is pre-offset, so data[index] hits base).
+            array_num_set_item(num_arr, index, value);
+            break;
+        }
         TypeId val_type = get_type_id(value);
         ArrayNumElemType etype = num_arr->get_elem_type();
         if (etype == ELEM_FLOAT) {

@@ -553,7 +553,7 @@ static const char* get_temp_dir(void) {
 #else
     const char* temp = shell_getenv("TMPDIR");
     if (temp) return temp;
-    return "/tmp";
+    return "/tmp";  // TMP_PATH_OK: sysinfo reports the OS-standard tmpdir
 #endif
 }
 

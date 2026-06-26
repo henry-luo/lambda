@@ -474,7 +474,11 @@ function runTest(testInfo) {
 
         if (testInfo.runner === 'node') {
             command = 'node';
-            testArgs = appendArgValue(testInfo.args || [], '--report', jsonFile);
+            let scriptArgs = testInfo.args || [];
+            if (baseName === 'run_lambda_mathlive_markup' && targetCategory === 'baseline') {
+                scriptArgs = appendArgValue(scriptArgs, '--fixture-source', 'mathlive');
+            }
+            testArgs = appendArgValue(scriptArgs, '--report', jsonFile);
             spawnArgs = [scriptPath, ...testArgs];
         } else if (baseName === 'lambda_test_runner') {
             const tapFile = path.join(TEST_OUTPUT_DIR, `${baseName}_results.tap`);

@@ -2218,6 +2218,11 @@ static void resolve_font_size(LayoutContext* lycon, const CssDeclaration* decl) 
  */
 static float evaluate_calc_expression(LayoutContext* lycon, uintptr_t raw_prop,
                                       CssValue** items, int count, int* pos, int depth) {
+    // Bound parenthesis nesting to prevent stack overflow on adversarial
+    // stylesheets (Radiant audit finding #13).
+    constexpr int kMaxCalcDepth = 32;
+    if (depth > kMaxCalcDepth) return 0.0f;
+
     float result_sum = 0;
     float term = 0;
     int term_sign = 1;
@@ -6839,7 +6844,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     tf->params.matrix.a = 1; tf->params.matrix.b = 0;
                     tf->params.matrix.c = 0; tf->params.matrix.d = 1;
                     tf->params.matrix.e = 0; tf->params.matrix.f = 0;
-                    if (func->arg_count >= 6) {
+                    if (func->arg_count >= 6 &&
+                        func->args[0] && func->args[1] && func->args[2] &&
+                        func->args[3] && func->args[4] && func->args[5]) {
                         tf->params.matrix.a = func->args[0]->data.number.value;
                         tf->params.matrix.b = func->args[1]->data.number.value;
                         tf->params.matrix.c = func->args[2]->data.number.value;

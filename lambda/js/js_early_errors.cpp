@@ -73,7 +73,7 @@ static void ee_error(EarlyErrorCtx* ctx, JsAstNode* n, const char* fmt, ...) {
 
     uint32_t row = ts_node_start_point(n->node).row + 1;
     uint32_t col = ts_node_start_point(n->node).column + 1;
-    fprintf(stderr, "SyntaxError: %s (at line %u, column %u)\n", buf, row, col);
+    fprintf(stderr, "SyntaxError: %s (at line %u, column %u)\n", buf, row, col); // PRINTF_OK: stderr echo of js_error() for early-stage host visibility.
 }
 
 // ---- reserved word tables --------------------------------------------------

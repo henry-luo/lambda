@@ -12,6 +12,7 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/file.h"
 #include <limits.h>
+#include <new>
 #include <stdlib.h>
 #include <string.h>
 
@@ -1070,7 +1071,9 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         log_debug("reading file from path: %s", pathname ? pathname : "null");
 
         Input* input = input_from_local_path(pathname, abs_url, type, flavor);
-        url_destroy(abs_url);
+        // on success the Input owns abs_url (stored as input->url, freed by
+        // ~InputManager); only free it here if no input was created.
+        if (!input) url_destroy(abs_url);
         return input;
     }
     else if (abs_url->scheme == URL_SCHEME_HTTP || abs_url->scheme == URL_SCHEME_HTTPS) {
@@ -1097,10 +1100,12 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         }
 
         Input* input = input_from_sysinfo(abs_url, pool);
+        // on success the Input owns abs_url (create_input stores it, freed by
+        // ~InputManager); only tear down the pool and url if creation failed.
         if (!input) {
             pool_destroy(pool);
+            url_destroy(abs_url);
         }
-        url_destroy(abs_url);
         return input;
     }
     else {
@@ -1309,10 +1314,27 @@ InputManager::~InputManager() {
     decimal_ctx = nullptr;
 }
 
+//------------------------------------------------------------------------------
+// Heap factory (audited boundary for `new InputManager` / `delete mgr`)
+//------------------------------------------------------------------------------
+
+InputManager* input_manager_create() {
+    InputManager* mgr = (InputManager*)mem_alloc(sizeof(InputManager), MEM_CAT_INPUT_OTHER);
+    if (!mgr) return nullptr;
+    new (mgr) InputManager(); // NEW_DELETE_OK: single audited construction boundary for InputManager singleton.
+    return mgr;
+}
+
+void input_manager_destroy(InputManager* mgr) {
+    if (!mgr) return;
+    mgr->~InputManager(); // NEW_DELETE_OK: paired with input_manager_create.
+    mem_free(mgr);
+}
+
 mpd_context_t* InputManager::decimal_context() {
     // Lazy initialization of singleton
     if (!g_input_manager) {
-        g_input_manager = new InputManager();
+        g_input_manager = input_manager_create();
     }
     if (!g_input_manager) return nullptr;
     return g_input_manager->decimal_ctx;
@@ -1322,7 +1344,7 @@ mpd_context_t* InputManager::decimal_context() {
 Input* InputManager::create_input(Url* abs_url) {
     // Lazy initialization of singleton
     if (!g_input_manager) {
-        g_input_manager = new InputManager();
+        g_input_manager = input_manager_create();
     }
     if (!g_input_manager) return nullptr;
     return g_input_manager->create_input_instance(abs_url);
@@ -1351,8 +1373,21 @@ Input* InputManager::create_input_instance(Url* abs_url) {
 // Destroy the global instance
 void InputManager::destroy_global() {
     if (g_input_manager) {
-        delete g_input_manager;
+        input_manager_destroy(g_input_manager);
         g_input_manager = nullptr;
+    }
+}
+
+// Detach a URL pointer from any tracked Input that owns it, so the caller can
+// free the URL without ~InputManager double-freeing the same pointer.
+void InputManager::detach_url(Url* url) {
+    if (!g_input_manager || !url || !g_input_manager->inputs) return;
+    ArrayList* inputs = g_input_manager->inputs;
+    for (int i = 0; i < inputs->length; i++) {
+        Input* input = (Input*)inputs->data[i];
+        if (input && input->url == url) {
+            input->url = nullptr;
+        }
     }
 }
 

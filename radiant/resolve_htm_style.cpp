@@ -1593,7 +1593,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!block->form) {
             block->item_prop_type = DomElement::ITEM_PROP_FORM;
             block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
-            new (block->form) FormControlProp();
+            form_control_prop_init(block->form);
             block->form->control_type = FORM_CONTROL_BUTTON;
             if (block->has_attribute("disabled")) {
                 DocState* state = (DocState*)lycon->doc->state;
@@ -1634,7 +1634,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!block->form) {
             block->item_prop_type = DomElement::ITEM_PROP_FORM;
             block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
-            new (block->form) FormControlProp();  // placement new for constructor
+            form_control_prop_init(block->form);
 
             // Parse state attributes and seed canonical StateStore state.
             DocState* state = (DocState*)lycon->doc->state;
@@ -1853,7 +1853,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!block->form) {
             block->item_prop_type = DomElement::ITEM_PROP_FORM;
             block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
-            new (block->form) FormControlProp();
+            form_control_prop_init(block->form);
             block->form->control_type = FORM_CONTROL_SELECT;
             block->form->name = block->get_attribute("name");
             if (block->has_attribute("disabled")) {
@@ -1960,7 +1960,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!block->form) {
             block->item_prop_type = DomElement::ITEM_PROP_FORM;
             block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
-            new (block->form) FormControlProp();
+            form_control_prop_init(block->form);
             block->form->control_type = FORM_CONTROL_TEXTAREA;
             block->form->name = block->get_attribute("name");
             block->form->placeholder = block->get_attribute("placeholder");

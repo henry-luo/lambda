@@ -1,8 +1,9 @@
 #include "layout_pass.hpp"
 #include "form_control.hpp"
+#include "layout.hpp"
 
 #include "../lib/log.h"
-#include <cstdlib>
+#include "../lib/scratch_arena.h"
 
 namespace radiant {
 
@@ -32,10 +33,12 @@ struct LayoutViewSnapshot {
     CssEnum block_given_height_type;
 };
 
-static void layout_measure_snapshot_append(ArrayList* snapshots, ::DomNode* node) {
-    if (!snapshots || !node) return;
+static void layout_measure_snapshot_append(::LayoutContext* lycon,
+                                            ArrayList* snapshots, ::DomNode* node) {
+    if (!lycon || !snapshots || !node) return;
 
-    LayoutViewSnapshot* snapshot = (LayoutViewSnapshot*)calloc(1, sizeof(LayoutViewSnapshot));
+    LayoutViewSnapshot* snapshot =
+        (LayoutViewSnapshot*)scratch_calloc(&lycon->scratch, sizeof(LayoutViewSnapshot));
     if (!snapshot) return;
 
     snapshot->node = node;
@@ -71,24 +74,24 @@ static void layout_measure_snapshot_append(ArrayList* snapshots, ::DomNode* node
     }
 
     if (!arraylist_append(snapshots, snapshot)) {
-        free(snapshot);
+        scratch_free(&lycon->scratch, snapshot);
         return;
     }
 
     if (node->is_element()) {
         for (::DomNode* child = node->as_element()->first_child; child; child = child->next_sibling) {
-            layout_measure_snapshot_append(snapshots, child);
+            layout_measure_snapshot_append(lycon, snapshots, child);
         }
     }
 }
 
-static void layout_measure_snapshot_restore(ArrayList* snapshots) {
-    if (!snapshots) return;
+static void layout_measure_snapshot_restore(::LayoutContext* lycon, ArrayList* snapshots) {
+    if (!lycon || !snapshots) return;
 
     for (int i = snapshots->length - 1; i >= 0; i--) {
         LayoutViewSnapshot* snapshot = (LayoutViewSnapshot*)snapshots->data[i];
         if (!snapshot || !snapshot->node) {
-            free(snapshot);
+            scratch_free(&lycon->scratch, snapshot);
             continue;
         }
 
@@ -122,7 +125,7 @@ static void layout_measure_snapshot_restore(ArrayList* snapshots) {
             }
         }
 
-        free(snapshot);
+        scratch_free(&lycon->scratch, snapshot);
     }
     arraylist_free(snapshots);
 }
@@ -159,7 +162,7 @@ LayoutMeasureScope::LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_el
     saved_sizing_mode = lycon->sizing_mode;
     saved_available_space = lycon->available_space;
     saved_views = arraylist_new(8);
-    layout_measure_snapshot_append(saved_views, measure_elmt);
+    layout_measure_snapshot_append(lycon, saved_views, measure_elmt);
 
     lycon->run_mode = RunMode::ComputeSize;
     lycon->elmt = measure_elmt;
@@ -175,7 +178,7 @@ LayoutMeasureScope::~LayoutMeasureScope() {
     lycon->run_mode = saved_run_mode;
     lycon->sizing_mode = saved_sizing_mode;
     lycon->available_space = saved_available_space;
-    layout_measure_snapshot_restore(saved_views);
+    layout_measure_snapshot_restore(lycon, saved_views);
     saved_views = nullptr;
 }
 

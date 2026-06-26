@@ -149,23 +149,25 @@ enum EnumArrayNumElemType {
     // Lambda's standard numeric types (8 bytes/element each):
     ELEM_INT   = 0x00,   // 8 bytes  — int56-as-int64 (was ARRAY_INT)
     ELEM_FLOAT = 0x10,   // 8 bytes  — double (was ARRAY_FLOAT)
-    ELEM_INT64 = 0x20,   // 8 bytes  — int64 (was ARRAY_INT64)
 
     // Compact sized integer types:
-    ELEM_INT8    = 0x30,  // 1 byte   — maps to NUM_INT8
-    ELEM_INT16   = 0x40,  // 2 bytes  — maps to NUM_INT16
-    ELEM_INT32   = 0x50,  // 4 bytes  — maps to NUM_INT32
+    ELEM_INT8    = 0x20,  // 1 byte   — maps to NUM_INT8
+    ELEM_INT16   = 0x30,  // 2 bytes  — maps to NUM_INT16
+    ELEM_INT32   = 0x40,  // 4 bytes  — maps to NUM_INT32
+    ELEM_INT64   = 0x50,  // 8 bytes  — int64 (was ARRAY_INT64)
+
     ELEM_UINT8   = 0x60,  // 1 byte   — maps to NUM_UINT8
     ELEM_UINT16  = 0x70,  // 2 bytes  — maps to NUM_UINT16
     ELEM_UINT32  = 0x80,  // 4 bytes  — maps to NUM_UINT32
+    ELEM_UINT64  = 0x90,  // 8 bytes  — maps to NUM_UINT64
 
     // Compact sized float types:
-    ELEM_FLOAT16 = 0x90,  // 2 bytes  — maps to NUM_FLOAT16
-    ELEM_FLOAT32 = 0xA0,  // 4 bytes  — maps to NUM_FLOAT32
-
-    // Explicit 64-bit types:
-    ELEM_UINT64  = 0xB0,  // 8 bytes
+    ELEM_FLOAT16 = 0xA0,  // 2 bytes  — maps to NUM_FLOAT16
+    ELEM_FLOAT32 = 0xB0,  // 4 bytes  — maps to NUM_FLOAT32
     ELEM_FLOAT64 = 0xC0,  // 8 bytes  — explicit f64 (same storage as ELEM_FLOAT)
+
+    // Boolean type (1 byte/element):
+    ELEM_BOOL    = 0xD0,  // 1 byte   — bool values, distinct from UINT8 for any()/all() semantics
 
     ELEM_NUM_COUNT = 14
 };
@@ -175,18 +177,18 @@ typedef uint8_t ArrayNumElemType;
 static const uint8_t ELEM_TYPE_SIZE[16] = {
     8, // 0x00 ELEM_INT     — int64_t
     8, // 0x10 ELEM_FLOAT   — double
-    8, // 0x20 ELEM_INT64   — int64_t
-    1, // 0x30 ELEM_INT8
-    2, // 0x40 ELEM_INT16
-    4, // 0x50 ELEM_INT32
+    1, // 0x20 ELEM_INT8
+    2, // 0x30 ELEM_INT16
+    4, // 0x40 ELEM_INT32
+    8, // 0x50 ELEM_INT64   — int64_t
     1, // 0x60 ELEM_UINT8
     2, // 0x70 ELEM_UINT16
     4, // 0x80 ELEM_UINT32
-    2, // 0x90 ELEM_FLOAT16
-    4, // 0xA0 ELEM_FLOAT32
-    8, // 0xB0 ELEM_UINT64
+    8, // 0x90 ELEM_UINT64
+    2, // 0xA0 ELEM_FLOAT16
+    4, // 0xB0 ELEM_FLOAT32
     8, // 0xC0 ELEM_FLOAT64
-    0, // 0xD0 reserved
+    1, // 0xD0 ELEM_BOOL
     0, // 0xE0 reserved
     0, // 0xF0 reserved
 };
@@ -283,6 +285,51 @@ typedef enum SysFunc {
     SYSFUNC_JUSTNOW,
     SYSFUNC_SET,
     SYSFUNC_SLICE,
+    SYSFUNC_VIEW,             // subview(arr, start, end) - read-only view sharing arr's storage
+    SYSFUNC_IS_VIEW,          // is_view(arr) - check if arr is a view
+    SYSFUNC_RESHAPE,          // reshape(arr, shape_list) - view with new shape
+    SYSFUNC_SHAPE,            // shape(arr) - list of dimensions
+    SYSFUNC_NDIM,             // ndim(arr) - number of dimensions
+    SYSFUNC_SUM2,             // sum(arr, axis) - reduce along axis
+    SYSFUNC_AVG2,             // avg(arr, axis) - mean along axis
+    SYSFUNC_PROD2,            // math.prod(arr, axis)
+    SYSFUNC_MEAN2,            // math.mean(arr, axis)
+    SYSFUNC_CUMSUM2,          // math.cumsum(arr, axis)
+    SYSFUNC_CUMPROD2,         // math.cumprod(arr, axis)
+    SYSFUNC_TRANSPOSE,        // transpose(arr) - view with reversed axes (zero-copy)
+    SYSFUNC_FLATTEN,          // flatten(arr) - owned 1-D contiguous copy
+    SYSFUNC_RAVEL,            // ravel(arr) - 1-D view if contiguous, else copy
+    SYSFUNC_MATMUL,           // matmul(a, b) - matrix product (2-D·2-D, 1-D dot)
+    SYSFUNC_CONCAT,           // concat(a, b) - join along axis 0
+    SYSFUNC_STACK,            // stack(a, b) - stack along a new leading axis
+    // image stencil engine (N-D windowed neighbourhood ops over ArrayNum)
+    SYSFUNC_CONVOLVE,         // convolve(img, kernel) - weighted-sum (correlation)
+    SYSFUNC_BLUR,             // blur(img, ksize) - box (mean) blur
+    SYSFUNC_ERODE,            // erode(img, ksize) - morphological min
+    SYSFUNC_DILATE,           // dilate(img, ksize) - morphological max
+    SYSFUNC_MEDIAN_FILT,      // median_filter(img, ksize) - rank (median) filter
+    SYSFUNC_MAXPOOL,          // maxpool(img, ksize) - strided max pooling
+    SYSFUNC_AVGPOOL,          // avgpool(img, ksize) - strided mean pooling
+    // image I/O bridge
+    SYSFUNC_LOAD_IMAGE,       // load(path) - decode PNG/JPEG/GIF to (H,W,4) ubyte
+    SYSFUNC_SAVE_IMAGE,       // save(img, path) - encode an image to PNG
+    SYSFUNC_AS_FLOAT,         // as_float(img) - ubyte [0,255] -> float [0,1]
+    SYSFUNC_AS_UBYTE,         // as_ubyte(img) - float [0,1] -> ubyte [0,255]
+    // point / colour / geometric image ops
+    SYSFUNC_INVERT,           // invert(img) - photographic negative
+    SYSFUNC_GAMMA,            // gamma(img, g) - gamma correction
+    SYSFUNC_THRESHOLD,        // threshold(img, t) - binarize at t
+    SYSFUNC_GRAYSCALE,        // grayscale(img) - RGB -> luma (H,W)
+    SYSFUNC_FLIP,             // flip(img, axis) - mirror along axis 0/1
+    SYSFUNC_ROT90,            // rot90(img, k) - rotate CCW by 90*k
+    SYSFUNC_CROP,             // crop(img, rows, cols) - region copy
+    // histogram / segmentation / resize / warp
+    SYSFUNC_HISTOGRAM,        // histogram(img, bins) - value counts
+    SYSFUNC_OTSU,             // otsu(img) - optimal threshold value
+    SYSFUNC_LABEL,            // label(mask) - 4-connected components
+    SYSFUNC_RESIZE,           // resize(img, h, w) - bilinear resample
+    SYSFUNC_ROTATE,           // rotate(img, deg) - bilinear rotation
+    SYSFUNC_AFFINE_WARP,      // affine_warp(img, M) - 2x3 affine gather
     SYSFUNC_ALL,
     SYSFUNC_ANY,
     SYSFUNC_MIN1,
@@ -369,6 +416,7 @@ typedef enum SysFunc {
     SYSFUNC_HYPOT,
     SYSFUNC_LOG1P,
     SYSFUNC_SIGN,
+    SYSFUNC_CLIP,           // clip(x, lo, hi) - element-wise clamp to [lo, hi]
     // random number generation
     SYSFUNC_RANDOM,
     // vector manipulation functions
@@ -534,13 +582,20 @@ struct Container {
     union {
         uint8_t flags;
         struct {
-            uint8_t is_content:1;    // whether it is a content list, or value list
-            uint8_t is_spreadable:1; // whether this array should be spread when added to collections
-            uint8_t is_heap:1;       // whether allocated from runtime heap (vs arena for input docs)
-            uint8_t is_data_migrated:1; // data buffer migrated from input pool to runtime pool (for mutated markup containers)
-            uint8_t map_kind:4;      // MapKind tag (0 = plain, upper 4 bits of flags byte)
+            // lifecycle / allocation flags (lower nibble)
+            uint8_t is_content:1;        // whether it is a content list, or value list
+            uint8_t is_spreadable:1;     // whether this array should be spread when added to collections
+            uint8_t is_heap:1;           // whether allocated from runtime heap (vs arena for input docs)
+            uint8_t is_data_migrated:1;  // data buffer migrated from input pool to runtime pool (for mutated markup containers)
+            // layout / storage flags (upper nibble)
+            uint8_t is_ndim:1;           // bit 4: has shape side-table in `extra` (n-d owned array)
+            uint8_t is_view:1;           // bit 5: aliases another container's storage (implies is_ndim)
+            uint8_t is_pinned:1;         // bit 6: has live views; data buffer must not be relocated by compactor
+            uint8_t is_mutable_view:1;   // bit 7: a view writable through to its base (procedural in-place updates)
         };
     };
+    uint8_t map_kind;      // MapKind tag (0 = plain, only used for map/object/element)
+    uint8_t padding[5];  // padding to align to 8 bytes
 };
 
 // List/Array flags (stored in List.flags / Array.flags field)
@@ -549,6 +604,7 @@ struct Container {
     struct Range {
         TypeId type_id;
         uint8_t flags;
+        uint8_t padding[6];  // padding to align to 8 bytes
         //---------------------
         int64_t start;  // inclusive start
         int64_t end;    // inclusive end
@@ -558,6 +614,7 @@ struct Container {
     struct List {
         TypeId type_id;
         uint8_t flags;
+        uint8_t padding[6];  // padding to align to 8 bytes
         //---------------------
         Item* items;  // pointer to items
         int64_t length;  // number of items
@@ -567,7 +624,9 @@ struct Container {
 
     struct ArrayNum {
         TypeId type_id;
+        uint8_t flags;
         uint8_t elem_type;     // ArrayNumElemType (replaces flags for typed arrays)
+        uint8_t padding[5];  // padding to align to 8 bytes
         //---------------------
         union {
             int64_t* items;        // for ELEM_INT, ELEM_INT64
@@ -575,7 +634,7 @@ struct Container {
             void* data;            // for compact types (ELEM_INT8, ELEM_UINT8, etc.)
         };
         int64_t length;  // number of elements
-        int64_t extra;   // count of extra elements stored at end
+        int64_t extra;   // for is_ndim/is_view: ArrayNumShape* in this slot; else count of extra elements
         int64_t capacity;  // allocated capacity
     };
 
@@ -595,6 +654,8 @@ struct Container {
     struct Map {
         TypeId type_id;
         uint8_t flags;
+        uint8_t map_kind;
+        uint8_t padding[5];  // padding to align to 8 bytes
         //---------------------
         void* type;       // TypeMap* — shape/type info
         void* data;       // packed data struct of the map fields
@@ -610,6 +671,8 @@ struct Container {
     struct Object {
         TypeId type_id;
         uint8_t flags;
+        uint8_t map_kind;
+        uint8_t padding[5];  // padding to align to 8 bytes
         //---------------------
         void* type;       // TypeObject* — shape + methods + type_name
         void* data;       // packed field data (same layout as Map)
@@ -619,6 +682,8 @@ struct Container {
     struct Element {
         TypeId type_id;
         uint8_t flags;
+        uint8_t map_kind;
+        uint8_t padding[5];  // padding to align to 8 bytes
         //---------------------
         Item* items;       // list content items
         int64_t length;    // number of content items
@@ -631,6 +696,28 @@ struct Container {
     };
 
 #endif
+
+// ============================================================================
+// ArrayNumShape — side table for N-D arrays and views.
+// Pointer stored in ArrayNum.extra when Container.is_ndim or is_view is set.
+// Layout:
+//   [header fields ...]
+//   int64_t shape[ndim]      — element count per dimension
+//   int64_t strides[ndim]    — stride per dimension, in *elements* (not bytes)
+// Allocated via pool/heap, freed in ArrayNum finalizer.
+// ============================================================================
+typedef struct ArrayNumShape {
+    uint8_t  ndim;            // number of dimensions (1..32)
+    uint8_t  is_c_contig:1;   // contiguous in row-major
+    uint8_t  is_f_contig:1;   // contiguous in column-major
+    uint8_t  reserved:6;
+    int64_t  offset;          // element offset within base->data (0 for owned)
+    void*    base;            // Container* — non-NULL for views; NULL for owned N-D arrays
+    int64_t  data[];          // shape[ndim] followed by strides[ndim] — total 2*ndim entries
+} ArrayNumShape;
+
+static inline int64_t* array_num_shape_dims(ArrayNumShape* s) { return s->data; }
+static inline int64_t* array_num_shape_strides(ArrayNumShape* s) { return s->data + s->ndim; }
 
 Range* range();
 long range_get(Range *range, int64_t index);
@@ -1235,10 +1322,15 @@ extern "C" {
     Bool fn_ne(Item a, Item b);
     Bool fn_str_eq_ptr(String* a, String* b);
     Bool fn_sym_eq_ptr(Symbol* a, Symbol* b);
-    Bool fn_lt(Item a, Item b);
-    Bool fn_gt(Item a, Item b);
-    Bool fn_le(Item a, Item b);
-    Bool fn_ge(Item a, Item b);
+    // Ordered comparisons return Item (Any): a boolean mask when an operand is an
+    // ARRAY_NUM (vectorized), else a boxed scalar bool. The *_scalar helpers expose
+    // the raw 3-state scalar comparison for callers that only compare scalars.
+    Bool fn_lt_scalar(Item a, Item b);
+    Bool fn_gt_scalar(Item a, Item b);
+    Item fn_lt(Item a, Item b);
+    Item fn_gt(Item a, Item b);
+    Item fn_le(Item a, Item b);
+    Item fn_ge(Item a, Item b);
     Bool fn_not(Item a);
     Bool fn_is(Item a, Item b);
     Bool fn_is_nan(Item a);  // IEEE NaN check: expr is nan
@@ -1254,6 +1346,12 @@ extern "C" {
     Item vec_div(Item a, Item b);
     Item vec_mod(Item a, Item b);
     Item vec_pow(Item a, Item b);
+
+    // whole-array typed reduction → double accumulator, correct for every element
+    // type (the per-type fn_sum/min/max paths only handled INT/INT64/FLOAT).  op
+    // codes match ReduceOp.  Contiguous arrays use the vectorized kernel.
+    enum { ARRAY_RED_SUM = 0, ARRAY_RED_PROD = 1, ARRAY_RED_MIN = 2, ARRAY_RED_MAX = 3, ARRAY_RED_AVG = 4 };
+    double array_num_reduce_double(ArrayNum* arr, int op);
 
     // vector system functions (math module)
     Item fn_math_prod(Item a);
@@ -1385,6 +1483,60 @@ extern "C" {
     Item fn_take(Item a, Item n);
     Item fn_drop(Item a, Item n);
     Item fn_slice(Item a, Item start, Item end);
+    Item fn_clip(Item a, Item lo, Item hi);
+    Item fn_all(Item a);
+    Item fn_any(Item a);
+    Item fn_subview(Item arr, Item start, Item end);  // read-only view over arr[start..end]
+    Item fn_is_view(Item arr);                     // returns true if arr is a view
+    Item fn_reshape(Item arr, Item shape);         // returns view with new shape (contiguous required)
+    Item fn_shape(Item arr);                       // returns shape as a list
+    Item fn_ndim(Item arr);                        // returns number of dimensions (int)
+    Item fn_transpose(Item arr);                   // view with reversed axes
+    Item fn_flatten(Item arr);                     // owned 1-D contiguous copy
+    Item fn_ravel(Item arr);                       // 1-D view if contiguous, else copy
+    Item fn_matmul(Item a, Item b);                // matrix product
+    Item fn_concat(Item a, Item b);                // join along axis 0
+    Item fn_stack(Item a, Item b);                 // stack along new leading axis
+
+    // image stencil engine: slide a Kh×Kw window over the spatial dims of `in`
+    // (2-D H×W, or 3-D H×W×C applied per-channel) and reduce at each position.
+    // op: 0=DOT 1=MIN 2=MAX 3=MEDIAN 4=MEAN.  border: 0=CONSTANT 1=EDGE 2=REFLECT
+    // 3=WRAP.  pad_h/pad_w: window-start offset from each output's input position
+    // (negative → centred at Kh/2, Kw/2 for same-size filtering; 0 → top-left for
+    // pooling).  Result is ELEM_FLOAT.  Covers convolution/morphology/rank/pooling.
+    Item array_num_stencil(Item in, Item kernel, int op, int border, double border_value,
+                           int64_t stride_h, int64_t stride_w, int64_t pad_h, int64_t pad_w);
+    Item fn_convolve(Item img, Item kernel);       // weighted-sum correlation (DOT)
+    Item fn_blur(Item img, Item ksize);            // box (mean) blur
+    Item fn_erode(Item img, Item ksize);           // morphological min
+    Item fn_dilate(Item img, Item ksize);          // morphological max
+    Item fn_median_filter(Item img, Item ksize);   // rank (median) filter
+    Item fn_maxpool(Item img, Item ksize);         // strided max pooling
+    Item fn_avgpool(Item img, Item ksize);         // strided mean pooling
+    // image I/O bridge: load/save PNG-JPEG-GIF, ubyte[0,255] <-> float[0,1]
+    Item fn_load(Item path);                       // decode to (H,W,4) ubyte RGBA
+    Item fn_save(Item img, Item path);             // encode an image to PNG
+    Item fn_as_float(Item img);                    // ubyte [0,255] -> float [0,1]
+    Item fn_as_ubyte(Item img);                    // float [0,1] -> ubyte [0,255]
+    // point / colour / geometric image ops
+    Item fn_invert(Item img);                      // photographic negative
+    Item fn_gamma(Item img, Item g);               // gamma correction
+    Item fn_threshold(Item img, Item t);           // binarize at threshold t
+    Item fn_grayscale(Item img);                   // RGB -> luma, (H,W,C)->(H,W)
+    Item fn_flip(Item img, Item axis);             // mirror along axis 0 (vert) / 1 (horiz)
+    Item fn_rot90(Item img, Item k);               // rotate CCW by 90*k degrees
+    Item fn_crop(Item img, Item rows, Item cols);  // owned copy of an inclusive region
+    // histogram / segmentation / resize / warp
+    Item fn_histogram(Item img, Item bins);        // 1-D value counts
+    Item fn_otsu(Item img);                        // optimal threshold value
+    Item fn_label(Item mask);                      // 4-connected component labels
+    Item fn_resize(Item img, Item h, Item w);      // bilinear resample
+    Item fn_rotate(Item img, Item deg);            // bilinear rotation about centre
+    Item fn_affine_warp(Item img, Item m);         // 2x3 affine coordinate gather
+    int64_t array_num_iter_count(ArrayNum* arr);   // shape[0] for N-D, length for 1-D
+    ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim, int64_t* dims);
+    Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices);   // multi-dim scalar read
+    void array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value); // multi-dim write
     Item fn_zip(Item a, Item b);
     Item fn_range3(Item start, Item end, Item step);
     Item fn_math_quantile(Item a, Item p);
@@ -1420,6 +1572,25 @@ extern "C" {
     Item fn_url_resolve(Item base, Item relative);
     Item fn_split(Item str, Item sep);
     Item fn_split3(Item str, Item sep, Item keep_delim);
+    Item fn_array_split(Item arr, int64_t n, int64_t axis);  // split typed array into n parts along axis
+    // axis-aware reductions (2-arg): collapse `axis` of a typed N-D array
+    Item fn_sum_axis(Item arr, Item axis);
+    Item fn_avg_axis(Item arr, Item axis);
+    Item fn_prod_axis(Item arr, Item axis);
+    Item fn_cumsum_axis(Item arr, Item axis);    // running sum along axis (no collapse)
+    Item fn_cumprod_axis(Item arr, Item axis);   // running product along axis (no collapse)
+    Item fn_min_axis(Item arr, Item axis);       // min along axis (via min(arr, axis) / min(arr, axis:N))
+    Item fn_max_axis(Item arr, Item axis);       // max along axis
+    Item fn_mask_index(Item arr, Item mask);     // arr[mask] — boolean mask selection
+    void fn_index_assign(Item arr, Item idx, Item val);  // arr[mask] = v — masked write (procedural in-place)
+    Item vec_cmp(Item a, Item b, int op);        // vectorized a OP b → ELEM_BOOL mask (op = operator-OPERATOR_EQ)
+    // overload wrappers (the sysfunc dispatcher resolves fn_<name><argcount>)
+    Item fn_sum1(Item arr);            Item fn_sum2(Item arr, Item axis);
+    Item fn_avg1(Item arr);            Item fn_avg2(Item arr, Item axis);
+    Item fn_math_prod1(Item arr);      Item fn_math_prod2(Item arr, Item axis);
+    Item fn_math_mean1(Item arr);      Item fn_math_mean2(Item arr, Item axis);
+    Item fn_math_cumsum1(Item arr);    Item fn_math_cumsum2(Item arr, Item axis);
+    Item fn_math_cumprod1(Item arr);   Item fn_math_cumprod2(Item arr, Item axis);
     Item fn_split2(Item str, Item sep);  // overloaded alias for fn_split
     int64_t fn_ord(Item str);           // ord(str) - Unicode code point of first character
     int64_t fn_ord_str(String* str);    // native String* variant

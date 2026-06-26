@@ -112,7 +112,7 @@ static String* parse_tag_name(InputContext& ctx, const char **xml) {
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
-    while (**xml && (isalnum(**xml) || **xml == '_' || **xml == '-' || **xml == ':')) {
+    while (**xml && (isalnum((unsigned char)**xml) || **xml == '_' || **xml == '-' || **xml == ':')) {
         stringbuf_append_char(sb, **xml);
         (*xml)++;
     }

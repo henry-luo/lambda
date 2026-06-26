@@ -1,0 +1,70 @@
+"add identity:"
+true
+"mul identity:"
+true
+"sub self = mul 0:"
+true
+"add commutes:"
+true
+"mul commutes:"
+true
+"distributive:"
+true
+"double negate:"
+true
+"transpose involution:"
+true
+"transpose swaps shape:"
+true
+"(AB)^T == B^T A^T:"
+true
+"right identity:"
+true
+"left identity:"
+true
+"associative:"
+true
+"2x2 value:"
+[[19, 22], [43, 50]]
+"dot product:"
+32
+"sum = sum of col sums:"
+true
+"sum = sum of row sums:"
+true
+"sum all:"
+21
+"col sums:"
+[5, 7, 9]
+"row sums:"
+[6, 15]
+"min <= max:"
+true
+"product:"
+720
+"reshape preserves data:"
+true
+"reshape to 1-D = flatten:"
+true
+"ravel of contiguous:"
+true
+"broadcast shape:"
+true
+"broadcast value:"
+[[11, 21, 31], [12, 22, 32], [13, 23, 33]]
+"scalar broadcast shape:"
+true
+"concat axis0 shape:"
+true
+"stack shape:"
+true
+"sort idempotent:"
+true
+"sort ascending:"
+[1, 2, 3, 4, 5]
+"all positive:"
+true
+"any over 5:"
+false
+"clip range:"
+[0, 5, 10]

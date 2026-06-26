@@ -1369,7 +1369,7 @@ static Item js_debuglog_active(Item args_rest) {
             Item str = js_json_stringify(arg0);
             if (get_type_id(str) == LMD_TYPE_STRING) {
                 String* s = it2s(str);
-                if (s) fprintf(stderr, "%.*s\n", (int)s->len, s->chars);
+                if (s) fprintf(stderr, "%.*s\n", (int)s->len, s->chars); // PRINTF_OK: implements Node.js util.debuglog stderr write.
             }
         }
     }

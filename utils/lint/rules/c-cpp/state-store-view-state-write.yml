@@ -1,0 +1,24 @@
+id: state-store-view-state-write
+language: cpp
+severity: error
+message: >-
+  External direct write to ViewState (->data.form/scroll.* or ->flags.hovered/
+  active/focused). Mutate these through the StateStore API. Mark audited
+  exceptions with a trailing "// STATE_STORE_OK: <reason>".
+metadata:
+  suppress: STATE_STORE_OK
+rule:
+  any:
+    - all:
+        - kind: assignment_expression
+        - has:
+            field: left
+            regex: '->data\.(form|scroll)\.|->flags\.(hovered|active|focused)$'
+    - all:
+        - kind: update_expression
+        - has:
+            regex: '->data\.(form|scroll)\.|->flags\.(hovered|active|focused)$'
+files:
+  - "radiant/**/*.{cpp,hpp}"
+ignores:
+  - "radiant/state_store.cpp"

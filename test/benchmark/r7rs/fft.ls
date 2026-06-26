@@ -5,10 +5,6 @@
 
 let PI2 = 6.28318530717959
 
-pn make_array(n, val) {
-    return fill(n, val)
-}
-
 pn four1(data, n) {
     // Bit-reversal section
     var i = 0
@@ -64,7 +60,7 @@ pn four1(data, n) {
 }
 
 pn benchmark() {
-    var data = make_array(4096, 0.0)
+    var data = fill(4096, 0.0)
     four1(data, 4096)
     var result = data[0]
     return result

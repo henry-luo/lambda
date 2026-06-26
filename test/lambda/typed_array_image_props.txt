@@ -1,0 +1,44 @@
+"ubyte->float->ubyte identity:"
+true
+"as_float within [0,1]:"
+true
+"flip vert involution:"
+true
+"flip horiz involution:"
+true
+"rot90 x4 == identity:"
+true
+"rot90 1 then 3 == id:"
+true
+"rot90 x2 == flip both:"
+true
+"rotate 0 == identity:"
+true
+"erosion <= image:"
+true
+"image <= dilation:"
+true
+"opening <= image:"
+true
+"closing >= image:"
+true
+"erode/dilate duality:"
+true
+"median removes impulse:"
+true
+"convolve identity kernel:"
+true
+"blur preserves constant:"
+true
+"histogram sums to N pixels:"
+true
+"otsu within [min,max]:"
+true
+"label areas sum to N:"
+true
+"label component count:"
+2
+"full crop == identity:"
+true
+"resize same-size == id:"
+true

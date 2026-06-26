@@ -4579,7 +4579,7 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
             shift_table_cell_vertical_align_child(child, vertical_offset);
             if (child->view_type == RDT_VIEW_TEXT) {
                 log_debug("%s CSS vertical-align: adjusted text Y by +%.1fpx (align=%d)", tcell->source_loc(),
-                         vertical_offset, (int)valign); // INT_CAST_OK: enum for log
+                         vertical_offset, (int)valign);
             }
         }
     }
@@ -5577,7 +5577,7 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
 
                 const char* measure_text = (const char*)text;
                 size_t measure_len = text_len;
-                static char normalized_buffer[4096];  // Static buffer for normalized text
+                static char normalized_buffer[4096];  // LARGE_ARRAY_OK: static buffer — not on call stack.
 
                 // Track if original text has leading/trailing whitespace (before normalization)
                 bool original_has_leading_ws = (text_len > 0 && is_all_whitespace((const char*)text, 1));
@@ -6036,7 +6036,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
     }
 
     // Create metadata structure
-    TableMetadata* meta = new TableMetadata(&lycon->scratch, columns, rows);
+    TableMetadata* meta = table_metadata_create(&lycon->scratch, columns, rows);
 
     // Second pass: assign column indices, measure widths, and track collapsed rows
     int current_row = 0;
@@ -9376,7 +9376,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     arraylist_free(ordered_elements);
 
     // Cleanup - TableMetadata destructor handles grid_occupied and col_widths
-    delete meta;
+    table_metadata_destroy(meta);
     scratch_free(&lycon->scratch, col_x_positions);
 
     #undef GRID

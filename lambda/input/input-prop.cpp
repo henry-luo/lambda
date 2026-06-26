@@ -19,7 +19,7 @@ static String* parse_key(InputContext& ctx, const char **prop) {
     stringbuf_reset(sb);
 
     // read until '=', ':', or whitespace
-    while (**prop && **prop != '=' && **prop != ':' && **prop != '\n' && **prop != '\r' && !isspace(**prop)) {
+    while (**prop && **prop != '=' && **prop != ':' && **prop != '\n' && **prop != '\r' && !isspace((unsigned char)**prop)) {
         stringbuf_append_char(sb, **prop);
         (*prop)++;
     }
@@ -127,7 +127,7 @@ static String* parse_raw_value(InputContext& ctx, const char **prop) {
     }
 
     // trim trailing whitespace
-    while (sb->length > 0 && isspace(sb->str->chars[sb->length - 1])) {
+    while (sb->length > 0 && isspace((unsigned char)sb->str->chars[sb->length - 1])) {
         sb->length--;
     }
 

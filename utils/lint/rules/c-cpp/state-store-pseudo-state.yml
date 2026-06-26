@@ -1,0 +1,21 @@
+id: state-store-pseudo-state
+language: cpp
+severity: error
+message: >-
+  Legacy pseudo-state API / field reintroduced. Pseudo-state and the DocState
+  StateStore typedef were migrated away; use the StateStore API instead. Mark
+  audited exceptions with a trailing "// STATE_STORE_OK: <reason>".
+metadata:
+  suppress: STATE_STORE_OK
+rule:
+  any:
+    - { kind: identifier, regex: "^dom_element_(set|clear|has|toggle)_pseudo_state$" }
+    - pattern: DomElement::pseudo_state
+    - pattern: uint32_t pseudo_state;
+    - pattern: typedef DocState StateStore
+files:
+  - "lambda/**/*.{c,cpp,h,hpp}"
+  - "radiant/**/*.{c,cpp,h,hpp}"
+  - "test/**/*.{c,cpp,h,hpp}"
+ignores:
+  - "test/css/test_css_dom_integration.cpp"

@@ -5,6 +5,7 @@
 #include "../lib/arena.h"
 #include <string.h>
 #include <stdlib.h>
+#include <new>
 #include "../lib/memtrack.h"
 
 // Maximum number of batch updates supported
@@ -52,7 +53,7 @@ MarkEditor::MarkEditor(Input* input, EditMode mode)
     , next_version_num_(0)
 {
     // Create builder for constructing new structures
-    builder_ = new MarkBuilder(input);
+    builder_ = mark_builder_create(input);
 
     log_debug("MarkEditor created: mode=%s",
         mode == EDIT_MODE_INLINE ? "inline" : "immutable");
@@ -66,11 +67,29 @@ MarkEditor::~MarkEditor() {
 
     // Clean up builder
     if (builder_) {
-        delete builder_;
+        mark_builder_destroy(builder_);
         builder_ = nullptr;
     }
 
     log_debug("MarkEditor destroyed");
+}
+
+//------------------------------------------------------------------------------
+// Heap factory (audited boundary for `new MarkEditor` / `delete editor`)
+//------------------------------------------------------------------------------
+
+MarkEditor* mark_editor_create(Input* input, EditMode mode) {
+    if (!input) return nullptr;
+    MarkEditor* editor = (MarkEditor*)mem_alloc(sizeof(MarkEditor), MEM_CAT_EVAL);
+    if (!editor) return nullptr;
+    new (editor) MarkEditor(input, mode); // NEW_DELETE_OK: single audited construction boundary for MarkEditor.
+    return editor;
+}
+
+void mark_editor_destroy(MarkEditor* editor) {
+    if (!editor) return;
+    editor->~MarkEditor(); // NEW_DELETE_OK: paired with mark_editor_create.
+    mem_free(editor);
 }
 
 //==============================================================================
@@ -273,18 +292,18 @@ Item MarkEditor::get_version(int version_num) const {
 
 void MarkEditor::list_versions() const {
     if (mode_ != EDIT_MODE_IMMUTABLE) {
-        printf("Version control not available in inline mode\n");
+        printf("Version control not available in inline mode\n"); // PRINTF_OK: user-facing CLI output.
         return;
     }
 
     if (!version_head_) {
-        printf("No versions committed yet\n");
+        printf("No versions committed yet\n"); // PRINTF_OK: user-facing CLI output.
         return;
     }
 
     EditVersion* v = version_head_;
     while (v) {
-        printf("Version %d: %s %s\n",
+        printf("Version %d: %s %s\n", // PRINTF_OK: user-facing version listing.
                v->version_number,
                v->description ? v->description : "(no description)",
                v == current_version_ ? "<- current" : "");

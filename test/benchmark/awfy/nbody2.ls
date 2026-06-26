@@ -41,7 +41,7 @@ pn advance(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bv
 }
 
 pn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[]) {
-    var e = bx[0] - bx[0]
+    var e = 0.0
     var i: int = 0
     while (i < 5) {
         var ke = bvx[i] * bvx[i] + bvy[i] * bvy[i] + bvz[i] * bvz[i]
@@ -62,9 +62,9 @@ pn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz
 }
 
 pn offset_momentum(bvx: float[], bvy: float[], bvz: float[], bmass: float[]) {
-    var px = bvx[0] - bvx[0]
-    var py = bvy[0] - bvy[0]
-    var pz = bvz[0] - bvz[0]
+    var px = 0.0
+    var py = 0.0
+    var pz = 0.0
     var i: int = 0
     while (i < 5) {
         px = px + bvx[i] * bmass[i]

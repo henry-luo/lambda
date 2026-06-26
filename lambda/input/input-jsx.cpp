@@ -193,7 +193,7 @@ static String* parse_jsx_tag_name(InputContext& ctx, const char** jsx, const cha
     stringbuf_reset(sb);
 
     // First character
-    if (*jsx < end && (isalpha(**jsx) || **jsx == '_')) {
+    if (*jsx < end && (isalpha((unsigned char)**jsx) || **jsx == '_')) {
         stringbuf_append_char(sb, **jsx);
         (*jsx)++;
     } else {

@@ -16,6 +16,8 @@ node test/lambda/mathlive/run_lambda_mathlive_markup.mjs --category "FRACTIONS" 
 node test/lambda/mathlive/run_lambda_mathlive_markup.mjs --category "math_intensive"   # Lambda-derived (matches filename substring)
 node test/lambda/mathlive/run_lambda_mathlive_markup.mjs --limit 10
 node test/lambda/mathlive/run_lambda_mathlive_markup.mjs --strict
+node test/lambda/mathlive/run_lambda_mathlive_markup.mjs --fixture-source mathlive
+node test/lambda/mathlive/run_lambda_mathlive_markup.mjs --fixture-source all
 ```
 
 The runner:
@@ -23,6 +25,7 @@ The runner:
 - extracts runnable formulas and expected HTML from two snap files:
   - `__snapshots__/markup.test.ts.snap` — MathLive's upstream corpus (categories: ACCENTS, FRACTIONS, etc.)
   - `__snapshots__/lambda_input_markup.snap` — Lambda-derived corpus extracted from `test/input/*.{tex,md,txt}` (categories named by source filename, e.g. `math_intensive_test.tex`)
+- accepts `--fixture-source mathlive|lambda-input|all`; `make test-lambda-baseline` passes `mathlive`, while plain `make test` uses the default `all`
 - writes a generated Lambda batch script to `./temp/lambda_mathlive_markup_batch.ls`
 - renders formulas via `parse(..., {type: "math", flavor: "latex"})` and `math.render_inline()` / `math.render_display()`
 - writes comparison details to `./temp/lambda_mathlive_markup_report.json`

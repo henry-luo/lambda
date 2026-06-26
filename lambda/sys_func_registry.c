@@ -341,11 +341,100 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_SLICE, "slice", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_slice", FPTR(fn_slice), NULL, NULL, false, 0},
 
+    {SYSFUNC_VIEW, "subview", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_subview", FPTR(fn_subview), NULL, NULL, false, 0},
+
+    {SYSFUNC_IS_VIEW, "is_view", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_is_view", FPTR(fn_is_view), NULL, NULL, false, 0},
+
+    {SYSFUNC_RESHAPE, "reshape", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_reshape", FPTR(fn_reshape), NULL, NULL, false, 0},
+
+    {SYSFUNC_SHAPE, "shape", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_shape", FPTR(fn_shape), NULL, NULL, false, 0},
+
+    {SYSFUNC_NDIM, "ndim", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_ndim", FPTR(fn_ndim), NULL, NULL, false, 0},
+
+    {SYSFUNC_TRANSPOSE, "transpose", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_transpose", FPTR(fn_transpose), NULL, NULL, false, 0},
+
+    {SYSFUNC_FLATTEN, "flatten", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_flatten", FPTR(fn_flatten), NULL, NULL, false, 0},
+
+    {SYSFUNC_RAVEL, "ravel", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_ravel", FPTR(fn_ravel), NULL, NULL, false, 0},
+
+    {SYSFUNC_MATMUL, "matmul", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_matmul", FPTR(fn_matmul), NULL, NULL, false, 0},
+
+    {SYSFUNC_CONCAT, "concat", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_concat", FPTR(fn_concat), NULL, NULL, false, 0},
+
+    {SYSFUNC_STACK, "stack", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_stack", FPTR(fn_stack), NULL, NULL, false, 0},
+
+    // image stencil engine (windowed neighbourhood ops over ArrayNum)
+    {SYSFUNC_CONVOLVE, "convolve", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_convolve", FPTR(fn_convolve), NULL, NULL, false, 0},
+    {SYSFUNC_BLUR, "blur", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_blur", FPTR(fn_blur), NULL, NULL, false, 0},
+    {SYSFUNC_ERODE, "erode", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_erode", FPTR(fn_erode), NULL, NULL, false, 0},
+    {SYSFUNC_DILATE, "dilate", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_dilate", FPTR(fn_dilate), NULL, NULL, false, 0},
+    {SYSFUNC_MEDIAN_FILT, "median_filter", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_median_filter", FPTR(fn_median_filter), NULL, NULL, false, 0},
+    {SYSFUNC_MAXPOOL, "maxpool", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_maxpool", FPTR(fn_maxpool), NULL, NULL, false, 0},
+    {SYSFUNC_AVGPOOL, "avgpool", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_avgpool", FPTR(fn_avgpool), NULL, NULL, false, 0},
+
+    // image I/O bridge
+    {SYSFUNC_LOAD_IMAGE, "load", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_load", FPTR(fn_load), NULL, NULL, false, 0},
+    {SYSFUNC_SAVE_IMAGE, "save", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_BOOL, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_save", FPTR(fn_save), NULL, NULL, false, 0},
+    {SYSFUNC_AS_FLOAT, "as_float", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_as_float", FPTR(fn_as_float), NULL, NULL, false, 0},
+    {SYSFUNC_AS_UBYTE, "as_ubyte", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_as_ubyte", FPTR(fn_as_ubyte), NULL, NULL, false, 0},
+
+    // point / colour / geometric image ops
+    {SYSFUNC_INVERT, "invert", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_invert", FPTR(fn_invert), NULL, NULL, false, 0},
+    {SYSFUNC_GAMMA, "gamma", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_gamma", FPTR(fn_gamma), NULL, NULL, false, 0},
+    {SYSFUNC_THRESHOLD, "threshold", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_threshold", FPTR(fn_threshold), NULL, NULL, false, 0},
+    {SYSFUNC_GRAYSCALE, "grayscale", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_grayscale", FPTR(fn_grayscale), NULL, NULL, false, 0},
+    {SYSFUNC_FLIP, "flip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_flip", FPTR(fn_flip), NULL, NULL, false, 0},
+    {SYSFUNC_ROT90, "rot90", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_rot90", FPTR(fn_rot90), NULL, NULL, false, 0},
+    {SYSFUNC_CROP, "crop", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_crop", FPTR(fn_crop), NULL, NULL, false, 0},
+
+    // histogram / segmentation / resize / warp
+    {SYSFUNC_HISTOGRAM, "histogram", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_histogram", FPTR(fn_histogram), NULL, NULL, false, 0},
+    {SYSFUNC_OTSU, "otsu", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_otsu", FPTR(fn_otsu), NULL, NULL, false, 0},
+    {SYSFUNC_LABEL, "label", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_label", FPTR(fn_label), NULL, NULL, false, 0},
+    {SYSFUNC_RESIZE, "resize", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_resize", FPTR(fn_resize), NULL, NULL, false, 0},
+    {SYSFUNC_ROTATE, "rotate", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_rotate", FPTR(fn_rotate), NULL, NULL, false, 0},
+    {SYSFUNC_AFFINE_WARP, "affine_warp", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_affine_warp", FPTR(fn_affine_warp), NULL, NULL, false, 0},
+
     {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_all", NULL, NULL, NULL, false, 0},  // unimplemented
+     C_RET_ITEM, C_ARG_ITEM, "fn_all", FPTR(fn_all), NULL, NULL, false, 0},
 
     {SYSFUNC_ANY, "any", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_any", NULL, NULL, NULL, false, 0},  // unimplemented
+     C_RET_ITEM, C_ARG_ITEM, "fn_any", FPTR(fn_any), NULL, NULL, false, 0},
 
     // min/max — 1-arg is method-eligible, 2-arg is not
     {SYSFUNC_MIN1, "min", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
@@ -361,11 +450,17 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, C_ARG_ITEM, "fn_max2", FPTR(fn_max2), "fn_max2_u", NPTR(fn_max2_u), true, 2},
 
     // Aggregation functions — method-eligible on collections
-    {SYSFUNC_SUM, "sum", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_sum", FPTR(fn_sum), NULL, NULL, false, 0},
+    {SYSFUNC_SUM, "sum", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_sum1", FPTR(fn_sum1), NULL, NULL, false, 0},
 
-    {SYSFUNC_AVG, "avg", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_avg", FPTR(fn_avg), NULL, NULL, false, 0},
+    {SYSFUNC_SUM2, "sum", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_sum2", FPTR(fn_sum2), NULL, NULL, false, 0},
+
+    {SYSFUNC_AVG, "avg", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_avg1", FPTR(fn_avg1), NULL, NULL, false, 0},
+
+    {SYSFUNC_AVG2, "avg", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_avg2", FPTR(fn_avg2), NULL, NULL, false, 0},
 
     // ========================================================================
     // Math functions — method-eligible on numbers
@@ -387,6 +482,9 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_sign", FPTR(fn_sign), NULL, NULL, false, 0},
+
+    {SYSFUNC_CLIP, "clip", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_clip", FPTR(fn_clip), NULL, NULL, false, 0},
 
     // ========================================================================
     // I/O functions — can_raise=true for functions that may fail
@@ -475,14 +573,23 @@ SysFuncInfo sys_func_defs[] = {
     // ========================================================================
     // Vector/array functions — math module
     // ========================================================================
-    {SYSFUNC_PROD, "math_prod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_prod", FPTR(fn_math_prod), NULL, NULL, false, 0},
+    {SYSFUNC_PROD, "math_prod", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_prod1", FPTR(fn_math_prod1), NULL, NULL, false, 0},
 
-    {SYSFUNC_CUMSUM, "math_cumsum", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_cumsum", FPTR(fn_math_cumsum), NULL, NULL, false, 0},
+    {SYSFUNC_PROD2, "math_prod", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_prod2", FPTR(fn_math_prod2), NULL, NULL, false, 0},
 
-    {SYSFUNC_CUMPROD, "math_cumprod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_cumprod", FPTR(fn_math_cumprod), NULL, NULL, false, 0},
+    {SYSFUNC_CUMSUM, "math_cumsum", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_cumsum1", FPTR(fn_math_cumsum1), NULL, NULL, false, 0},
+
+    {SYSFUNC_CUMSUM2, "math_cumsum", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_cumsum2", FPTR(fn_math_cumsum2), NULL, NULL, false, 0},
+
+    {SYSFUNC_CUMPROD, "math_cumprod", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_cumprod1", FPTR(fn_math_cumprod1), NULL, NULL, false, 0},
+
+    {SYSFUNC_CUMPROD2, "math_cumprod", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_cumprod2", FPTR(fn_math_cumprod2), NULL, NULL, false, 0},
 
     {SYSFUNC_ARGMIN, "argmin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_argmin", FPTR(fn_argmin), NULL, NULL, false, 0},
@@ -502,8 +609,11 @@ SysFuncInfo sys_func_defs[] = {
     // ========================================================================
     // Statistical functions — math module
     // ========================================================================
-    {SYSFUNC_MEAN, "math_mean", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_mean", FPTR(fn_math_mean), NULL, NULL, false, 0},
+    {SYSFUNC_MEAN, "math_mean", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_mean1", FPTR(fn_math_mean1), NULL, NULL, false, 0},
+
+    {SYSFUNC_MEAN2, "math_mean", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_mean2", FPTR(fn_math_mean2), NULL, NULL, false, 0},
 
     {SYSFUNC_MEDIAN, "math_median", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_math_median", FPTR(fn_math_median), NULL, NULL, false, 0},
@@ -1059,7 +1169,11 @@ JitImport jit_runtime_imports[] = {
     {"array_int_new", FPTR(array_int_new)},
     {"array_int_set", FPTR(array_int_set)},
     {"array_num_new", FPTR(array_num_new)},
+    {"array_num_new_ndim", FPTR(array_num_new_ndim)},
+    {"array_num_at_nd", FPTR(array_num_at_nd)},
+    {"array_num_set_nd", FPTR(array_num_set_nd)},
     {"array_num_set_item", FPTR(array_num_set_item)},
+    {"fn_index_assign", FPTR(fn_index_assign)},
 
     // ========================================================================
     // List operations
@@ -1151,6 +1265,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_gt", FPTR(fn_gt)},
     {"fn_le", FPTR(fn_le)},
     {"fn_ge", FPTR(fn_ge)},
+    {"vec_cmp", FPTR(vec_cmp)},
     {"fn_not", FPTR(fn_not)},
     {"fn_and", FPTR(fn_and)},
     {"fn_or", FPTR(fn_or)},

@@ -34,8 +34,10 @@
 #include "../lib/arraylist.h"
 #include "../lib/hashmap.h"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include <cstring>
 #include <cassert>
+#include <new>
 
 // Forward declarations for internal functions in input.cpp
 extern Element* input_create_element_internal(Input *input, const char* tag_name);
@@ -68,6 +70,24 @@ MarkBuilder::MarkBuilder(Input* input)
 MarkBuilder::~MarkBuilder() {
     // RAII cleanup - nothing to do since we don't own any resources
     // Arena-allocated data lives until Input's arena is reset/destroyed
+}
+
+//------------------------------------------------------------------------------
+// Heap factory (audited boundary for `new MarkBuilder` / `delete builder`)
+//------------------------------------------------------------------------------
+
+MarkBuilder* mark_builder_create(Input* input) {
+    if (!input) return nullptr;
+    MarkBuilder* builder = (MarkBuilder*)mem_alloc(sizeof(MarkBuilder), MEM_CAT_EVAL);
+    if (!builder) return nullptr;
+    new (builder) MarkBuilder(input); // NEW_DELETE_OK: single audited construction boundary for MarkBuilder.
+    return builder;
+}
+
+void mark_builder_destroy(MarkBuilder* builder) {
+    if (!builder) return;
+    builder->~MarkBuilder(); // NEW_DELETE_OK: paired with mark_builder_create.
+    mem_free(builder);
 }
 
 //------------------------------------------------------------------------------
@@ -842,7 +862,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         if (!new_arr) return ItemNull;
 
         new_arr->type_id = LMD_TYPE_ARRAY_NUM;
-        new_arr->flags = arr->flags;  // copy elem_type (stored in flags byte)
+        new_arr->set_elem_type(arr->get_elem_type());  // copy elem_type from map_kind byte
         new_arr->capacity = new_arr->length = arr->length;
         new_arr->items = (int64_t*)((char*)new_arr + sizeof(ArrayNum));
         memcpy(new_arr->items, arr->items, arr->length * elem_size);

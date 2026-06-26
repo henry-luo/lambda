@@ -1909,7 +1909,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 CssEnum ws = get_white_space_value(child);
                 const char* measure_text = text;
                 size_t measure_len = len;
-                static thread_local char normalized_buffer[4096];
+                static thread_local char normalized_buffer[4096];  // LARGE_ARRAY_OK: static buffer — not on call stack.
 
                 if (should_collapse_whitespace(ws)) {
                     measure_len = normalize_whitespace_for_flex(text, len, normalized_buffer, sizeof(normalized_buffer));
@@ -2254,7 +2254,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 CssEnum ws = get_white_space_value(c);
                                 const char* measure_text = text;
                                 size_t measure_len = text_len;
-                                static thread_local char normalized_buffer2[4096];
+                                static thread_local char normalized_buffer2[4096];  // LARGE_ARRAY_OK: static buffer — not on call stack.
 
                                 if (should_collapse_whitespace(ws)) {
                                     measure_len = normalize_whitespace_for_flex(text, text_len,

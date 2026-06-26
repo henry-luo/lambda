@@ -683,7 +683,7 @@ static void editing_dispatch_commit_visual_invalidation(
         doc_state_request_reflow(state);
     }
     if (tx->mutation_invalidates_layout || tx->mutation_invalidates_paint) {
-        state->needs_repaint = true;
+        doc_state_request_repaint(state);
         if (evcon) evcon->need_repaint = true;
     }
 }

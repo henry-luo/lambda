@@ -1,5 +1,6 @@
 #include "js_mir_internal.hpp"
 #include "js_exec_profile.h"
+#include "../../lib/lambda_alloca.h"
 
 // ============================================================================
 // Function definition transpiler
@@ -337,11 +338,11 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         char native_name[140];
         snprintf(native_name, sizeof(native_name), "%s_n", fc->name);
 
-        MIR_var_t* n_params = (MIR_var_t*)alloca(param_count * sizeof(MIR_var_t));
-        char** n_param_names = (char**)alloca(param_count * sizeof(char*));
+        MIR_var_t* n_params = LAMBDA_ALLOCA(param_count, MIR_var_t);
+        char** n_param_names = LAMBDA_ALLOCA(param_count, char*);
         JsAstNode* param_node = fn->params;
         for (int i = 0; i < param_count; i++) {
-            n_param_names[i] = (char*)alloca(128);
+            n_param_names[i] = LAMBDA_ALLOCA(128, char);
             jm_get_param_name(param_node, i, n_param_names[i], 128);
             MIR_type_t mtype = (fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
             n_params[i] = {mtype, n_param_names[i], 0};
@@ -1811,12 +1812,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
     // --- Generate boxed version (original or wrapper) ---
     int total_params = param_count + (has_captures ? 1 : 0);
-    MIR_var_t* params = (MIR_var_t*)alloca(total_params * sizeof(MIR_var_t));
-    char** param_names_arr = (char**)alloca(total_params * sizeof(char*));
+    MIR_var_t* params = LAMBDA_ALLOCA(total_params, MIR_var_t);
+    char** param_names_arr = LAMBDA_ALLOCA(total_params, char*);
 
     int pi = 0;
     if (has_captures) {
-        param_names_arr[pi] = (char*)alloca(128);
+        param_names_arr[pi] = LAMBDA_ALLOCA(128, char);
         snprintf(param_names_arr[pi], 128, "_js_env");
         params[pi] = {MIR_T_I64, param_names_arr[pi], 0};
         pi++;
@@ -1824,7 +1825,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
     JsAstNode* param_node = fn->params;
     for (int i = 0; i < param_count; i++) {
-        param_names_arr[pi] = (char*)alloca(128);
+        param_names_arr[pi] = LAMBDA_ALLOCA(128, char);
         jm_get_param_name(param_node, i, param_names_arr[pi], 128);
         params[pi] = {MIR_T_I64, param_names_arr[pi], 0};
         param_node = param_node ? param_node->next : NULL;
@@ -1839,7 +1840,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             for (int j = i + 1; j < pi; j++) {
                 if (strcmp(param_names_arr[i], param_names_arr[j]) == 0) {
                     // Rename earlier duplicate — it's shadowed by the later one
-                    char* renamed = (char*)alloca(128);
+                    char* renamed = LAMBDA_ALLOCA(128, char);
                     snprintf(renamed, 128, "%s__dup%d", param_names_arr[i], i);
                     param_names_arr[i] = renamed;
                     params[i].name = renamed;
@@ -1955,7 +1956,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         char proto_name[160];
         snprintf(proto_name, sizeof(proto_name), "%s_n_wp%d", fc->name, mt->label_counter++);
 
-        MIR_var_t* np_args = (MIR_var_t*)alloca(param_count * sizeof(MIR_var_t));
+        MIR_var_t* np_args = LAMBDA_ALLOCA(param_count, MIR_var_t);
         for (int i = 0; i < param_count; i++) {
             MIR_type_t mtype = (fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
             np_args[i] = {mtype, "a", 0};
@@ -1964,7 +1965,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, &native_ret_type, param_count, np_args);
 
         int nops = 3 + param_count;
-        MIR_op_t* ops = (MIR_op_t*)alloca(nops * sizeof(MIR_op_t));
+        MIR_op_t* ops = LAMBDA_ALLOCA(nops, MIR_op_t);
         int oi = 0;
         ops[oi++] = MIR_new_ref_op(mt->ctx, proto);
         ops[oi++] = MIR_new_ref_op(mt->ctx, fc->native_func_item);

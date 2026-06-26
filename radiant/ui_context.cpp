@@ -90,7 +90,7 @@ int ui_context_init(UiContext* uicon, bool headless) {
             glfwInitHint(GLFW_COCOA_MENUBAR, GLFW_FALSE);
             #endif
             if (!glfwInit()) {
-                fprintf(stderr, "Error: Could not initialize GLFW for headless mode.\n");
+                log_error("GLFW init failed (headless mode)");
                 return EXIT_FAILURE;
             }
             glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);  // hidden window
@@ -118,14 +118,14 @@ int ui_context_init(UiContext* uicon, bool headless) {
         glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
         #endif
         if (!glfwInit()) {
-            fprintf(stderr, "Error: Could not initialize GLFW.\n");
+            log_error("GLFW init failed");
             return EXIT_FAILURE;
         }
 
         // create a window and its OpenGL context
         uicon->window = glfwCreateWindow(window_width, window_height, "Lambda Radiant Text Rendering", NULL, NULL);
         if (!uicon->window) {
-            fprintf(stderr, "Error: Could not create GLFW window.\n");
+            log_error("GLFW window create failed");
             return EXIT_FAILURE;
         }
 

@@ -18,6 +18,7 @@
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/lambda_alloca.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
@@ -4335,8 +4336,8 @@ static void bm_transpile_case(BashMirTranspiler* mt, BashCaseNode* node) {
     { BashAstNode* it = node->items; while (it) { item_count++; it = it->next; } }
 
     // allocate body labels (one per item) for ;& fallthrough
-    MIR_label_t* body_labels = (MIR_label_t*)alloca(item_count * sizeof(MIR_label_t));
-    MIR_label_t* next_labels = (MIR_label_t*)alloca(item_count * sizeof(MIR_label_t));
+    MIR_label_t* body_labels = LAMBDA_ALLOCA(item_count, MIR_label_t);
+    MIR_label_t* next_labels = LAMBDA_ALLOCA(item_count, MIR_label_t);
     for (int k = 0; k < item_count; k++) {
         body_labels[k] = bm_new_label(mt);
         next_labels[k] = bm_new_label(mt);

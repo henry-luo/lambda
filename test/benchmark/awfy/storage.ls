@@ -10,20 +10,14 @@ pn random_next(seed_arr) {
     return s
 }
 
-pn make_array(n, val) {
-    return fill(n, val)
-}
-
 pn build_tree_depth(state, depth, seed_arr) {
     state.count = state.count + 1
     if (depth == 1) {
-        return make_array((random_next(seed_arr) % 10) + 1, 0)
+        return fill((random_next(seed_arr) % 10) + 1, 0)
     }
-    var arr = [null, null, null, null]
-    var i = 0
-    while (i < 4) {
+    var arr = fill(4, null)
+    for i in 0 to 3 {
         arr[i] = build_tree_depth(state, depth - 1, seed_arr)
-        i = i + 1
     }
     return arr
 }

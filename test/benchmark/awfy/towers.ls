@@ -3,10 +3,6 @@
 // 13 disks, using arrays as stacks
 // Each pile is represented as {disks: [...], top: int}
 
-pn make_array(n, val) {
-    return fill(n, val)
-}
-
 pn push_disk(piles, tops, disk_size, pile) {
     let t = tops[pile]
     piles[pile * 14 + t] = disk_size
@@ -39,7 +35,7 @@ pn move_disks(piles, tops, state, disks, from_pile, to_pile) {
 
 pn benchmark() {
     // 3 piles × 14 slots each = 42 slots
-    var piles = make_array(42, 0)
+    var piles = fill(42, 0)
     var tops = [0, 0, 0]
     // build tower at pile 0 with 13 disks (size 0..12, pushed largest first)
     var i = 12

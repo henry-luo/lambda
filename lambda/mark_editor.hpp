@@ -355,3 +355,11 @@ private:
     void store_value_at_offset(void* field_ptr, Item value, TypeId type_id);
     void decrement_ref_count(void* field_ptr, TypeId type_id);
 };
+
+// ============================================================================
+// MarkEditor Heap Factory (audited boundary)
+// ============================================================================
+// Single audited construction site for `new MarkEditor` / `delete editor`.
+// Use these instead of raw new/delete in user code.
+MarkEditor* mark_editor_create(Input* input, EditMode mode = EDIT_MODE_INLINE);
+void mark_editor_destroy(MarkEditor* editor);

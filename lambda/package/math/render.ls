@@ -750,16 +750,25 @@ fn symbol_font_class(cmd_text, context) {
 fn render_colorbox_content(content_arg, context) {
     if (content_arg is string) box.text_box(string(content_arg), css.TEXT, "mord")
     else
-        (let content_context = ctx.derive(context, {colorbox_content: true}),
+        // \colorbox content is text-mode; any embedded `$...$` is inline math
+        // (text-style), so reset to text-style regardless of the ambient
+        // (display) style — matches MathLive's inline-math reset.
+        (let content_context = ctx.derive(context, {colorbox_content: true, style: "text"}),
          let children = render_children(content_arg, content_context),
          let spaced = apply_spacing(children, content_context),
          transparent_hbox(spaced))
 }
 
+// The ∂ glyph as a BARE element (no class span / italic margin — matches the
+// \pdiff golden) but carrying full-precision metrics from the cmr table so the
+// \pdiff fraction's children expose height_raw/depth_raw and can take the
+// metric path. cmr ∂ = height 0.69444, depth 0 (no descender).
 fn partial_box() => {
     element: "∂",
     height: 0.7,
-    depth: 0.08,
+    depth: 0.0,
+    height_raw: 0.69444,
+    depth_raw: 0.0,
     width: 0.45,
     type: "mord",
     italic: 0.0,
@@ -1360,7 +1369,27 @@ fn render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_he
             >
         >
     >
-    accent_box(el, vlist_h, 0.0, base_box.width)
+    accent_box_raw(el, vlist_h, base_box.width)
+}
+
+// A simple accent sits entirely above the baseline (depth 0) and its vlist
+// height is already CEIL@2, so it can carry raw metrics safely: with depth 0
+// there is no cross-term to overshoot the single-rounding strut. (Wide and
+// missing-base accents have depth and stay on the non-raw accent_box.)
+fn accent_box_raw(el, h, w) => {
+    element: el,
+    height: h,
+    depth: 0.0,
+    height_raw: h,
+    depth_raw: 0.0,
+    render_height: h,
+    render_depth: 0.0,
+    render_total: h,
+    width: w,
+    type: "mord",
+    italic: 0.0,
+    skew: 0.0,
+    no_left_bin_space: true
 }
 
 // Format an accent margin: MathLive emits a bare "0" (no unit) for zero,
@@ -1589,20 +1618,30 @@ fn render_stretchy_delimiter_group(left_text, right_text, content) {
     let style_attr = stretchy_left_right_style(content)
     let box_height = max(content.height, max(left_box.height, right_box.height))
     let box_depth = max(content.depth, max(left_box.depth, right_box.depth))
+    // Full-precision box extent: the content's raw height/depth maxed with the
+    // delimiter glyph raw. Exposing these lets the outer strut round h+d ONCE
+    // (the use_raw path) — replacing the strut_total override entirely.
+    let content_h = if (content.height_raw != null) content.height_raw else content.height
+    let content_d = if (content.left_right_render_depth != null) content.left_right_render_depth
+        else if (content.depth_raw != null) content.depth_raw else content.depth
+    let box_h_raw = max(content_h, max(delim_raw_h(left_box), delim_raw_h(right_box)))
+    let box_d_raw = max(content_d, max(delim_raw_d(left_box), delim_raw_d(right_box)))
+    let strut = stretchy_left_right_render_total(content, left_box, right_box)
     {
         element: <span class: css.LEFT_RIGHT, style: style_attr;
             for (el in elements) el
         >,
         height: box_height,
         depth: box_depth,
+        height_raw: box_h_raw,
+        depth_raw: box_d_raw,
         render_height: box_height,
         render_depth: box_depth,
-        render_total: stretchy_left_right_strut_total(content, box_height, box_depth),
+        render_total: strut,
         width: sum((for (p in parts where p != null) p.width)),
         type: "minner",
         italic: 0.0,
-        skew: 0.0,
-        strut_total: stretchy_left_right_strut_total(content, box_height, box_depth)
+        skew: 0.0
     }
 }
 
@@ -1616,25 +1655,50 @@ fn stretchy_left_right_style(content) {
     "margin-top:" ++ fmt_delim_em(0.0 - render_depth) ++ ";height:" ++ fmt_delim_em(render_total)
 }
 
-fn left_right_strut_total(content) {
+fn left_right_content_total(content) {
     if (content.left_right_render_total != null) round(content.left_right_render_total * 100.0) / 100.0
     else if (content.render_total != null) round(content.render_total * 100.0) / 100.0
     else null
 }
 
-fn stretchy_left_right_strut_total(content, box_height, box_depth) {
-    let content_total = left_right_strut_total(content)
-    let box_total = box_height + box_depth
-    let adjusted_box_total = if (abs(box_total - 2.4) < 0.001) 2.41 else box_total
-    if (content_total == null) adjusted_box_total
-    else max(content_total, adjusted_box_total)
+fn delim_raw_h(b) { if (b.height_raw != null) b.height_raw else b.height }
+fn delim_raw_d(b) { if (b.depth_raw != null) b.depth_raw else b.depth }
+
+// \left..\right strut height = CEIL@2 of the box's full-precision height+depth,
+// computed ONCE (mirrors MathLive box.ts toString). The delimiter glyphs carry
+// raw extent (delimiters.ls sized_delim_raw) so a Size3 pair sums to 2.40003
+// and rounds to 2.41 naturally — no special-casing.
+fn stretchy_left_right_render_total(content, left_box, right_box) {
+    let content_total = left_right_content_total(content)
+    let content_h = if (content.height_raw != null) content.height_raw else content.height
+    let content_d = if (content.left_right_render_depth != null) content.left_right_render_depth
+        else if (content.depth_raw != null) content.depth_raw else content.depth
+    let box_h = max(content_h, max(delim_raw_h(left_box), delim_raw_h(right_box)))
+    let box_d = max(content_d, max(delim_raw_d(left_box), delim_raw_d(right_box)))
+    let box_total = util.ceil_em2(box_h + box_d)
+    if (content_total == null) box_total
+    else max(content_total, box_total)
 }
 
+// \left..\right margin-top/height: MathLive emits these at full precision
+// with trailing zeros trimmed (NOT CEIL@2) — 0.686, 1.069108, 0.08333. Build
+// the 6dp fixed string with integer arithmetic (avoids float-to-string
+// artifacts) then drop trailing zeros.
 fn fmt_delim_em(v) {
-    if (abs(abs(v) - 0.686) < 0.0001 or abs(v - 2.076) < 0.0001)
-        util.fmt_em(v)
-    else
-        util.fmt_fixed(v, 6) ++ "em"
+    trim_trailing_zeros(util.fmt_fixed(v, 6)) ++ "em"
+}
+
+fn trim_trailing_zeros(s) {
+    if (index_of(s, ".") < 0) s
+    else trim_tz_loop(s, len(s))
+}
+
+fn trim_tz_loop(s, n) {
+    if (n <= 0) s
+    else (let last = slice(s, n - 1, n),
+          if (last == "0") trim_tz_loop(s, n - 1)
+          else if (last == ".") slice(s, 0, n - 1)
+          else slice(s, 0, n))
 }
 
 // ============================================================
@@ -1945,6 +2009,11 @@ fn render_radical(node, context) {
         element: el,
         height: spec.height,
         depth: spec.depth,
+        // metric-driven specs (display/text) carry full-precision raw extent so
+        // the outer strut and raw-aware parents (fractions) round once; the
+        // legacy script specs leave these null and fall back to render_*.
+        height_raw: spec.height_raw,
+        depth_raw: spec.depth_raw,
         render_height: spec.height,
         render_depth: spec.depth,
         render_total: spec.render_total,
@@ -1983,12 +2052,18 @@ fn sqrt_vlist_element(spec, body_elements) {
     else sqrt_small_vlist_element(spec, body_elements)
 }
 
+// the inner vlist height is the body stack extent (maxPos), which differs from
+// the box height when the surd glyph extends past the body (tall radicals).
+fn sqrt_vlist_height(spec) {
+    if (spec.vlist_height != null) spec.vlist_height else spec.height
+}
+
 fn sqrt_small_vlist_element(spec, body_elements) {
     let body_style = "height:" ++ fmt_sqrt_body_height(spec.body_height) ++ ";display:inline-block"
     let pstrut_style = "height:" ++ util.fmt_em(spec.pstrut)
     <span class: css.VLIST_T;
         <span class: css.VLIST_R;
-            <span class: css.VLIST, style: "height:" ++ util.fmt_em(spec.height);
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em(sqrt_vlist_height(spec));
                 <span style: "top:" ++ util.fmt_em(spec.body_top);
                     <span class: css.PSTRUT, style: pstrut_style>
                     <span style: body_style;
@@ -2009,7 +2084,7 @@ fn sqrt_tall_vlist_element(spec, body_elements) {
     let pstrut_style = "height:" ++ util.fmt_em(spec.pstrut)
     <span class: css.VLIST_T2;
         <span class: css.VLIST_R;
-            <span class: css.VLIST, style: "height:" ++ util.fmt_em(spec.height);
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em(sqrt_vlist_height(spec));
                 <span style: "top:" ++ util.fmt_em(spec.body_top);
                     <span class: css.PSTRUT, style: pstrut_style>
                     <span style: body_style;
@@ -2088,19 +2163,102 @@ fn sqrt_spec(body_box, context, has_index) {
         make_sqrt_spec(0.73, 0.27, body_box.height, -3.0, -3.62, 0.08, 3.0, 0.05, css.SMALL_DELIM)
     else if (context.style == "script" or context.style == "scriptscript")
         make_script_sqrt_spec(body_box)
-    else if (body_box.height == 0.0 and body_box.depth == 0.0)
-        make_sqrt_spec(0.66, 0.54, 0.0, -2.04, -2.61, 0.2, 2.04, 0.04, css.DELIM_SIZE1)
-    else if (body_box.height >= 1.0)
-        make_tall_sqrt_spec()
-    else if (body_box.height <= 0.5 and body_box.depth <= 0.1)
-        make_sqrt_spec(0.87, 0.33, body_box.height, -3.0, -3.78, -0.01, 3.0, 0.04, css.DELIM_SIZE1)
     else
-        make_sqrt_spec(0.98, 0.22, body_box.height, -3.0, -3.89, -0.12, 3.0, 0.04, css.DELIM_SIZE1)
+        sqrt_geom(body_box, context)
+}
+
+// Metric-driven radical geometry — a faithful port of TeXBook Rule 11 as
+// implemented by MathLive's SurdAtom.render + makeCustomSizedDelim + VBox
+// (ref/mathlive/src/atoms/surd.ts, core/delimiters.ts, core/v-box.ts).
+// Covers display & text styles (scalingFactor 1.0); script/scriptscript stay
+// on the legacy specs above. Every dimension derives from the body's
+// full-precision height/depth plus the surd font metrics — no bucket dispatch.
+fn sqrt_raw_h(b) { if (b.height_raw != null) b.height_raw else b.height }
+fn sqrt_raw_d(b) { if (b.depth_raw != null) b.depth_raw else b.depth }
+
+fn sqrt_geom(body_box, context) {
+    let inner_h = sqrt_raw_h(body_box)
+    let inner_d = sqrt_raw_d(body_box)
+    let is_empty = inner_h == 0.0 and inner_d == 0.0
+    let is_display = context.style == "display"
+    let si = met.style_index(context.style)
+    let factor = met.style_scale(context.style)
+    let rule_width = met.defaultRuleThickness[si] / factor
+    // φ = σ5 (x-height) in display, else the rule thickness (TeXBook p.443)
+    let phi = if (is_display) met.X_HEIGHT else rule_width
+    // ψ = θ + ¼|φ|, the body↔line clearance
+    let lc0 = factor * (rule_width + phi / 4.0)
+    let inner_total = max(factor * 2.0 * phi, inner_h + inner_d)
+    let min_delim = inner_total + lc0 + rule_width
+    let surd = surd_metrics(min_delim)
+    let surd_total = surd.h + surd.d
+    let delim_depth = surd_total - rule_width
+    // re-center the body when the surd is taller than the body needs
+    let lc = if (delim_depth > inner_h + inner_d + lc0)
+        (lc0 + delim_depth - (inner_h + inner_d)) / 2.0
+        else lc0
+    // setTop on the surd sign (only applied when |t| > 0.01, per Box.setTop)
+    let t = surd.h - inner_h - lc
+    let apply = abs(t) > 0.01
+    let body_h = inner_h + lc
+    let delim_h = if (apply) body_h else surd.h
+    let delim_d = if (apply) (surd_total - body_h) else surd.d
+    let result_h = max(delim_h, body_h)
+    let result_d = max(delim_d, inner_d)
+    // pstrut = max(maxFontSize, child heights) + 2; an empty body has no
+    // unscaled glyph (maxFontSize 0 → 2.04), otherwise the base sits at 1.0
+    let max_font = if (is_empty) 0.0 else 1.0
+    let pstrut = max(max(max_font, inner_h), rule_width) + 2.0
+    {
+        height: util.ceil_em2(result_h),
+        // depth projection rounds toward zero so the negated vertical-align
+        // matches MathLive's per-emission ceil (used only on the non-raw
+        // fallback path; the raw path reads depth_raw directly)
+        depth: 0.0 - util.ceil_em2(0.0 - result_d),
+        height_raw: result_h,
+        depth_raw: result_d,
+        render_total: util.ceil_em2(result_h + result_d),
+        vlist_height: util.ceil_em2(body_h),
+        body_height: util.ceil_em2(inner_h + inner_d),
+        body_top: util.ceil_em2(0.0 - pstrut),
+        line_top: util.ceil_em2(0.0 - pstrut - (body_h - 2.0 * rule_width)),
+        sign_top: if (apply) util.ceil_em2(t) else null,
+        pstrut: util.ceil_em2(pstrut),
+        line_height: util.ceil_em2(rule_width),
+        sign_class: surd.cls,
+        is_tall: inner_d > 0.0,
+        depth_holder: util.ceil_em2(inner_d)
+    }
+}
+
+// Choose the smallest surd glyph whose natural height+depth exceeds the
+// required delimiter height. Totals (Main-Regular small, then Size1–Size4):
+// 1.0, 1.20001, 1.80002, 2.40003, 3.00003 (ref font-metrics-data U+221A).
+fn surd_metrics(min_delim) {
+    let h = if (1.0 > min_delim) 0.8
+        else if (1.20001 > min_delim) 0.85
+        else if (1.80002 > min_delim) 1.15
+        else if (2.40003 > min_delim) 1.45
+        else 1.75
+    let d = if (1.0 > min_delim) 0.2
+        else if (1.20001 > min_delim) 0.35001
+        else if (1.80002 > min_delim) 0.65002
+        else if (2.40003 > min_delim) 0.95003
+        else 1.25003
+    let cls = if (1.0 > min_delim) css.SMALL_DELIM
+        else if (1.20001 > min_delim) css.DELIM_SIZE1
+        else if (1.80002 > min_delim) css.DELIM_SIZE2
+        else if (2.40003 > min_delim) css.DELIM_SIZE3
+        else css.DELIM_SIZE4
+    let r = {h: h, d: d, cls: cls}
+    r
 }
 
 fn make_sqrt_spec(h, d, body_h, body_top, line_top, sign_top, pstrut, line_h, sign_class) => {
     height: h,
     depth: d,
+    height_raw: null,
+    depth_raw: null,
     render_total: if (h + d < 1.21) 1.21 else h + d,
     body_height: body_h,
     body_top: body_top,
@@ -2114,6 +2272,8 @@ fn make_sqrt_spec(h, d, body_h, body_top, line_top, sign_top, pstrut, line_h, si
 fn make_script_sqrt_spec(body_box) => {
     height: 0.84,
     depth: 0.09,
+    height_raw: null,
+    depth_raw: null,
     render_total: 1.0,
     body_height: max(body_box.height, 0.83),
     body_top: -3.0,
@@ -2124,21 +2284,6 @@ fn make_script_sqrt_spec(body_box) => {
     sign_class: css.SMALL_DELIM,
     is_tall: true,
     depth_holder: 0.09
-}
-
-fn make_tall_sqrt_spec() => {
-    height: 1.45,
-    depth: 0.77,
-    render_total: 2.41,
-    body_height: 1.92,
-    body_top: -3.14,
-    line_top: -4.5,
-    sign_top: null,
-    pstrut: 3.15,
-    line_height: 0.04,
-    sign_class: css.DELIM_SIZE3,
-    is_tall: true,
-    depth_holder: 0.77
 }
 
 // ============================================================
@@ -2792,8 +2937,6 @@ fn box_with_type(bx, atom_type) => {
     type: atom_type,
     italic: bx.italic,
     skew: bx.skew,
-    strut_total: bx.strut_total,
-    strut_depth_em: bx.strut_depth_em,
     is_fraction: bx.is_fraction,
     is_script_radical: bx.is_script_radical
 }

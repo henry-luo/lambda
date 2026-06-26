@@ -69,4 +69,8 @@
 12
 "=== String Vector Operations ==="
 [error, error]
-"=== Vector Serialization ===nullEnd of Vector Performance and Edge Cases Tests"
+"=== Vector Serialization ===[
+  1,
+  2,
+  3
+]End of Vector Performance and Edge Cases Tests"

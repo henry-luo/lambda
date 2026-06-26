@@ -34,10 +34,28 @@ public:
     // Destroy the global instance (optional cleanup)
     static void destroy_global();
 
+    // Detach a URL pointer from any tracked Input that owns it (sets that
+    // input->url to null). Lets a caller free a URL it handed to create_input
+    // without ~InputManager / destroy_global double-freeing the same pointer.
+    static void detach_url(Url* url);
+
     // Instance methods for direct manager usage
     Input* create_input_instance(Url* abs_url);
     Pool* get_pool() const { return global_pool; }
+
+    // Audited factory boundary (single construction site) - InputManager has a
+    // private constructor, so friend access lets the factory placement-new it.
+    friend InputManager* input_manager_create();
+    friend void input_manager_destroy(InputManager* mgr);
 };
+
+// ============================================================================
+// InputManager Heap Factory (audited boundary)
+// ============================================================================
+// Single audited construction site for `new InputManager` / `delete mgr`.
+// Used for the process-lifetime g_input_manager singleton.
+InputManager* input_manager_create();
+void input_manager_destroy(InputManager* mgr);
 
 #include "../mark_builder.hpp"
 

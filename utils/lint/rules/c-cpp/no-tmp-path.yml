@@ -1,0 +1,18 @@
+id: no-tmp-path
+language: cpp
+severity: error
+message: >-
+  Hard-coded "/tmp" path (CLAUDE.md rule 2). Use "./temp/" (the project temp dir)
+  so test artifacts and crash dumps stay inside the repo. Mark an audited
+  exception with a trailing "// TMP_PATH_OK: <reason>".
+metadata:
+  suppress: TMP_PATH_OK
+rule:
+  kind: string_literal
+  regex: '^"/tmp(/|")'
+files:
+  - "lambda/**/*.{c,cpp,h,hpp}"
+  - "radiant/**/*.{c,cpp,h,hpp}"
+  - "lib/**/*.{c,cpp,h,hpp}"
+ignores:
+  - "**/tree-sitter*/**"

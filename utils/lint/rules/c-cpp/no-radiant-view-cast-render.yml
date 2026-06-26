@@ -1,0 +1,33 @@
+id: no-radiant-view-cast-render
+language: cpp
+severity: error
+message: >-
+  Unsafe View*/Dom* downcast. Route leaf-type downcasts through the helpers in
+  lib/tagged.hpp (lam::view_as_*/view_require_*/dom_as<>/dom_require<>), or mark
+  an audited exception with a trailing "// RADIANT_CAST_OK: <reason>".
+metadata:
+  suppress: RADIANT_CAST_OK
+# Render / event / driver group. Casts to a leaf View subtype or a concrete Dom
+# node type are dangerous downcasts; casts to the base View* are safe upcasts and
+# intentionally ignored. C-casts may target DomNode; static_casts do not.
+constraints:
+  CC:
+    regex: "^(View(Block|Text|Span|Element|Table|TableRow|TableCell|TableRowGroup|Marker)|Dom(Node|Element|Text|Comment))$"
+  SC:
+    regex: "^(View(Block|Text|Span|Element|Table|TableRow|TableCell|TableRowGroup|Marker)|Dom(Element|Text|Comment))$"
+rule:
+  all:
+    - any:
+        - pattern: ($CC *)$X
+        - pattern: static_cast<$SC *>($X)
+    # legacy regex used a single `*`; exclude pointer-to-pointer casts
+    - not:
+        pattern: ($DP **)$DX
+files:
+  - "radiant/{render,render_form,render_img,render_pdf,render_svg,render_svg_inline,render_walk}.cpp"
+  - "radiant/{event,event_sim,view_pool,state_store,dom_range_resolver,source_pos_bridge}.cpp"
+  - "radiant/{state_machine,dom_range,context_menu,css_animation,ui_context,script_runner}.cpp"
+  - "radiant/{block_context,resolve_htm_style,grid_positioning,intrinsic_sizing,cmd_layout}.cpp"
+  - "radiant/{window,webview_manager,ime_win}.cpp"
+  - "radiant/ime_mac.mm"
+  - "radiant/webdriver/{webdriver_actions,webdriver_locator,webdriver_server}.cpp"

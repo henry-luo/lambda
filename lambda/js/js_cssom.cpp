@@ -190,7 +190,7 @@ static const char* css_parse_unicode_range_canonical(const char* input, Pool* po
         format_codepoint(end_cp, end_str, sizeof(end_str));
         snprintf(result, sizeof(result), "U+%s-%s", start_str, end_str);
         char* out = (char*)pool_alloc(pool, strlen(result) + 1);
-        strcpy(out, result);
+        strcpy(out, result); // UNSAFE_LIBC_OK: dst allocated with strlen(result)+1
         return out;
     }
 
@@ -271,7 +271,7 @@ static const char* css_parse_unicode_range_canonical(const char* input, Pool* po
     }
 
     char* out = (char*)pool_alloc(pool, strlen(result) + 1);
-    strcpy(out, result);
+    strcpy(out, result); // UNSAFE_LIBC_OK: dst allocated with strlen(result)+1
     return out;
 }
 
@@ -1059,7 +1059,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
         CssDeclaration* new_decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
         if (!new_decl) return value;
         new_decl->property_name = (char*)pool_alloc(pool, strlen(css_prop) + 1);
-        if (new_decl->property_name) strcpy((char*)new_decl->property_name, css_prop);
+        if (new_decl->property_name) strcpy((char*)new_decl->property_name, css_prop); // UNSAFE_LIBC_OK: dst allocated with strlen(css_prop)+1
         new_decl->value_text = canonical;
         new_decl->value_text_len = strlen(canonical);
         new_decl->valid = true;

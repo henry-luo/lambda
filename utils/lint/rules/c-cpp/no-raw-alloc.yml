@@ -1,0 +1,39 @@
+id: no-raw-alloc
+language: cpp
+severity: error
+message: >-
+  Raw allocation call. Use mem_alloc/mem_calloc/mem_realloc/mem_free (or
+  raw_malloc/raw_free with a trailing "// RAWALLOC_OK: <reason>"), and
+  arena_alloc/pool_calloc for Lambda objects.
+metadata:
+  suppress: RAWALLOC_OK
+rule:
+  any:
+    - pattern: malloc($$$A)
+    - pattern: calloc($$$A)
+    - pattern: realloc($$$A)
+    - pattern: free($$$A)
+    - pattern: strdup($$$A)
+    - pattern: strndup($$$A)
+files:
+  # Scope: project-owned engine code. Matches the legacy check-raw-alloc
+  # exactly (.c/.cpp/.h/.hpp; no .mm).
+  - "lambda/**/*.{c,cpp,h,hpp}"
+  - "radiant/**/*.{c,cpp,h,hpp}"
+  #
+  # Deliberately out of scope (silently allowed):
+  #   lib/         — implements the mem_*/raw_*/arena_*/pool_* allocators and
+  #                  the GC, so it must use the raw libc primitives.
+  #   test/        — tests can use raw alloc liberally; production discipline
+  #                  doesn't apply.
+  #   utils/       — small tooling programs (typemeta_extract.cpp,
+  #                  compare_dvi.cpp, etc.); not part of the runtime.
+  #   include/mir* — vendored MIR (third-party, Copyright Vladimir Makarov).
+  #   mac-deps/    — gitignored macOS deps.
+  #   ref/         — gitignored vendored references.
+  #   build_temp/  — gitignored build artefacts.
+  #   temp/        — gitignored scratch dir (CLAUDE.md rule 2's target dir).
+ignores:
+  - "**/tree-sitter*/**"
+  - "lambda/lambda-wasm-main.c"     # WASM entry point uses libc alloc by design
+  - "**/windows_compat.h"           # Windows shim layer

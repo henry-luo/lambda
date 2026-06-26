@@ -1,0 +1,22 @@
+id: no-item-payload-cast
+language: cpp
+severity: error
+message: >-
+  Raw Item payload cast. Use lib/lambda_typed.hpp helpers (lam::as<>(),
+  lam::require<>(), lam::visit(), ItemReader and the typed reader constructors)
+  instead of masking tagged pointers by hand. Mark audited exceptions with a
+  trailing "// ITEM_CAST_OK: <reason>".
+metadata:
+  suppress: ITEM_CAST_OK
+constraints:
+  T:
+    regex: "^(Array|ArrayNum|Map|VMap|Element|Object|String|Symbol|Binary|Decimal|DateTime|Range|Type|TypeType|Function|Container)$"
+rule:
+  any:
+    - pattern: "0x00FFFFFFFFFFFFFF"
+    - pattern: ($T *)item.item
+files:
+  - "lambda/mark_builder.cpp"
+  - "lambda/mark_reader.cpp"
+  - "lambda/print.cpp"
+  - "lambda/format/format-json.cpp"

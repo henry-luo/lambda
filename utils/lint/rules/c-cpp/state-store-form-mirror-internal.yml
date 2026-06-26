@@ -1,0 +1,18 @@
+id: state-store-form-mirror-internal
+language: cpp
+severity: error
+message: >-
+  StateStore touching a non-text form mirror field directly. Only the text-form
+  mirrors (selection_*) may be read here; other form state is owned elsewhere.
+  Mark audited exceptions with a trailing "// STATE_STORE_OK: <reason>".
+metadata:
+  suppress: STATE_STORE_OK
+constraints:
+  O:
+    regex: "(^form|->form)$"
+  F:
+    regex: "^(disabled|readonly|selected_index|hover_index|dropdown_open|checked|required|range_value)$"
+rule:
+  pattern: $O->$F
+files:
+  - "radiant/state_store.cpp"

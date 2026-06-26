@@ -1,0 +1,36 @@
+'=== pipe map (int) ==='
+[2, 4, 6, 8, 10]
+[5]
+30
+'=== pipe map (to float) ==='
+[1.5, 3, 4.5, 6, 7.5]
+[5]
+'=== pipe map with index ==='
+[1, 3, 5, 7, 9]
+'=== comprehension ==='
+[10, 20, 30, 40, 50]
+[5]
+150
+'=== comprehension to float ==='
+[0.5, 1, 1.5, 2, 2.5]
+[5]
+'=== filter keeps subset, typed ==='
+[3, 4, 5]
+[3]
+12
+'=== filter float array ==='
+[2.5, 3.5, 4.5]
+[3]
+'=== filter all-out (empty) ==='
+[]
+0
+'=== chaining ==='
+55
+[10, 20, 30, 40, 50]
+32
+'=== map then reduce ==='
+30
+25
+'=== non-numeric ==='
+["item", "item", "item", "item", "item"]
+[[1, 1], [2, 2], [3, 3], [4, 4], [5, 5]]

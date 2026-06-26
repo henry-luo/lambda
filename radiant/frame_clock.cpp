@@ -1,6 +1,7 @@
 #include "frame_clock.h"
 
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -219,12 +220,12 @@ static void frame_clock_platform_destroy(RadiantFrameClockPlatform* platform) {
         platform->timer_fd = -1;
     }
 #endif
-    free(platform);
+    mem_free(platform);
 }
 
 static RadiantFrameClockPlatform* frame_clock_platform_create(RadiantFrameClock* clock) {
     RadiantFrameClockPlatform* platform =
-        (RadiantFrameClockPlatform*)calloc(1, sizeof(RadiantFrameClockPlatform));
+        (RadiantFrameClockPlatform*)mem_calloc(1, sizeof(RadiantFrameClockPlatform), MEM_CAT_RENDER);
     if (!platform) return NULL;
 
     platform->refresh_interval = clock->refresh_interval;

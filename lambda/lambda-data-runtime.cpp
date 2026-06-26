@@ -41,7 +41,7 @@ extern "C" SymbolKeyList* symbol_key_list_new(int64_t initial_capacity) {
     if (initial_capacity < 0) initial_capacity = 0;
     void* raw = mem_alloc(sizeof(LambdaSymbolKeyList), MEM_CAT_CONTAINER);
     if (!raw) return nullptr;
-    return new (raw) LambdaSymbolKeyList((size_t)initial_capacity);
+    return new (raw) LambdaSymbolKeyList((size_t)initial_capacity); // NEW_DELETE_OK: single audited boundary for LambdaSymbolKeyList construction inside symbol_key_list_new factory.
 }
 
 extern "C" bool symbol_key_list_append(SymbolKeyList* keys_ptr, Symbol* symbol) {
@@ -147,7 +147,7 @@ ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
     ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!arr) return NULL;
     arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->flags = elem_type;  // elem_type stored in Container::flags byte
+    arr->set_elem_type(elem_type);  // stored in map_kind byte (byte 2)
     int elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
     size_t bytes;
     if (length > 0 && lam::checked_mul((size_t)length, (size_t)elem_size, &bytes)) {
@@ -159,11 +159,207 @@ ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
     return arr;
 }
 
+// Allocate an N-D ArrayNum: data buffer sized for `total` elements, plus a
+// shape side-table with C-contiguous strides computed from `dims[0..ndim-1]`.
+// Used by both the C transpiler and the MIR transpiler to materialize nested
+// numeric literals like [[1,2],[3,4]] as a single tensor.
+ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim, int64_t* dims) {
+    if (ndim < 1 || ndim > 32) return NULL;
+    ArrayNum* arr = array_num_new(elem_type, total);
+    if (!arr) return NULL;
+    size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)ndim * sizeof(int64_t);
+    ArrayNumShape* s = (ArrayNumShape*)heap_data_calloc(shape_bytes);
+    if (!s) return arr;  // best-effort: keep as 1-D
+    s->ndim = (uint8_t)ndim;
+    s->is_c_contig = 1;
+    s->is_f_contig = (ndim == 1) ? 1 : 0;
+    s->offset = 0;
+    s->base = NULL;  // owned
+    int64_t* sd = array_num_shape_dims(s);
+    int64_t* ss = array_num_shape_strides(s);
+    int64_t stride = 1;
+    for (int i = ndim - 1; i >= 0; i--) {
+        sd[i] = dims[i];
+        ss[i] = stride;
+        stride *= dims[i];
+    }
+    arr->is_ndim = 1;
+    arr->extra = (int64_t)(uintptr_t)s;
+    return arr;
+}
+
+// Read a single scalar from ArrayNum's flat data buffer at the given offset.
+// Bypasses array_num_get's leading-axis-view logic — used by multi-dim access
+// where we've already computed the flat scalar offset via stride math.
+static Item array_num_read_scalar_at(ArrayNum* array, int64_t offset) {
+    if (!array || offset < 0) return ItemNull;
+    switch (array->get_elem_type()) {
+        case ELEM_INT:     return (Item){.item = i2it(array->items[offset])};
+        case ELEM_INT64:   return push_l(array->items[offset]);
+        case ELEM_FLOAT:   return push_d(array->float_items[offset]);
+        case ELEM_INT8:    return (Item){.item = i8_to_item(((int8_t*)array->data)[offset])};
+        case ELEM_INT16:   return (Item){.item = i16_to_item(((int16_t*)array->data)[offset])};
+        case ELEM_INT32:   return (Item){.item = i32_to_item(((int32_t*)array->data)[offset])};
+        case ELEM_UINT8:   return (Item){.item = u8_to_item(((uint8_t*)array->data)[offset])};
+        case ELEM_UINT16:  return (Item){.item = u16_to_item(((uint16_t*)array->data)[offset])};
+        case ELEM_UINT32:  return (Item){.item = u32_to_item(((uint32_t*)array->data)[offset])};
+        case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)array->data)[offset]))};
+        case ELEM_FLOAT32: return (Item){.item = f32_to_item(((float*)array->data)[offset])};
+        case ELEM_UINT64: {
+            uint64_t val = ((uint64_t*)array->data)[offset];
+            uint64_t* heap_val = (uint64_t*)heap_calloc(sizeof(uint64_t), LMD_TYPE_UINT64);
+            *heap_val = val;
+            return (Item){.item = u64_to_item(heap_val)};
+        }
+        case ELEM_FLOAT64: return push_d(((double*)array->data)[offset]);
+        case ELEM_BOOL:    return (Item){.item = b2it(((uint8_t*)array->data)[offset] ? BOOL_TRUE : BOOL_FALSE)};
+        default:           return ItemNull;
+    }
+}
+
+// Multi-dim scalar access: arr[i, j, k] on N-D ArrayNum.
+// Walks strides to compute a flat offset, then reads the scalar at that offset.
+// Negative indices are interpreted relative to the corresponding axis length.
+// On any out-of-range index or dim mismatch, returns ItemNull.
+Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices) {
+    if (!arr || ndim < 1) return ItemNull;
+    // 1-D access: arr[i] when arr is 1-D
+    if (!arr->is_ndim) {
+        if (ndim != 1) return ItemNull;  // can't multi-dim a 1-D array
+        int64_t i = indices[0];
+        if (i < 0) i += arr->length;
+        if (i < 0 || i >= arr->length) return ItemNull;
+        return array_num_read_scalar_at(arr, i);
+    }
+    // N-D access via stride dot product
+    ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
+    if (!shape || shape->ndim != ndim) return ItemNull;
+    int64_t* shp = array_num_shape_dims(shape);
+    int64_t* str = array_num_shape_strides(shape);
+    int64_t offset = 0;
+    for (int ax = 0; ax < ndim; ax++) {
+        int64_t i = indices[ax];
+        if (i < 0) i += shp[ax];
+        if (i < 0 || i >= shp[ax]) return ItemNull;
+        offset += i * str[ax];
+    }
+    return array_num_read_scalar_at(arr, offset);
+}
+
+// Multi-dim write: arr[i, j, k] = value on N-D ArrayNum.
+// Rejected on views (read-only).  Out-of-range indices silently no-op.
+void array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value) {
+    if (!arr || ndim < 1) return;
+    if (arr->is_view && !arr->is_mutable_view) {
+        log_error("array_num_set_nd: cannot mutate a read-only view; copy() first");
+        return;
+    }
+    // mutable view: the strided offset computed below lands in the base buffer
+    // (data is pre-offset / strides span the base), so the write goes through.
+    if (!arr->is_ndim) {
+        if (ndim != 1) return;
+        int64_t i = indices[0];
+        if (i < 0) i += arr->length;
+        if (i < 0 || i >= arr->length) return;
+        array_num_set_item(arr, i, value);
+        return;
+    }
+    ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
+    if (!shape || shape->ndim != ndim) return;
+    int64_t* shp = array_num_shape_dims(shape);
+    int64_t* str = array_num_shape_strides(shape);
+    int64_t offset = 0;
+    for (int ax = 0; ax < ndim; ax++) {
+        int64_t i = indices[ax];
+        if (i < 0) i += shp[ax];
+        if (i < 0 || i >= shp[ax]) return;
+        offset += i * str[ax];
+    }
+    array_num_set_item(arr, offset, value);
+}
+
+// Returns the iteration count for for-in / index loops:
+//   - 1-D / non-ndim arrays: total element count (length)
+//   - N-D arrays: shape[0] (leading axis), so for-in yields leading-axis slices
+int64_t array_num_iter_count(ArrayNum* arr) {
+    if (!arr) return 0;
+    if (arr->is_ndim && arr->extra) {
+        ArrayNumShape* s = (ArrayNumShape*)(uintptr_t)arr->extra;
+        if (s && s->ndim >= 1) return array_num_shape_dims(s)[0];
+    }
+    return arr->length;
+}
+
+// Build a leading-axis view of an N-D ArrayNum at `row_idx`.
+// Result is ndim-1 dimensional; for ndim==2 it's 1-D, for ndim==3 it's 2-D, etc.
+// The row view aliases the parent's data; its data pointer is adjusted so
+// element 0 of the row is element row_idx along axis 0 of the parent.
+static Item make_leading_axis_view(ArrayNum* parent, int64_t row_idx) {
+    ArrayNumShape* pshape = (ArrayNumShape*)(uintptr_t)parent->extra;
+    if (!pshape || pshape->ndim < 2) return ItemNull;
+    int64_t* pdims = array_num_shape_dims(pshape);
+    int64_t* pstrs = array_num_shape_strides(pshape);
+    if (row_idx < 0 || row_idx >= pdims[0]) return ItemNull;
+
+    int new_ndim = pshape->ndim - 1;
+    int64_t row_len = 1;
+    for (int i = 1; i < pshape->ndim; i++) row_len *= pdims[i];
+
+    ArrayNumElemType etype = parent->get_elem_type();
+    int elem_size = ELEM_TYPE_SIZE[etype >> 4];
+
+    ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    if (!view) return ItemNull;
+    view->type_id = LMD_TYPE_ARRAY_NUM;
+    view->set_elem_type(etype);
+    view->is_ndim = 1;
+    view->is_view = 1;
+    view->is_mutable_view = 1;  // leading-axis row view is writable through to base (Scope 3)
+    int64_t base_elem_offset = row_idx * pstrs[0];
+    view->data = (void*)((char*)parent->data + base_elem_offset * (size_t)elem_size);
+    view->length = row_len;
+    view->capacity = row_len;
+
+    // shape side-table for the row view
+    size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)new_ndim * sizeof(int64_t);
+    ArrayNumShape* rshape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
+    if (!rshape) return ItemNull;
+    rshape->ndim = (uint8_t)new_ndim;
+    rshape->is_c_contig = pshape->is_c_contig;  // inherits contig if parent was
+    rshape->is_f_contig = 0;
+    rshape->offset = base_elem_offset;
+    // base ref: prefer the parent's own base (if it's itself a view), else the parent.
+    // This keeps the original data owner alive across nested views.
+    rshape->base = pshape->base ? pshape->base : (void*)parent;
+    int64_t* rdims = array_num_shape_dims(rshape);
+    int64_t* rstrs = array_num_shape_strides(rshape);
+    for (int i = 0; i < new_ndim; i++) {
+        rdims[i] = pdims[i + 1];
+        rstrs[i] = pstrs[i + 1];
+    }
+    view->extra = (int64_t)(uintptr_t)rshape;
+
+    // pin the actual data owner
+    Container* owner = (Container*)rshape->base;
+    if (owner) owner->is_pinned = 1;
+    return { .array_num = view };
+}
+
 // Unified ArrayNum getter — dispatches on elem_type
 Item array_num_get(ArrayNum *array, int64_t index) {
     if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
     if (array->type_id != LMD_TYPE_ARRAY_NUM)
         return array_get((Array*)array, index);
+
+    // N-D arrays: return a leading-axis view instead of a scalar element
+    if (array->is_ndim && array->extra) {
+        ArrayNumShape* s = (ArrayNumShape*)(uintptr_t)array->extra;
+        if (s && s->ndim >= 2) {
+            return make_leading_axis_view(array, index);
+        }
+        // ndim==1: continue to scalar dispatch below, using shape[0] for bounds
+    }
+
     if (index < 0 || index >= array->length) {
         return ItemNull;
     }
@@ -194,6 +390,8 @@ Item array_num_get(ArrayNum *array, int64_t index) {
     }
     case ELEM_FLOAT64:
         return push_d(((double*)array->data)[index]);
+    case ELEM_BOOL:
+        return (Item){.item = b2it(((uint8_t*)array->data)[index] ? BOOL_TRUE : BOOL_FALSE)};
     default:
         return ItemNull;
     }
@@ -202,7 +400,7 @@ Item array_num_get(ArrayNum *array, int64_t index) {
 ArrayNum* array_int() {
     ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->flags = ELEM_INT;
+    arr->set_elem_type(ELEM_INT);
     return arr;
 }
 
@@ -254,7 +452,7 @@ int64_t array_int_get_raw(ArrayNum *array, int64_t index) {
 ArrayNum* array_int64() {
     ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->flags = ELEM_INT64;
+    arr->set_elem_type(ELEM_INT64);
     return arr;
 }
 
@@ -304,7 +502,7 @@ int64_t array_int64_get_raw(ArrayNum *array, int64_t index) {
 ArrayNum* array_float() {
     ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->flags = ELEM_FLOAT;
+    arr->set_elem_type(ELEM_FLOAT);
     return arr;
 }
 
@@ -316,7 +514,7 @@ ArrayNum* array_float_new(int64_t length) {
 ArrayNum* array_float_fill(ArrayNum *arr, int count, ...) {
     if (count > 0) {
         arr->type_id = LMD_TYPE_ARRAY_NUM;
-        arr->flags = ELEM_FLOAT;
+        arr->set_elem_type(ELEM_FLOAT);
         size_t bytes;
         if (lam::checked_mul((size_t)count, sizeof(double), &bytes)) {
             arr->float_items = (double*)heap_data_alloc(bytes);
@@ -358,6 +556,10 @@ void array_float_set(ArrayNum *arr, int64_t index, double value) {
     if (!arr || index < 0 || index >= arr->capacity) {
         return;  // Invalid access, do nothing
     }
+    if (arr->is_view) {
+        log_error("array_float_set: cannot mutate a view; copy() first");
+        return;
+    }
     arr->float_items[index] = value;
     // Update length if we're setting beyond current length
     if (index >= arr->length) {
@@ -367,6 +569,10 @@ void array_float_set(ArrayNum *arr, int64_t index, double value) {
 
 void array_int_set(ArrayNum *arr, int64_t index, int64_t value) {
     if (!arr || index < 0 || index >= arr->capacity) {
+        return;
+    }
+    if (arr->is_view) {
+        log_error("array_int_set: cannot mutate a view; copy() first");
         return;
     }
     arr->items[index] = value;
@@ -379,6 +585,10 @@ void array_int_set(ArrayNum *arr, int64_t index, int64_t value) {
 void array_float_set_item(ArrayNum *arr, int64_t index, Item value) {
     if (!arr || index < 0 || index >= arr->capacity) {
         return;  // Invalid access, do nothing
+    }
+    if (arr->is_view) {
+        log_error("array_float_set_item: cannot mutate a view; copy() first");
+        return;
     }
 
     double dval = 0.0;
@@ -461,6 +671,10 @@ static double item_to_float_value(Item value) {
 // Generic setter for all ArrayNum elem_types, dispatches on elem_type
 void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
     if (!arr || index < 0 || index >= arr->capacity) return;
+    if (arr->is_view && !arr->is_mutable_view) {
+        log_error("array_num_set_item: cannot mutate a read-only view; copy() first");
+        return;
+    }
     switch (arr->get_elem_type()) {
     case ELEM_INT:
         arr->items[index] = item_to_int_value(value);
@@ -501,6 +715,21 @@ void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
     case ELEM_FLOAT64:
         ((double*)arr->data)[index] = item_to_float_value(value);
         break;
+    case ELEM_BOOL: {
+        TypeId vt = get_type_id(value);
+        uint8_t b;
+        if (vt == LMD_TYPE_BOOL) {
+            b = (value.bool_val == BOOL_TRUE) ? 1 : 0;
+        } else if (vt == LMD_TYPE_INT || vt == LMD_TYPE_INT64) {
+            b = item_to_int_value(value) ? 1 : 0;
+        } else if (vt == LMD_TYPE_FLOAT) {
+            b = item_to_float_value(value) != 0.0 ? 1 : 0;
+        } else {
+            b = 0;
+        }
+        ((uint8_t*)arr->data)[index] = b;
+        break;
+    }
     default:
         return;
     }
@@ -567,12 +796,199 @@ Array* array_spreadable() {
     return arr;
 }
 
+// Dynamic N-D promotion: when every element of `arr` is an ArrayNum of the
+// same elem_type and length, promote the whole structure to a single N-D
+// ArrayNum.  Returns the new ArrayNum on success, or NULL if promotion isn't
+// applicable (heterogeneous children, jagged, mixed types, empty, etc.).
+//
+// Used by array_end to catch nested-literal cases the static AST detector
+// missed (let-bound rows, function-returned rows, etc.).
+// Determine whether the child item is a "row-like" numeric sequence (ArrayNum
+// or generic Array of homogeneous numerics) and extract its length / etype.
+// Returns true on success with rt_length set; etype defaults to LMD_TYPE_INT
+// (caller may widen later when scanning siblings).
+static bool row_summary(Item it, ArrayNumElemType* etype_out, int64_t* len_out, bool* is_arr_num) {
+    TypeId tid = get_type_id(it);
+    if (tid == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* a = it.array_num;
+        if (!a || a->is_view) return false;
+        *etype_out = a->get_elem_type();
+        *len_out = a->length;
+        *is_arr_num = true;
+        return true;
+    }
+    if (tid == LMD_TYPE_ARRAY) {
+        Array* a = it.array;
+        if (!a || a->is_spreadable || a->is_content) return false;
+        if (a->length == 0) return false;
+        // Scan items: all must be numeric; if any is float, etype = ELEM_FLOAT, else ELEM_INT64
+        bool any_float = false;
+        for (int64_t i = 0; i < a->length; i++) {
+            TypeId it_tid = get_type_id(a->items[i]);
+            if (it_tid == LMD_TYPE_FLOAT) any_float = true;
+            else if (it_tid != LMD_TYPE_INT && it_tid != LMD_TYPE_INT64) return false;
+        }
+        *etype_out = any_float ? ELEM_FLOAT : ELEM_INT64;
+        *len_out = a->length;
+        *is_arr_num = false;
+        return true;
+    }
+    return false;
+}
+
+// Write one element of the source row to the promoted N-D ArrayNum's data buffer
+// at position flat_idx.  Handles both ArrayNum source (typed read) and generic
+// Array source (Item-unboxed read).  When the source elem_type differs from
+// the destination etype (e.g. int row stored into a float-widened tensor),
+// converts element-by-element via the Item path; same-type rows memcpy.
+static void write_row_into_ndim(ArrayNum* dst, ArrayNumElemType etype, int64_t flat_idx,
+                                 Item src_item) {
+    TypeId tid = get_type_id(src_item);
+    if (tid == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* src = src_item.array_num;
+        if (src->get_elem_type() == etype) {
+            // same elem_type — byte-copy is safe
+            int elem_size = ELEM_TYPE_SIZE[etype >> 4];
+            memcpy((char*)dst->data + flat_idx * elem_size, src->data,
+                   (size_t)src->length * elem_size);
+        } else {
+            // type mismatch (e.g. int row into float tensor): convert per element
+            for (int64_t j = 0; j < src->length; j++) {
+                array_num_set_item(dst, flat_idx + j, array_num_get(src, j));
+            }
+        }
+    } else if (tid == LMD_TYPE_ARRAY) {
+        Array* src = src_item.array;
+        for (int64_t j = 0; j < src->length; j++) {
+            array_num_set_item(dst, flat_idx + j, src->items[j]);
+        }
+    }
+}
+
+static ArrayNum* try_promote_to_ndim(Array* arr) {
+    if (!arr || arr->length < 2) return NULL;
+    if (arr->is_spreadable || arr->is_content) return NULL;
+
+    // First child sets the shape/etype; subsequent must match
+    ArrayNumElemType etype;
+    int64_t inner_len;
+    bool first_is_arr_num;
+    if (!row_summary(arr->items[0], &etype, &inner_len, &first_is_arr_num)) return NULL;
+    if (inner_len == 0) return NULL;
+
+    // For now we only fold 1-D rows.  If the first row is N-D ArrayNum we require
+    // all rows to share the same multi-dim shape; this catches the common
+    // [tensor1, tensor2] → (N+1)-D case but stays conservative.
+    int64_t shape_stack[32];
+    int out_ndim;
+    shape_stack[0] = arr->length;
+
+    if (first_is_arr_num && arr->items[0].array_num->is_ndim && arr->items[0].array_num->extra) {
+        ArrayNum* fa = arr->items[0].array_num;
+        ArrayNumShape* fs = (ArrayNumShape*)(uintptr_t)fa->extra;
+        if (!fs || fs->ndim < 1 || fs->ndim > 30) return NULL;
+        int64_t* fd = array_num_shape_dims(fs);
+        for (int i = 0; i < fs->ndim; i++) shape_stack[1 + i] = fd[i];
+        out_ndim = 1 + fs->ndim;
+        // Verify all siblings match shape and elem_type
+        for (int64_t i = 1; i < arr->length; i++) {
+            ArrayNumElemType e2; int64_t l2; bool an2;
+            if (!row_summary(arr->items[i], &e2, &l2, &an2)) return NULL;
+            if (e2 != etype) return NULL;
+            if (!an2) return NULL;  // need full N-D match, generic Array can't carry N-D
+            ArrayNum* sa = arr->items[i].array_num;
+            if (!sa->is_ndim || !sa->extra) return NULL;
+            ArrayNumShape* ss = (ArrayNumShape*)(uintptr_t)sa->extra;
+            if (!ss || ss->ndim != fs->ndim) return NULL;
+            int64_t* sd = array_num_shape_dims(ss);
+            for (int j = 0; j < fs->ndim; j++) if (sd[j] != fd[j]) return NULL;
+        }
+    } else {
+        // 1-D rows: each sibling must be the same length, same (or compatible) elem_type
+        shape_stack[1] = inner_len;
+        out_ndim = 2;
+        bool any_float = (etype == ELEM_FLOAT || etype == ELEM_FLOAT64);
+        for (int64_t i = 1; i < arr->length; i++) {
+            ArrayNumElemType e2; int64_t l2; bool an2;
+            if (!row_summary(arr->items[i], &e2, &l2, &an2)) return NULL;
+            if (l2 != inner_len) return NULL;
+            // widen to float if any row is float
+            if (e2 == ELEM_FLOAT || e2 == ELEM_FLOAT64) any_float = true;
+            else if (e2 != etype && e2 != ELEM_INT && e2 != ELEM_INT64) {
+                // refuse exotic compact mixes for simplicity
+                return NULL;
+            }
+        }
+        if (any_float) etype = ELEM_FLOAT;
+        else if (etype == ELEM_INT) etype = ELEM_INT64;  // standardize int promotion to INT64 for storage
+    }
+
+    // Allocate promoted N-D ArrayNum
+    int64_t total = 1;
+    for (int i = 0; i < out_ndim; i++) total *= shape_stack[i];
+    ArrayNum* promoted = array_num_new_ndim(etype, total, out_ndim, shape_stack);
+    if (!promoted) return NULL;
+
+    // Fill: each row writes inner_len elements at offset i*inner_len
+    int64_t flat_idx = 0;
+    for (int64_t i = 0; i < arr->length; i++) {
+        write_row_into_ndim(promoted, etype, flat_idx, arr->items[i]);
+        flat_idx += inner_len;
+    }
+    return promoted;
+}
+
+// Promote a flat array whose elements are ALL numeric scalars into a 1-D typed
+// ArrayNum (compact storage).  Returns NULL if any element is non-numeric.
+// This is what makes pipe-map (`arr | ~*2`) and numeric comprehensions
+// (`[for (x in arr) x*2]`) produce typed results — both finalize via array_end.
+static ArrayNum* try_promote_scalars_to_1d(Array* arr) {
+    int64_t n = arr->length;
+    bool any_float = false;
+    int64_t bool_count = 0, num_count = 0;
+    for (int64_t i = 0; i < n; i++) {
+        TypeId t = get_type_id(arr->items[i]);
+        if (t == LMD_TYPE_BOOL) {
+            bool_count++;
+        } else if (t == LMD_TYPE_FLOAT) {
+            any_float = true; num_count++;
+        } else if (t == LMD_TYPE_NUM_SIZED) {
+            NumSizedType st = arr->items[i].get_num_type();
+            if (st == NUM_FLOAT16 || st == NUM_FLOAT32) any_float = true;
+            num_count++;
+        } else if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) {
+            num_count++;
+        } else {
+            return NULL;  // a non-numeric, non-bool element — keep generic
+        }
+    }
+    // all-bool → ELEM_BOOL (mask); all-numeric → int/float; mixed → keep generic
+    ArrayNumElemType et;
+    if (bool_count == n)     et = ELEM_BOOL;
+    else if (num_count == n) et = any_float ? ELEM_FLOAT : ELEM_INT64;
+    else return NULL;
+    ArrayNum* result = array_num_new(et, n);
+    if (!result) return NULL;
+    for (int64_t i = 0; i < n; i++) array_num_set_item(result, i, arr->items[i]);
+    return result;
+}
+
 // finalize spreadable array - returns array as Item (no flattening)
 // returns spreadable null for empty arrays so they can be skipped when spreading
 Item array_end(Array* arr) {
     if (arr->length == 0) {
         // return spreadable null - will be skipped when added to collections
         return {.item = ITEM_NULL_SPREADABLE};
+    }
+    // Dynamic N-D promotion: when children are uniform ArrayNums, fold into a tensor
+    ArrayNum* nd = try_promote_to_ndim(arr);
+    if (nd) return {.array_num = nd};
+    // 1-D promotion: when every child is a numeric scalar, fold into a typed array.
+    // Skip markup content lists and spreadable results (the latter must stay a
+    // generic List so a parent array can flatten them via array_push_spread).
+    if (!arr->is_content && !arr->is_spreadable && arr->length >= 1) {
+        ArrayNum* flat = try_promote_scalars_to_1d(arr);
+        if (flat) return {.array_num = flat};
     }
     return {.array = arr};
 }
