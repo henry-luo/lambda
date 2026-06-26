@@ -5118,6 +5118,12 @@ static bool js_array_sparse_delete(Array* arr, int64_t index) {
     return false;
 }
 
+static int js_array_sparse_index_cmp(const void* left, const void* right) {
+    int64_t a = *(const int64_t*)left;
+    int64_t b = *(const int64_t*)right;
+    return (a > b) - (a < b);
+}
+
 static int64_t js_array_sparse_count(SparseArrayMap* sm) {
     if (!sm || !sm->sparse_indices) return 0;
     return (int64_t)hashmap_count(sm->sparse_indices);
@@ -5138,6 +5144,31 @@ extern "C" Item js_array_sparse_get_index(Item array, int64_t index) {
     if (get_type_id(array) != LMD_TYPE_ARRAY) return make_js_undefined();
     Item value = ItemNull;
     return js_array_sparse_get(array.array, index, &value) ? value : make_js_undefined();
+}
+
+extern "C" int64_t js_array_sparse_collect_indices(Item array, int64_t start, int64_t end, int64_t* indices, int64_t cap) {
+    if (get_type_id(array) != LMD_TYPE_ARRAY || !array.array || array.array->extra == 0) return 0;
+    if (start < 0) start = 0;
+    if (end < start) return 0;
+    SparseArrayMap* sm = js_array_sparse_from_map((Map*)(uintptr_t)array.array->extra);
+    if (!sm || !sm->sparse_indices) return 0;
+
+    int64_t count = 0;
+    int64_t written = 0;
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(sm->sparse_indices, &iter, &item)) {
+        JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
+        if (!entry) continue;
+        if (entry->index < start || entry->index >= end) continue;
+        if (entry->value.item == JS_DELETED_SENTINEL_VAL) continue;
+        if (indices && written < cap) indices[written++] = entry->index;
+        count++;
+    }
+    if (indices && written > 1) {
+        qsort(indices, (size_t)written, sizeof(int64_t), js_array_sparse_index_cmp);
+    }
+    return count;
 }
 
 static inline bool js_array_dense_present(Array* arr, int64_t index) {
@@ -25733,6 +25764,8 @@ includes_slow_path:
                 Item val = _map_read_field(se, pm->data);
                 if (val.item != JS_DELETED_SENTINEL_VAL) sparse_count++;
             }
+            sparse_count += (int)js_array_sparse_collect_indices(
+                arr, a->capacity, a->length, NULL, 0);
         }
         int64_t* sparse_indices = sparse_count > 0 ?
             (int64_t*)mem_alloc((size_t)sparse_count * sizeof(int64_t), MEM_CAT_JS_RUNTIME) : NULL;
@@ -25752,6 +25785,15 @@ includes_slow_path:
                 if (val.item == JS_DELETED_SENTINEL_VAL) continue;
                 sparse_indices[sparse_pos] = idx;
                 sparse_values[sparse_pos] = val;
+                sparse_pos++;
+            }
+            int64_t hash_count = js_array_sparse_collect_indices(
+                arr, a->capacity, a->length,
+                sparse_indices ? sparse_indices + sparse_pos : NULL,
+                sparse_count - sparse_pos);
+            for (int64_t hi = 0; hi < hash_count && sparse_pos < sparse_count; hi++) {
+                int64_t idx = sparse_indices[sparse_pos];
+                sparse_values[sparse_pos] = js_array_sparse_get_index(arr, idx);
                 sparse_pos++;
             }
         }

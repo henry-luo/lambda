@@ -4918,9 +4918,18 @@ static void js_dom_focus_set_selection_for_element(DocState* state, DomElement* 
 
 extern "C" void js_dom_focus_if_editing_host_for_selection(void* dom_node) {
     DomNode* node = (DomNode*)dom_node;
-    if (!node || !node->is_element()) return;
-    DomElement* elem = node->as_element();
-    if (!js_dom_is_editing_host(elem)) return;
+    DomElement* elem = nullptr;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* candidate = node->as_element();
+            if (js_dom_is_editing_host(candidate)) {
+                elem = candidate;
+                break;
+            }
+        }
+        node = node->parent;
+    }
+    if (!elem) return;
     if (!js_dom_is_script_focusable(elem)) return;
     DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
     View* old_focus = state ? focus_get(state) : nullptr;

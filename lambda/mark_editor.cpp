@@ -17,6 +17,23 @@ extern TypeMap EmptyMap;
 extern TypeElmt EmptyElmt;
 extern TypeInfo type_info[];
 
+static bool mark_editor_should_preserve_ui_dom_child(Item child) {
+    TypeId type_id = get_type_id(child);
+    if (type_id == LMD_TYPE_ELEMENT && child.element) {
+        DomElement* elem = element_to_dom_element(child.element);
+        return elem && elem->node_type == DOM_NODE_ELEMENT &&
+            elem->native_element == child.element;
+    }
+    if (type_id == LMD_TYPE_STRING) {
+        String* s = child.get_safe_string();
+        if (!s) return false;
+        DomText* text = string_to_dom_text(s);
+        return text && text->node_type == DOM_NODE_TEXT &&
+            text->native_string == s;
+    }
+    return false;
+}
+
 //==============================================================================
 // Constructor / Destructor
 //==============================================================================
@@ -1339,7 +1356,8 @@ Item MarkEditor::elmt_insert_child(Item element, int index, Item child) {
     }
 
     // Ensure child is in target arena (deep copy if external)
-    if (!builder_->is_in_arena(child)) {
+    if (!builder_->is_in_arena(child) &&
+        !(ui_mode_ && mark_editor_should_preserve_ui_dom_child(child))) {
         log_debug("elmt_insert_child: child not in arena, deep copying");
         child = builder_->deep_copy(child);
     }

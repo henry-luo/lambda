@@ -11967,6 +11967,104 @@ MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
 }
 
 // Conditional expression (ternary)
+struct JsMirBranchState {
+    MIR_item_t current_func_item;
+    MIR_func_t current_func;
+    JsFuncCollected* current_fc;
+    JsClassEntry* current_class;
+    int current_func_index;
+    MIR_reg_t scope_env_reg;
+    int scope_env_slot_count;
+    int scope_depth;
+    bool scopes_saved;
+    struct hashmap* original_var_scopes[64];
+    struct hashmap* cloned_var_scopes[64];
+};
+
+static struct hashmap* jm_clone_var_scope_map(struct hashmap* src) {
+    if (!src) return NULL;
+    size_t count = hashmap_count(src);
+    size_t cap = count + 8;
+    if (cap < 16) cap = 16;
+    struct hashmap* dst = hashmap_new(sizeof(JsVarScopeEntry), cap, 0, 0,
+        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
+    if (!dst) return NULL;
+
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(src, &iter, &item)) {
+        hashmap_set(dst, item);
+    }
+    return dst;
+}
+
+static void jm_free_branch_state(JsMirBranchState* state);
+
+static void jm_save_branch_state(JsMirTranspiler* mt, JsMirBranchState* state) {
+    memset(state, 0, sizeof(*state));
+    state->current_func_item = mt->current_func_item;
+    state->current_func = mt->current_func;
+    state->current_fc = mt->current_fc;
+    state->current_class = mt->current_class;
+    state->current_func_index = mt->current_func_index;
+    state->scope_env_reg = mt->scope_env_reg;
+    state->scope_env_slot_count = mt->scope_env_slot_count;
+    state->scope_depth = mt->scope_depth;
+    state->scopes_saved = true;
+
+    for (int i = 0; i < 64; i++) {
+        state->original_var_scopes[i] = mt->var_scopes[i];
+    }
+    for (int i = 0; i <= mt->scope_depth && i < 64; i++) {
+        state->cloned_var_scopes[i] = jm_clone_var_scope_map(mt->var_scopes[i]);
+        if (mt->var_scopes[i] && !state->cloned_var_scopes[i]) {
+            state->scopes_saved = false;
+            log_error("js-mir: failed to snapshot conditional scope %d", i);
+            break;
+        }
+    }
+    if (!state->scopes_saved) {
+        jm_free_branch_state(state);
+        return;
+    }
+    for (int i = 0; i <= mt->scope_depth && i < 64; i++) {
+        mt->var_scopes[i] = state->cloned_var_scopes[i];
+    }
+}
+
+static void jm_free_branch_state(JsMirBranchState* state) {
+    if (!state) return;
+    for (int i = 0; i < 64; i++) {
+        if (state->cloned_var_scopes[i]) {
+            hashmap_free(state->cloned_var_scopes[i]);
+            state->cloned_var_scopes[i] = NULL;
+        }
+    }
+}
+
+static void jm_restore_branch_state(JsMirTranspiler* mt, JsMirBranchState* state) {
+    if (!state) return;
+
+    mt->current_func_item = state->current_func_item;
+    mt->current_func = state->current_func;
+    mt->current_fc = state->current_fc;
+    mt->current_class = state->current_class;
+    mt->current_func_index = state->current_func_index;
+    mt->scope_env_reg = state->scope_env_reg;
+    mt->scope_env_slot_count = state->scope_env_slot_count;
+    mt->scope_depth = state->scope_depth;
+
+    if (!state->scopes_saved) return;
+    for (int i = 0; i <= state->scope_depth && i < 64; i++) {
+        if (mt->var_scopes[i] && mt->var_scopes[i] != state->cloned_var_scopes[i] &&
+                mt->var_scopes[i] != state->original_var_scopes[i]) {
+            hashmap_free(mt->var_scopes[i]);
+        }
+        mt->var_scopes[i] = state->original_var_scopes[i];
+    }
+    jm_free_branch_state(state);
+}
+
 MIR_reg_t jm_transpile_conditional(JsMirTranspiler* mt, JsConditionalNode* cond) {
     MIR_reg_t truthy = jm_transpile_condition(mt, cond->test);
 
@@ -11977,13 +12075,22 @@ MIR_reg_t jm_transpile_conditional(JsMirTranspiler* mt, JsConditionalNode* cond)
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_false),
         MIR_new_reg_op(mt->ctx, truthy)));
 
+    JsMirBranchState branch_state;
+    jm_save_branch_state(mt, &branch_state);
+    jm_push_scope(mt);
     MIR_reg_t cons = jm_transpile_box_item(mt, cond->consequent);
+    while (mt->scope_depth > branch_state.scope_depth) jm_pop_scope(mt);
+    jm_restore_branch_state(mt, &branch_state);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, cons)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
     jm_emit_label(mt, l_false);
+    jm_save_branch_state(mt, &branch_state);
+    jm_push_scope(mt);
     MIR_reg_t alt = jm_transpile_box_item(mt, cond->alternate);
+    while (mt->scope_depth > branch_state.scope_depth) jm_pop_scope(mt);
+    jm_restore_branch_state(mt, &branch_state);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, alt)));
 

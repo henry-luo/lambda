@@ -9073,6 +9073,24 @@ extern "C" Item js_object_keys(Item object) {
             Item key_str = (Item){.item = s2it(heap_create_name(buf))};
             js_array_push(result, key_str);
         }
+        int64_t sparse_hash_count = js_array_sparse_collect_indices(
+            object, dense_lim, object.array->length, NULL, 0);
+        if (sparse_hash_count > 0) {
+            int64_t* sparse_hash_indices =
+                (int64_t*)mem_alloc((size_t)sparse_hash_count * sizeof(int64_t), MEM_CAT_JS_RUNTIME);
+            if (sparse_hash_indices) {
+                int64_t written = js_array_sparse_collect_indices(
+                    object, dense_lim, object.array->length,
+                    sparse_hash_indices, sparse_hash_count);
+                for (int64_t si = 0; si < written; si++) {
+                    char idx_buf[32];
+                    int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld",
+                        (long long)sparse_hash_indices[si]);
+                    js_array_push(result, (Item){.item = s2it(heap_create_name(idx_buf, idx_len))});
+                }
+                mem_free(sparse_hash_indices);
+            }
+        }
         // v25: also include custom (non-index) properties from companion map
         if (pm && pm->type) {
             TypeMap* pmt = (TypeMap*)pm->type;
