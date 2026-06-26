@@ -1,0 +1,1 @@
+[{"type":"command","name":"insertText","args":{"text":"abc"}},{"type":"command","name":"deleteContentBackward"},{"type":"command","name":"insertText","args":{"text":"Z"}}]
