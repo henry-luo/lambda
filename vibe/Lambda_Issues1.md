@@ -72,14 +72,28 @@ Note: unary `-` on literals (e.g. `-1.0`) works.
 **Pattern**: `var e = bx[0] - bx[0]` to produce a zero that has the same runtime
 type as array element reads.
 
-**Why**: Writing `var e = 0.0` gives a float literal, but subsequent accumulation
-with array elements (which return `Item` type in untyped arrays) causes a JIT type
-mismatch. Using `bx[0] - bx[0]` ensures `e` is Item-typed zero, compatible with
-later arithmetic on array-read results.
+**Why (historical)**: Writing `var e = 0.0` was believed to cause a JIT type
+mismatch with subsequent accumulation of `Item`-typed array reads, so the
+self-subtraction produced an `Item`-typed zero instead.
+
+**Status**: **RESOLVED**. All sites now use `var e = 0.0` / `var px = 0.0`.
+
+Investigation showed the workaround was obsolete *and* masked a deeper engine
+bug. The real fault was in procedural (`pn`) untyped-parameter type inference
+(`transpile-mir.cpp`, `infer_param_type`): a param used only in true division
+`dt / (d2 * dist)` — with no float literal elsewhere in the body — was
+speculatively inferred as `int`, so the call site inserted a truncating `it2i`
+coercion (`0.01 → 0`). In `nbody.advance()` this zeroed `mag`, killing every
+velocity update and producing a wrong energy (`1690750` vs the correct
+`1690876`). The fix: a tracked param participating in `/` now marks
+`INFER_FLOAT_CONTEXT` (Lambda's `/` always yields float, e.g. `4/2 → 2.0`),
+suppressing the unsound `int` narrowing. Untyped `nbody.ls` now passes; lambda
+baseline 3232/3232, no regressions.
 
 **Files affected**:
-- `awfy/nbody.ls` — `var e = bx[0] - bx[0]`
-- `awfy/nbody2.ls` — same
+- `awfy/nbody.ls` — was `var e = bx[0] - bx[0]`, `var px/py/pz = bvx[0] - bvx[0]`
+- `awfy/nbody2.ls` — same (typed `float[]` variant)
+- `lambda/transpile-mir.cpp` — engine fix (param-inference float-division guard)
 
 ---
 

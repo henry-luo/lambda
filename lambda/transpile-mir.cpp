@@ -9482,6 +9482,11 @@ static void gather_evidence(AstNode* node, InferCtx* ctx) {
                 if (left_is_tracked || right_is_tracked) {
                     ctx->evidence |= INFER_NUMERIC_USE;
                     if (is_arith) ctx->evidence |= INFER_ARITH_USE;
+                    // true division (`/`) always yields float in Lambda (e.g. 4/2 → 2.0),
+                    // so a param used as a `/` operand is float-natured. Mark float context
+                    // to suppress the speculative pn INT inference, which would otherwise
+                    // truncate float args at the call site (e.g. a timestep dt = 0.01 → 0).
+                    if (op == OPERATOR_DIV) ctx->evidence |= INFER_FLOAT_CONTEXT;
                 }
                 // If both sides are untyped but param is involved, check binary node's type
                 if ((left_is_tracked || right_is_tracked) &&
@@ -9722,6 +9727,11 @@ static void gather_evidence_multi(AstNode* node, InferCtx* ctxs, int ctx_count) 
                     if (left_is_tracked || right_is_tracked) {
                         ctxs[c].evidence |= INFER_NUMERIC_USE;
                         if (is_arith) ctxs[c].evidence |= INFER_ARITH_USE;
+                        // true division (`/`) always yields float in Lambda (e.g. 4/2 → 2.0),
+                        // so a param used as a `/` operand is float-natured. Mark float context
+                        // to suppress the speculative pn INT inference, which would otherwise
+                        // truncate float args at the call site (e.g. a timestep dt = 0.01 → 0).
+                        if (op == OPERATOR_DIV) ctxs[c].evidence |= INFER_FLOAT_CONTEXT;
                     }
                     if ((left_is_tracked || right_is_tracked) &&
                         !(ctxs[c].evidence & (INFER_INT | INFER_FLOAT))) {
