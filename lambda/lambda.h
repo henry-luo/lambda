@@ -587,15 +587,19 @@ struct Container {
             uint8_t is_spreadable:1;     // whether this array should be spread when added to collections
             uint8_t is_heap:1;           // whether allocated from runtime heap (vs arena for input docs)
             uint8_t is_data_migrated:1;  // data buffer migrated from input pool to runtime pool (for mutated markup containers)
-            // layout / storage flags (upper nibble)
+        };
+    };
+    union { // ArrayNum flags
+        uint8_t array_flags;
+        struct {
             uint8_t is_ndim:1;           // bit 4: has shape side-table in `extra` (n-d owned array)
             uint8_t is_view:1;           // bit 5: aliases another container's storage (implies is_ndim)
             uint8_t is_pinned:1;         // bit 6: has live views; data buffer must not be relocated by compactor
             uint8_t is_mutable_view:1;   // bit 7: a view writable through to its base (procedural in-place updates)
         };
-    };
+    };    
     uint8_t map_kind;      // MapKind tag (0 = plain, only used for map/object/element)
-    uint8_t padding[5];  // padding to align to 8 bytes
+    uint8_t padding[4];  // padding to align to 8 bytes
 };
 
 // List/Array flags (stored in List.flags / Array.flags field)
@@ -603,8 +607,8 @@ struct Container {
 #ifndef __cplusplus
     struct Range {
         TypeId type_id;
-        uint8_t flags;
-        uint8_t padding[6];  // padding to align to 8 bytes
+        uint16_t flags;
+        uint8_t padding[5];  // padding to align to 8 bytes
         //---------------------
         int64_t start;  // inclusive start
         int64_t end;    // inclusive end
@@ -613,8 +617,8 @@ struct Container {
 
     struct List {
         TypeId type_id;
-        uint8_t flags;
-        uint8_t padding[6];  // padding to align to 8 bytes
+        uint16_t flags;
+        uint8_t padding[5];  // padding to align to 8 bytes
         //---------------------
         Item* items;  // pointer to items
         int64_t length;  // number of items
@@ -624,9 +628,9 @@ struct Container {
 
     struct ArrayNum {
         TypeId type_id;
-        uint8_t flags;
+        uint16_t flags;
         uint8_t elem_type;     // ArrayNumElemType (replaces flags for typed arrays)
-        uint8_t padding[5];  // padding to align to 8 bytes
+        uint8_t padding[4];  // padding to align to 8 bytes
         //---------------------
         union {
             int64_t* items;        // for ELEM_INT, ELEM_INT64
@@ -653,9 +657,9 @@ struct Container {
     // Layout must match the C++ structs in lambda.hpp exactly
     struct Map {
         TypeId type_id;
-        uint8_t flags;
+        uint16_t flags;
         uint8_t map_kind;
-        uint8_t padding[5];  // padding to align to 8 bytes
+        uint8_t padding[4];  // padding to align to 8 bytes
         //---------------------
         void* type;       // TypeMap* — shape/type info
         void* data;       // packed data struct of the map fields
@@ -670,9 +674,9 @@ struct Container {
 
     struct Object {
         TypeId type_id;
-        uint8_t flags;
+        uint16_t flags;
         uint8_t map_kind;
-        uint8_t padding[5];  // padding to align to 8 bytes
+        uint8_t padding[4];  // padding to align to 8 bytes
         //---------------------
         void* type;       // TypeObject* — shape + methods + type_name
         void* data;       // packed field data (same layout as Map)
@@ -681,9 +685,9 @@ struct Container {
 
     struct Element {
         TypeId type_id;
-        uint8_t flags;
+        uint16_t flags;
         uint8_t map_kind;
-        uint8_t padding[5];  // padding to align to 8 bytes
+        uint8_t padding[4];  // padding to align to 8 bytes
         //---------------------
         Item* items;       // list content items
         int64_t length;    // number of content items
