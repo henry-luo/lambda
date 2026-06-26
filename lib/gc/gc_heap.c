@@ -898,8 +898,8 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         // Owned 1-D arrays have no outgoing pointers; views (is_view bit 5) hold
         // a base reference via the shape side-table in `extra` (offset 24).
         uint8_t* p = (uint8_t*)obj;
-        uint8_t flags = p[1];
-        if (flags & 0x20) {  // CONTAINER_FLAG_IS_VIEW = bit 5
+        uint8_t array_flags = p[2];
+        if (array_flags & 0x02) {  // Container.is_view in array_flags byte
             void* shape_ptr = (void*)(uintptr_t)(*(int64_t*)(p + 24));
             if (shape_ptr) {
                 // ArrayNumShape layout: { uint8_t ndim, 1-byte flag-byte, int64_t offset, void* base, ... }
@@ -944,7 +944,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     case LMD_TYPE_OBJECT_: {
         // Map/Object: { Container(8), type*(8@8), data*(8@16), data_cap(4@24) }
         uint8_t* p = (uint8_t*)obj;
-        uint8_t map_kind = p[1] >> 4;
+        uint8_t map_kind = p[3];
         void* type_ptr = *(void**)(p + 8);    // TypeMap*
         void* data_ptr = *(void**)(p + 16);   // data buffer
         if (tag == LMD_TYPE_MAP_ && map_kind == MAP_KIND_ITERATOR_) {
@@ -1243,20 +1243,20 @@ static void gc_compact_data(gc_heap_t* gc) {
         }
         case LMD_TYPE_ARRAY_NUM_: {
             uint8_t* p = (uint8_t*)obj;
-            uint8_t flags = p[1];
+            uint8_t array_flags = p[2];
             // Skip relocation when:
-            //   is_view  (bit 5): data is borrowed from base array; we must not move it
-            //   is_pinned (bit 6): a live view references this base; moving it would break the view
-            if (flags & 0x60) break;
+            //   is_view: data is borrowed from base array; we must not move it
+            //   is_pinned: a live view references this base; moving it would break the view
+            if (array_flags & 0x06) break;
             void** items_slot = (void**)(p + 8);
             int64_t capacity = *(int64_t*)(p + 32);
             if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
-                // Element width lives in map_kind byte at offset 2 (upper nibble = ELEM_* tag).
+                // Element width lives in map_kind byte at offset 3 (upper nibble = ELEM_* tag).
                 // ELEM_TYPE_SIZE table is keyed by (elem_type >> 4).
                 static const uint8_t ELEM_SIZE_IDX[16] = {
                     8, 8, 1, 2, 4, 8, 1, 2, 4, 8, 2, 4, 8, 1, 0, 0
                 };
-                uint8_t elem_type = p[2];
+                uint8_t elem_type = p[3];
                 size_t elem_bytes = ELEM_SIZE_IDX[(elem_type >> 4) & 0xF];
                 if (elem_bytes == 0) elem_bytes = 8;  // safe default
                 size_t size = (size_t)capacity * elem_bytes;
@@ -1384,7 +1384,7 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
     }
     else if (tag == LMD_TYPE_MAP_) {
         uint8_t* p = (uint8_t*)obj;
-        uint8_t map_kind = p[1] >> 4;
+        uint8_t map_kind = p[3];
         if (map_kind == MAP_KIND_ARRAY_SPARSE_) {
             gc_free_sparse_array_map_entries(obj);
         }

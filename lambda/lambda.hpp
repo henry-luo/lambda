@@ -352,8 +352,8 @@ struct List : Container {
 };
 
 struct ArrayNum : Container {
-    // Container::map_kind byte (byte 2) holds the elem_type for ArrayNum.
-    // Container::flags upper nibble is reserved for layout flags (is_ndim/is_view/is_pinned).
+    // Container::map_kind byte holds the elem_type for ArrayNum.
+    // Container::array_flags stores layout flags (is_ndim/is_view/is_pinned).
     union {
         int64_t* items;        // for ELEM_INT, ELEM_INT64
         double* float_items;   // for ELEM_FLOAT
