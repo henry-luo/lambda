@@ -1335,7 +1335,7 @@ Item fn_fill(Item n_item, Item value) {
     if (n == 0) {
         Array *result = (Array *)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
         result->type_id = LMD_TYPE_ARRAY;
-        result->length = 0;  result->extra = 0;
+        result->length = 0;  result->extra = 0;  result->capacity = 0;
         result->items = (Item*)(result + 1);
         return { .array = result };
     }
@@ -1362,7 +1362,7 @@ Item fn_fill(Item n_item, Item value) {
         // spreadable array for non-numeric values (avoids list merge behavior for strings)
         Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*n, LMD_TYPE_ARRAY);
         result->type_id = LMD_TYPE_ARRAY;
-        result->length = n;  result->extra = 0;
+        result->length = n;  result->extra = 0;  result->capacity = n;
         result->items = (Item*)(result + 1);
         for (int64_t i = 0; i < n; i++) {
             result->items[i] = value;

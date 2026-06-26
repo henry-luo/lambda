@@ -622,6 +622,23 @@ void array_push(Array* arr, Item item) {
     arr->length++;
 }
 
+// push(arr, val) — Lambda-script builtin: append val to a growable generic array
+// in place (amortized O(1) via expand_list's doubling). Mutates arr and returns it,
+// so len(arr) reflects the new size and arr[i] indexes directly. This is the
+// idiomatic replacement for the chunked-vector + `.sz` size-tracking workaround.
+Item pn_push(Item arr_item, Item value) {
+    TypeId tid = get_type_id(arr_item);
+    if (tid != LMD_TYPE_ARRAY) {
+        log_error("push: expected a growable array, got %s", get_type_name(tid));
+        return arr_item;
+    }
+    // array_push grows via expand_list (GC-aware, registers the array as a root
+    // across the allocation). It only flattens nested *content* lists; ordinary
+    // `[...]` values are appended as a single element.
+    array_push(arr_item.array, value);
+    return arr_item;
+}
+
 void list_push(List *list, Item item) {
     TypeId type_id = get_type_id(item);
     // 1. skip NULL value

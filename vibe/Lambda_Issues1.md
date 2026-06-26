@@ -142,13 +142,37 @@ separately. CD therefore retains literal null arrays until that GC bug is fixed.
 var vec = { chunks: [null16()], sz: 0 }
 ```
 
-**Why**: Lambda has no built-in growable/resizable array type. These benchmarks
-implement a chunked vector abstraction where `.sz` tracks the logical element count,
-separate from the physical chunk capacity. `len()` returns the array's physical size,
-not the user's logical size.
+**Why (historical)**: Lambda had no built-in growable array, so benchmarks implemented
+a chunked vector where `.sz` tracked the logical element count separate from physical
+chunk capacity.
 
-**Files affected**: `awfy/cd.ls`, `cd2.ls`, `havlak.ls`, `havlak2.ls`, `deltablue.ls`,
-`deltablue2.ls`, `json.ls`, `json2.ls`
+**Status**: **ENGINE ENHANCED + partially converted.** Added a built-in
+`push(arr, val)` that appends to a growable array **in place** (amortized O(1) via the
+runtime's existing `array_push` → `expand_list` doubling, which is GC-aware). `[]`
+makes an empty growable array; `len(arr)` gives the logical size; `arr[i]` indexes
+directly. This replaces the whole chunked-vector + `.sz` abstraction.
+
+- Engine: `SYSPROC_PUSH` in `lambda.h`; registry entry in `sys_func_registry.c`;
+  `pn_push` in `lambda-data.cpp`. Regression test: `test/lambda/proc/proc_push.ls`.
+- **Performance: `push` is ~9.6× faster** than the chunked vector (77 ms vs 742 ms on
+  a 10000×200 append+scan workload), with the same result — direct O(1) indexing vs
+  the chunked double-indirection + per-add chunk management. Far exceeds "comparable".
+
+**Converted (verified PASS, debug/ASan-clean):**
+- `awfy/json.ls`, `json2.ls` — `vec_new/add/at/size` now wrap `[]`/`push`/`[i]`/`len`.
+
+**Blocked — `havlak`/`havlak2`/`cd`/`cd2` keep the chunked vectors.** Converting them
+to `push` triggers the latent JIT GC-rooting use-after-free (BUG-001, see
+`Lambda_Bug.md`): `push`'s `expand_list` allocates more often than the chunked vector's
+batch allocation, and its GC frees a live-but-unrooted JIT local (a `fn_fill` chunk
+used in a pending `== null`). havlak-with-`push` is now a **deterministic reproducer**
+of BUG-001 (previously only cd.ls, non-reproducible). These stay chunked until the JIT
+root-frame coverage gap is fixed. (`deltablue`/`deltablue2` are independently
+slow/failing.)
+
+**Note:** `havlak`'s `arr`/`iarr` are *sparse absolute-index* stores (not sequential
+growable vectors), so they're not `push`-convertible regardless — a different pattern
+from the `.sz` size-tracking workaround.
 
 ---
 

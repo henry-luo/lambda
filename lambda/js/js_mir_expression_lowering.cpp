@@ -6825,6 +6825,25 @@ static bool jm_call_yield_blocks_direct(JsMirTranspiler* mt, JsAstNode* first_ar
     return false;
 }
 
+static bool jm_direct_call_name_is_shadowed(JsMirTranspiler* mt, const char* name, int name_len) {
+    if (!mt || !name || name_len <= 0) return false;
+    char vname[128];
+    snprintf(vname, sizeof(vname), "_js_%.*s", name_len, name);
+    if (jm_find_var(mt, vname)) return true;
+    if (mt->current_fc) {
+        for (int i = 0; i < mt->current_fc->capture_count; i++) {
+            if (strcmp(mt->current_fc->captures[i].name, vname) == 0) return true;
+        }
+    }
+    if (mt->module_consts) {
+        JsModuleConstEntry lookup;
+        snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+        JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+        if (mc && mc->const_type == MCONST_MODVAR) return true;
+    }
+    return false;
+}
+
 MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     int arg_count = jm_count_args(call->arguments);
 
@@ -9654,7 +9673,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // v14: setTimeout(callback, delay, ...extra_args)
-            if (nl == 10 && strncmp(n, "setTimeout", 10) == 0) {
+            if (nl == 10 && strncmp(n, "setTimeout", 10) == 0 &&
+                    !jm_direct_call_name_is_shadowed(mt, n, nl)) {
                 MIR_reg_t cb = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 MIR_reg_t delay = (call->arguments && call->arguments->next)
                     ? jm_transpile_box_item(mt, call->arguments->next)
@@ -9686,7 +9706,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, delay));
             }
             // v14: setInterval(callback, delay, ...extra_args)
-            if (nl == 11 && strncmp(n, "setInterval", 11) == 0) {
+            if (nl == 11 && strncmp(n, "setInterval", 11) == 0 &&
+                    !jm_direct_call_name_is_shadowed(mt, n, nl)) {
                 MIR_reg_t cb = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 MIR_reg_t delay = (call->arguments && call->arguments->next)
                     ? jm_transpile_box_item(mt, call->arguments->next)
@@ -9716,21 +9737,24 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, delay));
             }
             // v14: clearTimeout(id)
-            if (nl == 12 && strncmp(n, "clearTimeout", 12) == 0) {
+            if (nl == 12 && strncmp(n, "clearTimeout", 12) == 0 &&
+                    !jm_direct_call_name_is_shadowed(mt, n, nl)) {
                 MIR_reg_t id_val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 jm_call_void_1(mt, "js_clearTimeout",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, id_val));
                 return jm_emit_null(mt);
             }
             // v14: clearInterval(id)
-            if (nl == 13 && strncmp(n, "clearInterval", 13) == 0) {
+            if (nl == 13 && strncmp(n, "clearInterval", 13) == 0 &&
+                    !jm_direct_call_name_is_shadowed(mt, n, nl)) {
                 MIR_reg_t id_val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 jm_call_void_1(mt, "js_clearInterval",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, id_val));
                 return jm_emit_null(mt);
             }
             // v14: setImmediate(callback, ...extra_args)
-            if (nl == 12 && strncmp(n, "setImmediate", 12) == 0) {
+            if (nl == 12 && strncmp(n, "setImmediate", 12) == 0 &&
+                    !jm_direct_call_name_is_shadowed(mt, n, nl)) {
                 MIR_reg_t cb = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 JsAstNode* extra = call->arguments ? call->arguments->next : NULL;
                 if (extra) {

@@ -117,6 +117,15 @@ static void jm_count_lexical_binding_name_for_slot(JsAstNode* node, const char* 
         }
         return;
     }
+    case JS_AST_NODE_FUNCTION_DECLARATION: {
+        JsFunctionNode* fn = (JsFunctionNode*)node;
+        if (!fn->name) return;
+        char fn_name[128];
+        snprintf(fn_name, sizeof(fn_name), "_js_%.*s",
+            (int)fn->name->len, fn->name->chars);
+        if (strcmp(fn_name, name) == 0) (*count)++;
+        return;
+    }
     case JS_AST_NODE_IF_STATEMENT:
         jm_count_lexical_binding_name_for_slot(((JsIfNode*)node)->consequent, name, count);
         jm_count_lexical_binding_name_for_slot(((JsIfNode*)node)->alternate, name, count);
@@ -245,6 +254,17 @@ static void jm_collect_duplicate_module_block_lexicals(JsAstNode* node,
         }
         return;
     }
+    case JS_AST_NODE_FUNCTION_DECLARATION: {
+        if (!direct_program) {
+            JsFunctionNode* fn = (JsFunctionNode*)node;
+            if (fn->name) {
+                char name[128];
+                snprintf(name, sizeof(name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+                jm_note_module_block_lexical_name(seen, duplicate_consts, name, (int)JS_VAR_LET);
+            }
+        }
+        return;
+    }
     case JS_AST_NODE_BLOCK_STATEMENT: {
         JsBlockNode* blk = (JsBlockNode*)node;
         for (JsAstNode* s = blk->statements; s; s = s->next)
@@ -331,7 +351,6 @@ static void jm_collect_duplicate_module_block_lexicals(JsAstNode* node,
         jm_collect_duplicate_module_block_lexicals(n->declaration, seen, duplicate_consts, direct_program);
         return;
     }
-    case JS_AST_NODE_FUNCTION_DECLARATION:
     case JS_AST_NODE_FUNCTION_EXPRESSION:
     case JS_AST_NODE_ARROW_FUNCTION:
         return;
@@ -1138,6 +1157,17 @@ static bool jm_lexical_pattern_matches_name_key(JsAstNode* pat, const char* name
 
 static bool jm_lexical_decl_matches_name(JsAstNode* stmt, const char* name, char out_key[128]) {
     if (!stmt || !name || !out_key) return false;
+    if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+        JsFunctionNode* fn = (JsFunctionNode*)stmt;
+        if (!fn->name || ts_node_is_null(stmt->node)) return false;
+        char fn_name[128];
+        snprintf(fn_name, sizeof(fn_name), "_js_%.*s",
+            (int)fn->name->len, fn->name->chars);
+        if (strcmp(fn_name, name) != 0) return false;
+        snprintf(out_key, 128, "%s@%u:%u", name,
+            ts_node_start_byte(stmt->node), ts_node_end_byte(stmt->node));
+        return true;
+    }
     if (stmt->node_type != JS_AST_NODE_VARIABLE_DECLARATION) return false;
     JsVariableDeclarationNode* var = (JsVariableDeclarationNode*)stmt;
     if (var->kind != JS_VAR_LET && var->kind != JS_VAR_CONST) return false;
