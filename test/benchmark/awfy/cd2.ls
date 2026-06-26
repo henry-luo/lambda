@@ -73,7 +73,7 @@ pn null32() {
 // Type definitions for annotated map field access
 // =====================================================
 type Arr = {l0: list, sz: int}
-type Vec = {chunks: list, sz: int}
+type Vec = any
 type RbtTree = {root: int, cnt: int, nd: map}
 type DrawCtx = {p1x: float, p1y: float, p2x: float, p2y: float, motionIdx: int}
 
@@ -126,36 +126,16 @@ pn arr_set(a, idx: int, val) {
 // Small vector: 16x16=256
 // =====================================================
 pn vec_new() {
-    var v: Vec = { chunks: null16(), sz: 0 }
-    return v
+    return []
 }
 
 pn vec_add(v, item) {
-    var s: int = (v.sz)
-    var ii: int = s % 16
-    var ci: int = shr(s, 4)
-    var cks = (v.chunks)
-    var ck = cks[ci]
-    if (ck == null) {
-        var _n: int = 0
-        ck = null16()
-        cks[ci] = ck
-    }
-    var _d: int = 0
-    ck[ii] = item
-    var ns: int = s + 1
-    v.sz = ns
+    push(v, item)
     return 0
 }
 
 pn vec_at(v, idx: int) {
-    var ii: int = idx % 16
-    var ci: int = shr(idx, 4)
-    var cks = (v.chunks)
-    var ck = cks[ci]
-    if (ck == null) { return null }
-    var r = ck[ii]
-    return r
+    return v[idx]
 }
 
 // =====================================================
@@ -990,7 +970,7 @@ pn handle_new_frame(stateTree, frame: Vec) {
     var motions: Vec = vec_new()
     // Use flat arr for aircraft seen set (IDs are 0-99, well within arr capacity)
     var seenArr: Arr = arr_new()
-    var frameSz: int = (frame.sz)
+    var frameSz: int = len(frame)
     var i: int = 0
     while (i < frameSz) {
         var aircraft = vec_at(frame, i)
@@ -1022,7 +1002,7 @@ pn handle_new_frame(stateTree, frame: Vec) {
         }
         curId = rbt_successor(stateTree, curId)
     }
-    var trSz: int = (toRemove.sz)
+    var trSz: int = len(toRemove)
     var ri: int = 0
     while (ri < trSz) {
         var rk: int = vec_at(toRemove, ri)
@@ -1032,7 +1012,7 @@ pn handle_new_frame(stateTree, frame: Vec) {
 
     // Reduce collision set
     var voxelMap = rbt_new()
-    var motionsSz: int = (motions.sz)
+    var motionsSz: int = len(motions)
     var vxy = [null, null]
     var mi: int = 0
     while (mi < motionsSz) {
@@ -1057,7 +1037,7 @@ pn handle_new_frame(stateTree, frame: Vec) {
     while (vmCur != NIL) {
         var vmN = rbt_nd(voxelMap, vmCur)
         var motVec: Vec = vmN[NV]
-        var mvsz: int = (motVec.sz)
+        var mvsz: int = len(motVec)
         if (mvsz > 1) {
             var ii: int = 0
             while (ii < mvsz) {
