@@ -473,9 +473,13 @@ export function serializeDocToHtml(doc: Doc, opts: SerializeOptions): string {
   return serializeChild(doc, [], opts, 0).trim()
 }
 
+// HTML void elements — serialized without a closing tag (`<br>` not `<br></br>`,
+// which the HTML5 parser would read as two <br>s).
+const VOID_SERIALIZE_TAGS = new Set(['br', 'hr', 'img'])
+
 function serializeChild(c: Child, path: SourcePath, opts: SerializeOptions, depth: number): string {
   if (c.kind === 'text') {
-    return escapeText(c.text)
+    return serializeMarkedText(c.text, c.marks)
   }
   return serializeNode(c, path, opts, depth)
 }
@@ -485,6 +489,9 @@ function serializeNode(n: Node, path: SourcePath, opts: SerializeOptions, depth:
     ? ''
     : ' ' + n.attrs.map(a => `${a.name}="${escapeAttr(stringifyAttr(a.value))}"`).join(' ')
   const tag = n.tag
+  if (VOID_SERIALIZE_TAGS.has(tag)) {
+    return `<${tag}${attrs}>`
+  }
   if (n.content.length === 0 && tag !== 'doc') {
     return `<${tag}${attrs}></${tag}>`
   }
