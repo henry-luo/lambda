@@ -1,0 +1,1 @@
+[{"type":"step","step":{"kind":"replace","parent":[],"from":0,"to":1,"slice":[{"kind":"node","tag":"p","attrs":[],"content":[{"kind":"text","text":"new text","marks":{}}]}]}}]

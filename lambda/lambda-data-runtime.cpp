@@ -147,7 +147,7 @@ ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
     ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!arr) return NULL;
     arr->type_id = LMD_TYPE_ARRAY_NUM;
-    arr->set_elem_type(elem_type);  // stored in map_kind byte (byte 2)
+    arr->set_elem_type(elem_type);  // stored in map_kind/elem_type byte
     int elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
     size_t bytes;
     if (length > 0 && lam::checked_mul((size_t)length, (size_t)elem_size, &bytes)) {

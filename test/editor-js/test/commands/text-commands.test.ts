@@ -127,6 +127,25 @@ describe('commands/cmdInsertParagraph (split_block)', () => {
 })
 
 describe('commands/cmdInsertLineBreak', () => {
+  it('at the end of a leaf inserts a <br> with no trailing empty leaf', () => {
+    const s = state('doc', [node('p', [text('hello')])], caret([0, 0], 5))
+    const tx = cmdInsertLineBreak(s)!
+    const p = tx.doc_after.content[0] as any
+    // expect: [text("hello"), <br>] — NOT a trailing empty text leaf
+    expect(p.content.length).toBe(2)
+    expect(p.content[0]).toEqual({ kind: 'text', text: 'hello', marks: {} })
+    expect(p.content[1].tag).toBe('br')
+  })
+
+  it('at the start of a leaf inserts a <br> with no leading empty leaf', () => {
+    const s = state('doc', [node('p', [text('hello')])], caret([0, 0], 0))
+    const tx = cmdInsertLineBreak(s)!
+    const p = tx.doc_after.content[0] as any
+    expect(p.content.length).toBe(2)
+    expect(p.content[0].tag).toBe('br')
+    expect(p.content[1]).toEqual({ kind: 'text', text: 'hello', marks: {} })
+  })
+
   it('inserts a <br> in the middle of a leaf', () => {
     const s = state('doc', [node('p', [text('hello')])], caret([0, 0], 3))
     const tx = cmdInsertLineBreak(s)!

@@ -34,6 +34,8 @@ describe('Tier D — structural fixtures (lists / tables / images)', () => {
       const c = loadFixture(dir)
       const r = runFixtureCase(c)
       expect(r.actualDoc).toEqual(r.expectedDoc)
+      // every applied transform must be invertible (Slate/PM invariant)
+      if (r.invertRoundtrips !== null) expect(r.invertRoundtrips).toBe(true)
       if (r.expectedSelection !== null) {
         expect(r.actualSelection).toEqual(r.expectedSelection)
       }

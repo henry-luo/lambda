@@ -27,7 +27,7 @@ import {
   txSetSelection,
   txStep
 } from '../model/transaction.js'
-import { defaultSplitBlock, isBlockTag } from '../model/schema.js'
+import { defaultSplitBlock, isBlockTag, schemaAllowsInline } from '../model/schema.js'
 import { caret, caretAt, isText as selIsText, selCollapsed, selHi, selLo, selSingleLeaf } from './sel.js'
 import type { EditorState } from './types.js'
 import type { AttrValue, Child, MarkDict, Node, TextLeaf, Transaction } from '../model/types.js'
@@ -76,10 +76,13 @@ export function cmdInsertText(state: EditorState, txt: string): Transaction | nu
   const target = nodeAt(state.doc, lo.path)
   if (target === null) return null
 
-  // Caret sits on a NODE (empty block, or a child-index boundary) rather than
-  // inside a text leaf — insert a fresh text leaf carrying any stored marks.
+  // Caret sits on a NODE at a child-index boundary (empty block, or after an
+  // inline node like <br>). Insert a fresh text leaf carrying stored marks —
+  // but ONLY where the schema permits inline content, so we never splice a
+  // bare text leaf among block children (e.g. select-all + type into <doc>).
   if (isNode(target)) {
     if (txt.length === 0) return null
+    if (lo.path.length < 1 || !schemaAllowsInline(state.schema, target.tag)) return null
     const off = Math.min(lo.offset, target.content.length)
     const marks: MarkDict = state.stored_marks ?? {}
     const newLeaf: TextLeaf = { kind: 'text', text: txt, marks }
@@ -215,19 +218,23 @@ export function cmdInsertLineBreak(state: EditorState): Transaction | null {
   const before = lo.offset > 0
     ? [{ kind: 'text' as const, text: leaf.text.slice(0, lo.offset), marks: leaf.marks }]
     : []
-  const after  = {
-    kind: 'text' as const,
-    text: leaf.text.slice(hi.offset),
-    marks: leaf.marks
-  }
+  const afterText = leaf.text.slice(hi.offset)
+  const after = afterText.length > 0
+    ? [{ kind: 'text' as const, text: afterText, marks: leaf.marks }]
+    : []
   const slice = [
     ...before,
     { kind: 'node' as const, tag: 'br', attrs: [], content: [] },
-    after
+    ...after
   ]
   let tx = txBegin(state.doc, sel)
   tx = txStep(tx, stepReplace(blockPath, leafIdx, leafIdx + 1, slice))
-  return txSetSelection(tx, caretAt([...blockPath, leafIdx + before.length + 1], 0))
+  const brIdx = leafIdx + before.length
+  // Caret at the start of the trailing text if any, else just after the <br>.
+  const caretSel = after.length > 0
+    ? caretAt([...blockPath, brIdx + 1], 0)
+    : caretAt(blockPath, brIdx + 1)
+  return txSetSelection(tx, caretSel)
 }
 
 // ---------------------------------------------------------------------------

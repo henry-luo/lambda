@@ -1,0 +1,1 @@
+[{"type":"step","step":{"kind":"replace","parent":[0],"from":0,"to":0,"slice":[{"kind":"node","tag":"img","attrs":[{"name":"src","value":"q.png"},{"name":"alt","value":"q"}],"content":[]}]}}]

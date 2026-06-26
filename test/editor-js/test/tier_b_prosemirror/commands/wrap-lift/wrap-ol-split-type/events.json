@@ -1,0 +1,20 @@
+[
+  {
+    "type": "command",
+    "name": "wrapInList",
+    "args": {
+      "kind": "ol"
+    }
+  },
+  {
+    "type": "command",
+    "name": "insertParagraph"
+  },
+  {
+    "type": "command",
+    "name": "insertText",
+    "args": {
+      "text": "two"
+    }
+  }
+]

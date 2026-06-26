@@ -36,6 +36,8 @@ describe('Tier A — Slate-derived fixtures', () => {
       const c = loadFixture(dir)
       const r = runFixtureCase(c)
       expect(r.actualDoc).toEqual(r.expectedDoc)
+      // every applied transform must be invertible (Slate/PM invariant)
+      if (r.invertRoundtrips !== null) expect(r.invertRoundtrips).toBe(true)
       expect(r.actualSelection).toEqual(r.expectedSelection)
     })
   }

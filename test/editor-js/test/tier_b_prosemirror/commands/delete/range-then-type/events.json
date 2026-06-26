@@ -1,0 +1,13 @@
+[
+  {
+    "type": "command",
+    "name": "deleteContentBackward"
+  },
+  {
+    "type": "command",
+    "name": "insertText",
+    "args": {
+      "text": "X"
+    }
+  }
+]

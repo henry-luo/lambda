@@ -129,6 +129,7 @@ struct MirTranspiler {
 
     // Pattern type list (shared with Script's type_list for const_pattern access)
     ArrayList* type_list;
+    ArrayList* const_list;
     Pool* script_pool;  // pool for pattern compilation
 
     // MIR context
@@ -1406,6 +1407,219 @@ static MIR_reg_t emit_load_const_boxed(MirTranspiler* mt, int const_index, TypeI
         // Direct cast for containers
         return ptr;
     }
+}
+
+static bool static_const_item_from_node(MirTranspiler* mt, AstNode* node, Item* out);
+
+static int append_static_container_const(MirTranspiler* mt, void* ptr) {
+    if (!mt || !mt->const_list || !ptr) return -1;
+    arraylist_append(mt->const_list, ptr);
+    return mt->const_list->length - 1;
+}
+
+static bool static_store_field_value(void* field_ptr, TypeId field_type, Item value) {
+    if (!field_ptr) return false;
+    TypeId value_type = get_type_id(value);
+    switch (field_type) {
+    case LMD_TYPE_NULL:
+        if (value_type == LMD_TYPE_NULL) { *(void**)field_ptr = NULL; return true; }
+        *(Item*)field_ptr = value; return true;
+    case LMD_TYPE_BOOL:
+        if (value_type != LMD_TYPE_BOOL) return false;
+        *(bool*)field_ptr = value.bool_val; return true;
+    case LMD_TYPE_INT:
+        if (value_type != LMD_TYPE_INT) return false;
+        *(int64_t*)field_ptr = value.get_int56(); return true;
+    case LMD_TYPE_INT64:
+        if (value_type == LMD_TYPE_INT) { *(int64_t*)field_ptr = value.get_int56(); return true; }
+        if (value_type == LMD_TYPE_INT64) { *(int64_t*)field_ptr = value.get_int64(); return true; }
+        return false;
+    case LMD_TYPE_FLOAT:
+        if (value_type == LMD_TYPE_FLOAT) { *(double*)field_ptr = value.get_double(); return true; }
+        if (value_type == LMD_TYPE_INT) { *(double*)field_ptr = (double)value.get_int56(); return true; }
+        if (value_type == LMD_TYPE_INT64) { *(double*)field_ptr = (double)value.get_int64(); return true; }
+        return false;
+    case LMD_TYPE_DTIME:
+        if (value_type != LMD_TYPE_DTIME) return false;
+        *(DateTime*)field_ptr = value.get_datetime(); return true;
+    case LMD_TYPE_STRING:
+        if (value_type != LMD_TYPE_STRING) return false;
+        *(String**)field_ptr = value.get_safe_string(); return true;
+    case LMD_TYPE_SYMBOL:
+        if (value_type != LMD_TYPE_SYMBOL) return false;
+        *(Symbol**)field_ptr = value.get_safe_symbol(); return true;
+    case LMD_TYPE_BINARY:
+        if (value_type != LMD_TYPE_BINARY) return false;
+        *(String**)field_ptr = value.get_safe_binary(); return true;
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_RANGE:
+    case LMD_TYPE_MAP:
+    case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_OBJECT:
+        if (value_type < LMD_TYPE_RANGE || value_type > LMD_TYPE_OBJECT) return false;
+        *(Container**)field_ptr = value.container; return true;
+    case LMD_TYPE_DECIMAL:
+        if (value_type != LMD_TYPE_DECIMAL) return false;
+        *(Decimal**)field_ptr = value.get_decimal();
+        return true;
+    case LMD_TYPE_TYPE:
+        if (value_type != LMD_TYPE_TYPE) return false;
+        *(Type**)field_ptr = value.type;
+        return true;
+    case LMD_TYPE_FUNC:
+        if (value_type != LMD_TYPE_FUNC) return false;
+        *(Function**)field_ptr = value.function;
+        return true;
+    case LMD_TYPE_PATH:
+        if (value_type != LMD_TYPE_PATH) return false;
+        *(Path**)field_ptr = value.path;
+        return true;
+    case LMD_TYPE_UINT64:
+        if (field_type != value_type) return false;
+        *(void**)field_ptr = (void*)(uintptr_t)(value.item & 0x00FFFFFFFFFFFFFF);
+        return true;
+    case LMD_TYPE_NUM_SIZED:
+        if (value_type != LMD_TYPE_NUM_SIZED) return false;
+        *(uint64_t*)field_ptr = value.item; return true;
+    case LMD_TYPE_ANY: {
+        TypedItem titem;
+        memset(&titem, 0, sizeof(titem));
+        titem.type_id = value_type;
+        titem.item = value.item;
+        switch (value_type) {
+        case LMD_TYPE_NULL: case LMD_TYPE_UNDEFINED: case LMD_TYPE_ERROR: break;
+        case LMD_TYPE_BOOL: titem.bool_val = value.bool_val; break;
+        case LMD_TYPE_INT: titem.int_val = value.int_val; break;
+        case LMD_TYPE_INT64: titem.long_val = value.get_int64(); break;
+        case LMD_TYPE_FLOAT: titem.double_val = value.get_double(); break;
+        case LMD_TYPE_DTIME: titem.datetime_val = value.get_datetime(); break;
+        case LMD_TYPE_STRING: titem.string = value.get_safe_string(); break;
+        case LMD_TYPE_SYMBOL: titem.symbol = value.get_safe_symbol(); break;
+        case LMD_TYPE_BINARY: titem.string = value.get_safe_binary(); break;
+        case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_RANGE:
+        case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
+            titem.container = value.container; break;
+        case LMD_TYPE_DECIMAL: titem.decimal = value.get_decimal(); break;
+        case LMD_TYPE_TYPE: titem.type = value.type; break;
+        case LMD_TYPE_FUNC: titem.function = value.function; break;
+        case LMD_TYPE_PATH: titem.path = value.path; break;
+        default: return false;
+        }
+        *(TypedItem*)field_ptr = titem;
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+static bool static_const_array_from_node(MirTranspiler* mt, AstArrayNode* arr_node, Item* out) {
+    if (!mt || !arr_node || !out || !mt->script_pool) return false;
+    TypeArray* arr_type = (TypeArray*)arr_node->type;
+    if (arr_type && arr_type->nested && arr_type->nested->type_id == LMD_TYPE_BOOL) return false;
+    int64_t count = 0;
+    for (AstNode* item = arr_node->item; item; item = item->next) {
+        if (item->node_type == AST_NODE_FOR_EXPR || item->node_type == AST_NODE_SPREAD ||
+            item->node_type == AST_NODE_PIPE || item->node_type == AST_NODE_ASSIGN) return false;
+        AstNode* value = item;
+        if (value->node_type == AST_NODE_PRIMARY) {
+            AstPrimaryNode* pri = (AstPrimaryNode*)value;
+            if (pri->expr) value = pri->expr;
+        }
+        if (value->node_type == AST_NODE_ARRAY) return false;
+        count++;
+    }
+    Array* arr = (Array*)pool_calloc(mt->script_pool, sizeof(Array));
+    if (!arr) return false;
+    arr->type_id = LMD_TYPE_ARRAY;
+    arr->is_static = 1;
+    arr->length = count;
+    arr->capacity = count;
+    if (count > 0) {
+        arr->items = (Item*)pool_calloc(mt->script_pool, sizeof(Item) * count);
+        if (!arr->items) return false;
+    }
+    int64_t index = 0;
+    for (AstNode* item = arr_node->item; item; item = item->next) {
+        Item value = ItemNull;
+        if (!static_const_item_from_node(mt, item, &value)) return false;
+        arr->items[index++] = value;
+    }
+    out->item = (uint64_t)(uintptr_t)arr;
+    return true;
+}
+
+static bool static_const_map_from_node(MirTranspiler* mt, AstMapNode* map_node, Item* out) {
+    if (!mt || !map_node || !map_node->type || !out || !mt->script_pool) return false;
+    TypeMap* map_type = (TypeMap*)map_node->type;
+    Map* map = (Map*)pool_calloc(mt->script_pool, sizeof(Map));
+    if (!map) return false;
+    map->type_id = LMD_TYPE_MAP;
+    map->is_static = 1;
+    map->map_kind = MAP_KIND_PLAIN;
+    map->type = map_type;
+    map->data_cap = (int)map_type->byte_size;
+    if (map_type->byte_size > 0) {
+        map->data = pool_calloc(mt->script_pool, (size_t)map_type->byte_size);
+        if (!map->data) return false;
+    }
+    AstNode* item = map_node->item;
+    ShapeEntry* field = map_type->shape;
+    while (item && field) {
+        if (item->node_type != AST_NODE_KEY_EXPR || !field->name) return false;
+        AstNamedNode* key_expr = (AstNamedNode*)item;
+        Item value = ItemNull;
+        if (key_expr->as && !static_const_item_from_node(mt, key_expr->as, &value)) return false;
+        if (!static_store_field_value((char*)map->data + field->byte_offset,
+                field->type->type_id, value)) return false;
+        item = item->next;
+        field = field->next;
+    }
+    if (item || field) return false;
+    out->item = (uint64_t)(uintptr_t)map;
+    return true;
+}
+
+static bool static_const_item_from_node(MirTranspiler* mt, AstNode* node, Item* out) {
+    if (!mt || !node || !out) return false;
+    if (node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)node;
+        if (pri->expr) return static_const_item_from_node(mt, pri->expr, out);
+        if (!node->type || !node->type->is_literal) return false;
+        switch (node->type->type_id) {
+        case LMD_TYPE_NULL: *out = ItemNull; return true;
+        case LMD_TYPE_BOOL: out->item = b2it(parse_bool_literal(mt->source, node->node)); return true;
+        case LMD_TYPE_INT: out->item = i2it(parse_int_literal(mt->source, node->node)); return true;
+        case LMD_TYPE_INT64: { TypeInt64* t = (TypeInt64*)node->type; out->item = l2it(&t->int64_val); return true; }
+        case LMD_TYPE_FLOAT: { TypeFloat* t = (TypeFloat*)node->type; out->item = d2it(&t->double_val); return true; }
+        case LMD_TYPE_DTIME: { TypeDateTime* t = (TypeDateTime*)node->type; out->item = k2it(&t->datetime); return true; }
+        case LMD_TYPE_DECIMAL: { TypeDecimal* t = (TypeDecimal*)node->type; out->item = c2it(t->decimal); return true; }
+        case LMD_TYPE_STRING: { TypeString* t = (TypeString*)node->type; out->item = s2it(t->string); return true; }
+        case LMD_TYPE_SYMBOL: { TypeString* t = (TypeString*)node->type; out->item = y2it((Symbol*)t->string); return true; }
+        case LMD_TYPE_BINARY: { TypeString* t = (TypeString*)node->type; out->item = x2it(t->string); return true; }
+        case LMD_TYPE_NUM_SIZED: { TypeNumSized* t = (TypeNumSized*)node->type; out->item = NUM_SIZED_PACK(t->num_type, t->raw_bits); return true; }
+        case LMD_TYPE_UINT64: { TypeUint64* t = (TypeUint64*)node->type; out->item = u2it(&t->uint64_val); return true; }
+        default: return false;
+        }
+    }
+    if (node->node_type == AST_NODE_ARRAY) return static_const_array_from_node(mt, (AstArrayNode*)node, out);
+    if (node->node_type == AST_NODE_MAP) return static_const_map_from_node(mt, (AstMapNode*)node, out);
+    return false;
+}
+
+static bool emit_static_collection_const(MirTranspiler* mt, AstNode* node, MIR_reg_t* out_reg) {
+    if (!mt || !node || !out_reg) return false;
+    if (mt->in_proc) return false;
+    if (node->node_type != AST_NODE_ARRAY && node->node_type != AST_NODE_MAP) return false;
+    Item value = ItemNull;
+    if (!static_const_item_from_node(mt, node, &value)) return false;
+    TypeId tid = get_type_id(value);
+    if (tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_MAP) return false;
+    int const_index = append_static_container_const(mt, value.container);
+    if (const_index < 0) return false;
+    *out_reg = emit_load_const(mt, const_index, MIR_T_P);
+    return true;
 }
 
 // ============================================================================
@@ -3966,6 +4180,12 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
         return arr;  // ArrayNum* compact container pointer
     }
 
+    MIR_reg_t static_reg = 0;
+    if (emit_static_collection_const(mt, (AstNode*)arr_node, &static_reg)) {
+        if (has_let) pop_scope(mt);
+        return static_reg;
+    }
+
     // Generic array path
     MIR_reg_t arr = emit_call_0(mt, "array", MIR_T_P);
     int arr_root = create_pointer_gc_root_slot(mt, arr);
@@ -4405,6 +4625,11 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
 // ============================================================================
 
 static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
+    MIR_reg_t static_reg = 0;
+    if (emit_static_collection_const(mt, (AstNode*)map_node, &static_reg)) {
+        return static_reg;
+    }
+
     TypeMap* map_type = (TypeMap*)map_node->type;
     int type_index = map_type->type_index;
 
@@ -4532,10 +4757,10 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
                     MIR_new_mem_op(mt->ctx, MIR_T_U32, 12, cursor, 0, 1),         // header->alloc_size
                     MIR_new_int_op(mt->ctx, total_size)));
 
-                // Set Container.is_heap = 1 (flags byte at user+1)
+                // Set Container.is_heap = 1 (flags byte at user+1, bit 2)
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_U8, 1, m, 0, 1),
-                    MIR_new_int_op(mt->ctx, 1)));
+                    MIR_new_int_op(mt->ctx, 0x04)));
 
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                     MIR_new_label_op(mt->ctx, done_label)));
@@ -8501,20 +8726,20 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             // Inline ArrayNum int store (only for ELEM_INT / ELEM_INT64, not ELEM_FLOAT)
             emit_label(mt, l_fast);
             {
-                // Reject views (flags bit 5 = is_view): fall back to fn_array_set which logs the error.
+                // Reject views: fall back to fn_array_set which logs the error.
                 MIR_reg_t flags_byte = new_reg(mt, "flgb", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, flags_byte),
-                    MIR_new_mem_op(mt->ctx, MIR_T_U8, 1, arr_ptr, 0, 1)));
+                    MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, arr_ptr, 0, 1)));
                 MIR_reg_t is_view_bit = new_reg(mt, "isvw", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, is_view_bit),
-                    MIR_new_reg_op(mt->ctx, flags_byte), MIR_new_int_op(mt->ctx, 0x20)));
+                    MIR_new_reg_op(mt->ctx, flags_byte), MIR_new_int_op(mt->ctx, 0x02)));
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_slow),
                     MIR_new_reg_op(mt->ctx, is_view_bit)));
-                // elem_type lives in map_kind byte at offset 2 (was flags upper nibble pre-Phase2b)
+                // elem_type lives in map_kind byte at offset 3.
                 // ELEM_FLOAT=0x10 → fall back to fn_array_set; ELEM_INT=0x00 and ELEM_INT64=0x50 take fast path
                 MIR_reg_t etype = new_reg(mt, "etyp", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, etype),
-                    MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, arr_ptr, 0, 1)));
+                    MIR_new_mem_op(mt->ctx, MIR_T_U8, 3, arr_ptr, 0, 1)));
                 MIR_reg_t is_float = new_reg(mt, "isfl", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_float),
                     MIR_new_reg_op(mt->ctx, etype), MIR_new_int_op(mt->ctx, 0x10)));
@@ -8592,13 +8817,13 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             MIR_label_t l_oob = new_label(mt);
             MIR_label_t l_end = new_label(mt);
 
-            // Reject views (flags bit 5 = is_view): fall back to fn_array_set
+            // Reject views: fall back to fn_array_set
             MIR_reg_t fflags = new_reg(mt, "fflg", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, fflags),
-                MIR_new_mem_op(mt->ctx, MIR_T_U8, 1, arr_ptr, 0, 1)));
+                MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, arr_ptr, 0, 1)));
             MIR_reg_t fview = new_reg(mt, "fvw", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, fview),
-                MIR_new_reg_op(mt->ctx, fflags), MIR_new_int_op(mt->ctx, 0x20)));
+                MIR_new_reg_op(mt->ctx, fflags), MIR_new_int_op(mt->ctx, 0x02)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
                 MIR_new_reg_op(mt->ctx, fview)));
 
@@ -11912,7 +12137,8 @@ static void prepass_define_functions(MirTranspiler* mt, AstNode* node) {
 // ============================================================================
 
 void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
-                       ArrayList* type_list, Pool* script_pool, NamePool* name_pool) {
+                       ArrayList* type_list, ArrayList* const_list,
+                       Pool* script_pool, NamePool* name_pool) {
     log_notice("transpile AST to MIR (direct)");
 
     MirTranspiler mt;
@@ -11922,6 +12148,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     mt.source = source;
     mt.is_main = true;
     mt.type_list = type_list;
+    mt.const_list = const_list;
     mt.script_pool = script_pool;
     mt.name_pool = name_pool;
     mt.native_return_tid = LMD_TYPE_ANY;  // P4-3.4: no native return at module level
@@ -12371,7 +12598,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     if (timing) clock_gettime(CLOCK_MONOTONIC, &pt1);
 #endif
 
-    transpile_mir_ast(ctx, ast_root, tp->source, tp->type_list, tp->pool, tp->name_pool);
+    transpile_mir_ast(ctx, ast_root, tp->source, tp->type_list, tp->const_list, tp->pool, tp->name_pool);
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
 
 #ifdef _WIN32

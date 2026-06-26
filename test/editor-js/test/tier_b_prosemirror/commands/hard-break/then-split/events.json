@@ -1,0 +1,10 @@
+[
+  {
+    "type": "command",
+    "name": "insertLineBreak"
+  },
+  {
+    "type": "command",
+    "name": "insertParagraph"
+  }
+]

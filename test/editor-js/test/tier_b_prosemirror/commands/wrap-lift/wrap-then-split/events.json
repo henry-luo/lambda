@@ -1,0 +1,13 @@
+[
+  {
+    "type": "command",
+    "name": "wrapInList",
+    "args": {
+      "kind": "ul"
+    }
+  },
+  {
+    "type": "command",
+    "name": "insertParagraph"
+  }
+]

@@ -141,9 +141,8 @@ enum EnumNumSizedType {
 typedef uint8_t NumSizedType;
 
 // ============================================================================
-// ArrayNum element sub-types (stored in upper 4 bits of Container.flags byte)
-// Lower 4 bits of flags are reserved for Container boolean flags
-// (is_content, is_spreadable, is_heap, is_data_migrated)
+// ArrayNum element sub-types (stored in Container.map_kind/elem_type byte)
+// Container lifecycle flags and ArrayNum layout flags live in separate bytes.
 // ============================================================================
 enum EnumArrayNumElemType {
     // Lambda's standard numeric types (8 bytes/element each):
@@ -583,15 +582,16 @@ struct Container {
     union {
         uint8_t flags;
         struct {
-            // lifecycle / allocation flags (lower nibble)
+            // lifecycle / allocation flags
             uint8_t is_content:1;        // whether it is a content list, or value list
             uint8_t is_spreadable:1;     // whether this array should be spread when added to collections
             uint8_t is_heap:1;           // whether allocated from runtime heap (vs arena for input docs)
             uint8_t is_data_migrated:1;  // data buffer migrated from input pool to runtime pool (for mutated markup containers)
+            uint8_t is_static:1;         // read-only const-pool/static data container
         };
     };
-    union { // ArrayNum flags
-        uint8_t array_flags;
+    union {
+        uint8_t array_flags; // ArrayNum flags
         struct {
             uint8_t is_ndim:1;           // bit 4: has shape side-table in `extra` (n-d owned array)
             uint8_t is_view:1;           // bit 5: aliases another container's storage (implies is_ndim)
@@ -629,7 +629,7 @@ struct Container {
 
     struct ArrayNum {
         TypeId type_id;
-        uint16_t flags;
+        uint16_t flags;  // ArrayNum flags
         uint8_t elem_type;     // ArrayNumElemType (replaces flags for typed arrays)
         uint8_t padding[4];  // padding to align to 8 bytes
         //---------------------
