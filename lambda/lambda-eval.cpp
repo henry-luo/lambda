@@ -4766,6 +4766,10 @@ void fn_array_set(Array* arr, int64_t index, Item value) {
         return;
     }
     TypeId arr_type = arr->type_id;
+    if (arr->is_static) {
+        log_error("fn_array_set: cannot mutate static array");
+        return;
+    }
 
     // support negative indexing
     int64_t len = arr->length;
@@ -5197,18 +5201,21 @@ void fn_map_set(Item map_item, Item key, Item value) {
     if (map_type_id == LMD_TYPE_MAP) {
         Map* mp = map_item.map;
         if (!mp) { log_error("fn_map_set: null map"); return; }
+        if (mp->is_static) { log_error("fn_map_set: cannot mutate static map"); return; }
         type_slot = &mp->type;
         data_slot = &mp->data;
         cap_slot = &mp->data_cap;
     } else if (map_type_id == LMD_TYPE_OBJECT) {
         Object* obj = map_item.object;
         if (!obj) { log_error("fn_map_set: null object"); return; }
+        if (obj->is_static) { log_error("fn_map_set: cannot mutate static object"); return; }
         type_slot = &obj->type;
         data_slot = &obj->data;
         cap_slot = &obj->data_cap;
     } else if (map_type_id == LMD_TYPE_ELEMENT) {
         Element* el = (Element*)map_item.container;
         if (!el) { log_error("fn_map_set: null element"); return; }
+        if (el->is_static) { log_error("fn_map_set: cannot mutate static element"); return; }
         type_slot = &el->type;
         data_slot = &el->data;
         cap_slot = &el->data_cap;

@@ -18,7 +18,10 @@ pn t_num_array() {
     var arr = fill(5, 0)
     for i in 0 to 4 { arr[i] = i * i }
     print("num=")
-    for i in 0 to 4 { print(string(int(arr[i])) ++ " ") }
+    for i in 0 to 4 {
+        if (i > 0) { print(" ") }
+        print(string(int(arr[i])))
+    }
     print("\n")
 }
 
@@ -27,7 +30,10 @@ pn t_var_bound(n) {
     var arr = fill(n, 0)
     for i in 0 to n - 1 { arr[i] = i + 10 }
     print("vbound=")
-    for i in 0 to n - 1 { print(string(int(arr[i])) ++ " ") }
+    for i in 0 to n - 1 {
+        if (i > 0) { print(" ") }
+        print(string(int(arr[i])))
+    }
     print("\n")
 }
 
@@ -52,7 +58,10 @@ pn t_nested() {
         for j in 0 to 2 { arr[i * 3 + j] = i * 3 + j }
     }
     print("nested=")
-    for k in 0 to 8 { print(string(int(arr[k])) ++ " ") }
+    for k in 0 to 8 {
+        if (k > 0) { print(" ") }
+        print(string(int(arr[k])))
+    }
     print("\n")
 }
 
