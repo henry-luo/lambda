@@ -284,6 +284,9 @@ static Item js_create_readable_state(void) {
     js_state_set_bool(state, "readableListening", false);
     js_state_set_bool(state, "needReadable", false);
     js_state_set_bool(state, "emittedReadable", false);
+    js_state_set_bool(state, "resumeScheduled", false);
+    js_state_set_bool(state, "reading", false);
+    js_state_set_bool(state, "readingMore", false);
     js_state_set_item(state, "errored", ItemNull);
     js_state_set_item(state, "awaitDrainWriters", ItemNull);
     js_state_set_item(state, "highWaterMark", (Item){.item = i2it(js_stream_default_byte_hwm)});
@@ -557,6 +560,14 @@ static void js_stream_update_need_after_read(Item self) {
     js_stream_mark_readable_needed(self, empty);
 }
 
+static Item js_stream_decode_object_readable_chunk(Item self, Item chunk) {
+    if (!js_stream_readable_is_object_mode(self)) return chunk;
+    Item encoding = js_property_get(self, make_string_item("_encoding"));
+    if (get_type_id(encoding) != LMD_TYPE_STRING) return chunk;
+    if (!js_stream_chunk_is_arraybuffer_view(chunk)) return chunk;
+    return js_buffer_toString(chunk, encoding, make_js_undefined(), make_js_undefined());
+}
+
 static bool js_stream_has_callback_error(Item err) {
     return err.item != 0 && get_type_id(err) != LMD_TYPE_UNDEFINED &&
            get_type_id(err) != LMD_TYPE_NULL;
@@ -817,10 +828,21 @@ static Item js_stream_after_destroy(Item self, Item err) {
 }
 
 static int64_t js_stream_read_size_hint(Item self, Item size_item) {
-    if (get_type_id(size_item) == LMD_TYPE_INT && it2i(size_item) > 0)
-        return it2i(size_item);
     Item state = js_property_get(self, key_readable_state);
-    return js_stream_state_get_int(state, "highWaterMark", js_stream_default_byte_hwm);
+    int64_t hwm = js_stream_state_get_int(state, "highWaterMark", js_stream_default_byte_hwm);
+    if (get_type_id(size_item) == LMD_TYPE_INT && it2i(size_item) > 0 &&
+        !js_state_get_bool(state, "objectMode")) {
+        int64_t requested = it2i(size_item);
+        if (requested > hwm) {
+            int64_t next = 1;
+            while (next < requested && next < 0x40000000) next <<= 1;
+            hwm = next < requested ? requested : next;
+            Item hwm_item = (Item){.item = i2it(hwm)};
+            js_property_set(self, make_string_item("readableHighWaterMark"), hwm_item);
+            js_state_set_item(state, "highWaterMark", hwm_item);
+        }
+    }
+    return hwm;
 }
 
 static void js_stream_call_read_if_needed(Item self, Item size_item) {
@@ -1021,22 +1043,58 @@ static void js_stream_flush_buffered_data(Item self) {
         js_property_set(self, make_string_item("__emitting_data__"), js_bool_item(true));
         stream_emit(self, "data", &emitted, 1);
         js_property_set(self, make_string_item("__emitting_data__"), js_bool_item(false));
+        if (!js_item_is_true(js_property_get(self, key_flowing))) return;
+    }
+}
+
+static void js_stream_read_more_if_flowing(Item self) {
+    if (!js_item_is_true(js_property_get(self, key_flowing))) return;
+    Item buf = js_property_get(self, key_buffer);
+    if (js_stream_readable_accepts_more(self, buf)) {
+        js_stream_call_read_if_needed(self, make_js_undefined());
     }
 }
 
 static Item js_stream_flush_data_tick(Item self) {
     ensure_keys();
+    js_state_set_bool(js_property_get(self, key_readable_state), "resumeScheduled", false);
     if (js_item_is_true(js_property_get(self, key_destroyed))) {
         return make_js_undefined();
     }
     js_stream_flush_buffered_data(self);
-    js_stream_call_read_if_needed(self, make_js_undefined());
+    js_stream_read_more_if_flowing(self);
     return make_js_undefined();
 }
 
 static void js_stream_schedule_data_flush(Item self) {
+    Item state = js_property_get(self, key_readable_state);
+    if (js_state_get_bool(state, "resumeScheduled")) return;
+    js_state_set_bool(state, "resumeScheduled", true);
     Item bound_args[1] = { self };
     Item tick = js_bind_function(js_new_function((void*)js_stream_flush_data_tick, 1),
+                                 make_js_undefined(), bound_args, 1);
+    js_next_tick_enqueue(tick);
+}
+
+static Item js_stream_resume_tick(Item self) {
+    ensure_keys();
+    Item state = js_property_get(self, key_readable_state);
+    js_state_set_bool(state, "resumeScheduled", false);
+    if (js_item_is_true(js_property_get(self, key_destroyed))) {
+        return make_js_undefined();
+    }
+    stream_emit(self, "resume", NULL, 0);
+    js_stream_flush_buffered_data(self);
+    js_stream_read_more_if_flowing(self);
+    return make_js_undefined();
+}
+
+static void js_stream_schedule_resume(Item self) {
+    Item state = js_property_get(self, key_readable_state);
+    if (js_state_get_bool(state, "resumeScheduled")) return;
+    js_state_set_bool(state, "resumeScheduled", true);
+    Item bound_args[1] = { self };
+    Item tick = js_bind_function(js_new_function((void*)js_stream_resume_tick, 1),
                                  make_js_undefined(), bound_args, 1);
     js_next_tick_enqueue(tick);
 }
@@ -1089,10 +1147,7 @@ extern "C" Item js_stream_on(Item self, Item event_item, Item listener) {
             if (js_item_is_true(js_property_get(self, key_capture_rejections))) {
                 js_stream_schedule_data_flush(self);
             } else {
-                js_stream_flush_buffered_data(self);
-                if (!js_item_is_true(js_property_get(self, key_reading_sync))) {
-                    js_stream_call_read_if_needed(self, make_js_undefined());
-                }
+                js_stream_schedule_data_flush(self);
             }
         }
     }
@@ -1571,7 +1626,8 @@ extern "C" Item js_readable_read_size(Item self, Item size_item) {
         return ItemNull;
     }
 
-    if (get_type_id(size_item) == LMD_TYPE_INT && it2i(size_item) > 0) {
+    if (get_type_id(size_item) == LMD_TYPE_INT && it2i(size_item) > 0 &&
+        !js_stream_readable_is_object_mode(self)) {
         Item exact = js_readable_read_exact(self, buf, blen, it2i(size_item));
         if (exact.item == 0 || get_type_id(exact) == LMD_TYPE_NULL ||
             get_type_id(exact) == LMD_TYPE_UNDEFINED) {
@@ -1601,7 +1657,8 @@ extern "C" Item js_readable_read_size(Item self, Item size_item) {
     }
 
     Item encoding = js_property_get(self, make_string_item("_encoding"));
-    if (get_type_id(encoding) == LMD_TYPE_STRING) {
+    if (get_type_id(encoding) == LMD_TYPE_STRING &&
+        !js_stream_readable_is_object_mode(self)) {
         if (!js_item_is_true(js_property_get(self, key_end_pending)) &&
             !js_item_is_true(js_property_get(self, key_end_emitted))) {
             js_stream_call_read_if_needed(self, make_js_undefined());
@@ -1650,6 +1707,7 @@ extern "C" Item js_readable_read_size(Item self, Item size_item) {
             js_stream_schedule_read(self);
     }
     js_stream_update_need_after_read(self);
+    result = js_stream_decode_object_readable_chunk(self, result);
     return js_stream_maybe_emit_manual_data(self, result);
 }
 
@@ -3716,7 +3774,7 @@ extern "C" Item js_readable_pipe(Item self, Item dest) {
     // register data handler to forward
     // store that pipe is active via marker
     js_property_set(self, make_string_item("__piped__"), (Item){.item = b2it(true)});
-    js_stream_schedule_read(self);
+    js_stream_schedule_resume(self);
 
     return dest;
 }
@@ -3781,21 +3839,7 @@ extern "C" Item js_readable_resume(Item self) {
     ensure_keys();
     js_property_set(self, key_flowing, js_bool_item(true));
     js_property_set(self, key_paused, js_bool_item(false));
-    // flush buffered data
-    Item buf = js_property_get(self, key_buffer);
-    if (get_type_id(buf) == LMD_TYPE_ARRAY) {
-        int64_t blen = js_array_length(buf);
-        for (int64_t i = 0; i < blen; i++) {
-            Item chunk = js_array_get_int(buf, i);
-            stream_emit(self, "data", &chunk, 1);
-        }
-        js_stream_set_readable_buffer(self, js_array_new(0));
-        if (js_item_is_true(js_property_get(self, key_end_pending)) &&
-            !js_item_is_true(js_property_get(self, key_end_emitted))) {
-            js_stream_schedule_end(self);
-        }
-    }
-    js_stream_call_read_if_needed(self, make_js_undefined());
+    js_stream_schedule_resume(self);
     return self;
 }
 
