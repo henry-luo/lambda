@@ -135,6 +135,7 @@ static Item js_stream_make_error_with_code(const char* code, const char* message
 static Item js_stream_make_type_error_with_code(const char* code, const char* message);
 static bool js_stream_readable_is_object_mode(Item self);
 static int64_t js_stream_readable_chunk_length(Item self, Item chunk);
+static int64_t js_stream_readable_buffer_length(Item self, Item buf);
 static bool js_stream_readable_accepts_more(Item self, Item buf);
 static bool js_stream_readable_buffer_has_string(Item buf);
 static Item js_stream_concat_decoded_chunks(Item buf, Item encoding);
@@ -142,6 +143,7 @@ static bool js_stream_prepare_readable_chunk(Item self, Item* chunk, Item encodi
 extern "C" Item js_readable_push(Item self, Item chunk);
 extern "C" Item js_readable_new(Item opts);
 extern "C" Item js_stream_destroy(Item self, Item err);
+extern "C" Item js_stream_emit(Item self, Item event_item, Item arg1);
 static void js_stream_flush_buffered_data(Item self);
 static void js_stream_schedule_close(Item self);
 static void js_stream_async_iterators_drain(Item stream, Item err);
@@ -217,6 +219,62 @@ static void js_readable_clear_pipe(Item self) {
         js_property_set(state, make_string_item("awaitDrainWriters"), ItemNull);
 }
 
+static Item js_readable_pipes(Item self) {
+    Item state = js_property_get(self, key_readable_state);
+    if (get_type_id(state) != LMD_TYPE_MAP) return ItemNull;
+    Item pipes_key = make_string_item("pipes");
+    Item pipes = js_property_get(state, pipes_key);
+    if (get_type_id(pipes) != LMD_TYPE_ARRAY) {
+        pipes = js_array_new(0);
+        js_property_set(state, pipes_key, pipes);
+    }
+    return pipes;
+}
+
+static void js_readable_emit_unpipe(Item dest, Item source) {
+    Item unpipe_event = make_string_item("unpipe");
+    Item emit_fn = js_property_get(dest, key_emit);
+    if (get_type_id(emit_fn) == LMD_TYPE_FUNC) {
+        Item args[2] = {unpipe_event, source};
+        js_call_function(emit_fn, dest, args, 2);
+    } else {
+        js_stream_emit(dest, unpipe_event, source);
+    }
+}
+
+static bool js_readable_remove_pipe(Item self, Item dest, bool emit_unpipe) {
+    Item pipes = js_readable_pipes(self);
+    if (get_type_id(pipes) != LMD_TYPE_ARRAY) return false;
+    Item next = js_array_new(0);
+    bool removed = false;
+    int64_t len = js_array_length(pipes);
+    for (int64_t i = 0; i < len; i++) {
+        Item current = js_array_get_int(pipes, i);
+        bool matches = false;
+        if (dest.item == 0 || get_type_id(dest) == LMD_TYPE_UNDEFINED) {
+            matches = true;
+        } else {
+            matches = current.item == dest.item;
+        }
+        if (matches) {
+            removed = true;
+            if (emit_unpipe) js_readable_emit_unpipe(current, self);
+        } else {
+            js_array_push(next, current);
+        }
+    }
+    Item state = js_property_get(self, key_readable_state);
+    if (get_type_id(state) == LMD_TYPE_MAP) {
+        js_property_set(state, make_string_item("pipes"), next);
+    }
+    Item current_dest = js_property_get(self, make_string_item("__pipe_dest__"));
+    if (removed && (dest.item == 0 || get_type_id(dest) == LMD_TYPE_UNDEFINED ||
+                    current_dest.item == dest.item)) {
+        js_readable_clear_pipe(self);
+    }
+    return removed;
+}
+
 static bool js_item_is_true(Item item) {
     return get_type_id(item) == LMD_TYPE_BOOL && it2b(item);
 }
@@ -270,6 +328,8 @@ static void js_state_set_item(Item state, const char* name, Item value) {
 static void js_stream_set_readable_buffer(Item self, Item buffer) {
     js_property_set(self, key_buffer, buffer);
     js_property_set(self, make_string_item("readableBuffer"), buffer);
+    js_state_set_item(js_property_get(self, key_readable_state), "length",
+                      (Item){.item = i2it(js_stream_readable_buffer_length(self, buffer))});
 }
 
 static bool js_state_get_bool(Item state, const char* name) {
@@ -294,6 +354,8 @@ static Item js_create_readable_state(void) {
     js_state_set_bool(state, "didRead", false);
     js_state_set_item(state, "errored", ItemNull);
     js_state_set_item(state, "awaitDrainWriters", ItemNull);
+    js_state_set_item(state, "pipes", js_array_new(0));
+    js_state_set_item(state, "length", (Item){.item = i2it(0)});
     js_state_set_item(state, "highWaterMark", (Item){.item = i2it(js_stream_default_byte_hwm)});
     js_property_set(state, make_string_item("encoding"), make_string_item("utf8"));
     return state;
@@ -1650,6 +1712,7 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
             if (get_type_id(end_fn) == LMD_TYPE_FUNC) {
                 js_call_function(end_fn, pipe_dest, NULL, 0);
             }
+            js_readable_remove_pipe(self, pipe_dest, true);
         }
 
         js_property_set(self, key_end_pending, js_bool_item(true));
@@ -4291,10 +4354,31 @@ static Item js_stream_iter_push(Item options_or_transform) {
 // pipe(destination) — pipe this readable to a writable
 extern "C" Item js_readable_pipe(Item self, Item dest) {
     ensure_keys();
+    Item pipe_event = make_string_item("pipe");
+    Item emit_fn = js_property_get(dest, key_emit);
+    if (get_type_id(emit_fn) == LMD_TYPE_FUNC) {
+        Item emit_args[2] = {pipe_event, self};
+        js_call_function(emit_fn, dest, emit_args, 2);
+    } else {
+        js_stream_emit(dest, pipe_event, self);
+    }
+
     // set up data listener that writes to dest
     // store dest reference
     js_property_set(self, make_string_item("__pipe_dest__"), dest);
     js_property_set(self, key_flowing, (Item){.item = b2it(true)});
+    Item pipes = js_readable_pipes(self);
+    if (get_type_id(pipes) == LMD_TYPE_ARRAY) {
+        bool found = false;
+        int64_t plen = js_array_length(pipes);
+        for (int64_t i = 0; i < plen; i++) {
+            if (js_array_get_int(pipes, i).item == dest.item) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) js_array_push(pipes, dest);
+    }
 
     // flush buffer to dest
     Item buf = js_property_get(self, key_buffer);
@@ -4942,6 +5026,13 @@ static Item js_readable_inst_read(Item size_item) {
 static Item js_readable_inst_pipe(Item dest) {
     return js_readable_pipe(js_get_this(), dest);
 }
+static Item js_readable_inst_unpipe(Item dest) {
+    js_readable_remove_pipe(js_get_this(), dest, true);
+    return js_get_this();
+}
+static Item js_stream_base_constructor(void) {
+    return make_js_undefined();
+}
 static Item js_stream_inst_destroy(Item err) {
     return js_stream_destroy(js_get_this(), err);
 }
@@ -5057,6 +5148,7 @@ extern "C" Item js_readable_new(Item opts) {
     js_property_set(obj, make_string_item("unshift"), js_new_function((void*)js_readable_inst_unshift, 2));
     js_property_set(obj, key_read, js_new_function((void*)js_readable_inst_read, 1));
     js_property_set(obj, key_pipe, js_new_function((void*)js_readable_inst_pipe, 1));
+    js_property_set(obj, make_string_item("unpipe"), js_new_function((void*)js_readable_inst_unpipe, 1));
     js_property_set(obj, key_destroy, js_new_function((void*)js_stream_inst_destroy, 1));
     js_property_set(obj, make_string_item("resume"), js_new_function((void*)js_readable_inst_resume, 0));
     js_property_set(obj, make_string_item("pause"), js_new_function((void*)js_readable_inst_pause, 0));
@@ -5514,6 +5606,7 @@ extern "C" Item js_duplex_new(Item opts) {
     js_property_set(obj, make_string_item("unshift"), js_new_function((void*)js_readable_inst_unshift, 2));
     js_property_set(obj, key_read, js_new_function((void*)js_readable_inst_read, 1));
     js_property_set(obj, key_pipe, js_new_function((void*)js_readable_inst_pipe, 1));
+    js_property_set(obj, make_string_item("unpipe"), js_new_function((void*)js_readable_inst_unpipe, 1));
     js_property_set(obj, make_string_item("resume"), js_new_function((void*)js_readable_inst_resume, 0));
     js_property_set(obj, make_string_item("pause"), js_new_function((void*)js_readable_inst_pause, 0));
     js_property_set(obj, make_string_item("isPaused"), js_new_function((void*)js_readable_inst_isPaused, 0));
@@ -5741,6 +5834,7 @@ extern "C" Item js_transform_new(Item opts) {
     js_property_set(obj, make_string_item("unshift"), js_new_function((void*)js_readable_inst_unshift, 2));
     js_property_set(obj, key_read, js_new_function((void*)js_readable_inst_read, 1));
     js_property_set(obj, key_pipe, js_new_function((void*)js_readable_inst_pipe, 1));
+    js_property_set(obj, make_string_item("unpipe"), js_new_function((void*)js_readable_inst_unpipe, 1));
     js_property_set(obj, make_string_item("resume"), js_new_function((void*)js_readable_inst_resume, 0));
     js_property_set(obj, make_string_item("pause"), js_new_function((void*)js_readable_inst_pause, 0));
     js_property_set(obj, make_string_item("isPaused"), js_new_function((void*)js_readable_inst_isPaused, 0));
@@ -6057,6 +6151,10 @@ static void js_stream_finished_call_now(Item callback) {
 extern "C" Item js_stream_finished(Item stream, Item callback) {
     ensure_keys();
     if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+    if (!js_stream_is_stream_like(stream)) {
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "ERR_INVALID_ARG_TYPE: The \"stream\" argument must be an instance of stream.Stream.");
+    }
 
     // check if already finished/destroyed
     Item fin = js_property_get(stream, key_finished);
@@ -6525,10 +6623,27 @@ extern "C" Item js_get_stream_namespace(void) {
     js_mark_non_enumerable(pipeline_fn, custom_key);
     js_mark_non_enumerable(finished_fn, custom_key);
 
-    // Stream — base class (alias for EventEmitter with pipe method)
-    // In Node.js, stream.Stream inherits from EventEmitter
+    // Stream — base class that inherits from EventEmitter and provides pipe().
     extern Item js_get_events_namespace(void);
-    Item stream_base = js_get_events_namespace();
+    Item events_ctor = js_get_events_namespace();
+    Item stream_base = js_new_function((void*)js_stream_base_constructor, 0);
+    Item stream_base_proto = js_new_object();
+    Item events_proto = js_property_get(events_ctor, make_string_item("prototype"));
+    if (js_stream_is_object_like(events_proto)) {
+        js_set_prototype(stream_base_proto, events_proto);
+    }
+    if (js_stream_is_object_like(events_ctor)) {
+        js_set_prototype(stream_base, events_ctor);
+    }
+    js_property_set(stream_base_proto, key_pipe, js_new_function((void*)js_readable_inst_pipe, 1));
+    js_property_set(stream_base_proto, make_string_item("unpipe"),
+                    js_new_function((void*)js_readable_inst_unpipe, 1));
+    js_property_set(stream_base_proto, make_string_item("constructor"), stream_base);
+    js_mark_non_enumerable(stream_base_proto, make_string_item("constructor"));
+    js_set_function_name(stream_base, make_string_item("Stream"));
+    js_property_set(stream_base, make_string_item("prototype"), stream_base_proto);
+    js_property_set(stream_base, make_string_item("__instance_proto__"), stream_base_proto);
+    js_function_set_prototype(stream_base, stream_base_proto);
     js_property_set(stream_namespace, make_string_item("Stream"), stream_base);
 
     if (get_type_id(readable_constructor) == LMD_TYPE_FUNC) {
