@@ -204,6 +204,9 @@ static inline Item js_bool_item(bool value) {
 static void js_readable_clear_pipe(Item self) {
     js_property_set(self, make_string_item("__piped__"), js_bool_item(false));
     js_property_set(self, make_string_item("__pipe_dest__"), make_js_undefined());
+    Item state = js_property_get(self, key_readable_state);
+    if (get_type_id(state) == LMD_TYPE_MAP)
+        js_property_set(state, make_string_item("awaitDrainWriters"), ItemNull);
 }
 
 static bool js_item_is_true(Item item) {
@@ -274,6 +277,7 @@ static Item js_create_readable_state(void) {
     js_state_set_bool(state, "objectMode", false);
     js_state_set_bool(state, "readableListening", false);
     js_state_set_item(state, "errored", ItemNull);
+    js_state_set_item(state, "awaitDrainWriters", ItemNull);
     js_state_set_item(state, "highWaterMark", (Item){.item = i2it(js_stream_default_byte_hwm)});
     js_property_set(state, make_string_item("encoding"), make_string_item("utf8"));
     return state;
@@ -336,7 +340,7 @@ static bool js_stream_begin_write(Item self, Item chunk) {
     int64_t next = current + chunk_len;
     int64_t hwm = js_stream_state_get_int(state, "highWaterMark", 16 * 1024);
     js_state_set_item(state, "length", (Item){.item = i2it(next)});
-    bool need_drain = hwm > 0 && next >= hwm;
+    bool need_drain = next > 0 && next >= hwm;
     if (need_drain) js_state_set_bool(state, "needDrain", true);
     return !need_drain;
 }
@@ -1466,6 +1470,14 @@ extern "C" Item js_readable_read_size(Item self, Item size_item) {
 
     Item encoding = js_property_get(self, make_string_item("_encoding"));
     if (get_type_id(encoding) == LMD_TYPE_STRING) {
+        if (!js_item_is_true(js_property_get(self, key_end_pending)) &&
+            !js_item_is_true(js_property_get(self, key_end_emitted))) {
+            js_stream_call_read_if_needed(self, make_js_undefined());
+            buf = js_property_get(self, key_buffer);
+            if (get_type_id(buf) != LMD_TYPE_ARRAY) return ItemNull;
+            blen = js_array_length(buf);
+            if (blen == 0) return ItemNull;
+        }
         Item joined = blen == 1
             ? js_array_get_int(buf, 0)
             : (js_stream_readable_buffer_has_string(buf)
@@ -5210,6 +5222,13 @@ extern "C" Item js_stream_get_readableEnded(void) {
     return js_bool_item(ended);
 }
 
+extern "C" Item js_stream_get_readableLength(void) {
+    ensure_keys();
+    Item self = js_get_this();
+    Item buf = js_property_get(self, key_buffer);
+    return (Item){.item = i2it(js_stream_readable_buffer_length(self, buf))};
+}
+
 extern "C" Item js_stream_get_writableEnded(void) {
     ensure_keys();
     Item self = js_get_this();
@@ -5292,6 +5311,10 @@ static void js_stream_install_state_accessors(Item readable_ctor, Item writable_
     js_stream_install_accessor(readable_ctor, "readableEnded", (void*)js_stream_get_readableEnded);
     js_stream_install_accessor(duplex_ctor, "readableEnded", (void*)js_stream_get_readableEnded);
     js_stream_install_accessor(transform_ctor, "readableEnded", (void*)js_stream_get_readableEnded);
+
+    js_stream_install_accessor(readable_ctor, "readableLength", (void*)js_stream_get_readableLength);
+    js_stream_install_accessor(duplex_ctor, "readableLength", (void*)js_stream_get_readableLength);
+    js_stream_install_accessor(transform_ctor, "readableLength", (void*)js_stream_get_readableLength);
 
     js_stream_install_accessor(writable_ctor, "writableEnded", (void*)js_stream_get_writableEnded);
     js_stream_install_accessor(duplex_ctor, "writableEnded", (void*)js_stream_get_writableEnded);

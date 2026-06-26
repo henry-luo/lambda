@@ -41,6 +41,9 @@ interface RenderElementProps {
   path: SourcePath
 }
 
+// Void / atomic tags that must not receive a placeholder <br>.
+const VOID_TAGS = new Set(['img', 'hr', 'br'])
+
 function RenderElement({ doc, node, path }: RenderElementProps): React.ReactElement {
   const tag = node.tag === 'doc' ? 'div' : node.tag
   const props: Record<string, unknown> = {
@@ -51,11 +54,19 @@ function RenderElement({ doc, node, path }: RenderElementProps): React.ReactElem
   if (node.tag === 'doc') {
     props['className'] = 'rdt-editor'
   }
-  const children = node.content.length === 0
-    ? null
-    : node.content.map((c, i) => (
-        <RenderNode key={i} doc={doc} child={c} path={[...path, i]} />
-      ))
+  let children: React.ReactNode
+  if (node.content.length === 0) {
+    // Empty container blocks render a <br> so contentEditable gives them a
+    // line box and the caret can land inside (a truly-empty <p> collapses to
+    // zero height). Void elements (img/hr/br) stay childless.
+    children = VOID_TAGS.has(node.tag) || node.tag === 'doc'
+      ? null
+      : <br data-placeholder="true" />
+  } else {
+    children = node.content.map((c, i) => (
+      <RenderNode key={i} doc={doc} child={c} path={[...path, i]} />
+    ))
+  }
   return React.createElement(tag, props, children)
 }
 
