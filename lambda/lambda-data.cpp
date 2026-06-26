@@ -639,6 +639,73 @@ Item pn_push(Item arr_item, Item value) {
     return arr_item;
 }
 
+// splice(arr, start, count) — Lambda-script builtin: remove `count` elements starting
+// at index `start` from a growable generic array, IN PLACE — shift the tail down over
+// the gap and shrink `length` (no reallocation). Mutates arr and returns it, so callers
+// holding the same array (incl. through a map field) see the removal. Together with
+// push/len this gives pop / dequeue / middle-removal without a chunked + `.sz` wrapper.
+//   pop:     splice(v, len(v) - 1, 1)
+//   dequeue: splice(v, 0, 1)
+//   remove:  splice(v, idx, 1)
+// `start` may be negative (counts from the end, like slice); `start`/`count` are clamped
+// to the valid range.
+Item pn_splice(Item arr_item, Item start_item, Item count_item) {
+    TypeId tid = get_type_id(arr_item);
+    if (tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_ARRAY_NUM) {
+        log_error("splice: expected a growable array, got %s", get_type_name(tid));
+        return arr_item;
+    }
+    TypeId st = get_type_id(start_item), ct = get_type_id(count_item);
+    if ((st != LMD_TYPE_INT && st != LMD_TYPE_INT64) ||
+        (ct != LMD_TYPE_INT && ct != LMD_TYPE_INT64)) {
+        log_error("splice: start and count must be integers");
+        return arr_item;
+    }
+    int64_t start = (st == LMD_TYPE_INT) ? start_item.get_int56() : start_item.get_int64();
+    int64_t count = (ct == LMD_TYPE_INT) ? count_item.get_int56() : count_item.get_int64();
+
+    if (tid == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = arr_item.array_num;
+        if (arr->is_view || arr->is_ndim) {
+            log_error("splice: cannot splice a view or N-D array; copy()/ravel() first");
+            return arr_item;
+        }
+        int64_t len = arr->length;
+        if (start < 0) start += len;
+        if (start < 0) start = 0;
+        if (start > len) start = len;
+        if (count < 0) count = 0;
+        if (count > len - start) count = len - start;
+        if (count == 0) return arr_item;
+        // shift the typed elements [start+count, len) down to [start, len-count) — a raw
+        // byte move on the contiguous buffer (`data` aliases items/float_items in the union;
+        // ELEM_TYPE_SIZE gives bytes/element). No reallocation; just shrink the length.
+        size_t esize = ELEM_TYPE_SIZE[arr->get_elem_type() >> 4];
+        char* base = (char*)arr->data;
+        memmove(base + (size_t)start * esize, base + (size_t)(start + count) * esize,
+                (size_t)(len - start - count) * esize);
+        arr->length = len - count;
+        return arr_item;
+    }
+
+    // generic Array (Item* items)
+    Array* arr = arr_item.array;
+    int64_t len = arr->length;
+    if (start < 0) start += len;       // negative start counts from the end
+    if (start < 0) start = 0;
+    if (start > len) start = len;
+    if (count < 0) count = 0;
+    if (count > len - start) count = len - start;
+    if (count == 0) return arr_item;
+
+    // shift the tail [start+count, len) down into [start, len-count)
+    for (int64_t i = start + count; i < len; i++) {
+        arr->items[i - count] = arr->items[i];
+    }
+    arr->length = len - count;
+    return arr_item;
+}
+
 void list_push(List *list, Item item) {
     TypeId type_id = get_type_id(item);
     // 1. skip NULL value

@@ -20,76 +20,43 @@ let K_STAY = 2
 let K_EQUAL = 3
 let K_SCALE = 4
 
-type Vec = {chunks: list, sz: int}
+type Vec = any   // a growable array (built-in []/push/len/splice)
 type Variable = {val: int, constraints: map, determinedBy: int, walkStrength: int, stay: int, mark: int}
 type Planner = {currentMark: int, nextCid: int}
 
 // --- Vector (chunked 16x16=256) ---
 
+// Growable array via the built-ins `push`/`len`/`splice` — no chunked + `.sz` wrapper.
+// `splice(v, i, 1)` removes one element in place (shift + shrink).
 pn vec_new() {
-    var v: Vec = { chunks: fill(16, null), sz: 0 }
-    return v
+    return []
 }
 
 pn vec_add(v: Vec, item) {
-    var s = (v.sz)
-    var ii = s % 16
-    var ci = shr(s, 4)
-    var cks = (v.chunks)
-    var ck = cks[ci]
-    if (ck == null) {
-        var _n: int = 0
-        ck = fill(16, null)
-        cks[ci] = ck
-    }
-    var _d: int = 0
-    ck[ii] = item
-    var ns = s + 1
-    v.sz = ns
+    push(v, item)
 }
 
 pn vec_at(v: Vec, idx) {
-    var ii = idx % 16
-    var ci = shr(idx, 4)
-    var cks = (v.chunks)
-    var ck = cks[ci]
-    var r = ck[ii]
-    return r
+    return v[idx]
 }
 
 pn vec_size(v: Vec) {
-    var r = (v.sz)
-    return r
+    return len(v)
 }
 
 pn vec_set(v: Vec, idx, item) {
-    var ii = idx % 16
-    var ci = shr(idx, 4)
-    var cks = (v.chunks)
-    var ck = cks[ci]
-    var _d: int = 0
-    ck[ii] = item
+    v[idx] = item
 }
 
 pn vec_is_empty(v: Vec) {
-    var sz = (v.sz)
-    if (sz == 0) { return 1 }
+    if (len(v) == 0) { return 1 }
     return 0
 }
 
 pn vec_remove_first(v: Vec) {
-    var sz = (v.sz)
-    if (sz == 0) { return null }
-    var first = vec_at(v, 0)
-    var i: int = 1
-    while (i < sz) {
-        var elem = vec_at(v, i)
-        var pi = i - 1
-        vec_set(v, pi, elem)
-        i = i + 1
-    }
-    var nsz = sz - 1
-    v.sz = nsz
+    if (len(v) == 0) { return null }
+    var first = v[0]
+    splice(v, 0, 1)
     return first
 }
 
@@ -101,12 +68,12 @@ pn vec_with(item) {
 
 // Remove constraint by cid from vector
 pn vec_remove_cid(v: Vec, cid) {
-    var sz = (v.sz)
+    var sz = len(v)
     var found: int = -1
     var i: int = 0
     while (i < sz) {
         if (found == -1) {
-            var elem = vec_at(v, i)
+            var elem = v[i]
             var ecid = (elem.cid)
             if (ecid == cid) {
                 found = i
@@ -115,15 +82,7 @@ pn vec_remove_cid(v: Vec, cid) {
         i = i + 1
     }
     if (found == -1) { return 0 }
-    var j = found + 1
-    while (j < sz) {
-        var elem2 = vec_at(v, j)
-        var pj = j - 1
-        vec_set(v, pj, elem2)
-        j = j + 1
-    }
-    var nsz = sz - 1
-    v.sz = nsz
+    splice(v, found, 1)
     return 1
 }
 
