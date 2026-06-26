@@ -374,6 +374,11 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_STACK, "stack", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_stack", FPTR(fn_stack), NULL, NULL, false, 0},
 
+    // push(arr, val) — append to a growable generic array in place (amortized O(1)).
+    // Procedural: mutates arr and returns it. Replaces chunked-vector + .sz workarounds.
+    {SYSPROC_PUSH, "push", 2, &TYPE_ANY, true, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "pn_push", FPTR(pn_push), NULL, NULL, false, 0},
+
     // image stencil engine (windowed neighbourhood ops over ArrayNum)
     {SYSFUNC_CONVOLVE, "convolve", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_convolve", FPTR(fn_convolve), NULL, NULL, false, 0},

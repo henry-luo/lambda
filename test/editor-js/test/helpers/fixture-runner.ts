@@ -14,6 +14,7 @@ import path from 'node:path'
 import { parseHtmlToDoc } from '../../src/view/html-parser.js'
 import { docSchema } from '../../src/schemas/doc.js'
 import { historyApplyStep, historyNew } from '../../src/model/history.js'
+import { stepApply, stepInvert } from '../../src/model/step.js'
 import type { Doc, History, MarkDict, Selection, Step, Transaction } from '../../src/model/types.js'
 import type { Schema } from '../../src/model/schema.js'
 import type { EditorState } from '../../src/commands/types.js'
@@ -36,6 +37,10 @@ export interface FixtureResult {
   history: History
   stored_marks: MarkDict | null
   steps_applied: number
+  // True iff inverting every applied step (in reverse) restores the input doc
+  // exactly — the invertibility invariant Slate/PM lean on. Null when nothing
+  // mutated the document (no steps to invert).
+  invertRoundtrips: boolean | null
 }
 
 // ---------------------------------------------------------------------------
@@ -102,9 +107,20 @@ export function runFixtureCase(c: FixtureCase, schema: Schema = docSchema): Fixt
   let history: History = historyNew()
   let stepsApplied = 0
 
+  // Record (docBeforeStep, step) pairs across the whole run so we can verify
+  // the inverse chain restores the original document.
+  const stepLog: { before: Doc; step: Step }[] = []
+
   for (const ev of events) {
     const tx = driveEvents(state, ev)
     if (tx !== null) {
+      // tx.steps were applied starting from state.doc; walk them forward to
+      // log each step against the doc it saw.
+      let cursor = state.doc
+      for (const step of tx.steps) {
+        stepLog.push({ before: cursor, step })
+        cursor = stepApply(step, cursor)
+      }
       const out = applyTx(state, history, tx)
       state = out.state
       history = out.history
@@ -119,8 +135,23 @@ export function runFixtureCase(c: FixtureCase, schema: Schema = docSchema): Fixt
     expectedSelection: expected.selection,
     history,
     stored_marks: state.stored_marks,
-    steps_applied: stepsApplied
+    steps_applied: stepsApplied,
+    invertRoundtrips: checkInvertRoundtrip(initial.doc, stepLog)
   }
+}
+
+// Apply the inverse of every logged step, in reverse order, to the final doc;
+// the result must equal the original input doc.
+function checkInvertRoundtrip(inputDoc: Doc, log: { before: Doc; step: Step }[]): boolean | null {
+  if (log.length === 0) return null
+  // The final doc after all forward steps.
+  let cursor: Doc = log.length > 0 ? stepApply(log[log.length - 1]!.step, log[log.length - 1]!.before) : inputDoc
+  for (let i = log.length - 1; i >= 0; i--) {
+    const { before, step } = log[i]!
+    const inv = stepInvert(step, before)
+    cursor = stepApply(inv, cursor)
+  }
+  return JSON.stringify(cursor) === JSON.stringify(inputDoc)
 }
 
 function applyTx(state: EditorState, history: History, tx: Transaction): { state: EditorState; history: History } {

@@ -237,6 +237,20 @@ export function isMarkTag(schema: Schema, tag: string): boolean {
   return e !== undefined && e.role === 'mark'
 }
 
+// True iff the node's content expression permits inline content (text leaves) —
+// e.g. paragraph/heading/li/td. False for block containers (doc, ul, table) so
+// callers never splice a bare text leaf among block children.
+export function schemaAllowsInline(schema: Schema, tag: string): boolean {
+  const e = schemaEntry(schema, tag)
+  if (e === undefined) return false
+  const termAllowsInline = (t: ContentTerm): boolean => {
+    if ('role' in t) return t.role === 'inline' || t.role === 'text'
+    if ('any' in t) return t.any.some(termAllowsInline)
+    return false  // tag-keyed terms are block/structural
+  }
+  return e.content.some(termAllowsInline)
+}
+
 // Block tags that do NOT repeat on split — pressing Enter at the end produces
 // the schema default block (a paragraph) rather than another of the same tag.
 const NON_REPEATING_BLOCKS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'title'])

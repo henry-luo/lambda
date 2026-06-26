@@ -1,0 +1,24 @@
+[
+  {
+    "type": "command",
+    "name": "wrapInList",
+    "args": {
+      "kind": "ul"
+    }
+  },
+  {
+    "type": "command",
+    "name": "insertParagraph"
+  },
+  {
+    "type": "command",
+    "name": "insertText",
+    "args": {
+      "text": "child"
+    }
+  },
+  {
+    "type": "command",
+    "name": "indentListItem"
+  }
+]

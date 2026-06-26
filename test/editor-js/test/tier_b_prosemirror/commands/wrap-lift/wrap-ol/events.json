@@ -1,0 +1,9 @@
+[
+  {
+    "type": "command",
+    "name": "wrapInList",
+    "args": {
+      "kind": "ol"
+    }
+  }
+]

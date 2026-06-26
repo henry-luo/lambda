@@ -1,0 +1,6 @@
+grow: len=10 v0=0 v9=81
+maps: len=3 w1.name=b w2.val=30
+nested: len=2 z0.len=3 z1.len=2
+field: len=5 d0=100 d4=104
+stress: len=1000 sum=499500
+
