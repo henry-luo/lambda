@@ -7,40 +7,22 @@
 
 // --- Vector (chunked, 16 elements per chunk, up to 256 capacity) ---
 
+// Growable array via the built-in `push`/`len` (replaces the chunked-vector + .sz
+// workaround). `push` grows in place with amortized O(1); indexing is direct O(1).
 pn vec_new() {
-    var v = { chunks: fill(16, null), sz: 0 }
-    return v
+    return []
 }
 
 pn vec_add(v, item) {
-    var s = (v.sz)
-    var ii = s % 16
-    var ci = shr(s, 4)
-    var cks = (v.chunks)
-    var ck = cks[ci]
-    if (ck == null) {
-        var _n = 0
-        ck = fill(16, null)
-        cks[ci] = ck
-    }
-    var _d = 0
-    ck[ii] = item
-    var ns = s + 1
-    v.sz = ns
+    push(v, item)
 }
 
 pn vec_at(v, idx) {
-    var ii = idx % 16
-    var ci = shr(idx, 4)
-    var cks = (v.chunks)
-    var ck = cks[ci]
-    var r = ck[ii]
-    return r
+    return v[idx]
 }
 
 pn vec_size(v) {
-    var r = (v.sz)
-    return r
+    return len(v)
 }
 
 // --- Hash Index Table ---
