@@ -255,6 +255,15 @@ static bool is_block_level_element(DomNode* node) {
            display.outer == CSS_VALUE_TABLE_CELL;
 }
 
+static bool parent_preserves_inter_element_whitespace(DomNode* text_node) {
+    if (!text_node || !text_node->parent || !text_node->parent->is_element()) return false;
+    DomElement* parent_elem = text_node->parent->as_element();
+    if (!parent_elem->blk || parent_elem->blk->white_space == 0) return false;
+    CssEnum ws = parent_elem->blk->white_space;
+    return ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
+        ws == CSS_VALUE_BREAK_SPACES;
+}
+
 /**
  * Check if a whitespace-only text node should be collapsed according to CSS rules.
  * CSS 2.2: "When white space is contained at the end of a block's content, or at
@@ -277,6 +286,12 @@ static bool should_collapse_inter_element_whitespace(DomNode* text_node) {
     // Case 1: Whitespace at start of block, followed by a block-level element
     if (!text_node->prev_sibling && text_node->next_sibling) {
         if (is_block_level_element(text_node->next_sibling)) {
+            // css 2.1 section 9.2.1.1: preserved whitespace before the first block child
+            // still creates an anonymous block box; only collapsible whitespace
+            // disappears at this inter-element boundary.
+            if (parent_preserves_inter_element_whitespace(text_node)) {
+                return false;
+            }
             return true;
         }
     }
@@ -291,15 +306,8 @@ static bool should_collapse_inter_element_whitespace(DomNode* text_node) {
             // collapsed away according to the 'white-space' property does not generate
             // any anonymous inline boxes." — If white-space preserves spaces, the
             // whitespace IS meaningful and should NOT be collapsed.
-            if (text_node->parent->is_element()) {
-                DomElement* parent_elem = text_node->parent->as_element();
-                if (parent_elem->blk && parent_elem->blk->white_space != 0) {
-                    CssEnum ws = parent_elem->blk->white_space;
-                    if (ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
-                        ws == CSS_VALUE_BREAK_SPACES) {
-                        return false;
-                    }
-                }
+            if (parent_preserves_inter_element_whitespace(text_node)) {
+                return false;
             }
             return true;
         }
@@ -309,15 +317,8 @@ static bool should_collapse_inter_element_whitespace(DomNode* text_node) {
     // CSS 2.1 §16.6.1: When white-space preserves spaces (pre, pre-wrap, break-spaces),
     // this whitespace is meaningful content — do NOT collapse it.
     if (!text_node->next_sibling) {
-        if (text_node->parent->is_element()) {
-            DomElement* parent_elem = text_node->parent->as_element();
-            if (parent_elem->blk && parent_elem->blk->white_space != 0) {
-                CssEnum ws = parent_elem->blk->white_space;
-                if (ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
-                    ws == CSS_VALUE_BREAK_SPACES) {
-                    return false;
-                }
-            }
+        if (parent_preserves_inter_element_whitespace(text_node)) {
+            return false;
         }
         return true;
     }
