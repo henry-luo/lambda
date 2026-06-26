@@ -163,6 +163,12 @@ static void js_stream_iter_resolve_end_if_drained(Item writer);
 static void js_stream_iter_reject_end(Item writer, Item err);
 static void js_stream_iter_reject_pending_writes(Item writer, Item err);
 
+static bool js_stream_source_keeps_pipe_on_backpressure(Item self) {
+    JsClass cls = js_class_id(self);
+    return cls == JS_CLASS_DUPLEX || cls == JS_CLASS_TRANSFORM ||
+           cls == JS_CLASS_PASS_THROUGH;
+}
+
 static void ensure_keys() {
     if (keys_init) return;
     key_on       = make_string_item("on");
@@ -1320,8 +1326,10 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
             }
             js_property_set(self, key_flowing, js_bool_item(false));
             js_property_set(self, key_paused, js_bool_item(true));
-            js_property_set(self, make_string_item("__piped__"), js_bool_item(false));
-            js_property_set(self, make_string_item("__pipe_dest__"), make_js_undefined());
+            if (!js_stream_source_keeps_pipe_on_backpressure(self)) {
+                js_property_set(self, make_string_item("__piped__"), js_bool_item(false));
+                js_property_set(self, make_string_item("__pipe_dest__"), make_js_undefined());
+            }
             js_stream_call_read_if_needed(self, make_js_undefined());
             return js_bool_item(false);
         }
@@ -3684,8 +3692,10 @@ extern "C" Item js_readable_pipe(Item self, Item dest) {
                     if (js_stream_has_callback_error(dest_error)) break;
                     js_property_set(self, key_flowing, js_bool_item(false));
                     js_property_set(self, key_paused, js_bool_item(true));
-                    js_property_set(self, make_string_item("__piped__"), js_bool_item(false));
-                    js_property_set(self, make_string_item("__pipe_dest__"), make_js_undefined());
+                    if (!js_stream_source_keeps_pipe_on_backpressure(self)) {
+                        js_property_set(self, make_string_item("__piped__"), js_bool_item(false));
+                        js_property_set(self, make_string_item("__pipe_dest__"), make_js_undefined());
+                    }
                     js_stream_call_read_if_needed(self, make_js_undefined());
                     break;
                 }
