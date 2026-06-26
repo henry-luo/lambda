@@ -223,6 +223,39 @@ static bool span_children_have_no_line_content(ViewSpan* span) {
     return true;
 }
 
+static bool span_left_float_continuation_x(ViewSpan* span, float* continuation_x) {
+    if (!span || !continuation_x) return false;
+    bool found_left_float = false;
+    float max_right = *continuation_x;
+    for (View* child = span->first_child; child; child = child->next()) {
+        DomElement* child_elem = layout_inline_as_element(static_cast<DomNode*>(child));
+        if (!child_elem || !child_elem->position ||
+            child_elem->position->float_prop != CSS_VALUE_LEFT) {
+            continue;
+        }
+        float dx = 0.0f;
+        float dy = 0.0f;
+        ViewBlock* child_block = layout_inline_as_block_view(child);
+        if (child_block) {
+            layout_relative_position_offset(child_block, &dx, &dy);
+        }
+        float margin_right = child_block && child_block->bound ?
+            child_block->bound->margin.right : 0.0f;
+        // css 2.1 section 9.5: a direct left float is out of flow, but it still
+        // intrudes at the inline-start side of this line. The inline parent's
+        // zero-width continuation is therefore after the float margin box.
+        float static_right = child->x - dx + child->width + margin_right;
+        if (!found_left_float || static_right > max_right) {
+            max_right = static_right;
+        }
+        found_left_float = true;
+    }
+    if (found_left_float) {
+        *continuation_x = max_right;
+    }
+    return found_left_float;
+}
+
 static void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewSpan* span) {
     if (!lycon || !span || !lycon->font.font_handle) return;
     float ascender = 0.0f, descender = 0.0f;
@@ -1903,6 +1936,16 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     compute_span_bounding_box(span, span_is_multi_line, lycon->font.font_handle);
+    if (span->width == 0.0f && span->height == 0.0f && had_children &&
+        span_children_have_no_line_content(span)) {
+        // css 2.1 section 9.5: keep no-line-content spans collapsed, but anchor their
+        // normal position at the collapsed continuation point so later relative
+        // positioning moves the same zero-sized box browsers expose.
+        float continuation_x = collapsed_inline_fragment_x;
+        span_left_float_continuation_x(span, &continuation_x);
+        span->x = continuation_x;
+        span->y = lycon->block.advance_y;
+    }
 
     // CSS 2.1 §10.6.1: For inline non-replaced elements, the bounding box height
     // should reflect the font's content area + border + padding, not the union of
