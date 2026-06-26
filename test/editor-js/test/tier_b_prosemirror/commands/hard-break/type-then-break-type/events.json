@@ -1,0 +1,20 @@
+[
+  {
+    "type": "command",
+    "name": "insertText",
+    "args": {
+      "text": "a"
+    }
+  },
+  {
+    "type": "command",
+    "name": "insertLineBreak"
+  },
+  {
+    "type": "command",
+    "name": "insertText",
+    "args": {
+      "text": "b"
+    }
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "type": "command",
+    "name": "deleteContentForward"
+  },
+  {
+    "type": "command",
+    "name": "insertText",
+    "args": {
+      "text": "p"
+    }
+  },
+  {
+    "type": "command",
+    "name": "insertParagraph"
+  },
+  {
+    "type": "command",
+    "name": "insertText",
+    "args": {
+      "text": "!"
+    }
+  }
+]

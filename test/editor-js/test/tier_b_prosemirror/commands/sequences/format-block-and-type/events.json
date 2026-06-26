@@ -1,0 +1,16 @@
+[
+  {
+    "type": "command",
+    "name": "toggleMark",
+    "args": {
+      "mark": "italic"
+    }
+  },
+  {
+    "type": "command",
+    "name": "setBlockType",
+    "args": {
+      "tag": "blockquote"
+    }
+  }
+]

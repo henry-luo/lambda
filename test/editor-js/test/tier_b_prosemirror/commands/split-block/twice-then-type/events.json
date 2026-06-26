@@ -1,0 +1,24 @@
+[
+  {
+    "type": "command",
+    "name": "insertParagraph"
+  },
+  {
+    "type": "command",
+    "name": "insertText",
+    "args": {
+      "text": "mid"
+    }
+  },
+  {
+    "type": "command",
+    "name": "insertParagraph"
+  },
+  {
+    "type": "command",
+    "name": "insertText",
+    "args": {
+      "text": "end"
+    }
+  }
+]

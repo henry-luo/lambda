@@ -1,0 +1,16 @@
+[
+  {
+    "type": "command",
+    "name": "setBlockType",
+    "args": {
+      "tag": "h1"
+    }
+  },
+  {
+    "type": "command",
+    "name": "insertText",
+    "args": {
+      "text": "Y"
+    }
+  }
+]
