@@ -5118,6 +5118,11 @@ static bool js_array_sparse_delete(Array* arr, int64_t index) {
     return false;
 }
 
+static int64_t js_array_sparse_count(SparseArrayMap* sm) {
+    if (!sm || !sm->sparse_indices) return 0;
+    return (int64_t)hashmap_count(sm->sparse_indices);
+}
+
 extern "C" int64_t js_array_sparse_delete_index(Item array, int64_t index) {
     if (get_type_id(array) != LMD_TYPE_ARRAY) return 0;
     return js_array_sparse_delete(array.array, index) ? 1 : 0;
@@ -5142,6 +5147,9 @@ static inline bool js_array_dense_present(Array* arr, int64_t index) {
 
 static const int64_t JS_ARRAY_DENSE_GAP_ALWAYS_OK = 10000;
 static const int64_t JS_ARRAY_DENSE_MIN_PRESENT_DEN = 4;
+static const int64_t JS_ARRAY_SPARSE_PROMOTE_MAX_LENGTH = 262144;
+static const int64_t JS_ARRAY_SPARSE_PROMOTE_MIN_COUNT = 4096;
+static const int64_t JS_ARRAY_SPARSE_PROMOTE_MIN_DEN = 4;
 
 static void js_array_stamp_dense_tail_holes(Array* arr) {
     if (!arr || !arr->items || arr->length >= arr->capacity) return;
@@ -5193,6 +5201,59 @@ static bool js_array_should_keep_length_sparse(Array* arr, int64_t new_length) {
     return js_array_projected_density_is_sparse(arr, new_length, projected_present);
 }
 
+static bool js_array_should_promote_sparse_dense(Array* arr, SparseArrayMap* sm) {
+    if (!arr || !sm || !sm->sparse_indices) return false;
+    if (arr->is_content == 1) return false;
+    if (arr->length <= JS_ARRAY_DENSE_GAP_ALWAYS_OK ||
+            arr->length > JS_ARRAY_SPARSE_PROMOTE_MAX_LENGTH) {
+        return false;
+    }
+    int64_t sparse_count = js_array_sparse_count(sm);
+    if (sparse_count < JS_ARRAY_SPARSE_PROMOTE_MIN_COUNT) return false;
+    if (sparse_count * JS_ARRAY_SPARSE_PROMOTE_MIN_DEN < arr->length) return false;
+
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(sm->sparse_indices, &iter, &item)) {
+        JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
+        if (!entry || entry->index < 0 || entry->index >= arr->length) return false;
+    }
+    return true;
+}
+
+static void js_array_try_promote_sparse_dense(Item array_item) {
+    if (get_type_id(array_item) != LMD_TYPE_ARRAY) return;
+    Array* arr = array_item.array;
+    if (!arr || arr->extra == 0) return;
+    SparseArrayMap* sm = js_array_sparse_from_map((Map*)(uintptr_t)arr->extra);
+    if (!js_array_should_promote_sparse_dense(arr, sm)) return;
+
+    int64_t new_cap = arr->length + 4;
+    Item* new_items = (Item*)mem_alloc(new_cap * sizeof(Item), MEM_CAT_JS_RUNTIME);
+    Item hole = lam::hole_sentinel_item();
+    for (int64_t i = 0; i < new_cap; i++) {
+        new_items[i] = hole;
+    }
+
+    if (arr->items && arr->capacity > 0) {
+        int64_t copy_len = arr->length < arr->capacity ? arr->length : arr->capacity;
+        memcpy(new_items, arr->items, copy_len * sizeof(Item));
+    }
+
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(sm->sparse_indices, &iter, &item)) {
+        JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
+        new_items[entry->index] = entry->value;
+    }
+
+    js_array_install_runtime_items(arr, new_items, new_cap);
+    hashmap_free(sm->sparse_indices);
+    sm->sparse_indices = NULL;
+    sm->sparse_version++;
+    JS_PROPERTY_SET_BRANCH("array_sparse_promote_dense");
+}
+
 static void js_array_store_sparse_property(Item array_item, int64_t index, Item value, bool update_length) {
     if (get_type_id(array_item) != LMD_TYPE_ARRAY || index < 0) return;
     Array* arr = array_item.array;
@@ -5213,6 +5274,7 @@ static void js_array_store_sparse_property(Item array_item, int64_t index, Item 
     if (update_length && index <= 0xFFFFFFFELL && arr->length <= index) {
         arr->length = index + 1;
     }
+    js_array_try_promote_sparse_dense(array_item);
 }
 
 static bool js_array_parse_index_name(const char* name, int name_len, int64_t* out_index) {
@@ -5350,6 +5412,30 @@ static bool js_array_companion_has_numeric_slot(Array* arr, int64_t index) {
            status == JS_SHAPE_SLOT_DELETED;
 }
 
+static bool js_array_companion_has_array_index_shape(Array* arr) {
+    if (!arr || arr->extra == 0) return false;
+    Map* pm = (Map*)(uintptr_t)arr->extra;
+    if (!pm || !map_kind_is_array_props(pm->map_kind)) return false;
+    TypeMap* tm = (TypeMap*)pm->type;
+    return tm && tm->has_array_index_shape;
+}
+
+// Fast path for reading an existing own dense data element of a normal Array.
+// This is intentionally narrower than js_array_get_int(): it only handles the
+// plain own-slot case and lets holes, sparse entries, accessors, arguments, and
+// prototype numeric lookups use the semantic path.
+static inline bool js_array_fast_own_dense_get(Item object, int64_t index, Item* out) {
+    if (get_type_id(object) != LMD_TYPE_ARRAY || !out) return false;
+    Array* arr = object.array;
+    if (!arr || arr->is_content == 1) return false;
+    if (index < 0 || index >= arr->length || index >= arr->capacity) return false;
+    Item value = arr->items[index];
+    if (value.item == JS_DELETED_SENTINEL_VAL) return false;
+    if (js_array_companion_has_numeric_slot(arr, index)) return false;
+    *out = value;
+    return true;
+}
+
 // Fast path for writing an existing own dense data element of a normal Array.
 // Per ES OrdinarySet, an own writable data property is written directly without
 // consulting accessors, the prototype chain, or typed-array proto exotics. When
@@ -5357,13 +5443,15 @@ static bool js_array_companion_has_numeric_slot(Array* arr, int64_t index) {
 // can override the dense element semantics for this index; pure named companions
 // such as `Q.LinePixels` should not kick dense writes back to the generic setter.
 static inline bool js_array_fast_own_dense_set(Item object, int64_t index, Item value) {
-    if (get_type_id(object) != LMD_TYPE_ARRAY) return false;
+    assert (get_type_id(object) == LMD_TYPE_ARRAY && index >= 0);
     Array* arr = object.array;
     if (arr->is_content == 1) return false;
-    if (index < 0 || index >= arr->length || index >= arr->capacity) return false;
+    if (index >= arr->length || index >= arr->capacity) return false;
     if (arr->items[index].item == JS_DELETED_SENTINEL_VAL) return false;
-    if (js_array_companion_has_numeric_slot(arr, index)) return false;
-    js_array_sparse_delete(arr, index);
+    if (arr->extra) {
+        if (js_array_companion_has_numeric_slot(arr, index)) return false;
+        js_array_sparse_delete(arr, index);
+    }
     arr->items[index] = value;
     return true;
 }
@@ -5620,7 +5708,8 @@ static Item js_property_set_array(Item object, Item key, Item value) {
         return value;
     }
     // check for setter accessor on numeric index before array set
-    if (object.array->extra != 0) {
+    bool companion_has_index_shape = js_array_companion_has_array_index_shape(object.array);
+    if (companion_has_index_shape) {
         int idx = (int)js_get_number(key);
         if (idx >= 0) {
             Map* props = (Map*)(uintptr_t)object.array->extra;
@@ -6435,6 +6524,14 @@ extern "C" Item js_property_access(Item object, Item key) {
 
     // v18: throw TypeError when accessing properties on null or undefined
     TypeId type = get_type_id(object);
+
+    if (type == LMD_TYPE_ARRAY && get_type_id(key) == LMD_TYPE_INT) {
+        Item dense_value = ItemNull;
+        int64_t idx = it2i(key);
+        if (js_array_fast_own_dense_get(object, idx, &dense_value)) {
+            return dense_value;
+        }
+    }
 
     // TRACE: detect .col1 on non-MAP
     if (trace_enabled && type != LMD_TYPE_MAP && type != LMD_TYPE_NULL && type != LMD_TYPE_UNDEFINED &&
@@ -7887,7 +7984,8 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
         }
         Array* arr = array.array;
         // check for accessor (getter) on companion map — must check even when idx >= length
-        if (index >= 0 && arr->extra != 0) {
+        bool companion_has_index_shape = js_array_companion_has_array_index_shape(arr);
+        if (index >= 0 && companion_has_index_shape) {
             Map* props = (Map*)(uintptr_t)arr->extra;
             // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
             char idx_buf[32];
@@ -7904,7 +8002,7 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
             }
             // AT-3: legacy __get_<idx> marker fallback retired.
         }
-        if (index >= 0 && arr->extra != 0) {
+        if (index >= 0 && companion_has_index_shape) {
             char idx_buf[32];
             int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
             Map* props = (Map*)(uintptr_t)arr->extra;
@@ -7928,7 +8026,7 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
             // hole — fall through to prototype chain lookup below
         } else {
             // Arguments overflow: numeric index stored in companion map
-            if (index >= 0 && arr->is_content == 1 && arr->extra != 0) {
+            if (index >= 0 && arr->is_content == 1 && companion_has_index_shape) {
                 char idx_buf[32];
                 snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
                 Map* pm = (Map*)(uintptr_t)arr->extra;
@@ -7995,7 +8093,8 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
         return value;
     }
     // check companion map for accessor/non-writable markers — must check even when idx >= length
-    if (arr->extra != 0 && index >= 0) {
+    bool companion_has_index_shape = js_array_companion_has_array_index_shape(arr);
+    if (companion_has_index_shape && index >= 0) {
         Map* pm = (Map*)(uintptr_t)arr->extra;
         // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
         char idx_buf[32];
@@ -8017,6 +8116,9 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
                 return value;
             }
             if (_se_idx) {
+                if (!js_props_query_writable(pm, _se_idx, idx_buf, idx_len)) {
+                    return value;
+                }
                 Item str_key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
                 js_property_set(pm_item, str_key, value);
                 return value;
@@ -8055,7 +8157,7 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
         if (index < arr->length && index < arr->capacity &&
             arr->items[index].item != JS_DELETED_SENTINEL_VAL) {
             own_index_present = true;
-        } else if (arr->extra != 0) {
+        } else if (companion_has_index_shape) {
             Map* pm = (Map*)(uintptr_t)arr->extra;
             Item pm_item = (Item){.map = pm};
             JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf2, idx_len2, NULL, NULL);
@@ -8242,7 +8344,8 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
     }
 
     // Check companion-map descriptor state before writing.
-    if (arr->extra != 0 && idx >= 0 && idx < arr->length) {
+    bool companion_has_index_shape = js_array_companion_has_array_index_shape(arr);
+    if (companion_has_index_shape && idx >= 0 && idx < arr->length) {
         JS_PROPERTY_SET_BRANCH("array_set_companion_probe");
         Map* pm = (Map*)(uintptr_t)arr->extra;
         char idx_buf[32];
@@ -33560,6 +33663,31 @@ extern "C" Item js_internal_binding(Item name) {
         return cares_obj;
     }
 
+    if (s->len == 11 && memcmp(s->chars, "stream_wrap", 11) == 0) {
+        static Item stream_wrap_obj = {0};
+        static uint64_t stream_wrap_epoch = (uint64_t)-1;
+        if (stream_wrap_obj.item == 0 || stream_wrap_epoch != js_heap_epoch) {
+            stream_wrap_epoch = js_heap_epoch;
+            stream_wrap_obj = js_new_object();
+            heap_register_gc_root(&stream_wrap_obj.item);
+
+            Item stream_base_state = js_new_object();
+            js_property_set(stream_wrap_obj,
+                (Item){.item = s2it(heap_create_name("streamBaseState", 15))},
+                stream_base_state);
+            js_property_set(stream_wrap_obj,
+                (Item){.item = s2it(heap_create_name("kReadBytesOrError", 17))},
+                (Item){.item = i2it(0)});
+            js_property_set(stream_wrap_obj,
+                (Item){.item = s2it(heap_create_name("kArrayBufferOffset", 18))},
+                (Item){.item = i2it(1)});
+            js_property_set(stream_wrap_obj,
+                (Item){.item = s2it(heap_create_name("ShutdownWrap", 12))},
+                js_new_function((void*)js_stub_noop_object, 0));
+        }
+        return stream_wrap_obj;
+    }
+
     if (s->len == 2 && memcmp(s->chars, "fs", 2) == 0) {
         extern Item js_get_internal_fs_binding_namespace(void);
         return js_get_internal_fs_binding_namespace();
@@ -33741,11 +33869,11 @@ extern "C" Item js_module_get(Item specifier) {
         extern Item js_get_stream_promises_namespace(void);
         return js_get_stream_promises_namespace();
     }
-    // stream/web, node:stream/web — return stream namespace (contains ReadableStream etc.)
+    // stream/web, node:stream/web
     if ((spec->len == 10 && memcmp(spec->chars, "stream/web", 10) == 0) ||
         (spec->len == 15 && memcmp(spec->chars, "node:stream/web", 15) == 0)) {
-        extern Item js_get_stream_namespace(void);
-        return js_get_stream_namespace();
+        extern Item js_get_stream_web_namespace(void);
+        return js_get_stream_web_namespace();
     }
     // stream/consumers, node:stream/consumers — return stream namespace
     if ((spec->len == 16 && memcmp(spec->chars, "stream/consumers", 16) == 0) ||

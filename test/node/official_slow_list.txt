@@ -11,6 +11,7 @@ test-child-process-execfilesync-maxbuf.js        # [timeout] observed 60.0s (>10
 test-child-process-execsync-maxbuf.js            # [slow] observed 60.0s (>10s)
 test-compile-cache-success.js                    # [slow] observed 17.8s (>10s)
 test-crypto-cipheriv-decipheriv.js               # [timeout] observed 60.0s (>10s)
+test-fs-promises-readfile.js                     # [slow] observed 10.2s (>10s)
 test-fs-readdir-stack-overflow.js                # [timeout] observed 60.1s (>10s)
 test-http-buffer-sanity.js                       # [slow] observed 10.4s (>10s)
 test-http-byteswritten.js                        # [slow] observed 29.9s (>10s)

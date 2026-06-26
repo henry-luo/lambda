@@ -1032,6 +1032,121 @@ static int coerce_slice_index(Item item, int default_val, int blen) {
     return val;
 }
 
+static int append_utf8_replacement(char* out, int j) {
+    out[j++] = (char)0xEF;
+    out[j++] = (char)0xBF;
+    out[j++] = (char)0xBD;
+    return j;
+}
+
+static Item js_buffer_utf8_to_string(uint8_t* slice, int slice_len) {
+    char* out = (char*)mem_alloc((size_t)slice_len * 3 + 1, MEM_CAT_JS_RUNTIME);
+    int j = 0;
+    for (int i = 0; i < slice_len;) {
+        uint8_t b0 = slice[i];
+        if (b0 < 0x80) {
+            out[j++] = (char)b0;
+            i++;
+            continue;
+        }
+        if (b0 >= 0xC2 && b0 <= 0xDF) {
+            if (i + 1 >= slice_len) {
+                j = append_utf8_replacement(out, j);
+                break;
+            }
+            uint8_t b1 = slice[i + 1];
+            if ((b1 & 0xC0) == 0x80) {
+                out[j++] = (char)b0;
+                out[j++] = (char)b1;
+                i += 2;
+            } else {
+                j = append_utf8_replacement(out, j);
+                i++;
+            }
+            continue;
+        }
+        if (b0 >= 0xE0 && b0 <= 0xEF) {
+            if (i + 1 >= slice_len) {
+                j = append_utf8_replacement(out, j);
+                break;
+            }
+            uint8_t b1 = slice[i + 1];
+            bool b1_ok = false;
+            if (b0 == 0xE0) b1_ok = b1 >= 0xA0 && b1 <= 0xBF;
+            else if (b0 == 0xED) b1_ok = b1 >= 0x80 && b1 <= 0x9F;
+            else b1_ok = (b1 & 0xC0) == 0x80;
+            if (!b1_ok) {
+                j = append_utf8_replacement(out, j);
+                i++;
+                continue;
+            }
+            if (i + 2 >= slice_len) {
+                j = append_utf8_replacement(out, j);
+                break;
+            }
+            uint8_t b2 = slice[i + 2];
+            if ((b2 & 0xC0) == 0x80) {
+                out[j++] = (char)b0;
+                out[j++] = (char)b1;
+                out[j++] = (char)b2;
+                i += 3;
+            } else {
+                j = append_utf8_replacement(out, j);
+                i++;
+            }
+            continue;
+        }
+        if (b0 >= 0xF0 && b0 <= 0xF4) {
+            if (i + 1 >= slice_len) {
+                j = append_utf8_replacement(out, j);
+                break;
+            }
+            uint8_t b1 = slice[i + 1];
+            bool b1_ok = false;
+            if (b0 == 0xF0) b1_ok = b1 >= 0x90 && b1 <= 0xBF;
+            else if (b0 == 0xF4) b1_ok = b1 >= 0x80 && b1 <= 0x8F;
+            else b1_ok = (b1 & 0xC0) == 0x80;
+            if (!b1_ok) {
+                j = append_utf8_replacement(out, j);
+                i++;
+                continue;
+            }
+            if (i + 2 >= slice_len) {
+                j = append_utf8_replacement(out, j);
+                break;
+            }
+            uint8_t b2 = slice[i + 2];
+            if ((b2 & 0xC0) != 0x80) {
+                j = append_utf8_replacement(out, j);
+                i++;
+                continue;
+            }
+            if (i + 3 >= slice_len) {
+                j = append_utf8_replacement(out, j);
+                break;
+            }
+            uint8_t b3 = slice[i + 3];
+            if ((b3 & 0xC0) == 0x80) {
+                out[j++] = (char)b0;
+                out[j++] = (char)b1;
+                out[j++] = (char)b2;
+                out[j++] = (char)b3;
+                i += 4;
+            } else {
+                j = append_utf8_replacement(out, j);
+                i++;
+            }
+            continue;
+        }
+        j = append_utf8_replacement(out, j);
+        i++;
+    }
+    out[j] = '\0';
+    Item result = make_string_item(out, j);
+    mem_free(out);
+    return result;
+}
+
 extern "C" Item js_buffer_toString(Item buf, Item encoding, Item start_item, Item end_item) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
@@ -1154,7 +1269,7 @@ extern "C" Item js_buffer_toString(Item buf, Item encoding, Item start_item, Ite
     }
 
     // default: utf-8
-    return make_string_item((const char*)slice, slice_len);
+    return js_buffer_utf8_to_string(slice, slice_len);
 }
 
 // ─── buf.write(string, offset?, length?, encoding?) ─────────────────────────

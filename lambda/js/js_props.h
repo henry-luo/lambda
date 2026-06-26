@@ -416,6 +416,9 @@ bool js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* out);
 // invariants, etc.). `is_new_property` controls whether absent attribute
 // fields default to "non-X" (true: set non-* markers for new properties)
 // or are left untouched (false: existing markers preserved per ES spec).
+// `existing_accessor` is the validation-time shape of the existing own
+// property; it lets accessor-to-data conversion avoid routing the old
+// JsAccessorPair slot through ordinary map setters.
 //
 // Behavior summary:
 //   - HAS_GET | HAS_SET → routes through `js_define_accessor_partial`
@@ -436,7 +439,8 @@ void js_define_own_property_from_descriptor(Item object,
                                              const char* name,
                                              int name_len,
                                              const JsPropertyDescriptor* pd,
-                                             bool is_new_property);
+                                             bool is_new_property,
+                                             bool existing_accessor);
 
 // Stage A1 kernel surface: complete.
 //   js_to_property_key                  (A1)

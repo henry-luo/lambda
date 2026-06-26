@@ -511,6 +511,135 @@ static void js_props_fill_sparse_accessor_index(Item object,
     }
 }
 
+static Item js_props_array_numeric_storage_target(Item object,
+                                                  const char* name,
+                                                  int name_len) {
+    if (name_len <= 0) return ItemNull;
+    bool is_numeric_index = true;
+    if (name_len == 1 && name[0] == '0') {
+        is_numeric_index = true;
+    } else if (name[0] >= '1' && name[0] <= '9') {
+        for (int i = 1; i < name_len; i++) {
+            if (name[i] < '0' || name[i] > '9') {
+                is_numeric_index = false;
+                break;
+            }
+        }
+    } else {
+        is_numeric_index = false;
+    }
+    if (!is_numeric_index) return ItemNull;
+
+    if (get_type_id(object) == LMD_TYPE_ARRAY) {
+        Array* arr = object.array;
+        if (!arr || arr->extra == 0) return ItemNull;
+        return (Item){.map = (Map*)(uintptr_t)arr->extra};
+    }
+    if (get_type_id(object) == LMD_TYPE_MAP && object.map &&
+            map_kind_is_array_props(object.map->map_kind)) {
+        return object;
+    }
+    return ItemNull;
+}
+
+static Item js_props_array_companion_storage_target(Item object) {
+    if (get_type_id(object) == LMD_TYPE_ARRAY) {
+        Array* arr = object.array;
+        if (!arr || arr->extra == 0) return ItemNull;
+        return (Item){.map = (Map*)(uintptr_t)arr->extra};
+    }
+    if (get_type_id(object) == LMD_TYPE_MAP && object.map &&
+            map_kind_is_array_props(object.map->map_kind)) {
+        return object;
+    }
+    return ItemNull;
+}
+
+static Item js_props_function_properties_storage_target(Item object) {
+    if (get_type_id(object) != LMD_TYPE_FUNC) return ItemNull;
+    JsFuncPropsView_props* fn = (JsFuncPropsView_props*)object.function;
+    if (!fn || fn->properties_map.item == 0 ||
+            get_type_id(fn->properties_map) != LMD_TYPE_MAP) {
+        return ItemNull;
+    }
+    return fn->properties_map;
+}
+
+static Item js_props_existing_accessor_storage_target(Item object) {
+    Item target = js_props_array_companion_storage_target(object);
+    if (target.item != ItemNull.item) return target;
+    target = js_props_function_properties_storage_target(object);
+    if (target.item != ItemNull.item) return target;
+    return object;
+}
+
+static bool js_props_store_raw_data_slot(Item target, ShapeEntry* entry, Item value) {
+    if (get_type_id(target) != LMD_TYPE_MAP || !target.map || !entry ||
+            !target.map->data || entry->byte_offset < 0) {
+        return false;
+    }
+
+    TypeId value_type = get_type_id(value);
+    int value_size = type_info[value_type].byte_size;
+    if (value_size <= 0 ||
+            entry->byte_offset + value_size > (int64_t)target.map->data_cap) {
+        return false;
+    }
+
+    void* field_ptr = (char*)target.map->data + entry->byte_offset;
+    switch (value_type) {
+    case LMD_TYPE_NULL:
+        *(void**)field_ptr = NULL;
+        break;
+    case LMD_TYPE_UNDEFINED:
+        *(bool*)field_ptr = false;
+        break;
+    case LMD_TYPE_BOOL:
+        *(bool*)field_ptr = value.bool_val;
+        break;
+    case LMD_TYPE_INT:
+        *(int64_t*)field_ptr = value.get_int56();
+        break;
+    case LMD_TYPE_INT64:
+        *(int64_t*)field_ptr = value.get_int64();
+        break;
+    case LMD_TYPE_FLOAT:
+        *(double*)field_ptr = value.get_double();
+        break;
+    case LMD_TYPE_DTIME:
+        *(DateTime*)field_ptr = value.get_datetime();
+        break;
+    case LMD_TYPE_STRING:
+        *(String**)field_ptr = value.get_safe_string();
+        break;
+    case LMD_TYPE_SYMBOL:
+        *(Symbol**)field_ptr = value.get_safe_symbol();
+        break;
+    case LMD_TYPE_BINARY:
+        *(String**)field_ptr = value.get_safe_binary();
+        break;
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_RANGE:
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
+        *(Container**)field_ptr = value.container;
+        break;
+    case LMD_TYPE_FUNC: case LMD_TYPE_VMAP: case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_TYPE: case LMD_TYPE_PATH:
+        *(void**)field_ptr = (void*)(uintptr_t)(value.item & 0x00FFFFFFFFFFFFFFULL);
+        break;
+    case LMD_TYPE_ERROR:
+        *(void**)field_ptr = NULL;
+        break;
+    default:
+        return false;
+    }
+
+    if (value_type != LMD_TYPE_NULL) {
+        entry->type = type_info[value_type].type;
+    }
+    return true;
+}
+
 static inline Item js_props_throw_type(const char* msg) {
     Item tn = js_props_str("TypeError", 9);
     Item m  = js_props_str(msg, (int)strlen(msg));
@@ -597,7 +726,8 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
                                                         const char* name,
                                                         int name_len,
                                                         const JsPropertyDescriptor* pd,
-                                                        bool is_new_property) {
+                                                        bool is_new_property,
+                                                        bool existing_accessor) {
     if (!pd) return;
     if (name_len < 0 || name_len >= 240) return;
 
@@ -609,6 +739,7 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
 
     bool is_accessor_desc = js_pd_is_accessor(pd);
     bool was_accessor = false;  // accessor→data conversion track
+    Item accessor_data_target = ItemNull;
 
     // Generic descriptor (no value, no get/set) — pre-create the property
     // with `undefined` if it doesn't already exist. This MUST happen before
@@ -704,12 +835,17 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
     } else if (pd->flags & JS_PD_HAS_VALUE) {
         // ----- Data descriptor: write the value, clearing IS_ACCESSOR if
         //       the previous slot held an accessor pair.
+        Item value_storage_target = ItemNull;
         if (!is_new_property) {
-            ShapeEntry* se = js_find_shape_entry(object, name, name_len);
-            if (se && jspd_is_accessor(se)) {
-                // A2-T3: per-Map clone before clearing IS_ACCESSOR.
-                js_shape_entry_set_accessor(object, name, name_len, /*is_accessor=*/false);
+            Item accessor_target = existing_accessor ?
+                js_props_existing_accessor_storage_target(object) :
+                js_props_array_numeric_storage_target(object, name, name_len);
+            value_storage_target =
+                (accessor_target.item != ItemNull.item) ? accessor_target : object;
+            ShapeEntry* se = js_find_shape_entry(value_storage_target, name, name_len);
+            if ((se && jspd_is_accessor(se)) || existing_accessor) {
                 was_accessor = true;
+                accessor_data_target = value_storage_target;
             }
         }
 
@@ -728,8 +864,33 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
             js_attr_set_writable(object, name, name_len, /*writable=*/true);
         }
 
-        ShapeEntry* value_se = !is_new_property ? js_find_shape_entry(object, name, name_len) : NULL;
-        if (!is_new_property && get_type_id(object) == LMD_TYPE_MAP && value_se) {
+        if (!is_new_property && value_storage_target.item == ItemNull.item) {
+            Item accessor_target = existing_accessor ?
+                js_props_existing_accessor_storage_target(object) :
+                js_props_array_numeric_storage_target(object, name, name_len);
+            value_storage_target =
+                (accessor_target.item != ItemNull.item) ? accessor_target : object;
+        }
+        ShapeEntry* value_se = !is_new_property ?
+            js_find_shape_entry(
+                (value_storage_target.item != ItemNull.item) ? value_storage_target : object,
+                name, name_len) : NULL;
+        if (!was_accessor && value_se && jspd_is_accessor(value_se)) {
+            accessor_data_target =
+                (value_storage_target.item != ItemNull.item) ? value_storage_target : object;
+            was_accessor = true;
+        }
+        if (was_accessor && get_type_id(accessor_data_target) == LMD_TYPE_MAP) {
+            ShapeEntry* accessor_value_se = js_find_shape_entry(accessor_data_target, name, name_len);
+            if (!js_props_store_raw_data_slot(accessor_data_target, accessor_value_se, pd->value)) {
+                js_property_set(accessor_data_target, name_item, pd->value);
+            }
+            // Clear IS_ACCESSOR only after replacing the JsAccessorPair slot.
+            // Attribute probes between the two operations must continue to see
+            // the slot as an accessor, not as a real Function data property.
+            js_shape_entry_set_accessor(accessor_data_target, name, name_len, /*is_accessor=*/false);
+        } else if (!is_new_property && get_type_id(object) == LMD_TYPE_MAP &&
+                value_se && !jspd_is_accessor(value_se)) {
             // [[DefineOwnProperty]] performs an internal slot replacement after
             // validation. Do not route existing map properties through ordinary
             // [[Set]], which can still reject on writability/non-extensibility.

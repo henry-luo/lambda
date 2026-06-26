@@ -1242,6 +1242,18 @@ void jm_collect_let_const_names(JsAstNode* block, struct hashmap* names) {
                 snprintf(name, sizeof(name), "_js_%.*s", (int)c->name->len, c->name->chars);
                 jm_name_set_add_kind(names, name, (int)JS_VAR_LET);
             }
+        } else if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+            JsFunctionNode* fn = (JsFunctionNode*)stmt;
+            if (fn->name) {
+                char name[128];
+                snprintf(name, sizeof(name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+                jm_name_set_add_kind(names, name, (int)JS_VAR_LET);
+                JsNameSetEntry lookup;
+                memset(&lookup, 0, sizeof(lookup));
+                snprintf(lookup.name, sizeof(lookup.name), "%s", name);
+                JsNameSetEntry* e = (JsNameSetEntry*)hashmap_get(names, &lookup);
+                if (e) e->from_func_decl = true;
+            }
         }
         stmt = stmt->next;
     }
