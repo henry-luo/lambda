@@ -145,6 +145,7 @@ extern "C" Item js_stream_destroy(Item self, Item err);
 static void js_stream_flush_buffered_data(Item self);
 static void js_stream_schedule_close(Item self);
 static void js_stream_async_iterators_drain(Item stream, Item err);
+static void js_writable_maybe_finish_deferred(Item self);
 static void js_transform_maybe_finish_deferred(Item self);
 static Item js_readable_iterator(Item self, Item options);
 static void js_stream_iter_maybe_drain(Item readable);
@@ -452,9 +453,9 @@ static void js_stream_mark_writable_finished(Item self) {
 // =============================================================================
 
 static void js_stream_schedule_error(Item self, Item err);
-static void js_stream_schedule_callback(Item callback);
 static void js_stream_schedule_callback_error(Item callback, Item err);
 static void js_stream_flush_pending_writes(Item self);
+static void js_stream_call_writable_end_callbacks(Item self, Item err);
 
 static Item js_stream_capture_rejection(Item self, Item err) {
     ensure_keys();
@@ -670,6 +671,10 @@ static Item js_stream_after_write(Item self, Item callback, Item err) {
             js_call_function(callback, self, NULL, 0);
         }
     }
+    if (has_error) {
+        js_property_set(self, make_string_item("__writable_end_pending__"), js_bool_item(false));
+        js_stream_call_writable_end_callbacks(self, err);
+    }
 
     if (!has_error && need_drain &&
         !js_state_get_bool(state, "ended") &&
@@ -680,6 +685,7 @@ static Item js_stream_after_write(Item self, Item callback, Item err) {
     }
     if (!has_error) {
         js_stream_flush_pending_writes(self);
+        js_writable_maybe_finish_deferred(self);
         js_transform_maybe_finish_deferred(self);
     }
     return make_js_undefined();
@@ -736,6 +742,10 @@ static Item js_stream_after_writev(Item self, Item pending, Item err) {
             }
         }
     }
+    if (has_error) {
+        js_property_set(self, make_string_item("__writable_end_pending__"), js_bool_item(false));
+        js_stream_call_writable_end_callbacks(self, err);
+    }
 
     if (!has_error && need_drain &&
         !js_state_get_bool(state, "ended") &&
@@ -746,6 +756,7 @@ static Item js_stream_after_writev(Item self, Item pending, Item err) {
     }
     if (!has_error) {
         js_stream_flush_pending_writes(self);
+        js_writable_maybe_finish_deferred(self);
         js_transform_maybe_finish_deferred(self);
     }
     return make_js_undefined();
@@ -3572,6 +3583,203 @@ static bool js_stream_iter_signal_aborted(Item options, Item* reason_out) {
     return false;
 }
 
+static Item js_stream_iter_pipe_next(Item env_item);
+
+static Item js_stream_iter_pipe_reject(Item env_item, Item err) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env || js_item_is_true(env[6])) return make_js_undefined();
+    env[6] = js_bool_item(true);
+    Item reject = env[5];
+    if (get_type_id(reject) == LMD_TYPE_FUNC) {
+        Item args[1] = { err };
+        js_call_function(reject, make_js_undefined(), args, 1);
+    }
+    return make_js_undefined();
+}
+
+static Item js_stream_iter_pipe_resolve(Item env_item, Item value) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env || js_item_is_true(env[6])) return make_js_undefined();
+    env[6] = js_bool_item(true);
+    Item resolve = env[4];
+    if (get_type_id(resolve) == LMD_TYPE_FUNC) {
+        Item args[1] = { value };
+        js_call_function(resolve, make_js_undefined(), args, 1);
+    }
+    return make_js_undefined();
+}
+
+static Item js_stream_iter_pipe_after_write(Item env_item, Item ignored) {
+    (void)ignored;
+    return js_stream_iter_pipe_next(env_item);
+}
+
+static Item js_stream_iter_pipe_finish(Item env_item, Item result) {
+    return js_stream_iter_pipe_resolve(env_item, result);
+}
+
+static Item js_stream_iter_pipe_end(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env || js_item_is_true(env[6])) return make_js_undefined();
+    Item writer = env[1];
+    Item end_sync = js_property_get(writer, make_string_item("endSync"));
+    if (get_type_id(end_sync) == LMD_TYPE_FUNC) {
+        Item result = js_call_function(end_sync, writer, NULL, 0);
+        if (js_check_exception()) {
+            Item err = js_clear_exception();
+            return js_stream_iter_pipe_reject(env_item, err);
+        }
+        return js_stream_iter_pipe_resolve(env_item, result);
+    }
+    Item end_fn = js_property_get(writer, make_string_item("end"));
+    if (get_type_id(end_fn) == LMD_TYPE_FUNC) {
+        Item result = js_call_function(end_fn, writer, NULL, 0);
+        if (js_check_exception()) {
+            Item err = js_clear_exception();
+            return js_stream_iter_pipe_reject(env_item, err);
+        }
+        Item promise = js_promise_resolve(result);
+        Item on_done = js_new_closure((void*)js_stream_iter_pipe_finish, 1, env, 7);
+        Item on_error = js_new_closure((void*)js_stream_iter_pipe_reject, 1, env, 7);
+        js_promise_then(promise, on_done, on_error);
+        return make_js_undefined();
+    }
+    return js_stream_iter_pipe_resolve(env_item, make_js_undefined());
+}
+
+static Item js_stream_iter_pipe_write(Item env_item, Item chunk) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env || js_item_is_true(env[6])) return make_js_undefined();
+    Item err = make_js_undefined();
+    if (js_stream_iter_signal_aborted(env[3], &err)) {
+        return js_stream_iter_pipe_reject(env_item, err);
+    }
+
+    Item transform = env[2];
+    if (get_type_id(transform) == LMD_TYPE_FUNC) {
+        chunk = js_call_function(transform, make_js_undefined(), &chunk, 1);
+        if (js_check_exception()) {
+            Item thrown = js_clear_exception();
+            return js_stream_iter_pipe_reject(env_item, thrown);
+        }
+    }
+
+    Item writer = env[1];
+    Item write_sync = js_property_get(writer, make_string_item("writeSync"));
+    if (get_type_id(write_sync) == LMD_TYPE_FUNC) {
+        js_call_function(write_sync, writer, &chunk, 1);
+        if (js_check_exception()) {
+            Item thrown = js_clear_exception();
+            return js_stream_iter_pipe_reject(env_item, thrown);
+        }
+        return js_stream_iter_pipe_next(env_item);
+    }
+    Item write_fn = js_property_get(writer, make_string_item("write"));
+    if (get_type_id(write_fn) == LMD_TYPE_FUNC) {
+        Item result = js_call_function(write_fn, writer, &chunk, 1);
+        if (js_check_exception()) {
+            Item thrown = js_clear_exception();
+            return js_stream_iter_pipe_reject(env_item, thrown);
+        }
+        Item promise = js_promise_resolve(result);
+        Item on_done = js_new_closure((void*)js_stream_iter_pipe_after_write, 1, env, 7);
+        Item on_error = js_new_closure((void*)js_stream_iter_pipe_reject, 1, env, 7);
+        js_promise_then(promise, on_done, on_error);
+        return make_js_undefined();
+    }
+    return js_stream_iter_pipe_reject(env_item,
+        js_stream_make_type_error_with_code("ERR_INVALID_ARG_TYPE", "writer.write is not a function"));
+}
+
+static Item js_stream_iter_pipe_step(Item env_item, Item result) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env || js_item_is_true(env[6])) return make_js_undefined();
+    Item err = make_js_undefined();
+    if (js_stream_iter_signal_aborted(env[3], &err)) {
+        return js_stream_iter_pipe_reject(env_item, err);
+    }
+    if (js_iterator_result_done(result)) return js_stream_iter_pipe_end(env_item);
+    return js_stream_iter_pipe_write(env_item, js_iterator_result_value(result));
+}
+
+static Item js_stream_iter_pipe_next(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env || js_item_is_true(env[6])) return make_js_undefined();
+    Item err = make_js_undefined();
+    if (js_stream_iter_signal_aborted(env[3], &err)) {
+        return js_stream_iter_pipe_reject(env_item, err);
+    }
+    Item step = js_async_iterator_step_result(env[0]);
+    if (js_check_exception()) {
+        Item thrown = js_clear_exception();
+        return js_stream_iter_pipe_reject(env_item, thrown);
+    }
+    step = js_promise_resolve(step);
+    Item on_step = js_new_closure((void*)js_stream_iter_pipe_step, 1, env, 7);
+    Item on_error = js_new_closure((void*)js_stream_iter_pipe_reject, 1, env, 7);
+    js_promise_then(step, on_step, on_error);
+    return make_js_undefined();
+}
+
+static Item js_stream_iter_pipe_abort(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env || js_item_is_true(env[6])) return make_js_undefined();
+    Item signal = env[7];
+    Item reason = js_property_get(signal, make_string_item("reason"));
+    if (reason.item == 0 || get_type_id(reason) == LMD_TYPE_UNDEFINED) reason = js_stream_iter_make_abort_error();
+    return js_stream_iter_pipe_reject(env_item, reason);
+}
+
+static void js_stream_iter_pipe_attach_abort(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return;
+    Item options = env[3];
+    if (get_type_id(options) != LMD_TYPE_MAP && get_type_id(options) != LMD_TYPE_ELEMENT) return;
+    Item signal = js_property_get(options, make_string_item("signal"));
+    if (get_type_id(signal) != LMD_TYPE_MAP && get_type_id(signal) != LMD_TYPE_ELEMENT) return;
+    env[7] = signal;
+    Item add_event = js_property_get(signal, make_string_item("addEventListener"));
+    if (get_type_id(add_event) != LMD_TYPE_FUNC) return;
+    Item listener = js_new_closure((void*)js_stream_iter_pipe_abort, 0, env, 8);
+    Item args[2] = { make_string_item("abort"), listener };
+    js_call_function(add_event, signal, args, 2);
+}
+
+static Item js_stream_iter_pipeTo(Item source, Item transform_or_writer, Item writer_or_options, Item maybe_options) {
+    Item transform = make_js_undefined();
+    Item writer = transform_or_writer;
+    Item options = writer_or_options;
+    if (get_type_id(transform_or_writer) == LMD_TYPE_FUNC &&
+        (get_type_id(maybe_options) == LMD_TYPE_MAP || get_type_id(maybe_options) == LMD_TYPE_ELEMENT)) {
+        transform = transform_or_writer;
+        writer = writer_or_options;
+        options = maybe_options;
+    }
+
+    Item capability = js_promise_with_resolvers();
+    if (js_check_exception()) return ItemNull;
+    Item promise = js_property_get(capability, make_string_item("promise"));
+    Item err = make_js_undefined();
+    if (js_stream_iter_signal_aborted(options, &err)) return js_promise_reject(err);
+
+    Item iterator = js_get_async_iterator(source);
+    if (js_check_exception()) return js_promise_reject(js_clear_exception());
+
+    Item* env = js_alloc_env(8);
+    env[0] = iterator;
+    env[1] = writer;
+    env[2] = transform;
+    env[3] = options;
+    env[4] = js_property_get(capability, make_string_item("resolve"));
+    env[5] = js_property_get(capability, make_string_item("reject"));
+    env[6] = js_bool_item(false);
+    env[7] = make_js_undefined();
+    Item env_item = (Item){.item = (uint64_t)(uintptr_t)env};
+    js_stream_iter_pipe_attach_abort(env_item);
+    js_stream_iter_pipe_next(env_item);
+    return promise;
+}
+
 static Item js_stream_iter_pending_write_abort(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
@@ -4763,25 +4971,11 @@ static Item js_stream_make_type_error_with_code(const char* code, const char* me
     return err;
 }
 
-static Item js_stream_call_callback_tick(Item callback) {
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
-        js_call_function(callback, ItemNull, NULL, 0);
-    }
-    return make_js_undefined();
-}
-
 static Item js_stream_call_callback_error_tick(Item callback, Item err) {
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
         js_call_function(callback, ItemNull, &err, 1);
     }
     return make_js_undefined();
-}
-
-static void js_stream_schedule_callback(Item callback) {
-    if (get_type_id(callback) != LMD_TYPE_FUNC) return;
-    Item tick = js_bind_function(js_new_function((void*)js_stream_call_callback_tick, 1),
-                                 make_js_undefined(), &callback, 1);
-    js_next_tick_enqueue(tick);
 }
 
 static void js_stream_schedule_callback_error(Item callback, Item err) {
@@ -4792,13 +4986,40 @@ static void js_stream_schedule_callback_error(Item callback, Item err) {
     js_next_tick_enqueue(tick);
 }
 
+static void js_stream_add_writable_end_callback(Item self, Item callback) {
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return;
+    Item callbacks = js_property_get(self, make_string_item("__writable_end_callbacks__"));
+    if (get_type_id(callbacks) != LMD_TYPE_ARRAY) {
+        callbacks = js_array_new(0);
+        js_property_set(self, make_string_item("__writable_end_callbacks__"), callbacks);
+    }
+    js_array_push(callbacks, callback);
+}
+
+static void js_stream_call_writable_end_callbacks(Item self, Item err) {
+    Item callbacks = js_property_get(self, make_string_item("__writable_end_callbacks__"));
+    if (get_type_id(callbacks) != LMD_TYPE_ARRAY) return;
+    js_property_set(self, make_string_item("__writable_end_callbacks__"), js_array_new(0));
+    bool has_error = js_stream_has_error(err);
+    Item null_arg = ItemNull;
+    int64_t len = js_array_length(callbacks);
+    for (int64_t i = 0; i < len; i++) {
+        Item callback = js_array_get_int(callbacks, i);
+        if (get_type_id(callback) != LMD_TYPE_FUNC) continue;
+        if (has_error) {
+            js_call_function(callback, self, &err, 1);
+        } else {
+            js_call_function(callback, self, &null_arg, 1);
+        }
+    }
+}
+
 static Item js_stream_finish_after_final(Item self, Item callback, Item err) {
     ensure_keys();
     if (js_stream_has_error(err)) {
-        if (get_type_id(callback) == LMD_TYPE_FUNC) {
-            js_call_function(callback, self, &err, 1);
-        }
-        js_process_emit(make_string_item("uncaughtException"), err);
+        js_property_set(self, make_string_item("__writable_end_pending__"), js_bool_item(false));
+        js_stream_call_writable_end_callbacks(self, err);
+        js_stream_schedule_error(self, err);
         return make_js_undefined();
     }
 
@@ -4808,31 +5029,68 @@ static Item js_stream_finish_after_final(Item self, Item callback, Item err) {
 
     stream_emit(self, "prefinish", NULL, 0);
     js_stream_mark_writable_finished(self);
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
-        js_call_function(callback, self, NULL, 0);
-    }
+    js_stream_call_writable_end_callbacks(self, make_js_undefined());
     js_stream_emit_finish_tick(self);
     return make_js_undefined();
 }
 
-static Item js_stream_complete_finish_tick(Item self, Item callback) {
+static Item js_stream_complete_finish_tick(Item self) {
     ensure_keys();
     if (js_item_is_true(js_property_get(self, key_destroyed))) {
         return make_js_undefined();
     }
     js_stream_mark_writable_finished(self);
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
-        js_call_function(callback, self, NULL, 0);
-    }
+    js_stream_call_writable_end_callbacks(self, make_js_undefined());
     js_stream_schedule_finish(self);
     return make_js_undefined();
 }
 
-static void js_stream_schedule_finish_ready(Item self, Item callback) {
-    Item bound_args[2] = { self, callback };
-    Item tick = js_bind_function(js_new_function((void*)js_stream_complete_finish_tick, 2),
-                                 make_js_undefined(), bound_args, 2);
+static void js_stream_schedule_finish_ready(Item self) {
+    Item bound_args[1] = { self };
+    Item tick = js_bind_function(js_new_function((void*)js_stream_complete_finish_tick, 1),
+                                 make_js_undefined(), bound_args, 1);
     js_next_tick_enqueue(tick);
+}
+
+static void js_writable_finish_now(Item self, Item callback) {
+    ensure_keys();
+    if (js_item_is_true(js_property_get(self, key_destroyed)) ||
+        js_item_is_true(js_property_get(self, key_finish_emitted)) ||
+        js_state_get_bool(js_property_get(self, key_writable_state), "finished")) {
+        return;
+    }
+
+    js_property_set(self, make_string_item("__writable_end_pending__"), js_bool_item(false));
+
+    Item final_fn = js_property_get(self, make_string_item("_final"));
+    if (get_type_id(final_fn) == LMD_TYPE_FUNC) {
+        Item bound_args[2] = { self, callback };
+        Item final_cb = js_bind_function(js_new_function((void*)js_stream_finish_after_final, 3),
+                                         make_js_undefined(), bound_args, 2);
+        js_call_function(final_fn, self, &final_cb, 1);
+        if (js_check_exception()) {
+            Item err = js_clear_exception();
+            js_stream_finish_after_final(self, callback, err);
+        }
+        return;
+    }
+
+    stream_emit(self, "prefinish", NULL, 0);
+    js_stream_schedule_finish_ready(self);
+}
+
+static void js_writable_maybe_finish_deferred(Item self) {
+    ensure_keys();
+    if (!js_item_is_true(js_property_get(self, make_string_item("__writable_end_pending__")))) return;
+    if (js_item_is_true(js_property_get(self, make_string_item("_writing")))) return;
+    if (js_stream_pending_writes_count(self) > 0) {
+        js_stream_flush_pending_writes(self);
+        if (js_item_is_true(js_property_get(self, make_string_item("_writing"))) ||
+            js_stream_pending_writes_count(self) > 0) {
+            return;
+        }
+    }
+    js_writable_finish_now(self, make_js_undefined());
 }
 
 // end([chunk][, callback]) — signal end of writes
@@ -4853,7 +5111,16 @@ extern "C" Item js_writable_end(Item self, Item chunk, Item callback) {
 
     Item wstate = js_property_get(self, key_writable_state);
     if (js_state_get_bool(wstate, "ended")) {
-        js_stream_schedule_callback(callback);
+        js_stream_add_writable_end_callback(self, callback);
+        if (chunk.item != 0 && get_type_id(chunk) != LMD_TYPE_UNDEFINED &&
+            get_type_id(chunk) != LMD_TYPE_NULL) {
+            Item err = js_stream_make_error_with_code("ERR_STREAM_WRITE_AFTER_END",
+                "write after end");
+            js_property_set(self, make_string_item("__writable_end_pending__"), js_bool_item(false));
+            js_stream_mark_destroyed(self);
+            js_stream_call_writable_end_callbacks(self, err);
+            js_stream_schedule_error(self, err);
+        }
         return self;
     }
 
@@ -4877,18 +5144,9 @@ extern "C" Item js_writable_end(Item self, Item chunk, Item callback) {
 
     js_stream_mark_writable_ended(self);
 
-    // call _final if set
-    Item final_fn = js_property_get(self, make_string_item("_final"));
-    if (get_type_id(final_fn) == LMD_TYPE_FUNC) {
-        Item bound_args[2] = { self, callback };
-        Item final_cb = js_bind_function(js_new_function((void*)js_stream_finish_after_final, 3),
-                                         make_js_undefined(), bound_args, 2);
-        js_call_function(final_fn, self, &final_cb, 1);
-        return self;
-    }
-
-    stream_emit(self, "prefinish", NULL, 0);
-    js_stream_schedule_finish_ready(self, callback);
+    js_stream_add_writable_end_callback(self, callback);
+    js_property_set(self, make_string_item("__writable_end_pending__"), js_bool_item(true));
+    js_writable_maybe_finish_deferred(self);
     return self;
 }
 
@@ -6084,6 +6342,7 @@ extern "C" Item js_get_stream_iter_namespace(void) {
     stream_iter_namespace = js_new_object();
     stream_set_method(stream_iter_namespace, "from", (void*)js_stream_iter_from, 1);
     stream_set_method(stream_iter_namespace, "fromSync", (void*)js_stream_iter_fromSync, 1);
+    stream_set_method(stream_iter_namespace, "pipeTo", (void*)js_stream_iter_pipeTo, 4);
     stream_set_method(stream_iter_namespace, "pull", (void*)js_stream_iter_pull, 2);
     stream_set_method(stream_iter_namespace, "pullSync", (void*)js_stream_iter_pullSync, 8);
     stream_set_method(stream_iter_namespace, "push", (void*)js_stream_iter_push, 1);
