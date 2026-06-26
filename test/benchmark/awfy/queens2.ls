@@ -15,8 +15,7 @@ pn set_row_column(free_rows, free_maxs, free_mins, r: int, c: int, v) {
 }
 
 pn place_queen(free_rows, free_maxs, free_mins, queen_rows, c: int) {
-    var r: int = 0
-    while (r < 8) {
+    for r in 0 to 7 {
         if (get_row_column(free_rows, free_maxs, free_mins, r, c) == 1) {
             queen_rows[r] = c
             set_row_column(free_rows, free_maxs, free_mins, r, c, false)
@@ -28,7 +27,6 @@ pn place_queen(free_rows, free_maxs, free_mins, queen_rows, c: int) {
             }
             set_row_column(free_rows, free_maxs, free_mins, r, c, true)
         }
-        r = r + 1
     }
     return 0
 }
@@ -43,12 +41,10 @@ pn queens() {
 
 pn benchmark() {
     var result: int = 1
-    var i: int = 0
-    while (i < 10) {
+    for i in 0 to 9 {
         if (queens() != 1) {
             result = 0
         }
-        i = i + 1
     }
     return result
 }

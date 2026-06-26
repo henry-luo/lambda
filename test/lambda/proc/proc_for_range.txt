@@ -1,0 +1,8 @@
+sum=15
+num=0 1 4 9 16 
+vbound=10 11 12 13 14 
+float=0 1.5 3
+generic=0 100 200
+nested=0 1 2 3 4 5 6 7 8 
+void=123
+

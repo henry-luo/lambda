@@ -3691,6 +3691,20 @@ Item fn_mask_index(Item arr_item, Item mask_item) {
 // from procedural index-assign statements (so it is procedural by construction).
 // Scalar RHS fills every selected element; array RHS is consumed in order.
 void fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
+    // Generic Array with a plain integer index: the index was statically typed ANY
+    // (e.g. a range-for loop variable `for i in a to b { arr[i] = v }`) but is
+    // dynamically an int. Route to the ordinary element write — masks/ranges only
+    // apply to typed numeric arrays. fn_array_set handles negatives and bounds.
+    {
+        TypeId arr_tid = get_type_id(arr_item);
+        TypeId idx_tid = get_type_id(idx_item);
+        if (arr_tid == LMD_TYPE_ARRAY &&
+            (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64)) {
+            int64_t i = (idx_tid == LMD_TYPE_INT) ? idx_item.get_int56() : idx_item.get_int64();
+            fn_array_set(arr_item.array, i, val_item);
+            return;
+        }
+    }
     if (get_type_id(arr_item) != LMD_TYPE_ARRAY_NUM) {
         log_error("arr[idx] = v: masked assignment requires a typed numeric array target");
         return;

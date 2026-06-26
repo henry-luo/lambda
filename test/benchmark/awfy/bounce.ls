@@ -23,20 +23,16 @@ pn benchmark() {
     var byv = fill(ball_count, 0)
 
     // initialize balls
-    var i = 0
-    while (i < ball_count) {
+    for i in 0 to ball_count - 1 {
         bx[i] = random_next(seed_arr) % 500
         by[i] = random_next(seed_arr) % 500
         bxv[i] = (random_next(seed_arr) % 300) - 150
         byv[i] = (random_next(seed_arr) % 300) - 150
-        i = i + 1
     }
 
     // simulate 50 frames
-    i = 0
-    while (i < 50) {
-        var j = 0
-        while (j < ball_count) {
+    for i in 0 to 49 {
+        for j in 0 to ball_count - 1 {
             bx[j] = bx[j] + bxv[j]
             by[j] = by[j] + byv[j]
 
@@ -66,9 +62,7 @@ pn benchmark() {
                 bounced = 1
             }
             bounces = bounces + bounced
-            j = j + 1
         }
-        i = i + 1
     }
     return bounces
 }

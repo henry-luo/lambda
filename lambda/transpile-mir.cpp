@@ -3257,7 +3257,20 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
     // Body expression
     MIR_reg_t body_result = transpile_expr(mt, for_node->then);
     TypeId body_tid = get_effective_type(mt, for_node->then);
-    MIR_reg_t boxed_result = emit_box(mt, body_result, body_tid);
+    // A pure-statement body (e.g. `arr[i] = v` in a `for i in a to b { ... }`
+    // statement) produces no value — transpile returns reg 0 (the invalid-reg
+    // sentinel). Boxing it would emit an undeclared register. Substitute a null
+    // Item instead; the for-statement's collected spreadable result is discarded
+    // in procedural context anyway.
+    MIR_reg_t boxed_result;
+    if (body_result == 0) {
+        boxed_result = new_reg(mt, "for_void_null", MIR_T_I64);
+        uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, boxed_result),
+            MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+    } else {
+        boxed_result = emit_box(mt, body_result, body_tid);
+    }
 
     // Push to output (use spread to flatten nested spreadable arrays)
     emit_call_void_2(mt, "array_push_spread", MIR_T_P, MIR_new_reg_op(mt->ctx, output),

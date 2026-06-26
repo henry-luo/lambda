@@ -173,16 +173,45 @@ arrays (`int[]`) avoid this, but untyped arrays always need the cast.
 
 **Pattern**: Counter-based `while` loops instead of `for i in 0 to n-1 { ... }`.
 
-**Why**: `for i in start to end { ... }` in `pn` (procedural) functions causes runtime
-errors. All benchmarks are procedural (`pn`), so they must use `while` loops.
+**Why (historical)**: `for i in start to end { ... }` statement loops in `pn` failed —
+but with a MIR codegen error, not a generic "runtime error".
 
-**Files affected**: All benchmark files (~30+). Example:
+**Status**: **FIXED (engine) + partially converted.** Two engine bugs were found and
+fixed; `for i in start to end { ... }` statement loops now work in `pn`, including
+loops whose body assigns through the loop variable as an array index.
+
+Root causes (both in the JIT, exposed only by *statement-form* for-loops with an
+array-index-assignment body — `for i in a to b { arr[i] = v }`):
+1. **`transpile_for` boxed the body result unconditionally.** A pure-statement body
+   (e.g. `arr[i] = v`) produces no value — transpile returns reg 0 (the invalid-reg
+   sentinel) — and `emit_box(reg 0)` raised MIR's *"undeclared reg 0"* error. Fix:
+   substitute a null Item when the body result is reg 0 (`transpile-mir.cpp`,
+   `transpile_for`).
+2. **`fn_index_assign` rejected generic arrays.** A range loop variable is statically
+   typed ANY, so `arr[i] = v` routes through `fn_index_assign`, which only accepted
+   typed numeric (`ArrayNum`) targets and errored *"masked assignment requires a typed
+   numeric array target"* for a generic `[null,...]` array. Fix: handle a generic
+   `Array` + plain-int index as an ordinary element write via `fn_array_set`
+   (`lambda-vector.cpp`).
+
+Regression test: `test/lambda/proc/proc_for_range.ls`.
+
+**Converted (verified identical PASS output):** `awfy/sieve.ls`, `sieve2.ls`,
+`bounce.ls`, `bounce2.ls`, `queens.ls`, `queens2.ls`, `storage.ls`, `storage2.ls` —
+the clean `var i = 0; while (i < n) { … i = i + 1 }` counter loops became
+`for i in 0 to n - 1 { … }`. `storage` exercises fix #2 (generic chunk array).
+
+**Left as `while` (not simple unit-step ranges — convert case-by-case):** loops with a
+non-unit step (`k = k + i` in the sieve inner loop), decrementing counters
+(`while (i >= 0) { … i = i - 1 }` in `permute`/`towers`), and the macro-benchmarks with
+break/continue and nested mutable counter state (`cd`, `havlak`, `deltablue`, and the
+`r7rs`/`beng` numeric kernels).
+
+Example conversion:
 ```lambda
 var i = 0
-while (i < n) {
-    // ...
-    i = i + 1
-}
+while (i < n) { /* ... */ i = i + 1 }   // before
+for i in 0 to n - 1 { /* ... */ }       // after
 ```
 
 ---

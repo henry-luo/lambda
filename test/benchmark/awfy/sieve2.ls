@@ -3,8 +3,7 @@
 
 pn sieve(flags, sz: int) {
     var prime_count: int = 0
-    var i: int = 2
-    while (i <= sz) {
+    for i in 2 to sz {
         if (flags[i - 1]) {
             prime_count = prime_count + 1
             var k: int = i + i
@@ -13,7 +12,6 @@ pn sieve(flags, sz: int) {
                 k = k + i
             }
         }
-        i = i + 1
     }
     return prime_count
 }

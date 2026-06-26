@@ -16,10 +16,8 @@ pn build_tree_depth(state, depth, seed_arr) {
         return fill((random_next(seed_arr) % 10) + 1, 0)
     }
     var arr = fill(4, null)
-    var i = 0
-    while (i < 4) {
+    for i in 0 to 3 {
         arr[i] = build_tree_depth(state, depth - 1, seed_arr)
-        i = i + 1
     }
     return arr
 }
