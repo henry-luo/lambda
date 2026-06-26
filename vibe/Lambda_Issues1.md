@@ -146,24 +146,43 @@ var vec = { chunks: [null16()], sz: 0 }
 a chunked vector where `.sz` tracked the logical element count separate from physical
 chunk capacity.
 
-**Status**: **ENGINE ENHANCED + converted (6 of 8 files).** Added a built-in
-`push(arr, val)` that appends to a growable array **in place** (amortized O(1) via the
-runtime's existing `array_push` → `expand_list` doubling, which is GC-aware). `[]`
-makes an empty growable array; `len(arr)` gives the logical size; `arr[i]` indexes
-directly. This replaces the whole chunked-vector + `.sz` abstraction.
+**Status**: **RESOLVED — engine enhanced + all 8 files converted.** Added two
+pn-only builtins:
+- **`push(arr, val)`** — append to a growable array **in place** (amortized O(1) via the
+  runtime's existing `array_push` → `expand_list` doubling, GC-aware).
+- **`splice(arr, start, count)`** — remove `count` elements at `start` **in place**
+  (shift the tail down, shrink `length`; no reallocation). Gives pop / dequeue /
+  middle-removal: `pop = splice(v, len(v)-1, 1)`, `dequeue = splice(v, 0, 1)`,
+  `remove = splice(v, idx, 1)`. Handles both generic `Array` and `ArrayNum`.
 
-- Engine: `SYSPROC_PUSH` in `lambda.h`; registry entry in `sys_func_registry.c`;
-  `pn_push` in `lambda-data.cpp`. Regression test: `test/lambda/proc/proc_push.ls`.
-- **Performance: `push` is ~9.6× faster** than the chunked vector (77 ms vs 742 ms on
-  a 10000×200 append+scan workload), with the same result — direct O(1) indexing vs
-  the chunked double-indirection + per-add chunk management. Far exceeds "comparable".
+With these, `[]` makes an empty growable array, `len(arr)` is the logical size, and
+`arr[i]` indexes directly — replacing the whole chunked-vector + `.sz` abstraction.
 
-**Converted (verified PASS / no ASan, growable `[]`+`push`+`len`+`[i]`):**
+- Engine: `SYSPROC_PUSH`/`SYSPROC_SPLICE` in `lambda.h`; registry entries in
+  `sys_func_registry.c`; `pn_push`/`pn_splice` in `lambda-data.cpp`. Regression tests:
+  `test/lambda/proc/proc_push.ls`, `proc_splice.ls`.
+- **Performance: `push` is ~9.6× faster** than the chunked vector (77 ms vs 742 ms on a
+  10000×200 append+scan workload), same result — direct O(1) indexing vs the chunked
+  double-indirection + per-add chunk management. `splice` removal is the same O(n) shift
+  the chunked version already did, but in place (no allocation).
+- Engine fix (clean-up): index-assignment (`arr[i] = v`) used to return the invalid-reg
+  sentinel (reg 0) as its "value"; a `pn` whose body is a bare setter
+  (`pn vec_set(v, i, x) { v[i] = x }` with an ANY-typed index) then crashed MIR with
+  *"undeclared reg 0"*. It now returns a null Item (`transpile-mir.cpp`,
+  `emit_null_item_reg`), so assignment-as-value works anywhere.
+
+**Converted (verified PASS / no ASan, growable `[]`+`push`+`len`+`[i]`+`splice`):**
 - `awfy/json.ls`, `json2.ls` — `vec_*` wrappers.
 - `awfy/havlak.ls`, `havlak2.ls` — `vec` (list) **and** `bvec` (queue: `{data: [], first}`,
   `push(v.data, …)`, `len(v.data)-first`). `arr`/`iarr` stay chunked (sparse
   absolute-index stores — not sequential growable vectors, so not `push`-convertible).
-- `awfy/cd.ls`, `cd2.ls` — `vec` (cd2 also changes `type Vec = {chunks,sz}` → `type Vec = any`).
+- `awfy/cd.ls`, `cd2.ls` — `vec` (cd2: `type Vec = {chunks,sz}` → `type Vec = any`).
+- `awfy/deltablue.ls`, `deltablue2.ls` — `vec` incl. `vec_remove_first`/`vec_remove_cid`
+  rewritten with `splice`; `deltablue2`: `type Vec = any`. The conversion also **re-enabled
+  two previously-skipped baseline tests** (`MIR_SKIP_TESTS` in `test_lambda_gtest.cpp`):
+  `awfy_deltablue` (was "times out in MIR Direct debug build" — the chunked vec was slow)
+  and `awfy_deltablue2` (was "produces wrong output in MIR / returns null"). Both now PASS
+  against their `DeltaBlue: PASS` golden; `test_lambda_gtest` is 386/386 (was 384).
 
 These were **unblocked by the BUG-001 fix** (see `Lambda_Bug.md`, now FIXED): `fn_fill`
 generic arrays were created with `capacity = 0`, and `gc_trace_object` marks only
@@ -172,12 +191,6 @@ skipped by the collector and freed while still live. `push`'s more frequent GC m
 deterministic (havlak + `push` was the repro). Setting `capacity = n` in `fn_fill`
 fixed it; the same fix also resolved the pre-existing `proc_array_type_convert` and
 `proc_view_mutable` failures (garbage read from swept arrays).
-
-**Not converted — `deltablue.ls`, `deltablue2.ls`** (both PASS as-is after the BUG-001
-fix). Their vec is a fixed `fill(256, null)` + `.sz` that supports **remove-by-shift**
-(`vec_remove_first`, `vec_remove_cid`) — a `push`-only growable array can't express
-element removal without a separate `pop`/`remove`/`splice` builtin. Left on the
-workaround pending such a builtin.
 
 ---
 

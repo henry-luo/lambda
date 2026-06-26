@@ -22,46 +22,38 @@ let K_SCALE = 4
 
 // --- Vector (flat array) ---
 
+// Growable array via the built-ins `push`/`len`/`splice` — no `{data, sz}` wrapper.
+// `splice(v, i, 1)` removes one element in place (shift + shrink), so removals mutate
+// the same array object that callers hold.
 pn vec_new() {
-    return { data: fill(256, null), sz: 0 }
+    return []
 }
 
 pn vec_add(v, item) {
-    var s: int = v.sz
-    var d = v.data
-    d[s] = item
-    v.sz = s + 1
+    push(v, item)
 }
 
 pn vec_at(v, idx: int) {
-    return (v.data)[idx]
+    return v[idx]
 }
 
 pn vec_size(v) {
-    return v.sz
+    return len(v)
 }
 
 pn vec_set(v, idx: int, item) {
-    var d = v.data
-    d[idx] = item
+    v[idx] = item
 }
 
 pn vec_is_empty(v) {
-    if (v.sz == 0) { return 1 }
+    if (len(v) == 0) { return 1 }
     return 0
 }
 
 pn vec_remove_first(v) {
-    var sz: int = v.sz
-    if (sz == 0) { return null }
-    var d = v.data
-    var first = d[0]
-    var i: int = 1
-    while (i < sz) {
-        d[i - 1] = d[i]
-        i = i + 1
-    }
-    v.sz = sz - 1
+    if (len(v) == 0) { return null }
+    var first = v[0]
+    splice(v, 0, 1)
     return first
 }
 
@@ -73,13 +65,12 @@ pn vec_with(item) {
 
 // Remove constraint by cid from vector
 pn vec_remove_cid(v, cid) {
-    var sz: int = v.sz
-    var d = v.data
+    var sz: int = len(v)
     var found = -1
     var i: int = 0
     while (i < sz) {
         if (found == -1) {
-            var elem = d[i]
+            var elem = v[i]
             if (elem.cid == cid) {
                 found = i
             }
@@ -87,12 +78,7 @@ pn vec_remove_cid(v, cid) {
         i = i + 1
     }
     if (found == -1) { return 0 }
-    var j: int = found + 1
-    while (j < sz) {
-        d[j - 1] = d[j]
-        j = j + 1
-    }
-    v.sz = sz - 1
+    splice(v, found, 1)
     return 1
 }
 
