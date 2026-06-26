@@ -35,7 +35,9 @@
       "Bash(./lambda.exe render *)",
       "Bash(LAMBDA_ROOT=/Users/henryluo/Projects/lambda timeout 400 node test_radiant_render.js --strip-parity)",
       "Bash(clang -std=c11 -fsyntax-only -I lib lib/base64.c)",
-      "Bash(clang -std=c11 -fsyntax-only -I lib lib/url.c)"
+      "Bash(clang -std=c11 -fsyntax-only -I lib lib/url.c)",
+      "Bash(rm -rf test/tier_f_chromium/*/)",
+      "Bash(npx vite-node *)"
     ]
   }
 }
