@@ -2,10 +2,6 @@
 // Count all solutions to N-Queens problem
 // Adapted from r7rs-benchmarks/src/nqueens.scm: nqueens(8) = 92 (scaled down)
 
-pn make_array(n, val) {
-    return fill(n, val)
-}
-
 // Use arrays to represent lists of candidates
 // board[i] = column placed in row i (or -1 if not placed)
 // This is a direct translation of the Scheme version's logic
@@ -38,7 +34,7 @@ pn solve(candidates, cand_len, rest, rest_len, placed, placed_len) {
 
     if (ok(row, 1, placed, placed_len) == 1) {
         // Build new candidate list = rest of candidates + rest
-        var new_cands = make_array(cand_len - 1 + rest_len, 0)
+        var new_cands = fill(cand_len - 1 + rest_len, 0)
         var ni = 0
         var ci = 1
         while (ci < cand_len) {
@@ -54,12 +50,12 @@ pn solve(candidates, cand_len, rest, rest_len, placed, placed_len) {
         }
         // Add row to placed
         placed[placed_len] = row
-        count = count + solve(new_cands, ni, make_array(1, 0), 0, placed, placed_len + 1)
+        count = count + solve(new_cands, ni, fill(1, 0), 0, placed, placed_len + 1)
         // Undo placement (not strictly necessary since we copy, but clean)
     }
 
     // Try without placing candidates[0] (move to rest)
-    var new_rest = make_array(rest_len + 1, 0)
+    var new_rest = fill(rest_len + 1, 0)
     var ri2 = 0
     while (ri2 < rest_len) {
         new_rest[ri2] = rest[ri2]
@@ -67,7 +63,7 @@ pn solve(candidates, cand_len, rest, rest_len, placed, placed_len) {
     }
     new_rest[rest_len] = row
 
-    var new_cands2 = make_array(cand_len - 1, 0)
+    var new_cands2 = fill(cand_len - 1, 0)
     var ci2 = 1
     var ni2 = 0
     while (ci2 < cand_len) {
@@ -82,14 +78,14 @@ pn solve(candidates, cand_len, rest, rest_len, placed, placed_len) {
 
 pn nqueens(n) {
     // Build initial candidate list: [1, 2, ..., n]
-    var candidates = make_array(n, 0)
+    var candidates = fill(n, 0)
     var i = 0
     while (i < n) {
         candidates[i] = i + 1
         i = i + 1
     }
-    var placed = make_array(n, 0)
-    var empty = make_array(1, 0)
+    var placed = fill(n, 0)
+    var empty = fill(1, 0)
     return solve(candidates, n, empty, 0, placed, 0)
 }
 

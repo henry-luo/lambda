@@ -2,10 +2,6 @@
 // Expected result: 669
 // Ported from JavaScript AWFY suite
 
-pn make_array(n, val) {
-    return fill(n, val)
-}
-
 pn sieve(flags, sz) {
     var prime_count = 0
     var i = 2
@@ -24,7 +20,7 @@ pn sieve(flags, sz) {
 }
 
 pn benchmark() {
-    var flags = make_array(5000, true)
+    var flags = fill(5000, true)
     return sieve(flags, 5000)
 }
 

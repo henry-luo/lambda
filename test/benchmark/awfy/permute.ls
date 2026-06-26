@@ -2,10 +2,6 @@
 // Expected result: 8660
 // Generates all permutations of an array via recursive swap
 
-pn make_array(n, val) {
-    return fill(n, val)
-}
-
 pn swap(v, i, j) {
     var tmp = v[i]
     v[i] = v[j]
@@ -29,7 +25,7 @@ pn permute(state, v, n) {
 
 pn benchmark() {
     let state = {count: 0}
-    var v = make_array(6, 0)
+    var v = fill(6, 0)
     permute(state, v, 6)
     return state.count
 }

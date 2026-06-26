@@ -3,10 +3,6 @@
 // 100 balls bouncing in a 500x500 box for 50 frames
 // Uses flat arrays instead of maps for ball data to avoid type mismatch
 
-pn make_array(n, val) {
-    return fill(n, val)
-}
-
 pn random_next(seed_arr) {
     var s = seed_arr[0]
     s = s * 1309 + 13849
@@ -21,10 +17,10 @@ pn benchmark() {
     var bounces = 0
 
     // 4 arrays for ball properties: x, y, xVel, yVel
-    var bx = make_array(ball_count, 0)
-    var by = make_array(ball_count, 0)
-    var bxv = make_array(ball_count, 0)
-    var byv = make_array(ball_count, 0)
+    var bx = fill(ball_count, 0)
+    var by = fill(ball_count, 0)
+    var bxv = fill(ball_count, 0)
+    var byv = fill(ball_count, 0)
 
     // initialize balls
     var i = 0

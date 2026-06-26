@@ -1,10 +1,6 @@
 // AWFY Benchmark: Bounce (Typed version)
 // Expected result: 1331
 
-pn make_array(n: int, val) {
-    return fill(n, val)
-}
-
 pn random_next(seed_arr: int[]) {
     var s: int = seed_arr[0]
     s = s * 1309 + 13849
@@ -18,10 +14,10 @@ pn benchmark() {
     var ball_count: int = 100
     var bounces: int = 0
 
-    var bx:int[] = make_array(ball_count, 0)
-    var by:int[] = make_array(ball_count, 0)
-    var bxv:int[] = make_array(ball_count, 0)
-    var byv:int[] = make_array(ball_count, 0)
+    var bx:int[] = fill(ball_count, 0)
+    var by:int[] = fill(ball_count, 0)
+    var bxv:int[] = fill(ball_count, 0)
+    var byv:int[] = fill(ball_count, 0)
 
     var i: int = 0
     while (i < ball_count) {

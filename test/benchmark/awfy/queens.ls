@@ -2,10 +2,6 @@
 // Expected result: true (solved 10 times)
 // 8-Queens backtracking solver
 
-pn make_array(n, val) {
-    return fill(n, val)
-}
-
 pn get_row_column(free_rows, free_maxs, free_mins, r, c) {
     if (free_rows[r] and free_maxs[c + r] and free_mins[c - r + 7]) {
         return 1
@@ -39,10 +35,10 @@ pn place_queen(free_rows, free_maxs, free_mins, queen_rows, c) {
 }
 
 pn queens() {
-    var free_rows = make_array(8, true)
-    var free_maxs = make_array(16, true)
-    var free_mins = make_array(16, true)
-    var queen_rows = make_array(8, -1)
+    var free_rows = fill(8, true)
+    var free_maxs = fill(16, true)
+    var free_mins = fill(16, true)
+    var queen_rows = fill(8, -1)
     return place_queen(free_rows, free_maxs, free_mins, queen_rows, 0)
 }
 

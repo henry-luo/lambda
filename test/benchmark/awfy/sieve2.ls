@@ -1,10 +1,6 @@
 // AWFY Benchmark: Sieve of Eratosthenes (Typed version)
 // Expected result: 669
 
-pn make_array(n: int, val) {
-    return fill(n, val)
-}
-
 pn sieve(flags, sz: int) {
     var prime_count: int = 0
     var i: int = 2
@@ -23,7 +19,7 @@ pn sieve(flags, sz: int) {
 }
 
 pn benchmark() {
-    var flags = make_array(5000, true)
+    var flags = fill(5000, true)
     return sieve(flags, 5000)
 }
 

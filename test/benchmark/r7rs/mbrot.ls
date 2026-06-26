@@ -3,10 +3,6 @@
 // Adapted from r7rs-benchmarks/src/mbrot.scm: 1 iteration on 75x75 grid
 // Expected: count at (0,0) = 5
 
-pn make_array(n, val) {
-    return fill(n, val)
-}
-
 pn count(r, i, step, x, y) {
     var max_count = 64
     var radius2 = 16.0
@@ -44,10 +40,10 @@ pn mbrot(matrix, r, i, step, n) {
 
 pn test(n) {
     // Create n x n matrix
-    var matrix = make_array(n, null)
+    var matrix = fill(n, null)
     var idx = 0
     while (idx < n) {
-        matrix[idx] = make_array(n, 0)
+        matrix[idx] = fill(n, 0)
         idx = idx + 1
     }
     mbrot(matrix, -1.0, -0.5, 0.005, n)
