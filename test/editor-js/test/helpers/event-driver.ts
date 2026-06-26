@@ -23,6 +23,8 @@ import {
   cmdSetBlockType,
   cmdToggleMark
 } from '../../src/commands/text-commands.js'
+import { cmdMoveCaret } from '../../src/commands/caret.js'
+import type { Direction, Granularity } from '../../src/commands/caret.js'
 import {
   cmdAddTableColumn,
   cmdAddTableRow,
@@ -108,6 +110,12 @@ const COMMANDS: Record<string, CommandHandler> = {
   setBlockType:          (s, a) => cmdSetBlockType(s, asStr(a, 'tag')),
   selectAll:             (s)    => cmdSelectAll(s),
   deleteNode:            (s)    => cmdDeleteNode(s),
+  // caret navigation (selection.modify equivalent)
+  moveCaret:             (s, a) => cmdMoveCaret(
+                                     s,
+                                     a['alter'] === 'extend' ? 'extend' : 'move',
+                                     (a['direction'] as Direction) ?? 'forward',
+                                     (a['granularity'] as Granularity) ?? 'character'),
 
   // structural commands — lists / tables / images
   wrapInList:        (s, a) => cmdWrapInList(s, (a['kind'] === 'ol' ? 'ol' : 'ul')),

@@ -1,0 +1,1 @@
+[{"type":"command","name":"moveCaret","args":{"alter":"move","direction":"forward","granularity":"character"}},{"type":"command","name":"insertText","args":{"text":"a"}},{"type":"command","name":"insertText","args":{"text":"a"}},{"type":"command","name":"insertText","args":{"text":"a"}}]
