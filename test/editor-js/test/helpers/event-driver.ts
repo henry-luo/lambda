@@ -25,6 +25,8 @@ import {
 } from '../../src/commands/text-commands.js'
 import { cmdMoveCaret } from '../../src/commands/caret.js'
 import type { Direction, Granularity } from '../../src/commands/caret.js'
+import { cmdPasteSlice } from '../../src/commands/paste.js'
+import { parseHtmlToDoc } from '../../src/view/html-parser.js'
 import {
   cmdAddTableColumn,
   cmdAddTableRow,
@@ -53,7 +55,8 @@ import {
 import { stepApply } from '../../src/model/step.js'
 import { txBegin, txSetSelection, txStep } from '../../src/model/transaction.js'
 import type { EditorState } from '../../src/commands/types.js'
-import type { AttrValue, MarkDict, Selection, SourcePath, Step, Transaction } from '../../src/model/types.js'
+import type { AttrValue, Child, MarkDict, Node, Selection, SourcePath, Step, Transaction } from '../../src/model/types.js'
+import type { Schema } from '../../src/model/schema.js'
 
 // ---------------------------------------------------------------------------
 // Event union
@@ -116,6 +119,9 @@ const COMMANDS: Record<string, CommandHandler> = {
                                      a['alter'] === 'extend' ? 'extend' : 'move',
                                      (a['direction'] as Direction) ?? 'forward',
                                      (a['granularity'] as Granularity) ?? 'character'),
+  // paste / insertHTML — parse the fragment to a slice, then splice it in
+  paste:                 (s, a) => cmdPasteSlice(s, parseFragment(asStr(a, 'html'), s.schema)),
+  insertHTML:            (s, a) => cmdPasteSlice(s, parseFragment(asStr(a, 'html'), s.schema)),
 
   // structural commands — lists / tables / images
   wrapInList:        (s, a) => cmdWrapInList(s, (a['kind'] === 'ol' ? 'ol' : 'ul')),
@@ -154,6 +160,12 @@ const COMMANDS: Record<string, CommandHandler> = {
   deleteShapes:  (s, a) => cmdDeleteShapes(s, asPathArray(a, 'shape_paths')),
   bringToFront:  (s, a) => cmdBringToFront(s, asPath(a, 'shape_path')),
   sendToBack:    (s, a) => cmdSendToBack(s, asPath(a, 'shape_path'))
+}
+
+// Parse an HTML fragment into a slice (Child[]) for paste/insertHTML.
+function parseFragment(html: string, schema: Schema): Child[] {
+  const r = parseHtmlToDoc(`<doc>${html}</doc>`, schema)
+  return (r.doc as Node).content
 }
 
 function runCommand(state: EditorState, name: string, args: Record<string, unknown>): Transaction | null {

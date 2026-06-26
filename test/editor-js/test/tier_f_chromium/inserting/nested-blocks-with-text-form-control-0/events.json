@@ -1,0 +1,1 @@
+[{"type":"command","name":"insertHTML","args":{"html":"[\n            '<div>\\n',\n                '<div>\\n',\n                    '<input type=\"text\"> \\n',\n                    '<span>b</span>\\n',\n                '</div>\\n',\n            '</div>',\n        ].join('')"}}]
