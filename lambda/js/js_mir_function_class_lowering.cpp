@@ -511,6 +511,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             size_t lciter = 0; void* lcitem;
             while (hashmap_iter(let_consts, &lciter, &lcitem)) {
                 JsNameSetEntry* lce = (JsNameSetEntry*)lcitem;
+                // direct function declarations use mutable var/function bindings;
+                // marking them lexical blocks Annex B runtime replacement.
+                if (lce->from_func_decl) continue;
                 JsMirVarEntry* ve = jm_function_find_current_scope_var(mt, lce->name);
                 if (!ve) {
                     // Create register for let/const (no longer hoisted by jm_collect_body_locals)
@@ -2787,6 +2790,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             size_t lciter = 0; void* lcitem;
             while (hashmap_iter(let_consts, &lciter, &lcitem)) {
                 JsNameSetEntry* lce = (JsNameSetEntry*)lcitem;
+                // direct function declarations use mutable var/function bindings;
+                // marking them lexical blocks Annex B runtime replacement.
+                if (lce->from_func_decl) continue;
                 JsMirVarEntry* ve = jm_function_find_current_scope_var(mt, lce->name);
                 if (!ve) {
                     MIR_reg_t vr = jm_new_reg(mt, lce->name, MIR_T_I64);
