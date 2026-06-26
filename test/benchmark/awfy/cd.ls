@@ -118,41 +118,20 @@ pn arr_set(a, idx, val) {
 // Small vector: 16x16=256
 // =====================================================
 pn vec_new() {
-    var v = { chunks: null16(), sz: 0 }
-    return v
+    return []
 }
 
 pn vec_add(v, item) {
-    var s = (v.sz)
-    var ii = s % 16
-    var ci = shr(s, 4)
-    var cks = (v.chunks)
-    var ck = cks[ci]
-    if (ck == null) {
-        var _n = 0
-        ck = null16()
-        cks[ci] = ck
-    }
-    var _d = 0
-    ck[ii] = item
-    var ns = s + 1
-    v.sz = ns
+    push(v, item)
     return 0
 }
 
 pn vec_at(v, idx) {
-    var ii = idx % 16
-    var ci = shr(idx, 4)
-    var cks = (v.chunks)
-    var ck = cks[ci]
-    if (ck == null) { return null }
-    var r = ck[ii]
-    return r
+    return v[idx]
 }
 
 pn vec_size(v) {
-    var r = (v.sz)
-    return r
+    return len(v)
 }
 
 // =====================================================

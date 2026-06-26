@@ -146,7 +146,7 @@ var vec = { chunks: [null16()], sz: 0 }
 a chunked vector where `.sz` tracked the logical element count separate from physical
 chunk capacity.
 
-**Status**: **ENGINE ENHANCED + partially converted.** Added a built-in
+**Status**: **ENGINE ENHANCED + converted (6 of 8 files).** Added a built-in
 `push(arr, val)` that appends to a growable array **in place** (amortized O(1) via the
 runtime's existing `array_push` → `expand_list` doubling, which is GC-aware). `[]`
 makes an empty growable array; `len(arr)` gives the logical size; `arr[i]` indexes
@@ -158,21 +158,26 @@ directly. This replaces the whole chunked-vector + `.sz` abstraction.
   a 10000×200 append+scan workload), with the same result — direct O(1) indexing vs
   the chunked double-indirection + per-add chunk management. Far exceeds "comparable".
 
-**Converted (verified PASS, debug/ASan-clean):**
-- `awfy/json.ls`, `json2.ls` — `vec_new/add/at/size` now wrap `[]`/`push`/`[i]`/`len`.
+**Converted (verified PASS / no ASan, growable `[]`+`push`+`len`+`[i]`):**
+- `awfy/json.ls`, `json2.ls` — `vec_*` wrappers.
+- `awfy/havlak.ls`, `havlak2.ls` — `vec` (list) **and** `bvec` (queue: `{data: [], first}`,
+  `push(v.data, …)`, `len(v.data)-first`). `arr`/`iarr` stay chunked (sparse
+  absolute-index stores — not sequential growable vectors, so not `push`-convertible).
+- `awfy/cd.ls`, `cd2.ls` — `vec` (cd2 also changes `type Vec = {chunks,sz}` → `type Vec = any`).
 
-**Blocked — `havlak`/`havlak2`/`cd`/`cd2` keep the chunked vectors.** Converting them
-to `push` triggers the latent JIT GC-rooting use-after-free (BUG-001, see
-`Lambda_Bug.md`): `push`'s `expand_list` allocates more often than the chunked vector's
-batch allocation, and its GC frees a live-but-unrooted JIT local (a `fn_fill` chunk
-used in a pending `== null`). havlak-with-`push` is now a **deterministic reproducer**
-of BUG-001 (previously only cd.ls, non-reproducible). These stay chunked until the JIT
-root-frame coverage gap is fixed. (`deltablue`/`deltablue2` are independently
-slow/failing.)
+These were **unblocked by the BUG-001 fix** (see `Lambda_Bug.md`, now FIXED): `fn_fill`
+generic arrays were created with `capacity = 0`, and `gc_trace_object` marks only
+`items[0 … min(length, capacity))`, so every child of a `fill(n, null)` chunk was
+skipped by the collector and freed while still live. `push`'s more frequent GC made it
+deterministic (havlak + `push` was the repro). Setting `capacity = n` in `fn_fill`
+fixed it; the same fix also resolved the pre-existing `proc_array_type_convert` and
+`proc_view_mutable` failures (garbage read from swept arrays).
 
-**Note:** `havlak`'s `arr`/`iarr` are *sparse absolute-index* stores (not sequential
-growable vectors), so they're not `push`-convertible regardless — a different pattern
-from the `.sz` size-tracking workaround.
+**Not converted — `deltablue.ls`, `deltablue2.ls`** (both PASS as-is after the BUG-001
+fix). Their vec is a fixed `fill(256, null)` + `.sz` that supports **remove-by-shift**
+(`vec_remove_first`, `vec_remove_cid`) — a `push`-only growable array can't express
+element removal without a separate `pop`/`remove`/`splice` builtin. Left on the
+workaround pending such a builtin.
 
 ---
 

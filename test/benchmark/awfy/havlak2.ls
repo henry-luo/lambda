@@ -123,93 +123,51 @@ pn iarr_set(a, idx, val) {
 // Uses 3-level arr internally plus first/sz tracking
 // =====================================================
 pn bvec_new() {
-    var v = { l0: null16(), sz: 0, first: 0 }
+    var v = { data: [], first: 0 }
     return v
 }
 
 pn bvec_add(v, item) {
-    var s = (v.sz)
-    var i2 = s % 32
-    var mid = shr(s, 5)
-    var i1 = mid % 16
-    var i0 = shr(mid, 4)
-    var l0 = (v.l0)
-    var c1 = l0[i0]
-    if (c1 == null) {
-        var _d: int = 0
-        c1 = null16()
-        l0[i0] = c1
-    }
-    var c2 = c1[i1]
-    if (c2 == null) {
-        var _d2: int = 0
-        c2 = null32()
-        c1[i1] = c2
-    }
-    var _d3: int = 0
-    c2[i2] = item
-    var ns = s + 1
-    v.sz = ns
+    push(v.data, item)
     return 0
 }
 
 pn bvec_raw_get(v, idx) {
-    var i2 = idx % 32
-    var mid = shr(idx, 5)
-    var i1 = mid % 16
-    var i0 = shr(mid, 4)
-    var l0 = (v.l0)
-    var c1 = l0[i0]
-    if (c1 == null) { return null }
-    var c2 = c1[i1]
-    if (c2 == null) { return null }
-    var r = c2[i2]
-    return r
+    return (v.data)[idx]
 }
 
 pn bvec_at(v, idx) {
     var f = (v.first)
-    var ai = f + idx
-    var r = bvec_raw_get(v, ai)
-    return r
+    return (v.data)[f + idx]
 }
 
 pn bvec_size(v) {
-    var s = (v.sz)
-    var f = (v.first)
-    var r = s - f
-    return r
+    return len(v.data) - (v.first)
 }
 
 pn bvec_remove_first(v) {
     var f = (v.first)
-    var s = (v.sz)
-    if (f >= s) { return null }
-    var r = bvec_raw_get(v, f)
-    var nf = f + 1
-    v.first = nf
+    if (f >= len(v.data)) { return null }
+    var r = (v.data)[f]
+    v.first = f + 1
     return r
 }
 
 pn bvec_is_empty(v) {
-    var f = (v.first)
-    var s = (v.sz)
-    if (f >= s) { return 1 }
+    if ((v.first) >= len(v.data)) { return 1 }
     return 0
 }
 
 // Check if bvec contains element with given dfn field
 pn bvec_has_dfn(v, id) {
     var f = (v.first)
-    var s = (v.sz)
-    var i = f
-    while (i < s) {
-        var elem = bvec_raw_get(v, i)
+    var s = len(v.data)
+    for i in f to s - 1 {
+        var elem = (v.data)[i]
         if (elem != null) {
             var eid = (elem.dfn)
             if (eid == id) { return 1 }
         }
-        i = i + 1
     }
     return 0
 }
@@ -218,41 +176,20 @@ pn bvec_has_dfn(v, id) {
 // Small vector (vec): 16x16=256, for per-node small lists
 // =====================================================
 pn vec_new() {
-    var v = { chunks: null16(), sz: 0 }
-    return v
+    return []
 }
 
 pn vec_add(v, item) {
-    var s = (v.sz)
-    var ii = s % 16
-    var ci = shr(s, 4)
-    var cks = (v.chunks)
-    var ck = cks[ci]
-    if (ck == null) {
-        var _n: int = 0
-        ck = null16()
-        cks[ci] = ck
-    }
-    var _d: int = 0
-    ck[ii] = item
-    var ns = s + 1
-    v.sz = ns
+    push(v, item)
     return 0
 }
 
 pn vec_at(v, idx) {
-    var ii = idx % 16
-    var ci = shr(idx, 4)
-    var cks = (v.chunks)
-    var ck = cks[ci]
-    if (ck == null) { return null }
-    var r = ck[ii]
-    return r
+    return v[idx]
 }
 
 pn vec_size(v) {
-    var r = (v.sz)
-    return r
+    return len(v)
 }
 
 // =====================================================
@@ -265,7 +202,7 @@ pn iset_new() {
 
 pn iset_add(s, val) {
     var items = (s.items)
-    var sz = (items.sz)
+    var sz = len(items)
     var i: int = 0
     while (i < sz) {
         var elem = vec_at(items, i)
@@ -409,7 +346,7 @@ pn lsg_calc_nesting_rec(lsg, loop, depth) {
     loop.depthLvl = depth
     var chs = (loop.children)
     var f = (chs.first)
-    var s = (chs.sz)
+    var s = len(chs.data)
     var i = f
     while (i < s) {
         var child = bvec_raw_get(chs, i)
@@ -577,7 +514,7 @@ pn hlf_step_e(nodes, nonBackPreds, hlf_type, hlf_last, w, nodePool, workList, x)
     var xdfn = (x.dfn)
     var nbp = arr_get(nonBackPreds, xdfn)
     var items = (nbp.items)
-    var sz = (items.sz)
+    var sz = len(items)
     var i: int = 0
     while (i < sz) {
         var iter = vec_at(items, i)
@@ -608,7 +545,7 @@ pn hlf_set_loop_attrs(nodes, hlf_header, w, nodePool, loop) {
     var wNode = arr_get(nodes, w)
     wNode.loop = loop
     var f = (nodePool.first)
-    var s = (nodePool.sz)
+    var s = len(nodePool.data)
     var i = f
     while (i < s) {
         var node = bvec_raw_get(nodePool, i)
@@ -700,7 +637,7 @@ pn hlf_find_loops(cfg, lsg) {
             hlf_step_d(nodes, backPreds, hlf_type, w, nodePool)
             var workList = bvec_new()
             var npf = (nodePool.first)
-            var nps = (nodePool.sz)
+            var nps = len(nodePool.data)
             var cpi = npf
             while (cpi < nps) {
                 var cpn = bvec_raw_get(nodePool, cpi)
