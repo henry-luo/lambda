@@ -37,6 +37,7 @@
     #include <sys/wait.h>
     #include <dirent.h>
     #include <sys/stat.h>
+    #include <time.h>
     #define LAMBDA_EXE "./lambda.exe"
 #endif
 
@@ -432,7 +433,22 @@ inline void test_lambda_script_against_file(const char* script_path, const char*
 struct BatchResult {
     std::string output;
     int status;
+    long long elapsed_us;
 };
+
+inline long long lambda_test_now_us() {
+#ifdef _WIN32
+    LARGE_INTEGER frequency;
+    LARGE_INTEGER counter;
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&counter);
+    return (long long)((counter.QuadPart * 1000000LL) / frequency.QuadPart);
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000000LL + (long long)(ts.tv_nsec / 1000);
+#endif
+}
 
 // Extract output after "##### Script" marker (if present), same logic as execute_lambda_script
 inline char* extract_script_output(const std::string& raw_output) {
@@ -498,6 +514,7 @@ inline void run_sub_batch(
     std::string current_script;
     std::string current_output;
     bool in_script = false;
+    long long current_start_us = 0;
 
     while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
         if (buffer[0] == '\x01') {
@@ -508,14 +525,17 @@ inline void run_sub_batch(
                     current_script.pop_back();
                 current_output.clear();
                 in_script = true;
+                current_start_us = lambda_test_now_us();
             } else if (strncmp(buffer + 1, "BATCH_END ", 10) == 0) {
                 int status = atoi(buffer + 11);
-                results[current_script] = {current_output, status};
+                long long elapsed_us = current_start_us > 0 ? lambda_test_now_us() - current_start_us : 0;
+                results[current_script] = {current_output, status, elapsed_us};
                 size_t done = completed_scripts.fetch_add(1, std::memory_order_relaxed) + 1;
                 {
                     std::lock_guard<std::mutex> lock(progress_mutex);
-                    printf("  [batch %d] [%zu/%zu] %s finished",
-                           batch_id, done, total_scripts, current_script.c_str());
+                    printf("  [batch %d] [%zu/%zu] %s finished in %.3fs",
+                           batch_id, done, total_scripts, current_script.c_str(),
+                           (double)elapsed_us / 1000000.0);
                     if (status != 0) {
                         printf(" (status=%d)", status);
                     }

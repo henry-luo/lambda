@@ -229,6 +229,13 @@ TEST_P(LambdaScriptTest, ExecuteAndCompare) {
         << "Script not found in batch results: " << info.script_path;
 
     const BatchResult& br = it->second;
+    char elapsed_us_buf[64];
+    snprintf(elapsed_us_buf, sizeof(elapsed_us_buf), "%lld", br.elapsed_us);
+    RecordProperty("lambda_script_elapsed_us", elapsed_us_buf);
+    char elapsed_ms_buf[64];
+    snprintf(elapsed_ms_buf, sizeof(elapsed_ms_buf), "%.3f", (double)br.elapsed_us / 1000.0);
+    RecordProperty("lambda_script_elapsed_ms", elapsed_ms_buf);
+
     ASSERT_EQ(br.status, 0) << "Script execution failed: " << info.script_path;
 
     // Extract output (handle ##### Script marker)
@@ -308,6 +315,67 @@ TEST(LambdaNegativeTests, test_func_param_type_errors) {
     test_lambda_script_expects_error("test/lambda/negative/func_param_negative.ls");
 }
 
+static void patch_lambda_gtest_json_case_times() {
+    std::string output = ::testing::GTEST_FLAG(output);
+    const char* json_prefix = "json:";
+    if (output.compare(0, strlen(json_prefix), json_prefix) != 0) return;
+
+    std::string json_path = output.substr(strlen(json_prefix));
+    if (json_path.empty()) return;
+
+    FILE* file = fopen(json_path.c_str(), "rb");
+    if (!file) return;
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    if (file_size <= 0) {
+        fclose(file);
+        return;
+    }
+
+    std::string json;
+    json.resize((size_t)file_size);
+    size_t read_size = fread(&json[0], 1, (size_t)file_size, file);
+    fclose(file);
+    if (read_size != (size_t)file_size) return;
+
+    const char* elapsed_key = "\"lambda_script_elapsed_us\": \"";
+    const char* time_key = "\"time\": \"";
+    size_t pos = 0;
+    bool changed = false;
+    while ((pos = json.find(elapsed_key, pos)) != std::string::npos) {
+        size_t value_start = pos + strlen(elapsed_key);
+        size_t value_end = json.find('"', value_start);
+        if (value_end == std::string::npos) break;
+
+        long long elapsed_us = atoll(json.c_str() + value_start);
+        size_t next_pos = value_end;
+        if (elapsed_us > 0) {
+            size_t time_pos = json.rfind(time_key, pos);
+            if (time_pos != std::string::npos) {
+                size_t time_value_start = time_pos + strlen(time_key);
+                size_t time_value_end = json.find('"', time_value_start);
+                if (time_value_end != std::string::npos && time_value_end < pos) {
+                    char time_buf[64];
+                    snprintf(time_buf, sizeof(time_buf), "%.3fs", (double)elapsed_us / 1000000.0);
+                    size_t old_len = time_value_end - time_value_start;
+                    json.replace(time_value_start, old_len, time_buf);
+                    long diff = (long)strlen(time_buf) - (long)old_len;
+                    next_pos = (size_t)((long)next_pos + diff);
+                    changed = true;
+                }
+            }
+        }
+        pos = next_pos;
+    }
+
+    if (!changed) return;
+    file = fopen(json_path.c_str(), "wb");
+    if (!file) return;
+    fwrite(json.c_str(), 1, json.size(), file);
+    fclose(file);
+}
+
 //==============================================================================
 // Main - discovers tests before running
 //==============================================================================
@@ -341,5 +409,7 @@ int main(int argc, char **argv) {
 #endif
     }
 
-    return RUN_ALL_TESTS();
+    int result = RUN_ALL_TESTS();
+    patch_lambda_gtest_json_case_times();
+    return result;
 }
