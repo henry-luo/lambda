@@ -11,9 +11,12 @@ import {
   cmdInsertImage,
   cmdInsertTable,
   cmdOutdentListItem,
+  cmdResizeImage,
+  cmdSetNodeAttr,
   cmdWrapInList
 } from '../../src/commands/structural-commands.js'
 import { cmdDeleteNode, cmdInsertParagraph } from '../../src/commands/text-commands.js'
+import { attrsGet } from '../../src/model/doc.js'
 import type { EditorState } from '../../src/commands/types.js'
 import type { Selection } from '../../src/model/types.js'
 import { tagAt, textAt } from '../helpers/narrow.js'
@@ -101,6 +104,47 @@ describe('cmdInsertImage + node delete', () => {
     const p = nodeAt(tx.doc_after, [0]) as any
     expect(p.content.length).toBe(2)
     expect(p.content.every((c: any) => c.kind === 'text')).toBe(true)
+  })
+})
+
+// Regression guard for bug 3 (image resize)
+describe('cmdResizeImage / cmdSetNodeAttr', () => {
+  const imgDoc = () => st(
+    [node('p', [nodeAttrs('img', [{ name: 'src', value: 'x.png' }, { name: 'alt', value: 'a' }], [])])],
+    nodeSelection([0, 0])
+  )
+
+  it('cmdResizeImage sets width + height (rounded) in one transaction', () => {
+    const tx = cmdResizeImage(imgDoc(), [0, 0], 180.4, 90.6)!
+    const img = nodeAt(tx.doc_after, [0, 0]) as any
+    expect(attrsGet(img.attrs, 'width')).toBe(180)
+    expect(attrsGet(img.attrs, 'height')).toBe(91)
+    expect(tx.steps.length).toBe(2)
+    // existing attrs preserved
+    expect(attrsGet(img.attrs, 'src')).toBe('x.png')
+    expect(tx.sel_after).toEqual(nodeSelection([0, 0]))
+  })
+
+  it('cmdResizeImage updates existing width/height in place', () => {
+    const s = st(
+      [node('p', [nodeAttrs('img', [{ name: 'src', value: 'x' }, { name: 'width', value: 200 }, { name: 'height', value: 100 }], [])])],
+      nodeSelection([0, 0])
+    )
+    const tx = cmdResizeImage(s, [0, 0], 50, 25)!
+    const img = nodeAt(tx.doc_after, [0, 0]) as any
+    expect(attrsGet(img.attrs, 'width')).toBe(50)
+    expect(attrsGet(img.attrs, 'height')).toBe(25)
+  })
+
+  it('cmdSetNodeAttr sets an arbitrary attribute', () => {
+    const tx = cmdSetNodeAttr(imgDoc(), [0, 0], 'alt', 'new alt')!
+    const img = nodeAt(tx.doc_after, [0, 0]) as any
+    expect(attrsGet(img.attrs, 'alt')).toBe('new alt')
+  })
+
+  it('returns null when the path is not a node', () => {
+    const s = st([node('p', [text('x')])], nodeSelection([0, 0]))
+    expect(cmdResizeImage(s, [0, 0], 10, 10)).toBeNull()  // [0,0] is a text leaf
   })
 })
 

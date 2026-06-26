@@ -11,7 +11,7 @@
 // block, all/node selections) get expanded as the corresponding Slate
 // fixtures are ported.
 
-import { isText, lastIndex, nodeAt, parentPath } from '../model/doc.js'
+import { isNode, isText, lastIndex, node, nodeAt, parentPath } from '../model/doc.js'
 import { pos, textSelection } from '../model/source-pos.js'
 import {
   hasMark,
@@ -30,7 +30,7 @@ import {
 import { defaultSplitBlock, isBlockTag } from '../model/schema.js'
 import { caret, caretAt, isText as selIsText, selCollapsed, selHi, selLo, selSingleLeaf } from './sel.js'
 import type { EditorState } from './types.js'
-import type { AttrValue, MarkDict, TextLeaf, Transaction } from '../model/types.js'
+import type { AttrValue, Child, MarkDict, Node, TextLeaf, Transaction } from '../model/types.js'
 
 // ---------------------------------------------------------------------------
 // Common: delete a range within a single text leaf
@@ -73,9 +73,22 @@ export function cmdInsertText(state: EditorState, txt: string): Transaction | nu
 
   const lo = selLo(sel)
   const hi = selHi(sel)
-  const leaf = nodeAt(state.doc, lo.path)
-  if (leaf === null || !isText(leaf)) return null
+  const target = nodeAt(state.doc, lo.path)
+  if (target === null) return null
 
+  // Caret sits on a NODE (empty block, or a child-index boundary) rather than
+  // inside a text leaf — insert a fresh text leaf carrying any stored marks.
+  if (isNode(target)) {
+    if (txt.length === 0) return null
+    const off = Math.min(lo.offset, target.content.length)
+    const marks: MarkDict = state.stored_marks ?? {}
+    const newLeaf: TextLeaf = { kind: 'text', text: txt, marks }
+    let tx = txBegin(state.doc, sel)
+    tx = txStep(tx, stepReplace(lo.path, off, off, [newLeaf]))
+    return txSetSelection(tx, caretAt([...lo.path, off], txt.length))
+  }
+
+  if (!isText(target)) return null
   let tx = txBegin(state.doc, sel)
   tx = txStep(tx, stepReplaceText(lo.path, lo.offset, hi.offset, txt))
   return txSetSelection(tx, caretAt(lo.path, lo.offset + txt.length))
@@ -112,6 +125,30 @@ export function cmdInsertParagraph(state: EditorState): Transaction | null {
   }
 
   const p = sel.anchor
+
+  // Caret on a NODE (empty block, or a child-index boundary inside a block) —
+  // split the node's children at the boundary. For an empty block this just
+  // inserts an empty sibling; repeated Enter accumulates blank blocks.
+  const target0 = nodeAt(state.doc, p.path)
+  if (target0 !== null && isNode(target0) && p.path.length >= 1) {
+    const off = Math.min(p.offset, target0.content.length)
+    const blockParentPath = parentPath(p.path)
+    const blockIdx = lastIndex(p.path)
+    const splitTag = defaultSplitBlock(state.schema, target0.tag)
+    const first: Node = {
+      kind: 'node', tag: target0.tag, attrs: target0.attrs, content: target0.content.slice(0, off)
+    }
+    const second = node(splitTag, target0.content.slice(off))
+    let tx = txBegin(state.doc, sel)
+    tx = txStep(tx, stepReplace(blockParentPath, blockIdx, blockIdx + 1, [first, second]))
+    const secondPath = [...blockParentPath, blockIdx + 1]
+    const firstChild = second.content[0] as Child | undefined
+    const caretSel = firstChild !== undefined && isText(firstChild)
+      ? caretAt([...secondPath, 0], 0)
+      : caretAt(secondPath, 0)
+    return txSetSelection(tx, caretSel)
+  }
+
   const leafPath = p.path
   if (leafPath.length < 2) return null  // need at least block→leaf
 

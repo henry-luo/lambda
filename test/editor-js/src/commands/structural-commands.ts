@@ -17,7 +17,7 @@ import {
   withContent
 } from '../model/doc.js'
 import { nodeSelection, pos } from '../model/source-pos.js'
-import { stepReplace } from '../model/step.js'
+import { stepReplace, stepSetAttr } from '../model/step.js'
 import { txBegin, txSetSelection, txStep } from '../model/transaction.js'
 import { caret } from './sel.js'
 import type { EditorState } from './types.js'
@@ -367,4 +367,26 @@ export function cmdDeleteTableColumn(state: EditorState): Transaction | null {
 // Convenience: place a caret inside a table cell (used by callers/tests).
 export function caretInCell(rowPath: SourcePath, colIndex: number): Selection {
   return caret(pos([...rowPath, colIndex, 0], 0))
+}
+
+// ---------------------------------------------------------------------------
+// Generic node-attribute edits (used by image resize, inspector, etc.)
+// ---------------------------------------------------------------------------
+
+export function cmdSetNodeAttr(state: EditorState, path: SourcePath, name: string, value: import('../model/types.js').AttrValue): Transaction | null {
+  const n = nodeAt(state.doc, path)
+  if (n === null || !isNode(n)) return null
+  let tx = txBegin(state.doc, nodeSelection(path))
+  tx = txStep(tx, stepSetAttr(path, name, value))
+  return txSetSelection(tx, nodeSelection(path))
+}
+
+// Resize an image (or any node) by setting width + height in one transaction.
+export function cmdResizeImage(state: EditorState, path: SourcePath, width: number, height: number): Transaction | null {
+  const n = nodeAt(state.doc, path)
+  if (n === null || !isNode(n)) return null
+  let tx = txBegin(state.doc, nodeSelection(path))
+  tx = txStep(tx, stepSetAttr(path, 'width', Math.round(width)))
+  tx = txStep(tx, stepSetAttr(path, 'height', Math.round(height)))
+  return txSetSelection(tx, nodeSelection(path))
 }

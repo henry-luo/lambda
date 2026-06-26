@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { node, text } from '../../src/model/doc.js'
+import { node, nodeAt, text } from '../../src/model/doc.js'
 import { pos, textSelection } from '../../src/model/source-pos.js'
 import { html5SubsetSchema } from '../../src/schemas/index.js'
 import {
@@ -46,6 +46,54 @@ describe('commands/cmdInsertText', () => {
   it('returns null when no selection', () => {
     const s = state('doc', [node('p', [text('x')])], null as any)
     expect(cmdInsertText(s, 'y')).toBeNull()
+  })
+})
+
+describe('commands/cmdInsertText — empty block (bug 4)', () => {
+  it('types into an empty paragraph (caret at node position)', () => {
+    // empty <p>, caret at {path:[0], offset:0}
+    const s = state('doc', [node('p', [])], textSelection(pos([0], 0), pos([0], 0)))
+    const tx = cmdInsertText(s, 'hi')!
+    expect(textAt(tx.doc_after, [0, 0])).toBe('hi')
+    expect(tx.sel_after).toEqual(caret([0, 0], 2))
+  })
+
+  it('types into an empty list item', () => {
+    const s = state('doc', [node('ul', [node('li', [])])], textSelection(pos([0, 0], 0), pos([0, 0], 0)))
+    const tx = cmdInsertText(s, 'x')!
+    expect(textAt(tx.doc_after, [0, 0, 0])).toBe('x')
+  })
+
+  it('clamps an over-large node offset (DOM placeholder <br>)', () => {
+    const s = state('doc', [node('p', [])], textSelection(pos([0], 1), pos([0], 1)))
+    const tx = cmdInsertText(s, 'z')!
+    expect(textAt(tx.doc_after, [0, 0])).toBe('z')
+  })
+})
+
+describe('commands/cmdInsertParagraph — empty block (bug 2)', () => {
+  it('repeated Enter in an empty paragraph adds blank paragraphs', () => {
+    let s = state('doc', [node('p', [])], textSelection(pos([0], 0), pos([0], 0)))
+    // first Enter
+    let tx = cmdInsertParagraph(s)!
+    expect(tx.doc_after.content.length).toBe(2)
+    // second Enter from the resulting caret
+    s = { ...s, doc: tx.doc_after, selection: tx.sel_after }
+    tx = cmdInsertParagraph(s)!
+    expect(tx.doc_after.content.length).toBe(3)
+    // third
+    s = { ...s, doc: tx.doc_after, selection: tx.sel_after }
+    tx = cmdInsertParagraph(s)!
+    expect(tx.doc_after.content.length).toBe(4)
+    expect(tx.doc_after.content.every((b: any) => b.tag === 'p')).toBe(true)
+  })
+
+  it('Enter in an empty list item adds another empty <li>', () => {
+    const s = state('doc', [node('ul', [node('li', [])])], textSelection(pos([0, 0], 0), pos([0, 0], 0)))
+    const tx = cmdInsertParagraph(s)!
+    const ul = nodeAt(tx.doc_after, [0]) as any
+    expect(ul.content.length).toBe(2)
+    expect(ul.content.every((li: any) => li.tag === 'li')).toBe(true)
   })
 })
 

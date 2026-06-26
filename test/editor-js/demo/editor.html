@@ -29,7 +29,30 @@
         background: var(--bg);
         box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 8px 24px rgba(15, 23, 42, 0.06);
         overflow: hidden;
+        position: relative;   /* positioning context for the image-resize overlay */
       }
+
+      /* Image resize overlay */
+      .rdt-img-overlay {
+        position: absolute;
+        border: 1.5px solid var(--accent);
+        box-sizing: border-box;
+        pointer-events: none;
+        z-index: 10;
+      }
+      .rdt-img-handle {
+        position: absolute;
+        width: 10px; height: 10px;
+        background: #fff;
+        border: 1.5px solid var(--accent);
+        border-radius: 2px;
+        pointer-events: auto;
+      }
+      .rdt-h-nw { left: -6px; top: -6px;  cursor: nwse-resize; }
+      .rdt-h-ne { right: -6px; top: -6px; cursor: nesw-resize; }
+      .rdt-h-sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+      .rdt-h-se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+      .rdt-editor img { cursor: pointer; }
 
       /* Toolbar */
       .rdt-toolbar {
