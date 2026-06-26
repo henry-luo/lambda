@@ -14,6 +14,7 @@ import {
   cmdDeleteForward,
   cmdFormatBold,
   cmdFormatItalic,
+  cmdDeleteNode,
   cmdFormatUnderline,
   cmdInsertLineBreak,
   cmdInsertParagraph,
@@ -22,6 +23,17 @@ import {
   cmdSetBlockType,
   cmdToggleMark
 } from '../../src/commands/text-commands.js'
+import {
+  cmdAddTableColumn,
+  cmdAddTableRow,
+  cmdDeleteTableColumn,
+  cmdDeleteTableRow,
+  cmdIndentListItem,
+  cmdInsertImage,
+  cmdInsertTable,
+  cmdOutdentListItem,
+  cmdWrapInList
+} from '../../src/commands/structural-commands.js'
 import {
   cmdBringToFront,
   cmdDeleteShapes,
@@ -95,6 +107,18 @@ const COMMANDS: Record<string, CommandHandler> = {
   },
   setBlockType:          (s, a) => cmdSetBlockType(s, asStr(a, 'tag')),
   selectAll:             (s)    => cmdSelectAll(s),
+  deleteNode:            (s)    => cmdDeleteNode(s),
+
+  // structural commands — lists / tables / images
+  wrapInList:        (s, a) => cmdWrapInList(s, (a['kind'] === 'ol' ? 'ol' : 'ul')),
+  indentListItem:    (s)    => cmdIndentListItem(s),
+  outdentListItem:   (s)    => cmdOutdentListItem(s),
+  insertImage:       (s, a) => cmdInsertImage(s, asStr(a, 'src'), typeof a['alt'] === 'string' ? a['alt'] : ''),
+  insertTable:       (s, a) => cmdInsertTable(s, asNumOpt(a, 'rows') ?? 2, asNumOpt(a, 'cols') ?? 2, a['header'] !== false),
+  addTableRow:       (s)    => cmdAddTableRow(s),
+  deleteTableRow:    (s)    => cmdDeleteTableRow(s),
+  addTableColumn:    (s)    => cmdAddTableColumn(s),
+  deleteTableColumn: (s)    => cmdDeleteTableColumn(s),
 
   // drawing commands
   insertShape: (s, a) => {

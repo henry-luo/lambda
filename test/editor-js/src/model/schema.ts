@@ -237,10 +237,16 @@ export function isMarkTag(schema: Schema, tag: string): boolean {
   return e !== undefined && e.role === 'mark'
 }
 
-// Container's default block to materialize when splitting at a position whose
-// schema does not allow the current block to repeat (Enter at end of <h1> →
-// <p>, not another <h1>).
+// Block tags that do NOT repeat on split — pressing Enter at the end produces
+// the schema default block (a paragraph) rather than another of the same tag.
+const NON_REPEATING_BLOCKS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'title'])
+
+// The block tag to materialize for the *second* half when splitting a block.
+//   - non-repeating blocks (headings) → schema default block (e.g. 'p')
+//   - repeatable blocks (p, li, td, blockquote) → the same tag
+//     (so Enter in a list item makes a new <li>, not a <p>)
 export function defaultSplitBlock(schema: Schema, currentTag: string): string {
-  void currentTag
+  if (NON_REPEATING_BLOCKS.has(currentTag)) return schema.default_block
+  if (schema.entries[currentTag] !== undefined) return currentTag
   return schema.default_block
 }
