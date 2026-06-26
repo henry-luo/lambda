@@ -12,10 +12,12 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useReducer,
   useRef,
   useState,
   type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode
 } from 'react'
 import {
@@ -27,7 +29,10 @@ import { renderDoc } from '../src/view/render'
 import { dispatchIntent } from '../src/input/intent'
 import { intentFromInputEvent } from '../src/view/intent-from-input-event'
 import {
+  findElementByPath,
   getSourceSelectionFromDom,
+  nearestPathOwner,
+  pathOf,
   setDomSelectionFromSource
 } from '../src/view/dom-bridge'
 import {
@@ -38,13 +43,15 @@ import {
   cmdSetBlockType,
   cmdToggleMark
 } from '../src/commands/text-commands'
-import { isText, nodeAt } from '../src/model/doc'
+import { cmdResizeImage } from '../src/commands/structural-commands'
+import { isNode, isText, nodeAt } from '../src/model/doc'
 import type { EditorState } from '../src/commands/types'
 import type {
   AttrValue,
   Doc,
   MarkDict,
   Selection,
+  SourcePath,
   Transaction
 } from '../src/model/types'
 import type { Schema } from '../src/model/schema'
@@ -90,11 +97,22 @@ export function FullEditor(props: FullEditorProps) {
   const stateRef = useRef<EditorViewState>(state)
   useEffect(() => { stateRef.current = state }, [state])
 
+  // When the selection update originated from the user's own DOM selection,
+  // the DOM is already correct — re-pushing source→DOM here would fight an
+  // active drag (each removeAllRanges/addRange resets the in-progress
+  // selection). This flag tells the projection effect to skip exactly once.
+  const selectionFromDom = useRef(false)
+
   const [, forceTick] = useState(0)
 
-  // After any state change, project the source selection onto the DOM.
+  // After a transaction (doc or programmatic selection change), project the
+  // source selection onto the DOM. Skip when the change came from the DOM.
   useEffect(() => {
     if (rootRef.current === null) return
+    if (selectionFromDom.current) {
+      selectionFromDom.current = false
+      return
+    }
     setDomSelectionFromSource(rootRef.current, state.selection)
   }, [state.selection, state.doc])
 
@@ -139,6 +157,8 @@ export function FullEditor(props: FullEditorProps) {
         forceTick(t => t + 1)
         return
       }
+      // The DOM selection is already correct — don't re-project it back.
+      selectionFromDom.current = true
       dispatch({ type: 'set_selection', sel: next })
     }
     document.addEventListener('selectionchange', onSelChange)
@@ -161,11 +181,34 @@ export function FullEditor(props: FullEditorProps) {
     if (tx !== null) dispatch({ type: 'apply', tx })
   }, [])
 
+  const shellRef = useRef<HTMLDivElement | null>(null)
+
+  // Click on an image → select it as a node (so it can be resized/deleted).
+  const handleSurfaceMouseDown = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
+    const t = e.target as HTMLElement
+    if (t.tagName === 'IMG') {
+      const owner = nearestPathOwner(t)
+      if (owner !== null) {
+        e.preventDefault()
+        dispatch({ type: 'set_selection', sel: { kind: 'node', path: pathOf(owner) } })
+      }
+    }
+  }, [])
+
+  // The image currently selected as a node (path), if any.
+  const selectedImagePath: SourcePath | null =
+    state.selection?.kind === 'node'
+      ? (() => {
+          const n = nodeAt(state.doc, state.selection.path)
+          return n !== null && isNode(n) && n.tag === 'img' ? state.selection.path : null
+        })()
+      : null
+
   const marks = activeMarks(state.doc, state.selection)
   const block = activeBlock(state.doc, state.selection)
 
   return (
-    <div className="rdt-shell">
+    <div className="rdt-shell" ref={shellRef}>
       <Toolbar
         marks={marks}
         block={block}
@@ -192,10 +235,89 @@ export function FullEditor(props: FullEditorProps) {
         suppressContentEditableWarning
         spellCheck={false}
         onKeyDown={handleKeyDown}
+        onMouseDown={handleSurfaceMouseDown}
       >
         {renderDoc(state.doc)}
       </div>
+      {selectedImagePath !== null && (
+        <ImageResizeOverlay
+          shellRef={shellRef}
+          surfaceRef={rootRef}
+          imagePath={selectedImagePath}
+          docVersion={state.doc}
+          onResize={(w, h) => runCmd(s => cmdResizeImage(s, selectedImagePath, w, h))}
+        />
+      )}
       <StatusBar state={state} />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Image resize overlay — 8 handles around a node-selected image.
+// ---------------------------------------------------------------------------
+
+interface OverlayProps {
+  shellRef: React.RefObject<HTMLDivElement | null>
+  surfaceRef: React.RefObject<HTMLDivElement | null>
+  imagePath: SourcePath
+  docVersion: Doc
+  onResize: (w: number, h: number) => void
+}
+
+interface Box { left: number; top: number; width: number; height: number }
+
+function ImageResizeOverlay({ shellRef, surfaceRef, imagePath, docVersion, onResize }: OverlayProps) {
+  const [box, setBox] = useState<Box | null>(null)
+  const [preview, setPreview] = useState<Box | null>(null)
+  const drag = useRef<{ corner: string; startX: number; startY: number; w: number; h: number; ratio: number } | null>(null)
+
+  // Measure the image's position relative to the shell after each render.
+  useLayoutEffect(() => {
+    const shell = shellRef.current
+    const surface = surfaceRef.current
+    if (shell === null || surface === null) return
+    const el = findElementByPath(surface, imagePath)
+    if (el === null) { setBox(null); return }
+    const sRect = shell.getBoundingClientRect()
+    const r = el.getBoundingClientRect()
+    setBox({ left: r.left - sRect.left, top: r.top - sRect.top, width: r.width, height: r.height })
+    setPreview(null)
+  }, [imagePath, docVersion, shellRef, surfaceRef])
+
+  useEffect(() => {
+    function onMove(e: globalThis.MouseEvent) {
+      const d = drag.current
+      if (d === null || box === null) return
+      const dx = e.clientX - d.startX
+      // Corner drag: bottom-right grows with +dx; keep aspect ratio.
+      const sign = d.corner.includes('e') ? 1 : -1
+      const newW = Math.max(24, d.w + sign * dx)
+      const newH = newW / d.ratio
+      setPreview({ left: box.left, top: box.top, width: newW, height: newH })
+    }
+    function onUp() {
+      const d = drag.current
+      drag.current = null
+      if (d !== null && preview !== null) onResize(preview.width, preview.height)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+  }, [box, preview, onResize])
+
+  if (box === null) return null
+  const shown = preview ?? box
+  const startDrag = (corner: string) => (e: ReactMouseEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    drag.current = { corner, startX: e.clientX, startY: e.clientY, w: box.width, h: box.height, ratio: box.width / box.height || 1 }
+  }
+  const handles = ['nw', 'ne', 'sw', 'se'] as const
+  return (
+    <div className="rdt-img-overlay" style={{ left: shown.left, top: shown.top, width: shown.width, height: shown.height }}>
+      {handles.map(c => (
+        <span key={c} className={'rdt-img-handle rdt-h-' + c} onMouseDown={startDrag(c)} />
+      ))}
     </div>
   )
 }
