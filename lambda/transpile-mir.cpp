@@ -375,6 +375,10 @@ static bool should_gc_root_var(MIR_type_t mir_type, TypeId type_id) {
     return mir_type == MIR_T_P || is_gc_root_type(type_id);
 }
 
+static bool should_gc_root_local_var(MIR_type_t mir_type, TypeId type_id) {
+    return mir_type == MIR_T_I64 || should_gc_root_var(mir_type, type_id);
+}
+
 static MIR_reg_t emit_root_value_bits(MirTranspiler* mt, MIR_reg_t value) {
     MIR_reg_t bits = new_reg(mt, "root_bits", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, bits),
@@ -422,7 +426,7 @@ static MIR_reg_t load_gc_root_slot(MirTranspiler* mt, int root_slot, const char*
 
 static void update_gc_root_slot(MirTranspiler* mt, MirVarEntry* var) {
     if (!var) return;
-    if (var->root_slot < 0 && !should_gc_root_var(var->mir_type, var->type_id)) return;
+    if (var->root_slot < 0 && !should_gc_root_local_var(var->mir_type, var->type_id)) return;
     if (var->root_slot < 0) {
         var->root_slot = create_gc_root_slot(mt, var->reg);
         return;
@@ -460,7 +464,7 @@ static void set_var(MirTranspiler* mt, const char* name, MIR_reg_t reg, MIR_type
     snprintf(entry.name, sizeof(entry.name), "%s", name);
     entry.var.reg = reg;
     entry.var.root_slot = -1;
-    if (should_gc_root_var(mir_type, type_id)) {
+    if (should_gc_root_local_var(mir_type, type_id)) {
         entry.var.root_slot = create_gc_root_slot(mt, reg);
     }
     entry.var.mir_type = mir_type;
@@ -480,7 +484,7 @@ static void set_state_var(MirTranspiler* mt, const char* name, MIR_reg_t reg,
     snprintf(entry.name, sizeof(entry.name), "%s", name);
     entry.var.reg = reg;
     entry.var.root_slot = -1;
-    if (should_gc_root_var(mir_type, type_id)) {
+    if (should_gc_root_local_var(mir_type, type_id)) {
         entry.var.root_slot = create_gc_root_slot(mt, reg);
     }
     entry.var.mir_type = mir_type;
