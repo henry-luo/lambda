@@ -76,16 +76,18 @@ export function cmdInsertText(state: EditorState, txt: string): Transaction | nu
   const target = nodeAt(state.doc, lo.path)
   if (target === null) return null
 
-  // Caret sits on a NODE (empty block, or a child-index boundary) rather than
-  // inside a text leaf — insert a fresh text leaf carrying any stored marks.
+  // Caret sits inside an EMPTY block (a node with no children, not the doc
+  // root) — insert a fresh text leaf carrying any stored marks. Restricted to
+  // empty blocks so we never insert a bare text leaf among block children
+  // (e.g. select-all + type must NOT splice text directly into <doc>).
   if (isNode(target)) {
     if (txt.length === 0) return null
-    const off = Math.min(lo.offset, target.content.length)
+    if (lo.path.length < 1 || target.content.length !== 0) return null
     const marks: MarkDict = state.stored_marks ?? {}
     const newLeaf: TextLeaf = { kind: 'text', text: txt, marks }
     let tx = txBegin(state.doc, sel)
-    tx = txStep(tx, stepReplace(lo.path, off, off, [newLeaf]))
-    return txSetSelection(tx, caretAt([...lo.path, off], txt.length))
+    tx = txStep(tx, stepReplace(lo.path, 0, 0, [newLeaf]))
+    return txSetSelection(tx, caretAt([...lo.path, 0], txt.length))
   }
 
   if (!isText(target)) return null

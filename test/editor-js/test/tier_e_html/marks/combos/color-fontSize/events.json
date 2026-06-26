@@ -1,0 +1,1 @@
+[{"type":"command","name":"toggleMark","args":{"mark":"color","value":"red"}},{"type":"command","name":"toggleMark","args":{"mark":"fontSize","value":"18px"}}]
