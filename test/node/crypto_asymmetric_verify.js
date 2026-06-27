@@ -55,3 +55,54 @@ const base64Verifier = crypto.createVerify('RSA-SHA256');
 base64Verifier.update(message);
 assert.strictEqual(base64Verifier.verify({ key: publicKey }, base64Signature, 'base64'), true);
 console.log('rsa verify options base64:', true);
+
+const pssOptions = {
+  padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
+  saltLength: 32
+};
+const pssSignature = crypto.createSign('sha256')
+  .update(message)
+  .sign({ key: privateKey, padding: pssOptions.padding, saltLength: pssOptions.saltLength });
+assert.strictEqual(crypto.createVerify('sha256')
+  .update(message)
+  .verify({ key: publicKey, padding: pssOptions.padding, saltLength: pssOptions.saltLength }, pssSignature), true);
+assert.strictEqual(crypto.createVerify('sha256')
+  .update(message)
+  .verify({ key: publicKey, padding: pssOptions.padding, saltLength: 20 }, pssSignature), false);
+console.log('rsa pss sign verify options:', true);
+
+const privateKeyObject = crypto.createPrivateKey({ key: Buffer.from(privateKey) });
+const publicKeyObject = crypto.createPublicKey({ key: Buffer.from(publicKey) });
+assert.strictEqual(privateKeyObject.type, 'private');
+assert.strictEqual(publicKeyObject.type, 'public');
+assert.strictEqual(privateKeyObject.asymmetricKeyType, 'rsa');
+assert.strictEqual(publicKeyObject.asymmetricKeyType, 'rsa');
+console.log('rsa keyobject properties:', true);
+
+const objectSignature = crypto.createSign('sha256')
+  .update(message)
+  .sign(privateKeyObject);
+assert.strictEqual(crypto.createVerify('sha256')
+  .update(message)
+  .verify(publicKeyObject, objectSignature), true);
+console.log('rsa keyobject sign verify:', true);
+
+const derivedPublic = crypto.createPublicKey(privateKeyObject);
+assert.strictEqual(derivedPublic.type, 'public');
+assert.strictEqual(crypto.createVerify('sha256')
+  .update(message)
+  .verify(derivedPublic, objectSignature), true);
+console.log('rsa keyobject derive public:', true);
+
+assert.strictEqual(publicKeyObject.export().byteLength > 0, true);
+assert.strictEqual(publicKeyObject.export({ type: 'spki', format: 'pem' }).includes('BEGIN PUBLIC KEY'), true);
+assert.strictEqual(privateKeyObject.export({ type: 'pkcs8', format: 'pem' }).includes('BEGIN PRIVATE KEY'), true);
+assert.strictEqual(Buffer.isBuffer(publicKeyObject.export({ type: 'spki', format: 'der' })), true);
+assert.strictEqual(Buffer.isBuffer(privateKeyObject.export({ type: 'pkcs8', format: 'der' })), true);
+assert.throws(() => publicKeyObject.export({ type: 'pkcs8', format: 'pem' }), {
+  code: 'ERR_INVALID_ARG_VALUE'
+});
+console.log('rsa keyobject export options:', true);
+assert.strictEqual(privateKeyObject instanceof crypto.KeyObject, true);
+assert.strictEqual(publicKeyObject instanceof crypto.KeyObject, true);
+console.log('rsa keyobject export instanceof:', true);

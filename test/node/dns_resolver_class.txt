@@ -1,0 +1,17 @@
+resolver constructor: function
+resolver instanceof: true
+resolver resolve4 method: function
+resolver getServers method: function
+resolver setServers method: function
+resolver getServers array: true
+resolver setServers first: 127.0.0.1
+resolver getServers copy: true
+resolver setServers bad list: ERR_INVALID_ARG_TYPE
+resolver resolve4 err: true
+resolver resolve4 ipv4: true
+promises resolver instanceof: true
+promises resolver resolve4 method: function
+promises resolver getServers method: function
+promises resolver setServers method: function
+promises resolver setServers first: 127.0.0.1
+promises resolver resolve4 ipv4: true

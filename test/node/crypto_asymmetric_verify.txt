@@ -2,3 +2,9 @@ rsa sign options object: true
 rsa verify public pem: true
 rsa verify tampered: false
 rsa verify options base64: true
+rsa pss sign verify options: true
+rsa keyobject properties: true
+rsa keyobject sign verify: true
+rsa keyobject derive public: true
+rsa keyobject export options: true
+rsa keyobject export instanceof: true

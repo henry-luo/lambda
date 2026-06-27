@@ -18,6 +18,9 @@
 #include <cstdio>
 
 extern "C" Item js_internal_binding(Item name);
+extern "C" void heap_register_gc_root(uint64_t* slot);
+
+static bool dns_is_object_like(Item item);
 
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
@@ -46,6 +49,87 @@ static bool is_callable(Item value) {
 
 static bool is_symbol_item(Item value) {
     return get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE;
+}
+
+static int append_text(char* out, int out_size, int pos, const char* text) {
+    if (!out || out_size <= 0 || !text) return pos;
+    if (pos < 0) pos = 0;
+    while (*text && pos < out_size - 1) out[pos++] = *text++;
+    out[pos] = '\0';
+    return pos;
+}
+
+static int append_quoted_string_preview(char* out, int out_size, int pos, String* str) {
+    pos = append_text(out, out_size, pos, "'");
+    if (!str) return append_text(out, out_size, pos, "'");
+
+    int limit = (int)(str->len > 25 ? 25 : str->len);
+    for (int i = 0; i < limit && pos < out_size - 1; i++) {
+        char ch = str->chars[i];
+        if (ch == '\'' || ch == '\\') {
+            if (pos < out_size - 2) {
+                out[pos++] = '\\';
+                out[pos++] = ch;
+                out[pos] = '\0';
+            }
+        } else if (ch == '\n') {
+            pos = append_text(out, out_size, pos, "\\n");
+        } else if (ch == '\r') {
+            pos = append_text(out, out_size, pos, "\\r");
+        } else if (ch == '\t') {
+            pos = append_text(out, out_size, pos, "\\t");
+        } else {
+            out[pos++] = ch;
+            out[pos] = '\0';
+        }
+    }
+    if ((int)str->len > 28) pos = append_text(out, out_size, pos, "...");
+    return append_text(out, out_size, pos, "'");
+}
+
+static void append_invalid_arg_received(char* out, int out_size, Item value) {
+    int pos = (int)strlen(out);
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_UNDEFINED) {
+        append_text(out, out_size, pos, " Received undefined");
+    } else if (type == LMD_TYPE_NULL || value.item == ITEM_NULL) {
+        append_text(out, out_size, pos, " Received null");
+    } else if (type == LMD_TYPE_BOOL) {
+        append_text(out, out_size, pos, it2b(value) ?
+            " Received type boolean (true)" : " Received type boolean (false)");
+    } else if (type == LMD_TYPE_INT && !is_symbol_item(value)) {
+        char num[64];
+        snprintf(num, sizeof(num), " Received type number (%lld)", (long long)it2i(value));
+        append_text(out, out_size, pos, num);
+    } else if (type == LMD_TYPE_FLOAT) {
+        double d = it2d(value);
+        char num[96];
+        if (d != d) snprintf(num, sizeof(num), " Received type number (NaN)");
+        else if (d == 1.0/0.0) snprintf(num, sizeof(num), " Received type number (Infinity)");
+        else if (d == -1.0/0.0) snprintf(num, sizeof(num), " Received type number (-Infinity)");
+        else snprintf(num, sizeof(num), " Received type number (%g)", d);
+        append_text(out, out_size, pos, num);
+    } else if (type == LMD_TYPE_STRING) {
+        pos = append_text(out, out_size, pos, " Received type string (");
+        pos = append_quoted_string_preview(out, out_size, pos, it2s(value));
+        append_text(out, out_size, pos, ")");
+    } else if (type == LMD_TYPE_FUNC) {
+        append_text(out, out_size, pos, " Received function ");
+    } else if (type == LMD_TYPE_ARRAY) {
+        append_text(out, out_size, pos, " Received an instance of Array");
+    } else if (type == LMD_TYPE_MAP || type == LMD_TYPE_ELEMENT ||
+               type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP) {
+        append_text(out, out_size, pos, " Received an instance of Object");
+    } else {
+        append_text(out, out_size, pos, " Received type object");
+    }
+}
+
+static Item throw_invalid_servers_array_type(Item servers_item) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "The \"servers\" argument must be an instance of Array.");
+    append_invalid_arg_received(msg, sizeof(msg), servers_item);
+    return js_throw_type_error_code(JS_ERR_INVALID_ARG_TYPE, msg);
 }
 
 static Item make_node_error(const char* name, const char* code, const char* message) {
@@ -767,6 +851,49 @@ typedef struct DnsResolveOptions {
     Item callback;
 } DnsResolveOptions;
 
+static Item js_dns_cares_query_default(Item hostname) {
+    (void)hostname;
+    return (Item){.item = i2it(0)};
+}
+
+static Item make_dns_resolve_code_error(const char* code, const char* message,
+                                        const char* hostname, const char* syscall) {
+    Item error = js_new_error(make_string_item(message ? message : "DNS query failed"));
+    js_property_set(error, make_string_item("code"), make_string_item(code));
+    js_property_set(error, make_string_item("syscall"), make_string_item(syscall));
+    if (hostname) js_property_set(error, make_string_item("hostname"), make_string_item(hostname));
+    return error;
+}
+
+static void dns_ensure_cares_channelwrap(void) {
+    Item cares = js_internal_binding(make_string_item("cares_wrap"));
+    if (get_type_id(cares) != LMD_TYPE_MAP) return;
+
+    Item ctor = js_property_get(cares, make_string_item("ChannelWrap"));
+    if (!is_callable(ctor)) {
+        ctor = js_new_function((void*)js_dns_cares_query_default, 0);
+        js_property_set(cares, make_string_item("ChannelWrap"), ctor);
+    }
+
+    Item proto = js_property_get(ctor, make_string_item("prototype"));
+    if (!dns_is_object_like(proto)) {
+        proto = js_new_object();
+        js_property_set(ctor, make_string_item("prototype"), proto);
+    }
+
+    const char* methods[] = {
+        "queryA", "queryAaaa", "queryCname", "queryMx",
+        "querySrv", "queryTxt", "getHostByAddr", NULL
+    };
+    for (int i = 0; methods[i]; i++) {
+        Item key = make_string_item(methods[i]);
+        if (!is_callable(js_property_get(proto, key))) {
+            js_property_set(proto, key,
+                js_new_function((void*)js_dns_cares_query_default, 1));
+        }
+    }
+}
+
 static bool dns_rrtype_to_family(Item rrtype_item, int* out_family, char* out_syscall, int syscall_size) {
     if (is_nullish_item(rrtype_item)) {
         *out_family = 4;
@@ -788,8 +915,28 @@ static bool dns_rrtype_to_family(Item rrtype_item, int* out_family, char* out_sy
         snprintf(out_syscall, (size_t)syscall_size, "queryAaaa");
         return true;
     }
+    if (rrtype->len == 5 && memcmp(rrtype->chars, "CNAME", 5) == 0) {
+        *out_family = 0;
+        snprintf(out_syscall, (size_t)syscall_size, "queryCname");
+        return true;
+    }
+    if (rrtype->len == 2 && memcmp(rrtype->chars, "MX", 2) == 0) {
+        *out_family = 0;
+        snprintf(out_syscall, (size_t)syscall_size, "queryMx");
+        return true;
+    }
+    if (rrtype->len == 3 && memcmp(rrtype->chars, "SRV", 3) == 0) {
+        *out_family = 0;
+        snprintf(out_syscall, (size_t)syscall_size, "querySrv");
+        return true;
+    }
+    if (rrtype->len == 3 && memcmp(rrtype->chars, "TXT", 3) == 0) {
+        *out_family = 0;
+        snprintf(out_syscall, (size_t)syscall_size, "queryTxt");
+        return true;
+    }
     js_throw_type_error_code(JS_ERR_INVALID_ARG_VALUE,
-        "The argument 'rrtype' must be one of: 'A', 'AAAA'.");
+        "The argument 'rrtype' must be one of: 'A', 'AAAA', 'CNAME', 'MX', 'SRV', 'TXT'.");
     return false;
 }
 
@@ -817,6 +964,26 @@ static bool normalize_resolve_args(Item rest_args, bool promise_mode, int fixed_
     } else if (fixed_family == 6) {
         snprintf(out->syscall, sizeof(out->syscall), "queryAaaa");
         if (!promise_mode) callback_item = rrtype_item;
+    } else if (fixed_family == -1) {
+        out->family = 0;
+        snprintf(out->syscall, sizeof(out->syscall), "queryTxt");
+        if (!promise_mode) callback_item = rrtype_item;
+    } else if (fixed_family == -2) {
+        out->family = 0;
+        snprintf(out->syscall, sizeof(out->syscall), "queryMx");
+        if (!promise_mode) callback_item = rrtype_item;
+    } else if (fixed_family == -3) {
+        out->family = 0;
+        snprintf(out->syscall, sizeof(out->syscall), "querySrv");
+        if (!promise_mode) callback_item = rrtype_item;
+    } else if (fixed_family == -4) {
+        out->family = 0;
+        snprintf(out->syscall, sizeof(out->syscall), "queryCname");
+        if (!promise_mode) callback_item = rrtype_item;
+    } else if (fixed_family == -5) {
+        out->family = 0;
+        snprintf(out->syscall, sizeof(out->syscall), "getHostByAddr");
+        if (!promise_mode) callback_item = rrtype_item;
     } else {
         if (!promise_mode && is_callable(rrtype_item)) {
             callback_item = rrtype_item;
@@ -836,7 +1003,61 @@ static bool normalize_resolve_args(Item rest_args, bool promise_mode, int fixed_
     return true;
 }
 
+static bool dns_call_cares_query_hook(const DnsResolveOptions* options,
+                                      int* out_status, Item* out_value) {
+    *out_status = 0;
+    *out_value = make_js_undefined();
+
+    dns_ensure_cares_channelwrap();
+    Item cares = js_internal_binding(make_string_item("cares_wrap"));
+    if (get_type_id(cares) != LMD_TYPE_MAP) return false;
+
+    Item ctor = js_property_get(cares, make_string_item("ChannelWrap"));
+    Item proto = dns_is_object_like(ctor) ?
+        js_property_get(ctor, make_string_item("prototype")) : make_js_undefined();
+    if (!dns_is_object_like(proto)) return false;
+
+    Item fn = js_property_get(proto, make_string_item(options->syscall));
+    if (!is_callable(fn)) return false;
+
+    Item args[1] = { make_string_item(options->hostname) };
+    Item result = js_call_function(fn, proto, args, 1);
+    if (js_check_exception()) {
+        js_clear_exception();
+        return false;
+    }
+
+    if (get_type_id(result) == LMD_TYPE_INT) {
+        *out_status = (int)it2i(result);
+        return *out_status != 0;
+    }
+    if (is_nullish_item(result)) return false;
+
+    *out_value = result;
+    return true;
+}
+
 static bool dns_resolve_start(const DnsResolveOptions* options, Item resolve, Item reject) {
+    Item hook_value = make_js_undefined();
+    int hook_status = 0;
+    if (dns_call_cares_query_hook(options, &hook_status, &hook_value)) {
+        if (hook_status != 0) {
+            Item err = make_dns_resolve_error(hook_status, options->hostname, options->syscall);
+            dns_resolve_schedule(options->callback, resolve, reject, err, make_js_undefined());
+        } else {
+            dns_resolve_schedule(options->callback, resolve, reject, ItemNull, hook_value);
+        }
+        return true;
+    }
+
+    if (options->family != 4 && options->family != 6) {
+        Item err = make_dns_resolve_code_error("ENOTIMP",
+            "DNS record type is not implemented by this resolver backend",
+            options->hostname, options->syscall);
+        dns_resolve_schedule(options->callback, resolve, reject, err, make_js_undefined());
+        return true;
+    }
+
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) {
         log_error("dns: resolve: event loop not initialized");
@@ -904,6 +1125,26 @@ extern "C" Item js_dns_resolve6(Item rest_args) {
     return js_dns_resolve_common(rest_args, false, 6);
 }
 
+extern "C" Item js_dns_resolveTxt(Item rest_args) {
+    return js_dns_resolve_common(rest_args, false, -1);
+}
+
+extern "C" Item js_dns_resolveMx(Item rest_args) {
+    return js_dns_resolve_common(rest_args, false, -2);
+}
+
+extern "C" Item js_dns_resolveSrv(Item rest_args) {
+    return js_dns_resolve_common(rest_args, false, -3);
+}
+
+extern "C" Item js_dns_resolveCname(Item rest_args) {
+    return js_dns_resolve_common(rest_args, false, -4);
+}
+
+extern "C" Item js_dns_reverse(Item rest_args) {
+    return js_dns_resolve_common(rest_args, false, -5);
+}
+
 extern "C" Item js_dns_promises_resolve(Item rest_args) {
     return js_dns_resolve_common(rest_args, true, 0);
 }
@@ -914,6 +1155,26 @@ extern "C" Item js_dns_promises_resolve4(Item rest_args) {
 
 extern "C" Item js_dns_promises_resolve6(Item rest_args) {
     return js_dns_resolve_common(rest_args, true, 6);
+}
+
+extern "C" Item js_dns_promises_resolveTxt(Item rest_args) {
+    return js_dns_resolve_common(rest_args, true, -1);
+}
+
+extern "C" Item js_dns_promises_resolveMx(Item rest_args) {
+    return js_dns_resolve_common(rest_args, true, -2);
+}
+
+extern "C" Item js_dns_promises_resolveSrv(Item rest_args) {
+    return js_dns_resolve_common(rest_args, true, -3);
+}
+
+extern "C" Item js_dns_promises_resolveCname(Item rest_args) {
+    return js_dns_resolve_common(rest_args, true, -4);
+}
+
+extern "C" Item js_dns_promises_reverse(Item rest_args) {
+    return js_dns_resolve_common(rest_args, true, -5);
 }
 
 // =============================================================================
@@ -958,11 +1219,158 @@ extern "C" Item js_dns_lookupSync(Item hostname_item) {
 }
 
 // =============================================================================
-// dns Module Namespace
+// Resolver server list state
 // =============================================================================
 
 static Item dns_namespace = {0};
 static Item dns_promises_namespace = {0};
+static Item dns_resolver_prototype = {0};
+static Item dns_promises_resolver_prototype = {0};
+static Item dns_default_servers = {0};
+static bool dns_roots_registered = false;
+
+static void dns_register_roots_once(void) {
+    if (dns_roots_registered) return;
+    heap_register_gc_root(&dns_namespace.item);
+    heap_register_gc_root(&dns_promises_namespace.item);
+    heap_register_gc_root(&dns_resolver_prototype.item);
+    heap_register_gc_root(&dns_promises_resolver_prototype.item);
+    heap_register_gc_root(&dns_default_servers.item);
+    dns_roots_registered = true;
+}
+
+static Item dns_array_copy(Item servers) {
+    Item copy = js_array_new(0);
+    if (get_type_id(servers) != LMD_TYPE_ARRAY) return copy;
+    int64_t len = js_array_length(servers);
+    for (int64_t i = 0; i < len; i++) {
+        js_array_push(copy, js_array_get_int(servers, i));
+    }
+    return copy;
+}
+
+static void dns_push_resolv_conf_server(Item servers, const char* start, const char* end) {
+    while (start < end && (*start == ' ' || *start == '\t')) start++;
+    while (end > start && (end[-1] == ' ' || end[-1] == '\t' ||
+           end[-1] == '\r' || end[-1] == '\n')) {
+        end--;
+    }
+    if (end <= start) return;
+    int len = (int)(end - start);
+    if (len > 0 && len < 128) js_array_push(servers, make_string_item(start, len));
+}
+
+static Item dns_load_system_servers(void) {
+    Item servers = js_array_new(0);
+#ifndef _WIN32
+    FILE* file = fopen("/etc/resolv.conf", "r");
+    if (file) {
+        char line[512];
+        while (fgets(line, sizeof(line), file)) {
+            const char* p = line;
+            while (*p == ' ' || *p == '\t') p++;
+            if (memcmp(p, "nameserver", 10) != 0 ||
+                (p[10] != ' ' && p[10] != '\t')) {
+                continue;
+            }
+            p += 10;
+            const char* end = p;
+            while (*end && *end != '#' && *end != ';') end++;
+            dns_push_resolv_conf_server(servers, p, end);
+        }
+        fclose(file);
+    }
+#endif
+    if (js_array_length(servers) == 0) {
+        js_array_push(servers, make_string_item("127.0.0.1"));
+    }
+    return servers;
+}
+
+static Item dns_get_default_servers(void) {
+    dns_register_roots_once();
+    if (get_type_id(dns_default_servers) != LMD_TYPE_ARRAY) {
+        dns_default_servers = dns_load_system_servers();
+    }
+    return dns_default_servers;
+}
+
+static Item dns_validated_servers_copy(Item servers_item) {
+    if (get_type_id(servers_item) != LMD_TYPE_ARRAY) {
+        throw_invalid_servers_array_type(servers_item);
+        return ItemNull;
+    }
+
+    Item copy = js_array_new(0);
+    int64_t len = js_array_length(servers_item);
+    for (int64_t i = 0; i < len; i++) {
+        Item server = js_array_get_int(servers_item, i);
+        if (get_type_id(server) != LMD_TYPE_STRING) {
+            char name[32];
+            snprintf(name, sizeof(name), "servers[%lld]", (long long)i);
+            js_throw_invalid_arg_type(name, "string", server);
+            return ItemNull;
+        }
+        js_array_push(copy, server);
+    }
+    return copy;
+}
+
+static Item dns_receiver_servers(Item receiver) {
+    if (dns_is_object_like(receiver)) {
+        Item servers = js_property_get(receiver, make_string_item("__dns_servers__"));
+        if (get_type_id(servers) == LMD_TYPE_ARRAY) return servers;
+    }
+    return dns_get_default_servers();
+}
+
+extern "C" Item js_dns_resolver_handle_getServers(void) {
+    Item handle = js_get_this();
+    Item owner = dns_is_object_like(handle) ?
+        js_property_get(handle, make_string_item("__dns_owner__")) : make_js_undefined();
+    return dns_array_copy(dns_receiver_servers(owner));
+}
+
+extern "C" Item js_dns_getServers(void) {
+    Item receiver = js_get_this();
+    if (dns_is_object_like(receiver)) {
+        Item handle = js_property_get(receiver, make_string_item("_handle"));
+        if (dns_is_object_like(handle)) {
+            Item get_servers = js_property_get(handle, make_string_item("getServers"));
+            if (is_callable(get_servers)) {
+                Item result = js_call_function(get_servers, handle, NULL, 0);
+                if (get_type_id(result) == LMD_TYPE_ARRAY) return dns_array_copy(result);
+                return js_array_new(0);
+            }
+        }
+    }
+    return dns_array_copy(dns_receiver_servers(receiver));
+}
+
+extern "C" Item js_dns_setServers(Item servers_item) {
+    Item copy = dns_validated_servers_copy(servers_item);
+    if (js_check_exception()) return ItemNull;
+
+    Item receiver = js_get_this();
+    if (receiver.item == dns_namespace.item ||
+        receiver.item == dns_promises_namespace.item ||
+        !dns_is_object_like(receiver)) {
+        dns_default_servers = copy;
+        if (dns_namespace.item != 0) {
+            js_property_set(dns_namespace, make_string_item("__dns_servers__"), copy);
+        }
+        if (dns_promises_namespace.item != 0) {
+            js_property_set(dns_promises_namespace, make_string_item("__dns_servers__"), copy);
+        }
+    } else {
+        js_property_set(receiver, make_string_item("__dns_servers__"), copy);
+    }
+    return make_js_undefined();
+}
+
+// =============================================================================
+// dns Module Namespace
+// =============================================================================
 
 static void dns_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);
@@ -970,14 +1378,147 @@ static void dns_set_method(Item ns, const char* name, void* func_ptr, int param_
     js_property_set(ns, key, fn);
 }
 
+static void dns_set_constant(Item ns, const char* name, const char* value) {
+    js_property_set(ns, make_string_item(name), make_string_item(value));
+}
+
+static void dns_set_constants(Item ns) {
+    dns_set_constant(ns, "NODATA", "ENODATA");
+    dns_set_constant(ns, "FORMERR", "EFORMERR");
+    dns_set_constant(ns, "SERVFAIL", "ESERVFAIL");
+    dns_set_constant(ns, "NOTFOUND", "ENOTFOUND");
+    dns_set_constant(ns, "NOTIMP", "ENOTIMP");
+    dns_set_constant(ns, "REFUSED", "EREFUSED");
+    dns_set_constant(ns, "BADQUERY", "EBADQUERY");
+    dns_set_constant(ns, "BADNAME", "EBADNAME");
+    dns_set_constant(ns, "BADFAMILY", "EBADFAMILY");
+    dns_set_constant(ns, "BADRESP", "EBADRESP");
+    dns_set_constant(ns, "CONNREFUSED", "ECONNREFUSED");
+    dns_set_constant(ns, "TIMEOUT", "ETIMEOUT");
+    dns_set_constant(ns, "EOF", "EOF");
+    dns_set_constant(ns, "FILE", "EFILE");
+    dns_set_constant(ns, "NOMEM", "ENOMEM");
+    dns_set_constant(ns, "DESTRUCTION", "EDESTRUCTION");
+    dns_set_constant(ns, "BADSTR", "EBADSTR");
+    dns_set_constant(ns, "BADFLAGS", "EBADFLAGS");
+    dns_set_constant(ns, "NONAME", "ENONAME");
+    dns_set_constant(ns, "BADHINTS", "EBADHINTS");
+    dns_set_constant(ns, "NOTINITIALIZED", "ENOTINITIALIZED");
+    dns_set_constant(ns, "LOADIPHLPAPI", "ELOADIPHLPAPI");
+    dns_set_constant(ns, "ADDRGETNETWORKPARAMS", "EADDRGETNETWORKPARAMS");
+    dns_set_constant(ns, "CANCELLED", "ECANCELLED");
+}
+
+static bool dns_is_object_like(Item item) {
+    TypeId type = get_type_id(item);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
+        type == LMD_TYPE_ELEMENT || type == LMD_TYPE_FUNC;
+}
+
+static bool dns_called_as_constructor(void) {
+    Item new_target = js_get_new_target();
+    TypeId type = get_type_id(new_target);
+    return new_target.item != 0 && new_target.item != ItemNull.item &&
+        type != LMD_TYPE_UNDEFINED && dns_is_object_like(new_target);
+}
+
+static Item dns_get_resolver_prototype(bool promise_mode) {
+    Item* proto_ptr = promise_mode ? &dns_promises_resolver_prototype : &dns_resolver_prototype;
+    if (proto_ptr->item != 0) return *proto_ptr;
+
+    Item proto = js_new_object();
+    if (promise_mode) {
+        dns_set_method(proto, "resolve",  (void*)js_dns_promises_resolve, -1);
+        dns_set_method(proto, "resolve4", (void*)js_dns_promises_resolve4, -1);
+        dns_set_method(proto, "resolve6", (void*)js_dns_promises_resolve6, -1);
+        dns_set_method(proto, "resolveCname", (void*)js_dns_promises_resolveCname, -1);
+        dns_set_method(proto, "resolveMx", (void*)js_dns_promises_resolveMx, -1);
+        dns_set_method(proto, "resolveSrv", (void*)js_dns_promises_resolveSrv, -1);
+        dns_set_method(proto, "resolveTxt", (void*)js_dns_promises_resolveTxt, -1);
+        dns_set_method(proto, "reverse", (void*)js_dns_promises_reverse, -1);
+    } else {
+        dns_set_method(proto, "resolve",  (void*)js_dns_resolve, -1);
+        dns_set_method(proto, "resolve4", (void*)js_dns_resolve4, -1);
+        dns_set_method(proto, "resolve6", (void*)js_dns_resolve6, -1);
+        dns_set_method(proto, "resolveCname", (void*)js_dns_resolveCname, -1);
+        dns_set_method(proto, "resolveMx", (void*)js_dns_resolveMx, -1);
+        dns_set_method(proto, "resolveSrv", (void*)js_dns_resolveSrv, -1);
+        dns_set_method(proto, "resolveTxt", (void*)js_dns_resolveTxt, -1);
+        dns_set_method(proto, "reverse", (void*)js_dns_reverse, -1);
+    }
+    dns_set_method(proto, "getServers", (void*)js_dns_getServers, 0);
+    dns_set_method(proto, "setServers", (void*)js_dns_setServers, 1);
+
+    *proto_ptr = proto;
+    return proto;
+}
+
+static void dns_init_resolver_state(Item resolver) {
+    if (!dns_is_object_like(resolver)) return;
+    js_property_set(resolver, make_string_item("__dns_servers__"),
+        dns_array_copy(dns_get_default_servers()));
+
+    Item handle = js_new_object();
+    js_property_set(handle, make_string_item("__dns_owner__"), resolver);
+    js_property_set(handle, make_string_item("getServers"),
+        js_new_function((void*)js_dns_resolver_handle_getServers, 0));
+    js_property_set(resolver, make_string_item("_handle"), handle);
+}
+
+static Item dns_create_resolver(bool promise_mode) {
+    Item self = js_get_this();
+    Item proto = dns_get_resolver_prototype(promise_mode);
+    if (dns_called_as_constructor() && dns_is_object_like(self)) {
+        js_set_prototype(self, proto);
+        dns_init_resolver_state(self);
+        return self;
+    }
+
+    Item resolver = js_new_object();
+    js_set_prototype(resolver, proto);
+    dns_init_resolver_state(resolver);
+    return resolver;
+}
+
+extern "C" Item js_dns_resolver_constructor(void) {
+    return dns_create_resolver(false);
+}
+
+extern "C" Item js_dns_promises_resolver_constructor(void) {
+    return dns_create_resolver(true);
+}
+
+static Item dns_make_resolver_constructor(bool promise_mode) {
+    Item ctor = js_new_function(promise_mode ?
+        (void*)js_dns_promises_resolver_constructor :
+        (void*)js_dns_resolver_constructor, 0);
+    Item proto = dns_get_resolver_prototype(promise_mode);
+    js_property_set(ctor, make_string_item("prototype"), proto);
+    js_property_set(proto, make_string_item("constructor"), ctor);
+    return ctor;
+}
+
 extern "C" Item js_get_dns_promises_namespace(void) {
     if (dns_promises_namespace.item != 0) return dns_promises_namespace;
 
+    dns_ensure_cares_channelwrap();
     dns_promises_namespace = js_new_object();
     dns_set_method(dns_promises_namespace, "lookup",  (void*)js_dns_promises_lookup, -1);
     dns_set_method(dns_promises_namespace, "resolve", (void*)js_dns_promises_resolve, -1);
     dns_set_method(dns_promises_namespace, "resolve4", (void*)js_dns_promises_resolve4, -1);
     dns_set_method(dns_promises_namespace, "resolve6", (void*)js_dns_promises_resolve6, -1);
+    dns_set_method(dns_promises_namespace, "resolveCname", (void*)js_dns_promises_resolveCname, -1);
+    dns_set_method(dns_promises_namespace, "resolveMx", (void*)js_dns_promises_resolveMx, -1);
+    dns_set_method(dns_promises_namespace, "resolveSrv", (void*)js_dns_promises_resolveSrv, -1);
+    dns_set_method(dns_promises_namespace, "resolveTxt", (void*)js_dns_promises_resolveTxt, -1);
+    dns_set_method(dns_promises_namespace, "reverse", (void*)js_dns_promises_reverse, -1);
+    dns_set_method(dns_promises_namespace, "getServers", (void*)js_dns_getServers, 0);
+    dns_set_method(dns_promises_namespace, "setServers", (void*)js_dns_setServers, 1);
+    dns_set_constants(dns_promises_namespace);
+    js_property_set(dns_promises_namespace, make_string_item("__dns_servers__"),
+        dns_get_default_servers());
+    js_property_set(dns_promises_namespace, make_string_item("Resolver"),
+        dns_make_resolver_constructor(true));
     js_property_set(dns_promises_namespace, make_string_item("default"), dns_promises_namespace);
     return dns_promises_namespace;
 }
@@ -985,6 +1526,7 @@ extern "C" Item js_get_dns_promises_namespace(void) {
 extern "C" Item js_get_dns_namespace(void) {
     if (dns_namespace.item != 0) return dns_namespace;
 
+    dns_ensure_cares_channelwrap();
     dns_namespace = js_new_object();
 
     dns_set_method(dns_namespace, "lookup",     (void*)js_dns_lookup, -1);
@@ -992,6 +1534,18 @@ extern "C" Item js_get_dns_namespace(void) {
     dns_set_method(dns_namespace, "resolve",    (void*)js_dns_resolve, -1);
     dns_set_method(dns_namespace, "resolve4",   (void*)js_dns_resolve4, -1);
     dns_set_method(dns_namespace, "resolve6",   (void*)js_dns_resolve6, -1);
+    dns_set_method(dns_namespace, "resolveCname", (void*)js_dns_resolveCname, -1);
+    dns_set_method(dns_namespace, "resolveMx",    (void*)js_dns_resolveMx, -1);
+    dns_set_method(dns_namespace, "resolveSrv",   (void*)js_dns_resolveSrv, -1);
+    dns_set_method(dns_namespace, "resolveTxt",   (void*)js_dns_resolveTxt, -1);
+    dns_set_method(dns_namespace, "reverse",      (void*)js_dns_reverse, -1);
+    dns_set_method(dns_namespace, "getServers", (void*)js_dns_getServers, 0);
+    dns_set_method(dns_namespace, "setServers", (void*)js_dns_setServers, 1);
+    dns_set_constants(dns_namespace);
+    js_property_set(dns_namespace, make_string_item("__dns_servers__"),
+        dns_get_default_servers());
+    js_property_set(dns_namespace, make_string_item("Resolver"),
+        dns_make_resolver_constructor(false));
 
     Item promises = js_get_dns_promises_namespace();
     js_property_set(dns_namespace, make_string_item("promises"), promises);
@@ -1005,4 +1559,7 @@ extern "C" Item js_get_dns_namespace(void) {
 extern "C" void js_dns_reset(void) {
     dns_namespace = (Item){0};
     dns_promises_namespace = (Item){0};
+    dns_resolver_prototype = (Item){0};
+    dns_promises_resolver_prototype = (Item){0};
+    dns_default_servers = (Item){0};
 }

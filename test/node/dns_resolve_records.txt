@@ -6,3 +6,16 @@ resolve default array: true
 resolve default ipv4: true
 promises resolve4 array: true
 promises resolve4 ipv4: true
+resolveTxt err: true
+resolveTxt shape: lambda example.test spf
+resolveMx err: true
+resolveMx shape: mail.example.test 10
+resolveSrv err: true
+resolveSrv shape: srv.example.test 443 1 5
+resolveCname err: true
+resolveCname shape: alias.example.test
+reverse err: true
+reverse shape: ptr.127.0.0.1
+promises resolveTxt shape: lambda promise.test
+resolver resolveTxt method: function
+promises resolver reverse method: function

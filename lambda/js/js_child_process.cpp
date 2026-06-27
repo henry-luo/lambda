@@ -764,46 +764,82 @@ static bool item_string_equals(Item item, const char* text) {
     return s->len == len && memcmp(s->chars, text, len) == 0;
 }
 
-static void apply_stdio_entry(SpawnRequest* req, int index, Item entry) {
-    if (index < 0 || index >= 3) return;
+static bool throw_invalid_stdio_value(void) {
+    js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The argument 'stdio' is invalid");
+    return false;
+}
+
+static bool apply_stdio_ipc(SpawnRequest* req) {
+    if (req->ipc) {
+        js_throw_error_with_code("ERR_IPC_ONE_PIPE", "Child process can have only one IPC pipe");
+        return false;
+    }
+    req->ipc = true;
+    return true;
+}
+
+static bool apply_stdio_entry(SpawnRequest* req, int index, Item entry) {
+    if (index < 0 || index >= 3) return true;
+    if (is_nullish_item(entry)) return true;
     if (item_string_equals(entry, "ipc")) {
-        req->ipc = true;
-        return;
+        return apply_stdio_ipc(req);
     }
     if (item_string_equals(entry, "inherit")) {
         req->stdio_mode[index] = 1;
     } else if (item_string_equals(entry, "ignore")) {
         req->stdio_mode[index] = 2;
-    } else if (item_string_equals(entry, "pipe")) {
+    } else if (item_string_equals(entry, "pipe") || item_string_equals(entry, "overlapped")) {
         req->stdio_mode[index] = 0;
+    } else if (get_type_id(entry) == LMD_TYPE_STRING) {
+        return throw_invalid_stdio_value();
     }
+    return true;
 }
 
-static void normalize_stdio_options(SpawnRequest* req) {
-    if (!is_object_item(req->options)) return;
+static bool normalize_stdio_options(SpawnRequest* req) {
+    if (!is_object_item(req->options)) return true;
     Item stdio = js_property_get(req->options, make_string_item("stdio"));
-    if (is_nullish_item(stdio)) return;
+    if (is_nullish_item(stdio)) return true;
     if (item_string_equals(stdio, "inherit")) {
         req->stdio_mode[0] = 1;
         req->stdio_mode[1] = 1;
         req->stdio_mode[2] = 1;
-        return;
+        return true;
     }
     if (item_string_equals(stdio, "ignore")) {
         req->stdio_mode[0] = 2;
         req->stdio_mode[1] = 2;
         req->stdio_mode[2] = 2;
-        return;
+        return true;
+    }
+    if (item_string_equals(stdio, "pipe") || item_string_equals(stdio, "overlapped")) {
+        req->stdio_mode[0] = 0;
+        req->stdio_mode[1] = 0;
+        req->stdio_mode[2] = 0;
+        return true;
+    }
+    if (get_type_id(stdio) == LMD_TYPE_STRING) {
+        return throw_invalid_stdio_value();
     }
     if (get_type_id(stdio) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(stdio);
         for (int i = 0; i < 3 && i < len; i++) {
-            apply_stdio_entry(req, i, js_array_get_int(stdio, i));
+            if (!apply_stdio_entry(req, i, js_array_get_int(stdio, i))) return false;
         }
         for (int64_t i = 3; i < len; i++) {
-            if (item_string_equals(js_array_get_int(stdio, i), "ipc")) req->ipc = true;
+            Item entry = js_array_get_int(stdio, i);
+            if (item_string_equals(entry, "ipc")) {
+                if (!apply_stdio_ipc(req)) return false;
+            } else if (get_type_id(entry) == LMD_TYPE_STRING &&
+                       !item_string_equals(entry, "ignore") &&
+                       !item_string_equals(entry, "pipe") &&
+                       !item_string_equals(entry, "overlapped")) {
+                return throw_invalid_stdio_value();
+            }
         }
+        return true;
     }
+    return throw_invalid_stdio_value();
 }
 
 static bool normalize_spawn_request(Item rest_args, SpawnRequest* req) {
@@ -870,7 +906,7 @@ static bool normalize_spawn_request(Item rest_args, SpawnRequest* req) {
         req->shell = get_type_id(shell) == LMD_TYPE_BOOL && it2b(shell);
         Item env = js_property_get(req->options, make_string_item("env"));
         if (is_object_item(env)) req->env = env;
-        normalize_stdio_options(req);
+        if (!normalize_stdio_options(req)) return false;
     }
     return true;
 }
