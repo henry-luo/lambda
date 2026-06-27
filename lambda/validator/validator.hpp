@@ -18,6 +18,24 @@ typedef struct ValidationError ValidationError;
 typedef struct PathSegment PathSegment;
 class SchemaValidator;  // C++ class, defined below
 
+// ==================== Type Definition Registry ====================
+// Relocated from the former schema_ast.hpp, whose unified TypeSchema/Schema*
+// model was dead code. Only these two structs were still in use — by the
+// schema loader in doc_validator.cpp, which stores parsed `type Name = ...`
+// definitions keyed by name. The legacy `schema_type` slot is retained as an
+// always-null opaque pointer (the TypeSchema type it referenced is gone).
+typedef struct TypeDefinition {
+    StrView name;             // type name
+    void* schema_type;        // legacy slot, always null (former TypeSchema*)
+    Type* runtime_type;       // runtime representation
+    bool is_exported;         // whether the type is exported
+} TypeDefinition;
+
+typedef struct TypeRegistryEntry {
+    TypeDefinition* definition;  // the type definition
+    StrView name_key;            // key for hashmap lookup
+} TypeRegistryEntry;
+
 // ==================== Validation Error System ====================
 
 // Validation error codes

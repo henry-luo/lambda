@@ -1,8 +1,8 @@
 # Lambda Runtime — Value & Type Model
 
-> **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers how a Lambda value is represented at runtime: the 64-bit tagged `Item` layout, the `TypeId` enum and its three storage classes, the boxing/unboxing rules, the `Container` struct family (range, list/array, numeric array, map, object, element, vmap), the map *shape* machinery (`TypeMap`/`ShapeEntry`), the static `Type*` family used for compile-time typing, and the second, parallel `TypeSchema` vocabulary used by the validator.
+> **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers how a Lambda value is represented at runtime: the 64-bit tagged `Item` layout, the `TypeId` enum and its three storage classes, the boxing/unboxing rules, the `Container` struct family (range, list/array, numeric array, map, object, element, vmap), the map *shape* machinery (`TypeMap`/`ShapeEntry`), and the static `Type*` family used for compile-time typing.
 >
-> **Primary sources:** `lambda/lambda.h` (C-mode `Item`, `EnumTypeId`, container structs, boxing macros, C-API), `lambda/lambda.hpp` (the real bit-field `struct Item`, C++ container structs, unbox helpers), `lambda/lambda-data.hpp` (`Type*` family, `ShapeEntry`/`TypeMap`, singletons), `lambda/lambda-data.cpp` (unbox implementations, `item_deep_equal`, type singletons), `lambda/lambda-data-runtime.cpp` (element access + boxing at the boundary), `lambda/vmap.cpp` (`VMap`), `lambda/schema_ast.hpp` (`TypeSchema`).
+> **Primary sources:** `lambda/lambda.h` (C-mode `Item`, `EnumTypeId`, container structs, boxing macros, C-API), `lambda/lambda.hpp` (the real bit-field `struct Item`, C++ container structs, unbox helpers), `lambda/lambda-data.hpp` (`Type*` family, `ShapeEntry`/`TypeMap`, singletons), `lambda/lambda-data.cpp` (unbox implementations, `item_deep_equal`, type singletons), `lambda/lambda-data-runtime.cpp` (element access + boxing at the boundary), `lambda/vmap.cpp` (`VMap`).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names.
 
 ---
@@ -96,7 +96,7 @@ The `Type*` family (all in `lambda-data.hpp`):
 
 Every primitive has a singleton `TYPE_*` object and a `LIT_TYPE_*` reference, declared at `lambda-data.hpp:649`–`737` and wired up by `init_typetype()` (`lambda-data.cpp:195`). `base_type(TypeId)`/`const_type(idx)` (`lambda.h:1616`) and `fn_type(Item)` (`lambda-eval.cpp:1987`) bridge a runtime value back to its static `Type*`. The build-time inference that *produces* these `Type*` objects is owned by [LR_02 — Parsing & AST Construction](LR_02_Parsing_AST.md).
 
-**A second, parallel type vocabulary** exists for the schema validator. `schema_ast.hpp` defines `TypeSchema` (which embeds a `Type base`) plus a `SchemaTypeId` that extends `EnumTypeId` past `LMD_TYPE_ERROR` (`:37`), with the bridge functions `schema_to_runtime_type`/`runtime_to_schema_type` (`:195`). The two models overlap and must be kept in sync — a maintenance hazard noted in §Known Issues and detailed in the validator docs (out of scope here).
+A **second, parallel type vocabulary** (a `TypeSchema`/`SchemaTypeId` "unified schema" model in a former `schema_ast.hpp`) once shadowed this one for the schema validator, but it was unreachable dead code and has been removed; the validator now uses the runtime `Type*` family directly ([LR_13 — Schema Validator](LR_13_Schema_Validator.md)). The `Type*` family described here is the runtime's single type vocabulary.
 
 ---
 
@@ -119,7 +119,7 @@ Every primitive has a singleton `TYPE_*` object and a `LIT_TYPE_*` reference, de
 3. **Explicit MIR-JIT workarounds embedded in the value model.** `_store_i64`/`_store_f64` are opaque stores that exist purely to stop the MIR SSA optimizer reordering swap-pattern assignments inside loops (`lambda-data.cpp:377`, `lambda.h:1283`); `push_l_safe`/`push_d_safe`/`push_k_safe` exist purely to undo double-boxing the JIT introduces (`lambda-mem.cpp:597`); `_barg` must accept both tagged Items and raw `int64_t` for bitwise ops (`lambda.h:1289`). These are intentional but uncomfortable couplings between the value model and the backend — see [LR_07](LR_07_MIR_Transpiler_JIT.md).
 4. **Fragile sentinels and coercions.** `it2d` poisons unrecognized types to `NaN` rather than raising (`lambda-data.cpp:332`); `it2l` returns `INT64_MAX` as its error sentinel, which collides with a legitimate maximum int64 (`INT64_ERROR == INT64_MAX`, `lambda.h:830`); `it2b` omits `SYMBOL`/`INT64`/`NUM_SIZED`/`DECIMAL` from its explicit cases, so those fall through to an always-truthy tail (`:335`).
 5. **Overloaded tags.** `BigInt` rides on `LMD_TYPE_DECIMAL`, distinguished only by `Decimal.unlimited == DECIMAL_BIGINT` (`lambda.h:859`); `JsAccessorPair` deliberately begins with `type_id == LMD_TYPE_FUNC`, so a slot value mis-reads as a function unless callers check `JSPD_IS_ACCESSOR` first — the header itself warns about this (`lambda-data.hpp:213`).
-6. **Two parallel type vocabularies.** The runtime `Type*` family and the validator's `TypeSchema`/`SchemaTypeId` overlap and are bridged by hand (`schema_ast.hpp:195`); a change to one must be mirrored in the other.
+6. **~~Two parallel type vocabularies~~ (resolved).** A second `TypeSchema`/`SchemaTypeId` vocabulary in `schema_ast.hpp` once shadowed the runtime `Type*` family; it was dead code and has been removed ([LR_13](LR_13_Schema_Validator.md)), leaving `Type*` as the runtime's single type vocabulary.
 7. **`vmap_from_array` dead branch.** The guard `type_id != LMD_TYPE_ARRAY && type_id != LMD_TYPE_ARRAY` (`vmap.cpp:271`) compares `LMD_TYPE_ARRAY` twice; the second clause is a no-op and almost certainly meant `LMD_TYPE_ARRAY_NUM`.
 8. **Latent, not annotated.** The core value-model files carry no `TODO`/`FIXME`/`HACK`/`XXX` markers; the issues above are structural and discoverable only by reading the code, not by grepping for tags.
 
@@ -136,7 +136,6 @@ Every primitive has a singleton `TYPE_*` object and a `LIT_TYPE_*` reference, de
 | `lambda/lambda-data-runtime.cpp` | Container element reads with boundary boxing (`array_num_get`, `map_get`, `elmt_get`), for-loop iterators, `ensure_typed_array`. |
 | `lambda/lambda-mem.cpp` | Nursery boxing `push_l`/`push_d`/`push_k` and the `push_*_safe` double-box guards. |
 | `lambda/vmap.cpp` | `VMap` vtable-backed virtual map. |
-| `lambda/schema_ast.hpp` | The parallel `TypeSchema`/`SchemaTypeId` vocabulary and its runtime bridges. |
 
 ## Appendix B — Related documents
 
