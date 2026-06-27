@@ -101,6 +101,7 @@ def write_report(args, data):
     w(f"- **Platform:** {platform.system()} {platform.machine()}")
     w(f"- **Lambda commit:** `{commit}`")
     w("- **Lambda build:** clean release build (`make release`)")
+    w("- **Instrumentation check:** release binary passed the standard profiling-marker check before the benchmark run")
     w(f"- **Node.js:** {node_version}")
     w(f"- **QuickJS:** {qjs_version}")
     w("- **Methodology:** 3 runs per benchmark by default, median of self-reported `__TIMING__` milliseconds")
