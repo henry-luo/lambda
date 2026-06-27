@@ -36,7 +36,7 @@ let tx_all_insert = cmd_insert_text(s_all, "All new")
 "insert all caret path:"; path_equal(tx_all_insert.sel_after.anchor.path, [0, 0])
 "insert all caret off:"; tx_all_insert.sel_after.anchor.offset == 7
 
-let tx_all_insert_marked = cmd_insert_text({doc: d0, selection: all_selection(), stored_marks: ['strong']}, "Bold")
+let tx_all_insert_marked = cmd_insert_text({doc: d0, selection: all_selection(), stored_marks: [{name: 'strong', value: true}]}, "Bold")
 "insert all mark:"; has_mark(node_at(tx_all_insert_marked.doc_after, [0, 0]).marks, 'strong')
 
 let html_insert_doc = node('doc', [node('p', [text("Hello")])])
@@ -63,9 +63,9 @@ let tx_inline_node_insert = cmd_insert_text({doc: inline_atom_doc, selection: no
 "insert inline node caret:"; path_equal(tx_inline_node_insert.sel_after.anchor.path, [0, 1]) and tx_inline_node_insert.sel_after.anchor.offset == 1
 
 let mark_span_doc = node('doc', [node('paragraph', [
-  text_marked("Hello", ['strong']),
+  text_marked("Hello", [{name: 'strong', value: true}]),
   text(" "),
-  text_marked("world", ['em'])
+  text_marked("world", [{name: 'em', value: true}])
 ])])
 let mark_span_sel = text_selection(pos([0, 0], 2), pos([0, 2], 3))
 let mark_span_state = {doc: mark_span_doc, selection: mark_span_sel}
@@ -347,71 +347,71 @@ let tx_section_delete_row = cmd_delete_table_row(section_cell_state)
 // ---------------------------------------------------------------------------
 // cmd_toggle_mark
 // ---------------------------------------------------------------------------
-let tx_bold = cmd_toggle_mark(s0, 'strong')
+let tx_bold = cmd_toggle_mark(s0, 'strong', true)
 "toggle stored mark:"; has_mark(tx_get_meta(tx_bold, "storedMarks"), 'strong')
 "toggle stored no doc change:"; doc_text(tx_bold.doc_after) == doc_text(d0)
-let tx_bold_off = cmd_toggle_mark({doc: d0, selection: caret0, stored_marks: ['strong']}, 'strong')
+let tx_bold_off = cmd_toggle_mark({doc: d0, selection: caret0, stored_marks: [{name: 'strong', value: true}]}, 'strong', true)
 "toggle stored off:"; len(tx_get_meta(tx_bold_off, "storedMarks")) == 0
 let tx_stored_insert = cmd_insert_text({doc: d0, selection: caret0, stored_marks: tx_get_meta(tx_bold, "storedMarks")}, "! ")
 "stored insert children:"; len(node_at(tx_stored_insert.doc_after, [0]).content) == 3
 "stored insert mark:"; has_mark(node_at(tx_stored_insert.doc_after, [0, 1]).marks, 'strong')
 "stored insert text:"; node_at(tx_stored_insert.doc_after, [0, 1]).text == "! "
 
-let tx_range_bold = cmd_toggle_mark(s_sel, 'strong')
+let tx_range_bold = cmd_toggle_mark(s_sel, 'strong', true)
 let leaf_after = node_at(tx_range_bold.doc_after, [0, 1])
 "toggle add:";    has_mark(leaf_after.marks, 'strong')
 "toggle preserves text:"; doc_text(tx_range_bold.doc_after) == doc_text(d0)
 // toggling again removes
 let s_marked = {doc: tx_range_bold.doc_after, selection: tx_range_bold.sel_after}
-let tx_unbold = cmd_toggle_mark(s_marked, 'strong')
+let tx_unbold = cmd_toggle_mark(s_marked, 'strong', true)
 let leaf_after2 = node_at(tx_unbold.doc_after, [0, 1])
 "toggle remove:"; not has_mark(leaf_after2.marks, 'strong')
 
-let tx_all_bold = cmd_toggle_mark({doc: d0, selection: all_selection()}, 'strong')
+let tx_all_bold = cmd_toggle_mark({doc: d0, selection: all_selection()}, 'strong', true)
 "toggle all add steps:"; len(tx_all_bold.steps) == 2
 "toggle all add first:"; has_mark(node_at(tx_all_bold.doc_after, [0, 0]).marks, 'strong')
 "toggle all add second:"; has_mark(node_at(tx_all_bold.doc_after, [1, 0]).marks, 'strong')
-let tx_all_unbold = cmd_toggle_mark({doc: tx_all_bold.doc_after, selection: all_selection()}, 'strong')
+let tx_all_unbold = cmd_toggle_mark({doc: tx_all_bold.doc_after, selection: all_selection()}, 'strong', true)
 "toggle all remove steps:"; len(tx_all_unbold.steps) == 2
 "toggle all remove first:"; not has_mark(node_at(tx_all_unbold.doc_after, [0, 0]).marks, 'strong')
 "toggle all remove second:"; not has_mark(node_at(tx_all_unbold.doc_after, [1, 0]).marks, 'strong')
 let partial_mark_doc = node('doc', [
-  node('paragraph', [text_marked("Marked", ['strong'])]),
+  node('paragraph', [text_marked("Marked", [{name: 'strong', value: true}])]),
   node('paragraph', [text("Plain")])
 ])
-let tx_all_partial = cmd_toggle_mark({doc: partial_mark_doc, selection: all_selection()}, 'strong')
+let tx_all_partial = cmd_toggle_mark({doc: partial_mark_doc, selection: all_selection()}, 'strong', true)
 "toggle all partial steps:"; len(tx_all_partial.steps) == 1
 "toggle all partial first kept:"; has_mark(node_at(tx_all_partial.doc_after, [0, 0]).marks, 'strong')
 "toggle all partial second added:"; has_mark(node_at(tx_all_partial.doc_after, [1, 0]).marks, 'strong')
-let tx_node_bold = cmd_toggle_mark({doc: d0, selection: node_selection([0])}, 'strong')
+let tx_node_bold = cmd_toggle_mark({doc: d0, selection: node_selection([0])}, 'strong', true)
 "toggle node steps:"; len(tx_node_bold.steps) == 1
 "toggle node first:"; has_mark(node_at(tx_node_bold.doc_after, [0, 0]).marks, 'strong')
 "toggle node second untouched:"; not has_mark(node_at(tx_node_bold.doc_after, [1, 0]).marks, 'strong')
-let tx_node_unbold = cmd_toggle_mark({doc: tx_node_bold.doc_after, selection: node_selection([0])}, 'strong')
+let tx_node_unbold = cmd_toggle_mark({doc: tx_node_bold.doc_after, selection: node_selection([0])}, 'strong', true)
 "toggle node remove:"; not has_mark(node_at(tx_node_unbold.doc_after, [0, 0]).marks, 'strong')
-let tx_span_bold = cmd_toggle_mark(mark_span_state, 'strong')
+let tx_span_bold = cmd_toggle_mark(mark_span_state, 'strong', true)
 "toggle span add steps:"; len(tx_span_bold.steps) == 1
 "toggle span first kept:"; has_mark(node_at(tx_span_bold.doc_after, [0, 0]).marks, 'strong')
 "toggle span middle added:"; has_mark(node_at(tx_span_bold.doc_after, [0, 1]).marks, 'strong')
 "toggle span last added:"; has_mark(node_at(tx_span_bold.doc_after, [0, 2]).marks, 'strong')
-let tx_span_unbold = cmd_toggle_mark({doc: tx_span_bold.doc_after, selection: tx_span_bold.sel_after}, 'strong')
+let tx_span_unbold = cmd_toggle_mark({doc: tx_span_bold.doc_after, selection: tx_span_bold.sel_after}, 'strong', true)
 "toggle span remove steps:"; len(tx_span_unbold.steps) == 1
 "toggle span remove first:"; has_mark(node_at(tx_span_unbold.doc_after, [0, 0]).marks, 'strong')
 "toggle span remove middle:"; not has_mark(node_at(tx_span_unbold.doc_after, [0, 1]).marks, 'strong')
 "toggle span remove last:"; not has_mark(node_at(tx_span_unbold.doc_after, [0, 2]).marks, 'strong')
-let tx_cross_bold = cmd_toggle_mark(cross_block_state, 'strong')
+let tx_cross_bold = cmd_toggle_mark(cross_block_state, 'strong', true)
 "toggle cross-block steps:"; len(tx_cross_bold.steps) == 2
 "toggle cross-block first:"; has_mark(node_at(tx_cross_bold.doc_after, [0, 0]).marks, 'strong')
 "toggle cross-block second:"; has_mark(node_at(tx_cross_bold.doc_after, [1, 0]).marks, 'strong')
 "toggle cross-block selection:"; path_equal(tx_cross_bold.sel_after.anchor.path, [0, 0]) and path_equal(tx_cross_bold.sel_after.head.path, [1, 0])
-let tx_cross_unbold = cmd_toggle_mark({doc: tx_cross_bold.doc_after, selection: cross_block_sel}, 'strong')
+let tx_cross_unbold = cmd_toggle_mark({doc: tx_cross_bold.doc_after, selection: cross_block_sel}, 'strong', true)
 "toggle cross-block remove steps:"; len(tx_cross_unbold.steps) == 2
 "toggle cross-block remove first:"; not has_mark(node_at(tx_cross_unbold.doc_after, [0, 0]).marks, 'strong')
 "toggle cross-block remove second:"; not has_mark(node_at(tx_cross_unbold.doc_after, [1, 0]).marks, 'strong')
 
 let partial_edge_doc = node('doc', [node('paragraph', [text("abcdef")])])
 let partial_edge_state = {doc: partial_edge_doc, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4))}
-let tx_partial_mark = cmd_toggle_mark(partial_edge_state, 'strong')
+let tx_partial_mark = cmd_toggle_mark(partial_edge_state, 'strong', true)
 "toggle partial text:"; [for (n in node_at(tx_partial_mark.doc_after, [0]).content) n.text] == ["ab", "cd", "ef"]
 "toggle partial middle mark:"; has_mark(node_at(tx_partial_mark.doc_after, [0, 1]).marks, 'strong')
 "toggle partial edges plain:"; not has_mark(node_at(tx_partial_mark.doc_after, [0, 0]).marks, 'strong') and not has_mark(node_at(tx_partial_mark.doc_after, [0, 2]).marks, 'strong')
@@ -419,12 +419,12 @@ let tx_partial_mark = cmd_toggle_mark(partial_edge_state, 'strong')
 
 let partial_span_doc = node('doc', [node('paragraph', [text("abc"), text("def"), text("ghi")])])
 let partial_span_state = {doc: partial_span_doc, selection: text_selection(pos([0, 0], 1), pos([0, 2], 2))}
-let tx_partial_span = cmd_toggle_mark(partial_span_state, 'strong')
+let tx_partial_span = cmd_toggle_mark(partial_span_state, 'strong', true)
 "toggle partial span text:"; [for (n in node_at(tx_partial_span.doc_after, [0]).content) n.text] == ["a", "bc", "def", "gh", "i"]
 "toggle partial span marks:"; has_mark(node_at(tx_partial_span.doc_after, [0, 1]).marks, 'strong') and has_mark(node_at(tx_partial_span.doc_after, [0, 2]).marks, 'strong') and has_mark(node_at(tx_partial_span.doc_after, [0, 3]).marks, 'strong')
 "toggle partial span edges:"; not has_mark(node_at(tx_partial_span.doc_after, [0, 0]).marks, 'strong') and not has_mark(node_at(tx_partial_span.doc_after, [0, 4]).marks, 'strong')
 let boundary_mark_state = {doc: partial_span_doc, selection: text_selection(pos([0, 0], 1), pos([0, 1], 0))}
-let tx_boundary_mark = cmd_toggle_mark(boundary_mark_state, 'strong')
+let tx_boundary_mark = cmd_toggle_mark(boundary_mark_state, 'strong', true)
 "toggle partial boundary text:"; [for (n in node_at(tx_boundary_mark.doc_after, [0]).content) n.text] == ["a", "bc", "def", "ghi"]
 "toggle partial boundary selection:"; path_equal(tx_boundary_mark.sel_after.anchor.path, [0, 1]) and path_equal(tx_boundary_mark.sel_after.head.path, [0, 2]) and tx_boundary_mark.sel_after.head.offset == 0
 
@@ -447,7 +447,7 @@ let tx_h_cross = cmd_set_block_type(cross_block_state, 'heading')
 "set-type cross second:"; node_at(tx_h_cross.doc_after, [1]).tag == 'heading'
 "set-type cross selection:"; path_equal(tx_h_cross.sel_after.anchor.path, [0, 0]) and path_equal(tx_h_cross.sel_after.head.path, [1, 0])
 let boundary_block_state = {doc: d0, selection: text_selection(pos([0, 0], 2), pos([1, 0], 0))}
-let tx_boundary_bold = cmd_toggle_mark(boundary_block_state, 'strong')
+let tx_boundary_bold = cmd_toggle_mark(boundary_block_state, 'strong', true)
 "toggle boundary first mark:"; has_mark(node_at(tx_boundary_bold.doc_after, [0, 0]).marks, 'strong')
 "toggle boundary second plain:"; not has_mark(node_at(tx_boundary_bold.doc_after, [1, 0]).marks, 'strong')
 let tx_h_boundary = cmd_set_block_type(boundary_block_state, 'heading')

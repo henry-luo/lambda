@@ -7,8 +7,8 @@ import .mod_md_schema
 
 fn is_list(v) => type(v) == array or type(v) == list
 
-fn add_mark_to_text(n, mark) =>
-  if (is_text(n)) { text_marked(n.text, [*n.marks, mark]) } else { n }
+fn add_mark_to_text(n, name) =>
+  if (is_text(n)) { text_marked(n.text, [*n.marks, {name: name, value: true}]) } else { n }
 
 fn add_mark_at(nodes, mark, i, n, acc) {
   if (i >= n) { acc }
