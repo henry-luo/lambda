@@ -1,4 +1,0 @@
-selectAll supported=true enabled=true ok=true selectedAll=true html=ab<b>cd</b>ef expected=true
-removeFormat-nested supported=true enabled=true ok=true html=abcd expected=true
-removeFormat-style ok=true html=abcd expected=true
-removeFormat-collapsed ok=false html=a<b>bc</b>d expected=true

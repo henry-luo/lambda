@@ -20182,8 +20182,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
         (obj.map->map_kind == MAP_KIND_DOM || obj.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
         String* dom_method = it2s(method_name);
-        if (dom_method && !(dom_method->len == 11 &&
-                strncmp(dom_method->chars, "execCommand", 11) == 0)) {
+        if (dom_method) {
             bool own_dom_method = false;
             Item dom_fn = js_map_get_fast(obj.map, dom_method->chars,
                 (int)dom_method->len, &own_dom_method);
