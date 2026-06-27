@@ -30,6 +30,20 @@ const { Readable } = require('stream');
   const returned = await iterator.return();
   assert.deepStrictEqual(returned, { value: undefined, done: true });
 
+  const cleanupReadable = new Readable({ read() {} });
+  const cleanupIterator = cleanupReadable.iterator({ destroyOnReturn: false });
+  assert.strictEqual(cleanupReadable.__async_iterators__.length, 1);
+  const cleanupReturned = await cleanupIterator.return();
+  assert.deepStrictEqual(cleanupReturned, { value: undefined, done: true });
+  assert.strictEqual(cleanupReadable.__async_iterators__.length, 0);
+
+  const terminalIterator = cleanupReadable[Symbol.asyncIterator]();
+  assert.strictEqual(cleanupReadable.__async_iterators__.length, 1);
+  cleanupReadable.push(null);
+  const terminalDone = await terminalIterator.next();
+  assert.deepStrictEqual(terminalDone, { value: undefined, done: true });
+  assert.strictEqual(cleanupReadable.__async_iterators__.length, 0);
+
   console.log('stream async iterator pending ok');
 })().catch((err) => {
   console.log(err && err.stack || err);

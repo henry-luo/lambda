@@ -321,22 +321,273 @@ extern "C" Item js_util_format(Item args_item) {
 }
 
 // =============================================================================
-// util.inspect(obj[, options]) — basic inspect for debugging
+// util.inspect(obj[, options]) — Node.js-style formatting for diagnostics
 // =============================================================================
 
-extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
-    (void)options_item;
+extern "C" bool js_props_obj_query_enumerable(Item obj, const char* name, int name_len);
 
-    // handle values that JSON.stringify doesn't represent correctly
-    TypeId tid = get_type_id(obj_item);
-    if (tid == LMD_TYPE_FLOAT) {
-        double d = it2d(obj_item);
-        if (d != d) return make_string_item("NaN");
-        if (d == 1.0/0.0) return make_string_item("Infinity");
-        if (d == -1.0/0.0) return make_string_item("-Infinity");
+struct JsInspectContext {
+    bool show_hidden;
+    bool colors;
+    int depth;
+    Item seen;
+};
+
+static Item js_util_inspect_value(Item obj_item, JsInspectContext* ctx, int depth_left);
+
+static Item js_util_inspect_make_string(StrBuf* sb) {
+    Item result = make_string_item(sb->str ? sb->str : "", (int)sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+static bool js_util_inspect_option_bool(Item options, const char* name, bool fallback) {
+    if (get_type_id(options) != LMD_TYPE_MAP) return fallback;
+    Item value = js_property_get(options, make_string_item(name));
+    if (get_type_id(value) == LMD_TYPE_BOOL) return it2b(value);
+    return fallback;
+}
+
+static int js_util_inspect_option_depth(Item options) {
+    if (get_type_id(options) != LMD_TYPE_MAP) return 2;
+    Item value = js_property_get(options, make_string_item("depth"));
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_NULL) return 64;
+    if (type == LMD_TYPE_INT) {
+        int64_t n = it2i(value);
+        if (n < 0) return -1;
+        if (n > 64) return 64;
+        return (int)n;
     }
-    if (tid == LMD_TYPE_UNDEFINED) return make_string_item("undefined");
-    if (tid == LMD_TYPE_NULL) return make_string_item("null");
+    if (type == LMD_TYPE_FLOAT) {
+        double d = it2d(value);
+        if (d < 0) return -1;
+        if (d > 64) return 64;
+        return (int)d;
+    }
+    return 2;
+}
+
+static void js_util_inspect_append_styled(StrBuf* sb, JsInspectContext* ctx,
+                                          const char* style, const char* text) {
+    if (ctx && ctx->colors) {
+        if (strcmp(style, "string") == 0) strbuf_append_str(sb, "\x1b[32m");
+        else if (strcmp(style, "number") == 0 || strcmp(style, "boolean") == 0) strbuf_append_str(sb, "\x1b[33m");
+        else if (strcmp(style, "special") == 0) strbuf_append_str(sb, "\x1b[90m");
+    }
+    strbuf_append_str(sb, text);
+    if (ctx && ctx->colors) {
+        if (strcmp(style, "special") == 0) strbuf_append_str(sb, "\x1b[39m");
+        else strbuf_append_str(sb, "\x1b[39m");
+    }
+}
+
+static bool js_util_inspect_is_object_like(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC ||
+           type == LMD_TYPE_OBJECT || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP;
+}
+
+static bool js_util_inspect_seen_contains(Item seen, Item value) {
+    int64_t len = js_array_length(seen);
+    for (int64_t i = 0; i < len; i++) {
+        if (js_array_get_int(seen, i).item == value.item) return true;
+    }
+    return false;
+}
+
+static void js_util_inspect_seen_pop(Item seen) {
+    int64_t len = js_array_length(seen);
+    if (len <= 0) return;
+    js_property_set(seen, make_string_item("length"), (Item){.item = i2it(len - 1)});
+}
+
+static Item js_util_inspect_string(Item obj_item, JsInspectContext* ctx) {
+    String* s = it2s(obj_item);
+    StrBuf* sb = strbuf_new();
+    strbuf_append_char(sb, '\'');
+    if (s && s->len > 0) strbuf_append_str_n(sb, s->chars, s->len);
+    strbuf_append_char(sb, '\'');
+    Item raw = js_util_inspect_make_string(sb);
+    if (!ctx || !ctx->colors) return raw;
+
+    StrBuf* styled = strbuf_new();
+    String* rs = it2s(raw);
+    strbuf_append_str(styled, "\x1b[32m");
+    if (rs) strbuf_append_str_n(styled, rs->chars, rs->len);
+    strbuf_append_str(styled, "\x1b[39m");
+    return js_util_inspect_make_string(styled);
+}
+
+static Item js_util_inspect_number(Item obj_item, JsInspectContext* ctx) {
+    TypeId type = get_type_id(obj_item);
+    char buf[96];
+    if (type == LMD_TYPE_INT) {
+        snprintf(buf, sizeof(buf), "%lld", (long long)it2i(obj_item));
+    } else {
+        double d = it2d(obj_item);
+        if (d != d) snprintf(buf, sizeof(buf), "NaN");
+        else if (d == 1.0/0.0) snprintf(buf, sizeof(buf), "Infinity");
+        else if (d == -1.0/0.0) snprintf(buf, sizeof(buf), "-Infinity");
+        else snprintf(buf, sizeof(buf), "%.17g", d);
+    }
+    if (!ctx || !ctx->colors) return make_string_item(buf);
+    StrBuf* sb = strbuf_new();
+    js_util_inspect_append_styled(sb, ctx, "number", buf);
+    return js_util_inspect_make_string(sb);
+}
+
+static bool js_util_inspect_key_is_array_index(String* key, int64_t len) {
+    if (!key || key->len == 0) return false;
+    int64_t index = 0;
+    for (size_t i = 0; i < key->len; i++) {
+        char c = key->chars[i];
+        if (c < '0' || c > '9') return false;
+        index = index * 10 + (c - '0');
+        if (index >= len) return false;
+    }
+    return true;
+}
+
+static void js_util_inspect_append_key(StrBuf* sb, String* key, bool hidden) {
+    if (hidden) strbuf_append_char(sb, '[');
+    if (key && key->len > 0) strbuf_append_str_n(sb, key->chars, key->len);
+    if (hidden) strbuf_append_char(sb, ']');
+}
+
+static void js_util_inspect_append_property(StrBuf* sb, Item owner, Item key,
+                                            JsInspectContext* ctx, int depth_left,
+                                            bool* first) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return;
+    String* ks = it2s(key);
+    bool enumerable = true;
+    if (ks) enumerable = js_props_obj_query_enumerable(owner, ks->chars, (int)ks->len);
+    bool hidden = ctx && ctx->show_hidden && !enumerable;
+
+    Item value = js_property_get(owner, key);
+    Item value_str = js_util_inspect_value(value, ctx, depth_left - 1);
+    String* vs = it2s(value_str);
+    if (!*first) strbuf_append_str(sb, ", ");
+    *first = false;
+    js_util_inspect_append_key(sb, ks, hidden);
+    strbuf_append_str(sb, ": ");
+    if (vs) strbuf_append_str_n(sb, vs->chars, vs->len);
+}
+
+static Item js_util_inspect_object(Item obj_item, JsInspectContext* ctx, int depth_left) {
+    if (depth_left < 0) return make_string_item("[Object]");
+
+    if (ctx && js_util_inspect_seen_contains(ctx->seen, obj_item)) {
+        return make_string_item("[Circular]");
+    }
+    if (ctx) js_array_push(ctx->seen, obj_item);
+
+    extern int js_check_exception(void);
+    extern Item js_clear_exception(void);
+    Item custom_sym = js_symbol_for(make_string_item("nodejs.util.inspect.custom"));
+    Item custom_fn = js_property_get(obj_item, custom_sym);
+    if (get_type_id(custom_fn) == LMD_TYPE_FUNC) {
+        Item result = js_call_function(custom_fn, obj_item, nullptr, 0);
+        if (ctx) js_util_inspect_seen_pop(ctx->seen);
+        if (js_check_exception()) {
+            js_clear_exception();
+            return make_string_item("[object Object]");
+        }
+        if (get_type_id(result) == LMD_TYPE_STRING) return result;
+        return js_to_string(result);
+    }
+
+    Item keys = (ctx && ctx->show_hidden) ? js_object_get_own_property_names(obj_item) : js_object_keys(obj_item);
+    int64_t klen = js_array_length(keys);
+    if (klen == 0) {
+        if (ctx) js_util_inspect_seen_pop(ctx->seen);
+        return make_string_item("{}");
+    }
+
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, "{ ");
+    bool first = true;
+    for (int64_t i = 0; i < klen; i++) {
+        js_util_inspect_append_property(sb, obj_item, js_array_get_int(keys, i), ctx, depth_left, &first);
+    }
+    strbuf_append_str(sb, " }");
+    if (ctx) js_util_inspect_seen_pop(ctx->seen);
+    return js_util_inspect_make_string(sb);
+}
+
+static Item js_util_inspect_array(Item obj_item, JsInspectContext* ctx, int depth_left) {
+    if (depth_left < 0) return make_string_item("[Array]");
+
+    if (ctx && js_util_inspect_seen_contains(ctx->seen, obj_item)) {
+        return make_string_item("[Circular]");
+    }
+    if (ctx) js_array_push(ctx->seen, obj_item);
+
+    int64_t alen = js_array_length(obj_item);
+    StrBuf* sb = strbuf_new();
+    strbuf_append_char(sb, '[');
+    if (alen > 0) strbuf_append_char(sb, ' ');
+    bool first = true;
+    for (int64_t i = 0; i < alen; i++) {
+        Item val = js_array_get_int(obj_item, i);
+        Item val_str = js_util_inspect_value(val, ctx, depth_left - 1);
+        String* vs = it2s(val_str);
+        if (!first) strbuf_append_str(sb, ", ");
+        first = false;
+        if (vs) strbuf_append_str_n(sb, vs->chars, vs->len);
+    }
+    if (ctx && ctx->show_hidden) {
+        Item keys = js_object_get_own_property_names(obj_item);
+        int64_t klen = js_array_length(keys);
+        for (int64_t i = 0; i < klen; i++) {
+            Item key = js_array_get_int(keys, i);
+            if (get_type_id(key) != LMD_TYPE_STRING) continue;
+            String* ks = it2s(key);
+            if (ks && ks->len == 6 && memcmp(ks->chars, "length", 6) == 0) {
+                if (!first) strbuf_append_str(sb, ", ");
+                first = false;
+                strbuf_append_str(sb, "[length]: ");
+                strbuf_append_int64(sb, alen);
+                continue;
+            }
+            if (js_util_inspect_key_is_array_index(ks, alen)) continue;
+            js_util_inspect_append_property(sb, obj_item, key, ctx, depth_left, &first);
+        }
+    }
+    if (alen > 0 || !first) strbuf_append_char(sb, ' ');
+    strbuf_append_char(sb, ']');
+    if (ctx) js_util_inspect_seen_pop(ctx->seen);
+    return js_util_inspect_make_string(sb);
+}
+
+static Item js_util_inspect_value(Item obj_item, JsInspectContext* ctx, int depth_left) {
+    TypeId tid = get_type_id(obj_item);
+    if (tid == LMD_TYPE_UNDEFINED) {
+        if (!ctx || !ctx->colors) return make_string_item("undefined");
+        StrBuf* sb = strbuf_new();
+        js_util_inspect_append_styled(sb, ctx, "special", "undefined");
+        return js_util_inspect_make_string(sb);
+    }
+    if (tid == LMD_TYPE_NULL) {
+        if (!ctx || !ctx->colors) return make_string_item("null");
+        StrBuf* sb = strbuf_new();
+        js_util_inspect_append_styled(sb, ctx, "special", "null");
+        return js_util_inspect_make_string(sb);
+    }
+    if (tid == LMD_TYPE_BOOL) {
+        const char* text = it2b(obj_item) ? "true" : "false";
+        if (!ctx || !ctx->colors) return make_string_item(text);
+        StrBuf* sb = strbuf_new();
+        js_util_inspect_append_styled(sb, ctx, "boolean", text);
+        return js_util_inspect_make_string(sb);
+    }
+    if (tid == LMD_TYPE_INT && it2i(obj_item) <= -(int64_t)JS_SYMBOL_BASE) {
+        return js_symbol_to_string(obj_item);
+    }
+
+    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT) return js_util_inspect_number(obj_item, ctx);
+
+    if (tid == LMD_TYPE_STRING) return js_util_inspect_string(obj_item, ctx);
 
     if (js_class_id(obj_item) == JS_CLASS_PROMISE) {
         const char* state = js_promise_state_name(obj_item);
@@ -345,118 +596,36 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
         if (state && strcmp(state, "rejected") == 0) return make_string_item("Promise { <rejected> }");
     }
 
-    // Strings: wrap in single quotes (Node.js style)
-    if (tid == LMD_TYPE_STRING) {
-        String* s = it2s(obj_item);
-        if (!s) return make_string_item("''");
-        // build 'value' with single quotes
-        int len = (int)s->len;
-        char* buf = (char*)mem_alloc(len + 3, MEM_CAT_JS_RUNTIME);
-        buf[0] = '\'';
-        memcpy(buf + 1, s->chars, len);
-        buf[len + 1] = '\'';
-        buf[len + 2] = '\0';
-        Item result = make_string_item(buf, len + 2);
-        mem_free(buf);
-        return result;
+    if (tid == LMD_TYPE_FUNC) {
+        Item name = js_property_get(obj_item, make_string_item("name"));
+        String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
+        StrBuf* sb = strbuf_new();
+        if (ns && ns->len > 0) {
+            strbuf_append_str(sb, "[Function: ");
+            strbuf_append_str_n(sb, ns->chars, ns->len);
+            strbuf_append_char(sb, ']');
+        } else {
+            strbuf_append_str(sb, "[Function]");
+        }
+        return js_util_inspect_make_string(sb);
     }
 
-    // Objects: Node.js-style inspect { key: value, ... }
-    if (tid == LMD_TYPE_MAP) {
-        // Check for custom inspect function: Symbol.for('nodejs.util.inspect.custom')
-        extern Item js_symbol_for(Item desc);
-        extern int js_check_exception(void);
-        extern Item js_clear_exception(void);
-        Item custom_sym = js_symbol_for(make_string_item("nodejs.util.inspect.custom"));
-        Item custom_fn = js_property_get(obj_item, custom_sym);
-        if (get_type_id(custom_fn) == LMD_TYPE_FUNC) {
-            Item result = js_call_function(custom_fn, obj_item, nullptr, 0);
-            if (js_check_exception()) {
-                js_clear_exception();
-                return make_string_item("[object Object]");
-            }
-            if (get_type_id(result) == LMD_TYPE_STRING) return result;
-            return js_to_string(result);
-        }
+    if (tid == LMD_TYPE_ARRAY) return js_util_inspect_array(obj_item, ctx, depth_left);
+    if (js_util_inspect_is_object_like(obj_item)) return js_util_inspect_object(obj_item, ctx, depth_left);
 
-        extern Item js_object_keys(Item obj);
-        Item keys = js_object_keys(obj_item);
-        int64_t klen = js_array_length(keys);
-        if (klen == 0) return make_string_item("{}");
-        // build "{ key1: val1, key2: val2 }"
-        // estimate buffer size
-        int cap = 256;
-        char* buf = (char*)mem_alloc(cap, MEM_CAT_JS_RUNTIME);
-        int pos = 0;
-        buf[pos++] = '{';
-        buf[pos++] = ' ';
-        for (int64_t i = 0; i < klen; i++) {
-            if (i > 0) {
-                buf[pos++] = ',';
-                buf[pos++] = ' ';
-            }
-            Item key = js_array_get_int(keys, i);
-            String* ks = it2s(key);
-            Item val = js_property_get(obj_item, key);
-            Item val_str = js_util_inspect(val, make_js_undefined());
-            String* vs = it2s(val_str);
-            int need = pos + (ks ? (int)ks->len : 0) + 2 + (vs ? (int)vs->len : 0) + 4;
-            if (need >= cap) {
-                cap = need * 2;
-                buf = (char*)mem_realloc(buf, cap, MEM_CAT_JS_RUNTIME);
-            }
-            if (ks) { memcpy(buf + pos, ks->chars, ks->len); pos += (int)ks->len; }
-            buf[pos++] = ':';
-            buf[pos++] = ' ';
-            if (vs) { memcpy(buf + pos, vs->chars, vs->len); pos += (int)vs->len; }
-        }
-        buf[pos++] = ' ';
-        buf[pos++] = '}';
-        buf[pos] = '\0';
-        Item r = make_string_item(buf, pos);
-        mem_free(buf);
-        return r;
-    }
-
-    // Arrays: Node.js-style inspect [ val1, val2, ... ]
-    if (tid == LMD_TYPE_ARRAY) {
-        int64_t alen = js_array_length(obj_item);
-        if (alen == 0) return make_string_item("[]");
-        int cap = 256;
-        char* buf = (char*)mem_alloc(cap, MEM_CAT_JS_RUNTIME);
-        int pos = 0;
-        buf[pos++] = '[';
-        buf[pos++] = ' ';
-        for (int64_t i = 0; i < alen; i++) {
-            if (i > 0) {
-                buf[pos++] = ',';
-                buf[pos++] = ' ';
-            }
-            Item val = js_array_get_int(obj_item, i);
-            Item val_str = js_util_inspect(val, make_js_undefined());
-            String* vs = it2s(val_str);
-            int need = pos + (vs ? (int)vs->len : 0) + 6;
-            if (need >= cap) {
-                cap = need * 2;
-                buf = (char*)mem_realloc(buf, cap, MEM_CAT_JS_RUNTIME);
-            }
-            if (vs) { memcpy(buf + pos, vs->chars, vs->len); pos += (int)vs->len; }
-        }
-        buf[pos++] = ' ';
-        buf[pos++] = ']';
-        buf[pos] = '\0';
-        Item r = make_string_item(buf, pos);
-        mem_free(buf);
-        return r;
-    }
-
-    // use JSON.stringify as a basic inspect
     Item result = js_json_stringify(obj_item);
     if (get_type_id(result) == LMD_TYPE_STRING) return result;
+    return js_to_string(obj_item);
+}
 
-    // fallback for non-JSON-serializable values
-    Item str = js_to_string(obj_item);
-    return str;
+extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
+    JsInspectContext ctx;
+    ctx.show_hidden = get_type_id(options_item) == LMD_TYPE_BOOL ? it2b(options_item)
+                                                                  : js_util_inspect_option_bool(options_item, "showHidden", false);
+    ctx.colors = js_util_inspect_option_bool(options_item, "colors", false);
+    ctx.depth = js_util_inspect_option_depth(options_item);
+    ctx.seen = js_array_new(0);
+    return js_util_inspect_value(obj_item, &ctx, ctx.depth);
 }
 
 // =============================================================================

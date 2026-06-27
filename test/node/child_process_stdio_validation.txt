@@ -1,0 +1,4 @@
+bad scalar stdio: TypeError:ERR_INVALID_ARG_VALUE
+ipc scalar stdio: TypeError:ERR_INVALID_ARG_VALUE
+duplicate ipc stdio: Error:ERR_IPC_ONE_PIPE
+overlapped stdio pid type: number
