@@ -1,0 +1,1 @@
+stream compose transform nested ok

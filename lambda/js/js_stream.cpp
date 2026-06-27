@@ -3284,6 +3284,27 @@ static bool js_readable_compose_is_duplex_like(Item stream) {
 
 static void js_readable_compose_bridge_start(Item* env);
 
+static Item js_readable_compose_pipe_tick(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    js_readable_pipe(env[0], env[1]);
+    return make_js_undefined();
+}
+
+static Item js_readable_compose_forward_error(Item env_item, Item err) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    js_stream_destroy(env[0], err);
+    return make_js_undefined();
+}
+
+static void js_readable_compose_attach_error_forward(Item source, Item out) {
+    Item* env = js_alloc_env(1);
+    env[0] = out;
+    Item listener = js_new_closure((void*)js_readable_compose_forward_error, 1, env, 1);
+    js_stream_on(source, make_string_item("error"), listener);
+}
+
 static Item js_readable_compose_bridge_write(Item env_item, Item chunk, Item encoding, Item callback) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
@@ -3438,6 +3459,7 @@ static Item js_readable_compose(Item self, Item stream, Item options) {
             if (get_type_id(out) == LMD_TYPE_MAP || get_type_id(out) == LMD_TYPE_ELEMENT) {
                 js_stream_set_readable_object_mode(out, true);
                 js_property_set(out, key_writable, js_bool_item(false));
+                js_readable_compose_attach_error_forward(self, out);
                 js_readable_compose_attach_writable_bridge(out, self, input, stream);
                 if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_ELEMENT)
                     js_stream_iter_attach_abort(options, out);
@@ -3452,6 +3474,7 @@ static Item js_readable_compose(Item self, Item stream, Item options) {
         if (get_type_id(out) == LMD_TYPE_MAP || get_type_id(out) == LMD_TYPE_ELEMENT) {
             js_stream_set_readable_object_mode(out, true);
             js_property_set(out, key_writable, js_bool_item(false));
+            js_readable_compose_attach_error_forward(self, out);
             if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_ELEMENT)
                 js_stream_iter_attach_abort(options, out);
         }
@@ -3459,7 +3482,13 @@ static Item js_readable_compose(Item self, Item stream, Item options) {
     }
 
     if (js_readable_compose_is_duplex_like(stream)) {
-        js_readable_pipe(self, stream);
+        if (!js_readable_compose_is_duplex_like(self)) {
+            js_property_set(stream, key_writable, js_bool_item(false));
+        }
+        Item* env = js_alloc_env(2);
+        env[0] = self;
+        env[1] = stream;
+        js_next_tick_enqueue(js_new_closure((void*)js_readable_compose_pipe_tick, 0, env, 2));
         return stream;
     }
 
@@ -6615,7 +6644,10 @@ static bool js_readable_from_is_iterable(Item value) {
 // Readable.from(iterable) — create readable from iterable values
 extern "C" Item js_readable_from(Item iterable) {
     ensure_keys();
-    Item readable = js_readable_new(ItemNull);
+    Item opts = js_new_object();
+    js_property_set(opts, make_string_item("objectMode"), js_bool_item(true));
+    Item readable = js_readable_new(opts);
+    js_stream_set_readable_object_mode(readable, true);
 
     if (get_type_id(iterable) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(iterable);

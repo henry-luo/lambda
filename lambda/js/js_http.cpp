@@ -553,6 +553,7 @@ typedef struct JsHttpConn {
     int          request_count;
     int          request_body_remaining;
     int          pending_response_writes;
+    int          open_response_count;
     bool         destroyed;
     bool         read_ended;
     bool         is_pipe;
@@ -1203,6 +1204,9 @@ static void http_response_flush(Item self) {
 
     Item sent = js_property_get(self, make_string_item("__sent__"));
     if (get_type_id(sent) == LMD_TYPE_BOOL && it2b(sent)) return; // already sent
+    bool has_open_responses_after_this = false;
+    if (conn->open_response_count > 0) conn->open_response_count--;
+    has_open_responses_after_this = conn->open_response_count > 0;
 
     // get status code
     Item status_item = js_property_get(self, make_string_item("statusCode"));
@@ -1263,9 +1267,15 @@ static void http_response_flush(Item self) {
     bool keep_alive_max_null = http_response_bool_prop(self, "__keep_alive_max_null__");
     bool explicit_chunked_body = has_transfer_encoding &&
         http_response_header_has_token(self, "transfer-encoding", "chunked");
-    bool chunked_body = (used_send || explicit_chunked_body ||
-                         (has_body_write && keep_alive_max_null)) &&
-                        !request_http_10 && !has_content_length;
+    bool request_accepts_chunked_response =
+        http_response_bool_prop(self, "__request_accepts_chunked_response__");
+    bool chunked_allowed = !request_http_10 ||
+                           request_accepts_chunked_response ||
+                           explicit_chunked_body;
+    bool auto_chunked_body = used_send || (has_body_write &&
+        (keep_alive_max_null || (request_http_10 && request_accepts_chunked_response)));
+    bool chunked_body = (explicit_chunked_body || auto_chunked_body) &&
+                        chunked_allowed && !has_content_length;
     if (!has_content_length && !chunked_body && !used_send && (!has_body_write || !request_http_10)) {
         pos += snprintf(resp_buf + pos, sizeof(resp_buf) - pos,
                         "Content-Length: %d\r\n", body_len);
@@ -1293,9 +1303,11 @@ static void http_response_flush(Item self) {
                             "Date: %.*s\r\n", (int)date_len, date_buf);
         }
     }
+    bool server_close_requested = conn && conn->server && conn->server->close_requested;
     bool close_after = http_response_bool_prop(self, "__close_after_response__") ||
-                       (conn && conn->read_ended);
-    if (request_http_10 && body_len > 0 && !has_content_length) {
+                       (conn && conn->read_ended) ||
+                       (server_close_requested && !has_open_responses_after_this);
+    if (request_http_10 && body_len > 0 && !has_content_length && !chunked_body) {
         close_after = true;
     }
     if (!has_connection) {
@@ -1840,6 +1852,7 @@ static void http_conn_close_now(JsHttpConn* conn) {
 static void http_conn_maybe_close_after_response_writes(JsHttpConn* conn) {
     if (!conn || conn->destroyed) return;
     if (!conn->close_after_response_writes) return;
+    if (conn->open_response_count > 0) return;
     if (conn->pending_response_writes > 0) return;
     http_conn_close_now(conn);
 }
@@ -2028,9 +2041,15 @@ static bool http_request_has_expect_continue(ParsedRequest* req) {
     return expect && http_header_has_token(expect, "100-continue");
 }
 
+static bool http_request_accepts_chunked_response(ParsedRequest* req) {
+    const char* te = http_request_header(req, "te");
+    return te && http_header_has_token(te, "chunked");
+}
+
 static Item http_response_for_request(JsHttpConn* conn, ParsedRequest* req, bool force_close,
                                       bool over_max, bool has_buffered_request) {
     Item res_obj = make_response_object(conn);
+    if (conn) conn->open_response_count++;
     bool keep_alive = !force_close && !over_max && http_request_wants_keep_alive(req, has_buffered_request);
     int max_requests = http_server_max_requests(conn ? conn->server : NULL);
     bool close_after = !keep_alive || (max_requests > 0 && conn && conn->request_count >= max_requests);
@@ -2043,6 +2062,8 @@ static Item http_response_for_request(JsHttpConn* conn, ParsedRequest* req, bool
                     req ? make_string_item(req->http_version) : make_string_item("HTTP/1.1"));
     js_property_set(res_obj, make_string_item("__request_method__"),
                     req ? make_string_item(req->method) : make_string_item("GET"));
+    js_property_set(res_obj, make_string_item("__request_accepts_chunked_response__"),
+                    (Item){.item = b2it(req && http_request_accepts_chunked_response(req))});
     return res_obj;
 }
 

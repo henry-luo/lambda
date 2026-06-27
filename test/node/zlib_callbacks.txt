@@ -1,9 +1,9 @@
-gzip cb err null: true
-gunzip cb: true callback hello
-deflate cb err null: true
-inflate cb: true deflate hello
-raw cb: true callback hello
 unzipSync deflate: wrapped deflate
 unzipSync gzip: wrapped gzip
+gzip cb err null: true
+deflate cb err null: true
 unzip cb deflate: true wrapped deflate
 unzip cb gzip: true wrapped gzip
+gunzip cb: true callback hello
+inflate cb: true deflate hello
+raw cb: true callback hello

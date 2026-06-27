@@ -20,6 +20,7 @@ extern "C" Item js_get_stream_namespace(void);
 extern "C" Item js_transform_new(Item opts);
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" Item js_readable_push(Item self, Item chunk);
+extern "C" void js_next_tick_enqueue(Item callback);
 
 enum ZlibTransformMode {
     ZLIB_TRANSFORM_GZIP = 1,
@@ -451,6 +452,33 @@ static Item make_zlib_error(const char* method) {
     return js_new_error(make_string_item("zlib operation failed"));
 }
 
+static Item js_zlib_emit_callback(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+
+    Item callback = env[0];
+    Item err = env[1];
+    Item result = env[2];
+    if (!is_callable(callback)) return make_js_undefined();
+
+    if (get_type_id(err) != LMD_TYPE_NULL) {
+        Item args[1] = { err };
+        js_call_function(callback, make_js_undefined(), args, 1);
+    } else {
+        Item args[2] = { ItemNull, result };
+        js_call_function(callback, make_js_undefined(), args, 2);
+    }
+    return make_js_undefined();
+}
+
+static void js_zlib_schedule_callback(Item callback, Item err, Item result) {
+    Item* env = js_alloc_env(3);
+    env[0] = callback;
+    env[1] = err;
+    env[2] = result;
+    js_next_tick_enqueue(js_new_closure((void*)js_zlib_emit_callback, 0, env, 3));
+}
+
 static Item js_zlib_callback_result(const char* method, ZlibSyncFn sync_fn,
                                     Item input_item, Item options_item, Item callback_item) {
     if (is_callable(options_item) && !is_callable(callback_item)) {
@@ -463,13 +491,11 @@ static Item js_zlib_callback_result(const char* method, ZlibSyncFn sync_fn,
 
     Item result = sync_fn(input_item);
     if (result.item == ItemNull.item) {
-        Item args[1] = { make_zlib_error(method) };
-        js_call_function(callback_item, make_js_undefined(), args, 1);
+        js_zlib_schedule_callback(callback_item, make_zlib_error(method), make_js_undefined());
         return make_js_undefined();
     }
 
-    Item args[2] = { ItemNull, result };
-    js_call_function(callback_item, make_js_undefined(), args, 2);
+    js_zlib_schedule_callback(callback_item, ItemNull, result);
     return make_js_undefined();
 }
 

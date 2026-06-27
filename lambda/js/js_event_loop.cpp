@@ -313,9 +313,9 @@ typedef struct JsTimerRuntimeScope {
     bool doc_active;
 } JsTimerRuntimeScope;
 
-static void timer_capture_runtime(JsTimerHandle* th) {
+static void timer_capture_runtime(JsTimerHandle* th, const char* resource_name, int resource_len) {
     if (!th) return;
-    th->async_resource = js_async_hooks_create_resource("Timeout", 7);
+    th->async_resource = js_async_hooks_create_resource(resource_name, resource_len);
     th->als_context = js_als_capture_context();
     if (context) {
         th->runtime_heap = context->heap;
@@ -602,7 +602,7 @@ extern "C" Item js_timeout_toPrimitive(Item this_val) {
     return id;
 }
 
-static Item make_timer_object(int64_t id) {
+static Item make_timer_object(int64_t id, JsClass cls) {
     Item obj = js_new_object();
     js_property_set(obj, (Item){.item = s2it(heap_create_name("_timerId", 8))},
                     (Item){.item = i2it(id)});
@@ -625,7 +625,7 @@ static Item make_timer_object(int64_t id) {
 
     // class identity (T5b: typed JsClass byte; legacy `__class_name__`
     // string write retired).
-    js_class_stamp(obj, JS_CLASS_TIMEOUT);  // A3-T3b
+    js_class_stamp(obj, cls);  // A3-T3b
 
     return obj;
 }
@@ -674,7 +674,7 @@ extern "C" Item js_setTimeout(Item callback, Item delay) {
     th->is_interval = false;
     th->extra_count = 0;
     th->timer.data = th;
-    timer_capture_runtime(th);
+    timer_capture_runtime(th, "Timeout", 7);
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, ms, 0);
@@ -684,7 +684,7 @@ extern "C" Item js_setTimeout(Item callback, Item delay) {
         timer_handles[timer_handle_count++] = th;
     }
 
-    return make_timer_object(th->id);
+    return make_timer_object(th->id, JS_CLASS_TIMEOUT);
 }
 
 // setTimeout with extra args passed as a JS array
@@ -721,7 +721,7 @@ extern "C" Item js_setTimeout_args(Item callback, Item delay, Item args_array) {
         }
         th->extra_count = count;
     }
-    timer_capture_runtime(th);
+    timer_capture_runtime(th, "Timeout", 7);
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, ms, 0);
@@ -731,7 +731,59 @@ extern "C" Item js_setTimeout_args(Item callback, Item delay, Item args_array) {
         timer_handles[timer_handle_count++] = th;
     }
 
-    return make_timer_object(th->id);
+    return make_timer_object(th->id, JS_CLASS_TIMEOUT);
+}
+
+static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args) {
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        extern Item js_throw_type_error_code(const char*, const char*);
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"callback\" argument must be of type function.");
+    }
+    uv_loop_t *loop = lambda_uv_loop();
+    if (!loop) {
+        log_error("event_loop: uv loop not initialized for setImmediate");
+        return ItemNull;
+    }
+
+    JsTimerHandle *th = (JsTimerHandle *)mem_calloc(1, sizeof(JsTimerHandle), MEM_CAT_JS_RUNTIME);
+    if (!th) return ItemNull;
+
+    th->id = next_timer_id++;
+    th->callback = callback;
+    th->is_interval = false;
+    th->extra_count = 0;
+    th->timer.data = th;
+
+    if (has_args && get_type_id(args_array) == LMD_TYPE_ARRAY) {
+        Array* arr = args_array.array;
+        int count = (int)arr->length;
+        if (count > 8) count = 8;
+        for (int i = 0; i < count; i++) {
+            th->extra_args[i] = arr->items[i];
+        }
+        th->extra_count = count;
+    }
+
+    timer_capture_runtime(th, "Immediate", 9);
+
+    uv_timer_init(loop, &th->timer);
+    uv_timer_start(&th->timer, timer_fire_cb, 0, 0);
+    timer_register_gc_roots(th);
+
+    if (timer_handle_count < MAX_TIMER_HANDLES) {
+        timer_handles[timer_handle_count++] = th;
+    }
+
+    return make_timer_object(th->id, JS_CLASS_IMMEDIATE);
+}
+
+extern "C" Item js_setImmediate_timer(Item callback) {
+    return js_setImmediate_impl(callback, ItemNull, false);
+}
+
+extern "C" Item js_setImmediate_timer_args(Item callback, Item args_array) {
+    return js_setImmediate_impl(callback, args_array, true);
 }
 
 // Helper: create a JS array from 1-4 items (used by transpiler for setTimeout extra args)
@@ -801,7 +853,7 @@ extern "C" Item js_setInterval(Item callback, Item delay) {
     th->is_interval = true;
     th->extra_count = 0;
     th->timer.data = th;
-    timer_capture_runtime(th);
+    timer_capture_runtime(th, "Timeout", 7);
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, ms, ms);
@@ -811,7 +863,7 @@ extern "C" Item js_setInterval(Item callback, Item delay) {
         timer_handles[timer_handle_count++] = th;
     }
 
-    return make_timer_object(th->id);
+    return make_timer_object(th->id, JS_CLASS_TIMEOUT);
 }
 
 // setInterval with extra args passed as a JS array
@@ -848,7 +900,7 @@ extern "C" Item js_setInterval_args(Item callback, Item delay, Item args_array) 
         }
         th->extra_count = count;
     }
-    timer_capture_runtime(th);
+    timer_capture_runtime(th, "Timeout", 7);
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, ms, ms);
@@ -858,7 +910,7 @@ extern "C" Item js_setInterval_args(Item callback, Item delay, Item args_array) 
         timer_handles[timer_handle_count++] = th;
     }
 
-    return make_timer_object(th->id);
+    return make_timer_object(th->id, JS_CLASS_TIMEOUT);
 }
 
 // =============================================================================
@@ -967,7 +1019,7 @@ extern "C" Item js_setTimeout_promise(Item delay, Item value, Item options) {
     th->extra_args[0] = value;
     th->extra_count = 1;
     th->timer.data = th;
-    timer_capture_runtime(th);
+    timer_capture_runtime(th, "Timeout", 7);
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, ms, 0);
@@ -1046,7 +1098,7 @@ extern "C" Item js_setImmediate_promise(Item value, Item options) {
     th->extra_args[0] = value;
     th->extra_count = 1;
     th->timer.data = th;
-    timer_capture_runtime(th);
+    timer_capture_runtime(th, "Immediate", 9);
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, 0, 0);

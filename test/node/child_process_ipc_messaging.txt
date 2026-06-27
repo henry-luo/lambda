@@ -1,0 +1,8 @@
+parent connected start: true
+parent send return: true
+parent message: pong:42
+parent connected on disconnect: false
+child connected start: true
+child message: ping:41
+child connected after disconnect: false
+parent close: 0
