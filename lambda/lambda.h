@@ -83,6 +83,8 @@ void lambda_stack_overflow_error(const char* func_name);
 enum EnumTypeId {
     LMD_TYPE_RAW_POINTER = 0,
     LMD_TYPE_NULL,
+    // JavaScript-specific scalar sentinel, distinct from Lambda null.
+    LMD_TYPE_UNDEFINED,  // JavaScript undefined (distinct from null)
 
     // scalar types
     LMD_TYPE_BOOL,
@@ -115,9 +117,6 @@ enum EnumTypeId {
 
     LMD_TYPE_ANY,
     LMD_TYPE_ERROR,
-
-    // JavaScript-specific types (added at end to preserve existing type IDs)
-    LMD_TYPE_UNDEFINED,  // JavaScript undefined (distinct from null)
 
     LMD_TYPE_COUNT,  // number of type IDs — must be last before HEAP_START
     LMD_CONTAINER_HEAP_START, // special value for container heap entry start
@@ -1133,14 +1132,19 @@ static inline RetPath rp_err(LambdaError* error) {
 // ============================================================================
 #ifndef __cplusplus
 
-// Wrap a legacy Item-returning function result into RetItem
-// Note: Error Items (from fn_error()) don't carry a real LambdaError* pointer.
-// They're just tagged values (LMD_TYPE_ERROR in high 8 bits, pointer=0).
-// So we store the error Item in .value and use .err as a boolean sentinel.
+// Wrap a legacy Item-returning function result into RetItem.
+// Error Items may be either the historical sentinel (pointer=0) or a tagged
+// LambdaError* created at runtime. Preserve the pointer when present and use
+// .err as a boolean sentinel only for pointer-less errors.
 static inline RetItem item_to_ri(Item item) {
     RetItem r;
     r.value = item;
-    r.err = ((uint64_t)item >> 56 == LMD_TYPE_ERROR) ? (LambdaError*)1 : null;
+    if ((uint64_t)item >> 56 == LMD_TYPE_ERROR) {
+        LambdaError* err = it2err(item);
+        r.err = err ? err : (LambdaError*)1;
+    } else {
+        r.err = null;
+    }
     return r;
 }
 

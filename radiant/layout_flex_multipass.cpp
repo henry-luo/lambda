@@ -22,6 +22,141 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
 void run_enhanced_flex_algorithm(LayoutContext* lycon, ViewBlock* flex_container);
 bool has_auto_margins(ViewBlock* item);
 void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container);
+extern bool is_only_whitespace(const char* str);
+
+static bool flex_child_is_br(DomNode* child) {
+    if (!child || !child->is_element()) return false;
+    DomElement* elem = child->as_element();
+    return elem && elem->tag() == HTM_TAG_BR;
+}
+
+static bool flex_container_has_only_direct_text_and_br(ViewBlock* flex_container) {
+    if (!flex_container) return false;
+
+    bool saw_content = false;
+    bool saw_br = false;
+    DomNode* child = flex_container->first_child;
+    while (child) {
+        if (child->is_text()) {
+            const char* text = (const char*)child->text_data();
+            if (text && !is_only_whitespace(text)) {
+                saw_content = true;
+            }
+        } else if (flex_child_is_br(child)) {
+            saw_content = true;
+            saw_br = true;
+        } else {
+            return false;
+        }
+        child = child->next_sibling;
+    }
+    return saw_content && saw_br;
+}
+
+static bool flex_direct_text_br_bounds(ViewBlock* flex_container,
+        float* out_min_x, float* out_min_y, float* out_max_x, float* out_max_y) {
+    if (!flex_container || !out_min_x || !out_min_y || !out_max_x || !out_max_y) return false;
+
+    float min_x = 1.0e30f;
+    float min_y = 1.0e30f;
+    float max_x = -1.0e30f;
+    float max_y = -1.0e30f;
+    bool found = false;
+
+    DomNode* child = flex_container->first_child;
+    while (child) {
+        if (child->is_text()) {
+            DomText* text = child->as_text();
+            if (text && text->view_type == RDT_VIEW_TEXT) {
+                ViewText* text_view = lam::view_require<RDT_VIEW_TEXT>(text);
+                TextRect* rect = text_view->rect;
+                while (rect) {
+                    min_x = fminf(min_x, rect->x);
+                    min_y = fminf(min_y, rect->y);
+                    max_x = fmaxf(max_x, rect->x + rect->width);
+                    max_y = fmaxf(max_y, rect->y + rect->height);
+                    found = true;
+                    rect = rect->next;
+                }
+            }
+        } else if (flex_child_is_br(child)) {
+            ViewElement* elem = lam::view_as_element(child);
+            if (elem && elem->view_type != RDT_VIEW_NONE) {
+                min_x = fminf(min_x, elem->x);
+                min_y = fminf(min_y, elem->y);
+                max_x = fmaxf(max_x, elem->x + elem->width);
+                max_y = fmaxf(max_y, elem->y + elem->height);
+                found = true;
+            }
+        }
+        child = child->next_sibling;
+    }
+
+    if (!found) return false;
+    *out_min_x = min_x;
+    *out_min_y = min_y;
+    *out_max_x = max_x;
+    *out_max_y = max_y;
+    return true;
+}
+
+static void flex_shift_direct_text_br_run(ViewBlock* flex_container, float dx, float dy) {
+    if (!flex_container || (fabsf(dx) < 0.001f && fabsf(dy) < 0.001f)) return;
+
+    DomNode* child = flex_container->first_child;
+    while (child) {
+        if (child->is_text()) {
+            DomText* text = child->as_text();
+            if (text && text->view_type == RDT_VIEW_TEXT) {
+                ViewText* text_view = lam::view_require<RDT_VIEW_TEXT>(text);
+                text_view->x += dx;
+                text_view->y += dy;
+                TextRect* rect = text_view->rect;
+                while (rect) {
+                    rect->x += dx;
+                    rect->y += dy;
+                    rect = rect->next;
+                }
+            }
+        } else if (flex_child_is_br(child)) {
+            ViewElement* elem = lam::view_as_element(child);
+            if (elem && elem->view_type != RDT_VIEW_NONE) {
+                elem->x += dx;
+                elem->y += dy;
+            }
+        }
+        child = child->next_sibling;
+    }
+}
+
+static void flex_normalize_direct_br_boxes(ViewBlock* flex_container) {
+    if (!flex_container) return;
+
+    TextRect* previous_rect = nullptr;
+    DomNode* child = flex_container->first_child;
+    while (child) {
+        if (child->is_text()) {
+            DomText* text = child->as_text();
+            if (text && text->view_type == RDT_VIEW_TEXT) {
+                ViewText* text_view = lam::view_require<RDT_VIEW_TEXT>(text);
+                TextRect* rect = text_view->rect;
+                while (rect) {
+                    previous_rect = rect;
+                    rect = rect->next;
+                }
+            }
+        } else if (flex_child_is_br(child)) {
+            ViewElement* elem = lam::view_as_element(child);
+            if (elem && elem->view_type != RDT_VIEW_NONE && previous_rect) {
+                elem->x = previous_rect->x + previous_rect->width;
+                elem->y = previous_rect->y;
+                elem->width = 0.0f;
+                elem->height = previous_rect->height;
+            }
+        }
+        child = child->next_sibling;
+    }
+}
 
 static float flex_border_box_height_constraint(ViewBlock* block, float css_height) {
     if (!block || css_height < 0.0f) return css_height;
@@ -125,9 +260,6 @@ extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 
 // External function for scroller (from scroller.cpp)
 void update_scroller(ViewBlock* block, float content_width, float content_height);
-
-// External function from layout.cpp for whitespace detection
-extern bool is_only_whitespace(const char* str);
 
 static bool flex_layout_debug_checks_enabled() {
     return false;
@@ -1340,10 +1472,105 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             setup_font(lycon->ui_context, &lycon->font, flex_container->font);
         }
 
+        bool handled_direct_text_br_run = false;
+        if (flex_container_has_only_direct_text_and_br(flex_container)) {
+            // CSS Flexbox section 4: direct text runs in a flex container are wrapped in
+            // an anonymous flex item. A <br> inside that run still forces an inline
+            // line break, so use the normal inline formatter for the whole run.
+            setup_line_height(lycon, flex_container);
+            if (flex_container->blk) {
+                lycon->block.text_align = flex_container->blk->text_align;
+            }
+            lycon->block.advance_y = container_content_y;
+            lycon->block.max_width = 0.0f;
+            line_init(lycon, container_content_x, container_content_x + container_content_width);
+
+            DomNode* run_child = flex_container->first_child;
+            while (run_child) {
+                layout_flow_node(lycon, run_child);
+                run_child = run_child->next_sibling;
+            }
+            if (!lycon->line.is_line_start) {
+                line_break(lycon);
+            }
+            flex_normalize_direct_br_boxes(flex_container);
+
+            float min_x = 0.0f, min_y = 0.0f, max_x = 0.0f, max_y = 0.0f;
+            if (flex_direct_text_br_bounds(flex_container, &min_x, &min_y, &max_x, &max_y)) {
+                float run_width = max_x - min_x;
+                float run_height = max_y - min_y;
+                float target_x = min_x;
+                float target_y = min_y;
+
+                if (is_row) {
+                    switch (justify_content) {
+                        case CSS_VALUE_CENTER:
+                            target_x = container_content_x + (container_content_width - run_width) / 2.0f;
+                            break;
+                        case CSS_VALUE_FLEX_END:
+                        case CSS_VALUE_END:
+                            target_x = container_content_x + container_content_width - run_width;
+                            break;
+                        case CSS_VALUE_FLEX_START:
+                        case CSS_VALUE_START:
+                        default:
+                            target_x = container_content_x;
+                            break;
+                    }
+                    switch (align_items) {
+                        case CSS_VALUE_CENTER:
+                            target_y = container_content_y + (container_content_height - run_height) / 2.0f;
+                            break;
+                        case CSS_VALUE_FLEX_END:
+                            target_y = container_content_y + container_content_height - run_height;
+                            break;
+                        case CSS_VALUE_FLEX_START:
+                        case CSS_VALUE_STRETCH:
+                        default:
+                            target_y = container_content_y;
+                            break;
+                    }
+                } else {
+                    switch (justify_content) {
+                        case CSS_VALUE_CENTER:
+                            target_y = container_content_y + (container_content_height - run_height) / 2.0f;
+                            break;
+                        case CSS_VALUE_FLEX_END:
+                        case CSS_VALUE_END:
+                            target_y = container_content_y + container_content_height - run_height;
+                            break;
+                        case CSS_VALUE_FLEX_START:
+                        case CSS_VALUE_START:
+                        default:
+                            target_y = container_content_y;
+                            break;
+                    }
+                    switch (align_items) {
+                        case CSS_VALUE_CENTER:
+                            target_x = container_content_x + (container_content_width - run_width) / 2.0f;
+                            break;
+                        case CSS_VALUE_FLEX_END:
+                            target_x = container_content_x + container_content_width - run_width;
+                            break;
+                        case CSS_VALUE_FLEX_START:
+                        case CSS_VALUE_STRETCH:
+                        default:
+                            target_x = container_content_x;
+                            break;
+                    }
+                }
+
+                flex_shift_direct_text_br_run(flex_container, target_x - min_x, target_y - min_y);
+                lycon->block.max_width = fmaxf(lycon->block.max_width, run_width);
+                lycon->block.advance_y = target_y + run_height;
+            }
+            handled_direct_text_br_run = true;
+        }
+
         // Process each text node, positioning it after preceding element flex items
         // CSS Flexbox spec: Text nodes become anonymous flex items in document order
         text_child = flex_container->first_child;
-        while (text_child) {
+        while (!handled_direct_text_br_run && text_child) {
             if (text_child->is_text()) {
                 const char* text = (const char*)text_child->text_data();
                 if (text && !is_only_whitespace(text)) {
@@ -1633,7 +1860,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         // Track cumulative text width/height as we go through children in DOM order
         float cumulative_text_offset = 0;
         DomNode* child = flex_container->first_child;
-        while (child) {
+        while (!handled_direct_text_br_run && child) {
             if (child->is_text()) {
                 const char* text = (const char*)child->text_data();
                 if (text && !is_only_whitespace(text)) {

@@ -12,6 +12,7 @@
 #include "../log.h"
 #include "../memtrack.h"
 #include "../hashmap.h"
+#include "../../lambda/lambda.h"
 #include "../../lambda/js/js_exec_profile_weak.h"
 #include <stdlib.h>
 #include <string.h>
@@ -198,37 +199,37 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 }
 
 // ============================================================================
-// Type identification helpers (match lambda.h TypeId values)
-// These must match the EnumTypeId enum in lambda.h exactly.
-// We declare the values we need rather than including lambda.h from C.
+// Type identification helpers.
+// Keep the local suffix used in this C file, but bind to lambda.h's authoritative
+// enum values so TypeId reordering cannot desynchronize GC tracing.
 // ============================================================================
-#define LMD_TYPE_RAW_POINTER_ 0
-#define LMD_TYPE_NULL_     1
-#define LMD_TYPE_BOOL_     2
-#define LMD_TYPE_NUM_SIZED_ 3
-#define LMD_TYPE_INT_      4
-#define LMD_TYPE_INT64_    5
-#define LMD_TYPE_UINT64_   6
-#define LMD_TYPE_FLOAT_    7
-#define LMD_TYPE_DECIMAL_  8
-#define LMD_TYPE_NUMBER_   9
-#define LMD_TYPE_DTIME_   10
-#define LMD_TYPE_SYMBOL_  11
-#define LMD_TYPE_STRING_  12
-#define LMD_TYPE_BINARY_  13
-#define LMD_TYPE_PATH_    14
-#define LMD_TYPE_RANGE_   15
-#define LMD_TYPE_ARRAY_NUM_ 16
-#define LMD_TYPE_ARRAY_   17
-#define LMD_TYPE_MAP_     18
-#define LMD_TYPE_VMAP_    19
-#define LMD_TYPE_ELEMENT_ 20
-#define LMD_TYPE_OBJECT_  21
-#define LMD_TYPE_TYPE_    22
-#define LMD_TYPE_FUNC_    23
-#define LMD_TYPE_ANY_     24
-#define LMD_TYPE_ERROR_   25
-#define LMD_TYPE_UNDEFINED_ 26
+#define LMD_TYPE_RAW_POINTER_ LMD_TYPE_RAW_POINTER
+#define LMD_TYPE_NULL_        LMD_TYPE_NULL
+#define LMD_TYPE_BOOL_        LMD_TYPE_BOOL
+#define LMD_TYPE_NUM_SIZED_   LMD_TYPE_NUM_SIZED
+#define LMD_TYPE_INT_         LMD_TYPE_INT
+#define LMD_TYPE_INT64_       LMD_TYPE_INT64
+#define LMD_TYPE_UINT64_      LMD_TYPE_UINT64
+#define LMD_TYPE_FLOAT_       LMD_TYPE_FLOAT
+#define LMD_TYPE_DECIMAL_     LMD_TYPE_DECIMAL
+#define LMD_TYPE_NUMBER_      LMD_TYPE_NUMBER
+#define LMD_TYPE_DTIME_       LMD_TYPE_DTIME
+#define LMD_TYPE_SYMBOL_      LMD_TYPE_SYMBOL
+#define LMD_TYPE_STRING_      LMD_TYPE_STRING
+#define LMD_TYPE_BINARY_      LMD_TYPE_BINARY
+#define LMD_TYPE_PATH_        LMD_TYPE_PATH
+#define LMD_TYPE_RANGE_       LMD_TYPE_RANGE
+#define LMD_TYPE_ARRAY_NUM_   LMD_TYPE_ARRAY_NUM
+#define LMD_TYPE_ARRAY_       LMD_TYPE_ARRAY
+#define LMD_TYPE_MAP_         LMD_TYPE_MAP
+#define LMD_TYPE_VMAP_        LMD_TYPE_VMAP
+#define LMD_TYPE_ELEMENT_     LMD_TYPE_ELEMENT
+#define LMD_TYPE_OBJECT_      LMD_TYPE_OBJECT
+#define LMD_TYPE_TYPE_        LMD_TYPE_TYPE
+#define LMD_TYPE_FUNC_        LMD_TYPE_FUNC
+#define LMD_TYPE_ANY_         LMD_TYPE_ANY
+#define LMD_TYPE_ERROR_       LMD_TYPE_ERROR
+#define LMD_TYPE_UNDEFINED_   LMD_TYPE_UNDEFINED
 
 #define MAP_KIND_ITERATOR_ 6
 #define MAP_KIND_PROXY_    9
@@ -365,6 +366,8 @@ gc_heap_t* gc_heap_create_with_pool(Pool* pool) {
     // VMap callbacks (set by runtime via lambda-mem.cpp)
     gc->vmap_trace = NULL;
     gc->vmap_destroy = NULL;
+    gc->error_trace = NULL;
+    gc->error_destroy = NULL;
     // Initialize bump-pointer allocator
     gc->bump_blocks = NULL;
     gc->bump_cursor = NULL;
@@ -762,7 +765,8 @@ static gc_header_t* mark_stack_pop(gc_heap_t* gc) {
 //     Stored as raw pointer (item.item = (uint64_t)pointer).
 //     On 64-bit platforms, heap pointer high byte is 0 → _type_id = 0.
 //     Type is determined by reading Container.type_id at the struct's first byte.
-//   - Error/Any: _type_id = 25 or 24, lower bits = 0 → no pointer.
+//   - Error: _type_id = LMD_TYPE_ERROR, lower 56 bits may hold LambdaError*.
+//   - Any: _type_id = LMD_TYPE_ANY, lower bits = 0 → no pointer.
 static void* item_to_ptr(uint64_t item) {
     if (item == 0) return NULL;  // all-zero value
 
@@ -779,6 +783,10 @@ static void* item_to_ptr(uint64_t item) {
     // tags 4-11: tagged pointer types (Int64, Float, Decimal, DateTime, String, etc.)
     // mask off the tag byte in the upper 8 bits to get the actual pointer
     if (tag >= LMD_TYPE_INT64_ && tag <= LMD_TYPE_BINARY_) {
+        return (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
+    }
+
+    if (tag == LMD_TYPE_ERROR_) {
         return (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
     }
 
@@ -894,6 +902,13 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     case LMD_TYPE_PATH_:
         break;
 
+    case LMD_TYPE_ERROR_: {
+        if (gc->error_trace) {
+            gc->error_trace(obj, gc);
+        }
+        break;
+    }
+
     case LMD_TYPE_ARRAY_NUM_: {
         // Owned 1-D arrays have no outgoing pointers; views (is_view bit 5) hold
         // a base reference via the shape side-table in `extra` (offset 24).
@@ -985,7 +1000,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                 // only trace Item-typed fields (containers, strings, etc.)
                 // Skip inline values (bool, int) which don't hold GC pointers
                 if (field_type_id >= LMD_TYPE_INT64_ && field_type_id != LMD_TYPE_BOOL_
-                    && field_type_id != LMD_TYPE_UNDEFINED_ && field_type_id != LMD_TYPE_ERROR_) {
+                    && field_type_id != LMD_TYPE_UNDEFINED_) {
                     if (byte_offset >= 0 && byte_offset < byte_size) {
                         void* field_ptr = (uint8_t*)data_ptr + byte_offset;
 
@@ -1380,6 +1395,11 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
         if (data && gc->vmap_destroy) {
             gc->vmap_destroy(data);
             *(void**)(p + 8) = NULL;  // prevent double-free at context teardown
+        }
+    }
+    else if (tag == LMD_TYPE_ERROR_) {
+        if (gc->error_destroy) {
+            gc->error_destroy(obj);
         }
     }
     else if (tag == LMD_TYPE_MAP_) {

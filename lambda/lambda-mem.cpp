@@ -7,6 +7,7 @@
 #include "../lib/hashmap.h"
 #include "../lib/gc/gc_heap.h"
 #include "mem_factory_rt.h"
+#include "lambda-error.h"
 #include "js/js_runtime.h"
 #include "js/js_exec_profile_weak.h"
 #include "js/js_typed_array.h"
@@ -171,6 +172,8 @@ static uint64_t* jit_gc_root_snapshot_active(int* out_count) {
 // VMap GC bridge functions (defined in vmap.cpp)
 extern "C" void vmap_gc_trace(void* data, gc_heap_t* gc);
 extern "C" void vmap_gc_destroy(void* data);
+extern "C" void err_gc_trace(void* data, gc_heap_t* gc);
+extern "C" void err_gc_destroy(void* data);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
 // ── Interned single-char ASCII strings (Optimization 4) ──────────────
@@ -218,6 +221,9 @@ void heap_init() {
     // register VMap tracing/finalization callbacks
     context->heap->gc->vmap_trace = vmap_gc_trace;
     context->heap->gc->vmap_destroy = vmap_gc_destroy;
+    context->heap->gc->error_trace = err_gc_trace;
+    context->heap->gc->error_destroy = err_gc_destroy;
+    err_set_heap_allocator(heap_calloc);
 
     // initialize interned single-char ASCII table (one-time, idempotent)
     if (!ascii_char_table_initialized) {
@@ -236,6 +242,9 @@ void heap_init_with_pool(Pool* pool) {
     gc_set_collect_callback(context->heap->gc, heap_gc_collect);
     context->heap->gc->vmap_trace = vmap_gc_trace;
     context->heap->gc->vmap_destroy = vmap_gc_destroy;
+    context->heap->gc->error_trace = err_gc_trace;
+    context->heap->gc->error_destroy = err_gc_destroy;
+    err_set_heap_allocator(heap_calloc);
 
     if (!ascii_char_table_initialized) {
         init_ascii_char_table();
@@ -702,6 +711,9 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
                 mpd_del(dec->dec_val);
                 dec->dec_val = NULL;
             }
+        }
+        else if (tag == LMD_TYPE_ERROR) {
+            err_gc_destroy(obj);
         }
         else if (tag == LMD_TYPE_ARRAY) {
             Array *arr = (Array*)obj;

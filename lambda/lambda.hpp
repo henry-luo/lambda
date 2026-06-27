@@ -470,7 +470,12 @@ static inline RetItem ri_err(LambdaError* error) {
 static inline RetItem item_to_ri(Item item) {
     RetItem r;
     r.value = item;
-    r.err = (item._type_id == LMD_TYPE_ERROR) ? (LambdaError*)1 : nullptr;
+    if (item._type_id == LMD_TYPE_ERROR) {
+        LambdaError* err = it2err(item);
+        r.err = err ? err : (LambdaError*)1;
+    } else {
+        r.err = nullptr;
+    }
     return r;
 }
 

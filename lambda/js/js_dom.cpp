@@ -9878,6 +9878,16 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
     }
     DomElement* elem = node->as_element();
 
+    if (strcmp(prop, "style") == 0) {
+        const char* style_text = fn_to_cstr(value);
+        dom_element_set_attribute(elem, "style", style_text ? style_text : "");
+        elem->styles_resolved = false;
+        js_dom_mutation_notify(DOM_JS_MUTATION_STYLE, (DomNode*)elem, elem->parent);
+        log_debug("js_dom_set_property: set style='%.50s' on <%s>",
+                  style_text ? style_text : "", elem->tag_name ? elem->tag_name : "?");
+        return value;
+    }
+
     auto item_to_scroll_value = [](Item scroll_value) -> float {
         TypeId value_type = get_type_id(scroll_value);
         if (value_type == LMD_TYPE_INT) return (float)it2i(scroll_value);

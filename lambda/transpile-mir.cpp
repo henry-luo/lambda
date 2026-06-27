@@ -372,20 +372,8 @@ static void emit_call_void_3(MirTranspiler* mt, const char* fn_name,
 static bool should_gc_root_var(MIR_type_t mir_type, TypeId type_id) {
     if (mir_type == MIR_T_P) return true;
     // check is_gc_root_type
-    switch (type_id) {
-    // boxed scalar Items carry heap pointers and need roots even in I64 regs;
-    // packed int/bool/null scalars are handled by the default unrooted path.
-    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_DECIMAL:
-    case LMD_TYPE_DTIME: case LMD_TYPE_BINARY: case LMD_TYPE_INT64:
-    case LMD_TYPE_UINT64:
-    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_MAP:
-    case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: case LMD_TYPE_RANGE:
-    case LMD_TYPE_FUNC: case LMD_TYPE_TYPE: case LMD_TYPE_PATH:
-    case LMD_TYPE_VMAP: case LMD_TYPE_ANY:
-        return true;
-    default:
-        return false;
-    }
+    if (type_id >= LMD_TYPE_INT64 && type_id != LMD_TYPE_FLOAT) return true;
+    return false;
 }
 
 static MIR_reg_t emit_root_value_bits(MirTranspiler* mt, MIR_reg_t value) {

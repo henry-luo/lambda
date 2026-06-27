@@ -390,6 +390,13 @@ static const char* lowercase_attr_name(const char* name, char* buf, size_t buf_s
     return buf;
 }
 
+static bool dom_element_clear_inline_style_declarations(DomElement* element) {
+    if (!element || !element->specified_style) {
+        return false;
+    }
+    return style_tree_remove_inline_declarations(element->specified_style);
+}
+
 bool dom_element_set_attribute(DomElement* element, const char* name, const char* value) {
     if (!element || !name || !value) {
         log_debug("dom_element_set_attribute: invalid parameters");
@@ -457,8 +464,11 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
                     }
                 }
             } else if (strcmp(lower_name, "style") == 0) {
-                // Parse and apply inline styles
-                dom_element_apply_inline_style(element, value);
+                // Setting the style attribute replaces the previous inline declaration block.
+                dom_element_clear_inline_style_declarations(element);
+                if (value[0] != '\0') {
+                    dom_element_apply_inline_style(element, value);
+                }
             }
 
             // Invalidate style cache
@@ -537,6 +547,8 @@ bool dom_element_remove_attribute(DomElement* element, const char* name) {
             } else if (strcmp(lower_name, "class") == 0) {
                 element->class_count = 0;
                 dom_element_clear_class_names(element);
+            } else if (strcmp(lower_name, "style") == 0) {
+                dom_element_clear_inline_style_declarations(element);
             }
 
             // Invalidate style cache
@@ -855,19 +867,20 @@ const char* dom_element_get_inline_style(DomElement* element) {
  * Removes all declarations with inline_style specificity
  */
 bool dom_element_remove_inline_styles(DomElement* element) {
-    if (!element || !element->specified_style) {
+    if (!element) {
         return false;
     }
 
-    // Remove the style attribute
-    dom_element_remove_attribute(element, "style");
+    bool removed_attr = dom_element_remove_attribute(element, "style");
+    bool removed_decl = dom_element_clear_inline_style_declarations(element);
 
-    // Remove all inline style declarations from the style tree
-    // This is a simplified implementation - ideally we'd track which
-    // declarations came from inline styles
-    // For now, we rely on the style attribute being the source of truth
+    if (removed_decl) {
+        element->style_version++;
+        element->needs_style_recompute = true;
+        element->styles_resolved = false;
+    }
 
-    return true;
+    return removed_attr || removed_decl;
 }
 
 // ============================================================================

@@ -34,6 +34,8 @@ extern "C" {
 #endif
 
 #include "lambda-error.h"
+#include "lambda.h"
+#include "../lib/gc/gc_heap.h"
 #include "../lib/log.h"
 #include "../lib/stringbuf.h"
 #include "../lib/arraylist.h"
@@ -252,18 +254,36 @@ void free_debug_info_table(void* debug_info_list) {
 // Error Creation
 // ============================================================================
 
-LambdaError* err_create(LambdaErrorCode code, const char* message, SourceLocation* location) {
-    LambdaError* error = (LambdaError*)mem_calloc(1, sizeof(LambdaError), MEM_CAT_SYSTEM);
+static LambdaErrorHeapAllocFn g_heap_alloc_fn = NULL;
+
+void err_set_heap_allocator(LambdaErrorHeapAllocFn alloc_fn) {
+    g_heap_alloc_fn = alloc_fn;
+}
+
+static LambdaError* err_init(LambdaError* error, LambdaErrorCode code, const char* message,
+                             SourceLocation* location, bool is_heap) {
     if (!error) return NULL;
-    
+
     error->code = code;
+    error->is_heap = is_heap;
     error->message = message ? err_strdup(message) : err_strdup(err_code_message(code));
-    
+
     if (location) {
         error->location = *location;
     }
-    
+
     return error;
+}
+
+LambdaError* err_create(LambdaErrorCode code, const char* message, SourceLocation* location) {
+    LambdaError* error = (LambdaError*)mem_calloc(1, sizeof(LambdaError), MEM_CAT_SYSTEM);
+    return err_init(error, code, message, location, false);
+}
+
+LambdaError* err_create_heap(LambdaErrorCode code, const char* message, SourceLocation* location) {
+    if (!g_heap_alloc_fn) return NULL;
+    LambdaError* error = (LambdaError*)g_heap_alloc_fn(sizeof(LambdaError), LMD_TYPE_ERROR);
+    return err_init(error, code, message, location, true);
 }
 
 LambdaError* err_createf(LambdaErrorCode code, SourceLocation* location, const char* format, ...) {
@@ -929,15 +949,40 @@ void err_free_stack_trace(StackFrame* trace) {
     }
 }
 
-void err_free(LambdaError* error) {
+void err_release_payload(LambdaError* error) {
     if (!error) return;
-    
+
     if (error->message) mem_free(error->message);
     if (error->help) mem_free(error->help);
     if (error->stack_trace) err_free_stack_trace(error->stack_trace);
-    if (error->cause) err_free(error->cause);
-    
+    if (error->cause && !error->cause->is_heap) err_free(error->cause);
+
+    error->message = NULL;
+    error->help = NULL;
+    error->stack_trace = NULL;
+    error->cause = NULL;
+}
+
+void err_free(LambdaError* error) {
+    if (!error) return;
+
+    if (error->is_heap) return;
+    err_release_payload(error);
     mem_free(error);
+}
+
+void err_gc_trace(void* data, gc_heap_t* gc) {
+    LambdaError* error = (LambdaError*)data;
+    if (!error || !error->is_heap || !error->cause || !error->cause->is_heap) return;
+    uint64_t cause_item = ((uint64_t)LMD_TYPE_ERROR << 56) |
+                          ((uint64_t)(uintptr_t)error->cause & 0x00FFFFFFFFFFFFFFULL);
+    gc_mark_item(gc, cause_item);
+}
+
+void err_gc_destroy(void* data) {
+    LambdaError* error = (LambdaError*)data;
+    if (!error || !error->is_heap) return;
+    err_release_payload(error);
 }
 
 // ============================================================================
