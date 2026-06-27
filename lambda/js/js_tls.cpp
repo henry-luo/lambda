@@ -24,6 +24,8 @@ extern "C" Item js_buffer_from_bytes(const char* data, int len);
 extern "C" int64_t js_array_length(Item array);
 extern "C" Item js_array_get_int(Item array, int64_t index);
 extern "C" bool js_is_typed_array(Item val);
+extern "C" bool js_is_arraybuffer(Item val);
+extern "C" bool js_is_dataview(Item val);
 extern "C" void* js_typed_array_current_data_ptr(Item ta_item);
 extern "C" int js_typed_array_byte_length(Item ta_item);
 
@@ -44,6 +46,129 @@ static inline Item make_js_undefined() {
 
 static bool is_callable(Item item) {
     return get_type_id(item) == LMD_TYPE_FUNC;
+}
+
+static bool tls_is_missing(Item item) {
+    TypeId type = get_type_id(item);
+    return type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED;
+}
+
+static bool tls_property_exists(Item object, const char* name) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return false;
+    return !tls_is_missing(js_property_get(object, make_string_item(name)));
+}
+
+static bool tls_is_buffer_source(Item item) {
+    return js_is_typed_array(item) || js_is_arraybuffer(item) || js_is_dataview(item);
+}
+
+static int tls_append_cstr(char* out, int pos, int cap, const char* text) {
+    if (!out || cap <= 0 || pos >= cap - 1 || !text) return pos;
+    int len = (int)strlen(text);
+    int room = cap - 1 - pos;
+    int n = len < room ? len : room;
+    if (n > 0) {
+        memcpy(out + pos, text, (size_t)n);
+        pos += n;
+        out[pos] = '\0';
+    }
+    return pos;
+}
+
+static int tls_append_received_suffix(char* out, int pos, int cap, Item value) {
+    TypeId type = get_type_id(value);
+    char buf[128];
+    if (type == LMD_TYPE_BOOL) {
+        snprintf(buf, sizeof(buf), " Received type boolean (%s)",
+                 it2b(value) ? "true" : "false");
+        return tls_append_cstr(out, pos, cap, buf);
+    }
+    if (type == LMD_TYPE_INT) {
+        snprintf(buf, sizeof(buf), " Received type number (%lld)",
+                 (long long)it2i(value));
+        return tls_append_cstr(out, pos, cap, buf);
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        snprintf(buf, sizeof(buf), " Received type number");
+        return tls_append_cstr(out, pos, cap, buf);
+    }
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(value);
+        snprintf(buf, sizeof(buf), " Received type string ('%.*s')",
+                 s ? (int)(s->len > 25 ? 25 : s->len) : 0,
+                 s ? s->chars : "");
+        return tls_append_cstr(out, pos, cap, buf);
+    }
+    if (type == LMD_TYPE_NULL) return tls_append_cstr(out, pos, cap, " Received null");
+    if (type == LMD_TYPE_UNDEFINED) return tls_append_cstr(out, pos, cap, " Received undefined");
+    if (type == LMD_TYPE_MAP) {
+        return tls_append_cstr(out, pos, cap, " Received an instance of Object");
+    }
+    return tls_append_cstr(out, pos, cap, " Received type object");
+}
+
+static Item tls_throw_option_type_error(const char* name, const char* expected, Item value) {
+    char msg[512];
+    int pos = 0;
+    pos = tls_append_cstr(msg, pos, sizeof(msg), "The \"options.");
+    pos = tls_append_cstr(msg, pos, sizeof(msg), name);
+    pos = tls_append_cstr(msg, pos, sizeof(msg), "\" property must be of type ");
+    pos = tls_append_cstr(msg, pos, sizeof(msg), expected);
+    pos = tls_append_cstr(msg, pos, sizeof(msg), ".");
+    tls_append_received_suffix(msg, pos, sizeof(msg), value);
+    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+}
+
+static bool tls_validate_material_item(Item value, bool allow_pem_object,
+                                       bool allow_zero, Item* bad_value) {
+    if (tls_is_missing(value)) return true;
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_STRING) return true;
+    if (type == LMD_TYPE_BOOL && !it2b(value)) return true;
+    if (allow_zero && type == LMD_TYPE_INT && it2i(value) == 0) return true;
+    if (allow_zero && type == LMD_TYPE_FLOAT && it2d(value) == 0.0) return true;
+    if (tls_is_buffer_source(value)) return true;
+    if (type == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(value);
+        for (int64_t i = 0; i < len; i++) {
+            Item child = js_array_get_int(value, i);
+            if (!tls_validate_material_item(child, allow_pem_object, allow_zero, bad_value)) {
+                return false;
+            }
+        }
+        return true;
+    }
+    if (allow_pem_object && type == LMD_TYPE_MAP && tls_property_exists(value, "pem")) {
+        Item pem = js_property_get(value, make_string_item("pem"));
+        if (tls_validate_material_item(pem, false, allow_zero, bad_value)) return true;
+    }
+    if (bad_value) *bad_value = value;
+    return false;
+}
+
+static Item tls_validate_material_option(Item options, const char* name,
+                                         const char* expected,
+                                         bool allow_pem_object,
+                                         bool allow_zero) {
+    if (get_type_id(options) != LMD_TYPE_MAP) return make_js_undefined();
+    Item value = js_property_get(options, make_string_item(name));
+    Item bad = value;
+    if (!tls_validate_material_item(value, allow_pem_object, allow_zero, &bad)) {
+        return tls_throw_option_type_error(name, expected, bad);
+    }
+    return make_js_undefined();
+}
+
+static Item tls_validate_material_options(Item options, bool allow_zero) {
+    Item err = tls_validate_material_option(options, "key",
+        "string or an instance of Buffer, TypedArray, or DataView", true, allow_zero);
+    if (js_check_exception()) return err;
+    err = tls_validate_material_option(options, "cert",
+        "string or an instance of Buffer, TypedArray, or DataView", false, allow_zero);
+    if (js_check_exception()) return err;
+    err = tls_validate_material_option(options, "ca",
+        "string or an instance of Buffer, TypedArray, or DataView", false, allow_zero);
+    return err;
 }
 
 // helper: extract C string from Item into stack buffer
@@ -303,6 +428,9 @@ static Item make_tls_socket_object(JsTlsSocket* sock) {
 // =============================================================================
 
 extern "C" Item js_tls_createSecureContext(Item options_item) {
+    Item validation = tls_validate_material_options(options_item, true);
+    if (js_check_exception()) return validation;
+
     TlsConfig config = tls_config_default();
 
     char cert_buf[16384] = {0};
@@ -838,6 +966,9 @@ extern "C" Item js_tls_createServer(Item options_item, Item handler) {
     if (!loop) {
         return js_new_error(make_string_item("No event loop available"));
     }
+
+    Item validation = tls_validate_material_options(options_item, false);
+    if (js_check_exception()) return validation;
 
     // extract cert/key from options
     TlsConfig config = tls_config_default();

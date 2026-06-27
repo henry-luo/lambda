@@ -94,6 +94,24 @@ assert.strictEqual(crypto.createVerify('sha256')
   .verify(publicKeyObject, objectSignature), true);
 console.log('rsa keyobject sign verify:', true);
 
+const oneShotSignature = crypto.sign('sha256', Buffer.from(message), {
+  key: privateKeyObject,
+  padding: crypto.constants.RSA_PKCS1_PSS_PADDING
+});
+const oneShotMaxSaltLength = privateKeyObject.asymmetricKeyDetails.modulusLength / 8 -
+  crypto.hash('sha256', Buffer.from(message), 'buffer').byteLength - 2;
+assert.strictEqual(crypto.verify('sha256', Buffer.from(message), {
+  key: publicKeyObject,
+  padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
+  saltLength: oneShotMaxSaltLength
+}, oneShotSignature), true);
+assert.strictEqual(crypto.verify('sha256', Buffer.from(message + '!'), {
+  key: publicKeyObject,
+  padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
+  saltLength: oneShotMaxSaltLength
+}, oneShotSignature), false);
+console.log('rsa one-shot pss default salt:', true);
+
 const derivedPublic = crypto.createPublicKey(privateKeyObject);
 assert.strictEqual(derivedPublic.type, 'public');
 assert.strictEqual(crypto.createVerify('sha256')

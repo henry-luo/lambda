@@ -23,6 +23,7 @@ test-module-main-fail.js                         # [timeout] observed 60.0s (>10
 test-module-main-preserve-symlinks-fail.js       # [timeout] observed 60.0s (>10s)
 test-module-wrap.js                              # [timeout] observed 60.0s (>10s)
 test-module-wrapper.js                           # [timeout] observed 60.0s (>10s)
+test-net-child-process-connect-reset.js          # [slow] observed 10.3s (>10s)
 test-net-write-fully-async-buffer.js             # [timeout] observed 10.1s (>10s)
 test-querystring-maxKeys-non-finite.js           # [slow] observed 20.7s (>10s)
 test-repl-autolibs.js                            # [timeout] observed 60.1s (>10s)

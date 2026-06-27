@@ -805,11 +805,18 @@ static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
 
 extern "C" Item js_spawn_stream_on(Item event_item, Item callback);
 
+static Item js_spawn_stream_set_encoding(Item encoding) {
+    (void)encoding;
+    return js_get_this();
+}
+
 // create a stream-like object with on('data', cb) / on('close', cb)
 static Item make_stream_object(void) {
     Item obj = js_new_object();
     js_property_set(obj, make_string_item("on"),
                     js_new_function((void*)js_spawn_stream_on, 2));
+    js_property_set(obj, make_string_item("setEncoding"),
+                    js_new_function((void*)js_spawn_stream_set_encoding, 1));
     return obj;
 }
 
@@ -1092,6 +1099,11 @@ static bool normalize_spawn_request(Item rest_args, SpawnRequest* req) {
     req->stdio_mode[1] = 0;
     req->stdio_mode[2] = 0;
     req->env = make_js_undefined();
+    Item process_obj = js_get_process_object_value();
+    if (is_object_item(process_obj)) {
+        Item process_env = js_property_get(process_obj, make_string_item("env"));
+        if (is_object_item(process_env)) req->env = process_env;
+    }
 
     int64_t argc64 = js_array_length(rest_args);
     Item command_item = argc64 > 0 ? js_array_get_int(rest_args, 0) : make_js_undefined();
