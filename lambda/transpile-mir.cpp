@@ -9723,11 +9723,11 @@ static void gather_evidence(AstNode* node, InferCtx* ctx) {
                 // Only gather strong type evidence from LITERAL values (e.g. n+1, n%2).
                 // Typed variables (e.g. a:int in a+b) are NOT strong evidence — the
                 // untyped param may intentionally accept multiple types.
-                if (left_is_tracked && bi->right && bi->right->type && bi->right->type->is_literal) {
+                if (is_arith && left_is_tracked && bi->right && bi->right->type && bi->right->type->is_literal) {
                     TypeId rtid = node_type_id(bi->right);
                     ctx->evidence |= classify_other_type(rtid);
                 }
-                if (right_is_tracked && bi->left && bi->left->type && bi->left->type->is_literal) {
+                if (is_arith && right_is_tracked && bi->left && bi->left->type && bi->left->type->is_literal) {
                     TypeId ltid = node_type_id(bi->left);
                     ctx->evidence |= classify_other_type(ltid);
                 }
@@ -9888,19 +9888,14 @@ static TypeId infer_param_type(AstNode* body, const char* pname, int pname_len, 
     if ((ctx.evidence & INFER_INT) && !(ctx.evidence & INFER_FLOAT)) return LMD_TYPE_INT;
     // Any FLOAT evidence (even mixed with INT) → FLOAT (int promotes to float)
     if (ctx.evidence & INFER_FLOAT) return LMD_TYPE_FLOAT;
-    // Weak evidence: used only in numeric contexts (arithmetic/comparison) but no
-    // literal type info. Only apply for procedural (pn) functions where untyped
-    // params in compute-heavy loops are almost always int. Functional (fn) params
-    // are often intentionally polymorphic.
-    // Guard: if the function body contains float literals, the untyped param may
-    // receive float values — don't force INT. (e.g. mbrot's count() uses 16.0, 2.0)
-    // Only infer INT when param is used in actual arithmetic (not just comparisons).
-    // Comparisons (==, <, >) are polymorphic and don't prove the param is int.
-    // e.g. `(tree.root).key == key` should NOT cause key to be inferred as INT.
-    if (is_proc && (ctx.evidence & INFER_ARITH_USE)) {
-        if (!(ctx.evidence & INFER_FLOAT_CONTEXT)) return LMD_TYPE_INT;
-    }
-    // No evidence at all — keep ANY
+    // No POSITIVE type evidence (no int/float literal in arithmetic, no typed-array
+    // index, no float context). We previously SPECULATED INT here for pn params used
+    // in arithmetic ("compute-heavy loops are almost always int"). That guess is
+    // unsound: it unboxes float arguments to native int at the call boundary and
+    // TRUNCATES them. cd.ls's is_in_voxel positions (0.9 → 0) and safe_div denominators
+    // were silently truncated this way, corrupting the result. So we no longer guess —
+    // a param with only weak arithmetic evidence stays ANY (boxed, correct for both int
+    // and float; genuine int params still get native INT from positive evidence above).
     return LMD_TYPE_ANY;
 }
 
@@ -9970,11 +9965,11 @@ static void gather_evidence_multi(AstNode* node, InferCtx* ctxs, int ctx_count) 
                 for (int c = 0; c < ctx_count; c++) {
                     bool left_is_tracked = is_tracked_ref(bi->left, &ctxs[c]);
                     bool right_is_tracked = is_tracked_ref(bi->right, &ctxs[c]);
-                    if (left_is_tracked && bi->right && bi->right->type && bi->right->type->is_literal) {
+                    if (is_arith && left_is_tracked && bi->right && bi->right->type && bi->right->type->is_literal) {
                         TypeId rtid = node_type_id(bi->right);
                         ctxs[c].evidence |= classify_other_type(rtid);
                     }
-                    if (right_is_tracked && bi->left && bi->left->type && bi->left->type->is_literal) {
+                    if (is_arith && right_is_tracked && bi->left && bi->left->type && bi->left->type->is_literal) {
                         TypeId ltid = node_type_id(bi->left);
                         ctxs[c].evidence |= classify_other_type(ltid);
                     }
@@ -10105,9 +10100,9 @@ static TypeId resolve_inferred_type(InferCtx* ctx, bool is_proc) {
     if (ctx->evidence & INFER_STOP) return LMD_TYPE_ANY;
     if ((ctx->evidence & INFER_INT) && !(ctx->evidence & INFER_FLOAT)) return LMD_TYPE_INT;
     if (ctx->evidence & INFER_FLOAT) return LMD_TYPE_FLOAT;
-    if (is_proc && (ctx->evidence & INFER_ARITH_USE)) {
-        if (!(ctx->evidence & INFER_FLOAT_CONTEXT)) return LMD_TYPE_INT;
-    }
+    // Only weak arithmetic evidence (no int/float literal, no typed-array index) → keep ANY.
+    // We no longer SPECULATE INT here: that guess truncated float args at the call boundary
+    // (cd.ls positions/denominators). See infer_param_type() for the full rationale.
     return LMD_TYPE_ANY;
 }
 
