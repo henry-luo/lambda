@@ -898,6 +898,28 @@ pub fn cmd_delete_backward(state) {
   }
 }
 
+// Forward-delete at the end of a leaf: if a sibling follows within the block,
+// delete it (first char of next leaf, or the next inline node like <br>, merging
+// now-adjacent same-mark leaves); otherwise join the next block.
+fn delete_forward_at_leaf_end(state, p) {
+  let block_path = parent_path(p.path)
+  let block = node_at(state.doc, block_path)
+  let leaf_idx = last_index(p.path)
+  if (block == null or not is_node(block) or leaf_idx + 1 >= len(block.content)) { merge_blocks_forward(state, p) }
+  else {
+    let next = block.content[leaf_idx + 1]
+    if (is_text(next) and len(next.text) > 0) {
+      delete_range(state, pos([*block_path, leaf_idx + 1], 0), pos([*block_path, leaf_idx + 1], 1))
+    } else {
+      let before = list_slice(block.content, 0, leaf_idx + 1)
+      let new_content = merge_adjacent_text(list_concat(before, list_slice(block.content, leaf_idx + 2, len(block.content))))
+      let tx0 = tx_begin(state.doc, state.selection)
+      let tx1 = tx_step(tx0, step_replace(block_path, 0, len(block.content), new_content))
+      tx_set_selection(tx1, caret(p))
+    }
+  }
+}
+
 pub fn cmd_delete_forward(state) {
   let sel = state.selection
   if (sel == null) { null }
@@ -907,7 +929,7 @@ pub fn cmd_delete_forward(state) {
     let p = sel.anchor
     let leaf = node_at(state.doc, p.path)
     if (leaf == null or not is_text(leaf)) { null }
-    else if (p.offset >= len(leaf.text)) { merge_blocks_forward(state, p) }
+    else if (p.offset >= len(leaf.text)) { delete_forward_at_leaf_end(state, p) }
     else { delete_range(state, p, pos(p.path, p.offset + 1)) }
   }
 }

@@ -428,6 +428,78 @@ export function cmdDeleteBackward(state: EditorState): Transaction | null {
   return deleteBackwardAt(state, lo)
 }
 
+// Symmetric to mergeIntoLastInline: pull the FIRST inline-content run out of
+// `node`, descending through containers. `remainder` is `node` with that run
+// removed (null when `node` is wholly consumed).
+interface PullResult { inline: Child[]; remainder: Node | null }
+function pullFirstInline(schema: Schema, node: Node): PullResult | null {
+  if (schemaAllowsInline(schema, node.tag)) {
+    return { inline: node.content, remainder: null }
+  }
+  if (node.content.length === 0) return null
+  const first = node.content[0]
+  if (first === undefined || !isNode(first)) return null
+  const res = pullFirstInline(schema, first)
+  if (res === null) return null
+  const rest = res.remainder === null ? node.content.slice(1) : [res.remainder, ...node.content.slice(1)]
+  return { inline: res.inline, remainder: rest.length === 0 ? null : withContent(node, rest) }
+}
+
+// Forward delete at a block end: merge the NEXT sibling block's first inline run
+// into this block (PM joinForward). Symmetric to joinBlockBackward.
+function joinBlockForward(state: EditorState, blockPath: SourcePath): Transaction | null {
+  const parent = parentPath(blockPath)
+  const parentNode = nodeAt(state.doc, parent)
+  const blockIdx = lastIndex(blockPath)
+  const block = nodeAt(state.doc, blockPath)
+  if (block === null || !isNode(block) || parentNode === null || !isNode(parentNode)) return null
+  if (!schemaAllowsInline(state.schema, block.tag)) return null  // can only pull inline into an inline block
+  if (blockIdx >= parentNode.content.length - 1) return null     // last block — nothing after
+  const next = parentNode.content[blockIdx + 1]
+  if (next === undefined || !isNode(next)) return null
+  const pulled = pullFirstInline(state.schema, next)
+  if (pulled === null) return null
+  const seam = charLen(block.content)
+  const mergedContent = mergeInlines([...block.content, ...pulled.inline])
+  const merged = withContent(block, mergedContent)
+  const replacement = pulled.remainder === null ? [merged] : [merged, pulled.remainder]
+  let tx = txBegin(state.doc, state.selection)
+  tx = txStep(tx, stepReplace(parent, blockIdx, blockIdx + 2, replacement))
+  const cp = caretPosInContent(blockPath, mergedContent, seam)
+  return txSetSelection(tx, caret(cp))
+}
+
+// Delete one unit forward at child index `childIdx` of `blockPath`: first char of
+// the next text leaf, the next inline node, or — at the block end — join the next block.
+function deleteAfterChild(state: EditorState, blockPath: SourcePath, childIdx: number): Transaction | null {
+  const block = nodeAt(state.doc, blockPath)
+  if (block === null || !isNode(block)) return null
+  if (childIdx >= block.content.length) return joinBlockForward(state, blockPath)
+  const next = block.content[childIdx]
+  if (next !== undefined && isText(next) && next.text.length > 0) {
+    const nextPath = [...blockPath, childIdx]
+    return deleteRangeInLeaf(state, pos(nextPath, 0), pos(nextPath, 1))
+  }
+  // Next child is an inline node (e.g. <br>) or an empty leaf — remove it,
+  // merging any now-adjacent same-mark leaves so block content stays canonical.
+  const before = block.content.slice(0, childIdx)
+  const newContent = mergeInlines([...before, ...block.content.slice(childIdx + 1)])
+  let tx = txBegin(state.doc, state.selection)
+  tx = txStep(tx, stepReplace(blockPath, 0, block.content.length, newContent))
+  const cp = caretPosInContent(blockPath, newContent, charLen(before))
+  return txSetSelection(tx, caret(cp))
+}
+
+function deleteForwardAt(state: EditorState, p: SourcePos): Transaction | null {
+  const target = nodeAt(state.doc, p.path)
+  if (target === null) return null
+  if (isText(target)) {
+    if (p.offset < target.text.length) return deleteRangeInLeaf(state, p, pos(p.path, p.offset + 1))
+    return deleteAfterChild(state, parentPath(p.path), lastIndex(p.path) + 1)
+  }
+  return deleteAfterChild(state, p.path, p.offset)
+}
+
 export function cmdDeleteForward(state: EditorState): Transaction | null {
   const sel = state.selection
   if (sel === null) return null
@@ -436,10 +508,7 @@ export function cmdDeleteForward(state: EditorState): Transaction | null {
   const lo = resolvePos(state.doc, selLo(sel))
   const hi = resolvePos(state.doc, selHi(sel))
   if (!posEqual(lo, hi)) return deleteRangeResolved(state, lo, hi)
-  const leaf = nodeAt(state.doc, lo.path)
-  if (leaf === null || !isText(leaf)) return null  // node-position forward delete (joinForward) — TODO
-  if (lo.offset >= leaf.text.length) return null   // block-end boundary (joinForward) — TODO
-  return deleteRangeInLeaf(state, lo, pos(lo.path, lo.offset + 1))
+  return deleteForwardAt(state, lo)
 }
 
 // ---------------------------------------------------------------------------

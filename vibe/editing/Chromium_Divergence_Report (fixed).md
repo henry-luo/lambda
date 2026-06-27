@@ -9,10 +9,10 @@ stripped identically (tags/markers removed, block ends → newlines). Generated 
 ## Overall
 
 - **Compared:** 248 tests
-- **Exact text match:** 173 (69.8%)
+- **Exact text match:** 174 (70.2%)
 - **Whitespace-only divergence:** 4 (1.6%) — same text, different spacing
-- **Text-conformant (exact + whitespace):** 177 (71.4%)
-- **Content divergence:** 71 (28.6%) — our result differs in non-whitespace content
+- **Text-conformant (exact + whitespace):** 178 (71.8%)
+- **Content divergence:** 70 (28.2%) — our result differs in non-whitespace content
 - **Errors:** 0 (0.0%) — our editor threw on the sequence
 
 ## By category
@@ -20,7 +20,7 @@ stripped identically (tags/markers removed, block ends → newlines). Generated 
 | Category | Compared | Exact | Whitespace | Content | Error | Text-conformant |
 |---|---:|---:|---:|---:|---:|---:|
 | inserting | 74 | 47 | 0 | 27 | 0 | 64% |
-| deleting | 64 | 37 | 2 | 25 | 0 | 61% |
+| deleting | 64 | 38 | 2 | 24 | 0 | 63% |
 | execCommand | 70 | 59 | 0 | 11 | 0 | 84% |
 | style | 14 | 10 | 0 | 4 | 0 | 71% |
 | selection | 16 | 13 | 2 | 1 | 0 | 94% |
@@ -47,13 +47,15 @@ PM/Slate-class model intentionally or not-yet matches a browser:
 4. **`insertHTML` of `<div>` blocks — structural.** Chrome flattens pasted `<div>`s inline
    in some contexts; we treat them as blocks (extra newline). Tied to our schema not
    modelling `<div>`.
-5. **Caret-movement landing points / forward join.** A few sequences differ because our
-   headless caret movement lands on different stops, or because `deleteContentForward` at a
-   block *end* does not yet `joinForward`. The next actionable item.
+5. **Caret-movement landing points — needs layout.** A few `moveCaret`-then-type sequences
+   differ because our headless caret movement lands on different stops than a browser’s
+   layout-aware (visual-line) movement. Out of scope for the no-layout reference model.
 
-Status: the two structural gaps the previous report flagged — **(1) joinBackward** and
-**(2) select-all delete** — are now implemented. Remaining divergences are the intentional
-whitespace model (3), the `<div>` schema gap (4), and `joinForward` (5).
+Status: all three structural gaps the earlier reports flagged are now implemented —
+**joinBackward**, **select-all delete**, and **joinForward** (`deleteContentForward` at a
+block end, or before a `<br>`, now merges/deletes — matched in both the JS reference and
+the Lambda port). The remaining divergences are the intentional whitespace model (3), the
+`<div>` schema gap (4), and layout-aware caret movement (5) — none are bugs.
 
 ## Content divergences (sample)
 
