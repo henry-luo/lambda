@@ -115,11 +115,6 @@ for (const root of FIXTURE_ROOTS) {
     const dir = path.dirname(file)
     if (seen.has(dir)) continue
     seen.add(dir)
-    // Lambda implements joinForward (Delete at block end merges the next block —
-    // correct browser behaviour); the JS reference hasn't yet (its documented
-    // TODO), so it expects a no-op here. Nothing valid to compare → exclude until
-    // joinForward lands in JS.
-    if (/forward-block-boundary-noop/.test(dir)) { bump('js-lacks-joinforward'); continue }
     const inputHtml = fs.readFileSync(file, 'utf8').trim()
     const eventsPath = path.join(dir, 'events.json')
     if (!fs.existsSync(eventsPath)) continue

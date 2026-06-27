@@ -2868,939 +2868,945 @@ let st_455_0 = {doc: d_455, selection: text_selection(pos([0, 0], 3), pos([0, 0]
 let st_455_1 = next_state(st_455_0, cmd_delete_forward(st_455_0))
 fp(st_455_1.doc) == "doc(p(\"abc\"))"
 
-// [456] tier_b_prosemirror/commands/delete/forward-before-br-noop
+// [456] tier_b_prosemirror/commands/delete/forward-before-br-delete
 let d_456 = node('doc', [node('p', [text("ab"), node('br', []), text("cd")])])
 let st_456_0 = {doc: d_456, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
 let st_456_1 = next_state(st_456_0, cmd_delete_forward(st_456_0))
-fp(st_456_1.doc) == "doc(p(\"ab\",br(),\"cd\"))"
+fp(st_456_1.doc) == "doc(p(\"abcd\"))"
 
-// [457] tier_b_prosemirror/commands/delete/forward-char
-let d_457 = node('doc', [node('p', [text("abc")])])
-let st_457_0 = {doc: d_457, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0)), schema: html5_subset_schema}
+// [457] tier_b_prosemirror/commands/delete/forward-block-boundary-merge
+let d_457 = node('doc', [node('p', [text("a")]), node('p', [text("b")])])
+let st_457_0 = {doc: d_457, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1)), schema: html5_subset_schema}
 let st_457_1 = next_state(st_457_0, cmd_delete_forward(st_457_0))
-fp(st_457_1.doc) == "doc(p(\"bc\"))"
+fp(st_457_1.doc) == "doc(p(\"ab\"))"
 
-// [458] tier_b_prosemirror/commands/delete/forward-char-mid
-let d_458 = node('doc', [node('p', [text("abcd")])])
-let st_458_0 = {doc: d_458, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
+// [458] tier_b_prosemirror/commands/delete/forward-char
+let d_458 = node('doc', [node('p', [text("abc")])])
+let st_458_0 = {doc: d_458, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0)), schema: html5_subset_schema}
 let st_458_1 = next_state(st_458_0, cmd_delete_forward(st_458_0))
-fp(st_458_1.doc) == "doc(p(\"abd\"))"
+fp(st_458_1.doc) == "doc(p(\"bc\"))"
 
-// [459] tier_b_prosemirror/commands/delete/forward-then-split
-let d_459 = node('doc', [node('p', [text("heloworld")])])
-let st_459_0 = {doc: d_459, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
+// [459] tier_b_prosemirror/commands/delete/forward-char-mid
+let d_459 = node('doc', [node('p', [text("abcd")])])
+let st_459_0 = {doc: d_459, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
 let st_459_1 = next_state(st_459_0, cmd_delete_forward(st_459_0))
-let st_459_2 = next_state(st_459_1, cmd_split_block(st_459_1))
-fp(st_459_2.doc) == "doc(p(\"helo\"),p(\"orld\"))"
+fp(st_459_1.doc) == "doc(p(\"abd\"))"
 
-// [460] tier_b_prosemirror/commands/delete/forward-twice
-let d_460 = node('doc', [node('p', [text("abcd")])])
-let st_460_0 = {doc: d_460, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0)), schema: html5_subset_schema}
+// [460] tier_b_prosemirror/commands/delete/forward-then-split
+let d_460 = node('doc', [node('p', [text("heloworld")])])
+let st_460_0 = {doc: d_460, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
 let st_460_1 = next_state(st_460_0, cmd_delete_forward(st_460_0))
-let st_460_2 = next_state(st_460_1, cmd_delete_forward(st_460_1))
-fp(st_460_2.doc) == "doc(p(\"cd\"))"
+let st_460_2 = next_state(st_460_1, cmd_split_block(st_460_1))
+fp(st_460_2.doc) == "doc(p(\"helo\"),p(\"orld\"))"
 
-// [461] tier_b_prosemirror/commands/delete/in-heading
-let d_461 = node('doc', [node('h1', [text("Head")])])
-let st_461_0 = {doc: d_461, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_461_1 = next_state(st_461_0, cmd_delete_backward(st_461_0))
-fp(st_461_1.doc) == "doc(h1(\"Hea\"))"
+// [461] tier_b_prosemirror/commands/delete/forward-twice
+let d_461 = node('doc', [node('p', [text("abcd")])])
+let st_461_0 = {doc: d_461, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0)), schema: html5_subset_schema}
+let st_461_1 = next_state(st_461_0, cmd_delete_forward(st_461_0))
+let st_461_2 = next_state(st_461_1, cmd_delete_forward(st_461_1))
+fp(st_461_2.doc) == "doc(p(\"cd\"))"
 
-// [462] tier_b_prosemirror/commands/delete/in-list-item
-let d_462 = node('doc', [node('ul', [node('li', [text("abc")])])])
-let st_462_0 = {doc: d_462, selection: text_selection(pos([0, 0, 0], 2), pos([0, 0, 0], 2)), schema: html5_subset_schema}
+// [462] tier_b_prosemirror/commands/delete/in-heading
+let d_462 = node('doc', [node('h1', [text("Head")])])
+let st_462_0 = {doc: d_462, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
 let st_462_1 = next_state(st_462_0, cmd_delete_backward(st_462_0))
-fp(st_462_1.doc) == "doc(ul(li(\"ac\")))"
+fp(st_462_1.doc) == "doc(h1(\"Hea\"))"
 
-// [463] tier_b_prosemirror/commands/delete/range
-let d_463 = node('doc', [node('p', [text("abcd")])])
-let st_463_0 = {doc: d_463, selection: text_selection(pos([0, 0], 1), pos([0, 0], 3)), schema: html5_subset_schema}
+// [463] tier_b_prosemirror/commands/delete/in-list-item
+let d_463 = node('doc', [node('ul', [node('li', [text("abc")])])])
+let st_463_0 = {doc: d_463, selection: text_selection(pos([0, 0, 0], 2), pos([0, 0, 0], 2)), schema: html5_subset_schema}
 let st_463_1 = next_state(st_463_0, cmd_delete_backward(st_463_0))
-fp(st_463_1.doc) == "doc(p(\"ad\"))"
+fp(st_463_1.doc) == "doc(ul(li(\"ac\")))"
 
-// [464] tier_b_prosemirror/commands/delete/range-forward
+// [464] tier_b_prosemirror/commands/delete/range
 let d_464 = node('doc', [node('p', [text("abcd")])])
 let st_464_0 = {doc: d_464, selection: text_selection(pos([0, 0], 1), pos([0, 0], 3)), schema: html5_subset_schema}
-let st_464_1 = next_state(st_464_0, cmd_delete_forward(st_464_0))
+let st_464_1 = next_state(st_464_0, cmd_delete_backward(st_464_0))
 fp(st_464_1.doc) == "doc(p(\"ad\"))"
 
-// [465] tier_b_prosemirror/commands/delete/range-then-type
+// [465] tier_b_prosemirror/commands/delete/range-forward
 let d_465 = node('doc', [node('p', [text("abcd")])])
 let st_465_0 = {doc: d_465, selection: text_selection(pos([0, 0], 1), pos([0, 0], 3)), schema: html5_subset_schema}
-let st_465_1 = next_state(st_465_0, cmd_delete_backward(st_465_0))
-let st_465_2 = next_state(st_465_1, cmd_insert_text(st_465_1, "X"))
-fp(st_465_2.doc) == "doc(p(\"aXd\"))"
+let st_465_1 = next_state(st_465_0, cmd_delete_forward(st_465_0))
+fp(st_465_1.doc) == "doc(p(\"ad\"))"
 
-// [466] tier_b_prosemirror/commands/delete/whole-leaf-range
-let d_466 = node('doc', [node('p', [text("abc")])])
-let st_466_0 = {doc: d_466, selection: text_selection(pos([0, 0], 0), pos([0, 0], 3)), schema: html5_subset_schema}
-let st_466_1 = next_state(st_466_0, cmd_delete_forward(st_466_0))
-fp(st_466_1.doc) == "doc(p())"
+// [466] tier_b_prosemirror/commands/delete/range-then-type
+let d_466 = node('doc', [node('p', [text("abcd")])])
+let st_466_0 = {doc: d_466, selection: text_selection(pos([0, 0], 1), pos([0, 0], 3)), schema: html5_subset_schema}
+let st_466_1 = next_state(st_466_0, cmd_delete_backward(st_466_0))
+let st_466_2 = next_state(st_466_1, cmd_insert_text(st_466_1, "X"))
+fp(st_466_2.doc) == "doc(p(\"aXd\"))"
 
-// [467] tier_b_prosemirror/commands/hard-break/in-h1
-let d_467 = node('doc', [node('h1', [text("ab")])])
-let st_467_0 = {doc: d_467, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1)), schema: html5_subset_schema}
-let st_467_1 = next_state(st_467_0, cmd_insert_line_break(st_467_0))
-fp(st_467_1.doc) == "doc(h1(\"a\",br(),\"b\"))"
+// [467] tier_b_prosemirror/commands/delete/whole-leaf-range
+let d_467 = node('doc', [node('p', [text("abc")])])
+let st_467_0 = {doc: d_467, selection: text_selection(pos([0, 0], 0), pos([0, 0], 3)), schema: html5_subset_schema}
+let st_467_1 = next_state(st_467_0, cmd_delete_forward(st_467_0))
+fp(st_467_1.doc) == "doc(p())"
 
-// [468] tier_b_prosemirror/commands/hard-break/in-h2
-let d_468 = node('doc', [node('h2', [text("foobar")])])
-let st_468_0 = {doc: d_468, selection: text_selection(pos([0, 0], 3), pos([0, 0], 3)), schema: html5_subset_schema}
+// [468] tier_b_prosemirror/commands/hard-break/in-h1
+let d_468 = node('doc', [node('h1', [text("ab")])])
+let st_468_0 = {doc: d_468, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1)), schema: html5_subset_schema}
 let st_468_1 = next_state(st_468_0, cmd_insert_line_break(st_468_0))
-fp(st_468_1.doc) == "doc(h2(\"foo\",br(),\"bar\"))"
+fp(st_468_1.doc) == "doc(h1(\"a\",br(),\"b\"))"
 
-// [469] tier_b_prosemirror/commands/hard-break/in-li
-let d_469 = node('doc', [node('ul', [node('li', [text("ab")])])])
-let st_469_0 = {doc: d_469, selection: text_selection(pos([0, 0, 0], 1), pos([0, 0, 0], 1)), schema: html5_subset_schema}
+// [469] tier_b_prosemirror/commands/hard-break/in-h2
+let d_469 = node('doc', [node('h2', [text("foobar")])])
+let st_469_0 = {doc: d_469, selection: text_selection(pos([0, 0], 3), pos([0, 0], 3)), schema: html5_subset_schema}
 let st_469_1 = next_state(st_469_0, cmd_insert_line_break(st_469_0))
-fp(st_469_1.doc) == "doc(ul(li(\"a\",br(),\"b\")))"
+fp(st_469_1.doc) == "doc(h2(\"foo\",br(),\"bar\"))"
 
-// [470] tier_b_prosemirror/commands/hard-break/in-second-para
-let d_470 = node('doc', [node('p', [text("x")]), node('p', [text("here")])])
-let st_470_0 = {doc: d_470, selection: text_selection(pos([1, 0], 2), pos([1, 0], 2)), schema: html5_subset_schema}
+// [470] tier_b_prosemirror/commands/hard-break/in-li
+let d_470 = node('doc', [node('ul', [node('li', [text("ab")])])])
+let st_470_0 = {doc: d_470, selection: text_selection(pos([0, 0, 0], 1), pos([0, 0, 0], 1)), schema: html5_subset_schema}
 let st_470_1 = next_state(st_470_0, cmd_insert_line_break(st_470_0))
-fp(st_470_1.doc) == "doc(p(\"x\"),p(\"he\",br(),\"re\"))"
+fp(st_470_1.doc) == "doc(ul(li(\"a\",br(),\"b\")))"
 
-// [471] tier_b_prosemirror/commands/hard-break/middle
-let d_471 = node('doc', [node('p', [text("hello")])])
-let st_471_0 = {doc: d_471, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
+// [471] tier_b_prosemirror/commands/hard-break/in-second-para
+let d_471 = node('doc', [node('p', [text("x")]), node('p', [text("here")])])
+let st_471_0 = {doc: d_471, selection: text_selection(pos([1, 0], 2), pos([1, 0], 2)), schema: html5_subset_schema}
 let st_471_1 = next_state(st_471_0, cmd_insert_line_break(st_471_0))
-fp(st_471_1.doc) == "doc(p(\"he\",br(),\"llo\"))"
+fp(st_471_1.doc) == "doc(p(\"x\"),p(\"he\",br(),\"re\"))"
 
-// [472] tier_b_prosemirror/commands/hard-break/start
+// [472] tier_b_prosemirror/commands/hard-break/middle
 let d_472 = node('doc', [node('p', [text("hello")])])
-let st_472_0 = {doc: d_472, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0)), schema: html5_subset_schema}
+let st_472_0 = {doc: d_472, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
 let st_472_1 = next_state(st_472_0, cmd_insert_line_break(st_472_0))
-fp(st_472_1.doc) == "doc(p(br(),\"hello\"))"
+fp(st_472_1.doc) == "doc(p(\"he\",br(),\"llo\"))"
 
-// [473] tier_b_prosemirror/commands/hard-break/then-split
-let d_473 = node('doc', [node('p', [text("ab")])])
-let st_473_0 = {doc: d_473, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1)), schema: html5_subset_schema}
+// [473] tier_b_prosemirror/commands/hard-break/start
+let d_473 = node('doc', [node('p', [text("hello")])])
+let st_473_0 = {doc: d_473, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0)), schema: html5_subset_schema}
 let st_473_1 = next_state(st_473_0, cmd_insert_line_break(st_473_0))
-let st_473_2 = next_state(st_473_1, cmd_split_block(st_473_1))
-fp(st_473_2.doc) == "doc(p(\"a\",br()),p(\"b\"))"
+fp(st_473_1.doc) == "doc(p(br(),\"hello\"))"
 
-// [474] tier_b_prosemirror/commands/hard-break/then-type
+// [474] tier_b_prosemirror/commands/hard-break/then-split
 let d_474 = node('doc', [node('p', [text("ab")])])
 let st_474_0 = {doc: d_474, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1)), schema: html5_subset_schema}
 let st_474_1 = next_state(st_474_0, cmd_insert_line_break(st_474_0))
-let st_474_2 = next_state(st_474_1, cmd_insert_text(st_474_1, "X"))
-fp(st_474_2.doc) == "doc(p(\"a\",br(),\"Xb\"))"
+let st_474_2 = next_state(st_474_1, cmd_split_block(st_474_1))
+fp(st_474_2.doc) == "doc(p(\"a\",br()),p(\"b\"))"
 
-// [475] tier_b_prosemirror/commands/hard-break/twice
+// [475] tier_b_prosemirror/commands/hard-break/then-type
 let d_475 = node('doc', [node('p', [text("ab")])])
 let st_475_0 = {doc: d_475, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1)), schema: html5_subset_schema}
 let st_475_1 = next_state(st_475_0, cmd_insert_line_break(st_475_0))
-let st_475_2 = next_state(st_475_1, cmd_insert_line_break(st_475_1))
-fp(st_475_2.doc) == "doc(p(\"a\",br(),br(),\"b\"))"
+let st_475_2 = next_state(st_475_1, cmd_insert_text(st_475_1, "X"))
+fp(st_475_2.doc) == "doc(p(\"a\",br(),\"Xb\"))"
 
-// [476] tier_b_prosemirror/commands/hard-break/type-then-break-type
-let d_476 = node('doc', [node('p', [text("z")])])
-let st_476_0 = {doc: d_476, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0)), schema: html5_subset_schema}
-let st_476_1 = next_state(st_476_0, cmd_insert_text(st_476_0, "a"))
+// [476] tier_b_prosemirror/commands/hard-break/twice
+let d_476 = node('doc', [node('p', [text("ab")])])
+let st_476_0 = {doc: d_476, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1)), schema: html5_subset_schema}
+let st_476_1 = next_state(st_476_0, cmd_insert_line_break(st_476_0))
 let st_476_2 = next_state(st_476_1, cmd_insert_line_break(st_476_1))
-let st_476_3 = next_state(st_476_2, cmd_insert_text(st_476_2, "b"))
-fp(st_476_3.doc) == "doc(p(\"a\",br(),\"bz\"))"
+fp(st_476_2.doc) == "doc(p(\"a\",br(),br(),\"b\"))"
 
-// [477] tier_b_prosemirror/commands/sequences/delete-then-rebuild
-let d_477 = node('doc', [node('p', [text("heloworld")])])
-let st_477_0 = {doc: d_477, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_477_1 = next_state(st_477_0, cmd_delete_forward(st_477_0))
-let st_477_2 = next_state(st_477_1, cmd_insert_text(st_477_1, "p"))
-let st_477_3 = next_state(st_477_2, cmd_split_block(st_477_2))
-let st_477_4 = next_state(st_477_3, cmd_insert_text(st_477_3, "!"))
-fp(st_477_4.doc) == "doc(p(\"helop\"),p(\"!orld\"))"
+// [477] tier_b_prosemirror/commands/hard-break/type-then-break-type
+let d_477 = node('doc', [node('p', [text("z")])])
+let st_477_0 = {doc: d_477, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0)), schema: html5_subset_schema}
+let st_477_1 = next_state(st_477_0, cmd_insert_text(st_477_0, "a"))
+let st_477_2 = next_state(st_477_1, cmd_insert_line_break(st_477_1))
+let st_477_3 = next_state(st_477_2, cmd_insert_text(st_477_2, "b"))
+fp(st_477_3.doc) == "doc(p(\"a\",br(),\"bz\"))"
 
-// [478] tier_b_prosemirror/commands/sequences/format-block-and-type
-let d_478 = node('doc', [node('p', [text("note")])])
-let st_478_0 = {doc: d_478, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_478_1 = next_state(st_478_0, cmd_toggle_mark(st_478_0, 'em', true))
-let st_478_2 = next_state(st_478_1, cmd_set_block_type(st_478_1, 'blockquote'))
-fp(st_478_2.doc) == "doc(blockquote(\"note\"^em))"
+// [478] tier_b_prosemirror/commands/sequences/delete-then-rebuild
+let d_478 = node('doc', [node('p', [text("heloworld")])])
+let st_478_0 = {doc: d_478, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
+let st_478_1 = next_state(st_478_0, cmd_delete_forward(st_478_0))
+let st_478_2 = next_state(st_478_1, cmd_insert_text(st_478_1, "p"))
+let st_478_3 = next_state(st_478_2, cmd_split_block(st_478_2))
+let st_478_4 = next_state(st_478_3, cmd_insert_text(st_478_3, "!"))
+fp(st_478_4.doc) == "doc(p(\"helop\"),p(\"!orld\"))"
 
-// [479] tier_b_prosemirror/commands/sequences/heading-then-body
-let d_479 = node('doc', [node('p', [text("Title")])])
-let st_479_0 = {doc: d_479, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5)), schema: html5_subset_schema}
-let st_479_1 = next_state(st_479_0, cmd_set_block_type(st_479_0, 'h1'))
-let st_479_2 = next_state(st_479_1, cmd_split_block(st_479_1))
-let st_479_3 = next_state(st_479_2, cmd_insert_text(st_479_2, "Body text"))
-fp(st_479_3.doc) == "doc(h1(\"Title\"),p(\"Body text\"))"
+// [479] tier_b_prosemirror/commands/sequences/format-block-and-type
+let d_479 = node('doc', [node('p', [text("note")])])
+let st_479_0 = {doc: d_479, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
+let st_479_1 = next_state(st_479_0, cmd_toggle_mark(st_479_0, 'em', true))
+let st_479_2 = next_state(st_479_1, cmd_set_block_type(st_479_1, 'blockquote'))
+fp(st_479_2.doc) == "doc(blockquote(\"note\"^em))"
 
-// [480] tier_b_prosemirror/commands/sequences/split-and-format-second
-let d_480 = node('doc', [node('p', [text("line1line2")])])
+// [480] tier_b_prosemirror/commands/sequences/heading-then-body
+let d_480 = node('doc', [node('p', [text("Title")])])
 let st_480_0 = {doc: d_480, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5)), schema: html5_subset_schema}
-let st_480_1 = next_state(st_480_0, cmd_split_block(st_480_0))
-let st_480_2 = next_state(st_480_1, cmd_insert_text(st_480_1, "X"))
-fp(st_480_2.doc) == "doc(p(\"line1\"),p(\"Xline2\"))"
+let st_480_1 = next_state(st_480_0, cmd_set_block_type(st_480_0, 'h1'))
+let st_480_2 = next_state(st_480_1, cmd_split_block(st_480_1))
+let st_480_3 = next_state(st_480_2, cmd_insert_text(st_480_2, "Body text"))
+fp(st_480_3.doc) == "doc(h1(\"Title\"),p(\"Body text\"))"
 
-// [481] tier_b_prosemirror/commands/sequences/type-format-delete
-let d_481 = node('doc', [node('p', [text("word")])])
-let st_481_0 = {doc: d_481, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_481_1 = next_state(st_481_0, cmd_toggle_mark(st_481_0, 'strong', true))
-let st_481_2 = next_state(st_481_1, cmd_delete_backward(st_481_1))
-fp(st_481_2.doc) == "doc(p())"
+// [481] tier_b_prosemirror/commands/sequences/split-and-format-second
+let d_481 = node('doc', [node('p', [text("line1line2")])])
+let st_481_0 = {doc: d_481, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5)), schema: html5_subset_schema}
+let st_481_1 = next_state(st_481_0, cmd_split_block(st_481_0))
+let st_481_2 = next_state(st_481_1, cmd_insert_text(st_481_1, "X"))
+fp(st_481_2.doc) == "doc(p(\"line1\"),p(\"Xline2\"))"
 
-// [482] tier_b_prosemirror/commands/sequences/type-split-type
-let d_482 = node('doc', [node('p', [])])
-let st_482_0 = {doc: d_482, selection: text_selection(pos([0], 0), pos([0], 0)), schema: html5_subset_schema}
-let st_482_1 = next_state(st_482_0, cmd_insert_text(st_482_0, "hi"))
-let st_482_2 = next_state(st_482_1, cmd_split_block(st_482_1))
-let st_482_3 = next_state(st_482_2, cmd_insert_text(st_482_2, "yo"))
-fp(st_482_3.doc) == "doc(p(\"hi\"),p(\"yo\"))"
+// [482] tier_b_prosemirror/commands/sequences/type-format-delete
+let d_482 = node('doc', [node('p', [text("word")])])
+let st_482_0 = {doc: d_482, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
+let st_482_1 = next_state(st_482_0, cmd_toggle_mark(st_482_0, 'strong', true))
+let st_482_2 = next_state(st_482_1, cmd_delete_backward(st_482_1))
+fp(st_482_2.doc) == "doc(p())"
 
-// [483] tier_b_prosemirror/commands/set-block/h1-to-h2
-let d_483 = node('doc', [node('h1', [text("head")])])
-let st_483_0 = {doc: d_483, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_483_1 = next_state(st_483_0, cmd_set_block_type(st_483_0, 'h2'))
-fp(st_483_1.doc) == "doc(h2(\"head\"))"
+// [483] tier_b_prosemirror/commands/sequences/type-split-type
+let d_483 = node('doc', [node('p', [])])
+let st_483_0 = {doc: d_483, selection: text_selection(pos([0], 0), pos([0], 0)), schema: html5_subset_schema}
+let st_483_1 = next_state(st_483_0, cmd_insert_text(st_483_0, "hi"))
+let st_483_2 = next_state(st_483_1, cmd_split_block(st_483_1))
+let st_483_3 = next_state(st_483_2, cmd_insert_text(st_483_2, "yo"))
+fp(st_483_3.doc) == "doc(p(\"hi\"),p(\"yo\"))"
 
-// [484] tier_b_prosemirror/commands/set-block/h1-to-p
+// [484] tier_b_prosemirror/commands/set-block/h1-to-h2
 let d_484 = node('doc', [node('h1', [text("head")])])
 let st_484_0 = {doc: d_484, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_484_1 = next_state(st_484_0, cmd_set_block_type(st_484_0, 'p'))
-fp(st_484_1.doc) == "doc(p(\"head\"))"
+let st_484_1 = next_state(st_484_0, cmd_set_block_type(st_484_0, 'h2'))
+fp(st_484_1.doc) == "doc(h2(\"head\"))"
 
-// [485] tier_b_prosemirror/commands/set-block/h2-to-h4
-let d_485 = node('doc', [node('h2', [text("x")])])
-let st_485_0 = {doc: d_485, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1)), schema: html5_subset_schema}
-let st_485_1 = next_state(st_485_0, cmd_set_block_type(st_485_0, 'h4'))
-fp(st_485_1.doc) == "doc(h4(\"x\"))"
+// [485] tier_b_prosemirror/commands/set-block/h1-to-p
+let d_485 = node('doc', [node('h1', [text("head")])])
+let st_485_0 = {doc: d_485, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
+let st_485_1 = next_state(st_485_0, cmd_set_block_type(st_485_0, 'p'))
+fp(st_485_1.doc) == "doc(p(\"head\"))"
 
-// [486] tier_b_prosemirror/commands/set-block/only-target-block-of-two
-let d_486 = node('doc', [node('p', [text("a")]), node('p', [text("b")])])
+// [486] tier_b_prosemirror/commands/set-block/h2-to-h4
+let d_486 = node('doc', [node('h2', [text("x")])])
 let st_486_0 = {doc: d_486, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1)), schema: html5_subset_schema}
-let st_486_1 = next_state(st_486_0, cmd_set_block_type(st_486_0, 'h3'))
-fp(st_486_1.doc) == "doc(h3(\"a\"),p(\"b\"))"
+let st_486_1 = next_state(st_486_0, cmd_set_block_type(st_486_0, 'h4'))
+fp(st_486_1.doc) == "doc(h4(\"x\"))"
 
-// [487] tier_b_prosemirror/commands/set-block/p-h1-back-to-p
-let d_487 = node('doc', [node('p', [text("text")])])
-let st_487_0 = {doc: d_487, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_487_1 = next_state(st_487_0, cmd_set_block_type(st_487_0, 'h1'))
-let st_487_2 = next_state(st_487_1, cmd_set_block_type(st_487_1, 'p'))
-fp(st_487_2.doc) == "doc(p(\"text\"))"
+// [487] tier_b_prosemirror/commands/set-block/only-target-block-of-two
+let d_487 = node('doc', [node('p', [text("a")]), node('p', [text("b")])])
+let st_487_0 = {doc: d_487, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1)), schema: html5_subset_schema}
+let st_487_1 = next_state(st_487_0, cmd_set_block_type(st_487_0, 'h3'))
+fp(st_487_1.doc) == "doc(h3(\"a\"),p(\"b\"))"
 
-// [488] tier_b_prosemirror/commands/set-block/p-to-blockquote
-let d_488 = node('doc', [node('p', [text("quote")])])
-let st_488_0 = {doc: d_488, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5)), schema: html5_subset_schema}
-let st_488_1 = next_state(st_488_0, cmd_set_block_type(st_488_0, 'blockquote'))
-fp(st_488_1.doc) == "doc(blockquote(\"quote\"))"
+// [488] tier_b_prosemirror/commands/set-block/p-h1-back-to-p
+let d_488 = node('doc', [node('p', [text("text")])])
+let st_488_0 = {doc: d_488, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
+let st_488_1 = next_state(st_488_0, cmd_set_block_type(st_488_0, 'h1'))
+let st_488_2 = next_state(st_488_1, cmd_set_block_type(st_488_1, 'p'))
+fp(st_488_2.doc) == "doc(p(\"text\"))"
 
-// [489] tier_b_prosemirror/commands/set-block/p-to-h1
-let d_489 = node('doc', [node('p', [text("text")])])
-let st_489_0 = {doc: d_489, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_489_1 = next_state(st_489_0, cmd_set_block_type(st_489_0, 'h1'))
-fp(st_489_1.doc) == "doc(h1(\"text\"))"
+// [489] tier_b_prosemirror/commands/set-block/p-to-blockquote
+let d_489 = node('doc', [node('p', [text("quote")])])
+let st_489_0 = {doc: d_489, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5)), schema: html5_subset_schema}
+let st_489_1 = next_state(st_489_0, cmd_set_block_type(st_489_0, 'blockquote'))
+fp(st_489_1.doc) == "doc(blockquote(\"quote\"))"
 
-// [490] tier_b_prosemirror/commands/set-block/p-to-h2
+// [490] tier_b_prosemirror/commands/set-block/p-to-h1
 let d_490 = node('doc', [node('p', [text("text")])])
 let st_490_0 = {doc: d_490, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_490_1 = next_state(st_490_0, cmd_set_block_type(st_490_0, 'h2'))
-fp(st_490_1.doc) == "doc(h2(\"text\"))"
+let st_490_1 = next_state(st_490_0, cmd_set_block_type(st_490_0, 'h1'))
+fp(st_490_1.doc) == "doc(h1(\"text\"))"
 
-// [491] tier_b_prosemirror/commands/set-block/p-to-h3
+// [491] tier_b_prosemirror/commands/set-block/p-to-h2
 let d_491 = node('doc', [node('p', [text("text")])])
 let st_491_0 = {doc: d_491, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_491_1 = next_state(st_491_0, cmd_set_block_type(st_491_0, 'h3'))
-fp(st_491_1.doc) == "doc(h3(\"text\"))"
+let st_491_1 = next_state(st_491_0, cmd_set_block_type(st_491_0, 'h2'))
+fp(st_491_1.doc) == "doc(h2(\"text\"))"
 
-// [492] tier_b_prosemirror/commands/set-block/p-to-h6
+// [492] tier_b_prosemirror/commands/set-block/p-to-h3
 let d_492 = node('doc', [node('p', [text("text")])])
 let st_492_0 = {doc: d_492, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_492_1 = next_state(st_492_0, cmd_set_block_type(st_492_0, 'h6'))
-fp(st_492_1.doc) == "doc(h6(\"text\"))"
+let st_492_1 = next_state(st_492_0, cmd_set_block_type(st_492_0, 'h3'))
+fp(st_492_1.doc) == "doc(h3(\"text\"))"
 
-// [493] tier_b_prosemirror/commands/set-block/second-block-of-two
-let d_493 = node('doc', [node('p', [text("a")]), node('p', [text("b")])])
-let st_493_0 = {doc: d_493, selection: text_selection(pos([1, 0], 1), pos([1, 0], 1)), schema: html5_subset_schema}
-let st_493_1 = next_state(st_493_0, cmd_set_block_type(st_493_0, 'h2'))
-fp(st_493_1.doc) == "doc(p(\"a\"),h2(\"b\"))"
+// [493] tier_b_prosemirror/commands/set-block/p-to-h6
+let d_493 = node('doc', [node('p', [text("text")])])
+let st_493_0 = {doc: d_493, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
+let st_493_1 = next_state(st_493_0, cmd_set_block_type(st_493_0, 'h6'))
+fp(st_493_1.doc) == "doc(h6(\"text\"))"
 
-// [494] tier_b_prosemirror/commands/set-block/then-split-makes-p
-let d_494 = node('doc', [node('p', [text("ab")])])
-let st_494_0 = {doc: d_494, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
-let st_494_1 = next_state(st_494_0, cmd_set_block_type(st_494_0, 'h1'))
-let st_494_2 = next_state(st_494_1, cmd_split_block(st_494_1))
-fp(st_494_2.doc) == "doc(h1(\"ab\"),p())"
+// [494] tier_b_prosemirror/commands/set-block/second-block-of-two
+let d_494 = node('doc', [node('p', [text("a")]), node('p', [text("b")])])
+let st_494_0 = {doc: d_494, selection: text_selection(pos([1, 0], 1), pos([1, 0], 1)), schema: html5_subset_schema}
+let st_494_1 = next_state(st_494_0, cmd_set_block_type(st_494_0, 'h2'))
+fp(st_494_1.doc) == "doc(p(\"a\"),h2(\"b\"))"
 
-// [495] tier_b_prosemirror/commands/set-block/then-type
-let d_495 = node('doc', [node('p', [text("x")])])
-let st_495_0 = {doc: d_495, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1)), schema: html5_subset_schema}
+// [495] tier_b_prosemirror/commands/set-block/then-split-makes-p
+let d_495 = node('doc', [node('p', [text("ab")])])
+let st_495_0 = {doc: d_495, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
 let st_495_1 = next_state(st_495_0, cmd_set_block_type(st_495_0, 'h1'))
-let st_495_2 = next_state(st_495_1, cmd_insert_text(st_495_1, "Y"))
-fp(st_495_2.doc) == "doc(h1(\"xY\"))"
+let st_495_2 = next_state(st_495_1, cmd_split_block(st_495_1))
+fp(st_495_2.doc) == "doc(h1(\"ab\"),p())"
 
-// [496] tier_b_prosemirror/commands/split-block/blockquote-inner-p
-let d_496 = node('doc', [node('blockquote', [node('p', [text("abcd")])])])
-let st_496_0 = {doc: d_496, selection: text_selection(pos([0, 0, 0], 2), pos([0, 0, 0], 2)), schema: html5_subset_schema}
-let st_496_1 = next_state(st_496_0, cmd_split_block(st_496_0))
-fp(st_496_1.doc) == "doc(blockquote(p(\"ab\"),p(\"cd\")))"
+// [496] tier_b_prosemirror/commands/set-block/then-type
+let d_496 = node('doc', [node('p', [text("x")])])
+let st_496_0 = {doc: d_496, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1)), schema: html5_subset_schema}
+let st_496_1 = next_state(st_496_0, cmd_set_block_type(st_496_0, 'h1'))
+let st_496_2 = next_state(st_496_1, cmd_insert_text(st_496_1, "Y"))
+fp(st_496_2.doc) == "doc(h1(\"xY\"))"
 
-// [497] tier_b_prosemirror/commands/split-block/empty-p
-let d_497 = node('doc', [node('p', [])])
-let st_497_0 = {doc: d_497, selection: text_selection(pos([0], 0), pos([0], 0)), schema: html5_subset_schema}
+// [497] tier_b_prosemirror/commands/split-block/blockquote-inner-p
+let d_497 = node('doc', [node('blockquote', [node('p', [text("abcd")])])])
+let st_497_0 = {doc: d_497, selection: text_selection(pos([0, 0, 0], 2), pos([0, 0, 0], 2)), schema: html5_subset_schema}
 let st_497_1 = next_state(st_497_0, cmd_split_block(st_497_0))
-fp(st_497_1.doc) == "doc(p(),p())"
+fp(st_497_1.doc) == "doc(blockquote(p(\"ab\"),p(\"cd\")))"
 
-// [498] tier_b_prosemirror/commands/split-block/empty-p-twice
+// [498] tier_b_prosemirror/commands/split-block/empty-p
 let d_498 = node('doc', [node('p', [])])
 let st_498_0 = {doc: d_498, selection: text_selection(pos([0], 0), pos([0], 0)), schema: html5_subset_schema}
 let st_498_1 = next_state(st_498_0, cmd_split_block(st_498_0))
-let st_498_2 = next_state(st_498_1, cmd_split_block(st_498_1))
-fp(st_498_2.doc) == "doc(p(),p(),p())"
+fp(st_498_1.doc) == "doc(p(),p())"
 
-// [499] tier_b_prosemirror/commands/split-block/first-of-two
-let d_499 = node('doc', [node('p', [text("aabb")]), node('p', [text("cc")])])
-let st_499_0 = {doc: d_499, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
+// [499] tier_b_prosemirror/commands/split-block/empty-p-twice
+let d_499 = node('doc', [node('p', [])])
+let st_499_0 = {doc: d_499, selection: text_selection(pos([0], 0), pos([0], 0)), schema: html5_subset_schema}
 let st_499_1 = next_state(st_499_0, cmd_split_block(st_499_0))
-fp(st_499_1.doc) == "doc(p(\"aa\"),p(\"bb\"),p(\"cc\"))"
+let st_499_2 = next_state(st_499_1, cmd_split_block(st_499_1))
+fp(st_499_2.doc) == "doc(p(),p(),p())"
 
-// [500] tier_b_prosemirror/commands/split-block/h1-end-makes-p
-let d_500 = node('doc', [node('h1', [text("Title")])])
-let st_500_0 = {doc: d_500, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5)), schema: html5_subset_schema}
+// [500] tier_b_prosemirror/commands/split-block/first-of-two
+let d_500 = node('doc', [node('p', [text("aabb")]), node('p', [text("cc")])])
+let st_500_0 = {doc: d_500, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
 let st_500_1 = next_state(st_500_0, cmd_split_block(st_500_0))
-fp(st_500_1.doc) == "doc(h1(\"Title\"),p())"
+fp(st_500_1.doc) == "doc(p(\"aa\"),p(\"bb\"),p(\"cc\"))"
 
-// [501] tier_b_prosemirror/commands/split-block/h1-middle
+// [501] tier_b_prosemirror/commands/split-block/h1-end-makes-p
 let d_501 = node('doc', [node('h1', [text("Title")])])
-let st_501_0 = {doc: d_501, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
+let st_501_0 = {doc: d_501, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5)), schema: html5_subset_schema}
 let st_501_1 = next_state(st_501_0, cmd_split_block(st_501_0))
-fp(st_501_1.doc) == "doc(h1(\"Ti\"),p(\"tle\"))"
+fp(st_501_1.doc) == "doc(h1(\"Title\"),p())"
 
-// [502] tier_b_prosemirror/commands/split-block/h2-end-makes-p
-let d_502 = node('doc', [node('h2', [text("Head")])])
-let st_502_0 = {doc: d_502, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
+// [502] tier_b_prosemirror/commands/split-block/h1-middle
+let d_502 = node('doc', [node('h1', [text("Title")])])
+let st_502_0 = {doc: d_502, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
 let st_502_1 = next_state(st_502_0, cmd_split_block(st_502_0))
-fp(st_502_1.doc) == "doc(h2(\"Head\"),p())"
+fp(st_502_1.doc) == "doc(h1(\"Ti\"),p(\"tle\"))"
 
-// [503] tier_b_prosemirror/commands/split-block/h3-middle
-let d_503 = node('doc', [node('h3', [text("foobar")])])
-let st_503_0 = {doc: d_503, selection: text_selection(pos([0, 0], 3), pos([0, 0], 3)), schema: html5_subset_schema}
+// [503] tier_b_prosemirror/commands/split-block/h2-end-makes-p
+let d_503 = node('doc', [node('h2', [text("Head")])])
+let st_503_0 = {doc: d_503, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
 let st_503_1 = next_state(st_503_0, cmd_split_block(st_503_0))
-fp(st_503_1.doc) == "doc(h3(\"foo\"),p(\"bar\"))"
+fp(st_503_1.doc) == "doc(h2(\"Head\"),p())"
 
-// [504] tier_b_prosemirror/commands/split-block/li-end-makes-li
-let d_504 = node('doc', [node('ul', [node('li', [text("one")])])])
-let st_504_0 = {doc: d_504, selection: text_selection(pos([0, 0, 0], 3), pos([0, 0, 0], 3)), schema: html5_subset_schema}
+// [504] tier_b_prosemirror/commands/split-block/h3-middle
+let d_504 = node('doc', [node('h3', [text("foobar")])])
+let st_504_0 = {doc: d_504, selection: text_selection(pos([0, 0], 3), pos([0, 0], 3)), schema: html5_subset_schema}
 let st_504_1 = next_state(st_504_0, cmd_split_block(st_504_0))
-fp(st_504_1.doc) == "doc(ul(li(\"one\"),li()))"
+fp(st_504_1.doc) == "doc(h3(\"foo\"),p(\"bar\"))"
 
-// [505] tier_b_prosemirror/commands/split-block/li-middle
-let d_505 = node('doc', [node('ul', [node('li', [text("abcd")])])])
-let st_505_0 = {doc: d_505, selection: text_selection(pos([0, 0, 0], 2), pos([0, 0, 0], 2)), schema: html5_subset_schema}
+// [505] tier_b_prosemirror/commands/split-block/li-end-makes-li
+let d_505 = node('doc', [node('ul', [node('li', [text("one")])])])
+let st_505_0 = {doc: d_505, selection: text_selection(pos([0, 0, 0], 3), pos([0, 0, 0], 3)), schema: html5_subset_schema}
 let st_505_1 = next_state(st_505_0, cmd_split_block(st_505_0))
-fp(st_505_1.doc) == "doc(ul(li(\"ab\"),li(\"cd\")))"
+fp(st_505_1.doc) == "doc(ul(li(\"one\"),li()))"
 
-// [506] tier_b_prosemirror/commands/split-block/ol-li-middle
-let d_506 = node('doc', [node('ol', [node('li', [text("abcd")])])])
+// [506] tier_b_prosemirror/commands/split-block/li-middle
+let d_506 = node('doc', [node('ul', [node('li', [text("abcd")])])])
 let st_506_0 = {doc: d_506, selection: text_selection(pos([0, 0, 0], 2), pos([0, 0, 0], 2)), schema: html5_subset_schema}
 let st_506_1 = next_state(st_506_0, cmd_split_block(st_506_0))
-fp(st_506_1.doc) == "doc(ol(li(\"ab\"),li(\"cd\")))"
+fp(st_506_1.doc) == "doc(ul(li(\"ab\"),li(\"cd\")))"
 
-// [507] tier_b_prosemirror/commands/split-block/p-end
-let d_507 = node('doc', [node('p', [text("abcd")])])
-let st_507_0 = {doc: d_507, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
+// [507] tier_b_prosemirror/commands/split-block/ol-li-middle
+let d_507 = node('doc', [node('ol', [node('li', [text("abcd")])])])
+let st_507_0 = {doc: d_507, selection: text_selection(pos([0, 0, 0], 2), pos([0, 0, 0], 2)), schema: html5_subset_schema}
 let st_507_1 = next_state(st_507_0, cmd_split_block(st_507_0))
-fp(st_507_1.doc) == "doc(p(\"abcd\"),p())"
+fp(st_507_1.doc) == "doc(ol(li(\"ab\"),li(\"cd\")))"
 
-// [508] tier_b_prosemirror/commands/split-block/p-middle
+// [508] tier_b_prosemirror/commands/split-block/p-end
 let d_508 = node('doc', [node('p', [text("abcd")])])
-let st_508_0 = {doc: d_508, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
+let st_508_0 = {doc: d_508, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
 let st_508_1 = next_state(st_508_0, cmd_split_block(st_508_0))
-fp(st_508_1.doc) == "doc(p(\"ab\"),p(\"cd\"))"
+fp(st_508_1.doc) == "doc(p(\"abcd\"),p())"
 
-// [509] tier_b_prosemirror/commands/split-block/p-start
+// [509] tier_b_prosemirror/commands/split-block/p-middle
 let d_509 = node('doc', [node('p', [text("abcd")])])
-let st_509_0 = {doc: d_509, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0)), schema: html5_subset_schema}
+let st_509_0 = {doc: d_509, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
 let st_509_1 = next_state(st_509_0, cmd_split_block(st_509_0))
-fp(st_509_1.doc) == "doc(p(),p(\"abcd\"))"
+fp(st_509_1.doc) == "doc(p(\"ab\"),p(\"cd\"))"
 
-// [510] tier_b_prosemirror/commands/split-block/range-deletes-then-splits
+// [510] tier_b_prosemirror/commands/split-block/p-start
 let d_510 = node('doc', [node('p', [text("abcd")])])
-let st_510_0 = {doc: d_510, selection: text_selection(pos([0, 0], 1), pos([0, 0], 3)), schema: html5_subset_schema}
+let st_510_0 = {doc: d_510, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0)), schema: html5_subset_schema}
 let st_510_1 = next_state(st_510_0, cmd_split_block(st_510_0))
-fp(st_510_1.doc) == "doc(p(\"a\"),p(\"d\"))"
+fp(st_510_1.doc) == "doc(p(),p(\"abcd\"))"
 
-// [511] tier_b_prosemirror/commands/split-block/second-of-two
-let d_511 = node('doc', [node('p', [text("aa")]), node('p', [text("bbcc")])])
-let st_511_0 = {doc: d_511, selection: text_selection(pos([1, 0], 2), pos([1, 0], 2)), schema: html5_subset_schema}
+// [511] tier_b_prosemirror/commands/split-block/range-deletes-then-splits
+let d_511 = node('doc', [node('p', [text("abcd")])])
+let st_511_0 = {doc: d_511, selection: text_selection(pos([0, 0], 1), pos([0, 0], 3)), schema: html5_subset_schema}
 let st_511_1 = next_state(st_511_0, cmd_split_block(st_511_0))
-fp(st_511_1.doc) == "doc(p(\"aa\"),p(\"bb\"),p(\"cc\"))"
+fp(st_511_1.doc) == "doc(p(\"a\"),p(\"d\"))"
 
-// [512] tier_b_prosemirror/commands/split-block/start-then-type
-let d_512 = node('doc', [node('p', [text("abc")])])
-let st_512_0 = {doc: d_512, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0)), schema: html5_subset_schema}
+// [512] tier_b_prosemirror/commands/split-block/second-of-two
+let d_512 = node('doc', [node('p', [text("aa")]), node('p', [text("bbcc")])])
+let st_512_0 = {doc: d_512, selection: text_selection(pos([1, 0], 2), pos([1, 0], 2)), schema: html5_subset_schema}
 let st_512_1 = next_state(st_512_0, cmd_split_block(st_512_0))
-let st_512_2 = next_state(st_512_1, cmd_insert_text(st_512_1, "Z"))
-fp(st_512_2.doc) == "doc(p(),p(\"Zabc\"))"
+fp(st_512_1.doc) == "doc(p(\"aa\"),p(\"bb\"),p(\"cc\"))"
 
-// [513] tier_b_prosemirror/commands/split-block/then-type
-let d_513 = node('doc', [node('p', [text("abcd")])])
-let st_513_0 = {doc: d_513, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
+// [513] tier_b_prosemirror/commands/split-block/start-then-type
+let d_513 = node('doc', [node('p', [text("abc")])])
+let st_513_0 = {doc: d_513, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0)), schema: html5_subset_schema}
 let st_513_1 = next_state(st_513_0, cmd_split_block(st_513_0))
-let st_513_2 = next_state(st_513_1, cmd_insert_text(st_513_1, "X"))
-fp(st_513_2.doc) == "doc(p(\"ab\"),p(\"Xcd\"))"
+let st_513_2 = next_state(st_513_1, cmd_insert_text(st_513_1, "Z"))
+fp(st_513_2.doc) == "doc(p(),p(\"Zabc\"))"
 
-// [514] tier_b_prosemirror/commands/split-block/twice-then-type
-let d_514 = node('doc', [node('p', [text("start")])])
-let st_514_0 = {doc: d_514, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5)), schema: html5_subset_schema}
+// [514] tier_b_prosemirror/commands/split-block/then-type
+let d_514 = node('doc', [node('p', [text("abcd")])])
+let st_514_0 = {doc: d_514, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
 let st_514_1 = next_state(st_514_0, cmd_split_block(st_514_0))
-let st_514_2 = next_state(st_514_1, cmd_insert_text(st_514_1, "mid"))
-let st_514_3 = next_state(st_514_2, cmd_split_block(st_514_2))
-let st_514_4 = next_state(st_514_3, cmd_insert_text(st_514_3, "end"))
-fp(st_514_4.doc) == "doc(p(\"start\"),p(\"mid\"),p(\"end\"))"
+let st_514_2 = next_state(st_514_1, cmd_insert_text(st_514_1, "X"))
+fp(st_514_2.doc) == "doc(p(\"ab\"),p(\"Xcd\"))"
 
-// [515] tier_b_prosemirror/commands/toggle-mark/bold-off-existing
-let d_515 = node('doc', [node('p', [text_marked("word", [{name: 'strong', value: true}])])])
-let st_515_0 = {doc: d_515, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_515_1 = next_state(st_515_0, cmd_toggle_mark(st_515_0, 'strong', true))
-fp(st_515_1.doc) == "doc(p(\"word\"))"
+// [515] tier_b_prosemirror/commands/split-block/twice-then-type
+let d_515 = node('doc', [node('p', [text("start")])])
+let st_515_0 = {doc: d_515, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5)), schema: html5_subset_schema}
+let st_515_1 = next_state(st_515_0, cmd_split_block(st_515_0))
+let st_515_2 = next_state(st_515_1, cmd_insert_text(st_515_1, "mid"))
+let st_515_3 = next_state(st_515_2, cmd_split_block(st_515_2))
+let st_515_4 = next_state(st_515_3, cmd_insert_text(st_515_3, "end"))
+fp(st_515_4.doc) == "doc(p(\"start\"),p(\"mid\"),p(\"end\"))"
 
-// [516] tier_b_prosemirror/commands/toggle-mark/bold-on-italic
-let d_516 = node('doc', [node('p', [text_marked("word", [{name: 'em', value: true}])])])
+// [516] tier_b_prosemirror/commands/toggle-mark/bold-off-existing
+let d_516 = node('doc', [node('p', [text_marked("word", [{name: 'strong', value: true}])])])
 let st_516_0 = {doc: d_516, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
 let st_516_1 = next_state(st_516_0, cmd_toggle_mark(st_516_0, 'strong', true))
-fp(st_516_1.doc) == "doc(p(\"word\"^strong+em))"
+fp(st_516_1.doc) == "doc(p(\"word\"))"
 
-// [517] tier_b_prosemirror/commands/toggle-mark/bold-partial
-let d_517 = node('doc', [node('p', [text("abcd")])])
-let st_517_0 = {doc: d_517, selection: text_selection(pos([0, 0], 1), pos([0, 0], 3)), schema: html5_subset_schema}
+// [517] tier_b_prosemirror/commands/toggle-mark/bold-on-italic
+let d_517 = node('doc', [node('p', [text_marked("word", [{name: 'em', value: true}])])])
+let st_517_0 = {doc: d_517, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
 let st_517_1 = next_state(st_517_0, cmd_toggle_mark(st_517_0, 'strong', true))
-fp(st_517_1.doc) == "doc(p(\"a\",\"bc\"^strong,\"d\"))"
+fp(st_517_1.doc) == "doc(p(\"word\"^strong+em))"
 
-// [518] tier_b_prosemirror/commands/toggle-mark/bold-range
-let d_518 = node('doc', [node('p', [text("word")])])
-let st_518_0 = {doc: d_518, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
+// [518] tier_b_prosemirror/commands/toggle-mark/bold-partial
+let d_518 = node('doc', [node('p', [text("abcd")])])
+let st_518_0 = {doc: d_518, selection: text_selection(pos([0, 0], 1), pos([0, 0], 3)), schema: html5_subset_schema}
 let st_518_1 = next_state(st_518_0, cmd_toggle_mark(st_518_0, 'strong', true))
-fp(st_518_1.doc) == "doc(p(\"word\"^strong))"
+fp(st_518_1.doc) == "doc(p(\"a\",\"bc\"^strong,\"d\"))"
 
-// [519] tier_b_prosemirror/commands/toggle-mark/bold-then-italic
+// [519] tier_b_prosemirror/commands/toggle-mark/bold-range
 let d_519 = node('doc', [node('p', [text("word")])])
 let st_519_0 = {doc: d_519, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
 let st_519_1 = next_state(st_519_0, cmd_toggle_mark(st_519_0, 'strong', true))
-let st_519_2 = next_state(st_519_1, cmd_toggle_mark(st_519_1, 'em', true))
-fp(st_519_2.doc) == "doc(p(\"word\"^strong+em))"
+fp(st_519_1.doc) == "doc(p(\"word\"^strong))"
 
-// [520] tier_b_prosemirror/commands/toggle-mark/bold-then-off
+// [520] tier_b_prosemirror/commands/toggle-mark/bold-then-italic
 let d_520 = node('doc', [node('p', [text("word")])])
 let st_520_0 = {doc: d_520, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
 let st_520_1 = next_state(st_520_0, cmd_toggle_mark(st_520_0, 'strong', true))
-let st_520_2 = next_state(st_520_1, cmd_toggle_mark(st_520_1, 'strong', true))
-fp(st_520_2.doc) == "doc(p(\"word\"))"
+let st_520_2 = next_state(st_520_1, cmd_toggle_mark(st_520_1, 'em', true))
+fp(st_520_2.doc) == "doc(p(\"word\"^strong+em))"
 
-// [521] tier_b_prosemirror/commands/toggle-mark/collapsed-noop-doc
-let d_521 = node('doc', [node('p', [text("ab")])])
-let st_521_0 = {doc: d_521, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
+// [521] tier_b_prosemirror/commands/toggle-mark/bold-then-off
+let d_521 = node('doc', [node('p', [text("word")])])
+let st_521_0 = {doc: d_521, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
 let st_521_1 = next_state(st_521_0, cmd_toggle_mark(st_521_0, 'strong', true))
-fp(st_521_1.doc) == "doc(p(\"ab\"))"
+let st_521_2 = next_state(st_521_1, cmd_toggle_mark(st_521_1, 'strong', true))
+fp(st_521_2.doc) == "doc(p(\"word\"))"
 
-// [522] tier_b_prosemirror/commands/toggle-mark/collapsed-then-type
+// [522] tier_b_prosemirror/commands/toggle-mark/collapsed-noop-doc
 let d_522 = node('doc', [node('p', [text("ab")])])
 let st_522_0 = {doc: d_522, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
 let st_522_1 = next_state(st_522_0, cmd_toggle_mark(st_522_0, 'strong', true))
-let st_522_2 = next_state(st_522_1, cmd_insert_text(st_522_1, "X"))
-fp(st_522_2.doc) == "doc(p(\"abX\"))"
+fp(st_522_1.doc) == "doc(p(\"ab\"))"
 
-// [523] tier_b_prosemirror/commands/toggle-mark/italic-off-existing
-let d_523 = node('doc', [node('p', [text_marked("word", [{name: 'em', value: true}])])])
-let st_523_0 = {doc: d_523, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_523_1 = next_state(st_523_0, cmd_toggle_mark(st_523_0, 'em', true))
-fp(st_523_1.doc) == "doc(p(\"word\"))"
+// [523] tier_b_prosemirror/commands/toggle-mark/collapsed-then-type
+let d_523 = node('doc', [node('p', [text("ab")])])
+let st_523_0 = {doc: d_523, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
+let st_523_1 = next_state(st_523_0, cmd_toggle_mark(st_523_0, 'strong', true))
+let st_523_2 = next_state(st_523_1, cmd_insert_text(st_523_1, "X"))
+fp(st_523_2.doc) == "doc(p(\"abX\"))"
 
-// [524] tier_b_prosemirror/commands/toggle-mark/italic-range
-let d_524 = node('doc', [node('p', [text("word")])])
+// [524] tier_b_prosemirror/commands/toggle-mark/italic-off-existing
+let d_524 = node('doc', [node('p', [text_marked("word", [{name: 'em', value: true}])])])
 let st_524_0 = {doc: d_524, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
 let st_524_1 = next_state(st_524_0, cmd_toggle_mark(st_524_0, 'em', true))
-fp(st_524_1.doc) == "doc(p(\"word\"^em))"
+fp(st_524_1.doc) == "doc(p(\"word\"))"
 
-// [525] tier_b_prosemirror/commands/toggle-mark/partial-then-split
-let d_525 = node('doc', [node('p', [text("abcd")])])
-let st_525_0 = {doc: d_525, selection: text_selection(pos([0, 0], 1), pos([0, 0], 3)), schema: html5_subset_schema}
-let st_525_1 = next_state(st_525_0, cmd_toggle_mark(st_525_0, 'strong', true))
-let st_525_2 = next_state(st_525_1, cmd_split_block(st_525_1))
-fp(st_525_2.doc) == "doc(p(\"a\"),p(\"d\"))"
+// [525] tier_b_prosemirror/commands/toggle-mark/italic-range
+let d_525 = node('doc', [node('p', [text("word")])])
+let st_525_0 = {doc: d_525, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
+let st_525_1 = next_state(st_525_0, cmd_toggle_mark(st_525_0, 'em', true))
+fp(st_525_1.doc) == "doc(p(\"word\"^em))"
 
-// [526] tier_b_prosemirror/commands/toggle-mark/then-set-block
-let d_526 = node('doc', [node('p', [text("word")])])
-let st_526_0 = {doc: d_526, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
+// [526] tier_b_prosemirror/commands/toggle-mark/partial-then-split
+let d_526 = node('doc', [node('p', [text("abcd")])])
+let st_526_0 = {doc: d_526, selection: text_selection(pos([0, 0], 1), pos([0, 0], 3)), schema: html5_subset_schema}
 let st_526_1 = next_state(st_526_0, cmd_toggle_mark(st_526_0, 'strong', true))
-let st_526_2 = next_state(st_526_1, cmd_set_block_type(st_526_1, 'h2'))
-fp(st_526_2.doc) == "doc(h2(\"word\"^strong))"
+let st_526_2 = next_state(st_526_1, cmd_split_block(st_526_1))
+fp(st_526_2.doc) == "doc(p(\"a\"),p(\"d\"))"
 
-// [527] tier_b_prosemirror/commands/toggle-mark/underline-range
+// [527] tier_b_prosemirror/commands/toggle-mark/then-set-block
 let d_527 = node('doc', [node('p', [text("word")])])
 let st_527_0 = {doc: d_527, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_527_1 = next_state(st_527_0, cmd_toggle_mark(st_527_0, 'u', true))
-fp(st_527_1.doc) == "doc(p(\"word\"^u))"
+let st_527_1 = next_state(st_527_0, cmd_toggle_mark(st_527_0, 'strong', true))
+let st_527_2 = next_state(st_527_1, cmd_set_block_type(st_527_1, 'h2'))
+fp(st_527_2.doc) == "doc(h2(\"word\"^strong))"
 
-// [528] tier_b_prosemirror/history/insert-then-delete
-let d_528 = node('doc', [node('p', [text("start")])])
-let st_528_0 = {doc: d_528, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5)), schema: html5_subset_schema}
-let st_528_1 = next_state(st_528_0, cmd_insert_text(st_528_0, "XYZ"))
-let st_528_2 = next_state(st_528_1, cmd_delete_backward(st_528_1))
-let st_528_3 = next_state(st_528_2, cmd_delete_backward(st_528_2))
-fp(st_528_3.doc) == "doc(p(\"startX\"))"
+// [528] tier_b_prosemirror/commands/toggle-mark/underline-range
+let d_528 = node('doc', [node('p', [text("word")])])
+let st_528_0 = {doc: d_528, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
+let st_528_1 = next_state(st_528_0, cmd_toggle_mark(st_528_0, 'u', true))
+fp(st_528_1.doc) == "doc(p(\"word\"^u))"
 
-// [529] tier_b_prosemirror/history/undo-typing
-let d_529 = node('doc', [node('p', [text("hello")])])
-let st_529_0 = {doc: d_529, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
-let st_529_1 = next_state(st_529_0, cmd_insert_text(st_529_0, "XY"))
-fp(st_529_1.doc) == "doc(p(\"heXYllo\"))"
+// [529] tier_b_prosemirror/history/insert-then-delete
+let d_529 = node('doc', [node('p', [text("start")])])
+let st_529_0 = {doc: d_529, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5)), schema: html5_subset_schema}
+let st_529_1 = next_state(st_529_0, cmd_insert_text(st_529_0, "XYZ"))
+let st_529_2 = next_state(st_529_1, cmd_delete_backward(st_529_1))
+let st_529_3 = next_state(st_529_2, cmd_delete_backward(st_529_2))
+fp(st_529_3.doc) == "doc(p(\"startX\"))"
 
-// [530] tier_b_prosemirror/transform/add-mark/across-range
-let d_530 = node('doc', [node('p', [text("hello there!")])])
-let st_530_0 = {doc: d_530, selection: text_selection(pos([0, 0], 6), pos([0, 0], 11)), schema: html5_subset_schema}
-let st_530_1 = next_state(st_530_0, cmd_toggle_mark(st_530_0, 'strong', true))
-fp(st_530_1.doc) == "doc(p(\"hello \",\"there\"^strong,\"!\"))"
+// [530] tier_b_prosemirror/history/undo-typing
+let d_530 = node('doc', [node('p', [text("hello")])])
+let st_530_0 = {doc: d_530, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
+let st_530_1 = next_state(st_530_0, cmd_insert_text(st_530_0, "XY"))
+fp(st_530_1.doc) == "doc(p(\"heXYllo\"))"
 
-// [531] tier_b_prosemirror/transform/add-mark/add-italic-to-bold-leaf
-let d_531 = node('doc', [node('p', [text_marked("bolded", [{name: 'strong', value: true}])])])
-let st_531_0 = {doc: d_531, selection: text_selection(pos([0, 0], 0), pos([0, 0], 6)), schema: html5_subset_schema}
-let st_531_1 = next_state(st_531_0, cmd_toggle_mark(st_531_0, 'em', true))
-fp(st_531_1.doc) == "doc(p(\"bolded\"^strong+em))"
+// [531] tier_b_prosemirror/transform/add-mark/across-range
+let d_531 = node('doc', [node('p', [text("hello there!")])])
+let st_531_0 = {doc: d_531, selection: text_selection(pos([0, 0], 6), pos([0, 0], 11)), schema: html5_subset_schema}
+let st_531_1 = next_state(st_531_0, cmd_toggle_mark(st_531_0, 'strong', true))
+fp(st_531_1.doc) == "doc(p(\"hello \",\"there\"^strong,\"!\"))"
 
-// [532] tier_b_prosemirror/transform/add-mark/add-underline-to-italic-sub
-let d_532 = node('doc', [node('p', [text_marked("abcdef", [{name: 'em', value: true}])])])
-let st_532_0 = {doc: d_532, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_532_1 = next_state(st_532_0, cmd_toggle_mark(st_532_0, 'u', true))
-fp(st_532_1.doc) == "doc(p(\"ab\"^em,\"cd\"^em+u,\"ef\"^em))"
+// [532] tier_b_prosemirror/transform/add-mark/add-italic-to-bold-leaf
+let d_532 = node('doc', [node('p', [text_marked("bolded", [{name: 'strong', value: true}])])])
+let st_532_0 = {doc: d_532, selection: text_selection(pos([0, 0], 0), pos([0, 0], 6)), schema: html5_subset_schema}
+let st_532_1 = next_state(st_532_0, cmd_toggle_mark(st_532_0, 'em', true))
+fp(st_532_1.doc) == "doc(p(\"bolded\"^strong+em))"
 
-// [533] tier_b_prosemirror/transform/add-mark/bold-at-end
-let d_533 = node('doc', [node('p', [text("hello world")])])
-let st_533_0 = {doc: d_533, selection: text_selection(pos([0, 0], 6), pos([0, 0], 11)), schema: html5_subset_schema}
-let st_533_1 = next_state(st_533_0, cmd_toggle_mark(st_533_0, 'strong', true))
-fp(st_533_1.doc) == "doc(p(\"hello \",\"world\"^strong))"
+// [533] tier_b_prosemirror/transform/add-mark/add-underline-to-italic-sub
+let d_533 = node('doc', [node('p', [text_marked("abcdef", [{name: 'em', value: true}])])])
+let st_533_0 = {doc: d_533, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
+let st_533_1 = next_state(st_533_0, cmd_toggle_mark(st_533_0, 'u', true))
+fp(st_533_1.doc) == "doc(p(\"ab\"^em,\"cd\"^em+u,\"ef\"^em))"
 
-// [534] tier_b_prosemirror/transform/add-mark/bold-at-start
+// [534] tier_b_prosemirror/transform/add-mark/bold-at-end
 let d_534 = node('doc', [node('p', [text("hello world")])])
-let st_534_0 = {doc: d_534, selection: text_selection(pos([0, 0], 0), pos([0, 0], 5)), schema: html5_subset_schema}
+let st_534_0 = {doc: d_534, selection: text_selection(pos([0, 0], 6), pos([0, 0], 11)), schema: html5_subset_schema}
 let st_534_1 = next_state(st_534_0, cmd_toggle_mark(st_534_0, 'strong', true))
-fp(st_534_1.doc) == "doc(p(\"hello\"^strong,\" world\"))"
+fp(st_534_1.doc) == "doc(p(\"hello \",\"world\"^strong))"
 
-// [535] tier_b_prosemirror/transform/add-mark/bold-full-leaf
-let d_535 = node('doc', [node('p', [text("everything")])])
-let st_535_0 = {doc: d_535, selection: text_selection(pos([0, 0], 0), pos([0, 0], 10)), schema: html5_subset_schema}
+// [535] tier_b_prosemirror/transform/add-mark/bold-at-start
+let d_535 = node('doc', [node('p', [text("hello world")])])
+let st_535_0 = {doc: d_535, selection: text_selection(pos([0, 0], 0), pos([0, 0], 5)), schema: html5_subset_schema}
 let st_535_1 = next_state(st_535_0, cmd_toggle_mark(st_535_0, 'strong', true))
-fp(st_535_1.doc) == "doc(p(\"everything\"^strong))"
+fp(st_535_1.doc) == "doc(p(\"hello\"^strong,\" world\"))"
 
-// [536] tier_b_prosemirror/transform/add-mark/bold-in-heading
-let d_536 = node('doc', [node('h1', [text("The Title")])])
-let st_536_0 = {doc: d_536, selection: text_selection(pos([0, 0], 4), pos([0, 0], 9)), schema: html5_subset_schema}
+// [536] tier_b_prosemirror/transform/add-mark/bold-full-leaf
+let d_536 = node('doc', [node('p', [text("everything")])])
+let st_536_0 = {doc: d_536, selection: text_selection(pos([0, 0], 0), pos([0, 0], 10)), schema: html5_subset_schema}
 let st_536_1 = next_state(st_536_0, cmd_toggle_mark(st_536_0, 'strong', true))
-fp(st_536_1.doc) == "doc(h1(\"The \",\"Title\"^strong))"
+fp(st_536_1.doc) == "doc(p(\"everything\"^strong))"
 
-// [537] tier_b_prosemirror/transform/add-mark/bold-in-list-item
-let d_537 = node('doc', [node('ul', [node('li', [text("list item")])])])
-let st_537_0 = {doc: d_537, selection: text_selection(pos([0, 0, 0], 5), pos([0, 0, 0], 9)), schema: html5_subset_schema}
+// [537] tier_b_prosemirror/transform/add-mark/bold-in-heading
+let d_537 = node('doc', [node('h1', [text("The Title")])])
+let st_537_0 = {doc: d_537, selection: text_selection(pos([0, 0], 4), pos([0, 0], 9)), schema: html5_subset_schema}
 let st_537_1 = next_state(st_537_0, cmd_toggle_mark(st_537_0, 'strong', true))
-fp(st_537_1.doc) == "doc(ul(li(\"list \",\"item\"^strong)))"
+fp(st_537_1.doc) == "doc(h1(\"The \",\"Title\"^strong))"
 
-// [538] tier_b_prosemirror/transform/add-mark/bold-in-table-cell
-let d_538 = node('doc', [node('table', [node('tr', [node('td', [text("cell data")])])])])
-let st_538_0 = {doc: d_538, selection: text_selection(pos([0, 0, 0, 0], 5), pos([0, 0, 0, 0], 9)), schema: html5_subset_schema}
+// [538] tier_b_prosemirror/transform/add-mark/bold-in-list-item
+let d_538 = node('doc', [node('ul', [node('li', [text("list item")])])])
+let st_538_0 = {doc: d_538, selection: text_selection(pos([0, 0, 0], 5), pos([0, 0, 0], 9)), schema: html5_subset_schema}
 let st_538_1 = next_state(st_538_0, cmd_toggle_mark(st_538_0, 'strong', true))
-fp(st_538_1.doc) == "doc(table(tr(td(\"cell \",\"data\"^strong))))"
+fp(st_538_1.doc) == "doc(ul(li(\"list \",\"item\"^strong)))"
 
-// [539] tier_b_prosemirror/transform/add-mark/bold-mid-range
-let d_539 = node('doc', [node('p', [text("hello there!")])])
-let st_539_0 = {doc: d_539, selection: text_selection(pos([0, 0], 6), pos([0, 0], 11)), schema: html5_subset_schema}
+// [539] tier_b_prosemirror/transform/add-mark/bold-in-table-cell
+let d_539 = node('doc', [node('table', [node('tr', [node('td', [text("cell data")])])])])
+let st_539_0 = {doc: d_539, selection: text_selection(pos([0, 0, 0, 0], 5), pos([0, 0, 0, 0], 9)), schema: html5_subset_schema}
 let st_539_1 = next_state(st_539_0, cmd_toggle_mark(st_539_0, 'strong', true))
-fp(st_539_1.doc) == "doc(p(\"hello \",\"there\"^strong,\"!\"))"
+fp(st_539_1.doc) == "doc(table(tr(td(\"cell \",\"data\"^strong))))"
 
-// [540] tier_b_prosemirror/transform/add-mark/bold-single-char
-let d_540 = node('doc', [node('p', [text("abc")])])
-let st_540_0 = {doc: d_540, selection: text_selection(pos([0, 0], 1), pos([0, 0], 2)), schema: html5_subset_schema}
+// [540] tier_b_prosemirror/transform/add-mark/bold-mid-range
+let d_540 = node('doc', [node('p', [text("hello there!")])])
+let st_540_0 = {doc: d_540, selection: text_selection(pos([0, 0], 6), pos([0, 0], 11)), schema: html5_subset_schema}
 let st_540_1 = next_state(st_540_0, cmd_toggle_mark(st_540_0, 'strong', true))
-fp(st_540_1.doc) == "doc(p(\"a\",\"b\"^strong,\"c\"))"
+fp(st_540_1.doc) == "doc(p(\"hello \",\"there\"^strong,\"!\"))"
 
-// [541] tier_b_prosemirror/transform/add-mark/code-in-blockquote
-let d_541 = node('doc', [node('blockquote', [node('p', [text("quoted code")])])])
-let st_541_0 = {doc: d_541, selection: text_selection(pos([0, 0, 0], 7), pos([0, 0, 0], 11)), schema: html5_subset_schema}
-let st_541_1 = next_state(st_541_0, cmd_toggle_mark(st_541_0, 'code', true))
-fp(st_541_1.doc) == "doc(blockquote(p(\"quoted \",\"code\"^code)))"
+// [541] tier_b_prosemirror/transform/add-mark/bold-single-char
+let d_541 = node('doc', [node('p', [text("abc")])])
+let st_541_0 = {doc: d_541, selection: text_selection(pos([0, 0], 1), pos([0, 0], 2)), schema: html5_subset_schema}
+let st_541_1 = next_state(st_541_0, cmd_toggle_mark(st_541_0, 'strong', true))
+fp(st_541_1.doc) == "doc(p(\"a\",\"b\"^strong,\"c\"))"
 
-// [542] tier_b_prosemirror/transform/add-mark/code-mid-range
-let d_542 = node('doc', [node('p', [text("run code now")])])
-let st_542_0 = {doc: d_542, selection: text_selection(pos([0, 0], 4), pos([0, 0], 8)), schema: html5_subset_schema}
+// [542] tier_b_prosemirror/transform/add-mark/code-in-blockquote
+let d_542 = node('doc', [node('blockquote', [node('p', [text("quoted code")])])])
+let st_542_0 = {doc: d_542, selection: text_selection(pos([0, 0, 0], 7), pos([0, 0, 0], 11)), schema: html5_subset_schema}
 let st_542_1 = next_state(st_542_0, cmd_toggle_mark(st_542_0, 'code', true))
-fp(st_542_1.doc) == "doc(p(\"run \",\"code\"^code,\" now\"))"
+fp(st_542_1.doc) == "doc(blockquote(p(\"quoted \",\"code\"^code)))"
 
-// [543] tier_b_prosemirror/transform/add-mark/italic-full-leaf
-let d_543 = node('doc', [node('p', [text("slanted")])])
-let st_543_0 = {doc: d_543, selection: text_selection(pos([0, 0], 0), pos([0, 0], 7)), schema: html5_subset_schema}
-let st_543_1 = next_state(st_543_0, cmd_toggle_mark(st_543_0, 'em', true))
-fp(st_543_1.doc) == "doc(p(\"slanted\"^em))"
+// [543] tier_b_prosemirror/transform/add-mark/code-mid-range
+let d_543 = node('doc', [node('p', [text("run code now")])])
+let st_543_0 = {doc: d_543, selection: text_selection(pos([0, 0], 4), pos([0, 0], 8)), schema: html5_subset_schema}
+let st_543_1 = next_state(st_543_0, cmd_toggle_mark(st_543_0, 'code', true))
+fp(st_543_1.doc) == "doc(p(\"run \",\"code\"^code,\" now\"))"
 
-// [544] tier_b_prosemirror/transform/add-mark/italic-in-h2
-let d_544 = node('doc', [node('h2', [text("Subtitle")])])
-let st_544_0 = {doc: d_544, selection: text_selection(pos([0, 0], 0), pos([0, 0], 8)), schema: html5_subset_schema}
+// [544] tier_b_prosemirror/transform/add-mark/italic-full-leaf
+let d_544 = node('doc', [node('p', [text("slanted")])])
+let st_544_0 = {doc: d_544, selection: text_selection(pos([0, 0], 0), pos([0, 0], 7)), schema: html5_subset_schema}
 let st_544_1 = next_state(st_544_0, cmd_toggle_mark(st_544_0, 'em', true))
-fp(st_544_1.doc) == "doc(h2(\"Subtitle\"^em))"
+fp(st_544_1.doc) == "doc(p(\"slanted\"^em))"
 
-// [545] tier_b_prosemirror/transform/add-mark/italic-in-ordered-list
-let d_545 = node('doc', [node('ol', [node('li', [text("first point")])])])
-let st_545_0 = {doc: d_545, selection: text_selection(pos([0, 0, 0], 0), pos([0, 0, 0], 5)), schema: html5_subset_schema}
+// [545] tier_b_prosemirror/transform/add-mark/italic-in-h2
+let d_545 = node('doc', [node('h2', [text("Subtitle")])])
+let st_545_0 = {doc: d_545, selection: text_selection(pos([0, 0], 0), pos([0, 0], 8)), schema: html5_subset_schema}
 let st_545_1 = next_state(st_545_0, cmd_toggle_mark(st_545_0, 'em', true))
-fp(st_545_1.doc) == "doc(ol(li(\"first\"^em,\" point\")))"
+fp(st_545_1.doc) == "doc(h2(\"Subtitle\"^em))"
 
-// [546] tier_b_prosemirror/transform/add-mark/italic-mid-range
-let d_546 = node('doc', [node('p', [text("make this italic")])])
-let st_546_0 = {doc: d_546, selection: text_selection(pos([0, 0], 5), pos([0, 0], 9)), schema: html5_subset_schema}
+// [546] tier_b_prosemirror/transform/add-mark/italic-in-ordered-list
+let d_546 = node('doc', [node('ol', [node('li', [text("first point")])])])
+let st_546_0 = {doc: d_546, selection: text_selection(pos([0, 0, 0], 0), pos([0, 0, 0], 5)), schema: html5_subset_schema}
 let st_546_1 = next_state(st_546_0, cmd_toggle_mark(st_546_0, 'em', true))
-fp(st_546_1.doc) == "doc(p(\"make \",\"this\"^em,\" italic\"))"
+fp(st_546_1.doc) == "doc(ol(li(\"first\"^em,\" point\")))"
 
-// [547] tier_b_prosemirror/transform/add-mark/strikethrough-full-leaf
-let d_547 = node('doc', [node('p', [text("struck")])])
-let st_547_0 = {doc: d_547, selection: text_selection(pos([0, 0], 0), pos([0, 0], 6)), schema: html5_subset_schema}
-let st_547_1 = next_state(st_547_0, cmd_toggle_mark(st_547_0, 's', true))
-fp(st_547_1.doc) == "doc(p(\"struck\"^s))"
+// [547] tier_b_prosemirror/transform/add-mark/italic-mid-range
+let d_547 = node('doc', [node('p', [text("make this italic")])])
+let st_547_0 = {doc: d_547, selection: text_selection(pos([0, 0], 5), pos([0, 0], 9)), schema: html5_subset_schema}
+let st_547_1 = next_state(st_547_0, cmd_toggle_mark(st_547_0, 'em', true))
+fp(st_547_1.doc) == "doc(p(\"make \",\"this\"^em,\" italic\"))"
 
-// [548] tier_b_prosemirror/transform/add-mark/strikethrough-mid-range
-let d_548 = node('doc', [node('p', [text("strike this out")])])
-let st_548_0 = {doc: d_548, selection: text_selection(pos([0, 0], 7), pos([0, 0], 11)), schema: html5_subset_schema}
+// [548] tier_b_prosemirror/transform/add-mark/strikethrough-full-leaf
+let d_548 = node('doc', [node('p', [text("struck")])])
+let st_548_0 = {doc: d_548, selection: text_selection(pos([0, 0], 0), pos([0, 0], 6)), schema: html5_subset_schema}
 let st_548_1 = next_state(st_548_0, cmd_toggle_mark(st_548_0, 's', true))
-fp(st_548_1.doc) == "doc(p(\"strike \",\"this\"^s,\" out\"))"
+fp(st_548_1.doc) == "doc(p(\"struck\"^s))"
 
-// [549] tier_b_prosemirror/transform/add-mark/underline-full-leaf
-let d_549 = node('doc', [node('p', [text("underlined")])])
-let st_549_0 = {doc: d_549, selection: text_selection(pos([0, 0], 0), pos([0, 0], 10)), schema: html5_subset_schema}
-let st_549_1 = next_state(st_549_0, cmd_toggle_mark(st_549_0, 'u', true))
-fp(st_549_1.doc) == "doc(p(\"underlined\"^u))"
+// [549] tier_b_prosemirror/transform/add-mark/strikethrough-mid-range
+let d_549 = node('doc', [node('p', [text("strike this out")])])
+let st_549_0 = {doc: d_549, selection: text_selection(pos([0, 0], 7), pos([0, 0], 11)), schema: html5_subset_schema}
+let st_549_1 = next_state(st_549_0, cmd_toggle_mark(st_549_0, 's', true))
+fp(st_549_1.doc) == "doc(p(\"strike \",\"this\"^s,\" out\"))"
 
-// [550] tier_b_prosemirror/transform/add-mark/underline-mid-range
-let d_550 = node('doc', [node('p', [text("under line me")])])
-let st_550_0 = {doc: d_550, selection: text_selection(pos([0, 0], 6), pos([0, 0], 10)), schema: html5_subset_schema}
+// [550] tier_b_prosemirror/transform/add-mark/underline-full-leaf
+let d_550 = node('doc', [node('p', [text("underlined")])])
+let st_550_0 = {doc: d_550, selection: text_selection(pos([0, 0], 0), pos([0, 0], 10)), schema: html5_subset_schema}
 let st_550_1 = next_state(st_550_0, cmd_toggle_mark(st_550_0, 'u', true))
-fp(st_550_1.doc) == "doc(p(\"under \",\"line\"^u,\" me\"))"
+fp(st_550_1.doc) == "doc(p(\"underlined\"^u))"
 
-// [551] tier_b_prosemirror/transform/delete-range/at-end
-let d_551 = node('doc', [node('p', [text("hello")])])
-let st_551_0 = {doc: d_551, selection: text_selection(pos([0, 0], 3), pos([0, 0], 5)), schema: html5_subset_schema}
-let st_551_1 = next_state(st_551_0, cmd_delete_backward(st_551_0))
-fp(st_551_1.doc) == "doc(p(\"hel\"))"
+// [551] tier_b_prosemirror/transform/add-mark/underline-mid-range
+let d_551 = node('doc', [node('p', [text("under line me")])])
+let st_551_0 = {doc: d_551, selection: text_selection(pos([0, 0], 6), pos([0, 0], 10)), schema: html5_subset_schema}
+let st_551_1 = next_state(st_551_0, cmd_toggle_mark(st_551_0, 'u', true))
+fp(st_551_1.doc) == "doc(p(\"under \",\"line\"^u,\" me\"))"
 
-// [552] tier_b_prosemirror/transform/delete-range/at-start
+// [552] tier_b_prosemirror/transform/delete-range/at-end
 let d_552 = node('doc', [node('p', [text("hello")])])
-let st_552_0 = {doc: d_552, selection: text_selection(pos([0, 0], 0), pos([0, 0], 2)), schema: html5_subset_schema}
+let st_552_0 = {doc: d_552, selection: text_selection(pos([0, 0], 3), pos([0, 0], 5)), schema: html5_subset_schema}
 let st_552_1 = next_state(st_552_0, cmd_delete_backward(st_552_0))
-fp(st_552_1.doc) == "doc(p(\"llo\"))"
+fp(st_552_1.doc) == "doc(p(\"hel\"))"
 
-// [553] tier_b_prosemirror/transform/delete-range/collapsed-backspace
-let d_553 = node('doc', [node('p', [text("abc")])])
-let st_553_0 = {doc: d_553, selection: text_selection(pos([0, 0], 3), pos([0, 0], 3)), schema: html5_subset_schema}
+// [553] tier_b_prosemirror/transform/delete-range/at-start
+let d_553 = node('doc', [node('p', [text("hello")])])
+let st_553_0 = {doc: d_553, selection: text_selection(pos([0, 0], 0), pos([0, 0], 2)), schema: html5_subset_schema}
 let st_553_1 = next_state(st_553_0, cmd_delete_backward(st_553_0))
-fp(st_553_1.doc) == "doc(p(\"ab\"))"
+fp(st_553_1.doc) == "doc(p(\"llo\"))"
 
-// [554] tier_b_prosemirror/transform/delete-range/collapsed-backspace-mid
-let d_554 = node('doc', [node('p', [text("abcd")])])
-let st_554_0 = {doc: d_554, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
+// [554] tier_b_prosemirror/transform/delete-range/collapsed-backspace
+let d_554 = node('doc', [node('p', [text("abc")])])
+let st_554_0 = {doc: d_554, selection: text_selection(pos([0, 0], 3), pos([0, 0], 3)), schema: html5_subset_schema}
 let st_554_1 = next_state(st_554_0, cmd_delete_backward(st_554_0))
-fp(st_554_1.doc) == "doc(p(\"acd\"))"
+fp(st_554_1.doc) == "doc(p(\"ab\"))"
 
-// [555] tier_b_prosemirror/transform/delete-range/full-bold-leaf
-let d_555 = node('doc', [node('p', [text_marked("yz", [{name: 'strong', value: true}])])])
-let st_555_0 = {doc: d_555, selection: text_selection(pos([0, 0], 0), pos([0, 0], 2)), schema: html5_subset_schema}
+// [555] tier_b_prosemirror/transform/delete-range/collapsed-backspace-mid
+let d_555 = node('doc', [node('p', [text("abcd")])])
+let st_555_0 = {doc: d_555, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
 let st_555_1 = next_state(st_555_0, cmd_delete_backward(st_555_0))
-fp(st_555_1.doc) == "doc(p())"
+fp(st_555_1.doc) == "doc(p(\"acd\"))"
 
-// [556] tier_b_prosemirror/transform/delete-range/full-leaf
-let d_556 = node('doc', [node('p', [text("before")]), node('p', [text("gone")]), node('p', [text("after")])])
-let st_556_0 = {doc: d_556, selection: text_selection(pos([1, 0], 0), pos([1, 0], 4)), schema: html5_subset_schema}
+// [556] tier_b_prosemirror/transform/delete-range/full-bold-leaf
+let d_556 = node('doc', [node('p', [text_marked("yz", [{name: 'strong', value: true}])])])
+let st_556_0 = {doc: d_556, selection: text_selection(pos([0, 0], 0), pos([0, 0], 2)), schema: html5_subset_schema}
 let st_556_1 = next_state(st_556_0, cmd_delete_backward(st_556_0))
-fp(st_556_1.doc) == "doc(p(\"before\"),p(),p(\"after\"))"
+fp(st_556_1.doc) == "doc(p())"
 
-// [557] tier_b_prosemirror/transform/delete-range/in-heading
-let d_557 = node('doc', [node('h2', [text("Keep Remove End")])])
-let st_557_0 = {doc: d_557, selection: text_selection(pos([0, 0], 5), pos([0, 0], 11)), schema: html5_subset_schema}
+// [557] tier_b_prosemirror/transform/delete-range/full-leaf
+let d_557 = node('doc', [node('p', [text("before")]), node('p', [text("gone")]), node('p', [text("after")])])
+let st_557_0 = {doc: d_557, selection: text_selection(pos([1, 0], 0), pos([1, 0], 4)), schema: html5_subset_schema}
 let st_557_1 = next_state(st_557_0, cmd_delete_backward(st_557_0))
-fp(st_557_1.doc) == "doc(h2(\"Keep  End\"))"
+fp(st_557_1.doc) == "doc(p(\"before\"),p(),p(\"after\"))"
 
-// [558] tier_b_prosemirror/transform/delete-range/in-list-item
-let d_558 = node('doc', [node('ul', [node('li', [text("item extra")])])])
-let st_558_0 = {doc: d_558, selection: text_selection(pos([0, 0, 0], 5), pos([0, 0, 0], 10)), schema: html5_subset_schema}
+// [558] tier_b_prosemirror/transform/delete-range/in-heading
+let d_558 = node('doc', [node('h2', [text("Keep Remove End")])])
+let st_558_0 = {doc: d_558, selection: text_selection(pos([0, 0], 5), pos([0, 0], 11)), schema: html5_subset_schema}
 let st_558_1 = next_state(st_558_0, cmd_delete_backward(st_558_0))
-fp(st_558_1.doc) == "doc(ul(li(\"item \")))"
+fp(st_558_1.doc) == "doc(h2(\"Keep  End\"))"
 
-// [559] tier_b_prosemirror/transform/delete-range/in-table-cell
-let d_559 = node('doc', [node('table', [node('tr', [node('td', [text("abcd")])])])])
-let st_559_0 = {doc: d_559, selection: text_selection(pos([0, 0, 0, 0], 1), pos([0, 0, 0, 0], 3)), schema: html5_subset_schema}
+// [559] tier_b_prosemirror/transform/delete-range/in-list-item
+let d_559 = node('doc', [node('ul', [node('li', [text("item extra")])])])
+let st_559_0 = {doc: d_559, selection: text_selection(pos([0, 0, 0], 5), pos([0, 0, 0], 10)), schema: html5_subset_schema}
 let st_559_1 = next_state(st_559_0, cmd_delete_backward(st_559_0))
-fp(st_559_1.doc) == "doc(table(tr(td(\"ad\"))))"
+fp(st_559_1.doc) == "doc(ul(li(\"item \")))"
 
-// [560] tier_b_prosemirror/transform/delete-range/mid
-let d_560 = node('doc', [node('p', [text("hello")])])
-let st_560_0 = {doc: d_560, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
+// [560] tier_b_prosemirror/transform/delete-range/in-table-cell
+let d_560 = node('doc', [node('table', [node('tr', [node('td', [text("abcd")])])])])
+let st_560_0 = {doc: d_560, selection: text_selection(pos([0, 0, 0, 0], 1), pos([0, 0, 0, 0], 3)), schema: html5_subset_schema}
 let st_560_1 = next_state(st_560_0, cmd_delete_backward(st_560_0))
-fp(st_560_1.doc) == "doc(p(\"heo\"))"
+fp(st_560_1.doc) == "doc(table(tr(td(\"ad\"))))"
 
-// [561] tier_b_prosemirror/transform/delete-range/single-char
-let d_561 = node('doc', [node('p', [text("cart")])])
-let st_561_0 = {doc: d_561, selection: text_selection(pos([0, 0], 2), pos([0, 0], 3)), schema: html5_subset_schema}
+// [561] tier_b_prosemirror/transform/delete-range/mid
+let d_561 = node('doc', [node('p', [text("hello")])])
+let st_561_0 = {doc: d_561, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
 let st_561_1 = next_state(st_561_0, cmd_delete_backward(st_561_0))
-fp(st_561_1.doc) == "doc(p(\"cat\"))"
+fp(st_561_1.doc) == "doc(p(\"heo\"))"
 
-// [562] tier_b_prosemirror/transform/delete-range/within-bold-leaf
-let d_562 = node('doc', [node('p', [text_marked("fooXXbar", [{name: 'strong', value: true}])])])
-let st_562_0 = {doc: d_562, selection: text_selection(pos([0, 0], 3), pos([0, 0], 5)), schema: html5_subset_schema}
+// [562] tier_b_prosemirror/transform/delete-range/single-char
+let d_562 = node('doc', [node('p', [text("cart")])])
+let st_562_0 = {doc: d_562, selection: text_selection(pos([0, 0], 2), pos([0, 0], 3)), schema: html5_subset_schema}
 let st_562_1 = next_state(st_562_0, cmd_delete_backward(st_562_0))
-fp(st_562_1.doc) == "doc(p(\"foobar\"^strong))"
+fp(st_562_1.doc) == "doc(p(\"cat\"))"
 
-// [563] tier_b_prosemirror/transform/delete-range/word
-let d_563 = node('doc', [node('p', [text("delete this word please")])])
-let st_563_0 = {doc: d_563, selection: text_selection(pos([0, 0], 7), pos([0, 0], 16)), schema: html5_subset_schema}
+// [563] tier_b_prosemirror/transform/delete-range/within-bold-leaf
+let d_563 = node('doc', [node('p', [text_marked("fooXXbar", [{name: 'strong', value: true}])])])
+let st_563_0 = {doc: d_563, selection: text_selection(pos([0, 0], 3), pos([0, 0], 5)), schema: html5_subset_schema}
 let st_563_1 = next_state(st_563_0, cmd_delete_backward(st_563_0))
-fp(st_563_1.doc) == "doc(p(\"delete  please\"))"
+fp(st_563_1.doc) == "doc(p(\"foobar\"^strong))"
 
-// [564] tier_b_prosemirror/transform/insert-text/at-cursor
-let d_564 = node('doc', [node('p', [text("hello")])])
-let st_564_0 = {doc: d_564, selection: text_selection(pos([0, 0], 3), pos([0, 0], 3)), schema: html5_subset_schema}
-let st_564_1 = next_state(st_564_0, cmd_insert_text(st_564_0, "XYZ"))
-fp(st_564_1.doc) == "doc(p(\"helXYZlo\"))"
+// [564] tier_b_prosemirror/transform/delete-range/word
+let d_564 = node('doc', [node('p', [text("delete this word please")])])
+let st_564_0 = {doc: d_564, selection: text_selection(pos([0, 0], 7), pos([0, 0], 16)), schema: html5_subset_schema}
+let st_564_1 = next_state(st_564_0, cmd_delete_backward(st_564_0))
+fp(st_564_1.doc) == "doc(p(\"delete  please\"))"
 
-// [565] tier_b_prosemirror/transform/insert-text/multi-step
-let d_565 = node('doc', [node('p', [text("hi")])])
-let st_565_0 = {doc: d_565, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
-let st_565_1 = next_state(st_565_0, cmd_insert_text(st_565_0, " "))
-let st_565_2 = next_state(st_565_1, cmd_insert_text(st_565_1, "there"))
-fp(st_565_2.doc) == "doc(p(\"hi there\"))"
+// [565] tier_b_prosemirror/transform/insert-text/at-cursor
+let d_565 = node('doc', [node('p', [text("hello")])])
+let st_565_0 = {doc: d_565, selection: text_selection(pos([0, 0], 3), pos([0, 0], 3)), schema: html5_subset_schema}
+let st_565_1 = next_state(st_565_0, cmd_insert_text(st_565_0, "XYZ"))
+fp(st_565_1.doc) == "doc(p(\"helXYZlo\"))"
 
-// [566] tier_b_prosemirror/transform/insert-text/three-chars
-let d_566 = node('doc', [node('p', [text("ae")])])
-let st_566_0 = {doc: d_566, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1)), schema: html5_subset_schema}
-let st_566_1 = next_state(st_566_0, cmd_insert_text(st_566_0, "b"))
-let st_566_2 = next_state(st_566_1, cmd_insert_text(st_566_1, "c"))
-let st_566_3 = next_state(st_566_2, cmd_insert_text(st_566_2, "d"))
-fp(st_566_3.doc) == "doc(p(\"abcde\"))"
+// [566] tier_b_prosemirror/transform/insert-text/multi-step
+let d_566 = node('doc', [node('p', [text("hi")])])
+let st_566_0 = {doc: d_566, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
+let st_566_1 = next_state(st_566_0, cmd_insert_text(st_566_0, " "))
+let st_566_2 = next_state(st_566_1, cmd_insert_text(st_566_1, "there"))
+fp(st_566_2.doc) == "doc(p(\"hi there\"))"
 
-// [567] tier_b_prosemirror/transform/remove-mark/bold-from-bold-italic-full
-let d_567 = node('doc', [node('p', [text_marked("both", [{name: 'strong', value: true}, {name: 'em', value: true}])])])
-let st_567_0 = {doc: d_567, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_567_1 = next_state(st_567_0, cmd_toggle_mark(st_567_0, 'strong', true))
-fp(st_567_1.doc) == "doc(p(\"both\"^em))"
+// [567] tier_b_prosemirror/transform/insert-text/three-chars
+let d_567 = node('doc', [node('p', [text("ae")])])
+let st_567_0 = {doc: d_567, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1)), schema: html5_subset_schema}
+let st_567_1 = next_state(st_567_0, cmd_insert_text(st_567_0, "b"))
+let st_567_2 = next_state(st_567_1, cmd_insert_text(st_567_1, "c"))
+let st_567_3 = next_state(st_567_2, cmd_insert_text(st_567_2, "d"))
+fp(st_567_3.doc) == "doc(p(\"abcde\"))"
 
-// [568] tier_b_prosemirror/transform/remove-mark/bold-full-leaf
-let d_568 = node('doc', [node('p', [text_marked("bold", [{name: 'strong', value: true}])])])
+// [568] tier_b_prosemirror/transform/remove-mark/bold-from-bold-italic-full
+let d_568 = node('doc', [node('p', [text_marked("both", [{name: 'strong', value: true}, {name: 'em', value: true}])])])
 let st_568_0 = {doc: d_568, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
 let st_568_1 = next_state(st_568_0, cmd_toggle_mark(st_568_0, 'strong', true))
-fp(st_568_1.doc) == "doc(p(\"bold\"))"
+fp(st_568_1.doc) == "doc(p(\"both\"^em))"
 
-// [569] tier_b_prosemirror/transform/remove-mark/bold-in-heading-full
-let d_569 = node('doc', [node('h2', [text_marked("Heading", [{name: 'strong', value: true}])])])
-let st_569_0 = {doc: d_569, selection: text_selection(pos([0, 0], 0), pos([0, 0], 7)), schema: html5_subset_schema}
+// [569] tier_b_prosemirror/transform/remove-mark/bold-full-leaf
+let d_569 = node('doc', [node('p', [text_marked("bold", [{name: 'strong', value: true}])])])
+let st_569_0 = {doc: d_569, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
 let st_569_1 = next_state(st_569_0, cmd_toggle_mark(st_569_0, 'strong', true))
-fp(st_569_1.doc) == "doc(h2(\"Heading\"))"
+fp(st_569_1.doc) == "doc(p(\"bold\"))"
 
-// [570] tier_b_prosemirror/transform/remove-mark/bold-sub-at-end
-let d_570 = node('doc', [node('p', [text_marked("aabb", [{name: 'strong', value: true}])])])
-let st_570_0 = {doc: d_570, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
+// [570] tier_b_prosemirror/transform/remove-mark/bold-in-heading-full
+let d_570 = node('doc', [node('h2', [text_marked("Heading", [{name: 'strong', value: true}])])])
+let st_570_0 = {doc: d_570, selection: text_selection(pos([0, 0], 0), pos([0, 0], 7)), schema: html5_subset_schema}
 let st_570_1 = next_state(st_570_0, cmd_toggle_mark(st_570_0, 'strong', true))
-fp(st_570_1.doc) == "doc(p(\"aa\"^strong,\"bb\"))"
+fp(st_570_1.doc) == "doc(h2(\"Heading\"))"
 
-// [571] tier_b_prosemirror/transform/remove-mark/bold-sub-at-start
+// [571] tier_b_prosemirror/transform/remove-mark/bold-sub-at-end
 let d_571 = node('doc', [node('p', [text_marked("aabb", [{name: 'strong', value: true}])])])
-let st_571_0 = {doc: d_571, selection: text_selection(pos([0, 0], 0), pos([0, 0], 2)), schema: html5_subset_schema}
+let st_571_0 = {doc: d_571, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
 let st_571_1 = next_state(st_571_0, cmd_toggle_mark(st_571_0, 'strong', true))
-fp(st_571_1.doc) == "doc(p(\"aa\",\"bb\"^strong))"
+fp(st_571_1.doc) == "doc(p(\"aa\"^strong,\"bb\"))"
 
-// [572] tier_b_prosemirror/transform/remove-mark/bold-sub-range
-let d_572 = node('doc', [node('p', [text_marked("aabbcc", [{name: 'strong', value: true}])])])
-let st_572_0 = {doc: d_572, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
+// [572] tier_b_prosemirror/transform/remove-mark/bold-sub-at-start
+let d_572 = node('doc', [node('p', [text_marked("aabb", [{name: 'strong', value: true}])])])
+let st_572_0 = {doc: d_572, selection: text_selection(pos([0, 0], 0), pos([0, 0], 2)), schema: html5_subset_schema}
 let st_572_1 = next_state(st_572_0, cmd_toggle_mark(st_572_0, 'strong', true))
-fp(st_572_1.doc) == "doc(p(\"aa\"^strong,\"bb\",\"cc\"^strong))"
+fp(st_572_1.doc) == "doc(p(\"aa\",\"bb\"^strong))"
 
-// [573] tier_b_prosemirror/transform/remove-mark/code-full-leaf
-let d_573 = node('doc', [node('p', [text_marked("snippet", [{name: 'code', value: true}])])])
-let st_573_0 = {doc: d_573, selection: text_selection(pos([0, 0], 0), pos([0, 0], 7)), schema: html5_subset_schema}
-let st_573_1 = next_state(st_573_0, cmd_toggle_mark(st_573_0, 'code', true))
-fp(st_573_1.doc) == "doc(p(\"snippet\"))"
+// [573] tier_b_prosemirror/transform/remove-mark/bold-sub-range
+let d_573 = node('doc', [node('p', [text_marked("aabbcc", [{name: 'strong', value: true}])])])
+let st_573_0 = {doc: d_573, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
+let st_573_1 = next_state(st_573_0, cmd_toggle_mark(st_573_0, 'strong', true))
+fp(st_573_1.doc) == "doc(p(\"aa\"^strong,\"bb\",\"cc\"^strong))"
 
-// [574] tier_b_prosemirror/transform/remove-mark/italic-from-bold-italic-sub
-let d_574 = node('doc', [node('p', [text_marked("ppqqrr", [{name: 'strong', value: true}, {name: 'em', value: true}])])])
-let st_574_0 = {doc: d_574, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_574_1 = next_state(st_574_0, cmd_toggle_mark(st_574_0, 'em', true))
-fp(st_574_1.doc) == "doc(p(\"pp\"^strong+em,\"qq\"^strong,\"rr\"^strong+em))"
+// [574] tier_b_prosemirror/transform/remove-mark/code-full-leaf
+let d_574 = node('doc', [node('p', [text_marked("snippet", [{name: 'code', value: true}])])])
+let st_574_0 = {doc: d_574, selection: text_selection(pos([0, 0], 0), pos([0, 0], 7)), schema: html5_subset_schema}
+let st_574_1 = next_state(st_574_0, cmd_toggle_mark(st_574_0, 'code', true))
+fp(st_574_1.doc) == "doc(p(\"snippet\"))"
 
-// [575] tier_b_prosemirror/transform/remove-mark/italic-full-leaf
-let d_575 = node('doc', [node('p', [text_marked("slant", [{name: 'em', value: true}])])])
-let st_575_0 = {doc: d_575, selection: text_selection(pos([0, 0], 0), pos([0, 0], 5)), schema: html5_subset_schema}
+// [575] tier_b_prosemirror/transform/remove-mark/italic-from-bold-italic-sub
+let d_575 = node('doc', [node('p', [text_marked("ppqqrr", [{name: 'strong', value: true}, {name: 'em', value: true}])])])
+let st_575_0 = {doc: d_575, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
 let st_575_1 = next_state(st_575_0, cmd_toggle_mark(st_575_0, 'em', true))
-fp(st_575_1.doc) == "doc(p(\"slant\"))"
+fp(st_575_1.doc) == "doc(p(\"pp\"^strong+em,\"qq\"^strong,\"rr\"^strong+em))"
 
-// [576] tier_b_prosemirror/transform/remove-mark/italic-sub-range
-let d_576 = node('doc', [node('p', [text_marked("xxyyzz", [{name: 'em', value: true}])])])
-let st_576_0 = {doc: d_576, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
+// [576] tier_b_prosemirror/transform/remove-mark/italic-full-leaf
+let d_576 = node('doc', [node('p', [text_marked("slant", [{name: 'em', value: true}])])])
+let st_576_0 = {doc: d_576, selection: text_selection(pos([0, 0], 0), pos([0, 0], 5)), schema: html5_subset_schema}
 let st_576_1 = next_state(st_576_0, cmd_toggle_mark(st_576_0, 'em', true))
-fp(st_576_1.doc) == "doc(p(\"xx\"^em,\"yy\",\"zz\"^em))"
+fp(st_576_1.doc) == "doc(p(\"slant\"))"
 
-// [577] tier_b_prosemirror/transform/remove-mark/strikethrough-full-leaf
-let d_577 = node('doc', [node('p', [text_marked("gone", [{name: 's', value: true}])])])
-let st_577_0 = {doc: d_577, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_577_1 = next_state(st_577_0, cmd_toggle_mark(st_577_0, 's', true))
-fp(st_577_1.doc) == "doc(p(\"gone\"))"
+// [577] tier_b_prosemirror/transform/remove-mark/italic-sub-range
+let d_577 = node('doc', [node('p', [text_marked("xxyyzz", [{name: 'em', value: true}])])])
+let st_577_0 = {doc: d_577, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
+let st_577_1 = next_state(st_577_0, cmd_toggle_mark(st_577_0, 'em', true))
+fp(st_577_1.doc) == "doc(p(\"xx\"^em,\"yy\",\"zz\"^em))"
 
-// [578] tier_b_prosemirror/transform/remove-mark/underline-full-leaf
-let d_578 = node('doc', [node('p', [text_marked("lined", [{name: 'u', value: true}])])])
-let st_578_0 = {doc: d_578, selection: text_selection(pos([0, 0], 0), pos([0, 0], 5)), schema: html5_subset_schema}
-let st_578_1 = next_state(st_578_0, cmd_toggle_mark(st_578_0, 'u', true))
-fp(st_578_1.doc) == "doc(p(\"lined\"))"
+// [578] tier_b_prosemirror/transform/remove-mark/strikethrough-full-leaf
+let d_578 = node('doc', [node('p', [text_marked("gone", [{name: 's', value: true}])])])
+let st_578_0 = {doc: d_578, selection: text_selection(pos([0, 0], 0), pos([0, 0], 4)), schema: html5_subset_schema}
+let st_578_1 = next_state(st_578_0, cmd_toggle_mark(st_578_0, 's', true))
+fp(st_578_1.doc) == "doc(p(\"gone\"))"
 
-// [579] tier_b_prosemirror/transform/remove-mark/underline-in-list-sub
-let d_579 = node('doc', [node('ul', [node('li', [text_marked("aabbcc", [{name: 'u', value: true}])])])])
-let st_579_0 = {doc: d_579, selection: text_selection(pos([0, 0, 0], 2), pos([0, 0, 0], 4)), schema: html5_subset_schema}
+// [579] tier_b_prosemirror/transform/remove-mark/underline-full-leaf
+let d_579 = node('doc', [node('p', [text_marked("lined", [{name: 'u', value: true}])])])
+let st_579_0 = {doc: d_579, selection: text_selection(pos([0, 0], 0), pos([0, 0], 5)), schema: html5_subset_schema}
 let st_579_1 = next_state(st_579_0, cmd_toggle_mark(st_579_0, 'u', true))
-fp(st_579_1.doc) == "doc(ul(li(\"aa\"^u,\"bb\",\"cc\"^u)))"
+fp(st_579_1.doc) == "doc(p(\"lined\"))"
 
-// [580] tier_b_prosemirror/transform/replace/at-cursor-insert
-let d_580 = node('doc', [node('p', [text("abcd")])])
-let st_580_0 = {doc: d_580, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
-let st_580_1 = next_state(st_580_0, cmd_insert_text(st_580_0, "XY"))
-fp(st_580_1.doc) == "doc(p(\"abXYcd\"))"
+// [580] tier_b_prosemirror/transform/remove-mark/underline-in-list-sub
+let d_580 = node('doc', [node('ul', [node('li', [text_marked("aabbcc", [{name: 'u', value: true}])])])])
+let st_580_0 = {doc: d_580, selection: text_selection(pos([0, 0, 0], 2), pos([0, 0, 0], 4)), schema: html5_subset_schema}
+let st_580_1 = next_state(st_580_0, cmd_toggle_mark(st_580_0, 'u', true))
+fp(st_580_1.doc) == "doc(ul(li(\"aa\"^u,\"bb\",\"cc\"^u)))"
 
-// [581] tier_b_prosemirror/transform/replace/at-end
-let d_581 = node('doc', [node('p', [text("hello")])])
-let st_581_0 = {doc: d_581, selection: text_selection(pos([0, 0], 3), pos([0, 0], 5)), schema: html5_subset_schema}
-let st_581_1 = next_state(st_581_0, cmd_insert_text(st_581_0, "p!"))
-fp(st_581_1.doc) == "doc(p(\"help!\"))"
+// [581] tier_b_prosemirror/transform/replace/at-cursor-insert
+let d_581 = node('doc', [node('p', [text("abcd")])])
+let st_581_0 = {doc: d_581, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2)), schema: html5_subset_schema}
+let st_581_1 = next_state(st_581_0, cmd_insert_text(st_581_0, "XY"))
+fp(st_581_1.doc) == "doc(p(\"abXYcd\"))"
 
-// [582] tier_b_prosemirror/transform/replace/at-start
+// [582] tier_b_prosemirror/transform/replace/at-end
 let d_582 = node('doc', [node('p', [text("hello")])])
-let st_582_0 = {doc: d_582, selection: text_selection(pos([0, 0], 0), pos([0, 0], 2)), schema: html5_subset_schema}
-let st_582_1 = next_state(st_582_0, cmd_insert_text(st_582_0, "JE"))
-fp(st_582_1.doc) == "doc(p(\"JEllo\"))"
+let st_582_0 = {doc: d_582, selection: text_selection(pos([0, 0], 3), pos([0, 0], 5)), schema: html5_subset_schema}
+let st_582_1 = next_state(st_582_0, cmd_insert_text(st_582_0, "p!"))
+fp(st_582_1.doc) == "doc(p(\"help!\"))"
 
-// [583] tier_b_prosemirror/transform/replace/empty-deletes-full-leaf
-let d_583 = node('doc', [node('p', [text("keepdrop")])])
-let st_583_0 = {doc: d_583, selection: text_selection(pos([0, 0], 4), pos([0, 0], 8)), schema: html5_subset_schema}
-let st_583_1 = next_state(st_583_0, cmd_insert_text(st_583_0, ""))
-fp(st_583_1.doc) == "doc(p(\"keep\"))"
+// [583] tier_b_prosemirror/transform/replace/at-start
+let d_583 = node('doc', [node('p', [text("hello")])])
+let st_583_0 = {doc: d_583, selection: text_selection(pos([0, 0], 0), pos([0, 0], 2)), schema: html5_subset_schema}
+let st_583_1 = next_state(st_583_0, cmd_insert_text(st_583_0, "JE"))
+fp(st_583_1.doc) == "doc(p(\"JEllo\"))"
 
-// [584] tier_b_prosemirror/transform/replace/empty-deletes-range
-let d_584 = node('doc', [node('p', [text("hello")])])
-let st_584_0 = {doc: d_584, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
+// [584] tier_b_prosemirror/transform/replace/empty-deletes-full-leaf
+let d_584 = node('doc', [node('p', [text("keepdrop")])])
+let st_584_0 = {doc: d_584, selection: text_selection(pos([0, 0], 4), pos([0, 0], 8)), schema: html5_subset_schema}
 let st_584_1 = next_state(st_584_0, cmd_insert_text(st_584_0, ""))
-fp(st_584_1.doc) == "doc(p(\"heo\"))"
+fp(st_584_1.doc) == "doc(p(\"keep\"))"
 
-// [585] tier_b_prosemirror/transform/replace/full-leaf
-let d_585 = node('doc', [node('p', [text("oldtext")])])
-let st_585_0 = {doc: d_585, selection: text_selection(pos([0, 0], 0), pos([0, 0], 7)), schema: html5_subset_schema}
-let st_585_1 = next_state(st_585_0, cmd_insert_text(st_585_0, "brandnew"))
-fp(st_585_1.doc) == "doc(p(\"brandnew\"))"
+// [585] tier_b_prosemirror/transform/replace/empty-deletes-range
+let d_585 = node('doc', [node('p', [text("hello")])])
+let st_585_0 = {doc: d_585, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
+let st_585_1 = next_state(st_585_0, cmd_insert_text(st_585_0, ""))
+fp(st_585_1.doc) == "doc(p(\"heo\"))"
 
-// [586] tier_b_prosemirror/transform/replace/grow-range
-let d_586 = node('doc', [node('p', [text("hello")])])
-let st_586_0 = {doc: d_586, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_586_1 = next_state(st_586_0, cmd_insert_text(st_586_0, "LLLL"))
-fp(st_586_1.doc) == "doc(p(\"heLLLLo\"))"
+// [586] tier_b_prosemirror/transform/replace/full-leaf
+let d_586 = node('doc', [node('p', [text("oldtext")])])
+let st_586_0 = {doc: d_586, selection: text_selection(pos([0, 0], 0), pos([0, 0], 7)), schema: html5_subset_schema}
+let st_586_1 = next_state(st_586_0, cmd_insert_text(st_586_0, "brandnew"))
+fp(st_586_1.doc) == "doc(p(\"brandnew\"))"
 
-// [587] tier_b_prosemirror/transform/replace/in-heading
-let d_587 = node('doc', [node('h1', [text("My Draft Doc")])])
-let st_587_0 = {doc: d_587, selection: text_selection(pos([0, 0], 3), pos([0, 0], 8)), schema: html5_subset_schema}
-let st_587_1 = next_state(st_587_0, cmd_insert_text(st_587_0, "Final"))
-fp(st_587_1.doc) == "doc(h1(\"My Final Doc\"))"
+// [587] tier_b_prosemirror/transform/replace/grow-range
+let d_587 = node('doc', [node('p', [text("hello")])])
+let st_587_0 = {doc: d_587, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
+let st_587_1 = next_state(st_587_0, cmd_insert_text(st_587_0, "LLLL"))
+fp(st_587_1.doc) == "doc(p(\"heLLLLo\"))"
 
-// [588] tier_b_prosemirror/transform/replace/in-list-item
-let d_588 = node('doc', [node('ul', [node('li', [text("buy milk")])])])
-let st_588_0 = {doc: d_588, selection: text_selection(pos([0, 0, 0], 4), pos([0, 0, 0], 8)), schema: html5_subset_schema}
-let st_588_1 = next_state(st_588_0, cmd_insert_text(st_588_0, "eggs"))
-fp(st_588_1.doc) == "doc(ul(li(\"buy eggs\")))"
+// [588] tier_b_prosemirror/transform/replace/in-heading
+let d_588 = node('doc', [node('h1', [text("My Draft Doc")])])
+let st_588_0 = {doc: d_588, selection: text_selection(pos([0, 0], 3), pos([0, 0], 8)), schema: html5_subset_schema}
+let st_588_1 = next_state(st_588_0, cmd_insert_text(st_588_0, "Final"))
+fp(st_588_1.doc) == "doc(h1(\"My Final Doc\"))"
 
-// [589] tier_b_prosemirror/transform/replace/in-table-cell
-let d_589 = node('doc', [node('table', [node('tr', [node('td', [text("v1")])])])])
-let st_589_0 = {doc: d_589, selection: text_selection(pos([0, 0, 0, 0], 1), pos([0, 0, 0, 0], 2)), schema: html5_subset_schema}
-let st_589_1 = next_state(st_589_0, cmd_insert_text(st_589_0, "2"))
-fp(st_589_1.doc) == "doc(table(tr(td(\"v2\"))))"
+// [589] tier_b_prosemirror/transform/replace/in-list-item
+let d_589 = node('doc', [node('ul', [node('li', [text("buy milk")])])])
+let st_589_0 = {doc: d_589, selection: text_selection(pos([0, 0, 0], 4), pos([0, 0, 0], 8)), schema: html5_subset_schema}
+let st_589_1 = next_state(st_589_0, cmd_insert_text(st_589_0, "eggs"))
+fp(st_589_1.doc) == "doc(ul(li(\"buy eggs\")))"
 
-// [590] tier_b_prosemirror/transform/replace/shrink-range
-let d_590 = node('doc', [node('p', [text("hellooday")])])
-let st_590_0 = {doc: d_590, selection: text_selection(pos([0, 0], 3), pos([0, 0], 7)), schema: html5_subset_schema}
-let st_590_1 = next_state(st_590_0, cmd_insert_text(st_590_0, "X"))
-fp(st_590_1.doc) == "doc(p(\"helXay\"))"
+// [590] tier_b_prosemirror/transform/replace/in-table-cell
+let d_590 = node('doc', [node('table', [node('tr', [node('td', [text("v1")])])])])
+let st_590_0 = {doc: d_590, selection: text_selection(pos([0, 0, 0, 0], 1), pos([0, 0, 0, 0], 2)), schema: html5_subset_schema}
+let st_590_1 = next_state(st_590_0, cmd_insert_text(st_590_0, "2"))
+fp(st_590_1.doc) == "doc(table(tr(td(\"v2\"))))"
 
-// [591] tier_b_prosemirror/transform/replace/single-char
-let d_591 = node('doc', [node('p', [text("cat")])])
-let st_591_0 = {doc: d_591, selection: text_selection(pos([0, 0], 1), pos([0, 0], 2)), schema: html5_subset_schema}
-let st_591_1 = next_state(st_591_0, cmd_insert_text(st_591_0, "u"))
-fp(st_591_1.doc) == "doc(p(\"cut\"))"
+// [591] tier_b_prosemirror/transform/replace/shrink-range
+let d_591 = node('doc', [node('p', [text("hellooday")])])
+let st_591_0 = {doc: d_591, selection: text_selection(pos([0, 0], 3), pos([0, 0], 7)), schema: html5_subset_schema}
+let st_591_1 = next_state(st_591_0, cmd_insert_text(st_591_0, "X"))
+fp(st_591_1.doc) == "doc(p(\"helXay\"))"
 
-// [592] tier_b_prosemirror/transform/replace/two-for-two
-let d_592 = node('doc', [node('p', [text("hello")])])
-let st_592_0 = {doc: d_592, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_592_1 = next_state(st_592_0, cmd_insert_text(st_592_0, "LL"))
-fp(st_592_1.doc) == "doc(p(\"heLLo\"))"
+// [592] tier_b_prosemirror/transform/replace/single-char
+let d_592 = node('doc', [node('p', [text("cat")])])
+let st_592_0 = {doc: d_592, selection: text_selection(pos([0, 0], 1), pos([0, 0], 2)), schema: html5_subset_schema}
+let st_592_1 = next_state(st_592_0, cmd_insert_text(st_592_0, "u"))
+fp(st_592_1.doc) == "doc(p(\"cut\"))"
 
-// [593] tier_b_prosemirror/transform/replace/within-bold-leaf
-let d_593 = node('doc', [node('p', [text_marked("foobarbaz", [{name: 'strong', value: true}])])])
-let st_593_0 = {doc: d_593, selection: text_selection(pos([0, 0], 3), pos([0, 0], 6)), schema: html5_subset_schema}
-let st_593_1 = next_state(st_593_0, cmd_insert_text(st_593_0, "QUX"))
-fp(st_593_1.doc) == "doc(p(\"fooQUXbaz\"^strong))"
+// [593] tier_b_prosemirror/transform/replace/two-for-two
+let d_593 = node('doc', [node('p', [text("hello")])])
+let st_593_0 = {doc: d_593, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4)), schema: html5_subset_schema}
+let st_593_1 = next_state(st_593_0, cmd_insert_text(st_593_0, "LL"))
+fp(st_593_1.doc) == "doc(p(\"heLLo\"))"
 
-// [594] tier_b_prosemirror/transform/replace/within-italic-full
-let d_594 = node('doc', [node('p', [text_marked("old", [{name: 'em', value: true}])])])
-let st_594_0 = {doc: d_594, selection: text_selection(pos([0, 0], 0), pos([0, 0], 3)), schema: html5_subset_schema}
-let st_594_1 = next_state(st_594_0, cmd_insert_text(st_594_0, "new"))
-fp(st_594_1.doc) == "doc(p(\"new\"^em))"
+// [594] tier_b_prosemirror/transform/replace/within-bold-leaf
+let d_594 = node('doc', [node('p', [text_marked("foobarbaz", [{name: 'strong', value: true}])])])
+let st_594_0 = {doc: d_594, selection: text_selection(pos([0, 0], 3), pos([0, 0], 6)), schema: html5_subset_schema}
+let st_594_1 = next_state(st_594_0, cmd_insert_text(st_594_0, "QUX"))
+fp(st_594_1.doc) == "doc(p(\"fooQUXbaz\"^strong))"
 
-// [595] tier_b_prosemirror/transform/replace/word-with-phrase
-let d_595 = node('doc', [node('p', [text("the cat sat")])])
-let st_595_0 = {doc: d_595, selection: text_selection(pos([0, 0], 4), pos([0, 0], 7)), schema: html5_subset_schema}
-let st_595_1 = next_state(st_595_0, cmd_insert_text(st_595_0, "big dog"))
-fp(st_595_1.doc) == "doc(p(\"the big dog sat\"))"
+// [595] tier_b_prosemirror/transform/replace/within-italic-full
+let d_595 = node('doc', [node('p', [text_marked("old", [{name: 'em', value: true}])])])
+let st_595_0 = {doc: d_595, selection: text_selection(pos([0, 0], 0), pos([0, 0], 3)), schema: html5_subset_schema}
+let st_595_1 = next_state(st_595_0, cmd_insert_text(st_595_0, "new"))
+fp(st_595_1.doc) == "doc(p(\"new\"^em))"
 
-// [596] tier_b_prosemirror/transform/set-block-type/h1-to-p
-let d_596 = node('doc', [node('h1', [text("was-heading")])])
-let st_596_0 = {doc: d_596, selection: text_selection(pos([0, 0], 11), pos([0, 0], 11)), schema: html5_subset_schema}
-let st_596_1 = next_state(st_596_0, cmd_set_block_type(st_596_0, 'p'))
-fp(st_596_1.doc) == "doc(p(\"was-heading\"))"
+// [596] tier_b_prosemirror/transform/replace/word-with-phrase
+let d_596 = node('doc', [node('p', [text("the cat sat")])])
+let st_596_0 = {doc: d_596, selection: text_selection(pos([0, 0], 4), pos([0, 0], 7)), schema: html5_subset_schema}
+let st_596_1 = next_state(st_596_0, cmd_insert_text(st_596_0, "big dog"))
+fp(st_596_1.doc) == "doc(p(\"the big dog sat\"))"
 
-// [597] tier_b_prosemirror/transform/set-block-type/heading
-let d_597 = node('doc', [node('p', [text("important note")])])
-let st_597_0 = {doc: d_597, selection: text_selection(pos([0, 0], 14), pos([0, 0], 14)), schema: html5_subset_schema}
-let st_597_1 = next_state(st_597_0, cmd_set_block_type(st_597_0, 'h2'))
-fp(st_597_1.doc) == "doc(h2(\"important note\"))"
+// [597] tier_b_prosemirror/transform/set-block-type/h1-to-p
+let d_597 = node('doc', [node('h1', [text("was-heading")])])
+let st_597_0 = {doc: d_597, selection: text_selection(pos([0, 0], 11), pos([0, 0], 11)), schema: html5_subset_schema}
+let st_597_1 = next_state(st_597_0, cmd_set_block_type(st_597_0, 'p'))
+fp(st_597_1.doc) == "doc(p(\"was-heading\"))"
 
-// [598] tier_b_prosemirror/transform/set-type/h1-to-p
-let d_598 = node('doc', [node('h1', [text("was-heading")])])
-let st_598_0 = {doc: d_598, selection: text_selection(pos([0, 0], 11), pos([0, 0], 11)), schema: html5_subset_schema}
-let st_598_1 = next_state(st_598_0, cmd_set_block_type(st_598_0, 'p'))
-fp(st_598_1.doc) == "doc(p(\"was-heading\"))"
+// [598] tier_b_prosemirror/transform/set-block-type/heading
+let d_598 = node('doc', [node('p', [text("important note")])])
+let st_598_0 = {doc: d_598, selection: text_selection(pos([0, 0], 14), pos([0, 0], 14)), schema: html5_subset_schema}
+let st_598_1 = next_state(st_598_0, cmd_set_block_type(st_598_0, 'h2'))
+fp(st_598_1.doc) == "doc(h2(\"important note\"))"
 
-// [599] tier_b_prosemirror/transform/set-type/h2-to-h4
-let d_599 = node('doc', [node('h2', [text("retag")])])
-let st_599_0 = {doc: d_599, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5)), schema: html5_subset_schema}
-let st_599_1 = next_state(st_599_0, cmd_set_block_type(st_599_0, 'h4'))
-fp(st_599_1.doc) == "doc(h4(\"retag\"))"
+// [599] tier_b_prosemirror/transform/set-type/h1-to-p
+let d_599 = node('doc', [node('h1', [text("was-heading")])])
+let st_599_0 = {doc: d_599, selection: text_selection(pos([0, 0], 11), pos([0, 0], 11)), schema: html5_subset_schema}
+let st_599_1 = next_state(st_599_0, cmd_set_block_type(st_599_0, 'p'))
+fp(st_599_1.doc) == "doc(p(\"was-heading\"))"
 
-// [600] tier_b_prosemirror/transform/set-type/h3-to-h6
-let d_600 = node('doc', [node('h3', [text("deep")])])
-let st_600_0 = {doc: d_600, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
-let st_600_1 = next_state(st_600_0, cmd_set_block_type(st_600_0, 'h6'))
-fp(st_600_1.doc) == "doc(h6(\"deep\"))"
+// [600] tier_b_prosemirror/transform/set-type/h2-to-h4
+let d_600 = node('doc', [node('h2', [text("retag")])])
+let st_600_0 = {doc: d_600, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5)), schema: html5_subset_schema}
+let st_600_1 = next_state(st_600_0, cmd_set_block_type(st_600_0, 'h4'))
+fp(st_600_1.doc) == "doc(h4(\"retag\"))"
 
-// [601] tier_b_prosemirror/transform/set-type/p-to-h1
-let d_601 = node('doc', [node('p', [text("title")])])
-let st_601_0 = {doc: d_601, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5)), schema: html5_subset_schema}
-let st_601_1 = next_state(st_601_0, cmd_set_block_type(st_601_0, 'h1'))
-fp(st_601_1.doc) == "doc(h1(\"title\"))"
+// [601] tier_b_prosemirror/transform/set-type/h3-to-h6
+let d_601 = node('doc', [node('h3', [text("deep")])])
+let st_601_0 = {doc: d_601, selection: text_selection(pos([0, 0], 4), pos([0, 0], 4)), schema: html5_subset_schema}
+let st_601_1 = next_state(st_601_0, cmd_set_block_type(st_601_0, 'h6'))
+fp(st_601_1.doc) == "doc(h6(\"deep\"))"
 
-// [602] tier_b_prosemirror/transform/set-type/p-to-h1-range-sel
-let d_602 = node('doc', [node('p', [text("headline")])])
-let st_602_0 = {doc: d_602, selection: text_selection(pos([0, 0], 0), pos([0, 0], 8)), schema: html5_subset_schema}
+// [602] tier_b_prosemirror/transform/set-type/p-to-h1
+let d_602 = node('doc', [node('p', [text("title")])])
+let st_602_0 = {doc: d_602, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5)), schema: html5_subset_schema}
 let st_602_1 = next_state(st_602_0, cmd_set_block_type(st_602_0, 'h1'))
-fp(st_602_1.doc) == "doc(h1(\"headline\"))"
+fp(st_602_1.doc) == "doc(h1(\"title\"))"
 
-// [603] tier_b_prosemirror/transform/set-type/p-to-h2
-let d_603 = node('doc', [node('p', [text("section")])])
-let st_603_0 = {doc: d_603, selection: text_selection(pos([0, 0], 7), pos([0, 0], 7)), schema: html5_subset_schema}
-let st_603_1 = next_state(st_603_0, cmd_set_block_type(st_603_0, 'h2'))
-fp(st_603_1.doc) == "doc(h2(\"section\"))"
+// [603] tier_b_prosemirror/transform/set-type/p-to-h1-range-sel
+let d_603 = node('doc', [node('p', [text("headline")])])
+let st_603_0 = {doc: d_603, selection: text_selection(pos([0, 0], 0), pos([0, 0], 8)), schema: html5_subset_schema}
+let st_603_1 = next_state(st_603_0, cmd_set_block_type(st_603_0, 'h1'))
+fp(st_603_1.doc) == "doc(h1(\"headline\"))"
 
-// [604] tier_b_prosemirror/transform/set-type/p-to-h2-keeps-marks
-let d_604 = node('doc', [node('p', [text("plain "), text_marked("bold", [{name: 'strong', value: true}])])])
-let st_604_0 = {doc: d_604, selection: text_selection(pos([0, 1], 4), pos([0, 1], 4)), schema: html5_subset_schema}
+// [604] tier_b_prosemirror/transform/set-type/p-to-h2
+let d_604 = node('doc', [node('p', [text("section")])])
+let st_604_0 = {doc: d_604, selection: text_selection(pos([0, 0], 7), pos([0, 0], 7)), schema: html5_subset_schema}
 let st_604_1 = next_state(st_604_0, cmd_set_block_type(st_604_0, 'h2'))
-fp(st_604_1.doc) == "doc(h2(\"plain \",\"bold\"^strong))"
+fp(st_604_1.doc) == "doc(h2(\"section\"))"
 
-// [605] tier_b_prosemirror/transform/set-type/p-to-h3
-let d_605 = node('doc', [node('p', [text("sub")])])
-let st_605_0 = {doc: d_605, selection: text_selection(pos([0, 0], 3), pos([0, 0], 3)), schema: html5_subset_schema}
-let st_605_1 = next_state(st_605_0, cmd_set_block_type(st_605_0, 'h3'))
-fp(st_605_1.doc) == "doc(h3(\"sub\"))"
+// [605] tier_b_prosemirror/transform/set-type/p-to-h2-keeps-marks
+let d_605 = node('doc', [node('p', [text("plain "), text_marked("bold", [{name: 'strong', value: true}])])])
+let st_605_0 = {doc: d_605, selection: text_selection(pos([0, 1], 4), pos([0, 1], 4)), schema: html5_subset_schema}
+let st_605_1 = next_state(st_605_0, cmd_set_block_type(st_605_0, 'h2'))
+fp(st_605_1.doc) == "doc(h2(\"plain \",\"bold\"^strong))"
+
+// [606] tier_b_prosemirror/transform/set-type/p-to-h3
+let d_606 = node('doc', [node('p', [text("sub")])])
+let st_606_0 = {doc: d_606, selection: text_selection(pos([0, 0], 3), pos([0, 0], 3)), schema: html5_subset_schema}
+let st_606_1 = next_state(st_606_0, cmd_set_block_type(st_606_0, 'h3'))
+fp(st_606_1.doc) == "doc(h3(\"sub\"))"
