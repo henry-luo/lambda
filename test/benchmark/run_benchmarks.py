@@ -571,6 +571,7 @@ def time_run_single(b, engines, num_runs, timeout_s, results):
         results[suite] = {}
     if name not in results[suite]:
         results[suite][name] = {}
+    results[suite][name]["category"] = b["category"]
 
     row = {}
 
