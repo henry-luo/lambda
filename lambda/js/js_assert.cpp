@@ -12,6 +12,7 @@
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/strbuf.h"
 
 #include <cstring>
 #include <cstdio>
@@ -20,6 +21,8 @@ static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
 }
 
+extern "C" Item js_util_inspect(Item obj_item, Item options_item);
+
 static Item js_assert_noop(void) {
     return make_js_undefined();
 }
@@ -27,6 +30,11 @@ static Item js_assert_noop(void) {
 static Item assert_make_string(const char* str) {
     if (!str) return ItemNull;
     String* s = heap_create_name(str, strlen(str));
+    return (Item){.item = s2it(s)};
+}
+
+static Item assert_make_string_n(const char* str, size_t len) {
+    String* s = heap_create_name(str ? str : "", len);
     return (Item){.item = s2it(s)};
 }
 
@@ -255,7 +263,7 @@ extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item messa
             buf[len] = '\0';
             return throw_assertion_error(buf);
         }
-        return throw_assertion_error("Missing expected exception");
+        return throw_assertion_error("Missing expected exception.");
     }
 
     // fn threw — get the thrown value
@@ -363,33 +371,48 @@ extern "C" Item js_assert_module_doesNotThrow(Item fn, Item error_cls, Item mess
 
 // assert.ifError(value) — throw if value is truthy
 // Per Node.js spec: throws AssertionError with message "ifError got unwanted exception: <msg>"
+static Item js_assert_ifError_message_detail(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_STRING) return value;
+
+    if (type == LMD_TYPE_MAP) {
+        bool is_error = js_class_is_error_like(js_class_id(value));
+        Item msg_val = js_property_get(value, assert_make_string("message"));
+        if (get_type_id(msg_val) == LMD_TYPE_STRING) {
+            String* msg = it2s(msg_val);
+            if (!is_error || (msg && msg->len > 0)) return msg_val;
+        }
+        if (is_error) return js_to_string(value);
+    }
+
+    Item inspected = js_util_inspect(value, make_js_undefined());
+    if (get_type_id(inspected) == LMD_TYPE_STRING) return inspected;
+    return js_to_string(value);
+}
+
+static Item js_assert_ifError_message(Item value) {
+    Item detail = js_assert_ifError_message_detail(value);
+    String* ds = get_type_id(detail) == LMD_TYPE_STRING ? it2s(detail) : NULL;
+
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, "ifError got unwanted exception: ");
+    if (ds) strbuf_append_str_n(sb, ds->chars, ds->len);
+    Item message = assert_make_string_n(sb->str, sb->length);
+    strbuf_free(sb);
+    return message;
+}
+
 extern "C" Item js_assert_ifError(Item value) {
     // ifError throws for any value that is NOT null or undefined
     TypeId tid = get_type_id(value);
     if (value.item != 0 && tid != LMD_TYPE_NULL && tid != LMD_TYPE_UNDEFINED) {
         extern void js_throw_value(Item error);
-        extern Item js_property_get(Item obj, Item key);
         extern Item js_property_set(Item obj, Item key, Item value);
-        extern Item js_to_string(Item val);
         extern Item js_new_error_with_name(Item type_name, Item message);
-
-        // Build message: "ifError got unwanted exception: <original message>"
-        const char* orig_msg = "";
-        if (get_type_id(value) == LMD_TYPE_MAP) {
-            Item msg_key = assert_make_string("message");
-            Item msg_val = js_property_get(value, msg_key);
-            if (get_type_id(msg_val) == LMD_TYPE_STRING) {
-                orig_msg = it2s(msg_val)->chars;
-            }
-        } else if (get_type_id(value) == LMD_TYPE_STRING) {
-            orig_msg = it2s(value)->chars;
-        }
-        char buf[512];
-        snprintf(buf, sizeof(buf), "ifError got unwanted exception: %s", orig_msg);
 
         // Create AssertionError with proper properties
         Item type_name = assert_make_string("AssertionError");
-        Item msg_item = assert_make_string(buf);
+        Item msg_item = js_assert_ifError_message(value);
         Item error = js_new_error_with_name(type_name, msg_item);
         js_property_set(error, assert_make_string("code"), assert_make_string("ERR_ASSERTION"));
         js_property_set(error, assert_make_string("name"), assert_make_string("AssertionError"));
@@ -397,6 +420,7 @@ extern "C" Item js_assert_ifError(Item value) {
         js_property_set(error, assert_make_string("expected"), ItemNull);
         js_property_set(error, assert_make_string("operator"), assert_make_string("ifError"));
         js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(false)});
+        js_assert_attach_assertion_error_prototype(error);
         js_throw_value(error);
     }
     return make_js_undefined();

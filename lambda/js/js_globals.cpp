@@ -45,6 +45,7 @@ extern double js_get_number(Item value);
 #include "../../lib/hex.h"
 #include "../../lib/file.h"
 #include "../../lib/mem.h"
+#include "../../lib/uv_loop.h"
 #include <cstring>
 #include <cstdio>
 #include <cmath>
@@ -3212,6 +3213,8 @@ extern "C" Item js_process_setUncaughtExceptionCaptureCallback(Item fn) {
 
 extern "C" Item js_net_get_active_handles(void);
 extern "C" Item js_net_get_active_resources_info(void);
+extern "C" Item js_json_parse(Item str_item);
+extern "C" Item js_json_stringify(Item value);
 
 extern "C" Item js_process_getActiveHandles(void) {
     return js_net_get_active_handles();
@@ -3228,17 +3231,180 @@ extern "C" Item js_process_setSourceMapsEnabled(Item val) {
     return make_js_undefined();
 }
 
+typedef struct JsProcessIpcWriteReq {
+    uv_write_t req;
+    char* data;
+} JsProcessIpcWriteReq;
+
+static uv_pipe_t js_process_ipc_pipe;
+static bool js_process_ipc_active = false;
+static bool js_process_ipc_closing = false;
+static bool js_process_ipc_disconnect_emitted = false;
+static char* js_process_ipc_buf = NULL;
+static size_t js_process_ipc_len = 0;
+static size_t js_process_ipc_cap = 0;
+
+static void js_process_set_connected(bool connected) {
+    if (js_process_object.item == ITEM_NULL) return;
+    js_property_set(js_process_object,
+        (Item){.item = s2it(heap_create_name("connected", 9))},
+        (Item){.item = b2it(connected)});
+}
+
+static void js_process_ipc_emit_disconnect_once(void) {
+    if (js_process_ipc_disconnect_emitted) return;
+    js_process_ipc_disconnect_emitted = true;
+    js_process_set_connected(false);
+    js_process_emit((Item){.item = s2it(heap_create_name("disconnect", 10))}, make_js_undefined());
+}
+
+static void js_process_ipc_close_cb(uv_handle_t* handle) {
+    (void)handle;
+    js_process_ipc_active = false;
+    js_process_ipc_closing = false;
+    if (js_process_ipc_buf) {
+        mem_free(js_process_ipc_buf);
+        js_process_ipc_buf = NULL;
+    }
+    js_process_ipc_len = 0;
+    js_process_ipc_cap = 0;
+}
+
+static void js_process_ipc_write_cb(uv_write_t* req, int status) {
+    JsProcessIpcWriteReq* wr = (JsProcessIpcWriteReq*)req;
+    if (wr->data) mem_free(wr->data);
+    mem_free(wr);
+    (void)status;
+}
+
+static void js_process_ipc_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
+    (void)handle;
+    buf->base = (char*)mem_alloc(suggested_size, MEM_CAT_JS_RUNTIME);
+    buf->len = buf->base ? suggested_size : 0;
+}
+
+static void js_process_ipc_handle_line(const char* chars, int len) {
+    if (!chars || len <= 0) return;
+    Item json = (Item){.item = s2it(heap_create_name(chars, len))};
+    Item message = js_json_parse(json);
+    if (js_check_exception()) return;
+    js_process_emit((Item){.item = s2it(heap_create_name("message", 7))}, message);
+}
+
+static void js_process_ipc_consume_lines(void) {
+    if (!js_process_ipc_buf || js_process_ipc_len == 0) return;
+    size_t start = 0;
+    for (size_t i = 0; i < js_process_ipc_len; i++) {
+        if (js_process_ipc_buf[i] != '\n') continue;
+        size_t line_len = i - start;
+        if (line_len > 0 && js_process_ipc_buf[start + line_len - 1] == '\r') line_len--;
+        js_process_ipc_handle_line(js_process_ipc_buf + start, (int)line_len);
+        start = i + 1;
+    }
+    if (start > 0) {
+        size_t remaining = js_process_ipc_len - start;
+        if (remaining > 0) memmove(js_process_ipc_buf, js_process_ipc_buf + start, remaining);
+        js_process_ipc_len = remaining;
+    }
+}
+
+static void js_process_ipc_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
+    (void)stream;
+    if (nread > 0) {
+        size_t needed = js_process_ipc_len + (size_t)nread + 1;
+        if (needed > js_process_ipc_cap) {
+            size_t new_cap = js_process_ipc_cap ? js_process_ipc_cap * 2 : 1024;
+            while (new_cap < needed) new_cap *= 2;
+            char* nb = (char*)mem_realloc(js_process_ipc_buf, new_cap, MEM_CAT_JS_RUNTIME);
+            if (nb) {
+                js_process_ipc_buf = nb;
+                js_process_ipc_cap = new_cap;
+            }
+        }
+        if (js_process_ipc_buf && js_process_ipc_cap >= needed) {
+            memcpy(js_process_ipc_buf + js_process_ipc_len, buf->base, (size_t)nread);
+            js_process_ipc_len += (size_t)nread;
+            js_process_ipc_buf[js_process_ipc_len] = '\0';
+            js_process_ipc_consume_lines();
+        }
+    }
+    if (buf->base) mem_free(buf->base);
+    if (nread < 0 && js_process_ipc_active && !js_process_ipc_closing) {
+        js_process_ipc_closing = true;
+        js_process_ipc_emit_disconnect_once();
+        uv_close((uv_handle_t*)&js_process_ipc_pipe, js_process_ipc_close_cb);
+    }
+}
+
+static void js_process_ipc_init_from_env(void) {
+    if (js_process_ipc_active || js_process_ipc_closing) return;
+    const char* ipc = getenv("LAMBDA_JS_IPC");
+    const char* fd_text = getenv("LAMBDA_JS_IPC_FD");
+    if (!ipc || !fd_text) return;
+    int fd = atoi(fd_text);
+    if (fd < 0) return;
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) {
+        log_error("process_ipc: event loop not initialized");
+        return;
+    }
+    uv_pipe_init(loop, &js_process_ipc_pipe, 0);
+    int r = uv_pipe_open(&js_process_ipc_pipe, fd);
+    if (r != 0) {
+        log_error("process_ipc: failed to open fd %d: %s", fd, uv_strerror(r));
+        return;
+    }
+    js_process_ipc_pipe.data = NULL;
+    js_process_ipc_active = true;
+    js_process_ipc_closing = false;
+    js_process_ipc_disconnect_emitted = false;
+    js_process_set_connected(true);
+    r = uv_read_start((uv_stream_t*)&js_process_ipc_pipe, js_process_ipc_alloc_cb, js_process_ipc_read_cb);
+    if (r != 0) {
+        log_error("process_ipc: failed to start read: %s", uv_strerror(r));
+        js_process_ipc_active = false;
+        js_process_ipc_closing = true;
+        uv_close((uv_handle_t*)&js_process_ipc_pipe, js_process_ipc_close_cb);
+    }
+}
+
 extern "C" Item js_process_send(Item msg) {
+    if (!js_process_ipc_active || js_process_ipc_closing) return (Item){.item = b2it(false)};
+    Item json = js_json_stringify(msg);
+    if (js_check_exception() || get_type_id(json) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+    String* s = it2s(json);
+    if (!s) return (Item){.item = b2it(false)};
+    size_t len = s->len + 1;
+    JsProcessIpcWriteReq* wr = (JsProcessIpcWriteReq*)mem_calloc(1, sizeof(JsProcessIpcWriteReq), MEM_CAT_JS_RUNTIME);
+    if (!wr) return (Item){.item = b2it(false)};
+    wr->data = (char*)mem_alloc(len, MEM_CAT_JS_RUNTIME);
+    if (!wr->data) {
+        mem_free(wr);
+        return (Item){.item = b2it(false)};
+    }
+    memcpy(wr->data, s->chars, s->len);
+    wr->data[s->len] = '\n';
+    uv_buf_t buf = uv_buf_init(wr->data, (unsigned int)len);
+    int r = uv_write(&wr->req, (uv_stream_t*)&js_process_ipc_pipe, &buf, 1, js_process_ipc_write_cb);
+    if (r == 0) return (Item){.item = b2it(true)};
+    mem_free(wr->data);
+    mem_free(wr);
+    log_error("process_ipc: write failed: %s", uv_strerror(r));
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item js_process_send_compat(Item msg) {
     (void)msg;
     return (Item){.item = b2it(true)};
 }
 
 extern "C" Item js_process_disconnect(void) {
-    if (js_process_object.item != ITEM_NULL) {
-        js_property_set(js_process_object,
-            (Item){.item = s2it(heap_create_name("connected", 9))},
-            (Item){.item = b2it(false)});
+    js_process_set_connected(false);
+    if (js_process_ipc_active && !js_process_ipc_closing) {
+        js_process_ipc_closing = true;
+        uv_close((uv_handle_t*)&js_process_ipc_pipe, js_process_ipc_close_cb);
     }
+    js_process_ipc_emit_disconnect_once();
     return make_js_undefined();
 }
 
@@ -3315,6 +3481,7 @@ extern "C" Item js_get_process_object_value(void) {
             js_property_set(js_process_object,
                 (Item){.item = s2it(heap_create_name("connected", 9))},
                 (Item){.item = b2it(true)});
+            js_process_ipc_init_from_env();
         }
         js_process_set_method(js_process_object, "on", (void*)js_process_on, 2);
         js_process_set_method(js_process_object, "addListener", (void*)js_process_on, 2);
@@ -3599,8 +3766,8 @@ extern "C" Item js_setImmediate(Item callback) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"callback\" argument must be of type function.");
     }
-    extern Item js_setTimeout(Item cb, Item delay);
-    return js_setTimeout(callback, (Item){.item = i2it(0)});
+    extern Item js_setImmediate_timer(Item cb);
+    return js_setImmediate_timer(callback);
 }
 
 // setImmediate with extra args passed as a JS array (used by transpiler)
@@ -3610,8 +3777,8 @@ extern "C" Item js_setImmediate_with_args(Item callback, Item args_array) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"callback\" argument must be of type function.");
     }
-    extern Item js_setTimeout_args(Item cb, Item delay, Item args_array);
-    return js_setTimeout_args(callback, (Item){.item = i2it(0)}, args_array);
+    extern Item js_setImmediate_timer_args(Item cb, Item args_array);
+    return js_setImmediate_timer_args(callback, args_array);
 }
 
 // clearImmediate(id) — cancel a setImmediate
@@ -14088,6 +14255,15 @@ extern "C" void js_globals_batch_reset() {
     js_process_argv_items = (Item){.item = ITEM_NULL};
     js_process_exec_argv_items = (Item){.item = ITEM_NULL};
     js_process_object = (Item){.item = ITEM_NULL};
+    js_process_ipc_active = false;
+    js_process_ipc_closing = false;
+    js_process_ipc_disconnect_emitted = false;
+    if (js_process_ipc_buf) {
+        mem_free(js_process_ipc_buf);
+        js_process_ipc_buf = NULL;
+    }
+    js_process_ipc_len = 0;
+    js_process_ipc_cap = 0;
     js_process_argc_raw = 0;
     js_process_exec_argc_raw = 0;
     js_process_argv_raw = NULL;
@@ -16044,6 +16220,8 @@ enum JsConstructorId {
     JS_CTOR_INPUT_EVENT,
     JS_CTOR_POINTER_EVENT,
     JS_CTOR_STATIC_RANGE,
+    JS_CTOR_TIMEOUT,
+    JS_CTOR_IMMEDIATE,
     JS_CTOR_MAX
 };
 
@@ -16840,6 +17018,8 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"InputEvent", 10, JS_CTOR_INPUT_EVENT, 2},
         {"PointerEvent", 12, JS_CTOR_POINTER_EVENT, 2},
         {"StaticRange", 11, JS_CTOR_STATIC_RANGE, 1},
+        {"Timeout", 7, JS_CTOR_TIMEOUT, 0},
+        {"Immediate", 9, JS_CTOR_IMMEDIATE, 0},
         {NULL, 0, 0, 0}
     };
 
@@ -16895,6 +17075,8 @@ static bool js_intrinsic_proto_ctor_name_for_class(JsClass cls, const char** out
         case JS_CLASS_INPUT_EVENT:           name = "InputEvent"; len = 10; break;
         case JS_CLASS_POINTER_EVENT:         name = "PointerEvent"; len = 12; break;
         case JS_CLASS_STATIC_RANGE:          name = "StaticRange"; len = 11; break;
+        case JS_CLASS_TIMEOUT:               name = "Timeout"; len = 7; break;
+        case JS_CLASS_IMMEDIATE:             name = "Immediate"; len = 9; break;
         default: break;
     }
     if (!name) return false;
