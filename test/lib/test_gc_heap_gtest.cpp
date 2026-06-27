@@ -986,6 +986,77 @@ TEST_F(GCHeapTest, VMapNoCallbacksSafe) {
     free(fake_data);
 }
 
+// ============================================================================
+// 11. Error GC Tracing and Finalization
+// ============================================================================
+
+static int s_error_trace_calls = 0;
+static void* s_error_trace_last_data = nullptr;
+static gc_heap_t* s_error_trace_last_gc = nullptr;
+static int s_error_destroy_calls = 0;
+static void* s_error_destroy_last_data = nullptr;
+
+static uint64_t error_item(void* ptr) {
+    return ((uint64_t)LMD_TYPE_ERROR << 56) |
+           ((uint64_t)(uintptr_t)ptr & 0x00FFFFFFFFFFFFFFULL);
+}
+
+static void test_error_trace(void* data, gc_heap_t* gc) {
+    s_error_trace_calls++;
+    s_error_trace_last_data = data;
+    s_error_trace_last_gc = gc;
+}
+
+static void test_error_destroy(void* data) {
+    s_error_destroy_calls++;
+    s_error_destroy_last_data = data;
+}
+
+static void reset_error_test_state() {
+    s_error_trace_calls = 0;
+    s_error_trace_last_data = nullptr;
+    s_error_trace_last_gc = nullptr;
+    s_error_destroy_calls = 0;
+    s_error_destroy_last_data = nullptr;
+}
+
+TEST_F(GCHeapTest, ErrorTaggedPointerRootKeepsObjectAlive) {
+    reset_error_test_state();
+    gc->error_trace = test_error_trace;
+    gc->error_destroy = test_error_destroy;
+
+    void* error = gc_heap_calloc(gc, 32, LMD_TYPE_ERROR);
+    ASSERT_NE(error, nullptr);
+    uint64_t root = error_item(error);
+    gc_register_root(gc, &root);
+
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    EXPECT_EQ(gc->object_count, 1u);
+    EXPECT_EQ(s_error_trace_calls, 1);
+    EXPECT_EQ(s_error_trace_last_data, error);
+    EXPECT_EQ(s_error_trace_last_gc, gc);
+    EXPECT_EQ(s_error_destroy_calls, 0);
+
+    gc_unregister_root(gc, &root);
+}
+
+TEST_F(GCHeapTest, ErrorDestroyCallbackOnDead) {
+    reset_error_test_state();
+    gc->error_trace = test_error_trace;
+    gc->error_destroy = test_error_destroy;
+
+    void* error = gc_heap_calloc(gc, 32, LMD_TYPE_ERROR);
+    ASSERT_NE(error, nullptr);
+
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    EXPECT_EQ(gc->object_count, 0u);
+    EXPECT_EQ(s_error_trace_calls, 0);
+    EXPECT_EQ(s_error_destroy_calls, 1);
+    EXPECT_EQ(s_error_destroy_last_data, error);
+}
+
 TEST_F(GCHeapTest, NativeSeenSetDeduplicatesPointers) {
     gc_native_seen_t seen;
     gc_native_seen_init(&seen);

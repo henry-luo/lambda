@@ -366,6 +366,8 @@ gc_heap_t* gc_heap_create_with_pool(Pool* pool) {
     // VMap callbacks (set by runtime via lambda-mem.cpp)
     gc->vmap_trace = NULL;
     gc->vmap_destroy = NULL;
+    gc->error_trace = NULL;
+    gc->error_destroy = NULL;
     // Initialize bump-pointer allocator
     gc->bump_blocks = NULL;
     gc->bump_cursor = NULL;
@@ -763,7 +765,8 @@ static gc_header_t* mark_stack_pop(gc_heap_t* gc) {
 //     Stored as raw pointer (item.item = (uint64_t)pointer).
 //     On 64-bit platforms, heap pointer high byte is 0 → _type_id = 0.
 //     Type is determined by reading Container.type_id at the struct's first byte.
-//   - Error/Any: _type_id = 25 or 24, lower bits = 0 → no pointer.
+//   - Error: _type_id = LMD_TYPE_ERROR, lower 56 bits may hold LambdaError*.
+//   - Any: _type_id = LMD_TYPE_ANY, lower bits = 0 → no pointer.
 static void* item_to_ptr(uint64_t item) {
     if (item == 0) return NULL;  // all-zero value
 
@@ -780,6 +783,10 @@ static void* item_to_ptr(uint64_t item) {
     // tags 4-11: tagged pointer types (Int64, Float, Decimal, DateTime, String, etc.)
     // mask off the tag byte in the upper 8 bits to get the actual pointer
     if (tag >= LMD_TYPE_INT64_ && tag <= LMD_TYPE_BINARY_) {
+        return (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
+    }
+
+    if (tag == LMD_TYPE_ERROR_) {
         return (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
     }
 
@@ -895,6 +902,13 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     case LMD_TYPE_PATH_:
         break;
 
+    case LMD_TYPE_ERROR_: {
+        if (gc->error_trace) {
+            gc->error_trace(obj, gc);
+        }
+        break;
+    }
+
     case LMD_TYPE_ARRAY_NUM_: {
         // Owned 1-D arrays have no outgoing pointers; views (is_view bit 5) hold
         // a base reference via the shape side-table in `extra` (offset 24).
@@ -986,7 +1000,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                 // only trace Item-typed fields (containers, strings, etc.)
                 // Skip inline values (bool, int) which don't hold GC pointers
                 if (field_type_id >= LMD_TYPE_INT64_ && field_type_id != LMD_TYPE_BOOL_
-                    && field_type_id != LMD_TYPE_UNDEFINED_ && field_type_id != LMD_TYPE_ERROR_) {
+                    && field_type_id != LMD_TYPE_UNDEFINED_) {
                     if (byte_offset >= 0 && byte_offset < byte_size) {
                         void* field_ptr = (uint8_t*)data_ptr + byte_offset;
 
@@ -1381,6 +1395,11 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
         if (data && gc->vmap_destroy) {
             gc->vmap_destroy(data);
             *(void**)(p + 8) = NULL;  // prevent double-free at context teardown
+        }
+    }
+    else if (tag == LMD_TYPE_ERROR_) {
+        if (gc->error_destroy) {
+            gc->error_destroy(obj);
         }
     }
     else if (tag == LMD_TYPE_MAP_) {

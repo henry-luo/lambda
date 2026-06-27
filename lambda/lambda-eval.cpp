@@ -137,6 +137,17 @@ Item fn_error(Item message) {
         }
     }
     set_runtime_error(ERR_USER_ERROR, "%s", msg);
+    if (context && context->heap && context->heap->gc) {
+        SourceLocation loc = {0};
+        if (context->current_file) {
+            loc.file = context->current_file;
+        }
+        LambdaError* error = err_create_heap(ERR_USER_ERROR, msg, &loc);
+        if (error) {
+            error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+            return err2it(error);
+        }
+    }
     return ItemError;
 }
 

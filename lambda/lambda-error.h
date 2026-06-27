@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -178,6 +179,7 @@ typedef struct StackFrame {
 
 typedef struct LambdaError {
     LambdaErrorCode code;       // error code (e.g., 201)
+    bool is_heap;               // true when allocated on the Lambda GC heap
     char* message;              // human-readable message (owned)
     SourceLocation location;    // where the error occurred
     StackFrame* stack_trace;    // call stack (if enabled)
@@ -222,7 +224,10 @@ const char* err_code_message(LambdaErrorCode code);
 const char* err_category_name(LambdaErrorCode code);
 
 // Error creation
+typedef void* (*LambdaErrorHeapAllocFn)(size_t size, uint8_t type_id);
+void err_set_heap_allocator(LambdaErrorHeapAllocFn alloc_fn);
 LambdaError* err_create(LambdaErrorCode code, const char* message, SourceLocation* location);
+LambdaError* err_create_heap(LambdaErrorCode code, const char* message, SourceLocation* location);
 LambdaError* err_createf(LambdaErrorCode code, SourceLocation* location, const char* format, ...);
 LambdaError* err_create_simple(LambdaErrorCode code, const char* message);
 
@@ -251,6 +256,12 @@ void err_print_stack_trace(StackFrame* trace);
 // Error cleanup
 void err_free(LambdaError* error);
 void err_free_stack_trace(StackFrame* trace);
+void err_release_payload(LambdaError* error);
+
+// GC hooks for heap-owned LambdaError objects
+struct gc_heap;
+void err_gc_trace(void* data, struct gc_heap* gc);
+void err_gc_destroy(void* data);
 
 // Source location helpers
 SourceLocation src_loc(const char* file, uint32_t line, uint32_t col);
