@@ -79,6 +79,13 @@ assert.strictEqual(privateKeyObject.asymmetricKeyType, 'rsa');
 assert.strictEqual(publicKeyObject.asymmetricKeyType, 'rsa');
 console.log('rsa keyobject properties:', true);
 
+assert.strictEqual(privateKeyObject.asymmetricKeyDetails.modulusLength, 1024);
+assert.strictEqual(publicKeyObject.asymmetricKeyDetails.modulusLength, 1024);
+assert.strictEqual(privateKeyObject.asymmetricKeyDetails.publicExponent.toString(), '65537');
+assert.strictEqual(publicKeyObject.asymmetricKeyDetails.publicExponent.toString(), '65537');
+assert.strictEqual(typeof privateKeyObject.asymmetricKeyDetails.publicExponent, 'bigint');
+console.log('rsa keyobject details:', true);
+
 const objectSignature = crypto.createSign('sha256')
   .update(message)
   .sign(privateKeyObject);
@@ -106,3 +113,25 @@ console.log('rsa keyobject export options:', true);
 assert.strictEqual(privateKeyObject instanceof crypto.KeyObject, true);
 assert.strictEqual(publicKeyObject instanceof crypto.KeyObject, true);
 console.log('rsa keyobject export instanceof:', true);
+
+const generated = crypto.generateKeyPairSync('rsa', {
+  modulusLength: 1024,
+  publicExponent: 0x10001
+});
+assert.strictEqual(generated.privateKey.type, 'private');
+assert.strictEqual(generated.publicKey.type, 'public');
+assert.strictEqual(generated.privateKey.asymmetricKeyType, 'rsa');
+assert.strictEqual(generated.publicKey.asymmetricKeyType, 'rsa');
+assert.strictEqual(generated.privateKey.asymmetricKeyDetails.modulusLength, 1024);
+assert.strictEqual(generated.publicKey.asymmetricKeyDetails.publicExponent.toString(), '65537');
+assert.strictEqual(generated.privateKey instanceof crypto.KeyObject, true);
+assert.strictEqual(generated.publicKey instanceof crypto.KeyObject, true);
+console.log('rsa generateKeyPairSync keyobjects:', true);
+
+const generatedSignature = crypto.createSign('sha256')
+  .update(message)
+  .sign({ key: generated.privateKey, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: 20 });
+assert.strictEqual(crypto.createVerify('sha256')
+  .update(message)
+  .verify({ key: generated.publicKey, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: 20 }, generatedSignature), true);
+console.log('rsa generateKeyPairSync pss:', true);

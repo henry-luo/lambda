@@ -218,6 +218,11 @@ typedef struct ParsedRequest {
     char header_names[64][128];
     char header_values[64][4096];
     int  header_count;
+    char raw_trailer_names[32][128];
+    char raw_trailer_values[32][4096];
+    char trailer_names[32][128];
+    char trailer_values[32][4096];
+    int  trailer_count;
     const char* body;
     int  body_len;
     int  content_length;
@@ -261,9 +266,120 @@ static bool http_header_has_token(const char* value, const char* token) {
     return false;
 }
 
+static int http_chunk_hex_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static void http_request_store_trailer(ParsedRequest* req, const char* line_start,
+                                       const char* line_end) {
+    if (!req || req->trailer_count >= 32 || !line_start || !line_end || line_end <= line_start) return;
+    const char* colon = (const char*)memchr(line_start, ':', (size_t)(line_end - line_start));
+    if (!colon) return;
+
+    int nlen = (int)(colon - line_start);
+    const char* vstart = colon + 1;
+    while (vstart < line_end && (*vstart == ' ' || *vstart == '\t')) vstart++;
+    int vlen = (int)(line_end - vstart);
+    if (nlen <= 0) return;
+    if (nlen >= 128) nlen = 127;
+    if (vlen >= 4096) vlen = 4095;
+
+    int index = req->trailer_count;
+    memcpy(req->raw_trailer_names[index], line_start, (size_t)nlen);
+    req->raw_trailer_names[index][nlen] = '\0';
+    memcpy(req->raw_trailer_values[index], vstart, (size_t)vlen);
+    req->raw_trailer_values[index][vlen] = '\0';
+    memcpy(req->trailer_names[index], line_start, (size_t)nlen);
+    req->trailer_names[index][nlen] = '\0';
+    for (int i = 0; i < nlen; i++) {
+        char c = req->trailer_names[index][i];
+        if (c >= 'A' && c <= 'Z') req->trailer_names[index][i] = c + 32;
+    }
+    memcpy(req->trailer_values[index], vstart, (size_t)vlen);
+    req->trailer_values[index][vlen] = '\0';
+    req->trailer_count++;
+}
+
+static int http_decode_chunked_request_body(char* data, int len, ParsedRequest* req,
+                                            int* consumed, bool* complete, bool emit) {
+    int pos = 0;
+    int out_len = 0;
+    if (consumed) *consumed = 0;
+    if (complete) *complete = false;
+    if (!data || len <= 0) return 0;
+
+    while (pos < len) {
+        int line_start = pos;
+        int line_end = -1;
+        for (int i = pos; i + 1 < len; i++) {
+            if (data[i] == '\r' && data[i + 1] == '\n') {
+                line_end = i;
+                break;
+            }
+        }
+        if (line_end < 0) return out_len;
+
+        int size = 0;
+        bool saw_digit = false;
+        bool in_extension = false;
+        for (int i = line_start; i < line_end; i++) {
+            char c = data[i];
+            if (c == ';') {
+                in_extension = true;
+                continue;
+            }
+            if (in_extension) {
+                if (c == '\r' || c == '\n') return -1;
+                continue;
+            }
+            if (c == ' ' || c == '\t') continue;
+            int v = http_chunk_hex_value(c);
+            if (v < 0) return -1;
+            saw_digit = true;
+            if (size > 0x0fffffff) return -1;
+            size = size * 16 + v;
+        }
+        if (!saw_digit) return -1;
+        pos = line_end + 2;
+
+        if (size == 0) {
+            while (pos < len) {
+                int trailer_line_end = -1;
+                for (int i = pos; i + 1 < len; i++) {
+                    if (data[i] == '\r' && data[i + 1] == '\n') {
+                        trailer_line_end = i;
+                        break;
+                    }
+                }
+                if (trailer_line_end < 0) return out_len;
+                if (trailer_line_end == pos) {
+                    pos += 2;
+                    if (consumed) *consumed = pos;
+                    if (complete) *complete = true;
+                    return out_len;
+                }
+                if (emit) http_request_store_trailer(req, data + pos, data + trailer_line_end);
+                pos = trailer_line_end + 2;
+            }
+            return out_len;
+        }
+
+        if (pos + size + 2 > len) return out_len;
+        if (emit) memmove(data + out_len, data + pos, (size_t)size);
+        out_len += size;
+        pos += size;
+        if (data[pos] != '\r' || data[pos + 1] != '\n') return -1;
+        pos += 2;
+    }
+    return out_len;
+}
+
 // parse an HTTP request from raw bytes. Returns 0 on success, -1 on incomplete/error.
 // Sets *consumed to the number of bytes consumed (headers + body).
-static int parse_http_request(const char* data, int data_len, ParsedRequest* req, int* consumed) {
+static int parse_http_request(char* data, int data_len, ParsedRequest* req, int* consumed) {
     memset(req, 0, sizeof(ParsedRequest));
     *consumed = 0;
 
@@ -344,17 +460,50 @@ static int parse_http_request(const char* data, int data_len, ParsedRequest* req
 
     int hdr_size = (int)(hdr_end - data);
 
-    // check for Content-Length to read body
+    // check for Transfer-Encoding/Content-Length to read body
     int content_length = 0;
+    bool chunked_body = false;
+    bool has_content_length = false;
     for (int i = 0; i < req->header_count; i++) {
+        if (strcmp(req->header_names[i], "transfer-encoding") == 0 &&
+            http_header_has_token(req->header_values[i], "chunked")) {
+            chunked_body = true;
+        }
         if (strcmp(req->header_names[i], "content-length") == 0) {
+            has_content_length = true;
             content_length = atoi(req->header_values[i]);
-            break;
         }
     }
 
     req->content_length = content_length;
-    if (content_length > 0) {
+    if (chunked_body && !has_content_length) {
+        int available = data_len - hdr_size;
+        int chunked_consumed = 0;
+        bool chunked_complete = false;
+        int decoded_len = http_decode_chunked_request_body(data + hdr_size, available, req,
+                                                           &chunked_consumed, &chunked_complete, false);
+        if (decoded_len < 0) {
+            req->body = NULL;
+            req->body_len = 0;
+            req->body_complete = true;
+            *consumed = hdr_size;
+            return 0;
+        }
+        if (chunked_complete) {
+            req->trailer_count = 0;
+            int emit_consumed = 0;
+            bool emit_complete = false;
+            int emit_len = http_decode_chunked_request_body(data + hdr_size, available, req,
+                                                            &emit_consumed, &emit_complete, true);
+            if (emit_len < 0 || !emit_complete) return -1;
+            decoded_len = emit_len;
+            chunked_consumed = emit_consumed;
+        }
+        req->body = decoded_len > 0 ? data + hdr_size : NULL;
+        req->body_len = decoded_len;
+        req->body_complete = chunked_complete;
+        *consumed = hdr_size + (chunked_complete ? chunked_consumed : available);
+    } else if (content_length > 0) {
         int available = data_len - hdr_size;
         int body_len = available < content_length ? available : content_length;
         req->body = data + hdr_size;
@@ -1575,8 +1724,15 @@ static Item make_request_object(JsHttpConn* conn, ParsedRequest* req) {
     }
     js_property_set(msg, make_string_item("headers"), headers);
     js_property_set(msg, make_string_item("rawHeaders"), raw_headers);
-    js_property_set(msg, make_string_item("trailers"), js_new_object());
-    js_property_set(msg, make_string_item("rawTrailers"), js_array_new(0));
+    Item trailers = js_new_object();
+    Item raw_trailers = js_array_new(0);
+    for (int i = 0; i < req->trailer_count; i++) {
+        js_array_push(raw_trailers, make_string_item(req->raw_trailer_names[i]));
+        js_array_push(raw_trailers, make_string_item(req->raw_trailer_values[i]));
+        http_request_headers_append(trailers, req->trailer_names[i], req->trailer_values[i]);
+    }
+    js_property_set(msg, make_string_item("trailers"), trailers);
+    js_property_set(msg, make_string_item("rawTrailers"), raw_trailers);
 
     // body
     if (req->body && req->body_len > 0) {
@@ -2915,13 +3071,6 @@ static bool js_http_response_has_header_token(Item headers, const char* name, co
     memcpy(buf, s->chars, (size_t)len);
     buf[len] = '\0';
     return http_header_has_token(buf, token);
-}
-
-static int http_chunk_hex_value(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
 }
 
 static int http_decode_chunked_body(const char* data, int len, char* out,

@@ -145,6 +145,7 @@ static bool js_stream_prepare_readable_chunk(Item self, Item* chunk, Item encodi
 extern "C" Item js_readable_push(Item self, Item chunk);
 extern "C" Item js_readable_pipe(Item self, Item dest);
 extern "C" Item js_readable_new(Item opts);
+extern "C" Item js_passthrough_new(Item opts);
 extern "C" Item js_stream_destroy(Item self, Item err);
 extern "C" Item js_stream_emit(Item self, Item event_item, Item arg1);
 static void js_stream_flush_buffered_data(Item self);
@@ -165,6 +166,7 @@ static Item js_stream_iter_make_abort_error(void);
 static int64_t js_stream_iter_chunk_byte_length(Item chunk);
 static bool js_stream_has_error(Item err);
 extern "C" Item js_readable_from(Item iterable);
+static Item js_readable_from_pump(Item env_item);
 static void js_stream_iter_resolve_drain(Item writer, Item value);
 static void js_stream_iter_reject_drain(Item writer, Item err);
 static void js_stream_iter_resolve_end_if_drained(Item writer);
@@ -3280,6 +3282,141 @@ static bool js_readable_compose_is_duplex_like(Item stream) {
             get_type_id(writable_state) == LMD_TYPE_ELEMENT);
 }
 
+static void js_readable_compose_bridge_start(Item* env);
+
+static Item js_readable_compose_bridge_write(Item env_item, Item chunk, Item encoding, Item callback) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item source = env[0];
+    Item input = env[2];
+    Item write_fn = js_property_get(source, key_write);
+    Item result = make_js_undefined();
+    if (get_type_id(write_fn) == LMD_TYPE_FUNC) {
+        Item args[3] = { chunk, encoding, callback };
+        result = js_call_function(write_fn, source, args, 3);
+        if (js_check_exception()) return ItemNull;
+    }
+    if (get_type_id(input) == LMD_TYPE_MAP || get_type_id(input) == LMD_TYPE_ELEMENT) {
+        Item input_write = js_property_get(input, key_write);
+        if (get_type_id(input_write) == LMD_TYPE_FUNC) {
+            Item input_args[3] = { chunk, encoding, make_js_undefined() };
+            js_call_function(input_write, input, input_args, 3);
+            if (js_check_exception()) return ItemNull;
+        }
+    }
+    js_readable_compose_bridge_start(env);
+    return result;
+}
+
+static Item js_readable_compose_bridge_end(Item env_item, Item chunk, Item callback) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item source = env[0];
+    Item input = env[2];
+    Item end_fn = js_property_get(source, key_end);
+    if (get_type_id(end_fn) == LMD_TYPE_FUNC) {
+        Item args[2] = { chunk, callback };
+        js_call_function(end_fn, source, args, 2);
+        if (js_check_exception()) return ItemNull;
+    }
+    if (get_type_id(input) == LMD_TYPE_MAP || get_type_id(input) == LMD_TYPE_ELEMENT) {
+        Item input_end = js_property_get(input, key_end);
+        if (get_type_id(input_end) == LMD_TYPE_FUNC) {
+            Item input_args[2] = { chunk, make_js_undefined() };
+            js_call_function(input_end, input, input_args, 2);
+            if (js_check_exception()) return ItemNull;
+        }
+    }
+    js_readable_compose_bridge_start(env);
+    return env[1];
+}
+
+static Item js_readable_compose_bridge_cork(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item source = env[0];
+    Item cork_fn = js_property_get(source, make_string_item("cork"));
+    if (get_type_id(cork_fn) == LMD_TYPE_FUNC)
+        js_call_function(cork_fn, source, NULL, 0);
+    return env[1];
+}
+
+static Item js_readable_compose_bridge_uncork(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item source = env[0];
+    Item uncork_fn = js_property_get(source, make_string_item("uncork"));
+    if (get_type_id(uncork_fn) == LMD_TYPE_FUNC)
+        js_call_function(uncork_fn, source, NULL, 0);
+    return env[1];
+}
+
+static Item js_readable_compose_bridge_destroy(Item env_item, Item err) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item source = env[0];
+    Item destroy_fn = js_property_get(source, key_destroy);
+    if (get_type_id(destroy_fn) == LMD_TYPE_FUNC) {
+        Item args[1] = { err };
+        js_call_function(destroy_fn, source, args, 1);
+    }
+    return env[1];
+}
+
+static void js_readable_compose_bridge_start(Item* env) {
+    if (!env || js_item_is_true(env[4])) return;
+    env[4] = js_bool_item(true);
+
+    Item out = env[1];
+    Item input = env[2];
+    Item transform = env[3];
+    if (get_type_id(transform) != LMD_TYPE_FUNC) return;
+
+    Item args[1] = { input };
+    Item composed = js_call_function(transform, make_js_undefined(), args, 1);
+    if (js_check_exception()) {
+        Item err = js_clear_exception();
+        js_stream_destroy(out, err);
+        return;
+    }
+
+    Item iterator = js_get_async_iterator(composed);
+    if (js_check_exception()) {
+        Item err = js_clear_exception();
+        js_stream_destroy(out, err);
+        return;
+    }
+
+    Item* pump_env = js_alloc_env(2);
+    pump_env[0] = out;
+    pump_env[1] = iterator;
+    js_readable_from_pump((Item){.item = (uint64_t)(uintptr_t)pump_env});
+}
+
+static void js_readable_compose_attach_writable_bridge(Item out, Item source, Item input, Item transform) {
+    if (!js_readable_compose_is_duplex_like(source)) return;
+
+    Item* env = js_alloc_env(5);
+    env[0] = source;
+    env[1] = out;
+    env[2] = input;
+    env[3] = transform;
+    env[4] = js_bool_item(false);
+
+    js_property_set(out, key_writable, js_bool_item(true));
+    js_property_set(out, key_writable_state, js_property_get(source, key_writable_state));
+    js_property_set(out, key_write,
+                    js_new_closure((void*)js_readable_compose_bridge_write, 3, env, 5));
+    js_property_set(out, key_end,
+                    js_new_closure((void*)js_readable_compose_bridge_end, 2, env, 5));
+    js_property_set(out, make_string_item("cork"),
+                    js_new_closure((void*)js_readable_compose_bridge_cork, 0, env, 5));
+    js_property_set(out, make_string_item("uncork"),
+                    js_new_closure((void*)js_readable_compose_bridge_uncork, 0, env, 5));
+    js_property_set(out, key_destroy,
+                    js_new_closure((void*)js_readable_compose_bridge_destroy, 1, env, 5));
+}
+
 static Item js_readable_compose(Item self, Item stream, Item options) {
     if (!js_stream_validate_helper_options(options)) return ItemNull;
     if (!js_stream_validate_helper_signal(options)) return ItemNull;
@@ -3290,6 +3427,23 @@ static Item js_readable_compose(Item self, Item stream, Item options) {
     }
 
     if (stream_type == LMD_TYPE_FUNC) {
+        if (js_readable_compose_is_duplex_like(self)) {
+            Item input_opts = js_new_object();
+            js_property_set(input_opts, make_string_item("objectMode"), js_bool_item(true));
+            Item input = js_passthrough_new(input_opts);
+            if (js_check_exception()) return ItemNull;
+            Item out_opts = js_new_object();
+            js_property_set(out_opts, make_string_item("objectMode"), js_bool_item(true));
+            Item out = js_readable_new(out_opts);
+            if (get_type_id(out) == LMD_TYPE_MAP || get_type_id(out) == LMD_TYPE_ELEMENT) {
+                js_stream_set_readable_object_mode(out, true);
+                js_property_set(out, key_writable, js_bool_item(false));
+                js_readable_compose_attach_writable_bridge(out, self, input, stream);
+                if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_ELEMENT)
+                    js_stream_iter_attach_abort(options, out);
+            }
+            return out;
+        }
         Item args[1] = { self };
         Item composed = js_call_function(stream, make_js_undefined(), args, 1);
         if (js_check_exception()) return ItemNull;

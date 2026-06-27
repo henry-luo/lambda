@@ -30,6 +30,8 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 #include <mbedtls/pk.h>
 #include <mbedtls/rsa.h>
 
+extern "C" Item bigint_from_string(const char* str, int len);
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -3965,9 +3967,48 @@ static const char* crypto_asymmetric_key_type_name(mbedtls_pk_type_t type) {
     return "unknown";
 }
 
+static Item crypto_rsa_asymmetric_key_details(mbedtls_pk_context* pk) {
+    if (!pk || !crypto_pk_is_rsa(pk)) return make_js_undefined_crypto();
+
+    mbedtls_rsa_context* rsa = mbedtls_pk_rsa(*pk);
+    if (!rsa) return make_js_undefined_crypto();
+
+    mbedtls_mpi n;
+    mbedtls_mpi e;
+    mbedtls_mpi_init(&n);
+    mbedtls_mpi_init(&e);
+
+    int ret = mbedtls_rsa_export(rsa, &n, NULL, NULL, NULL, &e);
+    if (ret != 0) {
+        log_debug("crypto: RSA details export failed: -0x%04x", -ret);
+        mbedtls_mpi_free(&n);
+        mbedtls_mpi_free(&e);
+        return make_js_undefined_crypto();
+    }
+
+    Item details = js_new_object();
+    js_property_set(details, make_string_item_crypto("modulusLength"),
+                    (Item){.item = i2it((int64_t)mbedtls_mpi_bitlen(&n))});
+
+    char exp_buf[128];
+    size_t exp_len = 0;
+    ret = mbedtls_mpi_write_string(&e, 10, exp_buf, sizeof(exp_buf), &exp_len);
+    if (ret == 0 && exp_len > 0) {
+        js_property_set(details, make_string_item_crypto("publicExponent"),
+                        bigint_from_string(exp_buf, (int)strlen(exp_buf)));
+    } else {
+        log_debug("crypto: RSA public exponent export failed: -0x%04x", -ret);
+    }
+
+    mbedtls_mpi_free(&n);
+    mbedtls_mpi_free(&e);
+    return details;
+}
+
 static Item crypto_asymmetric_key_object_from_bytes(const uint8_t* key, int key_len,
                                                     const char* type_name,
-                                                    const char* asymmetric_type) {
+                                                    const char* asymmetric_type,
+                                                    mbedtls_pk_context* parsed_key) {
     if (key_len < 0) key_len = 0;
     Item bytes = js_typed_array_new(JS_TYPED_UINT8, key_len);
     JsTypedArray* ta = js_get_typed_array_ptr(bytes.map);
@@ -3983,6 +4024,10 @@ static Item crypto_asymmetric_key_object_from_bytes(const uint8_t* key, int key_
     js_property_set(obj, make_string_item_crypto("type"), make_string_item_crypto(type_name));
     js_property_set(obj, make_string_item_crypto("asymmetricKeyType"),
                     make_string_item_crypto(asymmetric_type ? asymmetric_type : "unknown"));
+    Item details = crypto_rsa_asymmetric_key_details(parsed_key);
+    if (!crypto_item_is_undefined(details)) {
+        js_property_set(obj, make_string_item_crypto("asymmetricKeyDetails"), details);
+    }
     js_property_set(obj, make_string_item_crypto("export"),
                     js_new_function((void*)js_crypto_asymmetricKeyExport, 1));
     return obj;
@@ -4007,7 +4052,7 @@ extern "C" Item js_crypto_createPrivateKey(Item key_item) {
     }
 
     const char* key_type = crypto_asymmetric_key_type_name(mbedtls_pk_get_type(&pk));
-    Item result = crypto_asymmetric_key_object_from_bytes(key, key_len, "private", key_type);
+    Item result = crypto_asymmetric_key_object_from_bytes(key, key_len, "private", key_type, &pk);
     mbedtls_pk_free(&pk);
     mem_free(key);
     return result;
@@ -4027,7 +4072,7 @@ extern "C" Item js_crypto_createPublicKey(Item key_item) {
     int ret = mbedtls_pk_parse_public_key(&pk, key, (size_t)key_len);
     if (ret == 0) {
         const char* key_type = crypto_asymmetric_key_type_name(mbedtls_pk_get_type(&pk));
-        Item result = crypto_asymmetric_key_object_from_bytes(key, key_len, "public", key_type);
+        Item result = crypto_asymmetric_key_object_from_bytes(key, key_len, "public", key_type, &pk);
         mbedtls_pk_free(&pk);
         mem_free(key);
         return result;
@@ -4055,7 +4100,7 @@ extern "C" Item js_crypto_createPublicKey(Item key_item) {
 
     int public_len = (int)strlen((const char*)public_pem) + 1;
     const char* key_type = crypto_asymmetric_key_type_name(mbedtls_pk_get_type(&pk));
-    Item result = crypto_asymmetric_key_object_from_bytes(public_pem, public_len, "public", key_type);
+    Item result = crypto_asymmetric_key_object_from_bytes(public_pem, public_len, "public", key_type, &pk);
     mbedtls_pk_free(&pk);
     mem_free(key);
     return result;
@@ -4114,6 +4159,101 @@ static bool crypto_keygen_length(Item options_item, int* out_bits) {
     }
     *out_bits = (int)value;
     return true;
+}
+
+static bool crypto_keypair_options(Item options_item, int* out_modulus_bits, int* out_public_exponent) {
+    if (!out_modulus_bits || !out_public_exponent) return false;
+    *out_modulus_bits = 0;
+    *out_public_exponent = 65537;
+
+    if (get_type_id(options_item) != LMD_TYPE_MAP) {
+        js_throw_invalid_arg_type("options", "Object", options_item);
+        return false;
+    }
+
+    Item modulus_item = js_property_get(options_item, make_string_item_crypto("modulusLength"));
+    if (crypto_item_is_undefined(modulus_item)) {
+        crypto_throw_invalid_property_type("options.modulusLength", "number");
+        return false;
+    }
+    if (!crypto_item_to_integer(modulus_item, "options.modulusLength", out_modulus_bits)) {
+        return false;
+    }
+    if (*out_modulus_bits < 1024) {
+        js_throw_out_of_range("options.modulusLength", ">= 1024", modulus_item);
+        return false;
+    }
+
+    Item exponent_item = js_property_get(options_item, make_string_item_crypto("publicExponent"));
+    if (!crypto_item_is_undefined(exponent_item)) {
+        if (!crypto_item_to_integer(exponent_item, "options.publicExponent", out_public_exponent)) {
+            return false;
+        }
+        if (*out_public_exponent < 3 || ((*out_public_exponent & 1) == 0)) {
+            js_throw_out_of_range("options.publicExponent", "an odd integer >= 3", exponent_item);
+            return false;
+        }
+    }
+    return true;
+}
+
+extern "C" Item js_crypto_generateKeyPairSync(Item type_item, Item options_item) {
+    if (get_type_id(type_item) != LMD_TYPE_STRING) {
+        return js_throw_invalid_arg_type("type", "string", type_item);
+    }
+    if (!crypto_string_equals(type_item, "rsa")) {
+        return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
+            "The argument 'type' must be a supported key type");
+    }
+
+    int modulus_bits = 0;
+    int public_exponent = 65537;
+    if (!crypto_keypair_options(options_item, &modulus_bits, &public_exponent)) return ItemNull;
+
+    mbedtls_pk_context pk;
+    mbedtls_pk_init(&pk);
+    int ret = mbedtls_pk_setup(&pk, mbedtls_pk_info_from_type(MBEDTLS_PK_RSA));
+    if (ret != 0) {
+        mbedtls_pk_free(&pk);
+        log_error("crypto: generateKeyPairSync RSA setup failed: -0x%04x", -ret);
+        return js_throw_error_with_code("ERR_OSSL_RSA_KEYGEN_FAILED", "Failed to generate RSA key pair");
+    }
+
+    ret = mbedtls_rsa_gen_key(mbedtls_pk_rsa(pk), crypto_mbedtls_random, NULL,
+                              (unsigned int)modulus_bits, public_exponent);
+    if (ret != 0) {
+        mbedtls_pk_free(&pk);
+        log_error("crypto: generateKeyPairSync RSA generation failed: -0x%04x", -ret);
+        return js_throw_error_with_code("ERR_OSSL_RSA_KEYGEN_FAILED", "Failed to generate RSA key pair");
+    }
+
+    unsigned char private_pem[8192];
+    unsigned char public_pem[8192];
+    ret = mbedtls_pk_write_key_pem(&pk, private_pem, sizeof(private_pem));
+    if (ret != 0) {
+        mbedtls_pk_free(&pk);
+        log_error("crypto: generateKeyPairSync private PEM write failed: -0x%04x", -ret);
+        return js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to export private key");
+    }
+    ret = mbedtls_pk_write_pubkey_pem(&pk, public_pem, sizeof(public_pem));
+    if (ret != 0) {
+        mbedtls_pk_free(&pk);
+        log_error("crypto: generateKeyPairSync public PEM write failed: -0x%04x", -ret);
+        return js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to export public key");
+    }
+
+    int private_len = (int)strlen((const char*)private_pem) + 1;
+    int public_len = (int)strlen((const char*)public_pem) + 1;
+    Item private_key = crypto_asymmetric_key_object_from_bytes(private_pem, private_len,
+        "private", "rsa", &pk);
+    Item public_key = crypto_asymmetric_key_object_from_bytes(public_pem, public_len,
+        "public", "rsa", &pk);
+
+    Item result = js_new_object();
+    js_property_set(result, make_string_item_crypto("publicKey"), public_key);
+    js_property_set(result, make_string_item_crypto("privateKey"), private_key);
+    mbedtls_pk_free(&pk);
+    return result;
 }
 
 extern "C" Item js_crypto_generateKeySync(Item type_item, Item options_item) {
@@ -5600,6 +5740,7 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(crypto_namespace, "createPublicKey",    (void*)js_crypto_createPublicKey, 1);
     crypto_set_method(crypto_namespace, "generateKeySync",    (void*)js_crypto_generateKeySync, 2);
     crypto_set_method(crypto_namespace, "generateKey",        (void*)js_crypto_generateKey, 3);
+    crypto_set_method(crypto_namespace, "generateKeyPairSync", (void*)js_crypto_generateKeyPairSync, 2);
 
     // subtle Web Crypto API (subset)
     Item subtle = js_new_object();
