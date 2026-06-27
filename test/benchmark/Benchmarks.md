@@ -2,6 +2,8 @@
 
 This document describes how to prepare, run, and report Lambda benchmarks across 6 suites and 6 engines.
 
+**Canonical snapshot workflow:** use `python3 test/benchmark/run_standard_benchmarks.py` from the project root. It rebuilds a clean release binary, verifies that JS execution profiling markers are absent from `lambda.exe`, runs the standardized benchmark matrix, writes a matching `benchmark_results_vN.json`, and can generate an `Overall_ResultN.md` report from that JSON.
+
 ---
 
 ## 1. Benchmark Suites
@@ -52,7 +54,7 @@ For the BENG suite, the convention is simpler: `binarytrees.ls` and `js/binarytr
 
 ### QuickJS wrapper
 
-QuickJS lacks `process.hrtime.bigint()` and `console.log`. The runner auto-generates `temp/qjs_<name>.js` with:
+QuickJS lacks `process.hrtime.bigint()` and `console.log`. The runner auto-generates wrappers under `temp/` with:
 
 ```javascript
 import * as std from 'std';
@@ -72,6 +74,19 @@ if (typeof process === 'undefined') {
 ### AWFY bundle files
 
 AWFY JS benchmarks use `require()` to load official source from `ref/are-we-fast-yet/`. Since LambdaJS and QuickJS don't support `require()`, standalone `*_bundle.js` files inline all dependencies. The runner automatically uses bundles for these two engines and the original `require()`-based file for Node.js.
+
+### JetStream standardized wrappers
+
+JetStream reference JS files expose a `Benchmark` class, but the per-file `runIteration()` count is not uniform. The standardized benchmark path does **not** time `new Benchmark().runIteration()` directly. For LambdaJS, QuickJS, and Node.js, `run_benchmarks.py` detects the underlying benchmark function from `runIteration()` and emits an explicit x8 timing wrapper:
+
+```javascript
+var _t0 = performance.now();
+for (var _i = 0; _i < 8; _i++) { runBenchmarkFunction(); }
+var _t1 = performance.now();
+console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));
+```
+
+This keeps the JS-engine JetStream workload comparable across LambdaJS, QuickJS, and Node.js and matches the older Result7-style workload. Non-JetStream suites use the checked-in timing loop/load in each benchmark file; do not change those ad hoc for a report run.
 
 ---
 
@@ -178,17 +193,42 @@ R7RS = [
 All commands run from the **project root** (`/Users/henryluo/Projects/Lambda`).
 The single unified runner is `test/benchmark/run_benchmarks.py`.
 
+### Standard snapshot run
+
+For checked-in result reports, use the standard workflow script instead of manually assembling commands:
+
+```bash
+python3 test/benchmark/run_standard_benchmarks.py --report-output test/benchmark/Overall_Result9.md --report-title "Lambda Benchmark Results: Round 9"
+```
+
+Default behavior:
+
+- Runs `make release` first. Never benchmark a debug build.
+- Checks `lambda.exe` with `strings` and rejects binaries containing profiling markers such as `JS_EXEC_PROFILE`.
+- Clears `JS_EXEC_PROFILE` and `JS_EXEC_PROFILE_OUT` from the benchmark environment.
+- Runs `test/benchmark/run_benchmarks.py -e mir,lambdajs,quickjs,nodejs -n 3 -t 180 --results-output test/benchmark/benchmark_results_v9.json`.
+- Derives the matching JSON path from `--report-output`; for example, `Overall_Result9.md` pairs with `benchmark_results_v9.json`.
+- If `--report-output` is provided, generates the report from the JSON via `test/benchmark/gen_overall_result.py`.
+
+Use `--skip-build` only for a quick local recheck when you already know `lambda.exe` is a fresh release binary. Use `run_benchmarks.py` directly only for exploratory filters or one-off diagnosis.
+
+To verify the exact command sequence and output pairing without running benchmarks:
+
+```bash
+python3 test/benchmark/run_standard_benchmarks.py --report-output test/benchmark/Overall_Result9.md --dry-run
+```
+
 ### Modes
 
 The runner supports three benchmark modes via `-m/--mode`:
 
 | Mode | Description | Default runs | Output file |
 |------|-------------|:------------:|-------------|
-| **time** (default) | Execution time across all engines | 3 | `benchmark_results_v3.json` |
+| **time** (default) | Execution time across all engines | 3 | `benchmark_results_v3.json` by default; snapshot runs use `benchmark_results_vN.json` |
 | **memory** | Peak resident set size (RSS) via `/usr/bin/time` | 1 | `memory_results.json` |
 | **mir-vs-c** | MIR Direct vs C2MIR transpiler wall-clock comparison | 3 | `temp/mir_vs_c_bench.csv` |
 
-### Full run (all 6 suites × 6 engines)
+### Exploratory full run (all 6 suites × 6 engines)
 
 ```bash
 python3 test/benchmark/run_benchmarks.py
@@ -197,6 +237,8 @@ python3 test/benchmark/run_benchmarks.py
 - Default: 3 runs per benchmark per engine, reports median.
 - Timeout: 120 seconds per run.
 - Results merged into `test/benchmark/benchmark_results_v3.json`.
+- This direct command is useful for exploration, but checked-in result reports should use `run_standard_benchmarks.py` so build mode, profiling checks, engines, timeout, and report generation are consistent.
+- Direct runs can also write a chosen JSON with `--results-output test/benchmark/benchmark_results_vN.json`.
 
 ### Filtering by suite, benchmark, or engine
 
@@ -346,23 +388,24 @@ Each engine value is the **self-reported exec time in milliseconds** (median of 
 ### Generate the report
 
 ```bash
-python3 test/benchmark/gen_result3.py
+python3 test/benchmark/gen_overall_result.py --output test/benchmark/Overall_Result9.md --title "Lambda Benchmark Results: Round 9"
 ```
 
-Reads `benchmark_results_v3.json` and writes `Overall_Result3.md` with:
-- Per-suite tables (6 engines + MIR/Node.js and MIR/Python ratio columns)
-- Geometric mean ratios per suite
-- Overall summary table with deduplication of shared benchmarks
-- Performance tier breakdown
-- Key findings narrative
+Reads the selected benchmark JSON and writes a chosen `Overall_ResultN.md` with:
+- Run metadata: current date, platform, Lambda commit hash, Node.js version, and QuickJS version
+- Per-suite tables for the selected engines
+- Geometric mean ratios against Node.js per suite and overall
+- The standardized JetStream x8 workload note
+
+`gen_result3.py` and `gen_result_doc.py` are historical generators for older report formats. Do not use them for new checked-in result snapshots.
 
 ### Pipeline summary
 
 ```
 prepare scripts  →  run benchmarks  →  report
- (.ls + .js + .py)   run_benchmarks.py   gen_result3.py
+ (.ls + .js + .py)   run_standard_benchmarks.py   gen_overall_result.py
                           ↓                    ↓
-              benchmark_results_v3.json   Overall_Result3.md
+              benchmark_results_vN.json   Overall_ResultN.md
               memory_results.json
               temp/mir_vs_c_bench.csv
 ```
@@ -379,7 +422,7 @@ prepare scripts  →  run benchmarks  →  report
 - **Timeout**: 120 seconds per run (configurable via `-t`). MIR-vs-C mode auto-raises to 300s.
 - **QuickJS wrappers** are auto-generated in `temp/` and not committed.
 - **AWFY Python harness**: AWFY Python benchmarks run via the official AWFY `harness.py` with per-benchmark class name mapping and iteration counts.
-- **JetStream Node.js wrappers**: Auto-generated in `temp/` — instantiate `new Benchmark()` and call `runIteration()` with timing.
+- **JetStream JS wrappers**: Auto-generated in `temp/` for LambdaJS, QuickJS, and Node.js. The standardized report path runs the detected benchmark function x8 instead of using per-file `Benchmark.runIteration()` counts.
 - **Known engine limitations**:
   - LambdaJS: No `require()`, no `fs`, limited ES6 class support (fails some AWFY).
   - QuickJS: No `fs` module (fails BENG file-reading benchmarks), stack overflow on deep recursion (fails `ack`).
@@ -488,13 +531,17 @@ Each set includes:
 
 | File | Purpose |
 |------|---------|
+| `run_standard_benchmarks.py` | **Canonical snapshot workflow**: clean release build, profiling-marker check, standardized engine matrix, optional report generation |
 | `run_benchmarks.py` | **Unified runner**: 6 suites × 6 engines, time/memory/mir-vs-c modes |
+| `gen_overall_result.py` | Generates current `Overall_ResultN.md` reports from a matching benchmark JSON |
 | `profile_transpile.py` | **Transpile profiler**: compilation phase timing for all Lambda scripts |
-| `gen_result3.py` | Generates `Overall_Result3.md` from `benchmark_results_v3.json` |
+| `gen_result3.py` | Historical generator for `Overall_Result3.md` |
 | `summarize_benchmarks.py` | Prints summary tables to stdout |
-| `benchmark_results_v3.json` | Execution time results (ms per engine per benchmark) |
+| `benchmark_results_vN.json` | Versioned execution time results (ms per engine per benchmark) for checked-in snapshots |
+| `benchmark_results_v3.json` | Historical/default execution time result file used by older direct runs |
 | `memory_results.json` | Peak RSS memory results (MB + raw bytes) |
-| `Overall_Result3.md` | Generated report with tables and analysis |
+| `Overall_ResultN.md` | Current generated result reports, created from matching `benchmark_results_vN.json` files |
+| `Overall_Result3.md` | Historical Round 3 report |
 | `Transpile_Result.md` | Transpile profiling report (standalone vs with-imports) |
 | `awfy/awfy_helper.js` | AWFY timing wrapper for Node.js |
 | `awfy/*_bundle.js` | Standalone AWFY bundles for LambdaJS/QuickJS |
