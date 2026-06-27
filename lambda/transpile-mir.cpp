@@ -371,8 +371,11 @@ static void emit_call_void_3(MirTranspiler* mt, const char* fn_name,
 
 static bool is_gc_root_type(TypeId type_id) {
     switch (type_id) {
+    // boxed scalar Items carry heap pointers and need roots even in I64 regs;
+    // packed int/bool/null scalars are handled by the default unrooted path.
     case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_DECIMAL:
-    case LMD_TYPE_DTIME: case LMD_TYPE_BINARY: case LMD_TYPE_UINT64:
+    case LMD_TYPE_DTIME: case LMD_TYPE_BINARY: case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64:
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: case LMD_TYPE_RANGE:
     case LMD_TYPE_FUNC: case LMD_TYPE_TYPE: case LMD_TYPE_PATH:
@@ -388,7 +391,7 @@ static bool should_gc_root_var(MIR_type_t mir_type, TypeId type_id) {
 }
 
 static bool should_gc_root_local_var(MIR_type_t mir_type, TypeId type_id) {
-    return mir_type == MIR_T_I64 || should_gc_root_var(mir_type, type_id);
+    return should_gc_root_var(mir_type, type_id);
 }
 
 static MIR_reg_t emit_root_value_bits(MirTranspiler* mt, MIR_reg_t value) {
@@ -2164,6 +2167,14 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             if (tid == LMD_TYPE_TYPE && v->type_id != LMD_TYPE_ANY) return v->type_id;
         }
     }
+    // Proc/function call AST types can be stale when one return path is null but
+    // another returns a heap value, e.g. `vec_remove_first()` returning null for
+    // empty arrays and a map otherwise. MIR calls return boxed Items in that case;
+    // treating the call as NULL leaves the result unrooted until a later assignment,
+    // where growing the root frame can allocate before the value is protected.
+    if (node->node_type == AST_NODE_CALL_EXPR && tid == LMD_TYPE_NULL) {
+        return LMD_TYPE_ANY;
+    }
     // For binary nodes: if either operand has effective type ANY, the runtime
     // will use the boxed fallback path → result is a boxed Item (ANY)
     if (node->node_type == AST_NODE_BINARY) {
@@ -3692,6 +3703,17 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 TypeId var_tid = declare->type ? declare->type->type_id : expr_tid;
                 if (expr_tid == LMD_TYPE_ANY) var_tid = LMD_TYPE_ANY;
                 if (var_tid == LMD_TYPE_ANY && expr_tid != LMD_TYPE_ANY) var_tid = expr_tid;
+                // mutable null placeholders often receive boxed heap Items later
+                // (`var out = null; out = c.v2`).  Creating a GC root slot only at
+                // that later assignment is unsafe because growing the root frame can
+                // allocate before the new heap value has been registered.  The AST
+                // type field already contains inferred NULL here, so use the source
+                // annotation flag to distinguish `var x = null` from `var x: int`.
+                if (let_node->node_type == AST_NODE_VAR_STAM &&
+                    (!asn->entry || !asn->entry->has_type_annotation) &&
+                    expr_tid == LMD_TYPE_NULL) {
+                    var_tid = LMD_TYPE_ANY;
+                }
 
                 // Detect fill(n, int_val) → narrows variable to ARRAY_INT for inline access.
                 // fill() with an int fill value always creates ArrayInt at runtime.
@@ -7014,7 +7036,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
 
             // Import calls return boxed Items. Unbox to native type to match
             // local/system call behavior, so callers can re-box consistently.
-            TypeId call_tid = ((AstNode*)call_node)->type ? ((AstNode*)call_node)->type->type_id : LMD_TYPE_ANY;
+            TypeId call_tid = get_effective_type(mt, (AstNode*)call_node);
             if (call_tid == LMD_TYPE_FLOAT || call_tid == LMD_TYPE_INT || call_tid == LMD_TYPE_BOOL) {
                 result = emit_unbox(mt, result, call_tid);
             }
@@ -7376,7 +7398,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
 
             // P4-3.3: Post-call type handling for return values
-            TypeId call_tid = ((AstNode*)call_node)->type ? ((AstNode*)call_node)->type->type_id : LMD_TYPE_ANY;
+            TypeId call_tid = get_effective_type(mt, (AstNode*)call_node);
             if (call_native_return) {
                 // Native function returns native value directly
                 if (call_tid == call_nfi->return_type) {
@@ -7466,7 +7488,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
     // Dynamic calls (fn_call0/1/2/3) return Item (already boxed).
     // Unbox to native type to match direct call behavior, so callers
     // can re-box consistently based on AST type.
-    TypeId call_tid = ((AstNode*)call_node)->type ? ((AstNode*)call_node)->type->type_id : LMD_TYPE_ANY;
+    TypeId call_tid = get_effective_type(mt, (AstNode*)call_node);
     if (call_tid == LMD_TYPE_FLOAT || call_tid == LMD_TYPE_INT || call_tid == LMD_TYPE_BOOL) {
         dyn_result = emit_unbox(mt, dyn_result, call_tid);
     }
