@@ -27,6 +27,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
 extern "C" Item js_util_custom_promisify_args_symbol(void);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
+extern "C" Item js_process_emit2(Item event_name, Item arg1, Item arg2);
 extern "C" Item push_d(double dval);
 extern "C" double it2d(Item item);
 extern "C" int64_t it2i(Item item);
@@ -4648,6 +4649,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                         // v88: Populate Promise.prototype methods
                         if (nl == 7 && strncmp(nm, "Promise", 7) == 0) {
                             js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
+                            Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+                            Item ctor_val = (Item){.function = (Function*)fn};
+                            js_property_set(fn->prototype, ctor_key, ctor_val);
+                            js_mark_non_enumerable(fn->prototype, ctor_key);
                             // Symbol.toStringTag = "Promise"
                             Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
                             Item tag_val = (Item){.item = s2it(heap_create_name("Promise", 7))};
@@ -20182,8 +20187,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
         (obj.map->map_kind == MAP_KIND_DOM || obj.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
         String* dom_method = it2s(method_name);
-        if (dom_method && !(dom_method->len == 11 &&
-                strncmp(dom_method->chars, "execCommand", 11) == 0)) {
+        if (dom_method) {
             bool own_dom_method = false;
             Item dom_fn = js_map_get_fast(obj.map, dom_method->chars,
                 (int)dom_method->len, &own_dom_method);
@@ -29348,12 +29352,21 @@ struct JsPromise {
     Item wrapper;                  // stable Promise object wrapper for this record
     bool is_finally[8];            // true if handler[i] is a finally handler
     bool wrapper_created;
+    bool rejection_handled;
+    bool unhandled_check_scheduled;
+    bool unhandled_reported;
+    int64_t unhandled_epoch;
     int  then_count;
 };
 
 #define JS_MAX_PROMISES 1024
 static JsPromise js_promises[JS_MAX_PROMISES];
 static int js_promise_count = 0;
+static int64_t js_promise_unhandled_epoch = 0;
+
+extern "C" void js_promise_note_unhandled_listener_reset(void) {
+    js_promise_unhandled_epoch++;
+}
 
 static void js_promise_register_roots_once() {
     static bool registered = false;
@@ -29390,6 +29403,10 @@ static JsPromise* js_alloc_promise() {
     memset(p->is_finally, 0, sizeof(p->is_finally));
     p->wrapper = ItemNull;
     p->wrapper_created = false;
+    p->rejection_handled = false;
+    p->unhandled_check_scheduled = false;
+    p->unhandled_reported = false;
+    p->unhandled_epoch = 0;
     return p;
 }
 
@@ -29404,6 +29421,10 @@ static Item js_promise_to_item(JsPromise* p) {
     js_class_stamp(obj, JS_CLASS_PROMISE);
     // Set __proto__ to Promise.prototype so methods are inherited
     js_wrapper_set_proto(obj, "Promise", 7);
+    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+    Item promise_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Promise", 7))});
+    js_property_set(obj, ctor_key, promise_ctor);
+    js_mark_non_enumerable(obj, ctor_key);
     p->wrapper = obj;
     p->wrapper_created = true;
     return p->wrapper;
@@ -29439,6 +29460,8 @@ extern "C" int js_promise_pending_count(void) {
 // Forward declaration — js_promise_settle is called recursively from microtask runner
 static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result);
 static void js_promise_resolve_with_value(JsPromise* p, Item value);
+static void js_promise_schedule_unhandled_check(JsPromise* p);
+static void js_promise_mark_rejection_handled(JsPromise* p);
 
 // Forward declarations for promise microtask helpers
 static Item js_promise_microtask_resolve(Item next_promise_item, Item value);
@@ -29518,6 +29541,7 @@ static void js_promise_adopt_native(JsPromise* target, JsPromise* source) {
         return;
     }
     Item target_item = js_promise_to_item(target);
+    js_promise_mark_rejection_handled(source);
     if (source->state != JS_PROMISE_PENDING) {
         Item handler = js_new_function((void*)(source->state == JS_PROMISE_FULFILLED
             ? js_promise_microtask_resolve : js_promise_microtask_reject), 2);
@@ -29679,6 +29703,40 @@ static Item js_promise_passthrough_run(Item next_promise_item, Item state_item, 
     return ItemNull;
 }
 
+static Item js_promise_unhandled_check(Item promise_item) {
+    JsPromise* p = js_get_promise(promise_item);
+    if (!p) return ItemNull;
+    p->unhandled_check_scheduled = false;
+    if (p->unhandled_epoch != js_promise_unhandled_epoch) return ItemNull;
+    if (p->state == JS_PROMISE_REJECTED && !p->rejection_handled && !p->unhandled_reported) {
+        p->unhandled_reported = true;
+        js_process_emit2((Item){.item = s2it(heap_create_name("unhandledRejection", 18))},
+            p->result, promise_item);
+    }
+    return ItemNull;
+}
+
+static void js_promise_schedule_unhandled_check(JsPromise* p) {
+    if (!p || p->rejection_handled || p->unhandled_check_scheduled || p->unhandled_reported) return;
+    p->unhandled_check_scheduled = true;
+    p->unhandled_epoch = js_promise_unhandled_epoch;
+    Item promise_item = js_promise_to_item(p);
+    Item check_fn = js_new_function((void*)js_promise_unhandled_check, 1);
+    Item callback = js_bind_function(check_fn, ItemNull, &promise_item, 1);
+    extern Item js_setImmediate(Item callback);
+    js_setImmediate(callback);
+    if (js_check_exception()) js_clear_exception();
+}
+
+static void js_promise_mark_rejection_handled(JsPromise* p) {
+    if (!p || p->rejection_handled) return;
+    p->rejection_handled = true;
+    if (p->unhandled_reported) {
+        js_process_emit((Item){.item = s2it(heap_create_name("rejectionHandled", 16))},
+            js_promise_to_item(p));
+    }
+}
+
 // Enqueue a promise handler as a microtask with proper chaining.
 // Creates a bound thunk: js_promise_microtask_run(handler, result, next_promise_item)
 static void js_promise_enqueue_handler(Item handler, Item result, Item next_promise_item) {
@@ -29736,6 +29794,10 @@ static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result) {
             // no handler for this state — propagate through a Promise reaction job
             js_promise_enqueue_passthrough(next_item, state, result);
         }
+    }
+
+    if (state == JS_PROMISE_REJECTED) {
+        js_promise_schedule_unhandled_check(p);
     }
 }
 
@@ -29865,6 +29927,7 @@ static Item js_promise_default_constructor(void) {
 
 static Item js_promise_species_constructor(Item promise) {
     Item default_constructor = js_promise_default_constructor();
+    if (js_get_promise(promise)) return default_constructor;
     Item constructor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
     Item constructor = js_property_get(promise, constructor_key);
     if (js_check_exception()) return ItemNull;
@@ -30646,6 +30709,10 @@ extern "C" Item js_async_get_promise(Item ctx_idx_item) {
 extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected) {
     JsPromise* p = js_get_promise(promise);
     if (!p) return ItemNull;
+    bool has_rejection_handler = get_type_id(on_rejected) == LMD_TYPE_FUNC;
+    if (has_rejection_handler) {
+        js_promise_mark_rejection_handled(p);
+    }
 
     Item return_promise = ItemNull;
     Item capability_resolve = ItemNull;

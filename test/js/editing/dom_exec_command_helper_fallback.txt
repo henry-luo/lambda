@@ -1,3 +1,0 @@
-delete-fallback ok=true html="fo" expected=true focus=true:1 focusExpected=1
-forwarddelete-fallback ok=true html="fo" expected=true focus=true:1 focusExpected=1
-helper-calls=2

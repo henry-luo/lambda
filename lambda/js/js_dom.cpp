@@ -182,8 +182,6 @@ static Item js_document_default_view = {.item = ITEM_NULL};
 // Stored document.title value (same reason as defaultView)
 static Item js_document_title_value = {.item = ITEM_NULL};
 static bool js_document_design_mode = false;
-static bool js_document_open_invalid_for_exec_command = false;
-static bool js_document_style_with_css = false;
 static DomElement* js_document_active_element = nullptr;
 static Item js_dom_document_element_from_point(DomDocument* doc,
                                                Item x_arg,
@@ -787,871 +785,6 @@ static Item js_dom_testdriver_key(Item key_item,
     return (Item){.item = b2it(ok && (prevented || mutated))};
 }
 
-static bool js_dom_exec_command_is_core_text(const char* cmd) {
-    if (!cmd) return false;
-    return strcasecmp(cmd, "insertText") == 0 ||
-        strcasecmp(cmd, "insertHTML") == 0 ||
-        strcasecmp(cmd, "insertParagraph") == 0 ||
-        strcasecmp(cmd, "insertLineBreak") == 0 ||
-        strcasecmp(cmd, "delete") == 0 ||
-        strcasecmp(cmd, "forwardDelete") == 0;
-}
-
-static bool js_dom_exec_command_is_inline_format(const char* cmd) {
-    if (!cmd) return false;
-    return strcasecmp(cmd, "bold") == 0 ||
-        strcasecmp(cmd, "italic") == 0 ||
-        strcasecmp(cmd, "underline") == 0 ||
-        strcasecmp(cmd, "strikethrough") == 0 ||
-        strcasecmp(cmd, "subscript") == 0 ||
-        strcasecmp(cmd, "superscript") == 0;
-}
-
-static bool js_dom_exec_command_is_block_structure(const char* cmd) {
-    if (!cmd) return false;
-    return strcasecmp(cmd, "formatBlock") == 0 ||
-        strcasecmp(cmd, "indent") == 0 ||
-        strcasecmp(cmd, "outdent") == 0 ||
-        strcasecmp(cmd, "insertOrderedList") == 0 ||
-        strcasecmp(cmd, "insertUnorderedList") == 0 ||
-        strcasecmp(cmd, "justifyLeft") == 0 ||
-        strcasecmp(cmd, "justifyCenter") == 0 ||
-        strcasecmp(cmd, "justifyRight") == 0 ||
-        strcasecmp(cmd, "justifyFull") == 0;
-}
-
-static bool js_dom_exec_command_is_link_object(const char* cmd) {
-    if (!cmd) return false;
-    return strcasecmp(cmd, "createLink") == 0 ||
-        strcasecmp(cmd, "unlink") == 0 ||
-        strcasecmp(cmd, "insertHorizontalRule") == 0 ||
-        strcasecmp(cmd, "insertImage") == 0;
-}
-
-static bool js_dom_exec_command_is_color_font(const char* cmd) {
-    if (!cmd) return false;
-    return strcasecmp(cmd, "foreColor") == 0 ||
-        strcasecmp(cmd, "backColor") == 0 ||
-        strcasecmp(cmd, "hiliteColor") == 0 ||
-        strcasecmp(cmd, "fontName") == 0 ||
-        strcasecmp(cmd, "fontSize") == 0;
-}
-
-static bool js_dom_exec_command_is_style_mode(const char* cmd) {
-    if (!cmd) return false;
-    return strcasecmp(cmd, "styleWithCSS") == 0 ||
-        strcasecmp(cmd, "useCSS") == 0;
-}
-
-static bool js_dom_exec_command_is_cleanup_selection(const char* cmd) {
-    if (!cmd) return false;
-    return strcasecmp(cmd, "removeFormat") == 0 ||
-        strcasecmp(cmd, "selectAll") == 0;
-}
-
-static bool js_dom_exec_command_is_clipboard(const char* cmd) {
-    if (!cmd) return false;
-    return strcasecmp(cmd, "copy") == 0 ||
-        strcasecmp(cmd, "cut") == 0 ||
-        strcasecmp(cmd, "paste") == 0;
-}
-
-static bool js_dom_exec_command_is_history(const char* cmd) {
-    if (!cmd) return false;
-    return strcasecmp(cmd, "undo") == 0 ||
-        strcasecmp(cmd, "redo") == 0;
-}
-
-static bool js_dom_exec_command_uses_helper_first(const char* cmd) {
-    if (!cmd) return false;
-    return js_dom_exec_command_is_clipboard(cmd) ||
-        strcasecmp(cmd, "insertText") == 0 ||
-        strcasecmp(cmd, "insertHTML") == 0 ||
-        strcasecmp(cmd, "insertParagraph") == 0 ||
-        strcasecmp(cmd, "insertLineBreak") == 0 ||
-        strcasecmp(cmd, "formatBlock") == 0 ||
-        strcasecmp(cmd, "justifyLeft") == 0 ||
-        strcasecmp(cmd, "justifyCenter") == 0 ||
-        strcasecmp(cmd, "justifyRight") == 0 ||
-        strcasecmp(cmd, "justifyFull") == 0 ||
-        strcasecmp(cmd, "indent") == 0 ||
-        strcasecmp(cmd, "outdent") == 0 ||
-        strcasecmp(cmd, "insertOrderedList") == 0 ||
-        strcasecmp(cmd, "insertUnorderedList") == 0 ||
-        strcasecmp(cmd, "createLink") == 0 ||
-        strcasecmp(cmd, "unlink") == 0 ||
-        strcasecmp(cmd, "bold") == 0 ||
-        strcasecmp(cmd, "backColor") == 0 ||
-        strcasecmp(cmd, "foreColor") == 0 ||
-        strcasecmp(cmd, "hiliteColor") == 0 ||
-        strcasecmp(cmd, "delete") == 0 ||
-        strcasecmp(cmd, "forwardDelete") == 0 ||
-        strcasecmp(cmd, "deleteForward") == 0 ||
-        strcasecmp(cmd, "undo") == 0;
-}
-
-static Item js_dom_exec_command_call_helper(Item* args, int argc) {
-    Item helper_key = (Item){.item = s2it(heap_create_name("__lambda_execCommand_handler"))};
-    Item helper = js_get_global_property(helper_key);
-    if (get_type_id(helper) == LMD_TYPE_FUNC) {
-        Item guard_key = (Item){.item = s2it(heap_create_name("__lambda_execCommand_helper_fallback"))};
-        Item prev_guard = js_get_global_property(guard_key);
-        if (js_is_truthy(prev_guard)) return (Item){.item = ITEM_FALSE};
-        js_set_global_property(guard_key, (Item){.item = ITEM_TRUE}, 0);
-        Item handled = js_call_function(helper, js_get_document_object_value(), args, argc);
-        js_set_global_property(guard_key, prev_guard, 0);
-        return handled;
-    }
-    return (Item){.item = ITEM_FALSE};
-}
-
-static void js_dom_exec_command_call_preflight(Item* args, int argc) {
-    if (js_document_open_invalid_for_exec_command) {
-        Item open_key = (Item){.item = s2it(heap_create_name("__lambda_document_open_invalid_for_exec_command"))};
-        js_set_global_property(open_key, (Item){.item = ITEM_TRUE}, 0);
-    }
-    Item hook_key = (Item){.item = s2it(heap_create_name("__lambda_execCommand_preflight"))};
-    Item hook = js_get_global_property(hook_key);
-    if (get_type_id(hook) == LMD_TYPE_FUNC) {
-        js_call_function(hook, js_get_document_object_value(), args, argc);
-    }
-    if (js_document_open_invalid_for_exec_command) {
-        Item open_key = (Item){.item = s2it(heap_create_name("__lambda_document_open_invalid_for_exec_command"))};
-        js_set_global_property(open_key, (Item){.item = ITEM_FALSE}, 0);
-        js_document_open_invalid_for_exec_command = false;
-    }
-}
-
-static bool js_dom_exec_command_is_native(const char* cmd) {
-    return js_dom_exec_command_is_core_text(cmd) ||
-        js_dom_exec_command_is_inline_format(cmd) ||
-        js_dom_exec_command_is_block_structure(cmd) ||
-        js_dom_exec_command_is_link_object(cmd) ||
-        js_dom_exec_command_is_color_font(cmd) ||
-        js_dom_exec_command_is_cleanup_selection(cmd) ||
-        js_dom_exec_command_is_clipboard(cmd) ||
-        js_dom_exec_command_is_history(cmd);
-}
-
-static bool js_dom_exec_command_is_supported(const char* cmd) {
-    if (!cmd) return false;
-    return js_dom_exec_command_is_native(cmd) ||
-        js_dom_exec_command_is_style_mode(cmd);
-}
-
-static bool js_dom_exec_command_style_mode_arg(Item value, bool default_value) {
-    if (is_js_undefined(value) || value.item == ITEM_NULL) return default_value;
-    if (get_type_id(value) == LMD_TYPE_BOOL) return it2b(value);
-    const char* s = fn_to_cstr(value);
-    if (s && strcasecmp(s, "false") == 0) return false;
-    return true;
-}
-
-static Item js_dom_exec_command_style_mode(const char* cmd,
-                                           Item* args,
-                                           int argc) {
-    if (!js_dom_exec_command_is_style_mode(cmd)) return (Item){.item = ITEM_FALSE};
-    bool enabled = argc >= 3
-        ? js_dom_exec_command_style_mode_arg(args[2], true)
-        : true;
-    if (strcasecmp(cmd, "useCSS") == 0) enabled = !enabled;
-    js_document_style_with_css = enabled;
-    log_debug("js_dom_exec_command_style_mode: command=%s styleWithCSS=%d",
-              cmd ? cmd : "", js_document_style_with_css ? 1 : 0);
-    return (Item){.item = ITEM_TRUE};
-}
-
-static bool js_dom_exec_command_map_intent(const char* cmd,
-                                           const char* value,
-                                           InputIntent* out) {
-    if (!cmd || !out) return false;
-    memset(out, 0, sizeof(*out));
-    if (strcasecmp(cmd, "insertText") == 0) {
-        out->type = INPUT_INTENT_INSERT_TEXT;
-        out->data = value ? value : "";
-        return true;
-    }
-    if (strcasecmp(cmd, "insertHTML") == 0) {
-        out->type = INPUT_INTENT_INSERT_FROM_PASTE;
-        out->data = value ? value : "";
-        out->html_data = value ? value : "";
-        out->data_mime = "text/html";
-        return true;
-    }
-    if (strcasecmp(cmd, "insertParagraph") == 0) {
-        out->type = INPUT_INTENT_INSERT_PARAGRAPH;
-        return true;
-    }
-    if (strcasecmp(cmd, "insertLineBreak") == 0) {
-        out->type = INPUT_INTENT_INSERT_LINE_BREAK;
-        return true;
-    }
-    if (strcasecmp(cmd, "delete") == 0) {
-        out->type = INPUT_INTENT_DELETE_CONTENT_BACKWARD;
-        out->key = RDT_KEY_BACKSPACE;
-        return true;
-    }
-    if (strcasecmp(cmd, "forwardDelete") == 0) {
-        out->type = INPUT_INTENT_DELETE_CONTENT_FORWARD;
-        out->key = RDT_KEY_DELETE;
-        return true;
-    }
-    if (strcasecmp(cmd, "bold") == 0) {
-        out->type = INPUT_INTENT_FORMAT_BOLD;
-        return true;
-    }
-    if (strcasecmp(cmd, "italic") == 0) {
-        out->type = INPUT_INTENT_FORMAT_ITALIC;
-        return true;
-    }
-    if (strcasecmp(cmd, "underline") == 0) {
-        out->type = INPUT_INTENT_FORMAT_UNDERLINE;
-        return true;
-    }
-    if (strcasecmp(cmd, "strikethrough") == 0) {
-        out->type = INPUT_INTENT_FORMAT_STRIKETHROUGH;
-        return true;
-    }
-    if (strcasecmp(cmd, "subscript") == 0) {
-        out->type = INPUT_INTENT_FORMAT_SUBSCRIPT;
-        return true;
-    }
-    if (strcasecmp(cmd, "superscript") == 0) {
-        out->type = INPUT_INTENT_FORMAT_SUPERSCRIPT;
-        return true;
-    }
-    if (strcasecmp(cmd, "foreColor") == 0) {
-        out->type = INPUT_INTENT_FORMAT_FORE_COLOR;
-        out->data = value ? value : "";
-        return true;
-    }
-    if (strcasecmp(cmd, "backColor") == 0) {
-        out->type = INPUT_INTENT_FORMAT_BACK_COLOR;
-        out->data = value ? value : "";
-        return true;
-    }
-    if (strcasecmp(cmd, "hiliteColor") == 0) {
-        out->type = INPUT_INTENT_FORMAT_HILITE_COLOR;
-        out->data = value ? value : "";
-        return true;
-    }
-    if (strcasecmp(cmd, "fontName") == 0) {
-        out->type = INPUT_INTENT_FORMAT_FONT_NAME;
-        out->data = value ? value : "";
-        return true;
-    }
-    if (strcasecmp(cmd, "fontSize") == 0) {
-        out->type = INPUT_INTENT_FORMAT_FONT_SIZE;
-        out->data = value ? value : "";
-        return true;
-    }
-    if (strcasecmp(cmd, "removeFormat") == 0) {
-        out->type = INPUT_INTENT_FORMAT_REMOVE;
-        return true;
-    }
-    if (strcasecmp(cmd, "selectAll") == 0) {
-        out->type = INPUT_INTENT_SELECT_ALL;
-        return true;
-    }
-    if (strcasecmp(cmd, "undo") == 0) {
-        out->type = INPUT_INTENT_HISTORY_UNDO;
-        return true;
-    }
-    if (strcasecmp(cmd, "redo") == 0) {
-        out->type = INPUT_INTENT_HISTORY_REDO;
-        return true;
-    }
-    if (strcasecmp(cmd, "cut") == 0) {
-        out->type = INPUT_INTENT_DELETE_BY_CUT;
-        return true;
-    }
-    if (strcasecmp(cmd, "paste") == 0) {
-        const char* text_read = clipboard_store_read_text();
-        char* text_copy = text_read ? mem_strdup(text_read, MEM_CAT_TEMP) : nullptr;
-        const char* html_read = clipboard_store_read_mime("text/html");
-        char* html_copy = html_read ? mem_strdup(html_read, MEM_CAT_TEMP) : nullptr;
-        if ((!text_copy || !text_copy[0]) && (!html_copy || !html_copy[0])) {
-            mem_free(text_copy);
-            mem_free(html_copy);
-            return false;
-        }
-        out->type = INPUT_INTENT_INSERT_FROM_PASTE;
-        if (text_copy && text_copy[0]) {
-            out->owned_data = text_copy;
-            out->data = text_copy;
-        } else if (html_copy) {
-            mem_free(text_copy);
-            out->owned_data = mem_strdup(html_copy, MEM_CAT_TEMP);
-            out->data = out->owned_data;
-        } else {
-            mem_free(text_copy);
-        }
-        if (html_copy && html_copy[0]) {
-            out->owned_html_data = html_copy;
-            out->html_data = html_copy;
-        } else {
-            mem_free(html_copy);
-        }
-        out->data_mime = (out->html_data && out->html_data[0])
-            ? "text/html"
-            : "text/plain";
-        if (!out->data) {
-            input_intent_dispose(out);
-            return false;
-        }
-        return true;
-    }
-    if (strcasecmp(cmd, "createLink") == 0) {
-        out->type = INPUT_INTENT_INSERT_LINK;
-        out->data = value ? value : "";
-        return true;
-    }
-    if (strcasecmp(cmd, "unlink") == 0) {
-        out->type = INPUT_INTENT_FORMAT_UNLINK;
-        return true;
-    }
-    if (strcasecmp(cmd, "insertHorizontalRule") == 0) {
-        out->type = INPUT_INTENT_INSERT_HORIZONTAL_RULE;
-        return true;
-    }
-    if (strcasecmp(cmd, "insertImage") == 0) {
-        out->type = INPUT_INTENT_INSERT_IMAGE;
-        out->data = value ? value : "";
-        return true;
-    }
-    if (strcasecmp(cmd, "formatBlock") == 0) {
-        out->type = INPUT_INTENT_FORMAT_BLOCK;
-        out->data = value ? value : "";
-        return true;
-    }
-    if (strcasecmp(cmd, "indent") == 0) {
-        out->type = INPUT_INTENT_FORMAT_INDENT;
-        return true;
-    }
-    if (strcasecmp(cmd, "outdent") == 0) {
-        out->type = INPUT_INTENT_FORMAT_OUTDENT;
-        return true;
-    }
-    if (strcasecmp(cmd, "insertOrderedList") == 0) {
-        out->type = INPUT_INTENT_FORMAT_ORDERED_LIST;
-        return true;
-    }
-    if (strcasecmp(cmd, "insertUnorderedList") == 0) {
-        out->type = INPUT_INTENT_FORMAT_UNORDERED_LIST;
-        return true;
-    }
-    if (strcasecmp(cmd, "justifyLeft") == 0) {
-        out->type = INPUT_INTENT_FORMAT_JUSTIFY_LEFT;
-        return true;
-    }
-    if (strcasecmp(cmd, "justifyCenter") == 0) {
-        out->type = INPUT_INTENT_FORMAT_JUSTIFY_CENTER;
-        return true;
-    }
-    if (strcasecmp(cmd, "justifyRight") == 0) {
-        out->type = INPUT_INTENT_FORMAT_JUSTIFY_RIGHT;
-        return true;
-    }
-    if (strcasecmp(cmd, "justifyFull") == 0) {
-        out->type = INPUT_INTENT_FORMAT_JUSTIFY_FULL;
-        return true;
-    }
-    return false;
-}
-
-static bool js_dom_exec_command_has_rich_target(void) {
-    DocState* state = js_dom_testdriver_state();
-    if (!state) return false;
-    int fallback_offset = 0;
-    View* target = js_dom_testdriver_current_target(state, &fallback_offset);
-    if (!target) return false;
-    EditingSurface surface;
-    return js_dom_testdriver_rich_surface(target, &surface);
-}
-
-static bool js_dom_exec_command_copy_selection_to_clipboard(DocState* state,
-                                                            const char* prefix) {
-    if (!state) return false;
-    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "js.execCommand.clipboard");
-    if (!temp_pool) return false;
-    Arena* temp_arena = mem_arena_create(NULL, temp_pool, MEM_ROLE_TEMP,
-                                         "js.execCommand.clipboard.arena");
-    if (!temp_arena) {
-        mem_pool_destroy(temp_pool);
-        return false;
-    }
-
-    char* text = state_store_extract_selection_text(state, temp_arena);
-    char* html = state_store_extract_selection_html(state, temp_arena);
-    bool copied = false;
-    if (html && html[0] && text) {
-        clipboard_store_write_html(html, text);
-        copied = true;
-        log_debug("%s: copied rich selection html=%zu text=%zu",
-                  prefix ? prefix : "js_dom_exec_command_copy",
-                  strlen(html), strlen(text));
-    } else if (text && text[0]) {
-        clipboard_store_write_text(text);
-        copied = true;
-        log_debug("%s: copied plain selection text=%zu",
-                  prefix ? prefix : "js_dom_exec_command_copy",
-                  strlen(text));
-    }
-
-    arena_destroy(temp_arena);
-    mem_pool_destroy(temp_pool);
-    return copied;
-}
-
-static bool js_dom_exec_command_copy_selection_hook(DocState* state,
-                                                    const char* prefix,
-                                                    void* user) {
-    (void)user;
-    return js_dom_exec_command_copy_selection_to_clipboard(state, prefix);
-}
-
-static Item js_dom_exec_command_native(Item* args, int argc) {
-    if (!_js_current_document || !args || argc < 1) {
-        return (Item){.item = ITEM_FALSE};
-    }
-    const char* cmd = fn_to_cstr(args[0]);
-    if (!js_dom_exec_command_is_native(cmd)) {
-        return (Item){.item = ITEM_FALSE};
-    }
-
-    DocState* state = js_dom_testdriver_state();
-    if (!state) return (Item){.item = ITEM_FALSE};
-
-    if (cmd && strcasecmp(cmd, "copy") == 0) {
-        bool copied = js_dom_exec_command_copy_selection_to_clipboard(
-            state, "js_dom_exec_command_copy");
-        return (Item){.item = b2it(copied)};
-    }
-
-    int fallback_offset = 0;
-    View* target = js_dom_testdriver_current_target(state, &fallback_offset);
-    if (!target) return (Item){.item = ITEM_FALSE};
-
-    EditingSurface surface;
-    if (!js_dom_testdriver_rich_surface(target, &surface)) {
-        return (Item){.item = ITEM_FALSE};
-    }
-
-    const char* value = argc >= 3 ? fn_to_cstr(args[2]) : "";
-    InputIntent intent;
-    if (!js_dom_exec_command_map_intent(cmd, value, &intent)) {
-        return (Item){.item = ITEM_FALSE};
-    }
-    bool record_history = js_dom_rich_history_should_record(&intent);
-    char* history_before = record_history
-        ? js_dom_rich_history_snapshot(surface.owner)
-        : nullptr;
-    JsDomRichHistorySelection history_before_sel;
-    memset(&history_before_sel, 0, sizeof(history_before_sel));
-    JsDomRichHistorySelection history_after_sel;
-    memset(&history_after_sel, 0, sizeof(history_after_sel));
-    if (record_history) {
-        js_dom_rich_history_capture_selection(state, surface.owner,
-                                              &history_before_sel);
-    }
-
-    EventContext evcon;
-    memset(&evcon, 0, sizeof(evcon));
-    evcon.target_document = _js_current_document;
-    evcon.event.key.type = RDT_EVENT_KEY_DOWN;
-    evcon.event.key.key = intent.key;
-    evcon.event.key.mods = intent.mods;
-
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = js_dom_testdriver_dispatch_input_event;
-    hooks.dispatch_lambda_event = nullptr;
-    hooks.copy_selection = js_dom_exec_command_copy_selection_hook;
-    hooks.user = nullptr;
-
-    JsDomTestdriverMutationArgs mutate_args;
-    mutate_args.fallback_view = target;
-    mutate_args.fallback_offset = fallback_offset;
-
-    EditingTransaction tx;
-    memset(&tx, 0, sizeof(tx));
-    tx.surface = &surface;
-    tx.intent = &intent;
-    tx.hooks = &hooks;
-    tx.mutate = js_dom_testdriver_rich_mutate;
-    tx.mutate_user = &mutate_args;
-    tx.operation = "execCommand";
-    tx.dispatch_input_without_mutation = false;
-    tx.mutation_invalidates_layout = true;
-    tx.mutation_invalidates_paint = true;
-
-    bool prevented = false;
-    bool mutated = false;
-    bool ok = editing_run_transaction(&evcon, &tx, &prevented, &mutated, nullptr);
-    if (ok && mutated && record_history && history_before) {
-        char* history_after = js_dom_rich_history_snapshot(surface.owner);
-        js_dom_rich_history_capture_selection(state, surface.owner,
-                                              &history_after_sel);
-        js_dom_rich_history_record(surface.owner, history_before, history_after,
-                                   &history_before_sel, &history_after_sel);
-        mem_free(history_after);
-    }
-    mem_free(history_before);
-    input_intent_dispose(&intent);
-    if (ok && mutated && _js_current_document) {
-        js_dom_mutation_notify(DOM_JS_MUTATION_TEXT, surface.owner, surface.owner);
-        js_dom_queue_selectionchange(state->dom_selection);
-    }
-    log_debug("js_dom_exec_command_native: command=%s inputType=%s ok=%d prevented=%d mutated=%d",
-              cmd ? cmd : "?", input_intent_type_name(intent.type),
-              ok ? 1 : 0, prevented ? 1 : 0, mutated ? 1 : 0);
-    return (Item){.item = b2it(ok && (prevented || mutated))};
-}
-
-static uintptr_t js_dom_exec_command_inline_tag(const char* cmd) {
-    if (!cmd) return 0;
-    if (strcasecmp(cmd, "bold") == 0) return HTM_TAG_B;
-    if (strcasecmp(cmd, "italic") == 0) return HTM_TAG_I;
-    if (strcasecmp(cmd, "underline") == 0) return HTM_TAG_U;
-    if (strcasecmp(cmd, "strikethrough") == 0) return HTM_TAG_S;
-    if (strcasecmp(cmd, "subscript") == 0) return HTM_TAG_SUB;
-    if (strcasecmp(cmd, "superscript") == 0) return HTM_TAG_SUP;
-    return 0;
-}
-
-static uint32_t js_dom_exec_command_inline_state_bit(const char* cmd) {
-    if (!cmd) return 0;
-    if (strcasecmp(cmd, "bold") == 0) return 1u << 0;
-    if (strcasecmp(cmd, "italic") == 0) return 1u << 1;
-    if (strcasecmp(cmd, "underline") == 0) return 1u << 2;
-    if (strcasecmp(cmd, "strikethrough") == 0) return 1u << 3;
-    if (strcasecmp(cmd, "subscript") == 0) return 1u << 4;
-    if (strcasecmp(cmd, "superscript") == 0) return 1u << 5;
-    return 0;
-}
-
-static bool js_dom_exec_command_inline_tag_matches(const char* cmd,
-                                                   uintptr_t tag) {
-    if (!cmd || !tag) return false;
-    if (strcasecmp(cmd, "bold") == 0) {
-        return tag == HTM_TAG_B || tag == HTM_TAG_STRONG;
-    }
-    if (strcasecmp(cmd, "italic") == 0) {
-        return tag == HTM_TAG_I || tag == HTM_TAG_EM;
-    }
-    if (strcasecmp(cmd, "underline") == 0) {
-        return tag == HTM_TAG_U;
-    }
-    if (strcasecmp(cmd, "strikethrough") == 0) {
-        return tag == HTM_TAG_S || tag == HTM_TAG_STRIKE;
-    }
-    if (strcasecmp(cmd, "subscript") == 0) {
-        return tag == HTM_TAG_SUB;
-    }
-    if (strcasecmp(cmd, "superscript") == 0) {
-        return tag == HTM_TAG_SUP;
-    }
-    return false;
-}
-
-static bool js_dom_exec_command_query_inline_state(const char* cmd) {
-    uintptr_t tag = js_dom_exec_command_inline_tag(cmd);
-    if (!tag) return false;
-    DocState* state = js_dom_testdriver_state();
-    if (!state || !state->dom_selection ||
-        state->dom_selection->range_count == 0 ||
-        !state->dom_selection->ranges[0]) {
-        return false;
-    }
-
-    uint32_t bit = js_dom_exec_command_inline_state_bit(cmd);
-    if (bit && (state->editing.inline_format_state_mask & bit)) {
-        return (state->editing.inline_format_state & bit) != 0;
-    }
-
-    DomBoundary boundary = dom_selection_focus_boundary(state->dom_selection);
-    DomNode* node = boundary.node;
-    if (!node) return false;
-
-    EditingSurface surface;
-    if (!editing_surface_from_target(static_cast<View*>(node), &surface) ||
-        !editing_surface_is_rich(&surface)) {
-        return false;
-    }
-
-    for (DomNode* cur = node; cur; cur = cur->parent) {
-        if (cur->is_element()) {
-            DomElement* elem = cur->as_element();
-            if (elem && js_dom_exec_command_inline_tag_matches(cmd, elem->tag())) {
-                return true;
-            }
-        }
-        if (cur == static_cast<DomNode*>(surface.owner)) break;
-    }
-    return false;
-}
-
-static const char* js_dom_exec_command_style_property(const char* cmd) {
-    if (!cmd) return nullptr;
-    if (strcasecmp(cmd, "foreColor") == 0) return "color";
-    if (strcasecmp(cmd, "backColor") == 0 ||
-        strcasecmp(cmd, "hiliteColor") == 0) {
-        return "background-color";
-    }
-    if (strcasecmp(cmd, "fontName") == 0) return "font-family";
-    if (strcasecmp(cmd, "fontSize") == 0) return "font-size";
-    return nullptr;
-}
-
-static bool js_dom_ascii_space(char ch) {
-    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
-}
-
-static bool js_dom_style_decl_value(const char* style_text,
-                                    const char* prop_name,
-                                    char* out,
-                                    size_t out_size) {
-    if (out && out_size > 0) out[0] = '\0';
-    if (!style_text || !prop_name || !out || out_size == 0) return false;
-
-    const char* seg = style_text;
-    while (*seg) {
-        const char* end = strchr(seg, ';');
-        if (!end) end = seg + strlen(seg);
-
-        const char* colon = nullptr;
-        for (const char* p = seg; p < end; p++) {
-            if (*p == ':') {
-                colon = p;
-                break;
-            }
-        }
-        if (colon) {
-            const char* name_start = seg;
-            const char* name_end = colon;
-            while (name_start < name_end && js_dom_ascii_space(*name_start)) {
-                name_start++;
-            }
-            while (name_end > name_start && js_dom_ascii_space(name_end[-1])) {
-                name_end--;
-            }
-
-            size_t name_len = (size_t)(name_end - name_start);
-            if (strlen(prop_name) == name_len &&
-                strncasecmp(name_start, prop_name, name_len) == 0) {
-                const char* value_start = colon + 1;
-                const char* value_end = end;
-                while (value_start < value_end &&
-                       js_dom_ascii_space(*value_start)) {
-                    value_start++;
-                }
-                while (value_end > value_start &&
-                       js_dom_ascii_space(value_end[-1])) {
-                    value_end--;
-                }
-
-                size_t value_len = (size_t)(value_end - value_start);
-                if (value_len >= out_size) value_len = out_size - 1;
-                memcpy(out, value_start, value_len);
-                out[value_len] = '\0';
-                return true;
-            }
-        }
-
-        seg = *end ? end + 1 : end;
-    }
-    return false;
-}
-
-static const char* js_dom_exec_command_query_style_value(const char* cmd,
-                                                        char* out,
-                                                        size_t out_size) {
-    if (out && out_size > 0) out[0] = '\0';
-    const char* prop_name = js_dom_exec_command_style_property(cmd);
-    if (!prop_name || !out || out_size == 0) return "";
-
-    DocState* state = js_dom_testdriver_state();
-    if (!state || !state->dom_selection ||
-        state->dom_selection->range_count == 0 ||
-        !state->dom_selection->ranges[0]) {
-        return "";
-    }
-
-    DomBoundary boundary = dom_selection_focus_boundary(state->dom_selection);
-    DomNode* node = boundary.node;
-    if (!node) return "";
-
-    EditingSurface surface;
-    if (!editing_surface_from_target(static_cast<View*>(node), &surface) ||
-        !editing_surface_is_rich(&surface)) {
-        return "";
-    }
-
-    for (DomNode* cur = node; cur; cur = cur->parent) {
-        if (cur->is_element()) {
-            DomElement* elem = cur->as_element();
-            const char* style_text =
-                elem ? dom_element_get_attribute(elem, "style") : nullptr;
-            if (js_dom_style_decl_value(style_text, prop_name, out, out_size)) {
-                return out;
-            }
-        }
-        if (cur == static_cast<DomNode*>(surface.owner)) break;
-    }
-    return "";
-}
-
-static bool js_dom_exec_command_block_tag(uintptr_t tag) {
-    return tag == HTM_TAG_P ||
-        tag == HTM_TAG_DIV ||
-        tag == HTM_TAG_H1 ||
-        tag == HTM_TAG_H2 ||
-        tag == HTM_TAG_H3 ||
-        tag == HTM_TAG_H4 ||
-        tag == HTM_TAG_H5 ||
-        tag == HTM_TAG_H6 ||
-        tag == HTM_TAG_BLOCKQUOTE ||
-        tag == HTM_TAG_PRE;
-}
-
-static const char* js_dom_exec_command_justify_value(const char* cmd) {
-    if (!cmd) return nullptr;
-    if (strcasecmp(cmd, "justifyLeft") == 0) return "left";
-    if (strcasecmp(cmd, "justifyCenter") == 0) return "center";
-    if (strcasecmp(cmd, "justifyRight") == 0) return "right";
-    if (strcasecmp(cmd, "justifyFull") == 0) return "justify";
-    return nullptr;
-}
-
-static const char* js_dom_skip_ascii_space(const char* p, const char* end) {
-    while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' ||
-                      *p == '\r' || *p == '\f')) {
-        p++;
-    }
-    return p;
-}
-
-static const char* js_dom_trim_ascii_space_end(const char* start,
-                                               const char* end) {
-    while (end > start && (end[-1] == ' ' || end[-1] == '\t' ||
-                          end[-1] == '\n' || end[-1] == '\r' ||
-                          end[-1] == '\f')) {
-        end--;
-    }
-    return end;
-}
-
-static bool js_dom_style_text_align_equals(const char* style,
-                                           const char* expected) {
-    if (!style || !expected) return false;
-    const char* p = style;
-    const char* end = style + strlen(style);
-    while (p < end) {
-        const char* semi = p;
-        while (semi < end && *semi != ';') semi++;
-        const char* decl_start = js_dom_skip_ascii_space(p, semi);
-        const char* decl_end = js_dom_trim_ascii_space_end(decl_start, semi);
-        const char* colon = decl_start;
-        while (colon < decl_end && *colon != ':') colon++;
-        if (colon < decl_end) {
-            const char* name_end = js_dom_trim_ascii_space_end(decl_start, colon);
-            const char* value_start = js_dom_skip_ascii_space(colon + 1, decl_end);
-            const char* value_end = js_dom_trim_ascii_space_end(value_start, decl_end);
-            if ((size_t)(name_end - decl_start) == 10 &&
-                strncasecmp(decl_start, "text-align", 10) == 0 &&
-                (size_t)(value_end - value_start) == strlen(expected) &&
-                strncasecmp(value_start, expected,
-                    (size_t)(value_end - value_start)) == 0) {
-                return true;
-            }
-        }
-        p = semi < end ? semi + 1 : end;
-    }
-    return false;
-}
-
-static DomElement* js_dom_exec_command_query_block_element(void) {
-    DocState* state = js_dom_testdriver_state();
-    if (!state || !state->dom_selection ||
-        state->dom_selection->range_count == 0 ||
-        !state->dom_selection->ranges[0]) {
-        return nullptr;
-    }
-
-    DomBoundary boundary =
-        dom_selection_focus_boundary(state->dom_selection);
-    DomNode* node = boundary.node;
-    if (!node) return nullptr;
-
-    EditingSurface surface;
-    if (!editing_surface_from_target(static_cast<View*>(node), &surface) ||
-        !editing_surface_is_rich(&surface)) {
-        return nullptr;
-    }
-
-    DomNode* owner_node = static_cast<DomNode*>(surface.owner);
-    for (DomNode* cur = node; cur && cur != owner_node; cur = cur->parent) {
-        if (!cur->is_element()) continue;
-        DomElement* elem = cur->as_element();
-        if (elem && js_dom_exec_command_block_tag(elem->tag())) {
-            return elem;
-        }
-    }
-    return nullptr;
-}
-
-static const char* js_dom_exec_command_query_format_block_value(void) {
-    DomElement* elem = js_dom_exec_command_query_block_element();
-    return elem && elem->tag_name ? elem->tag_name : "";
-}
-
-static bool js_dom_exec_command_query_justify_state(const char* cmd) {
-    const char* expected = js_dom_exec_command_justify_value(cmd);
-    DomElement* elem = js_dom_exec_command_query_block_element();
-    if (!expected || !elem) return false;
-    const char* style = dom_element_get_attribute(elem, "style");
-    if (js_dom_style_text_align_equals(style, expected)) return true;
-    const char* align = dom_element_get_attribute(elem, "align");
-    return align && strcasecmp(align, expected) == 0;
-}
-
-static uintptr_t js_dom_exec_command_list_tag(const char* cmd) {
-    if (!cmd) return 0;
-    if (strcasecmp(cmd, "insertOrderedList") == 0) return HTM_TAG_OL;
-    if (strcasecmp(cmd, "insertUnorderedList") == 0) return HTM_TAG_UL;
-    return 0;
-}
-
-static bool js_dom_exec_command_query_list_state(const char* cmd) {
-    uintptr_t list_tag = js_dom_exec_command_list_tag(cmd);
-    if (!list_tag) return false;
-
-    DocState* state = js_dom_testdriver_state();
-    if (!state || !state->dom_selection ||
-        state->dom_selection->range_count == 0 ||
-        !state->dom_selection->ranges[0]) {
-        return false;
-    }
-
-    DomBoundary boundary =
-        dom_selection_focus_boundary(state->dom_selection);
-    DomNode* node = boundary.node;
-    if (!node) return false;
-
-    EditingSurface surface;
-    if (!editing_surface_from_target(static_cast<View*>(node), &surface) ||
-        !editing_surface_is_rich(&surface)) {
-        return false;
-    }
-
-    DomNode* owner_node = static_cast<DomNode*>(surface.owner);
-    for (DomNode* cur = node; cur && cur != owner_node; cur = cur->parent) {
-        if (!cur->is_element()) continue;
-        DomElement* elem = cur->as_element();
-        if (elem && elem->tag() == list_tag) return true;
-    }
-    return false;
-}
-
 static bool js_dom_node_contains(DomNode* ancestor, DomNode* node) {
     for (DomNode* cur = node; cur; cur = cur->parent) {
         if (cur == ancestor) return true;
@@ -1844,149 +977,6 @@ static void reset_foreign_document_cache(); // forward declaration
 #include "../../radiant/text_control.hpp"
 #define tc_is_text_control_elem(e)      tc_is_text_control(e)
 
-static bool js_dom_select_all_text_control_enabled(DomElement* elem) {
-    if (!elem || !tc_is_text_control_elem(elem)) return false;
-    tc_ensure_init(elem);
-    FormControlProp* form = elem->form;
-    return form && form->current_value_u16_len > 0;
-}
-
-static DomElement* js_dom_focused_text_control_for_select_all(DocState* state) {
-    if (state) {
-        View* focused = focus_get(state);
-        if (focused && focused->is_element()) {
-            DomElement* elem = focused->as_element();
-            if (elem && tc_is_text_control_elem(elem)) return elem;
-            return nullptr;
-        }
-    }
-    if (js_document_active_element &&
-        (!_js_current_document || js_document_active_element->doc == _js_current_document) &&
-        tc_is_text_control_elem(js_document_active_element)) {
-        return js_document_active_element;
-    }
-    DomElement* active = state ? tc_get_active_element(state) : nullptr;
-    if (active && tc_is_text_control_elem(active)) return active;
-    return nullptr;
-}
-
-static bool js_dom_collapse_document_selection_before_node(DocState* state,
-                                                           DomNode* node) {
-    if (!state || !node || !node->parent) return false;
-    uint32_t index = dom_node_child_index(node);
-    if (index == UINT32_MAX) return false;
-    DomBoundary caret = { node->parent, index };
-    const char* exc = nullptr;
-    if (!state_store_set_selection(state, &caret, &caret, &exc)) {
-        log_debug("js_dom_select_all_text_control_dom_collapse_failed: %s",
-                  exc ? exc : "unknown");
-        return false;
-    }
-    return true;
-}
-
-static bool js_dom_exec_command_select_all_text_control(DocState* state) {
-    if (!state) return false;
-    DomElement* elem = js_dom_focused_text_control_for_select_all(state);
-    if (!elem) return false;
-    tc_ensure_init(elem);
-    FormControlProp* form = elem->form;
-    if (!form) return false;
-
-    js_dom_collapse_document_selection_before_node(state, static_cast<DomNode*>(elem));
-    form_control_set_selection(state, static_cast<View*>(elem), 0,
-                               form->current_value_u16_len, 0);
-    log_debug("js_dom_select_all_text_control: len=%u",
-              form->current_value_u16_len);
-    return true;
-}
-
-static bool js_dom_select_all_should_target_document(DocState* state) {
-    if (!state || !state->dom_selection ||
-        state->dom_selection->range_count == 0 ||
-        !dom_selection_is_collapsed(state->dom_selection)) {
-        return false;
-    }
-
-    View* focused = focus_get(state);
-    if (!focused && js_document_active_element &&
-        (!_js_current_document || js_document_active_element->doc == _js_current_document)) {
-        focused = static_cast<View*>(js_document_active_element);
-    }
-    if (!focused || !focused->is_element()) return false;
-
-    DomElement* elem = focused->as_element();
-    if (!elem || tc_is_text_control_elem(elem)) return false;
-
-    EditingSurface surface;
-    if (editing_surface_from_target(focused, &surface) &&
-        editing_surface_is_rich(&surface)) {
-        return false;
-    }
-    return true;
-}
-
-static bool js_dom_select_all_node_has_text(DomNode* node) {
-    if (!node) return false;
-    if (node->is_text()) {
-        DomText* text = node->as_text();
-        return text && text->text && text->length > 0;
-    }
-    if (!node->is_element()) return false;
-
-    DomElement* elem = node->as_element();
-    if (!elem) return false;
-    if (tc_is_text_control_elem(elem)) {
-        return js_dom_select_all_text_control_enabled(elem);
-    }
-    const char* tag = elem->tag_name;
-    if (tag &&
-        (strcasecmp(tag, "script") == 0 ||
-         strcasecmp(tag, "style") == 0 ||
-         strcasecmp(tag, "noscript") == 0)) {
-        return false;
-    }
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        if (js_dom_select_all_node_has_text(child)) return true;
-    }
-    return false;
-}
-
-static bool js_dom_select_all_enabled(DocState* state) {
-    if (!state) return false;
-
-    View* focused = focus_get(state);
-    if (focused && focused->is_element()) {
-        DomElement* elem = ((DomNode*)focused)->as_element();
-        if (tc_is_text_control_elem(elem)) {
-            return js_dom_select_all_text_control_enabled(elem);
-        }
-    }
-    if (js_document_active_element && tc_is_text_control_elem(js_document_active_element)) {
-        return js_dom_select_all_text_control_enabled(js_document_active_element);
-    }
-
-    int fallback_offset = 0;
-    View* target = js_dom_testdriver_current_target(state, &fallback_offset);
-    if (target && target->is_element()) {
-        DomElement* elem = ((DomNode*)target)->as_element();
-        if (tc_is_text_control_elem(elem)) {
-            return js_dom_select_all_text_control_enabled(elem);
-        }
-    }
-
-    EditingSurface surface;
-    if (target && js_dom_testdriver_rich_surface(target, &surface) &&
-        surface.owner) {
-        return js_dom_select_all_node_has_text((DomNode*)surface.owner);
-    }
-
-    if (js_document_design_mode && _js_current_document && _js_current_document->root) {
-        return js_dom_select_all_node_has_text((DomNode*)_js_current_document->root);
-    }
-    return false;
-}
-
 extern "C" void* js_dom_current_active_text_control(void) {
     DocState* state = js_dom_current_state();
     if (state) {
@@ -2017,8 +1007,6 @@ extern "C" void js_dom_batch_reset() {
     js_document_default_view = (Item){.item = ITEM_NULL};
     js_document_title_value = (Item){.item = ITEM_NULL};
     js_document_design_mode = false;
-    js_document_open_invalid_for_exec_command = false;
-    js_document_style_with_css = false;
     js_document_active_element = nullptr;
     js_document_fonts_value = (Item){.item = ITEM_NULL};
     _js_current_document = nullptr;
@@ -2736,6 +1724,12 @@ static Item js_dom_get_bounding_client_rect_method(Item elem_item) {
     return js_dom_element_method(self, method, NULL, 0);
 }
 
+static Item js_dom_scroll_into_view_method(Item elem_item) {
+    Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("scrollIntoView"))};
+    return js_dom_element_method(self, method, NULL, 0);
+}
+
 static Item js_dom_get_client_rects_method(Item elem_item) {
     Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
     Item method = (Item){.item = s2it(heap_create_name("getClientRects"))};
@@ -2820,7 +1814,7 @@ extern "C" Item js_get_document_object_value() {
 // Routes to js_document_method which handles getElementById, querySelector, etc.
 extern "C" Item js_document_proxy_method(Item method_name, Item* args, int argc) {
     const char* method = fn_to_cstr(method_name);
-    if (method && strcmp(method, "execCommand") != 0) {
+    if (method) {
         Item fn = js_document_get_property(method_name);
         if (get_type_id(fn) == LMD_TYPE_FUNC) {
             return js_call_function(fn, js_get_document_object_value(), args, argc);
@@ -3097,33 +2091,6 @@ static DomElement* document_body_element(DomDocument* doc) {
         child = child->next_sibling;
     }
     return nullptr;
-}
-
-static bool js_dom_exec_command_select_all_document(DomDocument* doc) {
-    if (!doc) return false;
-    DocState* state = doc->state ?
-        doc->state : radiant_document_ensure_state(doc, "js_dom_select_all");
-    if (!state) return false;
-    DomElement* body = document_body_element(doc);
-    if (!body) return false;
-
-    DomBoundary start;
-    DomBoundary end;
-    if (!dom_selection_compute_select_all_boundaries((DomNode*)body,
-                                                     &start, &end)) {
-        start.node = (DomNode*)body;
-        start.offset = 0;
-        end.node = (DomNode*)body;
-        end.offset = dom_node_boundary_length((DomNode*)body);
-    }
-
-    const char* exc = nullptr;
-    bool ok = state_store_set_selection(state, &start, &end, &exc);
-    if (!ok) {
-        log_debug("js_dom_exec_select_all_document_failed: %s",
-                  exc ? exc : "unknown");
-    }
-    return ok;
 }
 
 static void clear_element_children_for_navigation(DomElement* elem) {
@@ -5065,6 +4032,66 @@ static void collect_text_content(DomNode* node, StrBuf* sb) {
     }
 }
 
+static bool js_dom_ascii_space(char ch) {
+    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
+}
+
+static bool js_dom_style_decl_value(const char* style_text,
+                                    const char* prop_name,
+                                    char* out,
+                                    size_t out_size) {
+    if (out && out_size > 0) out[0] = '\0';
+    if (!style_text || !prop_name || !out || out_size == 0) return false;
+
+    const char* seg = style_text;
+    while (*seg) {
+        const char* end = strchr(seg, ';');
+        if (!end) end = seg + strlen(seg);
+
+        const char* colon = nullptr;
+        for (const char* p = seg; p < end; p++) {
+            if (*p == ':') {
+                colon = p;
+                break;
+            }
+        }
+        if (colon) {
+            const char* name_start = seg;
+            const char* name_end = colon;
+            while (name_start < name_end && js_dom_ascii_space(*name_start)) {
+                name_start++;
+            }
+            while (name_end > name_start && js_dom_ascii_space(name_end[-1])) {
+                name_end--;
+            }
+
+            size_t name_len = (size_t)(name_end - name_start);
+            if (strlen(prop_name) == name_len &&
+                strncasecmp(name_start, prop_name, name_len) == 0) {
+                const char* value_start = colon + 1;
+                const char* value_end = end;
+                while (value_start < value_end &&
+                       js_dom_ascii_space(*value_start)) {
+                    value_start++;
+                }
+                while (value_end > value_start &&
+                       js_dom_ascii_space(value_end[-1])) {
+                    value_end--;
+                }
+
+                size_t value_len = (size_t)(value_end - value_start);
+                if (value_len >= out_size) value_len = out_size - 1;
+                memcpy(out, value_start, value_len);
+                out[value_len] = '\0';
+                return true;
+            }
+        }
+
+        seg = *end ? end + 1 : end;
+    }
+    return false;
+}
+
 static float js_dom_parse_positive_css_dimension(const char* value) {
     if (!value) return 0.0f;
     while (js_dom_ascii_space(*value)) value++;
@@ -5757,7 +4784,6 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     }
 
     if (strcmp(method, "open") == 0) {
-        js_document_open_invalid_for_exec_command = true;
         DocState* state = doc->state ? doc->state : js_dom_current_state();
         if (state) {
             const char* exc = nullptr;
@@ -5776,7 +4802,6 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         return js_get_document_object_value();
     }
     if (strcmp(method, "close") == 0) {
-        js_document_open_invalid_for_exec_command = false;
         return make_js_undefined();
     }
 
@@ -6098,114 +5123,22 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     }
 
     // document.execCommand(cmd, [showUI], [value]) — legacy editing API.
-    // Native EC commands run through the same rich editing transaction
-    // envelope as synthetic key input.
+    // Radiant keeps this surface for feature detection only; standard editing
+    // lives in test/editor-js and should not flow through native DOM mutation.
     if (strcmp(method, "execCommand") == 0) {
-        const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
-        js_dom_exec_command_call_preflight(args, argc);
-        if (js_dom_exec_command_is_style_mode(cmd)) {
-            return js_dom_exec_command_style_mode(cmd, args, argc);
-        }
-        if (cmd && strcasecmp(cmd, "selectAll") == 0 &&
-            _js_current_document == _js_main_document &&
-            js_document_active_element &&
-            _is_tag(js_document_active_element, "iframe")) {
-            Item frame_doc_item = js_iframe_get_content_document(
-                js_document_active_element);
-            DomDocument* frame_doc =
-                (DomDocument*)js_get_foreign_doc(frame_doc_item);
-            if (frame_doc &&
-                js_dom_exec_command_select_all_document(frame_doc)) {
-                return (Item){.item = ITEM_TRUE};
-            }
-        }
-        if (cmd && strcasecmp(cmd, "selectAll") == 0 &&
-            _js_current_document && _js_current_document != _js_main_document &&
-            js_dom_exec_command_select_all_document(_js_current_document)) {
-            return (Item){.item = ITEM_TRUE};
-        }
-        if (cmd && strcasecmp(cmd, "selectAll") == 0) {
-            DocState* state = js_dom_testdriver_state();
-            if (js_dom_exec_command_select_all_text_control(state)) {
-                return (Item){.item = ITEM_TRUE};
-            }
-            if (js_dom_select_all_should_target_document(state) &&
-                js_dom_exec_command_select_all_document(_js_current_document)) {
-                return (Item){.item = ITEM_TRUE};
-            }
-        }
-        if (js_dom_exec_command_uses_helper_first(cmd)) {
-            Item handled = js_dom_exec_command_call_helper(args, argc);
-            if (js_is_truthy(handled)) return handled;
-        }
-        if (js_dom_exec_command_is_native(cmd)) {
-            Item handled = js_dom_exec_command_native(args, argc);
-            if (js_is_truthy(handled)) return handled;
-        }
-        // The WPT/Chrome editing shims install this helper to fire
-        // clipboard listeners and to cover headless DOM selections that do not
-        // resolve to a Radiant editing surface. For commands the helper does
-        // not own, it returns false.
-        return js_dom_exec_command_call_helper(args, argc);
+        return (Item){.item = ITEM_FALSE};
     }
-    // queryCommand* reports the native EC command surface plus clipboard
-    // commands. State/value/indeterm grow with the EC tiers.
     if (strcmp(method, "queryCommandSupported") == 0) {
-        const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
-        bool supported = js_dom_exec_command_is_supported(cmd);
-        return (Item){.item = b2it(supported)};
+        return (Item){.item = ITEM_FALSE};
     }
     if (strcmp(method, "queryCommandEnabled") == 0) {
-        const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
-        bool enabled = false;
-        if (cmd && js_dom_exec_command_is_style_mode(cmd)) {
-            enabled = true;
-        } else if (cmd && strcasecmp(cmd, "selectAll") == 0) {
-            enabled = js_dom_select_all_enabled(js_dom_testdriver_state());
-        } else if (cmd && js_dom_exec_command_is_native(cmd)) {
-            enabled = js_document_design_mode ||
-                js_dom_exec_command_has_rich_target();
-        }
-        return (Item){.item = b2it(enabled)};
+        return (Item){.item = ITEM_FALSE};
     }
     if (strcmp(method, "queryCommandIndeterm") == 0 ||
         strcmp(method, "queryCommandState") == 0) {
-        const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
-        if (strcmp(method, "queryCommandState") == 0 &&
-            cmd && strcasecmp(cmd, "styleWithCSS") == 0) {
-            return (Item){.item = b2it(js_document_style_with_css)};
-        }
-        if (strcmp(method, "queryCommandState") == 0 &&
-            cmd && strcasecmp(cmd, "useCSS") == 0) {
-            return (Item){.item = ITEM_FALSE};
-        }
-        if (strcmp(method, "queryCommandState") == 0 &&
-            js_dom_exec_command_is_inline_format(cmd)) {
-            return (Item){.item = b2it(js_dom_exec_command_query_inline_state(cmd))};
-        }
-        if (strcmp(method, "queryCommandState") == 0 &&
-            js_dom_exec_command_justify_value(cmd)) {
-            return (Item){.item = b2it(js_dom_exec_command_query_justify_state(cmd))};
-        }
-        if (strcmp(method, "queryCommandState") == 0 &&
-            js_dom_exec_command_list_tag(cmd)) {
-            return (Item){.item = b2it(js_dom_exec_command_query_list_state(cmd))};
-        }
         return (Item){.item = ITEM_FALSE};
     }
     if (strcmp(method, "queryCommandValue") == 0) {
-        const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
-        if (cmd && strcasecmp(cmd, "formatBlock") == 0) {
-            const char* value = js_dom_exec_command_query_format_block_value();
-            return (Item){.item = s2it(heap_create_name(value))};
-        }
-        if (cmd && js_dom_exec_command_style_property(cmd)) {
-            char value_buf[512];
-            const char* value =
-                js_dom_exec_command_query_style_value(cmd, value_buf,
-                                                      sizeof(value_buf));
-            return (Item){.item = s2it(heap_create_name(value))};
-        }
         return (Item){.item = s2it(heap_create_name(""))};
     }
     // document.contains(node) — true iff node is document or a descendant.
@@ -9688,6 +8621,11 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         return js_bind_function(js_new_function((void*)js_dom_get_bounding_client_rect_method, 1),
             make_js_undefined(), bound_args, 1);
     }
+    if (strcmp(prop, "scrollIntoView") == 0) {
+        Item bound_args[1] = { elem_item };
+        return js_bind_function(js_new_function((void*)js_dom_scroll_into_view_method, 1),
+            make_js_undefined(), bound_args, 1);
+    }
     if (strcmp(prop, "getClientRects") == 0) {
         Item bound_args[1] = { elem_item };
         return js_bind_function(js_new_function((void*)js_dom_get_client_rects_method, 1),
@@ -9730,7 +8668,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         "addEventListener", "removeEventListener", "dispatchEvent",
         "remove", "getBoundingClientRect", "getElementsByTagName",
         "getElementsByClassName", "compareDocumentPosition",
-        "append", "prepend", "getClientRects", "focus", "blur",
+        "append", "prepend", "getClientRects", "scrollIntoView", "focus", "blur",
         "__lambdaTextControlCaretBounds", "__lambdaTextControlBoundaryFromPoint",
         "__lambdaBoundaryFromPoint",
         "toString",
@@ -12058,6 +10996,16 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         float w = elem->width;
         float h = elem->height;
         return js_dom_make_rect_object(abs_x, abs_y, w, h);
+    }
+
+    if (strcmp(method, "scrollIntoView") == 0) {
+        DomDocument* doc = elem->doc ? elem->doc : _js_current_document;
+        if (doc) {
+            doc->pending_scroll_into_view_target = elem;
+            log_debug("js_dom_scrollIntoView: queued target <%s>",
+                      elem->tag_name ? elem->tag_name : "?");
+        }
+        return make_js_undefined();
     }
 
     // compareDocumentPosition(otherNode) — returns bitmask per W3C DOM spec

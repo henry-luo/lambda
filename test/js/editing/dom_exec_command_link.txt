@@ -1,2 +1,0 @@
-createLink supported=true enabled=true ok=true html=a<a href="https://example.test/">bc</a>d expected=true
-unlink supported=true enabled=true ok=true html=bc expected=true

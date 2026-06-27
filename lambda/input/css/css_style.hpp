@@ -581,6 +581,7 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_BASELINE_SOURCE,
 
     // Text Box Trim Properties (CSS Inline Level 3)
+    CSS_PROPERTY_TEXT_BOX,
     CSS_PROPERTY_TEXT_BOX_TRIM,
     CSS_PROPERTY_TEXT_BOX_EDGE,
 
