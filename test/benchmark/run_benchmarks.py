@@ -319,18 +319,21 @@ def make_qjs_wrapper(js_path):
 
 
 def make_jetstream_node_wrapper(bench_name, js_path):
-    """Create Node.js wrapper for JetStream benchmark (adds runIteration + timing)."""
+    """Create Node.js wrapper for JetStream benchmark with standardized x8 timing."""
+    run_expr = _detect_jetstream_run_function(js_path)
+    if run_expr is None:
+        return None
     os.makedirs("temp", exist_ok=True)
     wrapper = os.path.join("temp", f"_node_bench_{bench_name}.js")
     with open(js_path) as f:
         code = f.read()
     with open(wrapper, "w") as f:
         f.write(code)
-        f.write("\nconst b = new Benchmark();\n")
-        f.write("const t0 = performance.now();\n")
-        f.write("b.runIteration();\n")
-        f.write("const t1 = performance.now();\n")
-        f.write('console.log("__TIMING__:" + (t1 - t0).toFixed(3));\n')
+        f.write("\n// Timing wrapper (standardized x8 workload)\n")
+        f.write("var _t0 = performance.now();\n")
+        f.write(f"for (var _i = 0; _i < 8; _i++) {{ {run_expr}; }}\n")
+        f.write("var _t1 = performance.now();\n")
+        f.write('console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
     return wrapper
 
 
@@ -349,7 +352,10 @@ def _detect_jetstream_run_function(js_path):
 
 
 def make_jetstream_ljs_wrapper(bench_name, js_path):
-    """Create LambdaJS wrapper for JetStream benchmark (adds timing)."""
+    """Create LambdaJS wrapper for JetStream benchmark with standardized x8 timing."""
+    run_expr = _detect_jetstream_run_function(js_path)
+    if run_expr is None:
+        return None
     os.makedirs("temp", exist_ok=True)
     wrapper = os.path.join("temp", f"_ljs_jetstream_{bench_name}.js")
     with open(js_path) as f:
@@ -358,10 +364,32 @@ def make_jetstream_ljs_wrapper(bench_name, js_path):
     code = code.replace('"use strict";', "")
     with open(wrapper, "w") as f:
         f.write(code)
-        f.write("\n// Timing wrapper\n")
-        f.write("var _benchmark = new Benchmark();\n")
+        f.write("\n// Timing wrapper (standardized x8 workload)\n")
         f.write("var _t0 = performance.now();\n")
-        f.write("_benchmark.runIteration();\n")
+        f.write(f"for (var _i = 0; _i < 8; _i++) {{ {run_expr}; }}\n")
+        f.write("var _t1 = performance.now();\n")
+        f.write('console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
+    return wrapper
+
+
+def make_jetstream_qjs_wrapper(bench_name, js_path):
+    """Create QuickJS wrapper for JetStream benchmark with standardized x8 timing."""
+    run_expr = _detect_jetstream_run_function(js_path)
+    if run_expr is None:
+        return None
+    os.makedirs("temp", exist_ok=True)
+    wrapper = os.path.join("temp", f"_qjs_jetstream_{bench_name}.js")
+    with open(js_path) as f:
+        code = f.read()
+    code = code.replace("'use strict';", "")
+    code = code.replace('"use strict";', "")
+    with open(wrapper, "w") as f:
+        f.write("import * as std from 'std';\n")
+        f.write(QJS_POLYFILL)
+        f.write(code)
+        f.write("\n// Timing wrapper (standardized x8 workload)\n")
+        f.write("var _t0 = performance.now();\n")
+        f.write(f"for (var _i = 0; _i < 8; _i++) {{ {run_expr}; }}\n")
         f.write("var _t1 = performance.now();\n")
         f.write('console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
     return wrapper
@@ -654,19 +682,39 @@ def time_run_single(b, engines, num_runs, timeout_s, results):
                 print(f"  LambdaJS  ---")
 
         if "quickjs" in engines:
-            results[suite][name]["quickjs"] = None
-            row["quickjs"] = None
-            print(f"  QuickJS   ---")
+            qjs_js = JETSTREAM_NODE.get(name)
+            if qjs_js and os.path.exists(qjs_js):
+                wrapper = make_jetstream_qjs_wrapper(name, qjs_js)
+                if wrapper:
+                    print(f"  QuickJS  ", end="", flush=True)
+                    w, e, ok = time_run_benchmark(f"{QJS_EXE} --std -m {wrapper}", num_runs, timeout_s)
+                    val = e if ok and e is not None else (w if ok else None)
+                    results[suite][name]["quickjs"] = val
+                    row["quickjs"] = val
+                    print(f" {fmt_ms(e if e is not None else w)}")
+                else:
+                    results[suite][name]["quickjs"] = None
+                    row["quickjs"] = None
+                    print(f"  QuickJS   ---")
+            else:
+                results[suite][name]["quickjs"] = None
+                row["quickjs"] = None
+                print(f"  QuickJS   ---")
 
         if "nodejs" in engines:
             if ref_js and os.path.exists(ref_js):
-                print(f"  Node.js  ", end="", flush=True)
                 wrapper = make_jetstream_node_wrapper(name, ref_js)
-                w, e, ok = time_run_benchmark(f"{NODE_EXE} {wrapper}", num_runs, timeout_s)
-                val = e if ok and e is not None else (w if ok else None)
-                results[suite][name]["nodejs"] = val
-                row["nodejs"] = val
-                print(f" {fmt_ms(e if e is not None else w)}")
+                if wrapper:
+                    print(f"  Node.js  ", end="", flush=True)
+                    w, e, ok = time_run_benchmark(f"{NODE_EXE} {wrapper}", num_runs, timeout_s)
+                    val = e if ok and e is not None else (w if ok else None)
+                    results[suite][name]["nodejs"] = val
+                    row["nodejs"] = val
+                    print(f" {fmt_ms(e if e is not None else w)}")
+                else:
+                    results[suite][name]["nodejs"] = None
+                    row["nodejs"] = None
+                    print(f"  Node.js   ---")
             else:
                 results[suite][name]["nodejs"] = None
                 row["nodejs"] = None
@@ -688,11 +736,11 @@ def time_run_single(b, engines, num_runs, timeout_s, results):
     return row
 
 
-def run_time_mode(benchmarks, engines, num_runs, timeout_s, no_save):
+def run_time_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_path):
     """Execute TIME mode: measure execution time across engines."""
     # Load existing results (merge mode)
-    if os.path.exists(TIME_JSON_PATH):
-        with open(TIME_JSON_PATH) as f:
+    if os.path.exists(output_path):
+        with open(output_path) as f:
             results = json.load(f)
     else:
         results = {}
@@ -717,9 +765,9 @@ def run_time_mode(benchmarks, engines, num_runs, timeout_s, no_save):
 
     # Save
     if not no_save:
-        with open(TIME_JSON_PATH, "w") as f:
+        with open(output_path, "w") as f:
             json.dump(results, f, indent=2, default=str)
-        print(f"\nResults saved to {TIME_JSON_PATH}")
+        print(f"\nResults saved to {output_path}")
     else:
         print(f"\n--no-save: results NOT written to JSON")
 
@@ -937,7 +985,7 @@ def mem_run_single(b, engines, num_runs, timeout_s, results):
     return row
 
 
-def run_memory_mode(benchmarks, engines, num_runs, timeout_s, no_save):
+def run_memory_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_path):
     """Execute MEMORY mode: measure peak RSS across engines."""
     results = {}
 
@@ -1043,9 +1091,9 @@ def run_memory_mode(benchmarks, engines, num_runs, timeout_s, no_save):
                 json_results[suite_name][bench_name]["_raw_bytes"] = {
                     eng: data.get(eng) for eng in ALL_ENGINES
                 }
-        with open(MEMORY_JSON_PATH, "w") as f:
+        with open(output_path, "w") as f:
             json.dump(json_results, f, indent=2, default=str)
-        print(f"\nResults saved to {MEMORY_JSON_PATH}")
+        print(f"\nResults saved to {output_path}")
     else:
         print(f"\n--no-save: results NOT written to JSON")
 
@@ -1299,6 +1347,8 @@ Examples:
                         help="Show what would be run without actually running")
     parser.add_argument("--no-save", action="store_true",
                         help="Don't save results to JSON/CSV")
+    parser.add_argument("--results-output", type=str, default=None,
+                        help="Output JSON path for time or memory mode")
 
     args = parser.parse_args()
 
@@ -1313,6 +1363,12 @@ Examples:
 
     mode = args.mode
     timeout_s = args.timeout
+    if mode == "time":
+        results_output = args.results_output or TIME_JSON_PATH
+    elif mode == "memory":
+        results_output = args.results_output or MEMORY_JSON_PATH
+    else:
+        results_output = args.results_output or MIR_VS_C_CSV_PATH
 
     # Default runs depends on mode
     if args.runs is not None:
@@ -1355,11 +1411,11 @@ Examples:
         if mode == "mir-vs-c" and args.typed:
             print(f"  Typed   : yes (R7RS typed variants included)")
         if mode == "time":
-            print(f"  Output  : {TIME_JSON_PATH}")
+            print(f"  Output  : {results_output}")
         elif mode == "memory":
-            print(f"  Output  : {MEMORY_JSON_PATH}")
+            print(f"  Output  : {results_output}")
         elif mode == "mir-vs-c":
-            print(f"  Output  : {MIR_VS_C_CSV_PATH}")
+            print(f"  Output  : {results_output}")
 
         current_suite = None
         for b in benchmarks:
@@ -1383,6 +1439,7 @@ Examples:
     print(f"  Engines   : {', '.join(ENGINE_LABELS.get(e, e) for e in engines)}")
     print(f"  Runs      : {num_runs}")
     print(f"  Timeout   : {timeout_s}s")
+    print(f"  Output    : {results_output}")
     print(f"  Platform  : {platform.system()} {platform.machine()}")
     print(f"  Lambda    : {LAMBDA_EXE}")
 
@@ -1396,9 +1453,9 @@ Examples:
 
     # --- Dispatch to mode ---
     if mode == "time":
-        run_time_mode(benchmarks, engines, num_runs, timeout_s, args.no_save)
+        run_time_mode(benchmarks, engines, num_runs, timeout_s, args.no_save, results_output)
     elif mode == "memory":
-        run_memory_mode(benchmarks, engines, num_runs, timeout_s, args.no_save)
+        run_memory_mode(benchmarks, engines, num_runs, timeout_s, args.no_save, results_output)
     elif mode == "mir-vs-c":
         run_mirc_mode(benchmarks, num_runs, timeout_s, args.no_save, args.typed)
 
