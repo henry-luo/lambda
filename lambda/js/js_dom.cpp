@@ -2736,6 +2736,12 @@ static Item js_dom_get_bounding_client_rect_method(Item elem_item) {
     return js_dom_element_method(self, method, NULL, 0);
 }
 
+static Item js_dom_scroll_into_view_method(Item elem_item) {
+    Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("scrollIntoView"))};
+    return js_dom_element_method(self, method, NULL, 0);
+}
+
 static Item js_dom_get_client_rects_method(Item elem_item) {
     Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
     Item method = (Item){.item = s2it(heap_create_name("getClientRects"))};
@@ -9688,6 +9694,11 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         return js_bind_function(js_new_function((void*)js_dom_get_bounding_client_rect_method, 1),
             make_js_undefined(), bound_args, 1);
     }
+    if (strcmp(prop, "scrollIntoView") == 0) {
+        Item bound_args[1] = { elem_item };
+        return js_bind_function(js_new_function((void*)js_dom_scroll_into_view_method, 1),
+            make_js_undefined(), bound_args, 1);
+    }
     if (strcmp(prop, "getClientRects") == 0) {
         Item bound_args[1] = { elem_item };
         return js_bind_function(js_new_function((void*)js_dom_get_client_rects_method, 1),
@@ -9730,7 +9741,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         "addEventListener", "removeEventListener", "dispatchEvent",
         "remove", "getBoundingClientRect", "getElementsByTagName",
         "getElementsByClassName", "compareDocumentPosition",
-        "append", "prepend", "getClientRects", "focus", "blur",
+        "append", "prepend", "getClientRects", "scrollIntoView", "focus", "blur",
         "__lambdaTextControlCaretBounds", "__lambdaTextControlBoundaryFromPoint",
         "__lambdaBoundaryFromPoint",
         "toString",
@@ -12058,6 +12069,16 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         float w = elem->width;
         float h = elem->height;
         return js_dom_make_rect_object(abs_x, abs_y, w, h);
+    }
+
+    if (strcmp(method, "scrollIntoView") == 0) {
+        DomDocument* doc = elem->doc ? elem->doc : _js_current_document;
+        if (doc) {
+            doc->pending_scroll_into_view_target = elem;
+            log_debug("js_dom_scrollIntoView: queued target <%s>",
+                      elem->tag_name ? elem->tag_name : "?");
+        }
+        return make_js_undefined();
     }
 
     // compareDocumentPosition(otherNode) — returns bitmask per W3C DOM spec

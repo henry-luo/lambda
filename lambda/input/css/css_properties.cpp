@@ -397,6 +397,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_DOMINANT_BASELINE, "dominant-baseline", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
 
     // Text Box Trim Properties (CSS Inline Level 3)
+    {CSS_PROPERTY_TEXT_BOX, "text-box", PROP_TYPE_STRING, PROP_INHERIT_NO, "normal", false, true, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_TEXT_BOX_TRIM, "text-box-trim", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_BOX_EDGE, "text-box-edge", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
 

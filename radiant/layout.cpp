@@ -47,6 +47,88 @@ int64_t g_text_layout_count = 0;
 int64_t g_block_layout_count = 0;
 int64_t g_inline_layout_count = 0;
 
+static DomElement* layout_positioned_containing_block(DomElement* elem) {
+    if (!elem) return nullptr;
+    for (DomNode* cur = elem->parent; cur; cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* ancestor = cur->as_element();
+        if (ancestor->position &&
+            ancestor->position->position != CSS_VALUE_STATIC) {
+            return ancestor;
+        }
+    }
+    return nullptr;
+}
+
+static float layout_scroll_document_coord(DomElement* elem, bool x_axis) {
+    if (!elem) return 0.0f;
+    float value = x_axis ? elem->x : elem->y;
+    if (elem->position && elem->position->position == CSS_VALUE_ABSOLUTE) {
+        DomElement* containing_block = layout_positioned_containing_block(elem);
+        if (containing_block) {
+            value += x_axis ? containing_block->x : containing_block->y;
+        }
+    }
+    return value;
+}
+
+static float layout_scrollport_start(DomElement* elem, bool x_axis) {
+    if (!elem) return 0.0f;
+    float value = x_axis ? elem->x : elem->y;
+    if (elem->bound && elem->bound->border) {
+        value += x_axis ? elem->bound->border->width.left
+                        : elem->bound->border->width.top;
+    }
+    return value;
+}
+
+static DomElement* layout_nearest_scroll_container(DomElement* target,
+                                                   DomElement* root) {
+    if (!target) return nullptr;
+    for (DomNode* cur = target->parent; cur; cur = cur->parent) {
+        if (!cur->is_element() || !cur->is_block()) continue;
+        DomElement* ancestor = cur->as_element();
+        if (ancestor == root) return nullptr;
+        if (ancestor->scroller && ancestor->scroller->pane) {
+            return ancestor;
+        }
+    }
+    return nullptr;
+}
+
+static void layout_resolve_pending_scroll_into_view(DomDocument* doc,
+                                                    ViewBlock* root_block) {
+    if (!doc || !root_block || !doc->pending_scroll_into_view_target) return;
+
+    DomElement* target = doc->pending_scroll_into_view_target;
+    doc->pending_scroll_into_view_target = nullptr;
+
+    float target_x = layout_scroll_document_coord(target, true);
+    float target_y = layout_scroll_document_coord(target, false);
+    DomElement* root_elem = lam::dom_require_element(static_cast<View*>(root_block));
+    DomElement* scroll_container = layout_nearest_scroll_container(target, root_elem);
+
+    if (scroll_container) {
+        float scroll_x = target_x - layout_scrollport_start(scroll_container, true);
+        float scroll_y = target_y - layout_scrollport_start(scroll_container, false);
+        if (scroll_x < 0.0f) scroll_x = 0.0f;
+        if (scroll_y < 0.0f) scroll_y = 0.0f;
+        DocState* state = doc->state;
+        scroll_state_set_position_for_view(state, static_cast<View*>(scroll_container),
+            scroll_container->scroller->pane, scroll_x, scroll_y, false);
+        log_info("layout_scrollIntoView: applied element scroll (%.1f, %.1f) on <%s>",
+                 scroll_x, scroll_y,
+                 scroll_container->tag_name ? scroll_container->tag_name : "?");
+    } else {
+        if (target_x < 0.0f) target_x = 0.0f;
+        if (target_y < 0.0f) target_y = 0.0f;
+        doc->pending_viewport_scroll_x = target_x;
+        doc->pending_viewport_scroll_y = target_y;
+        log_info("layout_scrollIntoView: queued viewport scroll (%.1f, %.1f)",
+                 target_x, target_y);
+    }
+}
+
 static inline float collapse_root_margins(float a, float b) {
     if (a >= 0.0f && b >= 0.0f) return max(a, b);
     if (a < 0.0f && b < 0.0f) return min(a, b);
@@ -2885,6 +2967,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     if (doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
         layout_finalize_static_positioned_abs_descendants(root_block);
+        layout_resolve_pending_scroll_into_view(doc, root_block);
         if (root_block->scroller && root_block->scroller->pane) {
             ScrollPane* pane = root_block->scroller->pane;
             float target_x = doc->pending_viewport_scroll_x;

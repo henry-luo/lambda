@@ -52,6 +52,7 @@ std::vector<LambdaTestInfo> discover_all_c2mir_tests() {
         if (test.test_name == "view_state") continue;  // view state management only supported in MIR Direct
         if (test.test_name == "render_map") continue;  // render map only supported in MIR Direct
         if (test.test_name == "edit_bridge") continue;  // edit bridge only supported in MIR Direct
+        if (test.test_name == "proc_proc_gc_float_box_repro") continue;  // MIR Direct GC-root regression probe
         filtered.push_back(test);
     }
     return filtered;
