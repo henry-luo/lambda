@@ -156,6 +156,39 @@ def compute_dedup_summary(data, engines):
     }
 
 
+def write_historical_comparisons(w, metadata):
+    comparisons = metadata.get("historical_comparisons")
+    if not comparisons:
+        return
+
+    w("---")
+    w()
+    w("## Historical Comparison")
+    w()
+    for comparison in comparisons:
+        title = comparison.get("title")
+        if title:
+            w(f"### {title}")
+            w()
+        for note in comparison.get("notes", []):
+            w(note)
+            w()
+        for table in comparison.get("tables", []):
+            caption = table.get("caption")
+            if caption:
+                w(f"**{caption}**")
+                w()
+            columns = table.get("columns", [])
+            rows = table.get("rows", [])
+            if not columns or not rows:
+                continue
+            w("| " + " | ".join(columns) + " |")
+            w("|" + "|".join("---" for _ in columns) + "|")
+            for row in rows:
+                w("| " + " | ".join(row) + " |")
+            w()
+
+
 def write_report(args, data):
     engines = [e.strip() for e in args.engines.split(",") if e.strip()]
     metadata = data.get("_metadata", {})
@@ -253,6 +286,7 @@ def write_report(args, data):
     w("> **Overall dedup** is the default headline metric: duplicate benchmark names across suites are counted once, using the best timed value per engine. **Overall raw** keeps the row-weighted value for auditability.")
     w("> Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.")
     w()
+    write_historical_comparisons(w, metadata)
     missing, ljs_ratios, ljs_wins = collect_notables(data, engines)
     w("---")
     w()

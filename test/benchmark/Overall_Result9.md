@@ -33,6 +33,55 @@ JetStream JavaScript-engine wrappers are standardized to an explicit x8 loop ove
 
 ---
 
+## Historical Comparison
+
+### LambdaJS vs Result7
+
+Result7 is the nearest pre-Result9 LambdaJS baseline. It used Node.js v24.7.0, while Result9 uses Node.js v22.13.0, so the comparison is useful directionally but not a perfect Node-normalized rerun.
+
+The closest metric is the raw overall LambdaJS/Node.js geometric mean. Result9 also reports the new deduplicated headline metric.
+
+**LambdaJS overall comparison**
+
+| Baseline | Baseline LambdaJS/Node | Result9 LambdaJS/Node | Coverage | Change |
+|---|---|---|---|---|
+| Result7 initial fresh run | 18.43x raw | 15.6x raw; 13.1x dedup | 57/62 timed -> 59/62 raw, 53/56 dedup | Result9 is 1.18x better raw |
+| Result7 latest rerun | 17.81x raw | 15.6x raw; 13.1x dedup | 57/62 timed -> 59/62 raw, 53/56 dedup | Result9 is 1.14x better raw |
+
+**LambdaJS suite comparison, latest Result7 rerun vs Result9 raw**
+
+| Suite | Result7 latest | Result9 | Change |
+|---|---|---|---|
+| R7RS | 6.80x | 5.21x | 1.31x better |
+| AWFY | 49.01x | 36.6x | 1.34x better |
+| BENG | 6.43x | 6.18x | 1.04x better |
+| KOSTYA | 18.51x | 14.6x | 1.27x better |
+| LARCENY | 9.66x | 8.24x | 1.17x better |
+| JetStream | 207.86x | 148x | 1.40x better |
+
+### Lambda/MIR vs Result4
+
+Result4 is the last full pre-Result7 report with Lambda/MIR result tables and the same Node.js v22.13.0 reference version as Result9. Result5 has MIR timings, but it was the rejected direct-string-pointer experiment and does not publish a fresh MIR/Node summary.
+
+**Lambda/MIR overall comparison**
+
+| Baseline | Baseline MIR/Node | Result9 MIR/Node | Change |
+|---|---|---|---|
+| Result4 | 1.21x raw; 1.05x dedup | 4.62x raw; 4.31x dedup | Result9 is 3.82x worse raw, 4.11x worse dedup |
+
+**Lambda/MIR suite comparison, Result4 vs Result9**
+
+| Suite | Result4 MIR/Node | Result9 MIR/Node | Change |
+|---|---|---|---|
+| R7RS | 0.44x | 2.03x | 4.6x worse |
+| AWFY | 0.62x | 3.60x | 5.8x worse |
+| BENG | 0.94x | 1.57x | 1.7x worse |
+| KOSTYA | 2.09x | 9.86x | 4.7x worse |
+| LARCENY | 1.47x | 6.19x | 4.2x worse |
+| JetStream | 7.28x | 21.2x | 2.9x worse |
+
+---
+
 ## Notable Results
 
 - Missing timings: **9** cells

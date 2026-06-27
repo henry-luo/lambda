@@ -19,6 +19,7 @@
 extern __thread EvalContext* context;
 
 #define JIT_GC_ROOT_BLOCK_SLOTS 64
+#define JIT_GC_ROOT_FRAME_CACHE_MAX 256
 
 typedef struct JitGcRootBlock {
     int64_t block_index;
@@ -29,9 +30,13 @@ typedef struct JitGcRootBlock {
 typedef struct JitGcRootFrame {
     struct JitGcRootFrame* prev;
     JitGcRootBlock* blocks;
+    int64_t depth;
 } JitGcRootFrame;
 
 static __thread JitGcRootFrame* jit_gc_root_frame_top = NULL;
+static __thread JitGcRootFrame* jit_gc_root_frame_cache = NULL;
+static __thread int jit_gc_root_frame_cache_count = 0;
+static __thread int64_t jit_gc_root_frame_depth = 0;
 
 static void gc_finalize_all_objects(gc_heap_t *gc);
 
@@ -324,36 +329,8 @@ static JitGcRootBlock* jit_gc_root_frame_get_block(JitGcRootFrame* frame, int64_
     return block;
 }
 
-extern "C" void heap_jit_gc_root_frame_enter() {
-    JitGcRootFrame* frame = (JitGcRootFrame*)mem_calloc(1, sizeof(JitGcRootFrame), MEM_CAT_EVAL);
-    if (!frame) {
-        log_error("jit_gc_root_frame_enter: failed to allocate frame");
-        return;
-    }
-    frame->prev = jit_gc_root_frame_top;
-    jit_gc_root_frame_top = frame;
-}
-
-extern "C" void heap_jit_gc_root_frame_set(int64_t index, uint64_t value) {
-    JitGcRootFrame* frame = jit_gc_root_frame_top;
-    JitGcRootBlock* block = jit_gc_root_frame_get_block(frame, index, true);
-    if (!block) return;
-    int64_t offset = index % JIT_GC_ROOT_BLOCK_SLOTS;
-    block->slots[offset] = value;
-}
-
-extern "C" uint64_t heap_jit_gc_root_frame_get(int64_t index) {
-    JitGcRootFrame* frame = jit_gc_root_frame_top;
-    JitGcRootBlock* block = jit_gc_root_frame_get_block(frame, index, false);
-    if (!block) return 0;
-    int64_t offset = index % JIT_GC_ROOT_BLOCK_SLOTS;
-    return block->slots[offset];
-}
-
-extern "C" void heap_jit_gc_root_frame_exit() {
-    JitGcRootFrame* frame = jit_gc_root_frame_top;
+static void jit_gc_root_frame_free_blocks(JitGcRootFrame* frame) {
     if (!frame) return;
-    jit_gc_root_frame_top = frame->prev;
     JitGcRootBlock* block = frame->blocks;
     while (block) {
         JitGcRootBlock* next = block->next;
@@ -363,7 +340,98 @@ extern "C" void heap_jit_gc_root_frame_exit() {
         mem_free(block);
         block = next;
     }
-    mem_free(frame);
+    frame->blocks = NULL;
+}
+
+static JitGcRootFrame* jit_gc_root_frame_alloc() {
+    JitGcRootFrame* frame = jit_gc_root_frame_cache;
+    if (frame) {
+        jit_gc_root_frame_cache = frame->prev;
+        jit_gc_root_frame_cache_count--;
+        frame->prev = NULL;
+        frame->blocks = NULL;
+        frame->depth = 0;
+        return frame;
+    }
+    return (JitGcRootFrame*)mem_calloc(1, sizeof(JitGcRootFrame), MEM_CAT_EVAL);
+}
+
+static void jit_gc_root_frame_release(JitGcRootFrame* frame) {
+    if (!frame) return;
+    frame->blocks = NULL;
+    frame->depth = 0;
+    if (jit_gc_root_frame_cache_count >= JIT_GC_ROOT_FRAME_CACHE_MAX) {
+        mem_free(frame);
+        return;
+    }
+    frame->prev = jit_gc_root_frame_cache;
+    jit_gc_root_frame_cache = frame;
+    jit_gc_root_frame_cache_count++;
+}
+
+static void jit_gc_root_frame_cache_clear() {
+    while (jit_gc_root_frame_top) {
+        JitGcRootFrame* frame = jit_gc_root_frame_top;
+        jit_gc_root_frame_top = frame->prev;
+        jit_gc_root_frame_free_blocks(frame);
+        mem_free(frame);
+    }
+    while (jit_gc_root_frame_cache) {
+        JitGcRootFrame* frame = jit_gc_root_frame_cache;
+        jit_gc_root_frame_cache = frame->prev;
+        mem_free(frame);
+    }
+    jit_gc_root_frame_cache_count = 0;
+    jit_gc_root_frame_depth = 0;
+}
+
+static JitGcRootFrame* jit_gc_root_frame_current(bool create) {
+    if (jit_gc_root_frame_depth <= 0) return NULL;
+    if (jit_gc_root_frame_top && jit_gc_root_frame_top->depth == jit_gc_root_frame_depth) {
+        return jit_gc_root_frame_top;
+    }
+    if (!create) return NULL;
+    JitGcRootFrame* frame = jit_gc_root_frame_alloc();
+    if (!frame) return NULL;
+    frame->depth = jit_gc_root_frame_depth;
+    frame->prev = jit_gc_root_frame_top;
+    jit_gc_root_frame_top = frame;
+    return frame;
+}
+
+extern "C" void heap_jit_gc_root_frame_enter() {
+    jit_gc_root_frame_depth++;
+}
+
+extern "C" void heap_jit_gc_root_frame_set(int64_t index, uint64_t value) {
+    JitGcRootFrame* frame = jit_gc_root_frame_current(true);
+    if (!frame) {
+        log_error("jit_gc_root_frame_set: failed to allocate frame");
+        return;
+    }
+    JitGcRootBlock* block = jit_gc_root_frame_get_block(frame, index, true);
+    if (!block) return;
+    int64_t offset = index % JIT_GC_ROOT_BLOCK_SLOTS;
+    block->slots[offset] = value;
+}
+
+extern "C" uint64_t heap_jit_gc_root_frame_get(int64_t index) {
+    JitGcRootFrame* frame = jit_gc_root_frame_current(false);
+    JitGcRootBlock* block = jit_gc_root_frame_get_block(frame, index, false);
+    if (!block) return 0;
+    int64_t offset = index % JIT_GC_ROOT_BLOCK_SLOTS;
+    return block->slots[offset];
+}
+
+extern "C" void heap_jit_gc_root_frame_exit() {
+    if (jit_gc_root_frame_depth <= 0) return;
+    JitGcRootFrame* frame = jit_gc_root_frame_top;
+    if (frame && frame->depth == jit_gc_root_frame_depth) {
+        jit_gc_root_frame_top = frame->prev;
+        jit_gc_root_frame_free_blocks(frame);
+        jit_gc_root_frame_release(frame);
+    }
+    jit_gc_root_frame_depth--;
 }
 
 // unregister an external root slot
@@ -592,6 +660,7 @@ extern "C" void heap_finalize_gc_objects(gc_heap_t *gc) {
 
 void heap_destroy() {
     if (context->heap) {
+        jit_gc_root_frame_cache_clear();
         if (context->heap->gc) {
             // finalize all GC-managed objects: free sub-allocations (items[], data, mpd_t, closure_env)
             // that were malloc'd/calloc'd separately from the pool

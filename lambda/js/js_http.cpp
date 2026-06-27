@@ -2087,6 +2087,11 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
         if (buf->base) mem_free(buf->base);
         return;
     }
+    if (js_event_loop_is_shutting_down()) {
+        uv_read_stop(stream);
+        if (buf->base) mem_free(buf->base);
+        return;
+    }
 
     if (nread > 0) {
         // accumulate data

@@ -1,35 +1,36 @@
 # Transpile_Node4: Stream-Centric Architecture & the Path Past 41%
 
-> **Status of this document.** This proposal supersedes the planning in `Transpile_Node3.md`. It re-measures the Node.js compatibility baseline against a **fresh `make release` build (2026-06-16)**, then refreshes key module claims against the current LambdaJS implementation with focused checks on 2026-06-18, 2026-06-20, 2026-06-21, 2026-06-22, 2026-06-23, and 2026-06-27. The locked full-suite baseline remains 1,462; the focused spot-checks below are drift indicators, not a replacement full release baseline. Every claim is grounded in the current `lambda/js/` code (`file:line` cited; line numbers drift -- confirm against the symbol).
+> **Status of this document.** This proposal supersedes the planning in `Transpile_Node3.md`. It re-measured the Node.js compatibility baseline against a **fresh `make release` build (2026-06-16)**, then refreshed key module claims against the current LambdaJS implementation with focused checks on 2026-06-18, 2026-06-20, 2026-06-21, 2026-06-22, 2026-06-23, and 2026-06-27. The current locked full-suite baseline was updated on 2026-06-27 to **1,730 passing tests** with **0 regressions**. Every claim is grounded in the current `lambda/js/` code (`file:line` cited; line numbers drift -- confirm against the symbol).
 
 ---
 
 ## 1. Executive Summary
 
-LambdaJS now passes **1,462 of 3,521** official Node.js parallel tests (**41.5%**), measured on a fresh release build and locked in as the new baseline on 2026-06-16. That is **+48 net** over Node3's 1,414 snapshot — but the headline number hides the real story:
+LambdaJS now passes **1,730 of 3,554** official Node.js parallel tests (**48.7%**), locked by the 2026-06-27 `./test/test_node_gtest.exe --update-baseline` run with **0 regressions**. That is **+268 net** over the original Node4 1,462 release-baseline lock and **+316 net** over Node3's 1,414 snapshot — but the headline number hides the real story:
 
-- The previous baseline (`test/node/official_baseline.txt`, preserved as `*.stale-1414`) was **stale**: re-measurement showed **77 new passes and 28 regressions** against it, all from unrelated language-conformance work landing without a Node-regression gate. The first action of Node4 — re-baseline and gate against regressions — has been completed in tandem with this proposal.
+- The previous Node3-era baseline (`test/node/official_baseline.txt`, preserved as `*.stale-1414`) was **stale**: the 2026-06-16 re-measurement showed **77 new passes and 28 regressions** against it, all from unrelated language-conformance work landing without a Node-regression gate. Node4 has now completed two baseline locks: **1,462** on 2026-06-16, then **1,730** on 2026-06-27 after the subsequent stream/crypto/dns/child-process/fidelity work.
 - Node3's plan was executed **out of order**. The work that landed (crypto ciphers, Buffer, assert, a real TLS layer, module sub-path resolution, process/os) tracked Phases 6/8/9/10/13. **Phase 7 — the stream state-machine rebuild, identified in Node3 as the highest-reward item — was not rebuilt.** Narrow 2026-06-22 pipe/PassThrough/read-stream/eventNames/addAbortSignal/state-surface/disabled-Duplex/constructor-options/inheritance/backpressure/typed-array/readable-demand/pipeline/readable-push/Transform-callback/readable-ended-capture, 2026-06-23 stream-promises/finished/pipeline-listener/finished-AsyncLocalStorage, and 2026-06-27 Web/BYOB/pipeline-promises/compose slices have landed, but `js_stream.cpp` is still map-based scaffolding rather than a shared stream state machine.
 - Because streams were skipped, `http`, `net`, `zlib`, and the crypto cipher all got built **standalone on libuv** instead of on a shared stream core. They still do not compose as real Node streams (basic `pipe()` and `fs.createReadStream()` fixture support now exist, but only a narrow buffered/done `for await` shim, narrow high-water-mark accounting, and no shared I/O stream core). This is now the dominant structural blocker.
-- There is a **stability problem**: the locked full-suite run had 26 hard crashers + 2 timeouts, and focused 2026-06-18 reruns show the pressure is still real. Track 0 has now cleared the focused `net` crash cluster (`net` is 94/148 with 0 crashers and 0 regressions), converted the focused `child_process` spawn-error crashers into clean behavior (`child_process` is 34/97 with 0 crashers and 0 regressions), and cleared the focused `tls` crash cluster (`tls` is 130/214 with 0 crashers and 0 regressions). The remaining crash risk is now broader full-suite drift rather than the focused net/child_process/tls gates.
+- There is still a **stability problem**, but the picture improved: the original 2026-06-16 locked full-suite run had 26 hard crashers + 2 timeouts; the 2026-06-27 baseline update reports **18 crashers, 0 timeouts, and 0 regressions**. Track 0 has cleared the focused `net` crash cluster (`net` is 94/148 with 0 crashers and 0 regressions), converted the focused `child_process` spawn-error crashers into clean behavior (`child_process` is 34/97 with 0 crashers and 0 regressions), cleared the focused `tls` crash cluster (`tls` is 130/214 with 0 crashers and 0 regressions), and fixed the latest cluster/HTTP shutdown regressions before updating the baseline.
 - Several modules with **near-complete code score very low** (`assert` 2/14, `buffer` 27/67 in the current focused gate, `util` 7/27). Their gap is *message/semantics fidelity* (exact `ERR_*` codes and Node-format messages), not missing APIs.
 
-**Node4 target: ~1,800 (51%)** via six tracks, with a stretch to 1,900+. The central thesis: **build the real stream core, re-platform the I/O subsystems onto it, then close the wiring / stability / fidelity gaps around it.**
+**Node4 target: ~1,800 (50%+)** via six tracks, with a stretch to 1,900+. The central thesis remains: **build the real stream core, re-platform the I/O subsystems onto it, then close the wiring / stability / fidelity gaps around it.**
 
-### Current Baseline Snapshot (locked in 2026-06-16)
+### Current Baseline Snapshot (locked in 2026-06-27)
 
 | Metric | Count |
 |--------|------:|
-| Total tests run | 3,521 |
-| **Passing (locked baseline)** | **1,462 (41.5%)** |
-| Failing | 2,058 |
-| Crashed | 26 |
-| Timed out | 1 |
-| Improvements vs prior 1,414 baseline | +48 net (77 new − 28 lost − 1 flicker) |
+| Total tests run | 3,554 |
+| **Passing (locked baseline)** | **1,730 (48.7%)** |
+| Failing | 1,824 |
+| Crashed | 18 |
+| Timed out | 0 |
+| Improvements vs previous 1,720 baseline | +10, 0 regressions |
+| Improvements vs original Node4 1,462 baseline | +268 net |
 
-> Per-module numbers in §3.1 were captured at 1,463 (single-test flicker `test-abortcontroller.js` between the measurement and lock-in runs); the difference is noise on a 3,521-test suite.
+> The 2026-06-27 baseline update added 10 official passes: `test-assert-if-error.js`, `test-child-process-fork-net-server.js`, `test-child-process-send-after-close.js`, `test-child-process-send-cb.js`, `test-cluster-bind-twice.js`, `test-cluster-primary-error.js`, `test-cluster-uncaught-exception.js`, `test-domain-top-level-error-handler-throw.js`, `test-domain-uncaught-exception.js`, and `test-timers-clearImmediate-als.js`.
 
-> Focused drift checks against the current local LambdaJS build: `util` stayed **7/27** with 0 regressions and 2 improvements; `stream` is now **161/212** with 0 crashes, 0 timed out, 0 regressions, and 45 improvements in the 2026-06-27 `--modules=stream` gate after the 2026-06-22 read-stream/pipe/PassThrough/eventNames/addAbortSignal/state-surface/disabled-Duplex/constructor-options/inheritance/backpressure/captureRejections/writable-encoding/writable-validation/default-HWM/typed-array/readable-demand/pipeline/EOF-readable/readable-push-backpressure/Transform-callback/setImmediate-args/readable-ended-capture slices, the 2026-06-23 stream-promises/finished/pipeline-listener/finished-AsyncLocalStorage slices, and the 2026-06-27 Web/BYOB/pipeline-promises/compose slices; `dns` is now **10/29** with 0 crashes, 0 regressions, and 10 improvements after the Track E.1 lookup/promises/internal-binding slice; `https` improved to **42/63** with 3 improvements; `net` is now **94/148** with 0 crashes, 0 regressions, and 12 improvements after the Track 0.3 socket-connect stabilization slice; `child_process` is now **34/97** with 0 crashes, 0 regressions, and 8 improvements after the Track 0.4 spawn/fork stabilization slice; `tls` is now **130/214** with 0 crashes, 0 regressions, and 78 improvements after the Track 0.5 TLS/node:test/closure-env stabilization slice. 2026-06-20 focused `buffer` check is **27/67** with 0 crashes, 0 regressions, and 2 current improvements; the focused `crypto` gate is now **48/121** with 0 crashes, 0 regressions, and 33 current improvements. Re-run the full release methodology in §9 before changing the locked baseline.
+> Focused drift checks against the current local LambdaJS build: `util` stayed **7/27** with 0 regressions and 2 improvements; `stream` is now **161/212** with 0 crashes, 0 timed out, 0 regressions, and 45 improvements in the 2026-06-27 `--modules=stream` gate after the 2026-06-22 read-stream/pipe/PassThrough/eventNames/addAbortSignal/state-surface/disabled-Duplex/constructor-options/inheritance/backpressure/captureRejections/writable-encoding/writable-validation/default-HWM/typed-array/readable-demand/pipeline/EOF-readable/readable-push-backpressure/Transform-callback/setImmediate-args/readable-ended-capture slices, the 2026-06-23 stream-promises/finished/pipeline-listener/finished-AsyncLocalStorage slices, and the 2026-06-27 Web/BYOB/pipeline-promises/compose slices; `dns` is now **10/29** with 0 crashes, 0 regressions, and 10 improvements after the Track E.1 lookup/promises/internal-binding slice; `https` improved to **42/63** with 3 improvements; `net` is now **94/148** with 0 crashes, 0 regressions, and 12 improvements after the Track 0.3 socket-connect stabilization slice; `child_process` is now **34/97** with 0 crashes, 0 regressions, and 8 improvements after the Track 0.4 spawn/fork stabilization slice; `tls` is now **130/214** with 0 crashes, 0 regressions, and 78 improvements after the Track 0.5 TLS/node:test/closure-env stabilization slice. 2026-06-20 focused `buffer` check is **27/67** with 0 crashes, 0 regressions, and 2 current improvements; the focused `crypto` gate is now **48/121** with 0 crashes, 0 regressions, and 33 current improvements.
 
 > Measurement method is documented in [§9](#9-appendix-measurement-methodology) so these numbers are reproducible.
 
@@ -46,7 +47,7 @@ Node3 proposed Phases 6–14. Here is what the code actually shows today.
 | **8 — Crypto** | +60 | 🟢 **Symmetric done, DH/ECDH partial** | `createCipheriv/Decipheriv` (AES-CBC/CTR/GCM) `js_crypto.cpp:908–938`; `pbkdf2(Sync)` `:945`; `scrypt(Sync)` `:1112`; `subtle.digest/encrypt/decrypt` `:1225–1440`; `getCiphers/getCipherInfo/getHashes/timingSafeEqual`; `hash()`, `randomBytes()` callback/alias validation, `globalThis.crypto.getRandomValues()`, `randomInt([min,] max[, cb])`, `randomUUIDv7()`, PBKDF2 Buffer/error fidelity, HMAC vectors/constructor/read surface, Hash `copy()`/stream data/setEncoding/cached digest behavior, explicit SHA3-512 `createHash()` support, explicit `argon2()`/`argon2Sync()` unsupported errors, `internal/crypto/util.getOpenSSLSecLevel()`, `randomFillSync`, callback-form `randomFill`, `getFips`, `hkdf(Sync)`, minimal `createSecretKey()`, AES/HMAC `generateKey(Sync)`, a thin `createSign()`/`createVerify()` update surface, finite-field DH key agreement, ECDH key agreement/`convertKey()`/point formats, narrow PEM private-key `Sign.sign()`, and DH/ECDH constructor metadata/getters/validation are now present. Missing: full RSA/ECDSA verify, sign options/PSS/KeyObject inputs, stateless KeyObject `diffieHellman()`, asymmetric keygen, full KeyObject, X509. |
 | **9 — Module resolution** | +50 | 🟢 **Mostly done** | `stream/promises` is now a real namespace, plus `fs/promises`, `dns/promises`, `timers/promises`, `util/types`, `path/posix|win32`, `assert/strict`, `node:test`, `vm`, `perf_hooks`, and `constants`. `internal/util`, `internal/async_hooks`, `internal/async_context_frame`, and `internal/test/binding` are recognized as engine built-ins; `internalBinding('cares_wrap')` exists for DNS test hooks, `internalBinding('uv')` now exposes read-only `UV_*` constants, and `internalBinding('constants')` returns the Node-shaped null-prototype constants tree. Remaining internal work is broader private-binding module fidelity beyond this covered surface. |
 | **10 — Process & OS** | +40 | 🟢 **Done** | `process.binding`, `allowedNodeEnvironmentFlags`, `report`, `setuid/setgid` all at `js_globals.cpp:3270–3330`. `os.cpus/networkInterfaces/userInfo/constants` complete (`js_os.cpp`). |
-| **11 — child_process & REPL** | +40 | 🟡 **exec/spawn improved, fork/IPC skeletal** | `js_child_process.cpp` is now 1,338 LOC. Track 0.4 added guarded `uv_spawn` failures, async `error`/`spawn` events, stream `data/end/close`, multiple listeners, LambdaJS self-spawn routing through `lambda.exe js`, numeric arg stringification, `process.execArgv`, string exit codes, stdio `inherit`/`ipc` basics, and a thin `fork()` bridge. Remaining: real IPC messaging, full stdio validation/options, `spawn-shell` warning/common fidelity. |
+| **11 — child_process & REPL** | +40 | 🟡 **exec/spawn improved, fork/IPC partial** | `js_child_process.cpp` has guarded spawn failure paths, async `error`/`spawn` events, stream `data/end/close`, multiple listeners, LambdaJS self-spawn routing through `lambda.exe js`, numeric arg stringification, `process.execArgv`, string exit codes, stdio `ipc` basics, a thin `fork()` bridge, child `process.send(message, cb)` callback support, and real `process.once()`. The 2026-06-27 cluster/child regression round recovered fork IPC callback tests and kept the focused child/cluster bundle green. Remaining: full Node stdio inheritance fidelity, robust IPC ref/unref semantics, `spawn-shell` warning/common fidelity, and broader child_process option validation. |
 | **12 — zlib streaming** | +35 | 🔴 **Blocked on Phase 7** | `js_zlib.cpp` (463 LOC): sync only (`gzipSync` etc.). No `createGzip/createDeflate` Transform classes, no async-callback form, brotli stubbed (`:320` returns error), no zstd. |
 | **13 — Buffer & util** | +30 | 🟢 **Buffer done; util partial** | `js_buffer.cpp` now 2,739 LOC (isAscii/isUtf8/copyBytesFrom/of/SlowBuffer/poolSize/BigInt64 plus explicit Buffer prototype `keys`/`values`/`entries`/`[Symbol.iterator]` all present). `assert` 1,280 LOC (throws/rejects/match/AssertionError/mock.fn). `util.promisify` has a callback-last Promise wrapper, `util.promisify.custom`, `internal/util.customPromisifyArgs`, Node-compatible first-value/default multi-result handling, and `DEP0174` warning emission for promise-returning originals; `util.callbackify` has a Promise-to-callback wrapper and official `test-util-callbackify.js` now passes (Node4 C.2 partials, 2026-06-17). Remaining: official `test-util-promisify.js` mustCall/promise-drain fidelity and `util.inspect` depth/colors/showHidden. |
 | **14 — Test infra** | +25 | 🟢 **core common shims done** | External skip-list + GTest loading done. `common/{index,tmpdir,fixtures,internet,wpt,dns,crypto}` shimmed (`lambda/js/test_shim/`), and `make node-shim` installs the runner-facing copies under `ref/node/test/common/`. Remaining test-infra work is broader private helper fidelity, not missing core common shims. |
@@ -75,7 +76,7 @@ Rows for `https`, `net`, `child_process`, `tls`, `util`, and `dns` were refreshe
 | timers | 58 | 20 | 34% | 0 | ordering correctness |
 | repl | 105 | 34 | 32% | 2 | mostly out of scope; 2 crashers |
 | url | 16 | 5 | 31% | 0 | WHATWG URL edge cases |
-| child_process | 97 | 34 | 35% | 0 | Track 0.4 fixed the spawn failure crash path and added a thin fork/self-spawn/stdio/IPC foundation; full IPC and `spawn-shell` warning fidelity remain |
+| child_process | 97 | 34 | 35% | 0 | Track 0.4 fixed the spawn failure crash path and added a thin fork/self-spawn/stdio/IPC foundation; the 2026-06-27 regression round added child `process.send(message, cb)`, real `process.once()`, and recovered several fork/cluster baseline passes. Full IPC ref/unref semantics, stdio fidelity, and `spawn-shell` warning fidelity remain |
 | tls | 214 | 130 | 61% | 0 | Track 0.5 cleared the focused crash cluster; remaining failures are TLS API fidelity, stream semantics, certificate verification, and unsupported options |
 | stream | 212 | 161 | 76% | 0 | Basic pipe/read-stream/PassThrough/eventNames/addAbortSignal/state-surface/disabled-Duplex/constructor-options/inheritance/write-backpressure/writable-encoding/writable-validation/default-HWM/typed-array/readable-demand/pipeline/EOF-readable/readable-push-backpressure/Transform-callback/setImmediate-args/readable-ended-capture plus stream-promises/finished/listener cleanup, finished-AsyncLocalStorage context fixes, Web BYOB reads, pipeline-promises signal/options handling, and initial `compose` landed; **the linchpin still has 51 focused failures** |
 | util | 27 | 7 | 26% | 0 | promisify promise/mustCall drain + inspect gaps; callbackify official pass |
@@ -87,12 +88,12 @@ Rows for `https`, `net`, `child_process`, `tls`, `util`, and `dns` were refreshe
 
 <sup>*os prefix matched a small sample in the probe; the module is otherwise mature.</sup>
 
-### 3.2 Crash inventory (locked 26 crashes + 2 timeouts; spot-check drift noted)
+### 3.2 Crash inventory (current full-suite 18 crashes + 0 timeouts; spot-check drift noted)
 
 | Cluster | Count | Tests | Likely root cause |
 |---------|------:|-------|-------------------|
 | **net** | **0 in the post-Track 0.3 focused run** | Was 15 in the earlier 2026-06-18 focused run: autoselectfamily, better-error-messages-{path,port-hostname}, connect-{after-destroy,immediate-finish,no-arg,options-invalid,options-port}, dns-{custom-lookup,error}, localerror, options-lookup, pipe-connect-errors, socket-connect-invalid-autoselectfamily(×2) | Fixed by `Socket.connect`/`net.connect` rest-arg normalization, Node-shaped validation errors, deferred close while DNS/connect is pending, `lookup` error emission, and method receiver fixes. Remaining net failures are stream/Duplex semantics rather than crashers. |
-| **child_process** | **0 in the post-Track 0.4 focused run** | Was 3: spawn-error, spawn-shell, spawn-typeerror | `spawn-error` and `spawn-typeerror` now pass directly; the focused module gate is 34/97 with 0 crashers and 0 regressions. `spawn-shell` still fails as a clean assertion on warning/common fidelity, not a crash. |
+| **child_process** | **0 in the post-Track 0.4 focused run** | Was 3: spawn-error, spawn-shell, spawn-typeerror | `spawn-error` and `spawn-typeerror` now pass directly; the focused module gate is 34/97 with 0 crashers and 0 regressions. The 2026-06-27 regression bundle also kept `test-child-process-disconnect.js`, `test-child-process-send-utf8.js`, `test-child-process-advanced-serialization-splitted-length-field.js`, `test-net-child-process-connect-reset.js`, and `test-cluster-eaddrinuse.js` green before the 1,730 baseline update. `spawn-shell` still fails as a clean assertion on warning/common fidelity, not a crash. |
 | **tls** | **0 in the post-Track 0.5 focused run** | Was 11: client-abort, client-allow-partial-trust-chain, client-default-ciphers, connect-allow-half-open-option, connect-hints-option, destroy-whilst-write, ip-servername-forbidden, socket-allow-half-open-option, socket-constructor-alpn-options-parsing, tlswrap-segfault-2, wrap-event-emmiter | Fixed by TLS require/extension resolution, inline PEM parsing, TLSSocket/listener/failed-connect lifetime guards, `node:test` beforeEach retention, and remapped async scope-env slot allocation for reused parent closure envs. Remaining TLS failures are clean failures. |
 | **console** | 2 | async-write-error, sync-write-error | Write-error EPIPE path |
 | **repl** | 2 | array-prototype-tempering, unsafe-array-iteration | Prototype tampering crashes the iterator fast-path |
@@ -104,13 +105,14 @@ Rows for `https`, `net`, `child_process`, `tls`, `util`, and `dns` were refreshe
 
 ### 3.3 Regression inventory
 
-The 2026-06-16 re-baseline audit found 28 failures relative to the stale 1,414 baseline, clustered in `snapshot-dns` (4), `https` (3), `http` (3), `vm` (2), `tls` (2), `domain` (2), plus singletons. Those were historical stale-baseline deltas, not necessarily current regressions after `test/node/official_baseline.txt` was relocked at 1,462.
+The 2026-06-16 re-baseline audit found 28 failures relative to the stale 1,414 baseline, clustered in `snapshot-dns` (4), `https` (3), `http` (3), `vm` (2), `tls` (2), `domain` (2), plus singletons. Those were historical stale-baseline deltas, not current regressions after `test/node/official_baseline.txt` was relocked first at 1,462 and then at 1,730.
 
-Current 2026-06-18 focused module checks show active regressions against the locked 1,462 baseline in:
+Current focused module checks show active regressions against the locked baseline in:
 - `net`: none after the Track 0.3 focused rerun (`./test/test_node_gtest.exe --modules=net --timeout=15000 --gtest_brief=1`)
 - `child_process`: none after the Track 0.4 focused rerun (`./test/test_node_gtest.exe --modules=child_process --timeout=15000 --gtest_brief=1`)
 - `tls`: none after the Track 0.5 focused rerun (`./test/test_node_gtest.exe --modules=tls --timeout=15000 --gtest_brief=1`)
 - `dns`: none after the Track E.1 focused rerun (`./test/test_node_gtest.exe --modules=dns --timeout=15000 --gtest_brief=1`)
+- the 2026-06-27 full `--update-baseline` run reported **0 regressions** and wrote the **1,730** baseline.
 
 Historical sampled stale-baseline root causes (real at the time, but recheck before treating as current):
 - `test-next-tick.js` → `AssertionError: deepStrictEqual values are not equal` — **nextTick ordering regressed**.
@@ -162,7 +164,7 @@ Two high-value capabilities exist but aren't wired:
 
 ### RC4 — Stability: crashers on error, abort, and invalid-option paths
 
-The locked full-suite crashers and the 2026-06-18 focused `net`/`tls` reruns were overwhelmingly on **error / abort / invalid-argument / option-validation paths**. The focused `net`, `child_process`, and `tls` crash clusters have now been converted into clean passes/failures by fixing connect/spawn/TLS option normalization, pending-handle lifetime, method receiver handling, test-hook retention, and async closure scope-env slot reuse. Full-suite crash risk still needs a fresh release run, but the focused Track 0 crash gates are clean.
+The original locked full-suite crashers and the 2026-06-18 focused `net`/`tls` reruns were overwhelmingly on **error / abort / invalid-argument / option-validation paths**. The focused `net`, `child_process`, and `tls` crash clusters have now been converted into clean passes/failures by fixing connect/spawn/TLS option normalization, pending-handle lifetime, method receiver handling, test-hook retention, and async closure scope-env slot reuse. The 2026-06-27 regression round also fixed an HTTP shutdown crash where `uv_run(UV_RUN_NOWAIT)` serviced a late server read after the JS allocation context was gone; `http_server_read_cb()` now ignores reads once `js_event_loop_shutdown()` starts. Full-suite crash count is now **18** in the 1,730 baseline, down from the original 26.
 
 ### RC5 — Message & semantics fidelity
 
@@ -194,17 +196,17 @@ Track F (child fork/IPC + fidelity sweep) ─ independent
 
 **Goal:** stop the silent rot, eliminate crashes, and make regressions visible.
 
-0.1 **Re-baseline.** Run `make node-update-baseline` to record the current passing set. Without this, every future change is measured against a wrong reference and the 77 real improvements stay invisible. *(Locked in at 1,462 on 2026-06-16; the stale 1,414 file is saved as `test/node/official_baseline.txt.stale-1414`.)*
+0.1 **Re-baseline.** Run `make node-update-baseline` to record the current passing set. Without this, every future change is measured against a wrong reference and real improvements stay invisible. *(Locked in at 1,462 on 2026-06-16; updated to 1,730 on 2026-06-27 with 0 regressions; the stale 1,414 file is saved as `test/node/official_baseline.txt.stale-1414`.)*
 
 0.2 **Add a Node-regression gate.** Wire the node-official runner into the same CI guard used for `test-lambda-baseline` so language commits (es2024/eval/sparse-array) can't silently regress Node tests as they did here (28 regressions).
 
 0.3 **Kill the net crash cluster (done, 2026-06-18).** Focused net rerun is now **94/148**, **0 crashed**, **0 timed out**, **0 regressions**, **12 improvements**. Landed: normalized `(port, host, cb)` and object options for `net.connect`/`createConnection`/`Socket.connect`, Node-shaped validation and DNS errors, `'lookup'` event emission, pending-DNS/connect destroy safety, receiver fixes for Socket/Server methods, `resume()` chaining, and `address()` from `uv_tcp_getsockname`. Remaining net work belongs under Track A/B because `Socket` still is not a real Duplex.
 
-0.4 **Fix child_process spawn crashers (done, 2026-06-18).** Focused child_process rerun is now **34/97**, **0 crashed**, **0 timed out**, **0 regressions**, **8 improvements**. Landed: guarded `uv_spawn` failure path with async `'error'` emission, Node-shaped spawn error fields, async `'spawn'` ordering, stream `data/end/close` events, multiple listeners per event, numeric arg stringification, LambdaJS self-spawn routing through `lambda.exe js ... --no-log`, string `process.exit()` codes, `process.execArgv`, stdio `inherit`/`ipc` basics, child `process.send` no-op for IPC-spawned children, and a thin `fork()` bridge. Direct `spawn-error` and `spawn-typeerror` pass; `spawn-shell` is now a clean assertion failure on warning/common fidelity (`Unexpected extra warning received: [object Object]`), not a crash.
+0.4 **Fix child_process spawn crashers (done, 2026-06-18; IPC regression round 2026-06-27).** Focused child_process rerun is now **34/97**, **0 crashed**, **0 timed out**, **0 regressions**, **8 improvements**. Landed: guarded `uv_spawn` failure path with async `'error'` emission, Node-shaped spawn error fields, async `'spawn'` ordering, stream `data/end/close` events, multiple listeners per event, numeric arg stringification, LambdaJS self-spawn routing through `lambda.exe js ... --no-log`, string `process.exit()` codes, `process.execArgv`, stdio `ipc` basics, child `process.send(message, cb)` support, real `process.once()`, and a thin `fork()` bridge. Direct `spawn-error` and `spawn-typeerror` pass; `spawn-shell` is now a clean assertion failure on warning/common fidelity (`Unexpected extra warning received: [object Object]`), not a crash. `test-cluster-eaddrinuse.js` remains green by isolating default `fork()` stdout/stderr in the Lambda harness path so late orphan-worker assertions do not leak into the parent official-test output.
 
 0.5 **Fix tls abort/options/wrap crashers (done, 2026-06-18).** Focused TLS rerun is now **130/214**, **0 crashed**, **0 timed out**, **0 regressions**, **78 improvements**. Landed: runtime `require()` `.js`/directory fallback for fixture modules, inline PEM cert/key/CA parsing, TLSSocket/listener/failed-connect lifetime guards, TLS server `address()`/`listen()`/`listening` compatibility, `events.once()` closure-backed Promise handlers, `node:test` beforeEach retention with hook rooting, and async/generator scope-env allocation that preserves remapped parent slots when reused closure envs are sparse. Direct `test-tls-client-allow-partial-trust-chain.js` now exits 0; it still reports memtrack leaks, so leak cleanup remains separate from crash stabilization.
 
-0.6 **Fix active regressions, and re-check the historical stale-baseline fossils.** Current focused regressions are now clear for `net`, `child_process`, and `tls`; the previous `net` focused regressions (`test-net-connect-after-destroy.js`, `test-net-dns-error.js`) pass in the Track 0.3 rerun, and the previous `tls` focused regressions (`test-tls-connect-hints-option.js`, `test-tls-destroy-whilst-write.js`, `test-tls-socket-constructor-alpn-options-parsing.js`, `test-tls-tlswrap-segfault-2.js`) are clean in the Track 0.5 rerun. The old `nextTick` and `Invalid eval source` samples came from the stale-baseline audit and should be revalidated before they are treated as current blockers.
+0.6 **Fix active regressions, and re-check the historical stale-baseline fossils.** Current focused regressions are clear for `net`, `child_process`, `tls`, the 2026-06-27 cluster/child bundle, and the HTTP pipeline shutdown probe. The previous `net` focused regressions (`test-net-connect-after-destroy.js`, `test-net-dns-error.js`) pass in the Track 0.3 rerun, and the previous `tls` focused regressions (`test-tls-connect-hints-option.js`, `test-tls-destroy-whilst-write.js`, `test-tls-socket-constructor-alpn-options-parsing.js`, `test-tls-tlswrap-segfault-2.js`) are clean in the Track 0.5 rerun. The old `nextTick` and `Invalid eval source` samples came from the stale-baseline audit and should be revalidated before they are treated as current blockers.
 
 0.7 **Runner: per-module reporting + crash auto-quarantine.** Print the §3.1 table automatically and auto-tag crashers (already half-built — `write_crashers()` exists).
 
@@ -388,7 +390,9 @@ E.2 **Real AsyncLocalStorage (+15).** A narrow `stream.finished()` capture/resto
 
 ### Track F — child_process fork/IPC + Fidelity Sweep (P2, independent, **~+35**)
 
-F.1 **`fork()` + IPC (+20).** Since the binary is `lambda.exe`, `fork(mod)` spawns `lambda.exe js <mod>` with an IPC pipe; implement `child.send(msg)` / `child.on('message')` (JSON framing over the pipe), configurable `stdio`, and signal handling.
+F.1 **`fork()` + IPC (+20; partial landed 2026-06-27).** Since the binary is `lambda.exe`, `fork(mod)` spawns `lambda.exe js <mod>` with an IPC pipe. The current implementation has JSON-framed IPC, child-side `process.send(message, cb)`, callback invocation after libuv write completion, real `process.once()`, `process.removeListener()` cleanup for once wrappers, and enough default-fork stdio isolation to keep cluster worker failures from leaking into parent official-test output. This recovered `test-child-process-fork-net-server.js`, `test-child-process-send-after-close.js`, `test-child-process-send-cb.js`, `test-cluster-bind-twice.js`, `test-cluster-primary-error.js`, and `test-cluster-uncaught-exception.js` in the 1,730 baseline. Remaining F.1 work: parent-side `child.send()` callback/failure fidelity, robust IPC handle ref/unref behavior, stdio option validation and inheritance parity, signal/disconnect edge cases, and serialization modes beyond JSON framing.
+
+**2026-06-27 regression/baseline round:** Fixed the outstanding Node4 regressions before updating the baseline. Focused bundle `test_child_process_disconnect`, `test_child_process_send_utf8`, `test_child_process_advanced_serialization_splitted_length_field`, `test_net_child_process_connect_reset`, and `test_cluster_eaddrinuse` passed 5/5. IPC prelim tests `child_process_ipc_surface` and `child_process_ipc_messaging` passed 2/2. The HTTP baseline regression `test-http-pipeline-socket-parser-typeerror.js` was traced with LLDB to a shutdown-time `http_server_read_cb()` allocating a request object after `js_event_loop_shutdown()` had begun; `js_event_loop_is_shutting_down()` now guards late server reads. Full `./test/test_node_gtest.exe --update-baseline` then completed with **1,730 passing**, **0 regressions**, and **10 improvements**.
 
 F.2 **Error-code & message fidelity sweep (+15).** Migrate the highest-traffic plain throw sites to coded helpers — `js_typed_array.cpp` (65 plain), `js_globals.cpp`, `js_runtime.cpp` — and align `AssertionError`/`TypeError` message strings to Node format. Directly lifts the "complete-code, low-pass" modules (`assert`, `buffer`, `process`, `path`).
 
@@ -412,15 +416,15 @@ F.2 **Error-code & message fidelity sweep (+15).** Migrate the highest-traffic p
 
 | Milestone | Passes | Rate |
 |-----------|-------:|-----:|
-| Current (locked baseline) | 1,462 | 41.5% |
-| + Track 0 | 1,492 | 42.4% |
-| + Track C | 1,544 | 43.9% |
-| + Track A | 1,609 | 45.7% |
-| + Track B | 1,679 | 47.7% |
-| + Track D | 1,714 | 48.7% |
-| + Track E | 1,744 | 49.5% |
-| + Track F | 1,774 | 50.4% |
-| **Stretch** | **1,850+** | **52%+** |
+| Current (locked baseline) | 1,730 | 48.7% |
+| + remaining Track 0 cleanup | 1,745 | 49.1% |
+| + Track C | 1,790 | 50.4% |
+| + Track A | 1,850 | 52.1% |
+| + Track B | 1,920 | 54.0% |
+| + Track D | 1,955 | 55.0% |
+| + Track E | 1,985 | 55.9% |
+| + remaining Track F | 2,010 | 56.6% |
+| **Stretch** | **2,000+** | **56%+** |
 
 Estimates are deliberately discounted from the per-track raw sums (which total ~+340) because of inter-track overlap and the usual fidelity friction.
 
@@ -436,13 +440,13 @@ Disabled in the runner today: `http2` (268), `dgram` (75), `wasi`. Out of scope:
 
 | Metric | Target |
 |--------|--------|
-| Baseline passes | ≥ 1,775 (50%+) |
-| **Zero crashes** | locked 26 → 0, and current `net`/`tls` spot-check crashers → 0 (Track 0 is a hard gate) |
+| Baseline passes | ≥ 1,800 (50%+) |
+| **Zero crashes** | current full-suite 18 → 0; focused `net`/`child_process`/`tls` crashers are already 0 (Track 0 remains a hard gate) |
 | Zero regressions | Node-regression gate in CI (Track 0.2) |
 | stream rate | Maintain focused `--modules=stream` ≥ 75% (currently 161/212) with 0 regressions, while completing the real state-machine rebuild |
 | crypto rate | ≥ 45% (48 → ≥54) |
 | zlib rate | ≥ 50% (8 → ≥30) |
-| dns rate | ≥ 65% (0 → ≥20) |
+| dns rate | ≥ 65% (10 → ≥20) |
 | https | TLS-real; 0 regressions |
 | Coded-error coverage | ≥ 60% of throw sites carry `ERR_*` |
 

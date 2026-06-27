@@ -1632,8 +1632,8 @@ extern "C" Item js_cp_fork(Item rest_args) {
     }
     if (!copied_stdio) {
         js_array_push(stdio, make_string_item("ignore"));
-        js_array_push(stdio, make_string_item("inherit"));
-        js_array_push(stdio, make_string_item("inherit"));
+        js_array_push(stdio, make_string_item("ignore"));
+        js_array_push(stdio, make_string_item("ignore"));
     }
     if (!stdio_has_ipc) js_array_push(stdio, make_string_item("ipc"));
     js_property_set(spawn_options, make_string_item("stdio"), stdio);
