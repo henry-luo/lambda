@@ -163,6 +163,13 @@ bool style_tree_remove_property(StyleTree* style_tree, CssPropertyId property_id
  */
 bool style_tree_remove_declaration(StyleTree* style_tree, CssDeclaration* declaration);
 
+/**
+ * Remove all inline-style declarations from the style tree.
+ * @param style_tree Style tree to modify
+ * @return true if any inline declarations were removed, false otherwise
+ */
+bool style_tree_remove_inline_declarations(StyleTree* style_tree);
+
 // ============================================================================
 // CSS Cascade Resolution
 // ============================================================================
