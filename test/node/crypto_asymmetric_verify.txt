@@ -7,6 +7,7 @@ rsa keyobject properties: true
 rsa keyobject details: true
 rsa keyobject sign verify: true
 rsa keyobject derive public: true
+rsa keyobject equals: true
 rsa keyobject export options: true
 rsa keyobject export instanceof: true
 rsa generateKeyPairSync keyobjects: true

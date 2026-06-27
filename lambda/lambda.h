@@ -83,6 +83,8 @@ void lambda_stack_overflow_error(const char* func_name);
 enum EnumTypeId {
     LMD_TYPE_RAW_POINTER = 0,
     LMD_TYPE_NULL,
+    // JavaScript-specific scalar sentinel, distinct from Lambda null.
+    LMD_TYPE_UNDEFINED,  // JavaScript undefined (distinct from null)
 
     // scalar types
     LMD_TYPE_BOOL,
@@ -115,9 +117,6 @@ enum EnumTypeId {
 
     LMD_TYPE_ANY,
     LMD_TYPE_ERROR,
-
-    // JavaScript-specific types (added at end to preserve existing type IDs)
-    LMD_TYPE_UNDEFINED,  // JavaScript undefined (distinct from null)
 
     LMD_TYPE_COUNT,  // number of type IDs — must be last before HEAP_START
     LMD_CONTAINER_HEAP_START, // special value for container heap entry start

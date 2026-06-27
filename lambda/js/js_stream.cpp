@@ -167,6 +167,7 @@ static int64_t js_stream_iter_chunk_byte_length(Item chunk);
 static bool js_stream_has_error(Item err);
 extern "C" Item js_readable_from(Item iterable);
 static Item js_readable_from_pump(Item env_item);
+static bool js_readable_from_is_iterable(Item value);
 static void js_stream_iter_resolve_drain(Item writer, Item value);
 static void js_stream_iter_reject_drain(Item writer, Item err);
 static void js_stream_iter_resolve_end_if_drained(Item writer);
@@ -3438,6 +3439,135 @@ static void js_readable_compose_attach_writable_bridge(Item out, Item source, It
                     js_new_closure((void*)js_readable_compose_bridge_destroy, 1, env, 5));
 }
 
+static bool js_readable_compose_result_source_failed(Item* env) {
+    if (!env) return true;
+    Item source = env[2];
+    Item err = js_stream_get_stored_error(source);
+    if (!js_stream_has_error(err)) return false;
+    js_stream_destroy(env[0], err);
+    return true;
+}
+
+static Item js_readable_compose_result_pump(Item env_item);
+
+static Item js_readable_compose_result_on_step(Item env_item, Item result) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item readable = env[0];
+    if (js_item_is_true(js_property_get(readable, key_destroyed))) return make_js_undefined();
+    if (js_readable_compose_result_source_failed(env)) return make_js_undefined();
+
+    if (js_iterator_result_done(result)) {
+        if (js_check_exception()) {
+            Item err = js_clear_exception();
+            js_stream_destroy(readable, err);
+        } else {
+            js_readable_push(readable, ItemNull);
+        }
+        return make_js_undefined();
+    }
+    if (js_check_exception()) {
+        Item err = js_clear_exception();
+        js_stream_destroy(readable, err);
+        return make_js_undefined();
+    }
+    if (js_readable_compose_result_source_failed(env)) return make_js_undefined();
+
+    Item value = js_iterator_result_value(result);
+    if (js_check_exception()) {
+        Item err = js_clear_exception();
+        js_stream_destroy(readable, err);
+        return make_js_undefined();
+    }
+    if (get_type_id(value) == LMD_TYPE_NULL) {
+        Item err = js_stream_make_type_error_with_code("ERR_STREAM_NULL_VALUES",
+            "May not write null values to stream");
+        js_stream_destroy(readable, err);
+        return make_js_undefined();
+    }
+    js_readable_push(readable, value);
+    return js_readable_compose_result_pump(env_item);
+}
+
+static Item js_readable_compose_result_on_error(Item env_item, Item err) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    js_stream_destroy(env[0], err);
+    return make_js_undefined();
+}
+
+static Item js_readable_compose_result_pump(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item readable = env[0];
+    if (js_item_is_true(js_property_get(readable, key_destroyed))) return make_js_undefined();
+    if (js_readable_compose_result_source_failed(env)) return make_js_undefined();
+
+    Item step = js_async_iterator_step_result(env[1]);
+    if (js_check_exception()) {
+        Item err = js_clear_exception();
+        js_stream_destroy(readable, err);
+        return make_js_undefined();
+    }
+
+    Item on_step = js_new_closure((void*)js_readable_compose_result_on_step, 1, env, 3);
+    Item on_error = js_new_closure((void*)js_readable_compose_result_on_error, 1, env, 3);
+    js_promise_then(step, on_step, on_error);
+    return make_js_undefined();
+}
+
+static Item js_readable_compose_from_result(Item source, Item composed, Item options) {
+    Item opts = js_new_object();
+    js_property_set(opts, make_string_item("objectMode"), js_bool_item(true));
+    Item out = js_readable_new(opts);
+    if (get_type_id(out) != LMD_TYPE_MAP && get_type_id(out) != LMD_TYPE_ELEMENT) return out;
+
+    js_stream_set_readable_object_mode(out, true);
+    js_property_set(out, key_writable, js_bool_item(false));
+    js_readable_compose_attach_error_forward(source, out);
+    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_ELEMENT)
+        js_stream_iter_attach_abort(options, out);
+
+    TypeId composed_type = get_type_id(composed);
+    if (composed_type == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(composed);
+        for (int64_t i = 0; i < len; i++) {
+            Item value = js_array_get_int(composed, i);
+            if (get_type_id(value) == LMD_TYPE_NULL) {
+                Item err = js_stream_make_type_error_with_code("ERR_STREAM_NULL_VALUES",
+                    "May not write null values to stream");
+                js_stream_destroy(out, err);
+                return out;
+            }
+            js_readable_push(out, value);
+        }
+        js_readable_push(out, ItemNull);
+        return out;
+    }
+
+    if (composed_type == LMD_TYPE_STRING) {
+        js_readable_push(out, composed);
+        js_readable_push(out, ItemNull);
+        return out;
+    }
+
+    if (js_readable_from_is_iterable(composed)) {
+        Item iterator = js_get_async_iterator(composed);
+        if (js_check_exception()) {
+            Item err = js_clear_exception();
+            js_stream_destroy(out, err);
+            return out;
+        }
+        Item* env = js_alloc_env(3);
+        env[0] = out;
+        env[1] = iterator;
+        env[2] = source;
+        js_readable_compose_result_pump((Item){.item = (uint64_t)(uintptr_t)env});
+    }
+
+    return out;
+}
+
 static Item js_readable_compose(Item self, Item stream, Item options) {
     if (!js_stream_validate_helper_options(options)) return ItemNull;
     if (!js_stream_validate_helper_signal(options)) return ItemNull;
@@ -3470,15 +3600,7 @@ static Item js_readable_compose(Item self, Item stream, Item options) {
         Item composed = js_call_function(stream, make_js_undefined(), args, 1);
         if (js_check_exception()) return ItemNull;
 
-        Item out = js_readable_from(composed);
-        if (get_type_id(out) == LMD_TYPE_MAP || get_type_id(out) == LMD_TYPE_ELEMENT) {
-            js_stream_set_readable_object_mode(out, true);
-            js_property_set(out, key_writable, js_bool_item(false));
-            js_readable_compose_attach_error_forward(self, out);
-            if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_ELEMENT)
-                js_stream_iter_attach_abort(options, out);
-        }
-        return out;
+        return js_readable_compose_from_result(self, composed, options);
     }
 
     if (js_readable_compose_is_duplex_like(stream)) {

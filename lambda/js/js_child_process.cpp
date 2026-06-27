@@ -563,7 +563,7 @@ static Item spawn_send_callback_later(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     Item callback = env ? env[0] : make_js_undefined();
     if (is_callable(callback)) {
-        Item arg = make_js_undefined();
+        Item arg = env ? env[1] : make_js_undefined();
         js_call_function(callback, make_js_undefined(), &arg, 1);
         js_microtask_flush();
     }
@@ -583,6 +583,21 @@ static void schedule_spawn_event(Item obj) {
     env[0] = obj;
     Item callback = js_new_closure((void*)spawn_emit_spawn_later, 0, env, 1);
     js_next_tick_enqueue(callback);
+}
+
+static Item make_ipc_channel_closed_error(void) {
+    Item err = js_new_error(make_string_item("Channel closed"));
+    js_property_set(err, make_string_item("code"), make_string_item("ERR_IPC_CHANNEL_CLOSED"));
+    return err;
+}
+
+static void schedule_spawn_send_callback(Item callback, Item err) {
+    if (!is_callable(callback)) return;
+    Item* env = js_alloc_env(2);
+    env[0] = callback;
+    env[1] = err;
+    Item tick = js_new_closure((void*)spawn_send_callback_later, 0, env, 2);
+    js_next_tick_enqueue(tick);
 }
 
 static void spawn_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
@@ -832,38 +847,61 @@ static Item js_spawn_send_with_env(Item env_item, Item message, Item send_handle
     Item* env = (Item*)(uintptr_t)env_item.item;
     JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
     Item self = js_get_this();
-    Item connected = js_property_get(self, make_string_item("connected"));
-    if (connected.item == ITEM_FALSE || !sp || !sp->ipc_pipe_active) return (Item){.item = ITEM_FALSE};
 
     Item cb = make_js_undefined();
     if (is_callable(callback)) cb = callback;
     else if (is_callable(options)) cb = options;
     else if (is_callable(send_handle)) cb = send_handle;
-    if (!spawn_ipc_write_json(sp, message)) return (Item){.item = ITEM_FALSE};
-    if (is_callable(cb)) {
-        Item* env = js_alloc_env(1);
-        env[0] = cb;
-        Item tick = js_new_closure((void*)spawn_send_callback_later, 0, env, 1);
-        js_next_tick_enqueue(tick);
+
+    if (!is_undefined_item(callback) && !is_callable(callback)) {
+        return js_throw_invalid_arg_type("callback", "function", callback);
     }
+    if (!is_undefined_item(options) && !is_callable(options) && !is_object_item(options)) {
+        return js_throw_invalid_arg_type("options", "object", options);
+    }
+    if (!is_nullish_item(send_handle) && !is_callable(send_handle) && !is_object_item(send_handle)) {
+        return js_throw_type_error_code("ERR_INVALID_HANDLE_TYPE", "This handle type cannot be sent");
+    }
+
+    Item connected = js_property_get(self, make_string_item("connected"));
+    if (connected.item == ITEM_FALSE || !sp || !sp->ipc_pipe_active) {
+        Item err = make_ipc_channel_closed_error();
+        if (is_callable(cb)) schedule_spawn_send_callback(cb, err);
+        else spawn_emit_event(self, "error", &err, 1);
+        return (Item){.item = ITEM_FALSE};
+    }
+
+    if (!spawn_ipc_write_json(sp, message)) return (Item){.item = ITEM_FALSE};
+    schedule_spawn_send_callback(cb, make_js_undefined());
     return (Item){.item = ITEM_TRUE};
 }
 
 extern "C" Item js_spawn_send(Item message, Item send_handle, Item options, Item callback) {
     (void)message;
     Item self = js_get_this();
-    Item connected = js_property_get(self, make_string_item("connected"));
-    if (connected.item == ITEM_FALSE) return (Item){.item = ITEM_FALSE};
     Item cb = make_js_undefined();
     if (is_callable(callback)) cb = callback;
     else if (is_callable(options)) cb = options;
     else if (is_callable(send_handle)) cb = send_handle;
-    if (is_callable(cb)) {
-        Item* env = js_alloc_env(1);
-        env[0] = cb;
-        Item tick = js_new_closure((void*)spawn_send_callback_later, 0, env, 1);
-        js_next_tick_enqueue(tick);
+
+    if (!is_undefined_item(callback) && !is_callable(callback)) {
+        return js_throw_invalid_arg_type("callback", "function", callback);
     }
+    if (!is_undefined_item(options) && !is_callable(options) && !is_object_item(options)) {
+        return js_throw_invalid_arg_type("options", "object", options);
+    }
+    if (!is_nullish_item(send_handle) && !is_callable(send_handle) && !is_object_item(send_handle)) {
+        return js_throw_type_error_code("ERR_INVALID_HANDLE_TYPE", "This handle type cannot be sent");
+    }
+
+    Item connected = js_property_get(self, make_string_item("connected"));
+    if (connected.item == ITEM_FALSE) {
+        Item err = make_ipc_channel_closed_error();
+        if (is_callable(cb)) schedule_spawn_send_callback(cb, err);
+        else spawn_emit_event(self, "error", &err, 1);
+        return (Item){.item = ITEM_FALSE};
+    }
+    schedule_spawn_send_callback(cb, make_js_undefined());
     return (Item){.item = ITEM_TRUE};
 }
 

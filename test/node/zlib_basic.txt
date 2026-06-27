@@ -8,4 +8,7 @@ inflateRaw result: hello world
 unzip result: hello world
 Z_NO_FLUSH: true
 Z_FINISH: true
+codes frozen: true
+codes binding immutable: true
+Z_OK code: true
 large roundtrip: true
