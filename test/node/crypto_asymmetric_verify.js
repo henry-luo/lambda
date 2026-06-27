@@ -56,6 +56,21 @@ base64Verifier.update(message);
 assert.strictEqual(base64Verifier.verify({ key: publicKey }, base64Signature, 'base64'), true);
 console.log('rsa verify options base64:', true);
 
+const pssOptions = {
+  padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
+  saltLength: 32
+};
+const pssSignature = crypto.createSign('sha256')
+  .update(message)
+  .sign({ key: privateKey, padding: pssOptions.padding, saltLength: pssOptions.saltLength });
+assert.strictEqual(crypto.createVerify('sha256')
+  .update(message)
+  .verify({ key: publicKey, padding: pssOptions.padding, saltLength: pssOptions.saltLength }, pssSignature), true);
+assert.strictEqual(crypto.createVerify('sha256')
+  .update(message)
+  .verify({ key: publicKey, padding: pssOptions.padding, saltLength: 20 }, pssSignature), false);
+console.log('rsa pss sign verify options:', true);
+
 const privateKeyObject = crypto.createPrivateKey({ key: Buffer.from(privateKey) });
 const publicKeyObject = crypto.createPublicKey({ key: Buffer.from(publicKey) });
 assert.strictEqual(privateKeyObject.type, 'private');

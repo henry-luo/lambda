@@ -12,6 +12,7 @@
 #include "js_class.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/url.h"
 
 #include <cstdio>
 #include <cstring>
@@ -124,6 +125,16 @@ static int append_json_string_segment(char* out, int pos, int cap, Item options,
         return append_cstr(out, pos, cap, "\"");
     }
     return append_item_string(out, pos, cap, value);
+}
+
+static Item make_decoded_url_string_item(const char* str, int len) {
+    if (!str || len < 0) return ItemNull;
+    size_t decoded_len = 0;
+    char* decoded = url_decode_component(str, (size_t)len, &decoded_len);
+    if (!decoded) return make_string_item(str, len);
+    Item result = make_string_item(decoded, (int)decoded_len);
+    mem_free(decoded);
+    return result;
 }
 
 extern "C" Item js_https_agent_getName(Item options) {
@@ -263,8 +274,12 @@ static Item https_parse_url_string(Item url_item) {
     }
 
     const char* host_start = start;
+    const char* userinfo_end = NULL;
     for (const char* p = start; p < authority_end; p++) {
-        if (*p == '@') host_start = p + 1;
+        if (*p == '@') {
+            userinfo_end = p;
+            host_start = p + 1;
+        }
     }
 
     const char* host_end = authority_end;
@@ -289,6 +304,27 @@ static Item https_parse_url_string(Item url_item) {
 
     Item options = js_new_object();
     js_property_set(options, make_string_item("protocol"), make_string_item("https:"));
+    if (userinfo_end && userinfo_end > start) {
+        const char* password_start = NULL;
+        for (const char* p = start; p < userinfo_end; p++) {
+            if (*p == ':') {
+                password_start = p + 1;
+                break;
+            }
+        }
+        js_property_set(options, make_string_item("auth"),
+                        make_decoded_url_string_item(start, (int)(userinfo_end - start)));
+        if (password_start) {
+            js_property_set(options, make_string_item("username"),
+                            make_decoded_url_string_item(start, (int)(password_start - start - 1)));
+            js_property_set(options, make_string_item("password"),
+                            make_decoded_url_string_item(password_start, (int)(userinfo_end - password_start)));
+        } else {
+            js_property_set(options, make_string_item("username"),
+                            make_decoded_url_string_item(start, (int)(userinfo_end - start)));
+            js_property_set(options, make_string_item("password"), make_string_item(""));
+        }
+    }
     if (host_end > host_start) {
         js_property_set(options, make_string_item("hostname"),
                         make_string_item(host_start, (int)(host_end - host_start)));

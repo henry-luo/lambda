@@ -2381,6 +2381,24 @@ static int64_t js_stream_async_iterator_pending_count(Item iterator) {
     return js_array_length(queue);
 }
 
+static void js_stream_async_iterator_detach(Item iterator) {
+    Item stream = js_property_get(iterator, make_string_item("__stream__"));
+    if (get_type_id(stream) != LMD_TYPE_MAP && get_type_id(stream) != LMD_TYPE_ELEMENT) return;
+    Item iterators_key = make_string_item("__async_iterators__");
+    Item iterators = js_property_get(stream, iterators_key);
+    if (get_type_id(iterators) != LMD_TYPE_ARRAY) return;
+
+    Item next_iterators = js_array_new(0);
+    int64_t len = js_array_length(iterators);
+    for (int64_t i = 0; i < len; i++) {
+        Item current = js_array_get_int(iterators, i);
+        if (current.item != iterator.item) {
+            js_array_push(next_iterators, current);
+        }
+    }
+    js_property_set(stream, iterators_key, next_iterators);
+}
+
 static Item js_stream_async_iterator_shift_pending(Item iterator) {
     Item key = make_string_item("__pending_queue__");
     Item queue = js_property_get(iterator, key);
@@ -2431,6 +2449,7 @@ static void js_stream_async_iterator_resolve_all_done(Item iterator) {
         js_stream_async_iterator_resolve(iterator,
             js_stream_iterator_result(make_js_undefined(), true));
     }
+    js_stream_async_iterator_detach(iterator);
 }
 
 static void js_stream_async_iterator_reject_all(Item iterator, Item err) {
@@ -2438,6 +2457,7 @@ static void js_stream_async_iterator_reject_all(Item iterator, Item err) {
     while (js_stream_async_iterator_pending_count(iterator) > 0) {
         js_stream_async_iterator_reject(iterator, err);
     }
+    js_stream_async_iterator_detach(iterator);
 }
 
 static bool js_stream_async_iterator_is_legacy_stream(Item stream) {
@@ -2610,6 +2630,7 @@ static Item js_stream_async_iterator_next(Item iterator) {
     Item stored_error = js_property_get(iterator, make_string_item("__error__"));
     if (js_stream_has_callback_error(stored_error)) {
         js_property_set(iterator, make_string_item("__done__"), js_bool_item(true));
+        js_stream_async_iterator_detach(iterator);
         return js_promise_reject(stored_error);
     }
 
@@ -2622,10 +2643,12 @@ static Item js_stream_async_iterator_next(Item iterator) {
     stored_error = js_property_get(stream, make_string_item("__error__"));
     if (js_stream_has_callback_error(stored_error)) {
         js_property_set(iterator, make_string_item("__done__"), js_bool_item(true));
+        js_stream_async_iterator_detach(iterator);
         return js_promise_reject(stored_error);
     }
     if (js_item_is_true(js_property_get(stream, make_string_item("__iter_failed__")))) {
         js_property_set(iterator, make_string_item("__done__"), js_bool_item(true));
+        js_stream_async_iterator_detach(iterator);
         return js_promise_reject(js_property_get(stream, make_string_item("__iter_error__")));
     }
     if (js_item_is_true(js_property_get(stream, key_destroyed)) &&
@@ -2633,6 +2656,7 @@ static Item js_stream_async_iterator_next(Item iterator) {
         !js_item_is_true(js_property_get(stream, key_end_emitted)) &&
         !js_item_is_true(js_property_get(stream, key_ended))) {
         js_property_set(iterator, make_string_item("__done__"), js_bool_item(true));
+        js_stream_async_iterator_detach(iterator);
         return js_promise_reject(js_stream_make_error_with_code("ERR_STREAM_PREMATURE_CLOSE",
             "Premature close"));
     }
@@ -2642,6 +2666,7 @@ static Item js_stream_async_iterator_next(Item iterator) {
         Item event_error = js_property_get(iterator, make_string_item("__event_error__"));
         if (js_stream_has_callback_error(event_error)) {
             js_property_set(iterator, make_string_item("__done__"), js_bool_item(true));
+            js_stream_async_iterator_detach(iterator);
             js_stream_async_iterator_cleanup_stream(stream);
             return js_promise_reject(event_error);
         }
@@ -2652,6 +2677,7 @@ static Item js_stream_async_iterator_next(Item iterator) {
         }
         if (js_item_is_true(js_property_get(iterator, make_string_item("__event_done__")))) {
             js_property_set(iterator, make_string_item("__done__"), js_bool_item(true));
+            js_stream_async_iterator_detach(iterator);
             js_stream_async_iterator_cleanup_stream(stream);
             return js_promise_resolve(js_stream_iterator_result(make_js_undefined(), true));
         }
@@ -2665,6 +2691,7 @@ static Item js_stream_async_iterator_next(Item iterator) {
     stored_error = js_property_get(stream, make_string_item("__error__"));
     if (js_stream_has_callback_error(stored_error)) {
         js_property_set(iterator, make_string_item("__done__"), js_bool_item(true));
+        js_stream_async_iterator_detach(iterator);
         return js_promise_reject(stored_error);
     }
 
@@ -2674,6 +2701,7 @@ static Item js_stream_async_iterator_next(Item iterator) {
         stored_error = js_property_get(stream, make_string_item("__error__"));
         if (js_stream_has_callback_error(stored_error)) {
             js_property_set(iterator, make_string_item("__done__"), js_bool_item(true));
+            js_stream_async_iterator_detach(iterator);
             return js_promise_reject(stored_error);
         }
         chunk = js_readable_read(stream);
@@ -2688,6 +2716,7 @@ static Item js_stream_async_iterator_next(Item iterator) {
         !js_item_is_true(js_property_get(stream, key_end_emitted))) {
         js_stream_emit_end_tick(stream);
     }
+    js_stream_async_iterator_detach(iterator);
     return js_promise_resolve(js_stream_iterator_result(make_js_undefined(), true));
 }
 
@@ -2715,6 +2744,7 @@ static Item js_stream_async_iterator_inst_return(void) {
     if (js_item_is_true(js_property_get(iterator, make_string_item("__destroy_on_return__")))) {
         js_stream_async_iterator_cleanup_stream(stream);
     }
+    js_stream_async_iterator_detach(iterator);
     return js_promise_resolve(js_stream_iterator_result(make_js_undefined(), true));
 }
 
@@ -2736,6 +2766,7 @@ static Item js_stream_async_iterator_inst_throw(Item err) {
             js_stream_iter_reject_end(writer, err);
         }
     }
+    js_stream_async_iterator_detach(iterator);
     return js_promise_resolve(js_stream_iterator_result(make_js_undefined(), true));
 }
 

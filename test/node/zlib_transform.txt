@@ -12,3 +12,12 @@ gunzip stream: gzip stream hello
 deflate instanceof Deflate: true
 inflate instanceof Inflate: true
 inflate stream: deflate stream hello
+gzip split compressed: true
+gzip split result: split gzip hello
+deflate split compressed: true
+deflate split result: split deflate hello
+raw split compressed: true
+raw split result: split raw hello
+unzip split compressed: true
+unzip split result: split unzip hello
+unzip concatenated one-byte: abcdef

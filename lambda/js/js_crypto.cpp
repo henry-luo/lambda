@@ -28,6 +28,7 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 #include <mbedtls/ecp.h>
 #include <mbedtls/md.h>
 #include <mbedtls/pk.h>
+#include <mbedtls/rsa.h>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -69,6 +70,7 @@ static bool crypto_digest_compute_bits(int bits, const uint8_t* data,
                                        int offset, int length, uint8_t* out);
 static bool crypto_string_equals(Item item, const char* expected);
 static Item crypto_throw_invalid_property_value(const char* prop, const char* expected);
+static bool crypto_item_to_integer(Item item, const char* name, int* out_value);
 
 static int crypto_digest_len_for_name(const char* alg) {
     int bits = crypto_digest_bits_for_name_ext(alg, true, true, true);
@@ -1883,6 +1885,88 @@ static Item crypto_throw_sign_failed(const char* message) {
         message ? message : "Failed to sign data");
 }
 
+enum CryptoRsaPadding {
+    CRYPTO_RSA_PKCS1_PADDING = 1,
+    CRYPTO_RSA_PKCS1_PSS_PADDING = 6
+};
+
+struct CryptoSignVerifyOptions {
+    Item key;
+    int padding;
+    int salt_length;
+};
+
+static bool crypto_sign_verify_options(Item key_item, CryptoSignVerifyOptions* out) {
+    if (!out) return false;
+    out->key = key_item;
+    out->padding = CRYPTO_RSA_PKCS1_PADDING;
+    out->salt_length = MBEDTLS_RSA_SALT_LEN_ANY;
+
+    if (get_type_id(key_item) != LMD_TYPE_MAP) return true;
+
+    Item object_key = js_property_get(key_item, make_string_item_crypto("key"));
+    if (!crypto_item_is_undefined(object_key)) out->key = object_key;
+
+    Item padding_item = js_property_get(key_item, make_string_item_crypto("padding"));
+    if (!crypto_item_is_undefined(padding_item)) {
+        int padding = 0;
+        if (!crypto_item_to_integer(padding_item, "options.padding", &padding)) return false;
+        if (padding != CRYPTO_RSA_PKCS1_PADDING && padding != CRYPTO_RSA_PKCS1_PSS_PADDING) {
+            crypto_throw_invalid_property_value("options.padding",
+                "crypto.constants.RSA_PKCS1_PADDING, crypto.constants.RSA_PKCS1_PSS_PADDING");
+            return false;
+        }
+        out->padding = padding;
+    }
+
+    Item salt_item = js_property_get(key_item, make_string_item_crypto("saltLength"));
+    if (!crypto_item_is_undefined(salt_item)) {
+        int salt_length = 0;
+        if (!crypto_item_to_integer(salt_item, "options.saltLength", &salt_length)) return false;
+        if (salt_length < -1) {
+            js_throw_out_of_range("options.saltLength", ">= -1", salt_item);
+            return false;
+        }
+        out->salt_length = salt_length;
+    }
+    return true;
+}
+
+static bool crypto_pk_is_rsa(mbedtls_pk_context* pk) {
+    if (!pk) return false;
+    mbedtls_pk_type_t type = mbedtls_pk_get_type(pk);
+    return type == MBEDTLS_PK_RSA || type == MBEDTLS_PK_RSASSA_PSS;
+}
+
+static int crypto_rsa_pss_sign(mbedtls_pk_context* pk, mbedtls_md_type_t md_alg,
+                               const uint8_t* hash, int hash_len, int salt_length,
+                               uint8_t* signature, size_t signature_cap,
+                               size_t* signature_len) {
+    if (!pk || !signature || !signature_len || !crypto_pk_is_rsa(pk)) return MBEDTLS_ERR_RSA_BAD_INPUT_DATA;
+    size_t rsa_len = mbedtls_pk_get_len(pk);
+    if (rsa_len == 0 || rsa_len > signature_cap) return MBEDTLS_ERR_RSA_BAD_INPUT_DATA;
+    mbedtls_rsa_context* rsa = mbedtls_pk_rsa(*pk);
+    int ret = mbedtls_rsa_set_padding(rsa, MBEDTLS_RSA_PKCS_V21, md_alg);
+    if (ret != 0) return ret;
+    ret = mbedtls_rsa_rsassa_pss_sign_ext(rsa, crypto_mbedtls_random, NULL,
+        md_alg, (unsigned int)hash_len, hash, salt_length, signature);
+    if (ret == 0) *signature_len = rsa_len;
+    return ret;
+}
+
+static int crypto_rsa_pss_verify(mbedtls_pk_context* pk, mbedtls_md_type_t md_alg,
+                                 const uint8_t* hash, int hash_len, int salt_length,
+                                 const uint8_t* signature, int signature_len) {
+    if (!pk || !signature || !crypto_pk_is_rsa(pk)) return MBEDTLS_ERR_RSA_BAD_INPUT_DATA;
+    size_t rsa_len = mbedtls_pk_get_len(pk);
+    if (rsa_len == 0 || signature_len != (int)rsa_len) return MBEDTLS_ERR_RSA_VERIFY_FAILED;
+    mbedtls_rsa_context* rsa = mbedtls_pk_rsa(*pk);
+    int ret = mbedtls_rsa_set_padding(rsa, MBEDTLS_RSA_PKCS_V21, md_alg);
+    if (ret != 0) return ret;
+    return mbedtls_rsa_rsassa_pss_verify_ext(rsa, md_alg, (unsigned int)hash_len,
+        hash, md_alg, salt_length, signature);
+}
+
 extern "C" Item js_sign_verify_update(Item data_item, Item encoding_item) {
     Item self = js_get_current_this();
     SignVerifyCtx* ctx = sign_verify_ctx_from_this(self);
@@ -1933,6 +2017,9 @@ extern "C" Item js_sign_verify_sign(Item key_item, Item encoding_item) {
         return js_throw_error_with_code(JS_ERR_CRYPTO_SIGN_KEY_REQUIRED, "No key provided to sign");
     }
 
+    CryptoSignVerifyOptions options;
+    if (!crypto_sign_verify_options(key_item, &options)) return ItemNull;
+
     mbedtls_md_type_t md_alg = crypto_mbedtls_md_for_name(ctx->alg);
     int digest_bits = crypto_digest_bits_for_name_ext(ctx->alg, true, true, true);
     int hash_len = (int)digest_output_len_bits(digest_bits);
@@ -1953,11 +2040,11 @@ extern "C" Item js_sign_verify_sign(Item key_item, Item encoding_item) {
 
     uint8_t* key_bytes = NULL;
     int key_len = 0;
-    if (!crypto_private_key_bytes_for_sign(key_item, &key_bytes, &key_len)) {
+    if (!crypto_private_key_bytes_for_sign(options.key, &key_bytes, &key_len)) {
         ctx->finalized = true;
         js_property_set(self, make_string_item_crypto("__sign_verify_ctx__"), ItemNull);
         sign_verify_ctx_free(ctx);
-        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", key_item);
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", options.key);
     }
 
     mbedtls_pk_context pk;
@@ -1972,9 +2059,14 @@ extern "C" Item js_sign_verify_sign(Item key_item, Item encoding_item) {
         log_error("crypto: private key parse for sign failed: -0x%04x", -ret);
         result = js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse private key");
     } else {
-        ret = mbedtls_pk_sign(&pk, md_alg, hash, (size_t)hash_len,
-            signature, sizeof(signature), &signature_len,
-            crypto_mbedtls_random, NULL);
+        if (options.padding == CRYPTO_RSA_PKCS1_PSS_PADDING) {
+            ret = crypto_rsa_pss_sign(&pk, md_alg, hash, hash_len,
+                options.salt_length, signature, sizeof(signature), &signature_len);
+        } else {
+            ret = mbedtls_pk_sign(&pk, md_alg, hash, (size_t)hash_len,
+                signature, sizeof(signature), &signature_len,
+                crypto_mbedtls_random, NULL);
+        }
         if (ret != 0) {
             log_error("crypto: PK sign failed: -0x%04x", -ret);
             result = crypto_throw_sign_failed("Failed to sign data");
@@ -2003,6 +2095,9 @@ extern "C" Item js_sign_verify_verify(Item key_item, Item signature_item, Item e
     if (crypto_item_is_undefined(signature_item) || signature_item.item == ITEM_NULL) {
         return js_throw_invalid_arg_type("signature", "string, ArrayBuffer, Buffer, TypedArray, or DataView", signature_item);
     }
+
+    CryptoSignVerifyOptions options;
+    if (!crypto_sign_verify_options(key_item, &options)) return ItemNull;
 
     uint8_t* signature_bytes = NULL;
     int signature_len = 0;
@@ -2043,12 +2138,12 @@ extern "C" Item js_sign_verify_verify(Item key_item, Item signature_item, Item e
 
     uint8_t* key_bytes = NULL;
     int key_len = 0;
-    if (!crypto_public_key_bytes_for_verify(key_item, &key_bytes, &key_len)) {
+    if (!crypto_public_key_bytes_for_verify(options.key, &key_bytes, &key_len)) {
         mem_free(signature_bytes);
         ctx->finalized = true;
         js_property_set(self, make_string_item_crypto("__sign_verify_ctx__"), ItemNull);
         sign_verify_ctx_free(ctx);
-        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", key_item);
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", options.key);
     }
 
     mbedtls_pk_context pk;
@@ -2056,8 +2151,13 @@ extern "C" Item js_sign_verify_verify(Item key_item, Item signature_item, Item e
     bool verified = false;
     int ret = mbedtls_pk_parse_public_key(&pk, key_bytes, (size_t)key_len);
     if (ret == 0) {
-        ret = mbedtls_pk_verify(&pk, md_alg, hash, (size_t)hash_len,
-            signature_bytes, (size_t)signature_len);
+        if (options.padding == CRYPTO_RSA_PKCS1_PSS_PADDING) {
+            ret = crypto_rsa_pss_verify(&pk, md_alg, hash, hash_len,
+                options.salt_length, signature_bytes, signature_len);
+        } else {
+            ret = mbedtls_pk_verify(&pk, md_alg, hash, (size_t)hash_len,
+                signature_bytes, (size_t)signature_len);
+        }
         verified = ret == 0;
         if (ret != 0) {
             log_debug("crypto: public key verify mismatch or failure: -0x%04x", -ret);
@@ -5519,6 +5619,7 @@ extern "C" Item js_get_crypto_namespace(void) {
     js_property_set(constants, make_string_item_crypto("RSA_PKCS1_PADDING"), (Item){.item = i2it(1)});
     js_property_set(constants, make_string_item_crypto("RSA_PKCS1_OAEP_PADDING"), (Item){.item = i2it(4)});
     js_property_set(constants, make_string_item_crypto("RSA_NO_PADDING"), (Item){.item = i2it(3)});
+    js_property_set(constants, make_string_item_crypto("RSA_PKCS1_PSS_PADDING"), (Item){.item = i2it(6)});
     // point conversion
     js_property_set(constants, make_string_item_crypto("POINT_CONVERSION_COMPRESSED"), (Item){.item = i2it(2)});
     js_property_set(constants, make_string_item_crypto("POINT_CONVERSION_UNCOMPRESSED"), (Item){.item = i2it(4)});

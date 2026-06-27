@@ -19,6 +19,7 @@
 extern "C" Item js_get_stream_namespace(void);
 extern "C" Item js_transform_new(Item opts);
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
+extern "C" Item js_readable_push(Item self, Item chunk);
 
 enum ZlibTransformMode {
     ZLIB_TRANSFORM_GZIP = 1,
@@ -42,6 +43,14 @@ static inline Item make_js_undefined() {
 
 static bool is_callable(Item value) {
     return get_type_id(value) == LMD_TYPE_FUNC;
+}
+
+static Item make_zlib_error(const char* method);
+
+static bool zlib_bytes_start_gzip_member(const uint8_t* data, int len) {
+    if (!data || len <= 0) return false;
+    if (data[0] != 0x1f) return false;
+    return len == 1 || data[1] == 0x8b;
 }
 
 // extract buffer data from Uint8Array or string
@@ -146,16 +155,30 @@ extern "C" Item js_zlib_gunzipSync(Item input_item) {
 
     size_t total_out = 0;
     int ret;
-    do {
+    while (true) {
         if (total_out >= out_cap) {
             out_cap *= 2;
             out_buf = (uint8_t*)mem_realloc(out_buf, out_cap, MEM_CAT_JS_RUNTIME);
         }
+        size_t out_space = out_cap - total_out;
         strm.next_out = out_buf + total_out;
-        strm.avail_out = (uInt)(out_cap - total_out);
+        strm.avail_out = (uInt)out_space;
         ret = inflate(&strm, Z_NO_FLUSH);
-        total_out = strm.total_out;
-    } while (ret == Z_OK);
+        total_out += out_space - strm.avail_out;
+        if (ret == Z_STREAM_END) {
+            if (strm.avail_in > 0) {
+                Bytef* next_in = strm.next_in;
+                uInt avail_in = strm.avail_in;
+                ret = inflateReset2(&strm, 15 + 16);
+                if (ret != Z_OK) break;
+                strm.next_in = next_in;
+                strm.avail_in = avail_in;
+                continue;
+            }
+            break;
+        }
+        if (ret != Z_OK) break;
+    }
 
     inflateEnd(&strm);
 
@@ -199,16 +222,31 @@ extern "C" Item js_zlib_unzipSync(Item input_item) {
 
     size_t total_out = 0;
     int ret;
-    do {
+    while (true) {
         if (total_out >= out_cap) {
             out_cap *= 2;
             out_buf = (uint8_t*)mem_realloc(out_buf, out_cap, MEM_CAT_JS_RUNTIME);
         }
+        size_t out_space = out_cap - total_out;
         strm.next_out = out_buf + total_out;
-        strm.avail_out = (uInt)(out_cap - total_out);
+        strm.avail_out = (uInt)out_space;
         ret = inflate(&strm, Z_NO_FLUSH);
-        total_out = strm.total_out;
-    } while (ret == Z_OK);
+        total_out += out_space - strm.avail_out;
+        if (ret == Z_STREAM_END) {
+            if (strm.avail_in > 0 &&
+                zlib_bytes_start_gzip_member((const uint8_t*)strm.next_in, (int)strm.avail_in)) {
+                Bytef* next_in = strm.next_in;
+                uInt avail_in = strm.avail_in;
+                ret = inflateReset2(&strm, 15 + 32);
+                if (ret != Z_OK) break;
+                strm.next_in = next_in;
+                strm.avail_in = avail_in;
+                continue;
+            }
+            break;
+        }
+        if (ret != Z_OK) break;
+    }
 
     inflateEnd(&strm);
 
@@ -469,17 +507,234 @@ extern "C" Item js_zlib_unzip(Item input_item, Item options_item, Item callback_
 
 static Item zlib_constructor_prototypes[8] = {};
 
-static ZlibSyncFn zlib_sync_fn_for_mode(int mode) {
+struct JsZlibStreamState {
+    z_stream strm;
+    int mode;
+    int window_bits;
+    bool initialized;
+    bool finished;
+    bool is_deflate;
+};
+
+static bool zlib_mode_is_deflate(int mode) {
+    return mode == ZLIB_TRANSFORM_GZIP || mode == ZLIB_TRANSFORM_DEFLATE ||
+           mode == ZLIB_TRANSFORM_DEFLATE_RAW;
+}
+
+static bool zlib_stream_should_reset_member(JsZlibStreamState* state, const uint8_t* data, int len) {
+    if (!state || state->is_deflate) return false;
+    if (state->mode == ZLIB_TRANSFORM_GUNZIP) return true;
+    if (state->mode == ZLIB_TRANSFORM_UNZIP) return zlib_bytes_start_gzip_member(data, len);
+    return false;
+}
+
+static int zlib_option_int(Item options_item, const char* name, int fallback) {
+    if (get_type_id(options_item) != LMD_TYPE_MAP) return fallback;
+    Item value = js_property_get(options_item, make_string_item(name));
+    if (get_type_id(value) != LMD_TYPE_INT) return fallback;
+    return (int)it2i(value);
+}
+
+static int zlib_window_bits_for_mode(int mode, Item options_item) {
+    int window_bits = zlib_option_int(options_item, "windowBits", 15);
+    if (window_bits <= 0) window_bits = 15;
     switch (mode) {
-    case ZLIB_TRANSFORM_GZIP: return js_zlib_gzipSync;
-    case ZLIB_TRANSFORM_GUNZIP: return js_zlib_gunzipSync;
-    case ZLIB_TRANSFORM_DEFLATE: return js_zlib_deflateSync;
-    case ZLIB_TRANSFORM_INFLATE: return js_zlib_inflateSync;
-    case ZLIB_TRANSFORM_DEFLATE_RAW: return js_zlib_deflateRawSync;
-    case ZLIB_TRANSFORM_INFLATE_RAW: return js_zlib_inflateRawSync;
-    case ZLIB_TRANSFORM_UNZIP: return js_zlib_unzipSync;
-    default: return NULL;
+    case ZLIB_TRANSFORM_GZIP: return window_bits + 16;
+    case ZLIB_TRANSFORM_GUNZIP: return window_bits + 16;
+    case ZLIB_TRANSFORM_DEFLATE_RAW: return -window_bits;
+    case ZLIB_TRANSFORM_INFLATE_RAW: return -window_bits;
+    case ZLIB_TRANSFORM_UNZIP: return window_bits + 32;
+    default: return window_bits;
     }
+}
+
+static JsZlibStreamState* zlib_stream_state_new(int mode, Item options_item) {
+    JsZlibStreamState* state = (JsZlibStreamState*)mem_alloc(sizeof(JsZlibStreamState), MEM_CAT_JS_RUNTIME);
+    if (!state) return NULL;
+    memset(state, 0, sizeof(JsZlibStreamState));
+    state->mode = mode;
+    state->is_deflate = zlib_mode_is_deflate(mode);
+
+    int ret;
+    int window_bits = zlib_window_bits_for_mode(mode, options_item);
+    state->window_bits = window_bits;
+    if (state->is_deflate) {
+        int level = zlib_option_int(options_item, "level", Z_DEFAULT_COMPRESSION);
+        int mem_level = zlib_option_int(options_item, "memLevel", 8);
+        int strategy = zlib_option_int(options_item, "strategy", Z_DEFAULT_STRATEGY);
+        ret = deflateInit2(&state->strm, level, Z_DEFLATED, window_bits, mem_level, strategy);
+    } else {
+        ret = inflateInit2(&state->strm, window_bits);
+    }
+
+    if (ret != Z_OK) {
+        mem_free(state);
+        return NULL;
+    }
+    state->initialized = true;
+    return state;
+}
+
+static int zlib_stream_reset_inflate_member(JsZlibStreamState* state) {
+    Bytef* next_in = state->strm.next_in;
+    uInt avail_in = state->strm.avail_in;
+    int ret = inflateReset2(&state->strm, state->window_bits);
+    state->strm.next_in = next_in;
+    state->strm.avail_in = avail_in;
+    if (ret == Z_OK) state->finished = false;
+    return ret;
+}
+
+static void zlib_stream_state_close(JsZlibStreamState* state) {
+    if (!state || !state->initialized) return;
+    if (state->is_deflate) deflateEnd(&state->strm);
+    else inflateEnd(&state->strm);
+    state->initialized = false;
+}
+
+static void zlib_stream_state_free(JsZlibStreamState* state) {
+    if (!state) return;
+    zlib_stream_state_close(state);
+    mem_free(state);
+}
+
+static Item zlib_state_key(void) {
+    return make_string_item("__zlib_state__");
+}
+
+static Item zlib_stream_state_item(JsZlibStreamState* state) {
+    if (!state) return ItemNull;
+    return (Item){.item = i2it((int64_t)(uintptr_t)state)};
+}
+
+static JsZlibStreamState* zlib_stream_state_from_item(Item item) {
+    if (get_type_id(item) != LMD_TYPE_INT) return NULL;
+    return (JsZlibStreamState*)(uintptr_t)it2i(item);
+}
+
+static JsZlibStreamState* zlib_stream_state_from_stream(Item stream) {
+    return zlib_stream_state_from_item(js_property_get(stream, zlib_state_key()));
+}
+
+static void zlib_stream_clear_state(Item stream) {
+    JsZlibStreamState* state = zlib_stream_state_from_stream(stream);
+    js_property_set(stream, zlib_state_key(), ItemNull);
+    zlib_stream_state_free(state);
+}
+
+static bool zlib_stream_run(JsZlibStreamState* state, const uint8_t* in_data,
+                            int in_len, int flush, Item* result_out, int* zret_out) {
+    if (result_out) *result_out = make_js_undefined();
+    if (zret_out) *zret_out = Z_OK;
+    if (!state || !state->initialized) {
+        if (zret_out) *zret_out = Z_STREAM_ERROR;
+        return false;
+    }
+    if (state->finished) {
+        if (in_len > 0 && zlib_stream_should_reset_member(state, in_data, in_len)) {
+            int reset_ret = zlib_stream_reset_inflate_member(state);
+            if (reset_ret != Z_OK) {
+                if (zret_out) *zret_out = reset_ret;
+                return false;
+            }
+        } else if (!state->is_deflate && state->mode == ZLIB_TRANSFORM_UNZIP && in_len > 0) {
+            return true;
+        } else if (flush == Z_FINISH || in_len == 0) {
+            return true;
+        } else {
+            if (zret_out) *zret_out = Z_STREAM_END;
+            return false;
+        }
+    }
+
+    size_t out_cap = (size_t)in_len * 2 + 16384;
+    if (out_cap < 16384) out_cap = 16384;
+    uint8_t* out_buf = (uint8_t*)mem_alloc(out_cap, MEM_CAT_JS_RUNTIME);
+    if (!out_buf) {
+        if (zret_out) *zret_out = Z_MEM_ERROR;
+        return false;
+    }
+
+    state->strm.next_in = (Bytef*)in_data;
+    state->strm.avail_in = (uInt)in_len;
+
+    size_t total_out = 0;
+    int ret = Z_OK;
+    bool done = false;
+    while (!done) {
+        if (total_out >= out_cap) {
+            out_cap *= 2;
+            out_buf = (uint8_t*)mem_realloc(out_buf, out_cap, MEM_CAT_JS_RUNTIME);
+            if (!out_buf) {
+                if (zret_out) *zret_out = Z_MEM_ERROR;
+                return false;
+            }
+        }
+
+        size_t out_space = out_cap - total_out;
+        state->strm.next_out = out_buf + total_out;
+        state->strm.avail_out = (uInt)out_space;
+
+        if (state->is_deflate) ret = deflate(&state->strm, flush);
+        else ret = inflate(&state->strm, flush);
+
+        total_out += out_space - state->strm.avail_out;
+
+        if (ret == Z_STREAM_END) {
+            state->finished = true;
+            if (!state->is_deflate && state->strm.avail_in > 0 &&
+                zlib_stream_should_reset_member(state, (const uint8_t*)state->strm.next_in,
+                                                (int)state->strm.avail_in)) {
+                ret = zlib_stream_reset_inflate_member(state);
+                if (ret != Z_OK) {
+                    if (zret_out) *zret_out = ret;
+                    mem_free(out_buf);
+                    return false;
+                }
+            } else if (!state->is_deflate && state->mode == ZLIB_TRANSFORM_UNZIP &&
+                       state->strm.avail_in > 0) {
+                done = true;
+            } else {
+                done = true;
+            }
+        } else if (state->is_deflate) {
+            if (ret != Z_OK) {
+                if (zret_out) *zret_out = ret;
+                mem_free(out_buf);
+                return false;
+            }
+            if (flush == Z_NO_FLUSH) {
+                done = state->strm.avail_in == 0 && state->strm.avail_out != 0;
+            } else if (flush != Z_FINISH) {
+                done = state->strm.avail_out != 0;
+            }
+        } else {
+            if (ret == Z_BUF_ERROR && flush != Z_FINISH) {
+                ret = Z_OK;
+                done = true;
+            } else if (ret != Z_OK) {
+                if (zret_out) *zret_out = ret;
+                mem_free(out_buf);
+                return false;
+            } else if (flush == Z_NO_FLUSH) {
+                done = state->strm.avail_in == 0 && state->strm.avail_out != 0;
+            } else if (flush != Z_FINISH) {
+                done = state->strm.avail_out != 0;
+            } else if (state->strm.avail_in == 0 && state->strm.avail_out != 0) {
+                ret = Z_BUF_ERROR;
+                if (zret_out) *zret_out = ret;
+                mem_free(out_buf);
+                return false;
+            }
+        }
+    }
+
+    if (zret_out) *zret_out = ret;
+    if (total_out > 0 && result_out) {
+        *result_out = make_buffer_result(out_buf, (int)total_out);
+    }
+    mem_free(out_buf);
+    return true;
 }
 
 static const char* zlib_mode_name(int mode) {
@@ -500,24 +755,121 @@ static Item js_zlib_transform_chunk(Item chunk, Item encoding, Item callback) {
     Item self = js_get_this();
     Item mode_item = js_property_get(self, make_string_item("__zlib_mode__"));
     int mode = get_type_id(mode_item) == LMD_TYPE_INT ? (int)it2i(mode_item) : 0;
-    ZlibSyncFn sync_fn = zlib_sync_fn_for_mode(mode);
-    if (!sync_fn) {
+    JsZlibStreamState* state = zlib_stream_state_from_stream(self);
+    if (!state) {
         Item args[1] = { js_new_error(make_string_item("zlib transform mode missing")) };
         if (is_callable(callback)) js_call_function(callback, make_js_undefined(), args, 1);
         return make_js_undefined();
     }
 
-    Item result = sync_fn(chunk);
-    if (result.item == ItemNull.item) {
+    const uint8_t* in_data;
+    int in_len;
+    if (!get_input_buffer(chunk, &in_data, &in_len)) {
+        Item args[1] = { make_zlib_error(zlib_mode_name(mode)) };
+        if (is_callable(callback)) js_call_function(callback, make_js_undefined(), args, 1);
+        return make_js_undefined();
+    }
+
+    Item result = make_js_undefined();
+    int zret = Z_OK;
+    if (!zlib_stream_run(state, in_data, in_len, Z_NO_FLUSH, &result, &zret)) {
+        (void)zret;
         Item args[1] = { make_zlib_error(zlib_mode_name(mode)) };
         if (is_callable(callback)) js_call_function(callback, make_js_undefined(), args, 1);
         return make_js_undefined();
     }
 
     if (is_callable(callback)) {
-        Item args[2] = { ItemNull, result };
-        js_call_function(callback, make_js_undefined(), args, 2);
+        if (get_type_id(result) == LMD_TYPE_UNDEFINED) {
+            Item args[1] = { ItemNull };
+            js_call_function(callback, make_js_undefined(), args, 1);
+        } else {
+            Item args[2] = { ItemNull, result };
+            js_call_function(callback, make_js_undefined(), args, 2);
+        }
     }
+    return make_js_undefined();
+}
+
+static Item js_zlib_transform_flush(Item callback) {
+    Item self = js_get_this();
+    Item mode_item = js_property_get(self, make_string_item("__zlib_mode__"));
+    int mode = get_type_id(mode_item) == LMD_TYPE_INT ? (int)it2i(mode_item) : 0;
+    JsZlibStreamState* state = zlib_stream_state_from_stream(self);
+    if (!state) {
+        Item args[1] = { make_zlib_error(zlib_mode_name(mode)) };
+        if (is_callable(callback)) js_call_function(callback, make_js_undefined(), args, 1);
+        return make_js_undefined();
+    }
+
+    Item result = make_js_undefined();
+    int zret = Z_OK;
+    bool ok = zlib_stream_run(state, NULL, 0, Z_FINISH, &result, &zret);
+    if (ok && get_type_id(result) != LMD_TYPE_UNDEFINED) {
+        js_readable_push(self, result);
+    }
+    zlib_stream_clear_state(self);
+
+    if (!ok) {
+        (void)zret;
+        Item args[1] = { make_zlib_error(zlib_mode_name(mode)) };
+        if (is_callable(callback)) js_call_function(callback, make_js_undefined(), args, 1);
+        return make_js_undefined();
+    }
+
+    if (is_callable(callback)) js_call_function(callback, make_js_undefined(), NULL, 0);
+    return make_js_undefined();
+}
+
+static Item js_zlib_transform_destroy(Item err, Item callback) {
+    Item self = js_get_this();
+    zlib_stream_clear_state(self);
+    if (is_callable(callback)) {
+        if (err.item != 0 && get_type_id(err) != LMD_TYPE_UNDEFINED &&
+            get_type_id(err) != LMD_TYPE_NULL) {
+            js_call_function(callback, make_js_undefined(), &err, 1);
+        } else {
+            Item args[1] = { ItemNull };
+            js_call_function(callback, make_js_undefined(), args, 1);
+        }
+    }
+    return make_js_undefined();
+}
+
+static Item js_zlib_stream_flush_method(Item kind_item, Item callback_item) {
+    Item self = js_get_this();
+    int flush = Z_FULL_FLUSH;
+    if (is_callable(kind_item) &&
+        (callback_item.item == 0 || get_type_id(callback_item) == LMD_TYPE_UNDEFINED)) {
+        callback_item = kind_item;
+    } else if (get_type_id(kind_item) == LMD_TYPE_INT) {
+        flush = (int)it2i(kind_item);
+    }
+
+    Item mode_item = js_property_get(self, make_string_item("__zlib_mode__"));
+    int mode = get_type_id(mode_item) == LMD_TYPE_INT ? (int)it2i(mode_item) : 0;
+    JsZlibStreamState* state = zlib_stream_state_from_stream(self);
+    if (!state) {
+        Item args[1] = { make_zlib_error(zlib_mode_name(mode)) };
+        if (is_callable(callback_item)) js_call_function(callback_item, make_js_undefined(), args, 1);
+        return make_js_undefined();
+    }
+
+    Item result = make_js_undefined();
+    int zret = Z_OK;
+    bool ok = zlib_stream_run(state, NULL, 0, flush, &result, &zret);
+    if (ok && get_type_id(result) != LMD_TYPE_UNDEFINED) {
+        js_readable_push(self, result);
+    }
+
+    if (!ok) {
+        (void)zret;
+        Item args[1] = { make_zlib_error(zlib_mode_name(mode)) };
+        if (is_callable(callback_item)) js_call_function(callback_item, make_js_undefined(), args, 1);
+        return make_js_undefined();
+    }
+
+    if (is_callable(callback_item)) js_call_function(callback_item, make_js_undefined(), NULL, 0);
     return make_js_undefined();
 }
 
@@ -526,9 +878,20 @@ static Item js_zlib_create_transform(int mode, Item options_item) {
     Item stream = js_transform_new(options_item);
     if (stream.item == ItemNull.item) return stream;
 
+    JsZlibStreamState* state = zlib_stream_state_new(mode, options_item);
+    if (!state) return ItemNull;
+
     js_property_set(stream, make_string_item("__zlib_mode__"), (Item){.item = i2it(mode)});
+    js_property_set(stream, zlib_state_key(), zlib_stream_state_item(state));
+    js_mark_non_enumerable(stream, zlib_state_key());
     js_property_set(stream, make_string_item("_transform"),
                     js_new_function((void*)js_zlib_transform_chunk, 3));
+    js_property_set(stream, make_string_item("_flush"),
+                    js_new_function((void*)js_zlib_transform_flush, 1));
+    js_property_set(stream, make_string_item("_destroy"),
+                    js_new_function((void*)js_zlib_transform_destroy, 2));
+    js_property_set(stream, make_string_item("flush"),
+                    js_new_function((void*)js_zlib_stream_flush_method, 2));
 
     if (mode >= ZLIB_TRANSFORM_GZIP && mode <= ZLIB_TRANSFORM_UNZIP) {
         Item proto = zlib_constructor_prototypes[mode];
