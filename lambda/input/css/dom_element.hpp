@@ -40,6 +40,7 @@ typedef struct Url Url;  // From lib/url.h
 typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
 typedef struct Runtime Runtime;  // From lambda/lambda.h
+struct DomElement;
 
 // ============================================================================
 // DOM Document
@@ -168,6 +169,7 @@ struct DomDocument {
     // applied to the root viewport scroller after layout establishes scroll ranges.
     float pending_viewport_scroll_x;
     float pending_viewport_scroll_y;
+    DomElement* pending_scroll_into_view_target;
 
     // Browser-like lifecycle state exposed by document.readyState.
     const char* js_ready_state;
@@ -202,6 +204,7 @@ struct DomDocument {
                     js_runtime_pool(nullptr),
                     document_charset(nullptr),
                     pending_viewport_scroll_x(0.0f), pending_viewport_scroll_y(0.0f),
+                    pending_scroll_into_view_target(nullptr),
                     js_ready_state("complete") {}
 };
 

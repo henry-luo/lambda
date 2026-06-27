@@ -5915,10 +5915,83 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 #endif
         }
 
+        case CSS_PROPERTY_TEXT_BOX:
         case CSS_PROPERTY_TEXT_BOX_TRIM: {
             if (!block) break;
             if (!block->blk) block->blk = alloc_block_prop(lycon);
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+            if (prop_id == CSS_PROPERTY_TEXT_BOX) {
+                uint8_t trim = 0;
+                CssEnum over_edge = CSS_VALUE_TEXT;
+                CssEnum under_edge = CSS_VALUE_TEXT;
+                bool has_trim = false;
+                bool has_edge = false;
+
+                CssValue* values[4];
+                int value_count = 0;
+                if (value->type == CSS_VALUE_TYPE_LIST) {
+                    value_count = value->data.list.count > 4 ? 4 : value->data.list.count;
+                    for (int i = 0; i < value_count; i++) values[i] = value->data.list.values[i];
+                } else {
+                    values[0] = (CssValue*)value;
+                    value_count = 1;
+                }
+
+                for (int i = 0; i < value_count; i++) {
+                    CssValue* item = values[i];
+                    if (!item || item->type != CSS_VALUE_TYPE_KEYWORD) continue;
+
+                    CssEnum val = item->data.keyword;
+                    if (val == CSS_VALUE_NONE) {
+                        trim = 0;
+                        has_trim = true;
+                    } else if (val == CSS_VALUE_TRIM_START) {
+                        trim = TEXT_BOX_TRIM_START;
+                        has_trim = true;
+                    } else if (val == CSS_VALUE_TRIM_END) {
+                        trim = TEXT_BOX_TRIM_END;
+                        has_trim = true;
+                    } else if (val == CSS_VALUE_TRIM_BOTH || val == CSS_VALUE_BOTH) {
+                        trim = TEXT_BOX_TRIM_START | TEXT_BOX_TRIM_END;
+                        has_trim = true;
+                    } else if (val == CSS_VALUE_AUTO || val == CSS_VALUE_TEXT) {
+                        if (!has_edge) {
+                            over_edge = CSS_VALUE_TEXT;
+                            under_edge = CSS_VALUE_TEXT;
+                            has_edge = true;
+                        } else {
+                            under_edge = CSS_VALUE_TEXT;
+                        }
+                    } else if (val == CSS_VALUE_CAP || val == CSS_VALUE_EX) {
+                        if (!has_edge) {
+                            over_edge = val;
+                            under_edge = CSS_VALUE_TEXT;
+                            has_edge = true;
+                        } else {
+                            under_edge = val;
+                        }
+                    } else if (val == CSS_VALUE_ALPHABETIC || val == CSS_VALUE_IDEOGRAPHIC) {
+                        if (!has_edge) {
+                            over_edge = CSS_VALUE_TEXT;
+                            under_edge = val;
+                            has_edge = true;
+                        } else {
+                            under_edge = val;
+                        }
+                    }
+                }
+
+                if (has_trim) {
+                    block->blk->text_box_trim = trim;
+                }
+                if (has_edge) {
+                    block->blk->text_box_over_edge = over_edge;
+                    block->blk->text_box_under_edge = under_edge;
+                }
+                log_debug("[CSS] text-box shorthand: trim=0x%02X, over=%d, under=%d",
+                          block->blk->text_box_trim,
+                          block->blk->text_box_over_edge,
+                          block->blk->text_box_under_edge);
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 if (val == CSS_VALUE_NONE) {
                     block->blk->text_box_trim = 0;
