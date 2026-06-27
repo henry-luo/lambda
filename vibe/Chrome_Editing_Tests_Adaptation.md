@@ -181,9 +181,14 @@ The Chromium pasteboard tests **provide the clipboard data inside the test** via
 
 We have the building blocks (HTML parser, slice insertion via `replace` step). What's missing is a **paste command** (`cmdPasteHTML(html)`): parse the fragment, coerce to schema (drop disallowed tags, lift inlines into blocks, flatten marks), and splice at the selection. The Lambda side already specs this (`mod_html_paste.ls`); we haven't ported it.
 
-So pasteboard is **adaptable in scenario-harvest mode** once `cmdPasteHTML` exists. The fidelity of fragment *sanitization* will differ from Chrome's (Chrome has elaborate paste-cleanup heuristics), but harvest mode records our behavior rather than asserting Chrome's — so divergence is acceptable, and the divergence report (§5) quantifies it.
+So pasteboard is **adaptable in scenario-harvest mode** once a paste command exists. The fidelity of fragment *sanitization* differs from Chrome's (Chrome has elaborate paste-cleanup heuristics), but harvest mode records our behavior rather than asserting Chrome's — so divergence is acceptable, and the divergence report (§5) quantifies it.
 
-**v3 plan:** implement `cmdPasteHTML`; map `setClipboardData` + `paste` → it; harvest pasteboard tests. (Deferred behind v1/v2.)
+**v3 — DONE.** Implemented as [`cmdPasteSlice(state, slice)`](../test/editor-js/src/commands/paste.ts): a clean layering where the **view/event boundary** parses HTML→slice (it needs `DOMParser`) and the **command** does the pure model surgery — a pragmatic PM-style *open paste*:
+- inline slice → splice the inline leaves at the caret (adjacent same-mark leaves merged so the result round-trips);
+- single block → merge its content inline (no split);
+- multi-block → split the current block; first pasted block merges into the head, middle blocks insert as siblings, trailing content merges into the last pasted block.
+
+A range within one leaf is deleted first; multi-leaf ranges and the doc-root position return null. The harvester maps both `execCommand('insertHTML', false, html)` and `setClipboardData(html)` + `execCommand('paste')` → a `paste` event (distinguishing the `setClipboardData` *helper* from `event.clipboardData` *event access* by case/dot; `copy`+`paste` and event-handler pastes are still skipped). Paste is also wired into the real demo editor (Cmd/Ctrl+V → `text/html`, falling back to `text/plain`), verified by a `FullEditor` render test. 10 `cmdPasteSlice` unit tests + 3 integration tests.
 
 ### 4.3 Spelling — deferred
 
@@ -191,22 +196,34 @@ So pasteboard is **adaptable in scenario-harvest mode** once `cmdPasteHTML` exis
 
 ---
 
-## 5. Optional: divergence report (conformance gauge)
+## 5. Divergence report (conformance gauge) — DONE
 
-For convertible tests, also compare OUR output to Chromium's **expected** at the text-content level (strip tags, normalize whitespace). Emit a report: per-category match-rate + a categorized list of divergences (e.g. "delete merges differently", "bold wraps `<b>` vs `<span>`", "whitespace not collapsed"). This is informational only — never a gate — and is the highest-signal artifact for the Lambda port: it shows exactly where we differ from a real browser and why.
+For convertible tests, [`tools/divergence-report.ts`](../test/editor-js/tools/divergence-report.ts) compares OUR output to Chromium's **expected** at the text-content level (both stripped identically). Output: [`vibe/Chromium_Divergence_Report.md`](Chromium_Divergence_Report.md) — per-category match-rate + a categorized sample. Informational only, never a gate.
+
+**Headline (248 comparable tests): 71% text-conformant, 0 errors** (up from 66% after the two fixes below). By category: `selection` 94%, `execCommand` 84%, `style` 71%, `pasteboard` 70%, `inserting` 64%, **`deleting` 61%** (was 41%). The report distils the content divergences into five stable classes:
+
+1. **Cross-block backspace-merge (`joinBackward`) — IMPLEMENTED this round.** Backspace at a block start now merges into the previous block (descending into a previous list’s last item / heading, keeping the target tag). Also fixed a tree-corruption bug where a selection spanning only a block boundary was treated as a range over the doc root.
+2. **Select-all + delete — IMPLEMENTED this round.** A multi-block text range now deletes, leaving a single (often empty) block.
+3. Whitespace/`&nbsp;` fixup — intentional PM-class difference; now the *dominant* remaining divergence (informational, not a bug).
+4. `insertHTML` of `<div>` — structural (schema doesn't model `<div>`).
+5. Caret-movement landing points / `joinForward` (forward-delete at block end) — the next actionable item.
+
+Together (1)+(2) moved `deleting` 41% → 61% and overall 66% → 71%. The shared conversion logic lives in [`tools/chromium-adapt.ts`](../test/editor-js/tools/chromium-adapt.ts), imported by both the harvester and this report so they never drift. Regenerate with `npx vite-node tools/divergence-report.ts`.
 
 ---
 
 ## 6. Results (actual — v1 + v2 implemented)
 
-The harvester (`tools/harvest-chromium.ts`) plus caret navigation (`src/commands/caret.ts`, mapped from `selection.modify`) were implemented this round. Run over `inserting/ deleting/ execCommand/ style/ input/ selection/` (2,265 files, 542 extracted `assert_selection` calls):
+The harvester (`tools/harvest-chromium.ts`), caret navigation (`src/commands/caret.ts`, mapped from `selection.modify`) and paste (`src/commands/paste.ts`, mapped from `insertHTML` + `setClipboardData`/`paste`) were implemented this round. Run over `inserting/ deleting/ execCommand/ style/ input/ selection/ pasteboard/` (2,524 files, 614 extracted `assert_selection` calls):
 
 | Outcome | Count | Notes |
 |---|---:|---|
-| **Harvested fixtures written** | **103** | under `test/tier_f_chromium/`, all green (doc + invert-roundtrip) |
-| Skipped — tester | 153 | 50 helper-based bodies (no recognized op), 32 `insertHTML`, 22 `selection.collapse/extend` setup, 7 line/sentence/paragraph granularity, … |
-| Skipped — input | 178 | structures our schema doesn't model (`<div>` nesting, `<hr>`, bare tables) |
-| Skipped — run | 108 | converted, but our editor's result isn't invert- or serialize-round-trippable (correctly excluded; a few may flag real editor gaps) |
+| **Harvested fixtures written** | **135** | under `test/tier_f_chromium/`, all green (doc + invert-roundtrip) |
+| Skipped — tester | 178 | 61 helper-based bodies (no recognized op), 57 copy/undo/unsupported-exec, 22 `selection.collapse/extend` setup, 18 line/unsupported-granularity, … |
+| Skipped — input | 188 | structures our schema doesn't model (`<div>` nesting, `<hr>`, bare tables) |
+| Skipped — run | 113 | converted, but our editor's result isn't invert- or serialize-round-trippable (correctly excluded; a few may flag real editor gaps) |
+
+(v1 alone — no caret nav, no paste — yields just **8**; caret nav lifted it to 103; paste/insertHTML added the final **+32**.)
 
 **What made v2 the unlock:** with `selection.modify` rejected (v1-only), the clean `assert_selection` format yields just **8** fixtures — 97% of those tests interleave caret movement. Implementing character/word/document caret navigation lifted the yield to **103**. The `selection.modify` granularities in the corpus are dominated by `word` and `character` (no `line` in the top usage), so the no-layout subset captures the bulk.
 
@@ -220,8 +237,8 @@ Remaining headroom: `<div>`-structured inputs (178) are a genuine model mismatch
 
 - **v1 — DONE:** harvester for flat/string/array-join testers, supported-op subset → `test/tier_f_chromium/`.
 - **v2 — DONE:** `cmdMoveCaret` (character / word / documentboundary; `left`/`right` alias forward/backward; `move` + `extend`) wired from `selection.modify`; `line`/`lineboundary`/`sentence`/`paragraph` skipped (need layout / not modeled). 11 focused unit tests in `test/commands/caret.test.ts`.
-- **v3 — TODO:** implement `cmdPasteHTML` (clipboard data is in-test via `setClipboardData`); map `paste`; harvest `pasteboard/`.
-- **Ongoing — optional:** divergence report (§5) as a conformance gauge; `cmdInsertHTML`, `removeFormat`, justify/align to widen the supported-op set.
+- **v3 — DONE:** `cmdPasteSlice` (HTML→slice parsed at the view boundary); mapped `insertHTML` + `setClipboardData`/`paste`; harvested `pasteboard/`; wired into the demo (Cmd/Ctrl+V). 10 unit + 3 integration tests.
+- **Ongoing — optional:** divergence report (§5) as a conformance gauge; `removeFormat`, justify/align, and `copy`→clipboard (serialize the selected slice) to widen the supported-op set.
 
 Re-run anytime with: `npx vite-node tools/harvest-chromium.ts <categories…>` (regenerates `test/tier_f_chromium/`).
 
@@ -229,4 +246,4 @@ Re-run anytime with: `npx vite-node tools/harvest-chromium.ts <categories…>` (
 
 ## 8. Summary
 
-The Chromium editing suite is adaptable in **scenario-harvest** mode. Our command names already track the modern InputEvent/W3C and CSS vocabularies rather than legacy `execCommand` — the gaps are missing *commands* (`removeFormat`, `insertHTML`/paste, HR, align), not naming. `selection.modify` is mostly adaptable (only `line`-granularity needs layout) and was implemented as `cmdMoveCaret`; pasteboard is adaptable once a paste command exists; spelling is deferred. This round harvested **103 fixtures** of real browser editing sequences, each validated by the corpus-wide invert-roundtrip invariant. Two genuine editor bugs surfaced and were fixed along the way (`cmdInsertLineBreak` phantom empty leaf; schema-aware text insertion), plus a round-trip-correct `serializeDocToHtml`.
+The Chromium editing suite is adaptable in **scenario-harvest** mode. Our command names already track the modern InputEvent/W3C and CSS vocabularies rather than legacy `execCommand` — the gaps are missing *commands* (`removeFormat`, HR, align), not naming. `selection.modify` is mostly adaptable (only `line`-granularity needs layout) and was implemented as `cmdMoveCaret`; paste was implemented as `cmdPasteSlice` (and wired into the demo); spelling is deferred. This round harvested **135 fixtures** of real browser editing sequences, each validated by the corpus-wide invert-roundtrip invariant. Two genuine editor bugs surfaced and were fixed along the way (`cmdInsertLineBreak` phantom empty leaf; schema-aware text insertion), plus a round-trip-correct `serializeDocToHtml`. New this round: caret navigation and paste are real editor features, not just test scaffolding.

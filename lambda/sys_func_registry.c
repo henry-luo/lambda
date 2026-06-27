@@ -379,6 +379,12 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_PUSH, "push", 2, &TYPE_ANY, true, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "pn_push", FPTR(pn_push), NULL, NULL, false, 0},
 
+    // splice(arr, start, count) — remove `count` elements at `start` from a growable
+    // generic array, in place (shift the tail down, shrink length). Procedural: mutates
+    // arr and returns it. Enables pop/dequeue/middle-removal without a chunked + .sz wrapper.
+    {SYSPROC_SPLICE, "splice", 3, &TYPE_ANY, true, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "pn_splice", FPTR(pn_splice), NULL, NULL, false, 0},
+
     // image stencil engine (windowed neighbourhood ops over ArrayNum)
     {SYSFUNC_CONVOLVE, "convolve", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_convolve", FPTR(fn_convolve), NULL, NULL, false, 0},

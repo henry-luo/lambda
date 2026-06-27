@@ -341,6 +341,18 @@ static void emit_label(MirTranspiler* mt, MIR_label_t label) {
     MIR_append_insn(mt->ctx, mt->current_func_item, label);
 }
 
+// emit a register holding the boxed null Item. Used as the "value" of statements that
+// produce no result (e.g. an index-assignment `arr[i] = v`) so callers that consume the
+// result — a function return, a for-loop body push, `let x = (arr[i] = v)` — never see
+// the invalid-reg sentinel (reg 0), which would crash MIR with "undeclared reg 0".
+static MIR_reg_t emit_null_item_reg(MirTranspiler* mt) {
+    MIR_reg_t r = new_reg(mt, "stmt_null", MIR_T_I64);
+    uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+        MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+    return r;
+}
+
 static MIR_reg_t emit_call_1(MirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t arg1_type, MIR_op_t arg1);
 static MIR_reg_t emit_call_0(MirTranspiler* mt, const char* fn_name,
@@ -8542,7 +8554,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ndim),
                 MIR_T_P,   MIR_new_reg_op(mt->ctx, idx_buf),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
-            return (MIR_reg_t)0;
+            return emit_null_item_reg(mt);
         }
 
         // Masked / slice assignment: arr[mask] = v (mask is a typed bool array),
@@ -8559,7 +8571,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_item),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_item),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val_item));
-                return (MIR_reg_t)0;
+                return emit_null_item_reg(mt);
             }
         }
 

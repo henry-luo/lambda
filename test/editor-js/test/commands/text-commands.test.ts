@@ -187,6 +187,65 @@ describe('commands/cmdDeleteForward', () => {
   })
 })
 
+describe('commands/cmdDeleteBackward — join backward (divergence fix)', () => {
+  it('merges a block into the previous block at block start', () => {
+    const s = state('doc', [node('p', [text('a')]), node('p', [text('b')])], caret([1, 0], 0))
+    const tx = cmdDeleteBackward(s)!
+    expect(tx.doc_after.content).toEqual([node('p', [text('ab')])])
+    expect(tx.sel_after).toEqual(caret([0, 0], 1))
+  })
+
+  it('merges a paragraph into a previous heading (keeps the heading tag)', () => {
+    const s = state('doc', [node('h1', [text('Title')]), node('p', [text('body')])], caret([1, 0], 0))
+    const tx = cmdDeleteBackward(s)!
+    expect(tx.doc_after.content).toEqual([node('h1', [text('Titlebody')])])
+    expect(tx.sel_after).toEqual(caret([0, 0], 5))
+  })
+
+  it('merges a paragraph into the last item of a previous list', () => {
+    const s = state('doc', [node('ul', [node('li', [text('x')])]), node('p', [text('y')])], caret([1, 0], 0))
+    const tx = cmdDeleteBackward(s)!
+    expect(tx.doc_after.content).toEqual([node('ul', [node('li', [text('xy')])])])
+    expect(tx.sel_after).toEqual(caret([0, 0, 0], 1))
+  })
+
+  it('returns null at the first block (nothing to merge into)', () => {
+    const s = state('doc', [node('p', [text('a')]), node('p', [text('b')])], caret([0, 0], 0))
+    expect(cmdDeleteBackward(s)).toBeNull()
+  })
+
+  it('merges an empty block into the previous block', () => {
+    const s = state('doc', [node('p', [text('a')]), node('p', [])], caret([1], 0))
+    const tx = cmdDeleteBackward(s)!
+    expect(tx.doc_after.content).toEqual([node('p', [text('a')])])
+  })
+})
+
+describe('commands/cmdDeleteBackward — multi-block range delete (select-all fix)', () => {
+  it('empties the doc on a full-document range', () => {
+    const s = state('doc', [node('p', [text('ab')]), node('p', [text('cd')])],
+      textSelection(pos([0, 0], 0), pos([1, 0], 2)))
+    const tx = cmdDeleteBackward(s)!
+    expect(tx.doc_after.content).toEqual([node('p', [])])
+    expect(tx.sel_after).toEqual(caret([0], 0))
+  })
+
+  it('deletes a partial multi-block range, joining the ends into the start block', () => {
+    const s = state('doc', [node('p', [text('abc')]), node('p', [text('def')])],
+      textSelection(pos([0, 0], 1), pos([1, 0], 2)))
+    const tx = cmdDeleteBackward(s)!
+    expect(tx.doc_after.content).toEqual([node('p', [text('af')])])
+    expect(tx.sel_after).toEqual(caret([0, 0], 1))
+  })
+
+  it('select-all then delete leaves a single empty block', () => {
+    const s = state('doc', [node('h1', [text('Title')]), node('p', [text('body')])],
+      textSelection(pos([0, 0], 0), pos([1, 0], 4)))
+    const tx = cmdDeleteBackward(s)!
+    expect(tx.doc_after.content).toEqual([node('h1', [])])
+  })
+})
+
 describe('commands/cmdFormatBold (toggleMark with leaf-split)', () => {
   it('splits a leaf and bolds the middle when range is partial', () => {
     // "hello", select offsets 1..4 → before "h", target "ell", after "o"

@@ -54,8 +54,8 @@ static const char* MIR_SKIP_TESTS[] = {
     "awfy_json",        // JSON benchmark uses features not yet in MIR
     "awfy_json2",       // JSON benchmark uses features not yet in MIR
     "awfy_list2",       // list benchmark uses features not yet in MIR
-    "awfy_deltablue",   // deltablue benchmark times out in MIR Direct debug build
-    "awfy_deltablue2",  // deltablue benchmark produces wrong output in MIR (runs but returns null)
+    // awfy_deltablue / awfy_deltablue2 re-enabled: converted to the growable []/push/len/splice
+    // vector (no chunked + .sz wrapper), which fixed both the timeout and the null-output issue.
     "awfy_richards",    // Richards benchmark produces wrong output in MIR Direct
     "awfy_richards2",   // Richards benchmark produces wrong output in MIR Direct
     "beng_fasta",       // fasta benchmark uses features not yet in MIR

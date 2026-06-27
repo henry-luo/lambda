@@ -490,6 +490,7 @@ typedef enum SysFunc {
     SYSFUNC_PDF_PARSE_CONTENT_STREAM,  // pdf_parse_content_stream(bytes) - fast PDF content tokenizer
     SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER,  // pdf_register_svg_image_resolver(svg, pdf) - bind PDF image handles to SVG root
     SYSPROC_PUSH,            // push(arr, val) - append val to a growable array in place (procedural)
+    SYSPROC_SPLICE,          // splice(arr, start, count) - remove count elements at start, in place (procedural)
 } SysFunc;
 
 typedef struct Type {
@@ -1503,6 +1504,7 @@ extern "C" {
     Item fn_concat(Item a, Item b);                // join along axis 0
     Item fn_stack(Item a, Item b);                 // stack along new leading axis
     Item pn_push(Item arr, Item value);            // append value to a growable array in place
+    Item pn_splice(Item arr, Item start, Item count); // remove count elements at start, in place
 
     // image stencil engine: slide a Kh×Kw window over the spatial dims of `in`
     // (2-D H×W, or 3-D H×W×C applied per-channel) and reduce at each position.

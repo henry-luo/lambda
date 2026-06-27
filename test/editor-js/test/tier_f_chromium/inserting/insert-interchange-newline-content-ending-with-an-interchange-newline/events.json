@@ -1,0 +1,1 @@
+[{"type":"command","name":"insertHTML","args":{"html":"foo<div>bar</div><br class=\"Apple-interchange-newline\">"}}]

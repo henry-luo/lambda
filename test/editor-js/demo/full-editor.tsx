@@ -44,6 +44,8 @@ import {
   cmdToggleMark
 } from '../src/commands/text-commands'
 import { cmdResizeImage } from '../src/commands/structural-commands'
+import { cmdPasteSlice } from '../src/commands/paste'
+import { parseHtmlToDoc } from '../src/view/html-parser'
 import { isNode, isText, nodeAt } from '../src/model/doc'
 import type { EditorState } from '../src/commands/types'
 import type {
@@ -66,6 +68,23 @@ type Command = (state: EditorState) => Transaction | null
 
 function selKey(sel: Selection | null): string {
   return sel === null ? 'null' : JSON.stringify(sel)
+}
+
+// Pull the meaningful fragment out of clipboard text/html (strip the wrapper
+// chrome and the StartFragment/EndFragment comments browsers add).
+function extractClipboardFragment(html: string): string {
+  const frag = html.match(/<!--StartFragment-->([\s\S]*?)<!--EndFragment-->/)
+  if (frag) return frag[1]!
+  const body = html.match(/<body[^>]*>([\s\S]*)<\/body>/i)
+  return (body ? body[1]! : html).trim()
+}
+
+// Convert pasted plain text to HTML: blank lines split paragraphs, single
+// newlines become <br>.
+function plainTextToHtml(text: string): string {
+  if (text === '') return ''
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return text.split(/\n\n+/).map(p => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('')
 }
 
 // Active marks at the current selection (read from the text leaf the anchor
@@ -138,6 +157,31 @@ export function FullEditor(props: FullEditorProps) {
     }
     el.addEventListener('beforeinput', handler)
     return () => el.removeEventListener('beforeinput', handler)
+  }, [])
+
+  // Native paste → parse clipboard HTML (or plain text) into a slice → cmdPasteSlice.
+  useEffect(() => {
+    const el = rootRef.current
+    if (el === null) return
+    const handler = (ev: ClipboardEvent) => {
+      const cb = ev.clipboardData
+      if (cb === null) return
+      const html = cb.getData('text/html')
+      const fragment = html.trim() !== ''
+        ? extractClipboardFragment(html)
+        : plainTextToHtml(cb.getData('text/plain'))
+      if (fragment === '') return
+      ev.preventDefault()
+      const cur = stateRef.current
+      const parsed = parseHtmlToDoc(`<doc>${fragment}</doc>`, cur.schema)
+      const tx = cmdPasteSlice(
+        { doc: cur.doc, schema: cur.schema, selection: cur.selection, stored_marks: cur.stored_marks },
+        parsed.doc.content
+      )
+      if (tx !== null) dispatch({ type: 'apply', tx })
+    }
+    el.addEventListener('paste', handler)
+    return () => el.removeEventListener('paste', handler)
   }, [])
 
   // DOM selection → source selection. Lets the toolbar follow the caret.

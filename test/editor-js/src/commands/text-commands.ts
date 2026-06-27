@@ -11,8 +11,9 @@
 // block, all/node selections) get expanded as the corresponding Slate
 // fixtures are ported.
 
-import { isNode, isText, lastIndex, node, nodeAt, parentPath } from '../model/doc.js'
-import { pos, textSelection } from '../model/source-pos.js'
+import { isNode, isText, lastIndex, node, nodeAt, parentPath, withContent } from '../model/doc.js'
+import { pos, posEqual, textSelection } from '../model/source-pos.js'
+import { charLen, caretPosInContent, mergeInlines } from '../model/inline.js'
 import {
   hasMark,
   stepReplace,
@@ -28,9 +29,10 @@ import {
   txStep
 } from '../model/transaction.js'
 import { defaultSplitBlock, isBlockTag, schemaAllowsInline } from '../model/schema.js'
+import type { Schema } from '../model/schema.js'
 import { caret, caretAt, isText as selIsText, selCollapsed, selHi, selLo, selSingleLeaf } from './sel.js'
 import type { EditorState } from './types.js'
-import type { AttrValue, Child, MarkDict, Node, TextLeaf, Transaction } from '../model/types.js'
+import type { AttrValue, Child, MarkDict, Node, SourcePath, SourcePos, TextLeaf, Transaction } from '../model/types.js'
 
 // ---------------------------------------------------------------------------
 // Common: delete a range within a single text leaf
@@ -54,11 +56,137 @@ function deleteRangeInLeaf(state: EditorState, from: import('../model/types.js')
   return txSetSelection(tx, caret(pos(from.path, from.offset)))
 }
 
-// Delete the current (non-collapsed, single-leaf) selection.
+// Canonicalize a position to a within-block leaf/node position. Descends
+// through block-level (doc-root / container) node positions to the nearest
+// leaf boundary, so `{path:[], offset:1}` (a gap between blocks) becomes the
+// start of the relevant block's first leaf rather than a doc-root position.
+function resolvePos(doc: Node, p: SourcePos): SourcePos {
+  let path = [...p.path]
+  let off = p.offset
+  for (let guard = 0; guard < 50; guard++) {
+    const n = nodeAt(doc, path)
+    if (n === null || isText(n)) return pos(path, off)
+    if (n.content.length === 0) return pos(path, off)  // empty block — node position stays
+    if (off < n.content.length) {
+      path = [...path, off]
+      off = 0
+    } else {
+      const last = n.content[n.content.length - 1]
+      path = [...path, n.content.length - 1]
+      off = isText(last) ? last.text.length : isNode(last) ? last.content.length : 0
+    }
+  }
+  return pos(path, off)
+}
+
+// Delete the current non-collapsed text selection. Single-leaf ranges go
+// through the simple path; multi-leaf / multi-block ranges (e.g. select-all)
+// are handled generally as long as the two endpoints share a block parent.
 function deleteSelectionSimple(state: EditorState): Transaction | null {
   const sel = state.selection
-  if (sel === null || !selIsText(sel) || selCollapsed(sel) || !selSingleLeaf(sel)) return null
-  return deleteRangeInLeaf(state, selLo(sel), selHi(sel))
+  if (sel === null || !selIsText(sel) || selCollapsed(sel)) return null
+  const lo = resolvePos(state.doc, selLo(sel))
+  const hi = resolvePos(state.doc, selHi(sel))
+  if (posEqual(lo, hi)) return null  // degenerate range (a block boundary only)
+  if (pathEq(lo.path, hi.path)) return deleteRangeInLeaf(state, lo, hi)
+  return deleteRangeResolved(state, lo, hi)
+}
+
+// Split a block's content around a position into (before, after), and report
+// the block's path. Works for a leaf position (splits the leaf) or a node
+// child-index position (empty/at-boundary block).
+interface BlockSplit { blockPath: SourcePath; before: Child[]; after: Child[] }
+function splitBlockAt(doc: Node, p: SourcePos): BlockSplit | null {
+  const target = nodeAt(doc, p.path)
+  if (target === null) return null
+  if (isText(target)) {
+    const blockPath = parentPath(p.path)
+    const leafIdx = lastIndex(p.path)
+    const block = nodeAt(doc, blockPath)
+    if (block === null || !isNode(block)) return null
+    const leftText = target.text.slice(0, p.offset)
+    const rightText = target.text.slice(p.offset)
+    const before = [...block.content.slice(0, leafIdx), ...(leftText ? [{ kind: 'text' as const, text: leftText, marks: target.marks }] : [])]
+    const after = [...(rightText ? [{ kind: 'text' as const, text: rightText, marks: target.marks }] : []), ...block.content.slice(leafIdx + 1)]
+    return { blockPath, before, after }
+  }
+  if (isNode(target)) {
+    return { blockPath: p.path, before: target.content.slice(0, p.offset), after: target.content.slice(p.offset) }
+  }
+  return null
+}
+
+function pathEq(a: SourcePath, b: SourcePath): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i])
+}
+
+// General range delete over two already-resolved (within-block) positions:
+// keep the start block's prefix + the end block's suffix, removing everything
+// between (and the blocks themselves). The two endpoints must live under the
+// same block parent (covers select-all over a flat doc and any same-level
+// multi-block range).
+function deleteRangeResolved(state: EditorState, loPos: SourcePos, hiPos: SourcePos): Transaction | null {
+  const lo = splitBlockAt(state.doc, loPos)
+  const hi = splitBlockAt(state.doc, hiPos)
+  if (lo === null || hi === null) return null
+  if (lo.blockPath.length === 0 || hi.blockPath.length === 0) return null  // never treat the doc root as a block
+  const loParent = parentPath(lo.blockPath)
+  const hiParent = parentPath(hi.blockPath)
+  if (!pathEq(loParent, hiParent)) return null  // cross-parent nested range — unsupported
+  const loIdx = lastIndex(lo.blockPath)
+  const hiIdx = lastIndex(hi.blockPath)
+  if (loIdx > hiIdx) return null
+  const loBlock = nodeAt(state.doc, lo.blockPath)
+  if (loBlock === null || !isNode(loBlock)) return null
+  const mergedContent = mergeInlines([...lo.before, ...hi.after])
+  const merged = withContent(loBlock, mergedContent)
+  let tx = txBegin(state.doc, state.selection)
+  tx = txStep(tx, stepReplace(loParent, loIdx, hiIdx + 1, [merged]))
+  const cp = caretPosInContent([...loParent, loIdx], mergedContent, charLen(lo.before))
+  return txSetSelection(tx, caret(cp))
+}
+
+// Merge `incoming` inline content into `prev`'s last inline-content descendant.
+// Returns the rebuilt node plus the caret's relative path/offset at the seam.
+// Descends through containers (a paragraph backspacing into a list merges into
+// that list's last item). Returns null if `prev` has no mergeable descendant.
+interface MergeResult { node: Node; caretRelPath: number[]; caretOffset: number }
+function mergeIntoLastInline(schema: Schema, prev: Node, incoming: Child[]): MergeResult | null {
+  if (schemaAllowsInline(schema, prev.tag)) {
+    const seam = charLen(prev.content)
+    const merged = mergeInlines([...prev.content, ...incoming])
+    const cp = caretPosInContent([], merged, seam)
+    return { node: withContent(prev, merged), caretRelPath: cp.path, caretOffset: cp.offset }
+  }
+  const n = prev.content.length
+  if (n === 0) return null
+  const last = prev.content[n - 1]
+  if (last === undefined || !isNode(last)) return null
+  const res = mergeIntoLastInline(schema, last, incoming)
+  if (res === null) return null
+  return {
+    node: withContent(prev, [...prev.content.slice(0, n - 1), res.node]),
+    caretRelPath: [n - 1, ...res.caretRelPath],
+    caretOffset: res.caretOffset
+  }
+}
+
+// Backspace at the very start of a block: merge it into the previous sibling
+// block (PM joinBackward). Returns null at the first block (no previous sibling)
+// or when the previous block has no mergeable descendant.
+function joinBlockBackward(state: EditorState, blockPath: SourcePath): Transaction | null {
+  const parent = parentPath(blockPath)
+  const blockIdx = lastIndex(blockPath)
+  if (blockIdx === 0) return null  // first block under its parent — nothing to merge into
+  const cur = nodeAt(state.doc, blockPath)
+  const prev = nodeAt(state.doc, [...parent, blockIdx - 1])
+  if (cur === null || !isNode(cur) || prev === null || !isNode(prev)) return null
+  const merged = mergeIntoLastInline(state.schema, prev, cur.content)
+  if (merged === null) return null
+  let tx = txBegin(state.doc, state.selection)
+  tx = txStep(tx, stepReplace(parent, blockIdx - 1, blockIdx + 1, [merged.node]))
+  const caretPath = [...parent, blockIdx - 1, ...merged.caretRelPath]
+  return txSetSelection(tx, caret(pos(caretPath, merged.caretOffset)))
 }
 
 // ---------------------------------------------------------------------------
@@ -257,16 +385,47 @@ export function cmdDeleteNode(state: EditorState): Transaction | null {
 // cmdDeleteBackward / cmdDeleteForward (single-leaf happy path)
 // ---------------------------------------------------------------------------
 
+// Delete one unit immediately before child index `childIdx` of `blockPath`:
+// the last char of the previous text leaf, the previous inline node, or — when
+// `childIdx` is 0 (block start) — join into the previous block.
+function deleteBeforeChild(state: EditorState, blockPath: SourcePath, childIdx: number): Transaction | null {
+  if (childIdx === 0) return joinBlockBackward(state, blockPath)
+  const block = nodeAt(state.doc, blockPath)
+  if (block === null || !isNode(block)) return null
+  const prev = block.content[childIdx - 1]
+  if (prev !== undefined && isText(prev) && prev.text.length > 0) {
+    const prevPath = [...blockPath, childIdx - 1]
+    return deleteRangeInLeaf(state, pos(prevPath, prev.text.length - 1), pos(prevPath, prev.text.length))
+  }
+  // Previous child is an inline node (or an empty leaf) — remove it wholesale.
+  let tx = txBegin(state.doc, state.selection)
+  tx = txStep(tx, stepReplace(blockPath, childIdx - 1, childIdx, []))
+  return txSetSelection(tx, caret(pos(blockPath, childIdx - 1)))
+}
+
+// Backspace at a single (collapsed) position: previous char, previous inline
+// node, or join into the previous block at a block start.
+function deleteBackwardAt(state: EditorState, p: SourcePos): Transaction | null {
+  const target = nodeAt(state.doc, p.path)
+  if (target === null) return null
+  if (isText(target)) {
+    if (p.offset > 0) return deleteRangeInLeaf(state, pos(p.path, p.offset - 1), p)
+    return deleteBeforeChild(state, parentPath(p.path), lastIndex(p.path))
+  }
+  return deleteBeforeChild(state, p.path, p.offset)
+}
+
 export function cmdDeleteBackward(state: EditorState): Transaction | null {
   const sel = state.selection
   if (sel === null) return null
   if (sel.kind === 'node') return cmdDeleteNode(state)
   if (!selIsText(sel)) return null
-  if (!selCollapsed(sel)) return deleteSelectionSimple(state)
-  if (!selSingleLeaf(sel)) return null
-  const p = sel.anchor
-  if (p.offset <= 0) return null  // boundary: caller can chain to merge_blocks_backward later
-  return deleteRangeInLeaf(state, pos(p.path, p.offset - 1), p)
+  // Resolve endpoints so a selection that spans only a block boundary collapses
+  // to a single point (→ join) instead of corrupting the tree as a range.
+  const lo = resolvePos(state.doc, selLo(sel))
+  const hi = resolvePos(state.doc, selHi(sel))
+  if (!posEqual(lo, hi)) return deleteRangeResolved(state, lo, hi)
+  return deleteBackwardAt(state, lo)
 }
 
 export function cmdDeleteForward(state: EditorState): Transaction | null {
@@ -274,13 +433,13 @@ export function cmdDeleteForward(state: EditorState): Transaction | null {
   if (sel === null) return null
   if (sel.kind === 'node') return cmdDeleteNode(state)
   if (!selIsText(sel)) return null
-  if (!selCollapsed(sel)) return deleteSelectionSimple(state)
-  if (!selSingleLeaf(sel)) return null
-  const p = sel.anchor
-  const leaf = nodeAt(state.doc, p.path)
-  if (leaf === null || !isText(leaf)) return null
-  if (p.offset >= leaf.text.length) return null  // boundary: merge_blocks_forward later
-  return deleteRangeInLeaf(state, p, pos(p.path, p.offset + 1))
+  const lo = resolvePos(state.doc, selLo(sel))
+  const hi = resolvePos(state.doc, selHi(sel))
+  if (!posEqual(lo, hi)) return deleteRangeResolved(state, lo, hi)
+  const leaf = nodeAt(state.doc, lo.path)
+  if (leaf === null || !isText(leaf)) return null  // node-position forward delete (joinForward) — TODO
+  if (lo.offset >= leaf.text.length) return null   // block-end boundary (joinForward) — TODO
+  return deleteRangeInLeaf(state, lo, pos(lo.path, lo.offset + 1))
 }
 
 // ---------------------------------------------------------------------------
