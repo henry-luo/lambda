@@ -2,12 +2,12 @@
 
 - **Date:** 2026-06-27
 - **Platform:** Darwin arm64
-- **Lambda commit:** `3477317deffcb04281f293fb4a82d9feae9f5348`
+- **Lambda commit:** `a18102ceaf4ad445e76cefa10aa846d9e3c1ffa7`
 - **Lambda build:** clean release build (`make release`)
-- **Instrumentation check:** release binary passed the standard profiling-marker check before the benchmark run
+- **Instrumentation check:** passed
 - **Node.js:** v22.13.0
 - **QuickJS:** 2025-09-13
-- **Methodology:** 3 runs per benchmark by default, median of self-reported `__TIMING__` milliseconds
+- **Methodology:** 3 run(s) per benchmark, median of self-reported `__TIMING__` milliseconds, timeout 180s per run
 - **Engines in this report:** MIR, LambdaJS, QuickJS, Node.js
 - **Results source:** `test/benchmark/benchmark_results_v9.json`
 
@@ -25,9 +25,40 @@ JetStream JavaScript-engine wrappers are standardized to an explicit x8 loop ove
 | KOSTYA | 7 | 7 | 7 | 7 | 7 | 9.86x | 14.6x | 11.7x |
 | LARCENY | 12 | 12 | 12 | 12 | 12 | 6.19x | 8.24x | 14.1x |
 | JetStream | 9 | 9 | 8 | 7 | 9 | 21.2x | 148x | 13.1x |
-| **Overall timed** | **62** | **62** | **59** | **56** | **62** | **4.62x** | **15.6x** | **8.16x** |
+| **Overall dedup** | **56** | **56** | **53** | **50** | **56** | **4.31x** | **13.1x** | **7.58x** |
+| Overall raw | 62 | 62 | 59 | 56 | 62 | 4.62x | 15.6x | 8.16x |
 
+> **Overall dedup** is the default headline metric: duplicate benchmark names across suites are counted once, using the best timed value per engine. **Overall raw** keeps the row-weighted value for auditability.
 > Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.
+
+---
+
+## Notable Results
+
+- Missing timings: **9** cells
+- QuickJS missing: r7rs/ack (not_recorded), beng/knucleotide (not_recorded), beng/regexredux (not_recorded), beng/revcomp (not_recorded), jetstream/cube3d (not_recorded), jetstream/raytrace3d (not_recorded)
+- LambdaJS missing: awfy/havlak (not_recorded), awfy/cd (not_recorded), jetstream/hashmap (not_recorded)
+- Deduplicated benchmark names: mandelbrot (awfy/beng), nbody (awfy/beng/jetstream), richards (awfy/jetstream), deltablue (awfy/jetstream), primes (kostya/larceny)
+
+### Largest LambdaJS / Node.js Ratios
+
+| Benchmark | LambdaJS | Node.js | Ratio |
+|---|---:|---:|---:|
+| jetstream/splay | 1.62s | 4.12 | 392x |
+| awfy/deltablue | 4.17s | 13.7 | 304x |
+| jetstream/deltablue | 1.88s | 7.06 | 266x |
+| jetstream/cube3d | 3.72s | 18.8 | 198x |
+| kostya/matmul | 2.87s | 16.3 | 176x |
+| jetstream/nbody | 929.2 | 5.68 | 163x |
+| jetstream/navier_stokes | 6.23s | 40.2 | 155x |
+| beng/nbody | 1.17s | 7.78 | 150x |
+
+### LambdaJS Faster Than Node.js
+
+| Benchmark | LambdaJS | Node.js | Ratio |
+|---|---:|---:|---:|
+| beng/pidigits | 0.318 | 2.02 | 0.16x |
+| beng/fannkuch | 2.06 | 4.19 | 0.49x |
 
 ---
 
