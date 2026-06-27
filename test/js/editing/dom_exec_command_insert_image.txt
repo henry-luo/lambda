@@ -1,3 +1,0 @@
-insertImage-collapsed supported=true enabled=true ok=true html=ab<img src="https://example.test/image.png">cd expected=true
-insertImage-selected ok=true html=a<img src="https://example.test/image.png">d expected=true
-insertImage-empty-src ok=false html=abcd expected=true

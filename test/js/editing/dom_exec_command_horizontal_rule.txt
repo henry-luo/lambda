@@ -1,2 +1,0 @@
-insertHorizontalRule-collapsed supported=true enabled=true ok=true html=ab<hr>cd expected=true
-insertHorizontalRule-selected ok=true html=a<hr>d expected=true

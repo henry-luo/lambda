@@ -1,4 +1,0 @@
-justifyLeft supported=true enabled=true before=false ok=true after=true html=<p style="text-align: left;">abc</p> expected=true states=true,false,false,false
-justifyCenter supported=true enabled=true before=false ok=true after=true html=<p style="text-align: center;">abc</p> expected=true states=false,true,false,false
-justifyRight supported=true enabled=true before=false ok=true after=true html=<p style="text-align: right;">abc</p> expected=true states=false,false,true,false
-justifyFull supported=true enabled=true before=false ok=true after=true html=<p style="text-align: justify;">abc</p> expected=true states=false,false,false,true

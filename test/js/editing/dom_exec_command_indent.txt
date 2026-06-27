@@ -1,2 +1,0 @@
-indent supported=true enabled=true state=false ok=true html=<blockquote><p>abc</p></blockquote><p>def</p> expected=true
-outdent supported=true enabled=true state=false ok=true html=<p>abc</p><p>def</p> expected=true

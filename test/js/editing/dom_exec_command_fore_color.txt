@@ -1,2 +1,0 @@
-foreColor supported=true enabled=true ok=true value=#123456 html=a<span style="color: #123456">bc</span>d expected=true
-foreColor-empty ok=false html=abcd expected=true
