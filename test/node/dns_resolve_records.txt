@@ -10,12 +10,17 @@ resolveTxt err: true
 resolveTxt shape: lambda example.test spf
 resolveMx err: true
 resolveMx shape: mail.example.test 10
+resolveNs err: true
+resolveNs shape: ns1.example.test ns2.example.test
 resolveSrv err: true
 resolveSrv shape: srv.example.test 443 1 5
 resolveCname err: true
 resolveCname shape: alias.example.test
 reverse err: true
 reverse shape: ptr.127.0.0.1
+promises resolveNs shape: ns1.promise.test
 promises resolveTxt shape: lambda promise.test
+resolver resolveNs method: function
 resolver resolveTxt method: function
+promises resolver resolveNs method: function
 promises resolver reverse method: function

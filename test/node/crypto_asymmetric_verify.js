@@ -99,7 +99,10 @@ assert.strictEqual(derivedPublic.type, 'public');
 assert.strictEqual(crypto.createVerify('sha256')
   .update(message)
   .verify(derivedPublic, objectSignature), true);
+assert.strictEqual(publicKeyObject.equals(derivedPublic), true);
+assert.strictEqual(publicKeyObject.equals(privateKeyObject), false);
 console.log('rsa keyobject derive public:', true);
+console.log('rsa keyobject equals:', true);
 
 assert.strictEqual(publicKeyObject.export().byteLength > 0, true);
 assert.strictEqual(publicKeyObject.export({ type: 'spki', format: 'pem' }).includes('BEGIN PUBLIC KEY'), true);

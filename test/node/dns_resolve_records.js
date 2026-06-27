@@ -30,6 +30,9 @@ channel.queryTxt = function(hostname) {
 channel.queryMx = function(hostname) {
   return [{ exchange: 'mail.' + hostname, priority: 10 }];
 };
+channel.queryNs = function(hostname) {
+  return ['ns1.' + hostname, 'ns2.' + hostname];
+};
 channel.querySrv = function(hostname) {
   return [{ name: 'srv.' + hostname, port: 443, priority: 1, weight: 5 }];
 };
@@ -49,27 +52,38 @@ function runRecordShapeTests() {
       console.log('resolveMx err:', mxErr === null);
       console.log('resolveMx shape:', mxRecords[0].exchange, mxRecords[0].priority);
 
-      dns.resolveSrv('example.test', function(srvErr, srvRecords) {
-        console.log('resolveSrv err:', srvErr === null);
-        console.log('resolveSrv shape:', srvRecords[0].name, srvRecords[0].port,
-                    srvRecords[0].priority, srvRecords[0].weight);
+      dns.resolveNs('example.test', function(nsErr, nsRecords) {
+        console.log('resolveNs err:', nsErr === null);
+        console.log('resolveNs shape:', nsRecords[0], nsRecords[1]);
 
-        dns.resolveCname('example.test', function(cnameErr, cnameRecords) {
-          console.log('resolveCname err:', cnameErr === null);
-          console.log('resolveCname shape:', cnameRecords[0]);
+        dns.resolveSrv('example.test', function(srvErr, srvRecords) {
+          console.log('resolveSrv err:', srvErr === null);
+          console.log('resolveSrv shape:', srvRecords[0].name, srvRecords[0].port,
+                      srvRecords[0].priority, srvRecords[0].weight);
 
-          dns.reverse('127.0.0.1', function(reverseErr, reverseRecords) {
-            console.log('reverse err:', reverseErr === null);
-            console.log('reverse shape:', reverseRecords[0]);
+          dns.resolveCname('example.test', function(cnameErr, cnameRecords) {
+            console.log('resolveCname err:', cnameErr === null);
+            console.log('resolveCname shape:', cnameRecords[0]);
 
-            dns.promises.resolveTxt('promise.test').then(function(promiseTxt) {
-              console.log('promises resolveTxt shape:',
-                          promiseTxt[0][0], promiseTxt[0][1]);
-              const resolver = new dns.Resolver();
-              console.log('resolver resolveTxt method:', typeof resolver.resolveTxt);
-              const promiseResolver = new dns.promises.Resolver();
-              console.log('promises resolver reverse method:',
-                          typeof promiseResolver.reverse);
+            dns.reverse('127.0.0.1', function(reverseErr, reverseRecords) {
+              console.log('reverse err:', reverseErr === null);
+              console.log('reverse shape:', reverseRecords[0]);
+
+              dns.promises.resolveNs('promise.test').then(function(promiseNs) {
+                console.log('promises resolveNs shape:', promiseNs[0]);
+                return dns.promises.resolveTxt('promise.test');
+              }).then(function(promiseTxt) {
+                console.log('promises resolveTxt shape:',
+                            promiseTxt[0][0], promiseTxt[0][1]);
+                const resolver = new dns.Resolver();
+                console.log('resolver resolveNs method:', typeof resolver.resolveNs);
+                console.log('resolver resolveTxt method:', typeof resolver.resolveTxt);
+                const promiseResolver = new dns.promises.Resolver();
+                console.log('promises resolver resolveNs method:',
+                            typeof promiseResolver.resolveNs);
+                console.log('promises resolver reverse method:',
+                            typeof promiseResolver.reverse);
+              });
             });
           });
         });

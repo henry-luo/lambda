@@ -883,7 +883,7 @@ static void dns_ensure_cares_channelwrap(void) {
 
     const char* methods[] = {
         "queryA", "queryAaaa", "queryCname", "queryMx",
-        "querySrv", "queryTxt", "getHostByAddr", NULL
+        "queryNs", "querySrv", "queryTxt", "getHostByAddr", NULL
     };
     for (int i = 0; methods[i]; i++) {
         Item key = make_string_item(methods[i]);
@@ -925,6 +925,11 @@ static bool dns_rrtype_to_family(Item rrtype_item, int* out_family, char* out_sy
         snprintf(out_syscall, (size_t)syscall_size, "queryMx");
         return true;
     }
+    if (rrtype->len == 2 && memcmp(rrtype->chars, "NS", 2) == 0) {
+        *out_family = 0;
+        snprintf(out_syscall, (size_t)syscall_size, "queryNs");
+        return true;
+    }
     if (rrtype->len == 3 && memcmp(rrtype->chars, "SRV", 3) == 0) {
         *out_family = 0;
         snprintf(out_syscall, (size_t)syscall_size, "querySrv");
@@ -936,7 +941,7 @@ static bool dns_rrtype_to_family(Item rrtype_item, int* out_family, char* out_sy
         return true;
     }
     js_throw_type_error_code(JS_ERR_INVALID_ARG_VALUE,
-        "The argument 'rrtype' must be one of: 'A', 'AAAA', 'CNAME', 'MX', 'SRV', 'TXT'.");
+        "The argument 'rrtype' must be one of: 'A', 'AAAA', 'CNAME', 'MX', 'NS', 'SRV', 'TXT'.");
     return false;
 }
 
@@ -954,7 +959,7 @@ static bool normalize_resolve_args(Item rest_args, bool promise_mode, int fixed_
     Item callback_item = argc > 2 ? js_array_get_int(rest_args, 2) : make_js_undefined();
 
     if (!copy_hostname(hostname_item, out->hostname, (int)sizeof(out->hostname))) {
-        js_throw_invalid_arg_type("hostname", "string", hostname_item);
+        js_throw_invalid_arg_type("name", "string", hostname_item);
         return false;
     }
 
@@ -979,6 +984,10 @@ static bool normalize_resolve_args(Item rest_args, bool promise_mode, int fixed_
     } else if (fixed_family == -4) {
         out->family = 0;
         snprintf(out->syscall, sizeof(out->syscall), "queryCname");
+        if (!promise_mode) callback_item = rrtype_item;
+    } else if (fixed_family == -6) {
+        out->family = 0;
+        snprintf(out->syscall, sizeof(out->syscall), "queryNs");
         if (!promise_mode) callback_item = rrtype_item;
     } else if (fixed_family == -5) {
         out->family = 0;
@@ -1091,7 +1100,6 @@ static bool dns_resolve_start(const DnsResolveOptions* options, Item resolve, It
 static Item js_dns_resolve_common(Item rest_args, bool promise_mode, int family) {
     DnsResolveOptions options;
     if (!normalize_resolve_args(rest_args, promise_mode, family, &options)) {
-        if (promise_mode && js_check_exception()) return js_promise_reject(js_clear_exception());
         return ItemNull;
     }
 
@@ -1141,6 +1149,10 @@ extern "C" Item js_dns_resolveCname(Item rest_args) {
     return js_dns_resolve_common(rest_args, false, -4);
 }
 
+extern "C" Item js_dns_resolveNs(Item rest_args) {
+    return js_dns_resolve_common(rest_args, false, -6);
+}
+
 extern "C" Item js_dns_reverse(Item rest_args) {
     return js_dns_resolve_common(rest_args, false, -5);
 }
@@ -1171,6 +1183,10 @@ extern "C" Item js_dns_promises_resolveSrv(Item rest_args) {
 
 extern "C" Item js_dns_promises_resolveCname(Item rest_args) {
     return js_dns_resolve_common(rest_args, true, -4);
+}
+
+extern "C" Item js_dns_promises_resolveNs(Item rest_args) {
+    return js_dns_resolve_common(rest_args, true, -6);
 }
 
 extern "C" Item js_dns_promises_reverse(Item rest_args) {
@@ -1433,6 +1449,7 @@ static Item dns_get_resolver_prototype(bool promise_mode) {
         dns_set_method(proto, "resolve6", (void*)js_dns_promises_resolve6, -1);
         dns_set_method(proto, "resolveCname", (void*)js_dns_promises_resolveCname, -1);
         dns_set_method(proto, "resolveMx", (void*)js_dns_promises_resolveMx, -1);
+        dns_set_method(proto, "resolveNs", (void*)js_dns_promises_resolveNs, -1);
         dns_set_method(proto, "resolveSrv", (void*)js_dns_promises_resolveSrv, -1);
         dns_set_method(proto, "resolveTxt", (void*)js_dns_promises_resolveTxt, -1);
         dns_set_method(proto, "reverse", (void*)js_dns_promises_reverse, -1);
@@ -1442,6 +1459,7 @@ static Item dns_get_resolver_prototype(bool promise_mode) {
         dns_set_method(proto, "resolve6", (void*)js_dns_resolve6, -1);
         dns_set_method(proto, "resolveCname", (void*)js_dns_resolveCname, -1);
         dns_set_method(proto, "resolveMx", (void*)js_dns_resolveMx, -1);
+        dns_set_method(proto, "resolveNs", (void*)js_dns_resolveNs, -1);
         dns_set_method(proto, "resolveSrv", (void*)js_dns_resolveSrv, -1);
         dns_set_method(proto, "resolveTxt", (void*)js_dns_resolveTxt, -1);
         dns_set_method(proto, "reverse", (void*)js_dns_reverse, -1);
@@ -1509,6 +1527,7 @@ extern "C" Item js_get_dns_promises_namespace(void) {
     dns_set_method(dns_promises_namespace, "resolve6", (void*)js_dns_promises_resolve6, -1);
     dns_set_method(dns_promises_namespace, "resolveCname", (void*)js_dns_promises_resolveCname, -1);
     dns_set_method(dns_promises_namespace, "resolveMx", (void*)js_dns_promises_resolveMx, -1);
+    dns_set_method(dns_promises_namespace, "resolveNs", (void*)js_dns_promises_resolveNs, -1);
     dns_set_method(dns_promises_namespace, "resolveSrv", (void*)js_dns_promises_resolveSrv, -1);
     dns_set_method(dns_promises_namespace, "resolveTxt", (void*)js_dns_promises_resolveTxt, -1);
     dns_set_method(dns_promises_namespace, "reverse", (void*)js_dns_promises_reverse, -1);
@@ -1536,6 +1555,7 @@ extern "C" Item js_get_dns_namespace(void) {
     dns_set_method(dns_namespace, "resolve6",   (void*)js_dns_resolve6, -1);
     dns_set_method(dns_namespace, "resolveCname", (void*)js_dns_resolveCname, -1);
     dns_set_method(dns_namespace, "resolveMx",    (void*)js_dns_resolveMx, -1);
+    dns_set_method(dns_namespace, "resolveNs",    (void*)js_dns_resolveNs, -1);
     dns_set_method(dns_namespace, "resolveSrv",   (void*)js_dns_resolveSrv, -1);
     dns_set_method(dns_namespace, "resolveTxt",   (void*)js_dns_resolveTxt, -1);
     dns_set_method(dns_namespace, "reverse",      (void*)js_dns_reverse, -1);
