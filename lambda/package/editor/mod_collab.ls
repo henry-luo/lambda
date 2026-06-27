@@ -96,10 +96,10 @@ pub fn step_rebase(step, mapping) {
     } else { null }
   }
   else if (step.kind == 'add_mark') {
-    step_add_mark(rebase_path(mapping, step.path), step.mark)
+    step_add_mark(rebase_path(mapping, step.path), step.name, step.value)
   }
   else if (step.kind == 'remove_mark') {
-    step_remove_mark(rebase_path(mapping, step.path), step.mark)
+    step_remove_mark(rebase_path(mapping, step.path), step.name)
   }
   else if (step.kind == 'set_attr') {
     step_set_attr(rebase_path(mapping, step.path), step.name, step.value)

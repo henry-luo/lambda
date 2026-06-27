@@ -55,7 +55,7 @@ pub fn edit_cmd_delete_table_column() => {name: 'delete_table_column'}
 pub fn edit_cmd_delete_backward() => {name: 'delete_backward'}
 pub fn edit_cmd_delete_forward() => {name: 'delete_forward'}
 pub fn edit_cmd_insert_line_break() => {name: 'insert_line_break'}
-pub fn edit_cmd_toggle_mark(mark) => {name: 'toggle_mark', mark: mark}
+pub fn edit_cmd_toggle_mark(mark, value) => {name: 'toggle_mark', mark: mark, value: value}
 pub fn edit_cmd_wrap_list(kind) => {name: 'wrap_list', kind: kind}
 pub fn edit_cmd_indent_list_item() => {name: 'indent_list_item'}
 pub fn edit_cmd_outdent_list_item() => {name: 'outdent_list_item'}
@@ -84,7 +84,7 @@ fn command_tx(editor, command) {
   else if (command.name == 'delete_backward') { cmd_delete_backward(editor) }
   else if (command.name == 'delete_forward') { cmd_delete_forward(editor) }
   else if (command.name == 'insert_line_break') { cmd_insert_line_break(editor) }
-  else if (command.name == 'toggle_mark') { cmd_toggle_mark(editor, command.mark) }
+  else if (command.name == 'toggle_mark') { cmd_toggle_mark(editor, command.mark, command.value) }
   else if (command.name == 'wrap_list') { cmd_wrap_list(editor, command.kind) }
   else if (command.name == 'indent_list_item') { cmd_indent_list_item(editor) }
   else if (command.name == 'outdent_list_item') { cmd_outdent_list_item(editor) }

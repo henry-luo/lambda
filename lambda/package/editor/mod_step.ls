@@ -14,8 +14,8 @@
 //   'replace'        {parent, from, to, slice}   replace children[from..to] of a node
 //   'replace_around' {parent, from, to, gap_from, gap_to, slice, insert}
 //                                                   replace outer range while preserving an inner gap
-//   'add_mark'       {path, mark}                add `mark` to a text leaf
-//   'remove_mark'    {path, mark}                remove `mark` from a text leaf
+//   'add_mark'       {path, name, value}         add a {name,value} mark to a text leaf
+//   'remove_mark'    {path, name}                remove the named mark from a text leaf
 //   'set_attr'       {path, name, value}         set one attribute
 //   'set_node_type'  {path, tag}                 retag a node
 
@@ -36,11 +36,11 @@ pub fn step_replace_around(parent, from, to, gap_from, gap_to, slice, insert) =>
   {kind: 'replace_around', parent: parent, from: from, to: to,
    gap_from: gap_from, gap_to: gap_to, slice: slice, insert: insert}
 
-pub fn step_add_mark(path, mark) =>
-  {kind: 'add_mark', path: path, mark: mark}
+pub fn step_add_mark(path, name, value) =>
+  {kind: 'add_mark', path: path, name: name, value: value}
 
-pub fn step_remove_mark(path, mark) =>
-  {kind: 'remove_mark', path: path, mark: mark}
+pub fn step_remove_mark(path, name) =>
+  {kind: 'remove_mark', path: path, name: name}
 
 pub fn step_set_attr(path, name, value) =>
   {kind: 'set_attr', path: path, name: name, value: value}
@@ -49,27 +49,50 @@ pub fn step_set_node_type(path, tag) =>
   {kind: 'set_node_type', path: path, tag: tag}
 
 // ---------------------------------------------------------------------------
-// Mark helpers (pure list ops over [symbol...])
+// Mark helpers — marks are a flat list of {name, value} entries: value-carrying
+// and non-nested (e.g. [{name:'strong', value:true}, {name:'color', value:"red"}]).
+// Mirrors the `attrs` representation. (Lambda maps are records with fixed fields
+// and lack key enumeration, so a list-of-pairs is the idiomatic flat-dict form.)
+// Keyed by `name`; `with_mark` replaces an existing entry in place, else appends.
 // ---------------------------------------------------------------------------
 
-fn has_mark_at(marks, m, i, n) {
+pub fn mark(name, value) => {name: name, value: value}
+
+fn has_mark_at(marks, name, i, n) {
   if (i >= n) { false }
-  else if (marks[i] == m) { true }
-  else { has_mark_at(marks, m, i + 1, n) }
+  else if (marks[i].name == name) { true }
+  else { has_mark_at(marks, name, i + 1, n) }
 }
+pub fn has_mark(marks, name) => has_mark_at(marks, name, 0, len(marks))
 
-pub fn has_mark(marks, m) => has_mark_at(marks, m, 0, len(marks))
+fn mark_value_at(marks, name, i, n) {
+  if (i >= n) { null }
+  else if (marks[i].name == name) { marks[i].value }
+  else { mark_value_at(marks, name, i + 1, n) }
+}
+pub fn mark_value(marks, name) => mark_value_at(marks, name, 0, len(marks))
 
-fn without_mark_at(marks, m, i, n, acc) {
+fn without_mark_at(marks, name, i, n, acc) {
   if (i >= n) { acc }
-  else if (marks[i] == m) { without_mark_at(marks, m, i + 1, n, acc) }
-  else { without_mark_at(marks, m, i + 1, n, [*acc, marks[i]]) }
+  else if (marks[i].name == name) { without_mark_at(marks, name, i + 1, n, acc) }
+  else { without_mark_at(marks, name, i + 1, n, [*acc, marks[i]]) }
 }
+pub fn without_mark(marks, name) => without_mark_at(marks, name, 0, len(marks), [])
 
-pub fn without_mark(marks, m) => without_mark_at(marks, m, 0, len(marks), [])
+fn with_mark_at(marks, name, value, i, n, found, acc) {
+  if (i >= n) { if (found) { acc } else { [*acc, {name: name, value: value}] } }
+  else if (marks[i].name == name) { with_mark_at(marks, name, value, i + 1, n, true, [*acc, {name: name, value: value}]) }
+  else { with_mark_at(marks, name, value, i + 1, n, found, [*acc, marks[i]]) }
+}
+pub fn with_mark(marks, name, value) => with_mark_at(marks, name, value, 0, len(marks), false, [])
 
-pub fn with_mark(marks, m) =>
-  if (has_mark(marks, m)) { marks } else { [*marks, m] }
+// order-independent set equality over {name, value} entries
+fn marks_subset_at(a, b, i, n) {
+  if (i >= n) { true }
+  else if (mark_value(b, a[i].name) == a[i].value) { marks_subset_at(a, b, i + 1, n) }
+  else { false }
+}
+pub fn marks_equal(a, b) => len(a) == len(b) and marks_subset_at(a, b, 0, len(a))
 
 // ---------------------------------------------------------------------------
 // step_apply
@@ -96,13 +119,13 @@ fn apply_replace_around(step, doc) {
 
 fn apply_add_mark(step, doc) {
   let leaf = node_at(doc, step.path)
-  let new_leaf = {kind: 'text', text: leaf.text, marks: with_mark(leaf.marks, step.mark)}
+  let new_leaf = {kind: 'text', text: leaf.text, marks: with_mark(leaf.marks, step.name, step.value)}
   replace_node_at(doc, step.path, new_leaf)
 }
 
 fn apply_remove_mark(step, doc) {
   let leaf = node_at(doc, step.path)
-  let new_leaf = {kind: 'text', text: leaf.text, marks: without_mark(leaf.marks, step.mark)}
+  let new_leaf = {kind: 'text', text: leaf.text, marks: without_mark(leaf.marks, step.name)}
   replace_node_at(doc, step.path, new_leaf)
 }
 
@@ -192,8 +215,11 @@ pub fn step_invert(step, doc_before) {
   if (step.kind == 'replace_text')      { invert_replace_text(step, doc_before) }
   else if (step.kind == 'replace')      { invert_replace(step, doc_before) }
   else if (step.kind == 'replace_around'){ invert_replace_around(step, doc_before) }
-  else if (step.kind == 'add_mark')     { step_remove_mark(step.path, step.mark) }
-  else if (step.kind == 'remove_mark')  { step_add_mark(step.path, step.mark) }
+  else if (step.kind == 'add_mark')     { step_remove_mark(step.path, step.name) }
+  else if (step.kind == 'remove_mark')  {
+    let prev = mark_value(node_at(doc_before, step.path).marks, step.name)
+    step_add_mark(step.path, step.name, if (prev == null) { true } else { prev })
+  }
   else if (step.kind == 'set_attr')     { invert_set_attr(step, doc_before) }
   else if (step.kind == 'set_node_type'){ invert_set_node_type(step, doc_before) }
   else { step }

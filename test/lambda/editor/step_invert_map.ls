@@ -69,7 +69,7 @@ let around_back = step_apply(around_inv, around_after)
 // ---------------------------------------------------------------------------
 // invert(add_mark) / invert(remove_mark)
 // ---------------------------------------------------------------------------
-let m = step_add_mark([0, 0], 'strong')
+let m = step_add_mark([0, 0], 'strong', true)
 let dm = step_apply(m, d)
 let m_inv = step_invert(m, d)
 "m_inv kind:";   m_inv.kind == 'remove_mark'

@@ -64,11 +64,11 @@ let d6b = step_apply(s6b, wrap_doc)
 // ---------------------------------------------------------------------------
 // step_add_mark / step_remove_mark
 // ---------------------------------------------------------------------------
-let m1 = step_add_mark([0, 0], 'strong')
+let m1 = step_add_mark([0, 0], 'strong', true)
 let d7 = step_apply(m1, d)
 "marks before:";   len(d.content[0].content[0].marks)
 "marks after:";    len(d7.content[0].content[0].marks)
-"mark[0]:";        d7.content[0].content[0].marks[0]
+"mark[0]:";        d7.content[0].content[0].marks[0].name
 
 // Adding the same mark twice is idempotent
 let d8 = step_apply(m1, d7)
