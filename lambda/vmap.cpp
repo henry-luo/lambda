@@ -268,8 +268,11 @@ extern "C" Item vmap_new() {
 extern "C" Item vmap_from_array(Item array_item) {
     log_debug("vmap_from_array: creating VMap from array");
     TypeId type_id = get_type_id(array_item);
-    if (type_id != LMD_TYPE_ARRAY && type_id != LMD_TYPE_ARRAY) {
-        log_error("vmap_from_array: expected array/list, got type %s", get_type_name(type_id));
+    // lists are represented as LMD_TYPE_ARRAY at runtime (LMD_TYPE_LIST was removed);
+    // LMD_TYPE_ARRAY_NUM is intentionally rejected — its packed int64/double layout is
+    // incompatible with the Item* items[] access below.
+    if (type_id != LMD_TYPE_ARRAY) {
+        log_error("vmap_from_array: expected array, got type %s", get_type_name(type_id));
         return ItemNull;
     }
     // Array is typedef for List — both have items[] and length

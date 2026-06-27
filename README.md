@@ -290,6 +290,7 @@ See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-bench
 | [Developer Guide](doc/dev/Developer_Guide.md)         | Build from source, dependencies, testing, Tree-sitter grammar, MIR JIT                 |
 | [C+ Coding Convention](doc/dev/C_Plus_Convention.md)  | C/C++ coding convention                                                                |
 | [Lambda Runtime](doc/dev/Lamdba_Runtime.md)           | Runtime internals and architecture                                                     |
+| [Lambda Core Runtime Design](doc/dev/lambda/LR_00_Overview.md) | Detailed design of the core runtime — compilation pipeline, value & type model, the C and MIR-Direct transpilers, MIR JIT, memory & GC, builtins, error handling, Mark API, and the procedural runtime |
 | [Radiant Layout Design](doc/dev/Radiant_Layout_Design.md) | HTML/CSS layout engine internals                                                       |
 | [Lambda Jube Runtime](doc/Lambda_Jube_Runtime.md)      | Polyglot runtime build — Python, Bash, Ruby, and legacy C2MIR transpiler               |
 | [LambdaJS Support](doc/JS_DOM_Support.md)             | Experimental JavaScript JIT engine and browser DOM — supported features and benchmarks |

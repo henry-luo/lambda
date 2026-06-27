@@ -1,0 +1,16 @@
+flowchart TD
+    A["for i in a to b { arr[i] = v }"] --> B["build_for_stam (build_ast.cpp:5988)"]
+    B --> C["AstForNode: loop clause + then body, type = ANY"]
+    C --> D["transpile_for (transpile-mir.cpp:3274)"]
+    D --> E["evaluate collection / range, item_keys, loop header"]
+    E --> F["body: AST_NODE_INDEX_ASSIGN_STAM"]
+    F --> G{"index-assign dispatch (transpile-mir.cpp:8526)"}
+    G -->|"single int idx + known ArrayNum int + native val"| H["FAST PATH: inline store items[idx], bounds-checked"]
+    G -->|"mask / range / ANY key"| I["fn_index_assign runtime helper"]
+    G -->|"generic Array / fallback"| J["fn_array_set"]
+    H --> K["emit_null_item_reg (:348): boxed-null result"]
+    I --> K
+    J --> K
+    K --> L["body has a valid MIR reg, NOT reg 0"]
+    L --> M["loop back-edge / next i"]
+    M --> N["was: MIR 'undeclared reg 0' crash — now fixed"]

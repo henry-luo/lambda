@@ -1,0 +1,26 @@
+flowchart TB
+    OP["MarkEditor.map_update / elmt_update_attr / array_set"]
+    OP --> MODE{EditMode?}
+
+    MODE -- "EDIT_MODE_INLINE" --> SHAPECHK1{shape change?}
+    MODE -- "EDIT_MODE_IMMUTABLE" --> SHAPECHK2{shape change?}
+
+    subgraph Inline["Inline (mutate in place)"]
+        SHAPECHK1 -- "no (same type)" --> IW["write value at byte_offset\nin existing data buffer"]
+        SHAPECHK1 -- "yes" --> IR["map_rebuild_with_new_shape(is_inline=true)\nShapeBuilder -> new TypeMap\nmigrate data, mutate old TypeMap"]
+        IR --> IFREE{"ui_mode?"}
+        IFREE -- "no" --> FREE["pool_free(old data)"]
+        IFREE -- "yes (JIT arena data)" --> NOFREE["MUST NOT pool_free\n(allocator-provenance landmine)"]
+    end
+
+    subgraph Immutable["Immutable (copy-on-write)"]
+        SHAPECHK2 -- "no (same type)" --> CW["alloc new Map, memcpy data buffer\nSHARE TypeMap, write changed field"]
+        SHAPECHK2 -- "yes" --> CR["map_rebuild_with_new_shape(is_inline=false)\nnew Map + new TypeMap, structural sharing"]
+        CW --> VER
+        CR --> VER
+        VER["commit() -> EditVersion node\ndoubly-linked undo/redo chain"]
+    end
+
+    IW --> SAME["returns SAME Item"]
+    IR --> SAME
+    VER --> NEW["returns NEW Item (versioned)"]

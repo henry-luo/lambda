@@ -1,0 +1,26 @@
+flowchart TB
+  subgraph GC["GC heap (gc_heap_t, mark-and-sweep, lib/gc/gc_heap.c)"]
+    OZ["Object zone (gc_object_zone)\nfixed-size structs, NEVER moved\n7 size classes 16..256B + large >256B\nString Map Array Element Function boxed-num"]
+    BUMP["Bump region (gc_heap_bump_alloc)\nJIT hot path, 4MB..64MB doubling blocks\nGC_FLAG_BUMP, recycled via free lists"]
+    subgraph DZ["Data zone (gc_data_zone, variable buffers: items[], map data, closure_env)"]
+      DN["data nursery (4MB blocks)\nbump-allocated, COMPACTED each cycle"]
+      DT["tenured data\nsurvivors copied here on collect"]
+      DN -->|"gc_compact_data: copy survivors\nrewrite owner pointers"| DT
+    end
+    LO["Large objects (>256B)\nmalloc'd, sorted large_objects[] for ownership"]
+  end
+
+  subgraph NUR["Numeric nursery (gc_nursery, malloc-backed 32KB blocks)"]
+    NN["boxed int64 / double / DateTime\npush_l / push_d / push_k\nNEVER collected -> lives to gc_nursery_destroy"]
+  end
+
+  subgraph POOL["Name & shape pools (arena/Pool-backed, ref-counted, hierarchical)"]
+    NP["Name pool (interned identifiers)\nStrView-keyed, parent-chained"]
+    SP["Shape pool (ShapeEntry-chain dedup)\nShapeSignature-keyed, cap 64 fields"]
+  end
+
+  ARENA["Arena (parser doc data, ShapeEntry chains)\nno GC header, bulk-freed at doc scope"]
+
+  TAGS["tagged Item pointers"]
+  TAGS -->|"stable: objects never move"| OZ
+  TAGS -->|"FLOAT/INT64/DTIME box"| NN

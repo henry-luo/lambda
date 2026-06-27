@@ -1,0 +1,28 @@
+flowchart TB
+  JIT["JIT'd native code (MIR Direct)\nLR_07"]
+
+  subgraph CTX["__thread EvalContext* context"]
+    C1["pool / arena / heap (GC) / nursery"]
+    C2["decimal_ctx (mpdec) / type_info"]
+    C3["last_error / debug_info / current_file"]
+  end
+
+  subgraph EVAL["lambda-eval.cpp — C-ABI support library (NOT eval dispatch)"]
+    CMP["comparison: fn_eq/fn_eq_depth,\nfn_lt/gt/le/ge → scalar or vec_cmp"]
+    IDX["indexing/member: fn_index, fn_member,\nfn_len, item_at"]
+    STR["string ops: fn_substring/trim/split/\nreplace/upper/lower/join/index_of"]
+    DT["datetime ctors: fn_datetime*/date*/time*"]
+    ERR["errors: fn_error, set_runtime_error,\nGUARD_ERROR* propagation"]
+  end
+
+  subgraph SIB["sibling runtime TUs"]
+    NUM["lambda-eval-num.cpp (LR_04)"]
+    VEC["lambda-vector.cpp (LR_05)"]
+    DEC["lambda-decimal.cpp (LR_04)"]
+    PROC["lambda-proc.cpp pn_* I/O (LR_12)"]
+  end
+
+  JIT --> CMP & IDX & STR & DT & ERR
+  JIT --> NUM & VEC & DEC & PROC
+  EVAL --> CTX
+  SIB --> CTX

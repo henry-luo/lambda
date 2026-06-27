@@ -143,6 +143,7 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 | Output formatters | `lambda/format/` |
 | CSS & layout | `radiant/layout.cpp`, `radiant/layout_*.cpp` |
 | LambdaJS (JS engine) | `lambda/js/` — detailed design in `doc/dev/js/JS_00_Overview.md` |
+| Core runtime internals | `lambda/` (core) — detailed design in `doc/dev/lambda/LR_00_Overview.md` (value model, transpilers, MIR JIT, memory & GC, builtins) |
 | Custom lib types | `lib/str.h`, `lib/strbuf.h`, `lib/arraylist.h`, `lib/hashmap.h`, `lib/mempool.h` |
 | Tests | `test/*.cpp` (GTest), `test/lambda/*.ls` (integration), `test/layout/` (HTML/CSS) |
 
@@ -162,4 +163,5 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 - `doc/Lambda_Cheatsheet.md` — Quick syntax cheatsheet
 - `doc/Lambda_Jube_Runtime.md` — Polyglot runtime build (Python, Bash, Ruby, C2MIR)
 - `doc/dev/Radiant_Layout_Design.md` — Radiant CSS layout engine design
+- `doc/dev/lambda/LR_00_Overview.md` — Lambda core-runtime detailed design — compilation pipeline, value & type model, the C and MIR-Direct transpilers, MIR JIT, memory & GC, runtime builtins, error handling, the Mark data API, and the procedural runtime (index to the LR_01–LR_12 set)
 - `doc/dev/js/JS_00_Overview.md` — LambdaJS runtime detailed design — compilation pipeline, value model, runtime, standard library, RegExp, async/modules, DOM, and Node.js compatibility (index to the JS_01–JS_16 set)

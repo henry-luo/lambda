@@ -1,0 +1,14 @@
+flowchart TD
+    NODE["AST node<br/>node->type->type_id"] --> BOX{"transpile_box_item<br/>(transpile.cpp:996)"}
+    BOX -->|"already returns Item:<br/>dynamic fn_call /<br/>binary_already_returns_item /<br/>direct_call_returns_item"| ASIS["transpile_expr<br/>(emit as-is)"]
+    BOX -->|"scalar"| SCALAR["try_box_scalar<br/>(transpile.cpp:963)"]
+
+    SCALAR --> TABLE["get_box_info<br/>type_box_table[]<br/>(transpile_shared-area :76)"]
+    TABLE -->|"literal + const_box_fn"| CONST["const_l2it(idx)<br/>const_d2it(idx) ..."]
+    TABLE -->|"box_fn present"| BOXFN["i2it / b2it<br/>push_l / push_d / push_k<br/>s2it / y2it / c2it"]
+    TABLE -->|"container: box_fn=NULL"| CAST["(Item)(ptr) cast<br/>via emit_box_open"]
+
+    NATIVE["native target<br/>(assign / param)"] --> UNBOX["emit_unbox_open<br/>it2i / it2d / it2l / it2b /<br/>it2s / it2map ..."]
+
+    SWAP["assign in while loop<br/>+ analyze_loop_var_safety<br/>(transpile.cpp:3000)"] -->|"cross-read var"| STORE["_store_i64(&_v,val)<br/>_store_f64(&_v,val)<br/>(SSA reorder guard)"]
+    IDIV["is_idiv_expr<br/>(transpile.cpp:863)"] -->|"boxed Item but AST=INT"| UNBOX

@@ -1,0 +1,20 @@
+flowchart TD
+    A["main() arg parse + subcommand dispatch"] --> B{"bare .ls file?"}
+    B -->|"lambda script.ls"| C["run_script_file (use_mir=true, run_main=false)"]
+    B -->|"lambda run script.ls"| D["run_script_file (run_main=true)"]
+    B -->|"no file"| E["run_repl"]
+    C --> F["run_script_mir (use_mir_direct=true)"]
+    D --> F
+    F --> G["load_script: precompile_imports + canonical-path dedup + circular check"]
+    G --> H["transpile_script"]
+    H --> H1["lambda_parse_source -> Tree-sitter CST"]
+    H1 --> H2["find_errors"]
+    H2 --> H3["build_script -> typed AST"]
+    H3 --> H4["compile_script_as_mir_direct (LR_07)"]
+    H4 --> I{"script has imports?"}
+    I -->|"yes"| J["runner_setup_context + register_bss_gc_roots + run imports in reverse order"]
+    I -->|"no"| K["execute_script_and_create_output"]
+    J --> L["run main_func under sigsetjmp guard"]
+    K --> L
+    L --> M["resolve_sys_paths_recursive + wrap result in fresh-pool Input"]
+    M --> N["print_root_item / err_print"]

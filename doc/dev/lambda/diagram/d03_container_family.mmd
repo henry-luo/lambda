@@ -1,0 +1,44 @@
+classDiagram
+  class Container {
+    +TypeId type_id
+    +flags
+    +map_kind
+  }
+  class List_Array {
+    +Item items
+    +int64 length extra capacity
+  }
+  class ArrayNum {
+    +union items float_items data
+    +elem_type in map_kind byte
+    +ArrayNumShape in extra for n-d
+  }
+  class Range {
+    +int64 start end length
+  }
+  class Map {
+    +TypeMap type
+    +void data packed fields
+    +int data_cap
+  }
+  class Object {
+    +TypeObject type
+    +void data
+  }
+  class Element {
+    +inherits List children
+    +TypeElmt type
+    +void data attributes
+  }
+  class VMap {
+    +void data
+    +VMapVtable vtable
+  }
+  Container <|-- List_Array
+  Container <|-- ArrayNum
+  Container <|-- Range
+  Container <|-- Map
+  Container <|-- VMap
+  Map <|-- Object
+  List_Array <|-- Element
+  Element ..> Map : also keyed attributes
