@@ -23,6 +23,7 @@
 #include "../../lib/mem.h"
 #include <setjmp.h>
 #include <signal.h>
+#include <cstdio>
 
 extern __thread EvalContext* context;
 extern "C" Item js_async_hooks_get_current_resource(void);
@@ -33,6 +34,8 @@ extern "C" void js_async_hooks_emit_destroy_resource(Item resource);
 extern "C" Item js_util_promisify_custom_symbol(void);
 extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
+extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc);
+extern "C" Item js_process_emit(Item event_name, Item arg1);
 
 // =============================================================================
 // Task Queues
@@ -296,6 +299,8 @@ static JsTimerHandle *timer_handles[MAX_TIMER_HANDLES];
 static int timer_handle_count = 0;
 static int64_t next_timer_id = 1;
 static bool timer_force_shutdown = false;
+static bool timer_nan_warning_emitted = false;
+static bool timer_negative_warning_emitted = false;
 
 static void close_all_timer_handles(void);
 
@@ -448,7 +453,8 @@ static void timer_fire_cb(uv_timer_t *handle) {
                     js_als_context_call(th->als_context, th->callback, ItemNull,
                                         th->extra_args[0], 1);
                 } else {
-                    js_call_function(th->callback, ItemNull, th->extra_args, th->extra_count);
+                    js_als_context_call_args(th->als_context, th->callback, ItemNull,
+                                             th->extra_args, th->extra_count);
                 }
             } else {
                 js_als_context_call(th->als_context, th->callback, ItemNull, ItemNull, 0);
@@ -470,6 +476,77 @@ static double item_to_ms(Item delay) {
         return (double)it2i(delay);
     }
     return 0;
+}
+
+static void timer_format_delay(double value, char* buf, size_t buf_size) {
+    if (!buf || buf_size == 0) return;
+    if (isnan(value)) {
+        snprintf(buf, buf_size, "NaN");
+    } else if (isinf(value)) {
+        snprintf(buf, buf_size, value > 0 ? "Infinity" : "-Infinity");
+    } else if (floor(value) == value) {
+        snprintf(buf, buf_size, "%.0f", value);
+    } else {
+        snprintf(buf, buf_size, "%.15g", value);
+    }
+}
+
+static void timer_emit_duration_warning(const char* name, const char* first_line) {
+    char message[256];
+    int len = snprintf(message, sizeof(message), "%s\nTimeout duration was set to 1.",
+                       first_line ? first_line : "");
+    if (len < 0) len = 0;
+    if (len >= (int)sizeof(message)) len = (int)sizeof(message) - 1;
+
+    Item warning = js_new_object();
+    js_property_set(warning,
+        (Item){.item = s2it(heap_create_name("name", 4))},
+        (Item){.item = s2it(heap_create_name(name, (int)strlen(name)))});
+    js_property_set(warning,
+        (Item){.item = s2it(heap_create_name("message", 7))},
+        (Item){.item = s2it(heap_create_name(message, len))});
+    js_process_emit(
+        (Item){.item = s2it(heap_create_name("warning", 7))},
+        warning);
+}
+
+static uint64_t normalize_timer_delay(Item delay) {
+    const double timeout_max = 2147483647.0;
+    double ms = item_to_ms(delay);
+
+    if (isnan(ms)) {
+        if (!timer_nan_warning_emitted) {
+            timer_nan_warning_emitted = true;
+            char value_buf[32];
+            char line[128];
+            timer_format_delay(ms, value_buf, sizeof(value_buf));
+            snprintf(line, sizeof(line), "%s is not a number.", value_buf);
+            timer_emit_duration_warning("TimeoutNaNWarning", line);
+        }
+        return 1;
+    }
+    if (ms < 0) {
+        if (!timer_negative_warning_emitted) {
+            timer_negative_warning_emitted = true;
+            char value_buf[32];
+            char line[128];
+            timer_format_delay(ms, value_buf, sizeof(value_buf));
+            snprintf(line, sizeof(line), "%s is a negative number.", value_buf);
+            timer_emit_duration_warning("TimeoutNegativeWarning", line);
+        }
+        return 1;
+    }
+    if (ms > timeout_max) {
+        char value_buf[32];
+        char line[160];
+        timer_format_delay(ms, value_buf, sizeof(value_buf));
+        snprintf(line, sizeof(line), "%s does not fit into a 32-bit signed integer.",
+                 value_buf);
+        timer_emit_duration_warning("TimeoutOverflowWarning", line);
+        return 1;
+    }
+    if (ms < 1) return 0;
+    return (uint64_t)ms;
 }
 
 // =============================================================================
@@ -587,8 +664,7 @@ extern "C" Item js_setTimeout(Item callback, Item delay) {
         return ItemNull;
     }
 
-    double ms = item_to_ms(delay);
-    if (ms < 0) ms = 0;
+    uint64_t ms = normalize_timer_delay(delay);
 
     JsTimerHandle *th = (JsTimerHandle *)mem_calloc(1, sizeof(JsTimerHandle), MEM_CAT_JS_RUNTIME);
     if (!th) return ItemNull;
@@ -601,7 +677,7 @@ extern "C" Item js_setTimeout(Item callback, Item delay) {
     timer_capture_runtime(th);
 
     uv_timer_init(loop, &th->timer);
-    uv_timer_start(&th->timer, timer_fire_cb, (uint64_t)ms, 0);
+    uv_timer_start(&th->timer, timer_fire_cb, ms, 0);
     timer_register_gc_roots(th);
 
     if (timer_handle_count < MAX_TIMER_HANDLES) {
@@ -624,8 +700,7 @@ extern "C" Item js_setTimeout_args(Item callback, Item delay, Item args_array) {
         return ItemNull;
     }
 
-    double ms = item_to_ms(delay);
-    if (ms < 0) ms = 0;
+    uint64_t ms = normalize_timer_delay(delay);
 
     JsTimerHandle *th = (JsTimerHandle *)mem_calloc(1, sizeof(JsTimerHandle), MEM_CAT_JS_RUNTIME);
     if (!th) return ItemNull;
@@ -649,7 +724,7 @@ extern "C" Item js_setTimeout_args(Item callback, Item delay, Item args_array) {
     timer_capture_runtime(th);
 
     uv_timer_init(loop, &th->timer);
-    uv_timer_start(&th->timer, timer_fire_cb, (uint64_t)ms, 0);
+    uv_timer_start(&th->timer, timer_fire_cb, ms, 0);
     timer_register_gc_roots(th);
 
     if (timer_handle_count < MAX_TIMER_HANDLES) {
@@ -715,7 +790,7 @@ extern "C" Item js_setInterval(Item callback, Item delay) {
         return ItemNull;
     }
 
-    double ms = item_to_ms(delay);
+    uint64_t ms = normalize_timer_delay(delay);
     if (ms < 1) ms = 1; // minimum interval
 
     JsTimerHandle *th = (JsTimerHandle *)mem_calloc(1, sizeof(JsTimerHandle), MEM_CAT_JS_RUNTIME);
@@ -729,7 +804,7 @@ extern "C" Item js_setInterval(Item callback, Item delay) {
     timer_capture_runtime(th);
 
     uv_timer_init(loop, &th->timer);
-    uv_timer_start(&th->timer, timer_fire_cb, (uint64_t)ms, (uint64_t)ms);
+    uv_timer_start(&th->timer, timer_fire_cb, ms, ms);
     timer_register_gc_roots(th);
 
     if (timer_handle_count < MAX_TIMER_HANDLES) {
@@ -752,7 +827,7 @@ extern "C" Item js_setInterval_args(Item callback, Item delay, Item args_array) 
         return ItemNull;
     }
 
-    double ms = item_to_ms(delay);
+    uint64_t ms = normalize_timer_delay(delay);
     if (ms < 1) ms = 1;
 
     JsTimerHandle *th = (JsTimerHandle *)mem_calloc(1, sizeof(JsTimerHandle), MEM_CAT_JS_RUNTIME);
@@ -776,7 +851,7 @@ extern "C" Item js_setInterval_args(Item callback, Item delay, Item args_array) 
     timer_capture_runtime(th);
 
     uv_timer_init(loop, &th->timer);
-    uv_timer_start(&th->timer, timer_fire_cb, (uint64_t)ms, (uint64_t)ms);
+    uv_timer_start(&th->timer, timer_fire_cb, ms, ms);
     timer_register_gc_roots(th);
 
     if (timer_handle_count < MAX_TIMER_HANDLES) {
@@ -881,22 +956,7 @@ extern "C" Item js_setTimeout_promise(Item delay, Item value, Item options) {
     uv_loop_t *loop = lambda_uv_loop();
     if (!loop) return promise;
 
-    double ms = item_to_ms(delay);
-    // emit process 'warning' for NaN delay (Node.js compat)
-    if (get_type_id(delay) == LMD_TYPE_FLOAT && isnan(it2d(delay))) {
-        extern Item js_process_emit(Item event_name, Item arg1);
-        Item warning_obj = js_new_object();
-        js_property_set(warning_obj,
-            (Item){.item = s2it(heap_create_name("name", 4))},
-            (Item){.item = s2it(heap_create_name("TimeoutNaNWarning", 17))});
-        js_property_set(warning_obj,
-            (Item){.item = s2it(heap_create_name("message", 7))},
-            (Item){.item = s2it(heap_create_name("NaN milliseconds is not a valid timeout", 39))});
-        js_process_emit(
-            (Item){.item = s2it(heap_create_name("warning", 7))},
-            warning_obj);
-    }
-    if (ms < 0 || isnan(ms)) ms = 0;
+    uint64_t ms = normalize_timer_delay(delay);
 
     JsTimerHandle *th = (JsTimerHandle *)mem_calloc(1, sizeof(JsTimerHandle), MEM_CAT_JS_RUNTIME);
     if (!th) return promise;
@@ -910,7 +970,7 @@ extern "C" Item js_setTimeout_promise(Item delay, Item value, Item options) {
     timer_capture_runtime(th);
 
     uv_timer_init(loop, &th->timer);
-    uv_timer_start(&th->timer, timer_fire_cb, (uint64_t)ms, 0);
+    uv_timer_start(&th->timer, timer_fire_cb, ms, 0);
     timer_register_gc_roots(th);
 
     if (timer_handle_count < MAX_TIMER_HANDLES) {
@@ -1132,6 +1192,8 @@ extern "C" void js_event_loop_init(void) {
     }
     timer_handle_count = 0;
     next_timer_id = 1;
+    timer_nan_warning_emitted = false;
+    timer_negative_warning_emitted = false;
 
     // register task ring buffers as GC roots (static memory invisible to stack scanning)
     static bool statics_rooted = false;

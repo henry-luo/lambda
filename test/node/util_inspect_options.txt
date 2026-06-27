@@ -1,0 +1,6 @@
+depth0: { a: [Object] }
+depth1: { a: { b: [Object] } }
+hidden off: { visible: 1 }
+hidden on: { visible: 1, [secret]: 2 }
+color number: true
+circular: true

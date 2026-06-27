@@ -1,0 +1,4 @@
+TimeoutNaNWarning:NaN is not a number.
+TimeoutNegativeWarning:-1 is a negative number.
+TimeoutOverflowWarning:2147483648 does not fit into a 32-bit signed integer.
+TimeoutOverflowWarning:2147483648 does not fit into a 32-bit signed integer.

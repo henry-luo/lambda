@@ -27,6 +27,7 @@
 #endif
 
 extern "C" Item js_process_emit(Item event_name, Item arg1);
+extern "C" void js_next_tick_enqueue(Item callback);
 
 // =============================================================================
 // Helpers
@@ -545,6 +546,17 @@ static Item spawn_emit_spawn_later(Item env_item) {
     return make_js_undefined();
 }
 
+static Item spawn_send_callback_later(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    Item callback = env ? env[0] : make_js_undefined();
+    if (is_callable(callback)) {
+        Item arg = make_js_undefined();
+        js_call_function(callback, make_js_undefined(), &arg, 1);
+        js_microtask_flush();
+    }
+    return make_js_undefined();
+}
+
 static void schedule_spawn_error(Item obj, Item err) {
     Item* env = js_alloc_env(2);
     env[0] = obj;
@@ -706,6 +718,32 @@ extern "C" Item js_spawn_stream_on(Item event_item, Item callback) {
     return spawn_add_listener(js_get_this(), event_item, callback);
 }
 
+extern "C" Item js_spawn_send(Item message, Item send_handle, Item options, Item callback) {
+    (void)message;
+    Item self = js_get_this();
+    Item connected = js_property_get(self, make_string_item("connected"));
+    if (connected.item == ITEM_FALSE) return (Item){.item = ITEM_FALSE};
+
+    Item cb = make_js_undefined();
+    if (is_callable(callback)) cb = callback;
+    else if (is_callable(options)) cb = options;
+    else if (is_callable(send_handle)) cb = send_handle;
+    if (is_callable(cb)) {
+        Item* env = js_alloc_env(1);
+        env[0] = cb;
+        Item tick = js_new_closure((void*)spawn_send_callback_later, 0, env, 1);
+        js_next_tick_enqueue(tick);
+    }
+    return (Item){.item = ITEM_TRUE};
+}
+
+extern "C" Item js_spawn_disconnect(void) {
+    Item self = js_get_this();
+    js_property_set(self, make_string_item("connected"), (Item){.item = ITEM_FALSE});
+    spawn_emit_event(self, "disconnect", NULL, 0);
+    return make_js_undefined();
+}
+
 static Item make_child_process_object(void) {
     Item obj = js_new_object();
     Item stdin_obj = make_stream_object();
@@ -724,6 +762,14 @@ static Item make_child_process_object(void) {
                     js_new_function((void*)js_spawn_on, 2));
     js_property_set(obj, make_string_item("pid"), make_js_undefined());
     return obj;
+}
+
+static void install_ipc_surface(Item obj) {
+    js_property_set(obj, make_string_item("connected"), (Item){.item = ITEM_TRUE});
+    js_property_set(obj, make_string_item("send"),
+                    js_new_function((void*)js_spawn_send, 4));
+    js_property_set(obj, make_string_item("disconnect"),
+                    js_new_function((void*)js_spawn_disconnect, 0));
 }
 
 typedef struct SpawnRequest {
@@ -1044,6 +1090,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     js_property_set(obj, make_string_item("spawnargs"), spawnargs);
 
     sp->js_object = obj;
+    if (req.ipc) install_ipc_surface(obj);
 
     sp->handles_expected = 1;
     sp->stdin_pipe_active = req.stdio_mode[0] == 0;
@@ -1325,10 +1372,41 @@ extern "C" Item js_cp_fork(Item rest_args) {
         if (is_object_item(env)) js_property_set(spawn_options, make_string_item("env"), env);
     }
     Item stdio = js_array_new(0);
-    js_array_push(stdio, make_string_item("ignore"));
-    js_array_push(stdio, make_string_item("inherit"));
-    js_array_push(stdio, make_string_item("inherit"));
-    js_array_push(stdio, make_string_item("ipc"));
+    bool copied_stdio = false;
+    bool stdio_has_ipc = false;
+    if (is_object_item(options)) {
+        Item opt_stdio = js_property_get(options, make_string_item("stdio"));
+        if (!is_nullish_item(opt_stdio)) {
+            if (item_string_equals(opt_stdio, "pipe") ||
+                item_string_equals(opt_stdio, "inherit") ||
+                item_string_equals(opt_stdio, "ignore")) {
+                js_array_push(stdio, opt_stdio);
+                js_array_push(stdio, opt_stdio);
+                js_array_push(stdio, opt_stdio);
+                copied_stdio = true;
+            } else if (get_type_id(opt_stdio) == LMD_TYPE_STRING) {
+                throw_invalid_stdio_value();
+                return ItemNull;
+            } else if (get_type_id(opt_stdio) == LMD_TYPE_ARRAY) {
+                int64_t opt_len = js_array_length(opt_stdio);
+                for (int64_t i = 0; i < opt_len; i++) {
+                    Item entry = js_array_get_int(opt_stdio, i);
+                    if (item_string_equals(entry, "ipc")) stdio_has_ipc = true;
+                    js_array_push(stdio, entry);
+                }
+                copied_stdio = true;
+            } else {
+                throw_invalid_stdio_value();
+                return ItemNull;
+            }
+        }
+    }
+    if (!copied_stdio) {
+        js_array_push(stdio, make_string_item("ignore"));
+        js_array_push(stdio, make_string_item("inherit"));
+        js_array_push(stdio, make_string_item("inherit"));
+    }
+    if (!stdio_has_ipc) js_array_push(stdio, make_string_item("ipc"));
     js_property_set(spawn_options, make_string_item("stdio"), stdio);
 
     Item spawn_rest = js_array_new(0);

@@ -32972,6 +32972,40 @@ extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, 
     return result;
 }
 
+extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc) {
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return (Item){.item = ITEM_JS_UNDEFINED};
+    if (get_type_id(context) != LMD_TYPE_ARRAY) {
+        return js_call_function(callback, this_val, args, argc);
+    }
+
+    Item store_key = js_als_store_key();
+    Item previous = js_array_new(0);
+    int64_t len = js_array_length(context);
+    for (int64_t i = 0; i < len; i++) {
+        Item pair = js_array_get_int(context, i);
+        if (get_type_id(pair) != LMD_TYPE_ARRAY || js_array_length(pair) < 2) continue;
+        Item instance = js_array_get_int(pair, 0);
+        Item store = js_array_get_int(pair, 1);
+        Item saved = js_array_new(0);
+        js_array_push(saved, instance);
+        js_array_push(saved, js_property_get(instance, store_key));
+        js_array_push(previous, saved);
+        js_property_set(instance, store_key, store);
+    }
+
+    Item result = js_call_function(callback, this_val, args, argc);
+
+    int64_t previous_len = js_array_length(previous);
+    for (int64_t i = previous_len - 1; i >= 0; i--) {
+        Item saved = js_array_get_int(previous, i);
+        if (get_type_id(saved) != LMD_TYPE_ARRAY || js_array_length(saved) < 2) continue;
+        Item instance = js_array_get_int(saved, 0);
+        Item store = js_array_get_int(saved, 1);
+        js_property_set(instance, store_key, store);
+    }
+    return result;
+}
+
 // AsyncLocalStorage: constructor creates an object with run/getStore/enterWith/disable
 static Item js_als_constructor(Item options) {
     Item self = js_get_this();
