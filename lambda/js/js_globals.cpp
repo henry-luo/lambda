@@ -3018,6 +3018,8 @@ static bool js_process_exiting = false;
 static Item process_listener_map = {0}; // general event → listener array map
 static int process_total_listener_count = 0;
 
+static void js_process_ipc_refresh_ref(void);
+
 static Item get_process_listener_map() {
     if (process_listener_map.item == 0) {
         process_listener_map = js_new_object();
@@ -3027,6 +3029,12 @@ static Item get_process_listener_map() {
 }
 
 extern "C" int64_t js_key_is_symbol_c(Item key);
+static bool process_event_name_equals(Item event_name, const char* name, int name_len) {
+    if (get_type_id(event_name) != LMD_TYPE_STRING) return false;
+    String* ev = it2s(event_name);
+    return ev && ev->len == (uint64_t)name_len && memcmp(ev->chars, name, (size_t)name_len) == 0;
+}
+
 extern "C" Item js_process_on(Item event_name, Item listener) {
     TypeId etype = get_type_id(event_name);
     bool is_sym = js_key_is_symbol_c(event_name);
@@ -3059,6 +3067,11 @@ extern "C" Item js_process_on(Item event_name, Item listener) {
     js_property_set(js_process_object,
         (Item){.item = s2it(heap_create_name("_eventsCount", 12))},
         (Item){.item = i2it((int64_t)process_total_listener_count)});
+
+    if (process_event_name_equals(event_name, "message", 7) ||
+        process_event_name_equals(event_name, "disconnect", 10)) {
+        js_process_ipc_refresh_ref();
+    }
 
     // return process for chaining
     return js_process_object;
@@ -3105,11 +3118,37 @@ extern "C" void js_process_reset_listeners(void) {
     process_listener_map = (Item){0};
 }
 
+extern "C" Item js_process_removeListener(Item event_name, Item listener);
+
+static Item js_process_once_wrapper(Item env_item, Item arg1) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item event_name = env[0];
+    Item listener = env[1];
+    Item wrapper = env[2];
+    js_process_removeListener(event_name, wrapper);
+    if (get_type_id(listener) == LMD_TYPE_FUNC) {
+        Item result = js_call_function(listener, js_process_object, &arg1, 1);
+        js_process_ipc_refresh_ref();
+        return result;
+    }
+    js_process_ipc_refresh_ref();
+    return make_js_undefined();
+}
+
 // process.once(event, listener) — like process.on but fires only once
 extern "C" Item js_process_once(Item event_name, Item listener) {
-    // For simplicity, just register as a normal listener.
-    // A full implementation would wrap the listener to auto-remove after first call.
-    return js_process_on(event_name, listener);
+    TypeId etype = get_type_id(event_name);
+    bool is_sym = js_key_is_symbol_c(event_name);
+    if (etype != LMD_TYPE_STRING && !is_sym) return js_process_object;
+    if (get_type_id(listener) != LMD_TYPE_FUNC) return js_process_object;
+
+    Item* env = js_alloc_env(3);
+    env[0] = event_name;
+    env[1] = listener;
+    Item wrapper = js_new_closure((void*)js_process_once_wrapper, 1, env, 3);
+    env[2] = wrapper;
+    return js_process_on(event_name, wrapper);
 }
 
 static void js_process_update_events_count(void) {
@@ -3164,6 +3203,10 @@ extern "C" Item js_process_removeListener(Item event_name, Item listener) {
         process_total_listener_count -= (int)removed;
         if (process_total_listener_count < 0) process_total_listener_count = 0;
         js_process_update_events_count();
+        if (process_event_name_equals(event_name, "message", 7) ||
+            process_event_name_equals(event_name, "disconnect", 10)) {
+            js_process_ipc_refresh_ref();
+        }
     }
     return js_process_object;
 }
@@ -3215,6 +3258,7 @@ extern "C" Item js_net_get_active_handles(void);
 extern "C" Item js_net_get_active_resources_info(void);
 extern "C" Item js_json_parse(Item str_item);
 extern "C" Item js_json_stringify(Item value);
+extern "C" void js_microtask_flush(void);
 
 extern "C" Item js_process_getActiveHandles(void) {
     return js_net_get_active_handles();
@@ -3234,6 +3278,7 @@ extern "C" Item js_process_setSourceMapsEnabled(Item val) {
 typedef struct JsProcessIpcWriteReq {
     uv_write_t req;
     char* data;
+    Item callback;
 } JsProcessIpcWriteReq;
 
 static uv_pipe_t js_process_ipc_pipe;
@@ -3243,6 +3288,10 @@ static bool js_process_ipc_disconnect_emitted = false;
 static char* js_process_ipc_buf = NULL;
 static size_t js_process_ipc_len = 0;
 static size_t js_process_ipc_cap = 0;
+
+static void js_process_ipc_refresh_ref(void) {
+    (void)js_process_ipc_active;
+}
 
 static void js_process_set_connected(bool connected) {
     if (js_process_object.item == ITEM_NULL) return;
@@ -3272,9 +3321,16 @@ static void js_process_ipc_close_cb(uv_handle_t* handle) {
 
 static void js_process_ipc_write_cb(uv_write_t* req, int status) {
     JsProcessIpcWriteReq* wr = (JsProcessIpcWriteReq*)req;
+    Item callback = wr->callback;
     if (wr->data) mem_free(wr->data);
     mem_free(wr);
     (void)status;
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        Item arg = make_js_undefined();
+        js_call_function(callback, make_js_undefined(), &arg, 1);
+        js_microtask_flush();
+    }
+    js_process_ipc_refresh_ref();
 }
 
 static void js_process_ipc_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
@@ -3365,10 +3421,12 @@ static void js_process_ipc_init_from_env(void) {
         js_process_ipc_active = false;
         js_process_ipc_closing = true;
         uv_close((uv_handle_t*)&js_process_ipc_pipe, js_process_ipc_close_cb);
+    } else {
+        js_process_ipc_refresh_ref();
     }
 }
 
-extern "C" Item js_process_send(Item msg) {
+extern "C" Item js_process_send(Item msg, Item callback) {
     if (!js_process_ipc_active || js_process_ipc_closing) return (Item){.item = b2it(false)};
     Item json = js_json_stringify(msg);
     if (js_check_exception() || get_type_id(json) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
@@ -3377,6 +3435,7 @@ extern "C" Item js_process_send(Item msg) {
     size_t len = s->len + 1;
     JsProcessIpcWriteReq* wr = (JsProcessIpcWriteReq*)mem_calloc(1, sizeof(JsProcessIpcWriteReq), MEM_CAT_JS_RUNTIME);
     if (!wr) return (Item){.item = b2it(false)};
+    wr->callback = get_type_id(callback) == LMD_TYPE_FUNC ? callback : make_js_undefined();
     wr->data = (char*)mem_alloc(len, MEM_CAT_JS_RUNTIME);
     if (!wr->data) {
         mem_free(wr);
@@ -3385,8 +3444,10 @@ extern "C" Item js_process_send(Item msg) {
     memcpy(wr->data, s->chars, s->len);
     wr->data[s->len] = '\n';
     uv_buf_t buf = uv_buf_init(wr->data, (unsigned int)len);
+    uv_ref((uv_handle_t*)&js_process_ipc_pipe);
     int r = uv_write(&wr->req, (uv_stream_t*)&js_process_ipc_pipe, &buf, 1, js_process_ipc_write_cb);
     if (r == 0) return (Item){.item = b2it(true)};
+    js_process_ipc_refresh_ref();
     mem_free(wr->data);
     mem_free(wr);
     log_error("process_ipc: write failed: %s", uv_strerror(r));
@@ -3476,7 +3537,7 @@ extern "C" Item js_get_process_object_value(void) {
         js_process_set_method(js_process_object, "getActiveResourcesInfo", (void*)js_process_getActiveResourcesInfo, 0);
         js_process_set_method(js_process_object, "setSourceMapsEnabled", (void*)js_process_setSourceMapsEnabled, 1);
         if (getenv("LAMBDA_JS_IPC")) {
-            js_process_set_method(js_process_object, "send", (void*)js_process_send, 1);
+            js_process_set_method(js_process_object, "send", (void*)js_process_send, 2);
             js_process_set_method(js_process_object, "disconnect", (void*)js_process_disconnect, 0);
             js_property_set(js_process_object,
                 (Item){.item = s2it(heap_create_name("connected", 9))},

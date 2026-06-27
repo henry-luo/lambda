@@ -65,6 +65,7 @@ static int raf_tail = 0;
 static int raf_count = 0;
 static int64_t next_raf_id = 1;
 static bool auto_close_mode = false;
+static bool event_loop_shutting_down = false;
 
 extern "C" void js_event_loop_set_auto_close_mode(bool enabled) {
     auto_close_mode = enabled;
@@ -72,6 +73,10 @@ extern "C" void js_event_loop_set_auto_close_mode(bool enabled) {
 
 extern "C" bool js_event_loop_auto_close_mode(void) {
     return auto_close_mode;
+}
+
+extern "C" bool js_event_loop_is_shutting_down(void) {
+    return event_loop_shutting_down;
 }
 
 static void next_tick_push(Item cb) {
@@ -1219,6 +1224,7 @@ extern "C" void js_event_loop_init(void) {
     if (timer_handle_count > 0) {
         js_event_loop_shutdown();
     }
+    event_loop_shutting_down = false;
 
     // reset task queues — zero ring buffers to prevent GC scanning stale Items
     memset(next_tick_ring, 0, sizeof(next_tick_ring));
@@ -1270,6 +1276,7 @@ extern "C" void js_event_loop_init(void) {
 extern "C" void js_event_loop_shutdown(void) {
     uv_loop_t* loop = lambda_uv_loop();
 
+    event_loop_shutting_down = true;
     timer_force_shutdown = true;
     close_all_timer_handles();
     if (loop) {
