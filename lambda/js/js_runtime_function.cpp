@@ -118,6 +118,15 @@ extern "C" void js_args_stack_reset(void) {
     js_args_registered = false;
 }
 
+extern "C" void js_args_stack_cleanup(void) {
+    if (js_args_stack) {
+        mem_free(js_args_stack);
+        js_args_stack = NULL;
+    }
+    js_args_len = 0;
+    js_args_registered = false;
+}
+
 extern "C" int64_t js_with_depth_active(void);
 extern "C" Item* js_with_capture_stack(int* out_depth);
 

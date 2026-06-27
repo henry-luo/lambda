@@ -27,6 +27,9 @@
 #endif
 
 extern "C" Item js_process_emit(Item event_name, Item arg1);
+extern "C" void js_next_tick_enqueue(Item callback);
+extern "C" Item js_json_parse(Item str_item);
+extern "C" Item js_json_stringify(Item value);
 
 // =============================================================================
 // Helpers
@@ -496,6 +499,7 @@ typedef struct JsSpawnProcess {
     uv_pipe_t    stdin_pipe;
     uv_pipe_t    stdout_pipe;
     uv_pipe_t    stderr_pipe;
+    uv_pipe_t    ipc_pipe;
     Item         js_object;    // the JS object returned to user
     int          exit_code;
     bool         process_exited;
@@ -504,12 +508,22 @@ typedef struct JsSpawnProcess {
     bool         stdin_pipe_active;
     bool         stdout_pipe_active;
     bool         stderr_pipe_active;
+    bool         ipc_pipe_active;
+    bool         ipc_disconnect_emitted;
+    char*        ipc_buf;
+    size_t       ipc_len;
+    size_t       ipc_cap;
 } JsSpawnProcess;
 
 typedef struct SpawnWriteReq {
     uv_write_t req;
     char* data;
 } SpawnWriteReq;
+
+static void spawn_set_connected(Item obj, bool connected) {
+    js_property_set(obj, make_string_item("connected"),
+                    (Item){.item = b2it(connected)});
+}
 
 static void spawn_emit_event(Item obj, const char* event, Item* args, int argc) {
     char key_buf[64];
@@ -545,6 +559,17 @@ static Item spawn_emit_spawn_later(Item env_item) {
     return make_js_undefined();
 }
 
+static Item spawn_send_callback_later(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    Item callback = env ? env[0] : make_js_undefined();
+    if (is_callable(callback)) {
+        Item arg = make_js_undefined();
+        js_call_function(callback, make_js_undefined(), &arg, 1);
+        js_microtask_flush();
+    }
+    return make_js_undefined();
+}
+
 static void schedule_spawn_error(Item obj, Item err) {
     Item* env = js_alloc_env(2);
     env[0] = obj;
@@ -570,6 +595,7 @@ static void spawn_handle_close_cb(uv_handle_t* handle) {
     if (!sp) return;
     sp->handles_closed++;
     if (sp->handles_closed >= sp->handles_expected) {
+        if (sp->ipc_buf) mem_free(sp->ipc_buf);
         mem_free(sp);
     }
 }
@@ -583,6 +609,97 @@ static void spawn_stdin_write_cb(uv_write_t* req, int status) {
     if (sp && sp->stdin_pipe_active) {
         sp->stdin_pipe_active = false;
         uv_close((uv_handle_t*)&sp->stdin_pipe, spawn_handle_close_cb);
+    }
+}
+
+static void spawn_ipc_write_cb(uv_write_t* req, int status) {
+    SpawnWriteReq* wr = (SpawnWriteReq*)req;
+    if (wr->data) mem_free(wr->data);
+    mem_free(wr);
+    (void)status;
+}
+
+static void spawn_emit_disconnect_once(JsSpawnProcess* sp) {
+    if (!sp || sp->ipc_disconnect_emitted) return;
+    sp->ipc_disconnect_emitted = true;
+    spawn_set_connected(sp->js_object, false);
+    spawn_emit_event(sp->js_object, "disconnect", NULL, 0);
+}
+
+static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message) {
+    if (!sp || !sp->ipc_pipe_active) return false;
+    Item json = js_json_stringify(message);
+    if (js_check_exception() || get_type_id(json) != LMD_TYPE_STRING) return false;
+    String* s = it2s(json);
+    if (!s) return false;
+    size_t len = s->len + 1;
+    SpawnWriteReq* wr = (SpawnWriteReq*)mem_calloc(1, sizeof(SpawnWriteReq), MEM_CAT_JS_RUNTIME);
+    if (!wr) return false;
+    wr->data = (char*)mem_alloc(len, MEM_CAT_JS_RUNTIME);
+    if (!wr->data) {
+        mem_free(wr);
+        return false;
+    }
+    memcpy(wr->data, s->chars, s->len);
+    wr->data[s->len] = '\n';
+    uv_buf_t buf = uv_buf_init(wr->data, (unsigned int)len);
+    int r = uv_write(&wr->req, (uv_stream_t*)&sp->ipc_pipe, &buf, 1, spawn_ipc_write_cb);
+    if (r == 0) return true;
+    mem_free(wr->data);
+    mem_free(wr);
+    return false;
+}
+
+static void spawn_ipc_handle_line(JsSpawnProcess* sp, const char* chars, int len) {
+    if (!sp || len <= 0) return;
+    Item json = make_string_item(chars, len);
+    Item message = js_json_parse(json);
+    if (js_check_exception()) return;
+    spawn_emit_event(sp->js_object, "message", &message, 1);
+}
+
+static void spawn_ipc_consume_lines(JsSpawnProcess* sp) {
+    if (!sp || !sp->ipc_buf || sp->ipc_len == 0) return;
+    size_t start = 0;
+    for (size_t i = 0; i < sp->ipc_len; i++) {
+        if (sp->ipc_buf[i] != '\n') continue;
+        size_t line_len = i - start;
+        if (line_len > 0 && sp->ipc_buf[start + line_len - 1] == '\r') line_len--;
+        spawn_ipc_handle_line(sp, sp->ipc_buf + start, (int)line_len);
+        start = i + 1;
+    }
+    if (start > 0) {
+        size_t remaining = sp->ipc_len - start;
+        if (remaining > 0) memmove(sp->ipc_buf, sp->ipc_buf + start, remaining);
+        sp->ipc_len = remaining;
+    }
+}
+
+static void spawn_ipc_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
+    JsSpawnProcess* sp = (JsSpawnProcess*)stream->data;
+    if (nread > 0 && sp) {
+        size_t needed = sp->ipc_len + (size_t)nread + 1;
+        if (needed > sp->ipc_cap) {
+            size_t new_cap = sp->ipc_cap ? sp->ipc_cap * 2 : 1024;
+            while (new_cap < needed) new_cap *= 2;
+            char* nb = (char*)mem_realloc(sp->ipc_buf, new_cap, MEM_CAT_JS_RUNTIME);
+            if (nb) {
+                sp->ipc_buf = nb;
+                sp->ipc_cap = new_cap;
+            }
+        }
+        if (sp->ipc_buf && sp->ipc_cap >= needed) {
+            memcpy(sp->ipc_buf + sp->ipc_len, buf->base, (size_t)nread);
+            sp->ipc_len += (size_t)nread;
+            sp->ipc_buf[sp->ipc_len] = '\0';
+            spawn_ipc_consume_lines(sp);
+        }
+    }
+    if (buf->base) mem_free(buf->base);
+    if (nread < 0 && sp && sp->ipc_pipe_active) {
+        sp->ipc_pipe_active = false;
+        spawn_emit_disconnect_once(sp);
+        uv_close((uv_handle_t*)stream, spawn_handle_close_cb);
     }
 }
 
@@ -663,6 +780,11 @@ static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
         sp->stdin_pipe_active = false;
         uv_close((uv_handle_t*)&sp->stdin_pipe, spawn_handle_close_cb);
     }
+    if (sp->ipc_pipe_active) {
+        sp->ipc_pipe_active = false;
+        spawn_emit_disconnect_once(sp);
+        uv_close((uv_handle_t*)&sp->ipc_pipe, spawn_handle_close_cb);
+    }
     uv_close((uv_handle_t*)process, spawn_handle_close_cb);
 }
 
@@ -706,6 +828,66 @@ extern "C" Item js_spawn_stream_on(Item event_item, Item callback) {
     return spawn_add_listener(js_get_this(), event_item, callback);
 }
 
+static Item js_spawn_send_with_env(Item env_item, Item message, Item send_handle, Item options, Item callback) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
+    Item self = js_get_this();
+    Item connected = js_property_get(self, make_string_item("connected"));
+    if (connected.item == ITEM_FALSE || !sp || !sp->ipc_pipe_active) return (Item){.item = ITEM_FALSE};
+
+    Item cb = make_js_undefined();
+    if (is_callable(callback)) cb = callback;
+    else if (is_callable(options)) cb = options;
+    else if (is_callable(send_handle)) cb = send_handle;
+    if (!spawn_ipc_write_json(sp, message)) return (Item){.item = ITEM_FALSE};
+    if (is_callable(cb)) {
+        Item* env = js_alloc_env(1);
+        env[0] = cb;
+        Item tick = js_new_closure((void*)spawn_send_callback_later, 0, env, 1);
+        js_next_tick_enqueue(tick);
+    }
+    return (Item){.item = ITEM_TRUE};
+}
+
+extern "C" Item js_spawn_send(Item message, Item send_handle, Item options, Item callback) {
+    (void)message;
+    Item self = js_get_this();
+    Item connected = js_property_get(self, make_string_item("connected"));
+    if (connected.item == ITEM_FALSE) return (Item){.item = ITEM_FALSE};
+    Item cb = make_js_undefined();
+    if (is_callable(callback)) cb = callback;
+    else if (is_callable(options)) cb = options;
+    else if (is_callable(send_handle)) cb = send_handle;
+    if (is_callable(cb)) {
+        Item* env = js_alloc_env(1);
+        env[0] = cb;
+        Item tick = js_new_closure((void*)spawn_send_callback_later, 0, env, 1);
+        js_next_tick_enqueue(tick);
+    }
+    return (Item){.item = ITEM_TRUE};
+}
+
+static Item js_spawn_disconnect_with_env(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
+    Item self = js_get_this();
+    spawn_set_connected(self, false);
+    if (sp && sp->ipc_pipe_active) {
+        sp->ipc_pipe_active = false;
+        uv_close((uv_handle_t*)&sp->ipc_pipe, spawn_handle_close_cb);
+    }
+    if (sp) spawn_emit_disconnect_once(sp);
+    else spawn_emit_event(self, "disconnect", NULL, 0);
+    return make_js_undefined();
+}
+
+extern "C" Item js_spawn_disconnect(void) {
+    Item self = js_get_this();
+    spawn_set_connected(self, false);
+    spawn_emit_event(self, "disconnect", NULL, 0);
+    return make_js_undefined();
+}
+
 static Item make_child_process_object(void) {
     Item obj = js_new_object();
     Item stdin_obj = make_stream_object();
@@ -724,6 +906,26 @@ static Item make_child_process_object(void) {
                     js_new_function((void*)js_spawn_on, 2));
     js_property_set(obj, make_string_item("pid"), make_js_undefined());
     return obj;
+}
+
+static void install_ipc_surface(Item obj, JsSpawnProcess* sp) {
+    spawn_set_connected(obj, true);
+    Item* send_env = js_alloc_env(1);
+    send_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    js_property_set(obj, make_string_item("send"),
+                    js_new_closure((void*)js_spawn_send_with_env, 4, send_env, 1));
+    Item* disconnect_env = js_alloc_env(1);
+    disconnect_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    js_property_set(obj, make_string_item("disconnect"),
+                    js_new_closure((void*)js_spawn_disconnect_with_env, 0, disconnect_env, 1));
+}
+
+static void install_ipc_legacy_surface(Item obj) {
+    spawn_set_connected(obj, true);
+    js_property_set(obj, make_string_item("send"),
+                    js_new_function((void*)js_spawn_send, 4));
+    js_property_set(obj, make_string_item("disconnect"),
+                    js_new_function((void*)js_spawn_disconnect, 0));
 }
 
 typedef struct SpawnRequest {
@@ -764,46 +966,82 @@ static bool item_string_equals(Item item, const char* text) {
     return s->len == len && memcmp(s->chars, text, len) == 0;
 }
 
-static void apply_stdio_entry(SpawnRequest* req, int index, Item entry) {
-    if (index < 0 || index >= 3) return;
+static bool throw_invalid_stdio_value(void) {
+    js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The argument 'stdio' is invalid");
+    return false;
+}
+
+static bool apply_stdio_ipc(SpawnRequest* req) {
+    if (req->ipc) {
+        js_throw_error_with_code("ERR_IPC_ONE_PIPE", "Child process can have only one IPC pipe");
+        return false;
+    }
+    req->ipc = true;
+    return true;
+}
+
+static bool apply_stdio_entry(SpawnRequest* req, int index, Item entry) {
+    if (index < 0 || index >= 3) return true;
+    if (is_nullish_item(entry)) return true;
     if (item_string_equals(entry, "ipc")) {
-        req->ipc = true;
-        return;
+        return apply_stdio_ipc(req);
     }
     if (item_string_equals(entry, "inherit")) {
         req->stdio_mode[index] = 1;
     } else if (item_string_equals(entry, "ignore")) {
         req->stdio_mode[index] = 2;
-    } else if (item_string_equals(entry, "pipe")) {
+    } else if (item_string_equals(entry, "pipe") || item_string_equals(entry, "overlapped")) {
         req->stdio_mode[index] = 0;
+    } else if (get_type_id(entry) == LMD_TYPE_STRING) {
+        return throw_invalid_stdio_value();
     }
+    return true;
 }
 
-static void normalize_stdio_options(SpawnRequest* req) {
-    if (!is_object_item(req->options)) return;
+static bool normalize_stdio_options(SpawnRequest* req) {
+    if (!is_object_item(req->options)) return true;
     Item stdio = js_property_get(req->options, make_string_item("stdio"));
-    if (is_nullish_item(stdio)) return;
+    if (is_nullish_item(stdio)) return true;
     if (item_string_equals(stdio, "inherit")) {
         req->stdio_mode[0] = 1;
         req->stdio_mode[1] = 1;
         req->stdio_mode[2] = 1;
-        return;
+        return true;
     }
     if (item_string_equals(stdio, "ignore")) {
         req->stdio_mode[0] = 2;
         req->stdio_mode[1] = 2;
         req->stdio_mode[2] = 2;
-        return;
+        return true;
+    }
+    if (item_string_equals(stdio, "pipe") || item_string_equals(stdio, "overlapped")) {
+        req->stdio_mode[0] = 0;
+        req->stdio_mode[1] = 0;
+        req->stdio_mode[2] = 0;
+        return true;
+    }
+    if (get_type_id(stdio) == LMD_TYPE_STRING) {
+        return throw_invalid_stdio_value();
     }
     if (get_type_id(stdio) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(stdio);
         for (int i = 0; i < 3 && i < len; i++) {
-            apply_stdio_entry(req, i, js_array_get_int(stdio, i));
+            if (!apply_stdio_entry(req, i, js_array_get_int(stdio, i))) return false;
         }
         for (int64_t i = 3; i < len; i++) {
-            if (item_string_equals(js_array_get_int(stdio, i), "ipc")) req->ipc = true;
+            Item entry = js_array_get_int(stdio, i);
+            if (item_string_equals(entry, "ipc")) {
+                if (!apply_stdio_ipc(req)) return false;
+            } else if (get_type_id(entry) == LMD_TYPE_STRING &&
+                       !item_string_equals(entry, "ignore") &&
+                       !item_string_equals(entry, "pipe") &&
+                       !item_string_equals(entry, "overlapped")) {
+                return throw_invalid_stdio_value();
+            }
         }
+        return true;
     }
+    return throw_invalid_stdio_value();
 }
 
 static bool normalize_spawn_request(Item rest_args, SpawnRequest* req) {
@@ -870,7 +1108,7 @@ static bool normalize_spawn_request(Item rest_args, SpawnRequest* req) {
         req->shell = get_type_id(shell) == LMD_TYPE_BOOL && it2b(shell);
         Item env = js_property_get(req->options, make_string_item("env"));
         if (is_object_item(env)) req->env = env;
-        normalize_stdio_options(req);
+        if (!normalize_stdio_options(req)) return false;
     }
     return true;
 }
@@ -911,6 +1149,45 @@ static void free_envp(char** envp, int count) {
         if (envp[i]) mem_free(envp[i]);
     }
     mem_free(envp);
+}
+
+static bool envp_key_matches(const char* entry, const char* key) {
+    if (!entry || !key) return false;
+    size_t key_len = strlen(key);
+    return strncmp(entry, key, key_len) == 0 && entry[key_len] == '=';
+}
+
+static char* make_env_entry(const char* key, const char* value) {
+    size_t key_len = strlen(key);
+    size_t value_len = strlen(value);
+    char* entry = (char*)mem_alloc(key_len + 1 + value_len + 1, MEM_CAT_JS_RUNTIME);
+    if (!entry) return NULL;
+    memcpy(entry, key, key_len);
+    entry[key_len] = '=';
+    memcpy(entry + key_len + 1, value, value_len);
+    entry[key_len + 1 + value_len] = '\0';
+    return entry;
+}
+
+static char** envp_set(char** envp, int* count, const char* key, const char* value) {
+    if (!count) return envp;
+    for (int i = 0; envp && i < *count; i++) {
+        if (envp_key_matches(envp[i], key)) {
+            char* replacement = make_env_entry(key, value);
+            if (!replacement) return envp;
+            mem_free(envp[i]);
+            envp[i] = replacement;
+            return envp;
+        }
+    }
+    char** next = (char**)mem_realloc(envp, sizeof(char*) * (size_t)(*count + 2), MEM_CAT_JS_RUNTIME);
+    if (!next) return envp;
+    envp = next;
+    envp[*count] = make_env_entry(key, value);
+    if (!envp[*count]) return envp;
+    (*count)++;
+    envp[*count] = NULL;
+    return envp;
 }
 
 extern "C" Item js_cp_spawn(Item rest_args) {
@@ -1008,6 +1285,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     js_property_set(obj, make_string_item("spawnargs"), spawnargs);
 
     sp->js_object = obj;
+    if (req.ipc) install_ipc_surface(obj, sp);
 
     sp->handles_expected = 1;
     sp->stdin_pipe_active = req.stdio_mode[0] == 0;
@@ -1033,8 +1311,14 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         sp->stderr_pipe.data = sp;
         sp->handles_expected++;
     }
+    if (req.ipc) {
+        uv_pipe_init(loop, &sp->ipc_pipe, 0);
+        sp->ipc_pipe.data = sp;
+        sp->ipc_pipe_active = true;
+        sp->handles_expected++;
+    }
 
-    uv_stdio_container_t stdio[3];
+    uv_stdio_container_t stdio[4];
     memset(stdio, 0, sizeof(stdio));
     if (req.stdio_mode[0] == 1) {
         stdio[0].flags = UV_INHERIT_FD;
@@ -1063,16 +1347,24 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         stdio[2].flags = (uv_stdio_flags)(UV_CREATE_PIPE | UV_WRITABLE_PIPE);
         stdio[2].data.stream = (uv_stream_t*)&sp->stderr_pipe;
     }
+    if (req.ipc) {
+        stdio[3].flags = (uv_stdio_flags)(UV_CREATE_PIPE | UV_READABLE_PIPE | UV_WRITABLE_PIPE);
+        stdio[3].data.stream = (uv_stream_t*)&sp->ipc_pipe;
+    }
 
     uv_process_options_t opts;
     memset(&opts, 0, sizeof(opts));
     opts.file = req.shell ? argv[0] : req.file;
     opts.args = argv;
     opts.stdio = stdio;
-    opts.stdio_count = 3;
+    opts.stdio_count = req.ipc ? 4 : 3;
     opts.exit_cb = spawn_exit_cb;
     int env_count = 0;
     char** envp = build_envp(req.env, &env_count);
+    if (req.ipc && envp) {
+        envp = envp_set(envp, &env_count, "LAMBDA_JS_IPC", "1");
+        envp = envp_set(envp, &env_count, "LAMBDA_JS_IPC_FD", "3");
+    }
     if (envp) opts.env = envp;
 
     sp->process.data = sp;
@@ -1087,12 +1379,24 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         old_ipc_buf[old_len] = '\0';
     }
     if (req.ipc) setenv("LAMBDA_JS_IPC", "1", 1);
+    const char* old_ipc_fd_env = getenv("LAMBDA_JS_IPC_FD");
+    char old_ipc_fd_buf[32];
+    bool had_ipc_fd_env = old_ipc_fd_env != NULL;
+    if (had_ipc_fd_env) {
+        int old_len = (int)strlen(old_ipc_fd_env);
+        if (old_len >= (int)sizeof(old_ipc_fd_buf)) old_len = (int)sizeof(old_ipc_fd_buf) - 1;
+        memcpy(old_ipc_fd_buf, old_ipc_fd_env, (size_t)old_len);
+        old_ipc_fd_buf[old_len] = '\0';
+    }
+    if (req.ipc) setenv("LAMBDA_JS_IPC_FD", "3", 1);
 
     int r = uv_spawn(loop, &sp->process, &opts);
 
     if (req.ipc) {
         if (had_ipc_env) setenv("LAMBDA_JS_IPC", old_ipc_buf, 1);
         else unsetenv("LAMBDA_JS_IPC");
+        if (had_ipc_fd_env) setenv("LAMBDA_JS_IPC_FD", old_ipc_fd_buf, 1);
+        else unsetenv("LAMBDA_JS_IPC_FD");
     }
 
     // free arg copies
@@ -1109,8 +1413,13 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         log_error("child_process: spawn: failed: %s", uv_strerror(r));
         Item err = make_uv_spawn_error(r, req.file, make_spawn_error_args_array(req.args));
         schedule_spawn_error(obj, err);
+        if (req.ipc) install_ipc_legacy_surface(obj);
         if (sp->stdout_pipe_active) uv_close((uv_handle_t*)&sp->stdout_pipe, spawn_handle_close_cb);
         if (sp->stderr_pipe_active) uv_close((uv_handle_t*)&sp->stderr_pipe, spawn_handle_close_cb);
+        if (sp->ipc_pipe_active) {
+            sp->ipc_pipe_active = false;
+            uv_close((uv_handle_t*)&sp->ipc_pipe, spawn_handle_close_cb);
+        }
         sp->handles_closed++;
         if (sp->handles_closed >= sp->handles_expected) mem_free(sp);
         return obj;
@@ -1126,6 +1435,9 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     }
     if (sp->stderr_pipe_active) {
         uv_read_start((uv_stream_t*)&sp->stderr_pipe, spawn_alloc_cb, spawn_stderr_read_cb);
+    }
+    if (sp->ipc_pipe_active) {
+        uv_read_start((uv_stream_t*)&sp->ipc_pipe, spawn_alloc_cb, spawn_ipc_read_cb);
     }
 
     return obj;
@@ -1289,10 +1601,41 @@ extern "C" Item js_cp_fork(Item rest_args) {
         if (is_object_item(env)) js_property_set(spawn_options, make_string_item("env"), env);
     }
     Item stdio = js_array_new(0);
-    js_array_push(stdio, make_string_item("ignore"));
-    js_array_push(stdio, make_string_item("inherit"));
-    js_array_push(stdio, make_string_item("inherit"));
-    js_array_push(stdio, make_string_item("ipc"));
+    bool copied_stdio = false;
+    bool stdio_has_ipc = false;
+    if (is_object_item(options)) {
+        Item opt_stdio = js_property_get(options, make_string_item("stdio"));
+        if (!is_nullish_item(opt_stdio)) {
+            if (item_string_equals(opt_stdio, "pipe") ||
+                item_string_equals(opt_stdio, "inherit") ||
+                item_string_equals(opt_stdio, "ignore")) {
+                js_array_push(stdio, opt_stdio);
+                js_array_push(stdio, opt_stdio);
+                js_array_push(stdio, opt_stdio);
+                copied_stdio = true;
+            } else if (get_type_id(opt_stdio) == LMD_TYPE_STRING) {
+                throw_invalid_stdio_value();
+                return ItemNull;
+            } else if (get_type_id(opt_stdio) == LMD_TYPE_ARRAY) {
+                int64_t opt_len = js_array_length(opt_stdio);
+                for (int64_t i = 0; i < opt_len; i++) {
+                    Item entry = js_array_get_int(opt_stdio, i);
+                    if (item_string_equals(entry, "ipc")) stdio_has_ipc = true;
+                    js_array_push(stdio, entry);
+                }
+                copied_stdio = true;
+            } else {
+                throw_invalid_stdio_value();
+                return ItemNull;
+            }
+        }
+    }
+    if (!copied_stdio) {
+        js_array_push(stdio, make_string_item("ignore"));
+        js_array_push(stdio, make_string_item("inherit"));
+        js_array_push(stdio, make_string_item("inherit"));
+    }
+    if (!stdio_has_ipc) js_array_push(stdio, make_string_item("ipc"));
     js_property_set(spawn_options, make_string_item("stdio"), stdio);
 
     Item spawn_rest = js_array_new(0);

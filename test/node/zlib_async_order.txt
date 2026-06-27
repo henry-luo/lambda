@@ -1,0 +1,8 @@
+after call events: after-call
+gzip after return: true
+gzip err null: true
+gzip text: async order
+manual nextTick events: after-call,gzip,manual
+deflate err null: true
+deflate text: nested deflate
+events final: after-call,gzip,manual,deflate

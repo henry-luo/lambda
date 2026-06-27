@@ -138,6 +138,7 @@ enum JsClass : uint8_t {
     JS_CLASS_DUPLEX,
     JS_CLASS_TRANSFORM,
     JS_CLASS_PASS_THROUGH,
+    JS_CLASS_IMMEDIATE,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -234,6 +235,7 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "Writable", 8)) return JS_CLASS_WRITABLE;
             break;
         case 9:
+            if (!strncmp(nm, "Immediate", 9)) return JS_CLASS_IMMEDIATE;
             if (!strncmp(nm, "TLSServer", 9)) return JS_CLASS_TLS_SERVER;
             if (!strncmp(nm, "TLSSocket", 9)) return JS_CLASS_TLS_SOCKET;
             if (!strncmp(nm, "Selection", 9)) return JS_CLASS_SELECTION;
@@ -416,6 +418,7 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_DUPLEX: return "Duplex";
         case JS_CLASS_TRANSFORM: return "Transform";
         case JS_CLASS_PASS_THROUGH: return "PassThrough";
+        case JS_CLASS_IMMEDIATE: return "Immediate";
         default: return NULL;
     }
 }

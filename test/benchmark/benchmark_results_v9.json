@@ -1,0 +1,1717 @@
+{
+  "r7rs": {
+    "fib": {
+      "mir": 56.933,
+      "lambdajs": 17.21575,
+      "quickjs": 19.049,
+      "nodejs": 1.805875,
+      "category": "recursive",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "fibfp": {
+      "mir": 60.345,
+      "lambdajs": 22.435,
+      "quickjs": 18.82,
+      "nodejs": 1.805542,
+      "category": "recursive",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "tak": {
+      "mir": 3.256,
+      "lambdajs": 1.26075,
+      "quickjs": 2.881,
+      "nodejs": 0.826334,
+      "category": "recursive",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "cpstak": {
+      "mir": 6.405,
+      "lambdajs": 2.517084,
+      "quickjs": 5.669,
+      "nodejs": 0.977834,
+      "category": "closure",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "sum": {
+      "mir": 0.282,
+      "lambdajs": 22.858875,
+      "quickjs": 32.896,
+      "nodejs": 1.17875,
+      "category": "iterative",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "sumfp": {
+      "mir": 0.069,
+      "lambdajs": 1.666292,
+      "quickjs": 3.824,
+      "nodejs": 0.904833,
+      "category": "iterative",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "nqueens": {
+      "mir": 2.572,
+      "lambdajs": 3.811166,
+      "quickjs": 9.876,
+      "nodejs": 1.752416,
+      "category": "backtrack",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "fft": {
+      "mir": 0.447,
+      "lambdajs": 6.748542,
+      "quickjs": 2.837,
+      "nodejs": 1.668667,
+      "category": "numeric",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "mbrot": {
+      "mir": 0.867,
+      "lambdajs": 28.956375,
+      "quickjs": 18.423,
+      "nodejs": 1.803667,
+      "category": "numeric",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "ack": {
+      "mir": 172.007,
+      "lambdajs": 86.429292,
+      "quickjs": null,
+      "nodejs": 13.781167,
+      "category": "recursive",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "not_recorded",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    }
+  },
+  "awfy": {
+    "sieve": {
+      "mir": 0.415,
+      "lambdajs": 0.490708,
+      "quickjs": 0.633,
+      "nodejs": 0.405209,
+      "category": "micro",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "permute": {
+      "mir": 2.646,
+      "lambdajs": 38.673959,
+      "quickjs": 1.581,
+      "nodejs": 0.825291,
+      "category": "micro",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "queens": {
+      "mir": 1.947,
+      "lambdajs": 25.07,
+      "quickjs": 1.14,
+      "nodejs": 0.921667,
+      "category": "micro",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "towers": {
+      "mir": 4.953,
+      "lambdajs": 70.762959,
+      "quickjs": 2.329,
+      "nodejs": 1.135667,
+      "category": "micro",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "bounce": {
+      "mir": 0.704,
+      "lambdajs": 10.156541,
+      "quickjs": 0.926,
+      "nodejs": 0.558208,
+      "category": "micro",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "list": {
+      "mir": 0.2,
+      "lambdajs": 11.908375,
+      "quickjs": 0.942,
+      "nodejs": 0.538333,
+      "category": "micro",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "storage": {
+      "mir": 1.72,
+      "lambdajs": 30.172292,
+      "quickjs": 2.705,
+      "nodejs": 0.6495,
+      "category": "micro",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "mandelbrot": {
+      "mir": 32.778,
+      "lambdajs": 1517.169917,
+      "quickjs": 905.83,
+      "nodejs": 32.330666,
+      "category": "compute",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "nbody": {
+      "mir": 79.895,
+      "lambdajs": 430.125833,
+      "quickjs": 167.641,
+      "nodejs": 5.874625,
+      "category": "compute",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "richards": {
+      "mir": 636.322,
+      "lambdajs": 5543.102167,
+      "quickjs": 200.978,
+      "nodejs": 49.546708,
+      "category": "macro",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "json": {
+      "mir": 20.741,
+      "lambdajs": 75.609334,
+      "quickjs": 12.04,
+      "nodejs": 2.7595,
+      "category": "macro",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "deltablue": {
+      "mir": 228.241,
+      "lambdajs": 4170.916833,
+      "quickjs": 116.035,
+      "nodejs": 13.725833,
+      "category": "macro",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "havlak": {
+      "mir": 220.916,
+      "lambdajs": null,
+      "quickjs": 4371.656,
+      "nodejs": 115.458042,
+      "category": "macro",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "not_recorded",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "cd": {
+      "mir": 1525.6,
+      "lambdajs": null,
+      "quickjs": 1111.0,
+      "nodejs": 40.012709,
+      "category": "macro",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "not_recorded",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    }
+  },
+  "beng": {
+    "binarytrees": {
+      "mir": 44.427,
+      "lambdajs": 52.08925,
+      "quickjs": 29.128,
+      "nodejs": 4.536708,
+      "category": "allocation",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "fannkuch": {
+      "mir": 1.995,
+      "lambdajs": 2.063375,
+      "quickjs": 7.451,
+      "nodejs": 4.189625,
+      "category": "permutation",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "fasta": {
+      "mir": 1.726,
+      "lambdajs": 7.601292,
+      "quickjs": 10.329,
+      "nodejs": 6.058542,
+      "category": "generation",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "knucleotide": {
+      "mir": 5.201,
+      "lambdajs": 122.178458,
+      "quickjs": null,
+      "nodejs": 5.602084,
+      "category": "hashing",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "not_recorded",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "mandelbrot": {
+      "mir": 192.317,
+      "lambdajs": 184.148125,
+      "quickjs": 712.302,
+      "nodejs": 15.859333,
+      "category": "numeric",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "nbody": {
+      "mir": 81.109,
+      "lambdajs": 1165.4,
+      "quickjs": 157.512,
+      "nodejs": 7.7835,
+      "category": "numeric",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "pidigits": {
+      "mir": 0.325,
+      "lambdajs": 0.317875,
+      "quickjs": 0.156,
+      "nodejs": 2.019875,
+      "category": "bignum",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "regexredux": {
+      "mir": 1.25,
+      "lambdajs": 15.001166,
+      "quickjs": null,
+      "nodejs": 3.087708,
+      "category": "regex",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "not_recorded",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "revcomp": {
+      "mir": 1.149,
+      "lambdajs": 46.456292,
+      "quickjs": null,
+      "nodejs": 3.627667,
+      "category": "string",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "not_recorded",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "spectralnorm": {
+      "mir": 79.745,
+      "lambdajs": 87.817083,
+      "quickjs": 65.886,
+      "nodejs": 2.829917,
+      "category": "numeric",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    }
+  },
+  "kostya": {
+    "brainfuck": {
+      "mir": 453.051,
+      "lambdajs": 726.75525,
+      "quickjs": 956.359,
+      "nodejs": 47.907125,
+      "category": "interpreter",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "matmul": {
+      "mir": 34.646,
+      "lambdajs": 2873.050417,
+      "quickjs": 563.626,
+      "nodejs": 16.32575,
+      "category": "numeric",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "primes": {
+      "mir": 11.933,
+      "lambdajs": 16.526,
+      "quickjs": 99.927,
+      "nodejs": 4.791417,
+      "category": "numeric",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "base64": {
+      "mir": 15518.3,
+      "lambdajs": 805.987459,
+      "quickjs": 187.21,
+      "nodejs": 18.564584,
+      "category": "string",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "levenshtein": {
+      "mir": 155.834,
+      "lambdajs": 58.91675,
+      "quickjs": 56.738,
+      "nodejs": 4.066542,
+      "category": "string",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "json_gen": {
+      "mir": 150.613,
+      "lambdajs": 33.035083,
+      "quickjs": 21.862,
+      "nodejs": 6.369917,
+      "category": "data",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "collatz": {
+      "mir": 354.607,
+      "lambdajs": 6935.7125,
+      "quickjs": 6521.422,
+      "nodejs": 1483.996958,
+      "category": "numeric",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    }
+  },
+  "larceny": {
+    "triangl": {
+      "mir": 397.892,
+      "lambdajs": 2316.773791,
+      "quickjs": 2279.047,
+      "nodejs": 70.88125,
+      "category": "search",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "array1": {
+      "mir": 1.989,
+      "lambdajs": 3.401709,
+      "quickjs": 39.243,
+      "nodejs": 1.992,
+      "category": "array",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "deriv": {
+      "mir": 72.896,
+      "lambdajs": 107.187084,
+      "quickjs": 71.313,
+      "nodejs": 3.910084,
+      "category": "symbolic",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "diviter": {
+      "mir": 15632.1,
+      "lambdajs": 2664.7845,
+      "quickjs": 28636.671,
+      "nodejs": 493.965458,
+      "category": "iterative",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "divrec": {
+      "mir": 19.608,
+      "lambdajs": 28.080875,
+      "quickjs": 38.916,
+      "nodejs": 8.015875,
+      "category": "recursive",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "gcbench": {
+      "mir": 1366.93,
+      "lambdajs": 1224.876792,
+      "quickjs": 678.903,
+      "nodejs": 25.314167,
+      "category": "allocation",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "paraffins": {
+      "mir": 1.026,
+      "lambdajs": 2.142334,
+      "quickjs": 2.697,
+      "nodejs": 1.153583,
+      "category": "combinat",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "pnpoly": {
+      "mir": 121.803,
+      "lambdajs": 138.406792,
+      "quickjs": 212.378,
+      "nodejs": 6.094417,
+      "category": "numeric",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "primes": {
+      "mir": 11.833,
+      "lambdajs": 15.901958,
+      "quickjs": 99.155,
+      "nodejs": 4.803291,
+      "category": "iterative",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "puzzle": {
+      "mir": 17.781,
+      "lambdajs": 22.69275,
+      "quickjs": 30.879,
+      "nodejs": 3.430375,
+      "category": "search",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "quicksort": {
+      "mir": 11.202,
+      "lambdajs": 28.823667,
+      "quickjs": 19.996,
+      "nodejs": 1.742166,
+      "category": "sorting",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "ray": {
+      "mir": 18.094,
+      "lambdajs": 16.58575,
+      "quickjs": 14.38,
+      "nodejs": 3.617666,
+      "category": "numeric",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    }
+  },
+  "jetstream": {
+    "nbody": {
+      "mir": 80.424,
+      "lambdajs": 929.214,
+      "quickjs": 137.689,
+      "nodejs": 5.684,
+      "category": "numeric",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "cube3d": {
+      "mir": 46.656,
+      "lambdajs": 3721.739,
+      "quickjs": null,
+      "nodejs": 18.753,
+      "category": "3d",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "not_recorded",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "navier_stokes": {
+      "mir": 1285.98,
+      "lambdajs": 6233.859,
+      "quickjs": 819.581,
+      "nodejs": 40.224,
+      "category": "numeric",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "richards": {
+      "mir": 539.141,
+      "lambdajs": 628.242,
+      "quickjs": 26.869,
+      "nodejs": 5.286,
+      "category": "macro",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "splay": {
+      "mir": 3169.02,
+      "lambdajs": 1616.048,
+      "quickjs": 31.138,
+      "nodejs": 4.119,
+      "category": "data",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "deltablue": {
+      "mir": 39.959,
+      "lambdajs": 1875.103,
+      "quickjs": 49.183,
+      "nodejs": 7.058,
+      "category": "macro",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "hashmap": {
+      "mir": 245.565,
+      "lambdajs": null,
+      "quickjs": 2670.933,
+      "nodejs": 54.842,
+      "category": "data",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "not_recorded",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "crypto_sha1": {
+      "mir": 116.878,
+      "lambdajs": 233.785,
+      "quickjs": 76.023,
+      "nodejs": 7.421,
+      "category": "crypto",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    },
+    "raytrace3d": {
+      "mir": 471.184,
+      "lambdajs": 2259.101,
+      "quickjs": null,
+      "nodejs": 19.58,
+      "category": "3d",
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "not_recorded",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "backfilled": true
+        },
+        "lambdajs": {
+          "backfilled": true
+        },
+        "quickjs": {
+          "backfilled": true
+        },
+        "nodejs": {
+          "backfilled": true
+        }
+      }
+    }
+  },
+  "_metadata": {
+    "schema_version": 2,
+    "mode": "time",
+    "started_at": "2026-06-27T12:14:00",
+    "finished_at": "2026-06-27T13:04:44",
+    "command": "python3 test/benchmark/run_standard_benchmarks.py --report-output test/benchmark/Overall_Result9.md --report-title \"Lambda Benchmark Results: Round 9\"",
+    "engines": [
+      "mir",
+      "lambdajs",
+      "quickjs",
+      "nodejs"
+    ],
+    "runs": 3,
+    "timeout_s": 180,
+    "results_output": "test/benchmark/benchmark_results_v9.json",
+    "fresh": true,
+    "suite_filters": [],
+    "bench_filters": [],
+    "platform": "Darwin arm64",
+    "lambda_exe": "./lambda.exe",
+    "lambda_exe_size_bytes": 16034856,
+    "lambda_commit": "a18102ceaf4ad445e76cefa10aa846d9e3c1ffa7",
+    "node_version": "v22.13.0",
+    "python_version": "Python 3.14.4",
+    "quickjs_version": "2025-09-13",
+    "profile_check": "passed",
+    "log_dir": null,
+    "status_backfill": "statuses added after original Round 9 run; missing cells have status not_recorded"
+  }
+}

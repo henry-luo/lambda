@@ -146,8 +146,10 @@ var vec = { chunks: [null16()], sz: 0 }
 a chunked vector where `.sz` tracked the logical element count separate from physical
 chunk capacity.
 
-**Status**: **RESOLVED — engine enhanced + all 8 files converted.** Added two
-pn-only builtins:
+**Status**: ✅ **FULLY CLOSED — engine enhanced + all 8 files converted, zero `.sz`
+workaround remaining.** Verified: no `.sz` / `.chunks` code references anywhere in
+`test/benchmark/` (only 3 historical comments documenting the migration), and no
+`{chunks/data: …, sz: …}` wrapper literals remain. Added two pn-only builtins:
 - **`push(arr, val)`** — append to a growable array **in place** (amortized O(1) via the
   runtime's existing `array_push` → `expand_list` doubling, GC-aware).
 - **`splice(arr, start, count)`** — remove `count` elements at `start` **in place**

@@ -14,6 +14,8 @@ This rerun refreshes Result8 after the dense-array fast-path work and after rest
 
 Important comparison caveat: Node.js was rerun as v22.13.0 in this environment, while the original Result7 header recorded Node.js v24.7.0. Therefore, the LambdaJS-vs-Node geometric mean is a current-machine snapshot, not a clean Node-held-constant comparison against Result7.
 
+Important workload note: Result8 used the newer JetStream wrapper shape (`new Benchmark().runIteration()`) instead of the older standardized wrapper that calls the detected benchmark function 8 times. Several JetStream files define different internal `runIteration()` counts, so Result8 JetStream rows are not directly comparable to Result7 or older x8 snapshots without workload normalization.
+
 ---
 
 ## Summary

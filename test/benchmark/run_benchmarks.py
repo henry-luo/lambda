@@ -27,6 +27,7 @@ Usage examples:
 """
 
 import argparse
+import datetime
 import json
 import math
 import os
@@ -303,6 +304,66 @@ def fmt_mem_mb(rss_bytes):
     return round(rss_bytes / (1024 * 1024), 2)
 
 
+def get_command_output(args):
+    try:
+        proc = subprocess.run(args, capture_output=True, text=True, check=False)
+    except OSError:
+        return None
+    return proc.stdout.strip() or proc.stderr.strip() or None
+
+
+def build_run_metadata(mode, engines, num_runs, timeout_s, results_output, fresh, suite_filters, bench_filters):
+    exe_size = os.path.getsize(LAMBDA_EXE) if os.path.exists(LAMBDA_EXE) else None
+    return {
+        "schema_version": 2,
+        "mode": mode,
+        "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "command": " ".join(sys.argv),
+        "engines": engines,
+        "runs": num_runs,
+        "timeout_s": timeout_s,
+        "results_output": results_output,
+        "fresh": fresh,
+        "suite_filters": suite_filters or [],
+        "bench_filters": bench_filters or [],
+        "platform": f"{platform.system()} {platform.machine()}",
+        "lambda_exe": LAMBDA_EXE,
+        "lambda_exe_size_bytes": exe_size,
+        "lambda_commit": get_command_output(["git", "rev-parse", "HEAD"]),
+        "node_version": get_command_output([NODE_EXE, "--version"]),
+        "python_version": get_command_output([PYTHON_EXE, "--version"]),
+        "quickjs_version": (get_command_output([QJS_EXE, "--help"]) or "").splitlines()[0].replace("QuickJS version ", "") or None,
+        "profile_check": os.environ.get("LAMBDA_BENCH_PROFILE_CHECK", "not_recorded"),
+        "log_dir": os.environ.get("LAMBDA_BENCH_LOG_DIR"),
+    }
+
+
+def finish_run_metadata(results):
+    meta = results.setdefault("_metadata", {})
+    meta["finished_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+
+
+def update_run_metadata(results, metadata):
+    existing = results.get("_metadata", {})
+    existing.update(metadata)
+    results["_metadata"] = existing
+
+
+def record_status(results, suite, name, engine, status, detail=None):
+    row = results[suite][name]
+    row.setdefault("_status", {})[engine] = status
+    if detail:
+        row.setdefault("_status_detail", {})[engine] = detail
+
+
+def record_time_result(results, row, suite, name, engine, wall_ms, exec_ms, ok, status, detail=None):
+    val = exec_ms if ok and exec_ms is not None else (wall_ms if ok else None)
+    results[suite][name][engine] = val
+    row[engine] = val
+    record_status(results, suite, name, engine, status, detail)
+    return val
+
+
 def make_qjs_wrapper(js_path):
     """Create a QuickJS-compatible wrapper for a Node.js benchmark script."""
     os.makedirs("temp", exist_ok=True)
@@ -319,18 +380,21 @@ def make_qjs_wrapper(js_path):
 
 
 def make_jetstream_node_wrapper(bench_name, js_path):
-    """Create Node.js wrapper for JetStream benchmark (adds runIteration + timing)."""
+    """Create Node.js wrapper for JetStream benchmark with standardized x8 timing."""
+    run_expr = _detect_jetstream_run_function(js_path)
+    if run_expr is None:
+        return None
     os.makedirs("temp", exist_ok=True)
     wrapper = os.path.join("temp", f"_node_bench_{bench_name}.js")
     with open(js_path) as f:
         code = f.read()
     with open(wrapper, "w") as f:
         f.write(code)
-        f.write("\nconst b = new Benchmark();\n")
-        f.write("const t0 = performance.now();\n")
-        f.write("b.runIteration();\n")
-        f.write("const t1 = performance.now();\n")
-        f.write('console.log("__TIMING__:" + (t1 - t0).toFixed(3));\n')
+        f.write("\n// Timing wrapper (standardized x8 workload)\n")
+        f.write("var _t0 = performance.now();\n")
+        f.write(f"for (var _i = 0; _i < 8; _i++) {{ {run_expr}; }}\n")
+        f.write("var _t1 = performance.now();\n")
+        f.write('console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
     return wrapper
 
 
@@ -349,7 +413,10 @@ def _detect_jetstream_run_function(js_path):
 
 
 def make_jetstream_ljs_wrapper(bench_name, js_path):
-    """Create LambdaJS wrapper for JetStream benchmark (adds timing)."""
+    """Create LambdaJS wrapper for JetStream benchmark with standardized x8 timing."""
+    run_expr = _detect_jetstream_run_function(js_path)
+    if run_expr is None:
+        return None
     os.makedirs("temp", exist_ok=True)
     wrapper = os.path.join("temp", f"_ljs_jetstream_{bench_name}.js")
     with open(js_path) as f:
@@ -358,10 +425,32 @@ def make_jetstream_ljs_wrapper(bench_name, js_path):
     code = code.replace('"use strict";', "")
     with open(wrapper, "w") as f:
         f.write(code)
-        f.write("\n// Timing wrapper\n")
-        f.write("var _benchmark = new Benchmark();\n")
+        f.write("\n// Timing wrapper (standardized x8 workload)\n")
         f.write("var _t0 = performance.now();\n")
-        f.write("_benchmark.runIteration();\n")
+        f.write(f"for (var _i = 0; _i < 8; _i++) {{ {run_expr}; }}\n")
+        f.write("var _t1 = performance.now();\n")
+        f.write('console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
+    return wrapper
+
+
+def make_jetstream_qjs_wrapper(bench_name, js_path):
+    """Create QuickJS wrapper for JetStream benchmark with standardized x8 timing."""
+    run_expr = _detect_jetstream_run_function(js_path)
+    if run_expr is None:
+        return None
+    os.makedirs("temp", exist_ok=True)
+    wrapper = os.path.join("temp", f"_qjs_jetstream_{bench_name}.js")
+    with open(js_path) as f:
+        code = f.read()
+    code = code.replace("'use strict';", "")
+    code = code.replace('"use strict";', "")
+    with open(wrapper, "w") as f:
+        f.write("import * as std from 'std';\n")
+        f.write(QJS_POLYFILL)
+        f.write(code)
+        f.write("\n// Timing wrapper (standardized x8 workload)\n")
+        f.write("var _t0 = performance.now();\n")
+        f.write(f"for (var _i = 0; _i < 8; _i++) {{ {run_expr}; }}\n")
         f.write("var _t1 = performance.now();\n")
         f.write('console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
     return wrapper
@@ -440,7 +529,7 @@ def list_benchmarks():
 
 def time_run_once(cmd, timeout_s):
     """Run cmd once using process groups for reliable timeout kill.
-    Returns (wall_ms, exec_ms_or_None, success)."""
+    Returns (wall_ms, exec_ms_or_None, success, status)."""
     start = time.perf_counter_ns()
     try:
         proc = subprocess.Popen(
@@ -451,36 +540,47 @@ def time_run_once(cmd, timeout_s):
         except subprocess.TimeoutExpired:
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             proc.wait()
-            return (timeout_s * 1000, None, False)
+            return (timeout_s * 1000, None, False, "timeout")
         end = time.perf_counter_ns()
         wall_ms = (end - start) / 1_000_000
         if proc.returncode != 0:
-            return (wall_ms, None, False)
+            return (wall_ms, None, False, f"exit_{proc.returncode}")
         exec_ms = parse_timing(stdout)
-        return (wall_ms, exec_ms, True)
+        status = "ok" if exec_ms is not None else "wall_fallback"
+        return (wall_ms, exec_ms, True, status)
     except Exception:
-        return (0, None, False)
+        return (0, None, False, "exception")
 
 
 def time_run_benchmark(cmd, num_runs, timeout_s):
-    """Run cmd N times, return (median_wall_ms, median_exec_ms_or_None, success)."""
+    """Run cmd N times, return (median_wall_ms, median_exec_ms_or_None, success, status, detail)."""
     walls, execs = [], []
     ok = False
+    status_counts = {}
     for _ in range(num_runs):
-        w, e, success = time_run_once(cmd, timeout_s)
+        w, e, success, status = time_run_once(cmd, timeout_s)
+        status_counts[status] = status_counts.get(status, 0) + 1
         if success:
             ok = True
             walls.append(w)
             if e is not None:
                 execs.append(e)
         print(".", end="", flush=True)
+    detail = {"status_counts": status_counts}
     if not ok:
-        return (None, None, False)
+        status = max(status_counts, key=status_counts.get) if status_counts else "failed"
+        return (None, None, False, status, detail)
     walls.sort()
     execs.sort()
+    if execs:
+        status = "ok" if status_counts.get("ok", 0) == num_runs else "partial_ok"
+    else:
+        status = "wall_fallback"
     return (walls[len(walls) // 2],
             execs[len(execs) // 2] if execs else None,
-            True)
+            True,
+            status,
+            detail)
 
 
 def time_run_awfy_python(bench_name, num_runs, timeout_s):
@@ -495,16 +595,20 @@ def time_run_awfy_python(bench_name, num_runs, timeout_s):
     cmd = f"cd {py_dir} && {PYTHON_EXE} harness.py {class_name} {num_iter} {inner}"
     walls, execs = [], []
     ok = False
+    status_counts = {}
     for _ in range(num_runs):
         start = time.perf_counter_ns()
         try:
             r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout_s)
         except subprocess.TimeoutExpired:
+            status_counts["timeout"] = status_counts.get("timeout", 0) + 1
             print("T", end="", flush=True)
             continue
         end = time.perf_counter_ns()
         wall_ms = (end - start) / 1_000_000
         if r.returncode != 0:
+            status = f"exit_{r.returncode}"
+            status_counts[status] = status_counts.get(status, 0) + 1
             print("X", end="", flush=True)
             continue
         ok = True
@@ -519,14 +623,21 @@ def time_run_awfy_python(bench_name, num_runs, timeout_s):
         t = parse_timing(r.stdout)
         if t is not None and not execs:
             execs.append(t)
+        status = "ok" if execs else "wall_fallback"
+        status_counts[status] = status_counts.get(status, 0) + 1
         print(".", end="", flush=True)
+    detail = {"status_counts": status_counts}
     if not ok:
-        return (None, None, False)
+        status = max(status_counts, key=status_counts.get) if status_counts else "failed"
+        return (None, None, False, status, detail)
     walls.sort()
     execs.sort()
+    status = "ok" if execs else "wall_fallback"
     return (walls[len(walls) // 2],
             execs[len(execs) // 2] if execs else None,
-            True)
+            True,
+            status,
+            detail)
 
 
 def time_run_single(b, engines, num_runs, timeout_s, results):
@@ -543,25 +654,22 @@ def time_run_single(b, engines, num_runs, timeout_s, results):
         results[suite] = {}
     if name not in results[suite]:
         results[suite][name] = {}
+    results[suite][name]["category"] = b["category"]
 
     row = {}
 
     # --- MIR Direct ---
     if "mir" in engines:
         print(f"  MIR      ", end="", flush=True)
-        w, e, ok = time_run_benchmark(f"{LAMBDA_EXE} run {ls_path}", num_runs, timeout_s)
-        val = e if ok and e is not None else (w if ok else None)
-        results[suite][name]["mir"] = val
-        row["mir"] = val
+        w, e, ok, status, detail = time_run_benchmark(f"{LAMBDA_EXE} run {ls_path}", num_runs, timeout_s)
+        record_time_result(results, row, suite, name, "mir", w, e, ok, status, detail)
         print(f" {fmt_ms(e if e is not None else w)}")
 
     # --- C2MIR ---
     if "c2mir" in engines:
         print(f"  C2MIR    ", end="", flush=True)
-        w, e, ok = time_run_benchmark(f"{LAMBDA_EXE} run --c2mir {ls_path}", num_runs, timeout_s)
-        val = e if ok and e is not None else (w if ok else None)
-        results[suite][name]["c2mir"] = val
-        row["c2mir"] = val
+        w, e, ok, status, detail = time_run_benchmark(f"{LAMBDA_EXE} run --c2mir {ls_path}", num_runs, timeout_s)
+        record_time_result(results, row, suite, name, "c2mir", w, e, ok, status, detail)
         print(f" {fmt_ms(e if e is not None else w)}")
 
     if not is_js:
@@ -572,14 +680,13 @@ def time_run_single(b, engines, num_runs, timeout_s, results):
         if "lambdajs" in engines:
             if standalone_js and os.path.exists(standalone_js):
                 print(f"  LambdaJS ", end="", flush=True)
-                w, e, ok = time_run_benchmark(f"{LAMBDA_EXE} js {standalone_js}", num_runs, timeout_s)
-                val = e if ok and e is not None else (w if ok else None)
-                results[suite][name]["lambdajs"] = val
-                row["lambdajs"] = val
+                w, e, ok, status, detail = time_run_benchmark(f"{LAMBDA_EXE} js {standalone_js}", num_runs, timeout_s)
+                record_time_result(results, row, suite, name, "lambdajs", w, e, ok, status, detail)
                 print(f" {fmt_ms(e if e is not None else w)}")
             else:
                 results[suite][name]["lambdajs"] = None
                 row["lambdajs"] = None
+                record_status(results, suite, name, "lambdajs", "missing_file")
                 print(f"  LambdaJS  ---")
 
         # --- QuickJS ---
@@ -587,49 +694,44 @@ def time_run_single(b, engines, num_runs, timeout_s, results):
             if standalone_js and os.path.exists(standalone_js):
                 print(f"  QuickJS  ", end="", flush=True)
                 wrapper = make_qjs_wrapper(standalone_js)
-                w, e, ok = time_run_benchmark(f"{QJS_EXE} --std -m {wrapper}", num_runs, timeout_s)
-                val = e if ok and e is not None else (w if ok else None)
-                results[suite][name]["quickjs"] = val
-                row["quickjs"] = val
+                w, e, ok, status, detail = time_run_benchmark(f"{QJS_EXE} --std -m {wrapper}", num_runs, timeout_s)
+                record_time_result(results, row, suite, name, "quickjs", w, e, ok, status, detail)
                 print(f" {fmt_ms(e if e is not None else w)}")
             else:
                 results[suite][name]["quickjs"] = None
                 row["quickjs"] = None
+                record_status(results, suite, name, "quickjs", "missing_file")
                 print(f"  QuickJS   ---")
 
         # --- Node.js ---
         if "nodejs" in engines:
             if js_path and os.path.exists(js_path):
                 print(f"  Node.js  ", end="", flush=True)
-                w, e, ok = time_run_benchmark(f"{NODE_EXE} {js_path}", num_runs, timeout_s)
-                val = e if ok and e is not None else (w if ok else None)
-                results[suite][name]["nodejs"] = val
-                row["nodejs"] = val
+                w, e, ok, status, detail = time_run_benchmark(f"{NODE_EXE} {js_path}", num_runs, timeout_s)
+                record_time_result(results, row, suite, name, "nodejs", w, e, ok, status, detail)
                 print(f" {fmt_ms(e if e is not None else w)}")
             else:
                 results[suite][name]["nodejs"] = None
                 row["nodejs"] = None
+                record_status(results, suite, name, "nodejs", "missing_file")
                 print(f"  Node.js   ---")
 
         # --- Python ---
         if "python" in engines:
             if suite == "awfy":
                 print(f"  Python   ", end="", flush=True)
-                w, e, ok = time_run_awfy_python(name, num_runs, timeout_s)
-                val = e if ok and e is not None else (w if ok else None)
-                results[suite][name]["python"] = val
-                row["python"] = val
+                w, e, ok, status, detail = time_run_awfy_python(name, num_runs, timeout_s)
+                record_time_result(results, row, suite, name, "python", w, e, ok, status, detail)
                 print(f" {fmt_ms(e if e is not None else w)}")
             elif py_path and os.path.exists(py_path):
                 print(f"  Python   ", end="", flush=True)
-                w, e, ok = time_run_benchmark(f"{PYTHON_EXE} {py_path}", num_runs, timeout_s)
-                val = e if ok and e is not None else (w if ok else None)
-                results[suite][name]["python"] = val
-                row["python"] = val
+                w, e, ok, status, detail = time_run_benchmark(f"{PYTHON_EXE} {py_path}", num_runs, timeout_s)
+                record_time_result(results, row, suite, name, "python", w, e, ok, status, detail)
                 print(f" {fmt_ms(e if e is not None else w)}")
             else:
                 results[suite][name]["python"] = None
                 row["python"] = None
+                record_status(results, suite, name, "python", "missing_file")
                 print(f"  Python    ---")
     else:
         # JetStream suite
@@ -639,63 +741,83 @@ def time_run_single(b, engines, num_runs, timeout_s, results):
                 wrapper = make_jetstream_ljs_wrapper(name, ljs_js)
                 if wrapper:
                     print(f"  LambdaJS ", end="", flush=True)
-                    w, e, ok = time_run_benchmark(f"{LAMBDA_EXE} js {wrapper}", num_runs, timeout_s)
-                    val = e if ok and e is not None else (w if ok else None)
-                    results[suite][name]["lambdajs"] = val
-                    row["lambdajs"] = val
+                    w, e, ok, status, detail = time_run_benchmark(f"{LAMBDA_EXE} js {wrapper}", num_runs, timeout_s)
+                    record_time_result(results, row, suite, name, "lambdajs", w, e, ok, status, detail)
                     print(f" {fmt_ms(e if e is not None else w)}")
                 else:
                     results[suite][name]["lambdajs"] = None
                     row["lambdajs"] = None
+                    record_status(results, suite, name, "lambdajs", "wrapper_unavailable")
                     print(f"  LambdaJS  ---")
             else:
                 results[suite][name]["lambdajs"] = None
                 row["lambdajs"] = None
+                record_status(results, suite, name, "lambdajs", "missing_file")
                 print(f"  LambdaJS  ---")
 
         if "quickjs" in engines:
-            results[suite][name]["quickjs"] = None
-            row["quickjs"] = None
-            print(f"  QuickJS   ---")
+            qjs_js = JETSTREAM_NODE.get(name)
+            if qjs_js and os.path.exists(qjs_js):
+                wrapper = make_jetstream_qjs_wrapper(name, qjs_js)
+                if wrapper:
+                    print(f"  QuickJS  ", end="", flush=True)
+                    w, e, ok, status, detail = time_run_benchmark(f"{QJS_EXE} --std -m {wrapper}", num_runs, timeout_s)
+                    record_time_result(results, row, suite, name, "quickjs", w, e, ok, status, detail)
+                    print(f" {fmt_ms(e if e is not None else w)}")
+                else:
+                    results[suite][name]["quickjs"] = None
+                    row["quickjs"] = None
+                    record_status(results, suite, name, "quickjs", "wrapper_unavailable")
+                    print(f"  QuickJS   ---")
+            else:
+                results[suite][name]["quickjs"] = None
+                row["quickjs"] = None
+                record_status(results, suite, name, "quickjs", "missing_file")
+                print(f"  QuickJS   ---")
 
         if "nodejs" in engines:
             if ref_js and os.path.exists(ref_js):
-                print(f"  Node.js  ", end="", flush=True)
                 wrapper = make_jetstream_node_wrapper(name, ref_js)
-                w, e, ok = time_run_benchmark(f"{NODE_EXE} {wrapper}", num_runs, timeout_s)
-                val = e if ok and e is not None else (w if ok else None)
-                results[suite][name]["nodejs"] = val
-                row["nodejs"] = val
-                print(f" {fmt_ms(e if e is not None else w)}")
+                if wrapper:
+                    print(f"  Node.js  ", end="", flush=True)
+                    w, e, ok, status, detail = time_run_benchmark(f"{NODE_EXE} {wrapper}", num_runs, timeout_s)
+                    record_time_result(results, row, suite, name, "nodejs", w, e, ok, status, detail)
+                    print(f" {fmt_ms(e if e is not None else w)}")
+                else:
+                    results[suite][name]["nodejs"] = None
+                    row["nodejs"] = None
+                    record_status(results, suite, name, "nodejs", "wrapper_unavailable")
+                    print(f"  Node.js   ---")
             else:
                 results[suite][name]["nodejs"] = None
                 row["nodejs"] = None
+                record_status(results, suite, name, "nodejs", "missing_file")
                 print(f"  Node.js   ---")
 
         if "python" in engines:
             if py_path and os.path.exists(py_path):
                 print(f"  Python   ", end="", flush=True)
-                w, e, ok = time_run_benchmark(f"{PYTHON_EXE} {py_path}", num_runs, timeout_s)
-                val = e if ok and e is not None else (w if ok else None)
-                results[suite][name]["python"] = val
-                row["python"] = val
+                w, e, ok, status, detail = time_run_benchmark(f"{PYTHON_EXE} {py_path}", num_runs, timeout_s)
+                record_time_result(results, row, suite, name, "python", w, e, ok, status, detail)
                 print(f" {fmt_ms(e if e is not None else w)}")
             else:
                 results[suite][name]["python"] = None
                 row["python"] = None
+                record_status(results, suite, name, "python", "missing_file")
                 print(f"  Python    ---")
 
     return row
 
 
-def run_time_mode(benchmarks, engines, num_runs, timeout_s, no_save):
+def run_time_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_path, fresh, metadata):
     """Execute TIME mode: measure execution time across engines."""
     # Load existing results (merge mode)
-    if os.path.exists(TIME_JSON_PATH):
-        with open(TIME_JSON_PATH) as f:
+    if os.path.exists(output_path) and not fresh:
+        with open(output_path) as f:
             results = json.load(f)
     else:
         results = {}
+    update_run_metadata(results, metadata)
 
     summary = []
     current_suite = None
@@ -717,9 +839,10 @@ def run_time_mode(benchmarks, engines, num_runs, timeout_s, no_save):
 
     # Save
     if not no_save:
-        with open(TIME_JSON_PATH, "w") as f:
+        finish_run_metadata(results)
+        with open(output_path, "w") as f:
             json.dump(results, f, indent=2, default=str)
-        print(f"\nResults saved to {TIME_JSON_PATH}")
+        print(f"\nResults saved to {output_path}")
     else:
         print(f"\n--no-save: results NOT written to JSON")
 
@@ -937,7 +1060,7 @@ def mem_run_single(b, engines, num_runs, timeout_s, results):
     return row
 
 
-def run_memory_mode(benchmarks, engines, num_runs, timeout_s, no_save):
+def run_memory_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_path):
     """Execute MEMORY mode: measure peak RSS across engines."""
     results = {}
 
@@ -1043,9 +1166,9 @@ def run_memory_mode(benchmarks, engines, num_runs, timeout_s, no_save):
                 json_results[suite_name][bench_name]["_raw_bytes"] = {
                     eng: data.get(eng) for eng in ALL_ENGINES
                 }
-        with open(MEMORY_JSON_PATH, "w") as f:
+        with open(output_path, "w") as f:
             json.dump(json_results, f, indent=2, default=str)
-        print(f"\nResults saved to {MEMORY_JSON_PATH}")
+        print(f"\nResults saved to {output_path}")
     else:
         print(f"\n--no-save: results NOT written to JSON")
 
@@ -1299,6 +1422,10 @@ Examples:
                         help="Show what would be run without actually running")
     parser.add_argument("--no-save", action="store_true",
                         help="Don't save results to JSON/CSV")
+    parser.add_argument("--results-output", type=str, default=None,
+                        help="Output JSON path for time or memory mode")
+    parser.add_argument("--fresh", action="store_true",
+                        help="Start from an empty result file instead of merging with existing JSON")
 
     args = parser.parse_args()
 
@@ -1313,6 +1440,13 @@ Examples:
 
     mode = args.mode
     timeout_s = args.timeout
+    if mode == "time":
+        results_output = args.results_output or TIME_JSON_PATH
+    elif mode == "memory":
+        results_output = args.results_output or MEMORY_JSON_PATH
+    else:
+        results_output = args.results_output or MIR_VS_C_CSV_PATH
+    metadata = build_run_metadata(mode, [], 0, timeout_s, results_output, args.fresh, suite_filters, bench_filters)
 
     # Default runs depends on mode
     if args.runs is not None:
@@ -1331,6 +1465,10 @@ Examples:
                 sys.exit(1)
     else:
         engines = ALL_ENGINES
+    metadata.update({
+        "engines": engines,
+        "runs": num_runs,
+    })
 
     # Build benchmark list
     benchmarks = build_benchmark_list(suite_filters, bench_filters)
@@ -1352,14 +1490,15 @@ Examples:
         print(f"  Mode    : {mode_label}")
         print(f"  Engines : {', '.join(ENGINE_LABELS.get(e, e) for e in engines)}")
         print(f"  Timeout : {timeout_s}s per run")
+        print(f"  Fresh   : {'yes' if args.fresh else 'no (merge mode)'}")
         if mode == "mir-vs-c" and args.typed:
             print(f"  Typed   : yes (R7RS typed variants included)")
         if mode == "time":
-            print(f"  Output  : {TIME_JSON_PATH}")
+            print(f"  Output  : {results_output}")
         elif mode == "memory":
-            print(f"  Output  : {MEMORY_JSON_PATH}")
+            print(f"  Output  : {results_output}")
         elif mode == "mir-vs-c":
-            print(f"  Output  : {MIR_VS_C_CSV_PATH}")
+            print(f"  Output  : {results_output}")
 
         current_suite = None
         for b in benchmarks:
@@ -1383,6 +1522,8 @@ Examples:
     print(f"  Engines   : {', '.join(ENGINE_LABELS.get(e, e) for e in engines)}")
     print(f"  Runs      : {num_runs}")
     print(f"  Timeout   : {timeout_s}s")
+    print(f"  Output    : {results_output}")
+    print(f"  Fresh     : {'yes' if args.fresh else 'no (merge mode)'}")
     print(f"  Platform  : {platform.system()} {platform.machine()}")
     print(f"  Lambda    : {LAMBDA_EXE}")
 
@@ -1396,9 +1537,9 @@ Examples:
 
     # --- Dispatch to mode ---
     if mode == "time":
-        run_time_mode(benchmarks, engines, num_runs, timeout_s, args.no_save)
+        run_time_mode(benchmarks, engines, num_runs, timeout_s, args.no_save, results_output, args.fresh, metadata)
     elif mode == "memory":
-        run_memory_mode(benchmarks, engines, num_runs, timeout_s, args.no_save)
+        run_memory_mode(benchmarks, engines, num_runs, timeout_s, args.no_save, results_output)
     elif mode == "mir-vs-c":
         run_mirc_mode(benchmarks, num_runs, timeout_s, args.no_save, args.typed)
 

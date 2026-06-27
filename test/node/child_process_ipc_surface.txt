@@ -1,0 +1,8 @@
+fork bad stdio: TypeError:ERR_INVALID_ARG_VALUE
+spawn ipc connected: true
+spawn ipc send type: function
+spawn ipc disconnect type: function
+spawn ipc send return: true
+spawn ipc callback err: true
+spawn ipc disconnected: false
+spawn ipc send after disconnect: false
