@@ -25,6 +25,21 @@ const resolver = new dns.Resolver();
 console.log('resolver constructor:', typeof dns.Resolver);
 console.log('resolver instanceof:', resolver instanceof dns.Resolver);
 console.log('resolver resolve4 method:', typeof resolver.resolve4);
+console.log('resolver getServers method:', typeof resolver.getServers);
+console.log('resolver setServers method:', typeof resolver.setServers);
+console.log('resolver getServers array:', Array.isArray(resolver.getServers()));
+
+resolver.setServers(['127.0.0.1']);
+const resolverServers = resolver.getServers();
+resolverServers.push('8.8.8.8');
+console.log('resolver setServers first:', resolver.getServers()[0]);
+console.log('resolver getServers copy:', resolver.getServers().length === 1);
+
+try {
+  resolver.setServers('127.0.0.1');
+} catch (err) {
+  console.log('resolver setServers bad list:', err && err.code);
+}
 
 resolver.resolve4('localhost', function(err, addresses) {
   console.log('resolver resolve4 err:', err === null);
@@ -33,6 +48,10 @@ resolver.resolve4('localhost', function(err, addresses) {
   const promiseResolver = new dns.promises.Resolver();
   console.log('promises resolver instanceof:', promiseResolver instanceof dns.promises.Resolver);
   console.log('promises resolver resolve4 method:', typeof promiseResolver.resolve4);
+  console.log('promises resolver getServers method:', typeof promiseResolver.getServers);
+  console.log('promises resolver setServers method:', typeof promiseResolver.setServers);
+  promiseResolver.setServers(['127.0.0.1']);
+  console.log('promises resolver setServers first:', promiseResolver.getServers()[0]);
 
   promiseResolver.resolve4('localhost').then(function(promiseAddresses) {
     console.log('promises resolver resolve4 ipv4:', allIPv4(promiseAddresses));

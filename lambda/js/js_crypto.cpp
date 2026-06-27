@@ -68,6 +68,7 @@ static mbedtls_md_type_t crypto_mbedtls_md_for_name(const char* alg);
 static bool crypto_digest_compute_bits(int bits, const uint8_t* data,
                                        int offset, int length, uint8_t* out);
 static bool crypto_string_equals(Item item, const char* expected);
+static Item crypto_throw_invalid_property_value(const char* prop, const char* expected);
 
 static int crypto_digest_len_for_name(const char* alg) {
     int bits = crypto_digest_bits_for_name_ext(alg, true, true, true);
@@ -3733,27 +3734,94 @@ static int crypto_visible_pem_len(const uint8_t* bytes, int len) {
     return len;
 }
 
-static bool crypto_key_export_wants_pem(Item options_item) {
-    if (get_type_id(options_item) != LMD_TYPE_MAP) return false;
+enum CryptoAsymmetricExportFormat {
+    CRYPTO_ASYM_EXPORT_LEGACY_BUFFER = 0,
+    CRYPTO_ASYM_EXPORT_PEM = 1,
+    CRYPTO_ASYM_EXPORT_DER = 2
+};
+
+static bool crypto_asymmetric_export_options(Item options_item, bool is_private,
+                                             int* out_format) {
+    if (!out_format) return false;
+    *out_format = CRYPTO_ASYM_EXPORT_LEGACY_BUFFER;
+    if (crypto_item_is_undefined(options_item) || get_type_id(options_item) == LMD_TYPE_NULL) return true;
+    if (get_type_id(options_item) != LMD_TYPE_MAP) {
+        js_throw_invalid_arg_type("options", "Object", options_item);
+        return false;
+    }
+
     Item format_item = js_property_get(options_item, make_string_item_crypto("format"));
-    return crypto_string_equals(format_item, "pem");
+    if (crypto_string_equals(format_item, "pem")) {
+        *out_format = CRYPTO_ASYM_EXPORT_PEM;
+    } else if (crypto_string_equals(format_item, "der")) {
+        *out_format = CRYPTO_ASYM_EXPORT_DER;
+    } else {
+        crypto_throw_invalid_property_value("options.format", "'pem', 'der'");
+        return false;
+    }
+
+    Item type_item = js_property_get(options_item, make_string_item_crypto("type"));
+    const char* expected_type = is_private ? "pkcs8" : "spki";
+    if (!crypto_string_equals(type_item, expected_type)) {
+        crypto_throw_invalid_property_value("options.type", is_private ? "'pkcs8'" : "'spki'");
+        return false;
+    }
+    return true;
+}
+
+static Item crypto_asymmetric_export_der(const uint8_t* bytes, int len,
+                                         bool is_private) {
+    mbedtls_pk_context pk;
+    mbedtls_pk_init(&pk);
+    Item result = ItemNull;
+    int ret = is_private ?
+        mbedtls_pk_parse_key(&pk, bytes, (size_t)len, NULL, 0,
+            crypto_mbedtls_random, NULL) :
+        mbedtls_pk_parse_public_key(&pk, bytes, (size_t)len);
+    if (ret != 0) {
+        log_debug("crypto: KeyObject DER export parse failed: -0x%04x", -ret);
+        mbedtls_pk_free(&pk);
+        return js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse key");
+    }
+
+    unsigned char der[8192];
+    ret = is_private ?
+        mbedtls_pk_write_key_der(&pk, der, sizeof(der)) :
+        mbedtls_pk_write_pubkey_der(&pk, der, sizeof(der));
+    if (ret < 0) {
+        log_debug("crypto: KeyObject DER export write failed: -0x%04x", -ret);
+        result = js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to export key");
+    } else {
+        result = crypto_buffer_from_bytes(der + sizeof(der) - ret, ret);
+    }
+
+    mbedtls_pk_free(&pk);
+    return result;
 }
 
 extern "C" Item js_crypto_asymmetricKeyExport(Item options_item) {
     Item self = js_get_current_this();
     Item key_bytes = js_property_get(self, make_string_item_crypto("__crypto_private_key__"));
+    bool is_private = true;
     if (crypto_item_is_undefined(key_bytes) || key_bytes.item == ITEM_NULL) {
         key_bytes = js_property_get(self, make_string_item_crypto("__crypto_public_key__"));
+        is_private = false;
     }
 
     const uint8_t* buf = NULL;
     int len = 0;
     if (!get_uint8_buffer(key_bytes, &buf, &len)) return ItemNull;
 
+    int export_format = CRYPTO_ASYM_EXPORT_LEGACY_BUFFER;
+    if (!crypto_asymmetric_export_options(options_item, is_private, &export_format)) return ItemNull;
+
     int visible_len = crypto_visible_pem_len(buf, len);
-    if (crypto_key_export_wants_pem(options_item)) {
+    if (export_format == CRYPTO_ASYM_EXPORT_PEM) {
         String* str = heap_create_name((const char*)(buf ? buf : crypto_empty_bytes), (size_t)visible_len);
         return {.item = s2it(str)};
+    }
+    if (export_format == CRYPTO_ASYM_EXPORT_DER) {
+        return crypto_asymmetric_export_der(buf, len, is_private);
     }
 
     Item result = js_typed_array_new(JS_TYPED_UINT8, visible_len);

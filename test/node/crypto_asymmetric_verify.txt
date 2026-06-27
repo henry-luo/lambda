@@ -5,4 +5,5 @@ rsa verify options base64: true
 rsa keyobject properties: true
 rsa keyobject sign verify: true
 rsa keyobject derive public: true
+rsa keyobject export options: true
 rsa keyobject export instanceof: true

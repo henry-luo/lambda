@@ -80,6 +80,14 @@ assert.strictEqual(crypto.createVerify('sha256')
 console.log('rsa keyobject derive public:', true);
 
 assert.strictEqual(publicKeyObject.export().byteLength > 0, true);
+assert.strictEqual(publicKeyObject.export({ type: 'spki', format: 'pem' }).includes('BEGIN PUBLIC KEY'), true);
+assert.strictEqual(privateKeyObject.export({ type: 'pkcs8', format: 'pem' }).includes('BEGIN PRIVATE KEY'), true);
+assert.strictEqual(Buffer.isBuffer(publicKeyObject.export({ type: 'spki', format: 'der' })), true);
+assert.strictEqual(Buffer.isBuffer(privateKeyObject.export({ type: 'pkcs8', format: 'der' })), true);
+assert.throws(() => publicKeyObject.export({ type: 'pkcs8', format: 'pem' }), {
+  code: 'ERR_INVALID_ARG_VALUE'
+});
+console.log('rsa keyobject export options:', true);
 assert.strictEqual(privateKeyObject instanceof crypto.KeyObject, true);
 assert.strictEqual(publicKeyObject instanceof crypto.KeyObject, true);
 console.log('rsa keyobject export instanceof:', true);
