@@ -20,6 +20,12 @@
 
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" Item js_get_net_namespace(void);
+extern "C" Item js_buffer_from_bytes(const char* data, int len);
+extern "C" int64_t js_array_length(Item array);
+extern "C" Item js_array_get_int(Item array, int64_t index);
+extern "C" bool js_is_typed_array(Item val);
+extern "C" void* js_typed_array_current_data_ptr(Item ta_item);
+extern "C" int js_typed_array_byte_length(Item ta_item);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -888,6 +894,90 @@ extern "C" Item js_tls_createServer(Item options_item, Item handler) {
     return obj;
 }
 
+static bool tls_alpn_item_bytes(Item protocol, const char** data, int* len) {
+    if (!data || !len) return false;
+    *data = NULL;
+    *len = 0;
+
+    if (get_type_id(protocol) == LMD_TYPE_STRING) {
+        String* s = it2s(protocol);
+        if (!s || s->len > 255) return false;
+        *data = s->chars;
+        *len = (int)s->len;
+        return true;
+    }
+
+    if (js_is_typed_array(protocol)) {
+        int byte_len = js_typed_array_byte_length(protocol);
+        if (byte_len < 0 || byte_len > 255) return false;
+        void* ptr = js_typed_array_current_data_ptr(protocol);
+        if (byte_len > 0 && !ptr) return false;
+        *data = (const char*)ptr;
+        *len = byte_len;
+        return true;
+    }
+
+    return false;
+}
+
+static int64_t tls_alpn_protocols_length(Item protocols_item) {
+    if (get_type_id(protocols_item) == LMD_TYPE_ARRAY) {
+        return js_array_length(protocols_item);
+    }
+    Item length_item = js_property_get(protocols_item, make_string_item("length"));
+    if (get_type_id(length_item) != LMD_TYPE_INT) return -1;
+    int64_t len = it2i(length_item);
+    return len >= 0 ? len : -1;
+}
+
+static Item tls_alpn_protocol_at(Item protocols_item, int64_t index) {
+    if (get_type_id(protocols_item) == LMD_TYPE_ARRAY) {
+        return js_array_get_int(protocols_item, index);
+    }
+    char key[32];
+    snprintf(key, sizeof(key), "%lld", (long long)index);
+    return js_property_get(protocols_item, make_string_item(key));
+}
+
+extern "C" Item js_tls_convertALPNProtocols(Item protocols_item, Item out_item) {
+    if (get_type_id(out_item) != LMD_TYPE_MAP) {
+        return make_js_undefined();
+    }
+
+    int64_t count = tls_alpn_protocols_length(protocols_item);
+    if (count < 0) return make_js_undefined();
+
+    int total = 0;
+    for (int64_t i = 0; i < count; i++) {
+        const char* data = NULL;
+        int len = 0;
+        if (!tls_alpn_item_bytes(tls_alpn_protocol_at(protocols_item, i), &data, &len)) {
+            return make_js_undefined();
+        }
+        if (total > 4096 - len - 1) return make_js_undefined();
+        total += len + 1;
+    }
+
+    char encoded[4096];
+    int pos = 0;
+    for (int64_t i = 0; i < count; i++) {
+        const char* data = NULL;
+        int len = 0;
+        if (!tls_alpn_item_bytes(tls_alpn_protocol_at(protocols_item, i), &data, &len)) {
+            return make_js_undefined();
+        }
+        encoded[pos++] = (char)len;
+        if (len > 0) {
+            memcpy(encoded + pos, data, (size_t)len);
+            pos += len;
+        }
+    }
+
+    js_property_set(out_item, make_string_item("ALPNProtocols"),
+                    js_buffer_from_bytes(encoded, total));
+    return make_js_undefined();
+}
+
 // =============================================================================
 // tls Module Namespace
 // =============================================================================
@@ -925,6 +1015,7 @@ extern "C" Item js_get_tls_namespace(void) {
     tls_set_method(tls_namespace, "connect",             (void*)js_tls_connect, -1);
     tls_set_method(tls_namespace, "createServer",        (void*)js_tls_createServer, 2);
     tls_set_method(tls_namespace, "createSecureContext",  (void*)js_tls_createSecureContext, 1);
+    tls_set_method(tls_namespace, "convertALPNProtocols", (void*)js_tls_convertALPNProtocols, 2);
     Item server_fn = tls_set_method(tls_namespace, "Server", (void*)js_tls_createServer, 2); // alias
     Item tls_socket_fn = tls_set_method(tls_namespace, "TLSSocket", (void*)js_tls_TLSSocket, 2);
 

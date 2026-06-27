@@ -503,7 +503,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
 	    ensure-test262-gtest test262-baseline test262-full \
 	    test-ui-automation test-reactive-ui test-redex-baseline \
-	    node-baseline node-full node-update-baseline
+	    node-baseline node-regression-gate node-full node-update-baseline
 
 # Help target - shows available commands
 help:
@@ -1060,6 +1060,11 @@ node-shim-restore:
 node-baseline: build-test node-shim
 	@echo "Running Node.js official test suite..."
 	@./test/test_node_gtest.exe --baseline-only
+
+# Node.js official: fast regression gate for currently locked passing tests
+node-regression-gate: build-test node-shim
+	@echo "Running Node.js official regression gate..."
+	@./test/test_node_gtest.exe --baseline-only --gtest_brief=1
 
 # Node.js official: run full enabled official Node.js test sweep
 node-full: build-test node-shim

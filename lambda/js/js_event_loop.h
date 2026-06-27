@@ -25,6 +25,7 @@ int  js_event_loop_drain(void);
 void js_event_loop_shutdown(void);
 void js_event_loop_set_auto_close_mode(bool enabled);
 bool js_event_loop_auto_close_mode(void);
+bool js_event_loop_is_shutting_down(void);
 
 // =============================================================================
 // Microtask Queue

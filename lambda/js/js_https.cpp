@@ -35,8 +35,11 @@ extern "C" Item js_http_get(Item options_item, Item callback);
 
 // Forward decls from js_tls.cpp
 extern "C" Item js_tls_createServer(Item options, Item handler);
+extern "C" Item js_tls_convertALPNProtocols(Item protocols_item, Item out_item);
 
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
+extern "C" Item js_buffer_from_bytes(const char* data, int len);
+extern "C" Item js_get_this(void);
 extern "C" Item js_http_Agent(Item);
 extern "C" Item js_http_agent_destroy(void);
 extern "C" Item js_http_agent_createConnection(Item options, Item callback);
@@ -391,6 +394,60 @@ extern "C" Item js_https_Agent(Item options) {
     return agent;
 }
 
+static bool https_string_equals(Item item, const char* value) {
+    if (get_type_id(item) != LMD_TYPE_STRING || !value) return false;
+    String* s = it2s(item);
+    int len = (int)strlen(value);
+    return s && s->len == (size_t)len && memcmp(s->chars, value, (size_t)len) == 0;
+}
+
+static Item https_default_alpn_protocols(void) {
+    static const char alpn[] = { 8, 'h', 't', 't', 'p', '/', '1', '.', '1' };
+    return js_buffer_from_bytes(alpn, (int)sizeof(alpn));
+}
+
+static Item js_https_server_listeners(Item event_item) {
+    Item self = js_get_this();
+    Item result = js_array_new(0);
+    if (!https_string_equals(event_item, "request")) return result;
+
+    Item listener = js_property_get(self, make_string_item("__https_request_listener__"));
+    if (get_type_id(listener) == LMD_TYPE_FUNC) js_array_push(result, listener);
+
+    Item on_request = js_property_get(self, make_string_item("__on_request__"));
+    if (get_type_id(on_request) == LMD_TYPE_FUNC && on_request.item != listener.item) {
+        js_array_push(result, on_request);
+    }
+    return result;
+}
+
+static void https_server_apply_alpn_options(Item server, Item options) {
+    if (get_type_id(server) != LMD_TYPE_MAP) return;
+
+    if (get_type_id(options) == LMD_TYPE_MAP) {
+        Item alpn_callback = js_property_get(options, make_string_item("ALPNCallback"));
+        if (!is_missing_value(alpn_callback)) {
+            js_property_set(server, make_string_item("ALPNCallback"), alpn_callback);
+            return;
+        }
+
+        Item alpn_protocols = js_property_get(options, make_string_item("ALPNProtocols"));
+        if (!is_missing_value(alpn_protocols)) {
+            Item encoded = js_new_object();
+            js_tls_convertALPNProtocols(alpn_protocols, encoded);
+            Item encoded_protocols = js_property_get(encoded, make_string_item("ALPNProtocols"));
+            if (!is_missing_value(encoded_protocols)) {
+                js_property_set(server, make_string_item("ALPNProtocols"), encoded_protocols);
+            } else {
+                js_property_set(server, make_string_item("ALPNProtocols"), alpn_protocols);
+            }
+            return;
+        }
+    }
+
+    js_property_set(server, make_string_item("ALPNProtocols"), https_default_alpn_protocols());
+}
+
 // https.createServer(options, requestListener)
 // options should contain {key, cert} plus optional TLS options
 extern "C" Item js_https_createServer(Item options, Item handler) {
@@ -404,6 +461,14 @@ extern "C" Item js_https_createServer(Item options, Item handler) {
                         (Item){.item = b2it(true)});
         // store TLS options for later use in listen()
         js_property_set(server, make_string_item("__tls_options__"), options);
+        if (get_type_id(options) == LMD_TYPE_FUNC) {
+            js_property_set(server, make_string_item("__https_request_listener__"), options);
+        } else if (get_type_id(handler) == LMD_TYPE_FUNC) {
+            js_property_set(server, make_string_item("__https_request_listener__"), handler);
+        }
+        js_property_set(server, make_string_item("listeners"),
+                        js_new_function((void*)js_https_server_listeners, 1));
+        https_server_apply_alpn_options(server, options);
     }
     return server;
 }

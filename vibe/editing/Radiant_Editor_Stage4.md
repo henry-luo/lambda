@@ -1,7 +1,7 @@
 # Radiant Rich Editor — Stage 4: Inline Drawing Blocks
 
-**Date:** 2026-06-25
-**Status:** Proposal
+**Date:** 2026-06-25 · **Updated:** 2026-06-27
+**Status:** Proposal — **design validated** in a JS reference implementation (`test/editor-js/`, drawing layer green across 392 fixtures); **Lambda drawing-layer port pending**. See [§0.5 Progress](#05-implementation-progress--2026-06-27).
 **Builds on:** [Radiant_Rich_Text_Editing.md](Radiant_Rich_Text_Editing.md) (Stage 1),
 [Radiant_Rich_Text_Editing2.md](Radiant_Rich_Text_Editing2.md) (Stage 2),
 [Radiant_Rich_Text_Editor3.md](Radiant_Rich_Text_Editor3.md) (Stage 3),
@@ -44,6 +44,47 @@
 - **Canvas mode** (focused drawing): tool palette appears, key bindings change (V=select, R=rect, O=ellipse, L=line, C=connector, T=text, H=hand, Esc=back to select), text caret hides; clicking outside the drawing or pressing Esc twice returns to flow mode.
 
 **What does *not* change.** `mod_doc.ls`, `mod_step.ls`, `mod_source_pos.ls`, `mod_transaction.ls`, `mod_history.ls` extend (new schema entries, new commands) but don't fork. The render pipeline is `view`/`edit` templates as already designed. The DOM bridge keeps its current shape; we add a *geometric* hit-test path alongside the existing tree hit-test.
+
+---
+
+## 0.5 Implementation Progress — 2026-06-27
+
+**Strategy shift since this proposal was written.** Rather than implement Stage 4 directly in Lambda, we built a **parallel JS/TypeScript reference implementation** (`test/editor-js/`) **first** — to validate the design end-to-end and serve as the executable **oracle** for the eventual Lambda port. This de-risked the design (data model, step-lowering, tool machine, routing) before committing it to Lambda, and gave us a deep regression corpus.
+
+### What's validated — JS reference (`test/editor-js/`), green
+
+The Stage-4 drawing model is **fully prototyped and passing** in the reference. Every locked design decision in this doc now has a working implementation:
+
+| Stage-4 design element | JS reference module / status |
+|---|---|
+| §3 Data model (`drawing`/`layer`/`shape`/`connector`/`group`/`text-frame`, stable ids) | `src/drawing/schema.ts` ✓ |
+| §5 Step-lowering — shape edits → `set_attr`/`replace`, **zero new step kinds** | `src/drawing/commands.ts` ✓ — `insertShape`, `moveShapes`, `resizeShape`, `rotateShape`, `setShapeAttr`, `deleteShapes`, `bringToFront`, `sendToBack` |
+| §6 Tool state machine | `src/drawing/tools.ts` ✓ |
+| §7 Geometric hit-test + per-shape geometry | `src/drawing/hit-test.ts`, `src/drawing/geom.ts` ✓ |
+| §9 Connector routing | `src/drawing/router.ts`, `src/drawing/shape-utils.ts` ✓ |
+| §14 Test suite | **392 drawing fixtures** (`test/tier_0_drawing/`), part of **1841 passing** overall |
+
+The **"zero new step kinds"** rule (§5.1) and an **invert-roundtrip invariant** (every recorded transaction inverts to restore the input) hold across all 392 drawing fixtures — empirically confirming the §5.2 history/collab payoff. The JS reference also covers the surrounding text editor, the Chromium-editing conformance harvest, and a divergence report (informational gauge).
+
+### Lambda port status — the actual Stage-4 deliverable
+
+The port to `lambda/package/editor/` proceeds **text-first**, each step verified against the JS oracle via a bridge (`test/editor-js/tools/export-lambda-oracle.ts` → `test/lambda/editor/oracle_poc.ls`):
+
+| Layer | Lambda port status |
+|---|---|
+| Text model / steps / commands (Stages 1-3 foundation) | **done** — 15 module tests + **606/606** oracle cases match JS |
+| Marks → flat value-carrying form (`[{name,value}]`) | **done** |
+| List-split + empty-block convention aligned to JS | **done** |
+| **Drawing layer** — `mod_geom`, `mod_tools`, `mod_router`, `mod_drawing_schema`, `mod_drawing_commands`, `mod_selection_handles`, `mod_drawing_templates`, `mod_snap`, `mod_clipboard_drawing` (§13.1) | **not yet ported** — the next major effort; the JS `src/drawing/*` modules are their spec |
+
+### Phase map (§15) against reality
+
+Phases **4a-4g are prototyped in the JS reference** (data model, shape tools, routing, snap, groups/z-order, clipboard all exist and are tested there). What remains for Stage 4 proper:
+
+1. **Port the drawing layer to Lambda** (§13.1 modules), validated case-by-case by extending the oracle bridge to the 392 drawing fixtures (today the bridge covers the text commands; drawing commands are the next mappings to add).
+2. **Live-Radiant integration** the headless JS reference can't cover: the C `canvas_bridge.hpp` (§13.3), geometric hit-test in `radiant/event.cpp`, and the direct-DOM-patch fast path for drag (§8.3 / phase 4h).
+
+**Net:** the design in this doc is no longer speculative — it has a complete, green executable model. Stage 4 is now a *porting + integration* effort against a fixed reference, not a from-scratch build.
 
 ---
 

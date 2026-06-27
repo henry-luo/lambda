@@ -32,6 +32,17 @@ console.log('unzip result:', unzipped.toString());
 // zlib.constants
 console.log('Z_NO_FLUSH:', zlib.constants.Z_NO_FLUSH === 0);
 console.log('Z_FINISH:', zlib.constants.Z_FINISH === 4);
+console.log('codes frozen:', Object.isFrozen(zlib.codes));
+(function() {
+  'use strict';
+  try {
+    zlib.codes = { Z_OK: 1 };
+    console.log('codes binding immutable:', false);
+  } catch (e) {
+    console.log('codes binding immutable:', e instanceof TypeError);
+  }
+})();
+console.log('Z_OK code:', zlib.codes.Z_OK === 0);
 
 // larger data roundtrip
 var large = Buffer.from('The quick brown fox jumps over the lazy dog. Repeated. The quick brown fox jumps over the lazy dog.');

@@ -4033,6 +4033,57 @@ static Item crypto_asymmetric_key_object_from_bytes(const uint8_t* key, int key_
     return obj;
 }
 
+static bool crypto_keyobject_material(Item obj, const uint8_t** out_buf,
+                                      int* out_len, const char** out_kind) {
+    if (!out_buf || !out_len || !out_kind || get_type_id(obj) != LMD_TYPE_MAP) return false;
+    *out_buf = NULL;
+    *out_len = 0;
+    *out_kind = NULL;
+
+    Item secret = js_property_get(obj, make_string_item_crypto("__crypto_secret_key__"));
+    if (get_uint8_buffer(secret, out_buf, out_len)) {
+        *out_kind = "secret";
+        return true;
+    }
+
+    Item public_key = js_property_get(obj, make_string_item_crypto("__crypto_public_key__"));
+    if (get_uint8_buffer(public_key, out_buf, out_len)) {
+        *out_kind = "public";
+        if (*out_len > 0 && (*out_buf)[*out_len - 1] == 0) (*out_len)--;
+        return true;
+    }
+
+    Item private_key = js_property_get(obj, make_string_item_crypto("__crypto_private_key__"));
+    if (get_uint8_buffer(private_key, out_buf, out_len)) {
+        *out_kind = "private";
+        if (*out_len > 0 && (*out_buf)[*out_len - 1] == 0) (*out_len)--;
+        return true;
+    }
+    return false;
+}
+
+extern "C" Item js_crypto_keyObjectEquals(Item other_item) {
+    Item self = js_get_current_this();
+    const uint8_t* self_buf = NULL;
+    const uint8_t* other_buf = NULL;
+    int self_len = 0;
+    int other_len = 0;
+    const char* self_kind = NULL;
+    const char* other_kind = NULL;
+
+    if (!crypto_keyobject_material(self, &self_buf, &self_len, &self_kind)) {
+        return js_throw_type_error_code("ERR_INVALID_THIS", "Value of \"this\" must be of type KeyObject");
+    }
+    if (!crypto_keyobject_material(other_item, &other_buf, &other_len, &other_kind)) {
+        return js_throw_invalid_arg_type("otherKeyObject", "KeyObject", other_item);
+    }
+
+    bool equal = strcmp(self_kind, other_kind) == 0 &&
+                 self_len == other_len &&
+                 (self_len == 0 || memcmp(self_buf, other_buf, (size_t)self_len) == 0);
+    return (Item){.item = b2it(equal)};
+}
+
 extern "C" Item js_crypto_createPrivateKey(Item key_item) {
     uint8_t* key = NULL;
     int key_len = 0;
@@ -4179,8 +4230,8 @@ static bool crypto_keypair_options(Item options_item, int* out_modulus_bits, int
     if (!crypto_item_to_integer(modulus_item, "options.modulusLength", out_modulus_bits)) {
         return false;
     }
-    if (*out_modulus_bits < 1024) {
-        js_throw_out_of_range("options.modulusLength", ">= 1024", modulus_item);
+    if (*out_modulus_bits < 512) {
+        js_throw_out_of_range("options.modulusLength", ">= 512", modulus_item);
         return false;
     }
 
@@ -5792,8 +5843,14 @@ extern "C" Item js_get_crypto_namespace(void) {
     js_property_set(ecdh_ctor, make_string_item_crypto("convertKey"),
         js_new_function((void*)js_ecdh_convertKey, 5));
     js_property_set(crypto_namespace, make_string_item_crypto("ECDH"), ecdh_ctor);
+    Item keyobject_ctor = js_new_function((void*)js_crypto_KeyObject, 0);
+    Item keyobject_proto = js_property_get(keyobject_ctor, make_string_item_crypto("prototype"));
+    if (get_type_id(keyobject_proto) == LMD_TYPE_MAP) {
+        js_property_set(keyobject_proto, make_string_item_crypto("equals"),
+            js_new_function((void*)js_crypto_keyObjectEquals, 1));
+    }
     js_property_set(crypto_namespace, make_string_item_crypto("KeyObject"),
-        js_new_function((void*)js_crypto_KeyObject, 0));
+        keyobject_ctor);
 
     Item default_key = make_string_item_crypto("default");
     js_property_set(crypto_namespace, default_key, crypto_namespace);

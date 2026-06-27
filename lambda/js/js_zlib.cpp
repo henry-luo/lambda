@@ -21,6 +21,8 @@ extern "C" Item js_transform_new(Item opts);
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" Item js_readable_push(Item self, Item chunk);
 extern "C" void js_next_tick_enqueue(Item callback);
+extern "C" void js_mark_non_writable(Item object, Item name);
+extern "C" void js_mark_non_configurable(Item object, Item name);
 
 enum ZlibTransformMode {
     ZLIB_TRANSFORM_GZIP = 1,
@@ -1112,7 +1114,10 @@ extern "C" Item js_get_zlib_namespace(void) {
     js_property_set(constants, make_string_item("INFLATERAW"),        (Item){.item = i2it(6)});
     js_property_set(constants, make_string_item("UNZIP"),             (Item){.item = i2it(7)});
     js_object_freeze(constants);
-    js_property_set(zlib_namespace, make_string_item("constants"), constants);
+    Item constants_key = make_string_item("constants");
+    js_property_set(zlib_namespace, constants_key, constants);
+    js_mark_non_writable(zlib_namespace, constants_key);
+    js_mark_non_configurable(zlib_namespace, constants_key);
 
     // codes — error code map (frozen)
     Item codes = js_new_object();
@@ -1126,7 +1131,10 @@ extern "C" Item js_get_zlib_namespace(void) {
     js_property_set(codes, make_string_item("Z_BUF_ERROR"),       (Item){.item = i2it(Z_BUF_ERROR)});
     js_property_set(codes, make_string_item("Z_VERSION_ERROR"),   (Item){.item = i2it(Z_VERSION_ERROR)});
     js_object_freeze(codes);
-    js_property_set(zlib_namespace, make_string_item("codes"), codes);
+    Item codes_key = make_string_item("codes");
+    js_property_set(zlib_namespace, codes_key, codes);
+    js_mark_non_writable(zlib_namespace, codes_key);
+    js_mark_non_configurable(zlib_namespace, codes_key);
 
     Item default_key = make_string_item("default");
     js_property_set(zlib_namespace, default_key, zlib_namespace);
