@@ -61,7 +61,7 @@ let r2 = rebase_steps(local2, remote2)
 let ms = r2.kept[0]
 "r2 path[0]:";     ms.path[0] == 2
 "r2 path[1]:";     ms.path[1] == 0
-"r2 mark:";        ms.mark == 'strong'
+"r2 mark:";        ms.name == 'strong'
 
 // ---------------------------------------------------------------------------
 // Drop: a local replace_text whose container was concurrently removed.

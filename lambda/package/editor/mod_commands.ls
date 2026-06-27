@@ -51,6 +51,31 @@ fn state_default_block(state) =>
 
 fn state_hard_break(state) => schema_hard_break(state_schema(state))
 
+// True iff a block's schema content permits inline content (text leaves) — e.g.
+// p/heading/li/td. Used so typing into an empty []-block inserts a text leaf
+// there (never among block children / at the doc root). Recurses into `any:[…]`.
+fn term_allows_inline(t) =>
+  if (t.role != null) { t.role == 'inline' or t.role == 'text' }
+  else if (t.any != null) { any_allows_inline(t.any, 0, len(t.any)) }
+  else { false }
+fn any_allows_inline(terms, i, n) {
+  if (i >= n) { false }
+  else if (term_allows_inline(terms[i])) { true }
+  else { any_allows_inline(terms, i + 1, n) }
+}
+fn block_allows_inline(state, tag) {
+  let schema = state.schema
+  if (schema == null) {
+    tag == 'p' or tag == 'paragraph' or tag == 'li' or tag == 'list_item' or tag == 'heading' or
+    tag == 'h1' or tag == 'h2' or tag == 'h3' or tag == 'h4' or tag == 'h5' or tag == 'h6' or
+    tag == 'td' or tag == 'th'
+  } else {
+    let e = schema[tag]
+    if (e == null or e.content == null) { false }
+    else { any_allows_inline(e.content, 0, len(e.content)) }
+  }
+}
+
 fn state_image_tag(state) =>
   if (state_schema(state).img != null and state_schema(state).image == null) { 'img' } else { 'image' }
 
@@ -457,7 +482,16 @@ pub fn cmd_insert_text(state, txt) {
     let hi = sel_hi(sel)
     let stored_marks = state.stored_marks
     let leaf = node_at(state.doc, lo.path)
-    if (stored_marks != null and len(txt) > 0 and leaf != null and is_text(leaf) and len(lo.path) > 0) {
+    if (leaf != null and is_node(leaf) and len(txt) > 0 and len(lo.path) >= 1 and block_allows_inline(state, leaf.tag)) {
+      // node-position caret in an inline-content block (e.g. empty <p>/<li>) —
+      // insert a text leaf there rather than mangling the block.
+      let off = if (lo.offset < len(leaf.content)) { lo.offset } else { len(leaf.content) }
+      let marks = if (stored_marks != null) { stored_marks } else { [] }
+      let tx0 = tx_begin(state.doc, sel)
+      let tx1 = tx_step(tx0, step_replace(lo.path, off, off, [text_marked(txt, marks)]))
+      tx_set_selection(tx1, caret(pos([*lo.path, off], len(txt))))
+    }
+    else if (stored_marks != null and len(txt) > 0 and leaf != null and is_text(leaf) and len(lo.path) > 0) {
       let leaf_parent = parent_path(lo.path)
       let leaf_index = last_index(lo.path)
       let before = nonempty_text_leaf(slice(leaf.text, 0, lo.offset), leaf.marks)
@@ -749,10 +783,22 @@ pub fn cmd_move_text_selection(state, source_selection, target_pos) {
 // edge text child.
 
 fn delete_range(state, lo, hi) {
-  let step = step_replace_text(lo.path, lo.offset, hi.offset, "")
-  let tx0  = tx_begin(state.doc, state.selection)
-  let tx1  = tx_step(tx0, step)
-  tx_set_selection(tx1, caret(lo))
+  let leaf = node_at(state.doc, lo.path)
+  // Whole leaf emptied → drop the leaf (block becomes empty []), matching JS
+  // rather than leaving an empty text("") child.
+  if (leaf != null and is_text(leaf) and lo.offset == 0 and hi.offset == len(leaf.text) and len(lo.path) >= 1) {
+    let block_path = parent_path(lo.path)
+    let leaf_idx = last_index(lo.path)
+    let tx0 = tx_begin(state.doc, state.selection)
+    let tx1 = tx_step(tx0, step_replace(block_path, leaf_idx, leaf_idx + 1, []))
+    tx_set_selection(tx1, caret(pos(block_path, leaf_idx)))
+  }
+  else {
+    let step = step_replace_text(lo.path, lo.offset, hi.offset, "")
+    let tx0  = tx_begin(state.doc, state.selection)
+    let tx1  = tx_step(tx0, step)
+    tx_set_selection(tx1, caret(lo))
+  }
 }
 
 fn delete_all(state) => replace_all_with_text(state, "")
@@ -778,6 +824,22 @@ fn last_text_pos_at(n, path) {
 fn block_merge_allowed(a, b) =>
   is_node(a) and is_node(b) and a.tag == b.tag
 
+// Merge adjacent same-mark text leaves (keeps the joined block's inline content
+// canonical, e.g. ["a","b"] → ["ab"] at a merge seam) — matches JS mergeInlines.
+fn merge_adjacent_text_at(content, i, n, acc) {
+  if (i >= n) { acc }
+  else {
+    let c = content[i]
+    let last = if (len(acc) > 0) { acc[len(acc) - 1] } else { null }
+    if (last != null and is_text(last) and is_text(c) and marks_equal(last.marks, c.marks)) {
+      merge_adjacent_text_at(content, i + 1, n, list_set(acc, len(acc) - 1, {kind: 'text', text: last.text ++ c.text, marks: last.marks}))
+    } else {
+      merge_adjacent_text_at(content, i + 1, n, [*acc, c])
+    }
+  }
+}
+fn merge_adjacent_text(content) => merge_adjacent_text_at(content, 0, len(content), [])
+
 fn merge_blocks_backward(state, p) {
   if (len(p.path) < 2 or last_index(p.path) != 0) { null }
   else {
@@ -793,7 +855,7 @@ fn merge_blocks_backward(state, p) {
         let caret_pos = last_text_pos_at(prev, [*parent_path(block_path), block_index - 1])
         if (caret_pos == null) { null }
         else {
-          let merged = node_attrs(prev.tag, prev.attrs, list_concat(prev.content, block.content))
+          let merged = node_attrs(prev.tag, prev.attrs, merge_adjacent_text(list_concat(prev.content, block.content)))
           let tx0 = tx_begin(state.doc, state.selection)
           let tx1 = tx_step(tx0, step_replace(parent_path(block_path), block_index - 1, block_index + 1, [merged]))
           tx_set_selection(tx1, caret(caret_pos))
@@ -815,7 +877,7 @@ fn merge_blocks_forward(state, p) {
       let next = parent.content[block_index + 1]
       if (not block_merge_allowed(block, next)) { null }
       else {
-        let merged = node_attrs(block.tag, block.attrs, list_concat(block.content, next.content))
+        let merged = node_attrs(block.tag, block.attrs, merge_adjacent_text(list_concat(block.content, next.content)))
         let tx0 = tx_begin(state.doc, state.selection)
         let tx1 = tx_step(tx0, step_replace(parent_path(block_path), block_index, block_index + 2, [merged]))
         tx_set_selection(tx1, caret(p))
@@ -1044,7 +1106,7 @@ fn has_text_leaf_children(children, i, n) {
 }
 
 fn any_unmarked_text(n, mark) {
-  if (is_text(n)) { not has_mark(n.marks, mark) }
+  if (is_text(n)) { not has_mark(n.marks, mark.name) }
   else if (is_node(n)) { any_unmarked_text_children(n.content, mark, 0, len(n.content)) }
   else { false }
 }
@@ -1057,8 +1119,8 @@ fn any_unmarked_text_children(children, mark, i, n) {
 
 fn collect_mark_steps(n, path, mark, adding, acc) {
   if (is_text(n)) {
-    if (adding and not has_mark(n.marks, mark)) { [*acc, step_add_mark(path, mark)] }
-    else if (not adding and has_mark(n.marks, mark)) { [*acc, step_remove_mark(path, mark)] }
+    if (adding and not has_mark(n.marks, mark.name)) { [*acc, step_add_mark(path, mark.name, mark.value)] }
+    else if (not adding and has_mark(n.marks, mark.name)) { [*acc, step_remove_mark(path, mark.name)] }
     else { acc }
   }
   else if (is_node(n)) { collect_mark_steps_children(n.content, path, mark, adding, 0, len(n.content), acc) }
@@ -1077,7 +1139,7 @@ fn range_any_unmarked_leaf(doc, parent_path0, mark, i, end_i) {
   if (i > end_i) { false }
   else {
     let leaf = text_leaf_or_null(doc, [*parent_path0, i])
-    if (leaf != null and not has_mark(leaf.marks, mark)) { true }
+    if (leaf != null and not has_mark(leaf.marks, mark.name)) { true }
     else { range_any_unmarked_leaf(doc, parent_path0, mark, i + 1, end_i) }
   }
 }
@@ -1088,15 +1150,15 @@ fn collect_range_mark_steps(doc, parent_path0, mark, adding, i, end_i, acc) {
     let path = [*parent_path0, i]
     let leaf = text_leaf_or_null(doc, path)
     let next = if (leaf == null) { acc }
-      else if (adding and not has_mark(leaf.marks, mark)) { [*acc, step_add_mark(path, mark)] }
-      else if (not adding and has_mark(leaf.marks, mark)) { [*acc, step_remove_mark(path, mark)] }
+      else if (adding and not has_mark(leaf.marks, mark.name)) { [*acc, step_add_mark(path, mark.name, mark.value)] }
+      else if (not adding and has_mark(leaf.marks, mark.name)) { [*acc, step_remove_mark(path, mark.name)] }
       else { acc }
     collect_range_mark_steps(doc, parent_path0, mark, adding, i + 1, end_i, next)
   }
 }
 
 fn mark_list_for(marks, mark, adding) =>
-  if (adding) { with_mark(marks, mark) } else { without_mark(marks, mark) }
+  if (adding) { with_mark(marks, mark.name, mark.value) } else { without_mark(marks, mark.name) }
 
 fn mark_text_leaf_node(leaf, mark, adding) =>
   text_marked(leaf.text, mark_list_for(leaf.marks, mark, adding))
@@ -1121,7 +1183,7 @@ fn mark_node_children(children, mark, adding, i, n, acc) {
 }
 
 fn selected_leaf_range_any_unmarked(leaf, from, to, mark) =>
-  leaf != null and is_text(leaf) and to > from and not has_mark(leaf.marks, mark)
+  leaf != null and is_text(leaf) and to > from and not has_mark(leaf.marks, mark.name)
 
 fn selected_node_any_unmarked(n, mark) => any_unmarked_text(n, mark)
 
@@ -1239,17 +1301,18 @@ fn toggle_mark_node(state, mark) {
   }
 }
 
-pub fn cmd_toggle_stored_mark(state, mark) {
+pub fn cmd_toggle_stored_mark(state, name, value) {
   let sel = state.selection
   if (sel == null or not sel_collapsed(sel)) { null }
   else {
     let base = state_marks_at(state, sel.anchor.path)
-    let next = if (has_mark(base, mark)) { without_mark(base, mark) } else { with_mark(base, mark) }
+    let next = if (has_mark(base, name)) { without_mark(base, name) } else { with_mark(base, name, value) }
     tx_set_meta(tx_set_meta(tx_begin(state.doc, sel), "storedMarks", next), "addToHistory", false)
   }
 }
 
-pub fn cmd_toggle_mark(state, mark) {
+pub fn cmd_toggle_mark(state, name, value) {
+  let mark = {name: name, value: value}
   let sel = state.selection
   if (sel == null) { null }
   else if (sel.kind == 'all') { toggle_mark_all(state, mark) }
@@ -1257,15 +1320,15 @@ pub fn cmd_toggle_mark(state, mark) {
   else if (not sel_collapsed(sel) and sel_same_parent_leaves(sel)) { toggle_mark_same_parent_range(state, mark) }
   else if (sel_top_block_range(sel)) { toggle_mark_top_block_range(state, mark) }
   else if (not sel_single_leaf(sel)) { null }
-  else if (sel_collapsed(sel)) { cmd_toggle_stored_mark(state, mark) }
+  else if (sel_collapsed(sel)) { cmd_toggle_stored_mark(state, name, value) }
   else {
     let leaf = node_at(state.doc, sel.anchor.path)
     if (leaf == null or not is_text(leaf)) { null }
     else {
-      let step = if (has_mark(leaf.marks, mark)) {
-        step_remove_mark(sel.anchor.path, mark)
+      let step = if (has_mark(leaf.marks, name)) {
+        step_remove_mark(sel.anchor.path, name)
       } else {
-        step_add_mark(sel.anchor.path, mark)
+        step_add_mark(sel.anchor.path, name, value)
       }
       let tx0 = tx_begin(state.doc, sel)
       tx_step(tx0, step)
@@ -1329,20 +1392,11 @@ pub fn cmd_replace_all(state, needle, replacement) {
   }
 }
 
-pub fn cmd_format_bold(state) {
-  let mark = 'strong'
-  cmd_toggle_mark(state, mark)
-}
+pub fn cmd_format_bold(state) => cmd_toggle_mark(state, 'strong', true)
 
-pub fn cmd_format_italic(state) {
-  let mark = 'em'
-  cmd_toggle_mark(state, mark)
-}
+pub fn cmd_format_italic(state) => cmd_toggle_mark(state, 'em', true)
 
-pub fn cmd_format_underline(state) {
-  let mark = 'u'
-  cmd_toggle_mark(state, mark)
-}
+pub fn cmd_format_underline(state) => cmd_toggle_mark(state, 'u', true)
 
 // ---------------------------------------------------------------------------
 // cmd_set_block_type — re-tag the immediate block ancestor of the caret
@@ -1747,10 +1801,15 @@ pub fn cmd_delete_table_column(state) {
 // command emits a single `replace` step on the grand-parent that swaps one
 // child for two, plus a caret pointing at offset 0 of the new block's leaf.
 
-fn split_right_tag(state, block, cut, text_len) {
-  let default_block = state_default_block(state)
-  if (cut == text_len and block.tag != default_block) { default_block } else { block.tag }
-}
+// Non-repeating blocks (headings/title) split into the schema default block;
+// every other block (paragraph, list_item, blockquote, …) splits into itself —
+// matching JS defaultSplitBlock. (cut/text_len kept for call-site compatibility.)
+fn is_non_repeating_block(tag) =>
+  tag == 'heading' or tag == 'title' or
+  tag == 'h1' or tag == 'h2' or tag == 'h3' or tag == 'h4' or tag == 'h5' or tag == 'h6'
+
+fn split_right_tag(state, block, cut, text_len) =>
+  if (is_non_repeating_block(block.tag)) { state_default_block(state) } else { block.tag }
 
 fn split_right_attrs(block, right_tag) =>
   if (right_tag == block.tag) { block.attrs } else { [] }
@@ -1783,14 +1842,14 @@ fn split_block_text_selection(state) {
     let block_idx = last_index(block_path)
     let left_prefix = list_slice(block.content, 0, span.lo_index)
     let right_suffix = list_slice(block.content, span.hi_index + 1, len(block.content))
-    let left_content = nonempty_or_empty_text(list_concat(left_prefix, span.before_edge), span.lo_leaf.marks)
-    let right_content = nonempty_or_empty_text(list_concat(span.after_edge, right_suffix), span.hi_leaf.marks)
-    let right_tag = split_right_tag(state, block, if (len(span.after_edge) == 0 and len(right_suffix) == 0) { len(span.hi_leaf.text) } else { 0 }, len(span.hi_leaf.text))
+    let left_content = list_concat(left_prefix, span.before_edge)
+    let right_content = list_concat(span.after_edge, right_suffix)
+    let right_tag = split_right_tag(state, block, 0, len(span.hi_leaf.text))
     let left_block = node_attrs(block.tag, block.attrs, left_content)
     let right_block = node_attrs(right_tag, split_right_attrs(block, right_tag), right_content)
     let tx0 = tx_begin(state.doc, state.selection)
     let tx1 = tx_step(tx0, step_replace(grand_path, block_idx, block_idx + 1, [left_block, right_block]))
-    tx_set_selection(tx1, caret(pos([*grand_path, block_idx + 1, 0], 0)))
+    tx_set_selection(tx1, caret(first_caret_pos_in(right_block, [*grand_path, block_idx + 1])))
   }
 }
 
@@ -1844,14 +1903,14 @@ fn split_block_collapsed_selection(state) {
       let block_idx = last_index(block_path)
       let left_prefix = list_slice(block.content, 0, top_index)
       let right_suffix = list_slice(block.content, top_index + 1, len(block.content))
-      let left_content = nonempty_or_empty_text(list_concat(left_prefix, split.left), leaf.marks)
-      let right_content = nonempty_or_empty_text(list_concat(split.right, right_suffix), leaf.marks)
-      let right_tag = split_right_tag(state, block, if (len(split.right) == 0 and len(right_suffix) == 0) { len(leaf.text) } else { 0 }, len(leaf.text))
+      let left_content = list_concat(left_prefix, split.left)
+      let right_content = list_concat(split.right, right_suffix)
+      let right_tag = split_right_tag(state, block, 0, len(leaf.text))
       let left_block = node_attrs(block.tag, block.attrs, left_content)
       let right_block = node_attrs(right_tag, split_right_attrs(block, right_tag), right_content)
       let tx0 = tx_begin(state.doc, sel)
       let tx1 = tx_step(tx0, step_replace(grand_path, block_idx, block_idx + 1, [left_block, right_block]))
-      tx_set_selection(tx1, caret(pos([*grand_path, block_idx + 1, 0], 0)))
+      tx_set_selection(tx1, caret(first_caret_pos_in(right_block, [*grand_path, block_idx + 1])))
     }
   }
 }
@@ -1865,10 +1924,9 @@ fn split_block_node_selection(state) {
   else {
     let grand_path = parent_path(block_path)
     let block_idx = last_index(block_path)
-    let marks = block_boundary_marks(block, p.offset)
-    let left_content = nonempty_or_empty_text(list_slice(block.content, 0, p.offset), marks)
-    let right_content = nonempty_or_empty_text(list_slice(block.content, p.offset, len(block.content)), marks)
-    let right_tag = if (p.offset >= len(block.content) and block.tag != state_default_block(state)) { state_default_block(state) } else { block.tag }
+    let left_content = list_slice(block.content, 0, p.offset)
+    let right_content = list_slice(block.content, p.offset, len(block.content))
+    let right_tag = split_right_tag(state, block, 0, 0)
     let left_block = node_attrs(block.tag, block.attrs, left_content)
     let right_block = node_attrs(right_tag, split_right_attrs(block, right_tag), right_content)
     let tx0 = tx_begin(state.doc, sel)

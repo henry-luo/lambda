@@ -33,7 +33,7 @@ let editor3 = edit_exec(editor2, edit_cmd_history_redo())
 "exec redo doc:"; doc_text(editor3.doc) == "Hello!"
 "exec redo selection:"; editor3.selection.anchor.offset == 6
 
-let editor4 = edit_exec(editor0, edit_cmd_toggle_mark('strong'))
+let editor4 = edit_exec(editor0, edit_cmd_toggle_mark('strong', true))
 "exec stored mark:"; has_mark(editor4.stored_marks, 'strong')
 "exec stored history:"; len(editor4.history.undo) == 0
 
@@ -65,7 +65,7 @@ let cross_delete_editor = edit_exec(cross_editor, edit_cmd_delete_backward())
 let cross_paste_editor = edit_exec(cross_editor, edit_cmd_paste_html("<p>One</p><p>Two</p>", "One\nTwo"))
 "exec cross paste count:"; len(cross_paste_editor.doc.content) == 2
 "exec cross paste doc:"; [for (n in cross_paste_editor.doc.content) doc_text(n)] == ["AlOne", "Twoega"]
-let cross_bold_editor = edit_exec(cross_editor, edit_cmd_toggle_mark('strong'))
+let cross_bold_editor = edit_exec(cross_editor, edit_cmd_toggle_mark('strong', true))
 "exec cross bold first:"; has_mark(node_at(cross_bold_editor.doc, [0, 0]).marks, 'strong')
 "exec cross bold second:"; has_mark(node_at(cross_bold_editor.doc, [1, 0]).marks, 'strong')
 

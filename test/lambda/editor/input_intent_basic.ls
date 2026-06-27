@@ -62,7 +62,7 @@ let tx_html_paste = dispatch_intent(s0, {
 let html_leaf = node_at(tx_html_paste.doc_after, [0, 1])
 "html paste doc:"; doc_text(tx_html_paste.doc_after) == "Hello world"
 "html paste caret:"; tx_html_paste.sel_after.anchor.offset == 5
-"html paste mark:"; node_at(tx_html_paste.doc_after, [0, 2]).marks[0] == 'strong'
+"html paste mark:"; node_at(tx_html_paste.doc_after, [0, 2]).marks[0].name == 'strong'
 
 let drop_doc = node('doc', [
   node('paragraph', [text("A")]),
@@ -109,9 +109,9 @@ let tx_node_paste = dispatch_intent(atom_state, {
 "node paste caret:"; path_equal(tx_node_paste.sel_after.anchor.path, [2, 0]) and tx_node_paste.sel_after.anchor.offset == 4
 
 let mark_span_doc = node('doc', [node('paragraph', [
-  text_marked("Hello", ['strong']),
+  text_marked("Hello", [{name: 'strong', value: true}]),
   text(" "),
-  text_marked("world", ['em'])
+  text_marked("world", [{name: 'em', value: true}])
 ])])
 let mark_span_state = {doc: mark_span_doc, selection: text_selection(pos([0, 0], 2), pos([0, 2], 3))}
 let tx_span_type = dispatch_intent(mark_span_state, {input_type: "insertText", data: "X"})

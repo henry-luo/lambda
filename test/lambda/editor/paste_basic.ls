@@ -18,11 +18,11 @@ let para_without_unknown = coerce_to_schema(md_schema, para_with_unknown)
 // ---------------------------------------------------------------------------
 // 2. Strip unknown marks from a text leaf
 // ---------------------------------------------------------------------------
-let leaf = text_marked("hi", ['strong', 'glitter', 'em'])
+let leaf = text_marked("hi", [{name:'strong',value:true}, {name:'glitter',value:true}, {name:'em',value:true}])
 let leaf2 = coerce_to_schema(md_schema, leaf)
 "keep known marks:"; len(leaf2.marks)
-"strong kept:"; leaf2.marks[0] == 'strong'
-"em kept:";     leaf2.marks[1] == 'em'
+"strong kept:"; leaf2.marks[0].name == 'strong'
+"em kept:";     leaf2.marks[1].name == 'em'
 
 // ---------------------------------------------------------------------------
 // 3. Atomic node — strip its content
@@ -135,19 +135,19 @@ let coerced3 = coerce_children(md_schema, inline_kids, 'inline')
 // ---------------------------------------------------------------------------
 // 7. Nested coercion through a paragraph child
 // ---------------------------------------------------------------------------
-let para = node('paragraph', [text_marked("bold", ['strong', 'evil'])])
+let para = node('paragraph', [text_marked("bold", [{name:'strong',value:true}, {name:'evil',value:true}])])
 let para2 = coerce_to_schema(md_schema, para)
 "nested marks count:"; len(para2.content[0].marks) == 1
-"nested mark:"; para2.content[0].marks[0] == 'strong'
+"nested mark:"; para2.content[0].marks[0].name == 'strong'
 
-let code_block_marked = node('code_block', [text_marked("literal", ['strong'])])
+let code_block_marked = node('code_block', [text_marked("literal", [{name: 'strong', value: true}])])
 let code_block_clean = coerce_to_schema(md_schema, code_block_marked)
 "code block drops marks:"; len(code_block_clean.content[0].marks) == 0
 
-let code_and_strong = node('paragraph', [text_marked("literal", ['strong', 'code'])])
+let code_and_strong = node('paragraph', [text_marked("literal", [{name:'strong',value:true}, {name:'code',value:true}])])
 let code_and_strong_clean = coerce_to_schema(md_schema, code_and_strong)
 "exclusive mark count:"; len(code_and_strong_clean.content[0].marks) == 1
-"exclusive mark kept:"; code_and_strong_clean.content[0].marks[0] == 'code'
+"exclusive mark kept:"; code_and_strong_clean.content[0].marks[0].name == 'code'
 
 // ---------------------------------------------------------------------------
 // 8. Convert an HTML-like fragment and preserve common inline marks
@@ -157,19 +157,19 @@ let md_blocks = html_fragment_to_md_blocks(html_frag)
 "html block count:"; len(md_blocks) == 1
 "html block tag:"; md_blocks[0].tag == 'paragraph'
 "html text:"; doc_text(md_blocks[0]) == "Hello world"
-"html strong mark:"; md_blocks[0].content[1].marks[0] == 'strong'
+"html strong mark:"; md_blocks[0].content[1].marks[0].name == 'strong'
 
 let paste_doc = node('doc', [node('paragraph', [text("Say: ")])])
 let paste_state = {doc: paste_doc, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
 let tx_html = cmd_paste_html(paste_state, html_frag, "Hello world")
 let pasted_para = node_at(tx_html.doc_after, [0])
 "cmd html paste text:"; doc_text(pasted_para) == "Say: Hello world"
-"cmd html paste mark:"; pasted_para.content[2].marks[0] == 'strong'
+"cmd html paste mark:"; pasted_para.content[2].marks[0].name == 'strong'
 
 let tx_raw_html = cmd_paste_html(paste_state, "<p>Hello <strong>world</strong></p>", "Hello world")
 let raw_pasted_para = node_at(tx_raw_html.doc_after, [0])
 "cmd raw html paste text:"; doc_text(raw_pasted_para) == "Say: Hello world"
-"cmd raw html paste mark:"; raw_pasted_para.content[2].marks[0] == 'strong'
+"cmd raw html paste mark:"; raw_pasted_para.content[2].marks[0].name == 'strong'
 
 let link_frag = node('p', [text("Read "), node_attrs('a', [{name: 'href', value: "https://example.com"}], [text("more")])])
 let md_link_blocks = html_fragment_to_md_blocks(link_frag)
@@ -189,7 +189,7 @@ let html_blocks = html_fragment_to_blocks_for_schema(html5_subset_schema,
 "html schema block count:"; len(html_blocks) == 2
 "html schema heading tag:"; html_blocks[0].tag == 'h1'
 "html schema para tag:"; html_blocks[1].tag == 'p'
-"html schema mark:"; html_blocks[1].content[1].marks[0] == 'strong'
+"html schema mark:"; html_blocks[1].content[1].marks[0].name == 'strong'
 
 let html_link_blocks = html_fragment_to_blocks_for_schema(html5_subset_schema, link_frag)
 "html schema link tag:"; html_link_blocks[0].content[1].tag == 'a'
@@ -260,7 +260,7 @@ let tx_html_schema = cmd_paste_html(html_paste_state, "<p>Hello <strong>world</s
 let html_schema_para = node_at(tx_html_schema.doc_after, [0])
 "cmd html schema paste tag:"; html_schema_para.tag == 'p'
 "cmd html schema paste text:"; doc_text(html_schema_para) == "Say: Hello world"
-"cmd html schema paste mark:"; html_schema_para.content[2].marks[0] == 'strong'
+"cmd html schema paste mark:"; html_schema_para.content[2].marks[0].name == 'strong'
 
 let loose_list_md = html_fragment_to_md_blocks(node('ul', [text("loose"), node('ul', [node('li', [text("nested")])])]))
 "html loose list outer tag:"; loose_list_md[0].tag == 'list'

@@ -206,8 +206,10 @@ Default behavior:
 - Runs `make release` first. Never benchmark a debug build.
 - Checks `lambda.exe` with `strings` and rejects binaries containing profiling markers such as `JS_EXEC_PROFILE`.
 - Clears `JS_EXEC_PROFILE` and `JS_EXEC_PROFILE_OUT` from the benchmark environment.
-- Runs `test/benchmark/run_benchmarks.py -e mir,lambdajs,quickjs,nodejs -n 3 -t 180 --results-output test/benchmark/benchmark_results_v9.json`.
+- Runs `test/benchmark/run_benchmarks.py -e mir,lambdajs,quickjs,nodejs -n 3 -t 180 --results-output test/benchmark/benchmark_results_v9.json --fresh`.
 - Derives the matching JSON path from `--report-output`; for example, `Overall_Result9.md` pairs with `benchmark_results_v9.json`.
+- Starts snapshot runs from an empty result file by default. Use `--merge` only when intentionally refreshing part of an existing JSON.
+- Writes run logs under `temp/benchmark_vN/`: `build_release.log`, `profile_check.log`, `benchmark.log`, and `report.log`.
 - If `--report-output` is provided, generates the report from the JSON via `test/benchmark/gen_overall_result.py`.
 
 Use `--skip-build` only for a quick local recheck when you already know `lambda.exe` is a fresh release binary. Use `run_benchmarks.py` directly only for exploratory filters or one-off diagnosis.
@@ -239,6 +241,7 @@ python3 test/benchmark/run_benchmarks.py
 - Results merged into `test/benchmark/benchmark_results_v3.json`.
 - This direct command is useful for exploration, but checked-in result reports should use `run_standard_benchmarks.py` so build mode, profiling checks, engines, timeout, and report generation are consistent.
 - Direct runs can also write a chosen JSON with `--results-output test/benchmark/benchmark_results_vN.json`.
+- Add `--fresh` when a direct run should start from an empty JSON instead of merging into existing results.
 
 ### Filtering by suite, benchmark, or engine
 
@@ -318,6 +321,8 @@ python3 test/benchmark/run_benchmarks.py -b fib -s r7rs --no-save
 | `--list` | List all available benchmarks and exit |
 | `--dry-run` | Show what would run without executing |
 | `--no-save` | Don't write results to JSON/CSV |
+| `--results-output` | Write time or memory results to a chosen JSON path |
+| `--fresh` | Start from an empty result set instead of merge mode |
 
 ### Manual single-benchmark run
 
@@ -362,28 +367,47 @@ python3 test/benchmark/r7rs/python/fib.py
 
 | File | Mode | Format |
 |------|------|--------|
-| `benchmark_results_v3.json` | time | Exec time (ms) per engine per benchmark |
+| `benchmark_results_vN.json` | time | Exec time (ms), run metadata, and per-engine status for each checked-in snapshot |
+| `benchmark_results_v3.json` | time | Historical/default exec time result file for older direct runs |
 | `memory_results.json` | memory | Peak RSS (MB) + raw bytes per engine |
 | `temp/mir_vs_c_bench.csv` | mir-vs-c | C2MIR vs MIR Direct (μs) + ratio |
 
-`benchmark_results_v3.json` structure:
+`benchmark_results_vN.json` structure:
 
 ```json
 {
+  "_metadata": {
+    "schema_version": 2,
+    "mode": "time",
+    "started_at": "2026-06-27T12:14:00",
+    "engines": ["mir", "lambdajs", "quickjs", "nodejs"],
+    "runs": 3,
+    "timeout_s": 180,
+    "lambda_commit": "...",
+    "profile_check": "passed",
+    "log_dir": "temp/benchmark_v9"
+  },
   "r7rs": {
     "fib": {
+      "category": "recursive",
       "mir": 1.96,
-      "c2mir": 2.22,
       "lambdajs": 10.8,
       "quickjs": 17.4,
       "nodejs": 1.64,
-      "python": 12.5
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      }
     }
   }
 }
 ```
 
-Each engine value is the **self-reported exec time in milliseconds** (median of N runs). A value of `null` means the benchmark failed or timed out. The runner operates in **merge mode** — only the benchmarks you run are overwritten; existing results are preserved.
+Each engine value is the **self-reported exec time in milliseconds** (median of N runs). A value of `null` means no usable timing was recorded. The companion `_status` field records why when the current runner knows it, such as `timeout`, `exit_1`, `missing_file`, `wrapper_unavailable`, `wall_fallback`, or `ok`. Older results that were backfilled after the fact may use `not_recorded` for missing cells.
+
+The direct runner defaults to **merge mode**: only the benchmarks you run are overwritten and existing results are preserved. Snapshot runs use `--fresh` through `run_standard_benchmarks.py` so a versioned `benchmark_results_vN.json` cannot accidentally inherit stale rows.
 
 ### Generate the report
 
@@ -395,6 +419,9 @@ Reads the selected benchmark JSON and writes a chosen `Overall_ResultN.md` with:
 - Run metadata: current date, platform, Lambda commit hash, Node.js version, and QuickJS version
 - Per-suite tables for the selected engines
 - Geometric mean ratios against Node.js per suite and overall
+- A default deduplicated overall metric: duplicate benchmark names across suites are counted once, using the best timed value per engine
+- A raw overall metric: every suite row is counted, kept for auditability
+- A Notable Results section with missing timings, largest LambdaJS/Node.js ratios, and LambdaJS wins
 - The standardized JetStream x8 workload note
 
 `gen_result3.py` and `gen_result_doc.py` are historical generators for older report formats. Do not use them for new checked-in result snapshots.
@@ -417,7 +444,10 @@ prepare scripts  →  run benchmarks  →  report
 - **Median of N runs** (default N=3 for time, N=1 for memory). The median filters outliers from GC pauses or system load.
 - **Self-reported exec time** is the primary comparison metric. It isolates algorithmic performance from process startup overhead (~15–40 ms for Lambda/Node).
 - **Wall-clock time** is also measured internally but exec time is preferred when available.
-- **Merge mode**: The runner only overwrites results for benchmarks you actually run. Existing results for other benchmarks are preserved in the JSON.
+- **Fresh vs merge mode**: `run_standard_benchmarks.py` uses `--fresh` by default for checked-in snapshots. Direct `run_benchmarks.py` invocations remain merge-mode unless `--fresh` is passed.
+- **Status metadata**: Time-mode JSON stores `_metadata` at top level and `_status` per benchmark row so missing timings can be distinguished from successful timings.
+- **Snapshot logs**: Standard snapshot runs write logs to `temp/benchmark_vN/`. Logs are not committed, but they preserve build, profile-check, benchmark, and report-generation output for local diagnosis.
+- **Deduplicated overall metric**: The report's headline `Overall dedup` row groups rows with the same benchmark name across different suites and counts that name once. For each engine, the best timed value in the group is used before computing the geometric mean against Node.js. The `Overall raw` row is also shown and counts every suite row.
 - **Process-group kill**: The runner uses `os.setsid` + `os.killpg` for reliable timeout handling, ensuring child processes don't leak.
 - **Timeout**: 120 seconds per run (configurable via `-t`). MIR-vs-C mode auto-raises to 300s.
 - **QuickJS wrappers** are auto-generated in `temp/` and not committed.

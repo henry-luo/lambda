@@ -126,15 +126,16 @@ fn symbol_in_list(items, value, i, n) {
   else { symbol_in_list(items, value, i + 1, n) }
 }
 
+// `mark` is a {name, value} entry; schema lookups key on its name.
 fn mark_allowed_by_parent(schema, parent_entry, mark) {
-  if (not mark_is_known(schema, mark)) { false }
+  if (not mark_is_known(schema, mark.name)) { false }
   else if (parent_entry == null or parent_entry.marks == null or parent_entry.marks == 'all') { true }
   else if (parent_entry.marks == 'none') { false }
-  else { symbol_in_list(parent_entry.marks, mark, 0, len(parent_entry.marks)) }
+  else { symbol_in_list(parent_entry.marks, mark.name, 0, len(parent_entry.marks)) }
 }
 
 fn mark_excludes_all(schema, mark) {
-  let e = entry_for(schema, mark)
+  let e = entry_for(schema, mark.name)
   e != null and e.excludes == 'all'
 }
 
