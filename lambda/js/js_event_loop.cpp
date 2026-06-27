@@ -1346,8 +1346,41 @@ static void event_loop_sigsegv_handler(int sig, siginfo_t* info, void* ctx) {
 // long-running timers in document scripts (e.g. CSS animation test pages).
 #define EVENT_LOOP_DRAIN_TIMEOUT_MS 5000
 
+#ifndef NDEBUG
+typedef struct JsUvDumpState {
+    int count;
+} JsUvDumpState;
+
+static void event_loop_dump_handle_cb(uv_handle_t* h, void* arg) {
+    JsUvDumpState* state = (JsUvDumpState*)arg;
+    if (!state || !h) return;
+    state->count++;
+
+    const char* type_name = uv_handle_type_name(h->type);
+    if (!type_name) type_name = "unknown";
+
+    log_debug("event_loop: drain handle #%d type=%s handle=%p data=%p active=%d closing=%d ref=%d",
+              state->count, type_name, h, h->data,
+              uv_is_active(h), uv_is_closing(h), uv_has_ref(h));
+}
+
+static void event_loop_dump_active_handles(void) {
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) return;
+
+    JsUvDumpState state;
+    state.count = 0;
+    log_debug("event_loop: drain active handle dump begin");
+    uv_walk(loop, event_loop_dump_handle_cb, &state);
+    log_debug("event_loop: drain active handle dump end count=%d", state.count);
+}
+#endif
+
 static void drain_watchdog_cb(uv_timer_t* handle) {
     log_debug("event_loop: drain timeout (%d ms) — stopping loop", EVENT_LOOP_DRAIN_TIMEOUT_MS);
+#ifndef NDEBUG
+    event_loop_dump_active_handles();
+#endif
     lambda_uv_stop();
 }
 
