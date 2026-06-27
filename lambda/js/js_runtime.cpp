@@ -19310,6 +19310,12 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                         return js_throw_type_error("Cannot perform %TypedArray%.prototype.copyWithin on an out-of-bounds ArrayBuffer");
                     }
                 }
+                if (ta && js_typed_array_is_out_of_bounds_item(obj)) {
+                    if (!js_dispatch_as_array_method) {
+                        return js_throw_type_error("Cannot perform %TypedArray%.prototype.copyWithin on a detached or out-of-bounds ArrayBuffer");
+                    }
+                    return obj;
+                }
 
                 int len = js_typed_array_length(obj);
                 if (end_is_default) d_end = (double)initial_len;
@@ -19346,7 +19352,13 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: elem_size = 4; break;
                 case JS_TYPED_FLOAT64: case JS_TYPED_BIGINT64: case JS_TYPED_BIGUINT64: elem_size = 8; break;
                 }
-                void* data = ta->buffer ? (void*)((uint8_t*)ta->buffer->data + ta->byte_offset) : ta->data;
+                void* data = js_typed_array_current_data_ptr(obj);
+                if (!data) {
+                    if (!js_dispatch_as_array_method) {
+                        return js_throw_type_error("Cannot perform %TypedArray%.prototype.copyWithin on a detached or out-of-bounds ArrayBuffer");
+                    }
+                    return obj;
+                }
                 memmove((uint8_t*)data + target * elem_size,
                         (uint8_t*)data + start * elem_size,
                         count * elem_size);
