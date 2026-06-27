@@ -3077,8 +3077,7 @@ extern "C" Item js_process_on(Item event_name, Item listener) {
     return js_process_object;
 }
 
-// process.emit(event, ...args) — emit an event on process
-extern "C" Item js_process_emit(Item event_name, Item arg1) {
+static Item js_process_emit_args(Item event_name, Item* args, int arg_count) {
     TypeId etype = get_type_id(event_name);
     if (etype != LMD_TYPE_STRING && !js_key_is_symbol_c(event_name)) return (Item){.item = b2it(false)};
 
@@ -3092,10 +3091,20 @@ extern "C" Item js_process_emit(Item event_name, Item arg1) {
     for (int64_t i = 0; i < len; i++) {
         Item listener = js_array_get_int(arr, i);
         if (get_type_id(listener) == LMD_TYPE_FUNC) {
-            js_call_function(listener, js_process_object, &arg1, 1);
+            js_call_function(listener, js_process_object, args, arg_count);
         }
     }
     return (Item){.item = b2it(true)};
+}
+
+// process.emit(event, ...args) — emit an event on process
+extern "C" Item js_process_emit(Item event_name, Item arg1) {
+    return js_process_emit_args(event_name, &arg1, 1);
+}
+
+extern "C" Item js_process_emit2(Item event_name, Item arg1, Item arg2) {
+    Item args[2] = { arg1, arg2 };
+    return js_process_emit_args(event_name, args, 2);
 }
 
 extern "C" void js_process_emit_exit(int code) {
@@ -3211,8 +3220,48 @@ extern "C" Item js_process_removeListener(Item event_name, Item listener) {
     return js_process_object;
 }
 
-// process.removeAllListeners(event) — no-op for now
+// process.removeAllListeners(event)
 extern "C" Item js_process_removeAllListeners(Item event_name) {
+    extern void js_promise_note_unhandled_listener_reset(void);
+    TypeId etype = get_type_id(event_name);
+    if (etype == LMD_TYPE_UNDEFINED || event_name.item == ITEM_JS_UNDEFINED || event_name.item == ItemNull.item) {
+        process_exit_listener_count = 0;
+        process_uncaught_listener_count = 0;
+        process_total_listener_count = 0;
+        process_listener_map = js_new_object();
+        heap_register_gc_root(&process_listener_map.item);
+        js_process_update_events_count();
+        js_promise_note_unhandled_listener_reset();
+        js_process_ipc_refresh_ref();
+        return js_process_object;
+    }
+    bool is_sym = js_key_is_symbol_c(event_name);
+    if (etype != LMD_TYPE_STRING && !is_sym) return js_process_object;
+
+    if (etype == LMD_TYPE_STRING) {
+        String* ev = it2s(event_name);
+        if (ev->len == 4 && memcmp(ev->chars, "exit", 4) == 0) {
+            process_exit_listener_count = 0;
+        } else if (ev->len == 18 && memcmp(ev->chars, "uncaughtException", 18) == 0) {
+            process_uncaught_listener_count = 0;
+        } else if (ev->len == 18 && memcmp(ev->chars, "unhandledRejection", 18) == 0) {
+            js_promise_note_unhandled_listener_reset();
+        }
+    }
+
+    Item map = get_process_listener_map();
+    Item arr = js_property_get(map, event_name);
+    if (get_type_id(arr) == LMD_TYPE_ARRAY && arr.array) {
+        int64_t removed = js_array_length(arr);
+        arr.array->length = 0;
+        process_total_listener_count -= (int)removed;
+        if (process_total_listener_count < 0) process_total_listener_count = 0;
+        js_process_update_events_count();
+    }
+    if (process_event_name_equals(event_name, "message", 7) ||
+        process_event_name_equals(event_name, "disconnect", 10)) {
+        js_process_ipc_refresh_ref();
+    }
     return js_process_object;
 }
 

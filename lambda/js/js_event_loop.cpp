@@ -473,6 +473,7 @@ static void timer_fire_cb(uv_timer_t *handle) {
     if (!th->is_interval) {
         timer_close_handle(th);
     }
+    js_microtask_flush();
 }
 static double item_to_ms(Item delay) {
     if (get_type_id(delay) == LMD_TYPE_FLOAT) {
