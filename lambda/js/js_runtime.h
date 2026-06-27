@@ -219,6 +219,7 @@ Item* js_args_push(int count);
 int64_t js_args_save(void);
 void js_args_restore(int64_t mark);
 void js_args_stack_reset(void);
+void js_args_stack_cleanup(void);
 void js_set_function_name(Item fn_item, Item name_item);
 void js_set_function_source(Item fn_item, Item source_item);
 void js_mark_generator_func(Item fn_item);
