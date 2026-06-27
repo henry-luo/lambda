@@ -6576,7 +6576,9 @@ static Item js_stream_finished_dispose(Item env_item) {
 static Item js_stream_finished_emit_callback(Item* env, Item err) {
     if (!env || js_item_is_true(env[2])) return make_js_undefined();
     env[2] = js_bool_item(true);
-    js_stream_finished_remove_all(env);
+    if (js_item_is_true(env[10])) {
+        js_stream_finished_remove_all(env);
+    }
     Item callback = env[1];
     if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
     if (js_stream_has_error(err)) {
@@ -6639,7 +6641,24 @@ static Item js_stream_finished_call_now(Item callback, Item err) {
 static void js_stream_finished_call_later(Item* env, Item err) {
     if (!env) return;
     env[9] = err;
-    js_next_tick_enqueue(js_new_closure((void*)js_stream_finished_emit_callback_tick, 0, env, 10));
+    js_next_tick_enqueue(js_new_closure((void*)js_stream_finished_emit_callback_tick, 0, env, 11));
+}
+
+static bool js_stream_finished_options_cleanup(Item options, bool* cleanup) {
+    *cleanup = false;
+    if (get_type_id(options) != LMD_TYPE_MAP && get_type_id(options) != LMD_TYPE_ELEMENT) {
+        return true;
+    }
+    Item cleanup_item = js_property_get(options, make_string_item("cleanup"));
+    if (cleanup_item.item == 0 || get_type_id(cleanup_item) == LMD_TYPE_UNDEFINED) {
+        return true;
+    }
+    if (get_type_id(cleanup_item) != LMD_TYPE_BOOL) {
+        js_throw_invalid_arg_type("options.cleanup", "boolean", cleanup_item);
+        return false;
+    }
+    *cleanup = it2b(cleanup_item);
+    return true;
 }
 
 static Item js_stream_finished_impl(Item stream, Item options, Item callback) {
@@ -6653,12 +6672,14 @@ static Item js_stream_finished_impl(Item stream, Item options, Item callback) {
     }
 
     Item signal = make_js_undefined();
+    bool cleanup = false;
     if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_ELEMENT) {
         signal = js_property_get(options, make_string_item("signal"));
         if (signal.item != 0 && get_type_id(signal) != LMD_TYPE_UNDEFINED &&
             get_type_id(signal) != LMD_TYPE_NULL && !js_stream_is_abort_signal(signal)) {
             return js_throw_invalid_arg_type("options.signal", "AbortSignal", signal);
         }
+        if (!js_stream_finished_options_cleanup(options, &cleanup)) return ItemNull;
     } else if (options.item != 0 && get_type_id(options) != LMD_TYPE_UNDEFINED &&
                get_type_id(options) != LMD_TYPE_NULL) {
         return js_throw_invalid_arg_type("options", "object", options);
@@ -6666,7 +6687,7 @@ static Item js_stream_finished_impl(Item stream, Item options, Item callback) {
 
     Item registered_callback = js_stream_finished_context_wrapper(callback);
     bool sync_callback = js_stream_finished_options_sync_callback(options);
-    Item* env = js_alloc_env(10);
+    Item* env = js_alloc_env(11);
     env[0] = stream;
     env[1] = registered_callback;
     env[2] = js_bool_item(false);
@@ -6677,7 +6698,8 @@ static Item js_stream_finished_impl(Item stream, Item options, Item callback) {
     env[7] = signal;
     env[8] = make_js_undefined();
     env[9] = make_js_undefined();
-    Item dispose = js_new_closure((void*)js_stream_finished_dispose, 0, env, 10);
+    env[10] = js_bool_item(cleanup);
+    Item dispose = js_new_closure((void*)js_stream_finished_dispose, 0, env, 11);
 
     if (js_stream_is_abort_signal(signal)) {
         Item aborted = js_property_get(signal, make_string_item("aborted"));
@@ -6693,7 +6715,7 @@ static Item js_stream_finished_impl(Item stream, Item options, Item callback) {
         }
         Item add_event = js_property_get(signal, make_string_item("addEventListener"));
         if (get_type_id(add_event) == LMD_TYPE_FUNC) {
-            Item abort_listener = js_new_closure((void*)js_stream_finished_on_abort, 0, env, 10);
+            Item abort_listener = js_new_closure((void*)js_stream_finished_on_abort, 0, env, 11);
             env[8] = abort_listener;
             Item args[2] = { make_string_item("abort"), abort_listener };
             js_call_function(add_event, signal, args, 2);
@@ -6729,10 +6751,10 @@ static Item js_stream_finished_impl(Item stream, Item options, Item callback) {
     Item error_event = make_string_item("error");
     Item close_event = make_string_item("close");
 
-    env[3] = js_new_closure((void*)js_stream_finished_on_end, 0, env, 10);
-    env[4] = js_new_closure((void*)js_stream_finished_on_finish, 0, env, 10);
-    env[5] = js_new_closure((void*)js_stream_finished_on_error, 1, env, 10);
-    env[6] = js_new_closure((void*)js_stream_finished_on_close, 0, env, 10);
+    env[3] = js_new_closure((void*)js_stream_finished_on_end, 0, env, 11);
+    env[4] = js_new_closure((void*)js_stream_finished_on_finish, 0, env, 11);
+    env[5] = js_new_closure((void*)js_stream_finished_on_error, 1, env, 11);
+    env[6] = js_new_closure((void*)js_stream_finished_on_close, 0, env, 11);
 
     js_stream_on(stream, end_event, env[3]);
     js_stream_on(stream, finish_event, env[4]);
@@ -7222,7 +7244,7 @@ static Item js_stream_promises_finished(Item rest_args) {
     Item callback = js_new_closure((void*)js_stream_promises_finished_callback, 1, env, 6);
     env[1] = callback;
 
-    js_stream_finished(stream, callback);
+    js_stream_finished_impl(stream, options, callback);
     if (js_check_exception()) {
         Item err = js_clear_exception();
         Item reject = env[5];

@@ -1,0 +1,4 @@
+rsa sign options object: true
+rsa verify public pem: true
+rsa verify tampered: false
+rsa verify options base64: true

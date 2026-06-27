@@ -1790,6 +1790,39 @@ static bool crypto_private_key_bytes_for_sign(Item key_item, uint8_t** out, int*
     *out = NULL;
     *out_len = 0;
 
+    if (get_type_id(key_item) == LMD_TYPE_MAP) {
+        Item object_key = js_property_get(key_item, make_string_item_crypto("key"));
+        if (!crypto_item_is_undefined(object_key)) {
+            return crypto_private_key_bytes_for_sign(object_key, out, out_len);
+        }
+    }
+
+    if (get_type_id(key_item) == LMD_TYPE_STRING) {
+        String* s = it2s(key_item);
+        size_t len = s ? s->len : 0;
+        uint8_t* bytes = (uint8_t*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
+        if (len > 0 && s) memcpy(bytes, s->chars, len);
+        bytes[len] = 0;
+        *out = bytes;
+        *out_len = (int)(len + 1);
+        return true;
+    }
+
+    return extract_bytes(key_item, out, out_len);
+}
+
+static bool crypto_public_key_bytes_for_verify(Item key_item, uint8_t** out, int* out_len) {
+    if (!out || !out_len) return false;
+    *out = NULL;
+    *out_len = 0;
+
+    if (get_type_id(key_item) == LMD_TYPE_MAP) {
+        Item object_key = js_property_get(key_item, make_string_item_crypto("key"));
+        if (!crypto_item_is_undefined(object_key)) {
+            return crypto_public_key_bytes_for_verify(object_key, out, out_len);
+        }
+    }
+
     if (get_type_id(key_item) == LMD_TYPE_STRING) {
         String* s = it2s(key_item);
         size_t len = s ? s->len : 0;
@@ -1930,30 +1963,75 @@ extern "C" Item js_sign_verify_verify(Item key_item, Item signature_item, Item e
         return js_throw_invalid_arg_type("signature", "string, ArrayBuffer, Buffer, TypedArray, or DataView", signature_item);
     }
 
+    uint8_t* signature_bytes = NULL;
+    int signature_len = 0;
     if (get_type_id(signature_item) == LMD_TYPE_STRING) {
         String* s = it2s(signature_item);
         char enc[32];
         bool has_encoding = false;
         if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) return ItemNull;
-        uint8_t* bytes = NULL;
-        int len = 0;
-        if (!crypto_string_bytes_for_encoding(s, enc, has_encoding, &bytes, &len)) {
+        if (!crypto_string_bytes_for_encoding(s, enc, has_encoding, &signature_bytes, &signature_len)) {
             return js_throw_invalid_arg_value("encoding", "is invalid", encoding_item);
         }
-        mem_free(bytes);
     } else {
-        uint8_t* bytes = NULL;
-        int len = 0;
-        if (!extract_bytes(signature_item, &bytes, &len)) {
+        if (!extract_bytes(signature_item, &signature_bytes, &signature_len)) {
             return js_throw_invalid_arg_type("signature", "string, ArrayBuffer, Buffer, TypedArray, or DataView", signature_item);
         }
-        mem_free(bytes);
     }
 
+    mbedtls_md_type_t md_alg = crypto_mbedtls_md_for_name(ctx->alg);
+    int digest_bits = crypto_digest_bits_for_name_ext(ctx->alg, true, true, true);
+    int hash_len = (int)digest_output_len_bits(digest_bits);
+    if (md_alg == MBEDTLS_MD_NONE || hash_len <= 0 || hash_len > 64) {
+        mem_free(signature_bytes);
+        ctx->finalized = true;
+        js_property_set(self, make_string_item_crypto("__sign_verify_ctx__"), ItemNull);
+        sign_verify_ctx_free(ctx);
+        return js_throw_type_error("Digest method not supported");
+    }
+
+    uint8_t hash[64];
+    if (!crypto_digest_compute_bits(digest_bits, ctx->data, 0, ctx->data_len, hash)) {
+        mem_free(signature_bytes);
+        ctx->finalized = true;
+        js_property_set(self, make_string_item_crypto("__sign_verify_ctx__"), ItemNull);
+        sign_verify_ctx_free(ctx);
+        return js_throw_error_with_code("ERR_OSSL_CRYPTO_VERIFY_FAILED",
+            "Failed to hash data for verification");
+    }
+
+    uint8_t* key_bytes = NULL;
+    int key_len = 0;
+    if (!crypto_public_key_bytes_for_verify(key_item, &key_bytes, &key_len)) {
+        mem_free(signature_bytes);
+        ctx->finalized = true;
+        js_property_set(self, make_string_item_crypto("__sign_verify_ctx__"), ItemNull);
+        sign_verify_ctx_free(ctx);
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", key_item);
+    }
+
+    mbedtls_pk_context pk;
+    mbedtls_pk_init(&pk);
+    bool verified = false;
+    int ret = mbedtls_pk_parse_public_key(&pk, key_bytes, (size_t)key_len);
+    if (ret == 0) {
+        ret = mbedtls_pk_verify(&pk, md_alg, hash, (size_t)hash_len,
+            signature_bytes, (size_t)signature_len);
+        verified = ret == 0;
+        if (ret != 0) {
+            log_debug("crypto: public key verify mismatch or failure: -0x%04x", -ret);
+        }
+    } else {
+        log_debug("crypto: public key parse for verify failed: -0x%04x", -ret);
+    }
+
+    mbedtls_pk_free(&pk);
+    mem_free(key_bytes);
+    mem_free(signature_bytes);
     ctx->finalized = true;
     js_property_set(self, make_string_item_crypto("__sign_verify_ctx__"), ItemNull);
     sign_verify_ctx_free(ctx);
-    return (Item){.item = b2it(false)};
+    return (Item){.item = b2it(verified)};
 }
 
 static Item js_crypto_create_sign_verify(Item alg_item, bool verify_mode) {
