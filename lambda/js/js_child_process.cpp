@@ -18,6 +18,7 @@
 #include "../../lib/mem.h"
 
 #ifndef _WIN32
+#include <signal.h>
 #include <sys/wait.h>
 #else
 #include <process.h>
@@ -591,6 +592,59 @@ static Item make_ipc_channel_closed_error(void) {
     return err;
 }
 
+static int spawn_signal_number(Item signal_item) {
+    if (is_nullish_item(signal_item)) return SIGTERM;
+    TypeId type = get_type_id(signal_item);
+    if (type == LMD_TYPE_INT) return (int)it2i(signal_item);
+    if (type != LMD_TYPE_STRING) return SIGTERM;
+
+    String* s = it2s(signal_item);
+    if (!s) return SIGTERM;
+    if (s->len == 7 && memcmp(s->chars, "SIGTERM", 7) == 0) return SIGTERM;
+    if (s->len == 7 && memcmp(s->chars, "SIGKILL", 7) == 0) return SIGKILL;
+    if (s->len == 6 && memcmp(s->chars, "SIGINT", 6) == 0) return SIGINT;
+    if (s->len == 6 && memcmp(s->chars, "SIGHUP", 6) == 0) return SIGHUP;
+    return SIGTERM;
+}
+
+static Item spawn_signal_name_item(int signal_number) {
+    switch (signal_number) {
+        case SIGTERM: return make_string_item("SIGTERM");
+        case SIGKILL: return make_string_item("SIGKILL");
+        case SIGINT:  return make_string_item("SIGINT");
+        case SIGHUP:  return make_string_item("SIGHUP");
+        default:      return make_js_undefined();
+    }
+}
+
+static Item spawn_kill_with_env(Item env_item, Item signal_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
+    if (!sp || sp->process_exited || uv_is_closing((uv_handle_t*)&sp->process)) {
+        return (Item){.item = ITEM_FALSE};
+    }
+    int r = uv_process_kill(&sp->process, spawn_signal_number(signal_item));
+    return (Item){.item = b2it(r == 0)};
+}
+
+static Item spawn_ref_with_env(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
+    if (sp && !uv_is_closing((uv_handle_t*)&sp->process)) {
+        uv_ref((uv_handle_t*)&sp->process);
+    }
+    return js_get_this();
+}
+
+static Item spawn_unref_with_env(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
+    if (sp && !uv_is_closing((uv_handle_t*)&sp->process)) {
+        uv_unref((uv_handle_t*)&sp->process);
+    }
+    return js_get_this();
+}
+
 static void schedule_spawn_send_callback(Item callback, Item err) {
     if (!is_callable(callback)) return;
     Item* env = js_alloc_env(2);
@@ -785,8 +839,8 @@ static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
     sp->process_exited = true;
 
     Item args[2] = {
-        (Item){.item = i2it(exit_status)},
-        term_signal == 0 ? ItemNull : (Item){.item = i2it(term_signal)}
+        term_signal == 0 ? (Item){.item = i2it(exit_status)} : ItemNull,
+        term_signal == 0 ? ItemNull : spawn_signal_name_item(term_signal)
     };
     spawn_emit_event(sp->js_object, "exit", args, 2);
     spawn_emit_event(sp->js_object, "close", args, 2);
@@ -963,6 +1017,23 @@ static void install_ipc_surface(Item obj, JsSpawnProcess* sp) {
     disconnect_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     js_property_set(obj, make_string_item("disconnect"),
                     js_new_closure((void*)js_spawn_disconnect_with_env, 0, disconnect_env, 1));
+}
+
+static void install_spawn_lifecycle_surface(Item obj, JsSpawnProcess* sp) {
+    Item* kill_env = js_alloc_env(1);
+    kill_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    js_property_set(obj, make_string_item("kill"),
+                    js_new_closure((void*)spawn_kill_with_env, 1, kill_env, 1));
+
+    Item* ref_env = js_alloc_env(1);
+    ref_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    js_property_set(obj, make_string_item("ref"),
+                    js_new_closure((void*)spawn_ref_with_env, 0, ref_env, 1));
+
+    Item* unref_env = js_alloc_env(1);
+    unref_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    js_property_set(obj, make_string_item("unref"),
+                    js_new_closure((void*)spawn_unref_with_env, 0, unref_env, 1));
 }
 
 static void install_ipc_legacy_surface(Item obj) {
@@ -1335,6 +1406,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     js_property_set(obj, make_string_item("spawnargs"), spawnargs);
 
     sp->js_object = obj;
+    install_spawn_lifecycle_surface(obj, sp);
     if (req.ipc) install_ipc_surface(obj, sp);
 
     sp->handles_expected = 1;
