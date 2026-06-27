@@ -70,11 +70,28 @@ static bool crypto_normalize_string(Item item, char* out, int out_size, bool str
 static mbedtls_md_type_t crypto_mbedtls_md_for_name(const char* alg);
 static bool crypto_digest_compute_bits(int bits, const uint8_t* data,
                                        int offset, int length, uint8_t* out);
+static bool crypto_digest_compute_name(const char* alg, const uint8_t* data, int data_len,
+                                       uint8_t* out, int* out_len);
 static bool crypto_string_equals(Item item, const char* expected);
 static Item crypto_throw_invalid_property_value(const char* prop, const char* expected);
 static bool crypto_item_to_integer(Item item, const char* name, int* out_value);
+static Item make_string_item_crypto(const char* str);
+
+static bool crypto_digest_is_xof(const char* alg) {
+    return alg && (strcmp(alg, "shake128") == 0 || strcmp(alg, "shake256") == 0);
+}
+
+static int crypto_digest_default_xof_len(const char* alg) {
+    if (!alg) return 0;
+    if (strcmp(alg, "shake128") == 0) return 16;
+    if (strcmp(alg, "shake256") == 0) return 32;
+    return 0;
+}
 
 static int crypto_digest_len_for_name(const char* alg) {
+    int xof_len = crypto_digest_default_xof_len(alg);
+    if (xof_len > 0) return xof_len;
+
     int bits = crypto_digest_bits_for_name_ext(alg, true, true, true);
     int len = (int)digest_output_len_bits(bits);
     if (len > 0) return len;
@@ -85,10 +102,148 @@ static int crypto_digest_len_for_name(const char* alg) {
     return (int)mbedtls_md_get_size(info);
 }
 
+static uint64_t crypto_keccak_rotl64(uint64_t value, int shift) {
+    return shift == 0 ? value : ((value << shift) | (value >> (64 - shift)));
+}
+
+static uint64_t crypto_keccak_load64(const uint8_t* bytes) {
+    uint64_t value = 0;
+    for (int i = 0; i < 8; i++) {
+        value |= ((uint64_t)bytes[i]) << (8 * i);
+    }
+    return value;
+}
+
+static void crypto_keccak_store64(uint8_t* bytes, uint64_t value) {
+    for (int i = 0; i < 8; i++) {
+        bytes[i] = (uint8_t)((value >> (8 * i)) & 0xFF);
+    }
+}
+
+static void crypto_keccak_f1600(uint64_t state[25]) {
+    static const uint64_t round_constants[24] = {
+        0x0000000000000001ULL, 0x0000000000008082ULL,
+        0x800000000000808AULL, 0x8000000080008000ULL,
+        0x000000000000808BULL, 0x0000000080000001ULL,
+        0x8000000080008081ULL, 0x8000000000008009ULL,
+        0x000000000000008AULL, 0x0000000000000088ULL,
+        0x0000000080008009ULL, 0x000000008000000AULL,
+        0x000000008000808BULL, 0x800000000000008BULL,
+        0x8000000000008089ULL, 0x8000000000008003ULL,
+        0x8000000000008002ULL, 0x8000000000000080ULL,
+        0x000000000000800AULL, 0x800000008000000AULL,
+        0x8000000080008081ULL, 0x8000000000008080ULL,
+        0x0000000080000001ULL, 0x8000000080008008ULL
+    };
+    static const int rotation_offsets[25] = {
+         0,  1, 62, 28, 27,
+        36, 44,  6, 55, 20,
+         3, 10, 43, 25, 39,
+        41, 45, 15, 21,  8,
+        18,  2, 61, 56, 14
+    };
+
+    for (int round = 0; round < 24; round++) {
+        uint64_t c[5];
+        uint64_t d[5];
+        for (int x = 0; x < 5; x++) {
+            c[x] = state[x] ^ state[x + 5] ^ state[x + 10] ^ state[x + 15] ^ state[x + 20];
+        }
+        for (int x = 0; x < 5; x++) {
+            d[x] = c[(x + 4) % 5] ^ crypto_keccak_rotl64(c[(x + 1) % 5], 1);
+        }
+        for (int x = 0; x < 5; x++) {
+            for (int y = 0; y < 5; y++) {
+                state[x + 5 * y] ^= d[x];
+            }
+        }
+
+        uint64_t b[25];
+        for (int x = 0; x < 5; x++) {
+            for (int y = 0; y < 5; y++) {
+                int src = x + 5 * y;
+                int dst_x = y;
+                int dst_y = (2 * x + 3 * y) % 5;
+                b[dst_x + 5 * dst_y] = crypto_keccak_rotl64(state[src], rotation_offsets[src]);
+            }
+        }
+
+        for (int x = 0; x < 5; x++) {
+            for (int y = 0; y < 5; y++) {
+                state[x + 5 * y] = b[x + 5 * y] ^
+                    ((~b[((x + 1) % 5) + 5 * y]) & b[((x + 2) % 5) + 5 * y]);
+            }
+        }
+        state[0] ^= round_constants[round];
+    }
+}
+
+static bool crypto_shake_compute(const char* alg, const uint8_t* data, int data_len,
+                                 uint8_t* out, int out_len) {
+    if (!crypto_digest_is_xof(alg) || out_len < 0 || (!out && out_len > 0)) return false;
+
+    int rate = strcmp(alg, "shake128") == 0 ? 168 : 136;
+    uint64_t state[25];
+    memset(state, 0, sizeof(state));
+    const uint8_t* input = data ? data : crypto_empty_bytes;
+    int remaining = data_len > 0 ? data_len : 0;
+
+    while (remaining >= rate) {
+        for (int i = 0; i < rate / 8; i++) {
+            state[i] ^= crypto_keccak_load64(input + i * 8);
+        }
+        crypto_keccak_f1600(state);
+        input += rate;
+        remaining -= rate;
+    }
+
+    uint8_t block[168];
+    memset(block, 0, sizeof(block));
+    if (remaining > 0) memcpy(block, input, (size_t)remaining);
+    block[remaining] ^= 0x1F;
+    block[rate - 1] ^= 0x80;
+    for (int i = 0; i < rate / 8; i++) {
+        state[i] ^= crypto_keccak_load64(block + i * 8);
+    }
+
+    int produced = 0;
+    while (produced < out_len) {
+        crypto_keccak_f1600(state);
+        uint8_t squeeze[168];
+        for (int i = 0; i < rate / 8; i++) {
+            crypto_keccak_store64(squeeze + i * 8, state[i]);
+        }
+        int take = out_len - produced;
+        if (take > rate) take = rate;
+        memcpy(out + produced, squeeze, (size_t)take);
+        produced += take;
+    }
+    return true;
+}
+
+static bool crypto_digest_compute_name_len(const char* alg, const uint8_t* data, int data_len,
+                                           uint8_t* out, int out_len) {
+    if (crypto_digest_is_xof(alg)) {
+        return crypto_shake_compute(alg, data, data_len, out, out_len);
+    }
+
+    int default_len = crypto_digest_len_for_name(alg);
+    if (default_len <= 0 || out_len != default_len) return false;
+    int computed_len = 0;
+    return crypto_digest_compute_name(alg, data, data_len, out, &computed_len) && computed_len == out_len;
+}
+
 static bool crypto_digest_compute_name(const char* alg, const uint8_t* data, int data_len,
                                        uint8_t* out, int* out_len) {
     if (!out || !out_len) return false;
     *out_len = 0;
+
+    int xof_len = crypto_digest_default_xof_len(alg);
+    if (xof_len > 0) {
+        if (!crypto_shake_compute(alg, data, data_len, out, xof_len)) return false;
+        *out_len = xof_len;
+        return true;
+    }
 
     int bits = crypto_digest_bits_for_name_ext(alg, true, true, true);
     int len = (int)digest_output_len_bits(bits);
@@ -1040,6 +1195,7 @@ static Item crypto_digest_output_for_encoding(const uint8_t* bytes, int len, con
     }
     if (strcmp(enc, "hex") == 0) return bytes_to_hex_string(bytes, len);
     if (strcmp(enc, "base64") == 0) return bytes_to_base64_string(bytes, len);
+    if (strcmp(enc, "base64url") == 0) return bytes_to_base64url_string(bytes, len);
     if (strcmp(enc, "latin1") == 0 || strcmp(enc, "binary") == 0) return bytes_to_latin1_string(bytes, len);
     if (strcmp(enc, "ucs2") == 0 || strcmp(enc, "ucs-2") == 0 ||
         strcmp(enc, "utf16le") == 0 || strcmp(enc, "utf-16le") == 0) {
@@ -1457,6 +1613,7 @@ struct HashCtx {
     uint8_t* data;
     int data_len;
     int data_cap;
+    int output_len;
     bool finalized;
 };
 
@@ -1570,18 +1727,23 @@ extern "C" Item js_hash_digest(Item encoding_item) {
     bool has_encoding = false;
     if (!crypto_normalize_encoding(encoding_item, enc, sizeof(enc), &has_encoding)) return ItemNull;
 
-    uint8_t hash[64];
-    int hash_len = 0;
-
-    if (!crypto_digest_compute_name(ctx->alg, ctx->data, ctx->data_len, hash, &hash_len)) {
-        hash_len = 0;
+    int hash_len = ctx->output_len >= 0 ? ctx->output_len : crypto_digest_len_for_name(ctx->alg);
+    uint8_t* hash = (uint8_t*)mem_alloc((size_t)(hash_len > 0 ? hash_len : 1), MEM_CAT_JS_RUNTIME);
+    bool ok = false;
+    if (hash_len >= 0) {
+        ok = crypto_digest_compute_name_len(ctx->alg, ctx->data, ctx->data_len, hash, hash_len);
     }
 
     hash_ctx_free(ctx);
     js_property_set(self, make_string_item_crypto("__hash_ctx__"), ItemNull);
 
-    if (hash_len == 0) return crypto_empty_digest_output(encoding_item);
-    return crypto_digest_output_for_encoding(hash, hash_len, enc, has_encoding);
+    if (!ok) {
+        mem_free(hash);
+        return crypto_empty_digest_output(encoding_item);
+    }
+    Item result = crypto_digest_output_for_encoding(hash, hash_len, enc, has_encoding);
+    mem_free(hash);
+    return result;
 }
 
 extern "C" Item js_hash_end(Item data_item) {
@@ -1637,6 +1799,7 @@ extern "C" Item js_hash_copy(Item options_item) {
     HashCtx* copy = (HashCtx*)mem_calloc(1, sizeof(HashCtx), MEM_CAT_JS_RUNTIME);
     crypto_track_hash_context(copy);
     memcpy(copy->alg, ctx->alg, strlen(ctx->alg) + 1);
+    copy->output_len = ctx->output_len;
     if (ctx->data_len > 0) {
         copy->data = (uint8_t*)mem_alloc((size_t)ctx->data_len, MEM_CAT_JS_RUNTIME);
         memcpy(copy->data, ctx->data, (size_t)ctx->data_len);
@@ -1692,17 +1855,71 @@ static Item js_hash_make_object(HashCtx* ctx) {
     return obj;
 }
 
-extern "C" Item js_crypto_createHash(Item alg_item) {
+static bool crypto_hash_output_length_from_options(const char* alg, Item options_item,
+                                                   int default_len, int* out_len,
+                                                   bool* has_output_len) {
+    if (!out_len || !has_output_len) return false;
+    *out_len = default_len;
+    *has_output_len = false;
+    if (crypto_item_is_undefined(options_item) || get_type_id(options_item) == LMD_TYPE_NULL) return true;
+    if (get_type_id(options_item) != LMD_TYPE_MAP) return true;
+
+    Item output_len_item = js_property_get(options_item, make_string_item_crypto("outputLength"));
+    if (crypto_item_is_undefined(output_len_item)) return true;
+    int parsed_len = 0;
+    if (!crypto_item_to_integer(output_len_item, "options.outputLength", &parsed_len)) return false;
+    if (parsed_len < 0 || parsed_len > (int)CRYPTO_BUFFER_MAX_LENGTH) {
+        return js_throw_out_of_range("options.outputLength", ">= 0", output_len_item), false;
+    }
+    if (!crypto_digest_is_xof(alg) && parsed_len != default_len) {
+        char msg[160];
+        snprintf(msg, sizeof(msg),
+            "Output length %d is invalid for %s, which does not support XOF",
+            parsed_len, alg ? alg : "");
+        return js_throw_type_error(msg), false;
+    }
+    *out_len = parsed_len;
+    *has_output_len = true;
+    return true;
+}
+
+static void crypto_emit_shake_output_length_warning(void) {
+    static bool warned = false;
+    if (warned) return;
+    warned = true;
+    Item warning = js_new_object();
+    js_property_set(warning, make_string_item_crypto("name"),
+        make_string_item_crypto("DeprecationWarning"));
+    js_property_set(warning, make_string_item_crypto("message"),
+        make_string_item_crypto("Creating SHAKE128/256 digests without an explicit options.outputLength is deprecated."));
+    js_property_set(warning, make_string_item_crypto("code"),
+        make_string_item_crypto("DEP0198"));
+    js_process_emit(make_string_item_crypto("warning"), warning);
+}
+
+extern "C" Item js_crypto_createHash(Item alg_item, Item options_item) {
     if (get_type_id(alg_item) != LMD_TYPE_STRING) return js_throw_invalid_arg_type("algorithm", "string", alg_item);
     char alg_buf[16];
     crypto_normalize_string(alg_item, alg_buf, sizeof(alg_buf), true);
-    if (crypto_digest_len_for_name(alg_buf) == 0) {
+    int default_len = crypto_digest_len_for_name(alg_buf);
+    if (default_len == 0) {
         return js_throw_type_error("Digest method not supported");
+    }
+
+    int output_len = default_len;
+    bool has_output_len = false;
+    if (!crypto_hash_output_length_from_options(alg_buf, options_item, default_len,
+            &output_len, &has_output_len)) {
+        return ItemNull;
+    }
+    if (crypto_digest_is_xof(alg_buf) && !has_output_len) {
+        crypto_emit_shake_output_length_warning();
     }
 
     HashCtx* ctx = (HashCtx*)mem_calloc(1, sizeof(HashCtx), MEM_CAT_JS_RUNTIME);
     crypto_track_hash_context(ctx);
     memcpy(ctx->alg, alg_buf, strlen(alg_buf) + 1);
+    ctx->output_len = output_len;
 
     return js_hash_make_object(ctx);
 }
@@ -2317,16 +2534,22 @@ extern "C" Item js_crypto_hash(Item alg_item, Item data_item, Item encoding_item
     }
     alg_buf[pos] = '\0';
 
-    int hash_len = crypto_digest_len_for_name(alg_buf);
-    if (hash_len <= 0 || hash_len > 64) {
+    int default_len = crypto_digest_len_for_name(alg_buf);
+    if (default_len <= 0) {
         return js_throw_invalid_arg_value("algorithm", "is invalid", alg_item);
     }
 
     const char* enc = "hex";
     char enc_buf[32];
+    int hash_len = default_len;
+    bool has_output_len = false;
     if (!crypto_item_is_undefined(encoding_item)) {
         Item output_encoding_item = encoding_item;
         if (get_type_id(encoding_item) == LMD_TYPE_MAP) {
+            if (!crypto_hash_output_length_from_options(alg_buf, encoding_item, default_len,
+                    &hash_len, &has_output_len)) {
+                return ItemNull;
+            }
             output_encoding_item = js_property_get(encoding_item, make_string_item_crypto("outputEncoding"));
             if (crypto_item_is_undefined(output_encoding_item)) {
                 output_encoding_item = make_string_item_crypto("hex");
@@ -2345,6 +2568,9 @@ extern "C" Item js_crypto_hash(Item alg_item, Item data_item, Item encoding_item
             return js_throw_invalid_arg_value("outputEncoding", "is invalid", output_encoding_item);
         }
     }
+    if (crypto_digest_is_xof(alg_buf) && !has_output_len) {
+        crypto_emit_shake_output_length_warning();
+    }
 
     uint8_t* data = NULL;
     int data_len = 0;
@@ -2352,13 +2578,17 @@ extern "C" Item js_crypto_hash(Item alg_item, Item data_item, Item encoding_item
         return js_throw_invalid_arg_type("data", "string, ArrayBuffer, Buffer, TypedArray, or DataView", data_item);
     }
 
-    uint8_t hash[64];
-    bool ok = crypto_digest_compute_name(alg_buf, data, data_len, hash, &hash_len);
+    uint8_t* hash = (uint8_t*)mem_alloc((size_t)(hash_len > 0 ? hash_len : 1), MEM_CAT_JS_RUNTIME);
+    bool ok = crypto_digest_compute_name_len(alg_buf, data, data_len, hash, hash_len);
     mem_free(data);
-    if (!ok) return ItemNull;
+    if (!ok) {
+        mem_free(hash);
+        return ItemNull;
+    }
 
-    if (strcmp(enc, "base64url") == 0) return bytes_to_base64url_string(hash, hash_len);
-    return crypto_digest_output_for_encoding(hash, hash_len, enc, true);
+    Item result = crypto_digest_output_for_encoding(hash, hash_len, enc, true);
+    mem_free(hash);
+    return result;
 }
 
 // ============================================================================
@@ -2370,6 +2600,8 @@ extern "C" Item js_crypto_getHashes(void) {
     js_array_push(arr, make_string_item_crypto("sha256"));
     js_array_push(arr, make_string_item_crypto("sha384"));
     js_array_push(arr, make_string_item_crypto("sha512"));
+    js_array_push(arr, make_string_item_crypto("shake128"));
+    js_array_push(arr, make_string_item_crypto("shake256"));
     return arr;
 }
 
@@ -5838,7 +6070,7 @@ extern "C" Item js_get_crypto_namespace(void) {
 
     crypto_namespace = js_new_object();
 
-    crypto_set_method(crypto_namespace, "createHash",         (void*)js_crypto_createHash, 1);
+    crypto_set_method(crypto_namespace, "createHash",         (void*)js_crypto_createHash, 2);
     crypto_set_method(crypto_namespace, "hash",               (void*)js_crypto_hash, 3);
     crypto_set_method(crypto_namespace, "createHmac",         (void*)js_crypto_createHmac, 2);
     crypto_set_method(crypto_namespace, "createSign",         (void*)js_crypto_createSign, 1);
@@ -5911,7 +6143,7 @@ extern "C" Item js_get_crypto_namespace(void) {
 
     // class constructors as stubs (for typeof/instanceof checks)
     js_property_set(crypto_namespace, make_string_item_crypto("Hash"),
-        js_new_function((void*)js_crypto_createHash, 1));
+        js_new_function((void*)js_crypto_createHash, 2));
     js_property_set(crypto_namespace, make_string_item_crypto("Hmac"),
         js_new_function((void*)js_crypto_createHmac, 2));
     js_property_set(crypto_namespace, make_string_item_crypto("Sign"),

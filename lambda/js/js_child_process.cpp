@@ -914,7 +914,7 @@ static Item js_spawn_send_with_env(Item env_item, Item message, Item send_handle
     else if (is_callable(options)) cb = options;
     else if (is_callable(send_handle)) cb = send_handle;
 
-    if (!is_undefined_item(callback) && !is_callable(callback)) {
+    if (!is_nullish_item(callback) && !is_callable(callback)) {
         return js_throw_invalid_arg_type("callback", "function", callback);
     }
     if (!is_undefined_item(options) && !is_callable(options) && !is_object_item(options)) {
@@ -945,7 +945,7 @@ extern "C" Item js_spawn_send(Item message, Item send_handle, Item options, Item
     else if (is_callable(options)) cb = options;
     else if (is_callable(send_handle)) cb = send_handle;
 
-    if (!is_undefined_item(callback) && !is_callable(callback)) {
+    if (!is_nullish_item(callback) && !is_callable(callback)) {
         return js_throw_invalid_arg_type("callback", "function", callback);
     }
     if (!is_undefined_item(options) && !is_callable(options) && !is_object_item(options)) {

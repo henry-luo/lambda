@@ -107,6 +107,7 @@ Phases **4a-4g are prototyped in the JS reference** (data model, shape tools, ro
 15. [Test Suite Plan](#14-test-suite-plan)
 16. [Phased Implementation](#15-phased-implementation)
 17. [Risks and Open Questions](#16-risks-and-open-questions)
+18. [Appendix A — Vanilla-DOM Editor (future third rendering target)](#appendix-a--vanilla-dom-editor-future-third-rendering-target)
 
 ---
 
@@ -150,6 +151,23 @@ Phases **4a-4g are prototyped in the JS reference** (data model, shape tools, ro
 | **Excalidraw** ([excalidraw.com](https://excalidraw.com), [github](https://github.com/excalidraw/excalidraw)) | (a) `versionNonce` — every shape carries a random nonce used for cheap "did this change" checks. Useful for our `render_map` invalidation. (b) Element-snapshot history (cheap, coarse) as a reference for *what not to do* — we keep PM step-based history for the unified algebra. | Their flat-array document model; their canvas renderer; their absence of layers. | Excalidraw is the minimal reference, useful to keep us honest about which "elaborate" features (layers, groups, connectors) we actually need. |
 | **CodeMirror 6** ([codemirror.net/6](https://codemirror.net/6)) | The "single `State` → `Transaction` → `State`" loop with `effects` separate from `changes`. Reinforces `mod_transaction.ls`'s direction. | Its facet system; its EditorView. | Periphery; one design pattern. |
 | **Lexical** ([github](https://github.com/facebook/lexical)) | Keyed reconciler — stable node keys mean we can re-render without diffing. Maps cleanly to **stable shape IDs** in our model. | Its EditorState; its node class hierarchy. | Periphery; one design pattern (already noted in Editor3.md). |
+
+### 2.1 Architectural comparison — where our model sits
+
+How the reference editors differ structurally, and where **our `editor-js`** (the JS reference being ported to Lambda) lands. Our editor deliberately takes **Slate's tree + path model**, **ProseMirror's step/transaction algebra**, and **BlockSuite/Affine's embedded-drawing-surface UX** — while rejecting Editor.js's flat-block model (no structured inline) and BlockSuite's CRDT-first storage.
+
+| Aspect                | **Our `editor-js`**                                                                       | Slate                                             | ProseMirror                                        | Editor.js (lib)                                | BlockSuite / Affine                                         |
+| --------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------- |
+| **Doc model**         | structured tree — `node`/`text` leaves, flat mark dict                                    | structured tree (elements + text, marks as props) | schema-constrained tree                            | flat block list (JSON), per-block plugins      | block tree on a **Yjs CRDT** (flavoured blocks, stable IDs) |
+| **Inline / marks**    | first-class flat mark dict on text leaves                                                 | first-class (marks as leaf props)                 | first-class (marks in schema)                      | **none** — block-internal contenteditable HTML | first-class (Yjs text + attributes)                         |
+| **Positions**         | **Slate-style** `{path, offset}`                                                          | path + offset (`Point`/`Path`)                    | integer positions + `ResolvedPos`                  | none global; per-block selection               | block-ID + offset (own selection manager)                   |
+| **Edit algebra**      | **PM-style** 7 invertible steps (`apply`/`invert`/`map`)                                  | Operations (`split_node`, `set_node`, …)          | Steps / Transactions (OT-ready, mappable)          | none (block CRUD)                              | CRDT (Yjs) mutations — no step algebra                      |
+| **History**           | transaction-based, invertible, coalescing                                                 | operation-based undo stack                        | step-based, rebaseable; collab module              | snapshot plugin (coarse)                       | Yjs `UndoManager` (CRDT undo)                               |
+| **View layer**        | **React** (demo) → **Lambda `view`/`edit` templates** (port)                              | React (`slate-react`)                             | own contenteditable view; React via libs           | vanilla DOM block tools (framework-agnostic)   | **Lit** web components                                      |
+| **Drawings / canvas** | custom **Mark records** (`shape`/`connector`/…); shape edits lower to existing steps (§5) | none (text-only)                                  | none in core (NodeViews can embed; no shape model) | none (a block plugin could embed)              | **first-class** — `surface` block + edgeless canvas mode    |
+| **Collab posture**    | stable-id + `set_attr`-only mutation → CRDT-ready (Stage 5)                               | manual                                            | OT via steps                                       | none                                           | **native** (Yjs)                                            |
+
+**Reading the table for Stage 4:** our drawing layer is unique in lowering every shape gesture to the *same* step algebra as text (§5) — Slate/PM have no shape model, Editor.js has no algebra, and BlockSuite gets drawings but pays for them with a CRDT-coupled store and a separate edit path. We get BlockSuite's embedded-surface ergonomics on PM/Slate's unified, invertible, mappable substrate. (Naming note: our `editor-js` is the *JS reference editor*, **not** based on the Editor.js library — the row above shows they are opposite designs.)
 
 ---
 
@@ -1187,3 +1205,71 @@ Stage 4 adds **one new block type** (`<drawing>`) and the canvas-mode editor tha
 The two reference editors picked — Affine BlockSuite for embed UX and maxGraph for routing — are the right pair: Affine validates the "doc with drawing surface" shape end-to-end, maxGraph validates the routing algorithm at production scale. We adopt their architectural ideas surgically and run the algorithm port through our existing step/transaction/history substrate. The result is a unified rich-document editor whose drawings are first-class peers of paragraphs, with the same undo, the same selection model, the same DAG history, and the same path forward to collab.
 
 The test plan (`test/lambda/editing/`) frontloads the catalog in `cases.md` — review the catalog first, then the fixtures, then the runners. ~150 cases covering schema, position, steps, all eight tools, routing, snap, align, multi-select, mode switch, history coalescing, clipboard, and the text-frame ↔ flow interop. PM's transform tests, maxGraph's edge-style tests, and tldraw's tool tests provide the case-derivation source-of-truth — we port the *cases*, not the JS.
+
+---
+
+## Appendix A — Vanilla-DOM Editor (Future Third Rendering Target)
+
+**Status:** deferred design note. **Decision (2026-06-27): keep React for the JS reference for now**, and implement a **vanilla-DOM** view *later* — when we want to run the JS editor live **under Radiant**. Until then, hold the React dependency **as lean as possible** (§A.3) so the future swap stays cheap. This appendix records the rationale and the pros/cons so the option is ready when the need arises.
+
+### A.1 Why a third target
+
+The JS reference (`test/editor-js/`) renders with **React** today. A third option — the *same* editor on a **vanilla-DOM** view — would let the JS implementation run **under Radiant** (via the LambdaJS DOM), giving an in-engine reference to validate against *before* the Lambda port is finished, and a way to cross-check Lambda vs JS in the same render environment. This mirrors **ProseMirror**, which is deliberately *not* React for exactly these reasons (tight contenteditable control, framework independence, embeddability); **Slate** chose React, and our reference currently follows Slate there (see §2.1).
+
+### A.2 Feasibility — LambdaJS already exposes a DOM
+
+Present in-tree: `lambda/js/js_dom.{cpp,h}`, `js_dom_events.{cpp,h}`, `js_dom_selection.{cpp,h}` (design: `doc/dev/js/JS_13_Web_DOM.md`). A standards-only editor — `createElement` / `setAttribute` / `addEventListener` / `Selection` / `Range` — can run on it. **React effectively cannot** (it assumes a full browser runtime + scheduler). So vanilla DOM is the *enabler* for the Radiant host; React is a non-starter there.
+
+> **De-risk before building.** Spike `js_dom` first to confirm it supports what the editor assumes under Radiant: contenteditable-style text input, `Selection` get/set (ideally `selection.modify` for caret nav), and a `beforeinput`-equivalent event. If those are present the path is clear; if contenteditable input isn't wired yet, that's a Radiant-side gap to scope separately.
+
+### A.3 Keeping the React dependency lean (do this now)
+
+The future migration is cheap **only if React never leaks past the view**. Discipline to hold today:
+
+- **Core stays React-free.** `src/model`, `src/commands`, `src/drawing`, `src/input`, parser/serializer — no React types, hooks, or imports. (Today: 36 `.ts` files, all clean; only 3 `.tsx` in `src/`.)
+- **Confine React to ~4 files** — `src/view/{render.tsx, EditorView.tsx, drawing/DrawingView.tsx, use-editor-state.ts}` — plus the `demo/` shell.
+- **Keep `renderDoc` a (near-)pure `doc → view-structure` function** — separate *what* to render from *how* it commits, so only the commit layer changes later.
+- **Use native DOM events** (`beforeinput`, `selectionchange`), not React synthetic events. *(Already done — chosen earlier to avoid React/jsdom quirks.)*
+- **Keep source↔DOM mapping in `dom-bridge.ts`** — framework-agnostic; transfers as-is.
+- **Keep editor state a plain reducer** (`use-editor-state.ts`) that React merely *drives*; a vanilla controller can drive the identical reducer.
+
+Held to these, React is one thin, swappable shell over a portable core — and **1838 of 1841 tests are already headless** (only 3 `.tsx`), so the test suite is effectively framework-independent already.
+
+### A.4 Vanilla DOM vs React — pros / cons
+
+**Pros of vanilla DOM**
+
+1. **Enables the Radiant target** — standards-only DOM runs on LambdaJS `js_dom*`; React can't host there. *(The decisive reason.)*
+2. **Converges with the Lambda view** — Lambda renders via `view`/`edit` templates + `render_map` (a template + keyed reconciler, *not* a VDOM). A vanilla keyed reconciler mirrors that, keyed by `path` (text) / `shape-id` (drawings) just like `render_map` — tightening the JS↔Lambda correspondence.
+3. **PM-style control of contenteditable + selection** — no reconciler clobbering the native caret (we already added a `selectionFromDom` guard to work around React doing exactly that).
+4. **Smaller deps/build** — drop `react`/`react-dom` and the React Vite plugin; the single-file build simplifies.
+5. **One view runs everywhere** — browser demo, headless tests, and Radiant.
+
+**Cons of vanilla DOM**
+
+1. **You inherit reconciliation** — keyed, focus-preserving incremental DOM patching is the hard part of an editor view (PM's `prosemirror-view` is large precisely for this). React does it for free today; `render.tsx` is simple *because of that*.
+2. **Manual selection/focus restoration** on every edit (save native selection → patch → map → restore). *Mitigant:* the `dom-bridge.ts` source↔DOM mapping transfers.
+3. **More verbose demo chrome** — toolbar, image-resize overlay, and Stage-4's tool palette are pleasant in JSX; vanilla needs a small `h()` helper or plain DOM.
+4. **Migration + regression risk** on the demo (recall the earlier typing/Enter/resize bugs) — needs re-verification.
+5. **Honest framing:** this simplifies the *dependency stack and portability*, **not** total complexity — it moves reconciliation from React into our own code. The win is control + reach, not fewer lines.
+
+### A.5 The one hard part, and how to stage it
+
+The whole migration reduces to **one new component: a keyed, selection-preserving reconciler.** Everything else (model, steps, commands, native events, selection mapping) is already in place. Recommended sequence when the time comes:
+
+1. **Extract `renderDoc`** as a pure `doc → view-structure` function (it nearly is).
+2. **Commit layer, simplest-first:** start with *full re-render + save/restore selection* (correct and easy, fine for a reference), then add keyed diffing only where perf demands it (typing, drag), keyed by `path` / `shape-id`.
+3. **Replace the React shell** with a vanilla controller: native events → command → transaction → reconcile.
+4. **Tests:** the 1838 headless cases are unaffected; rewrite the 3 `.tsx` component tests against the vanilla view.
+
+Pay-off is double: a Radiant-hostable JS reference **and** a working prototype of the Lambda `render_map` reconciler.
+
+### A.6 The three rendering targets
+
+| Target | View layer | Runs on | Status |
+|---|---|---|---|
+| JS reference (browser demo) | **React** | browser (Vite single-file) | **current** |
+| Lambda port | Lambda `view`/`edit` templates + `render_map` | Radiant (native) | **in progress** |
+| JS-under-Radiant *(this appendix)* | **vanilla DOM** | Radiant via LambdaJS `js_dom*` | **deferred / future** |
+
+All three share the same model, step algebra, commands, and oracle-verified behaviour — they differ **only** in the view/commit layer. Keeping React lean (§A.3) keeps the third target a small, well-scoped addition rather than a rewrite.

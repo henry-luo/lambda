@@ -16,6 +16,10 @@ fn add_mark_at(nodes, mark, i, n, acc) {
 }
 fn add_mark(nodes, mark) => add_mark_at(nodes, mark, 0, len(nodes), [])
 
+fn html_mark_fragment(schema, tag, n, mark) =>
+  if (html_schema_mode(schema)) { [node(tag, convert_inline_schema(schema, n))] }
+  else { add_mark(convert_inline_schema(schema, n), mark) }
+
 fn frag_concat_at(a, b, i, n, acc) {
   if (i >= n) { acc }
   else { frag_concat_at(a, b, i + 1, n, [*acc, b[i]]) }
@@ -169,9 +173,10 @@ pub fn html_to_editor_fragment_for_schema(schema, n) {
     else if (tag == 'h1') { [heading_node(schema, 1, convert_inline_schema(schema, n))] }
     else if (tag == 'h2') { [heading_node(schema, 2, convert_inline_schema(schema, n))] }
     else if (tag == 'h3') { [heading_node(schema, 3, convert_inline_schema(schema, n))] }
-    else if (tag == 'strong' or tag == 'b') { add_mark(convert_inline_schema(schema, n), 'strong') }
-    else if (tag == 'em' or tag == 'i') { add_mark(convert_inline_schema(schema, n), 'em') }
-    else if (tag == 'code') { add_mark(convert_inline_schema(schema, n), 'code') }
+    else if (tag == 'strong' or tag == 'b') { html_mark_fragment(schema, 'strong', n, 'strong') }
+    else if (tag == 'em' or tag == 'i') { html_mark_fragment(schema, 'em', n, 'em') }
+    else if (tag == 'u') { html_mark_fragment(schema, 'u', n, 'u') }
+    else if (tag == 'code') { html_mark_fragment(schema, 'code', n, 'code') }
     else if (tag == 'blockquote') { [blockquote_node(schema, n)] }
     else if (tag == 'pre') { [code_block_node(schema, n)] }
     else if (tag == 'hr') { [node('hr', [])] }

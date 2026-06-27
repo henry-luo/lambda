@@ -26,6 +26,9 @@ console.log('spawn ipc bad send options:', thrownCode(function() {
 console.log('spawn ipc bad send handle:', thrownCode(function() {
   child.send('bad', 'handle', undefined);
 }));
+console.log('spawn ipc null callback:', thrownCode(function() {
+  child.send('bad', null, {}, null);
+}));
 console.log('spawn ipc send return:', child.send({ hello: 'world' }, function(err) {
   console.log('spawn ipc callback err:', err === undefined);
   child.disconnect();

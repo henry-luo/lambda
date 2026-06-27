@@ -4,6 +4,7 @@ spawn ipc send type: function
 spawn ipc disconnect type: function
 spawn ipc bad send options: TypeError:ERR_INVALID_ARG_TYPE
 spawn ipc bad send handle: TypeError:ERR_INVALID_HANDLE_TYPE
+spawn ipc null callback: none
 spawn ipc send return: true
 spawn ipc callback err: true
 spawn ipc disconnected: false

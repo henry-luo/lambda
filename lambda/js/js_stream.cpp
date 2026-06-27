@@ -146,6 +146,7 @@ extern "C" Item js_readable_push(Item self, Item chunk);
 extern "C" Item js_readable_pipe(Item self, Item dest);
 extern "C" Item js_readable_new(Item opts);
 extern "C" Item js_passthrough_new(Item opts);
+extern "C" Item js_writable_end(Item self, Item chunk, Item callback);
 extern "C" Item js_stream_destroy(Item self, Item err);
 extern "C" Item js_stream_emit(Item self, Item event_item, Item arg1);
 static void js_stream_flush_buffered_data(Item self);
@@ -694,6 +695,34 @@ static void js_stream_mark_readable_end_emitted(Item self) {
     js_property_set(self, make_string_item("readableAborted"), js_bool_item(false));
 }
 
+static Item js_stream_end_writable_side_tick(Item self) {
+    ensure_keys();
+    Item writable_state = js_property_get(self, key_writable_state);
+    if (!js_item_is_true(js_property_get(self, key_writable)) ||
+        js_state_get_bool(writable_state, "ended") ||
+        js_item_is_true(js_property_get(self, key_finish_emitted))) {
+        return make_js_undefined();
+    }
+    return js_writable_end(self, make_js_undefined(), make_js_undefined());
+}
+
+static void js_stream_maybe_end_writable_after_readable_end(Item self) {
+    ensure_keys();
+    Item allow_half_open = js_property_get(self, make_string_item("allowHalfOpen"));
+    if (get_type_id(allow_half_open) != LMD_TYPE_BOOL || it2b(allow_half_open)) return;
+    if (!js_item_is_true(js_property_get(self, key_writable))) return;
+    Item writable_state = js_property_get(self, key_writable_state);
+    if (get_type_id(writable_state) != LMD_TYPE_MAP ||
+        js_state_get_bool(writable_state, "ended") ||
+        js_item_is_true(js_property_get(self, key_finish_emitted))) {
+        return;
+    }
+    Item bound_args[1] = { self };
+    Item tick = js_bind_function(js_new_function((void*)js_stream_end_writable_side_tick, 1),
+                                 make_js_undefined(), bound_args, 1);
+    js_next_tick_enqueue(tick);
+}
+
 static void js_stream_mark_writable_ended(Item self) {
     Item state = js_property_get(self, key_writable_state);
     js_state_set_bool(state, "ending", true);
@@ -1162,6 +1191,7 @@ static Item js_stream_emit_end_tick(Item self) {
     js_property_set(self, key_end_pending, js_bool_item(false));
     js_stream_mark_readable_end_emitted(self);
     stream_emit(self, "end", NULL, 0);
+    js_stream_maybe_end_writable_after_readable_end(self);
     js_stream_async_iterators_drain(self, make_js_undefined());
     if (js_stream_can_auto_destroy_after_readable_end(self)) {
         js_stream_auto_destroy_after_terminal(self);
@@ -3855,7 +3885,8 @@ static Item js_stream_iter_batch_next(Item env_item) {
         return js_stream_iter_result(batch, false);
     }
 
-    while (js_array_length(batch) < 128) {
+    bool collect_all = js_item_is_true(env[4]);
+    while (collect_all || js_array_length(batch) == 0) {
         Item value = js_iterator_step(env[1]);
         if (js_check_exception()) return ItemNull;
         if (value.item == JS_ITER_DONE_SENTINEL) {
@@ -3878,14 +3909,15 @@ static Item js_stream_iter_make_batch_iterable(Item source, bool async_iterable)
         if (js_check_exception()) return ItemNull;
     }
 
-    Item* env = js_alloc_env(4);
+    Item* env = js_alloc_env(5);
     env[0] = source;
     env[1] = iterator;
     env[2] = js_bool_item(false);
     env[3] = js_bool_item(single);
+    env[4] = js_bool_item(get_type_id(source) == LMD_TYPE_ARRAY);
 
     Item obj = js_new_object();
-    js_property_set(obj, make_string_item("next"), js_new_closure((void*)js_stream_iter_batch_next, 0, env, 4));
+    js_property_set(obj, make_string_item("next"), js_new_closure((void*)js_stream_iter_batch_next, 0, env, 5));
     js_property_set(obj, make_string_item("__sym_1"), js_new_function((void*)js_stream_iter_identity, 0));
     if (async_iterable)
         js_property_set(obj, make_string_item("__sym_5"), js_new_function((void*)js_stream_iter_identity, 0));
@@ -5567,6 +5599,9 @@ static bool propagate_stream_options(Item obj, Item opts) {
     Item auto_destroy = js_property_get(opts, make_string_item("autoDestroy"));
     if (get_type_id(auto_destroy) == LMD_TYPE_BOOL)
         js_property_set(obj, key_auto_destroy, auto_destroy);
+    Item allow_half_open = js_property_get(opts, make_string_item("allowHalfOpen"));
+    if (is_duplex_like && get_type_id(allow_half_open) == LMD_TYPE_BOOL)
+        js_property_set(obj, make_string_item("allowHalfOpen"), allow_half_open);
     return true;
 }
 
@@ -6227,6 +6262,7 @@ extern "C" Item js_duplex_new(Item opts) {
     js_property_set(obj, key_paused, js_bool_item(false));
     js_property_set(obj, key_close_emitted, js_bool_item(false));
     js_property_set(obj, key_auto_destroy, js_bool_item(true));
+    js_property_set(obj, make_string_item("allowHalfOpen"), js_bool_item(true));
     js_property_set(obj, key_readable_state, js_create_readable_state());
     js_property_set(obj, key_writable_state, js_create_writable_state(obj));
     js_stream_set_writable_corked(obj, 0);
@@ -6459,6 +6495,7 @@ extern "C" Item js_transform_new(Item opts) {
     js_property_set(obj, key_paused, js_bool_item(false));
     js_property_set(obj, key_close_emitted, js_bool_item(false));
     js_property_set(obj, key_auto_destroy, js_bool_item(true));
+    js_property_set(obj, make_string_item("allowHalfOpen"), js_bool_item(true));
     js_property_set(obj, key_readable_state, js_create_readable_state());
     js_property_set(obj, key_writable_state, js_create_writable_state(obj));
     js_stream_set_writable_corked(obj, 0);

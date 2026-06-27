@@ -133,13 +133,11 @@ fn source_selection_is_range(sel) =>
 
 fn click_selection_for_doc(doc, evt, fallback) {
   let sel = normalize_source_selection(doc, evt.source_selection)
-  if (source_selection_is_range(sel)) { sel }
-  else {
-    let p = normalize_source_pos(doc, evt.source_pos)
-    if (p != null) { text_selection(p, p) }
-    else if (sel != null) { sel }
-    else { fallback }
-  }
+  let p = normalize_source_pos(doc, evt.source_pos)
+  if (p != null) { text_selection(p, p) }
+  else if (source_selection_is_range(sel)) { sel }
+  else if (sel != null) { sel }
+  else { fallback }
 }
 
 fn editor_with_event_selection(ed, evt) => edit_set_selection(ed, event_selection_for_doc(ed.doc, evt, ed.selection))
@@ -320,7 +318,7 @@ on beforeinput(evt) {
   }
 }
 on click(evt) {
-  if (evt.target_tag != "button" and (evt.source_selection != null or evt.source_pos != null)) {
+  if ((evt.target_tag == null or evt.target_tag != "button") and (evt.source_selection != null or evt.source_pos != null)) {
     editor = editor_with_click_selection(editor, evt)
     status = "selected"
   }
