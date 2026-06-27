@@ -369,7 +369,9 @@ static void emit_call_void_3(MirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
     MIR_type_t a3t, MIR_op_t a3);
 
-static bool is_gc_root_type(TypeId type_id) {
+static bool should_gc_root_var(MIR_type_t mir_type, TypeId type_id) {
+    if (mir_type == MIR_T_P) return true;
+    // check is_gc_root_type
     switch (type_id) {
     // boxed scalar Items carry heap pointers and need roots even in I64 regs;
     // packed int/bool/null scalars are handled by the default unrooted path.
@@ -384,14 +386,6 @@ static bool is_gc_root_type(TypeId type_id) {
     default:
         return false;
     }
-}
-
-static bool should_gc_root_var(MIR_type_t mir_type, TypeId type_id) {
-    return mir_type == MIR_T_P || is_gc_root_type(type_id);
-}
-
-static bool should_gc_root_local_var(MIR_type_t mir_type, TypeId type_id) {
-    return should_gc_root_var(mir_type, type_id);
 }
 
 static MIR_reg_t emit_root_value_bits(MirTranspiler* mt, MIR_reg_t value) {
@@ -441,7 +435,7 @@ static MIR_reg_t load_gc_root_slot(MirTranspiler* mt, int root_slot, const char*
 
 static void update_gc_root_slot(MirTranspiler* mt, MirVarEntry* var) {
     if (!var) return;
-    if (var->root_slot < 0 && !should_gc_root_local_var(var->mir_type, var->type_id)) return;
+    if (var->root_slot < 0 && !should_gc_root_var(var->mir_type, var->type_id)) return;
     if (var->root_slot < 0) {
         var->root_slot = create_gc_root_slot(mt, var->reg);
         return;
@@ -479,7 +473,7 @@ static void set_var(MirTranspiler* mt, const char* name, MIR_reg_t reg, MIR_type
     snprintf(entry.name, sizeof(entry.name), "%s", name);
     entry.var.reg = reg;
     entry.var.root_slot = -1;
-    if (should_gc_root_local_var(mir_type, type_id)) {
+    if (should_gc_root_var(mir_type, type_id)) {
         entry.var.root_slot = create_gc_root_slot(mt, reg);
     }
     entry.var.mir_type = mir_type;
@@ -499,7 +493,7 @@ static void set_state_var(MirTranspiler* mt, const char* name, MIR_reg_t reg,
     snprintf(entry.name, sizeof(entry.name), "%s", name);
     entry.var.reg = reg;
     entry.var.root_slot = -1;
-    if (should_gc_root_local_var(mir_type, type_id)) {
+    if (should_gc_root_var(mir_type, type_id)) {
         entry.var.root_slot = create_gc_root_slot(mt, reg);
     }
     entry.var.mir_type = mir_type;
