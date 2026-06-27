@@ -1,0 +1,21 @@
+flowchart TB
+  subgraph ItemWord["LMD_TYPE_ERROR Item (high byte = 0x0E)"]
+    SENT["Bare sentinel: ItemError\n((uint64_t)LMD_TYPE_ERROR << 56)\nlow 56 bits = 0 (no payload)"]
+    BOXED["Boxed pointer: err2it(LambdaError*)\nlow 56 bits = LambdaError* heap pointer"]
+  end
+
+  SENT -->|"it2err() -> NULL"| NULLERR["no rich payload\ncheck context->last_error\nfor code + message + trace"]
+  BOXED -->|"it2err() -> LambdaError*"| RICH
+
+  subgraph RICH["struct LambdaError (lambda-error.h:180)"]
+    F1["code : LambdaErrorCode (1xx..5xx)"]
+    F2["is_heap : GC-owned when true"]
+    F3["message : char* (owned)"]
+    F4["location : SourceLocation"]
+    F5["stack_trace : StackFrame* chain"]
+    F6["help / details / cause"]
+  end
+
+  CREATE["err_create (arena, is_heap=false)\nerr_create_heap (GC, is_heap=true)\nerr_createf (1024B buffer)"] --> RICH
+  RICH -->|"GC heap present"| GCHOOK["err_gc_trace / err_gc_destroy\nregistered for LMD_TYPE_ERROR"]
+  RICH -->|"arena / no heap"| FREE["err_free frees non-heap;\nno-op for is_heap (GC owns)"]

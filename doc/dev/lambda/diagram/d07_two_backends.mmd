@@ -1,0 +1,20 @@
+flowchart TB
+  AST["Typed AST (build_ast.cpp)"]
+  SEL{"runtime->use_mir_direct ?"}
+  AST --> SEL
+
+  SEL -->|"default"| MD["MIR Direct: transpile-mir.cpp"]
+  MD --> MDl["transpile_expr lowers AST nodes\nstraight to MIR insns"]
+  MDl --> MDb["inline emit_box / push_d / push_l_safe"]
+  MDb --> MIR["MIR module + funcs"]
+
+  SEL -->|"--c2mir (legacy, ifdef)"| C2["C2MIR: transpile.cpp"]
+  C2 --> C2t["transpile_expr emits C text\ninto StrBuf code_buf"]
+  C2t --> C2e["prepend lambda-embed.h (lambda.h decls)"]
+  C2e --> C2c["c2mir_compile (C to MIR)"]
+  C2c --> MIR
+
+  MIR --> LINK["mir.c: MIR_link + import_resolver"]
+  LINK --> GEN["MIR_gen to native code"]
+  GEN --> ROOT["register_bss_gc_roots (_gvar_)"]
+  ROOT --> RUN["main_func(context)"]

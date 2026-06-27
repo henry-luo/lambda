@@ -1,0 +1,18 @@
+flowchart TD
+    A["script.ls"] --> B{"CLI subcommand (LR_01)"}
+    B -->|"lambda script.ls"| C["run_main = false (functional)"]
+    B -->|"lambda run script.ls"| D["run_main = true (procedural)"]
+    C --> E["compile_script_as_mir_direct (LR_07)"]
+    D --> E
+    E --> F{"function kind"}
+    F -->|"fn (pure)"| G["functional body: no side effects, no mutation, value result"]
+    F -->|"pn / main()"| H["proc body: mt->in_proc set"]
+    G --> G1["expression collections [..], {..}, for-EXPR yields a value"]
+    H --> H1["statements: var, assignment, for-STAM, while-STAM"]
+    H1 --> H2["mutation builtins: push() / splice() (SYSPROC_*)"]
+    H1 --> H3["IO builtins: pn_print / pn_output* / pn_fetch / pn_cmd* / pn_io_* / pn_clock"]
+    H2 --> I["in-place mutate Array / ArrayNum, return same pointer"]
+    H3 --> J["RetItem (can_raise), g_dry_run gate"]
+    G1 --> K["result wrapped in fresh-pool Input (LR_01)"]
+    I --> K
+    J --> K

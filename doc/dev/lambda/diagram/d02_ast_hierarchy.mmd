@@ -1,0 +1,89 @@
+classDiagram
+  class AstNode {
+    +AstNodeType node_type
+    +Type* type
+    +AstNode* next
+    +TSNode node
+  }
+  class AstPrimaryNode {
+    +AstNode* expr
+  }
+  class AstUnaryNode {
+    +AstNode* operand
+    +Operator op
+  }
+  class AstBinaryNode {
+    +AstNode* left right
+    +Operator op
+  }
+  class AstFieldNode {
+    +AstNode* object field
+  }
+  class AstCallNode {
+    +AstNode* function argument
+    +bool pipe_inject propagate can_raise
+  }
+  class AstIdentNode {
+    +String* name
+    +NameEntry* entry
+  }
+  class AstNamedNode {
+    +String* name
+    +AstNode* as
+    +String* error_name
+    +NameEntry* entry
+  }
+  class AstLoopNode {
+    +String* name index_name
+    +AstNode* as
+    +LoopKeyFilter key_filter
+  }
+  class AstArrayNode {
+    +AstNode* item
+  }
+  class AstListNode {
+    +AstNode* declare
+    +NameScope* vars
+    +TypeList* list_type
+  }
+  class AstMapNode {
+    +AstNode* item
+  }
+  class AstElementNode {
+    +AstNode* content
+  }
+  class AstFuncNode {
+    +String* name
+    +AstNamedNode* param
+    +AstNode* body
+    +NameScope* vars
+    +CaptureInfo* captures
+  }
+  class AstIfNode {
+    +AstNode* cond then otherwise
+  }
+  class AstForNode {
+    +AstNode* loop where order
+    +NameScope* vars
+  }
+  class AstScript {
+    +AstNode* child
+    +NameScope* global_vars
+  }
+  AstNode <|-- AstPrimaryNode
+  AstNode <|-- AstUnaryNode
+  AstNode <|-- AstBinaryNode
+  AstNode <|-- AstFieldNode
+  AstNode <|-- AstCallNode
+  AstNode <|-- AstIdentNode
+  AstNode <|-- AstNamedNode
+  AstNode <|-- AstLoopNode
+  AstNode <|-- AstArrayNode
+  AstNode <|-- AstMapNode
+  AstNode <|-- AstIfNode
+  AstNode <|-- AstForNode
+  AstNode <|-- AstFuncNode
+  AstNode <|-- AstScript
+  AstArrayNode <|-- AstListNode
+  AstMapNode <|-- AstElementNode
+  AstNode ..> Type : carries inferred (LR_03)

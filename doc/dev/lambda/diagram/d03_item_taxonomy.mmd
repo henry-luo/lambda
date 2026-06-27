@@ -1,0 +1,30 @@
+classDiagram
+  class Item {
+    +uint64 item
+    +int56 int_val
+    +uint8 bool_val
+    +ptr56 tagged_pointer
+    +type_id() TypeId
+  }
+  class PackedScalar {
+    +NULL UNDEFINED
+    +BOOL ITEM_TRUE ITEM_FALSE
+    +INT int56 i2it
+    +NUM_SIZED i8..u32 f16 f32
+  }
+  class TaggedPointerScalar {
+    +INT64 nursery int64
+    +FLOAT nursery double
+    +DTIME nursery DateTime
+    +DECIMAL Decimal or BigInt
+    +STRING SYMBOL BINARY
+    +PATH ERROR
+  }
+  class Container {
+    +TypeId type_id at offset 0
+    +flags lifecycle and array
+    +map_kind or elem_type
+  }
+  Item <|.. PackedScalar : high byte tag, value in word
+  Item <|.. TaggedPointerScalar : high byte tag, 56-bit ptr
+  Item <|.. Container : high byte zero, raw pointer

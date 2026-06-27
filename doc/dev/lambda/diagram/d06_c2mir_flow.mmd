@@ -1,0 +1,15 @@
+flowchart TD
+    AST["Typed AST<br/>(build_ast.cpp)"] --> ROOT["transpile_ast_root<br/>(transpile.cpp:7703)"]
+    ROOT --> PRE["prepend lambda-embed.h<br/>#define LAMBDA_C2MIR_RUNTIME 1<br/>+ extern Context* _lambda_rt"]
+    ROOT --> INFER["infer_proc_param_types_from_callsites<br/>(transpile.cpp:3447)"]
+    INFER --> WALK["recursive walk: transpile_expr<br/>+ per-node transpile_*"]
+    WALK --> EMIT["strbuf_append_* into<br/>StrBuf* code_buf"]
+    PRE --> EMIT
+    EMIT --> CTEXT["C source text<br/>(GCC statement-expressions)"]
+    CTEXT --> SKIP["runner.cpp:668<br/>skip lambda_lambda_h_len bytes"]
+    SKIP --> C2MIR["jit_compile_to_mir<br/>c2mir_compile (mir.c:151)<br/>#ifdef LAMBDA_C2MIR"]
+    C2MIR --> MIR["MIR IR module"]
+    MIR --> GEN["jit_gen_func + MIR_gen<br/>(mir.c:252)"]
+    GEN --> NATIVE["native code"]
+
+    DEFAULT["MIR Direct (default)<br/>see LR_07"] -.->|"--c2mir clears<br/>use_mir_direct"| ROOT

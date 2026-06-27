@@ -1,0 +1,31 @@
+flowchart TB
+  SRC["source .ls text"]
+  SRC --> PC["parse.c: lambda_parse_source\nts_parser_parse_string"]
+  PC --> CST["TSTree (CST)\nnodes carry TSSymbol ids"]
+  CST --> BS["build_script (build_ast.cpp:8199)\nalloc AstScript, global NameScope"]
+  BS -->|"SYM_IMPORT_MODULE"| BMI["build_module_import"]
+  BS -->|"SYM_CONTENT"| BC["build_content (two-pass when is_global)"]
+  BS -->|"SYM_COMMENT"| SKIP["skip"]
+
+  BC --> BE["build_expr (7378)\nRecursionGuard MAX_BUILD_DEPTH=1000"]
+  BE --> SW{"switch ts_node_symbol(node)\nover SYM_* (ts-enum.h)"}
+  SW -->|"SYM_EXPR / SYM_TYPE_EXPR"| UNWRAP["unwrap single child, recurse"]
+  SW -->|"SYM_INT/FLOAT/STRING/..."| LIT["inline literal build\nint56-range -> float promote"]
+  SW -->|"SYM_BINARY_EXPR"| BB["build_binary_expr (3009)"]
+  SW -->|"SYM_UNARY_EXPR"| BU["build_unary_expr (2893)"]
+  SW -->|"SYM_IF_EXPR"| BI["build_if_expr (3398)"]
+  SW -->|"SYM_PRIMARY_EXPR"| BP["build_primary_expr (2606)"]
+  SW -->|"SYM_CALL_EXPR"| BCALL["build_call_expr (1358)"]
+  SW -->|"SYM_IDENT"| BID["build_identifier (1812)"]
+  SW -->|"SYM_MAP {TypeName}"| BOBJ["AstObjectLiteralNode pre-check"]
+
+  BB --> INFER["forward/local type inference\nstd::max over TypeId order, DIV->FLOAT"]
+  BU --> INFER
+  BI --> INFER
+  BID --> RES["lookup_name -> NameEntry->node->type"]
+  BCALL --> RES2["SysFuncInfo.return_type / TypeFunc.returned"]
+  INFER --> AST["typed AstNode\n(node_type, Type* type, next, TSNode)"]
+  RES --> AST
+  RES2 --> AST
+  LIT --> AST
+  BOBJ --> AST

@@ -1,4 +1,5 @@
 #include "js_mir_internal.hpp"
+#include "../../lib/file.h"
 
 extern "C" void js_dynfunc_cache_reset(void);
 
@@ -1565,6 +1566,15 @@ void jm_finish_last_deferred_mir() {
     }
 }
 
+static bool jm_path_has_known_js_ext(const char* path) {
+    int len = path ? (int)strlen(path) : 0;
+    return (len >= 3 && strcmp(path + len - 3, ".js") == 0) ||
+           (len >= 4 && strcmp(path + len - 4, ".mjs") == 0) ||
+           (len >= 4 && strcmp(path + len - 4, ".cjs") == 0) ||
+           (len >= 5 && strcmp(path + len - 5, ".json") == 0) ||
+           (len >= 3 && strcmp(path + len - 3, ".ls") == 0);
+}
+
 // Resolve a module specifier relative to the importing file's directory
 void jm_resolve_module_path(const char* base_file, const char* specifier, int spec_len,
                                    char* out, int out_size) {
@@ -1638,18 +1648,38 @@ void jm_resolve_module_path(const char* base_file, const char* specifier, int sp
         if (is_builtin) return;  // builtins don't need .js extension
     }
 
-    // If doesn't end in a known JS extension, try adding .js
+    // If doesn't end in a known JS extension, use Node-style file and
+    // directory fallbacks for static literal require/import resolution.
     // Recognized extensions: .js, .mjs, .cjs, .json, .ls
     int len = (int)strlen(out);
     bool has_node_prefix = (len >= 5 && strncmp(out, "node:", 5) == 0);
     if (!has_node_prefix) {
-        bool has_ext = (len >= 3 && strcmp(out + len - 3, ".js") == 0) ||
-                       (len >= 4 && strcmp(out + len - 4, ".mjs") == 0) ||
-                       (len >= 4 && strcmp(out + len - 4, ".cjs") == 0) ||
-                       (len >= 5 && strcmp(out + len - 5, ".json") == 0) ||
-                       (len >= 3 && strcmp(out + len - 3, ".ls") == 0);
-        if (!has_ext && len + 3 < (int)out_size) {
-            snprintf(out + len, out_size - (size_t)len, "%s", ".js");
+        bool has_ext = jm_path_has_known_js_ext(out);
+        if (!has_ext) {
+            if (file_is_file(out)) return;
+
+            char js_candidate[512];
+            if (len + 3 < (int)sizeof(js_candidate)) {
+                snprintf(js_candidate, sizeof(js_candidate), "%s.js", out);
+                if (file_is_file(js_candidate) && (int)strlen(js_candidate) < out_size) {
+                    snprintf(out, out_size, "%s", js_candidate);
+                    return;
+                }
+            }
+
+            char index_candidate[512];
+            const char* sep = (len > 0 && out[len - 1] == '/') ? "" : "/";
+            if (len + (int)strlen(sep) + 8 < (int)sizeof(index_candidate)) {
+                snprintf(index_candidate, sizeof(index_candidate), "%s%sindex.js", out, sep);
+                if (file_is_file(index_candidate) && (int)strlen(index_candidate) < out_size) {
+                    snprintf(out, out_size, "%s", index_candidate);
+                    return;
+                }
+            }
+
+            if (len + 3 < (int)out_size) {
+                snprintf(out + len, out_size - (size_t)len, "%s", ".js");
+            }
         }
     }
 }

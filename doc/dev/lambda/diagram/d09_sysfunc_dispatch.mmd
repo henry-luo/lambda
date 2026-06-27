@@ -1,0 +1,19 @@
+flowchart TB
+  TBL["sys_func_defs[] (174 rows)\nsys_func_registry.c\nSysFuncInfo: name + arg_count + return_type\n+ c_func_name + func_ptr + native_func_ptr"]
+
+  subgraph BUILD["AST-build time (build_ast.cpp)"]
+    MAPS["init_sys_func_maps:\nsys_func_map (name,arg_count)→SysFuncInfo*\n+ sys_func_name_set"]
+    LOOKUP["get_sys_func_info / get_sys_func_for_method\nis_sys_func_name"]
+    NODE["AstSysFuncNode.fn_info = SysFuncInfo*\n(return_type, can_raise, is_proc...)"]
+  end
+
+  subgraph JITT["JIT time"]
+    EMIT["transpile_call (transpile-mir.cpp:6441)\nreads sys->fn_info: c_ret_type, c_func_name"]
+    IMPORTMAP["mir.c init_func_map:\nc_func_name→func_ptr\nnative_c_name→native_func_ptr\n+ jit_runtime_imports[]"]
+    RESOLVE["import_resolver (mir.c:106)\nbinds emitted call to func_ptr"]
+  end
+
+  TBL --> MAPS --> LOOKUP --> NODE --> EMIT
+  TBL --> IMPORTMAP --> RESOLVE
+  EMIT -->|"emits call to c_func_name"| RESOLVE
+  RESOLVE --> NATIVE["JIT'd native code calls fn_*/pn_*"]

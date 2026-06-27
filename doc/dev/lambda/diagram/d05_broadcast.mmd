@@ -1,0 +1,37 @@
+flowchart TD
+  A["vec_add/sub/mul/div/mod/pow (a, b)"] --> B{operand kinds?}
+  B -->|scalar + vector| C["vec_scalar_op(vec, scalar, op, scalar_first)"]
+  B -->|vector + vector| D["vec_vec_op(a, b, op)"]
+
+  C --> C1{is_ndim?}
+  C1 -->|yes| E["wrap scalar as 1-elem ArrayNum<br/>vec_broadcast_op"]
+  C1 -->|no| C2{elem_type fast path?}
+  C2 -->|ELEM_INT/INT64| K1["k_vs / k_sv int64 branch-hoisted"]
+  C2 -->|ELEM_FLOAT32| K2["k_vs / k_sv float32"]
+  C2 -->|ELEM_FLOAT/FLOAT64| K3["k_vs / k_sv double"]
+  C2 -->|else| K4["per-element double loop (compact / heterogeneous)"]
+
+  D --> D1{either is_ndim?}
+  D1 -->|yes| E
+  D1 -->|len-1 operand| C
+  D1 -->|same len, contiguous| K5["k_vv / k_vv_widen same-type kernel"]
+
+  E --> F["get_shape_strides (shp[32] str[32])"]
+  F --> G["compute_broadcast_shape<br/>right-align, dim==dim or dim==1, size-1 -> stride 0"]
+  G --> H{compatible?}
+  H -->|no| I["ItemError"]
+  H -->|yes| J["strided N-D walk: off = sum(idx*eff_str)<br/>read double, apply op, store"]
+
+  K1 --> R["result ArrayNum"]
+  K2 --> R
+  K3 --> R
+  K4 --> R
+  K5 --> R
+  J --> R
+
+  subgraph kernels["LMD_VEC_LOOP __restrict templated kernels"]
+    K1
+    K2
+    K3
+    K5
+  end

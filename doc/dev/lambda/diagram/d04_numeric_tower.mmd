@@ -1,0 +1,17 @@
+flowchart TD
+  subgraph tower["Numeric promotion rank — widen toward higher"]
+    INT["INT (int56, packed inline)"]
+    INT64["INT64 (tagged ptr, nursery)"]
+    FLOAT["FLOAT (tagged ptr double, nursery)"]
+    DECIMAL["DECIMAL (heap mpd_t*, GC)"]
+    INT --> INT64 --> FLOAT --> DECIMAL
+  end
+  NUM_SIZED["NUM_SIZED i8..f32 / UINT64"]
+  NUM_SIZED -->|normalize_sized| INT64
+  NUM_SIZED -->|float subtypes| FLOAT
+  INT -->|overflow add/sub/mul| ERR["ItemError (no wrap)"]
+  INT64 -->|__builtin_*_overflow| ERR
+  DIV["true '/' fn_div"] -->|always| FLOAT
+  IDIV["'//' fn_idiv"] -->|stays| INT64
+  POW["fn_pow"] -->|always pow double| FLOAT
+  ANY["either operand DECIMAL"] -->|delegate decimal_*| DECIMAL

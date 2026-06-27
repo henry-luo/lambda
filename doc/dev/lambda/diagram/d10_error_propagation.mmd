@@ -1,0 +1,19 @@
+flowchart TB
+  CALL["JIT-generated code calls fn_op(a, b)"] --> G
+
+  subgraph G["fn_op body"]
+    GUARD["GUARD_ERROR2(a, b)\nif get_type_id(a)==LMD_TYPE_ERROR return a\nif get_type_id(b)==LMD_TYPE_ERROR return b"]
+    GUARD -->|"an operand is an error Item"| EARLY["early-return the error Item\nunchanged (no unbox, no work)"]
+    GUARD -->|"both operands clean"| WORK["do the real work"]
+    WORK -->|"runtime failure"| RAISE["set_runtime_error(code, ...)\n-> context->last_error\nreturn ItemError sentinel"]
+    WORK -->|"success"| OK["return value Item"]
+  end
+
+  EARLY --> CALLER["caller's own GUARD_ERROR* sees the\nerror Item and early-returns again"]
+  RAISE --> CALLER
+  CALLER -->|"propagates up the native call chain"| TOP["script boundary"]
+
+  OK --> USE["value flows on"]
+  USE -->|"used as a condition"| TRUTHY["is_truthy: LMD_TYPE_ERROR -> BOOL_FALSE\nerrors are falsy; if (^e) tests for error"]
+
+  COMPILE["Compile-time lowering (NOT runtime):\n? operator, let a^err = expr,\nERR_UNHANDLED_ERROR enforcement\nbuild_ast.cpp / transpile-mir.cpp"] -.->|"emits the guarded calls\nand the error-name binding"| CALL

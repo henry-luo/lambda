@@ -1,0 +1,13 @@
+sequenceDiagram
+  participant Caller as JIT function body
+  participant Frame as JIT root frame (thread-local)
+  participant Heap as GC heap / nursery
+  Caller->>Frame: emit_jit_root_frame_enter (save jit_root_next)
+  Caller->>Heap: allocate container / box value
+  Caller->>Frame: create_gc_root_slot + store_gc_root_slot
+  Frame->>Frame: slot keeps the Item reachable
+  Caller->>Heap: further allocation may trigger GC
+  Heap-->>Frame: GC scans root-frame slots (no UAF)
+  Caller->>Frame: update_gc_root_slot on reassignment
+  Caller->>Frame: root_gc_result_if_needed (return value)
+  Caller->>Frame: emit_jit_root_frame_exit (restore cursor)

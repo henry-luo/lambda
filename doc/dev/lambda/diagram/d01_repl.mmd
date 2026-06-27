@@ -1,0 +1,18 @@
+stateDiagram-v2
+    [*] --> Reading
+    Reading --> CommandCheck: line read (top of input)
+    CommandCheck --> Exit: quit / q / exit
+    CommandCheck --> Reading: help / clear
+    CommandCheck --> Accumulate: ordinary line
+    Reading --> Accumulate: continuation line
+    Accumulate --> Completeness: check_statement_completeness
+    Completeness --> Reading: INCOMPLETE (continuation prompt)
+    Completeness --> Discard: ERROR (discard pending input)
+    Discard --> Reading
+    Completeness --> Execute: COMPLETE (append to repl_history)
+    Execute --> RunWholeHistory: run_script_mir over entire repl_history
+    RunWholeHistory --> Rollback: result is ERROR
+    Rollback --> Reading: truncate repl_history to saved length
+    RunWholeHistory --> Display: success
+    Display --> Reading: incremental prefix diff vs last_output
+    Exit --> [*]

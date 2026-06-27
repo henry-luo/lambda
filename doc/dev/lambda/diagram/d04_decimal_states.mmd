@@ -1,0 +1,15 @@
+stateDiagram-v2
+  [*] --> Fixed: literal 123.45n / decimal_from_*
+  [*] --> Unlimited: literal 123.45N
+  [*] --> BigInt: bigint_from_*
+  Fixed: Fixed (unlimited=0)\n38-digit g_fixed_ctx
+  Unlimited: Unlimited (unlimited=1)\nprec=200 (capped, misnomer)
+  BigInt: BigInt (unlimited=2 DECIMAL_BIGINT)\nprec=2000 integers only
+  Fixed --> Unlimited: op with any Unlimited operand\n(should_be_unlimited contagion)
+  Unlimited --> Unlimited: op with Fixed or Unlimited
+  Fixed --> Fixed: op with Fixed
+  note right of BigInt
+    same LMD_TYPE_DECIMAL tag,
+    distinguished only by unlimited flag;
+    own g_bigint_ctx, separate ops
+  end note

@@ -1,0 +1,41 @@
+flowchart TB
+    subgraph Parser["Input parser (stack scope)"]
+        MB["MarkBuilder b(input)\ncaches pool/arena/name_pool/type_list/ui_mode"]
+        EB["ElementBuilder\nelement(tag)"]
+        MapB["MapBuilder\nmap()"]
+        ArrB["ArrayBuilder\narray()"]
+    end
+
+    subgraph Strings["String strategy"]
+        CN["createName()\nNamePool — pooled, deduplicated\n(keys / tags / attr names)"]
+        CS["createString()\narena — never pooled\n(text / content)"]
+        CY["createSymbol()\narena — UNCONDITIONAL\n(comment says ≤32 pooled — diverges)"]
+    end
+
+    subgraph Arena["Input arena (bump allocator)"]
+        ELMT["Element + TypeElmt\n(registered in type_list)"]
+        MAP["Map + data buffer (pool)"]
+        ARR["Array slab"]
+    end
+
+    subgraph Shapes["Shape finalize (dedup)"]
+        FS1["elmt_finalize_shape()"]
+        FS2["map_finalize_shape()"]
+        SP["ShapePool\nshared ShapeEntry / TypeMap"]
+    end
+
+    MB --> EB & MapB & ArrB
+    EB -- "tag/attr names" --> CN
+    EB -- "text()" --> CS
+    EB --> ELMT
+    MapB -- "put(key,..)" --> CN
+    MapB --> MAP
+    ArrB --> ARR
+    MapB -- "string values" --> CS
+    CN --> Arena
+    CS --> Arena
+    CY --> Arena
+
+    EB -- "final()" --> FS1 --> SP
+    MapB -- "final()" --> FS2 --> SP
+    SP -. "dedup chains" .-> ELMT & MAP
