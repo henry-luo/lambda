@@ -6,6 +6,7 @@ rsa pss sign verify options: true
 rsa keyobject properties: true
 rsa keyobject details: true
 rsa keyobject sign verify: true
+rsa one-shot pss default salt: true
 rsa keyobject derive public: true
 rsa keyobject equals: true
 rsa keyobject export options: true

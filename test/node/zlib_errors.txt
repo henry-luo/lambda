@@ -1,0 +1,12 @@
+gunzipSync invalid code: Z_DATA_ERROR
+gunzipSync invalid errno: -3
+gunzipSync invalid has message: true
+inflateSync invalid code: Z_DATA_ERROR
+inflateSync invalid errno: -3
+inflateSync invalid has message: true
+gunzip cb code: Z_DATA_ERROR
+gunzip cb errno: -3
+gunzip cb result undefined: true
+inflate cb code: Z_DATA_ERROR
+inflate cb errno: -3
+inflate cb result undefined: true

@@ -1892,6 +1892,12 @@ enum CryptoRsaPadding {
     CRYPTO_RSA_PKCS1_PSS_PADDING = 6
 };
 
+enum CryptoRsaPssSaltLength {
+    CRYPTO_RSA_PSS_SALTLEN_DIGEST = -1,
+    CRYPTO_RSA_PSS_SALTLEN_MAX_SIGN = -2,
+    CRYPTO_RSA_PSS_SALTLEN_AUTO = -2
+};
+
 struct CryptoSignVerifyOptions {
     Item key;
     int padding;
@@ -1902,7 +1908,7 @@ static bool crypto_sign_verify_options(Item key_item, CryptoSignVerifyOptions* o
     if (!out) return false;
     out->key = key_item;
     out->padding = CRYPTO_RSA_PKCS1_PADDING;
-    out->salt_length = MBEDTLS_RSA_SALT_LEN_ANY;
+    out->salt_length = CRYPTO_RSA_PSS_SALTLEN_AUTO;
 
     if (get_type_id(key_item) != LMD_TYPE_MAP) return true;
 
@@ -1925,8 +1931,8 @@ static bool crypto_sign_verify_options(Item key_item, CryptoSignVerifyOptions* o
     if (!crypto_item_is_undefined(salt_item)) {
         int salt_length = 0;
         if (!crypto_item_to_integer(salt_item, "options.saltLength", &salt_length)) return false;
-        if (salt_length < -1) {
-            js_throw_out_of_range("options.saltLength", ">= -1", salt_item);
+        if (salt_length < CRYPTO_RSA_PSS_SALTLEN_MAX_SIGN) {
+            js_throw_out_of_range("options.saltLength", ">= -2", salt_item);
             return false;
         }
         out->salt_length = salt_length;
@@ -1940,6 +1946,28 @@ static bool crypto_pk_is_rsa(mbedtls_pk_context* pk) {
     return type == MBEDTLS_PK_RSA || type == MBEDTLS_PK_RSASSA_PSS;
 }
 
+static int crypto_rsa_pss_max_salt_length(mbedtls_pk_context* pk, int hash_len) {
+    if (!pk || hash_len < 0) return -1;
+    int rsa_len = (int)mbedtls_pk_get_len(pk);
+    int salt_len = rsa_len - hash_len - 2;
+    return salt_len >= 0 ? salt_len : -1;
+}
+
+static int crypto_rsa_pss_sign_salt_length(mbedtls_pk_context* pk, int hash_len,
+                                           int salt_length) {
+    if (salt_length == CRYPTO_RSA_PSS_SALTLEN_MAX_SIGN) {
+        return crypto_rsa_pss_max_salt_length(pk, hash_len);
+    }
+    if (salt_length == CRYPTO_RSA_PSS_SALTLEN_DIGEST) return hash_len;
+    return salt_length;
+}
+
+static int crypto_rsa_pss_verify_salt_length(int hash_len, int salt_length) {
+    if (salt_length == CRYPTO_RSA_PSS_SALTLEN_AUTO) return MBEDTLS_RSA_SALT_LEN_ANY;
+    if (salt_length == CRYPTO_RSA_PSS_SALTLEN_DIGEST) return hash_len;
+    return salt_length;
+}
+
 static int crypto_rsa_pss_sign(mbedtls_pk_context* pk, mbedtls_md_type_t md_alg,
                                const uint8_t* hash, int hash_len, int salt_length,
                                uint8_t* signature, size_t signature_cap,
@@ -1950,6 +1978,8 @@ static int crypto_rsa_pss_sign(mbedtls_pk_context* pk, mbedtls_md_type_t md_alg,
     mbedtls_rsa_context* rsa = mbedtls_pk_rsa(*pk);
     int ret = mbedtls_rsa_set_padding(rsa, MBEDTLS_RSA_PKCS_V21, md_alg);
     if (ret != 0) return ret;
+    salt_length = crypto_rsa_pss_sign_salt_length(pk, hash_len, salt_length);
+    if (salt_length < 0) return MBEDTLS_ERR_RSA_BAD_INPUT_DATA;
     ret = mbedtls_rsa_rsassa_pss_sign_ext(rsa, crypto_mbedtls_random, NULL,
         md_alg, (unsigned int)hash_len, hash, salt_length, signature);
     if (ret == 0) *signature_len = rsa_len;
@@ -1965,6 +1995,7 @@ static int crypto_rsa_pss_verify(mbedtls_pk_context* pk, mbedtls_md_type_t md_al
     mbedtls_rsa_context* rsa = mbedtls_pk_rsa(*pk);
     int ret = mbedtls_rsa_set_padding(rsa, MBEDTLS_RSA_PKCS_V21, md_alg);
     if (ret != 0) return ret;
+    salt_length = crypto_rsa_pss_verify_salt_length(hash_len, salt_length);
     return mbedtls_rsa_rsassa_pss_verify_ext(rsa, md_alg, (unsigned int)hash_len,
         hash, md_alg, salt_length, signature);
 }
@@ -2213,6 +2244,61 @@ extern "C" Item js_crypto_createSign(Item alg_item) {
 
 extern "C" Item js_crypto_createVerify(Item alg_item) {
     return js_crypto_create_sign_verify(alg_item, true);
+}
+
+extern "C" Item js_crypto_sign(Item alg_item, Item data_item, Item key_item, Item callback_item) {
+    bool has_callback = !crypto_item_is_undefined(callback_item);
+    if (has_callback && get_type_id(callback_item) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "Function", callback_item);
+    }
+
+    Item sign_obj = js_crypto_createSign(alg_item);
+    if (js_check_exception()) return ItemNull;
+
+    Item update_fn = js_property_get(sign_obj, make_string_item_crypto("update"));
+    Item update_args[1] = { data_item };
+    js_call_function(update_fn, sign_obj, update_args, 1);
+    if (js_check_exception()) return ItemNull;
+
+    Item sign_fn = js_property_get(sign_obj, make_string_item_crypto("sign"));
+    Item sign_args[1] = { key_item };
+    Item result = js_call_function(sign_fn, sign_obj, sign_args, 1);
+    if (js_check_exception()) return ItemNull;
+
+    if (has_callback) {
+        Item args[2] = { ItemNull, result };
+        js_call_function(callback_item, make_js_undefined_crypto(), args, 2);
+        return make_js_undefined_crypto();
+    }
+    return result;
+}
+
+extern "C" Item js_crypto_verify(Item alg_item, Item data_item, Item key_item,
+                                  Item signature_item, Item callback_item) {
+    bool has_callback = !crypto_item_is_undefined(callback_item);
+    if (has_callback && get_type_id(callback_item) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "Function", callback_item);
+    }
+
+    Item verify_obj = js_crypto_createVerify(alg_item);
+    if (js_check_exception()) return ItemNull;
+
+    Item update_fn = js_property_get(verify_obj, make_string_item_crypto("update"));
+    Item update_args[1] = { data_item };
+    js_call_function(update_fn, verify_obj, update_args, 1);
+    if (js_check_exception()) return ItemNull;
+
+    Item verify_fn = js_property_get(verify_obj, make_string_item_crypto("verify"));
+    Item verify_args[2] = { key_item, signature_item };
+    Item result = js_call_function(verify_fn, verify_obj, verify_args, 2);
+    if (js_check_exception()) return ItemNull;
+
+    if (has_callback) {
+        Item args[2] = { ItemNull, result };
+        js_call_function(callback_item, make_js_undefined_crypto(), args, 2);
+        return make_js_undefined_crypto();
+    }
+    return result;
 }
 
 // crypto.hash(algorithm, data[, outputEncoding]) → digest
@@ -5757,6 +5843,8 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(crypto_namespace, "createHmac",         (void*)js_crypto_createHmac, 2);
     crypto_set_method(crypto_namespace, "createSign",         (void*)js_crypto_createSign, 1);
     crypto_set_method(crypto_namespace, "createVerify",       (void*)js_crypto_createVerify, 1);
+    crypto_set_method(crypto_namespace, "sign",               (void*)js_crypto_sign, 4);
+    crypto_set_method(crypto_namespace, "verify",             (void*)js_crypto_verify, 5);
     crypto_set_method(crypto_namespace, "createCipheriv",     (void*)js_crypto_createCipheriv, 3);
     crypto_set_method(crypto_namespace, "createDecipheriv",   (void*)js_crypto_createDecipheriv, 3);
     crypto_set_method(crypto_namespace, "argon2",             (void*)js_crypto_argon2_unsupported, 0);
@@ -5812,6 +5900,9 @@ extern "C" Item js_get_crypto_namespace(void) {
     js_property_set(constants, make_string_item_crypto("RSA_PKCS1_OAEP_PADDING"), (Item){.item = i2it(4)});
     js_property_set(constants, make_string_item_crypto("RSA_NO_PADDING"), (Item){.item = i2it(3)});
     js_property_set(constants, make_string_item_crypto("RSA_PKCS1_PSS_PADDING"), (Item){.item = i2it(6)});
+    js_property_set(constants, make_string_item_crypto("RSA_PSS_SALTLEN_DIGEST"), (Item){.item = i2it(CRYPTO_RSA_PSS_SALTLEN_DIGEST)});
+    js_property_set(constants, make_string_item_crypto("RSA_PSS_SALTLEN_MAX_SIGN"), (Item){.item = i2it(CRYPTO_RSA_PSS_SALTLEN_MAX_SIGN)});
+    js_property_set(constants, make_string_item_crypto("RSA_PSS_SALTLEN_AUTO"), (Item){.item = i2it(CRYPTO_RSA_PSS_SALTLEN_AUTO)});
     // point conversion
     js_property_set(constants, make_string_item_crypto("POINT_CONVERSION_COMPRESSED"), (Item){.item = i2it(2)});
     js_property_set(constants, make_string_item_crypto("POINT_CONVERSION_UNCOMPRESSED"), (Item){.item = i2it(4)});

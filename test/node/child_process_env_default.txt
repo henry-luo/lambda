@@ -1,0 +1,3 @@
+stdout setEncoding type: function
+default env inherited: true
+default env close: 0

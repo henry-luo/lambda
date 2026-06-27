@@ -198,6 +198,19 @@ static Item make_invalid_lookup_value_error(void) {
         "The argument 'hostname' is invalid.");
 }
 
+static Item throw_invalid_local_address_value(Item address_item) {
+    char value[128] = "";
+    if (get_type_id(address_item) == LMD_TYPE_STRING) {
+        String* s = it2s(address_item);
+        int len = (int)s->len < (int)sizeof(value) - 1 ? (int)s->len : (int)sizeof(value) - 1;
+        memcpy(value, s->chars, (size_t)len);
+        value[len] = '\0';
+    }
+    char msg[192];
+    snprintf(msg, sizeof(msg), "Invalid IP address: %s", value);
+    return js_throw_type_error_code("ERR_INVALID_IP_ADDRESS", msg);
+}
+
 typedef struct DnsLookupOptions {
     char hostname[256];
     int family;
@@ -1384,6 +1397,73 @@ extern "C" Item js_dns_setServers(Item servers_item) {
     return make_js_undefined();
 }
 
+static bool dns_copy_string_value(Item value, char* out, int out_size) {
+    if (get_type_id(value) != LMD_TYPE_STRING) return false;
+    String* str = it2s(value);
+    int len = (int)str->len < out_size - 1 ? (int)str->len : out_size - 1;
+    memcpy(out, str->chars, (size_t)len);
+    out[len] = '\0';
+    return true;
+}
+
+static int dns_ip_address_family(const char* address) {
+    struct sockaddr_in addr4;
+    if (uv_ip4_addr(address, 0, &addr4) == 0) return 4;
+    struct sockaddr_in6 addr6;
+    if (uv_ip6_addr(address, 0, &addr6) == 0) return 6;
+    return 0;
+}
+
+extern "C" Item js_dns_setLocalAddress(Item ipv4_item, Item ipv6_item) {
+    char first[INET6_ADDRSTRLEN];
+    char second[INET6_ADDRSTRLEN];
+    first[0] = '\0';
+    second[0] = '\0';
+
+    if (is_nullish_item(ipv4_item)) {
+        return js_throw_type_error_code(JS_ERR_INVALID_ARG_VALUE,
+            "At least one local address must be specified");
+    }
+    if (get_type_id(ipv4_item) != LMD_TYPE_STRING) {
+        return js_throw_invalid_arg_type("ipv4", "string", ipv4_item);
+    }
+    dns_copy_string_value(ipv4_item, first, (int)sizeof(first));
+
+    int first_family = dns_ip_address_family(first);
+    if (first_family == 0) return throw_invalid_local_address_value(ipv4_item);
+
+    int second_family = 0;
+    if (!is_nullish_item(ipv6_item)) {
+        if (get_type_id(ipv6_item) != LMD_TYPE_STRING) {
+            return js_throw_invalid_arg_type("ipv6", "string", ipv6_item);
+        }
+        dns_copy_string_value(ipv6_item, second, (int)sizeof(second));
+        second_family = dns_ip_address_family(second);
+        if (second_family == 0) return throw_invalid_local_address_value(ipv6_item);
+        if (second_family == first_family) {
+            return js_throw_type_error_code(JS_ERR_INVALID_ARG_VALUE,
+                "Local addresses must include one IPv4 and one IPv6 address");
+        }
+    }
+
+    Item receiver = js_get_this();
+    if (dns_is_object_like(receiver)) {
+        if (first_family == 4) {
+            js_property_set(receiver, make_string_item("__dns_local_address_ipv4__"), make_string_item(first));
+            if (second_family == 6) {
+                js_property_set(receiver, make_string_item("__dns_local_address_ipv6__"), make_string_item(second));
+            }
+        } else {
+            js_property_set(receiver, make_string_item("__dns_local_address_ipv6__"), make_string_item(first));
+            if (second_family == 4) {
+                js_property_set(receiver, make_string_item("__dns_local_address_ipv4__"), make_string_item(second));
+            }
+        }
+    }
+
+    return make_js_undefined();
+}
+
 // =============================================================================
 // dns Module Namespace
 // =============================================================================
@@ -1466,6 +1546,7 @@ static Item dns_get_resolver_prototype(bool promise_mode) {
     }
     dns_set_method(proto, "getServers", (void*)js_dns_getServers, 0);
     dns_set_method(proto, "setServers", (void*)js_dns_setServers, 1);
+    dns_set_method(proto, "setLocalAddress", (void*)js_dns_setLocalAddress, 2);
 
     *proto_ptr = proto;
     return proto;

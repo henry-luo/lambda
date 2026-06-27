@@ -1,0 +1,13 @@
+resolver setLocalAddress method: function
+promises resolver setLocalAddress method: function
+resolver ipv4: true
+resolver ipv6: true
+resolver both: true
+promises resolver both: true
+resolver duplicate ipv4: ERR_INVALID_ARG_VALUE
+resolver duplicate ipv6: ERR_INVALID_ARG_VALUE
+resolver bad address: ERR_INVALID_IP_ADDRESS
+resolver bad ipv4 type: ERR_INVALID_ARG_TYPE
+resolver bad ipv6 type: ERR_INVALID_ARG_TYPE
+resolver missing: ERR_INVALID_ARG_VALUE
+promises resolver missing: ERR_INVALID_ARG_VALUE

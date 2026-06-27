@@ -13,6 +13,7 @@
 #include "../../lib/mem.h"
 
 #include <climits>
+#include <cstdio>
 #include <cstring>
 #include <zlib.h>
 
@@ -48,12 +49,40 @@ static bool is_callable(Item value) {
     return get_type_id(value) == LMD_TYPE_FUNC;
 }
 
-static Item make_zlib_error(const char* method);
+static Item make_zlib_error(const char* method, int zret, const char* detail);
+static Item throw_zlib_error(const char* method, int zret, const char* detail);
 
 static bool zlib_bytes_start_gzip_member(const uint8_t* data, int len) {
     if (!data || len <= 0) return false;
     if (data[0] != 0x1f) return false;
     return len == 1 || data[1] == 0x8b;
+}
+
+static const char* zlib_error_code_name(int zret) {
+    switch (zret) {
+    case Z_STREAM_END: return "Z_STREAM_END";
+    case Z_NEED_DICT: return "Z_NEED_DICT";
+    case Z_ERRNO: return "Z_ERRNO";
+    case Z_STREAM_ERROR: return "Z_STREAM_ERROR";
+    case Z_DATA_ERROR: return "Z_DATA_ERROR";
+    case Z_MEM_ERROR: return "Z_MEM_ERROR";
+    case Z_BUF_ERROR: return "Z_BUF_ERROR";
+    case Z_VERSION_ERROR: return "Z_VERSION_ERROR";
+    default: return "Z_OK";
+    }
+}
+
+static const char* zlib_error_default_detail(int zret) {
+    switch (zret) {
+    case Z_NEED_DICT: return "need dictionary";
+    case Z_ERRNO: return "zlib errno";
+    case Z_STREAM_ERROR: return "stream error";
+    case Z_DATA_ERROR: return "data error";
+    case Z_MEM_ERROR: return "memory error";
+    case Z_BUF_ERROR: return "unexpected end of file";
+    case Z_VERSION_ERROR: return "version error";
+    default: return "zlib operation failed";
+    }
 }
 
 // extract buffer data from Uint8Array or string
@@ -115,13 +144,13 @@ extern "C" Item js_zlib_gzipSync(Item input_item) {
     strm.avail_out = (uInt)out_cap;
 
     int ret = deflate(&strm, Z_FINISH);
-    deflateEnd(&strm);
-
     if (ret != Z_STREAM_END) {
         log_error("zlib: gzipSync: deflate failed with %d", ret);
+        deflateEnd(&strm);
         mem_free(out_buf);
-        return ItemNull;
+        return throw_zlib_error("gzip", ret, NULL);
     }
+    deflateEnd(&strm);
 
     int out_len = (int)strm.total_out;
     Item result = make_buffer_result(out_buf, out_len);
@@ -183,12 +212,15 @@ extern "C" Item js_zlib_gunzipSync(Item input_item) {
         if (ret != Z_OK) break;
     }
 
+    char detail[128];
+    detail[0] = '\0';
+    if (ret != Z_STREAM_END && strm.msg) snprintf(detail, sizeof(detail), "%s", strm.msg);
     inflateEnd(&strm);
 
     if (ret != Z_STREAM_END) {
         log_error("zlib: gunzipSync: inflate failed with %d", ret);
         mem_free(out_buf);
-        return ItemNull;
+        return throw_zlib_error("gunzip", ret, detail);
     }
 
     Item result = make_buffer_result(out_buf, (int)total_out);
@@ -251,12 +283,15 @@ extern "C" Item js_zlib_unzipSync(Item input_item) {
         if (ret != Z_OK) break;
     }
 
+    char detail[128];
+    detail[0] = '\0';
+    if (ret != Z_STREAM_END && strm.msg) snprintf(detail, sizeof(detail), "%s", strm.msg);
     inflateEnd(&strm);
 
     if (ret != Z_STREAM_END) {
         log_error("zlib: unzipSync: inflate failed with %d", ret);
         mem_free(out_buf);
-        return ItemNull;
+        return throw_zlib_error("unzip", ret, detail);
     }
 
     Item result = make_buffer_result(out_buf, (int)total_out);
@@ -292,12 +327,12 @@ extern "C" Item js_zlib_deflateSync(Item input_item) {
     strm.avail_out = (uInt)out_cap;
 
     int ret = deflate(&strm, Z_FINISH);
-    deflateEnd(&strm);
-
     if (ret != Z_STREAM_END) {
+        deflateEnd(&strm);
         mem_free(out_buf);
-        return ItemNull;
+        return throw_zlib_error("deflate", ret, NULL);
     }
+    deflateEnd(&strm);
 
     Item result = make_buffer_result(out_buf, (int)strm.total_out);
     mem_free(out_buf);
@@ -343,11 +378,14 @@ extern "C" Item js_zlib_inflateSync(Item input_item) {
         total_out = strm.total_out;
     } while (ret == Z_OK);
 
+    char detail[128];
+    detail[0] = '\0';
+    if (ret != Z_STREAM_END && strm.msg) snprintf(detail, sizeof(detail), "%s", strm.msg);
     inflateEnd(&strm);
 
     if (ret != Z_STREAM_END) {
         mem_free(out_buf);
-        return ItemNull;
+        return throw_zlib_error("inflate", ret, detail);
     }
 
     Item result = make_buffer_result(out_buf, (int)total_out);
@@ -378,9 +416,12 @@ extern "C" Item js_zlib_deflateRawSync(Item input_item) {
     strm.avail_out = (uInt)out_cap;
 
     int ret = deflate(&strm, Z_FINISH);
+    if (ret != Z_STREAM_END) {
+        deflateEnd(&strm);
+        mem_free(out_buf);
+        return throw_zlib_error("deflateRaw", ret, NULL);
+    }
     deflateEnd(&strm);
-
-    if (ret != Z_STREAM_END) { mem_free(out_buf); return ItemNull; }
 
     Item result = make_buffer_result(out_buf, (int)strm.total_out);
     mem_free(out_buf);
@@ -420,9 +461,15 @@ extern "C" Item js_zlib_inflateRawSync(Item input_item) {
         total_out = strm.total_out;
     } while (ret == Z_OK);
 
+    char detail[128];
+    detail[0] = '\0';
+    if (ret != Z_STREAM_END && strm.msg) snprintf(detail, sizeof(detail), "%s", strm.msg);
     inflateEnd(&strm);
 
-    if (ret != Z_STREAM_END) { mem_free(out_buf); return ItemNull; }
+    if (ret != Z_STREAM_END) {
+        mem_free(out_buf);
+        return throw_zlib_error("inflateRaw", ret, detail);
+    }
 
     Item result = make_buffer_result(out_buf, (int)total_out);
     mem_free(out_buf);
@@ -449,9 +496,20 @@ extern "C" Item js_zlib_brotliDecompressSync(Item input_item) {
 
 typedef Item (*ZlibSyncFn)(Item);
 
-static Item make_zlib_error(const char* method) {
-    (void)method;
-    return js_new_error(make_string_item("zlib operation failed"));
+static Item make_zlib_error(const char* method, int zret, const char* detail) {
+    const char* code = zlib_error_code_name(zret);
+    const char* reason = detail && detail[0] ? detail : zlib_error_default_detail(zret);
+    char msg[256];
+    snprintf(msg, sizeof(msg), "%s: %s failed: %s", code, method ? method : "zlib", reason);
+    Item error = js_new_error(make_string_item(msg));
+    js_property_set(error, make_string_item("code"), make_string_item(code));
+    js_property_set(error, make_string_item("errno"), (Item){.item = i2it(zret)});
+    return error;
+}
+
+static Item throw_zlib_error(const char* method, int zret, const char* detail) {
+    js_throw_value(make_zlib_error(method, zret, detail));
+    return ItemNull;
 }
 
 static Item js_zlib_emit_callback(Item env_item) {
@@ -493,7 +551,9 @@ static Item js_zlib_callback_result(const char* method, ZlibSyncFn sync_fn,
 
     Item result = sync_fn(input_item);
     if (result.item == ItemNull.item) {
-        js_zlib_schedule_callback(callback_item, make_zlib_error(method), make_js_undefined());
+        Item err = js_check_exception() ? js_clear_exception() :
+            make_zlib_error(method, Z_STREAM_ERROR, NULL);
+        js_zlib_schedule_callback(callback_item, err, make_js_undefined());
         return make_js_undefined();
     }
 
@@ -793,7 +853,7 @@ static Item js_zlib_transform_chunk(Item chunk, Item encoding, Item callback) {
     const uint8_t* in_data;
     int in_len;
     if (!get_input_buffer(chunk, &in_data, &in_len)) {
-        Item args[1] = { make_zlib_error(zlib_mode_name(mode)) };
+        Item args[1] = { make_zlib_error(zlib_mode_name(mode), Z_STREAM_ERROR, "invalid input") };
         if (is_callable(callback)) js_call_function(callback, make_js_undefined(), args, 1);
         return make_js_undefined();
     }
@@ -801,8 +861,7 @@ static Item js_zlib_transform_chunk(Item chunk, Item encoding, Item callback) {
     Item result = make_js_undefined();
     int zret = Z_OK;
     if (!zlib_stream_run(state, in_data, in_len, Z_NO_FLUSH, &result, &zret)) {
-        (void)zret;
-        Item args[1] = { make_zlib_error(zlib_mode_name(mode)) };
+        Item args[1] = { make_zlib_error(zlib_mode_name(mode), zret, NULL) };
         if (is_callable(callback)) js_call_function(callback, make_js_undefined(), args, 1);
         return make_js_undefined();
     }
@@ -825,7 +884,7 @@ static Item js_zlib_transform_flush(Item callback) {
     int mode = get_type_id(mode_item) == LMD_TYPE_INT ? (int)it2i(mode_item) : 0;
     JsZlibStreamState* state = zlib_stream_state_from_stream(self);
     if (!state) {
-        Item args[1] = { make_zlib_error(zlib_mode_name(mode)) };
+        Item args[1] = { make_zlib_error(zlib_mode_name(mode), Z_STREAM_ERROR, NULL) };
         if (is_callable(callback)) js_call_function(callback, make_js_undefined(), args, 1);
         return make_js_undefined();
     }
@@ -839,8 +898,7 @@ static Item js_zlib_transform_flush(Item callback) {
     zlib_stream_clear_state(self);
 
     if (!ok) {
-        (void)zret;
-        Item args[1] = { make_zlib_error(zlib_mode_name(mode)) };
+        Item args[1] = { make_zlib_error(zlib_mode_name(mode), zret, NULL) };
         if (is_callable(callback)) js_call_function(callback, make_js_undefined(), args, 1);
         return make_js_undefined();
     }
@@ -878,7 +936,7 @@ static Item js_zlib_stream_flush_method(Item kind_item, Item callback_item) {
     int mode = get_type_id(mode_item) == LMD_TYPE_INT ? (int)it2i(mode_item) : 0;
     JsZlibStreamState* state = zlib_stream_state_from_stream(self);
     if (!state) {
-        Item args[1] = { make_zlib_error(zlib_mode_name(mode)) };
+        Item args[1] = { make_zlib_error(zlib_mode_name(mode), Z_STREAM_ERROR, NULL) };
         if (is_callable(callback_item)) js_call_function(callback_item, make_js_undefined(), args, 1);
         return make_js_undefined();
     }
@@ -891,8 +949,7 @@ static Item js_zlib_stream_flush_method(Item kind_item, Item callback_item) {
     }
 
     if (!ok) {
-        (void)zret;
-        Item args[1] = { make_zlib_error(zlib_mode_name(mode)) };
+        Item args[1] = { make_zlib_error(zlib_mode_name(mode), zret, NULL) };
         if (is_callable(callback_item)) js_call_function(callback_item, make_js_undefined(), args, 1);
         return make_js_undefined();
     }
