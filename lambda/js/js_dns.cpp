@@ -963,11 +963,76 @@ extern "C" Item js_dns_lookupSync(Item hostname_item) {
 
 static Item dns_namespace = {0};
 static Item dns_promises_namespace = {0};
+static Item dns_resolver_prototype = {0};
+static Item dns_promises_resolver_prototype = {0};
 
 static void dns_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);
     Item fn = js_new_function(func_ptr, param_count);
     js_property_set(ns, key, fn);
+}
+
+static bool dns_is_object_like(Item item) {
+    TypeId type = get_type_id(item);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
+        type == LMD_TYPE_ELEMENT || type == LMD_TYPE_FUNC;
+}
+
+static bool dns_called_as_constructor(void) {
+    Item new_target = js_get_new_target();
+    TypeId type = get_type_id(new_target);
+    return new_target.item != 0 && new_target.item != ItemNull.item &&
+        type != LMD_TYPE_UNDEFINED && dns_is_object_like(new_target);
+}
+
+static Item dns_get_resolver_prototype(bool promise_mode) {
+    Item* proto_ptr = promise_mode ? &dns_promises_resolver_prototype : &dns_resolver_prototype;
+    if (proto_ptr->item != 0) return *proto_ptr;
+
+    Item proto = js_new_object();
+    if (promise_mode) {
+        dns_set_method(proto, "resolve",  (void*)js_dns_promises_resolve, -1);
+        dns_set_method(proto, "resolve4", (void*)js_dns_promises_resolve4, -1);
+        dns_set_method(proto, "resolve6", (void*)js_dns_promises_resolve6, -1);
+    } else {
+        dns_set_method(proto, "resolve",  (void*)js_dns_resolve, -1);
+        dns_set_method(proto, "resolve4", (void*)js_dns_resolve4, -1);
+        dns_set_method(proto, "resolve6", (void*)js_dns_resolve6, -1);
+    }
+
+    *proto_ptr = proto;
+    return proto;
+}
+
+static Item dns_create_resolver(bool promise_mode) {
+    Item self = js_get_this();
+    Item proto = dns_get_resolver_prototype(promise_mode);
+    if (dns_called_as_constructor() && dns_is_object_like(self)) {
+        js_set_prototype(self, proto);
+        return self;
+    }
+
+    Item resolver = js_new_object();
+    js_set_prototype(resolver, proto);
+    return resolver;
+}
+
+extern "C" Item js_dns_resolver_constructor(void) {
+    return dns_create_resolver(false);
+}
+
+extern "C" Item js_dns_promises_resolver_constructor(void) {
+    return dns_create_resolver(true);
+}
+
+static Item dns_make_resolver_constructor(bool promise_mode) {
+    Item ctor = js_new_function(promise_mode ?
+        (void*)js_dns_promises_resolver_constructor :
+        (void*)js_dns_resolver_constructor, 0);
+    Item proto = dns_get_resolver_prototype(promise_mode);
+    js_property_set(ctor, make_string_item("prototype"), proto);
+    js_property_set(proto, make_string_item("constructor"), ctor);
+    return ctor;
 }
 
 extern "C" Item js_get_dns_promises_namespace(void) {
@@ -978,6 +1043,8 @@ extern "C" Item js_get_dns_promises_namespace(void) {
     dns_set_method(dns_promises_namespace, "resolve", (void*)js_dns_promises_resolve, -1);
     dns_set_method(dns_promises_namespace, "resolve4", (void*)js_dns_promises_resolve4, -1);
     dns_set_method(dns_promises_namespace, "resolve6", (void*)js_dns_promises_resolve6, -1);
+    js_property_set(dns_promises_namespace, make_string_item("Resolver"),
+        dns_make_resolver_constructor(true));
     js_property_set(dns_promises_namespace, make_string_item("default"), dns_promises_namespace);
     return dns_promises_namespace;
 }
@@ -992,6 +1059,8 @@ extern "C" Item js_get_dns_namespace(void) {
     dns_set_method(dns_namespace, "resolve",    (void*)js_dns_resolve, -1);
     dns_set_method(dns_namespace, "resolve4",   (void*)js_dns_resolve4, -1);
     dns_set_method(dns_namespace, "resolve6",   (void*)js_dns_resolve6, -1);
+    js_property_set(dns_namespace, make_string_item("Resolver"),
+        dns_make_resolver_constructor(false));
 
     Item promises = js_get_dns_promises_namespace();
     js_property_set(dns_namespace, make_string_item("promises"), promises);
@@ -1005,4 +1074,6 @@ extern "C" Item js_get_dns_namespace(void) {
 extern "C" void js_dns_reset(void) {
     dns_namespace = (Item){0};
     dns_promises_namespace = (Item){0};
+    dns_resolver_prototype = (Item){0};
+    dns_promises_resolver_prototype = (Item){0};
 }

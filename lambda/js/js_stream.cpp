@@ -6918,6 +6918,28 @@ extern "C" Item js_stream_isDisturbed(Item stream) {
     return js_bool_item(js_item_is_true(js_property_get(stream, make_string_item("__web_disturbed__"))));
 }
 
+extern "C" Item js_stream_isReadable(Item stream) {
+    ensure_keys();
+    if (!js_stream_is_stream_like(stream) || !js_stream_has_readable_side(stream)) return ItemNull;
+    if (js_item_is_true(js_property_get(stream, key_destroyed))) return js_bool_item(false);
+    if (js_item_is_true(js_property_get(stream, key_end_emitted)) ||
+        js_state_get_bool(js_property_get(stream, key_readable_state), "endEmitted")) {
+        return js_bool_item(false);
+    }
+    return js_bool_item(js_item_is_true(js_property_get(stream, key_readable)));
+}
+
+extern "C" Item js_stream_isWritable(Item stream) {
+    ensure_keys();
+    if (!js_stream_is_stream_like(stream) || !js_stream_has_writable_side(stream)) return ItemNull;
+    if (js_item_is_true(js_property_get(stream, key_destroyed))) return js_bool_item(false);
+    if (js_item_is_true(js_property_get(stream, key_finished)) ||
+        js_state_get_bool(js_property_get(stream, key_writable_state), "finished")) {
+        return js_bool_item(false);
+    }
+    return js_bool_item(js_item_is_true(js_property_get(stream, key_writable)));
+}
+
 extern "C" Item js_stream_isErrored(Item stream) {
     ensure_keys();
     if (!js_stream_is_stream_like(stream)) return ItemNull;
@@ -6927,6 +6949,13 @@ extern "C" Item js_stream_isErrored(Item stream) {
     if (js_stream_has_callback_error(err)) return js_bool_item(true);
     err = js_property_get(js_property_get(stream, key_writable_state), make_string_item("errored"));
     return js_bool_item(js_stream_has_callback_error(err));
+}
+
+extern "C" Item js_stream_isDestroyed(Item stream) {
+    ensure_keys();
+    if (!js_stream_is_stream_like(stream)) return ItemNull;
+    return js_bool_item(js_item_is_true(js_property_get(stream, key_destroyed)) ||
+                        js_item_is_true(js_property_get(stream, make_string_item("destroyed"))));
 }
 
 static Item js_stream_constructor_prototype(Item ctor) {
@@ -7502,8 +7531,11 @@ extern "C" Item js_get_stream_namespace(void) {
                       (void*)js_stream_getDefaultHighWaterMark, 1);
     stream_set_method(stream_namespace, "setDefaultHighWaterMark",
                       (void*)js_stream_setDefaultHighWaterMark, 2);
+    stream_set_method(stream_namespace, "isReadable", (void*)js_stream_isReadable, 1);
+    stream_set_method(stream_namespace, "isWritable", (void*)js_stream_isWritable, 1);
     stream_set_method(stream_namespace, "isDisturbed", (void*)js_stream_isDisturbed, 1);
     stream_set_method(stream_namespace, "isErrored", (void*)js_stream_isErrored, 1);
+    stream_set_method(stream_namespace, "isDestroyed", (void*)js_stream_isDestroyed, 1);
     stream_set_method(stream_namespace, "arrayBuffer", (void*)js_stream_consumer_arrayBuffer, 1);
     stream_set_method(stream_namespace, "blob", (void*)js_stream_consumer_blob, 1);
     stream_set_method(stream_namespace, "buffer", (void*)js_stream_consumer_buffer, 1);

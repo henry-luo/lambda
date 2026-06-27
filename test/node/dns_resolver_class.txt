@@ -1,0 +1,8 @@
+resolver constructor: function
+resolver instanceof: true
+resolver resolve4 method: function
+resolver resolve4 err: true
+resolver resolve4 ipv4: true
+promises resolver instanceof: true
+promises resolver resolve4 method: function
+promises resolver resolve4 ipv4: true

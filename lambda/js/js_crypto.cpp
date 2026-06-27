@@ -67,6 +67,7 @@ static bool crypto_normalize_string(Item item, char* out, int out_size, bool str
 static mbedtls_md_type_t crypto_mbedtls_md_for_name(const char* alg);
 static bool crypto_digest_compute_bits(int bits, const uint8_t* data,
                                        int offset, int length, uint8_t* out);
+static bool crypto_string_equals(Item item, const char* expected);
 
 static int crypto_digest_len_for_name(const char* alg) {
     int bits = crypto_digest_bits_for_name_ext(alg, true, true, true);
@@ -1770,6 +1771,19 @@ static SignVerifyCtx* sign_verify_ctx_from_this(Item self) {
     return (SignVerifyCtx*)(uintptr_t)it2i(ctx_item);
 }
 
+static bool crypto_bytes_look_like_pem(const uint8_t* bytes, int len) {
+    return bytes && len >= 10 && memcmp(bytes, "-----BEGIN", 10) == 0;
+}
+
+static void crypto_ensure_pem_nul(uint8_t** bytes, int* len) {
+    if (!bytes || !*bytes || !len || *len <= 0) return;
+    if (!crypto_bytes_look_like_pem(*bytes, *len)) return;
+    if ((*bytes)[*len - 1] == 0) return;
+    *bytes = (uint8_t*)mem_realloc(*bytes, (size_t)(*len + 1), MEM_CAT_JS_RUNTIME);
+    (*bytes)[*len] = 0;
+    *len += 1;
+}
+
 static mbedtls_md_type_t crypto_mbedtls_md_for_name(const char* alg) {
     if (!alg) return MBEDTLS_MD_NONE;
     if (strcmp(alg, "md5") == 0) return MBEDTLS_MD_MD5;
@@ -1791,6 +1805,17 @@ static bool crypto_private_key_bytes_for_sign(Item key_item, uint8_t** out, int*
     *out_len = 0;
 
     if (get_type_id(key_item) == LMD_TYPE_MAP) {
+        Item private_key = js_property_get(key_item, make_string_item_crypto("__crypto_private_key__"));
+        const uint8_t* key_buf = NULL;
+        int key_len = 0;
+        if (get_uint8_buffer(private_key, &key_buf, &key_len)) {
+            size_t alloc_len = key_len > 0 ? (size_t)key_len : 1;
+            *out = (uint8_t*)mem_alloc(alloc_len, MEM_CAT_JS_RUNTIME);
+            if (key_len > 0) memcpy(*out, key_buf, (size_t)key_len);
+            *out_len = key_len;
+            return true;
+        }
+
         Item object_key = js_property_get(key_item, make_string_item_crypto("key"));
         if (!crypto_item_is_undefined(object_key)) {
             return crypto_private_key_bytes_for_sign(object_key, out, out_len);
@@ -1808,7 +1833,9 @@ static bool crypto_private_key_bytes_for_sign(Item key_item, uint8_t** out, int*
         return true;
     }
 
-    return extract_bytes(key_item, out, out_len);
+    bool ok = extract_bytes(key_item, out, out_len);
+    if (ok) crypto_ensure_pem_nul(out, out_len);
+    return ok;
 }
 
 static bool crypto_public_key_bytes_for_verify(Item key_item, uint8_t** out, int* out_len) {
@@ -1817,6 +1844,17 @@ static bool crypto_public_key_bytes_for_verify(Item key_item, uint8_t** out, int
     *out_len = 0;
 
     if (get_type_id(key_item) == LMD_TYPE_MAP) {
+        Item public_key = js_property_get(key_item, make_string_item_crypto("__crypto_public_key__"));
+        const uint8_t* key_buf = NULL;
+        int key_len = 0;
+        if (get_uint8_buffer(public_key, &key_buf, &key_len)) {
+            size_t alloc_len = key_len > 0 ? (size_t)key_len : 1;
+            *out = (uint8_t*)mem_alloc(alloc_len, MEM_CAT_JS_RUNTIME);
+            if (key_len > 0) memcpy(*out, key_buf, (size_t)key_len);
+            *out_len = key_len;
+            return true;
+        }
+
         Item object_key = js_property_get(key_item, make_string_item_crypto("key"));
         if (!crypto_item_is_undefined(object_key)) {
             return crypto_public_key_bytes_for_verify(object_key, out, out_len);
@@ -1834,7 +1872,9 @@ static bool crypto_public_key_bytes_for_verify(Item key_item, uint8_t** out, int
         return true;
     }
 
-    return extract_bytes(key_item, out, out_len);
+    bool ok = extract_bytes(key_item, out, out_len);
+    if (ok) crypto_ensure_pem_nul(out, out_len);
+    return ok;
 }
 
 static Item crypto_throw_sign_failed(const char* message) {
@@ -3687,6 +3727,41 @@ extern "C" Item js_crypto_secretKeyExport(Item options_item) {
     return result;
 }
 
+static int crypto_visible_pem_len(const uint8_t* bytes, int len) {
+    if (!bytes || len <= 0) return 0;
+    if (bytes[len - 1] == 0) return len - 1;
+    return len;
+}
+
+static bool crypto_key_export_wants_pem(Item options_item) {
+    if (get_type_id(options_item) != LMD_TYPE_MAP) return false;
+    Item format_item = js_property_get(options_item, make_string_item_crypto("format"));
+    return crypto_string_equals(format_item, "pem");
+}
+
+extern "C" Item js_crypto_asymmetricKeyExport(Item options_item) {
+    Item self = js_get_current_this();
+    Item key_bytes = js_property_get(self, make_string_item_crypto("__crypto_private_key__"));
+    if (crypto_item_is_undefined(key_bytes) || key_bytes.item == ITEM_NULL) {
+        key_bytes = js_property_get(self, make_string_item_crypto("__crypto_public_key__"));
+    }
+
+    const uint8_t* buf = NULL;
+    int len = 0;
+    if (!get_uint8_buffer(key_bytes, &buf, &len)) return ItemNull;
+
+    int visible_len = crypto_visible_pem_len(buf, len);
+    if (crypto_key_export_wants_pem(options_item)) {
+        String* str = heap_create_name((const char*)(buf ? buf : crypto_empty_bytes), (size_t)visible_len);
+        return {.item = s2it(str)};
+    }
+
+    Item result = js_typed_array_new(JS_TYPED_UINT8, visible_len);
+    JsTypedArray* ta = js_get_typed_array_ptr(result.map);
+    if (ta && ta->data && buf && visible_len > 0) memcpy(ta->data, buf, (size_t)visible_len);
+    return result;
+}
+
 static Item crypto_secret_key_object_from_bytes(const uint8_t* key, int key_len) {
     if (key_len < 0) key_len = 0;
     Item bytes = js_typed_array_new(JS_TYPED_UINT8, key_len);
@@ -3694,6 +3769,7 @@ static Item crypto_secret_key_object_from_bytes(const uint8_t* key, int key_len)
     if (ta && ta->data && key && key_len > 0) memcpy(ta->data, key, (size_t)key_len);
 
     Item obj = js_new_object();
+    crypto_link_instance_to_constructor(obj, "KeyObject");
     js_property_set(obj, make_string_item_crypto("__crypto_secret_key__"), bytes);
     js_property_set(obj, make_string_item_crypto("type"), make_string_item_crypto("secret"));
     js_property_set(obj, make_string_item_crypto("symmetricKeySize"), (Item){.item = i2it(key_len)});
@@ -3713,6 +3789,112 @@ extern "C" Item js_crypto_createSecretKey(Item key_item, Item encoding_item) {
     Item obj = crypto_secret_key_object_from_bytes(key, key_len);
     mem_free(key);
     return obj;
+}
+
+static const char* crypto_asymmetric_key_type_name(mbedtls_pk_type_t type) {
+    if (type == MBEDTLS_PK_RSA || type == MBEDTLS_PK_RSASSA_PSS) return "rsa";
+    if (type == MBEDTLS_PK_ECKEY || type == MBEDTLS_PK_ECKEY_DH) return "ec";
+    return "unknown";
+}
+
+static Item crypto_asymmetric_key_object_from_bytes(const uint8_t* key, int key_len,
+                                                    const char* type_name,
+                                                    const char* asymmetric_type) {
+    if (key_len < 0) key_len = 0;
+    Item bytes = js_typed_array_new(JS_TYPED_UINT8, key_len);
+    JsTypedArray* ta = js_get_typed_array_ptr(bytes.map);
+    if (ta && ta->data && key && key_len > 0) memcpy(ta->data, key, (size_t)key_len);
+
+    Item obj = js_new_object();
+    crypto_link_instance_to_constructor(obj, "KeyObject");
+    if (strcmp(type_name, "private") == 0) {
+        js_property_set(obj, make_string_item_crypto("__crypto_private_key__"), bytes);
+    } else {
+        js_property_set(obj, make_string_item_crypto("__crypto_public_key__"), bytes);
+    }
+    js_property_set(obj, make_string_item_crypto("type"), make_string_item_crypto(type_name));
+    js_property_set(obj, make_string_item_crypto("asymmetricKeyType"),
+                    make_string_item_crypto(asymmetric_type ? asymmetric_type : "unknown"));
+    js_property_set(obj, make_string_item_crypto("export"),
+                    js_new_function((void*)js_crypto_asymmetricKeyExport, 1));
+    return obj;
+}
+
+extern "C" Item js_crypto_createPrivateKey(Item key_item) {
+    uint8_t* key = NULL;
+    int key_len = 0;
+    if (!crypto_private_key_bytes_for_sign(key_item, &key, &key_len)) {
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", key_item);
+    }
+
+    mbedtls_pk_context pk;
+    mbedtls_pk_init(&pk);
+    int ret = mbedtls_pk_parse_key(&pk, key, (size_t)key_len, NULL, 0,
+        crypto_mbedtls_random, NULL);
+    if (ret != 0) {
+        log_debug("crypto: createPrivateKey parse failed: -0x%04x", -ret);
+        mbedtls_pk_free(&pk);
+        mem_free(key);
+        return js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse private key");
+    }
+
+    const char* key_type = crypto_asymmetric_key_type_name(mbedtls_pk_get_type(&pk));
+    Item result = crypto_asymmetric_key_object_from_bytes(key, key_len, "private", key_type);
+    mbedtls_pk_free(&pk);
+    mem_free(key);
+    return result;
+}
+
+extern "C" Item js_crypto_createPublicKey(Item key_item) {
+    uint8_t* key = NULL;
+    int key_len = 0;
+    if (!crypto_public_key_bytes_for_verify(key_item, &key, &key_len)) {
+        if (!crypto_private_key_bytes_for_sign(key_item, &key, &key_len)) {
+            return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", key_item);
+        }
+    }
+
+    mbedtls_pk_context pk;
+    mbedtls_pk_init(&pk);
+    int ret = mbedtls_pk_parse_public_key(&pk, key, (size_t)key_len);
+    if (ret == 0) {
+        const char* key_type = crypto_asymmetric_key_type_name(mbedtls_pk_get_type(&pk));
+        Item result = crypto_asymmetric_key_object_from_bytes(key, key_len, "public", key_type);
+        mbedtls_pk_free(&pk);
+        mem_free(key);
+        return result;
+    }
+
+    mbedtls_pk_free(&pk);
+    mbedtls_pk_init(&pk);
+    ret = mbedtls_pk_parse_key(&pk, key, (size_t)key_len, NULL, 0,
+        crypto_mbedtls_random, NULL);
+    if (ret != 0) {
+        log_debug("crypto: createPublicKey parse failed: -0x%04x", -ret);
+        mbedtls_pk_free(&pk);
+        mem_free(key);
+        return js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse public key");
+    }
+
+    unsigned char public_pem[8192];
+    ret = mbedtls_pk_write_pubkey_pem(&pk, public_pem, sizeof(public_pem));
+    if (ret != 0) {
+        log_debug("crypto: createPublicKey public PEM write failed: -0x%04x", -ret);
+        mbedtls_pk_free(&pk);
+        mem_free(key);
+        return js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to export public key");
+    }
+
+    int public_len = (int)strlen((const char*)public_pem) + 1;
+    const char* key_type = crypto_asymmetric_key_type_name(mbedtls_pk_get_type(&pk));
+    Item result = crypto_asymmetric_key_object_from_bytes(public_pem, public_len, "public", key_type);
+    mbedtls_pk_free(&pk);
+    mem_free(key);
+    return result;
+}
+
+extern "C" Item js_crypto_KeyObject(void) {
+    return js_throw_type_error("Illegal constructor");
 }
 
 // ============================================================================
@@ -5246,6 +5428,8 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(crypto_namespace, "hkdf",               (void*)js_crypto_hkdf, 6);
     crypto_set_method(crypto_namespace, "scryptSync",         (void*)js_crypto_scryptSync, 4);
     crypto_set_method(crypto_namespace, "createSecretKey",    (void*)js_crypto_createSecretKey, 2);
+    crypto_set_method(crypto_namespace, "createPrivateKey",   (void*)js_crypto_createPrivateKey, 1);
+    crypto_set_method(crypto_namespace, "createPublicKey",    (void*)js_crypto_createPublicKey, 1);
     crypto_set_method(crypto_namespace, "generateKeySync",    (void*)js_crypto_generateKeySync, 2);
     crypto_set_method(crypto_namespace, "generateKey",        (void*)js_crypto_generateKey, 3);
 
@@ -5298,6 +5482,8 @@ extern "C" Item js_get_crypto_namespace(void) {
     js_property_set(ecdh_ctor, make_string_item_crypto("convertKey"),
         js_new_function((void*)js_ecdh_convertKey, 5));
     js_property_set(crypto_namespace, make_string_item_crypto("ECDH"), ecdh_ctor);
+    js_property_set(crypto_namespace, make_string_item_crypto("KeyObject"),
+        js_new_function((void*)js_crypto_KeyObject, 0));
 
     Item default_key = make_string_item_crypto("default");
     js_property_set(crypto_namespace, default_key, crypto_namespace);

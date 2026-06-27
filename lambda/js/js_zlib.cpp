@@ -22,6 +22,14 @@ static Item make_string_item(const char* str) {
     return (Item){.item = s2it(s)};
 }
 
+static inline Item make_js_undefined() {
+    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+}
+
+static bool is_callable(Item value) {
+    return get_type_id(value) == LMD_TYPE_FUNC;
+}
+
 // extract buffer data from Uint8Array or string
 static bool get_input_buffer(Item input, const uint8_t** out, int* out_len) {
     if (js_is_typed_array(input)) {
@@ -139,6 +147,59 @@ extern "C" Item js_zlib_gunzipSync(Item input_item) {
 
     if (ret != Z_STREAM_END) {
         log_error("zlib: gunzipSync: inflate failed with %d", ret);
+        mem_free(out_buf);
+        return ItemNull;
+    }
+
+    Item result = make_buffer_result(out_buf, (int)total_out);
+    mem_free(out_buf);
+    return result;
+}
+
+// =============================================================================
+// unzipSync(buffer) — auto-detect gzip or zlib-wrapped deflate
+// =============================================================================
+
+extern "C" Item js_zlib_unzipSync(Item input_item) {
+    const uint8_t* in_data;
+    int in_len;
+    if (!get_input_buffer(input_item, &in_data, &in_len)) {
+        log_error("zlib: unzipSync: invalid input");
+        return ItemNull;
+    }
+
+    z_stream strm;
+    memset(&strm, 0, sizeof(strm));
+    // windowBits = 15 + 32 asks zlib to auto-detect gzip or zlib headers.
+    if (inflateInit2(&strm, 15 + 32) != Z_OK) {
+        log_error("zlib: unzipSync: inflateInit2 failed");
+        return ItemNull;
+    }
+
+    size_t out_cap = (size_t)in_len * 4;
+    if (out_cap < 4096) out_cap = 4096;
+    uint8_t* out_buf = (uint8_t*)mem_alloc(out_cap, MEM_CAT_JS_RUNTIME);
+
+    strm.next_in = (Bytef*)in_data;
+    strm.avail_in = (uInt)in_len;
+
+    size_t total_out = 0;
+    int ret;
+    do {
+        if (total_out >= out_cap) {
+            out_cap *= 2;
+            out_buf = (uint8_t*)mem_realloc(out_buf, out_cap, MEM_CAT_JS_RUNTIME);
+        }
+        strm.next_out = out_buf + total_out;
+        strm.avail_out = (uInt)(out_cap - total_out);
+        ret = inflate(&strm, Z_NO_FLUSH);
+        total_out = strm.total_out;
+    } while (ret == Z_OK);
+
+    inflateEnd(&strm);
+
+    if (ret != Z_STREAM_END) {
+        log_error("zlib: unzipSync: inflate failed with %d", ret);
         mem_free(out_buf);
         return ItemNull;
     }
@@ -328,6 +389,67 @@ extern "C" Item js_zlib_brotliDecompressSync(Item input_item) {
 }
 
 // =============================================================================
+// async convenience wrappers — execute locally, report through Node callback form
+// =============================================================================
+
+typedef Item (*ZlibSyncFn)(Item);
+
+static Item make_zlib_error(const char* method) {
+    (void)method;
+    return js_new_error(make_string_item("zlib operation failed"));
+}
+
+static Item js_zlib_callback_result(const char* method, ZlibSyncFn sync_fn,
+                                    Item input_item, Item options_item, Item callback_item) {
+    if (is_callable(options_item) && !is_callable(callback_item)) {
+        callback_item = options_item;
+    }
+
+    if (!is_callable(callback_item)) {
+        return js_throw_invalid_arg_type("callback", "function", callback_item);
+    }
+
+    Item result = sync_fn(input_item);
+    if (result.item == ItemNull.item) {
+        Item args[1] = { make_zlib_error(method) };
+        js_call_function(callback_item, make_js_undefined(), args, 1);
+        return make_js_undefined();
+    }
+
+    Item args[2] = { ItemNull, result };
+    js_call_function(callback_item, make_js_undefined(), args, 2);
+    return make_js_undefined();
+}
+
+extern "C" Item js_zlib_gzip(Item input_item, Item options_item, Item callback_item) {
+    return js_zlib_callback_result("gzip", js_zlib_gzipSync, input_item, options_item, callback_item);
+}
+
+extern "C" Item js_zlib_gunzip(Item input_item, Item options_item, Item callback_item) {
+    return js_zlib_callback_result("gunzip", js_zlib_gunzipSync, input_item, options_item, callback_item);
+}
+
+extern "C" Item js_zlib_deflate(Item input_item, Item options_item, Item callback_item) {
+    return js_zlib_callback_result("deflate", js_zlib_deflateSync, input_item, options_item, callback_item);
+}
+
+extern "C" Item js_zlib_inflate(Item input_item, Item options_item, Item callback_item) {
+    return js_zlib_callback_result("inflate", js_zlib_inflateSync, input_item, options_item, callback_item);
+}
+
+extern "C" Item js_zlib_deflateRaw(Item input_item, Item options_item, Item callback_item) {
+    return js_zlib_callback_result("deflateRaw", js_zlib_deflateRawSync, input_item, options_item, callback_item);
+}
+
+extern "C" Item js_zlib_inflateRaw(Item input_item, Item options_item, Item callback_item) {
+    return js_zlib_callback_result("inflateRaw", js_zlib_inflateRawSync, input_item, options_item, callback_item);
+}
+
+extern "C" Item js_zlib_unzip(Item input_item, Item options_item, Item callback_item) {
+    return js_zlib_callback_result("unzip", js_zlib_unzipSync, input_item, options_item, callback_item);
+}
+
+// =============================================================================
 // zlib Module Namespace
 // =============================================================================
 
@@ -372,6 +494,13 @@ extern "C" Item js_get_zlib_namespace(void) {
 
     zlib_namespace = js_new_object();
 
+    zlib_set_method(zlib_namespace, "gzip",                (void*)js_zlib_gzip, 3);
+    zlib_set_method(zlib_namespace, "gunzip",              (void*)js_zlib_gunzip, 3);
+    zlib_set_method(zlib_namespace, "deflate",             (void*)js_zlib_deflate, 3);
+    zlib_set_method(zlib_namespace, "inflate",             (void*)js_zlib_inflate, 3);
+    zlib_set_method(zlib_namespace, "deflateRaw",          (void*)js_zlib_deflateRaw, 3);
+    zlib_set_method(zlib_namespace, "inflateRaw",          (void*)js_zlib_inflateRaw, 3);
+    zlib_set_method(zlib_namespace, "unzip",               (void*)js_zlib_unzip, 3);
     zlib_set_method(zlib_namespace, "gzipSync",            (void*)js_zlib_gzipSync, 1);
     zlib_set_method(zlib_namespace, "gunzipSync",          (void*)js_zlib_gunzipSync, 1);
     zlib_set_method(zlib_namespace, "deflateSync",         (void*)js_zlib_deflateSync, 1);
@@ -380,8 +509,7 @@ extern "C" Item js_get_zlib_namespace(void) {
     zlib_set_method(zlib_namespace, "inflateRawSync",      (void*)js_zlib_inflateRawSync, 1);
     zlib_set_method(zlib_namespace, "brotliCompressSync",  (void*)js_zlib_brotliCompressSync, 1);
     zlib_set_method(zlib_namespace, "brotliDecompressSync",(void*)js_zlib_brotliDecompressSync, 1);
-    // unzipSync is alias for gunzipSync (handles both gzip and deflate)
-    zlib_set_method(zlib_namespace, "unzipSync",           (void*)js_zlib_gunzipSync, 1);
+    zlib_set_method(zlib_namespace, "unzipSync",           (void*)js_zlib_unzipSync, 1);
     zlib_set_method(zlib_namespace, "crc32",               (void*)js_zlib_crc32, 2);
 
     // constants — all zlib constants including flush modes, error codes, compression levels, strategies

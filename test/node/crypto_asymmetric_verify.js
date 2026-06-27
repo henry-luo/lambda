@@ -55,3 +55,31 @@ const base64Verifier = crypto.createVerify('RSA-SHA256');
 base64Verifier.update(message);
 assert.strictEqual(base64Verifier.verify({ key: publicKey }, base64Signature, 'base64'), true);
 console.log('rsa verify options base64:', true);
+
+const privateKeyObject = crypto.createPrivateKey({ key: Buffer.from(privateKey) });
+const publicKeyObject = crypto.createPublicKey({ key: Buffer.from(publicKey) });
+assert.strictEqual(privateKeyObject.type, 'private');
+assert.strictEqual(publicKeyObject.type, 'public');
+assert.strictEqual(privateKeyObject.asymmetricKeyType, 'rsa');
+assert.strictEqual(publicKeyObject.asymmetricKeyType, 'rsa');
+console.log('rsa keyobject properties:', true);
+
+const objectSignature = crypto.createSign('sha256')
+  .update(message)
+  .sign(privateKeyObject);
+assert.strictEqual(crypto.createVerify('sha256')
+  .update(message)
+  .verify(publicKeyObject, objectSignature), true);
+console.log('rsa keyobject sign verify:', true);
+
+const derivedPublic = crypto.createPublicKey(privateKeyObject);
+assert.strictEqual(derivedPublic.type, 'public');
+assert.strictEqual(crypto.createVerify('sha256')
+  .update(message)
+  .verify(derivedPublic, objectSignature), true);
+console.log('rsa keyobject derive public:', true);
+
+assert.strictEqual(publicKeyObject.export().byteLength > 0, true);
+assert.strictEqual(privateKeyObject instanceof crypto.KeyObject, true);
+assert.strictEqual(publicKeyObject instanceof crypto.KeyObject, true);
+console.log('rsa keyobject export instanceof:', true);
