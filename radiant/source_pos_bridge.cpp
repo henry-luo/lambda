@@ -30,6 +30,7 @@
 #include "../lib/hashmap.h"
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
+#include "../lambda/mark_reader.hpp"
 #include "../lambda/render_map.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -64,6 +65,15 @@ extern "C" __attribute__((weak)) bool state_store_set_selection(
     return dom_selection_set_base_and_extent(selection,
         anchor->node, anchor->offset, focus->node, focus->offset,
         out_exception);
+}
+
+static bool source_item_is_editor_text_leaf(Item item) {
+    MapReader m = MapReader::fromItem(item);
+    if (!m.isValid()) return false;
+    ItemReader kind = m.get("kind");
+    if (!kind.isSymbol()) return false;
+    Symbol* sym = kind.asSymbol();
+    return sym && strcmp(sym->chars, "text") == 0;
 }
 
 extern "C" {
@@ -279,28 +289,39 @@ bool source_pos_from_dom_boundary(const DomBoundary* boundary,
         if (!node) return false;
     }
 
-    // Walk upward until we find a DomElement with native_element.
-    Element* native = NULL;
+    // Walk upward until we find a DomElement registered in the render map.
+    // Literal wrappers generated inside a template can have native_element
+    // without their own render-map entry, so keep climbing through them.
+    RenderMapLookup lookup;
+    SourcePathC base;
+    bool found_base = false;
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
             DomElement* de = lam::dom_require_element(node);
-            if (de->native_element) { native = de->native_element; break; }
+            if (de->native_element) {
+                Item result_item;
+                result_item.element = de->native_element;
+                if (render_map_reverse_lookup_with_path(result_item, &lookup, &base)) {
+                    found_base = true;
+                    break;
+                }
+            }
+        }
+        if (is_text_leaf) {
+            leaf_child_index = source_child_index(node);
         }
         node = node->parent;
     }
-    if (!native) return false;
-
-    Item result_item;
-    result_item.element = native;
-    RenderMapLookup lookup;
-    SourcePathC base;
-    if (!render_map_reverse_lookup_with_path(result_item, &lookup, &base)) {
-        return false;
-    }
-    // base is a clone of the recorded path; extend it.
+    if (!found_base) return false;
+    // base is a clone of the recorded path. Text leaves rendered through
+    // mark wrappers (<strong>/<em>/<code>/...) are recorded at the source
+    // text leaf itself, so keep that path instead of appending the wrapper's
+    // DOM child index. Container nodes still need the child-index extension.
     int extra = 0;
     int extra_indices[2];
-    if (is_text_leaf) {
+    bool recorded_text_leaf = is_text_leaf &&
+        source_item_is_editor_text_leaf(lookup.source_item);
+    if (is_text_leaf && !recorded_text_leaf) {
         if (leaf_child_index < 0) {
             source_path_free(&base);
             return false;
@@ -499,8 +520,6 @@ Item source_node_selection_to_item(MarkBuilder& mb, const SourcePathC* path) {
 // Parse a Lambda `selection` Item and apply it to the given DomSelection by
 // resolving each endpoint through `dom_boundary_from_source_pos`.
 // ---------------------------------------------------------------------------
-
-#include "../lambda/mark_reader.hpp"
 
 namespace {
 

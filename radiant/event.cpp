@@ -1401,6 +1401,30 @@ static View* canonical_selection_focus_target(DocState* state) {
     return focus.node ? static_cast<View*>(focus.node) : nullptr;
 }
 
+static View* rich_keyboard_target_from_selection(DocState* state,
+                                                 View* preferred,
+                                                 EditingSurface* out_surface) {
+    if (out_surface) editing_surface_clear(out_surface);
+    EditingSurface surface;
+    if (preferred && editing_surface_from_target(preferred, &surface)) {
+        if (editing_surface_is_rich(&surface)) {
+            if (out_surface) *out_surface = surface;
+            return preferred;
+        }
+        if (editing_surface_is_text_control(&surface)) {
+            return nullptr;
+        }
+    }
+
+    View* selection_target = canonical_selection_focus_target(state);
+    if (selection_target && editing_surface_from_target(selection_target, &surface) &&
+        editing_surface_is_rich(&surface)) {
+        if (out_surface) *out_surface = surface;
+        return selection_target;
+    }
+    return nullptr;
+}
+
 static bool copy_current_selection_to_clipboard(DocState* state, const char* prefix) {
     if (!state) return false;
     View* surface_target = canonical_selection_focus_target(state);
@@ -1652,7 +1676,9 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
             event_x = evcon->event.mouse_position.x;
             event_y = evcon->event.mouse_position.y;
             has_mouse_pos = true;
-        } else if (evcon->event.type == RDT_EVENT_MOUSE_DOWN || evcon->event.type == RDT_EVENT_MOUSE_UP) {
+        } else if (evcon->event.type == RDT_EVENT_MOUSE_DOWN ||
+                   evcon->event.type == RDT_EVENT_MOUSE_UP ||
+                   evcon->event.type == RDT_EVENT_CLICK) {
             event_x = evcon->event.mouse_button.x;
             event_y = evcon->event.mouse_button.y;
             has_mouse_pos = true;
@@ -2123,6 +2149,26 @@ static bool dispatch_editing_copy_selection(DocState* state,
     return copy_current_selection_to_clipboard(state, prefix);
 }
 
+static void rich_select_all_sync_descendant_text_controls(DocState* state,
+                                                          DomNode* node) {
+    if (!state || !node || !node->is_element()) return;
+
+    DomElement* elem = lam::dom_require_element(node);
+    if (tc_is_text_control(elem)) {
+        tc_ensure_init(elem);
+        FormControlProp* form = elem->form;
+        if (!form) return;
+        uint32_t len = form->current_value_u16_len;
+        form_control_set_selection(state, static_cast<View*>(elem),
+                                   0, len, (uint8_t)(len > 0 ? 1 : 0));
+        return;
+    }
+
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        rich_select_all_sync_descendant_text_controls(state, child);
+    }
+}
+
 static bool dispatch_rich_consumer_transaction_operation(EventContext* evcon,
                                                          View* target,
                                                          const InputIntent* intent,
@@ -2304,27 +2350,6 @@ static DomElement* find_element_by_author_id(DomNode* node, const char* id) {
     return nullptr;
 }
 
-static void rich_select_all_sync_descendant_text_controls(DocState* state,
-                                                          DomNode* node) {
-    if (!state || !node) return;
-    if (!node->is_element()) return;
-
-    DomElement* elem = lam::dom_require_element(node);
-    if (tc_is_text_control(elem)) {
-        tc_ensure_init(elem);
-        FormControlProp* form = elem->form;
-        if (!form) return;
-        uint32_t len = form->current_value_u16_len;
-        form_control_set_selection(state, static_cast<View*>(elem),
-                                   0, len, (uint8_t)(len > 0 ? 1 : 0));
-        return;
-    }
-
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        rich_select_all_sync_descendant_text_controls(state, child);
-    }
-}
-
 static bool dispatch_rich_select_all_default(EventContext* evcon,
                                              DocState* state,
                                              View* target,
@@ -2362,6 +2387,11 @@ static bool dispatch_rich_select_all_default(EventContext* evcon,
         return false;
     }
     rich_select_all_sync_descendant_text_controls(state, owner_node);
+    if (!state_store_set_selection(state, &start, &end, &exc)) {
+        log_debug("dispatch_rich_select_all_default: restore rejected: %s",
+                  exc ? exc : "?");
+        return false;
+    }
     event_log_editing_selection(state, &surface, intent, "selectAll", 0, 0);
     return true;
 }
@@ -7833,6 +7863,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 ? state->editing.active_surface.view
                 : static_cast<View*>(state->editing.active_surface.owner);
         }
+        if (!intent_target) {
+            intent_target = rich_keyboard_target_from_selection(state, nullptr,
+                                                                nullptr);
+        }
 
         // Forward key events to layer-mode webview if it has focus
         if (focused && focused->is_element()) {
@@ -7936,11 +7970,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (intent_target && input_intent_from_key_event(key_event, &intent)) {
                 if (intent.type == INPUT_INTENT_SELECT_ALL) {
                     EditingSurface surface;
-                    bool rich_select_all = editing_surface_from_target(intent_target, &surface) &&
-                        editing_surface_is_rich(&surface);
-                    if (rich_select_all) {
+                    View* rich_select_all_target =
+                        rich_keyboard_target_from_selection(state, intent_target,
+                                                            &surface);
+                    if (rich_select_all_target) {
                         dispatch_rich_select_all_transaction(&evcon, state,
-                            intent_target, &intent);
+                            rich_select_all_target, &intent);
                         input_intent_dispose(&intent);
                         evcon.need_repaint = true;
                         break;
@@ -8016,13 +8051,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         if (!evcon.default_prevented &&
             (key_event->mods & (RDT_MOD_CTRL | RDT_MOD_SUPER)) &&
             key_event->key == RDT_KEY_C) {
-            View* rich_copy_target = intent_target
-                ? intent_target
-                : canonical_selection_focus_target(state);
             EditingSurface rich_copy_surface;
-            if (rich_copy_target &&
-                editing_surface_from_target(rich_copy_target, &rich_copy_surface) &&
-                editing_surface_is_rich(&rich_copy_surface)) {
+            View* rich_copy_target =
+                rich_keyboard_target_from_selection(state, intent_target,
+                                                    &rich_copy_surface);
+            if (rich_copy_target) {
                 copy_current_selection_to_clipboard(state, "rich copy");
                 break;
             }

@@ -49,6 +49,11 @@ static bool is_callable(Item value) {
     return get_type_id(value) == LMD_TYPE_FUNC;
 }
 
+static bool zlib_item_is_undefined(Item value) {
+    return value.item == 0 || value.item == ITEM_JS_UNDEFINED ||
+           get_type_id(value) == LMD_TYPE_UNDEFINED;
+}
+
 static Item make_zlib_error(const char* method, int zret, const char* detail);
 static Item throw_zlib_error(const char* method, int zret, const char* detail);
 
@@ -89,9 +94,9 @@ static const char* zlib_error_default_detail(int zret) {
 static bool get_input_buffer(Item input, const uint8_t** out, int* out_len) {
     if (js_is_typed_array(input)) {
         JsTypedArray* ta = js_get_typed_array_ptr(input.map);
-        if (ta && ta->data) {
+        if (ta && (ta->data || ta->byte_length == 0)) {
             *out = (const uint8_t*)ta->data;
-            *out_len = ta->length;
+            *out_len = ta->byte_length;
             return true;
         }
     }
@@ -623,6 +628,123 @@ static int zlib_option_int(Item options_item, const char* name, int fallback) {
     return (int)it2i(value);
 }
 
+static bool zlib_option_number_value(Item value, double* out_value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT) {
+        *out_value = (double)it2i(value);
+        return true;
+    }
+    if (type == LMD_TYPE_INT64) {
+        *out_value = (double)it2l(value);
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        *out_value = it2d(value);
+        return true;
+    }
+    return false;
+}
+
+static void zlib_format_number_for_error(Item value, char* out, int out_size) {
+    if (!out || out_size <= 0) return;
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT) {
+        snprintf(out, out_size, "%lld", (long long)it2i(value));
+        return;
+    }
+    if (type == LMD_TYPE_INT64) {
+        snprintf(out, out_size, "%lld", (long long)it2l(value));
+        return;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        double number = it2d(value);
+        if (number != number) snprintf(out, out_size, "NaN");
+        else if (number == 1.0 / 0.0) snprintf(out, out_size, "Infinity");
+        else if (number == -1.0 / 0.0) snprintf(out, out_size, "-Infinity");
+        else if (number == (double)(int64_t)number) snprintf(out, out_size, "%lld", (long long)(int64_t)number);
+        else snprintf(out, out_size, "%g", number);
+        return;
+    }
+    snprintf(out, out_size, "undefined");
+}
+
+static Item zlib_throw_property_type_error(const char* name, const char* expected, Item actual) {
+    char msg[512];
+    int pos = snprintf(msg, sizeof(msg),
+        "The \"%s\" property must be of type %s.", name, expected);
+    if (pos < 0) pos = 0;
+    if (pos >= (int)sizeof(msg)) pos = (int)sizeof(msg) - 1;
+    if (get_type_id(actual) == LMD_TYPE_STRING) {
+        String* s = it2s(actual);
+        int len = s ? (int)s->len : 0;
+        if (len > 25) len = 25;
+        snprintf(msg + pos, sizeof(msg) - (size_t)pos,
+            " Received type string ('%.*s%s')", len, s ? s->chars : "",
+            (s && s->len > 25) ? "..." : "");
+    } else {
+        snprintf(msg + pos, sizeof(msg) - (size_t)pos, " Received type %s",
+            get_type_id(actual) == LMD_TYPE_BOOL ? "boolean" :
+            get_type_id(actual) == LMD_TYPE_NULL ? "null" :
+            get_type_id(actual) == LMD_TYPE_UNDEFINED ? "undefined" :
+            get_type_id(actual) == LMD_TYPE_FUNC ? "function" : "object");
+    }
+    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+}
+
+static Item zlib_throw_property_range_error(const char* name, const char* range, Item actual) {
+    char actual_buf[64];
+    zlib_format_number_for_error(actual, actual_buf, sizeof(actual_buf));
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+        "The value of \"%s\" is out of range. It must be %s. Received %s",
+        name, range, actual_buf);
+    return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
+}
+
+static bool zlib_validate_int_option(Item options_item, const char* key_name,
+                                     const char* prop_name,
+                                     int min_value, int max_value, bool allow_zero) {
+    if (get_type_id(options_item) != LMD_TYPE_MAP) return true;
+    Item value = js_property_get(options_item, make_string_item(key_name));
+    if (zlib_item_is_undefined(value)) return true;
+
+    double number = 0.0;
+    if (!zlib_option_number_value(value, &number)) {
+        zlib_throw_property_type_error(prop_name, "number", value);
+        return false;
+    }
+    if (number != number || number == 1.0 / 0.0 || number == -1.0 / 0.0) {
+        zlib_throw_property_range_error(prop_name, "a finite number", value);
+        return false;
+    }
+    bool zero_is_allowed = allow_zero && number == 0.0;
+    if (!zero_is_allowed && (number < (double)min_value || number > (double)max_value)) {
+        char range[64];
+        snprintf(range, sizeof(range), ">= %d and <= %d", min_value, max_value);
+        zlib_throw_property_range_error(prop_name, range, value);
+        return false;
+    }
+    return true;
+}
+
+static bool zlib_validate_stream_options(int mode, Item options_item) {
+    if (get_type_id(options_item) != LMD_TYPE_MAP) return true;
+
+    bool is_deflate = zlib_mode_is_deflate(mode);
+    int min_window_bits = mode == ZLIB_TRANSFORM_GZIP ? 9 : 8;
+    bool allow_zero_window_bits = !is_deflate;
+    if (!zlib_validate_int_option(options_item, "windowBits", "options.windowBits",
+                                  min_window_bits, 15, allow_zero_window_bits)) {
+        return false;
+    }
+    if (is_deflate) {
+        if (!zlib_validate_int_option(options_item, "level", "options.level", -1, 9, false)) return false;
+        if (!zlib_validate_int_option(options_item, "memLevel", "options.memLevel", 1, 9, false)) return false;
+        if (!zlib_validate_int_option(options_item, "strategy", "options.strategy", 0, 4, false)) return false;
+    }
+    return true;
+}
+
 static int zlib_window_bits_for_mode(int mode, Item options_item) {
     int window_bits = zlib_option_int(options_item, "windowBits", 15);
     if (window_bits <= 0) window_bits = 15;
@@ -960,6 +1082,8 @@ static Item js_zlib_stream_flush_method(Item kind_item, Item callback_item) {
 
 static Item js_zlib_create_transform(int mode, Item options_item) {
     (void)js_get_stream_namespace();
+    if (!zlib_validate_stream_options(mode, options_item)) return ItemNull;
+
     Item stream = js_transform_new(options_item);
     if (stream.item == ItemNull.item) return stream;
 
@@ -1020,29 +1144,26 @@ extern "C" Item js_zlib_createUnzip(Item options_item) {
 // crc32(data[, value]) — compute CRC32
 extern "C" Item js_zlib_crc32(Item data_item, Item init_val) {
     unsigned long crc_val = 0;
-    if (get_type_id(init_val) == LMD_TYPE_INT) {
+    TypeId init_type = get_type_id(init_val);
+    if (init_type == LMD_TYPE_INT) {
         crc_val = (unsigned long)it2i(init_val);
+    } else if (init_type == LMD_TYPE_INT64) {
+        crc_val = (unsigned long)it2l(init_val);
+    } else if (init_type == LMD_TYPE_FLOAT) {
+        crc_val = (unsigned long)it2d(init_val);
+    } else if (!zlib_item_is_undefined(init_val)) {
+        return js_throw_invalid_arg_type("value", "number", init_val);
     }
 
-    TypeId tid = get_type_id(data_item);
-    if (tid == LMD_TYPE_STRING) {
-        String* s = it2s(data_item);
-        if (s && s->len > 0) {
-            crc_val = crc32(crc_val, (const Bytef*)s->chars, (uInt)s->len);
-        }
-    } else if (tid == LMD_TYPE_MAP) {
-        // TypedArray / Buffer — get data pointer via internal struct
-        Map* m = data_item.map;
-        if (m && m->map_kind == MAP_KIND_TYPED_ARRAY && m->data) {
-            struct TaHeader { int element_type; int length; int byte_length; int byte_offset; void* data; };
-            TaHeader* ta = (TaHeader*)m->data;
-            if (ta->data && ta->byte_length > 0) {
-                crc_val = crc32(crc_val, (const Bytef*)ta->data, (uInt)ta->byte_length);
-            }
-        }
+    const uint8_t* data = NULL;
+    int data_len = 0;
+    if (!get_input_buffer(data_item, &data, &data_len)) {
+        return js_throw_invalid_arg_type("data", "string, Buffer, TypedArray, or DataView", data_item);
     }
-    // return as unsigned 32-bit integer
-    return (Item){.item = i2it((int32_t)(crc_val & 0xFFFFFFFF))};
+    crc_val = crc32(crc_val, (const Bytef*)data, (uInt)data_len);
+
+    // return as an unsigned 32-bit value represented by Lambda's signed int slot.
+    return (Item){.item = i2it((int64_t)(crc_val & 0xFFFFFFFFUL))};
 }
 
 static Item zlib_namespace = {0};

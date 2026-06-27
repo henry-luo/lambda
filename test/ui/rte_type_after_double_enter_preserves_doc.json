@@ -13,7 +13,7 @@
     {"type": "wait", "ms": 160},
     {"type": "assert_text", "target": {"selector": "#doc"}, "contains": "Simple Markdown Test"},
     {"type": "assert_text", "target": {"selector": "#doc"}, "contains": "This is a si"},
-    {"type": "assert_text", "target": {"selector": "#doc"}, "contains": "si\u200Bxmple markdown document"},
+    {"type": "assert_text", "target": {"selector": "#doc"}, "contains": "sixmple markdown document"},
     {"type": "assert_text", "target": {"selector": "#doc"}, "contains": "Basic Text"},
     {"type": "assert_selection", "is_collapsed": true, "check_dom": true}
   ]
