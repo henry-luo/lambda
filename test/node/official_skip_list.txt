@@ -77,6 +77,7 @@ test-http-client-reject-chunked-with-content-length.js # [crash] aborts in HTTP 
 test-http-client-reject-cr-no-lf.js         # [crash] aborts in HTTP CR-without-LF rejection fixture
 test-http-double-content-length.js          # [crash] aborts in duplicate content-length rejection fixture
 test-http-highwatermark.js                  # [crash] aborts in HTTP highWaterMark fixture
+test-http-1.0-keep-alive.js                 # [crash] segfaults in repeated HTTP/1.0 keep-alive fixture
 test-http-invalid-te.js                     # [crash] aborts in invalid transfer-encoding fixture
 test-http-request-host-header.js            # [crash] aborts in HTTP Host header fixture
 test-http-server-reject-cr-no-lf.js         # [crash] aborts in server CR-without-LF rejection fixture

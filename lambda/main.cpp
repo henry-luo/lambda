@@ -313,6 +313,8 @@ static size_t lambda_main_memtrack_shutdown_once(void) {
         return 0;
     }
     g_lambda_main_memtrack_shutdown_done = true;
+    js_args_stack_cleanup();
+    js_array_runtime_items_cleanup_all();
     return memtrack_shutdown();
 }
 
