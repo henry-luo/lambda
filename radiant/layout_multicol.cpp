@@ -766,6 +766,91 @@ static float multicol_line_advance_from_items(InlineFragmentItem* items, int ite
     return 16.0f;
 }
 
+static bool multicol_inline_line_metrics(
+    ViewBlock* child,
+    int* out_line_count,
+    float* out_line_advance
+) {
+    if (!child || !out_line_count || !out_line_advance) return false;
+
+    int item_count = 0;
+    int line_count = 0;
+    float current_line_y = 0.0f;
+    float previous_item_y = 0.0f;
+    float line_advance = -1.0f;
+    float fallback_height = 0.0f;
+    bool forced_break_pending = false;
+
+    View* descendant = child->first_placed_child();
+    while (descendant) {
+        if (descendant->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(descendant);
+            TextRect* rect = text->rect;
+            while (rect) {
+                if (rect->width <= 0 && rect->length > 0) {
+                    rect = rect->next;
+                    continue;
+                }
+
+                float item_y = rect->y - child->y;
+                if (fallback_height <= 0.0f && rect->height > 0.0f) {
+                    fallback_height = rect->height;
+                }
+                if (item_count == 0) {
+                    current_line_y = item_y;
+                    line_count = 1;
+                } else {
+                    float adjacent_delta = fabsf(item_y - previous_item_y);
+                    if (adjacent_delta > 1.0f &&
+                        (line_advance < 0.0f || adjacent_delta < line_advance)) {
+                        line_advance = adjacent_delta;
+                    }
+                    if (forced_break_pending || fabsf(item_y - current_line_y) > 1.0f) {
+                        line_count++;
+                        current_line_y = item_y;
+                        forced_break_pending = false;
+                    }
+                }
+                previous_item_y = item_y;
+                item_count++;
+                rect = rect->next;
+            }
+        } else if (descendant->view_type == RDT_VIEW_BR) {
+            float item_y = descendant->y - child->y;
+            if (fallback_height <= 0.0f && descendant->height > 0.0f) {
+                fallback_height = descendant->height;
+            }
+            if (item_count == 0) {
+                current_line_y = item_y;
+                line_count = 1;
+            } else {
+                float adjacent_delta = fabsf(item_y - previous_item_y);
+                if (adjacent_delta > 1.0f &&
+                    (line_advance < 0.0f || adjacent_delta < line_advance)) {
+                    line_advance = adjacent_delta;
+                }
+                if (forced_break_pending || fabsf(item_y - current_line_y) > 1.0f) {
+                    line_count++;
+                    current_line_y = item_y;
+                    forced_break_pending = false;
+                }
+            }
+            forced_break_pending = true;
+            previous_item_y = item_y;
+            item_count++;
+        }
+        descendant = descendant->next();
+    }
+
+    if (item_count == 0 || line_count <= 0) return false;
+    if (line_advance <= 0.0f) line_advance = fallback_height > 0.0f ? fallback_height : 16.0f;
+    if (line_advance <= 0.0f) return false;
+
+    *out_line_count = line_count;
+    *out_line_advance = line_advance;
+    return true;
+}
+
 static float multicol_normalize_inline_x(float x, float origin_x, float pitch) {
     if (pitch <= 0) return x;
     float local = fmodf(x - origin_x, pitch);
@@ -1239,6 +1324,59 @@ static float multicol_clone_fragmented_flow_height(
     return adjusted;
 }
 
+static float multicol_slice_text_box_trim_flow_height(
+    ViewBlock* child,
+    float item_height,
+    float fragment_height
+) {
+    if (!child || !child->blk || fragment_height <= 0.0f) return item_height;
+    if (child->blk->box_decoration_break == CSS_VALUE_CLONE) return item_height;
+    if (!(child->blk->text_box_trim_applied & (TEXT_BOX_TRIM_START | TEXT_BOX_TRIM_END))) {
+        return item_height;
+    }
+
+    int line_count = 0;
+    float line_advance = 0.0f;
+    if (!multicol_inline_line_metrics(child, &line_count, &line_advance)) {
+        return item_height;
+    }
+
+    int lines_per_fragment = (int)floorf((fragment_height + 0.5f) / line_advance); // INT_CAST_OK: line slot count from positive fragment height
+    if (lines_per_fragment < 1) lines_per_fragment = 1;
+    int fragment_count = (line_count + lines_per_fragment - 1) / lines_per_fragment;
+    if (fragment_count <= 1) return item_height;
+
+    int last_fragment_lines = line_count % lines_per_fragment;
+    if (last_fragment_lines == 0) last_fragment_lines = lines_per_fragment;
+
+    float flow_height = (fragment_count - 1) * fragment_height +
+        last_fragment_lines * line_advance;
+    if (child->blk->text_box_trim_applied & TEXT_BOX_TRIM_END) {
+        flow_height -= child->blk->text_box_trim_end_amount;
+    }
+    if (flow_height < 0.0f) flow_height = 0.0f;
+
+    float margin_extra = item_height - child->height;
+    if (margin_extra > 0.0f) flow_height += margin_extra;
+    if (flow_height < item_height) return item_height;
+
+    log_debug("[MULTICOL] slice text-box-trim flow: item=%.1f lines=%d per_fragment=%d flow=%.1f",
+              item_height, line_count, lines_per_fragment, flow_height);
+    return flow_height;
+}
+
+static float multicol_text_box_trim_fragmented_flow_height(
+    ViewBlock* child,
+    float item_height,
+    float fragment_height,
+    int fragment_count
+) {
+    if (child && child->blk && child->blk->box_decoration_break == CSS_VALUE_CLONE) {
+        return multicol_clone_fragmented_flow_height(child, item_height, fragment_count);
+    }
+    return multicol_slice_text_box_trim_flow_height(child, item_height, fragment_height);
+}
+
 static float multicol_split_child_around_spanners(
     LayoutContext* lycon,
     ViewBlock* container,
@@ -1410,14 +1548,14 @@ static float multicol_split_child_around_spanners(
                 int fragment_count = target_height > 0.0f ?
                     (int)ceilf(children[j].height / target_height) : 1; // INT_CAST_OK: fragment count from positive heights
                 if (fragment_count < 1) fragment_count = 1;
+                float flow_height = multicol_text_box_trim_fragmented_flow_height(
+                    block_child, children[j].height, target_height, fragment_count);
                 placed_height = multicol_fragmented_child_union(
                     lycon, container, block_child, children[j].height, target_height,
                     column_count, column_width, column_gap, &used_columns);
                 if (used_columns > group.fragment_count) {
                     group.fragment_count = used_columns;
                 }
-                float flow_height = multicol_clone_fragmented_flow_height(
-                    block_child, children[j].height, fragment_count);
                 multicol_cursor_advance_fragmented_block(&cursor, flow_height);
                 placed_height = 0.0f;
             }
@@ -2285,6 +2423,8 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                 int fragment_count = group_target > 0.0f ?
                     (int)ceilf(info.height / group_target) : 1; // INT_CAST_OK: fragment count from positive heights
                 if (fragment_count < 1) fragment_count = 1;
+                float flow_height = multicol_text_box_trim_fragmented_flow_height(
+                    cb, info.height, group_target, fragment_count);
                 placed_height = multicol_fragmented_child_union(
                     lycon, block, cb, info.height, group_target, column_count, column_width, gap, &used_columns);
                 if (used_columns > group.fragment_count) {
@@ -2292,7 +2432,6 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                 }
                 log_debug("[MULTICOL] Fragmented monolithic %s into %d columns, union height=%.1f",
                           cb->node_name(), used_columns, placed_height);
-                float flow_height = multicol_clone_fragmented_flow_height(cb, info.height, fragment_count);
                 multicol_cursor_advance_fragmented_block(&cursor, flow_height);
                 placed_height = 0.0f;
             }

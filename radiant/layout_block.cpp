@@ -2151,6 +2151,12 @@ static void apply_block_axis_content_alignment(ViewBlock* block, float flow_heig
     shift_block_axis_content_for_alignment(block, offset);
 }
 
+static bool block_has_layout_fragments(ViewBlock* block) {
+    if (!block || !block->is_element()) return false;
+    DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(block);
+    return elem->layout_fragments && elem->layout_fragment_count > 1;
+}
+
 static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, float trim) {
     if (container == target) {
         // Inline content in this block. Shift all children up,
@@ -2233,8 +2239,10 @@ static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, 
             if (!found_first) {
                 // First in-flow child: reduce its height, recurse into it
                 found_first = true;
-                vb->height -= trim;
-                vb->content_height -= trim;
+                if (!block_has_layout_fragments(vb)) {
+                    vb->height -= trim;
+                    vb->content_height -= trim;
+                }
                 apply_start_trim_recursive(vb, target, trim);
             } else {
                 // Subsequent in-flow siblings: shift up
@@ -2247,8 +2255,10 @@ static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, 
                 found_first = true;
                 shrink_inline_wrappers_containing_block(child, bii, trim);
                 // Reduce the block inside the inline
-                bii->height -= trim;
-                bii->content_height -= trim;
+                if (!block_has_layout_fragments(bii)) {
+                    bii->height -= trim;
+                    bii->content_height -= trim;
+                }
                 apply_start_trim_recursive(bii, target, trim);
             }
         } else if (!found_first) {
@@ -2339,8 +2349,10 @@ static void apply_end_trim_recursive(ViewBlock* container, ViewBlock* target, fl
         if (last_inline_wrapper) {
             shrink_inline_wrappers_containing_block(last_inline_wrapper, last_in_flow, trim);
         }
-        last_in_flow->height -= trim;
-        last_in_flow->content_height -= trim;
+        if (!block_has_layout_fragments(last_in_flow)) {
+            last_in_flow->height -= trim;
+            last_in_flow->content_height -= trim;
+        }
         apply_end_trim_recursive(last_in_flow, target, trim);
     }
 }
