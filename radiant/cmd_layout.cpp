@@ -103,13 +103,14 @@ extern __thread Context* input_context;
 
 // Forward declarations
 Element* get_html_root_element(Input* input);
+extern void fontface_cleanup(UiContext* uicon);
 void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine, int depth = 0);
 void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
 static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
 CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count, int* linked_count_out = nullptr);
 void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
                                 CssStylesheet*** stylesheets, int* count, int depth = 0, bool recurse = true);
-void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
+void collect_inline_styles_to_list(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
                                    CssStylesheet*** stylesheets, int* count, int depth = 0, bool recurse = true);
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
 static const int MAX_CSS_TREE_DEPTH = 512;
@@ -183,6 +184,18 @@ static bool resolve_layout_support_resource_path(const char* href, const char* b
     strncat(out_path, "/support", out_size - strlen(out_path) - 1);
     strncat(out_path, href, out_size - strlen(out_path) - 1);
     return access(out_path, R_OK) == 0;
+}
+
+static bool css_file_url_to_local_path(const char* href, char* out_path, size_t out_size) {
+    if (!href || !out_path || out_size == 0 || strncmp(href, "file:", 5) != 0) return false;
+    const char* path = href + 5;
+    if (path[0] == '/' && path[1] == '/') path += 2;
+    if (path[0] != '/') return false;
+
+    size_t len = strlen(path);
+    if (len + 1 > out_size) return false;
+    str_copy(out_path, out_size, path, len);
+    return true;
 }
 
 // Forward declaration for charset conversion (defined after convert_latin1_to_utf8)
@@ -989,12 +1002,58 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
         log_debug("[CSS @import] Processing: @import '%s' (base: %s)", import_url,
                   import_base_dir ? import_base_dir : "(none)");
 
-        // Resolve import path relative to the stylesheet
+        // Resolve import path relative to the stylesheet or document URL.
         char import_path[1024];
+        import_path[0] = '\0';
         if (strstr(import_url, "://") != nullptr) {
-            // Absolute URL
-            strncpy(import_path, import_url, sizeof(import_path) - 1);
-            import_path[sizeof(import_path) - 1] = '\0';
+            Url* import_abs_url = url_parse(import_url);
+            if (import_abs_url && import_abs_url->scheme == URL_SCHEME_FILE) {
+                char* local_path = url_to_local_path(import_abs_url);
+                if (local_path) {
+                    strncpy(import_path, local_path, sizeof(import_path) - 1);
+                    import_path[sizeof(import_path) - 1] = '\0';
+                    mem_free(local_path);
+                }
+                if (import_path[0] == '\0') {
+                    const char* import_href = url_get_href(import_abs_url);
+                    css_file_url_to_local_path(import_href, import_path, sizeof(import_path));
+                }
+            }
+            if (import_path[0] == '\0') {
+                if (!css_file_url_to_local_path(import_url, import_path, sizeof(import_path))) {
+                    strncpy(import_path, import_url, sizeof(import_path) - 1);
+                    import_path[sizeof(import_path) - 1] = '\0';
+                }
+            }
+            if (import_abs_url) url_destroy(import_abs_url);
+        } else if (stylesheet_path &&
+                   (strncmp(stylesheet_path, "file:", 5) == 0 ||
+                    strncmp(stylesheet_path, "http://", 7) == 0 ||
+                    strncmp(stylesheet_path, "https://", 8) == 0)) {
+            Url* base_url = url_parse(stylesheet_path);
+            Url* resolved_url = base_url ? url_parse_with_base(import_url, base_url) : nullptr;
+            if (resolved_url && resolved_url->scheme == URL_SCHEME_FILE) {
+                char* local_path = url_to_local_path(resolved_url);
+                if (local_path) {
+                    strncpy(import_path, local_path, sizeof(import_path) - 1);
+                    import_path[sizeof(import_path) - 1] = '\0';
+                    mem_free(local_path);
+                }
+                if (import_path[0] == '\0') {
+                    const char* resolved_href = url_get_href(resolved_url);
+                    css_file_url_to_local_path(resolved_href, import_path, sizeof(import_path));
+                }
+            } else if (resolved_url) {
+                const char* resolved_href = url_get_href(resolved_url);
+                if (resolved_href) {
+                    if (!css_file_url_to_local_path(resolved_href, import_path, sizeof(import_path))) {
+                        strncpy(import_path, resolved_href, sizeof(import_path) - 1);
+                        import_path[sizeof(import_path) - 1] = '\0';
+                    }
+                }
+            }
+            if (resolved_url) url_destroy(resolved_url);
+            if (base_url) url_destroy(base_url);
         } else if (import_base_dir) {
             snprintf(import_path, sizeof(import_path), "%s%s", import_base_dir, import_url);
         } else {
@@ -1669,7 +1728,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
  * Recursively collect <style> inline CSS from HTML
  * Parses and returns list of stylesheets
  */
-void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
+void collect_inline_styles_to_list(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
                                    CssStylesheet*** stylesheets, int* count, int depth, bool recurse) {
     if (!elem || !engine || !pool || !stylesheets || !count) return;
     if (depth > MAX_CSS_TREE_DEPTH) return;
@@ -1712,6 +1771,12 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
                                                                       (*count + 1) * sizeof(CssStylesheet*));
                         (*stylesheets)[*count] = stylesheet;
                         (*count)++;
+
+                        // Inline stylesheets resolve @import relative to the
+                        // document URL. Imported sheets keep their own origin_url
+                        // so nested @font-face src URLs resolve relative to the
+                        // imported CSS file.
+                        resolve_stylesheet_imports(stylesheet, base_path, engine, pool, stylesheets, count, 0);
                     }
                 }
             }
@@ -1724,7 +1789,8 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
         for (int64_t i = 0; i < elem->length; i++) {
             Item child_item = elem->items[i];
             if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                collect_inline_styles_to_list(child_item.element, engine, pool, stylesheets, count, depth + 1, true);
+                collect_inline_styles_to_list(child_item.element, engine, base_path, pool,
+                                              stylesheets, count, depth + 1, true);
             }
         }
     }
@@ -1748,7 +1814,7 @@ static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engi
                 *linked_count += *count - before;
             }
         } else if (str_ieq_const(type->name.str, strlen(type->name.str), "style")) {
-            collect_inline_styles_to_list(elem, engine, pool,
+            collect_inline_styles_to_list(elem, engine, base_path, pool,
                                           stylesheets, count, depth, false);
         }
     }
@@ -1774,8 +1840,8 @@ static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engi
  * - <style disabled> elements — skipped (e.g. table-anonymous-objects-015)
  * - Media query filtering
  */
-void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* pool,
-                                     CssStylesheet*** stylesheets, int* count, int depth = 0) {
+void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, const char* base_path, Pool* pool,
+                                    CssStylesheet*** stylesheets, int* count, int depth = 0) {
     if (!elem || !engine || !pool || !stylesheets || !count) return;
     if (depth > MAX_CSS_TREE_DEPTH) return;
 
@@ -1804,6 +1870,7 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* p
                                                                               (*count + 1) * sizeof(CssStylesheet*));
                                 (*stylesheets)[*count] = stylesheet;
                                 (*count)++;
+                                resolve_stylesheet_imports(stylesheet, base_path, engine, pool, stylesheets, count, 0);
                             }
                         }
                     }
@@ -1817,7 +1884,7 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* p
     DomNode* child = elem->first_child;
     while (child) {
         if (child->node_type == DOM_NODE_ELEMENT) {
-            collect_inline_styles_from_dom(lam::dom_require_element(child), engine, pool, stylesheets, count, depth + 1);
+            collect_inline_styles_from_dom(lam::dom_require_element(child), engine, base_path, pool, stylesheets, count, depth + 1);
         }
         child = child->next_sibling;
     }
@@ -3180,7 +3247,8 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
             // initial collection are preserved — they don't change due to JS mutations.
             int rescan_inline_count = 0;
             CssStylesheet** rescan_inline_sheets = nullptr;
-            collect_inline_styles_from_dom(dom_root, css_engine, pool, &rescan_inline_sheets, &rescan_inline_count);
+            collect_inline_styles_from_dom(dom_root, css_engine, css_base_path, pool,
+                                           &rescan_inline_sheets, &rescan_inline_count);
 
             int old_inline_only = inline_stylesheet_count - linked_stylesheet_count;
             if (rescan_inline_count != old_inline_only) {
@@ -6514,9 +6582,9 @@ static bool layout_single_file(
     lambda_uv_cleanup();
 
     // Reset per-document font state to avoid cross-document cache pollution in batch mode.
+    fontface_cleanup(ui_context);
     font_context_reset_document_fonts(ui_context->font_ctx);
     font_context_reset_glyph_caches(ui_context->font_ctx);
-    ui_context->font_face_count = 0;
 
     // [DIAG] Track memory usage per file for leak detection
     {

@@ -315,10 +315,11 @@ Os2Table* font_tables_get_os2(FontTables* tables) {
     o->us_win_ascent      = rd16(raw + 74);
     o->us_win_descent     = rd16(raw + 76);
 
-    // version >= 2 fields
-    if (o->version >= 2 && len >= 96) {
-        o->sx_height      = rd16s(raw + 88);
-        o->s_cap_height   = rd16s(raw + 90);
+    // OS/2 version >= 2 fields. In the OpenType OS/2 table, sxHeight is at
+    // byte 86 and sCapHeight is at byte 88; byte 90 starts usDefaultChar.
+    if (o->version >= 2 && len >= 90) {
+        o->sx_height      = rd16s(raw + 86);
+        o->s_cap_height   = rd16s(raw + 88);
     }
 
     tables->os2 = o;
