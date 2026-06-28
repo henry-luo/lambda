@@ -1988,26 +1988,11 @@ void line_break(LayoutContext* lycon) {
 
     lycon->block.advance_y += used_line_height;
 
-    // -webkit-line-clamp: track line count and clamp when limit reached
+    // -webkit-line-clamp: track line count and remember the clamp boundary.
     lycon->block.line_number++;
-    if (lycon->block.line_clamp > 0 && lycon->block.line_number >= lycon->block.line_clamp) {
-        // This was the last allowed line. Add ellipsis to the last text rect
-        // and mark layout as clamped to prevent further content.
-        if (lycon->line.last_text_rect && lycon->font.font_handle) {
-            GlyphInfo ellipsis = font_get_glyph(lycon->font.font_handle, 0x2026); // U+2026 …
-            float ellipsis_w = (ellipsis.id != 0) ? ellipsis.advance_x : lycon->font.current_font_size * 0.5f;
-            TextRect* tr = lycon->line.last_text_rect;
-            float max_w = lycon->line.right - tr->x;
-            // Truncate text width if needed to fit ellipsis within the line
-            if (tr->width + ellipsis_w > max_w && max_w > ellipsis_w) {
-                tr->width = max_w - ellipsis_w;
-            }
-            tr->has_trailing_ellipsis = true;
-            log_debug("[LINE-CLAMP] Clamped at line %d, ellipsis after x=%.1f",
-                      lycon->block.line_number, tr->x + tr->width);
-        }
-        lycon->block.line_clamped = true;
-    }
+    bool reached_line_clamp = lycon->block.line_clamp > 0 &&
+        lycon->block.line_number >= lycon->block.line_clamp &&
+        !lycon->block.line_clamped;
 
     // CSS 2.1 10.8.1: Track last line's baseline offset for inline-block baseline alignment.
     // The baseline of an inline-block is the baseline of its last line box.
@@ -2048,6 +2033,26 @@ void line_break(LayoutContext* lycon) {
     }
     lycon->block.last_line_max_ascender = trim_max_ascender;
     lycon->block.last_line_max_descender = trim_max_descender;
+
+    if (reached_line_clamp) {
+        if (lycon->line.last_text_rect && lycon->font.font_handle) {
+            GlyphInfo ellipsis = font_get_glyph(lycon->font.font_handle, 0x2026); // U+2026 …
+            float ellipsis_w = (ellipsis.id != 0) ? ellipsis.advance_x : lycon->font.current_font_size * 0.5f;
+            TextRect* tr = lycon->line.last_text_rect;
+            float max_w = lycon->line.right - tr->x;
+            if (tr->width + ellipsis_w > max_w && max_w > ellipsis_w) {
+                tr->width = max_w - ellipsis_w;
+            }
+            tr->has_trailing_ellipsis = true;
+            log_debug("[LINE-CLAMP] Clamped at line %d, ellipsis after x=%.1f",
+                      lycon->block.line_number, tr->x + tr->width);
+        }
+        lycon->block.line_clamped = true;
+        lycon->block.line_clamp_advance_y = lycon->block.advance_y;
+        lycon->block.line_clamp_last_line_ascender = lycon->block.last_line_ascender;
+        lycon->block.line_clamp_last_line_max_ascender = trim_max_ascender;
+        lycon->block.line_clamp_last_line_max_descender = trim_max_descender;
+    }
 
     // reset the new line
     line_reset(lycon);
@@ -2601,10 +2606,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     // Guard against infinite loop from extreme negative margins or degenerate layouts
     if (++layout_text_iterations > 500) {
         log_error("layout_text: exceeded 500 iterations, aborting text layout");
-        return;
-    }
-    // -webkit-line-clamp: stop processing text if line limit reached
-    if (lycon->block.line_clamped) {
         return;
     }
     // Check if we're already past the line end before starting new text

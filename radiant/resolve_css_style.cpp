@@ -9890,8 +9890,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_LINE_CLAMP:
         case CSS_PROPERTY_WEBKIT_LINE_CLAMP: {
-            log_debug("[CSS] Processing -webkit-line-clamp property");
+            log_debug("[CSS] Processing line-clamp property");
             if (!block || !block->blk) {
                 if (block) {
                     block->blk = alloc_block_prop(lycon);
@@ -9899,17 +9900,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     break;
                 }
             }
-            if (value->type == CSS_VALUE_TYPE_NUMBER) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                block->blk->line_clamp = 0;
+                log_debug("[CSS] line-clamp: none");
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 int clamp = (int)value->data.number.value; // INT_CAST_OK: line count
                 if (clamp > 0) {
                     block->blk->line_clamp = clamp;
-                    log_debug("[CSS] -webkit-line-clamp: %d", clamp);
+                    log_debug("[CSS] line-clamp: %d", clamp);
                 }
             } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 int clamp = (int)value->data.length.value; // INT_CAST_OK: line count
                 if (clamp > 0) {
                     block->blk->line_clamp = clamp;
-                    log_debug("[CSS] -webkit-line-clamp: %d (from length)", clamp);
+                    log_debug("[CSS] line-clamp: %d (from length)", clamp);
                 }
             }
             break;

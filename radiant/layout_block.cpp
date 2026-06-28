@@ -2781,6 +2781,20 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     // formatted lines) and shifts child positions accordingly.
     // Copy line box metrics from layout context to view tree for use by trim.
     if (block->blk) {
+        if (lycon->block.line_clamped && lycon->block.line_clamp_advance_y >= 0.0f) {
+            float clamp_content_height = lycon->block.line_clamp_advance_y;
+            if (block->bound) {
+                clamp_content_height += block->bound->padding.bottom;
+                flow_height = clamp_content_height +
+                    (block->bound->border ? block->bound->border->width.bottom : 0.0f);
+            } else {
+                flow_height = clamp_content_height;
+            }
+            block->content_height = clamp_content_height;
+            lycon->block.last_line_ascender = lycon->block.line_clamp_last_line_ascender;
+            lycon->block.last_line_max_ascender = lycon->block.line_clamp_last_line_max_ascender;
+            lycon->block.last_line_max_descender = lycon->block.line_clamp_last_line_max_descender;
+        }
         block->blk->first_line_max_ascender = lycon->block.first_line_max_ascender;
         block->blk->first_line_max_descender = lycon->block.first_line_max_descender;
         block->blk->last_line_max_ascender = lycon->block.last_line_max_ascender;
@@ -4187,9 +4201,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                         // Phase 16: save height contribution for future incremental passes
                         child->layout_height_contribution = lycon->block.advance_y - pre_advance_y;
                         child = child->next_sibling;
-                    } while (child && !lycon->block.line_clamped);
+                    } while (child);
                     // handle last line
-                    if (!lycon->line.is_line_start && !lycon->block.line_clamped) {
+                    if (!lycon->line.is_line_start) {
                         lycon->line.is_last_line = true;
                         line_break(lycon);
                     }
@@ -4541,6 +4555,10 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     lycon->block.line_number = 0;
     lycon->block.line_clamp = (block->blk && block->blk->line_clamp > 0) ? block->blk->line_clamp : 0;
     lycon->block.line_clamped = false;
+    lycon->block.line_clamp_advance_y = -1.0f;
+    lycon->block.line_clamp_last_line_ascender = 0.0f;
+    lycon->block.line_clamp_last_line_max_ascender = 0.0f;
+    lycon->block.line_clamp_last_line_max_descender = 0.0f;
 
     // Resolve text-indent: percentage needs containing block width (now available)
     float resolved_text_indent = 0.0f;

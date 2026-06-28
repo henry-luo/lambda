@@ -117,6 +117,10 @@ typedef struct BlockContext {
     int line_number;            // Current line number (1-based, incremented by line_break)
     int line_clamp;             // Max visible lines (0 = no clamp, from BlockProp)
     bool line_clamped;          // True after line_clamp lines have been laid out
+    float line_clamp_advance_y; // advance_y at the clamp boundary
+    float line_clamp_last_line_ascender;
+    float line_clamp_last_line_max_ascender;
+    float line_clamp_last_line_max_descender;
 
     // =========================================================================
     // BFC Hierarchy
