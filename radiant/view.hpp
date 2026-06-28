@@ -1068,6 +1068,7 @@ typedef struct BlockProp {
     int tab_size;           // CSS tab-size (number of spaces, default 8)
     uint8_t margin_trim;     // bitmask: MARGIN_TRIM_BLOCK_START|END|INLINE_START|END
     uint8_t text_box_trim;   // bitmask: TEXT_BOX_TRIM_START|END (CSS Inline Level 3)
+    uint8_t text_box_trim_applied; // bitmask of start/end trim actually applied during layout
     CssEnum text_box_over_edge;  // CSS Inline 3 text-box-edge over metric (CSS_VALUE_TEXT, CSS_VALUE_CAP, CSS_VALUE_EX, etc.)
     CssEnum text_box_under_edge; // CSS Inline 3 text-box-edge under metric (CSS_VALUE_TEXT, CSS_VALUE_ALPHABETIC, etc.)
     float given_width, given_height;  // CSS specified width/height values

@@ -2100,14 +2100,18 @@ static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, 
                 }
             }
             if (!skip) {
-                child->y -= trim;
+                bool shift_child_box = true;
                 if (child->is_block()) {
                     ViewBlock* vb = lam::view_require_block(child);
                     if (is_inline_level_atomic_block(child, vb)) {
+                        shift_child_box = !(vb->blk &&
+                            (vb->blk->text_box_trim_applied & TEXT_BOX_TRIM_START));
+                        if (shift_child_box) child->y -= trim;
                         child = child->next();
                         continue;
                     }
                 }
+                if (shift_child_box) child->y -= trim;
                 // Block-in-inline: block children inside inline wrappers have y
                 // relative to the containing block, not relative to the inline
                 // wrapper. Shifting the inline wrapper doesn't move them, so
@@ -2350,7 +2354,9 @@ static bool has_end_padding_or_border_between(ViewBlock* container, ViewBlock* t
 // AFTER the trim (per spec, trim modifies intrinsic height before
 // min-height/max-height kicks in).
 static float apply_text_box_trim(ViewBlock* block, float end_trim_limit) {
-    if (!block->blk || !block->blk->text_box_trim) return 0;
+    if (!block->blk) return 0;
+    block->blk->text_box_trim_applied = 0;
+    if (!block->blk->text_box_trim) return 0;
 
     uint8_t trim = block->blk->text_box_trim;
 
@@ -2387,10 +2393,12 @@ static float apply_text_box_trim(ViewBlock* block, float end_trim_limit) {
               start_trim, end_trim, block->node_name(), block->height);
 
     if (start_trim > 0) {
+        block->blk->text_box_trim_applied |= TEXT_BOX_TRIM_START;
         apply_start_trim_recursive(block, first_line_block, start_trim);
     }
 
     if (end_trim > 0) {
+        block->blk->text_box_trim_applied |= TEXT_BOX_TRIM_END;
         apply_end_trim_recursive(block, last_line_block, end_trim);
     }
 
