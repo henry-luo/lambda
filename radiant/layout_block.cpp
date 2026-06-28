@@ -2110,7 +2110,6 @@ static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, 
             if (is_inline_level_atomic_block(child, vb)) {
                 if (found_first) {
                     child->y -= trim;
-                    shift_text_rects_y(child, -trim);
                 }
                 child = child->next();
                 continue;
@@ -2124,7 +2123,6 @@ static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, 
             } else {
                 // Subsequent in-flow siblings: shift up
                 child->y -= trim;
-                shift_text_rects_y(child, -trim);
             }
         } else if (!found_first && child->view_type == RDT_VIEW_INLINE) {
             // Check for block-in-inline: inline wrapper containing a block child
