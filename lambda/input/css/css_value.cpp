@@ -460,6 +460,8 @@ static const CssEnumInfo css_value_definitions[] = {
     // text-box-edge values (auto, text, alphabetic, ideographic reuse existing enums)
     {"cap", 3, CSS_VALUE_CAP, CSS_VALUE_GROUP_TEXT_BOX_EDGE},
     {"ex", 2, CSS_VALUE_EX, CSS_VALUE_GROUP_TEXT_BOX_EDGE},
+    {"slice", 5, CSS_VALUE_SLICE, CSS_VALUE_GROUP_MISC},
+    {"clone", 5, CSS_VALUE_CLONE, CSS_VALUE_GROUP_MISC},
     // Background repeat values
     {"repeat", 6, CSS_VALUE_REPEAT, CSS_VALUE_GROUP_BGROUND_REPEAT},
     {"no-repeat", 9, CSS_VALUE_NO_REPEAT, CSS_VALUE_GROUP_BGROUND_REPEAT},

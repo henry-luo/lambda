@@ -364,6 +364,7 @@ BlockProp* alloc_block_prop(LayoutContext* lycon) {
     prop->tab_size = 8;                  // CSS default tab-size is 8
     prop->given_min_height = prop->given_min_width = prop->given_max_height = prop->given_max_width = -1;  // -1 for undefined
     prop->box_sizing = CSS_VALUE_CONTENT_BOX;  // default to content-box
+    prop->box_decoration_break = CSS_VALUE_SLICE;  // CSS initial value
     prop->given_width = prop->given_height = -1;  // -1 for not specified
     prop->given_width_percent = prop->given_height_percent = NAN;  // NAN for not percentage
     prop->contain_intrinsic_width = prop->contain_intrinsic_height = -1;

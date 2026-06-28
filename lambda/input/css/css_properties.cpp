@@ -120,6 +120,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_BORDER_BLOCK_END_WIDTH, "border-block-end-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
 
     {CSS_PROPERTY_BOX_SIZING, "box-sizing", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "content-box", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_BOX_DECORATION_BREAK, "box-decoration-break", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "slice", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_ASPECT_RATIO, "aspect-ratio", PROP_TYPE_STRING, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_string, NULL},
 
     // Typography Properties

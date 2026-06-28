@@ -7839,6 +7839,21 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_BOX_DECORATION_BREAK: {
+            log_debug("[CSS] Processing box-decoration-break property");
+            if (!block) break;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum kw = value->data.keyword;
+                block->blk->box_decoration_break =
+                    (kw == CSS_VALUE_CLONE) ? CSS_VALUE_CLONE : CSS_VALUE_SLICE;
+                log_debug("[CSS] box-decoration-break: %s",
+                          block->blk->box_decoration_break == CSS_VALUE_CLONE ? "clone" : "slice");
+            }
+            break;
+        }
+
         case CSS_PROPERTY_COLUMN_FILL: {
             log_debug("[CSS] Processing column-fill property");
             if (!block) break;

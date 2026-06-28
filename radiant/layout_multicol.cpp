@@ -1220,6 +1220,25 @@ static float multicol_fragmented_child_union(
     return union_height;
 }
 
+static float multicol_clone_fragmented_flow_height(
+    ViewBlock* child,
+    float item_height,
+    int fragment_count
+) {
+    if (!child || !child->blk || fragment_count <= 1) return item_height;
+    if (child->blk->box_decoration_break != CSS_VALUE_CLONE) return item_height;
+    if (!(child->blk->text_box_trim_applied & TEXT_BOX_TRIM_START)) return item_height;
+
+    float extra_start_trim = child->blk->text_box_trim_start_amount * fragment_count;
+    if (extra_start_trim <= 0.0f) return item_height;
+
+    float adjusted = item_height - extra_start_trim;
+    if (adjusted < 0.0f) adjusted = 0.0f;
+    log_debug("[MULTICOL] clone text-box-trim flow: item=%.1f fragments=%d extra_start=%.1f adjusted=%.1f",
+              item_height, fragment_count, extra_start_trim, adjusted);
+    return adjusted;
+}
+
 static float multicol_split_child_around_spanners(
     LayoutContext* lycon,
     ViewBlock* container,
@@ -1388,13 +1407,18 @@ static float multicol_split_child_around_spanners(
             if (multicol_should_fragment_monolithic_child(container, block_child, children[j].height, target_height) ||
                 children[j].height > target_height) {
                 int used_columns = 1;
+                int fragment_count = target_height > 0.0f ?
+                    (int)ceilf(children[j].height / target_height) : 1; // INT_CAST_OK: fragment count from positive heights
+                if (fragment_count < 1) fragment_count = 1;
                 placed_height = multicol_fragmented_child_union(
                     lycon, container, block_child, children[j].height, target_height,
                     column_count, column_width, column_gap, &used_columns);
                 if (used_columns > group.fragment_count) {
                     group.fragment_count = used_columns;
                 }
-                multicol_cursor_advance_fragmented_block(&cursor, children[j].height);
+                float flow_height = multicol_clone_fragmented_flow_height(
+                    block_child, children[j].height, fragment_count);
+                multicol_cursor_advance_fragmented_block(&cursor, flow_height);
                 placed_height = 0.0f;
             }
             if (!leading_fragment_border_consumed && j == group_start && leading_fragment_border_height > 0) {
@@ -2258,6 +2282,9 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
             } else if (multicol_should_fragment_monolithic_child(block, cb, info.height, group_target) ||
                        info.height > group_target) {
                 int used_columns = 1;
+                int fragment_count = group_target > 0.0f ?
+                    (int)ceilf(info.height / group_target) : 1; // INT_CAST_OK: fragment count from positive heights
+                if (fragment_count < 1) fragment_count = 1;
                 placed_height = multicol_fragmented_child_union(
                     lycon, block, cb, info.height, group_target, column_count, column_width, gap, &used_columns);
                 if (used_columns > group.fragment_count) {
@@ -2265,7 +2292,8 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                 }
                 log_debug("[MULTICOL] Fragmented monolithic %s into %d columns, union height=%.1f",
                           cb->node_name(), used_columns, placed_height);
-                multicol_cursor_advance_fragmented_block(&cursor, info.height);
+                float flow_height = multicol_clone_fragmented_flow_height(cb, info.height, fragment_count);
+                multicol_cursor_advance_fragmented_block(&cursor, flow_height);
                 placed_height = 0.0f;
             }
 

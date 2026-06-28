@@ -2424,6 +2424,8 @@ static bool has_end_padding_or_border_between(ViewBlock* container, ViewBlock* t
 static float apply_text_box_trim(ViewBlock* block, float end_trim_limit) {
     if (!block->blk) return 0;
     block->blk->text_box_trim_applied = 0;
+    block->blk->text_box_trim_start_amount = 0.0f;
+    block->blk->text_box_trim_end_amount = 0.0f;
     if (!block->blk->text_box_trim) return 0;
 
     uint8_t trim = block->blk->text_box_trim;
@@ -2462,11 +2464,13 @@ static float apply_text_box_trim(ViewBlock* block, float end_trim_limit) {
 
     if (start_trim > 0) {
         block->blk->text_box_trim_applied |= TEXT_BOX_TRIM_START;
+        block->blk->text_box_trim_start_amount = start_trim;
         apply_start_trim_recursive(block, first_line_block, start_trim);
     }
 
     if (end_trim > 0) {
         block->blk->text_box_trim_applied |= TEXT_BOX_TRIM_END;
+        block->blk->text_box_trim_end_amount = end_trim;
         apply_end_trim_recursive(block, last_line_block, end_trim);
     }
 

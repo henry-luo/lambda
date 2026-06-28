@@ -1058,6 +1058,7 @@ typedef struct BlockProp {
     char* counter_increment;        // counter names and values
     char* counter_set;              // counter names and values (CSS Lists 3)
     CssEnum box_sizing;  // CSS_VALUE_CONTENT_BOX or CSS_VALUE_BORDER_BOX
+    CssEnum box_decoration_break;  // CSS_VALUE_SLICE (default) | CSS_VALUE_CLONE
     CssEnum white_space;  // CSS_VALUE_NORMAL, CSS_VALUE_NOWRAP, CSS_VALUE_PRE, etc.
     CssEnum word_break;   // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_ALL, CSS_VALUE_KEEP_ALL
     CssEnum overflow_wrap;  // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_WORD, CSS_VALUE_ANYWHERE
@@ -1069,6 +1070,8 @@ typedef struct BlockProp {
     uint8_t margin_trim;     // bitmask: MARGIN_TRIM_BLOCK_START|END|INLINE_START|END
     uint8_t text_box_trim;   // bitmask: TEXT_BOX_TRIM_START|END (CSS Inline Level 3)
     uint8_t text_box_trim_applied; // bitmask of start/end trim actually applied during layout
+    float text_box_trim_start_amount;
+    float text_box_trim_end_amount;
     CssEnum text_box_over_edge;  // CSS Inline 3 text-box-edge over metric (CSS_VALUE_TEXT, CSS_VALUE_CAP, CSS_VALUE_EX, etc.)
     CssEnum text_box_under_edge; // CSS Inline 3 text-box-edge under metric (CSS_VALUE_TEXT, CSS_VALUE_ALPHABETIC, etc.)
     float given_width, given_height;  // CSS specified width/height values
