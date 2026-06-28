@@ -1066,6 +1066,8 @@ typedef struct BlockProp {
     CssEnum text_spacing_trim;  // CSS Text 4 text-spacing-trim
     CssEnum break_before;  // CSS Fragmentation: auto, column, page, always
     CssEnum break_after;   // CSS Fragmentation: auto, column, page, always
+    int orphans;           // CSS Fragmentation: minimum lines before a break
+    int widows;            // CSS Fragmentation: minimum lines after a break
     int tab_size;           // CSS tab-size (number of spaces, default 8)
     uint8_t margin_trim;     // bitmask: MARGIN_TRIM_BLOCK_START|END|INLINE_START|END
     uint8_t text_box_trim;   // bitmask: TEXT_BOX_TRIM_START|END (CSS Inline Level 3)

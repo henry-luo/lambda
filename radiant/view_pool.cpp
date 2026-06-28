@@ -361,6 +361,8 @@ BlockProp* alloc_block_prop(LayoutContext* lycon) {
     prop->text_spacing_trim = CSS_VALUE_NORMAL;
     prop->break_before = CSS_VALUE_AUTO;
     prop->break_after = CSS_VALUE_AUTO;
+    prop->orphans = 2;                    // CSS initial value
+    prop->widows = 2;                     // CSS initial value
     prop->tab_size = 8;                  // CSS default tab-size is 8
     prop->given_min_height = prop->given_min_width = prop->given_max_height = prop->given_max_width = -1;  // -1 for undefined
     prop->box_sizing = CSS_VALUE_CONTENT_BOX;  // default to content-box

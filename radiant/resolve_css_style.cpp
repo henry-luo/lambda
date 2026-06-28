@@ -7839,6 +7839,36 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_ORPHANS: {
+            log_debug("[CSS] Processing orphans property");
+            if (!block) break;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+
+            if (value->type == CSS_VALUE_TYPE_NUMBER) {
+                int count = (int)value->data.number.value; // INT_CAST_OK: orphans is a line count
+                if (count > 0) {
+                    block->blk->orphans = count;
+                    log_debug("[CSS] orphans: %d", count);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_WIDOWS: {
+            log_debug("[CSS] Processing widows property");
+            if (!block) break;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+
+            if (value->type == CSS_VALUE_TYPE_NUMBER) {
+                int count = (int)value->data.number.value; // INT_CAST_OK: widows is a line count
+                if (count > 0) {
+                    block->blk->widows = count;
+                    log_debug("[CSS] widows: %d", count);
+                }
+            }
+            break;
+        }
+
         case CSS_PROPERTY_BOX_DECORATION_BREAK: {
             log_debug("[CSS] Processing box-decoration-break property");
             if (!block) break;

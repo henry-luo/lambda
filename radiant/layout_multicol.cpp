@@ -2311,6 +2311,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
             TextRect* rect;
             DomText* text_node;  // owning text node
             float line_y;        // original y
+            float new_y;         // redistributed y
             float line_height;   // height of this rect
         };
         LineRect lines[512];
@@ -2325,6 +2326,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                     lines[line_count].rect = tr;
                     lines[line_count].text_node = tnode;
                     lines[line_count].line_y = tr->y;
+                    lines[line_count].new_y = tr->y;
                     lines[line_count].line_height = tr->height;
                     line_count++;
                     tr = tr->next;
@@ -2349,8 +2351,11 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         int current_col = 0;
         float col_y = 0;           // y offset within current column
         float col_start_y = 0;     // the original y of the first line assigned to the current column
+        int col_start_line = 0;
         bool col_started = false;
         float max_col_height = 0;
+        int orphans = block->blk && block->blk->orphans > 0 ? block->blk->orphans : 2;
+        int widows = block->blk && block->blk->widows > 0 ? block->blk->widows : 2;
 
         for (int li = 0; li < line_count; li++) {
             LineRect& lr = lines[li];
@@ -2363,21 +2368,40 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
             // excluding it is closer to balanced than including it.
             // This matches browser behavior of preferring more content
             // in earlier columns when lines are indivisible.
+            bool should_break = false;
             if (col_started && current_col < column_count - 1) {
                 float col_h_with = rel_y - col_start_y + lr.line_height;
                 if (col_h_with > target_height) {
                     float col_h_without = rel_y - col_start_y;
                     float overshoot = col_h_with - target_height;
                     float undershoot = target_height - col_h_without;
-                    bool should_break = block->multicol->fill == COLUMN_FILL_AUTO ||
-                                        undershoot <= overshoot;
-                    if (should_break) {
-                        // closer to balanced without this line — break here
-                        if (col_h_without > max_col_height) max_col_height = col_h_without;
-                        current_col++;
-                        col_start_y = rel_y;
-                        log_debug("[MULTICOL] Inline column break -> column %d at rel_y=%.1f", current_col, rel_y);
+                    should_break = block->multicol->fill == COLUMN_FILL_AUTO ||
+                                   undershoot <= overshoot;
+                } else if (li + 1 < line_count && widows > 1) {
+                    int remaining_after_this = line_count - (li + 1);
+                    int remaining_with_this = line_count - li;
+                    int lines_before_break = li - col_start_line;
+                    if (remaining_after_this > 0 &&
+                        remaining_after_this < widows &&
+                        remaining_with_this >= widows &&
+                        lines_before_break >= orphans) {
+                        float next_rel_y = lines[li + 1].line_y - lines[0].line_y;
+                        float next_col_h_with = next_rel_y - col_start_y + lines[li + 1].line_height;
+                        should_break = next_col_h_with > target_height;
                     }
+                }
+                if (should_break && li - col_start_line < orphans) {
+                    should_break = false;
+                }
+                if (should_break) {
+                    // closer to balanced without this line, or move the break
+                    // earlier so the next fragment satisfies widows.
+                    float col_h_without = rel_y - col_start_y;
+                    if (col_h_without > max_col_height) max_col_height = col_h_without;
+                    current_col++;
+                    col_start_y = rel_y;
+                    col_start_line = li;
+                    log_debug("[MULTICOL] Inline column break -> column %d at rel_y=%.1f", current_col, rel_y);
                 }
             }
             col_started = true;
@@ -2385,7 +2409,8 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
             // Reposition: shift x by column offset, reset y within column
             float col_x_offset = current_col * (column_width + gap);
             lr.rect->x += col_x_offset;
-            lr.rect->y = lines[0].line_y + (rel_y - col_start_y);
+            lr.new_y = lines[0].line_y + (rel_y - col_start_y);
+            lr.rect->y = lr.new_y;
 
             col_y = (rel_y - col_start_y) + lr.line_height;
         }
@@ -2413,6 +2438,14 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                 }
                 // DomText doesn't have x/y/width/height directly, but
                 // the parent block uses content_height from advance_y
+            } else if (child->view_type == RDT_VIEW_BR) {
+                View* br = (View*)child;
+                for (int li = 0; li < line_count; li++) {
+                    if (fabsf(br->y - lines[li].line_y) <= 1.0f) {
+                        br->y = lines[li].new_y;
+                        break;
+                    }
+                }
             }
             child = child->next_sibling;
         }
