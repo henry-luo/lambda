@@ -1415,18 +1415,6 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 pb = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
             }
             float expected_height = content_area + bt + pt + pb + bb;
-            // Check if any child inline span overflows the expected height
-            bool child_overflows = false;
-            if (span->height > expected_height) {
-                View* ch = span->first_placed_child();
-                while (ch) {
-                    if (ch->view_type == RDT_VIEW_INLINE && ch->height > expected_height) {
-                        child_overflows = true;
-                        break;
-                    }
-                    ch = (View*)ch->next_sibling;
-                }
-            }
             ViewBlock* anonymous_inline_table =
                 inline_span_anonymous_inline_table_child(span);
             bool use_anonymous_table_cell_fragment =
@@ -1467,10 +1455,11 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                               span->y, span->height,
                               anonymous_inline_table->height - table_baseline);
                 }
-            } else if (span->height > expected_height && !child_overflows) {
+            } else if (span->height > expected_height) {
                 // CSS 2.1 §10.6.1 and §10.8.1: an inline non-replaced element's
-                // own box is positioned from its font metrics. Atomic children
-                // such as inline-blocks and inline-tables may protrude outside it.
+                // own box is positioned from its font metrics. Descendant inline
+                // boxes and atomic children may protrude outside it, but they do
+                // not enlarge the ancestor inline box's DOMRect.
                 float span_lh = span->content_height;
                 float hhea_content = span_asc + span_desc;
                 float half_leading = (span_lh - hhea_content) / 2.0f;
