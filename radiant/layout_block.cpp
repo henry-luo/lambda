@@ -2020,6 +2020,7 @@ static void shift_text_rects_y(View* view, float delta) {
 // shifted separately when the block itself is shifted by apply_start_trim_recursive.
 static void shift_text_rects_y_inline_only(View* view, float delta) {
     if (view->view_type == RDT_VIEW_TEXT) {
+        view->y += delta;
         TextRect* rect = lam::view_require<RDT_VIEW_TEXT>(view)->rect;
         while (rect) {
             rect->y += delta;
@@ -2308,7 +2309,7 @@ static bool has_end_padding_or_border_between(ViewBlock* container, ViewBlock* t
 // block->content_height so that min/max-height constraints are applied
 // AFTER the trim (per spec, trim modifies intrinsic height before
 // min-height/max-height kicks in).
-static float apply_text_box_trim(ViewBlock* block) {
+static float apply_text_box_trim(ViewBlock* block, float end_trim_limit) {
     if (!block->blk || !block->blk->text_box_trim) return 0;
 
     uint8_t trim = block->blk->text_box_trim;
@@ -2334,6 +2335,9 @@ static float apply_text_box_trim(ViewBlock* block) {
             CssEnum over_edge, under_edge;
             get_text_box_edge(last_line_block, &over_edge, &under_edge);
             end_trim = compute_under_trim(last_line_block, under_edge);
+            if (end_trim_limit >= 0.0f && end_trim > end_trim_limit) {
+                end_trim = end_trim_limit;
+            }
         }
     }
 
@@ -2744,7 +2748,11 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         // Persist first line baseline for flex baseline alignment (CSS Flexbox §9.4)
         block->blk->first_line_baseline = lycon->block.first_line_ascender;
     }
-    float text_box_trim_amount = apply_text_box_trim(block);
+    float end_trim_limit = -1.0f;
+    if (lycon->block.saved_clear_y >= 0.0f) {
+        end_trim_limit = max(lycon->block.advance_y - lycon->block.saved_clear_y, 0.0f);
+    }
+    float text_box_trim_amount = apply_text_box_trim(block, end_trim_limit);
     if (text_box_trim_amount > 0) {
         flow_height -= text_box_trim_amount;
         block->content_height -= text_box_trim_amount;
@@ -2753,6 +2761,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         // pick up the trimmed value.  For in-flow blocks this is harmless
         // because the parent restores its own block context afterward.
         lycon->block.advance_y -= text_box_trim_amount;
+        recompute_inline_descendant_bounds(static_cast<View*>(block), lycon->font.font_handle);
         log_debug("%s finalizing block, display=%d, given wd:%f", block->source_loc(), display, lycon->block.given_width);
     }
     if (display == CSS_VALUE_INLINE_BLOCK && lycon->block.given_width < 0) {
@@ -7110,6 +7119,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_debug("saved pa_block.advance_y: %.2f for element %s", pa_block.advance_y, elmt->source_loc());
     lycon->block.content_width = lycon->block.content_height = 0;
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
+    lycon->block.saved_clear_y = -1;
     // reset line ascender/descender state so stale values from the parent context
     // do not contaminate this child block's baseline computation
     lycon->block.first_line_ascender = 0;

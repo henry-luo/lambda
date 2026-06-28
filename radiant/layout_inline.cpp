@@ -1236,6 +1236,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     }
                     // clear_y is in BFC coordinates; convert to local
                     float local_clear_y = clear_y - lycon->block.bfc_offset_y;
+                    if (local_clear_y > lycon->block.saved_clear_y) {
+                        lycon->block.saved_clear_y = local_clear_y;
+                    }
                     if (local_clear_y > lycon->block.advance_y) {
                         log_debug("%s <br> clear: advance_y %.1f -> %.1f (clear_y=%.1f, bfc_offset=%.1f)", elmt->source_loc(),
                                   lycon->block.advance_y, local_clear_y, clear_y, lycon->block.bfc_offset_y);
