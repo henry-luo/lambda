@@ -13,7 +13,6 @@
 #include "../../lib/memtrack.h"
 #include "../transpiler.hpp"
 #include "validator.hpp"
-#include "../schema_ast.hpp"
 #include "../mark_reader.hpp"
 #include "../lambda-error.h"
 

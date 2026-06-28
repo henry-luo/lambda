@@ -1,0 +1,15 @@
+flowchart TB
+  VAT["validate_against_type(item, Type*)\nswitch on Type::type_id"]
+  VAT --> PRIM["primitive\nint/float/string/bool/decimal/datetime"]
+  VAT --> MAP["map / element\niterate ShapeEntry fields\noptional + null handling"]
+  VAT --> ARR["array / list\ncount constraints + per-element recurse"]
+  VAT --> OCC["TypeUnary occurrence\n? + * [n] (validate_pattern.cpp)"]
+  VAT --> UNI["TypeBinary\nunion / intersect / exclude\n(MAX_UNION_TYPES = 32)"]
+  VAT --> PAT["TypePattern\nRE2 pattern_full_match_chars"]
+  VAT --> REF["type reference\nresolve via visited_nodes (circular detect)"]
+  MAP --> VAT
+  ARR --> VAT
+  OCC --> VAT
+  UNI --> VAT
+  REF --> VAT
+  VAT --> GUARD["bounded by PathScope / DepthScope RAII\nmax_depth, timeout, max_errors"]

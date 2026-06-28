@@ -337,7 +337,7 @@ TEST_F(ValidatorFeaturesTest, ValidateZeroOrMoreOperator) {
 
 // ==================== Phase 3: Type Registry and Schema Extraction ====================
 
-// Helper struct matching TypeRegistryEntry layout (from schema_ast.hpp)
+// Helper struct matching TypeRegistryEntry layout (from validator/validator.hpp)
 struct TestTypeDefinition {
     StrView name;
     Type* schema_type;

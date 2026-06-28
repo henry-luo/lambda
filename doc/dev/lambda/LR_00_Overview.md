@@ -2,7 +2,7 @@
 
 > **This is the index and architecture map for the Lambda core-runtime detailed-design set.** It covers what the runtime is, how a script becomes running native code, how the codebase is organized into subsystems, the design themes that recur across them, and a synthesized view of the runtime's maturity and known-issue clusters. Each subsystem has its own document, linked in [§4](#4-the-document-set).
 >
-> **Scope:** the Lambda *core language runtime* — the value model, parser/AST, the two code-generation backends and the MIR JIT, memory and GC, the numeric/string/vector machinery, the runtime builtins, error handling, the Mark data API, and the procedural runtime. Out of scope (their own subsystems): the input parsers and output formatters (`lambda/input/`, `lambda/format/`), the schema validator (`lambda/validator/`), the embedded JavaScript engine (`lambda/js/`, see [doc/dev/js/](../js/JS_00_Overview.md)), the polyglot Jube runtimes (`bash/`, `py/`, `rb/`), and the Radiant layout engine (`radiant/`).
+> **Scope:** the Lambda *core language runtime* — the value model, parser/AST, the two code-generation backends and the MIR JIT, memory and GC, the numeric/string/vector machinery, the runtime builtins, error handling, the Mark data API, the procedural runtime, and the schema validator. Out of scope (their own subsystems): the input parsers and output formatters (`lambda/input/`, `lambda/format/`), the embedded JavaScript engine (`lambda/js/`, see [doc/dev/js/](../js/JS_00_Overview.md)), the polyglot Jube runtimes (`bash/`, `py/`, `rb/`), and the Radiant layout engine (`radiant/`).
 > **Audience:** engine developers. **Convention:** every doc cites `file:line` + exact symbol names rather than quoting code, since line numbers drift; confirm against the symbol names.
 
 ---
@@ -84,6 +84,10 @@ A run of `lambda script.ls` threads through these stages (full detail in [LR_01]
 - **[LR_11 — Mark Data API](LR_11_Mark_Data_API.md)** — building, reading, and editing Lambda data structures, plus the canonical value printer.
 - **[LR_12 — Procedural Runtime](LR_12_Procedural_Runtime.md)** — `pn` procedures, `run`/`main()`, in-place mutation builtins, for-loops, and the safety analyzer.
 
+### Part VI — Validation
+
+- **[LR_13 — Schema Validator](LR_13_Schema_Validator.md)** — validating runtime data against `type`-definition schemas: the per-kind dispatch, occurrence/union/reference/pattern handling, error reporting and suggestions, and the parallel dead schema model.
+
 ---
 
 ## 5. Cross-cutting design themes
@@ -105,7 +109,7 @@ The runtime is mature and heavily tested, but the per-document Known Issues sect
 - **GC rooting depends on honest local typing.** Precise rooting requires the transpiler's belief about a register (native scalar vs heap Item) to match reality; where it doesn't, a use-after-free is latent (the historical DeltaBlue corruption). The current blanket-root-`INT64`+ policy is load-bearing but pessimistic, and the numeric nursery is never individually collected ([LR_08](LR_08_Memory_and_GC.md), [LR_07](LR_07_MIR_Transpiler_JIT.md)).
 - **Equality and coercion are representation-sensitive.** `item_deep_equal` lacks cases for several types and falls back to pointer equality; numeric arrays compare by raw `memcmp` (robust value-equality is `sum(abs(a-b)) == 0`); `it2d`/`it2l`/`it2b` have poisoning and sentinel-collision sharp edges ([LR_03](LR_03_Value_and_Type_Model.md), [LR_05](LR_05_Strings_and_Vectors.md)).
 - **Hard-coded caps with silent failure modes.** Fixed sizes recur — map hash table, shape-chain length 64, scope depth 64, loop stack 32, inference parameter arrays 16, `ndim` 32 — and several truncate or fall back silently rather than erroring ([LR_03](LR_03_Value_and_Type_Model.md), [LR_07](LR_07_MIR_Transpiler_JIT.md), [LR_11](LR_11_Mark_Data_API.md)).
-- **Two parallel vocabularies and two backends to keep in sync.** The runtime `Type*` family and the validator's `TypeSchema` overlap and are bridged by hand; the MIR Direct and C2MIR backends (and their separate inference engines) must agree. Divergences are correctness hazards, not just maintenance cost ([LR_03](LR_03_Value_and_Type_Model.md), [LR_06](LR_06_C_Transpiler.md)).
+- **Two backends to keep in sync.** The MIR Direct and C2MIR backends (and their separate parameter-inference engines) must produce identical results; divergences are correctness hazards, not just maintenance cost ([LR_06](LR_06_C_Transpiler.md), [LR_07](LR_07_MIR_Transpiler_JIT.md)). A second type-vocabulary hazard once existed here too — the validator's parallel `TypeSchema` model — but it was dead code and has since been removed, leaving the runtime `Type*` family as the single vocabulary ([LR_03](LR_03_Value_and_Type_Model.md), [LR_13](LR_13_Schema_Validator.md)).
 - **Conservatism by default.** The safety analyzer always requests a stack check and disables TCO at the gate despite a full TCO analysis being implemented; param inference dropped speculative-INT after it truncated float arguments. These are deliberate trades of performance for correctness ([LR_12](LR_12_Procedural_Runtime.md), [LR_07](LR_07_MIR_Transpiler_JIT.md)).
 
 None of these block normal use; they are the concrete future-improvement targets the set surfaces.

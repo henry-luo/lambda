@@ -1,0 +1,12 @@
+flowchart TB
+  CLI["lambda validate data -s schema.ls (main.cpp)"]
+  EXEC["exec_validation (ast_validate.cpp)\nargv parse, format auto-detect, default-schema resolve"]
+  MODE["run_ast_validation\npick AST-only vs schema mode; guess root type"]
+  CLI --> EXEC --> MODE
+  MODE -->|".ls syntactic only"| ASTV["parse-only validation\n(Tree-sitter ERROR/MISSING)"]
+  MODE -->|"data vs schema"| LOAD["SchemaValidator::load_schema (doc_validator.cpp)\nparse .ls via real transpiler;\nharvest 'type Name = ...' into Type* hashmap"]
+  LOAD --> DATA["parse input data to Item\n(input parsers)"]
+  DATA --> VDOC["validate_document"]
+  VDOC --> VAT["validate_against_type (validate.cpp)\ntype_id switch"]
+  VAT --> RES["ValidationResult\nlinked list of errors"]
+  RES --> REP["error_reporting.cpp\ntext / JSON output"]
