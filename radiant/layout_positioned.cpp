@@ -530,7 +530,13 @@ ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type) {
         // Find nearest positioned ancestor
         ViewElement* ancestor = element->parent_view();
         while (ancestor) {
-            if (ancestor->is_block()) {
+            if (ancestor->view_type == RDT_VIEW_INLINE) {
+                ViewSpan* ancestor_span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
+                if (ancestor_span->position &&
+                    ancestor_span->position->position != CSS_VALUE_STATIC) {
+                    return lam::unsafe_view_block_api_span(ancestor_span);
+                }
+            } else if (ancestor->is_block()) {
                 ViewBlock* ancestor_block = lam::view_require_block(ancestor);
                 // Check if ancestor is positioned
                 if (ancestor_block->position && ancestor_block->position->position != CSS_VALUE_STATIC) {
@@ -560,13 +566,22 @@ static void calculate_parent_to_cb_offset(ViewBlock* block, ViewBlock* containin
     float parent_to_cb_offset_x = 0;
     float parent_to_cb_offset_y = 0;
     ViewElement* walk_start = block->parent_view();
+    ViewElement* containing_element = reinterpret_cast<ViewElement*>(containing_block);
 
-    while (walk_start && !walk_start->is_block()) {
+    if (walk_start == containing_element) {
+        *out_x = parent_to_cb_offset_x;
+        *out_y = parent_to_cb_offset_y;
+        return;
+    }
+
+    while (walk_start && !walk_start->is_block() && walk_start != containing_element) {
         walk_start = walk_start->parent_view();
     }
 
-    if (walk_start && walk_start->is_block()) {
-        ViewBlock* p = lam::view_require_block(walk_start);
+    if (walk_start && (walk_start->is_block() || walk_start == containing_element)) {
+        ViewBlock* p = walk_start->view_type == RDT_VIEW_INLINE
+            ? lam::unsafe_view_block_api_span(lam::view_require<RDT_VIEW_INLINE>(walk_start))
+            : lam::view_require_block(walk_start);
         while (p && p != containing_block) {
             parent_to_cb_offset_x += p->x;
             parent_to_cb_offset_y += p->y;
@@ -578,7 +593,14 @@ static void calculate_parent_to_cb_offset(ViewBlock* block, ViewBlock* containin
                 ViewElement* ancestor = p->parent_view();
                 ViewBlock* p_cb = nullptr;
                 while (ancestor) {
-                    if (ancestor->is_block()) {
+                    if (ancestor->view_type == RDT_VIEW_INLINE) {
+                        ViewSpan* ancestor_span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
+                        if (ancestor_span->position &&
+                            ancestor_span->position->position != CSS_VALUE_STATIC) {
+                            p_cb = lam::unsafe_view_block_api_span(ancestor_span);
+                            break;
+                        }
+                    } else if (ancestor->is_block()) {
                         ViewBlock* ab = lam::view_require_block(ancestor);
                         if (ab->position && ab->position->position != CSS_VALUE_STATIC) {
                             p_cb = ab;
