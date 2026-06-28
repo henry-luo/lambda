@@ -13,6 +13,7 @@
 #include "layout_measure.hpp"
 #include "layout_table.hpp"
 #include "layout_box.hpp"
+#include "layout_alignment.hpp"
 #include "grid.hpp"
 #include "form_control.hpp"
 #include "render_svg_inline.hpp"
@@ -2039,6 +2040,47 @@ static void shift_text_rects_y_inline_only(View* view, float delta) {
     }
 }
 
+static void shift_block_axis_content_for_alignment(ViewBlock* block, float delta) {
+    View* child = block->first_placed_child();
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* vb = lam::view_require_block(child);
+            if (!is_out_of_flow_block(vb)) {
+                child->y += delta;
+            }
+        } else if (child->view_type == RDT_VIEW_INLINE) {
+            child->y += delta;
+            shift_text_rects_y_inline_only(child, delta);
+            View* ic = lam::view_require<RDT_VIEW_INLINE>(child)->first_placed_child();
+            while (ic) {
+                if (ic->is_block() && !is_out_of_flow_block(lam::view_require_block(ic))) {
+                    ic->y += delta;
+                }
+                ic = ic->next();
+            }
+        } else {
+            child->y += delta;
+            shift_text_rects_y(child, delta);
+        }
+        child = child->next();
+    }
+}
+
+static void apply_block_axis_content_alignment(ViewBlock* block, float flow_height) {
+    if (!block || !block->blk) return;
+    CssEnum align = block->blk->align_content;
+    if (align == CSS_VALUE__UNDEF || align == CSS_VALUE_NORMAL || align == CSS_VALUE_STRETCH) return;
+    if (block->display.inner != CSS_VALUE_FLOW && block->display.inner != CSS_VALUE_FLOW_ROOT) return;
+
+    float free_space = block->height - flow_height;
+    float offset = radiant::compute_alignment_offset_simple(align, free_space);
+    if (offset == 0.0f) return;
+
+    log_debug("%s align-content block shift: align=%d free_space=%.1f offset=%.1f",
+              block->source_loc(), align, free_space, offset);
+    shift_block_axis_content_for_alignment(block, offset);
+}
+
 static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, float trim) {
     if (container == target) {
         // Inline content in this block. Shift all children up,
@@ -3015,6 +3057,8 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
                       is_table ? "table" : "flex", block->height, flow_height);
         }
     }
+
+    apply_block_axis_content_alignment(block, flow_height);
 
     // BFC (Block Formatting Context) height expansion to contain floats
     // CSS 2.1 §10.6.7: For BFC roots with AUTO height, floating descendants

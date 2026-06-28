@@ -131,6 +131,47 @@ static bool css_font_family_is_available(LayoutContext* lycon, const char* famil
     return false;
 }
 
+static bool css_is_content_alignment_keyword(CssEnum value) {
+    switch (value) {
+        case CSS_VALUE_NORMAL:
+        case CSS_VALUE_STRETCH:
+        case CSS_VALUE_START:
+        case CSS_VALUE_END:
+        case CSS_VALUE_FLEX_START:
+        case CSS_VALUE_FLEX_END:
+        case CSS_VALUE_CENTER:
+        case CSS_VALUE_BASELINE:
+        case CSS_VALUE_SPACE_BETWEEN:
+        case CSS_VALUE_SPACE_AROUND:
+        case CSS_VALUE_SPACE_EVENLY:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static CssEnum css_resolve_content_alignment_keyword(const CssValue* value) {
+    if (!value) return CSS_VALUE__UNDEF;
+
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum keyword = value->data.keyword;
+        return css_is_content_alignment_keyword(keyword) ? keyword : CSS_VALUE__UNDEF;
+    }
+
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.values) {
+        CssEnum resolved = CSS_VALUE__UNDEF;
+        for (int i = 0; i < value->data.list.count; i++) {
+            CssEnum candidate = css_resolve_content_alignment_keyword(value->data.list.values[i]);
+            if (candidate != CSS_VALUE__UNDEF) {
+                resolved = candidate;
+            }
+        }
+        return resolved;
+    }
+
+    return CSS_VALUE__UNDEF;
+}
+
 static const char* css_join_font_family_values(LayoutContext* lycon, const CssValue* list,
                                                size_t start, size_t end) {
     if (!lycon || !lycon->doc || !lycon->doc->view_tree ||
@@ -10207,24 +10248,25 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 break;
             }
 
-            // Allocate FlexProp if needed (for flexbox)
-            alloc_flex_prop(lycon, block);
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum val = value->data.keyword;
-                if (val > 0) {
-                    block->embed->flex->align_content = val;
-                    log_debug("[CSS] align-content (flex): %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
+            CssEnum val = css_resolve_content_alignment_keyword(value);
+            if (val != CSS_VALUE__UNDEF) {
+                if (!block->blk) {
+                    block->blk = alloc_block_prop(lycon);
                 }
-            }
+                block->blk->align_content = val;
+                const CssEnumInfo* info = css_enum_info(val);
+                log_debug("[CSS] align-content (block): %s -> 0x%04X",
+                          info && info->name ? info->name : "(unknown)", val);
 
-            // Also allocate GridProp and store value (for grid containers)
-            alloc_grid_prop(lycon, block);
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum val = value->data.keyword;
-                if (val > 0) {
+                if (block->display.inner == CSS_VALUE_FLEX) {
+                    alloc_flex_prop(lycon, block);
+                    block->embed->flex->align_content = val;
+                    log_debug("[CSS] align-content (flex): 0x%04X", val);
+                }
+                if (block->display.inner == CSS_VALUE_GRID) {
+                    alloc_grid_prop(lycon, block);
                     block->embed->grid->align_content = val;
-                    log_debug("[CSS] align-content (grid): %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
+                    log_debug("[CSS] align-content (grid): 0x%04X", val);
                 }
             }
             break;
