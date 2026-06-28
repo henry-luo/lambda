@@ -769,7 +769,8 @@ static float multicol_line_advance_from_items(InlineFragmentItem* items, int ite
 static bool multicol_inline_line_metrics(
     ViewBlock* child,
     int* out_line_count,
-    float* out_line_advance
+    float* out_line_advance,
+    float* out_visual_height
 ) {
     if (!child || !out_line_count || !out_line_advance) return false;
 
@@ -848,7 +849,72 @@ static bool multicol_inline_line_metrics(
 
     *out_line_count = line_count;
     *out_line_advance = line_advance;
+    if (out_visual_height) {
+        *out_visual_height = fallback_height > 0.0f ? fallback_height : line_advance;
+    }
     return true;
+}
+
+static bool multicol_uses_slice_start_trim(ViewBlock* child) {
+    // slice only trims the real box edges. With trim-both, intermediate column
+    // breaks keep their normal line-box under-edge, so only start-only trim
+    // changes the first fragment's line capacity.
+    return child && child->blk &&
+        child->blk->box_decoration_break != CSS_VALUE_CLONE &&
+        (child->blk->text_box_trim_applied & TEXT_BOX_TRIM_START) &&
+        !(child->blk->text_box_trim_applied & TEXT_BOX_TRIM_END) &&
+        child->blk->text_box_trim_start_amount > 0.0f;
+}
+
+static float multicol_line_visual_height_from_items(InlineFragmentItem* items, int item_count) {
+    for (int i = 0; i < item_count; i++) {
+        if (items[i].height > 0.0f) return items[i].height;
+    }
+    return 0.0f;
+}
+
+static float multicol_normal_line_offset(float line_advance, float visual_height) {
+    if (line_advance <= visual_height || visual_height <= 0.0f) return 0.0f;
+    return (line_advance - visual_height) * 0.5f;
+}
+
+static int multicol_lines_that_fit_fragment(
+    float fragment_height,
+    float line_advance,
+    float visual_height,
+    float line_offset
+) {
+    if (fragment_height <= 0.0f || line_advance <= 0.0f) return 1;
+    if (visual_height <= 0.0f) {
+        int count = (int)floorf((fragment_height + 0.5f) / line_advance); // INT_CAST_OK: line slot count from positive fragment height
+        return count > 0 ? count : 1;
+    }
+
+    float remaining = fragment_height - line_offset - visual_height;
+    if (remaining < -0.5f) return 1;
+
+    int count = (int)floorf((remaining + 0.5f) / line_advance) + 1; // INT_CAST_OK: line slot count from positive fragment height
+    return count > 0 ? count : 1;
+}
+
+static void multicol_map_line_to_fragment(
+    int line_index,
+    int first_fragment_lines,
+    int continuation_fragment_lines,
+    int* out_fragment_index,
+    int* out_line_slot
+) {
+    if (first_fragment_lines < 1) first_fragment_lines = 1;
+    if (continuation_fragment_lines < 1) continuation_fragment_lines = first_fragment_lines;
+    if (line_index < first_fragment_lines) {
+        *out_fragment_index = 0;
+        *out_line_slot = line_index;
+        return;
+    }
+
+    int remaining = line_index - first_fragment_lines;
+    *out_fragment_index = 1 + remaining / continuation_fragment_lines;
+    *out_line_slot = remaining % continuation_fragment_lines;
 }
 
 static float multicol_normalize_inline_x(float x, float origin_x, float pitch) {
@@ -935,8 +1001,30 @@ static bool multicol_project_fragmented_inline_descendants(
     }
 
     float line_advance = multicol_line_advance_from_items(items, item_count);
-    int lines_per_fragment = (int)floorf((fragment_height + 0.5f) / line_advance); // INT_CAST_OK: line slot count from positive fragment height
-    if (lines_per_fragment < 1) lines_per_fragment = 1;
+    float visual_height = multicol_line_visual_height_from_items(items, item_count);
+    if (visual_height <= 0.0f) visual_height = line_advance;
+    float normal_line_offset = multicol_normal_line_offset(line_advance, visual_height);
+    bool slice_start_trim = multicol_uses_slice_start_trim(child);
+    float first_fragment_line_offset = first_line_y;
+    float continuation_line_offset = first_line_y;
+    if (slice_start_trim) {
+        first_fragment_line_offset = normal_line_offset - child->blk->text_box_trim_start_amount;
+        if (first_fragment_line_offset < 0.0f) first_fragment_line_offset = 0.0f;
+        continuation_line_offset = normal_line_offset;
+    }
+
+    int first_fragment_lines = 0;
+    int continuation_fragment_lines = 0;
+    if (slice_start_trim) {
+        first_fragment_lines = multicol_lines_that_fit_fragment(
+            fragment_height, line_advance, visual_height, first_fragment_line_offset);
+        continuation_fragment_lines = multicol_lines_that_fit_fragment(
+            fragment_height, line_advance, visual_height, continuation_line_offset);
+    } else {
+        first_fragment_lines = (int)floorf((fragment_height + 0.5f) / line_advance); // INT_CAST_OK: line slot count from positive fragment height
+        if (first_fragment_lines < 1) first_fragment_lines = 1;
+        continuation_fragment_lines = first_fragment_lines;
+    }
 
     int inner_column_count = 1;
     float inner_column_width = parent_column_width;
@@ -952,8 +1040,11 @@ static bool multicol_project_fragmented_inline_descendants(
     float inner_pitch = inner_column_width + inner_column_gap;
 
     for (int i = 0; i < item_count; i++) {
-        int inner_fragment_index = items[i].line_index / lines_per_fragment;
-        int line_slot = items[i].line_index % lines_per_fragment;
+        int inner_fragment_index = 0;
+        int line_slot = 0;
+        multicol_map_line_to_fragment(items[i].line_index,
+            first_fragment_lines, continuation_fragment_lines,
+            &inner_fragment_index, &line_slot);
         int inner_column_index = inner_fragment_index % inner_column_count;
         int parent_fragment_index = inner_fragment_index / inner_column_count;
         int parent_column_index = parent_fragment_index % parent_column_count;
@@ -961,10 +1052,12 @@ static bool multicol_project_fragmented_inline_descendants(
 
         float normalized_x = multicol_normalize_inline_x(items[i].original_x, child->x, inner_pitch);
         float line_local_delta_y = items[i].is_text ? items[i].original_y - items[i].line_y : 0;
+        float fragment_line_offset = slice_start_trim && inner_fragment_index > 0 ?
+            continuation_line_offset : first_fragment_line_offset;
         float new_x = normalized_x +
             parent_column_index * parent_pitch +
             inner_column_index * inner_pitch;
-        float new_y = child->y + first_line_y +
+        float new_y = child->y + fragment_line_offset +
             parent_row_index * (fragment_height + row_gap) +
             line_slot * line_advance +
             line_local_delta_y;
@@ -986,8 +1079,8 @@ static bool multicol_project_fragmented_inline_descendants(
         descendant = descendant->next();
     }
 
-    log_debug("[MULTICOL] Projected %d inline continuation items across %d line slots",
-              item_count, lines_per_fragment);
+    log_debug("[MULTICOL] Projected %d inline continuation items across %d/%d line slots",
+              item_count, first_fragment_lines, continuation_fragment_lines);
     scratch_free(&lycon->scratch, items);
     return true;
 }
@@ -1337,20 +1430,46 @@ static float multicol_slice_text_box_trim_flow_height(
 
     int line_count = 0;
     float line_advance = 0.0f;
-    if (!multicol_inline_line_metrics(child, &line_count, &line_advance)) {
+    float visual_height = 0.0f;
+    if (!multicol_inline_line_metrics(child, &line_count, &line_advance, &visual_height)) {
         return item_height;
     }
 
-    int lines_per_fragment = (int)floorf((fragment_height + 0.5f) / line_advance); // INT_CAST_OK: line slot count from positive fragment height
-    if (lines_per_fragment < 1) lines_per_fragment = 1;
-    int fragment_count = (line_count + lines_per_fragment - 1) / lines_per_fragment;
+    bool slice_start_trim = multicol_uses_slice_start_trim(child);
+    float normal_line_offset = multicol_normal_line_offset(line_advance, visual_height);
+    float first_fragment_line_offset = 0.0f;
+    float continuation_line_offset = 0.0f;
+    int first_fragment_lines = 0;
+    int continuation_fragment_lines = 0;
+    if (slice_start_trim) {
+        first_fragment_line_offset = normal_line_offset - child->blk->text_box_trim_start_amount;
+        if (first_fragment_line_offset < 0.0f) first_fragment_line_offset = 0.0f;
+        continuation_line_offset = normal_line_offset;
+        first_fragment_lines = multicol_lines_that_fit_fragment(
+            fragment_height, line_advance, visual_height, first_fragment_line_offset);
+        continuation_fragment_lines = multicol_lines_that_fit_fragment(
+            fragment_height, line_advance, visual_height, continuation_line_offset);
+    } else {
+        first_fragment_lines = (int)floorf((fragment_height + 0.5f) / line_advance); // INT_CAST_OK: line slot count from positive fragment height
+        if (first_fragment_lines < 1) first_fragment_lines = 1;
+        continuation_fragment_lines = first_fragment_lines;
+    }
+
+    int last_fragment_index = 0;
+    int last_line_slot = 0;
+    multicol_map_line_to_fragment(line_count - 1,
+        first_fragment_lines, continuation_fragment_lines,
+        &last_fragment_index, &last_line_slot);
+
+    int fragment_count = last_fragment_index + 1;
     if (fragment_count <= 1) return item_height;
 
-    int last_fragment_lines = line_count % lines_per_fragment;
-    if (last_fragment_lines == 0) last_fragment_lines = lines_per_fragment;
+    int last_fragment_lines = last_line_slot + 1;
+    float last_fragment_line_offset = slice_start_trim && last_fragment_index > 0 ?
+        continuation_line_offset : first_fragment_line_offset;
 
     float flow_height = (fragment_count - 1) * fragment_height +
-        last_fragment_lines * line_advance;
+        last_fragment_line_offset + last_fragment_lines * line_advance;
     if (child->blk->text_box_trim_applied & TEXT_BOX_TRIM_END) {
         flow_height -= child->blk->text_box_trim_end_amount;
     }
@@ -1360,8 +1479,8 @@ static float multicol_slice_text_box_trim_flow_height(
     if (margin_extra > 0.0f) flow_height += margin_extra;
     if (flow_height < item_height) return item_height;
 
-    log_debug("[MULTICOL] slice text-box-trim flow: item=%.1f lines=%d per_fragment=%d flow=%.1f",
-              item_height, line_count, lines_per_fragment, flow_height);
+    log_debug("[MULTICOL] slice text-box-trim flow: item=%.1f lines=%d per_fragment=%d/%d flow=%.1f",
+              item_height, line_count, first_fragment_lines, continuation_fragment_lines, flow_height);
     return flow_height;
 }
 
