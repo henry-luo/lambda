@@ -1270,8 +1270,17 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 continue;
             }
             float item_height = rect->height;
-            // for text, baseline is at font.ascender
-            float item_baseline = text_view->font ? text_view->font->ascender : item_height;
+            // for text, baseline is at the font content-area ascender, not the
+            // normal line-height split stored on FontProp.
+            float item_baseline = item_height;
+            if (text_view->font && text_view->font->font_handle) {
+                float content_asc = 0.0f, content_desc = 0.0f;
+                font_get_content_area_split(text_view->font->font_handle,
+                                            &content_asc, &content_desc);
+                if (content_asc > 0.0f) item_baseline = content_asc;
+            } else if (text_view->font && text_view->font->ascender > 0.0f) {
+                item_baseline = text_view->font->ascender;
+            }
             float vertical_offset = calculate_vertical_align_offset(lycon, lycon->line.vertical_align, item_height,
                 line_height, baseline_pos, item_baseline, lycon->line.vertical_align_offset);
             const unsigned char* td = text_view->text_data();

@@ -2027,12 +2027,27 @@ void line_break(LayoutContext* lycon) {
     // CSS Inline 3 §5: Track first/last line box metrics for text-box-trim.
     // max_ascender/max_descender capture the full line box extent including
     // contributions from tall inline descendants (e.g., font-size: 200% spans).
-    if (lycon->block.first_line_max_ascender == 0 && lycon->block.first_line_max_descender == 0) {
-        lycon->block.first_line_max_ascender = lycon->line.max_ascender;
-        lycon->block.first_line_max_descender = lycon->line.max_descender;
+    // For uniform explicit-line-height text, used_line_height is the actual line
+    // box height even when independently-rounded extrema add up larger than it.
+    float trim_max_ascender = lycon->line.max_ascender;
+    float trim_max_descender = lycon->line.max_descender;
+    if (used_line_height > 0.0f &&
+        trim_max_ascender + trim_max_descender > used_line_height &&
+        !lycon->block.line_height_is_normal &&
+        !lycon->line.has_replaced_content) {
+        if (trim_max_ascender < used_line_height) {
+            trim_max_descender = used_line_height - trim_max_ascender;
+        } else {
+            trim_max_ascender = used_line_height;
+            trim_max_descender = 0.0f;
+        }
     }
-    lycon->block.last_line_max_ascender = lycon->line.max_ascender;
-    lycon->block.last_line_max_descender = lycon->line.max_descender;
+    if (lycon->block.first_line_max_ascender == 0 && lycon->block.first_line_max_descender == 0) {
+        lycon->block.first_line_max_ascender = trim_max_ascender;
+        lycon->block.first_line_max_descender = trim_max_descender;
+    }
+    lycon->block.last_line_max_ascender = trim_max_ascender;
+    lycon->block.last_line_max_descender = trim_max_descender;
 
     // reset the new line
     line_reset(lycon);
@@ -2352,16 +2367,8 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     if (lycon->block.line_height_is_normal && lycon->font.font_handle) {
         font_get_normal_lh_split(lycon->font.font_handle, &ascender, &descender);
     } else {
-        TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
-        if (typo.valid && typo.use_typo_metrics) {
-            ascender = typo.ascender;
-            descender = typo.descender;
-        } else if (lycon->font.font_handle) {
-            const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
-            if (m) {
-                ascender = m->hhea_ascender;
-                descender = -(m->hhea_descender);
-            }
+        if (lycon->font.font_handle) {
+            font_get_content_area_split(lycon->font.font_handle, &ascender, &descender);
         }
     }
     if (ascender > 0 || descender > 0) {
@@ -2702,8 +2709,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         rect->width = soft_hyphen_leading_width;
         soft_hyphen_leading_width = 0.0f;
     }
-    const FontMetrics* _fm = font_get_metrics(lycon->font.font_handle);
-    float font_height = _fm ? _fm->hhea_line_height : 16.0f;
+    float font_height = font_get_cell_height(lycon->font.font_handle);
+    if (font_height <= 0.0f) font_height = 16.0f;
     rect->x = lycon->line.advance_x;
     // browser text rect height uses font metrics (ascent+descent), NOT CSS line-height
     // CSS line-height affects line spacing/positioning, but text rect height is font-based

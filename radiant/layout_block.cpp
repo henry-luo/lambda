@@ -1498,16 +1498,8 @@ static float compute_collapsible_bottom_margin(ViewBlock* block) {
 static float compute_block_lead_y(ViewBlock* block) {
     if (!block->font || !block->font->font_handle) return 0;
 
-    // Get ascender/descender, preferring OS/2 typo metrics when USE_TYPO_METRICS is set
     float ascender, descender;
-    TypoMetrics typo = get_os2_typo_metrics(block->font->font_handle);
-    if (typo.valid && typo.use_typo_metrics) {
-        ascender = typo.ascender;
-        descender = typo.descender;
-    } else {
-        ascender = block->font->ascender;
-        descender = block->font->descender;
-    }
+    font_get_content_area_split(block->font->font_handle, &ascender, &descender);
 
     // Resolve line-height: walk up parent chain to find inherited value
     float line_height;
@@ -1558,6 +1550,14 @@ static bool is_out_of_flow_block(ViewBlock* vb) {
     return false;
 }
 
+static bool is_inline_level_atomic_block(View* child, ViewBlock* block) {
+    if (!child || !block) return false;
+    if (child->view_type == RDT_VIEW_INLINE_BLOCK) return true;
+    return child->view_type == RDT_VIEW_TABLE &&
+        (block->display.outer == CSS_VALUE_INLINE ||
+         block->display.outer == CSS_VALUE_INLINE_BLOCK);
+}
+
 // Find the first in-flow block child inside an inline wrapper (block-in-inline).
 // In Radiant, a <span> containing a <div> remains as RDT_VIEW_INLINE with a
 // block child, rather than being split into anonymous blocks per CSS 2.1 §9.2.1.1.
@@ -1569,7 +1569,9 @@ static ViewBlock* find_first_block_in_inline(View* inline_view) {
     while (child) {
         if (child->is_block()) {
             ViewBlock* vb = lam::view_require_block(child);
-            if (!is_out_of_flow_block(vb)) return vb;
+            if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
+                return vb;
+            }
         }
         child = child->next();
     }
@@ -1585,7 +1587,9 @@ static ViewBlock* find_last_block_in_inline(View* inline_view) {
     while (child) {
         if (child->is_block()) {
             ViewBlock* vb = lam::view_require_block(child);
-            if (!is_out_of_flow_block(vb)) last = vb;
+            if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
+                last = vb;
+            }
         }
         child = child->next();
     }
@@ -1600,6 +1604,7 @@ static bool has_any_inline_before_first_block(ViewBlock* container) {
     while (child) {
         if (child->is_block()) {
             ViewBlock* vb = lam::view_require_block(child);
+            if (is_inline_level_atomic_block(child, vb)) return true;
             if (!is_out_of_flow_block(vb)) {
                 return false; // hit first in-flow block without finding inline content
             }
@@ -1629,7 +1634,7 @@ static bool has_any_inline_after_last_block(ViewBlock* container) {
     while (child) {
         if (child->is_block()) {
             ViewBlock* vb = lam::view_require_block(child);
-            if (!is_out_of_flow_block(vb)) {
+            if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
                 last_block = child;
             }
         } else if (child->view_type == RDT_VIEW_INLINE && find_first_block_in_inline(child)) {
@@ -1642,6 +1647,10 @@ static bool has_any_inline_after_last_block(ViewBlock* container) {
 
     child = last_block->next();
     while (child) {
+        if (child->is_block()) {
+            ViewBlock* vb = lam::view_require_block(child);
+            if (is_inline_level_atomic_block(child, vb)) return true;
+        }
         if (child->view_type == RDT_VIEW_TEXT) {
             return true;
         }
@@ -1661,6 +1670,9 @@ static bool has_inline_content_before_first_block(ViewBlock* container) {
     while (child) {
         if (child->is_block()) {
             ViewBlock* vb = lam::view_require_block(child);
+            if (is_inline_level_atomic_block(child, vb)) {
+                return child->width > 0 || child->height > 0;
+            }
             if (!is_out_of_flow_block(vb)) {
                 return false;
             }
@@ -1697,6 +1709,13 @@ static bool has_inline_content_after_last_block(ViewBlock* container) {
 
     child = last_block->next();
     while (child) {
+        if (child->is_block()) {
+            ViewBlock* vb = lam::view_require_block(child);
+            if (is_inline_level_atomic_block(child, vb) &&
+                (child->width > 0 || child->height > 0)) {
+                return true;
+            }
+        }
         if (child->view_type == RDT_VIEW_TEXT && child->width > 0) return true;
         if (child->view_type == RDT_VIEW_INLINE && !find_first_block_in_inline(child) &&
             (child->width > 0 || child->height > 0)) return true;
@@ -1717,7 +1736,7 @@ static ViewBlock* find_first_formatted_line_block(ViewBlock* container) {
     while (child) {
         if (child->is_block()) {
             ViewBlock* vb = lam::view_require_block(child);
-            if (!is_out_of_flow_block(vb)) {
+            if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
                 has_block_child = true;
                 break;
             }
@@ -1734,6 +1753,10 @@ static ViewBlock* find_first_formatted_line_block(ViewBlock* container) {
         while (child) {
             if (child->view_type == RDT_VIEW_TEXT || child->view_type == RDT_VIEW_INLINE) {
                 return container;
+            }
+            if (child->is_block()) {
+                ViewBlock* vb = lam::view_require_block(child);
+                if (is_inline_level_atomic_block(child, vb)) return container;
             }
             child = child->next();
         }
@@ -1768,6 +1791,10 @@ static ViewBlock* find_first_formatted_line_block(ViewBlock* container) {
                 child = child->next();
                 continue;
             }
+            if (is_inline_level_atomic_block(child, vb)) {
+                child = child->next();
+                continue;
+            }
             return find_first_formatted_line_block(vb);
         }
         ViewBlock* bii = find_first_block_in_inline(child);
@@ -1788,7 +1815,7 @@ static ViewBlock* find_last_formatted_line_block(ViewBlock* container) {
     while (child) {
         if (child->is_block()) {
             ViewBlock* vb = lam::view_require_block(child);
-            if (!is_out_of_flow_block(vb)) {
+            if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
                 has_block_child = true;
                 break;
             }
@@ -1805,6 +1832,10 @@ static ViewBlock* find_last_formatted_line_block(ViewBlock* container) {
         while (child) {
             if (child->view_type == RDT_VIEW_TEXT || child->view_type == RDT_VIEW_INLINE) {
                 return container;
+            }
+            if (child->is_block()) {
+                ViewBlock* vb = lam::view_require_block(child);
+                if (is_inline_level_atomic_block(child, vb)) return container;
             }
             child = child->next();
         }
@@ -1829,7 +1860,7 @@ static ViewBlock* find_last_formatted_line_block(ViewBlock* container) {
     while (child) {
         if (child->is_block()) {
             ViewBlock* vb = lam::view_require_block(child);
-            if (!is_out_of_flow_block(vb)) {
+            if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
                 last_in_flow = child;
                 last_is_in_inline = false;
             }
@@ -1877,20 +1908,13 @@ static void get_text_box_edge(ViewBlock* block, CssEnum* over_edge, CssEnum* und
 }
 
 // Compute the over-edge (block-start) trim amount based on text-box-edge and font.
-// Get block container font ascender/descender, matching compute_block_lead_y logic.
+// Get block container content-area ascender/descender, matching compute_block_lead_y logic.
 static void get_block_font_metrics(ViewBlock* block, float* ascender, float* descender) {
     if (!block->font || !block->font->font_handle) {
         *ascender = *descender = 0;
         return;
     }
-    TypoMetrics typo = get_os2_typo_metrics(block->font->font_handle);
-    if (typo.valid && typo.use_typo_metrics) {
-        *ascender = typo.ascender;
-        *descender = typo.descender;
-    } else {
-        *ascender = block->font->ascender;
-        *descender = block->font->descender;
-    }
+    font_get_content_area_split(block->font->font_handle, ascender, descender);
 }
 
 // Compute the over-edge (block-start) trim based on text-box-edge and font.
@@ -2034,6 +2058,13 @@ static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, 
             }
             if (!skip) {
                 child->y -= trim;
+                if (child->is_block()) {
+                    ViewBlock* vb = lam::view_require_block(child);
+                    if (is_inline_level_atomic_block(child, vb)) {
+                        child = child->next();
+                        continue;
+                    }
+                }
                 // Block-in-inline: block children inside inline wrappers have y
                 // relative to the containing block, not relative to the inline
                 // wrapper. Shifting the inline wrapper doesn't move them, so
@@ -2072,6 +2103,14 @@ static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, 
         if (child->is_block()) {
             ViewBlock* vb = lam::view_require_block(child);
             if (is_out_of_flow_block(vb)) {
+                child = child->next();
+                continue;
+            }
+            if (is_inline_level_atomic_block(child, vb)) {
+                if (found_first) {
+                    child->y -= trim;
+                    shift_text_rects_y(child, -trim);
+                }
                 child = child->next();
                 continue;
             }
@@ -2169,7 +2208,7 @@ static void apply_end_trim_recursive(ViewBlock* container, ViewBlock* target, fl
     while (child) {
         if (child->is_block()) {
             ViewBlock* vb = lam::view_require_block(child);
-            if (!is_out_of_flow_block(vb)) {
+            if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
                 last_in_flow = vb;
                 last_inline_wrapper = nullptr;
             }
@@ -2205,7 +2244,7 @@ static bool has_start_padding_or_border_between(ViewBlock* container, ViewBlock*
         while (child) {
             if (child->is_block()) {
                 ViewBlock* vb = lam::view_require_block(child);
-                if (!is_out_of_flow_block(vb)) {
+                if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
                     next_block = vb;
                     break;
                 }
@@ -2240,7 +2279,7 @@ static bool has_end_padding_or_border_between(ViewBlock* container, ViewBlock* t
         while (child) {
             if (child->is_block()) {
                 ViewBlock* vb = lam::view_require_block(child);
-                if (!is_out_of_flow_block(vb)) {
+                if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
                     last_block = vb;
                 }
             } else {
@@ -2345,11 +2384,7 @@ static bool inline_span_has_in_flow_block_child_for_recompute(ViewSpan* span) {
 }
 
 static bool block_recompute_view_is_inline_level_atomic(View* child, ViewBlock* block) {
-    if (!child || !block) return false;
-    if (child->view_type == RDT_VIEW_INLINE_BLOCK) return true;
-    return child->view_type == RDT_VIEW_TABLE &&
-        (block->display.outer == CSS_VALUE_INLINE ||
-         block->display.outer == CSS_VALUE_INLINE_BLOCK);
+    return is_inline_level_atomic_block(child, block);
 }
 
 static bool inline_span_has_inline_level_atomic_child_for_recompute(ViewSpan* span) {
@@ -4618,19 +4653,11 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
             lycon->block.init_descender = split_desc;
             log_debug("init_metrics (normal, split): asc=%f, desc=%f", split_asc, split_desc);
         } else {
-            TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
-            if (typo.valid && typo.use_typo_metrics) {
-                lycon->block.init_ascender = typo.ascender;
-                lycon->block.init_descender = typo.descender;
-                log_debug("init_metrics (typo): asc=%f, desc=%f", typo.ascender, typo.descender);
-            } else {
-                const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
-                if (m) {
-                    lycon->block.init_ascender = m->hhea_ascender;
-                    lycon->block.init_descender = -(m->hhea_descender);
-                    log_debug("init_metrics (hhea): asc=%f, desc=%f", m->hhea_ascender, -(m->hhea_descender));
-                }
-            }
+            font_get_content_area_split(lycon->font.font_handle,
+                                        &lycon->block.init_ascender,
+                                        &lycon->block.init_descender);
+            log_debug("init_metrics (content area): asc=%f, desc=%f",
+                      lycon->block.init_ascender, lycon->block.init_descender);
         }
     }
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);

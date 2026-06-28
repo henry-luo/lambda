@@ -262,17 +262,7 @@ static void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewS
     if (lycon->block.line_height_is_normal) {
         font_get_normal_lh_split(lycon->font.font_handle, &ascender, &descender);
     } else {
-        TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
-        if (typo.valid && typo.use_typo_metrics) {
-            ascender = typo.ascender;
-            descender = typo.descender;
-        } else {
-            const FontMetrics* metrics = font_get_metrics(lycon->font.font_handle);
-            if (metrics) {
-                ascender = metrics->hhea_ascender;
-                descender = -(metrics->hhea_descender);
-            }
-        }
+        font_get_content_area_split(lycon->font.font_handle, &ascender, &descender);
         float content_height = ascender + descender;
         float half_leading = (lycon->block.line_height - content_height) / 2.0f;
         ascender += half_leading;

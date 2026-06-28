@@ -500,6 +500,34 @@ float font_get_cell_height(FontHandle* handle) {
     return 0;
 }
 
+void font_get_content_area_split(FontHandle* handle, float* out_ascender, float* out_descender) {
+    if (out_ascender) *out_ascender = 0;
+    if (out_descender) *out_descender = 0;
+    if (!handle) return;
+
+    float cell_height = font_get_cell_height(handle);
+    float ascender = font_get_rendering_ascender(handle);
+
+    if (cell_height <= 0.0f || ascender <= 0.0f) {
+        const FontMetrics* m = font_get_metrics(handle);
+        if (!m) return;
+        if (m->use_typo_metrics && (m->typo_ascender > 0.0f || m->typo_descender > 0.0f)) {
+            ascender = m->typo_ascender;
+            cell_height = m->typo_ascender + m->typo_descender;
+        } else {
+            ascender = m->hhea_ascender;
+            cell_height = m->hhea_ascender - m->hhea_descender;
+        }
+    }
+
+    if (ascender > cell_height) ascender = cell_height;
+    float descender = cell_height - ascender;
+    if (descender < 0.0f) descender = 0.0f;
+
+    if (out_ascender) *out_ascender = ascender;
+    if (out_descender) *out_descender = descender;
+}
+
 /**
  * Get the raw content-area ascender for rendering glyph baseline positioning.
  *

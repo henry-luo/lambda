@@ -311,6 +311,11 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
 // For all other fonts, returns the font metrics cell height (ascent + descent).
 float font_get_cell_height(FontHandle* handle);
 
+// Get the font content-area split used by explicit line-height inline boxes.
+// The returned values are positive distances above/below the alphabetic baseline
+// and sum to font_get_cell_height() when metrics are available.
+void font_get_content_area_split(FontHandle* handle, float* out_ascender, float* out_descender);
+
 // Get the raw content-area ascender for rendering glyph baseline positioning.
 // On macOS, returns CoreText ascent (matching the CT rasterizer's coordinate system).
 // Fallback: hhea_ascender. Returns value in CSS pixels (positive).
