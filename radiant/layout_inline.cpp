@@ -1193,9 +1193,14 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         br_view->y = lycon->block.advance_y + (br_line_height - br_font_height) / 2.0f;
         // CSS Text 3 §7.2: text-align-last applies to lines immediately before
         // a forced line break. <br> is a forced break per CSS Text 3 §4.1.
+        bool was_line_clamped = lycon->block.line_clamped;
         lycon->line.is_last_line = true;
         line_break(lycon);
         lycon->line.is_last_line = false;
+        if (!was_line_clamped && lycon->block.line_clamped && lycon->font.font_handle) {
+            GlyphInfo ellipsis = font_get_glyph(lycon->font.font_handle, 0x2026); // U+2026
+            br_view->width = ellipsis.id != 0 ? ellipsis.advance_x : lycon->font.current_font_size * 0.5f;
+        }
 
         // CSS 2.1 §9.5.2: check if the <br> has a 'clear' property and apply float clearance.
         // Browsers treat <br style="clear:both"> as clearing floats at the line break point.

@@ -1574,6 +1574,10 @@ static ViewBlock* find_first_block_in_inline(View* inline_view) {
                 return vb;
             }
         }
+        if (child->view_type == RDT_VIEW_INLINE) {
+            ViewBlock* nested = find_first_block_in_inline(child);
+            if (nested) return nested;
+        }
         child = child->next();
     }
     return nullptr;
@@ -1592,9 +1596,32 @@ static ViewBlock* find_last_block_in_inline(View* inline_view) {
                 last = vb;
             }
         }
+        if (child->view_type == RDT_VIEW_INLINE) {
+            ViewBlock* nested = find_last_block_in_inline(child);
+            if (nested) last = nested;
+        }
         child = child->next();
     }
     return last;
+}
+
+static bool shrink_inline_wrappers_containing_block(View* inline_view, ViewBlock* target, float trim) {
+    if (!inline_view || inline_view->view_type != RDT_VIEW_INLINE || !target) return false;
+    ViewElement* span = lam::view_require_element(inline_view);
+    View* child = span->first_placed_child();
+    while (child) {
+        if (child->is_block() && lam::view_require_block(child) == target) {
+            inline_view->height -= trim;
+            return true;
+        }
+        if (child->view_type == RDT_VIEW_INLINE &&
+            shrink_inline_wrappers_containing_block(child, target, trim)) {
+            inline_view->height -= trim;
+            return true;
+        }
+        child = child->next();
+    }
+    return false;
 }
 
 // Check whether any inline/text views exist before the first in-flow block child.
@@ -2175,8 +2202,7 @@ static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, 
             ViewBlock* bii = find_first_block_in_inline(child);
             if (bii) {
                 found_first = true;
-                // Reduce the inline wrapper's height
-                child->height -= trim;
+                shrink_inline_wrappers_containing_block(child, bii, trim);
                 // Reduce the block inside the inline
                 bii->height -= trim;
                 bii->content_height -= trim;
@@ -2268,8 +2294,7 @@ static void apply_end_trim_recursive(ViewBlock* container, ViewBlock* target, fl
     }
     if (last_in_flow) {
         if (last_inline_wrapper) {
-            // Reduce the inline wrapper's height too
-            last_inline_wrapper->height -= trim;
+            shrink_inline_wrappers_containing_block(last_inline_wrapper, last_in_flow, trim);
         }
         last_in_flow->height -= trim;
         last_in_flow->content_height -= trim;
