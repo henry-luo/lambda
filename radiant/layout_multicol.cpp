@@ -1846,6 +1846,184 @@ static float multicol_group_target_height(ViewBlock* block, float balanced_heigh
     return balanced_height;
 }
 
+static float multicol_project_mixed_direct_inline_content(
+    ViewBlock* block,
+    int column_count,
+    float column_width,
+    float column_gap,
+    float target_height
+) {
+    if (!block || column_count <= 0 || column_width <= 0.0f || target_height <= 0.0f) {
+        return 0.0f;
+    }
+
+    View* direct_child = block->first_placed_child();
+    while (direct_child) {
+        if (ViewBlock* direct_block = lam::view_as_block(direct_child)) {
+            if (multicol_is_spanner_block(direct_block)) {
+                return 0.0f;
+            }
+        }
+        direct_child = direct_child->next();
+    }
+
+    struct DirectInlineLine {
+        TextRect* rect;
+        float original_x;
+        float original_y;
+        float new_y;
+        float line_height;
+        int fragment_index;
+    };
+
+    struct DirectInlineBreak {
+        View* view;
+        float original_x;
+        float original_y;
+        int line_index;
+    };
+
+    constexpr int MAX_DIRECT_INLINE_LINES = 512;
+    DirectInlineLine lines[MAX_DIRECT_INLINE_LINES];
+    DirectInlineBreak breaks[MAX_DIRECT_INLINE_LINES];
+    int line_count = 0;
+    int break_count = 0;
+
+    View* child = block->first_child;
+    while (child) {
+        if (child->node_type == DOM_NODE_TEXT) {
+            DomText* tnode = lam::dom_require<DOM_NODE_TEXT>(child);
+            TextRect* rect = tnode->rect;
+            while (rect && line_count < MAX_DIRECT_INLINE_LINES) {
+                lines[line_count].rect = rect;
+                lines[line_count].original_x = rect->x;
+                lines[line_count].original_y = rect->y;
+                lines[line_count].new_y = rect->y;
+                lines[line_count].line_height = rect->height;
+                lines[line_count].fragment_index = 0;
+                line_count++;
+                rect = rect->next;
+            }
+        } else if (child->view_type == RDT_VIEW_BR && break_count < MAX_DIRECT_INLINE_LINES) {
+            breaks[break_count].view = child;
+            breaks[break_count].original_x = child->x;
+            breaks[break_count].original_y = child->y;
+            breaks[break_count].line_index = -1;
+            break_count++;
+        }
+        child = child->next_sibling;
+    }
+
+    if (line_count == 0) return 0.0f;
+
+    float line_advance = -1.0f;
+    for (int i = 1; i < line_count; i++) {
+        float delta = fabsf(lines[i].original_y - lines[i - 1].original_y);
+        if (delta > 1.0f && (line_advance < 0.0f || delta < line_advance)) {
+            line_advance = delta;
+        }
+    }
+    float visual_height = lines[0].line_height > 0.0f ? lines[0].line_height : 0.0f;
+    if (line_advance <= 0.0f) line_advance = visual_height > 0.0f ? visual_height : 16.0f;
+    if (visual_height <= 0.0f) visual_height = line_advance;
+
+    float normal_line_offset = multicol_normal_line_offset(line_advance, visual_height);
+    float first_line_box_y = lines[0].original_y - block->y - normal_line_offset;
+    if (first_line_box_y < 0.0f && first_line_box_y > -normal_line_offset - 0.5f) {
+        first_line_box_y = 0.0f;
+    }
+
+    int start_fragment = (int)floorf(first_line_box_y / target_height); // INT_CAST_OK: fragment index from positive flow offset
+    if (start_fragment < 0) start_fragment = 0;
+    float start_offset = first_line_box_y - start_fragment * target_height;
+    if (start_offset < 0.0f) start_offset = 0.0f;
+
+    int orphans = block->blk && block->blk->orphans > 0 ? block->blk->orphans : 2;
+    int widows = block->blk && block->blk->widows > 0 ? block->blk->widows : 2;
+    int first_fragment_fit = multicol_lines_that_fit_fragment(
+        target_height - start_offset, line_advance, visual_height, normal_line_offset);
+    bool broke_before_run = false;
+    if (start_offset > 0.0f && line_count >= orphans && first_fragment_fit < orphans) {
+        start_fragment++;
+        start_offset = 0.0f;
+        broke_before_run = true;
+    }
+
+    int current_fragment = start_fragment;
+    float fragment_start_offset = start_offset;
+    int line_slot = 0;
+    float max_used_height = 0.0f;
+    float pitch = column_width + column_gap;
+
+    for (int li = 0; li < line_count; li++) {
+        float line_offset = fragment_start_offset > 0.0f ? normal_line_offset : 0.0f;
+        float visual_bottom = fragment_start_offset + line_slot * line_advance +
+            line_offset + visual_height;
+        bool should_break = line_slot > 0 && visual_bottom > target_height + 0.5f;
+        if (!should_break && widows > 1 && li + 1 < line_count) {
+            int remaining_after_this = line_count - (li + 1);
+            int remaining_with_this = line_count - li;
+            if (remaining_after_this > 0 &&
+                remaining_after_this < widows &&
+                remaining_with_this >= widows &&
+                line_slot + 1 >= orphans) {
+                float next_bottom = fragment_start_offset + (line_slot + 1) * line_advance +
+                    line_offset + visual_height;
+                should_break = next_bottom > target_height + 0.5f;
+            }
+        }
+
+        if (should_break) {
+            current_fragment++;
+            fragment_start_offset = 0.0f;
+            line_slot = 0;
+            line_offset = 0.0f;
+        }
+
+        int column_index = current_fragment % column_count;
+        int row_index = current_fragment / column_count;
+        float row_y = row_index * target_height;
+        float new_y = block->y + row_y + fragment_start_offset +
+            line_slot * line_advance + line_offset;
+        lines[li].rect->x = lines[li].original_x + column_index * pitch;
+        lines[li].rect->y = new_y;
+        lines[li].new_y = new_y;
+        lines[li].fragment_index = current_fragment;
+
+        float used_height = row_y + fragment_start_offset + line_slot * line_advance +
+            line_offset + visual_height;
+        if (used_height > max_used_height) max_used_height = used_height;
+        line_slot++;
+    }
+
+    for (int bi = 0; bi < break_count; bi++) {
+        int matched_line = -1;
+        for (int li = 0; li < line_count; li++) {
+            if (fabsf(breaks[bi].original_y - lines[li].original_y) <= 1.0f) {
+                matched_line = li;
+                break;
+            }
+        }
+        if (matched_line < 0 && bi < line_count) matched_line = bi;
+        if (matched_line < 0) continue;
+
+        DirectInlineLine& line = lines[matched_line];
+        int column_index = line.fragment_index % column_count;
+        if (broke_before_run || line.fragment_index == start_fragment) {
+            breaks[bi].view->x = breaks[bi].original_x + column_index * pitch;
+            breaks[bi].view->y = line.new_y;
+        } else {
+            breaks[bi].view->x = breaks[bi].original_x;
+            breaks[bi].view->y = breaks[bi].original_y - first_line_box_y;
+        }
+    }
+
+    log_debug("[MULTICOL] Projected mixed direct inline run: lines=%d start_offset=%.1f fragments=%d max_used=%.1f",
+              line_count, first_line_box_y, lines[line_count - 1].fragment_index - start_fragment + 1,
+              max_used_height);
+    return max_used_height;
+}
+
 static int multicol_simulate_column_count(
     float* item_heights,
     bool* break_before,
@@ -2665,6 +2843,14 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         }
         max_column_height += group.group_used_height;
         prev_margin_bottom = 0;  // column group doesn't have trailing margin
+    }
+
+    float mixed_inline_target = multicol_group_target_height(
+        block, ceilf(total_content_height / column_count), total_content_height);
+    float mixed_inline_height = multicol_project_mixed_direct_inline_content(
+        block, column_count, column_width, gap, mixed_inline_target);
+    if (mixed_inline_height > max_column_height) {
+        max_column_height = mixed_inline_height;
     }
 
     // Calculate total height including padding
