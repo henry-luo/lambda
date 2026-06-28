@@ -1952,7 +1952,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         }
 
         // BFC height expansion: if floats extend beyond flow content, expand height
-        if (max_float_bottom > block->height) {
+        bool has_text_box_trim = block->blk && block->blk->text_box_trim;
+        if (!has_text_box_trim && max_float_bottom > block->height) {
             log_debug("[ABS BFC] Expanding height from %.1f to %.1f to contain floats",
                       block->height, max_float_bottom);
             block->height = max_float_bottom;

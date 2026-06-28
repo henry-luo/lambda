@@ -2145,9 +2145,16 @@ static void apply_end_trim_recursive(ViewBlock* container, ViewBlock* target, fl
         if (last_visible_bottom > 0) {
             child = container->first_placed_child();
             while (child) {
-                if (child->y >= last_visible_bottom && child->view_type != RDT_VIEW_TEXT
-                    && child->view_type != RDT_VIEW_BR && !child->is_block()) {
-                    child->y -= trim;
+                if (child->y >= last_visible_bottom) {
+                    if (child->is_block()) {
+                        ViewBlock* vb = lam::view_require_block(child);
+                        if (element_has_float(vb)) {
+                            child->y -= trim;
+                        }
+                    } else if (child->view_type != RDT_VIEW_TEXT &&
+                        child->view_type != RDT_VIEW_BR) {
+                        child->y -= trim;
+                    }
                 }
                 child = child->next();
             }
@@ -2971,7 +2978,9 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     // CSS 2.1 §10.6.7: For BFC roots with AUTO height, floating descendants
     // are included in height computation. When height is explicitly specified
     // (given_height >= 0), the explicit height is used and floats may overflow.
-    if (lycon->block.establishing_element == block && block_given_height < 0) {
+    bool has_text_box_trim = block->blk && block->blk->text_box_trim;
+    if (lycon->block.establishing_element == block && block_given_height < 0 &&
+        !has_text_box_trim) {
         float max_float_bottom = 0;
         // Check all floats in this BFC
         for (FloatBox* fb = lycon->block.left_floats; fb; fb = fb->next) {

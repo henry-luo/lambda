@@ -63,18 +63,29 @@ static DomElement* layout_positioned_containing_block(DomElement* elem) {
 static float layout_scroll_document_coord(DomElement* elem, bool x_axis) {
     if (!elem) return 0.0f;
     float value = x_axis ? elem->x : elem->y;
+
+    if (elem->position && elem->position->position == CSS_VALUE_FIXED) {
+        return value;
+    }
     if (elem->position && elem->position->position == CSS_VALUE_ABSOLUTE) {
         DomElement* containing_block = layout_positioned_containing_block(elem);
         if (containing_block) {
             value += x_axis ? containing_block->x : containing_block->y;
         }
+        return value;
+    }
+
+    for (DomNode* cur = elem->parent; cur; cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* ancestor = cur->as_element();
+        value += x_axis ? ancestor->x : ancestor->y;
     }
     return value;
 }
 
 static float layout_scrollport_start(DomElement* elem, bool x_axis) {
     if (!elem) return 0.0f;
-    float value = x_axis ? elem->x : elem->y;
+    float value = layout_scroll_document_coord(elem, x_axis);
     if (elem->bound && elem->bound->border) {
         value += x_axis ? elem->bound->border->width.left
                         : elem->bound->border->width.top;
