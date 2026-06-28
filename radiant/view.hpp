@@ -1097,6 +1097,12 @@ typedef struct BlockProp {
     float bfc_float_avoidance_shift_y;
     CssEnum text_overflow;  // CSS_VALUE_CLIP (default 0) | CSS_VALUE_ELLIPSIS
     int line_clamp;         // -webkit-line-clamp: max visible lines (0 = no clamp)
+    bool line_clamp_inherited; // transient: this block is consuming an ancestor clamp
+    bool line_clamped;      // transient: layout hit this block's active line clamp
+    float line_clamp_advance_y; // transient: content advance at clamp boundary
+    float line_clamp_last_line_ascender;
+    float line_clamp_last_line_max_ascender;
+    float line_clamp_last_line_max_descender;
 } BlockProp;
 
 typedef struct FontBox {

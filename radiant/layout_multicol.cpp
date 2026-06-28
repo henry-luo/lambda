@@ -48,12 +48,14 @@ bool is_multicol_container(ViewBlock* block) {
 void calculate_multicol_dimensions(
     MultiColumnProp* multicol,
     float available_width,
+    float normal_gap_size,
     int* out_column_count,
     float* out_column_width,
     float* out_gap
 ) {
-    // Default gap is 1em (using 16px as typical default)
-    float gap = multicol->column_gap_is_normal ? 16.0f : multicol->column_gap;
+    // CSS Multi-column §3.4: normal column-gap computes to 1em.
+    if (normal_gap_size <= 0.0f) normal_gap_size = 16.0f;
+    float gap = multicol->column_gap_is_normal ? normal_gap_size : multicol->column_gap;
     if (gap < 0) gap = 0;
 
     int column_count = multicol->column_count;  // 0 = auto
@@ -176,6 +178,10 @@ static void multicol_cursor_place_block(
     float group_y
 );
 static void multicol_cursor_advance_block(FragmentedFlowCursor* cursor, float block_height);
+static void multicol_cursor_advance_fragmented_block(
+    FragmentedFlowCursor* cursor,
+    float flow_height
+);
 static void multicol_group_finish(ColumnGroup* group, FragmentedFlowCursor* cursor);
 static float multicol_balanced_target_search(
     ViewBlock* block,
@@ -244,6 +250,13 @@ static float multicol_row_gap(ViewBlock* block) {
     if (block->embed->grid) return block->embed->grid->row_gap;
     if (block->embed->flex) return block->embed->flex->row_gap;
     return 0;
+}
+
+static float multicol_normal_gap_size(ViewBlock* block) {
+    if (block && block->font && block->font->font_size > 0.0f) {
+        return block->font->font_size;
+    }
+    return 16.0f;
 }
 
 static bool multicol_is_out_of_flow(ViewBlock* block) {
@@ -845,6 +858,7 @@ static bool multicol_project_fragmented_inline_descendants(
     float inner_column_gap = 0;
     if (child->multicol && is_multicol_container(child)) {
         calculate_multicol_dimensions(child->multicol, parent_column_width,
+            multicol_normal_gap_size(child),
             &inner_column_count, &inner_column_width, &inner_column_gap);
         if (inner_column_count < 1) inner_column_count = 1;
     }
@@ -917,6 +931,7 @@ static void multicol_project_fragmented_descendants(
     float inner_column_gap = 0;
     if (child_is_multicol) {
         calculate_multicol_dimensions(child->multicol, column_width,
+            multicol_normal_gap_size(child),
             &inner_column_count, &inner_column_width, &inner_column_gap);
         if (inner_column_count < 1) inner_column_count = 1;
         if (inner_column_width <= 0) inner_column_width = column_width;
@@ -1379,6 +1394,8 @@ static float multicol_split_child_around_spanners(
                 if (used_columns > group.fragment_count) {
                     group.fragment_count = used_columns;
                 }
+                multicol_cursor_advance_fragmented_block(&cursor, children[j].height);
+                placed_height = 0.0f;
             }
             if (!leading_fragment_border_consumed && j == group_start && leading_fragment_border_height > 0) {
                 placed_height += leading_fragment_border_height;
@@ -1701,6 +1718,45 @@ static void multicol_cursor_advance_block(FragmentedFlowCursor* cursor, float bl
     cursor->block_offset += block_height;
 }
 
+static void multicol_cursor_advance_fragmented_block(
+    FragmentedFlowCursor* cursor,
+    float flow_height
+) {
+    if (!cursor || !cursor->group || flow_height <= 0.0f) return;
+    ColumnGroup* group = cursor->group;
+    float target_height = group->target_height;
+    if (target_height <= 0.0f) {
+        multicol_cursor_advance_block(cursor, flow_height);
+        return;
+    }
+
+    float remaining = flow_height;
+    while (remaining > 0.0f) {
+        ColumnFragment* fragment = multicol_cursor_current_fragment(cursor);
+        if (!fragment) return;
+        float available = target_height - cursor->block_offset;
+        if (available <= 0.0f) {
+            if (fragment->column_index >= group->column_count - 1 && !group->wraps_rows) {
+                cursor->block_offset += remaining;
+                return;
+            }
+            multicol_cursor_advance_fragment(cursor);
+            continue;
+        }
+        if (remaining <= available) {
+            cursor->block_offset += remaining;
+            return;
+        }
+        cursor->block_offset = target_height;
+        remaining -= available;
+        if (fragment->column_index >= group->column_count - 1 && !group->wraps_rows) {
+            cursor->block_offset += remaining;
+            return;
+        }
+        multicol_cursor_advance_fragment(cursor);
+    }
+}
+
 static void multicol_group_finish(ColumnGroup* group, FragmentedFlowCursor* cursor) {
     if (!group || !cursor) return;
     ColumnFragment* fragment = multicol_cursor_current_fragment(cursor);
@@ -1742,6 +1798,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     int column_count;
     float column_width, gap;
     calculate_multicol_dimensions(block->multicol, available_width,
+                                   multicol_normal_gap_size(block),
                                    &column_count, &column_width, &gap);
 
     // Store computed values for rendering
@@ -2208,6 +2265,8 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                 }
                 log_debug("[MULTICOL] Fragmented monolithic %s into %d columns, union height=%.1f",
                           cb->node_name(), used_columns, placed_height);
+                multicol_cursor_advance_fragmented_block(&cursor, info.height);
+                placed_height = 0.0f;
             }
 
             ColumnFragment* fragment = multicol_cursor_current_fragment(&cursor);

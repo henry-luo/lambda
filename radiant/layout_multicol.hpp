@@ -47,6 +47,7 @@ bool is_multicol_container(ViewBlock* block);
 void calculate_multicol_dimensions(
     MultiColumnProp* multicol,
     float available_width,
+    float normal_gap_size,
     int* out_column_count,
     float* out_column_width,
     float* out_gap

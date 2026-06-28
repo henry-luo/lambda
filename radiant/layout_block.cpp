@@ -1752,6 +1752,42 @@ static bool has_inline_content_after_last_block(ViewBlock* container) {
     return false;
 }
 
+static ViewBlock* find_line_clamped_descendant_in_view(View* view);
+
+static ViewBlock* find_line_clamped_descendant_block(ViewBlock* container) {
+    View* child = container->first_placed_child();
+    while (child) {
+        ViewBlock* clamped = find_line_clamped_descendant_in_view(child);
+        if (clamped) return clamped;
+        child = child->next();
+    }
+    return nullptr;
+}
+
+static ViewBlock* find_line_clamped_descendant_in_view(View* view) {
+    if (!view) return nullptr;
+    if (view->is_block()) {
+        ViewBlock* vb = lam::view_require_block(view);
+        if (is_out_of_flow_block(vb) || is_inline_level_atomic_block(view, vb)) {
+            return nullptr;
+        }
+        if (vb->blk && vb->blk->line_clamped && vb->blk->line_clamp_inherited) {
+            ViewBlock* nested = find_line_clamped_descendant_block(vb);
+            return nested ? nested : vb;
+        }
+        return find_line_clamped_descendant_block(vb);
+    }
+    if (view->view_type == RDT_VIEW_INLINE) {
+        View* child = lam::view_require<RDT_VIEW_INLINE>(view)->first_placed_child();
+        while (child) {
+            ViewBlock* clamped = find_line_clamped_descendant_in_view(child);
+            if (clamped) return clamped;
+            child = child->next();
+        }
+    }
+    return nullptr;
+}
+
 // Find the block containing the first formatted line, following CSS Inline 3 §5 rules.
 // For a block container with block-level content, the first formatted line is
 // the first formatted line of its first in-flow block-level child.
@@ -1837,6 +1873,13 @@ static ViewBlock* find_first_formatted_line_block(ViewBlock* container) {
 // Find the block containing the last formatted line.
 // Returns nullptr if no last formatted line exists.
 static ViewBlock* find_last_formatted_line_block(ViewBlock* container) {
+    if (container->blk && container->blk->line_clamped) {
+        ViewBlock* clamped_descendant = find_line_clamped_descendant_block(container);
+        if (clamped_descendant) {
+            return find_last_formatted_line_block(clamped_descendant);
+        }
+    }
+
     // Check if container has any in-flow block children (direct or via inline wrapper).
     bool has_block_child = false;
     View* child = container->first_placed_child();
@@ -2832,6 +2875,11 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         block->blk->first_line_max_descender = lycon->block.first_line_max_descender;
         block->blk->last_line_max_ascender = lycon->block.last_line_max_ascender;
         block->blk->last_line_max_descender = lycon->block.last_line_max_descender;
+        block->blk->line_clamped = lycon->block.line_clamped;
+        block->blk->line_clamp_advance_y = lycon->block.line_clamp_advance_y;
+        block->blk->line_clamp_last_line_ascender = lycon->block.line_clamp_last_line_ascender;
+        block->blk->line_clamp_last_line_max_ascender = lycon->block.line_clamp_last_line_max_ascender;
+        block->blk->line_clamp_last_line_max_descender = lycon->block.line_clamp_last_line_max_descender;
         // Persist first line baseline for flex baseline alignment (CSS Flexbox §9.4)
         block->blk->first_line_baseline = lycon->block.first_line_ascender;
     }
@@ -4592,6 +4640,14 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     lycon->block.line_clamp_last_line_ascender = 0.0f;
     lycon->block.line_clamp_last_line_max_ascender = 0.0f;
     lycon->block.line_clamp_last_line_max_descender = 0.0f;
+    if (block->blk) {
+        block->blk->line_clamp_inherited = false;
+        block->blk->line_clamped = false;
+        block->blk->line_clamp_advance_y = -1.0f;
+        block->blk->line_clamp_last_line_ascender = 0.0f;
+        block->blk->line_clamp_last_line_max_ascender = 0.0f;
+        block->blk->line_clamp_last_line_max_descender = 0.0f;
+    }
 
     // Resolve text-indent: percentage needs containing block width (now available)
     float resolved_text_indent = 0.0f;
@@ -6440,6 +6496,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
     // setup inline context
     setup_inline(lycon, block);
+    if (pa_block && pa_block->line_clamp > 0 && !pa_block->line_clamped &&
+        lycon->block.line_clamp == 0 && block->blk) {
+        lycon->block.line_clamp = pa_block->line_clamp;
+        lycon->block.line_number = pa_block->line_number;
+        block->blk->line_clamp_inherited = true;
+        log_debug("[LINE-CLAMP] %s inherited ancestor clamp: line=%d limit=%d",
+                  block->source_loc(), lycon->block.line_number, lycon->block.line_clamp);
+    }
 
     // For floats and inline-blocks with auto width, calculate intrinsic width BEFORE laying out children
     // This ensures children are laid out with the correct shrink-to-fit width
@@ -7332,6 +7396,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // Always print block type for debugging
         bool is_table = (block->view_type == RDT_VIEW_TABLE);
         layout_block_content(lycon, block, &pa_block, &pa_line);
+        bool child_line_clamp_inherited = block->blk && block->blk->line_clamp_inherited;
+        bool child_line_clamped = block->blk && block->blk->line_clamped;
+        int child_line_number = lycon->block.line_number;
+        float child_line_clamp_advance_y = block->blk ? block->blk->line_clamp_advance_y : -1.0f;
+        float child_line_clamp_last_line_ascender = block->blk ? block->blk->line_clamp_last_line_ascender : 0.0f;
+        float child_line_clamp_last_line_max_ascender = block->blk ? block->blk->line_clamp_last_line_max_ascender : 0.0f;
+        float child_line_clamp_last_line_max_descender = block->blk ? block->blk->line_clamp_last_line_max_descender : 0.0f;
 
         // WORKAROUND: Restore table height from global - it gets corrupted after return
         // This is a mysterious issue where the height field gets zeroed between
@@ -8570,6 +8641,24 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             // children with content_last_line_ascender > 0 naturally overwrite.
             if (!is_float && content_last_line_ascender > 0) {
                 lycon->block.last_line_ascender = block->y + content_last_line_ascender;
+            }
+
+            if (!is_float && child_line_clamp_inherited) {
+                lycon->block.line_number = child_line_number;
+                if (child_line_clamped && !lycon->block.line_clamped &&
+                    child_line_clamp_advance_y >= 0.0f) {
+                    lycon->block.line_clamped = true;
+                    lycon->block.line_clamp_advance_y = block->y + child_line_clamp_advance_y;
+                    lycon->block.line_clamp_last_line_ascender =
+                        block->y + child_line_clamp_last_line_ascender;
+                    lycon->block.line_clamp_last_line_max_ascender =
+                        child_line_clamp_last_line_max_ascender;
+                    lycon->block.line_clamp_last_line_max_descender =
+                        child_line_clamp_last_line_max_descender;
+                    log_debug("[LINE-CLAMP] %s propagated ancestor clamp boundary: line=%d advance_y=%.1f",
+                              elmt->source_loc(), lycon->block.line_number,
+                              lycon->block.line_clamp_advance_y);
+                }
             }
 
             log_debug("%s block end, pa max_width: %f, pa advance_y: %f, block hg: %f", elmt->source_loc(),
