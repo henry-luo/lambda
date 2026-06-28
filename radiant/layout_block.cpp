@@ -7577,6 +7577,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
                 float item_height = block->height + (block->bound ?
                     block->bound->margin.top + block->bound->margin.bottom : 0);
+                if (!is_broken_alt_image) {
+                    lycon->line.max_atomic_inline_height = max(
+                        lycon->line.max_atomic_inline_height, item_height);
+                }
                 // For non-replaced inline-blocks with content: baseline is at content baseline
                 // For replaced elements (like img): baseline is at bottom margin edge
                 // CSS 2.1 §17.5.1: inline-table baseline = first-row baseline

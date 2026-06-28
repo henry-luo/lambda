@@ -223,6 +223,8 @@ typedef struct Linebox {
     bool has_replaced_content;      // true if line has inline replaced elements (images, inline-blocks)
     float max_desc_before_last_text; // max_descender value before last output_text (for trailing space rollback)
     bool has_expanded_inline_lh;    // true if an inline element's own line-height exceeds the parent block's
+    float max_inline_line_height;   // max explicit line-height from baseline-aligned inline descendants
+    float max_atomic_inline_height; // max margin-box height from inline-block/replaced descendants
     bool has_inline_spans;          // true if line contains inline span elements (for bbox correction)
     bool has_different_inline_font; // true if any inline text uses a different font from the block's strut
     float max_normal_line_height;   // max normal line-height across all inline boxes on this line

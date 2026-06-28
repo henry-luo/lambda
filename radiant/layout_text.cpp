@@ -1414,6 +1414,8 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.max_bottom_height = 0;
     lycon->line.max_desc_before_last_text = 0;
     lycon->line.has_expanded_inline_lh = false;
+    lycon->line.max_inline_line_height = 0;
+    lycon->line.max_atomic_inline_height = 0;
     lycon->line.has_different_inline_font = false;
     lycon->line.max_normal_line_height = 0;
     lycon->line.has_c1_control_text = false;
@@ -1913,7 +1915,23 @@ void line_break(LayoutContext* lycon) {
         // due to different ascender/descender ratios across fonts (both values
         // are clamped ≥0, so they can't represent overlapping extents).
         // In that case, css_line_height is the correct used line height.
-        if (lycon->line.has_replaced_content || lycon->block.line_height_is_normal ||
+        float explicit_inline_height = css_line_height;
+        if (!lycon->block.line_height_is_normal &&
+            lycon->line.max_inline_line_height > explicit_inline_height) {
+            explicit_inline_height = lycon->line.max_inline_line_height;
+        }
+        bool atomic_expands_line = !lycon->block.line_height_is_normal &&
+            lycon->line.max_atomic_inline_height > explicit_inline_height + 0.5f;
+        if (!lycon->block.line_height_is_normal &&
+            lycon->line.has_replaced_content &&
+            lycon->line.max_inline_line_height > css_line_height &&
+            !atomic_expands_line) {
+            // CSS 2.1 §10.8.1: an inline box's line-height, not its glyph
+            // DOMRect, determines line box height. A small replaced element on
+            // the same line should not make baseline-aligned glyph overflow
+            // inflate the block's line advance.
+            used_line_height = explicit_inline_height;
+        } else if (lycon->line.has_replaced_content || lycon->block.line_height_is_normal ||
             lycon->line.has_expanded_inline_lh) {
             used_line_height = max(css_line_height, font_line_height);
             // CSS 2.1 §10.8.1: For normal line-height with mixed fonts, each inline box

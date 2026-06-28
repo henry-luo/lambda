@@ -1427,6 +1427,14 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // so line_break() knows to respect the expanded line box height.
         if (lycon->block.line_height > pa_line_height) {
             lycon->line.has_expanded_inline_lh = true;
+            CssEnum span_valign = span->in_line && span->in_line->vertical_align ?
+                span->in_line->vertical_align : CSS_VALUE_BASELINE;
+            float span_valign_offset = span->in_line ?
+                span->in_line->vertical_align_offset : 0.0f;
+            if (span_valign == CSS_VALUE_BASELINE && span_valign_offset == 0.0f) {
+                lycon->line.max_inline_line_height = max(
+                    lycon->line.max_inline_line_height, lycon->block.line_height);
+            }
         }
     }
     // line.max_ascender and max_descender to be changed only when there's output from the span
