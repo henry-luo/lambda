@@ -701,6 +701,97 @@ Results:
   improvements (`test-stream-construct.js`, `test-stream-duplex-end.js`,
   `test-stream-duplexpair.js`, `test-stream-transform-hwm0.js`).
 
+### 2026-06-29 Track A continuation: Duplex.from web and async edges
+
+Extended the stream-duplex surface without adding test-specific branches:
+
+- `ReadableStream` and `WritableStream` constructors now preserve their
+  underlying source/sink argument through both `globalThis` and
+  `require('stream/web')` constructors.
+- The minimal WebStream shims now keep queued readable chunks, closed/read
+  state, reader objects, writable sinks, writer objects, and sink
+  `write`/`close` calls.
+- `require('buffer').Blob` is now constructable from the buffer namespace, which
+  unblocks Blob inputs to `Duplex.from()`.
+- `Duplex.from()` now bridges Blob, WebReadable, WebWritable, and mixed
+  `{ readable, writable }` web-stream objects into Node-style duplex facades.
+- Readable-side errors from wrapped `{ readable, writable }` pairs now destroy
+  the facade and the wrapped writable; `_read` exceptions are routed through
+  stream `destroy(err)`; duplicate writable callback errors are suppressed.
+- `pipeline()` now normalizes iterable sources with `Readable.from()` and invokes
+  a function final stage as an async sink instead of requiring every stage to
+  already expose `.pipe()`.
+- Async-generator lowering now preserves `mt->in_async` while compiling the
+  shared generator state machine. This lets `await` inside async generators use
+  the async-generator suspension marker instead of the synchronous await helper,
+  fixing `for await` over pending stream iterator promises.
+- `Duplex.from(function)` now routes promise-like function return values through
+  the existing promise-backed duplex helper, so rejected async function results
+  are surfaced as stream `error` events.
+
+Verification:
+
+```bash
+make build
+./lambda.exe js ref/node/test/parallel/test-stream-duplexpair.js --no-log
+./lambda.exe js ref/node/test/parallel/test-stream-duplex-from.js --no-log
+```
+
+Results:
+
+- `make build`: pass.
+- Direct official `test-stream-duplexpair.js`: still pass.
+- Direct official `test-stream-duplex-from.js`: pass.
+- Reduced async-generator probes now resolve streamed `for await` values
+  without `iterator result is not an object`.
+- Reduced `Duplex.from(async function)` probe now emits the rejected promise as
+  `error: myCustomError`.
+
+### 2026-06-29 Track A continuation: stream.compose lifecycle edges
+
+Continued the `stream.compose()` implementation without adding filename-specific
+branches:
+
+- Final async non-generator function stages are now treated as async sinks
+  instead of readable transforms. The returned composed stream keeps a hidden
+  pending state so `finished()` waits for the sink promise, and non-undefined
+  sink return values surface as `ERR_INVALID_RETURN_VALUE`.
+- Function-composed async-generator transforms no longer double-forward writes
+  or finalization into the same passthrough input, which removes the internal
+  `ERR_MULTIPLE_CALLBACK` path and lets single-stage and multi-stage generator
+  compose chains emit yielded data.
+- `Duplex.from({ readable, writable })` now preserves readable and writable
+  object-mode flags from the wrapped endpoints and suppresses duplicate internal
+  forwarded callbacks at the facade boundary.
+- Compose now forwards inter-stage errors, handles writable-only tail streams by
+  delaying outer finish until the tail finishes, and normalizes web
+  `TransformStream` objects through the existing web-readable/web-writable
+  bridge.
+
+Verification:
+
+```bash
+make build
+./lambda.exe js ref/node/test/parallel/test-stream-compose.js --no-log
+./lambda.exe js ref/node/test/parallel/test-stream-duplex-from.js --no-log
+./lambda.exe js ref/node/test/parallel/test-stream-duplexpair.js --no-log
+```
+
+Results:
+
+- `make build`: pass.
+- Direct official `test-stream-duplex-from.js`: still pass.
+- Direct official `test-stream-duplexpair.js`: still pass.
+- Reduced compose probes pass for async-generator transform data/end,
+  multi-stage generator `toArray()`, final async sink completion, invalid sink
+  return errors, object-mode propagation, web `TransformStream` tails, and
+  intermediate generator error propagation.
+- Direct official `test-stream-compose.js`: reduced to one remaining missed
+  `mustCall`. Diagnostic indexing identifies it as the first block's `end`
+  callback; that first block passes alone and with the first async-generator
+  block, so the remaining issue appears to be a full-file scheduling/ordering
+  interaction rather than the individual transform-chain semantics.
+
 ## Verification Policy
 
 Every implementation slice should finish with:

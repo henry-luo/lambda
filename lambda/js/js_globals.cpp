@@ -14970,15 +14970,15 @@ extern "C" Item js_get_global_this() {
 
         // Web Streams constructors as globals
         {
-            extern Item js_readable_stream_new(void);
-            extern Item js_writable_stream_new(void);
+            extern Item js_readable_stream_new(Item underlying_source);
+            extern Item js_writable_stream_new(Item underlying_sink);
             extern Item js_transform_stream_new(Item transformer);
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("ReadableStream", 14))},
-                js_new_function((void*)js_readable_stream_new, 0));
+                js_new_function((void*)js_readable_stream_new, 1));
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("WritableStream", 14))},
-                js_new_function((void*)js_writable_stream_new, 0));
+                js_new_function((void*)js_writable_stream_new, 1));
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("TransformStream", 15))},
                 js_new_function((void*)js_transform_stream_new, 1));
@@ -17738,29 +17738,125 @@ extern "C" Item js_url_can_parse(Item input) {
     return valid ? (Item){.item = b2it(true)} : (Item){.item = b2it(false)};
 }
 
-// ReadableStream stub — Web Streams API minimal implementation.
-// The test checks: typeof readable.getReader === "function"
-static Item js_readable_stream_get_reader_stub(void) {
-    return js_new_object();
+static Item js_web_stream_key(const char* name) {
+    return (Item){.item = s2it(heap_create_name(name, (int)strlen(name)))};
 }
 
-extern "C" Item js_readable_stream_new(void) {
+static Item js_readable_stream_controller_enqueue(Item env_item, Item chunk) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item chunks = js_property_get(env[0], js_web_stream_key("__chunks__"));
+    if (get_type_id(chunks) != LMD_TYPE_ARRAY) {
+        chunks = js_array_new(0);
+        js_property_set(env[0], js_web_stream_key("__chunks__"), chunks);
+    }
+    js_array_push(chunks, chunk);
+    return make_js_undefined();
+}
+
+static Item js_readable_stream_controller_close(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    js_property_set(env[0], js_web_stream_key("__closed__"), (Item){.item = b2it(true)});
+    return make_js_undefined();
+}
+
+static Item js_readable_stream_reader_read(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return js_promise_resolve(make_js_undefined());
+    Item stream = env[0];
+    Item chunks = js_property_get(stream, js_web_stream_key("__chunks__"));
+    int64_t index = 0;
+    Item index_item = js_property_get(stream, js_web_stream_key("__read_index__"));
+    if (get_type_id(index_item) == LMD_TYPE_INT) index = it2i(index_item);
+
+    Item result = js_new_object();
+    int64_t len = get_type_id(chunks) == LMD_TYPE_ARRAY ? js_array_length(chunks) : 0;
+    if (index < len) {
+        js_property_set(result, js_web_stream_key("value"), js_array_get_int(chunks, index));
+        js_property_set(result, js_web_stream_key("done"), (Item){.item = b2it(false)});
+        js_property_set(stream, js_web_stream_key("__read_index__"), (Item){.item = i2it(index + 1)});
+    } else {
+        js_property_set(result, js_web_stream_key("value"), make_js_undefined());
+        js_property_set(result, js_web_stream_key("done"), (Item){.item = b2it(true)});
+    }
+    return js_promise_resolve(result);
+}
+
+static Item js_readable_stream_get_reader_stub(void) {
+    Item stream = js_get_this();
+    Item* env = js_alloc_env(1);
+    env[0] = stream;
+    Item reader = js_new_object();
+    js_property_set(reader, js_web_stream_key("read"),
+                    js_new_closure((void*)js_readable_stream_reader_read, 0, env, 1));
+    return reader;
+}
+
+extern "C" Item js_readable_stream_new(Item underlying_source) {
     Item obj = js_new_object();
     js_class_stamp(obj, JS_CLASS_READABLE_STREAM);
+    js_property_set(obj, js_web_stream_key("__chunks__"), js_array_new(0));
+    js_property_set(obj, js_web_stream_key("__closed__"), (Item){.item = b2it(false)});
+    js_property_set(obj, js_web_stream_key("__read_index__"), (Item){.item = i2it(0)});
     Item get_reader_key = (Item){.item = s2it(heap_create_name("getReader"))};
     Item get_reader_fn = js_new_function((void*)js_readable_stream_get_reader_stub, 0);
     js_property_set(obj, get_reader_key, get_reader_fn);
+
+    Item start_fn = js_property_get(underlying_source, js_web_stream_key("start"));
+    if (get_type_id(start_fn) == LMD_TYPE_FUNC) {
+        Item* env = js_alloc_env(1);
+        env[0] = obj;
+        Item controller = js_new_object();
+        js_property_set(controller, js_web_stream_key("enqueue"),
+                        js_new_closure((void*)js_readable_stream_controller_enqueue, 1, env, 1));
+        js_property_set(controller, js_web_stream_key("close"),
+                        js_new_closure((void*)js_readable_stream_controller_close, 0, env, 1));
+        js_call_function(start_fn, underlying_source, &controller, 1);
+    }
     return obj;
 }
 
-// WritableStream stub
-static Item js_writable_stream_get_writer_stub(void) {
-    return js_new_object();
+static Item js_writable_stream_writer_write(Item env_item, Item chunk) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return js_promise_resolve(make_js_undefined());
+    Item sink = js_property_get(env[0], js_web_stream_key("__sink__"));
+    Item write_fn = js_property_get(sink, js_web_stream_key("write"));
+    if (get_type_id(write_fn) == LMD_TYPE_FUNC) {
+        js_call_function(write_fn, sink, &chunk, 1);
+    }
+    return js_promise_resolve(make_js_undefined());
 }
 
-extern "C" Item js_writable_stream_new(void) {
+static Item js_writable_stream_writer_close(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return js_promise_resolve(make_js_undefined());
+    Item sink = js_property_get(env[0], js_web_stream_key("__sink__"));
+    Item close_fn = js_property_get(sink, js_web_stream_key("close"));
+    if (get_type_id(close_fn) == LMD_TYPE_FUNC) {
+        js_call_function(close_fn, sink, NULL, 0);
+    }
+    js_property_set(env[0], js_web_stream_key("__closed__"), (Item){.item = b2it(true)});
+    return js_promise_resolve(make_js_undefined());
+}
+
+static Item js_writable_stream_get_writer_stub(void) {
+    Item stream = js_get_this();
+    Item* env = js_alloc_env(1);
+    env[0] = stream;
+    Item writer = js_new_object();
+    js_property_set(writer, js_web_stream_key("write"),
+                    js_new_closure((void*)js_writable_stream_writer_write, 1, env, 1));
+    js_property_set(writer, js_web_stream_key("close"),
+                    js_new_closure((void*)js_writable_stream_writer_close, 0, env, 1));
+    return writer;
+}
+
+extern "C" Item js_writable_stream_new(Item underlying_sink) {
     Item obj = js_new_object();
     js_class_stamp(obj, JS_CLASS_WRITABLE_STREAM);
+    js_property_set(obj, js_web_stream_key("__sink__"), underlying_sink);
+    js_property_set(obj, js_web_stream_key("__closed__"), (Item){.item = b2it(false)});
     Item get_writer_key = (Item){.item = s2it(heap_create_name("getWriter"))};
     Item get_writer_fn = js_new_function((void*)js_writable_stream_get_writer_stub, 0);
     js_property_set(obj, get_writer_key, get_writer_fn);

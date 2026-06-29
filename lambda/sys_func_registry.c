@@ -1946,6 +1946,7 @@ JitImport jit_runtime_imports[] = {
     // v14: Generator runtime
     {"js_generator_create", FPTR(js_generator_create)},
     {"js_gen_yield_result", FPTR(js_gen_yield_result)},
+    {"js_gen_await_result", FPTR(js_gen_await_result)},
     {"js_gen_yield_delegate_result", FPTR(js_gen_yield_delegate_result)},
     {"js_gen_is_return_signal", FPTR(js_gen_is_return_signal)},
     {"js_gen_return_signal_value", FPTR(js_gen_return_signal_value)},

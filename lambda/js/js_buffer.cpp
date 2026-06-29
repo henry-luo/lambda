@@ -37,6 +37,8 @@ static Item make_string_item(const char* str) {
 }
 
 extern "C" Item js_get_current_this(void);
+extern "C" Item js_blob_new(Item parts, Item options);
+extern "C" void js_set_function_name(Item fn_item, Item name_item);
 
 // Helper: get raw data pointer and length from a typed array Item
 static const int64_t JS_BUFFER_MAX_LENGTH = (1LL << 30) - 1;
@@ -2951,6 +2953,11 @@ extern "C" Item js_get_buffer_namespace(void) {
     extern Item js_btoa(Item);
     buf_set_method(buffer_namespace, "atob", (void*)js_atob, 1);
     buf_set_method(buffer_namespace, "btoa", (void*)js_btoa, 1);
+    {
+        Item blob_ctor = js_new_function((void*)js_blob_new, 2);
+        js_set_function_name(blob_ctor, make_string_item("Blob"));
+        js_property_set(buffer_namespace, make_string_item("Blob"), blob_ctor);
+    }
 
     // Buffer.constants — MAX_LENGTH and MAX_STRING_LENGTH
     {

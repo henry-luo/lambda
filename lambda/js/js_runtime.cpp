@@ -27806,9 +27806,18 @@ extern "C" Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state
     return arr;
 }
 
+extern "C" Item js_gen_await_result(Item value, int64_t next_state) {
+    Item arr = js_array_new(3);
+    arr.array->items[0] = value;
+    arr.array->items[1] = (Item){.item = i2it(next_state)};
+    arr.array->items[2] = (Item){.item = i2it(2)};  // async-generator await flag
+    return arr;
+}
+
 extern "C" Item js_get_iterator(Item iterable);
 extern "C" Item js_iterator_step(Item iterator);
 extern "C" Item js_generator_next(Item generator, Item input);
+extern "C" Item js_generator_throw(Item generator, Item error);
 
 // Static prototype caches for Generator and AsyncGenerator instances.
 // Per ES spec, the prototype chain for generator instances is:
@@ -28039,7 +28048,7 @@ extern "C" Item js_iterator_result_value(Item result) {
 }
 
 extern "C" Item js_async_iterator_step_result(Item iterator) {
-    if (js_is_generator(iterator)) {
+    if (js_is_generator(iterator) && !js_is_async_generator(iterator)) {
         return js_generator_next(iterator, make_js_undefined());
     }
 
@@ -28109,6 +28118,14 @@ static Item js_generator_resume_after_delegate_abrupt(Item generator, JsGenerato
     gen->delegate_resume = -1;
     gen->delegate_idx = 0;
     return js_generator_next(generator, make_js_undefined());
+}
+
+static Item js_async_generator_await_resume(Item generator, Item resolved) {
+    return js_generator_next(generator, resolved);
+}
+
+static Item js_async_generator_await_reject(Item generator, Item reason) {
+    return js_generator_throw(generator, reason);
 }
 
 extern "C" Item js_generator_next(Item generator, Item input) {
@@ -28228,6 +28245,20 @@ run_state_machine:
             // Immediately take the first delegated step.
             gen->executing = false;
             return js_generator_next(generator, make_js_undefined());
+        }
+
+        if (arr->length > 2 && get_type_id(arr->items[2]) == LMD_TYPE_INT && it2i(arr->items[2]) == 2) {
+            gen->state = next_state;
+            gen->executing = false;
+            if (!is_async) return js_generator_next(generator, value);
+            Item promise = js_promise_resolve(value);
+            Item on_fulfilled = js_bind_function(
+                js_new_function((void*)js_async_generator_await_resume, 2),
+                make_js_undefined(), &generator, 1);
+            Item on_rejected = js_bind_function(
+                js_new_function((void*)js_async_generator_await_reject, 2),
+                make_js_undefined(), &generator, 1);
+            return js_promise_then(promise, on_fulfilled, on_rejected);
         }
 
         if (next_state < 0) {
