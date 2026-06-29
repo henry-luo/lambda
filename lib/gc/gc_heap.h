@@ -82,6 +82,7 @@ typedef void (*gc_vmap_destroy_fn)(void* data);
  */
 typedef void (*gc_error_trace_fn)(void* data, gc_heap_t* gc);
 typedef void (*gc_error_destroy_fn)(void* data);
+typedef void (*gc_js_native_trace_fn)(void* data, gc_heap_t* gc);
 
 /**
  * Small per-cleanup native-pointer set used by runtime finalizers that own
@@ -181,6 +182,7 @@ typedef struct gc_heap {
     gc_vmap_destroy_fn vmap_destroy; // frees VMap's malloc'd backing data
     gc_error_trace_fn error_trace;   // traces heap-owned LambdaError cause chain
     gc_error_destroy_fn error_destroy; // frees LambdaError external payload fields
+    gc_js_native_trace_fn js_native_trace; // traces native payload edges on JS Map wrappers
 
     // Bump-pointer block chain (for cleanup and ownership registration)
     gc_bump_block_t* bump_blocks;   // linked list of allocated bump regions
@@ -350,6 +352,7 @@ void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
  * Public for use by external root scanners.
  */
 void gc_mark_item(gc_heap_t* gc, uint64_t item);
+void gc_mark_object_ptr(gc_heap_t* gc, void* ptr);
 
 /**
  * Check if the data zone has exceeded the GC trigger threshold.

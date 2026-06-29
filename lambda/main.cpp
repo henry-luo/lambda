@@ -3632,7 +3632,9 @@ int main(int argc, char *argv[]) {
             if (runtime.scripts) {
                 for (int i = 0; i < runtime.scripts->length; i++) {
                     Script *script = (Script*)runtime.scripts->data[i];
+                    if (script->reference) mem_free((void*)script->reference);
                     if (script->source) mem_free((void*)script->source);
+                    if (script->directory) mem_free((void*)script->directory);
                     if (script->syntax_tree) ts_tree_delete(script->syntax_tree);
                     if (script->pool) pool_destroy(script->pool);
                     if (script->type_list) arraylist_free(script->type_list);

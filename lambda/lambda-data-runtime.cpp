@@ -6,6 +6,7 @@
 #include "../lib/checked_math.hpp"
 #include "input/css/dom_element.hpp"  // DomElement, dom_element_to_element, element_to_dom_element
 #include "input/css/dom_node.hpp"     // DomText, dom_text_to_string, string_to_dom_text
+#include <math.h>
 
 // data zone allocation helpers (defined in lambda-mem.cpp)
 extern "C" void* heap_data_alloc(size_t size);
@@ -24,6 +25,21 @@ extern "C" void path_load_metadata(Path* path);
 
 // External: interned ASCII char table (implemented in lambda-mem.cpp)
 extern "C" String* get_ascii_char_string(unsigned char ch);
+
+static uint8_t array_num_clamp_uint8_even(double value) {
+    if (isnan(value) || value <= 0.0) return 0;
+    if (value >= 255.0) return 255;
+
+    double lower;
+    double frac = modf(value, &lower);
+    int64_t rounded = (int64_t)lower;
+    if (frac > 0.5) {
+        rounded++;
+    } else if (frac == 0.5 && (rounded & 1)) {
+        rounded++;
+    }
+    return (uint8_t)rounded;
+}
 
 // VMap access helpers (implemented in vmap.cpp)
 Item vmap_get_by_str(VMap* vm, const char* key);
@@ -159,6 +175,31 @@ ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
     return arr;
 }
 
+ArrayNum* array_num_new_external_view(Container* base, void* data_base,
+        ArrayNumElemType elem_type, int64_t byte_offset, int64_t length, bool mutable_view) {
+    if (byte_offset < 0 || length < 0) return NULL;
+    uint8_t elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
+    if (!elem_size || (byte_offset % elem_size) != 0) return NULL;
+    size_t payload_bytes;
+    size_t end_offset;
+    if (!lam::checked_mul((size_t)length, (size_t)elem_size, &payload_bytes) ||
+        !lam::checked_add((size_t)byte_offset, payload_bytes, &end_offset)) {
+        return NULL;
+    }
+    (void)end_offset;
+
+    ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    if (!view) return NULL;
+    size_t shape_bytes = sizeof(ArrayNumShape) + 2 * sizeof(int64_t);
+    ArrayNumShape* shape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
+    if (!shape) return NULL;
+    if (!array_num_init_external_view(view, shape, base, data_base, elem_type,
+            byte_offset, length, mutable_view)) {
+        return NULL;
+    }
+    return view;
+}
+
 // Allocate an N-D ArrayNum: data buffer sized for `total` elements, plus a
 // shape side-table with C-contiguous strides computed from `dims[0..ndim-1]`.
 // Used by both the C transpiler and the MIR transpiler to materialize nested
@@ -201,6 +242,7 @@ static Item array_num_read_scalar_at(ArrayNum* array, int64_t offset) {
         case ELEM_INT16:   return (Item){.item = i16_to_item(((int16_t*)array->data)[offset])};
         case ELEM_INT32:   return (Item){.item = i32_to_item(((int32_t*)array->data)[offset])};
         case ELEM_UINT8:   return (Item){.item = u8_to_item(((uint8_t*)array->data)[offset])};
+        case ELEM_UINT8_CLAMPED: return (Item){.item = u8_to_item(((uint8_t*)array->data)[offset])};
         case ELEM_UINT16:  return (Item){.item = u16_to_item(((uint16_t*)array->data)[offset])};
         case ELEM_UINT32:  return (Item){.item = u32_to_item(((uint32_t*)array->data)[offset])};
         case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)array->data)[offset]))};
@@ -378,6 +420,7 @@ Item array_num_get(ArrayNum *array, int64_t index) {
     case ELEM_INT16:   return (Item){.item = i16_to_item(((int16_t*)array->data)[index])};
     case ELEM_INT32:   return (Item){.item = i32_to_item(((int32_t*)array->data)[index])};
     case ELEM_UINT8:   return (Item){.item = u8_to_item(((uint8_t*)array->data)[index])};
+    case ELEM_UINT8_CLAMPED: return (Item){.item = u8_to_item(((uint8_t*)array->data)[index])};
     case ELEM_UINT16:  return (Item){.item = u16_to_item(((uint16_t*)array->data)[index])};
     case ELEM_UINT32:  return (Item){.item = u32_to_item(((uint32_t*)array->data)[index])};
     case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)array->data)[index]))};
@@ -556,8 +599,8 @@ void array_float_set(ArrayNum *arr, int64_t index, double value) {
     if (!arr || index < 0 || index >= arr->capacity) {
         return;  // Invalid access, do nothing
     }
-    if (arr->is_view) {
-        log_error("array_float_set: cannot mutate a view; copy() first");
+    if (arr->is_view && !arr->is_mutable_view) {
+        log_error("array_float_set: cannot mutate a read-only view; copy() first");
         return;
     }
     arr->float_items[index] = value;
@@ -571,8 +614,8 @@ void array_int_set(ArrayNum *arr, int64_t index, int64_t value) {
     if (!arr || index < 0 || index >= arr->capacity) {
         return;
     }
-    if (arr->is_view) {
-        log_error("array_int_set: cannot mutate a view; copy() first");
+    if (arr->is_view && !arr->is_mutable_view) {
+        log_error("array_int_set: cannot mutate a read-only view; copy() first");
         return;
     }
     arr->items[index] = value;
@@ -586,8 +629,8 @@ void array_float_set_item(ArrayNum *arr, int64_t index, Item value) {
     if (!arr || index < 0 || index >= arr->capacity) {
         return;  // Invalid access, do nothing
     }
-    if (arr->is_view) {
-        log_error("array_float_set_item: cannot mutate a view; copy() first");
+    if (arr->is_view && !arr->is_mutable_view) {
+        log_error("array_float_set_item: cannot mutate a read-only view; copy() first");
         return;
     }
 
@@ -668,6 +711,123 @@ static double item_to_float_value(Item value) {
     }
 }
 
+double array_num_get_number_value(ArrayNum *arr, int64_t index) {
+    if (!arr || index < 0 || index >= arr->length) return 0.0;
+    switch (arr->get_elem_type()) {
+    case ELEM_INT:
+    case ELEM_INT64:
+        return (double)arr->items[index];
+    case ELEM_FLOAT:
+        return arr->float_items[index];
+    case ELEM_INT8:
+        return (double)((int8_t*)arr->data)[index];
+    case ELEM_INT16:
+        return (double)((int16_t*)arr->data)[index];
+    case ELEM_INT32:
+        return (double)((int32_t*)arr->data)[index];
+    case ELEM_UINT8:
+    case ELEM_UINT8_CLAMPED:
+        return (double)((uint8_t*)arr->data)[index];
+    case ELEM_UINT16:
+        return (double)((uint16_t*)arr->data)[index];
+    case ELEM_UINT32:
+        return (double)((uint32_t*)arr->data)[index];
+    case ELEM_FLOAT16:
+        return (double)f16_bits_to_f32(((uint16_t*)arr->data)[index]);
+    case ELEM_FLOAT32:
+        return (double)((float*)arr->data)[index];
+    case ELEM_UINT64:
+        return (double)((uint64_t*)arr->data)[index];
+    case ELEM_FLOAT64:
+        return ((double*)arr->data)[index];
+    case ELEM_BOOL:
+        return ((uint8_t*)arr->data)[index] ? 1.0 : 0.0;
+    default:
+        return 0.0;
+    }
+}
+
+void array_num_set_int64_value(ArrayNum *arr, int64_t index, int64_t value) {
+    if (!arr || index < 0 || index >= arr->capacity) return;
+    if (arr->is_view && !arr->is_mutable_view) {
+        log_error("array_num_set_int64_value: cannot mutate a read-only view; copy() first");
+        return;
+    }
+    switch (arr->get_elem_type()) {
+    case ELEM_INT:
+    case ELEM_INT64:
+        arr->items[index] = value;
+        break;
+    case ELEM_FLOAT:
+        arr->float_items[index] = (double)value;
+        break;
+    case ELEM_INT8:
+        ((int8_t*)arr->data)[index] = (int8_t)value;
+        break;
+    case ELEM_INT16:
+        ((int16_t*)arr->data)[index] = (int16_t)value;
+        break;
+    case ELEM_INT32:
+        ((int32_t*)arr->data)[index] = (int32_t)value;
+        break;
+    case ELEM_UINT8:
+    case ELEM_UINT8_CLAMPED:
+        ((uint8_t*)arr->data)[index] = (uint8_t)value;
+        break;
+    case ELEM_UINT16:
+        ((uint16_t*)arr->data)[index] = (uint16_t)value;
+        break;
+    case ELEM_UINT32:
+        ((uint32_t*)arr->data)[index] = (uint32_t)value;
+        break;
+    case ELEM_FLOAT16:
+        ((uint16_t*)arr->data)[index] = f32_to_f16_bits((float)value);
+        break;
+    case ELEM_FLOAT32:
+        ((float*)arr->data)[index] = (float)value;
+        break;
+    case ELEM_UINT64:
+        ((uint64_t*)arr->data)[index] = (uint64_t)value;
+        break;
+    case ELEM_FLOAT64:
+        ((double*)arr->data)[index] = (double)value;
+        break;
+    case ELEM_BOOL:
+        ((uint8_t*)arr->data)[index] = value ? 1 : 0;
+        break;
+    default:
+        break;
+    }
+}
+
+void array_num_set_double_value(ArrayNum *arr, int64_t index, double value) {
+    if (!arr || index < 0 || index >= arr->capacity) return;
+    if (arr->is_view && !arr->is_mutable_view) {
+        log_error("array_num_set_double_value: cannot mutate a read-only view; copy() first");
+        return;
+    }
+    switch (arr->get_elem_type()) {
+    case ELEM_FLOAT:
+        arr->float_items[index] = value;
+        break;
+    case ELEM_FLOAT16:
+        ((uint16_t*)arr->data)[index] = f32_to_f16_bits((float)value);
+        break;
+    case ELEM_FLOAT32:
+        ((float*)arr->data)[index] = (float)value;
+        break;
+    case ELEM_FLOAT64:
+        ((double*)arr->data)[index] = value;
+        break;
+    case ELEM_UINT8_CLAMPED:
+        ((uint8_t*)arr->data)[index] = array_num_clamp_uint8_even(value);
+        break;
+    default:
+        array_num_set_int64_value(arr, index, (int64_t)value);
+        break;
+    }
+}
+
 // Generic setter for all ArrayNum elem_types, dispatches on elem_type
 void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
     if (!arr || index < 0 || index >= arr->capacity) return;
@@ -696,6 +856,9 @@ void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
         break;
     case ELEM_UINT8:
         ((uint8_t*)arr->data)[index] = (uint8_t)item_to_int_value(value);
+        break;
+    case ELEM_UINT8_CLAMPED:
+        ((uint8_t*)arr->data)[index] = array_num_clamp_uint8_even(item_to_float_value(value));
         break;
     case ELEM_UINT16:
         ((uint16_t*)arr->data)[index] = (uint16_t)item_to_int_value(value);

@@ -204,6 +204,35 @@ typedef struct JsTlsSocket {
     char           local_address[256];
 } JsTlsSocket;
 
+typedef struct JsTlsSecureContextOwner {
+    TlsContext* ctx;
+    struct JsTlsSecureContextOwner* next;
+} JsTlsSecureContextOwner;
+
+static JsTlsSecureContextOwner* secure_context_owners = NULL;
+
+static bool tls_track_secure_context(TlsContext* ctx) {
+    if (!ctx) return false;
+    JsTlsSecureContextOwner* owner = (JsTlsSecureContextOwner*)mem_calloc(
+        1, sizeof(JsTlsSecureContextOwner), MEM_CAT_JS_RUNTIME);
+    if (!owner) return false;
+    owner->ctx = ctx;
+    owner->next = secure_context_owners;
+    secure_context_owners = owner;
+    return true;
+}
+
+static void tls_destroy_tracked_secure_contexts(void) {
+    JsTlsSecureContextOwner* owner = secure_context_owners;
+    secure_context_owners = NULL;
+    while (owner) {
+        JsTlsSecureContextOwner* next = owner->next;
+        if (owner->ctx) tls_context_destroy(owner->ctx);
+        mem_free(owner);
+        owner = next;
+    }
+}
+
 static JsTlsSocket* tls_socket_from_object(Item obj) {
     Item handle_item = js_property_get(obj, make_string_item("__handle__"));
     if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
@@ -460,6 +489,10 @@ extern "C" Item js_tls_createSecureContext(Item options_item) {
     TlsContext* ctx = tls_context_create(&config);
     if (!ctx) {
         return js_new_error(make_string_item("Failed to create TLS context"));
+    }
+    if (!tls_track_secure_context(ctx)) {
+        tls_context_destroy(ctx);
+        return js_new_error(make_string_item("Failed to track TLS context"));
     }
 
     Item result = js_new_object();
@@ -1190,5 +1223,6 @@ extern "C" Item js_get_tls_namespace(void) {
 }
 
 extern "C" void js_tls_reset(void) {
+    tls_destroy_tracked_secure_contexts();
     tls_namespace = (Item){0};
 }

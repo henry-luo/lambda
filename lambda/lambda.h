@@ -167,7 +167,10 @@ enum EnumArrayNumElemType {
     // Boolean type (1 byte/element):
     ELEM_BOOL    = 0xD0,  // 1 byte   — bool values, distinct from UINT8 for any()/all() semantics
 
-    ELEM_NUM_COUNT = 14
+    // JS-compatible clamped byte type:
+    ELEM_UINT8_CLAMPED = 0xE0,  // 1 byte — Uint8ClampedArray storage semantics
+
+    ELEM_NUM_COUNT = 15
 };
 typedef uint8_t ArrayNumElemType;
 
@@ -187,7 +190,7 @@ static const uint8_t ELEM_TYPE_SIZE[16] = {
     4, // 0xB0 ELEM_FLOAT32
     8, // 0xC0 ELEM_FLOAT64
     1, // 0xD0 ELEM_BOOL
-    0, // 0xE0 reserved
+    1, // 0xE0 ELEM_UINT8_CLAMPED
     0, // 0xF0 reserved
 };
 
@@ -1197,6 +1200,8 @@ extern "C" {
     ArrayNum* array_float();
 
     ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length);
+    ArrayNum* array_num_new_external_view(Container* base, void* data_base,
+        ArrayNumElemType elem_type, int64_t byte_offset, int64_t length, bool mutable_view);
     ArrayNum* array_int_new(int64_t length);
     ArrayNum* array_int64_new(int64_t length);
     ArrayNum* array_float_new(int64_t length);
@@ -1204,6 +1209,9 @@ extern "C" {
     void array_float_set(ArrayNum *arr, int64_t index, double value);
     void array_int_set(ArrayNum *arr, int64_t index, int64_t value);
     void array_num_set_item(ArrayNum *arr, int64_t index, Item value);
+    double array_num_get_number_value(ArrayNum *arr, int64_t index);
+    void array_num_set_int64_value(ArrayNum *arr, int64_t index, int64_t value);
+    void array_num_set_double_value(ArrayNum *arr, int64_t index, double value);
 
     Map* map(int64_t type_index);
     Map* map_with_data(int64_t type_index);
