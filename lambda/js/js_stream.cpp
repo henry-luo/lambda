@@ -182,6 +182,7 @@ static void js_stream_iter_attach_abort(Item options, Item readable);
 static bool js_stream_chunk_is_buffer(Item chunk);
 static bool js_stream_chunk_is_arraybuffer_view(Item chunk);
 static bool js_stream_is_abort_signal(Item signal);
+static Item js_stream_attach_abort_signal(Item signal, Item stream);
 static bool js_stream_is_stream_like(Item stream);
 static Item js_stream_iter_push(Item options_or_transform);
 static Item js_stream_iter_make_abort_error(void);
@@ -5030,6 +5031,41 @@ static void js_stream_iter_attach_abort(Item options, Item readable) {
     js_call_function(add_event, signal, args, 2);
 }
 
+static Item js_stream_abort_signal_reason(Item signal) {
+    Item reason = js_property_get(signal, make_string_item("reason"));
+    if (reason.item == 0 || get_type_id(reason) == LMD_TYPE_UNDEFINED) {
+        reason = js_stream_iter_make_abort_error();
+    }
+    return reason;
+}
+
+static Item js_stream_abort_signal_destroy_stream(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item signal = env[0];
+    Item stream = env[1];
+    js_stream_destroy(stream, js_stream_abort_signal_reason(signal));
+    return make_js_undefined();
+}
+
+static Item js_stream_attach_abort_signal(Item signal, Item stream) {
+    Item aborted = js_property_get(signal, make_string_item("aborted"));
+    if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
+        js_stream_destroy(stream, js_stream_abort_signal_reason(signal));
+        return stream;
+    }
+
+    Item add_event = js_property_get(signal, make_string_item("addEventListener"));
+    if (get_type_id(add_event) != LMD_TYPE_FUNC) return stream;
+    Item* env = js_alloc_env(2);
+    env[0] = signal;
+    env[1] = stream;
+    Item listener = js_new_closure((void*)js_stream_abort_signal_destroy_stream, 0, env, 2);
+    Item args[2] = { make_string_item("abort"), listener };
+    js_call_function(add_event, signal, args, 2);
+    return stream;
+}
+
 static Item js_stream_iter_push(Item options_or_transform) {
     ensure_keys();
     TypeId opt_type = get_type_id(options_or_transform);
@@ -5727,6 +5763,16 @@ static bool propagate_stream_options(Item obj, Item opts) {
     Item allow_half_open = js_property_get(opts, make_string_item("allowHalfOpen"));
     if (is_duplex_like && get_type_id(allow_half_open) == LMD_TYPE_BOOL)
         js_property_set(obj, make_string_item("allowHalfOpen"), allow_half_open);
+    Item signal = js_property_get(opts, make_string_item("signal"));
+    TypeId signal_type = get_type_id(signal);
+    if (signal.item != 0 && signal_type != LMD_TYPE_UNDEFINED &&
+        signal_type != LMD_TYPE_NULL) {
+        if (!js_stream_is_abort_signal(signal)) {
+            js_throw_invalid_arg_type("options.signal", "AbortSignal", signal);
+            return false;
+        }
+        js_stream_attach_abort_signal(signal, obj);
+    }
     return true;
 }
 
@@ -8210,15 +8256,7 @@ static Item js_stream_compose_rest(Item rest_args) {
 
 extern "C" Item js_stream_addAbortSignalNoValidate(Item signal, Item stream) {
     ensure_keys();
-    Item aborted = js_property_get(signal, make_string_item("aborted"));
-    if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
-        Item destroy_fn = js_property_get(stream, key_destroy);
-        if (get_type_id(destroy_fn) == LMD_TYPE_FUNC) {
-            Item reason = js_property_get(signal, make_string_item("reason"));
-            js_call_function(destroy_fn, stream, &reason, 1);
-        }
-    }
-    return stream;
+    return js_stream_attach_abort_signal(signal, stream);
 }
 
 extern "C" Item js_stream_addAbortSignal(Item signal, Item stream) {
@@ -9014,6 +9052,11 @@ extern "C" Item js_get_stream_namespace(void) {
         js_stream_mark_constructor_prototype(transform_constructor, stream_transform_prototype, JS_CLASS_TRANSFORM);
         js_stream_mark_constructor_prototype(passthrough_constructor, stream_passthrough_prototype,
                                              JS_CLASS_PASS_THROUGH);
+        js_property_set(stream_readable_prototype, make_string_item("destroyed"), js_bool_item(false));
+        js_property_set(stream_writable_prototype, make_string_item("destroyed"), js_bool_item(false));
+        js_property_set(stream_duplex_prototype, make_string_item("destroyed"), js_bool_item(false));
+        js_property_set(stream_transform_prototype, make_string_item("destroyed"), js_bool_item(false));
+        js_property_set(stream_passthrough_prototype, make_string_item("destroyed"), js_bool_item(false));
 
         js_stream_install_state_accessors(readable_constructor, writable_constructor,
                                           duplex_constructor, transform_constructor);
