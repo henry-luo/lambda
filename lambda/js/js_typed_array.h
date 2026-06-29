@@ -100,6 +100,7 @@ Item js_typed_array_set_from(Item ta, Item source, int offset);
 bool js_typed_array_raw_reverse(Item ta);
 bool js_typed_array_raw_copy_reversed(Item dst, Item src);
 bool js_typed_array_raw_copy_same_type(Item dst, Item src);
+bool js_typed_array_raw_copy_within(Item ta, int target, int start, int count);
 int js_typed_array_raw_index_of(Item ta, Item search_value, int from, int bound, bool reverse, bool same_value_zero);
 
 // ArrayBuffer operations

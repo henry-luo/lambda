@@ -19391,6 +19391,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 if (target + count > len) count = len - target;
                 if (start + count > len) count = len - start;
                 if (count <= 0) return obj;
+                if (js_typed_array_raw_copy_within(obj, target, start, count)) return obj;
                 int elem_size = 1;
                 switch (ta->element_type) {
                 case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: elem_size = 1; break;
