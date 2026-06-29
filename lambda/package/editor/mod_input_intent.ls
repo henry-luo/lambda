@@ -97,8 +97,12 @@ pub fn dispatch_composition_intent(state, ev) {
 
 fn dispatch_intent_raw(state, ev) =>
   if (ev.input_type == "insertText") {
-    let tx = cmd_insert_text(state, ev.data)
-    if (tx == null) { null } else { mark_typing_history(tx) }
+    let af = if (ev.data == " ") { cmd_autoformat_list(state) } else { null }
+    if (af != null) { af }
+    else {
+      let tx = cmd_insert_text(state, ev.data)
+      if (tx == null) { null } else { mark_typing_history(tx) }
+    }
   }
   else if (ev.input_type == "insertFromPaste" and ev.mime == "text/html") cmd_paste_html(state, ev.html, ev.data)
   else if (ev.input_type == "insertFromPaste") cmd_paste_text(state, ev.data)

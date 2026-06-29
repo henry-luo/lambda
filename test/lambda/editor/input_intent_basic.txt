@@ -150,17 +150,17 @@ true
 true
 "word-delete node caret:"
 true
-"indent intent nested:"
+"indent intent level:"
 true
-"outdent intent top count:"
+"outdent intent level cleared:"
 true
-"indent html intent nested:"
+"indent html intent level:"
 true
-"indent html intent tag:"
+"indent html intent text:"
 true
 "outdent html intent top count:"
 true
-"outdent html intent caret kept:"
+"outdent html intent level cleared:"
 true
 "bold intent stored:"
 true

@@ -215,16 +215,17 @@ let list_doc = node('doc', [node_attrs('list', [{name: 'ordered', value: false}]
 ])])
 let list_state = {doc: list_doc, selection: text_selection(pos([0, 1, 0, 0], 1), pos([0, 1, 0, 0], 1))}
 let tx_indent = cmd_indent_list_item(list_state)
-"indent top count:"; len(node_at(tx_indent.doc_after, [0]).content) == 2
-"indent nested text:"; doc_text(node_at(tx_indent.doc_after, [0, 0, 1, 0])) == "B"
-"indent caret kept:"; tx_indent.sel_after.kind == 'text' and path_equal(tx_indent.sel_after.anchor.path, [0, 0, 1, 0, 0, 0])
+"indent top count:"; len(node_at(tx_indent.doc_after, [0]).content) == 3
+"indent level set:"; attrs_get(node_at(tx_indent.doc_after, [0, 1]).attrs, 'indent') == 1
+"indent text kept:"; doc_text(node_at(tx_indent.doc_after, [0, 1])) == "B"
+"indent caret kept:"; tx_indent.sel_after.kind == 'text' and path_equal(tx_indent.sel_after.anchor.path, [0, 1, 0, 0])
 
-let outdent_state = {doc: tx_indent.doc_after, selection: text_selection(pos([0, 0, 1, 0, 0, 0], 1), pos([0, 0, 1, 0, 0, 0], 1))}
+let outdent_state = {doc: tx_indent.doc_after, selection: text_selection(pos([0, 1, 0, 0], 1), pos([0, 1, 0, 0], 1))}
 let tx_outdent = cmd_outdent_list_item(outdent_state)
 "outdent top count:"; len(node_at(tx_outdent.doc_after, [0]).content) == 3
-"outdent middle text:"; doc_text(node_at(tx_outdent.doc_after, [0, 1])) == "B"
+"outdent level cleared:"; attrs_get(node_at(tx_outdent.doc_after, [0, 1]).attrs, 'indent') == null
 "outdent caret kept:"; tx_outdent.sel_after.kind == 'text' and path_equal(tx_outdent.sel_after.anchor.path, [0, 1, 0, 0])
-"indent first null:"; cmd_indent_list_item({doc: list_doc, selection: node_selection([0, 0])}) == null
+"indent first works:"; attrs_get(cmd_indent_list_item({doc: list_doc, selection: node_selection([0, 0])}).doc_after.content[0].content[0].attrs, 'indent') == 1
 
 let html_list_doc = node('doc', [node('ul', [
   node('li', [text("A")]),
@@ -233,14 +234,14 @@ let html_list_doc = node('doc', [node('ul', [
 ])])
 let html_list_state = {doc: html_list_doc, schema: html5_subset_schema, selection: text_selection(pos([0, 1, 0], 1), pos([0, 1, 0], 1))}
 let tx_html_indent = cmd_indent_list_item(html_list_state)
-"indent html top count:"; len(node_at(tx_html_indent.doc_after, [0]).content) == 2
-"indent html nested tag:"; node_at(tx_html_indent.doc_after, [0, 0, 1]).tag == 'ul'
-"indent html nested text:"; doc_text(node_at(tx_html_indent.doc_after, [0, 0, 1, 0])) == "B"
-"indent html caret kept:"; tx_html_indent.sel_after.kind == 'text' and path_equal(tx_html_indent.sel_after.anchor.path, [0, 0, 1, 0, 0])
-let html_outdent_state = {doc: tx_html_indent.doc_after, schema: html5_subset_schema, selection: text_selection(pos([0, 0, 1, 0, 0], 1), pos([0, 0, 1, 0, 0], 1))}
+"indent html top count:"; len(node_at(tx_html_indent.doc_after, [0]).content) == 3
+"indent html level set:"; attrs_get(node_at(tx_html_indent.doc_after, [0, 1]).attrs, 'indent') == 1
+"indent html text kept:"; doc_text(node_at(tx_html_indent.doc_after, [0, 1])) == "B"
+"indent html caret kept:"; tx_html_indent.sel_after.kind == 'text' and path_equal(tx_html_indent.sel_after.anchor.path, [0, 1, 0])
+let html_outdent_state = {doc: tx_html_indent.doc_after, schema: html5_subset_schema, selection: text_selection(pos([0, 1, 0], 1), pos([0, 1, 0], 1))}
 let tx_html_outdent = cmd_outdent_list_item(html_outdent_state)
 "outdent html top count:"; len(node_at(tx_html_outdent.doc_after, [0]).content) == 3
-"outdent html middle text:"; doc_text(node_at(tx_html_outdent.doc_after, [0, 1])) == "B"
+"outdent html level cleared:"; attrs_get(node_at(tx_html_outdent.doc_after, [0, 1]).attrs, 'indent') == null
 "outdent html caret kept:"; tx_html_outdent.sel_after.kind == 'text' and path_equal(tx_html_outdent.sel_after.anchor.path, [0, 1, 0])
 
 let tx_image = cmd_insert_image(s0, "photo.png", "Photo")

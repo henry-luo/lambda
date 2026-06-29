@@ -6,11 +6,10 @@
 // kinds.
 
 import {
+  attrsGet,
   isNode,
   isText,
   lastIndex,
-  listSet,
-  listSplice,
   node,
   nodeAt,
   nodeAttrs,
@@ -20,9 +19,9 @@ import {
 import { nodeSelection, pos } from '../model/source-pos.js'
 import { stepReplace, stepSetAttr } from '../model/step.js'
 import { txBegin, txSetSelection, txStep } from '../model/transaction.js'
-import { caret } from './sel.js'
+import { caret, selCollapsed } from './sel.js'
 import type { EditorState } from './types.js'
-import type { Attr, Child, Node, Selection, SourcePath, Transaction } from '../model/types.js'
+import type { Attr, AttrValue, Child, Node, Selection, SourcePath, Transaction } from '../model/types.js'
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -40,10 +39,6 @@ function ancestorTag(doc: Node, path: SourcePath, tag: string): SourcePath | nul
 
 function isListNode(n: Child | null): n is Node {
   return n !== null && isNode(n) && (n.tag === 'ul' || n.tag === 'ol' || n.tag === 'list')
-}
-
-function sameListKind(a: Child, b: Child): boolean {
-  return isListNode(a) && isListNode(b) && a.tag === b.tag
 }
 
 // The top-level block index addressed by the current selection, or null.
@@ -86,20 +81,102 @@ export function cmdWrapInList(state: EditorState, kind: 'ul' | 'ol' = 'ul'): Tra
   return txSetSelection(tx, nodeSelection([blockIdx, 0]))
 }
 
-function appendToSublist(prevItem: Node, listNode: Node, item: Child): Node {
-  const kids = prevItem.content
-  const last = kids[kids.length - 1]
-  if (kids.length > 0 && last !== undefined && sameListKind(last, listNode)) {
-    const sub = last as Node
-    const sub2 = withContent(sub, [...sub.content, item])
-    return nodeAttrs(prevItem.tag, prevItem.attrs, listSet(kids, kids.length - 1, sub2))
-  }
-  return nodeAttrs(prevItem.tag, prevItem.attrs, [...kids, nodeAttrs(listNode.tag, listNode.attrs, [item])])
+// Markdown-style list autoformat: typing a space after a line that is exactly a
+// list marker turns the block into a list. "-", "*", "+" → bullet list; "1."
+// (any "N.") → ordered list. The marker text is consumed. Returns null when the
+// block isn't a bare marker. Call this on space-insertion before cmdInsertText.
+const UL_MARKERS = new Set(['-', '*', '+'])
+
+export function cmdAutoformatList(state: EditorState): Transaction | null {
+  const sel = state.selection
+  if (sel === null || sel.kind !== 'text' || !selCollapsed(sel)) return null
+  const p = sel.anchor
+  if (p.path.length < 2) return null
+  const leaf = nodeAt(state.doc, p.path)
+  if (leaf === null || !isText(leaf) || p.offset !== leaf.text.length) return null
+  const blockPath = parentPath(p.path)
+  const block = nodeAt(state.doc, blockPath)
+  if (block === null || !isNode(block)) return null
+  if (block.tag === 'li' || block.tag === 'list_item') return null   // already a list item
+  // the block must be exactly the marker (a single text leaf)
+  if (block.content.length !== 1) return null
+  const only = block.content[0] as Child
+  if (!isText(only)) return null
+  const marker = only.text
+  let ordered: boolean
+  if (UL_MARKERS.has(marker)) ordered = false
+  else if (/^\d+\.$/.test(marker)) ordered = true
+  else return null
+
+  const useHtml = state.schema.entries['ul'] !== undefined
+  const listTag = useHtml ? (ordered ? 'ol' : 'ul') : 'list'
+  const itemTag = useHtml ? 'li' : 'list_item'
+  const listAttrs: Attr[] = (!useHtml && ordered) ? [{ name: 'ordered', value: true }] : []
+  const item = node(itemTag, useHtml ? [] : [node('paragraph', [])])
+  const listNode = nodeAttrs(listTag, listAttrs, [item])
+
+  const parent = parentPath(blockPath)
+  const blockIdx = lastIndex(blockPath)
+  let tx = txBegin(state.doc, sel)
+  tx = txStep(tx, stepReplace(parent, blockIdx, blockIdx + 1, [listNode]))
+  const itemPath = [...parent, blockIdx, 0]
+  const caretPath = useHtml ? itemPath : [...itemPath, 0]
+  return txSetSelection(tx, caret(pos(caretPath, 0)))
 }
 
-// After a list item moves (indent/outdent), keep the caret where it was inside
-// that item — the item's subtree moves intact, so the caret's path relative to
-// the item is preserved. A node selection stays a node selection on the item.
+// Maximum indent level (Word caps around 9; keep it bounded).
+const MAX_INDENT = 8
+
+function listItemIndent(item: Node): number {
+  const v = attrsGet(item.attrs, 'indent')
+  return typeof v === 'number' ? v : 0
+}
+
+// Indent / outdent the current list item by one indent LEVEL — a flat-list model
+// (Word / Google-Docs style). The level is stored as an `indent` attribute and
+// rendered with left-margin; no nested <ul>/<li> is created. Works from any
+// caret position and on the FIRST item; Tab repeats up to MAX_INDENT, Shift-Tab
+// decreases to 0 (which removes the attribute). The caret is untouched because
+// only an attribute changes.
+export function cmdIndentListItem(state: EditorState): Transaction | null {
+  const sel = state.selection
+  const basePath = sel?.kind === 'node' ? sel.path : sel?.kind === 'text' ? sel.anchor.path : null
+  if (sel === null || basePath === null) return null
+  const itemPath = ancestorTag(state.doc, basePath, 'li')
+  if (itemPath === null) return null
+  const item = nodeAt(state.doc, itemPath)
+  if (item === null || !isNode(item)) return null
+  const cur = listItemIndent(item)
+  if (cur >= MAX_INDENT) return null
+  let tx = txBegin(state.doc, sel)
+  tx = txStep(tx, stepSetAttr(itemPath, 'indent', cur + 1))
+  return tx
+}
+
+export function cmdOutdentListItem(state: EditorState): Transaction | null {
+  const sel = state.selection
+  const basePath = sel?.kind === 'node' ? sel.path : sel?.kind === 'text' ? sel.anchor.path : null
+  if (sel === null || basePath === null) return null
+  const itemPath = ancestorTag(state.doc, basePath, 'li')
+  if (itemPath === null) return null
+  const item = nodeAt(state.doc, itemPath)
+  if (item === null || !isNode(item)) return null
+  const cur = listItemIndent(item)
+  if (cur > 0) {
+    // flat model: drop one indent level (null removes the attr at level 0;
+    // cast mirrors invertSetAttr's null handling).
+    const next = cur - 1
+    let tx = txBegin(state.doc, sel)
+    tx = txStep(tx, stepSetAttr(itemPath, 'indent', (next === 0 ? null : next) as AttrValue))
+    return tx
+  }
+  // level 0: fall back to structural un-nesting so nested lists from HTML input
+  // can still be lifted out.
+  return outdentNestedItem(state, sel, itemPath)
+}
+
+// After a structurally-nested item moves on outdent, keep the caret inside it
+// (its subtree moves intact, so the relative path is preserved).
 function reselectMovedItem(sel: Selection, oldItemPath: SourcePath, newItemPath: SourcePath): Selection {
   if (sel.kind === 'text') {
     const rel = sel.anchor.path.slice(oldItemPath.length)
@@ -108,47 +185,14 @@ function reselectMovedItem(sel: Selection, oldItemPath: SourcePath, newItemPath:
   return nodeSelection(newItemPath)
 }
 
-// Indent the current list item — nest it as a sublist under the previous item.
-export function cmdIndentListItem(state: EditorState): Transaction | null {
-  const sel = state.selection
-  const basePath = sel?.kind === 'node' ? sel.path : sel?.kind === 'text' ? sel.anchor.path : null
-  if (sel === null || basePath === null) return null
-  const itemPath = ancestorTag(state.doc, basePath, 'li')
-  if (itemPath === null) return null
-  const listPath = parentPath(itemPath)
-  const itemIndex = lastIndex(itemPath)
-  const listNode = nodeAt(state.doc, listPath)
-  if (listNode === null || !isListNode(listNode) || itemIndex <= 0) return null
-
-  const item = listNode.content[itemIndex] as Child
-  const prevItem = listNode.content[itemIndex - 1] as Child
-  if (!isNode(prevItem)) return null
-  const prev2 = appendToSublist(prevItem, listNode, item)
-  const newItems = listSplice(listSet(listNode.content, itemIndex - 1, prev2), itemIndex, 1, [])
-  const list2 = nodeAttrs(listNode.tag, listNode.attrs, newItems)
-
-  let tx = txBegin(state.doc, sel)
-  tx = txStep(tx, stepReplace(parentPath(listPath), lastIndex(listPath), lastIndex(listPath) + 1, [list2]))
-  // the moved item is the last item of prev2's last child (the sublist)
-  const subIdx = prev2.content.length - 1
-  const sub = prev2.content[subIdx] as Node
-  const movedItemPath = [...listPath, itemIndex - 1, subIdx, sub.content.length - 1]
-  return txSetSelection(tx, reselectMovedItem(sel, itemPath, movedItemPath))
-}
-
 function replaceOrRemoveSublist(parentItem: Node, subIndex: number, sublist: Node): Child[] {
-  if (sublist.content.length === 0) return listSplice(parentItem.content, subIndex, 1, [])
-  return listSet(parentItem.content, subIndex, sublist)
+  if (sublist.content.length === 0) return [...parentItem.content.slice(0, subIndex), ...parentItem.content.slice(subIndex + 1)]
+  return [...parentItem.content.slice(0, subIndex), sublist, ...parentItem.content.slice(subIndex + 1)]
 }
 
-// Outdent the current (nested) list item — lift it out to the grandparent list
-// as a sibling of its parent item.
-export function cmdOutdentListItem(state: EditorState): Transaction | null {
-  const sel = state.selection
-  const basePath = sel?.kind === 'node' ? sel.path : sel?.kind === 'text' ? sel.anchor.path : null
-  if (sel === null || basePath === null) return null
-  const itemPath = ancestorTag(state.doc, basePath, 'li')
-  if (itemPath === null) return null
+// Lift a structurally-nested list item out to its grandparent list (the legacy
+// nested-list outdent). Used only for items that came from nested HTML input.
+function outdentNestedItem(state: EditorState, sel: Selection, itemPath: SourcePath): Transaction | null {
   const listPath = parentPath(itemPath)
   const itemIndex = lastIndex(itemPath)
   const parentItemPath = parentPath(listPath)
@@ -163,11 +207,9 @@ export function cmdOutdentListItem(state: EditorState): Transaction | null {
       !isListNode(listNode) || parentItem.tag !== 'li' || !isListNode(grandList)) {
     return null
   }
-
   const item = listNode.content[itemIndex] as Child
-  const list2 = withContent(listNode, listSplice(listNode.content, itemIndex, 1, []))
+  const list2 = withContent(listNode, [...listNode.content.slice(0, itemIndex), ...listNode.content.slice(itemIndex + 1)])
   const parent2 = nodeAttrs(parentItem.tag, parentItem.attrs, replaceOrRemoveSublist(parentItem, listChildIndex, list2))
-
   let tx = txBegin(state.doc, sel)
   tx = txStep(tx, stepReplace(grandListPath, parentItemIndex, parentItemIndex + 1, [parent2, item]))
   return txSetSelection(tx, reselectMovedItem(sel, itemPath, [...grandListPath, parentItemIndex + 1]))

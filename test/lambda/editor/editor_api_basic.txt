@@ -126,13 +126,13 @@ true
 true
 "exec html delete col:"
 true
-"exec html indent tag:"
+"exec html indent level:"
 true
 "exec html indent text:"
 true
 "exec html outdent count:"
 true
-"exec html outdent caret kept:"
+"exec html outdent level cleared:"
 true
 "dispatch intent doc:"
 true

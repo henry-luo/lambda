@@ -22,6 +22,7 @@ import {
   cmdSetBlockType,
   cmdToggleMark
 } from '../commands/text-commands.js'
+import { cmdAutoformatList } from '../commands/structural-commands.js'
 import { txSetMeta } from '../model/transaction.js'
 import type { EditorState } from '../commands/types.js'
 import type { Transaction } from '../model/types.js'
@@ -64,7 +65,13 @@ function markScrollIntoView(tx: Transaction | null): Transaction | null {
 
 function dispatchIntentRaw(state: EditorState, intent: InputIntent): Transaction | null {
   switch (intent.type) {
-    case 'insertText':            return markTypingHistory(cmdInsertText(state, intent.text))
+    case 'insertText': {
+      if (intent.text === ' ') {
+        const af = cmdAutoformatList(state)
+        if (af !== null) return af
+      }
+      return markTypingHistory(cmdInsertText(state, intent.text))
+    }
     case 'insertParagraph':       return cmdInsertParagraph(state)
     case 'insertLineBreak':       return cmdInsertLineBreak(state)
     case 'deleteContentBackward': return cmdDeleteBackward(state)
