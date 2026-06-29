@@ -3050,7 +3050,7 @@ extern "C" Item js_process_on(Item event_name, Item listener) {
             if (process_exit_listener_count < MAX_PROCESS_LISTENERS) {
                 process_exit_listeners[process_exit_listener_count++] = listener;
             }
-        } else if (ev->len == 18 && memcmp(ev->chars, "uncaughtException", 18) == 0) {
+        } else if (ev->len == 17 && memcmp(ev->chars, "uncaughtException", 17) == 0) {
             if (process_uncaught_listener_count < MAX_PROCESS_LISTENERS) {
                 process_uncaught_listeners[process_uncaught_listener_count++] = listener;
             }
@@ -3190,7 +3190,7 @@ extern "C" Item js_process_removeListener(Item event_name, Item listener) {
         String* ev = it2s(event_name);
         if (ev->len == 4 && memcmp(ev->chars, "exit", 4) == 0) {
             js_process_remove_from_fixed_list(process_exit_listeners, &process_exit_listener_count, listener);
-        } else if (ev->len == 18 && memcmp(ev->chars, "uncaughtException", 18) == 0) {
+        } else if (ev->len == 17 && memcmp(ev->chars, "uncaughtException", 17) == 0) {
             js_process_remove_from_fixed_list(process_uncaught_listeners, &process_uncaught_listener_count, listener);
         }
     }
@@ -3246,7 +3246,7 @@ extern "C" Item js_process_removeAllListeners(Item event_name) {
         String* ev = it2s(event_name);
         if (ev->len == 4 && memcmp(ev->chars, "exit", 4) == 0) {
             process_exit_listener_count = 0;
-        } else if (ev->len == 18 && memcmp(ev->chars, "uncaughtException", 18) == 0) {
+        } else if (ev->len == 17 && memcmp(ev->chars, "uncaughtException", 17) == 0) {
             process_uncaught_listener_count = 0;
         } else if (ev->len == 18 && memcmp(ev->chars, "unhandledRejection", 18) == 0) {
             js_promise_note_unhandled_listener_reset();
