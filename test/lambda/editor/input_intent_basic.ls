@@ -193,22 +193,22 @@ let list_doc = node('doc', [node_attrs('list', [{name: 'ordered', value: false}]
 ])])
 let tx_indent_intent = dispatch_intent({doc: list_doc, selection: text_selection(pos([0, 1, 0, 0], 1), pos([0, 1, 0, 0], 1))},
   {input_type: "formatIndent", data: null})
-"indent intent nested:"; doc_text(node_at(tx_indent_intent.doc_after, [0, 0, 1, 0])) == "B"
-let tx_outdent_intent = dispatch_intent({doc: tx_indent_intent.doc_after, selection: text_selection(pos([0, 0, 1, 0, 0, 0], 1), pos([0, 0, 1, 0, 0, 0], 1))},
+"indent intent level:"; attrs_get(node_at(tx_indent_intent.doc_after, [0, 1]).attrs, 'indent') == 1
+let tx_outdent_intent = dispatch_intent({doc: tx_indent_intent.doc_after, selection: text_selection(pos([0, 1, 0, 0], 1), pos([0, 1, 0, 0], 1))},
   {input_type: "formatOutdent", data: null})
-"outdent intent top count:"; len(node_at(tx_outdent_intent.doc_after, [0]).content) == 2
+"outdent intent level cleared:"; attrs_get(node_at(tx_outdent_intent.doc_after, [0, 1]).attrs, 'indent') == null
 
 let html_list_doc = node('doc', [node('ul', [node('li', [text("A")]), node('li', [text("B")])])])
 let tx_html_indent_intent = dispatch_intent({doc: html_list_doc, schema: html5_subset_schema,
   selection: text_selection(pos([0, 1, 0], 1), pos([0, 1, 0], 1))},
   {input_type: "formatIndent", data: null})
-"indent html intent nested:"; doc_text(node_at(tx_html_indent_intent.doc_after, [0, 0, 1, 0])) == "B"
-"indent html intent tag:"; node_at(tx_html_indent_intent.doc_after, [0, 0, 1]).tag == 'ul'
+"indent html intent level:"; attrs_get(node_at(tx_html_indent_intent.doc_after, [0, 1]).attrs, 'indent') == 1
+"indent html intent text:"; doc_text(node_at(tx_html_indent_intent.doc_after, [0, 1])) == "B"
 let tx_html_outdent_intent = dispatch_intent({doc: tx_html_indent_intent.doc_after, schema: html5_subset_schema,
-  selection: text_selection(pos([0, 0, 1, 0, 0], 1), pos([0, 0, 1, 0, 0], 1))},
+  selection: text_selection(pos([0, 1, 0], 1), pos([0, 1, 0], 1))},
   {input_type: "formatOutdent", data: null})
 "outdent html intent top count:"; len(node_at(tx_html_outdent_intent.doc_after, [0]).content) == 2
-"outdent html intent caret kept:"; tx_html_outdent_intent.sel_after.kind == 'text' and path_equal(tx_html_outdent_intent.sel_after.anchor.path, [0, 1, 0])
+"outdent html intent level cleared:"; attrs_get(node_at(tx_html_outdent_intent.doc_after, [0, 1]).attrs, 'indent') == null
 
 let tx_bold = dispatch_intent(s0, {input_type: "formatBold", data: null})
 "bold intent stored:"; has_mark(tx_get_meta(tx_bold, "storedMarks"), 'strong')

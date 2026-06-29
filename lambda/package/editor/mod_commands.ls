@@ -622,6 +622,60 @@ pub fn cmd_insert_link(state, href, title, label) {
   else { null }
 }
 
+// Normalize pasted lists to the flat indent-level model: a nested list inside a
+// list item is flattened into the parent list, each formerly-nested item carried
+// over as a flat item with an `indent` level equal to its nesting depth (the
+// outer list's kind wins). Idempotent for already-flat lists.
+fn fnl_is_list_tag(tag) => tag == 'ul' or tag == 'ol' or tag == 'list'
+
+fn fnl_attrs_without_at(attrs, name, i, n, acc) {
+  if (i >= n) { acc }
+  else if (attrs[i].name == name) { fnl_attrs_without_at(attrs, name, i + 1, n, acc) }
+  else { fnl_attrs_without_at(attrs, name, i + 1, n, [*acc, attrs[i]]) }
+}
+fn fnl_attrs_without(attrs, name) => fnl_attrs_without_at(attrs, name, 0, len(attrs), [])
+
+fn fnl_split_item(content, i, n, own, subs) {
+  if (i >= n) { {own: own, subs: subs} }
+  else {
+    let c = content[i]
+    if (is_node(c) and fnl_is_list_tag(c.tag)) { fnl_split_item(content, i + 1, n, own, [*subs, c]) }
+    else { fnl_split_item(content, i + 1, n, [*own, c], subs) }
+  }
+}
+
+fn fnl_flatten_list(lst, base) => node_attrs(lst.tag, lst.attrs, fnl_flatten_items(lst.content, base, 0, len(lst.content), []))
+
+fn fnl_append_subs(subs, level, i, n, acc) {
+  if (i >= n) { acc }
+  else { fnl_append_subs(subs, level, i + 1, n, list_concat(acc, fnl_flatten_list(subs[i], level + 1).content)) }
+}
+
+fn fnl_flatten_items(items, base, i, n, acc) {
+  if (i >= n) { acc }
+  else {
+    let item = items[i]
+    if (not is_node(item) or (item.tag != 'li' and item.tag != 'list_item')) {
+      fnl_flatten_items(items, base, i + 1, n, [*acc, item])
+    } else {
+      let sp = fnl_split_item(item.content, 0, len(item.content), [], [])
+      let existing = if (type(attrs_get(item.attrs, 'indent')) == int) { attrs_get(item.attrs, 'indent') } else { 0 }
+      let level = base + existing
+      let base_attrs = fnl_attrs_without(item.attrs, 'indent')
+      let attrs2 = if (level > 0) { [*base_attrs, {name: 'indent', value: level}] } else { base_attrs }
+      let flat_item = node_attrs(item.tag, attrs2, flatten_nested_lists(sp.own))
+      let acc2 = fnl_append_subs(sp.subs, level, 0, len(sp.subs), [*acc, flat_item])
+      fnl_flatten_items(items, base, i + 1, n, acc2)
+    }
+  }
+}
+
+pub fn flatten_nested_lists(children) =>
+  [for (c in children)
+    (if (is_node(c) and fnl_is_list_tag(c.tag)) { fnl_flatten_list(c, 0) }
+     else if (is_node(c)) { node_attrs(c.tag, c.attrs, flatten_nested_lists(c.content)) }
+     else { c })]
+
 pub fn cmd_paste_fragment(state, fragment) {
   let sel = state.selection
   if (sel == null) { null }
@@ -638,7 +692,7 @@ pub fn cmd_paste_fragment(state, fragment) {
     else {
       let blocks = coerce_children(state_schema(state), fragment, 'block')
       if (len(blocks) == 0) { null }
-      else if (len(blocks) == 1 and blocks[0].tag == state_default_block(state)) {
+      else {
         let block_path = find_inline_container_path(state.doc, state_schema(state), lo.path, 0)
         let block = if (block_path == null) { null } else { node_at(state.doc, block_path) }
         if (block == null or not is_node(block)) { cmd_paste_text(state, doc_text(node('fragment', blocks))) }
@@ -649,22 +703,53 @@ pub fn cmd_paste_fragment(state, fragment) {
           let rel_hi = slice(hi.path, len(block_path) + 1, len(hi.path))
           let before = inline_prefix_before_pos(target, rel_lo, lo.offset)
           let after = inline_suffix_after_pos(target, rel_hi, hi.offset)
-          let prefix = list_slice(block.content, 0, top_index)
-          let suffix = list_slice(block.content, top_index + 1, len(block.content))
-          let content0 = list_concat(list_concat(list_concat(list_concat(prefix, before), blocks[0].content), after), suffix)
-          let content1 = if (len(content0) == 0) { [text("")] } else { content0 }
-          let new_block = node_attrs(block.tag, block.attrs, content1)
-          let tx0 = tx_begin(state.doc, sel)
-          let tx1 = tx_step(tx0, step_replace(parent_path(block_path), last_index(block_path), last_index(block_path) + 1, [new_block]))
-          let inserted_count = len(blocks[0].content)
-          let caret_index = if (inserted_count > 0) { len(prefix) + len(before) + inserted_count - 1 }
-            else if (len(prefix) + len(before) > 0) { len(prefix) + len(before) - 1 }
-            else { 0 }
-          let caret_pos = if (inserted_count > 0) { last_caret_pos_in(blocks[0].content[inserted_count - 1], [*block_path, caret_index]) }
-            else { last_caret_pos_in(content1[caret_index], [*block_path, caret_index]) }
-          tx_set_selection(tx1, caret(caret_pos))
+          let head_inline = list_concat(list_slice(block.content, 0, top_index), before)
+          let tail_inline = list_concat(after, list_slice(block.content, top_index + 1, len(block.content)))
+          let first = blocks[0]
+          let last = blocks[len(blocks) - 1]
+          let blk_inl = block_allows_inline(state, block.tag)
+          let merge_first = blk_inl and block_allows_inline(state, first.tag)
+          let merge_last = (len(blocks) > 1) and blk_inl and block_allows_inline(state, last.tag)
+          if (len(blocks) == 1 and merge_first) {
+            // single inline-content block (p/h/li) merges inline — no split
+            let content0 = list_concat(list_concat(head_inline, first.content), tail_inline)
+            let content1 = if (len(content0) == 0) { [text("")] } else { content0 }
+            let new_block = node_attrs(block.tag, block.attrs, content1)
+            let tx0 = tx_begin(state.doc, sel)
+            let tx1 = tx_step(tx0, step_replace(parent_path(block_path), last_index(block_path), last_index(block_path) + 1, [new_block]))
+            let inserted = len(first.content)
+            let caret_index = if (inserted > 0) { len(head_inline) + inserted - 1 }
+              else if (len(head_inline) > 0) { len(head_inline) - 1 }
+              else { 0 }
+            tx_set_selection(tx1, caret(last_caret_pos_in(content1[caret_index], [*block_path, caret_index])))
+          } else {
+            // general open paste: split the block into head + tail; inline-content
+            // first/last blocks merge into the halves, container blocks (ul/ol/
+            // table/blockquote) are inserted as siblings between them
+            let head_content = if (merge_first) { merge_adjacent_text(list_concat(head_inline, first.content)) } else { head_inline }
+            let mstart = if (merge_first) { 1 } else { 0 }
+            let mend = if (merge_last) { len(blocks) - 1 } else { len(blocks) }
+            let middle = list_slice(blocks, mstart, mend)
+            let repl_head = if (len(head_content) > 0) { [node_attrs(block.tag, block.attrs, head_content)] } else { [] }
+            let repl_mid = list_concat(repl_head, middle)
+            let repl = if (merge_last) { list_concat(repl_mid, [node_attrs(block.tag, block.attrs, merge_adjacent_text(list_concat(last.content, tail_inline)))]) }
+              else if (len(tail_inline) > 0) { list_concat(repl_mid, [node_attrs(block.tag, block.attrs, tail_inline)]) }
+              else { repl_mid }
+            if (len(repl) == 0) { null }
+            else {
+              let block_parent = parent_path(block_path)
+              let block_idx = last_index(block_path)
+              let tx0 = tx_begin(state.doc, sel)
+              let tx1 = tx_step(tx0, step_replace(block_parent, block_idx, block_idx + 1, repl))
+              let last_repl_idx = block_idx + len(repl) - 1
+              let last_repl = repl[len(repl) - 1]
+              let caret_pos = if (merge_last or len(tail_inline) > 0) { first_caret_pos_in(last_repl, [*block_parent, last_repl_idx]) }
+                else { last_caret_pos_in(last_repl, [*block_parent, last_repl_idx]) }
+              tx_set_selection(tx1, caret(caret_pos))
+            }
+          }
         }
-      } else { cmd_paste_text(state, doc_text(node('fragment', blocks))) }
+      }
     }
   }
 }
@@ -673,9 +758,9 @@ pub fn cmd_paste_html(state, html, fallback_text) =>
   if (type(html) == string) {
     let parsed = parse_html_fragment(html)
     if (parsed == null) { cmd_paste_text(state, fallback_text) }
-    else { cmd_paste_fragment(state, html_to_editor_fragment_for_schema(state_schema(state), parsed)) }
+    else { cmd_paste_fragment(state, flatten_nested_lists(html_to_editor_fragment_for_schema(state_schema(state), parsed))) }
   }
-  else { cmd_paste_fragment(state, html_to_editor_fragment_for_schema(state_schema(state), html)) }
+  else { cmd_paste_fragment(state, flatten_nested_lists(html_to_editor_fragment_for_schema(state_schema(state), html))) }
 
 // ---------------------------------------------------------------------------
 // cmd_insert_at / cmd_move_node — structural drop commands
@@ -1086,6 +1171,73 @@ fn reselect_moved_item(sel, old_item_path, new_item_path) {
   } else { node_selection(new_item_path) }
 }
 
+fn list_item_indent(item) {
+  let v = attrs_get(item.attrs, 'indent')
+  if (type(v) == int) { v } else { 0 }
+}
+
+// Markdown-style list autoformat: a space typed after a line that is exactly a
+// list marker turns the block into a list. "-"/"*"/"+" -> bullet, "N." -> ordered.
+fn af_all_digits_at(s, i, n) {
+  if (i >= n) { (n > 0) }
+  else {
+    let c = slice(s, i, i + 1)
+    if (c >= "0" and c <= "9") { af_all_digits_at(s, i + 1, n) }
+    else { false }
+  }
+}
+
+fn af_marker_kind(marker) {
+  if (marker == "-" or marker == "*" or marker == "+") { 0 }
+  else {
+    let n = len(marker)
+    if (n >= 2 and slice(marker, n - 1, n) == "." and af_all_digits_at(slice(marker, 0, n - 1), 0, n - 1)) { 1 }
+    else { -1 }
+  }
+}
+
+pub fn cmd_autoformat_list(state) {
+  let sel = state.selection
+  if (sel == null or sel.kind != 'text' or not sel_collapsed(sel)) { null }
+  else {
+    let p = sel.anchor
+    if (len(p.path) < 2) { null }
+    else {
+      let leaf = node_at(state.doc, p.path)
+      if (leaf == null or not is_text(leaf) or p.offset != len(leaf.text)) { null }
+      else {
+        let block_path = parent_path(p.path)
+        let block = node_at(state.doc, block_path)
+        if (block == null or not is_node(block) or block.tag == 'li' or block.tag == 'list_item') { null }
+        else if (len(block.content) != 1 or not is_text(block.content[0])) { null }
+        else {
+          let kind = af_marker_kind(block.content[0].text)
+          if (kind < 0) { null }
+          else {
+            let use_html = state_schema(state).ul != null
+            let list_tag = if (use_html) { if (kind == 1) { 'ol' } else { 'ul' } } else { 'list' }
+            let item_tag = if (use_html) { 'li' } else { 'list_item' }
+            let list_attrs = if (not use_html and kind == 1) { [{name: 'ordered', value: true}] } else { [] }
+            let item_content = if (use_html) { [] } else { [node('paragraph', [])] }
+            let item = node_attrs(item_tag, [], item_content)
+            let list_node = node_attrs(list_tag, list_attrs, [item])
+            let parent = parent_path(block_path)
+            let block_idx = last_index(block_path)
+            let tx1 = tx_step(tx_begin(state.doc, sel), step_replace(parent, block_idx, block_idx + 1, [list_node]))
+            let item_path = [*parent, block_idx, 0]
+            let caret_path = if (use_html) { item_path } else { [*item_path, 0] }
+            tx_set_selection(tx1, caret(pos(caret_path, 0)))
+          }
+        }
+      }
+    }
+  }
+}
+
+// Indent the current list item by one indent LEVEL (flat-list model, Word/Docs
+// style). The level is an `indent` attribute rendered with margin; no nesting is
+// created. Works from any caret position and on the first item; repeats up to 8.
+// The caret is untouched (only an attribute changes).
 pub fn cmd_indent_list_item(state) {
   let sel = state.selection
   if (sel == null) { null }
@@ -1094,22 +1246,12 @@ pub fn cmd_indent_list_item(state) {
     let item_path = ancestor_tag(state.doc, base_path, state_list_item_tag(state))
     if (item_path == null) { null }
     else {
-      let list_path = parent_path(item_path)
-      let item_index = last_index(item_path)
-      let list_node = node_at(state.doc, list_path)
-      if (list_node == null or not is_list_node(list_node) or item_index <= 0) { null }
+      let item = node_at(state.doc, item_path)
+      if (item == null or not is_node(item)) { null }
       else {
-        let item = list_node.content[item_index]
-        let prev_item = list_node.content[item_index - 1]
-        let prev2 = append_to_sublist(prev_item, list_node, item)
-        let new_items = list_splice(list_set(list_node.content, item_index - 1, prev2), item_index, 1, [])
-        let list2 = node_attrs(list_node.tag, list_node.attrs, new_items)
-        let tx0 = tx_begin(state.doc, sel)
-        let tx1 = tx_step(tx0, step_replace(parent_path(list_path), last_index(list_path), last_index(list_path) + 1, [list2]))
-        let sub_idx = len(prev2.content) - 1
-        let sub = prev2.content[sub_idx]
-        let moved_item_path = [*list_path, item_index - 1, sub_idx, len(sub.content) - 1]
-        tx_set_selection(tx1, reselect_moved_item(sel, [*list_path, item_index], moved_item_path))
+        let cur = list_item_indent(item)
+        if (cur >= 8) { null }
+        else { tx_step(tx_begin(state.doc, sel), step_set_attr(item_path, 'indent', cur + 1)) }
       }
     }
   }
@@ -1120,6 +1262,34 @@ fn replace_or_remove_sublist(parent_item, sub_index, sublist) {
   else { list_set(parent_item.content, sub_index, sublist) }
 }
 
+// Lift a structurally-nested list item out to its grandparent list (legacy
+// nested-list outdent). Used only for items that came from nested HTML input.
+fn outdent_nested_item(state, sel, item_path) {
+  let list_path = parent_path(item_path)
+  let item_index = last_index(item_path)
+  let parent_item_path = parent_path(list_path)
+  let grand_list_path = parent_path(parent_item_path)
+  let parent_item_index = last_index(parent_item_path)
+  let list_child_index = last_index(list_path)
+  let list_node = node_at(state.doc, list_path)
+  let parent_item = node_at(state.doc, parent_item_path)
+  let grand_list = node_at(state.doc, grand_list_path)
+  let item_tag = state_list_item_tag(state)
+  if (list_node == null or parent_item == null or grand_list == null or
+      not is_node(list_node) or not is_node(parent_item) or not is_node(grand_list) or
+      not is_list_node(list_node) or parent_item.tag != item_tag or not is_list_node(grand_list)) { null }
+  else {
+    let item = list_node.content[item_index]
+    let list2 = with_content(list_node, list_splice(list_node.content, item_index, 1, []))
+    let parent2 = node_attrs(parent_item.tag, parent_item.attrs, replace_or_remove_sublist(parent_item, list_child_index, list2))
+    let tx0 = tx_begin(state.doc, sel)
+    let tx1 = tx_step(tx0, step_replace(grand_list_path, parent_item_index, parent_item_index + 1, [parent2, item]))
+    tx_set_selection(tx1, reselect_moved_item(sel, item_path, [*grand_list_path, parent_item_index + 1]))
+  }
+}
+
+// Outdent: drop one indent level (flat); at level 0 fall back to structural
+// un-nesting so nested lists from HTML input can still be lifted out.
 pub fn cmd_outdent_list_item(state) {
   let sel = state.selection
   if (sel == null) { null }
@@ -1128,26 +1298,17 @@ pub fn cmd_outdent_list_item(state) {
     let item_path = ancestor_tag(state.doc, base_path, state_list_item_tag(state))
     if (item_path == null) { null }
     else {
-      let list_path = parent_path(item_path)
-      let item_index = last_index(item_path)
-      let parent_item_path = parent_path(list_path)
-      let grand_list_path = parent_path(parent_item_path)
-      let parent_item_index = last_index(parent_item_path)
-      let list_child_index = last_index(list_path)
-      let list_node = node_at(state.doc, list_path)
-      let parent_item = node_at(state.doc, parent_item_path)
-      let grand_list = node_at(state.doc, grand_list_path)
-        let item_tag = state_list_item_tag(state)
-      if (list_node == null or parent_item == null or grand_list == null or
-          not is_node(list_node) or not is_node(parent_item) or not is_node(grand_list) or
-          not is_list_node(list_node) or parent_item.tag != item_tag or not is_list_node(grand_list)) { null }
+      let item = node_at(state.doc, item_path)
+      if (item == null or not is_node(item)) { null }
       else {
-        let item = list_node.content[item_index]
-        let list2 = with_content(list_node, list_splice(list_node.content, item_index, 1, []))
-        let parent2 = node_attrs(parent_item.tag, parent_item.attrs, replace_or_remove_sublist(parent_item, list_child_index, list2))
-        let tx0 = tx_begin(state.doc, sel)
-        let tx1 = tx_step(tx0, step_replace(grand_list_path, parent_item_index, parent_item_index + 1, [parent2, item]))
-        tx_set_selection(tx1, reselect_moved_item(sel, item_path, [*grand_list_path, parent_item_index + 1]))
+        let cur = list_item_indent(item)
+        if (cur > 0) {
+          let next = cur - 1
+          let val = if (next == 0) { null } else { next }
+          tx_step(tx_begin(state.doc, sel), step_set_attr(item_path, 'indent', val))
+        } else {
+          outdent_nested_item(state, sel, item_path)
+        }
       }
     }
   }

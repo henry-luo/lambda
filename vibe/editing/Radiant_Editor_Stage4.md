@@ -73,6 +73,7 @@ Stage 4 is the **rich-text editor** plus the **contract** by which a drawing bec
 
 | Area | Capability |
 |---|---|
+| Rich-text lists | Flat **indent-level** lists (Word/Docs-style Tab/Shift-Tab), markdown autoformat (`- `/`1. `), blank-item lift on Enter, adjacent-list join on Backspace, nested-paste normalization — see §4 |
 | Block kind | One new block type, `<drawing>`, recognised by the flow-doc schema as an **atomic, editable** block embed |
 | Mode model | **Flow mode** (text caret) ↔ **canvas mode** (drawing focused), driven by focus; key bindings and selection swap with the mode |
 | Selection bridging | `node` selection on a `<drawing>` from flow mode; a `multi-node` selection variant for in-canvas multi-select (defined here, consumed in Stage 5) |
@@ -127,9 +128,49 @@ Three seams connect the drawing surface to the rich-text editor. Each is stated 
 
 ---
 
-## 4. Summary
+## 4. Rich-Text List Editing
 
-Stage 4 keeps the rich-text editor the centre of gravity and admits drawings through **one** new block type and a small, well-defined integration surface: an atomic block embed, a focus-driven flow/canvas mode switch, a selection model that bridges text and shapes, and the discipline that every shape edit lowers to the *existing* step algebra. Nothing about history, mapping, templates, or the DOM bridge forks. The full drawing editor — a draw.io-class diagram surface with shapes, connectors, routing, snapping, groups, clipboard, and its own tools and tests — is designed and built in **[Stage 5](Radiant_Editor_Stage5.md)**, slotting in behind the three seams above.
+These are rich-text refinements delivered in Stage 4. The behaviour is authored and verified in the JS reference (`test/editor-js/`, which builds the live `test/html/editor.html`) and mirrored to the Lambda port (`lambda/package/editor/mod_commands.ls`), with the JS↔Lambda oracle keeping them in step.
+
+### 4.1 Indentation: the flat *indent-level* model (decision)
+
+**Decision (2026-06-29): list indentation uses a flat indent-level model (Word / Google-Docs), not nested sub-lists.** A list item carries an integer `indent` attribute; the list stays a single flat `<ul>/<ol>` and the level renders as left-margin. We surveyed the field before deciding:
+
+| Model | Editors | Behaviour | Verdict |
+|---|---|---|---|
+| **Sibling-nesting** (real `<ul><li><ul>` nesting; an item indents only under a preceding sibling) | Notion, Apple Notes, ProseMirror, Tiptap, CKEditor 5 | first item / lone item **can't** indent | rejected — fails "Tab always works" |
+| **Browser wrap** (`execCommand('indent')` wraps in a nested list) | legacy contentEditable / TinyMCE 4 | indenting a first/lone item leaves a **stray empty bullet** | rejected — visible artifact |
+| **Indent levels** (flat list, per-item `indent` attribute + margin) | **Word, Google Docs** | Tab always indents (first item + repeats), Shift-Tab outdents, no stray bullets | **chosen** |
+
+Consequences:
+- **Tab** (`cmd_indent_list_item`) increments `indent` (cap 8); works from any caret position, on the first item, and repeats. The caret is untouched because only an attribute changes.
+- **Shift-Tab** (`cmd_outdent_list_item`) decrements `indent` (the attribute is removed at level 0). At level 0 it **falls back to structural un-nesting**, so genuinely nested lists (e.g. from older content) can still be lifted out.
+- Rendering applies `margin-inline-start` per level; the `indent` attribute round-trips through HTML automatically (numeric-attr coercion). Schema: `li` / `list_item` gain an optional `indent: int` attribute.
+- Tab/Shift-Tab are bound in the editor view; the commands resolve the list item from any caret position, satisfying "no matter where the caret is."
+
+### 4.2 Markdown list autoformat
+
+Typing a space after a line that is **exactly** a list marker converts the block to a list and consumes the marker (`cmd_autoformat_list`, run on space-insertion in the input-intent layer, before text insertion):
+
+- `- ` , `* ` , `+ ` → bullet list (`ul` / `list`)
+- `1. ` (any `N. `) → ordered list (`ol` / `list ordered`)
+
+It only fires when the block is the bare marker (not inside an existing list item), so normal typing is unaffected.
+
+### 4.3 Other list-editing behaviours
+
+- **Enter in a blank list item** lifts it (Mac-Notes style): a level-N item drops to N-1; a level-0 item exits the list as a paragraph (splitting the list if items follow) — `cmd_enter_empty_list_item`, routed from `cmd_split_block`.
+- **Backspace at the start of the second of two adjacent lists** joins them into one (the first list's kind wins), caret at the carried-over item — `cmd_delete_backward` → `join_first_list_item_backward`.
+- **Paste normalization**: pasted HTML containing nested lists is flattened into the indent-level model — each formerly-nested item becomes a flat item with `indent` = its nesting depth (`flatten_nested_lists`, applied in `cmd_paste_html`). Idempotent for already-flat lists.
+- **Block paste / open split**: pasting a container block (a list, table, or blockquote) into the middle of a paragraph **splits** the paragraph at the caret and inserts the block as a sibling between the two halves (`<p>ab</p><ul>…</ul><p>cd</p>`); inline-content blocks (`p`/`h`/`li`) merge into the surrounding halves instead. This "general open paste" is the JS-reference behaviour, now mirrored in the Lambda `cmd_paste_fragment`.
+
+> Tests: `test/lambda/editor/{list_item_enter, list_edit_fixes, list_autoformat, list_paste_normalize}.ls` (Lambda) and the `lists/*` fixtures + command unit tests under `test/editor-js/` (the oracle).
+
+---
+
+## 5. Summary
+
+Stage 4 keeps the rich-text editor the centre of gravity. It hardens rich-text **list editing** (flat indent-level Tab/Shift-Tab, markdown autoformat, blank-item lift, adjacent-list join, paste normalization — §4) and admits drawings through **one** new block type and a small, well-defined integration surface: an atomic block embed, a focus-driven flow/canvas mode switch, a selection model that bridges text and shapes, and the discipline that every shape edit lowers to the *existing* step algebra. Nothing about history, mapping, templates, or the DOM bridge forks. The full drawing editor — a draw.io-class diagram surface with shapes, connectors, routing, snapping, groups, clipboard, and its own tools and tests — is designed and built in **[Stage 5](Radiant_Editor_Stage5.md)**, slotting in behind the three seams above.
 
 ---
 

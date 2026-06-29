@@ -53,7 +53,8 @@ export const html5SubsetEntries: Record<string, SchemaEntry> = {
   li:         {
     role: 'block',
     content: [{ any: [{ role: 'block', qty: 'one' }, { role: 'inline', qty: 'one' }], qty: 'plus' }],
-    marks: 'all'
+    marks: 'all',
+    attrs: [{ name: 'indent', required: false, type: 'int', default: 0 }]
   },
 
   figure:     block([{ any: [{ tag: 'img', qty: 'one' }, { tag: 'figcaption', qty: 'one' }], qty: 'plus' }]),

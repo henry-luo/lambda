@@ -13,7 +13,8 @@ import {
   cmdOutdentListItem,
   cmdResizeImage,
   cmdSetNodeAttr,
-  cmdWrapInList
+  cmdWrapInList,
+  cmdAutoformatList
 } from '../../src/commands/structural-commands.js'
 import { cmdDeleteNode, cmdInsertParagraph } from '../../src/commands/text-commands.js'
 import { attrsGet } from '../../src/model/doc.js'
@@ -62,25 +63,30 @@ describe('cmdWrapInList', () => {
 })
 
 describe('cmdIndentListItem / cmdOutdentListItem', () => {
-  it('indent nests the second item under the first', () => {
+  it('indent sets an indent level on the item (flat model, no nesting)', () => {
     const s = st([node('ul', [node('li', [text('a')]), node('li', [text('b')])])], caret([0, 1, 0], 0))
     const tx = cmdIndentListItem(s)!
     const ul = nodeAt(tx.doc_after, [0]) as any
-    expect(ul.content.length).toBe(1)             // only the first item remains at top
-    const first = ul.content[0]
-    expect(first.tag).toBe('li')
-    // first li now contains its text + a nested <ul> with the moved item
-    const sub = first.content[first.content.length - 1]
-    expect(sub.tag).toBe('ul')
-    expect(sub.content[0].content[0].text).toBe('b')
+    expect(ul.content.length).toBe(2)             // flat: both items stay at top level
+    expect(attrsGet(ul.content[1].attrs, 'indent')).toBe(1)
+    expect(ul.content[1].content[0].text).toBe('b')
   })
 
-  it('indent keeps the caret inside the moved item (any caret position)', () => {
-    // caret in the middle of "bc" — indent must keep the caret in "bc", not select the item
+  it('indent works from any caret position and leaves the caret untouched', () => {
+    // caret in the middle of "bc" — only an attribute changes, so the caret stays put
     const s = st([node('ul', [node('li', [text('a')]), node('li', [text('bc')])])], caret([0, 1, 0], 1))
     const tx = cmdIndentListItem(s)!
-    // moved item now at ul > li(a) > ul > li(bc) → caret in its text leaf, offset preserved
-    expect(tx.sel_after).toEqual(caret([0, 0, 1, 0, 0], 1))
+    expect(tx.sel_after).toEqual(caret([0, 1, 0], 1))
+    expect(attrsGet((nodeAt(tx.doc_after, [0, 1]) as any).attrs, 'indent')).toBe(1)
+  })
+
+  it('indents the first item and repeats (Word/Docs style)', () => {
+    const s = st([node('ul', [node('li', [text('a')]), node('li', [text('b')])])], caret([0, 0, 0], 0))
+    const t1 = cmdIndentListItem(s)!
+    expect(attrsGet((nodeAt(t1.doc_after, [0, 0]) as any).attrs, 'indent')).toBe(1)
+    const s2 = { ...s, doc: t1.doc_after, selection: t1.sel_after }
+    const t2 = cmdIndentListItem(s2)!
+    expect(attrsGet((nodeAt(t2.doc_after, [0, 0]) as any).attrs, 'indent')).toBe(2)
   })
 
   it('indent then outdent round-trips (caret preserved both ways)', () => {
@@ -218,5 +224,40 @@ describe('tables', () => {
   it('cmdDeleteTableRow no-ops when only one row remains', () => {
     const s = st([node('table', [node('tr', [node('td', [text('only')])])])], caret([0, 0, 0, 0], 0))
     expect(cmdDeleteTableRow(s)).toBeNull()
+  })
+})
+
+describe('cmdAutoformatList', () => {
+  it('"- " turns a paragraph into a bullet list', () => {
+    const s = st([node('p', [text('-')])], caret([0, 0], 1))
+    const tx = cmdAutoformatList(s)!
+    expect((nodeAt(tx.doc_after, [0]) as any).tag).toBe('ul')
+    expect((nodeAt(tx.doc_after, [0, 0]) as any).tag).toBe('li')
+    expect((nodeAt(tx.doc_after, [0, 0]) as any).content).toEqual([])
+  })
+
+  it('"1." turns a paragraph into an ordered list', () => {
+    const s = st([node('p', [text('1.')])], caret([0, 0], 2))
+    const tx = cmdAutoformatList(s)!
+    expect((nodeAt(tx.doc_after, [0]) as any).tag).toBe('ol')
+  })
+
+  it('"*" and "+" also start a bullet list; "42." an ordered list', () => {
+    for (const m of ['*', '+']) {
+      const s = st([node('p', [text(m)])], caret([0, 0], m.length))
+      expect((nodeAt(cmdAutoformatList(s)!.doc_after, [0]) as any).tag).toBe('ul')
+    }
+    const s = st([node('p', [text('42.')])], caret([0, 0], 3))
+    expect((nodeAt(cmdAutoformatList(s)!.doc_after, [0]) as any).tag).toBe('ol')
+  })
+
+  it('does not fire when the block has more than the marker', () => {
+    const s = st([node('p', [text('-x')])], caret([0, 0], 2))
+    expect(cmdAutoformatList(s)).toBeNull()
+  })
+
+  it('does not fire inside an existing list item', () => {
+    const s = st([node('ul', [node('li', [text('-')])])], caret([0, 0, 0], 1))
+    expect(cmdAutoformatList(s)).toBeNull()
   })
 })

@@ -186,29 +186,31 @@ true
 true
 "indent top count:"
 true
-"indent nested text:"
+"indent level set:"
+true
+"indent text kept:"
 true
 "indent caret kept:"
 true
 "outdent top count:"
 true
-"outdent middle text:"
+"outdent level cleared:"
 true
 "outdent caret kept:"
 true
-"indent first null:"
+"indent first works:"
 true
 "indent html top count:"
 true
-"indent html nested tag:"
+"indent html level set:"
 true
-"indent html nested text:"
+"indent html text kept:"
 true
 "indent html caret kept:"
 true
 "outdent html top count:"
 true
-"outdent html middle text:"
+"outdent html level cleared:"
 true
 "outdent html caret kept:"
 true

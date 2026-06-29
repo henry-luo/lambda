@@ -54,6 +54,13 @@ function RenderElement({ doc, node, path }: RenderElementProps): React.ReactElem
   if (node.tag === 'doc') {
     props['className'] = 'rdt-editor'
   }
+  // List-item indent level → left margin (flat indent model). Drop the raw
+  // `indent` attribute so it doesn't render as an invalid DOM attribute.
+  if (node.tag === 'li' || node.tag === 'list_item') {
+    const indent = typeof props['indent'] === 'number' ? (props['indent'] as number) : 0
+    delete props['indent']
+    if (indent > 0) props['style'] = { marginInlineStart: `${indent * 1.75}em` }
+  }
   let children: React.ReactNode
   if (node.content.length === 0) {
     // Empty container blocks render a <br> so contentEditable gives them a

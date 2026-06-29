@@ -154,12 +154,12 @@ let html_list_editor = edit_open(node('doc', [node('ul', [
 	node('li', [text("B")])
 ])]), editor_schemas.html5_subset, text_selection(pos([0, 1, 0], 1), pos([0, 1, 0], 1)))
 let html_indent_editor = edit_exec(html_list_editor, edit_cmd_indent_list_item())
-"exec html indent tag:"; node_at(html_indent_editor.doc, [0, 0, 1]).tag == 'ul'
-"exec html indent text:"; doc_text(node_at(html_indent_editor.doc, [0, 0, 1, 0])) == "B"
+"exec html indent level:"; attrs_get(node_at(html_indent_editor.doc, [0, 1]).attrs, 'indent') == 1
+"exec html indent text:"; doc_text(node_at(html_indent_editor.doc, [0, 1])) == "B"
 let html_outdent_editor = edit_exec(edit_open(html_indent_editor.doc, editor_schemas.html5_subset,
-	text_selection(pos([0, 0, 1, 0, 0], 1), pos([0, 0, 1, 0, 0], 1))), edit_cmd_outdent_list_item())
+	text_selection(pos([0, 1, 0], 1), pos([0, 1, 0], 1))), edit_cmd_outdent_list_item())
 "exec html outdent count:"; len(node_at(html_outdent_editor.doc, [0]).content) == 2
-"exec html outdent caret kept:"; html_outdent_editor.selection.kind == 'text' and path_equal(html_outdent_editor.selection.anchor.path, [0, 1, 0])
+"exec html outdent level cleared:"; attrs_get(node_at(html_outdent_editor.doc, [0, 1]).attrs, 'indent') == null
 
 let intent_editor = edit_dispatch(editor0, {input_type: "insertText", data: "?"})
 "dispatch intent doc:"; doc_text(intent_editor.doc) == "Hello?"

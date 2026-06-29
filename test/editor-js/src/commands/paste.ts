@@ -12,7 +12,7 @@
 // A non-collapsed selection within a single leaf is deleted first. Multi-leaf
 // ranges and node/doc-root positions are not handled (returns null).
 
-import { isNode, isText, node, nodeAt, parentPath, lastIndex, withContent } from '../model/doc.js'
+import { attrsGet, isNode, isText, node, nodeAt, parentPath, lastIndex, withContent } from '../model/doc.js'
 import { stepReplace } from '../model/step.js'
 import { charLen, caretPosInContent, mergeInlines } from '../model/inline.js'
 import { isBlockTag, schemaAllowsInline } from '../model/schema.js'
@@ -59,8 +59,42 @@ function normalizeSlice(slice: Child[], schema: Schema): Slice | null {
     else pending.push(c)
   }
   flush()
-  const wrapped = wrapBareListItems(blocks)
+  const wrapped = normalizeNestedLists(wrapBareListItems(blocks)) as Node[]
   return wrapped.length ? { kind: 'block', blocks: wrapped } : null
+}
+
+// Normalize pasted lists to our flat indent-level model: a nested <ul>/<ol>/<list>
+// inside a list item is flattened into the parent list, each formerly-nested item
+// carried over as a flat item with an `indent` level equal to its nesting depth
+// (the outer list's kind wins). Idempotent for already-flat lists.
+function isListTag(tag: string): boolean { return tag === 'ul' || tag === 'ol' || tag === 'list' }
+
+function flattenList(list: Node, base: number): Node {
+  const out: Child[] = []
+  for (const item of list.content) {
+    if (!isNode(item) || (item.tag !== 'li' && item.tag !== 'list_item')) { out.push(item); continue }
+    const own: Child[] = []
+    const subs: Node[] = []
+    for (const c of item.content) {
+      if (isNode(c) && isListTag(c.tag)) subs.push(c)
+      else own.push(c)
+    }
+    const existing = typeof attrsGet(item.attrs, 'indent') === 'number' ? (attrsGet(item.attrs, 'indent') as number) : 0
+    const level = base + existing
+    const baseAttrs = item.attrs.filter(a => a.name !== 'indent')
+    const attrs = level > 0 ? [...baseAttrs, { name: 'indent' as const, value: level }] : baseAttrs
+    out.push({ kind: 'node', tag: item.tag, attrs, content: normalizeNestedLists(own) })
+    for (const sub of subs) out.push(...flattenList(sub, level + 1).content)
+  }
+  return { kind: 'node', tag: list.tag, attrs: list.attrs, content: out }
+}
+
+function normalizeNestedLists(children: Child[]): Child[] {
+  return children.map(c => {
+    if (!isNode(c)) return c
+    if (isListTag(c.tag)) return flattenList(c, 0)
+    return withContent(c, normalizeNestedLists(c.content))
+  })
 }
 
 // Position at the end of a node's last text leaf (descends; node position if empty).
