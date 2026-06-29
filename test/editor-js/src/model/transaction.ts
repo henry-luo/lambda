@@ -105,6 +105,14 @@ export function selMap(step: Step, sel: Selection): Selection {
       }
       return { kind: 'multi-node', paths: survivors }
     }
+    case 'gap': {
+      // Map the gap's container position (its index can shift when siblings are
+      // inserted/removed before it).
+      const container = sel.path.slice(0, -1)
+      const index = sel.path[sel.path.length - 1] ?? 0
+      const mapped = stepMap(step, pos(container, index))
+      return { kind: 'gap', path: [...mapped.path, mapped.offset] }
+    }
   }
 }
 

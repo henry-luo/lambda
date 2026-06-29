@@ -14,6 +14,7 @@
 import { isNode, isText, lastIndex, node, nodeAt, nodeAttrs, parentPath, withContent } from '../model/doc.js'
 import { pos, posEqual, textSelection } from '../model/source-pos.js'
 import { charLen, caretPosInContent, mergeInlines } from '../model/inline.js'
+import { cmdInsertTextAtGap, cmdDeleteAtGap } from './gap-cursor.js'
 import {
   hasMark,
   stepReplace,
@@ -239,6 +240,7 @@ function joinBlockBackward(state: EditorState, blockPath: SourcePath): Transacti
 export function cmdInsertText(state: EditorState, txt: string): Transaction | null {
   const sel = state.selection
   if (sel === null) return null
+  if (sel.kind === 'gap') return cmdInsertTextAtGap(state, txt)
   if (!selIsText(sel)) return null
   // Cross-leaf / cross-block range: delete it first, then insert at the caret.
   if (!selSingleLeaf(sel)) {
@@ -290,7 +292,9 @@ export function cmdInsertText(state: EditorState, txt: string): Transaction | nu
 
 export function cmdInsertParagraph(state: EditorState): Transaction | null {
   const sel = state.selection
-  if (sel === null || !selIsText(sel)) return null
+  if (sel === null) return null
+  if (sel.kind === 'gap') return cmdInsertTextAtGap(state, '')
+  if (!selIsText(sel)) return null
 
   // If non-collapsed, delete first then split at lo.
   if (!selCollapsed(sel)) {
@@ -478,6 +482,7 @@ function deleteBackwardAt(state: EditorState, p: SourcePos): Transaction | null 
 export function cmdDeleteBackward(state: EditorState): Transaction | null {
   const sel = state.selection
   if (sel === null) return null
+  if (sel.kind === 'gap') return cmdDeleteAtGap(state, false)
   if (sel.kind === 'node') return cmdDeleteNode(state)
   if (!selIsText(sel)) return null
   // Resolve endpoints so a selection that spans only a block boundary collapses
@@ -563,6 +568,7 @@ function deleteForwardAt(state: EditorState, p: SourcePos): Transaction | null {
 export function cmdDeleteForward(state: EditorState): Transaction | null {
   const sel = state.selection
   if (sel === null) return null
+  if (sel.kind === 'gap') return cmdDeleteAtGap(state, true)
   if (sel.kind === 'node') return cmdDeleteNode(state)
   if (!selIsText(sel)) return null
   const lo = resolvePos(state.doc, selLo(sel))

@@ -12,7 +12,7 @@
 
 ## 0. TL;DR
 
-**Scope.** Promote the editor from "structured text only" to "structured text **with** structured drawings". Add a single new block type — `<drawing>` — that, when focused, switches the editor into a **canvas mode** with its own tool palette, hit-test, selection, and key bindings, while leaving the surrounding flow document under the existing ProseMirror-shaped text editor.
+**Scope.** Promote the editor from "structured text only" to "structured text **with** structured drawings". Add a single new block type — `<drawing>` — that, when focused, switches the editor into a **canvas mode** with its own tool palette, hit-test, selection, and key bindings, while leaving the surrounding flow document under the existing ProseMirror-shaped text editor. Stage 4 also closes the highest-priority **rich-text parity gaps** vs ProseMirror/Slate/Lexical — input rules, gap cursor, inline atoms, full table editing, drag-and-drop, and inline link editing (§5).
 
 **The big four design choices (locked from preceding decisions):**
 
@@ -74,6 +74,7 @@ Stage 4 is the **rich-text editor** plus the **contract** by which a drawing bec
 | Area | Capability |
 |---|---|
 | Rich-text lists | Flat **indent-level** lists (Word/Docs-style Tab/Shift-Tab), markdown autoformat (`- `/`1. `), blank-item lift on Enter, adjacent-list join on Backspace, nested-paste normalization — see §4 |
+| Rich-text parity | Input rules (markdown shortcuts), gap cursor, inline atom nodes, full table editing (cell select / merge-split / col-resize), drag-and-drop, inline link editing — see §5 |
 | Block kind | One new block type, `<drawing>`, recognised by the flow-doc schema as an **atomic, editable** block embed |
 | Mode model | **Flow mode** (text caret) ↔ **canvas mode** (drawing focused), driven by focus; key bindings and selection swap with the mode |
 | Selection bridging | `node` selection on a `<drawing>` from flow mode; a `multi-node` selection variant for in-canvas multi-select (defined here, consumed in Stage 5) |
@@ -168,9 +169,54 @@ It only fires when the block is the bare marker (not inside an existing list ite
 
 ---
 
-## 5. Summary
+## 5. Rich-Text Editing Roadmap — Parity Features
 
-Stage 4 keeps the rich-text editor the centre of gravity. It hardens rich-text **list editing** (flat indent-level Tab/Shift-Tab, markdown autoformat, blank-item lift, adjacent-list join, paste normalization — §4) and admits drawings through **one** new block type and a small, well-defined integration surface: an atomic block embed, a focus-driven flow/canvas mode switch, a selection model that bridges text and shapes, and the discipline that every shape edit lowers to the *existing* step algebra. Nothing about history, mapping, templates, or the DOM bridge forks. The full drawing editor — a draw.io-class diagram surface with shapes, connectors, routing, snapping, groups, clipboard, and its own tools and tests — is designed and built in **[Stage 5](Radiant_Editor_Stage5.md)**, slotting in behind the three seams above.
+§4 hardens list editing; this section adds the remaining **core rich-text** capabilities that ProseMirror / Slate / Lexical / TipTap / BlockSuite have and ours does not yet. A 2026-06-29 gap analysis (grounded in our actual command surface and input pipeline) surfaced sixteen differences; the **six below are in Stage-4 scope** — authored in the JS reference (`test/editor-js/`, which builds `test/html/editor.html`) and mirrored to the Lambda port via the oracle. IME/composition input, real-time collaboration, and the lower-priority UX/architecture items are **deferred** (§5.7).
+
+| # | Feature | Reference editors | Where it lives | Headless-testable? |
+|---|---|---|---|---|
+| 1 | **Input rules** (markdown shortcuts beyond lists) | PM, TipTap, Lexical, BlockSuite | input-intent layer | yes |
+| 2 | **Gap cursor** (caret around block atoms) | PM `GapCursor` | selection model + view | mostly yes |
+| 3 | **Inline atom nodes** (mentions, emoji, inline math) | PM, Slate, Lexical | schema + render | yes |
+| 4 | **Full table editing** (cell selection, merge/split, col-resize) | prosemirror-tables, BlockSuite | selection + commands | cell ops yes / resize live |
+| 5 | **Drag-and-drop** (block reorder, selection move, file drop) | Editor.js, BlockSuite, PM, Slate | view + `cmd_move_node` | model yes / gesture live |
+| 6 | **Inline link-editing UX** (hover-card edit/remove) | PM, TipTap, Slate | view only | live-session |
+
+**Priority / sequencing.** (1) Input rules — cheap, high daily value, and a direct generalization of the existing list autoformat. (2) Gap cursor + (3) inline atoms next — both pair with the `<drawing>` block embed (you need a gap to caret around it; inline atoms share its atomic-node machinery). (4) Table editing and (5) drag-and-drop build on the existing step algebra and `MultiNodeSelection` (§2.2). (6) Link UX last — pure view sugar over the existing `link` mark.
+
+### 5.1 Input rules (markdown shortcuts) — *priority 1*
+
+**Gap.** Only lists autoformat today (§4.2). **Reference:** PM `inputrules`, TipTap, Lexical, BlockSuite auto-convert `# `→heading, `> `→quote, ` ``` `→code block, `---`→hr, `**x**`/`*x*`→bold/italic, `~~x~~`→strike. **Approach.** Generalize the existing space-triggered autoformat hook into an **input-rule table**: each rule is a regex over the text before the caret plus a command. Block rules fire on space (`# `, `> `); inline-wrap rules fire on the closing delimiter (`**bold**` resolves when the second `*` is typed). Each compiles to existing commands (`cmdSetBlockType`, `cmdToggleMark`, a small `cmdInsertHr`). **Test/port.** Fully headless and oracle-convertible (deterministic text→tx); same hook point as `cmd_autoformat_list` in Lambda.
+
+### 5.2 Gap cursor — *priority 2*
+
+**Gap.** There is no caret position where there's no text — before the first block, between two block atoms (image, table, hr, **`<drawing>`**), or after the last — so navigation can get "stuck" around atoms. **Reference:** PM `GapCursor`. **Approach.** A new selection variant `gap` — `{ kind: 'gap', path, side: 'before' | 'after' }` — rendered as a thin caret between blocks. Arrow/click navigation that lands between two atoms or at a doc edge resolves to a `gap`; typing at a gap inserts a paragraph and moves the caret in. Touches `mod_source_pos` (the variant), `cmdMoveCaret` (resolution), and the view (caret render). **Test/port.** Selection resolution + typing-at-gap are headless; the visual caret is live-session. Pairs directly with the `<drawing>` embed (§1) — a gap is how you caret before/after it.
+
+### 5.3 Inline atom nodes — *priority 3*
+
+**Gap.** Inline content is `TextLeaf` + marks only — no non-text inline leaves. **Reference:** PM inline atoms, Slate inline voids, Lexical decorator nodes (@mentions, emoji-as-node, inline math, smart chips). **Approach.** Add an **inline-atom node kind** (`inline: true, atomic: true` schema flag) carried in a block's `content` beside text leaves — the *inline* analogue of the `<drawing>` *block* atom, reusing the same atomic-editable/selectable schema machinery. `SourcePos` already handles it (child index, `offset` 0); insert/delete are existing `replace` steps (this generalizes today's inline `<img>`/`<br>` handling, incl. `delete_forward_at_leaf_end`); caret movement skips it as one unit; selection over it is the existing `node` variant. The work is the **schema entries + render templates + atomic caret-skip**. **Test/port.** Insert / delete / caret-skip fixtures are headless and oracle-convertible.
+
+### 5.4 Full table editing — *priority 4*
+
+**Gap.** We ship add/delete row & column (`cmdAddTableRow/Column`, `cmdDeleteTableRow/Column`); missing are cell-range selection, merge/split, and column resize. **Reference:** `prosemirror-tables`, BlockSuite. **Approach.** (a) **Cell selection** — a `cell-range` variant (a rectangular cell block: anchor cell + head cell → rect), a table-constrained cousin of `MultiNodeSelection`, resolved in the dom-bridge. (b) **Merge / split** — `cmd_merge_cells` sets `colspan`/`rowspan` on the anchor cell and removes the covered cells (`set_attr` + `replace`); `cmd_split_cell` inverts — pure step algebra, so undo is free. (c) **Column resize** — a `width` attr + a drag handle (`set_attr` on drag-end). **Test/port.** Cell selection + merge/split are headless fixtures; the column-resize drag is live-session.
+
+### 5.5 Drag-and-drop — *priority 5*
+
+**Gap.** Only image-resize exists; no drag-and-drop. **Reference:** Editor.js / BlockSuite (block-reorder handles), PM / Slate (drag-move a selection). **Approach.** The model already supports the moves — a block move is a `replace` (remove + insert) in one transaction; add a `cmdMoveNode(fromPath, toIndex)` command. Add the **view plumbing**: a per-block drag handle (HTML5 DnD) → on drop, compute the target index → move tx; drag-move of a text selection = serialize the slice on `dragstart`, then delete-at-source + paste-at-target on `drop` (reuse `cmdPasteSlice` + range delete); external file drop reuses the `image/*` reader already in the paste handler. A drop-target indicator is a view decoration. **Test/port.** `cmdMoveNode` fixtures are headless; the gesture is live-session. Dragging a `MultiNodeSelection` (§2.2) is the multi-block / multi-shape case.
+
+### 5.6 Inline link-editing UX — *priority 6*
+
+**Gap.** Links are added via `window.prompt`; there's no inline edit / visit / remove. **Reference:** PM, TipTap, Slate inline link cards. **Approach.** View-only — the `link` mark already carries the href. When the caret enters (or hovers) a `link`-marked run, show a popover — **reusing the `ColorPalette` popover pattern already built in `full-editor.tsx`** — with the URL, an edit field, Visit, and Remove (`cmdRemoveMark(s, 'link')`). No model change. **Test/port.** A live-session demo integration test.
+
+### 5.7 Deferred (out of Stage 4)
+
+Consciously deferred from the same gap analysis: **IME / composition input** (CJK, dead keys, accents — `beforeinput`-only today; needs `compositionstart/update/end` + `isComposing` handling, live-session-only to test); **real-time collaboration** (CRDT/OT + remote cursors) — note the step algebra is *already* collab-ready (stable-id + `set_attr`/`replace`, §3), so this is a future bolt-on rather than a redesign — plus a **UI decoration layer** (placeholder text, search-match highlight, remote cursors, lint squiggles), **task lists / checkboxes**, **slash / @-mention menus**, **code-block syntax highlighting**, **find & replace**, a **read-only / view-mode toggle**, **mobile/touch affordances**, and a general **plugin / extension API**.
+
+---
+
+## 6. Summary
+
+Stage 4 keeps the rich-text editor the centre of gravity. It hardens rich-text **list editing** (flat indent-level Tab/Shift-Tab, markdown autoformat, blank-item lift, adjacent-list join, paste normalization — §4), closes the core **rich-text parity gaps** (§5 — input rules, gap cursor, inline atom nodes, full table editing, drag-and-drop, inline link editing), and admits drawings through **one** new block type and a small, well-defined integration surface: an atomic block embed, a focus-driven flow/canvas mode switch, a selection model that bridges text and shapes, and the discipline that every shape edit lowers to the *existing* step algebra. Nothing about history, mapping, templates, or the DOM bridge forks. The full drawing editor — a draw.io-class diagram surface with shapes, connectors, routing, snapping, groups, clipboard, and its own tools and tests — is designed and built in **[Stage 5](Radiant_Editor_Stage5.md)**, slotting in behind the three seams above.
 
 ---
 

@@ -75,6 +75,15 @@ export const html5SubsetEntries: Record<string, SchemaEntry> = {
 
   hr:         { role: 'block', content: [], marks: 'none', atomic: true, selectable: true },
   br:         { role: 'inline', content: [], marks: 'none', atomic: true },
+  // An inline atom (mention chip): non-text, atomic, selectable — the general
+  // form that @mentions / emoji / inline-math share.
+  mention:    inlineLeaf({
+    selectable: true,
+    attrs: [
+      { name: 'id', required: false, type: 'string', default: '' },
+      { name: 'label', required: true, type: 'string' }
+    ]
+  }),
   img:        inlineLeaf({
     selectable: true,
     draggable: true,
