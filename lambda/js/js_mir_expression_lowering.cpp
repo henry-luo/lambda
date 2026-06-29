@@ -5855,8 +5855,6 @@ bool jm_is_console_log(JsCallNode* call) {
     int pl = (int)prop->name->len;
     const char* pn = prop->name->chars;
     return (pl == 3 && strncmp(pn, "log", 3) == 0) ||
-           (pl == 5 && strncmp(pn, "error", 5) == 0) ||
-           (pl == 4 && strncmp(pn, "warn", 4) == 0) ||
            (pl == 5 && strncmp(pn, "debug", 5) == 0) ||
            (pl == 4 && strncmp(pn, "info", 4) == 0);
 }
@@ -12430,6 +12428,15 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // v29 TDZ: Propagate is_let_const from parent scope var entries to captures.
         // This runs in the parent's scope where var entries are available.
         for (int ci = 0; ci < fc->capture_count; ci++) {
+            if (!fc->captures[ci].is_nfe_binding && fc->captures[ci].scope_env_slot < 0 &&
+                mt->current_fc && mt->current_fc->has_scope_env && mt->current_fc->scope_env_names) {
+                for (int s = 0; s < mt->current_fc->scope_env_count; s++) {
+                    if (strcmp(fc->captures[ci].name, mt->current_fc->scope_env_names[s]) == 0) {
+                        fc->captures[ci].scope_env_slot = s;
+                        break;
+                    }
+                }
+            }
             JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
             if (cv && cv->is_let_const) {
                 fc->captures[ci].is_let_const = true;
@@ -12638,6 +12645,15 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
     MIR_reg_t fn_reg;
     if (fc->capture_count > 0) {
         for (int ci = 0; ci < fc->capture_count; ci++) {
+            if (!fc->captures[ci].is_nfe_binding && fc->captures[ci].scope_env_slot < 0 &&
+                mt->current_fc && mt->current_fc->has_scope_env && mt->current_fc->scope_env_names) {
+                for (int s = 0; s < mt->current_fc->scope_env_count; s++) {
+                    if (strcmp(fc->captures[ci].name, mt->current_fc->scope_env_names[s]) == 0) {
+                        fc->captures[ci].scope_env_slot = s;
+                        break;
+                    }
+                }
+            }
             JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
             if (!fc->captures[ci].is_nfe_binding &&
                 cv && cv->in_scope_env && cv->scope_env_reg == mt->scope_env_reg &&

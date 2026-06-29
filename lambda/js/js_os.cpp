@@ -555,7 +555,11 @@ extern "C" Item js_os_networkInterfaces(void) {
 }
 
 // os.userInfo() — returns user information
-extern "C" Item js_os_userInfo(void) {
+extern "C" Item js_os_userInfo(Item options) {
+    if (get_type_id(options) == LMD_TYPE_MAP) {
+        js_property_get(options, make_string_item("encoding"));
+        if (js_check_exception()) return ItemNull;
+    }
     Item obj = js_new_object();
 #ifdef _WIN32
     const char* username = shell_getenv("USERNAME");
@@ -658,7 +662,7 @@ extern "C" Item js_get_os_namespace(void) {
     js_os_set_method(os_namespace, "release",           (void*)js_os_release, 0);
     js_os_set_method(os_namespace, "version",           (void*)js_os_version, 0);
     js_os_set_method(os_namespace, "networkInterfaces", (void*)js_os_networkInterfaces, 0);
-    js_os_set_method(os_namespace, "userInfo",          (void*)js_os_userInfo, 0);
+    js_os_set_method(os_namespace, "userInfo",          (void*)js_os_userInfo, 1);
     js_os_set_method(os_namespace, "loadavg",           (void*)js_os_loadavg, 0);
     js_os_set_method(os_namespace, "machine",           (void*)js_os_machine, 0);
     js_os_set_method(os_namespace, "availableParallelism", (void*)js_os_availableParallelism, 0);

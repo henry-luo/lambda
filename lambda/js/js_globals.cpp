@@ -2522,6 +2522,19 @@ extern "C" Item js_process_set_exitCode(Item code_item) {
     return make_js_undefined();
 }
 
+extern "C" int js_process_current_exit_code(void) {
+    int code = js_process_exit_code_value;
+    if (js_process_object.item != ITEM_NULL) {
+        Item prop = js_property_get(js_process_object,
+            (Item){.item = s2it(heap_create_name("exitCode", 8))});
+        TypeId type = get_type_id(prop);
+        if (type == LMD_TYPE_INT) code = (int)it2i(prop);
+        else if (type == LMD_TYPE_FLOAT) code = (int)it2d(prop);
+    }
+    js_process_exit_code_value = code;
+    return code;
+}
+
 // process.uptime()
 extern "C" Item js_process_uptime(void) {
     static double start_time = 0;
@@ -14871,6 +14884,10 @@ extern "C" Item js_get_global_this() {
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("CSS", 3))}, js_get_css_object_value());
         extern Item js_get_crypto_namespace(void);
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("crypto", 6))}, js_get_crypto_namespace());
+        extern Item js_get_os_namespace(void);
+        extern Item js_get_vm_namespace(void);
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("os", 2))}, js_get_os_namespace());
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("vm", 2))}, js_get_vm_namespace());
 
         // populate global functions as own properties
         static const struct { const char* name; int len; int param_count; } global_fns[] = {

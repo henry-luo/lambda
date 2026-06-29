@@ -245,8 +245,9 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
         }
         if (!existing) existing = jm_find_var(mt, name);
         if (existing) {
-            // v15: In generators, preserve env slot info from hoisted variables
-            if (mt->in_generator && existing->from_env &&
+            // Preserve env slot info from predeclared TDZ/hoisted bindings so
+            // closures keep observing the same lexical cell after initialization.
+            if (existing->from_env &&
                 (existing_in_target_scope || existing->tdz_active || existing->from_hoist)) {
                 entry.var.from_env = true;
                 entry.var.env_slot = existing->env_slot;

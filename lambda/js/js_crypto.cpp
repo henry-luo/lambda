@@ -1667,6 +1667,11 @@ static Item crypto_throw_hash_finalized(void) {
     return js_throw_error_with_code("ERR_CRYPTO_HASH_FINALIZED", "Digest already called");
 }
 
+static Item crypto_throw_invalid_xof_length(void) {
+    return js_throw_error_with_code("ERR_OSSL_EVP_NOT_XOF_OR_INVALID_LENGTH",
+        "error:030000B2:digital envelope routines::not XOF or invalid length");
+}
+
 extern "C" Item js_hash_update(Item data_item, Item encoding_item) {
     Item self = js_get_current_this();
     Item ctx_item = js_property_get(self, make_string_item_crypto("__hash_ctx__"));
@@ -1787,19 +1792,29 @@ extern "C" Item js_hash_read(void) {
 }
 
 static Item js_hash_make_object(HashCtx* ctx);
+static bool crypto_hash_output_length_from_options(const char* alg, Item options_item,
+                                                   int default_len, int* out_len,
+                                                   bool* has_output_len);
 
 extern "C" Item js_hash_copy(Item options_item) {
-    (void)options_item;
     Item self = js_get_current_this();
     Item ctx_item = js_property_get(self, make_string_item_crypto("__hash_ctx__"));
     if (ctx_item.item == 0 || ctx_item.item == ITEM_NULL) return crypto_throw_hash_finalized();
     HashCtx* ctx = (HashCtx*)(uintptr_t)it2i(ctx_item);
     if (!ctx || ctx->finalized) return crypto_throw_hash_finalized();
 
+    int output_len = ctx->output_len;
+    bool has_output_len = false;
+    int default_len = crypto_digest_len_for_name(ctx->alg);
+    if (!crypto_hash_output_length_from_options(ctx->alg, options_item, default_len,
+            &output_len, &has_output_len)) {
+        return ItemNull;
+    }
+
     HashCtx* copy = (HashCtx*)mem_calloc(1, sizeof(HashCtx), MEM_CAT_JS_RUNTIME);
     crypto_track_hash_context(copy);
     memcpy(copy->alg, ctx->alg, strlen(ctx->alg) + 1);
-    copy->output_len = ctx->output_len;
+    copy->output_len = has_output_len ? output_len : ctx->output_len;
     if (ctx->data_len > 0) {
         copy->data = (uint8_t*)mem_alloc((size_t)ctx->data_len, MEM_CAT_JS_RUNTIME);
         memcpy(copy->data, ctx->data, (size_t)ctx->data_len);
@@ -1861,11 +1876,29 @@ static bool crypto_hash_output_length_from_options(const char* alg, Item options
     if (!out_len || !has_output_len) return false;
     *out_len = default_len;
     *has_output_len = false;
-    if (crypto_item_is_undefined(options_item) || get_type_id(options_item) == LMD_TYPE_NULL) return true;
-    if (get_type_id(options_item) != LMD_TYPE_MAP) return true;
+    if (crypto_item_is_undefined(options_item) || get_type_id(options_item) == LMD_TYPE_NULL) {
+        if (crypto_digest_is_xof(alg)) {
+            crypto_throw_invalid_xof_length();
+            return false;
+        }
+        return true;
+    }
+    if (get_type_id(options_item) != LMD_TYPE_MAP) {
+        if (crypto_digest_is_xof(alg)) {
+            crypto_throw_invalid_xof_length();
+            return false;
+        }
+        return true;
+    }
 
     Item output_len_item = js_property_get(options_item, make_string_item_crypto("outputLength"));
-    if (crypto_item_is_undefined(output_len_item)) return true;
+    if (crypto_item_is_undefined(output_len_item)) {
+        if (crypto_digest_is_xof(alg)) {
+            crypto_throw_invalid_xof_length();
+            return false;
+        }
+        return true;
+    }
     int parsed_len = 0;
     if (!crypto_item_to_integer(output_len_item, "options.outputLength", &parsed_len)) return false;
     if (parsed_len < 0 || parsed_len > (int)CRYPTO_BUFFER_MAX_LENGTH) {
@@ -1881,20 +1914,6 @@ static bool crypto_hash_output_length_from_options(const char* alg, Item options
     *out_len = parsed_len;
     *has_output_len = true;
     return true;
-}
-
-static void crypto_emit_shake_output_length_warning(void) {
-    static bool warned = false;
-    if (warned) return;
-    warned = true;
-    Item warning = js_new_object();
-    js_property_set(warning, make_string_item_crypto("name"),
-        make_string_item_crypto("DeprecationWarning"));
-    js_property_set(warning, make_string_item_crypto("message"),
-        make_string_item_crypto("Creating SHAKE128/256 digests without an explicit options.outputLength is deprecated."));
-    js_property_set(warning, make_string_item_crypto("code"),
-        make_string_item_crypto("DEP0198"));
-    js_process_emit(make_string_item_crypto("warning"), warning);
 }
 
 extern "C" Item js_crypto_createHash(Item alg_item, Item options_item) {
@@ -1913,7 +1932,7 @@ extern "C" Item js_crypto_createHash(Item alg_item, Item options_item) {
         return ItemNull;
     }
     if (crypto_digest_is_xof(alg_buf) && !has_output_len) {
-        crypto_emit_shake_output_length_warning();
+        return crypto_throw_invalid_xof_length();
     }
 
     HashCtx* ctx = (HashCtx*)mem_calloc(1, sizeof(HashCtx), MEM_CAT_JS_RUNTIME);
@@ -2569,7 +2588,7 @@ extern "C" Item js_crypto_hash(Item alg_item, Item data_item, Item encoding_item
         }
     }
     if (crypto_digest_is_xof(alg_buf) && !has_output_len) {
-        crypto_emit_shake_output_length_warning();
+        return crypto_throw_invalid_xof_length();
     }
 
     uint8_t* data = NULL;

@@ -1,7 +1,7 @@
 # Transpile Node Tune5 Proposal
 
 Date: 2026-06-29
-Status: Track A in progress
+Status: Node5 baseline refreshed; Track A/B/C slices landed
 Scope: structural LambdaJS Node.js compatibility work against official Node.js
 parallel tests.
 
@@ -47,72 +47,74 @@ local socket preflight for `http` / `https` / `net` / `tls` tests.
 
 ## Baseline Snapshot
 
-`test/node/official_baseline.txt` currently records:
+`test/node/official_baseline.txt` currently records the successful
+2026-06-29 baseline refresh:
 
 | Metric | Count |
 | --- | ---: |
-| Passing baseline | 1744 |
-| Total tests in recorded run | 3554 |
-| Failed | 1810 |
+| Passing baseline | 1923 |
+| Total tests in recorded run | 3542 |
+| Failed | 1619 |
 | Missing | 0 |
 | Timed out | 0 |
-| Crashed | 17 |
-| Previous baseline | 1730 |
+| Crashed in recorded run | 1 |
+| Previous baseline | 1744 |
 | Regressions | 0 |
-| Improvements | 14 |
-| Slow list | 32 tests |
-| Skip list | 76 tests |
+| Improvements | 180 |
+| Slow list | 33 tests |
+| Skip list | 95 tests |
 
 The local `ref/node` checkout was refreshed to upstream `92b72d4f601` after the
 initial Tune5 analysis. That resolved the earlier local drift where 75 passing
-baseline filenames were absent from `ref/node/test/parallel`. The current tree
-now contains all 1744 passing baseline filenames. Because the baseline header
-still records the older `ref/node` commit `4d3198c6646`, Tune5 Track 0 should
-still decide whether to refresh `official_baseline.txt` against `92b72d4f601`
-before making acceptance claims.
+baseline filenames were absent from `ref/node/test/parallel`. The current
+baseline header now records `ref/node` commit `92b72d4f601`, and the generated
+inventory report confirms zero passing-baseline filenames are missing from the
+checkout.
 
-The checked-in `Transpile_Node4.md` is now stale on the headline number: it
-still describes the full-suite baseline as 1730 passing, while the current
-baseline artifact records 1744.
+The one crasher observed during the successful refresh was
+`test-child-process-reject-null-bytes.js`. It was not in the baseline and has
+been moved into `official_skip_list.txt`, along with the earlier 17 crashers
+and one timeout that were also outside the passing baseline.
 
 ## Failure Shape
 
-Using the current checkout's runner prefix rules and updated `ref/node`
-`92b72d4f601`, the current non-skip/non-slow official tree has 3561 enabled
-tests. Of those, 1743 are in the current passing baseline and 1818 are not; the
-remaining one passing baseline test is listed in `official_slow_list.txt`.
+Using the current checkout's runner prefix rules, updated `ref/node`
+`92b72d4f601`, and the refreshed skip/slow lists, the current non-skip/non-slow
+official tree has 3541 active tests. Of those, 1923 are in the passing baseline
+and 1618 are baseline-inferred failures.
 
 The largest active failing clusters are:
 
 | Prefix | Pass | Fail | Total | Read |
 | --- | ---: | ---: | ---: | --- |
-| `http` | 121 | 259 | 380 | request/response lifecycle and stream-body semantics |
-| `tls` | 46 | 165 | 211 | certificate/options/session fidelity and async lexical/event ordering |
-| `worker` | 30 | 109 | 139 | mostly stubbed worker model |
-| `crypto` | 62 | 69 | 131 | asymmetric crypto, KeyObject, async sign/verify |
-| `cluster` | 15 | 67 | 82 | fork/IPC/process supervision semantics |
-| `vm` | 30 | 63 | 93 | context isolation and timeout semantics |
-| `diagnostics` | 6 | 62 | 68 | diagnostics_channel and async context binding |
-| `repl` | 45 | 60 | 105 | lower priority, CLI/debuggability surface |
-| `child-process` | 43 | 53 | 96 | IPC/fork/stdio fidelity |
-| `stream` | 162 | 50 | 212 | remaining state-machine and validation gaps |
-| `process` | 38 | 50 | 88 | process binding/env/signal/message fidelity |
+| `http` | 163 | 207 | 396 | request/response lifecycle and stream-body semantics |
+| `tls` | 96 | 114 | 218 | certificate/options/session fidelity and async lexical/event ordering |
+| `worker` | 31 | 108 | 139 | mostly stubbed worker model |
+| `crypto` | 63 | 68 | 134 | asymmetric crypto, KeyObject, async sign/verify |
+| `cluster` | 15 | 67 | 83 | fork/IPC/process supervision semantics |
+| `vm` | 30 | 62 | 98 | context isolation and timeout semantics |
+| `repl` | 45 | 60 | 106 | lower priority, CLI/debuggability surface |
+| `diagnostics` | 16 | 52 | 68 | diagnostics_channel and async context binding |
+| `child-process` | 45 | 50 | 109 | IPC/fork/stdio fidelity |
+| `process` | 38 | 50 | 93 | process binding/env/signal/message fidelity |
 | `whatwg` | 14 | 49 | 63 | TextEncoder/Decoder, web platform shims |
-| `zlib` | 18 | 45 | 63 | brotli/zstd plus stream transform fidelity |
-| `permission` | 15 | 44 | 59 | Node permission model and CLI flags |
-| `https` | 21 | 40 | 61 | HTTPS agent/session/TLS-over-HTTP composition |
-| `buffer` | 30 | 38 | 68 | ArrayBuffer/exotic/fidelity gaps |
-| `fs` | 215 | 37 | 252 | near-strong, but async/watch/FileHandle gaps remain |
+| `permission` | 16 | 43 | 59 | Node permission model and CLI flags |
+| `zlib` | 24 | 39 | 64 | brotli/zstd plus stream transform fidelity |
+| `buffer` | 31 | 36 | 69 | ArrayBuffer/exotic/fidelity gaps |
+| `fs` | 217 | 35 | 257 | near-strong, but async/watch/FileHandle gaps remain |
+| `stream` | 176 | 35 | 215 | remaining state-machine and validation gaps |
 
 This ranking is not just "stream leftovers." Streams remain important, but the
 current failing surface says Tune5 also needs async context, diagnostics,
 worker/cluster process modeling, crypto, VM isolation, and fidelity work.
 
-## Representative Failure Samples
+## Original Representative Failure Samples
 
-The focused sample ran 10 selected failing official tests with 0 crashes and 0
-timeouts. All failed as expected failures, which is useful: these are structural
-semantics gaps, not harness instability.
+The initial Tune5 focused sample ran 10 selected failing official tests with 0
+crashes and 0 timeouts. All failed as expected failures, which was useful at
+the proposal stage: these were structural semantics gaps, not harness
+instability. Several of these original representatives now pass and are covered
+in the implementation-status sections below.
 
 | Test | Result | Symptom |
 | --- | --- | --- |
@@ -857,6 +859,77 @@ Results:
 - Direct official `test-stream-compose.js`: still pass.
 - Direct official `test-stream-duplex-from.js`: still pass.
 - Direct official `test-stream-duplexpair.js`: still pass.
+
+### 2026-06-29 baseline-update rerun and regression repair
+
+Reran the official Node baseline update after the stream slices and initially
+hit eight current-baseline regressions:
+
+```bash
+make node-update-baseline
+```
+
+The first run completed but withheld the `official_baseline.txt` rewrite
+because the baseline gate found regressions. Focused rerun confirmed these
+eight failures were real runtime regressions, not harness noise:
+
+```bash
+./test/test_node_gtest.exe --gtest_filter='NodeOfficial/NodeOfficialTest.Run/test_common_countdown:NodeOfficial/NodeOfficialTest.Run/test_common_gc:NodeOfficial/NodeOfficialTest.Run/test_crypto_default_shake_lengths_oneshot:NodeOfficial/NodeOfficialTest.Run/test_crypto_default_shake_lengths:NodeOfficial/NodeOfficialTest.Run/test_fs_read_stream_double_close:NodeOfficial/NodeOfficialTest.Run/test_promise_unhandled_error:NodeOfficial/NodeOfficialTest.Run/test_promises_unhandled_rejections:NodeOfficial/NodeOfficialTest.Run/test_stream_iter_from_sync' --gtest_brief=1
+```
+
+- `test-common-countdown.js`
+- `test-common-gc.js`
+- `test-crypto-default-shake-lengths-oneshot.js`
+- `test-crypto-default-shake-lengths.js`
+- `test-fs-read-stream-double-close.js`
+- `test-promise-unhandled-error.js`
+- `test-promises-unhandled-rejections.js`
+- `test-stream-iter-from-sync.js`
+
+Root-cause fixes landed for the shared paths those tests exercised:
+
+- SHAKE hashes now require and preserve `outputLength`, including `Hash#copy()`.
+- `fs.ReadStream.close(callback)` now routes through the stream destroy
+  callback path instead of dropping the callback.
+- `stream.destroy(callback)` invokes pending callbacks even when the stream is
+  already destroyed.
+- `stream/iter.fromSync()` batches synchronous iterable chunks without changing
+  the ordinary `Readable.from()` path.
+- Promise unhandled-rejection checks now flush at microtask checkpoints, support
+  `--unhandled-rejections=strict` / `none`, and preserve Node's strict-mode
+  `uncaughtException` ordering.
+- AsyncResource GC tracking, fixture subprocess callback failures, Node-style
+  `-p`, TLS version flag rejection, `vm.createScript()`, eval globals, and
+  `execFile()`/`maxBuffer` child-process behavior were fixed where they were
+  the actual regression root.
+
+Verification:
+
+```bash
+make build
+make build-test
+./test/test_node_gtest.exe --gtest_filter='NodeOfficial/NodeOfficialTest.Run/test_common_countdown:NodeOfficial/NodeOfficialTest.Run/test_common_gc:NodeOfficial/NodeOfficialTest.Run/test_crypto_default_shake_lengths_oneshot:NodeOfficial/NodeOfficialTest.Run/test_crypto_default_shake_lengths:NodeOfficial/NodeOfficialTest.Run/test_fs_read_stream_double_close:NodeOfficial/NodeOfficialTest.Run/test_promise_unhandled_error:NodeOfficial/NodeOfficialTest.Run/test_promises_unhandled_rejections:NodeOfficial/NodeOfficialTest.Run/test_stream_iter_from_sync' --gtest_brief=1
+./test/test_node_gtest.exe --update-baseline --gtest_brief=1
+python3 -B test/node/node_official_report.py
+```
+
+Results:
+
+- Focused eight-regression gate: 8/8 passed, 0 regressions.
+- Wider focused gate including neighboring fixes: 13/13 passed, 0 regressions.
+- Full baseline update wrote `test/node/official_baseline.txt` with 1923
+  passing tests, 1619 ordinary failures, 0 regressions, and 180 improvements
+  over the previous 1744-test baseline.
+- The successful full run observed one non-baseline crasher,
+  `test-child-process-reject-null-bytes.js`; it is now in
+  `official_skip_list.txt`.
+- The earlier 17 crashers and the `test-stream-pipeline.js` timeout were also
+  moved to `official_skip_list.txt` after confirming they were not in the
+  passing baseline. `test-stream-pipeline.js` was removed from
+  `official_slow_list.txt`; `test-buffer-constants.js` remains slow-listed.
+- Regenerated `temp/node_official_report.md` now reports 3541 active tests,
+  1923 active baseline passes, 1618 inferred failures, 95 skip-list entries,
+  33 slow-list exclusions, and 0 missing baseline names.
 
 ## Verification Policy
 

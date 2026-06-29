@@ -36,6 +36,7 @@ extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
 extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
+extern "C" void js_promise_flush_unhandled_checks(void);
 
 // =============================================================================
 // Task Queues
@@ -182,6 +183,7 @@ extern "C" void js_microtask_flush(void) {
     if (safety >= TASK_FLUSH_SAFETY_LIMIT) {
         log_error("event_loop: nextTick/microtask flush exceeded safety limit");
     }
+    js_promise_flush_unhandled_checks();
 }
 
 static bool raf_push(Item cb, int64_t id) {

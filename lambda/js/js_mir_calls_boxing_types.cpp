@@ -1292,6 +1292,7 @@ void jm_scope_env_mark_and_writeback_binding(JsMirTranspiler* mt, const char* na
             MIR_new_reg_op(mt->ctx, val)));
         return;
     }
+    jm_scope_env_mark_and_writeback(mt, name, val_reg, type_id);
 }
 
 // v23: truthiness check with inline fast-path for known boolean Items.

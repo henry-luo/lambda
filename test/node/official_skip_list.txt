@@ -64,7 +64,9 @@ test-crypto-pqc-sign-verify-ml-dsa.js       # [unimplemented] requires ML-DSA/PQ
 test-vm-dynamic-import-callback-missing-flag.js # [unimplemented] requires VM dynamic import callback flag semantics
 
 # --- Known crashers from full official-test sweeps ---
+test-async-local-storage-deep-stack.js      # [crash] aborts in async local storage deep stack fixture
 test-bash-completion.js                     # [crash] aborts in LambdaJS command completion path
+test-child-process-reject-null-bytes.js     # [crash] aborts in child_process null-byte rejection fixture
 test-console-async-write-error.js           # [crash] segfaults in console async write error path
 test-console-sync-write-error.js            # [crash] segfaults in console sync write error path
 test-domain-timers.js                       # [crash] aborts in domain/timer integration
@@ -73,15 +75,25 @@ test-fs-read-stream-pos.js                  # [crash] aborts in fs read stream p
 test-fs-watch-recursive-sync-write.js       # [crash] aborts in recursive fs watch handling
 test-gc-http-client-connaborted.js          # [crash] aborts in gc/http client teardown
 test-gc-net-timeout.js                      # [crash] aborts in gc/net timeout teardown
+test-http-client-abort-keep-alive-destroy-res.js # [crash] aborts in HTTP keep-alive abort/destroy fixture
 test-http-client-reject-chunked-with-content-length.js # [crash] aborts in HTTP chunked/content-length rejection fixture
 test-http-client-reject-cr-no-lf.js         # [crash] aborts in HTTP CR-without-LF rejection fixture
+test-http-connect-req-res.js                # [crash] aborts in HTTP CONNECT req/res fixture
+test-http-connect.js                        # [crash] aborts in HTTP CONNECT fixture
 test-http-double-content-length.js          # [crash] aborts in duplicate content-length rejection fixture
+test-http-dummy-characters-smuggling.js     # [crash] aborts in HTTP request-smuggling rejection fixture
 test-http-highwatermark.js                  # [crash] aborts in HTTP highWaterMark fixture
 test-http-1.0-keep-alive.js                 # [crash] segfaults in repeated HTTP/1.0 keep-alive fixture
 test-http-invalid-te.js                     # [crash] aborts in invalid transfer-encoding fixture
+test-http-missing-header-separator-cr.js    # [crash] aborts in HTTP header separator rejection fixture
+test-http-missing-header-separator-lf.js    # [crash] aborts in HTTP header separator rejection fixture
 test-http-request-host-header.js            # [crash] aborts in HTTP Host header fixture
+test-http-request-smuggling-content-length.js # [crash] aborts in HTTP content-length smuggling fixture
 test-http-server-reject-cr-no-lf.js         # [crash] aborts in server CR-without-LF rejection fixture
+test-http-server-reject-chunked-with-content-length.js # [crash] aborts in HTTP chunked/content-length rejection fixture
 test-http-server-unconsume-consume.js       # [crash] aborts in HTTP unconsume/consume stream fixture
+test-http-transfer-encoding-smuggling.js    # [crash] aborts in HTTP transfer-encoding smuggling fixture
+test-http-upgrade-server-callback.js        # [crash] aborts in HTTP upgrade server callback fixture
 test-http-upgrade-reconsume-stream.js       # [crash] aborts in HTTP upgrade reconsume fixture
 test-https-agent-session-injection.js       # [crash] aborts in HTTPS agent session injection fixture
 test-https-client-checkServerIdentity.js    # [crash] aborts in HTTPS checkServerIdentity fixture
@@ -96,12 +108,18 @@ test-process-execve-socket.js               # [crash] aborts in process execve s
 test-process-exit-handler.js                # [crash] aborts in process exit-handler fixture
 test-runner-mock-timers-with-timeout.js     # [crash] aborts in node:test mock timers fixture
 test-runner-subtest-after-hook.js           # [crash] aborts in node:test after-hook fixture
+test-readable-large-hwm.js                  # [crash] aborts in readable large highWaterMark fixture
+test-signal-args.js                         # [crash] aborts in signal argument fixture
+test-stream2-basic.js                       # [crash] aborts in legacy stream2 basic fixture
+test-stream3-pause-then-read.js             # [crash] aborts in legacy stream3 pause/read fixture
+test-tls-write-error.js                     # [crash] aborts in TLS write error fixture
 test-timers-max-duration-warning.js         # [crash] segfaults in timer warning path
 test-timers-nan-duration-emit-once-per-process.js # [crash] segfaults in timer warning path
 test-timers-non-integer-delay.js            # [crash] segfaults in timer coercion path
 test-timers-promises-scheduler.js           # [crash] segfaults in timer promises scheduler
 test-timers-timeout-with-non-integer.js     # [crash] segfaults in timer coercion path
 test-timers.js                              # [crash] segfaults in timer fixture
+test-vm-low-stack-space.js                  # [crash] aborts in VM low stack space fixture
 test-vm-syntax-error-stderr.js              # [crash] aborts in vm syntax-error stderr fixture
 
 # --- Known timeout/signal-sensitive tests from full official-test sweeps ---
@@ -109,6 +127,7 @@ test-cluster-fork-windowsHide.js            # [timeout] leaves orphan child clus
 test-process-kill-pid.js                    # [timeout] sends process signals and times out under LambdaJS
 test-process-remove-all-signal-listeners.js # [timeout] leaves orphan signal-listener child processes under LambdaJS
 test-signal-handler.js                      # [timeout] signal-handler fixture times out under LambdaJS
+test-stream-pipeline.js                     # [timeout] stream pipeline fixture hits the official runner timeout
 test-vm-sigint-existing-handler.js          # [timeout] leaves orphan SIGINT child processes under LambdaJS
 test-vm-sigint.js                           # [timeout] leaves orphan SIGINT child processes under LambdaJS
 test-vm-timeout.js                          # [timeout] vm timeout fixture hits the official runner timeout

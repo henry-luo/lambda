@@ -2415,7 +2415,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     // would read the wrong slot. Let identifier resolution handle it
                     // (via id->entry for function decls, or module_consts for MODVARs).
                     int pi = fc->parent_index;
-                    if (pi >= 0 && pi < mt->func_count && mt->func_entries[pi].has_scope_env) {
+                    if (pi >= 0 && pi < mt->func_count && mt->func_entries[pi].has_scope_env &&
+                        fc->captures[i].grandparent_slot < 0) {
                         continue;
                     }
                     // For per-closure envs, also skip MODVAR captures
@@ -2871,9 +2872,35 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             // v29: If this function has a parent env link, store parent env ptr in last slot
             if (fc->has_parent_env_link && has_captures && env_reg != 0) {
                 int parent_env_slot = fc->scope_env_count - 1; // last slot
+                MIR_reg_t parent_env_value = env_reg;
+                if (fc->parent_env_link_uses_grandparent) {
+                    int parent_index = fc->parent_index;
+                    int parent_link_slot = -1;
+                    if (parent_index >= 0 && parent_index < mt->func_count &&
+                        mt->func_entries[parent_index].has_parent_env_link) {
+                        parent_link_slot = mt->func_entries[parent_index].scope_env_count - 1;
+                    }
+                    if (parent_link_slot >= 0) {
+                        MIR_reg_t linked_env = jm_new_reg(mt, "linked_parent_env", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, linked_env),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                parent_link_slot * (int)sizeof(uint64_t), env_reg, 0, 1)));
+                        MIR_label_t linked_ok = jm_new_label(mt);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                            MIR_new_label_op(mt->ctx, linked_ok),
+                            MIR_new_reg_op(mt->ctx, linked_env),
+                            MIR_new_int_op(mt->ctx, 0)));
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, linked_env),
+                            MIR_new_reg_op(mt->ctx, env_reg)));
+                        jm_emit_label(mt, linked_ok);
+                        parent_env_value = linked_env;
+                    }
+                }
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, parent_env_slot * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
-                    MIR_new_reg_op(mt->ctx, env_reg)));
+                    MIR_new_reg_op(mt->ctx, parent_env_value)));
                 log_debug("js-mir: stored parent env link in scope_env[%d] for '%s'", parent_env_slot, fc->name);
             }
 

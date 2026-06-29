@@ -4021,7 +4021,7 @@ static Item js_stream_iter_batch_next(Item env_item) {
     return js_stream_iter_result(batch, false);
 }
 
-static Item js_stream_iter_make_batch_iterable(Item source, bool async_iterable) {
+static Item js_stream_iter_make_batch_iterable(Item source, bool async_iterable, bool collect_all_sync) {
     Item iterator = make_js_undefined();
     bool single = js_stream_iter_source_is_single_chunk(source);
     if (!single) {
@@ -4034,7 +4034,7 @@ static Item js_stream_iter_make_batch_iterable(Item source, bool async_iterable)
     env[1] = iterator;
     env[2] = js_bool_item(false);
     env[3] = js_bool_item(single);
-    env[4] = js_bool_item(get_type_id(source) == LMD_TYPE_ARRAY);
+    env[4] = js_bool_item(get_type_id(source) == LMD_TYPE_ARRAY || collect_all_sync);
 
     Item obj = js_new_object();
     js_property_set(obj, make_string_item("next"), js_new_closure((void*)js_stream_iter_batch_next, 0, env, 5));
@@ -4064,7 +4064,7 @@ static Item js_stream_iter_from(Item source) {
     if (!js_stream_iter_apply_protocol(&source, "Stream.toStreamable"))
         return ItemNull;
     if (js_stream_iter_value_can_sync(source))
-        return js_stream_iter_make_batch_iterable(source, true);
+        return js_stream_iter_make_batch_iterable(source, true, false);
     return js_stream_iter_to_readable(source);
 }
 
@@ -4075,7 +4075,7 @@ static Item js_stream_iter_fromSync(Item source) {
         js_throw_invalid_arg_type("source", "a sync streamable value", source);
         return ItemNull;
     }
-    return js_stream_iter_make_batch_iterable(source, false);
+    return js_stream_iter_make_batch_iterable(source, false, true);
 }
 
 static bool js_stream_iter_is_byte_array(Item value) {
@@ -5207,7 +5207,10 @@ extern "C" Item js_readable_pipe(Item self, Item dest) {
 // destroy([err]) — destroy stream
 extern "C" Item js_stream_destroy(Item self, Item err) {
     ensure_keys();
-    if (js_item_is_true(js_property_get(self, key_destroyed))) return self;
+    if (js_item_is_true(js_property_get(self, key_destroyed))) {
+        js_stream_invoke_destroy_callback(self, err);
+        return self;
+    }
     if (js_item_is_true(js_property_get(self, key_flowing))) {
         js_stream_flush_buffered_data(self);
     }

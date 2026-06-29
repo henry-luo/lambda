@@ -990,6 +990,9 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         }
                         jm_write_env_backing_if_needed(mt, jm_find_var(mt, vname), reg, LMD_TYPE_ANY);
                         jm_scope_env_mark_and_writeback_binding(mt, vname, d->id, reg);
+                        if (var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST) {
+                            jm_write_last_closure_capture_if_matching(mt, vname, reg, LMD_TYPE_ANY);
+                        }
                     }
                 }
 
@@ -2611,7 +2614,9 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     }
 
     if (ctor_len == 7 && strncmp(ctor_name, "Promise", 7) == 0) {
-        return jm_emit_dynamic_new_expr(mt, call, arg_count);
+        MIR_reg_t promise = jm_emit_dynamic_new_expr(mt, call, arg_count);
+        jm_readback_closure_env(mt);
+        return promise;
     }
 
     // Check if it's a built-in type that needs early first-arg evaluation
@@ -2954,8 +2959,10 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // v14: new Promise(executor)
     if (ctor_len == 7 && strncmp(ctor_name, "Promise", 7) == 0) {
         MIR_reg_t executor_arg = first_arg ? first_arg : jm_emit_null(mt);
-        return jm_call_1(mt, "js_promise_create", MIR_T_I64,
+        MIR_reg_t promise = jm_call_1(mt, "js_promise_create", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, executor_arg));
+        jm_readback_closure_env(mt);
+        return promise;
     }
 
     // Phase 3: new TextEncoder() / new TextDecoder()

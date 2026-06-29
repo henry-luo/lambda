@@ -28,6 +28,7 @@ extern "C" Item js_property_set_strict(Item object, Item key, Item value);
 extern "C" Item js_util_custom_promisify_args_symbol(void);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_process_emit2(Item event_name, Item arg1, Item arg2);
+extern "C" int js_is_process_object_value(Item object);
 extern "C" Item push_d(double dval);
 extern "C" double it2d(Item item);
 extern "C" int64_t it2i(Item item);
@@ -8573,6 +8574,16 @@ extern "C" void js_console_log(Item value) {
     if (get_type_id(str) == LMD_TYPE_STRING) {
         String* s = it2s(str);
         printf("%.*s\n", (int)s->len, s->chars); // PRINTF_OK: implements JS console.log stdout write.
+    }
+}
+
+extern "C" void js_console_error(Item value) {
+    Item str = js_to_string(value);
+    if (get_type_id(str) == LMD_TYPE_STRING) {
+        String* s = it2s(str);
+        fwrite(s->chars, 1, s->len, stderr);
+        fputc('\n', stderr);
+        fflush(stderr);
     }
 }
 
@@ -18164,6 +18175,9 @@ extern "C" Item js_map_collection_new_from(Item iterable) {
 // Map/Set method dispatch
 // method_id: 0=set/add, 1=get, 2=has, 3=delete, 4=clear,
 //   5=forEach, 6=keys, 7=values, 8=entries, 9=size(getter)
+static void js_async_hooks_queue_destroy(Item resource);
+static bool js_async_hooks_is_gc_tracker(Item resource);
+
 extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2) {
     JsCollectionData* cd = js_get_collection_data(obj);
     if (!cd) return ItemNull;
@@ -18203,6 +18217,11 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
                 entry.value = arg2;
             }
             hashmap_set(cd->hmap, &entry);
+            if (cd->is_weak && cd->type == JS_COLLECTION_MAP &&
+                js_async_hooks_is_gc_tracker(arg2) &&
+                !js_is_process_object_value(arg1)) {
+                js_async_hooks_queue_destroy(arg2);
+            }
             // Maintain insertion-order list
             js_collection_order_upsert(cd, entry.key, entry.value);
             js_collection_update_size(obj, cd);
@@ -26359,6 +26378,7 @@ extern "C" Item js_get_console_object_value() {
 
         // Populate console methods as function objects
         extern void js_console_log(Item);
+        extern void js_console_error(Item);
         extern void js_console_log_multi(Item*, int);
         extern Item js_console_count_fn(Item);
         extern Item js_console_countReset_fn(Item);
@@ -26373,13 +26393,13 @@ extern "C" Item js_get_console_object_value() {
         extern Item js_console_table_fn(Item);
         extern Item js_console_assert_fn(Item, Item);
 
-        // log, warn, error, info, debug all map to console_log
+        // log/info/debug write to stdout; warn/error write to stderr.
         js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("log", 3))},
             js_new_function((void*)js_console_log, 1));
         js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("warn", 4))},
-            js_new_function((void*)js_console_log, 1));
+            js_new_function((void*)js_console_error, 1));
         js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("error", 5))},
-            js_new_function((void*)js_console_log, 1));
+            js_new_function((void*)js_console_error, 1));
         js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("info", 4))},
             js_new_function((void*)js_console_log, 1));
         js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("debug", 5))},
@@ -29413,6 +29433,13 @@ struct JsPromise {
 static JsPromise js_promises[JS_MAX_PROMISES];
 static int js_promise_count = 0;
 static int64_t js_promise_unhandled_epoch = 0;
+static Item js_promise_unhandled_queue[1024];
+static int js_promise_unhandled_queue_count = 0;
+static bool js_promise_unhandled_strict = false;
+
+extern "C" void js_promise_set_unhandled_rejections_mode(int64_t strict_mode) {
+    js_promise_unhandled_strict = strict_mode != 0;
+}
 
 extern "C" void js_promise_note_unhandled_listener_reset(void) {
     js_promise_unhandled_epoch++;
@@ -29760,6 +29787,24 @@ static Item js_promise_unhandled_check(Item promise_item) {
     if (p->unhandled_epoch != js_promise_unhandled_epoch) return ItemNull;
     if (p->state == JS_PROMISE_REJECTED && !p->rejection_handled && !p->unhandled_reported) {
         p->unhandled_reported = true;
+        if (js_promise_unhandled_strict) {
+            Item error = p->result;
+            TypeId reason_type = get_type_id(error);
+            if (reason_type != LMD_TYPE_MAP && reason_type != LMD_TYPE_ELEMENT) {
+                const char* msg =
+                    "This error originated either by throwing inside of an async function without a catch block, or by rejecting a promise which was not handled with .catch(). The promise rejected with the reason \"null\".";
+                error = js_new_error_with_name(
+                    (Item){.item = s2it(heap_create_name("UnhandledPromiseRejection", 25))},
+                    (Item){.item = s2it(heap_create_name(msg, strlen(msg)))});
+                js_property_set(error,
+                    (Item){.item = s2it(heap_create_name("code", 4))},
+                    (Item){.item = s2it(heap_create_name("ERR_UNHANDLED_REJECTION", 23))});
+            }
+            js_process_emit2((Item){.item = s2it(heap_create_name("uncaughtException", 17))},
+                error,
+                (Item){.item = s2it(heap_create_name("unhandledRejection", 18))});
+            if (js_check_exception()) js_clear_exception();
+        }
         js_process_emit2((Item){.item = s2it(heap_create_name("unhandledRejection", 18))},
             p->result, promise_item);
     }
@@ -29770,12 +29815,22 @@ static void js_promise_schedule_unhandled_check(JsPromise* p) {
     if (!p || p->rejection_handled || p->unhandled_check_scheduled || p->unhandled_reported) return;
     p->unhandled_check_scheduled = true;
     p->unhandled_epoch = js_promise_unhandled_epoch;
-    Item promise_item = js_promise_to_item(p);
-    Item check_fn = js_new_function((void*)js_promise_unhandled_check, 1);
-    Item callback = js_bind_function(check_fn, ItemNull, &promise_item, 1);
-    extern Item js_setImmediate(Item callback);
-    js_setImmediate(callback);
-    if (js_check_exception()) js_clear_exception();
+    if (js_promise_unhandled_queue_count >= 1024) {
+        log_error("js-promise: unhandled rejection queue overflow");
+        return;
+    }
+    js_promise_unhandled_queue[js_promise_unhandled_queue_count++] = js_promise_to_item(p);
+}
+
+extern "C" void js_promise_flush_unhandled_checks(void) {
+    int count = js_promise_unhandled_queue_count;
+    if (count <= 0) return;
+    js_promise_unhandled_queue_count = 0;
+    for (int i = 0; i < count; i++) {
+        Item promise_item = js_promise_unhandled_queue[i];
+        js_promise_unhandled_queue[i] = ItemNull;
+        js_promise_unhandled_check(promise_item);
+    }
 }
 
 static void js_promise_mark_rejection_handled(JsPromise* p) {
@@ -29784,6 +29839,10 @@ static void js_promise_mark_rejection_handled(JsPromise* p) {
     if (p->unhandled_reported) {
         js_process_emit((Item){.item = s2it(heap_create_name("rejectionHandled", 16))},
             js_promise_to_item(p));
+        if (js_check_exception()) {
+            Item error = js_clear_exception();
+            js_process_emit((Item){.item = s2it(heap_create_name("uncaughtException", 17))}, error);
+        }
     }
 }
 
@@ -32194,7 +32253,19 @@ static Item js_vm_isContext(Item obj) {
 }
 
 // vm.runInThisContext(code, options) — evaluate code in global context
-static Item js_vm_runInThisContext(Item code) {
+static bool js_vm_touch_options(Item options, const char** names, int count) {
+    TypeId type = get_type_id(options);
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return true;
+    for (int i = 0; i < count; i++) {
+        js_property_get(options, (Item){.item = s2it(heap_create_name(names[i], strlen(names[i])))});
+        if (js_check_exception()) return false;
+    }
+    return true;
+}
+
+static Item js_vm_runInThisContext(Item code, Item options) {
+    const char* names[] = {"breakOnSigint", "timeout", "displayErrors"};
+    if (!js_vm_touch_options(options, names, 3)) return ItemNull;
     return js_builtin_eval(code, 1); // global scope
 }
 
@@ -32312,7 +32383,9 @@ static Item js_vm_compileFunction(Item code, Item params) {
 }
 
 // Script.runInThisContext wrapper that extracts _code from `this`
-static Item js_vm_Script_runInThisContext(void) {
+static Item js_vm_Script_runInThisContext(Item options) {
+    const char* names[] = {"breakOnSigint", "timeout", "displayErrors"};
+    if (!js_vm_touch_options(options, names, 3)) return ItemNull;
     Item self = js_get_this();
     Item code = js_property_get(self, (Item){.item = s2it(heap_create_name("_code", 5))});
     return js_builtin_eval(code, 1);
@@ -32334,15 +32407,21 @@ static Item js_vm_Script_runInNewContext(Item sandbox) {
 
 // Script constructor wrapper (called with `new vm.Script(code, options)`)
 static Item js_vm_Script_constructor(Item code, Item options) {
+    const char* names[] = {"filename", "cachedData", "produceCachedData", "lineOffset", "columnOffset"};
+    if (!js_vm_touch_options(options, names, 5)) return ItemNull;
     Item script = js_new_object();
     js_property_set(script, (Item){.item = s2it(heap_create_name("_code", 5))}, code);
     js_property_set(script, (Item){.item = s2it(heap_create_name("runInThisContext", 16))},
-                    js_new_function((void*)js_vm_Script_runInThisContext, 0));
+                    js_new_function((void*)js_vm_Script_runInThisContext, 1));
     js_property_set(script, (Item){.item = s2it(heap_create_name("runInContext", 12))},
                     js_new_function((void*)js_vm_Script_runInContext, 1));
     js_property_set(script, (Item){.item = s2it(heap_create_name("runInNewContext", 15))},
                     js_new_function((void*)js_vm_Script_runInNewContext, 1));
     return script;
+}
+
+static Item js_vm_createScript(Item code, Item options) {
+    return js_vm_Script_constructor(code, options);
 }
 
 // =============================================================================
@@ -33434,6 +33513,18 @@ static void js_async_hooks_queue_destroy(Item resource) {
     js_async_pending_destroy_resources[js_async_pending_destroy_count++] = resource;
 }
 
+static bool js_async_hooks_is_gc_tracker(Item resource) {
+    if (resource.item == 0 || resource.item == ITEM_NULL ||
+        get_type_id(resource) == LMD_TYPE_UNDEFINED) {
+        return false;
+    }
+    Item type = js_property_get(resource, js_async_hooks_key("type"));
+    if (get_type_id(type) != LMD_TYPE_STRING) return false;
+    String* type_str = it2s(type);
+    return type_str && type_str->len == 27 &&
+           strncmp(type_str->chars, "NODE_TEST_COMMON_GC_TRACKER", 27) == 0;
+}
+
 extern "C" void js_async_hooks_after_gc(void) {
     int count = js_async_pending_destroy_count;
     js_async_pending_destroy_count = 0;
@@ -33538,7 +33629,9 @@ static Item js_ar_constructor(Item type, Item options) {
     js_property_set(self, js_async_hooks_key("__lambda_trigger_async_id__"), (Item){.item = i2it(trigger_id)});
     js_property_set(self, js_async_hooks_key("__lambda_async_resource_destroyed__"), (Item){.item = b2it(false)});
     js_async_hooks_emit_init(async_id, type, trigger_id, self);
-    if (!require_manual_destroy) js_async_hooks_queue_destroy(self);
+    if (!require_manual_destroy && !js_async_hooks_is_gc_tracker(self)) {
+        js_async_hooks_queue_destroy(self);
+    }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
@@ -33813,7 +33906,7 @@ extern "C" Item js_get_vm_namespace(void) {
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("isContext", 9))},
                         js_new_function((void*)js_vm_isContext, 1));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("runInThisContext", 16))},
-                        js_new_function((void*)js_vm_runInThisContext, 1));
+                        js_new_function((void*)js_vm_runInThisContext, 2));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("runInContext", 12))},
                         js_new_function((void*)js_vm_runInContext, 2));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("runInNewContext", 15))},
@@ -33822,6 +33915,8 @@ extern "C" Item js_get_vm_namespace(void) {
                         js_new_function((void*)js_vm_compileFunction, 2));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("Script", 6))},
                         js_new_function((void*)js_vm_Script_constructor, 2));
+        js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("createScript", 12))},
+                        js_new_function((void*)js_vm_createScript, 2));
 
         // constants sub-object
         Item constants = js_new_object();

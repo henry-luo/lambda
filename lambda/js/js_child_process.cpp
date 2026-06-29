@@ -120,11 +120,28 @@ static void emit_shell_args_warning(void) {
 static bool append_shell_arg(char* out, int out_size, int* pos, Item arg) {
     if (get_type_id(arg) != LMD_TYPE_STRING) return false;
     String* s = it2s(arg);
-    if (*pos < out_size - 1) {
-        int written = snprintf(out + *pos, (size_t)(out_size - *pos), " %.*s", (int)s->len, s->chars);
-        if (written > 0) *pos += written;
-        if (*pos >= out_size) *pos = out_size - 1;
+    if (*pos >= out_size - 1) return true;
+    out[(*pos)++] = ' ';
+    if (*pos >= out_size - 1) {
+        out[out_size - 1] = '\0';
+        return true;
     }
+    out[(*pos)++] = '\'';
+    for (size_t i = 0; i < s->len && *pos < out_size - 1; i++) {
+        char ch = s->chars[i];
+        if (ch == '\'') {
+            const char* esc = "'\\''";
+            for (int j = 0; esc[j] && *pos < out_size - 1; j++) {
+                out[(*pos)++] = esc[j];
+            }
+        } else {
+            out[(*pos)++] = ch;
+        }
+    }
+    if (*pos < out_size - 1) {
+        out[(*pos)++] = '\'';
+    }
+    out[*pos < out_size ? *pos : out_size - 1] = '\0';
     return true;
 }
 
@@ -160,7 +177,11 @@ static bool should_spawn_lambda_js_mode(const char* file, Item args) {
         if (get_type_id(arg) != LMD_TYPE_STRING) continue;
         String* s = it2s(arg);
         if ((s->len == 2 && memcmp(s->chars, "-e", 2) == 0) ||
+            (s->len == 2 && memcmp(s->chars, "-p", 2) == 0) ||
             (s->len == 6 && memcmp(s->chars, "--eval", 6) == 0) ||
+            (s->len == 7 && memcmp(s->chars, "--print", 7) == 0) ||
+            (s->len == 14 && memcmp(s->chars, "--tls-min-v1.3", 14) == 0) ||
+            (s->len == 14 && memcmp(s->chars, "--tls-max-v1.2", 14) == 0) ||
             (s->len == 19 && memcmp(s->chars, "--input-type=module", 19) == 0)) {
             return true;
         }
@@ -206,6 +227,9 @@ typedef struct JsChildProcess {
     char*  stderr_buf;
     size_t stderr_len;
     size_t stderr_cap;
+    size_t max_buffer;
+    bool   max_buffer_exceeded;
+    char   max_buffer_stream[8];
 
     // callback for exec(): (err, stdout, stderr) => ...
     Item callback;
@@ -249,20 +273,40 @@ static void child_handle_close_cb(uv_handle_t* handle) {
 // Read callbacks — buffer stdout/stderr
 // =============================================================================
 
+static void child_note_max_buffer(JsChildProcess* cp, const char* stream_name) {
+    if (!cp || cp->max_buffer_exceeded) return;
+    cp->max_buffer_exceeded = true;
+    snprintf(cp->max_buffer_stream, sizeof(cp->max_buffer_stream), "%s", stream_name);
+}
+
+static void child_append_buffer(JsChildProcess* cp, const char* stream_name,
+                                char** target_buf, size_t* target_len,
+                                size_t* target_cap, const char* data, size_t data_len) {
+    if (!cp || !data || data_len == 0) return;
+    size_t allowed = data_len;
+    if (cp->max_buffer > 0 && *target_len + data_len > cp->max_buffer) {
+        child_note_max_buffer(cp, stream_name);
+        allowed = cp->max_buffer > *target_len ? cp->max_buffer - *target_len : 0;
+    }
+    if (allowed == 0) return;
+    if (*target_len + allowed >= *target_cap) {
+        size_t new_cap = (*target_cap == 0) ? 4096 : *target_cap * 2;
+        while (new_cap < *target_len + allowed + 1) new_cap *= 2;
+        char* nb = (char*)mem_realloc(*target_buf, new_cap, MEM_CAT_JS_RUNTIME);
+        if (nb) { *target_buf = nb; *target_cap = new_cap; }
+    }
+    if (*target_buf) {
+        memcpy(*target_buf + *target_len, data, allowed);
+        *target_len += allowed;
+        (*target_buf)[*target_len] = '\0';
+    }
+}
+
 static void child_stdout_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
     JsChildProcess* cp = (JsChildProcess*)stream->data;
     if (nread > 0 && cp) {
-        if (cp->stdout_len + (size_t)nread >= cp->stdout_cap) {
-            size_t new_cap = (cp->stdout_cap == 0) ? 4096 : cp->stdout_cap * 2;
-            while (new_cap < cp->stdout_len + (size_t)nread + 1) new_cap *= 2;
-            char* nb = (char*)mem_realloc(cp->stdout_buf, new_cap, MEM_CAT_JS_RUNTIME);
-            if (nb) { cp->stdout_buf = nb; cp->stdout_cap = new_cap; }
-        }
-        if (cp->stdout_buf) {
-            memcpy(cp->stdout_buf + cp->stdout_len, buf->base, nread);
-            cp->stdout_len += nread;
-            cp->stdout_buf[cp->stdout_len] = '\0';
-        }
+        child_append_buffer(cp, "stdout", &cp->stdout_buf, &cp->stdout_len,
+                            &cp->stdout_cap, buf->base, (size_t)nread);
     }
     if (buf->base) mem_free(buf->base);
     if (nread < 0) { // EOF or error
@@ -277,17 +321,8 @@ static void child_stdout_read_cb(uv_stream_t* stream, ssize_t nread, const uv_bu
 static void child_stderr_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
     JsChildProcess* cp = (JsChildProcess*)stream->data;
     if (nread > 0 && cp) {
-        if (cp->stderr_len + (size_t)nread >= cp->stderr_cap) {
-            size_t new_cap = (cp->stderr_cap == 0) ? 4096 : cp->stderr_cap * 2;
-            while (new_cap < cp->stderr_len + (size_t)nread + 1) new_cap *= 2;
-            char* nb = (char*)mem_realloc(cp->stderr_buf, new_cap, MEM_CAT_JS_RUNTIME);
-            if (nb) { cp->stderr_buf = nb; cp->stderr_cap = new_cap; }
-        }
-        if (cp->stderr_buf) {
-            memcpy(cp->stderr_buf + cp->stderr_len, buf->base, nread);
-            cp->stderr_len += nread;
-            cp->stderr_buf[cp->stderr_len] = '\0';
-        }
+        child_append_buffer(cp, "stderr", &cp->stderr_buf, &cp->stderr_len,
+                            &cp->stderr_cap, buf->base, (size_t)nread);
     }
     if (buf->base) mem_free(buf->base);
     if (nread < 0) { // EOF or error
@@ -326,9 +361,22 @@ static void maybe_complete(JsChildProcess* cp) {
     // call callback(err, stdout, stderr)
     if (get_type_id(cp->callback) == LMD_TYPE_FUNC) {
         Item err = ItemNull;
-        if (cp->exit_code != 0) {
+        if (cp->max_buffer_exceeded) {
             char emsg[128];
-            snprintf(emsg, sizeof(emsg), "Command failed with exit code %d", cp->exit_code);
+            snprintf(emsg, sizeof(emsg), "%s maxBuffer length exceeded",
+                     cp->max_buffer_stream[0] ? cp->max_buffer_stream : "stdout");
+            err = js_new_error_with_name(make_string_item("RangeError"), make_string_item(emsg));
+            js_property_set(err, make_string_item("code"),
+                            make_string_item("ERR_CHILD_PROCESS_STDIO_MAXBUFFER"));
+        } else if (cp->exit_code != 0) {
+            char emsg[1024];
+            if (cp->stderr_buf && cp->stderr_len > 0) {
+                int stderr_len = cp->stderr_len < 800 ? (int)cp->stderr_len : 800;
+                snprintf(emsg, sizeof(emsg), "Command failed with exit code %d\n%.*s",
+                         cp->exit_code, stderr_len, cp->stderr_buf);
+            } else {
+                snprintf(emsg, sizeof(emsg), "Command failed with exit code %d", cp->exit_code);
+            }
             err = js_new_error(make_string_item(emsg));
         }
         Item stdout_str = cp->stdout_buf
@@ -351,7 +399,7 @@ static void maybe_complete(JsChildProcess* cp) {
 // exec(command, callback) — async, buffers stdout/stderr
 // =============================================================================
 
-extern "C" Item js_cp_exec(Item command_item, Item callback_item) {
+static Item js_cp_exec_with_max_buffer(Item command_item, Item callback_item, size_t max_buffer) {
     char cmd_buf[4096];
     const char* cmd = item_to_cstr(command_item, cmd_buf, sizeof(cmd_buf));
     if (!cmd) {
@@ -368,6 +416,7 @@ extern "C" Item js_cp_exec(Item command_item, Item callback_item) {
     if (!cp) return ItemNull;
 
     cp->callback = callback_item;
+    cp->max_buffer = max_buffer;
 
     // init pipes
     uv_pipe_init(loop, &cp->stdout_pipe, 0);
@@ -420,6 +469,10 @@ extern "C" Item js_cp_exec(Item command_item, Item callback_item) {
     uv_read_start((uv_stream_t*)&cp->stderr_pipe, child_alloc_cb, child_stderr_read_cb);
 
     return make_js_undefined();
+}
+
+extern "C" Item js_cp_exec(Item command_item, Item callback_item) {
+    return js_cp_exec_with_max_buffer(command_item, callback_item, 1024 * 1024);
 }
 
 // =============================================================================
@@ -1643,8 +1696,81 @@ static bool validate_execfile_args(Item rest_args) {
     return false;
 }
 
+static size_t execfile_max_buffer_from_options(Item options) {
+    if (!is_object_item(options)) return 1024 * 1024;
+    Item value = js_property_get(options, make_string_item("maxBuffer"));
+    if (is_nullish_item(value)) return 1024 * 1024;
+    TypeId type = get_type_id(value);
+    double number = 0;
+    if (type == LMD_TYPE_INT) number = (double)it2i(value);
+    else if (type == LMD_TYPE_FLOAT) number = it2d(value);
+    else return 1024 * 1024;
+    if (number < 0) return 0;
+    if (number > 9007199254740991.0) return (size_t)-1;
+    return (size_t)number;
+}
+
 extern "C" Item js_cp_execFile(Item rest_args) {
     if (!validate_execfile_args(rest_args)) return ItemNull;
+    int64_t argc = js_array_length(rest_args);
+    Item file_item = js_array_get_int(rest_args, 0);
+    Item args_item = make_js_undefined();
+    Item options_item = make_js_undefined();
+    Item callback_item = make_js_undefined();
+
+    if (argc > 1) {
+        Item second = js_array_get_int(rest_args, 1);
+        if (get_type_id(second) == LMD_TYPE_ARRAY) {
+            args_item = second;
+            if (argc > 2) {
+                Item third = js_array_get_int(rest_args, 2);
+                if (is_callable(third)) callback_item = third;
+                else {
+                    options_item = third;
+                }
+                if (argc > 3) {
+                    Item fourth = js_array_get_int(rest_args, 3);
+                    if (is_callable(fourth)) callback_item = fourth;
+                }
+            }
+        } else if (is_callable(second)) {
+            callback_item = second;
+        } else if (is_object_item(second) || is_nullish_item(second)) {
+            options_item = second;
+            if (argc > 2) {
+                Item third = js_array_get_int(rest_args, 2);
+                if (is_callable(third)) callback_item = third;
+            }
+        }
+    }
+
+    char file_buf[4096];
+    const char* file = item_to_cstr(file_item, file_buf, sizeof(file_buf));
+    if (!file) return js_throw_invalid_arg_type("file", "string", file_item);
+
+    char cmd[8192];
+    int pos = snprintf(cmd, sizeof(cmd), "%s", file);
+    if (pos < 0) pos = 0;
+    if (pos >= (int)sizeof(cmd)) pos = (int)sizeof(cmd) - 1;
+
+    if (should_spawn_lambda_js_mode(file, args_item)) {
+        Item js_arg = make_string_item("js");
+        append_shell_arg(cmd, sizeof(cmd), &pos, js_arg);
+        Item no_log_arg = make_string_item("--no-log");
+        append_shell_arg(cmd, sizeof(cmd), &pos, no_log_arg);
+    }
+
+    if (get_type_id(args_item) == LMD_TYPE_ARRAY) {
+        int64_t args_len = js_array_length(args_item);
+        for (int64_t i = 0; i < args_len; i++) {
+            if (!append_shell_arg(cmd, sizeof(cmd), &pos, js_array_get_int(args_item, i))) {
+                return js_throw_invalid_arg_type("args", "Array of strings", args_item);
+            }
+        }
+    }
+
+    js_cp_exec_with_max_buffer(make_string_item(cmd), callback_item,
+                               execfile_max_buffer_from_options(options_item));
     return make_child_process_object();
 }
 

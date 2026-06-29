@@ -28,6 +28,7 @@
 #endif
 
 int js_dynamic_import_suppress_module_drain = 0;
+extern "C" int js_process_current_exit_code(void);
 
 static JsMirPhaseTiming g_last_js_mir_phase_timing;
 
@@ -930,8 +931,9 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     // Fire process 'exit' event listeners (Node.js compatibility).
     // Must happen while JIT code is still mapped (before MIR_finish).
     {
-        int exit_code = (result.item == ITEM_ERROR || js_check_exception()) ? 1 : 0;
+        int exit_code = (result.item == ITEM_ERROR || js_check_exception()) ? 1 : js_process_current_exit_code();
         js_process_emit_exit(exit_code);
+        js_process_current_exit_code();
     }
 
     // Preamble mode: snapshot module_consts so tests can inherit harness definitions

@@ -4885,6 +4885,49 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             parent_fc->name, parent_env_link_slot, parent_fc->scope_env_count);
     }
 
+    // Phase 1.7d: A function cannot reuse a direct parent's mixed scope env.
+    // Mixed scope envs contain local slots plus a parent-env link. Reusing that
+    // env as if it were the grandparent env makes grandchildren read stale or
+    // unrelated slots for later-initialized lexical captures.
+    for (int fi = 0; fi < mt->func_count; fi++) {
+        JsFuncCollected* fc = &mt->func_entries[fi];
+        if (!fc->reuse_parent_env) continue;
+        int parent_index = fc->parent_index;
+        if (parent_index < 0 || parent_index >= mt->func_count) continue;
+        JsFuncCollected* parent_fc = &mt->func_entries[parent_index];
+        if (!parent_fc->has_parent_env_link) continue;
+
+        fc->reuse_parent_env = false;
+        fc->reuse_env_slot_count = 0;
+        fc->has_parent_env_link = true;
+        fc->parent_env_link_uses_grandparent = true;
+        int parent_env_link_slot = fc->scope_env_count;
+        snprintf(fc->scope_env_names[fc->scope_env_count], 64, "__parent_env__");
+        fc->scope_env_count++;
+        for (int ci = 0; ci < mt->func_count; ci++) {
+            JsFuncCollected* child = &mt->func_entries[ci];
+            if (child->parent_index != fi) continue;
+            for (int k = 0; k < child->capture_count; k++) {
+                for (int s = 0; s < fc->scope_env_count; s++) {
+                    if (strcmp(child->captures[k].name, fc->scope_env_names[s]) == 0) {
+                        child->captures[k].scope_env_slot = s;
+                        child->captures[k].grandparent_slot = -1;
+                        for (int c = 0; c < fc->capture_count; c++) {
+                            if (strcmp(child->captures[k].name, fc->captures[c].name) == 0 &&
+                                fc->captures[c].grandparent_slot >= 0) {
+                                child->captures[k].grandparent_slot = fc->captures[c].grandparent_slot;
+                                break;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        log_debug("js-mir: Phase 1.7d: '%s' will allocate own scope env with parent link at slot %d because parent '%s' has mixed scope env",
+            fc->name, parent_env_link_slot, parent_fc->name);
+    }
+
     // Phase 1.75: Infer parameter and return types for each function
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];

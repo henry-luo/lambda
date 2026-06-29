@@ -851,8 +851,12 @@ extern "C" Item js_fs_readstream_pipe(Item dest_item) {
     return dest_item;
 }
 
-static Item js_fs_readstream_close(void) {
-    return js_stream_destroy(js_get_this(), make_js_undefined());
+static Item js_fs_readstream_close(Item callback_item) {
+    Item stream = js_get_this();
+    if (get_type_id(callback_item) == LMD_TYPE_FUNC) {
+        js_property_set(stream, make_string_item("__destroy_callback__"), callback_item);
+    }
+    return js_stream_destroy(stream, make_js_undefined());
 }
 
 static Item js_fs_readstream_end_later(Item stream) {
@@ -874,7 +878,7 @@ extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
     if (stream.item == 0) return ItemNull;
     js_property_set(stream, make_string_item("__readstream_path__"), path_item);
     js_property_set(stream, make_string_item("__readstream_drained__"), (Item){.item = b2it(false)});
-    js_property_set(stream, make_string_item("close"), js_new_function((void*)js_fs_readstream_close, 0));
+    js_property_set(stream, make_string_item("close"), js_new_function((void*)js_fs_readstream_close, 1));
 
     Item chunk = js_fs_read_file_buffer(path);
     if (js_check_exception()) {

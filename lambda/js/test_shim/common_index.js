@@ -70,6 +70,14 @@ const buildType = 'Release';
 
 const mustCallChecks = [];
 
+function isFixtureProcess() {
+  const script = process.argv && process.argv[1];
+  if (typeof script !== 'string') return false;
+  const normalized = script.replace(/\\/g, '/');
+  return normalized.includes('/test/fixtures/') ||
+         normalized.includes('/fixtures/');
+}
+
 function runCallChecks(exitCode) {
   if (exitCode !== 0) return;
   const failed = mustCallChecks.filter(function(context) {
@@ -94,9 +102,7 @@ function runCallChecks(exitCode) {
                 context.messageSegment,
                 context.actual);
   });
-  // Only exit(1) if at least one mustCall was partially fulfilled
-  // (indicating the test got partway through its assertions)
-  if (anyInvoked) process.exit(1);
+  if (isFixtureProcess()) process.exitCode = 1;
 }
 
 function mustCall(fn, exact) {

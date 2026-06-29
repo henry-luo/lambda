@@ -475,6 +475,8 @@ extern "C" {
     #include "../lib/string.h"
     // create_string function is declared in lib/string.h
     void js_process_emit_exit(int code);
+    int js_process_current_exit_code(void);
+    void js_promise_set_unhandled_rejections_mode(int64_t strict_mode);
 }
 
 // System includes for environment and string functions
@@ -1770,7 +1772,11 @@ int main(int argc, char *argv[]) {
             const char* html_file = NULL;
             const char* eval_source_arg = NULL;
             bool eval_mode = false;
+            bool print_eval_result = false;
             bool input_type_module = false;
+            bool unhandled_rejections_strict = false;
+            bool tls_min_v13 = false;
+            bool tls_max_v12 = false;
             int js_file_arg_index = -1;
             int eval_option_index = -1;
             for (int i = 2; i < argc; i++) {
@@ -1778,6 +1784,14 @@ int main(int argc, char *argv[]) {
                     html_file = argv[++i];
                 } else if (strcmp(argv[i], "--input-type=module") == 0) {
                     input_type_module = true;
+                } else if (strcmp(argv[i], "--unhandled-rejections=strict") == 0) {
+                    unhandled_rejections_strict = true;
+                } else if (strcmp(argv[i], "--unhandled-rejections=none") == 0) {
+                    unhandled_rejections_strict = false;
+                } else if (strcmp(argv[i], "--tls-min-v1.3") == 0) {
+                    tls_min_v13 = true;
+                } else if (strcmp(argv[i], "--tls-max-v1.2") == 0) {
+                    tls_max_v12 = true;
                 } else if (!js_file && (strcmp(argv[i], "-e") == 0 || strcmp(argv[i], "--eval") == 0)) {
                     if (i + 1 >= argc) {
                         printf("Error: Option '%s' requires an argument\n", argv[i]);
@@ -1785,6 +1799,16 @@ int main(int argc, char *argv[]) {
                         return lambda_main_finish(1);
                     }
                     eval_mode = true;
+                    eval_option_index = i;
+                    eval_source_arg = argv[++i];
+                } else if (!js_file && (strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--print") == 0)) {
+                    if (i + 1 >= argc) {
+                        printf("Error: Option '%s' requires an argument\n", argv[i]);
+                        runtime_cleanup(&runtime);
+                        return lambda_main_finish(1);
+                    }
+                    eval_mode = true;
+                    print_eval_result = true;
                     eval_option_index = i;
                     eval_source_arg = argv[++i];
                 } else if (strcmp(argv[i], "--mir-interp") == 0) {
@@ -1805,13 +1829,25 @@ int main(int argc, char *argv[]) {
                 }
             }
 
+            if (tls_min_v13 && tls_max_v12) {
+                fputs("Error: TLS protocol version customizations can not both set minimum v1.3 and maximum v1.2\n", stderr);
+                runtime_cleanup(&runtime);
+                return lambda_main_finish(1);
+            }
+
             size_t js_source_len = 0;
             char* js_source = NULL;
             if (eval_mode) {
                 js_file = "[eval]";
-                js_source_len = strlen(eval_source_arg);
-                js_source = (char*)mem_alloc(js_source_len + 1, MEM_CAT_SYSTEM);
-                memcpy(js_source, eval_source_arg, js_source_len);
+                if (print_eval_result) {
+                    js_source_len = strlen(eval_source_arg) + 13;
+                    js_source = (char*)mem_alloc(js_source_len + 1, MEM_CAT_SYSTEM);
+                    snprintf(js_source, js_source_len + 1, "console.log(%s)", eval_source_arg);
+                } else {
+                    js_source_len = strlen(eval_source_arg);
+                    js_source = (char*)mem_alloc(js_source_len + 1, MEM_CAT_SYSTEM);
+                    memcpy(js_source, eval_source_arg, js_source_len);
+                }
                 js_source[js_source_len] = '\0';
             } else if (input_type_module && !js_file) {
                 js_file = "[stdin]";
@@ -1830,6 +1866,7 @@ int main(int argc, char *argv[]) {
                     return lambda_main_finish(1);
                 }
             }
+            js_promise_set_unhandled_rejections_mode(unhandled_rejections_strict ? 1 : 0);
 
             // If --document is provided, load HTML and set up DOM context
             if (html_file) {
@@ -1987,9 +2024,10 @@ int main(int argc, char *argv[]) {
             mem_free(js_source);
         }
 
+        int final_js_exit_code = js_exit_code ? js_exit_code : (js_had_error ? 1 : js_process_current_exit_code());
         runtime_cleanup(&runtime);
         js_document_session_finish(&js_document_session);
-        return lambda_main_finish(js_exit_code ? js_exit_code : (js_had_error ? 1 : 0));
+        return lambda_main_finish(final_js_exit_code);
     }
 
 #ifdef LAMBDA_PYTHON
