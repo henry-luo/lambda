@@ -1,7 +1,7 @@
 # Transpile Node Tune5 Proposal
 
 Date: 2026-06-29
-Status: proposal
+Status: Track 0 in progress
 Scope: structural LambdaJS Node.js compatibility work against official Node.js
 parallel tests.
 
@@ -272,7 +272,7 @@ Acceptance:
 
 - A fresh node baseline update can say which Node commit it used and whether
   any baseline-pass filenames are absent.
-- `Transpile_Node_Tune5.md` can be updated from a single report command rather
+- `Transpile_Node5.md` can be updated from a single report command rather
   than manual ad hoc counting.
 - No runtime change is accepted without a focused module run and a baseline-only
   regression gate.
@@ -485,6 +485,36 @@ Acceptance:
 6. Track D crypto asymmetric slice.
 7. Track E scope decision for worker/cluster.
 8. Track F VM/module isolation if worker/cluster is deferred.
+
+## Implementation Status
+
+### 2026-06-29 Track 0 slice: generated official inventory report
+
+Landed a first Track 0 measurement slice:
+
+- Added `test/node/node_official_report.py`, a postprocessor that reads the
+  official Node harness configuration, `official_baseline.txt`,
+  `official_skip_list.txt`, `official_slow_list.txt`, the current
+  `ref/node/test/parallel` tree, and any latest `temp/` run artifacts.
+- Added `make node-official-report`, which writes
+  `temp/node_official_report.md` by default.
+- The report now provides the per-prefix pass/fail/skip/slow inventory, active
+  baseline filenames missing from `ref/node`, latest timing status counts,
+  slowest non-passing timing rows, crash/timeout manifest rows, and a
+  first-error-line failure classifier.
+
+Verification:
+
+```bash
+python3 -B test/node/node_official_report.py
+make node-official-report
+git diff --check
+```
+
+Current generated report from the checked-in baseline plus latest temp run
+artifacts is `temp/node_official_report.md`. Runtime compatibility has not been
+changed in this slice; this is intentionally a harness/reporting foundation for
+the next Node5 implementation slice.
 
 ## Verification Policy
 
