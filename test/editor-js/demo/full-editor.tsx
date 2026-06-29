@@ -41,7 +41,9 @@ import {
   cmdFormatItalic,
   cmdFormatUnderline,
   cmdSetBlockType,
-  cmdToggleMark
+  cmdToggleMark,
+  cmdSetMark,
+  cmdRemoveMark
 } from '../src/commands/text-commands'
 import { cmdResizeImage, cmdInsertImage, cmdIndentListItem, cmdOutdentListItem } from '../src/commands/structural-commands'
 import { cmdPasteSlice } from '../src/commands/paste'
@@ -311,7 +313,8 @@ export function FullEditor(props: FullEditorProps) {
           const url = window.prompt('Link URL:', 'https://')
           if (url) runCmd(s => cmdToggleMark(s, 'link', url))
         }}
-        onColor={value => runCmd(s => cmdToggleMark(s, 'color', value))}
+        onColor={value => runCmd(s => cmdSetMark(s, 'color', value))}
+        onClearColor={() => runCmd(s => cmdRemoveMark(s, 'color'))}
         onUndo={() => dispatch({ type: 'undo' })}
         onRedo={() => dispatch({ type: 'redo' })}
         canUndo={state.history.undo.length > 0}
@@ -361,17 +364,24 @@ function ImageResizeOverlay({ shellRef, surfaceRef, imagePath, docVersion, onRes
   const [preview, setPreview] = useState<Box | null>(null)
   const drag = useRef<{ corner: string; startX: number; startY: number; w: number; h: number; ratio: number } | null>(null)
 
-  // Measure the image's position relative to the shell after each render.
+  // Measure the image's position relative to the shell after each render, and
+  // keep it aligned while the surface scrolls or the window resizes.
   useLayoutEffect(() => {
     const shell = shellRef.current
     const surface = surfaceRef.current
     if (shell === null || surface === null) return
-    const el = findElementByPath(surface, imagePath)
-    if (el === null) { setBox(null); return }
-    const sRect = shell.getBoundingClientRect()
-    const r = el.getBoundingClientRect()
-    setBox({ left: r.left - sRect.left, top: r.top - sRect.top, width: r.width, height: r.height })
+    const measure = () => {
+      const el = findElementByPath(surface, imagePath)
+      if (el === null) { setBox(null); return }
+      const sRect = shell.getBoundingClientRect()
+      const r = el.getBoundingClientRect()
+      setBox({ left: r.left - sRect.left, top: r.top - sRect.top, width: r.width, height: r.height })
+    }
+    measure()
     setPreview(null)
+    surface.addEventListener('scroll', measure)
+    window.addEventListener('resize', measure)
+    return () => { surface.removeEventListener('scroll', measure); window.removeEventListener('resize', measure) }
   }, [imagePath, docVersion, shellRef, surfaceRef])
 
   useEffect(() => {
@@ -426,6 +436,7 @@ interface ToolbarProps {
   onBlock: (tag: string) => void
   onLink: () => void
   onColor: (value: string) => void
+  onClearColor: () => void
   onUndo: () => void
   onRedo: () => void
   canUndo: boolean
@@ -441,6 +452,9 @@ function Toolbar(p: ToolbarProps) {
         className="rdt-block"
         value={['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote'].includes(p.block) ? p.block : 'p'}
         onChange={e => p.onBlock(e.target.value)}
+        // The toolbar's onMouseDown preventDefault (keepFocus) would stop a native
+        // <select> from opening — let this control receive its own mousedown.
+        onMouseDown={e => e.stopPropagation()}
         title="Block type"
       >
         <option value="p">Paragraph</option>
@@ -464,10 +478,11 @@ function Toolbar(p: ToolbarProps) {
 
       <span className="rdt-sep" />
 
-      <label className="rdt-color" title="Text color">
-        <span style={{ color: typeof p.marks['color'] === 'string' ? (p.marks['color'] as string) : '#111' }}>A</span>
-        <input type="color" onChange={e => p.onColor(e.target.value)} defaultValue="#e11d48" />
-      </label>
+      <ColorPalette
+        current={typeof p.marks['color'] === 'string' ? (p.marks['color'] as string) : null}
+        onPick={p.onColor}
+        onClear={p.onClearColor}
+      />
       <Btn onClick={() => p.onMark('background', '#fef08a')} title="Highlight">🖍️</Btn>
 
       <span className="rdt-sep" />
@@ -490,6 +505,62 @@ function Btn(props: { active?: boolean; disabled?: boolean; onClick: () => void;
     >
       {props.children}
     </button>
+  )
+}
+
+// Text-color control: a swatch palette popover + a custom picker + a "default"
+// (clear-color) action. Picking always SETS the colour (cmdSetMark), so re-picking
+// replaces rather than toggling off.
+const TEXT_COLORS = [
+  '#0f172a', '#475569', '#94a3b8', '#ffffff', '#ef4444', '#f97316', '#eab308', '#84cc16',
+  '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6', '#2563eb', '#8b5cf6', '#d946ef', '#ec4899'
+]
+
+function ColorPalette(p: { current: string | null; onPick: (c: string) => void; onClear: () => void }) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLSpanElement | null>(null)
+  // Close when clicking outside the control.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: globalThis.MouseEvent) => {
+      if (wrapRef.current !== null && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+  return (
+    <span className="rdt-color-wrap" ref={wrapRef}>
+      <button
+        type="button"
+        className="rdt-color"
+        title="Text color"
+        onMouseDown={e => e.preventDefault()}
+        onClick={() => setOpen(o => !o)}
+      >
+        <span className="rdt-a" style={{ color: p.current ?? '#111827' }}>A</span>
+      </button>
+      {open && (
+        <div className="rdt-palette" onMouseDown={e => e.preventDefault()}>
+          {TEXT_COLORS.map(c => (
+            <button
+              key={c}
+              type="button"
+              className={'rdt-swatch' + (p.current === c ? ' is-current' : '')}
+              style={{ background: c }}
+              title={c}
+              onClick={() => { p.onPick(c); setOpen(false) }}
+            />
+          ))}
+          <label className="rdt-custom">
+            Custom
+            <input type="color" defaultValue={p.current ?? '#e11d48'} onChange={e => p.onPick(e.target.value)} />
+          </label>
+          <button type="button" className="rdt-clear" onClick={() => { p.onClear(); setOpen(false) }}>
+            Default color
+          </button>
+        </div>
+      )}
+    </span>
   )
 }
 

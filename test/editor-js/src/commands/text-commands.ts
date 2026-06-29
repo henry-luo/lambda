@@ -585,18 +585,36 @@ export function cmdDeleteForward(state: EditorState): Transaction | null {
 // ---------------------------------------------------------------------------
 
 export function cmdToggleMark(state: EditorState, name: string, value: AttrValue = true): Transaction | null {
+  return applyMarkCmd(state, name, value, undefined)
+}
+
+// Set a value-carrying mark across the selection (always applied, never toggled
+// off). Used for marks like text color where re-picking a colour must REPLACE
+// the value rather than remove the mark (which is what cmdToggleMark would do
+// once the run already carries some colour).
+export function cmdSetMark(state: EditorState, name: string, value: AttrValue): Transaction | null {
+  return applyMarkCmd(state, name, value, true)
+}
+
+// Remove a mark across the selection unconditionally (e.g. a "default" colour swatch).
+export function cmdRemoveMark(state: EditorState, name: string): Transaction | null {
+  return applyMarkCmd(state, name, true, false)
+}
+
+// Route a mark add/remove to the right strategy by selection shape.
+// force: true = always add, false = always remove, undefined = toggle.
+function applyMarkCmd(state: EditorState, name: string, value: AttrValue, force: boolean | undefined): Transaction | null {
   const sel = state.selection
   if (sel === null) return null
   if (!selIsText(sel)) return null
 
-  if (selCollapsed(sel)) return cmdToggleStoredMark(state, name, value)
-  if (selSingleLeaf(sel)) return toggleMarkSingleLeaf(state, name, value)
+  if (selCollapsed(sel)) return setStoredMark(state, name, value, force)
+  if (selSingleLeaf(sel)) return toggleMarkSingleLeaf(state, name, value, force)
   // Multi-leaf range within one block — e.g. selecting a styled run among
-  // siblings yields anchor at the previous leaf's end. Toggle across the
-  // covered leaves.
+  // siblings yields anchor at the previous leaf's end.
   const mlo = selLo(sel), mhi = selHi(sel)
-  if (pathEq(parentPath(mlo.path), parentPath(mhi.path))) return toggleMarkSameBlock(state, name, value)
-  return toggleMarkCrossBlock(state, name, value)
+  if (pathEq(parentPath(mlo.path), parentPath(mhi.path))) return toggleMarkSameBlock(state, name, value, force)
+  return toggleMarkCrossBlock(state, name, value, force)
 }
 
 // --- shared range mark-toggling helpers (one or more blocks) ---
@@ -643,8 +661,8 @@ function markBlock(block: Node, cov: Map<number, { from: number; to: number }>, 
   return { content: newContent, aIdx, hIdx, hOff }
 }
 
-// Toggle a mark across the covered text leaves of a single block.
-function toggleMarkSameBlock(state: EditorState, name: string, value: AttrValue): Transaction | null {
+// Toggle (or force add/remove) a mark across the covered text leaves of a block.
+function toggleMarkSameBlock(state: EditorState, name: string, value: AttrValue, force?: boolean): Transaction | null {
   const sel = state.selection
   if (sel === null || !selIsText(sel)) return null
   const lo = selLo(sel)
@@ -654,7 +672,7 @@ function toggleMarkSameBlock(state: EditorState, name: string, value: AttrValue)
   if (block === null || !isNode(block)) return null
   const cov = coveredLeaves(block, lastIndex(lo.path), lo.offset, lastIndex(hi.path), hi.offset)
   if (cov.size === 0) return null
-  const adding = anyLacksMark(block, cov, name)
+  const adding = force ?? anyLacksMark(block, cov, name)
   const { content, aIdx, hIdx, hOff } = markBlock(block, cov, name, value, adding)
   let tx = txBegin(state.doc, sel)
   tx = txStep(tx, stepReplace(blockPath, 0, block.content.length, content))
@@ -664,7 +682,7 @@ function toggleMarkSameBlock(state: EditorState, name: string, value: AttrValue)
 // Toggle a mark across a range spanning multiple SIBLING blocks (e.g. paragraphs).
 // The add/remove decision is global (add unless every covered leaf already has it);
 // nested non-inline blocks in the range (e.g. a list) are left untouched.
-function toggleMarkCrossBlock(state: EditorState, name: string, value: AttrValue): Transaction | null {
+function toggleMarkCrossBlock(state: EditorState, name: string, value: AttrValue, force?: boolean): Transaction | null {
   const sel = state.selection
   if (sel === null || !selIsText(sel)) return null
   const lo = selLo(sel)
@@ -689,8 +707,10 @@ function toggleMarkCrossBlock(state: EditorState, name: string, value: AttrValue
     const toOff = bi === hiBi ? hi.offset : (lastLeaf !== undefined && isText(lastLeaf) ? lastLeaf.text.length : 0)
     infos.push({ idx: bi, block, cov: coveredLeaves(block, fromIdx, fromOff, toIdx, toOff) })
   }
-  let adding = false
-  for (const inf of infos) { if (anyLacksMark(inf.block, inf.cov, name)) { adding = true; break } }
+  let adding = force ?? false
+  if (force === undefined) {
+    for (const inf of infos) { if (anyLacksMark(inf.block, inf.cov, name)) { adding = true; break } }
+  }
 
   const newBlocks: Node[] = []
   let anchorPos: SourcePos | undefined
@@ -708,7 +728,7 @@ function toggleMarkCrossBlock(state: EditorState, name: string, value: AttrValue
   return txSetSelection(tx, { kind: 'text', anchor: anchorPos, head: headPos })
 }
 
-function toggleMarkSingleLeaf(state: EditorState, name: string, value: AttrValue): Transaction | null {
+function toggleMarkSingleLeaf(state: EditorState, name: string, value: AttrValue, force?: boolean): Transaction | null {
   const sel = state.selection
   if (sel === null || !selIsText(sel)) return null
   const lo = selLo(sel)
@@ -719,12 +739,12 @@ function toggleMarkSingleLeaf(state: EditorState, name: string, value: AttrValue
   const targetText = leaf.text.slice(lo.offset, hi.offset)
   if (targetText.length === 0) return null
 
-  // Decide: is the mark currently present on the whole target range?
-  // (Range is within a single leaf, so the answer is just "does the leaf have it?")
-  const present = hasMark(leaf.marks, name)
-  const newMarks: MarkDict = present
-    ? withoutMark(leaf.marks, name)
-    : withMark(leaf.marks, name, value)
+  // Decide whether we're adding or removing. Range is within a single leaf, so
+  // "present" is just whether the leaf has the mark; `force` overrides for set/remove.
+  const adding = force ?? !hasMark(leaf.marks, name)
+  const newMarks: MarkDict = adding
+    ? withMark(leaf.marks, name, value)
+    : withoutMark(leaf.marks, name)
 
   const beforeText = leaf.text.slice(0, lo.offset)
   const afterText  = leaf.text.slice(hi.offset)
@@ -753,8 +773,15 @@ function toggleMarkSingleLeaf(state: EditorState, name: string, value: AttrValue
 }
 
 export function cmdToggleStoredMark(state: EditorState, name: string, value: AttrValue = true): Transaction | null {
+  return setStoredMark(state, name, value, undefined)
+}
+
+// Update the stored marks (applied to the next typed text) for a collapsed caret.
+// force: true = add, false = remove, undefined = toggle.
+function setStoredMark(state: EditorState, name: string, value: AttrValue, force?: boolean): Transaction | null {
   const cur: MarkDict = state.stored_marks ?? {}
-  const next: MarkDict = hasMark(cur, name) ? withoutMark(cur, name) : withMark(cur, name, value)
+  const adding = force ?? !hasMark(cur, name)
+  const next: MarkDict = adding ? withMark(cur, name, value) : withoutMark(cur, name)
   let tx = txBegin(state.doc, state.selection)
   tx = txSetMeta(tx, 'storedMarks', next)
   tx = txSetMeta(tx, 'addToHistory', false)
