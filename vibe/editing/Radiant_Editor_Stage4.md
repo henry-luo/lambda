@@ -118,7 +118,8 @@ Existing variants (`text`, `node`, `all`) all continue to work; `node` selection
 
 Three seams connect the drawing surface to the rich-text editor. Each is stated here as a contract; Stage 5 implements behind it.
 
-1. **Schema seam.** The flow-doc schema gains a `drawing` block entry (and the drawing-object roles). To the flow editor a `<drawing>` is just an atomic, selectable, editable block — the same shape as today's `image`. Stage 5 §3 defines the full sub-schema (layers, shapes, connectors, …).
+1. **Schema seam.** The flow-doc schema gains a `drawing` block entry (and the drawing-object roles). To the flow editor a `<drawing>` is an atomic **editable** embed: because `editable: true`, a click inside it *descends* (canvas mode) rather than selecting it as one opaque unit; its inner shapes (atomic + selectable, non-editable) are the selectable units. A `node` selection on the `<drawing>` still works as a whole-block handle (move/delete the block). Stage 5 §3 defines the full sub-schema (layers, shapes, connectors, …).
+   > **Status (2026-06-29): implemented.** The combined schema is `doc_schema` (`mod_doc_schema.ls` = `md_schema` + drawing entries), wired into the editor as `editor_schemas.doc`. The DOM-bridge `nearest_selectable_path` correctly descends through the editable drawing block to its selectable shapes. Headless test: `test/lambda/editor/drawing_block_integration.ls`.
 
 2. **Step seam.** Drawing gestures never introduce new step kinds; they compile to `set_attr` / `replace` / `replace_around` (Stage 5 §5). Consequences the rich-text editor gets for free: one unified undo stack, position `Mapping` across shape edits, and a collab-ready (stable-id + `set_attr`) mutation model.
 
