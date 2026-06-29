@@ -617,6 +617,28 @@ export function cmdMergeCells(state: EditorState): Transaction | null {
   return txSetSelection(tx, nodeSelection([...rowPath, idxs[0] as number]))
 }
 
+// Set a column's width by writing the `width` attr on every cell in that column
+// (the model op behind drag-to-resize). `anchorCellPath` identifies the column.
+export function cmdSetColumnWidth(state: EditorState, anchorCellPath: SourcePath, width: number): Transaction | null {
+  if (anchorCellPath.length < 2) return null
+  const cellIdx = lastIndex(anchorCellPath)
+  const tablePath = parentPath(parentPath(anchorCellPath))
+  const table = nodeAt(state.doc, tablePath)
+  if (table === null || !isNode(table) || table.tag !== 'table') return null
+  const w = Math.max(24, Math.round(width))
+  let tx = txBegin(state.doc, state.selection)
+  let any = false
+  for (let r = 0; r < table.content.length; r++) {
+    const row = table.content[r]
+    if (row === undefined || row.kind !== 'node' || row.tag !== 'tr') continue
+    if (!isCell(row.content[cellIdx])) continue
+    tx = txStep(tx, stepSetAttr([...tablePath, r, cellIdx], 'width', w))
+    any = true
+  }
+  if (!any) return null
+  return txSetSelection(tx, state.selection ?? nodeSelection(anchorCellPath))
+}
+
 // Split a colspan>1 cell back into individual cells (content stays in the first).
 export function cmdSplitCell(state: EditorState): Transaction | null {
   const sel = state.selection

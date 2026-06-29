@@ -33,7 +33,9 @@ import {
   getSourceSelectionFromDom,
   nearestPathOwner,
   pathOf,
-  setDomSelectionFromSource
+  setDomSelectionFromSource,
+  domBoundaryToSourcePos,
+  parsePath
 } from '../src/view/dom-bridge'
 import {
   cmdFormatBold,
@@ -51,7 +53,7 @@ import {
 } from '../src/commands/text-commands'
 import { cmdMoveCaret } from '../src/commands/caret'
 import { gapSelection, multiNodeSelection, pos, textSelection } from '../src/model/source-pos'
-import { cmdResizeImage, cmdInsertImage, cmdIndentListItem, cmdOutdentListItem, cmdInsertInlineAtom, cmdMergeCells, cmdSplitCell, cmdMoveNode } from '../src/commands/structural-commands'
+import { cmdResizeImage, cmdInsertImage, cmdIndentListItem, cmdOutdentListItem, cmdInsertInlineAtom, cmdMergeCells, cmdSplitCell, cmdMoveNode, cmdSetColumnWidth } from '../src/commands/structural-commands'
 import { cmdPasteSlice } from '../src/commands/paste'
 import { parseHtmlToDoc, serializeDocToHtml } from '../src/view/html-parser'
 import { isNode, isText, nodeAt } from '../src/model/doc'
@@ -354,9 +356,41 @@ export function FullEditor(props: FullEditorProps) {
     setDragHandleTop(block.getBoundingClientRect().top - shell.getBoundingClientRect().top)
   }, [topBlocks])
 
+  // Resolve a collapsed text selection at a viewport point (for drop position).
+  const caretAtPoint = useCallback((x: number, y: number): Selection | null => {
+    const d = document as Document & {
+      caretRangeFromPoint?: (x: number, y: number) => Range | null
+      caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
+    }
+    let node: Node | null = null
+    let offset = 0
+    if (typeof d.caretRangeFromPoint === 'function') {
+      const r = d.caretRangeFromPoint(x, y)
+      if (r !== null) { node = r.startContainer; offset = r.startOffset }
+    } else if (typeof d.caretPositionFromPoint === 'function') {
+      const p = d.caretPositionFromPoint(x, y)
+      if (p !== null) { node = p.offsetNode; offset = p.offset }
+    }
+    if (node === null) return null
+    const sp = domBoundaryToSourcePos({ node, offset })
+    return sp === null ? null : textSelection(pos(sp.path, sp.offset), pos(sp.path, sp.offset))
+  }, [])
+
   useEffect(() => {
     const el = rootRef.current
     if (el === null) return
+    // Dragging an image starts a block move of its containing top-level block.
+    const onDragStart = (e: DragEvent) => {
+      const t = e.target as HTMLElement
+      if (t.tagName !== 'IMG') return
+      const block = t.closest<HTMLElement>('.rdt-editor > *')
+      const idx = block !== null ? topBlocks().indexOf(block) : -1
+      if (idx >= 0 && e.dataTransfer !== null) {
+        dragSrcIdx.current = idx
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/plain', 'block')
+      }
+    }
     const onDragOver = (e: DragEvent) => {
       const hasFile = e.dataTransfer !== null && Array.from(e.dataTransfer.types).includes('Files')
       if (dragSrcIdx.current === null && !hasFile) return
@@ -368,10 +402,12 @@ export function FullEditor(props: FullEditorProps) {
       const file = e.dataTransfer !== null ? Array.from(e.dataTransfer.files).find(f => f.type.startsWith('image/')) : undefined
       if (file !== undefined) {
         e.preventDefault()
+        // Insert at the drop POINT: resolve a caret there (fall back to the live one).
+        const dropSel = caretAtPoint(e.clientX, e.clientY) ?? stateRef.current.selection
         const reader = new FileReader()
         reader.onload = () => {
           const cur = stateRef.current
-          const tx = cmdInsertImage({ doc: cur.doc, schema: cur.schema, selection: cur.selection, stored_marks: cur.stored_marks }, String(reader.result), '')
+          const tx = cmdInsertImage({ doc: cur.doc, schema: cur.schema, selection: dropSel, stored_marks: cur.stored_marks }, String(reader.result), '')
           if (tx !== null) dispatch({ type: 'apply', tx })
         }
         reader.readAsDataURL(file)
@@ -383,10 +419,15 @@ export function FullEditor(props: FullEditorProps) {
       dragSrcIdx.current = null
       setDropLineTop(null)
     }
+    el.addEventListener('dragstart', onDragStart)
     el.addEventListener('dragover', onDragOver)
     el.addEventListener('drop', onDrop)
-    return () => { el.removeEventListener('dragover', onDragOver); el.removeEventListener('drop', onDrop) }
-  }, [dropAt])
+    return () => {
+      el.removeEventListener('dragstart', onDragStart)
+      el.removeEventListener('dragover', onDragOver)
+      el.removeEventListener('drop', onDrop)
+    }
+  }, [dropAt, topBlocks, caretAtPoint])
 
   // Click on an image → select it as a node (so it can be resized/deleted).
   const handleSurfaceMouseDown = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
@@ -415,17 +456,17 @@ export function FullEditor(props: FullEditorProps) {
         }
         if (!paths.some(p => p.join(',') === key)) paths.push(clicked)
         dispatch({ type: 'set_selection', sel: multiNodeSelection(paths) })
+        // Clear the native selection so a stray `selectionchange` can't overwrite
+        // the cell (multi-node) selection with a text selection. The cells are
+        // shown via the .rdt-cell-selected highlight instead.
+        window.getSelection()?.removeAllRanges()
       }
       return
     }
-    if (t.tagName === 'IMG') {
-      const owner = nearestPathOwner(t)
-      if (owner !== null) {
-        e.preventDefault()
-        dispatch({ type: 'set_selection', sel: { kind: 'node', path: pathOf(owner) } })
-      }
-      return
-    }
+    // NOTE: image node-selection is handled on CLICK (handleSurfaceClick), not
+    // here — calling preventDefault on an image mousedown would block the native
+    // drag from ever starting (mousedown → dragstart). So leave mousedown alone.
+    if (t.tagName === 'IMG') return
     // Clicking a block atom (an <hr>, or the drawing block) places a gap cursor
     // before it, so the caret can sit between blocks with no text.
     const atomEl = t.tagName === 'HR' ? t : t.closest<HTMLElement>('.rdt-drawing')
@@ -436,6 +477,17 @@ export function FullEditor(props: FullEditorProps) {
         dispatch({ type: 'set_selection', sel: gapSelection(pathOf(owner)) })
       }
     }
+  }, [])
+
+  // Click (not mousedown) selects an image as a node — a click only fires when
+  // the press did NOT become a drag, so this leaves image dragging intact.
+  const handleSurfaceClick = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
+    const t = e.target as HTMLElement
+    if (t.tagName !== 'IMG') return
+    const owner = nearestPathOwner(t)
+    if (owner === null) return
+    dispatch({ type: 'set_selection', sel: { kind: 'node', path: pathOf(owner) } })
+    window.getSelection()?.removeAllRanges()   // keep selectionchange from clobbering it
   }, [])
 
   // The image currently selected as a node (path), if any.
@@ -488,6 +540,7 @@ export function FullEditor(props: FullEditorProps) {
           const name = window.prompt('Mention:', 'alice')
           if (name) runCmd(s => cmdInsertInlineAtom(s, 'mention', [{ name: 'label', value: name }]))
         }}
+        onEmoji={emoji => runCmd(s => cmdInsertText(s, emoji))}
         onMergeCells={() => runCmd(cmdMergeCells)}
         onSplitCell={() => runCmd(cmdSplitCell)}
         onUndo={() => dispatch({ type: 'undo' })}
@@ -503,6 +556,7 @@ export function FullEditor(props: FullEditorProps) {
         spellCheck={false}
         onKeyDown={handleKeyDown}
         onMouseDown={handleSurfaceMouseDown}
+        onClick={handleSurfaceClick}
         onMouseMove={onSurfaceMouseMove}
         onMouseLeave={() => { if (dragSrcIdx.current === null) setDragHandleTop(null) }}
       >
@@ -523,6 +577,10 @@ export function FullEditor(props: FullEditorProps) {
         >⠿</div>
       )}
       {dropLineTop !== null && <div className="rdt-drop-line" style={{ top: dropLineTop }} />}
+      <TableColumnResizers
+        shellRef={shellRef} surfaceRef={rootRef} docVersion={state.doc}
+        onResize={(cellPath, width) => runCmd(s => cmdSetColumnWidth(s, cellPath, width))}
+      />
       {selectedImagePath !== null && (
         <ImageResizeOverlay
           shellRef={shellRef}
@@ -662,6 +720,87 @@ function GapCaret({ shellRef, surfaceRef, gapPath, docVersion }: {
 }
 
 // ---------------------------------------------------------------------------
+// Table column resizers — a draggable handle at each column's right edge.
+// ---------------------------------------------------------------------------
+
+function TableColumnResizers({ shellRef, surfaceRef, docVersion, onResize }: {
+  shellRef: React.RefObject<HTMLDivElement | null>
+  surfaceRef: React.RefObject<HTMLDivElement | null>
+  docVersion: Doc
+  onResize: (cellPath: SourcePath, width: number) => void
+}) {
+  const [handles, setHandles] = useState<{ key: string; left: number; top: number; height: number; cellPath: SourcePath }[]>([])
+  const [guideX, setGuideX] = useState<number | null>(null)
+  const drag = useRef<{ cellPath: SourcePath; startX: number; startW: number } | null>(null)
+
+  // Passive effect (not layout): on the initial mount a child's layout effect
+  // runs before the parent .rdt-shell ref is attached, so use useEffect to be
+  // sure shellRef is ready.
+  useEffect(() => {
+    const shell = shellRef.current
+    const surface = surfaceRef.current
+    if (shell === null || surface === null) return
+    const measure = () => {
+      const sRect = shell.getBoundingClientRect()
+      const hs: { key: string; left: number; top: number; height: number; cellPath: SourcePath }[] = []
+      surface.querySelectorAll('table').forEach(tbl => {
+        const firstRow = tbl.querySelector('tr')
+        if (firstRow === null) return
+        const tRect = (tbl as HTMLElement).getBoundingClientRect()
+        Array.from(firstRow.children).forEach(cellEl => {
+          const sp = cellEl.getAttribute('data-source-path')
+          if (sp === null) return
+          const cr = cellEl.getBoundingClientRect()
+          hs.push({ key: sp, left: cr.right - sRect.left, top: tRect.top - sRect.top, height: tRect.height, cellPath: parsePath(sp) })
+        })
+      })
+      setHandles(hs)
+    }
+    measure()
+    surface.addEventListener('scroll', measure)
+    window.addEventListener('resize', measure)
+    return () => { surface.removeEventListener('scroll', measure); window.removeEventListener('resize', measure) }
+  }, [docVersion, shellRef, surfaceRef])
+
+  useEffect(() => {
+    const onMove = (e: globalThis.MouseEvent) => {
+      if (drag.current === null) return
+      const sLeft = shellRef.current?.getBoundingClientRect().left ?? 0
+      setGuideX(e.clientX - sLeft)
+    }
+    const onUp = (e: globalThis.MouseEvent) => {
+      const d = drag.current
+      if (d === null) return
+      drag.current = null
+      setGuideX(null)
+      onResize(d.cellPath, d.startW + (e.clientX - d.startX))
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+  }, [onResize, shellRef])
+
+  return (
+    <>
+      {handles.map(h => (
+        <div
+          key={h.key}
+          className="rdt-col-resizer"
+          style={{ left: h.left - 3, top: h.top, height: h.height }}
+          onMouseDown={e => {
+            e.preventDefault()
+            const cellEl = surfaceRef.current !== null ? findElementByPath(surfaceRef.current, h.cellPath) : null
+            const startW = cellEl !== null ? cellEl.getBoundingClientRect().width : 80
+            drag.current = { cellPath: h.cellPath, startX: e.clientX, startW }
+          }}
+        />
+      ))}
+      {guideX !== null && <div className="rdt-col-guide" style={{ left: guideX }} />}
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Link popover — inline edit / visit / remove over a link-marked run.
 // ---------------------------------------------------------------------------
 
@@ -719,6 +858,7 @@ interface ToolbarProps {
   onColor: (value: string) => void
   onClearColor: () => void
   onMention: () => void
+  onEmoji: (emoji: string) => void
   onMergeCells: () => void
   onSplitCell: () => void
   onUndo: () => void
@@ -760,6 +900,7 @@ function Toolbar(p: ToolbarProps) {
       <Btn active={p.marks['code'] === true} onClick={p.onCode} title="Code"><code>{'<>'}</code></Btn>
       <Btn active={'link' in p.marks} onClick={p.onLink} title="Link">🔗</Btn>
       <Btn onClick={p.onMention} title="Insert mention">@</Btn>
+      <EmojiPicker onPick={p.onEmoji} />
 
       <span className="rdt-sep" />
 
@@ -805,6 +946,47 @@ const TEXT_COLORS = [
   '#0f172a', '#475569', '#94a3b8', '#ffffff', '#ef4444', '#f97316', '#eab308', '#84cc16',
   '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6', '#2563eb', '#8b5cf6', '#d946ef', '#ec4899'
 ]
+
+// A grid of common emoji; picking one inserts it as text at the caret (emoji are
+// plain Unicode text, not a special node). The popover stays open for multi-insert.
+const EMOJI = [
+  '😀', '😄', '😁', '😂', '🤣', '😊', '😍', '😎', '🤔', '😴',
+  '😉', '😅', '😇', '🥳', '🤩', '😜', '🤗', '😢', '😡', '🤯',
+  '👍', '👎', '👏', '🙏', '💪', '👋', '✌️', '🤝', '🙌', '👀',
+  '❤️', '🔥', '⭐', '✨', '🎉', '🎊', '💯', '✅', '❌', '⚠️',
+  '🚀', '💡', '📌', '📝', '📎', '🔗', '📅', '⏰', '🔒', '🔑'
+]
+
+function EmojiPicker(p: { onPick: (emoji: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLSpanElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: globalThis.MouseEvent) => {
+      if (wrapRef.current !== null && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+  return (
+    <span className="rdt-emoji-wrap" ref={wrapRef}>
+      <button
+        type="button"
+        className="rdt-btn"
+        title="Insert emoji"
+        onMouseDown={e => e.preventDefault()}
+        onClick={() => setOpen(o => !o)}
+      >😀</button>
+      {open && (
+        <div className="rdt-emoji-palette" onMouseDown={e => e.preventDefault()}>
+          {EMOJI.map(em => (
+            <button key={em} type="button" className="rdt-emoji" title={em} onClick={() => p.onPick(em)}>{em}</button>
+          ))}
+        </div>
+      )}
+    </span>
+  )
+}
 
 function ColorPalette(p: { current: string | null; onPick: (c: string) => void; onClear: () => void }) {
   const [open, setOpen] = useState(false)

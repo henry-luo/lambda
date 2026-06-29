@@ -3,7 +3,7 @@ import { node, nodeAttrs, text } from '../../src/model/doc.js'
 import { multiNodeSelection, nodeSelection } from '../../src/model/source-pos.js'
 import { html5SubsetSchema } from '../../src/schemas/index.js'
 import { serializeDocToHtml } from '../../src/view/html-parser.js'
-import { cmdMergeCells, cmdSplitCell } from '../../src/commands/structural-commands.js'
+import { cmdMergeCells, cmdSplitCell, cmdSetColumnWidth } from '../../src/commands/structural-commands.js'
 import type { EditorState } from '../../src/commands/types.js'
 import type { Selection } from '../../src/model/types.js'
 
@@ -47,5 +47,14 @@ describe('table cell merge / split', () => {
 
   it('split is a no-op on a colspan=1 cell', () => {
     expect(cmdSplitCell(st(tableDoc(), nodeSelection([0, 0, 0])))).toBeNull()
+  })
+
+  it('sets a column width on every cell in that column', () => {
+    const two = [node('table', [
+      node('tr', [node('td', [text('a')]), node('td', [text('b')])]),
+      node('tr', [node('td', [text('c')]), node('td', [text('d')])])
+    ])]
+    const tx = cmdSetColumnWidth(st(two, nodeSelection([0, 0, 1])), [0, 0, 1], 120)!
+    expect(html(tx.doc_after)).toBe('<doc><table><tr><td>a</td><td width="120">b</td></tr><tr><td>c</td><td width="120">d</td></tr></table></doc>')
   })
 })

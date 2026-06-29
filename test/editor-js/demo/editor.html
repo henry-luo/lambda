@@ -37,6 +37,16 @@
         position: relative;   /* positioning context for the image-resize overlay */
       }
 
+      /* Table column resize handles + drag guide */
+      .rdt-col-resizer {
+        position: absolute; width: 7px; z-index: 7; cursor: col-resize;
+      }
+      .rdt-col-resizer:hover { background: rgba(37, 99, 235, 0.25); }
+      .rdt-col-guide {
+        position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent);
+        z-index: 13; pointer-events: none;
+      }
+
       /* Inline link popover */
       .rdt-link-popover {
         position: absolute; z-index: 12; display: flex; align-items: center; gap: 4px;
@@ -140,6 +150,21 @@
       }
       .rdt-color:hover { background: #e2e8f0; }
       .rdt-color input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+      /* Emoji picker popover */
+      .rdt-emoji-wrap { position: relative; display: inline-flex; }
+      .rdt-emoji-palette {
+        position: absolute; top: 34px; left: 0; z-index: 20;
+        background: #fff; border: 1px solid var(--border); border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18); padding: 8px;
+        display: grid; grid-template-columns: repeat(10, 26px); gap: 2px;
+        width: max-content; max-height: 240px; overflow-y: auto;
+      }
+      .rdt-emoji {
+        width: 26px; height: 26px; padding: 0; border: none; background: transparent;
+        font-size: 17px; line-height: 1; cursor: pointer; border-radius: 5px;
+      }
+      .rdt-emoji:hover { background: #e2e8f0; }
 
       /* Color palette popover */
       .rdt-color-wrap { position: relative; display: inline-flex; }
