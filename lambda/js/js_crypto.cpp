@@ -2096,6 +2096,15 @@ static bool crypto_public_key_bytes_for_verify(Item key_item, uint8_t** out, int
             return true;
         }
 
+        Item private_key = js_property_get(key_item, make_string_item_crypto("__crypto_private_key__"));
+        if (get_uint8_buffer(private_key, &key_buf, &key_len)) {
+            size_t alloc_len = key_len > 0 ? (size_t)key_len : 1;
+            *out = (uint8_t*)mem_alloc(alloc_len, MEM_CAT_JS_RUNTIME);
+            if (key_len > 0) memcpy(*out, key_buf, (size_t)key_len);
+            *out_len = key_len;
+            return true;
+        }
+
         Item object_key = js_property_get(key_item, make_string_item_crypto("key"));
         if (!crypto_item_is_undefined(object_key)) {
             return crypto_public_key_bytes_for_verify(object_key, out, out_len);
@@ -2116,6 +2125,19 @@ static bool crypto_public_key_bytes_for_verify(Item key_item, uint8_t** out, int
     bool ok = extract_bytes(key_item, out, out_len);
     if (ok) crypto_ensure_pem_nul(out, out_len);
     return ok;
+}
+
+static int crypto_parse_key_for_verify(mbedtls_pk_context* pk,
+                                       const uint8_t* key_bytes, int key_len) {
+    if (!pk || !key_bytes || key_len < 0) return MBEDTLS_ERR_PK_BAD_INPUT_DATA;
+
+    int ret = mbedtls_pk_parse_public_key(pk, key_bytes, (size_t)key_len);
+    if (ret == 0) return 0;
+
+    mbedtls_pk_free(pk);
+    mbedtls_pk_init(pk);
+    return mbedtls_pk_parse_key(pk, key_bytes, (size_t)key_len, NULL, 0,
+        crypto_mbedtls_random, NULL);
 }
 
 static Item crypto_throw_sign_failed(const char* message) {
@@ -2418,7 +2440,7 @@ extern "C" Item js_sign_verify_verify(Item key_item, Item signature_item, Item e
     mbedtls_pk_context pk;
     mbedtls_pk_init(&pk);
     bool verified = false;
-    int ret = mbedtls_pk_parse_public_key(&pk, key_bytes, (size_t)key_len);
+    int ret = crypto_parse_key_for_verify(&pk, key_bytes, key_len);
     if (ret == 0) {
         if (options.padding == CRYPTO_RSA_PKCS1_PSS_PADDING) {
             ret = crypto_rsa_pss_verify(&pk, md_alg, hash, hash_len,
@@ -2432,7 +2454,7 @@ extern "C" Item js_sign_verify_verify(Item key_item, Item signature_item, Item e
             log_debug("crypto: public key verify mismatch or failure: -0x%04x", -ret);
         }
     } else {
-        log_debug("crypto: public key parse for verify failed: -0x%04x", -ret);
+        log_debug("crypto: key parse for verify failed: -0x%04x", -ret);
     }
 
     mbedtls_pk_free(&pk);

@@ -1241,6 +1241,190 @@ static char* js_require_read_resolved_path(char* path_buf, int path_buf_size) {
     return NULL;
 }
 
+static Item js_cjs_key(const char* name, int len) {
+    return (Item){.item = s2it(heap_create_name(name, len))};
+}
+
+static Item js_cjs_key(const char* name) {
+    return js_cjs_key(name, (int)strlen(name));
+}
+
+#define JS_CJS_STACK_MAX 128
+#define JS_CJS_MODULE_MAX 256
+static Item js_cjs_module_stack[JS_CJS_STACK_MAX];
+static int js_cjs_module_stack_count = 0;
+static Item js_cjs_module_names[JS_CJS_MODULE_MAX];
+static Item js_cjs_module_objects[JS_CJS_MODULE_MAX];
+static int js_cjs_module_count = 0;
+static bool js_cjs_roots_registered = false;
+
+static void js_cjs_register_roots(void) {
+    if (js_cjs_roots_registered) return;
+    heap_register_gc_root_range((uint64_t*)js_cjs_module_stack, JS_CJS_STACK_MAX);
+    heap_register_gc_root_range((uint64_t*)js_cjs_module_names, JS_CJS_MODULE_MAX);
+    heap_register_gc_root_range((uint64_t*)js_cjs_module_objects, JS_CJS_MODULE_MAX);
+    js_cjs_roots_registered = true;
+}
+
+static bool js_cjs_same_string(Item left, Item right) {
+    if (left.item == right.item) return true;
+    if (get_type_id(left) != LMD_TYPE_STRING || get_type_id(right) != LMD_TYPE_STRING) return false;
+    String* ls = it2s(left);
+    String* rs = it2s(right);
+    if (!ls || !rs || ls->len != rs->len) return false;
+    return memcmp(ls->chars, rs->chars, (size_t)ls->len) == 0;
+}
+
+static Item js_cjs_current_module(void) {
+    if (js_cjs_module_stack_count <= 0) return ItemNull;
+    return js_cjs_module_stack[js_cjs_module_stack_count - 1];
+}
+
+static Item js_cjs_find_module(Item filename) {
+    for (int i = 0; i < js_cjs_module_count; i++) {
+        if (js_cjs_same_string(js_cjs_module_names[i], filename)) return js_cjs_module_objects[i];
+    }
+    return ItemNull;
+}
+
+static void js_cjs_store_module(Item filename, Item module) {
+    for (int i = 0; i < js_cjs_module_count; i++) {
+        if (js_cjs_same_string(js_cjs_module_names[i], filename)) {
+            js_cjs_module_objects[i] = module;
+            return;
+        }
+    }
+    if (js_cjs_module_count >= JS_CJS_MODULE_MAX) {
+        log_error("cjs-metadata: module registry overflow (%d)", JS_CJS_MODULE_MAX);
+        return;
+    }
+    js_cjs_module_names[js_cjs_module_count] = filename;
+    js_cjs_module_objects[js_cjs_module_count] = module;
+    js_cjs_module_count++;
+}
+
+static Item js_cjs_exports(Item module) {
+    Item exports_key = js_cjs_key("exports");
+    Item exports = js_property_get(module, exports_key);
+    if (get_type_id(exports) == LMD_TYPE_NULL || get_type_id(exports) == LMD_TYPE_UNDEFINED) {
+        exports = js_new_object();
+        js_property_set(module, exports_key, exports);
+    }
+    return exports;
+}
+
+static Item js_cjs_children(Item module) {
+    Item children_key = js_cjs_key("children");
+    Item children = js_property_get(module, children_key);
+    if (get_type_id(children) != LMD_TYPE_ARRAY) {
+        children = js_array_new(0);
+        js_property_set(module, children_key, children);
+    }
+    return children;
+}
+
+static void js_cjs_update_cached_default(Item filename, Item module) {
+    Item ns = js_module_get(filename);
+    if (get_type_id(ns) != LMD_TYPE_MAP && get_type_id(ns) != LMD_TYPE_OBJECT) return;
+    js_property_set(ns, js_cjs_key("default"), js_cjs_exports(module));
+}
+
+extern "C" Item js_cjs_enter(Item module, Item filename) {
+    js_cjs_register_roots();
+    if (get_type_id(module) != LMD_TYPE_MAP && get_type_id(module) != LMD_TYPE_OBJECT) {
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    js_property_set(module, js_cjs_key("id"), filename);
+    js_property_set(module, js_cjs_key("filename"), filename);
+    js_property_set(module, js_cjs_key("loaded"), (Item){.item = ITEM_FALSE});
+    js_cjs_exports(module);
+    js_cjs_children(module);
+    Item parent = js_cjs_current_module();
+    js_property_set(module, js_cjs_key("parent"), parent);
+    if (get_type_id(filename) == LMD_TYPE_STRING) {
+        js_cjs_store_module(filename, module);
+        js_cjs_update_cached_default(filename, module);
+    }
+    if (js_cjs_module_stack_count < JS_CJS_STACK_MAX) {
+        js_cjs_module_stack[js_cjs_module_stack_count++] = module;
+    } else {
+        log_error("cjs-metadata: module stack overflow (%d)", JS_CJS_STACK_MAX);
+    }
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+extern "C" Item js_cjs_complete(Item module) {
+    if (get_type_id(module) == LMD_TYPE_MAP || get_type_id(module) == LMD_TYPE_OBJECT) {
+        js_property_set(module, js_cjs_key("loaded"), (Item){.item = ITEM_TRUE});
+    }
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+extern "C" Item js_cjs_leave(Item module) {
+    if (js_cjs_module_stack_count > 0) {
+        if (js_cjs_module_stack[js_cjs_module_stack_count - 1].item == module.item) {
+            js_cjs_module_stack_count--;
+        } else {
+            for (int i = js_cjs_module_stack_count - 1; i >= 0; i--) {
+                if (js_cjs_module_stack[i].item != module.item) continue;
+                for (int j = i + 1; j < js_cjs_module_stack_count; j++) {
+                    js_cjs_module_stack[j - 1] = js_cjs_module_stack[j];
+                }
+                js_cjs_module_stack_count--;
+                break;
+            }
+        }
+    }
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static Item js_cjs_create_module_metadata(Item child_filename, Item exports) {
+    Item module = js_new_object();
+    js_property_set(module, js_cjs_key("id"), child_filename);
+    js_property_set(module, js_cjs_key("filename"), child_filename);
+    js_property_set(module, js_cjs_key("exports"), exports);
+    js_property_set(module, js_cjs_key("loaded"), (Item){.item = ITEM_TRUE});
+    js_property_set(module, js_cjs_key("children"), js_array_new(0));
+    js_property_set(module, js_cjs_key("parent"), ItemNull);
+    js_cjs_store_module(child_filename, module);
+    return module;
+}
+
+static bool js_cjs_specifier_is_file_path(Item specifier) {
+    if (get_type_id(specifier) != LMD_TYPE_STRING) return false;
+    String* spec = it2s(specifier);
+    if (!spec || spec->len <= 0) return false;
+    bool has_slash = false;
+    for (int64_t i = 0; i < spec->len; i++) {
+        if (spec->chars[i] == '/') {
+            has_slash = true;
+            break;
+        }
+    }
+    if (!has_slash) return false;
+    if (spec->len >= 4 && memcmp(spec->chars + spec->len - 4, ".mjs", 4) == 0) return false;
+    if (spec->len >= 4 && memcmp(spec->chars + spec->len - 4, ".cjs", 4) == 0) return true;
+    if (spec->len >= 3 && memcmp(spec->chars + spec->len - 3, ".js", 3) == 0) return true;
+    return false;
+}
+
+static void js_cjs_note_child(Item child_filename, Item child_exports) {
+    Item parent = js_cjs_current_module();
+    if (get_type_id(parent) != LMD_TYPE_MAP && get_type_id(parent) != LMD_TYPE_OBJECT) return;
+    Item child = js_cjs_find_module(child_filename);
+    if (get_type_id(child) != LMD_TYPE_MAP && get_type_id(child) != LMD_TYPE_OBJECT) {
+        child = js_cjs_create_module_metadata(child_filename, child_exports);
+    }
+    if (get_type_id(child) != LMD_TYPE_MAP && get_type_id(child) != LMD_TYPE_OBJECT) return;
+    Item children = js_cjs_children(parent);
+    int64_t len = js_array_length(children);
+    for (int64_t i = 0; i < len; i++) {
+        Item existing = js_array_get_int(children, i);
+        if (existing.item == child.item) return;
+    }
+    js_array_push(children, child);
+}
+
 char* js_wrap_cjs_source(const char* source, const char* filename) {
     char filename_buf[2048];
     snprintf(filename_buf, sizeof(filename_buf), "%s", filename);
@@ -1262,8 +1446,15 @@ char* js_wrap_cjs_source(const char* source, const char* filename) {
         "var exports = __cjs_module__.exports;\n"
         "var module = __cjs_module__;\n"
         "var __filename = \"%s\";\n"
-        "var __dirname = \"%.*s\";\n";
-    const char* suffix = "\nexport default __cjs_module__.exports;\n";
+        "var __dirname = \"%.*s\";\n"
+        "__lambda_cjs_enter(__cjs_module__, __filename);\n"
+        "try {\n";
+    const char* suffix =
+        "\n__lambda_cjs_complete(__cjs_module__);\n"
+        "} finally {\n"
+        "__lambda_cjs_leave(__cjs_module__);\n"
+        "}\n"
+        "export default __cjs_module__.exports;\n";
 
     size_t src_len = strlen(source);
     size_t prefix_size = strlen(prefix_fmt) + strlen(filename_buf) + dir_len + 64;
@@ -1293,7 +1484,11 @@ extern "C" Item js_require(Item specifier) {
         Item def_key = (Item){.item = s2it(heap_create_name("default"))};
         Item def_val = js_property_get(existing, def_key);
         TypeId dt = get_type_id(def_val);
-        if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) return def_val;
+        if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) {
+            if (js_cjs_specifier_is_file_path(specifier)) js_cjs_note_child(specifier, def_val);
+            return def_val;
+        }
+        if (js_cjs_specifier_is_file_path(specifier)) js_cjs_note_child(specifier, existing);
         return existing;
     }
 
@@ -1310,6 +1505,21 @@ extern "C" Item js_require(Item specifier) {
             return js_new_object();
         }
         return ItemNull;
+    }
+
+    Item resolved_spec = (Item){.item = s2it(heap_create_name(path_buf, strlen(path_buf)))};
+    existing = js_module_get(resolved_spec);
+    if (get_type_id(existing) != LMD_TYPE_NULL) {
+        mem_free(source);
+        Item def_key = (Item){.item = s2it(heap_create_name("default"))};
+        Item def_val = js_property_get(existing, def_key);
+        TypeId dt = get_type_id(def_val);
+        if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) {
+            if (js_is_cjs_file(path_buf)) js_cjs_note_child(resolved_spec, def_val);
+            return def_val;
+        }
+        if (js_is_cjs_file(path_buf)) js_cjs_note_child(resolved_spec, existing);
+        return existing;
     }
 
     Runtime* runtime = js_source_runtime;
@@ -1342,7 +1552,11 @@ extern "C" Item js_require(Item specifier) {
         Item def_key = (Item){.item = s2it(heap_create_name("default"))};
         Item def_val = js_property_get(ns, def_key);
         TypeId dt = get_type_id(def_val);
-        if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) return def_val;
+        if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) {
+            js_cjs_note_child(resolved_spec, def_val);
+            return def_val;
+        }
+        js_cjs_note_child(resolved_spec, ns);
     }
 
     return ns;

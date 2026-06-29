@@ -14745,13 +14745,96 @@ static Item js_mp_stub_noop(void) {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
 }
 
-static Item js_message_port_postMessage(Item msg) {
-    (void)msg;
-    // stub: no cross-context messaging
+static bool js_message_port_event_name_matches(Item event, const char* expected) {
+    if (get_type_id(event) != LMD_TYPE_STRING || !expected) return false;
+    String* s = it2s(event);
+    size_t len = strlen(expected);
+    return s->len == (int64_t)len && memcmp(s->chars, expected, len) == 0;
+}
+
+static bool js_message_port_is_object(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+}
+
+static Item js_message_port_add_listener(Item event, Item handler) {
+    Item self = js_get_this();
+    if (!js_message_port_event_name_matches(event, "message") || get_type_id(handler) != LMD_TYPE_FUNC) {
+        return self;
+    }
+    Item listeners = js_property_get(self, make_string_item("__message_listeners__"));
+    if (get_type_id(listeners) != LMD_TYPE_ARRAY) {
+        listeners = js_array_new(0);
+        js_property_set(self, make_string_item("__message_listeners__"), listeners);
+    }
+    js_array_push(listeners, handler);
+    return self;
+}
+
+static Item js_message_port_deliver(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    Item target = env ? env[0] : make_js_undefined();
+    Item msg = env ? env[1] : make_js_undefined();
+
+    Item onmessage = js_property_get(target, make_string_item("onmessage"));
+    if (get_type_id(onmessage) == LMD_TYPE_FUNC) {
+        Item event = js_new_object();
+        js_property_set(event, make_string_item("data"), msg);
+        Item args[1] = {event};
+        js_call_function(onmessage, target, args, 1);
+    }
+
+    Item listeners = js_property_get(target, make_string_item("__message_listeners__"));
+    if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
+        int64_t count = js_array_length(listeners);
+        for (int64_t i = 0; i < count; i++) {
+            Item listener = js_array_get_int(listeners, i);
+            if (get_type_id(listener) == LMD_TYPE_FUNC) {
+                Item args[1] = {msg};
+                js_call_function(listener, target, args, 1);
+            }
+        }
+    }
     return make_js_undefined();
 }
 
-static Item js_message_port_close(void) {
+static Item js_message_port_postMessage(Item msg) {
+    Item self = js_get_this();
+    Item closed = js_property_get(self, make_string_item("__closed__"));
+    if (closed.item == ITEM_TRUE) return make_js_undefined();
+    if (get_type_id(msg) == LMD_TYPE_FUNC) {
+        Item msg_str = js_to_string(msg);
+        char buf[512];
+        if (get_type_id(msg_str) == LMD_TYPE_STRING) {
+            String* s = it2s(msg_str);
+            snprintf(buf, sizeof(buf), "%.*s could not be cloned.", (int)s->len, s->chars);
+        } else {
+            snprintf(buf, sizeof(buf), "function could not be cloned.");
+        }
+        Item err = js_new_error_with_name(make_string_item("DataCloneError"), make_string_item(buf));
+        js_throw_value(err);
+        return make_js_undefined();
+    }
+    Item peer = js_property_get(self, make_string_item("__peer__"));
+    if (!js_message_port_is_object(peer)) return make_js_undefined();
+    Item peer_closed = js_property_get(peer, make_string_item("__closed__"));
+    if (peer_closed.item == ITEM_TRUE) return make_js_undefined();
+
+    Item* env = js_alloc_env(2);
+    env[0] = peer;
+    env[1] = msg;
+    Item deliver = js_new_closure((void*)js_message_port_deliver, 0, env, 2);
+    extern Item js_setTimeout(Item callback, Item delay);
+    js_setTimeout(deliver, (Item){.item = i2it(0)});
+    return make_js_undefined();
+}
+
+static Item js_message_port_close(Item callback) {
+    Item self = js_get_this();
+    js_property_set(self, make_string_item("__closed__"), (Item){.item = ITEM_TRUE});
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        js_next_tick_enqueue(callback);
+    }
     return make_js_undefined();
 }
 
@@ -14762,16 +14845,18 @@ extern "C" Item js_message_port_new(void) {
     js_property_set(port, make_string_item("postMessage"),
         js_new_function((void*)js_message_port_postMessage, 1));
     js_property_set(port, make_string_item("close"),
-        js_new_function((void*)js_message_port_close, 0));
+        js_new_function((void*)js_message_port_close, 1));
     js_property_set(port, make_string_item("onmessage"), ItemNull);
     js_property_set(port, make_string_item("onmessageerror"), ItemNull);
+    js_property_set(port, make_string_item("__closed__"), (Item){.item = ITEM_FALSE});
+    js_property_set(port, make_string_item("__message_listeners__"), js_array_new(0));
     // EventEmitter methods
     js_property_set(port, make_string_item("on"),
-        js_new_function((void*)js_mp_stub_noop, 2));
+        js_new_function((void*)js_message_port_add_listener, 2));
     js_property_set(port, make_string_item("once"),
-        js_new_function((void*)js_mp_stub_noop, 2));
+        js_new_function((void*)js_message_port_add_listener, 2));
     js_property_set(port, make_string_item("addEventListener"),
-        js_new_function((void*)js_mp_stub_noop, 2));
+        js_new_function((void*)js_message_port_add_listener, 2));
     js_property_set(port, make_string_item("removeEventListener"),
         js_new_function((void*)js_mp_stub_noop, 2));
     js_property_set(port, make_string_item("start"),
@@ -14789,6 +14874,8 @@ extern "C" Item js_message_channel_new(void) {
     js_class_stamp(channel, JS_CLASS_MESSAGE_CHANNEL);  // A3-T3b
     Item port1 = js_message_port_new();
     Item port2 = js_message_port_new();
+    js_property_set(port1, make_string_item("__peer__"), port2);
+    js_property_set(port2, make_string_item("__peer__"), port1);
     js_property_set(channel, make_string_item("port1"), port1);
     js_property_set(channel, make_string_item("port2"), port2);
     return channel;
@@ -14922,6 +15009,19 @@ extern "C" Item js_get_global_this() {
 
         // Node.js: 'global' is an alias for globalThis
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("global", 6))}, js_global_this_obj);
+
+        extern Item js_cjs_enter(Item module, Item filename);
+        extern Item js_cjs_complete(Item module);
+        extern Item js_cjs_leave(Item module);
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("__lambda_cjs_enter", 18))},
+            js_new_function((void*)js_cjs_enter, 2));
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("__lambda_cjs_complete", 21))},
+            js_new_function((void*)js_cjs_complete, 1));
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("__lambda_cjs_leave", 18))},
+            js_new_function((void*)js_cjs_leave, 1));
 
         // EventTarget interface methods on globalThis (window/self acts as
         // an EventTarget per HTML spec).
