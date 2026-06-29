@@ -465,6 +465,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     memcpy(owned_source, js_source, js_source_len);
     owned_source[js_source_len] = '\0';
     js_source = owned_source;
+    jm_track_active_js_transpile(NULL, NULL, owned_source);
 
     // Inject __filename and __dirname for Node.js CommonJS compatibility.
     // Only for file-based scripts (not eval/REPL), and only if the source
@@ -507,8 +508,10 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         memcpy(injected_source + insert_at, commonjs_header, (size_t)off);
         memcpy(injected_source + insert_at + (size_t)off, js_source + insert_at, js_source_len - insert_at);
         injected_source[js_source_len + (size_t)off] = '\0';
+        jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
         owned_source = injected_source;
+        jm_track_active_js_transpile(NULL, NULL, owned_source);
         js_source = injected_source;
         js_source_len += (size_t)off;
     }
@@ -535,15 +538,19 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     JsTranspiler* tp = js_transpiler_create(runtime);
     if (!tp) {
         log_error("js-mir: failed to create transpiler");
+        jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
     }
+    jm_track_active_js_transpile(tp, NULL, NULL);
 
     // Parse JavaScript source
     long phase_start = js_mir_phase_now_us();
     if (!js_transpiler_parse(tp, js_source, js_source_len)) {
         log_error("js-mir: parse failed");
+        jm_clear_active_js_transpile(tp, NULL, NULL);
         js_transpiler_destroy(tp);
+        jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
     }
@@ -557,7 +564,9 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     JsAstNode* js_ast = build_js_ast(tp, root);
     if (!js_ast) {
         log_error("js-mir: AST build failed");
+        jm_clear_active_js_transpile(tp, NULL, NULL);
         js_transpiler_destroy(tp);
+        jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
     }
@@ -569,7 +578,9 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     int early_errors = js_check_early_errors(tp, js_ast);
     if (early_errors > 0) {
         log_error("js-mir: %d early error(s) detected", early_errors);
+        jm_clear_active_js_transpile(tp, NULL, NULL);
         js_transpiler_destroy(tp);
+        jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
     }
@@ -652,7 +663,9 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     }
     if (!ctx) {
         log_error("js-mir: MIR context init failed");
+        jm_clear_active_js_transpile(tp, NULL, NULL);
         js_transpiler_destroy(tp);
+        jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
     }
@@ -666,11 +679,15 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     // Set up MIR transpiler (heap-allocated: struct is ~3 MB due to func_entries[256])
     JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, filename, false, 64, 32, 16, "js-mir");
     if (!mt) {
+        g_active_mir_ctx = NULL;
         MIR_finish(ctx);
+        jm_clear_active_js_transpile(tp, NULL, NULL);
         js_transpiler_destroy(tp);
+        jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
     }
+    jm_track_active_js_transpile(NULL, mt, NULL);
 
     // Tune6 §3.3: enable per-opcode emission histogram for this transpile.
     static int js_opcode_hist_cached = -1;
@@ -740,9 +757,13 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     // Pre-link validation: abort gracefully if NULL labels found
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-mir: NULL labels detected, aborting link for '%s'", filename ? filename : "<string>");
+        jm_clear_active_js_transpile(NULL, mt, NULL);
         jm_destroy_mir_transpiler(mt);
+        g_active_mir_ctx = NULL;
         MIR_finish(ctx);
+        jm_clear_active_js_transpile(tp, NULL, NULL);
         js_transpiler_destroy(tp);
+        jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
     }
@@ -843,9 +864,13 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
 
     if (!js_main) {
         log_error("js-mir: failed to find js_main");
+        jm_clear_active_js_transpile(NULL, mt, NULL);
         jm_destroy_mir_transpiler(mt);
+        g_active_mir_ctx = NULL;
         MIR_finish(ctx);
+        jm_clear_active_js_transpile(tp, NULL, NULL);
         js_transpiler_destroy(tp);
+        jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
     }
@@ -980,6 +1005,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
 
     // Cleanup
     phase_start = js_mir_phase_now_us();
+    jm_clear_active_js_transpile(NULL, mt, NULL);
     jm_destroy_mir_transpiler(mt);
     if (g_jm_preamble_out) {
         // Preamble mode: keep MIR context alive — harness function objects reference compiled code
@@ -990,6 +1016,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         g_jm_preamble_out->tp_ast_pool = tp->ast_pool;
         g_jm_preamble_out->tp_name_pool = tp->name_pool;
         g_jm_preamble_out->source_buffer = owned_source;
+        jm_clear_active_js_transpile(NULL, NULL, owned_source);
         owned_source = NULL;
         tp->ast_pool = NULL;  // prevent js_transpiler_destroy from freeing these
         tp->name_pool = NULL;
@@ -1006,11 +1033,13 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
             module_mir_name_pools[module_mir_context_count - 1] = tp->name_pool;
             module_mir_ast_pools[module_mir_context_count - 1] = tp->ast_pool;
             module_mir_source_buffers[module_mir_context_count - 1] = owned_source;
+            jm_clear_active_js_transpile(NULL, NULL, owned_source);
             owned_source = NULL;
         }
         tp->name_pool = NULL;
         tp->ast_pool = NULL;
     } else {
+        g_active_mir_ctx = NULL;
         MIR_finish(ctx);
     }
     g_active_mir_ctx = NULL;  // normal cleanup done, no longer need recovery
@@ -1035,8 +1064,10 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     if (!reusing_context) {
         jm_cleanup_deferred_mir();
     }
+    jm_clear_active_js_transpile(tp, NULL, NULL);
     js_transpiler_destroy(tp);
 
+    jm_clear_active_js_transpile(NULL, NULL, owned_source);
     mem_free(owned_source);
     g_last_js_mir_phase_timing.cleanup_us = js_mir_phase_now_us() - phase_start;
     g_last_js_mir_phase_timing.total_us = js_mir_phase_now_us() - phase_total_start;
@@ -1161,6 +1192,7 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
         log_error("js-mir: cannot read JS file '%s'", js_path);
         return ItemNull;
     }
+    jm_track_active_js_transpile(NULL, NULL, source);
 
     // transpile_js_module_to_mir assumes a heap context is already active
     // (normally provided by transpile_js_to_mir). When called from build_ast
@@ -1184,6 +1216,7 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
     }
 
     Item ns = transpile_js_module_to_mir(runtime, source, js_path);
+    jm_clear_active_js_transpile(NULL, NULL, source);
     mem_free(source);
     return ns;
 }
@@ -1314,14 +1347,23 @@ static int js_cjs_module_stack_count = 0;
 static Item js_cjs_module_names[JS_CJS_MODULE_MAX];
 static Item js_cjs_module_objects[JS_CJS_MODULE_MAX];
 static int js_cjs_module_count = 0;
-static bool js_cjs_roots_registered = false;
+static struct gc_heap* js_cjs_roots_gc = NULL;
 
 static void js_cjs_register_roots(void) {
-    if (js_cjs_roots_registered) return;
+    if (!context || !context->heap || !context->heap->gc) return;
+    if (js_cjs_roots_gc == context->heap->gc) return;
     heap_register_gc_root_range((uint64_t*)js_cjs_module_stack, JS_CJS_STACK_MAX);
     heap_register_gc_root_range((uint64_t*)js_cjs_module_names, JS_CJS_MODULE_MAX);
     heap_register_gc_root_range((uint64_t*)js_cjs_module_objects, JS_CJS_MODULE_MAX);
-    js_cjs_roots_registered = true;
+    js_cjs_roots_gc = context->heap->gc;
+}
+
+extern "C" void js_cjs_metadata_reset(void) {
+    memset(js_cjs_module_stack, 0, sizeof(js_cjs_module_stack));
+    memset(js_cjs_module_names, 0, sizeof(js_cjs_module_names));
+    memset(js_cjs_module_objects, 0, sizeof(js_cjs_module_objects));
+    js_cjs_module_stack_count = 0;
+    js_cjs_module_count = 0;
 }
 
 static bool js_cjs_same_string(Item left, Item right) {
@@ -1564,10 +1606,12 @@ extern "C" Item js_require(Item specifier) {
         }
         return ItemNull;
     }
+    jm_track_active_js_transpile(NULL, NULL, source);
 
     Item resolved_spec = (Item){.item = s2it(heap_create_name(path_buf, strlen(path_buf)))};
     existing = js_module_get(resolved_spec);
     if (get_type_id(existing) != LMD_TYPE_NULL) {
+        jm_clear_active_js_transpile(NULL, NULL, source);
         mem_free(source);
         Item def_key = (Item){.item = s2it(heap_create_name("default"))};
         Item def_val = js_property_get(existing, def_key);
@@ -1583,6 +1627,7 @@ extern "C" Item js_require(Item specifier) {
     Runtime* runtime = js_source_runtime;
     if (!runtime) {
         log_error("require: no runtime available");
+        jm_clear_active_js_transpile(NULL, NULL, source);
         mem_free(source);
         return ItemNull;
     }
@@ -1591,12 +1636,16 @@ extern "C" Item js_require(Item specifier) {
     if (js_is_cjs_file(path_buf)) {
         // Wrap CJS source with module/exports globals
         char* wrapped = js_wrap_cjs_source(source, path_buf);
+        jm_clear_active_js_transpile(NULL, NULL, source);
         mem_free(source);
+        jm_track_active_js_transpile(NULL, NULL, wrapped);
         ns = transpile_js_module_to_mir(runtime, wrapped, path_buf);
+        jm_clear_active_js_transpile(NULL, NULL, wrapped);
         mem_free(wrapped);
     } else {
         // ESM — transpile as-is
         ns = transpile_js_module_to_mir(runtime, source, path_buf);
+        jm_clear_active_js_transpile(NULL, NULL, source);
         mem_free(source);
     }
 
@@ -1659,13 +1708,16 @@ extern "C" Item js_dynamic_import(Item specifier) {
             snprintf(msg, sizeof(msg), "Cannot find module '%.*s'", (int)spec->len, spec->chars);
             return js_dynamic_import_reject_type_error(msg);
         }
+        jm_track_active_js_transpile(NULL, NULL, source);
         Runtime* runtime = js_source_runtime;
         if (!runtime) {
+            jm_clear_active_js_transpile(NULL, NULL, source);
             mem_free(source);
             js_dynamic_import_suppress_module_drain--;
             return js_dynamic_import_reject_type_error("import(): no runtime available");
         }
         ns = transpile_js_module_to_mir(runtime, source, path_buf);
+        jm_clear_active_js_transpile(NULL, NULL, source);
         mem_free(source);
     }
     js_dynamic_import_suppress_module_drain--;
