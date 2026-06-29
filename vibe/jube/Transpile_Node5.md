@@ -1,7 +1,7 @@
 # Transpile Node Tune5 Proposal
 
 Date: 2026-06-29
-Status: Track C in progress
+Status: Track B in progress
 Scope: structural LambdaJS Node.js compatibility work against official Node.js
 parallel tests.
 
@@ -564,6 +564,55 @@ Results:
   several non-assert/non-buffer tests. The stable reproduced subset remains
   failing after reversing this Node5 patch and rebuilding, so those failures are
   not introduced by this slice.
+
+### 2026-06-29 Track B slice: AsyncResource and diagnostics stores
+
+Landed the first async-context runtime slice for two Track B representative
+official failures:
+
+- `AsyncResource` constructor now validates public Node-shaped arguments:
+  missing/non-string `type` throws `ERR_INVALID_ARG_TYPE`, empty string `type`
+  throws `ERR_ASYNC_TYPE`, and invalid numeric `triggerAsyncId` throws
+  `ERR_INVALID_ASYNC_ID`.
+- `AsyncResource` preserves valid numeric/object `triggerAsyncId` options and
+  existing `requireManualDestroy` behavior.
+- `diagnostics_channel` channels now expose real `bindStore`, `unbindStore`,
+  and `runStores` behavior backed by the existing AsyncLocalStorage context
+  helper.
+- Diagnostics store transforms now run before subscriber/callback execution,
+  subscribers observe the bound stores during `runStores`, nested contexts
+  restore correctly, and transform failures are contained and emitted through
+  `uncaughtException` after `runStores` returns.
+- The diagnostics failure also exposed a root-cause event-name bug in this
+  path: deferred `uncaughtException` emission must use the real 17-byte event
+  name, otherwise it misses listeners stored under the JS-created event key.
+  The same 17-byte length is now used by process listener bookkeeping for
+  `uncaughtException`.
+
+Verification:
+
+```bash
+make build
+./lambda.exe js ref/node/test/parallel/test-async-hooks-asyncresource-constructor.js --no-log
+./lambda.exe js ref/node/test/parallel/test-diagnostics-channel-bind-store.js --no-log
+./lambda.exe js test/node/timers_async_local_storage.js --no-log
+./lambda.exe js test/node/stream_finished_async_local_storage.js --no-log
+./test/test_node_gtest.exe '--gtest_filter=*test_async_hooks_asyncresource_constructor*:*test_diagnostics_channel_bind_store*' --gtest_brief=1
+./test/test_node_gtest.exe '--gtest_filter=*test_async_hooks_run_in_async_scope_this_arg*:*test_async_hooks_prevent_double_destroy*:*test_async_hooks_disable_gc_tracking*:*test_async_hooks_asyncresource_constructor*' --gtest_brief=1
+./test/test_node_gtest.exe '--gtest_filter=*test_diagnostics_channel_memory_leak*:*test_diagnostics_channel_module_import_error*:*test_diagnostics_channel_sync_unsubscribe*:*test_diagnostics_channel_tracing_channel_promise_early_exit*:*test_diagnostics_channel_web_locks*:*test_diagnostics_channel_worker_threads*:*test_diagnostics_channel_bind_store*' --gtest_brief=1
+```
+
+Results:
+
+- Direct official `test-async-hooks-asyncresource-constructor.js`: pass.
+- Direct official `test-diagnostics-channel-bind-store.js`: pass.
+- Local timer and stream AsyncLocalStorage fixtures still pass.
+- Focused official gtest filter: 2/2 passed, 0 regressions,
+  `NEW_PASS test-async-hooks-asyncresource-constructor.js`,
+  `NEW_PASS test-diagnostics-channel-bind-store.js`.
+- Neighboring AsyncResource focused filter: 4/4 passed, 0 regressions.
+- Diagnostics baseline guard plus bind-store: 7/7 passed, 0 regressions,
+  `NEW_PASS test-diagnostics-channel-bind-store.js`.
 
 ## Verification Policy
 

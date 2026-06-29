@@ -32325,11 +32325,13 @@ static Item js_dc_tc_traceSync(Item fn);
 static Item js_dc_tc_tracePromise(Item fn);
 static Item js_dc_tc_traceCallback(Item fn);
 static void js_dc_channel_publish_on(Item channel, Item message);
+static Item js_dc_channel_runStores(Item message, Item callback, Item this_arg, Item arg1, Item arg2);
 
 extern "C" Item js_array_new(int length);
 extern "C" Item js_array_push(Item array, Item value);
 extern "C" Item js_array_get_int(Item array, int64_t index);
 extern "C" int64_t js_array_length(Item array);
+extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc);
 
 // Channel.subscribe(handler)
 static Item js_dc_channel_subscribe(Item handler) {
@@ -32375,9 +32377,124 @@ static Item js_dc_channel_hasSubscribers(void) {
     return (Item){.item = ITEM_FALSE};
 }
 
-// Channel.bindStore / Channel.unbindStore — no-ops
-static Item js_dc_channel_bindStore(Item store, Item transform) {
+static Item js_dc_stores_key(void) {
+    return (Item){.item = s2it(heap_create_name("_stores", 7))};
+}
+
+#define JS_DC_DEFERRED_ERROR_MAX 64
+static Item js_dc_deferred_errors[JS_DC_DEFERRED_ERROR_MAX];
+static int js_dc_deferred_error_count = 0;
+static bool js_dc_deferred_error_roots_registered = false;
+
+static void js_dc_deferred_error_register_roots(void) {
+    if (js_dc_deferred_error_roots_registered) return;
+    heap_register_gc_root_range((uint64_t*)js_dc_deferred_errors, JS_DC_DEFERRED_ERROR_MAX);
+    js_dc_deferred_error_roots_registered = true;
+}
+
+static Item js_dc_emit_deferred_error(void) {
+    if (js_dc_deferred_error_count <= 0) return (Item){.item = ITEM_JS_UNDEFINED};
+    Item error = js_dc_deferred_errors[0];
+    for (int i = 1; i < js_dc_deferred_error_count; i++) {
+        js_dc_deferred_errors[i - 1] = js_dc_deferred_errors[i];
+    }
+    js_dc_deferred_error_count--;
+    js_dc_deferred_errors[js_dc_deferred_error_count] = (Item){0};
+    js_process_emit((Item){.item = s2it(heap_create_name("uncaughtException", 17))}, error);
     return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static void js_dc_defer_transform_error(Item error) {
+    js_dc_deferred_error_register_roots();
+    if (js_dc_deferred_error_count >= JS_DC_DEFERRED_ERROR_MAX) {
+        js_process_emit((Item){.item = s2it(heap_create_name("uncaughtException", 17))}, error);
+        return;
+    }
+    js_dc_deferred_errors[js_dc_deferred_error_count++] = error;
+    extern Item js_setImmediate(Item callback);
+    js_setImmediate(js_new_function((void*)js_dc_emit_deferred_error, 0));
+}
+
+// Channel.bindStore(store[, transform])
+static Item js_dc_channel_bindStore(Item store, Item transform) {
+    Item self = js_get_this();
+    Item stores = js_property_get(self, js_dc_stores_key());
+    if (get_type_id(stores) != LMD_TYPE_ARRAY) {
+        stores = js_array_new(0);
+        js_property_set(self, js_dc_stores_key(), stores);
+    }
+    Item entry = js_array_new(0);
+    js_array_push(entry, store);
+    js_array_push(entry, transform);
+    js_array_push(stores, entry);
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// Channel.unbindStore(store)
+static Item js_dc_channel_unbindStore(Item store) {
+    Item self = js_get_this();
+    Item stores = js_property_get(self, js_dc_stores_key());
+    if (get_type_id(stores) != LMD_TYPE_ARRAY) return (Item){.item = ITEM_FALSE};
+    Item next = js_array_new(0);
+    bool removed = false;
+    int64_t len = js_array_length(stores);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(stores, i);
+        if (get_type_id(entry) == LMD_TYPE_ARRAY && js_array_length(entry) >= 1) {
+            Item bound_store = js_array_get_int(entry, 0);
+            if (!removed && bound_store.item == store.item) {
+                removed = true;
+                continue;
+            }
+        }
+        js_array_push(next, entry);
+    }
+    js_property_set(self, js_dc_stores_key(), next);
+    return (Item){.item = b2it(removed)};
+}
+
+static Item js_dc_build_store_context(Item channel, Item message) {
+    Item context = js_array_new(0);
+    Item stores = js_property_get(channel, js_dc_stores_key());
+    if (get_type_id(stores) != LMD_TYPE_ARRAY) return context;
+
+    int64_t len = js_array_length(stores);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(stores, i);
+        if (get_type_id(entry) != LMD_TYPE_ARRAY || js_array_length(entry) < 1) continue;
+        Item store = js_array_get_int(entry, 0);
+        Item transform = js_array_length(entry) >= 2 ? js_array_get_int(entry, 1) :
+            (Item){.item = ITEM_JS_UNDEFINED};
+        Item store_value = message;
+        if (get_type_id(transform) == LMD_TYPE_FUNC) {
+            store_value = js_call_function(transform, (Item){.item = ITEM_JS_UNDEFINED}, &message, 1);
+            if (js_check_exception()) {
+                Item error = js_clear_exception();
+                js_dc_defer_transform_error(error);
+                continue;
+            }
+            if (get_type_id(store_value) == LMD_TYPE_ERROR) {
+                js_dc_defer_transform_error(store_value);
+                continue;
+            }
+        }
+        Item pair = js_array_new(0);
+        js_array_push(pair, store);
+        js_array_push(pair, store_value);
+        js_array_push(context, pair);
+    }
+    return context;
+}
+
+static Item js_dc_channel_runStores(Item message, Item callback, Item this_arg, Item arg1, Item arg2) {
+    Item self = js_get_this();
+    Item context = js_dc_build_store_context(self, message);
+    Item publish_fn = js_property_get(self, (Item){.item = s2it(heap_create_name("publish", 7))});
+    js_als_context_call_args(context, publish_fn, self, &message, 1);
+    if (js_check_exception()) return ItemNull;
+
+    Item args[2] = { arg1, arg2 };
+    return js_als_context_call_args(context, callback, this_arg, args, 2);
 }
 
 // dc.channel(name) — create or return existing channel
@@ -32386,6 +32503,7 @@ static Item js_dc_channel_factory(Item name) {
     js_property_set(ch, (Item){.item = s2it(heap_create_name("name", 4))}, name);
     js_property_set(ch, (Item){.item = s2it(heap_create_name("_subscribers", 12))},
                     js_array_new(0));
+    js_property_set(ch, js_dc_stores_key(), js_array_new(0));
     js_property_set(ch, (Item){.item = s2it(heap_create_name("subscribe", 9))},
                     js_new_function((void*)js_dc_channel_subscribe, 1));
     js_property_set(ch, (Item){.item = s2it(heap_create_name("unsubscribe", 11))},
@@ -32397,7 +32515,9 @@ static Item js_dc_channel_factory(Item name) {
     js_property_set(ch, (Item){.item = s2it(heap_create_name("bindStore", 9))},
                     js_new_function((void*)js_dc_channel_bindStore, 2));
     js_property_set(ch, (Item){.item = s2it(heap_create_name("unbindStore", 11))},
-                    js_new_function((void*)js_dc_channel_bindStore, 1));
+                    js_new_function((void*)js_dc_channel_unbindStore, 1));
+    js_property_set(ch, (Item){.item = s2it(heap_create_name("runStores", 9))},
+                    js_new_function((void*)js_dc_channel_runStores, 5));
     return ch;
 }
 
@@ -33311,15 +33431,77 @@ extern "C" void js_async_hooks_emit_destroy_resource(Item resource) {
 }
 
 // AsyncResource
+static bool js_async_hooks_is_nullish(Item value) {
+    if (value.item == 0 || value.item == ITEM_NULL) return true;
+    return get_type_id(value) == LMD_TYPE_UNDEFINED;
+}
+
+static Item js_async_hooks_throw_invalid_async_id(void) {
+    return js_throw_range_error_code("ERR_INVALID_ASYNC_ID",
+        "triggerAsyncId must be an integer greater than or equal to -1");
+}
+
+static bool js_async_hooks_parse_async_id(Item value, int64_t* out_id) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT) {
+        int64_t id = it2i(value);
+        if (id < -1) return false;
+        *out_id = id;
+        return true;
+    }
+    if (type == LMD_TYPE_INT64) {
+        int64_t id = it2l(value);
+        if (id < -1) return false;
+        *out_id = id;
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        double id = it2d(value);
+        if (!isfinite(id) || floor(id) != id || id < -1.0 ||
+            id < (double)INT64_MIN || id > (double)INT64_MAX) {
+            return false;
+        }
+        *out_id = (int64_t)id;
+        return true;
+    }
+    return false;
+}
+
 static Item js_ar_constructor(Item type, Item options) {
+    if (get_type_id(type) != LMD_TYPE_STRING) {
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"type\" argument must be of type string.");
+    }
+    String* type_str = it2s(type);
+    if (!type_str || type_str->len == 0) {
+        return js_throw_type_error_code("ERR_ASYNC_TYPE",
+            "The \"type\" argument must be a non-empty string.");
+    }
+
     Item self = js_get_this();
-    int64_t async_id = js_async_hooks_next_id++;
     int64_t trigger_id = js_async_resource_id(js_async_hooks_get_current_resource());
     bool require_manual_destroy = false;
-    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT) {
+
+    TypeId options_type = get_type_id(options);
+    if (options_type == LMD_TYPE_INT || options_type == LMD_TYPE_INT64 ||
+        options_type == LMD_TYPE_FLOAT) {
+        if (!js_async_hooks_parse_async_id(options, &trigger_id)) {
+            return js_async_hooks_throw_invalid_async_id();
+        }
+    } else if (options_type == LMD_TYPE_MAP || options_type == LMD_TYPE_OBJECT) {
+        Item option_trigger_id = js_property_get(options, js_async_hooks_key("triggerAsyncId"));
+        if (!js_async_hooks_is_nullish(option_trigger_id) &&
+            !js_async_hooks_parse_async_id(option_trigger_id, &trigger_id)) {
+            return js_async_hooks_throw_invalid_async_id();
+        }
         Item manual = js_property_get(options, js_async_hooks_key("requireManualDestroy"));
         require_manual_destroy = js_is_truthy(manual);
+    } else if (!js_async_hooks_is_nullish(options)) {
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"options\" argument must be of type number or object.");
     }
+
+    int64_t async_id = js_async_hooks_next_id++;
     js_property_set(self, js_async_hooks_key("type"), type);
     js_property_set(self, js_async_hooks_key("__lambda_async_id__"), (Item){.item = i2it(async_id)});
     js_property_set(self, js_async_hooks_key("__lambda_trigger_async_id__"), (Item){.item = i2it(trigger_id)});
