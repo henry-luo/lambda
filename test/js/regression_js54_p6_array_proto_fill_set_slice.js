@@ -30,6 +30,13 @@ function makeOobTA() {
     return ta;
 }
 
+function assertBytes(actual, expected, label) {
+    assertEq(actual.length, expected.length, label + " length");
+    for (let i = 0; i < expected.length; i++) {
+        assertEq(actual[i], expected[i], label + " byte " + i);
+    }
+}
+
 // === TypedArray.prototype.X on OOB TA still throws (P4/P5 preserved) ===
 const ta_oob = makeOobTA();
 assertThrows(() => ta_oob.fill(1), "TypeError", "ta.fill direct");
@@ -64,5 +71,54 @@ let valueofCalled = false;
 assertThrows(() => rab_pre_detached.resize({ valueOf() { valueofCalled = true; return 32; } }),
     "TypeError", "resize on already-detached throws");
 assertEq(valueofCalled, true, "resize calls valueOf BEFORE detach check");
+
+// === Float lanes preserve raw bytes on same-type bulk paths ===
+// These byte patterns encode NaNs if read numerically, but the same-type paths
+// must copy/swap the underlying bytes rather than canonicalizing through
+// numeric get/set.
+const nan_a = [1, 2, 3, 4, 5, 6, 248, 127];
+const nan_b = [9, 8, 7, 6, 5, 4, 240, 127];
+const nan_c = [17, 18, 19, 20, 21, 22, 248, 127];
+{
+    const src_f64 = new Float64Array(1);
+    new Uint8Array(src_f64.buffer).set(nan_a);
+    const dst_f64 = new Float64Array(1);
+    dst_f64.set(src_f64);
+    assertBytes(new Uint8Array(dst_f64.buffer), nan_a, "Float64Array.set preserves NaN payload bytes");
+}
+{
+    const f64 = new Float64Array(2);
+    const bytes = new Uint8Array(f64.buffer);
+    bytes.set(nan_a, 0);
+    bytes.set(nan_b, 8);
+    f64.reverse();
+    assertBytes(new Uint8Array(f64.buffer), nan_b.concat(nan_a), "Float64Array.reverse preserves NaN payload bytes");
+}
+{
+    const f64 = new Float64Array(2);
+    const bytes = new Uint8Array(f64.buffer);
+    bytes.set(nan_a, 0);
+    bytes.set(nan_b, 8);
+    const reversed = f64.toReversed();
+    assertBytes(new Uint8Array(reversed.buffer), nan_b.concat(nan_a), "Float64Array.toReversed preserves NaN payload bytes");
+    assertBytes(new Uint8Array(f64.buffer), nan_a.concat(nan_b), "Float64Array.toReversed leaves source bytes unchanged");
+}
+{
+    const f64 = new Float64Array(2);
+    const bytes = new Uint8Array(f64.buffer);
+    bytes.set(nan_a, 0);
+    bytes.set(nan_b, 8);
+    const sliced = f64.slice(1);
+    assertBytes(new Uint8Array(sliced.buffer), nan_b, "Float64Array.slice preserves NaN payload bytes");
+}
+{
+    const f64 = new Float64Array(3);
+    const bytes = new Uint8Array(f64.buffer);
+    bytes.set(nan_a, 0);
+    bytes.set(nan_b, 8);
+    bytes.set(nan_c, 16);
+    f64.copyWithin(1, 0, 2);
+    assertBytes(new Uint8Array(f64.buffer), nan_a.concat(nan_a).concat(nan_b), "Float64Array.copyWithin preserves overlapping NaN payload bytes");
+}
 
 console.log("Js54 P6 OOB-gating + length-tracking + resize regression: all assertions passed");

@@ -19391,6 +19391,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 if (target + count > len) count = len - target;
                 if (start + count > len) count = len - start;
                 if (count <= 0) return obj;
+                if (js_typed_array_raw_copy_within(obj, target, start, count)) return obj;
                 int elem_size = 1;
                 switch (ta->element_type) {
                 case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: elem_size = 1; break;
@@ -32444,40 +32445,122 @@ static Item js_vm_createScript(Item code, Item options) {
 // Forward declarations
 static Item js_dc_tc_subscribe(Item handlers);
 static Item js_dc_tc_unsubscribe(Item handlers);
-static Item js_dc_tc_traceSync(Item fn);
-static Item js_dc_tc_tracePromise(Item fn);
+static Item js_dc_tc_traceSync(Item fn, Item context, Item this_arg, Item rest_args);
+static Item js_dc_tc_tracePromise(Item fn, Item context, Item this_arg, Item rest_args);
 static Item js_dc_tc_traceCallback(Item fn);
 static void js_dc_channel_publish_on(Item channel, Item message);
 static Item js_dc_channel_runStores(Item message, Item callback, Item this_arg, Item arg1, Item arg2);
+static Item js_dc_channel_factory(Item name);
+static Item js_dc_stores_key(void);
 
 extern "C" Item js_array_new(int length);
 extern "C" Item js_array_push(Item array, Item value);
 extern "C" Item js_array_get_int(Item array, int64_t index);
 extern "C" int64_t js_array_length(Item array);
 extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc);
+extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
+
+#define JS_DC_CHANNEL_MAX 512
+static Item js_dc_channel_names[JS_DC_CHANNEL_MAX];
+static Item js_dc_channels[JS_DC_CHANNEL_MAX];
+static int js_dc_channel_count = 0;
+static bool js_dc_channel_roots_registered = false;
+
+static Item js_dc_key(const char* name) {
+    return (Item){.item = s2it(heap_create_name(name, (int)strlen(name)))};
+}
+
+static bool js_dc_is_nullish(Item value) {
+    if (value.item == 0 || value.item == ITEM_NULL) return true;
+    return get_type_id(value) == LMD_TYPE_UNDEFINED;
+}
+
+static Item js_dc_context_or_new(Item context) {
+    return js_dc_is_nullish(context) ? js_new_object() : context;
+}
+
+static void js_dc_register_roots(void) {
+    if (js_dc_channel_roots_registered) return;
+    heap_register_gc_root_range((uint64_t*)js_dc_channel_names, JS_DC_CHANNEL_MAX);
+    heap_register_gc_root_range((uint64_t*)js_dc_channels, JS_DC_CHANNEL_MAX);
+    js_dc_channel_roots_registered = true;
+}
+
+static bool js_dc_item_same(Item left, Item right) {
+    if (left.item == right.item) return true;
+    if (get_type_id(left) != LMD_TYPE_STRING || get_type_id(right) != LMD_TYPE_STRING) {
+        return false;
+    }
+    String* left_str = it2s(left);
+    String* right_str = it2s(right);
+    if (!left_str || !right_str || left_str->len != right_str->len) return false;
+    return memcmp(left_str->chars, right_str->chars, (size_t)left_str->len) == 0;
+}
+
+static Item js_dc_channel_subscribers(Item channel) {
+    Item subs = js_property_get(channel, js_dc_key("_subscribers"));
+    if (get_type_id(subs) != LMD_TYPE_ARRAY) {
+        subs = js_array_new(0);
+        js_property_set(channel, js_dc_key("_subscribers"), subs);
+    }
+    return subs;
+}
+
+static bool js_dc_channel_has_active_subscribers(Item channel) {
+    Item subs = js_property_get(channel, js_dc_key("_subscribers"));
+    if (get_type_id(subs) == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(subs);
+        for (int64_t i = 0; i < len; i++) {
+            if (get_type_id(js_array_get_int(subs, i)) == LMD_TYPE_FUNC) return true;
+        }
+    }
+    Item stores = js_property_get(channel, js_dc_stores_key());
+    return get_type_id(stores) == LMD_TYPE_ARRAY && js_array_length(stores) > 0;
+}
+
+static void js_dc_channel_refresh_has_subscribers(Item channel) {
+    js_property_set(channel, js_dc_key("hasSubscribers"),
+                    (Item){.item = b2it(js_dc_channel_has_active_subscribers(channel))});
+}
+
+static bool js_dc_channel_remove_subscriber(Item channel, Item handler) {
+    Item subs = js_property_get(channel, js_dc_key("_subscribers"));
+    if (get_type_id(subs) != LMD_TYPE_ARRAY) return false;
+    Item next = js_array_new(0);
+    bool removed = false;
+    int64_t len = js_array_length(subs);
+    for (int64_t i = 0; i < len; i++) {
+        Item el = js_array_get_int(subs, i);
+        if (!removed && el.item == handler.item) {
+            removed = true;
+            continue;
+        }
+        js_array_push(next, el);
+    }
+    if (removed) {
+        js_property_set(channel, js_dc_key("_subscribers"), next);
+        js_dc_channel_refresh_has_subscribers(channel);
+    }
+    return removed;
+}
 
 // Channel.subscribe(handler)
 static Item js_dc_channel_subscribe(Item handler) {
     Item self = js_get_this();
-    Item subs = js_property_get(self, (Item){.item = s2it(heap_create_name("_subscribers", 12))});
-    if (get_type_id(subs) != LMD_TYPE_ARRAY) {
-        subs = js_array_new(0);
-        js_property_set(self, (Item){.item = s2it(heap_create_name("_subscribers", 12))}, subs);
-    }
+    Item subs = js_dc_channel_subscribers(self);
     js_array_push(subs, handler);
+    js_dc_channel_refresh_has_subscribers(self);
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-// Channel.unsubscribe(handler) — simple approach: mark as removed
 static Item js_dc_channel_unsubscribe(Item handler) {
-    // no-op for simplicity — unsubscribing from diagnostics channels
-    return (Item){.item = ITEM_FALSE};
+    return (Item){.item = b2it(js_dc_channel_remove_subscriber(js_get_this(), handler))};
 }
 
 // Channel.publish(message)
 static Item js_dc_channel_publish(Item message) {
     Item self = js_get_this();
-    Item subs = js_property_get(self, (Item){.item = s2it(heap_create_name("_subscribers", 12))});
+    Item subs = js_property_get(self, js_dc_key("_subscribers"));
     if (get_type_id(subs) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(subs);
         for (int64_t i = 0; i < len; i++) {
@@ -32491,11 +32574,11 @@ static Item js_dc_channel_publish(Item message) {
 }
 
 // Channel.hasSubscribers getter
-static Item js_dc_channel_hasSubscribers(void) {
-    Item self = js_get_this();
-    Item subs = js_property_get(self, (Item){.item = s2it(heap_create_name("_subscribers", 12))});
-    if (get_type_id(subs) == LMD_TYPE_ARRAY) {
-        if (js_array_length(subs) > 0) return (Item){.item = ITEM_TRUE};
+static Item js_dc_hasSubscribers(Item name) {
+    for (int i = 0; i < js_dc_channel_count; i++) {
+        if (js_dc_item_same(js_dc_channel_names[i], name)) {
+            return (Item){.item = b2it(js_dc_channel_has_active_subscribers(js_dc_channels[i]))};
+        }
     }
     return (Item){.item = ITEM_FALSE};
 }
@@ -32550,6 +32633,7 @@ static Item js_dc_channel_bindStore(Item store, Item transform) {
     js_array_push(entry, store);
     js_array_push(entry, transform);
     js_array_push(stores, entry);
+    js_dc_channel_refresh_has_subscribers(self);
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
@@ -32573,6 +32657,7 @@ static Item js_dc_channel_unbindStore(Item store) {
         js_array_push(next, entry);
     }
     js_property_set(self, js_dc_stores_key(), next);
+    js_dc_channel_refresh_has_subscribers(self);
     return (Item){.item = b2it(removed)};
 }
 
@@ -32622,25 +32707,29 @@ static Item js_dc_channel_runStores(Item message, Item callback, Item this_arg, 
 
 // dc.channel(name) — create or return existing channel
 static Item js_dc_channel_factory(Item name) {
+    js_dc_register_roots();
+    for (int i = 0; i < js_dc_channel_count; i++) {
+        if (js_dc_item_same(js_dc_channel_names[i], name)) {
+            return js_dc_channels[i];
+        }
+    }
+
     Item ch = js_new_object();
-    js_property_set(ch, (Item){.item = s2it(heap_create_name("name", 4))}, name);
-    js_property_set(ch, (Item){.item = s2it(heap_create_name("_subscribers", 12))},
-                    js_array_new(0));
+    js_property_set(ch, js_dc_key("name"), name);
+    js_property_set(ch, js_dc_key("_subscribers"), js_array_new(0));
     js_property_set(ch, js_dc_stores_key(), js_array_new(0));
-    js_property_set(ch, (Item){.item = s2it(heap_create_name("subscribe", 9))},
-                    js_new_function((void*)js_dc_channel_subscribe, 1));
-    js_property_set(ch, (Item){.item = s2it(heap_create_name("unsubscribe", 11))},
-                    js_new_function((void*)js_dc_channel_unsubscribe, 1));
-    js_property_set(ch, (Item){.item = s2it(heap_create_name("publish", 7))},
-                    js_new_function((void*)js_dc_channel_publish, 1));
-    js_property_set(ch, (Item){.item = s2it(heap_create_name("hasSubscribers", 14))},
-                    (Item){.item = ITEM_FALSE});
-    js_property_set(ch, (Item){.item = s2it(heap_create_name("bindStore", 9))},
-                    js_new_function((void*)js_dc_channel_bindStore, 2));
-    js_property_set(ch, (Item){.item = s2it(heap_create_name("unbindStore", 11))},
-                    js_new_function((void*)js_dc_channel_unbindStore, 1));
-    js_property_set(ch, (Item){.item = s2it(heap_create_name("runStores", 9))},
-                    js_new_function((void*)js_dc_channel_runStores, 5));
+    js_property_set(ch, js_dc_key("subscribe"), js_new_function((void*)js_dc_channel_subscribe, 1));
+    js_property_set(ch, js_dc_key("unsubscribe"), js_new_function((void*)js_dc_channel_unsubscribe, 1));
+    js_property_set(ch, js_dc_key("publish"), js_new_function((void*)js_dc_channel_publish, 1));
+    js_property_set(ch, js_dc_key("hasSubscribers"), (Item){.item = ITEM_FALSE});
+    js_property_set(ch, js_dc_key("bindStore"), js_new_function((void*)js_dc_channel_bindStore, 2));
+    js_property_set(ch, js_dc_key("unbindStore"), js_new_function((void*)js_dc_channel_unbindStore, 1));
+    js_property_set(ch, js_dc_key("runStores"), js_new_function((void*)js_dc_channel_runStores, 5));
+    if (js_dc_channel_count < JS_DC_CHANNEL_MAX) {
+        js_dc_channel_names[js_dc_channel_count] = name;
+        js_dc_channels[js_dc_channel_count] = ch;
+        js_dc_channel_count++;
+    }
     return ch;
 }
 
@@ -32667,9 +32756,9 @@ static Item js_dc_tracing_channel(Item nameOrChannels) {
     js_property_set(tc, (Item){.item = s2it(heap_create_name("unsubscribe", 11))},
                     js_new_function((void*)js_dc_tc_unsubscribe, 1));
     js_property_set(tc, (Item){.item = s2it(heap_create_name("traceSync", 9))},
-                    js_new_function((void*)js_dc_tc_traceSync, 1));
+                    js_new_function((void*)js_dc_tc_traceSync, -4));
     js_property_set(tc, (Item){.item = s2it(heap_create_name("tracePromise", 12))},
-                    js_new_function((void*)js_dc_tc_tracePromise, 1));
+                    js_new_function((void*)js_dc_tc_tracePromise, -4));
     js_property_set(tc, (Item){.item = s2it(heap_create_name("traceCallback", 13))},
                     js_new_function((void*)js_dc_tc_traceCallback, 1));
     return tc;
@@ -32685,23 +32774,33 @@ static Item js_dc_tc_subscribe(Item handlers) {
         Item handler = js_property_get(handlers, key);
         if (get_type_id(handler) == LMD_TYPE_FUNC) {
             Item ch = js_property_get(self, key);
-            Item subs = js_property_get(ch, (Item){.item = s2it(heap_create_name("_subscribers", 12))});
-            if (get_type_id(subs) == LMD_TYPE_ARRAY) {
-                js_array_push(subs, handler);
-            }
+            Item subs = js_dc_channel_subscribers(ch);
+            js_array_push(subs, handler);
+            js_dc_channel_refresh_has_subscribers(ch);
         }
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-// TracingChannel.unsubscribe(handlers) — no-op
 static Item js_dc_tc_unsubscribe(Item handlers) {
-    return (Item){.item = ITEM_JS_UNDEFINED};
+    Item self = js_get_this();
+    bool done = true;
+    static const char* sub_names[] = {"start", "end", "asyncStart", "asyncEnd", "error"};
+    static const int sub_lens[] = {5, 3, 10, 8, 5};
+    for (int i = 0; i < 5; i++) {
+        Item key = (Item){.item = s2it(heap_create_name(sub_names[i], sub_lens[i]))};
+        Item handler = js_property_get(handlers, key);
+        if (get_type_id(handler) == LMD_TYPE_FUNC) {
+            Item ch = js_property_get(self, key);
+            if (!js_dc_channel_remove_subscriber(ch, handler)) done = false;
+        }
+    }
+    return (Item){.item = b2it(done)};
 }
 
 // Helper: publish a message on a channel object
 static void js_dc_channel_publish_on(Item channel, Item message) {
-    Item subs = js_property_get(channel, (Item){.item = s2it(heap_create_name("_subscribers", 12))});
+    Item subs = js_property_get(channel, js_dc_key("_subscribers"));
     if (get_type_id(subs) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(subs);
         for (int64_t i = 0; i < len; i++) {
@@ -32713,27 +32812,172 @@ static void js_dc_channel_publish_on(Item channel, Item message) {
     }
 }
 
+static void js_dc_channel_publish_with_stores(Item channel, Item message) {
+    Item context = js_dc_build_store_context(channel, message);
+    Item publish_fn = js_property_get(channel, js_dc_key("publish"));
+    js_als_context_call_args(context, publish_fn, channel, &message, 1);
+}
+
+static Item js_dc_trace_promise_resolve(Item state, Item result) {
+    if (get_type_id(state) != LMD_TYPE_ARRAY || js_array_length(state) < 3) return result;
+    Item async_start_ch = js_array_get_int(state, 0);
+    Item async_end_ch = js_array_get_int(state, 1);
+    Item ctx = js_array_get_int(state, 2);
+    js_property_set(ctx, js_dc_key("result"), result);
+    js_dc_channel_publish_with_stores(async_start_ch, ctx);
+    js_dc_channel_publish_on(async_end_ch, ctx);
+    return result;
+}
+
+static Item js_dc_trace_promise_reject(Item state, Item error) {
+    if (get_type_id(state) != LMD_TYPE_ARRAY || js_array_length(state) < 4) {
+        js_throw_value(error);
+        return ItemNull;
+    }
+    Item async_start_ch = js_array_get_int(state, 0);
+    Item async_end_ch = js_array_get_int(state, 1);
+    Item ctx = js_array_get_int(state, 2);
+    Item error_ch = js_array_get_int(state, 3);
+    js_property_set(ctx, js_dc_key("error"), error);
+    js_dc_channel_publish_on(error_ch, ctx);
+    js_dc_channel_publish_with_stores(async_start_ch, ctx);
+    js_dc_channel_publish_on(async_end_ch, ctx);
+    js_throw_value(error);
+    return ItemNull;
+}
+
+static int js_dc_rest_args(Item rest_args, Item* args_storage, Item** out_args) {
+    if (get_type_id(rest_args) != LMD_TYPE_ARRAY) {
+        *out_args = nullptr;
+        return 0;
+    }
+    int64_t len64 = js_array_length(rest_args);
+    if (len64 <= 0) {
+        *out_args = nullptr;
+        return 0;
+    }
+    int len = len64 > 16 ? 16 : (int)len64;
+    for (int i = 0; i < len; i++) {
+        args_storage[i] = js_array_get_int(rest_args, i);
+    }
+    *out_args = args_storage;
+    return len;
+}
+
+static void js_dc_emit_trace_promise_non_thenable_warning(Item fn) {
+    const char* name = "<anonymous>";
+    int name_len = 11;
+    if (get_type_id(fn) == LMD_TYPE_FUNC) {
+        JsFunction* function = (JsFunction*)fn.function;
+        if (function && function->name && function->name->len > 0) {
+            name = function->name->chars;
+            name_len = (int)function->name->len;
+        }
+    }
+
+    char message[256];
+    int message_len = snprintf(message, sizeof(message),
+        "tracePromise was called with the function '%.*s', which returned a non-thenable.",
+        name_len, name);
+    if (message_len < 0) return;
+    if (message_len >= (int)sizeof(message)) message_len = (int)sizeof(message) - 1;
+
+    Item warning = js_new_object();
+    js_property_set(warning, js_dc_key("name"),
+                    (Item){.item = s2it(heap_create_name("Warning", 7))});
+    js_property_set(warning, js_dc_key("message"),
+                    (Item){.item = s2it(heap_create_name(message, message_len))});
+    js_process_emit(js_dc_key("warning"), warning);
+}
+
 // TracingChannel.traceSync(fn, context) — run fn, publishing to start/end channels
-static Item js_dc_tc_traceSync(Item fn) {
+static Item js_dc_tc_traceSync(Item fn, Item context, Item this_arg, Item rest_args) {
     Item self = js_get_this();
     Item start_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("start", 5))});
     Item end_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("end", 3))});
     Item error_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("error", 5))});
-    Item ctx = js_new_object();
-    js_dc_channel_publish_on(start_ch, ctx);
-    Item result = js_call_function(fn, (Item){.item = ITEM_JS_UNDEFINED}, &ctx, 1);
+    Item args_storage[16];
+    Item* args = nullptr;
+    int argc = js_dc_rest_args(rest_args, args_storage, &args);
+    bool should_trace = js_dc_channel_has_active_subscribers(start_ch) ||
+                        js_dc_channel_has_active_subscribers(end_ch) ||
+                        js_dc_channel_has_active_subscribers(error_ch);
+    if (!should_trace) {
+        return js_call_function(fn, this_arg, args, argc);
+    }
+    Item ctx = js_dc_context_or_new(context);
+    Item store_context = js_dc_build_store_context(start_ch, ctx);
+    Item publish_fn = js_property_get(start_ch, js_dc_key("publish"));
+    js_als_context_call_args(store_context, publish_fn, start_ch, &ctx, 1);
+    Item result = js_als_context_call_args(store_context, fn, this_arg, args, argc);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        js_property_set(ctx, js_dc_key("error"), error);
+        js_dc_channel_publish_on(error_ch, ctx);
+        js_dc_channel_publish_on(end_ch, ctx);
+        js_throw_value(error);
+        return ItemNull;
+    }
     if (get_type_id(result) == LMD_TYPE_ERROR) {
-        js_property_set(ctx, (Item){.item = s2it(heap_create_name("error", 5))}, result);
+        js_property_set(ctx, js_dc_key("error"), result);
         js_dc_channel_publish_on(error_ch, ctx);
     }
+    js_property_set(ctx, js_dc_key("result"), result);
     js_dc_channel_publish_on(end_ch, ctx);
     return result;
 }
 
-// TracingChannel.tracePromise(fn, context) — stub, just calls fn
-static Item js_dc_tc_tracePromise(Item fn) {
-    Item ctx = js_new_object();
-    return js_call_function(fn, (Item){.item = ITEM_JS_UNDEFINED}, &ctx, 1);
+// TracingChannel.tracePromise(fn, context)
+static Item js_dc_tc_tracePromise(Item fn, Item context, Item this_arg, Item rest_args) {
+    Item self = js_get_this();
+    Item start_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("start", 5))});
+    Item end_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("end", 3))});
+    Item async_start_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("asyncStart", 10))});
+    Item async_end_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("asyncEnd", 8))});
+    Item error_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("error", 5))});
+    Item args_storage[16];
+    Item* args = nullptr;
+    int argc = js_dc_rest_args(rest_args, args_storage, &args);
+    bool should_trace = js_dc_channel_has_active_subscribers(start_ch) ||
+                        js_dc_channel_has_active_subscribers(end_ch) ||
+                        js_dc_channel_has_active_subscribers(async_start_ch) ||
+                        js_dc_channel_has_active_subscribers(async_end_ch) ||
+                        js_dc_channel_has_active_subscribers(error_ch);
+    if (!should_trace) {
+        return js_call_function(fn, this_arg, args, argc);
+    }
+    Item ctx = js_dc_context_or_new(context);
+    Item store_context = js_dc_build_store_context(start_ch, ctx);
+    Item publish_fn = js_property_get(start_ch, js_dc_key("publish"));
+    js_als_context_call_args(store_context, publish_fn, start_ch, &ctx, 1);
+    Item result = js_als_context_call_args(store_context, fn, this_arg, args, argc);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        js_property_set(ctx, js_dc_key("error"), error);
+        js_dc_channel_publish_on(error_ch, ctx);
+        js_dc_channel_publish_on(end_ch, ctx);
+        js_throw_value(error);
+        return ItemNull;
+    }
+    js_property_set(ctx, js_dc_key("result"), result);
+    js_dc_channel_publish_on(end_ch, ctx);
+    Item then_fn = js_property_get(result, js_dc_key("then"));
+    if (get_type_id(then_fn) != LMD_TYPE_FUNC) {
+        js_dc_emit_trace_promise_non_thenable_warning(fn);
+        return result;
+    }
+
+    Item state = js_array_new(0);
+    js_array_push(state, async_start_ch);
+    js_array_push(state, async_end_ch);
+    js_array_push(state, ctx);
+    js_array_push(state, error_ch);
+    Item resolve_fn = js_bind_function(js_new_function((void*)js_dc_trace_promise_resolve, 2),
+                                       (Item){.item = ITEM_JS_UNDEFINED}, &state, 1);
+    Item reject_fn = js_bind_function(js_new_function((void*)js_dc_trace_promise_reject, 2),
+                                      (Item){.item = ITEM_JS_UNDEFINED}, &state, 1);
+    Item then_args[2] = { resolve_fn, reject_fn };
+    return js_call_function(then_fn, result, then_args, 2);
 }
 
 // TracingChannel.traceCallback(fn, ...) — stub, just calls fn
@@ -32777,13 +33021,14 @@ static Item js_dc_bounded_channel(Item name) {
 // dc.subscribe(name, handler) — convenience wrapper
 static Item js_dc_subscribe(Item name, Item handler) {
     Item ch = js_dc_channel_factory(name);
-    js_array_push(js_property_get(ch, (Item){.item = s2it(heap_create_name("_subscribers", 12))}), handler);
+    js_array_push(js_dc_channel_subscribers(ch), handler);
+    js_dc_channel_refresh_has_subscribers(ch);
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-// dc.unsubscribe(name, handler) — convenience wrapper
 static Item js_dc_unsubscribe(Item name, Item handler) {
-    return (Item){.item = ITEM_FALSE};
+    Item ch = js_dc_channel_factory(name);
+    return (Item){.item = b2it(js_dc_channel_remove_subscriber(ch, handler))};
 }
 
 // =============================================================================
@@ -34279,6 +34524,8 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 5 && memcmp(spec->chars, "util/", 5) == 0) ||
         (spec->len == 7 && memcmp(spec->chars, "util.js", 7) == 0) ||
         (spec->len == 8 && memcmp(spec->chars, "util/.js", 8) == 0) ||
+        (spec->len == 3 && memcmp(spec->chars, "sys", 3) == 0) ||
+        (spec->len == 6 && memcmp(spec->chars, "sys.js", 6) == 0) ||
         (spec->len == 9 && memcmp(spec->chars, "node:util", 9) == 0)) {
         extern Item js_get_util_namespace(void);
         return js_get_util_namespace();
@@ -34729,7 +34976,7 @@ extern "C" Item js_module_get(Item specifier) {
             js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("unsubscribe", 11))},
                             js_new_function((void*)js_dc_unsubscribe, 2));
             js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("hasSubscribers", 14))},
-                            js_new_function((void*)js_dc_channel_hasSubscribers, 1));
+                            js_new_function((void*)js_dc_hasSubscribers, 1));
             // Channel and TracingChannel classes
             js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("Channel", 7))},
                             js_new_function((void*)js_dc_channel_factory, 1));

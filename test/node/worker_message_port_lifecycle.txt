@@ -1,0 +1,6 @@
+once message: first
+removed seen: 0
+close once: 1
+late message: queued-before-close
+close final: 1
+done

@@ -828,6 +828,82 @@ void array_num_set_double_value(ArrayNum *arr, int64_t index, double value) {
     }
 }
 
+static bool array_num_can_copy_bytes(ArrayNum *arr, int64_t index, int64_t count, bool write) {
+    if (!arr || count < 0 || index < 0) return false;
+    if (count == 0) return true;
+    if (!arr->data) return false;
+    if (index > arr->length || count > arr->length - index) return false;
+    if (write && arr->is_view && !arr->is_mutable_view) return false;
+    uint8_t elem_size = ELEM_TYPE_SIZE[arr->get_elem_type() >> 4];
+    return elem_size > 0;
+}
+
+bool array_num_copy_same_type_bytes(ArrayNum *dst, int64_t dst_index,
+                                    ArrayNum *src, int64_t src_index, int64_t count) {
+    if (!dst || !src || dst->get_elem_type() != src->get_elem_type()) return false;
+    if (count == 0) return true;
+    if (!array_num_can_copy_bytes(src, src_index, count, false)) return false;
+    if (!array_num_can_copy_bytes(dst, dst_index, count, true)) {
+        if (dst && dst->is_view && !dst->is_mutable_view) {
+            log_error("array_num_copy_same_type_bytes: cannot mutate a read-only view; copy() first");
+        }
+        return false;
+    }
+    uint8_t elem_size = ELEM_TYPE_SIZE[dst->get_elem_type() >> 4];
+    char* dst_ptr = (char*)dst->data + (size_t)dst_index * elem_size;
+    char* src_ptr = (char*)src->data + (size_t)src_index * elem_size;
+    memmove(dst_ptr, src_ptr, (size_t)count * elem_size);
+    return true;
+}
+
+bool array_num_reverse_bytes(ArrayNum *arr) {
+    if (!arr) return false;
+    int64_t len = arr->length;
+    if (len <= 1) return true;
+    if (!array_num_can_copy_bytes(arr, 0, len, true)) {
+        if (arr->is_view && !arr->is_mutable_view) {
+            log_error("array_num_reverse_bytes: cannot mutate a read-only view; copy() first");
+        }
+        return false;
+    }
+    uint8_t elem_size = ELEM_TYPE_SIZE[arr->get_elem_type() >> 4];
+    if (elem_size == 0 || elem_size > 16) return false;
+    char temp[16];
+    char* data = (char*)arr->data;
+    for (int64_t i = 0, j = len - 1; i < j; i++, j--) {
+        char* left = data + (size_t)i * elem_size;
+        char* right = data + (size_t)j * elem_size;
+        memcpy(temp, left, elem_size);
+        memcpy(left, right, elem_size);
+        memcpy(right, temp, elem_size);
+    }
+    return true;
+}
+
+bool array_num_copy_reversed_bytes(ArrayNum *dst, ArrayNum *src) {
+    if (!dst || !src || dst->get_elem_type() != src->get_elem_type()) return false;
+    int64_t len = src->length;
+    if (len != dst->length) return false;
+    if (len <= 0) return true;
+    if (!array_num_can_copy_bytes(src, 0, len, false)) return false;
+    if (!array_num_can_copy_bytes(dst, 0, len, true)) {
+        if (dst->is_view && !dst->is_mutable_view) {
+            log_error("array_num_copy_reversed_bytes: cannot mutate a read-only view; copy() first");
+        }
+        return false;
+    }
+    uint8_t elem_size = ELEM_TYPE_SIZE[src->get_elem_type() >> 4];
+    if (elem_size == 0) return false;
+    char* dst_data = (char*)dst->data;
+    char* src_data = (char*)src->data;
+    for (int64_t i = 0, j = len - 1; i < len; i++, j--) {
+        memcpy(dst_data + (size_t)i * elem_size,
+               src_data + (size_t)j * elem_size,
+               elem_size);
+    }
+    return true;
+}
+
 // Generic setter for all ArrayNum elem_types, dispatches on elem_type
 void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
     if (!arr || index < 0 || index >= arr->capacity) return;

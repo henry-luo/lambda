@@ -353,7 +353,6 @@ test-cluster-primary-error.js
 test-cluster-shared-handle-bind-privileged-port.js
 test-cluster-uncaught-exception.js
 test-code-cache.js
-test-common-check.js
 test-common-countdown.js
 test-common-gc.js
 test-common.js
@@ -1958,7 +1957,6 @@ test-ttywrap-stack.js
 test-tz-version.js
 test-uncaught-exception-handler-stack-overflow-on-stack-overflow.js
 test-uncaught-exception-handler-stack-overflow.js
-test-url-basic-check.js
 test-url-domain-ascii-unicode.js
 test-url-format-whatwg.js
 test-url-format.js

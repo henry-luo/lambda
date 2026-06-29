@@ -564,6 +564,10 @@ typedef struct JsSpawnProcess {
     bool         stderr_pipe_active;
     bool         ipc_pipe_active;
     bool         ipc_disconnect_emitted;
+    bool         abort_error_emitted;
+    int          abort_kill_signal;
+    Item         abort_signal;
+    Item         abort_listener;
     char*        ipc_buf;
     size_t       ipc_len;
     size_t       ipc_cap;
@@ -611,6 +615,24 @@ static Item spawn_emit_spawn_later(Item env_item) {
     Item obj = env[0];
     spawn_emit_event(obj, "spawn", NULL, 0);
     return make_js_undefined();
+}
+
+static Item spawn_make_abort_error(Item reason) {
+    Item err = js_new_error_with_name(make_string_item("AbortError"),
+                                      make_string_item("The operation was aborted"));
+    js_property_set(err, make_string_item("name"), make_string_item("AbortError"));
+    js_property_set(err, make_string_item("code"), make_string_item("ABORT_ERR"));
+    if (!is_nullish_item(reason)) {
+        js_property_set(err, make_string_item("cause"), reason);
+    }
+    return err;
+}
+
+static void spawn_emit_abort_error_once(JsSpawnProcess* sp, Item reason) {
+    if (!sp || sp->abort_error_emitted || sp->process_exited) return;
+    sp->abort_error_emitted = true;
+    Item err = spawn_make_abort_error(reason);
+    spawn_emit_event(sp->js_object, "error", &err, 1);
 }
 
 static Item spawn_send_callback_later(Item env_item) {
@@ -746,6 +768,64 @@ static void spawn_emit_disconnect_once(JsSpawnProcess* sp) {
     sp->ipc_disconnect_emitted = true;
     spawn_set_connected(sp->js_object, false);
     spawn_emit_event(sp->js_object, "disconnect", NULL, 0);
+}
+
+static Item spawn_abort_with_env(Item env_item, Item event_item) {
+    (void)event_item;
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
+    if (!sp || sp->process_exited || uv_is_closing((uv_handle_t*)&sp->process)) {
+        return make_js_undefined();
+    }
+    Item reason = is_object_item(sp->abort_signal)
+        ? js_property_get(sp->abort_signal, make_string_item("reason"))
+        : make_js_undefined();
+    uv_process_kill(&sp->process, sp->abort_kill_signal ? sp->abort_kill_signal : SIGTERM);
+    spawn_emit_abort_error_once(sp, reason);
+    return make_js_undefined();
+}
+
+static Item spawn_abort_later(Item env_item) {
+    return spawn_abort_with_env(env_item, make_js_undefined());
+}
+
+static void spawn_install_abort_signal(Item obj, JsSpawnProcess* sp, Item options) {
+    if (!sp || !is_object_item(options)) return;
+    Item signal = js_property_get(options, make_string_item("signal"));
+    if (!is_object_item(signal)) return;
+
+    sp->abort_signal = signal;
+    sp->abort_kill_signal = spawn_signal_number(js_property_get(options, make_string_item("killSignal")));
+
+    Item* abort_env = js_alloc_env(1);
+    abort_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    Item listener = js_new_closure((void*)spawn_abort_with_env, 1, abort_env, 1);
+    sp->abort_listener = listener;
+
+    Item add_listener = js_property_get(signal, make_string_item("addEventListener"));
+    if (is_callable(add_listener)) {
+        Item args[2] = {make_string_item("abort"), listener};
+        js_call_function(add_listener, signal, args, 2);
+        js_microtask_flush();
+    }
+
+    Item aborted = js_property_get(signal, make_string_item("aborted"));
+    if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
+        Item abort_tick = js_new_closure((void*)spawn_abort_later, 0, abort_env, 1);
+        js_next_tick_enqueue(abort_tick);
+    }
+    (void)obj;
+}
+
+static void spawn_remove_abort_signal(JsSpawnProcess* sp) {
+    if (!sp || !is_object_item(sp->abort_signal) || !is_callable(sp->abort_listener)) return;
+    Item remove_listener = js_property_get(sp->abort_signal, make_string_item("removeEventListener"));
+    if (is_callable(remove_listener)) {
+        Item args[2] = {make_string_item("abort"), sp->abort_listener};
+        js_call_function(remove_listener, sp->abort_signal, args, 2);
+    }
+    sp->abort_signal = make_js_undefined();
+    sp->abort_listener = make_js_undefined();
 }
 
 static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message) {
@@ -890,6 +970,7 @@ static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
     if (!sp) return;
     sp->exit_code = (int)exit_status;
     sp->process_exited = true;
+    spawn_remove_abort_signal(sp);
 
     Item args[2] = {
         term_signal == 0 ? (Item){.item = i2it(exit_status)} : ItemNull,
@@ -1602,6 +1683,8 @@ extern "C" Item js_cp_spawn(Item rest_args) {
 
     js_property_set(obj, make_string_item("pid"),
                     (Item){.item = i2it(sp->process.pid)});
+
+    spawn_install_abort_signal(obj, sp, req.options);
 
     schedule_spawn_event(obj);
 
