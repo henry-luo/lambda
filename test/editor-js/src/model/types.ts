@@ -72,9 +72,18 @@ export interface MultiNodeSelection {
   paths: SourcePath[]
 }
 
+// A gap cursor (ProseMirror GapCursor): a caret at a position with no text — at
+// a container edge or between two block atoms (image, hr, table, drawing). `path`
+// is [...containerPath, index]: the gap sits before the child at `index` (an
+// index equal to the child count means "after the last child").
+export interface GapSelection {
+  kind: 'gap'
+  path: SourcePath
+}
+
 // `AllSelection` was dropped per Inline_Formatting design doc §11. "Select all"
 // is a TextSelection at the doc-root boundaries.
-export type Selection = TextSelection | NodeSelection | MultiNodeSelection
+export type Selection = TextSelection | NodeSelection | MultiNodeSelection | GapSelection
 
 // ---------------------------------------------------------------------------
 // Step model — seven kinds, discriminated union on `kind`

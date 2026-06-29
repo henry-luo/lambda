@@ -367,6 +367,35 @@ struct ArrayNum : Container {
     void set_elem_type(ArrayNumElemType e) { map_kind = (uint8_t)e; }
 };
 
+static inline bool array_num_init_external_view(ArrayNum* view, ArrayNumShape* shape,
+        Container* base, void* data_base, ArrayNumElemType elem_type,
+        int64_t byte_offset, int64_t length, bool mutable_view) {
+    if (!view || !shape || byte_offset < 0 || length < 0) return false;
+    if (!data_base && (byte_offset != 0 || length != 0)) return false;
+    uint8_t elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
+    if (!elem_size || (byte_offset % elem_size) != 0) return false;
+
+    view->type_id = LMD_TYPE_ARRAY_NUM;
+    view->array_flags = 0;
+    view->is_ndim = 1;
+    view->is_view = 1;
+    view->is_mutable_view = mutable_view ? 1 : 0;
+    view->set_elem_type(elem_type);
+    view->data = data_base ? (void*)((uint8_t*)data_base + byte_offset) : NULL;
+    view->length = length;
+    view->capacity = length;
+
+    shape->ndim = 1;
+    shape->is_c_contig = 1;
+    shape->is_f_contig = 1;
+    shape->offset = byte_offset / elem_size;
+    shape->base = (void*)base;
+    array_num_shape_dims(shape)[0] = length;
+    array_num_shape_strides(shape)[0] = 1;
+    view->extra = (int64_t)(uintptr_t)shape;
+    return true;
+}
+
 struct Map : Container {
     void* type;  // map type/shape
     void* data;  // packed data struct of the map

@@ -368,6 +368,7 @@ gc_heap_t* gc_heap_create_with_pool(Pool* pool) {
     gc->vmap_destroy = NULL;
     gc->error_trace = NULL;
     gc->error_destroy = NULL;
+    gc->js_native_trace = NULL;
     // Initialize bump-pointer allocator
     gc->bump_blocks = NULL;
     gc->bump_cursor = NULL;
@@ -862,6 +863,18 @@ void gc_mark_item(gc_heap_t* gc, uint64_t item) {
     mark_stack_push(gc, header);
 }
 
+void gc_mark_object_ptr(gc_heap_t* gc, void* ptr) {
+    if (!ptr || !is_gc_object(gc, ptr)) return;
+
+    gc_header_t* header = gc_get_header(ptr);
+    if (!header) return;
+    if (header->marked) return;
+    if (header->gc_flags & GC_FLAG_FREED) return;
+
+    header->marked = 1;
+    mark_stack_push(gc, header);
+}
+
 static void gc_mark_possible_item(gc_heap_t* gc, uint64_t value) {
     void* ptr = item_to_ptr(value);
     if (!ptr || !is_gc_object(gc, ptr)) return;
@@ -962,6 +975,9 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         uint8_t map_kind = p[3];
         void* type_ptr = *(void**)(p + 8);    // TypeMap*
         void* data_ptr = *(void**)(p + 16);   // data buffer
+        if (tag == LMD_TYPE_MAP_ && gc->js_native_trace) {
+            gc->js_native_trace(obj, gc);
+        }
         if (tag == LMD_TYPE_MAP_ && map_kind == MAP_KIND_ITERATOR_) {
             if (data_ptr) gc_mark_item(gc, *(uint64_t*)data_ptr);
             break;
@@ -1269,7 +1285,7 @@ static void gc_compact_data(gc_heap_t* gc) {
                 // Element width lives in map_kind byte at offset 3 (upper nibble = ELEM_* tag).
                 // ELEM_TYPE_SIZE table is keyed by (elem_type >> 4).
                 static const uint8_t ELEM_SIZE_IDX[16] = {
-                    8, 8, 1, 2, 4, 8, 1, 2, 4, 8, 2, 4, 8, 1, 0, 0
+                    8, 8, 1, 2, 4, 8, 1, 2, 4, 8, 2, 4, 8, 1, 1, 0
                 };
                 uint8_t elem_type = p[3];
                 size_t elem_bytes = ELEM_SIZE_IDX[(elem_type >> 4) & 0xF];

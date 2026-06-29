@@ -37,6 +37,40 @@
         position: relative;   /* positioning context for the image-resize overlay */
       }
 
+      /* Inline link popover */
+      .rdt-link-popover {
+        position: absolute; z-index: 12; display: flex; align-items: center; gap: 4px;
+        background: #fff; border: 1px solid var(--border); border-radius: 8px;
+        box-shadow: 0 6px 20px rgba(15, 23, 42, 0.16); padding: 4px 6px; max-width: 360px;
+      }
+      .rdt-link-popover .rdt-link-url {
+        font-size: 13px; color: var(--accent); max-width: 240px; overflow: hidden;
+        text-overflow: ellipsis; white-space: nowrap; text-decoration: none;
+      }
+      .rdt-link-popover .rdt-link-url:hover { text-decoration: underline; }
+
+      /* Drag-to-reorder: a grip in the left gutter + a drop indicator line */
+      .rdt-drag-handle {
+        position: absolute; left: 4px; width: 20px; height: 24px; z-index: 9;
+        display: flex; align-items: center; justify-content: center;
+        color: var(--muted); cursor: grab; border-radius: 4px;
+        user-select: none; font-size: 13px; line-height: 1;
+      }
+      .rdt-drag-handle:hover { background: #e2e8f0; color: var(--text); }
+      .rdt-drag-handle:active { cursor: grabbing; }
+      .rdt-drop-line {
+        position: absolute; left: 10px; right: 10px; height: 2px;
+        background: var(--accent); z-index: 9; pointer-events: none; border-radius: 1px;
+      }
+
+      /* Gap cursor — a thin blinking line between blocks */
+      .rdt-gap-caret {
+        position: absolute; height: 3px; background: var(--accent);
+        border-radius: 2px; z-index: 8; pointer-events: none;
+        animation: rdt-gap-blink 1.05s steps(1, end) infinite;
+      }
+      @keyframes rdt-gap-blink { 50% { opacity: 0.15; } }
+
       /* Image resize overlay */
       .rdt-img-overlay {
         position: absolute;
@@ -154,6 +188,11 @@
       .rdt-editor h3 { font-size: 16px; margin: 20px 0 8px; }
       .rdt-editor p { margin: 0 0 12px; }
       .rdt-editor a { color: var(--accent); }
+      .rdt-editor .rdt-mention {
+        display: inline-block; background: #e0e7ff; color: #3730a3;
+        border-radius: 4px; padding: 0 5px; margin: 0 1px; font-weight: 500;
+        font-size: 0.95em; white-space: nowrap; user-select: none; cursor: default;
+      }
       .rdt-editor code {
         background: #f1f5f9; border-radius: 4px; padding: 1px 5px;
         font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
@@ -174,6 +213,9 @@
         border: 1px solid var(--border); padding: 7px 11px; text-align: left; font-size: 14px;
       }
       .rdt-editor th { background: #f8fafc; font-weight: 600; }
+      .rdt-editor td.rdt-cell-selected, .rdt-editor th.rdt-cell-selected {
+        background: #dbeafe; box-shadow: inset 0 0 0 2px var(--accent);
+      }
       .rdt-drawing {
         margin: 10px 0 18px; border: 1px solid var(--border);
         border-radius: 8px; overflow: hidden;

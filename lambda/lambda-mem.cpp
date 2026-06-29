@@ -41,6 +41,31 @@ static __thread int64_t jit_gc_root_frame_depth = 0;
 
 static void gc_finalize_all_objects(gc_heap_t *gc);
 
+static JsTypedArray* gc_typed_array_from_map(Map* map) {
+    if (!map) return NULL;
+    if (map->data_cap == 0) {
+        return (JsTypedArray*)map->data;
+    }
+    bool found = false;
+    Item ta_val = js_map_get_fast_ext(map, "__ta__", 6, &found);
+    if (found) return (JsTypedArray*)(uintptr_t)it2i(ta_val);
+    return NULL;
+}
+
+static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
+    Map* map = (Map*)data;
+    if (!map || !gc) return;
+    if (map->type_id != LMD_TYPE_MAP || map->map_kind != MAP_KIND_TYPED_ARRAY) return;
+
+    JsTypedArray* ta = gc_typed_array_from_map(map);
+    if (ta && ta->buffer_item) {
+        gc_mark_item(gc, ta->buffer_item);
+    }
+    if (ta && ta->view) {
+        gc_mark_object_ptr(gc, ta->view);
+    }
+}
+
 static void gc_finalize_arraybuffer(JsArrayBuffer* ab, gc_native_seen_t* seen_native) {
     if (!ab || gc_native_seen_seen_or_add(seen_native, ab)) return;
     if (ab->data) {
@@ -65,14 +90,7 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
     if (!map) return;
     switch (map->map_kind) {
     case MAP_KIND_TYPED_ARRAY: {
-        JsTypedArray* ta = NULL;
-        if (map->data_cap == 0) {
-            ta = (JsTypedArray*)map->data;
-        } else {
-            bool found = false;
-            Item ta_val = js_map_get_fast_ext(map, "__ta__", 6, &found);
-            if (found) ta = (JsTypedArray*)(uintptr_t)it2i(ta_val);
-        }
+        JsTypedArray* ta = gc_typed_array_from_map(map);
         gc_finalize_typed_array(ta, seen_native);
         map->data = NULL;
         break;
@@ -223,6 +241,7 @@ void heap_init() {
     context->heap->gc->vmap_destroy = vmap_gc_destroy;
     context->heap->gc->error_trace = err_gc_trace;
     context->heap->gc->error_destroy = err_gc_destroy;
+    context->heap->gc->js_native_trace = js_native_map_gc_trace;
     err_set_heap_allocator(heap_calloc);
 
     // initialize interned single-char ASCII table (one-time, idempotent)
@@ -244,6 +263,7 @@ void heap_init_with_pool(Pool* pool) {
     context->heap->gc->vmap_destroy = vmap_gc_destroy;
     context->heap->gc->error_trace = err_gc_trace;
     context->heap->gc->error_destroy = err_gc_destroy;
+    context->heap->gc->js_native_trace = js_native_map_gc_trace;
     err_set_heap_allocator(heap_calloc);
 
     if (!ascii_char_table_initialized) {

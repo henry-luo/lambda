@@ -61,6 +61,7 @@ typedef struct JsTypedArray {
     uint64_t buffer_item;            // offset 32: original ArrayBuffer Item for identity-preserving .buffer access
     bool length_tracking;            // true when constructed from buffer without explicit length
     bool is_buffer;                  // true only for Node Buffer instances backed by Uint8Array storage
+    ArrayNum* view;                  // ArrayNum descriptor over the same non-moving byte storage
 } JsTypedArray;
 
 typedef enum JsAtomicsOp {

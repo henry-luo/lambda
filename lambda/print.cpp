@@ -14,6 +14,7 @@ static Item read_compact_elem(ArrayNum* arr, int i) {
     case ELEM_INT16:   return (Item){.item = i16_to_item(((int16_t*)arr->data)[i])};
     case ELEM_INT32:   return (Item){.item = i32_to_item(((int32_t*)arr->data)[i])};
     case ELEM_UINT8:   return (Item){.item = u8_to_item(((uint8_t*)arr->data)[i])};
+    case ELEM_UINT8_CLAMPED: return (Item){.item = u8_to_item(((uint8_t*)arr->data)[i])};
     case ELEM_UINT16:  return (Item){.item = u16_to_item(((uint16_t*)arr->data)[i])};
     case ELEM_UINT32:  return (Item){.item = u32_to_item(((uint32_t*)arr->data)[i])};
     case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)arr->data)[i]))};

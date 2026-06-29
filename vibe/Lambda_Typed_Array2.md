@@ -621,7 +621,7 @@ Per your direction, the unification of `JsTypedArray`/`JsArrayBuffer`/`JsDataVie
 - **View semantics must support views over externally-owned buffers**, not just other `ArrayNum`s. The `base` field is typed `Container*` (not `ArrayNum*`) precisely so a future JS-buffer wrapper can serve as base.
 - **Read-only-by-default** matches JS semantics for views into detached buffers and aligns with the eventual `Uint8Array.prototype.slice()` return-a-copy / `subarray()` return-a-view distinction.
 - **Element coercion lives at API boundaries, not in ArrayNum ops.** Lambda keeps strict numeric semantics; the JS wrapper applies truncation / clamping / NaN-coercion before delegating writes.
-- **`ELEM_UINT8_CLAMPED`** is *not* added in this proposal but reserved as element kind #15 (or kind #14 if `ELEM_BOOL` doesn't ship). The flag-only alternative (re-using `ELEM_UINT8` with a `clamped` flag) is rejected because the arithmetic semantics genuinely differ and a per-op clamp branch hurts the hot loop.
+- **`ELEM_UINT8_CLAMPED`** was not added in this proposal; it is now implemented by [Lambda_Typed_Array3.md](Lambda_Typed_Array3.md) as element kind #15. The flag-only alternative (re-using `ELEM_UINT8` with a `clamped` flag) remains rejected because the arithmetic semantics genuinely differ and a per-op clamp branch hurts the hot loop.
 - **`gc_native_seen_t` dedup pattern** already used by `gc_finalize_arraybuffer`/`gc_finalize_typed_array` is reusable for shared-buffer finalization.
 
 The duplication table, element-type map, target architecture diagram, migration order, and compatibility/risk discussion below remain as **the spec for future work**.
@@ -631,7 +631,7 @@ The duplication table, element-type map, target architecture diagram, migration 
 | Concern | Lambda `ArrayNum` | LambdaJS `JsTypedArray` |
 |---|---|---|
 | Storage | Owned buffer in `data`/`items`/`float_items` | Owned buffer or window into `JsArrayBuffer` |
-| Element types | 13 (`ELEM_INT…ELEM_FLOAT64`) | 11 (`JS_TYPED_INT8`…`BIGUINT64`) — almost a subset |
+| Element types | 15 (`ELEM_INT…ELEM_UINT8_CLAMPED`) | 11 (`JS_TYPED_INT8`…`BIGUINT64`) — now covered |
 | Views | None today; this proposal adds them | `subarray`, `slice`, length-tracking views |
 | Backing buffer | Implicit (owned) | Explicit `JsArrayBuffer` with detach/resize/transfer |
 | Arithmetic | Element-wise `+ - * / %` via `vec_*` | None — JS spec doesn't define array arithmetic |
@@ -652,9 +652,9 @@ The element-type mappings are nearly 1:1:
 | `JS_TYPED_FLOAT64` | `ELEM_FLOAT64` / `ELEM_FLOAT` |
 | `JS_TYPED_BIGINT64` | `ELEM_INT64` |
 | `JS_TYPED_BIGUINT64` | `ELEM_UINT64` |
-| `JS_TYPED_UINT8_CLAMPED` | **gap** — needs a new element kind or a flag |
+| `JS_TYPED_UINT8_CLAMPED` | `ELEM_UINT8_CLAMPED` |
 
-Only `Uint8ClampedArray` lacks an `ArrayNum` analog. Add `ELEM_UINT8_CLAMPED` (14th element kind) or a clamped-arithmetic flag bit.
+The `Uint8ClampedArray` storage gap is closed by `ELEM_UINT8_CLAMPED` in [Lambda_Typed_Array3.md](Lambda_Typed_Array3.md).
 
 ### Target architecture
 
@@ -684,7 +684,7 @@ Concretely:
 
 ### Migration order
 
-1. **Add `ELEM_UINT8_CLAMPED`** (or flag) — `ArrayNum` now covers every JS element type.
+1. **Add `ELEM_UINT8_CLAMPED`** — done in [Lambda_Typed_Array3.md](Lambda_Typed_Array3.md); `ArrayNum` now covers every JS element type.
 2. **Build `ArrayNum` view machinery (§2)** — JS `subarray`/`slice` will rely on this.
 3. **Refactor `JsArrayBuffer` to wrap a shared buffer** — same buffer can underlie a Lambda `ArrayNum` and a JS `Uint8Array` simultaneously.
 4. **Replace `JsTypedArray.data` with `ArrayNum*`** — JS read/write ops delegate. The JS layer keeps its own struct for identity/`buffer_item`/length-tracking, but storage moves.

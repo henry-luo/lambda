@@ -10,6 +10,7 @@ import { isNode, isText } from './doc.js'
 import type {
   Child,
   Doc,
+  GapSelection,
   MultiNodeSelection,
   NodeSelection,
   ResolvedAncestor,
@@ -38,6 +39,11 @@ export function nodeSelection(path: SourcePath): NodeSelection {
 
 export function multiNodeSelection(paths: SourcePath[]): MultiNodeSelection {
   return { kind: 'multi-node', paths }
+}
+
+// A gap cursor at insertion index `path` (= [...containerPath, index]).
+export function gapSelection(path: SourcePath): GapSelection {
+  return { kind: 'gap', path }
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +246,7 @@ export function selectionToString(doc: Doc, sel: Selection): string {
     }
     return out
   }
+  if (sel.kind === 'gap') return ''   // a gap cursor covers no text
   // text selection (covers "select all" too — anchor/head sit at doc boundaries)
   const lo = posMin(sel.anchor, sel.head)
   const hi = posMax(sel.anchor, sel.head)

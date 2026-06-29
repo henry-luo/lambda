@@ -108,6 +108,11 @@ const RICH_DOC = `
 
   <p>Keep typing below — every keystroke is a typed transaction over the source
   tree, with full undo/redo (<code>Cmd/Ctrl+Z</code>).</p>
+
+  <hr>
+  <p>The rule above is a block atom: arrow into it (or click it) and a <strong>gap
+  cursor</strong> appears — a caret position between blocks where no text lives.
+  Type there to insert a paragraph, or press Backspace/Delete to remove the rule.</p>
 </doc>
 `
 
