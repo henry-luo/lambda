@@ -28,6 +28,16 @@ function RenderNode({ doc, child, path }: RenderProps): React.ReactElement {
   if (child.tag === 'drawing') {
     return <DrawingView doc={doc} node={child} path={path} />
   }
+  if (child.tag === 'mention') {
+    // An inline atom: rendered as a non-editable chip so the caret treats it as
+    // one unit. data-source-path lets the dom-bridge map clicks/selection to it.
+    const label = (child.attrs.find(a => a.name === 'label')?.value as string) ?? ''
+    return (
+      <span data-source-path={stringifyPath(path)} data-tag="mention" className="rdt-mention" contentEditable={false}>
+        @{label}
+      </span>
+    )
+  }
   return <RenderElement doc={doc} node={child} path={path} />
 }
 

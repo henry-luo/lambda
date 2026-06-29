@@ -9,6 +9,7 @@
 #include "js_runtime.h"
 #include "js_event_loop.h"
 #include "js_class.h"
+#include "js_error_codes.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -117,9 +118,8 @@ static void js_assert_attach_assertion_error_prototype(Item error) {
 }
 
 // helper: throw AssertionError with full Node.js properties
-static Item throw_assertion_error_full(const char* message, Item actual, Item expected, const char* op_str, bool generated = true) {
+static Item make_assertion_error_full(const char* message, Item actual, Item expected, const char* op_str, bool generated = true) {
     extern Item js_new_error_with_name(Item type_name, Item message);
-    extern void js_throw_value(Item error);
     extern Item js_property_set(Item obj, Item key, Item value);
     Item type_name = assert_make_string("AssertionError");
     Item msg_item = assert_make_string(message);
@@ -131,7 +131,32 @@ static Item throw_assertion_error_full(const char* message, Item actual, Item ex
     js_property_set(error, assert_make_string("expected"), expected);
     if (op_str) js_property_set(error, assert_make_string("operator"), assert_make_string(op_str));
     js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(generated)});
+    if (op_str) {
+        Item stack_val = js_property_get(error, assert_make_string("stack"));
+        String* stack = get_type_id(stack_val) == LMD_TYPE_STRING ? it2s(stack_val) : NULL;
+        StrBuf* sb = strbuf_new();
+        if (stack && stack->len > 0) {
+            strbuf_append_str_n(sb, stack->chars, stack->len);
+        } else {
+            strbuf_append_str(sb, "AssertionError");
+            if (message && message[0]) {
+                strbuf_append_str(sb, ": ");
+                strbuf_append_str(sb, message);
+            }
+        }
+        strbuf_append_str(sb, "\n    at ");
+        strbuf_append_str(sb, op_str);
+        strbuf_append_str(sb, " (node:assert)");
+        js_property_set(error, assert_make_string("stack"), assert_make_string_n(sb->str, sb->length));
+        strbuf_free(sb);
+    }
     js_assert_attach_assertion_error_prototype(error);
+    return error;
+}
+
+static Item throw_assertion_error_full(const char* message, Item actual, Item expected, const char* op_str, bool generated = true) {
+    extern void js_throw_value(Item error);
+    Item error = make_assertion_error_full(message, actual, expected, op_str, generated);
     js_throw_value(error);
     return make_js_undefined();
 }
@@ -555,6 +580,163 @@ extern "C" Item js_assert_partialDeepStrictEqual(Item actual, Item expected, Ite
 // assert.rejects / assert.doesNotReject — async assertion helpers
 // =============================================================================
 
+static Item make_type_error_with_code(const char* code, const char* message) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    Item error = js_new_error_with_name(assert_make_string("TypeError"), assert_make_string(message));
+    js_property_set(error, assert_make_string("code"), assert_make_string(code));
+    return error;
+}
+
+static bool js_assert_is_native_promise(Item value) {
+    return get_type_id(value) == LMD_TYPE_MAP && js_class_id(value) == JS_CLASS_PROMISE;
+}
+
+static bool js_assert_is_valid_thenable(Item value) {
+    TypeId type = get_type_id(value);
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ELEMENT && type != LMD_TYPE_ARRAY &&
+        type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) {
+        return false;
+    }
+    Item then_fn = js_property_get(value, assert_make_string("then"));
+    if (get_type_id(then_fn) != LMD_TYPE_FUNC) return false;
+    Item catch_fn = js_property_get(value, assert_make_string("catch"));
+    return get_type_id(catch_fn) == LMD_TYPE_FUNC;
+}
+
+static const char* js_assert_class_instance_name(Item value) {
+    if (get_type_id(value) == LMD_TYPE_ARRAY) return "Array";
+    if (get_type_id(value) != LMD_TYPE_MAP) return "Object";
+    JsClass cls = js_class_id(value);
+    switch (cls) {
+        case JS_CLASS_MAP: return "Map";
+        case JS_CLASS_SET: return "Set";
+        case JS_CLASS_PROMISE: return "Promise";
+        case JS_CLASS_DATE: return "Date";
+        case JS_CLASS_REGEXP: return "RegExp";
+        case JS_CLASS_ARRAY_BUFFER: return "ArrayBuffer";
+        case JS_CLASS_DATA_VIEW: return "DataView";
+        default: return "Object";
+    }
+}
+
+static bool js_assert_constructor_name(Item value, char* out, int out_size) {
+    if (out_size <= 0) return false;
+    out[0] = '\0';
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    Item ctor = js_property_get(value, assert_make_string("constructor"));
+    if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) return false;
+    Item name = js_property_get(ctor, assert_make_string("name"));
+    String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
+    if (!ns || ns->len == 0) return false;
+    int len = (int)(ns->len < (size_t)out_size - 1 ? ns->len : (size_t)out_size - 1);
+    memcpy(out, ns->chars, len);
+    out[len] = '\0';
+    return true;
+}
+
+static int js_assert_append_value_type(char* buf, int buf_size, Item value) {
+    if (buf_size <= 0) return 0;
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_UNDEFINED) return snprintf(buf, buf_size, "undefined");
+    if (type == LMD_TYPE_NULL) return snprintf(buf, buf_size, "null");
+    if (type == LMD_TYPE_BOOL) return snprintf(buf, buf_size, "type boolean (%s)", it2b(value) ? "true" : "false");
+    if (type == LMD_TYPE_INT) return snprintf(buf, buf_size, "type number (%lld)", (long long)it2i(value));
+    if (type == LMD_TYPE_FLOAT) {
+        double d = it2d(value);
+        if (d != d) return snprintf(buf, buf_size, "type number (NaN)");
+        if (d == 1.0/0.0) return snprintf(buf, buf_size, "type number (Infinity)");
+        if (d == -1.0/0.0) return snprintf(buf, buf_size, "type number (-Infinity)");
+        return snprintf(buf, buf_size, "type number (%g)", d);
+    }
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(value);
+        return snprintf(buf, buf_size, "type string ('%.*s')", s ? (int)s->len : 0, s ? s->chars : "");
+    }
+    if (type == LMD_TYPE_FUNC) return snprintf(buf, buf_size, "function");
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_ELEMENT ||
+        type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP) {
+        char ctor_name[64];
+        const char* class_name = js_assert_class_instance_name(value);
+        if (strcmp(class_name, "Object") == 0 && js_assert_constructor_name(value, ctor_name, sizeof(ctor_name))) {
+            class_name = ctor_name;
+        }
+        return snprintf(buf, buf_size, "an instance of %s", class_name);
+    }
+    return snprintf(buf, buf_size, "type object");
+}
+
+static Item js_assert_make_invalid_arg_type_error(Item actual) {
+    char received[160];
+    js_assert_append_value_type(received, sizeof(received), actual);
+    char msg[384];
+    snprintf(msg, sizeof(msg),
+        "The \"promiseFn\" argument must be of type function or an instance of Promise. Received %s",
+        received);
+    return make_type_error_with_code(JS_ERR_INVALID_ARG_TYPE, msg);
+}
+
+static Item js_assert_make_invalid_return_error(Item actual) {
+    char received[160];
+    js_assert_append_value_type(received, sizeof(received), actual);
+    char msg[384];
+    snprintf(msg, sizeof(msg),
+        "Expected instance of Promise to be returned from the \"promiseFn\" function but got %s.",
+        received);
+    return make_type_error_with_code(JS_ERR_INVALID_RETURN_VALUE, msg);
+}
+
+static Item js_assert_reject_with_error(Item error) {
+    extern Item js_promise_reject(Item reason);
+    return js_promise_reject(error);
+}
+
+static bool js_assert_is_async_assertion_input(Item value) {
+    return js_assert_is_native_promise(value) || js_assert_is_valid_thenable(value);
+}
+
+static Item js_assert_missing_rejection_error(Item error_expected) {
+    const char* suffix = "";
+    char name_buf[128];
+    if (get_type_id(error_expected) == LMD_TYPE_FUNC) {
+        Item name = js_property_get(error_expected, assert_make_string("name"));
+        String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
+        if (ns && ns->len > 0) {
+            int len = (int)(ns->len < (int)sizeof(name_buf) - 1 ? ns->len : (int)sizeof(name_buf) - 1);
+            memcpy(name_buf, ns->chars, len);
+            name_buf[len] = '\0';
+            suffix = name_buf;
+        }
+    }
+    char msg[192];
+    if (suffix[0]) snprintf(msg, sizeof(msg), "Missing expected rejection (%s).", suffix);
+    else snprintf(msg, sizeof(msg), "Missing expected rejection.");
+    return make_assertion_error_full(msg, make_js_undefined(), error_expected, "rejects", true);
+}
+
+static Item js_assert_unwanted_rejection_error(Item reason, Item error_expected) {
+    Item msg_val = js_property_get(reason, assert_make_string("message"));
+    String* msg_str = get_type_id(msg_val) == LMD_TYPE_STRING ? it2s(msg_val) : NULL;
+    char msg[512];
+    if (msg_str && msg_str->len > 0) {
+        snprintf(msg, sizeof(msg), "Got unwanted rejection.\nActual message: \"%.*s\"",
+            (int)msg_str->len, msg_str->chars);
+    } else {
+        snprintf(msg, sizeof(msg), "Got unwanted rejection.");
+    }
+    return make_assertion_error_full(msg, reason, error_expected, "doesNotReject", true);
+}
+
+static Item js_assert_throw_rejection_mismatch(Item thrown, Item error_expected, Item message,
+                                               const char* generated_msg) {
+    if (get_type_id(message) == LMD_TYPE_STRING) {
+        String* ms = it2s(message);
+        char msg[512];
+        snprintf(msg, sizeof(msg), "%.*s", ms ? (int)ms->len : 0, ms ? ms->chars : "");
+        return throw_assertion_error_full(msg, thrown, error_expected, "rejects", false);
+    }
+    return throw_assertion_error_full(generated_msg, thrown, error_expected, "rejects", true);
+}
+
 // Validate a rejected value against an expected error pattern.
 // Returns true if validation passes, false if it fails (and throws assertion error).
 static bool validate_rejection(Item thrown, Item error_expected, Item message) {
@@ -583,9 +765,25 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
         // Maybe it's a validation function.
         Item validate_result = js_call_function(error_expected, make_js_undefined(), &thrown, 1);
         if (js_check_exception()) return true; // validator threw — propagate
-        if (assert_is_truthy(validate_result)) return true;
+        if (get_type_id(validate_result) == LMD_TYPE_BOOL && it2b(validate_result)) return true;
         // validation failed
-        throw_assertion_error("The validation function is expected to return \"true\"");
+        char result_text[160];
+        Item result_str = js_to_string_val(validate_result);
+        String* rs = get_type_id(result_str) == LMD_TYPE_STRING ? it2s(result_str) : NULL;
+        if (get_type_id(validate_result) == LMD_TYPE_STRING) {
+            snprintf(result_text, sizeof(result_text), "'%.*s'", rs ? (int)rs->len : 0, rs ? rs->chars : "");
+        } else {
+            snprintf(result_text, sizeof(result_text), "%.*s", rs ? (int)rs->len : 0, rs ? rs->chars : "");
+        }
+        char caught_text[256];
+        Item thrown_str = js_to_string_val(thrown);
+        String* ts = get_type_id(thrown_str) == LMD_TYPE_STRING ? it2s(thrown_str) : NULL;
+        snprintf(caught_text, sizeof(caught_text), "%.*s", ts ? (int)ts->len : 0, ts ? ts->chars : "");
+        char msg[512];
+        snprintf(msg, sizeof(msg),
+            "The \"validate\" validation function is expected to return \"true\". Received %s\n\nCaught error:\n\n%s",
+            result_text, caught_text);
+        throw_assertion_error_full(msg, thrown, error_expected, "rejects", true);
         return false;
     }
 
@@ -614,6 +812,7 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
         // Object pattern: validate each property
         Item keys = js_object_keys(error_expected);
         if (get_type_id(keys) == LMD_TYPE_ARRAY) {
+            if (keys.array->length == 0) return false;
             for (int64_t i = 0; i < keys.array->length; i++) {
                 Item key = list_get(keys.array, (int)i);
                 Item expected_val = js_property_get(error_expected, key);
@@ -631,7 +830,7 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
                                 String* ks = it2s(key);
                                 snprintf(buf, sizeof(buf), "Expected property '%.*s' to match regex",
                                          ks ? (int)ks->len : 1, ks ? ks->chars : "?");
-                                throw_assertion_error(buf);
+                                js_assert_throw_rejection_mismatch(thrown, error_expected, message, buf);
                                 return false;
                             }
                             continue;
@@ -643,7 +842,7 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
                     String* ks = it2s(key);
                     snprintf(buf, sizeof(buf), "Expected property '%.*s' to be strictly equal",
                              ks ? (int)ks->len : 1, ks ? ks->chars : "?");
-                    throw_assertion_error(buf);
+                    js_assert_throw_rejection_mismatch(thrown, error_expected, message, buf);
                     return false;
                 }
             }
@@ -654,9 +853,12 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
     return true;
 }
 
-static Item js_assert_rejects_on_fulfilled(Item value) {
-    // promise fulfilled when it should have rejected
-    throw_assertion_error("Missing expected rejection");
+static Item js_assert_rejects_on_fulfilled_with_env(Item env_item, Item value) {
+    (void)value;
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    Item error_expected = env ? env[0] : make_js_undefined();
+    extern void js_throw_value(Item error);
+    js_throw_value(js_assert_missing_rejection_error(error_expected));
     return make_js_undefined();
 }
 
@@ -664,7 +866,11 @@ static Item js_assert_rejects_on_rejected(Item env_item, Item reason) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     Item error_expected = env ? env[0] : make_js_undefined();
     Item message = env ? env[1] : make_js_undefined();
-    validate_rejection(reason, error_expected, message);
+    bool matched = validate_rejection(reason, error_expected, message);
+    if (!matched && !js_check_exception()) {
+        extern void js_throw_value(Item error);
+        js_throw_value(reason);
+    }
     return make_js_undefined();
 }
 
@@ -680,31 +886,59 @@ extern "C" Item js_assert_rejects(Item asyncFnOrPromise, Item error_expected, It
     if (get_type_id(asyncFnOrPromise) == LMD_TYPE_FUNC) {
         promise = js_call_function(asyncFnOrPromise, make_js_undefined(), NULL, 0);
         if (js_check_exception()) {
-            // synchronous throw — treat as rejection
             Item thrown = js_clear_exception();
-            validate_rejection(thrown, error_expected, message);
+            bool matched = validate_rejection(thrown, error_expected, message);
+            if (js_check_exception()) {
+                return js_assert_reject_with_error(js_clear_exception());
+            }
+            if (!matched) {
+                return js_assert_reject_with_error(thrown);
+            }
             return js_promise_resolve(make_js_undefined());
+        }
+        if (!js_assert_is_async_assertion_input(promise)) {
+            return js_assert_reject_with_error(js_assert_make_invalid_return_error(promise));
+        }
+        if (!js_assert_is_native_promise(promise)) {
+            promise = js_promise_resolve(promise);
         }
     } else {
         promise = asyncFnOrPromise;
+        if (!js_assert_is_async_assertion_input(promise)) {
+            return js_assert_reject_with_error(js_assert_make_invalid_arg_type_error(asyncFnOrPromise));
+        }
+        if (!js_assert_is_native_promise(promise)) {
+            promise = js_promise_resolve(promise);
+        }
     }
 
-    Item on_fulfilled = js_new_function((void*)js_assert_rejects_on_fulfilled, 1);
     Item* reject_env = js_alloc_env(2);
     reject_env[0] = error_expected;
     reject_env[1] = message;
+    Item on_fulfilled = js_new_closure((void*)js_assert_rejects_on_fulfilled_with_env, 1, reject_env, 2);
     Item on_rejected = js_new_closure((void*)js_assert_rejects_on_rejected, 1, reject_env, 2);
     return js_promise_then(promise, on_fulfilled, on_rejected);
 }
 
-static Item js_assert_doesNotReject_on_rejected(Item reason) {
+static Item js_assert_doesNotReject_on_rejected(Item env_item, Item reason) {
     // promise rejected when it should not have
     extern void js_throw_value(Item error);
-    // if reason is already an error, re-throw it
-    if (get_type_id(reason) == LMD_TYPE_MAP) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    Item error_expected = env ? env[0] : make_js_undefined();
+    TypeId exp_type = get_type_id(error_expected);
+    if (exp_type == LMD_TYPE_UNDEFINED || exp_type == LMD_TYPE_NULL) {
         js_throw_value(reason);
-    } else {
-        throw_assertion_error("Got unwanted rejection");
+        return make_js_undefined();
+    }
+
+    bool matched = validate_rejection(reason, error_expected, env ? env[1] : make_js_undefined());
+    if (js_check_exception()) {
+        js_clear_exception();
+        js_throw_value(reason);
+        return make_js_undefined();
+    }
+    if (matched) {
+        js_throw_value(js_assert_unwanted_rejection_error(reason, error_expected));
     }
     return make_js_undefined();
 }
@@ -721,16 +955,29 @@ extern "C" Item js_assert_doesNotReject(Item asyncFnOrPromise, Item error_expect
     if (get_type_id(asyncFnOrPromise) == LMD_TYPE_FUNC) {
         promise = js_call_function(asyncFnOrPromise, make_js_undefined(), NULL, 0);
         if (js_check_exception()) {
-            js_clear_exception();
-            throw_assertion_error("Got unwanted rejection");
-            return js_promise_resolve(make_js_undefined());
+            return js_assert_reject_with_error(js_clear_exception());
+        }
+        if (!js_assert_is_async_assertion_input(promise)) {
+            return js_assert_reject_with_error(js_assert_make_invalid_return_error(promise));
+        }
+        if (!js_assert_is_native_promise(promise)) {
+            promise = js_promise_resolve(promise);
         }
     } else {
         promise = asyncFnOrPromise;
+        if (!js_assert_is_async_assertion_input(promise)) {
+            return js_assert_reject_with_error(js_assert_make_invalid_arg_type_error(asyncFnOrPromise));
+        }
+        if (!js_assert_is_native_promise(promise)) {
+            promise = js_promise_resolve(promise);
+        }
     }
 
+    Item* reject_env = js_alloc_env(2);
+    reject_env[0] = error_expected;
+    reject_env[1] = message;
     Item on_fulfilled = js_new_function((void*)js_assert_noop, 0);
-    Item on_rejected = js_new_function((void*)js_assert_doesNotReject_on_rejected, 1);
+    Item on_rejected = js_new_closure((void*)js_assert_doesNotReject_on_rejected, 1, reject_env, 2);
     return js_promise_then(promise, on_fulfilled, on_rejected);
 }
 

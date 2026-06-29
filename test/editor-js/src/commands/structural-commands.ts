@@ -17,6 +17,7 @@ import {
   withContent
 } from '../model/doc.js'
 import { nodeSelection, pos } from '../model/source-pos.js'
+import { mergeInlines } from '../model/inline.js'
 import { stepReplace, stepSetAttr } from '../model/step.js'
 import { txBegin, txSetSelection, txStep } from '../model/transaction.js'
 import { caret, selCollapsed } from './sel.js'
@@ -283,6 +284,39 @@ export function cmdEnterEmptyListItem(state: EditorState): Transaction | null {
 
 // Insert an inline image at a collapsed text caret. The image becomes a
 // NodeSelection so it can be styled or deleted as a unit.
+// Insert an inline ATOM node (mention / emoji / inline-math) at a collapsed text
+// caret, splitting the text leaf around it. The caret lands AFTER the atom so
+// typing continues normally. Generalizes cmdInsertImage to any inline atom.
+export function cmdInsertInlineAtom(state: EditorState, tag: string, atomAttrs: Attr[]): Transaction | null {
+  const sel = state.selection
+  if (sel === null || sel.kind !== 'text') return null
+  const lo = sel.anchor
+  const hi = sel.head
+  if (lo.path.join(',') !== hi.path.join(',')) return null
+  const leaf = nodeAt(state.doc, lo.path)
+  if (leaf === null || leaf.kind !== 'text' || lo.path.length < 2) return null
+
+  const from = Math.min(lo.offset, hi.offset)
+  const to = Math.max(lo.offset, hi.offset)
+  const blockPath = parentPath(lo.path)
+  const leafIdx = lastIndex(lo.path)
+  const before = leaf.text.slice(0, from)
+  const after = leaf.text.slice(to)
+  const atom: Node = nodeAttrs(tag, atomAttrs, [])
+
+  const slice: Child[] = []
+  if (before.length > 0) slice.push({ kind: 'text', text: before, marks: leaf.marks })
+  slice.push(atom)
+  if (after.length > 0) slice.push({ kind: 'text', text: after, marks: leaf.marks })
+
+  let tx = txBegin(state.doc, sel)
+  tx = txStep(tx, stepReplace(blockPath, leafIdx, leafIdx + 1, slice))
+  const atomIdx = leafIdx + (before.length > 0 ? 1 : 0)
+  // Caret after the atom: start of the trailing leaf, or the block's end position.
+  const caretPos = after.length > 0 ? pos([...blockPath, atomIdx + 1], 0) : pos(blockPath, atomIdx + 1)
+  return txSetSelection(tx, caret(caretPos))
+}
+
 export function cmdInsertImage(state: EditorState, src: string, alt = ''): Transaction | null {
   const sel = state.selection
   if (sel === null || sel.kind !== 'text') return null
@@ -370,7 +404,7 @@ interface TableContext {
 // `table > tr > (td|th)` and `table > (thead|tbody|tfoot) > tr > (td|th)`.
 function tableContext(state: EditorState): TableContext | null {
   const sel = state.selection
-  if (sel === null || sel.kind === 'multi-node') return null
+  if (sel === null || sel.kind === 'multi-node' || sel.kind === 'gap') return null
   const basePath = sel.kind === 'node' ? sel.path : sel.anchor.path
   let cellPath = ancestorTag(state.doc, basePath, 'td')
   if (cellPath === null) cellPath = ancestorTag(state.doc, basePath, 'th')
@@ -509,4 +543,94 @@ export function cmdResizeImage(state: EditorState, path: SourcePath, width: numb
   tx = txStep(tx, stepSetAttr(path, 'width', Math.round(width)))
   tx = txStep(tx, stepSetAttr(path, 'height', Math.round(height)))
   return txSetSelection(tx, nodeSelection(path))
+}
+
+// Move a node within its parent from its current index to `toIndex` (a remove +
+// insert in one transaction — the model op behind drag-to-reorder). No-op when
+// the target is the same slot. `toIndex` is in the ORIGINAL child coordinate space.
+export function cmdMoveNode(state: EditorState, fromPath: SourcePath, toIndex: number): Transaction | null {
+  if (fromPath.length === 0) return null
+  const parent = parentPath(fromPath)
+  const fromIdx = lastIndex(fromPath)
+  const container = nodeAt(state.doc, parent)
+  if (container === null || !isNode(container)) return null
+  const moved = container.content[fromIdx]
+  if (moved === undefined) return null
+  if (toIndex < 0 || toIndex > container.content.length) return null
+  if (toIndex === fromIdx || toIndex === fromIdx + 1) return null  // already there
+  let tx = txBegin(state.doc, state.selection)
+  tx = txStep(tx, stepReplace(parent, fromIdx, fromIdx + 1, []))         // remove
+  const adjusted = toIndex > fromIdx ? toIndex - 1 : toIndex            // index after removal
+  tx = txStep(tx, stepReplace(parent, adjusted, adjusted, [moved]))     // re-insert
+  return txSetSelection(tx, nodeSelection([...parent, adjusted]))
+}
+
+// --- table cell merge / split (horizontal colspan) ---
+
+function isCell(n: Child | null | undefined): n is Node {
+  return n !== null && n !== undefined && n.kind === 'node' && (n.tag === 'td' || n.tag === 'th')
+}
+function colspanOf(cell: Node): number {
+  const v = attrsGet(cell.attrs, 'colspan')
+  return typeof v === 'number' ? v : 1
+}
+// Set/remove the colspan attribute on a cell's attr list.
+function withColspan(attrs: Attr[], span: number): Attr[] {
+  const rest = attrs.filter(a => a.name !== 'colspan')
+  return span > 1 ? [...rest, { name: 'colspan', value: span }] : rest
+}
+
+// Merge a contiguous run of selected cells in ONE row into the first cell, which
+// takes a colspan covering them; the rest are removed and their content appended.
+export function cmdMergeCells(state: EditorState): Transaction | null {
+  const sel = state.selection
+  if (sel === null || sel.kind !== 'multi-node' || sel.paths.length < 2) return null
+  const rowPath = parentPath(sel.paths[0] as SourcePath)
+  const idxs: number[] = []
+  for (const p of sel.paths) {
+    if (parentPath(p).join(',') !== rowPath.join(',')) return null   // same row only
+    if (!isCell(nodeAt(state.doc, p))) return null
+    idxs.push(lastIndex(p))
+  }
+  idxs.sort((a, b) => a - b)
+  if (idxs.some((v, i) => v !== (idxs[0] as number) + i)) return null  // contiguous only
+  const row = nodeAt(state.doc, rowPath)
+  if (row === null || !isNode(row)) return null
+
+  const first = row.content[idxs[0] as number] as Node
+  let span = 0
+  let merged: Child[] = []
+  for (const i of idxs) {
+    const cell = row.content[i] as Node
+    span += colspanOf(cell)
+    merged = [...merged, ...cell.content]
+  }
+  const mergedCell = nodeAttrs(first.tag, withColspan(first.attrs, span), mergeInlines(merged))
+  const selected = new Set(idxs)
+  const newRow: Child[] = []
+  for (let i = 0; i < row.content.length; i++) {
+    if (i === idxs[0]) newRow.push(mergedCell)
+    else if (!selected.has(i)) newRow.push(row.content[i] as Child)
+  }
+  let tx = txBegin(state.doc, sel)
+  tx = txStep(tx, stepReplace(parentPath(rowPath), lastIndex(rowPath), lastIndex(rowPath) + 1, [withContent(row, newRow)]))
+  return txSetSelection(tx, nodeSelection([...rowPath, idxs[0] as number]))
+}
+
+// Split a colspan>1 cell back into individual cells (content stays in the first).
+export function cmdSplitCell(state: EditorState): Transaction | null {
+  const sel = state.selection
+  if (sel === null || sel.kind !== 'node') return null
+  const cell = nodeAt(state.doc, sel.path)
+  if (!isCell(cell)) return null
+  const span = colspanOf(cell)
+  if (span < 2) return null
+  const rowPath = parentPath(sel.path)
+  const cellIdx = lastIndex(sel.path)
+  const firstCell = nodeAttrs(cell.tag, withColspan(cell.attrs, 1), cell.content)
+  const cells: Node[] = [firstCell]
+  for (let k = 0; k < span - 1; k++) cells.push(node(cell.tag, []))
+  let tx = txBegin(state.doc, sel)
+  tx = txStep(tx, stepReplace(rowPath, cellIdx, cellIdx + 1, cells))
+  return txSetSelection(tx, nodeSelection(sel.path))
 }

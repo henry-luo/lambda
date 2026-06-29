@@ -22,7 +22,7 @@ import {
   cmdSetBlockType,
   cmdToggleMark
 } from '../commands/text-commands.js'
-import { cmdAutoformatList } from '../commands/structural-commands.js'
+import { cmdInputRule } from '../commands/input-rules.js'
 import { txSetMeta } from '../model/transaction.js'
 import type { EditorState } from '../commands/types.js'
 import type { Transaction } from '../model/types.js'
@@ -66,9 +66,11 @@ function markScrollIntoView(tx: Transaction | null): Transaction | null {
 function dispatchIntentRaw(state: EditorState, intent: InputIntent): Transaction | null {
   switch (intent.type) {
     case 'insertText': {
-      if (intent.text === ' ') {
-        const af = cmdAutoformatList(state)
-        if (af !== null) return af
+      // Single-character inserts may trigger a markdown input rule (heading,
+      // quote, hr, list, **bold**/…); a hit consumes the char as its own undo step.
+      if (intent.text.length === 1) {
+        const rule = cmdInputRule(state, intent.text)
+        if (rule !== null) return rule
       }
       return markTypingHistory(cmdInsertText(state, intent.text))
     }

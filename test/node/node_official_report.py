@@ -7,11 +7,13 @@ import argparse
 import datetime as dt
 import os
 import re
+import subprocess
 from collections import Counter, defaultdict
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+NODE_REPO = ROOT / "ref/node"
 NODE_TEST_DIR = ROOT / "ref/node/test/parallel"
 HARNESS_FILE = ROOT / "test/test_node_gtest.cpp"
 BASELINE_FILE = ROOT / "test/node/official_baseline.txt"
@@ -65,6 +67,33 @@ def read_baseline(path: Path) -> tuple[set[str], dict[str, str]]:
         if stripped:
             names.add(stripped)
     return names, header
+
+
+def read_git_head(repo: Path) -> str:
+    if not repo.exists():
+        return "(missing)"
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--short=11", "HEAD"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except OSError:
+        return "(unavailable)"
+    if result.returncode != 0:
+        return "(unavailable)"
+    head = result.stdout.strip()
+    return head if head else "(unavailable)"
+
+
+def commit_ids_match(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    if left.startswith("(") or right.startswith("("):
+        return False
+    return left == right or left.startswith(right) or right.startswith(left)
 
 
 def read_features(path: Path) -> list[tuple[str, str, bool]]:
@@ -248,6 +277,7 @@ def build_report(args: argparse.Namespace) -> str:
     prefixes = enabled_prefixes(features, modules)
     node_tests = read_node_tests(prefixes)
     baseline, baseline_header = read_baseline(BASELINE_FILE)
+    actual_node_head = read_git_head(NODE_REPO)
     skip_list = read_name_list(SKIP_LIST_FILE)
     slow_list = read_name_list(SLOW_LIST_FILE)
     timing_rows = read_timing_rows(TIMING_FILE)
@@ -264,6 +294,31 @@ def build_report(args: argparse.Namespace) -> str:
     active_pass = active & baseline
     active_fail = active - baseline
     baseline_missing = sorted(name for name in baseline if name not in existing_names)
+    baseline_node_commit = baseline_header.get("ref/node commit", "")
+
+    warnings: list[list[object]] = []
+    if baseline_node_commit:
+        if not commit_ids_match(baseline_node_commit, actual_node_head):
+            warnings.append([
+                "warning",
+                "baseline/ref-node mismatch",
+                f"baseline records `{baseline_node_commit}`, actual ref/node HEAD is `{actual_node_head}`",
+            ])
+    else:
+        warnings.append([
+            "warning",
+            "baseline/ref-node missing",
+            "baseline header does not record `ref/node commit`",
+        ])
+    if baseline_missing:
+        preview = ", ".join(f"`{name}`" for name in baseline_missing[:8])
+        if len(baseline_missing) > 8:
+            preview += f", ... {len(baseline_missing) - 8} more"
+        warnings.append([
+            "warning",
+            "baseline names missing from ref/node",
+            f"{len(baseline_missing)} missing: {preview}",
+        ])
 
     prefix_rows = []
     per_prefix: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
@@ -321,6 +376,7 @@ def build_report(args: argparse.Namespace) -> str:
     report.append("## Summary\n\n")
     report.append(format_table([
         ["Metric", "Count"],
+        ["warnings", len(warnings)],
         ["enabled test files", len(existing_names)],
         ["active tests", len(active)],
         ["baseline passes in active set", len(active_pass)],
@@ -330,6 +386,20 @@ def build_report(args: argparse.Namespace) -> str:
         ["baseline names missing from ref/node", len(baseline_missing)],
         ["latest timing rows", len(timing_rows)],
         ["latest crash/timeout manifest rows", len(crashers)],
+    ]))
+    report.append("\n")
+
+    report.append("## Warnings\n\n")
+    report.append(format_table(
+        [["Level", "Issue", "Detail"]] + warnings
+    ))
+    report.append("\n")
+
+    report.append("## Repository State\n\n")
+    report.append(format_table([
+        ["Field", "Value"],
+        ["actual ref/node HEAD", actual_node_head],
+        ["baseline header ref/node commit", baseline_node_commit or "(missing)"],
     ]))
     report.append("\n")
 

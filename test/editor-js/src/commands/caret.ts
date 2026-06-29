@@ -9,8 +9,11 @@
 // sequences (type / move / type) through the editor.
 
 import { isNode, isText } from '../model/doc.js'
-import { pos } from '../model/source-pos.js'
-import type { Child, Doc, SourcePath, SourcePos, TextSelection } from '../model/types.js'
+import { gapSelection, pos } from '../model/source-pos.js'
+import { schemaAllowsInline } from '../model/schema.js'
+import { isBlockAtom } from './gap-cursor.js'
+import type { Schema } from '../model/schema.js'
+import type { Child, Doc, Selection, SourcePath, SourcePos } from '../model/types.js'
 import type { EditorState } from './types.js'
 import { txBegin, txSetMeta, txSetSelection } from '../model/transaction.js'
 import type { Transaction } from '../model/types.js'
@@ -19,15 +22,24 @@ export type Granularity = 'character' | 'word' | 'documentboundary'
 export type Direction = 'forward' | 'backward' | 'left' | 'right'
 export type Alter = 'move' | 'extend'
 
-interface Stop { path: SourcePath; offset: number }
+// A caret stop: a text-leaf offset, an empty-block position, or (gap:true) a gap
+// cursor at an insertion index — `path` is then [...containerPath, index].
+interface Stop { path: SourcePath; offset: number; gap?: boolean }
+
+function pathEq(a: SourcePath, b: SourcePath): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i])
+}
 
 // Enumerate caret stops in document order, with the concatenated text and a
 // per-stop global char index (for word segmentation).
-function enumerate(doc: Doc): { stops: Stop[]; text: string; globalOf: number[] } {
+function enumerate(doc: Doc, schema: Schema): { stops: Stop[]; text: string; globalOf: number[] } {
   const stops: Stop[] = []
   const globalOf: number[] = []
   let text = ''
-  const walk = (n: Child, path: SourcePath): void => {
+  // `inInline` = this node sits in an inline context (its parent holds inline
+  // content), so an atom here is an INLINE atom (e.g. an <img> in a paragraph),
+  // which keeps a normal node stop — only BLOCK-context atoms become gaps.
+  const walk = (n: Child, path: SourcePath, inInline: boolean): void => {
     if (isText(n)) {
       for (let o = 0; o <= n.text.length; o++) {
         stops.push({ path, offset: o })
@@ -37,16 +49,32 @@ function enumerate(doc: Doc): { stops: Stop[]; text: string; globalOf: number[] 
       return
     }
     if (isNode(n)) {
+      // A block-context atom (hr/img/drawing) gets a gap stop BEFORE it instead
+      // of a text stop — you cannot put a text caret inside it.
+      if (path.length > 0 && isBlockAtom(n.tag) && !inInline) {
+        stops.push({ path, offset: 0, gap: true })
+        globalOf.push(text.length)
+        return
+      }
       if (n.content.length === 0 && path.length > 0) {
-        // empty block — a single stop
+        // empty block, or an inline atom (image/br) — a single node stop
         stops.push({ path, offset: 0 })
         globalOf.push(text.length)
         return
       }
-      for (let i = 0; i < n.content.length; i++) walk(n.content[i] as Child, [...path, i])
+      const childInline = schemaAllowsInline(schema, n.tag)
+      for (let i = 0; i < n.content.length; i++) {
+        walk(n.content[i] as Child, [...path, i], childInline)
+        // A trailing block atom also needs a gap AFTER it (e.g. doc ends with an <hr>).
+        const child = n.content[i] as Child
+        if (i === n.content.length - 1 && !childInline && child.kind === 'node' && isBlockAtom(child.tag)) {
+          stops.push({ path: [...path, i + 1], offset: 0, gap: true })
+          globalOf.push(text.length)
+        }
+      }
     }
   }
-  walk(doc, [])
+  walk(doc, [], false)
   return { stops, text, globalOf }
 }
 
@@ -101,11 +129,18 @@ function nearestStopAtGlobal(globalOf: number[], target: number, forward: boolea
 
 export function cmdMoveCaret(state: EditorState, alter: Alter, dir: Direction, gran: Granularity): Transaction | null {
   const sel = state.selection
-  if (sel === null || sel.kind !== 'text') return null
-  const { stops, text, globalOf } = enumerate(state.doc)
+  if (sel === null || (sel.kind !== 'text' && sel.kind !== 'gap')) return null
+  const { stops, text, globalOf } = enumerate(state.doc, state.schema)
   if (stops.length === 0) return null
 
-  const headIdx = indexOf(stops, sel.head)
+  // Locate the current head among the stops (a gap matches by path).
+  let headIdx: number
+  if (sel.kind === 'gap') {
+    headIdx = stops.findIndex(s => s.gap === true && pathEq(s.path, sel.path))
+    if (headIdx < 0) headIdx = 0
+  } else {
+    headIdx = indexOf(stops, sel.head)
+  }
   const fwd = isForward(dir)
   let targetIdx: number
   if (gran === 'documentboundary') {
@@ -116,9 +151,17 @@ export function cmdMoveCaret(state: EditorState, alter: Alter, dir: Direction, g
     targetIdx = Math.max(0, Math.min(stops.length - 1, headIdx + (fwd ? 1 : -1)))
   }
   const target = stops[targetIdx] as Stop
-  const headPos = pos(target.path, target.offset)
-  const anchorPos = alter === 'extend' ? sel.anchor : headPos
-  const next: TextSelection = { kind: 'text', anchor: anchorPos, head: headPos }
+
+  // A gap target produces a GapSelection; extend collapses onto it (a gap is not
+  // a range endpoint).
+  let next: Selection
+  if (target.gap === true) {
+    next = gapSelection(target.path)
+  } else {
+    const headPos = pos(target.path, target.offset)
+    const anchorPos = alter === 'extend' && sel.kind === 'text' ? sel.anchor : headPos
+    next = { kind: 'text', anchor: anchorPos, head: headPos }
+  }
 
   // Movement does not mutate the doc — emit a selection-only, non-history tx.
   let tx = txBegin(state.doc, sel)

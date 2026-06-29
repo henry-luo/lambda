@@ -94,6 +94,20 @@ assert.strictEqual(crypto.createVerify('sha256')
   .verify(publicKeyObject, objectSignature), true);
 console.log('rsa keyobject sign verify:', true);
 
+const privateDer = privateKeyObject.export({ type: 'pkcs8', format: 'der' });
+assert.strictEqual(crypto.createVerify('sha256')
+  .update(message)
+  .verify(privateKey, objectSignature), true);
+assert.strictEqual(crypto.createVerify('sha256')
+  .update(message)
+  .verify(privateKeyObject, objectSignature), true);
+assert.strictEqual(crypto.verify('sha256', Buffer.from(message), {
+  key: privateDer,
+  format: 'der',
+  type: 'pkcs8'
+}, objectSignature), true);
+console.log('rsa verify private key material:', true);
+
 const oneShotSignature = crypto.sign('sha256', Buffer.from(message), {
   key: privateKeyObject,
   padding: crypto.constants.RSA_PKCS1_PSS_PADDING
