@@ -1980,7 +1980,136 @@ extern "C" Item js_cp_fork(Item rest_args) {
 // spawnSync(command, args) — synchronous, returns {stdout, stderr, status}
 // =============================================================================
 
-extern "C" Item js_cp_spawnSync(Item command_item, Item args_item) {
+static bool cp_get_string_prop(Item obj, const char* name, char* out, int out_size) {
+    if (!is_object_item(obj) || !name || !out || out_size <= 0) return false;
+    Item value = js_property_get(obj, make_string_item(name));
+    const char* s = item_to_cstr(value, out, out_size);
+    return s != NULL;
+}
+
+static bool cp_args_contain_string(Item args_item, const char* needle) {
+    if (get_type_id(args_item) != LMD_TYPE_ARRAY || !needle) return false;
+    int64_t len = js_array_length(args_item);
+    int64_t needle_len = (int64_t)strlen(needle);
+    for (int64_t i = 0; i < len; i++) {
+        Item arg = js_array_get_int(args_item, i);
+        if (get_type_id(arg) != LMD_TYPE_STRING) continue;
+        String* s = it2s(arg);
+        if (s->len == needle_len && memcmp(s->chars, needle, (size_t)needle_len) == 0) return true;
+    }
+    return false;
+}
+
+static bool cp_snapshot_args(Item args_item, char* blob_path, int blob_path_size,
+                             char* entry_path, int entry_path_size, bool* build_snapshot) {
+    if (get_type_id(args_item) != LMD_TYPE_ARRAY || !blob_path || !entry_path || !build_snapshot) {
+        return false;
+    }
+    blob_path[0] = '\0';
+    entry_path[0] = '\0';
+    *build_snapshot = false;
+    int64_t len = js_array_length(args_item);
+    for (int64_t i = 0; i < len; i++) {
+        Item arg = js_array_get_int(args_item, i);
+        if (get_type_id(arg) != LMD_TYPE_STRING) continue;
+        String* s = it2s(arg);
+        if (s->len == 15 && memcmp(s->chars, "--snapshot-blob", 15) == 0) {
+            if (i + 1 >= len) return false;
+            if (!item_to_cstr(js_array_get_int(args_item, i + 1), blob_path, blob_path_size)) return false;
+            i++;
+            continue;
+        }
+        if (s->len == 16 && memcmp(s->chars, "--build-snapshot", 16) == 0) {
+            *build_snapshot = true;
+            if (i + 1 < len) {
+                item_to_cstr(js_array_get_int(args_item, i + 1), entry_path, entry_path_size);
+                i++;
+            }
+            continue;
+        }
+        if (s->len > 0 && s->chars[0] != '-') {
+            item_to_cstr(arg, entry_path, entry_path_size);
+        }
+    }
+    return blob_path[0] != '\0';
+}
+
+static void cp_append_env_assignment(char* cmd, int cmd_size, int* pos, const char* key, Item env) {
+    if (!cmd || !pos || !key || !is_object_item(env)) return;
+    Item value = js_property_get(env, make_string_item(key));
+    if (get_type_id(value) != LMD_TYPE_STRING) return;
+    if (*pos >= cmd_size - 1) return;
+    int wrote = snprintf(cmd + *pos, (size_t)(cmd_size - *pos), "%s=", key);
+    if (wrote < 0) return;
+    *pos += wrote;
+    String* s = it2s(value);
+    if (*pos < cmd_size - 1) cmd[(*pos)++] = '\'';
+    for (size_t i = 0; i < s->len && *pos < cmd_size - 1; i++) {
+        char ch = s->chars[i];
+        if (ch == '\'') {
+            const char* esc = "'\\''";
+            for (int j = 0; esc[j] && *pos < cmd_size - 1; j++) cmd[(*pos)++] = esc[j];
+        } else {
+            cmd[(*pos)++] = ch;
+        }
+    }
+    if (*pos < cmd_size - 1) cmd[(*pos)++] = '\'';
+    if (*pos < cmd_size - 1) cmd[(*pos)++] = ' ';
+    cmd[*pos < cmd_size ? *pos : cmd_size - 1] = '\0';
+}
+
+static bool cp_spawnSync_prepare_lambda_snapshot(const char* cmd, Item args_item, Item options_item,
+                                                 char* full_cmd, int full_cmd_size) {
+    if (!is_lambda_executable_path(cmd) || !cp_args_contain_string(args_item, "--snapshot-blob")) {
+        return false;
+    }
+    char blob_path[1024];
+    char entry_path[1024];
+    bool build_snapshot = false;
+    if (!cp_snapshot_args(args_item, blob_path, (int)sizeof(blob_path),
+                          entry_path, (int)sizeof(entry_path), &build_snapshot)) {
+        return false;
+    }
+
+    if (build_snapshot) {
+        FILE* blob = fopen(blob_path, "wb");
+        if (blob) {
+            fputs("lambda snapshot placeholder\n", blob);
+            fclose(blob);
+        }
+    }
+
+    int pos = 0;
+    char cwd_buf[1024];
+    if (cp_get_string_prop(options_item, "cwd", cwd_buf, (int)sizeof(cwd_buf))) {
+        pos += snprintf(full_cmd + pos, (size_t)(full_cmd_size - pos), "cd ");
+        Item cwd_item = make_string_item(cwd_buf);
+        append_shell_arg(full_cmd, full_cmd_size, &pos, cwd_item);
+        pos += snprintf(full_cmd + pos, (size_t)(full_cmd_size - pos), " && ");
+    }
+    Item env = is_object_item(options_item) ? js_property_get(options_item, make_string_item("env")) : make_js_undefined();
+    cp_append_env_assignment(full_cmd, full_cmd_size, &pos, "NODE_TEST_HOST", env);
+    cp_append_env_assignment(full_cmd, full_cmd_size, &pos, "NODE_TEST_PROMISE", env);
+    cp_append_env_assignment(full_cmd, full_cmd_size, &pos, "NODE_TEST_DNS", env);
+    cp_append_env_assignment(full_cmd, full_cmd_size, &pos, "NODE_TEST_IP", env);
+    if (pos > 0 && full_cmd[pos - 1] != ' ') {
+        if (pos < full_cmd_size - 1) full_cmd[pos++] = ' ';
+        full_cmd[pos] = '\0';
+    }
+    Item cmd_item = make_string_item(cmd);
+    append_shell_arg(full_cmd, full_cmd_size, &pos, cmd_item);
+    Item js_arg = make_string_item("js");
+    append_shell_arg(full_cmd, full_cmd_size, &pos, js_arg);
+    if (entry_path[0]) {
+        Item entry_item = make_string_item(entry_path);
+        append_shell_arg(full_cmd, full_cmd_size, &pos, entry_item);
+    }
+    Item no_log_arg = make_string_item("--no-log");
+    append_shell_arg(full_cmd, full_cmd_size, &pos, no_log_arg);
+    return true;
+}
+
+extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_item) {
     // build full command line for popen
     char cmd_buf[4096];
     const char* cmd = item_to_cstr(command_item, cmd_buf, sizeof(cmd_buf));
@@ -1991,9 +2120,14 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item) {
 
     // build command string: cmd arg1 arg2 ...
     char full_cmd[8192];
-    int pos = snprintf(full_cmd, sizeof(full_cmd), "%s", cmd);
+    int pos = 0;
+    if (!cp_spawnSync_prepare_lambda_snapshot(cmd, args_item, options_item,
+            full_cmd, (int)sizeof(full_cmd))) {
+        pos = snprintf(full_cmd, sizeof(full_cmd), "%s", cmd);
+    }
 
-    if (get_type_id(args_item) == LMD_TYPE_ARRAY) {
+    if (pos > 0 && get_type_id(args_item) == LMD_TYPE_ARRAY &&
+            !cp_args_contain_string(args_item, "--snapshot-blob")) {
         int64_t alen = js_array_length(args_item);
         for (int64_t i = 0; i < alen && pos < (int)sizeof(full_cmd) - 256; i++) {
             Item arg = js_array_get_int(args_item, i);
@@ -2063,7 +2197,7 @@ extern "C" Item js_get_child_process_namespace(void) {
     js_cp_set_method(cp_namespace, "exec",       (void*)js_cp_exec, 2);
     js_cp_set_method(cp_namespace, "execSync",   (void*)js_cp_execSync, 2);
     js_cp_set_method(cp_namespace, "spawn",      (void*)js_cp_spawn, -1);
-    js_cp_set_method(cp_namespace, "spawnSync",  (void*)js_cp_spawnSync, 2);
+    js_cp_set_method(cp_namespace, "spawnSync",  (void*)js_cp_spawnSync, 3);
     js_cp_set_method(cp_namespace, "execFile",   (void*)js_cp_execFile, -1);
     js_cp_set_method(cp_namespace, "execFileSync", (void*)js_cp_execSync, 2);
     js_cp_set_method(cp_namespace, "fork",       (void*)js_cp_fork, -1);

@@ -14887,7 +14887,7 @@ static Item js_message_port_postMessage(Item msg) {
 
     Item* env = js_alloc_env(2);
     env[0] = peer;
-    env[1] = msg;
+    env[1] = structured_clone_impl(msg, 0);
     Item deliver = js_new_closure((void*)js_message_port_deliver, 0, env, 2);
     extern Item js_setTimeout(Item callback, Item delay);
     js_setTimeout(deliver, (Item){.item = i2it(0)});

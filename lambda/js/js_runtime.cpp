@@ -35014,6 +35014,12 @@ extern "C" Item js_module_get(Item specifier) {
             js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("setFlagsFromString", 18))}, noop1);
             js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("serialize", 9))}, noop1);
             js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("deserialize", 11))}, noop1);
+            Item startup_snapshot = js_new_object();
+            js_property_set(startup_snapshot,
+                            (Item){.item = s2it(heap_create_name("setDeserializeMainFunction", 26))},
+                            noop1);
+            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("startupSnapshot", 15))},
+                            startup_snapshot);
             js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("GCProfiler", 10))},
                             js_new_function((void*)js_stub_noop_object, 0));
             js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("default", 7))}, v8_ns);

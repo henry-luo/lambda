@@ -1209,17 +1209,92 @@ static bool js_require_path_has_known_extension(const char* path) {
            (len >= 3 && strcmp(path + len - 3, ".ls") == 0);
 }
 
+static bool js_require_path_is_json(const char* path) {
+    int len = path ? (int)strlen(path) : 0;
+    return len >= 5 && strcmp(path + len - 5, ".json") == 0;
+}
+
 static char* js_require_read_resolved_path_internal(char* path_buf, int path_buf_size,
         bool allow_package_main);
+
+static void js_require_normalize_lexical_path(char* path_buf, int path_buf_size) {
+    if (!path_buf || path_buf_size <= 0) return;
+
+    js_normalize_path_separators(path_buf);
+    char input[512];
+    snprintf(input, sizeof(input), "%s", path_buf);
+
+    const char* parts[128];
+    int part_lens[128];
+    int part_count = 0;
+    bool absolute = (input[0] == '/');
+    const char* p = input;
+    while (*p) {
+        while (*p == '/') p++;
+        const char* start = p;
+        while (*p && *p != '/') p++;
+        int len = (int)(p - start);
+        if (len == 0 || (len == 1 && start[0] == '.')) continue;
+        if (len == 2 && start[0] == '.' && start[1] == '.') {
+            if (part_count > 0) {
+                bool prev_parent = (part_lens[part_count - 1] == 2 &&
+                                    parts[part_count - 1][0] == '.' &&
+                                    parts[part_count - 1][1] == '.');
+                if (!prev_parent) {
+                    part_count--;
+                    continue;
+                }
+            }
+            if (!absolute && part_count < 128) {
+                parts[part_count] = start;
+                part_lens[part_count] = len;
+                part_count++;
+            }
+            continue;
+        }
+        if (part_count < 128) {
+            parts[part_count] = start;
+            part_lens[part_count] = len;
+            part_count++;
+        }
+    }
+
+    int pos = 0;
+    if (absolute && pos < path_buf_size - 1) path_buf[pos++] = '/';
+    for (int i = 0; i < part_count; i++) {
+        if (i > 0 && pos < path_buf_size - 1) path_buf[pos++] = '/';
+        for (int j = 0; j < part_lens[i] && pos < path_buf_size - 1; j++) {
+            path_buf[pos++] = parts[i][j];
+        }
+    }
+    if (pos == 0 && absolute && path_buf_size > 1) path_buf[pos++] = '/';
+    path_buf[pos] = '\0';
+}
+
+static void js_require_canonicalize_existing_path(char* path_buf, int path_buf_size) {
+    if (!path_buf || path_buf_size <= 0) return;
+    char resolved[512];
+    if (!realpath(path_buf, resolved)) return;
+    js_normalize_path_separators(resolved);
+    if ((int)strlen(resolved) >= path_buf_size) return;
+    snprintf(path_buf, path_buf_size, "%s", resolved);
+}
 
 static char* js_require_read_package_main(char* path_buf, int path_buf_size,
         const char* dir_path) {
     if (!dir_path || !dir_path[0]) return NULL;
 
+    char canonical_dir[512];
+    const char* package_dir = dir_path;
+    if (realpath(dir_path, canonical_dir)) {
+        js_normalize_path_separators(canonical_dir);
+        package_dir = canonical_dir;
+    }
+
     char package_path[512];
-    int dir_len = (int)strlen(dir_path);
+    int dir_len = (int)strlen(package_dir);
     if (dir_len + 14 >= (int)sizeof(package_path)) return NULL;
-    snprintf(package_path, sizeof(package_path), "%s/package.json", dir_path);
+    snprintf(package_path, sizeof(package_path), "%s/package.json", package_dir);
 
     char* package_source = read_text_file(package_path);
     if (!package_source) return NULL;
@@ -1242,7 +1317,7 @@ static char* js_require_read_package_main(char* path_buf, int path_buf_size,
         snprintf(main_path, sizeof(main_path), "%.*s", (int)main_str->len, main_str->chars);
     } else {
         if (dir_len + 1 + main_str->len >= (int64_t)sizeof(main_path)) return NULL;
-        snprintf(main_path, sizeof(main_path), "%s/%.*s", dir_path, (int)main_str->len, main_str->chars);
+        snprintf(main_path, sizeof(main_path), "%s/%.*s", package_dir, (int)main_str->len, main_str->chars);
     }
 
     char resolved_main[512];
@@ -1259,11 +1334,15 @@ static char* js_require_read_package_main(char* path_buf, int path_buf_size,
 
 static char* js_require_read_resolved_path_internal(char* path_buf, int path_buf_size,
         bool allow_package_main) {
+    js_require_normalize_lexical_path(path_buf, path_buf_size);
     char original[512];
     snprintf(original, sizeof(original), "%s", path_buf);
 
     char* source = read_text_file(path_buf);
-    if (source) return source;
+    if (source) {
+        js_require_canonicalize_existing_path(path_buf, path_buf_size);
+        return source;
+    }
 
     int len = (int)strlen(original);
     bool has_node_prefix = (len >= 5 && strncmp(original, "node:", 5) == 0);
@@ -1271,7 +1350,10 @@ static char* js_require_read_resolved_path_internal(char* path_buf, int path_buf
             len + 3 < path_buf_size) {
         snprintf(path_buf, path_buf_size, "%s.js", original);
         source = read_text_file(path_buf);
-        if (source) return source;
+        if (source) {
+            js_require_canonicalize_existing_path(path_buf, path_buf_size);
+            return source;
+        }
     }
 
     snprintf(path_buf, path_buf_size, "%s", original);
@@ -1288,7 +1370,10 @@ static char* js_require_read_resolved_path_internal(char* path_buf, int path_buf
     if (plen + strlen("/index.js") < (size_t)path_buf_size) {
         strncat(path_buf, "/index.js", path_buf_size - strlen(path_buf) - 1);
         source = read_text_file(path_buf);
-        if (source) return source;
+        if (source) {
+            js_require_canonicalize_existing_path(path_buf, path_buf_size);
+            return source;
+        }
     }
 
     snprintf(path_buf, path_buf_size, "%s", original);
@@ -1578,6 +1663,16 @@ extern "C" Item js_require(Item specifier) {
         }
         if (js_is_cjs_file(path_buf)) js_cjs_note_child(resolved_spec, existing);
         return existing;
+    }
+
+    if (js_require_path_is_json(path_buf)) {
+        Item json_text = (Item){.item = s2it(heap_create_name(source, strlen(source)))};
+        Item parsed = js_json_parse(json_text);
+        mem_free(source);
+        if (js_check_exception()) return ItemNull;
+        js_module_register(resolved_spec, parsed);
+        js_cjs_note_child(resolved_spec, parsed);
+        return parsed;
     }
 
     Runtime* runtime = js_source_runtime;

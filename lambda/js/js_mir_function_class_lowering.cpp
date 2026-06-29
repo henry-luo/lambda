@@ -1817,11 +1817,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     int total_params = param_count + (has_captures ? 1 : 0);
     MIR_var_t* params = LAMBDA_ALLOCA(total_params, MIR_var_t);
     char** param_names_arr = LAMBDA_ALLOCA(total_params, char*);
+    const char* closure_env_param_name = "_js.env";
 
     int pi = 0;
     if (has_captures) {
         param_names_arr[pi] = LAMBDA_ALLOCA(128, char);
-        snprintf(param_names_arr[pi], 128, "_js_env");
+        snprintf(param_names_arr[pi], 128, "%s", closure_env_param_name);
         params[pi] = {MIR_T_I64, param_names_arr[pi], 0};
         pi++;
     }
@@ -2055,7 +2056,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
 
             if (has_captures) {
-                MIR_reg_t wrapper_env = MIR_reg(mt->ctx, "_js_env", func);
+                MIR_reg_t wrapper_env = MIR_reg(mt->ctx, closure_env_param_name, func);
                 char wrapper_self_capture_name[128] = {0};
                 if (fn->name) {
                     snprintf(wrapper_self_capture_name, sizeof(wrapper_self_capture_name), "_js_%.*s",
@@ -2139,7 +2140,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         // Store captured variables into env[0..capture_count-1]
         if (has_captures) {
-            MIR_reg_t outer_env = MIR_reg(mt->ctx, "_js_env", func);
+            MIR_reg_t outer_env = MIR_reg(mt->ctx, closure_env_param_name, func);
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 int src_slot = fc->captures[ci].scope_env_slot >= 0 ? fc->captures[ci].scope_env_slot : ci;
                 MIR_reg_t cap_val = jm_new_reg(mt, "gcap", MIR_T_I64);
@@ -2276,7 +2277,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         // Store captured variables into env[0..capture_count-1]
         if (has_captures) {
-            MIR_reg_t outer_env = MIR_reg(mt->ctx, "_js_env", func);
+            MIR_reg_t outer_env = MIR_reg(mt->ctx, closure_env_param_name, func);
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 int src_slot = fc->captures[ci].scope_env_slot >= 0 ? fc->captures[ci].scope_env_slot : ci;
                 MIR_reg_t cap_val = jm_new_reg(mt, "acap", MIR_T_I64);
@@ -2397,7 +2398,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 (int)fn->name->len, fn->name->chars);
         }
             if (has_captures) {
-            env_reg = MIR_reg(mt->ctx, "_js_env", func);
+            env_reg = MIR_reg(mt->ctx, closure_env_param_name, func);
             for (int i = 0; i < fc->capture_count; i++) {
                 // Skip captures that are MCONST_MODVAR (IIFE-promoted vars):
                 // For PER-CLOSURE envs (scope_env_slot < 0), the env holds stale
