@@ -14,20 +14,25 @@
         --muted: #64748b;
       }
       * { box-sizing: border-box; }
+      html, body { height: 100%; }
       body {
         margin: 0;
         font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
         color: var(--text);
         background: #eef2f7;
-        padding: 24px;
+        padding: 0;
+        overflow: hidden;     /* the document scrolls inside .rdt-surface, not the page */
       }
-      #root { max-width: 860px; margin: 0 auto; }
+      #root { height: 100vh; max-width: 900px; margin: 0 auto; }
 
       .rdt-shell {
-        border: 1px solid var(--border);
-        border-radius: 10px;
+        height: 100%;
+        display: flex;
+        flex-direction: column;   /* toolbar (fixed) | surface (scrolls) | status (fixed) */
+        border-left: 1px solid var(--border);
+        border-right: 1px solid var(--border);
         background: var(--bg);
-        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 8px 24px rgba(15, 23, 42, 0.06);
+        box-shadow: 0 0 24px rgba(15, 23, 42, 0.06);
         overflow: hidden;
         position: relative;   /* positioning context for the image-resize overlay */
       }
@@ -56,6 +61,7 @@
 
       /* Toolbar */
       .rdt-toolbar {
+        flex: 0 0 auto;       /* pinned at the top; never scrolls */
         display: flex;
         align-items: center;
         gap: 4px;
@@ -63,8 +69,6 @@
         padding: 8px 10px;
         background: var(--bar);
         border-bottom: 1px solid var(--border);
-        position: sticky;
-        top: 0;
         z-index: 5;
       }
       .rdt-btn {
@@ -98,12 +102,50 @@
         position: relative; width: 30px; height: 30px; border-radius: 6px;
         display: inline-flex; align-items: center; justify-content: center;
         font-weight: 700; cursor: pointer;
+        border: 1px solid transparent; background: transparent; color: var(--text);
       }
       .rdt-color:hover { background: #e2e8f0; }
       .rdt-color input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 
+      /* Color palette popover */
+      .rdt-color-wrap { position: relative; display: inline-flex; }
+      .rdt-color .rdt-a {
+        font-weight: 700; line-height: 11px;
+        border-bottom: 3px solid currentColor; padding-bottom: 1px;
+      }
+      .rdt-palette {
+        position: absolute; top: 34px; left: 0; z-index: 20;
+        background: #fff; border: 1px solid var(--border); border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+        padding: 8px;
+        display: grid; grid-template-columns: repeat(8, 18px); gap: 6px;
+        width: max-content;
+      }
+      .rdt-swatch {
+        width: 18px; height: 18px; border-radius: 4px; padding: 0; cursor: pointer;
+        border: 1px solid rgba(15, 23, 42, 0.18); transition: transform 0.08s;
+      }
+      .rdt-swatch:hover { transform: scale(1.18); }
+      .rdt-swatch.is-current { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .rdt-palette .rdt-custom {
+        grid-column: 1 / -1; display: flex; align-items: center; gap: 6px;
+        font-size: 12px; color: var(--muted); cursor: pointer; margin-top: 2px;
+      }
+      .rdt-palette .rdt-clear {
+        grid-column: 1 / -1; height: 26px; border-radius: 5px; cursor: pointer;
+        border: 1px solid var(--border); background: #fff; font-size: 12px; color: var(--text);
+      }
+      .rdt-palette .rdt-clear:hover { background: #f1f5f9; }
+
       /* Editing surface */
-      .rdt-surface { padding: 28px 32px; min-height: 360px; outline: none; line-height: 1.6; }
+      .rdt-surface {
+        flex: 1 1 auto;       /* fills the shell; this is the scroll region */
+        overflow-y: auto;
+        min-height: 0;        /* allow the flex child to shrink so it can scroll */
+        padding: 28px 32px;
+        outline: none;
+        line-height: 1.6;
+      }
       .rdt-surface:focus { outline: none; }
 
       /* Document content */
@@ -139,6 +181,7 @@
 
       /* Status bar */
       .rdt-status {
+        flex: 0 0 auto;       /* pinned at the bottom */
         display: flex; justify-content: space-between; gap: 16px;
         padding: 6px 12px; font-size: 12px; color: var(--muted);
         background: var(--bar); border-top: 1px solid var(--border);
