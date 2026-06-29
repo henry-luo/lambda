@@ -747,6 +747,51 @@ Results:
 - Reduced `Duplex.from(async function)` probe now emits the rejected promise as
   `error: myCustomError`.
 
+### 2026-06-29 Track A continuation: stream.compose lifecycle edges
+
+Continued the `stream.compose()` implementation without adding filename-specific
+branches:
+
+- Final async non-generator function stages are now treated as async sinks
+  instead of readable transforms. The returned composed stream keeps a hidden
+  pending state so `finished()` waits for the sink promise, and non-undefined
+  sink return values surface as `ERR_INVALID_RETURN_VALUE`.
+- Function-composed async-generator transforms no longer double-forward writes
+  or finalization into the same passthrough input, which removes the internal
+  `ERR_MULTIPLE_CALLBACK` path and lets single-stage and multi-stage generator
+  compose chains emit yielded data.
+- `Duplex.from({ readable, writable })` now preserves readable and writable
+  object-mode flags from the wrapped endpoints and suppresses duplicate internal
+  forwarded callbacks at the facade boundary.
+- Compose now forwards inter-stage errors, handles writable-only tail streams by
+  delaying outer finish until the tail finishes, and normalizes web
+  `TransformStream` objects through the existing web-readable/web-writable
+  bridge.
+
+Verification:
+
+```bash
+make build
+./lambda.exe js ref/node/test/parallel/test-stream-compose.js --no-log
+./lambda.exe js ref/node/test/parallel/test-stream-duplex-from.js --no-log
+./lambda.exe js ref/node/test/parallel/test-stream-duplexpair.js --no-log
+```
+
+Results:
+
+- `make build`: pass.
+- Direct official `test-stream-duplex-from.js`: still pass.
+- Direct official `test-stream-duplexpair.js`: still pass.
+- Reduced compose probes pass for async-generator transform data/end,
+  multi-stage generator `toArray()`, final async sink completion, invalid sink
+  return errors, object-mode propagation, web `TransformStream` tails, and
+  intermediate generator error propagation.
+- Direct official `test-stream-compose.js`: reduced to one remaining missed
+  `mustCall`. Diagnostic indexing identifies it as the first block's `end`
+  callback; that first block passes alone and with the first async-generator
+  block, so the remaining issue appears to be a full-file scheduling/ordering
+  interaction rather than the individual transform-chain semantics.
+
 ## Verification Policy
 
 Every implementation slice should finish with:
