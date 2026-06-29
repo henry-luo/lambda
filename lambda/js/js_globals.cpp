@@ -14757,17 +14757,91 @@ static bool js_message_port_is_object(Item value) {
     return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
 }
 
+static const char* js_message_port_listener_key(Item event) {
+    if (js_message_port_event_name_matches(event, "message")) return "__message_listeners__";
+    if (js_message_port_event_name_matches(event, "close")) return "__close_listeners__";
+    return NULL;
+}
+
+static void js_message_port_remove_listener_from_key(Item port, const char* key, Item handler) {
+    if (!key || get_type_id(handler) != LMD_TYPE_FUNC) return;
+    Item listeners = js_property_get(port, make_string_item(key));
+    if (get_type_id(listeners) != LMD_TYPE_ARRAY || !listeners.array) return;
+
+    int64_t len = js_array_length(listeners);
+    int64_t write = 0;
+    for (int64_t read = 0; read < len; read++) {
+        Item current = js_array_get_int(listeners, read);
+        if (current.item == handler.item) continue;
+        if (write != read) listeners.array->items[write] = current;
+        write++;
+    }
+    listeners.array->length = write;
+}
+
+static void js_message_port_emit_listener_array(Item target, const char* key, Item* args, int argc) {
+    Item listeners = js_property_get(target, make_string_item(key));
+    if (get_type_id(listeners) != LMD_TYPE_ARRAY) return;
+    int64_t count = js_array_length(listeners);
+    if (count <= 0) return;
+    Item* snapshot = (Item*)mem_alloc(sizeof(Item) * (size_t)count, MEM_CAT_JS_RUNTIME);
+    if (!snapshot) return;
+    for (int64_t i = 0; i < count; i++) {
+        snapshot[i] = js_array_get_int(listeners, i);
+    }
+    for (int64_t i = 0; i < count; i++) {
+        Item listener = snapshot[i];
+        if (get_type_id(listener) == LMD_TYPE_FUNC) {
+            js_call_function(listener, target, args, argc);
+        }
+    }
+    mem_free(snapshot);
+}
+
 static Item js_message_port_add_listener(Item event, Item handler) {
     Item self = js_get_this();
-    if (!js_message_port_event_name_matches(event, "message") || get_type_id(handler) != LMD_TYPE_FUNC) {
+    const char* key = js_message_port_listener_key(event);
+    if (!key || get_type_id(handler) != LMD_TYPE_FUNC) {
         return self;
     }
-    Item listeners = js_property_get(self, make_string_item("__message_listeners__"));
+    Item listeners = js_property_get(self, make_string_item(key));
     if (get_type_id(listeners) != LMD_TYPE_ARRAY) {
         listeners = js_array_new(0);
-        js_property_set(self, make_string_item("__message_listeners__"), listeners);
+        js_property_set(self, make_string_item(key), listeners);
     }
     js_array_push(listeners, handler);
+    return self;
+}
+
+static Item js_message_port_once_wrapper(Item env_item, Item arg1) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item self = js_get_this();
+    const char* key = js_message_port_listener_key(env[0]);
+    js_message_port_remove_listener_from_key(self, key, env[2]);
+    if (get_type_id(env[1]) == LMD_TYPE_FUNC) {
+        Item args[1] = {arg1};
+        return js_call_function(env[1], self, args, 1);
+    }
+    return make_js_undefined();
+}
+
+static Item js_message_port_add_once_listener(Item event, Item handler) {
+    Item self = js_get_this();
+    if (!js_message_port_listener_key(event) || get_type_id(handler) != LMD_TYPE_FUNC) {
+        return self;
+    }
+    Item* env = js_alloc_env(3);
+    env[0] = event;
+    env[1] = handler;
+    Item wrapper = js_new_closure((void*)js_message_port_once_wrapper, 1, env, 3);
+    env[2] = wrapper;
+    return js_message_port_add_listener(event, wrapper);
+}
+
+static Item js_message_port_remove_listener(Item event, Item handler) {
+    Item self = js_get_this();
+    js_message_port_remove_listener_from_key(self, js_message_port_listener_key(event), handler);
     return self;
 }
 
@@ -14784,17 +14858,8 @@ static Item js_message_port_deliver(Item env_item) {
         js_call_function(onmessage, target, args, 1);
     }
 
-    Item listeners = js_property_get(target, make_string_item("__message_listeners__"));
-    if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
-        int64_t count = js_array_length(listeners);
-        for (int64_t i = 0; i < count; i++) {
-            Item listener = js_array_get_int(listeners, i);
-            if (get_type_id(listener) == LMD_TYPE_FUNC) {
-                Item args[1] = {msg};
-                js_call_function(listener, target, args, 1);
-            }
-        }
-    }
+    Item args[1] = {msg};
+    js_message_port_emit_listener_array(target, "__message_listeners__", args, 1);
     return make_js_undefined();
 }
 
@@ -14831,7 +14896,10 @@ static Item js_message_port_postMessage(Item msg) {
 
 static Item js_message_port_close(Item callback) {
     Item self = js_get_this();
+    Item closed = js_property_get(self, make_string_item("__closed__"));
+    if (closed.item == ITEM_TRUE) return make_js_undefined();
     js_property_set(self, make_string_item("__closed__"), (Item){.item = ITEM_TRUE});
+    js_message_port_emit_listener_array(self, "__close_listeners__", NULL, 0);
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
         js_next_tick_enqueue(callback);
     }
@@ -14850,15 +14918,20 @@ extern "C" Item js_message_port_new(void) {
     js_property_set(port, make_string_item("onmessageerror"), ItemNull);
     js_property_set(port, make_string_item("__closed__"), (Item){.item = ITEM_FALSE});
     js_property_set(port, make_string_item("__message_listeners__"), js_array_new(0));
+    js_property_set(port, make_string_item("__close_listeners__"), js_array_new(0));
     // EventEmitter methods
     js_property_set(port, make_string_item("on"),
         js_new_function((void*)js_message_port_add_listener, 2));
     js_property_set(port, make_string_item("once"),
-        js_new_function((void*)js_message_port_add_listener, 2));
+        js_new_function((void*)js_message_port_add_once_listener, 2));
     js_property_set(port, make_string_item("addEventListener"),
         js_new_function((void*)js_message_port_add_listener, 2));
     js_property_set(port, make_string_item("removeEventListener"),
-        js_new_function((void*)js_mp_stub_noop, 2));
+        js_new_function((void*)js_message_port_remove_listener, 2));
+    js_property_set(port, make_string_item("removeListener"),
+        js_new_function((void*)js_message_port_remove_listener, 2));
+    js_property_set(port, make_string_item("off"),
+        js_new_function((void*)js_message_port_remove_listener, 2));
     js_property_set(port, make_string_item("start"),
         js_new_function((void*)js_mp_stub_noop, 0));
     js_property_set(port, make_string_item("ref"),

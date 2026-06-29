@@ -1209,7 +1209,56 @@ static bool js_require_path_has_known_extension(const char* path) {
            (len >= 3 && strcmp(path + len - 3, ".ls") == 0);
 }
 
-static char* js_require_read_resolved_path(char* path_buf, int path_buf_size) {
+static char* js_require_read_resolved_path_internal(char* path_buf, int path_buf_size,
+        bool allow_package_main);
+
+static char* js_require_read_package_main(char* path_buf, int path_buf_size,
+        const char* dir_path) {
+    if (!dir_path || !dir_path[0]) return NULL;
+
+    char package_path[512];
+    int dir_len = (int)strlen(dir_path);
+    if (dir_len + 14 >= (int)sizeof(package_path)) return NULL;
+    snprintf(package_path, sizeof(package_path), "%s/package.json", dir_path);
+
+    char* package_source = read_text_file(package_path);
+    if (!package_source) return NULL;
+
+    Item package_text = (Item){.item = s2it(heap_create_name(package_source, strlen(package_source)))};
+    Item package_obj = js_json_parse(package_text);
+    mem_free(package_source);
+    if (js_check_exception()) return NULL;
+
+    Item main_key = (Item){.item = s2it(heap_create_name("main", 4))};
+    Item main_value = js_property_get(package_obj, main_key);
+    if (js_check_exception() || get_type_id(main_value) != LMD_TYPE_STRING) return NULL;
+
+    String* main_str = it2s(main_value);
+    if (!main_str || main_str->len <= 0) return NULL;
+
+    char main_path[512];
+    if (main_str->chars[0] == '/') {
+        if (main_str->len >= (int64_t)sizeof(main_path)) return NULL;
+        snprintf(main_path, sizeof(main_path), "%.*s", (int)main_str->len, main_str->chars);
+    } else {
+        if (dir_len + 1 + main_str->len >= (int64_t)sizeof(main_path)) return NULL;
+        snprintf(main_path, sizeof(main_path), "%s/%.*s", dir_path, (int)main_str->len, main_str->chars);
+    }
+
+    char resolved_main[512];
+    snprintf(resolved_main, sizeof(resolved_main), "%s", main_path);
+    char* source = js_require_read_resolved_path_internal(resolved_main, (int)sizeof(resolved_main), false);
+    if (!source) return NULL;
+    if ((int)strlen(resolved_main) >= path_buf_size) {
+        mem_free(source);
+        return NULL;
+    }
+    snprintf(path_buf, path_buf_size, "%s", resolved_main);
+    return source;
+}
+
+static char* js_require_read_resolved_path_internal(char* path_buf, int path_buf_size,
+        bool allow_package_main) {
     char original[512];
     snprintf(original, sizeof(original), "%s", path_buf);
 
@@ -1231,6 +1280,11 @@ static char* js_require_read_resolved_path(char* path_buf, int path_buf_size) {
         path_buf[plen - 3] = '\0';
         plen -= 3;
     }
+    if (!has_node_prefix && allow_package_main) {
+        source = js_require_read_package_main(path_buf, path_buf_size, path_buf);
+        if (source) return source;
+        if (js_check_exception()) return NULL;
+    }
     if (plen + strlen("/index.js") < (size_t)path_buf_size) {
         strncat(path_buf, "/index.js", path_buf_size - strlen(path_buf) - 1);
         source = read_text_file(path_buf);
@@ -1239,6 +1293,10 @@ static char* js_require_read_resolved_path(char* path_buf, int path_buf_size) {
 
     snprintf(path_buf, path_buf_size, "%s", original);
     return NULL;
+}
+
+static char* js_require_read_resolved_path(char* path_buf, int path_buf_size) {
+    return js_require_read_resolved_path_internal(path_buf, path_buf_size, true);
 }
 
 static Item js_cjs_key(const char* name, int len) {
