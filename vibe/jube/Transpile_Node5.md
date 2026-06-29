@@ -659,6 +659,48 @@ Results:
   improvements (`test-stream-construct.js`, `test-stream-duplex-end.js`,
   `test-stream-transform-hwm0.js`).
 
+### 2026-06-29 Track A slice: stream duplex surface
+
+Continued the stream no-network surface slice:
+
+- Added `stream.duplexPair()` as two cross-wired `Duplex` endpoints. Each side
+  is a real `Duplex` instance, writes push into the peer readable side, `_final`
+  pushes EOF to the peer, and the existing writable machinery still owns cork,
+  uncork, write callbacks, and empty-byte-chunk handling.
+- Added a first structural `Duplex.from()` bridge for Node-style readable and
+  writable streams plus promise inputs. Objects with `{ readable, writable }`
+  are wrapped into a duplex facade; readable events feed the facade readable
+  side, facade writes feed the wrapped writable side, and promise fulfillment or
+  rejection maps to readable data/EOF or stream error.
+- Added an initial `stream.compose(...)` export that chains normalized streams
+  and returns a duplex wrapper over the first writable side and last readable
+  side. This removes the missing-API failure boundary, but the full compose
+  official test still has semantic `mustCall` gaps and remains a follow-up.
+
+Verification:
+
+```bash
+make build
+./lambda.exe js ref/node/test/parallel/test-stream-duplexpair.js --no-log
+./lambda.exe js ref/node/test/parallel/test-stream-duplex-from.js --no-log
+./lambda.exe js ref/node/test/parallel/test-stream-compose.js --no-log
+./test/test_node_gtest.exe --modules=stream --timeout=20000 --gtest_brief=1
+```
+
+Results:
+
+- Direct official `test-stream-duplexpair.js`: pass.
+- Direct official `test-stream-duplex-from.js`: advanced past the previous
+  missing `Duplex.from`/Promise boundary, but still fails on pending
+  `mustCall`s and leak reporting from later unsupported forms.
+- Direct official `test-stream-compose.js`: advanced past the previous missing
+  `stream.compose` export, but still fails on pending `mustCall`s.
+- Stream module sweep: 212 selected tests, 164 passed, 48 remaining failures,
+  0 crashes, 0 timeouts, 2 pre-existing baseline regressions still present
+  (`test-stream-destroy.js`, `test-stream-iter-from-sync.js`), and 4
+  improvements (`test-stream-construct.js`, `test-stream-duplex-end.js`,
+  `test-stream-duplexpair.js`, `test-stream-transform-hwm0.js`).
+
 ## Verification Policy
 
 Every implementation slice should finish with:
