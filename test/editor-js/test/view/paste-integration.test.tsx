@@ -3,8 +3,15 @@ import { act, render, cleanup } from '@testing-library/react'
 import { FullEditor } from '../../demo/full-editor.js'
 import { html5SubsetSchema } from '../../src/schemas/index.js'
 import { parseHtmlToDoc } from '../../src/view/html-parser.js'
+import { node, text } from '../../src/model/doc.js'
+import { pos, textSelection } from '../../src/model/source-pos.js'
 
 afterEach(() => cleanup())
+
+function toolbarBtn(container: HTMLElement, title: string): HTMLElement {
+  return Array.from(container.querySelectorAll('.rdt-toolbar button'))
+    .find(b => (b as HTMLElement).title === title) as HTMLElement
+}
 
 function firePaste(el: HTMLElement, html: string, text = '') {
   act(() => {
@@ -90,6 +97,22 @@ describe('demo/FullEditor — image drag / select', () => {
     const img = container.querySelector('img') as HTMLElement
     act(() => { img.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })) })
     expect(container.querySelector('.rdt-img-overlay')).not.toBeNull()
+  })
+})
+
+describe('demo/FullEditor — highlight active state', () => {
+  const caret = textSelection(pos([0, 0], 1), pos([0, 0], 1))
+
+  it('highlight button lights up when the caret is in highlighted text', () => {
+    const doc = node('doc', [node('p', [{ ...text('hi'), marks: { background: '#fef08a' } }])])
+    const { container } = render(<FullEditor doc={doc} schema={html5SubsetSchema} initialSelection={caret} />)
+    expect(toolbarBtn(container, 'Highlight').className).toContain('is-active')
+  })
+
+  it('highlight button is not active in plain text', () => {
+    const doc = node('doc', [node('p', [text('hi')])])
+    const { container } = render(<FullEditor doc={doc} schema={html5SubsetSchema} initialSelection={caret} />)
+    expect(toolbarBtn(container, 'Highlight').className).not.toContain('is-active')
   })
 })
 

@@ -914,7 +914,7 @@ function Toolbar(p: ToolbarProps) {
         onPick={p.onColor}
         onClear={p.onClearColor}
       />
-      <Btn onClick={() => p.onMark('background', '#fef08a')} title="Highlight">🖍️</Btn>
+      <Btn active={'background' in p.marks} onClick={() => p.onMark('background', '#fef08a')} title="Highlight">🖍️</Btn>
 
       <span className="rdt-sep" />
 
