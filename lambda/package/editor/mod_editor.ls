@@ -54,6 +54,7 @@ pub fn edit_cmd_add_table_column() => {name: 'add_table_column'}
 pub fn edit_cmd_delete_table_column() => {name: 'delete_table_column'}
 pub fn edit_cmd_delete_backward() => {name: 'delete_backward'}
 pub fn edit_cmd_delete_forward() => {name: 'delete_forward'}
+pub fn edit_cmd_delete_multi_node() => {name: 'delete_multi_node'}
 pub fn edit_cmd_insert_line_break() => {name: 'insert_line_break'}
 pub fn edit_cmd_toggle_mark(mark, value) => {name: 'toggle_mark', mark: mark, value: value}
 pub fn edit_cmd_wrap_list(kind) => {name: 'wrap_list', kind: kind}
@@ -83,6 +84,7 @@ fn command_tx(editor, command) {
   else if (command.name == 'delete_table_column') { cmd_delete_table_column(editor) }
   else if (command.name == 'delete_backward') { cmd_delete_backward(editor) }
   else if (command.name == 'delete_forward') { cmd_delete_forward(editor) }
+  else if (command.name == 'delete_multi_node') { cmd_delete_multi_node(editor) }
   else if (command.name == 'insert_line_break') { cmd_insert_line_break(editor) }
   else if (command.name == 'toggle_mark') { cmd_toggle_mark(editor, command.mark, command.value) }
   else if (command.name == 'wrap_list') { cmd_wrap_list(editor, command.kind) }

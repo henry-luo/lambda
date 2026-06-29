@@ -5,7 +5,7 @@
 **Builds on:** [Stage 4 — high-level drawing integration](Radiant_Editor_Stage4.md) (the `<drawing>` block embed, the flow/canvas mode model, selection bridging, and the "zero new step kinds" rule), [Reactive_UI.md](Reactive_UI.md).
 **Goal:** a full **draw.io-class** diagram editor embedded in the flow document — shapes, connectors with real routing, ports, groups, layers, snap/align, clipboard, and (roadmap) stencils, edgeless canvas, and collab.
 
-> **Section numbering.** The dense internal cross-references (§3.2, §5.1, §9.3, …) are preserved from the original combined draft, so the detailed sections keep their original numbers (§2, §3, §5–§17). The high-level integration overview — TL;DR, integration scope, and the **flow/canvas mode model** (Stage 4 §2) — lives in [Stage 4](Radiant_Editor_Stage4.md); references below to "§4" point to **Stage 4 §2**.
+> **Section numbering.** The dense internal cross-references (§3.2, §5.1, §9.3, …) are preserved from the original combined draft. The high-level integration overview — TL;DR, integration scope, and the core **selection model** (Stage 4 §2, including the `multi-node` variant) — lives in [Stage 4](Radiant_Editor_Stage4.md). The **mode model, focus, and live-session glue** (formerly Stage 4 §2.3-§2.4) now live in **§4** of this document.
 
 ---
 
@@ -349,6 +349,42 @@ Mark already supports `id:` as an arbitrary attribute, no parser changes needed.
 
 ---
 
+## 4. Mode Model, Focus & Live-Session Integration
+
+This section is **live-session glue**: it has no headless oracle and only does anything once a drawing surface exists, which is why it lives in Stage 5 rather than the Stage-4 integration overview. It realises the third ("event/render") seam of [Stage 4 §3](Radiant_Editor_Stage4.md#3-integration-extension-points-high-level).
+
+### 4.1 The mode model
+
+Two modes, owned by the editor session, stored in `editor.mode`:
+
+| Mode | Active when | Effects |
+|---|---|---|
+| `'flow` | No drawing focused | Text caret visible; `selection` is `text/node/all` over flow doc; key bindings = text editor's |
+| `'canvas` | A drawing is focused (clicked into, or auto-focused on insert) | Text caret hidden; `selection` is `node`/`multi-node` over drawing-objects; key bindings = canvas tool palette; `editor.tool` is non-null |
+
+Transitions:
+
+```
+flow ──(click inside <drawing>)──→ canvas   (auto-selects empty / the clicked shape)
+canvas ──(click outside <drawing>)──→ flow
+canvas ──(Esc twice)──→ flow
+canvas ──(focus another drawing)──→ canvas (mode stays; selection moves)
+```
+
+Mode entry calls `mod_editor.set_mode('canvas', drawing_id)` which:
+1. Activates the configured tool palette (default: select tool).
+2. Hides the flow text caret.
+3. Sets `editor.focused_drawing = drawing_id` (used by hit-test scoping).
+4. Fires `'mode-change'` event to subscribers (toolbar UI re-renders).
+
+Mode exit reverses; final selection inside the canvas is **retained** in the state store so re-entering the same drawing restores it (per Reactive_UI §5A.2's state-key model — `(drawing_id, "select_tool", "selection")`). The `multi_node_selection` variant the canvas mode uses is already implemented in the core model ([Stage 4 §2.2](Radiant_Editor_Stage4.md)).
+
+### 4.2 Focus & the `data-drawing-focus` annotation
+
+Reactive_UI §7 already plans `data-editable: ~` on outputs of `edit` templates. We extend the convention: the `<drawing>` render outputs `data-drawing-focus: ~.id` on its outermost SVG node. The DOM dispatch hook in `event.cpp` walks up from a click target, and when it sees `data-drawing-focus`, it routes the event into the canvas mode pipeline (tool state machine) rather than the text pipeline. The geometric hit-test it then runs is §7; the C bridge is §13.3.
+
+---
+
 ## 5. Step Algebra and Commands
 
 ### 5.1 Zero new step kinds — design rule
@@ -403,8 +439,8 @@ A **command** is `(state, dispatch?) -> bool` (the PM pattern — see `mod_comma
 | `cmd_delete_selection()` | One `replace` per selected shape; handles dangling connectors (re-anchor to last known free coord) |
 | `cmd_duplicate_selection()` | Deep-clone with new ids, offset by (10,10) |
 | `cmd_paste_shapes_at(pos, slice)` | Insert a slice (parsed from clipboard) at pos with id-remap |
-| `cmd_enter_canvas_mode(drawing_id)` | Mode switch (Stage 4 §2.3) |
-| `cmd_exit_canvas_mode()` | Mode switch (Stage 4 §2.3) |
+| `cmd_enter_canvas_mode(drawing_id)` | Mode switch (§4.1) |
+| `cmd_exit_canvas_mode()` | Mode switch (§4.1) |
 | `cmd_set_tool(name)` | Activate tool (§6) |
 
 All commands are pure dispatch: they construct a `Transaction` (a list of steps + a target selection) and call `editor.dispatch(tx)`. Dry-run mode (`dispatch=null`) is used by toolbars to gray out unapplicable buttons — the standard PM idiom.

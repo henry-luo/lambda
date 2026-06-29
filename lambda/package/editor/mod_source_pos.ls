@@ -27,6 +27,20 @@ pub fn node_selection(path) =>
 
 pub fn all_selection() => {kind: 'all'}
 
+// Multi-node selection — shift-click / lasso over several drawing-objects (or
+// blocks). Paths are stored in document order; consumed by the Stage-5 drawing
+// layer. (Port of multiNodeSelection in test/editor-js/src/model/source-pos.ts.)
+pub fn multi_node_selection(paths) =>
+  {kind: 'multi-node', paths: paths}
+
+// The node paths a selection targets: [path] for a node selection, the path
+// list for a multi-node selection, [] otherwise.
+pub fn selection_paths(sel) {
+  if (sel.kind == 'node') { [sel.path] }
+  else if (sel.kind == 'multi-node') { sel.paths }
+  else { [] }
+}
+
 // ---------------------------------------------------------------------------
 // Path comparison
 // ---------------------------------------------------------------------------
@@ -235,11 +249,23 @@ fn selection_text_across_leaves(doc, lo, hi) {
 // Text extraction for a TextSelection. Same-leaf selections return the direct
 // substring; cross-leaf selections concatenate all string leaves in document
 // order between the endpoints.
+fn multinode_text_at(doc, paths, i, n, acc) {
+  if (i >= n) { acc }
+  else {
+    let r = resolve_pos(doc, pos(paths[i], 0))
+    let t = if (r.found and r.node != null) { node_text(r.node) } else { "" }
+    multinode_text_at(doc, paths, i + 1, n, acc ++ t)
+  }
+}
+
 pub fn selection_to_string(doc, sel) {
   if (sel.kind == 'all') { node_text(doc) }
   else if (sel.kind == 'node') {
     let r = resolve_pos(doc, pos(sel.path, 0))
     if (not r.found) { "" } else { node_text(r.node) }
+  }
+  else if (sel.kind == 'multi-node') {
+    multinode_text_at(doc, sel.paths, 0, len(sel.paths), "")
   }
   else if (sel.kind == 'text') {
     let lo = pos_min(sel.anchor, sel.head)
