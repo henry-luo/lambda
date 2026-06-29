@@ -46,13 +46,10 @@ static const int64_t JS_BUFFER_MAX_STRING_LENGTH = (1LL << 28) - 16;
 
 static uint8_t* buffer_data(Item buf, int* out_len) {
     if (!js_is_typed_array(buf)) { *out_len = 0; return NULL; }
-    // use js_get_typed_array_ptr to handle both original (data_cap==0)
-    // and upgraded layouts (after Object.defineProperty adds properties)
-    Map* m = buf.map;
-    JsTypedArray* ta = js_get_typed_array_ptr(m);
-    if (!ta || !ta->data) { *out_len = 0; return NULL; }
-    *out_len = ta->byte_length;
-    return (uint8_t*)ta->data;
+    uint8_t* data = (uint8_t*)js_typed_array_current_data_ptr(buf);
+    if (!data) { *out_len = 0; return NULL; }
+    *out_len = js_typed_array_byte_length(buf);
+    return data;
 }
 
 // Helper: create a Buffer (Uint8Array)
@@ -797,13 +794,11 @@ static Item js_buffer_has_instance(Item value) {
 // ─── Buffer.isUtf8(input) ──────────────────────────────────────────────────
 static Item js_buffer_isUtf8(Item input) {
     if (!js_is_typed_array(input)) return (Item){.item = b2it(false)};
-    Map* m = input.map;
-    JsTypedArray* ta = (JsTypedArray*)m->data;
-    if (!ta || !ta->data) return (Item){.item = b2it(false)};
+    const uint8_t* bytes = (const uint8_t*)js_typed_array_current_data_ptr(input);
+    if (!bytes) return (Item){.item = b2it(false)};
 
     // Validate UTF-8 byte sequence
-    const uint8_t* bytes = (const uint8_t*)ta->data;
-    size_t len = ta->byte_length;
+    size_t len = (size_t)js_typed_array_byte_length(input);
     size_t i = 0;
     while (i < len) {
         uint8_t b = bytes[i];
@@ -836,13 +831,12 @@ static Item js_buffer_isUtf8(Item input) {
 // ─── Buffer.isAscii(input) ─────────────────────────────────────────────────
 static Item js_buffer_isAscii(Item input) {
     if (!js_is_typed_array(input)) return (Item){.item = b2it(false)};
-    Map* m = input.map;
-    JsTypedArray* ta = (JsTypedArray*)m->data;
-    if (!ta || !ta->data) return (Item){.item = b2it(true)};
-    if (ta->byte_length == 0) return (Item){.item = b2it(true)};
+    int byte_length = js_typed_array_byte_length(input);
+    const uint8_t* bytes = (const uint8_t*)js_typed_array_current_data_ptr(input);
+    if (!bytes) return (Item){.item = b2it(true)};
+    if (byte_length == 0) return (Item){.item = b2it(true)};
 
-    const uint8_t* bytes = (const uint8_t*)ta->data;
-    for (int i = 0; i < ta->byte_length; i++) {
+    for (int i = 0; i < byte_length; i++) {
         if (bytes[i] > 0x7F) return (Item){.item = b2it(false)};
     }
     return (Item){.item = b2it(true)};
@@ -852,8 +846,9 @@ static Item js_buffer_isAscii(Item input) {
 static Item js_buffer_copyBytesFrom(Item view, Item offset_item, Item length_item) {
     if (!js_is_typed_array(view)) return ItemNull;
     Map* m = view.map;
-    JsTypedArray* ta = (JsTypedArray*)m->data;
-    if (!ta || !ta->data) return ItemNull;
+    JsTypedArray* ta = js_get_typed_array_ptr(m);
+    const uint8_t* src_data = (const uint8_t*)js_typed_array_current_data_ptr(view);
+    if (!ta || !src_data) return ItemNull;
 
     int64_t offset = 0;
     if (get_type_id(offset_item) == LMD_TYPE_INT) offset = it2i(offset_item);
@@ -869,7 +864,8 @@ static Item js_buffer_copyBytesFrom(Item view, Item offset_item, Item length_ite
         default: break;
     }
 
-    int64_t byte_len = (int64_t)ta->byte_length - offset * elem_size;
+    int64_t view_byte_length = js_typed_array_byte_length(view);
+    int64_t byte_len = view_byte_length - offset * elem_size;
     if (get_type_id(length_item) == LMD_TYPE_INT) {
         int64_t req = it2i(length_item) * elem_size;
         if (req < byte_len) byte_len = req;
@@ -880,9 +876,9 @@ static Item js_buffer_copyBytesFrom(Item view, Item offset_item, Item length_ite
     extern Item js_buffer_alloc(Item size, Item fill);
     Item result = js_buffer_alloc((Item){.item = i2it(byte_len)}, ItemNull);
     if (js_is_typed_array(result) && byte_len > 0) {
-        JsTypedArray* dst_ta = (JsTypedArray*)result.map->data;
-        if (dst_ta && dst_ta->data && src_offset + byte_len <= (int64_t)ta->byte_length) {
-            memcpy(dst_ta->data, (const uint8_t*)ta->data + src_offset, byte_len);
+        uint8_t* dst_data = (uint8_t*)js_typed_array_current_data_ptr(result);
+        if (dst_data && src_offset + byte_len <= view_byte_length) {
+            memcpy(dst_data, src_data + src_offset, byte_len);
         }
     }
     return result;

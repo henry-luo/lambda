@@ -399,22 +399,22 @@ static bool fs_parse_access_mode(Item mode_item, bool has_mode, int* out_mode) {
 // Helper: get raw data pointer and length from a Buffer (typed array) Item
 static uint8_t* buffer_data(Item buf, int* out_len) {
     if (!js_is_typed_array(buf)) { *out_len = 0; return NULL; }
-    Map* m = buf.map;
-    JsTypedArray* ta = (JsTypedArray*)m->data;
-    if (!ta || !ta->data) { *out_len = 0; return NULL; }
-    *out_len = ta->byte_length;
-    return (uint8_t*)ta->data;
+    uint8_t* data = (uint8_t*)js_typed_array_current_data_ptr(buf);
+    if (!data) { *out_len = 0; return NULL; }
+    *out_len = js_typed_array_byte_length(buf);
+    return data;
 }
 
 static Item fs_buffer_from_bytes(const char* data, int len) {
     if (len < 0) len = 0;
     Item chunk = js_typed_array_new(JS_TYPED_UINT8, len);
     if (js_is_typed_array(chunk)) {
-        JsTypedArray* ta = (JsTypedArray*)chunk.map->data;
+        JsTypedArray* ta = js_get_typed_array_ptr(chunk.map);
         if (ta) {
             ta->is_buffer = true;
-            if (ta->data && data && len > 0) {
-                memcpy(ta->data, data, (size_t)len);
+            uint8_t* dst = (uint8_t*)js_typed_array_current_data_ptr(chunk);
+            if (dst && data && len > 0) {
+                memcpy(dst, data, (size_t)len);
             }
         }
     }

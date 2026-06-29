@@ -3946,14 +3946,14 @@ static Item structured_clone_impl(Item value, int depth) {
     if (js_is_typed_array(value)) {
         Map* m = value.map;
         JsTypedArray* ta = js_get_typed_array_ptr(m);
-        if (ta && ta->data && ta->byte_length > 0) {
+        int len = js_typed_array_length(value);
+        int byte_length = js_typed_array_byte_length(value);
+        const void* src_data = js_typed_array_current_data_ptr(value);
+        if (ta && src_data && byte_length > 0) {
             extern Item js_typed_array_new(int element_type, int length);
-            Item clone = js_typed_array_new(ta->element_type, ta->byte_length);
-            Map* cm = clone.map;
-            JsTypedArray* cta = js_get_typed_array_ptr(cm);
-            if (cta && cta->data) {
-                memcpy(cta->data, ta->data, ta->byte_length);
-            }
+            Item clone = js_typed_array_new(ta->element_type, len);
+            void* dst_data = js_typed_array_current_data_ptr(clone);
+            if (dst_data) memcpy(dst_data, src_data, (size_t)byte_length);
             return clone;
         }
         return value;
@@ -5129,43 +5129,16 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
 
     // Handle TypedArray (Uint8Array, Int32Array, etc.)
     if (type == LMD_TYPE_MAP && js_is_typed_array(arr_item)) {
-        JsTypedArray* ta = js_get_typed_array_ptr(arr_item.map);
-        int len = ta->length;
+        int len = js_typed_array_length(arr_item);
         if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
         char* buf = (char*)mem_alloc(len * 4 + 1, MEM_CAT_JS_RUNTIME);
         int pos = 0;
         for (int i = 0; i < len; i++) {
-            Item code_item = (Item){0};
-            switch (ta->element_type) {
-            case JS_TYPED_UINT8:   code_item = (Item){.item = i2it(((uint8_t*)ta->data)[i])}; break;
-            case JS_TYPED_INT8:    code_item = (Item){.item = i2it(((int8_t*)ta->data)[i])}; break;
-            case JS_TYPED_UINT8_CLAMPED: code_item = (Item){.item = i2it(((uint8_t*)ta->data)[i])}; break;
-            case JS_TYPED_UINT16:  code_item = (Item){.item = i2it(((uint16_t*)ta->data)[i])}; break;
-            case JS_TYPED_INT16:   code_item = (Item){.item = i2it(((int16_t*)ta->data)[i])}; break;
-            case JS_TYPED_UINT32:  code_item = (Item){.item = i2it((int64_t)((uint32_t*)ta->data)[i])}; break;
-            case JS_TYPED_INT32:   code_item = (Item){.item = i2it(((int32_t*)ta->data)[i])}; break;
-            case JS_TYPED_FLOAT32: code_item = push_d((double)((float*)ta->data)[i]); break;
-            case JS_TYPED_FLOAT64: code_item = push_d(((double*)ta->data)[i]); break;
-            case JS_TYPED_BIGINT64: code_item = (Item){.item = i2it(((int64_t*)ta->data)[i])}; break;
-            case JS_TYPED_BIGUINT64: code_item = (Item){.item = i2it((int64_t)((uint64_t*)ta->data)[i])}; break;
-            }
+            Item code_item = js_typed_array_get(arr_item, (Item){.item = i2it(i)});
             int code = js_from_char_code_to_uint16(code_item);
             // combine adjacent surrogate pairs into a single supplementary codepoint
             if (code >= 0xD800 && code <= 0xDBFF && i + 1 < len) {
-                Item lo_item = (Item){0};
-                switch (ta->element_type) {
-                case JS_TYPED_UINT8:   lo_item = (Item){.item = i2it(((uint8_t*)ta->data)[i+1])}; break;
-                case JS_TYPED_INT8:    lo_item = (Item){.item = i2it(((int8_t*)ta->data)[i+1])}; break;
-                case JS_TYPED_UINT8_CLAMPED: lo_item = (Item){.item = i2it(((uint8_t*)ta->data)[i+1])}; break;
-                case JS_TYPED_UINT16:  lo_item = (Item){.item = i2it(((uint16_t*)ta->data)[i+1])}; break;
-                case JS_TYPED_INT16:   lo_item = (Item){.item = i2it(((int16_t*)ta->data)[i+1])}; break;
-                case JS_TYPED_UINT32:  lo_item = (Item){.item = i2it((int64_t)((uint32_t*)ta->data)[i+1])}; break;
-                case JS_TYPED_INT32:   lo_item = (Item){.item = i2it(((int32_t*)ta->data)[i+1])}; break;
-                case JS_TYPED_FLOAT32: lo_item = push_d((double)((float*)ta->data)[i+1]); break;
-                case JS_TYPED_FLOAT64: lo_item = push_d(((double*)ta->data)[i+1]); break;
-                case JS_TYPED_BIGINT64: lo_item = (Item){.item = i2it(((int64_t*)ta->data)[i+1])}; break;
-                case JS_TYPED_BIGUINT64: lo_item = (Item){.item = i2it((int64_t)((uint64_t*)ta->data)[i+1])}; break;
-                }
+                Item lo_item = js_typed_array_get(arr_item, (Item){.item = i2it(i + 1)});
                 int lo = js_from_char_code_to_uint16(lo_item);
                 if (lo >= 0xDC00 && lo <= 0xDFFF) {
                     int cp = 0x10000 + ((code - 0xD800) << 10) + (lo - 0xDC00);
@@ -12219,8 +12192,7 @@ extern "C" Item js_array_from(Item iterable) {
     }
     // TypedArray: convert each element to a JS number in a regular array
     if (js_is_typed_array(iterable)) {
-        JsTypedArray* ta = js_get_typed_array_ptr(iterable.map);
-        int len = ta->length;
+        int len = js_typed_array_length(iterable);
         Item result = js_array_new(0);
         for (int i = 0; i < len; i++) {
             Item idx = (Item){.item = i2it(i)};
