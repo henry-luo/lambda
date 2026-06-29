@@ -1212,6 +1212,10 @@ extern "C" {
     double array_num_get_number_value(ArrayNum *arr, int64_t index);
     void array_num_set_int64_value(ArrayNum *arr, int64_t index, int64_t value);
     void array_num_set_double_value(ArrayNum *arr, int64_t index, double value);
+    bool array_num_copy_same_type_bytes(ArrayNum *dst, int64_t dst_index,
+        ArrayNum *src, int64_t src_index, int64_t count);
+    bool array_num_reverse_bytes(ArrayNum *arr);
+    bool array_num_copy_reversed_bytes(ArrayNum *dst, ArrayNum *src);
 
     Map* map(int64_t type_index);
     Map* map_with_data(int64_t type_index);

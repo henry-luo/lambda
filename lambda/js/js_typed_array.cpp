@@ -397,6 +397,13 @@ static bool js_typed_array_arraynum_view_matches(JsTypedArray* ta, const char* d
         index >= 0 && index < ta->view->length;
 }
 
+static bool js_typed_array_arraynum_range_matches(JsTypedArray* ta, const char* data,
+                                                  int index, int count) {
+    return ta && !ta->is_buffer && ta->view && ta->view->data == (void*)data &&
+        index >= 0 && count >= 0 && index <= ta->view->length &&
+        count <= ta->view->length - index;
+}
+
 static bool js_typed_array_try_raw_set_same_type(JsTypedArray* dst, JsTypedArray* src, int offset) {
     if (!js_typed_array_raw_fast_enabled()) return false;
     if (!dst || !src || dst->element_type != src->element_type) return false;
@@ -407,9 +414,15 @@ static bool js_typed_array_try_raw_set_same_type(JsTypedArray* dst, JsTypedArray
     int dst_len = js_typed_array_current_length(dst);
     if (offset < 0 || (int64_t)offset + (int64_t)src_len > (int64_t)dst_len) return false;
 
+    js_typed_array_refresh_arraynum_view(src);
+    js_typed_array_refresh_arraynum_view(dst);
     char* src_data = (char*)js_typed_array_current_data(src);
     char* dst_data = (char*)js_typed_array_current_data(dst);
     if (!src_data || !dst_data) return false;
+    if (js_typed_array_arraynum_range_matches(src, src_data, 0, src_len) &&
+        js_typed_array_arraynum_range_matches(dst, dst_data, offset, src_len)) {
+        return array_num_copy_same_type_bytes(dst->view, offset, src->view, 0, src_len);
+    }
 
     int elem_size = typed_array_element_size(src->element_type);
     size_t byte_count = (size_t)src_len * (size_t)elem_size;
@@ -650,9 +663,15 @@ extern "C" bool js_typed_array_raw_copy_same_type(Item dst_item, Item src_item) 
     int len = js_typed_array_current_length(src);
     if (len != js_typed_array_current_length(dst)) return false;
     if (len <= 0) return true;
+    js_typed_array_refresh_arraynum_view(src);
+    js_typed_array_refresh_arraynum_view(dst);
     char* src_data = (char*)js_typed_array_current_data(src);
     char* dst_data = (char*)js_typed_array_current_data(dst);
     if (!src_data || !dst_data) return false;
+    if (js_typed_array_arraynum_range_matches(src, src_data, 0, len) &&
+        js_typed_array_arraynum_range_matches(dst, dst_data, 0, len)) {
+        return array_num_copy_same_type_bytes(dst->view, 0, src->view, 0, len);
+    }
     int elem_size = typed_array_element_size(src->element_type);
     memcpy(dst_data, src_data, (size_t)len * (size_t)elem_size);
     return true;
@@ -665,8 +684,12 @@ extern "C" bool js_typed_array_raw_reverse(Item ta_item) {
     if (!ta || js_typed_array_is_out_of_bounds(ta)) return false;
     int len = js_typed_array_current_length(ta);
     if (len <= 1) return true;
+    js_typed_array_refresh_arraynum_view(ta);
     char* data = (char*)js_typed_array_current_data(ta);
     if (!data) return false;
+    if (js_typed_array_arraynum_range_matches(ta, data, 0, len)) {
+        return array_num_reverse_bytes(ta->view);
+    }
     int elem_size = typed_array_element_size(ta->element_type);
     char temp[8];
     for (int i = 0, j = len - 1; i < j; i++, j--) {
@@ -689,9 +712,15 @@ extern "C" bool js_typed_array_raw_copy_reversed(Item dst_item, Item src_item) {
     int len = js_typed_array_current_length(src);
     if (len != js_typed_array_current_length(dst)) return false;
     if (len <= 0) return true;
+    js_typed_array_refresh_arraynum_view(src);
+    js_typed_array_refresh_arraynum_view(dst);
     char* src_data = (char*)js_typed_array_current_data(src);
     char* dst_data = (char*)js_typed_array_current_data(dst);
     if (!src_data || !dst_data) return false;
+    if (js_typed_array_arraynum_range_matches(src, src_data, 0, len) &&
+        js_typed_array_arraynum_range_matches(dst, dst_data, 0, len)) {
+        return array_num_copy_reversed_bytes(dst->view, src->view);
+    }
     int elem_size = typed_array_element_size(src->element_type);
     for (int i = 0, j = len - 1; i < len; i++, j--) {
         memcpy(dst_data + (size_t)i * (size_t)elem_size,
@@ -2786,10 +2815,16 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
         int elem_size = typed_array_element_size(ta->element_type);
         int count_bytes = new_length * elem_size;
         int source_byte_length = js_typed_array_current_byte_length(ta);
+        js_typed_array_refresh_arraynum_view(ta);
+        js_typed_array_refresh_arraynum_view(rta);
         char* src_data = (char*)js_typed_array_current_data(ta);
         char* dst_data = (char*)js_typed_array_current_data(rta);
         int src_start = start * elem_size;
-        if (src_data && dst_data && ta->buffer && rta->buffer && ta->buffer == rta->buffer) {
+        if (src_data && dst_data &&
+            js_typed_array_arraynum_range_matches(ta, src_data, start, new_length) &&
+            js_typed_array_arraynum_range_matches(rta, dst_data, 0, new_length)) {
+            array_num_copy_same_type_bytes(rta->view, 0, ta->view, start, new_length);
+        } else if (src_data && dst_data && ta->buffer && rta->buffer && ta->buffer == rta->buffer) {
             for (int i = 0; i < count_bytes; i++) {
                 int src_index = src_start + i;
                 dst_data[i] = (src_index >= 0 && src_index < source_byte_length) ? src_data[src_index] : 0;
