@@ -1931,6 +1931,9 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                         nt_proto_type == LMD_TYPE_ARRAY || nt_proto_type == LMD_TYPE_ELEMENT) {
                         js_set_prototype(result, nt_proto);
                     }
+                    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+                    js_property_set(result, ctor_key, effective_new_target);
+                    js_mark_non_enumerable(result, ctor_key);
                 }
                 return result;
             }
@@ -30036,7 +30039,6 @@ static Item js_promise_default_constructor(void) {
 
 static Item js_promise_species_constructor(Item promise) {
     Item default_constructor = js_promise_default_constructor();
-    if (js_get_promise(promise)) return default_constructor;
     Item constructor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
     Item constructor = js_property_get(promise, constructor_key);
     if (js_check_exception()) return ItemNull;
@@ -30121,16 +30123,27 @@ static Item js_promise_make_finally_wrapper(void* fn_ptr, Item on_finally, Item 
     return bound;
 }
 
+static bool js_promise_capability_slot_is_undefined(Item value) {
+    return value.item == ItemNull.item || value.item == ItemError.item ||
+           value.item == ITEM_JS_UNDEFINED || get_type_id(value) == LMD_TYPE_UNDEFINED;
+}
+
+static Item js_promise_capability_normalize_arg(Item value) {
+    return js_promise_capability_slot_is_undefined(value) ? make_js_undefined() : value;
+}
+
 // NewPromiseCapability executor. Bound arg: holder object.
 static Item js_promise_capability_executor(Item holder, Item resolve, Item reject) {
+    resolve = js_promise_capability_normalize_arg(resolve);
+    reject = js_promise_capability_normalize_arg(reject);
     Item resolve_key = (Item){.item = s2it(heap_create_name("resolve", 7))};
     Item reject_key = (Item){.item = s2it(heap_create_name("reject", 6))};
     Item existing_resolve = js_property_get(holder, resolve_key);
-    if (get_type_id(existing_resolve) != LMD_TYPE_UNDEFINED) {
+    if (!js_promise_capability_slot_is_undefined(existing_resolve)) {
         return js_throw_type_error("Promise capability executor already called");
     }
     Item existing_reject = js_property_get(holder, reject_key);
-    if (get_type_id(existing_reject) != LMD_TYPE_UNDEFINED) {
+    if (!js_promise_capability_slot_is_undefined(existing_reject)) {
         return js_throw_type_error("Promise capability executor already called");
     }
     js_property_set(holder, resolve_key, resolve);
