@@ -56,8 +56,10 @@ Stage 4 is the **rich-text editor** plus the **contract** by which a drawing bec
 |---|---|
 | Rich-text editing model, steps, transactions, history, commands | Stages 1-3 |
 | The `<drawing>` block as an **atomic, focus-switching embed** in the flow doc | **Stage 4 (this doc)** |
-| Flow ↔ canvas **mode model**, selection bridging, focus annotation | **Stage 4 (this doc)** |
-| The "reuse the existing transaction algebra / zero new step kinds" principle | **Stage 4 (this doc)** — stated; mechanics in Stage 5 |
+| Flow ↔ canvas **mode** — high-level overview | **Stage 4 (this doc, §0)** |
+| **Mode session API** (`set_mode`, `focused_drawing`) + `data-drawing-focus` DOM-bridge walk | [Stage 5](Radiant_Editor_Stage5.md) §4 (live-session glue) |
+| Selection model — `node` / **`multi-node`** variants | **Stage 4 (this doc, §2)** |
+| The "reuse the existing transaction algebra / zero new step kinds" principle | **Stage 4 (this doc, §3)** — stated; mechanics in Stage 5 |
 | Drawing **data model** (shape/connector/group/text-frame records), schema | [Stage 5](Radiant_Editor_Stage5.md) §3 |
 | **Tools**, **hit-test**, **routing**, **snap**, **clipboard**, **render templates** | [Stage 5](Radiant_Editor_Stage5.md) §6-§11 |
 | Drawing **module plan**, **test suite**, **phased implementation** | [Stage 5](Radiant_Editor_Stage5.md) §13-§15 |
@@ -84,7 +86,9 @@ The entire *drawing editor* — shape primitives, connectors and routing, tools,
 
 ---
 
-## 2. Position, Selection, and the Mode Model
+## 2. Position and Selection
+
+> The **mode model** (flow ↔ canvas), the `set_mode`/`focused_drawing` session API, and the `data-drawing-focus` DOM-bridge walk are **live-session glue** with no headless oracle — they only do anything once a drawing surface exists. They are specified and implemented in **[Stage 5 §4](Radiant_Editor_Stage5.md)**. Stage 4 keeps the high-level mode-model overview in §0 (TL;DR) and the integration seams in §3.
 
 ### 2.1 `SourcePos` inside drawings
 
@@ -106,35 +110,7 @@ For shift-click and lasso multi-select. Paths are stored in document order. All 
 
 Existing variants (`text`, `node`, `all`) all continue to work; `node` selection on a `<drawing>` block is what flow-mode uses (the whole drawing as one selectable unit, like an image today).
 
-### 2.3 The mode model
-
-Two modes, owned by the editor session, stored in `editor.mode`:
-
-| Mode | Active when | Effects |
-|---|---|---|
-| `'flow` | No drawing focused | Text caret visible; `selection` is `text/node/all` over flow doc; key bindings = text editor's |
-| `'canvas` | A drawing is focused (clicked into, or auto-focused on insert) | Text caret hidden; `selection` is `node`/`multi-node` over drawing-objects; key bindings = canvas tool palette; `editor.tool` is non-null |
-
-Transitions:
-
-```
-flow ──(click inside <drawing>)──→ canvas   (auto-selects empty / the clicked shape)
-canvas ──(click outside <drawing>)──→ flow
-canvas ──(Esc twice)──→ flow
-canvas ──(focus another drawing)──→ canvas (mode stays; selection moves)
-```
-
-Mode entry calls `mod_editor.set_mode('canvas', drawing_id)` which:
-1. Activates the configured tool palette (default: select tool).
-2. Hides the flow text caret.
-3. Sets `editor.focused_drawing = drawing_id` (used by hit-test scoping).
-4. Fires `'mode-change'` event to subscribers (toolbar UI re-renders).
-
-Mode exit reverses; final selection inside the canvas is **retained** in the state store so re-entering the same drawing restores it (per Reactive_UI §5A.2's state-key model — `(drawing_id, "select_tool", "selection")`).
-
-### 2.4 Focus & the `data-editable` annotation
-
-Reactive_UI §7 already plans `data-editable: ~` on outputs of `edit` templates. We extend the convention: the `<drawing>` render outputs `data-drawing-focus: ~.id` on its outermost SVG node. The DOM dispatch hook in `event.cpp` walks up from a click target, and when it sees `data-drawing-focus`, it routes the event into the canvas mode pipeline (tool state machine) rather than the text pipeline.
+> **Status (2026-06-29): implemented.** `multi_node_selection(paths)` and `selection_paths(sel)` ship in `mod_source_pos.ls`; `selection_to_string` concatenates the targeted nodes in document order; `sel_map` (`mod_transaction.ls`) maps each path through a step and **drops paths whose target was deleted** (port of the JS reference). The canonical operation — `cmd_delete_multi_node` (deletes every selected node in descending document order) — ships in `mod_commands.ls` and is exposed via `edit_cmd_delete_multi_node()`. Headless tests: `test/lambda/editor/multi_node_selection.ls` (model) and `multi_node_delete.ls` (command + editor API). The variant is defined here and further consumed by the Stage 5 drawing layer.
 
 ---
 
@@ -146,7 +122,7 @@ Three seams connect the drawing surface to the rich-text editor. Each is stated 
 
 2. **Step seam.** Drawing gestures never introduce new step kinds; they compile to `set_attr` / `replace` / `replace_around` (Stage 5 §5). Consequences the rich-text editor gets for free: one unified undo stack, position `Mapping` across shape edits, and a collab-ready (stable-id + `set_attr`) mutation model.
 
-3. **Event/render seam.** The DOM bridge walks up from a click target; when it crosses a node carrying `data-drawing-focus`, it (a) enters canvas mode and (b) routes subsequent pointer events through a **geometric** hit-test rather than the text tree hit-test. Geometry-only attribute changes (`x`, `y`, `width`, `height`, `rotate`, `points`, `waypoints`, and style attrs) take a direct-DOM-patch fast path that skips relayout. The mechanics — `canvas_bridge.hpp`, `radiant/event.cpp` wiring, the fast path — are Stage 5 §8.3 / §13.3.
+3. **Event/render seam.** The DOM bridge walks up from a click target; when it crosses a node carrying `data-drawing-focus`, it (a) enters canvas mode and (b) routes subsequent pointer events through a **geometric** hit-test rather than the text tree hit-test. Geometry-only attribute changes (`x`, `y`, `width`, `height`, `rotate`, `points`, `waypoints`, and style attrs) take a direct-DOM-patch fast path that skips relayout. The mechanics — the mode session API and `data-drawing-focus` walk (Stage 5 §4), and `canvas_bridge.hpp`, `radiant/event.cpp` wiring, the fast path (Stage 5 §8.3 / §13.3) — all live in Stage 5.
 
 ---
 

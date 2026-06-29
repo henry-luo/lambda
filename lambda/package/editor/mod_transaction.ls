@@ -76,6 +76,9 @@ pub fn tx_get_meta(tx, name) => find_meta_at(tx.meta, name, 0, len(tx.meta))
 pub fn sel_map(step, sel) {
   if (sel.kind == 'all') { sel }
   else if (sel.kind == 'node') { sel_map_node(step, sel) }
+  else if (sel.kind == 'multi-node') {
+    multi_node_selection(map_multinode_at(step, sel.paths, 0, len(sel.paths), []))
+  }
   else if (sel.kind == 'text') {
     text_selection(step_map(step, sel.anchor), step_map(step, sel.head))
   }
@@ -86,6 +89,24 @@ fn sel_map_node(step, sel) {
   let mapped = step_map(step, pos(sel.path, 0))
   if (len(mapped.path) == len(sel.path)) { node_selection(mapped.path) }
   else { text_selection(mapped, mapped) }
+}
+
+// Map a node path through a step; keep it if the node survives at the same
+// depth, else null (it was deleted / collapsed). Port of mapNodePath in
+// test/editor-js/src/model/transaction.ts.
+fn map_node_path(step, path) {
+  let mapped = step_map(step, pos(path, 0))
+  if (len(mapped.path) == len(path)) { mapped.path } else { null }
+}
+
+// Map a multi-node path list, dropping paths whose target the step deleted.
+fn map_multinode_at(step, paths, i, n, acc) {
+  if (i >= n) { acc }
+  else {
+    let mp = map_node_path(step, paths[i])
+    if (mp == null) { map_multinode_at(step, paths, i + 1, n, acc) }
+    else { map_multinode_at(step, paths, i + 1, n, [*acc, mp]) }
+  }
 }
 
 // ---------------------------------------------------------------------------

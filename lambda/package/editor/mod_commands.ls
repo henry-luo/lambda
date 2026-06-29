@@ -1991,6 +1991,51 @@ pub fn cmd_insert_paragraph(state) {
 }
 
 // ---------------------------------------------------------------------------
+// cmd_delete_multi_node — delete every node in a MultiNodeSelection.
+//
+// The canonical multi-select operation. Paths are deleted in descending
+// document order so earlier deletes don't shift later indices (same discipline
+// as the drawing layer's cmd_delete_shapes). The transaction's mapped selection
+// collapses to an empty multi-node selection (every target removed).
+// ---------------------------------------------------------------------------
+
+fn mn_insert_desc(sorted, p, i, n, acc) {
+  if (i >= n) { [*acc, p] }
+  else if (path_compare(p, sorted[i]) > 0) { list_concat([*acc, p], list_drop(sorted, i)) }
+  else { mn_insert_desc(sorted, p, i + 1, n, [*acc, sorted[i]]) }
+}
+
+fn mn_sort_desc_at(ps, i, n, acc) {
+  if (i >= n) { acc }
+  else { mn_sort_desc_at(ps, i + 1, n, mn_insert_desc(acc, ps[i], 0, len(acc), [])) }
+}
+
+fn mn_delete_at(tx, paths, i, n) {
+  if (i >= n) { tx }
+  else {
+    let p = paths[i]
+    let node = node_at(tx.doc_after, p)
+    if (node == null) { mn_delete_at(tx, paths, i + 1, n) }
+    else {
+      let parent = parent_path(p)
+      let idx = last_index(p)
+      if (idx < 0) { mn_delete_at(tx, paths, i + 1, n) }
+      else { mn_delete_at(tx_step(tx, step_replace(parent, idx, idx + 1, [])), paths, i + 1, n) }
+    }
+  }
+}
+
+pub fn cmd_delete_multi_node(state) {
+  let sel = state.selection
+  if (sel == null or sel.kind != 'multi-node' or len(sel.paths) == 0) { null }
+  else {
+    let sorted = mn_sort_desc_at(sel.paths, 0, len(sel.paths), [])
+    let tx = mn_delete_at(tx_begin(state.doc, sel), sorted, 0, len(sorted))
+    if (len(tx.steps) == 0) { null } else { tx }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // chain — try each command in turn; return the first non-null transaction
 // ---------------------------------------------------------------------------
 //
