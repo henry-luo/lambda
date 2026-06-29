@@ -89,9 +89,12 @@ describe('commands/cmdPasteSlice — guards', () => {
     const s = state([node('p', [text('x')])], caret([0, 0], 0))
     expect(cmdPasteSlice(s, [])).toBeNull()
   })
-  it('returns null for a multi-leaf range', () => {
+  it('deletes a multi-leaf (cross-block) range, then pastes at the caret', () => {
     const s = state([node('p', [text('ab')]), node('p', [text('cd')])],
       textSelection(pos([0, 0], 1), pos([1, 0], 1)))
-    expect(cmdPasteSlice(s, [text('y')])).toBeNull()
+    const tx = cmdPasteSlice(s, [text('y')])!
+    // range "b…c" deleted (blocks merge to "ad"), then "y" pasted at the caret
+    expect(tx.doc_after.content.length).toBe(1)
+    expect(tx.doc_after.content[0]).toEqual(node('p', [text('ayd')]))
   })
 })

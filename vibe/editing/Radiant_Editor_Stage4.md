@@ -950,27 +950,34 @@ test/lambda/editing/
 
 The catalog is written **first**, in `cases.md`, so test scope is reviewable before any fixtures are produced. Outline:
 
-| Category | Cases | PM/maxGraph reference |
+| Category | Cases | Case-derivation source(s) |
 |---|---|---|
 | Schema validation | 10 cases — valid drawings, invalid (missing id, bad kind, dangling connector ref, unknown attr, ill-typed attr, wrong child role, missing required port spec, attr out of bounds, structural-cycle, empty layer) | PM `prosemirror-model/test/test-schema.js` |
 | `SourcePos` over drawings | 6 cases — path resolution to shape, to connector, to text-frame, multi-node path resolution, deepest-common-ancestor across multi-select | PM `prosemirror-model/test/test-resolve.js` |
 | Step apply/invert/map | 10 cases per step kind on drawing-objects (set_attr on x/y/fill/kind, replace inserting shape, replace deleting shape, replace_around for group/ungroup) | PM `prosemirror-transform/test/test-step.js` |
-| Tool: select | 8 cases — click on shape, click on empty, shift-click extend, lasso, drag-move, drag-resize, drag-rotate, ESC clears | tldraw select tool tests |
+| Tool: select | 8 cases — click on shape, click on empty, shift-click extend, lasso, drag-move, drag-resize, drag-rotate, ESC clears | tldraw select tool tests; BlockSuite edgeless selection |
 | Tool: shape tools | 5 per tool — rect, ellipse, line, polyline (multi-click), path (smoothing), freehand (drag), text (insert + immediate text-edit) | tldraw shape tool tests |
 | Tool: connector | 8 cases — anchor on shape, anchor on port, anchor free, anchor → drop on shape, anchor → drop on free, routing default, switch routing strategy, escape mid-draw | maxGraph mxConnector tests |
 | Routing | 12 cases — straight, orthogonal L-route, orthogonal Z-route, orthogonal U-route, waypoint pinning, port anchor, edge anchor, route under move, multi-bend, label position, arrowhead variants, dangling fallback | maxGraph `EdgeStyle*` tests |
 | Snap | 6 cases — grid snap on/off, object-edge snap, center snap, no snap with Shift, snap guide decoration emit, multi-axis snap | tldraw snap tests |
 | Align / distribute | 10 cases — left/right/top/bottom/h-center/v-center align, horizontal distribute, vertical distribute, no-op on single selection, partial selection in nested groups | Figma / Sketch parity |
-| Multi-select | 6 cases — shift-click add, shift-click subtract, lasso intersect, lasso enclose, group as one selectable, ESC clears | tldraw multi-select |
-| Mode switch | 6 cases — click into drawing enters canvas, ESC×2 returns to flow, click outside returns, focus state persists on re-enter, mode-aware undo, selection cleared on mode change | Affine mode-switch tests |
-| Group / ungroup | 5 cases — group selection, ungroup preserves z-order, nested groups, group then move, undo group | tldraw group tests |
+| Multi-select | 6 cases — shift-click add, shift-click subtract, lasso intersect, lasso enclose, group as one selectable, ESC clears | tldraw multi-select; BlockSuite edgeless multi-select |
+| Mode switch | 6 cases — click into drawing enters canvas, ESC×2 returns to flow, click outside returns, focus state persists on re-enter, mode-aware undo, selection cleared on mode change | **BlockSuite edgeless mode tests**; Affine mode-switch |
+| Group / ungroup | 5 cases — group selection, ungroup preserves z-order, nested groups, group then move, undo group | tldraw group tests; BlockSuite edgeless group/frame |
 | Z-order | 4 cases — bring to front, send to back, step forward, step backward | maxGraph z-order |
 | History coalesce | 8 cases — drag = one entry, typing in text-frame = one entry, drag-then-resize = two entries, mode-change breaks coalesce, undo restores selection, undo restores mode+tool, redo restores selection, undo after delete restores connectors | PM history tests |
-| Clipboard | 8 cases — copy single shape, copy multi-select, copy group, paste preserves ids (with remap), paste SVG, paste PNG, paste text in canvas → new text-frame, cross-drawing paste | Excalidraw clipboard tests |
-| `text-frame` interop | 5 cases — text caret inside frame, PM commands work inside frame, marks (bold/italic) inside frame, frame resize affects text layout, frame delete | PM tests inside an arbitrary node |
+| Clipboard | 8 cases — copy single shape, copy multi-select, copy group, paste preserves ids (with remap), paste SVG, paste PNG, paste text in canvas → new text-frame, cross-drawing paste | Excalidraw clipboard tests; BlockSuite edgeless clipboard |
+| `text-frame` interop | 5 cases — text caret inside frame, PM commands work inside frame, marks (bold/italic) inside frame, frame resize affects text layout, frame delete | PM tests inside an arbitrary node; BlockSuite edgeless note/frame |
 | Performance budgets | 4 cases — drag at 60Hz on 100-shape canvas, route 50 connectors on shape move, undo 100 typing chars, retransform single attr edit < 5ms | (no external ref) |
 
 Total budget: ~150 cases across ~30 test files. Each case ≤ 100 lines of `.ls`. The fixture format keeps cases readable.
+
+**BlockSuite edgeless as a case source.** BlockSuite (Affine) is the closest existing "document with an embedded canvas" system (§2.1), so its **edgeless** test suite is the best external source for the canvas-UX categories above — selection, multi-select, mode switch, groups/frames, and in-canvas clipboard (the embed-in-doc angle that tldraw and maxGraph don't cover). Two caveats on *how* to use it:
+
+- **Manual case derivation, not auto-harvest.** Unlike the Chromium editing suite (clean declarative `assert_selection` we harvest mechanically), BlockSuite's edgeless tests are **Playwright** e2e (DOM/pixel + Yjs assertions). We read each scenario and author the equivalent `.ls` fixture by hand; we port the *cases*, not the code.
+- **Its Yjs store / CRDT unit tests are not applicable** — our model is step/transaction-based, not CRDT-backed, so only the edgeless *interaction* scenarios transfer, not the storage tests.
+
+(Deferred: actually mining BlockSuite's edgeless tests happens when the drawing layer is built — see §15. This entry records it as a planned source.)
 
 ### 14.3 Fixture format
 
@@ -1204,7 +1211,7 @@ Stage 4 adds **one new block type** (`<drawing>`) and the canvas-mode editor tha
 
 The two reference editors picked — Affine BlockSuite for embed UX and maxGraph for routing — are the right pair: Affine validates the "doc with drawing surface" shape end-to-end, maxGraph validates the routing algorithm at production scale. We adopt their architectural ideas surgically and run the algorithm port through our existing step/transaction/history substrate. The result is a unified rich-document editor whose drawings are first-class peers of paragraphs, with the same undo, the same selection model, the same DAG history, and the same path forward to collab.
 
-The test plan (`test/lambda/editing/`) frontloads the catalog in `cases.md` — review the catalog first, then the fixtures, then the runners. ~150 cases covering schema, position, steps, all eight tools, routing, snap, align, multi-select, mode switch, history coalescing, clipboard, and the text-frame ↔ flow interop. PM's transform tests, maxGraph's edge-style tests, and tldraw's tool tests provide the case-derivation source-of-truth — we port the *cases*, not the JS.
+The test plan (`test/lambda/editing/`) frontloads the catalog in `cases.md` — review the catalog first, then the fixtures, then the runners. ~150 cases covering schema, position, steps, all eight tools, routing, snap, align, multi-select, mode switch, history coalescing, clipboard, and the text-frame ↔ flow interop. PM's transform tests, maxGraph's edge-style tests, tldraw's tool tests, and **BlockSuite's edgeless tests** (for the embed-in-doc canvas UX — selection, mode switch, groups/frames) provide the case-derivation source-of-truth — we port the *cases*, not the JS.
 
 ---
 
