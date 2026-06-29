@@ -211,7 +211,7 @@ fn validate_node(schema, node, path) {
     let kids = children_array(node)
     let attr_violations = validate_attrs(node, path, tag, entry)
     let mark_violations = validate_mark_policy(schema, entry, kids, path)
-    let local = if (entry.atomic == true and len(kids) > 0)
+    let local = if (entry.atomic == true and len(entry.content) == 0 and len(kids) > 0)
         [mk_violation(path, tag, "atomic node has children")]
       else if (not match_content(schema, kids, entry.content))
         [mk_violation(path, tag, "content does not match schema")]
