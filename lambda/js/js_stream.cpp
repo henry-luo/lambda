@@ -6518,10 +6518,10 @@ static Item js_duplex_from_forward_error(Item env_item, Item err) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
     if (js_stream_has_stored_error(env[0])) return make_js_undefined();
-    js_stream_destroy(env[0], err);
     if (js_stream_is_stream_like(env[1]) && env[1].item != env[0].item) {
         js_stream_destroy(env[1], err);
     }
+    js_stream_destroy(env[0], err);
     return make_js_undefined();
 }
 
@@ -6600,6 +6600,35 @@ static void js_duplex_from_attach_writable(Item duplex, Item writable) {
     err_env[1] = ItemNull;
     js_stream_on(writable, make_string_item("error"),
                  js_new_closure((void*)js_duplex_from_forward_error, 1, err_env, 2));
+}
+
+static Item js_duplex_from_destroy(Item env_item, Item err, Item callback) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item readable = env[0];
+    Item writable = env[1];
+    Item duplex = env[2];
+    if (js_stream_is_stream_like(readable) &&
+        !js_item_is_true(js_property_get(readable, key_destroyed))) {
+        js_stream_destroy(readable, make_js_undefined());
+    }
+    if (writable.item != readable.item &&
+        js_stream_is_stream_like(writable) &&
+        !js_item_is_true(js_property_get(writable, key_destroyed))) {
+        js_stream_destroy(writable, make_js_undefined());
+    }
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        Item readable_state = js_property_get(duplex, key_readable_state);
+        Item writable_state = js_property_get(duplex, key_writable_state);
+        bool error_emitted = js_state_get_bool(readable_state, "errorEmitted") ||
+                             js_state_get_bool(writable_state, "errorEmitted");
+        if (js_stream_has_callback_error(err) && !error_emitted) {
+            js_call_function(callback, make_js_undefined(), &err, 1);
+        } else {
+            js_call_function(callback, make_js_undefined(), NULL, 0);
+        }
+    }
+    return make_js_undefined();
 }
 
 static Item js_duplex_from_promise_fulfilled(Item env_item, Item value) {
@@ -6848,6 +6877,12 @@ static Item js_duplex_from(Item source) {
 
     if (has_readable) js_duplex_from_attach_readable(duplex, readable, has_writable ? writable : ItemNull);
     if (has_writable) js_duplex_from_attach_writable(duplex, writable);
+    Item* destroy_env = js_alloc_env(3);
+    destroy_env[0] = readable;
+    destroy_env[1] = writable;
+    destroy_env[2] = duplex;
+    js_property_set(duplex, make_string_item("_destroy"),
+                    js_new_closure((void*)js_duplex_from_destroy, 2, destroy_env, 3));
     return duplex;
 }
 
@@ -8144,6 +8179,11 @@ static Item js_stream_compose_rest(Item rest_args) {
         }
         Item next = js_stream_compose_normalize(raw_next);
         if (js_check_exception()) return ItemNull;
+        if (!js_item_is_true(js_property_get(previous, key_readable)) ||
+            !js_item_is_true(js_property_get(next, key_writable))) {
+            return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
+                "The argument 'stream' must be writable and readable.");
+        }
         js_readable_pipe(previous, next);
         js_readable_compose_attach_error_forward(previous, next);
         previous = next;

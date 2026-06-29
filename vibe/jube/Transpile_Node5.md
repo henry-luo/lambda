@@ -792,6 +792,40 @@ Results:
   block, so the remaining issue appears to be a full-file scheduling/ordering
   interaction rather than the individual transform-chain semantics.
 
+### 2026-06-29 Track A continuation: compose destroy and validation edges
+
+Finished the next `stream.compose()` lifecycle slice:
+
+- Compose now rejects invalid inter-stage shapes with `ERR_INVALID_ARG_VALUE`
+  when a previous stage is not readable or the next stage is not writable,
+  matching the invalid `Writable -> PassThrough` and
+  `PassThrough -> Readable -> PassThrough` official cases.
+- `Duplex.from({ readable, writable })` facades now implement `_destroy` so
+  destroying the facade synchronously tears down the wrapped sides. This fixes
+  the compose destroy-tail case where `compose(pass, duplex).destroy(err)` must
+  make the wrapped duplex immediately report `destroyed === true`.
+- Facade destroy keeps the wrapper's original error emission on direct
+  `destroy(err)`, but avoids re-emitting an already-emitted write-callback
+  error during auto-destroy.
+- Readable-side error forwarding now propagates the original error to the
+  wrapped writable before the facade's neutral destroy cleanup can close it.
+
+Verification:
+
+```bash
+make build
+./lambda.exe js ref/node/test/parallel/test-stream-compose.js --no-log
+./lambda.exe js ref/node/test/parallel/test-stream-duplex-from.js --no-log
+./lambda.exe js ref/node/test/parallel/test-stream-duplexpair.js --no-log
+```
+
+Results:
+
+- `make build`: pass.
+- Direct official `test-stream-compose.js`: pass.
+- Direct official `test-stream-duplex-from.js`: still pass.
+- Direct official `test-stream-duplexpair.js`: still pass.
+
 ## Verification Policy
 
 Every implementation slice should finish with:
