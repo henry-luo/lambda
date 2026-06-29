@@ -723,6 +723,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         int saved_func_index_sm = mt->current_func_index;
         MIR_reg_t saved_eval_local_frame_reg_sm = mt->eval_local_frame_reg;
         bool saved_in_generator = mt->in_generator;
+        bool saved_in_async = mt->in_async;
 
         if (jm_has_use_strict_directive(fn)) {
             fc->is_strict = true;
@@ -746,6 +747,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         // Set up generator state
         mt->in_generator = true;
+        mt->in_async = fn->is_async;
         mt->gen_yield_index = 0;
         mt->gen_yield_count = yield_count;
         mt->gen_capture_offset = cap_offset;
@@ -1283,6 +1285,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->current_func_index = saved_func_index_sm;
         mt->eval_local_frame_reg = saved_eval_local_frame_reg_sm;
         mt->in_generator = saved_in_generator;
+        mt->in_async = saved_in_async;
 
         hashmap_free(gen_lexicals);
         hashmap_free(gen_locals);

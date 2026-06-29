@@ -721,9 +721,13 @@ Extended the stream-duplex surface without adding test-specific branches:
 - `pipeline()` now normalizes iterable sources with `Readable.from()` and invokes
   a function final stage as an async sink instead of requiring every stage to
   already expose `.pipe()`.
-- Added the runtime/import-table pieces for a distinct async-generator await
-  suspension marker. This is the right root direction, but the remaining
-  async-generator `for await` resume bug is not fully closed yet.
+- Async-generator lowering now preserves `mt->in_async` while compiling the
+  shared generator state machine. This lets `await` inside async generators use
+  the async-generator suspension marker instead of the synchronous await helper,
+  fixing `for await` over pending stream iterator promises.
+- `Duplex.from(function)` now routes promise-like function return values through
+  the existing promise-backed duplex helper, so rejected async function results
+  are surfaced as stream `error` events.
 
 Verification:
 
@@ -737,12 +741,11 @@ Results:
 
 - `make build`: pass.
 - Direct official `test-stream-duplexpair.js`: still pass.
-- Direct official `test-stream-duplex-from.js`: reduced from 9 missed
-  `mustCall`s at the start of this continuation to 1 missed `mustCall`.
-- Remaining blocker: the async-generator pipeline block calls the sink, but the
-  sink callback receives `iterator result is not an object`. A reduced shape is
-  `async function * g(source) { for await (const x of source) yield x; }` over a
-  `PassThrough`; plain async generators and plain `for await` consumers work.
+- Direct official `test-stream-duplex-from.js`: pass.
+- Reduced async-generator probes now resolve streamed `for await` values
+  without `iterator result is not an object`.
+- Reduced `Duplex.from(async function)` probe now emits the rejected promise as
+  `error: myCustomError`.
 
 ## Verification Policy
 

@@ -6710,7 +6710,10 @@ static Item js_duplex_from_function(Item fn) {
             "Expected a stream, iterable, or promise to be returned from the function");
     }
 
-    Item readable = js_readable_compose_from_result(input, result, make_js_undefined());
+    Item then_fn = js_property_get(result, make_string_item("then"));
+    Item readable = get_type_id(then_fn) == LMD_TYPE_FUNC
+        ? js_duplex_from_promise(js_promise_resolve(result))
+        : js_readable_compose_from_result(input, result, make_js_undefined());
     if (js_check_exception()) return ItemNull;
     Item pair = js_new_object();
     js_property_set(pair, make_string_item("readable"), readable);
