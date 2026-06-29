@@ -16,9 +16,12 @@ fn add_mark_at(nodes, mark, i, n, acc) {
 }
 fn add_mark(nodes, mark) => add_mark_at(nodes, mark, 0, len(nodes), [])
 
+// Mark tags (strong/em/u/code/...) always flatten to flat marks on the text
+// leaves — matching the canonical flat-mark model and the JS reference
+// (html-parser.ts, where mark wrappers disappear into each leaf's mark dict).
+// (`tag` is retained for call-site symmetry.)
 fn html_mark_fragment(schema, tag, n, mark) =>
-  if (html_schema_mode(schema)) { [node(tag, convert_inline_schema(schema, n))] }
-  else { add_mark(convert_inline_schema(schema, n), mark) }
+  add_mark(convert_inline_schema(schema, n), mark)
 
 fn frag_concat_at(a, b, i, n, acc) {
   if (i >= n) { acc }
