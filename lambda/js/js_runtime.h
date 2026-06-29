@@ -314,6 +314,7 @@ void js_set_process_exec_argv(int argc, const char** argv);
 Item js_get_process_argv(void);
 Item js_get_process_exec_argv(void);
 Item js_get_process_object_value(void);
+int js_is_process_object_value(Item object);
 void js_set_diagnose_enabled(int enabled);
 int js_is_diagnose_enabled(void);
 
@@ -737,6 +738,7 @@ void js_mir_volume_counters_get(JsMirVolumeCounters* out);
 // globalThis / global object
 Item js_get_global_this(void);
 Item js_get_global_object(void);
+int js_is_global_this_object_value(Item object);
 Item js_get_global_property(Item key);
 Item js_get_global_property_strict(Item key);
 Item js_get_global_property_reference(Item key, int64_t strict_reference);

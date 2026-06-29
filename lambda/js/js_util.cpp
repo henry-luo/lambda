@@ -1106,6 +1106,11 @@ static bool js_util_typed_array_bytes_equal(Item a, Item b) {
     return memcmp(adata, bdata, (size_t)alen) == 0;
 }
 
+static bool js_util_is_host_singleton_object(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    return js_is_global_this_object_value(value) || js_is_process_object_value(value);
+}
+
 extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
     // use strict equality for primitives
     Item eq = js_strict_equal(a, b);
@@ -1114,6 +1119,11 @@ extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
     TypeId ta = get_type_id(a);
     TypeId tb = get_type_id(b);
     if (ta != tb) return (Item){.item = b2it(false)};
+
+    if (ta == LMD_TYPE_MAP &&
+        (js_util_is_host_singleton_object(a) || js_util_is_host_singleton_object(b))) {
+        return (Item){.item = b2it(false)};
+    }
 
     bool a_dataview = js_is_dataview(a);
     bool b_dataview = js_is_dataview(b);

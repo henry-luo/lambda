@@ -239,8 +239,21 @@ static int format_received_suffix(char* buf, int buf_size, Item value) {
             return snprintf(buf, buf_size, " Received null");
         case LMD_TYPE_UNDEFINED:
             return snprintf(buf, buf_size, " Received undefined");
-        case LMD_TYPE_MAP:
+        case LMD_TYPE_MAP: {
+            extern Item js_property_get(Item object, Item key);
+            Item ctor = js_property_get(value, make_string_item("constructor"));
+            Item name = get_type_id(ctor) == LMD_TYPE_FUNC
+                ? js_property_get(ctor, make_string_item("name"))
+                : ItemNull;
+            if (get_type_id(name) == LMD_TYPE_STRING) {
+                String* ns = it2s(name);
+                if (ns && ns->len > 0) {
+                    return snprintf(buf, buf_size, " Received an instance of %.*s",
+                        (int)ns->len, ns->chars);
+                }
+            }
             return snprintf(buf, buf_size, " Received an instance of Object");
+        }
         default:
             return snprintf(buf, buf_size, " Received type object");
     }
@@ -294,12 +307,12 @@ extern "C" Item js_buffer_alloc(Item size_item, Item fill_item) {
     return buf;
 }
 
-// ─── new Buffer(arg, encoding?) — deprecated constructor ────────────────────
+// ─── new Buffer(arg, encodingOrOffset?, length?) — deprecated constructor ───
 // forward declaration
 extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item);
 // new Buffer(size) → Buffer.alloc(size), new Buffer(string, enc) → Buffer.from(string, enc)
 // new Buffer(array) → Buffer.from(array), new Buffer(buffer) → Buffer.from(buffer)
-extern "C" Item js_buffer_construct(Item arg, Item encoding) {
+extern "C" Item js_buffer_construct(Item arg, Item encoding, Item length_item) {
     TypeId tid = get_type_id(arg);
     if (tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT) {
         // new Buffer(size) — allocate zero-filled
@@ -307,13 +320,13 @@ extern "C" Item js_buffer_construct(Item arg, Item encoding) {
         return js_buffer_alloc(arg, fill);
     }
     // everything else delegates to Buffer.from
-    return js_buffer_from(arg, encoding, make_js_undefined());
+    return js_buffer_from(arg, encoding, length_item);
 }
 
-static bool buffer_from_to_index(Item item, int default_value, int* out_index, const char* name) {
+static bool buffer_from_to_index(Item item, int undefined_default, int nan_default, int* out_index, const char* name) {
     if (!out_index) return false;
     if (get_type_id(item) == LMD_TYPE_UNDEFINED || item.item == ITEM_JS_UNDEFINED) {
-        *out_index = default_value;
+        *out_index = undefined_default;
         return true;
     }
 
@@ -335,10 +348,15 @@ static bool buffer_from_to_index(Item item, int default_value, int* out_index, c
         return false;
     }
 
-    if (value != value || value < 0.0 || value > 2147483647.0) {
+    if (value != value) {
+        *out_index = nan_default;
+        return true;
+    }
+
+    if (value < 0.0 || value > 2147483647.0) {
         char msg[160];
-        snprintf(msg, sizeof(msg), "The value of \"%s\" is out of range.", name ? name : "offset");
-        js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
+        snprintf(msg, sizeof(msg), "\"%s\" is outside of buffer bounds", name ? name : "offset");
+        js_throw_range_error_code("ERR_BUFFER_OUT_OF_BOUNDS", msg);
         return false;
     }
 
@@ -537,17 +555,17 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
         }
 
         int byte_offset = 0;
-        if (!buffer_from_to_index(encoding, 0, &byte_offset, "byteOffset")) return ItemNull;
+        if (!buffer_from_to_index(encoding, 0, 0, &byte_offset, "offset")) return ItemNull;
         if (byte_offset > ab->byte_length) {
-            return js_throw_range_error_code("ERR_OUT_OF_RANGE",
-                "The value of \"byteOffset\" is out of range.");
+            return js_throw_range_error_code("ERR_BUFFER_OUT_OF_BOUNDS",
+                "\"offset\" is outside of buffer bounds");
         }
 
         int byte_length = ab->byte_length - byte_offset;
-        if (!buffer_from_to_index(length_item, byte_length, &byte_length, "length")) return ItemNull;
+        if (!buffer_from_to_index(length_item, byte_length, 0, &byte_length, "length")) return ItemNull;
         if (byte_length > ab->byte_length - byte_offset) {
-            return js_throw_range_error_code("ERR_OUT_OF_RANGE",
-                "The value of \"length\" is out of range.");
+            return js_throw_range_error_code("ERR_BUFFER_OUT_OF_BOUNDS",
+                "\"length\" is outside of buffer bounds");
         }
 
         Item buf = js_typed_array_new_from_buffer(JS_TYPED_UINT8, data, byte_offset, byte_length);
@@ -2831,7 +2849,7 @@ extern "C" Item js_get_buffer_namespace(void) {
     if (buffer_namespace.item != 0) return buffer_namespace;
 
     // Buffer is both a callable function (deprecated Buffer(arg, enc)) and a namespace
-    buffer_namespace = js_new_function((void*)js_buffer_construct, 2);
+    buffer_namespace = js_new_function((void*)js_buffer_construct, 3);
 
     // static methods (Buffer.alloc, Buffer.from, etc.)
     buf_set_method(buffer_namespace, "alloc",      (void*)js_buffer_alloc, 2);

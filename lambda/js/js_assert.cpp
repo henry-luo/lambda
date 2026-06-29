@@ -40,6 +40,72 @@ static Item assert_make_string_n(const char* str, size_t len) {
 
 static Item assert_namespace = {0};
 
+static bool js_assert_item_is_date(Item value) {
+    return get_type_id(value) == LMD_TYPE_MAP && js_class_id(value) == JS_CLASS_DATE;
+}
+
+static bool js_assert_string_equals(Item value, const char* text) {
+    if (get_type_id(value) != LMD_TYPE_STRING || !text) return false;
+    String* s = it2s(value);
+    size_t len = strlen(text);
+    return s && s->len == len && memcmp(s->chars, text, len) == 0;
+}
+
+static bool js_assert_has_date_prototype(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP || js_assert_item_is_date(value)) return false;
+    extern Item js_get_prototype_of(Item object);
+    extern Item js_get_constructor(Item name_item);
+    Item proto = js_get_prototype_of(value);
+    if (get_type_id(proto) != LMD_TYPE_MAP) return false;
+    Item date_ctor = js_get_constructor(assert_make_string("Date"));
+    if (get_type_id(date_ctor) == LMD_TYPE_FUNC) {
+        Item date_proto = js_property_get(date_ctor, assert_make_string("prototype"));
+        if (proto.item == date_proto.item) return true;
+    }
+    Item tag = js_property_get(proto, assert_make_string("__sym_4"));
+    return js_assert_string_equals(tag, "Date");
+}
+
+static bool js_assert_append_date_checktag_value(StrBuf* sb, Item value) {
+    if (js_assert_item_is_date(value)) {
+        extern Item js_date_method(Item date_obj, int method_id);
+        Item iso = js_date_method(value, 8);
+        if (get_type_id(iso) != LMD_TYPE_STRING) return false;
+        String* s = it2s(iso);
+        if (!s) return false;
+        strbuf_append_str_n(sb, s->chars, s->len);
+        return true;
+    }
+    if (js_assert_has_date_prototype(value)) {
+        strbuf_append_str(sb, "Date {}");
+        return true;
+    }
+    return false;
+}
+
+static Item js_assert_date_checktag_message(Item actual, Item expected) {
+    bool actual_date = js_assert_item_is_date(actual);
+    bool expected_date = js_assert_item_is_date(expected);
+    bool actual_fake_date = js_assert_has_date_prototype(actual);
+    bool expected_fake_date = js_assert_has_date_prototype(expected);
+    if (!((actual_date && expected_fake_date) ||
+          (actual_fake_date && expected_date))) {
+        return ItemNull;
+    }
+
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
+    strbuf_append_str(sb, "+ actual - expected\n");
+    strbuf_append_str(sb, "\n");
+    strbuf_append_str(sb, "+ ");
+    if (!js_assert_append_date_checktag_value(sb, actual)) return ItemNull;
+    strbuf_append_str(sb, "\n");
+    strbuf_append_str(sb, "- ");
+    if (!js_assert_append_date_checktag_value(sb, expected)) return ItemNull;
+    strbuf_append_str(sb, "\n");
+    return assert_make_string_n(sb->str, sb->length);
+}
+
 static void js_assert_attach_assertion_error_prototype(Item error) {
     if (assert_namespace.item == 0) return;
     Item ae_fn = js_property_get(assert_namespace, assert_make_string("AssertionError"));
@@ -166,6 +232,11 @@ extern "C" Item js_assert_deepStrictEqual(Item actual, Item expected, Item messa
     bool equal = (get_type_id(result) == LMD_TYPE_INT && it2i(result) == 1) ||
                  (get_type_id(result) == LMD_TYPE_BOOL && it2b(result));
     if (!equal) {
+        Item date_msg = js_assert_date_checktag_message(actual, expected);
+        if (get_type_id(date_msg) == LMD_TYPE_STRING) {
+            return throw_assert_msg_or_auto(date_msg,
+                "assert.deepStrictEqual: values are not deep-strict-equal", actual, expected, "deepStrictEqual");
+        }
         return throw_assert_msg_or_auto(message,
             "assert.deepStrictEqual: values are not deep-strict-equal", actual, expected, "deepStrictEqual");
     }

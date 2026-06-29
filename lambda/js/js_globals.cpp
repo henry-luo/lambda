@@ -2459,6 +2459,10 @@ extern "C" Item js_get_process_exec_argv(void) {
 // process object (lazy-initialized for `var p = process` standalone usage)
 static Item js_process_object = {.item = ITEM_NULL};
 
+extern "C" int js_is_process_object_value(Item object) {
+    return js_process_object.item != ITEM_NULL && object.item == js_process_object.item;
+}
+
 // process.cwd()
 extern "C" Item js_process_cwd(void) {
     char* cwd = file_getcwd();
@@ -14327,6 +14331,10 @@ extern "C" int js_is_window_event_global_property(Item object, Item key) {
         js_global_this_obj.item != 0 &&
         object.item == js_global_this_obj.item &&
         js_key_is_event_name(key);
+}
+
+extern "C" int js_is_global_this_object_value(Item object) {
+    return js_global_this_obj.item != 0 && object.item == js_global_this_obj.item;
 }
 
 extern "C" Item js_get_window_event_global_value(void) {
