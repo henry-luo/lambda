@@ -1,7 +1,7 @@
 # Transpile Node Tune5 Proposal
 
 Date: 2026-06-29
-Status: proposal
+Status: Track C in progress
 Scope: structural LambdaJS Node.js compatibility work against official Node.js
 parallel tests.
 
@@ -272,7 +272,7 @@ Acceptance:
 
 - A fresh node baseline update can say which Node commit it used and whether
   any baseline-pass filenames are absent.
-- `Transpile_Node_Tune5.md` can be updated from a single report command rather
+- `Transpile_Node5.md` can be updated from a single report command rather
   than manual ad hoc counting.
 - No runtime change is accepted without a focused module run and a baseline-only
   regression gate.
@@ -485,6 +485,85 @@ Acceptance:
 6. Track D crypto asymmetric slice.
 7. Track E scope decision for worker/cluster.
 8. Track F VM/module isolation if worker/cluster is deferred.
+
+## Implementation Status
+
+### 2026-06-29 Track 0 slice: generated official inventory report
+
+Landed a first Track 0 measurement slice:
+
+- Added `test/node/node_official_report.py`, a postprocessor that reads the
+  official Node harness configuration, `official_baseline.txt`,
+  `official_skip_list.txt`, `official_slow_list.txt`, the current
+  `ref/node/test/parallel` tree, and any latest `temp/` run artifacts.
+- Added `make node-official-report`, which writes
+  `temp/node_official_report.md` by default.
+- The report now provides the per-prefix pass/fail/skip/slow inventory, active
+  baseline filenames missing from `ref/node`, latest timing status counts,
+  slowest non-passing timing rows, crash/timeout manifest rows, and a
+  first-error-line failure classifier.
+
+Verification:
+
+```bash
+python3 -B test/node/node_official_report.py
+make node-official-report
+git diff --check
+```
+
+Current generated report from the checked-in baseline plus latest temp run
+artifacts is `temp/node_official_report.md`. Runtime compatibility has not been
+changed in this slice; this is intentionally a harness/reporting foundation for
+the next Node5 implementation slice.
+
+### 2026-06-29 Track C slice: assert and Buffer fidelity
+
+Landed the first runtime fidelity slice for the two representative official
+failures from this proposal:
+
+- `Buffer.from(arrayBuffer, offset, length)` and deprecated `Buffer(...)` now
+  preserve shared `ArrayBuffer` backing, expose Buffer `.parent`, forward the
+  third constructor argument, and use Node-shaped
+  `ERR_BUFFER_OUT_OF_BOUNDS` offset/length errors.
+- ArrayBuffer offset conversion now distinguishes omitted `length` from
+  nonnumeric `length`: omitted means remaining bytes, while nonnumeric/`NaN`
+  means zero bytes.
+- Buffer invalid-input diagnostics now preserve constructor names such as
+  `AB` in the `Received an instance of ...` suffix.
+- `assert.deepStrictEqual()` now emits the Node-shaped Date/fake-Date
+  check-tag message used by `test-assert-checktag.js`.
+- `globalThis` and `process` now expose no-allocation identity predicates, and
+  `util.isDeepStrictEqual()` rejects host singleton objects compared against
+  structural copies. This fixes the shared root cause behind fake
+  global/process equality without changing the runtime class/prototype behavior
+  of those objects.
+
+Verification:
+
+```bash
+make build
+./lambda.exe js ref/node/test/parallel/test-buffer-arraybuffer.js --no-log
+./lambda.exe js ref/node/test/parallel/test-assert-checktag.js --no-log
+./lambda.exe js test/node/assert_basic.js --no-log
+./lambda.exe js test/node/buffer_advanced.js --no-log
+./test/test_node_gtest.exe '--gtest_filter=*test_assert_checktag*:*test_buffer_arraybuffer*' --gtest_brief=1
+./test/test_node_gtest.exe --modules=assert,buffer --gtest_brief=1
+```
+
+Results:
+
+- Direct official `test-buffer-arraybuffer.js`: pass.
+- Direct official `test-assert-checktag.js`: pass.
+- Focused official gtest filter: 2/2 passed, 0 regressions,
+  `NEW_PASS test-assert-checktag.js`,
+  `NEW_PASS test-buffer-arraybuffer.js`.
+- Assert/buffer module sweep: 82 selected tests, 35 passed, 47 expected
+  failures, 0 regressions, same two improvements.
+- Local assert and Buffer fixtures still pass.
+- The full baseline-only gate currently reports unrelated baseline drift in
+  several non-assert/non-buffer tests. The stable reproduced subset remains
+  failing after reversing this Node5 patch and rebuilding, so those failures are
+  not introduced by this slice.
 
 ## Verification Policy
 

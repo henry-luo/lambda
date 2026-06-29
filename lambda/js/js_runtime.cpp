@@ -3137,6 +3137,25 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
                 *out_result = wrapped;
                 return true;
             }
+            if (str_key->len == 6 && strncmp(str_key->chars, "parent", 6) == 0) {
+                JsTypedArray* ta = js_get_typed_array_ptr(object.map);
+                if (!ta || !ta->is_buffer) {
+                    *out_result = make_js_undefined();
+                    return true;
+                }
+                if (ta->buffer_item) {
+                    *out_result = (Item){.item = ta->buffer_item};
+                    return true;
+                }
+                if (!ta->buffer) {
+                    *out_result = make_js_undefined();
+                    return true;
+                }
+                Item wrapped = js_arraybuffer_wrap(ta->buffer);
+                ta->buffer_item = wrapped.item;
+                *out_result = wrapped;
+                return true;
+            }
             if (str_key->len == 17 && strncmp(str_key->chars, "BYTES_PER_ELEMENT", 17) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(object.map);
                 int bpe = 4;

@@ -503,7 +503,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
 	    ensure-test262-gtest test262-baseline test262-full \
 	    test-ui-automation test-reactive-ui test-redex-baseline \
-	    node-baseline node-regression-gate node-full node-update-baseline
+	    node-baseline node-regression-gate node-full node-update-baseline node-official-report
 
 # Help target - shows available commands
 help:
@@ -1075,6 +1075,10 @@ node-full: build-test node-shim
 node-update-baseline: build-test node-shim
 	@echo "Running Node.js official test suite and updating baseline..."
 	@./test/test_node_gtest.exe --update-baseline
+
+# Node.js official: generate inventory/report from baseline plus latest temp run files
+node-official-report:
+	@$(PYTHON) -B test/node/node_official_report.py
 
 ensure-yaml-submodule:
 	@if [ ! -f test/yaml/README.md ]; then \
