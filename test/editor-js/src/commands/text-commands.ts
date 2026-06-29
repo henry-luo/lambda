@@ -197,7 +197,19 @@ export function cmdInsertText(state: EditorState, txt: string): Transaction | nu
   const sel = state.selection
   if (sel === null) return null
   if (!selIsText(sel)) return null
-  if (!selSingleLeaf(sel)) return null  // cross-leaf edits — TODO when fixtures demand
+  // Cross-leaf / cross-block range: delete it first, then insert at the caret.
+  if (!selSingleLeaf(sel)) {
+    const del = deleteSelectionSimple(state)
+    if (del === null) return null
+    if (txt.length === 0) return del  // typing "" over a range == delete it
+    const ins = cmdInsertText({ ...state, doc: del.doc_after, selection: del.sel_after }, txt)
+    if (ins === null) return del
+    return {
+      doc_before: state.doc, doc_after: ins.doc_after,
+      steps: [...del.steps, ...ins.steps],
+      sel_before: state.selection, sel_after: ins.sel_after, meta: []
+    }
+  }
 
   const lo = selLo(sel)
   const hi = selHi(sel)
@@ -530,8 +542,127 @@ export function cmdToggleMark(state: EditorState, name: string, value: AttrValue
   if (!selIsText(sel)) return null
 
   if (selCollapsed(sel)) return cmdToggleStoredMark(state, name, value)
-  if (!selSingleLeaf(sel)) return null
+  if (selSingleLeaf(sel)) return toggleMarkSingleLeaf(state, name, value)
+  // Multi-leaf range within one block — e.g. selecting a styled run among
+  // siblings yields anchor at the previous leaf's end. Toggle across the
+  // covered leaves.
+  const mlo = selLo(sel), mhi = selHi(sel)
+  if (pathEq(parentPath(mlo.path), parentPath(mhi.path))) return toggleMarkSameBlock(state, name, value)
+  return toggleMarkCrossBlock(state, name, value)
+}
 
+// --- shared range mark-toggling helpers (one or more blocks) ---
+
+// Covered leaf sub-ranges of a block: leafIdx → {from,to} char offsets.
+function coveredLeaves(block: Node, fromIdx: number, fromOff: number, toIdx: number, toOff: number): Map<number, { from: number; to: number }> {
+  const cov = new Map<number, { from: number; to: number }>()
+  for (let i = fromIdx; i <= toIdx; i++) {
+    const leaf = block.content[i]
+    if (leaf === undefined || !isText(leaf)) continue
+    const from = i === fromIdx ? fromOff : 0
+    const to = i === toIdx ? toOff : leaf.text.length
+    if (from < to) cov.set(i, { from, to })
+  }
+  return cov
+}
+
+// PM/Slate convention: add the mark unless every covered leaf already has it.
+function anyLacksMark(block: Node, cov: Map<number, { from: number; to: number }>, name: string): boolean {
+  for (const i of cov.keys()) { if (!hasMark((block.content[i] as TextLeaf).marks, name)) return true }
+  return false
+}
+
+// Rebuild a block's content with the mark added/removed over the covered leaves,
+// splitting partial leaves. Returns new content + the first/last marked leaf idx.
+function markBlock(block: Node, cov: Map<number, { from: number; to: number }>, name: string, value: AttrValue, adding: boolean): { content: Child[]; aIdx: number; hIdx: number; hOff: number } {
+  const newContent: Child[] = []
+  let aIdx = -1, hIdx = -1, hOff = 0
+  for (let i = 0; i < block.content.length; i++) {
+    const child = block.content[i] as Child
+    const c = cov.get(i)
+    if (c === undefined) { newContent.push(child); continue }
+    const leaf = child as TextLeaf
+    const beforeT = leaf.text.slice(0, c.from)
+    const midT = leaf.text.slice(c.from, c.to)
+    const afterT = leaf.text.slice(c.to)
+    const newMarks = adding ? withMark(leaf.marks, name, value) : withoutMark(leaf.marks, name)
+    if (beforeT.length > 0) newContent.push({ kind: 'text', text: beforeT, marks: leaf.marks })
+    if (aIdx === -1) aIdx = newContent.length
+    newContent.push({ kind: 'text', text: midT, marks: newMarks })
+    hIdx = newContent.length - 1; hOff = midT.length
+    if (afterT.length > 0) newContent.push({ kind: 'text', text: afterT, marks: leaf.marks })
+  }
+  return { content: newContent, aIdx, hIdx, hOff }
+}
+
+// Toggle a mark across the covered text leaves of a single block.
+function toggleMarkSameBlock(state: EditorState, name: string, value: AttrValue): Transaction | null {
+  const sel = state.selection
+  if (sel === null || !selIsText(sel)) return null
+  const lo = selLo(sel)
+  const hi = selHi(sel)
+  const blockPath = parentPath(lo.path)
+  const block = nodeAt(state.doc, blockPath)
+  if (block === null || !isNode(block)) return null
+  const cov = coveredLeaves(block, lastIndex(lo.path), lo.offset, lastIndex(hi.path), hi.offset)
+  if (cov.size === 0) return null
+  const adding = anyLacksMark(block, cov, name)
+  const { content, aIdx, hIdx, hOff } = markBlock(block, cov, name, value, adding)
+  let tx = txBegin(state.doc, sel)
+  tx = txStep(tx, stepReplace(blockPath, 0, block.content.length, content))
+  return txSetSelection(tx, { kind: 'text', anchor: pos([...blockPath, aIdx], 0), head: pos([...blockPath, hIdx], hOff) })
+}
+
+// Toggle a mark across a range spanning multiple SIBLING blocks (e.g. paragraphs).
+// The add/remove decision is global (add unless every covered leaf already has it);
+// nested non-inline blocks in the range (e.g. a list) are left untouched.
+function toggleMarkCrossBlock(state: EditorState, name: string, value: AttrValue): Transaction | null {
+  const sel = state.selection
+  if (sel === null || !selIsText(sel)) return null
+  const lo = selLo(sel)
+  const hi = selHi(sel)
+  const gp = parentPath(parentPath(lo.path))
+  if (!pathEq(gp, parentPath(parentPath(hi.path)))) return null  // only sibling blocks
+  const parent = nodeAt(state.doc, gp)
+  if (parent === null || !isNode(parent)) return null
+  const loBi = lastIndex(parentPath(lo.path))
+  const hiBi = lastIndex(parentPath(hi.path))
+  if (loBi >= hiBi) return null
+
+  type BInfo = { idx: number; block: Node; cov: Map<number, { from: number; to: number }> }
+  const infos: BInfo[] = []
+  for (let bi = loBi; bi <= hiBi; bi++) {
+    const block = parent.content[bi]
+    if (block === undefined || !isNode(block)) return null
+    const fromIdx = bi === loBi ? lastIndex(lo.path) : 0
+    const fromOff = bi === loBi ? lo.offset : 0
+    const toIdx = bi === hiBi ? lastIndex(hi.path) : block.content.length - 1
+    const lastLeaf = block.content[toIdx]
+    const toOff = bi === hiBi ? hi.offset : (lastLeaf !== undefined && isText(lastLeaf) ? lastLeaf.text.length : 0)
+    infos.push({ idx: bi, block, cov: coveredLeaves(block, fromIdx, fromOff, toIdx, toOff) })
+  }
+  let adding = false
+  for (const inf of infos) { if (anyLacksMark(inf.block, inf.cov, name)) { adding = true; break } }
+
+  const newBlocks: Node[] = []
+  let anchorPos: SourcePos | undefined
+  let headPos: SourcePos | undefined
+  for (const inf of infos) {
+    if (inf.cov.size === 0) { newBlocks.push(inf.block); continue }
+    const { content, aIdx, hIdx, hOff } = markBlock(inf.block, inf.cov, name, value, adding)
+    newBlocks.push(withContent(inf.block, content))
+    if (anchorPos === undefined) anchorPos = pos([...gp, inf.idx, aIdx], 0)
+    headPos = pos([...gp, inf.idx, hIdx], hOff)
+  }
+  if (anchorPos === undefined || headPos === undefined) return null
+  let tx = txBegin(state.doc, sel)
+  tx = txStep(tx, stepReplace(gp, loBi, hiBi + 1, newBlocks))
+  return txSetSelection(tx, { kind: 'text', anchor: anchorPos, head: headPos })
+}
+
+function toggleMarkSingleLeaf(state: EditorState, name: string, value: AttrValue): Transaction | null {
+  const sel = state.selection
+  if (sel === null || !selIsText(sel)) return null
   const lo = selLo(sel)
   const hi = selHi(sel)
   const leaf = nodeAt(state.doc, lo.path)

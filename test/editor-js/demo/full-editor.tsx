@@ -43,9 +43,9 @@ import {
   cmdSetBlockType,
   cmdToggleMark
 } from '../src/commands/text-commands'
-import { cmdResizeImage } from '../src/commands/structural-commands'
+import { cmdResizeImage, cmdInsertImage } from '../src/commands/structural-commands'
 import { cmdPasteSlice } from '../src/commands/paste'
-import { parseHtmlToDoc } from '../src/view/html-parser'
+import { parseHtmlToDoc, serializeDocToHtml } from '../src/view/html-parser'
 import { isNode, isText, nodeAt } from '../src/model/doc'
 import type { EditorState } from '../src/commands/types'
 import type {
@@ -166,6 +166,25 @@ export function FullEditor(props: FullEditorProps) {
     const handler = (ev: ClipboardEvent) => {
       const cb = ev.clipboardData
       if (cb === null) return
+      // An image file on the clipboard (copied image / screenshot) → insert <img>.
+      const imgItem = Array.from(cb.items ?? []).find(it => it.kind === 'file' && it.type.startsWith('image/'))
+      if (imgItem !== undefined) {
+        const file = imgItem.getAsFile()
+        if (file !== null) {
+          ev.preventDefault()
+          const reader = new FileReader()
+          reader.onload = () => {
+            const cur = stateRef.current
+            const tx = cmdInsertImage(
+              { doc: cur.doc, schema: cur.schema, selection: cur.selection, stored_marks: cur.stored_marks },
+              String(reader.result), ''
+            )
+            if (tx !== null) dispatch({ type: 'apply', tx })
+          }
+          reader.readAsDataURL(file)
+          return
+        }
+      }
       const html = cb.getData('text/html')
       const fragment = html.trim() !== ''
         ? extractClipboardFragment(html)
@@ -182,6 +201,25 @@ export function FullEditor(props: FullEditorProps) {
     }
     el.addEventListener('paste', handler)
     return () => el.removeEventListener('paste', handler)
+  }, [])
+
+  // Native copy/cut → serialize a selected node (e.g. an image) to the clipboard
+  // as HTML so it can be pasted back. (Text selections use the browser default.)
+  useEffect(() => {
+    const el = rootRef.current
+    if (el === null) return
+    const onCopy = (ev: ClipboardEvent) => {
+      const cur = stateRef.current
+      const sel = cur.selection
+      if (sel === null || sel.kind !== 'node') return
+      const n = nodeAt(cur.doc, sel.path)
+      if (n === null || !isNode(n) || ev.clipboardData === null) return
+      ev.preventDefault()
+      ev.clipboardData.setData('text/html', serializeDocToHtml(n, { schema: cur.schema }))
+      ev.clipboardData.setData('text/plain', '')
+    }
+    el.addEventListener('copy', onCopy)
+    return () => el.removeEventListener('copy', onCopy)
   }, [])
 
   // DOM selection → source selection. Lets the toolbar follow the caret.
