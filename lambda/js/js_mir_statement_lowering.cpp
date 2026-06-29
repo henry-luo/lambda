@@ -3027,11 +3027,15 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
 
     // new ReadableStream([underlyingSource [, queuingStrategy]])
     if (ctor_len == 14 && strncmp(ctor_name, "ReadableStream", 14) == 0) {
-        return jm_call_0(mt, "js_readable_stream_new", MIR_T_I64);
+        MIR_reg_t source_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+        return jm_call_1(mt, "js_readable_stream_new", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, source_arg));
     }
     // new WritableStream([underlyingSink [, queuingStrategy]])
     if (ctor_len == 14 && strncmp(ctor_name, "WritableStream", 14) == 0) {
-        return jm_call_0(mt, "js_writable_stream_new", MIR_T_I64);
+        MIR_reg_t sink_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+        return jm_call_1(mt, "js_writable_stream_new", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, sink_arg));
     }
 
     // new Proxy(target, handler) — create proxy with handler traps
@@ -3813,7 +3817,7 @@ static MIR_reg_t jm_emit_await_value_reg(JsMirTranspiler* mt, MIR_reg_t promise_
             }
         }
         MIR_reg_t await_target = jm_call_0(mt, "js_async_get_resolved", MIR_T_I64);
-        MIR_reg_t suspend_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+        MIR_reg_t suspend_result = jm_call_2(mt, "js_gen_await_result", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, await_target),
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)next_state));
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, suspend_result)));

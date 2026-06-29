@@ -13604,7 +13604,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 }
             }
             MIR_reg_t await_target = jm_call_0(mt, "js_async_get_resolved", MIR_T_I64);
-            MIR_reg_t suspend_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+            MIR_reg_t suspend_result = jm_call_2(mt, "js_gen_await_result", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, await_target),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)next_state));
             jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, suspend_result)));

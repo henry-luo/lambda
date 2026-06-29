@@ -799,8 +799,8 @@ Item js_url_construct(Item input);
 Item js_url_construct_with_base(Item input, Item base);
 Item js_url_parse(Item input, Item base);
 Item js_url_can_parse(Item input);
-Item js_readable_stream_new(void);
-Item js_writable_stream_new(void);
+Item js_readable_stream_new(Item underlying_source);
+Item js_writable_stream_new(Item underlying_sink);
 
 // Symbol API
 // Symbol items are encoded as negative ints: -(id + JS_SYMBOL_BASE).
@@ -846,6 +846,7 @@ Item js_generator_throw(Item generator, Item error);
  * Called from MIR-compiled generator state machine functions at each yield point.
  */
 Item js_gen_yield_result(Item value, int64_t next_state);
+Item js_gen_await_result(Item value, int64_t next_state);
 Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state);
 Item js_gen_return_signal(Item value);
 int64_t js_gen_is_return_signal(Item value);

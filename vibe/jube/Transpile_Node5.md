@@ -701,6 +701,49 @@ Results:
   improvements (`test-stream-construct.js`, `test-stream-duplex-end.js`,
   `test-stream-duplexpair.js`, `test-stream-transform-hwm0.js`).
 
+### 2026-06-29 Track A continuation: Duplex.from web and async edges
+
+Extended the stream-duplex surface without adding test-specific branches:
+
+- `ReadableStream` and `WritableStream` constructors now preserve their
+  underlying source/sink argument through both `globalThis` and
+  `require('stream/web')` constructors.
+- The minimal WebStream shims now keep queued readable chunks, closed/read
+  state, reader objects, writable sinks, writer objects, and sink
+  `write`/`close` calls.
+- `require('buffer').Blob` is now constructable from the buffer namespace, which
+  unblocks Blob inputs to `Duplex.from()`.
+- `Duplex.from()` now bridges Blob, WebReadable, WebWritable, and mixed
+  `{ readable, writable }` web-stream objects into Node-style duplex facades.
+- Readable-side errors from wrapped `{ readable, writable }` pairs now destroy
+  the facade and the wrapped writable; `_read` exceptions are routed through
+  stream `destroy(err)`; duplicate writable callback errors are suppressed.
+- `pipeline()` now normalizes iterable sources with `Readable.from()` and invokes
+  a function final stage as an async sink instead of requiring every stage to
+  already expose `.pipe()`.
+- Added the runtime/import-table pieces for a distinct async-generator await
+  suspension marker. This is the right root direction, but the remaining
+  async-generator `for await` resume bug is not fully closed yet.
+
+Verification:
+
+```bash
+make build
+./lambda.exe js ref/node/test/parallel/test-stream-duplexpair.js --no-log
+./lambda.exe js ref/node/test/parallel/test-stream-duplex-from.js --no-log
+```
+
+Results:
+
+- `make build`: pass.
+- Direct official `test-stream-duplexpair.js`: still pass.
+- Direct official `test-stream-duplex-from.js`: reduced from 9 missed
+  `mustCall`s at the start of this continuation to 1 missed `mustCall`.
+- Remaining blocker: the async-generator pipeline block calls the sink, but the
+  sink callback receives `iterator result is not an object`. A reduced shape is
+  `async function * g(source) { for await (const x of source) yield x; }` over a
+  `PassThrough`; plain async generators and plain `for await` consumers work.
+
 ## Verification Policy
 
 Every implementation slice should finish with:
