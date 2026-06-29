@@ -2504,6 +2504,16 @@ extern "C" Item js_crypto_createVerify(Item alg_item) {
     return js_crypto_create_sign_verify(alg_item, true);
 }
 
+static Item js_crypto_sign_verify_emit(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined_crypto();
+    Item callback = env[0];
+    Item result = env[1];
+    Item args[2] = { ItemNull, result };
+    js_call_function(callback, make_js_undefined_crypto(), args, 2);
+    return make_js_undefined_crypto();
+}
+
 extern "C" Item js_crypto_sign(Item alg_item, Item data_item, Item key_item, Item callback_item) {
     bool has_callback = !crypto_item_is_undefined(callback_item);
     if (has_callback && get_type_id(callback_item) != LMD_TYPE_FUNC) {
@@ -2524,8 +2534,11 @@ extern "C" Item js_crypto_sign(Item alg_item, Item data_item, Item key_item, Ite
     if (js_check_exception()) return ItemNull;
 
     if (has_callback) {
-        Item args[2] = { ItemNull, result };
-        js_call_function(callback_item, make_js_undefined_crypto(), args, 2);
+        Item* env = js_alloc_env(2);
+        env[0] = callback_item;
+        env[1] = result;
+        Item fn = js_new_closure((void*)js_crypto_sign_verify_emit, 0, env, 2);
+        js_next_tick_enqueue(fn);
         return make_js_undefined_crypto();
     }
     return result;
@@ -2552,8 +2565,11 @@ extern "C" Item js_crypto_verify(Item alg_item, Item data_item, Item key_item,
     if (js_check_exception()) return ItemNull;
 
     if (has_callback) {
-        Item args[2] = { ItemNull, result };
-        js_call_function(callback_item, make_js_undefined_crypto(), args, 2);
+        Item* env = js_alloc_env(2);
+        env[0] = callback_item;
+        env[1] = result;
+        Item fn = js_new_closure((void*)js_crypto_sign_verify_emit, 0, env, 2);
+        js_next_tick_enqueue(fn);
         return make_js_undefined_crypto();
     }
     return result;

@@ -32445,8 +32445,8 @@ static Item js_vm_createScript(Item code, Item options) {
 // Forward declarations
 static Item js_dc_tc_subscribe(Item handlers);
 static Item js_dc_tc_unsubscribe(Item handlers);
-static Item js_dc_tc_traceSync(Item fn);
-static Item js_dc_tc_tracePromise(Item fn);
+static Item js_dc_tc_traceSync(Item fn, Item context, Item this_arg, Item rest_args);
+static Item js_dc_tc_tracePromise(Item fn, Item context, Item this_arg, Item rest_args);
 static Item js_dc_tc_traceCallback(Item fn);
 static void js_dc_channel_publish_on(Item channel, Item message);
 static Item js_dc_channel_runStores(Item message, Item callback, Item this_arg, Item arg1, Item arg2);
@@ -32468,6 +32468,15 @@ static bool js_dc_channel_roots_registered = false;
 
 static Item js_dc_key(const char* name) {
     return (Item){.item = s2it(heap_create_name(name, (int)strlen(name)))};
+}
+
+static bool js_dc_is_nullish(Item value) {
+    if (value.item == 0 || value.item == ITEM_NULL) return true;
+    return get_type_id(value) == LMD_TYPE_UNDEFINED;
+}
+
+static Item js_dc_context_or_new(Item context) {
+    return js_dc_is_nullish(context) ? js_new_object() : context;
 }
 
 static void js_dc_register_roots(void) {
@@ -32747,9 +32756,9 @@ static Item js_dc_tracing_channel(Item nameOrChannels) {
     js_property_set(tc, (Item){.item = s2it(heap_create_name("unsubscribe", 11))},
                     js_new_function((void*)js_dc_tc_unsubscribe, 1));
     js_property_set(tc, (Item){.item = s2it(heap_create_name("traceSync", 9))},
-                    js_new_function((void*)js_dc_tc_traceSync, 1));
+                    js_new_function((void*)js_dc_tc_traceSync, -4));
     js_property_set(tc, (Item){.item = s2it(heap_create_name("tracePromise", 12))},
-                    js_new_function((void*)js_dc_tc_tracePromise, 1));
+                    js_new_function((void*)js_dc_tc_tracePromise, -4));
     js_property_set(tc, (Item){.item = s2it(heap_create_name("traceCallback", 13))},
                     js_new_function((void*)js_dc_tc_traceCallback, 1));
     return tc;
@@ -32837,39 +32846,126 @@ static Item js_dc_trace_promise_reject(Item state, Item error) {
     return ItemNull;
 }
 
+static int js_dc_rest_args(Item rest_args, Item* args_storage, Item** out_args) {
+    if (get_type_id(rest_args) != LMD_TYPE_ARRAY) {
+        *out_args = nullptr;
+        return 0;
+    }
+    int64_t len64 = js_array_length(rest_args);
+    if (len64 <= 0) {
+        *out_args = nullptr;
+        return 0;
+    }
+    int len = len64 > 16 ? 16 : (int)len64;
+    for (int i = 0; i < len; i++) {
+        args_storage[i] = js_array_get_int(rest_args, i);
+    }
+    *out_args = args_storage;
+    return len;
+}
+
+static void js_dc_emit_trace_promise_non_thenable_warning(Item fn) {
+    const char* name = "<anonymous>";
+    int name_len = 11;
+    if (get_type_id(fn) == LMD_TYPE_FUNC) {
+        JsFunction* function = (JsFunction*)fn.function;
+        if (function && function->name && function->name->len > 0) {
+            name = function->name->chars;
+            name_len = (int)function->name->len;
+        }
+    }
+
+    char message[256];
+    int message_len = snprintf(message, sizeof(message),
+        "tracePromise was called with the function '%.*s', which returned a non-thenable.",
+        name_len, name);
+    if (message_len < 0) return;
+    if (message_len >= (int)sizeof(message)) message_len = (int)sizeof(message) - 1;
+
+    Item warning = js_new_object();
+    js_property_set(warning, js_dc_key("name"),
+                    (Item){.item = s2it(heap_create_name("Warning", 7))});
+    js_property_set(warning, js_dc_key("message"),
+                    (Item){.item = s2it(heap_create_name(message, message_len))});
+    js_process_emit(js_dc_key("warning"), warning);
+}
+
 // TracingChannel.traceSync(fn, context) — run fn, publishing to start/end channels
-static Item js_dc_tc_traceSync(Item fn) {
+static Item js_dc_tc_traceSync(Item fn, Item context, Item this_arg, Item rest_args) {
     Item self = js_get_this();
     Item start_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("start", 5))});
     Item end_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("end", 3))});
     Item error_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("error", 5))});
-    Item ctx = js_new_object();
+    Item args_storage[16];
+    Item* args = nullptr;
+    int argc = js_dc_rest_args(rest_args, args_storage, &args);
+    bool should_trace = js_dc_channel_has_active_subscribers(start_ch) ||
+                        js_dc_channel_has_active_subscribers(end_ch) ||
+                        js_dc_channel_has_active_subscribers(error_ch);
+    if (!should_trace) {
+        return js_call_function(fn, this_arg, args, argc);
+    }
+    Item ctx = js_dc_context_or_new(context);
     Item store_context = js_dc_build_store_context(start_ch, ctx);
     Item publish_fn = js_property_get(start_ch, js_dc_key("publish"));
     js_als_context_call_args(store_context, publish_fn, start_ch, &ctx, 1);
-    Item result = js_als_context_call_args(store_context, fn, (Item){.item = ITEM_JS_UNDEFINED}, &ctx, 1);
+    Item result = js_als_context_call_args(store_context, fn, this_arg, args, argc);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        js_property_set(ctx, js_dc_key("error"), error);
+        js_dc_channel_publish_on(error_ch, ctx);
+        js_dc_channel_publish_on(end_ch, ctx);
+        js_throw_value(error);
+        return ItemNull;
+    }
     if (get_type_id(result) == LMD_TYPE_ERROR) {
-        js_property_set(ctx, (Item){.item = s2it(heap_create_name("error", 5))}, result);
+        js_property_set(ctx, js_dc_key("error"), result);
         js_dc_channel_publish_on(error_ch, ctx);
     }
+    js_property_set(ctx, js_dc_key("result"), result);
     js_dc_channel_publish_on(end_ch, ctx);
     return result;
 }
 
 // TracingChannel.tracePromise(fn, context)
-static Item js_dc_tc_tracePromise(Item fn) {
+static Item js_dc_tc_tracePromise(Item fn, Item context, Item this_arg, Item rest_args) {
     Item self = js_get_this();
     Item start_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("start", 5))});
+    Item end_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("end", 3))});
     Item async_start_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("asyncStart", 10))});
     Item async_end_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("asyncEnd", 8))});
     Item error_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("error", 5))});
-    Item ctx = js_new_object();
+    Item args_storage[16];
+    Item* args = nullptr;
+    int argc = js_dc_rest_args(rest_args, args_storage, &args);
+    bool should_trace = js_dc_channel_has_active_subscribers(start_ch) ||
+                        js_dc_channel_has_active_subscribers(end_ch) ||
+                        js_dc_channel_has_active_subscribers(async_start_ch) ||
+                        js_dc_channel_has_active_subscribers(async_end_ch) ||
+                        js_dc_channel_has_active_subscribers(error_ch);
+    if (!should_trace) {
+        return js_call_function(fn, this_arg, args, argc);
+    }
+    Item ctx = js_dc_context_or_new(context);
     Item store_context = js_dc_build_store_context(start_ch, ctx);
     Item publish_fn = js_property_get(start_ch, js_dc_key("publish"));
     js_als_context_call_args(store_context, publish_fn, start_ch, &ctx, 1);
-    Item result = js_als_context_call_args(store_context, fn, (Item){.item = ITEM_JS_UNDEFINED}, &ctx, 1);
+    Item result = js_als_context_call_args(store_context, fn, this_arg, args, argc);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        js_property_set(ctx, js_dc_key("error"), error);
+        js_dc_channel_publish_on(error_ch, ctx);
+        js_dc_channel_publish_on(end_ch, ctx);
+        js_throw_value(error);
+        return ItemNull;
+    }
+    js_property_set(ctx, js_dc_key("result"), result);
+    js_dc_channel_publish_on(end_ch, ctx);
     Item then_fn = js_property_get(result, js_dc_key("then"));
-    if (get_type_id(then_fn) != LMD_TYPE_FUNC) return result;
+    if (get_type_id(then_fn) != LMD_TYPE_FUNC) {
+        js_dc_emit_trace_promise_non_thenable_warning(fn);
+        return result;
+    }
 
     Item state = js_array_new(0);
     js_array_push(state, async_start_ch);

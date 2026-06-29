@@ -170,3 +170,21 @@ assert.strictEqual(crypto.createVerify('sha256')
   .update(message)
   .verify({ key: generated.publicKey, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: 20 }, generatedSignature), true);
 console.log('rsa generateKeyPairSync pss:', true);
+
+let asyncSignAfterCall = false;
+const asyncSignReturn = crypto.sign('sha256', Buffer.from(message), privateKeyObject,
+  function(err, asyncSignature) {
+    console.log('rsa one-shot sign callback:',
+      err === null && Buffer.isBuffer(asyncSignature) && asyncSignAfterCall);
+  });
+assert.strictEqual(asyncSignReturn, undefined);
+asyncSignAfterCall = true;
+
+const asyncVerifySignature = crypto.sign('sha256', Buffer.from(message), privateKeyObject);
+let asyncVerifyAfterCall = false;
+const asyncVerifyReturn = crypto.verify('sha256', Buffer.from(message), publicKeyObject,
+  asyncVerifySignature, function(err, ok) {
+    console.log('rsa one-shot verify callback:', err === null && ok === true && asyncVerifyAfterCall);
+  });
+assert.strictEqual(asyncVerifyReturn, undefined);
+asyncVerifyAfterCall = true;
