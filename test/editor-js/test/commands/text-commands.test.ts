@@ -222,6 +222,20 @@ describe('commands/cmdDeleteBackward — join backward (divergence fix)', () => 
     expect(tx.sel_after).toEqual(caret([0, 0, 0], 1))
   })
 
+  it('joins two adjacent lists at the start of the second list', () => {
+    const s = state('doc', [node('ul', [node('li', [text('one')])]), node('ul', [node('li', [text('two')])])], caret([1, 0, 0], 0))
+    const tx = cmdDeleteBackward(s)!
+    expect(tx.doc_after.content).toEqual([node('ul', [node('li', [text('one')]), node('li', [text('two')])])])
+    // caret at the start of the item carried over from the second list
+    expect(tx.sel_after).toEqual(caret([0, 1, 0], 0))
+  })
+
+  it('joins lists of different kinds into the first list’s kind', () => {
+    const s = state('doc', [node('ol', [node('li', [text('one')])]), node('ul', [node('li', [text('two')])])], caret([1, 0, 0], 0))
+    const tx = cmdDeleteBackward(s)!
+    expect(tx.doc_after.content).toEqual([node('ol', [node('li', [text('one')]), node('li', [text('two')])])])
+  })
+
   it('returns null at the first block (nothing to merge into)', () => {
     const s = state('doc', [node('p', [text('a')]), node('p', [text('b')])], caret([0, 0], 0))
     expect(cmdDeleteBackward(s)).toBeNull()

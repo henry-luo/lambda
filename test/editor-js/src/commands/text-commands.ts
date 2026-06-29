@@ -11,7 +11,7 @@
 // block, all/node selections) get expanded as the corresponding Slate
 // fixtures are ported.
 
-import { isNode, isText, lastIndex, node, nodeAt, parentPath, withContent } from '../model/doc.js'
+import { isNode, isText, lastIndex, node, nodeAt, nodeAttrs, parentPath, withContent } from '../model/doc.js'
 import { pos, posEqual, textSelection } from '../model/source-pos.js'
 import { charLen, caretPosInContent, mergeInlines } from '../model/inline.js'
 import {
@@ -175,10 +175,52 @@ function mergeIntoLastInline(schema: Schema, prev: Node, incoming: Child[]): Mer
 // Backspace at the very start of a block: merge it into the previous sibling
 // block (PM joinBackward). Returns null at the first block (no previous sibling)
 // or when the previous block has no mergeable descendant.
+function isListTag(tag: string): boolean {
+  return tag === 'ul' || tag === 'ol' || tag === 'list'
+}
+
+// Backspace at the very start of the FIRST item of a list, when that list is
+// preceded by another list, joins the two lists into one (the earlier list's
+// kind wins). Walks up through first-child wrappers (e.g. <li><p>…) to find the
+// enclosing first list item. Returns null when not at such a boundary.
+function joinFirstListItemBackward(state: EditorState, blockPath: SourcePath): Transaction | null {
+  let p = blockPath
+  while (p.length >= 1) {
+    if (lastIndex(p) !== 0) return null            // not at the very start of its parent
+    const parent = nodeAt(state.doc, parentPath(p))
+    if (parent === null || !isNode(parent)) return null
+    if (isListTag(parent.tag)) return joinLists(state, parentPath(p))
+    p = parentPath(p)
+  }
+  return null
+}
+
+function joinLists(state: EditorState, listPath: SourcePath): Transaction | null {
+  const list = nodeAt(state.doc, listPath)
+  if (list === null || !isNode(list) || !isListTag(list.tag)) return null
+  const listParent = parentPath(listPath)
+  const listIdx = lastIndex(listPath)
+  if (listIdx === 0) return null                   // no previous sibling to join with
+  const prev = nodeAt(state.doc, [...listParent, listIdx - 1])
+  if (prev === null || !isNode(prev) || !isListTag(prev.tag)) return null  // previous sibling isn't a list
+  const prevLen = prev.content.length
+  const merged = nodeAttrs(prev.tag, prev.attrs, [...prev.content, ...list.content])
+  let tx = txBegin(state.doc, state.selection)
+  tx = txStep(tx, stepReplace(listParent, listIdx - 1, listIdx + 1, [merged]))
+  // caret at the start of the first item carried over from the second list
+  const movedItemPath = [...listParent, listIdx - 1, prevLen]
+  const firstMoved = list.content[0]
+  const caretPath = firstMoved !== undefined && isNode(firstMoved) &&
+                    firstMoved.content.length > 0 && isText(firstMoved.content[0])
+    ? [...movedItemPath, 0]
+    : movedItemPath
+  return txSetSelection(tx, caret(pos(caretPath, 0)))
+}
+
 function joinBlockBackward(state: EditorState, blockPath: SourcePath): Transaction | null {
   const parent = parentPath(blockPath)
   const blockIdx = lastIndex(blockPath)
-  if (blockIdx === 0) return null  // first block under its parent — nothing to merge into
+  if (blockIdx === 0) return joinFirstListItemBackward(state, blockPath)  // try list↔list join
   const cur = nodeAt(state.doc, blockPath)
   const prev = nodeAt(state.doc, [...parent, blockIdx - 1])
   if (cur === null || !isNode(cur) || prev === null || !isNode(prev)) return null

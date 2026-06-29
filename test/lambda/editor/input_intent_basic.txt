@@ -160,7 +160,7 @@ true
 true
 "outdent html intent top count:"
 true
-"outdent html intent selected:"
+"outdent html intent caret kept:"
 true
 "bold intent stored:"
 true
