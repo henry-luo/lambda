@@ -112,6 +112,20 @@ const nan_c = [17, 18, 19, 20, 21, 22, 248, 127];
     assertBytes(new Uint8Array(sliced.buffer), nan_b, "Float64Array.slice preserves NaN payload bytes");
 }
 {
+    const f64 = new Float64Array([10, 20, 30, 40, 50, 60]);
+    f64.constructor = {
+        [Symbol.species]: function() {
+            return new Float64Array(f64.buffer, 2 * Float64Array.BYTES_PER_ELEMENT);
+        }
+    };
+    const sliced = f64.slice(1, 4);
+    assertEq(sliced.length, 4, "Float64Array.slice same-buffer species length");
+    assertEq(sliced[0], 20, "Float64Array.slice same-buffer species elem 0");
+    assertEq(sliced[1], 20, "Float64Array.slice same-buffer species elem 1");
+    assertEq(sliced[2], 20, "Float64Array.slice same-buffer species elem 2");
+    assertEq(sliced[3], 60, "Float64Array.slice same-buffer species elem 3");
+}
+{
     const f64 = new Float64Array(3);
     const bytes = new Uint8Array(f64.buffer);
     bytes.set(nan_a, 0);
