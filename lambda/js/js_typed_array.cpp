@@ -392,6 +392,11 @@ static bool js_typed_array_raw_fast_enabled(void) {
     return enabled != 0;
 }
 
+static bool js_typed_array_arraynum_view_matches(JsTypedArray* ta, const char* data, int index) {
+    return ta && !ta->is_buffer && ta->view && ta->view->data == (void*)data &&
+        index >= 0 && index < ta->view->length;
+}
+
 static bool js_typed_array_try_raw_set_same_type(JsTypedArray* dst, JsTypedArray* src, int offset) {
     if (!js_typed_array_raw_fast_enabled()) return false;
     if (!dst || !src || dst->element_type != src->element_type) return false;
@@ -420,7 +425,13 @@ static bool js_typed_array_ranges_overlap(const char* dst_data, int dst_byte_len
     return dst_data < src_end && src_data < dst_end;
 }
 
-static double js_typed_array_raw_load_number(JsTypedArrayType type, const char* data, int index) {
+static double js_typed_array_raw_load_number(JsTypedArray* ta, const char* data, int index) {
+    if (!ta) return 0.0;
+    if (js_typed_array_arraynum_view_matches(ta, data, index) &&
+        js_typed_array_is_number_element(ta->element_type)) {
+        return array_num_get_number_value(ta->view, index);
+    }
+    JsTypedArrayType type = ta->element_type;
     switch (type) {
     case JS_TYPED_INT8: return (double)((int8_t*)data)[index];
     case JS_TYPED_UINT8:
@@ -463,7 +474,41 @@ static int64_t js_typed_array_to_int_n(double value, int bits, bool is_signed) {
     return (int64_t)wrapped;
 }
 
-static void js_typed_array_raw_store_number(JsTypedArrayType type, char* data, int index, double value) {
+static void js_typed_array_raw_store_number(JsTypedArray* ta, char* data, int index, double value) {
+    if (!ta) return;
+    if (js_typed_array_arraynum_view_matches(ta, data, index) &&
+        js_typed_array_is_number_element(ta->element_type)) {
+        switch (ta->element_type) {
+        case JS_TYPED_INT8:
+            array_num_set_int64_value(ta->view, index, js_typed_array_to_int_n(value, 8, true));
+            return;
+        case JS_TYPED_UINT8:
+            array_num_set_int64_value(ta->view, index, js_typed_array_to_int_n(value, 8, false));
+            return;
+        case JS_TYPED_UINT8_CLAMPED:
+            array_num_set_double_value(ta->view, index, value);
+            return;
+        case JS_TYPED_INT16:
+            array_num_set_int64_value(ta->view, index, js_typed_array_to_int_n(value, 16, true));
+            return;
+        case JS_TYPED_UINT16:
+            array_num_set_int64_value(ta->view, index, js_typed_array_to_int_n(value, 16, false));
+            return;
+        case JS_TYPED_INT32:
+            array_num_set_int64_value(ta->view, index, js_typed_array_to_int_n(value, 32, true));
+            return;
+        case JS_TYPED_UINT32:
+            array_num_set_int64_value(ta->view, index, js_typed_array_to_int_n(value, 32, false));
+            return;
+        case JS_TYPED_FLOAT32:
+        case JS_TYPED_FLOAT64:
+            array_num_set_double_value(ta->view, index, value);
+            return;
+        default:
+            break;
+        }
+    }
+    JsTypedArrayType type = ta->element_type;
     switch (type) {
     case JS_TYPED_INT8:
         ((int8_t*)data)[index] = (int8_t)js_typed_array_to_int_n(value, 8, true);
@@ -504,6 +549,7 @@ static bool js_typed_array_try_raw_from_dense_number_array(Item result, Array* a
 
     JsTypedArray* dst = js_get_typed_array_ptr(result.map);
     if (!dst || !js_typed_array_is_number_element(dst->element_type)) return false;
+    js_typed_array_refresh_arraynum_view(dst);
     char* data = (char*)js_typed_array_current_data(dst);
     if (len > 0 && !data) return false;
 
@@ -525,7 +571,7 @@ static bool js_typed_array_try_raw_from_dense_number_array(Item result, Array* a
                 return false;
             }
         }
-        js_typed_array_raw_store_number(dst->element_type, data, i, num_val);
+        js_typed_array_raw_store_number(dst, data, i, num_val);
     }
     return true;
 }
@@ -543,6 +589,8 @@ static bool js_typed_array_try_raw_convert_number(JsTypedArray* dst, JsTypedArra
     int dst_len = js_typed_array_current_length(dst);
     if (offset < 0 || (int64_t)offset + (int64_t)src_len > (int64_t)dst_len) return false;
 
+    js_typed_array_refresh_arraynum_view(src);
+    js_typed_array_refresh_arraynum_view(dst);
     char* src_data = (char*)js_typed_array_current_data(src);
     char* dst_data = (char*)js_typed_array_current_data(dst);
     if (!src_data || !dst_data) return false;
@@ -557,8 +605,8 @@ static bool js_typed_array_try_raw_convert_number(JsTypedArray* dst, JsTypedArra
     }
 
     for (int i = 0; i < src_len; i++) {
-        double value = js_typed_array_raw_load_number(src->element_type, src_data, i);
-        js_typed_array_raw_store_number(dst->element_type, dst_start, i, value);
+        double value = js_typed_array_raw_load_number(src, src_data, i);
+        js_typed_array_raw_store_number(dst, dst_data, offset + i, value);
     }
     return true;
 }
@@ -698,18 +746,19 @@ extern "C" int js_typed_array_raw_index_of(Item ta_item, Item search_value,
         if (!reverse) return -1;
         from = len - 1;
     }
+    js_typed_array_refresh_arraynum_view(ta);
     char* data = (char*)js_typed_array_current_data(ta);
     if (!data) return -2;
 
     bool needle_nan = isnan(needle);
     if (reverse) {
         for (int i = from; i >= 0; i--) {
-            double value = js_typed_array_raw_load_number(ta->element_type, data, i);
+            double value = js_typed_array_raw_load_number(ta, data, i);
             if (value == needle || (same_value_zero && needle_nan && isnan(value))) return i;
         }
     } else {
         for (int i = from; i < len; i++) {
-            double value = js_typed_array_raw_load_number(ta->element_type, data, i);
+            double value = js_typed_array_raw_load_number(ta, data, i);
             if (value == needle || (same_value_zero && needle_nan && isnan(value))) return i;
         }
     }
@@ -2221,6 +2270,28 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
 
 extern "C" Item js_typed_array_raw_get_item(JsTypedArray* ta, void* data, int idx) {
     if (!ta || !data || idx < 0) return (Item){.item = ITEM_JS_UNDEFINED};
+    if (js_typed_array_arraynum_view_matches(ta, (const char*)data, idx) &&
+        js_typed_array_is_number_element(ta->element_type)) {
+        double value = array_num_get_number_value(ta->view, idx);
+        switch (ta->element_type) {
+        case JS_TYPED_INT8:
+        case JS_TYPED_UINT8:
+        case JS_TYPED_INT16:
+        case JS_TYPED_UINT16:
+        case JS_TYPED_INT32:
+        case JS_TYPED_UINT32:
+        case JS_TYPED_UINT8_CLAMPED:
+            return (Item){.item = i2it((int64_t)value)};
+        case JS_TYPED_FLOAT32:
+        case JS_TYPED_FLOAT64: {
+            double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+            *fp = value;
+            return (Item){.item = d2it(fp)};
+        }
+        default:
+            break;
+        }
+    }
     switch (ta->element_type) {
     case JS_TYPED_INT8:
         return (Item){.item = i2it((int64_t)((int8_t*)data)[idx])};

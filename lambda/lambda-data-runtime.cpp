@@ -711,6 +711,123 @@ static double item_to_float_value(Item value) {
     }
 }
 
+double array_num_get_number_value(ArrayNum *arr, int64_t index) {
+    if (!arr || index < 0 || index >= arr->length) return 0.0;
+    switch (arr->get_elem_type()) {
+    case ELEM_INT:
+    case ELEM_INT64:
+        return (double)arr->items[index];
+    case ELEM_FLOAT:
+        return arr->float_items[index];
+    case ELEM_INT8:
+        return (double)((int8_t*)arr->data)[index];
+    case ELEM_INT16:
+        return (double)((int16_t*)arr->data)[index];
+    case ELEM_INT32:
+        return (double)((int32_t*)arr->data)[index];
+    case ELEM_UINT8:
+    case ELEM_UINT8_CLAMPED:
+        return (double)((uint8_t*)arr->data)[index];
+    case ELEM_UINT16:
+        return (double)((uint16_t*)arr->data)[index];
+    case ELEM_UINT32:
+        return (double)((uint32_t*)arr->data)[index];
+    case ELEM_FLOAT16:
+        return (double)f16_bits_to_f32(((uint16_t*)arr->data)[index]);
+    case ELEM_FLOAT32:
+        return (double)((float*)arr->data)[index];
+    case ELEM_UINT64:
+        return (double)((uint64_t*)arr->data)[index];
+    case ELEM_FLOAT64:
+        return ((double*)arr->data)[index];
+    case ELEM_BOOL:
+        return ((uint8_t*)arr->data)[index] ? 1.0 : 0.0;
+    default:
+        return 0.0;
+    }
+}
+
+void array_num_set_int64_value(ArrayNum *arr, int64_t index, int64_t value) {
+    if (!arr || index < 0 || index >= arr->capacity) return;
+    if (arr->is_view && !arr->is_mutable_view) {
+        log_error("array_num_set_int64_value: cannot mutate a read-only view; copy() first");
+        return;
+    }
+    switch (arr->get_elem_type()) {
+    case ELEM_INT:
+    case ELEM_INT64:
+        arr->items[index] = value;
+        break;
+    case ELEM_FLOAT:
+        arr->float_items[index] = (double)value;
+        break;
+    case ELEM_INT8:
+        ((int8_t*)arr->data)[index] = (int8_t)value;
+        break;
+    case ELEM_INT16:
+        ((int16_t*)arr->data)[index] = (int16_t)value;
+        break;
+    case ELEM_INT32:
+        ((int32_t*)arr->data)[index] = (int32_t)value;
+        break;
+    case ELEM_UINT8:
+    case ELEM_UINT8_CLAMPED:
+        ((uint8_t*)arr->data)[index] = (uint8_t)value;
+        break;
+    case ELEM_UINT16:
+        ((uint16_t*)arr->data)[index] = (uint16_t)value;
+        break;
+    case ELEM_UINT32:
+        ((uint32_t*)arr->data)[index] = (uint32_t)value;
+        break;
+    case ELEM_FLOAT16:
+        ((uint16_t*)arr->data)[index] = f32_to_f16_bits((float)value);
+        break;
+    case ELEM_FLOAT32:
+        ((float*)arr->data)[index] = (float)value;
+        break;
+    case ELEM_UINT64:
+        ((uint64_t*)arr->data)[index] = (uint64_t)value;
+        break;
+    case ELEM_FLOAT64:
+        ((double*)arr->data)[index] = (double)value;
+        break;
+    case ELEM_BOOL:
+        ((uint8_t*)arr->data)[index] = value ? 1 : 0;
+        break;
+    default:
+        break;
+    }
+}
+
+void array_num_set_double_value(ArrayNum *arr, int64_t index, double value) {
+    if (!arr || index < 0 || index >= arr->capacity) return;
+    if (arr->is_view && !arr->is_mutable_view) {
+        log_error("array_num_set_double_value: cannot mutate a read-only view; copy() first");
+        return;
+    }
+    switch (arr->get_elem_type()) {
+    case ELEM_FLOAT:
+        arr->float_items[index] = value;
+        break;
+    case ELEM_FLOAT16:
+        ((uint16_t*)arr->data)[index] = f32_to_f16_bits((float)value);
+        break;
+    case ELEM_FLOAT32:
+        ((float*)arr->data)[index] = (float)value;
+        break;
+    case ELEM_FLOAT64:
+        ((double*)arr->data)[index] = value;
+        break;
+    case ELEM_UINT8_CLAMPED:
+        ((uint8_t*)arr->data)[index] = array_num_clamp_uint8_even(value);
+        break;
+    default:
+        array_num_set_int64_value(arr, index, (int64_t)value);
+        break;
+    }
+}
+
 // Generic setter for all ArrayNum elem_types, dispatches on elem_type
 void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
     if (!arr || index < 0 || index >= arr->capacity) return;

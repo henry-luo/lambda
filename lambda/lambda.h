@@ -1209,6 +1209,9 @@ extern "C" {
     void array_float_set(ArrayNum *arr, int64_t index, double value);
     void array_int_set(ArrayNum *arr, int64_t index, int64_t value);
     void array_num_set_item(ArrayNum *arr, int64_t index, Item value);
+    double array_num_get_number_value(ArrayNum *arr, int64_t index);
+    void array_num_set_int64_value(ArrayNum *arr, int64_t index, int64_t value);
+    void array_num_set_double_value(ArrayNum *arr, int64_t index, double value);
 
     Map* map(int64_t type_index);
     Map* map_with_data(int64_t type_index);
