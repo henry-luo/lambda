@@ -77,10 +77,6 @@ static void gc_finalize_arraybuffer(JsArrayBuffer* ab, gc_native_seen_t* seen_na
 
 static void gc_finalize_typed_array(JsTypedArray* ta, gc_native_seen_t* seen_native) {
     if (!ta || gc_native_seen_seen_or_add(seen_native, ta)) return;
-    if (!ta->buffer && ta->data) {
-        mem_free(ta->data);
-        ta->data = NULL;
-    }
     mem_free(ta);
 }
 

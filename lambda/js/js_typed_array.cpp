@@ -316,17 +316,41 @@ static bool js_typed_array_is_number_element(JsTypedArrayType type) {
     return !js_typed_array_is_bigint_element(type);
 }
 
+static ArrayNumShape* js_typed_array_view_shape(JsTypedArray* ta) {
+    return (ta && ta->view) ? (ArrayNumShape*)(uintptr_t)ta->view->extra : NULL;
+}
+
+static int js_typed_array_stored_byte_offset(JsTypedArray* ta) {
+    if (!ta || !ta->view) return 0;
+    int elem_size = typed_array_element_size(ta->element_type);
+    ArrayNumShape* shape = js_typed_array_view_shape(ta);
+    if (shape) return (int)(shape->offset * elem_size);
+    return 0;
+}
+
+static int js_typed_array_stored_length(JsTypedArray* ta) {
+    if (!ta || !ta->view) return 0;
+    return (int)ta->view->length;
+}
+
+static int js_typed_array_stored_byte_length(JsTypedArray* ta) {
+    if (!ta) return 0;
+    return js_typed_array_stored_length(ta) * typed_array_element_size(ta->element_type);
+}
+
 static int js_typed_array_current_byte_length(JsTypedArray* ta) {
     if (!ta) return 0;
-    if (!ta->buffer) return ta->byte_length;
+    if (!ta->buffer) return js_typed_array_stored_byte_length(ta);
     if (ta->buffer->detached) return 0;
-    int available = ta->buffer->byte_length - ta->byte_offset;
+    int byte_offset = js_typed_array_stored_byte_offset(ta);
+    int available = ta->buffer->byte_length - byte_offset;
     if (available < 0) return 0;
     if (ta->length_tracking) {
         int elem_size = typed_array_element_size(ta->element_type);
         return (available / elem_size) * elem_size;
     }
-    return available >= ta->byte_length ? ta->byte_length : 0;
+    int byte_length = js_typed_array_stored_byte_length(ta);
+    return available >= byte_length ? byte_length : 0;
 }
 
 static int js_typed_array_current_length(JsTypedArray* ta) {
@@ -337,24 +361,27 @@ static int js_typed_array_current_length(JsTypedArray* ta) {
 
 static int js_typed_array_current_byte_offset(JsTypedArray* ta) {
     if (!ta) return 0;
-    if (!ta->buffer) return ta->byte_offset;
+    int byte_offset = js_typed_array_stored_byte_offset(ta);
+    if (!ta->buffer) return byte_offset;
     if (ta->buffer->detached) return 0;
-    if (ta->length_tracking) return ta->buffer->byte_length >= ta->byte_offset ? ta->byte_offset : 0;
-    return ta->buffer->byte_length >= ta->byte_offset + ta->byte_length ? ta->byte_offset : 0;
+    if (ta->length_tracking) return ta->buffer->byte_length >= byte_offset ? byte_offset : 0;
+    int byte_length = js_typed_array_stored_byte_length(ta);
+    return ta->buffer->byte_length >= byte_offset + byte_length ? byte_offset : 0;
 }
 
 static void* js_typed_array_current_data(JsTypedArray* ta) {
     if (!ta) return NULL;
-    if (!ta->buffer) return ta->data;
+    if (!ta->buffer) return ta->view ? ta->view->data : NULL;
     if (js_typed_array_current_byte_length(ta) == 0) return NULL;
-    return (char*)ta->buffer->data + ta->byte_offset;
+    return (char*)ta->buffer->data + js_typed_array_current_byte_offset(ta);
 }
 
 static void js_typed_array_refresh_arraynum_view(JsTypedArray* ta) {
     if (!ta || !ta->view) return;
 
-    int byte_offset = js_typed_array_current_byte_offset(ta);
-    int length = js_typed_array_current_length(ta);
+    int byte_offset = js_typed_array_stored_byte_offset(ta);
+    int length = ta->length_tracking ? js_typed_array_current_length(ta) :
+        js_typed_array_stored_length(ta);
     void* data = js_typed_array_current_data(ta);
 
     ta->view->data = data;
@@ -379,8 +406,9 @@ static void js_typed_array_refresh_arraynum_view(JsTypedArray* ta) {
 static bool js_typed_array_is_out_of_bounds(JsTypedArray* ta) {
     if (!ta || !ta->buffer) return false;
     if (ta->buffer->detached) return true;
-    if (ta->length_tracking) return ta->buffer->byte_length < ta->byte_offset;
-    return ta->buffer->byte_length < ta->byte_offset + ta->byte_length;
+    int byte_offset = js_typed_array_stored_byte_offset(ta);
+    if (ta->length_tracking) return ta->buffer->byte_length < byte_offset;
+    return ta->buffer->byte_length < byte_offset + js_typed_array_stored_byte_length(ta);
 }
 
 static bool js_typed_array_arraynum_view_matches(JsTypedArray* ta, const char* data, int index) {
@@ -1985,18 +2013,16 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     JsTypedArrayType arr_type = (JsTypedArrayType)type_id;
     int elem_size = typed_array_element_size(arr_type);
     int byte_length = length * elem_size;
+    JsArrayBuffer* ab = js_arraybuffer_alloc(byte_length);
+    Item buffer_item = js_arraybuffer_wrap(ab);
 
     JsTypedArray* ta = (JsTypedArray*)mem_alloc(sizeof(JsTypedArray), MEM_CAT_JS_RUNTIME);
     ta->element_type = arr_type;
-    ta->length = length;
-    ta->byte_length = byte_length;
-    ta->byte_offset = 0;
-    ta->data = mem_calloc(length > 0 ? length : 1, elem_size, MEM_CAT_JS_RUNTIME);
-    ta->buffer = NULL;
-    ta->buffer_item = 0;
+    ta->buffer = ab;
+    ta->buffer_item = buffer_item.item;
     ta->length_tracking = false;
     ta->is_buffer = false;
-    ta->view = array_num_new_external_view(NULL, ta->data,
+    ta->view = array_num_new_external_view((Container*)buffer_item.map, ab->data,
         js_typed_array_elem_type(arr_type), 0, length, true);
     js_typed_array_refresh_arraynum_view(ta);
 
@@ -2057,10 +2083,6 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
 
     JsTypedArray* ta = (JsTypedArray*)mem_alloc(sizeof(JsTypedArray), MEM_CAT_JS_RUNTIME);
     ta->element_type = arr_type;
-    ta->length = length;
-    ta->byte_length = byte_length;
-    ta->byte_offset = byte_offset;
-    ta->data = (char*)ab->data + byte_offset;  // direct pointer into buffer
     ta->buffer = ab;
     ta->buffer_item = buffer_item.item;  // preserve original Item for identity-preserving .buffer
     ta->length_tracking = length_tracking;
@@ -2446,7 +2468,7 @@ extern "C" int js_typed_array_length(Item ta_item) {
 // Js54 P3: live data pointer for the typed array's element storage.
 // Used by the MIR JIT inline indexed get/set paths so resizable-buffer-backed
 // views see the current ab->data after a resize() reallocs the backing store
-// (the cached ta->data would point to the freed-or-stale buffer otherwise).
+// (cached descriptor data would point at the freed/stale backing store otherwise).
 // Returns NULL for OOB or detached views — callers must treat NULL as a
 // short-circuit on the access path.
 extern "C" void* js_typed_array_current_data_ptr(Item ta_item) {
@@ -2749,7 +2771,8 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
     }
     // Copy elements — species may return a different typed array type, so use element-by-element copy
     JsTypedArray* rta = js_get_typed_array_ptr(result.map);
-    if (rta && rta->element_type == ta->element_type && rta->length >= new_length) {
+    if (rta && rta->element_type == ta->element_type &&
+            js_typed_array_current_length(rta) >= new_length) {
         int elem_size = typed_array_element_size(ta->element_type);
         int count_bytes = new_length * elem_size;
         int source_byte_length = js_typed_array_current_byte_length(ta);
@@ -2801,12 +2824,13 @@ extern "C" Item js_typed_array_subarray(Item ta_item, int start, int end, bool e
     JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
 
     int elem_size = typed_array_element_size(ta->element_type);
-    int available_len = ta->length;
-    int begin_byte_offset = ta->byte_offset + start * elem_size;
+    int byte_offset = js_typed_array_stored_byte_offset(ta);
+    int available_len = js_typed_array_stored_length(ta);
+    int begin_byte_offset = byte_offset + start * elem_size;
     bool result_length_tracking = ta->buffer && ta->length_tracking && end_is_default;
 
     if (ta->buffer && !ta->buffer->detached) {
-        int available_bytes = ta->buffer->byte_length - ta->byte_offset;
+        int available_bytes = ta->buffer->byte_length - byte_offset;
         if (available_bytes < 0) available_bytes = 0;
         available_len = available_bytes / elem_size;
         if (begin_byte_offset > ta->buffer->byte_length) {
@@ -2821,20 +2845,9 @@ extern "C" Item js_typed_array_subarray(Item ta_item, int start, int end, bool e
     int new_length = result_length_tracking ? available_len - start : end - start;
     if (new_length < 0) new_length = 0;
 
-    if (!ta->buffer) {
-        JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
-        ab->data = ta->data;
-        ab->byte_length = ta->byte_length;
-        ab->max_byte_length = ta->byte_length;
-        ab->detached = false;
-        ab->is_shared = false;
-        ab->resizable = false;
-        ta->buffer = ab;
-        Item wrapped = js_arraybuffer_wrap(ab);
-        ta->buffer_item = wrapped.item;
-    }
+    if (!ta->buffer_item || !ta->buffer) return js_throw_type_error("TypedArray has no backing ArrayBuffer");
     return js_typed_array_species_create_from_buffer(
-        ta_item, (Item){.item = ta->buffer_item}, ta->byte_offset + start * elem_size,
+        ta_item, (Item){.item = ta->buffer_item}, byte_offset + start * elem_size,
         new_length, result_length_tracking);
 }
 

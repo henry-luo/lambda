@@ -3125,19 +3125,13 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
             }
             if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(object.map);
-                if (ta->buffer_item) {
+                if (ta && ta->buffer_item) {
                     *out_result = (Item){.item = ta->buffer_item};
                     return true;
                 }
-                if (!ta->buffer) {
-                    JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
-                    ab->data = js_typed_array_current_data_ptr(object);
-                    ab->byte_length = js_typed_array_byte_length(object);
-                    ab->max_byte_length = ab->byte_length;
-                    ab->detached = false;
-                    ab->is_shared = false;
-                    ab->resizable = false;
-                    ta->buffer = ab;
+                if (!ta || !ta->buffer) {
+                    *out_result = make_js_undefined();
+                    return true;
                 }
                 Item wrapped = js_arraybuffer_wrap(ta->buffer);
                 ta->buffer_item = wrapped.item;

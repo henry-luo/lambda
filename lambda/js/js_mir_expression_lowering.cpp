@@ -10395,8 +10395,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
 // Memory layout:
 //   Item (boxed) → Map* (direct pointer, no tag bits for containers)
 //     Map.data    at offset 16 → JsTypedArray*
-//       ta->length at offset 4  (int32)
-//       ta->data   at offset 16 → raw element buffer
+//       live length/data are loaded through js_typed_array_length() and
+//       js_typed_array_current_data_ptr(); JsTypedArray no longer caches them.
 //
 // Element sizes: INT8/UINT8=1, INT16/UINT16=2, INT32/UINT32/FLOAT32=4, FLOAT64=8
 
@@ -10564,8 +10564,8 @@ bool jm_typed_array_is_int(int ta_type) {
 // Access pattern:
 //   map_ptr     = arr_reg (container Item )
 //   ta_ptr      = *(void**)(map_ptr + 16)      // Map.data → JsTypedArray*
-//   ta_length   = *(int32*)(ta_ptr + 4)         // JsTypedArray.length
-//   data_ptr    = *(void**)(ta_ptr + 16)        // JsTypedArray.data
+//   ta_length   = js_typed_array_length(map_ptr)
+//   data_ptr    = js_typed_array_current_data_ptr(map_ptr)
 //   if (idx < 0 || idx >) return ITEM_NULL
 //   element     = data_ptr[idx]                 // sized load
 //   return box(element)
@@ -10583,7 +10583,7 @@ MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr_reg,
         // ta.__proto__=X), js_upgrade_native_backed_map_for_properties moves
         // the JsTypedArray* into the __ta__ slot and overwrites m->data with
         // the property-storage buffer. Direct offset-16 load would then
-        // dereference garbage — SIGSEGV on the next ta->data read. Route
+        // dereference garbage before asking for live storage. Route
         // through the runtime helper which checks data_cap and reads __ta__
         // when upgraded.
         (void)jm_call_1(mt, "js_get_typed_array_ptr", MIR_T_I64,
@@ -10597,7 +10597,7 @@ MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr_reg,
         // Js54 P3: ask the runtime for the live data pointer. For TAs over an
         // ArrayBuffer the data lives at ab->data + byte_offset, and ab->data
         // can be replaced by ArrayBuffer.prototype.resize() reallocating —
-        // the cached ta->data would point at the freed/stale backing store.
+        // cached descriptor data would point at the freed/stale backing store.
         // The helper returns NULL for OOB / detached, which the bounds check
         // below treats like idx-out-of-range.
         data_ptr = jm_call_1(mt, "js_typed_array_current_data_ptr", MIR_T_I64,
