@@ -88,6 +88,7 @@ static Item vector_get(Item item, int64_t index) {
                 case ELEM_INT16:   return { .item = i16_to_item(((int16_t*)arr->data)[index]) };
                 case ELEM_INT32:   return { .item = i32_to_item(((int32_t*)arr->data)[index]) };
                 case ELEM_UINT8:   return { .item = u8_to_item(((uint8_t*)arr->data)[index]) };
+                case ELEM_UINT8_CLAMPED: return { .item = u8_to_item(((uint8_t*)arr->data)[index]) };
                 case ELEM_UINT16:  return { .item = u16_to_item(((uint16_t*)arr->data)[index]) };
                 case ELEM_UINT32:  return { .item = u32_to_item(((uint32_t*)arr->data)[index]) };
                 case ELEM_FLOAT16: return { .item = f16_to_item(f16_bits_to_f32(((uint16_t*)arr->data)[index])) };
@@ -141,6 +142,7 @@ static inline double compact_elem_to_double(ArrayNum* arr, int64_t index) {
         case ELEM_INT16:   return (double)((int16_t*)arr->data)[index];
         case ELEM_INT32:   return (double)((int32_t*)arr->data)[index];
         case ELEM_UINT8:   return (double)((uint8_t*)arr->data)[index];
+        case ELEM_UINT8_CLAMPED: return (double)((uint8_t*)arr->data)[index];
         case ELEM_UINT16:  return (double)((uint16_t*)arr->data)[index];
         case ELEM_UINT32:  return (double)((uint32_t*)arr->data)[index];
         case ELEM_FLOAT16: return (double)f16_bits_to_f32(((uint16_t*)arr->data)[index]);
@@ -237,7 +239,8 @@ static inline bool is_double_elem(ArrayNumElemType et) {
 }
 static inline bool is_small_int_elem(ArrayNumElemType et) {
     return et == ELEM_INT8 || et == ELEM_INT16 || et == ELEM_INT32 ||
-           et == ELEM_UINT8 || et == ELEM_UINT16 || et == ELEM_UINT32;
+           et == ELEM_UINT8 || et == ELEM_UINT8_CLAMPED ||
+           et == ELEM_UINT16 || et == ELEM_UINT32;
 }
 
 //==============================================================================
@@ -518,6 +521,7 @@ static inline double read_arr_elem_as_double(ArrayNum* arr, int64_t off) {
         case ELEM_INT16:   return (double)((int16_t*)arr->data)[off];
         case ELEM_INT32:   return (double)((int32_t*)arr->data)[off];
         case ELEM_UINT8:   return (double)((uint8_t*)arr->data)[off];
+        case ELEM_UINT8_CLAMPED: return (double)((uint8_t*)arr->data)[off];
         case ELEM_UINT16:  return (double)((uint16_t*)arr->data)[off];
         case ELEM_UINT32:  return (double)((uint32_t*)arr->data)[off];
         case ELEM_FLOAT32: return (double)((float*)arr->data)[off];
@@ -525,6 +529,21 @@ static inline double read_arr_elem_as_double(ArrayNum* arr, int64_t off) {
         case ELEM_BOOL:    return ((uint8_t*)arr->data)[off] ? 1.0 : 0.0;
         default:           return 0.0;
     }
+}
+
+static inline uint8_t clamp_uint8_even(double value) {
+    if (isnan(value) || value <= 0.0) return 0;
+    if (value >= 255.0) return 255;
+
+    double lower;
+    double frac = modf(value, &lower);
+    long rounded = (long)lower;
+    if (frac > 0.5) {
+        rounded++;
+    } else if (frac == 0.5 && (rounded & 1)) {
+        rounded++;
+    }
+    return (uint8_t)rounded;
 }
 
 // Write a double into element `off`, rounding + clamping to the elem type's range
@@ -536,6 +555,7 @@ static inline void write_arr_elem_from_double(ArrayNum* arr, int64_t off, double
         case ELEM_FLOAT32: ((float*)arr->data)[off] = (float)v; return;
         case ELEM_INT8:   { long r = llround(v); ((int8_t*)arr->data)[off]   = (int8_t)(r < -128 ? -128 : r > 127 ? 127 : r); return; }
         case ELEM_UINT8:  { long r = llround(v); ((uint8_t*)arr->data)[off]  = (uint8_t)(r < 0 ? 0 : r > 255 ? 255 : r); return; }
+        case ELEM_UINT8_CLAMPED: ((uint8_t*)arr->data)[off] = clamp_uint8_even(v); return;
         case ELEM_INT16:  { long r = llround(v); ((int16_t*)arr->data)[off]  = (int16_t)(r < -32768 ? -32768 : r > 32767 ? 32767 : r); return; }
         case ELEM_UINT16: { long r = llround(v); ((uint16_t*)arr->data)[off] = (uint16_t)(r < 0 ? 0 : r > 65535 ? 65535 : r); return; }
         case ELEM_INT32:  ((int32_t*)arr->data)[off]  = (int32_t)llround(v); return;
@@ -858,6 +878,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
             case ELEM_INT16:  LMD_WIDEN_VV(int16_t);  break;
             case ELEM_INT32:  LMD_WIDEN_VV(int32_t);  break;
             case ELEM_UINT8:  LMD_WIDEN_VV(uint8_t);  break;
+            case ELEM_UINT8_CLAMPED: LMD_WIDEN_VV(uint8_t); break;
             case ELEM_UINT16: LMD_WIDEN_VV(uint16_t); break;
             case ELEM_UINT32: LMD_WIDEN_VV(uint32_t); break;
             default: break;
@@ -3373,6 +3394,7 @@ static double reduce_contig_dispatch(ArrayNum* arr, int64_t base_off, int64_t le
         case ELEM_INT16:                    LMD_RED(int16_t);  break;
         case ELEM_INT32:                    LMD_RED(int32_t);  break;
         case ELEM_UINT8:                    LMD_RED(uint8_t);  break;
+        case ELEM_UINT8_CLAMPED:            LMD_RED(uint8_t);  break;
         case ELEM_UINT16:                   LMD_RED(uint16_t); break;
         case ELEM_UINT32:                   LMD_RED(uint32_t); break;
         case ELEM_UINT64:                   LMD_RED(uint64_t); break;
@@ -4023,6 +4045,7 @@ Item fn_as_float(Item arr_item) {
     double scale;
     switch (in->get_elem_type()) {
         case ELEM_UINT8:    scale = 1.0 / 255.0;   break;
+        case ELEM_UINT8_CLAMPED: scale = 1.0 / 255.0; break;
         case ELEM_UINT16:   scale = 1.0 / 65535.0; break;
         case ELEM_FLOAT: case ELEM_FLOAT32: case ELEM_FLOAT64: scale = 1.0; break;  // passthrough
         default:            scale = 1.0 / 255.0;   break;  // assume 8-bit image range

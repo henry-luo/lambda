@@ -2,7 +2,7 @@
 
 > **Scope.** Migrate the LambdaJS typed-array stack (`JsTypedArray` / `JsArrayBuffer` / `JsDataView`, ~3,300 lines in [lambda/js/js_typed_array.cpp](../lambda/js/js_typed_array.cpp)) so that its **numeric storage and element machinery** are provided by the Lambda `ArrayNum` runtime type, instead of a second, parallel implementation. This is the "Phase 5 / JS unification" that [Lambda_Typed_Array2.md](Lambda_Typed_Array2.md) §5 deferred — now its own proposal, written against the **as-built** state of both stacks after Typed Array 2 landed (baseline 3224/3224).
 
-> **Status:** design proposal. Not yet implemented. The Typed Array 2 work (N-D, views, `is_view`/`is_pinned`, the compactor view-skip, the `base: Container*` field) was built with this migration in mind and is the load-bearing prerequisite — it is now in place.
+> **Status:** design proposal with Phase 3a, the Phase 3b substrate slice, and the first Phase 3c descriptor slice implemented. `ELEM_UINT8_CLAMPED` now exists as the 15th `ArrayNum` kind, `ArrayNum` can describe a writable external byte-buffer view with a raw `Container*` lifetime base, and each JS `JsTypedArray` now owns a GC-marked `ArrayNum* view` descriptor over its existing byte storage. Full JS raw-path replacement is still pending. The Typed Array 2 work (N-D, views, `is_view`/`is_pinned`, the compactor view-skip, the `base: Container*` field) was built with this migration in mind and is the load-bearing prerequisite — it is now in place.
 
 ---
 
@@ -22,7 +22,7 @@ Three reasons, in priority order:
 
 1. **Interop is currently impossible.** A Lambda program that parses a binary blob into an `ArrayNum` and a JS module that wants to process it as a `Float32Array` cannot share the bytes — there is **no bridge** (`lambda_to_js` / `js_to_lambda` do not exist; confirmed by search). Every cross-language handoff today would be a full re-parse or serialize round-trip. A shared substrate makes zero-copy handoff possible.
 
-2. **Duplicated maintenance surface.** Two implementations of "typed numeric buffer with N element kinds, indexed get/set, bulk copy, fill, slice" drift independently. The JS stack is ~3,300 lines ([js_typed_array.cpp](../lambda/js/js_typed_array.cpp) is 3,153; the header 164); a large fraction is element-size dispatch, raw load/store, same-type `memcpy` fast paths, and cross-type conversion loops — all of which `ArrayNum` already implements for its 14 element kinds.
+2. **Duplicated maintenance surface.** Two implementations of "typed numeric buffer with N element kinds, indexed get/set, bulk copy, fill, slice" drift independently. The JS stack is ~3,300 lines ([js_typed_array.cpp](../lambda/js/js_typed_array.cpp) is 3,153; the header 164); a large fraction is element-size dispatch, raw load/store, same-type `memcpy` fast paths, and cross-type conversion loops — all of which `ArrayNum` already implements for its 15 element kinds.
 
 3. **Feature transfer, both directions.** Unification gives JS typed arrays Lambda's vectorized math and N-D for free (where it makes sense as a Lambda-side extension), and gives Lambda `ArrayNum` the JS stack's hard-won binary-data machinery (DataView-style heterogeneous access, endianness) as a reusable primitive.
 
@@ -90,9 +90,9 @@ struct ArrayNum {
 };
 ```
 
-- **14 element kinds:** `ELEM_INT`, `INT64`, `FLOAT`, `INT{8,16,32}`, `UINT{8,16,32}`, `FLOAT{16,32}`, `UINT64`, `FLOAT64`, `BOOL`. Bytes via `ELEM_TYPE_SIZE[elem_type >> 4]`.
+- **15 element kinds:** `ELEM_INT`, `INT64`, `FLOAT`, `INT{8,16,32}`, `UINT{8,16,32}`, `FLOAT{16,32}`, `UINT64`, `FLOAT64`, `BOOL`, `UINT8_CLAMPED`. Bytes via `ELEM_TYPE_SIZE[elem_type >> 4]`.
 - **Data is GC-managed and *moving*:** `heap_data_alloc → gc_data_alloc` (GC nursery data zone, [lambda-mem.cpp:407‑422](../lambda/lambda-mem.cpp), [gc_heap.c:541‑564](../lib/gc/gc_heap.c)). The compactor `gc_compact_data` **relocates** ArrayNum data nursery→tenured and rewrites the pointer ([gc_heap.c:1203‑1231](../lib/gc/gc_heap.c), pointer rewrite at `:1224`) — **unless** `is_view` (0x20) or `is_pinned` (0x40) is set, in which case it skips relocation (`if (flags & 0x60) break;` at [gc_heap.c:1209](../lib/gc/gc_heap.c)).
-- **Views (TA2 §2):** zero-copy, read-only, `is_view` set, an `ArrayNumShape` side-table in `extra` carrying `offset` + `base` (typed `Container*`, deliberately not `ArrayNum*`), strides for N-D. The GC tracer marks `shape->base`; the base carries `is_pinned`.
+- **Views (TA2 §2):** zero-copy, `is_view` set, an `ArrayNumShape` side-table in `extra` carrying `offset` + `base` (typed `Container*`, deliberately not `ArrayNum*`), strides for N-D. As built, Lambda already has `is_mutable_view` for procedural write-through views; non-mutable views remain read-only. The GC tracer marks `shape->base`; the base carries `is_pinned`.
 
 ### 2.3 The two element-type enums line up almost 1:1
 
@@ -108,9 +108,9 @@ struct ArrayNum {
 | `JS_TYPED_FLOAT64` | `ELEM_FLOAT64` | exact (also Lambda's default `ELEM_FLOAT`) |
 | `JS_TYPED_BIGINT64` | `ELEM_INT64` | **storage** identical — the element is a 64-bit lane by spec. *Values* are `BigInt` = `LMD_TYPE_DECIMAL` (mpdecimal), converted at the boundary, not truncated (see §4). |
 | `JS_TYPED_BIGUINT64` | `ELEM_UINT64` | same; the load **must** be unsigned-aware — high-bit lanes reconstruct the full u64, not a negative value (see §4). |
-| `JS_TYPED_UINT8_CLAMPED` | **gap → add `ELEM_UINT8_CLAMPED`** | clamp is a write-coercion difference, not a storage one |
+| `JS_TYPED_UINT8_CLAMPED` | `ELEM_UINT8_CLAMPED` | 1-byte storage; store path clamps with round-half-to-even |
 
-Only `Uint8ClampedArray` lacks an `ArrayNum` analog. See §4.
+The element-kind gap is now closed. See §4.
 
 ---
 
@@ -135,7 +135,7 @@ There are two ways to get a non-moving byte buffer; the proposal picks the first
 
 ## 4. Element-type unification
 
-**Add `ELEM_UINT8_CLAMPED` as the 15th element kind** (1 byte, same storage as `ELEM_UINT8`). Rationale, carried from TA2 §5:
+**`ELEM_UINT8_CLAMPED` is now the 15th element kind** (1 byte, same storage as `ELEM_UINT8`). Rationale, carried from TA2 §5:
 
 - The clamp is a **write-coercion** difference (NaN→0, saturate to [0,255], round-half-to-even), not a read or storage difference. Reads are identical to `UINT8`.
 - A flag-bit alternative (reuse `ELEM_UINT8` + a `clamped` bit) is rejected: it forces a per-write branch into the hot store loop and muddies `ELEM_TYPE_SIZE` indexing. A distinct kind keeps the clamp in one place — the JS store path — and lets every other ArrayNum op treat it exactly as `UINT8`.
@@ -176,12 +176,12 @@ After this, **`ArrayNum` covers every JS element type**, and `ELEM_TYPE_SIZE` pl
 
 Concretely, each struct changes as follows:
 
-- **`JsArrayBuffer`** — unchanged in spirit: owns the malloc byte buffer + JS state (`detached`/`resizable`/`is_shared`/`max_byte_length`). It becomes the **`base`** of every `ArrayNum` view over it. Its `Map` wrapper is what `ArrayNumShape.base` points to (so GC liveness already flows: the view's tracer marks `base` → the buffer Map → the bytes).
-- **`JsTypedArray`** — its storage fields (`element_type`, `length`, `byte_length`, `byte_offset`, `data`) collapse into a single **`ArrayNum* view`**. Element typing, sizing, indexed get/set, bulk copy/fill/slice all delegate to `ArrayNum`. It keeps the **JS-only** fields: `buffer_item` (identity-preserving `.buffer`), `length_tracking`, `is_buffer`. A standalone (`new Uint8Array(8)`) typed array becomes: allocate a fresh non-moving buffer + an owning-less `ArrayNum` view over it (so there is exactly one storage path, not two).
+- **`JsArrayBuffer`** — unchanged in spirit: owns the malloc byte buffer + JS state (`detached`/`resizable`/`is_shared`/`max_byte_length`). It becomes the **lifetime base** of every `ArrayNum` view over it. Its `Map` wrapper is what `ArrayNumShape.base` points to, stored as a raw `Container*` (matching existing Lambda views); the GC tracer already marks that raw pointer from the shape side-table. Because a `Map`'s `data` field is the native payload (`JsArrayBuffer*`), not the byte buffer itself, external views also carry an explicit raw byte-base pointer when constructed.
+- **`JsTypedArray`** — its storage fields (`element_type`, `length`, `byte_length`, `byte_offset`, `data`) collapse into a single **`ArrayNum* view`**. Element typing, sizing, indexed get/set, bulk copy/fill/slice all delegate to `ArrayNum`. It keeps the **JS-only** fields: `buffer_item` (identity-preserving `.buffer`), `length_tracking`, `is_buffer`. Because `JsTypedArray` is native data behind a Map, the GC must gain an explicit mark edge from the wrapper/native finalization path to this `ArrayNum* view`; otherwise the view can be swept while the JS Map survives. A standalone (`new Uint8Array(8)`) typed array becomes: allocate a fresh non-moving buffer + an owning-less `ArrayNum` view over it (so there is exactly one storage path, not two).
 - **`JsDataView`** — essentially unchanged. DataView is *inherently heterogeneous* (it reads Int8/Int16/Float64/BigInt64 from the same bytes at arbitrary offsets with explicit endianness), which `ArrayNum`'s single-`elem_type` model does not represent. DataView keeps reading the raw `JsArrayBuffer.data` directly. It benefits from unification only indirectly (shared buffer substrate, shared detach/resize logic).
 - **`ArrayNum`** — gains **two capabilities** beyond what TA2 shipped:
-  1. **Views over an external (non-`ArrayNum`) base** — TA2 typed `base` as `Container*` precisely for this; the remaining work is letting `array_num_new_view(base_buffer, elem_type, byte_offset, length)` build a view whose `data` aliases `base->data + byte_offset` and whose finalizer frees nothing.
-  2. **Writable views** — TA2 views are read-only (mutation rejected at both runtime and MIR fast paths). JS typed arrays are writable. This needs a **writable-view** variant (`is_view` without the write rejection) — see §6.4.
+  1. **Views over an external (non-`ArrayNum`) base** — implemented as `array_num_new_external_view(base, data_base, elem_type, byte_offset, length, mutable_view)`. `base` is the raw `Container*` lifetime edge stored in `ArrayNumShape.base`; `data_base` is the raw non-moving byte buffer, so `view->data` aliases `data_base + byte_offset`. The view finalizer frees nothing.
+  2. **Writable external views** — the runtime already has an `is_mutable_view` flag and generic mutable-view guards for procedural write-through views. JS typed arrays should reuse that capability for views whose base is a `JsArrayBuffer`, while preserving read-only Lambda-side interop views. The stale specialized `array_float_set`, `array_int_set`, and `array_float_set_item` guards now check `!is_mutable_view` instead of rejecting every view.
 
 What this deletes from the JS layer once delegation is wired: the per-element-size raw load/store dispatch, the same-type `memcpy` and cross-type conversion loops in `set`/`slice`/`copyWithin`/`fill` (replaced by `ArrayNum` bulk ops with a JS coercion shim), and the standalone-buffer bookkeeping. Estimated ~800–1,200 of the ~3,300 lines become thin delegations; the rest (spec semantics, exotic gate, Atomics, DataView, Node Buffer) stays.
 
@@ -201,15 +201,18 @@ A single `ArrayBuffer` is simultaneously viewable as `Float64Array`, `Uint8Array
 
 These are **buffer-level** JS states with no `ArrayNum` analog — and they should *stay* JS-level, driving the view rather than living in it:
 
-- **Detach / transfer** ([js_typed_array.cpp:1552‑1558, 1689‑1698](../lambda/js/js_typed_array.cpp)): the `JsArrayBuffer` drops/zeroes its bytes. Every dependent `ArrayNum` view must then read as out-of-bounds. Implement by having the view consult `base` liveness on access (the JS get/set already gates on `js_typed_array_is_out_of_bounds`); the `ArrayNum` view's `length`/`data` are re-derived from the buffer, not trusted-cached. This matches the existing rule that view `data` is stale after resize and must be re-fetched ([js_typed_array.cpp:2357](../lambda/js/js_typed_array.cpp)).
-- **Resizable + length-tracking** ([js_typed_array.cpp:302‑319](../lambda/js/js_typed_array.cpp)): keep `length_tracking` on the JS wrapper; on each access the wrapper recomputes element count from `buffer->byte_length` and refreshes the `ArrayNum` view's `length`/`data`. `ArrayNumShape` does **not** grow a resize concept; the buffer remains the source of truth.
+- **Detach / transfer** ([js_typed_array.cpp:1552‑1558, 1689‑1698](../lambda/js/js_typed_array.cpp)): the `JsArrayBuffer` drops/zeroes its bytes. Every dependent `ArrayNum` view must then read as out-of-bounds. Implement by having the JS wrapper consult buffer liveness before every access (the JS get/set already gates on `js_typed_array_is_out_of_bounds`); the `ArrayNum` view's `length`/`capacity`/`data` are re-derived from the buffer, not trusted-cached. This matches the existing rule that view `data` is stale after resize and must be re-fetched ([js_typed_array.cpp:2357](../lambda/js/js_typed_array.cpp)).
+- **Resizable + length-tracking** ([js_typed_array.cpp:302‑319](../lambda/js/js_typed_array.cpp)): keep `length_tracking` on the JS wrapper; on each access the wrapper recomputes element count from `buffer->byte_length` and refreshes the `ArrayNum` view's `length`/`capacity`/`data`. Make this a single helper, e.g. `js_typed_array_refresh_arraynum_view(ta)`, and require indexed, bulk, and inline fast paths to call it after OOB/detach checks. `ArrayNumShape` does **not** grow a resize concept; the buffer remains the source of truth.
 - **OOB views**: reads → `undefined`, writes → silent no-op (typed array) or `TypeError` (DataView). These divergent error semantics live in the JS get/set/DataView paths, unchanged.
 
 The principle: **the JS wrapper owns mutable buffer state and refreshes a cheap `ArrayNum` view descriptor per operation; `ArrayNum` owns element typing and the actual byte poke.**
 
 ### 6.4 Writable views
 
-TA2 shipped **read-only** views (mutation rejected at runtime and in the MIR fast path). JS typed arrays are writable. Add a **writable-view** flavor: same `is_view` aliasing + base liveness, but the write-rejection guard checks an additional `is_mutable_view` bit (or: writable iff the base is a `JsArrayBuffer`, never a Lambda `ArrayNum`, preserving Lambda's "views don't mutate shared Lambda data" invariant). This keeps Lambda-side views read-only while letting JS-backed views write — the cleanest split, since the two never alias the same base.
+TA2's initial view design was read-only, but the as-built runtime already has `is_mutable_view` for procedural write-through views and the generic `array_num_set_item` / `array_num_set_nd` guards check it. JS should reuse that bit for `JsArrayBuffer`-backed views. Two caveats are implementation-critical:
+
+- Some older specialized setters still reject `arr->is_view` unconditionally; route JS through the generic mutable-aware setter path or harmonize those guards before exposing writable external views.
+- The writability policy should still be explicit: JS-owned views are mutable from JS; JS→Lambda interop views should be handed to Lambda as read-only unless an API deliberately asks for shared mutation.
 
 ### 6.5 DataView endianness
 
@@ -262,13 +265,13 @@ This asymmetry should be **documented, not hidden**: JS→Lambda is free; Lambda
 Every phase keeps `make test-js-baseline` / test262 typed-array conformance green. Order is substrate-first so each step is independently shippable.
 
 **Phase 3a — element-type parity.**
-Add `ELEM_UINT8_CLAMPED` (15th kind) with the round-half-to-even clamp in the *store* path only; reads alias `UINT8`. Now `ArrayNum` covers all 11 JS element kinds. No JS behavior change yet. *Test:* existing ArrayNum suite + a clamp unit test.
+**Implemented.** `ELEM_UINT8_CLAMPED` (15th kind) uses the round-half-to-even clamp in the *store* path only; reads alias `UINT8`. Now `ArrayNum` covers all 11 JS element kinds. No JS behavior change yet. *Test:* existing ArrayNum suite + a clamp unit test.
 
 **Phase 3b — `ArrayNum` external-base + writable views.**
-Implement `array_num_new_view(Container* base, ArrayNumElemType, int64_t byte_offset, int64_t length)` producing an `is_view` `ArrayNum` aliasing `base->data + byte_offset` (finalizer frees nothing; tracer marks `base`; compactor already skips via `flags & 0x60`). Add the writable-view bit so a view whose base is a `JsArrayBuffer` may be written. *Test:* Lambda-side unit tests building a view over a malloc buffer and reading/writing through it.
+**Implemented as the substrate slice.** `array_num_new_external_view(Container* base, void* data_base, ArrayNumElemType, int64_t byte_offset, int64_t length, bool mutable_view)` produces an `is_view` `ArrayNum` aliasing `data_base + byte_offset`; the shape stores a raw `Container*` base for GC tracing, and the view owns/frees no bytes. The older specialized setters that rejected all views now honor `is_mutable_view`. *Test:* descriptor-level unit test for raw base, byte offset, shape offset, mutability, and alignment; existing mutable-view Lambda tests remain the write-through gate.
 
 **Phase 3c — back `JsTypedArray` storage with an `ArrayNum` view.**
-Replace the `JsTypedArray` storage fields with `ArrayNum* view`; route `js_typed_array_raw_get_item`/`raw_store_number`/`raw_reverse` and the same-type `memcpy` paths through `ArrayNum`. Keep `buffer_item`/`length_tracking`/`is_buffer`. The standalone constructor allocates a non-moving buffer + view. *This is the load-bearing change* — land it behind the existing `LAMBDA_JS_TA_RAW_FAST` flag so the old path remains as a fallback for one release. *Test:* full `test/js/typed_arrays.*` + the `regression_js54_*` set + test262 typed-array pages.
+**Descriptor slice implemented.** `JsTypedArray` now carries an `ArrayNum* view` alongside the legacy storage fields; standalone and ArrayBuffer-backed constructors create a writable external view over the same non-moving bytes, refresh its length/offset for length-tracking or detached buffers, and the GC now marks the view through a JS-native Map trace callback. Remaining Phase 3c work: route `js_typed_array_raw_get_item`/`raw_store_number`/`raw_reverse` and the same-type `memcpy` paths through `ArrayNum`, then retire the duplicate fields in Phase 3d. Keep `buffer_item`/`length_tracking`/`is_buffer`. *Test:* full `test/js/typed_arrays.*` + the `regression_js54_*` set + test262 typed-array pages.
 
 **Phase 3d — delete the duplicated storage code.**
 Remove `js_typed_array_raw_*` element-size dispatch and the cross-type conversion loops now served by `ArrayNum`. Retire the fallback flag. *Test:* same suite, plus a line-count check that the duplication is gone.
@@ -304,16 +307,14 @@ Remove `js_typed_array_raw_*` element-size dispatch and the cross-type conversio
 
 ## 12. Open questions
 
-1. **Writable-view gating** — a dedicated `is_mutable_view` flag bit, or the rule "writable iff base is a `JsArrayBuffer`"? The latter needs no new bit and preserves Lambda's read-only-view invariant, but couples the writability decision to base type. (Leaning: base-type rule.)
-2. **Standalone typed array** — always allocate a `JsArrayBuffer` substrate (uniform, one storage path), or keep a buffer-less fast path for the common `new Uint8Array(n)` case? Uniform is simpler; buffer-less saves one allocation per standalone array. (Leaning: uniform, measure, optimize if it shows.)
-3. **Pin-clearing for Lambda→JS** — TA2 defers pin-clearing. If pinned interop proves common, do we revisit view-count tracking on the base to clear `is_pinned` when the last JS view dies? (Deferred until there's evidence.)
-4. **`ELEM_UINT8_CLAMPED` value = 0xE0?** — next free `elem_type >> 4` slot after `ELEM_BOOL` (0xD0). Confirm `ELEM_TYPE_SIZE` table extension.
+1. **Standalone typed array** — always allocate a `JsArrayBuffer` substrate (uniform, one storage path), or keep a buffer-less fast path for the common `new Uint8Array(n)` case? Uniform is simpler; buffer-less saves one allocation per standalone array. (Leaning: uniform, measure, optimize if it shows.)
+2. **Pin-clearing for Lambda→JS** — TA2 defers pin-clearing. If pinned interop proves common, do we revisit view-count tracking on the base to clear `is_pinned` when the last JS view dies? (Deferred until there's evidence.)
 
 ---
 
 ## 13. Success criteria
 
-- `ArrayNum` covers all 11 JS element kinds (incl. clamped); `make test-lambda-baseline` stays green through 3a–3b.
+- `ArrayNum` covers all 11 JS element kinds (incl. clamped), and it can describe mutable external views over non-moving byte buffers; `make test-lambda-baseline` stays green through 3a–3b.
 - `JsTypedArray` storage is a single `ArrayNum` view; `js_typed_array.cpp` shrinks by the duplicated raw-storage code (target: −800 lines or more) with **zero** JS test regressions (full `test/js` typed-array suite + `regression_js54_*` + test262 typed-array pages green).
 - A blob parsed into a Lambda `ArrayNum` is consumed by JS as a `Float32Array` (zero-copy) and a JS `Uint8Array` is read by Lambda as an `ArrayNum`, demonstrated by a round-trip test.
 - No measurable regression on indexed `ta[i]` and same-type bulk copy benchmarks.

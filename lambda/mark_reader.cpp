@@ -448,6 +448,7 @@ static Item arr_num_leaf_item(ArrayNum* a, int64_t off) {
         case ELEM_INT16:   return Item{ .item = i16_to_item(((int16_t*)a->data)[off]) };
         case ELEM_INT32:   return Item{ .item = i32_to_item(((int32_t*)a->data)[off]) };
         case ELEM_UINT8:   return Item{ .item = u8_to_item(((uint8_t*)a->data)[off]) };
+        case ELEM_UINT8_CLAMPED: return Item{ .item = u8_to_item(((uint8_t*)a->data)[off]) };
         case ELEM_UINT16:  return Item{ .item = u16_to_item(((uint16_t*)a->data)[off]) };
         case ELEM_UINT32:  return Item{ .item = u32_to_item(((uint32_t*)a->data)[off]) };
         // uint64 has no dedicated formatter path; reinterpret the live 8 bytes as

@@ -291,6 +291,23 @@ static int typed_array_element_size(JsTypedArrayType type) {
     }
 }
 
+static ArrayNumElemType js_typed_array_elem_type(JsTypedArrayType type) {
+    switch (type) {
+    case JS_TYPED_INT8:          return ELEM_INT8;
+    case JS_TYPED_UINT8:         return ELEM_UINT8;
+    case JS_TYPED_INT16:         return ELEM_INT16;
+    case JS_TYPED_UINT16:        return ELEM_UINT16;
+    case JS_TYPED_INT32:         return ELEM_INT32;
+    case JS_TYPED_UINT32:        return ELEM_UINT32;
+    case JS_TYPED_FLOAT32:       return ELEM_FLOAT32;
+    case JS_TYPED_FLOAT64:       return ELEM_FLOAT64;
+    case JS_TYPED_UINT8_CLAMPED: return ELEM_UINT8_CLAMPED;
+    case JS_TYPED_BIGINT64:      return ELEM_INT64;
+    case JS_TYPED_BIGUINT64:     return ELEM_UINT64;
+    default:                     return ELEM_UINT8;
+    }
+}
+
 static bool js_typed_array_is_bigint_element(JsTypedArrayType type) {
     return type == JS_TYPED_BIGINT64 || type == JS_TYPED_BIGUINT64;
 }
@@ -331,6 +348,32 @@ static void* js_typed_array_current_data(JsTypedArray* ta) {
     if (!ta->buffer) return ta->data;
     if (js_typed_array_current_byte_length(ta) == 0) return NULL;
     return (char*)ta->buffer->data + ta->byte_offset;
+}
+
+static void js_typed_array_refresh_arraynum_view(JsTypedArray* ta) {
+    if (!ta || !ta->view) return;
+
+    int byte_offset = js_typed_array_current_byte_offset(ta);
+    int length = js_typed_array_current_length(ta);
+    void* data = js_typed_array_current_data(ta);
+
+    ta->view->data = data;
+    ta->view->length = length;
+    ta->view->capacity = length;
+
+    ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)ta->view->extra;
+    if (!shape) return;
+
+    int elem_size = typed_array_element_size(ta->element_type);
+    shape->offset = elem_size ? byte_offset / elem_size : 0;
+    if (ta->buffer_item) {
+        Item buffer_item;  buffer_item.item = ta->buffer_item;
+        if (buffer_item.type_id() == LMD_TYPE_MAP) {
+            shape->base = (void*)buffer_item.map;
+        }
+    }
+    array_num_shape_dims(shape)[0] = length;
+    array_num_shape_strides(shape)[0] = 1;
 }
 
 static bool js_typed_array_is_out_of_bounds(JsTypedArray* ta) {
@@ -1936,6 +1979,9 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     ta->buffer_item = 0;
     ta->length_tracking = false;
     ta->is_buffer = false;
+    ta->view = array_num_new_external_view(NULL, ta->data,
+        js_typed_array_elem_type(arr_type), 0, length, true);
+    js_typed_array_refresh_arraynum_view(ta);
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
@@ -2002,6 +2048,9 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
     ta->buffer_item = buffer_item.item;  // preserve original Item for identity-preserving .buffer
     ta->length_tracking = length_tracking;
     ta->is_buffer = false;
+    ta->view = array_num_new_external_view((Container*)buffer_item.map, ab->data,
+        js_typed_array_elem_type(arr_type), byte_offset, length, true);
+    js_typed_array_refresh_arraynum_view(ta);
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
@@ -2220,6 +2269,7 @@ extern "C" Item js_typed_array_get(Item ta_item, Item index) {
 
     Map* m = ta_item.map;
     JsTypedArray* ta = js_get_typed_array_ptr(m);
+    js_typed_array_refresh_arraynum_view(ta);
     int idx = (int)it2i(index);
 
     int current_length = js_typed_array_current_length(ta);
@@ -2234,6 +2284,7 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
 
     Map* m = ta_item.map;
     JsTypedArray* ta = js_get_typed_array_ptr(m);
+    js_typed_array_refresh_arraynum_view(ta);
     int idx = (int)it2i(index);
 
     // BigInt types: ToBigInt(value), then store as int64/uint64.
@@ -2350,6 +2401,7 @@ extern "C" int js_typed_array_length(Item ta_item) {
     if (!js_is_typed_array(ta_item)) return 0;
     Map* m = ta_item.map;
     JsTypedArray* ta = js_get_typed_array_ptr(m);
+    js_typed_array_refresh_arraynum_view(ta);
     return js_typed_array_current_length(ta);
 }
 
@@ -2363,18 +2415,21 @@ extern "C" void* js_typed_array_current_data_ptr(Item ta_item) {
     if (!js_is_typed_array(ta_item)) return NULL;
     Map* m = ta_item.map;
     JsTypedArray* ta = js_get_typed_array_ptr(m);
+    js_typed_array_refresh_arraynum_view(ta);
     return js_typed_array_current_data(ta);
 }
 
 extern "C" int js_typed_array_byte_length(Item ta_item) {
     if (!js_is_typed_array(ta_item)) return 0;
     JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
+    js_typed_array_refresh_arraynum_view(ta);
     return js_typed_array_current_byte_length(ta);
 }
 
 extern "C" int js_typed_array_byte_offset(Item ta_item) {
     if (!js_is_typed_array(ta_item)) return 0;
     JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
+    js_typed_array_refresh_arraynum_view(ta);
     return js_typed_array_current_byte_offset(ta);
 }
 

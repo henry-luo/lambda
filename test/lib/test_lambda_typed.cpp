@@ -310,3 +310,45 @@ TEST(LambdaTypedItem, ItemOrErrorWrapsRetStructs) {
     EXPECT_EQ(array_result.error(), err);
     EXPECT_EQ(array_result.raw().value, nullptr);
 }
+
+TEST(LambdaTypedItem, Uint8ClampedArrayNumUsesReservedNibbleSlot) {
+    EXPECT_EQ(ELEM_UINT8_CLAMPED, 0xE0);
+    EXPECT_EQ(ELEM_NUM_COUNT, 15);
+    EXPECT_EQ(ELEM_TYPE_SIZE[ELEM_UINT8_CLAMPED >> 4], 1);
+}
+
+TEST(LambdaTypedItem, ExternalArrayNumViewAliasesRawBufferWithRawBase) {
+    Map base = {};
+    base.type_id = LMD_TYPE_MAP;
+    base.map_kind = MAP_KIND_ARRAYBUFFER;
+
+    uint8_t raw[8] = {};
+    ArrayNum view = {};
+    uint8_t shape_storage[sizeof(ArrayNumShape) + 2 * sizeof(int64_t)] = {};
+    ArrayNumShape* shape = (ArrayNumShape*)shape_storage;
+
+    ASSERT_TRUE(array_num_init_external_view(&view, shape, &base, raw,
+                                             ELEM_UINT16, 2, 3, true));
+    EXPECT_EQ(view.type_id, LMD_TYPE_ARRAY_NUM);
+    EXPECT_EQ(view.get_elem_type(), ELEM_UINT16);
+    EXPECT_TRUE(view.is_ndim);
+    EXPECT_TRUE(view.is_view);
+    EXPECT_TRUE(view.is_mutable_view);
+    EXPECT_EQ(view.data, raw + 2);
+    EXPECT_EQ(view.length, 3);
+    EXPECT_EQ(view.capacity, 3);
+    EXPECT_EQ(view.extra, (int64_t)(uintptr_t)shape);
+    EXPECT_EQ(shape->ndim, 1);
+    EXPECT_TRUE(shape->is_c_contig);
+    EXPECT_TRUE(shape->is_f_contig);
+    EXPECT_EQ(shape->offset, 1);
+    EXPECT_EQ(shape->base, (void*)&base);
+    EXPECT_EQ(array_num_shape_dims(shape)[0], 3);
+    EXPECT_EQ(array_num_shape_strides(shape)[0], 1);
+
+    ArrayNum bad_view = {};
+    uint8_t bad_shape_storage[sizeof(ArrayNumShape) + 2 * sizeof(int64_t)] = {};
+    ArrayNumShape* bad_shape = (ArrayNumShape*)bad_shape_storage;
+    EXPECT_FALSE(array_num_init_external_view(&bad_view, bad_shape, &base, raw,
+                                              ELEM_UINT16, 1, 1, true));
+}
