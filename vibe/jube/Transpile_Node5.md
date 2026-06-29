@@ -1,7 +1,7 @@
 # Transpile Node Tune5 Proposal
 
 Date: 2026-06-29
-Status: Track B in progress
+Status: Track A in progress
 Scope: structural LambdaJS Node.js compatibility work against official Node.js
 parallel tests.
 
@@ -613,6 +613,93 @@ Results:
 - Neighboring AsyncResource focused filter: 4/4 passed, 0 regressions.
 - Diagnostics baseline guard plus bind-store: 7/7 passed, 0 regressions,
   `NEW_PASS test-diagnostics-channel-bind-store.js`.
+
+### 2026-06-29 Track A slice: stream construct lifecycle
+
+Landed the first no-network stream lifecycle slice:
+
+- Stream constructor options now propagate `construct` to `_construct` across
+  `Readable`, `Writable`, `Duplex`, and `Transform`.
+- Each stream instance invokes `_construct(callback)` after its state, listener
+  table, and public methods are installed.
+- The construct callback is once-only: a second invocation emits
+  `ERR_MULTIPLE_CALLBACK`, while construct errors are scheduled through the
+  existing stream error path so listeners attached after construction can
+  observe them.
+- Public stream `destroy(err, callback)` now accepts the callback at the native
+  method boundary and invokes it through the shared destroy completion path
+  instead of dropping it through the previous one-argument arity clamp.
+- Transform write completion now defers `drain` until after pending
+  `readable` listeners have observed their current chunk. For async
+  object-mode transforms with `highWaterMark: 0`, this prevents the next write
+  from exposing a second transformed chunk before the consumer's already
+  scheduled `setImmediate` turn.
+
+Verification:
+
+```bash
+make build
+./lambda.exe js ref/node/test/parallel/test-stream-construct.js --no-log
+./lambda.exe js ref/node/test/parallel/test-stream-transform-hwm0.js --no-log
+./test/test_node_gtest.exe '--gtest_filter=*test_stream_transform_hwm0*:*test_stream_construct*:*test_stream_err_multiple_callback_construction*:*test_stream_duplex_end*:*test_stream_base_prototype_accessors_enumerability*' --timeout=15000 --gtest_brief=1
+./test/test_node_gtest.exe --modules=stream --timeout=20000 --gtest_brief=1
+```
+
+Results:
+
+- Direct official `test-stream-construct.js`: pass.
+- Direct official `test-stream-transform-hwm0.js`: pass.
+- Focused official stream filter: 5/5 passed, 0 regressions,
+  `NEW_PASS test-stream-construct.js`, `NEW_PASS test-stream-duplex-end.js`,
+  `NEW_PASS test-stream-transform-hwm0.js`.
+- Direct official `test-stream-err-multiple-callback-construction.js`: pass.
+- Stream module sweep: 212 selected tests, 163 passed, 49 expected failures,
+  0 crashes, 0 timeouts, 2 pre-existing baseline regressions still present
+  (`test-stream-destroy.js`, `test-stream-iter-from-sync.js`), and 3
+  improvements (`test-stream-construct.js`, `test-stream-duplex-end.js`,
+  `test-stream-transform-hwm0.js`).
+
+### 2026-06-29 Track A slice: stream duplex surface
+
+Continued the stream no-network surface slice:
+
+- Added `stream.duplexPair()` as two cross-wired `Duplex` endpoints. Each side
+  is a real `Duplex` instance, writes push into the peer readable side, `_final`
+  pushes EOF to the peer, and the existing writable machinery still owns cork,
+  uncork, write callbacks, and empty-byte-chunk handling.
+- Added a first structural `Duplex.from()` bridge for Node-style readable and
+  writable streams plus promise inputs. Objects with `{ readable, writable }`
+  are wrapped into a duplex facade; readable events feed the facade readable
+  side, facade writes feed the wrapped writable side, and promise fulfillment or
+  rejection maps to readable data/EOF or stream error.
+- Added an initial `stream.compose(...)` export that chains normalized streams
+  and returns a duplex wrapper over the first writable side and last readable
+  side. This removes the missing-API failure boundary, but the full compose
+  official test still has semantic `mustCall` gaps and remains a follow-up.
+
+Verification:
+
+```bash
+make build
+./lambda.exe js ref/node/test/parallel/test-stream-duplexpair.js --no-log
+./lambda.exe js ref/node/test/parallel/test-stream-duplex-from.js --no-log
+./lambda.exe js ref/node/test/parallel/test-stream-compose.js --no-log
+./test/test_node_gtest.exe --modules=stream --timeout=20000 --gtest_brief=1
+```
+
+Results:
+
+- Direct official `test-stream-duplexpair.js`: pass.
+- Direct official `test-stream-duplex-from.js`: advanced past the previous
+  missing `Duplex.from`/Promise boundary, but still fails on pending
+  `mustCall`s and leak reporting from later unsupported forms.
+- Direct official `test-stream-compose.js`: advanced past the previous missing
+  `stream.compose` export, but still fails on pending `mustCall`s.
+- Stream module sweep: 212 selected tests, 164 passed, 48 remaining failures,
+  0 crashes, 0 timeouts, 2 pre-existing baseline regressions still present
+  (`test-stream-destroy.js`, `test-stream-iter-from-sync.js`), and 4
+  improvements (`test-stream-construct.js`, `test-stream-duplex-end.js`,
+  `test-stream-duplexpair.js`, `test-stream-transform-hwm0.js`).
 
 ## Verification Policy
 
