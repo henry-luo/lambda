@@ -75,6 +75,22 @@ describe('cmdIndentListItem / cmdOutdentListItem', () => {
     expect(sub.content[0].content[0].text).toBe('b')
   })
 
+  it('indent keeps the caret inside the moved item (any caret position)', () => {
+    // caret in the middle of "bc" — indent must keep the caret in "bc", not select the item
+    const s = st([node('ul', [node('li', [text('a')]), node('li', [text('bc')])])], caret([0, 1, 0], 1))
+    const tx = cmdIndentListItem(s)!
+    // moved item now at ul > li(a) > ul > li(bc) → caret in its text leaf, offset preserved
+    expect(tx.sel_after).toEqual(caret([0, 0, 1, 0, 0], 1))
+  })
+
+  it('indent then outdent round-trips (caret preserved both ways)', () => {
+    const s = st([node('ul', [node('li', [text('a')]), node('li', [text('b')])])], caret([0, 1, 0], 0))
+    const tx1 = cmdIndentListItem(s)!
+    const s2 = { ...s, doc: tx1.doc_after, selection: tx1.sel_after }
+    const tx2 = cmdOutdentListItem(s2)!
+    expect(tx2.doc_after).toEqual(node('doc', [node('ul', [node('li', [text('a')]), node('li', [text('b')])])]))
+  })
+
   it('outdent reverses indent (round-trip)', () => {
     const nested = node('ul', [
       nodeAttrs('li', [], [text('a'), node('ul', [node('li', [text('b')])])])

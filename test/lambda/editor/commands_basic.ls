@@ -217,13 +217,13 @@ let list_state = {doc: list_doc, selection: text_selection(pos([0, 1, 0, 0], 1),
 let tx_indent = cmd_indent_list_item(list_state)
 "indent top count:"; len(node_at(tx_indent.doc_after, [0]).content) == 2
 "indent nested text:"; doc_text(node_at(tx_indent.doc_after, [0, 0, 1, 0])) == "B"
-"indent selected parent:"; path_equal(tx_indent.sel_after.path, [0, 0])
+"indent caret kept:"; tx_indent.sel_after.kind == 'text' and path_equal(tx_indent.sel_after.anchor.path, [0, 0, 1, 0, 0, 0])
 
 let outdent_state = {doc: tx_indent.doc_after, selection: text_selection(pos([0, 0, 1, 0, 0, 0], 1), pos([0, 0, 1, 0, 0, 0], 1))}
 let tx_outdent = cmd_outdent_list_item(outdent_state)
 "outdent top count:"; len(node_at(tx_outdent.doc_after, [0]).content) == 3
 "outdent middle text:"; doc_text(node_at(tx_outdent.doc_after, [0, 1])) == "B"
-"outdent selected:"; path_equal(tx_outdent.sel_after.path, [0, 1])
+"outdent caret kept:"; tx_outdent.sel_after.kind == 'text' and path_equal(tx_outdent.sel_after.anchor.path, [0, 1, 0, 0])
 "indent first null:"; cmd_indent_list_item({doc: list_doc, selection: node_selection([0, 0])}) == null
 
 let html_list_doc = node('doc', [node('ul', [
@@ -236,12 +236,12 @@ let tx_html_indent = cmd_indent_list_item(html_list_state)
 "indent html top count:"; len(node_at(tx_html_indent.doc_after, [0]).content) == 2
 "indent html nested tag:"; node_at(tx_html_indent.doc_after, [0, 0, 1]).tag == 'ul'
 "indent html nested text:"; doc_text(node_at(tx_html_indent.doc_after, [0, 0, 1, 0])) == "B"
-"indent html selected:"; path_equal(tx_html_indent.sel_after.path, [0, 0])
+"indent html caret kept:"; tx_html_indent.sel_after.kind == 'text' and path_equal(tx_html_indent.sel_after.anchor.path, [0, 0, 1, 0, 0])
 let html_outdent_state = {doc: tx_html_indent.doc_after, schema: html5_subset_schema, selection: text_selection(pos([0, 0, 1, 0, 0], 1), pos([0, 0, 1, 0, 0], 1))}
 let tx_html_outdent = cmd_outdent_list_item(html_outdent_state)
 "outdent html top count:"; len(node_at(tx_html_outdent.doc_after, [0]).content) == 3
 "outdent html middle text:"; doc_text(node_at(tx_html_outdent.doc_after, [0, 1])) == "B"
-"outdent html selected:"; path_equal(tx_html_outdent.sel_after.path, [0, 1])
+"outdent html caret kept:"; tx_html_outdent.sel_after.kind == 'text' and path_equal(tx_html_outdent.sel_after.anchor.path, [0, 1, 0])
 
 let tx_image = cmd_insert_image(s0, "photo.png", "Photo")
 "insert image tag:"; node_at(tx_image.doc_after, [0, 1]).tag == 'image'

@@ -132,7 +132,7 @@ true
 true
 "exec html outdent count:"
 true
-"exec html outdent selected:"
+"exec html outdent caret kept:"
 true
 "dispatch intent doc:"
 true

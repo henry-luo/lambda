@@ -840,6 +840,51 @@ fn merge_adjacent_text_at(content, i, n, acc) {
 }
 fn merge_adjacent_text(content) => merge_adjacent_text_at(content, 0, len(content), [])
 
+fn jlist_is_list_tag(tag) => tag == 'ul' or tag == 'ol' or tag == 'list'
+fn jlist_is_list(n) => is_node(n) and jlist_is_list_tag(n.tag)
+
+// Join `list_path` with its previous-sibling list (the earlier list's kind wins),
+// placing the caret at the start of the first item carried over from the second
+// list. Returns null when there's no previous list sibling.
+fn join_lists(state, list_path) {
+  let lst = node_at(state.doc, list_path)
+  if (lst == null or not jlist_is_list(lst)) { null }
+  else {
+    let list_parent = parent_path(list_path)
+    let list_idx = last_index(list_path)
+    if (list_idx == 0) { null }
+    else {
+      let prev = node_at(state.doc, [*list_parent, list_idx - 1])
+      if (prev == null or not jlist_is_list(prev)) { null }
+      else {
+        let prev_len = len(prev.content)
+        let merged = node_attrs(prev.tag, prev.attrs, list_concat(prev.content, lst.content))
+        let tx0 = tx_begin(state.doc, state.selection)
+        let tx1 = tx_step(tx0, step_replace(list_parent, list_idx - 1, list_idx + 1, [merged]))
+        let moved_item_path = [*list_parent, list_idx - 1, prev_len]
+        let first_moved = lst.content[0]
+        let caret_path = if (is_node(first_moved) and len(first_moved.content) > 0 and is_text(first_moved.content[0])) {
+            [*moved_item_path, 0]
+          } else { moved_item_path }
+        tx_set_selection(tx1, caret(pos(caret_path, 0)))
+      }
+    }
+  }
+}
+
+// Backspace at the very start of the FIRST item of a list, when that list is
+// preceded by another list, joins the two. Walks up through first-child wrappers
+// (e.g. li > p) to find the enclosing first list item.
+fn join_first_list_item_backward(state, p) {
+  if (len(p) < 1 or last_index(p) != 0) { null }
+  else {
+    let parent = node_at(state.doc, parent_path(p))
+    if (parent == null or not is_node(parent)) { null }
+    else if (jlist_is_list(parent)) { join_lists(state, parent_path(p)) }
+    else { join_first_list_item_backward(state, parent_path(p)) }
+  }
+}
+
 fn merge_blocks_backward(state, p) {
   if (len(p.path) < 2 or last_index(p.path) != 0) { null }
   else {
@@ -847,7 +892,8 @@ fn merge_blocks_backward(state, p) {
     let block_index = last_index(block_path)
     let parent = node_at(state.doc, parent_path(block_path))
     let block = node_at(state.doc, block_path)
-    if (parent == null or block == null or not is_node(parent) or not is_node(block) or block_index <= 0) { null }
+    if (parent == null or block == null or not is_node(parent) or not is_node(block)) { null }
+    else if (block_index <= 0) { join_first_list_item_backward(state, block_path) }
     else {
       let prev = parent.content[block_index - 1]
       if (not block_merge_allowed(prev, block)) { null }
@@ -1031,6 +1077,15 @@ fn append_to_sublist(prev_item, list_node, item) {
   }
 }
 
+// After a list item moves (indent/outdent), keep the caret where it was inside
+// that item (its subtree moves intact); a node selection stays a node selection.
+fn reselect_moved_item(sel, old_item_path, new_item_path) {
+  if (sel.kind == 'text') {
+    let rel = list_drop(sel.anchor.path, len(old_item_path))
+    caret(pos(list_concat(new_item_path, rel), sel.anchor.offset))
+  } else { node_selection(new_item_path) }
+}
+
 pub fn cmd_indent_list_item(state) {
   let sel = state.selection
   if (sel == null) { null }
@@ -1051,7 +1106,10 @@ pub fn cmd_indent_list_item(state) {
         let list2 = node_attrs(list_node.tag, list_node.attrs, new_items)
         let tx0 = tx_begin(state.doc, sel)
         let tx1 = tx_step(tx0, step_replace(parent_path(list_path), last_index(list_path), last_index(list_path) + 1, [list2]))
-        tx_set_selection(tx1, node_selection([*list_path, item_index - 1]))
+        let sub_idx = len(prev2.content) - 1
+        let sub = prev2.content[sub_idx]
+        let moved_item_path = [*list_path, item_index - 1, sub_idx, len(sub.content) - 1]
+        tx_set_selection(tx1, reselect_moved_item(sel, [*list_path, item_index], moved_item_path))
       }
     }
   }
@@ -1089,7 +1147,7 @@ pub fn cmd_outdent_list_item(state) {
         let parent2 = node_attrs(parent_item.tag, parent_item.attrs, replace_or_remove_sublist(parent_item, list_child_index, list2))
         let tx0 = tx_begin(state.doc, sel)
         let tx1 = tx_step(tx0, step_replace(grand_list_path, parent_item_index, parent_item_index + 1, [parent2, item]))
-        tx_set_selection(tx1, node_selection([*grand_list_path, parent_item_index + 1]))
+        tx_set_selection(tx1, reselect_moved_item(sel, item_path, [*grand_list_path, parent_item_index + 1]))
       }
     }
   }

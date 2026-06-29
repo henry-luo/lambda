@@ -188,13 +188,13 @@ true
 true
 "indent nested text:"
 true
-"indent selected parent:"
+"indent caret kept:"
 true
 "outdent top count:"
 true
 "outdent middle text:"
 true
-"outdent selected:"
+"outdent caret kept:"
 true
 "indent first null:"
 true
@@ -204,13 +204,13 @@ true
 true
 "indent html nested text:"
 true
-"indent html selected:"
+"indent html caret kept:"
 true
 "outdent html top count:"
 true
 "outdent html middle text:"
 true
-"outdent html selected:"
+"outdent html caret kept:"
 true
 "insert image tag:"
 true

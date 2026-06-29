@@ -208,7 +208,7 @@ let tx_html_outdent_intent = dispatch_intent({doc: tx_html_indent_intent.doc_aft
   selection: text_selection(pos([0, 0, 1, 0, 0], 1), pos([0, 0, 1, 0, 0], 1))},
   {input_type: "formatOutdent", data: null})
 "outdent html intent top count:"; len(node_at(tx_html_outdent_intent.doc_after, [0]).content) == 2
-"outdent html intent selected:"; path_equal(tx_html_outdent_intent.sel_after.path, [0, 1])
+"outdent html intent caret kept:"; tx_html_outdent_intent.sel_after.kind == 'text' and path_equal(tx_html_outdent_intent.sel_after.anchor.path, [0, 1, 0])
 
 let tx_bold = dispatch_intent(s0, {input_type: "formatBold", data: null})
 "bold intent stored:"; has_mark(tx_get_meta(tx_bold, "storedMarks"), 'strong')

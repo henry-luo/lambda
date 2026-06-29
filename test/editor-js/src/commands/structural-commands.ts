@@ -97,6 +97,17 @@ function appendToSublist(prevItem: Node, listNode: Node, item: Child): Node {
   return nodeAttrs(prevItem.tag, prevItem.attrs, [...kids, nodeAttrs(listNode.tag, listNode.attrs, [item])])
 }
 
+// After a list item moves (indent/outdent), keep the caret where it was inside
+// that item — the item's subtree moves intact, so the caret's path relative to
+// the item is preserved. A node selection stays a node selection on the item.
+function reselectMovedItem(sel: Selection, oldItemPath: SourcePath, newItemPath: SourcePath): Selection {
+  if (sel.kind === 'text') {
+    const rel = sel.anchor.path.slice(oldItemPath.length)
+    return caret(pos([...newItemPath, ...rel], sel.anchor.offset))
+  }
+  return nodeSelection(newItemPath)
+}
+
 // Indent the current list item — nest it as a sublist under the previous item.
 export function cmdIndentListItem(state: EditorState): Transaction | null {
   const sel = state.selection
@@ -118,7 +129,11 @@ export function cmdIndentListItem(state: EditorState): Transaction | null {
 
   let tx = txBegin(state.doc, sel)
   tx = txStep(tx, stepReplace(parentPath(listPath), lastIndex(listPath), lastIndex(listPath) + 1, [list2]))
-  return txSetSelection(tx, nodeSelection([...listPath, itemIndex - 1]))
+  // the moved item is the last item of prev2's last child (the sublist)
+  const subIdx = prev2.content.length - 1
+  const sub = prev2.content[subIdx] as Node
+  const movedItemPath = [...listPath, itemIndex - 1, subIdx, sub.content.length - 1]
+  return txSetSelection(tx, reselectMovedItem(sel, itemPath, movedItemPath))
 }
 
 function replaceOrRemoveSublist(parentItem: Node, subIndex: number, sublist: Node): Child[] {
@@ -155,7 +170,7 @@ export function cmdOutdentListItem(state: EditorState): Transaction | null {
 
   let tx = txBegin(state.doc, sel)
   tx = txStep(tx, stepReplace(grandListPath, parentItemIndex, parentItemIndex + 1, [parent2, item]))
-  return txSetSelection(tx, nodeSelection([...grandListPath, parentItemIndex + 1]))
+  return txSetSelection(tx, reselectMovedItem(sel, itemPath, [...grandListPath, parentItemIndex + 1]))
 }
 
 // True iff a block's content is "empty" — nothing, a single empty text leaf,

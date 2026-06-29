@@ -43,7 +43,7 @@ import {
   cmdSetBlockType,
   cmdToggleMark
 } from '../src/commands/text-commands'
-import { cmdResizeImage, cmdInsertImage } from '../src/commands/structural-commands'
+import { cmdResizeImage, cmdInsertImage, cmdIndentListItem, cmdOutdentListItem } from '../src/commands/structural-commands'
 import { cmdPasteSlice } from '../src/commands/paste'
 import { parseHtmlToDoc, serializeDocToHtml } from '../src/view/html-parser'
 import { isNode, isText, nodeAt } from '../src/model/doc'
@@ -248,6 +248,13 @@ export function FullEditor(props: FullEditorProps) {
   }, [])
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
+    // Tab / Shift+Tab indent/outdent the current list item (from any caret
+    // position inside it). No-op outside a list item.
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      runCmd(e.shiftKey ? cmdOutdentListItem : cmdIndentListItem)
+      return
+    }
     const meta = e.metaKey || e.ctrlKey
     if (!meta) return
     if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); dispatch({ type: 'undo' }) }
