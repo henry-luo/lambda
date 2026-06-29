@@ -826,6 +826,38 @@ Results:
 - Direct official `test-stream-duplex-from.js`: still pass.
 - Direct official `test-stream-duplexpair.js`: still pass.
 
+### 2026-06-29 Track A continuation: readable abort and subclass defaults
+
+Continued the stream lifecycle work with the next parseable destroy failure:
+
+- `stream.addAbortSignal()` now attaches an abort listener instead of only
+  checking already-aborted signals. Future aborts destroy the target stream with
+  the signal reason, so aborted readable streams stop producing `data`.
+- Stream constructors now validate and honor `options.signal`, routing it
+  through the same abort attachment path used by `addAbortSignal()`.
+- Stream prototypes now expose an inherited `destroyed: false` default. This
+  matches Node's subclass construction behavior where user constructors can
+  read `this.destroyed` before calling `Readable.call(this)` or
+  `Writable.call(this)`.
+
+Verification:
+
+```bash
+make build
+./lambda.exe js ref/node/test/parallel/test-stream-readable-destroy.js --no-log
+./lambda.exe js ref/node/test/parallel/test-stream-compose.js --no-log
+./lambda.exe js ref/node/test/parallel/test-stream-duplex-from.js --no-log
+./lambda.exe js ref/node/test/parallel/test-stream-duplexpair.js --no-log
+```
+
+Results:
+
+- `make build`: pass.
+- Direct official `test-stream-readable-destroy.js`: pass.
+- Direct official `test-stream-compose.js`: still pass.
+- Direct official `test-stream-duplex-from.js`: still pass.
+- Direct official `test-stream-duplexpair.js`: still pass.
+
 ## Verification Policy
 
 Every implementation slice should finish with:
