@@ -88,12 +88,25 @@ describe('commands/cmdInsertParagraph — empty block (bug 2)', () => {
     expect(tx.doc_after.content.every((b: any) => b.tag === 'p')).toBe(true)
   })
 
-  it('Enter in an empty list item adds another empty <li>', () => {
+  it('Enter in an empty top-level list item exits the list (Mac-Notes outdent)', () => {
     const s = state('doc', [node('ul', [node('li', [])])], textSelection(pos([0, 0], 0), pos([0, 0], 0)))
     const tx = cmdInsertParagraph(s)!
+    // the single empty item's list collapses to an empty paragraph
+    expect(tx.doc_after.content.length).toBe(1)
+    expect((nodeAt(tx.doc_after, [0]) as any).tag).toBe('p')
+    expect(tx.sel_after).toEqual(caret([0], 0))
+  })
+
+  it('Enter in an empty NESTED list item outdents it one level', () => {
+    const s = state('doc',
+      [node('ul', [node('li', [text('a'), node('ul', [node('li', [])])])])],
+      textSelection(pos([0, 0, 1, 0], 0), pos([0, 0, 1, 0], 0)))
+    const tx = cmdInsertParagraph(s)!
     const ul = nodeAt(tx.doc_after, [0]) as any
+    // the empty nested item becomes a sibling of "a" at the outer level
     expect(ul.content.length).toBe(2)
     expect(ul.content.every((li: any) => li.tag === 'li')).toBe(true)
+    expect((ul.content[1] as any).content).toEqual([])
   })
 })
 

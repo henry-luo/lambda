@@ -1957,11 +1957,72 @@ fn split_block_node_selection(state) {
   }
 }
 
+// True iff a block's content is "empty" — nothing, a single empty text leaf,
+// or a single empty wrapper block (e.g. <li></li>, <li><p></p></li>).
+fn is_empty_block_content(content) {
+  if (len(content) == 0) { true }
+  else if (len(content) == 1) {
+    let c = content[0]
+    if (is_text(c)) { c.text == "" }
+    else if (is_node(c)) { is_empty_block_content(c.content) }
+    else { false }
+  }
+  else { false }
+}
+
+// cmd_enter_empty_list_item — Mac-Notes Enter behaviour. Pressing Enter in an
+// EMPTY list item lifts it instead of creating another empty item:
+//   * nested item   → outdent one level (caret left inside the outdented item)
+//   * top-level item → exit the list as an empty default block (the list splits
+//                      if items follow), caret placed in that block.
+// Returns null when the caret is not in an empty list item. Mirrors
+// cmdEnterEmptyListItem in test/editor-js/src/commands/structural-commands.ts.
+fn cmd_enter_empty_list_item(state) {
+  let sel = state.selection
+  if (sel == null or sel.kind != 'text') { null }
+  else {
+    let item_path = ancestor_tag(state.doc, sel.anchor.path, state_list_item_tag(state))
+    if (item_path == null) { null }
+    else {
+      let item = node_at(state.doc, item_path)
+      if (item == null or not is_node(item) or not is_empty_block_content(item.content)) { null }
+      else {
+        let outdent = cmd_outdent_list_item(state)
+        if (outdent != null) {
+          if (outdent.sel_after != null and outdent.sel_after.kind == 'node') {
+            tx_set_selection(outdent, caret(pos(outdent.sel_after.path, 0)))
+          } else { outdent }
+        } else {
+          let list_path = parent_path(item_path)
+          let list_node = node_at(state.doc, list_path)
+          if (list_node == null or not is_node(list_node) or not is_list_node(list_node)) { null }
+          else {
+            let list_parent_path = parent_path(list_path)
+            let list_index = last_index(list_path)
+            let item_index = last_index(item_path)
+            let before = list_take(list_node.content, item_index)
+            let after = list_drop(list_node.content, item_index + 1)
+            let para = node(state_default_block(state), [])
+            let with_before = if (len(before) > 0) { [with_content(list_node, before)] } else { [] }
+            let para_offset = len(with_before)
+            let with_after = if (len(after) > 0) { [with_content(list_node, after)] } else { [] }
+            let replacement = list_concat(list_concat(with_before, [para]), with_after)
+            let tx0 = tx_begin(state.doc, sel)
+            let tx1 = tx_step(tx0, step_replace(list_parent_path, list_index, list_index + 1, replacement))
+            tx_set_selection(tx1, caret(pos([*list_parent_path, list_index + para_offset], 0)))
+          }
+        }
+      }
+    }
+  }
+}
+
 pub fn cmd_split_block(state) {
   let sel = state.selection
   if (sel == null) { null }
   else if (sel.kind == 'text' and not sel_collapsed(sel) and sel_same_parent_leaves(sel)) { split_block_text_selection(state) }
   else if (not sel_collapsed(sel)) { null }
+  else if (cmd_enter_empty_list_item(state) != null) { cmd_enter_empty_list_item(state) }
   else if (node_at(state.doc, sel.anchor.path) != null and is_node(node_at(state.doc, sel.anchor.path))) { split_block_node_selection(state) }
   else if (not sel_single_leaf(sel)) { null }
   else { split_block_collapsed_selection(state) }

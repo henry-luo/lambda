@@ -480,14 +480,14 @@ let d_71 = node('doc', [node('ol', [node('li', [text("p")]), node('li', [text("q
 let st_71_0 = {doc: d_71, selection: text_selection(pos([0, 1, 0], 1), pos([0, 1, 0], 1)), schema: html5_subset_schema}
 let st_71_1 = next_state(st_71_0, cmd_split_block(st_71_0))
 let st_71_2 = next_state(st_71_1, cmd_split_block(st_71_1))
-fp(st_71_2.doc) == "doc(ol(li(\"p\"),li(\"q\"),li(),li()))"
+fp(st_71_2.doc) == "doc(ol(li(\"p\"),li(\"q\")),p())"
 
 // [72] tier_e_html/lists/multi-item/ol-end-2enter
 let d_72 = node('doc', [node('ol', [node('li', [text("y")])])])
 let st_72_0 = {doc: d_72, selection: text_selection(pos([0, 0, 0], 1), pos([0, 0, 0], 1)), schema: html5_subset_schema}
 let st_72_1 = next_state(st_72_0, cmd_split_block(st_72_0))
 let st_72_2 = next_state(st_72_1, cmd_split_block(st_72_1))
-fp(st_72_2.doc) == "doc(ol(li(\"y\"),li(),li()))"
+fp(st_72_2.doc) == "doc(ol(li(\"y\")),p())"
 
 // [73] tier_e_html/lists/multi-item/ol-end-3enter
 let d_73 = node('doc', [node('ol', [node('li', [text("y")])])])
@@ -495,7 +495,7 @@ let st_73_0 = {doc: d_73, selection: text_selection(pos([0, 0, 0], 1), pos([0, 0
 let st_73_1 = next_state(st_73_0, cmd_split_block(st_73_0))
 let st_73_2 = next_state(st_73_1, cmd_split_block(st_73_1))
 let st_73_3 = next_state(st_73_2, cmd_split_block(st_73_2))
-fp(st_73_3.doc) == "doc(ol(li(\"y\"),li(),li(),li()))"
+fp(st_73_3.doc) == "doc(ol(li(\"y\")),p(),p())"
 
 // [74] tier_e_html/lists/multi-item/ol-mid-2enter
 let d_74 = node('doc', [node('ol', [node('li', [text("abcd")])])])
@@ -509,14 +509,14 @@ let d_75 = node('doc', [node('ul', [node('li', [text("one")]), node('li', [text(
 let st_75_0 = {doc: d_75, selection: text_selection(pos([0, 0, 0], 3), pos([0, 0, 0], 3)), schema: html5_subset_schema}
 let st_75_1 = next_state(st_75_0, cmd_split_block(st_75_0))
 let st_75_2 = next_state(st_75_1, cmd_split_block(st_75_1))
-fp(st_75_2.doc) == "doc(ul(li(\"one\"),li(),li(),li(\"two\")))"
+fp(st_75_2.doc) == "doc(ul(li(\"one\")),p(),ul(li(\"two\")))"
 
 // [76] tier_e_html/lists/multi-item/ul-end-2enter
 let d_76 = node('doc', [node('ul', [node('li', [text("x")])])])
 let st_76_0 = {doc: d_76, selection: text_selection(pos([0, 0, 0], 1), pos([0, 0, 0], 1)), schema: html5_subset_schema}
 let st_76_1 = next_state(st_76_0, cmd_split_block(st_76_0))
 let st_76_2 = next_state(st_76_1, cmd_split_block(st_76_1))
-fp(st_76_2.doc) == "doc(ul(li(\"x\"),li(),li()))"
+fp(st_76_2.doc) == "doc(ul(li(\"x\")),p())"
 
 // [77] tier_e_html/lists/multi-item/ul-end-3enter
 let d_77 = node('doc', [node('ul', [node('li', [text("x")])])])
@@ -524,7 +524,7 @@ let st_77_0 = {doc: d_77, selection: text_selection(pos([0, 0, 0], 1), pos([0, 0
 let st_77_1 = next_state(st_77_0, cmd_split_block(st_77_0))
 let st_77_2 = next_state(st_77_1, cmd_split_block(st_77_1))
 let st_77_3 = next_state(st_77_2, cmd_split_block(st_77_2))
-fp(st_77_3.doc) == "doc(ul(li(\"x\"),li(),li(),li()))"
+fp(st_77_3.doc) == "doc(ul(li(\"x\")),p(),p())"
 
 // [78] tier_e_html/lists/multi-item/ul-mid-2enter
 let d_78 = node('doc', [node('ul', [node('li', [text("hello")])])])
@@ -581,7 +581,7 @@ fp(st_85_1.doc) == "doc(ol(li(\"x1\"),li(\"y\"),li(\"2\"),li(\"z3\")))"
 let d_86 = node('doc', [node('ol', [node('li', [])])])
 let st_86_0 = {doc: d_86, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0)), schema: html5_subset_schema}
 let st_86_1 = next_state(st_86_0, cmd_split_block(st_86_0))
-fp(st_86_1.doc) == "doc(ol(li(),li()))"
+fp(st_86_1.doc) == "doc(p())"
 
 // [87] tier_e_html/lists/split/ul-1item-1char-after
 let d_87 = node('doc', [node('ul', [node('li', [text("a")])])])
@@ -683,7 +683,7 @@ fp(st_102_1.doc) == "doc(ul(li(\"alpha\"),li(),li(\"beta\"),li(\"gamma\")))"
 let d_103 = node('doc', [node('ul', [node('li', [])])])
 let st_103_0 = {doc: d_103, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0)), schema: html5_subset_schema}
 let st_103_1 = next_state(st_103_0, cmd_split_block(st_103_0))
-fp(st_103_1.doc) == "doc(ul(li(),li()))"
+fp(st_103_1.doc) == "doc(p())"
 
 // [104] tier_e_html/lists/split-marks/bold-before-run
 let d_104 = node('doc', [node('ul', [node('li', [text("plain "), text_marked("bold", [{name: 'strong', value: true}])])])])

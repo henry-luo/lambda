@@ -31,6 +31,7 @@ import {
 import { defaultSplitBlock, isBlockTag, schemaAllowsInline } from '../model/schema.js'
 import type { Schema } from '../model/schema.js'
 import { caret, caretAt, isText as selIsText, selCollapsed, selHi, selLo, selSingleLeaf } from './sel.js'
+import { cmdEnterEmptyListItem } from './structural-commands.js'
 import type { EditorState } from './types.js'
 import type { AttrValue, Child, MarkDict, Node, SourcePath, SourcePos, TextLeaf, Transaction } from '../model/types.js'
 
@@ -266,6 +267,11 @@ export function cmdInsertParagraph(state: EditorState): Transaction | null {
       meta: []
     }
   }
+
+  // Mac-Notes behaviour: Enter in an EMPTY list item lifts/outdents it instead
+  // of creating another empty item.
+  const lifted = cmdEnterEmptyListItem(state)
+  if (lifted !== null) return lifted
 
   const p = sel.anchor
 

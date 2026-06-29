@@ -7,6 +7,7 @@
 
 import {
   isNode,
+  isText,
   lastIndex,
   listSet,
   listSplice,
@@ -155,6 +156,68 @@ export function cmdOutdentListItem(state: EditorState): Transaction | null {
   let tx = txBegin(state.doc, sel)
   tx = txStep(tx, stepReplace(grandListPath, parentItemIndex, parentItemIndex + 1, [parent2, item]))
   return txSetSelection(tx, nodeSelection([...grandListPath, parentItemIndex + 1]))
+}
+
+// True iff a block's content is "empty" — nothing, a single empty text leaf,
+// or a single empty wrapper block (e.g. <li></li>, <li><p></p></li>).
+function isEmptyBlockContent(content: Child[]): boolean {
+  if (content.length === 0) return true
+  if (content.length === 1) {
+    const c = content[0] as Child
+    if (isText(c)) return c.text === ''
+    if (isNode(c)) return isEmptyBlockContent(c.content)
+  }
+  return false
+}
+
+// cmdEnterEmptyListItem — Mac-Notes Enter behaviour. Pressing Enter in an EMPTY
+// list item lifts it instead of creating another empty item:
+//   * nested item   → outdent one level (still a bullet, parent list level)
+//   * top-level item → exit the list as an empty paragraph (the list splits if
+//                      items follow), caret placed in that paragraph.
+// Returns null when the caret is not in an empty list item (caller falls back
+// to the normal split).
+export function cmdEnterEmptyListItem(state: EditorState): Transaction | null {
+  const sel = state.selection
+  const basePath = sel?.kind === 'text' ? sel.anchor.path : null
+  if (sel === null || basePath === null) return null
+  const itemPath = ancestorTag(state.doc, basePath, 'li')
+  if (itemPath === null) return null
+  const item = nodeAt(state.doc, itemPath)
+  if (item === null || !isNode(item) || !isEmptyBlockContent(item.content)) return null
+
+  // Nested item: reuse the outdent transform, but leave a caret inside the
+  // (empty) outdented item rather than selecting it, so the user keeps typing.
+  const outdent = cmdOutdentListItem(state)
+  if (outdent !== null) {
+    const after = outdent.sel_after
+    if (after !== null && after.kind === 'node') {
+      return txSetSelection(outdent, caret(pos(after.path, 0)))
+    }
+    return outdent
+  }
+
+  // Top-level item: exit the list as an empty default block (paragraph).
+  const listPath = parentPath(itemPath)
+  const listNode = nodeAt(state.doc, listPath)
+  if (listNode === null || !isNode(listNode) || !isListNode(listNode)) return null
+  const listParentPath = parentPath(listPath)
+  const listIndex = lastIndex(listPath)
+  const itemIndex = lastIndex(itemPath)
+
+  const before = listNode.content.slice(0, itemIndex)
+  const after = listNode.content.slice(itemIndex + 1)
+  const para = node(state.schema.default_block, [])
+  const replacement: Child[] = []
+  if (before.length > 0) replacement.push(withContent(listNode, before))
+  const paraOffset = replacement.length
+  replacement.push(para)
+  if (after.length > 0) replacement.push(withContent(listNode, after))
+
+  let tx = txBegin(state.doc, sel)
+  tx = txStep(tx, stepReplace(listParentPath, listIndex, listIndex + 1, replacement))
+  const paraPath = [...listParentPath, listIndex + paraOffset]
+  return txSetSelection(tx, caret(pos(paraPath, 0)))
 }
 
 // ---------------------------------------------------------------------------
