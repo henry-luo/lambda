@@ -6,6 +6,7 @@
 
 import .mod_commands
 import .mod_decorations
+import .mod_doc_schema
 import .mod_history
 import .mod_input_intent
 import .mod_md_schema
@@ -15,7 +16,12 @@ import .mod_transaction
 pub editor_schemas = {
   markdown: markdown_schema,
   commonmark_strict: commonmark_strict_schema,
-  html5_subset: html5_subset_schema
+  html5_subset: html5_subset_schema,
+  // doc = md_schema + drawing-layer entries: lets an editor host inline
+  // <drawing> blocks (the Stage-4 schema seam). The drawing block is atomic +
+  // editable, so flow-mode descends into it (canvas mode) rather than selecting
+  // it as one opaque unit; its inner shapes are the selectable units.
+  doc: doc_schema
 }
 
 fn schema_or_default(schema) => if (schema == null) markdown_schema else schema
