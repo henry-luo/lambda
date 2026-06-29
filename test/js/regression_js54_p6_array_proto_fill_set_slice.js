@@ -78,6 +78,7 @@ assertEq(valueofCalled, true, "resize calls valueOf BEFORE detach check");
 // numeric get/set.
 const nan_a = [1, 2, 3, 4, 5, 6, 248, 127];
 const nan_b = [9, 8, 7, 6, 5, 4, 240, 127];
+const nan_c = [17, 18, 19, 20, 21, 22, 248, 127];
 {
     const src_f64 = new Float64Array(1);
     new Uint8Array(src_f64.buffer).set(nan_a);
@@ -109,6 +110,15 @@ const nan_b = [9, 8, 7, 6, 5, 4, 240, 127];
     bytes.set(nan_b, 8);
     const sliced = f64.slice(1);
     assertBytes(new Uint8Array(sliced.buffer), nan_b, "Float64Array.slice preserves NaN payload bytes");
+}
+{
+    const f64 = new Float64Array(3);
+    const bytes = new Uint8Array(f64.buffer);
+    bytes.set(nan_a, 0);
+    bytes.set(nan_b, 8);
+    bytes.set(nan_c, 16);
+    f64.copyWithin(1, 0, 2);
+    assertBytes(new Uint8Array(f64.buffer), nan_a.concat(nan_a).concat(nan_b), "Float64Array.copyWithin preserves overlapping NaN payload bytes");
 }
 
 console.log("Js54 P6 OOB-gating + length-tracking + resize regression: all assertions passed");

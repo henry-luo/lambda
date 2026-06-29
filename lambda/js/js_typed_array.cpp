@@ -730,6 +730,22 @@ extern "C" bool js_typed_array_raw_copy_reversed(Item dst_item, Item src_item) {
     return true;
 }
 
+extern "C" bool js_typed_array_raw_copy_within(Item ta_item, int target, int start, int count) {
+    if (!js_typed_array_raw_fast_enabled()) return false;
+    if (!js_is_typed_array(ta_item)) return false;
+    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
+    if (!ta || js_typed_array_is_out_of_bounds(ta)) return false;
+    if (count <= 0) return true;
+    js_typed_array_refresh_arraynum_view(ta);
+    char* data = (char*)js_typed_array_current_data(ta);
+    if (!data) return false;
+    if (js_typed_array_arraynum_range_matches(ta, data, start, count) &&
+        js_typed_array_arraynum_range_matches(ta, data, target, count)) {
+        return array_num_copy_same_type_bytes(ta->view, target, ta->view, start, count);
+    }
+    return false;
+}
+
 extern "C" int js_typed_array_raw_index_of(Item ta_item, Item search_value,
                                            int from, int bound, bool reverse, bool same_value_zero) {
     if (!js_typed_array_raw_fast_enabled()) return -2;
