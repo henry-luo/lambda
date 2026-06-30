@@ -63,7 +63,7 @@ function h(tag: string, props: Props = {}, children: (Node | string)[] = []): HT
   for (const k in props) {
     const v = props[k]
     if (v === null || v === undefined || v === false) continue
-    if (k === 'class') e.className = String(v)
+    if (k === 'class') e.setAttribute('class', String(v))        // content attr; keeps classList in sync under Radiant (vs the .className property)
     else if (k === 'title') e.setAttribute('title', String(v))   // content attr (reflects under Radiant; [title=…] selectors)
     else if (k === 'disabled') (e as HTMLButtonElement).disabled = Boolean(v)
     else if (k === 'html') e.innerHTML = String(v)
@@ -193,9 +193,24 @@ export class FullEditorDom {
   }
 
   private runCmd = (cmd: Command): void => {
+    this.syncSelectionFromDom()
     const c = this.state
     const tx = cmd({ doc: c.doc, schema: c.schema, selection: c.selection, stored_marks: c.stored_marks })
     if (tx !== null) this.dispatch({ type: 'apply', tx })
+  }
+
+  // Pull the live DOM selection into the model just before running a toolbar
+  // command. The browser keeps the model synced via `selectionchange`; under
+  // Radiant that event isn't delivered for native caret moves in the editor's
+  // nested contenteditable, so we read it on demand here (window.getSelection()
+  // works). Only text selections; node/multi-node/gap selections are kept.
+  private syncSelectionFromDom(): void {
+    const cur = this.state.selection
+    if (cur !== null && cur.kind !== 'text') return
+    const src = getSourceSelectionFromDom()
+    if (src === null) return
+    const next: Selection = { kind: 'text', anchor: src.anchor, head: src.head }
+    if (selKey(next) !== selKey(cur)) this.state = { ...this.state, selection: next }
   }
 
   private render(): void {
@@ -343,7 +358,18 @@ export class FullEditorDom {
   private syncToolbar(): void {
     const marks = activeMarks(this.state.doc, this.state.selection)
     const block = activeBlock(this.state.doc, this.state.selection)
-    const setActive = (key: string, on: boolean) => this.btn[key]?.classList.toggle('is-active', on)
+    // Toggle the active class via setAttribute('class', …) rather than
+    // classList.toggle: under Radiant, classList mutations on JS-created
+    // elements don't reflect to the `class` content attribute (the same
+    // property-vs-attribute split as .title/.className), so the highlight would
+    // never appear. Rebuilding the class string keeps it consistent everywhere.
+    const setActive = (key: string, on: boolean) => {
+      const b = this.btn[key]
+      if (!b) return
+      const cls = (b.getAttribute('class') ?? '').split(/\s+/).filter(c => c && c !== 'is-active')
+      if (on) cls.push('is-active')
+      b.setAttribute('class', cls.join(' '))
+    }
     setActive('bold', marks['bold'] === true)
     setActive('italic', marks['italic'] === true)
     setActive('underline', marks['underline'] === true)

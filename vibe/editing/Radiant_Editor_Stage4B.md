@@ -1,6 +1,6 @@
 # Radiant Rich Editor — Stage 4B: Script-Driven Editing Under Radiant (Plain-DOM JS) over a Common C++ Substrate
 
-**Date:** 2026-06-30 · **Status:** Proposal.
+**Date:** 2026-06-30 · **Status:** In progress — Phase 1 done; Phase 2 substantially done (editor loads/mounts/edits/formats under Radiant); see **Progress** below.
 **Scope:** Make the Stage-4 rich-text editor run **inside Radiant** by moving **all document-model editing into the scripting layer** and reducing the C++ side to a **common substrate** — caret/selection, the editable flag, and event generation/routing — shared by **two co-equal runtime editors**: the **JS** editor (ported from React to plain DOM, the focus of 4B) and the **Lambda `.ls`** editor (`lambda/package/editor/`). The native C++ rich-text **editing-behavior subsystem is disabled/retired**; `contenteditable` becomes **just a flag** that routes input events to script handlers. Promotes the deferred design note in **[Stage 4, Appendix A](Radiant_Editor_Stage4.md#appendix-a--vanilla-dom-editor-future-third-rendering-target)** into committed work.
 **Builds on:** [Radiant_Editor_Stage4.md](Radiant_Editor_Stage4.md), [Radiant_Rich_Text_Editing.md](Radiant_Rich_Text_Editing.md) → [Radiant_Rich_Text_Editor3.md](Radiant_Rich_Text_Editor3.md) (Stages 1-3), [Reactive_UI.md](Reactive_UI.md) (reactive substrate, Lambda event dispatch, `render_map`), [JS_13_Web_DOM.md](../../doc/dev/js/JS_13_Web_DOM.md) (LambdaJS DOM).
 **Co-developed with:** the Lambda `.ls` editor — **as important as the JS version, built in parallel, aligned on source-model/doc handling, and checked against the same fixtures** (§1, §6). Drawing editor → [Stage 5](Radiant_Editor_Stage5.md).
@@ -22,6 +22,28 @@ Two editor implementations are co-equal deliverables that **share one design and
 **Why cheap:** the JS reference is already React-lean (38 pure `.ts`, 3 `.tsx`, 1838/1841 tests headless); `dom-bridge.ts` is already standards-only; events are already native. The Lambda editor already mirrors the JS module structure (`mod_dom_bridge`, `mod_input_intent`, `mod_router`, `mod_source_pos`, `mod_step`, `mod_transaction`, `mod_history`). The **one new component** for JS is a keyed selection-preserving reconciler (the Lambda side already has `render_map`).
 
 **The phases:** (0) define the three-layer division for *both* runtimes → (1) plain-DOM JS view, browser-first → (2) run JS under Radiant + spike → (3) reduce `contenteditable` to a flag; route events to script → (4) reach parity across browser-JS + Radiant-JS + Radiant-Lambda on the shared fixtures → (5) retire the dead C++ editing-behavior subsystem behind a strict parity gate.
+
+---
+
+## Progress (as of 2026-06-30)
+
+**Done — Phase 1 (plain-DOM JS view, browser).** React swapped for a framework-free view in `test/editor-js/src/view/`: `vnode.ts`, `render-vnode.ts`, `reconcile.ts` (the keyed selection-preserving reconciler — the one new component), `editor-view-dom.ts` (`EditorViewDom`), and `editor-state.ts` (pure reducer split out so the plain-DOM graph imports no React). Full chrome ported in `demo/full-editor-dom.ts` (`FullEditorDom`: toolbar, DOM-selection→model tracking, paste/copy, drag-reorder, image-resize, gap caret, link popover, table col-resize). **React is retained permanently** (§3.2) as the future React-under-Radiant test vehicle. Single-file demo `demo/editor-dom.html` + `main-dom.ts` → `npm run build:page-dom` → `test/html/editor-dom.html` (classic **IIFE**, no React). Tests: parallel `test/view/{render-vnode,reconcile,editor-view-dom,full-editor-dom}.test.ts` beside the React suite — **full JS suite 1955 green, tsc clean**; browser-verified.
+
+**Substantially done — Phase 2 (run JS editor under Radiant).** The plain-DOM editor **loads, mounts, edits text, runs toolbar commands, and applies range formatting** under Radiant via the headless `lambda.exe view --event-file` testdriver. Fixture suite `test/ui/editor4b/*.json` (mount · typing · sustained typing · toolbar undo/redo · selectionchange delivery · toolbar Bold on a range incl. `is-active`) — **6/6 green** via `test/editor-js/tools/run-radiant-fixtures.sh`. The de-risk spike passed: inline classic JS runs, `beforeinput` reaches page JS and is cancelable, `getSelection()` works.
+
+**Radiant substrate fixes made along the way** (Phase 2/3 work, all behind `make build`; `make test-radiant-baseline` unchanged at 6091/209 — no new regressions):
+- **`getAttributeNames()`** added to `js_dom` (parser needs to enumerate attributes; `.attributes` was absent).
+- **`_lambda_rt` set in `radiant_js_ctx_enter`/`_exit`** (`event.cpp`) — fixed a heap-buffer-overflow when a JIT'd JS event handler evaluated a template literal (`stringbuf_new(_lambda_rt->pool)` with a stale pool). Native editing event-tests 25/25 after.
+- **`js_event_loop_pump_nowait()`** + a tick in the headless loop (`window.cpp`) — delivers `setTimeout(0)`/microtask work (e.g. coalesced `selectionchange`) between sim events. `selectionchange` now reaches page-JS `document` listeners (proven for plain contenteditable).
+- **reflow-on-JS-mutation** — `js_dom_mutation_notify` requests a reflow for layout-affecting mutations, so JS-built chrome is laid out and hit-testable at mount.
+- Editor-side adaptations: classic-IIFE build (Radiant skips `type="module"`); `DOMParser`→`innerHTML` fallback in `parseHtmlToDoc`; `title`/`class` set via `setAttribute` (JS *property* sets don't reflect to content attributes under Radiant); just-in-time `getSelection()`→model sync before toolbar commands; `is-active` toggled via `setAttribute`.
+
+**Open / known issues**
+- **JS-built chrome layout view orphaned after an editing interaction** → after a click/Cmd+A in the surface, a coordinate-resolved toolbar click resolves to `y=INT_MAX` and misses (even a forced full reflow doesn't recompute it). The range-format fixture types one char first as a workaround. Root-caused and filed: **[vibe/Radiant_Issue.md](../Radiant_Issue.md)**.
+- **`selectionchange` not delivered for the editor's nested contenteditable** (the queue drops at the runtime-enter guard because the retained JS runtime isn't reachable from the selection's `DocState` at native-mutation time). Worked around editor-side (just-in-time `getSelection()` sync); delivery to page JS is proven for *plain* contenteditable.
+- The non-minified `DEBUG_BUILD` editor page is unreliable under Radiant — always test the minified build.
+
+**Not started:** Phase 3 proper (reduce `contenteditable` to a flag / disable the native editing-behavior engine), Phase 4 (triple-runtime parity; the Lambda `.ls` track under Radiant), Phase 5 (retire the native engine). Also deferred: migrating the 4 React `.tsx` tests onto the plain-DOM view (kept in parallel since React is retained).
 
 ---
 
@@ -128,7 +150,7 @@ Build and prove it in the browser (known-good platform, zero Radiant variables).
 
 > **Status (2026-06-30): plain-DOM view built, React retained.** New in `test/editor-js/src/view/`: `vnode.ts`, `render-vnode.ts`, `reconcile.ts` (keyed reconciler), `editor-view-dom.ts` (`EditorViewDom`), `editor-state.ts` (pure reducer split out of `use-editor-state.ts` so the plain-DOM graph imports no React). Full chrome: `demo/full-editor-dom.ts` (`FullEditorDom` — vanilla port of `full-editor.tsx`: toolbar, DOM-selection→source tracking, paste/copy, drag-reorder, image-resize, gap caret, link popover, table col-resize). Parallel tests `test/view/{render-vnode,reconcile,editor-view-dom,full-editor-dom}.test.ts` (38 tests). Single-file demo `demo/editor-dom.html` + `main-dom.ts` → `npm run build:page-dom` → `test/html/editor-dom.html` (no React). Suite green with React + plain-DOM in parallel; browser-verified.
 
-### 3.2 Phase 2 — run the JS editor under Radiant
+### 3.3 Phase 2 — run the JS editor under Radiant
 
 Radiant runs page JS via `script_runner` (retains JS state for interactive windows): `./lambda.exe view test/html/editor-dom.html` loads the single-file plain-DOM editor live on the LambdaJS DOM; headless event-script playback (`event_sim`) runs the fixture corpus without a window. **De-risk spike first** (gates everything):
 
@@ -153,12 +175,14 @@ Radiant runs page JS via `script_runner` (retains JS state for interactive windo
 >   - **Root cause (it was a missing event-loop tick, not a missing dispatch):** the JS bridge `js_dom_queue_selectionchange` (`js_dom_selection.cpp`) already queued the event via `setTimeout(0)` from the `dom_range` selection notifier, but the **headless event simulator never drained the timer/microtask queue**, so the coalesced fire (`_wpt_selectionchange_fire`) never ran. (Confirmed by tracing: queued 25×, fired 0×.)
 >   - **Fix:** added `js_event_loop_pump_nowait()` (`lambda/js/js_event_loop.{cpp,h}`) — a **bounded, non-blocking** pump (a few `uv_run(UV_RUN_NOWAIT)` turns + microtask flush, no watchdog wait so a self-rescheduling callback can't spin) — and called it between sim events in the headless loop (`radiant/window.cpp`). This mirrors a real event loop ticking between user actions. **Verified safe:** the full `make test-radiant-baseline` is unchanged (6091 pass / 209 pre-existing fail, identical to before); native editing event-tests 25/25.
 > **Toolbar coverage (2026-06-30):** toolbar buttons dispatch to the JS editor (undo/redo fixture green); title set via `setAttribute` so `[title=…]` selectors match under Radiant (a `.title` *property* set does not reflect to the content attribute).
-> **Remaining for selection-based formatting — root-caused (2026-06-30):** bold/italic/colour on a *range* still doesn't apply in the **full editor**. Tracing (`js_dom_queue_selectionchange`) showed the editor **does** queue `selectionchange` (14× in the Cmd+A fixture) — but every call is **dropped at the runtime-enter guard** (`js_doc_runtime_enter_if_needed`, `js_dom_selection.cpp`), so the event is never scheduled/fired:
->   - **7× with `doc == NULL`** — the selection's anchor node is **detached**: the keyed reconciler / `projectSelection` churns the DOM so the native `DomSelection` ends up pointing at removed nodes, and `node_owning_doc(anchor)` returns null.
->   - **7× with a real document that lacks `js_runtime_heap`** while no JS `context` is active — the guard requires either an active JS context or a doc carrying the JS-runtime fields, and neither holds when the queue is reached from native event processing for that resolved document.
->   - **So it's two coupled gaps, the next task:** (a) **editor-side** — after a reconcile, re-establish the native DOM selection on the *live* (re-rendered) nodes so it never references detached nodes (the keyed reconciler should preserve the caret's text node, or `projectSelection` must re-apply it); (b) **native robustness** — `js_dom_queue_selectionchange` should enter the *main document's* retained JS runtime (via its stored `js_runtime_*` fields) when called without an active context, rather than silently bailing. `window.getSelection()` works throughout; this is downstream of the now-fixed event *delivery*.
+> **Selection-based range formatting — WORKING (2026-06-30).** Bold/italic/colour on a *selected range* now applies under Radiant: fixture `test/ui/editor4b/toolbar-bold-range.json` (caret → type → Cmd+A → toolbar **Bold**) asserts `font-weight:bold` on the selected leaf and passes.
+>   - **What fixed it (editor-side, design-around):** the editor now syncs the live DOM selection into its model **just-in-time before each toolbar command** (`syncSelectionFromDom()` in `FullEditorDom.runCmd`, reading `getSourceSelectionFromDom()` → `window.getSelection()`, which works under Radiant). This avoids depending on `selectionchange` for the editor's nested contenteditable — confirmed it maps the Cmd+A range correctly (`[0,0]:0 → [7,0]:40`).
+>   - **Why the "native queue robustness" half was *not* needed/possible:** investigation showed the editor *does* queue `selectionchange`, but the runtime-enter guard (`js_doc_runtime_enter_if_needed`) drops it — the retained JS runtime is reachable only via the `EventContext` during JS dispatch (as `radiant_js_ctx_enter` does), **not** from the selection's `DocState` / thread-local main document at native-selection-mutation time (both carry `js_runtime_heap == NULL` there). A robust native fix would require re-plumbing that topology; the editor-side just-in-time sync sidesteps it entirely, so the native attempt was reverted.
+>   - **Two minor follow-ups — addressed (2026-06-30):**
+>     - **(1) JS-created chrome now lays out at mount.** Root cause: JS DOM mutations didn't request a reflow (only the native editing path did), so the JS-built chrome had no geometry and position-based clicks missed until an edit triggered relayout. **Fix:** `js_dom_mutation_notify` (`lambda/js/js_dom.cpp`) now calls `doc_state_request_reflow()` for layout-affecting mutations (not paint-only). A fresh-mount toolbar click now lands (verified). `make test-radiant-baseline` unchanged (6091/209) — safe. *Caveat — separate, deeper issue (investigated, not yet fixed):* the range-format fixture still types one char first because, after a surface interaction (click/Cmd+A), a subsequent **coordinate-resolved** toolbar-button click resolves to `y = INT_MAX`. Root cause: the editing/caret path's reflow leaves the JS-built chrome's **layout view orphaned** at the "pending-layout" sentinel, and **even a forced full `reflow_html_doc` does not recompute it** (the JS-created toolbar views are no longer reached by layout after editing). So coordinate hit-testing on the toolbar misses. A type triggers the editor's reconcile (JS DOM mutations → reflow-on-mutation, fix 1 above) which re-establishes the chrome's layout, which is why the type-first fixture passes. The proper fix is in Radiant's layout/view-tree linkage for JS-created subtrees after editing operations — a dedicated follow-up; the workaround is harmless and a real interactive window (full per-frame layout) is unaffected.
+>     - **(2) Toolbar active-state (`is-active`) now lights up.** Root cause: under Radiant `classList` mutations on JS-created elements don't reflect to the `class` content attribute (the same property-vs-attribute split as `.title`/`.className`), so `classList.toggle('is-active', …)` never showed. **Fix:** `FullEditorDom.syncToolbar` rebuilds the class string via `setAttribute('class', …)` (and `h()` sets `class` via `setAttribute` too). Verified: the Bold button is `is-active` after a range bold (`toolbar-bold-range.json` asserts both the applied style and the active class).
 
-### 3.3 Phase 3 — reduce `contenteditable` to a flag; route events to script
+### 3.4 Phase 3 — reduce `contenteditable` to a flag; route events to script
 
 Apply §1.4: break the four substrate→editing edge-groups; make `contenteditable` classify-only; have `event.cpp` deliver input events to script handlers (JS `addEventListener` and Lambda `on` handlers) and **stop invoking the native apply path**. The dead engine is *bypassed* here and *deleted* in Phase 5 (after parity).
 
@@ -209,14 +233,14 @@ Once Phase 4's parity gate is green, **delete** the disabled editing-behavior la
 
 ## 7. Phases & acceptance
 
-| Phase | Deliverable | Exit gate |
-|---|---|---|
-| **0 — Division (both runtimes)** | §1 three-layer model; Layer-A keep list; the four edges to break; contenteditable-as-flag plan; `js_dom.cpp` coupling plan; JS/Lambda alignment map | Signed off; every native file classified; both runtimes' Layer-B boundaries identical |
-| **1 — Plain-DOM JS view (browser)** | `render.ts` + `reconcile()` + vanilla controller; React in parallel | All 1841 tests green on the plain-DOM view |
-| **2 — JS under Radiant + spike** | `editor-dom.html` runs via `./lambda.exe view`; §3.2 spike resolved | Basics work under Radiant; minimal DOM surface asserted |
-| **3 — contenteditable → flag** | edges broken; events routed to script; native apply path bypassed | Both runtimes edit via script; no native edit fires |
-| **4 — Triple-runtime parity** | corpus runs in browser-JS + Radiant-JS + Radiant-Lambda; divergence triage; native-behaviour coverage map | Every divergence triaged; **every native behaviour covered green under both Radiant runtimes** (retirement gate) |
-| **5 — Retire C++ engine** | dead editing-behavior subsystem + couplings removed; Layer A kept | `make test-radiant-baseline` + 4B lanes green; no behaviour lost |
+| Phase | Status | Deliverable | Exit gate |
+|---|---|---|---|
+| **0 — Division (both runtimes)** | ◑ architecture decided | §1 three-layer model; Layer-A keep list; the four edges to break; contenteditable-as-flag plan; `js_dom.cpp` coupling plan; JS/Lambda alignment map | Signed off; every native file classified; both runtimes' Layer-B boundaries identical *(formal sign-off + JS/Lambda alignment map still to record)* |
+| **1 — Plain-DOM JS view (browser)** | ✅ done | `render.ts` + `reconcile()` + vanilla controller; React in parallel | All tests green on the plain-DOM view *(1955 green; React + plain-DOM run in parallel; the 4 React `.tsx` tests kept, not migrated)* |
+| **2 — JS under Radiant + spike** | ◑ substantially done | `editor-dom.html` runs via `./lambda.exe view`; §3.3 spike resolved | Basics work under Radiant; minimal DOM surface asserted *(loads/mounts/edits/toolbar/range-format green via `test/ui/editor4b` 6/6; one open layout issue — [Radiant_Issue.md](../Radiant_Issue.md))* |
+| **3 — contenteditable → flag** | ☐ not started | edges broken; events routed to script; native apply path bypassed | Both runtimes edit via script; no native edit fires |
+| **4 — Triple-runtime parity** | ☐ not started | corpus runs in browser-JS + Radiant-JS + Radiant-Lambda; divergence triage; native-behaviour coverage map | Every divergence triaged; **every native behaviour covered green under both Radiant runtimes** (retirement gate) |
+| **5 — Retire C++ engine** | ☐ not started | dead editing-behavior subsystem + couplings removed; Layer A kept | `make test-radiant-baseline` + 4B lanes green; no behaviour lost |
 
 **Overall acceptance:** the same editor design, source-model handling, and oracle-verified behaviour runs in the browser and as **two co-equal Radiant editors** (JS and Lambda) over a **common C++ substrate**; all document editing is script-driven over a minimal, documented DOM surface; `contenteditable` is a routing flag; the native C++ editing-behavior subsystem is gone while caret/selection/rendering/event-routing/form-controls remain.
 
@@ -226,13 +250,13 @@ Once Phase 4's parity gate is green, **delete** the disabled editing-behavior la
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| contenteditable input not routed to page-JS / Lambda handlers | medium | Phase 0/2 spike (§3.2); fallback to `keydown` + intent layer (localized) |
+| contenteditable input not routed to page-JS / Lambda handlers | medium | Phase 0/2 spike (§3.3); fallback to `keydown` + intent layer (localized) |
 | Breaking substrate→editing edges destabilizes caret/selection | medium | Audit shows edges are few/narrow (§1.4); break in Phase 0 with the native engine still present as a safety net; baseline tests guard |
-| Double-edit (native still applies an edit the script also applies) | medium | §3.3 disables the native apply path; Phase 4 verifies no native edit fires before Phase 5 deletes it |
+| Double-edit (native still applies an edit the script also applies) | medium | §3.4 disables the native apply path; Phase 4 verifies no native edit fires before Phase 5 deletes it |
 | JS and Lambda editors drift in design | medium | Alignment rule (§1.3): model/step/command changes land in both, gated by shared fixtures |
 | Reconciler regressions (caret/typing/Enter) | medium | Simplest-first (§3.1); React kept in parallel; reconciler unit tests |
 | Silent LambdaJS DOM gaps (undefined-fallthrough) | medium | Phase 2/3 assert the minimal surface explicitly |
-| Stale geometry breaks hit-test / popovers | low–medium | Hit-test from the model; anchor popovers off substrate selection rects (§3.3) |
+| Stale geometry breaks hit-test / popovers | low–medium | Hit-test from the model; anchor popovers off substrate selection rects (§3.4) |
 | Premature retirement removes an uncovered behaviour | medium | Retirement gated on Phase-4 parity, file-by-file (§5.2) |
 
 ---
