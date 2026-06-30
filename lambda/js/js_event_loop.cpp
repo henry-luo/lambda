@@ -43,6 +43,7 @@ extern "C" void js_domain_restore(Item previous);
 extern "C" Item js_domain_capture_stack(void);
 extern "C" Item js_domain_set_stack(Item stack);
 extern "C" void js_domain_restore_stack(Item previous);
+extern "C" Context* _lambda_rt;
 
 // =============================================================================
 // Task Queues
@@ -335,9 +336,11 @@ static void close_all_timer_handles(void);
 typedef struct JsTimerRuntimeScope {
     EvalContext runtime_ctx;
     EvalContext* saved_context;
+    Context* saved_lambda_rt;
     ArrayList* type_list;
     void* saved_doc;
     bool active;
+    bool rt_active;
     bool doc_active;
 } JsTimerRuntimeScope;
 
@@ -376,6 +379,11 @@ static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
         context = &scope->runtime_ctx;
         scope->active = true;
     }
+    scope->saved_lambda_rt = _lambda_rt;
+    if (context) {
+        _lambda_rt = (Context*)context;
+        scope->rt_active = true;
+    }
     if (th->runtime_doc) {
         js_dom_set_document(th->runtime_doc);
         scope->doc_active = true;
@@ -401,6 +409,10 @@ static void timer_runtime_exit(JsTimerRuntimeScope* scope) {
             scope->type_list = nullptr;
         }
         scope->active = false;
+    }
+    if (scope->rt_active) {
+        _lambda_rt = scope->saved_lambda_rt;
+        scope->rt_active = false;
     }
 }
 
