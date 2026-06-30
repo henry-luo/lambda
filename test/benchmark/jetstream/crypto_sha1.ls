@@ -4,23 +4,26 @@
 // Tests bitwise operations, array manipulation, and string processing
 
 let CHRSZ = 8  // bits per input character (ASCII)
+let MASK32 = 4294967295
 
-// Safe 32-bit addition with masking
+// 32-bit addition relies on u32 wraparound.
 pn safe_add(x: int, y: int) {
-    return band(x + y, 4294967295)
+    var ux: u32 = x
+    var uy: u32 = y
+    return int(ux + uy)
 }
 
 // Rotate left (32-bit)
-// Lambda uses 64-bit ints, so shl can overflow 32 bits. Must mask result.
+// Keep the explicit mask until unsigned right shift/shift-width semantics are separate.
 pn rol(num: int, cnt: int) {
-    var n = band(num, 4294967295)
-    return band(bor(shl(n, cnt), shr(n, 32 - cnt)), 4294967295)
+    var n = band(num, MASK32)
+    return band(bor(shl(n, cnt), shr(n, 32 - cnt)), MASK32)
 }
 
 // SHA-1 round function
 pn sha1_ft(t: int, b: int, c: int, d: int) {
     if (t < 20) {
-        return bor(band(b, c), band(band(bnot(b), 4294967295), d))
+        return bor(band(b, c), band(band(bnot(b), MASK32), d))
     }
     if (t < 40) {
         return bxor(bxor(b, c), d)

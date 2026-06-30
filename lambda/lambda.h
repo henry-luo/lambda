@@ -1293,6 +1293,8 @@ extern "C" {
     int64_t it2i(Item item);
     String* it2s(Item item);
     const char* fn_to_cstr(Item item);  // convert Item to C string (for path segment names)
+    Item coerce_num_sized(Item value, int64_t num_type);
+    Item coerce_uint64(Item value);
 
     // MIR JIT workaround: opaque store functions prevent SSA optimizer from
     // reordering swap-pattern assignments inside while loops.

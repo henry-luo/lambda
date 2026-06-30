@@ -49,6 +49,7 @@ static Item assert_make_string_n(const char* str, size_t len) {
 
 static Item assert_namespace = {0};
 static Item internal_errors_namespace = {0};
+static Item internal_assert_myers_diff_namespace = {0};
 static Item assert_options_key = {0};
 static Item assert_diff_key = {0};
 
@@ -317,6 +318,108 @@ extern "C" Item js_get_internal_errors_namespace(void) {
         js_new_function((void*)js_internal_errors_true, 0));
     js_property_set(internal_errors_namespace, assert_make_string("default"), internal_errors_namespace);
     return internal_errors_namespace;
+}
+
+static Item js_assert_myers_make_operation(int op, Item value) {
+    Item pair = js_array_new(0);
+    js_array_push(pair, (Item){.item = i2it(op)});
+    js_array_push(pair, value);
+    return pair;
+}
+
+extern "C" Item js_internal_assert_myersDiff(Item actual, Item expected, Item check_comma_disparity) {
+    (void)check_comma_disparity;
+    int64_t actual_len = js_get_length(actual);
+    int64_t expected_len = js_get_length(expected);
+    if (actual_len < 0) actual_len = 0;
+    if (expected_len < 0) expected_len = 0;
+    int64_t max = actual_len + expected_len;
+    if (max > 2147483647LL) {
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+            "The value of \"myersDiff input size\" is out of range. It must be < 2^31. Received %lld",
+            (long long)max);
+        return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+    }
+
+    Item diff = js_array_new(0);
+    int64_t common_len = actual_len < expected_len ? actual_len : expected_len;
+    for (int64_t i = common_len - 1; i >= 0; i--) {
+        Item actual_value = js_array_get_int(actual, i);
+        Item expected_value = js_array_get_int(expected, i);
+        Item same = js_strict_equal(actual_value, expected_value);
+        if (get_type_id(same) == LMD_TYPE_BOOL && it2b(same)) {
+            js_array_push(diff, js_assert_myers_make_operation(0, actual_value));
+        } else {
+            js_array_push(diff, js_assert_myers_make_operation(1, actual_value));
+            js_array_push(diff, js_assert_myers_make_operation(-1, expected_value));
+        }
+    }
+    for (int64_t i = actual_len - 1; i >= common_len; i--) {
+        js_array_push(diff, js_assert_myers_make_operation(1, js_array_get_int(actual, i)));
+    }
+    for (int64_t i = expected_len - 1; i >= common_len; i--) {
+        js_array_push(diff, js_assert_myers_make_operation(-1, js_array_get_int(expected, i)));
+    }
+    return diff;
+}
+
+static void js_assert_myers_append_string_value(StrBuf* sb, Item value) {
+    Item text = get_type_id(value) == LMD_TYPE_STRING ? value : js_to_string_val(value);
+    String* s = get_type_id(text) == LMD_TYPE_STRING ? it2s(text) : NULL;
+    if (s) strbuf_append_str_n(sb, s->chars, s->len);
+}
+
+extern "C" Item js_internal_assert_printSimpleMyersDiff(Item diff) {
+    StrBuf* sb = strbuf_new();
+    strbuf_append_char(sb, '\n');
+    int64_t len = js_array_length(diff);
+    for (int64_t i = len - 1; i >= 0; i--) {
+        Item pair = js_array_get_int(diff, i);
+        js_assert_myers_append_string_value(sb, js_array_get_int(pair, 1));
+    }
+    Item result = assert_make_string_n(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+extern "C" Item js_internal_assert_printMyersDiff(Item diff, Item operator_item) {
+    (void)operator_item;
+    StrBuf* sb = strbuf_new();
+    strbuf_append_char(sb, '\n');
+    int64_t len = js_array_length(diff);
+    for (int64_t i = len - 1; i >= 0; i--) {
+        Item pair = js_array_get_int(diff, i);
+        Item op_item = js_array_get_int(pair, 0);
+        int64_t op = get_type_id(op_item) == LMD_TYPE_INT ? it2i(op_item) : 0;
+        if (op > 0) strbuf_append_str(sb, "+ ");
+        else if (op < 0) strbuf_append_str(sb, "- ");
+        else strbuf_append_str(sb, "  ");
+        js_assert_myers_append_string_value(sb, js_array_get_int(pair, 1));
+        if (i > 0) strbuf_append_char(sb, '\n');
+    }
+    Item result = js_new_object();
+    js_property_set(result, assert_make_string("message"),
+        assert_make_string_n(sb->str, sb->length));
+    js_property_set(result, assert_make_string("skipped"), (Item){.item = b2it(false)});
+    strbuf_free(sb);
+    return result;
+}
+
+extern "C" Item js_get_internal_assert_myers_diff_namespace(void) {
+    if (internal_assert_myers_diff_namespace.item != 0) return internal_assert_myers_diff_namespace;
+
+    internal_assert_myers_diff_namespace = js_new_object();
+    heap_register_gc_root(&internal_assert_myers_diff_namespace.item);
+    js_property_set(internal_assert_myers_diff_namespace, assert_make_string("myersDiff"),
+        js_new_function((void*)js_internal_assert_myersDiff, 3));
+    js_property_set(internal_assert_myers_diff_namespace, assert_make_string("printMyersDiff"),
+        js_new_function((void*)js_internal_assert_printMyersDiff, 2));
+    js_property_set(internal_assert_myers_diff_namespace, assert_make_string("printSimpleMyersDiff"),
+        js_new_function((void*)js_internal_assert_printSimpleMyersDiff, 1));
+    js_property_set(internal_assert_myers_diff_namespace, assert_make_string("default"),
+        internal_assert_myers_diff_namespace);
+    return internal_assert_myers_diff_namespace;
 }
 
 // helper: throw AssertionError with full Node.js properties
@@ -1845,6 +1948,7 @@ extern "C" Item js_get_assert_namespace(void) {
 extern "C" void js_assert_reset(void) {
     assert_namespace = (Item){0};
     internal_errors_namespace = (Item){0};
+    internal_assert_myers_diff_namespace = (Item){0};
 }
 
 // =============================================================================

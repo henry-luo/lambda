@@ -1253,6 +1253,8 @@ JitImport jit_runtime_imports[] = {
     {"it2b", FPTR(it2b)},
     {"it2s", FPTR(it2s)},
     {"fn_to_cstr", FPTR(fn_to_cstr)},
+    {"coerce_num_sized", FPTR(coerce_num_sized)},
+    {"coerce_uint64", FPTR(coerce_uint64)},
     {"ensure_typed_array", FPTR(ensure_typed_array)},
     {"ensure_sized_array", FPTR(ensure_sized_array)},
 

@@ -12,19 +12,12 @@ pn create_node(key, value) {
 }
 
 // Simple LCG pseudo-random number generator (deterministic)
-// Use float arithmetic to avoid integer overflow
+// u32 arithmetic intentionally wraps like the original 32-bit PRNG.
 pn next_random(state) {
-    var s = state.seed
-    // Split multiplication to avoid overflow: 1103515245 = 1103515 * 1000 + 245
-    // Use modular arithmetic in parts
-    var hi = s / 127773           // q = 2147483648 / 16807 ≈ 127773
-    var lo = s % 127773
-    s = 16807 * lo - 2836 * hi
-    if (s <= 0) {
-        s = s + 2147483647
-    }
-    state.seed = s
-    return float(s) / 2147483647.0
+    var s: u32 = state.seed
+    s = s * 1103515245u32 + 12345u32
+    state.seed = int(s)
+    return float(s) / 4294967296.0
 }
 
 // Splay tree using maps for tree state

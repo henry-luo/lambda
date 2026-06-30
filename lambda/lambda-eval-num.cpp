@@ -36,7 +36,7 @@ Item push_c(int64_t cval) {
                               (t) == LMD_TYPE_FLOAT || (t) == LMD_TYPE_DECIMAL || \
                               (t) == LMD_TYPE_NUM_SIZED || (t) == LMD_TYPE_UINT64)
 
-// promote NUM_SIZED / UINT64 to standard INT64 or FLOAT for arithmetic
+// promote NUM_SIZED / UINT64 to native integer values for ordinary arithmetic
 static inline void normalize_sized(Item &item, TypeId &type) {
     if (type == LMD_TYPE_NUM_SIZED) {
         NumSizedType st = item.get_num_type();
@@ -51,6 +51,191 @@ static inline void normalize_sized(Item &item, TypeId &type) {
         item = push_l((int64_t)item.get_uint64());
         type = LMD_TYPE_INT64;
     }
+}
+
+struct SizedIntegerValue {
+    bool is_unsigned;
+    int bits;
+    uint64_t raw;
+    int64_t sval;
+};
+
+enum SizedIntegerOp {
+    SIZED_INTEGER_ADD,
+    SIZED_INTEGER_SUB,
+    SIZED_INTEGER_MUL,
+    SIZED_INTEGER_DIV,
+    SIZED_INTEGER_MOD,
+};
+
+static inline uint64_t sized_mask(int bits) {
+    return bits >= 64 ? UINT64_MAX : ((1ULL << bits) - 1ULL);
+}
+
+static inline int64_t int64_from_bits(uint64_t raw) {
+    int64_t result;
+    __builtin_memcpy(&result, &raw, sizeof(result));
+    return result;
+}
+
+static inline Item push_u64(uint64_t value) {
+    uint64_t* heap_val = (uint64_t*)heap_calloc(sizeof(uint64_t), LMD_TYPE_UINT64);
+    *heap_val = value;
+    return (Item){ .item = u2it(heap_val) };
+}
+
+static bool read_sized_integer(Item item, TypeId type, SizedIntegerValue* out) {
+    if (type == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = item.get_num_type();
+        out->is_unsigned = false;
+        switch (st) {
+        case NUM_INT8:
+            out->bits = 8;  out->sval = item.get_i8();   out->raw = (uint8_t)out->sval;  return true;
+        case NUM_INT16:
+            out->bits = 16; out->sval = item.get_i16();  out->raw = (uint16_t)out->sval; return true;
+        case NUM_INT32:
+            out->bits = 32; out->sval = item.get_i32();  out->raw = (uint32_t)out->sval; return true;
+        case NUM_UINT8:
+            out->bits = 8;  out->is_unsigned = true; out->raw = item.get_u8();  out->sval = (int64_t)out->raw; return true;
+        case NUM_UINT16:
+            out->bits = 16; out->is_unsigned = true; out->raw = item.get_u16(); out->sval = (int64_t)out->raw; return true;
+        case NUM_UINT32:
+            out->bits = 32; out->is_unsigned = true; out->raw = item.get_u32(); out->sval = (int64_t)out->raw; return true;
+        default:
+            return false;
+        }
+    }
+    if (type == LMD_TYPE_INT64) {
+        out->is_unsigned = false;
+        out->bits = 64;
+        out->sval = item.get_int64();
+        out->raw = (uint64_t)out->sval;
+        return true;
+    }
+    if (type == LMD_TYPE_UINT64) {
+        out->is_unsigned = true;
+        out->bits = 64;
+        out->raw = item.get_uint64();
+        out->sval = int64_from_bits(out->raw);
+        return true;
+    }
+    return false;
+}
+
+static inline int next_signed_width_for_unsigned(int unsigned_bits) {
+    if (unsigned_bits < 8) return 8;
+    if (unsigned_bits < 16) return 16;
+    if (unsigned_bits < 32) return 32;
+    if (unsigned_bits < 64) return 64;
+    return 64;
+}
+
+static void sized_integer_result_type(const SizedIntegerValue* a, const SizedIntegerValue* b,
+        bool* is_unsigned, int* bits) {
+    if (a->is_unsigned == b->is_unsigned) {
+        *is_unsigned = a->is_unsigned;
+        *bits = a->bits > b->bits ? a->bits : b->bits;
+        return;
+    }
+    SizedIntegerValue signed_value = a->is_unsigned ? *b : *a;
+    SizedIntegerValue unsigned_value = a->is_unsigned ? *a : *b;
+    if (signed_value.bits > unsigned_value.bits) {
+        *is_unsigned = false;
+        *bits = signed_value.bits;
+    } else if (unsigned_value.bits < 64) {
+        *is_unsigned = false;
+        *bits = next_signed_width_for_unsigned(unsigned_value.bits);
+        if (*bits < signed_value.bits) *bits = signed_value.bits;
+    } else {
+        *is_unsigned = true;
+        *bits = 64;
+    }
+}
+
+static inline int64_t sized_signed_operand(const SizedIntegerValue* value, int bits) {
+    uint64_t raw = value->is_unsigned ? value->raw : (uint64_t)value->sval;
+    if (bits < 64) {
+        uint64_t sign_bit = 1ULL << (bits - 1);
+        raw &= sized_mask(bits);
+        if (raw & sign_bit) raw |= ~sized_mask(bits);
+    }
+    return int64_from_bits(raw);
+}
+
+static inline uint64_t sized_operand_raw(const SizedIntegerValue* value) {
+    return value->is_unsigned ? value->raw : (uint64_t)value->sval;
+}
+
+static Item pack_sized_integer(bool is_unsigned, int bits, uint64_t raw) {
+    raw &= sized_mask(bits);
+    if (is_unsigned) {
+        switch (bits) {
+        case 8:  return (Item){ .item = u8_to_item(raw) };
+        case 16: return (Item){ .item = u16_to_item(raw) };
+        case 32: return (Item){ .item = u32_to_item(raw) };
+        default: return push_u64(raw);
+        }
+    }
+    switch (bits) {
+    case 8:  return (Item){ .item = i8_to_item(raw) };
+    case 16: return (Item){ .item = i16_to_item(raw) };
+    case 32: return (Item){ .item = i32_to_item(raw) };
+    default: return push_l(int64_from_bits(raw));
+    }
+}
+
+static bool sized_integer_arithmetic(Item item_a, TypeId type_a, Item item_b, TypeId type_b,
+        SizedIntegerOp op, Item* result) {
+    SizedIntegerValue a, b;
+    if (!read_sized_integer(item_a, type_a, &a) || !read_sized_integer(item_b, type_b, &b)) {
+        return false;
+    }
+
+    bool is_unsigned = false;
+    int bits = 0;
+    sized_integer_result_type(&a, &b, &is_unsigned, &bits);
+
+    uint64_t raw = 0;
+    uint64_t mask = sized_mask(bits);
+    uint64_t raw_a = sized_operand_raw(&a);
+    uint64_t raw_b = sized_operand_raw(&b);
+    if (op == SIZED_INTEGER_ADD) {
+        raw = raw_a + raw_b;
+    } else if (op == SIZED_INTEGER_SUB) {
+        raw = raw_a - raw_b;
+    } else if (op == SIZED_INTEGER_MUL) {
+        raw = raw_a * raw_b;
+    } else if (is_unsigned) {
+        uint64_t divisor = raw_b & mask;
+        if (divisor == 0) {
+            log_error("sized integer division by zero error");
+            *result = ItemError;
+            return true;
+        }
+        raw = (op == SIZED_INTEGER_DIV) ? ((raw_a & mask) / divisor) : ((raw_a & mask) % divisor);
+    } else {
+        int64_t dividend = sized_signed_operand(&a, bits);
+        int64_t divisor = sized_signed_operand(&b, bits);
+        if (divisor == 0) {
+            log_error("sized integer division by zero error");
+            *result = ItemError;
+            return true;
+        }
+        if (bits == 64 && dividend == INT64_MIN && divisor == -1) {
+            raw = (op == SIZED_INTEGER_DIV) ? (uint64_t)INT64_MIN : 0;
+        } else {
+            raw = (op == SIZED_INTEGER_DIV) ? (uint64_t)(dividend / divisor) : (uint64_t)(dividend % divisor);
+        }
+    }
+    *result = pack_sized_integer(is_unsigned, bits, raw);
+    return true;
+}
+
+static bool sized_integer_neg(Item item, TypeId type, Item* result) {
+    SizedIntegerValue value;
+    if (!read_sized_integer(item, type, &value)) return false;
+    *result = pack_sized_integer(value.is_unsigned, value.bits, 0ULL - value.raw);
+    return true;
 }
 
 // forward declarations for vector ops (defined in lambda-vector.cpp)
@@ -106,6 +291,11 @@ Item fn_add(Item item_a, Item item_b) {
         (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_add(item_a, item_b);
+    }
+
+    Item sized_result;
+    if (sized_integer_arithmetic(item_a, type_a, item_b, type_b, SIZED_INTEGER_ADD, &sized_result)) {
+        return sized_result;
     }
 
     normalize_sized(item_a, type_a);
@@ -203,6 +393,11 @@ Item fn_mul(Item item_a, Item item_b) {
         (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_mul(item_a, item_b);
+    }
+
+    Item sized_result;
+    if (sized_integer_arithmetic(item_a, type_a, item_b, type_b, SIZED_INTEGER_MUL, &sized_result)) {
+        return sized_result;
     }
 
     normalize_sized(item_a, type_a);
@@ -307,6 +502,11 @@ Item fn_sub(Item item_a, Item item_b) {
         (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_sub(item_a, item_b);
+    }
+
+    Item sized_result;
+    if (sized_integer_arithmetic(item_a, type_a, item_b, type_b, SIZED_INTEGER_SUB, &sized_result)) {
+        return sized_result;
     }
 
     normalize_sized(item_a, type_a);
@@ -518,6 +718,11 @@ Item fn_idiv(Item item_a, Item item_b) {
     TypeId ta = get_type_id(item_a), tb = get_type_id(item_b);
     if (ta == LMD_TYPE_NULL || tb == LMD_TYPE_NULL) return ItemNull;
 
+    Item sized_result;
+    if (sized_integer_arithmetic(item_a, ta, item_b, tb, SIZED_INTEGER_DIV, &sized_result)) {
+        return sized_result;
+    }
+
     normalize_sized(item_a, ta);
     normalize_sized(item_b, tb);
 
@@ -635,6 +840,11 @@ Item fn_mod(Item item_a, Item item_b) {
         (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_mod(item_a, item_b);
+    }
+
+    Item sized_result;
+    if (sized_integer_arithmetic(item_a, type_a, item_b, type_b, SIZED_INTEGER_MOD, &sized_result)) {
+        return sized_result;
     }
 
     normalize_sized(item_a, type_a);
@@ -1579,8 +1789,9 @@ Item fn_neg(Item item) {
         return (Item) { .item = i2it(-val) };
     }
     else if (item._type_id == LMD_TYPE_INT64) {
-        int64_t val = item.get_int64();
-        return push_l(-val);
+        Item sized_result;
+        if (sized_integer_neg(item, LMD_TYPE_INT64, &sized_result)) return sized_result;
+        return ItemError;
     }
     else if (item._type_id == LMD_TYPE_FLOAT) {
         double val = item.get_double();
@@ -1594,11 +1805,15 @@ Item fn_neg(Item item) {
         if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
             return push_d(-item.get_num_sized_as_double());
         } else {
-            return push_l(-item.get_num_sized_as_int64());
+            Item sized_result;
+            if (sized_integer_neg(item, LMD_TYPE_NUM_SIZED, &sized_result)) return sized_result;
+            return ItemError;
         }
     }
     else if (item._type_id == LMD_TYPE_UINT64) {
-        return push_l(-(int64_t)item.get_uint64());
+        Item sized_result;
+        if (sized_integer_neg(item, LMD_TYPE_UINT64, &sized_result)) return sized_result;
+        return ItemError;
     }
     else if (get_type_id(item) == LMD_TYPE_ARRAY_NUM ||
              get_type_id(item) == LMD_TYPE_ARRAY ||
@@ -2241,6 +2456,7 @@ extern "C" double fn_max2_u(double a, double b) {
 
 // Integer absolute value
 extern "C" int64_t fn_abs_i(int64_t x) {
+    if (x == INT64_MIN) return INT64_MIN;
     return x < 0 ? -x : x;
 }
 
@@ -2251,7 +2467,7 @@ extern "C" double fn_abs_f(double x) {
 
 // Integer negation
 extern "C" int64_t fn_neg_i(int64_t x) {
-    return -x;
+    return int64_from_bits(0ULL - (uint64_t)x);
 }
 
 // Float negation
@@ -2265,6 +2481,7 @@ extern "C" int64_t fn_mod_i(int64_t a, int64_t b) {
         log_error("modulo by zero error");
         return INT64_ERROR;
     }
+    if (a == INT64_MIN && b == -1) return 0;
     return a % b;
 }
 
@@ -2274,6 +2491,7 @@ extern "C" int64_t fn_idiv_i(int64_t a, int64_t b) {
         log_error("integer division by zero error");
         return INT64_ERROR;
     }
+    if (a == INT64_MIN && b == -1) return INT64_MIN;
     return a / b;
 }
 

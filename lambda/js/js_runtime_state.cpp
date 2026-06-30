@@ -8,6 +8,7 @@ static Item js_eval_source_filename_stack[JS_EVAL_SOURCE_STACK_MAX];
 static Item js_eval_source_code_stack[JS_EVAL_SOURCE_STACK_MAX];
 static int64_t js_eval_source_line_offset_stack[JS_EVAL_SOURCE_STACK_MAX];
 static int64_t js_eval_source_column_offset_stack[JS_EVAL_SOURCE_STACK_MAX];
+static bool js_eval_source_compact_stack[JS_EVAL_SOURCE_STACK_MAX];
 static int js_eval_source_stack_depth = 0;
 static bool js_eval_source_roots_registered = false;
 
@@ -18,8 +19,9 @@ static void js_eval_source_register_roots(void) {
     js_eval_source_roots_registered = true;
 }
 
-extern "C" void js_eval_source_push(Item filename, Item source,
-                                    int64_t line_offset, int64_t column_offset) {
+static void js_eval_source_push_mode(Item filename, Item source,
+                                     int64_t line_offset, int64_t column_offset,
+                                     bool compact_stack) {
     js_eval_source_register_roots();
     if (js_eval_source_stack_depth >= JS_EVAL_SOURCE_STACK_MAX) return;
     int idx = js_eval_source_stack_depth++;
@@ -27,6 +29,17 @@ extern "C" void js_eval_source_push(Item filename, Item source,
     js_eval_source_code_stack[idx] = source;
     js_eval_source_line_offset_stack[idx] = line_offset;
     js_eval_source_column_offset_stack[idx] = column_offset;
+    js_eval_source_compact_stack[idx] = compact_stack;
+}
+
+extern "C" void js_eval_source_push(Item filename, Item source,
+                                    int64_t line_offset, int64_t column_offset) {
+    js_eval_source_push_mode(filename, source, line_offset, column_offset, false);
+}
+
+extern "C" void js_eval_source_push_compact(Item filename, Item source,
+                                            int64_t line_offset, int64_t column_offset) {
+    js_eval_source_push_mode(filename, source, line_offset, column_offset, true);
 }
 
 extern "C" void js_eval_source_pop(void) {
@@ -36,10 +49,12 @@ extern "C" void js_eval_source_pop(void) {
     js_eval_source_code_stack[idx] = ItemNull;
     js_eval_source_line_offset_stack[idx] = 0;
     js_eval_source_column_offset_stack[idx] = 0;
+    js_eval_source_compact_stack[idx] = false;
 }
 
 static bool js_eval_source_current(Item* out_filename, Item* out_source,
-                                   int64_t* out_line_offset, int64_t* out_column_offset) {
+                                   int64_t* out_line_offset, int64_t* out_column_offset,
+                                   bool* out_compact_stack) {
     if (js_eval_source_stack_depth <= 0) return false;
     int idx = js_eval_source_stack_depth - 1;
     Item filename = js_eval_source_filename_stack[idx];
@@ -51,6 +66,7 @@ static bool js_eval_source_current(Item* out_filename, Item* out_source,
     if (out_source) *out_source = source;
     if (out_line_offset) *out_line_offset = js_eval_source_line_offset_stack[idx];
     if (out_column_offset) *out_column_offset = js_eval_source_column_offset_stack[idx];
+    if (out_compact_stack) *out_compact_stack = js_eval_source_compact_stack[idx];
     return true;
 }
 
@@ -85,7 +101,9 @@ static Item js_eval_source_stack_string(Item error_name, Item message) {
     Item source_item = ItemNull;
     int64_t line_offset = 0;
     int64_t column_offset = 0;
-    if (!js_eval_source_current(&filename_item, &source_item, &line_offset, &column_offset)) {
+    bool compact_stack = false;
+    if (!js_eval_source_current(&filename_item, &source_item, &line_offset, &column_offset,
+                                &compact_stack)) {
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
     String* filename = it2s(filename_item);
@@ -110,6 +128,27 @@ static Item js_eval_source_stack_string(Item error_name, Item message) {
     if (get_type_id(message) == LMD_TYPE_STRING) {
         String* ms = it2s(message);
         if (ms) { msg_str = ms->chars; msg_len = (int)ms->len; }
+    }
+
+    if (compact_stack) {
+        int total = name_len + msg_len + (int)filename->len + 64;
+        char* buf = (char*)mem_alloc((size_t)total + 1, MEM_CAT_JS_RUNTIME);
+        if (!buf) return (Item){.item = ITEM_JS_UNDEFINED};
+        int pos = 0;
+        pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos, "%.*s",
+                        name_len, name_str);
+        if (msg_len > 0) {
+            pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos, ": %.*s",
+                            msg_len, msg_str);
+        }
+        pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos,
+                        "\n    at %.*s:%d:%d",
+                        (int)filename->len, filename->chars, display_line, display_col);
+        if (pos < 0) pos = 0;
+        if (pos > total) pos = total;
+        Item result = (Item){.item = s2it(heap_create_name(buf, pos))};
+        mem_free(buf);
+        return result;
     }
 
     int caret_spaces = display_col - 1;

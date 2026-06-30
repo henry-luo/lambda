@@ -88,6 +88,10 @@ struct JsFunction {
     bool eval_initializer_context;
     Item* with_env; // captured with-object environment stack, if any
     int with_env_depth;
+    String* vm_stack_filename;
+    String* vm_stack_source;
+    int64_t vm_stack_line_offset;
+    int64_t vm_stack_column_offset;
 };
 
 #define JS_FUNC_FLAG_GENERATOR 1

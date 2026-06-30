@@ -4629,6 +4629,51 @@ static int crypto_visible_pem_len(const uint8_t* bytes, int len) {
     return len;
 }
 
+static const uint8_t* crypto_mbedtls_parse_bytes(const uint8_t* bytes, int len,
+                                                 uint8_t** scratch,
+                                                 int* parse_len) {
+    if (scratch) *scratch = NULL;
+    if (parse_len) *parse_len = len;
+    if (!bytes || len <= 0 || !scratch || !parse_len ||
+            !crypto_bytes_look_like_pem(bytes, len)) {
+        return bytes;
+    }
+
+    int visible_len = crypto_visible_pem_len(bytes, len);
+    if (visible_len < 0) visible_len = 0;
+    if (visible_len + 1 == len && bytes[visible_len] == 0) return bytes;
+
+    uint8_t* copy = (uint8_t*)mem_alloc((size_t)visible_len + 1, MEM_CAT_JS_RUNTIME);
+    if (visible_len > 0) memcpy(copy, bytes, (size_t)visible_len);
+    copy[visible_len] = 0;
+    *scratch = copy;
+    *parse_len = visible_len + 1;
+    return copy;
+}
+
+static int crypto_mbedtls_parse_private_key(mbedtls_pk_context* pk,
+                                            const uint8_t* bytes, int len) {
+    uint8_t* scratch = NULL;
+    int parse_len = len;
+    const uint8_t* parse_bytes = crypto_mbedtls_parse_bytes(bytes, len,
+        &scratch, &parse_len);
+    int ret = mbedtls_pk_parse_key(pk, parse_bytes, (size_t)parse_len, NULL, 0,
+        crypto_mbedtls_random, NULL);
+    if (scratch) mem_free(scratch);
+    return ret;
+}
+
+static int crypto_mbedtls_parse_public_key(mbedtls_pk_context* pk,
+                                           const uint8_t* bytes, int len) {
+    uint8_t* scratch = NULL;
+    int parse_len = len;
+    const uint8_t* parse_bytes = crypto_mbedtls_parse_bytes(bytes, len,
+        &scratch, &parse_len);
+    int ret = mbedtls_pk_parse_public_key(pk, parse_bytes, (size_t)parse_len);
+    if (scratch) mem_free(scratch);
+    return ret;
+}
+
 static bool crypto_bytes_contains_seq(const uint8_t* bytes, int len,
                                       const uint8_t* needle, int needle_len) {
     if (!bytes || !needle || len <= 0 || needle_len <= 0 || needle_len > len) return false;
@@ -5329,6 +5374,29 @@ static bool crypto_openssl_dsa_export_der(const uint8_t* key_bytes, int key_len,
     return true;
 }
 
+static bool crypto_openssl_export_pem(const uint8_t* key_bytes, int key_len,
+                                      bool is_private, uint8_t** out,
+                                      int* out_len) {
+    if (!out || !out_len || !crypto_openssl_dsa_load()) return false;
+    *out = NULL;
+    *out_len = 0;
+    CryptoOpenSslDsaBackend* b = &crypto_openssl_dsa_backend;
+    void* pkey = crypto_openssl_parse_evp_key(key_bytes, key_len, is_private, NULL);
+    if (!pkey) return false;
+    void* bio = b->bio_new(b->bio_s_mem());
+    if (!bio) {
+        b->pkey_free(pkey);
+        return false;
+    }
+    bool ok = is_private ?
+        (b->pem_write_bio_private_key(bio, pkey, NULL, NULL, 0, NULL, NULL) == 1) :
+        (b->pem_write_bio_pubkey(bio, pkey) == 1);
+    if (ok) ok = crypto_openssl_bio_to_mem(bio, out, out_len);
+    b->bio_free(bio);
+    b->pkey_free(pkey);
+    return ok;
+}
+
 static bool crypto_openssl_dsa_sign_message(const char* digest,
                                             const uint8_t* key_bytes, int key_len,
                                             const uint8_t* data, int data_len,
@@ -5951,9 +6019,8 @@ static Item crypto_asymmetric_export_pkcs1(const uint8_t* bytes, int len,
     mbedtls_pk_context pk;
     mbedtls_pk_init(&pk);
     int ret = is_private ?
-        mbedtls_pk_parse_key(&pk, bytes, (size_t)len, NULL, 0,
-            crypto_mbedtls_random, NULL) :
-        mbedtls_pk_parse_public_key(&pk, bytes, (size_t)len);
+        crypto_mbedtls_parse_private_key(&pk, bytes, len) :
+        crypto_mbedtls_parse_public_key(&pk, bytes, len);
     if (ret != 0 || !crypto_pk_is_rsa(&pk)) {
         log_debug("crypto: KeyObject PKCS#1 export parse failed: -0x%04x", -ret);
         mbedtls_pk_free(&pk);
@@ -5976,6 +6043,46 @@ static Item crypto_asymmetric_export_pkcs1(const uint8_t* bytes, int len,
     return crypto_pkcs1_pem_from_der(der, der_len, is_private);
 }
 
+static Item crypto_asymmetric_export_pem(const uint8_t* bytes, int len,
+                                         bool is_private) {
+    uint8_t* openssl_pem = NULL;
+    int openssl_len = 0;
+    if (crypto_openssl_export_pem(bytes, len, is_private,
+            &openssl_pem, &openssl_len)) {
+        int visible_len = crypto_visible_pem_len(openssl_pem, openssl_len);
+        String* str = heap_create_name((const char*)openssl_pem,
+            (size_t)visible_len);
+        mem_free(openssl_pem);
+        return {.item = s2it(str)};
+    }
+
+    mbedtls_pk_context pk;
+    mbedtls_pk_init(&pk);
+    Item result = ItemNull;
+    int ret = is_private ?
+        crypto_mbedtls_parse_private_key(&pk, bytes, len) :
+        crypto_mbedtls_parse_public_key(&pk, bytes, len);
+    if (ret != 0) {
+        log_debug("crypto: KeyObject PEM export parse failed: -0x%04x", -ret);
+        mbedtls_pk_free(&pk);
+        return js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse key");
+    }
+
+    unsigned char pem[8192];
+    ret = is_private ?
+        mbedtls_pk_write_key_pem(&pk, pem, sizeof(pem)) :
+        mbedtls_pk_write_pubkey_pem(&pk, pem, sizeof(pem));
+    if (ret != 0) {
+        log_debug("crypto: KeyObject PEM export write failed: -0x%04x", -ret);
+        result = js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to export key");
+    } else {
+        result = make_string_item_crypto((const char*)pem);
+    }
+
+    mbedtls_pk_free(&pk);
+    return result;
+}
+
 static Item crypto_asymmetric_export_der(const uint8_t* bytes, int len,
                                          bool is_private) {
     CryptoEdKeyMaterial ed_material;
@@ -5994,9 +6101,8 @@ static Item crypto_asymmetric_export_der(const uint8_t* bytes, int len,
     mbedtls_pk_init(&pk);
     Item result = ItemNull;
     int ret = is_private ?
-        mbedtls_pk_parse_key(&pk, bytes, (size_t)len, NULL, 0,
-            crypto_mbedtls_random, NULL) :
-        mbedtls_pk_parse_public_key(&pk, bytes, (size_t)len);
+        crypto_mbedtls_parse_private_key(&pk, bytes, len) :
+        crypto_mbedtls_parse_public_key(&pk, bytes, len);
     if (ret != 0) {
         log_debug("crypto: KeyObject DER export parse failed: -0x%04x", -ret);
         mbedtls_pk_free(&pk);
@@ -6040,6 +6146,12 @@ extern "C" Item js_crypto_asymmetricKeyExport(Item options_item) {
         return crypto_asymmetric_export_pkcs1(buf, len, is_private, export_format);
     }
     if (export_format == CRYPTO_ASYM_EXPORT_PEM) {
+        const char* pkcs1_label = is_private ?
+            "-----BEGIN RSA PRIVATE KEY-----" :
+            "-----BEGIN RSA PUBLIC KEY-----";
+        if (crypto_bytes_contains_ascii(buf, len, pkcs1_label)) {
+            return crypto_asymmetric_export_pem(buf, len, is_private);
+        }
         String* str = heap_create_name((const char*)(buf ? buf : crypto_empty_bytes), (size_t)visible_len);
         return {.item = s2it(str)};
     }
@@ -6078,6 +6190,12 @@ static Item crypto_asymmetric_export_key_bytes(const uint8_t* buf, int len,
         return crypto_asymmetric_export_pkcs1(buf, len, is_private, export_format);
     }
     if (export_format == CRYPTO_ASYM_EXPORT_PEM) {
+        const char* pkcs1_label = is_private ?
+            "-----BEGIN RSA PRIVATE KEY-----" :
+            "-----BEGIN RSA PUBLIC KEY-----";
+        if (crypto_bytes_contains_ascii(buf, len, pkcs1_label)) {
+            return crypto_asymmetric_export_pem(buf, len, is_private);
+        }
         String* str = heap_create_name((const char*)(buf ? buf : crypto_empty_bytes),
             (size_t)visible_len);
         return {.item = s2it(str)};
@@ -6113,6 +6231,115 @@ static Item crypto_secret_key_object_from_bytes(const uint8_t* key, int key_len)
     js_property_set(obj, make_string_item_crypto("export"),
                     js_new_function((void*)js_crypto_secretKeyExport, 1));
     return obj;
+}
+
+static bool crypto_rsa_key_options(Item key_item, CryptoSignVerifyOptions* options) {
+    if (!options) return false;
+    if (!crypto_sign_verify_options(key_item, options)) return false;
+    if (options->padding != CRYPTO_RSA_PKCS1_PADDING) {
+        js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
+            "RSA encryption currently supports RSA_PKCS1_PADDING");
+        return false;
+    }
+    return true;
+}
+
+extern "C" Item js_crypto_publicEncrypt(Item key_item, Item buffer_item) {
+    CryptoSignVerifyOptions options;
+    if (!crypto_rsa_key_options(key_item, &options)) return ItemNull;
+
+    uint8_t* input = NULL;
+    int input_len = 0;
+    if (!extract_bytes(buffer_item, &input, &input_len)) {
+        return js_throw_invalid_arg_type("buffer", "string, ArrayBuffer, Buffer, TypedArray, or DataView", buffer_item);
+    }
+
+    uint8_t* key_bytes = NULL;
+    int key_len = 0;
+    if (!crypto_public_key_bytes_for_verify(options.key, &key_bytes, &key_len) &&
+            !crypto_private_key_bytes_for_sign(options.key, &key_bytes, &key_len)) {
+        mem_free(input);
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", options.key);
+    }
+
+    mbedtls_pk_context pk;
+    mbedtls_pk_init(&pk);
+    int ret = crypto_mbedtls_parse_public_key(&pk, key_bytes, key_len);
+    if (ret != 0) {
+        mbedtls_pk_free(&pk);
+        mbedtls_pk_init(&pk);
+        ret = crypto_mbedtls_parse_private_key(&pk, key_bytes, key_len);
+    }
+
+    Item result = ItemNull;
+    if (ret != 0 || !crypto_pk_is_rsa(&pk)) {
+        log_debug("crypto: publicEncrypt RSA key parse failed: -0x%04x", -ret);
+        result = js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse RSA key");
+    } else {
+        uint8_t output[MBEDTLS_PK_SIGNATURE_MAX_SIZE];
+        size_t output_len = 0;
+        ret = mbedtls_pk_encrypt(&pk, input ? input : crypto_empty_bytes,
+            input_len > 0 ? (size_t)input_len : 0, output, &output_len,
+            sizeof(output), crypto_mbedtls_random, NULL);
+        if (ret != 0) {
+            log_debug("crypto: publicEncrypt RSA encrypt failed: -0x%04x", -ret);
+            result = js_throw_error_with_code("ERR_OSSL_RSA_ENCRYPT_FAILED",
+                "Failed to encrypt data");
+        } else {
+            result = crypto_buffer_from_bytes(output, (int)output_len);
+        }
+    }
+
+    mbedtls_pk_free(&pk);
+    mem_free(key_bytes);
+    mem_free(input);
+    return result;
+}
+
+extern "C" Item js_crypto_privateDecrypt(Item key_item, Item buffer_item) {
+    CryptoSignVerifyOptions options;
+    if (!crypto_rsa_key_options(key_item, &options)) return ItemNull;
+
+    uint8_t* input = NULL;
+    int input_len = 0;
+    if (!extract_bytes(buffer_item, &input, &input_len)) {
+        return js_throw_invalid_arg_type("buffer", "string, ArrayBuffer, Buffer, TypedArray, or DataView", buffer_item);
+    }
+
+    uint8_t* key_bytes = NULL;
+    int key_len = 0;
+    if (!crypto_private_key_bytes_for_sign(options.key, &key_bytes, &key_len)) {
+        mem_free(input);
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", options.key);
+    }
+
+    mbedtls_pk_context pk;
+    mbedtls_pk_init(&pk);
+    int ret = crypto_mbedtls_parse_private_key(&pk, key_bytes, key_len);
+
+    Item result = ItemNull;
+    if (ret != 0 || !crypto_pk_is_rsa(&pk)) {
+        log_debug("crypto: privateDecrypt RSA key parse failed: -0x%04x", -ret);
+        result = js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse RSA key");
+    } else {
+        uint8_t output[MBEDTLS_PK_SIGNATURE_MAX_SIZE];
+        size_t output_len = 0;
+        ret = mbedtls_pk_decrypt(&pk, input ? input : crypto_empty_bytes,
+            input_len > 0 ? (size_t)input_len : 0, output, &output_len,
+            sizeof(output), crypto_mbedtls_random, NULL);
+        if (ret != 0) {
+            log_debug("crypto: privateDecrypt RSA decrypt failed: -0x%04x", -ret);
+            result = js_throw_error_with_code("ERR_OSSL_RSA_DECRYPT_FAILED",
+                "Failed to decrypt data");
+        } else {
+            result = crypto_buffer_from_bytes(output, (int)output_len);
+        }
+    }
+
+    mbedtls_pk_free(&pk);
+    mem_free(key_bytes);
+    mem_free(input);
+    return result;
 }
 
 extern "C" Item js_crypto_createSecretKey(Item key_item, Item encoding_item) {
@@ -8091,6 +8318,8 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(crypto_namespace, "createVerify",       (void*)js_crypto_createVerify, 1);
     crypto_set_method(crypto_namespace, "sign",               (void*)js_crypto_sign, 4);
     crypto_set_method(crypto_namespace, "verify",             (void*)js_crypto_verify, 5);
+    crypto_set_method(crypto_namespace, "publicEncrypt",      (void*)js_crypto_publicEncrypt, 2);
+    crypto_set_method(crypto_namespace, "privateDecrypt",     (void*)js_crypto_privateDecrypt, 2);
     crypto_set_method(crypto_namespace, "createCipheriv",     (void*)js_crypto_createCipheriv, 3);
     crypto_set_method(crypto_namespace, "createDecipheriv",   (void*)js_crypto_createDecipheriv, 3);
     crypto_set_method(crypto_namespace, "argon2",             (void*)js_crypto_argon2_unsupported, 0);
