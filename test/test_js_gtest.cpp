@@ -136,6 +136,38 @@ int execute_js_script_status(const char* script_path, char* output, size_t outpu
 #endif
 }
 
+int execute_command_status(const char* command, char* output, size_t output_size) {
+    if (output && output_size > 0) output[0] = '\0';
+    FILE* pipe = popen(command, "r");
+    if (!pipe) {
+        return -1;
+    }
+
+    char buffer[256];
+    size_t total_size = 0;
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        if (output && output_size > 0 && total_size < output_size - 1) {
+            size_t len = strlen(buffer);
+            size_t copy_len = len;
+            if (copy_len > output_size - 1 - total_size) {
+                copy_len = output_size - 1 - total_size;
+            }
+            memcpy(output + total_size, buffer, copy_len);
+            total_size += copy_len;
+            output[total_size] = '\0';
+        }
+    }
+
+    int status = pclose(pipe);
+#ifdef _WIN32
+    return status;
+#else
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return status;
+#endif
+}
+
 // Helper function to trim trailing whitespace
 void trim_trailing_whitespace(char* str) {
     if (!str) return;
@@ -651,6 +683,41 @@ TEST(JavaScriptBasic, CommandInterface) {
     char* output = execute_js_builtin_tests();
     ASSERT_NE(output, nullptr) << "JavaScript command should execute successfully";
     free(output);
+}
+
+TEST(JavaScriptRegression, ModuleCompileCacheHonorsPermissionWriteGrants) {
+    char output[2048];
+#ifdef _WIN32
+    const char* denied_command =
+        "lambda.exe js --permission -e \"const m=require('node:module');"
+        "const r=m.enableCompileCache('./temp/js_cc_perm_denied');"
+        "console.log(r.status+':' +(m.getCompileCacheDir()===undefined));\" --no-log 2>&1";
+    const char* allowed_command =
+        "lambda.exe js --permission -e \"const m=require('node:module');"
+        "const r=m.enableCompileCache('./temp/js_cc_perm_allowed');"
+        "const d=m.getCompileCacheDir();"
+        "const ok=typeof d==='string'?d.indexOf('js_cc_perm_allowed')>=0:false;"
+        "console.log(r.status+':' +ok);\" --allow-fs-write ./temp/js_cc_perm_allowed --no-log 2>&1";
+#else
+    const char* denied_command =
+        "./lambda.exe js --permission -e \"const m=require('node:module');"
+        "const r=m.enableCompileCache('./temp/js_cc_perm_denied');"
+        "console.log(r.status+':' +(m.getCompileCacheDir()===undefined));\" --no-log 2>&1";
+    const char* allowed_command =
+        "./lambda.exe js --permission -e \"const m=require('node:module');"
+        "const r=m.enableCompileCache('./temp/js_cc_perm_allowed');"
+        "const d=m.getCompileCacheDir();"
+        "const ok=typeof d==='string'?d.indexOf('js_cc_perm_allowed')>=0:false;"
+        "console.log(r.status+':' +ok);\" --allow-fs-write ./temp/js_cc_perm_allowed --no-log 2>&1";
+#endif
+
+    int status = execute_command_status(denied_command, output, sizeof(output));
+    ASSERT_EQ(status, 0) << output;
+    ASSERT_NE(strstr(output, "0:true"), nullptr) << output;
+
+    status = execute_command_status(allowed_command, output, sizeof(output));
+    ASSERT_EQ(status, 0) << output;
+    ASSERT_NE(strstr(output, "1:true"), nullptr) << output;
 }
 
 TEST(JavaScriptFuzz, FuzzIifeObjectLabelBlockDoesNotTimeout) {

@@ -21,6 +21,8 @@ ec keyobject p1363 sign verify: true
 ed25519 keyobject sign verify: true
 ed448 keyobject sign verify: true
 dsa keyobject sign verify: true
+dsa generateKeyPairSync keyobjects: true
+dsa generateKeyPairSync encodings: true
 unsupported asymmetric import errors: true
 rsa one-shot sign callback: true
 rsa one-shot verify callback: true

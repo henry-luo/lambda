@@ -52,6 +52,30 @@ static uint8_t* buffer_data(Item buf, int* out_len) {
     return data;
 }
 
+static int buffer_valid_hex_byte_length(const char* str, int str_len, int max_out) {
+    if (!str || str_len <= 0 || max_out == 0) return 0;
+    int limit = str_len / 2;
+    if (max_out > 0 && limit > max_out) limit = max_out;
+    int count = 0;
+    for (int i = 0; i < limit; i++) {
+        int hi = hex_decode_byte(str[i * 2]);
+        int lo = hex_decode_byte(str[i * 2 + 1]);
+        if (hi < 0 || lo < 0) break;
+        count++;
+    }
+    return count;
+}
+
+static int buffer_decode_hex_bytes(const char* str, int str_len, uint8_t* out, int max_out) {
+    int byte_len = buffer_valid_hex_byte_length(str, str_len, max_out);
+    for (int i = 0; i < byte_len; i++) {
+        int hi = hex_decode_byte(str[i * 2]);
+        int lo = hex_decode_byte(str[i * 2 + 1]);
+        out[i] = (uint8_t)((hi << 4) | lo);
+    }
+    return byte_len;
+}
+
 // Helper: create a Buffer (Uint8Array)
 // We cannot set string properties on typed arrays (MAP_KIND_TYPED_ARRAY routes
 // property_set to typed_array_set which only handles numeric indices).
@@ -384,24 +408,12 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
         }
 
         if (strcmp(enc_buf, "hex") == 0) {
-            // hex decode
-            int hex_len = (int)s->len;
-            int byte_len = hex_len / 2;
+            int byte_len = buffer_valid_hex_byte_length(s->chars, (int)s->len, -1);
             Item buf = create_buffer(byte_len);
             int buf_len = 0;
             uint8_t* bdata = buffer_data(buf, &buf_len);
             if (bdata) {
-                for (int i = 0; i < byte_len && i * 2 + 1 < hex_len; i++) {
-                    char hi = s->chars[i * 2];
-                    char lo = s->chars[i * 2 + 1];
-                    auto hex_digit = [](char c) -> int {
-                        if (c >= '0' && c <= '9') return c - '0';
-                        if (c >= 'a' && c <= 'f') return 10 + c - 'a';
-                        if (c >= 'A' && c <= 'F') return 10 + c - 'A';
-                        return 0;
-                    };
-                    bdata[i] = (uint8_t)((hex_digit(hi) << 4) | hex_digit(lo));
-                }
+                buffer_decode_hex_bytes(s->chars, (int)s->len, bdata, buf_len);
             }
             return buf;
         }
@@ -1289,7 +1301,10 @@ extern "C" Item js_buffer_toString(Item buf, Item encoding, Item start_item, Ite
 }
 
 // ─── buf.write(string, offset?, length?, encoding?) ─────────────────────────
-extern "C" Item js_buffer_write(Item buf, Item str_item, Item offset_item) {
+static int encode_string_bytes(const char* str, int str_len, const char* enc,
+                               uint8_t* out_buf, int max_out);
+
+extern "C" Item js_buffer_write(Item buf, Item str_item, Item offset_item, Item length_item, Item enc_item) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
     if (!data || blen == 0) return (Item){.item = i2it(0)};
@@ -1297,6 +1312,18 @@ extern "C" Item js_buffer_write(Item buf, Item str_item, Item offset_item) {
 
     String* s = it2s(str_item);
     int offset = 0;
+    int length = blen;
+    char enc[32] = "utf8";
+
+    if (get_type_id(offset_item) == LMD_TYPE_STRING) {
+        enc_item = offset_item;
+        offset_item = make_js_undefined();
+        length_item = make_js_undefined();
+    } else if (get_type_id(length_item) == LMD_TYPE_STRING) {
+        enc_item = length_item;
+        length_item = make_js_undefined();
+    }
+
     if (get_type_id(offset_item) == LMD_TYPE_INT) offset = (int)it2i(offset_item);
     else if (get_type_id(offset_item) == LMD_TYPE_FLOAT) offset = (int)it2d(offset_item);
     if (offset < 0 || offset > blen) {
@@ -1307,9 +1334,19 @@ extern "C" Item js_buffer_write(Item buf, Item str_item, Item offset_item) {
     }
     if (offset >= blen) return (Item){.item = i2it(0)};
 
-    int write_len = (int)s->len;
-    if (offset + write_len > blen) write_len = blen - offset;
-    memcpy(data + offset, s->chars, write_len);
+    length = blen - offset;
+    if (get_type_id(length_item) == LMD_TYPE_INT) length = (int)it2i(length_item);
+    else if (get_type_id(length_item) == LMD_TYPE_FLOAT) length = (int)it2d(length_item);
+    if (length < 0) length = 0;
+    if (length > blen - offset) length = blen - offset;
+
+    if (normalize_encoding(enc_item, enc, sizeof(enc)) && !is_known_encoding(enc)) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "Unknown encoding: %s", enc);
+        return js_throw_type_error_code("ERR_UNKNOWN_ENCODING", msg);
+    }
+
+    int write_len = encode_string_bytes(s->chars, (int)s->len, enc, data + offset, length);
     return (Item){.item = i2it(write_len)};
 }
 
@@ -1459,19 +1496,7 @@ static int encode_string_bytes(const char* str, int str_len, const char* enc,
     if (str_len == 0 || max_out == 0) return 0;
 
     if (strcmp(enc, "hex") == 0) {
-        int byte_len = str_len / 2;
-        if (byte_len > max_out) byte_len = max_out;
-        for (int i = 0; i < byte_len && i * 2 + 1 < str_len; i++) {
-            char hi = str[i * 2], lo = str[i * 2 + 1];
-            auto hd = [](char c) -> int {
-                if (c >= '0' && c <= '9') return c - '0';
-                if (c >= 'a' && c <= 'f') return 10 + c - 'a';
-                if (c >= 'A' && c <= 'F') return 10 + c - 'A';
-                return 0;
-            };
-            out_buf[i] = (uint8_t)((hd(hi) << 4) | hd(lo));
-        }
-        return byte_len;
+        return buffer_decode_hex_bytes(str, str_len, out_buf, max_out);
     }
 
     if (strcmp(enc, "base64") == 0 || strcmp(enc, "base64url") == 0) {
@@ -2642,8 +2667,8 @@ extern "C" Item js_buffer_allocUnsafeSlow(Item size_item) {
 extern "C" Item js_buf_inst_toString(Item encoding, Item start_item, Item end_item) {
     return js_buffer_toString(THIS, encoding, start_item, end_item);
 }
-extern "C" Item js_buf_inst_write(Item str_item, Item offset_item) {
-    return js_buffer_write(THIS, str_item, offset_item);
+extern "C" Item js_buf_inst_write(Item str_item, Item offset_item, Item length_item, Item enc_item) {
+    return js_buffer_write(THIS, str_item, offset_item, length_item, enc_item);
 }
 extern "C" Item js_buf_inst_copy(Item dst_buf, Item target_start_item, Item source_start_item, Item source_end_item) {
     return js_buffer_copy(THIS, dst_buf, target_start_item, source_start_item, source_end_item);
@@ -2760,7 +2785,7 @@ extern "C" Item js_get_buffer_prototype(void) {
     buffer_prototype = js_new_object();
 
     buf_set_method(buffer_prototype, "toString",   (void*)js_buf_inst_toString, 3);
-    buf_set_method(buffer_prototype, "write",      (void*)js_buf_inst_write, 2);
+    buf_set_method(buffer_prototype, "write",      (void*)js_buf_inst_write, 4);
     buf_set_method(buffer_prototype, "copy",       (void*)js_buf_inst_copy, 4);
     buf_set_method(buffer_prototype, "equals",     (void*)js_buf_inst_equals, 1);
     buf_set_method(buffer_prototype, "compare",    (void*)js_buf_inst_compare, 1);
@@ -2864,7 +2889,7 @@ extern "C" Item js_get_buffer_namespace(void) {
     buf_set_method(buffer_namespace, "allocUnsafeSlow", (void*)js_buffer_allocUnsafeSlow, 1);
     buf_set_method(buffer_namespace, "compare",    (void*)js_buffer_compare_static, 2);
     buf_set_method(buffer_namespace, "toString",   (void*)js_buffer_toString, 4);
-    buf_set_method(buffer_namespace, "write",      (void*)js_buffer_write, 3);
+    buf_set_method(buffer_namespace, "write",      (void*)js_buffer_write, 5);
     buf_set_method(buffer_namespace, "copy",       (void*)js_buffer_copy, 5);
     buf_set_method(buffer_namespace, "equals",     (void*)js_buffer_equals, 2);
     buf_set_method(buffer_namespace, "compare",    (void*)js_buffer_compare, 2);

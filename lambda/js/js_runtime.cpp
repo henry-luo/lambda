@@ -9,6 +9,7 @@
 #include "js_regex_generated_properties.h"
 #include "js_state_guards.h"
 #include "js_exec_profile.h"
+#include "js_permission.h"
 #include "../../lib/lambda_typed.hpp"
 #include "../../lib/gc/gc_heap.h"
 #include "../../lib/lambda_alloca.h"
@@ -33305,6 +33306,19 @@ static Item js_dc_channel_unsubscribe(Item handler) {
     return (Item){.item = b2it(js_dc_channel_remove_subscriber(js_get_this(), handler))};
 }
 
+static void js_dc_emit_uncaught_subscriber_error(Item error) {
+    js_process_emit((Item){.item = s2it(heap_create_name("uncaughtException", 17))}, error);
+}
+
+static void js_dc_call_subscriber(Item subscriber, Item message, Item name) {
+    Item args[2] = { message, name };
+    js_call_function(subscriber, (Item){.item = ITEM_JS_UNDEFINED}, args, 2);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        js_dc_emit_uncaught_subscriber_error(error);
+    }
+}
+
 // Channel.publish(message)
 static Item js_dc_channel_publish(Item message) {
     Item self = js_get_this();
@@ -33315,8 +33329,8 @@ static Item js_dc_channel_publish(Item message) {
         for (int64_t i = 0; i < len; i++) {
             Item el = js_array_get_int(subs, i);
             if (get_type_id(el) == LMD_TYPE_FUNC) {
-                Item args[2] = { message, name };
-                js_call_function(el, (Item){.item = ITEM_JS_UNDEFINED}, args, 2);
+                js_dc_call_subscriber(el, message, name);
+                if (js_check_exception()) return ItemNull;
             }
         }
     }
@@ -33697,8 +33711,8 @@ static void js_dc_channel_publish_on(Item channel, Item message) {
         for (int64_t i = 0; i < len; i++) {
             Item el = js_array_get_int(subs, i);
             if (get_type_id(el) == LMD_TYPE_FUNC) {
-                Item args[2] = { message, name };
-                js_call_function(el, (Item){.item = ITEM_JS_UNDEFINED}, args, 2);
+                js_dc_call_subscriber(el, message, name);
+                if (js_check_exception()) return;
             }
         }
     }
@@ -36023,36 +36037,8 @@ static bool g_js_cc_enabled = false;
 static bool g_js_cc_disabled = false;
 static bool g_js_cc_reported = false;
 
-static bool js_cc_path_starts_with(const char* path, const char* prefix) {
-    if (!path || !prefix || !prefix[0]) return false;
-    size_t plen = strlen(prefix);
-    if (strncmp(path, prefix, plen) != 0) return false;
-    return path[plen] == '\0' || path[plen] == '/';
-}
-
 static bool js_cc_write_allowed(const char* dir) {
-    Item process_obj = js_get_process_object_value();
-    if (!js_cc_is_object(process_obj)) return true;
-    Item argv = js_property_get(process_obj, js_cc_key("argv"));
-    if (get_type_id(argv) != LMD_TYPE_ARRAY) return true;
-    int64_t len = js_array_length(argv);
-    bool permission_mode = false;
-    bool saw_write_allow = false;
-    char arg_buf[4096];
-    for (int64_t i = 0; i < len; i++) {
-        if (!js_cc_get_string(js_array_get_int(argv, i), arg_buf, (int)sizeof(arg_buf))) continue;
-        if (strcmp(arg_buf, "--permission") == 0) {
-            permission_mode = true;
-            continue;
-        }
-        const char* prefix = "--allow-fs-write=";
-        size_t prefix_len = strlen(prefix);
-        if (strncmp(arg_buf, prefix, prefix_len) == 0) {
-            saw_write_allow = true;
-            if (js_cc_path_starts_with(dir, arg_buf + prefix_len)) return true;
-        }
-    }
-    return !permission_mode || !saw_write_allow;
+    return js_permission_has_fs_write(dir) != 0;
 }
 
 static void js_cc_make_absolute(const char* input, char* out, int out_size) {
@@ -36673,6 +36659,8 @@ extern "C" Item js_module_get(Item specifier) {
             extern Item js_message_port_new(void);
             extern Item js_message_port_move_to_context(Item port, Item context);
             extern Item js_message_port_receive_message_on_port(Item port);
+            extern Item js_worker_mark_as_untransferable(Item value);
+            extern Item js_worker_is_marked_as_untransferable(Item value);
             js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("MessageChannel", 14))},
                             js_new_function((void*)js_message_channel_new, 0));
             js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("MessagePort", 11))},
@@ -36681,6 +36669,10 @@ extern "C" Item js_module_get(Item specifier) {
                             js_new_function((void*)js_message_port_move_to_context, 2));
             js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("receiveMessageOnPort", 20))},
                             js_new_function((void*)js_message_port_receive_message_on_port, 1));
+            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("markAsUntransferable", 20))},
+                            js_new_function((void*)js_worker_mark_as_untransferable, 1));
+            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("isMarkedAsUntransferable", 24))},
+                            js_new_function((void*)js_worker_is_marked_as_untransferable, 1));
             // Worker constructor stub — creates a non-functional object
             js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("Worker", 6))},
                             js_new_function((void*)js_stub_noop_object, 1));
