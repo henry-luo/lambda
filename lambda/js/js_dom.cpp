@@ -8659,7 +8659,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     // so that feature-detection patterns like `elem.getAttribute && elem.getAttribute("class")`
     // work correctly (jQuery, Sizzle, etc.)
     static const char* dom_methods[] = {
-        "getAttribute", "setAttribute", "removeAttribute", "hasAttribute", "toggleAttribute",
+        "getAttribute", "setAttribute", "removeAttribute", "hasAttribute", "toggleAttribute", "getAttributeNames",
         "querySelector", "querySelectorAll", "closest", "matches",
         "appendChild", "removeChild", "replaceChild", "replaceWith", "insertBefore",
         "insertAdjacentElement", "insertAdjacentHTML",
@@ -10395,6 +10395,22 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         if (!attr_name) return (Item){.item = ITEM_FALSE};
         bool has = dom_element_has_attribute(elem, attr_name);
         return (Item){.item = b2it(has ? 1 : 0)};
+    }
+
+    // getAttributeNames() → array of attribute name strings (DOM §4.9)
+    if (strcmp(method, "getAttributeNames") == 0) {
+        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+        arr->type_id = LMD_TYPE_ARRAY;
+        arr->items = nullptr;
+        arr->length = 0;
+        arr->capacity = 0;
+        Item arr_item = (Item){.array = arr};
+        int attr_count = 0;
+        const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+        for (int i = 0; attr_names && i < attr_count; i++) {
+            js_array_push(arr_item, (Item){.item = s2it(heap_create_name(attr_names[i]))});
+        }
+        return arr_item;
     }
 
     // removeAttribute(name)
