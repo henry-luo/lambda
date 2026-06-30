@@ -11,7 +11,7 @@ console.log('execSync pipe:', result2.trim());
 
 // spawnSync - simple
 var sp = cp.spawnSync('echo', ['spawn', 'test']);
-console.log('spawnSync stdout:', sp.stdout.trim());
+console.log('spawnSync stdout:', sp.stdout.toString().trim());
 console.log('spawnSync status:', sp.status);
 
 // spawnSync - ls

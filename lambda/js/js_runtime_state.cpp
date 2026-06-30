@@ -554,6 +554,7 @@ extern "C" void js_batch_reset() {
     js_array_runtime_items_cleanup_all();
     // v95: reset Array.prototype[Symbol.iterator] override flag
     g_array_sym_iter_ever_set = 0;
+    g_array_proto_push_ever_set = 0;
     js_assert_batch_runtime_state_clear("js_batch_reset", true);
 }
 
@@ -671,6 +672,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_dynfunc_cache_reset();
     // v95: reset Array.prototype[Symbol.iterator] override flag
     g_array_sym_iter_ever_set = 0;
+    g_array_proto_push_ever_set = 0;
     js_assert_batch_runtime_state_clear("js_batch_reset_to", true);
 }
 

@@ -7,4 +7,4 @@ var child = cp.spawnSync(process.execPath, [
 ]);
 
 console.log('status:', child.status);
-console.log('stdout:', child.stdout.trim());
+console.log('stdout:', child.stdout.toString().trim());
