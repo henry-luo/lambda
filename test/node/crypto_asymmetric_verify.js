@@ -336,6 +336,48 @@ assert.strictEqual(crypto.verify('sha256', Buffer.from(message), dsaDerivedPubli
   dsaDerSignature), true);
 console.log('dsa keyobject sign verify:', true);
 
+const generatedDsa = crypto.generateKeyPairSync('dsa', {
+  modulusLength: 2048,
+  divisorLength: 256
+});
+assert.strictEqual(generatedDsa.privateKey.type, 'private');
+assert.strictEqual(generatedDsa.publicKey.type, 'public');
+assert.strictEqual(generatedDsa.privateKey.asymmetricKeyType, 'dsa');
+assert.strictEqual(generatedDsa.publicKey.asymmetricKeyType, 'dsa');
+assert.strictEqual(generatedDsa.privateKey.asymmetricKeyDetails.modulusLength, 2048);
+assert.strictEqual(generatedDsa.privateKey.asymmetricKeyDetails.divisorLength, 256);
+const generatedDsaSignature = crypto.sign('sha256', Buffer.from(message), {
+  key: generatedDsa.privateKey,
+  dsaEncoding: 'ieee-p1363'
+});
+assert.strictEqual(generatedDsaSignature.length, 64);
+assert.strictEqual(crypto.verify('sha256', Buffer.from(message), {
+  key: generatedDsa.publicKey,
+  dsaEncoding: 'ieee-p1363'
+}, generatedDsaSignature), true);
+console.log('dsa generateKeyPairSync keyobjects:', true);
+
+const generatedDsaEncoded = crypto.generateKeyPairSync('dsa', {
+  modulusLength: 2048,
+  divisorLength: 256,
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+  privateKeyEncoding: { type: 'pkcs8', format: 'der' }
+});
+assert.strictEqual(typeof generatedDsaEncoded.publicKey, 'string');
+assert.strictEqual(generatedDsaEncoded.publicKey.includes('BEGIN PUBLIC KEY'), true);
+assert.strictEqual(Buffer.isBuffer(generatedDsaEncoded.privateKey), true);
+const generatedDsaEncodedPrivate = crypto.createPrivateKey({
+  key: generatedDsaEncoded.privateKey,
+  type: 'pkcs8',
+  format: 'der'
+});
+const generatedDsaEncodedPublic = crypto.createPublicKey(generatedDsaEncoded.publicKey);
+const generatedDsaEncodedSignature = crypto.sign('sha256', Buffer.from(message),
+  generatedDsaEncodedPrivate);
+assert.strictEqual(crypto.verify('sha256', Buffer.from(message),
+  generatedDsaEncodedPublic, generatedDsaEncodedSignature), true);
+console.log('dsa generateKeyPairSync encodings:', true);
+
 assert.throws(() => crypto.createPrivateKey(invalidDsaPrivateKey), {
   code: 'ERR_OSSL_UNSUPPORTED',
   message: /dsa/

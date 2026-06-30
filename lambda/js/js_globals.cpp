@@ -14772,6 +14772,35 @@ static bool js_message_port_is_object(Item value) {
     return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
 }
 
+static bool js_worker_transfer_markable(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_ARRAY || type == LMD_TYPE_MAP ||
+        type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP ||
+        type == LMD_TYPE_ELEMENT;
+}
+
+extern "C" Item js_worker_mark_as_untransferable(Item value) {
+    if (js_worker_transfer_markable(value)) {
+        js_property_set(value, make_string_item("__worker_untransferable__"),
+            (Item){.item = ITEM_TRUE});
+    }
+    return make_js_undefined();
+}
+
+extern "C" Item js_worker_is_marked_as_untransferable(Item value) {
+    if (!js_worker_transfer_markable(value)) {
+        return (Item){.item = ITEM_FALSE};
+    }
+    extern Item js_has_own_property(Item obj, Item key);
+    Item key = make_string_item("__worker_untransferable__");
+    Item has_own = js_has_own_property(value, key);
+    if (get_type_id(has_own) != LMD_TYPE_BOOL || !it2b(has_own)) {
+        return (Item){.item = ITEM_FALSE};
+    }
+    Item marked = js_property_get(value, key);
+    return (Item){.item = b2it(marked.item == ITEM_TRUE)};
+}
+
 static bool js_message_port_is_port(Item value) {
     return js_message_port_is_object(value) && js_class_id(value) == JS_CLASS_MESSAGE_PORT;
 }
@@ -14879,6 +14908,17 @@ static bool js_message_port_transfer_list_has(Item transfer_list, Item value) {
     for (int64_t i = 0; i < len; i++) {
         Item entry = js_array_get_int(transfer_list, i);
         if (entry.item == value.item) return true;
+    }
+    return false;
+}
+
+static bool js_message_port_transfer_list_has_marked(Item transfer_list) {
+    if (get_type_id(transfer_list) != LMD_TYPE_ARRAY) return false;
+    int64_t len = js_array_length(transfer_list);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(transfer_list, i);
+        Item marked = js_worker_is_marked_as_untransferable(entry);
+        if (marked.item == ITEM_TRUE) return true;
     }
     return false;
 }
@@ -15048,6 +15088,10 @@ static Item js_message_port_postMessage(Item msg, Item transfer_list) {
         js_message_port_transfer_list_has(transfer_list, msg);
     if (js_message_port_is_filehandle(msg) && !transfer_filehandle) {
         js_throw_value(js_message_port_data_clone_error("FileHandle object could not be cloned."));
+        return make_js_undefined();
+    }
+    if (js_message_port_transfer_list_has_marked(transfer_list)) {
+        js_throw_value(js_message_port_data_clone_error("Object is marked as untransferable."));
         return make_js_undefined();
     }
     Item peer = js_property_get(self, make_string_item("__peer__"));

@@ -18,4 +18,7 @@ isBuffer true: true
 isBuffer false: false
 isEncoding utf8: true
 isEncoding hex: true
+bad hex write: 2
+bad hex buffer: abcd0000
+bad hex from: cd
 fill byte: AAA

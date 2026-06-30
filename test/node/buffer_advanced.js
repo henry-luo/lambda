@@ -71,6 +71,12 @@ console.log('isBuffer false:', Buffer.isBuffer('hello'));
 console.log('isEncoding utf8:', Buffer.isEncoding('utf8'));
 console.log('isEncoding hex:', Buffer.isEncoding('hex'));
 
+// invalid hex stops at first bad pair
+var hx = Buffer.alloc(4);
+console.log('bad hex write:', hx.write('abcdxx', 0, 'hex'));
+console.log('bad hex buffer:', hx.toString('hex'));
+console.log('bad hex from:', Buffer.from('cdxxab', 'hex').toString('hex'));
+
 // fill with byte value
 var fs = Buffer.alloc(3);
 fs.fill(65);

@@ -1404,6 +1404,75 @@ Results:
 - The prior Node improvement gate and
   `test-stream-readable-pause-and-resume.js` new pass remain green.
 
+### 2026-06-30 Node5 outstanding-track fifth subagent pass
+
+Ran another parallel pass with one worker per active Track A-F and integrated
+bounded fixes from each track:
+
+- Track A stream/I/O: `pipeline()` now handles function stages more like Node:
+  middle async-generator transforms are converted into readable outputs, final
+  async-function sinks pass their fulfillment value to callback argument 2,
+  invalid function returns report `ERR_INVALID_RETURN_VALUE`, and sink errors
+  destroy the tracked pipeline stream list. Added
+  `test/node/stream_pipeline_function_stages.js`.
+- Track B async/diagnostics: diagnostics-channel subscriber throws are now
+  isolated. Publishing catches subscriber exceptions, clears the pending JS
+  exception, emits `process` `uncaughtException`, and continues delivering to
+  later subscribers.
+- Track C fidelity: Buffer hex decoding now stops at the first invalid hex
+  pair for `Buffer.from(str, 'hex')` and `buf.write(..., 'hex')`. Buffer
+  string writes now parse the Node offset/length/encoding overload used by
+  `buf.write('abcdxx', 0, 'hex')`.
+- Track D crypto: `crypto.generateKeyPairSync('dsa', ...)` now generates DSA
+  KeyObjects or encoded PEM/DER outputs through OpenSSL EVP parameter/keygen
+  hooks, and DSA private DER export uses PKCS#8 DER for round-tripping.
+- Track E worker/process: `worker_threads.markAsUntransferable()` and
+  `isMarkedAsUntransferable()` are exported; `MessagePort.postMessage()`
+  rejects marked transfer-list entries while preserving own-property-only mark
+  semantics. Added `test/node/worker_mark_as_untransferable.js`.
+- Track F VM/module/permission: `module.enableCompileCache()` now delegates
+  compile-cache write permission checks to the shared permission system instead
+  of reparsing `process.argv`, so `--permission` and `--allow-fs-write` use the
+  same normalized grant semantics as the rest of the runtime.
+
+Verification:
+
+```bash
+make build
+make build-test
+./lambda.exe js test/node/stream_pipeline_function_source.js --no-log
+./lambda.exe js test/node/stream_pipeline_multistage_error.js --no-log
+./lambda.exe js test/node/stream_pipeline_function_stages.js --no-log
+./lambda.exe js test/node/diagnostics_channel_pubsub_contract.js --no-log
+./lambda.exe js test/node/diagnostics_trace_callback_stores.js --no-log
+./lambda.exe js test/node/worker_mark_as_untransferable.js --no-log
+./lambda.exe js test/node/crypto_asymmetric_verify.js --no-log
+./lambda.exe js test/node/buffer_advanced.js --no-log
+./test/test_node_prelim_gtest.exe --gtest_filter='NodePrelimTests/NodeFileTest.Run/buffer_advanced:NodePrelimTests/NodeFileTest.Run/worker_mark_as_untransferable:NodePrelimTests/NodeFileTest.Run/child_process_spawn_sync_lambda_eval:NodePrelimTests/NodeFileTest.Run/child_process_sync' --gtest_brief=1
+./test/test_js_gtest.exe --gtest_filter='JavaScriptRegression.ModuleCompileCacheHonorsPermissionWriteGrants:JavaScriptTests/JsFileTest.Run/stream_pipeline_function_stages:JavaScriptTests/JsFileTest.Run/vm_cached_data' --gtest_brief=1
+./test/test_node_gtest.exe --gtest_filter='NodeOfficial/NodeOfficialTest.Run/test_diagnostics_channel_safe_subscriber_errors:NodeOfficial/NodeOfficialTest.Run/test_worker_message_transfer_port_mark_as_untransferable:NodeOfficial/NodeOfficialTest.Run/test_buffer_badhex:NodeOfficial/NodeOfficialTest.Run/test_child_process_spawnsync:NodeOfficial/NodeOfficialTest.Run/test_assert_class:NodeOfficial/NodeOfficialTest.Run/test_crypto_async_sign_verify:NodeOfficial/NodeOfficialTest.Run/test_vm_cached_data' --include-slow --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --gtest_filter='*test_stream_pipeline*' --include-slow --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --timeout=20000 --gtest_brief=1
+git diff --check
+```
+
+Results:
+
+- Build and test binaries rebuilt successfully.
+- Direct local fixtures passed.
+- Prelim focused gate: 4/4 passed.
+- JS focused gate: 3/3 passed.
+- Official focused gate: 7/7 passed, 0 regressions, 3 new passes:
+  `test-buffer-badhex.js`,
+  `test-diagnostics-channel-safe-subscriber-errors.js`, and
+  `test-worker-message-transfer-port-mark-as-untransferable.js`.
+- Stream pipeline family: 7 passed, 1 expected non-baseline failure
+  (`test-stream-pipeline-http2.js`), 0 regressions. Direct
+  `test-stream-pipeline.js` remains skip-listed and still has later
+  `mustCall`/shutdown-leak blockers.
+- Full Node baseline-only rerun: 2046/2046 passed, 0 regressions, 0 crashes,
+  0 timeouts.
+
 ## Verification Policy
 
 Every implementation slice should finish with:

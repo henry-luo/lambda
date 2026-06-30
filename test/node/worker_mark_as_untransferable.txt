@@ -1,0 +1,11 @@
+primitive marks: false,false,false,false,false
+object mark: true
+array mark: true
+prototype mark: true
+instance inherited mark: false
+arraybuffer mark: true
+arraybuffer transfer: DataCloneError:25
+arraybuffer byteLength: 8
+port mark: true
+port transfer: DataCloneError:25
+marked port still works: still works
