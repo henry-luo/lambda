@@ -263,24 +263,28 @@ pn main() {
 
 **Severity**: Compilation error  
 **Affected benchmarks**: splay
+**Status**: ✅ **FIXED for `pn`**; `fn` parameters remain immutable by design.
 
-Function parameters cannot be reassigned. This is intentional design but surprising when porting from JavaScript where parameters are mutable.
+Procedural `pn` function parameters can now be reassigned, which matches the imperative style used by JavaScript benchmark ports. Functional `fn` function parameters remain immutable by design.
 
 ```
 error[E211]: cannot assign to 'idx': parameter bindings are immutable
 ```
 
-**Workaround**: Copy the parameter to a `var` local:
+That error is still expected for `fn` bodies, but it should no longer occur for normal procedural `pn` code:
 
 ```lambda
-// FAILS
 pn traverse(node, keys, idx) {
-    idx = traverse(node.left, keys, idx)  // error: idx is immutable
+    idx = traverse(node.left, keys, idx)  // ok in pn
+    return idx
+}
 
-// WORKS
-pn traverse(node, keys, idx_in) {
-    var idx = traverse(node.left, keys, idx_in)  // ok: idx is a new local var
+fn functional_step(idx) {
+    idx = idx + 1  // still rejected: fn parameter is immutable
+}
 ```
+
+**Verification**: `test/lambda/proc/proc_param_mutation.ls` covers reassignment of `pn` parameters used as scalars, accumulators, strings, and loop indices. `test/lambda/negative/semantic/immutable_assignment.ls` confirms `fn` parameter reassignment still fails. The AST semantic guard rejects assignment to immutable parameter bindings unless the current scope is procedural.
 
 ---
 
@@ -304,7 +308,14 @@ ord(s[char_idx])                       // 97
 slice("abcdefghi", 7.0, 8.0)           // "h"
 ```
 
-**Remaining edge policy**: Fractional floats such as `1.5` are still rejected as index errors rather than truncated.
+**Float index policy decision**: Integral floats are allowed as indices because Lambda `/` intentionally returns float and exact values such as `0.0` and `7.0` naturally arise in numeric code. Non-integral floats are rejected as index errors rather than truncated or rounded.
+
+Language references considered:
+- Python, Ruby, Go, Rust, Java, and C/C++ all reject float indices instead of silently truncating or rounding.
+- JavaScript is a poor fit here because bracket indexing coerces through property keys (`"abc"[1.0]` works, `"abc"[1.5]` is just a missing property/`undefined`).
+- R is more permissive/coercive, but that behavior is not a good model for Lambda because it can hide indexing mistakes.
+
+Therefore Lambda uses a strict-but-ergonomic rule: `slice(s, 1.0, 3.0)` is allowed, while `slice(s, 1.5, 3.5)` is rejected.
 
 **Verification**: `test/lambda/slice_float_indices.ls` covers integral float indices for string slicing, UTF-8 strings, array slicing, 2-arg `slice`, and fractional-float rejection.
 
@@ -522,7 +533,7 @@ pn show() {
 | 7 | `fill(0, x)` returns null | Edge case | **Fixed**; DeltaBlue now concatenates from empty fill arrays directly |
 | 8 | Missing substr/charcode | Missing feature | **No Fix**; use `str[start to end]`, `slice(str,start,end)`, and `ord(str[idx])` |
 | 9 | `div` reserved word | Reserved word | **Fixed**; `div` can be used as a parameter/local name and assignment target |
-| 10 | Immutable parameters | Language design | 1 benchmark, minor |
+| 10 | Immutable parameters | Language design | **Fixed for `pn`**; procedural parameters are mutable, `fn` parameters remain immutable |
 | 11 | Integer division returns float | Runtime bug | **Fixed**; `/` stays float and `slice` accepts integer-valued float indices |
 | 12 | `shl` 64-bit overflow | Bitwise ops | **Fixed for typed `u32` code**; SHA-1/MD5 rotate helpers use compact shifts |
 | 13 | `@` path literals don't parse | Missing feature | 1 benchmark, doc mismatch |
