@@ -867,6 +867,26 @@ bool editing_run_transaction(EventContext* evcon,
                 editing_dispatch_sync_rich_transaction_to_selection(
                     state, &current_surface, &tx_target);
             }
+            if (prevented && current_surface.owner) {
+                // Stage 4B: the script (JS preventDefault) applied the edit and
+                // may have reconciled the editable subtree — splitting/merging
+                // blocks (e.g. Enter) detaches the leaf view this transaction
+                // referenced, and the script restores the selection
+                // asynchronously. No native mutation runs for a prevented edit,
+                // so re-anchor the transaction to the editing host (which
+                // survives reconcile) instead of leaving it pointed at a
+                // detached view; this keeps the rich-transaction phase and its
+                // target-range invariant referencing a live surface.
+                EditingSurface host_surface;
+                if (editing_surface_from_target(
+                        static_cast<View*>(current_surface.owner),
+                        &host_surface) &&
+                    editing_surface_is_rich(&host_surface)) {
+                    current_surface = host_surface;
+                    tx_target = host_surface.view;
+                    editing_interaction_set_active_surface(state, &host_surface);
+                }
+            }
             editing_dispatch_set_rich_phase(state, EDITING_RICH_TX_BEFOREINPUT,
                                             tx_target);
             before_guard.commit();
@@ -1018,9 +1038,20 @@ bool editing_dispatch_beforeinput_ex(EventContext* evcon,
     // preventDefault() remains the cancellation surface for Input Events.
     bool js_prevented = false;
     if (dispatchable && hooks->dispatch_input_event) {
+        // The script handler may synchronously reconcile the editable subtree
+        // (Stage 4B). Mark the re-entrant window so a focus/selection
+        // transition triggered by that reconcile does not assert the native
+        // rich-transaction target-range invariant against a surface the script
+        // is mid-replacing (it re-syncs once dispatch returns, below).
+        bool prev_in_dispatch = state &&
+            state->editing.rich_transaction_in_script_dispatch;
+        if (state) state->editing.rich_transaction_in_script_dispatch = true;
         js_prevented = hooks->dispatch_input_event(evcon, surface->view,
                                                    "beforeinput", intent,
                                                    hooks->user);
+        if (state) {
+            state->editing.rich_transaction_in_script_dispatch = prev_in_dispatch;
+        }
     }
 
     bool lambda_handled = false;
