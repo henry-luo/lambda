@@ -164,6 +164,8 @@ static bool js_stream_readable_is_object_mode(Item self);
 static int64_t js_stream_readable_chunk_length(Item self, Item chunk);
 static int64_t js_stream_readable_buffer_length(Item self, Item buf);
 static bool js_stream_readable_accepts_more(Item self, Item buf);
+static bool js_stream_mark_transform_readable_backpressure(Item self);
+static void js_stream_maybe_drain_transform_readable_backpressure(Item self);
 static bool js_stream_readable_buffer_has_string(Item buf);
 static Item js_stream_concat_decoded_chunks(Item buf, Item encoding);
 static bool js_stream_prepare_readable_chunk(Item self, Item* chunk, Item encoding);
@@ -1939,6 +1941,7 @@ static void js_stream_flush_buffered_data(Item self) {
         js_property_set(self, make_string_item("__emitting_data__"), js_bool_item(true));
         stream_emit(self, "data", &emitted, 1);
         js_property_set(self, make_string_item("__emitting_data__"), js_bool_item(false));
+        js_stream_maybe_drain_transform_readable_backpressure(self);
         if (!js_item_is_true(js_property_get(self, key_flowing))) return;
     }
 }
@@ -2524,6 +2527,38 @@ static bool js_stream_readable_accepts_more(Item self, Item buf) {
     return length < hwm;
 }
 
+static bool js_stream_readable_buffer_backpressured(Item self) {
+    Item state = js_property_get(self, key_readable_state);
+    if (get_type_id(state) != LMD_TYPE_MAP) return false;
+    Item buf = js_property_get(self, key_buffer);
+    int64_t length = js_stream_readable_buffer_length(self, buf);
+    int64_t hwm = js_stream_state_get_int(state, "highWaterMark", js_stream_default_byte_hwm);
+    return hwm > 0 && length >= hwm;
+}
+
+static bool js_stream_mark_transform_readable_backpressure(Item self) {
+    if (!js_stream_readable_buffer_backpressured(self)) return false;
+    Item state = js_property_get(self, key_writable_state);
+    if (get_type_id(state) == LMD_TYPE_MAP) {
+        js_state_set_bool(state, "needDrain", true);
+    }
+    return true;
+}
+
+static void js_stream_maybe_drain_transform_readable_backpressure(Item self) {
+    Item state = js_property_get(self, key_writable_state);
+    if (get_type_id(state) != LMD_TYPE_MAP) return;
+    if (!js_state_get_bool(state, "needDrain")) return;
+    if (js_stream_readable_buffer_backpressured(self)) return;
+    if (js_state_get_bool(state, "ended") ||
+        js_item_is_true(js_property_get(self, key_destroyed)) ||
+        js_item_is_true(js_property_get(self, key_finish_emitted))) {
+        return;
+    }
+    js_state_set_bool(state, "needDrain", false);
+    js_stream_emit_or_schedule_drain(self);
+}
+
 static bool js_stream_readable_buffer_has_string(Item buf) {
     if (get_type_id(buf) != LMD_TYPE_ARRAY) return false;
     int64_t len = js_array_length(buf);
@@ -2670,6 +2705,7 @@ extern "C" Item js_readable_read_size(Item self, Item size_item) {
         Item decoded = js_stream_decode_readable_chunk(self, exact);
         js_stream_update_need_after_read(self);
         js_stream_mark_readable_did_read(self);
+        js_stream_maybe_drain_transform_readable_backpressure(self);
         return js_stream_maybe_emit_manual_data(self, decoded);
     }
 
@@ -2718,6 +2754,7 @@ extern "C" Item js_readable_read_size(Item self, Item size_item) {
             js_stream_schedule_read(self);
         js_stream_update_need_after_read(self);
         js_stream_mark_readable_did_read(self);
+        js_stream_maybe_drain_transform_readable_backpressure(self);
         if (get_type_id(joined) == LMD_TYPE_STRING)
             return js_stream_maybe_emit_manual_data(self, joined);
         Item decoded = js_buffer_toString(joined, encoding, make_js_undefined(), make_js_undefined());
@@ -2741,6 +2778,7 @@ extern "C" Item js_readable_read_size(Item self, Item size_item) {
     js_stream_update_need_after_read(self);
     result = js_stream_decode_object_readable_chunk(self, result);
     js_stream_mark_readable_did_read(self);
+    js_stream_maybe_drain_transform_readable_backpressure(self);
     return js_stream_maybe_emit_manual_data(self, result);
 }
 
@@ -7338,6 +7376,7 @@ extern "C" Item js_transform_write(Item self, Item chunk, Item encoding, Item ca
         }
         bool accepted = js_stream_begin_write(self, chunk);
         js_stream_buffer_write_request(self, chunk, encoding, callback);
+        if (js_stream_mark_transform_readable_backpressure(self)) accepted = false;
         return js_bool_item(accepted);
     }
 
@@ -7375,6 +7414,7 @@ extern "C" Item js_transform_write(Item self, Item chunk, Item encoding, Item ca
                 return js_bool_item(false);
             }
         }
+        if (js_stream_mark_transform_readable_backpressure(self)) accepted = false;
         return js_bool_item(accepted);
     } else {
         // no _transform method — throw ERR_METHOD_NOT_IMPLEMENTED

@@ -8,6 +8,7 @@
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_error_codes.h"
+#include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -15,6 +16,7 @@
 
 #include <cstring>
 #include <cstdlib>
+#include <climits>
 #include "../../lib/mem.h"
 
 #ifndef _WIN32
@@ -34,6 +36,7 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" void js_next_tick_enqueue(Item callback);
 extern "C" Item js_json_parse(Item str_item);
 extern "C" Item js_json_stringify(Item value);
+extern "C" Item js_buffer_from_bytes(const char* data, int len);
 
 // =============================================================================
 // Helpers
@@ -2220,6 +2223,97 @@ static char* cp_read_file_to_buffer(const char* path, size_t* out_len) {
     return out;
 }
 
+static bool cp_sync_output_wants_string(Item options_item) {
+    if (!is_object_item(options_item)) return false;
+    Item encoding = js_property_get(options_item, make_string_item("encoding"));
+    if (is_nullish_item(encoding)) return false;
+    if (get_type_id(encoding) != LMD_TYPE_STRING) return false;
+    String* s = it2s(encoding);
+    if (s->len == 6 && memcmp(s->chars, "buffer", 6) == 0) return false;
+    return true;
+}
+
+static Item cp_sync_make_output_item(const char* data, size_t len, bool as_string) {
+    int item_len = len > (size_t)INT32_MAX ? INT32_MAX : (int)len;
+    if (as_string) {
+        return data ? make_string_item(data, item_len) : make_string_item("");
+    }
+    return js_buffer_from_bytes(data ? data : "", item_len);
+}
+
+static bool cp_sync_input_bytes(Item input, const char** data, size_t* len) {
+    if (!data || !len) return false;
+    *data = NULL;
+    *len = 0;
+    TypeId type = get_type_id(input);
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(input);
+        *data = s->chars;
+        *len = s->len;
+        return true;
+    }
+    if (js_is_typed_array(input)) {
+        *data = (const char*)js_typed_array_current_data_ptr(input);
+        int byte_len = js_typed_array_byte_length(input);
+        *len = byte_len > 0 ? (size_t)byte_len : 0;
+        return true;
+    }
+    if (js_is_arraybuffer(input)) {
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(input);
+        if (!ab || ab->detached) return true;
+        *data = (const char*)ab->data;
+        *len = ab->byte_length > 0 ? (size_t)ab->byte_length : 0;
+        return true;
+    }
+    if (js_is_dataview(input)) {
+        JsDataView* dv = js_get_dataview_ptr(input);
+        if (!dv || !dv->buffer || dv->buffer->detached) return true;
+        int byte_len = dv->length_tracking ? dv->buffer->byte_length - dv->byte_offset : dv->byte_length;
+        if (byte_len < 0 || dv->byte_offset < 0 ||
+                dv->byte_offset > dv->buffer->byte_length ||
+                dv->byte_offset + byte_len > dv->buffer->byte_length) {
+            return true;
+        }
+        *data = (const char*)dv->buffer->data + dv->byte_offset;
+        *len = byte_len > 0 ? (size_t)byte_len : 0;
+        return true;
+    }
+    return false;
+}
+
+static bool cp_sync_write_input_file(Item options_item, const char* input_path) {
+    if (!is_object_item(options_item) || !input_path) return true;
+    Item input = js_property_get(options_item, make_string_item("input"));
+    if (is_nullish_item(input)) return true;
+    const char* data = NULL;
+    size_t len = 0;
+    if (!cp_sync_input_bytes(input, &data, &len)) {
+        js_throw_invalid_arg_type("options.input", "string, Buffer, TypedArray, DataView, or ArrayBuffer", input);
+        return false;
+    }
+    FILE* fp = fopen(input_path, "wb");
+    if (!fp) {
+        log_error("child_process: spawnSync: failed to open stdin temp file");
+        return false;
+    }
+    if (len > 0 && data) {
+        size_t wrote = fwrite(data, 1, len, fp);
+        if (wrote != len) {
+            fclose(fp);
+            log_error("child_process: spawnSync: failed to write stdin temp file");
+            return false;
+        }
+    }
+    fclose(fp);
+    return true;
+}
+
+static bool cp_sync_has_input(Item options_item) {
+    if (!is_object_item(options_item)) return false;
+    Item input = js_property_get(options_item, make_string_item("input"));
+    return !is_nullish_item(input);
+}
+
 static bool cp_get_number_prop(Item obj, const char* name, double* out) {
     if (!out || !is_object_item(obj)) return false;
     Item value = js_property_get(obj, make_string_item(name));
@@ -2370,18 +2464,26 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
         return ItemNull;
     }
 
+    Item effective_args = args_item;
+    Item effective_options = options_item;
+    if (is_object_item(args_item) && is_nullish_item(options_item)) {
+        effective_args = make_js_undefined();
+        effective_options = args_item;
+    }
+
     // build command string: cmd arg1 arg2 ...
     char full_cmd[8192];
     int pos = 0;
-    if (!cp_spawnSync_prepare_lambda_snapshot(cmd, args_item, options_item,
+    if (!cp_spawnSync_prepare_lambda_snapshot(cmd, effective_args, effective_options,
             full_cmd, (int)sizeof(full_cmd))) {
-        cp_spawnSync_prepare_shell_command(cmd, args_item, options_item, full_cmd,
+        cp_spawnSync_prepare_shell_command(cmd, effective_args, effective_options, full_cmd,
                                            (int)sizeof(full_cmd), &pos);
     }
 
     mkdir("temp", 0755);
     char stdout_path[256];
     char stderr_path[256];
+    char stdin_path[256];
 #ifndef _WIN32
     long pid = (long)getpid();
 #else
@@ -2389,10 +2491,21 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
 #endif
     snprintf(stdout_path, sizeof(stdout_path), "temp/js_spawn_sync_%ld_%p.out", pid, (void*)&stdout_path);
     snprintf(stderr_path, sizeof(stderr_path), "temp/js_spawn_sync_%ld_%p.err", pid, (void*)&stderr_path);
+    snprintf(stdin_path, sizeof(stdin_path), "temp/js_spawn_sync_%ld_%p.in", pid, (void*)&stdin_path);
+    bool has_input = cp_sync_has_input(effective_options);
+    if (has_input && !cp_sync_write_input_file(effective_options, stdin_path)) {
+        unlink(stdin_path);
+        return ItemNull;
+    }
     int redir_pos = (int)strlen(full_cmd);
     if (redir_pos < (int)sizeof(full_cmd) - 1) {
         Item out_item = make_string_item(stdout_path);
         Item err_item = make_string_item(stderr_path);
+        if (has_input) {
+            Item in_item = make_string_item(stdin_path);
+            redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " < ");
+            append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, in_item);
+        }
         redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " > ");
         append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, out_item);
         redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " 2> ");
@@ -2400,9 +2513,9 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
     }
 
     int64_t timeout_ms = 0;
-    cp_get_spawn_timeout_ms(options_item, &timeout_ms);
+    cp_get_spawn_timeout_ms(effective_options, &timeout_ms);
     const char* timeout_signal_name = "SIGTERM";
-    int kill_signal = cp_get_kill_signal(options_item, &timeout_signal_name);
+    int kill_signal = cp_get_kill_signal(effective_options, &timeout_signal_name);
     bool timed_out = false;
     int status = cp_spawnSync_run_shell_command(full_cmd, timeout_ms, kill_signal, &timed_out);
     int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
@@ -2416,19 +2529,19 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
     if (timed_out) {
         js_property_set(result, make_string_item("status"), ItemNull);
         js_property_set(result, make_string_item("signal"), make_string_item(timeout_signal_name));
-        js_property_set(result, make_string_item("error"), cp_make_spawn_sync_timeout_error(cmd, args_item));
+        js_property_set(result, make_string_item("error"), cp_make_spawn_sync_timeout_error(cmd, effective_args));
     } else {
         js_property_set(result, make_string_item("status"), (Item){.item = i2it(exit_code)});
         js_property_set(result, make_string_item("signal"), ItemNull);
     }
-    js_property_set(result, make_string_item("stdout"),
-                    out_buf ? make_string_item(out_buf, (int)out_len) : make_string_item(""));
-    js_property_set(result, make_string_item("stderr"),
-                    err_buf ? make_string_item(err_buf, (int)err_len) : make_string_item(""));
+    bool output_as_string = cp_sync_output_wants_string(effective_options);
+    js_property_set(result, make_string_item("stdout"), cp_sync_make_output_item(out_buf, out_len, output_as_string));
+    js_property_set(result, make_string_item("stderr"), cp_sync_make_output_item(err_buf, err_len, output_as_string));
     if (out_buf) mem_free(out_buf);
     if (err_buf) mem_free(err_buf);
     unlink(stdout_path);
     unlink(stderr_path);
+    if (has_input) unlink(stdin_path);
 
     return result;
 }
