@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "editor-dom",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "test/editor-js", "run", "dev:page-dom"],
+      "port": 5191
+    }
+  ]
+}
