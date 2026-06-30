@@ -1,0 +1,22 @@
+{
+  "name": "editor4b: Phase 3 — script-managed contenteditable routes input to script, native engine fires no edit",
+  "_note": "Phase 3 exit-gate guard. The editor's contenteditable host carries data-script-edit, so Radiant delivers beforeinput to the JS handler (editing.beforeinput, prevented) but runs NO native rich transaction (editing.transaction count 0) and NO native apply. If the data-script-edit routing regressed, the legacy native rich-transaction would emit editing.transaction records and this fixture would fail.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 60},
+    {"type": "type", "target": {"selector": ".rdt-surface"}, "text": "ZZ"},
+    {"type": "wait", "ms": 100},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "wait", "ms": 100},
+    {"type": "type", "target": {"selector": ".rdt-surface"}, "text": "QQ"},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface"}, "contains": "ZZ"},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface"}, "contains": "QQ"},
+    {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "insertText", "prevented": true, "min": 1},
+    {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "insertParagraph", "prevented": true, "min": 1},
+    {"type": "assert_editing_event", "event": "editing.transaction", "count": 0}
+  ]
+}
