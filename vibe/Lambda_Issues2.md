@@ -64,22 +64,26 @@ buckets[idx] = entry
 
 ---
 
-## 3. `list` Is a Reserved Keyword (Silent Failure)
+## 3. Type Keywords as Map Field Names Were Treated as Reserved in Assignment — Fixed
 
-**Severity**: Runtime bug (silent, no error)  
+**Status**: Fixed in the AST member-assignment builder.  
+**Severity**: Was a runtime bug (assignment silently ignored after a logged runtime error).  
 **Affected benchmarks**: richards
 
-Using `list` as a map field name does not produce a compile error, but assignments to it silently fail — the value is always `null` when read back.
+Using `list` as a map field name did not produce a compile error, but assignment through dot-member syntax failed: the value stayed `null` when read back. The same shape also affected other type keywords such as `map`, `string`, and `int` when used as field names.
 
 ```lambda
+// now works
 var sched = {list: null, count: 0}
 sched.list = some_value
-print(string(sched.list))  // prints "null" — assignment was silently ignored
+print(string(sched.list))  // prints some_value
 ```
 
-**Workaround**: Rename the field (e.g., `task_list`).
+**Design decision**: Lambda aligns with JavaScript property semantics here. A type keyword is still reserved where the grammar expects a type or variable binding, but in map keys and dot-member field positions it is a field/property name. Therefore `{list: ...}` and `sched.list` are legal and should not require quoting or renaming.
 
-**Suggestion**: Either produce a compile-time error when reserved words are used as field names, or allow them (since field names are strings, not identifiers in most languages).
+**Fix**: Member assignment now normalizes identifier-like field tokens, including `base_type` tokens such as `list`, into `AST_NODE_IDENT`, matching the existing read-side member access path. This lets the MIR assignment lowering emit the field name as a string key for `fn_map_set()`.
+
+**Regression coverage**: `test/lambda/proc/proc_member_keyword_field.ls` covers `list` and other type-keyword field names in map literals, dot-member reads, and dot-member assignments.
 
 ---
 
