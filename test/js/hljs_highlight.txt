@@ -27,6 +27,5 @@ json-highlight-error
 json-highlight-error
 auto-error
 auto-error
-Could not find the language 'nonexistent_xyz', did you forget to load/include a language module?
 true
 HLJS_TESTS_DONE
