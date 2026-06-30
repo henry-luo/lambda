@@ -459,5 +459,5 @@ pn main() {
     } else {
         print("Richards: FAIL\n")
     }
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

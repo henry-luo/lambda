@@ -60,20 +60,20 @@ pn main() {
 
         // Build output string for validation
         var output = ""
-        output = output ++ "agggtaaa|tttaccct " ++ string(c1) ++ "\n"
-        output = output ++ "[cgt]gggtaaa|tttaccc[acg] " ++ string(c2) ++ "\n"
-        output = output ++ "a[act]ggtaaa|tttacc[agt]t " ++ string(c3) ++ "\n"
-        output = output ++ "ag[act]gtaaa|tttac[agt]ct " ++ string(c4) ++ "\n"
-        output = output ++ "agg[act]taaa|ttta[agt]cct " ++ string(c5) ++ "\n"
-        output = output ++ "aggg[acg]aaa|ttt[cgt]ccct " ++ string(c6) ++ "\n"
-        output = output ++ "agggt[cgt]aa|tt[acg]accct " ++ string(c7) ++ "\n"
-        output = output ++ "agggta[cgt]a|t[acg]taccct " ++ string(c8) ++ "\n"
-        output = output ++ "agggtaa[cgt]|[acg]ttaccct " ++ string(c9) ++ "\n"
+        output = output ++ "agggtaaa|tttaccct " ++ c1 ++ "\n"
+        output = output ++ "[cgt]gggtaaa|tttaccc[acg] " ++ c2 ++ "\n"
+        output = output ++ "a[act]ggtaaa|tttacc[agt]t " ++ c3 ++ "\n"
+        output = output ++ "ag[act]gtaaa|tttac[agt]ct " ++ c4 ++ "\n"
+        output = output ++ "agg[act]taaa|ttta[agt]cct " ++ c5 ++ "\n"
+        output = output ++ "aggg[acg]aaa|ttt[cgt]ccct " ++ c6 ++ "\n"
+        output = output ++ "agggt[cgt]aa|tt[acg]accct " ++ c7 ++ "\n"
+        output = output ++ "agggta[cgt]a|t[acg]taccct " ++ c8 ++ "\n"
+        output = output ++ "agggtaa[cgt]|[acg]ttaccct " ++ c9 ++ "\n"
 
         // Validate pattern counts
         if (output != expected_output) {
-            print("FAIL: pattern output mismatch (iter " ++ string(iter) ++ ")\n")
-            print("output len=" ++ string(len(output)) ++ " expected len=" ++ string(len(expected_output)) ++ "\n")
+            print("FAIL: pattern output mismatch (iter " ++ iter ++ ")\n")
+            print("output len=" ++ len(output) ++ " expected len=" ++ len(expected_output) ++ "\n")
             pass = false
         }
 
@@ -92,8 +92,8 @@ pn main() {
 
         // Validate substituted DNA
         if (dna != expected_dna) {
-            print("FAIL: IUPAC substitution mismatch (iter " ++ string(iter) ++ ")\n")
-            print("Expected length: " ++ string(len(expected_dna)) ++ " Got length: " ++ string(len(dna)) ++ "\n")
+            print("FAIL: IUPAC substitution mismatch (iter " ++ iter ++ ")\n")
+            print("Expected length: " ++ len(expected_dna) ++ " Got length: " ++ len(dna) ++ "\n")
             pass = false
         }
 
@@ -106,5 +106,5 @@ pn main() {
     } else {
         print("regex-dna: FAIL\n")
     }
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

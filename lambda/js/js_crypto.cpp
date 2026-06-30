@@ -359,10 +359,8 @@ extern "C" Item js_native_sha256(Item data_item, Item offset_item, Item length_i
     sha256_compute(buf, offset, length, hash);
 
     Item result = js_typed_array_new(JS_TYPED_UINT8, 32);
-    JsTypedArray* rta = (JsTypedArray*)result.map->data;
-    if (rta && rta->data) {
-        memcpy(rta->data, hash, 32);
-    }
+    uint8_t* out = (uint8_t*)js_typed_array_current_data_ptr(result);
+    if (out) memcpy(out, hash, 32);
     return result;
 }
 
@@ -384,10 +382,8 @@ extern "C" Item js_native_sha384(Item data_item, Item offset_item, Item length_i
     sha512_compute(buf, offset, length, true, hash);
 
     Item result = js_typed_array_new(JS_TYPED_UINT8, 48);
-    JsTypedArray* rta = (JsTypedArray*)result.map->data;
-    if (rta && rta->data) {
-        memcpy(rta->data, hash, 48);
-    }
+    uint8_t* out = (uint8_t*)js_typed_array_current_data_ptr(result);
+    if (out) memcpy(out, hash, 48);
     return result;
 }
 
@@ -409,10 +405,8 @@ extern "C" Item js_native_sha512(Item data_item, Item offset_item, Item length_i
     sha512_compute(buf, offset, length, false, hash);
 
     Item result = js_typed_array_new(JS_TYPED_UINT8, 64);
-    JsTypedArray* rta = (JsTypedArray*)result.map->data;
-    if (rta && rta->data) {
-        memcpy(rta->data, hash, 64);
-    }
+    uint8_t* out = (uint8_t*)js_typed_array_current_data_ptr(result);
+    if (out) memcpy(out, hash, 64);
     return result;
 }
 
@@ -467,7 +461,8 @@ static Item crypto_buffer_from_bytes(const uint8_t* bytes, int len) {
     JsTypedArray* ta = js_get_typed_array_ptr(result.map);
     if (ta) {
         ta->is_buffer = true;
-        if (ta->data && bytes && len > 0) memcpy(ta->data, bytes, (size_t)len);
+        uint8_t* out = (uint8_t*)js_typed_array_current_data_ptr(result);
+        if (out && bytes && len > 0) memcpy(out, bytes, (size_t)len);
     }
     return result;
 }
@@ -590,9 +585,9 @@ extern "C" Item js_crypto_randomBytes(Item size_item, Item callback_item) {
     }
 
     Item result = crypto_buffer_from_bytes(NULL, size);
-    JsTypedArray* ta = js_get_typed_array_ptr(result.map);
-    if (!ta || (!ta->data && size > 0)) return ItemNull;
-    if (size > 0 && !crypto_random_bytes((uint8_t*)ta->data, (size_t)size)) {
+    uint8_t* out = (uint8_t*)js_typed_array_current_data_ptr(result);
+    if (!out && size > 0) return ItemNull;
+    if (size > 0 && !crypto_random_bytes(out, (size_t)size)) {
         log_error("crypto: randomBytes: entropy source failed");
         return ItemNull;
     }
@@ -4380,8 +4375,8 @@ extern "C" Item js_crypto_secretKeyExport(Item options_item) {
     if (!get_uint8_buffer(key_bytes, &buf, &len)) return ItemNull;
 
     Item result = js_typed_array_new(JS_TYPED_UINT8, len);
-    JsTypedArray* ta = js_get_typed_array_ptr(result.map);
-    if (ta && ta->data && buf && len > 0) memcpy(ta->data, buf, (size_t)len);
+    uint8_t* out = (uint8_t*)js_typed_array_current_data_ptr(result);
+    if (out && buf && len > 0) memcpy(out, buf, (size_t)len);
     return result;
 }
 
@@ -4569,16 +4564,16 @@ extern "C" Item js_crypto_asymmetricKeyExport(Item options_item) {
     }
 
     Item result = js_typed_array_new(JS_TYPED_UINT8, visible_len);
-    JsTypedArray* ta = js_get_typed_array_ptr(result.map);
-    if (ta && ta->data && buf && visible_len > 0) memcpy(ta->data, buf, (size_t)visible_len);
+    uint8_t* out = (uint8_t*)js_typed_array_current_data_ptr(result);
+    if (out && buf && visible_len > 0) memcpy(out, buf, (size_t)visible_len);
     return result;
 }
 
 static Item crypto_secret_key_object_from_bytes(const uint8_t* key, int key_len) {
     if (key_len < 0) key_len = 0;
     Item bytes = js_typed_array_new(JS_TYPED_UINT8, key_len);
-    JsTypedArray* ta = js_get_typed_array_ptr(bytes.map);
-    if (ta && ta->data && key && key_len > 0) memcpy(ta->data, key, (size_t)key_len);
+    uint8_t* out = (uint8_t*)js_typed_array_current_data_ptr(bytes);
+    if (out && key && key_len > 0) memcpy(out, key, (size_t)key_len);
 
     Item obj = js_new_object();
     crypto_link_instance_to_constructor(obj, "KeyObject");
@@ -4653,8 +4648,8 @@ static Item crypto_asymmetric_key_object_from_bytes(const uint8_t* key, int key_
                                                     mbedtls_pk_context* parsed_key) {
     if (key_len < 0) key_len = 0;
     Item bytes = js_typed_array_new(JS_TYPED_UINT8, key_len);
-    JsTypedArray* ta = js_get_typed_array_ptr(bytes.map);
-    if (ta && ta->data && key && key_len > 0) memcpy(ta->data, key, (size_t)key_len);
+    uint8_t* out = (uint8_t*)js_typed_array_current_data_ptr(bytes);
+    if (out && key && key_len > 0) memcpy(out, key, (size_t)key_len);
 
     Item obj = js_new_object();
     crypto_link_instance_to_constructor(obj, "KeyObject");
@@ -5123,8 +5118,8 @@ extern "C" Item js_cipher_final(Item output_encoding_item) {
 
             // store auth tag on the object
             Item tag = js_typed_array_new(JS_TYPED_UINT8, 16);
-            JsTypedArray* tag_ta = (JsTypedArray*)tag.map->data;
-            if (tag_ta && tag_ta->data) memcpy(tag_ta->data, ctx->auth_tag, 16);
+            uint8_t* tag_data = (uint8_t*)js_typed_array_current_data_ptr(tag);
+            if (tag_data) memcpy(tag_data, ctx->auth_tag, 16);
             js_property_set(self, make_string_item_crypto("__auth_tag__"), tag);
 
             cipher_ctx_free(ctx);
@@ -5242,11 +5237,11 @@ static Item crypto_concat_buffer_items(Item first, Item second) {
 
     int total = first_len + second_len;
     Item result = crypto_buffer_from_bytes(NULL, total);
-    JsTypedArray* ta = js_get_typed_array_ptr(result.map);
-    if (ta && ta->data) {
-        if (first_buf && first_len > 0) memcpy(ta->data, first_buf, (size_t)first_len);
+    uint8_t* out = (uint8_t*)js_typed_array_current_data_ptr(result);
+    if (out) {
+        if (first_buf && first_len > 0) memcpy(out, first_buf, (size_t)first_len);
         if (second_buf && second_len > 0) {
-            memcpy((uint8_t*)ta->data + first_len, second_buf, (size_t)second_len);
+            memcpy(out + first_len, second_buf, (size_t)second_len);
         }
     }
     return result;
@@ -6001,8 +5996,8 @@ extern "C" Item js_crypto_scryptSync(Item pass_item, Item salt_item, Item keylen
     }
 
     Item result = js_typed_array_new(JS_TYPED_UINT8, keylen);
-    JsTypedArray* ta = (JsTypedArray*)result.map->data;
-    if (ta && ta->data) memcpy(ta->data, output, (size_t)keylen);
+    uint8_t* out = (uint8_t*)js_typed_array_current_data_ptr(result);
+    if (out) memcpy(out, output, (size_t)keylen);
     mem_free(output);
     return result;
 }
@@ -6223,8 +6218,8 @@ extern "C" Item js_subtle_digest(Item alg_item, Item data_item) {
     }
 
     Item result = js_typed_array_new(JS_TYPED_UINT8, hash_len);
-    JsTypedArray* ta = (JsTypedArray*)result.map->data;
-    if (ta && ta->data) memcpy(ta->data, hash, (size_t)hash_len);
+    uint8_t* out = (uint8_t*)js_typed_array_current_data_ptr(result);
+    if (out) memcpy(out, hash, (size_t)hash_len);
 
     // wrap in resolved Promise
     return js_promise_resolve(result);
@@ -6301,10 +6296,10 @@ extern "C" Item js_subtle_encrypt(Item alg_item, Item key_item, Item data_item) 
 
     int total = update_len + final_len_val;
     Item result = js_typed_array_new(JS_TYPED_UINT8, total);
-    JsTypedArray* ta = (JsTypedArray*)result.map->data;
-    if (ta && ta->data) {
-        if (u_buf && update_len > 0) memcpy(ta->data, u_buf, (size_t)update_len);
-        if (f_buf && final_len_val > 0) memcpy((uint8_t*)ta->data + update_len, f_buf, (size_t)final_len_val);
+    uint8_t* out = (uint8_t*)js_typed_array_current_data_ptr(result);
+    if (out) {
+        if (u_buf && update_len > 0) memcpy(out, u_buf, (size_t)update_len);
+        if (f_buf && final_len_val > 0) memcpy(out + update_len, f_buf, (size_t)final_len_val);
     }
 
     return js_promise_resolve(result);
@@ -6376,10 +6371,10 @@ extern "C" Item js_subtle_decrypt(Item alg_item, Item key_item, Item data_item) 
 
     int total = update_len + final_len_val;
     Item result = js_typed_array_new(JS_TYPED_UINT8, total);
-    JsTypedArray* ta = (JsTypedArray*)result.map->data;
-    if (ta && ta->data) {
-        if (u_buf && update_len > 0) memcpy(ta->data, u_buf, (size_t)update_len);
-        if (f_buf && final_len_val > 0) memcpy((uint8_t*)ta->data + update_len, f_buf, (size_t)final_len_val);
+    uint8_t* out = (uint8_t*)js_typed_array_current_data_ptr(result);
+    if (out) {
+        if (u_buf && update_len > 0) memcpy(out, u_buf, (size_t)update_len);
+        if (f_buf && final_len_val > 0) memcpy(out + update_len, f_buf, (size_t)final_len_val);
     }
 
     return js_promise_resolve(result);

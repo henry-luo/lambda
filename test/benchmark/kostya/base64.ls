@@ -69,11 +69,11 @@ pn main() {
     var __t1 = clock()
 
     let enc_len = len(encoded)
-    print("base64: encoded_len=" ++ string(enc_len) ++ " decoded_len=" ++ string(decoded_len) ++ "\n")
+    print("base64: encoded_len=" ++ enc_len ++ " decoded_len=" ++ decoded_len ++ "\n")
     if (decoded_len == num_bytes) {
         print("base64: PASS\n")
     } else {
         print("base64: FAIL\n")
     }
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

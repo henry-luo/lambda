@@ -29,7 +29,7 @@ pn main() {
 
     // stretch tree
     let stretch = make_tree(stretch_depth)
-    print("stretch tree of depth " ++ string(stretch_depth) ++ "\t check: " ++ string(check(stretch)) ++ "\n")
+    print("stretch tree of depth " ++ stretch_depth ++ "\t check: " ++ check(stretch) ++ "\n")
 
     // long-lived tree
     let long_lived = make_tree(max_depth)
@@ -43,11 +43,11 @@ pn main() {
             total_check = total_check + check(make_tree(depth))
             i = i + 1
         }
-        print(string(iterations) ++ "\t trees of depth " ++ string(depth) ++ "\t check: " ++ string(total_check) ++ "\n")
+        print(iterations ++ "\t trees of depth " ++ depth ++ "\t check: " ++ total_check ++ "\n")
         depth = depth + 2
     }
 
-    print("long lived tree of depth " ++ string(max_depth) ++ "\t check: " ++ string(check(long_lived)) ++ "\n")
+    print("long lived tree of depth " ++ max_depth ++ "\t check: " ++ check(long_lived) ++ "\n")
     var __t1 = clock()
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

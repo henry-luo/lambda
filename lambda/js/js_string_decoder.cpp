@@ -27,11 +27,10 @@ static Item make_string_item(const char* str) {
 // Helper: get raw data pointer and length from a typed array Item
 static uint8_t* buffer_data(Item buf, int* out_len) {
     if (!js_is_typed_array(buf)) { *out_len = 0; return NULL; }
-    Map* m = buf.map;
-    JsTypedArray* ta = js_get_typed_array_ptr(m);
-    if (!ta || !ta->data) { *out_len = 0; return NULL; }
-    *out_len = ta->byte_length;
-    return (uint8_t*)ta->data;
+    uint8_t* data = (uint8_t*)js_typed_array_current_data_ptr(buf);
+    if (!data) { *out_len = 0; return NULL; }
+    *out_len = js_typed_array_byte_length(buf);
+    return data;
 }
 
 // StringDecoder stores incomplete multi-byte sequences in __pending__ property

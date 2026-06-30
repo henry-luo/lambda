@@ -65,11 +65,11 @@ pn main() {
         iter = iter + 1
     }
     var __t1 = clock()
-    print("json_gen: length=" ++ string(result) ++ "\n")
+    print("json_gen: length=" ++ result ++ "\n")
     if (result > 0) {
         print("json_gen: PASS\n")
     } else {
         print("json_gen: FAIL\n")
     }
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

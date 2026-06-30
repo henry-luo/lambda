@@ -271,9 +271,9 @@ pn main() {
     let count = run_splay()
     var __t1 = clock()
     if (count == TREE_SIZE) {
-        print("splay: PASS (nodes=" ++ string(count) ++ ")\n")
+        print("splay: PASS (nodes=" ++ count ++ ")\n")
     } else {
-        print("splay: FAIL (nodes=" ++ string(count) ++ ", expected " ++ string(TREE_SIZE) ++ ")\n")
+        print("splay: FAIL (nodes=" ++ count ++ ", expected " ++ TREE_SIZE ++ ")\n")
     }
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

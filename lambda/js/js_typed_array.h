@@ -52,13 +52,9 @@ typedef struct JsDataView {
 } JsDataView;
 
 typedef struct JsTypedArray {
-    JsTypedArrayType element_type;  // offset 0: type enum (4 bytes)
-    int length;                      // offset 4: element count
-    int byte_length;                 // offset 8: total bytes
-    int byte_offset;                 // offset 12: offset into backing buffer
-    void* data;                      // offset 16: raw data pointer (direct pointer to first element)
-    JsArrayBuffer* buffer;           // offset 24: optional backing ArrayBuffer (NULL if standalone)
-    uint64_t buffer_item;            // offset 32: original ArrayBuffer Item for identity-preserving .buffer access
+    JsTypedArrayType element_type;   // typed-array element kind
+    JsArrayBuffer* buffer;           // backing ArrayBuffer
+    uint64_t buffer_item;            // original ArrayBuffer Item for identity-preserving .buffer access
     bool length_tracking;            // true when constructed from buffer without explicit length
     bool is_buffer;                  // true only for Node Buffer instances backed by Uint8Array storage
     ArrayNum* view;                  // ArrayNum descriptor over the same non-moving byte storage

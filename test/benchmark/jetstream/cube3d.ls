@@ -414,7 +414,7 @@ pn run() {
             diff = 0.0 - diff
         }
         if (diff > 0.001) {
-            print("3d-cube: FAIL for size=" ++ string(sz) ++ " sum=" ++ string(sum) ++ "\n")
+            print("3d-cube: FAIL for size=" ++ sz ++ " sum=" ++ sum ++ "\n")
             pass = false
         }
         sz = sz * 2
@@ -439,5 +439,5 @@ pn main() {
     } else {
         print("3d-cube: FAIL\n")
     }
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

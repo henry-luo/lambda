@@ -39,9 +39,7 @@ The following language/runtime issues were encountered while implementing the BE
 
 ### Parser / Language Limitations
 
-1. **`fn` closures don't work inside `pn` functions** — Using `sort(entries, fn(a, b) { ... })` inside a `pn` function causes an "Unexpected syntax" parser error. Workaround: manual bubble sort in `knucleotide.ls`.
-
-2. **`sort()` lacks custom comparator support** — `sort()` only accepts an optional `"desc"` string, not a comparison function. Any non-trivial sorting (e.g. sort by frequency descending, then alphabetically) requires a manual sort implementation.
+1. **Historical: `sort()` support in `pn` was limited** — `knucleotide.ls` originally used a manual bubble sort because `sort(entries, fn(a, b) { ... })` did not parse and `sort()` lacked key-function/options support. Current Lambda supports `sort()` with key functions and an options map in `pn`; `knucleotide.ls` now uses a stable two-pass `sort()` for frequency descending, then alphabetically ascending.
 
 3. **`@"..."` path literal syntax doesn't work** — Scripts originally used `@"path/to/file"` but this is not valid. Workaround: use plain `"..."` strings for file paths.
 

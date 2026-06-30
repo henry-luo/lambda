@@ -145,11 +145,11 @@ pn run() {
         var dec_len = dec_result[1]
 
         if (dec_len != n) {
-            print("base64: FAIL - length mismatch: expected " ++ string(n) ++ " got " ++ string(dec_len) ++ "\n")
+            print("base64: FAIL - length mismatch: expected " ++ n ++ " got " ++ dec_len ++ "\n")
             return false
         }
         if (bytes_equal(bytes, dec_bytes, n) == false) {
-            print("base64: FAIL - decode mismatch at size " ++ string(n) ++ "\n")
+            print("base64: FAIL - decode mismatch at size " ++ n ++ "\n")
             return false
         }
 
@@ -185,5 +185,5 @@ pn main() {
     } else {
         print("base64: FAIL\n")
     }
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }
