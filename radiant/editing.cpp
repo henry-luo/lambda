@@ -1,11 +1,13 @@
 #include "editing.hpp"
 
 #include "editing_host.hpp"
+#include "editing_intent.hpp"
 #include "form_control.hpp"
 #include "state_store.hpp"
 #include "text_control.hpp"
 #include "view.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lib/tagged.hpp"
 
 #include <strings.h>
 
@@ -118,9 +120,28 @@ bool editing_surface_is_text_control(const EditingSurface* surface) {
     return surface && surface->kind == EDIT_SURFACE_TEXT_CONTROL;
 }
 
-bool editing_surface_is_script_managed(const EditingSurface* surface) {
-    return editing_surface_is_rich(surface) && surface->owner &&
-        surface->owner->has_attribute("data-script-edit");
+// Layer-A helpers retained from the retired editing_rich_transaction.cpp.
+DomText* editing_rich_find_text_descendant(DomNode* node, bool last) {
+    if (!node) return nullptr;
+    if (node->is_text()) return lam::dom_require_text(node);
+    if (!node->is_element()) return nullptr;
+
+    DomElement* elem = lam::dom_require_element(node);
+    DomText* found = nullptr;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        DomText* text = editing_rich_find_text_descendant(child, last);
+        if (!text) continue;
+        if (!last) return text;
+        found = text;
+    }
+    return found;
+}
+
+bool editing_rich_is_composition_intent(const EditingIntent* intent) {
+    return intent &&
+        (intent->type == INPUT_INTENT_INSERT_COMPOSITION_TEXT ||
+         intent->type == INPUT_INTENT_INSERT_FROM_COMPOSITION ||
+         intent->type == INPUT_INTENT_DELETE_COMPOSITION_TEXT);
 }
 
 const char* editing_surface_kind_name(EditingSurfaceKind kind) {

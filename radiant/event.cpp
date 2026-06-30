@@ -21,7 +21,6 @@
 #include "editing_dispatch.hpp"
 #include "editing_geometry.hpp"
 #include "editing_intent.hpp"
-#include "editing_rich_transaction.hpp"
 #include "editing_target_range.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
@@ -2203,21 +2202,6 @@ static bool dispatch_rich_consumer_transaction(EventContext* evcon,
                                                         "consumer");
 }
 
-static void rich_transaction_log_mutation(DocState* state,
-                                          const EditingSurface* surface,
-                                          const EditingIntent* intent,
-                                          const char* operation,
-                                          uint32_t old_len,
-                                          uint32_t new_len,
-                                          uint32_t selection_start,
-                                          uint32_t selection_end,
-                                          void* user) {
-    (void)user;
-    event_log_editing_mutation(state, surface, intent, operation,
-                               old_len, new_len,
-                               selection_start, selection_end);
-}
-
 struct RichDefaultTransactionArgs {
     View* fallback_view;
     int fallback_offset;
@@ -2228,13 +2212,11 @@ static bool rich_transaction_default_mutate(EventContext* evcon,
                                             const EditingSurface* surface,
                                             const EditingIntent* intent,
                                             void* user) {
-    (void)surface;
-    RichDefaultTransactionArgs* args = (RichDefaultTransactionArgs*)user;
-    (void)evcon;
-    return editing_rich_default_replace(state, intent,
-        args ? args->fallback_view : nullptr,
-        args ? args->fallback_offset : 0,
-        rich_transaction_log_mutation, nullptr);
+    // Stage 4B Phase 5: the native rich-edit apply layer is retired. Rich
+    // editing is script-owned — `editing_run_transaction` routes `beforeinput`
+    // to the script and never invokes this default mutate. Inert no-op.
+    (void)evcon; (void)state; (void)surface; (void)intent; (void)user;
+    return false;
 }
 
 static bool dispatch_rich_transaction_defaultable(EventContext* evcon,

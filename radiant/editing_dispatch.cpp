@@ -829,16 +829,17 @@ bool editing_run_transaction(EventContext* evcon,
 
     DocState* state = editing_dispatch_doc_state(evcon);
 
-    // Stage 4B Phase 3: contenteditable hosts marked `data-script-edit` are
-    // script-managed routing flags. Generate and deliver the `beforeinput`
-    // event to the script handlers (JS addEventListener / Lambda `on`), which
-    // own the model and apply the edit; the native rich-edit behavior layer
-    // (transaction state machine + default mutation) is bypassed entirely.
-    // `dispatchable` intents are the real Input Events (insertText,
-    // insertParagraph, delete*, …); non-dispatchable intents (format*/selectAll)
-    // are not fired as `beforeinput` and fall through to the legacy path so
-    // their existing routing to script `on` handlers is unchanged.
-    if (editing_surface_is_script_managed(&current_surface) &&
+    // Stage 4B Phase 5: contenteditable is a pure routing flag. For every rich
+    // editing host, generate and deliver the `beforeinput` event to the script
+    // handlers (JS addEventListener / Lambda `on`), which own the model and
+    // apply the edit; the native rich-edit behavior layer (transaction state
+    // machine + default mutation) is retired and never runs. `dispatchable`
+    // intents are the real Input Events (insertText, insertParagraph, delete*,
+    // …); non-dispatchable intents (format*/selectAll) are not fired as
+    // `beforeinput` and fall through (selectAll etc. stay Layer-A selection
+    // operations, not edits). (Phase 3 gated this on `data-script-edit`;
+    // Phase 5 makes it unconditional as the native engine is removed.)
+    if (editing_surface_is_rich(&current_surface) &&
         input_intent_is_dispatchable(current_tx.intent->type)) {
         bool prevented = false;
         bool lambda_handled = false;

@@ -43,16 +43,15 @@ bool editing_surface_from_focus(DocState* state, EditingSurface* out);
 bool editing_surface_is_rich(const EditingSurface* surface);
 bool editing_surface_is_text_control(const EditingSurface* surface);
 
-// Stage 4B Phase 3: a rich editing host explicitly marked `data-script-edit`
-// is script-managed — its input events are routed to script handlers (JS
-// addEventListener / Lambda `on`) which own the document model and apply every
-// edit. The native rich-edit behavior layer is bypassed for such surfaces
-// (contenteditable acts purely as a routing flag). Unmarked contenteditable
-// keeps the native engine, the Phase-4 parity safety net. Transitional: once
-// the native engine is retired (Phase 5) all contenteditable routes to script.
-bool editing_surface_is_script_managed(const EditingSurface* surface);
-
 const char* editing_surface_kind_name(EditingSurfaceKind kind);
 const char* editing_mode_name(EditingMode mode);
+
+// Layer-A helpers (formerly in the retired editing_rich_transaction.cpp):
+// `find_text_descendant` backs click-to-place-caret in a rich host;
+// `is_composition_intent` classifies IME composition input. Both are pure
+// classification/navigation, not editing apply.
+#include "editing_intent.hpp"
+DomText* editing_rich_find_text_descendant(DomNode* node, bool last);
+bool editing_rich_is_composition_intent(const EditingIntent* intent);
 
 #endif // RADIANT_EDITING_HPP
