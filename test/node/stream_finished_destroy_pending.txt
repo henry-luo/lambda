@@ -1,0 +1,1 @@
+stream finished destroy pending ok

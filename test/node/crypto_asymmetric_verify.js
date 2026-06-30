@@ -171,6 +171,69 @@ assert.strictEqual(crypto.createVerify('sha256')
   .verify({ key: generated.publicKey, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: 20 }, generatedSignature), true);
 console.log('rsa generateKeyPairSync pss:', true);
 
+const ecPrivateKey = [
+  '-----BEGIN PRIVATE KEY-----',
+  'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgDxBsPQPIgMuMyQbx',
+  'zbb9toew6Ev6e9O6ZhpxLNgmAEqhRANCAARfSYxhH+6V5lIg+M3O0iQBLf+53kuE',
+  '2luIgWnp81/Ya1Gybj8tl4tJVu1GEwcTyt8hoA7vRACmCHnI5B1+bNpS',
+  '-----END PRIVATE KEY-----'
+].join('\n') + '\n';
+
+const ecPublicKey = [
+  '-----BEGIN PUBLIC KEY-----',
+  'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEX0mMYR/uleZSIPjNztIkAS3/ud5L',
+  'hNpbiIFp6fNf2GtRsm4/LZeLSVbtRhMHE8rfIaAO70QApgh5yOQdfmzaUg==',
+  '-----END PUBLIC KEY-----'
+].join('\n') + '\n';
+
+const ecPrivateKeyObject = crypto.createPrivateKey(ecPrivateKey);
+const ecPublicKeyObject = crypto.createPublicKey(ecPublicKey);
+assert.strictEqual(ecPrivateKeyObject.asymmetricKeyType, 'ec');
+assert.strictEqual(ecPublicKeyObject.asymmetricKeyType, 'ec');
+const ecP1363Signature = crypto.sign('sha256', Buffer.from(message), {
+  key: ecPrivateKeyObject,
+  dsaEncoding: 'ieee-p1363'
+});
+assert.strictEqual(ecP1363Signature.length, 64);
+assert.strictEqual(crypto.verify('sha256', Buffer.from(message), {
+  key: ecPublicKeyObject,
+  dsaEncoding: 'ieee-p1363'
+}, ecP1363Signature), true);
+assert.strictEqual(crypto.verify('sha256', Buffer.from(message), {
+  key: ecPublicKeyObject,
+  dsaEncoding: 'der'
+}, ecP1363Signature), false);
+console.log('ec keyobject p1363 sign verify:', true);
+
+const unsupportedEd25519PrivateKey = [
+  '-----BEGIN PRIVATE KEY-----',
+  'MC4CAQAwBQYDK2VwBCIEIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  '-----END PRIVATE KEY-----'
+].join('\n') + '\n';
+const unsupportedEd448PublicKey = [
+  '-----BEGIN PUBLIC KEY-----',
+  'MEMwBQYDK2VxAzoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  '-----END PUBLIC KEY-----'
+].join('\n') + '\n';
+const unsupportedDsaPrivateKey = [
+  '-----BEGIN DSA PRIVATE KEY-----',
+  'AA==',
+  '-----END DSA PRIVATE KEY-----'
+].join('\n') + '\n';
+assert.throws(() => crypto.createPrivateKey(unsupportedEd25519PrivateKey), {
+  code: 'ERR_OSSL_UNSUPPORTED',
+  message: /ed25519/
+});
+assert.throws(() => crypto.createPublicKey(unsupportedEd448PublicKey), {
+  code: 'ERR_OSSL_UNSUPPORTED',
+  message: /ed448/
+});
+assert.throws(() => crypto.createPrivateKey(unsupportedDsaPrivateKey), {
+  code: 'ERR_OSSL_UNSUPPORTED',
+  message: /dsa/
+});
+console.log('unsupported asymmetric import errors:', true);
+
 let asyncSignAfterCall = false;
 const asyncSignReturn = crypto.sign('sha256', Buffer.from(message), privateKeyObject,
   function(err, asyncSignature) {
@@ -188,3 +251,15 @@ const asyncVerifyReturn = crypto.verify('sha256', Buffer.from(message), publicKe
   });
 assert.strictEqual(asyncVerifyReturn, undefined);
 asyncVerifyAfterCall = true;
+
+let asyncEcSignAfterCall = false;
+const asyncEcSignReturn = crypto.sign('sha256', Buffer.from(message), {
+  key: ecPrivateKeyObject,
+  dsaEncoding: 'ieee-p1363'
+}, function(err, asyncSignature) {
+  console.log('ec one-shot p1363 callback:',
+    err === null && Buffer.isBuffer(asyncSignature) &&
+    asyncSignature.length === 64 && asyncEcSignAfterCall);
+});
+assert.strictEqual(asyncEcSignReturn, undefined);
+asyncEcSignAfterCall = true;

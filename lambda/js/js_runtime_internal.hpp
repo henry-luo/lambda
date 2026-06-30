@@ -83,6 +83,7 @@ struct JsFunction {
     uint16_t flags;   // v20: JS_FUNC_FLAG_* bits
     int16_t formal_length; // ES spec .length: params before first default, excl rest (-1 = use param_count)
     Item* module_vars; // Per-module variable array (NULL for built-in functions)
+    Item home_global; // globalThis captured when the function was created
     String* source_text; // v29: original source text for Function.prototype.toString
     bool eval_initializer_context;
     Item* with_env; // captured with-object environment stack, if any
