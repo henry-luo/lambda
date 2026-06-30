@@ -14788,6 +14788,13 @@ static Item js_message_port_make_message_event(Item msg) {
     return event;
 }
 
+static Item js_message_port_make_message_error_event(Item data) {
+    Item event = js_new_object();
+    js_property_set(event, make_string_item("data"), data);
+    js_property_set(event, make_string_item("type"), make_string_item("messageerror"));
+    return event;
+}
+
 static Item js_message_port_make_close_event(void) {
     Item event = js_new_object();
     js_property_set(event, make_string_item("type"), make_string_item("close"));
@@ -14816,6 +14823,75 @@ static Item js_message_port_shift_message(Item port) {
     }
     js_property_set(port, make_string_item("__message_queue__"), next_queue);
     return value;
+}
+
+static bool js_message_port_is_filehandle(Item value) {
+    if (!js_message_port_is_object(value)) return false;
+    Item fd = js_property_get(value, make_string_item("__fd"));
+    return get_type_id(fd) == LMD_TYPE_INT;
+}
+
+static bool js_message_port_transfer_list_has(Item transfer_list, Item value) {
+    if (get_type_id(transfer_list) != LMD_TYPE_ARRAY) return false;
+    int64_t len = js_array_length(transfer_list);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(transfer_list, i);
+        if (entry.item == value.item) return true;
+    }
+    return false;
+}
+
+static Item js_message_port_clone_filehandle_for_transfer(Item handle) {
+    Item fd = js_property_get(handle, make_string_item("__fd"));
+    if (get_type_id(fd) != LMD_TYPE_INT) return handle;
+
+    Item moved = js_new_object();
+    Item proto = js_get_prototype(handle);
+    if (proto.item == ItemNull.item || get_type_id(proto) == LMD_TYPE_UNDEFINED) {
+        proto = js_get_prototype_of(handle);
+    }
+    if (js_message_port_is_object(proto)) js_set_prototype(moved, proto);
+    js_property_set(moved, make_string_item("__fd"), fd);
+    js_property_set(handle, make_string_item("__fd"), (Item){.item = i2it(-1)});
+    return moved;
+}
+
+static Item js_message_port_data_clone_error(const char* message) {
+    return js_domexception_new(make_string_item(message ? message : ""),
+                               make_string_item("DataCloneError"));
+}
+
+static Item js_message_port_context_unavailable_error(void) {
+    Item err = js_new_error_with_name(make_string_item("Error"),
+        make_string_item("Message target context is unavailable"));
+    js_property_set(err, make_string_item("code"),
+        make_string_item("ERR_MESSAGE_TARGET_CONTEXT_UNAVAILABLE"));
+    return err;
+}
+
+static Item js_message_port_emit_message_error_tick(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item target = env[0];
+    Item data = env[1];
+    if (!js_message_port_is_port(target)) return make_js_undefined();
+
+    Item onmessageerror = js_property_get(target, make_string_item("onmessageerror"));
+    if (get_type_id(onmessageerror) == LMD_TYPE_FUNC) {
+        Item event = js_message_port_make_message_error_event(data);
+        Item args[1] = {event};
+        js_call_function(onmessageerror, target, args, 1);
+    }
+    return make_js_undefined();
+}
+
+static void js_message_port_schedule_message_error(Item target, Item data) {
+    Item* env = js_alloc_env(2);
+    env[0] = target;
+    env[1] = data;
+    Item callback = js_new_closure((void*)js_message_port_emit_message_error_tick, 0, env, 2);
+    extern Item js_setTimeout(Item callback, Item delay);
+    js_setTimeout(callback, (Item){.item = i2it(0)});
 }
 
 static Item js_message_port_add_listener(Item event, Item handler) {
@@ -14909,7 +14985,7 @@ static Item js_message_port_deliver(Item env_item) {
     return make_js_undefined();
 }
 
-static Item js_message_port_postMessage(Item msg) {
+static Item js_message_port_postMessage(Item msg, Item transfer_list) {
     Item self = js_get_this();
     Item closed = js_property_get(self, make_string_item("__closed__"));
     if (closed.item == ITEM_TRUE) return make_js_undefined();
@@ -14926,13 +15002,27 @@ static Item js_message_port_postMessage(Item msg) {
         js_throw_value(err);
         return make_js_undefined();
     }
+    bool transfer_filehandle = js_message_port_is_filehandle(msg) &&
+        js_message_port_transfer_list_has(transfer_list, msg);
+    if (js_message_port_is_filehandle(msg) && !transfer_filehandle) {
+        js_throw_value(js_message_port_data_clone_error("FileHandle object could not be cloned."));
+        return make_js_undefined();
+    }
     Item peer = js_property_get(self, make_string_item("__peer__"));
     if (!js_message_port_is_port(peer)) return make_js_undefined();
     Item peer_closed = js_property_get(peer, make_string_item("__closed__"));
     if (peer_closed.item == ITEM_TRUE) return make_js_undefined();
 
+    Item clone = transfer_filehandle ? js_message_port_clone_filehandle_for_transfer(msg)
+        : structured_clone_impl(msg, 0);
+    Item peer_moved = js_property_get(peer, make_string_item("__moved_context__"));
+    if (transfer_filehandle && peer_moved.item == ITEM_TRUE) {
+        js_message_port_schedule_message_error(peer, js_message_port_context_unavailable_error());
+        return make_js_undefined();
+    }
+
     Item queue = js_message_port_queue(peer);
-    js_array_push(queue, structured_clone_impl(msg, 0));
+    js_array_push(queue, clone);
 
     Item* env = js_alloc_env(1);
     env[0] = peer;
@@ -14966,6 +15056,7 @@ extern "C" Item js_message_port_move_to_context(Item port, Item context) {
             return js_throw_type_error_code(JS_ERR_CLOSED_MESSAGE_PORT,
                 "Cannot send data on closed MessagePort");
         }
+        js_property_set(port, make_string_item("__moved_context__"), (Item){.item = ITEM_TRUE});
         return port;
     }
     extern Item js_throw_type_error_code(const char*, const char*);
@@ -14992,12 +15083,13 @@ extern "C" Item js_message_port_new(void) {
     // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(port, JS_CLASS_MESSAGE_PORT);  // A3-T3b
     js_property_set(port, make_string_item("postMessage"),
-        js_new_function((void*)js_message_port_postMessage, 1));
+        js_new_function((void*)js_message_port_postMessage, 2));
     js_property_set(port, make_string_item("close"),
         js_new_function((void*)js_message_port_close, 1));
     js_property_set(port, make_string_item("onmessage"), ItemNull);
     js_property_set(port, make_string_item("onmessageerror"), ItemNull);
     js_property_set(port, make_string_item("__closed__"), (Item){.item = ITEM_FALSE});
+    js_property_set(port, make_string_item("__moved_context__"), (Item){.item = ITEM_FALSE});
     js_property_set(port, make_string_item("__message_listeners__"), js_array_new(0));
     js_property_set(port, make_string_item("__close_listeners__"), js_array_new(0));
     js_property_set(port, make_string_item("__message_event_listeners__"), js_array_new(0));

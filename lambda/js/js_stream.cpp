@@ -8005,6 +8005,13 @@ static bool js_stream_finished_expects_close(Item stream) {
     return !js_stream_is_native_stream(stream);
 }
 
+static bool js_stream_finished_expects_close_for_checks(Item stream,
+                                                        bool check_readable,
+                                                        bool check_writable) {
+    if (!check_readable || !check_writable) return false;
+    return js_stream_finished_expects_close(stream);
+}
+
 static void js_stream_finished_add_listener(Item stream, Item event_item, Item listener) {
     if (js_stream_is_native_stream(stream)) {
         js_stream_on(stream, event_item, listener);
@@ -8085,7 +8092,8 @@ static Item js_stream_finished_on_end(Item env_item) {
                                       js_item_is_true(env[12]))) {
         return make_js_undefined();
     }
-    if (js_stream_finished_expects_close(env[0])) {
+    if (js_stream_finished_expects_close_for_checks(env[0], js_item_is_true(env[11]),
+                                                    js_item_is_true(env[12]))) {
         return make_js_undefined();
     }
     return js_stream_finished_emit_callback(env, make_js_undefined());
@@ -8099,7 +8107,8 @@ static Item js_stream_finished_on_error(Item env_item, Item err) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
     env[9] = err;
-    if (js_stream_finished_expects_close(env[0])) {
+    if (js_stream_finished_expects_close_for_checks(env[0], js_item_is_true(env[11]),
+                                                    js_item_is_true(env[12]))) {
         return make_js_undefined();
     }
     return js_stream_finished_emit_callback(env, err);
@@ -8233,7 +8242,7 @@ static Item js_stream_finished_impl(Item stream, Item options, Item callback) {
     Item fin = js_property_get(stream, key_finished);
     Item des = js_property_get(stream, key_destroyed);
     bool side_done = js_stream_finished_side_done(stream, check_readable, check_writable);
-    bool expects_close = js_stream_finished_expects_close(stream);
+    bool expects_close = js_stream_finished_expects_close_for_checks(stream, check_readable, check_writable);
     bool is_done = (side_done && !expects_close) ||
                    (get_type_id(fin) == LMD_TYPE_BOOL && it2b(fin) && !expects_close) ||
                    (get_type_id(des) == LMD_TYPE_BOOL && it2b(des) &&

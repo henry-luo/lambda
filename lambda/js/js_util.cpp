@@ -388,6 +388,24 @@ static bool js_util_inspect_is_object_like(Item value) {
            type == LMD_TYPE_OBJECT || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP;
 }
 
+static bool js_util_inspect_is_undefined(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_UNDEFINED || value.item == ITEM_JS_UNDEFINED;
+}
+
+static bool js_util_inspect_string_equals(Item value, const char* text) {
+    if (get_type_id(value) != LMD_TYPE_STRING || !text) return false;
+    String* s = it2s(value);
+    size_t len = strlen(text);
+    return s && s->len == len && memcmp(s->chars, text, len) == 0;
+}
+
+static bool js_util_inspect_is_assertion_error(Item value) {
+    if (!js_util_inspect_is_object_like(value)) return false;
+    Item code = js_property_get(value, make_string_item("code"));
+    return js_util_inspect_string_equals(code, "ERR_ASSERTION");
+}
+
 static bool js_util_inspect_seen_contains(Item seen, Item value) {
     int64_t len = js_array_length(seen);
     for (int64_t i = 0; i < len; i++) {
@@ -437,6 +455,44 @@ static Item js_util_inspect_number(Item obj_item, JsInspectContext* ctx) {
     return js_util_inspect_make_string(sb);
 }
 
+static void js_util_inspect_append_escaped_char(StrBuf* sb, char ch) {
+    if (ch == '\\') strbuf_append_str(sb, "\\\\");
+    else if (ch == '\'') strbuf_append_str(sb, "\\'");
+    else if (ch == '\n') strbuf_append_str(sb, "\\n");
+    else if (ch == '\r') strbuf_append_str(sb, "\\r");
+    else if (ch == '\t') strbuf_append_str(sb, "\\t");
+    else strbuf_append_char(sb, ch);
+}
+
+static void js_util_inspect_append_assertion_string(StrBuf* sb, Item value) {
+    String* s = get_type_id(value) == LMD_TYPE_STRING ? it2s(value) : NULL;
+    strbuf_append_char(sb, '\'');
+    if (s && s->len > 0) {
+        size_t limit = s->len;
+        bool append_ellipsis = false;
+        int newline_count = 0;
+        for (size_t i = 0; i < s->len; i++) {
+            if (s->chars[i] == '\n') {
+                newline_count++;
+                if (newline_count == 10) {
+                    limit = i + 1;
+                    append_ellipsis = true;
+                    break;
+                }
+            }
+        }
+        if (!append_ellipsis && s->len > 9488) {
+            limit = 9488;
+            append_ellipsis = true;
+        }
+        for (size_t i = 0; i < limit; i++) {
+            js_util_inspect_append_escaped_char(sb, s->chars[i]);
+        }
+        if (append_ellipsis) strbuf_append_str(sb, "...");
+    }
+    strbuf_append_char(sb, '\'');
+}
+
 static bool js_util_inspect_key_is_array_index(String* key, int64_t len) {
     if (!key || key->len == 0) return false;
     int64_t index = 0;
@@ -474,6 +530,64 @@ static void js_util_inspect_append_property(StrBuf* sb, Item owner, Item key,
     if (vs) strbuf_append_str_n(sb, vs->chars, vs->len);
 }
 
+static void js_util_inspect_append_named_value(StrBuf* sb, const char* name, Item value,
+                                               JsInspectContext* ctx, int depth_left,
+                                               bool* first, bool assertion_string) {
+    if (js_util_inspect_is_undefined(value)) return;
+    if (!*first) strbuf_append_str(sb, ", ");
+    *first = false;
+    strbuf_append_str(sb, name);
+    strbuf_append_str(sb, ": ");
+    if (assertion_string && get_type_id(value) == LMD_TYPE_STRING) {
+        js_util_inspect_append_assertion_string(sb, value);
+        return;
+    }
+    Item value_str = js_util_inspect_value(value, ctx, depth_left - 1);
+    String* vs = it2s(value_str);
+    if (vs) strbuf_append_str_n(sb, vs->chars, vs->len);
+}
+
+static Item js_util_inspect_assertion_error(Item obj_item, JsInspectContext* ctx, int depth_left) {
+    Item message = js_property_get(obj_item, make_string_item("message"));
+    Item code = js_property_get(obj_item, make_string_item("code"));
+    String* ms = get_type_id(message) == LMD_TYPE_STRING ? it2s(message) : NULL;
+    String* cs = get_type_id(code) == LMD_TYPE_STRING ? it2s(code) : NULL;
+
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, "AssertionError");
+    if (cs && cs->len > 0) {
+        strbuf_append_str(sb, " [");
+        strbuf_append_str_n(sb, cs->chars, cs->len);
+        strbuf_append_char(sb, ']');
+    }
+    if (ms && ms->len > 0) {
+        strbuf_append_str(sb, ": ");
+        strbuf_append_str_n(sb, ms->chars, ms->len);
+    }
+    strbuf_append_str(sb, " { ");
+
+    bool first = true;
+    js_util_inspect_append_named_value(sb, "generatedMessage",
+        js_property_get(obj_item, make_string_item("generatedMessage")),
+        ctx, depth_left, &first, false);
+    js_util_inspect_append_named_value(sb, "code", code, ctx, depth_left, &first, false);
+    js_util_inspect_append_named_value(sb, "actual",
+        js_property_get(obj_item, make_string_item("actual")),
+        ctx, depth_left, &first, true);
+    js_util_inspect_append_named_value(sb, "expected",
+        js_property_get(obj_item, make_string_item("expected")),
+        ctx, depth_left, &first, true);
+    js_util_inspect_append_named_value(sb, "operator",
+        js_property_get(obj_item, make_string_item("operator")),
+        ctx, depth_left, &first, false);
+    js_util_inspect_append_named_value(sb, "diff",
+        js_property_get(obj_item, make_string_item("diff")),
+        ctx, depth_left, &first, false);
+
+    strbuf_append_str(sb, " }");
+    return js_util_inspect_make_string(sb);
+}
+
 static Item js_util_inspect_object(Item obj_item, JsInspectContext* ctx, int depth_left) {
     if (depth_left < 0) return make_string_item("[Object]");
 
@@ -495,6 +609,12 @@ static Item js_util_inspect_object(Item obj_item, JsInspectContext* ctx, int dep
         }
         if (get_type_id(result) == LMD_TYPE_STRING) return result;
         return js_to_string(result);
+    }
+
+    if (js_util_inspect_is_assertion_error(obj_item)) {
+        Item result = js_util_inspect_assertion_error(obj_item, ctx, depth_left);
+        if (ctx) js_util_inspect_seen_pop(ctx->seen);
+        return result;
     }
 
     Item keys = (ctx && ctx->show_hidden) ? js_object_get_own_property_names(obj_item) : js_object_keys(obj_item);

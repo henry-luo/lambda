@@ -531,6 +531,8 @@ static void jm_collect_for_init_lexical_names(JsAstNode* node, struct hashmap* n
         JsForOfNode* n = (JsForOfNode*)node;
         if (n->left && n->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
             jm_collect_for_init_lexical_from_decl((JsVariableDeclarationNode*)n->left, names);
+        } else if ((n->kind == 1 || n->kind == 2) && n->left) {
+            jm_collect_for_init_lexical_pattern(n->left, names);
         }
         jm_collect_for_init_lexical_names(n->body, names, /*in_loop=*/true);
         return;
@@ -5021,6 +5023,25 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             }
                         }
                         break;
+                    }
+                }
+            }
+            // if this direct child also has a scope env, its own children should
+            // use the child's compact slots for these bindings. Phase 1.7c may
+            // have already marked them as grandparent reads before 1.7d changed
+            // this function from parent-env reuse to an owned compact env.
+            if (child->has_scope_env && child->scope_env_names) {
+                for (int gi = 0; gi < mt->func_count; gi++) {
+                    JsFuncCollected* grandchild = &mt->func_entries[gi];
+                    if (grandchild->parent_index != ci) continue;
+                    for (int gk = 0; gk < grandchild->capture_count; gk++) {
+                        for (int s = 0; s < child->scope_env_count; s++) {
+                            if (strcmp(grandchild->captures[gk].name, child->scope_env_names[s]) == 0) {
+                                grandchild->captures[gk].scope_env_slot = s;
+                                grandchild->captures[gk].grandparent_slot = -1;
+                                break;
+                            }
+                        }
                     }
                 }
             }
