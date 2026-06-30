@@ -301,10 +301,27 @@ hanging. The existing `test/lambda/unboxed_sys_func.ls` also covers scalar
 
 **Pattern**: ~20-line functions to format a float to a fixed number of decimal places.
 
-**Why**: Lambda lacks `sprintf`-style formatted output or a `toFixed(n)` function.
-Each benchmark requiring specific decimal precision must implement its own formatter
-that decomposes a float into integer + fraction parts, scales, pads with zeros, and
-concatenates strings.
+**Status**: **DEFERRED / current `format()` does not support this yet.** Rechecked
+on 2026-06-30: Lambda has `format(data, type)`, but that function is currently for
+data/document serialization (`json`, `yaml`, `toml`, `text`, markup, etc.) and
+datetime pattern formatting. It does not provide `sprintf`/`toFixed`-style numeric
+formatting for scalars.
+
+`format(x, {type: 'text', precision: 3})` ignores `precision`, `format(x, {type:
+'json', precision: 3})` still uses the JSON serializer's default number rendering,
+and `format(x, {type: 'number', precision: 3})` is unsupported. The internal
+serializer helper `format_number()` uses a fixed general format (`%.15g`) rather
+than caller-selected decimal places.
+
+**Why**: Each benchmark requiring exact decimal precision must still implement its
+own formatter that decomposes a float into integer + fraction parts, scales, pads
+with zeros, and concatenates strings. JS `Number.prototype.toFixed` support and
+Bash `printf` support are not Lambda-script builtins.
+
+**Future direction**: Enhance `format()` itself to support scalar formatting for
+numbers and datetime values, probably with a format string or equivalent options
+syntax. Until that lands, the benchmark-local `format9()` / `format3()` helpers are
+intentional deferred workarounds.
 
 **Files affected**:
 - `beng/nbody.ls` — `pn format9(x)` (9 decimal places)
@@ -388,7 +405,7 @@ concatenation.
 | `fill(n, null)` hangs in hot paths | 4 | Engine bug |
 | `for` range broken in pn | 7 | Engine fix (transpile) |
 | `fn`/built-in calls hang in pn | 8 | Engine fix (JIT interop) |
-| No float format specifier | 9 | New built-in function |
+| `format()` lacks scalar format strings | 9 | DEFERRED / enhance `format()` |
 | Scalars are pass-by-value only | 10 | NO-FIX / by design |
 | No built-in sort | 11 | New built-in function |
 | No string interpolation | 12 | Syntax sugar |
