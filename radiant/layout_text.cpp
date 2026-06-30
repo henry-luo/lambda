@@ -1702,6 +1702,44 @@ static void finalize_non_rendered_table_markers_for_line(LayoutContext* lycon) {
                                              line_top, baseline_y);
 }
 
+static void contribute_block_root_strut(LayoutContext* lycon) {
+    if (!lycon || lycon->block.line_height_is_normal ||
+        lycon->line.has_expanded_inline_lh) return;
+
+    float ascender = lycon->block.init_ascender;
+    float descender = lycon->block.init_descender;
+    float content_height = ascender + descender;
+    if (content_height <= 0.0f) return;
+
+    // CSS Inline 3: the block container generates a root inline box whose
+    // layout bounds participate in every line box. Negative half-leading is
+    // real here; it changes the root box's above/below-baseline contribution.
+    float half_leading = (lycon->block.line_height - content_height) / 2.0f;
+    ascender += half_leading;
+    descender += half_leading;
+
+    if (ascender > 0.0f) {
+        lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
+    }
+    if (descender > 0.0f) {
+        lycon->line.max_descender = max(lycon->line.max_descender, descender);
+    }
+}
+
+static bool block_root_strut_extends_line_height(LayoutContext* lycon) {
+    if (!lycon || lycon->block.line_height_is_normal ||
+        lycon->line.has_expanded_inline_lh) return false;
+
+    float content_height = lycon->block.init_ascender + lycon->block.init_descender;
+    if (content_height <= 0.0f || lycon->block.line_height <= 0.0f) return false;
+
+    float half_leading = (lycon->block.line_height - content_height) / 2.0f;
+    float ascender = lycon->block.init_ascender + half_leading;
+    float descender = lycon->block.init_descender + half_leading;
+    return ascender > lycon->block.line_height + 0.5f ||
+        descender > lycon->block.line_height + 0.5f;
+}
+
 void line_break(LayoutContext* lycon) {
     // CSS 2.1 §16.6.1: For normal/nowrap/pre-line white-space, trailing spaces
     // at the end of a line are removed. Trim the last text rect's width.
@@ -1797,6 +1835,7 @@ void line_break(LayoutContext* lycon) {
             lycon->line.max_descender, lycon->line.max_desc_before_last_text);
         lycon->line.max_descender = lycon->line.max_desc_before_last_text;
     }
+    contribute_block_root_strut(lycon);
     finalize_non_rendered_table_markers_for_line(lycon);
     // CSS 2.1 §10.8.1: The strut is a zero-width inline box with the block's font
     // and line-height. Run vertical alignment when:
@@ -1933,7 +1972,8 @@ void line_break(LayoutContext* lycon) {
             // inflate the block's line advance.
             used_line_height = explicit_inline_height;
         } else if (lycon->line.has_replaced_content || lycon->block.line_height_is_normal ||
-            lycon->line.has_expanded_inline_lh) {
+            lycon->line.has_expanded_inline_lh ||
+            (lycon->line.has_different_inline_font && block_root_strut_extends_line_height(lycon))) {
             used_line_height = max(css_line_height, font_line_height);
             // CSS 2.1 §10.8.1: For normal line-height with mixed fonts, each inline box
             // contributes its own font's normal line-height (including lineGap).
@@ -2075,6 +2115,16 @@ void line_break(LayoutContext* lycon) {
 
     // reset the new line
     line_reset(lycon);
+    FontProp* block_font = lycon->block.establishing_element ?
+        lycon->block.establishing_element->font : lycon->block.block_container_font;
+    if (block_font) {
+        lycon->line.line_start_font.style = block_font;
+        lycon->line.line_start_font.font_handle = block_font->font_handle ?
+            block_font->font_handle : lycon->line.line_start_font.font_handle;
+        lycon->line.line_start_font.current_font_size = block_font->font_size;
+        lycon->line.parent_font_size = block_font->font_size;
+        lycon->line.parent_font_handle = lycon->line.line_start_font.font_handle;
+    }
 }
 
 // CSS Text 3 §5.2: Measure the width of the first word starting from `str`.

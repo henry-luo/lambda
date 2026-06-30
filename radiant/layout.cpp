@@ -1251,6 +1251,13 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
     // inline font is present, max_ascender may be less than the strut's baseline,
     // but the baseline must still be at the strut's position.
     float strut_baseline = lycon->block.init_ascender + lycon->block.lead_y;
+    if (!lycon->block.line_height_is_normal) {
+        float strut_content_height = lycon->block.init_ascender + lycon->block.init_descender;
+        if (strut_content_height > 0.0f) {
+            strut_baseline = lycon->block.init_ascender +
+                (lycon->block.line_height - strut_content_height) / 2.0f;
+        }
+    }
     float baseline_pos = max(lycon->line.max_ascender, strut_baseline);
     // CSS 2.1 §10.8.1: When a bottom-aligned element is taller than the tentative
     // line box (from baseline-aligned content), the line box extends upward,
