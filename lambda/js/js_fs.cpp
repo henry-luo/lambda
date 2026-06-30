@@ -2275,6 +2275,67 @@ static Item js_fs_filehandle_read(Item buffer_item, Item offset_item, Item lengt
     return js_promise_resolve(result);
 }
 
+static Item js_fs_filehandle_transferred_error(const char* syscall) {
+    Item err = js_new_error_with_name(make_string_item("Error"),
+        make_string_item("The FileHandle has been transferred"));
+    js_property_set(err, make_string_item("code"), make_string_item("EBADF"));
+    js_property_set(err, make_string_item("syscall"), make_string_item(syscall ? syscall : "read"));
+    return err;
+}
+
+static Item js_fs_filehandle_readFile(Item options_item) {
+    if (!fs_validate_encoding_options(options_item)) {
+        Item err = js_clear_exception();
+        return js_promise_reject(err);
+    }
+
+    Item self = js_get_this();
+    Item fd_item = js_property_get(self, make_string_item("__fd"));
+    if (get_type_id(fd_item) != LMD_TYPE_INT || it2i(fd_item) < 0) {
+        return js_promise_reject(js_fs_filehandle_transferred_error("read"));
+    }
+    int fd = (int)it2i(fd_item);
+
+    uv_fs_t stat_req;
+    fs_maybe_call_internal_fstat_hook(fd);
+    int r = uv_fs_fstat(NULL, &stat_req, fd, NULL);
+    if (r < 0) {
+        uv_fs_req_cleanup(&stat_req);
+        Item result = js_throw_system_error(r, "fstat", NULL);
+        if (js_check_exception()) {
+            Item err = js_clear_exception();
+            return js_promise_reject(err);
+        }
+        return js_promise_reject(result);
+    }
+
+    size_t file_size = (size_t)stat_req.statbuf.st_size;
+    uv_fs_req_cleanup(&stat_req);
+    char* data = (char*)mem_alloc(file_size > 0 ? file_size : 1, MEM_CAT_JS_RUNTIME);
+    if (!data) return js_promise_reject(js_fs_filehandle_transferred_error("read"));
+
+    uv_buf_t buf = uv_buf_init(data, (unsigned int)file_size);
+    uv_fs_t read_req;
+    int bytes_read = (int)uv_fs_read(NULL, &read_req, fd, &buf, 1, 0, NULL);
+    uv_fs_req_cleanup(&read_req);
+
+    if (bytes_read < 0) {
+        mem_free(data);
+        Item result = js_throw_system_error(bytes_read, "read", NULL);
+        if (js_check_exception()) {
+            Item err = js_clear_exception();
+            return js_promise_reject(err);
+        }
+        return js_promise_reject(result);
+    }
+
+    Item result = fs_read_file_should_return_buffer(options_item)
+        ? fs_buffer_from_bytes(data, bytes_read)
+        : make_string_item(data, bytes_read);
+    mem_free(data);
+    return js_promise_resolve(result);
+}
+
 static Item js_fs_filehandle_close(void) {
     Item self = js_get_this();
     Item fd_item = js_property_get(self, make_string_item("__fd"));
@@ -2305,6 +2366,7 @@ static Item fs_get_filehandle_prototype(void) {
     js_install_native_accessor(fs_filehandle_proto, make_string_item("fd"), fd_getter,
                                ItemNull, JSPD_NON_ENUMERABLE);
     js_fs_set_method(fs_filehandle_proto, "read", (void*)js_fs_filehandle_read, 4);
+    js_fs_set_method(fs_filehandle_proto, "readFile", (void*)js_fs_filehandle_readFile, 1);
     js_fs_set_method(fs_filehandle_proto, "close", (void*)js_fs_filehandle_close, 0);
     js_property_set(fs_filehandle_proto, make_string_item("__sym_14"),
                     js_new_function((void*)js_fs_filehandle_close, 0));

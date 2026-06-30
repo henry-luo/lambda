@@ -2,6 +2,7 @@
 
 const assert = require('assert');
 const crypto = require('crypto');
+const fs = require('fs');
 
 const privateKey = [
   '-----BEGIN PRIVATE KEY-----',
@@ -248,7 +249,9 @@ const ed448PublicKey = [
   'RdstLktvwpkVJOoNb7oDgc2V5ZUA',
   '-----END PUBLIC KEY-----'
 ].join('\n') + '\n';
-const unsupportedDsaPrivateKey = [
+const dsaPrivateKey = fs.readFileSync('ref/node/test/fixtures/keys/dsa_private.pem', 'utf8');
+const dsaPublicKey = fs.readFileSync('ref/node/test/fixtures/keys/dsa_public.pem', 'utf8');
+const invalidDsaPrivateKey = [
   '-----BEGIN DSA PRIVATE KEY-----',
   'AA==',
   '-----END DSA PRIVATE KEY-----'
@@ -286,11 +289,40 @@ assert.strictEqual(crypto.verify(undefined, Buffer.from(message), Buffer.from(ed
   ed448Signature), true);
 console.log('ed448 keyobject sign verify:', true);
 
-assert.throws(() => crypto.createPrivateKey(unsupportedDsaPrivateKey), {
+const dsaPrivateKeyObject = crypto.createPrivateKey(dsaPrivateKey);
+const dsaPublicKeyObject = crypto.createPublicKey(dsaPublicKey);
+assert.strictEqual(dsaPrivateKeyObject.asymmetricKeyType, 'dsa');
+assert.strictEqual(dsaPublicKeyObject.asymmetricKeyType, 'dsa');
+assert.strictEqual(dsaPrivateKeyObject.asymmetricKeyDetails.modulusLength, 2048);
+assert.strictEqual(dsaPrivateKeyObject.asymmetricKeyDetails.divisorLength, 256);
+const dsaDerSignature = crypto.sign('sha256', Buffer.from(message), dsaPrivateKeyObject);
+assert.strictEqual(crypto.verify('sha256', Buffer.from(message), dsaPublicKeyObject,
+  dsaDerSignature), true);
+assert.strictEqual(crypto.verify('sha256', Buffer.from(message + '!'), dsaPublicKeyObject,
+  dsaDerSignature), false);
+const dsaP1363Signature = crypto.sign('sha256', Buffer.from(message), {
+  key: dsaPrivateKeyObject,
+  dsaEncoding: 'ieee-p1363'
+});
+assert.strictEqual(dsaP1363Signature.length,
+  Math.ceil(dsaPrivateKeyObject.asymmetricKeyDetails.divisorLength / 8) * 2);
+assert.strictEqual(crypto.verify('sha256', Buffer.from(message), {
+  key: dsaPublicKeyObject.export({ type: 'spki', format: 'der' }),
+  format: 'der',
+  type: 'spki',
+  dsaEncoding: 'ieee-p1363'
+}, dsaP1363Signature), true);
+const dsaDerivedPublic = crypto.createPublicKey(dsaPrivateKeyObject);
+assert.strictEqual(dsaDerivedPublic.asymmetricKeyType, 'dsa');
+assert.strictEqual(crypto.verify('sha256', Buffer.from(message), dsaDerivedPublic,
+  dsaDerSignature), true);
+console.log('dsa keyobject sign verify:', true);
+
+assert.throws(() => crypto.createPrivateKey(invalidDsaPrivateKey), {
   code: 'ERR_OSSL_UNSUPPORTED',
   message: /dsa/
 });
-console.log('unsupported dsa import errors:', true);
+console.log('unsupported asymmetric import errors:', true);
 
 let asyncSignAfterCall = false;
 const asyncSignReturn = crypto.sign('sha256', Buffer.from(message), privateKeyObject,
