@@ -1,0 +1,8 @@
+"=== string slice integral floats ==="
+["0", "a", 97, "h", 104]
+"=== UTF-8 string slice integral floats ==="
+["é", 233, 233]
+"=== array slice integral floats ==="
+[20, 30, 30, 40]
+"=== fractional float indices reject ==="
+[error, error]

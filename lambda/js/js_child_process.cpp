@@ -1676,13 +1676,23 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         Item err = make_uv_spawn_error(r, req.file, make_spawn_error_args_array(req.args));
         schedule_spawn_error(obj, err);
         if (req.ipc) install_ipc_legacy_surface(obj);
+        // uv_spawn can fail after some stdio/process handles were initialized.
+        // Close every live handle through libuv so the loop queue is not left
+        // pointing at a freed JsSpawnProcess during later batch cleanup.
+        if (sp->stdin_pipe_active) uv_close((uv_handle_t*)&sp->stdin_pipe, spawn_handle_close_cb);
         if (sp->stdout_pipe_active) uv_close((uv_handle_t*)&sp->stdout_pipe, spawn_handle_close_cb);
         if (sp->stderr_pipe_active) uv_close((uv_handle_t*)&sp->stderr_pipe, spawn_handle_close_cb);
         if (sp->ipc_pipe_active) {
             sp->ipc_pipe_active = false;
             uv_close((uv_handle_t*)&sp->ipc_pipe, spawn_handle_close_cb);
         }
-        sp->handles_closed++;
+        if (sp->process.type == UV_PROCESS && sp->process.loop == loop) {
+            if (!uv_is_closing((uv_handle_t*)&sp->process)) {
+                uv_close((uv_handle_t*)&sp->process, spawn_handle_close_cb);
+            }
+        } else {
+            sp->handles_closed++;
+        }
         if (sp->handles_closed >= sp->handles_expected) mem_free(sp);
         return obj;
     }

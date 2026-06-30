@@ -13,6 +13,7 @@ These rules MUST be followed. Violations are considered errors.
 9. Follow C++17 standard. Start each log line with a distinct prefix/phrase for easy searching.
 10. **NEVER use debug build for performance testing**. Use release build (`make release`).
 11. **In `radiant/` layout code, NEVER use `int` for position/dimension variables**. All layout dimensions are `float`. If an `(int)` cast is truly needed (e.g., string length, repeat count), mark it with `// INT_CAST_OK: <reason>`. Run `make check-int-cast` to verify.
+12. When fixing a bug, ALWAYS add a brief code comment at the fix point explaining the root cause or invariant being protected. Do not add generic narration.
 
 | DON'T | DO |
 |-------|-----|
@@ -124,7 +125,7 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 - **Memory**: Use `pool_calloc()`, `arena_alloc()` for Lambda objects. Use `MarkBuilder`/`MarkReader` for constructing/reading Lambda data structures.
 - **Logging**: Use `log_debug()`/`log_info()`/`log_error()` from `lib/log.h` → outputs to `./log.txt`
 - **Naming**: `snake_case` for C/C++ functions, `PascalCase` for classes
-- **Comments**: Start inline comments in lowercase: `// process the next token`
+- **Comments**: Start inline comments in lowercase: `// process the next token`. For bug fixes, add a short comment at the fix point explaining why the code is necessary, especially for lifecycle, ownership, memory, async, batching, parser, or platform edge cases. Prefer root-cause comments over restating what the code does.
 - **Error handling**: Return `ItemNull` or `ItemError`, log errors with `log_error()`
 
 ## Key Entry Points
