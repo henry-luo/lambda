@@ -193,6 +193,24 @@ assert.strictEqual(crypto.createVerify('sha256')
   .verify({ key: generated.publicKey, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: 20 }, generatedSignature), true);
 console.log('rsa generateKeyPairSync pss:', true);
 
+const generatedSmall = crypto.generateKeyPairSync('rsa', {
+  modulusLength: 512
+});
+assert.strictEqual(generatedSmall.publicKey.type, 'public');
+assert.strictEqual(generatedSmall.privateKey.type, 'private');
+assert.strictEqual(generatedSmall.publicKey.asymmetricKeyType, 'rsa');
+assert.strictEqual(generatedSmall.publicKey.asymmetricKeyDetails.modulusLength, 512);
+assert.strictEqual(generatedSmall.privateKey.asymmetricKeyDetails.publicExponent.toString(), '65537');
+console.log('rsa generateKeyPairSync 512 keyobjects:', true);
+
+const generatedSmallSignature = crypto.createSign('sha256')
+  .update(message)
+  .sign(generatedSmall.privateKey);
+assert.strictEqual(crypto.createVerify('sha256')
+  .update(message)
+  .verify(generatedSmall.publicKey, generatedSmallSignature), true);
+console.log('rsa generateKeyPairSync 512 sign verify:', true);
+
 const ecPrivateKey = [
   '-----BEGIN PRIVATE KEY-----',
   'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgDxBsPQPIgMuMyQbx',

@@ -14,6 +14,23 @@ static bool jm_test262_fast_paths_enabled(JsMirTranspiler* mt) {
            strstr(mt->filename, "test/js262/test/") != NULL;
 }
 
+static bool jm_is_proto_literal_key(JsAstNode* key) {
+    if (!key) return false;
+    if (key->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* id = (JsIdentifierNode*)key;
+        return id->name && id->name->len == 9 &&
+            memcmp(id->name->chars, "__proto__", 9) == 0;
+    }
+    if (key->node_type == JS_AST_NODE_LITERAL) {
+        JsLiteralNode* literal = (JsLiteralNode*)key;
+        String* value = literal->literal_type == JS_LITERAL_STRING ?
+            literal->value.string_value : NULL;
+        return value && value->len == 9 &&
+            memcmp(value->chars, "__proto__", 9) == 0;
+    }
+    return false;
+}
+
 static bool jm_load_ic_enabled() {
     static int enabled = -1;
     if (enabled < 0) {
@@ -11927,13 +11944,8 @@ MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
             bool is_proto_literal = false;
             if (!p->computed && !p->method && !p->is_getter && !p->is_setter &&
                 !p->shorthand &&
-                p->key && p->value && p->key != p->value &&
-                p->key->node_type == JS_AST_NODE_IDENTIFIER) {
-                JsIdentifierNode* k_id = (JsIdentifierNode*)p->key;
-                if (k_id->name && k_id->name->len == 9 &&
-                    memcmp(k_id->name->chars, "__proto__", 9) == 0) {
-                    is_proto_literal = true;
-                }
+                p->key && p->value && p->key != p->value) {
+                is_proto_literal = jm_is_proto_literal_key(p->key);
             }
             // function name inference from object property key
             if (!is_proto_literal && p->value &&

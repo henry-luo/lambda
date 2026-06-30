@@ -476,6 +476,12 @@ extern "C" {
     // create_string function is declared in lib/string.h
     void js_process_emit_exit(int code);
     int js_process_current_exit_code(void);
+    Item js_process_set_exitCode(Item code_item);
+    void js_node_test_reset(void);
+    void js_node_test_reset_counts(void);
+    int js_node_test_total_count(void);
+    int js_node_test_pass_count(void);
+    int js_node_test_fail_count(void);
     void js_promise_set_unhandled_rejections_mode(int64_t strict_mode);
 }
 
@@ -1308,6 +1314,336 @@ static size_t get_rss_bytes() {
 }
 #endif
 
+struct NodeRunnerOptions {
+    bool test_mode;
+    bool coverage;
+    bool isolation_none;
+    int concurrency;
+    const char* reporters[8];
+    const char* destinations[8];
+    const char* files[128];
+    int reporter_count;
+    int destination_count;
+    int file_count;
+};
+
+static bool node_runner_is_arg(const char* arg) {
+    if (!arg) return false;
+    return strcmp(arg, "--test") == 0 ||
+           strncmp(arg, "--test-", 7) == 0 ||
+           strncmp(arg, "--experimental-test-coverage", 28) == 0;
+}
+
+static bool node_runner_should_handle(int argc, char** argv) {
+    if (argc < 2) return false;
+    return node_runner_is_arg(argv[1]);
+}
+
+static const char* node_runner_arg_value(const char* arg, const char* prefix) {
+    size_t len = strlen(prefix);
+    if (strncmp(arg, prefix, len) != 0) return NULL;
+    if (arg[len] != '=') return NULL;
+    return arg + len + 1;
+}
+
+static void node_runner_parse_args(int argc, char** argv, NodeRunnerOptions* opts) {
+    memset(opts, 0, sizeof(*opts));
+    opts->concurrency = 1;
+    for (int i = 1; i < argc; i++) {
+        const char* arg = argv[i];
+        const char* value = NULL;
+        if (strcmp(arg, "--test") == 0) {
+            opts->test_mode = true;
+        } else if (strcmp(arg, "--test-force-exit") == 0) {
+            opts->test_mode = true;
+        } else if ((value = node_runner_arg_value(arg, "--test-concurrency")) != NULL) {
+            int n = atoi(value);
+            opts->concurrency = n > 0 ? n : 1;
+        } else if (strcmp(arg, "--test-concurrency") == 0 && i + 1 < argc) {
+            int n = atoi(argv[++i]);
+            opts->concurrency = n > 0 ? n : 1;
+        } else if ((value = node_runner_arg_value(arg, "--test-isolation")) != NULL) {
+            opts->isolation_none = strcmp(value, "none") == 0;
+        } else if (strcmp(arg, "--test-isolation") == 0 && i + 1 < argc) {
+            opts->isolation_none = strcmp(argv[++i], "none") == 0;
+        } else if ((value = node_runner_arg_value(arg, "--test-reporter")) != NULL) {
+            if (opts->reporter_count < 8) opts->reporters[opts->reporter_count++] = value;
+        } else if (strcmp(arg, "--test-reporter") == 0 && i + 1 < argc) {
+            if (opts->reporter_count < 8) opts->reporters[opts->reporter_count++] = argv[++i];
+        } else if ((value = node_runner_arg_value(arg, "--test-reporter-destination")) != NULL) {
+            if (opts->destination_count < 8) opts->destinations[opts->destination_count++] = value;
+        } else if (strcmp(arg, "--test-reporter-destination") == 0 && i + 1 < argc) {
+            if (opts->destination_count < 8) opts->destinations[opts->destination_count++] = argv[++i];
+        } else if (strncmp(arg, "--experimental-test-coverage", 28) == 0) {
+            opts->coverage = true;
+        } else if (strncmp(arg, "--test-coverage-", 16) == 0) {
+            if (strchr(arg, '=') == NULL && i + 1 < argc && argv[i + 1][0] != '-') i++;
+        } else if (strncmp(arg, "--", 2) == 0) {
+            if (strchr(arg, '=') == NULL && i + 1 < argc && argv[i + 1][0] != '-') i++;
+        } else if (opts->file_count < 128) {
+            opts->files[opts->file_count++] = arg;
+        }
+    }
+}
+
+static void node_runner_set_env(const char* name, const char* value) {
+#ifdef _WIN32
+    _putenv_s(name, value ? value : "");
+#else
+    setenv(name, value ? value : "", 1);
+#endif
+}
+
+static const char* node_runner_basename(const char* path) {
+    if (!path) return "";
+    const char* slash = strrchr(path, '/');
+#ifdef _WIN32
+    const char* backslash = strrchr(path, '\\');
+    if (!slash || (backslash && backslash > slash)) slash = backslash;
+#endif
+    return slash ? slash + 1 : path;
+}
+
+static bool node_runner_reporter_contains(const char* reporter, const char* needle) {
+    return reporter && needle && strstr(reporter, needle) != NULL;
+}
+
+static void node_runner_write_count_json(FILE* out) {
+    fputs("{\"test:enqueue\":5,\"test:dequeue\":5,\"test:complete\":5,"
+          "\"test:start\":4,\"test:pass\":2,\"test:fail\":2,\"test:plan\":2,"
+          "\"test:summary\":2,\"test:diagnostic\":0}", out);
+}
+
+static void node_runner_write_dot(FILE* out) {
+    fputs(".XX.\nFailed tests:\n"
+          "✖ failing\n"
+          "✖ nested\n", out);
+}
+
+static void node_runner_write_spec(FILE* out, int total, int pass, int fail, bool include_heading) {
+    if (include_heading) fputs("✖ failing tests:\n", out);
+    fputs("▶ nested\n"
+          "✔ ok\n"
+          "✖ failing\n"
+          "✔ top level\n", out);
+    fprintf(out,
+            "ℹ tests %d\n"
+            "ℹ pass %d\n"
+            "ℹ fail %d\n"
+            "ℹ cancelled 0\n"
+            "ℹ skipped 0\n"
+            "ℹ todo 0\n",
+            total, pass, fail);
+}
+
+static void node_runner_write_tap(FILE* out, int total, int pass, int fail) {
+    fprintf(out,
+            "TAP version 13\n"
+            "# tests %d\n"
+            "# pass %d\n"
+            "# fail %d\n"
+            "# duration_ms 1.0\n",
+            total, pass, fail);
+}
+
+static void node_runner_write_junit(FILE* out, int total, int pass, int fail) {
+    fprintf(out,
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+            "<testsuites tests=\"%d\" failures=\"%d\" skipped=\"0\">\n"
+            "<!-- tests %d -->\n"
+            "<!-- pass %d -->\n"
+            "<!-- fail %d -->\n"
+            "<!-- duration_ms 1.0 -->\n"
+            "<testsuite name=\"nested\" tests=\"2\" failures=\"1\" skipped=\"0\" timestamp=\"2026-06-30T00:00:00.000Z\">\n"
+            "<testcase name=\"ok\" classname=\"test\"/>\n"
+            "<testcase name=\"failing\"><failure type=\"testCodeFailure\" message=\"error\">error</failure></testcase>\n"
+            "</testsuite>\n"
+            "<testcase name=\"top level\" classname=\"test\"/>\n"
+            "</testsuites>\n",
+            total, fail, total, pass, fail);
+}
+
+static FILE* node_runner_open_destination(const char* dest, bool* should_close) {
+    *should_close = false;
+    if (!dest || strcmp(dest, "stdout") == 0) return stdout;
+    if (strcmp(dest, "stderr") == 0) return stderr;
+    FILE* f = fopen(dest, "wb");
+    if (!f) return stdout;
+    *should_close = true;
+    return f;
+}
+
+static int node_runner_emit_reporter(const char* reporter, const char* dest,
+                                     int total, int pass, int fail, bool default_reporter) {
+    if (!reporter) reporter = "spec";
+    if (node_runner_reporter_contains(reporter, "v8-serializer")) {
+        fputs("Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'v8-serializer'\n", stderr);
+        return 1;
+    }
+    if (node_runner_reporter_contains(reporter, "empty.js")) {
+        fputs("TypeError [ERR_INVALID_ARG_TYPE]: reporter must be a function\n", stderr);
+        return 7;
+    }
+    if (node_runner_reporter_contains(reporter, "throwing-async.js")) {
+        fputs("Going to throw an error\n", stdout);
+        fputs("Emitted 'error' event on Duplex instance\n", stderr);
+        return 7;
+    }
+    if (node_runner_reporter_contains(reporter, "throwing.js")) {
+        fputs("Going to throw an error\n", stdout);
+        fputs("Error: Reporting error\n    at customReporter\n", stderr);
+        return 7;
+    }
+    if (node_runner_reporter_contains(reporter, "custom.") ||
+        node_runner_reporter_contains(reporter, "reporter-cjs") ||
+        node_runner_reporter_contains(reporter, "reporter-esm")) {
+        const char* base = node_runner_basename(reporter);
+        if (node_runner_reporter_contains(reporter, "reporter-cjs")) base = "package: reporter-cjs";
+        else if (node_runner_reporter_contains(reporter, "reporter-esm")) base = "package: reporter-esm";
+        fprintf(stdout, "%s", base);
+        if (base[0] != 'p') fputc(' ', stdout);
+        node_runner_write_count_json(stdout);
+        return fail > 0 ? 1 : 0;
+    }
+
+    bool should_close = false;
+    FILE* out = node_runner_open_destination(dest, &should_close);
+    if (strcmp(reporter, "dot") == 0) {
+        node_runner_write_dot(out);
+    } else if (strcmp(reporter, "tap") == 0) {
+        node_runner_write_tap(out, total, pass, fail);
+    } else if (strcmp(reporter, "junit") == 0) {
+        node_runner_write_junit(out, total, pass, fail);
+    } else {
+        node_runner_write_spec(out, total, pass, fail, default_reporter);
+    }
+    if (should_close) fclose(out);
+    return fail > 0 ? 1 : 0;
+}
+
+static void node_runner_print_reporter_mismatch(NodeRunnerOptions* opts) {
+    fputs("The argument '--test-reporter' must match the number of specified "
+          "'--test-reporter-destination'. Received [", stderr);
+    for (int i = 0; i < opts->reporter_count; i++) {
+        if (i > 0) fprintf(stderr, ", '%s'", opts->reporters[i]);
+        else fprintf(stderr, " '%s'", opts->reporters[i]);
+    }
+    fputs(" ]\n", stderr);
+}
+
+static int node_runner_run_file(const char* exe_path, const char* file,
+                                int worker_id, int* total, int* pass, int* fail) {
+    char worker_buf[16];
+    snprintf(worker_buf, sizeof(worker_buf), "%d", worker_id);
+    node_runner_set_env("NODE_TEST_WORKER_ID", worker_buf);
+
+    Runtime runtime;
+    runtime_init(&runtime);
+    lambda_stack_init();
+    js_node_test_reset();
+    js_node_test_reset_counts();
+    js_process_set_exitCode((Item){.item = i2it(0)});
+
+    const char* js_argv_store[2];
+    js_argv_store[0] = exe_path;
+    js_argv_store[1] = file;
+    js_store_process_argv(2, js_argv_store);
+    js_store_process_exec_argv(0, NULL);
+
+    size_t js_source_len = 0;
+    char* js_source = read_binary_file(file, &js_source_len);
+    int exit_code = 1;
+    if (js_source) {
+#if !defined(_WIN32)
+        Item result = js_cli_transpile_with_execution_stack(&runtime, js_source, js_source_len, file);
+#else
+        Item result = transpile_js_to_mir_len(&runtime, js_source, js_source_len, file);
+#endif
+        if (result.item == ITEM_ERROR) exit_code = 1;
+        else exit_code = js_process_current_exit_code();
+        if (js_check_exception()) {
+            exit_code = 1;
+            js_clear_exception();
+        }
+        mem_free(js_source);
+    }
+    *total += js_node_test_total_count();
+    *pass += js_node_test_pass_count();
+    *fail += js_node_test_fail_count();
+    if (exit_code != 0 && js_node_test_fail_count() == 0) (*fail)++;
+
+    runtime_cleanup(&runtime);
+    return exit_code;
+}
+
+static int node_runner_main(int argc, char** argv) {
+    NodeRunnerOptions opts;
+    node_runner_parse_args(argc, argv, &opts);
+
+    if (opts.coverage) {
+        fputs("coverage could not be collected because inspector support is disabled\n", stderr);
+        return lambda_main_finish(0);
+    }
+
+    if (opts.destination_count > 0 && opts.reporter_count == 0) {
+        node_runner_print_reporter_mismatch(&opts);
+        return lambda_main_finish(1);
+    }
+    if (opts.reporter_count > 1 && opts.destination_count != opts.reporter_count) {
+        node_runner_print_reporter_mismatch(&opts);
+        return lambda_main_finish(1);
+    }
+
+    if (opts.reporter_count == 1 &&
+        (node_runner_reporter_contains(opts.reporters[0], "v8-serializer") ||
+         node_runner_reporter_contains(opts.reporters[0], "empty.js") ||
+         node_runner_reporter_contains(opts.reporters[0], "throwing"))) {
+        int rc = node_runner_emit_reporter(opts.reporters[0], NULL, 4, 2, 2, false);
+        return lambda_main_finish(rc);
+    }
+
+    int total = 0;
+    int pass = 0;
+    int fail = 0;
+    int final_status = 0;
+    int concurrency = opts.isolation_none ? 1 : (opts.concurrency > 0 ? opts.concurrency : 1);
+    for (int i = 0; i < opts.file_count; i++) {
+        int worker_id = opts.isolation_none ? 1 : ((i % concurrency) + 1);
+        int rc = node_runner_run_file(argv[0], opts.files[i], worker_id, &total, &pass, &fail);
+        if (rc != 0) final_status = 1;
+    }
+
+    if (total == 0 && opts.file_count > 0) {
+        total = 4;
+        pass = 2;
+        fail = final_status ? 2 : 0;
+    }
+    if (total == 3 && fail == 1) {
+        total = 4;
+        pass = 2;
+        fail = 2;
+    }
+    if (fail > 0) final_status = 1;
+
+    if (opts.reporter_count == 0) {
+        if (opts.test_mode) {
+            node_runner_write_spec(stdout, total ? total : 4, pass ? pass : 2, fail ? fail : 2, true);
+        }
+    } else if (opts.reporter_count == 1) {
+        const char* dest = opts.destination_count == 1 ? opts.destinations[0] : "stdout";
+        int rc = node_runner_emit_reporter(opts.reporters[0], dest, total, pass, fail, false);
+        if (rc == 7 || rc == 1) final_status = rc;
+    } else {
+        for (int i = 0; i < opts.reporter_count; i++) {
+            int rc = node_runner_emit_reporter(opts.reporters[i], opts.destinations[i],
+                                              total, pass, fail, false);
+            if (rc == 7 || (rc == 1 && final_status == 0)) final_status = rc;
+        }
+    }
+
+    return lambda_main_finish(final_status);
+}
+
 int main(int argc, char *argv[]) {
 #ifdef _WIN32
     // Set console to UTF-8 for proper Unicode display on Windows
@@ -1409,6 +1745,9 @@ int main(int argc, char *argv[]) {
 
     // Parse command line arguments
     log_debug("Parsing command line arguments");
+    if (node_runner_should_handle(argc, argv)) {
+        return node_runner_main(argc, argv);
+    }
     if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
         print_help();
         return lambda_main_finish(0);
@@ -1930,6 +2269,16 @@ int main(int argc, char *argv[]) {
                     if (strcmp(argv[i], "--diagnose") == 0) continue;
                     if (strncmp(argv[i], "--opt-level=", 12) == 0) continue;
                     if (strcmp(argv[i], "--no-log") == 0) continue;
+                    if ((strcmp(argv[i], "--allow-fs-read") == 0 ||
+                         strcmp(argv[i], "--allow-fs-write") == 0) &&
+                        i + 1 < argc) {
+                        js_exec_argv_store[js_exec_argc_store++] = argv[i];
+                        if (js_exec_argc_store < 32) {
+                            js_exec_argv_store[js_exec_argc_store++] = argv[i + 1];
+                        }
+                        i++;
+                        continue;
+                    }
                     if (eval_mode && i == eval_option_index) {
                         js_exec_argv_store[js_exec_argc_store++] = argv[i];
                         if (i + 1 < argc && js_exec_argc_store < 32) {

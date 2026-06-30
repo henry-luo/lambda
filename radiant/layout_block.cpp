@@ -210,6 +210,94 @@ static void apply_canvas_object_view_box_auto_size(LayoutContext* lycon, ViewBlo
               block->source_loc(), lycon->block.given_width, lycon->block.given_height);
 }
 
+static float text_wrap_balance_ellipsis_width(LayoutContext* lycon) {
+    if (!lycon) return 0.0f;
+
+    if (lycon->font.font_handle) {
+        GlyphInfo ellipsis = font_get_glyph(lycon->font.font_handle, 0x2026);
+        if (ellipsis.id != 0 && ellipsis.advance_x > 0.0f) {
+            return ellipsis.advance_x;
+        }
+    }
+
+    return lycon->font.current_font_size > 0.0f ?
+        lycon->font.current_font_size * 0.5f : 8.0f;
+}
+
+static float text_wrap_balance_line_height(LayoutContext* lycon) {
+    if (!lycon) return 16.0f;
+    if (lycon->block.line_height > 0.0f) return lycon->block.line_height;
+    if (lycon->font.current_font_size > 0.0f) return lycon->font.current_font_size * 1.2f;
+    return 16.0f;
+}
+
+static int text_wrap_balance_normal_line_count(LayoutContext* lycon, ViewBlock* block,
+                                               float content_width) {
+    if (!lycon || !block || content_width <= 0.0f) return 1;
+
+    float line_height = text_wrap_balance_line_height(lycon);
+    float normal_height = calculate_max_content_height(lycon, static_cast<DomNode*>(block), content_width);
+    if (normal_height <= line_height + 0.5f) return 1;
+
+    int line_count = (int)ceilf((normal_height - 0.01f) / line_height); // INT_CAST_OK: line-count estimate for balance wrapping
+    if (line_count < 1) line_count = 1;
+    return line_count;
+}
+
+static float text_wrap_balance_measure(LayoutContext* lycon, ViewBlock* block,
+                                       float content_width) {
+    if (!lycon || !block || !block->blk || content_width <= 0.0f) return 0.0f;
+    if (lycon->block.text_wrap_style != CSS_VALUE_BALANCE) return 0.0f;
+    if (block->blk->white_space == CSS_VALUE_NOWRAP || block->blk->white_space == CSS_VALUE_PRE) return 0.0f;
+    if (block->display.inner != CSS_VALUE_FLOW && block->display.inner != CSS_VALUE_FLOW_ROOT) return 0.0f;
+
+    float max_content = calculate_max_content_width(lycon, static_cast<DomNode*>(block));
+    if (max_content <= content_width + 0.5f) return 0.0f;
+
+    float min_content = calculate_min_content_width(lycon, static_cast<DomNode*>(block));
+    if (min_content >= content_width - 0.5f) return 0.0f;
+
+    int target_lines = lycon->block.line_clamp > 0 ?
+        lycon->block.line_clamp : text_wrap_balance_normal_line_count(lycon, block, content_width);
+    if (target_lines <= 1) return 0.0f;
+
+    // CSS Text 4 permits UAs to skip balancing above a small line-count limit.
+    // Chromium and Firefox use five lines; keeping the same cap prevents balance
+    // from perturbing long documents and keeps intrinsic probing bounded.
+    if (target_lines > 5) return 0.0f;
+
+    float content_measure = max_content;
+    if (lycon->block.line_clamp > 0) {
+        content_measure += text_wrap_balance_ellipsis_width(lycon);
+    }
+
+    float lower_bound = content_measure / (float)target_lines;
+    if (lower_bound < min_content) lower_bound = min_content;
+    if (lower_bound >= content_width - 0.5f) return 0.0f;
+
+    float low = lower_bound;
+    float high = content_width;
+    for (int step = 0; step < 12; step++) {
+        float mid = (low + high) * 0.5f;
+        float measured_height = calculate_max_content_height(lycon, static_cast<DomNode*>(block), mid);
+        int line_count = (int)ceilf((measured_height - 0.01f) / text_wrap_balance_line_height(lycon)); // INT_CAST_OK: probe result as line count
+        if (line_count <= target_lines) {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+
+    float balanced = ceilf(high * 2.0f) * 0.5f;
+    if (balanced < lower_bound) balanced = lower_bound;
+    if (balanced < min_content) balanced = min_content;
+    if (balanced >= content_width - 0.5f) return 0.0f;
+
+    log_debug("%s [TEXT-WRAP-BALANCE] content=%.1f max=%.1f min=%.1f lines=%d balanced=%.1f",
+              block->source_loc(), content_width, max_content, min_content, target_lines, balanced);
+    return balanced;
+}
+
 static bool extract_aspect_ratio_number(const char* text, double* out_value) {
     if (!text || !out_value) return false;
     const char* cursor = text;
@@ -4656,6 +4744,13 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     lycon->block.line_clamp_last_line_ascender = 0.0f;
     lycon->block.line_clamp_last_line_max_ascender = 0.0f;
     lycon->block.line_clamp_last_line_max_descender = 0.0f;
+    CssEnum inherited_text_wrap_style = lycon->block.parent ?
+        lycon->block.parent->text_wrap_style : CSS_VALUE_AUTO;
+    if (!inherited_text_wrap_style) inherited_text_wrap_style = CSS_VALUE_AUTO;
+    lycon->block.text_wrap_style = (block->blk && block->blk->text_wrap_style) ?
+        block->blk->text_wrap_style : inherited_text_wrap_style;
+    lycon->block.balance_wrap_active = false;
+    lycon->block.balance_wrap_width = 0.0f;
     if (block->blk) {
         block->blk->line_clamp_inherited = false;
         block->blk->line_clamped = false;
@@ -4663,6 +4758,14 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         block->blk->line_clamp_last_line_ascender = 0.0f;
         block->blk->line_clamp_last_line_max_ascender = 0.0f;
         block->blk->line_clamp_last_line_max_descender = 0.0f;
+    }
+    if (lycon->block.parent && lycon->block.parent->line_clamp > 0 &&
+        !lycon->block.parent->line_clamped && lycon->block.line_clamp == 0 && block->blk) {
+        lycon->block.line_clamp = lycon->block.parent->line_clamp;
+        lycon->block.line_number = lycon->block.parent->line_number;
+        block->blk->line_clamp_inherited = true;
+        log_debug("[LINE-CLAMP] %s inherited ancestor clamp before inline setup: line=%d limit=%d",
+                  block->source_loc(), lycon->block.line_number, lycon->block.line_clamp);
     }
 
     // Resolve text-indent: percentage needs containing block width (now available)
@@ -4775,6 +4878,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     // These define the nominal line box boundaries for this block
     lycon->line.left = inner_left;
     lycon->line.right = inner_right;
+    lycon->line.align_left = inner_left;
+    lycon->line.align_right = inner_right;
 
     // Initialize effective bounds to match container bounds
     // line_reset() will adjust these for floats if needed
@@ -4834,6 +4939,26 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
                       lycon->block.init_ascender, lycon->block.init_descender);
         }
     }
+
+    float balance_width = text_wrap_balance_measure(lycon, block, content_width);
+    if (balance_width > 0.0f) {
+        lycon->block.balance_wrap_active = true;
+        lycon->block.balance_wrap_width = balance_width;
+        lycon->line.left = inner_left;
+        lycon->line.right = inner_left + balance_width;
+        lycon->line.align_left = inner_left;
+        lycon->line.align_right = inner_right;
+        lycon->line.effective_left = lycon->line.left;
+        lycon->line.effective_right = lycon->line.right;
+        lycon->line.advance_x = lycon->line.left;
+        lycon->line.has_float_intrusion = false;
+        lycon->line.inline_start_edge_pending = 0;
+        lycon->block.is_first_line = true;
+        line_reset(lycon);
+        log_debug("%s [TEXT-WRAP-BALANCE] wrap_right=%.1f align_right=%.1f",
+                  block->source_loc(), lycon->line.right, lycon->line.align_right);
+    }
+
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
     const FontMetrics* fm = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle) : NULL;
     float font_height = fm ? fm->hhea_line_height : 0;
@@ -6607,7 +6732,21 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 }
                 inner_left += block->bound->padding.left;
             }
-            line_init(lycon, inner_left, inner_left + block->content_width);
+            float inner_right = inner_left + block->content_width;
+            float balance_width = text_wrap_balance_measure(lycon, block, block->content_width);
+            if (balance_width > 0.0f) {
+                lycon->block.balance_wrap_active = true;
+                lycon->block.balance_wrap_width = balance_width;
+                line_init(lycon, inner_left, inner_left + balance_width);
+                lycon->line.align_left = inner_left;
+                lycon->line.align_right = inner_right;
+                log_debug("%s [TEXT-WRAP-BALANCE] shrink-to-fit wrap_right=%.1f align_right=%.1f",
+                          block->source_loc(), lycon->line.right, lycon->line.align_right);
+            } else {
+                lycon->block.balance_wrap_active = false;
+                lycon->block.balance_wrap_width = 0.0f;
+                line_init(lycon, inner_left, inner_right);
+            }
         }
 
         // CSS 2.1 §10.3.3: Re-resolve auto margins after shrink-to-fit changed the

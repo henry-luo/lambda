@@ -9913,6 +9913,23 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_TEXT_WRAP_STYLE: {
+            log_debug("[CSS] Processing text-wrap-style property");
+            if (!span->blk) {
+                span->blk = alloc_block_prop(lycon);
+            }
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
+                    span->blk->text_wrap_style = val;
+                    log_debug("[CSS] text-wrap-style: %s -> 0x%04X",
+                             css_enum_info(value->data.keyword)->name, val);
+                }
+            }
+            break;
+        }
+
         case CSS_PROPERTY_TEXT_OVERFLOW: {
             log_debug("[CSS] Processing text-overflow property");
             if (!block || !block->blk) {

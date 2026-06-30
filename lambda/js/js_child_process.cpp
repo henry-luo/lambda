@@ -8,6 +8,7 @@
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_error_codes.h"
+#include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -15,11 +16,15 @@
 
 #include <cstring>
 #include <cstdlib>
+#include <climits>
 #include "../../lib/mem.h"
 
 #ifndef _WIN32
 #include <signal.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <unistd.h>
 #else
 #include <process.h>
 // On Windows, pclose() returns the exit code directly
@@ -31,6 +36,7 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" void js_next_tick_enqueue(Item callback);
 extern "C" Item js_json_parse(Item str_item);
 extern "C" Item js_json_stringify(Item value);
+extern "C" Item js_buffer_from_bytes(const char* data, int len);
 
 // =============================================================================
 // Helpers
@@ -2058,6 +2064,46 @@ static void cp_append_env_assignment(char* cmd, int cmd_size, int* pos, const ch
     cmd[*pos < cmd_size ? *pos : cmd_size - 1] = '\0';
 }
 
+static void cp_append_env_assignment_value(char* cmd, int cmd_size, int* pos, Item key, Item value) {
+    if (!cmd || !pos || get_type_id(key) != LMD_TYPE_STRING) return;
+    if (is_nullish_item(value)) return;
+    if (get_type_id(value) != LMD_TYPE_STRING) value = js_to_string(value);
+    if (get_type_id(value) != LMD_TYPE_STRING) return;
+    String* ks = it2s(key);
+    String* vs = it2s(value);
+    if (!ks || !vs || ks->len == 0 || *pos >= cmd_size - 1) return;
+    for (size_t i = 0; i < ks->len && *pos < cmd_size - 1; i++) {
+        char ch = ks->chars[i];
+        if (ch == '=' || ch == '\0') return;
+        cmd[(*pos)++] = ch;
+    }
+    if (*pos < cmd_size - 1) cmd[(*pos)++] = '=';
+    if (*pos < cmd_size - 1) cmd[(*pos)++] = '\'';
+    for (size_t i = 0; i < vs->len && *pos < cmd_size - 1; i++) {
+        char ch = vs->chars[i];
+        if (ch == '\'') {
+            const char* esc = "'\\''";
+            for (int j = 0; esc[j] && *pos < cmd_size - 1; j++) cmd[(*pos)++] = esc[j];
+        } else {
+            cmd[(*pos)++] = ch;
+        }
+    }
+    if (*pos < cmd_size - 1) cmd[(*pos)++] = '\'';
+    if (*pos < cmd_size - 1) cmd[(*pos)++] = ' ';
+    cmd[*pos < cmd_size ? *pos : cmd_size - 1] = '\0';
+}
+
+static void cp_append_env_assignments(char* cmd, int cmd_size, int* pos, Item env) {
+    if (!cmd || !pos || !is_object_item(env)) return;
+    Item keys = js_object_keys(env);
+    int64_t key_count = get_type_id(keys) == LMD_TYPE_ARRAY ? js_array_length(keys) : 0;
+    for (int64_t i = 0; i < key_count; i++) {
+        Item key = js_array_get_int(keys, i);
+        Item value = js_property_get(env, key);
+        cp_append_env_assignment_value(cmd, cmd_size, pos, key, value);
+    }
+}
+
 static bool cp_spawnSync_prepare_lambda_snapshot(const char* cmd, Item args_item, Item options_item,
                                                  char* full_cmd, int full_cmd_size) {
     if (!is_lambda_executable_path(cmd) || !cp_args_contain_string(args_item, "--snapshot-blob")) {
@@ -2114,16 +2160,29 @@ static int cp_spawnSync_append_args(char* full_cmd, int full_cmd_size, int pos, 
     int64_t alen = js_array_length(args_item);
     for (int64_t i = 0; i < alen && pos < full_cmd_size - 1; i++) {
         Item arg = js_array_get_int(args_item, i);
+        if (get_type_id(arg) != LMD_TYPE_STRING) {
+            arg = js_to_string(arg);
+            if (js_exception_pending) return pos;
+        }
         if (get_type_id(arg) != LMD_TYPE_STRING) continue;
         append_shell_arg(full_cmd, full_cmd_size, &pos, arg);
     }
     return pos;
 }
 
-static bool cp_spawnSync_prepare_shell_command(const char* cmd, Item args_item,
+static bool cp_spawnSync_prepare_shell_command(const char* cmd, Item args_item, Item options_item,
                                                char* full_cmd, int full_cmd_size, int* pos_out) {
     if (!cmd || !full_cmd || !pos_out || full_cmd_size <= 0) return false;
     int pos = 0;
+    char cwd_buf[1024];
+    if (cp_get_string_prop(options_item, "cwd", cwd_buf, (int)sizeof(cwd_buf))) {
+        pos += snprintf(full_cmd + pos, (size_t)(full_cmd_size - pos), "cd ");
+        Item cwd_item = make_string_item(cwd_buf);
+        append_shell_arg(full_cmd, full_cmd_size, &pos, cwd_item);
+        pos += snprintf(full_cmd + pos, (size_t)(full_cmd_size - pos), " && ");
+    }
+    Item env = is_object_item(options_item) ? js_property_get(options_item, make_string_item("env")) : make_js_undefined();
+    cp_append_env_assignments(full_cmd, full_cmd_size, &pos, env);
     Item cmd_item = make_string_item(cmd);
     if (!append_shell_arg(full_cmd, full_cmd_size, &pos, cmd_item)) return false;
     if (should_spawn_lambda_js_mode(cmd, args_item)) {
@@ -2139,6 +2198,300 @@ static bool cp_spawnSync_prepare_shell_command(const char* cmd, Item args_item,
     return true;
 }
 
+static char* cp_read_file_to_buffer(const char* path, size_t* out_len) {
+    if (out_len) *out_len = 0;
+    FILE* fp = fopen(path, "rb");
+    if (!fp) return NULL;
+    char* out = NULL;
+    size_t len = 0;
+    size_t cap = 0;
+    char chunk[4096];
+    size_t nread = 0;
+    while ((nread = fread(chunk, 1, sizeof(chunk), fp)) > 0) {
+        if (len + nread >= cap) {
+            cap = cap == 0 ? 4096 : cap * 2;
+            while (cap < len + nread + 1) cap *= 2;
+            out = (char*)mem_realloc(out, cap, MEM_CAT_JS_RUNTIME);
+        }
+        memcpy(out + len, chunk, nread);
+        len += nread;
+    }
+    fclose(fp);
+    if (!out) {
+        out = (char*)mem_alloc(1, MEM_CAT_JS_RUNTIME);
+        if (out) out[0] = '\0';
+    } else {
+        out[len] = '\0';
+    }
+    if (out_len) *out_len = len;
+    return out;
+}
+
+static bool cp_sync_output_wants_string(Item options_item) {
+    if (!is_object_item(options_item)) return false;
+    Item encoding = js_property_get(options_item, make_string_item("encoding"));
+    if (is_nullish_item(encoding)) return false;
+    if (get_type_id(encoding) != LMD_TYPE_STRING) return false;
+    String* s = it2s(encoding);
+    if (s->len == 6 && memcmp(s->chars, "buffer", 6) == 0) return false;
+    return true;
+}
+
+static Item cp_sync_make_output_item(const char* data, size_t len, bool as_string) {
+    int item_len = len > (size_t)INT32_MAX ? INT32_MAX : (int)len;
+    if (as_string) {
+        return data ? make_string_item(data, item_len) : make_string_item("");
+    }
+    return js_buffer_from_bytes(data ? data : "", item_len);
+}
+
+static bool cp_sync_input_bytes(Item input, const char** data, size_t* len) {
+    if (!data || !len) return false;
+    *data = NULL;
+    *len = 0;
+    TypeId type = get_type_id(input);
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(input);
+        *data = s->chars;
+        *len = s->len;
+        return true;
+    }
+    if (js_is_typed_array(input)) {
+        *data = (const char*)js_typed_array_current_data_ptr(input);
+        int byte_len = js_typed_array_byte_length(input);
+        *len = byte_len > 0 ? (size_t)byte_len : 0;
+        return true;
+    }
+    if (js_is_arraybuffer(input)) {
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(input);
+        if (!ab || ab->detached) return true;
+        *data = (const char*)ab->data;
+        *len = ab->byte_length > 0 ? (size_t)ab->byte_length : 0;
+        return true;
+    }
+    if (js_is_dataview(input)) {
+        JsDataView* dv = js_get_dataview_ptr(input);
+        if (!dv || !dv->buffer || dv->buffer->detached) return true;
+        int byte_len = dv->length_tracking ? dv->buffer->byte_length - dv->byte_offset : dv->byte_length;
+        if (byte_len < 0 || dv->byte_offset < 0 ||
+                dv->byte_offset > dv->buffer->byte_length ||
+                dv->byte_offset + byte_len > dv->buffer->byte_length) {
+            return true;
+        }
+        *data = (const char*)dv->buffer->data + dv->byte_offset;
+        *len = byte_len > 0 ? (size_t)byte_len : 0;
+        return true;
+    }
+    return false;
+}
+
+static bool cp_sync_write_input_file(Item options_item, const char* input_path) {
+    if (!is_object_item(options_item) || !input_path) return true;
+    Item input = js_property_get(options_item, make_string_item("input"));
+    if (is_nullish_item(input)) return true;
+    const char* data = NULL;
+    size_t len = 0;
+    if (!cp_sync_input_bytes(input, &data, &len)) {
+        js_throw_invalid_arg_type("options.input", "string, Buffer, TypedArray, DataView, or ArrayBuffer", input);
+        return false;
+    }
+    FILE* fp = fopen(input_path, "wb");
+    if (!fp) {
+        log_error("child_process: spawnSync: failed to open stdin temp file");
+        return false;
+    }
+    if (len > 0 && data) {
+        size_t wrote = fwrite(data, 1, len, fp);
+        if (wrote != len) {
+            fclose(fp);
+            log_error("child_process: spawnSync: failed to write stdin temp file");
+            return false;
+        }
+    }
+    fclose(fp);
+    return true;
+}
+
+static bool cp_sync_has_input(Item options_item) {
+    if (!is_object_item(options_item)) return false;
+    Item input = js_property_get(options_item, make_string_item("input"));
+    return !is_nullish_item(input);
+}
+
+static bool cp_sync_normalize_stdio(Item options_item, int stdio_mode[3]) {
+    if (!stdio_mode) return false;
+    stdio_mode[0] = 0;
+    stdio_mode[1] = 0;
+    stdio_mode[2] = 0;
+    if (!is_object_item(options_item)) return true;
+
+    SpawnRequest req;
+    memset(&req, 0, sizeof(req));
+    req.options = options_item;
+    req.stdio_mode[0] = 0;
+    req.stdio_mode[1] = 0;
+    req.stdio_mode[2] = 0;
+    if (!normalize_stdio_options(&req)) return false;
+    stdio_mode[0] = req.stdio_mode[0];
+    stdio_mode[1] = req.stdio_mode[1];
+    stdio_mode[2] = req.stdio_mode[2];
+    return true;
+}
+
+static Item cp_sync_stdio_output_item(int stdio_mode, const char* data, size_t len, bool as_string) {
+    if (stdio_mode != 0) return ItemNull;
+    return cp_sync_make_output_item(data, len, as_string);
+}
+
+static const char* cp_sync_null_device(void) {
+#ifdef _WIN32
+    return "NUL";
+#else
+    return "/dev/null";
+#endif
+}
+
+static bool cp_get_number_prop(Item obj, const char* name, double* out) {
+    if (!out || !is_object_item(obj)) return false;
+    Item value = js_property_get(obj, make_string_item(name));
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT) {
+        *out = (double)it2i(value);
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        *out = it2d(value);
+        return true;
+    }
+    return false;
+}
+
+static bool cp_get_spawn_timeout_ms(Item options_item, int64_t* timeout_ms) {
+    if (!timeout_ms) return false;
+    *timeout_ms = 0;
+    double timeout = 0.0;
+    if (!cp_get_number_prop(options_item, "timeout", &timeout)) return false;
+    if (timeout <= 0.0) return false;
+    if (timeout > 2147483647.0) timeout = 2147483647.0;
+    *timeout_ms = (int64_t)timeout;
+    return true;
+}
+
+static const char* cp_signal_name_from_number(int sig) {
+#ifndef _WIN32
+    if (sig == SIGKILL) return "SIGKILL";
+    if (sig == SIGTERM) return "SIGTERM";
+#endif
+    return "SIGTERM";
+}
+
+static int cp_get_kill_signal(Item options_item, const char** signal_name) {
+#ifndef _WIN32
+    int sig = SIGTERM;
+    const char* name = "SIGTERM";
+    if (is_object_item(options_item)) {
+        Item value = js_property_get(options_item, make_string_item("killSignal"));
+        TypeId type = get_type_id(value);
+        if (type == LMD_TYPE_INT) {
+            int requested = (int)it2i(value);
+            if (requested == SIGKILL || requested == SIGTERM) sig = requested;
+            name = cp_signal_name_from_number(sig);
+        } else if (type == LMD_TYPE_STRING) {
+            String* s = it2s(value);
+            if ((s->len == 7 && memcmp(s->chars, "SIGKILL", 7) == 0) ||
+                (s->len == 4 && memcmp(s->chars, "KILL", 4) == 0)) {
+                sig = SIGKILL;
+                name = "SIGKILL";
+            } else if ((s->len == 7 && memcmp(s->chars, "SIGTERM", 7) == 0) ||
+                       (s->len == 4 && memcmp(s->chars, "TERM", 4) == 0)) {
+                sig = SIGTERM;
+                name = "SIGTERM";
+            }
+        }
+    }
+    if (signal_name) *signal_name = name;
+    return sig;
+#else
+    if (signal_name) *signal_name = "SIGTERM";
+    return 0;
+#endif
+}
+
+#ifndef _WIN32
+static int64_t cp_now_ms(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return ((int64_t)tv.tv_sec * 1000) + ((int64_t)tv.tv_usec / 1000);
+}
+
+static int cp_spawnSync_run_shell_command(const char* full_cmd, int64_t timeout_ms,
+                                          int kill_signal, bool* timed_out) {
+    if (timed_out) *timed_out = false;
+    if (timeout_ms <= 0) return system(full_cmd);
+
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        setpgid(0, 0);
+        execl("/bin/sh", "sh", "-c", full_cmd, (char*)NULL);
+        _exit(127);
+    }
+
+    setpgid(pid, pid);
+    int status = 0;
+    int64_t deadline = cp_now_ms() + timeout_ms;
+    while (true) {
+        pid_t done = waitpid(pid, &status, WNOHANG);
+        if (done == pid) return status;
+        if (done < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        if (cp_now_ms() >= deadline) break;
+        usleep(1000);
+    }
+
+    if (timed_out) *timed_out = true;
+    kill(-pid, kill_signal);
+    int64_t kill_deadline = cp_now_ms() + 250;
+    while (true) {
+        pid_t done = waitpid(pid, &status, WNOHANG);
+        if (done == pid) return status;
+        if (done < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        if (cp_now_ms() >= kill_deadline) break;
+        usleep(1000);
+    }
+    kill(-pid, SIGKILL);
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR) return -1;
+    }
+    return status;
+}
+#else
+static int cp_spawnSync_run_shell_command(const char* full_cmd, int64_t timeout_ms,
+                                          int kill_signal, bool* timed_out) {
+    (void)timeout_ms;
+    (void)kill_signal;
+    if (timed_out) *timed_out = false;
+    return system(full_cmd);
+}
+#endif
+
+static Item cp_make_spawn_sync_timeout_error(const char* cmd, Item args_item) {
+    Item err = js_new_error(make_string_item("spawnSync ETIMEDOUT"));
+    js_property_set(err, make_string_item("code"), make_string_item("ETIMEDOUT"));
+    js_property_set(err, make_string_item("errno"), (Item){.item = i2it((int64_t)UV_ETIMEDOUT)});
+    char syscall[512];
+    snprintf(syscall, sizeof(syscall), "spawnSync %s", cmd ? cmd : "");
+    js_property_set(err, make_string_item("syscall"), make_string_item(syscall));
+    if (cmd) js_property_set(err, make_string_item("path"), make_string_item(cmd));
+    js_property_set(err, make_string_item("spawnargs"), make_spawn_error_args_array(args_item));
+    return err;
+}
+
 extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_item) {
     // build full command line for popen
     char cmd_buf[4096];
@@ -2148,49 +2501,106 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
         return ItemNull;
     }
 
+    Item effective_args = args_item;
+    Item effective_options = options_item;
+    if (is_object_item(args_item) && is_nullish_item(options_item)) {
+        effective_args = make_js_undefined();
+        effective_options = args_item;
+    }
+
     // build command string: cmd arg1 arg2 ...
     char full_cmd[8192];
     int pos = 0;
-    if (!cp_spawnSync_prepare_lambda_snapshot(cmd, args_item, options_item,
+    if (!cp_spawnSync_prepare_lambda_snapshot(cmd, effective_args, effective_options,
             full_cmd, (int)sizeof(full_cmd))) {
-        cp_spawnSync_prepare_shell_command(cmd, args_item, full_cmd,
+        cp_spawnSync_prepare_shell_command(cmd, effective_args, effective_options, full_cmd,
                                            (int)sizeof(full_cmd), &pos);
     }
 
-    // redirect stderr to a temp approach — capture stdout via popen
-    FILE* fp = popen(full_cmd, "r");
-    if (!fp) {
-        log_error("child_process: spawnSync: popen failed");
-        Item result = js_new_object();
-        js_property_set(result, make_string_item("status"), (Item){.item = i2it(-1)});
-        js_property_set(result, make_string_item("stdout"), make_string_item(""));
-        js_property_set(result, make_string_item("stderr"), make_string_item(""));
-        return result;
+    mkdir("temp", 0755);
+    char stdout_path[256];
+    char stderr_path[256];
+    char stdin_path[256];
+#ifndef _WIN32
+    long pid = (long)getpid();
+#else
+    long pid = (long)_getpid();
+#endif
+    snprintf(stdout_path, sizeof(stdout_path), "temp/js_spawn_sync_%ld_%p.out", pid, (void*)&stdout_path);
+    snprintf(stderr_path, sizeof(stderr_path), "temp/js_spawn_sync_%ld_%p.err", pid, (void*)&stderr_path);
+    snprintf(stdin_path, sizeof(stdin_path), "temp/js_spawn_sync_%ld_%p.in", pid, (void*)&stdin_path);
+    int stdio_mode[3];
+    if (!cp_sync_normalize_stdio(effective_options, stdio_mode)) {
+        return ItemNull;
+    }
+    bool has_input = cp_sync_has_input(effective_options);
+    if (has_input && !cp_sync_write_input_file(effective_options, stdin_path)) {
+        unlink(stdin_path);
+        return ItemNull;
+    }
+    int redir_pos = (int)strlen(full_cmd);
+    if (redir_pos < (int)sizeof(full_cmd) - 1) {
+        Item out_item = make_string_item(stdout_path);
+        Item err_item = make_string_item(stderr_path);
+        if (has_input && stdio_mode[0] == 0) {
+            Item in_item = make_string_item(stdin_path);
+            redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " < ");
+            append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, in_item);
+        } else if (stdio_mode[0] == 2) {
+            Item null_item = make_string_item(cp_sync_null_device());
+            redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " < ");
+            append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, null_item);
+        }
+        if (stdio_mode[1] == 0) {
+            redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " > ");
+            append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, out_item);
+        } else if (stdio_mode[1] == 2) {
+            Item null_item = make_string_item(cp_sync_null_device());
+            redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " > ");
+            append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, null_item);
+        }
+        if (stdio_mode[2] == 0) {
+            redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " 2> ");
+            append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, err_item);
+        } else if (stdio_mode[2] == 2) {
+            Item null_item = make_string_item(cp_sync_null_device());
+            redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " 2> ");
+            append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, null_item);
+        }
     }
 
-    char* out_buf = NULL;
-    size_t out_len = 0;
-    size_t out_cap = 0;
-    char chunk[4096];
-    while (fgets(chunk, sizeof(chunk), fp)) {
-        size_t clen = strlen(chunk);
-        if (out_len + clen >= out_cap) {
-            out_cap = (out_cap == 0) ? 4096 : out_cap * 2;
-            while (out_cap < out_len + clen + 1) out_cap *= 2;
-            out_buf = (char*)mem_realloc(out_buf, out_cap, MEM_CAT_JS_RUNTIME);
-        }
-        memcpy(out_buf + out_len, chunk, clen);
-        out_len += clen;
-    }
-    int status = pclose(fp);
+    int64_t timeout_ms = 0;
+    cp_get_spawn_timeout_ms(effective_options, &timeout_ms);
+    const char* timeout_signal_name = "SIGTERM";
+    int kill_signal = cp_get_kill_signal(effective_options, &timeout_signal_name);
+    bool timed_out = false;
+    int status = cp_spawnSync_run_shell_command(full_cmd, timeout_ms, kill_signal, &timed_out);
     int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 
+    size_t out_len = 0;
+    size_t err_len = 0;
+    char* out_buf = cp_read_file_to_buffer(stdout_path, &out_len);
+    char* err_buf = cp_read_file_to_buffer(stderr_path, &err_len);
+
     Item result = js_new_object();
-    js_property_set(result, make_string_item("status"), (Item){.item = i2it(exit_code)});
+    if (timed_out) {
+        js_property_set(result, make_string_item("status"), ItemNull);
+        js_property_set(result, make_string_item("signal"), make_string_item(timeout_signal_name));
+        js_property_set(result, make_string_item("error"), cp_make_spawn_sync_timeout_error(cmd, effective_args));
+    } else {
+        js_property_set(result, make_string_item("status"), (Item){.item = i2it(exit_code)});
+        js_property_set(result, make_string_item("signal"), ItemNull);
+    }
+    bool output_as_string = cp_sync_output_wants_string(effective_options);
     js_property_set(result, make_string_item("stdout"),
-                    out_buf ? make_string_item(out_buf, (int)out_len) : make_string_item(""));
-    js_property_set(result, make_string_item("stderr"), make_string_item(""));
+                    cp_sync_stdio_output_item(stdio_mode[1], out_buf, out_len, output_as_string));
+    js_property_set(result, make_string_item("stderr"),
+                    cp_sync_stdio_output_item(stdio_mode[2], err_buf, err_len, output_as_string));
     if (out_buf) mem_free(out_buf);
+    if (err_buf) mem_free(err_buf);
+    unlink(stdout_path);
+    unlink(stderr_path);
+    if (has_input) unlink(stdin_path);
 
     return result;
 }

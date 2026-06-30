@@ -121,6 +121,9 @@ typedef struct BlockContext {
     float line_clamp_last_line_ascender;
     float line_clamp_last_line_max_ascender;
     float line_clamp_last_line_max_descender;
+    CssEnum text_wrap_style;    // CSS Text 4 text-wrap-style
+    bool balance_wrap_active;   // true when wrapping against balance_wrap_width
+    float balance_wrap_width;   // inline measure used for text-wrap-style: balance
 
     // =========================================================================
     // BFC Hierarchy
@@ -201,6 +204,7 @@ typedef enum BreakKind {
 
 typedef struct Linebox {
     float left, right;                // left and right bounds of the line
+    float align_left, align_right;    // original alignment bounds when wrap measure differs
     float effective_left;             // float-adjusted left bound
     float effective_right;            // float-adjusted right bound
     float advance_x;
@@ -520,6 +524,7 @@ ScrollProp* alloc_scroll_prop(LayoutContext* lycon);
 PositionProp* alloc_position_prop(LayoutContext* lycon);
 void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* block);
+void reset_flex_item_prop_for_style(LayoutContext* lycon, ViewSpan* block);
 void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span);
 PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block);

@@ -1485,6 +1485,7 @@ void line_reset(LayoutContext* lycon) {
 
 void line_init(LayoutContext* lycon, float left, float right) {
     lycon->line.left = left;  lycon->line.right = right;
+    lycon->line.align_left = left;  lycon->line.align_right = right;
     // Initialize effective bounds to full width (will be adjusted for floats later)
     lycon->line.effective_left = left;
     lycon->line.effective_right = right;
@@ -3020,26 +3021,19 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 if (is_small_caps_lower) {
                     wd *= 0.7f;
                 }
-                // Track fallback font metrics for line-height computation
-                // When a glyph comes from a fallback font with taller metrics,
-                // update the line ascender/descender (but NOT the text rect height,
-                // which uses primary font metrics per browser behavior)
+                // Track fallback font metrics for line-height computation.
+                // For line-height: normal, browser engines blend fallback font
+                // metrics into the used line height. With an explicit line-height,
+                // output_text() has already contributed the CSS inline box height;
+                // fallback glyph metrics affect advance/painting, but must not
+                // re-baseline the line.
                 if (glyph && glyph->font_ascender > 0 &&
+                    lycon->block.line_height_is_normal &&
                     !control_fallback_keeps_primary_line_metrics(codepoint)) {
                     float fb_asc, fb_desc;
-                    if (lycon->block.line_height_is_normal) {
-                        // normal line-height: use platform-aware split from glyph
-                        fb_asc = glyph->font_normal_ascender;
-                        fb_desc = glyph->font_normal_descender;
-                    } else {
-                        // explicit line-height: use hhea metrics with half-leading
-                        fb_asc = glyph->font_ascender;
-                        fb_desc = glyph->font_descender;
-                        float content_height = fb_asc + fb_desc;
-                        float half_leading = (lycon->block.line_height - content_height) / 2.0f;
-                        fb_asc += half_leading;
-                        fb_desc += half_leading;
-                    }
+                    // normal line-height: use platform-aware split from glyph
+                    fb_asc = glyph->font_normal_ascender;
+                    fb_desc = glyph->font_normal_descender;
                     float fb_normal_line_height = glyph->font_normal_line_height;
                     normalize_c1_control_fallback_metrics(codepoint, lycon->font.style, &fb_asc, &fb_desc,
                                                           &fb_normal_line_height);

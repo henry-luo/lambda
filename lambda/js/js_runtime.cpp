@@ -29,6 +29,7 @@ extern "C" Item js_util_custom_promisify_args_symbol(void);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_process_emit2(Item event_name, Item arg1, Item arg2);
 extern "C" int js_is_process_object_value(Item object);
+extern "C" Item js_get_process_exec_argv(void);
 extern "C" Item push_d(double dval);
 extern "C" double it2d(Item item);
 extern "C" int64_t it2i(Item item);
@@ -156,8 +157,26 @@ static const int JS_BOUND_TARGET_KEY_LEN = 16;
 static const char* JS_NATIVE_FUNCTION_SOURCE = "function () { [native code] }";
 static const int JS_NATIVE_FUNCTION_SOURCE_LEN = 29;
 
+extern "C" void js_eval_source_push(Item filename, Item source,
+                                    int64_t line_offset, int64_t column_offset);
+extern "C" void js_eval_source_push_compact(Item filename, Item source,
+                                            int64_t line_offset, int64_t column_offset);
+extern "C" void js_eval_source_pop(void);
+
 static inline Item js_native_function_source_item() {
     return (Item){.item = s2it(heap_create_name(JS_NATIVE_FUNCTION_SOURCE, JS_NATIVE_FUNCTION_SOURCE_LEN))};
+}
+
+static bool js_function_has_vm_stack_source(JsFunction* fn) {
+    return fn && fn->vm_stack_filename && fn->vm_stack_source;
+}
+
+static void js_function_push_vm_stack_source(JsFunction* fn) {
+    if (!js_function_has_vm_stack_source(fn)) return;
+    js_eval_source_push_compact((Item){.item = s2it(fn->vm_stack_filename)},
+                                (Item){.item = s2it(fn->vm_stack_source)},
+                                fn->vm_stack_line_offset,
+                                fn->vm_stack_column_offset);
 }
 
 struct JsGlobalVarModuleBinding {
@@ -9367,6 +9386,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         if (js_exception_pending) return ItemNull;
         if (custom_tag.item != ItemNull.item) return custom_tag;
 
+        if (js_is_process_object_value(this_val)) {
+            return (Item){.item = s2it(heap_create_name("[object process]", 16))};
+        }
+
         if (get_type_id(this_val) == LMD_TYPE_MAP) {
             Map* m = this_val.map;
             if (m) {
@@ -12937,7 +12960,10 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             js_current_private_home_class = method_home_class;
             js_current_private_home_class_index = js_class_private_index(method_home_class);
         }
+        bool pushed_vm_stack_source = js_function_has_vm_stack_source(fn);
+        if (pushed_vm_stack_source) js_function_push_vm_stack_source(fn);
         Item result = js_invoke_fn(fn, merged_args, total_argc);
+        if (pushed_vm_stack_source) js_eval_source_pop();
         js_current_private_home_class = prev_private_home_class;
         js_current_private_home_class_index = prev_private_home_class_index;
         if (derived_ctor_call) result = js_super_this_binding_finish(result);
@@ -13016,7 +13042,10 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         js_current_private_home_class = method_home_class;
         js_current_private_home_class_index = js_class_private_index(method_home_class);
     }
+    bool pushed_vm_stack_source = js_function_has_vm_stack_source(fn);
+    if (pushed_vm_stack_source) js_function_push_vm_stack_source(fn);
     Item result = js_invoke_fn(fn, args, arg_count);
+    if (pushed_vm_stack_source) js_eval_source_pop();
     js_current_private_home_class = prev_private_home_class;
     js_current_private_home_class_index = prev_private_home_class_index;
     if (derived_ctor_call) result = js_super_this_binding_finish(result);
@@ -13166,6 +13195,10 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     bound->home_global = orig->home_global;
     if (bound->home_global.item != 0) heap_register_gc_root(&bound->home_global.item);
     bound->source_text = orig->source_text;
+    bound->vm_stack_filename = orig->vm_stack_filename;
+    bound->vm_stack_source = orig->vm_stack_source;
+    bound->vm_stack_line_offset = orig->vm_stack_line_offset;
+    bound->vm_stack_column_offset = orig->vm_stack_column_offset;
     bound->prototype = orig->prototype; // ES spec: bound functions use target's prototype for [[Construct]]
     bound->builtin_id = orig->builtin_id;
     bound->flags = orig->flags; // preserve strict/arrow flags from original
@@ -29270,6 +29303,8 @@ struct JsPromise {
     Item on_fulfilled[8];          // then() callbacks (max chain depth)
     Item on_rejected[8];
     Item next_promise[8];          // chained promise for each then() handler
+    Item reaction_domain[8];       // active domain captured by then()
+    Item reject_domain;            // active domain captured at rejection
     Item wrapper;                  // stable Promise object wrapper for this record
     bool is_finally[8];            // true if handler[i] is a finally handler
     bool wrapper_created;
@@ -29287,6 +29322,145 @@ static int64_t js_promise_unhandled_epoch = 0;
 static Item js_promise_unhandled_queue[1024];
 static int js_promise_unhandled_queue_count = 0;
 static bool js_promise_unhandled_strict = false;
+static Item js_domain_current = {0};
+static Item js_domain_namespace = {0};
+static Item js_domain_stack[64];
+static int js_domain_stack_count = 0;
+
+extern "C" Item js_get_process_object_value(void);
+
+static bool js_domain_is_domain_item(Item domain) {
+    TypeId type = get_type_id(domain);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_ELEMENT;
+}
+
+static void js_domain_sync_visible_state(void) {
+    Item domain = js_domain_stack_count > 0
+        ? js_domain_stack[js_domain_stack_count - 1]
+        : make_js_undefined();
+    js_domain_current = js_domain_stack_count > 0 ? domain : (Item){0};
+
+    Item process = js_get_process_object_value();
+    js_property_set(process, (Item){.item = s2it(heap_create_name("domain", 6))}, domain);
+
+    if (js_domain_namespace.item != 0) {
+        Item stack = js_array_new(0);
+        for (int i = 0; i < js_domain_stack_count; i++) {
+            js_array_push(stack, js_domain_stack[i]);
+        }
+        js_property_set(js_domain_namespace, (Item){.item = s2it(heap_create_name("_stack", 6))}, stack);
+    }
+}
+
+extern "C" Item js_domain_capture_stack(void) {
+    Item stack = js_array_new(0);
+    for (int i = 0; i < js_domain_stack_count; i++) {
+        js_array_push(stack, js_domain_stack[i]);
+    }
+    return stack;
+}
+
+static void js_domain_apply_stack(Item stack) {
+    js_domain_stack_count = 0;
+    if (get_type_id(stack) == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(stack);
+        if (len > 64) len = 64;
+        for (int64_t i = 0; i < len; i++) {
+            Item domain = js_array_get_int(stack, i);
+            if (js_domain_is_domain_item(domain)) {
+                js_domain_stack[js_domain_stack_count++] = domain;
+            }
+        }
+    } else if (js_domain_is_domain_item(stack)) {
+        js_domain_stack[js_domain_stack_count++] = stack;
+    }
+    js_domain_sync_visible_state();
+}
+
+extern "C" Item js_domain_set_stack(Item stack) {
+    Item previous = js_domain_capture_stack();
+    js_domain_apply_stack(stack);
+    return previous;
+}
+
+extern "C" void js_domain_restore_stack(Item previous) {
+    js_domain_apply_stack(previous);
+}
+
+static void js_domain_push(Item domain) {
+    if (!js_domain_is_domain_item(domain)) return;
+    if (js_domain_stack_count < 64) js_domain_stack[js_domain_stack_count++] = domain;
+    js_domain_sync_visible_state();
+}
+
+extern "C" Item js_domain_get_current(void) {
+    if (js_domain_current.item == 0) return make_js_undefined();
+    return js_domain_current;
+}
+
+extern "C" Item js_domain_set_current(Item domain) {
+    Item previous = js_domain_get_current();
+    TypeId domain_type = get_type_id(domain);
+    if (domain.item == 0 || domain_type == LMD_TYPE_UNDEFINED ||
+        domain_type == LMD_TYPE_NULL || domain.item == ItemNull.item) {
+        js_domain_stack_count = 0;
+    } else {
+        js_domain_stack_count = 1;
+        js_domain_stack[0] = domain;
+    }
+    js_domain_sync_visible_state();
+    return previous;
+}
+
+extern "C" void js_domain_restore(Item previous) {
+    js_domain_set_current(previous);
+}
+
+extern "C" Item js_domain_call_function(Item domain, Item fn, Item this_val, Item* args, int arg_count) {
+    Item previous = js_domain_set_stack(domain);
+    Item result = js_call_function(fn, this_val, args, arg_count);
+    js_domain_restore_stack(previous);
+    return result;
+}
+
+static bool js_domain_emit_error_at(Item domain, Item error, int parent_count) {
+    if (!js_domain_is_domain_item(domain)) return false;
+    Item on_error = js_property_get(domain, (Item){.item = s2it(heap_create_name("__domain_error__", 16))});
+    if (get_type_id(on_error) != LMD_TYPE_FUNC) return false;
+
+    if (parent_count < 0) parent_count = 0;
+    if (parent_count > js_domain_stack_count) parent_count = js_domain_stack_count;
+    js_domain_stack_count = parent_count;
+    js_domain_sync_visible_state();
+
+    js_call_function(on_error, domain, &error, 1);
+    if (js_check_exception()) {
+        Item thrown = js_clear_exception();
+        if (parent_count > 0) {
+            Item parent = js_domain_stack[parent_count - 1];
+            return js_domain_emit_error_at(parent, thrown, parent_count - 1);
+        }
+        js_throw_value(thrown);
+    }
+    return true;
+}
+
+static bool js_domain_emit_error(Item domain, Item error) {
+    int parent_count = js_domain_stack_count;
+    while (parent_count > 0 && js_domain_stack[parent_count - 1].item == domain.item) parent_count--;
+    return js_domain_emit_error_at(domain, error, parent_count);
+}
+
+extern "C" int js_domain_emit_current_error(Item error) {
+    if (js_domain_stack_count <= 0) return 0;
+    Item previous = js_domain_capture_stack();
+    Item domain = js_domain_stack[js_domain_stack_count - 1];
+    int parent_count = js_domain_stack_count;
+    while (parent_count > 0 && js_domain_stack[parent_count - 1].item == domain.item) parent_count--;
+    bool handled = js_domain_emit_error_at(domain, error, parent_count);
+    if (!js_check_exception()) js_domain_restore_stack(previous);
+    return handled ? 1 : 0;
+}
 
 extern "C" void js_promise_set_unhandled_rejections_mode(int64_t strict_mode) {
     js_promise_unhandled_strict = strict_mode != 0;
@@ -29302,13 +29476,19 @@ static void js_promise_register_roots_once() {
     registered = true;
 
     extern void heap_register_gc_root_range(uint64_t* base, int count);
+    extern void heap_register_gc_root(uint64_t* slot);
     for (int i = 0; i < JS_MAX_PROMISES; i++) {
         heap_register_gc_root_range((uint64_t*)&js_promises[i].result, 1);
         heap_register_gc_root_range((uint64_t*)js_promises[i].on_fulfilled, 8);
         heap_register_gc_root_range((uint64_t*)js_promises[i].on_rejected, 8);
         heap_register_gc_root_range((uint64_t*)js_promises[i].next_promise, 8);
+        heap_register_gc_root_range((uint64_t*)js_promises[i].reaction_domain, 8);
+        heap_register_gc_root_range((uint64_t*)&js_promises[i].reject_domain, 1);
         heap_register_gc_root_range((uint64_t*)&js_promises[i].wrapper, 1);
     }
+    heap_register_gc_root(&js_domain_current.item);
+    heap_register_gc_root(&js_domain_namespace.item);
+    heap_register_gc_root_range((uint64_t*)js_domain_stack, 64);
 }
 
 static JsPromise* js_alloc_promise() {
@@ -29328,7 +29508,9 @@ static JsPromise* js_alloc_promise() {
     memset(p->on_fulfilled, 0, sizeof(p->on_fulfilled));
     memset(p->on_rejected, 0, sizeof(p->on_rejected));
     memset(p->next_promise, 0, sizeof(p->next_promise));
+    memset(p->reaction_domain, 0, sizeof(p->reaction_domain));
     memset(p->is_finally, 0, sizeof(p->is_finally));
+    p->reject_domain = ItemNull;
     p->wrapper = ItemNull;
     p->wrapper_created = false;
     p->rejection_handled = false;
@@ -29398,7 +29580,7 @@ static Item js_promise_finally_continue(Item next_promise_item, Item state_item,
 static Item js_resolve_callback(Item promise_idx_item, Item value);
 static Item js_reject_callback(Item promise_idx_item, Item reason);
 static void js_promise_enqueue_handler(Item handler, Item result, Item next_promise_item);
-static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseState state, Item result);
+static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseState state, Item result, Item domain);
 static Item js_all_resolve_element(Item counter_obj, Item index_item, Item result_item, Item value);
 static Item js_all_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason);
 static Item js_any_fulfill_element(Item counter_obj, Item index_item, Item result_item, Item value);
@@ -29631,6 +29813,11 @@ static Item js_promise_passthrough_run(Item next_promise_item, Item state_item, 
     return ItemNull;
 }
 
+static Item js_promise_domain_run(Item domain, Item job) {
+    if (get_type_id(job) != LMD_TYPE_FUNC) return ItemNull;
+    return js_domain_call_function(domain, job, ItemNull, NULL, 0);
+}
+
 static Item js_promise_unhandled_check(Item promise_item) {
     JsPromise* p = js_get_promise(promise_item);
     if (!p) return ItemNull;
@@ -29638,6 +29825,12 @@ static Item js_promise_unhandled_check(Item promise_item) {
     if (p->unhandled_epoch != js_promise_unhandled_epoch) return ItemNull;
     if (p->state == JS_PROMISE_REJECTED && !p->rejection_handled && !p->unhandled_reported) {
         p->unhandled_reported = true;
+        Item domain = p->reject_domain;
+        if (get_type_id(domain) == LMD_TYPE_MAP || get_type_id(domain) == LMD_TYPE_ELEMENT) {
+            js_domain_emit_error(domain, p->result);
+            if (js_check_exception()) js_clear_exception();
+            return ItemNull;
+        }
         if (js_promise_unhandled_strict) {
             Item error = p->result;
             TypeId reason_type = get_type_id(error);
@@ -29706,18 +29899,40 @@ static void js_promise_enqueue_handler(Item handler, Item result, Item next_prom
     js_enqueue_promise_job(thunk);
 }
 
-// Enqueue a finally handler as a microtask.
-static void js_promise_enqueue_finally(Item handler, Item next_promise_item, JsPromiseState state, Item result) {
-    Item runner_fn = js_new_function((void*)js_promise_finally_microtask_run, 4);
-    Item bound_args[4] = {handler, next_promise_item, (Item){.item = i2it((int64_t)state)}, result};
-    Item thunk = js_bind_function(runner_fn, ItemNull, bound_args, 4);
+static void js_promise_enqueue_handler_domain(Item handler, Item result, Item next_promise_item, Item domain) {
+    Item runner_fn = js_new_function((void*)js_promise_microtask_run, 3);
+    Item bound_args[3] = {handler, result, next_promise_item};
+    Item thunk = js_bind_function(runner_fn, ItemNull, bound_args, 3);
+    if (get_type_id(domain) == LMD_TYPE_MAP || get_type_id(domain) == LMD_TYPE_ELEMENT) {
+        Item domain_runner = js_new_function((void*)js_promise_domain_run, 2);
+        Item domain_args[2] = {domain, thunk};
+        thunk = js_bind_function(domain_runner, ItemNull, domain_args, 2);
+    }
     js_enqueue_promise_job(thunk);
 }
 
-static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseState state, Item result) {
+// Enqueue a finally handler as a microtask.
+static void js_promise_enqueue_finally(Item handler, Item next_promise_item, JsPromiseState state, Item result, Item domain) {
+    Item runner_fn = js_new_function((void*)js_promise_finally_microtask_run, 4);
+    Item bound_args[4] = {handler, next_promise_item, (Item){.item = i2it((int64_t)state)}, result};
+    Item thunk = js_bind_function(runner_fn, ItemNull, bound_args, 4);
+    if (get_type_id(domain) == LMD_TYPE_MAP || get_type_id(domain) == LMD_TYPE_ELEMENT) {
+        Item domain_runner = js_new_function((void*)js_promise_domain_run, 2);
+        Item domain_args[2] = {domain, thunk};
+        thunk = js_bind_function(domain_runner, ItemNull, domain_args, 2);
+    }
+    js_enqueue_promise_job(thunk);
+}
+
+static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseState state, Item result, Item domain) {
     Item runner_fn = js_new_function((void*)js_promise_passthrough_run, 3);
     Item bound_args[3] = {next_promise_item, (Item){.item = i2it((int64_t)state)}, result};
     Item thunk = js_bind_function(runner_fn, ItemNull, bound_args, 3);
+    if (get_type_id(domain) == LMD_TYPE_MAP || get_type_id(domain) == LMD_TYPE_ELEMENT) {
+        Item domain_runner = js_new_function((void*)js_promise_domain_run, 2);
+        Item domain_args[2] = {domain, thunk};
+        thunk = js_bind_function(domain_runner, ItemNull, domain_args, 2);
+    }
     js_enqueue_promise_job(thunk);
 }
 
@@ -29726,33 +29941,34 @@ static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result) {
 
     p->state = state;
     p->result = result;
+    if (state == JS_PROMISE_REJECTED) {
+        p->reject_domain = js_domain_get_current();
+    }
 
     // Schedule handlers as microtasks (per ECMAScript spec)
     for (int i = 0; i < p->then_count; i++) {
         Item handler = (state == JS_PROMISE_FULFILLED) ? p->on_fulfilled[i] : p->on_rejected[i];
         Item next_item = p->next_promise[i];
+        Item domain = p->reaction_domain[i];
 
         if (p->is_finally[i]) {
             // finally handler: called with 0 args, passes through original result
             if (get_type_id(handler) == LMD_TYPE_FUNC) {
-                js_promise_enqueue_finally(handler, next_item, state, result);
+                js_promise_enqueue_finally(handler, next_item, state, result, domain);
             } else {
-                js_promise_enqueue_passthrough(next_item, state, result);
+                js_promise_enqueue_passthrough(next_item, state, result, domain);
             }
         } else if (get_type_id(handler) == LMD_TYPE_FUNC) {
             if (get_type_id(next_item) == LMD_TYPE_MAP) {
                 // has a chained next promise — enqueue with chaining
-                js_promise_enqueue_handler(handler, result, next_item);
+                js_promise_enqueue_handler_domain(handler, result, next_item, domain);
             } else {
                 // direct handler (e.g. from chaining resolution), no next promise
-                Item runner_fn = js_new_function((void*)js_promise_microtask_run, 3);
-                Item bound_args[3] = {handler, result, ItemNull};
-                Item thunk = js_bind_function(runner_fn, ItemNull, bound_args, 3);
-                js_enqueue_promise_job(thunk);
+                js_promise_enqueue_handler_domain(handler, result, ItemNull, domain);
             }
         } else {
             // no handler for this state — propagate through a Promise reaction job
-            js_promise_enqueue_passthrough(next_item, state, result);
+            js_promise_enqueue_passthrough(next_item, state, result, domain);
         }
     }
 
@@ -30683,6 +30899,7 @@ extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejecte
     if (has_rejection_handler) {
         js_promise_mark_rejection_handled(p);
     }
+    Item reaction_domain = js_domain_get_current();
 
     Item return_promise = ItemNull;
     Item capability_resolve = ItemNull;
@@ -30713,20 +30930,21 @@ extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejecte
             p->on_fulfilled[p->then_count] = on_fulfilled;
             p->on_rejected[p->then_count] = on_rejected;
             p->next_promise[p->then_count] = next_item;
+            p->reaction_domain[p->then_count] = reaction_domain;
             p->then_count++;
         }
     } else if (p->state == JS_PROMISE_FULFILLED) {
         if (get_type_id(on_fulfilled) == LMD_TYPE_FUNC) {
             // per spec: schedule as microtask even if already resolved
-            js_promise_enqueue_handler(on_fulfilled, p->result, next_item);
+            js_promise_enqueue_handler_domain(on_fulfilled, p->result, next_item, reaction_domain);
         } else {
-            js_promise_enqueue_passthrough(next_item, JS_PROMISE_FULFILLED, p->result);
+            js_promise_enqueue_passthrough(next_item, JS_PROMISE_FULFILLED, p->result, reaction_domain);
         }
     } else {
         if (get_type_id(on_rejected) == LMD_TYPE_FUNC) {
-            js_promise_enqueue_handler(on_rejected, p->result, next_item);
+            js_promise_enqueue_handler_domain(on_rejected, p->result, next_item, reaction_domain);
         } else {
-            js_promise_enqueue_passthrough(next_item, JS_PROMISE_REJECTED, p->result);
+            js_promise_enqueue_passthrough(next_item, JS_PROMISE_REJECTED, p->result, reaction_domain);
         }
     }
 
@@ -32083,6 +32301,9 @@ extern "C" void js_with_push(Item obj);
 extern "C" void js_with_set_stack(Item* stack, int depth);
 extern "C" int js_with_save_stack(Item* out_stack, int max_depth);
 extern "C" void js_mark_non_enumerable(Item object, Item name);
+extern "C" Item js_delete_property(Item obj, Item key);
+extern "C" Item js_get_prototype(Item object);
+extern "C" Item js_get_prototype_of(Item object);
 extern "C" Item js_buffer_from_bytes(const char* data, int len);
 
 struct JsVmEvalOptions {
@@ -32135,6 +32356,243 @@ static bool js_vm_read_options(Item options, const char** names, int count, JsVm
         out->column_offset = js_vm_option_to_int64(col);
     }
     return true;
+}
+
+static Item js_vm_throw_invalid_option_property_type(const char* name,
+                                                     const char* expected,
+                                                     Item actual) {
+    char msg[512];
+    int pos = snprintf(msg, sizeof(msg),
+        "The \"%s\" property must be of type %s.", name, expected);
+    if (pos < 0) pos = 0;
+    if (pos >= (int)sizeof(msg)) pos = (int)sizeof(msg) - 1;
+    js_format_invalid_arg_received(msg + pos, (int)sizeof(msg) - pos, actual);
+    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+}
+
+static bool js_vm_is_options_object(Item options) {
+    TypeId type = get_type_id(options);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+}
+
+static bool js_vm_is_undefined_item(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_UNDEFINED || value.item == ITEM_JS_UNDEFINED || value.item == 0;
+}
+
+static bool js_vm_is_number_item(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT;
+}
+
+static bool js_vm_validate_options_object(Item options) {
+    if (js_vm_is_undefined_item(options)) return true;
+    if (js_vm_is_options_object(options)) return true;
+    js_throw_invalid_arg_type("options", "object", options);
+    return false;
+}
+
+static bool js_vm_validate_string_option(Item options, const char* key_name,
+                                         int key_len, const char* display_name) {
+    if (!js_vm_is_options_object(options)) return true;
+    Item key = (Item){.item = s2it(heap_create_name(key_name, key_len))};
+    Item value = js_property_get(options, key);
+    if (js_check_exception()) return false;
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_UNDEFINED || value.item == ITEM_JS_UNDEFINED) return true;
+    if (type == LMD_TYPE_STRING) return true;
+    js_vm_throw_invalid_option_property_type(display_name, "string", value);
+    return false;
+}
+
+static bool js_vm_validate_create_context_options(Item options) {
+    if (!js_vm_validate_options_object(options)) return false;
+    if (!js_vm_validate_string_option(options, "name", 4, "options.name")) return false;
+    if (!js_vm_validate_string_option(options, "origin", 6, "options.origin")) return false;
+    return true;
+}
+
+static bool js_vm_validate_run_context_options(Item options) {
+    if (!js_vm_validate_string_option(options, "contextName", 11, "options.contextName")) return false;
+    if (!js_vm_validate_string_option(options, "contextOrigin", 13, "options.contextOrigin")) return false;
+    return true;
+}
+
+static Item js_vm_throw_invalid_arg_instance(const char* name, const char* expected, Item actual) {
+    char msg[512];
+    int pos = snprintf(msg, sizeof(msg),
+        "The \"%s\" argument must be an instance of %s.", name, expected);
+    if (pos < 0) pos = 0;
+    if (pos >= (int)sizeof(msg)) pos = (int)sizeof(msg) - 1;
+    js_format_invalid_arg_received(msg + pos, (int)sizeof(msg) - pos, actual);
+    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+}
+
+static Item js_vm_throw_invalid_option_property_instance(const char* name,
+                                                        const char* expected,
+                                                        Item actual) {
+    char msg[512];
+    int pos = snprintf(msg, sizeof(msg),
+        "The \"%s\" property must be an instance of %s.", name, expected);
+    if (pos < 0) pos = 0;
+    if (pos >= (int)sizeof(msg)) pos = (int)sizeof(msg) - 1;
+    js_format_invalid_arg_received(msg + pos, (int)sizeof(msg) - pos, actual);
+    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+}
+
+static bool js_vm_is_context_item(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    Item marker = js_property_get(value, (Item){.item = s2it(heap_create_name("__vmContext", 11))});
+    if (js_check_exception()) return false;
+    return get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker);
+}
+
+static bool js_vm_is_cached_data_item(Item value) {
+    if (js_is_typed_array(value) || js_is_dataview(value)) return true;
+    return false;
+}
+
+static bool js_vm_validate_compile_function_options(Item options) {
+    if (!js_vm_validate_options_object(options)) return false;
+    if (!js_vm_is_options_object(options)) return true;
+
+    Item filename = js_property_get(options, (Item){.item = s2it(heap_create_name("filename", 8))});
+    if (js_check_exception()) return false;
+    if (!js_vm_is_undefined_item(filename) && get_type_id(filename) != LMD_TYPE_STRING) {
+        js_vm_throw_invalid_option_property_type("options.filename", "string", filename);
+        return false;
+    }
+
+    Item column = js_property_get(options, (Item){.item = s2it(heap_create_name("columnOffset", 12))});
+    if (js_check_exception()) return false;
+    if (!js_vm_is_undefined_item(column) && !js_vm_is_number_item(column)) {
+        js_vm_throw_invalid_option_property_type("options.columnOffset", "number", column);
+        return false;
+    }
+
+    Item line = js_property_get(options, (Item){.item = s2it(heap_create_name("lineOffset", 10))});
+    if (js_check_exception()) return false;
+    if (!js_vm_is_undefined_item(line) && !js_vm_is_number_item(line)) {
+        js_vm_throw_invalid_option_property_type("options.lineOffset", "number", line);
+        return false;
+    }
+
+    Item cached_data = js_property_get(options, (Item){.item = s2it(heap_create_name("cachedData", 10))});
+    if (js_check_exception()) return false;
+    if (!js_vm_is_undefined_item(cached_data) && !js_vm_is_cached_data_item(cached_data)) {
+        js_vm_throw_invalid_option_property_instance("options.cachedData", "Buffer, TypedArray, or DataView", cached_data);
+        return false;
+    }
+
+    Item produce = js_property_get(options, (Item){.item = s2it(heap_create_name("produceCachedData", 17))});
+    if (js_check_exception()) return false;
+    if (!js_vm_is_undefined_item(produce) && get_type_id(produce) != LMD_TYPE_BOOL) {
+        js_vm_throw_invalid_option_property_type("options.produceCachedData", "boolean", produce);
+        return false;
+    }
+
+    Item parsing_context = js_property_get(options, (Item){.item = s2it(heap_create_name("parsingContext", 14))});
+    if (js_check_exception()) return false;
+    if (!js_vm_is_undefined_item(parsing_context) && !js_vm_is_context_item(parsing_context)) {
+        js_vm_throw_invalid_option_property_instance("options.parsingContext", "Context", parsing_context);
+        return false;
+    }
+
+    Item context_extensions = js_property_get(options, (Item){.item = s2it(heap_create_name("contextExtensions", 17))});
+    if (js_check_exception()) return false;
+    if (!js_vm_is_undefined_item(context_extensions)) {
+        if (get_type_id(context_extensions) != LMD_TYPE_ARRAY) {
+            js_vm_throw_invalid_option_property_instance("options.contextExtensions", "Array", context_extensions);
+            return false;
+        }
+        int64_t length = js_array_length(context_extensions);
+        for (int64_t i = 0; i < length; i++) {
+            Item extension = js_array_get_int(context_extensions, i);
+            if (!js_vm_is_options_object(extension)) {
+                char prop_name[64];
+                snprintf(prop_name, sizeof(prop_name), "options.contextExtensions[%lld]", (long long)i);
+                js_vm_throw_invalid_option_property_type(prop_name, "object", extension);
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+static bool js_vm_function_body_has_unmatched_close_brace(String* body) {
+    if (!body) return false;
+    int brace_depth = 0;
+    bool in_sq = false;
+    bool in_dq = false;
+    bool in_tpl = false;
+    bool in_line_comment = false;
+    bool in_block_comment = false;
+    bool escaped = false;
+    const char* src = body->chars;
+    int len = (int)body->len;
+    for (int i = 0; i < len; i++) {
+        char ch = src[i];
+        char next = (i + 1 < len) ? src[i + 1] : 0;
+        if (in_line_comment) {
+            if (ch == '\n' || ch == '\r') in_line_comment = false;
+            continue;
+        }
+        if (in_block_comment) {
+            if (ch == '*' && next == '/') {
+                in_block_comment = false;
+                i++;
+            }
+            continue;
+        }
+        if (in_sq || in_dq || in_tpl) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (ch == '\\') {
+                escaped = true;
+                continue;
+            }
+            if ((in_sq && ch == '\'') || (in_dq && ch == '"') || (in_tpl && ch == '`')) {
+                in_sq = false;
+                in_dq = false;
+                in_tpl = false;
+            }
+            continue;
+        }
+        if (ch == '/' && next == '/') {
+            in_line_comment = true;
+            i++;
+            continue;
+        }
+        if (ch == '/' && next == '*') {
+            in_block_comment = true;
+            i++;
+            continue;
+        }
+        if (ch == '\'') {
+            in_sq = true;
+            continue;
+        }
+        if (ch == '"') {
+            in_dq = true;
+            continue;
+        }
+        if (ch == '`') {
+            in_tpl = true;
+            continue;
+        }
+        if (ch == '{') {
+            brace_depth++;
+            continue;
+        }
+        if (ch == '}') {
+            if (brace_depth == 0) return true;
+            brace_depth--;
+        }
+    }
+    return false;
 }
 
 static uint64_t js_vm_cache_hash_bytes(const char* data, int len) {
@@ -32223,34 +32681,70 @@ static Item js_vm_make_cached_data_for_code(Item code) {
     return js_buffer_from_bytes((const char*)payload, (int)sizeof(payload));
 }
 
-static void js_vm_set_global_alias(Item sandbox, const char* name, int len) {
-    Item key = (Item){.item = s2it(heap_create_name(name, len))};
-    js_property_set(sandbox, key, sandbox);
-    js_mark_non_enumerable(sandbox, key);
+struct JsVmContextBinding {
+    Item key;
+};
+
+static void js_vm_track_temp_binding(Item key, JsVmContextBinding* bindings, int* count, int max_count) {
+    if (!bindings || !count || *count >= max_count) return;
+    bindings[*count].key = key;
+    (*count)++;
 }
 
-static void js_vm_install_global_aliases(Item sandbox) {
-    js_vm_set_global_alias(sandbox, "globalThis", 10);
-    js_vm_set_global_alias(sandbox, "self", 4);
-    js_vm_set_global_alias(sandbox, "window", 6);
-    js_vm_set_global_alias(sandbox, "global", 6);
+static void js_vm_set_temp_global_alias(Item sandbox, const char* name, int len,
+                                        JsVmContextBinding* bindings, int* count, int max_count) {
+    Item key = (Item){.item = s2it(heap_create_name(name, len))};
+    if (it2b(js_has_own_property(sandbox, key))) return;
+    js_property_set(sandbox, key, sandbox);
+    js_mark_non_enumerable(sandbox, key);
+    js_vm_track_temp_binding(key, bindings, count, max_count);
+}
+
+static void js_vm_mask_temp_host_global(Item sandbox, const char* name, int len,
+                                        JsVmContextBinding* bindings, int* count, int max_count) {
+    Item key = (Item){.item = s2it(heap_create_name(name, len))};
+    if (it2b(js_has_own_property(sandbox, key))) return;
+    js_property_set(sandbox, key, make_js_undefined());
+    js_mark_non_enumerable(sandbox, key);
+    js_vm_track_temp_binding(key, bindings, count, max_count);
+}
+
+static int js_vm_apply_context_bindings(Item sandbox, JsVmContextBinding* bindings, int max_count) {
+    int count = 0;
+    js_vm_set_temp_global_alias(sandbox, "globalThis", 10, bindings, &count, max_count);
+    js_vm_set_temp_global_alias(sandbox, "self", 4, bindings, &count, max_count);
+    js_vm_set_temp_global_alias(sandbox, "window", 6, bindings, &count, max_count);
+    js_vm_set_temp_global_alias(sandbox, "global", 6, bindings, &count, max_count);
+    js_vm_mask_temp_host_global(sandbox, "process", 7, bindings, &count, max_count);
+    js_vm_mask_temp_host_global(sandbox, "require", 7, bindings, &count, max_count);
+    js_vm_mask_temp_host_global(sandbox, "module", 6, bindings, &count, max_count);
+    js_vm_mask_temp_host_global(sandbox, "exports", 7, bindings, &count, max_count);
+    js_vm_mask_temp_host_global(sandbox, "__filename", 10, bindings, &count, max_count);
+    js_vm_mask_temp_host_global(sandbox, "__dirname", 9, bindings, &count, max_count);
+    return count;
+}
+
+static void js_vm_restore_context_bindings(Item sandbox, JsVmContextBinding* bindings, int count) {
+    for (int i = count - 1; i >= 0; i--) {
+        js_delete_property(sandbox, bindings[i].key);
+    }
 }
 
 static Item js_vm_contextify(Item sandbox) {
     if (get_type_id(sandbox) != LMD_TYPE_MAP) {
         sandbox = js_new_object();
     }
-    Item base_global = js_get_global_this();
-    js_set_prototype(sandbox, base_global);
-    js_vm_install_global_aliases(sandbox);
-    js_property_set(sandbox, (Item){.item = s2it(heap_create_name("__vmContext", 11))},
+    Item marker_key = (Item){.item = s2it(heap_create_name("__vmContext", 11))};
+    js_property_set(sandbox, marker_key,
                     (Item){.item = ITEM_TRUE});
+    js_mark_non_enumerable(sandbox, marker_key);
     return sandbox;
 }
 
 // vm.createContext(sandbox) — returns sandbox (or new object) marked as a "context"
-static Item js_vm_createContext(Item sandbox) {
+static Item js_vm_createContext(Item sandbox, Item options) {
     extern Item js_throw_type_error_code(const char* code, const char* msg);
+    if (!js_vm_validate_create_context_options(options)) return ItemNull;
     // If no sandbox provided, create a new empty object
     TypeId t = get_type_id(sandbox);
     if (t == LMD_TYPE_STRING || t == LMD_TYPE_INT || t == LMD_TYPE_FLOAT ||
@@ -32300,11 +32794,16 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox, Item options) {
     const char* names[] = {"breakOnSigint", "timeout", "displayErrors", "filename", "lineOffset", "columnOffset"};
     JsVmEvalOptions eval_options;
     if (!js_vm_read_options(options, names, 6, &eval_options)) return ItemNull;
+    if (!js_vm_validate_run_context_options(options)) return ItemNull;
 
     sandbox = js_vm_contextify(sandbox);
 
     // bit 8: vm context — each runInContext unit gets its own module-var slot
     // namespace so units sharing this context don't clobber each other's slots.
+    Item previous_proto = js_get_prototype_of(sandbox);
+    js_set_prototype(sandbox, js_get_global_this());
+    JsVmContextBinding vm_bindings[16];
+    int vm_binding_count = js_vm_apply_context_bindings(sandbox, vm_bindings, 16);
     Item prev_this = js_get_current_this();
     Item prev_global = js_vm_swap_global_this(sandbox);
     Item saved_with_stack[16];
@@ -32317,6 +32816,8 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox, Item options) {
     js_set_this(prev_this);
     js_with_set_stack(saved_with_stack, saved_with_depth);
     js_vm_swap_global_this(prev_global);
+    js_vm_restore_context_bindings(sandbox, vm_bindings, vm_binding_count);
+    js_set_prototype(sandbox, previous_proto);
     return result;
 }
 
@@ -32332,40 +32833,156 @@ static Item js_vm_runInNewContext(Item code, Item sandbox, Item options) {
 
 // vm.compileFunction(code, params, options) — compile a function from string
 // Returns a function object
-static Item js_vm_compileFunction(Item code, Item params) {
+static Item js_vm_compileFunction(Item code, Item params, Item options) {
     // Build Function constructor args: params..., body
     // For simplicity, wrap in Function() call via eval
-    if (get_type_id(code) != LMD_TYPE_STRING) return ItemNull;
+    if (get_type_id(code) != LMD_TYPE_STRING) {
+        js_throw_invalid_arg_type("code", "string", code);
+        return ItemNull;
+    }
+    if (!js_vm_is_undefined_item(params) && get_type_id(params) != LMD_TYPE_ARRAY) {
+        js_vm_throw_invalid_arg_instance("params", "Array", params);
+        return ItemNull;
+    }
+    if (!js_vm_validate_compile_function_options(options)) return ItemNull;
+    const char* option_names[] = {"filename", "lineOffset", "columnOffset", "cachedData",
+        "produceCachedData", "parsingContext", "contextExtensions"};
+    JsVmEvalOptions eval_options;
+    if (!js_vm_read_options(options, option_names, 7, &eval_options)) return ItemNull;
     String* code_str = it2s(code);
+    if (js_vm_function_body_has_unmatched_close_brace(code_str)) {
+        js_throw_syntax_error((Item){.item = s2it(heap_create_name("Unexpected token '}'", 20))});
+        return ItemNull;
+    }
+    Item context_extensions = (Item){.item = ITEM_JS_UNDEFINED};
+    Item parsing_context = (Item){.item = ITEM_JS_UNDEFINED};
+    Item cached_data = (Item){.item = ITEM_JS_UNDEFINED};
+    bool cached_data_produced = false;
+    bool cached_data_rejected = false;
+    int extension_count = 0;
+    if (js_vm_is_options_object(options)) {
+        context_extensions = js_property_get(options, (Item){.item = s2it(heap_create_name("contextExtensions", 17))});
+        if (js_check_exception()) return ItemNull;
+        if (get_type_id(context_extensions) == LMD_TYPE_ARRAY) {
+            int64_t length = js_array_length(context_extensions);
+            extension_count = length > 16 ? 16 : (int)length;
+        }
+        parsing_context = js_property_get(options, (Item){.item = s2it(heap_create_name("parsingContext", 14))});
+        if (js_check_exception()) return ItemNull;
+        cached_data = js_property_get(options, (Item){.item = s2it(heap_create_name("cachedData", 10))});
+        if (js_check_exception()) return ItemNull;
+        if (!js_vm_is_undefined_item(cached_data)) {
+            bool valid_cached_type = false;
+            bool matched = js_vm_cached_data_matches_source(cached_data, code, &valid_cached_type);
+            cached_data_rejected = !matched;
+        }
+        Item produce = js_property_get(options, (Item){.item = s2it(heap_create_name("produceCachedData", 17))});
+        if (js_check_exception()) return ItemNull;
+        if (get_type_id(produce) == LMD_TYPE_BOOL && it2b(produce)) {
+            cached_data = js_vm_make_cached_data_for_code(code);
+            cached_data_produced = true;
+            cached_data_rejected = false;
+        }
+    }
 
     // If params array provided, build "function(p1,p2,...) { body }" string
     // For now, just wrap body as a function with no params
-    size_t bufsz = code_str->len + 256;
-    char* buf = (char*)mem_alloc(bufsz, MEM_CAT_TEMP);
-    memset(buf, 0, bufsz);
-    if (params.item != 0 && params.item != ITEM_NULL && params.item != ITEM_UNDEFINED) {
+    StrBuf* eval_buf = strbuf_new();
+    StrBuf* display_buf = strbuf_new();
+    Item extension_keys[16];
+    memset(extension_keys, 0, sizeof(extension_keys));
+    bool use_parsing_context = !js_vm_is_undefined_item(parsing_context) &&
+        get_type_id(parsing_context) == LMD_TYPE_MAP;
+    Item global_obj = use_parsing_context ? parsing_context : js_get_global_this();
+    static int vm_compile_extension_counter = 0;
+    for (int i = 0; i < extension_count; i++) {
+        char ext_name[64];
+        int ext_len = snprintf(ext_name, sizeof(ext_name),
+            "__vm_compile_context_ext_%d_%d", vm_compile_extension_counter++, i);
+        Item ext_key = (Item){.item = s2it(heap_create_name(ext_name, ext_len))};
+        extension_keys[i] = ext_key;
+        Item ext_obj = js_array_get_int(context_extensions, i);
+        js_property_set(global_obj, ext_key, ext_obj);
+        strbuf_append_str_n(eval_buf, "with(", 5);
+        strbuf_append_str_n(eval_buf, ext_name, ext_len);
+        strbuf_append_str_n(eval_buf, "){", 2);
+    }
+    strbuf_append_str_n(eval_buf, "(function(", 10);
+    strbuf_append_str_n(display_buf, "function (", 10);
+    if (!js_vm_is_undefined_item(params)) {
         // Extract param names from array
         int nparams = (int)js_array_length(params);
-        int off = 0;
-        off += snprintf(buf + off, bufsz - off, "(function(");
         for (int i = 0; i < nparams; i++) {
-            if (i > 0) off += snprintf(buf + off, bufsz - off, ",");
+            if (i > 0) {
+                strbuf_append_str_n(eval_buf, ",", 1);
+                strbuf_append_str_n(display_buf, ", ", 2);
+            }
             Item p = js_array_get_int(params, i);
             if (get_type_id(p) == LMD_TYPE_STRING) {
                 String* ps = it2s(p);
-                memcpy(buf + off, ps->chars, ps->len);
-                off += (int)ps->len;
+                strbuf_append_str_n(eval_buf, ps->chars, ps->len);
+                strbuf_append_str_n(display_buf, ps->chars, ps->len);
             }
         }
-        off += snprintf(buf + off, bufsz - off, "){");
-        memcpy(buf + off, code_str->chars, code_str->len);
-        off += (int)code_str->len;
-        snprintf(buf + off, bufsz - off, "})");
-    } else {
-        snprintf(buf, bufsz, "(function(){%.*s})", (int)code_str->len, code_str->chars);
     }
-    Item eval_code = (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
-    return js_builtin_eval(eval_code, 1);
+    strbuf_append_str_n(eval_buf, "){", 2);
+    strbuf_append_str_n(eval_buf, code_str->chars, code_str->len);
+    strbuf_append_str_n(eval_buf, "})", 2);
+    for (int i = 0; i < extension_count; i++) {
+        strbuf_append_str_n(eval_buf, "}", 1);
+    }
+    strbuf_append_str_n(display_buf, ") {\n", 4);
+    strbuf_append_str_n(display_buf, code_str->chars, code_str->len);
+    strbuf_append_str_n(display_buf, "\n}", 2);
+
+    Item eval_code = (Item){.item = s2it(heap_create_name(eval_buf->str, eval_buf->length))};
+    String* display_source = heap_create_name(display_buf->str, display_buf->length);
+    strbuf_free(eval_buf);
+    strbuf_free(display_buf);
+
+    Item previous_proto = ItemNull;
+    Item prev_global = ItemNull;
+    Item prev_this = ItemNull;
+    Item saved_with_stack[16];
+    int saved_with_depth = 0;
+    JsVmContextBinding vm_bindings[16];
+    int vm_binding_count = 0;
+    if (use_parsing_context) {
+        previous_proto = js_get_prototype_of(parsing_context);
+        js_set_prototype(parsing_context, js_get_global_this());
+        vm_binding_count = js_vm_apply_context_bindings(parsing_context, vm_bindings, 16);
+        prev_this = js_get_current_this();
+        prev_global = js_vm_swap_global_this(parsing_context);
+        saved_with_depth = js_with_save_stack(saved_with_stack, 16);
+        js_with_push(parsing_context);
+        js_set_this(parsing_context);
+    }
+    Item result = js_builtin_eval(eval_code, 1);
+    if (use_parsing_context) {
+        js_set_this(prev_this);
+        js_with_set_stack(saved_with_stack, saved_with_depth);
+        js_vm_swap_global_this(prev_global);
+        js_vm_restore_context_bindings(parsing_context, vm_bindings, vm_binding_count);
+        js_set_prototype(parsing_context, previous_proto);
+    }
+    for (int i = extension_count - 1; i >= 0; i--) {
+        js_delete_property(global_obj, extension_keys[i]);
+    }
+    if (get_type_id(result) == LMD_TYPE_FUNC) {
+        JsFunction* fn = (JsFunction*)result.function;
+        fn->source_text = display_source;
+        fn->vm_stack_filename = get_type_id(eval_options.filename) == LMD_TYPE_STRING ?
+            it2s(eval_options.filename) : heap_create_name("<anonymous>", 11);
+        fn->vm_stack_source = heap_create_name(code_str->chars, code_str->len);
+        fn->vm_stack_line_offset = eval_options.line_offset;
+        fn->vm_stack_column_offset = eval_options.column_offset;
+        js_property_set(result, (Item){.item = s2it(heap_create_name("cachedData", 10))}, cached_data);
+        js_property_set(result, (Item){.item = s2it(heap_create_name("cachedDataProduced", 18))},
+                        (Item){.item = b2it(cached_data_produced)});
+        js_property_set(result, (Item){.item = s2it(heap_create_name("cachedDataRejected", 18))},
+                        (Item){.item = b2it(cached_data_rejected)});
+    }
+    return result;
 }
 
 static Item js_vm_Script_createCachedData(void) {
@@ -32489,11 +33106,13 @@ static Item js_vm_createScript(Item code, Item options) {
 // Forward declarations
 static Item js_dc_tc_subscribe(Item handlers);
 static Item js_dc_tc_unsubscribe(Item handlers);
+static Item js_dc_tc_hasSubscribers_getter(void);
 static Item js_dc_tc_traceSync(Item fn, Item context, Item this_arg, Item rest_args);
 static Item js_dc_tc_tracePromise(Item fn, Item context, Item this_arg, Item rest_args);
 static Item js_dc_tc_traceCallback(Item fn, Item rest_args);
 static void js_dc_channel_publish_on(Item channel, Item message);
 static Item js_dc_channel_runStores(Item message, Item callback, Item this_arg, Item arg1, Item arg2);
+static Item js_dc_channel_withStoreScope(Item message);
 static Item js_dc_channel_factory(Item name);
 static Item js_dc_stores_key(void);
 extern "C" void js_set_prototype(Item object, Item prototype);
@@ -32514,8 +33133,10 @@ static int js_dc_channel_count = 0;
 static bool js_dc_channel_roots_registered = false;
 static Item js_dc_channel_proto = {0};
 static Item js_dc_tracing_channel_proto = {0};
+static Item js_dc_bounded_channel_proto = {0};
 static Item js_dc_channel_ctor = {0};
 static Item js_dc_tracing_channel_ctor = {0};
+static Item js_dc_bounded_channel_ctor = {0};
 
 static Item js_dc_key(const char* name) {
     return (Item){.item = s2it(heap_create_name(name, (int)strlen(name)))};
@@ -32554,8 +33175,10 @@ static void js_dc_register_roots(void) {
     heap_register_gc_root_range((uint64_t*)js_dc_channels, JS_DC_CHANNEL_MAX);
     heap_register_gc_root(&js_dc_channel_proto.item);
     heap_register_gc_root(&js_dc_tracing_channel_proto.item);
+    heap_register_gc_root(&js_dc_bounded_channel_proto.item);
     heap_register_gc_root(&js_dc_channel_ctor.item);
     heap_register_gc_root(&js_dc_tracing_channel_ctor.item);
+    heap_register_gc_root(&js_dc_bounded_channel_ctor.item);
     js_dc_channel_roots_registered = true;
 }
 
@@ -32672,9 +33295,31 @@ static Item js_dc_hasSubscribers(Item name) {
     return (Item){.item = ITEM_FALSE};
 }
 
+static bool js_dc_named_channels_have_active_subscribers(Item owner,
+        const char** names, const int* lens, int count) {
+    TypeId owner_type = get_type_id(owner);
+    if (owner_type != LMD_TYPE_MAP && owner_type != LMD_TYPE_OBJECT) return false;
+    for (int i = 0; i < count; i++) {
+        Item key = (Item){.item = s2it(heap_create_name(names[i], lens[i]))};
+        Item ch = js_property_get(owner, key);
+        if (js_dc_is_channel(ch) && js_dc_channel_has_active_subscribers(ch)) return true;
+    }
+    return false;
+}
+
+static Item js_dc_tc_hasSubscribers_getter(void) {
+    static const char* sub_names[] = {"start", "end", "asyncStart", "asyncEnd", "error"};
+    static const int sub_lens[] = {5, 3, 10, 8, 5};
+    return (Item){.item = b2it(js_dc_named_channels_have_active_subscribers(
+        js_get_this(), sub_names, sub_lens, 5))};
+}
+
 static Item js_dc_stores_key(void) {
     return (Item){.item = s2it(heap_create_name("_stores", 7))};
 }
+
+static Item js_als_apply_context(Item context);
+static void js_als_restore_context(Item previous);
 
 #define JS_DC_DEFERRED_ERROR_MAX 64
 static Item js_dc_deferred_errors[JS_DC_DEFERRED_ERROR_MAX];
@@ -32794,6 +33439,65 @@ static Item js_dc_channel_runStores(Item message, Item callback, Item this_arg, 
     return js_als_context_call_args(context, callback, this_arg, args, 2);
 }
 
+static Item js_dc_scope_state_key(void) {
+    return (Item){.item = s2it(heap_create_name("__lambda_dc_scope_state__", 25))};
+}
+
+static Item js_dc_dispose_key(void) {
+    Item name = (Item){.item = s2it(heap_create_name("dispose", 7))};
+    return js_symbol_well_known(name);
+}
+
+static Item js_dc_scope_dispose(void) {
+    Item self = js_get_this();
+    Item state = js_property_get(self, js_dc_scope_state_key());
+    if (get_type_id(state) != LMD_TYPE_MAP && get_type_id(state) != LMD_TYPE_OBJECT) {
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+
+    Item disposed_key = js_dc_key("disposed");
+    Item disposed = js_property_get(state, disposed_key);
+    if (get_type_id(disposed) == LMD_TYPE_BOOL && it2b(disposed)) {
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    js_property_set(state, disposed_key, (Item){.item = ITEM_TRUE});
+
+    Item end_ch = js_property_get(state, js_dc_key("endChannel"));
+    Item context = js_property_get(state, js_dc_key("context"));
+    if (!js_dc_is_nullish(end_ch)) {
+        js_dc_channel_publish_on(end_ch, context);
+    }
+
+    Item previous = js_property_get(state, js_dc_key("previous"));
+    js_als_restore_context(previous);
+    return js_check_exception() ? ItemNull : (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static Item js_dc_make_scope(Item previous, Item end_ch, Item context) {
+    Item scope = js_new_object();
+    Item state = js_new_object();
+    js_property_set(state, js_dc_key("previous"), previous);
+    js_property_set(state, js_dc_key("endChannel"), end_ch);
+    js_property_set(state, js_dc_key("context"), context);
+    js_property_set(state, js_dc_key("disposed"), (Item){.item = ITEM_FALSE});
+    js_property_set(scope, js_dc_scope_state_key(), state);
+    js_property_set(scope, js_dc_dispose_key(), js_new_function((void*)js_dc_scope_dispose, 0));
+    return scope;
+}
+
+static Item js_dc_channel_withStoreScope(Item message) {
+    Item self = js_get_this();
+    Item context = js_dc_build_store_context(self, message);
+    Item previous = js_als_apply_context(context);
+    js_dc_channel_publish_on(self, message);
+    if (js_check_exception()) {
+        js_als_restore_context(previous);
+        return ItemNull;
+    }
+    return js_dc_make_scope(previous, (Item){.item = ITEM_JS_UNDEFINED},
+                            (Item){.item = ITEM_JS_UNDEFINED});
+}
+
 // dc.channel(name) — create or return existing channel
 static Item js_dc_channel_factory(Item name) {
     js_dc_register_roots();
@@ -32819,6 +33523,7 @@ static Item js_dc_channel_factory(Item name) {
     js_property_set(ch, js_dc_key("bindStore"), js_new_function((void*)js_dc_channel_bindStore, 2));
     js_property_set(ch, js_dc_key("unbindStore"), js_new_function((void*)js_dc_channel_unbindStore, 1));
     js_property_set(ch, js_dc_key("runStores"), js_new_function((void*)js_dc_channel_runStores, 5));
+    js_property_set(ch, js_dc_key("withStoreScope"), js_new_function((void*)js_dc_channel_withStoreScope, 1));
     if (js_dc_channel_count < JS_DC_CHANNEL_MAX) {
         js_dc_channel_names[js_dc_channel_count] = name;
         js_dc_channels[js_dc_channel_count] = ch;
@@ -32902,6 +33607,39 @@ static Item js_dc_tc_unsubscribe(Item handlers) {
     static const char* sub_names[] = {"start", "end", "asyncStart", "asyncEnd", "error"};
     static const int sub_lens[] = {5, 3, 10, 8, 5};
     for (int i = 0; i < 5; i++) {
+        Item key = (Item){.item = s2it(heap_create_name(sub_names[i], sub_lens[i]))};
+        Item handler = js_property_get(handlers, key);
+        if (get_type_id(handler) == LMD_TYPE_FUNC) {
+            Item ch = js_property_get(self, key);
+            if (!js_dc_channel_remove_subscriber(ch, handler)) done = false;
+        }
+    }
+    return (Item){.item = b2it(done)};
+}
+
+static Item js_dc_bc_subscribe(Item handlers) {
+    Item self = js_get_this();
+    static const char* sub_names[] = {"start", "end"};
+    static const int sub_lens[] = {5, 3};
+    for (int i = 0; i < 2; i++) {
+        Item key = (Item){.item = s2it(heap_create_name(sub_names[i], sub_lens[i]))};
+        Item handler = js_property_get(handlers, key);
+        if (get_type_id(handler) == LMD_TYPE_FUNC) {
+            Item ch = js_property_get(self, key);
+            Item subs = js_dc_channel_subscribers(ch);
+            js_array_push(subs, handler);
+            js_dc_channel_refresh_has_subscribers(ch);
+        }
+    }
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static Item js_dc_bc_unsubscribe(Item handlers) {
+    Item self = js_get_this();
+    bool done = true;
+    static const char* sub_names[] = {"start", "end"};
+    static const int sub_lens[] = {5, 3};
+    for (int i = 0; i < 2; i++) {
         Item key = (Item){.item = s2it(heap_create_name(sub_names[i], sub_lens[i]))};
         Item handler = js_property_get(handlers, key);
         if (get_type_id(handler) == LMD_TYPE_FUNC) {
@@ -33234,35 +33972,96 @@ static Item js_dc_tc_traceCallback(Item fn, Item rest_args) {
     return result;
 }
 
-// BoundedChannel.run(context, fn, ...args) — publish to start, call fn, publish to end
-static Item js_dc_bc_run(Item context, Item fn) {
+// BoundedChannel.run(context, fn, thisArg, ...args) — publish to start, call fn, publish to end
+static Item js_dc_bc_run(Item context, Item fn, Item this_arg, Item rest_args) {
     Item self = js_get_this();
     Item start_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("start", 5))});
     Item end_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("end", 3))});
-    Item error_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("error", 5))});
-    // publish start with context
+    Item args_storage[16];
+    Item* args = nullptr;
+    int argc = js_dc_rest_args(rest_args, args_storage, &args);
+
+    Item store_context = js_dc_build_store_context(start_ch, context);
+    Item previous = js_als_apply_context(store_context);
     js_dc_channel_publish_on(start_ch, context);
-    // call fn with context
-    Item result = js_call_function(fn, (Item){.item = ITEM_JS_UNDEFINED}, &context, 1);
-    // check for error
-    if (get_type_id(result) == LMD_TYPE_ERROR) {
-        js_property_set(context, (Item){.item = s2it(heap_create_name("error", 5))}, result);
-        js_dc_channel_publish_on(error_ch, context);
+    if (js_check_exception()) {
+        js_als_restore_context(previous);
+        return ItemNull;
     }
-    // publish end with context + result
-    js_property_set(context, (Item){.item = s2it(heap_create_name("result", 6))}, result);
+
+    Item result = js_call_function(fn, this_arg, args, argc);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        js_dc_channel_publish_on(end_ch, context);
+        js_als_restore_context(previous);
+        js_throw_value(error);
+        return ItemNull;
+    }
+
     js_dc_channel_publish_on(end_ch, context);
-    return result;
+    js_als_restore_context(previous);
+    return js_check_exception() ? ItemNull : result;
+}
+
+static Item js_dc_bc_withScope(Item context) {
+    Item self = js_get_this();
+    Item start_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("start", 5))});
+    Item end_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("end", 3))});
+    Item store_context = js_dc_build_store_context(start_ch, context);
+    Item previous = js_als_apply_context(store_context);
+    js_dc_channel_publish_on(start_ch, context);
+    if (js_check_exception()) {
+        js_als_restore_context(previous);
+        return ItemNull;
+    }
+    return js_dc_make_scope(previous, end_ch, context);
 }
 
 // dc.boundedChannel(name) — create a TracingChannel with run() method
-static Item js_dc_bounded_channel(Item name) {
-    Item tc = js_dc_tracing_channel(name);
+static Item js_dc_bounded_channel(Item nameOrChannels) {
+    Item tc = js_new_object();
+    if (js_dc_bounded_channel_proto.item != 0) js_set_prototype(tc, js_dc_bounded_channel_proto);
+    static const char* sub_names[] = {"start", "end"};
+    static const int sub_lens[] = {5, 3};
+    TypeId name_type = get_type_id(nameOrChannels);
+    for (int i = 0; i < 2; i++) {
+        Item key = (Item){.item = s2it(heap_create_name(sub_names[i], sub_lens[i]))};
+        Item ch;
+        if (name_type == LMD_TYPE_STRING) {
+            String* base = it2s(nameOrChannels);
+            char buf[256];
+            snprintf(buf, sizeof(buf), "tracing:%.*s:%s", (int)base->len, base->chars, sub_names[i]);
+            Item sub_name = (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
+            ch = js_dc_channel_factory(sub_name);
+        } else if (name_type == LMD_TYPE_MAP || name_type == LMD_TYPE_OBJECT) {
+            ch = js_property_get(nameOrChannels, key);
+            if (js_dc_is_nullish(ch)) {
+                return js_throw_type_error("Cannot convert undefined or null to object");
+            }
+            if (!js_dc_is_channel(ch)) {
+                char message[128];
+                int len = snprintf(message, sizeof(message),
+                    "The \"nameOrChannels.%s\" property must be an instance of Channel.", sub_names[i]);
+                if (len < 0) len = 0;
+                if (len >= (int)sizeof(message)) len = (int)sizeof(message) - 1;
+                return js_dc_throw_invalid_arg_type(message);
+            }
+        } else {
+            return js_dc_throw_invalid_arg_type(
+                "The \"nameOrChannels\" argument must be of type string or Object.");
+        }
+        js_property_set(tc, key, ch);
+    }
+    js_property_set(tc, (Item){.item = s2it(heap_create_name("subscribe", 9))},
+                    js_new_function((void*)js_dc_bc_subscribe, 1));
+    js_property_set(tc, (Item){.item = s2it(heap_create_name("unsubscribe", 11))},
+                    js_new_function((void*)js_dc_bc_unsubscribe, 1));
     js_property_set(tc, (Item){.item = s2it(heap_create_name("run", 3))},
-                    js_new_function((void*)js_dc_bc_run, 2));
-    // runStores — no-op
+                    js_new_function((void*)js_dc_bc_run, -4));
     js_property_set(tc, (Item){.item = s2it(heap_create_name("runStores", 9))},
-                    js_new_function((void*)js_dc_bc_run, 2));
+                    js_new_function((void*)js_dc_bc_run, -4));
+    js_property_set(tc, (Item){.item = s2it(heap_create_name("withScope", 9))},
+                    js_new_function((void*)js_dc_bc_withScope, 1));
     return tc;
 }
 
@@ -33298,32 +34097,63 @@ static Item js_stub_noop(void) {
 static Item js_domain_run(Item fn) {
     Item self = js_get_this();
     if (get_type_id(fn) == LMD_TYPE_FUNC) {
+        Item previous = js_domain_capture_stack();
+        int parent_count = js_domain_stack_count;
+        js_domain_push(self);
         Item result = js_call_function(fn, (Item){.item = ITEM_JS_UNDEFINED}, NULL, 0);
         if (js_check_exception()) {
             Item error = js_clear_exception();
-            Item on_error = js_property_get(self, (Item){.item = s2it(heap_create_name("__domain_error__", 16))});
-            if (get_type_id(on_error) == LMD_TYPE_FUNC) {
-                js_call_function(on_error, self, &error, 1);
-            } else {
-                js_throw_value(error);
-            }
+            js_domain_stack_count = parent_count + 1;
+            if (js_domain_stack_count > 64) js_domain_stack_count = 64;
+            js_domain_sync_visible_state();
+            js_domain_emit_error_at(self, error, parent_count);
+            if (!js_check_exception()) js_domain_restore_stack(previous);
             return (Item){.item = ITEM_JS_UNDEFINED};
         }
+        js_domain_restore_stack(previous);
         return result;
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-// Domain.enter/exit — no-ops
-static Item js_domain_enter(void) { return (Item){.item = ITEM_JS_UNDEFINED}; }
-static Item js_domain_exit(void) { return (Item){.item = ITEM_JS_UNDEFINED}; }
+// Domain.enter/exit
+static Item js_domain_enter(void) {
+    Item self = js_get_this();
+    js_domain_push(self);
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static Item js_domain_exit(void) {
+    if (js_domain_stack_count > 0) js_domain_stack_count--;
+    js_domain_sync_visible_state();
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
 
 // Domain.add/remove — no-ops
 static Item js_domain_add(Item emitter) { return (Item){.item = ITEM_JS_UNDEFINED}; }
 static Item js_domain_remove(Item emitter) { return (Item){.item = ITEM_JS_UNDEFINED}; }
 
-// Domain.intercept/bind — return the callback
-static Item js_domain_intercept(Item fn) { return fn; }
+static Item js_domain_bound_call(Item domain, Item fn) {
+    if (get_type_id(fn) != LMD_TYPE_FUNC) return make_js_undefined();
+    Item result = js_domain_call_function(domain, fn, (Item){.item = ITEM_JS_UNDEFINED}, NULL, 0);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        js_domain_emit_error(domain, error);
+        if (js_check_exception()) js_clear_exception();
+        return make_js_undefined();
+    }
+    return result;
+}
+
+static Item js_domain_bind(Item fn) {
+    if (get_type_id(fn) != LMD_TYPE_FUNC) return fn;
+    Item self = js_get_this();
+    Item base = js_new_function((void*)js_domain_bound_call, 2);
+    Item args[2] = {self, fn};
+    return js_bind_function(base, ItemNull, args, 2);
+}
+
+static Item js_domain_intercept(Item fn) { return js_domain_bind(fn); }
 
 static Item js_domain_on(Item event_item, Item listener) {
     Item self = js_get_this();
@@ -33353,7 +34183,7 @@ static Item js_domain_create(void) {
     js_property_set(d, (Item){.item = s2it(heap_create_name("intercept", 9))},
                     js_new_function((void*)js_domain_intercept, 1));
     js_property_set(d, (Item){.item = s2it(heap_create_name("bind", 4))},
-                    js_new_function((void*)js_domain_intercept, 1));
+                    js_new_function((void*)js_domain_bind, 1));
     // EventEmitter-like methods needed by domain error handling.
     js_property_set(d, (Item){.item = s2it(heap_create_name("on", 2))},
                     js_new_function((void*)js_domain_on, 2));
@@ -33766,6 +34596,40 @@ extern "C" Item js_als_capture_context(void) {
     return context;
 }
 
+static Item js_als_apply_context(Item context) {
+    Item previous = js_array_new(0);
+    if (get_type_id(context) != LMD_TYPE_ARRAY) return previous;
+
+    Item store_key = js_als_store_key();
+    int64_t len = js_array_length(context);
+    for (int64_t i = 0; i < len; i++) {
+        Item pair = js_array_get_int(context, i);
+        if (get_type_id(pair) != LMD_TYPE_ARRAY || js_array_length(pair) < 2) continue;
+        Item instance = js_array_get_int(pair, 0);
+        Item store = js_array_get_int(pair, 1);
+        Item saved = js_array_new(0);
+        js_array_push(saved, instance);
+        js_array_push(saved, js_property_get(instance, store_key));
+        js_array_push(previous, saved);
+        js_property_set(instance, store_key, store);
+    }
+    return previous;
+}
+
+static void js_als_restore_context(Item previous) {
+    if (get_type_id(previous) != LMD_TYPE_ARRAY) return;
+
+    Item store_key = js_als_store_key();
+    int64_t previous_len = js_array_length(previous);
+    for (int64_t i = previous_len - 1; i >= 0; i--) {
+        Item saved = js_array_get_int(previous, i);
+        if (get_type_id(saved) != LMD_TYPE_ARRAY || js_array_length(saved) < 2) continue;
+        Item instance = js_array_get_int(saved, 0);
+        Item store = js_array_get_int(saved, 1);
+        js_property_set(instance, store_key, store);
+    }
+}
+
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg) {
     if (get_type_id(callback) != LMD_TYPE_FUNC) return (Item){.item = ITEM_JS_UNDEFINED};
     if (get_type_id(context) != LMD_TYPE_ARRAY) {
@@ -33776,20 +34640,7 @@ extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, 
         return js_call_function(callback, this_val, nullptr, 0);
     }
 
-    Item store_key = js_als_store_key();
-    Item previous = js_array_new(0);
-    int64_t len = js_array_length(context);
-    for (int64_t i = 0; i < len; i++) {
-        Item pair = js_array_get_int(context, i);
-        if (get_type_id(pair) != LMD_TYPE_ARRAY || js_array_length(pair) < 2) continue;
-        Item instance = js_array_get_int(pair, 0);
-        Item store = js_array_get_int(pair, 1);
-        Item saved = js_array_new(0);
-        js_array_push(saved, instance);
-        js_array_push(saved, js_property_get(instance, store_key));
-        js_array_push(previous, saved);
-        js_property_set(instance, store_key, store);
-    }
+    Item previous = js_als_apply_context(context);
 
     Item result;
     if (has_arg) {
@@ -33799,14 +34650,7 @@ extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, 
         result = js_call_function(callback, this_val, nullptr, 0);
     }
 
-    int64_t previous_len = js_array_length(previous);
-    for (int64_t i = previous_len - 1; i >= 0; i--) {
-        Item saved = js_array_get_int(previous, i);
-        if (get_type_id(saved) != LMD_TYPE_ARRAY || js_array_length(saved) < 2) continue;
-        Item instance = js_array_get_int(saved, 0);
-        Item store = js_array_get_int(saved, 1);
-        js_property_set(instance, store_key, store);
-    }
+    js_als_restore_context(previous);
     return result;
 }
 
@@ -33816,31 +34660,9 @@ extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_
         return js_call_function(callback, this_val, args, argc);
     }
 
-    Item store_key = js_als_store_key();
-    Item previous = js_array_new(0);
-    int64_t len = js_array_length(context);
-    for (int64_t i = 0; i < len; i++) {
-        Item pair = js_array_get_int(context, i);
-        if (get_type_id(pair) != LMD_TYPE_ARRAY || js_array_length(pair) < 2) continue;
-        Item instance = js_array_get_int(pair, 0);
-        Item store = js_array_get_int(pair, 1);
-        Item saved = js_array_new(0);
-        js_array_push(saved, instance);
-        js_array_push(saved, js_property_get(instance, store_key));
-        js_array_push(previous, saved);
-        js_property_set(instance, store_key, store);
-    }
-
+    Item previous = js_als_apply_context(context);
     Item result = js_call_function(callback, this_val, args, argc);
-
-    int64_t previous_len = js_array_length(previous);
-    for (int64_t i = previous_len - 1; i >= 0; i--) {
-        Item saved = js_array_get_int(previous, i);
-        if (get_type_id(saved) != LMD_TYPE_ARRAY || js_array_length(saved) < 2) continue;
-        Item instance = js_array_get_int(saved, 0);
-        Item store = js_array_get_int(saved, 1);
-        js_property_set(instance, store_key, store);
-    }
+    js_als_restore_context(previous);
     return result;
 }
 
@@ -33893,6 +34715,379 @@ static Item js_als_disable(void) {
     Item self = js_get_this();
     js_property_set(self, js_als_store_key(), (Item){.item = ITEM_JS_UNDEFINED});
     return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// trace_events: enough of Node's tracing model for dynamic async_hooks traces.
+#define JS_TRACE_MAX_CATEGORIES 64
+#define JS_TRACE_MAX_EVENTS 2048
+
+typedef struct JsTraceCategory {
+    char name[64];
+    int refs;
+    bool from_exec_argv;
+} JsTraceCategory;
+
+typedef struct JsTraceEvent {
+    char ph;
+    char cat[128];
+    char name[96];
+    uint64_t ts;
+    int64_t id;
+    bool has_id;
+} JsTraceEvent;
+
+static JsTraceCategory js_trace_categories[JS_TRACE_MAX_CATEGORIES];
+static int js_trace_category_count = 0;
+static JsTraceEvent js_trace_events[JS_TRACE_MAX_EVENTS];
+static int js_trace_event_count = 0;
+static bool js_trace_initialized = false;
+static bool js_trace_file_written = false;
+
+static Item js_trace_key(const char* name) {
+    return (Item){.item = s2it(heap_create_name(name, (int)strlen(name)))};
+}
+
+static void js_trace_copy_cstr(char* dst, int dst_size, const char* src, int src_len) {
+    if (!dst || dst_size <= 0) return;
+    if (!src) src = "";
+    if (src_len < 0) src_len = (int)strlen(src);
+    if (src_len >= dst_size) src_len = dst_size - 1;
+    memcpy(dst, src, (size_t)src_len);
+    dst[src_len] = '\0';
+}
+
+static bool js_trace_category_matches(const char* enabled, const char* category) {
+    if (!enabled || !enabled[0] || !category || !category[0]) return false;
+    if (strcmp(enabled, category) == 0) return true;
+    if (strcmp(enabled, "node") == 0 && strncmp(category, "node.", 5) == 0) return true;
+    return strcmp(enabled, "*") == 0;
+}
+
+static int js_trace_find_category(const char* name) {
+    for (int i = 0; i < js_trace_category_count; i++) {
+        if (strcmp(js_trace_categories[i].name, name) == 0) return i;
+    }
+    return -1;
+}
+
+static void js_trace_add_category(const char* name, bool from_exec_argv) {
+    if (!name || !name[0]) return;
+    int idx = js_trace_find_category(name);
+    if (idx >= 0) {
+        js_trace_categories[idx].refs++;
+        js_trace_categories[idx].from_exec_argv =
+            js_trace_categories[idx].from_exec_argv || from_exec_argv;
+        return;
+    }
+    if (js_trace_category_count >= JS_TRACE_MAX_CATEGORIES) return;
+    JsTraceCategory* cat = &js_trace_categories[js_trace_category_count++];
+    js_trace_copy_cstr(cat->name, (int)sizeof(cat->name), name, -1);
+    cat->refs = 1;
+    cat->from_exec_argv = from_exec_argv;
+}
+
+static void js_trace_remove_category(const char* name) {
+    int idx = js_trace_find_category(name);
+    if (idx < 0 || js_trace_categories[idx].from_exec_argv) return;
+    if (js_trace_categories[idx].refs > 0) js_trace_categories[idx].refs--;
+    if (js_trace_categories[idx].refs > 0) return;
+    for (int i = idx; i + 1 < js_trace_category_count; i++) {
+        js_trace_categories[i] = js_trace_categories[i + 1];
+    }
+    js_trace_category_count--;
+}
+
+static void js_trace_add_categories_from_chars(const char* chars, int len, bool from_exec_argv) {
+    if (!chars || len <= 0) return;
+    int start = 0;
+    for (int i = 0; i <= len; i++) {
+        if (i == len || chars[i] == ',') {
+            int end = i;
+            while (start < end && (chars[start] == ' ' || chars[start] == '\t')) start++;
+            while (end > start && (chars[end - 1] == ' ' || chars[end - 1] == '\t')) end--;
+            if (end > start) {
+                char name[64];
+                js_trace_copy_cstr(name, (int)sizeof(name), chars + start, end - start);
+                js_trace_add_category(name, from_exec_argv);
+            }
+            start = i + 1;
+        }
+    }
+}
+
+static void js_trace_init_from_exec_argv(void) {
+    if (js_trace_initialized) return;
+    js_trace_initialized = true;
+    Item exec_argv = js_get_process_exec_argv();
+    if (get_type_id(exec_argv) != LMD_TYPE_ARRAY) return;
+    int64_t len = js_array_length(exec_argv);
+    for (int64_t i = 0; i < len; i++) {
+        Item arg = js_array_get_int(exec_argv, i);
+        if (get_type_id(arg) != LMD_TYPE_STRING) continue;
+        String* s = it2s(arg);
+        if (!s) continue;
+        const char* prefix = "--trace-event-categories=";
+        int prefix_len = (int)strlen(prefix);
+        if ((int)s->len > prefix_len && memcmp(s->chars, prefix, (size_t)prefix_len) == 0) {
+            js_trace_add_categories_from_chars(s->chars + prefix_len, (int)s->len - prefix_len, true);
+        } else if (s->len == 24 && memcmp(s->chars, "--trace-event-categories", 24) == 0 &&
+                   i + 1 < len) {
+            Item next = js_array_get_int(exec_argv, i + 1);
+            if (get_type_id(next) == LMD_TYPE_STRING) {
+                String* ns = it2s(next);
+                if (ns) js_trace_add_categories_from_chars(ns->chars, (int)ns->len, true);
+            }
+            i++;
+        }
+    }
+}
+
+extern "C" bool js_trace_is_category_enabled_cstr(const char* category) {
+    js_trace_init_from_exec_argv();
+    for (int i = 0; i < js_trace_category_count; i++) {
+        if (js_trace_categories[i].refs > 0 &&
+            js_trace_category_matches(js_trace_categories[i].name, category)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void js_trace_append_json_string(StrBuf* sb, const char* chars) {
+    if (!chars) chars = "";
+    strbuf_append_char(sb, '"');
+    for (int i = 0; chars[i]; i++) {
+        unsigned char c = (unsigned char)chars[i];
+        switch (c) {
+            case '"': strbuf_append_str_n(sb, "\\\"", 2); break;
+            case '\\': strbuf_append_str_n(sb, "\\\\", 2); break;
+            case '\n': strbuf_append_str_n(sb, "\\n", 2); break;
+            case '\r': strbuf_append_str_n(sb, "\\r", 2); break;
+            case '\t': strbuf_append_str_n(sb, "\\t", 2); break;
+            default:
+                if (c < 0x20) {
+                    char esc[8];
+                    snprintf(esc, sizeof(esc), "\\u%04x", c);
+                    strbuf_append_str_n(sb, esc, 6);
+                } else {
+                    strbuf_append_char(sb, (char)c);
+                }
+                break;
+        }
+    }
+    strbuf_append_char(sb, '"');
+}
+
+extern "C" void js_trace_emit_async_hooks_init(const char* type_chars, int type_len,
+                                                int64_t async_id, int64_t trigger_id) {
+    if (!js_trace_is_category_enabled_cstr("node.async_hooks")) return;
+    if (js_trace_event_count >= JS_TRACE_MAX_EVENTS) return;
+    JsTraceEvent* ev = &js_trace_events[js_trace_event_count++];
+    ev->ph = 'b';
+    js_trace_copy_cstr(ev->cat, (int)sizeof(ev->cat), "node,node.async_hooks", -1);
+    js_trace_copy_cstr(ev->name, (int)sizeof(ev->name), type_chars, type_len);
+    ev->ts = uv_hrtime() / 1000;
+    ev->id = async_id;
+    ev->has_id = true;
+    (void)trigger_id;
+    js_trace_file_written = false;
+}
+
+extern "C" void js_trace_flush(void) {
+    js_trace_init_from_exec_argv();
+    if (js_trace_file_written || js_trace_event_count <= 0) return;
+    FILE* fp = fopen("node_trace.1.log", "wb");
+    if (!fp) {
+        log_error("trace_events: failed to open node_trace.1.log");
+        return;
+    }
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str_n(sb, "{\"traceEvents\":[", 16);
+    long pid = (long)uv_os_getpid();
+    for (int i = 0; i < js_trace_event_count; i++) {
+        JsTraceEvent* ev = &js_trace_events[i];
+        if (i > 0) strbuf_append_char(sb, ',');
+        strbuf_append_str_n(sb, "{\"pid\":", 7);
+        strbuf_append_int64(sb, (int64_t)pid);
+        strbuf_append_str_n(sb, ",\"tid\":0,\"ts\":", 14);
+        strbuf_append_int64(sb, (int64_t)ev->ts);
+        strbuf_append_str_n(sb, ",\"ph\":\"", 7);
+        strbuf_append_char(sb, ev->ph);
+        strbuf_append_str_n(sb, "\",\"cat\":", 8);
+        js_trace_append_json_string(sb, ev->cat);
+        strbuf_append_str_n(sb, ",\"name\":", 8);
+        js_trace_append_json_string(sb, ev->name);
+        if (ev->has_id) {
+            char id_buf[32];
+            snprintf(id_buf, sizeof(id_buf), "0x%llx", (long long)ev->id);
+            strbuf_append_str_n(sb, ",\"id\":", 6);
+            js_trace_append_json_string(sb, id_buf);
+        }
+        strbuf_append_str_n(sb, ",\"args\":{}}", 11);
+    }
+    strbuf_append_str_n(sb, "]}", 2);
+    fwrite(sb->str, 1, sb->length, fp);
+    fclose(fp);
+    strbuf_free(sb);
+    js_trace_file_written = true;
+}
+
+static Item js_trace_getEnabledCategories(void) {
+    js_trace_init_from_exec_argv();
+    StrBuf* sb = strbuf_new();
+    bool first = true;
+    for (int i = 0; i < js_trace_category_count; i++) {
+        if (js_trace_categories[i].refs <= 0) continue;
+        if (!first) strbuf_append_char(sb, ',');
+        first = false;
+        strbuf_append_str_n(sb, js_trace_categories[i].name, strlen(js_trace_categories[i].name));
+    }
+    Item result = (Item){.item = s2it(heap_create_name(sb->str, (int)sb->length))};
+    strbuf_free(sb);
+    return result;
+}
+
+static bool js_trace_value_to_category_string(Item value, char* out, int out_size) {
+    if (get_type_id(value) != LMD_TYPE_STRING) return false;
+    String* s = it2s(value);
+    if (!s || s->len == 0) return false;
+    js_trace_copy_cstr(out, out_size, s->chars, (int)s->len);
+    return true;
+}
+
+static Item js_trace_throw_invalid_arg(void) {
+    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+        "The \"options.categories\" property must be an array of strings.");
+}
+
+static Item js_trace_enable(void) {
+    Item self = js_get_this();
+    Item enabled = js_property_get(self, js_trace_key("enabled"));
+    if (get_type_id(enabled) != LMD_TYPE_BOOL || !it2b(enabled)) {
+        Item cats = js_property_get(self, js_trace_key("__lambda_trace_categories__"));
+        if (get_type_id(cats) == LMD_TYPE_STRING) {
+            String* s = it2s(cats);
+            if (s) js_trace_add_categories_from_chars(s->chars, (int)s->len, false);
+        }
+        js_property_set(self, js_trace_key("enabled"), (Item){.item = b2it(true)});
+    }
+    return self;
+}
+
+static Item js_trace_disable(void) {
+    Item self = js_get_this();
+    Item enabled = js_property_get(self, js_trace_key("enabled"));
+    if (get_type_id(enabled) == LMD_TYPE_BOOL && it2b(enabled)) {
+        Item cats = js_property_get(self, js_trace_key("__lambda_trace_categories__"));
+        if (get_type_id(cats) == LMD_TYPE_STRING) {
+            String* s = it2s(cats);
+            if (s) {
+                int start = 0;
+                for (int i = 0; i <= (int)s->len; i++) {
+                    if (i == (int)s->len || s->chars[i] == ',') {
+                        char cat[64];
+                        js_trace_copy_cstr(cat, (int)sizeof(cat), s->chars + start, i - start);
+                        js_trace_remove_category(cat);
+                        start = i + 1;
+                    }
+                }
+            }
+        }
+        js_property_set(self, js_trace_key("enabled"), (Item){.item = b2it(false)});
+    }
+    return self;
+}
+
+static Item js_trace_createTracing(Item options) {
+    TypeId options_type = get_type_id(options);
+    if (options_type != LMD_TYPE_MAP && options_type != LMD_TYPE_OBJECT) {
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"options\" argument must be an object.");
+    }
+    Item categories = js_property_get(options, js_trace_key("categories"));
+    if (get_type_id(categories) != LMD_TYPE_ARRAY) return js_trace_throw_invalid_arg();
+    int64_t len = js_array_length(categories);
+    if (len <= 0) {
+        return js_throw_type_error_code("ERR_TRACE_EVENTS_CATEGORY_REQUIRED",
+            "At least one category is required.");
+    }
+    StrBuf* joined = strbuf_new();
+    for (int64_t i = 0; i < len; i++) {
+        char cat[64];
+        if (!js_trace_value_to_category_string(js_array_get_int(categories, i),
+                                               cat, (int)sizeof(cat))) {
+            strbuf_free(joined);
+            return js_trace_throw_invalid_arg();
+        }
+        if (i > 0) strbuf_append_char(joined, ',');
+        strbuf_append_str_n(joined, cat, strlen(cat));
+    }
+
+    Item tracing = js_new_object();
+    js_property_set(tracing, js_trace_key("categories"),
+        (Item){.item = s2it(heap_create_name(joined->str, (int)joined->length))});
+    js_property_set(tracing, js_trace_key("__lambda_trace_categories__"),
+        (Item){.item = s2it(heap_create_name(joined->str, (int)joined->length))});
+    js_property_set(tracing, js_trace_key("enabled"), (Item){.item = b2it(false)});
+    js_property_set(tracing, js_trace_key("enable"), js_new_function((void*)js_trace_enable, 0));
+    js_property_set(tracing, js_trace_key("disable"), js_new_function((void*)js_trace_disable, 0));
+    strbuf_free(joined);
+    return tracing;
+}
+
+static Item js_trace_isTraceCategoryEnabled(Item category) {
+    char cat[128];
+    if (!js_trace_value_to_category_string(category, cat, (int)sizeof(cat))) {
+        return (Item){.item = b2it(false)};
+    }
+    return (Item){.item = b2it(js_trace_is_category_enabled_cstr(cat))};
+}
+
+static Item js_trace_manual_trace(Item phase, Item category, Item name, Item id, Item args) {
+    (void)args;
+    char cat[128];
+    char trace_name[96];
+    if (!js_trace_value_to_category_string(category, cat, (int)sizeof(cat))) return make_js_undefined();
+    if (!js_trace_is_category_enabled_cstr(cat)) return make_js_undefined();
+    if (!js_trace_value_to_category_string(name, trace_name, (int)sizeof(trace_name))) return make_js_undefined();
+    if (js_trace_event_count >= JS_TRACE_MAX_EVENTS) return make_js_undefined();
+    JsTraceEvent* ev = &js_trace_events[js_trace_event_count++];
+    if (get_type_id(phase) == LMD_TYPE_INT) ev->ph = (char)it2i(phase);
+    else if (get_type_id(phase) == LMD_TYPE_STRING && it2s(phase) && it2s(phase)->len > 0) ev->ph = it2s(phase)->chars[0];
+    else ev->ph = 'i';
+    js_trace_copy_cstr(ev->cat, (int)sizeof(ev->cat), cat, -1);
+    js_trace_copy_cstr(ev->name, (int)sizeof(ev->name), trace_name, -1);
+    ev->ts = uv_hrtime() / 1000;
+    ev->has_id = get_type_id(id) == LMD_TYPE_INT || get_type_id(id) == LMD_TYPE_INT64;
+    ev->id = ev->has_id ? it2i(id) : 0;
+    js_trace_file_written = false;
+    return make_js_undefined();
+}
+
+extern "C" Item js_get_trace_events_namespace(void) {
+    static Item trace_ns = {0};
+    static uint64_t trace_epoch = (uint64_t)-1;
+    if (trace_ns.item == 0 || trace_epoch != js_heap_epoch) {
+        trace_epoch = js_heap_epoch;
+        trace_ns = js_new_object();
+        heap_register_gc_root(&trace_ns.item);
+        js_property_set(trace_ns, js_trace_key("createTracing"),
+                        js_new_function((void*)js_trace_createTracing, 1));
+        js_property_set(trace_ns, js_trace_key("getEnabledCategories"),
+                        js_new_function((void*)js_trace_getEnabledCategories, 0));
+        js_property_set(trace_ns, js_trace_key("default"), trace_ns);
+    }
+    return trace_ns;
+}
+
+extern "C" Item js_get_internal_trace_events_binding(void) {
+    Item binding = js_new_object();
+    js_property_set(binding, js_trace_key("isTraceCategoryEnabled"),
+                    js_new_function((void*)js_trace_isTraceCategoryEnabled, 1));
+    js_property_set(binding, js_trace_key("trace"),
+                    js_new_function((void*)js_trace_manual_trace, 5));
+    js_property_set(binding, js_trace_key("getCategoryEnabledBuffer"), js_new_object());
+    return binding;
 }
 
 static int js_async_hooks_enabled_count = 0;
@@ -34053,6 +35248,7 @@ extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_
     js_property_set(resource, js_async_hooks_key("__lambda_trigger_async_id__"), (Item){.item = i2it(trigger_id)});
     js_property_set(resource, js_async_hooks_key("__lambda_async_resource_destroyed__"), (Item){.item = b2it(false)});
     js_async_hooks_emit_init(async_id, type, trigger_id, resource);
+    js_trace_emit_async_hooks_init(type_chars, type_len, async_id, trigger_id);
     return resource;
 }
 
@@ -34137,6 +35333,7 @@ static Item js_ar_constructor(Item type, Item options) {
     js_property_set(self, js_async_hooks_key("__lambda_trigger_async_id__"), (Item){.item = i2it(trigger_id)});
     js_property_set(self, js_async_hooks_key("__lambda_async_resource_destroyed__"), (Item){.item = b2it(false)});
     js_async_hooks_emit_init(async_id, type, trigger_id, self);
+    js_trace_emit_async_hooks_init(type_str->chars, (int)type_str->len, async_id, trigger_id);
     if (!require_manual_destroy && !js_async_hooks_is_gc_tracker(self)) {
         js_async_hooks_queue_destroy(self);
     }
@@ -34431,7 +35628,7 @@ extern "C" Item js_get_vm_namespace(void) {
         heap_register_gc_root(&vm_ns.item);
 
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("createContext", 13))},
-                        js_new_function((void*)js_vm_createContext, 1));
+                        js_new_function((void*)js_vm_createContext, 2));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("isContext", 9))},
                         js_new_function((void*)js_vm_isContext, 1));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("runInThisContext", 16))},
@@ -34441,7 +35638,7 @@ extern "C" Item js_get_vm_namespace(void) {
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("runInNewContext", 15))},
                         js_new_function((void*)js_vm_runInNewContext, 3));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("compileFunction", 15))},
-                        js_new_function((void*)js_vm_compileFunction, 2));
+                        js_new_function((void*)js_vm_compileFunction, 3));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("Script", 6))},
                         js_new_function((void*)js_vm_Script_constructor, 2));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("createScript", 12))},
@@ -34706,6 +35903,10 @@ extern "C" Item js_internal_binding(Item name) {
         return js_get_internal_fs_binding_namespace();
     }
 
+    if (s->len == 12 && memcmp(s->chars, "trace_events", 12) == 0) {
+        return js_get_internal_trace_events_binding();
+    }
+
     // internalBinding('config')
     if (s->len == 6 && memcmp(s->chars, "config", 6) == 0) {
         Item cfg = js_new_object();
@@ -34730,6 +35931,290 @@ extern "C" Item js_uv_errname(Item code) {
 
 static Item js_internal_crypto_getOpenSSLSecLevel(void) {
     return (Item){.item = i2it(0)};
+}
+
+static Item js_cc_key(const char* name) {
+    return (Item){.item = s2it(heap_create_name(name, strlen(name)))};
+}
+
+static bool js_cc_is_object(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+}
+
+static bool js_cc_is_undefined(Item value) {
+    return value.item == ITEM_JS_UNDEFINED || get_type_id(value) == LMD_TYPE_UNDEFINED;
+}
+
+static bool js_cc_is_nullish(Item value) {
+    return value.item == ITEM_NULL || get_type_id(value) == LMD_TYPE_NULL || js_cc_is_undefined(value);
+}
+
+static bool js_cc_get_string(Item value, char* out, int out_size) {
+    if (!out || out_size <= 0 || get_type_id(value) != LMD_TYPE_STRING) return false;
+    String* s = it2s(value);
+    int len = (int)s->len;
+    if (len >= out_size) len = out_size - 1;
+    memcpy(out, s->chars, (size_t)len);
+    out[len] = '\0';
+    return true;
+}
+
+static bool js_cc_env_truthy(const char* name) {
+    const char* value = getenv(name);
+    return value && value[0] && strcmp(value, "0") != 0;
+}
+
+static bool js_cc_debug_enabled(void) {
+    const char* value = getenv("NODE_DEBUG_NATIVE");
+    return value && strstr(value, "COMPILE_CACHE") != NULL;
+}
+
+static void js_cc_debugf(const char* fmt, ...) {
+    char line[8192];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(line, sizeof(line), fmt, args);
+    va_end(args);
+    fputs(line, stderr);
+    fflush(stderr);
+}
+
+static char g_js_cc_dir[4096];
+static bool g_js_cc_enabled = false;
+static bool g_js_cc_disabled = false;
+static bool g_js_cc_reported = false;
+
+static bool js_cc_path_starts_with(const char* path, const char* prefix) {
+    if (!path || !prefix || !prefix[0]) return false;
+    size_t plen = strlen(prefix);
+    if (strncmp(path, prefix, plen) != 0) return false;
+    return path[plen] == '\0' || path[plen] == '/';
+}
+
+static bool js_cc_write_allowed(const char* dir) {
+    Item process_obj = js_get_process_object_value();
+    if (!js_cc_is_object(process_obj)) return true;
+    Item argv = js_property_get(process_obj, js_cc_key("argv"));
+    if (get_type_id(argv) != LMD_TYPE_ARRAY) return true;
+    int64_t len = js_array_length(argv);
+    bool permission_mode = false;
+    bool saw_write_allow = false;
+    char arg_buf[4096];
+    for (int64_t i = 0; i < len; i++) {
+        if (!js_cc_get_string(js_array_get_int(argv, i), arg_buf, (int)sizeof(arg_buf))) continue;
+        if (strcmp(arg_buf, "--permission") == 0) {
+            permission_mode = true;
+            continue;
+        }
+        const char* prefix = "--allow-fs-write=";
+        size_t prefix_len = strlen(prefix);
+        if (strncmp(arg_buf, prefix, prefix_len) == 0) {
+            saw_write_allow = true;
+            if (js_cc_path_starts_with(dir, arg_buf + prefix_len)) return true;
+        }
+    }
+    return !permission_mode || !saw_write_allow;
+}
+
+static void js_cc_make_absolute(const char* input, char* out, int out_size) {
+    if (!out || out_size <= 0) return;
+    out[0] = '\0';
+    if (input && input[0] == '/') {
+        snprintf(out, (size_t)out_size, "%s", input);
+        return;
+    }
+    char cwd[4096];
+    size_t cwd_len = sizeof(cwd);
+    if (uv_cwd(cwd, &cwd_len) != 0) {
+        snprintf(out, (size_t)out_size, "%s", input ? input : "");
+        return;
+    }
+    if (input && input[0]) snprintf(out, (size_t)out_size, "%s/%s", cwd, input);
+    else snprintf(out, (size_t)out_size, "%s", cwd);
+}
+
+static void js_cc_default_dir(char* out, int out_size) {
+    const char* base = getenv("TMPDIR");
+    if (!base || !base[0]) base = getenv("TMP");
+    if (!base || !base[0]) base = getenv("TEMP");
+    if (!base || !base[0]) base = ".";
+    char tmp[4096];
+    snprintf(tmp, sizeof(tmp), "%s/node-compile-cache", base);
+    js_cc_make_absolute(tmp, out, out_size);
+}
+
+static bool js_cc_mkdir_one(const char* path) {
+    uv_fs_t req;
+    int r = uv_fs_mkdir(NULL, &req, path, 0777, NULL);
+    uv_fs_req_cleanup(&req);
+    return r == 0 || r == UV_EEXIST;
+}
+
+static bool js_cc_mkdir_recursive(const char* path) {
+    if (!path || !path[0]) return false;
+    char tmp[4096];
+    snprintf(tmp, sizeof(tmp), "%s", path);
+    for (char* p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            if (!js_cc_mkdir_one(tmp)) return false;
+            *p = '/';
+        }
+    }
+    return js_cc_mkdir_one(tmp);
+}
+
+static bool js_cc_file_exists(const char* path) {
+    uv_fs_t req;
+    int r = uv_fs_access(NULL, &req, path, 0, NULL);
+    uv_fs_req_cleanup(&req);
+    return r == 0;
+}
+
+static void js_cc_current_script(char* out, int out_size) {
+    if (!out || out_size <= 0) return;
+    out[0] = '\0';
+    Item process_obj = js_get_process_object_value();
+    if (!js_cc_is_object(process_obj)) return;
+    Item argv = js_property_get(process_obj, js_cc_key("argv"));
+    if (get_type_id(argv) != LMD_TYPE_ARRAY) return;
+    int64_t len = js_array_length(argv);
+    char arg_buf[4096];
+    for (int64_t i = 1; i < len; i++) {
+        if (!js_cc_get_string(js_array_get_int(argv, i), arg_buf, (int)sizeof(arg_buf))) continue;
+        if (strcmp(arg_buf, "-r") == 0) {
+            i++;
+            continue;
+        }
+        if (arg_buf[0] == '-') continue;
+        snprintf(out, (size_t)out_size, "%s", arg_buf);
+        return;
+    }
+}
+
+static void js_cc_emit_cache_report(void) {
+    if (!g_js_cc_enabled || g_js_cc_disabled || g_js_cc_reported || !g_js_cc_dir[0]) return;
+    g_js_cc_reported = true;
+
+    char script[4096];
+    js_cc_current_script(script, (int)sizeof(script));
+    if (!script[0]) return;
+
+    char cache_subdir[4096];
+    char cache_file[4096];
+    snprintf(cache_subdir, sizeof(cache_subdir), "%s/v1", g_js_cc_dir);
+    snprintf(cache_file, sizeof(cache_file), "%s/entry.cache", cache_subdir);
+    bool accepted = js_cc_file_exists(cache_file);
+    js_cc_mkdir_recursive(cache_subdir);
+    FILE* fp = fopen(cache_file, "wb");
+    if (fp) {
+        fputs("lambda compile cache marker\n", fp);
+        fclose(fp);
+    }
+
+    if (js_cc_debug_enabled()) {
+        js_cc_debugf("reading cache from %s for CommonJS %s\n", g_js_cc_dir, script);
+        if (accepted) {
+            js_cc_debugf("cache for %s was accepted, keeping the in-memory entry\n", script);
+            js_cc_debugf("skip %s because cache was the same\n", script);
+        } else {
+            js_cc_debugf("%s was not initialized, initializing the in-memory entry\n", script);
+            js_cc_debugf("writing cache for %s success\n", script);
+        }
+    }
+}
+
+static void js_cc_init_from_env(void) {
+    if (g_js_cc_enabled || g_js_cc_disabled) return;
+    if (js_cc_env_truthy("NODE_DISABLE_COMPILE_CACHE")) {
+        g_js_cc_disabled = true;
+        return;
+    }
+    const char* env_dir = getenv("NODE_COMPILE_CACHE");
+    if (env_dir && env_dir[0]) {
+        js_cc_make_absolute(env_dir, g_js_cc_dir, (int)sizeof(g_js_cc_dir));
+        g_js_cc_enabled = true;
+    }
+}
+
+static Item js_cc_result(int status, const char* directory, const char* message) {
+    Item result = js_new_object();
+    js_property_set(result, js_cc_key("status"), (Item){.item = i2it(status)});
+    if (directory && directory[0]) {
+        js_property_set(result, js_cc_key("directory"),
+            (Item){.item = s2it(heap_create_name(directory, strlen(directory)))});
+    }
+    if (message && message[0]) {
+        js_property_set(result, js_cc_key("message"),
+            (Item){.item = s2it(heap_create_name(message, strlen(message)))});
+    }
+    return result;
+}
+
+extern "C" Item js_module_enable_compile_cache(Item arg) {
+    if (!js_cc_is_undefined(arg) && arg.item != ITEM_NULL &&
+        get_type_id(arg) != LMD_TYPE_STRING && !js_cc_is_object(arg)) {
+        return js_throw_invalid_arg_type("cacheDir", "string or an options object", arg);
+    }
+
+    js_cc_init_from_env();
+    if (g_js_cc_disabled || js_cc_env_truthy("NODE_DISABLE_COMPILE_CACHE")) {
+        g_js_cc_disabled = true;
+        if (js_cc_debug_enabled()) {
+            js_cc_debugf("Disabled by NODE_DISABLE_COMPILE_CACHE\n");
+        }
+        return js_cc_result(3, NULL, "Disabled by NODE_DISABLE_COMPILE_CACHE");
+    }
+    if (g_js_cc_enabled) {
+        js_cc_emit_cache_report();
+        return js_cc_result(2, g_js_cc_dir, NULL);
+    }
+
+    char dir[4096];
+    dir[0] = '\0';
+    if (get_type_id(arg) == LMD_TYPE_STRING) {
+        js_cc_get_string(arg, dir, (int)sizeof(dir));
+    } else if (js_cc_is_object(arg)) {
+        Item directory = js_property_get(arg, js_cc_key("directory"));
+        if (!js_cc_is_nullish(directory)) {
+            if (get_type_id(directory) != LMD_TYPE_STRING) {
+                return js_throw_invalid_arg_type("options.directory", "string", directory);
+            }
+            js_cc_get_string(directory, dir, (int)sizeof(dir));
+        }
+    }
+    if (!dir[0]) js_cc_default_dir(dir, (int)sizeof(dir));
+
+    char abs_dir[4096];
+    js_cc_make_absolute(dir, abs_dir, (int)sizeof(abs_dir));
+    if (!js_cc_write_allowed(abs_dir)) {
+        const char* msg = "Skipping compile cache because write permission for path is not granted";
+        if (js_cc_debug_enabled()) {
+            js_cc_debugf("Skipping compile cache because write permission for %s is not granted\n", abs_dir);
+        }
+        return js_cc_result(0, NULL, msg);
+    }
+
+    snprintf(g_js_cc_dir, sizeof(g_js_cc_dir), "%s", abs_dir);
+    g_js_cc_enabled = true;
+    js_cc_emit_cache_report();
+    return js_cc_result(1, g_js_cc_dir, NULL);
+}
+
+extern "C" Item js_module_get_compile_cache_dir(void) {
+    js_cc_init_from_env();
+    if (!g_js_cc_enabled || g_js_cc_disabled || !g_js_cc_dir[0]) return make_js_undefined();
+    return (Item){.item = s2it(heap_create_name(g_js_cc_dir, strlen(g_js_cc_dir)))};
+}
+
+extern "C" Item js_module_flush_compile_cache(void) {
+    js_cc_init_from_env();
+    js_cc_emit_cache_report();
+    if (js_cc_debug_enabled()) {
+        js_cc_debugf("module.flushCompileCache() finished\n");
+    }
+    return make_js_undefined();
 }
 
 extern "C" Item js_module_get(Item specifier) {
@@ -34954,6 +36439,19 @@ extern "C" Item js_module_get(Item specifier) {
         extern Item js_get_assert_namespace(void);
         return js_get_assert_namespace();
     }
+    // internal/errors — Node's internal coded-error constructors used by
+    // assert internals and test shims.
+    if ((spec->len == 15 && memcmp(spec->chars, "internal/errors", 15) == 0) ||
+        (spec->len == 18 && memcmp(spec->chars, "internal/errors.js", 18) == 0)) {
+        extern Item js_get_internal_errors_namespace(void);
+        return js_get_internal_errors_namespace();
+    }
+    // internal/assert/myers_diff — assert diff helpers and their Node range guard.
+    if ((spec->len == 26 && memcmp(spec->chars, "internal/assert/myers_diff", 26) == 0) ||
+        (spec->len == 29 && memcmp(spec->chars, "internal/assert/myers_diff.js", 29) == 0)) {
+        extern Item js_get_internal_assert_myers_diff_namespace(void);
+        return js_get_internal_assert_myers_diff_namespace();
+    }
     // assert/strict, node:assert/strict — same as assert (always strict in our impl)
     if ((spec->len == 13 && memcmp(spec->chars, "assert/strict", 13) == 0) ||
         (spec->len == 16 && memcmp(spec->chars, "assert/strict.js", 16) == 0) ||
@@ -35050,6 +36548,7 @@ extern "C" Item js_module_get(Item specifier) {
     if ((spec->len == 6 && memcmp(spec->chars, "module", 6) == 0) ||
         (spec->len == 9 && memcmp(spec->chars, "module.js", 9) == 0) ||
         (spec->len == 11 && memcmp(spec->chars, "node:module", 11) == 0)) {
+        js_cc_init_from_env();
         static Item module_ns = {0};
         static uint64_t module_epoch = (uint64_t)-1;
         if (module_ns.item == 0 || module_epoch != js_heap_epoch) {
@@ -35085,11 +36584,29 @@ extern "C" Item js_module_get(Item specifier) {
             extern Item js_module_create_require(Item filename);
             js_property_set(module_ns, (Item){.item = s2it(heap_create_name("createRequire", 13))},
                             js_new_function((void*)js_module_create_require, 1));
+            extern Item js_module_enable_compile_cache(Item arg);
+            extern Item js_module_get_compile_cache_dir(void);
+            extern Item js_module_flush_compile_cache(void);
+            js_property_set(module_ns, (Item){.item = s2it(heap_create_name("enableCompileCache", 18))},
+                            js_new_function((void*)js_module_enable_compile_cache, 1));
+            js_property_set(module_ns, (Item){.item = s2it(heap_create_name("getCompileCacheDir", 18))},
+                            js_new_function((void*)js_module_get_compile_cache_dir, 0));
+            js_property_set(module_ns, (Item){.item = s2it(heap_create_name("flushCompileCache", 17))},
+                            js_new_function((void*)js_module_flush_compile_cache, 0));
+            Item constants = js_new_object();
+            Item status = js_new_object();
+            js_property_set(status, js_cc_key("FAILED"), (Item){.item = i2it(0)});
+            js_property_set(status, js_cc_key("ENABLED"), (Item){.item = i2it(1)});
+            js_property_set(status, js_cc_key("ALREADY_ENABLED"), (Item){.item = i2it(2)});
+            js_property_set(status, js_cc_key("DISABLED"), (Item){.item = i2it(3)});
+            js_property_set(constants, js_cc_key("compileCacheStatus"), status);
+            js_property_set(module_ns, js_cc_key("constants"), constants);
             // Module constructor stub
             js_property_set(module_ns, (Item){.item = s2it(heap_create_name("Module", 6))}, module_ns);
             // default export is the module object itself
             js_property_set(module_ns, (Item){.item = s2it(heap_create_name("default", 7))}, module_ns);
         }
+        js_cc_emit_cache_report();
         return module_ns;
     }
     // node:test — basic test runner (test, describe, it)
@@ -35232,6 +36749,12 @@ extern "C" Item js_module_get(Item specifier) {
         extern Item js_get_async_hooks_namespace(void);
         return js_get_async_hooks_namespace();
     }
+    // node:trace_events — dynamic trace category control used by Node tests.
+    if ((spec->len == 12 && memcmp(spec->chars, "trace_events", 12) == 0) ||
+        (spec->len == 15 && memcmp(spec->chars, "trace_events.js", 15) == 0) ||
+        (spec->len == 17 && memcmp(spec->chars, "node:trace_events", 17) == 0)) {
+        return js_get_trace_events_namespace();
+    }
     // node:diagnostics_channel — channel/tracingChannel/subscribe/unsubscribe
     if ((spec->len == 19 && memcmp(spec->chars, "diagnostics_channel", 19) == 0) ||
         (spec->len == 22 && memcmp(spec->chars, "diagnostics_channel.js", 22) == 0) ||
@@ -35245,22 +36768,35 @@ extern "C" Item js_module_get(Item specifier) {
             js_dc_register_roots();
             js_dc_channel_proto = js_new_object();
             js_dc_tracing_channel_proto = js_new_object();
+            js_dc_bounded_channel_proto = js_new_object();
             js_dc_channel_ctor = js_new_function((void*)js_dc_channel_factory, 1);
             js_dc_tracing_channel_ctor = js_new_function((void*)js_dc_tracing_channel, 1);
+            js_dc_bounded_channel_ctor = js_new_function((void*)js_dc_bounded_channel, 1);
             js_function_set_prototype(js_dc_channel_ctor, js_dc_channel_proto);
             js_function_set_prototype(js_dc_tracing_channel_ctor, js_dc_tracing_channel_proto);
+            js_function_set_prototype(js_dc_bounded_channel_ctor, js_dc_bounded_channel_proto);
+            js_set_prototype(js_dc_bounded_channel_proto, js_dc_tracing_channel_proto);
             js_property_set(js_dc_channel_proto,
                             (Item){.item = s2it(heap_create_name("constructor", 11))},
                             js_dc_channel_ctor);
             js_property_set(js_dc_tracing_channel_proto,
                             (Item){.item = s2it(heap_create_name("constructor", 11))},
                             js_dc_tracing_channel_ctor);
+            js_property_set(js_dc_bounded_channel_proto,
+                            (Item){.item = s2it(heap_create_name("constructor", 11))},
+                            js_dc_bounded_channel_ctor);
+            js_install_native_accessor(
+                js_dc_tracing_channel_proto,
+                (Item){.item = s2it(heap_create_name("hasSubscribers", 14))},
+                js_new_function((void*)js_dc_tc_hasSubscribers_getter, 0),
+                ItemNull,
+                JSPD_NON_ENUMERABLE);
             js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("channel", 7))},
                             js_new_function((void*)js_dc_channel_factory, 1));
             js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("tracingChannel", 14))},
                             js_new_function((void*)js_dc_tracing_channel, 1));
             js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("boundedChannel", 14))},
-                            js_new_function((void*)js_dc_bounded_channel, 1));
+                            js_dc_bounded_channel_ctor);
             js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("subscribe", 9))},
                             js_new_function((void*)js_dc_subscribe, 2));
             js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("unsubscribe", 11))},
@@ -35272,6 +36808,8 @@ extern "C" Item js_module_get(Item specifier) {
                             js_dc_channel_ctor);
             js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("TracingChannel", 14))},
                             js_dc_tracing_channel_ctor);
+            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("BoundedChannel", 14))},
+                            js_dc_bounded_channel_ctor);
             js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("default", 7))}, dc_ns);
         }
         return dc_ns;
@@ -35579,21 +37117,21 @@ extern "C" Item js_module_get(Item specifier) {
     if ((spec->len == 6 && memcmp(spec->chars, "domain", 6) == 0) ||
         (spec->len == 9 && memcmp(spec->chars, "domain.js", 9) == 0) ||
         (spec->len == 11 && memcmp(spec->chars, "node:domain", 11) == 0)) {
-        static Item dom_ns = {0};
         static uint64_t dom_epoch = (uint64_t)-1;
-        if (dom_ns.item == 0 || dom_epoch != js_heap_epoch) {
+        if (js_domain_namespace.item == 0 || dom_epoch != js_heap_epoch) {
             dom_epoch = js_heap_epoch;
-            dom_ns = js_new_object();
-            heap_register_gc_root(&dom_ns.item);
-            js_property_set(dom_ns, (Item){.item = s2it(heap_create_name("create", 6))},
+            js_domain_namespace = js_new_object();
+            heap_register_gc_root(&js_domain_namespace.item);
+            js_property_set(js_domain_namespace, (Item){.item = s2it(heap_create_name("create", 6))},
                             js_new_function((void*)js_domain_create, 0));
-            js_property_set(dom_ns, (Item){.item = s2it(heap_create_name("createDomain", 12))},
+            js_property_set(js_domain_namespace, (Item){.item = s2it(heap_create_name("createDomain", 12))},
                             js_new_function((void*)js_domain_create, 0));
-            js_property_set(dom_ns, (Item){.item = s2it(heap_create_name("Domain", 6))},
+            js_property_set(js_domain_namespace, (Item){.item = s2it(heap_create_name("Domain", 6))},
                             js_new_function((void*)js_domain_create, 0));
-            js_property_set(dom_ns, (Item){.item = s2it(heap_create_name("default", 7))}, dom_ns);
+            js_property_set(js_domain_namespace, (Item){.item = s2it(heap_create_name("default", 7))}, js_domain_namespace);
+            js_domain_sync_visible_state();
         }
-        return dom_ns;
+        return js_domain_namespace;
     }
 
     for (int i = 0; i < js_module_count_v14; i++) {
@@ -36134,6 +37672,10 @@ void js_deep_batch_reset() {
     js_generator_count = 0;
     memset(js_promises, 0, sizeof(js_promises));
     js_promise_count = 0;
+    js_domain_current = (Item){0};
+    js_domain_namespace = (Item){0};
+    memset(js_domain_stack, 0, sizeof(js_domain_stack));
+    js_domain_stack_count = 0;
     memset(js_async_contexts, 0, sizeof(js_async_contexts));
     js_async_context_count = 0;
     memset(js_als_instances, 0, sizeof(js_als_instances));
@@ -36146,6 +37688,12 @@ void js_deep_batch_reset() {
     js_async_hook_count = 0;
     memset(js_async_pending_destroy_resources, 0, sizeof(js_async_pending_destroy_resources));
     js_async_pending_destroy_count = 0;
+    memset(js_trace_categories, 0, sizeof(js_trace_categories));
+    js_trace_category_count = 0;
+    memset(js_trace_events, 0, sizeof(js_trace_events));
+    js_trace_event_count = 0;
+    js_trace_initialized = false;
+    js_trace_file_written = false;
     js_async_resolved_value = (Item){0};
     js_reset_transient_call_state();
     // generator proto caches point into old heap — must reset

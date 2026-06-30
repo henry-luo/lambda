@@ -1716,6 +1716,11 @@ void line_align(LayoutContext* lycon) {
             lycon->line.effective_left : lycon->line.left;
         float line_right = lycon->line.has_float_intrusion ?
             lycon->line.effective_right : lycon->line.right;
+        if (!lycon->line.has_float_intrusion && lycon->block.balance_wrap_active &&
+            lycon->line.align_right > lycon->line.right) {
+            line_left = lycon->line.align_left;
+            line_right = lycon->line.align_right;
+        }
         float line_width = lycon->line.advance_x - line_left;
         // CSS 2.1 §16.1: RTL text-indent narrows the available width for alignment
         float available_width = (line_right - line_left) - lycon->line.text_indent_offset;

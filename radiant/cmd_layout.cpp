@@ -5523,6 +5523,133 @@ static View* find_matching_input(View* root, const char* match_tag, const char* 
     return nullptr;
 }
 
+struct LambdaFocusRestore {
+    bool valid;
+    RenderMapLookup lookup;
+    int path[64];
+    int path_len;
+    const char* fallback_tag;
+    const char* fallback_class;
+};
+
+static bool find_child_element_index(DomElement* parent, DomElement* child,
+                                     int* out_index) {
+    if (!parent || !child || !out_index) return false;
+    int index = 0;
+    DomNode* node = parent->first_child;
+    while (node) {
+        if (node->node_type == DOM_NODE_ELEMENT) {
+            if (node == static_cast<DomNode*>(child)) {
+                *out_index = index;
+                return true;
+            }
+            index++;
+        }
+        node = node->next_sibling;
+    }
+    return false;
+}
+
+static bool build_focus_path_from_template_root(DomElement* root,
+                                                DomElement* focused,
+                                                LambdaFocusRestore* out) {
+    if (!root || !focused || !out) return false;
+
+    DomElement* chain[64];
+    int depth = 0;
+    DomNode* node = static_cast<DomNode*>(focused);
+    while (node) {
+        if (node->node_type == DOM_NODE_ELEMENT) {
+            if (depth >= 64) return false;
+            chain[depth++] = lam::dom_require_element(node);
+            if (node == static_cast<DomNode*>(root)) break;
+        }
+        node = node->parent;
+    }
+    if (depth == 0 || chain[depth - 1] != root) return false;
+
+    out->path_len = 0;
+    for (int i = depth - 1; i > 0; i--) {
+        int child_index = 0;
+        if (!find_child_element_index(chain[i], chain[i - 1], &child_index)) {
+            return false;
+        }
+        out->path[out->path_len++] = child_index;
+    }
+    return true;
+}
+
+static void capture_lambda_focus_restore(DocState* state,
+                                         LambdaFocusRestore* out) {
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    if (!state || !focus_has_current(state)) return;
+
+    View* focused = focus_get(state);
+    if (!focused || !focused->is_element()) return;
+    DomElement* focused_elem = lam::dom_require_element(focused);
+    if (focused_elem->item_prop_type != DomElement::ITEM_PROP_FORM ||
+        !focused_elem->form ||
+        focused_elem->form->control_type != FORM_CONTROL_TEXT) {
+        return;
+    }
+    out->fallback_tag = focused_elem->tag_name;
+    if (focused_elem->class_count > 0 && focused_elem->class_names) {
+        out->fallback_class = focused_elem->class_names[0];
+    }
+
+    DomNode* node = static_cast<DomNode*>(focused);
+    while (node) {
+        if (node->node_type == DOM_NODE_ELEMENT) {
+            DomElement* elem = lam::dom_require_element(node);
+            if (elem->native_element) {
+                Item item = {.element = elem->native_element};
+                RenderMapLookup lookup;
+                if (render_map_reverse_lookup(item, &lookup)) {
+                    out->lookup = lookup;
+                    out->valid = build_focus_path_from_template_root(
+                        elem, focused_elem, out);
+                    return;
+                }
+            }
+        }
+        node = node->parent;
+    }
+}
+
+static View* resolve_lambda_focus_restore(DomDocument* doc,
+                                          const LambdaFocusRestore* restore) {
+    if (!doc || !restore || !restore->valid || !doc->element_dom_map) {
+        return nullptr;
+    }
+
+    Item result = render_map_get_result(restore->lookup.source_item,
+                                        restore->lookup.template_ref);
+    if (get_type_id(result) != LMD_TYPE_ELEMENT) return nullptr;
+
+    DomElement* elem = element_dom_map_lookup(doc->element_dom_map,
+                                              result.element);
+    for (int i = 0; elem && i < restore->path_len; i++) {
+        int wanted = restore->path[i];
+        int index = 0;
+        DomElement* found = nullptr;
+        DomNode* child = elem->first_child;
+        while (child) {
+            if (child->node_type == DOM_NODE_ELEMENT) {
+                if (index == wanted) {
+                    found = lam::dom_require_element(child);
+                    break;
+                }
+                index++;
+            }
+            child = child->next_sibling;
+        }
+        elem = found;
+    }
+
+    return elem ? static_cast<View*>(elem) : nullptr;
+}
+
 void rebuild_lambda_doc(UiContext* uicon) {
     if (!uicon || !uicon->document) {
         log_error("rebuild_lambda_doc: no document");
@@ -5552,16 +5679,12 @@ void rebuild_lambda_doc(UiContext* uicon) {
 
     // Save focus info before rebuild so we can restore it on the new tree
     DocState* state = (DocState*)doc->state;
-    const char* focus_tag = nullptr;
-    const char* focus_class = nullptr;
+    LambdaFocusRestore focus_restore;
+    capture_lambda_focus_restore(state, &focus_restore);
     bool had_focus = false;
     if (state && focus_has_current(state)) {
         View* focused = focus_get(state);
         if (focused->is_element()) {
-            DomElement* felem = lam::dom_require_element(focused);
-            focus_tag = felem->tag_name;
-            if (felem->class_count > 0 && felem->class_names)
-                focus_class = felem->class_names[0];
             had_focus = true;
         }
     }
@@ -5629,12 +5752,19 @@ void rebuild_lambda_doc(UiContext* uicon) {
 
     // Restore focus to matching element in new view tree
     if (had_focus && state && doc->view_tree && doc->view_tree->root) {
-        View* new_focused = find_matching_input(
-            doc->view_tree->root, focus_tag, focus_class);
+        View* new_focused = resolve_lambda_focus_restore(doc, &focus_restore);
+        if (!new_focused && focus_restore.fallback_tag) {
+            new_focused = find_matching_input(
+                doc->view_tree->root,
+                focus_restore.fallback_tag,
+                focus_restore.fallback_class);
+        }
         if (new_focused) {
             focus_set(state, new_focused, false);
             log_debug("rebuild_lambda_doc: restored focus to new view %p (tag=%s class=%s)",
-                     new_focused, focus_tag ? focus_tag : "", focus_class ? focus_class : "");
+                     new_focused,
+                     focus_restore.fallback_tag ? focus_restore.fallback_tag : "",
+                     focus_restore.fallback_class ? focus_restore.fallback_class : "");
         } else if (focus_has_current(state)) {
             // old focused element was removed; clear stale pointer so autofocus can fire
             focus_clear(state);
@@ -5798,16 +5928,12 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 
     // Save focus info
     DocState* state = (DocState*)doc->state;
-    const char* focus_tag = nullptr;
-    const char* focus_class = nullptr;
+    LambdaFocusRestore focus_restore;
+    capture_lambda_focus_restore(state, &focus_restore);
     bool had_focus = false;
     if (state && focus_has_current(state)) {
         View* focused = focus_get(state);
         if (focused->is_element()) {
-            DomElement* felem = lam::dom_require_element(focused);
-            focus_tag = felem->tag_name;
-            if (felem->class_count > 0 && felem->class_names)
-                focus_class = felem->class_names[0];
             had_focus = true;
         }
     }
@@ -5917,8 +6043,13 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 
     // Restore focus
     if (had_focus && state && doc->view_tree && doc->view_tree->root) {
-        View* new_focused = find_matching_input(
-            doc->view_tree->root, focus_tag, focus_class);
+        View* new_focused = resolve_lambda_focus_restore(doc, &focus_restore);
+        if (!new_focused && focus_restore.fallback_tag) {
+            new_focused = find_matching_input(
+                doc->view_tree->root,
+                focus_restore.fallback_tag,
+                focus_restore.fallback_class);
+        }
         if (new_focused) {
             focus_set(state, new_focused, false);
             log_debug("rebuild_lambda_doc_incremental: restored focus");

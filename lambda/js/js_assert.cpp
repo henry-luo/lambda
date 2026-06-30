@@ -18,6 +18,7 @@
 
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
@@ -27,6 +28,7 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item);
 extern "C" Item js_util_isDeepStrictEqual(Item a, Item b);
 extern "C" Item js_get_this(void);
 extern "C" Item js_new_method_function(void* func_ptr, int param_count);
+extern "C" Item js_process_set_exitCode(Item code_item);
 
 static void js_assert_append_inspected_value(StrBuf* sb, Item value);
 
@@ -46,6 +48,8 @@ static Item assert_make_string_n(const char* str, size_t len) {
 }
 
 static Item assert_namespace = {0};
+static Item internal_errors_namespace = {0};
+static Item internal_assert_myers_diff_namespace = {0};
 static Item assert_options_key = {0};
 static Item assert_diff_key = {0};
 
@@ -227,6 +231,195 @@ static bool js_assert_prototypes_differ(Item actual, Item expected) {
 static Item js_assert_throw_missing_actual_expected(void) {
     return js_throw_type_error_code(JS_ERR_MISSING_ARGS,
         "The \"actual\" and \"expected\" arguments must be specified");
+}
+
+static void js_internal_errors_append_item(StrBuf* sb, Item value) {
+    TypeId type = get_type_id(value);
+    char buf[128];
+    if (type == LMD_TYPE_INT) {
+        snprintf(buf, sizeof(buf), "%lld", (long long)it2i(value));
+        strbuf_append_str(sb, buf);
+        return;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        snprintf(buf, sizeof(buf), "%.15g", it2d(value));
+        strbuf_append_str(sb, buf);
+        return;
+    }
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(value);
+        if (s) strbuf_append_str_n(sb, s->chars, s->len);
+        return;
+    }
+    extern Item js_to_string(Item value);
+    Item text = js_to_string(value);
+    if (get_type_id(text) == LMD_TYPE_STRING) {
+        String* s = it2s(text);
+        if (s) strbuf_append_str_n(sb, s->chars, s->len);
+    }
+}
+
+static Item js_internal_errors_make_range_error(Item message) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    Item error = js_new_error_with_name(assert_make_string("RangeError"), message);
+    js_property_set(error, assert_make_string("code"), assert_make_string(JS_ERR_OUT_OF_RANGE));
+    return error;
+}
+
+extern "C" Item js_internal_errors_ERR_OUT_OF_RANGE_ctor(Item name, Item range, Item actual) {
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, "The value of \"");
+    js_internal_errors_append_item(sb, name);
+    strbuf_append_str(sb, "\" is out of range. It must be ");
+    js_internal_errors_append_item(sb, range);
+    strbuf_append_str(sb, ". Received ");
+    js_internal_errors_append_item(sb, actual);
+    Item message = assert_make_string_n(sb->str, sb->length);
+    strbuf_free(sb);
+    return js_internal_errors_make_range_error(message);
+}
+
+extern "C" Item js_internal_errors_identity(Item value) {
+    return value;
+}
+
+extern "C" Item js_internal_errors_true(void) {
+    return (Item){.item = ITEM_TRUE};
+}
+
+static void js_internal_errors_set_code(Item codes, const char* name, void* ctor_ptr, int param_count) {
+    Item fn = js_new_function(ctor_ptr, param_count);
+
+    Item range_ctor = js_get_constructor(assert_make_string("RangeError"));
+    Item range_proto = js_property_get(range_ctor, assert_make_string("prototype"));
+    Item proto = js_object_create(range_proto);
+    js_property_set(proto, assert_make_string("constructor"), fn);
+    js_property_set(fn, assert_make_string("prototype"), proto);
+
+    js_property_set(codes, assert_make_string(name), fn);
+}
+
+extern "C" Item js_get_internal_errors_namespace(void) {
+    if (internal_errors_namespace.item != 0) return internal_errors_namespace;
+
+    internal_errors_namespace = js_new_object();
+    heap_register_gc_root(&internal_errors_namespace.item);
+
+    Item codes = js_new_object();
+    js_internal_errors_set_code(codes, JS_ERR_OUT_OF_RANGE,
+        (void*)js_internal_errors_ERR_OUT_OF_RANGE_ctor, 3);
+    js_property_set(internal_errors_namespace, assert_make_string("codes"), codes);
+
+    js_property_set(internal_errors_namespace, assert_make_string("hideStackFrames"),
+        js_new_function((void*)js_internal_errors_identity, 1));
+    js_property_set(internal_errors_namespace, assert_make_string("hideInternalStackFrames"),
+        js_new_function((void*)js_internal_errors_identity, 1));
+    js_property_set(internal_errors_namespace, assert_make_string("isErrorStackTraceLimitWritable"),
+        js_new_function((void*)js_internal_errors_true, 0));
+    js_property_set(internal_errors_namespace, assert_make_string("default"), internal_errors_namespace);
+    return internal_errors_namespace;
+}
+
+static Item js_assert_myers_make_operation(int op, Item value) {
+    Item pair = js_array_new(0);
+    js_array_push(pair, (Item){.item = i2it(op)});
+    js_array_push(pair, value);
+    return pair;
+}
+
+extern "C" Item js_internal_assert_myersDiff(Item actual, Item expected, Item check_comma_disparity) {
+    (void)check_comma_disparity;
+    int64_t actual_len = js_get_length(actual);
+    int64_t expected_len = js_get_length(expected);
+    if (actual_len < 0) actual_len = 0;
+    if (expected_len < 0) expected_len = 0;
+    int64_t max = actual_len + expected_len;
+    if (max > 2147483647LL) {
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+            "The value of \"myersDiff input size\" is out of range. It must be < 2^31. Received %lld",
+            (long long)max);
+        return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE, msg);
+    }
+
+    Item diff = js_array_new(0);
+    int64_t common_len = actual_len < expected_len ? actual_len : expected_len;
+    for (int64_t i = common_len - 1; i >= 0; i--) {
+        Item actual_value = js_array_get_int(actual, i);
+        Item expected_value = js_array_get_int(expected, i);
+        Item same = js_strict_equal(actual_value, expected_value);
+        if (get_type_id(same) == LMD_TYPE_BOOL && it2b(same)) {
+            js_array_push(diff, js_assert_myers_make_operation(0, actual_value));
+        } else {
+            js_array_push(diff, js_assert_myers_make_operation(1, actual_value));
+            js_array_push(diff, js_assert_myers_make_operation(-1, expected_value));
+        }
+    }
+    for (int64_t i = actual_len - 1; i >= common_len; i--) {
+        js_array_push(diff, js_assert_myers_make_operation(1, js_array_get_int(actual, i)));
+    }
+    for (int64_t i = expected_len - 1; i >= common_len; i--) {
+        js_array_push(diff, js_assert_myers_make_operation(-1, js_array_get_int(expected, i)));
+    }
+    return diff;
+}
+
+static void js_assert_myers_append_string_value(StrBuf* sb, Item value) {
+    Item text = get_type_id(value) == LMD_TYPE_STRING ? value : js_to_string_val(value);
+    String* s = get_type_id(text) == LMD_TYPE_STRING ? it2s(text) : NULL;
+    if (s) strbuf_append_str_n(sb, s->chars, s->len);
+}
+
+extern "C" Item js_internal_assert_printSimpleMyersDiff(Item diff) {
+    StrBuf* sb = strbuf_new();
+    strbuf_append_char(sb, '\n');
+    int64_t len = js_array_length(diff);
+    for (int64_t i = len - 1; i >= 0; i--) {
+        Item pair = js_array_get_int(diff, i);
+        js_assert_myers_append_string_value(sb, js_array_get_int(pair, 1));
+    }
+    Item result = assert_make_string_n(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+extern "C" Item js_internal_assert_printMyersDiff(Item diff, Item operator_item) {
+    (void)operator_item;
+    StrBuf* sb = strbuf_new();
+    strbuf_append_char(sb, '\n');
+    int64_t len = js_array_length(diff);
+    for (int64_t i = len - 1; i >= 0; i--) {
+        Item pair = js_array_get_int(diff, i);
+        Item op_item = js_array_get_int(pair, 0);
+        int64_t op = get_type_id(op_item) == LMD_TYPE_INT ? it2i(op_item) : 0;
+        if (op > 0) strbuf_append_str(sb, "+ ");
+        else if (op < 0) strbuf_append_str(sb, "- ");
+        else strbuf_append_str(sb, "  ");
+        js_assert_myers_append_string_value(sb, js_array_get_int(pair, 1));
+        if (i > 0) strbuf_append_char(sb, '\n');
+    }
+    Item result = js_new_object();
+    js_property_set(result, assert_make_string("message"),
+        assert_make_string_n(sb->str, sb->length));
+    js_property_set(result, assert_make_string("skipped"), (Item){.item = b2it(false)});
+    strbuf_free(sb);
+    return result;
+}
+
+extern "C" Item js_get_internal_assert_myers_diff_namespace(void) {
+    if (internal_assert_myers_diff_namespace.item != 0) return internal_assert_myers_diff_namespace;
+
+    internal_assert_myers_diff_namespace = js_new_object();
+    heap_register_gc_root(&internal_assert_myers_diff_namespace.item);
+    js_property_set(internal_assert_myers_diff_namespace, assert_make_string("myersDiff"),
+        js_new_function((void*)js_internal_assert_myersDiff, 3));
+    js_property_set(internal_assert_myers_diff_namespace, assert_make_string("printMyersDiff"),
+        js_new_function((void*)js_internal_assert_printMyersDiff, 2));
+    js_property_set(internal_assert_myers_diff_namespace, assert_make_string("printSimpleMyersDiff"),
+        js_new_function((void*)js_internal_assert_printSimpleMyersDiff, 1));
+    js_property_set(internal_assert_myers_diff_namespace, assert_make_string("default"),
+        internal_assert_myers_diff_namespace);
+    return internal_assert_myers_diff_namespace;
 }
 
 // helper: throw AssertionError with full Node.js properties
@@ -1570,43 +1763,66 @@ static void assert_set_method_item(Item ns, const char* name, Item fn) {
     js_property_set(ns, assert_make_string(name), fn);
 }
 
+static Item js_assert_constructor_default_message(Item actual, Item expected, Item op_item) {
+    if (js_assert_string_equals(op_item, "strictEqual")) {
+        return js_assert_strict_equal_message(actual, expected);
+    }
+    if (js_assert_string_equals(op_item, "notStrictEqual")) {
+        return js_assert_not_strict_equal_message(actual);
+    }
+    if (js_assert_string_equals(op_item, "deepEqual")) {
+        return js_assert_deep_equal_message(actual, expected);
+    }
+    if (js_assert_string_equals(op_item, "deepStrictEqual")) {
+        Item date_msg = js_assert_date_checktag_message(actual, expected);
+        if (get_type_id(date_msg) == LMD_TYPE_STRING) return date_msg;
+        Item array_msg = js_assert_deep_strict_array_message(actual, expected);
+        if (get_type_id(array_msg) == LMD_TYPE_STRING) return array_msg;
+        return assert_make_string("Expected values to be strictly deep-equal");
+    }
+    if (js_assert_string_equals(op_item, "fail")) {
+        return assert_make_string("Failed");
+    }
+    return assert_make_string("assertion error");
+}
+
 // AssertionError constructor: new assert.AssertionError({ message, actual, expected, operator })
 extern "C" Item js_assert_AssertionError_ctor(Item options) {
     extern Item js_new_error_with_name(Item type_name, Item message);
     extern Item js_property_get(Item obj, Item key);
     extern Item js_property_set(Item obj, Item key, Item value);
-    const char* msg_str = "assertion error";
-    const char* op_str = NULL;
+    Item msg_item = ItemNull;
+    Item op_item = make_js_undefined();
     Item actual = make_js_undefined();
     Item expected = make_js_undefined();
     const char* diff_str = "simple";
+    bool generated = true;
     if (get_type_id(options) == LMD_TYPE_MAP) {
         Item m = js_property_get(options, assert_make_string("message"));
         if (get_type_id(m) == LMD_TYPE_STRING) {
-            String* ms = it2s(m);
-            // use message string directly
-            msg_str = ms->chars;
+            msg_item = m;
+            generated = false;
         }
         actual = js_property_get(options, assert_make_string("actual"));
         expected = js_property_get(options, assert_make_string("expected"));
-        Item op_item = js_property_get(options, assert_make_string("operator"));
-        if (get_type_id(op_item) == LMD_TYPE_STRING) {
-            op_str = it2s(op_item)->chars;
-        }
+        op_item = js_property_get(options, assert_make_string("operator"));
         diff_str = js_assert_normalized_diff(js_property_get(options, js_assert_diff_key()));
     } else if (get_type_id(options) == LMD_TYPE_STRING) {
-        msg_str = it2s(options)->chars;
+        msg_item = options;
+        generated = false;
+    }
+    if (get_type_id(msg_item) != LMD_TYPE_STRING) {
+        msg_item = js_assert_constructor_default_message(actual, expected, op_item);
     }
     Item type_name = assert_make_string("AssertionError");
-    Item msg_item = assert_make_string(msg_str);
     Item error = js_new_error_with_name(type_name, msg_item);
     js_property_set(error, assert_make_string("code"), assert_make_string("ERR_ASSERTION"));
     js_property_set(error, assert_make_string("name"), assert_make_string("AssertionError"));
     js_property_set(error, assert_make_string("actual"), actual);
     js_property_set(error, assert_make_string("expected"), expected);
-    if (op_str) js_property_set(error, assert_make_string("operator"), assert_make_string(op_str));
+    if (get_type_id(op_item) == LMD_TYPE_STRING) js_property_set(error, assert_make_string("operator"), op_item);
     js_property_set(error, assert_make_string("diff"), assert_make_string(diff_str));
-    js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(false)});
+    js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(generated)});
     js_assert_attach_assertion_error_prototype(error);
     return error;
 }
@@ -1731,6 +1947,8 @@ extern "C" Item js_get_assert_namespace(void) {
 
 extern "C" void js_assert_reset(void) {
     assert_namespace = (Item){0};
+    internal_errors_namespace = (Item){0};
+    internal_assert_myers_diff_namespace = (Item){0};
 }
 
 // =============================================================================
@@ -1740,6 +1958,9 @@ extern "C" void js_assert_reset(void) {
 static Item node_test_namespace = {0};
 static Item g_node_before_each_store = {0};
 static Item g_node_after_each_store = {0};
+static int g_node_test_total_count = 0;
+static int g_node_test_pass_count = 0;
+static int g_node_test_fail_count = 0;
 
 #define MAX_NODE_TEST_HOOKS 64
 static Item g_node_before_each_hooks[MAX_NODE_TEST_HOOKS];
@@ -2008,6 +2229,36 @@ static bool node_test_is_promise_like(Item value) {
     return get_type_id(then) == LMD_TYPE_FUNC;
 }
 
+static void node_test_note_failure(void) {
+    g_node_test_fail_count++;
+    js_process_set_exitCode((Item){.item = i2it(1)});
+}
+
+extern "C" void js_node_test_reset_counts(void) {
+    g_node_test_total_count = 0;
+    g_node_test_pass_count = 0;
+    g_node_test_fail_count = 0;
+}
+
+extern "C" int js_node_test_total_count(void) {
+    return g_node_test_total_count;
+}
+
+extern "C" int js_node_test_pass_count(void) {
+    return g_node_test_pass_count;
+}
+
+extern "C" int js_node_test_fail_count(void) {
+    return g_node_test_fail_count;
+}
+
+static int node_test_current_worker_id(void) {
+    const char* worker_id = getenv("NODE_TEST_WORKER_ID");
+    if (!worker_id || !worker_id[0]) return 1;
+    int id = atoi(worker_id);
+    return id > 0 ? id : 1;
+}
+
 // Build a test context (t) passed to test callbacks
 static Item js_build_test_context(void) {
     Item t = js_new_object();
@@ -2042,6 +2293,10 @@ static Item js_build_test_context(void) {
 
     // t.name — filled in later
     js_property_set(t, assert_make_string("name"), make_js_undefined());
+
+    // t.workerId — mirrors NODE_TEST_WORKER_ID for process-isolated test files.
+    js_property_set(t, assert_make_string("workerId"),
+                    (Item){.item = i2it(node_test_current_worker_id())});
 
     // t.signal — an AbortSignal stub
     js_property_set(t, assert_make_string("signal"), make_js_undefined());
@@ -2085,6 +2340,8 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
         return make_js_undefined();
     }
 
+    g_node_test_total_count++;
+
     // create test context with t.mock, t.assert, t.skip, etc.
     Item t = js_build_test_context();
 
@@ -2127,7 +2384,10 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
     }
 
     if (callback_threw) {
-        js_throw_value(callback_error);
+        (void)callback_error;
+        node_test_note_failure();
+    } else {
+        g_node_test_pass_count++;
     }
 
     return make_js_undefined();
@@ -2198,13 +2458,13 @@ extern "C" Item js_node_test_after_each(Item fn, Item options) {
 extern "C" Item js_get_node_test_namespace(void) {
     if (node_test_namespace.item != 0) return node_test_namespace;
 
-    node_test_namespace = js_new_object();
+    Item test_fn = js_new_function((void*)js_node_test_run, 3);
+    node_test_namespace = test_fn;
     node_test_ensure_hook_stores();
 
-    Item test_fn = js_new_function((void*)js_node_test_run, 3);
     // test is both the default export and a named export
     js_property_set(node_test_namespace, assert_make_string("test"), test_fn);
-    js_property_set(node_test_namespace, assert_make_string("default"), node_test_namespace);
+    js_property_set(node_test_namespace, assert_make_string("default"), test_fn);
 
     Item describe_fn = js_new_function((void*)js_node_test_describe, 3);
     js_property_set(node_test_namespace, assert_make_string("describe"), describe_fn);
@@ -2242,4 +2502,5 @@ extern "C" void js_node_test_reset(void) {
     g_node_after_each_store = (Item){0};
     g_node_before_each_count = 0;
     g_node_after_each_count = 0;
+    js_node_test_reset_counts();
 }
