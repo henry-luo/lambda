@@ -21,6 +21,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 #else
 #include <process.h>
@@ -2219,6 +2220,147 @@ static char* cp_read_file_to_buffer(const char* path, size_t* out_len) {
     return out;
 }
 
+static bool cp_get_number_prop(Item obj, const char* name, double* out) {
+    if (!out || !is_object_item(obj)) return false;
+    Item value = js_property_get(obj, make_string_item(name));
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT) {
+        *out = (double)it2i(value);
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        *out = it2d(value);
+        return true;
+    }
+    return false;
+}
+
+static bool cp_get_spawn_timeout_ms(Item options_item, int64_t* timeout_ms) {
+    if (!timeout_ms) return false;
+    *timeout_ms = 0;
+    double timeout = 0.0;
+    if (!cp_get_number_prop(options_item, "timeout", &timeout)) return false;
+    if (timeout <= 0.0) return false;
+    if (timeout > 2147483647.0) timeout = 2147483647.0;
+    *timeout_ms = (int64_t)timeout;
+    return true;
+}
+
+static const char* cp_signal_name_from_number(int sig) {
+#ifndef _WIN32
+    if (sig == SIGKILL) return "SIGKILL";
+    if (sig == SIGTERM) return "SIGTERM";
+#endif
+    return "SIGTERM";
+}
+
+static int cp_get_kill_signal(Item options_item, const char** signal_name) {
+#ifndef _WIN32
+    int sig = SIGTERM;
+    const char* name = "SIGTERM";
+    if (is_object_item(options_item)) {
+        Item value = js_property_get(options_item, make_string_item("killSignal"));
+        TypeId type = get_type_id(value);
+        if (type == LMD_TYPE_INT) {
+            int requested = (int)it2i(value);
+            if (requested == SIGKILL || requested == SIGTERM) sig = requested;
+            name = cp_signal_name_from_number(sig);
+        } else if (type == LMD_TYPE_STRING) {
+            String* s = it2s(value);
+            if ((s->len == 7 && memcmp(s->chars, "SIGKILL", 7) == 0) ||
+                (s->len == 4 && memcmp(s->chars, "KILL", 4) == 0)) {
+                sig = SIGKILL;
+                name = "SIGKILL";
+            } else if ((s->len == 7 && memcmp(s->chars, "SIGTERM", 7) == 0) ||
+                       (s->len == 4 && memcmp(s->chars, "TERM", 4) == 0)) {
+                sig = SIGTERM;
+                name = "SIGTERM";
+            }
+        }
+    }
+    if (signal_name) *signal_name = name;
+    return sig;
+#else
+    if (signal_name) *signal_name = "SIGTERM";
+    return 0;
+#endif
+}
+
+#ifndef _WIN32
+static int64_t cp_now_ms(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return ((int64_t)tv.tv_sec * 1000) + ((int64_t)tv.tv_usec / 1000);
+}
+
+static int cp_spawnSync_run_shell_command(const char* full_cmd, int64_t timeout_ms,
+                                          int kill_signal, bool* timed_out) {
+    if (timed_out) *timed_out = false;
+    if (timeout_ms <= 0) return system(full_cmd);
+
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        setpgid(0, 0);
+        execl("/bin/sh", "sh", "-c", full_cmd, (char*)NULL);
+        _exit(127);
+    }
+
+    setpgid(pid, pid);
+    int status = 0;
+    int64_t deadline = cp_now_ms() + timeout_ms;
+    while (true) {
+        pid_t done = waitpid(pid, &status, WNOHANG);
+        if (done == pid) return status;
+        if (done < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        if (cp_now_ms() >= deadline) break;
+        usleep(1000);
+    }
+
+    if (timed_out) *timed_out = true;
+    kill(-pid, kill_signal);
+    int64_t kill_deadline = cp_now_ms() + 250;
+    while (true) {
+        pid_t done = waitpid(pid, &status, WNOHANG);
+        if (done == pid) return status;
+        if (done < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        if (cp_now_ms() >= kill_deadline) break;
+        usleep(1000);
+    }
+    kill(-pid, SIGKILL);
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR) return -1;
+    }
+    return status;
+}
+#else
+static int cp_spawnSync_run_shell_command(const char* full_cmd, int64_t timeout_ms,
+                                          int kill_signal, bool* timed_out) {
+    (void)timeout_ms;
+    (void)kill_signal;
+    if (timed_out) *timed_out = false;
+    return system(full_cmd);
+}
+#endif
+
+static Item cp_make_spawn_sync_timeout_error(const char* cmd, Item args_item) {
+    Item err = js_new_error(make_string_item("spawnSync ETIMEDOUT"));
+    js_property_set(err, make_string_item("code"), make_string_item("ETIMEDOUT"));
+    js_property_set(err, make_string_item("errno"), (Item){.item = i2it((int64_t)UV_ETIMEDOUT)});
+    char syscall[512];
+    snprintf(syscall, sizeof(syscall), "spawnSync %s", cmd ? cmd : "");
+    js_property_set(err, make_string_item("syscall"), make_string_item(syscall));
+    if (cmd) js_property_set(err, make_string_item("path"), make_string_item(cmd));
+    js_property_set(err, make_string_item("spawnargs"), make_spawn_error_args_array(args_item));
+    return err;
+}
+
 extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_item) {
     // build full command line for popen
     char cmd_buf[4096];
@@ -2257,7 +2399,12 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
         append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, err_item);
     }
 
-    int status = system(full_cmd);
+    int64_t timeout_ms = 0;
+    cp_get_spawn_timeout_ms(options_item, &timeout_ms);
+    const char* timeout_signal_name = "SIGTERM";
+    int kill_signal = cp_get_kill_signal(options_item, &timeout_signal_name);
+    bool timed_out = false;
+    int status = cp_spawnSync_run_shell_command(full_cmd, timeout_ms, kill_signal, &timed_out);
     int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 
     size_t out_len = 0;
@@ -2266,7 +2413,14 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
     char* err_buf = cp_read_file_to_buffer(stderr_path, &err_len);
 
     Item result = js_new_object();
-    js_property_set(result, make_string_item("status"), (Item){.item = i2it(exit_code)});
+    if (timed_out) {
+        js_property_set(result, make_string_item("status"), ItemNull);
+        js_property_set(result, make_string_item("signal"), make_string_item(timeout_signal_name));
+        js_property_set(result, make_string_item("error"), cp_make_spawn_sync_timeout_error(cmd, args_item));
+    } else {
+        js_property_set(result, make_string_item("status"), (Item){.item = i2it(exit_code)});
+        js_property_set(result, make_string_item("signal"), ItemNull);
+    }
     js_property_set(result, make_string_item("stdout"),
                     out_buf ? make_string_item(out_buf, (int)out_len) : make_string_item(""));
     js_property_set(result, make_string_item("stderr"),

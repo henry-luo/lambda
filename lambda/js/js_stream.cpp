@@ -644,6 +644,7 @@ static Item js_create_writable_state(Item owner) {
     js_state_set_item(state, "errored", ItemNull);
     js_state_set_item(state, "corked", (Item){.item = i2it(0)});
     js_state_set_item(state, "bufferedRequestCount", (Item){.item = i2it(0)});
+    js_state_set_item(state, "pendingcb", (Item){.item = i2it(0)});
     js_state_set_item(state, "length", (Item){.item = i2it(0)});
     js_state_set_bool(state, "needDrain", false);
     js_state_set_item(state, "highWaterMark", (Item){.item = i2it(js_stream_default_byte_hwm)});
@@ -687,6 +688,26 @@ static int64_t js_stream_state_get_int(Item state, const char* name, int64_t fal
     Item value = js_property_get(state, make_string_item(name));
     if (get_type_id(value) == LMD_TYPE_INT) return it2i(value);
     return fallback;
+}
+
+static bool js_stream_writable_state_has_pendingcb(Item state) {
+    if (get_type_id(state) != LMD_TYPE_MAP) return false;
+    Item value = js_property_get(state, make_string_item("pendingcb"));
+    return value.item != 0 && get_type_id(value) != LMD_TYPE_UNDEFINED;
+}
+
+static void js_stream_set_writable_pendingcb(Item self, int64_t count) {
+    if (count < 0) count = 0;
+    Item state = js_property_get(self, key_writable_state);
+    if (get_type_id(state) != LMD_TYPE_MAP) return;
+    js_state_set_item(state, "pendingcb", (Item){.item = i2it(count)});
+}
+
+static void js_stream_adjust_writable_pendingcb(Item self, int64_t delta) {
+    Item state = js_property_get(self, key_writable_state);
+    if (get_type_id(state) != LMD_TYPE_MAP) return;
+    int64_t current = js_stream_state_get_int(state, "pendingcb", 0);
+    js_stream_set_writable_pendingcb(self, current + delta);
 }
 
 static int64_t js_stream_chunk_length(Item self, Item chunk) {
@@ -1243,6 +1264,7 @@ static Item js_stream_after_write(Item self, Item callback, Item err) {
     bool need_drain = js_state_get_bool(state, "needDrain");
     bool has_error = js_stream_has_callback_error(err);
     js_property_set(self, make_string_item("_writing"), js_bool_item(false));
+    js_stream_adjust_writable_pendingcb(self, -1);
     js_state_set_item(state, "length", (Item){.item = i2it(0)});
     js_state_set_bool(state, "needDrain", false);
     if (has_error) {
@@ -1292,6 +1314,7 @@ static Item js_stream_write_callback_once(Item env_item, Item err) {
 }
 
 static Item js_stream_make_write_callback(Item self, Item callback) {
+    js_stream_adjust_writable_pendingcb(self, 1);
     Item* env = js_alloc_env(3);
     env[0] = self;
     env[1] = callback;
@@ -1326,6 +1349,7 @@ static Item js_stream_transform_write_callback_once(Item env_item, Item err, Ite
 }
 
 static Item js_stream_make_transform_write_callback(Item self, Item callback) {
+    js_stream_adjust_writable_pendingcb(self, 1);
     Item* env = js_alloc_env(3);
     env[0] = self;
     env[1] = callback;
@@ -1339,6 +1363,7 @@ static Item js_stream_after_writev(Item self, Item pending, Item err) {
     bool need_drain = js_state_get_bool(state, "needDrain");
     bool has_error = js_stream_has_callback_error(err);
     js_property_set(self, make_string_item("_writing"), js_bool_item(false));
+    js_stream_adjust_writable_pendingcb(self, -1);
     js_state_set_item(state, "length", (Item){.item = i2it(0)});
     js_state_set_bool(state, "needDrain", false);
     if (has_error) {
@@ -1395,6 +1420,7 @@ static Item js_stream_writev_callback_once(Item env_item, Item err) {
 }
 
 static Item js_stream_make_writev_callback(Item self, Item pending) {
+    js_stream_adjust_writable_pendingcb(self, 1);
     Item* env = js_alloc_env(3);
     env[0] = self;
     env[1] = pending;
@@ -7898,13 +7924,19 @@ static bool js_stream_finished_side_done(Item stream, bool check_readable, bool 
     }
     if (check_writable && js_stream_has_writable_side(stream) &&
         js_stream_writable_side_enabled(stream)) {
+        Item writable_state = js_property_get(stream, key_writable_state);
         bool native_writable_state =
             get_type_id(js_property_get(stream, key_writable_side_enabled)) == LMD_TYPE_BOOL ||
             get_type_id(js_property_get(stream, key_writable)) == LMD_TYPE_BOOL;
+        bool legacy_no_pendingcb_done =
+            native_writable_state &&
+            js_state_get_bool(writable_state, "ended") &&
+            !js_stream_writable_state_has_pendingcb(writable_state);
         writable_done = js_item_is_true(js_property_get(stream, key_finish_emitted)) ||
                         js_item_is_true(js_property_get(stream, key_finished)) ||
+                        legacy_no_pendingcb_done ||
                         (native_writable_state &&
-                         js_state_get_bool(js_property_get(stream, key_writable_state), "finished"));
+                         js_state_get_bool(writable_state, "finished"));
     }
     return readable_done && writable_done;
 }
