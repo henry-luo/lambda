@@ -2160,6 +2160,10 @@ static int cp_spawnSync_append_args(char* full_cmd, int full_cmd_size, int pos, 
     int64_t alen = js_array_length(args_item);
     for (int64_t i = 0; i < alen && pos < full_cmd_size - 1; i++) {
         Item arg = js_array_get_int(args_item, i);
+        if (get_type_id(arg) != LMD_TYPE_STRING) {
+            arg = js_to_string(arg);
+            if (js_exception_pending) return pos;
+        }
         if (get_type_id(arg) != LMD_TYPE_STRING) continue;
         append_shell_arg(full_cmd, full_cmd_size, &pos, arg);
     }
@@ -2312,6 +2316,39 @@ static bool cp_sync_has_input(Item options_item) {
     if (!is_object_item(options_item)) return false;
     Item input = js_property_get(options_item, make_string_item("input"));
     return !is_nullish_item(input);
+}
+
+static bool cp_sync_normalize_stdio(Item options_item, int stdio_mode[3]) {
+    if (!stdio_mode) return false;
+    stdio_mode[0] = 0;
+    stdio_mode[1] = 0;
+    stdio_mode[2] = 0;
+    if (!is_object_item(options_item)) return true;
+
+    SpawnRequest req;
+    memset(&req, 0, sizeof(req));
+    req.options = options_item;
+    req.stdio_mode[0] = 0;
+    req.stdio_mode[1] = 0;
+    req.stdio_mode[2] = 0;
+    if (!normalize_stdio_options(&req)) return false;
+    stdio_mode[0] = req.stdio_mode[0];
+    stdio_mode[1] = req.stdio_mode[1];
+    stdio_mode[2] = req.stdio_mode[2];
+    return true;
+}
+
+static Item cp_sync_stdio_output_item(int stdio_mode, const char* data, size_t len, bool as_string) {
+    if (stdio_mode != 0) return ItemNull;
+    return cp_sync_make_output_item(data, len, as_string);
+}
+
+static const char* cp_sync_null_device(void) {
+#ifdef _WIN32
+    return "NUL";
+#else
+    return "/dev/null";
+#endif
 }
 
 static bool cp_get_number_prop(Item obj, const char* name, double* out) {
@@ -2492,6 +2529,10 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
     snprintf(stdout_path, sizeof(stdout_path), "temp/js_spawn_sync_%ld_%p.out", pid, (void*)&stdout_path);
     snprintf(stderr_path, sizeof(stderr_path), "temp/js_spawn_sync_%ld_%p.err", pid, (void*)&stderr_path);
     snprintf(stdin_path, sizeof(stdin_path), "temp/js_spawn_sync_%ld_%p.in", pid, (void*)&stdin_path);
+    int stdio_mode[3];
+    if (!cp_sync_normalize_stdio(effective_options, stdio_mode)) {
+        return ItemNull;
+    }
     bool has_input = cp_sync_has_input(effective_options);
     if (has_input && !cp_sync_write_input_file(effective_options, stdin_path)) {
         unlink(stdin_path);
@@ -2501,15 +2542,31 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
     if (redir_pos < (int)sizeof(full_cmd) - 1) {
         Item out_item = make_string_item(stdout_path);
         Item err_item = make_string_item(stderr_path);
-        if (has_input) {
+        if (has_input && stdio_mode[0] == 0) {
             Item in_item = make_string_item(stdin_path);
             redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " < ");
             append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, in_item);
+        } else if (stdio_mode[0] == 2) {
+            Item null_item = make_string_item(cp_sync_null_device());
+            redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " < ");
+            append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, null_item);
         }
-        redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " > ");
-        append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, out_item);
-        redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " 2> ");
-        append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, err_item);
+        if (stdio_mode[1] == 0) {
+            redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " > ");
+            append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, out_item);
+        } else if (stdio_mode[1] == 2) {
+            Item null_item = make_string_item(cp_sync_null_device());
+            redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " > ");
+            append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, null_item);
+        }
+        if (stdio_mode[2] == 0) {
+            redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " 2> ");
+            append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, err_item);
+        } else if (stdio_mode[2] == 2) {
+            Item null_item = make_string_item(cp_sync_null_device());
+            redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " 2> ");
+            append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, null_item);
+        }
     }
 
     int64_t timeout_ms = 0;
@@ -2535,8 +2592,10 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
         js_property_set(result, make_string_item("signal"), ItemNull);
     }
     bool output_as_string = cp_sync_output_wants_string(effective_options);
-    js_property_set(result, make_string_item("stdout"), cp_sync_make_output_item(out_buf, out_len, output_as_string));
-    js_property_set(result, make_string_item("stderr"), cp_sync_make_output_item(err_buf, err_len, output_as_string));
+    js_property_set(result, make_string_item("stdout"),
+                    cp_sync_stdio_output_item(stdio_mode[1], out_buf, out_len, output_as_string));
+    js_property_set(result, make_string_item("stderr"),
+                    cp_sync_stdio_output_item(stdio_mode[2], err_buf, err_len, output_as_string));
     if (out_buf) mem_free(out_buf);
     if (err_buf) mem_free(err_buf);
     unlink(stdout_path);

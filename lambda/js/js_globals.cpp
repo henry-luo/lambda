@@ -6773,10 +6773,15 @@ struct JsFunctionLayout {
     uint16_t flags;
     int16_t formal_length;
     Item* module_vars;
+    Item home_global;
     String* source_text;
     bool eval_initializer_context;
     Item* with_env;
     int with_env_depth;
+    String* vm_stack_filename;
+    String* vm_stack_source;
+    int64_t vm_stack_line_offset;
+    int64_t vm_stack_column_offset;
 };
 
 static bool js_func_is_constructor(Item func_item) {
@@ -16961,10 +16966,15 @@ struct JsCtor {
     uint16_t flags;      // must match JsFunction layout (generator, arrow flags)
     int16_t formal_length; // must match JsFunction layout
     Item* module_vars;   // must match JsFunction layout
+    Item home_global;
     String* source_text; // must match JsFunction layout (v29)
     bool eval_initializer_context;
     Item* with_env;
     int with_env_depth;
+    String* vm_stack_filename;
+    String* vm_stack_source;
+    int64_t vm_stack_line_offset;
+    int64_t vm_stack_column_offset;
 };
 
 // Reset constructor prototype objects between batch tests.
