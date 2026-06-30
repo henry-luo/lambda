@@ -15,6 +15,7 @@
 #include <stdarg.h>
 #include <time.h>
 #include <errno.h>  // for errno checking
+#include <math.h>
 #if _WIN32
 #include <windows.h>
 #include <process.h>
@@ -37,6 +38,28 @@ extern "C" Map* create_match_map_ext(const char* match_str, size_t match_len, in
 
 // forward declaration of static error string (defined later in this file)
 extern String& STR_ERROR;
+
+static bool item_to_integral_index(Item item, int64_t* out) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT) {
+        *out = item.get_int56();
+        return true;
+    }
+    if (type == LMD_TYPE_INT64) {
+        *out = item.get_int64();
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        double val = item.get_double();
+        if (isnan(val) || isinf(val)) return false;
+        if (val < (double)LLONG_MIN || val > (double)LLONG_MAX) return false;
+        int64_t int_val = (int64_t)val;
+        if ((double)int_val != val) return false;
+        *out = int_val;
+        return true;
+    }
+    return false;
+}
 
 // External path resolution function (implemented in path.c)
 extern "C" Item path_resolve_for_iteration(Path* path);
@@ -2966,13 +2989,15 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
         return ItemError;
     }
 
-    if (get_type_id(start_item) != LMD_TYPE_INT && get_type_id(start_item) != LMD_TYPE_INT64) {
-        log_debug("fn_substring: start index must be an integer");
+    int64_t start = 0;
+    int64_t end = 0;
+    if (!item_to_integral_index(start_item, &start)) {
+        log_debug("fn_substring: start index must be an integer-valued number");
         return ItemError;
     }
 
-    if (get_type_id(end_item) != LMD_TYPE_INT && get_type_id(end_item) != LMD_TYPE_INT64) {
-        log_debug("fn_substring: end index must be an integer");
+    if (!item_to_integral_index(end_item, &end)) {
+        log_debug("fn_substring: end index must be an integer-valued number");
         return ItemError;
     }
 
@@ -2994,9 +3019,6 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
         if (!str) return ItemNull;
         is_ascii = str->is_ascii != 0;
     }
-
-    int64_t start = it2l(start_item);
-    int64_t end = it2l(end_item);
 
     // ASCII fast path: char index == byte index
     if (is_ascii) {

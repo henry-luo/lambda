@@ -210,7 +210,7 @@ len(cl)         // 0
 
 ## 8. Missing `substr` and `charcode` Functions
 
-**Status**: No Fix
+**Status**: ✅ **No Fix**
 **Severity**: Compilation error  
 **Affected benchmarks**: crypto_sha1
 
@@ -286,30 +286,27 @@ pn traverse(node, keys, idx_in) {
 
 ## 11. Integer Division Returns Float, Causing Silent Failures in `slice`/`ord`
 
+**Status**:  ✅ **FIXED**.
 **Severity**: Runtime bug (silent wrong results — returns 0 instead of correct value)  
 **Affected benchmarks**: crypto_sha1
 
-When dividing two integers with `/`, the result is a float rather than an integer — even when the division is exact (e.g., `0 / 8 = 0.0`). The float value `string()`-ifies identically to the int (`"0"` not `"0.0"`), making it very hard to diagnose.
+Lambda `/` correctly returns float, including for exact integer division (`0 / 8 = 0.0`). The bug was that `slice(str, start, end)` and array/vector `slice(vec, start, end)` rejected integral float indices such as `0.0` and `7.0`, which made `ord(slice(...))` collapse to `0` in ported benchmark code.
 
-When this float is passed to `slice(str, start, end)` or `ord()`, the functions silently return wrong results (empty strings or 0) instead of raising a type error.
+`slice()` now accepts integer-valued floats for start/end indices. `ord()` works with the resulting one-character string, and `ord(str[idx])` already supports integer-valued float indices through string indexing.
 
 ```lambda
 var i: int = 0
 let CHRSZ = 8
 var char_idx = i / CHRSZ      // char_idx is 0.0 (float), not 0 (int)
-ord(slice(s, char_idx, char_idx + 1))  // returns 0 instead of 97!
+ord(slice(s, char_idx, char_idx + 1))  // 97
+ord(s[char_idx])                       // 97
 
-var char_idx2: int = i / CHRSZ  // explicitly typed as int — works correctly
-ord(slice(s, char_idx2, char_idx2 + 1))  // returns 97 ✓
+slice("abcdefghi", 7.0, 8.0)           // "h"
 ```
 
-**Workaround**: Always explicitly type variables that hold division results as `int`:
+**Remaining edge policy**: Fractional floats such as `1.5` are still rejected as index errors rather than truncated.
 
-```lambda
-var char_idx: int = i / CHRSZ  // explicit int annotation
-```
-
-**Suggestion**: Either (1) make integer `/` integer produce an integer result (like Python's `//`), or (2) have `slice` and `ord` accept float indices by truncating to int, or (3) produce a type error when a float is passed where an int is expected.
+**Verification**: `test/lambda/slice_float_indices.ls` covers integral float indices for string slicing, UTF-8 strings, array slicing, 2-arg `slice`, and fractional-float rejection.
 
 ---
 
@@ -526,7 +523,7 @@ pn show() {
 | 8 | Missing substr/charcode | Missing feature | **No Fix**; use `str[start to end]`, `slice(str,start,end)`, and `ord(str[idx])` |
 | 9 | `div` reserved word | Reserved word | **Fixed**; `div` can be used as a parameter/local name and assignment target |
 | 10 | Immutable parameters | Language design | 1 benchmark, minor |
-| 11 | Integer division returns float | Type inference | 1 benchmark, silent wrong results |
+| 11 | Integer division returns float | Runtime bug | **Fixed**; `/` stays float and `slice` accepts integer-valued float indices |
 | 12 | `shl` 64-bit overflow | Bitwise ops | **Fixed for typed `u32` code**; SHA-1/MD5 rotate helpers use compact shifts |
 | 13 | `@` path literals don't parse | Missing feature | 1 benchmark, doc mismatch |
 | 14 | `slice()` no 2-argument form | Missing feature | **Fixed**; `slice(vec,start)` delegates to slice-to-end |
