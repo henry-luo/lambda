@@ -1620,16 +1620,28 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
 
     JsVariableDeclarationNode* var_decl = (JsVariableDeclarationNode*)alloc_js_ast_node(tp, JS_AST_NODE_VARIABLE_DECLARATION, var_node, sizeof(JsVariableDeclarationNode));
 
-    // Determine variable kind (var, let, const)
-    TSNode first_child = ts_node_child(var_node, 0);
-    StrView kind_source = js_node_source(tp, first_child);
-
-    if (strncmp(kind_source.str, "var", 3) == 0) {
-        var_decl->kind = JS_VAR_VAR;
-    } else if (strncmp(kind_source.str, "let", 3) == 0) {
-        var_decl->kind = JS_VAR_LET;
-    } else if (strncmp(kind_source.str, "const", 5) == 0) {
-        var_decl->kind = JS_VAR_CONST;
+    // Determine variable kind (var, let, const, using).
+    var_decl->kind = JS_VAR_VAR;
+    uint32_t raw_child_count = ts_node_child_count(var_node);
+    for (uint32_t ki = 0; ki < raw_child_count; ki++) {
+        TSNode child = ts_node_child(var_node, ki);
+        StrView kind_source = js_node_source(tp, child);
+        if (kind_source.length == 3 && strncmp(kind_source.str, "var", 3) == 0) {
+            var_decl->kind = JS_VAR_VAR;
+            break;
+        } else if (kind_source.length == 3 && strncmp(kind_source.str, "let", 3) == 0) {
+            var_decl->kind = JS_VAR_LET;
+            break;
+        } else if (kind_source.length == 5 && strncmp(kind_source.str, "const", 5) == 0) {
+            var_decl->kind = JS_VAR_CONST;
+            break;
+        } else if (kind_source.length == 5 && strncmp(kind_source.str, "await", 5) == 0) {
+            var_decl->is_await_using = true;
+        } else if (kind_source.length == 5 && strncmp(kind_source.str, "using", 5) == 0) {
+            var_decl->kind = JS_VAR_CONST;
+            var_decl->is_using = true;
+            break;
+        }
     }
 
     // Build declarators

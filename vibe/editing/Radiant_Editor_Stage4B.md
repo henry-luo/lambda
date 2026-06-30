@@ -210,9 +210,11 @@ Keys children by `data-source-path` (and `shape-id` for drawings) so reorder/ins
 
 ## 5. Phase 4–5 — parity across three runtimes, then retire the dead C++ engine
 
-### 5.1 Phase 4 — triple-runtime parity on the shared fixtures
+### 5.1 Phase 4 — triple-runtime parity on the shared fixtures — **DEFERRED to future**
 
-The same fixture corpus runs across these runtime pipelines, all co-equal:
+> **Status (2026-06-30): deferred.** The Lambda `.ls` editor track under Radiant (mount/edit/structural-edit/format via `on` handlers + `render_map`, then triage to parity against the JS runtime) is **postponed to a future milestone**. The substrate is already Lambda-ready — the Phase-3 script-managed bypass dispatches `beforeinput` to *both* bindings (`editing_dispatch_beforeinput_ex` calls `dispatch_input_event` for JS **and** `dispatch_lambda_event` for Lambda), and `data-script-edit` routing is runtime-neutral — so the Lambda track can resume later without re-touching the substrate. **Consequence for Phase 5:** the original "covered green under *both* Radiant runtimes" retirement gate is relaxed to the **JS runtime alone** (the shipping editor); see §5.2.
+
+The eventual shared-corpus pipelines (for when the Lambda track resumes):
 
 | Pipeline | View / commit | Runs on | Role |
 |---|---|---|---|
@@ -222,11 +224,23 @@ The same fixture corpus runs across these runtime pipelines, all co-equal:
 | **Lambda under Radiant** | `view`/`edit` + `render_map` | Radiant native | shipping (Lambda) |
 | *React under Radiant* | React | Radiant via a future React host | *future* — when Radiant gains React support, the retained React version validates it (§3.2) |
 
-**Triage** each divergence to one cause: browser ✅ / Radiant-JS ❌ → **substrate/DOM gap** (fix in C++ `js_dom*`/event routing); Radiant-JS ✅ / Lambda ❌ (or vice-versa) → a **runtime-port gap** (fix in the lagging `src/` or `mod_*.ls`, keeping designs aligned); all differ from expected → a **legitimate editor difference** to record. **Retirement gate:** every behaviour the native C++ engine currently provides must have a green covering fixture under **both** Radiant runtimes before its native code is removed.
+**Triage** each divergence to one cause: browser ✅ / Radiant-JS ❌ → **substrate/DOM gap** (fix in C++ `js_dom*`/event routing); Radiant-JS ✅ / Lambda ❌ (or vice-versa) → a **runtime-port gap** (fix in the lagging `src/` or `mod_*.ls`, keeping designs aligned); all differ from expected → a **legitimate editor difference** to record.
 
-### 5.2 Phase 5 — retire the C++ editing-behavior subsystem
+### 5.2 Phase 5 — retire the C++ editing-behavior subsystem (gated on JS parity only)
 
-Once Phase 4's parity gate is green, **delete** the disabled editing-behavior layer (the **RETIRE** rows: `editing_rich_transaction.cpp` ~4k, the apply-paths of `editing_controller`/`editing_dispatch`/`editing_target_range`, `editing_intent`, the rich path of `text_edit`) and remove the `js_dom.cpp` coupling (§1.5), keeping Layer A intact. Steps: (1) sever `js_dom.cpp` → `editing_rich_transaction`; (2) delete dead files + build entries (`build_lambda_config.json` → `make`); (3) prune orphaned hooks from `event.cpp`/`state_machine.cpp`/`state_store.cpp`, leaving event generation, routing, and caret/selection intact; (4) re-run `make test-radiant-baseline` + the 4B fixture lanes. **Guard:** gated on parity, file-by-file; no native code deleted while it is the sole provider of a behaviour.
+**Revised gate (Phase 4 deferred).** Retirement now proceeds against the **JS runtime alone** — the shipping editor — rather than the original dual-runtime parity gate. The plain-DOM JS editor's coverage (the `test/ui/editor4b` corpus, incl. `phase3-no-native-edit.json`) is the gate.
+
+**The native engine is still the sole provider for *non*-script-managed contenteditable** — i.e. any `contenteditable` *without* `data-script-edit`. That set is exercised by the **native editing test suites** (`test_chrome_editing_gtest` — the WPT `execCommand`/testdriver conformance suite, ~hundreds of cases, **not** in `make test-radiant-baseline`; plus native editing-event tests). So retiring the engine necessarily **retires those tests with it** — they validate the behaviour being removed. (Audit: `editing_rich_transaction.cpp` is 3998 LOC; referenced from `state_machine.cpp`, `editing_geometry.cpp`, `event.cpp`, `lambda/js/js_dom.cpp`, and its own header.)
+
+**Order (each stage gated by `make test-radiant-baseline` + the `editor4b` lanes staying green; the ungated native editing suites are expected to drop as their engine is removed):**
+1. ✅ **Sever `js_dom.cpp` → `editing_rich_transaction`** (§1.5) — **done 2026-06-30.** `js_dom_testdriver_rich_mutate` (the WPT testdriver/`execCommand` native-apply callback) is now an inert no-op and the `editing_rich_transaction.hpp` include is removed; `js_dom.cpp` no longer depends on the native rich-edit engine. **Verified:** `make build` clean; **gated baseline unchanged (6104/178, UI Automation 238/170)**; `editor4b` **10/10** (the shipping editor never used this path — it edits via real `beforeinput` → script). The ungated `test_chrome_editing` `execCommand`/testdriver cases that relied on native apply degrade as expected (engine retiring). Reversible edit (no deletions yet).
+2. **Sever the `event.cpp` keydown/native-apply path** so unmarked contenteditable no longer runs `dispatch_rich_transaction_defaultable` / the native default mutate.
+3. **Delete the dead files + build entries** (`editing_rich_transaction.cpp`, the apply-paths of `editing_controller`/`editing_dispatch`/`editing_target_range`, `editing_intent`, the rich path of `text_edit`; `build_lambda_config.json` → `make`).
+4. **Prune orphaned hooks** from `event.cpp`/`state_machine.cpp`/`state_store.cpp`, leaving event generation, routing, caret/selection, rendering, and form controls (Layer A) intact.
+5. **Retire/remove the native editing test suites** and the `data-script-edit` marker (contenteditable becomes unconditionally script-routed).
+6. Re-run `make test-radiant-baseline` + the `editor4b` lanes.
+
+**Guard:** file-by-file; never break the **gated** baseline or the JS `editor4b` lanes. Where a stage would break a *gated* test (a UI-automation editing case), stop and treat that behaviour as one the JS editor must cover (a fixture) before proceeding — the JS-parity analogue of the original guard.
 
 ---
 
@@ -247,8 +261,8 @@ Once Phase 4's parity gate is green, **delete** the disabled editing-behavior la
 | **1 — Plain-DOM JS view (browser)** | ✅ done | `render.ts` + `reconcile()` + vanilla controller; React in parallel | All tests green on the plain-DOM view *(1955 green; React + plain-DOM run in parallel; the 4 React `.tsx` tests kept, not migrated)* |
 | **2 — JS under Radiant + spike** | ◑ substantially done | `editor-dom.html` runs via `./lambda.exe view`; §3.3 spike resolved | Basics work under Radiant; minimal DOM surface asserted *(loads/mounts/edits/toolbar/range-format/structural-edits/whole-doc-replace green via `test/ui/editor4b` 9/9; layout + native-structural-crash + full-rebuild-focus-loss issues all fixed — [Radiant_Issue2.md](../radiant/Radiant_Issue2.md), [Radiant_Issue3.md](../radiant/Radiant_Issue3.md))* |
 | **3 — contenteditable → flag** | ◑ core cut done (JS) | `data-script-edit` routing; events routed to script; native apply path bypassed for marked surfaces | Both runtimes edit via script; no native edit fires *(JS: proven — `editing.transaction` count 0 in `phase3-no-native-edit.json`, 10/10 fixtures; Lambda track pending Phase 4; the four link-time edge-groups deferred to Phase 5 with the marker)* |
-| **4 — Triple-runtime parity** | ☐ not started | corpus runs in browser-JS + Radiant-JS + Radiant-Lambda; divergence triage; native-behaviour coverage map | Every divergence triaged; **every native behaviour covered green under both Radiant runtimes** (retirement gate) |
-| **5 — Retire C++ engine** | ☐ not started | dead editing-behavior subsystem + couplings removed; Layer A kept | `make test-radiant-baseline` + 4B lanes green; no behaviour lost |
+| **4 — Triple-runtime parity** | ⏸ **deferred to future** | corpus runs in browser-JS + Radiant-JS + Radiant-Lambda; divergence triage; native-behaviour coverage map | *(deferred — the Lambda `.ls` track resumes in a future milestone; substrate already Lambda-ready)* |
+| **5 — Retire C++ engine** | ◐ in progress (JS-gated) | dead editing-behavior subsystem + couplings removed; Layer A kept | `make test-radiant-baseline` + `editor4b` lanes green; native editing test suites retired with the engine *(gate relaxed to the JS runtime since Phase 4 is deferred — §5.2)* |
 
 **Overall acceptance:** the same editor design, source-model handling, and oracle-verified behaviour runs in the browser and as **two co-equal Radiant editors** (JS and Lambda) over a **common C++ substrate**; all document editing is script-driven over a minimal, documented DOM surface; `contenteditable` is a routing flag; the native C++ editing-behavior subsystem is gone while caret/selection/rendering/event-routing/form-controls remain.
 

@@ -7078,6 +7078,36 @@ static Item js_crypto_generateKey_emit(Item env_item) {
     return make_js_undefined_crypto();
 }
 
+static Item js_crypto_generateKeyPair_emit(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined_crypto();
+    Item callback = env[0];
+    Item public_key = env[1];
+    Item private_key = env[2];
+    Item args[3] = { ItemNull, public_key, private_key };
+    js_call_function(callback, make_js_undefined_crypto(), args, 3);
+    return make_js_undefined_crypto();
+}
+
+extern "C" Item js_crypto_generateKeyPair(Item type_item, Item options_item, Item callback_item) {
+    if (get_type_id(callback_item) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "Function", callback_item);
+    }
+
+    Item result = js_crypto_generateKeyPairSync(type_item, options_item);
+    if (js_check_exception() || result.item == ITEM_NULL) return ItemNull;
+
+    Item public_key = js_property_get(result, make_string_item_crypto("publicKey"));
+    Item private_key = js_property_get(result, make_string_item_crypto("privateKey"));
+    Item* env = js_alloc_env(3);
+    env[0] = callback_item;
+    env[1] = public_key;
+    env[2] = private_key;
+    Item fn = js_new_closure((void*)js_crypto_generateKeyPair_emit, 0, env, 3);
+    js_next_tick_enqueue(fn);
+    return make_js_undefined_crypto();
+}
+
 extern "C" Item js_crypto_generateKey(Item type_item, Item options_item, Item callback_item) {
     Item result = js_crypto_generateKeySync(type_item, options_item);
     if (js_check_exception() || result.item == ITEM_NULL) return ItemNull;
@@ -8517,6 +8547,7 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(crypto_namespace, "createPublicKey",    (void*)js_crypto_createPublicKey, 1);
     crypto_set_method(crypto_namespace, "generateKeySync",    (void*)js_crypto_generateKeySync, 2);
     crypto_set_method(crypto_namespace, "generateKey",        (void*)js_crypto_generateKey, 3);
+    crypto_set_method(crypto_namespace, "generateKeyPair",    (void*)js_crypto_generateKeyPair, 3);
     crypto_set_method(crypto_namespace, "generateKeyPairSync", (void*)js_crypto_generateKeyPairSync, 2);
 
     // subtle Web Crypto API (subset)

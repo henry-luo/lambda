@@ -712,78 +712,94 @@ extern "C" Item js_buffer_of(Item a0, Item a1, Item a2) {
 
 // ─── Buffer.concat(list, totalLength?) ──────────────────────────────────────
 extern "C" Item js_buffer_concat(Item list, Item total_length_item) {
-    // list must be an array-like
+    // list must be an actual Array, not merely array-like (Buffer/Uint8Array).
+    if (get_type_id(list) != LMD_TYPE_ARRAY) {
+        char msg[256];
+        int pos = snprintf(msg, sizeof(msg),
+            "The \"list\" argument must be an instance of Array.");
+        format_received_suffix(msg + pos, (int)sizeof(msg) - pos, list);
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+    }
     int64_t count = js_array_length(list);
-    if (count < 0) {
-        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
-            "The \"list\" argument must be an instance of Array, Buffer, or Uint8Array");
+    if (count == 0) {
+        return create_buffer(0);
     }
 
-    // Validate totalLength if provided (must be integer, >= 0)
-    if (get_type_id(total_length_item) != LMD_TYPE_UNDEFINED &&
-        total_length_item.item != ITEM_NULL && total_length_item.item != ITEM_JS_UNDEFINED) {
-        // Check if it's not an integer — simple approach: check if string representation has a dot
-        // Node.js throws ERR_OUT_OF_RANGE for non-integer or negative totalLength
-        TypeId tl_type = get_type_id(total_length_item);
-        if (tl_type == LMD_TYPE_FLOAT) {
-            // Check if value has fractional part or is negative
-            extern Item js_to_string(Item value);
-            Item str = js_to_string(total_length_item);
-            String* s = it2s(str);
-            if (s) {
-                bool has_dot = false;
-                bool is_neg = (s->len > 0 && s->chars[0] == '-');
-                for (int i = 0; i < (int)s->len; i++) {
-                    if (s->chars[i] == '.') { has_dot = true; break; }
-                }
-                if (has_dot) {
-                    return js_throw_range_error_code("ERR_OUT_OF_RANGE",
-                        "The value of \"totalLength\" is out of range. It must be an integer");
-                }
-                if (is_neg) {
-                    return js_throw_range_error_code("ERR_OUT_OF_RANGE",
-                        "The value of \"totalLength\" is out of range. It must be >= 0");
-                }
-            }
-        } else if (tl_type == LMD_TYPE_INT) {
-            // check negative
-            int64_t v = it2i(total_length_item);
-            if (v < 0) {
-                return js_throw_range_error_code("ERR_OUT_OF_RANGE",
-                    "The value of \"totalLength\" is out of range. It must be >= 0");
-            }
-        }
-    }
-
-    // Validate each element is a Buffer/Uint8Array
+    // compute natural total length
+    int64_t total = 0;
     for (int64_t i = 0; i < count; i++) {
         Item buf = js_array_get_int(list, i);
         if (!js_is_typed_array(buf)) {
-            return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
-                "\"list\" argument must be an instance of Buffer or Uint8Array");
+            char msg[256];
+            int pos = snprintf(msg, sizeof(msg),
+                "The \"list[%lld]\" argument must be an instance of Buffer or Uint8Array.",
+                (long long)i);
+            format_received_suffix(msg + pos, (int)sizeof(msg) - pos, buf);
+            return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
         }
-    }
-
-    // compute total length
-    int total = 0;
-    for (int64_t i = 0; i < count; i++) {
-        Item buf = js_array_get_int(list, i);
         int blen = 0;
         buffer_data(buf, &blen);
         total += blen;
+        if (total > JS_BUFFER_MAX_LENGTH) {
+            total = JS_BUFFER_MAX_LENGTH;
+            break;
+        }
     }
-    Item result = create_buffer(total);
+
+    // validate and honor totalLength when provided (must be number, integer, in range).
+    if (get_type_id(total_length_item) != LMD_TYPE_UNDEFINED &&
+        total_length_item.item != ITEM_NULL && total_length_item.item != ITEM_JS_UNDEFINED) {
+        TypeId tl_type = get_type_id(total_length_item);
+        double requested = 0.0;
+        if (tl_type == LMD_TYPE_INT) {
+            requested = (double)it2i(total_length_item);
+        } else if (tl_type == LMD_TYPE_FLOAT) {
+            requested = it2d(total_length_item);
+        } else if (tl_type == LMD_TYPE_INT64) {
+            requested = (double)it2l(total_length_item);
+        } else {
+            char msg[256];
+            int pos = snprintf(msg, sizeof(msg),
+                "The \"length\" argument must be of type number.");
+            format_received_suffix(msg + pos, (int)sizeof(msg) - pos, total_length_item);
+            return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+        }
+        int64_t requested_int = (int64_t)requested;
+        if (requested != requested || (double)requested_int != requested) {
+            char msg[160];
+            snprintf(msg, sizeof(msg),
+                "The value of \"length\" is out of range. It must be an integer. Received %g",
+                requested);
+            return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
+        }
+        if (requested < 0.0 || requested > (double)JS_BUFFER_MAX_LENGTH) {
+            char msg[192];
+            snprintf(msg, sizeof(msg),
+                "The value of \"length\" is out of range. It must be >= 0 && <= %lld. Received %g",
+                (long long)JS_BUFFER_MAX_LENGTH, requested);
+            return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
+        }
+        total = requested_int;
+    } else if (total_length_item.item == ITEM_NULL) {
+        char msg[160];
+        int pos = snprintf(msg, sizeof(msg),
+            "The \"length\" argument must be of type number.");
+        format_received_suffix(msg + pos, (int)sizeof(msg) - pos, total_length_item);
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+    }
+
+    Item result = create_buffer((int)total);
     int dst_len = 0;
     uint8_t* dst = buffer_data(result, &dst_len);
-    int offset = 0;
+    int64_t offset = 0;
     for (int64_t i = 0; i < count && offset < total; i++) {
         Item buf = js_array_get_int(list, i);
         int blen = 0;
         uint8_t* bdata = buffer_data(buf, &blen);
         if (bdata && blen > 0) {
-            int copy = blen;
+            int64_t copy = blen;
             if (offset + copy > total) copy = total - offset;
-            memcpy(dst + offset, bdata, copy);
+            memcpy(dst + offset, bdata, (size_t)copy);
             offset += copy;
         }
     }

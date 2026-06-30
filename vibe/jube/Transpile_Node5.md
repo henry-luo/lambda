@@ -1473,6 +1473,92 @@ Results:
 - Full Node baseline-only rerun: 2046/2046 passed, 0 regressions, 0 crashes,
   0 timeouts.
 
+### 2026-06-30 Node5 outstanding-track sixth subagent pass
+
+Ran a sixth parallel pass with one worker per active Track A-F and integrated
+bounded fixes from each track:
+
+- Track A stream/I/O: legacy `new Stream()` instances now get a state-free
+  `pipe()` fallback that forwards emitted `data` chunks to `dest.write()` and
+  emitted `end` to `dest.end()`. Added
+  `test/node/stream_pipeline_legacy_stream.js`. The direct official
+  `test-stream-pipeline.js` run improved again but remains skip-listed on later
+  mustCall/shutdown-leak blockers.
+- Track B async/diagnostics: parsed and lowered simple JS `using`
+  declarations, added normal block/function-scope disposal, and wired the
+  diagnostics bounded-channel shutdown/error cases through `beforeExit`,
+  uncaught-exception, and async-hooks destroy-drain behavior. `await using`,
+  async/generator disposal, and suppressed-error fidelity remain out of scope.
+- Track C fidelity: `Buffer.concat()` now requires an actual array input,
+  reports indexed element type errors, honors explicit `totalLength`
+  truncation/padding for non-empty inputs, and preserves Node's empty-list
+  result. `test-buffer-concat.js` is now green.
+- Track D crypto: added async `crypto.generateKeyPair()` for the key types
+  supported by the existing sync implementation, scheduling the Node-style
+  `(err, publicKey, privateKey)` callback on nextTick. Added coverage to
+  `test/node/crypto_asymmetric_verify.js`.
+- Track E worker/process: MessagePort transfer lists now move ports instead of
+  deep-cloning inert objects, detach transferred sender endpoints, validate
+  ports/ArrayBuffers before detach side effects, and preserve marked/closed
+  transfer errors. Added `test/node/worker_message_port_transfer.js`.
+- Track F VM/module isolation: `module.enableCompileCache(null)` now follows
+  Node's invalid-argument path instead of treating `null` as omitted. Added
+  `test/node/module_compile_cache_api_error.js`; the compile-cache official
+  slice is green.
+- Integration follow-up: shutdown now drains async-hooks destroy callbacks
+  before `beforeExit`, emits `beforeExit` before `exit`, and only runs the
+  post-`beforeExit` event-loop drain when referenced libuv handles remain. This
+  fixes `test-async-wrap-destroyid.js`,
+  `test-process-beforeexit-throw-exit.js`, and
+  `test-timers-unrefed-in-beforeexit.js` without suppressing normal async
+  fs/dns/net/tls drains.
+
+Verification:
+
+```bash
+make build
+make build-test
+./lambda.exe js test/node/stream_pipeline_legacy_stream.js --no-log
+./lambda.exe js test/node/stream_pipeline_function_stages.js --no-log
+./lambda.exe js test/node/diagnostics_channel_pubsub_contract.js --no-log
+./lambda.exe js test/node/diagnostics_trace_callback_stores.js --no-log
+./lambda.exe js test/node/buffer_advanced.js --no-log
+./lambda.exe js test/node/crypto_asymmetric_verify.js --no-log
+./lambda.exe js test/node/worker_message_port_transfer.js --no-log
+./lambda.exe js test/node/module_compile_cache_api_error.js --no-log
+./test/test_node_prelim_gtest.exe --gtest_filter='NodePrelimTests/NodeFileTest.Run/buffer_advanced:NodePrelimTests/NodeFileTest.Run/worker_message_port_transfer:NodePrelimTests/NodeFileTest.Run/worker_mark_as_untransferable:NodePrelimTests/NodeFileTest.Run/child_process_spawn_sync_lambda_eval:NodePrelimTests/NodeFileTest.Run/child_process_sync' --gtest_brief=1
+./test/test_js_gtest.exe --gtest_filter='*module_compile_cache_api_error*:*stream_pipeline_legacy_stream*:*stream_pipeline_function_stages*:*crypto_asymmetric_verify*' --gtest_brief=1
+./test/test_node_gtest.exe --modules=misc --gtest_filter='*bounded*' --include-slow --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --gtest_filter='*test_buffer_concat*:*test_buffer_badhex*:*test_buffer_fill*' --include-slow --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --gtest_filter='*test_stream_pipeline*' --include-slow --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --modules=crypto --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --gtest_filter='NodeOfficial/NodeOfficialTest.Run/test_worker_message_port_message_port_transferring:NodeOfficial/NodeOfficialTest.Run/test_worker_message_transfer_port_mark_as_untransferable' --include-slow --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --gtest_filter='*test_compile_cache*' --include-slow --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --timeout=20000 --gtest_brief=1
+git diff --check
+```
+
+Results:
+
+- Build and test binaries rebuilt successfully.
+- Direct local fixtures passed.
+- Prelim focused gate: 5/5 passed.
+- JS focused gate: 4/4 passed.
+- Diagnostics bounded official gate: 7/7 passed, 6 improvements across the
+  bounded-channel files.
+- Buffer concat/badhex/fill official gate: 3/3 passed, 3 improvements.
+- Stream pipeline family: 7 passed, 1 expected non-baseline failure
+  (`test-stream-pipeline-http2.js`), 0 regressions. Direct
+  `test-stream-pipeline.js` still has 11 mustCall mismatches plus the existing
+  16-allocation shutdown leak.
+- Crypto baseline module gate: 64/64 passed, 0 regressions.
+- Worker transfer focused gate: 2/2 passed.
+- Compile-cache official slice: 22/22 passed.
+- Combined focused Node official gate: 14/14 passed, 11 improvements and
+  0 regressions.
+- Full Node baseline-only rerun after the shutdown follow-up: 2046/2046 passed,
+  0 regressions, 0 crashes, 0 timeouts.
+
 ## Verification Policy
 
 Every implementation slice should finish with:

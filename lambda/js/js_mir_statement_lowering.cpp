@@ -4786,6 +4786,158 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
     jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, val)));
 }
 
+static bool jm_statement_is_using_decl(JsAstNode* stmt) {
+    if (!stmt || stmt->node_type != JS_AST_NODE_VARIABLE_DECLARATION) return false;
+    JsVariableDeclarationNode* decl = (JsVariableDeclarationNode*)stmt;
+    return decl->is_using;
+}
+
+static void jm_emit_using_dispose_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* decl) {
+    MIR_reg_t resources[64];
+    int resource_count = 0;
+    for (JsAstNode* n = decl ? decl->declarations : NULL; n && resource_count < 64; n = n->next) {
+        if (n->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+        JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)n;
+        if (!d->id || d->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
+        JsIdentifierNode* id = (JsIdentifierNode*)d->id;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        JsMirVarEntry* var = jm_find_var(mt, vname);
+        if (!var || !var->reg) continue;
+        MIR_reg_t value = var->reg;
+        if (jm_is_native_type(var->type_id)) {
+            value = jm_box_native(mt, var->reg, var->type_id);
+        }
+        resources[resource_count++] = value;
+    }
+    for (int i = resource_count - 1; i >= 0; i--) {
+        (void)jm_call_1(mt, "js_using_dispose", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, resources[i]));
+    }
+}
+
+void jm_transpile_statement_list_with_using(JsMirTranspiler* mt, JsAstNode* first);
+
+static void jm_transpile_using_tail(JsMirTranspiler* mt, JsAstNode* tail,
+        JsVariableDeclarationNode* using_decl) {
+    MIR_label_t finally_label = jm_new_label(mt);
+    MIR_label_t end_label = jm_new_label(mt);
+    MIR_reg_t return_val_reg = jm_new_reg(mt, "_using_ret", MIR_T_I64);
+    MIR_reg_t has_return_reg = jm_new_reg(mt, "_using_has_ret", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, return_val_reg),
+        MIR_new_int_op(mt->ctx, 0)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, has_return_reg),
+        MIR_new_int_op(mt->ctx, 0)));
+
+    if (mt->try_ctx_depth < 16) {
+        JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
+        tc->catch_label = 0;
+        tc->finally_label = finally_label;
+        tc->end_label = end_label;
+        tc->return_val_reg = return_val_reg;
+        tc->has_return_reg = has_return_reg;
+        tc->has_catch = false;
+        tc->has_finally = true;
+        tc->inlining_finally = false;
+        tc->yield_state_only = false;
+        tc->finally_body = NULL;
+        tc->saved_exc_flag_reg = 0;
+        tc->saved_exc_val_reg = 0;
+    }
+
+    MIR_reg_t saved_with_depth = jm_call_0(mt, "js_with_save_depth", MIR_T_I64);
+    MIR_reg_t saved_args_mark = jm_call_0(mt, "js_args_save", MIR_T_I64);
+
+    jm_transpile_statement_list_with_using(mt, tail);
+
+    MIR_reg_t exc_check = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, finally_label),
+        MIR_new_reg_op(mt->ctx, exc_check)));
+
+    if (mt->try_ctx_depth > 0) mt->try_ctx_depth--;
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, finally_label)));
+
+    jm_emit_label(mt, finally_label);
+    jm_call_void_1(mt, "js_with_restore_depth", MIR_T_I64,
+        MIR_new_reg_op(mt->ctx, saved_with_depth));
+    jm_call_void_1(mt, "js_args_restore", MIR_T_I64,
+        MIR_new_reg_op(mt->ctx, saved_args_mark));
+
+    MIR_reg_t saved_exc_flag = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+    MIR_reg_t saved_exc_val = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
+
+    jm_emit_using_dispose_decl(mt, using_decl);
+
+    MIR_reg_t new_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+    MIR_label_t skip_restore = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, skip_restore),
+        MIR_new_reg_op(mt->ctx, new_exc)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, skip_restore),
+        MIR_new_reg_op(mt->ctx, saved_exc_flag)));
+    jm_call_void_1(mt, "js_throw_value",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, saved_exc_val));
+    jm_emit_label(mt, skip_restore);
+
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, end_label),
+        MIR_new_reg_op(mt->ctx, has_return_reg)));
+
+    jm_emit_label(mt, end_label);
+    MIR_label_t no_ret_label = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, no_ret_label),
+        MIR_new_reg_op(mt->ctx, has_return_reg)));
+    jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+        MIR_new_reg_op(mt->ctx, return_val_reg)));
+    jm_emit_label(mt, no_ret_label);
+
+    MIR_reg_t still_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+    MIR_label_t no_exc_label = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, no_exc_label),
+        MIR_new_reg_op(mt->ctx, still_exc)));
+    if (mt->try_ctx_depth > 0) {
+        JsTryContext* outer = &mt->try_ctx_stack[mt->try_ctx_depth - 1];
+        MIR_label_t target = outer->has_catch ? outer->catch_label
+                           : (outer->has_finally ? outer->finally_label : outer->end_label);
+        if (target) {
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, target)));
+        } else {
+            MIR_reg_t null_ret = jm_emit_null(mt);
+            jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+                MIR_new_reg_op(mt->ctx, null_ret)));
+        }
+    } else {
+        MIR_reg_t null_ret = jm_emit_null(mt);
+        jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+            MIR_new_reg_op(mt->ctx, null_ret)));
+    }
+    jm_emit_label(mt, no_exc_label);
+}
+
+void jm_transpile_statement_list_with_using(JsMirTranspiler* mt, JsAstNode* first) {
+    JsAstNode* s = first;
+    while (s) {
+        if (jm_statement_is_using_decl(s)) {
+            JsVariableDeclarationNode* decl = (JsVariableDeclarationNode*)s;
+            jm_transpile_var_decl(mt, decl);
+            jm_transpile_using_tail(mt, s->next, decl);
+            return;
+        }
+        jm_transpile_statement(mt, s);
+        if (mt->try_ctx_depth > 0) {
+            jm_emit_exc_propagate_check(mt);
+        }
+        s = s->next;
+    }
+}
+
 // Statement dispatcher
 void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
     if (!stmt) return;
@@ -5756,8 +5908,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         jm_push_scope(mt);
         jm_init_block_tdz(mt, stmt);  // v20 TDZ
         JsBlockNode* blk = (JsBlockNode*)stmt;
-        JsAstNode* s = blk->statements;
-        while (s) { jm_transpile_statement(mt, s); s = s->next; }
+        jm_transpile_statement_list_with_using(mt, blk->statements);
         jm_pop_scope(mt);
 
         // Js55 P19: restore prior tracking.

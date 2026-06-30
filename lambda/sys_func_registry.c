@@ -1107,6 +1107,7 @@ extern Item js_property_get_str(Item object, const char* key, int key_len);
 extern Item js_property_access_named_ic(Item object, const char* name, int64_t name_len, JsLoadIC* ic);
 extern Item js_property_set_named_ic(Item object, const char* name, int64_t name_len, Item value,
     int64_t strict, JsStoreIC* ic);
+extern Item js_using_dispose(Item resource);
 extern Item js_arguments_mapped_get(Item arguments, int64_t index, Item current_value);
 extern Item js_arguments_mapped_param_writeback(Item arguments, int64_t index, Item value);
 // v23b: Comparison facades returning raw int64_t 0/1.
@@ -1562,6 +1563,7 @@ JitImport jit_runtime_imports[] = {
     {"js_arguments_mapped_get", FPTR(js_arguments_mapped_get)},
     {"js_arguments_mapped_param_writeback", FPTR(js_arguments_mapped_param_writeback)},
     {"js_property_set", FPTR(js_property_set)},
+    {"js_using_dispose", FPTR(js_using_dispose)},
     // Tune8 §2.2: strict-mode setter routes through js_property_set_v
     // dispatcher; the 3-arg js_property_set_strict is still used by C-side
     // callers (in js_globals.cpp and js_runtime.cpp) but no longer JIT-imported.
