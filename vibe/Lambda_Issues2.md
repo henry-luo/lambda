@@ -6,7 +6,7 @@ Issues discovered while porting JetStream JavaScript benchmarks to Lambda Script
 
 ## 1. `float[]` Type Annotation Rejects List Literals (Type 17 vs 22) — Fixed
 
-**Status**: Fixed in the AST call-site type checker.
+**Status**: ✅ **Fixed** in the AST call-site type checker.
 **Severity**: Was a compilation error.
 **Affected benchmarks**: cube3d, navier_stokes, raytrace3d.
 
@@ -64,9 +64,9 @@ buckets[idx] = entry
 
 ---
 
-## 3. Type Keywords as Map Field Names Were Treated as Reserved in Assignment — Fixed
+## 3. Type Keywords as Map Field Names Were Treated as Reserved in Assignment
 
-**Status**: Fixed in the AST member-assignment builder.  
+**Status**: ✅ **Fixed** in the AST member-assignment builder.  
 **Severity**: Was a runtime bug (assignment silently ignored after a logged runtime error).  
 **Affected benchmarks**: richards
 

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Stage 4B — selectionchange delivery probe</title>
+    <style>
+      #surface { border: 1px solid #ccc; padding: 8px; min-height: 40px; outline: none; }
+      #log { margin-top: 8px; font-family: monospace; }
+    </style>
+  </head>
+  <body>
+    <div id="surface" contenteditable="true">abcdef ghijkl</div>
+    <div id="log">init</div>
+    <!-- Classic (non-module) script: Radiant's script runner skips type="module". -->
+    <script>
+      var log = document.getElementById('log')
+      var n = 0
+      log.textContent = 'mounted'
+      // The native caret/selection substrate must deliver `selectionchange` to a
+      // page-JS document listener so a JS editor can track the user's caret.
+      document.addEventListener('selectionchange', function () {
+        n++
+        var sel = window.getSelection()
+        log.textContent = 'selchange:' + n + ' rc=' + (sel ? sel.rangeCount : -1)
+      })
+    </script>
+  </body>
+</html>

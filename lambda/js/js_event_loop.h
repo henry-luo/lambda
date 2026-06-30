@@ -22,6 +22,8 @@ extern "C" {
 
 void js_event_loop_init(void);
 int  js_event_loop_drain(void);
+// Bounded non-blocking pump (fires ready timers + microtasks, no watchdog wait).
+void js_event_loop_pump_nowait(void);
 void js_event_loop_shutdown(void);
 void js_event_loop_set_auto_close_mode(bool enabled);
 bool js_event_loop_auto_close_mode(void);
