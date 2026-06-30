@@ -9156,6 +9156,19 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             // showed 0 emissions across the test262 sweep; arr.indexOf(int)
             // calls now go through the generic array method dispatcher.
 
+            if (recv_type == LMD_TYPE_ARRAY && !m->computed && prop && prop->name &&
+                    prop->name->len == 4 && strncmp(prop->name->chars, "push", 4) == 0 &&
+                    arg_count == 1 && call->arguments && !call->arguments->next &&
+                    !jm_call_yield_blocks_direct(mt, call->arguments)) {
+                jm_clear_last_closure_tracking(mt);
+                MIR_reg_t push_arg = jm_transpile_box_item(mt, call->arguments);
+                MIR_reg_t r = jm_call_2(mt, "js_array_push_method_direct_1", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, push_arg));
+                jm_readback_closure_env(mt);
+                return r;
+            }
+
             bool p3_allow_immediate_callback_env = false;
             if (!m->computed && prop && prop->name &&
                 prop->name->len == 7 && strncmp(prop->name->chars, "replace", 7) == 0 &&
@@ -10478,6 +10491,19 @@ MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t arr_reg,
     // arguments-exotic array representation. Other arrays must use the runtime
     // path so numeric accessors, sparse companion entries, and overflow args
     // keep their observable behavior.
+    MIR_reg_t item_tag = jm_new_reg(mt, "atag", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_URSH, MIR_new_reg_op(mt->ctx, item_tag),
+        MIR_new_reg_op(mt->ctx, arr_reg), MIR_new_int_op(mt->ctx, 56)));
+    MIR_reg_t tag_is_zero = jm_new_reg(mt, "atz0", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, tag_is_zero),
+        MIR_new_reg_op(mt->ctx, item_tag), MIR_new_int_op(mt->ctx, 0)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_slow),
+        MIR_new_reg_op(mt->ctx, tag_is_zero)));
+    MIR_reg_t ptr_nonzero = jm_new_reg(mt, "apnz", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_NE, MIR_new_reg_op(mt->ctx, ptr_nonzero),
+        MIR_new_reg_op(mt->ctx, arr_reg), MIR_new_int_op(mt->ctx, 0)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_slow),
+        MIR_new_reg_op(mt->ctx, ptr_nonzero)));
     MIR_reg_t type_reg = jm_new_reg(mt, "atyp", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, type_reg),
         MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, arr_reg, 0, 1)));
@@ -11241,10 +11267,8 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_boxed),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_boxed));
             }
-            MIR_reg_t idx_boxed = jm_box_int_reg(mt, idx_native);
-            return jm_call_2(mt, "js_typed_array_get", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, ta_var->reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed));
+            return jm_transpile_typed_array_get(mt, ta_var->reg, idx_native,
+                ta_var->typed_array_type, ta_var->hoisted_data_reg, ta_var->hoisted_len_reg);
         }
 
         // P9b: this.prop[idx] where prop is a known typed array from class fields
@@ -11299,17 +11323,13 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
             }
-            // Ordinary JS Arrays can still be exotic: sparse numeric hash
-            // entries, companion-map descriptors, prototype numeric accessors,
-            // and backing-store growth all affect reads. Keep variable-index
-            // reads on the runtime path for now so sparse arrays stay correct
-            // after rehash-style backing-store replacement.
+            // Known JS array variables can use the guarded dense fast path.
+            // It falls back for companion-map descriptors, sparse entries,
+            // holes/prototype lookup, and stale non-array bindings.
             JsMirVarEntry* arr_var = jm_get_js_array_var(mt, mem->object);
             if (arr_var) {
-                MIR_reg_t key_item = jm_box_int_reg(mt, idx_native);
-                return jm_call_2(mt, "js_property_access", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_var->reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_item));
+                return jm_transpile_array_get_inline(mt, arr_var->reg, idx_native,
+                    arr_var->hoisted_data_reg, arr_var->hoisted_len_reg);
             }
             // A4: Unknown array type — use the generic property path so sparse
             // numeric hash entries and companion descriptors are honored.

@@ -23,6 +23,7 @@ struct JsRuntimeState {
     bool strict_mode = false;
     bool skip_accessor_dispatch = false;
     int array_sym_iter_ever_set = 0;
+    int array_proto_push_ever_set = 0;
 
     Item module_vars[JS_MAX_MODULE_VARS] = {};
     Item* active_module_vars = module_vars;
@@ -82,6 +83,7 @@ static inline Item*& js_active_module_vars_ref() {
 #define js_strict_mode (js_runtime_state.strict_mode)
 #define js_skip_accessor_dispatch (js_runtime_state.skip_accessor_dispatch)
 #define g_array_sym_iter_ever_set (js_runtime_state.array_sym_iter_ever_set)
+#define g_array_proto_push_ever_set (js_runtime_state.array_proto_push_ever_set)
 #define js_module_vars (js_runtime_state.module_vars)
 #define js_active_module_vars (js_active_module_vars_ref())
 #define js_module_var_count (js_runtime_state.module_var_count)

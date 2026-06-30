@@ -1349,6 +1349,61 @@ Results:
 - `python3 -B test/node/node_official_report.py` regenerated
   `temp/node_official_report.md` from the final baseline-only timing sample.
 
+### 2026-06-30 Combined outstanding-track subagent pass
+
+Ran a parallel pass with one worker per remaining outstanding track and
+integrated the bounded fixes that survived focused verification:
+
+- Track A / Tune5 `base64` push path: statically-known `arr.push(x)` now uses a
+  guarded pristine-`Array.prototype.push` one-argument fast path. Prototype
+  tampering through assignment, `defineProperty`, or delete disables the path,
+  and arrays with own companion properties still fall back to the override-aware
+  dispatch.
+- Track B / Tune5 numeric recursion: P6 ADD inference now recovers numeric
+  recursive returns only when both ADD operands are proven numeric, preserving
+  string-concat correctness for mixed cases.
+- Track C / Tune5 array read path: known dense array computed reads use a
+  pointer-safe inline bounds/hole-checked load before falling back to
+  `js_array_get_int`.
+- Track D / Tune5 float subset: known typed-array computed reads in boxed/value
+  position use the existing inline typed-array load helper. This is a safe
+  subset; broader unboxed float arithmetic remains open.
+- Track E / Node stream pipeline: `pipeline()` now prepares function sources
+  through `Readable.from()` and installs pair listeners before `pipe()` so
+  synchronous sources cannot finish before completion listeners exist. The
+  focused local function-source fixture passes. Full direct
+  `test-stream-pipeline.js` advances but still reports 10 `mustCall`
+  mismatches plus the existing shutdown memtrack leak, so the skip-list entry
+  remains unchanged.
+
+Verification:
+
+```bash
+make build
+./lambda.exe js test/js/array_push_override_fastpath.js --no-log
+./lambda.exe js test/js/tune5_p6_numeric_add_recursion.js --no-log
+./lambda.exe js test/node/stream_pipeline_function_source.js --no-log
+./test/test_js_gtest.exe --gtest_filter='*array_push_override_fastpath*:*tune5_p6_numeric_add_recursion*:*array_methods*:*stream_*'
+./test/test_node_gtest.exe --gtest_filter='*test_stream_pipeline*' --include-slow --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --timeout=20000 --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-file=temp/tune5_p6_addition_js262.txt --gtest_brief=1
+git diff --check
+```
+
+Results:
+
+- `make build`: passed with two pre-existing Radiant function-pointer cast
+  warnings.
+- Direct local fixtures passed.
+- Combined JS fixture gate: 28/28 passed.
+- Stream pipeline official family: 7 passed, 1 expected non-baseline failure
+  (`test-stream-pipeline-http2.js`), 0 regressions.
+- Full Node baseline-only rerun: 2046/2046 passed, 0 regressions, 0 crashes,
+  0 timeouts.
+- Focused js262 addition slice: 5/5 passed.
+- The prior Node improvement gate and
+  `test-stream-readable-pause-and-resume.js` new pass remain green.
+
 ## Verification Policy
 
 Every implementation slice should finish with:

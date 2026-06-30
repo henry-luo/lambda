@@ -284,6 +284,7 @@ Item js_string_method(Item str, Item method_name, Item* args, int argc);
 
 Item js_array_method(Item arr, Item method_name, Item* args, int argc);
 Item js_array_method_direct(Item arr, Item method_name, Item* args, int argc);
+Item js_array_push_method_direct_1(Item arr, Item value);
 
 // =============================================================================
 // Math Object Methods & Properties

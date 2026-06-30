@@ -182,24 +182,29 @@ pn rol(num: int, cnt: int) {
 **Severity**: Runtime error (null concatenation)  
 **Affected benchmarks**: deltablue
 
-`fill(0, 0)` returns `null` rather than an empty array. Subsequent concatenation with `++` fails:
+**Status**: ✅ **FIXED**.
 
-```
-runtime error [201]: fn_join: unsupported operand types: null and array
-```
-
-**Workaround**: Guard concatenation with null checks:
+`fill(0, value)` now returns a real empty array with `length = 0` and `capacity = 0`.
+The result participates in normal collection operations:
 
 ```lambda
-var cl = var1.constraints  // may be null from fill(0, 0)
-if (cl == null) {
-    var1.constraints = [idx]
-} else {
-    var1.constraints = cl ++ [idx]
-}
+let cl = fill(0, 0)
+cl ++ [idx]     // [idx]
+len(cl)         // 0
 ```
 
-**Suggestion**: `fill(0, value)` should return an empty array `[]`, not `null`.
+**Fix notes**:
+- `fn_fill()` keeps a dedicated zero-count branch that returns `[]`, not `null`.
+- `test/lambda/proc/proc_fill.ls` now verifies `fill(0, int)`, `fill(0, null)`, typed `int[] = fill(0, 0)`, and concatenation from each empty result.
+- `test/benchmark/jetstream/deltablue.ls` and `test/benchmark/jetstream/deltablue2.ls` now rely on `cl ++ [idx]` directly instead of guarding against `null`.
+
+**Reference behavior from other languages/scripts**:
+- Python has no direct `fill(n, value)` builtin, but equivalent construction idioms return empty lists for zero count: `[value] * 0`, `list(range(0))`, and `list(itertools.repeat(value, 0))` all produce `[]`.
+- JavaScript follows the same collection rule: `new Array(0).fill(value)` returns `[]`, and `new Uint32Array(0).fill(value)` remains an empty typed array.
+- Ruby and Rust mirror this behavior with `Array.new(0, value)` and `vec![value; 0]`, respectively.
+- The design decision for Lambda is therefore: zero count constructs an empty collection; negative count is the error case.
+
+**Remaining edge policy**: `fill(n, value)` rejects negative `n` as an error.
 
 ---
 
@@ -294,27 +299,35 @@ var char_idx: int = i / CHRSZ  // explicit int annotation
 ## 12. `shl` Operates on 64-bit Integers (No 32-bit Masking)
 
 **Severity**: Wrong results in bitwise code  
-**Affected benchmarks**: crypto_sha1
+**Affected benchmarks**: crypto_sha1, crypto_md5
 
-Lambda's `shl` operates on full 64-bit integers, so left-shifting a 32-bit value can produce results exceeding 32 bits. JavaScript's `<<` implicitly truncates to 32 bits.
+**Status**: ✅ **FIXED for explicit compact integer operands**.
+
+Lambda's default `int` `shl` still operates on the wider native integer domain, so left-shifting an untyped 32-bit value can still produce results exceeding 32 bits:
 
 ```lambda
-shl(1732584193, 5)   // Lambda: 55442694176 (33+ bits)
-// JavaScript: 1732584193 << 5 → -390880736 (truncated to 32-bit signed)
+shl(1732584193, 5)     // 55442694176, type int
 ```
 
-This affects any code that rotates or shifts 32-bit values (SHA-1, MD5, CRC, etc.).
+The fixed Lambda spelling is to keep the word in an explicit compact type. With the Go-like bitwise model, `shl` preserves and truncates to the left operand width:
 
-**Workaround**: Always mask `shl` results with `band(shl(x, n), 4294967295)`.
+```lambda
+shl(1732584193u32, 5)  // 3903086624, type u32
+```
+
+That gives SHA-1/MD5-style rotate code deterministic 32-bit wrap without a manual `band(..., 4294967295)` mask:
 
 ```lambda
 pn rol(num: int, cnt: int) {
-    var n = band(num, 4294967295)
-    return band(bor(shl(n, cnt), shr(n, 32 - cnt)), 4294967295)
+    var n: u32 = num
+    return int(bor(shl(n, cnt), shr(n, 32 - cnt)))
 }
 ```
 
-**Suggestion**: Consider adding `shl32`/`shr32` variants, or a general `u32(x)` masking function.
+**Fix notes**:
+- `fn_shl_item()` routes compact integer operands through `sized_shift()`, preserving/truncating to the left operand width.
+- `test/lambda/sized_numeric_bitwise_go.ls` covers compact shift truncation (`shl(128u8, 1) -> 0u8`, `shl(1i8, 7) -> -128i8`).
+- `test/benchmark/jetstream/crypto_sha1.ls` and `test/benchmark/jetstream/crypto_md5.ls` now use `u32` rotate helpers instead of 32-bit mask workarounds.
 
 ---
 
@@ -486,12 +499,12 @@ pn show() {
 | 4 | No hex literals | Missing feature | 2 benchmarks, tedious manual conversion |
 | 5 | Integer overflow errors | Arithmetic | **Fixed**; splay PRNG and SHA-1 word arithmetic now use `u32` |
 | 6 | No unsigned right shift | Bitwise ops | **Fixed for typed unsigned ints**; `shr(u32, n)` zero-fills |
-| 7 | `fill(0, x)` returns null | Edge case | 1 benchmark, 120k runtime errors |
+| 7 | `fill(0, x)` returns null | Edge case | **Fixed**; DeltaBlue now concatenates from empty fill arrays directly |
 | 8 | Missing substr/charcode | Missing feature | 1 benchmark, minor |
 | 9 | `div` reserved word | Reserved word | 1 benchmark, minor |
 | 10 | Immutable parameters | Language design | 1 benchmark, minor |
 | 11 | Integer division returns float | Type inference | 1 benchmark, silent wrong results |
-| 12 | `shl` 64-bit overflow | Bitwise ops | 1 benchmark, wrong hash output |
+| 12 | `shl` 64-bit overflow | Bitwise ops | **Fixed for typed `u32` code**; SHA-1/MD5 rotate helpers use compact shifts |
 | 13 | `@` path literals don't parse | Missing feature | 1 benchmark, doc mismatch |
 | 14 | `slice()` no 2-argument form | Missing feature | 1 benchmark, minor |
 | 15 | No case-insensitive patterns | Missing feature | 1 benchmark, workaround needed |
