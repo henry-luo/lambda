@@ -316,7 +316,7 @@ pn run() {
             var pos = b * blockSize + i
             var decByte = bxor(ct_bytes[pos], cipherCntr[i])
             if (decByte != pt_bytes[pos]) {
-                print("crypto-aes: FAIL at pos " ++ string(pos) ++ "\n")
+                print("crypto-aes: FAIL at pos " ++ pos ++ "\n")
                 return false
             }
             i = i + 1
@@ -343,5 +343,5 @@ pn main() {
     } else {
         print("crypto-aes: FAIL\n")
     }
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

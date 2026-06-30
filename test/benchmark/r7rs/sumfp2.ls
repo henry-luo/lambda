@@ -29,5 +29,5 @@ pn main() {
         print(result)
         print("\n")
     }
-    print("__TIMING__:" ++ string(elapsed) ++ "\n")
+    print("__TIMING__:" ++ elapsed ++ "\n")
 }

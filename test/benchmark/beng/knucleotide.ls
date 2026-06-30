@@ -68,39 +68,13 @@ pn format3(x) {
         pad = pad - 1
     }
     frac_str = prefix ++ frac_str
-    return string(int_part) ++ "." ++ frac_str
+    return int_part ++ "." ++ frac_str
 }
 
-// print frequency table for k-mers of length k, sorted by frequency desc
-// bubble sort entries by count descending, then alphabetically ascending
+// sort by count descending, then alphabetically ascending
 pn sort_entries(entries) {
-    var n = len(entries)
-    var swapped = 1
-    while (swapped == 1) {
-        swapped = 0
-        var i = 0
-        while (i < n - 1) {
-            var do_swap = 0
-            if (entries[i][1] < entries[i + 1][1]) {
-                do_swap = 1
-            } else {
-                if (entries[i][1] == entries[i + 1][1]) {
-                    if (entries[i][0] > entries[i + 1][0]) {
-                        do_swap = 1
-                    }
-                }
-            }
-            if (do_swap == 1) {
-                var tmp = entries[i]
-                entries[i] = entries[i + 1]
-                entries[i + 1] = tmp
-                swapped = 1
-            }
-            i = i + 1
-        }
-        n = n - 1
-    }
-    return entries
+    entries = sort(entries, (e) => (e[0]))
+    return sort(entries, {by: (e) => (e[1]), dir: 'desc'})
 }
 
 pn print_frequencies(seq, k) {
@@ -132,7 +106,7 @@ pn print_count(seq, kmer) {
     if (count == null) {
         print("0\t" ++ kmer ++ "\n")
     } else {
-        print(string(count) ++ "\t" ++ kmer ++ "\n")
+        print(count ++ "\t" ++ kmer ++ "\n")
     }
 }
 
@@ -152,5 +126,5 @@ pn main() {
     print_count(seq, "GGTATTTTAATT")
     print_count(seq, "GGTATTTTAATTTATAGT")
     var __t1 = clock()
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

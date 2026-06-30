@@ -40,12 +40,12 @@ pn main() {
             var fd3 = idiv(3N * q + r, 3N * s + t)
             var fd4 = idiv(4N * q + r, 4N * s + t)
             if (fd3 == fd4) {
-                digits = digits ++ string(fd3)
+                digits = digits ++ fd3
                 i = i + 1
 
                 // output 10 digits per line
                 if (i % 10 == 0) {
-                    print(digits ++ "\t:" ++ string(i) ++ "\n")
+                    print(digits ++ "\t:" ++ i ++ "\n")
                     digits = ""
                 }
 
@@ -62,8 +62,8 @@ pn main() {
         while (len(digits) < 10) {
             digits = digits ++ " "
         }
-        print(digits ++ "\t:" ++ string(i) ++ "\n")
+        print(digits ++ "\t:" ++ i ++ "\n")
     }
     var __t1 = clock()
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

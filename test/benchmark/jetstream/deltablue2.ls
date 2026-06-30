@@ -405,5 +405,5 @@ pn main() {
     var __t1 = clock()
     // DeltaBlue has no explicit output verification in JS (just runs without error)
     print("deltablue: PASS\n")
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

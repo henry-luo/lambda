@@ -88,10 +88,10 @@ pn benchmark() {
     var s4 = make_string("ba", 200)
     var d4 = levenshtein(s3, s4)
 
-    print("levenshtein: d(kitten,sitting)=" ++ string(d1) ++ "\n")
-    print("levenshtein: d(saturday,sunday)=" ++ string(d2) ++ "\n")
-    print("levenshtein: d(aaa...,bbb...)=" ++ string(d3) ++ "\n")
-    print("levenshtein: d(ababab...,babab...)=" ++ string(d4) ++ "\n")
+    print("levenshtein: d(kitten,sitting)=" ++ d1 ++ "\n")
+    print("levenshtein: d(saturday,sunday)=" ++ d2 ++ "\n")
+    print("levenshtein: d(aaa...,bbb...)=" ++ d3 ++ "\n")
+    print("levenshtein: d(ababab...,babab...)=" ++ d4 ++ "\n")
 
     if (d1 == 3 and d2 == 3) {
         print("levenshtein: PASS\n")
@@ -105,5 +105,5 @@ pn main() {
     var __t0 = clock()
     benchmark()
     var __t1 = clock()
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

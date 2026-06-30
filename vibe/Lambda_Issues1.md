@@ -18,7 +18,7 @@ mutations to silently fail. The bug has been fixed:
 - `ensure_typed_array()` handles any typed-array cross-conversion generically
 - The transpiler's coercion check now triggers for all typed array expression types
 
-**Status**: **RESOLVED**. All benchmarks (both untyped and typed) now use
+**Status**: ✅ **RESOLVED**. All benchmarks (both untyped and typed) now use
 `return fill(n, val)` in `make_array`. The `make_array` wrapper is kept for API
 consistency but its body is simply `fill()`.
 
@@ -58,7 +58,7 @@ Note: unary `-` on literals (e.g. `-1.0`) works.
 - `awfy/nbody.ls`, `awfy/nbody2.ls` — `0.0 - (px / SOLAR_MASS)` (intentional: see also #3)
 - `awfy/cd.ls` — `0 - radius * radius`
 
-**Fixed** (now use `-expr`):
+✅ **Fixed** (now use `-expr`):
 - `awfy/cd.ls` — `(-b - sq)`, `(-b + sq)` in `find_intersection`
 - `awfy/cd2.ls` — same
 - `larceny/ray.ls` — `(-b - math.sqrt(disc))`, `(-b + math.sqrt(disc))`
@@ -76,7 +76,7 @@ type as array element reads.
 mismatch with subsequent accumulation of `Item`-typed array reads, so the
 self-subtraction produced an `Item`-typed zero instead.
 
-**Status**: **RESOLVED**. All sites now use `var e = 0.0` / `var px = 0.0`.
+**Status**: ✅ **RESOLVED**. All sites now use `var e = 0.0` / `var px = 0.0`.
 
 Investigation showed the workaround was obsolete *and* masked a deeper engine
 bug. The real fault was in procedural (`pn`) untyped-parameter type inference
@@ -106,7 +106,7 @@ or 32 elements.
 (Vec/Arr abstractions). `fill(16, null)` was reported to cause runtime hangs in
 hot-path functions like `null16()`/`null32()`, so literal null arrays were used.
 
-**Status**: **MOSTLY RESOLVED**. `fill(n, null)` no longer hangs and is now used in
+**Status**: ✅ **MOSTLY RESOLVED**. `fill(n, null)` no longer hangs and is now used in
 11 of the 13 affected files, each verified byte-for-byte identical to the literal
 version (passing benchmarks stay passing; pre-existing failures are unchanged).
 
@@ -200,7 +200,7 @@ fixed it; the same fix also resolved the pre-existing `proc_array_type_convert` 
 
 **Pattern**: `int(arr[i])` or `int(floor(x))` to extract a typed integer.
 
-**Status**: **FIXED for array reads / benchmark casts cleaned.** Rechecked on 2026-06-30:
+**Status**: ✅ **FIXED for array reads / benchmark casts cleaned.** Rechecked on 2026-06-30:
 literal int arrays, `fill()` int arrays, untyped array parameters, widened generic
 arrays, and nested reads like `entries[i][1]` all run arithmetic/comparison without
 `int()`. Temporary no-cast copies of `test/benchmark/beng/fannkuch.ls` and
@@ -236,7 +236,7 @@ not evidence that array reads still require manual unboxing.
 **Why (historical)**: `for i in start to end { ... }` statement loops in `pn` failed —
 but with a MIR codegen error, not a generic "runtime error".
 
-**Status**: **FIXED (engine) + partially converted.** Two engine bugs were found and
+**Status**: ✅ **FIXED (engine) + partially converted.** Two engine bugs were found and
 fixed; `for i in start to end { ... }` statement loops now work in `pn`, including
 loops whose body assigns through the loop variable as an array index.
 
@@ -280,9 +280,16 @@ for i in 0 to n - 1 { /* ... */ }       // after
 
 **Pattern**: Manual min/max functions instead of built-in `min()`/`max()`.
 
-**Why**: Calling the built-in `min()`/`max()` with `fn` syntax inside `pn` functions
-caused runtime hangs during testing. The `pn` wrapper with explicit `if` comparison
-works reliably.
+**Status**: ✅ **NOT REPRODUCIBLE / wrappers appear stale.** Rechecked on 2026-06-30:
+a tiny procedural repro using `min(a, b)` / `max(a, b)` in both untyped and typed
+`pn` functions passed, and temporary no-wrapper copies of `test/benchmark/awfy/cd.ls`
+and `test/benchmark/awfy/cd2.ls` produced `collisions=4305` / `CD: PASS` without
+hanging. The existing `test/lambda/unboxed_sys_func.ls` also covers scalar
+`min()`/`max()` wrappers from `fn` definitions.
+
+**Why (historical)**: Calling the built-in `min()`/`max()` with `fn` syntax inside
+`pn` functions caused runtime hangs during testing. The `pn` wrapper with explicit
+`if` comparison worked reliably at the time.
 
 **Files affected**:
 - `awfy/cd.ls` — `pn min_f(a, b)`, `pn max_f(a, b)`
@@ -311,12 +318,18 @@ concatenates strings.
 **Pattern**: `var seed_arr = [74755]` or `let state = {count: 0}` to wrap a scalar
 that needs to be mutated across function calls.
 
-**Why**: Lambda passes scalars by value. To simulate pass-by-reference (needed for
-PRNG state, counters, accumulators), the value is wrapped in a `[val]` array or
-`{field: val}` map. The container is passed by reference, allowing mutation of the
-inner value.
+**Status**: **NO-FIX / by design.** Lambda scalar values are copied by value across
+function boundaries. This is intentional and should not be treated as a runtime bug.
+When shared mutable state is required for benchmark ports (PRNG state, counters,
+accumulators), use an explicit mutable container such as `[val]` or `{field: val}`.
+The container is passed as a reference-like value, so mutating its contents is the
+intended state-sharing mechanism.
 
-**Files affected**:
+**Why**: Scalar copy-by-value preserves Lambda's value semantics and keeps mutation
+explicit. Single-element arrays/maps are a deliberate modeling pattern for shared
+state, not a workaround awaiting an engine fix.
+
+**Files using this pattern**:
 - `awfy/bounce.ls`, `bounce2.ls` — `seed_arr = [74755]`
 - `awfy/storage.ls`, `storage2.ls` — `seed_arr = [74755]`, `state = {count: 0}`
 - `awfy/permute.ls`, `permute2.ls` — `state = {count: 0}`
@@ -329,11 +342,19 @@ inner value.
 
 **Pattern**: Hand-written bubble sort.
 
-**Why**: Lambda has no built-in sort function for arrays, nor support for custom
-comparators in `pn` context.
+**Status**: ✅ **FIXED / benchmark cleaned.** Rechecked on 2026-06-30: `sort()` works on
+arrays in `pn`, including key functions and an options map. A procedural repro sorted
+`[["T", 3], ["A", 3], ["G", 1], ["C", 2]]` by name ascending and then stably by
+count descending, producing `A:3 T:3 C:2 G:1`. `test/benchmark/beng/knucleotide.ls`
+now uses this two-pass `sort()` pattern instead of a manual bubble sort and still
+matches the original benchmark output.
 
-**Files affected**:
-- `beng/knucleotide.ls` — `pn sort_entries(entries)` (~25 lines)
+**Why (historical)**: Lambda had no built-in sort function for arrays, nor support
+for custom comparators/key functions in `pn` context.
+
+**Files affected historically**:
+- `test/benchmark/beng/knucleotide.ls` — `pn sort_entries(entries)` used to contain
+  a manual bubble sort; it now delegates to `sort()`.
 
 ---
 
@@ -341,11 +362,18 @@ comparators in `pn` context.
 
 **Pattern**: `string(value)` in string concatenation expressions.
 
-**Why**: The `++` operator doesn't auto-coerce non-string types. This is **by design**
-in Lambda, not a bug. Noted here for completeness. A future string interpolation
-syntax (e.g. `$"value={x}"`) could reduce verbosity.
+**Status**: **FIXED / benchmark casts cleaned.** Rechecked on 2026-06-30: `++` now
+auto-coerces non-string values in concatenation expressions, including ints, floats,
+and `len(...)` results. Redundant `string(...)` wrappers were removed from benchmark
+script concatenation and output lines. Remaining benchmark `string` occurrences are
+not this workaround: fixed-width formatting intermediates, JSON number rendering, or
+function names such as `bi_from_string`.
 
-**Files affected**: All benchmark files that produce output.
+**Why (historical)**: The `++` operator did not auto-coerce non-string types, so
+benchmarks had to wrap numeric values explicitly in `string(...)` before
+concatenation.
+
+**Files affected historically**: All benchmark files that produce output.
 
 ---
 
@@ -361,6 +389,6 @@ syntax (e.g. `$"value={x}"`) could reduce verbosity.
 | `for` range broken in pn | 7 | Engine fix (transpile) |
 | `fn`/built-in calls hang in pn | 8 | Engine fix (JIT interop) |
 | No float format specifier | 9 | New built-in function |
-| Scalars are pass-by-value only | 10 | By design / add ref params |
+| Scalars are pass-by-value only | 10 | NO-FIX / by design |
 | No built-in sort | 11 | New built-in function |
 | No string interpolation | 12 | Syntax sugar |

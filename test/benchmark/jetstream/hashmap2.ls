@@ -191,15 +191,15 @@ pn run() {
     var expected_value_sum = 42 * COUNT
 
     if (result != expected_result) {
-        print("hash-map: FAIL result=" ++ string(result) ++ " expected=" ++ string(expected_result) ++ "\n")
+        print("hash-map: FAIL result=" ++ result ++ " expected=" ++ expected_result ++ "\n")
         return false
     }
     if (key_sum != expected_key_sum) {
-        print("hash-map: FAIL keySum=" ++ string(key_sum) ++ " expected=" ++ string(expected_key_sum) ++ "\n")
+        print("hash-map: FAIL keySum=" ++ key_sum ++ " expected=" ++ expected_key_sum ++ "\n")
         return false
     }
     if (value_sum != expected_value_sum) {
-        print("hash-map: FAIL valueSum=" ++ string(value_sum) ++ " expected=" ++ string(expected_value_sum) ++ "\n")
+        print("hash-map: FAIL valueSum=" ++ value_sum ++ " expected=" ++ expected_value_sum ++ "\n")
         return false
     }
     return true
@@ -214,5 +214,5 @@ pn main() {
     } else {
         print("hash-map: FAIL\n")
     }
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

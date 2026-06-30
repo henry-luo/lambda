@@ -31,7 +31,7 @@ pn format9(x) {
         pad = pad - 1
     }
     frac_str = prefix ++ frac_str
-    var result = neg ++ string(int_part) ++ "." ++ frac_str
+    var result = neg ++ int_part ++ "." ++ frac_str
     return result
 }
 
@@ -151,5 +151,5 @@ pn main() {
     }
     print(format9(energy(bx, by, bz, bvx, bvy, bvz, bmass)) ++ "\n")
     var __t1 = clock()
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

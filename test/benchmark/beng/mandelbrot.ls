@@ -64,7 +64,7 @@ pn main() {
         }
         y = y + 1
     }
-    print(string(checksum) ++ "\n")
+    print(checksum ++ "\n")
     var __t1 = clock()
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

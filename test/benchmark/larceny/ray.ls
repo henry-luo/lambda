@@ -86,12 +86,12 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    print("ray: hits=" ++ string(result) ++ "\n")
+    print("ray: hits=" ++ result ++ "\n")
     // The exact hit count depends on geometry; just verify it's reasonable
     if (result > 0 and result < 10000) {
         print("ray: PASS\n")
     } else {
         print("ray: FAIL\n")
     }
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

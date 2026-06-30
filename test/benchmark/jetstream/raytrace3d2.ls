@@ -349,9 +349,9 @@ pn main() {
     var __t1 = clock()
     // 30x30 = 900 pixels per iteration, 8 iterations = 7200
     if (total_pixels == 7200) {
-        print("3d-raytrace: PASS (pixels=" ++ string(total_pixels) ++ ")\n")
+        print("3d-raytrace: PASS (pixels=" ++ total_pixels ++ ")\n")
     } else {
-        print("3d-raytrace: DONE (pixels=" ++ string(total_pixels) ++ ")\n")
+        print("3d-raytrace: DONE (pixels=" ++ total_pixels ++ ")\n")
     }
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

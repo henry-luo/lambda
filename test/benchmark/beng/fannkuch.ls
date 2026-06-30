@@ -88,8 +88,8 @@ pn main() {
         }
     }
 
-    print(string(checksum) ++ "\n")
-    print("Pfannkuchen(" ++ string(n) ++ ") = " ++ string(max_flips) ++ "\n")
+    print(checksum ++ "\n")
+    print("Pfannkuchen(" ++ n ++ ") = " ++ max_flips ++ "\n")
     var __t1 = clock()
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }
