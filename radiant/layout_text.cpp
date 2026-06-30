@@ -1485,6 +1485,7 @@ void line_reset(LayoutContext* lycon) {
 
 void line_init(LayoutContext* lycon, float left, float right) {
     lycon->line.left = left;  lycon->line.right = right;
+    lycon->line.align_left = left;  lycon->line.align_right = right;
     // Initialize effective bounds to full width (will be adjusted for floats later)
     lycon->line.effective_left = left;
     lycon->line.effective_right = right;
