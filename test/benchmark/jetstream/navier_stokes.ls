@@ -8,7 +8,7 @@ let HEIGHT = 128
 let ROW_SIZE = WIDTH + 2
 let GRID_SIZE = (WIDTH + 2) * (HEIGHT + 2)
 
-pn add_fields(x, s, dt: float) {
+pn add_fields(x: float[], s: float[], dt: float) {
     var i: int = 0
     while (i < GRID_SIZE) {
         x[i] = x[i] + dt * s[i]
@@ -16,7 +16,7 @@ pn add_fields(x, s, dt: float) {
     }
 }
 
-pn set_bnd(b: int, x) {
+pn set_bnd(b: int, x: float[]) {
     if (b == 1) {
         var i: int = 1
         while (i <= WIDTH) {
@@ -66,7 +66,7 @@ pn set_bnd(b: int, x) {
     x[(WIDTH + 1) + max_edge] = 0.5 * (x[WIDTH + max_edge] + x[(WIDTH + 1) + HEIGHT * ROW_SIZE])
 }
 
-pn lin_solve(b: int, x, x0, a: float, c: float, iterations: int) {
+pn lin_solve(b: int, x: float[], x0: float[], a: float, c: float, iterations: int) {
     if (a == 0.0) {
         if (c == 1.0) {
             var j: int = 1
@@ -111,24 +111,24 @@ pn lin_solve(b: int, x, x0, a: float, c: float, iterations: int) {
     return 0
 }
 
-pn diffuse(b: int, x, x0, dt: float, iterations: int) {
+pn diffuse(b: int, x: float[], x0: float[], dt: float, iterations: int) {
     var a = 0.0
     lin_solve(b, x, x0, a, 1.0 + 4.0 * a, iterations)
 }
 
-pn advect(b: int, d, d0, u, v, dt: float) {
-    var w_dt0 = dt * float(WIDTH)
-    var h_dt0 = dt * float(HEIGHT)
-    var wp5 = float(WIDTH) + 0.5
-    var hp5 = float(HEIGHT) + 0.5
+pn advect(b: int, d: float[], d0: float[], u: float[], v: float[], dt: float) {
+    var w_dt0: float = dt * float(WIDTH)
+    var h_dt0: float = dt * float(HEIGHT)
+    var wp5: float = float(WIDTH) + 0.5
+    var hp5: float = float(HEIGHT) + 0.5
     var j: int = 1
     while (j <= HEIGHT) {
         var pos = j * ROW_SIZE
         var i: int = 1
         while (i <= WIDTH) {
             pos = pos + 1
-            var x = float(i) - w_dt0 * u[pos]
-            var y = float(j) - h_dt0 * v[pos]
+            var x: float = float(i) - w_dt0 * u[pos]
+            var y: float = float(j) - h_dt0 * v[pos]
             if (x < 0.5) {
                 x = 0.5
             } else {
@@ -136,8 +136,8 @@ pn advect(b: int, d, d0, u, v, dt: float) {
                     x = wp5
                 }
             }
-            var i0 = int(floor(x))
-            var i1 = i0 + 1
+            var i0: int = int(floor(x))
+            var i1: int = i0 + 1
             if (y < 0.5) {
                 y = 0.5
             } else {
@@ -145,14 +145,14 @@ pn advect(b: int, d, d0, u, v, dt: float) {
                     y = hp5
                 }
             }
-            var j0 = int(floor(y))
-            var j1 = j0 + 1
-            var s1 = x - float(i0)
-            var s0 = 1.0 - s1
-            var t1 = y - float(j0)
-            var t0 = 1.0 - t1
-            var row1 = j0 * ROW_SIZE
-            var row2 = j1 * ROW_SIZE
+            var j0: int = int(floor(y))
+            var j1: int = j0 + 1
+            var s1: float = x - float(i0)
+            var s0: float = 1.0 - s1
+            var t1: float = y - float(j0)
+            var t0: float = 1.0 - t1
+            var row1: int = j0 * ROW_SIZE
+            var row2: int = j1 * ROW_SIZE
             d[pos] = s0 * (t0 * d0[i0 + row1] + t1 * d0[i0 + row2]) +
                      s1 * (t0 * d0[i1 + row1] + t1 * d0[i1 + row2])
             i = i + 1
@@ -162,7 +162,7 @@ pn advect(b: int, d, d0, u, v, dt: float) {
     set_bnd(b, d)
 }
 
-pn project(u, v, p, dv, iterations: int) {
+pn project(u: float[], v: float[], p: float[], dv: float[], iterations: int) {
     var h = -0.5 / math.sqrt(float(WIDTH * HEIGHT))
     var j: int = 1
     while (j <= HEIGHT) {
@@ -198,13 +198,13 @@ pn project(u, v, p, dv, iterations: int) {
     set_bnd(2, v)
 }
 
-pn dens_step(x, x0, u, v, dt: float, iterations: int) {
+pn dens_step(x: float[], x0: float[], u: float[], v: float[], dt: float, iterations: int) {
     add_fields(x, x0, dt)
     diffuse(0, x0, x, dt, iterations)
     advect(0, x, x0, u, v, dt)
 }
 
-pn vel_step(u, v, u0, v0, dt: float, iterations: int) {
+pn vel_step(u: float[], v: float[], u0: float[], v0: float[], dt: float, iterations: int) {
     add_fields(u, u0, dt)
     add_fields(v, v0, dt)
     // swap u,u0 and v,v0 by copying
@@ -237,7 +237,7 @@ pn vel_step(u, v, u0, v0, dt: float, iterations: int) {
     project(u, v, u0, v0, iterations)
 }
 
-pn add_points(dens, u, v) {
+pn add_points(dens: float[], u: float[], v: float[]) {
     var n: int = 64
     var i: int = 1
     while (i <= n) {

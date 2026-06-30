@@ -14,49 +14,49 @@ pn vec3(x: float, y: float, z: float) {
     return [x, y, z]
 }
 
-pn vec_add(v1, v2) {
+pn vec_add(v1: float[], v2: float[]) {
     return [v1[0] + v2[0], v1[1] + v2[1], v1[2] + v2[2]]
 }
 
-pn vec_sub(v1, v2) {
+pn vec_sub(v1: float[], v2: float[]) {
     return [v1[0] - v2[0], v1[1] - v2[1], v1[2] - v2[2]]
 }
 
-pn vec_scale(v, s: float) {
+pn vec_scale(v: float[], s: float) {
     return [v[0] * s, v[1] * s, v[2] * s]
 }
 
-pn vec_scalev(v1, v2) {
+pn vec_scalev(v1: float[], v2: float[]) {
     return [v1[0] * v2[0], v1[1] * v2[1], v1[2] * v2[2]]
 }
 
-pn vec_dot(v1, v2) float {
+pn vec_dot(v1: float[], v2: float[]) float {
     return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2]
 }
 
-pn vec_cross(v1, v2) {
+pn vec_cross(v1: float[], v2: float[]) {
     return [v1[1] * v2[2] - v1[2] * v2[1],
             v1[2] * v2[0] - v1[0] * v2[2],
             v1[0] * v2[1] - v1[1] * v2[0]]
 }
 
-pn vec_length(v) float {
+pn vec_length(v: float[]) float {
     return math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
 }
 
-pn vec_normalise(v) {
+pn vec_normalise(v: float[]) {
     var l: float = vec_length(v)
     return [v[0] / l, v[1] / l, v[2] / l]
 }
 
-pn vec_add_inplace(v1, v2) {
+pn vec_add_inplace(v1: float[], v2: float[]) {
     v1[0] = v1[0] + v2[0]
     v1[1] = v1[1] + v2[1]
     v1[2] = v1[2] + v2[2]
     return v1
 }
 
-pn vec_scale_inplace(v, s: float) {
+pn vec_scale_inplace(v: float[], s: float) {
     v[0] = v[0] * s
     v[1] = v[1] * s
     v[2] = v[2] * s
@@ -64,14 +64,14 @@ pn vec_scale_inplace(v, s: float) {
 }
 
 // Matrix: flat 12-element array (3x4)
-pn transform_matrix(m, v) {
+pn transform_matrix(m: float[], v: float[]) {
     var x = m[0] * v[0] + m[1] * v[1] + m[2] * v[2] + m[3]
     var y = m[4] * v[0] + m[5] * v[1] + m[6] * v[2] + m[7]
     var z = m[8] * v[0] + m[9] * v[1] + m[10] * v[2] + m[11]
     return [x, y, z]
 }
 
-pn invert_matrix(m) {
+pn invert_matrix(m: float[]) {
     var temp = fill(16, 0.0)
     var tx = 0.0 - m[3]
     var ty = 0.0 - m[7]
@@ -97,7 +97,7 @@ pn invert_matrix(m) {
 }
 
 // Triangle: stored as a map with precomputed intersection data
-pn create_triangle(p1, p2, p3) {
+pn create_triangle(p1: float[], p2: float[], p3: float[]) {
     var edge1 = vec_sub(p3, p1)
     var edge2 = vec_sub(p2, p1)
     var normal = vec_cross(edge1, edge2)
@@ -135,7 +135,7 @@ pn create_triangle(p1, p2, p3) {
     return tri
 }
 
-pn triangle_intersect(tri: Triangle, orig, dir, near: float, far: float) float {
+pn triangle_intersect(tri: Triangle, orig: float[], dir: float[], near: float, far: float) float {
     var u = (tri.axis + 1) % 3
     var v = (tri.axis + 2) % 3
     var d = dir[tri.axis] + tri.nu * dir[u] + tri.nv * dir[v]
@@ -170,7 +170,7 @@ pn create_scene(triangles) {
     return sc
 }
 
-pn scene_add_light(scene: Scene, pos, colour) {
+pn scene_add_light(scene: Scene, pos: float[], colour: float[]) {
     var idx = scene.n_lights
     // Store as flat array: [x,y,z, r,g,b]
     var light: Light = {pos: pos, colour: colour}
@@ -179,7 +179,7 @@ pn scene_add_light(scene: Scene, pos, colour) {
     scene.n_lights = idx + 1
 }
 
-pn scene_intersect(scene: Scene, origin, dir, near: float, far: float, depth: int) {
+pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far: float, depth: int) {
     if (depth > 3) {
         return scene.background
     }
@@ -237,7 +237,7 @@ pn scene_intersect(scene: Scene, origin, dir, near: float, far: float, depth: in
 }
 
 // Camera
-pn create_camera(origin, lookat, up) {
+pn create_camera(origin: float[], lookat: float[], up: float[]) {
     var zaxis = vec_normalise(vec_sub(lookat, origin))
     var xaxis = vec_normalise(vec_cross(up, zaxis))
     var neg_z = [0.0 - zaxis[0], 0.0 - zaxis[1], 0.0 - zaxis[2]]
