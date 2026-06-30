@@ -203,8 +203,8 @@ pn KeyExpansion(key) {
 // ================= Helpers =================
 
 pn concat_arr(a, b) {
-    var la = int(len(a))
-    var lb = int(len(b))
+    var la = len(a)
+    var lb = len(b)
     var result = fill(la + lb, 0)
     var i: int = 0
     while (i < la) {
@@ -246,7 +246,7 @@ pn derive_key_schedule(password, nBits: int) {
     var pwBytes = fill(nBytes, 0)
     var i: int = 0
     while (i < nBytes) {
-        pwBytes[i] = band(int(ord(slice(password, i, i + 1))), 255)
+        pwBytes[i] = band(ord(slice(password, i, i + 1)), 255)
         i = i + 1
     }
     var key = AesCipher(pwBytes, KeyExpansion(pwBytes))
@@ -270,11 +270,11 @@ pn run() {
     var keySchedule = derive_key_schedule(password, nBits)
 
     // Convert plaintext to byte array
-    var pt_len = int(len(plainText))
+    var pt_len = len(plainText)
     var pt_bytes = fill(pt_len, 0)
     var i: int = 0
     while (i < pt_len) {
-        pt_bytes[i] = int(ord(slice(plainText, i, i + 1)))
+        pt_bytes[i] = ord(slice(plainText, i, i + 1))
         i = i + 1
     }
 

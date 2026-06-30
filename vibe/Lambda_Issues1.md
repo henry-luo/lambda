@@ -200,16 +200,32 @@ fixed it; the same fix also resolved the pre-existing `proc_array_type_convert` 
 
 **Pattern**: `int(arr[i])` or `int(floor(x))` to extract a typed integer.
 
-**Why**: Reads from untyped arrays return `Item` (a tagged runtime value). Arithmetic
-and comparison operations require explicit `int()` casts to unwrap the integer. Typed
-arrays (`int[]`) avoid this, but untyped arrays always need the cast.
+**Status**: **FIXED for array reads / benchmark casts cleaned.** Rechecked on 2026-06-30:
+literal int arrays, `fill()` int arrays, untyped array parameters, widened generic
+arrays, and nested reads like `entries[i][1]` all run arithmetic/comparison without
+`int()`. Temporary no-cast copies of `test/benchmark/beng/fannkuch.ls` and
+`test/benchmark/beng/knucleotide.ls` compiled and produced the same outputs as the
+checked-in versions. Current MIR code has native integer index fast paths for known
+`ArrayNum` int elements, and `test/lambda/proc/proc_typed_array_param.ls` covers
+`sum = sum + arr[i]`, `arr[i] * 10`, and `arr[i] > max_val` without casts. Redundant
+array-read casts were removed from `test/benchmark/beng/fannkuch.ls` and
+`test/benchmark/beng/knucleotide.ls`; direct `ord()` casts were also removed from the
+JetStream crypto benchmarks where they were compile-verified as redundant.
 
-**Files affected**:
-- `awfy/cd.ls`, `awfy/cd2.ls` — `int(x)`, `int(px / GOOD_VOXEL_SIZE)`
-- `beng/fannkuch.ls` — `int(perm[0])`, `int(count[r])`
-- `beng/knucleotide.ls` — `int(entries[i][1])`
-- `beng/spectralnorm.ls`, `beng/nbody.ls` — `int(floor(v))`
-- `kostya/matmul.ls` — `int(floor(total))`
+**Why (historical)**: Reads from untyped arrays returned `Item` (a tagged runtime
+value), and arithmetic/comparison operations required explicit `int()` casts to unwrap
+integer values. Current array-read lowering can infer/unbox these integer reads in the
+tested procedural paths. `int(floor(x))` is a separate float-to-int conversion pattern,
+not evidence that array reads still require manual unboxing.
+
+**Remaining cast patterns**:
+- `test/benchmark/awfy/cd.ls`, `test/benchmark/awfy/cd2.ls` — float/division-to-int
+  conversions like `int(x)` and `int(px / GOOD_VOXEL_SIZE)`
+- `test/benchmark/beng/spectralnorm.ls`, `test/benchmark/beng/nbody.ls` — explicit
+  `int(floor(v))` float-to-int conversions
+- `test/benchmark/kostya/matmul.ls` — `int(floor(total))`
+- `test/benchmark/jetstream/crypto_rsa.ls` — `int(len(...))` is still required in
+  typed-`int` index paths because removing it widens the value and fails type checking
 
 ---
 

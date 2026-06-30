@@ -81,10 +81,10 @@ pn sort_entries(entries) {
         var i = 0
         while (i < n - 1) {
             var do_swap = 0
-            if (int(entries[i][1]) < int(entries[i + 1][1])) {
+            if (entries[i][1] < entries[i + 1][1]) {
                 do_swap = 1
             } else {
-                if (int(entries[i][1]) == int(entries[i + 1][1])) {
+                if (entries[i][1] == entries[i + 1][1]) {
                     if (entries[i][0] > entries[i + 1][0]) {
                         do_swap = 1
                     }

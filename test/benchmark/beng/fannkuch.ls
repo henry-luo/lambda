@@ -40,7 +40,7 @@ pn main() {
 
         // count flips
         var flips = 0
-        var k = int(perm[0])
+        var k = perm[0]
         while (k != 0) {
             var lo = 0
             var hi = k
@@ -52,7 +52,7 @@ pn main() {
                 hi = hi - 1
             }
             flips = flips + 1
-            k = int(perm[0])
+            k = perm[0]
         }
 
         if (flips > max_flips) {
@@ -76,8 +76,8 @@ pn main() {
                 i = i + 1
             }
             perm1[r] = perm0
-            count[r] = int(count[r]) - 1
-            if (int(count[r]) > 0) {
+            count[r] = count[r] - 1
+            if (count[r] > 0) {
                 found = 1
             } else {
                 r = r + 1
