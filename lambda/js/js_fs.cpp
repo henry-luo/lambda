@@ -874,7 +874,14 @@ extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
     const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
 
-    Item stream = js_readable_new(ItemNull);
+    if (get_type_id(options_item) == LMD_TYPE_MAP) {
+        Item auto_close = js_property_get(options_item, make_string_item("autoClose"));
+        if (get_type_id(auto_close) == LMD_TYPE_BOOL && !it2b(auto_close)) {
+            js_property_set(options_item, make_string_item("autoDestroy"), (Item){.item = b2it(false)});
+        }
+    }
+
+    Item stream = js_readable_new(options_item);
     if (stream.item == 0) return ItemNull;
     js_property_set(stream, make_string_item("__readstream_path__"), path_item);
     js_property_set(stream, make_string_item("__readstream_drained__"), (Item){.item = b2it(false)});
