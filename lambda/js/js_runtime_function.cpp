@@ -129,6 +129,8 @@ extern "C" void js_args_stack_cleanup(void) {
 
 extern "C" int64_t js_with_depth_active(void);
 extern "C" Item* js_with_capture_stack(int* out_depth);
+extern "C" Item js_get_global_this(void);
+extern void heap_register_gc_root(uint64_t* slot);
 
 static void js_function_capture_with_env(JsFunction* fn) {
     if (!fn || !js_with_depth_active()) return;
@@ -191,6 +193,8 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     fn->env_size = 0;
     fn->prototype = ItemNull;
     fn->module_vars = js_active_module_vars; // bind to creating module's vars
+    fn->home_global = js_get_global_this();
+    heap_register_gc_root(&fn->home_global.item);
     js_function_capture_with_env(fn);
     if (!has_with_env && !suppress_cache) js_func_cache_insert(func_ptr, fn);
     return (Item){.function = (Function*)fn};
@@ -210,6 +214,8 @@ extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
     fn->env_size = 0;
     fn->prototype = ItemNull;
     fn->module_vars = js_active_module_vars;
+    fn->home_global = js_get_global_this();
+    heap_register_gc_root(&fn->home_global.item);
     js_function_capture_with_env(fn);
     return (Item){.function = (Function*)fn};
 }
@@ -227,6 +233,8 @@ extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int e
     fn->env_size = env_size;
     fn->prototype = ItemNull;
     fn->module_vars = js_active_module_vars; // bind to creating module's vars
+    fn->home_global = js_get_global_this();
+    heap_register_gc_root(&fn->home_global.item);
     js_function_capture_with_env(fn);
     return (Item){.function = (Function*)fn};
 }

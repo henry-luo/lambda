@@ -173,6 +173,7 @@ static uint64_t js_global_var_module_binding_epoch = 0;
 static Item js_global_var_module_binding_global = {0};
 
 extern "C" Item js_get_global_this(void);
+extern "C" Item js_vm_swap_global_this(Item next_global);
 extern "C" uint64_t js_get_heap_epoch(void);
 static Item js_262_eval_script(Item code);
 
@@ -12908,6 +12909,10 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         Item* prev_modvars = js_active_module_vars;
         if (fn->module_vars && fn->module_vars != js_active_module_vars)
             js_active_module_vars = fn->module_vars;
+        Item prev_global = ItemNull;
+        bool switched_global = fn->home_global.item != 0 &&
+            get_type_id(fn->home_global) == LMD_TYPE_MAP;
+        if (switched_global) prev_global = js_vm_swap_global_this(fn->home_global);
         // Enter the callee's lexical with-environment, then restore caller state.
         extern int js_with_save_stack(Item* out_stack, int max_depth);
         extern void js_with_set_stack(Item* stack, int depth);
@@ -12941,6 +12946,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         if (derived_ctor_call) result = js_super_this_binding_finish(result);
         js_generator_callee_proto = saved_gen_callee_proto_b;
         js_with_set_stack(saved_with_stack, saved_with_depth);
+        if (switched_global) js_vm_swap_global_this(prev_global);
         js_active_module_vars = prev_modvars;
         js_current_this = prev_this;
         js_new_target = prev_nt;
@@ -12981,6 +12987,10 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     Item* prev_modvars = js_active_module_vars;
     if (fn->module_vars && fn->module_vars != js_active_module_vars)
         js_active_module_vars = fn->module_vars;
+    Item prev_global = ItemNull;
+    bool switched_global = fn->home_global.item != 0 &&
+        get_type_id(fn->home_global) == LMD_TYPE_MAP;
+    if (switched_global) prev_global = js_vm_swap_global_this(fn->home_global);
     // Enter the callee's lexical with-environment, then restore caller state.
     extern int js_with_save_stack(Item* out_stack, int max_depth);
     extern void js_with_set_stack(Item* stack, int depth);
@@ -13015,6 +13025,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     if (derived_ctor_call) result = js_super_this_binding_finish(result);
     js_generator_callee_proto = saved_gen_callee_proto;
     js_with_set_stack(saved_with_stack, saved_with_depth);
+    if (switched_global) js_vm_swap_global_this(prev_global);
     js_active_module_vars = prev_modvars;
     js_current_this = prev_this;
     js_new_target = prev_nt;
@@ -13155,6 +13166,8 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     bound->with_env = orig->with_env;
     bound->with_env_depth = orig->with_env_depth;
     bound->module_vars = orig->module_vars;
+    bound->home_global = orig->home_global;
+    if (bound->home_global.item != 0) heap_register_gc_root(&bound->home_global.item);
     bound->source_text = orig->source_text;
     bound->prototype = orig->prototype; // ES spec: bound functions use target's prototype for [[Construct]]
     bound->builtin_id = orig->builtin_id;
@@ -32227,6 +32240,92 @@ extern "C" Item js_p5_chain_dynamic_import(Item awaited, Item namespace_obj) {
 // =============================================================================
 
 extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope);
+extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
+                                             Item filename_item,
+                                             int64_t line_offset,
+                                             int64_t column_offset);
+extern "C" Item js_vm_swap_global_this(Item next_global);
+extern "C" void js_with_push(Item obj);
+extern "C" void js_with_set_stack(Item* stack, int depth);
+extern "C" int js_with_save_stack(Item* out_stack, int max_depth);
+extern "C" void js_mark_non_enumerable(Item object, Item name);
+
+struct JsVmEvalOptions {
+    Item filename;
+    int64_t line_offset;
+    int64_t column_offset;
+};
+
+static void js_vm_eval_options_init(JsVmEvalOptions* out) {
+    out->filename = (Item){.item = ITEM_JS_UNDEFINED};
+    out->line_offset = 0;
+    out->column_offset = 0;
+}
+
+static int64_t js_vm_option_to_int64(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT) return it2i(value);
+    if (type == LMD_TYPE_INT64) return it2l(value);
+    if (type == LMD_TYPE_FLOAT) {
+        double d = it2d(value);
+        if (isfinite(d)) return (int64_t)d;
+    }
+    return 0;
+}
+
+static bool js_vm_read_options(Item options, const char** names, int count, JsVmEvalOptions* out) {
+    if (out) js_vm_eval_options_init(out);
+    TypeId type = get_type_id(options);
+    if (type == LMD_TYPE_STRING) {
+        if (out) out->filename = options;
+        return true;
+    }
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return true;
+    for (int i = 0; i < count; i++) {
+        js_property_get(options, (Item){.item = s2it(heap_create_name(names[i], strlen(names[i])))});
+        if (js_check_exception()) return false;
+    }
+    if (out) {
+        Item filename_key = (Item){.item = s2it(heap_create_name("filename", 8))};
+        Item filename = js_property_get(options, filename_key);
+        if (js_check_exception()) return false;
+        if (get_type_id(filename) == LMD_TYPE_STRING) out->filename = filename;
+        Item line_key = (Item){.item = s2it(heap_create_name("lineOffset", 10))};
+        Item line = js_property_get(options, line_key);
+        if (js_check_exception()) return false;
+        out->line_offset = js_vm_option_to_int64(line);
+        Item col_key = (Item){.item = s2it(heap_create_name("columnOffset", 12))};
+        Item col = js_property_get(options, col_key);
+        if (js_check_exception()) return false;
+        out->column_offset = js_vm_option_to_int64(col);
+    }
+    return true;
+}
+
+static void js_vm_set_global_alias(Item sandbox, const char* name, int len) {
+    Item key = (Item){.item = s2it(heap_create_name(name, len))};
+    js_property_set(sandbox, key, sandbox);
+    js_mark_non_enumerable(sandbox, key);
+}
+
+static void js_vm_install_global_aliases(Item sandbox) {
+    js_vm_set_global_alias(sandbox, "globalThis", 10);
+    js_vm_set_global_alias(sandbox, "self", 4);
+    js_vm_set_global_alias(sandbox, "window", 6);
+    js_vm_set_global_alias(sandbox, "global", 6);
+}
+
+static Item js_vm_contextify(Item sandbox) {
+    if (get_type_id(sandbox) != LMD_TYPE_MAP) {
+        sandbox = js_new_object();
+    }
+    Item base_global = js_get_global_this();
+    js_set_prototype(sandbox, base_global);
+    js_vm_install_global_aliases(sandbox);
+    js_property_set(sandbox, (Item){.item = s2it(heap_create_name("__vmContext", 11))},
+                    (Item){.item = ITEM_TRUE});
+    return sandbox;
+}
 
 // vm.createContext(sandbox) — returns sandbox (or new object) marked as a "context"
 static Item js_vm_createContext(Item sandbox) {
@@ -32242,10 +32341,7 @@ static Item js_vm_createContext(Item sandbox) {
     if (t != LMD_TYPE_MAP) {
         sandbox = js_new_object();
     }
-    // Mark it as a vm context (set a hidden property)
-    js_property_set(sandbox, (Item){.item = s2it(heap_create_name("__vmContext", 11))},
-                    (Item){.item = ITEM_TRUE});
-    return sandbox;
+    return js_vm_contextify(sandbox);
 }
 
 // vm.isContext(obj) — check if object is a context
@@ -32266,96 +32362,51 @@ static Item js_vm_isContext(Item obj) {
     return (Item){.item = ITEM_FALSE};
 }
 
-// vm.runInThisContext(code, options) — evaluate code in global context
-static bool js_vm_touch_options(Item options, const char** names, int count) {
-    TypeId type = get_type_id(options);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return true;
-    for (int i = 0; i < count; i++) {
-        js_property_get(options, (Item){.item = s2it(heap_create_name(names[i], strlen(names[i])))});
-        if (js_check_exception()) return false;
-    }
-    return true;
-}
-
 static Item js_vm_runInThisContext(Item code, Item options) {
-    const char* names[] = {"breakOnSigint", "timeout", "displayErrors"};
-    if (!js_vm_touch_options(options, names, 3)) return ItemNull;
-    return js_builtin_eval(code, 1); // global scope
+    const char* names[] = {"breakOnSigint", "timeout", "displayErrors", "filename", "lineOffset", "columnOffset"};
+    JsVmEvalOptions eval_options;
+    if (!js_vm_read_options(options, names, 6, &eval_options)) return ItemNull;
+    return js_builtin_eval_with_options(code, 1, eval_options.filename,
+                                        eval_options.line_offset,
+                                        eval_options.column_offset);
 }
 
 // Helper: run code with sandbox variables injected as temporary globals.
 // Sets sandbox properties as globals before eval, removes after.
-static Item js_vm_run_with_sandbox(Item code, Item sandbox) {
+static Item js_vm_run_with_sandbox(Item code, Item sandbox, Item options) {
     if (get_type_id(code) != LMD_TYPE_STRING) return ItemNull;
 
-    // If no sandbox or it's not an object, just eval directly
-    if (sandbox.item == 0 || sandbox.item == ITEM_NULL || sandbox.item == ITEM_UNDEFINED ||
-        get_type_id(sandbox) != LMD_TYPE_MAP) {
-        return js_builtin_eval(code, 1 | 8);  // bit 8: vm context — isolate module-var slots
-    }
+    const char* names[] = {"breakOnSigint", "timeout", "displayErrors", "filename", "lineOffset", "columnOffset"};
+    JsVmEvalOptions eval_options;
+    if (!js_vm_read_options(options, names, 6, &eval_options)) return ItemNull;
 
-    // Get sandbox keys
-    Item keys = js_object_keys(sandbox);
-    int64_t nkeys = js_array_length(keys);
+    sandbox = js_vm_contextify(sandbox);
 
-    if (nkeys == 0) {
-        return js_builtin_eval(code, 1 | 8);  // bit 8: vm context — isolate module-var slots
-    }
-
-    // Get globalThis to inject sandbox variables
-    extern Item js_get_global_this(void);
-    Item global = js_get_global_this();
-
-    // Save existing global values and inject sandbox values
-    Item* saved_vals = (Item*)mem_alloc(sizeof(Item) * nkeys, MEM_CAT_TEMP);
-    bool* had_val = (bool*)mem_alloc(sizeof(bool) * nkeys, MEM_CAT_TEMP);
-
-    for (int64_t i = 0; i < nkeys; i++) {
-        Item k = js_array_get_int(keys, (int)i);
-        if (get_type_id(k) != LMD_TYPE_STRING) { had_val[i] = false; continue; }
-        String* ks = it2s(k);
-        // Skip internal keys
-        if (ks->len > 1 && ks->chars[0] == '_' && ks->chars[1] == '_') {
-            had_val[i] = false;
-            continue;
-        }
-        // Save existing value
-        saved_vals[i] = js_property_get(global, k);
-        had_val[i] = true;
-        // Set sandbox value on global
-        js_property_set(global, k, js_property_get(sandbox, k));
-    }
-
-    // Eval the code in global scope.
     // bit 8: vm context — each runInContext unit gets its own module-var slot
     // namespace so units sharing this context don't clobber each other's slots.
     Item prev_this = js_get_current_this();
-    js_set_this(global);
-    Item result = js_builtin_eval(code, 1 | 8);
+    Item prev_global = js_vm_swap_global_this(sandbox);
+    Item saved_with_stack[16];
+    int saved_with_depth = js_with_save_stack(saved_with_stack, 16);
+    js_with_push(sandbox);
+    js_set_this(sandbox);
+    Item result = js_builtin_eval_with_options(code, 1 | 8, eval_options.filename,
+                                               eval_options.line_offset,
+                                               eval_options.column_offset);
     js_set_this(prev_this);
-
-    // Restore original globals
-    for (int64_t i = 0; i < nkeys; i++) {
-        if (!had_val[i]) continue;
-        Item k = js_array_get_int(keys, (int)i);
-        if (get_type_id(k) != LMD_TYPE_STRING) continue;
-        // Restore original value
-        js_property_set(global, k, saved_vals[i]);
-    }
-
-    mem_free(saved_vals);
-    mem_free(had_val);
+    js_with_set_stack(saved_with_stack, saved_with_depth);
+    js_vm_swap_global_this(prev_global);
     return result;
 }
 
 // vm.runInContext(code, context, options) — evaluate code
-static Item js_vm_runInContext(Item code, Item context) {
-    return js_vm_run_with_sandbox(code, context);
+static Item js_vm_runInContext(Item code, Item context, Item options) {
+    return js_vm_run_with_sandbox(code, context, options);
 }
 
 // vm.runInNewContext(code, sandbox, options) — create context and run code
-static Item js_vm_runInNewContext(Item code, Item sandbox) {
-    return js_vm_run_with_sandbox(code, sandbox);
+static Item js_vm_runInNewContext(Item code, Item sandbox, Item options) {
+    return js_vm_run_with_sandbox(code, sandbox, options);
 }
 
 // vm.compileFunction(code, params, options) — compile a function from string
@@ -32398,39 +32449,71 @@ static Item js_vm_compileFunction(Item code, Item params) {
 
 // Script.runInThisContext wrapper that extracts _code from `this`
 static Item js_vm_Script_runInThisContext(Item options) {
-    const char* names[] = {"breakOnSigint", "timeout", "displayErrors"};
-    if (!js_vm_touch_options(options, names, 3)) return ItemNull;
+    const char* names[] = {"breakOnSigint", "timeout", "displayErrors", "filename", "lineOffset", "columnOffset"};
+    JsVmEvalOptions eval_options;
+    if (!js_vm_read_options(options, names, 6, &eval_options)) return ItemNull;
     Item self = js_get_this();
     Item code = js_property_get(self, (Item){.item = s2it(heap_create_name("_code", 5))});
-    return js_builtin_eval(code, 1);
+    if (get_type_id(eval_options.filename) != LMD_TYPE_STRING) {
+        eval_options.filename = js_property_get(self, (Item){.item = s2it(heap_create_name("_filename", 9))});
+        eval_options.line_offset = js_vm_option_to_int64(js_property_get(self, (Item){.item = s2it(heap_create_name("_lineOffset", 11))}));
+        eval_options.column_offset = js_vm_option_to_int64(js_property_get(self, (Item){.item = s2it(heap_create_name("_columnOffset", 13))}));
+    }
+    return js_builtin_eval_with_options(code, 1, eval_options.filename,
+                                        eval_options.line_offset,
+                                        eval_options.column_offset);
 }
 
 // Script.runInContext wrapper
-static Item js_vm_Script_runInContext(Item context) {
+static Item js_vm_Script_runInContext(Item context, Item options) {
     Item self = js_get_this();
     Item code = js_property_get(self, (Item){.item = s2it(heap_create_name("_code", 5))});
-    return js_vm_run_with_sandbox(code, context);
+    if (get_type_id(options) == LMD_TYPE_UNDEFINED || options.item == ITEM_JS_UNDEFINED || options.item == 0) {
+        options = js_new_object();
+        js_property_set(options, (Item){.item = s2it(heap_create_name("filename", 8))},
+                        js_property_get(self, (Item){.item = s2it(heap_create_name("_filename", 9))}));
+        js_property_set(options, (Item){.item = s2it(heap_create_name("lineOffset", 10))},
+                        js_property_get(self, (Item){.item = s2it(heap_create_name("_lineOffset", 11))}));
+        js_property_set(options, (Item){.item = s2it(heap_create_name("columnOffset", 12))},
+                        js_property_get(self, (Item){.item = s2it(heap_create_name("_columnOffset", 13))}));
+    }
+    return js_vm_run_with_sandbox(code, context, options);
 }
 
 // Script.runInNewContext wrapper
-static Item js_vm_Script_runInNewContext(Item sandbox) {
+static Item js_vm_Script_runInNewContext(Item sandbox, Item options) {
     Item self = js_get_this();
     Item code = js_property_get(self, (Item){.item = s2it(heap_create_name("_code", 5))});
-    return js_vm_run_with_sandbox(code, sandbox);
+    if (get_type_id(options) == LMD_TYPE_UNDEFINED || options.item == ITEM_JS_UNDEFINED || options.item == 0) {
+        options = js_new_object();
+        js_property_set(options, (Item){.item = s2it(heap_create_name("filename", 8))},
+                        js_property_get(self, (Item){.item = s2it(heap_create_name("_filename", 9))}));
+        js_property_set(options, (Item){.item = s2it(heap_create_name("lineOffset", 10))},
+                        js_property_get(self, (Item){.item = s2it(heap_create_name("_lineOffset", 11))}));
+        js_property_set(options, (Item){.item = s2it(heap_create_name("columnOffset", 12))},
+                        js_property_get(self, (Item){.item = s2it(heap_create_name("_columnOffset", 13))}));
+    }
+    return js_vm_run_with_sandbox(code, sandbox, options);
 }
 
 // Script constructor wrapper (called with `new vm.Script(code, options)`)
 static Item js_vm_Script_constructor(Item code, Item options) {
     const char* names[] = {"filename", "cachedData", "produceCachedData", "lineOffset", "columnOffset"};
-    if (!js_vm_touch_options(options, names, 5)) return ItemNull;
+    JsVmEvalOptions eval_options;
+    if (!js_vm_read_options(options, names, 5, &eval_options)) return ItemNull;
     Item script = js_new_object();
     js_property_set(script, (Item){.item = s2it(heap_create_name("_code", 5))}, code);
+    js_property_set(script, (Item){.item = s2it(heap_create_name("_filename", 9))}, eval_options.filename);
+    js_property_set(script, (Item){.item = s2it(heap_create_name("_lineOffset", 11))},
+                    (Item){.item = i2it(eval_options.line_offset)});
+    js_property_set(script, (Item){.item = s2it(heap_create_name("_columnOffset", 13))},
+                    (Item){.item = i2it(eval_options.column_offset)});
     js_property_set(script, (Item){.item = s2it(heap_create_name("runInThisContext", 16))},
                     js_new_function((void*)js_vm_Script_runInThisContext, 1));
     js_property_set(script, (Item){.item = s2it(heap_create_name("runInContext", 12))},
-                    js_new_function((void*)js_vm_Script_runInContext, 1));
+                    js_new_function((void*)js_vm_Script_runInContext, 2));
     js_property_set(script, (Item){.item = s2it(heap_create_name("runInNewContext", 15))},
-                    js_new_function((void*)js_vm_Script_runInNewContext, 1));
+                    js_new_function((void*)js_vm_Script_runInNewContext, 2));
     return script;
 }
 
@@ -32447,7 +32530,7 @@ static Item js_dc_tc_subscribe(Item handlers);
 static Item js_dc_tc_unsubscribe(Item handlers);
 static Item js_dc_tc_traceSync(Item fn, Item context, Item this_arg, Item rest_args);
 static Item js_dc_tc_tracePromise(Item fn, Item context, Item this_arg, Item rest_args);
-static Item js_dc_tc_traceCallback(Item fn);
+static Item js_dc_tc_traceCallback(Item fn, Item rest_args);
 static void js_dc_channel_publish_on(Item channel, Item message);
 static Item js_dc_channel_runStores(Item message, Item callback, Item this_arg, Item arg1, Item arg2);
 static Item js_dc_channel_factory(Item name);
@@ -32459,6 +32542,7 @@ extern "C" Item js_array_get_int(Item array, int64_t index);
 extern "C" int64_t js_array_length(Item array);
 extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc);
 extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
+extern "C" Item js_delete_property(Item obj, Item key);
 
 #define JS_DC_CHANNEL_MAX 512
 static Item js_dc_channel_names[JS_DC_CHANNEL_MAX];
@@ -32760,7 +32844,7 @@ static Item js_dc_tracing_channel(Item nameOrChannels) {
     js_property_set(tc, (Item){.item = s2it(heap_create_name("tracePromise", 12))},
                     js_new_function((void*)js_dc_tc_tracePromise, -4));
     js_property_set(tc, (Item){.item = s2it(heap_create_name("traceCallback", 13))},
-                    js_new_function((void*)js_dc_tc_traceCallback, 1));
+                    js_new_function((void*)js_dc_tc_traceCallback, -2));
     return tc;
 }
 
@@ -32846,6 +32930,17 @@ static Item js_dc_trace_promise_reject(Item state, Item error) {
     return ItemNull;
 }
 
+static int64_t js_dc_rest_length(Item rest_args) {
+    return get_type_id(rest_args) == LMD_TYPE_ARRAY ? js_array_length(rest_args) : 0;
+}
+
+static Item js_dc_rest_get(Item rest_args, int64_t index) {
+    if (get_type_id(rest_args) != LMD_TYPE_ARRAY) return (Item){.item = ITEM_JS_UNDEFINED};
+    int64_t len = js_array_length(rest_args);
+    if (index < 0 || index >= len) return (Item){.item = ITEM_JS_UNDEFINED};
+    return js_array_get_int(rest_args, index);
+}
+
 static int js_dc_rest_args(Item rest_args, Item* args_storage, Item** out_args) {
     if (get_type_id(rest_args) != LMD_TYPE_ARRAY) {
         *out_args = nullptr;
@@ -32862,6 +32957,22 @@ static int js_dc_rest_args(Item rest_args, Item* args_storage, Item** out_args) 
     }
     *out_args = args_storage;
     return len;
+}
+
+static int js_dc_callback_position(Item value, int extra_count) {
+    int64_t pos = 0;
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT) {
+        pos = it2i(value);
+    } else if (type == LMD_TYPE_INT64) {
+        pos = it2l(value);
+    } else if (type == LMD_TYPE_FLOAT) {
+        double d = it2d(value);
+        if (isfinite(d)) pos = (int64_t)d;
+    }
+    if (pos < 0) return 0;
+    if (pos > extra_count) return extra_count;
+    return (int)pos;
 }
 
 static void js_dc_emit_trace_promise_non_thenable_warning(Item fn) {
@@ -32980,10 +33091,115 @@ static Item js_dc_tc_tracePromise(Item fn, Item context, Item this_arg, Item res
     return js_call_function(then_fn, result, then_args, 2);
 }
 
-// TracingChannel.traceCallback(fn, ...) — stub, just calls fn
-static Item js_dc_tc_traceCallback(Item fn) {
-    Item ctx = js_new_object();
-    return js_call_function(fn, (Item){.item = ITEM_JS_UNDEFINED}, &ctx, 1);
+static Item js_dc_trace_callback_invoke(Item state, Item rest_args) {
+    if (get_type_id(state) != LMD_TYPE_ARRAY || js_array_length(state) < 6) {
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+
+    Item async_start_ch = js_array_get_int(state, 0);
+    Item async_end_ch = js_array_get_int(state, 1);
+    Item error_ch = js_array_get_int(state, 2);
+    Item ctx = js_array_get_int(state, 3);
+    Item callback = js_array_get_int(state, 4);
+
+    int64_t argc64 = js_dc_rest_length(rest_args);
+    int argc = argc64 > 15 ? 15 : (int)argc64;
+    Item args[15];
+    for (int i = 0; i < argc; i++) {
+        args[i] = js_dc_rest_get(rest_args, i);
+    }
+
+    Item err = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+    bool has_error = !js_dc_is_nullish(err);
+    if (has_error) {
+        js_property_set(ctx, js_dc_key("error"), err);
+        js_dc_channel_publish_on(error_ch, ctx);
+        js_delete_property(ctx, js_dc_key("error"));
+    } else if (argc > 1) {
+        js_property_set(ctx, js_dc_key("result"), args[1]);
+    }
+
+    Item async_store_context = js_dc_build_store_context(async_start_ch, ctx);
+    Item publish_fn = js_property_get(async_start_ch, js_dc_key("publish"));
+    js_als_context_call_args(async_store_context, publish_fn, async_start_ch, &ctx, 1);
+    js_dc_channel_publish_on(async_end_ch, ctx);
+    return js_als_context_call_args(async_store_context, callback,
+                                    (Item){.item = ITEM_JS_UNDEFINED}, args, argc);
+}
+
+// TracingChannel.traceCallback(fn, position, context, thisArg, callback, ...args)
+static Item js_dc_tc_traceCallback(Item fn, Item rest_args) {
+    Item self = js_get_this();
+    Item start_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("start", 5))});
+    Item end_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("end", 3))});
+    Item async_start_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("asyncStart", 10))});
+    Item async_end_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("asyncEnd", 8))});
+    Item error_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("error", 5))});
+
+    int64_t total = js_dc_rest_length(rest_args);
+    Item callback = js_dc_rest_get(rest_args, 3);
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        return js_throw_type_error("The \"callback\" argument must be of type function.");
+    }
+
+    Item position_item = js_dc_rest_get(rest_args, 0);
+    Item context = js_dc_rest_get(rest_args, 1);
+    Item this_arg = js_dc_rest_get(rest_args, 2);
+    Item ctx = js_dc_context_or_new(context);
+    int extra_count = total > 4 ? (int)(total - 4) : 0;
+    if (extra_count > 14) extra_count = 14;
+
+    bool should_trace = js_dc_channel_has_active_subscribers(start_ch) ||
+                        js_dc_channel_has_active_subscribers(end_ch) ||
+                        js_dc_channel_has_active_subscribers(async_start_ch) ||
+                        js_dc_channel_has_active_subscribers(async_end_ch) ||
+                        js_dc_channel_has_active_subscribers(error_ch);
+
+    Item callback_for_fn = callback;
+    if (should_trace) {
+        Item state = js_array_new(0);
+        js_array_push(state, async_start_ch);
+        js_array_push(state, async_end_ch);
+        js_array_push(state, error_ch);
+        js_array_push(state, ctx);
+        js_array_push(state, callback);
+        js_array_push(state, (Item){.item = ITEM_JS_UNDEFINED});
+        callback_for_fn = js_bind_function(js_new_function((void*)js_dc_trace_callback_invoke, -2),
+                                           (Item){.item = ITEM_JS_UNDEFINED}, &state, 1);
+    }
+
+    int callback_pos = js_dc_callback_position(position_item, extra_count);
+    Item fn_args[15];
+    int fn_argc = extra_count + 1;
+    for (int i = 0; i < fn_argc; i++) {
+        if (i < callback_pos) {
+            fn_args[i] = js_dc_rest_get(rest_args, 4 + i);
+        } else if (i == callback_pos) {
+            fn_args[i] = callback_for_fn;
+        } else {
+            fn_args[i] = js_dc_rest_get(rest_args, 4 + i - 1);
+        }
+    }
+
+    if (!should_trace) {
+        return js_call_function(fn, this_arg, fn_args, fn_argc);
+    }
+
+    Item store_context = js_dc_build_store_context(start_ch, ctx);
+    Item publish_fn = js_property_get(start_ch, js_dc_key("publish"));
+    js_als_context_call_args(store_context, publish_fn, start_ch, &ctx, 1);
+    Item result = js_als_context_call_args(store_context, fn, this_arg, fn_args, fn_argc);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        js_property_set(ctx, js_dc_key("error"), error);
+        js_dc_channel_publish_on(error_ch, ctx);
+        js_delete_property(ctx, js_dc_key("error"));
+        js_dc_channel_publish_on(end_ch, ctx);
+        js_throw_value(error);
+        return ItemNull;
+    }
+    js_dc_channel_publish_on(end_ch, ctx);
+    return result;
 }
 
 // BoundedChannel.run(context, fn, ...args) — publish to start, call fn, publish to end
@@ -33606,10 +33822,8 @@ static Item js_als_constructor(Item options) {
     } else if ((get_type_id(options) != LMD_TYPE_NULL && get_type_id(options) != LMD_TYPE_UNDEFINED &&
                options.item != ITEM_JS_UNDEFINED && options.item != 0) ||
                get_type_id(options) == LMD_TYPE_NULL) {
-        // non-object argument is invalid — throw TypeError
-        extern Item js_throw_type_error(const char* msg);
-        js_throw_type_error("The \"options\" argument must be of type object.");
-        return (Item){.item = ITEM_JS_UNDEFINED};
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"options\" argument must be of type object.");
     }
     js_property_set(self, js_als_store_key(), default_val);
     js_property_set(self, (Item){.item = s2it(heap_create_name("_defaultValue", 13))}, default_val);
@@ -33945,6 +34159,27 @@ static Item js_ah_disable(void) {
 }
 
 static Item js_ah_createHook(Item callbacks) {
+    TypeId callbacks_type = get_type_id(callbacks);
+    if (callbacks_type == LMD_TYPE_MAP || callbacks_type == LMD_TYPE_OBJECT ||
+        callbacks_type == LMD_TYPE_FUNC || callbacks_type == LMD_TYPE_ARRAY ||
+        callbacks_type == LMD_TYPE_ELEMENT || callbacks_type == LMD_TYPE_VMAP) {
+        static const char* names[] = {"init", "before", "after", "destroy", "promiseResolve"};
+        static const int lens[] = {4, 6, 5, 7, 14};
+        for (int i = 0; i < 5; i++) {
+            Item key = (Item){.item = s2it(heap_create_name(names[i], lens[i]))};
+            Item callback = js_property_get(callbacks, key);
+            if (get_type_id(callback) != LMD_TYPE_UNDEFINED &&
+                callback.item != ITEM_JS_UNDEFINED &&
+                callback.item != 0 &&
+                get_type_id(callback) != LMD_TYPE_FUNC) {
+                char message[64];
+                int len = snprintf(message, sizeof(message), "hook.%s must be a function", names[i]);
+                if (len < 0) len = 0;
+                if (len >= (int)sizeof(message)) len = (int)sizeof(message) - 1;
+                return js_throw_type_error_code("ERR_ASYNC_CALLBACK", message);
+            }
+        }
+    }
     Item hook = js_new_object();
     js_async_hooks_add_hook(hook);
     js_property_set(hook, js_async_hooks_key("__lambda_async_hook_callbacks__"), callbacks);
@@ -34166,9 +34401,9 @@ extern "C" Item js_get_vm_namespace(void) {
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("runInThisContext", 16))},
                         js_new_function((void*)js_vm_runInThisContext, 2));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("runInContext", 12))},
-                        js_new_function((void*)js_vm_runInContext, 2));
+                        js_new_function((void*)js_vm_runInContext, 3));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("runInNewContext", 15))},
-                        js_new_function((void*)js_vm_runInNewContext, 2));
+                        js_new_function((void*)js_vm_runInNewContext, 3));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("compileFunction", 15))},
                         js_new_function((void*)js_vm_compileFunction, 2));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("Script", 6))},
@@ -34845,10 +35080,16 @@ extern "C" Item js_module_get(Item specifier) {
             // MessageChannel/MessagePort constructors
             extern Item js_message_channel_new(void);
             extern Item js_message_port_new(void);
+            extern Item js_message_port_move_to_context(Item port, Item context);
+            extern Item js_message_port_receive_message_on_port(Item port);
             js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("MessageChannel", 14))},
                             js_new_function((void*)js_message_channel_new, 0));
             js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("MessagePort", 11))},
                             js_new_function((void*)js_message_port_new, 0));
+            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("moveMessagePortToContext", 24))},
+                            js_new_function((void*)js_message_port_move_to_context, 2));
+            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("receiveMessageOnPort", 20))},
+                            js_new_function((void*)js_message_port_receive_message_on_port, 1));
             // Worker constructor stub — creates a non-functional object
             js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("Worker", 6))},
                             js_new_function((void*)js_stub_noop_object, 1));

@@ -2836,15 +2836,15 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
         char* src_data = (char*)js_typed_array_current_data(ta);
         char* dst_data = (char*)js_typed_array_current_data(rta);
         int src_start = start * elem_size;
-        if (src_data && dst_data &&
-            js_typed_array_arraynum_range_matches(ta, src_data, start, new_length) &&
-            js_typed_array_arraynum_range_matches(rta, dst_data, 0, new_length)) {
-            array_num_copy_same_type_bytes(rta->view, 0, ta->view, start, new_length);
-        } else if (src_data && dst_data && ta->buffer && rta->buffer && ta->buffer == rta->buffer) {
+        if (src_data && dst_data && ta->buffer && rta->buffer && ta->buffer == rta->buffer) {
             for (int i = 0; i < count_bytes; i++) {
                 int src_index = src_start + i;
                 dst_data[i] = (src_index >= 0 && src_index < source_byte_length) ? src_data[src_index] : 0;
             }
+        } else if (src_data && dst_data &&
+            js_typed_array_arraynum_range_matches(ta, src_data, start, new_length) &&
+            js_typed_array_arraynum_range_matches(rta, dst_data, 0, new_length)) {
+            array_num_copy_same_type_bytes(rta->view, 0, ta->view, start, new_length);
         } else if (src_data && dst_data && source_byte_length >= src_start + count_bytes) {
             memcpy(dst_data, src_data + src_start, count_bytes);
         } else if (dst_data) {

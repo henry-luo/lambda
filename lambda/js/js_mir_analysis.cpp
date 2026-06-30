@@ -937,6 +937,7 @@ void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs) {
     }
     case JS_AST_NODE_PROPERTY: {
         JsPropertyNode* p = (JsPropertyNode*)node;
+        if (p->computed) jm_collect_body_refs(p->key, refs);
         jm_collect_body_refs(p->value, refs);
         break;
     }

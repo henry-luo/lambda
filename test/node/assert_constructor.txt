@@ -1,0 +1,6 @@
+plain Assert: TypeError:ERR_CONSTRUCT_CALL_REQUIRED
+instance ok isolated: true
+loose equal: pass
+strict aliases: true:true:true:true
+invalid diff: TypeError:ERR_INVALID_ARG_VALUE:The property 'options.diff' must be one of: 'simple', 'full'. Received 'invalid'
+full diff: ERR_ASSERTION:full

@@ -11,6 +11,7 @@
 #include "js_runtime.h"
 #include "js_typed_array.h"
 #include "js_dom_events.h"
+#include "js_error_codes.h"
 #include "js_property_attrs.h"
 #include "js_props.h"
 #include "js_class.h"
@@ -14757,6 +14758,10 @@ static bool js_message_port_is_object(Item value) {
     return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
 }
 
+static bool js_message_port_is_port(Item value) {
+    return js_message_port_is_object(value) && js_class_id(value) == JS_CLASS_MESSAGE_PORT;
+}
+
 static const char* js_message_port_listener_key(Item event) {
     if (js_message_port_event_name_matches(event, "message")) return "__message_listeners__";
     if (js_message_port_event_name_matches(event, "close")) return "__close_listeners__";
@@ -14796,6 +14801,30 @@ static void js_message_port_emit_listener_array(Item target, const char* key, It
         }
     }
     mem_free(snapshot);
+}
+
+static Item js_message_port_queue(Item port) {
+    Item queue = js_property_get(port, make_string_item("__message_queue__"));
+    if (get_type_id(queue) != LMD_TYPE_ARRAY) {
+        queue = js_array_new(0);
+        js_property_set(port, make_string_item("__message_queue__"), queue);
+    }
+    return queue;
+}
+
+static Item js_message_port_shift_message(Item port) {
+    Item queue = js_property_get(port, make_string_item("__message_queue__"));
+    if (get_type_id(queue) != LMD_TYPE_ARRAY) return make_js_undefined();
+    int64_t len = js_array_length(queue);
+    if (len <= 0) return make_js_undefined();
+
+    Item value = js_array_get_int(queue, 0);
+    Item next_queue = js_array_new(0);
+    for (int64_t i = 1; i < len; i++) {
+        js_array_push(next_queue, js_array_get_int(queue, i));
+    }
+    js_property_set(port, make_string_item("__message_queue__"), next_queue);
+    return value;
 }
 
 static Item js_message_port_add_listener(Item event, Item handler) {
@@ -14848,7 +14877,9 @@ static Item js_message_port_remove_listener(Item event, Item handler) {
 static Item js_message_port_deliver(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     Item target = env ? env[0] : make_js_undefined();
-    Item msg = env ? env[1] : make_js_undefined();
+    if (!js_message_port_is_port(target)) return make_js_undefined();
+    Item msg = js_message_port_shift_message(target);
+    if (get_type_id(msg) == LMD_TYPE_UNDEFINED) return make_js_undefined();
 
     Item onmessage = js_property_get(target, make_string_item("onmessage"));
     if (get_type_id(onmessage) == LMD_TYPE_FUNC) {
@@ -14881,14 +14912,16 @@ static Item js_message_port_postMessage(Item msg) {
         return make_js_undefined();
     }
     Item peer = js_property_get(self, make_string_item("__peer__"));
-    if (!js_message_port_is_object(peer)) return make_js_undefined();
+    if (!js_message_port_is_port(peer)) return make_js_undefined();
     Item peer_closed = js_property_get(peer, make_string_item("__closed__"));
     if (peer_closed.item == ITEM_TRUE) return make_js_undefined();
 
-    Item* env = js_alloc_env(2);
+    Item queue = js_message_port_queue(peer);
+    js_array_push(queue, structured_clone_impl(msg, 0));
+
+    Item* env = js_alloc_env(1);
     env[0] = peer;
-    env[1] = structured_clone_impl(msg, 0);
-    Item deliver = js_new_closure((void*)js_message_port_deliver, 0, env, 2);
+    Item deliver = js_new_closure((void*)js_message_port_deliver, 0, env, 1);
     extern Item js_setTimeout(Item callback, Item delay);
     js_setTimeout(deliver, (Item){.item = i2it(0)});
     return make_js_undefined();
@@ -14906,6 +14939,36 @@ static Item js_message_port_close(Item callback) {
     return make_js_undefined();
 }
 
+extern "C" Item js_message_port_move_to_context(Item port, Item context) {
+    (void)context;
+    if (js_message_port_is_port(port)) {
+        Item closed = js_property_get(port, make_string_item("__closed__"));
+        if (closed.item == ITEM_TRUE) {
+            extern Item js_throw_type_error_code(const char*, const char*);
+            return js_throw_type_error_code(JS_ERR_CLOSED_MESSAGE_PORT,
+                "Cannot send data on closed MessagePort");
+        }
+        return port;
+    }
+    extern Item js_throw_type_error_code(const char*, const char*);
+    return js_throw_type_error_code(JS_ERR_INVALID_ARG_TYPE,
+        "The \"port\" argument must be an instance of MessagePort.");
+}
+
+extern "C" Item js_message_port_receive_message_on_port(Item port) {
+    if (!js_message_port_is_port(port)) {
+        extern Item js_throw_type_error_code(const char*, const char*);
+        return js_throw_type_error_code(JS_ERR_INVALID_ARG_TYPE,
+            "The \"port\" argument must be a MessagePort instance");
+    }
+    Item msg = js_message_port_shift_message(port);
+    if (get_type_id(msg) == LMD_TYPE_UNDEFINED) return make_js_undefined();
+
+    Item result = js_new_object();
+    js_property_set(result, make_string_item("message"), msg);
+    return result;
+}
+
 extern "C" Item js_message_port_new(void) {
     Item port = js_new_object();
     // T5b: legacy `__class_name__` string write retired.
@@ -14919,6 +14982,7 @@ extern "C" Item js_message_port_new(void) {
     js_property_set(port, make_string_item("__closed__"), (Item){.item = ITEM_FALSE});
     js_property_set(port, make_string_item("__message_listeners__"), js_array_new(0));
     js_property_set(port, make_string_item("__close_listeners__"), js_array_new(0));
+    js_property_set(port, make_string_item("__message_queue__"), js_array_new(0));
     // EventEmitter methods
     js_property_set(port, make_string_item("on"),
         js_new_function((void*)js_message_port_add_listener, 2));
@@ -15272,6 +15336,16 @@ extern "C" Item js_get_global_this() {
     return js_global_this_obj;
 }
 
+extern "C" Item js_vm_swap_global_this(Item next_global) {
+    Item previous = js_get_global_this();
+    TypeId type = get_type_id(next_global);
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP) {
+        js_global_this_obj = next_global;
+        js_global_var_define_cache_reset();
+    }
+    return previous;
+}
+
 // js_get_global_object: alias for js_get_global_this (used by assignment fallback)
 extern "C" Item js_get_global_object() {
     return js_get_global_this();
@@ -15370,6 +15444,7 @@ extern "C" Item* js_with_capture_stack(int* out_depth) {
     for (int i = 0; i < js_with_stack_depth; i++) {
         captured[i] = js_with_stack[i];
     }
+    heap_register_gc_root_range((uint64_t*)captured, js_with_stack_depth);
     return captured;
 }
 

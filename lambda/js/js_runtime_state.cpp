@@ -3,6 +3,145 @@
 JsRuntimeState js_runtime_state;
 extern __thread EvalContext* context;
 
+#define JS_EVAL_SOURCE_STACK_MAX 16
+static Item js_eval_source_filename_stack[JS_EVAL_SOURCE_STACK_MAX];
+static Item js_eval_source_code_stack[JS_EVAL_SOURCE_STACK_MAX];
+static int64_t js_eval_source_line_offset_stack[JS_EVAL_SOURCE_STACK_MAX];
+static int64_t js_eval_source_column_offset_stack[JS_EVAL_SOURCE_STACK_MAX];
+static int js_eval_source_stack_depth = 0;
+static bool js_eval_source_roots_registered = false;
+
+static void js_eval_source_register_roots(void) {
+    if (js_eval_source_roots_registered) return;
+    heap_register_gc_root_range((uint64_t*)js_eval_source_filename_stack, JS_EVAL_SOURCE_STACK_MAX);
+    heap_register_gc_root_range((uint64_t*)js_eval_source_code_stack, JS_EVAL_SOURCE_STACK_MAX);
+    js_eval_source_roots_registered = true;
+}
+
+extern "C" void js_eval_source_push(Item filename, Item source,
+                                    int64_t line_offset, int64_t column_offset) {
+    js_eval_source_register_roots();
+    if (js_eval_source_stack_depth >= JS_EVAL_SOURCE_STACK_MAX) return;
+    int idx = js_eval_source_stack_depth++;
+    js_eval_source_filename_stack[idx] = filename;
+    js_eval_source_code_stack[idx] = source;
+    js_eval_source_line_offset_stack[idx] = line_offset;
+    js_eval_source_column_offset_stack[idx] = column_offset;
+}
+
+extern "C" void js_eval_source_pop(void) {
+    if (js_eval_source_stack_depth <= 0) return;
+    int idx = --js_eval_source_stack_depth;
+    js_eval_source_filename_stack[idx] = ItemNull;
+    js_eval_source_code_stack[idx] = ItemNull;
+    js_eval_source_line_offset_stack[idx] = 0;
+    js_eval_source_column_offset_stack[idx] = 0;
+}
+
+static bool js_eval_source_current(Item* out_filename, Item* out_source,
+                                   int64_t* out_line_offset, int64_t* out_column_offset) {
+    if (js_eval_source_stack_depth <= 0) return false;
+    int idx = js_eval_source_stack_depth - 1;
+    Item filename = js_eval_source_filename_stack[idx];
+    Item source = js_eval_source_code_stack[idx];
+    if (get_type_id(filename) != LMD_TYPE_STRING || get_type_id(source) != LMD_TYPE_STRING) {
+        return false;
+    }
+    if (out_filename) *out_filename = filename;
+    if (out_source) *out_source = source;
+    if (out_line_offset) *out_line_offset = js_eval_source_line_offset_stack[idx];
+    if (out_column_offset) *out_column_offset = js_eval_source_column_offset_stack[idx];
+    return true;
+}
+
+static int js_eval_source_first_line(String* source, const char** out_line) {
+    if (!source || !out_line) return 0;
+    const char* s = source->chars;
+    int len = (int)source->len;
+    int start = 0;
+    while (start < len && (s[start] == '\n' || s[start] == '\r')) start++;
+    int end = start;
+    while (end < len && s[end] != '\n' && s[end] != '\r') end++;
+    *out_line = s + start;
+    return end - start;
+}
+
+static int js_eval_source_display_column(String* source) {
+    const char* line = NULL;
+    int line_len = js_eval_source_first_line(source, &line);
+    if (!line || line_len <= 0) return 1;
+    int pos = 0;
+    while (pos < line_len && (line[pos] == ' ' || line[pos] == '\t')) pos++;
+    if (pos + 5 <= line_len && memcmp(line + pos, "throw", 5) == 0 &&
+        (pos + 5 == line_len || line[pos + 5] == ' ' || line[pos + 5] == '\t')) {
+        pos += 5;
+        while (pos < line_len && (line[pos] == ' ' || line[pos] == '\t')) pos++;
+    }
+    return pos + 1;
+}
+
+static Item js_eval_source_stack_string(Item error_name, Item message) {
+    Item filename_item = ItemNull;
+    Item source_item = ItemNull;
+    int64_t line_offset = 0;
+    int64_t column_offset = 0;
+    if (!js_eval_source_current(&filename_item, &source_item, &line_offset, &column_offset)) {
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    String* filename = it2s(filename_item);
+    String* source = it2s(source_item);
+    if (!filename || !source) return (Item){.item = ITEM_JS_UNDEFINED};
+
+    const char* line = NULL;
+    int line_len = js_eval_source_first_line(source, &line);
+    int display_line = (int)line_offset + 1;
+    if (display_line < 1) display_line = 1;
+    int display_col = js_eval_source_display_column(source) + (int)column_offset;
+    if (display_col < 1) display_col = 1;
+
+    const char* name_str = "Error";
+    int name_len = 5;
+    if (get_type_id(error_name) == LMD_TYPE_STRING) {
+        String* ns = it2s(error_name);
+        if (ns) { name_str = ns->chars; name_len = (int)ns->len; }
+    }
+    const char* msg_str = "";
+    int msg_len = 0;
+    if (get_type_id(message) == LMD_TYPE_STRING) {
+        String* ms = it2s(message);
+        if (ms) { msg_str = ms->chars; msg_len = (int)ms->len; }
+    }
+
+    int caret_spaces = display_col - 1;
+    int total = (int)filename->len + 32 + line_len + caret_spaces +
+        name_len + msg_len + (int)filename->len + 64;
+    char* buf = (char*)mem_alloc((size_t)total + 1, MEM_CAT_JS_RUNTIME);
+    if (!buf) return (Item){.item = ITEM_JS_UNDEFINED};
+    int pos = 0;
+    pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos, "%.*s:%d\n",
+                    (int)filename->len, filename->chars, display_line);
+    if (line_len > 0) {
+        pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos, "%.*s", line_len, line);
+    }
+    pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos, "\n");
+    for (int i = 0; i < caret_spaces && pos < total; i++) buf[pos++] = ' ';
+    if (pos < total) buf[pos++] = '^';
+    pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos, "\n\n%.*s",
+                    name_len, name_str);
+    if (msg_len > 0) {
+        pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos, ": %.*s",
+                        msg_len, msg_str);
+    }
+    pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos,
+                    "\n    at %.*s:%d:%d",
+                    (int)filename->len, filename->chars, display_line, display_col);
+    if (pos < 0) pos = 0;
+    if (pos > total) pos = total;
+    Item result = (Item){.item = s2it(heap_create_name(buf, pos))};
+    mem_free(buf);
+    return result;
+}
+
 static void js_ensure_module_vars_gc_rooted() {
     static struct gc_heap* rooted_gc = NULL;
     if (!context || !context->heap || !context->heap->gc) return;
@@ -529,7 +668,10 @@ extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
     }
     // Set stack property from compile-time stack trace
     Item stack_key = (Item){.item = s2it(heap_create_name("stack"))};
-    if (stack_str.item != ITEM_JS_UNDEFINED) {
+    Item eval_stack = js_eval_source_stack_string(name_val, message);
+    if (eval_stack.item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj, stack_key, eval_stack);
+    } else if (stack_str.item != ITEM_JS_UNDEFINED) {
         js_property_set(obj, stack_key, stack_str);
     } else {
         // Default: "Error" + message
@@ -587,7 +729,10 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
     }
     // Set stack property
     Item stack_key = (Item){.item = s2it(heap_create_name("stack"))};
-    if (stack_str.item != ITEM_JS_UNDEFINED) {
+    Item eval_stack = js_eval_source_stack_string(error_name, message);
+    if (eval_stack.item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj, stack_key, eval_stack);
+    } else if (stack_str.item != ITEM_JS_UNDEFINED) {
         js_property_set(obj, stack_key, stack_str);
     } else {
         const char* name_str = "Error";

@@ -1323,7 +1323,14 @@ static bool js_eval_strict_assigns_restricted_name(String* code_str) {
 // eval_flags bit 0: evaluate as global/direct script; bit 1: syntactic direct eval;
 // bit 2: inherit strictness from the direct eval caller.
 // ============================================================================
-extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
+extern "C" void js_eval_source_push(Item filename, Item source,
+                                    int64_t line_offset, int64_t column_offset);
+extern "C" void js_eval_source_pop(void);
+
+extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
+                                              Item filename_item,
+                                              int64_t line_offset,
+                                              int64_t column_offset) {
     if (!js_source_runtime) {
         log_error("js-eval: no runtime context for dynamic evaluation");
         return ItemNull;
@@ -1337,8 +1344,12 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
     bool is_direct_eval = (eval_flags & 2) != 0;
     bool is_global_scope = (eval_flags & 1) != 0;
     bool inherited_strict = (eval_flags & 4) != 0;
+    bool has_eval_source = get_type_id(filename_item) == LMD_TYPE_STRING;
+    const char* eval_filename = has_eval_source ? it2s(filename_item)->chars : "<eval>";
+    if (has_eval_source) js_eval_source_push(filename_item, code_item, line_offset, column_offset);
 
     if (js_eval_initializer_early_error(code_str, is_direct_eval)) {
+        if (has_eval_source) js_eval_source_pop();
         return ItemNull;
     }
 
@@ -1376,7 +1387,10 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
             has_code = true;
             break;
         }
-        if (!has_code) return (Item){.item = ITEM_JS_UNDEFINED};
+        if (!has_code) {
+            if (has_eval_source) js_eval_source_pop();
+            return (Item){.item = ITEM_JS_UNDEFINED};
+        }
     }
 
     // Fast path: if code is a single RegExp literal, construct directly
@@ -1405,7 +1419,9 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
             }
             if (valid && flags_start <= code_str->len) {
                 extern Item js_create_regexp_from_source(const char* src, size_t len);
-                return js_create_regexp_from_source(code_str->chars, code_str->len);
+                Item regexp_result = js_create_regexp_from_source(code_str->chars, code_str->len);
+                if (has_eval_source) js_eval_source_pop();
+                return regexp_result;
             }
         }
     }
@@ -1416,10 +1432,12 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
 
     if (is_direct_eval && inherited_strict && js_eval_source_assigns_immutable_binding(code_str)) {
         js_throw_type_error("Assignment to constant variable");
+        if (has_eval_source) js_eval_source_pop();
         return ItemNull;
     }
     if (is_direct_eval && inherited_strict && js_eval_strict_assigns_restricted_name(code_str)) {
         js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid strict eval assignment", 30))});
+        if (has_eval_source) js_eval_source_pop();
         return ItemNull;
     }
 
@@ -1531,7 +1549,10 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
             size_t plen = strlen(prefix), slen2 = strlen(suffix);
             size_t total = plen + code_len + slen2 + 1;
             char* body = (char*)mem_alloc(total, MEM_CAT_JS_RUNTIME);
-            if (!body) return ItemNull;
+            if (!body) {
+                if (has_eval_source) js_eval_source_pop();
+                return ItemNull;
+            }
             memcpy(body, prefix, plen);
             memcpy(body + plen, code_str->chars, code_len);
             memcpy(body + plen + code_len, suffix, slen2);
@@ -1548,6 +1569,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
         extern Item js_get_this();
         Item eval_this = js_get_this();
         Item result = js_call_function(fn_item, eval_this, NULL, 0);
+        if (has_eval_source) js_eval_source_pop();
         return result;
     }
 
@@ -1562,6 +1584,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
         JsTranspiler* tp = js_transpiler_create(js_source_runtime);
         if (!tp) {
             log_error("js-eval: failed to create transpiler for direct script");
+            if (has_eval_source) js_eval_source_pop();
             return ItemNull;
         }
         tp->strict_mode = inherited_strict;
@@ -1570,6 +1593,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
             log_error("js-eval: parse failed for direct script");
             js_transpiler_destroy(tp);
             js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid eval source", 19))});
+            if (has_eval_source) js_eval_source_pop();
             return ItemNull;
         }
 
@@ -1578,6 +1602,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
         if (!js_ast) {
             log_error("js-eval: AST build failed for direct script");
             js_transpiler_destroy(tp);
+            if (has_eval_source) js_eval_source_pop();
             return ItemNull;
         }
 
@@ -1585,10 +1610,12 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
         if (early_errors > 0) {
             js_transpiler_destroy(tp);
             js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid eval source", 19))});
+            if (has_eval_source) js_eval_source_pop();
             return ItemNull;
         }
         if (is_direct_eval && !inherited_strict && js_eval_var_conflicts_lexical_program(js_ast)) {
             js_transpiler_destroy(tp);
+            if (has_eval_source) js_eval_source_pop();
             return ItemNull;
         }
 
@@ -1598,6 +1625,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
         if (!eval_ctx) {
             log_error("js-eval: MIR context init failed");
             js_transpiler_destroy(tp);
+            if (has_eval_source) js_eval_source_pop();
             return ItemNull;
         }
 
@@ -1605,10 +1633,11 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
             MIR_set_error_func(eval_ctx, g_batch_mir_error_handler);
         }
 
-        JsMirTranspiler* mt = jm_create_mir_transpiler(tp, eval_ctx, "<eval>", false, 16, 8, 8, "js-eval");
+        JsMirTranspiler* mt = jm_create_mir_transpiler(tp, eval_ctx, eval_filename, false, 16, 8, 8, "js-eval");
         if (!mt) {
             MIR_finish(eval_ctx);
             js_transpiler_destroy(tp);
+            if (has_eval_source) js_eval_source_pop();
             return ItemNull;
         }
         mt->is_eval_direct = is_global_scope;  // sloppy-mode eval: export vars to globalThis
@@ -1632,6 +1661,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
             jm_destroy_mir_transpiler(mt);
             MIR_finish(eval_ctx);
             js_transpiler_destroy(tp);
+            if (has_eval_source) js_eval_source_pop();
             return ItemNull;
         }
 
@@ -1645,6 +1675,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
             jm_destroy_mir_transpiler(mt);
             MIR_finish(eval_ctx);
             js_transpiler_destroy(tp);
+            if (has_eval_source) js_eval_source_pop();
             return ItemNull;
         }
 
@@ -1673,6 +1704,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
         }
 
         Item result = js_main_fn((Context*)context);
+        if (has_eval_source) js_eval_source_pop();
 
         if (js_eval_fresh_module_scope) {
             js_set_active_module_vars(js_eval_prev_module_vars);
@@ -1696,6 +1728,11 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
 
         return result;
     }
+}
+
+extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
+    return js_builtin_eval_with_options(code_item, eval_flags,
+        (Item){.item = ITEM_JS_UNDEFINED}, 0, 0);
 }
 
 // ============================================================================
