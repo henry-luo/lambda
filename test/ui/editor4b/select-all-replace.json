@@ -1,0 +1,22 @@
+{
+  "name": "editor4b: select-all + type replaces the whole document and keeps editing (focus preserved across full rebuild)",
+  "_note": "Regression guard for the whole-document-replace focus-preservation gap (vibe/radiant/Radiant_Issue3.md follow-up). Cmd+A then typing collapses all blocks to one, forcing Radiant's FULL view-tree rebuild, which used to blur the contenteditable host and drop every keystroke after the first. The fix re-focuses the editing host after relayout. All of 'Hello' must land, then Enter splits and 'World' lands in the new block.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 60},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "wait", "ms": 60},
+    {"type": "type", "target": {"selector": ".rdt-surface"}, "text": "Hello"},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface [data-source-path=\"0,0\"]"}, "equals": "Hello"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "wait", "ms": 100},
+    {"type": "type", "target": {"selector": ".rdt-surface"}, "text": "World"},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface [data-source-path=\"0,0\"]"}, "equals": "Hello"},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface [data-source-path=\"1,0\"]"}, "equals": "World"}
+  ]
+}

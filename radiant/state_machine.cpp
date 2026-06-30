@@ -1348,6 +1348,15 @@ static void validate_editing_target_ranges_invariant(
         StateValidationReport* report) {
     if (!state) return;
     const EditingInteractionState* editing = &state->editing;
+    // Stage 4B: while the substrate is synchronously dispatching `beforeinput`
+    // into a script handler, the script may reconcile (split/merge/replace) the
+    // editable subtree, transiently destroying the surface the native rich
+    // transaction references. The transaction is inert during that window (the
+    // script preventDefaults) and re-syncs to the post-reconcile selection once
+    // dispatch returns, so suspend the target-range invariant here.
+    if (editing->rich_transaction_in_script_dispatch) {
+        return;
+    }
     if (editing->rich_transaction_phase == EDITING_RICH_TX_IDLE) {
         if (editing->rich_transaction_target_ranges_active ||
             editing->rich_transaction_target_range_count != 0 ||
