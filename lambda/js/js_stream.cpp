@@ -176,6 +176,7 @@ extern "C" Item js_passthrough_new(Item opts);
 extern "C" Item js_writable_end(Item self, Item chunk, Item callback);
 extern "C" Item js_stream_destroy(Item self, Item err);
 extern "C" Item js_stream_emit(Item self, Item event_item, Item arg1);
+extern "C" Item js_stream_on(Item self, Item event_item, Item listener);
 static void js_stream_flush_buffered_data(Item self);
 static void js_stream_schedule_close(Item self);
 static void js_stream_async_iterators_drain(Item stream, Item err);
@@ -406,6 +407,49 @@ static bool js_readable_has_pipe(Item self, Item dest) {
         if (js_array_get_int(pipes, i).item == dest.item) return true;
     }
     return false;
+}
+
+static Item js_legacy_stream_pipe_on_data(Item env_item, Item chunk) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item dest = env[0];
+    Item write_fn = js_property_get(dest, key_write);
+    if (get_type_id(write_fn) != LMD_TYPE_FUNC) return make_js_undefined();
+    return js_call_function(write_fn, dest, &chunk, 1);
+}
+
+static Item js_legacy_stream_pipe_on_end(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item dest = env[0];
+    Item end_fn = js_property_get(dest, key_end);
+    if (get_type_id(end_fn) != LMD_TYPE_FUNC) return make_js_undefined();
+    return js_call_function(end_fn, dest, NULL, 0);
+}
+
+static void js_legacy_stream_pipe_add_listener(Item source, const char* event_name, Item listener) {
+    Item on_fn = js_property_get(source, key_on);
+    Item args[2] = { make_string_item(event_name), listener };
+    if (get_type_id(on_fn) == LMD_TYPE_FUNC) {
+        js_call_function(on_fn, source, args, 2);
+    } else {
+        js_stream_on(source, args[0], listener);
+    }
+}
+
+static Item js_legacy_stream_pipe(Item source, Item dest) {
+    Item* env = js_alloc_env(1);
+    env[0] = dest;
+    Item on_data = js_new_closure((void*)js_legacy_stream_pipe_on_data, 1, env, 1);
+    Item on_end = js_new_closure((void*)js_legacy_stream_pipe_on_end, 0, env, 1);
+    js_legacy_stream_pipe_add_listener(source, "data", on_data);
+    js_legacy_stream_pipe_add_listener(source, "end", on_end);
+
+    Item resume_fn = js_property_get(source, make_string_item("resume"));
+    if (get_type_id(resume_fn) == LMD_TYPE_FUNC) {
+        js_call_function(resume_fn, source, NULL, 0);
+    }
+    return dest;
 }
 
 static int64_t js_readable_existing_pipe_count(Item self) {
@@ -5439,6 +5483,10 @@ extern "C" Item js_readable_pipe(Item self, Item dest) {
         js_call_function(emit_fn, dest, emit_args, 2);
     } else {
         js_stream_emit(dest, pipe_event, self);
+    }
+
+    if (get_type_id(js_property_get(self, key_readable_state)) != LMD_TYPE_MAP) {
+        return js_legacy_stream_pipe(self, dest);
     }
 
     // set up data listener that writes to dest

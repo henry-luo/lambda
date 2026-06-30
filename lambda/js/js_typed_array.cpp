@@ -1783,6 +1783,9 @@ extern "C" void js_arraybuffer_detach(Item val) {
     if (!js_is_arraybuffer(val)) return;
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return;
+    if (ab->data) {
+        mem_free(ab->data);
+    }
     ab->data = NULL;
     ab->byte_length = 0;
     ab->detached = true;

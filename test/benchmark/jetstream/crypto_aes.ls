@@ -246,7 +246,7 @@ pn derive_key_schedule(password, nBits: int) {
     var pwBytes = fill(nBytes, 0)
     var i: int = 0
     while (i < nBytes) {
-        pwBytes[i] = band(ord(slice(password, i, i + 1)), 255)
+        pwBytes[i] = band(ord(password[i]), 255)
         i = i + 1
     }
     var key = AesCipher(pwBytes, KeyExpansion(pwBytes))
@@ -274,7 +274,7 @@ pn run() {
     var pt_bytes = fill(pt_len, 0)
     var i: int = 0
     while (i < pt_len) {
-        pt_bytes[i] = ord(slice(plainText, i, i + 1))
+        pt_bytes[i] = ord(plainText[i])
         i = i + 1
     }
 

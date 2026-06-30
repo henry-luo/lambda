@@ -81,3 +81,19 @@ console.log('bad hex from:', Buffer.from('cdxxab', 'hex').toString('hex'));
 var fs = Buffer.alloc(3);
 fs.fill(65);
 console.log('fill byte:', fs.toString());
+
+// Buffer.concat list validation and explicit length handling
+function concatThrows(value) {
+  try {
+    Buffer.concat(value);
+    return false;
+  } catch (err) {
+    return err && err.code === 'ERR_INVALID_ARG_TYPE';
+  }
+}
+
+console.log('concat rejects undefined:', concatThrows(undefined));
+console.log('concat rejects buffer:', concatThrows(Buffer.from('hello')));
+console.log('concat empty length:', Buffer.concat([], 100).length);
+console.log('concat truncate:', Buffer.concat([Buffer.from('hello')], 3).toString());
+console.log('concat pad:', Buffer.concat([Buffer.from('hi')], 5).toString('hex'));

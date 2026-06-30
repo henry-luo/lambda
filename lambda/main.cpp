@@ -4001,6 +4001,7 @@ int main(int argc, char *argv[]) {
 
     // Handle js-test-batch command: run multiple JS scripts in one process for test performance
     if (argc >= 2 && strcmp(argv[1], "js-test-batch") == 0) {
+        js_batch_execution_mode = 1;
         bool diagnose_requested = false;
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--diagnose") == 0) {
@@ -4537,6 +4538,7 @@ int main(int argc, char *argv[]) {
         if (saved_harness_src) { mem_free(saved_harness_src); saved_harness_src = NULL; }
 
         runtime_cleanup(&runtime);
+        js_batch_execution_mode = 0;
         return lambda_main_finish(0);
     }
 

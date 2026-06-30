@@ -22,3 +22,8 @@ bad hex write: 2
 bad hex buffer: abcd0000
 bad hex from: cd
 fill byte: AAA
+concat rejects undefined: true
+concat rejects buffer: true
+concat empty length: 0
+concat truncate: hel
+concat pad: 6869000000

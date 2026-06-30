@@ -3162,20 +3162,21 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         if (fn->body) {
             if (fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
                 JsBlockNode* blk = (JsBlockNode*)fn->body;
-                JsAstNode* s = blk->statements;
-                while (s) {
-                    jm_transpile_statement(mt, s);
-                    // Phase 5: After each statement in async body, check for exception
-                    if (fn->is_async && async_catch_label) {
-                        MIR_reg_t exc_check = jm_call_0(mt, "js_check_exception", MIR_T_I64);
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                            MIR_new_label_op(mt->ctx, async_catch_label),
-                            MIR_new_reg_op(mt->ctx, exc_check)));
-                    } else if (!fn->is_async) {
-                        // Non-async: propagate exception to caller by checking after each statement
-                        jm_emit_exc_propagate_check(mt);
+                if (!fn->is_async) {
+                    jm_transpile_statement_list_with_using(mt, blk->statements);
+                } else {
+                    JsAstNode* s = blk->statements;
+                    while (s) {
+                        jm_transpile_statement(mt, s);
+                        // Phase 5: After each statement in async body, check for exception
+                        if (async_catch_label) {
+                            MIR_reg_t exc_check = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                                MIR_new_label_op(mt->ctx, async_catch_label),
+                                MIR_new_reg_op(mt->ctx, exc_check)));
+                        }
+                        s = s->next;
                     }
-                    s = s->next;
                 }
             } else {
                 MIR_reg_t val = jm_transpile_box_item(mt, fn->body);

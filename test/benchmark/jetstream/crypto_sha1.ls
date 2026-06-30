@@ -56,7 +56,7 @@ pn str2binb(str: string) {
     var i: int = 0
     while (i < slen * CHRSZ) {
         var char_idx: int = i / CHRSZ
-        var ch = ord(slice(str, char_idx, char_idx + 1))
+        var ch = ord(str[char_idx])
         var word_idx = shr(i, 5)
         var bit_pos = 32 - CHRSZ - (i % 32)
         bin[word_idx] = bor(bin[word_idx], shl(band(ch, mask), bit_pos))

@@ -2494,6 +2494,7 @@ extern "C" Item js_process_chdir(Item dir_item) {
 // process.exit([code])
 static int js_process_exit_code_value = 0;
 extern "C" void js_process_emit_exit(int code); // forward declaration
+extern "C" void js_process_emit_before_exit(int code); // forward declaration
 
 extern "C" Item js_process_exit(Item code_item) {
     int code = js_process_exit_code_value; // default to exitCode
@@ -3152,6 +3153,12 @@ extern "C" void js_process_emit_exit(int code) {
     for (int i = 0; i < process_exit_listener_count; i++) {
         js_call_function(process_exit_listeners[i], js_process_object, &code_item, 1);
     }
+}
+
+extern "C" void js_process_emit_before_exit(int code) {
+    if (js_process_exiting) return;
+    Item code_item = (Item){.item = i2it((int64_t)code)};
+    js_process_emit_args((Item){.item = s2it(heap_create_name("beforeExit", 10))}, &code_item, 1);
 }
 
 extern "C" void js_process_reset_listeners(void) {
@@ -3951,7 +3958,13 @@ extern "C" void js_clearImmediate(Item id) {
 // structuredClone(value) — deep clone
 // =============================================================================
 
-static Item structured_clone_impl(Item value, int depth) {
+static bool js_message_port_is_port(Item value);
+static bool js_message_port_transfer_list_has(Item transfer_list, Item value);
+static bool js_message_port_transfer_list_has_marked(Item transfer_list);
+static Item js_message_port_clone_for_transfer(Item port);
+extern "C" Item js_message_port_new(void);
+
+static Item structured_clone_transfer_impl(Item value, Item transfer_list, int depth) {
     if (depth > 100) return value; // prevent infinite recursion
     TypeId tid = get_type_id(value);
 
@@ -3968,9 +3981,30 @@ static Item structured_clone_impl(Item value, int depth) {
         Item result = js_array_new((int)len);
         for (int64_t i = 0; i < len; i++) {
             Item elem = js_array_get_int(value, i);
-            js_array_push(result, structured_clone_impl(elem, depth + 1));
+            js_array_push(result, structured_clone_transfer_impl(elem, transfer_list, depth + 1));
         }
         return result;
+    }
+
+    // ArrayBuffer: clone bytes, or clone as the transferred backing store.
+    if (js_is_arraybuffer(value) && !js_is_sharedarraybuffer(value)) {
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(value);
+        if (!ab || ab->detached) return value;
+        Item clone = js_arraybuffer_new(ab->byte_length);
+        JsArrayBuffer* cab = js_get_arraybuffer_ptr_item(clone);
+        if (cab && ab->data && cab->data && ab->byte_length > 0) {
+            memcpy(cab->data, ab->data, (size_t)ab->byte_length);
+        }
+        return clone;
+    }
+
+    // MessagePort: a listed port is moved to a fresh endpoint that is wired to
+    // the original peer; unlisted ports cannot be meaningfully cloned.
+    if (js_message_port_is_port(value)) {
+        if (js_message_port_transfer_list_has(transfer_list, value)) {
+            return js_message_port_clone_for_transfer(value);
+        }
+        return value;
     }
 
     // typed array: copy buffer
@@ -4000,7 +4034,7 @@ static Item structured_clone_impl(Item value, int depth) {
         for (int64_t i = 0; i < len; i++) {
             Item key = js_array_get_int(keys, i);
             Item val = js_property_get(value, key);
-            js_property_set(result, key, structured_clone_impl(val, depth + 1));
+            js_property_set(result, key, structured_clone_transfer_impl(val, transfer_list, depth + 1));
         }
         return result;
     }
@@ -4011,6 +4045,10 @@ static Item structured_clone_impl(Item value, int depth) {
     }
 
     return value;
+}
+
+static Item structured_clone_impl(Item value, int depth) {
+    return structured_clone_transfer_impl(value, ItemNull, depth);
 }
 
 extern "C" Item js_structuredClone(Item value) {
@@ -14912,6 +14950,84 @@ static bool js_message_port_transfer_list_has(Item transfer_list, Item value) {
     return false;
 }
 
+static Item js_message_port_data_clone_error(const char* message) {
+    return js_domexception_new(make_string_item(message ? message : ""),
+                               make_string_item("DataCloneError"));
+}
+
+static bool js_message_port_is_detached(Item port) {
+    if (!js_message_port_is_port(port)) return false;
+    Item closed = js_property_get(port, make_string_item("__closed__"));
+    Item detached = js_property_get(port, make_string_item("__detached__"));
+    return closed.item == ITEM_TRUE || detached.item == ITEM_TRUE;
+}
+
+static bool js_message_port_validate_transfer_list(Item transfer_list) {
+    if (get_type_id(transfer_list) != LMD_TYPE_ARRAY) return true;
+    int64_t len = js_array_length(transfer_list);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(transfer_list, i);
+        for (int64_t j = i + 1; j < len; j++) {
+            Item other = js_array_get_int(transfer_list, j);
+            if (entry.item != other.item) continue;
+            if (js_message_port_is_port(entry)) {
+                js_throw_value(js_message_port_data_clone_error(
+                    "Transfer list contains duplicate MessagePort"));
+                return false;
+            }
+            if (js_is_arraybuffer(entry) && !js_is_sharedarraybuffer(entry)) {
+                js_throw_value(js_message_port_data_clone_error(
+                    "Transfer list contains duplicate ArrayBuffer"));
+                return false;
+            }
+            js_throw_value(js_message_port_data_clone_error(
+                "Transfer list contains duplicate transferable"));
+            return false;
+        }
+        if (js_message_port_is_port(entry) && js_message_port_is_detached(entry)) {
+            js_throw_value(js_message_port_data_clone_error(
+                "MessagePort in transfer list is already detached"));
+            return false;
+        }
+        if (js_is_arraybuffer(entry) && !js_is_sharedarraybuffer(entry) &&
+            js_arraybuffer_is_detached(entry)) {
+            js_throw_value(js_message_port_data_clone_error(
+                "ArrayBuffer in transfer list is already detached"));
+            return false;
+        }
+    }
+    if (js_message_port_transfer_list_has_marked(transfer_list)) {
+        js_throw_value(js_message_port_data_clone_error("Object is marked as untransferable."));
+        return false;
+    }
+    return true;
+}
+
+static void js_message_port_detach_arraybuffers_in_transfer_list(Item transfer_list) {
+    if (get_type_id(transfer_list) != LMD_TYPE_ARRAY) return;
+    int64_t len = js_array_length(transfer_list);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(transfer_list, i);
+        if (js_is_arraybuffer(entry) && !js_is_sharedarraybuffer(entry)) {
+            js_arraybuffer_detach(entry);
+        }
+    }
+}
+
+static Item js_message_port_clone_for_transfer(Item port) {
+    if (!js_message_port_is_port(port)) return port;
+    Item moved = js_message_port_new();
+    Item peer = js_property_get(port, make_string_item("__peer__"));
+    if (js_message_port_is_port(peer)) {
+        js_property_set(moved, make_string_item("__peer__"), peer);
+        js_property_set(peer, make_string_item("__peer__"), moved);
+    }
+    js_property_set(port, make_string_item("__closed__"), (Item){.item = ITEM_TRUE});
+    js_property_set(port, make_string_item("__detached__"), (Item){.item = ITEM_TRUE});
+    js_property_set(port, make_string_item("__peer__"), make_js_undefined());
+    return moved;
+}
+
 static bool js_message_port_transfer_list_has_marked(Item transfer_list) {
     if (get_type_id(transfer_list) != LMD_TYPE_ARRAY) return false;
     int64_t len = js_array_length(transfer_list);
@@ -14936,11 +15052,6 @@ static Item js_message_port_clone_filehandle_for_transfer(Item handle) {
     js_property_set(moved, make_string_item("__fd"), fd);
     js_property_set(handle, make_string_item("__fd"), (Item){.item = i2it(-1)});
     return moved;
-}
-
-static Item js_message_port_data_clone_error(const char* message) {
-    return js_domexception_new(make_string_item(message ? message : ""),
-                               make_string_item("DataCloneError"));
 }
 
 static Item js_message_port_context_unavailable_error(void) {
@@ -15090,8 +15201,7 @@ static Item js_message_port_postMessage(Item msg, Item transfer_list) {
         js_throw_value(js_message_port_data_clone_error("FileHandle object could not be cloned."));
         return make_js_undefined();
     }
-    if (js_message_port_transfer_list_has_marked(transfer_list)) {
-        js_throw_value(js_message_port_data_clone_error("Object is marked as untransferable."));
+    if (!js_message_port_validate_transfer_list(transfer_list)) {
         return make_js_undefined();
     }
     Item peer = js_property_get(self, make_string_item("__peer__"));
@@ -15100,7 +15210,7 @@ static Item js_message_port_postMessage(Item msg, Item transfer_list) {
     if (peer_closed.item == ITEM_TRUE) return make_js_undefined();
 
     Item clone = transfer_filehandle ? js_message_port_clone_filehandle_for_transfer(msg)
-        : structured_clone_impl(msg, 0);
+        : structured_clone_transfer_impl(msg, transfer_list, 0);
     Item peer_moved = js_property_get(peer, make_string_item("__moved_context__"));
     if (transfer_filehandle && peer_moved.item == ITEM_TRUE) {
         js_message_port_schedule_message_error(peer, js_message_port_context_unavailable_error());
@@ -15115,6 +15225,7 @@ static Item js_message_port_postMessage(Item msg, Item transfer_list) {
     Item deliver = js_new_closure((void*)js_message_port_deliver, 0, env, 1);
     extern Item js_setTimeout(Item callback, Item delay);
     js_setTimeout(deliver, (Item){.item = i2it(0)});
+    js_message_port_detach_arraybuffers_in_transfer_list(transfer_list);
     return make_js_undefined();
 }
 
@@ -15175,6 +15286,7 @@ extern "C" Item js_message_port_new(void) {
     js_property_set(port, make_string_item("onmessage"), ItemNull);
     js_property_set(port, make_string_item("onmessageerror"), ItemNull);
     js_property_set(port, make_string_item("__closed__"), (Item){.item = ITEM_FALSE});
+    js_property_set(port, make_string_item("__detached__"), (Item){.item = ITEM_FALSE});
     js_property_set(port, make_string_item("__moved_context__"), (Item){.item = ITEM_FALSE});
     js_property_set(port, make_string_item("__message_listeners__"), js_array_new(0));
     js_property_set(port, make_string_item("__close_listeners__"), js_array_new(0));

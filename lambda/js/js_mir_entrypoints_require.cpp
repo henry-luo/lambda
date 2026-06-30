@@ -28,7 +28,10 @@
 #endif
 
 int js_dynamic_import_suppress_module_drain = 0;
+extern "C" int js_batch_execution_mode = 0;
 extern "C" int js_process_current_exit_code(void);
+extern "C" void js_async_hooks_drain_destroy_queue(void);
+extern "C" bool js_event_loop_has_refed_handles(void);
 extern "C" void js_trace_flush(void);
 
 static JsMirPhaseTiming g_last_js_mir_phase_timing;
@@ -954,11 +957,24 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     }
     log_debug("js-mir: event loop drained");
 
-    // Fire process 'exit' event listeners (Node.js compatibility).
-    // Must happen while JIT code is still mapped (before MIR_finish).
-    {
+    // Fire process lifecycle listeners for Node.js compatibility.  test262
+    // batch workers intentionally run many isolated ECMAScript tests in one
+    // process; process lifecycle events are a CLI/Node boundary, not a
+    // per-test boundary, and running them here pollutes hot-reload batches.
+    if (!js_batch_execution_mode) {
         int exit_code = (result.item == ITEM_ERROR || js_check_exception()) ? 1 : js_process_current_exit_code();
+        js_async_hooks_drain_destroy_queue();
+        js_process_emit_before_exit(exit_code);
+        bool before_exit_threw = js_check_exception();
+        if (js_event_loop_has_refed_handles()) {
+            js_event_loop_drain();
+        } else {
+            js_microtask_flush();
+        }
         js_process_emit_exit(exit_code);
+        if (before_exit_threw && js_process_current_exit_code() == 0) {
+            js_clear_exception();
+        }
         js_trace_flush();
         js_process_current_exit_code();
     }

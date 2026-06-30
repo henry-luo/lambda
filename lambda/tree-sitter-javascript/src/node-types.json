@@ -2035,6 +2035,10 @@
           {
             "type": "let",
             "named": false
+          },
+          {
+            "type": "using",
+            "named": false
           }
         ]
       }
