@@ -82,6 +82,27 @@ pn test_fill_null_untyped() {
 pn test_fill_zero() {
     var arr = fill(0, 99)
     print(len(arr))
+    print(" ")
+    var appended = arr ++ [7]
+    print(len(appended))
+    print(" ")
+    print(appended[0])
+    print(" ")
+    var null_arr = fill(0, null)
+    print(len(null_arr))
+    print(" ")
+    var null_appended = null_arr ++ ["x"]
+    print(len(null_appended))
+    print(" ")
+    print(null_appended[0])
+    print(" ")
+    var typed_arr:int[] = fill(0, 0)
+    print(len(typed_arr))
+    print(" ")
+    var typed_appended = typed_arr ++ [42]
+    print(len(typed_appended))
+    print(" ")
+    print(typed_appended[0])
     print("\n")
 }
 

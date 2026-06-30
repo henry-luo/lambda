@@ -250,6 +250,8 @@ SysFuncInfo* get_sys_func_for_method(StrView* method_name, int method_arg_count,
     return info;
 }
 
+static bool is_global_simple_type(const Type* type);
+
 static Type* unwrap_simple_type_type(Type* type) {
     while (type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE) {
         TypeType* type_type = (TypeType*)type;
@@ -349,6 +351,20 @@ static bool typed_array_argument_compatible(AstNode* arg, Type* param_type) {
     return true;
 }
 
+static bool is_global_simple_type(const Type* type) {
+    return type == &TYPE_NULL || type == &TYPE_BOOL || type == &TYPE_INT ||
+           type == &TYPE_INT64 || type == &TYPE_FLOAT || type == &TYPE_DECIMAL ||
+           type == &TYPE_NUMBER || type == &TYPE_STRING || type == &TYPE_SYMBOL ||
+           type == &TYPE_DTIME || type == &TYPE_DATE || type == &TYPE_TIME ||
+           type == &TYPE_BINARY || type == &TYPE_RANGE || type == &TYPE_ARRAY ||
+           type == &TYPE_MAP || type == &TYPE_ELMT || type == &TYPE_OBJECT ||
+           type == &TYPE_FUNC || type == &TYPE_TYPE || type == &TYPE_ANY ||
+           type == &TYPE_ERROR || type == &TYPE_I8 || type == &TYPE_I16 ||
+           type == &TYPE_I32 || type == &TYPE_U8 || type == &TYPE_U16 ||
+           type == &TYPE_U32 || type == &TYPE_F16 || type == &TYPE_F32 ||
+           type == &TYPE_UINT64;
+}
+
 static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* param_full_type) {
     if (!arg_type || !param_type) return true;  // unknown types are compatible
     if (param_type->type_id == LMD_TYPE_ANY) return true;  // any accepts all
@@ -360,11 +376,15 @@ static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* p
     // for TypeParam with complex types, use full_type if available
     Type* actual_param = param_full_type ? param_full_type : param_type;
 
-    if (typed_array_annotation_compatible(arg_type, actual_param)) {
+    bool can_read_extended_kind = actual_param && !is_global_simple_type(actual_param);
+
+    if (can_read_extended_kind &&
+        (actual_param->type_id == LMD_TYPE_ARRAY || actual_param->type_id == LMD_TYPE_ARRAY_NUM) &&
+        typed_array_annotation_compatible(arg_type, actual_param)) {
         return true;
     }
 
-    if (actual_param->kind == TYPE_KIND_BINARY) {
+    if (can_read_extended_kind && actual_param->kind == TYPE_KIND_BINARY) {
         TypeBinary* union_type = (TypeBinary*)actual_param;
         if (union_type->op == OPERATOR_UNION) {
             // unwrap TypeType if present
@@ -419,6 +439,97 @@ static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* p
 // check if arg_type is compatible with param_type for function calls
 bool types_compatible(Type* arg_type, Type* param_type) {
     return types_compatible_with_full(arg_type, param_type, NULL);
+}
+
+static bool type_sized_integer_info(Type* type, bool* is_unsigned, int* bits) {
+    if (!type) return false;
+    if (type->type_id == LMD_TYPE_UINT64) {
+        *is_unsigned = true;
+        *bits = 64;
+        return true;
+    }
+    if (type->type_id != LMD_TYPE_NUM_SIZED) return false;
+    switch (type_num_sized_kind(type)) {
+    case NUM_INT8:   *is_unsigned = false; *bits = 8;  return true;
+    case NUM_INT16:  *is_unsigned = false; *bits = 16; return true;
+    case NUM_INT32:  *is_unsigned = false; *bits = 32; return true;
+    case NUM_UINT8:  *is_unsigned = true;  *bits = 8;  return true;
+    case NUM_UINT16: *is_unsigned = true;  *bits = 16; return true;
+    case NUM_UINT32: *is_unsigned = true;  *bits = 32; return true;
+    default: return false;
+    }
+}
+
+static Type* sized_integer_type_for(bool is_unsigned, int bits) {
+    if (is_unsigned) {
+        if (bits <= 8) return &TYPE_U8;
+        if (bits <= 16) return &TYPE_U16;
+        if (bits <= 32) return &TYPE_U32;
+        return &TYPE_UINT64;
+    }
+    if (bits <= 8) return &TYPE_I8;
+    if (bits <= 16) return &TYPE_I16;
+    if (bits <= 32) return &TYPE_I32;
+    return &TYPE_INT64;
+}
+
+static int next_signed_width_for_unsigned_type(int unsigned_bits) {
+    if (unsigned_bits < 8) return 8;
+    if (unsigned_bits < 16) return 16;
+    if (unsigned_bits < 32) return 32;
+    return 64;
+}
+
+static Type* promote_sized_integer_types(Type* left, Type* right) {
+    bool left_unsigned = false, right_unsigned = false;
+    int left_bits = 0, right_bits = 0;
+    bool left_sized = type_sized_integer_info(left, &left_unsigned, &left_bits);
+    bool right_sized = type_sized_integer_info(right, &right_unsigned, &right_bits);
+    if (!left_sized && !right_sized) return NULL;
+    if (left_sized && !right_sized) return sized_integer_type_for(left_unsigned, left_bits);
+    if (!left_sized && right_sized) return sized_integer_type_for(right_unsigned, right_bits);
+
+    if (left_unsigned == right_unsigned) {
+        return sized_integer_type_for(left_unsigned, left_bits > right_bits ? left_bits : right_bits);
+    }
+
+    int signed_bits = left_unsigned ? right_bits : left_bits;
+    int unsigned_bits = left_unsigned ? left_bits : right_bits;
+    if (signed_bits > unsigned_bits) return sized_integer_type_for(false, signed_bits);
+    if (unsigned_bits < 64) {
+        int bits = next_signed_width_for_unsigned_type(unsigned_bits);
+        if (bits < signed_bits) bits = signed_bits;
+        return sized_integer_type_for(false, bits);
+    }
+    return &TYPE_UINT64;
+}
+
+static Type* infer_bitwise_call_type(SysFunc fn, AstNode* first_arg, AstNode* second_arg) {
+    Type* left = first_arg ? first_arg->type : NULL;
+    Type* right = second_arg ? second_arg->type : NULL;
+    switch (fn) {
+    case SYSFUNC_BAND:
+    case SYSFUNC_BOR:
+    case SYSFUNC_BXOR: {
+        Type* promoted = promote_sized_integer_types(left, right);
+        return promoted ? promoted : NULL;
+    }
+    case SYSFUNC_BNOT: {
+        bool is_unsigned = false;
+        int bits = 0;
+        return type_sized_integer_info(left, &is_unsigned, &bits) ?
+            sized_integer_type_for(is_unsigned, bits) : NULL;
+    }
+    case SYSFUNC_SHL:
+    case SYSFUNC_SHR: {
+        bool is_unsigned = false;
+        int bits = 0;
+        return type_sized_integer_info(left, &is_unsigned, &bits) ?
+            sized_integer_type_for(is_unsigned, bits) : NULL;
+    }
+    default:
+        return NULL;
+    }
 }
 
 // Record a type error and check if we should continue transpiling
@@ -1819,6 +1930,18 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     }
     ts_tree_cursor_delete(&cursor);
 
+    if (sys_func_info) {
+        AstNode* first_arg = ast_node->argument;
+        AstNode* second_arg = first_arg ? first_arg->next : NULL;
+        Type* bitwise_type = infer_bitwise_call_type(sys_func_info->fn, first_arg, second_arg);
+        if (bitwise_type) {
+            ast_node->type = bitwise_type;
+            if (ast_node->function && ast_node->function->node_type == AST_NODE_SYS_FUNC) {
+                ast_node->function->type = bitwise_type;
+            }
+        }
+    }
+
     // Validate argument types against parameter types (for user-defined functions)
     if (ast_node->function->type->type_id == LMD_TYPE_FUNC) {
         TypeFunc* func_type = (TypeFunc*)ast_node->function->type;
@@ -2501,7 +2624,13 @@ Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
     num_str[source.length - suffix_len] = '\0';  // strip suffix
 
     char* endptr;
-    int64_t value = strtoll(num_str, &endptr, 10);
+    int64_t value = 0;
+    uint64_t uvalue = 0;
+    if (num_type == 0xFE) {
+        uvalue = strtoull(num_str, &endptr, 10);
+    } else {
+        value = strtoll(num_str, &endptr, 10);
+    }
     mem_free(num_str);
 
     // i64 suffix → use existing INT64 type
@@ -2519,9 +2648,9 @@ Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
     // u64 suffix → use UINT64 type
     if (num_type == 0xFE) {
         TypeUint64* item_type = (TypeUint64*)alloc_type(tp->pool, LMD_TYPE_UINT64, sizeof(TypeUint64));
-        item_type->uint64_val = (uint64_t)value;
+        item_type->uint64_val = uvalue;
         uint64_t* heap_val = (uint64_t*)pool_alloc(tp->pool, sizeof(uint64_t));
-        *heap_val = (uint64_t)value;
+        *heap_val = uvalue;
         arraylist_append(tp->const_list, heap_val);
         item_type->const_index = tp->const_list->length - 1;
         item_type->is_const = 1;  item_type->is_literal = 1;
@@ -3037,6 +3166,11 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     }
     else if (ast_node->op == OPERATOR_POS || ast_node->op == OPERATOR_NEG) {
         // For numeric unary operators (+/-), preserve the operand type if numeric
+        if (operand_type == LMD_TYPE_NUM_SIZED || operand_type == LMD_TYPE_UINT64) {
+            ast_node->type = ast_node->operand->type;
+            log_debug("end build unary expr");
+            return (AstNode*)ast_node;
+        }
         if (LMD_TYPE_INT <= operand_type && operand_type <= LMD_TYPE_NUMBER) {
             type_id = operand_type;  // Preserve the exact numeric type
         }
@@ -3893,11 +4027,13 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                     // and the RHS is a literal array with known element types, verify compatibility
                     Type* ann_type = ast_node->type;
                     Type* rhs_type = ast_node->as ? ast_node->as->type : nullptr;
-                    if (ann_type && ann_type->kind == TYPE_KIND_UNARY && rhs_type) {
+                    if (ann_type && !is_global_simple_type(ann_type) &&
+                        ann_type->kind == TYPE_KIND_UNARY && rhs_type) {
                         TypeUnary* unary = (TypeUnary*)ann_type;
                         // unwrap the TypeType wrapper on the operand
                         Type* expected_elem = unary->operand;
-                        if (expected_elem && expected_elem->type_id == LMD_TYPE_TYPE && expected_elem->kind == TYPE_KIND_SIMPLE) {
+                        if (expected_elem && !is_global_simple_type(expected_elem) &&
+                            expected_elem->type_id == LMD_TYPE_TYPE && expected_elem->kind == TYPE_KIND_SIMPLE) {
                             expected_elem = ((TypeType*)expected_elem)->type;
                         }
                         if (expected_elem && rhs_type->type_id == LMD_TYPE_ARRAY) {
@@ -6575,10 +6711,12 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
                 // For complex types (TypeBinary, TypeUnary) and named map/object types,
                 // store pointer to full type so that downstream code can access
                 // extended fields (shape, struct_name, methods, etc.)
-                if (type_type->type->kind == TYPE_KIND_BINARY) {
+                if (!is_global_simple_type(type_type->type) &&
+                    type_type->type->kind == TYPE_KIND_BINARY) {
                     param_type->full_type = type_type->type;
                     log_debug("parameter has union type, storing full_type pointer");
-                } else if (type_type->type->kind == TYPE_KIND_UNARY) {
+                } else if (!is_global_simple_type(type_type->type) &&
+                           type_type->type->kind == TYPE_KIND_UNARY) {
                     param_type->full_type = type_type->type;
                     log_debug("parameter has occurrence type, storing full_type pointer");
                 } else if (type_type->type->type_id == LMD_TYPE_MAP ||

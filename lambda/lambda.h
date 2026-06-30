@@ -1293,6 +1293,8 @@ extern "C" {
     int64_t it2i(Item item);
     String* it2s(Item item);
     const char* fn_to_cstr(Item item);  // convert Item to C string (for path segment names)
+    Item coerce_num_sized(Item value, int64_t num_type);
+    Item coerce_uint64(Item value);
 
     // MIR JIT workaround: opaque store functions prevent SSA optimizer from
     // reordering swap-pattern assignments inside while loops.
@@ -1703,6 +1705,12 @@ extern "C" {
     int64_t fn_bnot(int64_t a);
     int64_t fn_shl(int64_t a, int64_t b);
     int64_t fn_shr(int64_t a, int64_t b);
+    Item fn_band_item(Item a, Item b);
+    Item fn_bor_item(Item a, Item b);
+    Item fn_bxor_item(Item a, Item b);
+    Item fn_bnot_item(Item a);
+    Item fn_shl_item(Item a, Item b);
+    Item fn_shr_item(Item a, Item b);
 
     // compound assignment support (procedural only)
     void fn_array_set(Array* arr, int64_t index, Item value);

@@ -711,6 +711,28 @@ static double item_to_float_value(Item value) {
     }
 }
 
+extern "C" Item coerce_num_sized(Item value, int64_t num_type_int) {
+    NumSizedType num_type = (NumSizedType)num_type_int;
+    switch (num_type) {
+    case NUM_INT8:    return (Item){ .item = i8_to_item((int8_t)item_to_int_value(value)) };
+    case NUM_INT16:   return (Item){ .item = i16_to_item((int16_t)item_to_int_value(value)) };
+    case NUM_INT32:   return (Item){ .item = i32_to_item((int32_t)item_to_int_value(value)) };
+    case NUM_UINT8:   return (Item){ .item = u8_to_item((uint8_t)item_to_int_value(value)) };
+    case NUM_UINT16:  return (Item){ .item = u16_to_item((uint16_t)item_to_int_value(value)) };
+    case NUM_UINT32:  return (Item){ .item = u32_to_item((uint32_t)item_to_int_value(value)) };
+    case NUM_FLOAT16: return (Item){ .item = f16_to_item((float)item_to_float_value(value)) };
+    case NUM_FLOAT32: return (Item){ .item = f32_to_item((float)item_to_float_value(value)) };
+    default:          return ItemError;
+    }
+}
+
+extern "C" Item coerce_uint64(Item value) {
+    uint64_t* heap_val = (uint64_t*)heap_calloc(sizeof(uint64_t), LMD_TYPE_UINT64);
+    if (!heap_val) return ItemError;
+    *heap_val = (uint64_t)item_to_int_value(value);
+    return (Item){ .item = u2it(heap_val) };
+}
+
 double array_num_get_number_value(ArrayNum *arr, int64_t index) {
     if (!arr || index < 0 || index >= arr->length) return 0.0;
     switch (arr->get_elem_type()) {

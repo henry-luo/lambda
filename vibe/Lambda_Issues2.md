@@ -118,58 +118,62 @@ Common conversions needed:
 
 ## 5. Integer Overflow in Multiplication (No Silent Wraparound)
 
+**Status**: ✅ **FIXED**
 **Severity**: Runtime error  
 **Affected benchmarks**: splay, crypto_sha1
 
-Lambda's `int` type overflows on multiplication of large values, producing `<error>` / `nan` instead of wrapping. JavaScript uses floats for all numbers, so `49734321 * 1103515245` wraps silently in 32-bit PRNG code.
+Lambda now supports explicit fixed-width integer annotations with deterministic wraparound. Compact integer arithmetic follows the Go-like model documented in `vibe/Lambda_Type_Int.md`: `i8/i16/i32/i64` wrap in signed two's-complement width, and `u8/u16/u32/u64` wrap modulo their width.
+
+The original issue was that Lambda's default `int` type overflowed on multiplication of large values, producing `<error>` / `nan` instead of wrapping. JavaScript uses floats for all numbers, but benchmark PRNG/hash code often depends on explicit 32-bit wrap semantics.
 
 ```
 [ERR!] integer overflow in multiplication
 ```
 
-This makes it impossible to directly port standard LCG pseudo-random number generators or 32-bit hash computations.
+This previously made it impossible to directly port standard LCG pseudo-random number generators or 32-bit hash computations.
 
-**Workaround for PRNG**: Use a different PRNG algorithm that avoids large intermediate products (e.g., Park-Miller with Schrage's method):
+**Benchmark cleanup**:
+
+- `test/benchmark/jetstream/splay.ls` and `test/benchmark/jetstream/splay2.ls` now use the direct `u32` LCG:
 
 ```lambda
 pn next_random(state) {
-    var s = state.seed
-    var hi = s / 127773
-    var lo = s % 127773
-    s = 16807 * lo - 2836 * hi
-    if (s <= 0) { s = s + 2147483647 }
-    state.seed = s
-    return float(s) / 2147483647.0
+    var s: u32 = state.seed
+    s = s * 1103515245u32 + 12345u32
+    state.seed = int(s)
+    return float(s) / 4294967296.0
 }
 ```
 
-**Suggestion**: Either provide explicit 32-bit wrapping arithmetic functions (e.g., `mul32`, `add32`), or add an `int32` type with wraparound semantics.
+- `test/benchmark/jetstream/crypto_sha1.ls` now uses `u32` locals inside `safe_add()` so 32-bit word addition wraps by type instead of by overflow-prone default `int` arithmetic.
+
+**Follow-up**: issue 6 now covers the typed unsigned shift fix. SHA-1 still keeps explicit masks around `bnot`/round helpers where default `int` bitwise semantics are intentionally used.
 
 ---
 
 ## 6. `shr` Performs Arithmetic (Sign-Extending) Right Shift
 
+**Status**: ✅ **FIXED for explicit unsigned integer operands**
 **Severity**: Wrong results  
 **Affected benchmarks**: crypto_sha1
 
-Lambda's `shr` function performs an arithmetic right shift, preserving the sign bit. JavaScript's `>>>` is a logical (unsigned) right shift that fills with zeros. This produces different results for negative numbers, which is critical in SHA-1 and other bitwise algorithms.
+Lambda's `shr` now follows the Go-like explicit integer model for typed operands. Signed compact operands (`i8/i16/i32/i64`) still perform arithmetic right shift, preserving the sign bit. Unsigned compact operands (`u8/u16/u32/u64`) perform logical right shift, filling with zeros.
 
 ```lambda
-// Lambda: shr(-1, 1) → -1  (sign bit preserved)
-// JS:     -1 >>> 1  → 2147483647  (zero-filled)
+shr(-1i32, 1)          // -1i32, sign bit preserved
+shr(4294967295u32, 1)  // 2147483647u32, zero-filled
 ```
 
-**Workaround**: Mask with `band(x, 4294967295)` before shifting, or implement a `ushr` function:
+The original issue was that SHA-1-style code needed JS `>>>` semantics but only had default signed `int` shifting. The intended Lambda spelling is now to keep the word in `u32` and call `shr`:
 
 ```lambda
-pn ushr(x: int, n: int) {
-    return shr(band(x, 4294967295), n)
+pn rol(num: int, cnt: int) {
+    var n: u32 = num
+    return int(bor(shl(n, cnt), shr(n, 32 - cnt)))
 }
 ```
 
-**Note**: This workaround may still not work correctly if `shr` sign-extends regardless of the input range. A native unsigned right shift (`ushr` or `>>>`) would be needed.
-
-**Suggestion**: Add a `ushr` (unsigned/logical right shift) built-in function.
+**Remaining optional convenience**: Lambda still has no JS-spelling `>>>` or `ushr` alias. That is now syntactic convenience rather than missing core behavior.
 
 ---
 
@@ -178,24 +182,29 @@ pn ushr(x: int, n: int) {
 **Severity**: Runtime error (null concatenation)  
 **Affected benchmarks**: deltablue
 
-`fill(0, 0)` returns `null` rather than an empty array. Subsequent concatenation with `++` fails:
+**Status**: ✅ **FIXED**.
 
-```
-runtime error [201]: fn_join: unsupported operand types: null and array
-```
-
-**Workaround**: Guard concatenation with null checks:
+`fill(0, value)` now returns a real empty array with `length = 0` and `capacity = 0`.
+The result participates in normal collection operations:
 
 ```lambda
-var cl = var1.constraints  // may be null from fill(0, 0)
-if (cl == null) {
-    var1.constraints = [idx]
-} else {
-    var1.constraints = cl ++ [idx]
-}
+let cl = fill(0, 0)
+cl ++ [idx]     // [idx]
+len(cl)         // 0
 ```
 
-**Suggestion**: `fill(0, value)` should return an empty array `[]`, not `null`.
+**Fix notes**:
+- `fn_fill()` keeps a dedicated zero-count branch that returns `[]`, not `null`.
+- `test/lambda/proc/proc_fill.ls` now verifies `fill(0, int)`, `fill(0, null)`, typed `int[] = fill(0, 0)`, and concatenation from each empty result.
+- `test/benchmark/jetstream/deltablue.ls` and `test/benchmark/jetstream/deltablue2.ls` now rely on `cl ++ [idx]` directly instead of guarding against `null`.
+
+**Reference behavior from other languages/scripts**:
+- Python has no direct `fill(n, value)` builtin, but equivalent construction idioms return empty lists for zero count: `[value] * 0`, `list(range(0))`, and `list(itertools.repeat(value, 0))` all produce `[]`.
+- JavaScript follows the same collection rule: `new Array(0).fill(value)` returns `[]`, and `new Uint32Array(0).fill(value)` remains an empty typed array.
+- Ruby and Rust mirror this behavior with `Array.new(0, value)` and `vec![value; 0]`, respectively.
+- The design decision for Lambda is therefore: zero count constructs an empty collection; negative count is the error case.
+
+**Remaining edge policy**: `fill(n, value)` rejects negative `n` as an error.
 
 ---
 
@@ -480,9 +489,9 @@ pn show() {
 | 2 | Can't assign through parenthesized access | Syntax | 4 benchmarks, core pattern |
 | 3 | `list` field name silent failure | Reserved word | 1 benchmark, hours of debugging |
 | 4 | No hex literals | Missing feature | 2 benchmarks, tedious manual conversion |
-| 5 | Integer overflow errors | Arithmetic | 2 benchmarks, wrong results |
-| 6 | No unsigned right shift | Missing feature | 1 benchmark, wrong hash output |
-| 7 | `fill(0, x)` returns null | Edge case | 1 benchmark, 120k runtime errors |
+| 5 | Integer overflow errors | Arithmetic | **Fixed**; splay PRNG and SHA-1 word arithmetic now use `u32` |
+| 6 | No unsigned right shift | Bitwise ops | **Fixed for typed unsigned ints**; `shr(u32, n)` zero-fills |
+| 7 | `fill(0, x)` returns null | Edge case | **Fixed**; DeltaBlue now concatenates from empty fill arrays directly |
 | 8 | Missing substr/charcode | Missing feature | 1 benchmark, minor |
 | 9 | `div` reserved word | Reserved word | 1 benchmark, minor |
 | 10 | Immutable parameters | Language design | 1 benchmark, minor |

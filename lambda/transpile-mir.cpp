@@ -108,6 +108,7 @@ struct MirVarEntry {
     MIR_type_t mir_type;
     TypeId type_id;
     TypeId elem_type;  // P4-3.1: element type for container vars (from fill() or annotation)
+    NumSizedType num_type;  // compact scalar subtype for NUM_SIZED annotations
     int env_offset;  // >= 0 if captured variable (byte offset in env struct), -1 otherwise
     bool is_state_var;  // true for view/edit state variables (writes go to template state store)
     const char* state_name_ptr;  // interned state name pointer (only valid if is_state_var)
@@ -227,6 +228,7 @@ struct MirTranspiler {
     // Set when a function (fn or pn) has a native return type (INT, FLOAT, BOOL).
     // Used by transpile_return() to emit unboxed return values in procs.
     TypeId native_return_tid;
+    Type* current_return_type;
 
     // Variadic function body context: when true, return/raise must emit restore_vargs
     bool in_variadic_body;
@@ -467,6 +469,7 @@ static void set_var(MirTranspiler* mt, const char* name, MIR_reg_t reg, MIR_type
     entry.var.mir_type = mir_type;
     entry.var.type_id = type_id;
     entry.var.elem_type = LMD_TYPE_ANY;
+    entry.var.num_type = NUM_INT8;
     entry.var.env_offset = -1;  // not a captured variable by default
     entry.var.is_state_var = false;
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
@@ -487,6 +490,7 @@ static void set_state_var(MirTranspiler* mt, const char* name, MIR_reg_t reg,
     entry.var.mir_type = mir_type;
     entry.var.type_id = type_id;
     entry.var.elem_type = LMD_TYPE_ANY;
+    entry.var.num_type = NUM_INT8;
     entry.var.env_offset = -1;
     entry.var.is_state_var = true;
     entry.var.state_name_ptr = interned_name_ptr;
@@ -1123,6 +1127,51 @@ static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg, TypeId type_id) 
         // Already boxed Item or NULL
         return val_reg;
     }
+}
+
+static Type* mir_unwrap_decl_type(Type* type) {
+    if (type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE) {
+        TypeType* tt = (TypeType*)type;
+        if (tt->type) return tt->type;
+    }
+    return type;
+}
+
+static TypeId mir_decl_type_id(Type* type) {
+    Type* unwrapped = mir_unwrap_decl_type(type);
+    return unwrapped ? unwrapped->type_id : LMD_TYPE_ANY;
+}
+
+static MIR_reg_t emit_coerce_boxed_to_declared(MirTranspiler* mt, MIR_reg_t boxed, Type* declared_type) {
+    Type* target = mir_unwrap_decl_type(declared_type);
+    TypeId target_tid = target ? target->type_id : LMD_TYPE_ANY;
+    if (target_tid == LMD_TYPE_NUM_SIZED) {
+        NumSizedType num_type = type_num_sized_kind(target);
+        return emit_call_2(mt, "coerce_num_sized", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)num_type));
+    }
+    if (target_tid == LMD_TYPE_UINT64) {
+        return emit_call_1(mt, "coerce_uint64", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+    }
+    return boxed;
+}
+
+static MIR_reg_t emit_coerce_value_to_declared(MirTranspiler* mt, MIR_reg_t val,
+                                               TypeId val_tid, Type* declared_type) {
+    TypeId target_tid = mir_decl_type_id(declared_type);
+    if (target_tid == LMD_TYPE_NUM_SIZED || target_tid == LMD_TYPE_UINT64) {
+        MIR_reg_t boxed = emit_box(mt, val, val_tid);
+        return emit_coerce_boxed_to_declared(mt, boxed, declared_type);
+    }
+    return val;
+}
+
+static MIR_reg_t emit_bitwise_i64_arg(MirTranspiler* mt, MIR_reg_t val, TypeId tid) {
+    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64) return val;
+    MIR_reg_t boxed = emit_box(mt, val, tid);
+    return emit_call_1(mt, "_barg", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
 }
 
 // Unbox boxed Item -> container pointer by stripping the type tag (upper 8 bits)
@@ -2349,12 +2398,14 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         AstUnaryNode* un = (AstUnaryNode*)node;
         TypeId operand_eff = get_effective_type(mt, un->operand);
         if (un->op == OPERATOR_NEG) {
+            if (operand_eff == LMD_TYPE_NUM_SIZED || operand_eff == LMD_TYPE_UINT64) return operand_eff;
             if (operand_eff == LMD_TYPE_INT) return LMD_TYPE_INT;
             if (operand_eff == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
         } else if (un->op == OPERATOR_NOT) {
             return LMD_TYPE_BOOL;
         } else if (un->op == OPERATOR_POS) {
             if (operand_eff == LMD_TYPE_INT || operand_eff == LMD_TYPE_INT64 ||
+                operand_eff == LMD_TYPE_NUM_SIZED || operand_eff == LMD_TYPE_UINT64 ||
                 operand_eff == LMD_TYPE_FLOAT)
                 return operand_eff;
         } else if (un->op == OPERATOR_IS_ERROR) {
@@ -3712,12 +3763,23 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 char name_buf[128];
                 snprintf(name_buf, sizeof(name_buf), "%.*s", (int)asn->name->len, asn->name->chars);
                 TypeId expr_tid = get_effective_type(mt, asn->as);
+                bool has_type_annotation = asn->entry && asn->entry->has_type_annotation;
+                if (!has_type_annotation && declare->type && asn->as &&
+                    declare->type != asn->as->type) {
+                    TypeId declared_tid = mir_decl_type_id(declare->type);
+                    has_type_annotation = (declared_tid == LMD_TYPE_INT ||
+                                           declared_tid == LMD_TYPE_INT64 ||
+                                           declared_tid == LMD_TYPE_FLOAT ||
+                                           declared_tid == LMD_TYPE_NUM_SIZED ||
+                                           declared_tid == LMD_TYPE_UINT64);
+                }
+                Type* declared_value_type = has_type_annotation ? mir_unwrap_decl_type(declare->type) : NULL;
                 // Use the variable's declared type if available, otherwise the expression type.
                 // But if the expression is boxed ANY (e.g. captured variable), the declared
                 // type from AST is stale — use ANY to match the actual runtime value.
                 // Also: when declared type is ANY (untyped var) but expression type is concrete,
                 // prefer the expression type so type narrowing propagates through assignments.
-                TypeId var_tid = declare->type ? declare->type->type_id : expr_tid;
+                TypeId var_tid = declared_value_type ? declared_value_type->type_id : expr_tid;
                 if (expr_tid == LMD_TYPE_ANY) var_tid = LMD_TYPE_ANY;
                 if (var_tid == LMD_TYPE_ANY && expr_tid != LMD_TYPE_ANY) var_tid = expr_tid;
                 // mutable null placeholders often receive boxed heap Items later
@@ -3807,7 +3869,15 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 }
 
                 // Convert value if expression type differs from variable type
-                if (var_tid == LMD_TYPE_FLOAT && expr_tid == LMD_TYPE_INT) {
+                if (declared_value_type && declared_value_type->type_id == LMD_TYPE_NUM_SIZED) {
+                    val = emit_coerce_value_to_declared(mt, val, expr_tid, declared_value_type);
+                    var_tid = LMD_TYPE_NUM_SIZED;
+                    expr_tid = LMD_TYPE_NUM_SIZED;
+                } else if (declared_value_type && declared_value_type->type_id == LMD_TYPE_UINT64) {
+                    val = emit_coerce_value_to_declared(mt, val, expr_tid, declared_value_type);
+                    var_tid = LMD_TYPE_UINT64;
+                    expr_tid = LMD_TYPE_UINT64;
+                } else if (var_tid == LMD_TYPE_FLOAT && expr_tid == LMD_TYPE_INT) {
                     // int -> float conversion
                     MIR_reg_t fval = new_reg(mt, "i2d", MIR_T_D);
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D,
@@ -3837,6 +3907,10 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
 
                 // Store in current scope
                 set_var(mt, name_buf, copy, mtype, var_tid);
+                if (var_tid == LMD_TYPE_NUM_SIZED && declared_value_type) {
+                    MirVarEntry* v = find_var(mt, name_buf);
+                    if (v) v->num_type = type_num_sized_kind(declared_value_type);
+                }
 
                 // P4-3.1: Set element type for container variables (from fill() narrowing)
                 // Only set when var_tid is still ARRAY (not overridden by typed array coercion)
@@ -6608,17 +6682,32 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             info->fn == SYSFUNC_BXOR || info->fn == SYSFUNC_SHL ||
             info->fn == SYSFUNC_SHR) {
             arg = call_node->argument;
+            TypeId call_tid = ((AstNode*)call_node)->type ? ((AstNode*)call_node)->type->type_id : LMD_TYPE_ANY;
+            if (call_tid == LMD_TYPE_NUM_SIZED || call_tid == LMD_TYPE_UINT64) {
+                const char* boxed_fn = NULL;
+                switch (info->fn) {
+                    case SYSFUNC_BAND: boxed_fn = "fn_band_item"; break;
+                    case SYSFUNC_BOR:  boxed_fn = "fn_bor_item"; break;
+                    case SYSFUNC_BXOR: boxed_fn = "fn_bxor_item"; break;
+                    case SYSFUNC_SHL:  boxed_fn = "fn_shl_item"; break;
+                    case SYSFUNC_SHR:  boxed_fn = "fn_shr_item"; break;
+                    default: break;
+                }
+                MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
+                arg = arg->next;
+                MIR_reg_t boxed_a2 = transpile_box_item(mt, arg);
+                return emit_call_2(mt, boxed_fn, MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2));
+            }
+
             MIR_reg_t a1 = transpile_expr(mt, arg);
             TypeId a1_tid = get_effective_type(mt, arg);
-            if (a1_tid != LMD_TYPE_INT && a1_tid != LMD_TYPE_INT64) {
-                a1 = emit_unbox(mt, a1, LMD_TYPE_INT);
-            }
+            a1 = emit_bitwise_i64_arg(mt, a1, a1_tid);
             arg = arg->next;
             MIR_reg_t a2 = transpile_expr(mt, arg);
             TypeId a2_tid = get_effective_type(mt, arg);
-            if (a2_tid != LMD_TYPE_INT && a2_tid != LMD_TYPE_INT64) {
-                a2 = emit_unbox(mt, a2, LMD_TYPE_INT);
-            }
+            a2 = emit_bitwise_i64_arg(mt, a2, a2_tid);
 
             // band/bor/bxor: single MIR instruction, always safe
             MIR_insn_code_t mir_op = (MIR_insn_code_t)0;
@@ -6679,11 +6768,16 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
         }
         if (info->fn == SYSFUNC_BNOT) {
             arg = call_node->argument;
+            TypeId call_tid = ((AstNode*)call_node)->type ? ((AstNode*)call_node)->type->type_id : LMD_TYPE_ANY;
+            if (call_tid == LMD_TYPE_NUM_SIZED || call_tid == LMD_TYPE_UINT64) {
+                MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
+                return emit_call_1(mt, "fn_bnot_item", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
+            }
+
             MIR_reg_t a1 = transpile_expr(mt, arg);
             TypeId a1_tid = get_effective_type(mt, arg);
-            if (a1_tid != LMD_TYPE_INT && a1_tid != LMD_TYPE_INT64) {
-                a1 = emit_unbox(mt, a1, LMD_TYPE_INT);
-            }
+            a1 = emit_bitwise_i64_arg(mt, a1, a1_tid);
             // ~a == a XOR -1
             MIR_reg_t result = new_reg(mt, "bnot", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_XOR,
@@ -7933,6 +8027,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
         } else {
             // Standard: box and return
             MIR_reg_t boxed = emit_box(mt, val, val_tid);
+            boxed = emit_coerce_boxed_to_declared(mt, boxed, mt->current_return_type);
             emit_vargs_restore();
             emit_jit_root_frame_exit(mt);
             emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, boxed)));
@@ -7987,7 +8082,20 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
         // when e.g. len() (INT64) result participates in INT arithmetic.
         bool same_int_family = (var_tid == LMD_TYPE_INT || var_tid == LMD_TYPE_INT64) &&
                                (val_tid == LMD_TYPE_INT || val_tid == LMD_TYPE_INT64);
-        if (var_tid == val_tid || same_int_family ||
+        if (var_tid == LMD_TYPE_NUM_SIZED) {
+            MIR_reg_t boxed = emit_box(mt, val, val_tid);
+            MIR_reg_t coerced = emit_call_2(mt, "coerce_num_sized", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)var->num_type));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, var->reg),
+                MIR_new_reg_op(mt->ctx, coerced)));
+        } else if (var_tid == LMD_TYPE_UINT64) {
+            MIR_reg_t boxed = emit_box(mt, val, val_tid);
+            MIR_reg_t coerced = emit_call_1(mt, "coerce_uint64", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, var->reg),
+                MIR_new_reg_op(mt->ctx, coerced)));
+        } else if (var_tid == val_tid || same_int_family ||
             (var_tid == LMD_TYPE_ANY && val_tid == LMD_TYPE_ANY)) {
             // Same type (or INT/INT64 compatible): direct move
             if (var->mir_type == MIR_T_D) {
@@ -10258,6 +10366,7 @@ static TypeId infer_return_type(AstFuncNode* fn_node) {
                 log_debug("mir: infer_return_type - declared type_id=%d (proc=%d)", ret_tid, is_proc);
                 return ret_tid;
             }
+            return LMD_TYPE_ANY;
         }
     }
 
@@ -10810,7 +10919,10 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             // Untyped, nullable optional, or complex type: keep as boxed Item.
             // Preserve known container type (e.g. ARRAY_NUM from annotation) so
             // the transpiler can generate fast paths for array access.
-            TypeId var_type = (tid == LMD_TYPE_ARRAY_NUM) ? tid : LMD_TYPE_ANY;
+            Type* param_decl_type = mir_unwrap_decl_type((Type*)param->type);
+            TypeId param_decl_tid = param_decl_type ? param_decl_type->type_id : tid;
+            TypeId var_type = (tid == LMD_TYPE_ARRAY_NUM || param_decl_tid == LMD_TYPE_NUM_SIZED ||
+                               param_decl_tid == LMD_TYPE_UINT64) ? param_decl_tid : LMD_TYPE_ANY;
 
             MIR_reg_t final_reg = preg;
             // For typed array params: ensure the incoming array is the correct
@@ -10836,9 +10948,19 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, preg),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, param_elem_tid));
                 log_debug("mir: param '%s' — inserted ensure_typed_array (elem=%d)", pname, param_elem_tid);
+            } else if (var_type == LMD_TYPE_NUM_SIZED) {
+                final_reg = emit_coerce_boxed_to_declared(mt, preg, param_decl_type);
+                log_debug("mir: param '%s' — inserted coerce_num_sized", pname);
+            } else if (var_type == LMD_TYPE_UINT64) {
+                final_reg = emit_coerce_boxed_to_declared(mt, preg, param_decl_type);
+                log_debug("mir: param '%s' — inserted coerce_uint64", pname);
             }
 
             set_var(mt, pname, final_reg, MIR_T_I64, var_type);
+            if (var_type == LMD_TYPE_NUM_SIZED) {
+                MirVarEntry* v = find_var(mt, pname);
+                if (v) v->num_type = type_num_sized_kind(param_decl_type);
+            }
 
             // Set elem_type on the variable entry for fast path dispatch
             if (var_type == LMD_TYPE_ARRAY_NUM && param_elem_tid != LMD_TYPE_ANY) {
@@ -10861,6 +10983,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 
     // P4-3.4: Set native return type for transpile_return() to use
     TypeId saved_native_return_tid = mt->native_return_tid;
+    Type* saved_current_return_type = mt->current_return_type;
+    mt->current_return_type = fn_type ? fn_type->returned : NULL;
     mt->native_return_tid = LMD_TYPE_ANY;
     if (native_return) {
         NativeFuncInfo* nfi_ctx = find_native_func_info(mt, name_buf->str);
@@ -11027,6 +11151,9 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     } else {
         // Standard: box result to Item
         body_result = transpile_box_item(mt, fn_node->body);
+        if (!mt->block_returned) {
+            body_result = emit_coerce_boxed_to_declared(mt, body_result, mt->current_return_type);
+        }
     }
 
     // Return result
@@ -11044,6 +11171,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     pop_scope(mt);
 
     MIR_finish_func(mt->ctx);
+    mt->current_return_type = saved_current_return_type;
 
     // Phase 4: Generate boxed wrapper (_b) for native functions
     // This must happen after MIR_finish_func but before restoring outer context,
