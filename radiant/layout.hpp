@@ -121,6 +121,9 @@ typedef struct BlockContext {
     float line_clamp_last_line_ascender;
     float line_clamp_last_line_max_ascender;
     float line_clamp_last_line_max_descender;
+    CssEnum text_wrap_style;    // CSS Text 4 text-wrap-style
+    bool balance_wrap_active;   // true when wrapping against balance_wrap_width
+    float balance_wrap_width;   // inline measure used for text-wrap-style: balance
 
     // =========================================================================
     // BFC Hierarchy
@@ -201,6 +204,7 @@ typedef enum BreakKind {
 
 typedef struct Linebox {
     float left, right;                // left and right bounds of the line
+    float align_left, align_right;    // original alignment bounds when wrap measure differs
     float effective_left;             // float-adjusted left bound
     float effective_right;            // float-adjusted right bound
     float advance_x;
