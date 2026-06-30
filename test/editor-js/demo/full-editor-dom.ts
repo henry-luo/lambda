@@ -149,7 +149,10 @@ export class FullEditorDom {
     this.state = initialEditorState({ doc: opts.doc, schema: opts.schema, selection: opts.initialSelection })
 
     this.toolbar = this.buildToolbar()
-    this.surface = h('div', { class: 'rdt-surface', contenteditable: 'true', spellcheck: 'false' })
+    // `data-script-edit` opts this contenteditable host into Stage 4B Phase 3
+    // script-managed routing: Radiant delivers `beforeinput` here and performs
+    // no native editing — this controller owns the model and every edit.
+    this.surface = h('div', { class: 'rdt-surface', contenteditable: 'true', spellcheck: 'false', 'data-script-edit': 'true' })
 
     this.shell = h('div', { class: 'rdt-shell' }, [this.toolbar, this.surface])
     host.appendChild(this.shell)
