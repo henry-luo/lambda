@@ -520,6 +520,7 @@ ScrollProp* alloc_scroll_prop(LayoutContext* lycon);
 PositionProp* alloc_position_prop(LayoutContext* lycon);
 void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* block);
+void reset_flex_item_prop_for_style(LayoutContext* lycon, ViewSpan* block);
 void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span);
 PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block);

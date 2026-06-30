@@ -12,6 +12,7 @@
 #include "../lib/mem_factory.h"
 #include <time.h>
 #include <cmath>  // for INFINITY
+#include <string.h>
 
 void print_view_group(ViewElement* view_group, StrBuf* buf, int indent);
 
@@ -424,6 +425,36 @@ void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block) {
     }
 }
 
+static void init_flex_item_prop_defaults(FlexItemProp* prop) {
+    if (!prop) return;
+    memset(prop, 0, sizeof(FlexItemProp));
+    prop->flex_basis = -1;  // -1 for auto
+    prop->flex_grow = 0;
+    prop->flex_shrink = 1;
+    prop->align_self = CSS_VALUE_AUTO;  // CSS initial value
+    prop->order = 0;
+    prop->aspect_ratio = 0;
+}
+
+void reset_flex_item_prop_for_style(LayoutContext* lycon, ViewSpan* span) {
+    if (!span) return;
+
+    // form/grid/table item props share storage with fi; do not overwrite them.
+    if (span->item_prop_type == DomElement::ITEM_PROP_FORM ||
+        span->item_prop_type == DomElement::ITEM_PROP_GRID ||
+        span->item_prop_type == DomElement::ITEM_PROP_TABLE ||
+        span->item_prop_type == DomElement::ITEM_PROP_CELL) {
+        return;
+    }
+
+    if (span->item_prop_type != DomElement::ITEM_PROP_FLEX || !span->fi) {
+        FlexItemProp* prop = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
+        span->fi = prop;
+        span->item_prop_type = DomElement::ITEM_PROP_FLEX;
+    }
+    init_flex_item_prop_defaults(span->fi);
+}
+
 void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* span) {
     log_debug("alloc_flex_item_prop: span=%p, item_prop_type=%d, fi=%p, form=%p",
               span, span ? span->item_prop_type : -1, span ? span->fi : nullptr, span ? span->form : nullptr);
@@ -447,8 +478,7 @@ void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* span) {
         FlexItemProp* prop = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
         span->fi = prop;
         span->item_prop_type = DomElement::ITEM_PROP_FLEX;
-        prop->flex_grow = 0;  prop->flex_shrink = 1;  prop->flex_basis = -1;  // -1 for auto
-        prop->align_self = CSS_VALUE_AUTO; // ALIGN_AUTO as per CSS spec
+        init_flex_item_prop_defaults(prop);
         log_debug("alloc_flex_item_prop: allocated fi=%p for span=%p", prop, span);
     }
 }

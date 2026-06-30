@@ -877,6 +877,45 @@ static inline void dom_post_insert(DomNode* parent, DomNode* node) {
     if (st && parent && node) dom_mutation_post_insert(st, parent, node);
     js_dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_INSERT, node, parent, 0);
 }
+
+static bool js_dom_is_generated_pseudo_node(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    DomElement* elem = node->as_element();
+    return elem->tag_name && elem->tag_name[0] == ':' && elem->tag_name[1] == ':';
+}
+
+static DomNode* js_dom_next_script_visible_sibling(DomNode* node) {
+    DomNode* sibling = node ? node->next_sibling : nullptr;
+    while (js_dom_is_generated_pseudo_node(sibling)) {
+        sibling = sibling->next_sibling;
+    }
+    return sibling;
+}
+
+static DomNode* js_dom_prev_script_visible_sibling(DomNode* node) {
+    DomNode* sibling = node ? node->prev_sibling : nullptr;
+    while (js_dom_is_generated_pseudo_node(sibling)) {
+        sibling = sibling->prev_sibling;
+    }
+    return sibling;
+}
+
+static DomNode* js_dom_first_script_visible_child(DomElement* elem) {
+    DomNode* child = elem ? elem->first_child : nullptr;
+    while (js_dom_is_generated_pseudo_node(child)) {
+        child = child->next_sibling;
+    }
+    return child;
+}
+
+static DomNode* js_dom_last_script_visible_child(DomElement* elem) {
+    DomNode* child = elem ? elem->last_child : nullptr;
+    while (js_dom_is_generated_pseudo_node(child)) {
+        child = child->prev_sibling;
+    }
+    return child;
+}
+
 static inline void dom_text_replace_data(DomText* text, uint32_t off,
                                          uint32_t cnt, uint32_t repl_len) {
     DocState* st = js_dom_state_for_nodes((DomNode*)text, text ? text->parent : nullptr);
@@ -4021,6 +4060,7 @@ static CssSelector* parse_css_selector(const char* sel_text, Pool* pool) {
 
 static void collect_text_content(DomNode* node, StrBuf* sb) {
     if (!node) return;
+    if (js_dom_is_generated_pseudo_node(node)) return;
 
     if (node->is_text()) {
         DomText* text = node->as_text();
@@ -4032,10 +4072,10 @@ static void collect_text_content(DomNode* node, StrBuf* sb) {
 
     if (node->is_element()) {
         DomElement* elem = node->as_element();
-        DomNode* child = elem->first_child;
+        DomNode* child = js_dom_first_script_visible_child(elem);
         while (child) {
             collect_text_content(child, sb);
-            child = child->next_sibling;
+            child = js_dom_next_script_visible_sibling(child);
         }
     }
 }
@@ -4155,6 +4195,7 @@ static void collect_html_attr_value(const char* value, StrBuf* sb) {
 
 static void collect_inner_html(DomNode* node, StrBuf* sb) {
     if (!node) return;
+    if (js_dom_is_generated_pseudo_node(node)) return;
 
     if (node->is_text()) {
         DomText* text = node->as_text();
@@ -4197,10 +4238,10 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
         strbuf_append_char(sb, '>');
 
         // children
-        DomNode* child = elem->first_child;
+        DomNode* child = js_dom_first_script_visible_child(elem);
         while (child) {
             collect_inner_html(child, sb);
-            child = child->next_sibling;
+            child = js_dom_next_script_visible_sibling(child);
         }
 
         // closing tag (skip void elements)
@@ -4219,7 +4260,8 @@ static char* js_dom_rich_history_snapshot(DomElement* owner) {
     if (!owner) return nullptr;
     StrBuf* sb = strbuf_new_cap(256);
     if (!sb) return nullptr;
-    for (DomNode* child = owner->first_child; child; child = child->next_sibling) {
+    for (DomNode* child = js_dom_first_script_visible_child(owner); child;
+         child = js_dom_next_script_visible_sibling(child)) {
         collect_inner_html(child, sb);
     }
     char* copy = mem_strdup(sb->str ? sb->str : "", MEM_CAT_JS_RUNTIME);
@@ -7379,12 +7421,12 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
             return ItemNull;
         }
         if (strcmp(prop, "nextSibling") == 0) {
-            DomNode* sib = text_node->next_sibling;
+            DomNode* sib = js_dom_next_script_visible_sibling((DomNode*)text_node);
             if (!sib) return ItemNull;
             return js_dom_wrap_element((void*)sib);
         }
         if (strcmp(prop, "previousSibling") == 0) {
-            DomNode* sib = text_node->prev_sibling;
+            DomNode* sib = js_dom_prev_script_visible_sibling((DomNode*)text_node);
             if (!sib) return ItemNull;
             return js_dom_wrap_element((void*)sib);
         }
@@ -7562,10 +7604,10 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     // innerHTML (recursive HTML serialization of children)
     if (strcmp(prop, "innerHTML") == 0) {
         StrBuf* sb = strbuf_new_cap(256);
-        DomNode* child = elem->first_child;
+        DomNode* child = js_dom_first_script_visible_child(elem);
         while (child) {
             collect_inner_html(child, sb);
-            child = child->next_sibling;
+            child = js_dom_next_script_visible_sibling(child);
         }
         String* result = heap_create_name(sb->str ? sb->str : "");
         strbuf_free(sb);
@@ -7591,10 +7633,10 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     // childElementCount
     if (strcmp(prop, "childElementCount") == 0) {
         int count = 0;
-        DomNode* child = elem->first_child;
+        DomNode* child = js_dom_first_script_visible_child(elem);
         while (child) {
             if (child->is_element()) count++;
-            child = child->next_sibling;
+            child = js_dom_next_script_visible_sibling(child);
         }
         return (Item){.item = i2it((int64_t)count)};
     }
@@ -7606,12 +7648,12 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         arr->items = nullptr;
         arr->length = 0;
         arr->capacity = 0;
-        DomNode* child = elem->first_child;
+        DomNode* child = js_dom_first_script_visible_child(elem);
         while (child) {
             if (child->is_element()) {
                 array_push(arr, js_dom_wrap_element(child->as_element()));
             }
-            child = child->next_sibling;
+            child = js_dom_next_script_visible_sibling(child);
         }
         return (Item){.array = arr};
     }
@@ -7648,7 +7690,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
 
     // firstChild (any node type, not just elements)
     if (strcmp(prop, "firstChild") == 0) {
-        DomNode* child = elem->first_child;
+        DomNode* child = js_dom_first_script_visible_child(elem);
         if (!child) return ItemNull;
         if (child->is_element()) return js_dom_wrap_element(child->as_element());
         // wrap text node
@@ -7657,7 +7699,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
 
     // lastChild (any node type)
     if (strcmp(prop, "lastChild") == 0) {
-        DomNode* child = elem->last_child;
+        DomNode* child = js_dom_last_script_visible_child(elem);
         if (!child) return ItemNull;
         if (child->is_element()) return js_dom_wrap_element(child->as_element());
         return js_dom_wrap_element((DomElement*)(void*)child);
@@ -7665,7 +7707,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
 
     // nextSibling (any node type)
     if (strcmp(prop, "nextSibling") == 0) {
-        DomNode* sib = ((DomNode*)elem)->next_sibling;
+        DomNode* sib = js_dom_next_script_visible_sibling((DomNode*)elem);
         if (!sib) return ItemNull;
         if (sib->is_element()) return js_dom_wrap_element(sib->as_element());
         return js_dom_wrap_element((DomElement*)(void*)sib);
@@ -7673,7 +7715,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
 
     // previousSibling (any node type)
     if (strcmp(prop, "previousSibling") == 0) {
-        DomNode* sib = ((DomNode*)elem)->prev_sibling;
+        DomNode* sib = js_dom_prev_script_visible_sibling((DomNode*)elem);
         if (!sib) return ItemNull;
         if (sib->is_element()) return js_dom_wrap_element(sib->as_element());
         return js_dom_wrap_element((DomElement*)(void*)sib);
@@ -7681,40 +7723,40 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
 
     // firstElementChild
     if (strcmp(prop, "firstElementChild") == 0) {
-        DomNode* child = elem->first_child;
+        DomNode* child = js_dom_first_script_visible_child(elem);
         while (child) {
             if (child->is_element()) return js_dom_wrap_element(child->as_element());
-            child = child->next_sibling;
+            child = js_dom_next_script_visible_sibling(child);
         }
         return ItemNull;
     }
 
     // lastElementChild
     if (strcmp(prop, "lastElementChild") == 0) {
-        DomNode* child = elem->last_child;
+        DomNode* child = js_dom_last_script_visible_child(elem);
         while (child) {
             if (child->is_element()) return js_dom_wrap_element(child->as_element());
-            child = child->prev_sibling;
+            child = js_dom_prev_script_visible_sibling(child);
         }
         return ItemNull;
     }
 
     // nextElementSibling
     if (strcmp(prop, "nextElementSibling") == 0) {
-        DomNode* sib = ((DomNode*)elem)->next_sibling;
+        DomNode* sib = js_dom_next_script_visible_sibling((DomNode*)elem);
         while (sib) {
             if (sib->is_element()) return js_dom_wrap_element(sib->as_element());
-            sib = sib->next_sibling;
+            sib = js_dom_next_script_visible_sibling(sib);
         }
         return ItemNull;
     }
 
     // previousElementSibling
     if (strcmp(prop, "previousElementSibling") == 0) {
-        DomNode* sib = ((DomNode*)elem)->prev_sibling;
+        DomNode* sib = js_dom_prev_script_visible_sibling((DomNode*)elem);
         while (sib) {
             if (sib->is_element()) return js_dom_wrap_element(sib->as_element());
-            sib = sib->prev_sibling;
+            sib = js_dom_prev_script_visible_sibling(sib);
         }
         return ItemNull;
     }
@@ -7726,7 +7768,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         arr->items = nullptr;
         arr->length = 0;
         arr->capacity = 0;
-        DomNode* child = elem->first_child;
+        DomNode* child = js_dom_first_script_visible_child(elem);
         while (child) {
             if (child->is_element()) {
                 array_push(arr, js_dom_wrap_element(child->as_element()));
@@ -7734,7 +7776,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
                 // wrap text/comment nodes
                 array_push(arr, js_dom_wrap_element((DomElement*)(void*)child));
             }
-            child = child->next_sibling;
+            child = js_dom_next_script_visible_sibling(child);
         }
         return (Item){.array = arr};
     }
@@ -7746,12 +7788,12 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         arr->items = nullptr;
         arr->length = 0;
         arr->capacity = 0;
-        DomNode* child = elem->first_child;
+        DomNode* child = js_dom_first_script_visible_child(elem);
         while (child) {
             if (child->is_element()) {
                 array_push(arr, js_dom_wrap_element(child->as_element()));
             }
-            child = child->next_sibling;
+            child = js_dom_next_script_visible_sibling(child);
         }
         return (Item){.array = arr};
     }
@@ -7759,10 +7801,10 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     // length (for NodeList / HTMLCollection-like results)
     if (strcmp(prop, "length") == 0) {
         int count = 0;
-        DomNode* child = elem->first_child;
+        DomNode* child = js_dom_first_script_visible_child(elem);
         while (child) {
             if (child->is_element()) count++;
-            child = child->next_sibling;
+            child = js_dom_next_script_visible_sibling(child);
         }
         return (Item){.item = i2it((int64_t)count)};
     }
@@ -10621,20 +10663,28 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         DomNode* new_child = (DomNode*)js_dom_unwrap_element(args[0]);
         DomNode* ref_child = (DomNode*)js_dom_unwrap_element(args[1]);
         if (!new_child) return ItemNull;
+        DomNode* parent_node = (DomNode*)elem;
+        if (ref_child && ref_child->parent != parent_node) {
+            log_error("js_dom insertBefore guard: reference node is not a child of target parent");
+            return ItemNull;
+        }
         // v12b: DocumentFragment support — move children instead of the fragment itself
         if (new_child->is_element()) {
             DomElement* new_elem = new_child->as_element();
             if (new_elem->tag_name && strcmp(new_elem->tag_name, "#document-fragment") == 0) {
+                bool mutated = false;
                 DomNode* frag_child = new_elem->first_child;
                 while (frag_child) {
                     DomNode* next = frag_child->next_sibling;
                     dom_pre_remove(frag_child);
                     new_elem->remove_child(frag_child);
-                    ((DomNode*)elem)->insert_before(frag_child, ref_child);
-                    dom_post_insert((DomNode*)elem, frag_child);
+                    if (parent_node->insert_before(frag_child, ref_child)) {
+                        dom_post_insert(parent_node, frag_child);
+                        mutated = true;
+                    }
                     frag_child = next;
                 }
-                js_dom_mutation_notify();
+                if (mutated) js_dom_mutation_notify();
                 return args[0];
             }
         }
@@ -10643,15 +10693,17 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             dom_pre_remove(new_child);
             new_child->parent->remove_child(new_child);
         }
-        ((DomNode*)elem)->insert_before(new_child, ref_child);
-        dom_post_insert((DomNode*)elem, new_child);
+        if (!parent_node->insert_before(new_child, ref_child)) {
+            return ItemNull;
+        }
+        dom_post_insert(parent_node, new_child);
         js_dom_mutation_notify();
         return args[0];
     }
 
     // hasChildNodes() → boolean
     if (strcmp(method, "hasChildNodes") == 0) {
-        bool has = (elem->first_child != nullptr);
+        bool has = (js_dom_first_script_visible_child(elem) != nullptr);
         return (Item){.item = b2it(has ? 1 : 0)};
     }
 
