@@ -2398,12 +2398,14 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         AstUnaryNode* un = (AstUnaryNode*)node;
         TypeId operand_eff = get_effective_type(mt, un->operand);
         if (un->op == OPERATOR_NEG) {
+            if (operand_eff == LMD_TYPE_NUM_SIZED || operand_eff == LMD_TYPE_UINT64) return operand_eff;
             if (operand_eff == LMD_TYPE_INT) return LMD_TYPE_INT;
             if (operand_eff == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
         } else if (un->op == OPERATOR_NOT) {
             return LMD_TYPE_BOOL;
         } else if (un->op == OPERATOR_POS) {
             if (operand_eff == LMD_TYPE_INT || operand_eff == LMD_TYPE_INT64 ||
+                operand_eff == LMD_TYPE_NUM_SIZED || operand_eff == LMD_TYPE_UINT64 ||
                 operand_eff == LMD_TYPE_FLOAT)
                 return operand_eff;
         } else if (un->op == OPERATOR_IS_ERROR) {
@@ -6680,6 +6682,25 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             info->fn == SYSFUNC_BXOR || info->fn == SYSFUNC_SHL ||
             info->fn == SYSFUNC_SHR) {
             arg = call_node->argument;
+            TypeId call_tid = ((AstNode*)call_node)->type ? ((AstNode*)call_node)->type->type_id : LMD_TYPE_ANY;
+            if (call_tid == LMD_TYPE_NUM_SIZED || call_tid == LMD_TYPE_UINT64) {
+                const char* boxed_fn = NULL;
+                switch (info->fn) {
+                    case SYSFUNC_BAND: boxed_fn = "fn_band_item"; break;
+                    case SYSFUNC_BOR:  boxed_fn = "fn_bor_item"; break;
+                    case SYSFUNC_BXOR: boxed_fn = "fn_bxor_item"; break;
+                    case SYSFUNC_SHL:  boxed_fn = "fn_shl_item"; break;
+                    case SYSFUNC_SHR:  boxed_fn = "fn_shr_item"; break;
+                    default: break;
+                }
+                MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
+                arg = arg->next;
+                MIR_reg_t boxed_a2 = transpile_box_item(mt, arg);
+                return emit_call_2(mt, boxed_fn, MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2));
+            }
+
             MIR_reg_t a1 = transpile_expr(mt, arg);
             TypeId a1_tid = get_effective_type(mt, arg);
             a1 = emit_bitwise_i64_arg(mt, a1, a1_tid);
@@ -6747,6 +6768,13 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
         }
         if (info->fn == SYSFUNC_BNOT) {
             arg = call_node->argument;
+            TypeId call_tid = ((AstNode*)call_node)->type ? ((AstNode*)call_node)->type->type_id : LMD_TYPE_ANY;
+            if (call_tid == LMD_TYPE_NUM_SIZED || call_tid == LMD_TYPE_UINT64) {
+                MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
+                return emit_call_1(mt, "fn_bnot_item", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
+            }
+
             MIR_reg_t a1 = transpile_expr(mt, arg);
             TypeId a1_tid = get_effective_type(mt, arg);
             a1 = emit_bitwise_i64_arg(mt, a1, a1_tid);

@@ -441,6 +441,97 @@ bool types_compatible(Type* arg_type, Type* param_type) {
     return types_compatible_with_full(arg_type, param_type, NULL);
 }
 
+static bool type_sized_integer_info(Type* type, bool* is_unsigned, int* bits) {
+    if (!type) return false;
+    if (type->type_id == LMD_TYPE_UINT64) {
+        *is_unsigned = true;
+        *bits = 64;
+        return true;
+    }
+    if (type->type_id != LMD_TYPE_NUM_SIZED) return false;
+    switch (type_num_sized_kind(type)) {
+    case NUM_INT8:   *is_unsigned = false; *bits = 8;  return true;
+    case NUM_INT16:  *is_unsigned = false; *bits = 16; return true;
+    case NUM_INT32:  *is_unsigned = false; *bits = 32; return true;
+    case NUM_UINT8:  *is_unsigned = true;  *bits = 8;  return true;
+    case NUM_UINT16: *is_unsigned = true;  *bits = 16; return true;
+    case NUM_UINT32: *is_unsigned = true;  *bits = 32; return true;
+    default: return false;
+    }
+}
+
+static Type* sized_integer_type_for(bool is_unsigned, int bits) {
+    if (is_unsigned) {
+        if (bits <= 8) return &TYPE_U8;
+        if (bits <= 16) return &TYPE_U16;
+        if (bits <= 32) return &TYPE_U32;
+        return &TYPE_UINT64;
+    }
+    if (bits <= 8) return &TYPE_I8;
+    if (bits <= 16) return &TYPE_I16;
+    if (bits <= 32) return &TYPE_I32;
+    return &TYPE_INT64;
+}
+
+static int next_signed_width_for_unsigned_type(int unsigned_bits) {
+    if (unsigned_bits < 8) return 8;
+    if (unsigned_bits < 16) return 16;
+    if (unsigned_bits < 32) return 32;
+    return 64;
+}
+
+static Type* promote_sized_integer_types(Type* left, Type* right) {
+    bool left_unsigned = false, right_unsigned = false;
+    int left_bits = 0, right_bits = 0;
+    bool left_sized = type_sized_integer_info(left, &left_unsigned, &left_bits);
+    bool right_sized = type_sized_integer_info(right, &right_unsigned, &right_bits);
+    if (!left_sized && !right_sized) return NULL;
+    if (left_sized && !right_sized) return sized_integer_type_for(left_unsigned, left_bits);
+    if (!left_sized && right_sized) return sized_integer_type_for(right_unsigned, right_bits);
+
+    if (left_unsigned == right_unsigned) {
+        return sized_integer_type_for(left_unsigned, left_bits > right_bits ? left_bits : right_bits);
+    }
+
+    int signed_bits = left_unsigned ? right_bits : left_bits;
+    int unsigned_bits = left_unsigned ? left_bits : right_bits;
+    if (signed_bits > unsigned_bits) return sized_integer_type_for(false, signed_bits);
+    if (unsigned_bits < 64) {
+        int bits = next_signed_width_for_unsigned_type(unsigned_bits);
+        if (bits < signed_bits) bits = signed_bits;
+        return sized_integer_type_for(false, bits);
+    }
+    return &TYPE_UINT64;
+}
+
+static Type* infer_bitwise_call_type(SysFunc fn, AstNode* first_arg, AstNode* second_arg) {
+    Type* left = first_arg ? first_arg->type : NULL;
+    Type* right = second_arg ? second_arg->type : NULL;
+    switch (fn) {
+    case SYSFUNC_BAND:
+    case SYSFUNC_BOR:
+    case SYSFUNC_BXOR: {
+        Type* promoted = promote_sized_integer_types(left, right);
+        return promoted ? promoted : NULL;
+    }
+    case SYSFUNC_BNOT: {
+        bool is_unsigned = false;
+        int bits = 0;
+        return type_sized_integer_info(left, &is_unsigned, &bits) ?
+            sized_integer_type_for(is_unsigned, bits) : NULL;
+    }
+    case SYSFUNC_SHL:
+    case SYSFUNC_SHR: {
+        bool is_unsigned = false;
+        int bits = 0;
+        return type_sized_integer_info(left, &is_unsigned, &bits) ?
+            sized_integer_type_for(is_unsigned, bits) : NULL;
+    }
+    default:
+        return NULL;
+    }
+}
+
 // Record a type error and check if we should continue transpiling
 void record_type_error(Transpiler* tp, int line, const char* format, ...) {
     tp->error_count++;
@@ -1839,6 +1930,18 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     }
     ts_tree_cursor_delete(&cursor);
 
+    if (sys_func_info) {
+        AstNode* first_arg = ast_node->argument;
+        AstNode* second_arg = first_arg ? first_arg->next : NULL;
+        Type* bitwise_type = infer_bitwise_call_type(sys_func_info->fn, first_arg, second_arg);
+        if (bitwise_type) {
+            ast_node->type = bitwise_type;
+            if (ast_node->function && ast_node->function->node_type == AST_NODE_SYS_FUNC) {
+                ast_node->function->type = bitwise_type;
+            }
+        }
+    }
+
     // Validate argument types against parameter types (for user-defined functions)
     if (ast_node->function->type->type_id == LMD_TYPE_FUNC) {
         TypeFunc* func_type = (TypeFunc*)ast_node->function->type;
@@ -3063,6 +3166,11 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     }
     else if (ast_node->op == OPERATOR_POS || ast_node->op == OPERATOR_NEG) {
         // For numeric unary operators (+/-), preserve the operand type if numeric
+        if (operand_type == LMD_TYPE_NUM_SIZED || operand_type == LMD_TYPE_UINT64) {
+            ast_node->type = ast_node->operand->type;
+            log_debug("end build unary expr");
+            return (AstNode*)ast_node;
+        }
         if (LMD_TYPE_INT <= operand_type && operand_type <= LMD_TYPE_NUMBER) {
             type_id = operand_type;  // Preserve the exact numeric type
         }

@@ -1705,6 +1705,12 @@ extern "C" {
     int64_t fn_bnot(int64_t a);
     int64_t fn_shl(int64_t a, int64_t b);
     int64_t fn_shr(int64_t a, int64_t b);
+    Item fn_band_item(Item a, Item b);
+    Item fn_bor_item(Item a, Item b);
+    Item fn_bxor_item(Item a, Item b);
+    Item fn_bnot_item(Item a);
+    Item fn_shl_item(Item a, Item b);
+    Item fn_shr_item(Item a, Item b);
 
     // compound assignment support (procedural only)
     void fn_array_set(Array* arr, int64_t index, Item value);

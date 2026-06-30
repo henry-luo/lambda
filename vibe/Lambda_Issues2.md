@@ -147,33 +147,33 @@ pn next_random(state) {
 
 - `test/benchmark/jetstream/crypto_sha1.ls` now uses `u32` locals inside `safe_add()` so 32-bit word addition wraps by type instead of by overflow-prone default `int` arithmetic.
 
-**Remaining adjacent issue**: unsigned right shift and shift-width behavior are tracked separately in issue 6, so SHA-1 still keeps explicit masks around rotate/bitwise helpers where those semantics matter.
+**Follow-up**: issue 6 now covers the typed unsigned shift fix. SHA-1 still keeps explicit masks around `bnot`/round helpers where default `int` bitwise semantics are intentionally used.
 
 ---
 
 ## 6. `shr` Performs Arithmetic (Sign-Extending) Right Shift
 
+**Status**: ✅ **FIXED for explicit unsigned integer operands**
 **Severity**: Wrong results  
 **Affected benchmarks**: crypto_sha1
 
-Lambda's `shr` function performs an arithmetic right shift, preserving the sign bit. JavaScript's `>>>` is a logical (unsigned) right shift that fills with zeros. This produces different results for negative numbers, which is critical in SHA-1 and other bitwise algorithms.
+Lambda's `shr` now follows the Go-like explicit integer model for typed operands. Signed compact operands (`i8/i16/i32/i64`) still perform arithmetic right shift, preserving the sign bit. Unsigned compact operands (`u8/u16/u32/u64`) perform logical right shift, filling with zeros.
 
 ```lambda
-// Lambda: shr(-1, 1) → -1  (sign bit preserved)
-// JS:     -1 >>> 1  → 2147483647  (zero-filled)
+shr(-1i32, 1)          // -1i32, sign bit preserved
+shr(4294967295u32, 1)  // 2147483647u32, zero-filled
 ```
 
-**Workaround**: Mask with `band(x, 4294967295)` before shifting, or implement a `ushr` function:
+The original issue was that SHA-1-style code needed JS `>>>` semantics but only had default signed `int` shifting. The intended Lambda spelling is now to keep the word in `u32` and call `shr`:
 
 ```lambda
-pn ushr(x: int, n: int) {
-    return shr(band(x, 4294967295), n)
+pn rol(num: int, cnt: int) {
+    var n: u32 = num
+    return int(bor(shl(n, cnt), shr(n, 32 - cnt)))
 }
 ```
 
-**Note**: This workaround may still not work correctly if `shr` sign-extends regardless of the input range. A native unsigned right shift (`ushr` or `>>>`) would be needed.
-
-**Suggestion**: Add a `ushr` (unsigned/logical right shift) built-in function.
+**Remaining optional convenience**: Lambda still has no JS-spelling `>>>` or `ushr` alias. That is now syntactic convenience rather than missing core behavior.
 
 ---
 
@@ -485,7 +485,7 @@ pn show() {
 | 3 | `list` field name silent failure | Reserved word | 1 benchmark, hours of debugging |
 | 4 | No hex literals | Missing feature | 2 benchmarks, tedious manual conversion |
 | 5 | Integer overflow errors | Arithmetic | **Fixed**; splay PRNG and SHA-1 word arithmetic now use `u32` |
-| 6 | No unsigned right shift | Missing feature | 1 benchmark, wrong hash output |
+| 6 | No unsigned right shift | Bitwise ops | **Fixed for typed unsigned ints**; `shr(u32, n)` zero-fills |
 | 7 | `fill(0, x)` returns null | Edge case | 1 benchmark, 120k runtime errors |
 | 8 | Missing substr/charcode | Missing feature | 1 benchmark, minor |
 | 9 | `div` reserved word | Reserved word | 1 benchmark, minor |

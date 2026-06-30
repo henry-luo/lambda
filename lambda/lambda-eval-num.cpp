@@ -68,6 +68,12 @@ enum SizedIntegerOp {
     SIZED_INTEGER_MOD,
 };
 
+enum SizedBitwiseOp {
+    SIZED_BITWISE_AND,
+    SIZED_BITWISE_OR,
+    SIZED_BITWISE_XOR,
+};
+
 static inline uint64_t sized_mask(int bits) {
     return bits >= 64 ? UINT64_MAX : ((1ULL << bits) - 1ULL);
 }
@@ -235,6 +241,118 @@ static bool sized_integer_neg(Item item, TypeId type, Item* result) {
     SizedIntegerValue value;
     if (!read_sized_integer(item, type, &value)) return false;
     *result = pack_sized_integer(value.is_unsigned, value.bits, 0ULL - value.raw);
+    return true;
+}
+
+struct BitwiseIntegerValue {
+    SizedIntegerValue value;
+    bool is_sized;
+};
+
+static bool read_bitwise_integer(Item item, BitwiseIntegerValue* out) {
+    TypeId type = get_type_id(item);
+    if (read_sized_integer(item, type, &out->value)) {
+        out->is_sized = true;
+        return true;
+    }
+    out->is_sized = false;
+    out->value.is_unsigned = false;
+    out->value.bits = 64;
+    switch (type) {
+    case LMD_TYPE_INT:
+        out->value.sval = item.get_int56();
+        out->value.raw = (uint64_t)out->value.sval;
+        return true;
+    case LMD_TYPE_INT64:
+        out->value.sval = item.get_int64();
+        out->value.raw = (uint64_t)out->value.sval;
+        return true;
+    case LMD_TYPE_FLOAT:
+        out->value.sval = (int64_t)item.get_double();
+        out->value.raw = (uint64_t)out->value.sval;
+        return true;
+    case LMD_TYPE_BOOL:
+        out->value.sval = item.bool_val ? 1 : 0;
+        out->value.raw = (uint64_t)out->value.sval;
+        return true;
+    case LMD_TYPE_RAW_POINTER:
+        out->value.raw = item.item;
+        out->value.sval = int64_from_bits(out->value.raw);
+        return true;
+    case LMD_TYPE_NULL:
+    case LMD_TYPE_ERROR:
+        out->value.sval = 0;
+        out->value.raw = 0;
+        return true;
+    default:
+        out->value.sval = 0;
+        out->value.raw = 0;
+        return true;
+    }
+}
+
+static bool sized_bitwise_binary(Item item_a, Item item_b, SizedBitwiseOp op, Item* result) {
+    BitwiseIntegerValue a, b;
+    if (!read_bitwise_integer(item_a, &a) || !read_bitwise_integer(item_b, &b)) return false;
+    if (!a.is_sized && !b.is_sized) return false;
+
+    bool is_unsigned = false;
+    int bits = 0;
+    if (a.is_sized && b.is_sized) {
+        sized_integer_result_type(&a.value, &b.value, &is_unsigned, &bits);
+    } else {
+        SizedIntegerValue* sized_value = a.is_sized ? &a.value : &b.value;
+        is_unsigned = sized_value->is_unsigned;
+        bits = sized_value->bits;
+    }
+
+    uint64_t mask = sized_mask(bits);
+    uint64_t raw_a = sized_operand_raw(&a.value) & mask;
+    uint64_t raw_b = sized_operand_raw(&b.value) & mask;
+    uint64_t raw = 0;
+    if (op == SIZED_BITWISE_AND) raw = raw_a & raw_b;
+    else if (op == SIZED_BITWISE_OR) raw = raw_a | raw_b;
+    else raw = raw_a ^ raw_b;
+
+    *result = pack_sized_integer(is_unsigned, bits, raw);
+    return true;
+}
+
+static bool sized_bitwise_not(Item item, Item* result) {
+    BitwiseIntegerValue value;
+    if (!read_bitwise_integer(item, &value) || !value.is_sized) return false;
+    uint64_t raw = ~sized_operand_raw(&value.value);
+    *result = pack_sized_integer(value.value.is_unsigned, value.value.bits, raw);
+    return true;
+}
+
+static bool sized_shift(Item item_a, Item item_b, bool shift_left, Item* result) {
+    BitwiseIntegerValue a, b;
+    if (!read_bitwise_integer(item_a, &a) || !a.is_sized) return false;
+    if (!read_bitwise_integer(item_b, &b)) return false;
+
+    int64_t count = b.value.sval;
+    if (count < 0) {
+        log_error("sized bitwise negative shift count");
+        *result = ItemError;
+        return true;
+    }
+
+    int bits = a.value.bits;
+    uint64_t raw = 0;
+    uint64_t mask = sized_mask(bits);
+    if (shift_left) {
+        raw = (count >= bits) ? 0 : ((sized_operand_raw(&a.value) & mask) << count);
+    } else if (a.value.is_unsigned) {
+        raw = (count >= bits) ? 0 : ((a.value.raw & mask) >> count);
+    } else if (count >= bits) {
+        raw = (sized_operand_raw(&a.value) & (1ULL << (bits - 1))) ? mask : 0;
+    } else {
+        int64_t signed_value = sized_signed_operand(&a.value, bits);
+        raw = (uint64_t)(signed_value >> count);
+    }
+
+    *result = pack_sized_integer(a.value.is_unsigned, bits, raw);
     return true;
 }
 
@@ -2682,16 +2800,40 @@ extern "C" int64_t fn_band(int64_t a, int64_t b) {
     return a & b;
 }
 
+extern "C" Item fn_band_item(Item a, Item b) {
+    Item result;
+    if (sized_bitwise_binary(a, b, SIZED_BITWISE_AND, &result)) return result;
+    return push_l(fn_band(_barg(a), _barg(b)));
+}
+
 extern "C" int64_t fn_bor(int64_t a, int64_t b) {
     return a | b;
+}
+
+extern "C" Item fn_bor_item(Item a, Item b) {
+    Item result;
+    if (sized_bitwise_binary(a, b, SIZED_BITWISE_OR, &result)) return result;
+    return push_l(fn_bor(_barg(a), _barg(b)));
 }
 
 extern "C" int64_t fn_bxor(int64_t a, int64_t b) {
     return a ^ b;
 }
 
+extern "C" Item fn_bxor_item(Item a, Item b) {
+    Item result;
+    if (sized_bitwise_binary(a, b, SIZED_BITWISE_XOR, &result)) return result;
+    return push_l(fn_bxor(_barg(a), _barg(b)));
+}
+
 extern "C" int64_t fn_bnot(int64_t a) {
     return ~a;
+}
+
+extern "C" Item fn_bnot_item(Item a) {
+    Item result;
+    if (sized_bitwise_not(a, &result)) return result;
+    return push_l(fn_bnot(_barg(a)));
 }
 
 extern "C" int64_t fn_shl(int64_t a, int64_t b) {
@@ -2699,7 +2841,19 @@ extern "C" int64_t fn_shl(int64_t a, int64_t b) {
     return a << b;
 }
 
+extern "C" Item fn_shl_item(Item a, Item b) {
+    Item result;
+    if (sized_shift(a, b, true, &result)) return result;
+    return push_l(fn_shl(_barg(a), _barg(b)));
+}
+
 extern "C" int64_t fn_shr(int64_t a, int64_t b) {
     if (b < 0 || b >= 64) return 0;
     return a >> b;  // arithmetic right shift (sign-extending)
+}
+
+extern "C" Item fn_shr_item(Item a, Item b) {
+    Item result;
+    if (sized_shift(a, b, false, &result)) return result;
+    return push_l(fn_shr(_barg(a), _barg(b)));
 }
