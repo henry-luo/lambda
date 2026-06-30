@@ -264,6 +264,7 @@ extern "C" void js_iterator_proto_cache_reset(void);
 extern "C" void js_reset_css_namespace_object(void);
 extern "C" void js_dynfunc_cache_reset(void);
 extern "C" void js_canvas_cleanup(void);
+extern "C" void js_cjs_metadata_reset(void);
 
 extern "C" void js_batch_reset() {
     // increment epoch to invalidate cached heap objects
@@ -275,6 +276,8 @@ extern "C" void js_batch_reset() {
     module_registry_cleanup();
     // clear JS module cache (specifier String* pointers become dangling after heap reset)
     js_module_cache_reset();
+    // clear CommonJS metadata (filenames/modules are heap Items from the prior script)
+    js_cjs_metadata_reset();
     // clear any pending exception from previous script
     js_exception_pending = false;
     js_exception_value = (Item){0};
@@ -406,6 +409,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     module_registry_cleanup();
     // clear JS module cache counter
     js_module_cache_reset();
+    js_cjs_metadata_reset();
     // clear pending exception
     js_exception_pending = false;
     js_exception_value = (Item){0};

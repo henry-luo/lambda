@@ -31,15 +31,15 @@ pn main() {
     var clean_len = len(seq)
 
     // step 2: count matches for each of 9 patterns
-    print("agggtaaa|tttaccct " ++ string(len(find(seq, pat1))) ++ "\n")
-    print("[cgt]gggtaaa|tttaccc[acg] " ++ string(len(find(seq, pat2))) ++ "\n")
-    print("a[act]ggtaaa|tttacc[agt]t " ++ string(len(find(seq, pat3))) ++ "\n")
-    print("ag[act]gtaaa|tttac[agt]ct " ++ string(len(find(seq, pat4))) ++ "\n")
-    print("agg[act]taaa|ttta[agt]cct " ++ string(len(find(seq, pat5))) ++ "\n")
-    print("aggg[acg]aaa|ttt[cgt]ccct " ++ string(len(find(seq, pat6))) ++ "\n")
-    print("agggt[cgt]aa|tt[acg]taccct " ++ string(len(find(seq, pat7))) ++ "\n")
-    print("agggta[cgt]a|t[acg]ataccct " ++ string(len(find(seq, pat8))) ++ "\n")
-    print("agggtaa[cgt]|[acg]aataccct " ++ string(len(find(seq, pat9))) ++ "\n")
+    print("agggtaaa|tttaccct " ++ len(find(seq, pat1)) ++ "\n")
+    print("[cgt]gggtaaa|tttaccc[acg] " ++ len(find(seq, pat2)) ++ "\n")
+    print("a[act]ggtaaa|tttacc[agt]t " ++ len(find(seq, pat3)) ++ "\n")
+    print("ag[act]gtaaa|tttac[agt]ct " ++ len(find(seq, pat4)) ++ "\n")
+    print("agg[act]taaa|ttta[agt]cct " ++ len(find(seq, pat5)) ++ "\n")
+    print("aggg[acg]aaa|ttt[cgt]ccct " ++ len(find(seq, pat6)) ++ "\n")
+    print("agggt[cgt]aa|tt[acg]taccct " ++ len(find(seq, pat7)) ++ "\n")
+    print("agggta[cgt]a|t[acg]ataccct " ++ len(find(seq, pat8)) ++ "\n")
+    print("agggtaa[cgt]|[acg]aataccct " ++ len(find(seq, pat9)) ++ "\n")
 
     // step 3: IUPAC code substitutions — each single letter expands to alternatives
     var result = seq
@@ -57,9 +57,9 @@ pn main() {
 
     // step 4: print lengths
     print("\n")
-    print(string(original_len) ++ "\n")
-    print(string(clean_len) ++ "\n")
-    print(string(len(result)) ++ "\n")
+    print(original_len ++ "\n")
+    print(clean_len ++ "\n")
+    print(len(result) ++ "\n")
     var __t1 = clock()
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

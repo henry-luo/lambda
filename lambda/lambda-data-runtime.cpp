@@ -856,6 +856,26 @@ bool array_num_copy_same_type_bytes(ArrayNum *dst, int64_t dst_index,
     return true;
 }
 
+bool array_num_copy_equal_size_bytes(ArrayNum *dst, int64_t dst_index,
+                                     ArrayNum *src, int64_t src_index, int64_t count) {
+    if (!dst || !src) return false;
+    if (count == 0) return true;
+    if (!array_num_can_copy_bytes(src, src_index, count, false)) return false;
+    if (!array_num_can_copy_bytes(dst, dst_index, count, true)) {
+        if (dst && dst->is_view && !dst->is_mutable_view) {
+            log_error("array_num_copy_equal_size_bytes: cannot mutate a read-only view; copy() first");
+        }
+        return false;
+    }
+    uint8_t src_elem_size = ELEM_TYPE_SIZE[src->get_elem_type() >> 4];
+    uint8_t dst_elem_size = ELEM_TYPE_SIZE[dst->get_elem_type() >> 4];
+    if (src_elem_size == 0 || dst_elem_size == 0 || src_elem_size != dst_elem_size) return false;
+    char* dst_ptr = (char*)dst->data + (size_t)dst_index * dst_elem_size;
+    char* src_ptr = (char*)src->data + (size_t)src_index * src_elem_size;
+    memmove(dst_ptr, src_ptr, (size_t)count * src_elem_size);
+    return true;
+}
+
 bool array_num_reverse_bytes(ArrayNum *arr) {
     if (!arr) return false;
     int64_t len = arr->length;

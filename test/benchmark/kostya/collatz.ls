@@ -38,11 +38,11 @@ pn main() {
     let result = benchmark()
     var __t1 = clock()
     if (result == 837799) {
-        print("collatz: PASS (start=" ++ string(result) ++ ")\n")
+        print("collatz: PASS (start=" ++ result ++ ")\n")
     } else {
         print("collatz: FAIL result=")
         print(result)
         print("\n")
     }
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

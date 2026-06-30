@@ -59,7 +59,7 @@ pn benchmark() {
         ix = ix + 1
     }
 
-    print("pnpoly: total=" ++ string(total) ++ " inside=" ++ string(count) ++ "\n")
+    print("pnpoly: total=" ++ total ++ " inside=" ++ count ++ "\n")
     return count
 }
 
@@ -69,5 +69,5 @@ pn main() {
     var __t1 = clock()
     // result depends on polygon area / grid sampling
     print("pnpoly: DONE\n")
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

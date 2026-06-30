@@ -315,9 +315,9 @@ pn main() {
     let result = run_navier_stokes()
     var __t1 = clock()
     if (result == 77) {
-        print("navier-stokes: PASS (checksum=" ++ string(result) ++ ")\n")
+        print("navier-stokes: PASS (checksum=" ++ result ++ ")\n")
     } else {
-        print("navier-stokes: FAIL (checksum=" ++ string(result) ++ ", expected 77)\n")
+        print("navier-stokes: FAIL (checksum=" ++ result ++ ", expected 77)\n")
     }
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

@@ -83,5 +83,5 @@ pn main() {
         output_reverse_complement(header, seq)
     }
     var __t1 = clock()
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

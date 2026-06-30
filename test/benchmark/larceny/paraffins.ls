@@ -163,11 +163,11 @@ pn main() {
     var __t1 = clock()
 
     // result = nb(23)
-    print("paraffins: nb(23) = " ++ string(result) ++ "\n")
+    print("paraffins: nb(23) = " ++ result ++ "\n")
     if (result == 5731580) {
         print("paraffins: PASS\n")
     } else {
         print("paraffins: FAIL (expected 5731580)\n")
     }
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

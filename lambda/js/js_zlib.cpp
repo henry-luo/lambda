@@ -93,12 +93,9 @@ static const char* zlib_error_default_detail(int zret) {
 // extract buffer data from Uint8Array or string
 static bool get_input_buffer(Item input, const uint8_t** out, int* out_len) {
     if (js_is_typed_array(input)) {
-        JsTypedArray* ta = js_get_typed_array_ptr(input.map);
-        if (ta && (ta->data || ta->byte_length == 0)) {
-            *out = (const uint8_t*)ta->data;
-            *out_len = ta->byte_length;
-            return true;
-        }
+        *out = (const uint8_t*)js_typed_array_current_data_ptr(input);
+        *out_len = js_typed_array_byte_length(input);
+        return *out || *out_len == 0;
     }
     if (get_type_id(input) == LMD_TYPE_STRING) {
         String* s = it2s(input);
@@ -115,7 +112,8 @@ static Item make_buffer_result(const uint8_t* data, int len) {
     JsTypedArray* ta = js_get_typed_array_ptr(result.map);
     if (ta) {
         ta->is_buffer = true;
-        if (ta->data) memcpy(ta->data, data, (size_t)len);
+        uint8_t* dst = (uint8_t*)js_typed_array_current_data_ptr(result);
+        if (dst) memcpy(dst, data, (size_t)len);
     }
     return result;
 }

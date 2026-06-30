@@ -60,7 +60,7 @@ pn main() {
 
     // Print truncated sum for verification
     let int_total = int(floor(total))
-    print("matmul: sum=" ++ string(int_total) ++ "\n")
+    print("matmul: sum=" ++ int_total ++ "\n")
     print("matmul: DONE\n")
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

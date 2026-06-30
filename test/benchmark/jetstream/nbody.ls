@@ -136,7 +136,7 @@ pn main() {
         var result = run()
         var check = floor(result * -10000000.0)
         if (check != 13524862) {
-            print("nbody: FAIL iteration=" ++ string(i) ++ " check=" ++ string(check) ++ " energy=" ++ string(result) ++ "\n")
+            print("nbody: FAIL iteration=" ++ i ++ " check=" ++ check ++ " energy=" ++ result ++ "\n")
             pass = false
         }
         i = i + 1
@@ -145,5 +145,5 @@ pn main() {
     if (pass) {
         print("nbody: PASS\n")
     }
-    print("__TIMING__:" ++ string((__t1 - __t0) * 1000.0) ++ "\n")
+    print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

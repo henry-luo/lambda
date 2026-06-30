@@ -133,10 +133,10 @@ static void blob_append_part(StrBuf* sb, Item part) {
         return;
     }
     if (js_is_typed_array(part)) {
-        Map* m = part.map;
-        JsTypedArray* ta = (JsTypedArray*)m->data;
-        if (ta && ta->data && ta->byte_length > 0) {
-            strbuf_append_str_n(sb, (const char*)ta->data, (size_t)ta->byte_length);
+        const char* data = (const char*)js_typed_array_current_data_ptr(part);
+        int byte_length = js_typed_array_byte_length(part);
+        if (data && byte_length > 0) {
+            strbuf_append_str_n(sb, data, (size_t)byte_length);
         }
         return;
     }
