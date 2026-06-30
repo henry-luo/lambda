@@ -4001,7 +4001,9 @@ int main(int argc, char *argv[]) {
 
     // Handle js-test-batch command: run multiple JS scripts in one process for test performance
     if (argc >= 2 && strcmp(argv[1], "js-test-batch") == 0) {
-        js_batch_execution_mode = 1;
+        // file-backed Node batches still need normal process exit hooks;
+        // harness/inline test262 batches opt into lifecycle suppression per test.
+        js_batch_execution_mode = 0;
         bool diagnose_requested = false;
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--diagnose") == 0) {
@@ -4247,6 +4249,10 @@ int main(int argc, char *argv[]) {
             batch_js_argv_store[1] = script_exec_path;
             js_store_process_argv(2, batch_js_argv_store);
             js_store_process_exec_argv(0, NULL);
+            // test262 inline/harness batches share one worker process, so suppress
+            // per-script Node process lifecycle only there. File-backed Node tests
+            // depend on process.on('exit') flushing expected output.
+            js_batch_execution_mode = (inline_source || inline_module_source || has_preamble) ? 1 : 0;
 
             int result = 0;
 #ifndef _WIN32
