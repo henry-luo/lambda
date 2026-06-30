@@ -26,7 +26,7 @@ pn replace_first(s, search, repl) {
     }
     var pos = matches[0].index
     var slen = len(search)
-    return slice(s, 0, pos) ++ repl ++ slice(s, pos + slen, len(s))
+    return slice(s, 0, pos) ++ repl ++ slice(s, pos + slen)
 }
 
 pn main() {

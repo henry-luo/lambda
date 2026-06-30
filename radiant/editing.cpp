@@ -118,6 +118,11 @@ bool editing_surface_is_text_control(const EditingSurface* surface) {
     return surface && surface->kind == EDIT_SURFACE_TEXT_CONTROL;
 }
 
+bool editing_surface_is_script_managed(const EditingSurface* surface) {
+    return editing_surface_is_rich(surface) && surface->owner &&
+        surface->owner->has_attribute("data-script-edit");
+}
+
 const char* editing_surface_kind_name(EditingSurfaceKind kind) {
     switch (kind) {
         case EDIT_SURFACE_NONE: return "none";

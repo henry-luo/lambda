@@ -43,6 +43,15 @@ bool editing_surface_from_focus(DocState* state, EditingSurface* out);
 bool editing_surface_is_rich(const EditingSurface* surface);
 bool editing_surface_is_text_control(const EditingSurface* surface);
 
+// Stage 4B Phase 3: a rich editing host explicitly marked `data-script-edit`
+// is script-managed — its input events are routed to script handlers (JS
+// addEventListener / Lambda `on`) which own the document model and apply every
+// edit. The native rich-edit behavior layer is bypassed for such surfaces
+// (contenteditable acts purely as a routing flag). Unmarked contenteditable
+// keeps the native engine, the Phase-4 parity safety net. Transitional: once
+// the native engine is retired (Phase 5) all contenteditable routes to script.
+bool editing_surface_is_script_managed(const EditingSurface* surface);
+
 const char* editing_surface_kind_name(EditingSurfaceKind kind);
 const char* editing_mode_name(EditingMode mode);
 

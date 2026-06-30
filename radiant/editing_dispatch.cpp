@@ -828,6 +828,36 @@ bool editing_run_transaction(EventContext* evcon,
     current_tx.surface = &current_surface;
 
     DocState* state = editing_dispatch_doc_state(evcon);
+
+    // Stage 4B Phase 3: contenteditable hosts marked `data-script-edit` are
+    // script-managed routing flags. Generate and deliver the `beforeinput`
+    // event to the script handlers (JS addEventListener / Lambda `on`), which
+    // own the model and apply the edit; the native rich-edit behavior layer
+    // (transaction state machine + default mutation) is bypassed entirely.
+    // `dispatchable` intents are the real Input Events (insertText,
+    // insertParagraph, delete*, …); non-dispatchable intents (format*/selectAll)
+    // are not fired as `beforeinput` and fall through to the legacy path so
+    // their existing routing to script `on` handlers is unchanged.
+    if (editing_surface_is_script_managed(&current_surface) &&
+        input_intent_is_dispatchable(current_tx.intent->type)) {
+        bool prevented = false;
+        bool lambda_handled = false;
+        editing_dispatch_beforeinput_ex(evcon, &current_surface, current_tx.intent,
+                                        current_tx.hooks, false,
+                                        &prevented, &lambda_handled);
+        if (out_prevented) *out_prevented = prevented;
+        if (out_lambda_handled) *out_lambda_handled = lambda_handled;
+        if (out_mutated) *out_mutated = false;
+        log_debug("editing_dispatch: script-managed surface — routed %s to script, "
+                  "native apply bypassed (prevented=%d lambda_handled=%d)",
+                  input_intent_type_name(current_tx.intent->type),
+                  prevented, lambda_handled);
+        // Routed to the script: the native engine performs no mutation and
+        // reports the event handled so callers do not fall through to the
+        // native consumer/default transaction (which would re-dispatch it).
+        return true;
+    }
+
     if (state) {
         radiant_state_assert_valid(state, "editing_transaction_preflight");
     }
@@ -866,6 +896,26 @@ bool editing_run_transaction(EventContext* evcon,
             if (state->selection_mutation_seq != beforeinput_selection_seq) {
                 editing_dispatch_sync_rich_transaction_to_selection(
                     state, &current_surface, &tx_target);
+            }
+            if (prevented && current_surface.owner) {
+                // Stage 4B: the script (JS preventDefault) applied the edit and
+                // may have reconciled the editable subtree — splitting/merging
+                // blocks (e.g. Enter) detaches the leaf view this transaction
+                // referenced, and the script restores the selection
+                // asynchronously. No native mutation runs for a prevented edit,
+                // so re-anchor the transaction to the editing host (which
+                // survives reconcile) instead of leaving it pointed at a
+                // detached view; this keeps the rich-transaction phase and its
+                // target-range invariant referencing a live surface.
+                EditingSurface host_surface;
+                if (editing_surface_from_target(
+                        static_cast<View*>(current_surface.owner),
+                        &host_surface) &&
+                    editing_surface_is_rich(&host_surface)) {
+                    current_surface = host_surface;
+                    tx_target = host_surface.view;
+                    editing_interaction_set_active_surface(state, &host_surface);
+                }
             }
             editing_dispatch_set_rich_phase(state, EDITING_RICH_TX_BEFOREINPUT,
                                             tx_target);
@@ -1018,9 +1068,20 @@ bool editing_dispatch_beforeinput_ex(EventContext* evcon,
     // preventDefault() remains the cancellation surface for Input Events.
     bool js_prevented = false;
     if (dispatchable && hooks->dispatch_input_event) {
+        // The script handler may synchronously reconcile the editable subtree
+        // (Stage 4B). Mark the re-entrant window so a focus/selection
+        // transition triggered by that reconcile does not assert the native
+        // rich-transaction target-range invariant against a surface the script
+        // is mid-replacing (it re-syncs once dispatch returns, below).
+        bool prev_in_dispatch = state &&
+            state->editing.rich_transaction_in_script_dispatch;
+        if (state) state->editing.rich_transaction_in_script_dispatch = true;
         js_prevented = hooks->dispatch_input_event(evcon, surface->view,
                                                    "beforeinput", intent,
                                                    hooks->user);
+        if (state) {
+            state->editing.rich_transaction_in_script_dispatch = prev_in_dispatch;
+        }
     }
 
     bool lambda_handled = false;

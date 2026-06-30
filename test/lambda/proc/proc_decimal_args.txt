@@ -1,0 +1,9 @@
+global-unlimited=3.14159
+literal-unlimited=2.71828
+local-unlimited=0.333
+forwarded-unlimited=3.14159
+global-fixed=1.25
+literal-fixed=6.5
+forwarded-fixed=4.75
+fn-echo=3.14159
+fn-add=3.75

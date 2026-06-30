@@ -282,6 +282,15 @@ typedef struct EditingInteractionState {
     EditingScrollState autoscroll;
     EditingRichTransactionPhase rich_transaction_phase;
     View* rich_transaction_target;
+    // Set while the substrate is synchronously dispatching a `beforeinput`
+    // event into a script handler (JS addEventListener / Lambda `on` handler).
+    // The script may reconcile the editable subtree re-entrantly inside that
+    // window (Stage 4B: the script owns the apply path), which transiently
+    // destroys/replaces the surface the native rich transaction references.
+    // The transaction is inert during script dispatch (the script
+    // preventDefaults) and re-syncs to the post-reconcile selection once
+    // dispatch returns, so the target-range invariant is suspended here.
+    bool rich_transaction_in_script_dispatch;
     bool rich_transaction_target_ranges_active;
     bool rich_transaction_target_ranges_required;
     bool rich_transaction_target_ranges_valid;

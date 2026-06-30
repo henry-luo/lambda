@@ -4303,6 +4303,8 @@ static bool post_html_handler_incremental_rebuild(
     return true;
 }
 
+static DomElement* radiant_view_to_dom_element(View* v);
+
 static void post_html_handler_rebuild(EventContext* evcon,
                                        std::chrono::high_resolution_clock::time_point t_start,
                                        std::chrono::high_resolution_clock::time_point t_handler) {
@@ -4350,6 +4352,14 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     DocState* state = (DocState*)doc->state;
 
+    // A full rebuild frees the entire view tree, so the focused View* must be
+    // cleared (below) to avoid a dangling pointer. For a script-driven rich
+    // editor (Stage 4B) that would silently blur the contenteditable host and
+    // drop all subsequent input. The DOM tree survives the view-tree teardown,
+    // so capture the focused editing host element here and re-focus it after
+    // relayout — mirroring rebuild_lambda_doc and restore_form_text_focus_after_input.
+    DomElement* refocus_host = nullptr;
+
     // Clear interaction targets before freeing views so transition helpers can
     // still update pseudo-state mirrors on the old tree.
     if (state) {
@@ -4365,6 +4375,19 @@ static void post_html_handler_rebuild(EventContext* evcon,
         doc_state_set_active_target(state, NULL);
         doc_state_set_drag_state(state, NULL, false);
         if (focus_has_current(state)) {
+            // Capture from the live focus (active_surface may already have been
+            // cleared by the reconcile's focus/caret churn): if the focused
+            // element resolves to a rich editing host, remember it for re-focus.
+            View* focused_view = focus_get(state);
+            DomElement* focused_elem = focused_view
+                ? radiant_view_to_dom_element(focused_view) : nullptr;
+            EditingSurface focused_surface;
+            if (focused_elem &&
+                editing_surface_from_target(static_cast<View*>(focused_elem),
+                                            &focused_surface) &&
+                editing_surface_is_rich(&focused_surface)) {
+                refocus_host = focused_surface.owner;
+            }
             focus_clear(state);
         } else if (!preserve_rich_editing && !preserve_text_control_selection) {
             state_store_legacy_selection_clear(state);
@@ -4404,6 +4427,24 @@ static void post_html_handler_rebuild(EventContext* evcon,
     if (evcon->ui_context) evcon->ui_context->document = doc;
     layout_html_doc(evcon->ui_context, doc, false);
     if (evcon->ui_context) evcon->ui_context->document = saved_doc;
+
+    // Re-focus the editing host the rebuild blurred, provided it is still
+    // connected to the document (the host survives a child-subtree reconcile;
+    // a whole-document replace keeps it too). Without this the contenteditable
+    // surface stays blurred after a structural edit and silently drops further
+    // input. The DOM element persists across the view-tree rebuild, so the
+    // freshly-laid-out element node is itself the focus target.
+    if (state && refocus_host && !focus_has_current(state)) {
+        bool connected = false;
+        for (DomNode* p = static_cast<DomNode*>(refocus_host); p; p = p->parent) {
+            if (p == static_cast<DomNode*>(doc->root)) { connected = true; break; }
+        }
+        if (connected) {
+            focus_set(state, static_cast<View*>(refocus_host), false);
+            log_debug("post_html_handler_rebuild: restored focus to rich editing host %p",
+                      refocus_host);
+        }
+    }
 
     auto t2 = high_resolution_clock::now();
 
