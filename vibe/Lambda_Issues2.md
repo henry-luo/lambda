@@ -223,22 +223,28 @@ Lambda does not have `substr(str, start, len)` or `charcode(str, idx)` functions
 
 ## 9. `div` Is a Reserved Word
 
+**Status**: Fixed
 **Severity**: Compilation error (syntax error near `=`)  
 **Affected benchmarks**: navier_stokes
 
-Using `div` as a variable or parameter name produces a syntax error when it appears as an assignment target.
+`div` is still the integer-division operator in expression context (`a div b`), but it is no longer treated as a reserved word for identifiers. It can be used as a local variable or parameter name, including as an indexed assignment target.
 
-**Workaround**: Rename the variable (e.g., `dv`).
+Because `div` remains an operator, a line starting with `div[...]` immediately after another expression can still be parsed as a continuation of the previous expression unless the previous statement is clearly terminated. Use a statement separator in that case, just as with other expression-continuation ambiguities.
+
+**Former workaround**: Rename the variable (e.g., `dv`). This is no longer needed.
 
 ```lambda
-// FAILS
 pn project(u, v, p, div, iterations: int) {
-    div[idx] = ...  // syntax error near '='
+    div[idx] = value  // now parses and assigns correctly
+}
 
-// WORKS
-pn project(u, v, p, dv, iterations: int) {
-    dv[idx] = ...
+pn main() {
+    var div = [1, 2, 3];
+    project(null, null, null, div, 1)
+}
 ```
+
+**Verification**: `test/lambda/proc/proc_div_identifier.ls` covers `div` as a procedural parameter, local variable, and indexed assignment target.
 
 ---
 
@@ -458,27 +464,30 @@ pn replace_first(s, search, repl) {
 
 ## 17. Decimal Values Become Zero When Passed as Function Arguments
 
+**Status**: ✅ **FIXED**.
 **Severity**: Compilation/runtime bug
 **Affected benchmarks**: bigdenary
 
-When a `decimal` value (with either `n` or `N` suffix) is passed as an argument to a `pn` function, the received value is `0` instead of the original decimal. This happens with both global `let` constants and local variables.
+Decimal argument passing now preserves both fixed (`n`) and unlimited (`N`) decimal values through `pn` parameters and expression functions. The regression test `test/lambda/proc/proc_decimal_args.ls` covers global constants, literals, locals, forwarded procedural calls, and `fn` calls.
+
+Previously, when a `decimal` value (with either `n` or `N` suffix) was passed as an argument to a `pn` function, the received value was `0` instead of the original decimal. This happened with both global `let` constants and local variables.
 
 ```lambda
 let BD1 = 3.14159N
 
 pn show(d) {
-    print(string(d) ++ "\n")  // prints "0" instead of "3.14159"
+    print(string(d) ++ "\n")  // now prints "3.14159"
 }
 
 pn main() {
-    show(BD1)         // 0
-    show(3.14159N)    // 0
+    show(BD1)         // 3.14159
+    show(3.14159N)    // 3.14159
     let x = 2.71828N
-    show(x)           // 0
+    show(x)           // 2.71828
 }
 ```
 
-**Workaround**: Access global decimal constants directly inside functions instead of passing them as parameters.
+**Former workaround**: Access global decimal constants directly inside functions instead of passing them as parameters. This workaround is no longer needed.
 
 ```lambda
 let BD1 = 3.14159N
@@ -488,7 +497,7 @@ pn show() {
 }
 ```
 
-**Suggestion**: Fix the transpiler or calling convention to correctly pass decimal values through function arguments.
+**Verification**: `test/lambda/proc/proc_decimal_args.ls` passes under the Lambda procedural test runner.
 
 ---
 
@@ -504,7 +513,7 @@ pn show() {
 | 6 | No unsigned right shift | Bitwise ops | **Fixed for typed unsigned ints**; `shr(u32, n)` zero-fills |
 | 7 | `fill(0, x)` returns null | Edge case | **Fixed**; DeltaBlue now concatenates from empty fill arrays directly |
 | 8 | Missing substr/charcode | Missing feature | 1 benchmark, minor |
-| 9 | `div` reserved word | Reserved word | 1 benchmark, minor |
+| 9 | `div` reserved word | Reserved word | **Fixed**; `div` can be used as a parameter/local name and assignment target |
 | 10 | Immutable parameters | Language design | 1 benchmark, minor |
 | 11 | Integer division returns float | Type inference | 1 benchmark, silent wrong results |
 | 12 | `shl` 64-bit overflow | Bitwise ops | **Fixed for typed `u32` code**; SHA-1/MD5 rotate helpers use compact shifts |
@@ -512,4 +521,4 @@ pn show() {
 | 14 | `slice()` no 2-argument form | Missing feature | **Fixed**; `slice(vec,start)` delegates to slice-to-end |
 | 15 | No case-insensitive patterns | Missing feature | 1 benchmark, workaround needed |
 | 16 | No replace-first function | Missing feature | 1 benchmark, manual workaround |
-| 17 | Decimal args become zero | Runtime bug | 1 benchmark, workaround needed |
+| 17 | Decimal args become zero | Runtime bug | **Fixed**; decimal values pass correctly through `pn` and `fn` arguments |

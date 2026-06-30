@@ -1,0 +1,2 @@
+local-assign=99
+param-assign=42
