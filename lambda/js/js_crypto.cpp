@@ -76,6 +76,9 @@ static bool crypto_string_equals(Item item, const char* expected);
 static Item crypto_throw_invalid_property_value(const char* prop, const char* expected);
 static bool crypto_item_to_integer(Item item, const char* name, int* out_value);
 static Item make_string_item_crypto(const char* str);
+static const char* crypto_detect_unsupported_asymmetric_key_type(const uint8_t* key,
+                                                                int key_len);
+static Item crypto_throw_unsupported_asymmetric_key(const char* key_type);
 
 static bool crypto_digest_is_xof(const char* alg) {
     return alg && (strcmp(alg, "shake128") == 0 || strcmp(alg, "shake256") == 0);
@@ -2155,6 +2158,7 @@ struct CryptoSignVerifyOptions {
     Item key;
     int padding;
     int salt_length;
+    bool dsa_ieee_p1363;
 };
 
 static bool crypto_sign_verify_options(Item key_item, CryptoSignVerifyOptions* out) {
@@ -2162,6 +2166,7 @@ static bool crypto_sign_verify_options(Item key_item, CryptoSignVerifyOptions* o
     out->key = key_item;
     out->padding = CRYPTO_RSA_PKCS1_PADDING;
     out->salt_length = CRYPTO_RSA_PSS_SALTLEN_AUTO;
+    out->dsa_ieee_p1363 = false;
 
     if (get_type_id(key_item) != LMD_TYPE_MAP) return true;
 
@@ -2190,6 +2195,17 @@ static bool crypto_sign_verify_options(Item key_item, CryptoSignVerifyOptions* o
         }
         out->salt_length = salt_length;
     }
+
+    Item dsa_encoding_item = js_property_get(key_item, make_string_item_crypto("dsaEncoding"));
+    if (!crypto_item_is_undefined(dsa_encoding_item)) {
+        if (crypto_string_equals(dsa_encoding_item, "ieee-p1363")) {
+            out->dsa_ieee_p1363 = true;
+        } else if (!crypto_string_equals(dsa_encoding_item, "der")) {
+            crypto_throw_invalid_property_value("options.dsaEncoding",
+                "'der', 'ieee-p1363'");
+            return false;
+        }
+    }
     return true;
 }
 
@@ -2197,6 +2213,186 @@ static bool crypto_pk_is_rsa(mbedtls_pk_context* pk) {
     if (!pk) return false;
     mbedtls_pk_type_t type = mbedtls_pk_get_type(pk);
     return type == MBEDTLS_PK_RSA || type == MBEDTLS_PK_RSASSA_PSS;
+}
+
+static bool crypto_pk_is_ec(mbedtls_pk_context* pk) {
+    if (!pk) return false;
+    mbedtls_pk_type_t type = mbedtls_pk_get_type(pk);
+    return type == MBEDTLS_PK_ECKEY || type == MBEDTLS_PK_ECKEY_DH;
+}
+
+static bool crypto_der_read_len(const uint8_t* der, int der_len, int* pos,
+                                int* out_len) {
+    if (!der || !pos || !out_len || *pos >= der_len) return false;
+    int first = der[(*pos)++];
+    if ((first & 0x80) == 0) {
+        *out_len = first;
+        return *pos + *out_len <= der_len;
+    }
+
+    int bytes = first & 0x7F;
+    if (bytes <= 0 || bytes > 4 || *pos + bytes > der_len) return false;
+    int len = 0;
+    for (int i = 0; i < bytes; i++) {
+        len = (len << 8) | der[(*pos)++];
+    }
+    if (len < 0 || *pos + len > der_len) return false;
+    *out_len = len;
+    return true;
+}
+
+static bool crypto_der_read_integer_p1363(const uint8_t* der, int der_len,
+                                          int* pos, uint8_t* out, int width) {
+    if (!der || !pos || !out || width <= 0 || *pos >= der_len) return false;
+    if (der[(*pos)++] != 0x02) return false;
+
+    int len = 0;
+    if (!crypto_der_read_len(der, der_len, pos, &len)) return false;
+    if (len <= 0 || *pos + len > der_len) return false;
+
+    const uint8_t* value = der + *pos;
+    int value_len = len;
+    while (value_len > 1 && value[0] == 0) {
+        value++;
+        value_len--;
+    }
+    if (value_len > width) return false;
+
+    memset(out, 0, (size_t)width);
+    memcpy(out + width - value_len, value, (size_t)value_len);
+    *pos += len;
+    return true;
+}
+
+static bool crypto_ecdsa_der_to_p1363(const uint8_t* der, int der_len,
+                                      int width, uint8_t* out, int out_len) {
+    if (!der || !out || der_len <= 0 || width <= 0 || out_len != width * 2) return false;
+    int pos = 0;
+    if (der[pos++] != 0x30) return false;
+
+    int seq_len = 0;
+    if (!crypto_der_read_len(der, der_len, &pos, &seq_len)) return false;
+    if (seq_len <= 0 || pos + seq_len != der_len) return false;
+
+    if (!crypto_der_read_integer_p1363(der, der_len, &pos, out, width)) return false;
+    if (!crypto_der_read_integer_p1363(der, der_len, &pos, out + width, width)) return false;
+    return pos == der_len;
+}
+
+static int crypto_der_write_len(uint8_t* out, int out_cap, int pos, int len) {
+    if (!out || len < 0 || pos < 0 || pos >= out_cap) return -1;
+    if (len < 0x80) {
+        out[pos++] = (uint8_t)len;
+        return pos;
+    }
+
+    uint8_t tmp[4];
+    int count = 0;
+    int value = len;
+    while (value > 0 && count < 4) {
+        tmp[count++] = (uint8_t)(value & 0xFF);
+        value >>= 8;
+    }
+    if (value != 0 || pos + 1 + count > out_cap) return -1;
+    out[pos++] = (uint8_t)(0x80 | count);
+    for (int i = count - 1; i >= 0; i--) out[pos++] = tmp[i];
+    return pos;
+}
+
+static int crypto_der_integer_len_from_p1363(const uint8_t* value, int width) {
+    if (!value || width <= 0) return -1;
+    int offset = 0;
+    while (offset < width - 1 && value[offset] == 0) offset++;
+    int len = width - offset;
+    if ((value[offset] & 0x80) != 0) len++;
+    return len;
+}
+
+static int crypto_der_write_integer_from_p1363(uint8_t* out, int out_cap,
+                                               int pos, const uint8_t* value,
+                                               int width) {
+    if (!out || !value || width <= 0 || pos < 0 || pos >= out_cap) return -1;
+    int offset = 0;
+    while (offset < width - 1 && value[offset] == 0) offset++;
+    int value_len = width - offset;
+    bool needs_zero = (value[offset] & 0x80) != 0;
+    int encoded_len = value_len + (needs_zero ? 1 : 0);
+    if (pos + 1 >= out_cap) return -1;
+    out[pos++] = 0x02;
+    pos = crypto_der_write_len(out, out_cap, pos, encoded_len);
+    if (pos < 0 || pos + encoded_len > out_cap) return -1;
+    if (needs_zero) out[pos++] = 0;
+    memcpy(out + pos, value + offset, (size_t)value_len);
+    return pos + value_len;
+}
+
+static int crypto_der_len_size(int len) {
+    if (len < 0) return -1;
+    if (len < 0x80) return 1;
+    if (len <= 0xFF) return 2;
+    if (len <= 0xFFFF) return 3;
+    if (len <= 0xFFFFFF) return 4;
+    return 5;
+}
+
+static int crypto_der_mpi_integer_content_len(const mbedtls_mpi* value) {
+    if (!value) return -1;
+    size_t bit_len = mbedtls_mpi_bitlen(value);
+    if (bit_len == 0) return 1;
+    int byte_len = (int)((bit_len + 7) / 8);
+    return byte_len + ((bit_len % 8) == 0 ? 1 : 0);
+}
+
+static int crypto_der_mpi_integer_total_len(const mbedtls_mpi* value) {
+    int content_len = crypto_der_mpi_integer_content_len(value);
+    if (content_len <= 0) return -1;
+    int len_size = crypto_der_len_size(content_len);
+    if (len_size <= 0) return -1;
+    return 1 + len_size + content_len;
+}
+
+static int crypto_der_write_mpi_integer(uint8_t* out, int out_cap, int pos,
+                                        const mbedtls_mpi* value) {
+    if (!out || !value || pos < 0 || pos >= out_cap) return -1;
+    size_t bit_len = mbedtls_mpi_bitlen(value);
+    int value_len = bit_len == 0 ? 1 : (int)((bit_len + 7) / 8);
+    bool needs_zero = bit_len > 0 && (bit_len % 8) == 0;
+    int content_len = value_len + (needs_zero ? 1 : 0);
+    if (pos + 1 >= out_cap) return -1;
+    out[pos++] = 0x02;
+    pos = crypto_der_write_len(out, out_cap, pos, content_len);
+    if (pos < 0 || pos + content_len > out_cap) return -1;
+    if (needs_zero) out[pos++] = 0;
+    if (bit_len == 0) {
+        out[pos++] = 0;
+    } else if (mbedtls_mpi_write_binary(value, out + pos, (size_t)value_len) != 0) {
+        return -1;
+    } else {
+        pos += value_len;
+    }
+    return pos;
+}
+
+static bool crypto_ecdsa_p1363_to_der(const uint8_t* p1363, int p1363_len,
+                                      int width, uint8_t* out, int out_cap,
+                                      int* out_len) {
+    if (!p1363 || !out || !out_len || width <= 0 || p1363_len != width * 2) return false;
+    int r_len = crypto_der_integer_len_from_p1363(p1363, width);
+    int s_len = crypto_der_integer_len_from_p1363(p1363 + width, width);
+    if (r_len <= 0 || s_len <= 0) return false;
+
+    int ints_len = 2 + r_len + 2 + s_len;
+    int pos = 0;
+    if (out_cap <= 0) return false;
+    out[pos++] = 0x30;
+    pos = crypto_der_write_len(out, out_cap, pos, ints_len);
+    if (pos < 0) return false;
+    pos = crypto_der_write_integer_from_p1363(out, out_cap, pos, p1363, width);
+    if (pos < 0) return false;
+    pos = crypto_der_write_integer_from_p1363(out, out_cap, pos, p1363 + width, width);
+    if (pos < 0) return false;
+    *out_len = pos;
+    return true;
 }
 
 static int crypto_rsa_pss_max_salt_length(mbedtls_pk_context* pk, int hash_len) {
@@ -2343,7 +2539,10 @@ extern "C" Item js_sign_verify_sign(Item key_item, Item encoding_item) {
         crypto_mbedtls_random, NULL);
     if (ret != 0) {
         log_error("crypto: private key parse for sign failed: -0x%04x", -ret);
-        result = js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse private key");
+        const char* unsupported_type = crypto_detect_unsupported_asymmetric_key_type(key_bytes, key_len);
+        result = unsupported_type ?
+            crypto_throw_unsupported_asymmetric_key(unsupported_type) :
+            js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse private key");
     } else {
         if (options.padding == CRYPTO_RSA_PKCS1_PSS_PADDING) {
             ret = crypto_rsa_pss_sign(&pk, md_alg, hash, hash_len,
@@ -2357,7 +2556,19 @@ extern "C" Item js_sign_verify_sign(Item key_item, Item encoding_item) {
             log_error("crypto: PK sign failed: -0x%04x", -ret);
             result = crypto_throw_sign_failed("Failed to sign data");
         } else {
-            result = crypto_output_temp_bytes(signature, (int)signature_len, encoding_item);
+            if (options.dsa_ieee_p1363 && crypto_pk_is_ec(&pk)) {
+                int width = (int)mbedtls_pk_get_len(&pk);
+                uint8_t p1363[MBEDTLS_PK_SIGNATURE_MAX_SIZE];
+                if (width <= 0 || width * 2 > (int)sizeof(p1363) ||
+                        !crypto_ecdsa_der_to_p1363(signature, (int)signature_len,
+                            width, p1363, width * 2)) {
+                    result = crypto_throw_sign_failed("Failed to encode ECDSA signature");
+                } else {
+                    result = crypto_output_temp_bytes(p1363, width * 2, encoding_item);
+                }
+            } else {
+                result = crypto_output_temp_bytes(signature, (int)signature_len, encoding_item);
+            }
         }
     }
 
@@ -2437,12 +2648,28 @@ extern "C" Item js_sign_verify_verify(Item key_item, Item signature_item, Item e
     bool verified = false;
     int ret = crypto_parse_key_for_verify(&pk, key_bytes, key_len);
     if (ret == 0) {
+        uint8_t der_signature[MBEDTLS_PK_SIGNATURE_MAX_SIZE];
+        const uint8_t* verify_signature = signature_bytes;
+        int verify_signature_len = signature_len;
+        if (options.dsa_ieee_p1363 && crypto_pk_is_ec(&pk)) {
+            int width = (int)mbedtls_pk_get_len(&pk);
+            int der_signature_len = 0;
+            if (width <= 0 ||
+                    !crypto_ecdsa_p1363_to_der(signature_bytes, signature_len,
+                        width, der_signature, (int)sizeof(der_signature),
+                        &der_signature_len)) {
+                ret = MBEDTLS_ERR_PK_SIG_LEN_MISMATCH;
+            } else {
+                verify_signature = der_signature;
+                verify_signature_len = der_signature_len;
+            }
+        }
         if (options.padding == CRYPTO_RSA_PKCS1_PSS_PADDING) {
             ret = crypto_rsa_pss_verify(&pk, md_alg, hash, hash_len,
-                options.salt_length, signature_bytes, signature_len);
-        } else {
+                options.salt_length, verify_signature, verify_signature_len);
+        } else if (ret == 0) {
             ret = mbedtls_pk_verify(&pk, md_alg, hash, (size_t)hash_len,
-                signature_bytes, (size_t)signature_len);
+                verify_signature, (size_t)verify_signature_len);
         }
         verified = ret == 0;
         if (ret != 0) {
@@ -4206,16 +4433,109 @@ static int crypto_visible_pem_len(const uint8_t* bytes, int len) {
     return len;
 }
 
+static bool crypto_bytes_contains_seq(const uint8_t* bytes, int len,
+                                      const uint8_t* needle, int needle_len) {
+    if (!bytes || !needle || len <= 0 || needle_len <= 0 || needle_len > len) return false;
+    for (int i = 0; i <= len - needle_len; i++) {
+        if (memcmp(bytes + i, needle, (size_t)needle_len) == 0) return true;
+    }
+    return false;
+}
+
+static bool crypto_bytes_contains_ascii(const uint8_t* bytes, int len,
+                                        const char* needle) {
+    if (!needle) return false;
+    return crypto_bytes_contains_seq(bytes, len, (const uint8_t*)needle,
+        (int)strlen(needle));
+}
+
+static bool crypto_pem_body_bounds(const uint8_t* bytes, int len,
+                                   const char** body, int* body_len) {
+    if (!body || !body_len || !crypto_bytes_look_like_pem(bytes, len)) return false;
+    *body = NULL;
+    *body_len = 0;
+
+    int begin_end = -1;
+    for (int i = 0; i < len; i++) {
+        if (bytes[i] == '\n' || bytes[i] == '\r') {
+            begin_end = i + 1;
+            while (begin_end < len && (bytes[begin_end] == '\n' || bytes[begin_end] == '\r')) begin_end++;
+            break;
+        }
+    }
+    if (begin_end < 0 || begin_end >= len) return false;
+
+    const char* end_marker = "-----END ";
+    int end_marker_len = (int)strlen(end_marker);
+    int end_pos = -1;
+    for (int i = begin_end; i <= len - end_marker_len; i++) {
+        if (memcmp(bytes + i, end_marker, (size_t)end_marker_len) == 0) {
+            end_pos = i;
+            break;
+        }
+    }
+    if (end_pos < 0 || end_pos <= begin_end) return false;
+
+    *body = (const char*)bytes + begin_end;
+    *body_len = end_pos - begin_end;
+    return true;
+}
+
+static const char* crypto_unsupported_key_type_from_der(const uint8_t* der, int der_len) {
+    static const uint8_t ed25519_oid[] = {0x06, 0x03, 0x2b, 0x65, 0x70};
+    static const uint8_t ed448_oid[] = {0x06, 0x03, 0x2b, 0x65, 0x71};
+    static const uint8_t dsa_oid[] = {0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x38, 0x04, 0x01};
+
+    if (crypto_bytes_contains_seq(der, der_len, ed25519_oid, (int)sizeof(ed25519_oid))) return "ed25519";
+    if (crypto_bytes_contains_seq(der, der_len, ed448_oid, (int)sizeof(ed448_oid))) return "ed448";
+    if (crypto_bytes_contains_seq(der, der_len, dsa_oid, (int)sizeof(dsa_oid))) return "dsa";
+    return NULL;
+}
+
+static const char* crypto_detect_unsupported_asymmetric_key_type(const uint8_t* key,
+                                                                int key_len) {
+    if (!key || key_len <= 0) return NULL;
+
+    if (crypto_bytes_contains_ascii(key, key_len, "-----BEGIN DSA PRIVATE KEY-----")) {
+        return "dsa";
+    }
+
+    const char* body = NULL;
+    int body_len = 0;
+    if (crypto_pem_body_bounds(key, key_len, &body, &body_len)) {
+        size_t der_len = 0;
+        uint8_t* der = base64_decode_variant(body, (size_t)body_len, &der_len, BASE64_STD);
+        const char* key_type = crypto_unsupported_key_type_from_der(der, (int)der_len);
+        if (der) mem_free(der);
+        if (key_type) return key_type;
+    }
+
+    return crypto_unsupported_key_type_from_der(key, key_len);
+}
+
+static Item crypto_throw_unsupported_asymmetric_key(const char* key_type) {
+    char msg[160];
+    snprintf(msg, sizeof(msg), "Unsupported asymmetric key type: %s",
+        key_type ? key_type : "unknown");
+    return js_throw_error_with_code("ERR_OSSL_UNSUPPORTED", msg);
+}
+
 enum CryptoAsymmetricExportFormat {
     CRYPTO_ASYM_EXPORT_LEGACY_BUFFER = 0,
     CRYPTO_ASYM_EXPORT_PEM = 1,
     CRYPTO_ASYM_EXPORT_DER = 2
 };
 
+enum CryptoAsymmetricExportType {
+    CRYPTO_ASYM_EXPORT_TYPE_DEFAULT = 0,
+    CRYPTO_ASYM_EXPORT_TYPE_PKCS1 = 1
+};
+
 static bool crypto_asymmetric_export_options(Item options_item, bool is_private,
-                                             int* out_format) {
-    if (!out_format) return false;
+                                             int* out_format, int* out_type) {
+    if (!out_format || !out_type) return false;
     *out_format = CRYPTO_ASYM_EXPORT_LEGACY_BUFFER;
+    *out_type = CRYPTO_ASYM_EXPORT_TYPE_DEFAULT;
     if (crypto_item_is_undefined(options_item) || get_type_id(options_item) == LMD_TYPE_NULL) return true;
     if (get_type_id(options_item) != LMD_TYPE_MAP) {
         js_throw_invalid_arg_type("options", "Object", options_item);
@@ -4234,11 +4554,191 @@ static bool crypto_asymmetric_export_options(Item options_item, bool is_private,
 
     Item type_item = js_property_get(options_item, make_string_item_crypto("type"));
     const char* expected_type = is_private ? "pkcs8" : "spki";
-    if (!crypto_string_equals(type_item, expected_type)) {
+    if (crypto_string_equals(type_item, "pkcs1")) {
+        *out_type = CRYPTO_ASYM_EXPORT_TYPE_PKCS1;
+    } else if (!crypto_string_equals(type_item, expected_type)) {
         crypto_throw_invalid_property_value("options.type", is_private ? "'pkcs8'" : "'spki'");
         return false;
     }
     return true;
+}
+
+static Item crypto_pkcs1_pem_from_der(const uint8_t* der, int der_len, bool is_private) {
+    if (!der || der_len <= 0) {
+        return js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to export key");
+    }
+
+    const char* begin = is_private ?
+        "-----BEGIN RSA PRIVATE KEY-----\n" :
+        "-----BEGIN RSA PUBLIC KEY-----\n";
+    const char* end = is_private ?
+        "-----END RSA PRIVATE KEY-----\n" :
+        "-----END RSA PUBLIC KEY-----\n";
+    size_t b64_len = base64_encoded_len((size_t)der_len, BASE64_STD);
+    size_t line_breaks = b64_len == 0 ? 0 : (b64_len - 1) / 64 + 1;
+    size_t total_len = strlen(begin) + b64_len + line_breaks + strlen(end);
+    char* pem = (char*)mem_alloc(total_len + 1, MEM_CAT_JS_RUNTIME);
+    char* b64 = (char*)mem_alloc(b64_len + 1, MEM_CAT_JS_RUNTIME);
+    base64_encode(der, (size_t)der_len, b64, BASE64_STD);
+
+    int pos = 0;
+    int begin_len = (int)strlen(begin);
+    memcpy(pem + pos, begin, (size_t)begin_len);
+    pos += begin_len;
+    for (size_t i = 0; i < b64_len; i += 64) {
+        size_t chunk = b64_len - i;
+        if (chunk > 64) chunk = 64;
+        memcpy(pem + pos, b64 + i, chunk);
+        pos += (int)chunk;
+        pem[pos++] = '\n';
+    }
+    int end_len = (int)strlen(end);
+    memcpy(pem + pos, end, (size_t)end_len);
+    pos += end_len;
+    pem[pos] = 0;
+
+    Item result = make_string_item_crypto(pem);
+    mem_free(b64);
+    mem_free(pem);
+    return result;
+}
+
+static bool crypto_rsa_pkcs1_public_der(mbedtls_rsa_context* rsa,
+                                        uint8_t* der, int der_cap, int* out_len) {
+    if (!rsa || !der || !out_len) return false;
+    *out_len = 0;
+    mbedtls_mpi n;
+    mbedtls_mpi e;
+    mbedtls_mpi_init(&n);
+    mbedtls_mpi_init(&e);
+    int ret = mbedtls_rsa_export(rsa, &n, NULL, NULL, NULL, &e);
+    if (ret != 0) {
+        mbedtls_mpi_free(&n);
+        mbedtls_mpi_free(&e);
+        return false;
+    }
+
+    int content_len = crypto_der_mpi_integer_total_len(&n) +
+                      crypto_der_mpi_integer_total_len(&e);
+    int pos = 0;
+    if (content_len <= 0 || der_cap <= 0) goto fail;
+    der[pos++] = 0x30;
+    pos = crypto_der_write_len(der, der_cap, pos, content_len);
+    pos = crypto_der_write_mpi_integer(der, der_cap, pos, &n);
+    pos = crypto_der_write_mpi_integer(der, der_cap, pos, &e);
+    if (pos <= 0) goto fail;
+    *out_len = pos;
+    mbedtls_mpi_free(&n);
+    mbedtls_mpi_free(&e);
+    return true;
+
+fail:
+    mbedtls_mpi_free(&n);
+    mbedtls_mpi_free(&e);
+    return false;
+}
+
+static bool crypto_rsa_pkcs1_private_der(mbedtls_rsa_context* rsa,
+                                         uint8_t* der, int der_cap, int* out_len) {
+    if (!rsa || !der || !out_len) return false;
+    *out_len = 0;
+    mbedtls_mpi n, e, d, p, q, dp, dq, qp, version;
+    mbedtls_mpi_init(&n);
+    mbedtls_mpi_init(&e);
+    mbedtls_mpi_init(&d);
+    mbedtls_mpi_init(&p);
+    mbedtls_mpi_init(&q);
+    mbedtls_mpi_init(&dp);
+    mbedtls_mpi_init(&dq);
+    mbedtls_mpi_init(&qp);
+    mbedtls_mpi_init(&version);
+    int content_len = 0;
+    int pos = 0;
+
+    int ret = mbedtls_mpi_lset(&version, 0);
+    if (ret != 0) goto fail;
+    ret = mbedtls_rsa_export(rsa, &n, &p, &q, &d, &e);
+    if (ret != 0) goto fail;
+    ret = mbedtls_rsa_export_crt(rsa, &dp, &dq, &qp);
+    if (ret != 0) goto fail;
+
+    content_len =
+        crypto_der_mpi_integer_total_len(&version) +
+        crypto_der_mpi_integer_total_len(&n) +
+        crypto_der_mpi_integer_total_len(&e) +
+        crypto_der_mpi_integer_total_len(&d) +
+        crypto_der_mpi_integer_total_len(&p) +
+        crypto_der_mpi_integer_total_len(&q) +
+        crypto_der_mpi_integer_total_len(&dp) +
+        crypto_der_mpi_integer_total_len(&dq) +
+        crypto_der_mpi_integer_total_len(&qp);
+    if (content_len <= 0 || der_cap <= 0) goto fail;
+    der[pos++] = 0x30;
+    pos = crypto_der_write_len(der, der_cap, pos, content_len);
+    pos = crypto_der_write_mpi_integer(der, der_cap, pos, &version);
+    pos = crypto_der_write_mpi_integer(der, der_cap, pos, &n);
+    pos = crypto_der_write_mpi_integer(der, der_cap, pos, &e);
+    pos = crypto_der_write_mpi_integer(der, der_cap, pos, &d);
+    pos = crypto_der_write_mpi_integer(der, der_cap, pos, &p);
+    pos = crypto_der_write_mpi_integer(der, der_cap, pos, &q);
+    pos = crypto_der_write_mpi_integer(der, der_cap, pos, &dp);
+    pos = crypto_der_write_mpi_integer(der, der_cap, pos, &dq);
+    pos = crypto_der_write_mpi_integer(der, der_cap, pos, &qp);
+    if (pos <= 0) goto fail;
+    *out_len = pos;
+
+    mbedtls_mpi_free(&n);
+    mbedtls_mpi_free(&e);
+    mbedtls_mpi_free(&d);
+    mbedtls_mpi_free(&p);
+    mbedtls_mpi_free(&q);
+    mbedtls_mpi_free(&dp);
+    mbedtls_mpi_free(&dq);
+    mbedtls_mpi_free(&qp);
+    mbedtls_mpi_free(&version);
+    return true;
+
+fail:
+    mbedtls_mpi_free(&n);
+    mbedtls_mpi_free(&e);
+    mbedtls_mpi_free(&d);
+    mbedtls_mpi_free(&p);
+    mbedtls_mpi_free(&q);
+    mbedtls_mpi_free(&dp);
+    mbedtls_mpi_free(&dq);
+    mbedtls_mpi_free(&qp);
+    mbedtls_mpi_free(&version);
+    return false;
+}
+
+static Item crypto_asymmetric_export_pkcs1(const uint8_t* bytes, int len,
+                                           bool is_private, int export_format) {
+    mbedtls_pk_context pk;
+    mbedtls_pk_init(&pk);
+    int ret = is_private ?
+        mbedtls_pk_parse_key(&pk, bytes, (size_t)len, NULL, 0,
+            crypto_mbedtls_random, NULL) :
+        mbedtls_pk_parse_public_key(&pk, bytes, (size_t)len);
+    if (ret != 0 || !crypto_pk_is_rsa(&pk)) {
+        log_debug("crypto: KeyObject PKCS#1 export parse failed: -0x%04x", -ret);
+        mbedtls_pk_free(&pk);
+        return js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse RSA key");
+    }
+
+    uint8_t der[8192];
+    int der_len = 0;
+    bool ok = is_private ?
+        crypto_rsa_pkcs1_private_der(mbedtls_pk_rsa(pk), der, (int)sizeof(der), &der_len) :
+        crypto_rsa_pkcs1_public_der(mbedtls_pk_rsa(pk), der, (int)sizeof(der), &der_len);
+    mbedtls_pk_free(&pk);
+    if (!ok || der_len <= 0) {
+        log_debug("crypto: KeyObject PKCS#1 export write failed");
+        return js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to export RSA key");
+    }
+    if (export_format == CRYPTO_ASYM_EXPORT_DER) {
+        return crypto_buffer_from_bytes(der, der_len);
+    }
+    return crypto_pkcs1_pem_from_der(der, der_len, is_private);
 }
 
 static Item crypto_asymmetric_export_der(const uint8_t* bytes, int len,
@@ -4285,9 +4785,13 @@ extern "C" Item js_crypto_asymmetricKeyExport(Item options_item) {
     if (!get_uint8_buffer(key_bytes, &buf, &len)) return ItemNull;
 
     int export_format = CRYPTO_ASYM_EXPORT_LEGACY_BUFFER;
-    if (!crypto_asymmetric_export_options(options_item, is_private, &export_format)) return ItemNull;
+    int export_type = CRYPTO_ASYM_EXPORT_TYPE_DEFAULT;
+    if (!crypto_asymmetric_export_options(options_item, is_private, &export_format, &export_type)) return ItemNull;
 
     int visible_len = crypto_visible_pem_len(buf, len);
+    if (export_type == CRYPTO_ASYM_EXPORT_TYPE_PKCS1) {
+        return crypto_asymmetric_export_pkcs1(buf, len, is_private, export_format);
+    }
     if (export_format == CRYPTO_ASYM_EXPORT_PEM) {
         String* str = heap_create_name((const char*)(buf ? buf : crypto_empty_bytes), (size_t)visible_len);
         return {.item = s2it(str)};
@@ -4467,9 +4971,12 @@ extern "C" Item js_crypto_createPrivateKey(Item key_item) {
         crypto_mbedtls_random, NULL);
     if (ret != 0) {
         log_debug("crypto: createPrivateKey parse failed: -0x%04x", -ret);
+        const char* unsupported_type = crypto_detect_unsupported_asymmetric_key_type(key, key_len);
         mbedtls_pk_free(&pk);
         mem_free(key);
-        return js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse private key");
+        return unsupported_type ?
+            crypto_throw_unsupported_asymmetric_key(unsupported_type) :
+            js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse private key");
     }
 
     const char* key_type = crypto_asymmetric_key_type_name(mbedtls_pk_get_type(&pk));
@@ -4499,15 +5006,25 @@ extern "C" Item js_crypto_createPublicKey(Item key_item) {
         return result;
     }
 
+    const char* unsupported_public_type = crypto_detect_unsupported_asymmetric_key_type(key, key_len);
+    if (unsupported_public_type) {
+        mbedtls_pk_free(&pk);
+        mem_free(key);
+        return crypto_throw_unsupported_asymmetric_key(unsupported_public_type);
+    }
+
     mbedtls_pk_free(&pk);
     mbedtls_pk_init(&pk);
     ret = mbedtls_pk_parse_key(&pk, key, (size_t)key_len, NULL, 0,
         crypto_mbedtls_random, NULL);
     if (ret != 0) {
         log_debug("crypto: createPublicKey parse failed: -0x%04x", -ret);
+        const char* unsupported_type = crypto_detect_unsupported_asymmetric_key_type(key, key_len);
         mbedtls_pk_free(&pk);
         mem_free(key);
-        return js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse public key");
+        return unsupported_type ?
+            crypto_throw_unsupported_asymmetric_key(unsupported_type) :
+            js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse public key");
     }
 
     unsigned char public_pem[8192];

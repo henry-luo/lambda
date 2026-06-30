@@ -52,16 +52,16 @@ local socket preflight for `http` / `https` / `net` / `tls` tests.
 
 | Metric | Count |
 | --- | ---: |
-| Passing baseline | 1923 |
-| Total tests in recorded run | 3542 |
-| Failed | 1619 |
+| Passing baseline | 1930 |
+| Total tests in recorded run | 3538 |
+| Failed | 1608 |
 | Missing | 0 |
 | Timed out | 0 |
-| Crashed in recorded run | 1 |
-| Previous baseline | 1744 |
+| Crashed in recorded run | 0 |
+| Previous baseline | 1913 |
 | Regressions | 0 |
-| Improvements | 180 |
-| Slow list | 33 tests |
+| Improvements | 17 |
+| Slow list | 34 tests |
 | Skip list | 95 tests |
 
 The local `ref/node` checkout was refreshed to upstream `92b72d4f601` after the
@@ -71,17 +71,17 @@ baseline header now records `ref/node` commit `92b72d4f601`, and the generated
 inventory report confirms zero passing-baseline filenames are missing from the
 checkout.
 
-The one crasher observed during the successful refresh was
-`test-child-process-reject-null-bytes.js`. It was not in the baseline and has
-been moved into `official_skip_list.txt`, along with the earlier 17 crashers
-and one timeout that were also outside the passing baseline.
+The follow-up baseline rerun after updating `ref/node` and removing stale
+missing baseline entries completed with no recorded crashers or timeouts. The
+previously observed `test-child-process-reject-null-bytes.js` crasher remains
+outside the passing baseline and is covered by the skip-list policy.
 
 ## Failure Shape
 
 Using the current checkout's runner prefix rules, updated `ref/node`
 `92b72d4f601`, and the refreshed skip/slow lists, the current non-skip/non-slow
-official tree has 3541 active tests. Of those, 1923 are in the passing baseline
-and 1618 are baseline-inferred failures.
+official tree has 3538 active tests. Of those, 1930 are in the passing baseline
+and 1608 are baseline-inferred failures.
 
 The largest active failing clusters are:
 
@@ -89,12 +89,12 @@ The largest active failing clusters are:
 | --- | ---: | ---: | ---: | --- |
 | `http` | 163 | 207 | 396 | request/response lifecycle and stream-body semantics |
 | `tls` | 96 | 114 | 218 | certificate/options/session fidelity and async lexical/event ordering |
-| `worker` | 31 | 108 | 139 | mostly stubbed worker model |
+| `worker` | 30 | 109 | 139 | mostly stubbed worker model |
 | `crypto` | 63 | 68 | 134 | asymmetric crypto, KeyObject, async sign/verify |
 | `cluster` | 15 | 67 | 83 | fork/IPC/process supervision semantics |
 | `vm` | 30 | 62 | 98 | context isolation and timeout semantics |
 | `repl` | 45 | 60 | 106 | lower priority, CLI/debuggability surface |
-| `diagnostics` | 16 | 52 | 68 | diagnostics_channel and async context binding |
+| `diagnostics` | 26 | 42 | 68 | diagnostics_channel and async context binding |
 | `child-process` | 45 | 50 | 109 | IPC/fork/stdio fidelity |
 | `process` | 38 | 50 | 93 | process binding/env/signal/message fidelity |
 | `whatwg` | 14 | 49 | 63 | TextEncoder/Decoder, web platform shims |
@@ -102,7 +102,7 @@ The largest active failing clusters are:
 | `zlib` | 24 | 39 | 64 | brotli/zstd plus stream transform fidelity |
 | `buffer` | 31 | 36 | 69 | ArrayBuffer/exotic/fidelity gaps |
 | `fs` | 217 | 35 | 257 | near-strong, but async/watch/FileHandle gaps remain |
-| `stream` | 176 | 35 | 215 | remaining state-machine and validation gaps |
+| `stream` | 178 | 33 | 215 | remaining state-machine and validation gaps |
 
 This ranking is not just "stream leftovers." Streams remain important, but the
 current failing surface says Tune5 also needs async context, diagnostics,
@@ -182,8 +182,8 @@ models:
 selected `internal/async_hooks` and `internal/async_context_frame` namespaces.
 However, official failures remain broad:
 
-- `async` prefix: 30 failures out of 48 in the current tree;
-- `diagnostics` prefix: 61 failures out of 67;
+- `async` prefix: 21 failures out of 48 in the current tree;
+- `diagnostics` prefix: 42 failures out of 68;
 - representative diagnostics failure: `TypeError: is not a function`;
 - representative AsyncResource failure: missing expected exception.
 
@@ -198,7 +198,7 @@ The remaining official shape is no longer "crypto missing"; it is asymmetric
 and object-model fidelity:
 
 - `test-crypto-async-sign-verify.js` still fails;
-- 62 current crypto-prefix failures remain;
+- 68 current crypto-prefix failures remain;
 - the likely cluster is KeyObject, Sign/Verify async paths, options/PSS, X509,
   and precise Node error surfaces.
 
@@ -208,7 +208,7 @@ The worker and cluster prefixes are large failure pools:
 
 - `worker`: 109 failures out of 139;
 - `cluster`: 67 failures out of 82;
-- `child-process`: 53 failures out of 95.
+- `child-process`: 50 failures out of 109.
 
 The runtime has useful `child_process` work and some fork/IPC surface, but
 workers and cluster remain mostly compatibility stubs. Tune5 should decide
@@ -221,9 +221,12 @@ Leaving them half-enabled creates noisy failure volume.
 Some modules have mature code but low official score because Node asserts exact
 surface details:
 
-- `assert`: 3 / 14 in the current tree; sample fails on exact `message`.
-- `buffer`: 29 / 67; sample fails on ArrayBuffer/Buffer equality behavior.
-- `util`: 11 / 26; `util.inspect` is slow-listed and `promisify` now passes the
+- `assert`: the original `test-assert-checktag.js` sample now passes, but
+  assertion-message and deep-equality fidelity failures remain in the generated
+  failure classifier.
+- `buffer`: 31 / 69; the original ArrayBuffer sample now passes, while
+  ArrayBuffer/exotic/fidelity gaps remain.
+- `util`: 11 / 30; `util.inspect` is slow-listed and `promisify` now passes the
   current baseline, but deeper inspect/deprecate/format fidelity remains.
 - `path`: 7 / 13 plus several path crash skips.
 
@@ -930,6 +933,186 @@ Results:
 - Regenerated `temp/node_official_report.md` now reports 3541 active tests,
   1923 active baseline passes, 1618 inferred failures, 95 skip-list entries,
   33 slow-list exclusions, and 0 missing baseline names.
+
+### 2026-06-30 Node5 outstanding-track subagent slices
+
+Continued the outstanding Node5 tracks in parallel and landed bounded structural
+slices across each remaining area:
+
+- Track A stream/I/O: `finished()` now distinguishes a disabled stream side
+  from a side closed by `destroy()` before `end` / `finish`; added
+  `test/node/stream_finished_destroy_pending.js`.
+- Track B async/diagnostics: `diagnostics_channel.tracingChannel()
+  .traceCallback()` now wraps async callbacks, preserves start/asyncStart
+  store contexts, publishes callback result/error context, and validates the
+  callback argument; `AsyncLocalStorage(null)` now reports a Node-shaped
+  invalid-argument code; added
+  `test/node/diagnostics_trace_callback_stores.js`.
+- Track C fidelity: `Assert` instances are now unique callable objects, assert
+  errors expose Node's `diff` property, per-instance `diff` options affect
+  direct method calls while destructured methods fall back to `simple`, and
+  `options.strict` wires legacy equality method names to strict variants.
+- Track D crypto: ECDSA Sign/Verify now supports
+  `dsaEncoding: 'ieee-p1363'` for EC keys, including one-shot async callback
+  forms; local asymmetric coverage was expanded. The official async
+  sign/verify test remains blocked by unsupported Ed25519/Ed448/DSA key import.
+- Track E worker/process: `worker_threads.moveMessagePortToContext()` is
+  exported and returns `ERR_CLOSED_MESSAGE_PORT` for closed ports; local
+  MessagePort lifecycle coverage was expanded.
+- Track F VM/module isolation: VM contexts now run with the sandbox as active
+  `globalThis`, install global aliases, inherit standard globals through the
+  real global object, preserve function creation globals across context
+  boundaries, and root captured `with` environments for VM-returned closures.
+
+Verification:
+
+```bash
+make build
+./test/test_js_gtest.exe --gtest_filter='*diagnostics_trace_callback_stores*:*stream_finished_destroy_pending*:*worker_message_port_lifecycle*:*crypto_asymmetric_verify*' --gtest_brief=1
+./test/test_node_gtest.exe --gtest_filter='NodeOfficial/NodeOfficialTest.Run/test_assert_class_destructuring:NodeOfficial/NodeOfficialTest.Run/test_diagnostics_channel_tracing_channel_callback:NodeOfficial/NodeOfficialTest.Run/test_diagnostics_channel_tracing_channel_callback_error:NodeOfficial/NodeOfficialTest.Run/test_diagnostics_channel_tracing_channel_callback_run_stores:NodeOfficial/NodeOfficialTest.Run/test_als_defaultvalue:NodeOfficial/NodeOfficialTest.Run/test_worker_message_port_close' --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --modules=vm --gtest_filter='NodeOfficial/NodeOfficialTest.Run/test_vm_*' --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --modules=crypto --timeout=20000 --gtest_brief=1
+git diff --check
+```
+
+Results:
+
+- Local JS fixture gate: 4/4 passed.
+- Official focused non-VM gate: 6/6 passed, 0 regressions, 6 improvements:
+  `test-als-defaultvalue.js`, `test-assert-class-destructuring.js`,
+  `test-diagnostics-channel-tracing-channel-callback.js`,
+  `test-diagnostics-channel-tracing-channel-callback-error.js`,
+  `test-diagnostics-channel-tracing-channel-callback-run-stores.js`, and
+  `test-worker-message-port-close.js`.
+- Official VM sweep: 47/92 passed, 45 expected failures, 0 regressions, 17
+  improvements.
+- Crypto baseline-only module guard: 63/63 baseline crypto tests passed, 0
+  regressions.
+
+### 2026-06-30 Node5 outstanding-track follow-up slices
+
+Ran a second parallel subagent pass over the remaining blockers:
+
+- Track A stream/I/O: replaced stream-internal scheduled bound callbacks with
+  direct closures for lifecycle ticks, fixing the original
+  `test-stream-finished.js` callback-shape failure; added
+  `test/node/stream_finished_after_invalid_args.js`. The official fixture now
+  reaches a later `undefined.code` failure plus the existing shutdown memtrack
+  leak.
+- Track B async/diagnostics: fixed MIR capture analysis so computed object
+  property keys participate in closure capture. This resolves the root cause of
+  `test-async-hooks-constructor.js`; added
+  `test/node/async_hooks_constructor_computed_key.js`.
+- Track C fidelity: tightened `Assert` constructor behavior: public
+  `Assert()` now requires `new`, instances are fresh callable objects, strict
+  aliases share function identity, invalid `diff` throws
+  `ERR_INVALID_ARG_VALUE`, and deep equality methods throw
+  `ERR_MISSING_ARGS` when `actual` / `expected` are omitted. The larger
+  `test-assert-class.js` still reaches a later message-fidelity mismatch.
+- Track D crypto: unsupported Ed25519, Ed448, and DSA key imports now report
+  `ERR_OSSL_UNSUPPORTED` instead of generic parse failures. Full
+  `test-crypto-async-sign-verify.js` still needs real EdDSA/DSA backend support.
+- Track E worker/process: `worker_threads.receiveMessageOnPort()` is exported,
+  MessagePort now keeps a FIFO inbox, and `postMessage()` enqueues structured
+  cloned payloads before async delivery.
+- Track F VM/module isolation: VM eval/options now carry filename metadata into
+  stack/source formatting, and `test-vm-run-in-new-context.js` passes.
+
+Verification:
+
+```bash
+make build
+./test/test_js_gtest.exe --gtest_filter='*assert_constructor*:*async_hooks_constructor_computed_key*:*stream_finished_after_invalid_args*:*diagnostics_trace_callback_stores*:*stream_finished_destroy_pending*:*worker_message_port_lifecycle*:*crypto_asymmetric_verify*' --gtest_brief=1
+./test/test_node_gtest.exe --gtest_filter='NodeOfficial/NodeOfficialTest.Run/test_assert_class_destructuring:NodeOfficial/NodeOfficialTest.Run/test_async_hooks_constructor:NodeOfficial/NodeOfficialTest.Run/test_worker_message_port_close:NodeOfficial/NodeOfficialTest.Run/test_worker_message_port_receive_message:NodeOfficial/NodeOfficialTest.Run/test_vm_run_in_new_context' --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --modules=vm --gtest_filter='NodeOfficial/NodeOfficialTest.Run/test_vm_*' --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --modules=crypto --timeout=15000 --gtest_brief=1
+git diff --check
+```
+
+Results:
+
+- Local JS fixture gate: 7/7 passed.
+- Official focused follow-up gate: 5/5 passed, 0 regressions, 5 improvements:
+  `test-assert-class-destructuring.js`, `test-async-hooks-constructor.js`,
+  `test-worker-message-port-close.js`,
+  `test-worker-message-port-receive-message.js`, and
+  `test-vm-run-in-new-context.js`.
+- Official VM sweep: 48/92 passed, 44 expected failures, 0 regressions, 18
+  improvements.
+- Crypto module guard: 63 passed, 68 expected failures, 0 regressions.
+
+### 2026-06-30 Node5 outstanding-track third subagent pass
+
+Ran a third parallel subagent pass with one worker per remaining Track A-F.
+Each slice stayed bounded to its owning module surface:
+
+- Track A stream/I/O: `finished()` now tracks readable/writable side-enabled
+  state separately from transient open/closed state, tracks async destroy
+  pending state, ignores boolean state sentinels as stored errors, and reports
+  premature close only for enabled sides that missed terminal events. Added
+  `test/node/stream_finished_destroyed_premature.js`.
+- Track B async/diagnostics: `diagnostics_channel` now has real Channel and
+  TracingChannel prototype wiring, validates string/symbol channel names and
+  subscribers, delivers `(message, name)` to subscribers, accepts object-form
+  `tracingChannel()`, and uses Node-shaped tracing channel names. Added
+  `test/node/diagnostics_channel_pubsub_contract.js`.
+- Track C fidelity: `assert.partialDeepStrictEqual()` now performs structural
+  partial subset matching, partial mismatch errors include Node-shaped custom
+  diff text, `match()` / `doesNotMatch()` validate the regexp argument with
+  `ERR_INVALID_ARG_TYPE`, and `doesNotThrow()` handles matched unwanted
+  exceptions in a Node-shaped way.
+- Track D crypto: RSA `KeyObject.export({ type: 'pkcs1', format: 'pem' |
+  'der' })` now emits real PKCS#1 public/private DER, including private CRT
+  fields, and supports PEM wrapping plus re-import verification coverage.
+- Track E worker/process: MessagePort now distinguishes EventEmitter listeners
+  from EventTarget listeners. `.on('message')` receives the raw value, while
+  `addEventListener('message')` and `onmessage` receive event objects with
+  `.data`; close listeners receive a close event object. FIFO
+  `receiveMessageOnPort()` behavior remains intact.
+- Track F VM/module isolation: `vm.Script` now supports cache-data tokens via
+  `createCachedData()`, `cachedData`, `cachedDataProduced`, and
+  `cachedDataRejected`, including source fingerprint validation and
+  Buffer/TypedArray/DataView option handling. Added `test/node/vm_cached_data.js`.
+
+Verification:
+
+```bash
+make build
+./test/test_js_gtest.exe --gtest_filter='*stream_finished_destroyed_premature*:*stream_finished_destroy_pending*:*stream_finished_after_invalid_args*:*stream_finished_async_local_storage*:*diagnostics_channel_pubsub_contract*:*diagnostics_trace_callback_stores*:*async_hooks_constructor_computed_key*:*assert_constructor*:*crypto_asymmetric_verify*:*worker_message_port_lifecycle*:*vm_cached_data*' --gtest_brief=1
+./test/test_node_gtest.exe --gtest_filter='NodeOfficial/NodeOfficialTest.Run/test_diagnostics_channel_object_channel_pub_sub:NodeOfficial/NodeOfficialTest.Run/test_diagnostics_channel_pub_sub:NodeOfficial/NodeOfficialTest.Run/test_diagnostics_channel_symbol_named:NodeOfficial/NodeOfficialTest.Run/test_diagnostics_channel_tracing_channel_args_types:NodeOfficial/NodeOfficialTest.Run/test_worker_message_port_close:NodeOfficial/NodeOfficialTest.Run/test_worker_message_port_receive_message:NodeOfficial/NodeOfficialTest.Run/test_vm_createcacheddata:NodeOfficial/NodeOfficialTest.Run/test_stream_finished' --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --modules=crypto --timeout=15000 --gtest_brief=1
+git diff --check
+```
+
+Results:
+
+- `make build`: passed.
+- Local JS fixture gate: 11/11 passed.
+- Focused official gate: 7 passed and 1 expected failure, 0 regressions, 7
+  improvements:
+  `test-diagnostics-channel-object-channel-pub-sub.js`,
+  `test-diagnostics-channel-pub-sub.js`,
+  `test-diagnostics-channel-symbol-named.js`,
+  `test-diagnostics-channel-tracing-channel-args-types.js`,
+  `test-vm-createcacheddata.js`, `test-worker-message-port-close.js`, and
+  `test-worker-message-port-receive-message.js`.
+- `test-stream-finished.js` remains outside the baseline as an expected
+  failure, but advanced past the prior `undefined.code` failure to a later
+  assertion mismatch plus the known shutdown memtrack leak.
+- Crypto module guard: 63 passed, 68 expected failures, 0 regressions.
+- `git diff --check`: passed.
+
+Remaining known blockers:
+
+- Track A: `test-stream-finished.js` still needs later stream ordering/error
+  semantics after the `undefined.code` blocker.
+- Track C: full `test-assert-class.js` still reaches later message-fidelity
+  mismatches.
+- Track D: full `test-crypto-async-sign-verify.js` still needs real
+  Ed25519/Ed448/DSA backend support.
+- Track F: `test-vm-cached-data.js` is still blocked earlier by child-process
+  `spawnSync(process.execPath, ['-e', ...])` inline execution behavior, not by
+  VM cache-data token handling.
 
 ## Verification Policy
 

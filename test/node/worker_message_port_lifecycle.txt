@@ -1,6 +1,22 @@
+receive empty: undefined
+receive first: alpha
+receive second: beta
+receive empty after: undefined
+receive drained: drained
+receive invalid code: ERR_INVALID_ARG_TYPE
+receive event drained: drained-event
+event listener: message event
+event emitter raw: event undefined
 once message: first
 removed seen: 0
+receive listener seen: 0
+event listener seen: 1
+event emitter seen: 1
+event drain seen: 0
 close once: 1
+close event: close
 late message: queued-before-close
 close final: 1
+close event final: 1
+closed move code: ERR_CLOSED_MESSAGE_PORT
 done

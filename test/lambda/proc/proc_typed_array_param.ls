@@ -126,6 +126,14 @@ pn test_int_array_compare(arr: int[], n: int) {
 }
 
 // ============================================================
+// Test 9: float[] params accept literal arrays
+// ============================================================
+pn test_float_array_literals(v1: float[], v2: float[]) {
+    print(v1[0] * v2[0] + v1[1] * v2[1])
+    print("\n")
+}
+
+// ============================================================
 // Main: exercise all test patterns
 // ============================================================
 pn main() {
@@ -163,4 +171,7 @@ pn main() {
 
     // Test 8: comparison (find max)
     test_int_array_compare(a, 5)
+
+    // Test 9: direct list literals are coerced for float[] params
+    test_float_array_literals([1.0, 0.0], [0.0, 1.0])
 }
