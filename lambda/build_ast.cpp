@@ -250,39 +250,129 @@ SysFuncInfo* get_sys_func_for_method(StrView* method_name, int method_arg_count,
     return info;
 }
 
-// Check if arg_type is compatible with param_type for function calls
-bool types_compatible(Type* arg_type, Type* param_type) {
+static Type* unwrap_simple_type_type(Type* type) {
+    while (type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE) {
+        TypeType* type_type = (TypeType*)type;
+        if (!type_type->type) break;
+        type = type_type->type;
+    }
+    return type;
+}
+
+static bool typed_array_element_compatible(Type* arg_elem, Type* expected_elem) {
+    arg_elem = unwrap_simple_type_type(arg_elem);
+    expected_elem = unwrap_simple_type_type(expected_elem);
+    if (!arg_elem || !expected_elem) return true;
+
+    TypeId arg_tid = arg_elem->type_id;
+    if (arg_tid == LMD_TYPE_ANY || arg_tid == LMD_TYPE_TYPE) return true;
+    switch (expected_elem->type_id) {
+    case LMD_TYPE_INT:
+        return arg_tid == LMD_TYPE_INT || arg_tid == LMD_TYPE_INT64 || arg_tid == LMD_TYPE_BOOL;
+    case LMD_TYPE_FLOAT:
+        return arg_tid == LMD_TYPE_FLOAT || arg_tid == LMD_TYPE_INT ||
+               arg_tid == LMD_TYPE_INT64 || arg_tid == LMD_TYPE_DECIMAL ||
+               arg_tid == LMD_TYPE_BOOL;
+    case LMD_TYPE_INT64:
+        return arg_tid == LMD_TYPE_INT || arg_tid == LMD_TYPE_INT64 || arg_tid == LMD_TYPE_BOOL;
+    default:
+        return false;
+    }
+}
+
+static bool typed_array_annotation_compatible(Type* arg_type, Type* param_type) {
+    arg_type = unwrap_simple_type_type(arg_type);
+    param_type = unwrap_simple_type_type(param_type);
+    if (!arg_type || !param_type || param_type->kind != TYPE_KIND_UNARY) return false;
+
+    TypeUnary* unary = (TypeUnary*)param_type;
+    Type* expected_elem = unwrap_simple_type_type(unary->operand);
+    if (!expected_elem) return false;
+    if (expected_elem->type_id != LMD_TYPE_INT &&
+        expected_elem->type_id != LMD_TYPE_FLOAT &&
+        expected_elem->type_id != LMD_TYPE_INT64) {
+        return false;
+    }
+
+    if (arg_type->type_id == LMD_TYPE_ARRAY_NUM) return true;
+    if (arg_type->type_id != LMD_TYPE_ARRAY) return false;
+
+    TypeArray* arr_type = (TypeArray*)arg_type;
+    if (!arr_type->nested) return arr_type->length == 0;
+    return typed_array_element_compatible(arr_type->nested, expected_elem);
+}
+
+static Type* typed_array_expected_element(Type* param_type) {
+    param_type = unwrap_simple_type_type(param_type);
+    if (!param_type || param_type->kind != TYPE_KIND_UNARY) return NULL;
+
+    TypeUnary* unary = (TypeUnary*)param_type;
+    Type* expected_elem = unwrap_simple_type_type(unary->operand);
+    if (!expected_elem) return NULL;
+    if (expected_elem->type_id != LMD_TYPE_INT &&
+        expected_elem->type_id != LMD_TYPE_FLOAT &&
+        expected_elem->type_id != LMD_TYPE_INT64) {
+        return NULL;
+    }
+    return expected_elem;
+}
+
+static bool typed_array_argument_compatible(AstNode* arg, Type* param_type) {
+    if (!arg || !arg->type) return true;
+
+    Type* expected_elem = typed_array_expected_element(param_type);
+    if (!expected_elem) return false;
+
+    Type* arg_type = unwrap_simple_type_type(arg->type);
+    if (!arg_type) return true;
+    if (arg_type->type_id == LMD_TYPE_ARRAY_NUM) return true;
+    if (arg_type->type_id != LMD_TYPE_ARRAY) return false;
+
+    TypeArray* arr_type = (TypeArray*)arg_type;
+    if (arr_type->nested) {
+        return typed_array_element_compatible(arr_type->nested, expected_elem);
+    }
+
+    if (arg->node_type != AST_NODE_ARRAY) {
+        return true;
+    }
+
+    AstNode* item = ((AstArrayNode*)arg)->item;
+    while (item) {
+        if (item->node_type != AST_NODE_ASSIGN &&
+            item->type && item->type->type_id != LMD_TYPE_ANY &&
+            !typed_array_element_compatible(item->type, expected_elem)) {
+            return false;
+        }
+        item = item->next;
+    }
+    return true;
+}
+
+static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* param_full_type) {
     if (!arg_type || !param_type) return true;  // unknown types are compatible
     if (param_type->type_id == LMD_TYPE_ANY) return true;  // any accepts all
     if (arg_type->type_id == LMD_TYPE_ANY) return true;  // any arg can pass to typed param (runtime check)
     if (arg_type->type_id == param_type->type_id) return true;
 
-    // Handle union types (e.g., T | error from T^ syntax)
-    // If param is a union type, check if arg matches either side
-    // For TypeParam with complex types, use full_type if available
-    Type* actual_param = param_type;
-    if (param_type->kind == TYPE_KIND_BINARY) {
-        // Check if this is a TypeParam with full_type pointer
-        TypeParam* tp = (TypeParam*)param_type;
-        if (tp->full_type && tp->full_type->kind == TYPE_KIND_BINARY) {
-            actual_param = tp->full_type;
-        }
+    // handle union types (e.g., T | error from T^ syntax)
+    // if param is a union type, check if arg matches either side
+    // for TypeParam with complex types, use full_type if available
+    Type* actual_param = param_full_type ? param_full_type : param_type;
+
+    if (typed_array_annotation_compatible(arg_type, actual_param)) {
+        return true;
     }
 
     if (actual_param->kind == TYPE_KIND_BINARY) {
         TypeBinary* union_type = (TypeBinary*)actual_param;
         if (union_type->op == OPERATOR_UNION) {
             // unwrap TypeType if present
-            Type* left = union_type->left;
-            if (left && left->type_id == LMD_TYPE_TYPE) {
-                left = ((TypeType*)left)->type;
-            }
-            Type* right = union_type->right;
-            if (right && right->type_id == LMD_TYPE_TYPE) {
-                right = ((TypeType*)right)->type;
-            }
+            Type* left = unwrap_simple_type_type(union_type->left);
+            Type* right = unwrap_simple_type_type(union_type->right);
             // arg matches if compatible with either side of the union
-            if (types_compatible(arg_type, left) || types_compatible(arg_type, right)) {
+            if (types_compatible_with_full(arg_type, left, NULL) ||
+                types_compatible_with_full(arg_type, right, NULL)) {
                 return true;
             }
         }
@@ -324,6 +414,11 @@ bool types_compatible(Type* arg_type, Type* param_type) {
     }
 
     return false;
+}
+
+// check if arg_type is compatible with param_type for function calls
+bool types_compatible(Type* arg_type, Type* param_type) {
+    return types_compatible_with_full(arg_type, param_type, NULL);
 }
 
 // Record a type error and check if we should continue transpiling
@@ -1733,7 +1828,12 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         int line = ts_node_start_point(call_node).row + 1;
 
         while (arg && expected_param) {
-            if (arg->type && !types_compatible(arg->type, (Type*)expected_param)) {
+            bool compatible = types_compatible_with_full(arg->type, (Type*)expected_param, expected_param->full_type);
+            if (!compatible) {
+                Type* full_type = expected_param->full_type ? expected_param->full_type : (Type*)expected_param;
+                compatible = typed_array_argument_compatible(arg, full_type);
+            }
+            if (arg->type && !compatible) {
                 record_type_error(tp, line,
                     "argument %d has incompatible type %d, expected %d",
                     arg_index + 1, arg->type->type_id, expected_param->type_id);

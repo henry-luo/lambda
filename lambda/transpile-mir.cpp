@@ -573,6 +573,41 @@ static bool mir_is_native_param_type(TypeId tid) {
     }
 }
 
+static TypeId resolve_declared_param_type(AstNamedNode* param, TypeParam* type_param) {
+    if (!param) return LMD_TYPE_ANY;
+    TypeId tid = param->type ? param->type->type_id : LMD_TYPE_ANY;
+    bool may_be_null = type_param && type_param->is_optional && !type_param->default_value;
+
+    // Typed array annotations are stored as TypeParam/TypeUnary wrappers. The
+    // MIR native-call metadata must keep them as boxed containers; treating
+    // `float[]` as scalar FLOAT makes callers pass an array where the proto
+    // expects a double.
+    if (param->type && param->type->kind == TYPE_KIND_UNARY) {
+        TypeParam* tp_cast = (TypeParam*)param->type;
+        Type* full = tp_cast->full_type;
+        if (full && full->kind == TYPE_KIND_UNARY) {
+            TypeUnary* unary = (TypeUnary*)full;
+            Type* operand = unary->operand;
+            if (operand && operand->type_id == LMD_TYPE_TYPE && operand->kind == TYPE_KIND_SIMPLE) {
+                operand = ((TypeType*)operand)->type;
+            }
+            if (operand) {
+                switch (operand->type_id) {
+                case LMD_TYPE_FLOAT:
+                case LMD_TYPE_INT:
+                case LMD_TYPE_INT64:
+                    tid = LMD_TYPE_ARRAY_NUM;
+                    break;
+                default: break;
+                }
+            }
+        }
+    }
+
+    if (may_be_null) tid = LMD_TYPE_ANY;
+    return tid;
+}
+
 // Get or create import + proto for a runtime function
 static MirImportEntry* ensure_import(MirTranspiler* mt, const char* name,
     MIR_type_t ret_type, int nargs, MIR_var_t* args, int nres) {
@@ -5570,8 +5605,14 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     // ======================================================================
     if (obj_tid == LMD_TYPE_ARRAY_NUM &&
         (obj_elem_type == LMD_TYPE_INT || obj_elem_type == LMD_TYPE_INT64) &&
-        (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64)) {
-        MIR_reg_t idx_native = transpile_expr(mt, field_node->field);
+        (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64 || idx_tid == LMD_TYPE_ANY)) {
+        MIR_reg_t idx_native;
+        if (idx_tid == LMD_TYPE_ANY) {
+            MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
+            idx_native = emit_unbox(mt, boxed_idx, LMD_TYPE_INT);
+        } else {
+            idx_native = transpile_expr(mt, field_node->field);
+        }
         MIR_reg_t obj_item = transpile_expr(mt, field_node->object);  // tagged container Item
         MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);       // strip tag → raw ArrayNum*
 
@@ -5638,8 +5679,14 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     // ======================================================================
     if (obj_tid == LMD_TYPE_ARRAY_NUM &&
         obj_elem_type == LMD_TYPE_FLOAT &&
-        (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64)) {
-        MIR_reg_t idx_native = transpile_expr(mt, field_node->field);
+        (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64 || idx_tid == LMD_TYPE_ANY)) {
+        MIR_reg_t idx_native;
+        if (idx_tid == LMD_TYPE_ANY) {
+            MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
+            idx_native = emit_unbox(mt, boxed_idx, LMD_TYPE_INT);
+        } else {
+            idx_native = transpile_expr(mt, field_node->field);
+        }
         MIR_reg_t obj_item = transpile_expr(mt, field_node->object);  // tagged container Item
         MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);       // strip tag → raw ArrayFloat*
 
@@ -8183,6 +8230,14 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
     // Skip boxing to avoid type mismatches (e.g. trying to box an I64 dummy as FLOAT).
     if (mt->block_returned) return val;
 
+    // Boxed/unknown expressions already produce Item registers. Do this before
+    // binary/unary heuristics so mixed boxed-native arithmetic is not reboxed
+    // using a stale scalar expectation.
+    if (tid == LMD_TYPE_ANY || tid == LMD_TYPE_ERROR || tid == LMD_TYPE_NULL ||
+        tid == LMD_TYPE_NUMBER) {
+        return val;
+    }
+
     // For BINARY/UNARY nodes: check if the result is already a boxed Item
     // from the runtime fallback path (not native handling).
     // transpile_binary returns NATIVE values only for specific type+op combos;
@@ -8313,12 +8368,6 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             return emit_box_bool(mt, val);
         }
         // Default: assume boxed
-        return val;
-    }
-
-    // If result is already an Item type (ANY, ERROR, LIST that came from list_end, etc.), return as-is
-    if (tid == LMD_TYPE_ANY || tid == LMD_TYPE_ERROR || tid == LMD_TYPE_NULL ||
-        tid == LMD_TYPE_NUMBER) {
         return val;
     }
 
@@ -10411,38 +10460,11 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         TypeParam* tp_iter = fn_type ? fn_type->param : NULL;
         AstNamedNode* p = fn_node->param;
         while (p && user_param_count < 16) {
-            TypeId tid = p->type ? p->type->type_id : LMD_TYPE_ANY;
-            bool may_be_null = tp_iter && tp_iter->is_optional && !tp_iter->default_value;
-
-            // Resolve typed array annotations: float[] → ARRAY_NUM, int[] → ARRAY_NUM, etc.
-            if (p->type && p->type->kind == TYPE_KIND_UNARY) {
-                TypeParam* tp_cast = (TypeParam*)p->type;
-                Type* full = tp_cast->full_type;
-                if (full && full->kind == TYPE_KIND_UNARY) {
-                    TypeUnary* unary = (TypeUnary*)full;
-                    Type* operand = unary->operand;
-                    if (operand && operand->type_id == LMD_TYPE_TYPE && operand->kind == TYPE_KIND_SIMPLE) {
-                        operand = ((TypeType*)operand)->type;
-                    }
-                    if (operand) {
-                        switch (operand->type_id) {
-                        case LMD_TYPE_FLOAT:
-                        case LMD_TYPE_INT:
-                        case LMD_TYPE_INT64:
-                            tid = LMD_TYPE_ARRAY_NUM;
-                            break;
-                        default: break;
-                        }
-                    }
-                }
-                if (tid != LMD_TYPE_ANY) {
-                    log_debug("mir: param '%.*s' resolved typed array annotation → type_id=%d",
-                        (int)p->name->len, p->name->chars, tid);
-                }
+            TypeId tid = resolve_declared_param_type(p, tp_iter);
+            if (tid == LMD_TYPE_ARRAY_NUM) {
+                log_debug("mir: param '%.*s' resolved typed array annotation -> type_id=%d",
+                    (int)p->name->len, p->name->chars, tid);
             }
-
-            // Optional params without defaults must remain boxed (could be null)
-            if (may_be_null) tid = LMD_TYPE_ANY;
 
             resolved_param_types[user_param_count] = tid;
             user_param_count++;
@@ -10476,7 +10498,14 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // param with a native type (INT, FLOAT, BOOL, STRING, INT64), OR has a
     // declared native return type (P4-3.4: return-type-only optimization).
     bool generate_native = false;
-    if (!is_closure && !is_method && !is_variadic) {
+    bool has_typed_array_param = false;
+    for (int i = 0; i < user_param_count; i++) {
+        if (resolved_param_types[i] == LMD_TYPE_ARRAY_NUM) {
+            has_typed_array_param = true;
+            break;
+        }
+    }
+    if (!is_closure && !is_method && !is_variadic && !has_typed_array_param) {
         for (int i = 0; i < user_param_count; i++) {
             if (mir_is_native_param_type(resolved_param_types[i])) {
                 generate_native = true;
@@ -11185,9 +11214,7 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                         TypeParam* tp = ft ? ft->param : NULL;
                         AstNamedNode* p = fn_node->param;
                         while (p && fwd_param_count < 16) {
-                            TypeId tid = p->type ? p->type->type_id : LMD_TYPE_ANY;
-                            bool may_be_null = tp && tp->is_optional && !tp->default_value;
-                            if (may_be_null) tid = LMD_TYPE_ANY;
+                            TypeId tid = resolve_declared_param_type(p, tp);
                             fwd_param_types[fwd_param_count] = tid;
                             fwd_param_count++;
                             tp = tp ? tp->next : NULL;
@@ -11196,9 +11223,12 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                     }
                     // Batch-infer types for all untyped params in a single body walk
                     infer_param_types_batched(fn_node, is_proc, fwd_param_types, fwd_param_count);
+                    bool has_typed_array_param = false;
                     for (int i = 0; i < fwd_param_count; i++) {
+                        if (fwd_param_types[i] == LMD_TYPE_ARRAY_NUM) has_typed_array_param = true;
                         if (mir_is_native_param_type(fwd_param_types[i])) has_native = true;
                     }
+                    if (has_typed_array_param) has_native = false;
                     // Cache inferred param types so transpile_func_def can skip re-inference
                     {
                         InferCacheEntry ice;
@@ -11237,7 +11267,7 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                             name_buf->str, fwd_ret_tid);
                     }
                     // P4-3.4: Also enable native version when return type alone is native
-                    if (!has_native) {
+                    if (!has_native && !has_typed_array_param) {
                         TypeId fwd_ret_tid = infer_return_type(fn_node);
                         if (fwd_ret_tid == LMD_TYPE_INT || fwd_ret_tid == LMD_TYPE_FLOAT ||
                             fwd_ret_tid == LMD_TYPE_BOOL) {

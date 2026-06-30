@@ -4,32 +4,31 @@ Issues discovered while porting JetStream JavaScript benchmarks to Lambda Script
 
 ---
 
-## 1. `float[]` Type Annotation Rejects List Literals (Type 17 vs 22)
+## 1. `float[]` Type Annotation Rejects List Literals (Type 17 vs 22) — Fixed
 
-**Severity**: Compilation error  
-**Affected benchmarks**: cube3d, navier_stokes, raytrace3d
+**Status**: Fixed in the AST call-site type checker.
+**Severity**: Was a compilation error.
+**Affected benchmarks**: cube3d, navier_stokes, raytrace3d.
 
-When a function parameter is annotated with `float[]`, passing a list literal like `[1.0, 0.0, 0.0]` fails with:
+When a function parameter was annotated with `float[]`, passing a list literal like `[1.0, 0.0, 0.0]` failed before runtime coercion could run:
 
 ```
 error[E201]: argument N has incompatible type 17, expected 22
 ```
 
-Type 17 is a list (from `[...]` literal), type 22 is a typed array (from `fill()`). These are incompatible even though both support indexed access.
+The exact enum numbers have shifted in current builds (`Array` literals report as type 18 and the `float[]` annotation wrapper reports as type 23), but the failing shape was the same: the AST checker rejected a generic list literal before MIR parameter binding could call `ensure_typed_array()`.
 
-**Workaround**: Remove `float[]` type annotations from function parameters — use untyped parameters instead.
+**Fix**: Function-call type validation now consults the parameter's full occurrence type (`float[]`, `int[]`, `int64[]`) and accepts list literals whose known element type is compatible with the existing `ensure_typed_array()` conversion rules. Mixed literals such as `[1.0, "bad"]` are still rejected.
 
 ```lambda
-// FAILS: list literal [1.0, 0.0] is type 17, float[] expects type 22
+// now works: list literals are accepted and coerced for float[] params
 pn vec_add(v1: float[], v2: float[]) { ... }
-var r = vec_add([1.0, 0.0], [0.0, 1.0])  // error
-
-// WORKS: remove type annotation
-pn vec_add(v1, v2) { ... }
-var r = vec_add([1.0, 0.0], [0.0, 1.0])  // ok
+var r = vec_add([1.0, 0.0], [0.0, 1.0])
 ```
 
-**Suggestion**: Either allow implicit coercion from list literal to `float[]`, or provide a way to create typed arrays from literals (e.g., `float[1.0, 0.0]`).
+**MIR follow-up**: MIR Direct keeps `float[]`/numeric-array parameters on the boxed container ABI, runs `ensure_typed_array()` at function entry, and preserves `ArrayNum` float/int fast paths when the index expression is boxed/unknown.
+
+**Regression coverage**: `test/lambda/proc/proc_typed_array_param.ls` includes a direct list-literal call to a `float[]` parameter function. The affected JetStream Lambda benchmark ports have had the old untyped-parameter workaround removed for numeric vector/matrix/grid helpers.
 
 ---
 
@@ -473,7 +472,7 @@ pn show() {
 
 | # | Issue | Type | Impact |
 |---|-------|------|--------|
-| 1 | `float[]` rejects list literals | Type system | 3 benchmarks, 50+ errors |
+| 1 | `float[]` rejects list literals | Type system | **Fixed**; benchmark workarounds removed |
 | 2 | Can't assign through parenthesized access | Syntax | 4 benchmarks, core pattern |
 | 3 | `list` field name silent failure | Reserved word | 1 benchmark, hours of debugging |
 | 4 | No hex literals | Missing feature | 2 benchmarks, tedious manual conversion |
