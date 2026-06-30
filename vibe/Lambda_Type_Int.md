@@ -1,5 +1,52 @@
 # Proposal: Change LMD_TYPE_INT from int32 to int56
 
+## Design Decision: Sized Integer Arithmetic Follows Go
+
+Lambda's explicit sized integer arithmetic should use a **Go-like fixed-width model** rather than JS `Number`, C/C++ signed-overflow, or Java-only signed integer promotion.
+
+This decision applies to explicit sized integer types:
+
+- `i8`, `i16`, `i32`, `i64`: arithmetic is performed in that signed width, with deterministic two's-complement wraparound.
+- `u8`, `u16`, `u32`, `u64`: arithmetic is performed in that unsigned width, with modulo `2^N` wraparound.
+- Same-width operands preserve that width: `i8 + i8 -> i8`, `u32 * u32 -> u32`.
+- Mixed widths promote to the wider participating width.
+- Mixed signed/unsigned operands use the promotion table below.
+- Storage annotations keep wrapping/truncating exactly as compact literals and typed-array stores do today.
+
+### Mixed Signed/Unsigned Promotion
+
+Lambda needs one policy beyond Go because Go generally requires explicit conversion between different defined integer types, while Lambda expressions support mixed numeric operands.
+
+Use this promotion table for compact integer operands:
+
+| Operands | Result Type | Rule |
+| --- | --- | --- |
+| `iN` + `iM` | `i(max(N, M))` | wider signed width |
+| `uN` + `uM` | `u(max(N, M))` | wider unsigned width |
+| `iN` + `uM`, where signed width can represent all unsigned values | that signed type | example: `i16 + u8 -> i16` |
+| `iN` + `uM`, where the next signed width can represent both | next wider signed type | example: `i8 + u8 -> i16`, `i16 + u16 -> i32`, `i32 + u32 -> i64` |
+| `i64` + `u64` | `u64` | no signed Lambda integer can represent all `u64` values |
+| signed + unsigned with no larger signed width available | wider unsigned type | deterministic modulo behavior |
+
+Examples:
+
+```lambda
+127i8 + 1i8                 // -128i8
+255u8 + 1u8                 // 0u8
+2147483647i32 + 1i32        // -2147483648i32
+4294967295u32 + 1u32        // 0u32
+42i8 + 10u8                 // 52i16
+2147483647i32 + 1u32        // 2147483648i64
+```
+
+### Secondary References
+
+Go is sufficient as the primary arithmetic model. Other languages are useful only for features beyond ordinary arithmetic:
+
+- **C#**: reference for future checked/unchecked arithmetic modes if Lambda adds explicit overflow-checking operators or compiler modes.
+- **Rust**: reference for named arithmetic helpers such as checked, wrapping, saturating, and overflowing operations.
+- **Java**: reference only for deterministic signed 64-bit wraparound; it is not enough for Lambda because it lacks unsigned primitive arithmetic.
+
 ## Executive Summary
 
 This document proposes changing the underlying representation of `LMD_TYPE_INT` from `int32` to `int56` (56-bit signed integer packed inline). The motivation is to:

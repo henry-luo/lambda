@@ -118,32 +118,36 @@ Common conversions needed:
 
 ## 5. Integer Overflow in Multiplication (No Silent Wraparound)
 
+**Status**: ✅ **FIXED**
 **Severity**: Runtime error  
 **Affected benchmarks**: splay, crypto_sha1
 
-Lambda's `int` type overflows on multiplication of large values, producing `<error>` / `nan` instead of wrapping. JavaScript uses floats for all numbers, so `49734321 * 1103515245` wraps silently in 32-bit PRNG code.
+Lambda now supports explicit fixed-width integer annotations with deterministic wraparound. Compact integer arithmetic follows the Go-like model documented in `vibe/Lambda_Type_Int.md`: `i8/i16/i32/i64` wrap in signed two's-complement width, and `u8/u16/u32/u64` wrap modulo their width.
+
+The original issue was that Lambda's default `int` type overflowed on multiplication of large values, producing `<error>` / `nan` instead of wrapping. JavaScript uses floats for all numbers, but benchmark PRNG/hash code often depends on explicit 32-bit wrap semantics.
 
 ```
 [ERR!] integer overflow in multiplication
 ```
 
-This makes it impossible to directly port standard LCG pseudo-random number generators or 32-bit hash computations.
+This previously made it impossible to directly port standard LCG pseudo-random number generators or 32-bit hash computations.
 
-**Workaround for PRNG**: Use a different PRNG algorithm that avoids large intermediate products (e.g., Park-Miller with Schrage's method):
+**Benchmark cleanup**:
+
+- `test/benchmark/jetstream/splay.ls` and `test/benchmark/jetstream/splay2.ls` now use the direct `u32` LCG:
 
 ```lambda
 pn next_random(state) {
-    var s = state.seed
-    var hi = s / 127773
-    var lo = s % 127773
-    s = 16807 * lo - 2836 * hi
-    if (s <= 0) { s = s + 2147483647 }
-    state.seed = s
-    return float(s) / 2147483647.0
+    var s: u32 = state.seed
+    s = s * 1103515245u32 + 12345u32
+    state.seed = int(s)
+    return float(s) / 4294967296.0
 }
 ```
 
-**Suggestion**: Either provide explicit 32-bit wrapping arithmetic functions (e.g., `mul32`, `add32`), or add an `int32` type with wraparound semantics.
+- `test/benchmark/jetstream/crypto_sha1.ls` now uses `u32` locals inside `safe_add()` so 32-bit word addition wraps by type instead of by overflow-prone default `int` arithmetic.
+
+**Remaining adjacent issue**: unsigned right shift and shift-width behavior are tracked separately in issue 6, so SHA-1 still keeps explicit masks around rotate/bitwise helpers where those semantics matter.
 
 ---
 
@@ -480,7 +484,7 @@ pn show() {
 | 2 | Can't assign through parenthesized access | Syntax | 4 benchmarks, core pattern |
 | 3 | `list` field name silent failure | Reserved word | 1 benchmark, hours of debugging |
 | 4 | No hex literals | Missing feature | 2 benchmarks, tedious manual conversion |
-| 5 | Integer overflow errors | Arithmetic | 2 benchmarks, wrong results |
+| 5 | Integer overflow errors | Arithmetic | **Fixed**; splay PRNG and SHA-1 word arithmetic now use `u32` |
 | 6 | No unsigned right shift | Missing feature | 1 benchmark, wrong hash output |
 | 7 | `fill(0, x)` returns null | Edge case | 1 benchmark, 120k runtime errors |
 | 8 | Missing substr/charcode | Missing feature | 1 benchmark, minor |

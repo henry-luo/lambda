@@ -128,7 +128,7 @@ nan
 
 **Sized numeric types** use a postfix suffix on numeric literals. Types `i8` through `u32` and `f16`/`f32` are packed inline in the 64-bit `Item` representation (zero heap allocation). Types `i64`, `u64`, and `f64` are heap-allocated.
 
-**Overflow behavior**: Sized integer arithmetic wraps silently (modular arithmetic):
+**Overflow behavior**: Sized integer arithmetic follows a Go-like fixed-width model and wraps deterministically in the result width:
 ```lambda
 127i8 + 1i8    // -128 (wraps)
 255u8 + 1u8    // 0 (wraps)
@@ -996,18 +996,24 @@ Lambda performs limited implicit coercion:
 "value: " ++ 42             // "value: 42"
 ```
 
-#### Sized Numeric Promotion
+#### Sized Integer Arithmetic
 
-Mixed arithmetic with sized types follows these promotion rules:
+Sized integer arithmetic follows a Go-like fixed-width model:
 
 ```lambda
-// Same signedness, different widths → widen to larger
-42i8 + 1000i16              // i16 result
+// Same-width compact arithmetic preserves width and wraps
+127i8 + 1i8                 // -128i8
+255u8 + 1u8                 // 0u8
+2147483647i32 + 1i32        // -2147483648i32
+4294967295u32 + 1u32        // 0u32
 
-// Signed + unsigned (same width) → next wider signed
-42i8 + 10u8                 // promoted to i16
+// Mixed widths promote to the wider participating width
+42i8 + 1000i16              // i16 result (1042)
 
-// Sized + standard int/float → promote to standard
+// Mixed signed/unsigned operands promote to a type that can represent both
+42i8 + 10u8                 // i16 result (52)
+
+// Sized + standard int/float promotes to standard int or float
 42i8 + 100                  // int result (142)
 100i32 + 3.14               // float result (103.14)
 
@@ -1015,6 +1021,18 @@ Mixed arithmetic with sized types follows these promotion rules:
 42i8 is number              // true
 3.14f32 is number           // true
 ```
+
+Signed compact integer arithmetic wraps deterministically using two's-complement behavior in the result width. Unsigned compact integer arithmetic wraps modulo `2^N` in the result width. Storage annotations keep wrapping/truncating at storage boundaries, such as compact literals, compact annotations, and compact typed-array storage.
+
+Mixed signed/unsigned promotion uses these rules:
+
+| Operands | Result Type | Rule |
+| --- | --- | --- |
+| `iN` + `iM` | `i(max(N, M))` | wider signed width |
+| `uN` + `uM` | `u(max(N, M))` | wider unsigned width |
+| `iN` + `uM`, where signed width can represent all unsigned values | that signed type | example: `i16 + u8 -> i16` |
+| `iN` + `uM`, where the next signed width can represent both | next wider signed type | example: `i8 + u8 -> i16`, `i16 + u16 -> i32`, `i32 + u32 -> i64` |
+| `i64` + `u64` | `u64` | no signed Lambda integer can represent all `u64` values |
 
 Sized types can be passed to functions expecting `int`, `float`, or `number` parameters, and vice versa.
 
