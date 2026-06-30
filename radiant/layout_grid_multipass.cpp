@@ -496,7 +496,8 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                     // Styles were already resolved in resolve_grid_item_styles above
                     // (init_grid_item_view was called for all children). Only call again
                     // if for some reason gi was not populated yet (defensive guard).
-                    if (ce->item_prop_type != DomElement::ITEM_PROP_GRID) {
+                    ViewBlock* ce_block = lam::view_as_block(ce);
+                    if (!grid_item_prop(ce_block)) {
                         init_grid_item_view(lycon, ch);
                     }
                     has_absolute_children = true;
@@ -553,9 +554,10 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             float max_content_h = 0;
             for (int i = 0; i < gl->item_count; i++) {
                 ViewBlock* item = gl->grid_items[i];
-                if (!item || !item->gi) continue;
-                int rs = item->gi->computed_grid_row_start - 1;
-                int re = item->gi->computed_grid_row_end - 1;
+                GridItemProp* gi = grid_item_prop(item);
+                if (!item || !gi) continue;
+                int rs = gi->computed_grid_row_start - 1;
+                int re = gi->computed_grid_row_end - 1;
                 if (rs != r || re != r + 1) continue; // only single-row-span items
                 float h = item->content_height;
                 // CSS Grid: if item has max-height, its contribution to the row is capped
@@ -923,15 +925,22 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
 
     // Ensure grid item properties are allocated
     // IMPORTANT: fi and gi are in a union! Check item_prop_type, not just gi pointer
-    if (elem->item_prop_type != DomElement::ITEM_PROP_GRID) {
+    ViewBlock* elem_block = lam::view_as_block(elem);
+    GridItemProp* existing_gi = grid_item_prop(elem_block);
+    if (!existing_gi) {
         Pool* pool = lycon->doc->view_tree->pool;
-        elem->gi = (GridItemProp*)pool_calloc(pool, sizeof(GridItemProp));
-        if (elem->gi) {
-            elem->item_prop_type = DomElement::ITEM_PROP_GRID;
+        GridItemProp* gi = (GridItemProp*)pool_calloc(pool, sizeof(GridItemProp));
+        if (gi) {
+            if (elem->item_prop_type == DomElement::ITEM_PROP_FORM && elem->form) {
+                elem->form->grid_item = gi;
+            } else {
+                elem->gi = gi;
+                elem->item_prop_type = DomElement::ITEM_PROP_GRID;
+            }
             // Initialize with auto placement defaults
-            elem->gi->is_grid_auto_placed = true;
-            elem->gi->justify_self = CSS_VALUE_AUTO;
-            elem->gi->align_self_grid = CSS_VALUE_AUTO;
+            gi->is_grid_auto_placed = true;
+            gi->justify_self = CSS_VALUE_AUTO;
+            gi->align_self_grid = CSS_VALUE_AUTO;
         }
     }
 
@@ -1000,16 +1009,17 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) 
                 // - Heights depend on the actual column width (after column sizing)
                 // - Row sizing will calculate heights on-demand using item->width
                 // This follows CSS Grid spec §11.5 where row sizing happens after column sizing
-                if (item->gi) {
-                    item->gi->measured_min_width = min_width;
-                    item->gi->measured_max_width = max_width;
+                GridItemProp* gi = grid_item_prop(item);
+                if (gi) {
+                    gi->measured_min_width = min_width;
+                    gi->measured_max_width = max_width;
                     // Note: We don't set measured_min/max_height here.
                     // The calculate_grid_item_intrinsic_sizes function will compute
                     // heights on-demand using the actual column width.
-                    item->gi->has_measured_size = true;  // Indicates width measurements are valid
+                    gi->has_measured_size = true;  // Indicates width measurements are valid
                     log_debug("Stored width measurements for %s (gi=%p): min_w=%.1f, max_w=%.1f",
-                              child->node_name(), item->gi,
-                              item->gi->measured_min_width, item->gi->measured_max_width);
+                              child->node_name(), gi,
+                              gi->measured_min_width, gi->measured_max_width);
                 } else {
                     log_debug("WARN: No gi for %s to store measurements", child->node_name());
                 }
@@ -1339,7 +1349,7 @@ static bool compute_grid_area_for_absolute(
     if (!grid_layout || !container || !item) return false;
 
     // Get grid item properties (if any)
-    GridItemProp* gi = item->gi;
+    GridItemProp* gi = grid_item_prop(item);
 
     // Check if item has any grid placement
     bool has_col_start = gi && gi->has_explicit_grid_column_start && gi->grid_column_start != 0;
@@ -1518,7 +1528,8 @@ static void layout_grid_abs_after_child(LayoutContext* lycon, ViewBlock* contain
         return;
     }
 
-    if (!child_block->gi) return;
+    GridItemProp* gi = grid_item_prop(child_block);
+    if (!gi) return;
 
     PositionProp* pos = child_block->position;
     bool no_horiz = !pos->has_left && !pos->has_right;
@@ -1529,14 +1540,14 @@ static void layout_grid_abs_after_child(LayoutContext* lycon, ViewBlock* contain
     float mb = child_block->bound ? child_block->bound->margin.bottom : 0.0f;
 
     if (no_horiz) {
-        int justify = radiant::resolve_justify_self(child_block->gi->justify_self,
+        int justify = radiant::resolve_justify_self(gi->justify_self,
             grid_layout ? grid_layout->justify_items : CSS_VALUE_STRETCH);
         float free_w = cb.padding_width - child_block->width - ml - mr;
         float offset = radiant::compute_alignment_offset_simple(justify, free_w);
         if (offset != 0.0f) child_block->x += offset;
     }
     if (no_vert) {
-        int align = radiant::resolve_align_self(child_block->gi->align_self_grid,
+        int align = radiant::resolve_align_self(gi->align_self_grid,
             grid_layout ? grid_layout->align_items : CSS_VALUE_STRETCH);
         float free_h = cb.padding_height - child_block->height - mt - mb;
         float offset = radiant::compute_alignment_offset_simple(align, free_h);

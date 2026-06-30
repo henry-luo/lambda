@@ -104,10 +104,11 @@ using ::GridContainerLayout;
  * Item participates if align-self is baseline and it doesn't span multiple rows.
  */
 inline bool item_participates_in_baseline(ViewBlock* item) {
-    if (!item || !item->gi) return false;
+    GridItemProp* gi = grid_item_prop(item);
+    if (!item || !gi) return false;
 
     // Get align-self value from grid item properties
-    int align_self = item->gi->align_self_grid;
+    int align_self = gi->align_self_grid;
 
     // CSS_VALUE_BASELINE = 22 typically
     constexpr int CSS_VALUE_BASELINE = 22;
@@ -116,7 +117,7 @@ inline bool item_participates_in_baseline(ViewBlock* item) {
     if (align_self != CSS_VALUE_BASELINE) return false;
 
     // Items spanning multiple rows don't participate in baseline alignment
-    int row_span = item->gi->computed_grid_row_end - item->gi->computed_grid_row_start;
+    int row_span = gi->computed_grid_row_end - gi->computed_grid_row_start;
     if (row_span > 1) return false;
 
     return true;
@@ -197,7 +198,9 @@ inline void resolve_grid_item_baselines(
         if (!item_participates_in_baseline(item)) continue;
 
         // computed_grid_row_start is 1-based, convert to 0-based
-        int row = item->gi->computed_grid_row_start - 1;
+        GridItemProp* gi = grid_item_prop(item);
+        if (!gi) continue;
+        int row = gi->computed_grid_row_start - 1;
         if (row < 0 || row >= grid_layout->computed_row_count) continue;
         if (row >= GRID_BASELINE_MAX_TRACKS) continue;
 

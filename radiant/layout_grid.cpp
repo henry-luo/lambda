@@ -365,22 +365,23 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("%s DEBUG: Phase 3.5 - Resolving named line references", container->source_loc());
     for (int idx = 0; idx < item_count; idx++) {
         ViewBlock* item = items[idx];
-        if (!item->gi) continue;
-        if (item->gi->grid_column_start_name) {
-            int ln = find_grid_line_by_name(grid_layout, item->gi->grid_column_start_name, false);
-            if (ln > 0) { item->gi->grid_column_start = ln; item->gi->has_explicit_grid_column_start = true; }
+        GridItemProp* gi = grid_item_prop(item);
+        if (!gi) continue;
+        if (gi->grid_column_start_name) {
+            int ln = find_grid_line_by_name(grid_layout, gi->grid_column_start_name, false);
+            if (ln > 0) { gi->grid_column_start = ln; gi->has_explicit_grid_column_start = true; }
         }
-        if (item->gi->grid_column_end_name) {
-            int ln = find_grid_line_by_name(grid_layout, item->gi->grid_column_end_name, false);
-            if (ln > 0) { item->gi->grid_column_end = ln; item->gi->has_explicit_grid_column_end = true; }
+        if (gi->grid_column_end_name) {
+            int ln = find_grid_line_by_name(grid_layout, gi->grid_column_end_name, false);
+            if (ln > 0) { gi->grid_column_end = ln; gi->has_explicit_grid_column_end = true; }
         }
-        if (item->gi->grid_row_start_name) {
-            int ln = find_grid_line_by_name(grid_layout, item->gi->grid_row_start_name, true);
-            if (ln > 0) { item->gi->grid_row_start = ln; item->gi->has_explicit_grid_row_start = true; }
+        if (gi->grid_row_start_name) {
+            int ln = find_grid_line_by_name(grid_layout, gi->grid_row_start_name, true);
+            if (ln > 0) { gi->grid_row_start = ln; gi->has_explicit_grid_row_start = true; }
         }
-        if (item->gi->grid_row_end_name) {
-            int ln = find_grid_line_by_name(grid_layout, item->gi->grid_row_end_name, true);
-            if (ln > 0) { item->gi->grid_row_end = ln; item->gi->has_explicit_grid_row_end = true; }
+        if (gi->grid_row_end_name) {
+            int ln = find_grid_line_by_name(grid_layout, gi->grid_row_end_name, true);
+            if (ln > 0) { gi->grid_row_end = ln; gi->has_explicit_grid_row_end = true; }
         }
     }
 
@@ -435,7 +436,8 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
         for (int idx = 0; idx < item_count; idx++) {
             ViewBlock* item = items[idx];
-            if (!item || !item->gi || !item->gi->has_measured_size) continue;
+            GridItemProp* gi = grid_item_prop(item);
+            if (!item || !gi || !gi->has_measured_size) continue;
 
             // Check if item has orthogonal writing mode
             bool is_orthogonal = false;
@@ -448,8 +450,8 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             // Get definite row height from template definitions.
             // Note: computed_rows are not yet allocated at this stage;
             // use grid_template_rows for explicit tracks directly.
-            int rs = item->gi->computed_grid_row_start - 1;  // 0-based track index
-            int re = item->gi->computed_grid_row_end - 1;
+            int rs = gi->computed_grid_row_start - 1;  // 0-based track index
+            int re = gi->computed_grid_row_end - 1;
             if (rs < 0 || re <= rs || re > grid_layout->computed_row_count) continue;
 
             float definite_row_height = 0.0f;
@@ -567,9 +569,9 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
                 log_debug("%s orthogonal item %s: row_height=%.1f -> width=%.1f (was min=%.1f max=%.1f)",
                           container->source_loc(), item->node_name(),
                           definite_row_height, max_block_size,
-                          item->gi->measured_min_width, item->gi->measured_max_width);
-                item->gi->measured_min_width = max_block_size;
-                item->gi->measured_max_width = max_block_size;
+                          gi->measured_min_width, gi->measured_max_width);
+                gi->measured_min_width = max_block_size;
+                gi->measured_max_width = max_block_size;
             }
         }
     }
@@ -649,12 +651,13 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("%s DEBUG: FINAL GRID POSITIONS:", container->source_loc());
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];
+        GridItemProp* gi = grid_item_prop(item);
         log_debug("%s FINAL_GRID_ITEM %d - pos: (%d,%d), size: %dx%d, grid_area: (%d-%d, %d-%d)", container->source_loc(),
             i, item->x, item->y, item->width, item->height,
-            item->gi ? item->gi->computed_grid_row_start : 0,
-            item->gi ? item->gi->computed_grid_row_end : 0,
-            item->gi ? item->gi->computed_grid_column_start : 0,
-            item->gi ? item->gi->computed_grid_column_end : 0);
+            gi ? gi->computed_grid_row_start : 0,
+            gi ? gi->computed_grid_row_end : 0,
+            gi ? gi->computed_grid_column_start : 0,
+            gi ? gi->computed_grid_column_end : 0);
     }
     log_debug("%s FINAL GRID POSITIONS:", container->source_loc());
     for (int i = 0; i < item_count; i++) {
@@ -756,12 +759,13 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
             // Initialize grid item placement properties with defaults if not set
             // Note: Only initialize placement-related properties (row/column),
             // NOT alignment properties (justify_self/align_self_grid) which may be set via CSS
-            bool has_explicit_placement = child->gi && (
-                child->gi->grid_row_start != 0 || child->gi->grid_row_end != 0 ||
-                child->gi->grid_column_start != 0 || child->gi->grid_column_end != 0);
-            if (!has_explicit_placement && child->gi) {
+            GridItemProp* child_gi = grid_item_prop(child);
+            bool has_explicit_placement = child_gi && (
+                child_gi->grid_row_start != 0 || child_gi->grid_row_end != 0 ||
+                child_gi->grid_column_start != 0 || child_gi->grid_column_end != 0);
+            if (!has_explicit_placement && child_gi) {
                 // Mark as auto-placed but preserve any CSS-set alignment properties
-                child->gi->is_grid_auto_placed = true;
+                child_gi->is_grid_auto_placed = true;
             }
 
             count++;
@@ -777,11 +781,12 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
         // Simple insertion sort (stable, good for small arrays)
         for (int i = 1; i < count; i++) {
             ViewBlock* key = grid_layout->grid_items[i];
-            int key_order = key->gi ? key->gi->order : 0;
+            GridItemProp* key_gi = grid_item_prop(key);
+            int key_order = key_gi ? key_gi->order : 0;
             int j = i - 1;
             while (j >= 0) {
-                int j_order = grid_layout->grid_items[j]->gi ?
-                             grid_layout->grid_items[j]->gi->order : 0;
+                GridItemProp* j_gi = grid_item_prop(grid_layout->grid_items[j]);
+                int j_order = j_gi ? j_gi->order : 0;
                 if (j_order > key_order) {
                     grid_layout->grid_items[j + 1] = grid_layout->grid_items[j];
                     j--;
@@ -820,15 +825,16 @@ void determine_grid_size(GridContainerLayout* grid_layout) {
     log_debug(" Checking %d items for grid size requirements\n", grid_layout->item_count);
     for (int i = 0; i < grid_layout->item_count; i++) {
         ViewBlock* item = grid_layout->grid_items[i];
-        if (!item->gi) continue;  // Skip items without grid item properties
+        GridItemProp* gi = grid_item_prop(item);
+        if (!gi) continue;  // Skip items without grid item properties
         log_debug(" Item %d placement - row: %d-%d, col: %d-%d\n",
-               i, item->gi->computed_grid_row_start, item->gi->computed_grid_row_end,
-               item->gi->computed_grid_column_start, item->gi->computed_grid_column_end);
+               i, gi->computed_grid_row_start, gi->computed_grid_row_end,
+               gi->computed_grid_column_start, gi->computed_grid_column_end);
 
         // CRITICAL FIX: Grid positions are 1-indexed, but we need the actual track count
         // If an item ends at position 2, it uses tracks 0 and 1 (2 tracks total)
-        max_row = fmax(max_row, item->gi->computed_grid_row_end - 1);
-        max_column = fmax(max_column, item->gi->computed_grid_column_end - 1);
+        max_row = fmax(max_row, gi->computed_grid_row_end - 1);
+        max_column = fmax(max_column, gi->computed_grid_column_end - 1);
     }
 
     // Ensure minimum grid size matches explicit template
@@ -922,10 +928,11 @@ void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout) {
         bool col_occupied[64] = {};
         for (int idx = 0; idx < grid_layout->item_count; idx++) {
             ViewBlock* item = grid_layout->grid_items[idx];
-            if (!item || !item->gi) continue;
+            GridItemProp* gi = grid_item_prop(item);
+            if (!item || !gi) continue;
             // computed positions are 1-based line numbers
-            int cs = item->gi->computed_grid_column_start - 1;
-            int ce = item->gi->computed_grid_column_end - 1;
+            int cs = gi->computed_grid_column_start - 1;
+            int ce = gi->computed_grid_column_end - 1;
             for (int c = cs; c < ce && c < 64; c++) {
                 if (c >= 0) col_occupied[c] = true;
             }
@@ -950,9 +957,10 @@ void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout) {
         bool row_occupied[64] = {};
         for (int idx = 0; idx < grid_layout->item_count; idx++) {
             ViewBlock* item = grid_layout->grid_items[idx];
-            if (!item || !item->gi) continue;
-            int rs = item->gi->computed_grid_row_start - 1;
-            int re = item->gi->computed_grid_row_end - 1;
+            GridItemProp* gi = grid_item_prop(item);
+            if (!item || !gi) continue;
+            int rs = gi->computed_grid_row_start - 1;
+            int re = gi->computed_grid_row_end - 1;
             for (int r = rs; r < re && r < 64; r++) {
                 if (r >= 0) row_occupied[r] = true;
             }

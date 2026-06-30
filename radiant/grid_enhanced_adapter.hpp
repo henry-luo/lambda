@@ -338,14 +338,13 @@ inline GridItemInfo extract_grid_item_info(ViewBlock* item, int item_index,
     GridItemInfo info;
     info.item_index = item_index;
 
-    if (!item || !item->gi) {
+    GridItemProp* gi = grid_item_prop(item);
+    if (!item || !gi) {
         // No grid item properties - fully auto-placed
         info.column = GridPlacement::Auto(1);
         info.row = GridPlacement::Auto(1);
         return info;
     }
-
-    GridItemProp* gi = item->gi;
 
     // Column placement
     int col_start = gi->grid_column_start;
@@ -420,9 +419,8 @@ inline GridItemInfo extract_grid_item_info(ViewBlock* item, int item_index,
  */
 inline void apply_placement_to_item(ViewBlock* item, const GridItemInfo& info,
                                     int neg_col_offset = 0, int neg_row_offset = 0) {
-    if (!item || !item->gi) return;
-
-    GridItemProp* gi = item->gi;
+    GridItemProp* gi = grid_item_prop(item);
+    if (!item || !gi) return;
 
     // Convert from OriginZero coordinates to 1-based final grid coordinates
     // OriginZero(0) = first line of explicit grid
@@ -613,26 +611,27 @@ inline void place_items_with_occupancy(
     log_debug("Resolving named grid areas: area_count=%d", grid_layout->area_count);
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];
-        if (!item || !item->gi || !item->gi->grid_area) continue;
+        GridItemProp* gi = grid_item_prop(item);
+        if (!item || !gi || !gi->grid_area) continue;
 
-        const char* area_name = item->gi->grid_area;
+        const char* area_name = gi->grid_area;
         log_debug("Item %d has grid_area='%s'", i, area_name);
 
         for (int j = 0; j < grid_layout->area_count; j++) {
             if (grid_layout->grid_areas[j].name &&
                 strcmp(grid_layout->grid_areas[j].name, area_name) == 0) {
                 // Found the area - set line positions
-                item->gi->grid_row_start = grid_layout->grid_areas[j].row_start;
-                item->gi->grid_row_end = grid_layout->grid_areas[j].row_end;
-                item->gi->grid_column_start = grid_layout->grid_areas[j].column_start;
-                item->gi->grid_column_end = grid_layout->grid_areas[j].column_end;
-                item->gi->has_explicit_grid_row_start = true;
-                item->gi->has_explicit_grid_row_end = true;
-                item->gi->has_explicit_grid_column_start = true;
-                item->gi->has_explicit_grid_column_end = true;
+                gi->grid_row_start = grid_layout->grid_areas[j].row_start;
+                gi->grid_row_end = grid_layout->grid_areas[j].row_end;
+                gi->grid_column_start = grid_layout->grid_areas[j].column_start;
+                gi->grid_column_end = grid_layout->grid_areas[j].column_end;
+                gi->has_explicit_grid_row_start = true;
+                gi->has_explicit_grid_row_end = true;
+                gi->has_explicit_grid_column_start = true;
+                gi->has_explicit_grid_column_end = true;
                 log_debug("  Resolved to rows %d-%d, cols %d-%d",
-                          item->gi->grid_row_start, item->gi->grid_row_end,
-                          item->gi->grid_column_start, item->gi->grid_column_end);
+                          gi->grid_row_start, gi->grid_row_end,
+                          gi->grid_column_start, gi->grid_column_end);
                 break;
             }
         }
@@ -780,15 +779,16 @@ inline ContribArray collect_item_contributions(
 
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];
-        if (!item || !item->gi) continue;
+        GridItemProp* gi = grid_item_prop(item);
+        if (!item || !gi) continue;
 
         GridItemContribution contrib = {};
         contrib.item = item;
 
         // Get item's placement (1-based line numbers from GridItemProp)
         if (is_column_axis) {
-            int col_start = item->gi->computed_grid_column_start;
-            int col_end = item->gi->computed_grid_column_end;
+            int col_start = gi->computed_grid_column_start;
+            int col_end = gi->computed_grid_column_end;
             if (col_start < 1 || col_end < 1) continue;
 
             contrib.track_start = col_start - 1;  // Convert to 0-based
@@ -798,9 +798,9 @@ inline ContribArray collect_item_contributions(
             // NOTE: has_measured_size=true means the measurement pass ran successfully.
             // 0 is a valid measurement (empty elements); do NOT skip it by checking > 0,
             // as that would cause the fallback to return 1px for empty flex items.
-            if (item->gi->has_measured_size) {
-                contrib.min_content_contribution = item->gi->measured_min_width;
-                contrib.max_content_contribution = item->gi->measured_max_width;
+            if (gi->has_measured_size) {
+                contrib.min_content_contribution = gi->measured_min_width;
+                contrib.max_content_contribution = gi->measured_max_width;
             } else {
                 // Fallback: use calculate_grid_item_intrinsic_sizes
                 IntrinsicSizes sizes = calculate_grid_item_intrinsic_sizes(
@@ -846,8 +846,8 @@ inline ContribArray collect_item_contributions(
             }
         } else {
             // Row axis
-            int row_start = item->gi->computed_grid_row_start;
-            int row_end = item->gi->computed_grid_row_end;
+            int row_start = gi->computed_grid_row_start;
+            int row_end = gi->computed_grid_row_end;
             if (row_start < 1 || row_end < 1) continue;
 
             contrib.track_start = row_start - 1;  // Convert to 0-based
