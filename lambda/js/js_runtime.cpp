@@ -6457,6 +6457,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         if (_sk && _sk->len == 7 && strncmp(_sk->chars, "__sym_1", 7) == 0)
             g_array_sym_iter_ever_set = 1;
     }
+    js_note_array_prototype_push_tamper(object, key);
 
     // Array: result[i] = val or arr.length = n
     if (type == LMD_TYPE_ARRAY) {
@@ -23418,6 +23419,16 @@ extern "C" Item js_array_method_direct(Item arr, Item method_name, Item* args, i
     js_array_method_real_this = (Item){0};
     if (get_type_id(arr) == LMD_TYPE_ARRAY && get_type_id(method_name) == LMD_TYPE_STRING) {
         String* method = it2s(method_name);
+        if (!g_array_proto_push_ever_set && method &&
+                method->len == 4 && strncmp(method->chars, "push", 4) == 0 &&
+                argc == 1 && arr.array && arr.array->extra == 0) {
+            int64_t length = arr.array->length;
+            if (length >= 0 && length < 0xFFFFFFFFLL &&
+                    js_array_set_append_or_dense_int_fast(arr, length, args[0])) {
+                js_array_method_real_this = saved;
+                return (Item){.item = i2it(arr.array->length)};
+            }
+        }
         Item resolved = js_property_get(arr, method_name);
         if (js_exception_pending) {
             js_array_method_real_this = saved;
@@ -23437,6 +23448,20 @@ extern "C" Item js_array_method_direct(Item arr, Item method_name, Item* args, i
     Item result = js_array_method(arr, method_name, args, argc);
     js_array_method_real_this = saved;
     return result;
+}
+
+extern "C" Item js_array_push_method_direct_1(Item arr, Item value) {
+    if (get_type_id(arr) == LMD_TYPE_ARRAY && !g_array_proto_push_ever_set &&
+            arr.array && arr.array->extra == 0) {
+        int64_t length = arr.array->length;
+        if (length >= 0 && length < 0xFFFFFFFFLL &&
+                js_array_set_append_or_dense_int_fast(arr, length, value)) {
+            return (Item){.item = i2it(arr.array->length)};
+        }
+    }
+    Item push_name = (Item){.item = s2it(heap_create_name("push", 4))};
+    Item args[1] = { value };
+    return js_array_method_direct(arr, push_name, args, 1);
 }
 
 // J39-7: returns true if length is non-writable (frozen array or
@@ -28671,6 +28696,19 @@ Item js_check_array_sym_iterator() {
         if (sfn->builtin_id == 0) return sym_iter;  // user-defined function
     }
     return ItemNull;  // still the default builtin
+}
+
+extern "C" void js_note_array_prototype_push_tamper(Item object, Item key) {
+    if (g_array_proto_push_ever_set) return;
+    if (get_type_id(object) != LMD_TYPE_MAP || get_type_id(key) != LMD_TYPE_STRING) return;
+    String* sk = it2s(key);
+    if (!sk || sk->len != 4 || strncmp(sk->chars, "push", 4) != 0) return;
+    if (js_class_id(object) != JS_CLASS_ARRAY) return;
+    bool is_proto = false;
+    Item proto_flag = js_map_get_fast_ext(object.map, "__is_proto__", 12, &is_proto);
+    if (is_proto && js_is_truthy(proto_flag)) {
+        g_array_proto_push_ever_set = 1;
+    }
 }
 
 // Get the iterator for an iterable (GetIterator, ES spec §7.4.1)

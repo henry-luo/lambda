@@ -35,6 +35,7 @@ extern "C" Item js_dom_range_get_prototype_value(void);
 extern "C" Item js_dom_selection_get_prototype_value(void);
 extern "C" Item js_internal_binding(Item name);
 extern "C" void js_async_hooks_after_gc(void);
+extern "C" void js_note_array_prototype_push_tamper(Item object, Item key);
 extern double js_get_number(Item value);
 
 #define JS_FUNC_FLAG_HAS_BOUND_THIS_G 16
@@ -8486,8 +8487,11 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
     }
     if (!js_require_object_type(obj, "defineProperty")) return ItemNull;
     if (obj.item == 0) return obj;
+    name = js_to_property_key(name);
+    if (js_check_exception()) return obj;
+    js_note_array_prototype_push_tamper(obj, name);
     bool ta_define_handled = false;
-    bool ta_define_ok = js_ta_define_own_numeric_index(obj, js_to_property_key(name), descriptor, &ta_define_handled);
+    bool ta_define_ok = js_ta_define_own_numeric_index(obj, name, descriptor, &ta_define_handled);
     if (js_check_exception()) return obj;
     if (ta_define_handled) {
         if (!ta_define_ok) {
@@ -13318,6 +13322,7 @@ static Item js_delete_map_property(Item obj, Item key) {
     // created by the corresponding get/set/defineProperty path.
     key = js_to_property_key(key);
     if (js_check_exception()) return (Item){.item = b2it(false)};
+    js_note_array_prototype_push_tamper(obj, key);
     // v95: Track __sym_1 deletion on a map (Array.prototype[Symbol.iterator] may be deleted)
     if (!g_array_sym_iter_ever_set && get_type_id(key) == LMD_TYPE_STRING) {
         String* _dk = it2s(key);

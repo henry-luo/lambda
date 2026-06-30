@@ -1,0 +1,6 @@
+fib 55
+ack 125
+num 5
+left-string 23
+right-string 23
+mixed-base x11

@@ -587,6 +587,7 @@ void js_strict_throw_property_error(const char* reason, const char* prop_name, i
 Map* js_resolve_object_prototype();
 Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_found = nullptr);
 Item js_check_array_sym_iterator();
+extern "C" void js_note_array_prototype_push_tamper(Item object, Item key);
 void js_regex_cache_reset();
 void js_module_cache_reset();
 void js_reset_transient_call_state();
