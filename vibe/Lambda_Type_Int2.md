@@ -13,34 +13,71 @@ Status after the implementation pass on 2026-06-30:
 - Fixed function parameter and function return coercion for compact integer annotations.
 - Implemented ordinary compact scalar arithmetic with a Go-like fixed-width model, not JS `Number`, C/C++ signed-overflow, or Java-only signed promotion. Same-width compact arithmetic preserves width and wraps deterministically; mixed compact widths use the promotion table below.
 - Preserved integer semantics for `div` and `%` so integer-only operators still produce integral results in the promoted integer width.
-- Fixed MIR Direct bitwise lowering for compact operands by routing boxed compact values through the runtime bitwise argument conversion path.
+- Extended bitwise builtins to follow the same Go-like typed integer model for explicit compact operands and `u64`.
+- Fixed MIR Direct bitwise lowering and AST return typing for compact bitwise results, so `band`, `bor`, `bxor`, `bnot`, `shl`, and `shr` preserve the defined sized integer result type instead of collapsing to default `int`.
 - Fixed `u64` literal parsing above `INT64_MAX` by using unsigned parsing for `u64` suffixes.
-- Added regression coverage in `test/lambda/sized_numeric_annotation_edges.ls` and `test/lambda/proc/proc_sized_numeric_annotations.ls`, covering `i8`, `i16`, `i32`, `u8`, `u16`, `u32`, and `u64`.
+- Added regression coverage in `test/lambda/sized_numeric_annotation_edges.ls`, `test/lambda/sized_numeric_bitwise_go.ls`, and `test/lambda/proc/proc_sized_numeric_annotations.ls`, covering `i8`, `i16`, `i32`, `u8`, `u16`, `u32`, and `u64`.
 
 Verified with:
 
 ```bash
 make build
-./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/sized_numeric_annotation_edges:AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/proc_proc_sized_numeric_annotations'
+./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/sized_numeric_annotation_edges:AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/sized_numeric_bitwise_go:AutoDiscovered/LambdaScriptTest.ExecuteAndCompare/proc_proc_sized_numeric_annotations'
 make test-lambda-baseline
 ```
 
 Remaining follow-up:
 
 - Scalar constructor/cast syntax such as `i32(2147483648)` is still not implemented.
-- A JS-style unsigned right shift operator/function is still not implemented.
+- A JS-style `>>>`/`ushr` alias is still not implemented; the core typed behavior is now expressed by `shr(u32_value, count)`.
+
+## Extended Bitwise Design
+
+Lambda bitwise builtins now use the same explicit typed integer model as compact arithmetic. Go is the primary reference: the left operand's signedness matters for right shift, unsigned values shift with zero-fill, signed values shift arithmetically, and fixed-width results are truncated back to their result width. Lambda still differs from Go by allowing mixed compact widths through the promotion table already used for arithmetic.
+
+The model applies to all integer bitwise builtins:
+
+| Builtin | Compact result type | Semantics |
+| --- | --- | --- |
+| `band(a, b)` | promoted compact integer type | bitwise AND in the promoted width |
+| `bor(a, b)` | promoted compact integer type | bitwise OR in the promoted width |
+| `bxor(a, b)` | promoted compact integer type | bitwise XOR in the promoted width |
+| `bnot(a)` | operand type | invert only the operand width |
+| `shl(a, n)` | left operand type | shift left and truncate to the left operand width |
+| `shr(a, n)` on `i8/i16/i32/i64` | left operand type | arithmetic right shift, sign-extending |
+| `shr(a, n)` on `u8/u16/u32/u64` | left operand type | logical right shift, zero-filling |
+
+Examples:
+
+```lambda
+bnot(0u32)                 // 4294967295u32
+bnot(0i8)                  // -1i8
+shl(1i8, 7)                // -128i8
+shr(-1i32, 1)              // -1i32
+shr(4294967295u32, 1)      // 2147483647u32
+shr(18446744073709551615u64, 1)  // 9223372036854775807u64
+```
+
+Mixed compact operands use the same promotion policy as arithmetic:
+
+```lambda
+bor(256u32, 1u8)           // 257u32
+band(-1i32, 4294967295u32) // 4294967295i64
+```
+
+Plain `int` operands keep Lambda's existing legacy bitwise behavior. When one operand is compact and the other is a plain `int`, the plain value is converted into the compact result width. This keeps typed bitwise code ergonomic without changing old default-int scripts.
 
 ## Historical Audit Snapshot
 
-This section preserves the original audit findings before the fix pass and before the Go-like arithmetic decision. The high-severity runtime crashes, parameter coercion gaps, bitwise compact operand bug, `u64` parse bug, and fixed-width arithmetic gap have now been addressed by the implementation above. The remaining product work is explicit constructor/cast syntax and unsigned right shift support.
+This section preserves the original audit findings before the fix pass and before the Go-like arithmetic and bitwise decisions. The high-severity runtime crashes, parameter coercion gaps, bitwise compact operand bug, `u64` parse bug, fixed-width arithmetic gap, and typed unsigned right shift gap have now been addressed by the implementation above. The remaining product work is explicit constructor/cast syntax and optional JS-style `>>>`/`ushr` spelling.
 
 - Compact integer literals and compact typed arrays perform fixed-width storage coercion. Examples: `128i8` prints `-128`, `4294967296u32` prints `0`, and `let a: u8[] = [255, 256, -1]` prints `[255, 0, 255]`. This matches JS typed-array storage conversion.
 - Original finding: scalar arithmetic on compact integer values did not wrap to the annotated width. It promoted through the generic numeric runtime and returned `int64` for integer arithmetic. Example: `127i8 + 1i8` returned `128` with type `int64`, not `-128`.
 - Original finding: scalar `i32` arithmetic also did not match JS `Number` for large products, because Lambda computed exact `int64` while JS `Number` rounded in double precision. Example: `49734321i32 * 1103515245i32` returned `54882581423223645`; Node reports `54882581423223650` for `49734321 * 1103515245`.
 - Scalar sized annotations are unsafe when initialized from unsuffixed integer values. `let a: i32 = 49734321` and a `pn`-local `var a: i32 = 49734321` both segfaulted.
 - Function parameter annotations are not reliable coercion points. `fn f(a: i32) => type(a); f(1)` returns `int`, not `i32`.
-- Bitwise builtins are broken for sized operands in MIR Direct. `band(4294967295u32, 255u32)` returns `0`; JS `4294967295 & 255` returns `255`.
-- `u64` is not real full unsigned 64-bit support today. Values above `INT64_MAX` parse as `9223372036854775807`, and `u64` arithmetic crashes.
+- Original finding: bitwise builtins were broken for sized operands in MIR Direct. `band(4294967295u32, 255u32)` returned `0`; JS `4294967295 & 255` returns `255`.
+- Original finding: `u64` was not real full unsigned 64-bit support. Values above `INT64_MAX` parsed as `9223372036854775807`, and `u64` arithmetic crashed.
 - Original finding: public docs claimed sized integer arithmetic wraps silently, but the implementation only wrapped/truncated at literal packing and compact array storage boundaries.
 
 ## Evidence
@@ -202,7 +239,7 @@ Cause: MIR Direct special-cases bitwise builtins inline. For non-`int`/`int64` a
 Expected: bitwise builtins should explicitly define JS-style coercion:
 
 - `band`, `bor`, `bxor`, `bnot`, `shl`, `shr` should use ToInt32-like behavior for signed operations.
-- An unsigned right shift (`ushr` or equivalent) is needed for JS `>>>`.
+- Original JS-alignment expectation: an unsigned right shift (`ushr` or equivalent) is needed for JS `>>>`. The Go-like Lambda design now provides the core behavior through unsigned typed operands, e.g. `shr(x_u32, n)`.
 - If `u32` operands are supported, they must not collapse to zero before the operation.
 
 ### 5. `u64` is not real unsigned 64-bit support
@@ -240,7 +277,7 @@ i8(128)
 
 Observed: runtime errors: `fn_call1: cannot call non-function value`; output is `error`.
 
-Expected: if explicit integer annotations are intended as JS-compatible conversion tools, there should be callable conversions or named builtins for `ToInt32`, `ToUint32`, `ToInt8`, `ToUint8`, etc. Annotation-only conversion is currently unsafe for scalar bindings and incomplete for parameters.
+Expected: if explicit integer annotations are intended as JS-compatible conversion tools, there should be callable conversions or named builtins for `ToInt32`, `ToUint32`, `ToInt8`, `ToUint8`, etc. Annotation-only conversion was unsafe for scalar bindings and incomplete for parameters at original audit time; those coercion boundaries are now fixed, but callable conversions remain missing.
 
 ### 7. Documentation is stale
 
@@ -272,11 +309,11 @@ JS has several different integer-like behaviors:
 4. Typed arrays: assignment coerces to element storage width; reading returns a `Number`.
 5. BigInt: separate arbitrary-precision integer domain; cannot mix freely with Number.
 
-Lambda currently mixes these models:
+At original audit time, Lambda mixed these models:
 
 - Compact literal/array storage behaves like JS typed-array storage.
-- Compact scalar arithmetic behaves like exact signed `int64`, not JS `Number` and not fixed-width wrap.
-- Bitwise compact operands are broken before JS-style coercion can happen.
+- Compact scalar arithmetic behaved like exact signed `int64`, not JS `Number` and not fixed-width wrap.
+- Bitwise compact operands were broken before JS-style coercion could happen.
 - `u64` is neither JS `Number` nor BigInt-correct.
 
 ## Additional Language References
@@ -293,14 +330,15 @@ Keep these secondary references for future design work:
 
 1. Done: shared scalar compact conversion helpers for `NUM_SIZED` and `UINT64` targets are used in scalar bindings, assignment, function parameters, and function returns.
 2. Done: ordinary compact scalar integer arithmetic uses Go-like fixed-width arithmetic. `i8 + i8 -> i8`, `u32 + u32 -> u32`, signed and unsigned operations wrap deterministically in the result width.
-3. Done: MIR Direct bitwise lowering now handles compact operands via runtime bitwise argument conversion.
+3. Done: MIR Direct bitwise lowering now handles compact operands via typed runtime bitwise helpers, preserving compact result type and implementing unsigned logical `shr`.
 4. Done: `u64` literals now parse with unsigned conversion.
 5. Remaining: add callable conversions (`i8`, `u8`, `i16`, `u16`, `i32`, `u32`, maybe `to_i32`/`to_u32` to avoid type-name call ambiguity).
-6. Remaining: add unsigned right shift support for JS `>>>`.
+6. Remaining: optionally add JS-style `>>>`/`ushr` spelling as an alias/convenience for typed unsigned `shr`.
 7. Done: update `doc/Lambda_Data.md` for compact scalar integer arithmetic. `doc/Lambda_Reference.md` should still be checked for any duplicate sized-numeric wording.
 
 ## Regression Tests To Add
 
 - Done in `test/lambda/sized_numeric_annotation_edges.ls`: scalar `i32` unsuffixed annotation, parameter coercion, return coercion, fixed-width `+`/`*`/`div`/`%`, signed/unsigned promotion, unary wrap, compact bitwise operands, `u64` boundary literal, and compact array storage.
+- Done in `test/lambda/sized_numeric_bitwise_go.ls`: Go-like `band`/`bor`/`bxor` promotion, width-preserving `bnot`, signed arithmetic `shr`, unsigned logical `shr`, shift-width edges, mixed compact/default operands, and `u64` bitwise behavior.
 - Done in `test/lambda/proc/proc_sized_numeric_annotations.ls`: procedural `var` initialization and reassignment coercion for `i8`, `u8`, `i32`, `u32`, and `u64`.
-- Remaining when implemented: constructor/cast syntax and unsigned right shift coverage.
+- Remaining when implemented: constructor/cast syntax coverage and optional `>>>`/`ushr` alias coverage.

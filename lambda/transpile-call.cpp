@@ -47,6 +47,21 @@ static inline bool is_native_type(AstNode* arg) {
     return t == LMD_TYPE_INT || t == LMD_TYPE_INT64 || t == LMD_TYPE_FLOAT || t == LMD_TYPE_BOOL;
 }
 
+static inline bool is_compact_integer_type(Type* type) {
+    return type && (type->type_id == LMD_TYPE_NUM_SIZED || type->type_id == LMD_TYPE_UINT64);
+}
+
+static void emit_boxed_bitwise_call(Transpiler* tp, const char* fn_name, AstNode* first_arg, AstNode* second_arg) {
+    strbuf_append_str(tp->code_buf, fn_name);
+    strbuf_append_char(tp->code_buf, '(');
+    transpile_box_item(tp, first_arg);
+    if (second_arg) {
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_box_item(tp, second_arg);
+    }
+    strbuf_append_char(tp->code_buf, ')');
+}
+
 // Emit a bitwise operation argument as int64_t.
 // For native-typed expressions: use (int64_t) cast (already raw C values).
 // For Item-typed expressions: use it2l() to properly unbox the tagged Item.
@@ -493,6 +508,10 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 
             // bnot(a) — unary bitwise NOT: inline as ~a
             if (fn_id == SYSFUNC_BNOT) {
+                if (is_compact_integer_type(call_node->type)) {
+                    emit_boxed_bitwise_call(tp, "fn_bnot_item", first_arg, NULL);
+                    return;
+                }
                 strbuf_append_str(tp->code_buf, "(~");
                 emit_bitwise_arg(tp, first_arg);
                 strbuf_append_char(tp->code_buf, ')');
@@ -547,6 +566,21 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             default: break;
             }
             if (c_op) {
+                if (is_compact_integer_type(call_node->type)) {
+                    const char* boxed_fn = NULL;
+                    switch (fn_id) {
+                    case SYSFUNC_BAND: boxed_fn = "fn_band_item"; break;
+                    case SYSFUNC_BOR:  boxed_fn = "fn_bor_item";  break;
+                    case SYSFUNC_BXOR: boxed_fn = "fn_bxor_item"; break;
+                    case SYSFUNC_SHL:  boxed_fn = "fn_shl_item";  break;
+                    case SYSFUNC_SHR:  boxed_fn = "fn_shr_item";  break;
+                    default: break;
+                    }
+                    if (boxed_fn) {
+                        emit_boxed_bitwise_call(tp, boxed_fn, first_arg, second_arg);
+                        return;
+                    }
+                }
                 if (is_shift) {
                     // emit: (((b) >= 0 && (b) < 64) ? ((a) OP (b)) : 0)
                     // b is evaluated twice, but shift amounts are typically literals

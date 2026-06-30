@@ -14,10 +14,9 @@ pn safe_add(x: int, y: int) {
 }
 
 // Rotate left (32-bit)
-// Keep the explicit mask until unsigned right shift/shift-width semantics are separate.
 pn rol(num: int, cnt: int) {
-    var n = band(num, MASK32)
-    return band(bor(shl(n, cnt), shr(n, 32 - cnt)), MASK32)
+    var n: u32 = num
+    return int(bor(shl(n, cnt), shr(n, 32 - cnt)))
 }
 
 // SHA-1 round function
