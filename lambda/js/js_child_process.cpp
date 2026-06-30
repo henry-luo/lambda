@@ -2109,6 +2109,36 @@ static bool cp_spawnSync_prepare_lambda_snapshot(const char* cmd, Item args_item
     return true;
 }
 
+static int cp_spawnSync_append_args(char* full_cmd, int full_cmd_size, int pos, Item args_item) {
+    if (get_type_id(args_item) != LMD_TYPE_ARRAY) return pos;
+    int64_t alen = js_array_length(args_item);
+    for (int64_t i = 0; i < alen && pos < full_cmd_size - 1; i++) {
+        Item arg = js_array_get_int(args_item, i);
+        if (get_type_id(arg) != LMD_TYPE_STRING) continue;
+        append_shell_arg(full_cmd, full_cmd_size, &pos, arg);
+    }
+    return pos;
+}
+
+static bool cp_spawnSync_prepare_shell_command(const char* cmd, Item args_item,
+                                               char* full_cmd, int full_cmd_size, int* pos_out) {
+    if (!cmd || !full_cmd || !pos_out || full_cmd_size <= 0) return false;
+    int pos = 0;
+    Item cmd_item = make_string_item(cmd);
+    if (!append_shell_arg(full_cmd, full_cmd_size, &pos, cmd_item)) return false;
+    if (should_spawn_lambda_js_mode(cmd, args_item)) {
+        Item js_arg = make_string_item("js");
+        append_shell_arg(full_cmd, full_cmd_size, &pos, js_arg);
+        pos = cp_spawnSync_append_args(full_cmd, full_cmd_size, pos, args_item);
+        Item no_log_arg = make_string_item("--no-log");
+        append_shell_arg(full_cmd, full_cmd_size, &pos, no_log_arg);
+    } else {
+        pos = cp_spawnSync_append_args(full_cmd, full_cmd_size, pos, args_item);
+    }
+    *pos_out = pos;
+    return true;
+}
+
 extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_item) {
     // build full command line for popen
     char cmd_buf[4096];
@@ -2123,20 +2153,8 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
     int pos = 0;
     if (!cp_spawnSync_prepare_lambda_snapshot(cmd, args_item, options_item,
             full_cmd, (int)sizeof(full_cmd))) {
-        pos = snprintf(full_cmd, sizeof(full_cmd), "%s", cmd);
-    }
-
-    if (pos > 0 && get_type_id(args_item) == LMD_TYPE_ARRAY &&
-            !cp_args_contain_string(args_item, "--snapshot-blob")) {
-        int64_t alen = js_array_length(args_item);
-        for (int64_t i = 0; i < alen && pos < (int)sizeof(full_cmd) - 256; i++) {
-            Item arg = js_array_get_int(args_item, i);
-            if (get_type_id(arg) == LMD_TYPE_STRING) {
-                String* s = it2s(arg);
-                pos += snprintf(full_cmd + pos, sizeof(full_cmd) - (size_t)pos,
-                                " %.*s", (int)s->len, s->chars);
-            }
-        }
+        cp_spawnSync_prepare_shell_command(cmd, args_item, full_cmd,
+                                           (int)sizeof(full_cmd), &pos);
     }
 
     // redirect stderr to a temp approach — capture stdout via popen

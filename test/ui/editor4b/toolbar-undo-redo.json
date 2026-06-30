@@ -1,0 +1,19 @@
+{
+  "name": "editor4b: toolbar Undo/Redo buttons dispatch to the JS editor",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 60},
+    {"type": "type", "target": {"selector": ".rdt-surface"}, "text": "QQ"},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface [data-source-path=\"0,0\"]"}, "contains": "QQ"},
+    {"type": "click", "target": {"selector": ".rdt-toolbar button[title=\"Undo (Cmd+Z)\"]"}},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface [data-source-path=\"0,0\"]"}, "equals": "Lambda Editor — plain-DOM (Stage 4B)"},
+    {"type": "click", "target": {"selector": ".rdt-toolbar button[title=\"Redo (Cmd+Shift+Z)\"]"}},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface [data-source-path=\"0,0\"]"}, "contains": "QQ"}
+  ]
+}

@@ -4,6 +4,9 @@ loose equal: pass
 strict aliases: true:true:true:true
 invalid diff: TypeError:ERR_INVALID_ARG_VALUE:The property 'options.diff' must be one of: 'simple', 'full'. Received 'invalid'
 full diff: ERR_ASSERTION:full
+strictEqual message: "Expected values to be strictly equal:\n+ actual - expected\n\n+ 'AAAAAAAAAA'\n- 'BBBBBBBBBB'\n"
+notStrictEqual message: "Expected \"actual\" to be strictly unequal to:\n\n'AAAAAAAAAA'"
+deepEqual message: "Expected values to be loosely deep-equal:\n\n'AAAAAAAAAA'\n\nshould loosely deep-equal\n\n'BBBBBBBBBB'"
 partial subset: pass
 partial diff: ERR_ASSERTION:partialDeepStrictEqual:"custom message\n+ actual - expected\n\n  {\n+   a: true\n-   a: false\n  }\n"
 match regexp validation: TypeError:ERR_INVALID_ARG_TYPE:The "regexp" argument must be an instance of RegExp. Received type string ('string')

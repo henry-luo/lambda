@@ -1114,6 +1114,55 @@ Remaining known blockers:
   `spawnSync(process.execPath, ['-e', ...])` inline execution behavior, not by
   VM cache-data token handling.
 
+### 2026-06-30 Node5 outstanding-track fourth pass
+
+Continued the outstanding Node5 tracks with parallel workers on disjoint
+surfaces and integrated the resulting bounded fixes:
+
+- Track A stream/I/O: the previously outstanding `test-stream-finished.js`
+  assertion/leak path now passes the official focused Node gate. The direct
+  stream fixture gate also passes, although one debug batch worker printed a
+  transient `js-test-batch` segfault while the harness still completed 4/4
+  successfully.
+- Track C fidelity: assertion generated messages now use Node-shaped text for
+  `strictEqual`, `notStrictEqual`, and loose `deepEqual`, including long-string
+  simple-diff handling. `test-assert-class.js` advances past the generic
+  `assert.strictEqual: values are not strictly equal` mismatch, but still fails
+  later on `util.inspect(AssertionError)` long-message formatting.
+- Track D crypto: Ed25519 and Ed448 RFC8410 private/public key import/export
+  and one-shot `crypto.sign(undefined, ...)` / `crypto.verify(undefined, ...)`
+  now work through a dynamic OpenSSL EVP raw-key backend with PSA fallback.
+  DSA remains unsupported.
+- Track F VM/child-process: `child_process.spawnSync(process.execPath,
+  ['-e', ...])` now detects Lambda self-spawn JS mode, quotes inline arguments
+  structurally, and appends `--no-log`; added a focused local fixture for inline
+  `-e` argv behavior.
+
+Verification:
+
+```bash
+make build
+./lambda.exe js test/node/assert_constructor.js --no-log
+./lambda.exe js test/node/crypto_asymmetric_verify.js --no-log
+./lambda.exe js test/node/child_process_spawn_sync_lambda_eval.js --no-log
+./test/test_js_gtest.exe --gtest_filter='*stream_finished_destroyed_premature*:*stream_finished_destroy_pending*:*stream_finished_after_invalid_args*:*stream_finished_async_local_storage*' --gtest_brief=1
+./test/test_node_gtest.exe --gtest_filter='NodeOfficial/NodeOfficialTest.Run/test_stream_finished:NodeOfficial/NodeOfficialTest.Run/test_assert_class:NodeOfficial/NodeOfficialTest.Run/test_crypto_async_sign_verify:NodeOfficial/NodeOfficialTest.Run/test_vm_cached_data' --timeout=20000 --gtest_brief=1
+git diff --check
+```
+
+Results:
+
+- `make build`: passed with 0 warnings.
+- Local assert, crypto, and child-process fixtures: passed.
+- Local stream fixture gate: 4/4 passed.
+- Official focused gate: 3 passed and 1 expected failure, 0 regressions, 3
+  improvements:
+  `test-crypto-async-sign-verify.js`, `test-stream-finished.js`, and
+  `test-vm-cached-data.js`.
+- `test-assert-class.js` remains outside the baseline as an expected failure,
+  now at the next inspect-formatting blocker.
+- `git diff --check`: passed.
+
 ## Verification Policy
 
 Every implementation slice should finish with:
