@@ -16,6 +16,8 @@ rsa keyobject export instanceof: true
 rsa generateKeyPairSync keyobjects: true
 rsa generateKeyPairSync pss: true
 ec keyobject p1363 sign verify: true
+ed25519 keyobject sign verify: true
+ed448 keyobject sign verify: true
 dsa keyobject sign verify: true
 unsupported asymmetric import errors: true
 rsa one-shot sign callback: true

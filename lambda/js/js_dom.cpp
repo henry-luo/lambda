@@ -360,7 +360,15 @@ static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATI
     }
 
     DocState* st = doc->state;
-    if (st) view_state_prune_orphans(st);
+    if (st) {
+        view_state_prune_orphans(st);
+        // Layout-affecting JS DOM mutations must request a reflow so JS-built
+        // structure (e.g. a script that constructs its UI at load, like the
+        // Stage-4B editor's toolbar) gets laid out and becomes hit-testable
+        // without waiting for a later edit to trigger relayout. Paint-only style
+        // changes don't need layout.
+        if (kind != DOM_JS_MUTATION_STYLE_REPAINT) doc_state_request_reflow(st);
+    }
 }
 
 static void js_dom_reset_mutation_records(DomDocument* doc) {

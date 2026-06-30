@@ -4241,6 +4241,12 @@ int main(int argc, char *argv[]) {
                 }
             }
 
+            const char* batch_js_argv_store[2];
+            batch_js_argv_store[0] = argv[0];
+            batch_js_argv_store[1] = script_exec_path;
+            js_store_process_argv(2, batch_js_argv_store);
+            js_store_process_exec_argv(0, NULL);
+
             int result = 0;
 #ifndef _WIN32
             // Per-test crash recovery via sigsetjmp.
