@@ -87,21 +87,13 @@ pn planner_add_constraint(p: Planner, kind: int, strength: int, v1: int, v2: int
     var p_vars2 = p.vars
     var var1: Variable = p_vars2[v1]
     var cl1 = var1.constraints
-    if (cl1 == null) {
-        var1.constraints = [idx]
-    } else {
-        var new_cl1 = cl1 ++ [idx]
-        var1.constraints = new_cl1
-    }
+    var new_cl1 = cl1 ++ [idx]
+    var1.constraints = new_cl1
     if (v2 >= 0) {
         var var2: Variable = (p.vars)[v2]
         var cl2 = var2.constraints
-        if (cl2 == null) {
-            var2.constraints = [idx]
-        } else {
-            var new_cl2 = cl2 ++ [idx]
-            var2.constraints = new_cl2
-        }
+        var new_cl2 = cl2 ++ [idx]
+        var2.constraints = new_cl2
     }
     return idx
 }

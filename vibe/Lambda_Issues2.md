@@ -182,24 +182,29 @@ pn rol(num: int, cnt: int) {
 **Severity**: Runtime error (null concatenation)  
 **Affected benchmarks**: deltablue
 
-`fill(0, 0)` returns `null` rather than an empty array. Subsequent concatenation with `++` fails:
+**Status**: ✅ **FIXED**.
 
-```
-runtime error [201]: fn_join: unsupported operand types: null and array
-```
-
-**Workaround**: Guard concatenation with null checks:
+`fill(0, value)` now returns a real empty array with `length = 0` and `capacity = 0`.
+The result participates in normal collection operations:
 
 ```lambda
-var cl = var1.constraints  // may be null from fill(0, 0)
-if (cl == null) {
-    var1.constraints = [idx]
-} else {
-    var1.constraints = cl ++ [idx]
-}
+let cl = fill(0, 0)
+cl ++ [idx]     // [idx]
+len(cl)         // 0
 ```
 
-**Suggestion**: `fill(0, value)` should return an empty array `[]`, not `null`.
+**Fix notes**:
+- `fn_fill()` keeps a dedicated zero-count branch that returns `[]`, not `null`.
+- `test/lambda/proc/proc_fill.ls` now verifies `fill(0, int)`, `fill(0, null)`, typed `int[] = fill(0, 0)`, and concatenation from each empty result.
+- `test/benchmark/jetstream/deltablue.ls` and `test/benchmark/jetstream/deltablue2.ls` now rely on `cl ++ [idx]` directly instead of guarding against `null`.
+
+**Reference behavior from other languages/scripts**:
+- Python has no direct `fill(n, value)` builtin, but equivalent construction idioms return empty lists for zero count: `[value] * 0`, `list(range(0))`, and `list(itertools.repeat(value, 0))` all produce `[]`.
+- JavaScript follows the same collection rule: `new Array(0).fill(value)` returns `[]`, and `new Uint32Array(0).fill(value)` remains an empty typed array.
+- Ruby and Rust mirror this behavior with `Array.new(0, value)` and `vec![value; 0]`, respectively.
+- The design decision for Lambda is therefore: zero count constructs an empty collection; negative count is the error case.
+
+**Remaining edge policy**: `fill(n, value)` rejects negative `n` as an error.
 
 ---
 
@@ -486,7 +491,7 @@ pn show() {
 | 4 | No hex literals | Missing feature | 2 benchmarks, tedious manual conversion |
 | 5 | Integer overflow errors | Arithmetic | **Fixed**; splay PRNG and SHA-1 word arithmetic now use `u32` |
 | 6 | No unsigned right shift | Bitwise ops | **Fixed for typed unsigned ints**; `shr(u32, n)` zero-fills |
-| 7 | `fill(0, x)` returns null | Edge case | 1 benchmark, 120k runtime errors |
+| 7 | `fill(0, x)` returns null | Edge case | **Fixed**; DeltaBlue now concatenates from empty fill arrays directly |
 | 8 | Missing substr/charcode | Missing feature | 1 benchmark, minor |
 | 9 | `div` reserved word | Reserved word | 1 benchmark, minor |
 | 10 | Immutable parameters | Language design | 1 benchmark, minor |
