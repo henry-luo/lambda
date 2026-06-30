@@ -29,6 +29,7 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 #include <mbedtls/md.h>
 #include <mbedtls/pk.h>
 #include <mbedtls/rsa.h>
+#include <psa/crypto.h>
 
 extern "C" Item bigint_from_string(const char* str, int len);
 
@@ -41,6 +42,7 @@ extern "C" Item bigint_from_string(const char* str, int len);
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <dlfcn.h>
 #endif
 
 // ============================================================================
@@ -78,6 +80,16 @@ static bool crypto_item_to_integer(Item item, const char* name, int* out_value);
 static Item make_string_item_crypto(const char* str);
 static const char* crypto_detect_unsupported_asymmetric_key_type(const uint8_t* key,
                                                                 int key_len);
+static bool crypto_detect_ed_key_material(const uint8_t* key, int key_len,
+                                          struct CryptoEdKeyMaterial* out);
+static bool crypto_eddsa_sign_message(const uint8_t* key_bytes, int key_len,
+                                      const uint8_t* data, int data_len,
+                                      uint8_t* signature, size_t signature_cap,
+                                      size_t* signature_len);
+static bool crypto_eddsa_verify_message(const uint8_t* key_bytes, int key_len,
+                                        const uint8_t* data, int data_len,
+                                        const uint8_t* signature,
+                                        int signature_len, bool* verified);
 static Item crypto_throw_unsupported_asymmetric_key(const char* key_type);
 
 static bool crypto_digest_is_xof(const char* alg) {
@@ -2736,10 +2748,102 @@ static Item js_crypto_sign_verify_emit(Item env_item) {
     return make_js_undefined_crypto();
 }
 
+static bool crypto_one_shot_data_bytes(Item data_item, uint8_t** out, int* out_len) {
+    if (!out || !out_len) return false;
+    *out = NULL;
+    *out_len = 0;
+    return extract_bytes(data_item, out, out_len);
+}
+
+static bool crypto_alg_is_eddsa_default(Item alg_item) {
+    return crypto_item_is_undefined(alg_item) || get_type_id(alg_item) == LMD_TYPE_NULL;
+}
+
+static Item js_crypto_sign_eddsa(Item data_item, Item key_item) {
+    CryptoSignVerifyOptions options;
+    if (!crypto_sign_verify_options(key_item, &options)) return ItemNull;
+
+    uint8_t* data = NULL;
+    int data_len = 0;
+    if (!crypto_one_shot_data_bytes(data_item, &data, &data_len)) {
+        return js_throw_invalid_arg_type("data", "string, ArrayBuffer, Buffer, TypedArray, or DataView", data_item);
+    }
+
+    uint8_t* key_bytes = NULL;
+    int key_len = 0;
+    if (!crypto_private_key_bytes_for_sign(options.key, &key_bytes, &key_len)) {
+        mem_free(data);
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", options.key);
+    }
+
+    uint8_t signature[128];
+    size_t signature_len = 0;
+    bool ok = crypto_eddsa_sign_message(key_bytes, key_len, data, data_len,
+        signature, sizeof(signature), &signature_len);
+    mem_free(key_bytes);
+    mem_free(data);
+    if (!ok) {
+        return crypto_throw_sign_failed("Failed to sign data");
+    }
+    return crypto_buffer_from_bytes(signature, (int)signature_len);
+}
+
+static Item js_crypto_verify_eddsa(Item data_item, Item key_item, Item signature_item) {
+    CryptoSignVerifyOptions options;
+    if (!crypto_sign_verify_options(key_item, &options)) return ItemNull;
+
+    uint8_t* data = NULL;
+    int data_len = 0;
+    if (!crypto_one_shot_data_bytes(data_item, &data, &data_len)) {
+        return js_throw_invalid_arg_type("data", "string, ArrayBuffer, Buffer, TypedArray, or DataView", data_item);
+    }
+
+    uint8_t* signature = NULL;
+    int signature_len = 0;
+    if (!extract_bytes(signature_item, &signature, &signature_len)) {
+        mem_free(data);
+        return js_throw_invalid_arg_type("signature", "string, ArrayBuffer, Buffer, TypedArray, or DataView", signature_item);
+    }
+
+    uint8_t* key_bytes = NULL;
+    int key_len = 0;
+    if (!crypto_public_key_bytes_for_verify(options.key, &key_bytes, &key_len)) {
+        mem_free(signature);
+        mem_free(data);
+        return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", options.key);
+    }
+
+    bool verified = false;
+    bool ok = crypto_eddsa_verify_message(key_bytes, key_len, data, data_len,
+        signature, signature_len, &verified);
+    mem_free(key_bytes);
+    mem_free(signature);
+    mem_free(data);
+    if (!ok) {
+        return js_throw_error_with_code("ERR_OSSL_EVP_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE",
+            "operation not supported for this keytype");
+    }
+    return (Item){.item = b2it(verified)};
+}
+
 extern "C" Item js_crypto_sign(Item alg_item, Item data_item, Item key_item, Item callback_item) {
     bool has_callback = !crypto_item_is_undefined(callback_item);
     if (has_callback && get_type_id(callback_item) != LMD_TYPE_FUNC) {
         return js_throw_invalid_arg_type("callback", "Function", callback_item);
+    }
+
+    if (crypto_alg_is_eddsa_default(alg_item)) {
+        Item result = js_crypto_sign_eddsa(data_item, key_item);
+        if (js_check_exception()) return ItemNull;
+        if (has_callback) {
+            Item* env = js_alloc_env(2);
+            env[0] = callback_item;
+            env[1] = result;
+            Item fn = js_new_closure((void*)js_crypto_sign_verify_emit, 0, env, 2);
+            js_next_tick_enqueue(fn);
+            return make_js_undefined_crypto();
+        }
+        return result;
     }
 
     Item sign_obj = js_crypto_createSign(alg_item);
@@ -2771,6 +2875,20 @@ extern "C" Item js_crypto_verify(Item alg_item, Item data_item, Item key_item,
     bool has_callback = !crypto_item_is_undefined(callback_item);
     if (has_callback && get_type_id(callback_item) != LMD_TYPE_FUNC) {
         return js_throw_invalid_arg_type("callback", "Function", callback_item);
+    }
+
+    if (crypto_alg_is_eddsa_default(alg_item)) {
+        Item result = js_crypto_verify_eddsa(data_item, key_item, signature_item);
+        if (js_check_exception()) return ItemNull;
+        if (has_callback) {
+            Item* env = js_alloc_env(2);
+            env[0] = callback_item;
+            env[1] = result;
+            Item fn = js_new_closure((void*)js_crypto_sign_verify_emit, 0, env, 2);
+            js_next_tick_enqueue(fn);
+            return make_js_undefined_crypto();
+        }
+        return result;
     }
 
     Item verify_obj = js_crypto_createVerify(alg_item);
@@ -4520,6 +4638,390 @@ static Item crypto_throw_unsupported_asymmetric_key(const char* key_type) {
     return js_throw_error_with_code("ERR_OSSL_UNSUPPORTED", msg);
 }
 
+struct CryptoEdKeyMaterial {
+    const char* type_name;
+    int bits;
+    int raw_len;
+    bool has_private;
+    bool has_public;
+    uint8_t private_key[57];
+    uint8_t public_key[57];
+};
+
+static bool crypto_ed_key_type_from_der(const uint8_t* der, int der_len,
+                                        const char** type_name, int* bits,
+                                        int* raw_len) {
+    if (!type_name || !bits || !raw_len) return false;
+    *type_name = NULL;
+    *bits = 0;
+    *raw_len = 0;
+
+    const char* detected = crypto_unsupported_key_type_from_der(der, der_len);
+    if (detected && strcmp(detected, "ed25519") == 0) {
+        *type_name = "ed25519";
+        *bits = 255;
+        *raw_len = 32;
+        return true;
+    }
+    if (detected && strcmp(detected, "ed448") == 0) {
+        *type_name = "ed448";
+        *bits = 448;
+        *raw_len = 57;
+        return true;
+    }
+    return false;
+}
+
+static bool crypto_ed_extract_raw_from_der(const uint8_t* der, int der_len,
+                                           CryptoEdKeyMaterial* out) {
+    if (!der || der_len <= 0 || !out) return false;
+    memset(out, 0, sizeof(CryptoEdKeyMaterial));
+    if (!crypto_ed_key_type_from_der(der, der_len, &out->type_name,
+                                     &out->bits, &out->raw_len)) {
+        return false;
+    }
+
+    for (int i = 0; i < der_len - 1; i++) {
+        int pos = i + 1;
+        int len = 0;
+        if (!crypto_der_read_len(der, der_len, &pos, &len)) continue;
+        if (pos + len > der_len) continue;
+
+        if (der[i] == 0x04 && len == out->raw_len + 2 &&
+                pos + 2 <= der_len && der[pos] == 0x04 &&
+                der[pos + 1] == out->raw_len) {
+            memcpy(out->private_key, der + pos + 2, (size_t)out->raw_len);
+            out->has_private = true;
+        } else if (der[i] == 0x04 && len == out->raw_len) {
+            memcpy(out->private_key, der + pos, (size_t)out->raw_len);
+            out->has_private = true;
+        } else if (der[i] == 0x03 && len == out->raw_len + 1 &&
+                der[pos] == 0) {
+            memcpy(out->public_key, der + pos + 1, (size_t)out->raw_len);
+            out->has_public = true;
+        }
+    }
+    return out->has_private || out->has_public;
+}
+
+static bool crypto_key_to_der_copy(const uint8_t* key, int key_len,
+                                   uint8_t** out_der, int* out_der_len) {
+    if (!out_der || !out_der_len) return false;
+    *out_der = NULL;
+    *out_der_len = 0;
+    if (!key || key_len <= 0) return false;
+
+    const char* body = NULL;
+    int body_len = 0;
+    if (crypto_pem_body_bounds(key, key_len, &body, &body_len)) {
+        size_t der_len = 0;
+        uint8_t* der = base64_decode_variant(body, (size_t)body_len,
+                                             &der_len, BASE64_STD);
+        if (!der || der_len == 0 || der_len > 8192) {
+            if (der) mem_free(der);
+            return false;
+        }
+        *out_der = der;
+        *out_der_len = (int)der_len;
+        return true;
+    }
+
+    int visible_len = crypto_visible_pem_len(key, key_len);
+    if (visible_len <= 0) return false;
+    uint8_t* der = (uint8_t*)mem_alloc((size_t)visible_len, MEM_CAT_JS_RUNTIME);
+    memcpy(der, key, (size_t)visible_len);
+    *out_der = der;
+    *out_der_len = visible_len;
+    return true;
+}
+
+static bool crypto_detect_ed_key_material(const uint8_t* key, int key_len,
+                                          CryptoEdKeyMaterial* out) {
+    uint8_t* der = NULL;
+    int der_len = 0;
+    if (!crypto_key_to_der_copy(key, key_len, &der, &der_len)) return false;
+    bool ok = crypto_ed_extract_raw_from_der(der, der_len, out);
+    mem_free(der);
+    return ok;
+}
+
+struct CryptoOpenSslEdBackend {
+    bool tried;
+    bool available;
+    void* handle;
+    void* (*md_ctx_new)(void);
+    void (*md_ctx_free)(void*);
+    void* (*pkey_new_raw_private_key_ex)(void*, const char*, const char*,
+                                         const unsigned char*, size_t);
+    void* (*pkey_new_raw_public_key_ex)(void*, const char*, const char*,
+                                        const unsigned char*, size_t);
+    void (*pkey_free)(void*);
+    int (*digest_sign_init)(void*, void**, const void*, void*, void*);
+    int (*digest_sign)(void*, unsigned char*, size_t*, const unsigned char*, size_t);
+    int (*digest_verify_init)(void*, void**, const void*, void*, void*);
+    int (*digest_verify)(void*, const unsigned char*, size_t, const unsigned char*, size_t);
+};
+
+static CryptoOpenSslEdBackend crypto_openssl_ed_backend;
+
+static void* crypto_dlsym_required(void* handle, const char* name) {
+#ifdef _WIN32
+    (void)handle;
+    (void)name;
+    return NULL;
+#else
+    return handle ? dlsym(handle, name) : NULL;
+#endif
+}
+
+static bool crypto_openssl_ed_load(void) {
+    CryptoOpenSslEdBackend* b = &crypto_openssl_ed_backend;
+    if (b->tried) return b->available;
+    b->tried = true;
+
+#ifdef _WIN32
+    return false;
+#else
+    const char* candidates[] = {
+        "libcrypto.3.dylib",
+        "/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib",
+        "/opt/homebrew/lib/libcrypto.3.dylib",
+        "libcrypto.so.3",
+        "libcrypto.so",
+        NULL
+    };
+    for (int i = 0; candidates[i]; i++) {
+        b->handle = dlopen(candidates[i], RTLD_LAZY | RTLD_LOCAL);
+        if (b->handle) break;
+    }
+    if (!b->handle) {
+        log_debug("crypto: OpenSSL EdDSA backend unavailable: libcrypto not found");
+        return false;
+    }
+
+    b->md_ctx_new = (void* (*)(void))crypto_dlsym_required(b->handle, "EVP_MD_CTX_new");
+    b->md_ctx_free = (void (*)(void*))crypto_dlsym_required(b->handle, "EVP_MD_CTX_free");
+    b->pkey_new_raw_private_key_ex =
+        (void* (*)(void*, const char*, const char*, const unsigned char*, size_t))
+        crypto_dlsym_required(b->handle, "EVP_PKEY_new_raw_private_key_ex");
+    b->pkey_new_raw_public_key_ex =
+        (void* (*)(void*, const char*, const char*, const unsigned char*, size_t))
+        crypto_dlsym_required(b->handle, "EVP_PKEY_new_raw_public_key_ex");
+    b->pkey_free = (void (*)(void*))crypto_dlsym_required(b->handle, "EVP_PKEY_free");
+    b->digest_sign_init =
+        (int (*)(void*, void**, const void*, void*, void*))
+        crypto_dlsym_required(b->handle, "EVP_DigestSignInit");
+    b->digest_sign =
+        (int (*)(void*, unsigned char*, size_t*, const unsigned char*, size_t))
+        crypto_dlsym_required(b->handle, "EVP_DigestSign");
+    b->digest_verify_init =
+        (int (*)(void*, void**, const void*, void*, void*))
+        crypto_dlsym_required(b->handle, "EVP_DigestVerifyInit");
+    b->digest_verify =
+        (int (*)(void*, const unsigned char*, size_t, const unsigned char*, size_t))
+        crypto_dlsym_required(b->handle, "EVP_DigestVerify");
+
+    b->available = b->md_ctx_new && b->md_ctx_free &&
+        b->pkey_new_raw_private_key_ex && b->pkey_new_raw_public_key_ex &&
+        b->pkey_free && b->digest_sign_init && b->digest_sign &&
+        b->digest_verify_init && b->digest_verify;
+    if (!b->available) {
+        log_debug("crypto: OpenSSL EdDSA backend unavailable: EVP symbols missing");
+    }
+    return b->available;
+#endif
+}
+
+static const char* crypto_openssl_ed_key_name(const CryptoEdKeyMaterial* material) {
+    if (!material || !material->type_name) return NULL;
+    if (strcmp(material->type_name, "ed25519") == 0) return "ED25519";
+    if (strcmp(material->type_name, "ed448") == 0) return "ED448";
+    return NULL;
+}
+
+static bool crypto_openssl_ed_sign(const CryptoEdKeyMaterial* material,
+                                   const uint8_t* data, int data_len,
+                                   uint8_t* signature, size_t signature_cap,
+                                   size_t* signature_len) {
+    if (!material || !material->has_private || !signature || !signature_len) return false;
+    if (!crypto_openssl_ed_load()) return false;
+    const char* key_name = crypto_openssl_ed_key_name(material);
+    if (!key_name) return false;
+
+    CryptoOpenSslEdBackend* b = &crypto_openssl_ed_backend;
+    void* pkey = b->pkey_new_raw_private_key_ex(NULL, key_name, NULL,
+        material->private_key, (size_t)material->raw_len);
+    if (!pkey) return false;
+    void* ctx = b->md_ctx_new();
+    if (!ctx) {
+        b->pkey_free(pkey);
+        return false;
+    }
+
+    bool ok = false;
+    if (b->digest_sign_init(ctx, NULL, NULL, NULL, pkey) == 1) {
+        size_t out_len = signature_cap;
+        if (b->digest_sign(ctx, signature, &out_len,
+                data ? data : crypto_empty_bytes,
+                data_len > 0 ? (size_t)data_len : 0) == 1) {
+            *signature_len = out_len;
+            ok = true;
+        }
+    }
+
+    b->md_ctx_free(ctx);
+    b->pkey_free(pkey);
+    return ok;
+}
+
+static bool crypto_openssl_ed_verify(const CryptoEdKeyMaterial* material,
+                                     const uint8_t* data, int data_len,
+                                     const uint8_t* signature,
+                                     int signature_len, bool* verified) {
+    if (!material || !verified) return false;
+    *verified = false;
+    if (!crypto_openssl_ed_load()) return false;
+    const char* key_name = crypto_openssl_ed_key_name(material);
+    if (!key_name) return false;
+
+    const uint8_t* raw = material->has_public ? material->public_key : material->private_key;
+    bool use_private = !material->has_public && material->has_private;
+    if (!raw) return false;
+
+    CryptoOpenSslEdBackend* b = &crypto_openssl_ed_backend;
+    void* pkey = use_private ?
+        b->pkey_new_raw_private_key_ex(NULL, key_name, NULL, raw, (size_t)material->raw_len) :
+        b->pkey_new_raw_public_key_ex(NULL, key_name, NULL, raw, (size_t)material->raw_len);
+    if (!pkey) return false;
+    void* ctx = b->md_ctx_new();
+    if (!ctx) {
+        b->pkey_free(pkey);
+        return false;
+    }
+
+    bool ok = false;
+    if (b->digest_verify_init(ctx, NULL, NULL, NULL, pkey) == 1) {
+        int ret = b->digest_verify(ctx,
+            signature ? signature : crypto_empty_bytes,
+            signature_len > 0 ? (size_t)signature_len : 0,
+            data ? data : crypto_empty_bytes,
+            data_len > 0 ? (size_t)data_len : 0);
+        if (ret == 1) {
+            *verified = true;
+            ok = true;
+        } else if (ret == 0) {
+            ok = true;
+        }
+    }
+
+    b->md_ctx_free(ctx);
+    b->pkey_free(pkey);
+    return ok;
+}
+
+static bool crypto_psa_ensure_init(void) {
+    static bool initialized = false;
+    if (initialized) return true;
+    psa_status_t status = psa_crypto_init();
+    if (status != PSA_SUCCESS) {
+        log_error("crypto: PSA crypto init failed: %d", (int)status);
+        return false;
+    }
+    initialized = true;
+    return true;
+}
+
+static bool crypto_psa_import_ed_key(const CryptoEdKeyMaterial* material,
+                                     bool for_sign, mbedtls_svc_key_id_t* key) {
+    if (!material || !key || !crypto_psa_ensure_init()) return false;
+    const uint8_t* raw = for_sign ? material->private_key : material->public_key;
+    if ((for_sign && !material->has_private) || (!for_sign && !material->has_public)) {
+        if (!for_sign && material->has_private) raw = material->private_key;
+        else return false;
+    }
+
+    psa_key_attributes_t attrs = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_type_t key_type = for_sign || (!for_sign && material->has_private) ?
+        PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_TWISTED_EDWARDS) :
+        PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_TWISTED_EDWARDS);
+    psa_set_key_type(&attrs, key_type);
+    psa_set_key_bits(&attrs, (size_t)material->bits);
+    psa_set_key_usage_flags(&attrs, for_sign ?
+        PSA_KEY_USAGE_SIGN_MESSAGE :
+        PSA_KEY_USAGE_VERIFY_MESSAGE);
+    psa_set_key_algorithm(&attrs, PSA_ALG_PURE_EDDSA);
+
+    psa_status_t status = psa_import_key(&attrs, raw, (size_t)material->raw_len, key);
+    psa_reset_key_attributes(&attrs);
+    if (status != PSA_SUCCESS) {
+        log_debug("crypto: PSA EdDSA key import failed: %d", (int)status);
+        return false;
+    }
+    return true;
+}
+
+static bool crypto_eddsa_sign_message(const uint8_t* key_bytes, int key_len,
+                                      const uint8_t* data, int data_len,
+                                      uint8_t* signature, size_t signature_cap,
+                                      size_t* signature_len) {
+    if (!signature || !signature_len) return false;
+    CryptoEdKeyMaterial material;
+    if (!crypto_detect_ed_key_material(key_bytes, key_len, &material) ||
+            !material.has_private) {
+        return false;
+    }
+
+    if (crypto_openssl_ed_sign(&material, data, data_len, signature,
+            signature_cap, signature_len)) {
+        return true;
+    }
+
+    mbedtls_svc_key_id_t key = MBEDTLS_SVC_KEY_ID_INIT;
+    if (!crypto_psa_import_ed_key(&material, true, &key)) return false;
+    psa_status_t status = psa_sign_message(key, PSA_ALG_PURE_EDDSA,
+        data ? data : crypto_empty_bytes, data_len > 0 ? (size_t)data_len : 0,
+        signature, signature_cap, signature_len);
+    psa_destroy_key(key);
+    if (status != PSA_SUCCESS) {
+        log_debug("crypto: PSA EdDSA sign failed: %d", (int)status);
+        return false;
+    }
+    return true;
+}
+
+static bool crypto_eddsa_verify_message(const uint8_t* key_bytes, int key_len,
+                                        const uint8_t* data, int data_len,
+                                        const uint8_t* signature,
+                                        int signature_len, bool* verified) {
+    if (!verified) return false;
+    *verified = false;
+    CryptoEdKeyMaterial material;
+    if (!crypto_detect_ed_key_material(key_bytes, key_len, &material)) return false;
+
+    if (crypto_openssl_ed_verify(&material, data, data_len, signature,
+            signature_len, verified)) {
+        return true;
+    }
+
+    mbedtls_svc_key_id_t key = MBEDTLS_SVC_KEY_ID_INIT;
+    if (!crypto_psa_import_ed_key(&material, false, &key)) return false;
+    psa_status_t status = psa_verify_message(key, PSA_ALG_PURE_EDDSA,
+        data ? data : crypto_empty_bytes, data_len > 0 ? (size_t)data_len : 0,
+        signature ? signature : crypto_empty_bytes,
+        signature_len > 0 ? (size_t)signature_len : 0);
+    psa_destroy_key(key);
+    if (status == PSA_SUCCESS) {
+        *verified = true;
+        return true;
+    }
+    if (status == PSA_ERROR_INVALID_SIGNATURE ||
+            status == PSA_ERROR_INVALID_ARGUMENT) {
+        return true;
+    }
+    log_debug("crypto: PSA EdDSA verify failed: %d", (int)status);
+    return false;
+}
+
 enum CryptoAsymmetricExportFormat {
     CRYPTO_ASYM_EXPORT_LEGACY_BUFFER = 0,
     CRYPTO_ASYM_EXPORT_PEM = 1,
@@ -4743,6 +5245,18 @@ static Item crypto_asymmetric_export_pkcs1(const uint8_t* bytes, int len,
 
 static Item crypto_asymmetric_export_der(const uint8_t* bytes, int len,
                                          bool is_private) {
+    CryptoEdKeyMaterial ed_material;
+    if (crypto_detect_ed_key_material(bytes, len, &ed_material)) {
+        uint8_t* der = NULL;
+        int der_len = 0;
+        if (!crypto_key_to_der_copy(bytes, len, &der, &der_len)) {
+            return js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to export key");
+        }
+        Item result = crypto_buffer_from_bytes(der, der_len);
+        mem_free(der);
+        return result;
+    }
+
     mbedtls_pk_context pk;
     mbedtls_pk_init(&pk);
     Item result = ItemNull;
@@ -4965,6 +5479,15 @@ extern "C" Item js_crypto_createPrivateKey(Item key_item) {
         return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", key_item);
     }
 
+    CryptoEdKeyMaterial ed_material;
+    if (crypto_detect_ed_key_material(key, key_len, &ed_material) &&
+            ed_material.has_private) {
+        Item result = crypto_asymmetric_key_object_from_bytes(key, key_len,
+            "private", ed_material.type_name, NULL);
+        mem_free(key);
+        return result;
+    }
+
     mbedtls_pk_context pk;
     mbedtls_pk_init(&pk);
     int ret = mbedtls_pk_parse_key(&pk, key, (size_t)key_len, NULL, 0,
@@ -4993,6 +5516,15 @@ extern "C" Item js_crypto_createPublicKey(Item key_item) {
         if (!crypto_private_key_bytes_for_sign(key_item, &key, &key_len)) {
             return js_throw_invalid_arg_type("key", "string, ArrayBuffer, Buffer, TypedArray, DataView, or KeyObject", key_item);
         }
+    }
+
+    CryptoEdKeyMaterial ed_material;
+    if (crypto_detect_ed_key_material(key, key_len, &ed_material) &&
+            ed_material.has_public) {
+        Item result = crypto_asymmetric_key_object_from_bytes(key, key_len,
+            "public", ed_material.type_name, NULL);
+        mem_free(key);
+        return result;
     }
 
     mbedtls_pk_context pk;
