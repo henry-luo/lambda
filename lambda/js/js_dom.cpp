@@ -45,7 +45,6 @@
 #include "../../radiant/editing_dispatch.hpp"
 #include "../../radiant/editing_geometry.hpp"
 #include "../../radiant/editing_intent.hpp"
-#include "../../radiant/editing_rich_transaction.hpp"
 #include "../../radiant/editing_target_range.hpp"
 #include "../../radiant/clipboard.hpp"
 #include "../../radiant/handler.hpp"
@@ -635,77 +634,15 @@ static bool js_dom_testdriver_rich_mutate(EventContext* evcon,
                                           const EditingSurface* surface,
                                           const EditingIntent* intent,
                                           void* user) {
-    (void)evcon;
-    if (intent && (intent->type == INPUT_INTENT_FORMAT_BOLD ||
-                   intent->type == INPUT_INTENT_FORMAT_ITALIC ||
-                   intent->type == INPUT_INTENT_FORMAT_UNDERLINE ||
-                   intent->type == INPUT_INTENT_FORMAT_STRIKETHROUGH ||
-                   intent->type == INPUT_INTENT_FORMAT_SUBSCRIPT ||
-                   intent->type == INPUT_INTENT_FORMAT_SUPERSCRIPT)) {
-        return editing_rich_default_format(state, surface, intent,
-                                           nullptr, nullptr);
-    }
-    if (intent && (intent->type == INPUT_INTENT_FORMAT_FORE_COLOR ||
-                   intent->type == INPUT_INTENT_FORMAT_BACK_COLOR ||
-                   intent->type == INPUT_INTENT_FORMAT_HILITE_COLOR ||
-                   intent->type == INPUT_INTENT_FORMAT_FONT_NAME ||
-                   intent->type == INPUT_INTENT_FORMAT_FONT_SIZE)) {
-        return editing_rich_default_style(state, surface, intent,
-                                          nullptr, nullptr);
-    }
-    if (intent && intent->type == INPUT_INTENT_FORMAT_REMOVE) {
-        return editing_rich_default_remove_format(state, surface, intent,
-                                                  nullptr, nullptr);
-    }
-    if (intent && intent->type == INPUT_INTENT_SELECT_ALL) {
-        return editing_rich_default_select_all(state, surface, intent,
-                                               nullptr, nullptr);
-    }
-    if (intent && (intent->type == INPUT_INTENT_INSERT_LINK ||
-                   intent->type == INPUT_INTENT_FORMAT_UNLINK)) {
-        return editing_rich_default_link(state, surface, intent,
-                                         nullptr, nullptr);
-    }
-    if (intent && (intent->type == INPUT_INTENT_INSERT_HORIZONTAL_RULE ||
-                   intent->type == INPUT_INTENT_INSERT_IMAGE)) {
-        return editing_rich_default_object(state, surface, intent,
-                                           nullptr, nullptr);
-    }
-    if (intent && intent->type == INPUT_INTENT_FORMAT_BLOCK) {
-        return editing_rich_default_format_block(state, surface, intent,
-                                                 nullptr, nullptr);
-    }
-    if (intent && (intent->type == INPUT_INTENT_FORMAT_JUSTIFY_LEFT ||
-                   intent->type == INPUT_INTENT_FORMAT_JUSTIFY_CENTER ||
-                   intent->type == INPUT_INTENT_FORMAT_JUSTIFY_RIGHT ||
-                   intent->type == INPUT_INTENT_FORMAT_JUSTIFY_FULL)) {
-        return editing_rich_default_justify(state, surface, intent,
-                                            nullptr, nullptr);
-    }
-    if (intent && (intent->type == INPUT_INTENT_FORMAT_ORDERED_LIST ||
-                   intent->type == INPUT_INTENT_FORMAT_UNORDERED_LIST)) {
-        return editing_rich_default_list(state, surface, intent,
-                                         nullptr, nullptr);
-    }
-    if (intent && (intent->type == INPUT_INTENT_FORMAT_INDENT ||
-                   intent->type == INPUT_INTENT_FORMAT_OUTDENT)) {
-        return editing_rich_default_indent(state, surface, intent,
-                                           nullptr, nullptr);
-    }
-    if (intent && (intent->type == INPUT_INTENT_HISTORY_UNDO ||
-                   intent->type == INPUT_INTENT_HISTORY_REDO)) {
-        return js_dom_rich_history_restore(state, surface, intent);
-    }
-    JsDomTestdriverMutationArgs* args = (JsDomTestdriverMutationArgs*)user;
-    View* fallback_view = nullptr;
-    int fallback_offset = 0;
-    if (!state || !state->dom_selection ||
-        state->dom_selection->range_count == 0) {
-        fallback_view = args ? args->fallback_view : nullptr;
-        fallback_offset = args ? args->fallback_offset : 0;
-    }
-    return editing_rich_default_replace(state, intent,
-        fallback_view, fallback_offset, nullptr, nullptr);
+    // Stage 4B Phase 5 (step 1 — sever js_dom → editing_rich_transaction):
+    // the native rich-editing apply layer is being retired. Editing is
+    // script-owned (script handlers apply via `beforeinput`); the WPT
+    // testdriver/`execCommand` path no longer drives native edits. Inert no-op
+    // so the testdriver transaction reports "no native mutation". The native
+    // editing-conformance suites that exercised this path retire with the
+    // engine (see vibe/editing/Radiant_Editor_Stage4B.md §5.2).
+    (void)evcon; (void)state; (void)surface; (void)intent; (void)user;
+    return false;
 }
 
 static uint32_t js_dom_testdriver_u32(Item value) {
