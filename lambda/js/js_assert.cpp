@@ -1572,43 +1572,66 @@ static void assert_set_method_item(Item ns, const char* name, Item fn) {
     js_property_set(ns, assert_make_string(name), fn);
 }
 
+static Item js_assert_constructor_default_message(Item actual, Item expected, Item op_item) {
+    if (js_assert_string_equals(op_item, "strictEqual")) {
+        return js_assert_strict_equal_message(actual, expected);
+    }
+    if (js_assert_string_equals(op_item, "notStrictEqual")) {
+        return js_assert_not_strict_equal_message(actual);
+    }
+    if (js_assert_string_equals(op_item, "deepEqual")) {
+        return js_assert_deep_equal_message(actual, expected);
+    }
+    if (js_assert_string_equals(op_item, "deepStrictEqual")) {
+        Item date_msg = js_assert_date_checktag_message(actual, expected);
+        if (get_type_id(date_msg) == LMD_TYPE_STRING) return date_msg;
+        Item array_msg = js_assert_deep_strict_array_message(actual, expected);
+        if (get_type_id(array_msg) == LMD_TYPE_STRING) return array_msg;
+        return assert_make_string("Expected values to be strictly deep-equal");
+    }
+    if (js_assert_string_equals(op_item, "fail")) {
+        return assert_make_string("Failed");
+    }
+    return assert_make_string("assertion error");
+}
+
 // AssertionError constructor: new assert.AssertionError({ message, actual, expected, operator })
 extern "C" Item js_assert_AssertionError_ctor(Item options) {
     extern Item js_new_error_with_name(Item type_name, Item message);
     extern Item js_property_get(Item obj, Item key);
     extern Item js_property_set(Item obj, Item key, Item value);
-    const char* msg_str = "assertion error";
-    const char* op_str = NULL;
+    Item msg_item = ItemNull;
+    Item op_item = make_js_undefined();
     Item actual = make_js_undefined();
     Item expected = make_js_undefined();
     const char* diff_str = "simple";
+    bool generated = true;
     if (get_type_id(options) == LMD_TYPE_MAP) {
         Item m = js_property_get(options, assert_make_string("message"));
         if (get_type_id(m) == LMD_TYPE_STRING) {
-            String* ms = it2s(m);
-            // use message string directly
-            msg_str = ms->chars;
+            msg_item = m;
+            generated = false;
         }
         actual = js_property_get(options, assert_make_string("actual"));
         expected = js_property_get(options, assert_make_string("expected"));
-        Item op_item = js_property_get(options, assert_make_string("operator"));
-        if (get_type_id(op_item) == LMD_TYPE_STRING) {
-            op_str = it2s(op_item)->chars;
-        }
+        op_item = js_property_get(options, assert_make_string("operator"));
         diff_str = js_assert_normalized_diff(js_property_get(options, js_assert_diff_key()));
     } else if (get_type_id(options) == LMD_TYPE_STRING) {
-        msg_str = it2s(options)->chars;
+        msg_item = options;
+        generated = false;
+    }
+    if (get_type_id(msg_item) != LMD_TYPE_STRING) {
+        msg_item = js_assert_constructor_default_message(actual, expected, op_item);
     }
     Item type_name = assert_make_string("AssertionError");
-    Item msg_item = assert_make_string(msg_str);
     Item error = js_new_error_with_name(type_name, msg_item);
     js_property_set(error, assert_make_string("code"), assert_make_string("ERR_ASSERTION"));
     js_property_set(error, assert_make_string("name"), assert_make_string("AssertionError"));
     js_property_set(error, assert_make_string("actual"), actual);
     js_property_set(error, assert_make_string("expected"), expected);
-    if (op_str) js_property_set(error, assert_make_string("operator"), assert_make_string(op_str));
+    if (get_type_id(op_item) == LMD_TYPE_STRING) js_property_set(error, assert_make_string("operator"), op_item);
     js_property_set(error, assert_make_string("diff"), assert_make_string(diff_str));
-    js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(false)});
+    js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(generated)});
     js_assert_attach_assertion_error_prototype(error);
     return error;
 }

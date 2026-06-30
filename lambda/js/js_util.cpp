@@ -16,6 +16,7 @@
 #include <cstring>
 #include <cmath>
 #include <cstdio>
+#include <cerrno>
 
 // forward declarations
 extern "C" Item js_util_inspect(Item obj_item, Item options_item);
@@ -1641,6 +1642,9 @@ extern "C" Item js_util_getSystemErrorName(Item err_item) {
         case 98: name = "EADDRINUSE"; break;
         case 99: name = "EADDRNOTAVAIL"; break;
         case 104: name = "ECONNRESET"; break;
+#if defined(ETIMEDOUT) && ETIMEDOUT != 110
+        case ETIMEDOUT: name = "ETIMEDOUT"; break;
+#endif
         case 110: name = "ETIMEDOUT"; break;
         case 111: name = "ECONNREFUSED"; break;
         default: name = "UNKNOWN"; break;

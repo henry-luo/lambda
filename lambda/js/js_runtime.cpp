@@ -32269,6 +32269,9 @@ extern "C" void js_with_push(Item obj);
 extern "C" void js_with_set_stack(Item* stack, int depth);
 extern "C" int js_with_save_stack(Item* out_stack, int max_depth);
 extern "C" void js_mark_non_enumerable(Item object, Item name);
+extern "C" Item js_delete_property(Item obj, Item key);
+extern "C" Item js_get_prototype(Item object);
+extern "C" Item js_get_prototype_of(Item object);
 extern "C" Item js_buffer_from_bytes(const char* data, int len);
 
 struct JsVmEvalOptions {
@@ -32409,28 +32412,63 @@ static Item js_vm_make_cached_data_for_code(Item code) {
     return js_buffer_from_bytes((const char*)payload, (int)sizeof(payload));
 }
 
-static void js_vm_set_global_alias(Item sandbox, const char* name, int len) {
-    Item key = (Item){.item = s2it(heap_create_name(name, len))};
-    js_property_set(sandbox, key, sandbox);
-    js_mark_non_enumerable(sandbox, key);
+struct JsVmContextBinding {
+    Item key;
+};
+
+static void js_vm_track_temp_binding(Item key, JsVmContextBinding* bindings, int* count, int max_count) {
+    if (!bindings || !count || *count >= max_count) return;
+    bindings[*count].key = key;
+    (*count)++;
 }
 
-static void js_vm_install_global_aliases(Item sandbox) {
-    js_vm_set_global_alias(sandbox, "globalThis", 10);
-    js_vm_set_global_alias(sandbox, "self", 4);
-    js_vm_set_global_alias(sandbox, "window", 6);
-    js_vm_set_global_alias(sandbox, "global", 6);
+static void js_vm_set_temp_global_alias(Item sandbox, const char* name, int len,
+                                        JsVmContextBinding* bindings, int* count, int max_count) {
+    Item key = (Item){.item = s2it(heap_create_name(name, len))};
+    if (it2b(js_has_own_property(sandbox, key))) return;
+    js_property_set(sandbox, key, sandbox);
+    js_mark_non_enumerable(sandbox, key);
+    js_vm_track_temp_binding(key, bindings, count, max_count);
+}
+
+static void js_vm_mask_temp_host_global(Item sandbox, const char* name, int len,
+                                        JsVmContextBinding* bindings, int* count, int max_count) {
+    Item key = (Item){.item = s2it(heap_create_name(name, len))};
+    if (it2b(js_has_own_property(sandbox, key))) return;
+    js_property_set(sandbox, key, make_js_undefined());
+    js_mark_non_enumerable(sandbox, key);
+    js_vm_track_temp_binding(key, bindings, count, max_count);
+}
+
+static int js_vm_apply_context_bindings(Item sandbox, JsVmContextBinding* bindings, int max_count) {
+    int count = 0;
+    js_vm_set_temp_global_alias(sandbox, "globalThis", 10, bindings, &count, max_count);
+    js_vm_set_temp_global_alias(sandbox, "self", 4, bindings, &count, max_count);
+    js_vm_set_temp_global_alias(sandbox, "window", 6, bindings, &count, max_count);
+    js_vm_set_temp_global_alias(sandbox, "global", 6, bindings, &count, max_count);
+    js_vm_mask_temp_host_global(sandbox, "process", 7, bindings, &count, max_count);
+    js_vm_mask_temp_host_global(sandbox, "require", 7, bindings, &count, max_count);
+    js_vm_mask_temp_host_global(sandbox, "module", 6, bindings, &count, max_count);
+    js_vm_mask_temp_host_global(sandbox, "exports", 7, bindings, &count, max_count);
+    js_vm_mask_temp_host_global(sandbox, "__filename", 10, bindings, &count, max_count);
+    js_vm_mask_temp_host_global(sandbox, "__dirname", 9, bindings, &count, max_count);
+    return count;
+}
+
+static void js_vm_restore_context_bindings(Item sandbox, JsVmContextBinding* bindings, int count) {
+    for (int i = count - 1; i >= 0; i--) {
+        js_delete_property(sandbox, bindings[i].key);
+    }
 }
 
 static Item js_vm_contextify(Item sandbox) {
     if (get_type_id(sandbox) != LMD_TYPE_MAP) {
         sandbox = js_new_object();
     }
-    Item base_global = js_get_global_this();
-    js_set_prototype(sandbox, base_global);
-    js_vm_install_global_aliases(sandbox);
-    js_property_set(sandbox, (Item){.item = s2it(heap_create_name("__vmContext", 11))},
+    Item marker_key = (Item){.item = s2it(heap_create_name("__vmContext", 11))};
+    js_property_set(sandbox, marker_key,
                     (Item){.item = ITEM_TRUE});
+    js_mark_non_enumerable(sandbox, marker_key);
     return sandbox;
 }
 
@@ -32491,6 +32529,10 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox, Item options) {
 
     // bit 8: vm context — each runInContext unit gets its own module-var slot
     // namespace so units sharing this context don't clobber each other's slots.
+    Item previous_proto = js_get_prototype_of(sandbox);
+    js_set_prototype(sandbox, js_get_global_this());
+    JsVmContextBinding vm_bindings[16];
+    int vm_binding_count = js_vm_apply_context_bindings(sandbox, vm_bindings, 16);
     Item prev_this = js_get_current_this();
     Item prev_global = js_vm_swap_global_this(sandbox);
     Item saved_with_stack[16];
@@ -32503,6 +32545,8 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox, Item options) {
     js_set_this(prev_this);
     js_with_set_stack(saved_with_stack, saved_with_depth);
     js_vm_swap_global_this(prev_global);
+    js_vm_restore_context_bindings(sandbox, vm_bindings, vm_binding_count);
+    js_set_prototype(sandbox, previous_proto);
     return result;
 }
 
@@ -32680,6 +32724,7 @@ static Item js_dc_tc_tracePromise(Item fn, Item context, Item this_arg, Item res
 static Item js_dc_tc_traceCallback(Item fn, Item rest_args);
 static void js_dc_channel_publish_on(Item channel, Item message);
 static Item js_dc_channel_runStores(Item message, Item callback, Item this_arg, Item arg1, Item arg2);
+static Item js_dc_channel_withStoreScope(Item message);
 static Item js_dc_channel_factory(Item name);
 static Item js_dc_stores_key(void);
 extern "C" void js_set_prototype(Item object, Item prototype);
@@ -32862,6 +32907,9 @@ static Item js_dc_stores_key(void) {
     return (Item){.item = s2it(heap_create_name("_stores", 7))};
 }
 
+static Item js_als_apply_context(Item context);
+static void js_als_restore_context(Item previous);
+
 #define JS_DC_DEFERRED_ERROR_MAX 64
 static Item js_dc_deferred_errors[JS_DC_DEFERRED_ERROR_MAX];
 static int js_dc_deferred_error_count = 0;
@@ -32980,6 +33028,65 @@ static Item js_dc_channel_runStores(Item message, Item callback, Item this_arg, 
     return js_als_context_call_args(context, callback, this_arg, args, 2);
 }
 
+static Item js_dc_scope_state_key(void) {
+    return (Item){.item = s2it(heap_create_name("__lambda_dc_scope_state__", 25))};
+}
+
+static Item js_dc_dispose_key(void) {
+    Item name = (Item){.item = s2it(heap_create_name("dispose", 7))};
+    return js_symbol_well_known(name);
+}
+
+static Item js_dc_scope_dispose(void) {
+    Item self = js_get_this();
+    Item state = js_property_get(self, js_dc_scope_state_key());
+    if (get_type_id(state) != LMD_TYPE_MAP && get_type_id(state) != LMD_TYPE_OBJECT) {
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+
+    Item disposed_key = js_dc_key("disposed");
+    Item disposed = js_property_get(state, disposed_key);
+    if (get_type_id(disposed) == LMD_TYPE_BOOL && it2b(disposed)) {
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    js_property_set(state, disposed_key, (Item){.item = ITEM_TRUE});
+
+    Item end_ch = js_property_get(state, js_dc_key("endChannel"));
+    Item context = js_property_get(state, js_dc_key("context"));
+    if (!js_dc_is_nullish(end_ch)) {
+        js_dc_channel_publish_on(end_ch, context);
+    }
+
+    Item previous = js_property_get(state, js_dc_key("previous"));
+    js_als_restore_context(previous);
+    return js_check_exception() ? ItemNull : (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static Item js_dc_make_scope(Item previous, Item end_ch, Item context) {
+    Item scope = js_new_object();
+    Item state = js_new_object();
+    js_property_set(state, js_dc_key("previous"), previous);
+    js_property_set(state, js_dc_key("endChannel"), end_ch);
+    js_property_set(state, js_dc_key("context"), context);
+    js_property_set(state, js_dc_key("disposed"), (Item){.item = ITEM_FALSE});
+    js_property_set(scope, js_dc_scope_state_key(), state);
+    js_property_set(scope, js_dc_dispose_key(), js_new_function((void*)js_dc_scope_dispose, 0));
+    return scope;
+}
+
+static Item js_dc_channel_withStoreScope(Item message) {
+    Item self = js_get_this();
+    Item context = js_dc_build_store_context(self, message);
+    Item previous = js_als_apply_context(context);
+    js_dc_channel_publish_on(self, message);
+    if (js_check_exception()) {
+        js_als_restore_context(previous);
+        return ItemNull;
+    }
+    return js_dc_make_scope(previous, (Item){.item = ITEM_JS_UNDEFINED},
+                            (Item){.item = ITEM_JS_UNDEFINED});
+}
+
 // dc.channel(name) — create or return existing channel
 static Item js_dc_channel_factory(Item name) {
     js_dc_register_roots();
@@ -33005,6 +33112,7 @@ static Item js_dc_channel_factory(Item name) {
     js_property_set(ch, js_dc_key("bindStore"), js_new_function((void*)js_dc_channel_bindStore, 2));
     js_property_set(ch, js_dc_key("unbindStore"), js_new_function((void*)js_dc_channel_unbindStore, 1));
     js_property_set(ch, js_dc_key("runStores"), js_new_function((void*)js_dc_channel_runStores, 5));
+    js_property_set(ch, js_dc_key("withStoreScope"), js_new_function((void*)js_dc_channel_withStoreScope, 1));
     if (js_dc_channel_count < JS_DC_CHANNEL_MAX) {
         js_dc_channel_names[js_dc_channel_count] = name;
         js_dc_channels[js_dc_channel_count] = ch;
@@ -33420,35 +33528,60 @@ static Item js_dc_tc_traceCallback(Item fn, Item rest_args) {
     return result;
 }
 
-// BoundedChannel.run(context, fn, ...args) — publish to start, call fn, publish to end
-static Item js_dc_bc_run(Item context, Item fn) {
+// BoundedChannel.run(context, fn, thisArg, ...args) — publish to start, call fn, publish to end
+static Item js_dc_bc_run(Item context, Item fn, Item this_arg, Item rest_args) {
     Item self = js_get_this();
     Item start_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("start", 5))});
     Item end_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("end", 3))});
-    Item error_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("error", 5))});
-    // publish start with context
+    Item args_storage[16];
+    Item* args = nullptr;
+    int argc = js_dc_rest_args(rest_args, args_storage, &args);
+
+    Item store_context = js_dc_build_store_context(start_ch, context);
+    Item previous = js_als_apply_context(store_context);
     js_dc_channel_publish_on(start_ch, context);
-    // call fn with context
-    Item result = js_call_function(fn, (Item){.item = ITEM_JS_UNDEFINED}, &context, 1);
-    // check for error
-    if (get_type_id(result) == LMD_TYPE_ERROR) {
-        js_property_set(context, (Item){.item = s2it(heap_create_name("error", 5))}, result);
-        js_dc_channel_publish_on(error_ch, context);
+    if (js_check_exception()) {
+        js_als_restore_context(previous);
+        return ItemNull;
     }
-    // publish end with context + result
-    js_property_set(context, (Item){.item = s2it(heap_create_name("result", 6))}, result);
+
+    Item result = js_call_function(fn, this_arg, args, argc);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        js_dc_channel_publish_on(end_ch, context);
+        js_als_restore_context(previous);
+        js_throw_value(error);
+        return ItemNull;
+    }
+
     js_dc_channel_publish_on(end_ch, context);
-    return result;
+    js_als_restore_context(previous);
+    return js_check_exception() ? ItemNull : result;
+}
+
+static Item js_dc_bc_withScope(Item context) {
+    Item self = js_get_this();
+    Item start_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("start", 5))});
+    Item end_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("end", 3))});
+    Item store_context = js_dc_build_store_context(start_ch, context);
+    Item previous = js_als_apply_context(store_context);
+    js_dc_channel_publish_on(start_ch, context);
+    if (js_check_exception()) {
+        js_als_restore_context(previous);
+        return ItemNull;
+    }
+    return js_dc_make_scope(previous, end_ch, context);
 }
 
 // dc.boundedChannel(name) — create a TracingChannel with run() method
 static Item js_dc_bounded_channel(Item name) {
     Item tc = js_dc_tracing_channel(name);
     js_property_set(tc, (Item){.item = s2it(heap_create_name("run", 3))},
-                    js_new_function((void*)js_dc_bc_run, 2));
-    // runStores — no-op
+                    js_new_function((void*)js_dc_bc_run, -4));
     js_property_set(tc, (Item){.item = s2it(heap_create_name("runStores", 9))},
-                    js_new_function((void*)js_dc_bc_run, 2));
+                    js_new_function((void*)js_dc_bc_run, -4));
+    js_property_set(tc, (Item){.item = s2it(heap_create_name("withScope", 9))},
+                    js_new_function((void*)js_dc_bc_withScope, 1));
     return tc;
 }
 
@@ -33983,6 +34116,40 @@ extern "C" Item js_als_capture_context(void) {
     return context;
 }
 
+static Item js_als_apply_context(Item context) {
+    Item previous = js_array_new(0);
+    if (get_type_id(context) != LMD_TYPE_ARRAY) return previous;
+
+    Item store_key = js_als_store_key();
+    int64_t len = js_array_length(context);
+    for (int64_t i = 0; i < len; i++) {
+        Item pair = js_array_get_int(context, i);
+        if (get_type_id(pair) != LMD_TYPE_ARRAY || js_array_length(pair) < 2) continue;
+        Item instance = js_array_get_int(pair, 0);
+        Item store = js_array_get_int(pair, 1);
+        Item saved = js_array_new(0);
+        js_array_push(saved, instance);
+        js_array_push(saved, js_property_get(instance, store_key));
+        js_array_push(previous, saved);
+        js_property_set(instance, store_key, store);
+    }
+    return previous;
+}
+
+static void js_als_restore_context(Item previous) {
+    if (get_type_id(previous) != LMD_TYPE_ARRAY) return;
+
+    Item store_key = js_als_store_key();
+    int64_t previous_len = js_array_length(previous);
+    for (int64_t i = previous_len - 1; i >= 0; i--) {
+        Item saved = js_array_get_int(previous, i);
+        if (get_type_id(saved) != LMD_TYPE_ARRAY || js_array_length(saved) < 2) continue;
+        Item instance = js_array_get_int(saved, 0);
+        Item store = js_array_get_int(saved, 1);
+        js_property_set(instance, store_key, store);
+    }
+}
+
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg) {
     if (get_type_id(callback) != LMD_TYPE_FUNC) return (Item){.item = ITEM_JS_UNDEFINED};
     if (get_type_id(context) != LMD_TYPE_ARRAY) {
@@ -33993,20 +34160,7 @@ extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, 
         return js_call_function(callback, this_val, nullptr, 0);
     }
 
-    Item store_key = js_als_store_key();
-    Item previous = js_array_new(0);
-    int64_t len = js_array_length(context);
-    for (int64_t i = 0; i < len; i++) {
-        Item pair = js_array_get_int(context, i);
-        if (get_type_id(pair) != LMD_TYPE_ARRAY || js_array_length(pair) < 2) continue;
-        Item instance = js_array_get_int(pair, 0);
-        Item store = js_array_get_int(pair, 1);
-        Item saved = js_array_new(0);
-        js_array_push(saved, instance);
-        js_array_push(saved, js_property_get(instance, store_key));
-        js_array_push(previous, saved);
-        js_property_set(instance, store_key, store);
-    }
+    Item previous = js_als_apply_context(context);
 
     Item result;
     if (has_arg) {
@@ -34016,14 +34170,7 @@ extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, 
         result = js_call_function(callback, this_val, nullptr, 0);
     }
 
-    int64_t previous_len = js_array_length(previous);
-    for (int64_t i = previous_len - 1; i >= 0; i--) {
-        Item saved = js_array_get_int(previous, i);
-        if (get_type_id(saved) != LMD_TYPE_ARRAY || js_array_length(saved) < 2) continue;
-        Item instance = js_array_get_int(saved, 0);
-        Item store = js_array_get_int(saved, 1);
-        js_property_set(instance, store_key, store);
-    }
+    js_als_restore_context(previous);
     return result;
 }
 
@@ -34033,31 +34180,9 @@ extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_
         return js_call_function(callback, this_val, args, argc);
     }
 
-    Item store_key = js_als_store_key();
-    Item previous = js_array_new(0);
-    int64_t len = js_array_length(context);
-    for (int64_t i = 0; i < len; i++) {
-        Item pair = js_array_get_int(context, i);
-        if (get_type_id(pair) != LMD_TYPE_ARRAY || js_array_length(pair) < 2) continue;
-        Item instance = js_array_get_int(pair, 0);
-        Item store = js_array_get_int(pair, 1);
-        Item saved = js_array_new(0);
-        js_array_push(saved, instance);
-        js_array_push(saved, js_property_get(instance, store_key));
-        js_array_push(previous, saved);
-        js_property_set(instance, store_key, store);
-    }
-
+    Item previous = js_als_apply_context(context);
     Item result = js_call_function(callback, this_val, args, argc);
-
-    int64_t previous_len = js_array_length(previous);
-    for (int64_t i = previous_len - 1; i >= 0; i--) {
-        Item saved = js_array_get_int(previous, i);
-        if (get_type_id(saved) != LMD_TYPE_ARRAY || js_array_length(saved) < 2) continue;
-        Item instance = js_array_get_int(saved, 0);
-        Item store = js_array_get_int(saved, 1);
-        js_property_set(instance, store_key, store);
-    }
+    js_als_restore_context(previous);
     return result;
 }
 
