@@ -20,3 +20,10 @@ export {
   type EditorViewState
 } from './use-editor-state.js'
 export { intentFromInputEvent } from './intent-from-input-event.js'
+
+// Stage 4B — plain-DOM (framework-free) view: VNode renderer, keyed reconciler,
+// and the vanilla controller that runs under Radiant.
+export { renderDoc as renderDocVNode } from './render-vnode.js'
+export { reconcile, reconcileDoc } from './reconcile.js'
+export { el, txt, type VNode, type VEl, type VText, type VAttrs } from './vnode.js'
+export { EditorViewDom, type EditorViewDomOptions } from './editor-view-dom.js'
