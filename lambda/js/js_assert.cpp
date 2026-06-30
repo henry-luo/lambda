@@ -24,6 +24,7 @@ static inline Item make_js_undefined() {
 }
 
 extern "C" Item js_util_inspect(Item obj_item, Item options_item);
+extern "C" Item js_util_isDeepStrictEqual(Item a, Item b);
 extern "C" Item js_get_this(void);
 extern "C" Item js_new_method_function(void* func_ptr, int param_count);
 
@@ -193,6 +194,36 @@ static bool js_assert_options_strict(Item options) {
     return true;
 }
 
+static bool js_assert_current_skip_prototype(void) {
+    Item this_val = js_get_this();
+    if (get_type_id(this_val) != LMD_TYPE_MAP &&
+            get_type_id(this_val) != LMD_TYPE_FUNC) {
+        return false;
+    }
+    Item options = js_property_get(this_val, js_assert_options_key());
+    if (get_type_id(options) != LMD_TYPE_MAP) return false;
+    Item skip = js_property_get(options, assert_make_string("skipPrototype"));
+    return skip.item == ITEM_TRUE || (get_type_id(skip) == LMD_TYPE_BOOL && it2b(skip));
+}
+
+static bool js_assert_is_prototype_checked_value(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
+           type == LMD_TYPE_ELEMENT || type == LMD_TYPE_OBJECT ||
+           type == LMD_TYPE_VMAP;
+}
+
+static bool js_assert_prototypes_differ(Item actual, Item expected) {
+    if (!js_assert_is_prototype_checked_value(actual) ||
+            !js_assert_is_prototype_checked_value(expected)) {
+        return false;
+    }
+    extern Item js_get_prototype_of(Item object);
+    Item actual_proto = js_get_prototype_of(actual);
+    Item expected_proto = js_get_prototype_of(expected);
+    return actual_proto.item != expected_proto.item;
+}
+
 static Item js_assert_throw_missing_actual_expected(void) {
     return js_throw_type_error_code(JS_ERR_MISSING_ARGS,
         "The \"actual\" and \"expected\" arguments must be specified");
@@ -315,16 +346,97 @@ static void js_assert_append_string_literal(StrBuf* sb, Item value) {
         return;
     }
     strbuf_append_char(sb, '\'');
-    if (s->len > 0) strbuf_append_str_n(sb, s->chars, s->len);
+    for (size_t i = 0; i < s->len; i++) {
+        char ch = s->chars[i];
+        if (ch == '\\') strbuf_append_str(sb, "\\\\");
+        else if (ch == '\'') strbuf_append_str(sb, "\\'");
+        else if (ch == '\n') strbuf_append_str(sb, "\\n");
+        else if (ch == '\r') strbuf_append_str(sb, "\\r");
+        else if (ch == '\t') strbuf_append_str(sb, "\\t");
+        else strbuf_append_char(sb, ch);
+    }
     strbuf_append_char(sb, '\'');
+}
+
+static int js_assert_count_newlines(String* s) {
+    if (!s) return 0;
+    int count = 0;
+    for (size_t i = 0; i < s->len; i++) {
+        if (s->chars[i] == '\n') count++;
+    }
+    return count;
+}
+
+static void js_assert_append_escaped_string_range(StrBuf* sb, const char* chars,
+                                                  size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        char ch = chars[i];
+        if (ch == '\\') strbuf_append_str(sb, "\\\\");
+        else if (ch == '\'') strbuf_append_str(sb, "\\'");
+        else if (ch == '\n') strbuf_append_str(sb, "\\n");
+        else if (ch == '\r') strbuf_append_str(sb, "\\r");
+        else if (ch == '\t') strbuf_append_str(sb, "\\t");
+        else strbuf_append_char(sb, ch);
+    }
+}
+
+static void js_assert_append_long_multiline_string(StrBuf* sb, String* s,
+                                                   const char* first_prefix,
+                                                   const char* next_prefix,
+                                                   int max_segments,
+                                                   const char* ellipsis) {
+    size_t start = 0;
+    bool first = true;
+    int segment_count = 0;
+    while (start < s->len) {
+        if (max_segments > 0 && segment_count >= max_segments) {
+            strbuf_append_str(sb, "\n");
+            strbuf_append_str(sb, ellipsis ? ellipsis : "...");
+            return;
+        }
+        size_t end = start;
+        while (end < s->len && s->chars[end] != '\n') end++;
+        if (end < s->len && s->chars[end] == '\n') end++;
+        if (!first) strbuf_append_str(sb, "\n");
+        strbuf_append_str(sb, first ? first_prefix : next_prefix);
+        strbuf_append_char(sb, '\'');
+        js_assert_append_escaped_string_range(sb, s->chars + start, end - start);
+        strbuf_append_char(sb, '\'');
+        bool truncated_after_this = max_segments > 0 &&
+            segment_count + 1 >= max_segments && end < s->len;
+        if (end < s->len || truncated_after_this) strbuf_append_str(sb, " +");
+        first = false;
+        start = end;
+        segment_count++;
+    }
+}
+
+static bool js_assert_should_expand_multiline_string(String* s) {
+    return js_assert_count_newlines(s) >= 10;
+}
+
+static bool js_assert_append_expanded_string_literal(StrBuf* sb, Item value,
+                                                     const char* first_prefix,
+                                                     const char* next_prefix,
+                                                     int max_segments = 0) {
+    String* s = get_type_id(value) == LMD_TYPE_STRING ? it2s(value) : NULL;
+    if (!s || !js_assert_should_expand_multiline_string(s)) return false;
+    js_assert_append_long_multiline_string(sb, s, first_prefix, next_prefix,
+        max_segments, "...");
+    return true;
 }
 
 static void js_assert_append_deep_equal_value(StrBuf* sb, Item value) {
     String* s = get_type_id(value) == LMD_TYPE_STRING ? it2s(value) : NULL;
     bool simple_diff = strcmp(js_assert_current_diff(), "simple") == 0;
+    if (s && js_assert_should_expand_multiline_string(s)) {
+        js_assert_append_long_multiline_string(sb, s, "", "  ",
+            simple_diff ? 51 : 0, simple_diff ? "..." : NULL);
+        return;
+    }
     if (s && simple_diff && s->len > 512) {
         strbuf_append_char(sb, '\'');
-        strbuf_append_str_n(sb, s->chars, 508);
+        js_assert_append_escaped_string_range(sb, s->chars, 508);
         strbuf_append_str(sb, "...");
         return;
     }
@@ -335,10 +447,15 @@ static Item js_assert_strict_equal_message(Item actual, Item expected) {
     StrBuf* sb = strbuf_new();
     strbuf_append_str(sb, "Expected values to be strictly equal:\n");
     strbuf_append_str(sb, "+ actual - expected\n\n");
-    strbuf_append_str(sb, "+ ");
-    js_assert_append_string_literal(sb, actual);
-    strbuf_append_str(sb, "\n- ");
-    js_assert_append_string_literal(sb, expected);
+    if (!js_assert_append_expanded_string_literal(sb, actual, "+ ", "+   ")) {
+        strbuf_append_str(sb, "+ ");
+        js_assert_append_string_literal(sb, actual);
+    }
+    strbuf_append_str(sb, "\n");
+    if (!js_assert_append_expanded_string_literal(sb, expected, "- ", "-   ")) {
+        strbuf_append_str(sb, "- ");
+        js_assert_append_string_literal(sb, expected);
+    }
     strbuf_append_str(sb, "\n");
     Item result = assert_make_string_n(sb->str, sb->length);
     strbuf_free(sb);
@@ -348,7 +465,13 @@ static Item js_assert_strict_equal_message(Item actual, Item expected) {
 static Item js_assert_not_strict_equal_message(Item actual) {
     StrBuf* sb = strbuf_new();
     strbuf_append_str(sb, "Expected \"actual\" to be strictly unequal to:\n\n");
-    js_assert_append_string_literal(sb, actual);
+    bool simple_diff = strcmp(js_assert_current_diff(), "simple") == 0;
+    if (js_assert_append_expanded_string_literal(sb, actual, "", "  ",
+            simple_diff ? 46 : 0)) {
+        strbuf_append_str(sb, "\n");
+    } else {
+        js_assert_append_string_literal(sb, actual);
+    }
     Item result = assert_make_string_n(sb->str, sb->length);
     strbuf_free(sb);
     return result;
@@ -360,6 +483,65 @@ static Item js_assert_deep_equal_message(Item actual, Item expected) {
     js_assert_append_deep_equal_value(sb, actual);
     strbuf_append_str(sb, "\n\nshould loosely deep-equal\n\n");
     js_assert_append_deep_equal_value(sb, expected);
+    Item result = assert_make_string_n(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
+    if (get_type_id(actual) != LMD_TYPE_ARRAY ||
+            get_type_id(expected) != LMD_TYPE_ARRAY) {
+        return ItemNull;
+    }
+    int64_t actual_len = js_array_length(actual);
+    int64_t expected_len = js_array_length(expected);
+    int64_t common_len = actual_len < expected_len ? actual_len : expected_len;
+    int64_t diff_index = -1;
+    for (int64_t i = 0; i < common_len; i++) {
+        Item eq = js_util_isDeepStrictEqual(js_array_get_int(actual, i),
+            js_array_get_int(expected, i));
+        bool same = (get_type_id(eq) == LMD_TYPE_INT && it2i(eq) == 1) ||
+            (get_type_id(eq) == LMD_TYPE_BOOL && it2b(eq));
+        if (!same) {
+            diff_index = i;
+            break;
+        }
+    }
+    if (diff_index < 0 && actual_len != expected_len) diff_index = common_len;
+    if (diff_index < 0) return ItemNull;
+
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
+    strbuf_append_str(sb, "+ actual - expected\n\n");
+    strbuf_append_str(sb, "  [\n");
+    int64_t max_len = actual_len > expected_len ? actual_len : expected_len;
+    for (int64_t i = 0; i < max_len; i++) {
+        if (i == diff_index) {
+            if (i < actual_len) {
+                strbuf_append_str(sb, "+   ");
+                js_assert_append_inspected_value(sb, js_array_get_int(actual, i));
+                if (i < max_len - 1) strbuf_append_str(sb, ",");
+                strbuf_append_str(sb, "\n");
+            }
+            if (i < expected_len) {
+                strbuf_append_str(sb, "-   ");
+                js_assert_append_inspected_value(sb, js_array_get_int(expected, i));
+                if (i < max_len - 1) strbuf_append_str(sb, ",");
+                strbuf_append_str(sb, "\n");
+            }
+        } else if (i < actual_len) {
+            strbuf_append_str(sb, "    ");
+            js_assert_append_inspected_value(sb, js_array_get_int(actual, i));
+            if (i < max_len - 1) strbuf_append_str(sb, ",");
+            strbuf_append_str(sb, "\n");
+        } else {
+            strbuf_append_str(sb, "-   ");
+            js_assert_append_inspected_value(sb, js_array_get_int(expected, i));
+            if (i < max_len - 1) strbuf_append_str(sb, ",");
+            strbuf_append_str(sb, "\n");
+        }
+    }
+    strbuf_append_str(sb, "  ]\n");
     Item result = assert_make_string_n(sb->str, sb->length);
     strbuf_free(sb);
     return result;
@@ -421,16 +603,24 @@ extern "C" Item js_assert_notStrictEqual(Item actual, Item expected, Item messag
 
 // assert.deepStrictEqual(actual, expected[, message])
 extern "C" Item js_assert_deepStrictEqual(Item actual, Item expected, Item message) {
-    extern Item js_util_isDeepStrictEqual(Item a, Item b);
     if (js_pending_call_argc < 2) return js_assert_throw_missing_actual_expected();
     Item result = js_util_isDeepStrictEqual(actual, expected);
     bool equal = (get_type_id(result) == LMD_TYPE_INT && it2i(result) == 1) ||
                  (get_type_id(result) == LMD_TYPE_BOOL && it2b(result));
+    if (equal && !js_assert_current_skip_prototype() &&
+            js_assert_prototypes_differ(actual, expected)) {
+        equal = false;
+    }
     if (!equal) {
         Item date_msg = js_assert_date_checktag_message(actual, expected);
         if (get_type_id(date_msg) == LMD_TYPE_STRING) {
             return throw_assert_msg_or_auto(date_msg,
                 "assert.deepStrictEqual: values are not deep-strict-equal", actual, expected, "deepStrictEqual");
+        }
+        Item array_msg = js_assert_deep_strict_array_message(actual, expected);
+        if (get_type_id(array_msg) == LMD_TYPE_STRING) {
+            return throw_assert_msg_or_auto_item(message, array_msg,
+                actual, expected, "deepStrictEqual");
         }
         return throw_assert_msg_or_auto(message,
             "assert.deepStrictEqual: values are not deep-strict-equal", actual, expected, "deepStrictEqual");
@@ -440,11 +630,14 @@ extern "C" Item js_assert_deepStrictEqual(Item actual, Item expected, Item messa
 
 // assert.notDeepStrictEqual(actual, expected[, message])
 extern "C" Item js_assert_notDeepStrictEqual(Item actual, Item expected, Item message) {
-    extern Item js_util_isDeepStrictEqual(Item a, Item b);
     if (js_pending_call_argc < 2) return js_assert_throw_missing_actual_expected();
     Item result = js_util_isDeepStrictEqual(actual, expected);
     bool equal = (get_type_id(result) == LMD_TYPE_INT && it2i(result) == 1) ||
                  (get_type_id(result) == LMD_TYPE_BOOL && it2b(result));
+    if (equal && !js_assert_current_skip_prototype() &&
+            js_assert_prototypes_differ(actual, expected)) {
+        equal = false;
+    }
     if (equal) {
         return throw_assert_msg_or_auto(message,
             "assert.notDeepStrictEqual: values are deep-strict-equal", actual, expected, "notDeepStrictEqual");
@@ -455,7 +648,6 @@ extern "C" Item js_assert_notDeepStrictEqual(Item actual, Item expected, Item me
 // assert.deepEqual(actual, expected[, message]) — legacy loose deep equality
 // In modern Node.js (v16+), deepEqual behaves like deepStrictEqual
 extern "C" Item js_assert_deepEqual(Item actual, Item expected, Item message) {
-    extern Item js_util_isDeepStrictEqual(Item a, Item b);
     if (js_pending_call_argc < 2) return js_assert_throw_missing_actual_expected();
     Item result = js_util_isDeepStrictEqual(actual, expected);
     bool equal = (get_type_id(result) == LMD_TYPE_INT && it2i(result) == 1) ||
@@ -469,7 +661,6 @@ extern "C" Item js_assert_deepEqual(Item actual, Item expected, Item message) {
 
 // assert.notDeepEqual(actual, expected[, message])
 extern "C" Item js_assert_notDeepEqual(Item actual, Item expected, Item message) {
-    extern Item js_util_isDeepStrictEqual(Item a, Item b);
     if (js_pending_call_argc < 2) return js_assert_throw_missing_actual_expected();
     Item result = js_util_isDeepStrictEqual(actual, expected);
     bool equal = (get_type_id(result) == LMD_TYPE_INT && it2i(result) == 1) ||
@@ -840,7 +1031,6 @@ static bool js_assert_is_partial_object_like(Item value) {
 }
 
 static bool js_assert_deep_strict_equal_bool(Item actual, Item expected) {
-    extern Item js_util_isDeepStrictEqual(Item a, Item b);
     Item result = js_util_isDeepStrictEqual(actual, expected);
     return (get_type_id(result) == LMD_TYPE_INT && it2i(result) == 1) ||
            (get_type_id(result) == LMD_TYPE_BOOL && it2b(result));

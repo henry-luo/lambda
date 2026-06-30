@@ -90,6 +90,28 @@ static bool crypto_eddsa_verify_message(const uint8_t* key_bytes, int key_len,
                                         const uint8_t* data, int data_len,
                                         const uint8_t* signature,
                                         int signature_len, bool* verified);
+static bool crypto_openssl_dsa_can_parse(const uint8_t* key_bytes, int key_len,
+                                         bool prefer_private);
+static bool crypto_openssl_dsa_public_pem(const uint8_t* key_bytes, int key_len,
+                                          uint8_t** out, int* out_len);
+static bool crypto_openssl_dsa_export_der(const uint8_t* key_bytes, int key_len,
+                                          bool is_private, uint8_t** out,
+                                          int* out_len);
+static bool crypto_openssl_dsa_sign_message(const char* digest,
+                                            const uint8_t* key_bytes, int key_len,
+                                            const uint8_t* data, int data_len,
+                                            uint8_t* signature,
+                                            size_t signature_cap,
+                                            size_t* signature_len,
+                                            int* out_width);
+static bool crypto_openssl_dsa_verify_message(const char* digest,
+                                              const uint8_t* key_bytes, int key_len,
+                                              const uint8_t* data, int data_len,
+                                              const uint8_t* signature,
+                                              int signature_len,
+                                              bool ieee_p1363,
+                                              bool* verified);
+static Item crypto_dsa_asymmetric_key_details(const uint8_t* key, int key_len);
 static Item crypto_throw_unsupported_asymmetric_key(const char* key_type);
 
 static bool crypto_digest_is_xof(const char* alg) {
@@ -2552,9 +2574,31 @@ extern "C" Item js_sign_verify_sign(Item key_item, Item encoding_item) {
     if (ret != 0) {
         log_error("crypto: private key parse for sign failed: -0x%04x", -ret);
         const char* unsupported_type = crypto_detect_unsupported_asymmetric_key_type(key_bytes, key_len);
-        result = unsupported_type ?
-            crypto_throw_unsupported_asymmetric_key(unsupported_type) :
-            js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse private key");
+        if (unsupported_type && strcmp(unsupported_type, "dsa") == 0) {
+            int dsa_width = 0;
+            if (crypto_openssl_dsa_sign_message(ctx->alg, key_bytes, key_len,
+                    ctx->data, ctx->data_len, signature, sizeof(signature),
+                    &signature_len, &dsa_width)) {
+                if (options.dsa_ieee_p1363) {
+                    uint8_t p1363[MBEDTLS_PK_SIGNATURE_MAX_SIZE];
+                    if (dsa_width <= 0 || dsa_width * 2 > (int)sizeof(p1363) ||
+                            !crypto_ecdsa_der_to_p1363(signature, (int)signature_len,
+                                dsa_width, p1363, dsa_width * 2)) {
+                        result = crypto_throw_sign_failed("Failed to encode DSA signature");
+                    } else {
+                        result = crypto_output_temp_bytes(p1363, dsa_width * 2, encoding_item);
+                    }
+                } else {
+                    result = crypto_output_temp_bytes(signature, (int)signature_len, encoding_item);
+                }
+            } else {
+                result = crypto_throw_unsupported_asymmetric_key(unsupported_type);
+            }
+        } else {
+            result = unsupported_type ?
+                crypto_throw_unsupported_asymmetric_key(unsupported_type) :
+                js_throw_error_with_code("ERR_OSSL_PEM_BAD_KEY", "Failed to parse private key");
+        }
     } else {
         if (options.padding == CRYPTO_RSA_PKCS1_PSS_PADDING) {
             ret = crypto_rsa_pss_sign(&pk, md_alg, hash, hash_len,
@@ -2688,7 +2732,17 @@ extern "C" Item js_sign_verify_verify(Item key_item, Item signature_item, Item e
             log_debug("crypto: public key verify mismatch or failure: -0x%04x", -ret);
         }
     } else {
-        log_debug("crypto: key parse for verify failed: -0x%04x", -ret);
+        const char* unsupported_type = crypto_detect_unsupported_asymmetric_key_type(key_bytes, key_len);
+        if (unsupported_type && strcmp(unsupported_type, "dsa") == 0) {
+            bool ok = crypto_openssl_dsa_verify_message(ctx->alg, key_bytes, key_len,
+                ctx->data, ctx->data_len, signature_bytes, signature_len,
+                options.dsa_ieee_p1363, &verified);
+            if (!ok) {
+                log_debug("crypto: OpenSSL DSA verify failed");
+            }
+        } else {
+            log_debug("crypto: key parse for verify failed: -0x%04x", -ret);
+        }
     }
 
     mbedtls_pk_free(&pk);
@@ -4774,6 +4828,426 @@ static void* crypto_dlsym_required(void* handle, const char* name) {
 #endif
 }
 
+struct CryptoOpenSslDsaBackend {
+    bool tried;
+    bool available;
+    void* handle;
+    void* (*bio_new)(const void*);
+    const void* (*bio_s_mem)(void);
+    void* (*bio_new_mem_buf)(const void*, int);
+    int (*bio_free)(void*);
+    long (*bio_ctrl)(void*, int, long, void*);
+    int (*bio_read)(void*, void*, int);
+    void* (*pem_read_bio_private_key)(void*, void*, void*, void*);
+    void* (*pem_read_bio_pubkey)(void*, void*, void*, void*);
+    int (*pem_write_bio_private_key)(void*, void*, const void*, const unsigned char*,
+                                     int, void*, void*);
+    int (*pem_write_bio_pubkey)(void*, void*);
+    void* (*d2i_auto_private_key)(void**, const unsigned char**, long);
+    void* (*d2i_pubkey)(void**, const unsigned char**, long);
+    int (*i2d_private_key)(void*, unsigned char**);
+    int (*i2d_pubkey)(void*, unsigned char**);
+    void (*pkey_free)(void*);
+    const void* (*get_digestbyname)(const char*);
+    void* (*md_ctx_new)(void);
+    void (*md_ctx_free)(void*);
+    int (*digest_sign_init)(void*, void**, const void*, void*, void*);
+    int (*digest_sign_update)(void*, const void*, size_t);
+    int (*digest_sign_final)(void*, unsigned char*, size_t*);
+    int (*digest_verify_init)(void*, void**, const void*, void*, void*);
+    int (*digest_verify_update)(void*, const void*, size_t);
+    int (*digest_verify_final)(void*, const unsigned char*, size_t);
+    int (*pkey_get_bn_param)(void*, const char*, void**);
+    int (*bn_num_bits)(const void*);
+    void (*bn_free)(void*);
+};
+
+static CryptoOpenSslDsaBackend crypto_openssl_dsa_backend;
+#define CRYPTO_OPENSSL_BIO_CTRL_PENDING 10
+
+static bool crypto_openssl_dsa_load(void) {
+    CryptoOpenSslDsaBackend* b = &crypto_openssl_dsa_backend;
+    if (b->tried) return b->available;
+    b->tried = true;
+
+#ifdef _WIN32
+    return false;
+#else
+    const char* candidates[] = {
+        "libcrypto.3.dylib",
+        "/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib",
+        "/opt/homebrew/lib/libcrypto.3.dylib",
+        "libcrypto.so.3",
+        "libcrypto.so",
+        NULL
+    };
+    for (int i = 0; candidates[i]; i++) {
+        b->handle = dlopen(candidates[i], RTLD_LAZY | RTLD_LOCAL);
+        if (b->handle) break;
+    }
+    if (!b->handle) {
+        log_debug("crypto: OpenSSL DSA backend unavailable: libcrypto not found");
+        return false;
+    }
+
+    b->bio_new_mem_buf = (void* (*)(const void*, int))
+        crypto_dlsym_required(b->handle, "BIO_new_mem_buf");
+    b->bio_new = (void* (*)(const void*))
+        crypto_dlsym_required(b->handle, "BIO_new");
+    b->bio_s_mem = (const void* (*)(void))
+        crypto_dlsym_required(b->handle, "BIO_s_mem");
+    b->bio_free = (int (*)(void*))
+        crypto_dlsym_required(b->handle, "BIO_free");
+    b->bio_ctrl = (long (*)(void*, int, long, void*))
+        crypto_dlsym_required(b->handle, "BIO_ctrl");
+    b->bio_read = (int (*)(void*, void*, int))
+        crypto_dlsym_required(b->handle, "BIO_read");
+    b->pem_read_bio_private_key = (void* (*)(void*, void*, void*, void*))
+        crypto_dlsym_required(b->handle, "PEM_read_bio_PrivateKey");
+    b->pem_read_bio_pubkey = (void* (*)(void*, void*, void*, void*))
+        crypto_dlsym_required(b->handle, "PEM_read_bio_PUBKEY");
+    b->pem_write_bio_private_key =
+        (int (*)(void*, void*, const void*, const unsigned char*, int, void*, void*))
+        crypto_dlsym_required(b->handle, "PEM_write_bio_PrivateKey");
+    b->pem_write_bio_pubkey = (int (*)(void*, void*))
+        crypto_dlsym_required(b->handle, "PEM_write_bio_PUBKEY");
+    b->d2i_auto_private_key = (void* (*)(void**, const unsigned char**, long))
+        crypto_dlsym_required(b->handle, "d2i_AutoPrivateKey");
+    b->d2i_pubkey = (void* (*)(void**, const unsigned char**, long))
+        crypto_dlsym_required(b->handle, "d2i_PUBKEY");
+    b->i2d_private_key = (int (*)(void*, unsigned char**))
+        crypto_dlsym_required(b->handle, "i2d_PrivateKey");
+    b->i2d_pubkey = (int (*)(void*, unsigned char**))
+        crypto_dlsym_required(b->handle, "i2d_PUBKEY");
+    b->pkey_free = (void (*)(void*))
+        crypto_dlsym_required(b->handle, "EVP_PKEY_free");
+    b->get_digestbyname = (const void* (*)(const char*))
+        crypto_dlsym_required(b->handle, "EVP_get_digestbyname");
+    b->md_ctx_new = (void* (*)(void))
+        crypto_dlsym_required(b->handle, "EVP_MD_CTX_new");
+    b->md_ctx_free = (void (*)(void*))
+        crypto_dlsym_required(b->handle, "EVP_MD_CTX_free");
+    b->digest_sign_init = (int (*)(void*, void**, const void*, void*, void*))
+        crypto_dlsym_required(b->handle, "EVP_DigestSignInit");
+    b->digest_sign_update = (int (*)(void*, const void*, size_t))
+        crypto_dlsym_required(b->handle, "EVP_DigestSignUpdate");
+    b->digest_sign_final = (int (*)(void*, unsigned char*, size_t*))
+        crypto_dlsym_required(b->handle, "EVP_DigestSignFinal");
+    b->digest_verify_init = (int (*)(void*, void**, const void*, void*, void*))
+        crypto_dlsym_required(b->handle, "EVP_DigestVerifyInit");
+    b->digest_verify_update = (int (*)(void*, const void*, size_t))
+        crypto_dlsym_required(b->handle, "EVP_DigestVerifyUpdate");
+    b->digest_verify_final = (int (*)(void*, const unsigned char*, size_t))
+        crypto_dlsym_required(b->handle, "EVP_DigestVerifyFinal");
+    b->pkey_get_bn_param = (int (*)(void*, const char*, void**))
+        crypto_dlsym_required(b->handle, "EVP_PKEY_get_bn_param");
+    b->bn_num_bits = (int (*)(const void*))
+        crypto_dlsym_required(b->handle, "BN_num_bits");
+    b->bn_free = (void (*)(void*))
+        crypto_dlsym_required(b->handle, "BN_free");
+
+    b->available = b->bio_new && b->bio_s_mem && b->bio_new_mem_buf &&
+        b->bio_free && b->bio_ctrl && b->bio_read &&
+        b->pem_read_bio_private_key && b->pem_read_bio_pubkey &&
+        b->pem_write_bio_private_key && b->pem_write_bio_pubkey &&
+        b->d2i_auto_private_key && b->d2i_pubkey && b->i2d_private_key &&
+        b->i2d_pubkey && b->pkey_free && b->get_digestbyname &&
+        b->md_ctx_new && b->md_ctx_free && b->digest_sign_init &&
+        b->digest_sign_update && b->digest_sign_final &&
+        b->digest_verify_init && b->digest_verify_update &&
+        b->digest_verify_final && b->pkey_get_bn_param &&
+        b->bn_num_bits && b->bn_free;
+    if (!b->available) {
+        log_debug("crypto: OpenSSL DSA backend unavailable: required EVP symbols missing");
+    }
+    return b->available;
+#endif
+}
+
+static bool crypto_openssl_dsa_key_details_from_pkey(void* pkey,
+                                                     int* out_modulus_bits,
+                                                     int* out_divisor_bits) {
+    if (!pkey || !out_modulus_bits || !out_divisor_bits ||
+            !crypto_openssl_dsa_load()) {
+        return false;
+    }
+    *out_modulus_bits = 0;
+    *out_divisor_bits = 0;
+
+    CryptoOpenSslDsaBackend* b = &crypto_openssl_dsa_backend;
+    void* p = NULL;
+    void* q = NULL;
+    if (b->pkey_get_bn_param(pkey, "p", &p) != 1 ||
+            b->pkey_get_bn_param(pkey, "q", &q) != 1 ||
+            !p || !q) {
+        if (p) b->bn_free(p);
+        if (q) b->bn_free(q);
+        return false;
+    }
+
+    *out_modulus_bits = b->bn_num_bits(p);
+    *out_divisor_bits = b->bn_num_bits(q);
+    b->bn_free(p);
+    b->bn_free(q);
+    return *out_modulus_bits > 0 && *out_divisor_bits > 0;
+}
+
+static int crypto_openssl_dsa_signature_width(void* pkey) {
+    int modulus_bits = 0;
+    int divisor_bits = 0;
+    if (!crypto_openssl_dsa_key_details_from_pkey(pkey, &modulus_bits,
+            &divisor_bits)) {
+        return 0;
+    }
+    return (divisor_bits + 7) / 8;
+}
+
+static void* crypto_openssl_dsa_parse_key(const uint8_t* key_bytes, int key_len,
+                                          bool prefer_private,
+                                          bool* out_private) {
+    if (out_private) *out_private = false;
+    if (!key_bytes || key_len <= 0 || !crypto_openssl_dsa_load()) return NULL;
+
+    CryptoOpenSslDsaBackend* b = &crypto_openssl_dsa_backend;
+    void* pkey = NULL;
+    bool parsed_private = false;
+
+    if (crypto_bytes_look_like_pem(key_bytes, key_len)) {
+        int pem_len = crypto_visible_pem_len(key_bytes, key_len);
+        void* bio = b->bio_new_mem_buf(key_bytes, pem_len);
+        if (!bio) return NULL;
+        if (prefer_private) {
+            pkey = b->pem_read_bio_private_key(bio, NULL, NULL, NULL);
+            parsed_private = pkey != NULL;
+        } else {
+            pkey = b->pem_read_bio_pubkey(bio, NULL, NULL, NULL);
+        }
+        b->bio_free(bio);
+
+        if (!pkey) {
+            bio = b->bio_new_mem_buf(key_bytes, pem_len);
+            if (!bio) return NULL;
+            if (prefer_private) {
+                pkey = b->pem_read_bio_pubkey(bio, NULL, NULL, NULL);
+            } else {
+                pkey = b->pem_read_bio_private_key(bio, NULL, NULL, NULL);
+                parsed_private = pkey != NULL;
+            }
+            b->bio_free(bio);
+        }
+    } else {
+        const unsigned char* ptr = key_bytes;
+        long der_len = key_len;
+        if (prefer_private) {
+            pkey = b->d2i_auto_private_key(NULL, &ptr, der_len);
+            parsed_private = pkey != NULL;
+        } else {
+            pkey = b->d2i_pubkey(NULL, &ptr, der_len);
+        }
+        if (!pkey) {
+            ptr = key_bytes;
+            if (prefer_private) {
+                pkey = b->d2i_pubkey(NULL, &ptr, der_len);
+            } else {
+                pkey = b->d2i_auto_private_key(NULL, &ptr, der_len);
+                parsed_private = pkey != NULL;
+            }
+        }
+    }
+
+    int modulus_bits = 0;
+    int divisor_bits = 0;
+    if (!pkey || !crypto_openssl_dsa_key_details_from_pkey(pkey,
+            &modulus_bits, &divisor_bits)) {
+        if (pkey) b->pkey_free(pkey);
+        return NULL;
+    }
+    if (out_private) *out_private = parsed_private;
+    return pkey;
+}
+
+static bool crypto_openssl_dsa_can_parse(const uint8_t* key_bytes, int key_len,
+                                         bool prefer_private) {
+    void* pkey = crypto_openssl_dsa_parse_key(key_bytes, key_len,
+        prefer_private, NULL);
+    if (!pkey) return false;
+    crypto_openssl_dsa_backend.pkey_free(pkey);
+    return true;
+}
+
+static bool crypto_openssl_bio_to_mem(void* bio, uint8_t** out, int* out_len) {
+    if (!bio || !out || !out_len || !crypto_openssl_dsa_load()) return false;
+    *out = NULL;
+    *out_len = 0;
+    CryptoOpenSslDsaBackend* b = &crypto_openssl_dsa_backend;
+    long pending = b->bio_ctrl(bio, CRYPTO_OPENSSL_BIO_CTRL_PENDING, 0, NULL);
+    if (pending <= 0 || pending > 32768) return false;
+    uint8_t* bytes = (uint8_t*)mem_alloc((size_t)pending, MEM_CAT_JS_RUNTIME);
+    int read_len = b->bio_read(bio, bytes, (int)pending);
+    if (read_len <= 0) {
+        mem_free(bytes);
+        return false;
+    }
+    *out = bytes;
+    *out_len = read_len;
+    return true;
+}
+
+static bool crypto_openssl_dsa_public_pem(const uint8_t* key_bytes, int key_len,
+                                          uint8_t** out, int* out_len) {
+    if (!out || !out_len || !crypto_openssl_dsa_load()) return false;
+    *out = NULL;
+    *out_len = 0;
+    CryptoOpenSslDsaBackend* b = &crypto_openssl_dsa_backend;
+    void* pkey = crypto_openssl_dsa_parse_key(key_bytes, key_len, false, NULL);
+    if (!pkey) return false;
+    void* bio = b->bio_new(b->bio_s_mem());
+    if (!bio) {
+        b->pkey_free(pkey);
+        return false;
+    }
+    bool ok = b->pem_write_bio_pubkey(bio, pkey) == 1 &&
+        crypto_openssl_bio_to_mem(bio, out, out_len);
+    b->bio_free(bio);
+    b->pkey_free(pkey);
+    return ok;
+}
+
+static bool crypto_openssl_dsa_export_der(const uint8_t* key_bytes, int key_len,
+                                          bool is_private, uint8_t** out,
+                                          int* out_len) {
+    if (!out || !out_len || !crypto_openssl_dsa_load()) return false;
+    *out = NULL;
+    *out_len = 0;
+    CryptoOpenSslDsaBackend* b = &crypto_openssl_dsa_backend;
+    void* pkey = crypto_openssl_dsa_parse_key(key_bytes, key_len, is_private, NULL);
+    if (!pkey) return false;
+    int der_len = is_private ?
+        b->i2d_private_key(pkey, NULL) :
+        b->i2d_pubkey(pkey, NULL);
+    if (der_len <= 0 || der_len > 32768) {
+        b->pkey_free(pkey);
+        return false;
+    }
+    uint8_t* der = (uint8_t*)mem_alloc((size_t)der_len, MEM_CAT_JS_RUNTIME);
+    unsigned char* write_ptr = der;
+    int ret = is_private ?
+        b->i2d_private_key(pkey, &write_ptr) :
+        b->i2d_pubkey(pkey, &write_ptr);
+    b->pkey_free(pkey);
+    if (ret != der_len) {
+        mem_free(der);
+        return false;
+    }
+    *out = der;
+    *out_len = der_len;
+    return true;
+}
+
+static bool crypto_openssl_dsa_sign_message(const char* digest,
+                                            const uint8_t* key_bytes, int key_len,
+                                            const uint8_t* data, int data_len,
+                                            uint8_t* signature,
+                                            size_t signature_cap,
+                                            size_t* signature_len,
+                                            int* out_width) {
+    if (!digest || !signature || !signature_len || !out_width ||
+            !crypto_openssl_dsa_load()) {
+        return false;
+    }
+    *signature_len = 0;
+    *out_width = 0;
+    CryptoOpenSslDsaBackend* b = &crypto_openssl_dsa_backend;
+    void* pkey = crypto_openssl_dsa_parse_key(key_bytes, key_len, true, NULL);
+    if (!pkey) return false;
+    const void* md = b->get_digestbyname(digest);
+    void* ctx = md ? b->md_ctx_new() : NULL;
+    bool ok = false;
+    if (ctx && b->digest_sign_init(ctx, NULL, md, NULL, pkey) == 1 &&
+            b->digest_sign_update(ctx, data ? data : crypto_empty_bytes,
+                data_len > 0 ? (size_t)data_len : 0) == 1) {
+        size_t need = 0;
+        if (b->digest_sign_final(ctx, NULL, &need) == 1 &&
+                need > 0 && need <= signature_cap &&
+                b->digest_sign_final(ctx, signature, &need) == 1) {
+            *signature_len = need;
+            *out_width = crypto_openssl_dsa_signature_width(pkey);
+            ok = *out_width > 0;
+        }
+    }
+    if (ctx) b->md_ctx_free(ctx);
+    b->pkey_free(pkey);
+    return ok;
+}
+
+static bool crypto_openssl_dsa_verify_message(const char* digest,
+                                              const uint8_t* key_bytes, int key_len,
+                                              const uint8_t* data, int data_len,
+                                              const uint8_t* signature,
+                                              int signature_len,
+                                              bool ieee_p1363,
+                                              bool* verified) {
+    if (!digest || !verified || !crypto_openssl_dsa_load()) return false;
+    *verified = false;
+    CryptoOpenSslDsaBackend* b = &crypto_openssl_dsa_backend;
+    void* pkey = crypto_openssl_dsa_parse_key(key_bytes, key_len, false, NULL);
+    if (!pkey) return false;
+
+    uint8_t der_signature[MBEDTLS_PK_SIGNATURE_MAX_SIZE];
+    const uint8_t* verify_signature = signature;
+    int verify_signature_len = signature_len;
+    if (ieee_p1363) {
+        int width = crypto_openssl_dsa_signature_width(pkey);
+        int der_len = 0;
+        if (width <= 0 || !crypto_ecdsa_p1363_to_der(signature, signature_len,
+                width, der_signature, (int)sizeof(der_signature), &der_len)) {
+            b->pkey_free(pkey);
+            return true;
+        }
+        verify_signature = der_signature;
+        verify_signature_len = der_len;
+    }
+
+    const void* md = b->get_digestbyname(digest);
+    void* ctx = md ? b->md_ctx_new() : NULL;
+    bool ok = false;
+    if (ctx && b->digest_verify_init(ctx, NULL, md, NULL, pkey) == 1 &&
+            b->digest_verify_update(ctx, data ? data : crypto_empty_bytes,
+                data_len > 0 ? (size_t)data_len : 0) == 1) {
+        int ret = b->digest_verify_final(ctx,
+            verify_signature ? verify_signature : crypto_empty_bytes,
+            verify_signature_len > 0 ? (size_t)verify_signature_len : 0);
+        if (ret == 1) {
+            *verified = true;
+            ok = true;
+        } else if (ret == 0) {
+            ok = true;
+        }
+    }
+    if (ctx) b->md_ctx_free(ctx);
+    b->pkey_free(pkey);
+    return ok;
+}
+
+static Item crypto_dsa_asymmetric_key_details(const uint8_t* key, int key_len) {
+    void* pkey = crypto_openssl_dsa_parse_key(key, key_len, false, NULL);
+    if (!pkey) return make_js_undefined_crypto();
+
+    int modulus_bits = 0;
+    int divisor_bits = 0;
+    bool ok = crypto_openssl_dsa_key_details_from_pkey(pkey,
+        &modulus_bits, &divisor_bits);
+    crypto_openssl_dsa_backend.pkey_free(pkey);
+    if (!ok) return make_js_undefined_crypto();
+
+    Item details = js_new_object();
+    js_property_set(details, make_string_item_crypto("modulusLength"),
+                    (Item){.item = i2it((int64_t)modulus_bits)});
+    js_property_set(details, make_string_item_crypto("divisorLength"),
+                    (Item){.item = i2it((int64_t)divisor_bits)});
+    return details;
+}
+
 static bool crypto_openssl_ed_load(void) {
     CryptoOpenSslEdBackend* b = &crypto_openssl_ed_backend;
     if (b->tried) return b->available;
@@ -5311,6 +5785,16 @@ extern "C" Item js_crypto_asymmetricKeyExport(Item options_item) {
         return {.item = s2it(str)};
     }
     if (export_format == CRYPTO_ASYM_EXPORT_DER) {
+        const char* unsupported_type = crypto_detect_unsupported_asymmetric_key_type(buf, len);
+        if (unsupported_type && strcmp(unsupported_type, "dsa") == 0) {
+            uint8_t* der = NULL;
+            int der_len = 0;
+            if (crypto_openssl_dsa_export_der(buf, len, is_private, &der, &der_len)) {
+                Item result = crypto_buffer_from_bytes(der, der_len);
+                mem_free(der);
+                return result;
+            }
+        }
         return crypto_asymmetric_export_der(buf, len, is_private);
     }
 
@@ -5415,6 +5899,11 @@ static Item crypto_asymmetric_key_object_from_bytes(const uint8_t* key, int key_
     Item details = crypto_rsa_asymmetric_key_details(parsed_key);
     if (!crypto_item_is_undefined(details)) {
         js_property_set(obj, make_string_item_crypto("asymmetricKeyDetails"), details);
+    } else if (asymmetric_type && strcmp(asymmetric_type, "dsa") == 0) {
+        details = crypto_dsa_asymmetric_key_details(key, key_len);
+        if (!crypto_item_is_undefined(details)) {
+            js_property_set(obj, make_string_item_crypto("asymmetricKeyDetails"), details);
+        }
     }
     js_property_set(obj, make_string_item_crypto("export"),
                     js_new_function((void*)js_crypto_asymmetricKeyExport, 1));
@@ -5495,6 +5984,14 @@ extern "C" Item js_crypto_createPrivateKey(Item key_item) {
     if (ret != 0) {
         log_debug("crypto: createPrivateKey parse failed: -0x%04x", -ret);
         const char* unsupported_type = crypto_detect_unsupported_asymmetric_key_type(key, key_len);
+        if (unsupported_type && strcmp(unsupported_type, "dsa") == 0 &&
+                crypto_openssl_dsa_can_parse(key, key_len, true)) {
+            Item result = crypto_asymmetric_key_object_from_bytes(key, key_len,
+                "private", "dsa", NULL);
+            mbedtls_pk_free(&pk);
+            mem_free(key);
+            return result;
+        }
         mbedtls_pk_free(&pk);
         mem_free(key);
         return unsupported_type ?
@@ -5540,6 +6037,25 @@ extern "C" Item js_crypto_createPublicKey(Item key_item) {
 
     const char* unsupported_public_type = crypto_detect_unsupported_asymmetric_key_type(key, key_len);
     if (unsupported_public_type) {
+        if (strcmp(unsupported_public_type, "dsa") == 0) {
+            if (crypto_openssl_dsa_can_parse(key, key_len, false)) {
+                uint8_t* public_pem = NULL;
+                int public_len = 0;
+                Item result = ItemNull;
+                if (crypto_openssl_dsa_public_pem(key, key_len,
+                        &public_pem, &public_len)) {
+                    result = crypto_asymmetric_key_object_from_bytes(public_pem,
+                        public_len, "public", "dsa", NULL);
+                    mem_free(public_pem);
+                } else {
+                    result = crypto_asymmetric_key_object_from_bytes(key,
+                        key_len, "public", "dsa", NULL);
+                }
+                mbedtls_pk_free(&pk);
+                mem_free(key);
+                return result;
+            }
+        }
         mbedtls_pk_free(&pk);
         mem_free(key);
         return crypto_throw_unsupported_asymmetric_key(unsupported_public_type);
@@ -5552,6 +6068,24 @@ extern "C" Item js_crypto_createPublicKey(Item key_item) {
     if (ret != 0) {
         log_debug("crypto: createPublicKey parse failed: -0x%04x", -ret);
         const char* unsupported_type = crypto_detect_unsupported_asymmetric_key_type(key, key_len);
+        if (unsupported_type && strcmp(unsupported_type, "dsa") == 0 &&
+                crypto_openssl_dsa_can_parse(key, key_len, false)) {
+            uint8_t* public_pem = NULL;
+            int public_len = 0;
+            Item result = ItemNull;
+            if (crypto_openssl_dsa_public_pem(key, key_len,
+                    &public_pem, &public_len)) {
+                result = crypto_asymmetric_key_object_from_bytes(public_pem,
+                    public_len, "public", "dsa", NULL);
+                mem_free(public_pem);
+            } else {
+                result = crypto_asymmetric_key_object_from_bytes(key,
+                    key_len, "public", "dsa", NULL);
+            }
+            mbedtls_pk_free(&pk);
+            mem_free(key);
+            return result;
+        }
         mbedtls_pk_free(&pk);
         mem_free(key);
         return unsupported_type ?

@@ -1163,6 +1163,192 @@ Results:
   now at the next inspect-formatting blocker.
 - `git diff --check`: passed.
 
+### 2026-06-30 Track 0/A/B/F verification sweep
+
+Ran the outstanding post-fourth-pass verification gates for measurement,
+stream, async/diagnostics, and VM/module. No runtime fixes were made in this
+slice; the concrete result is updated acceptance evidence plus a refreshed
+inventory report.
+
+Verification:
+
+```bash
+make build
+./test/test_node_gtest.exe --baseline-only --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --modules=stream --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --gtest_filter='<explicit async/als/diagnostics official test list>' --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --modules=vm,module --timeout=20000 --gtest_brief=1
+python3 -B test/node/node_official_report.py
+```
+
+Results:
+
+- `make build`: passed with 0 warnings.
+- Baseline-only gate after the combined Track D/E follow-ups: 1906/1930
+  passed, 24 regressions, 0 crashes, 0
+  timeouts, local socket preflight passed. Current regressions were:
+  `test-compile-cache-api-env.js`, `test-compile-cache-api-flush.js`,
+  `test-compile-cache-api-options-portable-env.js`,
+  `test-compile-cache-api-permission.js`,
+  `test-compile-cache-api-portable.js`,
+  `test-compile-cache-api-success.js`,
+  `test-compile-cache-api-tmpdir.js`, `test-compile-cache-disable.js`,
+  `test-domain-promise.js`, `test-permission-drop-fs-granted-path.js`,
+  `test-permission-drop-fs-specific-path.js`, `test-permission-fs-read.js`,
+  `test-permission-fs-symlink-target-write.js`,
+  `test-permission-fs-symlink.js`,
+  `test-permission-fs-traversal-path.js`,
+  `test-runner-coverage.js`, `test-runner-force-exit-flush.js`,
+  `test-runner-reporters.js`, `test-runner-worker-id.js`,
+  `test-tls-get-ca-certificates-extra-empty.js`,
+  `test-tls-get-ca-certificates-extra.js`,
+  `test-trace-events-async-hooks-dynamic.js`,
+  `test-uncaught-exception-handler-stack-overflow.js`, and
+  `test-zlib-crc32.js`.
+- Track A stream module gate: 179 passed, 32 expected failures, 0 regressions,
+  1 improvement: `test-stream-finished.js`.
+- Track B explicit async/ALS/diagnostics gate: 69 passed, 58 expected failures,
+  0 regressions, 14 improvements, including `test-als-defaultvalue.js`,
+  `test-async-hooks-constructor.js`,
+  `test-diagnostics-channel-object-channel-pub-sub.js`, and the
+  diagnostics tracing callback cases.
+- Track F VM/module gate: 62 passed, 55 expected failures, 0 regressions, 20
+  improvements, including `test-vm-cached-data.js`,
+  `test-vm-createcacheddata.js`, and `test-vm-run-in-new-context.js`.
+- `python3 -B test/node/node_official_report.py`: regenerated
+  `temp/node_official_report.md`; the report still shows 1930 active baseline
+  passes, 1608 baseline-inferred failures, 95 skip-list tests, 34 slow-list
+  exclusions, and 0 baseline names missing from `ref/node`. Its latest timing
+  sample reflects the final combined baseline-only gate.
+
+## Track E Follow-up: MessagePort Transfer Scope
+
+Decision: LambdaJS keeps `worker_threads` on the single-process compatibility
+path for Node5. `MessageChannel` / `MessagePort` should provide useful
+same-process queue and lifecycle semantics, while real worker isolates,
+subprocess-backed workers, and cluster worker process modeling remain deferred
+instead of being hidden by wider skip-list changes.
+
+Implemented scope:
+
+- `MessagePort.postMessage(value, transferList)` now accepts a transfer list for
+  the FileHandle case used by official worker MessagePort tests.
+- FileHandle transfers move the `fd` away from the sender and preserve the
+  receiver-side prototype rather than cloning the handle as a plain object.
+- `FileHandle.prototype.readFile()` now covers the received-handle readback path
+  used by the transfer test and rejects transferred/closed handles as `EBADF`.
+- `moveMessagePortToContext()` records moved-context state. A transferred
+  FileHandle sent to that moved port is discarded and reported via
+  `onmessageerror` with `ERR_MESSAGE_TARGET_CONTEXT_UNAVAILABLE`, allowing
+  later ordinary messages to continue draining.
+- Added `test/node/worker_message_port_transfer_context.js` as the focused
+  local fixture for the context-mismatch lifecycle.
+
+Verification status for this follow-up:
+
+- `./test/test_node_gtest.exe --modules=worker,cluster,child_process
+  --timeout=20000 --gtest_brief=1` before the patch showed 92 passes, 224
+  expected failures, 3 improvements, and one pre-existing Track E regression:
+  `test-worker-message-port-transfer-filehandle.js`.
+- `make build` initially stopped in unrelated Track D crypto edits because
+  `js_crypto.cpp` had unused static DSA helpers under `-Werror=unused-function`;
+  the later Track D DSA follow-up resolved that build blocker.
+- Follow-up focused official gate passed:
+  `./test/test_node_gtest.exe --gtest_filter='NodeOfficial/NodeOfficialTest.Run/test_worker_message_port_transfer_filehandle' --timeout=20000 --gtest_brief=1`
+  reported 1/1 passed, 0 regressions.
+- Full Track E worker/cluster/child-process module sweep passed with 93
+  passing tests, 223 expected failures, 0 regressions, 0 crashes/timeouts, and
+  the same 3 improvements:
+  `test-child-process-spawnsync-env.js`,
+  `test-worker-message-port-close.js`, and
+  `test-worker-message-port-receive-message.js`.
+
+### 2026-06-30 Track D DSA follow-up
+
+Closed the remaining DSA sign/verify capability gap for imported keys:
+
+- DSA PEM/DER private and public keys now import as `KeyObject`s with
+  `asymmetricKeyType: 'dsa'` and Node-shaped `asymmetricKeyDetails`
+  (`modulusLength`, `divisorLength`) through a dynamic OpenSSL EVP backend.
+- `Sign` / `Verify` now fall back to the OpenSSL DSA path when mbedTLS rejects
+  a detected DSA key, including `dsaEncoding: 'der'` and
+  `dsaEncoding: 'ieee-p1363'`.
+- DSA public-key derivation from private `KeyObject`s and DER export for DSA
+  KeyObjects are covered by the local asymmetric fixture.
+- Malformed DSA material still reports `ERR_OSSL_UNSUPPORTED` instead of being
+  treated as a supported key.
+
+Verification:
+
+```bash
+make build
+./lambda.exe js test/node/crypto_asymmetric_verify.js --no-log
+./test/test_node_gtest.exe --gtest_filter='NodeOfficial/NodeOfficialTest.Run/test_crypto_async_sign_verify' --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --modules=crypto --timeout=15000 --gtest_brief=1
+git diff --check
+```
+
+Results:
+
+- Local asymmetric fixture passed, including DSA DER and IEEE-P1363
+  sign/verify coverage.
+- Focused official async sign/verify passed and remains a new pass outside the
+  current baseline.
+- Crypto module guard passed with 64 passes, 67 expected failures, 0
+  regressions, and 1 improvement (`test-crypto-async-sign-verify.js`).
+- DSA key generation remains deferred; the current native key generator still
+  only implements RSA key-pair generation.
+
+### 2026-06-30 Track C integrated completion
+
+Closed the final explicit Track C blocker from the fourth pass:
+
+- `util.inspect()` now recognizes `AssertionError` objects and formats the
+  AssertionError surface with Node-shaped `actual`, `expected`, `operator`,
+  `code`, `generatedMessage`, and `diff` fields.
+- Assert-generated string messages now use Node-shaped escaped multiline string
+  chunks for long line diffs, including the different `full` and `simple`
+  truncation budgets used by `strictEqual`, `notStrictEqual`, and `deepEqual`.
+- `assert.deepStrictEqual()` now emits the Node-shaped array diff block for the
+  simple array mismatch covered by `test-assert-class.js`.
+- `Assert({ skipPrototype })` now applies prototype comparison at the assert
+  layer: default/deep-strict assertions still treat different prototypes as
+  different, while `skipPrototype: true` preserves the same-structure pass
+  behavior.
+
+Verification:
+
+```bash
+make build
+./lambda.exe js test/node/assert_constructor.js --no-log
+./lambda.exe js ref/node/test/parallel/test-assert-class.js --no-log
+./test/test_node_gtest.exe --gtest_filter='NodeOfficial/NodeOfficialTest.Run/test_assert_class:NodeOfficial/NodeOfficialTest.Run/test_crypto_async_sign_verify:NodeOfficial/NodeOfficialTest.Run/test_worker_message_port_transfer_filehandle:NodeOfficial/NodeOfficialTest.Run/test_stream_finished:NodeOfficial/NodeOfficialTest.Run/test_vm_cached_data' --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --modules=assert --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --timeout=20000 --gtest_brief=1
+git diff --check
+```
+
+Results:
+
+- Direct official `test-assert-class.js`: passed.
+- Local assert constructor fixture: passed.
+- Combined focused official gate: 5/5 passed, 0 regressions, 4 improvements:
+  `test-assert-class.js`, `test-crypto-async-sign-verify.js`,
+  `test-stream-finished.js`, and `test-vm-cached-data.js`.
+- Assert module sweep: 7 passed, 7 expected failures, 0 regressions, 2
+  improvements (`test-assert-class.js`,
+  `test-assert-class-destructuring.js`).
+- Crypto module sweep after integration: 64 passed, 67 expected failures, 0
+  regressions, 1 improvement (`test-crypto-async-sign-verify.js`).
+- Worker/cluster/child-process sweep after integration: 93 passed, 223 expected
+  failures, 0 regressions, 0 crashes/timeouts, and 3 improvements.
+- Baseline-only gate after final integration: 1904/1930 passed, 26 regressions,
+  0 crashes, 0 timeouts. The failing baseline set is still outside the focused
+  Node5 wins and currently clusters around compile-cache, permission, runner,
+  HTTP header, TLS CA, trace-events async-hooks, stack overflow, and zlib CRC32.
+- `python3 -B test/node/node_official_report.py` regenerated
+  `temp/node_official_report.md` from the final baseline-only timing sample.
+
 ## Verification Policy
 
 Every implementation slice should finish with:
