@@ -47,6 +47,40 @@ static RdtVideoCallbacks media_callbacks = {
     media_video_size_known
 };
 
+static FormControlProp* ensure_form_control_prop(LayoutContext* lycon, ViewBlock* block,
+                                                 FormControlType control_type,
+                                                 bool* out_created) {
+    if (out_created) *out_created = false;
+    if (!lycon || !block) return nullptr;
+    if (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form) {
+        return block->form;
+    }
+
+    float flex_grow = 0.0f;
+    float flex_shrink = 1.0f;
+    float flex_basis = -1.0f;
+    bool flex_basis_is_percent = false;
+    if (block->item_prop_type == DomElement::ITEM_PROP_FLEX && block->fi) {
+        flex_grow = block->fi->flex_grow;
+        flex_shrink = block->fi->flex_shrink;
+        flex_basis = block->fi->flex_basis;
+        flex_basis_is_percent = block->fi->flex_basis_is_percent;
+    }
+
+    FormControlProp* form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
+    form_control_prop_init(form);
+    form->control_type = control_type;
+    form->flex_grow = flex_grow;
+    form->flex_shrink = flex_shrink;
+    form->flex_basis = flex_basis;
+    form->flex_basis_is_percent = flex_basis_is_percent;
+
+    block->item_prop_type = DomElement::ITEM_PROP_FORM;
+    block->form = form;
+    if (out_created) *out_created = true;
+    return form;
+}
+
 // Parse HTML color attribute (e.g., "#ff6600" or "ff6600" or named colors like "red")
 static Color parse_html_color(const char* color_str) {
     Color result;
@@ -1590,11 +1624,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // button: centered text, some padding, inline-block display with flow inner
         // All values in CSS logical pixels
         // Guard: only allocate if not already allocated (avoid re-allocating on repeated style resolution)
-        if (!block->form) {
-            block->item_prop_type = DomElement::ITEM_PROP_FORM;
-            block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
-            form_control_prop_init(block->form);
-            block->form->control_type = FORM_CONTROL_BUTTON;
+        bool form_created = false;
+        ensure_form_control_prop(lycon, block, FORM_CONTROL_BUTTON, &form_created);
+        if (form_created) {
             if (block->has_attribute("disabled")) {
                 DocState* state = (DocState*)lycon->doc->state;
                 form_control_set_disabled(state, block, true);
@@ -1631,11 +1663,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_INPUT: {
         // Allocate form control prop - all values in CSS logical pixels
         // Guard: only allocate if not already allocated (avoid re-allocating on repeated style resolution)
-        if (!block->form) {
-            block->item_prop_type = DomElement::ITEM_PROP_FORM;
-            block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
-            form_control_prop_init(block->form);
-
+        bool form_created = false;
+        ensure_form_control_prop(lycon, block, FORM_CONTROL_TEXT, &form_created);
+        if (form_created) {
             // Parse state attributes and seed canonical StateStore state.
             DocState* state = (DocState*)lycon->doc->state;
             block->form->state_ref = state;
@@ -1850,11 +1880,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_SELECT: {
         // All values in CSS logical pixels
         // Guard: only allocate if not already allocated (avoid re-allocating on repeated style resolution)
-        if (!block->form) {
-            block->item_prop_type = DomElement::ITEM_PROP_FORM;
-            block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
-            form_control_prop_init(block->form);
-            block->form->control_type = FORM_CONTROL_SELECT;
+        bool form_created = false;
+        ensure_form_control_prop(lycon, block, FORM_CONTROL_SELECT, &form_created);
+        if (form_created) {
             block->form->name = block->get_attribute("name");
             if (block->has_attribute("disabled")) {
                 DocState* state = (DocState*)lycon->doc->state;
@@ -1957,11 +1985,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_TEXTAREA: {
         // All values in CSS logical pixels
         // Guard: only allocate if not already allocated (avoid re-allocating on repeated style resolution)
-        if (!block->form) {
-            block->item_prop_type = DomElement::ITEM_PROP_FORM;
-            block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
-            form_control_prop_init(block->form);
-            block->form->control_type = FORM_CONTROL_TEXTAREA;
+        bool form_created = false;
+        ensure_form_control_prop(lycon, block, FORM_CONTROL_TEXTAREA, &form_created);
+        if (form_created) {
             block->form->name = block->get_attribute("name");
             block->form->placeholder = block->get_attribute("placeholder");
             DocState* state = (DocState*)lycon->doc->state;
