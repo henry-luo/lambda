@@ -1509,6 +1509,8 @@ extern "C" {
     Item fn_take(Item a, Item n);
     Item fn_drop(Item a, Item n);
     Item fn_slice(Item a, Item start, Item end);
+    Item fn_slice3(Item a, Item start, Item end);
+    Item fn_slice2(Item a, Item start);
     Item fn_clip(Item a, Item lo, Item hi);
     Item fn_all(Item a);
     Item fn_any(Item a);

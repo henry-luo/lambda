@@ -2785,6 +2785,23 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
     }
 }
 
+Item fn_slice3(Item vec, Item start_item, Item end_item) {
+    return fn_slice(vec, start_item, end_item);
+}
+
+// slice(vec, start) - extract elements from start to the end
+Item fn_slice2(Item vec, Item start_item) {
+    GUARD_ERROR2(vec, start_item);
+    if (get_type_id(vec) == LMD_TYPE_NULL) return ItemNull;
+
+    int64_t len = fn_len(vec);
+    if (len < 0) {
+        log_error("fn_slice2: first argument must be sliceable");
+        return ItemError;
+    }
+    return fn_slice(vec, start_item, (Item){ .item = i2it(len) });
+}
+
 // ============================================================================
 // view(arr, start, end) — read-only view sharing arr's storage.
 // Allocates a new ArrayNum whose data pointer is base->data + start*elem_size.

@@ -338,8 +338,11 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_SET, "set", -1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_set", NULL, NULL, NULL, false, 0},  // variadic, unimplemented
 
-    {SYSFUNC_SLICE, "slice", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_slice", FPTR(fn_slice), NULL, NULL, false, 0},
+    {SYSFUNC_SLICE, "slice", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_slice2", FPTR(fn_slice2), NULL, NULL, false, 0},
+
+    {SYSFUNC_SLICE, "slice", 3, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_slice3", FPTR(fn_slice3), NULL, NULL, false, 0},
 
     {SYSFUNC_VIEW, "subview", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_subview", FPTR(fn_subview), NULL, NULL, false, 0},

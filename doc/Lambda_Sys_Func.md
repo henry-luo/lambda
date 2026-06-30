@@ -531,6 +531,7 @@ contains({x: 1, y: 2}, 'z')                  // false
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
 | `slice(vec, i, j)` | Extract slice [i, j) | `slice([1,2,3,4], 1, 3)` | `[2, 3]` |
+| `slice(vec, i)` | Extract slice [i, end) | `slice([1,2,3,4], 2)` | `[3, 4]` |
 | `take(vec, n)` | First n elements | `take([1, 2, 3], 2)` | `[1, 2]` |
 | `drop(vec, n)` | Drop first n elements | `drop([1, 2, 3], 1)` | `[2, 3]` |
 
@@ -564,6 +565,7 @@ Reduce a collection to a single value by applying a binary function cumulatively
 
 ```lambda
 slice([1, 2, 3, 4], 1, 3)  // [2, 3]
+slice([1, 2, 3, 4], 2)     // [3, 4]
 take([1, 2, 3, 4], 2)      // [1, 2]
 drop([1, 2, 3, 4], 2)      // [3, 4]
 
@@ -1158,7 +1160,7 @@ if (result is error) {
 | `contains` | 2 | Check element membership |
 | `index_of` | 2 | Index of first matching element |
 | `last_index_of` | 2 | Index of last matching element |
-| `slice` | 3 | Extract slice |
+| `slice` | 2 or 3 | Extract slice; 2-arg form slices to end |
 | `set` | 1+ | Remove duplicates |
 | `all` | 1 | All truthy |
 | `any` | 1 | Any truthy |

@@ -369,19 +369,22 @@ let data^err = input("./data.json", "json")
 **Severity**: Compilation error (`call to undefined function 'slice'`)  
 **Affected benchmarks**: regex_dna
 
-Calling `slice(str, start)` to get a substring from `start` to the end fails because Lambda only recognizes the 3-argument form `slice(str, start, end)`. The 2-arg call is treated as an entirely different (undefined) function.
+**Status**: ✅ **FIXED**.
+
+Lambda now supports `slice(vec, start)` as shorthand for `slice(vec, start, len(vec))`.
+This works for strings, arrays, method syntax, pipe syntax, negative starts, and `null`.
 
 ```lambda
-// FAILS
-var tail = slice("hello", 2)  // error: call to undefined function 'slice'
-
-// WORKS
-var tail = slice("hello", 2, len("hello"))  // "llo"
+slice("hello", 2)         // "llo"
+"hello".slice(2)          // "llo"
+"hello" | slice(2)        // "llo"
+slice([1, 2, 3, 4], -2)   // [3, 4]
 ```
 
-**Workaround**: Always provide the third argument, using `len(str)` for slice-to-end.
-
-**Suggestion**: Support the common 2-argument form `slice(str, start)` as shorthand for `slice(str, start, len(str))`. This is standard across JS, Python, and most languages.
+**Fix notes**:
+- `slice/2` is registered as an overload and dispatches to `fn_slice2()`.
+- `fn_slice2()` computes the end index with `fn_len()` and delegates to the existing `fn_slice()` implementation, preserving UTF-8 string slicing, array slicing, negative-index handling, clamping, and `null` behavior.
+- `test/lambda/slice_two_arg.ls` covers function, method, and pipe forms.
 
 ---
 
@@ -506,7 +509,7 @@ pn show() {
 | 11 | Integer division returns float | Type inference | 1 benchmark, silent wrong results |
 | 12 | `shl` 64-bit overflow | Bitwise ops | **Fixed for typed `u32` code**; SHA-1/MD5 rotate helpers use compact shifts |
 | 13 | `@` path literals don't parse | Missing feature | 1 benchmark, doc mismatch |
-| 14 | `slice()` no 2-argument form | Missing feature | 1 benchmark, minor |
+| 14 | `slice()` no 2-argument form | Missing feature | **Fixed**; `slice(vec,start)` delegates to slice-to-end |
 | 15 | No case-insensitive patterns | Missing feature | 1 benchmark, workaround needed |
 | 16 | No replace-first function | Missing feature | 1 benchmark, manual workaround |
 | 17 | Decimal args become zero | Runtime bug | 1 benchmark, workaround needed |
