@@ -9,6 +9,8 @@
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
+#include <climits>
+#include <math.h>
 #include <type_traits>
 
 // SIMD vectorization hint for the contiguous numeric kernels below.  Uses each
@@ -27,6 +29,28 @@ static int cmp_double_asc(const void* a, const void* b, void* udata) {
     (void)udata;
     double da = *(const double*)a, db = *(const double*)b;
     return (da > db) - (da < db);
+}
+
+static bool item_to_integral_index(Item item, int64_t* out) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT) {
+        *out = item.get_int56();
+        return true;
+    }
+    if (type == LMD_TYPE_INT64) {
+        *out = item.get_int64();
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        double val = item.get_double();
+        if (isnan(val) || isinf(val)) return false;
+        if (val < (double)LLONG_MIN || val > (double)LLONG_MAX) return false;
+        int64_t int_val = (int64_t)val;
+        if ((double)int_val != val) return false;
+        *out = int_val;
+        return true;
+    }
+    return false;
 }
 
 static int cmp_int64_asc(const void* a, const void* b, void* udata) {
@@ -2737,16 +2761,13 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
     int64_t len = vector_length(vec);
     if (len < 0) return ItemError;
 
-    TypeId start_type = get_type_id(start_item);
-    TypeId end_type = get_type_id(end_item);
-    if ((start_type != LMD_TYPE_INT && start_type != LMD_TYPE_INT64) ||
-        (end_type != LMD_TYPE_INT && end_type != LMD_TYPE_INT64)) {
-        log_error("fn_slice: start and end must be integers");
+    int64_t start = 0;
+    int64_t end = 0;
+    if (!item_to_integral_index(start_item, &start) ||
+        !item_to_integral_index(end_item, &end)) {
+        log_error("fn_slice: start and end must be integer-valued numbers");
         return ItemError;
     }
-
-    int64_t start = (start_type == LMD_TYPE_INT) ? start_item.get_int56() : start_item.get_int64();
-    int64_t end = (end_type == LMD_TYPE_INT) ? end_item.get_int56() : end_item.get_int64();
 
     // Handle negative indices
     if (start < 0) start = len + start;
