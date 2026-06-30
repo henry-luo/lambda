@@ -1,0 +1,9 @@
+cache is buffer: true
+cache length: true
+accepted rejected flag: false
+accepted result: 42
+changed source rejected: true
+changed source result: 43
+produce flag: true
+produced buffer: true
+invalid type throws: true

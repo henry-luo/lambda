@@ -11,6 +11,7 @@ rsa one-shot pss default salt: true
 rsa keyobject derive public: true
 rsa keyobject equals: true
 rsa keyobject export options: true
+rsa keyobject pkcs1 export: true
 rsa keyobject export instanceof: true
 rsa generateKeyPairSync keyobjects: true
 rsa generateKeyPairSync pss: true

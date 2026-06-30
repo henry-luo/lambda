@@ -1,0 +1,1 @@
+diagnostics channel pubsub contract ok

@@ -1041,6 +1041,79 @@ Results:
   improvements.
 - Crypto module guard: 63 passed, 68 expected failures, 0 regressions.
 
+### 2026-06-30 Node5 outstanding-track third subagent pass
+
+Ran a third parallel subagent pass with one worker per remaining Track A-F.
+Each slice stayed bounded to its owning module surface:
+
+- Track A stream/I/O: `finished()` now tracks readable/writable side-enabled
+  state separately from transient open/closed state, tracks async destroy
+  pending state, ignores boolean state sentinels as stored errors, and reports
+  premature close only for enabled sides that missed terminal events. Added
+  `test/node/stream_finished_destroyed_premature.js`.
+- Track B async/diagnostics: `diagnostics_channel` now has real Channel and
+  TracingChannel prototype wiring, validates string/symbol channel names and
+  subscribers, delivers `(message, name)` to subscribers, accepts object-form
+  `tracingChannel()`, and uses Node-shaped tracing channel names. Added
+  `test/node/diagnostics_channel_pubsub_contract.js`.
+- Track C fidelity: `assert.partialDeepStrictEqual()` now performs structural
+  partial subset matching, partial mismatch errors include Node-shaped custom
+  diff text, `match()` / `doesNotMatch()` validate the regexp argument with
+  `ERR_INVALID_ARG_TYPE`, and `doesNotThrow()` handles matched unwanted
+  exceptions in a Node-shaped way.
+- Track D crypto: RSA `KeyObject.export({ type: 'pkcs1', format: 'pem' |
+  'der' })` now emits real PKCS#1 public/private DER, including private CRT
+  fields, and supports PEM wrapping plus re-import verification coverage.
+- Track E worker/process: MessagePort now distinguishes EventEmitter listeners
+  from EventTarget listeners. `.on('message')` receives the raw value, while
+  `addEventListener('message')` and `onmessage` receive event objects with
+  `.data`; close listeners receive a close event object. FIFO
+  `receiveMessageOnPort()` behavior remains intact.
+- Track F VM/module isolation: `vm.Script` now supports cache-data tokens via
+  `createCachedData()`, `cachedData`, `cachedDataProduced`, and
+  `cachedDataRejected`, including source fingerprint validation and
+  Buffer/TypedArray/DataView option handling. Added `test/node/vm_cached_data.js`.
+
+Verification:
+
+```bash
+make build
+./test/test_js_gtest.exe --gtest_filter='*stream_finished_destroyed_premature*:*stream_finished_destroy_pending*:*stream_finished_after_invalid_args*:*stream_finished_async_local_storage*:*diagnostics_channel_pubsub_contract*:*diagnostics_trace_callback_stores*:*async_hooks_constructor_computed_key*:*assert_constructor*:*crypto_asymmetric_verify*:*worker_message_port_lifecycle*:*vm_cached_data*' --gtest_brief=1
+./test/test_node_gtest.exe --gtest_filter='NodeOfficial/NodeOfficialTest.Run/test_diagnostics_channel_object_channel_pub_sub:NodeOfficial/NodeOfficialTest.Run/test_diagnostics_channel_pub_sub:NodeOfficial/NodeOfficialTest.Run/test_diagnostics_channel_symbol_named:NodeOfficial/NodeOfficialTest.Run/test_diagnostics_channel_tracing_channel_args_types:NodeOfficial/NodeOfficialTest.Run/test_worker_message_port_close:NodeOfficial/NodeOfficialTest.Run/test_worker_message_port_receive_message:NodeOfficial/NodeOfficialTest.Run/test_vm_createcacheddata:NodeOfficial/NodeOfficialTest.Run/test_stream_finished' --timeout=20000 --gtest_brief=1
+./test/test_node_gtest.exe --modules=crypto --timeout=15000 --gtest_brief=1
+git diff --check
+```
+
+Results:
+
+- `make build`: passed.
+- Local JS fixture gate: 11/11 passed.
+- Focused official gate: 7 passed and 1 expected failure, 0 regressions, 7
+  improvements:
+  `test-diagnostics-channel-object-channel-pub-sub.js`,
+  `test-diagnostics-channel-pub-sub.js`,
+  `test-diagnostics-channel-symbol-named.js`,
+  `test-diagnostics-channel-tracing-channel-args-types.js`,
+  `test-vm-createcacheddata.js`, `test-worker-message-port-close.js`, and
+  `test-worker-message-port-receive-message.js`.
+- `test-stream-finished.js` remains outside the baseline as an expected
+  failure, but advanced past the prior `undefined.code` failure to a later
+  assertion mismatch plus the known shutdown memtrack leak.
+- Crypto module guard: 63 passed, 68 expected failures, 0 regressions.
+- `git diff --check`: passed.
+
+Remaining known blockers:
+
+- Track A: `test-stream-finished.js` still needs later stream ordering/error
+  semantics after the `undefined.code` blocker.
+- Track C: full `test-assert-class.js` still reaches later message-fidelity
+  mismatches.
+- Track D: full `test-crypto-async-sign-verify.js` still needs real
+  Ed25519/Ed448/DSA backend support.
+- Track F: `test-vm-cached-data.js` is still blocked earlier by child-process
+  `spawnSync(process.execPath, ['-e', ...])` inline execution behavior, not by
+  VM cache-data token handling.
+
 ## Verification Policy
 
 Every implementation slice should finish with:

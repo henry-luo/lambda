@@ -36,3 +36,38 @@ try {
 } catch (e) {
     console.log('full diff: ' + e.code + ':' + e.diff);
 }
+
+loose.partialDeepStrictEqual({ a: true, keep: 1 }, { a: true });
+console.log('partial subset: pass');
+
+try {
+    loose.partialDeepStrictEqual({ a: true }, { a: false }, 'custom message');
+    console.log('partial diff: did not throw');
+} catch (e) {
+    console.log('partial diff: ' + e.code + ':' + e.operator + ':' + JSON.stringify(e.message));
+}
+
+try {
+    loose.match(/abc/, 'string');
+    console.log('match regexp validation: did not throw');
+} catch (e) {
+    console.log('match regexp validation: ' + e.name + ':' + e.code + ':' + e.message);
+}
+
+try {
+    loose.doesNotMatch(/abc/, 'string');
+    console.log('doesNotMatch regexp validation: did not throw');
+} catch (e) {
+    console.log('doesNotMatch regexp validation: ' + e.name + ':' + e.code + ':' + e.message);
+}
+
+try {
+    loose.doesNotThrow(function () { throw new TypeError('wrong type'); }, TypeError, new RangeError('my range'));
+    console.log('doesNotThrow matched exception: did not throw');
+} catch (e) {
+    console.log('doesNotThrow matched exception: ' +
+        e.name + ':' + e.code + ':' + e.operator + ':' +
+        (e instanceof loose.AssertionError) + ':' +
+        JSON.stringify(e.message) + ':' +
+        e.stack.includes('doesNotThrow'));
+}

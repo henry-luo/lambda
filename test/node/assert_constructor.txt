@@ -4,3 +4,8 @@ loose equal: pass
 strict aliases: true:true:true:true
 invalid diff: TypeError:ERR_INVALID_ARG_VALUE:The property 'options.diff' must be one of: 'simple', 'full'. Received 'invalid'
 full diff: ERR_ASSERTION:full
+partial subset: pass
+partial diff: ERR_ASSERTION:partialDeepStrictEqual:"custom message\n+ actual - expected\n\n  {\n+   a: true\n-   a: false\n  }\n"
+match regexp validation: TypeError:ERR_INVALID_ARG_TYPE:The "regexp" argument must be an instance of RegExp. Received type string ('string')
+doesNotMatch regexp validation: TypeError:ERR_INVALID_ARG_TYPE:The "regexp" argument must be an instance of RegExp. Received type string ('string')
+doesNotThrow matched exception: AssertionError:ERR_ASSERTION:doesNotThrow:true:"Got unwanted exception: RangeError: my range\nActual message: \"wrong type\"":false

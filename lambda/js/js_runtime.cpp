@@ -32083,6 +32083,7 @@ extern "C" void js_with_push(Item obj);
 extern "C" void js_with_set_stack(Item* stack, int depth);
 extern "C" int js_with_save_stack(Item* out_stack, int max_depth);
 extern "C" void js_mark_non_enumerable(Item object, Item name);
+extern "C" Item js_buffer_from_bytes(const char* data, int len);
 
 struct JsVmEvalOptions {
     Item filename;
@@ -32134,6 +32135,92 @@ static bool js_vm_read_options(Item options, const char** names, int count, JsVm
         out->column_offset = js_vm_option_to_int64(col);
     }
     return true;
+}
+
+static uint64_t js_vm_cache_hash_bytes(const char* data, int len) {
+    uint64_t hash = 1469598103934665603ULL;
+    for (int i = 0; i < len; i++) {
+        hash ^= (uint8_t)data[i];
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+static bool js_vm_cache_source_fingerprint(Item code, uint64_t* out_hash, int64_t* out_len) {
+    if (get_type_id(code) != LMD_TYPE_STRING) return false;
+    String* source = it2s(code);
+    if (!source) return false;
+    if (out_hash) *out_hash = js_vm_cache_hash_bytes(source->chars, (int)source->len);
+    if (out_len) *out_len = source->len;
+    return true;
+}
+
+static void js_vm_write_u64_le(uint8_t* dst, uint64_t value) {
+    for (int i = 0; i < 8; i++) {
+        dst[i] = (uint8_t)((value >> (i * 8)) & 0xff);
+    }
+}
+
+static uint64_t js_vm_read_u64_le(const uint8_t* src) {
+    uint64_t value = 0;
+    for (int i = 0; i < 8; i++) {
+        value |= ((uint64_t)src[i]) << (i * 8);
+    }
+    return value;
+}
+
+static bool js_vm_cached_data_bytes(Item value, const uint8_t** out_data, int* out_len) {
+    if (js_is_typed_array(value)) {
+        *out_data = (const uint8_t*)js_typed_array_current_data_ptr(value);
+        *out_len = js_typed_array_byte_length(value);
+        return *out_data != NULL || *out_len == 0;
+    }
+    if (js_is_dataview(value)) {
+        JsDataView* dv = js_get_dataview_ptr(value);
+        if (!dv || !dv->buffer || dv->buffer->detached) return false;
+        int len = dv->length_tracking ? dv->buffer->byte_length - dv->byte_offset : dv->byte_length;
+        if (len < 0) len = 0;
+        *out_data = (const uint8_t*)dv->buffer->data + dv->byte_offset;
+        *out_len = len;
+        return *out_data != NULL || len == 0;
+    }
+    return false;
+}
+
+static bool js_vm_cached_data_matches_source(Item cached_data, Item code, bool* out_valid_type) {
+    const uint8_t* bytes = NULL;
+    int len = 0;
+    bool valid_type = js_vm_cached_data_bytes(cached_data, &bytes, &len);
+    if (out_valid_type) *out_valid_type = valid_type;
+    if (!valid_type || len < 28 || !bytes) return false;
+    if (memcmp(bytes, "LJSVMC1", 7) != 0 || bytes[7] != 0) return false;
+
+    uint64_t expected_hash = 0;
+    int64_t expected_len = 0;
+    if (!js_vm_cache_source_fingerprint(code, &expected_hash, &expected_len)) return false;
+    uint64_t actual_len = js_vm_read_u64_le(bytes + 8);
+    uint64_t actual_hash = js_vm_read_u64_le(bytes + 16);
+    uint64_t actual_check = js_vm_read_u64_le(bytes + 24);
+    return actual_len == (uint64_t)expected_len &&
+           actual_hash == expected_hash &&
+           actual_check == (expected_hash ^ actual_len ^ 0x6a735f766d5f6331ULL);
+}
+
+static Item js_vm_make_cached_data_for_code(Item code) {
+    uint64_t source_hash = 0;
+    int64_t source_len = 0;
+    if (!js_vm_cache_source_fingerprint(code, &source_hash, &source_len)) {
+        source_hash = 0;
+        source_len = 0;
+    }
+
+    uint8_t payload[32];
+    memset(payload, 0, sizeof(payload));
+    memcpy(payload, "LJSVMC1", 7);
+    js_vm_write_u64_le(payload + 8, (uint64_t)source_len);
+    js_vm_write_u64_le(payload + 16, source_hash);
+    js_vm_write_u64_le(payload + 24, source_hash ^ (uint64_t)source_len ^ 0x6a735f766d5f6331ULL);
+    return js_buffer_from_bytes((const char*)payload, (int)sizeof(payload));
 }
 
 static void js_vm_set_global_alias(Item sandbox, const char* name, int len) {
@@ -32281,6 +32368,12 @@ static Item js_vm_compileFunction(Item code, Item params) {
     return js_builtin_eval(eval_code, 1);
 }
 
+static Item js_vm_Script_createCachedData(void) {
+    Item self = js_get_this();
+    Item code = js_property_get(self, (Item){.item = s2it(heap_create_name("_code", 5))});
+    return js_vm_make_cached_data_for_code(code);
+}
+
 // Script.runInThisContext wrapper that extracts _code from `this`
 static Item js_vm_Script_runInThisContext(Item options) {
     const char* names[] = {"breakOnSigint", "timeout", "displayErrors", "filename", "lineOffset", "columnOffset"};
@@ -32335,6 +32428,33 @@ static Item js_vm_Script_constructor(Item code, Item options) {
     const char* names[] = {"filename", "cachedData", "produceCachedData", "lineOffset", "columnOffset"};
     JsVmEvalOptions eval_options;
     if (!js_vm_read_options(options, names, 5, &eval_options)) return ItemNull;
+    bool cached_data_produced = false;
+    bool cached_data_rejected = false;
+    Item cached_data = (Item){.item = ITEM_JS_UNDEFINED};
+    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT ||
+        get_type_id(options) == LMD_TYPE_VMAP) {
+        Item cached_data_key = (Item){.item = s2it(heap_create_name("cachedData", 10))};
+        cached_data = js_property_get(options, cached_data_key);
+        if (js_check_exception()) return ItemNull;
+        if (get_type_id(cached_data) != LMD_TYPE_UNDEFINED) {
+            bool valid_cached_type = false;
+            bool matched = js_vm_cached_data_matches_source(cached_data, code, &valid_cached_type);
+            if (!valid_cached_type) {
+                return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+                    "The \"options.cachedData\" property must be an instance of Buffer, TypedArray, or DataView.");
+            }
+            cached_data_rejected = !matched;
+        }
+
+        Item produce_key = (Item){.item = s2it(heap_create_name("produceCachedData", 17))};
+        Item produce = js_property_get(options, produce_key);
+        if (js_check_exception()) return ItemNull;
+        if (get_type_id(produce) == LMD_TYPE_BOOL && it2b(produce)) {
+            cached_data = js_vm_make_cached_data_for_code(code);
+            cached_data_produced = true;
+            cached_data_rejected = false;
+        }
+    }
     Item script = js_new_object();
     js_property_set(script, (Item){.item = s2it(heap_create_name("_code", 5))}, code);
     js_property_set(script, (Item){.item = s2it(heap_create_name("_filename", 9))}, eval_options.filename);
@@ -32348,6 +32468,13 @@ static Item js_vm_Script_constructor(Item code, Item options) {
                     js_new_function((void*)js_vm_Script_runInContext, 2));
     js_property_set(script, (Item){.item = s2it(heap_create_name("runInNewContext", 15))},
                     js_new_function((void*)js_vm_Script_runInNewContext, 2));
+    js_property_set(script, (Item){.item = s2it(heap_create_name("createCachedData", 16))},
+                    js_new_function((void*)js_vm_Script_createCachedData, 0));
+    js_property_set(script, (Item){.item = s2it(heap_create_name("cachedData", 10))}, cached_data);
+    js_property_set(script, (Item){.item = s2it(heap_create_name("cachedDataProduced", 18))},
+                    (Item){.item = b2it(cached_data_produced)});
+    js_property_set(script, (Item){.item = s2it(heap_create_name("cachedDataRejected", 18))},
+                    (Item){.item = b2it(cached_data_rejected)});
     return script;
 }
 
@@ -32369,6 +32496,8 @@ static void js_dc_channel_publish_on(Item channel, Item message);
 static Item js_dc_channel_runStores(Item message, Item callback, Item this_arg, Item arg1, Item arg2);
 static Item js_dc_channel_factory(Item name);
 static Item js_dc_stores_key(void);
+extern "C" void js_set_prototype(Item object, Item prototype);
+extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 
 extern "C" Item js_array_new(int length);
 extern "C" Item js_array_push(Item array, Item value);
@@ -32383,6 +32512,10 @@ static Item js_dc_channel_names[JS_DC_CHANNEL_MAX];
 static Item js_dc_channels[JS_DC_CHANNEL_MAX];
 static int js_dc_channel_count = 0;
 static bool js_dc_channel_roots_registered = false;
+static Item js_dc_channel_proto = {0};
+static Item js_dc_tracing_channel_proto = {0};
+static Item js_dc_channel_ctor = {0};
+static Item js_dc_tracing_channel_ctor = {0};
 
 static Item js_dc_key(const char* name) {
     return (Item){.item = s2it(heap_create_name(name, (int)strlen(name)))};
@@ -32393,6 +32526,24 @@ static bool js_dc_is_nullish(Item value) {
     return get_type_id(value) == LMD_TYPE_UNDEFINED;
 }
 
+static bool js_dc_is_symbol(Item value) {
+    return get_type_id(value) == LMD_TYPE_SYMBOL ||
+           (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE);
+}
+
+static bool js_dc_is_channel_name(Item value) {
+    return get_type_id(value) == LMD_TYPE_STRING || js_dc_is_symbol(value);
+}
+
+static Item js_dc_throw_invalid_arg_type(const char* message) {
+    char full_message[256];
+    int len = snprintf(full_message, sizeof(full_message), "ERR_INVALID_ARG_TYPE: %s",
+                       message ? message : "");
+    if (len < 0) len = 0;
+    if (len >= (int)sizeof(full_message)) len = (int)sizeof(full_message) - 1;
+    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", full_message);
+}
+
 static Item js_dc_context_or_new(Item context) {
     return js_dc_is_nullish(context) ? js_new_object() : context;
 }
@@ -32401,7 +32552,22 @@ static void js_dc_register_roots(void) {
     if (js_dc_channel_roots_registered) return;
     heap_register_gc_root_range((uint64_t*)js_dc_channel_names, JS_DC_CHANNEL_MAX);
     heap_register_gc_root_range((uint64_t*)js_dc_channels, JS_DC_CHANNEL_MAX);
+    heap_register_gc_root(&js_dc_channel_proto.item);
+    heap_register_gc_root(&js_dc_tracing_channel_proto.item);
+    heap_register_gc_root(&js_dc_channel_ctor.item);
+    heap_register_gc_root(&js_dc_tracing_channel_ctor.item);
     js_dc_channel_roots_registered = true;
+}
+
+static Item js_dc_channel_marker_key(void) {
+    return (Item){.item = s2it(heap_create_name("__lambda_dc_channel__", 21))};
+}
+
+static bool js_dc_is_channel(Item value) {
+    TypeId type = get_type_id(value);
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT) return false;
+    Item marker = js_property_get(value, js_dc_channel_marker_key());
+    return get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker);
 }
 
 static bool js_dc_item_same(Item left, Item right) {
@@ -32464,6 +32630,9 @@ static bool js_dc_channel_remove_subscriber(Item channel, Item handler) {
 
 // Channel.subscribe(handler)
 static Item js_dc_channel_subscribe(Item handler) {
+    if (get_type_id(handler) != LMD_TYPE_FUNC) {
+        return js_dc_throw_invalid_arg_type("The \"subscriber\" argument must be of type function.");
+    }
     Item self = js_get_this();
     Item subs = js_dc_channel_subscribers(self);
     js_array_push(subs, handler);
@@ -32479,12 +32648,14 @@ static Item js_dc_channel_unsubscribe(Item handler) {
 static Item js_dc_channel_publish(Item message) {
     Item self = js_get_this();
     Item subs = js_property_get(self, js_dc_key("_subscribers"));
+    Item name = js_property_get(self, js_dc_key("name"));
     if (get_type_id(subs) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(subs);
         for (int64_t i = 0; i < len; i++) {
             Item el = js_array_get_int(subs, i);
             if (get_type_id(el) == LMD_TYPE_FUNC) {
-                js_call_function(el, (Item){.item = ITEM_JS_UNDEFINED}, &message, 1);
+                Item args[2] = { message, name };
+                js_call_function(el, (Item){.item = ITEM_JS_UNDEFINED}, args, 2);
             }
         }
     }
@@ -32626,6 +32797,9 @@ static Item js_dc_channel_runStores(Item message, Item callback, Item this_arg, 
 // dc.channel(name) — create or return existing channel
 static Item js_dc_channel_factory(Item name) {
     js_dc_register_roots();
+    if (!js_dc_is_channel_name(name)) {
+        return js_dc_throw_invalid_arg_type("The \"name\" argument must be of type string or symbol.");
+    }
     for (int i = 0; i < js_dc_channel_count; i++) {
         if (js_dc_item_same(js_dc_channel_names[i], name)) {
             return js_dc_channels[i];
@@ -32633,7 +32807,9 @@ static Item js_dc_channel_factory(Item name) {
     }
 
     Item ch = js_new_object();
+    if (js_dc_channel_proto.item != 0) js_set_prototype(ch, js_dc_channel_proto);
     js_property_set(ch, js_dc_key("name"), name);
+    js_property_set(ch, js_dc_channel_marker_key(), (Item){.item = ITEM_TRUE});
     js_property_set(ch, js_dc_key("_subscribers"), js_array_new(0));
     js_property_set(ch, js_dc_stores_key(), js_array_new(0));
     js_property_set(ch, js_dc_key("subscribe"), js_new_function((void*)js_dc_channel_subscribe, 1));
@@ -32654,20 +32830,40 @@ static Item js_dc_channel_factory(Item name) {
 // dc.tracingChannel(name) — create a TracingChannel with start/end/asyncStart/asyncEnd/error channels
 static Item js_dc_tracing_channel(Item nameOrChannels) {
     Item tc = js_new_object();
+    if (js_dc_tracing_channel_proto.item != 0) js_set_prototype(tc, js_dc_tracing_channel_proto);
     static const char* sub_names[] = {"start", "end", "asyncStart", "asyncEnd", "error"};
     static const int sub_lens[] = {5, 3, 10, 8, 5};
     for (int i = 0; i < 5; i++) {
         Item sub_name;
-        if (get_type_id(nameOrChannels) == LMD_TYPE_STRING) {
+        TypeId name_type = get_type_id(nameOrChannels);
+        if (name_type == LMD_TYPE_STRING) {
             String* base = it2s(nameOrChannels);
             char buf[256];
-            snprintf(buf, sizeof(buf), "tracing:channel:%.*s:%s", (int)base->len, base->chars, sub_names[i]);
+            snprintf(buf, sizeof(buf), "tracing:%.*s:%s", (int)base->len, base->chars, sub_names[i]);
             sub_name = (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
-        } else {
-            sub_name = (Item){.item = s2it(heap_create_name(sub_names[i], sub_lens[i]))};
+            Item ch = js_dc_channel_factory(sub_name);
+            js_property_set(tc, (Item){.item = s2it(heap_create_name(sub_names[i], sub_lens[i]))}, ch);
+            continue;
         }
-        Item ch = js_dc_channel_factory(sub_name);
-        js_property_set(tc, (Item){.item = s2it(heap_create_name(sub_names[i], sub_lens[i]))}, ch);
+        if (name_type == LMD_TYPE_MAP || name_type == LMD_TYPE_OBJECT) {
+            Item key = (Item){.item = s2it(heap_create_name(sub_names[i], sub_lens[i]))};
+            Item ch = js_property_get(nameOrChannels, key);
+            if (js_dc_is_nullish(ch)) {
+                return js_throw_type_error("Cannot convert undefined or null to object");
+            }
+            if (!js_dc_is_channel(ch)) {
+                char message[128];
+                int len = snprintf(message, sizeof(message),
+                    "The \"nameOrChannels.%s\" property must be an instance of Channel.", sub_names[i]);
+                if (len < 0) len = 0;
+                if (len >= (int)sizeof(message)) len = (int)sizeof(message) - 1;
+                return js_dc_throw_invalid_arg_type(message);
+            }
+            js_property_set(tc, key, ch);
+            continue;
+        }
+        return js_dc_throw_invalid_arg_type(
+            "The \"nameOrChannels\" argument must be of type string or an instance of TracingChannel or Object.");
     }
     js_property_set(tc, (Item){.item = s2it(heap_create_name("subscribe", 9))},
                     js_new_function((void*)js_dc_tc_subscribe, 1));
@@ -32719,12 +32915,14 @@ static Item js_dc_tc_unsubscribe(Item handlers) {
 // Helper: publish a message on a channel object
 static void js_dc_channel_publish_on(Item channel, Item message) {
     Item subs = js_property_get(channel, js_dc_key("_subscribers"));
+    Item name = js_property_get(channel, js_dc_key("name"));
     if (get_type_id(subs) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(subs);
         for (int64_t i = 0; i < len; i++) {
             Item el = js_array_get_int(subs, i);
             if (get_type_id(el) == LMD_TYPE_FUNC) {
-                js_call_function(el, (Item){.item = ITEM_JS_UNDEFINED}, &message, 1);
+                Item args[2] = { message, name };
+                js_call_function(el, (Item){.item = ITEM_JS_UNDEFINED}, args, 2);
             }
         }
     }
@@ -33070,7 +33268,11 @@ static Item js_dc_bounded_channel(Item name) {
 
 // dc.subscribe(name, handler) — convenience wrapper
 static Item js_dc_subscribe(Item name, Item handler) {
+    if (get_type_id(handler) != LMD_TYPE_FUNC) {
+        return js_dc_throw_invalid_arg_type("The \"subscriber\" argument must be of type function.");
+    }
     Item ch = js_dc_channel_factory(name);
+    if (js_check_exception()) return ItemNull;
     js_array_push(js_dc_channel_subscribers(ch), handler);
     js_dc_channel_refresh_has_subscribers(ch);
     return (Item){.item = ITEM_JS_UNDEFINED};
@@ -35040,6 +35242,19 @@ extern "C" Item js_module_get(Item specifier) {
             dc_epoch = js_heap_epoch;
             dc_ns = js_new_object();
             heap_register_gc_root(&dc_ns.item);
+            js_dc_register_roots();
+            js_dc_channel_proto = js_new_object();
+            js_dc_tracing_channel_proto = js_new_object();
+            js_dc_channel_ctor = js_new_function((void*)js_dc_channel_factory, 1);
+            js_dc_tracing_channel_ctor = js_new_function((void*)js_dc_tracing_channel, 1);
+            js_function_set_prototype(js_dc_channel_ctor, js_dc_channel_proto);
+            js_function_set_prototype(js_dc_tracing_channel_ctor, js_dc_tracing_channel_proto);
+            js_property_set(js_dc_channel_proto,
+                            (Item){.item = s2it(heap_create_name("constructor", 11))},
+                            js_dc_channel_ctor);
+            js_property_set(js_dc_tracing_channel_proto,
+                            (Item){.item = s2it(heap_create_name("constructor", 11))},
+                            js_dc_tracing_channel_ctor);
             js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("channel", 7))},
                             js_new_function((void*)js_dc_channel_factory, 1));
             js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("tracingChannel", 14))},
@@ -35054,9 +35269,9 @@ extern "C" Item js_module_get(Item specifier) {
                             js_new_function((void*)js_dc_hasSubscribers, 1));
             // Channel and TracingChannel classes
             js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("Channel", 7))},
-                            js_new_function((void*)js_dc_channel_factory, 1));
+                            js_dc_channel_ctor);
             js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("TracingChannel", 14))},
-                            js_new_function((void*)js_dc_tracing_channel, 1));
+                            js_dc_tracing_channel_ctor);
             js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("default", 7))}, dc_ns);
         }
         return dc_ns;
