@@ -6,48 +6,125 @@
     <title>Lambda Editor — plain-DOM (Stage 4B)</title>
     <style>
       :root {
-        --border: #e2e8f0; --bg: #ffffff; --accent: #2563eb;
-        --text: #0f172a; --muted: #64748b;
+        --border: #e2e8f0; --bg: #ffffff; --bar: #f8fafc;
+        --accent: #2563eb; --text: #0f172a; --muted: #64748b;
       }
       * { box-sizing: border-box; }
+      html, body { height: 100%; }
       body {
         margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-        color: var(--text); background: #eef2f7;
+        color: var(--text); background: #eef2f7; overflow: hidden;
       }
-      #root { max-width: 820px; margin: 0 auto; padding: 24px; }
+      #root { height: 100vh; max-width: 900px; margin: 0 auto; }
 
-      .rdt-surface {
-        background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
-        padding: 24px 28px; outline: none; line-height: 1.6; min-height: 220px;
-        box-shadow: 0 0 24px rgba(15, 23, 42, 0.06);
+      .rdt-shell {
+        height: 100%; display: flex; flex-direction: column;
+        border-left: 1px solid var(--border); border-right: 1px solid var(--border);
+        background: var(--bg); box-shadow: 0 0 24px rgba(15, 23, 42, 0.06);
+        overflow: hidden; position: relative;
       }
+
+      .rdt-col-resizer { position: absolute; width: 7px; z-index: 7; cursor: col-resize; }
+      .rdt-col-resizer:hover { background: rgba(37, 99, 235, 0.25); }
+      .rdt-col-guide { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); z-index: 13; pointer-events: none; }
+
+      .rdt-link-popover {
+        position: absolute; z-index: 12; display: flex; align-items: center; gap: 4px;
+        background: #fff; border: 1px solid var(--border); border-radius: 8px;
+        box-shadow: 0 6px 20px rgba(15, 23, 42, 0.16); padding: 4px 6px; max-width: 360px;
+      }
+      .rdt-link-popover .rdt-link-url {
+        font-size: 13px; color: var(--accent); max-width: 240px; overflow: hidden;
+        text-overflow: ellipsis; white-space: nowrap; text-decoration: none;
+      }
+      .rdt-link-popover .rdt-link-url:hover { text-decoration: underline; }
+
+      .rdt-drag-handle {
+        position: absolute; left: 4px; width: 20px; height: 24px; z-index: 9;
+        display: flex; align-items: center; justify-content: center;
+        color: var(--muted); cursor: grab; border-radius: 4px; user-select: none; font-size: 13px;
+      }
+      .rdt-drag-handle:hover { background: #e2e8f0; color: var(--text); }
+      .rdt-drag-handle:active { cursor: grabbing; }
+      .rdt-drop-line { position: absolute; left: 10px; right: 10px; height: 2px; background: var(--accent); z-index: 9; pointer-events: none; border-radius: 1px; }
+
+      .rdt-gap-caret {
+        position: absolute; height: 3px; background: var(--accent); border-radius: 2px;
+        z-index: 8; pointer-events: none; animation: rdt-gap-blink 1.05s steps(1, end) infinite;
+      }
+      @keyframes rdt-gap-blink { 50% { opacity: 0.15; } }
+
+      .rdt-img-overlay { position: absolute; border: 1.5px solid var(--accent); box-sizing: border-box; pointer-events: none; z-index: 10; }
+      .rdt-img-handle { position: absolute; width: 10px; height: 10px; background: #fff; border: 1.5px solid var(--accent); border-radius: 2px; pointer-events: auto; }
+      .rdt-h-nw { left: -6px; top: -6px; cursor: nwse-resize; }
+      .rdt-h-ne { right: -6px; top: -6px; cursor: nesw-resize; }
+      .rdt-h-sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+      .rdt-h-se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+      .rdt-editor img { cursor: pointer; }
+
+      .rdt-toolbar {
+        flex: 0 0 auto; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+        padding: 8px 10px; background: var(--bar); border-bottom: 1px solid var(--border); z-index: 5;
+      }
+      .rdt-btn {
+        min-width: 30px; height: 30px; padding: 0 8px; border: 1px solid transparent;
+        border-radius: 6px; background: transparent; color: var(--text); font-size: 14px;
+        cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+      }
+      .rdt-btn:hover:not(:disabled) { background: #e2e8f0; }
+      .rdt-btn.is-active { background: #dbeafe; border-color: #bfdbfe; color: var(--accent); }
+      .rdt-btn:disabled { opacity: 0.4; cursor: default; }
+      .rdt-block { height: 30px; border: 1px solid var(--border); border-radius: 6px; background: #fff; padding: 0 8px; font-size: 14px; cursor: pointer; }
+      .rdt-sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
+      .rdt-color {
+        position: relative; width: 30px; height: 30px; border-radius: 6px;
+        display: inline-flex; align-items: center; justify-content: center; font-weight: 700;
+        cursor: pointer; border: 1px solid transparent; background: transparent; color: var(--text);
+      }
+      .rdt-color:hover { background: #e2e8f0; }
+
+      .rdt-emoji-wrap, .rdt-color-wrap { position: relative; display: inline-flex; }
+      .rdt-emoji-palette {
+        position: absolute; top: 34px; left: 0; z-index: 20; background: #fff;
+        border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+        padding: 8px; display: grid; grid-template-columns: repeat(10, 26px); gap: 2px;
+        width: max-content; max-height: 240px; overflow-y: auto;
+      }
+      .rdt-emoji { width: 26px; height: 26px; padding: 0; border: none; background: transparent; font-size: 17px; line-height: 1; cursor: pointer; border-radius: 5px; }
+      .rdt-emoji:hover { background: #e2e8f0; }
+      .rdt-color .rdt-a { font-weight: 700; line-height: 11px; border-bottom: 3px solid currentColor; padding-bottom: 1px; }
+      .rdt-palette {
+        position: absolute; top: 34px; left: 0; z-index: 20; background: #fff;
+        border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+        padding: 8px; display: grid; grid-template-columns: repeat(8, 18px); gap: 6px; width: max-content;
+      }
+      .rdt-swatch { width: 18px; height: 18px; border-radius: 4px; padding: 0; cursor: pointer; border: 1px solid rgba(15, 23, 42, 0.18); }
+      .rdt-swatch:hover { transform: scale(1.18); }
+      .rdt-swatch.is-current { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .rdt-palette .rdt-custom { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; margin-top: 2px; }
+      .rdt-palette .rdt-clear { grid-column: 1 / -1; height: 26px; border-radius: 5px; cursor: pointer; border: 1px solid var(--border); background: #fff; font-size: 12px; color: var(--text); }
+      .rdt-palette .rdt-clear:hover { background: #f1f5f9; }
+
+      .rdt-surface { flex: 1 1 auto; overflow-y: auto; min-height: 0; padding: 28px 32px; outline: none; line-height: 1.6; }
       .rdt-surface:focus { outline: none; }
 
       .rdt-editor h1 { font-size: 26px; margin: 0 0 14px; line-height: 1.25; }
-      .rdt-editor h2 { font-size: 19px; margin: 22px 0 10px; }
+      .rdt-editor h2 { font-size: 19px; margin: 26px 0 10px; }
+      .rdt-editor h3 { font-size: 16px; margin: 20px 0 8px; }
       .rdt-editor p { margin: 0 0 12px; }
       .rdt-editor a { color: var(--accent); }
-      .rdt-editor code {
-        background: #f1f5f9; border-radius: 4px; padding: 1px 5px;
-        font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
-      }
-      .rdt-editor blockquote {
-        margin: 12px 0; padding: 4px 16px; border-left: 4px solid #cbd5e1;
-        color: var(--muted); background: #f8fafc; border-radius: 0 6px 6px 0;
-      }
+      .rdt-editor .rdt-mention { display: inline-block; background: #e0e7ff; color: #3730a3; border-radius: 4px; padding: 0 5px; margin: 0 1px; font-weight: 500; font-size: 0.95em; white-space: nowrap; user-select: none; cursor: default; }
+      .rdt-editor code { background: #f1f5f9; border-radius: 4px; padding: 1px 5px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em; }
+      .rdt-editor blockquote { margin: 12px 0; padding: 4px 16px; border-left: 4px solid #cbd5e1; color: var(--muted); background: #f8fafc; border-radius: 0 6px 6px 0; }
       .rdt-editor ul, .rdt-editor ol { margin: 0 0 14px; padding-left: 26px; }
       .rdt-editor li { margin: 3px 0; }
-      .rdt-editor .rdt-mention {
-        display: inline-block; background: #e0e7ff; color: #3730a3;
-        border-radius: 4px; padding: 0 5px; margin: 0 1px; font-weight: 500;
-        white-space: nowrap; user-select: none; cursor: default;
-      }
+      .rdt-editor figure { margin: 12px 0; }
+      .rdt-editor img { max-width: 100%; border-radius: 8px; display: block; }
+      .rdt-editor table { border-collapse: collapse; margin: 8px 0 16px; width: 100%; }
+      .rdt-editor th, .rdt-editor td { border: 1px solid var(--border); padding: 7px 11px; text-align: left; font-size: 14px; }
+      .rdt-editor th { background: #f8fafc; font-weight: 600; }
+      .rdt-editor td.rdt-cell-selected, .rdt-editor th.rdt-cell-selected { background: #dbeafe; box-shadow: inset 0 0 0 2px var(--accent); }
       .rdt-drawing { margin: 10px 0 18px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-
-      .rdt-debug {
-        margin-top: 16px; font-size: 11px; background: #f6f6f6;
-        padding: 8px; border-radius: 6px; overflow: auto; color: var(--muted);
-      }
     </style>
   </head>
   <body>
