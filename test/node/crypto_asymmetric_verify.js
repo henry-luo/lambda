@@ -413,3 +413,72 @@ const asyncEcSignReturn = crypto.sign('sha256', Buffer.from(message), {
 });
 assert.strictEqual(asyncEcSignReturn, undefined);
 asyncEcSignAfterCall = true;
+
+let asyncRsaKeyPairAfterCall = false;
+const asyncRsaKeyPairReturn = crypto.generateKeyPair('rsa', {
+  modulusLength: 512
+}, function(err, publicKey, privateKey) {
+  assert.strictEqual(err, null);
+  assert.strictEqual(publicKey.type, 'public');
+  assert.strictEqual(privateKey.type, 'private');
+  assert.strictEqual(publicKey.asymmetricKeyType, 'rsa');
+  assert.strictEqual(privateKey.asymmetricKeyType, 'rsa');
+  assert.strictEqual(publicKey.asymmetricKeyDetails.modulusLength, 512);
+  assert.strictEqual(privateKey instanceof crypto.KeyObject, true);
+  const signature = crypto.sign('sha256', Buffer.from(message), privateKey);
+  console.log('rsa generateKeyPair async keyobjects:',
+    crypto.verify('sha256', Buffer.from(message), publicKey, signature) &&
+    asyncRsaKeyPairAfterCall);
+});
+assert.strictEqual(asyncRsaKeyPairReturn, undefined);
+asyncRsaKeyPairAfterCall = true;
+
+let asyncDsaKeyPairAfterCall = false;
+const asyncDsaKeyPairReturn = crypto.generateKeyPair('dsa', {
+  modulusLength: 2048,
+  divisorLength: 256
+}, function(err, publicKey, privateKey) {
+  assert.strictEqual(err, null);
+  assert.strictEqual(publicKey.type, 'public');
+  assert.strictEqual(privateKey.type, 'private');
+  assert.strictEqual(publicKey.asymmetricKeyType, 'dsa');
+  assert.strictEqual(privateKey.asymmetricKeyType, 'dsa');
+  assert.strictEqual(publicKey.asymmetricKeyDetails.divisorLength, 256);
+  assert.strictEqual(publicKey instanceof crypto.KeyObject, true);
+  const signature = crypto.sign('sha256', Buffer.from(message), {
+    key: privateKey,
+    dsaEncoding: 'ieee-p1363'
+  });
+  console.log('dsa generateKeyPair async keyobjects:',
+    crypto.verify('sha256', Buffer.from(message), {
+      key: publicKey,
+      dsaEncoding: 'ieee-p1363'
+    }, signature) && asyncDsaKeyPairAfterCall);
+});
+assert.strictEqual(asyncDsaKeyPairReturn, undefined);
+asyncDsaKeyPairAfterCall = true;
+
+let asyncDsaEncodedAfterCall = false;
+const asyncDsaEncodedReturn = crypto.generateKeyPair('dsa', {
+  modulusLength: 2048,
+  divisorLength: 256,
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+  privateKeyEncoding: { type: 'pkcs8', format: 'der' }
+}, function(err, publicKey, privateKey) {
+  assert.strictEqual(err, null);
+  assert.strictEqual(typeof publicKey, 'string');
+  assert.strictEqual(publicKey.includes('BEGIN PUBLIC KEY'), true);
+  assert.strictEqual(Buffer.isBuffer(privateKey), true);
+  const importedPrivate = crypto.createPrivateKey({
+    key: privateKey,
+    type: 'pkcs8',
+    format: 'der'
+  });
+  const importedPublic = crypto.createPublicKey(publicKey);
+  const signature = crypto.sign('sha256', Buffer.from(message), importedPrivate);
+  console.log('dsa generateKeyPair async encodings:',
+    crypto.verify('sha256', Buffer.from(message), importedPublic, signature) &&
+    asyncDsaEncodedAfterCall);
+});
+assert.strictEqual(asyncDsaEncodedReturn, undefined);
+asyncDsaEncodedAfterCall = true;

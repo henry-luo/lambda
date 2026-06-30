@@ -1,0 +1,5 @@
+moved message: through moved port
+original detached send: none
+duplicate port: DataCloneError:Transfer list contains duplicate MessagePort:25
+duplicate arraybuffer: DataCloneError:Transfer list contains duplicate ArrayBuffer:25
+duplicate arraybuffer byteLength: 4

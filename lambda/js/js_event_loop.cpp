@@ -1429,6 +1429,25 @@ static void drain_watchdog_cb(uv_timer_t* handle) {
     lambda_uv_stop();
 }
 
+typedef struct JsRefedHandleState {
+    bool has_refed;
+} JsRefedHandleState;
+
+static void event_loop_refed_handle_cb(uv_handle_t* h, void* arg) {
+    JsRefedHandleState* state = (JsRefedHandleState*)arg;
+    if (!state || state->has_refed || !h || uv_is_closing(h) || !uv_is_active(h)) return;
+    if (uv_has_ref(h)) state->has_refed = true;
+}
+
+extern "C" bool js_event_loop_has_refed_handles(void) {
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) return false;
+    JsRefedHandleState state;
+    state.has_refed = false;
+    uv_walk(loop, event_loop_refed_handle_cb, &state);
+    return state.has_refed;
+}
+
 // Stop and close all active interval timers so they don't keep the event
 // loop alive after drain completes or times out.
 static void stop_all_interval_timers(void) {

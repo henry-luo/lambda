@@ -166,6 +166,7 @@ Item js_typeof(Item value);         // typeof x
 Item js_new_object(void);
 Item js_property_get(Item object, Item key);
 Item js_property_set(Item object, Item key, Item value);
+Item js_using_dispose(Item resource);
 Item js_property_set_strict(Item object, Item key, Item value);
 // Tune8 §2.2: dispatcher for JIT-emitted dynamic-strict property sets.
 Item js_property_set_v(Item object, Item key, Item value, int64_t strict);
@@ -618,6 +619,7 @@ void js_register_global_var_module_bindings_bulk(const Item* keys, const int* in
 void js_batch_reset(void);
 int js_get_module_var_count(void);
 void js_batch_reset_to(int checkpoint_var_count);
+extern int js_batch_execution_mode;
 void js_dom_batch_reset(void);
 void js_globals_batch_reset(void);
 void js_reset_constructor_prototypes(void);

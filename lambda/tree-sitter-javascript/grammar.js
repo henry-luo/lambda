@@ -284,7 +284,10 @@ module.exports = grammar({
     ),
 
     lexical_declaration: $ => seq(
-      field('kind', choice('let', 'const')),
+      choice(
+        field('kind', choice('let', 'const', 'using')),
+        seq('await', field('kind', 'using')),
+      ),
       commaSep1($.variable_declarator),
       $._semicolon,
     ),

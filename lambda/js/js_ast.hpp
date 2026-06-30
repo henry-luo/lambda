@@ -353,6 +353,8 @@ typedef struct JsVariableDeclarationNode {
     JsAstNode base;
     JsAstNode* declarations;        // Variable declarators
     int kind;                       // Variable declaration kind (JsVarKind)
+    bool is_using;                  // true for explicit resource declarations
+    bool is_await_using;            // true for await using declarations
 } JsVariableDeclarationNode;
 
 // JavaScript variable declarator node

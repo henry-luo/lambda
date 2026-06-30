@@ -26,6 +26,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
 extern "C" Item js_has_own_property(Item obj, Item key);
 extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
+extern "C" Item js_symbol_well_known(Item name);
 extern "C" Item js_util_custom_promisify_args_symbol(void);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_process_emit2(Item event_name, Item arg1, Item arg2);
@@ -59,6 +60,24 @@ static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value);
 
 extern "C" void js_map_promote_descriptor_kind(Map* m) {
     if (m && m->map_kind == MAP_KIND_PLAIN) m->map_kind = MAP_KIND_DESC;
+}
+
+static Item js_runtime_make_string_item(const char* str, int len) {
+    return (Item){.item = s2it(heap_strcpy((char*)str, len))};
+}
+
+extern "C" Item js_using_dispose(Item resource) {
+    if (resource.item == 0 || resource.item == ITEM_NULL ||
+            get_type_id(resource) == LMD_TYPE_UNDEFINED) {
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    Item name = js_runtime_make_string_item("dispose", 7);
+    Item dispose_key = js_symbol_well_known(name);
+    Item dispose = js_property_get(resource, dispose_key);
+    if (get_type_id(dispose) != LMD_TYPE_FUNC) {
+        return js_throw_type_error("Object is not disposable");
+    }
+    return js_call_function(dispose, resource, NULL, 0);
 }
 
 #ifdef LAMBDA_JS_EXEC_PROFILE
@@ -33403,8 +33422,8 @@ static void js_dc_defer_transform_error(Item error) {
         return;
     }
     js_dc_deferred_errors[js_dc_deferred_error_count++] = error;
-    extern Item js_setImmediate(Item callback);
-    js_setImmediate(js_new_function((void*)js_dc_emit_deferred_error, 0));
+    extern void js_next_tick_enqueue(Item callback);
+    js_next_tick_enqueue(js_new_function((void*)js_dc_emit_deferred_error, 0));
 }
 
 // Channel.bindStore(store[, transform])
@@ -35290,6 +35309,10 @@ extern "C" void js_async_hooks_after_gc(void) {
     }
 }
 
+extern "C" void js_async_hooks_drain_destroy_queue(void) {
+    js_async_hooks_after_gc();
+}
+
 extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_len) {
     Item resource = js_new_object();
     Item type = (Item){.item = s2it(heap_create_name(type_chars, type_len))};
@@ -36177,7 +36200,7 @@ static Item js_cc_result(int status, const char* directory, const char* message)
 }
 
 extern "C" Item js_module_enable_compile_cache(Item arg) {
-    if (!js_cc_is_undefined(arg) && arg.item != ITEM_NULL &&
+    if (!js_cc_is_undefined(arg) &&
         get_type_id(arg) != LMD_TYPE_STRING && !js_cc_is_object(arg)) {
         return js_throw_invalid_arg_type("cacheDir", "string or an options object", arg);
     }
