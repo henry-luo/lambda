@@ -8,13 +8,15 @@ let MASK32 = 4294967295
 
 // Safe 32-bit addition
 pn safe_add(x: int, y: int) {
-    return band(band(x, MASK32) + band(y, MASK32), MASK32)
+    var ux: u32 = x
+    var uy: u32 = y
+    return int(ux + uy)
 }
 
-// Rotate left (32-bit) — Lambda uses 64-bit ints so must mask
+// Rotate left (32-bit)
 pn bit_rol(num: int, cnt: int) {
-    var n = band(num, MASK32)
-    return band(bor(shl(n, cnt), shr(n, 32 - cnt)), MASK32)
+    var n: u32 = num
+    return int(bor(shl(n, cnt), shr(n, 32 - cnt)))
 }
 
 // MD5 helper functions

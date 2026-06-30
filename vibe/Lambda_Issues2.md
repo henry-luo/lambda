@@ -299,27 +299,35 @@ var char_idx: int = i / CHRSZ  // explicit int annotation
 ## 12. `shl` Operates on 64-bit Integers (No 32-bit Masking)
 
 **Severity**: Wrong results in bitwise code  
-**Affected benchmarks**: crypto_sha1
+**Affected benchmarks**: crypto_sha1, crypto_md5
 
-Lambda's `shl` operates on full 64-bit integers, so left-shifting a 32-bit value can produce results exceeding 32 bits. JavaScript's `<<` implicitly truncates to 32 bits.
+**Status**: ✅ **FIXED for explicit compact integer operands**.
+
+Lambda's default `int` `shl` still operates on the wider native integer domain, so left-shifting an untyped 32-bit value can still produce results exceeding 32 bits:
 
 ```lambda
-shl(1732584193, 5)   // Lambda: 55442694176 (33+ bits)
-// JavaScript: 1732584193 << 5 → -390880736 (truncated to 32-bit signed)
+shl(1732584193, 5)     // 55442694176, type int
 ```
 
-This affects any code that rotates or shifts 32-bit values (SHA-1, MD5, CRC, etc.).
+The fixed Lambda spelling is to keep the word in an explicit compact type. With the Go-like bitwise model, `shl` preserves and truncates to the left operand width:
 
-**Workaround**: Always mask `shl` results with `band(shl(x, n), 4294967295)`.
+```lambda
+shl(1732584193u32, 5)  // 3903086624, type u32
+```
+
+That gives SHA-1/MD5-style rotate code deterministic 32-bit wrap without a manual `band(..., 4294967295)` mask:
 
 ```lambda
 pn rol(num: int, cnt: int) {
-    var n = band(num, 4294967295)
-    return band(bor(shl(n, cnt), shr(n, 32 - cnt)), 4294967295)
+    var n: u32 = num
+    return int(bor(shl(n, cnt), shr(n, 32 - cnt)))
 }
 ```
 
-**Suggestion**: Consider adding `shl32`/`shr32` variants, or a general `u32(x)` masking function.
+**Fix notes**:
+- `fn_shl_item()` routes compact integer operands through `sized_shift()`, preserving/truncating to the left operand width.
+- `test/lambda/sized_numeric_bitwise_go.ls` covers compact shift truncation (`shl(128u8, 1) -> 0u8`, `shl(1i8, 7) -> -128i8`).
+- `test/benchmark/jetstream/crypto_sha1.ls` and `test/benchmark/jetstream/crypto_md5.ls` now use `u32` rotate helpers instead of 32-bit mask workarounds.
 
 ---
 
@@ -496,7 +504,7 @@ pn show() {
 | 9 | `div` reserved word | Reserved word | 1 benchmark, minor |
 | 10 | Immutable parameters | Language design | 1 benchmark, minor |
 | 11 | Integer division returns float | Type inference | 1 benchmark, silent wrong results |
-| 12 | `shl` 64-bit overflow | Bitwise ops | 1 benchmark, wrong hash output |
+| 12 | `shl` 64-bit overflow | Bitwise ops | **Fixed for typed `u32` code**; SHA-1/MD5 rotate helpers use compact shifts |
 | 13 | `@` path literals don't parse | Missing feature | 1 benchmark, doc mismatch |
 | 14 | `slice()` no 2-argument form | Missing feature | 1 benchmark, minor |
 | 15 | No case-insensitive patterns | Missing feature | 1 benchmark, workaround needed |
