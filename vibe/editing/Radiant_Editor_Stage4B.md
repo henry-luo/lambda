@@ -120,7 +120,13 @@ Build and prove it in the browser (known-good platform, zero Radiant variables).
 | `use-editor-state.ts` — reducer driven by React | same reducer, driven by the controller |
 | `DrawingView.tsx`, `demo/*.tsx` chrome | `render.ts` drawing branch + a small `h()`-based shell |
 
-`dom-bridge.ts`, `intent-from-input-event.ts`, `intent.ts`, and all of `src/model`/`commands`/`input`/`clipboard`/`drawing` are **unchanged**. Commit-layer simplest-first (Appendix A.5): full re-render + save/restore selection first, then keyed diffing only where perf demands (typing, drag). Keep React in **parallel** (a second demo entry + build) until the plain-DOM view is green, then make it default. **Tests:** the 1838 headless cases are unaffected; rewrite the 3 `.tsx` tests against the plain-DOM view; add reconciler unit tests. **Exit:** all 1841 green on the plain-DOM view.
+`dom-bridge.ts`, `intent-from-input-event.ts`, `intent.ts`, and all of `src/model`/`commands`/`input`/`clipboard`/`drawing` are **unchanged**. Commit-layer simplest-first (Appendix A.5): full re-render + save/restore selection first, then keyed diffing only where perf demands (typing, drag). The plain-DOM view is **added alongside** React (a second demo entry + build), not a replacement. **Tests:** the headless cases are view-agnostic and unaffected; the plain-DOM view gets its own **parallel** test files (render parity, reconciler invariants, controller pipeline, full-chrome) mirroring the React `.tsx` tests. **Exit:** the full suite green with both views.
+
+### 3.2 React is retained permanently (decision)
+
+**The React reference is kept, not retired.** Originally Appendix A framed React as a temporary shell to swap out; we now keep it as a **permanent parallel target**. Rationale: Radiant is likely to gain a React host in future (a React renderer over the LambdaJS DOM), at which point the **React version becomes the test vehicle for that React support** — the same editor, same model, same fixtures, exercised through React-under-Radiant. So the three browser/engine views — React, plain-DOM (JS), and Lambda `.ls` — all coexist as long-lived targets sharing one design and one fixture corpus; none is thrown away. Concretely: the React demo entry/build and the React `.tsx` tests stay; the plain-DOM view and its tests run beside them. This costs one extra build + test lane and keeps a ready-made React conformance suite for the day Radiant can host it.
+
+> **Status (2026-06-30): plain-DOM view built, React retained.** New in `test/editor-js/src/view/`: `vnode.ts`, `render-vnode.ts`, `reconcile.ts` (keyed reconciler), `editor-view-dom.ts` (`EditorViewDom`), `editor-state.ts` (pure reducer split out of `use-editor-state.ts` so the plain-DOM graph imports no React). Full chrome: `demo/full-editor-dom.ts` (`FullEditorDom` — vanilla port of `full-editor.tsx`: toolbar, DOM-selection→source tracking, paste/copy, drag-reorder, image-resize, gap caret, link popover, table col-resize). Parallel tests `test/view/{render-vnode,reconcile,editor-view-dom,full-editor-dom}.test.ts` (38 tests). Single-file demo `demo/editor-dom.html` + `main-dom.ts` → `npm run build:page-dom` → `test/html/editor-dom.html` (no React). Suite green with React + plain-DOM in parallel; browser-verified.
 
 ### 3.2 Phase 2 — run the JS editor under Radiant
 
@@ -129,6 +135,19 @@ Radiant runs page JS via `script_runner` (retains JS state for interactive windo
 1. **`contenteditable` → input event reaches *page-JS***: confirm a `beforeinput`/`keydown` reaches a page-JS listener that can `preventDefault` it (not only the native editor). *Fallback if not: drive input from `keydown` + the intent layer — localized to `intent-from-input-event.ts`.*
 2. **`Selection` get/set fidelity** across text spans + atoms.
 3. **Caret navigation ownership**: per §1.2, the substrate moves the caret on arrow/word/line; confirm the script can *read* the result via `selectionchange`.
+
+> **Status (2026-06-30): editor LOADS and MOUNTS under Radiant; interactive editing blocked by a native runtime bug.** Headless harness: `./lambda.exe view test/html/editor-dom.html --event-file <events.json> --headless`, driven by the `event_sim` testdriver (`type`/`click`/`assert_text`). Mount verified — 4/4 asserts pass: surface (heading, marked text, lists) and full toolbar render through the LambdaJS DOM.
+>
+> **De-risk spike result (all positive, via a minimal classic-script page):** inline JS runs; `addEventListener('beforeinput')` fires and is cancelable (`preventDefault` works); `window.getSelection()` works; JS-driven DOM mutation is observed by the testdriver. So the §1 seam (beforeinput → page-JS → preventDefault → JS edits) is viable.
+>
+> **Gaps found & resolved to get the editor to mount:**
+> 1. **ES modules are not executed** by Radiant's script runner (`type="module"` → skipped). Fix: build the editor as a **classic IIFE** (`tools/build-dom-page.mjs` via Vite lib mode → inline into the HTML as a plain `<script>`; `build:page-dom` now runs it). *General constraint for any JS-under-Radiant page.*
+> 2. **`DOMParser` is undefined.** Fix: `parseHtmlToDoc` now falls back to the **`innerHTML`** setter (Radiant's HTML5 parser) when DOMParser is absent — unchanged for browsers/jsdom; no new DOM surface (§5.3).
+> 3. **`Element.attributes` / `getAttributeNames()` were missing.** Fix: added **`getAttributeNames()`** to `js_dom` (`lambda/js/js_dom.cpp`) — a minimal, faithful DOM method — and `parseHtmlToDoc` enumerates with it. *(Note: a DOM-method property read returns `true` for feature-detection under Radiant, so `typeof el.m === 'function'` misfires — call directly with a try/catch fallback.)*
+>
+> **Interactive editing: root-caused & FIXED (2026-06-30).** Typing previously crashed with a **heap-buffer-overflow in `pool_alloc` (`lib/mempool.c:303`) via `stringbuf_new`**, from a JIT builtin (template literal) inside the editor's render. **Root cause:** the JIT lowers template literals to `stringbuf_new(_lambda_rt->pool)` (`js_mir_expression_lowering.cpp` `jm_transpile_template_literal`); the global `_lambda_rt` is set during the script/module batch and *restored afterward*, so it is stale when a retained JS event handler fires in a later turn. `radiant_js_ctx_enter` (`radiant/event.cpp`) — the scope wrapping every JS DOM-event dispatch — installed a valid `context` from the document's JS runtime but **did not set `_lambda_rt`**, so a template literal in a handler dereferenced a dangling `_lambda_rt->pool`. (The earlier `+`/`Array.join` spikes passed because they don't read `_lambda_rt`; the editor's `render-vnode` uses template literals.) **Fix:** `radiant_js_ctx_enter`/`_exit` now save, set `_lambda_rt = &handler_ctx`, and restore it — mirroring the module-batch pattern. **Verified:** the editor types under Radiant (3/3 + sustained 12-turn typing); native editing event-tests still pass (keyboard/logging/clipboard/drop/IME, 25/25 across 5 files). *(Radiant baseline also shows pre-existing, unrelated failures — CSS-text layout, render-visual, and a stale `test_ui_automation_gtest.exe` not relinked by the build — none in the JS-dispatch path this change touches.)*
+>
+> **Net Phase 2 status: the plain-DOM JS editor loads, mounts, and edits text interactively under Radiant.** Remaining: broader fixture coverage and the Lambda/JS chrome interactions (toolbar commands, selection, paste) exercised under Radiant; then Phase 3 (contenteditable→flag) and beyond.
 
 ### 3.3 Phase 3 — reduce `contenteditable` to a flag; route events to script
 
@@ -152,13 +171,15 @@ Keys children by `data-source-path` (and `shape-id` for drawings) so reorder/ins
 
 ### 5.1 Phase 4 — triple-runtime parity on the shared fixtures
 
-The same fixture corpus runs in **three** runtime pipelines, all co-equal:
+The same fixture corpus runs across these runtime pipelines, all co-equal:
 
 | Pipeline | View / commit | Runs on | Role |
 |---|---|---|---|
-| JS reference | plain DOM (was React) | browser (Vite single-file) | ground truth |
+| JS reference (React) | React | browser (Vite single-file) | ground truth; **retained** as the future React-under-Radiant test vehicle (§3.2) |
+| JS reference (plain DOM) | plain DOM | browser (Vite single-file) | ground truth for the Radiant-JS path |
 | **JS under Radiant** | plain DOM | Radiant via LambdaJS `js_dom*` | shipping (JS) |
 | **Lambda under Radiant** | `view`/`edit` + `render_map` | Radiant native | shipping (Lambda) |
+| *React under Radiant* | React | Radiant via a future React host | *future* — when Radiant gains React support, the retained React version validates it (§3.2) |
 
 **Triage** each divergence to one cause: browser ✅ / Radiant-JS ❌ → **substrate/DOM gap** (fix in C++ `js_dom*`/event routing); Radiant-JS ✅ / Lambda ❌ (or vice-versa) → a **runtime-port gap** (fix in the lagging `src/` or `mod_*.ls`, keeping designs aligned); all differ from expected → a **legitimate editor difference** to record. **Retirement gate:** every behaviour the native C++ engine currently provides must have a green covering fixture under **both** Radiant runtimes before its native code is removed.
 

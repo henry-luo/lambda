@@ -4446,10 +4446,20 @@ typedef struct {
     EvalContext  handler_ctx;
     EvalContext* saved_ctx;
     Context*     saved_input_ctx;
+    Context*     saved_lambda_rt;
     DomDocument* doc;
     ArrayList*   tmp_type_list;
     bool         active;
 } JsCtxScope;
+
+// JIT-compiled JS reads the runtime pool for StringBuf allocation (template
+// literals, etc.) via the global `_lambda_rt` (see js_mir_expression_lowering
+// jm_transpile_template_literal). It is set during the script/module batch and
+// restored afterward, so it is stale when a retained JS event handler fires in
+// a later turn — a template literal in that handler would dereference a
+// dangling `_lambda_rt->pool`. The JS context scope below must point it at the
+// same handler_ctx it installs as `context`.
+extern "C" Context* _lambda_rt;
 
 static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->active = false;
@@ -4472,8 +4482,13 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->handler_ctx.type_list = s->tmp_type_list;
     s->saved_ctx = context;
     s->saved_input_ctx = input_context;
+    s->saved_lambda_rt = _lambda_rt;
     context = &s->handler_ctx;
     input_context = nullptr;
+    // JIT'd handler bodies read _lambda_rt->pool for StringBuf allocation;
+    // point it at the live handler context so template literals in a retained
+    // event handler allocate from the valid runtime pool, not a stale one.
+    _lambda_rt = (Context*)&s->handler_ctx;
     js_dom_set_document(s->doc);
     dom_js_mutation_reset_records(s->doc);
     s->active = true;
@@ -4487,6 +4502,7 @@ static void radiant_js_ctx_exit(JsCtxScope* s, EventContext* evcon,
     auto t_handler = std::chrono::high_resolution_clock::now();
     context = s->saved_ctx;
     input_context = s->saved_input_ctx;
+    _lambda_rt = s->saved_lambda_rt;
     if (s->tmp_type_list) {
         arraylist_free(s->tmp_type_list);
         s->tmp_type_list = nullptr;

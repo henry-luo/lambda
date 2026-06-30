@@ -101,11 +101,24 @@ interface ParseState {
 // Public entry — parse an HTML string
 // ---------------------------------------------------------------------------
 
+// Parse an HTML string into a container Element whose children are the parsed
+// nodes. Uses DOMParser where available (browsers, jsdom) so behaviour is
+// unchanged for every existing test; falls back to the `innerHTML` setter
+// (which Radiant's LambdaJS DOM supports, running its HTML5 fragment parser)
+// when DOMParser is absent — i.e. under Radiant. Keeps the DOM surface minimal
+// (Stage 4B §5.3): no new host API beyond the already-supported innerHTML.
+function htmlToBody(html: string): Element {
+  if (typeof DOMParser !== 'undefined') {
+    const dom = new DOMParser().parseFromString(`<!doctype html><html><body>${html}</body></html>`, 'text/html')
+    return dom.body
+  }
+  const host = document.createElement('div')
+  host.innerHTML = html
+  return host
+}
+
 export function parseHtmlToDoc(html: string, schema: Schema): ParseResult {
-  const parser = new DOMParser()
-  const wrapped = `<!doctype html><html><body>${html}</body></html>`
-  const dom = parser.parseFromString(wrapped, 'text/html')
-  const body = dom.body
+  const body = htmlToBody(html)
   const root = findDocRoot(body)
   const state: ParseState = {
     schema,
@@ -443,9 +456,20 @@ function nodeAtMutable(doc: Node, path: SourcePath): Node | null {
 
 function readAttrs(el: Element): { name: string; value: AttrValue }[] {
   const out: { name: string; value: AttrValue }[] = []
-  for (const a of Array.from(el.attributes)) {
-    if (a.name === 'data-source-path') continue  // test annotation; not source
-    out.push({ name: a.name, value: coerceAttrValue(a.value) })
+  // Enumerate via getAttributeNames() — supported in browsers, jsdom, and
+  // Radiant's LambdaJS DOM (Stage 4B). The `.attributes` NamedNodeMap is not
+  // available under Radiant, so it is only a fallback for exotic hosts. (We
+  // call directly rather than feature-detect with typeof: under Radiant a DOM
+  // method read returns `true`, not a function, so typeof would misfire.)
+  let names: string[]
+  try {
+    names = el.getAttributeNames()
+  } catch {
+    names = Array.from(el.attributes).map(a => a.name)
+  }
+  for (const name of names) {
+    if (name === 'data-source-path') continue  // test annotation; not source
+    out.push({ name, value: coerceAttrValue(el.getAttribute(name) ?? '') })
   }
   return out
 }
