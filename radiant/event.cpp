@@ -3637,6 +3637,10 @@ static void dispatch_selectionchange(EventContext* evcon, DocState* state, View*
     if (dispatch_lambda_handler(evcon, target, "selectionchange")) {
         evcon->need_repaint = true;
     }
+    // The JS `selectionchange` event is queued by the dom_range selection
+    // notifier (js_dom_queue_selectionchange) and delivered to page-JS document
+    // listeners when the event loop ticks; the headless simulator pumps it via
+    // js_event_loop_pump_nowait between events.
 }
 
 extern "C" bool radiant_dispatch_rich_composition_event(UiContext* uicon,

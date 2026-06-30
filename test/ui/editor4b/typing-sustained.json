@@ -1,0 +1,14 @@
+{
+  "name": "editor4b: sustained multi-turn typing is stable",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 60},
+    {"type": "type", "target": {"selector": ".rdt-surface"}, "text": "HelloRadiant"},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface"}, "contains": "HelloRadiant"},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface"}, "contains": "Lambda Editor"}
+  ]
+}

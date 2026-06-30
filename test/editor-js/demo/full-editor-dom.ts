@@ -64,7 +64,7 @@ function h(tag: string, props: Props = {}, children: (Node | string)[] = []): HT
     const v = props[k]
     if (v === null || v === undefined || v === false) continue
     if (k === 'class') e.className = String(v)
-    else if (k === 'title') e.title = String(v)
+    else if (k === 'title') e.setAttribute('title', String(v))   // content attr (reflects under Radiant; [title=…] selectors)
     else if (k === 'disabled') (e as HTMLButtonElement).disabled = Boolean(v)
     else if (k === 'html') e.innerHTML = String(v)
     else if (k === 'style' && typeof v === 'object') Object.assign(e.style, v as object)

@@ -1155,6 +1155,13 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             while (sim_ctx->is_running) {
                 bool running = event_sim_update(sim_ctx, &ui_context, window, current_time);
                 if (!running) break;
+                // Tick the JS event loop between sim events so deferred callbacks
+                // (setTimeout/queueMicrotask-scheduled work, e.g. the coalesced
+                // `selectionchange` dispatch) run — mirroring a real event loop
+                // ticking between user actions. Without this, page-JS never sees
+                // selection changes from native caret moves. Bounded/non-blocking
+                // so a self-rescheduling callback can't spin to the watchdog.
+                js_event_loop_pump_nowait();
                 // Advance time by event interval
                 SimEvent* ev = (sim_ctx->current_index > 0 && sim_ctx->current_index <= sim_ctx->events->length)
                     ? (SimEvent*)sim_ctx->events->data[sim_ctx->current_index - 1] : NULL;

@@ -1468,6 +1468,23 @@ extern "C" int js_await_bounded_drain(int (*predicate)(void*), void* user,
     return predicate(user) ? 0 : -1;
 }
 
+// Bounded, non-blocking pump: fire currently-ready timers and flush microtasks
+// WITHOUT blocking to the watchdog (unlike js_event_loop_drain, which runs the
+// loop to completion / watchdog). Used by the headless event simulator to
+// deliver setTimeout(0)-scheduled callbacks (e.g. the coalesced
+// `selectionchange` dispatch) between simulated events, without spinning when a
+// callback re-schedules itself.
+extern "C" void js_event_loop_pump_nowait(void) {
+    js_microtask_flush();
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) return;
+    for (int turn = 0; turn < 4; turn++) {
+        int active = uv_run(loop, UV_RUN_NOWAIT);
+        js_microtask_flush();
+        if (!active) break;
+    }
+}
+
 extern "C" int js_event_loop_drain(void) {
     // flush any synchronous microtasks first (from Promise resolutions)
     js_microtask_flush();
