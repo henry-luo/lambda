@@ -9368,6 +9368,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         if (js_exception_pending) return ItemNull;
         if (custom_tag.item != ItemNull.item) return custom_tag;
 
+        if (js_is_process_object_value(this_val)) {
+            return (Item){.item = s2it(heap_create_name("[object process]", 16))};
+        }
+
         if (get_type_id(this_val) == LMD_TYPE_MAP) {
             Map* m = this_val.map;
             if (m) {
@@ -32326,6 +32330,243 @@ static bool js_vm_read_options(Item options, const char** names, int count, JsVm
     return true;
 }
 
+static Item js_vm_throw_invalid_option_property_type(const char* name,
+                                                     const char* expected,
+                                                     Item actual) {
+    char msg[512];
+    int pos = snprintf(msg, sizeof(msg),
+        "The \"%s\" property must be of type %s.", name, expected);
+    if (pos < 0) pos = 0;
+    if (pos >= (int)sizeof(msg)) pos = (int)sizeof(msg) - 1;
+    js_format_invalid_arg_received(msg + pos, (int)sizeof(msg) - pos, actual);
+    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+}
+
+static bool js_vm_is_options_object(Item options) {
+    TypeId type = get_type_id(options);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+}
+
+static bool js_vm_is_undefined_item(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_UNDEFINED || value.item == ITEM_JS_UNDEFINED || value.item == 0;
+}
+
+static bool js_vm_is_number_item(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT;
+}
+
+static bool js_vm_validate_options_object(Item options) {
+    if (js_vm_is_undefined_item(options)) return true;
+    if (js_vm_is_options_object(options)) return true;
+    js_throw_invalid_arg_type("options", "object", options);
+    return false;
+}
+
+static bool js_vm_validate_string_option(Item options, const char* key_name,
+                                         int key_len, const char* display_name) {
+    if (!js_vm_is_options_object(options)) return true;
+    Item key = (Item){.item = s2it(heap_create_name(key_name, key_len))};
+    Item value = js_property_get(options, key);
+    if (js_check_exception()) return false;
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_UNDEFINED || value.item == ITEM_JS_UNDEFINED) return true;
+    if (type == LMD_TYPE_STRING) return true;
+    js_vm_throw_invalid_option_property_type(display_name, "string", value);
+    return false;
+}
+
+static bool js_vm_validate_create_context_options(Item options) {
+    if (!js_vm_validate_options_object(options)) return false;
+    if (!js_vm_validate_string_option(options, "name", 4, "options.name")) return false;
+    if (!js_vm_validate_string_option(options, "origin", 6, "options.origin")) return false;
+    return true;
+}
+
+static bool js_vm_validate_run_context_options(Item options) {
+    if (!js_vm_validate_string_option(options, "contextName", 11, "options.contextName")) return false;
+    if (!js_vm_validate_string_option(options, "contextOrigin", 13, "options.contextOrigin")) return false;
+    return true;
+}
+
+static Item js_vm_throw_invalid_arg_instance(const char* name, const char* expected, Item actual) {
+    char msg[512];
+    int pos = snprintf(msg, sizeof(msg),
+        "The \"%s\" argument must be an instance of %s.", name, expected);
+    if (pos < 0) pos = 0;
+    if (pos >= (int)sizeof(msg)) pos = (int)sizeof(msg) - 1;
+    js_format_invalid_arg_received(msg + pos, (int)sizeof(msg) - pos, actual);
+    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+}
+
+static Item js_vm_throw_invalid_option_property_instance(const char* name,
+                                                        const char* expected,
+                                                        Item actual) {
+    char msg[512];
+    int pos = snprintf(msg, sizeof(msg),
+        "The \"%s\" property must be an instance of %s.", name, expected);
+    if (pos < 0) pos = 0;
+    if (pos >= (int)sizeof(msg)) pos = (int)sizeof(msg) - 1;
+    js_format_invalid_arg_received(msg + pos, (int)sizeof(msg) - pos, actual);
+    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+}
+
+static bool js_vm_is_context_item(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    Item marker = js_property_get(value, (Item){.item = s2it(heap_create_name("__vmContext", 11))});
+    if (js_check_exception()) return false;
+    return get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker);
+}
+
+static bool js_vm_is_cached_data_item(Item value) {
+    if (js_is_typed_array(value) || js_is_dataview(value)) return true;
+    return false;
+}
+
+static bool js_vm_validate_compile_function_options(Item options) {
+    if (!js_vm_validate_options_object(options)) return false;
+    if (!js_vm_is_options_object(options)) return true;
+
+    Item filename = js_property_get(options, (Item){.item = s2it(heap_create_name("filename", 8))});
+    if (js_check_exception()) return false;
+    if (!js_vm_is_undefined_item(filename) && get_type_id(filename) != LMD_TYPE_STRING) {
+        js_vm_throw_invalid_option_property_type("options.filename", "string", filename);
+        return false;
+    }
+
+    Item column = js_property_get(options, (Item){.item = s2it(heap_create_name("columnOffset", 12))});
+    if (js_check_exception()) return false;
+    if (!js_vm_is_undefined_item(column) && !js_vm_is_number_item(column)) {
+        js_vm_throw_invalid_option_property_type("options.columnOffset", "number", column);
+        return false;
+    }
+
+    Item line = js_property_get(options, (Item){.item = s2it(heap_create_name("lineOffset", 10))});
+    if (js_check_exception()) return false;
+    if (!js_vm_is_undefined_item(line) && !js_vm_is_number_item(line)) {
+        js_vm_throw_invalid_option_property_type("options.lineOffset", "number", line);
+        return false;
+    }
+
+    Item cached_data = js_property_get(options, (Item){.item = s2it(heap_create_name("cachedData", 10))});
+    if (js_check_exception()) return false;
+    if (!js_vm_is_undefined_item(cached_data) && !js_vm_is_cached_data_item(cached_data)) {
+        js_vm_throw_invalid_option_property_instance("options.cachedData", "Buffer, TypedArray, or DataView", cached_data);
+        return false;
+    }
+
+    Item produce = js_property_get(options, (Item){.item = s2it(heap_create_name("produceCachedData", 17))});
+    if (js_check_exception()) return false;
+    if (!js_vm_is_undefined_item(produce) && get_type_id(produce) != LMD_TYPE_BOOL) {
+        js_vm_throw_invalid_option_property_type("options.produceCachedData", "boolean", produce);
+        return false;
+    }
+
+    Item parsing_context = js_property_get(options, (Item){.item = s2it(heap_create_name("parsingContext", 14))});
+    if (js_check_exception()) return false;
+    if (!js_vm_is_undefined_item(parsing_context) && !js_vm_is_context_item(parsing_context)) {
+        js_vm_throw_invalid_option_property_instance("options.parsingContext", "Context", parsing_context);
+        return false;
+    }
+
+    Item context_extensions = js_property_get(options, (Item){.item = s2it(heap_create_name("contextExtensions", 17))});
+    if (js_check_exception()) return false;
+    if (!js_vm_is_undefined_item(context_extensions)) {
+        if (get_type_id(context_extensions) != LMD_TYPE_ARRAY) {
+            js_vm_throw_invalid_option_property_instance("options.contextExtensions", "Array", context_extensions);
+            return false;
+        }
+        int64_t length = js_array_length(context_extensions);
+        for (int64_t i = 0; i < length; i++) {
+            Item extension = js_array_get_int(context_extensions, i);
+            if (!js_vm_is_options_object(extension)) {
+                char prop_name[64];
+                snprintf(prop_name, sizeof(prop_name), "options.contextExtensions[%lld]", (long long)i);
+                js_vm_throw_invalid_option_property_type(prop_name, "object", extension);
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+static bool js_vm_function_body_has_unmatched_close_brace(String* body) {
+    if (!body) return false;
+    int brace_depth = 0;
+    bool in_sq = false;
+    bool in_dq = false;
+    bool in_tpl = false;
+    bool in_line_comment = false;
+    bool in_block_comment = false;
+    bool escaped = false;
+    const char* src = body->chars;
+    int len = (int)body->len;
+    for (int i = 0; i < len; i++) {
+        char ch = src[i];
+        char next = (i + 1 < len) ? src[i + 1] : 0;
+        if (in_line_comment) {
+            if (ch == '\n' || ch == '\r') in_line_comment = false;
+            continue;
+        }
+        if (in_block_comment) {
+            if (ch == '*' && next == '/') {
+                in_block_comment = false;
+                i++;
+            }
+            continue;
+        }
+        if (in_sq || in_dq || in_tpl) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (ch == '\\') {
+                escaped = true;
+                continue;
+            }
+            if ((in_sq && ch == '\'') || (in_dq && ch == '"') || (in_tpl && ch == '`')) {
+                in_sq = false;
+                in_dq = false;
+                in_tpl = false;
+            }
+            continue;
+        }
+        if (ch == '/' && next == '/') {
+            in_line_comment = true;
+            i++;
+            continue;
+        }
+        if (ch == '/' && next == '*') {
+            in_block_comment = true;
+            i++;
+            continue;
+        }
+        if (ch == '\'') {
+            in_sq = true;
+            continue;
+        }
+        if (ch == '"') {
+            in_dq = true;
+            continue;
+        }
+        if (ch == '`') {
+            in_tpl = true;
+            continue;
+        }
+        if (ch == '{') {
+            brace_depth++;
+            continue;
+        }
+        if (ch == '}') {
+            if (brace_depth == 0) return true;
+            brace_depth--;
+        }
+    }
+    return false;
+}
+
 static uint64_t js_vm_cache_hash_bytes(const char* data, int len) {
     uint64_t hash = 1469598103934665603ULL;
     for (int i = 0; i < len; i++) {
@@ -32473,8 +32714,9 @@ static Item js_vm_contextify(Item sandbox) {
 }
 
 // vm.createContext(sandbox) — returns sandbox (or new object) marked as a "context"
-static Item js_vm_createContext(Item sandbox) {
+static Item js_vm_createContext(Item sandbox, Item options) {
     extern Item js_throw_type_error_code(const char* code, const char* msg);
+    if (!js_vm_validate_create_context_options(options)) return ItemNull;
     // If no sandbox provided, create a new empty object
     TypeId t = get_type_id(sandbox);
     if (t == LMD_TYPE_STRING || t == LMD_TYPE_INT || t == LMD_TYPE_FLOAT ||
@@ -32524,6 +32766,7 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox, Item options) {
     const char* names[] = {"breakOnSigint", "timeout", "displayErrors", "filename", "lineOffset", "columnOffset"};
     JsVmEvalOptions eval_options;
     if (!js_vm_read_options(options, names, 6, &eval_options)) return ItemNull;
+    if (!js_vm_validate_run_context_options(options)) return ItemNull;
 
     sandbox = js_vm_contextify(sandbox);
 
@@ -32562,40 +32805,96 @@ static Item js_vm_runInNewContext(Item code, Item sandbox, Item options) {
 
 // vm.compileFunction(code, params, options) — compile a function from string
 // Returns a function object
-static Item js_vm_compileFunction(Item code, Item params) {
+static Item js_vm_compileFunction(Item code, Item params, Item options) {
     // Build Function constructor args: params..., body
     // For simplicity, wrap in Function() call via eval
-    if (get_type_id(code) != LMD_TYPE_STRING) return ItemNull;
+    if (get_type_id(code) != LMD_TYPE_STRING) {
+        js_throw_invalid_arg_type("code", "string", code);
+        return ItemNull;
+    }
+    if (!js_vm_is_undefined_item(params) && get_type_id(params) != LMD_TYPE_ARRAY) {
+        js_vm_throw_invalid_arg_instance("params", "Array", params);
+        return ItemNull;
+    }
+    if (!js_vm_validate_compile_function_options(options)) return ItemNull;
     String* code_str = it2s(code);
+    if (js_vm_function_body_has_unmatched_close_brace(code_str)) {
+        js_throw_syntax_error((Item){.item = s2it(heap_create_name("Unexpected token '}'", 20))});
+        return ItemNull;
+    }
+    Item context_extensions = (Item){.item = ITEM_JS_UNDEFINED};
+    int extension_count = 0;
+    if (js_vm_is_options_object(options)) {
+        context_extensions = js_property_get(options, (Item){.item = s2it(heap_create_name("contextExtensions", 17))});
+        if (js_check_exception()) return ItemNull;
+        if (get_type_id(context_extensions) == LMD_TYPE_ARRAY) {
+            int64_t length = js_array_length(context_extensions);
+            extension_count = length > 16 ? 16 : (int)length;
+        }
+    }
 
     // If params array provided, build "function(p1,p2,...) { body }" string
     // For now, just wrap body as a function with no params
-    size_t bufsz = code_str->len + 256;
-    char* buf = (char*)mem_alloc(bufsz, MEM_CAT_TEMP);
-    memset(buf, 0, bufsz);
-    if (params.item != 0 && params.item != ITEM_NULL && params.item != ITEM_UNDEFINED) {
+    StrBuf* eval_buf = strbuf_new();
+    StrBuf* display_buf = strbuf_new();
+    Item extension_keys[16];
+    memset(extension_keys, 0, sizeof(extension_keys));
+    Item global_obj = js_get_global_this();
+    static int vm_compile_extension_counter = 0;
+    for (int i = 0; i < extension_count; i++) {
+        char ext_name[64];
+        int ext_len = snprintf(ext_name, sizeof(ext_name),
+            "__vm_compile_context_ext_%d_%d", vm_compile_extension_counter++, i);
+        Item ext_key = (Item){.item = s2it(heap_create_name(ext_name, ext_len))};
+        extension_keys[i] = ext_key;
+        Item ext_obj = js_array_get_int(context_extensions, i);
+        js_property_set(global_obj, ext_key, ext_obj);
+        strbuf_append_str_n(eval_buf, "with(", 5);
+        strbuf_append_str_n(eval_buf, ext_name, ext_len);
+        strbuf_append_str_n(eval_buf, "){", 2);
+    }
+    strbuf_append_str_n(eval_buf, "(function(", 10);
+    strbuf_append_str_n(display_buf, "function (", 10);
+    if (!js_vm_is_undefined_item(params)) {
         // Extract param names from array
         int nparams = (int)js_array_length(params);
-        int off = 0;
-        off += snprintf(buf + off, bufsz - off, "(function(");
         for (int i = 0; i < nparams; i++) {
-            if (i > 0) off += snprintf(buf + off, bufsz - off, ",");
+            if (i > 0) {
+                strbuf_append_str_n(eval_buf, ",", 1);
+                strbuf_append_str_n(display_buf, ", ", 2);
+            }
             Item p = js_array_get_int(params, i);
             if (get_type_id(p) == LMD_TYPE_STRING) {
                 String* ps = it2s(p);
-                memcpy(buf + off, ps->chars, ps->len);
-                off += (int)ps->len;
+                strbuf_append_str_n(eval_buf, ps->chars, ps->len);
+                strbuf_append_str_n(display_buf, ps->chars, ps->len);
             }
         }
-        off += snprintf(buf + off, bufsz - off, "){");
-        memcpy(buf + off, code_str->chars, code_str->len);
-        off += (int)code_str->len;
-        snprintf(buf + off, bufsz - off, "})");
-    } else {
-        snprintf(buf, bufsz, "(function(){%.*s})", (int)code_str->len, code_str->chars);
     }
-    Item eval_code = (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
-    return js_builtin_eval(eval_code, 1);
+    strbuf_append_str_n(eval_buf, "){", 2);
+    strbuf_append_str_n(eval_buf, code_str->chars, code_str->len);
+    strbuf_append_str_n(eval_buf, "})", 2);
+    for (int i = 0; i < extension_count; i++) {
+        strbuf_append_str_n(eval_buf, "}", 1);
+    }
+    strbuf_append_str_n(display_buf, ") {\n", 4);
+    strbuf_append_str_n(display_buf, code_str->chars, code_str->len);
+    strbuf_append_str_n(display_buf, "\n}", 2);
+
+    Item eval_code = (Item){.item = s2it(heap_create_name(eval_buf->str, eval_buf->length))};
+    String* display_source = heap_create_name(display_buf->str, display_buf->length);
+    strbuf_free(eval_buf);
+    strbuf_free(display_buf);
+
+    Item result = js_builtin_eval(eval_code, 1);
+    for (int i = extension_count - 1; i >= 0; i--) {
+        js_delete_property(global_obj, extension_keys[i]);
+    }
+    if (get_type_id(result) == LMD_TYPE_FUNC) {
+        JsFunction* fn = (JsFunction*)result.function;
+        fn->source_text = display_source;
+    }
+    return result;
 }
 
 static Item js_vm_Script_createCachedData(void) {
@@ -35148,7 +35447,7 @@ extern "C" Item js_get_vm_namespace(void) {
         heap_register_gc_root(&vm_ns.item);
 
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("createContext", 13))},
-                        js_new_function((void*)js_vm_createContext, 1));
+                        js_new_function((void*)js_vm_createContext, 2));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("isContext", 9))},
                         js_new_function((void*)js_vm_isContext, 1));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("runInThisContext", 16))},
@@ -35158,7 +35457,7 @@ extern "C" Item js_get_vm_namespace(void) {
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("runInNewContext", 15))},
                         js_new_function((void*)js_vm_runInNewContext, 3));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("compileFunction", 15))},
-                        js_new_function((void*)js_vm_compileFunction, 2));
+                        js_new_function((void*)js_vm_compileFunction, 3));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("Script", 6))},
                         js_new_function((void*)js_vm_Script_constructor, 2));
         js_property_set(vm_ns, (Item){.item = s2it(heap_create_name("createScript", 12))},
@@ -35958,6 +36257,13 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 11 && memcmp(spec->chars, "node:assert", 11) == 0)) {
         extern Item js_get_assert_namespace(void);
         return js_get_assert_namespace();
+    }
+    // internal/errors — Node's internal coded-error constructors used by
+    // assert internals and test shims.
+    if ((spec->len == 15 && memcmp(spec->chars, "internal/errors", 15) == 0) ||
+        (spec->len == 18 && memcmp(spec->chars, "internal/errors.js", 18) == 0)) {
+        extern Item js_get_internal_errors_namespace(void);
+        return js_get_internal_errors_namespace();
     }
     // assert/strict, node:assert/strict — same as assert (always strict in our impl)
     if ((spec->len == 13 && memcmp(spec->chars, "assert/strict", 13) == 0) ||

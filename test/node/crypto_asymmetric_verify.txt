@@ -16,6 +16,7 @@ rsa keyobject export instanceof: true
 rsa generateKeyPairSync keyobjects: true
 rsa generateKeyPairSync pss: true
 rsa generateKeyPairSync 512 keyobjects: true
+rsa generateKeyPairSync 512 sign verify: true
 ec keyobject p1363 sign verify: true
 ed25519 keyobject sign verify: true
 ed448 keyobject sign verify: true

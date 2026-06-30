@@ -48,6 +48,7 @@ static Item assert_make_string_n(const char* str, size_t len) {
 }
 
 static Item assert_namespace = {0};
+static Item internal_errors_namespace = {0};
 static Item assert_options_key = {0};
 static Item assert_diff_key = {0};
 
@@ -229,6 +230,93 @@ static bool js_assert_prototypes_differ(Item actual, Item expected) {
 static Item js_assert_throw_missing_actual_expected(void) {
     return js_throw_type_error_code(JS_ERR_MISSING_ARGS,
         "The \"actual\" and \"expected\" arguments must be specified");
+}
+
+static void js_internal_errors_append_item(StrBuf* sb, Item value) {
+    TypeId type = get_type_id(value);
+    char buf[128];
+    if (type == LMD_TYPE_INT) {
+        snprintf(buf, sizeof(buf), "%lld", (long long)it2i(value));
+        strbuf_append_str(sb, buf);
+        return;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        snprintf(buf, sizeof(buf), "%.15g", it2d(value));
+        strbuf_append_str(sb, buf);
+        return;
+    }
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(value);
+        if (s) strbuf_append_str_n(sb, s->chars, s->len);
+        return;
+    }
+    extern Item js_to_string(Item value);
+    Item text = js_to_string(value);
+    if (get_type_id(text) == LMD_TYPE_STRING) {
+        String* s = it2s(text);
+        if (s) strbuf_append_str_n(sb, s->chars, s->len);
+    }
+}
+
+static Item js_internal_errors_make_range_error(Item message) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    Item error = js_new_error_with_name(assert_make_string("RangeError"), message);
+    js_property_set(error, assert_make_string("code"), assert_make_string(JS_ERR_OUT_OF_RANGE));
+    return error;
+}
+
+extern "C" Item js_internal_errors_ERR_OUT_OF_RANGE_ctor(Item name, Item range, Item actual) {
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, "The value of \"");
+    js_internal_errors_append_item(sb, name);
+    strbuf_append_str(sb, "\" is out of range. It must be ");
+    js_internal_errors_append_item(sb, range);
+    strbuf_append_str(sb, ". Received ");
+    js_internal_errors_append_item(sb, actual);
+    Item message = assert_make_string_n(sb->str, sb->length);
+    strbuf_free(sb);
+    return js_internal_errors_make_range_error(message);
+}
+
+extern "C" Item js_internal_errors_identity(Item value) {
+    return value;
+}
+
+extern "C" Item js_internal_errors_true(void) {
+    return (Item){.item = ITEM_TRUE};
+}
+
+static void js_internal_errors_set_code(Item codes, const char* name, void* ctor_ptr, int param_count) {
+    Item fn = js_new_function(ctor_ptr, param_count);
+
+    Item range_ctor = js_get_constructor(assert_make_string("RangeError"));
+    Item range_proto = js_property_get(range_ctor, assert_make_string("prototype"));
+    Item proto = js_object_create(range_proto);
+    js_property_set(proto, assert_make_string("constructor"), fn);
+    js_property_set(fn, assert_make_string("prototype"), proto);
+
+    js_property_set(codes, assert_make_string(name), fn);
+}
+
+extern "C" Item js_get_internal_errors_namespace(void) {
+    if (internal_errors_namespace.item != 0) return internal_errors_namespace;
+
+    internal_errors_namespace = js_new_object();
+    heap_register_gc_root(&internal_errors_namespace.item);
+
+    Item codes = js_new_object();
+    js_internal_errors_set_code(codes, JS_ERR_OUT_OF_RANGE,
+        (void*)js_internal_errors_ERR_OUT_OF_RANGE_ctor, 3);
+    js_property_set(internal_errors_namespace, assert_make_string("codes"), codes);
+
+    js_property_set(internal_errors_namespace, assert_make_string("hideStackFrames"),
+        js_new_function((void*)js_internal_errors_identity, 1));
+    js_property_set(internal_errors_namespace, assert_make_string("hideInternalStackFrames"),
+        js_new_function((void*)js_internal_errors_identity, 1));
+    js_property_set(internal_errors_namespace, assert_make_string("isErrorStackTraceLimitWritable"),
+        js_new_function((void*)js_internal_errors_true, 0));
+    js_property_set(internal_errors_namespace, assert_make_string("default"), internal_errors_namespace);
+    return internal_errors_namespace;
 }
 
 // helper: throw AssertionError with full Node.js properties
@@ -1756,6 +1844,7 @@ extern "C" Item js_get_assert_namespace(void) {
 
 extern "C" void js_assert_reset(void) {
     assert_namespace = (Item){0};
+    internal_errors_namespace = (Item){0};
 }
 
 // =============================================================================

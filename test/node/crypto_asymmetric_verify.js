@@ -203,6 +203,14 @@ assert.strictEqual(generatedSmall.publicKey.asymmetricKeyDetails.modulusLength, 
 assert.strictEqual(generatedSmall.privateKey.asymmetricKeyDetails.publicExponent.toString(), '65537');
 console.log('rsa generateKeyPairSync 512 keyobjects:', true);
 
+const generatedSmallSignature = crypto.createSign('sha256')
+  .update(message)
+  .sign(generatedSmall.privateKey);
+assert.strictEqual(crypto.createVerify('sha256')
+  .update(message)
+  .verify(generatedSmall.publicKey, generatedSmallSignature), true);
+console.log('rsa generateKeyPairSync 512 sign verify:', true);
+
 const ecPrivateKey = [
   '-----BEGIN PRIVATE KEY-----',
   'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgDxBsPQPIgMuMyQbx',
