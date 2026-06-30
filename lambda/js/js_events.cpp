@@ -55,6 +55,7 @@ static void ensure_keys() {
 
 extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
+extern "C" int js_domain_emit_current_error(Item error);
 
 static bool is_listener_record(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
@@ -273,6 +274,9 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
                     is_error = true;
                 }
                 if (is_error) {
+                    if (js_domain_emit_current_error(err_arg)) {
+                        return (Item){.item = b2it(true)};
+                    }
                     // Error instance: throw directly
                     js_throw_value(err_arg);
                 } else {

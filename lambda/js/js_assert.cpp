@@ -18,6 +18,7 @@
 
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
@@ -27,6 +28,7 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item);
 extern "C" Item js_util_isDeepStrictEqual(Item a, Item b);
 extern "C" Item js_get_this(void);
 extern "C" Item js_new_method_function(void* func_ptr, int param_count);
+extern "C" Item js_process_set_exitCode(Item code_item);
 
 static void js_assert_append_inspected_value(StrBuf* sb, Item value);
 
@@ -1740,6 +1742,9 @@ extern "C" void js_assert_reset(void) {
 static Item node_test_namespace = {0};
 static Item g_node_before_each_store = {0};
 static Item g_node_after_each_store = {0};
+static int g_node_test_total_count = 0;
+static int g_node_test_pass_count = 0;
+static int g_node_test_fail_count = 0;
 
 #define MAX_NODE_TEST_HOOKS 64
 static Item g_node_before_each_hooks[MAX_NODE_TEST_HOOKS];
@@ -2008,6 +2013,36 @@ static bool node_test_is_promise_like(Item value) {
     return get_type_id(then) == LMD_TYPE_FUNC;
 }
 
+static void node_test_note_failure(void) {
+    g_node_test_fail_count++;
+    js_process_set_exitCode((Item){.item = i2it(1)});
+}
+
+extern "C" void js_node_test_reset_counts(void) {
+    g_node_test_total_count = 0;
+    g_node_test_pass_count = 0;
+    g_node_test_fail_count = 0;
+}
+
+extern "C" int js_node_test_total_count(void) {
+    return g_node_test_total_count;
+}
+
+extern "C" int js_node_test_pass_count(void) {
+    return g_node_test_pass_count;
+}
+
+extern "C" int js_node_test_fail_count(void) {
+    return g_node_test_fail_count;
+}
+
+static int node_test_current_worker_id(void) {
+    const char* worker_id = getenv("NODE_TEST_WORKER_ID");
+    if (!worker_id || !worker_id[0]) return 1;
+    int id = atoi(worker_id);
+    return id > 0 ? id : 1;
+}
+
 // Build a test context (t) passed to test callbacks
 static Item js_build_test_context(void) {
     Item t = js_new_object();
@@ -2042,6 +2077,10 @@ static Item js_build_test_context(void) {
 
     // t.name — filled in later
     js_property_set(t, assert_make_string("name"), make_js_undefined());
+
+    // t.workerId — mirrors NODE_TEST_WORKER_ID for process-isolated test files.
+    js_property_set(t, assert_make_string("workerId"),
+                    (Item){.item = i2it(node_test_current_worker_id())});
 
     // t.signal — an AbortSignal stub
     js_property_set(t, assert_make_string("signal"), make_js_undefined());
@@ -2085,6 +2124,8 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
         return make_js_undefined();
     }
 
+    g_node_test_total_count++;
+
     // create test context with t.mock, t.assert, t.skip, etc.
     Item t = js_build_test_context();
 
@@ -2127,7 +2168,10 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
     }
 
     if (callback_threw) {
-        js_throw_value(callback_error);
+        (void)callback_error;
+        node_test_note_failure();
+    } else {
+        g_node_test_pass_count++;
     }
 
     return make_js_undefined();
@@ -2198,13 +2242,13 @@ extern "C" Item js_node_test_after_each(Item fn, Item options) {
 extern "C" Item js_get_node_test_namespace(void) {
     if (node_test_namespace.item != 0) return node_test_namespace;
 
-    node_test_namespace = js_new_object();
+    Item test_fn = js_new_function((void*)js_node_test_run, 3);
+    node_test_namespace = test_fn;
     node_test_ensure_hook_stores();
 
-    Item test_fn = js_new_function((void*)js_node_test_run, 3);
     // test is both the default export and a named export
     js_property_set(node_test_namespace, assert_make_string("test"), test_fn);
-    js_property_set(node_test_namespace, assert_make_string("default"), node_test_namespace);
+    js_property_set(node_test_namespace, assert_make_string("default"), test_fn);
 
     Item describe_fn = js_new_function((void*)js_node_test_describe, 3);
     js_property_set(node_test_namespace, assert_make_string("describe"), describe_fn);
@@ -2242,4 +2286,5 @@ extern "C" void js_node_test_reset(void) {
     g_node_after_each_store = (Item){0};
     g_node_before_each_count = 0;
     g_node_after_each_count = 0;
+    js_node_test_reset_counts();
 }

@@ -9,6 +9,7 @@
 #include "js_runtime.h"
 #include "js_event_loop.h"
 #include "js_class.h"
+#include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -17,17 +18,15 @@
 #include "../serve/tls_handler.hpp"
 
 #include <cstring>
+#include <cstdlib>
+#include <cstdio>
 
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" Item js_get_net_namespace(void);
 extern "C" Item js_buffer_from_bytes(const char* data, int len);
 extern "C" int64_t js_array_length(Item array);
 extern "C" Item js_array_get_int(Item array, int64_t index);
-extern "C" bool js_is_typed_array(Item val);
-extern "C" bool js_is_arraybuffer(Item val);
-extern "C" bool js_is_dataview(Item val);
-extern "C" void* js_typed_array_current_data_ptr(Item ta_item);
-extern "C" int js_typed_array_byte_length(Item ta_item);
+extern "C" void heap_register_gc_root(uint64_t* slot);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -180,6 +179,258 @@ static const char* item_to_cstr(Item val, char* buf, int buf_size) {
     memcpy(buf, s->chars, len);
     buf[len] = '\0';
     return buf;
+}
+
+static bool tls_string_equals_lit(Item value, const char* lit) {
+    if (get_type_id(value) != LMD_TYPE_STRING || !lit) return false;
+    String* s = it2s(value);
+    int len = (int)strlen(lit);
+    return s && s->len == (uint64_t)len && memcmp(s->chars, lit, (size_t)len) == 0;
+}
+
+static bool tls_string_items_equal(Item a, Item b) {
+    if (get_type_id(a) != LMD_TYPE_STRING || get_type_id(b) != LMD_TYPE_STRING) return false;
+    String* as = it2s(a);
+    String* bs = it2s(b);
+    return as && bs && as->len == bs->len && memcmp(as->chars, bs->chars, (size_t)as->len) == 0;
+}
+
+static bool tls_array_includes_string(Item array, Item value) {
+    if (get_type_id(array) != LMD_TYPE_ARRAY) return false;
+    int64_t len = js_array_length(array);
+    for (int64_t i = 0; i < len; i++) {
+        if (tls_string_items_equal(js_array_get_int(array, i), value)) return true;
+    }
+    return false;
+}
+
+static bool tls_item_to_cert_string(Item value, Item* out) {
+    if (!out) return false;
+    if (get_type_id(value) == LMD_TYPE_STRING) {
+        *out = value;
+        return true;
+    }
+    if (js_is_typed_array(value)) {
+        int len = js_typed_array_byte_length(value);
+        void* data = js_typed_array_current_data_ptr(value);
+        if (len < 0 || (len > 0 && !data)) return false;
+        *out = make_string_item((const char*)data, len);
+        return true;
+    }
+    if (js_is_dataview(value)) {
+        JsDataView* dv = js_get_dataview_ptr(value);
+        if (!dv || !dv->buffer || dv->buffer->detached) return false;
+        if (dv->buffer->byte_length < dv->byte_offset) return false;
+        int len = dv->length_tracking ? dv->buffer->byte_length - dv->byte_offset : dv->byte_length;
+        if (len < 0 || dv->buffer->byte_length < (int64_t)dv->byte_offset + (int64_t)len) return false;
+        const char* data = (const char*)dv->buffer->data + dv->byte_offset;
+        *out = make_string_item(data, len);
+        return true;
+    }
+    return false;
+}
+
+static const char* tls_builtin_root_certificate =
+"-----BEGIN CERTIFICATE-----\n"
+"MIIDlDCCAnygAwIBAgIUSrFsjf1qfQ0t/KvfnEsOksatAikwDQYJKoZIhvcNAQEL\n"
+"BQAwejELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQswCQYDVQQHDAJTRjEPMA0G\n"
+"A1UECgwGSm95ZW50MRAwDgYDVQQLDAdOb2RlLmpzMQwwCgYDVQQDDANjYTExIDAe\n"
+"BgkqhkiG9w0BCQEWEXJ5QHRpbnljbG91ZHMub3JnMCAXDTIyMDkwMzIxNDAzN1oY\n"
+"DzIyOTYwNjE3MjE0MDM3WjB6MQswCQYDVQQGEwJVUzELMAkGA1UECAwCQ0ExCzAJ\n"
+"BgNVBAcMAlNGMQ8wDQYDVQQKDAZKb3llbnQxEDAOBgNVBAsMB05vZGUuanMxDDAK\n"
+"BgNVBAMMA2NhMTEgMB4GCSqGSIb3DQEJARYRcnlAdGlueWNsb3Vkcy5vcmcwggEi\n"
+"MA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDNvf4OGGep+ak+4DNjbuNgy0S/\n"
+"AZPxahEFp4gpbcvsi9YLOPZ31qpilQeQf7d27scIZ02Qx1YBAzljxELB8H/ZxuYS\n"
+"cQK0s+DNP22xhmgwMWznO7TezkHP5ujN2UkbfbUpfUxGFgncXeZf9wR7yFWppeHi\n"
+"RWNBOgsvY7sTrS12kXjWGjqntF7xcEDHc7h+KyF6ZjVJZJCnP6pJEQ+rUjd51eCZ\n"
+"Xt4WjowLnQiCS1VKzXiP83a++Ma1BKKkUitTR112/Uwd5eGoiByhmLzb/BhxnHJN\n"
+"07GXjhlMItZRm/jfbZsx1mwnNOO3tx4r08l+DaqkinIadvazs+1ugCaKQn8xAgMB\n"
+"AAGjEDAOMAwGA1UdEwQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBAFqG0RXURDam\n"
+"56x5accdg9sY5zEGP5VQhkK3ZDc2NyNNa25rwvrjCpO+e0OSwKAmm4aX6iIf2woY\n"
+"wF2f9swWYzxn9CG4fDlUA8itwlnHxupeL4fGMTYb72vf31plUXyBySRsTwHwBloc\n"
+"F7KvAZpYYKN9EMH1S/267By6H2I33BT/Ethv//n8dSfmuCurR1kYRaiOC4PVeyFk\n"
+"B3sj8TtolrN0y/nToWUhmKiaVFnDx3odQ00yhmxR3t21iB7yDkko6D8Vf2dVC4j/\n"
+"YYBVprXGlTP/hiYRLDoP20xKOYznx5cvHPJ9p+lVcOZUJsJj/Iy750+2n5UiBmXt\n"
+"lz88C25ucKA=\n"
+"-----END CERTIFICATE-----";
+
+static Item tls_namespace = {0};
+static Item tls_ca_bundled_cache = {0};
+static Item tls_ca_extra_cache = {0};
+static Item tls_ca_system_cache = {0};
+static Item tls_ca_default_cache = {0};
+static bool tls_ca_roots_registered = false;
+
+static void tls_ca_register_roots(void) {
+    if (tls_ca_roots_registered) return;
+    heap_register_gc_root(&tls_namespace.item);
+    heap_register_gc_root(&tls_ca_bundled_cache.item);
+    heap_register_gc_root(&tls_ca_extra_cache.item);
+    heap_register_gc_root(&tls_ca_system_cache.item);
+    heap_register_gc_root(&tls_ca_default_cache.item);
+    tls_ca_roots_registered = true;
+}
+
+static Item tls_clone_unique_string_array(Item source, bool freeze_result) {
+    Item result = js_array_new(0);
+    if (get_type_id(source) == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(source);
+        for (int64_t i = 0; i < len; i++) {
+            Item cert = js_array_get_int(source, i);
+            if (get_type_id(cert) == LMD_TYPE_STRING && !tls_array_includes_string(result, cert)) {
+                js_array_push(result, cert);
+            }
+        }
+    }
+    if (freeze_result) js_object_freeze(result);
+    return result;
+}
+
+static Item tls_get_bundled_certificates(void) {
+    if (tls_ca_bundled_cache.item != 0) return tls_ca_bundled_cache;
+    tls_ca_bundled_cache = js_array_new(0);
+    js_array_push(tls_ca_bundled_cache, make_string_item(tls_builtin_root_certificate));
+    js_object_freeze(tls_ca_bundled_cache);
+    return tls_ca_bundled_cache;
+}
+
+static char* tls_read_file_alloc(const char* path, int* out_len) {
+    if (out_len) *out_len = 0;
+    if (!path || path[0] == '\0') return NULL;
+    FILE* file = fopen(path, "rb");
+    if (!file) return NULL;
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        return NULL;
+    }
+    long size = ftell(file);
+    if (size <= 0 || size > 8 * 1024 * 1024) {
+        fclose(file);
+        return NULL;
+    }
+    if (fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        return NULL;
+    }
+    char* data = (char*)mem_alloc((size_t)size + 1, MEM_CAT_JS_RUNTIME);
+    if (!data) {
+        fclose(file);
+        return NULL;
+    }
+    size_t read_len = fread(data, 1, (size_t)size, file);
+    fclose(file);
+    if (read_len != (size_t)size) {
+        mem_free(data);
+        return NULL;
+    }
+    data[size] = '\0';
+    if (out_len) *out_len = (int)size;
+    return data;
+}
+
+static void tls_parse_pem_certificates(Item out, const char* data, int len) {
+    static const char begin_marker[] = "-----BEGIN CERTIFICATE-----";
+    static const char end_marker[] = "-----END CERTIFICATE-----";
+    const int begin_len = (int)sizeof(begin_marker) - 1;
+    const int end_len = (int)sizeof(end_marker) - 1;
+    int pos = 0;
+    while (data && pos < len) {
+        const char* begin = NULL;
+        for (int i = pos; i <= len - begin_len; i++) {
+            if (memcmp(data + i, begin_marker, (size_t)begin_len) == 0) {
+                begin = data + i;
+                break;
+            }
+        }
+        if (!begin) break;
+        int begin_pos = (int)(begin - data);
+        const char* end = NULL;
+        for (int i = begin_pos + begin_len; i <= len - end_len; i++) {
+            if (memcmp(data + i, end_marker, (size_t)end_len) == 0) {
+                end = data + i;
+                break;
+            }
+        }
+        if (!end) break;
+        int cert_end = (int)(end - data) + end_len;
+        if (cert_end < len && data[cert_end] == '\r' &&
+            cert_end + 1 < len && data[cert_end + 1] == '\n') {
+            cert_end += 2;
+        } else if (cert_end < len && data[cert_end] == '\n') {
+            cert_end++;
+        }
+        Item cert = make_string_item(data + begin_pos, cert_end - begin_pos);
+        if (!tls_array_includes_string(out, cert)) js_array_push(out, cert);
+        pos = cert_end;
+    }
+}
+
+static Item tls_get_extra_certificates(void) {
+    if (tls_ca_extra_cache.item != 0) return tls_ca_extra_cache;
+    tls_ca_extra_cache = js_array_new(0);
+    const char* path = getenv("NODE_EXTRA_CA_CERTS");
+    int len = 0;
+    char* data = tls_read_file_alloc(path, &len);
+    if (data) {
+        tls_parse_pem_certificates(tls_ca_extra_cache, data, len);
+        mem_free(data);
+    }
+    return tls_ca_extra_cache;
+}
+
+static Item tls_get_system_certificates(void) {
+    if (tls_ca_system_cache.item != 0) return tls_ca_system_cache;
+    tls_ca_system_cache = js_array_new(0);
+    return tls_ca_system_cache;
+}
+
+static Item tls_get_default_certificates(void) {
+    if (tls_ca_default_cache.item != 0) return tls_ca_default_cache;
+    tls_ca_default_cache = tls_clone_unique_string_array(tls_get_bundled_certificates(), false);
+    Item extra = tls_get_extra_certificates();
+    int64_t len = js_array_length(extra);
+    for (int64_t i = 0; i < len; i++) {
+        Item cert = js_array_get_int(extra, i);
+        if (get_type_id(cert) == LMD_TYPE_STRING && !tls_array_includes_string(tls_ca_default_cache, cert)) {
+            js_array_push(tls_ca_default_cache, cert);
+        }
+    }
+    return tls_ca_default_cache;
+}
+
+extern "C" Item js_tls_getCACertificates(Item type_item) {
+    if (tls_is_missing(type_item) || tls_string_equals_lit(type_item, "default")) {
+        return tls_get_default_certificates();
+    }
+    if (get_type_id(type_item) != LMD_TYPE_STRING) {
+        return js_throw_invalid_arg_type("type", "string", type_item);
+    }
+    if (tls_string_equals_lit(type_item, "bundled")) return tls_get_bundled_certificates();
+    if (tls_string_equals_lit(type_item, "system")) return tls_get_system_certificates();
+    if (tls_string_equals_lit(type_item, "extra")) return tls_get_extra_certificates();
+    return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
+        "The argument 'type' must be one of: 'default', 'system', 'bundled', 'extra'");
+}
+
+extern "C" Item js_tls_setDefaultCACertificates(Item certs_item) {
+    if (get_type_id(certs_item) != LMD_TYPE_ARRAY) {
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"certs\" argument must be an instance of Array.");
+    }
+    Item next = js_array_new(0);
+    int64_t len = js_array_length(certs_item);
+    for (int64_t i = 0; i < len; i++) {
+        Item cert = make_js_undefined();
+        Item raw = js_array_get_int(certs_item, i);
+        if (!tls_item_to_cert_string(raw, &cert)) {
+            char name[64];
+            snprintf(name, sizeof(name), "certs[%lld]", (long long)i);
+            return js_throw_invalid_arg_type(name, "string or an instance of ArrayBufferView", raw);
+        }
+        if (!tls_array_includes_string(next, cert)) js_array_push(next, cert);
+    }
+    tls_ca_default_cache = next;
+    return make_js_undefined();
 }
 
 // =============================================================================
@@ -1146,8 +1397,6 @@ extern "C" Item js_tls_convertALPNProtocols(Item protocols_item, Item out_item) 
 // tls Module Namespace
 // =============================================================================
 
-static Item tls_namespace = {0};
-
 static Item tls_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);
     Item fn = js_new_function(func_ptr, param_count);
@@ -1174,12 +1423,15 @@ static Item tls_constructor_prototype(Item ctor, JsClass cls) {
 extern "C" Item js_get_tls_namespace(void) {
     if (tls_namespace.item != 0) return tls_namespace;
 
+    tls_ca_register_roots();
     tls_namespace = js_new_object();
 
     tls_set_method(tls_namespace, "connect",             (void*)js_tls_connect, -1);
     tls_set_method(tls_namespace, "createServer",        (void*)js_tls_createServer, 2);
     tls_set_method(tls_namespace, "createSecureContext",  (void*)js_tls_createSecureContext, 1);
     tls_set_method(tls_namespace, "convertALPNProtocols", (void*)js_tls_convertALPNProtocols, 2);
+    tls_set_method(tls_namespace, "getCACertificates",   (void*)js_tls_getCACertificates, 1);
+    tls_set_method(tls_namespace, "setDefaultCACertificates", (void*)js_tls_setDefaultCACertificates, 1);
     Item server_fn = tls_set_method(tls_namespace, "Server", (void*)js_tls_createServer, 2); // alias
     Item tls_socket_fn = tls_set_method(tls_namespace, "TLSSocket", (void*)js_tls_TLSSocket, 2);
 
@@ -1216,6 +1468,10 @@ extern "C" Item js_get_tls_namespace(void) {
     js_property_set(tls_namespace, make_string_item("DEFAULT_ECDH_CURVE"),
         make_string_item("auto"));
 
+    Item root_key = make_string_item("rootCertificates");
+    js_property_set(tls_namespace, root_key, tls_get_bundled_certificates());
+    js_mark_non_writable(tls_namespace, root_key);
+
     Item default_key = make_string_item("default");
     js_property_set(tls_namespace, default_key, tls_namespace);
 
@@ -1225,4 +1481,8 @@ extern "C" Item js_get_tls_namespace(void) {
 extern "C" void js_tls_reset(void) {
     tls_destroy_tracked_secure_contexts();
     tls_namespace = (Item){0};
+    tls_ca_bundled_cache = (Item){0};
+    tls_ca_extra_cache = (Item){0};
+    tls_ca_system_cache = (Item){0};
+    tls_ca_default_cache = (Item){0};
 }

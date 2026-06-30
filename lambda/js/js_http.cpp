@@ -839,6 +839,12 @@ static void http_raw_headers_append(Item self, Item name, Item value) {
     js_array_push(raw, value);
 }
 
+static Item http_new_header_object(void) {
+    Item headers = js_new_object();
+    js_set_prototype(headers, ItemNull);
+    return headers;
+}
+
 static Item http_invalid_header_name_arg(Item name_item) {
     return js_throw_invalid_arg_type("name", "string", name_item);
 }
@@ -936,7 +942,7 @@ static void http_response_set_header_pair(Item self, Item name_item, Item value_
 
     Item headers = js_property_get(self, make_string_item("__headers__"));
     if (get_type_id(headers) != LMD_TYPE_MAP) {
-        headers = js_new_object();
+        headers = http_new_header_object();
         js_property_set(self, make_string_item("__headers__"), headers);
     }
     js_property_set(headers, http_lowercase_header_name(name), value);
@@ -952,7 +958,7 @@ static void http_response_append_raw_header_pair(Item self, Item name_item, Item
 
     Item headers = js_property_get(self, make_string_item("__headers__"));
     if (get_type_id(headers) != LMD_TYPE_MAP) {
-        headers = js_new_object();
+        headers = http_new_header_object();
         js_property_set(self, make_string_item("__headers__"), headers);
     }
     js_property_set(headers, http_lowercase_header_name(name), value);
@@ -1124,12 +1130,20 @@ extern "C" Item js_http_res_getHeader(Item self, Item name_item) {
 extern "C" Item js_http_res_getHeaders(Item self) {
     Item headers = js_property_get(self, make_string_item("__headers__"));
     if (get_type_id(headers) != LMD_TYPE_MAP) {
-        Item empty = js_new_object();
-        js_set_prototype(empty, ItemNull);
-        return empty;
+        return http_new_header_object();
     }
-    js_set_prototype(headers, ItemNull);
-    return headers;
+    Item copy = http_new_header_object();
+    Item keys = js_object_keys(headers);
+    int64_t len = js_array_length(keys);
+    for (int64_t i = 0; i < len; i++) {
+        Item key = js_array_get_int(keys, i);
+        Item value = js_property_get(headers, key);
+        TypeId type = get_type_id(value);
+        if (type != LMD_TYPE_UNDEFINED && type != LMD_TYPE_NULL) {
+            js_property_set(copy, key, value);
+        }
+    }
+    return copy;
 }
 
 // response.removeHeader(name)
@@ -1610,7 +1624,7 @@ static Item make_response_object(JsHttpConn* conn) {
     js_property_set(res, make_string_item("__conn__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)conn)});
     js_property_set(res, make_string_item("statusCode"), (Item){.item = i2it(200)});
-    js_property_set(res, make_string_item("__headers__"), js_new_object());
+    js_property_set(res, make_string_item("__headers__"), http_new_header_object());
     js_property_set(res, make_string_item("__body__"), make_string_item("", 0));
     js_property_set(res, make_string_item("__sent__"), (Item){.item = b2it(false)});
     js_property_set(res, make_string_item("__headers_sent__"), (Item){.item = b2it(false)});
@@ -1727,7 +1741,7 @@ static Item make_request_object(JsHttpConn* conn, ParsedRequest* req) {
     }
 
     // headers as lowercase-key object
-    Item headers = js_new_object();
+    Item headers = http_new_header_object();
     Item raw_headers = js_array_new(0);
     for (int i = 0; i < req->header_count; i++) {
         js_array_push(raw_headers, make_string_item(req->raw_header_names[i]));
@@ -1736,7 +1750,7 @@ static Item make_request_object(JsHttpConn* conn, ParsedRequest* req) {
     }
     js_property_set(msg, make_string_item("headers"), headers);
     js_property_set(msg, make_string_item("rawHeaders"), raw_headers);
-    Item trailers = js_new_object();
+    Item trailers = http_new_header_object();
     Item raw_trailers = js_array_new(0);
     for (int i = 0; i < req->trailer_count; i++) {
         js_array_push(raw_trailers, make_string_item(req->raw_trailer_names[i]));
@@ -2681,7 +2695,7 @@ static void http_client_sync_header_property(JsHttpClientReq* creq, Item req_obj
 static void http_client_metadata_ensure(Item req_obj, Item* out_headers, Item* out_raw) {
     Item headers = js_property_get(req_obj, make_string_item("__headers__"));
     if (get_type_id(headers) != LMD_TYPE_MAP) {
-        headers = js_new_object();
+        headers = http_new_header_object();
         js_property_set(req_obj, make_string_item("__headers__"), headers);
     }
     Item raw = js_property_get(req_obj, make_string_item("__raw_headers__"));

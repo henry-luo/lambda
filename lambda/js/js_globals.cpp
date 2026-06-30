@@ -12,6 +12,7 @@
 #include "js_typed_array.h"
 #include "js_dom_events.h"
 #include "js_error_codes.h"
+#include "js_permission.h"
 #include "js_property_attrs.h"
 #include "js_props.h"
 #include "js_class.h"
@@ -2414,6 +2415,7 @@ extern "C" void js_store_process_argv(int argc, const char** argv) {
 extern "C" void js_store_process_exec_argv(int argc, const char** argv) {
     js_process_exec_argc_raw = argc;
     js_process_exec_argv_raw = argv;
+    js_permission_init_from_argv(argc, argv);
 }
 
 extern "C" void js_set_process_argv(int argc, const char** argv) {
@@ -3053,6 +3055,16 @@ static bool process_event_name_equals(Item event_name, const char* name, int nam
     return ev && ev->len == (uint64_t)name_len && memcmp(ev->chars, name, (size_t)name_len) == 0;
 }
 
+static void js_process_record_uncaught_handler_failure(void) {
+    js_process_exit_code_value = 1;
+    if (js_process_object.item != ITEM_NULL) {
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("exitCode", 8))},
+            (Item){.item = i2it(1)});
+    }
+    log_error("js-process-uncaught-fatal: uncaughtException listener threw");
+}
+
 extern "C" Item js_process_on(Item event_name, Item listener) {
     TypeId etype = get_type_id(event_name);
     bool is_sym = js_key_is_symbol_c(event_name);
@@ -3100,6 +3112,7 @@ static Item js_process_emit_args(Item event_name, Item* args, int arg_count) {
     if (etype != LMD_TYPE_STRING && !js_key_is_symbol_c(event_name)) return (Item){.item = b2it(false)};
 
     extern Item js_call_function(Item func, Item this_val, Item* args, int nargs);
+    bool is_uncaught = process_event_name_equals(event_name, "uncaughtException", 17);
 
     Item map = get_process_listener_map();
     Item arr = js_property_get(map, event_name);
@@ -3110,6 +3123,10 @@ static Item js_process_emit_args(Item event_name, Item* args, int arg_count) {
         Item listener = js_array_get_int(arr, i);
         if (get_type_id(listener) == LMD_TYPE_FUNC) {
             js_call_function(listener, js_process_object, args, arg_count);
+            if (js_check_exception()) {
+                if (is_uncaught) js_process_record_uncaught_handler_failure();
+                return (Item){.item = b2it(true)};
+            }
         }
     }
     return (Item){.item = b2it(true)};
@@ -3672,6 +3689,20 @@ extern "C" Item js_get_process_object_value(void) {
         js_property_set(js_process_object,
             (Item){.item = s2it(heap_create_name("execArgv", 8))},
             js_get_process_exec_argv());
+
+        // process.permission — present only when Node permission model is enabled.
+        if (js_permission_enabled()) {
+            Item permission = js_new_object();
+            js_property_set(permission,
+                (Item){.item = s2it(heap_create_name("has", 3))},
+                js_new_function((void*)js_process_permission_has, 2));
+            js_property_set(permission,
+                (Item){.item = s2it(heap_create_name("drop", 4))},
+                js_new_function((void*)js_process_permission_drop, 2));
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("permission", 10))},
+                permission);
+        }
 
         // config — minimal process.config for Node.js compat
         {
@@ -14359,6 +14390,7 @@ extern "C" void js_globals_batch_reset() {
     js_process_argv_items = (Item){.item = ITEM_NULL};
     js_process_exec_argv_items = (Item){.item = ITEM_NULL};
     js_process_object = (Item){.item = ITEM_NULL};
+    js_permission_reset();
     js_process_ipc_active = false;
     js_process_ipc_closing = false;
     js_process_ipc_disconnect_emitted = false;

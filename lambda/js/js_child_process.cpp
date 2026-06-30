@@ -20,6 +20,8 @@
 #ifndef _WIN32
 #include <signal.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #else
 #include <process.h>
 // On Windows, pclose() returns the exit code directly
@@ -2058,6 +2060,46 @@ static void cp_append_env_assignment(char* cmd, int cmd_size, int* pos, const ch
     cmd[*pos < cmd_size ? *pos : cmd_size - 1] = '\0';
 }
 
+static void cp_append_env_assignment_value(char* cmd, int cmd_size, int* pos, Item key, Item value) {
+    if (!cmd || !pos || get_type_id(key) != LMD_TYPE_STRING) return;
+    if (is_nullish_item(value)) return;
+    if (get_type_id(value) != LMD_TYPE_STRING) value = js_to_string(value);
+    if (get_type_id(value) != LMD_TYPE_STRING) return;
+    String* ks = it2s(key);
+    String* vs = it2s(value);
+    if (!ks || !vs || ks->len == 0 || *pos >= cmd_size - 1) return;
+    for (size_t i = 0; i < ks->len && *pos < cmd_size - 1; i++) {
+        char ch = ks->chars[i];
+        if (ch == '=' || ch == '\0') return;
+        cmd[(*pos)++] = ch;
+    }
+    if (*pos < cmd_size - 1) cmd[(*pos)++] = '=';
+    if (*pos < cmd_size - 1) cmd[(*pos)++] = '\'';
+    for (size_t i = 0; i < vs->len && *pos < cmd_size - 1; i++) {
+        char ch = vs->chars[i];
+        if (ch == '\'') {
+            const char* esc = "'\\''";
+            for (int j = 0; esc[j] && *pos < cmd_size - 1; j++) cmd[(*pos)++] = esc[j];
+        } else {
+            cmd[(*pos)++] = ch;
+        }
+    }
+    if (*pos < cmd_size - 1) cmd[(*pos)++] = '\'';
+    if (*pos < cmd_size - 1) cmd[(*pos)++] = ' ';
+    cmd[*pos < cmd_size ? *pos : cmd_size - 1] = '\0';
+}
+
+static void cp_append_env_assignments(char* cmd, int cmd_size, int* pos, Item env) {
+    if (!cmd || !pos || !is_object_item(env)) return;
+    Item keys = js_object_keys(env);
+    int64_t key_count = get_type_id(keys) == LMD_TYPE_ARRAY ? js_array_length(keys) : 0;
+    for (int64_t i = 0; i < key_count; i++) {
+        Item key = js_array_get_int(keys, i);
+        Item value = js_property_get(env, key);
+        cp_append_env_assignment_value(cmd, cmd_size, pos, key, value);
+    }
+}
+
 static bool cp_spawnSync_prepare_lambda_snapshot(const char* cmd, Item args_item, Item options_item,
                                                  char* full_cmd, int full_cmd_size) {
     if (!is_lambda_executable_path(cmd) || !cp_args_contain_string(args_item, "--snapshot-blob")) {
@@ -2120,10 +2162,19 @@ static int cp_spawnSync_append_args(char* full_cmd, int full_cmd_size, int pos, 
     return pos;
 }
 
-static bool cp_spawnSync_prepare_shell_command(const char* cmd, Item args_item,
+static bool cp_spawnSync_prepare_shell_command(const char* cmd, Item args_item, Item options_item,
                                                char* full_cmd, int full_cmd_size, int* pos_out) {
     if (!cmd || !full_cmd || !pos_out || full_cmd_size <= 0) return false;
     int pos = 0;
+    char cwd_buf[1024];
+    if (cp_get_string_prop(options_item, "cwd", cwd_buf, (int)sizeof(cwd_buf))) {
+        pos += snprintf(full_cmd + pos, (size_t)(full_cmd_size - pos), "cd ");
+        Item cwd_item = make_string_item(cwd_buf);
+        append_shell_arg(full_cmd, full_cmd_size, &pos, cwd_item);
+        pos += snprintf(full_cmd + pos, (size_t)(full_cmd_size - pos), " && ");
+    }
+    Item env = is_object_item(options_item) ? js_property_get(options_item, make_string_item("env")) : make_js_undefined();
+    cp_append_env_assignments(full_cmd, full_cmd_size, &pos, env);
     Item cmd_item = make_string_item(cmd);
     if (!append_shell_arg(full_cmd, full_cmd_size, &pos, cmd_item)) return false;
     if (should_spawn_lambda_js_mode(cmd, args_item)) {
@@ -2137,6 +2188,35 @@ static bool cp_spawnSync_prepare_shell_command(const char* cmd, Item args_item,
     }
     *pos_out = pos;
     return true;
+}
+
+static char* cp_read_file_to_buffer(const char* path, size_t* out_len) {
+    if (out_len) *out_len = 0;
+    FILE* fp = fopen(path, "rb");
+    if (!fp) return NULL;
+    char* out = NULL;
+    size_t len = 0;
+    size_t cap = 0;
+    char chunk[4096];
+    size_t nread = 0;
+    while ((nread = fread(chunk, 1, sizeof(chunk), fp)) > 0) {
+        if (len + nread >= cap) {
+            cap = cap == 0 ? 4096 : cap * 2;
+            while (cap < len + nread + 1) cap *= 2;
+            out = (char*)mem_realloc(out, cap, MEM_CAT_JS_RUNTIME);
+        }
+        memcpy(out + len, chunk, nread);
+        len += nread;
+    }
+    fclose(fp);
+    if (!out) {
+        out = (char*)mem_alloc(1, MEM_CAT_JS_RUNTIME);
+        if (out) out[0] = '\0';
+    } else {
+        out[len] = '\0';
+    }
+    if (out_len) *out_len = len;
+    return out;
 }
 
 extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_item) {
@@ -2153,44 +2233,48 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
     int pos = 0;
     if (!cp_spawnSync_prepare_lambda_snapshot(cmd, args_item, options_item,
             full_cmd, (int)sizeof(full_cmd))) {
-        cp_spawnSync_prepare_shell_command(cmd, args_item, full_cmd,
+        cp_spawnSync_prepare_shell_command(cmd, args_item, options_item, full_cmd,
                                            (int)sizeof(full_cmd), &pos);
     }
 
-    // redirect stderr to a temp approach — capture stdout via popen
-    FILE* fp = popen(full_cmd, "r");
-    if (!fp) {
-        log_error("child_process: spawnSync: popen failed");
-        Item result = js_new_object();
-        js_property_set(result, make_string_item("status"), (Item){.item = i2it(-1)});
-        js_property_set(result, make_string_item("stdout"), make_string_item(""));
-        js_property_set(result, make_string_item("stderr"), make_string_item(""));
-        return result;
+    mkdir("temp", 0755);
+    char stdout_path[256];
+    char stderr_path[256];
+#ifndef _WIN32
+    long pid = (long)getpid();
+#else
+    long pid = (long)_getpid();
+#endif
+    snprintf(stdout_path, sizeof(stdout_path), "temp/js_spawn_sync_%ld_%p.out", pid, (void*)&stdout_path);
+    snprintf(stderr_path, sizeof(stderr_path), "temp/js_spawn_sync_%ld_%p.err", pid, (void*)&stderr_path);
+    int redir_pos = (int)strlen(full_cmd);
+    if (redir_pos < (int)sizeof(full_cmd) - 1) {
+        Item out_item = make_string_item(stdout_path);
+        Item err_item = make_string_item(stderr_path);
+        redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " > ");
+        append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, out_item);
+        redir_pos += snprintf(full_cmd + redir_pos, sizeof(full_cmd) - (size_t)redir_pos, " 2> ");
+        append_shell_arg(full_cmd, (int)sizeof(full_cmd), &redir_pos, err_item);
     }
 
-    char* out_buf = NULL;
-    size_t out_len = 0;
-    size_t out_cap = 0;
-    char chunk[4096];
-    while (fgets(chunk, sizeof(chunk), fp)) {
-        size_t clen = strlen(chunk);
-        if (out_len + clen >= out_cap) {
-            out_cap = (out_cap == 0) ? 4096 : out_cap * 2;
-            while (out_cap < out_len + clen + 1) out_cap *= 2;
-            out_buf = (char*)mem_realloc(out_buf, out_cap, MEM_CAT_JS_RUNTIME);
-        }
-        memcpy(out_buf + out_len, chunk, clen);
-        out_len += clen;
-    }
-    int status = pclose(fp);
+    int status = system(full_cmd);
     int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+
+    size_t out_len = 0;
+    size_t err_len = 0;
+    char* out_buf = cp_read_file_to_buffer(stdout_path, &out_len);
+    char* err_buf = cp_read_file_to_buffer(stderr_path, &err_len);
 
     Item result = js_new_object();
     js_property_set(result, make_string_item("status"), (Item){.item = i2it(exit_code)});
     js_property_set(result, make_string_item("stdout"),
                     out_buf ? make_string_item(out_buf, (int)out_len) : make_string_item(""));
-    js_property_set(result, make_string_item("stderr"), make_string_item(""));
+    js_property_set(result, make_string_item("stderr"),
+                    err_buf ? make_string_item(err_buf, (int)err_len) : make_string_item(""));
     if (out_buf) mem_free(out_buf);
+    if (err_buf) mem_free(err_buf);
+    unlink(stdout_path);
+    unlink(stderr_path);
 
     return result;
 }

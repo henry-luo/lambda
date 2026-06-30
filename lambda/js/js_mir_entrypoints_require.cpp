@@ -29,6 +29,7 @@
 
 int js_dynamic_import_suppress_module_drain = 0;
 extern "C" int js_process_current_exit_code(void);
+extern "C" void js_trace_flush(void);
 
 static JsMirPhaseTiming g_last_js_mir_phase_timing;
 
@@ -958,6 +959,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     {
         int exit_code = (result.item == ITEM_ERROR || js_check_exception()) ? 1 : js_process_current_exit_code();
         js_process_emit_exit(exit_code);
+        js_trace_flush();
         js_process_current_exit_code();
     }
 
