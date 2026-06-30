@@ -6438,7 +6438,17 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
 
         // build field name as identifier node
         TSNode field_node = ts_node_child_by_field_id(target_node, FIELD_FIELD);
-        ast_node->key = build_expr(tp, field_node);
+        TSSymbol field_sym = ts_node_symbol(field_node);
+        if (field_sym == SYM_IDENT || field_sym == SYM_BASE_TYPE) {
+            AstIdentNode* id_node = (AstIdentNode*)alloc_ast_node(tp, AST_NODE_IDENT, field_node, sizeof(AstIdentNode));
+            StrView var_name = ts_node_source(tp, field_node);
+            id_node->name = name_pool_create_strview(tp->name_pool, var_name);
+            log_debug("member assign field name: '%.*s'", (int)id_node->name->len, id_node->name->chars);
+            ast_node->key = (AstNode*)id_node;
+        }
+        else {
+            ast_node->key = build_expr(tp, field_node);
+        }
 
         // build value expression
         ast_node->value = build_expr(tp, value_node);

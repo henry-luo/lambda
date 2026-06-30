@@ -27,6 +27,8 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item);
 extern "C" Item js_get_this(void);
 extern "C" Item js_new_method_function(void* func_ptr, int param_count);
 
+static void js_assert_append_inspected_value(StrBuf* sb, Item value);
+
 static Item js_assert_noop(void) {
     return make_js_undefined();
 }
@@ -197,12 +199,21 @@ static Item js_assert_throw_missing_actual_expected(void) {
 }
 
 // helper: throw AssertionError with full Node.js properties
-static Item make_assertion_error_full(const char* message, Item actual, Item expected, const char* op_str, bool generated = true) {
-    extern Item js_new_error_with_name(Item type_name, Item message);
+static Item make_assertion_error_full_item(Item msg_item, Item actual, Item expected,
+                                           const char* op_str, bool generated = true) {
+    extern Item js_new_error_with_name_stack(Item type_name, Item message, Item stack_str);
     extern Item js_property_set(Item obj, Item key, Item value);
     Item type_name = assert_make_string("AssertionError");
-    Item msg_item = assert_make_string(message);
-    Item error = js_new_error_with_name(type_name, msg_item);
+    StrBuf* init_stack = strbuf_new();
+    strbuf_append_str(init_stack, "AssertionError");
+    String* init_msg = get_type_id(msg_item) == LMD_TYPE_STRING ? it2s(msg_item) : NULL;
+    if (init_msg && init_msg->len > 0) {
+        strbuf_append_str(init_stack, ": ");
+        strbuf_append_str_n(init_stack, init_msg->chars, init_msg->len);
+    }
+    Item init_stack_item = assert_make_string_n(init_stack->str, init_stack->length);
+    strbuf_free(init_stack);
+    Item error = js_new_error_with_name_stack(type_name, msg_item, init_stack_item);
     // Node.js AssertionError properties
     js_property_set(error, assert_make_string("code"), assert_make_string("ERR_ASSERTION"));
     js_property_set(error, assert_make_string("name"), assert_make_string("AssertionError"));
@@ -219,9 +230,10 @@ static Item make_assertion_error_full(const char* message, Item actual, Item exp
             strbuf_append_str_n(sb, stack->chars, stack->len);
         } else {
             strbuf_append_str(sb, "AssertionError");
-            if (message && message[0]) {
+            String* ms = get_type_id(msg_item) == LMD_TYPE_STRING ? it2s(msg_item) : NULL;
+            if (ms && ms->len > 0) {
                 strbuf_append_str(sb, ": ");
-                strbuf_append_str(sb, message);
+                strbuf_append_str_n(sb, ms->chars, ms->len);
             }
         }
         strbuf_append_str(sb, "\n    at ");
@@ -234,6 +246,10 @@ static Item make_assertion_error_full(const char* message, Item actual, Item exp
     return error;
 }
 
+static Item make_assertion_error_full(const char* message, Item actual, Item expected, const char* op_str, bool generated = true) {
+    return make_assertion_error_full_item(assert_make_string(message), actual, expected, op_str, generated);
+}
+
 static Item throw_assertion_error_full(const char* message, Item actual, Item expected, const char* op_str, bool generated = true) {
     extern void js_throw_value(Item error);
     Item error = make_assertion_error_full(message, actual, expected, op_str, generated);
@@ -243,6 +259,14 @@ static Item throw_assertion_error_full(const char* message, Item actual, Item ex
 
 static Item throw_assertion_error(const char* message) {
     return throw_assertion_error_full(message, make_js_undefined(), make_js_undefined(), NULL);
+}
+
+static Item throw_assertion_error_full_item(Item message, Item actual, Item expected,
+                                            const char* op_str, bool generated = true) {
+    extern void js_throw_value(Item error);
+    Item error = make_assertion_error_full_item(message, actual, expected, op_str, generated);
+    js_throw_value(error);
+    return make_js_undefined();
 }
 
 // helper: check truthiness
@@ -274,6 +298,71 @@ static Item throw_assert_msg_or_auto(Item message, const char* default_msg,
         return throw_assertion_error_full(buf, actual, expected, op_str, false);
     }
     return throw_assertion_error_full(default_msg, actual, expected, op_str, true);
+}
+
+static Item throw_assert_msg_or_auto_item(Item message, Item default_msg,
+                                          Item actual, Item expected, const char* op_str) {
+    if (get_type_id(message) == LMD_TYPE_STRING) {
+        return throw_assertion_error_full_item(message, actual, expected, op_str, false);
+    }
+    return throw_assertion_error_full_item(default_msg, actual, expected, op_str, true);
+}
+
+static void js_assert_append_string_literal(StrBuf* sb, Item value) {
+    String* s = get_type_id(value) == LMD_TYPE_STRING ? it2s(value) : NULL;
+    if (!s) {
+        js_assert_append_inspected_value(sb, value);
+        return;
+    }
+    strbuf_append_char(sb, '\'');
+    if (s->len > 0) strbuf_append_str_n(sb, s->chars, s->len);
+    strbuf_append_char(sb, '\'');
+}
+
+static void js_assert_append_deep_equal_value(StrBuf* sb, Item value) {
+    String* s = get_type_id(value) == LMD_TYPE_STRING ? it2s(value) : NULL;
+    bool simple_diff = strcmp(js_assert_current_diff(), "simple") == 0;
+    if (s && simple_diff && s->len > 512) {
+        strbuf_append_char(sb, '\'');
+        strbuf_append_str_n(sb, s->chars, 508);
+        strbuf_append_str(sb, "...");
+        return;
+    }
+    js_assert_append_string_literal(sb, value);
+}
+
+static Item js_assert_strict_equal_message(Item actual, Item expected) {
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, "Expected values to be strictly equal:\n");
+    strbuf_append_str(sb, "+ actual - expected\n\n");
+    strbuf_append_str(sb, "+ ");
+    js_assert_append_string_literal(sb, actual);
+    strbuf_append_str(sb, "\n- ");
+    js_assert_append_string_literal(sb, expected);
+    strbuf_append_str(sb, "\n");
+    Item result = assert_make_string_n(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+static Item js_assert_not_strict_equal_message(Item actual) {
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, "Expected \"actual\" to be strictly unequal to:\n\n");
+    js_assert_append_string_literal(sb, actual);
+    Item result = assert_make_string_n(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+static Item js_assert_deep_equal_message(Item actual, Item expected) {
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, "Expected values to be loosely deep-equal:\n\n");
+    js_assert_append_deep_equal_value(sb, actual);
+    strbuf_append_str(sb, "\n\nshould loosely deep-equal\n\n");
+    js_assert_append_deep_equal_value(sb, expected);
+    Item result = assert_make_string_n(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
 }
 
 // assert(value[, message]) / assert.ok(value[, message])
@@ -313,8 +402,8 @@ extern "C" Item js_assert_strictEqual(Item actual, Item expected, Item message) 
     extern Item js_strict_equal(Item a, Item b);
     Item result = js_strict_equal(actual, expected);
     if (!it2b(result)) {
-        return throw_assert_msg_or_auto(message,
-            "assert.strictEqual: values are not strictly equal", actual, expected, "strictEqual");
+        return throw_assert_msg_or_auto_item(message,
+            js_assert_strict_equal_message(actual, expected), actual, expected, "strictEqual");
     }
     return make_js_undefined();
 }
@@ -324,8 +413,8 @@ extern "C" Item js_assert_notStrictEqual(Item actual, Item expected, Item messag
     extern Item js_strict_equal(Item a, Item b);
     Item result = js_strict_equal(actual, expected);
     if (it2b(result)) {
-        return throw_assert_msg_or_auto(message,
-            "assert.notStrictEqual: values are strictly equal", actual, expected, "notStrictEqual");
+        return throw_assert_msg_or_auto_item(message,
+            js_assert_not_strict_equal_message(actual), actual, expected, "notStrictEqual");
     }
     return make_js_undefined();
 }
@@ -372,8 +461,8 @@ extern "C" Item js_assert_deepEqual(Item actual, Item expected, Item message) {
     bool equal = (get_type_id(result) == LMD_TYPE_INT && it2i(result) == 1) ||
                  (get_type_id(result) == LMD_TYPE_BOOL && it2b(result));
     if (!equal) {
-        return throw_assert_msg_or_auto(message,
-            "assert.deepEqual: values are not deep-equal", actual, expected, "deepEqual");
+        return throw_assert_msg_or_auto_item(message,
+            js_assert_deep_equal_message(actual, expected), actual, expected, "deepEqual");
     }
     return make_js_undefined();
 }

@@ -37,6 +37,27 @@ try {
     console.log('full diff: ' + e.code + ':' + e.diff);
 }
 
+try {
+    full.strictEqual('A'.repeat(10), 'B'.repeat(10));
+    console.log('strictEqual message: did not throw');
+} catch (e) {
+    console.log('strictEqual message: ' + JSON.stringify(e.message));
+}
+
+try {
+    full.notStrictEqual('A'.repeat(10), 'A'.repeat(10));
+    console.log('notStrictEqual message: did not throw');
+} catch (e) {
+    console.log('notStrictEqual message: ' + JSON.stringify(e.message));
+}
+
+try {
+    full.deepEqual('A'.repeat(10), 'B'.repeat(10));
+    console.log('deepEqual message: did not throw');
+} catch (e) {
+    console.log('deepEqual message: ' + JSON.stringify(e.message));
+}
+
 loose.partialDeepStrictEqual({ a: true, keep: 1 }, { a: true });
 console.log('partial subset: pass');
 

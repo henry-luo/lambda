@@ -226,14 +226,26 @@ assert.strictEqual(crypto.verify('sha256', Buffer.from(message), {
 }, ecP1363Signature), false);
 console.log('ec keyobject p1363 sign verify:', true);
 
-const unsupportedEd25519PrivateKey = [
+const ed25519PrivateKey = [
   '-----BEGIN PRIVATE KEY-----',
-  'MC4CAQAwBQYDK2VwBCIEIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  'MC4CAQAwBQYDK2VwBCIEIMFSujN0jIUIdzSvuxka0lfgVVkMdRTuaVvIYUHrvzXQ',
   '-----END PRIVATE KEY-----'
 ].join('\n') + '\n';
-const unsupportedEd448PublicKey = [
+const ed25519PublicKey = [
   '-----BEGIN PUBLIC KEY-----',
-  'MEMwBQYDK2VxAzoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  'MCowBQYDK2VwAyEAK1wIouqnuiA04b3WrMa+xKIKIpfHetNZRv3h9fBf768=',
+  '-----END PUBLIC KEY-----'
+].join('\n') + '\n';
+const ed448PrivateKey = [
+  '-----BEGIN PRIVATE KEY-----',
+  'MEcCAQAwBQYDK2VxBDsEOdOtCnu9bDdBqSHNNZ5xoDA5KdLBTUNPcKFaOADNX32s',
+  'dfpo52pCtPqfku/l3/OfUHsF43EfZsaaWA==',
+  '-----END PRIVATE KEY-----'
+].join('\n') + '\n';
+const ed448PublicKey = [
+  '-----BEGIN PUBLIC KEY-----',
+  'MEMwBQYDK2VxAzoAoX/ee5+jlcU53+BbGRsGIzly0V+SZtJ/oGXY0udf84q2hTW2',
+  'RdstLktvwpkVJOoNb7oDgc2V5ZUA',
   '-----END PUBLIC KEY-----'
 ].join('\n') + '\n';
 const unsupportedDsaPrivateKey = [
@@ -241,19 +253,44 @@ const unsupportedDsaPrivateKey = [
   'AA==',
   '-----END DSA PRIVATE KEY-----'
 ].join('\n') + '\n';
-assert.throws(() => crypto.createPrivateKey(unsupportedEd25519PrivateKey), {
-  code: 'ERR_OSSL_UNSUPPORTED',
-  message: /ed25519/
+const ed25519PrivateKeyObject = crypto.createPrivateKey(ed25519PrivateKey);
+const ed25519PublicKeyObject = crypto.createPublicKey(ed25519PublicKey);
+assert.strictEqual(ed25519PrivateKeyObject.asymmetricKeyType, 'ed25519');
+assert.strictEqual(ed25519PublicKeyObject.asymmetricKeyType, 'ed25519');
+const ed25519Signature = crypto.sign(undefined, Buffer.from(message), ed25519PrivateKeyObject);
+assert.strictEqual(ed25519Signature.length, 64);
+assert.strictEqual(crypto.verify(undefined, Buffer.from(message), ed25519PublicKeyObject,
+  ed25519Signature), true);
+assert.strictEqual(crypto.verify(undefined, Buffer.from(message + '!'), ed25519PublicKey,
+  ed25519Signature), false);
+assert.strictEqual(crypto.verify(undefined, Buffer.from(message), {
+  key: ed25519PublicKeyObject.export({ type: 'spki', format: 'der' }),
+  format: 'der',
+  type: 'spki'
+}, ed25519Signature), true);
+console.log('ed25519 keyobject sign verify:', true);
+
+const ed448PrivateKeyObject = crypto.createPrivateKey(ed448PrivateKey);
+const ed448PublicKeyObject = crypto.createPublicKey(ed448PublicKey);
+assert.strictEqual(ed448PrivateKeyObject.asymmetricKeyType, 'ed448');
+assert.strictEqual(ed448PublicKeyObject.asymmetricKeyType, 'ed448');
+const ed448Signature = crypto.sign(undefined, Buffer.from(message), {
+  key: ed448PrivateKeyObject.export({ type: 'pkcs8', format: 'der' }),
+  format: 'der',
+  type: 'pkcs8'
 });
-assert.throws(() => crypto.createPublicKey(unsupportedEd448PublicKey), {
-  code: 'ERR_OSSL_UNSUPPORTED',
-  message: /ed448/
-});
+assert.strictEqual(ed448Signature.length, 114);
+assert.strictEqual(crypto.verify(undefined, Buffer.from(message), ed448PublicKeyObject,
+  ed448Signature), true);
+assert.strictEqual(crypto.verify(undefined, Buffer.from(message), Buffer.from(ed448PublicKey),
+  ed448Signature), true);
+console.log('ed448 keyobject sign verify:', true);
+
 assert.throws(() => crypto.createPrivateKey(unsupportedDsaPrivateKey), {
   code: 'ERR_OSSL_UNSUPPORTED',
   message: /dsa/
 });
-console.log('unsupported asymmetric import errors:', true);
+console.log('unsupported dsa import errors:', true);
 
 let asyncSignAfterCall = false;
 const asyncSignReturn = crypto.sign('sha256', Buffer.from(message), privateKeyObject,
