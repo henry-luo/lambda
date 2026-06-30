@@ -210,20 +210,31 @@ len(cl)         // 0
 
 ## 8. Missing `substr` and `charcode` Functions
 
+**Status**: No Fix
 **Severity**: Compilation error  
 **Affected benchmarks**: crypto_sha1
 
-Lambda does not have `substr(str, start, len)` or `charcode(str, idx)` functions that are common in other languages.
+Lambda does not expose JavaScript-style `substr(str, start, len)` or `charcode(str, idx)` aliases. This is intentional: Lambda already has native string indexing, range subscripting, and `ord()`/`chr()` Unicode code point helpers.
 
-**Workaround**:
-- `substr(str, start, len)` → `slice(str, start, start + len)`
-- `charcode(str, idx)` → `ord(slice(str, idx, idx + 1))`
+**Lambda spelling**:
+- substring by explicit inclusive indices: `str[start to end]`
+- substring by start plus length: `slice(str, start, start + len)`
+- character code at index: `ord(str[idx])`
+
+```lambda
+"abcdef"[1 to 3]       // "bcd"
+slice("abcdef", 1, 4)  // "bcd"
+ord("ABC"[2])          // 67
+ord("café"[3])         // 233
+```
+
+**Verification**: `test/lambda/string_indexable.ls` covers `str[idx]`, UTF-8-aware indexing, and `str[start to end]`. `test/lambda/string_ord_chr.ls` covers `ord()` and `chr()`.
 
 ---
 
 ## 9. `div` Is a Reserved Word
 
-**Status**: Fixed
+**Status**: ✅ **FIXED**.
 **Severity**: Compilation error (syntax error near `=`)  
 **Affected benchmarks**: navier_stokes
 
@@ -512,7 +523,7 @@ pn show() {
 | 5 | Integer overflow errors | Arithmetic | **Fixed**; splay PRNG and SHA-1 word arithmetic now use `u32` |
 | 6 | No unsigned right shift | Bitwise ops | **Fixed for typed unsigned ints**; `shr(u32, n)` zero-fills |
 | 7 | `fill(0, x)` returns null | Edge case | **Fixed**; DeltaBlue now concatenates from empty fill arrays directly |
-| 8 | Missing substr/charcode | Missing feature | 1 benchmark, minor |
+| 8 | Missing substr/charcode | Missing feature | **No Fix**; use `str[start to end]`, `slice(str,start,end)`, and `ord(str[idx])` |
 | 9 | `div` reserved word | Reserved word | **Fixed**; `div` can be used as a parameter/local name and assignment target |
 | 10 | Immutable parameters | Language design | 1 benchmark, minor |
 | 11 | Integer division returns float | Type inference | 1 benchmark, silent wrong results |

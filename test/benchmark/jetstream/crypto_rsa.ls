@@ -43,7 +43,7 @@ pn int2char(n: int) {
 }
 
 pn intAt(s: string, i: int) {
-    var c = ord(slice(s, i, i + 1))
+    var c = ord(s[i])
     if (c < 0 or c >= 128) { return -1 }
     return BI_RC[c]
 }
@@ -164,7 +164,7 @@ pn bi_from_string(s: string, b: int) {
         i = i - 1
         var x: int = 0
         if (k == 8) {
-            x = band(ord(slice(s, i, i + 1)), 255)
+            x = band(ord(s[i]), 255)
         } else {
             x = intAt(s, i)
         }
@@ -193,7 +193,7 @@ pn bi_from_string(s: string, b: int) {
             if (sh >= BI_DB) { sh = sh - BI_DB }
         }
     }
-    if (k == 8 and band(ord(slice(s, 0, 1)), 128) != 0) {
+    if (k == 8 and band(ord(s[0]), 128) != 0) {
         bi.s = -1
         if (sh > 0) {
             ba[bi.t - 1] = bor(ba[bi.t - 1], shl(shl(1, BI_DB - sh) - 1, sh))
@@ -1422,7 +1422,7 @@ pn pkcs1pad2(s: string, n: int, rng_state) {
     var i = int(len(s)) - 1
     while (i >= 0 and n > 0) {
         n = n - 1
-        ba[n] = ord(slice(s, i, i + 1))
+        ba[n] = ord(s[i])
         i = i - 1
     }
     n = n - 1
