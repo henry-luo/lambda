@@ -5,6 +5,7 @@
 
 struct DomElement;
 struct FontProp;
+struct GridItemProp;
 struct ViewState;
 
 // Forward decl from text_edit.hpp (avoids circular include).
@@ -175,6 +176,11 @@ struct FormControlProp {
     float flex_shrink;
     float flex_basis;
     uint8_t flex_basis_is_percent : 1;
+
+    // Grid item properties (when form control is a grid item). The view's item
+    // property union can hold only one pointer, so form controls preserve the
+    // original GridItemProp here after switching item_prop_type to FORM.
+    GridItemProp* grid_item;
 
     // ------------------------------------------------------------------
     // Text-control selection state (input text-types and textarea only)

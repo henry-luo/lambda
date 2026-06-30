@@ -166,14 +166,15 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
     // Position each grid item
     for (int i = 0; i < grid_layout->item_count; i++) {
         ViewBlock* item = grid_layout->grid_items[i];
-        log_debug(" Item pointer %d: %p, item->gi=%p\n", i, (void*)item, item ? (void*)item->gi : nullptr);
-        if (!item->gi) continue;  // Skip items without grid item properties
+        GridItemProp* gi = grid_item_prop(item);
+        log_debug(" Item pointer %d: %p, gi=%p\n", i, (void*)item, (void*)gi);
+        if (!gi) continue;  // Skip items without grid item properties
 
         // Get grid area bounds (convert from 1-indexed to 0-indexed)
-        int row_start = item->gi->computed_grid_row_start - 1;
-        int row_end = item->gi->computed_grid_row_end - 1;
-        int col_start = item->gi->computed_grid_column_start - 1;
-        int col_end = item->gi->computed_grid_column_end - 1;
+        int row_start = gi->computed_grid_row_start - 1;
+        int row_end = gi->computed_grid_row_end - 1;
+        int col_start = gi->computed_grid_column_start - 1;
+        int col_end = gi->computed_grid_column_end - 1;
 
         // Clamp to valid ranges
         row_start = fmax(0, fmin(row_start, grid_layout->computed_row_count - 1));
@@ -205,10 +206,8 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         }
 
         // Store track area dimensions and base position for alignment phase
-        if (item->gi) {
-            item->gi->track_area_width = track_width;
-            item->gi->track_area_height = track_height;
-        }
+        gi->track_area_width = track_width;
+        gi->track_area_height = track_height;
 
         // Determine item dimensions - use CSS-specified size if available,
         // otherwise default to track size (will be adjusted during alignment)
@@ -290,10 +289,8 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         float new_y = container_offset_y + item_y;
 
         // Store base track position (before alignment) for later re-alignment
-        if (item->gi) {
-            item->gi->track_base_x = new_x;
-            item->gi->track_base_y = new_y;
-        }
+        gi->track_base_x = new_x;
+        gi->track_base_y = new_y;
 
         log_debug(" Assigning item %d: x=%.0f (%.0f+%.0f), y=%.0f, width=%.1f, height=%.1f\n",
                i, new_x, container_offset_x, item_x, new_y, item_width, item_height);
@@ -399,9 +396,10 @@ void align_grid_items(GridContainerLayout* grid_layout) {
     if (!has_baseline_alignment) {
         for (int i = 0; i < grid_layout->item_count; i++) {
             ViewBlock* item = grid_layout->grid_items[i];
-            if (item && item->gi) {
+            GridItemProp* gi = grid_item_prop(item);
+            if (item && gi) {
                 int resolved = radiant::resolve_align_self(
-                    item->gi->align_self_grid, grid_layout->align_items);
+                    gi->align_self_grid, grid_layout->align_items);
                 if (radiant::alignment_is_baseline(resolved)) {
                     has_baseline_alignment = true;
                     break;
@@ -419,13 +417,14 @@ void align_grid_items(GridContainerLayout* grid_layout) {
         // First pass: compute baselines and find per-row max above/below baseline
         for (int i = 0; i < grid_layout->item_count; i++) {
             ViewBlock* item = grid_layout->grid_items[i];
-            if (!item || !item->gi) continue;
+            GridItemProp* gi = grid_item_prop(item);
+            if (!item || !gi) continue;
 
             int resolved = radiant::resolve_align_self(
-                item->gi->align_self_grid, grid_layout->align_items);
+                gi->align_self_grid, grid_layout->align_items);
             if (!radiant::alignment_is_baseline(resolved)) continue;
 
-            int row_idx = item->gi->computed_grid_row_start - 1;
+            int row_idx = gi->computed_grid_row_start - 1;
             if (row_idx < 0 || row_idx >= row_count) continue;
 
             float baseline = radiant::compute_element_first_baseline(
@@ -476,16 +475,17 @@ void align_grid_items(GridContainerLayout* grid_layout) {
             // Re-position items based on new row offsets
             for (int i = 0; i < grid_layout->item_count; i++) {
                 ViewBlock* item = grid_layout->grid_items[i];
-                if (!item || !item->gi) continue;
+                GridItemProp* gi = grid_item_prop(item);
+                if (!item || !gi) continue;
 
-                int row_idx = item->gi->computed_grid_row_start - 1;
+                int row_idx = gi->computed_grid_row_start - 1;
                 if (row_idx < 0 || row_idx >= row_count) continue;
 
-                item->gi->track_base_y = grid_layout->computed_rows[row_idx].base_size
-                                               + content_top_offset;
+                gi->track_base_y = grid_layout->computed_rows[row_idx].base_size
+                    + content_top_offset;
 
                 // Recompute track_area_height for multi-row items
-                int row_end_idx = item->gi->computed_grid_row_end - 1;
+                int row_end_idx = gi->computed_grid_row_end - 1;
                 if (row_end_idx >= row_count) row_end_idx = row_count - 1;
                 if (row_end_idx < row_idx) row_end_idx = row_idx;
                 float area_h = 0;
@@ -493,20 +493,21 @@ void align_grid_items(GridContainerLayout* grid_layout) {
                     area_h += grid_layout->computed_rows[r].computed_size;
                     if (r < row_end_idx - 1) area_h += row_gap;
                 }
-                item->gi->track_area_height = area_h;
+                gi->track_area_height = area_h;
             }
         }
 
         // Apply baseline shifts to track_base_y
         for (int i = 0; i < grid_layout->item_count; i++) {
             ViewBlock* item = grid_layout->grid_items[i];
-            if (!item || !item->gi) continue;
+            GridItemProp* gi = grid_item_prop(item);
+            if (!item || !gi) continue;
 
             int resolved = radiant::resolve_align_self(
-                item->gi->align_self_grid, grid_layout->align_items);
+                gi->align_self_grid, grid_layout->align_items);
             if (!radiant::alignment_is_baseline(resolved)) continue;
 
-            int row_idx = item->gi->computed_grid_row_start - 1;
+            int row_idx = gi->computed_grid_row_start - 1;
             if (row_idx < 0 || row_idx >= row_count) continue;
 
             float baseline = radiant::compute_element_first_baseline(
@@ -515,7 +516,7 @@ void align_grid_items(GridContainerLayout* grid_layout) {
 
             float shift = row_max_baseline[row_idx] - baseline;
             if (shift > 0.01f) {
-                item->gi->track_base_y += shift;
+                gi->track_base_y += shift;
             }
         }
 
@@ -532,19 +533,20 @@ void align_grid_items(GridContainerLayout* grid_layout) {
 
 // Align a single grid item
 void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
-    if (!item || !grid_layout || !item->gi) return;
+    GridItemProp* gi = grid_item_prop(item);
+    if (!item || !grid_layout || !gi) return;
 
     float old_x = item->x;
     float old_y = item->y;
 
     // Reset to base track position before applying alignment
     // This allows align_grid_item to be called multiple times (e.g., after content layout)
-    item->x = item->gi->track_base_x;
-    item->y = item->gi->track_base_y;
+    item->x = gi->track_base_x;
+    item->y = gi->track_base_y;
 
     // Use stored track area dimensions from positioning phase
-    float available_width = item->gi->track_area_width;
-    float available_height = item->gi->track_area_height;
+    float available_width = gi->track_area_width;
+    float available_height = gi->track_area_height;
 
     // CSS Grid §8.1: fixed (non-auto) margins reduce the usable grid area for alignment.
     // The item's alignment box = grid area minus fixed margins.  Auto margins are handled
@@ -560,10 +562,10 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     ViewBlock* grid_container = item->parent && item->parent->is_block() ? lam::view_require_block(item->parent) : NULL;
     uint8_t grid_margin_trim = (grid_container && grid_container->blk) ? grid_container->blk->margin_trim : 0;
     if (grid_margin_trim) {
-        int row_start = item->gi->computed_grid_row_start - 1;
-        int row_end = item->gi->computed_grid_row_end - 1;
-        int col_start = item->gi->computed_grid_column_start - 1;
-        int col_end = item->gi->computed_grid_column_end - 1;
+        int row_start = gi->computed_grid_row_start - 1;
+        int row_end = gi->computed_grid_row_end - 1;
+        int col_start = gi->computed_grid_column_start - 1;
+        int col_end = gi->computed_grid_column_end - 1;
         // block-start: first row items
         if ((grid_margin_trim & MARGIN_TRIM_BLOCK_START) && row_start == 0) {
             log_debug("[MARGIN-TRIM] grid block-start: trimming margin_top=%f", margin_top);
@@ -789,7 +791,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
 
     // Apply justify-self (horizontal alignment)
     // Using unified resolve function from layout_alignment.hpp
-    int justify = radiant::resolve_justify_self(item->gi->justify_self, grid_layout->justify_items);
+    int justify = radiant::resolve_justify_self(gi->justify_self, grid_layout->justify_items);
 
     // For non-stretch alignment, use content width if available (set by Pass 3 content layout)
     // This allows center/start/end to work correctly with intrinsic content size
@@ -799,10 +801,10 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         if (item->content_width > 0 && item->content_width < available_width) {
             actual_width = item->content_width;
             item->width = actual_width;
-        } else if (item->gi && item->gi->has_measured_size &&
-                   item->gi->measured_max_width > 0 &&
-                   item->gi->measured_max_width < available_width) {
-            actual_width = item->gi->measured_max_width;
+        } else if (gi->has_measured_size &&
+                   gi->measured_max_width > 0 &&
+                   gi->measured_max_width < available_width) {
+            actual_width = gi->measured_max_width;
             item->width = actual_width;
         }
     }
@@ -852,7 +854,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
 
     // Apply align-self (vertical alignment)
     // Using unified resolve function from layout_alignment.hpp
-    int align = radiant::resolve_align_self(item->gi->align_self_grid, grid_layout->align_items);
+    int align = radiant::resolve_align_self(gi->align_self_grid, grid_layout->align_items);
 
     // For non-stretch alignment, use content height if available (set by Pass 3 content layout)
     // This allows center/start/end to work correctly with intrinsic content size

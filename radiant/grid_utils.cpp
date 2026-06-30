@@ -413,16 +413,17 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
 
     // First, check if we have pre-computed measurements from Pass 1 (layout_grid_multipass.cpp)
     // These measurements were calculated with proper width constraints for height calculation
-    if (item->gi) {
+    GridItemProp* gi = grid_item_prop(item);
+    if (gi) {
         if (is_row_axis) {
             // Use pre-computed height measurements if available
             log_debug("Checking pre-computed height for %s (gi=%p): min=%.1f, max=%.1f, has_measured=%d",
-                      item->node_name(), item->gi,
-                      item->gi->measured_min_height, item->gi->measured_max_height,
-                      item->gi->has_measured_size);
-            if (item->gi->has_measured_size && (item->gi->measured_min_height > 0 || item->gi->measured_max_height > 0)) {
-                sizes.min_content = item->gi->measured_min_height;
-                sizes.max_content = item->gi->measured_max_height;
+                      item->node_name(), gi,
+                      gi->measured_min_height, gi->measured_max_height,
+                      gi->has_measured_size);
+            if (gi->has_measured_size && (gi->measured_min_height > 0 || gi->measured_max_height > 0)) {
+                sizes.min_content = gi->measured_min_height;
+                sizes.max_content = gi->measured_max_height;
 
                 // Don't force minimum height - empty items should have 0 height
                 if (sizes.max_content < sizes.min_content) {
@@ -446,9 +447,9 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
         } else {
             // Use pre-computed width measurements if available
             // has_measured_size=true means measurement ran; 0 is valid for empty items.
-            if (item->gi->has_measured_size) {
-                sizes.min_content = item->gi->measured_min_width;
-                sizes.max_content = item->gi->measured_max_width;
+            if (gi->has_measured_size) {
+                sizes.min_content = gi->measured_min_width;
+                sizes.max_content = gi->measured_max_width;
 
                 // Don't force minimum width - empty items should have 0 width
                 if (sizes.max_content < sizes.min_content) {
@@ -495,11 +496,11 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
             if (item->width > 0) {
                 // Item already has a width (e.g., from previous layout pass)
                 width = item->width;
-            } else if (item->gi && lycon->grid_container) {
+            } else if (gi && lycon->grid_container) {
                 // Calculate width from computed column tracks
                 GridContainerLayout* grid = lycon->grid_container;
-                int col_start = item->gi->computed_grid_column_start - 1;
-                int col_end = item->gi->computed_grid_column_end - 1;
+                int col_start = gi->computed_grid_column_start - 1;
+                int col_end = gi->computed_grid_column_end - 1;
 
                 // Clamp to valid ranges
                 if (col_start >= 0 && col_end > col_start && col_end <= grid->computed_column_count) {
@@ -648,10 +649,11 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
             if (aspect_ratio > 0.0f) {
                 // Compute the effective track width (after column sizing)
                 float track_width = 0.0f;
-                if (item->gi && lycon && lycon->grid_container) {
+                GridItemProp* gi = grid_item_prop(item);
+                if (gi && lycon && lycon->grid_container) {
                     GridContainerLayout* grid = lycon->grid_container;
-                    int col_start = item->gi->computed_grid_column_start - 1;
-                    int col_end   = item->gi->computed_grid_column_end   - 1;
+                    int col_start = gi->computed_grid_column_start - 1;
+                    int col_end   = gi->computed_grid_column_end   - 1;
                     if (col_start >= 0 && col_end > col_start && col_end <= grid->computed_column_count) {
                         for (int c = col_start; c < col_end; c++) {
                             track_width += grid->computed_columns[c].computed_size;

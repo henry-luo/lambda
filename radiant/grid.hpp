@@ -11,10 +11,18 @@ extern "C" {
 #endif
 
 #include "layout.hpp"
+#include "form_control.hpp"
 
 // Forward declarations
 struct ViewBlock;
 struct LayoutContext;
+
+inline GridItemProp* grid_item_prop(ViewBlock* item) {
+    if (!item) return nullptr;
+    if (item->item_prop_type == DomElement::ITEM_PROP_GRID) return item->gi;
+    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) return item->form->grid_item;
+    return nullptr;
+}
 
 // IntrinsicSizes type is now defined in view.hpp (shared with flex layout)
 // typedef struct {

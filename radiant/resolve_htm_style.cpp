@@ -66,6 +66,10 @@ static FormControlProp* ensure_form_control_prop(LayoutContext* lycon, ViewBlock
         flex_basis = block->fi->flex_basis;
         flex_basis_is_percent = block->fi->flex_basis_is_percent;
     }
+    GridItemProp* grid_item = nullptr;
+    if (block->item_prop_type == DomElement::ITEM_PROP_GRID && block->gi) {
+        grid_item = block->gi;
+    }
 
     FormControlProp* form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
     form_control_prop_init(form);
@@ -74,6 +78,7 @@ static FormControlProp* ensure_form_control_prop(LayoutContext* lycon, ViewBlock
     form->flex_shrink = flex_shrink;
     form->flex_basis = flex_basis;
     form->flex_basis_is_percent = flex_basis_is_percent;
+    form->grid_item = grid_item;
 
     block->item_prop_type = DomElement::ITEM_PROP_FORM;
     block->form = form;
