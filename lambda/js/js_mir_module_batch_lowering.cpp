@@ -6667,17 +6667,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     MIR_reg_t static_new_target = jm_emit_undefined(mt);
                     jm_call_void_1(mt, "js_set_direct_new_target",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, static_new_target));
-                    JsMirVarEntry* static_js_this_var = jm_find_var(mt, "_js_this");
-                    MIR_reg_t prev_static_js_this = 0;
-                    if (static_js_this_var) {
-                        prev_static_js_this = jm_new_reg(mt, "prev_static_jt", MIR_T_I64);
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, prev_static_js_this),
-                            MIR_new_reg_op(mt->ctx, static_js_this_var->reg)));
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, static_js_this_var->reg),
-                            MIR_new_reg_op(mt->ctx, cls_obj)));
-                    }
+                    JsMirLexicalThisRebind static_this_rebind;
+                    jm_emit_begin_lexical_this_rebind(mt, cls_obj, &static_this_rebind, true);
                     jm_call_void_0(mt, "js_private_field_init_begin");
                     bool emitted_ordered_static_elements = false;
                     if (ce->node && ce->node->body && ce->node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
@@ -6843,11 +6834,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             jm_emit_class_static_block(mt, ce, ce->static_blocks[si]);
                         }
                     }
-                    if (static_js_this_var) {
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, static_js_this_var->reg),
-                            MIR_new_reg_op(mt->ctx, prev_static_js_this)));
-                    }
+                    jm_emit_end_lexical_this_rebind(mt, &static_this_rebind);
                     jm_call_void_1(mt, "js_set_this",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, prev_static_this));
                     jm_call_void_1(mt, "js_set_direct_new_target",

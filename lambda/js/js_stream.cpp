@@ -454,14 +454,6 @@ static Item js_legacy_stream_pipe(Item source, Item dest) {
     return dest;
 }
 
-static int64_t js_readable_existing_pipe_count(Item self) {
-    Item state = js_property_get(self, key_readable_state);
-    if (get_type_id(state) != LMD_TYPE_MAP) return 0;
-    Item pipes = js_property_get(state, make_string_item("pipes"));
-    if (get_type_id(pipes) != LMD_TYPE_ARRAY) return 0;
-    return js_array_length(pipes);
-}
-
 static void js_readable_emit_unpipe(Item dest, Item source) {
     Item unpipe_event = make_string_item("unpipe");
     Item emit_fn = js_property_get(dest, key_emit);
@@ -1890,6 +1882,12 @@ static bool js_stream_encoding_is_utf8(Item encoding) {
            (enc->len == 5 && strncmp(enc->chars, "utf-8", 5) == 0);
 }
 
+static bool js_stream_encoding_is_base64(Item encoding) {
+    if (get_type_id(encoding) != LMD_TYPE_STRING) return false;
+    String* enc = it2s(encoding);
+    return enc && enc->len == 6 && strncmp(enc->chars, "base64", 6) == 0;
+}
+
 static int js_stream_utf8_expected_len(uint8_t b0) {
     if (b0 < 0x80) return 1;
     if (b0 >= 0xC2 && b0 <= 0xDF) return 2;
@@ -2439,8 +2437,9 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
         return js_bool_item(js_stream_readable_accepts_more(self, buf));
     }
 
-    if (js_stream_await_drain_pending(self) &&
-        js_readable_existing_pipe_count(self) > 1) {
+    if (js_stream_await_drain_pending(self)) {
+        // backpressured pipes may still prefetch one readable chunk; while
+        // awaiting drain, that chunk belongs in the source buffer, not dest.write().
         Item buf = js_property_get(self, key_buffer);
         if (get_type_id(buf) != LMD_TYPE_ARRAY) {
             buf = js_array_new(0);
@@ -2448,6 +2447,10 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
         }
         js_array_push(buf, chunk);
         js_stream_set_readable_buffer(self, buf);
+        if (js_state_get_bool(js_property_get(self, key_readable_state), "readableListening")) {
+            // the prefetch is now readable even though the pipe is paused for drain.
+            js_stream_emit_readable(self);
+        }
         js_stream_async_iterators_drain(self, make_js_undefined());
         return js_bool_item(false);
     }
@@ -2510,6 +2513,7 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
         if (backpressured) {
             js_stream_set_flowing(self, false);
             js_property_set(self, key_paused, js_bool_item(true));
+            js_stream_schedule_read(self);
             return js_bool_item(false);
         }
         if (removed_destroyed_pipe && !wrote_to_pipe &&
@@ -2537,7 +2541,8 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
             js_item_is_true(js_property_get(self, make_string_item("_writing")))) {
             js_stream_flush_buffered_data(self);
         } else {
-            js_stream_schedule_data_flush(self);
+            // flowing streams must expose pushed chunks before unrelated async work can end the process.
+            js_stream_flush_buffered_data(self);
         }
     } else if (js_state_get_bool(js_property_get(self, key_readable_state), "readableListening")) {
         bool defer_readable = js_stream_readable_is_object_mode(self) &&
@@ -2855,6 +2860,20 @@ extern "C" Item js_readable_read_size(Item self, Item size_item) {
                 return ItemNull;
             }
         }
+        if (js_stream_encoding_is_base64(encoding)) {
+            int64_t available = js_stream_readable_buffer_length(self, buf);
+            int64_t remainder = available % 3;
+            if (available > 3 && remainder != 0) {
+                // base64 StringDecoder holds incomplete 3-byte groups until the
+                // final read; encoding the whole buffer here folds two reads into one.
+                Item exact = js_readable_read_exact(self, buf, blen, available - remainder);
+                Item decoded = js_buffer_toString(exact, encoding, make_js_undefined(), make_js_undefined());
+                js_stream_update_need_after_read(self);
+                js_stream_mark_readable_did_read(self);
+                js_stream_maybe_drain_transform_readable_backpressure(self);
+                return js_stream_maybe_emit_manual_data(self, decoded);
+            }
+        }
         Item joined = blen == 1
             ? js_array_get_int(buf, 0)
             : (js_stream_readable_buffer_has_string(buf)
@@ -3041,13 +3060,28 @@ static bool js_stream_async_iterator_is_legacy_stream(Item stream) {
 
 static void js_stream_async_iterator_cleanup_stream(Item stream) {
     if (get_type_id(stream) != LMD_TYPE_MAP && get_type_id(stream) != LMD_TYPE_ELEMENT) return;
+    if (js_item_is_true(js_property_get(stream, key_destroyed))) {
+        // rejected for-await calls both the error cleanup and iterator.return();
+        // only the first path may invoke a legacy public destroy hook.
+        return;
+    }
     Item destroy = js_property_get(stream, key_destroy);
     if (get_type_id(destroy) == LMD_TYPE_FUNC) {
+        if (!js_stream_is_native_stream(stream)) {
+            // legacy destroy hooks may not update stream flags, so mark before
+            // cleanup to keep pipeline's later error teardown idempotent.
+            js_stream_mark_destroyed(stream);
+        }
         js_call_function(destroy, stream, NULL, 0);
         return;
     }
     Item close = js_property_get(stream, make_string_item("close"));
     if (get_type_id(close) == LMD_TYPE_FUNC) {
+        if (!js_stream_is_native_stream(stream)) {
+            // legacy close hooks may not update stream flags, so mark before
+            // cleanup to keep pipeline's later error teardown idempotent.
+            js_stream_mark_destroyed(stream);
+        }
         js_call_function(close, stream, NULL, 0);
     }
 }
@@ -5611,6 +5645,7 @@ extern "C" Item js_readable_pipe(Item self, Item dest) {
                     js_stream_await_drain_add(self, dest);
                     js_stream_set_flowing(self, false);
                     js_property_set(self, key_paused, js_bool_item(true));
+                    js_stream_schedule_read(self);
                     if (!js_stream_source_keeps_pipe_on_backpressure(self)) {
                         js_property_set(self, make_string_item("__piped__"), js_bool_item(false));
                         js_property_set(self, make_string_item("__pipe_dest__"), make_js_undefined());
@@ -9737,6 +9772,9 @@ extern "C" Item js_get_stream_namespace(void) {
     js_property_set(stream_base_proto, key_pipe, js_new_function((void*)js_readable_inst_pipe, 1));
     js_property_set(stream_base_proto, make_string_item("unpipe"),
                     js_new_function((void*)js_readable_inst_unpipe, 1));
+    // legacy Stream instances have no readable state, so for-await must enter
+    // the event-listener iterator path from the base prototype.
+    js_stream_install_async_iterator(stream_base_proto);
     js_property_set(stream_base_proto, make_string_item("constructor"), stream_base);
     js_mark_non_enumerable(stream_base_proto, make_string_item("constructor"));
     js_set_function_name(stream_base, make_string_item("Stream"));

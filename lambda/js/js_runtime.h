@@ -905,7 +905,7 @@ Item js_async_get_promise(Item ctx_idx);          // get result promise for asyn
 
 Item js_text_encoder_new(void);
 Item js_text_encoder_encode(Item encoder, Item str);
-Item js_text_decoder_new(Item encoding);
+Item js_text_decoder_new(Item encoding, Item options);
 Item js_text_decoder_decode(Item decoder, Item input);
 
 // =============================================================================

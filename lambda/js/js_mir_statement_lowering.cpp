@@ -2154,6 +2154,11 @@ static void jm_emit_own_instance_fields_on_object(JsMirTranspiler* mt, JsClassEn
     if (!mt || !ce || !obj) return;
     JsClassEntry* saved_current_class = mt->current_class;
     mt->current_class = ce;
+    MIR_reg_t prev_this = jm_call_0(mt, "js_get_this", MIR_T_I64);
+    jm_call_void_1(mt, "js_set_this",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj));
+    JsMirLexicalThisRebind this_rebind;
+    jm_emit_begin_lexical_this_rebind(mt, obj, &this_rebind, true);
     // js_private_field_init_begin keeps the field-initializer early-error context
     // (eval restrictions) on. The brand-check bypass is NOT taken from this flag:
     // each field's *declaration* set goes through js_private_field_define (scoped
@@ -2205,6 +2210,9 @@ static void jm_emit_own_instance_fields_on_object(JsMirTranspiler* mt, JsClassEn
         jm_emit_exc_propagate_check(mt);
     }
     jm_call_void_0(mt, "js_private_field_init_end");
+    jm_emit_end_lexical_this_rebind(mt, &this_rebind);
+    jm_call_void_1(mt, "js_set_this",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, prev_this));
     mt->current_class = saved_current_class;
 }
 
@@ -2988,8 +2996,11 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     }
     if (ctor_len == 11 && strncmp(ctor_name, "TextDecoder", 11) == 0) {
         MIR_reg_t enc_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
-        return jm_call_1(mt, "js_text_decoder_new", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, enc_arg));
+        JsAstNode* options_node = call->arguments ? call->arguments->next : NULL;
+        MIR_reg_t options_arg = options_node ? jm_transpile_box_item(mt, options_node) : jm_emit_undefined(mt);
+        return jm_call_2(mt, "js_text_decoder_new", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, enc_arg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, options_arg));
     }
 
     // OffscreenCanvas(width, height)
@@ -3196,18 +3207,8 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_reg_t prev_this_fi = jm_call_0(mt, "js_get_this", MIR_T_I64);
             jm_call_void_1(mt, "js_set_this",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, obj));
-            // Also update _js_this if it exists (for field inits inside arrow contexts)
-            JsMirVarEntry* js_this_var = jm_find_var(mt, "_js_this");
-            MIR_reg_t prev_js_this_val = 0;
-            if (js_this_var) {
-                prev_js_this_val = jm_new_reg(mt, "prev_jt", MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, prev_js_this_val),
-                    MIR_new_reg_op(mt->ctx, js_this_var->reg)));
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, js_this_var->reg),
-                    MIR_new_reg_op(mt->ctx, obj)));
-            }
+            JsMirLexicalThisRebind this_rebind;
+            jm_emit_begin_lexical_this_rebind(mt, obj, &this_rebind, true);
             // Collect chain: chain[0] = most-base, chain[n-1] = immediate parent
             JsClassEntry* field_chain[32];
             int field_chain_len = 0;
@@ -3386,11 +3387,7 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             // Restore 'this' after field initialization
             jm_call_void_1(mt, "js_set_this",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, prev_this_fi));
-            if (js_this_var) {
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, js_this_var->reg),
-                    MIR_new_reg_op(mt->ctx, prev_js_this_val)));
-            }
+            jm_emit_end_lexical_this_rebind(mt, &this_rebind);
         }
 
         // v20: constructor property is inherited from prototype (prototype.constructor = Class)
@@ -4670,14 +4667,18 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             MIR_new_label_op(mt->ctx, l_no_delayed_ret),
             MIR_new_reg_op(mt->ctx, forit_has_return)));
         // Propagate return to outer try context if any
-        if (mt->try_ctx_depth > 0) {
-            JsTryContext* outer = &mt->try_ctx_stack[mt->try_ctx_depth - 1];
+        int outer_d = mt->try_ctx_depth - 1;
+        while (outer_d >= 0 && mt->try_ctx_stack[outer_d].yield_state_only) outer_d--;
+        if (outer_d >= 0) {
+            JsTryContext* outer = &mt->try_ctx_stack[outer_d];
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, outer->return_val_reg),
                 MIR_new_reg_op(mt->ctx, forit_return_val)));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, outer->has_return_reg),
                 MIR_new_int_op(mt->ctx, 1)));
+            // finally-body loops have synthetic resume contexts with no branch target;
+            // delayed returns must propagate to the nearest real try/finally instead.
             MIR_label_t target = outer->has_finally ? outer->finally_label : outer->end_label;
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                 MIR_new_label_op(mt->ctx, target)));
@@ -5673,17 +5674,8 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     MIR_reg_t static_new_target = jm_emit_undefined(mt);
                     jm_call_void_1(mt, "js_set_direct_new_target",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, static_new_target));
-                    JsMirVarEntry* static_js_this_var = jm_find_var(mt, "_js_this");
-                    MIR_reg_t prev_static_js_this = 0;
-                    if (static_js_this_var) {
-                        prev_static_js_this = jm_new_reg(mt, "prev_static_jt", MIR_T_I64);
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, prev_static_js_this),
-                            MIR_new_reg_op(mt->ctx, static_js_this_var->reg)));
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, static_js_this_var->reg),
-                            MIR_new_reg_op(mt->ctx, cls_obj)));
-                    }
+                    JsMirLexicalThisRebind static_this_rebind;
+                    jm_emit_begin_lexical_this_rebind(mt, cls_obj, &static_this_rebind, true);
                     jm_call_void_0(mt, "js_private_field_init_begin");
                     bool emitted_ordered_static_elements = false;
                     if (ce->node && ce->node->body && ce->node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
@@ -5849,11 +5841,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             jm_emit_class_static_block(mt, ce, ce->static_blocks[si]);
                         }
                     }
-                    if (static_js_this_var) {
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, static_js_this_var->reg),
-                            MIR_new_reg_op(mt->ctx, prev_static_js_this)));
-                    }
+                    jm_emit_end_lexical_this_rebind(mt, &static_this_rebind);
                     jm_call_void_1(mt, "js_set_this",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, prev_static_this));
                     jm_call_void_1(mt, "js_set_direct_new_target",

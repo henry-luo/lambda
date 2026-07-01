@@ -39,6 +39,8 @@ static Item new_listener_key; // "newListener"
 static Item remove_listener_key; // "removeListener"
 static Item listener_fn_key; // "__listener_fn__"
 static Item listener_context_key; // "__listener_als_context__"
+static Item warned_key;       // "__max_listener_warned__"
+static Item events_namespace = {0};
 static bool keys_initialized = false;
 
 static void ensure_keys() {
@@ -50,12 +52,14 @@ static void ensure_keys() {
     remove_listener_key = make_string_item("removeListener");
     listener_fn_key = make_string_item("__listener_fn__");
     listener_context_key = make_string_item("__listener_als_context__");
+    warned_key = make_string_item("__max_listener_warned__");
     keys_initialized = true;
 }
 
 extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
 extern "C" int js_domain_emit_current_error(Item error);
+extern "C" Item js_process_emitWarning(Item warning, Item type_item, Item code_item);
 
 static bool is_listener_record(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
@@ -134,6 +138,51 @@ static Item get_listeners_array(Item emitter, Item event_name) {
     return arr;
 }
 
+static int64_t get_default_max_listeners(void) {
+    Item val = js_property_get(events_namespace, make_string_item("defaultMaxListeners"));
+    if (get_type_id(val) == LMD_TYPE_INT) return it2i(val);
+    return 10;
+}
+
+static int64_t get_emitter_max_listeners(Item emitter) {
+    ensure_keys();
+    Item val = js_property_get(emitter, max_listeners_key);
+    if (get_type_id(val) == LMD_TYPE_INT) return it2i(val);
+    return get_default_max_listeners();
+}
+
+static void maybe_emit_max_listener_warning(Item emitter, Item event_name, Item arr) {
+    int64_t max = get_emitter_max_listeners(emitter);
+    if (max <= 0) return;
+    int64_t len = js_array_length(arr);
+    if (len <= max) return;
+    Item warned = js_property_get(arr, warned_key);
+    if (get_type_id(warned) == LMD_TYPE_BOOL && it2b(warned)) return;
+    js_property_set(arr, warned_key, (Item){.item = b2it(true)});
+
+    char event_buf[96];
+    const char* event_chars = "event";
+    int event_len = 5;
+    if (get_type_id(event_name) == LMD_TYPE_STRING) {
+        String* ev = it2s(event_name);
+        if (ev && ev->len > 0) {
+            event_len = ev->len < (int64_t)(sizeof(event_buf) - 1) ? (int)ev->len : (int)sizeof(event_buf) - 1;
+            memcpy(event_buf, ev->chars, event_len);
+            event_buf[event_len] = '\0';
+            event_chars = event_buf;
+        }
+    }
+
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+        "Possible EventEmitter memory leak detected. %lld %s listeners added to [EventEmitter]. MaxListeners is %lld.",
+        (long long)len, event_chars, (long long)max);
+    // listener growth warnings are emitted at insertion time so process
+    // warning handlers observe the same state as Node's EventEmitter.
+    js_process_emitWarning(make_string_item(msg),
+        make_string_item("MaxListenersExceededWarning"), make_js_undefined());
+}
+
 // Update _eventsCount on an emitter
 static void update_events_count(Item emitter) {
     Item map = get_events_map(emitter);
@@ -196,6 +245,7 @@ extern "C" Item js_ee_on(Item emitter, Item event_name, Item listener) {
     Item arr = get_listeners_array(emitter, event_name);
     js_array_push(arr, make_listener_record(listener));
     update_events_count(emitter);
+    maybe_emit_max_listener_warning(emitter, event_name, arr);
     return emitter;
 }
 
@@ -211,6 +261,7 @@ extern "C" Item js_ee_once(Item emitter, Item event_name, Item listener) {
     Item set = get_once_set(emitter);
     js_array_push(set, record);
     update_events_count(emitter);
+    maybe_emit_max_listener_warning(emitter, event_name, arr);
     return emitter;
 }
 
@@ -513,6 +564,7 @@ extern "C" Item js_ee_prependListener(Item emitter, Item event_name, Item listen
     Item map = get_events_map(emitter);
     js_property_set(map, event_name, new_arr);
     update_events_count(emitter);
+    maybe_emit_max_listener_warning(emitter, event_name, new_arr);
     return emitter;
 }
 
@@ -706,8 +758,6 @@ static Item js_ee_once_combined(Item emitter, Item event_name, Item listener) {
 static Item js_ee_static_getEventListeners(Item emitter, Item event_name) {
     return js_ee_listeners(emitter, event_name);
 }
-
-static Item events_namespace = {0};
 
 static void ee_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);

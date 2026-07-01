@@ -37,6 +37,9 @@ extern "C" void js_next_tick_enqueue(Item callback);
 extern "C" Item js_json_parse(Item str_item);
 extern "C" Item js_json_stringify(Item value);
 extern "C" Item js_buffer_from_bytes(const char* data, int len);
+extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe);
+extern "C" int js_net_dup_ipc_stdio_fd(Item handle_item);
+extern "C" uv_stream_t* js_net_stream_from_ipc_send_handle(Item handle_item);
 
 // =============================================================================
 // Helpers
@@ -562,7 +565,9 @@ typedef struct JsSpawnProcess {
     uv_pipe_t    ipc_pipe;
     Item         js_object;    // the JS object returned to user
     int          exit_code;
+    int          exit_signal;
     bool         process_exited;
+    bool         close_emitted;
     int          handles_closed;
     int          handles_expected;
     bool         stdin_pipe_active;
@@ -570,6 +575,7 @@ typedef struct JsSpawnProcess {
     bool         stderr_pipe_active;
     bool         ipc_pipe_active;
     int          stdin_pending_writes;
+    size_t       stdin_pending_bytes;
     bool         stdin_end_requested;
     bool         ipc_disconnect_emitted;
     bool         ipc_unref_requested;
@@ -577,6 +583,13 @@ typedef struct JsSpawnProcess {
     int          abort_kill_signal;
     Item         abort_signal;
     Item         abort_listener;
+    Item*        stdin_env;
+    Item*        send_env;
+    Item*        disconnect_env;
+    Item*        kill_env;
+    Item*        ref_env;
+    Item*        unref_env;
+    Item*        abort_env;
     char*        ipc_buf;
     size_t       ipc_len;
     size_t       ipc_cap;
@@ -585,7 +598,18 @@ typedef struct JsSpawnProcess {
 typedef struct SpawnWriteReq {
     uv_write_t req;
     char* data;
+    size_t len;
 } SpawnWriteReq;
+
+static Item spawn_signal_name_item(int signal_number);
+
+#define CP_STDIO_MAX 16
+#define CP_STDIO_PIPE 0
+#define CP_STDIO_INHERIT 1
+#define CP_STDIO_IGNORE 2
+#define CP_STDIO_FD 3
+#define CP_STDIO_IPC 4
+#define CP_STDIO_HANDLE 5
 
 static void spawn_set_connected(Item obj, bool connected) {
     js_property_set(obj, make_string_item("connected"),
@@ -608,6 +632,75 @@ static void spawn_emit_event(Item obj, const char* event, Item* args, int argc) 
             }
         }
         js_microtask_flush();
+    }
+}
+
+static void spawn_maybe_emit_process_close(JsSpawnProcess* sp) {
+    if (!sp || sp->close_emitted || !sp->process_exited ||
+        sp->stdout_pipe_active || sp->stderr_pipe_active) {
+        return;
+    }
+    sp->close_emitted = true;
+    Item args[2] = {
+        sp->exit_signal == 0 ? (Item){.item = i2it(sp->exit_code)} : ItemNull,
+        sp->exit_signal == 0 ? ItemNull : spawn_signal_name_item(sp->exit_signal)
+    };
+    // child close observes drained stdio; emitting it from process exit races ahead of pipe EOF.
+    spawn_emit_event(sp->js_object, "close", args, 2);
+}
+
+static bool spawn_has_event_listener(Item obj, const char* event) {
+    char key_buf[64];
+    snprintf(key_buf, sizeof(key_buf), "__on_%s__", event);
+    Item listeners = js_property_get(obj, make_string_item(key_buf));
+    if (is_callable(listeners)) return true;
+    return get_type_id(listeners) == LMD_TYPE_ARRAY && js_array_length(listeners) > 0;
+}
+
+static Item spawn_pending_messages_key(void) {
+    return make_string_item("__pending_ipc_messages__");
+}
+
+static void spawn_queue_ipc_message(Item obj, Item message, Item handle) {
+    Item key = spawn_pending_messages_key();
+    Item pending = js_property_get(obj, key);
+    if (get_type_id(pending) != LMD_TYPE_ARRAY) {
+        pending = js_array_new(0);
+        js_property_set(obj, key, pending);
+    }
+    Item entry = js_new_object();
+    js_property_set(entry, make_string_item("message"), message);
+    js_property_set(entry, make_string_item("handle"), handle);
+    js_array_push(pending, entry);
+}
+
+static void spawn_emit_ipc_message_or_queue(Item obj, Item message, Item handle) {
+    if (!spawn_has_event_listener(obj, "message")) {
+        // a forked child can answer before user code attaches child.on('message');
+        // retain the payload/socket until the listener exists.
+        spawn_queue_ipc_message(obj, message, handle);
+        return;
+    }
+    if (!is_undefined_item(handle)) {
+        Item args[2] = { message, handle };
+        spawn_emit_event(obj, "message", args, 2);
+    } else {
+        spawn_emit_event(obj, "message", &message, 1);
+    }
+}
+
+static void spawn_flush_queued_ipc_messages(Item obj) {
+    if (!spawn_has_event_listener(obj, "message")) return;
+    Item key = spawn_pending_messages_key();
+    Item pending = js_property_get(obj, key);
+    if (get_type_id(pending) != LMD_TYPE_ARRAY) return;
+    js_property_set(obj, key, js_array_new(0));
+    int64_t len = js_array_length(pending);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(pending, i);
+        Item message = js_property_get(entry, make_string_item("message"));
+        Item handle = js_property_get(entry, make_string_item("handle"));
+        spawn_emit_ipc_message_or_queue(obj, message, handle);
     }
 }
 
@@ -765,13 +858,31 @@ static void spawn_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t*
     buf->len = buf->base ? suggested_size : 0;
 }
 
+static void spawn_clear_env(Item* env) {
+    if (env) env[0] = (Item){.item = 0};
+}
+
+static void spawn_release_process(JsSpawnProcess* sp) {
+    if (!sp) return;
+    // JS closures outlive libuv handles, so clear their native pointer slots
+    // before releasing the process state they were capturing.
+    spawn_clear_env(sp->stdin_env);
+    spawn_clear_env(sp->send_env);
+    spawn_clear_env(sp->disconnect_env);
+    spawn_clear_env(sp->kill_env);
+    spawn_clear_env(sp->ref_env);
+    spawn_clear_env(sp->unref_env);
+    spawn_clear_env(sp->abort_env);
+    if (sp->ipc_buf) mem_free(sp->ipc_buf);
+    mem_free(sp);
+}
+
 static void spawn_handle_close_cb(uv_handle_t* handle) {
     JsSpawnProcess* sp = (JsSpawnProcess*)handle->data;
     if (!sp) return;
     sp->handles_closed++;
     if (sp->handles_closed >= sp->handles_expected) {
-        if (sp->ipc_buf) mem_free(sp->ipc_buf);
-        mem_free(sp);
+        spawn_release_process(sp);
     }
 }
 
@@ -779,9 +890,12 @@ static void spawn_stdin_write_cb(uv_write_t* req, int status) {
     SpawnWriteReq* wr = (SpawnWriteReq*)req;
     JsSpawnProcess* sp = (JsSpawnProcess*)req->handle->data;
     if (wr->data) mem_free(wr->data);
+    size_t len = wr->len;
     mem_free(wr);
     (void)status;
     if (sp && sp->stdin_pending_writes > 0) sp->stdin_pending_writes--;
+    if (sp && sp->stdin_pending_bytes >= len) sp->stdin_pending_bytes -= len;
+    else if (sp) sp->stdin_pending_bytes = 0;
     if (sp && sp->stdin_pipe_active && sp->stdin_end_requested && sp->stdin_pending_writes == 0) {
         sp->stdin_pipe_active = false;
         uv_close((uv_handle_t*)&sp->stdin_pipe, spawn_handle_close_cb);
@@ -831,6 +945,7 @@ static void spawn_install_abort_signal(Item obj, JsSpawnProcess* sp, Item option
 
     Item* abort_env = js_alloc_env(1);
     abort_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    sp->abort_env = abort_env;
     Item listener = js_new_closure((void*)spawn_abort_with_env, 1, abort_env, 1);
     sp->abort_listener = listener;
 
@@ -860,7 +975,7 @@ static void spawn_remove_abort_signal(JsSpawnProcess* sp) {
     sp->abort_listener = make_js_undefined();
 }
 
-static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message) {
+static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message, uv_stream_t* send_handle) {
     if (!sp || !sp->ipc_pipe_active) return false;
     Item json = js_json_stringify(message);
     if (js_check_exception() || get_type_id(json) != LMD_TYPE_STRING) return false;
@@ -877,7 +992,13 @@ static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message) {
     memcpy(wr->data, s->chars, s->len);
     wr->data[s->len] = '\n';
     uv_buf_t buf = uv_buf_init(wr->data, (unsigned int)len);
-    int r = uv_write(&wr->req, (uv_stream_t*)&sp->ipc_pipe, &buf, 1, spawn_ipc_write_cb);
+    int r = 0;
+    if (send_handle) {
+        r = uv_write2(&wr->req, (uv_stream_t*)&sp->ipc_pipe, &buf, 1,
+                      send_handle, spawn_ipc_write_cb);
+    } else {
+        r = uv_write(&wr->req, (uv_stream_t*)&sp->ipc_pipe, &buf, 1, spawn_ipc_write_cb);
+    }
     if (r == 0) return true;
     mem_free(wr->data);
     mem_free(wr);
@@ -889,7 +1010,8 @@ static void spawn_ipc_handle_line(JsSpawnProcess* sp, const char* chars, int len
     Item json = make_string_item(chars, len);
     Item message = js_json_parse(json);
     if (js_check_exception()) return;
-    spawn_emit_event(sp->js_object, "message", &message, 1);
+    Item handle = js_net_accept_ipc_tcp_handle(&sp->ipc_pipe);
+    spawn_emit_ipc_message_or_queue(sp->js_object, message, handle);
 }
 
 static void spawn_ipc_consume_lines(JsSpawnProcess* sp) {
@@ -937,7 +1059,8 @@ static void spawn_ipc_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t
     }
 }
 
-static bool spawn_write_stdin_chunk(JsSpawnProcess* sp, Item chunk) {
+static bool spawn_write_stdin_chunk(JsSpawnProcess* sp, Item chunk, bool* out_should_continue) {
+    if (out_should_continue) *out_should_continue = true;
     if (!sp || !sp->stdin_pipe_active || is_nullish_item(chunk)) return true;
     const char* data = NULL;
     size_t len = 0;
@@ -971,12 +1094,21 @@ static bool spawn_write_stdin_chunk(JsSpawnProcess* sp, Item chunk) {
         mem_free(wr);
         return false;
     }
+    wr->len = len;
     memcpy(wr->data, data, len);
     uv_buf_t buf = uv_buf_init(wr->data, (unsigned int)len);
     sp->stdin_pending_writes++;
+    sp->stdin_pending_bytes += len;
     int r = uv_write(&wr->req, (uv_stream_t*)&sp->stdin_pipe, &buf, 1, spawn_stdin_write_cb);
-    if (r == 0) return true;
+    if (r == 0) {
+        // Writable.write() reports backpressure after queuing; without this
+        // official tests spin forever waiting for a false return.
+        if (out_should_continue) *out_should_continue = sp->stdin_pending_bytes < (size_t)(16 * 1024);
+        return true;
+    }
     sp->stdin_pending_writes--;
+    if (sp->stdin_pending_bytes >= len) sp->stdin_pending_bytes -= len;
+    else sp->stdin_pending_bytes = 0;
     mem_free(wr->data);
     mem_free(wr);
     return false;
@@ -992,7 +1124,9 @@ static Item js_spawn_stdin_write(Item env_item, Item chunk) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
     if (!sp || !sp->stdin_pipe_active || sp->stdin_end_requested) return (Item){.item = ITEM_FALSE};
-    return (Item){.item = b2it(spawn_write_stdin_chunk(sp, chunk))};
+    bool should_continue = true;
+    if (!spawn_write_stdin_chunk(sp, chunk, &should_continue)) return (Item){.item = ITEM_FALSE};
+    return (Item){.item = b2it(should_continue)};
 }
 
 static Item js_spawn_stdin_end(Item env_item, Item chunk) {
@@ -1003,7 +1137,7 @@ static Item js_spawn_stdin_end(Item env_item, Item chunk) {
     // stdin.write() and stdin.end() share one uv pipe; end must wait for
     // earlier queued writes or cat-style children never receive complete input.
     sp->stdin_end_requested = true;
-    if (!spawn_write_stdin_chunk(sp, chunk)) return make_js_undefined();
+    if (!spawn_write_stdin_chunk(sp, chunk, NULL)) return make_js_undefined();
     spawn_maybe_close_stdin(sp);
     return make_js_undefined();
 }
@@ -1023,8 +1157,10 @@ static void spawn_stdout_read_cb(uv_stream_t* stream, ssize_t nread, const uv_bu
     if (buf->base) mem_free(buf->base);
     if (nread < 0) {
         if (sp) {
+            sp->stdout_pipe_active = false;
             spawn_emit_event(stdout_obj, "end", NULL, 0);
             spawn_emit_event(stdout_obj, "close", NULL, 0);
+            spawn_maybe_emit_process_close(sp);
         }
         uv_close((uv_handle_t*)stream, spawn_handle_close_cb);
     }
@@ -1039,8 +1175,10 @@ static void spawn_stderr_read_cb(uv_stream_t* stream, ssize_t nread, const uv_bu
     if (buf->base) mem_free(buf->base);
     if (nread < 0) {
         if (sp) {
+            sp->stderr_pipe_active = false;
             spawn_emit_event(stderr_obj, "end", NULL, 0);
             spawn_emit_event(stderr_obj, "close", NULL, 0);
+            spawn_maybe_emit_process_close(sp);
         }
         uv_close((uv_handle_t*)stream, spawn_handle_close_cb);
     }
@@ -1050,6 +1188,7 @@ static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
     JsSpawnProcess* sp = (JsSpawnProcess*)process->data;
     if (!sp) return;
     sp->exit_code = (int)exit_status;
+    sp->exit_signal = term_signal;
     sp->process_exited = true;
     spawn_remove_abort_signal(sp);
 
@@ -1058,7 +1197,6 @@ static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
         term_signal == 0 ? ItemNull : spawn_signal_name_item(term_signal)
     };
     spawn_emit_event(sp->js_object, "exit", args, 2);
-    spawn_emit_event(sp->js_object, "close", args, 2);
 
     if (sp->stdin_pipe_active) {
         sp->stdin_pipe_active = false;
@@ -1069,6 +1207,7 @@ static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
         spawn_emit_disconnect_once(sp);
         uv_close((uv_handle_t*)&sp->ipc_pipe, spawn_handle_close_cb);
     }
+    spawn_maybe_emit_process_close(sp);
     uv_close((uv_handle_t*)process, spawn_handle_close_cb);
 }
 
@@ -1106,6 +1245,9 @@ static Item spawn_add_listener(Item self, Item event_item, Item callback) {
         js_array_push(existing, callback);
     } else {
         js_property_set(self, key, callback);
+    }
+    if (ev->len == 7 && memcmp(ev->chars, "message", 7) == 0) {
+        spawn_flush_queued_ipc_messages(self);
     }
     return self;
 }
@@ -1147,7 +1289,15 @@ static Item js_spawn_send_with_env(Item env_item, Item message, Item send_handle
         return (Item){.item = ITEM_FALSE};
     }
 
-    if (!spawn_ipc_write_json(sp, message)) return (Item){.item = ITEM_FALSE};
+    uv_stream_t* native_handle = NULL;
+    if (!is_nullish_item(send_handle) && !is_callable(send_handle)) {
+        native_handle = js_net_stream_from_ipc_send_handle(send_handle);
+        if (!native_handle) {
+            return js_throw_type_error_code("ERR_INVALID_HANDLE_TYPE", "This handle type cannot be sent");
+        }
+    }
+
+    if (!spawn_ipc_write_json(sp, message, native_handle)) return (Item){.item = ITEM_FALSE};
     schedule_spawn_send_callback(cb, make_js_undefined());
     return (Item){.item = ITEM_TRUE};
 }
@@ -1226,10 +1376,12 @@ static void install_ipc_surface(Item obj, JsSpawnProcess* sp) {
     spawn_set_connected(obj, true);
     Item* send_env = js_alloc_env(1);
     send_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    sp->send_env = send_env;
     js_property_set(obj, make_string_item("send"),
                     js_new_closure((void*)js_spawn_send_with_env, 4, send_env, 1));
     Item* disconnect_env = js_alloc_env(1);
     disconnect_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    sp->disconnect_env = disconnect_env;
     js_property_set(obj, make_string_item("disconnect"),
                     js_new_closure((void*)js_spawn_disconnect_with_env, 0, disconnect_env, 1));
 }
@@ -1237,16 +1389,19 @@ static void install_ipc_surface(Item obj, JsSpawnProcess* sp) {
 static void install_spawn_lifecycle_surface(Item obj, JsSpawnProcess* sp) {
     Item* kill_env = js_alloc_env(1);
     kill_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    sp->kill_env = kill_env;
     js_property_set(obj, make_string_item("kill"),
                     js_new_closure((void*)spawn_kill_with_env, 1, kill_env, 1));
 
     Item* ref_env = js_alloc_env(1);
     ref_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    sp->ref_env = ref_env;
     js_property_set(obj, make_string_item("ref"),
                     js_new_closure((void*)spawn_ref_with_env, 0, ref_env, 1));
 
     Item* unref_env = js_alloc_env(1);
     unref_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    sp->unref_env = unref_env;
     js_property_set(obj, make_string_item("unref"),
                     js_new_closure((void*)spawn_unref_with_env, 0, unref_env, 1));
 }
@@ -1266,7 +1421,11 @@ typedef struct SpawnRequest {
     bool shell;
     bool detached;
     bool ipc;
-    int stdio_mode[3]; // 0 default pipe/ignore, 1 inherit, 2 ignore
+    int stdio_mode[CP_STDIO_MAX];
+    int stdio_fd[CP_STDIO_MAX];
+    Item stdio_handle[CP_STDIO_MAX];
+    int stdio_count;
+    int ipc_index;
     Item env;
 } SpawnRequest;
 
@@ -1309,22 +1468,38 @@ static bool apply_stdio_ipc(SpawnRequest* req) {
         return false;
     }
     req->ipc = true;
+    req->ipc_index = req->stdio_count;
     return true;
 }
 
 static bool apply_stdio_entry(SpawnRequest* req, int index, Item entry) {
-    if (index < 0 || index >= 3) return true;
+    if (index < 0 || index >= CP_STDIO_MAX) return throw_invalid_stdio_value();
+    if (index + 1 > req->stdio_count) req->stdio_count = index + 1;
     if (is_nullish_item(entry)) return true;
     if (item_string_equals(entry, "ipc")) {
-        return apply_stdio_ipc(req);
+        if (!apply_stdio_ipc(req)) return false;
+        req->stdio_mode[index] = CP_STDIO_IPC;
+        req->ipc_index = index;
+        return true;
     }
     if (item_string_equals(entry, "inherit")) {
-        req->stdio_mode[index] = 1;
+        req->stdio_mode[index] = CP_STDIO_INHERIT;
+        req->stdio_fd[index] = index;
     } else if (item_string_equals(entry, "ignore")) {
-        req->stdio_mode[index] = 2;
+        req->stdio_mode[index] = CP_STDIO_IGNORE;
     } else if (item_string_equals(entry, "pipe") || item_string_equals(entry, "overlapped")) {
-        req->stdio_mode[index] = 0;
+        req->stdio_mode[index] = CP_STDIO_PIPE;
     } else if (get_type_id(entry) == LMD_TYPE_STRING) {
+        return throw_invalid_stdio_value();
+    } else if (get_type_id(entry) == LMD_TYPE_INT || get_type_id(entry) == LMD_TYPE_INT64) {
+        int64_t fd = get_type_id(entry) == LMD_TYPE_INT ? it2i(entry) : it2l(entry);
+        if (fd < 0 || fd > INT_MAX) return throw_invalid_stdio_value();
+        req->stdio_mode[index] = CP_STDIO_FD;
+        req->stdio_fd[index] = (int)fd;
+    } else if (is_object_item(entry)) {
+        req->stdio_mode[index] = CP_STDIO_HANDLE;
+        req->stdio_handle[index] = entry;
+    } else {
         return throw_invalid_stdio_value();
     }
     return true;
@@ -1335,21 +1510,24 @@ static bool normalize_stdio_options(SpawnRequest* req) {
     Item stdio = js_property_get(req->options, make_string_item("stdio"));
     if (is_nullish_item(stdio)) return true;
     if (item_string_equals(stdio, "inherit")) {
-        req->stdio_mode[0] = 1;
-        req->stdio_mode[1] = 1;
-        req->stdio_mode[2] = 1;
+        req->stdio_mode[0] = CP_STDIO_INHERIT;
+        req->stdio_mode[1] = CP_STDIO_INHERIT;
+        req->stdio_mode[2] = CP_STDIO_INHERIT;
+        req->stdio_fd[0] = 0;
+        req->stdio_fd[1] = 1;
+        req->stdio_fd[2] = 2;
         return true;
     }
     if (item_string_equals(stdio, "ignore")) {
-        req->stdio_mode[0] = 2;
-        req->stdio_mode[1] = 2;
-        req->stdio_mode[2] = 2;
+        req->stdio_mode[0] = CP_STDIO_IGNORE;
+        req->stdio_mode[1] = CP_STDIO_IGNORE;
+        req->stdio_mode[2] = CP_STDIO_IGNORE;
         return true;
     }
     if (item_string_equals(stdio, "pipe") || item_string_equals(stdio, "overlapped")) {
-        req->stdio_mode[0] = 0;
-        req->stdio_mode[1] = 0;
-        req->stdio_mode[2] = 0;
+        req->stdio_mode[0] = CP_STDIO_PIPE;
+        req->stdio_mode[1] = CP_STDIO_PIPE;
+        req->stdio_mode[2] = CP_STDIO_PIPE;
         return true;
     }
     if (get_type_id(stdio) == LMD_TYPE_STRING) {
@@ -1357,19 +1535,10 @@ static bool normalize_stdio_options(SpawnRequest* req) {
     }
     if (get_type_id(stdio) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(stdio);
-        for (int i = 0; i < 3 && i < len; i++) {
+        if (len > CP_STDIO_MAX) return throw_invalid_stdio_value();
+        req->stdio_count = len > 3 ? (int)len : 3;
+        for (int i = 0; i < len; i++) {
             if (!apply_stdio_entry(req, i, js_array_get_int(stdio, i))) return false;
-        }
-        for (int64_t i = 3; i < len; i++) {
-            Item entry = js_array_get_int(stdio, i);
-            if (item_string_equals(entry, "ipc")) {
-                if (!apply_stdio_ipc(req)) return false;
-            } else if (get_type_id(entry) == LMD_TYPE_STRING &&
-                       !item_string_equals(entry, "ignore") &&
-                       !item_string_equals(entry, "pipe") &&
-                       !item_string_equals(entry, "overlapped")) {
-                return throw_invalid_stdio_value();
-            }
         }
         return true;
     }
@@ -1383,9 +1552,13 @@ static bool normalize_spawn_request(Item rest_args, SpawnRequest* req) {
     req->shell = false;
     req->detached = false;
     req->ipc = false;
-    req->stdio_mode[0] = 0;
-    req->stdio_mode[1] = 0;
-    req->stdio_mode[2] = 0;
+    req->stdio_count = 3;
+    req->ipc_index = -1;
+    for (int i = 0; i < CP_STDIO_MAX; i++) {
+        req->stdio_mode[i] = i < 3 ? CP_STDIO_PIPE : CP_STDIO_IGNORE;
+        req->stdio_fd[i] = i;
+        req->stdio_handle[i] = make_js_undefined();
+    }
     req->env = make_js_undefined();
     Item process_obj = js_get_process_object_value();
     if (is_object_item(process_obj)) {
@@ -1629,9 +1802,9 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     if (req.ipc) install_ipc_surface(obj, sp);
 
     sp->handles_expected = 1;
-    sp->stdin_pipe_active = req.stdio_mode[0] == 0;
-    sp->stdout_pipe_active = req.stdio_mode[1] == 0;
-    sp->stderr_pipe_active = req.stdio_mode[2] == 0;
+    sp->stdin_pipe_active = req.stdio_mode[0] == CP_STDIO_PIPE;
+    sp->stdout_pipe_active = req.stdio_mode[1] == CP_STDIO_PIPE;
+    sp->stderr_pipe_active = req.stdio_mode[2] == CP_STDIO_PIPE;
     if (sp->stdin_pipe_active) {
         uv_pipe_init(loop, &sp->stdin_pipe, 0);
         sp->stdin_pipe.data = sp;
@@ -1639,6 +1812,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         Item stdin_obj = js_property_get(obj, make_string_item("stdin"));
         Item* stdin_env = js_alloc_env(1);
         stdin_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+        sp->stdin_env = stdin_env;
         js_property_set(stdin_obj, make_string_item("write"),
                         js_new_closure((void*)js_spawn_stdin_write, 1, stdin_env, 1));
         js_property_set(stdin_obj, make_string_item("end"),
@@ -1663,44 +1837,53 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         js_property_set(stderr_obj, make_string_item("writable"), (Item){.item = ITEM_FALSE});
     }
     if (req.ipc) {
-        uv_pipe_init(loop, &sp->ipc_pipe, 0);
+        // ipc stdio pipes need descriptor passing enabled for sendHandle.
+        uv_pipe_init(loop, &sp->ipc_pipe, 1);
         sp->ipc_pipe.data = sp;
         sp->ipc_pipe_active = true;
         sp->handles_expected++;
     }
 
-    uv_stdio_container_t stdio[4];
+    uv_stdio_container_t stdio[CP_STDIO_MAX];
+    int inherited_fds[CP_STDIO_MAX];
     memset(stdio, 0, sizeof(stdio));
-    if (req.stdio_mode[0] == 1) {
-        stdio[0].flags = UV_INHERIT_FD;
-        stdio[0].data.fd = 0;
-    } else if (req.stdio_mode[0] == 2) {
-        stdio[0].flags = UV_IGNORE;
-    } else {
-        stdio[0].flags = (uv_stdio_flags)(UV_CREATE_PIPE | UV_READABLE_PIPE);
-        stdio[0].data.stream = (uv_stream_t*)&sp->stdin_pipe;
-    }
-    if (req.stdio_mode[1] == 1) {
-        stdio[1].flags = UV_INHERIT_FD;
-        stdio[1].data.fd = 1;
-    } else if (req.stdio_mode[1] == 2) {
-        stdio[1].flags = UV_IGNORE;
-    } else {
-        stdio[1].flags = (uv_stdio_flags)(UV_CREATE_PIPE | UV_WRITABLE_PIPE);
-        stdio[1].data.stream = (uv_stream_t*)&sp->stdout_pipe;
-    }
-    if (req.stdio_mode[2] == 1) {
-        stdio[2].flags = UV_INHERIT_FD;
-        stdio[2].data.fd = 2;
-    } else if (req.stdio_mode[2] == 2) {
-        stdio[2].flags = UV_IGNORE;
-    } else {
-        stdio[2].flags = (uv_stdio_flags)(UV_CREATE_PIPE | UV_WRITABLE_PIPE);
-        stdio[2].data.stream = (uv_stream_t*)&sp->stderr_pipe;
-    }
-    if (req.ipc) {
-        stdio[3].flags = (uv_stdio_flags)(UV_CREATE_PIPE | UV_READABLE_PIPE | UV_WRITABLE_PIPE);
-        stdio[3].data.stream = (uv_stream_t*)&sp->ipc_pipe;
+    for (int i = 0; i < CP_STDIO_MAX; i++) inherited_fds[i] = -1;
+    int pre_spawn_error = 0;
+    for (int i = 0; i < req.stdio_count; i++) {
+        int mode = req.stdio_mode[i];
+        if (mode == CP_STDIO_IPC) {
+            stdio[i].flags = (uv_stdio_flags)(UV_CREATE_PIPE | UV_READABLE_PIPE | UV_WRITABLE_PIPE);
+            stdio[i].data.stream = (uv_stream_t*)&sp->ipc_pipe;
+        } else if (mode == CP_STDIO_IGNORE) {
+            stdio[i].flags = UV_IGNORE;
+        } else if (mode == CP_STDIO_INHERIT || mode == CP_STDIO_FD) {
+            stdio[i].flags = UV_INHERIT_FD;
+            stdio[i].data.fd = req.stdio_fd[i];
+        } else if (mode == CP_STDIO_HANDLE) {
+            int fd = js_net_dup_ipc_stdio_fd(req.stdio_handle[i]);
+            if (fd < 0) {
+                pre_spawn_error = UV_EBADF;
+                stdio[i].flags = UV_IGNORE;
+            } else {
+                // uv_spawn maps this duplicate into the child's stdio slot;
+                // close our copy after spawning so the parent keeps only its
+                // original server/socket ownership.
+                inherited_fds[i] = fd;
+                stdio[i].flags = UV_INHERIT_FD;
+                stdio[i].data.fd = fd;
+            }
+        } else if (i == 0) {
+            stdio[i].flags = (uv_stdio_flags)(UV_CREATE_PIPE | UV_READABLE_PIPE);
+            stdio[i].data.stream = (uv_stream_t*)&sp->stdin_pipe;
+        } else if (i == 1) {
+            stdio[i].flags = (uv_stdio_flags)(UV_CREATE_PIPE | UV_WRITABLE_PIPE);
+            stdio[i].data.stream = (uv_stream_t*)&sp->stdout_pipe;
+        } else if (i == 2) {
+            stdio[i].flags = (uv_stdio_flags)(UV_CREATE_PIPE | UV_WRITABLE_PIPE);
+            stdio[i].data.stream = (uv_stream_t*)&sp->stderr_pipe;
+        } else {
+            stdio[i].flags = UV_IGNORE;
+        }
     }
 
     uv_process_options_t opts;
@@ -1708,16 +1891,18 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     opts.file = req.shell ? argv[0] : req.file;
     opts.args = argv;
     opts.stdio = stdio;
-    opts.stdio_count = req.ipc ? 4 : 3;
+    opts.stdio_count = req.stdio_count;
     opts.exit_cb = spawn_exit_cb;
     // detached children must start in their own process group; otherwise
     // unref() cannot let the intermediate parent exit before its child.
     if (req.detached) opts.flags |= UV_PROCESS_DETACHED;
     int env_count = 0;
     char** envp = build_envp(req.env, &env_count);
+    char ipc_fd_buf[32];
+    snprintf(ipc_fd_buf, sizeof(ipc_fd_buf), "%d", req.ipc_index >= 0 ? req.ipc_index : 3);
     if (req.ipc && envp) {
         envp = envp_set(envp, &env_count, "LAMBDA_JS_IPC", "1");
-        envp = envp_set(envp, &env_count, "LAMBDA_JS_IPC_FD", "3");
+        envp = envp_set(envp, &env_count, "LAMBDA_JS_IPC_FD", ipc_fd_buf);
     }
     if (envp) opts.env = envp;
 
@@ -1742,9 +1927,15 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         memcpy(old_ipc_fd_buf, old_ipc_fd_env, (size_t)old_len);
         old_ipc_fd_buf[old_len] = '\0';
     }
-    if (req.ipc) setenv("LAMBDA_JS_IPC_FD", "3", 1);
+    if (req.ipc) setenv("LAMBDA_JS_IPC_FD", ipc_fd_buf, 1);
 
-    int r = uv_spawn(loop, &sp->process, &opts);
+    int r = pre_spawn_error ? pre_spawn_error : uv_spawn(loop, &sp->process, &opts);
+
+#ifndef _WIN32
+    for (int i = 0; i < req.stdio_count; i++) {
+        if (inherited_fds[i] >= 0) close(inherited_fds[i]);
+    }
+#endif
 
     if (req.ipc) {
         if (had_ipc_env) setenv("LAMBDA_JS_IPC", old_ipc_buf, 1);
@@ -1785,7 +1976,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         } else {
             sp->handles_closed++;
         }
-        if (sp->handles_closed >= sp->handles_expected) mem_free(sp);
+        if (sp->handles_closed >= sp->handles_expected) spawn_release_process(sp);
         return obj;
     }
 

@@ -202,6 +202,14 @@ static uint64_t func_name_hash(const void *item, uint64_t seed0, uint64_t seed1)
     return hashmap_sip(name, strlen(name), seed0, seed1);
 }
 
+static void func_name_entry_free(void* item) {
+    char** entry = (char**)item;
+    // func_name_map owns the duplicated MIR/debug names; without this the map
+    // shell frees but successful eval-created functions leak their name entry.
+    if (entry[0]) mem_free(entry[0]);
+    if (entry[1]) mem_free(entry[1]);
+}
+
 // Register a function name mapping: MIR name -> Lambda name
 // This is called during transpilation to build the name mapping table
 // For closures/anonymous functions, defer registration until transpile_fn_expr where we know the assign name
@@ -214,7 +222,7 @@ static void register_func_name(Transpiler* tp, AstFuncNode* fn_node) {
 
     // create the map if it doesn't exist
     if (!tp->func_name_map) {
-        tp->func_name_map = hashmap_new(sizeof(char*[2]), 64, 0, 0, func_name_hash, func_name_cmp, NULL, NULL);
+        tp->func_name_map = hashmap_new(sizeof(char*[2]), 64, 0, 0, func_name_hash, func_name_cmp, func_name_entry_free, NULL);
     }
 
     // build MIR name (internal name like _outer36)
@@ -237,7 +245,7 @@ static void register_func_name(Transpiler* tp, AstFuncNode* fn_node) {
 static void register_func_name_with_context(Transpiler* tp, AstFuncNode* fn_node) {
     // create the map if it doesn't exist
     if (!tp->func_name_map) {
-        tp->func_name_map = hashmap_new(sizeof(char*[2]), 64, 0, 0, func_name_hash, func_name_cmp, NULL, NULL);
+        tp->func_name_map = hashmap_new(sizeof(char*[2]), 64, 0, 0, func_name_hash, func_name_cmp, func_name_entry_free, NULL);
     }
 
     // build MIR name (internal name like _f317)
