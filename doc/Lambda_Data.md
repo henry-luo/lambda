@@ -141,6 +141,9 @@ nan
 
 ### String Literals
 
+String literals use double quotes. Single quotes do not create strings in
+Lambda; they create `symbol` values (see [Symbol Literals](#symbol-literals)).
+
 ```lambda
 // Basic strings
 "hello world"
@@ -205,6 +208,9 @@ Symbols are interned identifiers, often used as keys or tags:
 - Symbols are interned (only one copy exists in memory)
 - Comparison is O(1) pointer equality
 - Used for type tags, format identifiers, map keys
+- Single quotes are not alternate string syntax: `'name'` is a `symbol`,
+  `"name"` is a `string`, and `'name' == "name"` is `false`
+- Use `string(sym)` or `symbol(str)` when crossing the boundary explicitly
 
 #### Symbol Indexing and Slicing
 

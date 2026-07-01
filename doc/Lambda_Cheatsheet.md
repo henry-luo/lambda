@@ -129,6 +129,7 @@ inf  nan  // Special values
 string"
 'symbol'          // Symbol
 symbol            // Unquoted symbol
+'name' == "name"  // false: symbol != string
 ```
 
 **Binary:**

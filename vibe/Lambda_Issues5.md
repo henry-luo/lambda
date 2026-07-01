@@ -189,17 +189,20 @@ are emitted as normal HTML attributes.
 
 ## 9. Single-quote vs double-quote strings produce non-equal values
 
+**Status: No Fix / by design (2026-07-01)** — single-quoted literals are
+`symbol` values; double-quoted literals are `string` values. Equality does not
+coerce between `symbol` and `string`, even when their spelling is identical.
+
 ```lambda
 let t = 'name'    // symbol
 let s = "name"    // string
 print(t == s)     // false
 ```
 
-Parser output uses string `"indirect_ref"` for the `type:` field of
-indirect-reference maps. Comparing against `'indirect_ref'` (the natural
-"tag" form) silently never matches. Worth documenting prominently or
-adding implicit coercion for `==` between symbol and string of equal
-spelling.
+This is intentional: symbols are interned identifiers/tags, while strings are
+text data. When a field stores a string value such as `"indirect_ref"`, compare
+against a string literal, or convert explicitly with `string(...)` /
+`symbol(...)` at the boundary.
 
 ---
 
