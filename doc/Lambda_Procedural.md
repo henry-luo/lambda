@@ -411,7 +411,7 @@ pn main() {
         sum = sum + i
         i = i + 1
     }
-    print("Sum 1..10 = " ++ string(sum))
+    "Sum 1..10 = " ++ string(sum)
 }
 ```
 
@@ -429,7 +429,7 @@ Sum 1..10 = 55
 | Functional | `lambda script.ls` | Top-level expressions evaluated | Pure `fn`, `let`, expressions |
 | Procedural | `lambda run script.ls` | `pn main()` called | `pn`, `var`, assignment, loops, I/O |
 
-A functional script evaluates top-level expressions and prints results. A procedural script calls `main()` and relies on explicit `print()` or file output for results.
+A functional script evaluates top-level expressions and prints results. A procedural script calls `main()` and prints a non-null `main()` return value; explicit `print()` and file output are still available for side effects and incremental output.
 
 ### Calling Between `fn` and `pn`
 

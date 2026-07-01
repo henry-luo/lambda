@@ -747,9 +747,13 @@ int run_script_file(Runtime *runtime, const char *script_path, bool use_mir, boo
     print_root_item(output, output_input->root);
     log_debug("Script '%s' executed ====================", script_path);
     if (run_main) {
-        // just print to debug log
+        // pn main() returns a real value; suppress only null so print-only scripts do not emit "null".
         log_debug("%s", output->str);
-        printf("\n");  // help end any output, otherwise, may see '%' at the end of the line
+        if (output_input->root.type_id() == LMD_TYPE_NULL) {
+            printf("\n");  // help end any output, otherwise, may see '%' at the end of the line
+        } else {
+            printf("%s", output->str);
+        }
     } else {
         // printf("##### Script '%s' executed: #####\n", script_path);
         printf("%s", output->str);

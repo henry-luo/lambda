@@ -218,6 +218,7 @@ let tag = 'div'
 // Equality
 'hello' == 'hello'     // true (same symbol)
 'hello' == 'world'     // false
+'hello' == "hello"     // false (symbol and string are distinct types)
 
 // Type checking
 type('hello')          // symbol

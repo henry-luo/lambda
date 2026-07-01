@@ -6613,10 +6613,17 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
                                entry->node->node_type == AST_NODE_KEY_EXPR &&
                                tp->current_scope && tp->current_scope->is_proc);
         if (entry && !entry->is_mutable && !is_field_in_pn) {
-            record_semantic_error(tp, assign_node, ERR_IMMUTABLE_ASSIGNMENT,
-                "cannot assign to '%.*s': %s bindings are immutable",
-                (int)target_str.length, target_str.str,
-                entry->node->node_type == AST_NODE_PARAM ? "parameter" : "let");
+            if (entry->node->node_type == AST_NODE_PARAM) {
+                record_semantic_error(tp, assign_node, ERR_IMMUTABLE_ASSIGNMENT,
+                    "cannot assign to '%.*s': parameter bindings are immutable",
+                    (int)target_str.length, target_str.str);
+            }
+            else {
+                // immutable let bindings are intentional; point users at var for reassignment.
+                record_semantic_error(tp, assign_node, ERR_IMMUTABLE_ASSIGNMENT,
+                    "cannot assign to let binding '%.*s'. declare with `var` instead of `let`.",
+                    (int)target_str.length, target_str.str);
+            }
         }
 
         // build value expression
