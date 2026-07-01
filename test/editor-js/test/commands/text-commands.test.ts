@@ -13,7 +13,7 @@ import {
   cmdSetBlockType
 } from '../../src/commands/text-commands.js'
 import type { EditorState } from '../../src/commands/types.js'
-import type { Selection } from '../../src/model/types.js'
+import type { Child, Selection } from '../../src/model/types.js'
 import { marksAt, tagAt, textAt } from '../helpers/narrow.js'
 
 function state(docTag: string, blocks: any[], sel: Selection): EditorState {
@@ -245,6 +245,58 @@ describe('commands/cmdDeleteBackward — join backward (divergence fix)', () => 
     const s = state('doc', [node('p', [text('a')]), node('p', [])], caret([1], 0))
     const tx = cmdDeleteBackward(s)!
     expect(tx.doc_after.content).toEqual([node('p', [text('a')])])
+  })
+})
+
+// Source-model analogue of the retired native `deleteContentBackward`
+// DOM-parity tests (removed `test/js/editing`). Those asserted exact
+// contenteditable HTML produced by the native rich-edit engine; the JS editor
+// instead edits the structured doc model, so the equivalent behavior is:
+// backward joins run through `mergeInlines` (coalesce adjacent same-mark
+// leaves, keep distinct marks separate) and an emptied inline leaf is dropped.
+// Native-only behaviors with no source-model counterpart are intentionally not
+// migrated — DOM whitespace collapse, <br>/<hr> atom ranges, table-cell joins
+// (colspan/rowspan), word/soft-line modifier delete, and implicit nested-list
+// unwrap-on-backspace (the editor outdents via cmdOutdentListItem instead).
+describe('commands/cmdDeleteBackward — inline-aware join + cleanup (migrated from test/js/editing)', () => {
+  const bold = (t: string): Child => ({ kind: 'text', text: t, marks: { bold: true } })
+  const italic = (t: string): Child => ({ kind: 'text', text: t, marks: { italic: true } })
+
+  it('coalesces adjacent same-mark leaves when joining two blocks', () => {
+    const s = state('doc', [node('p', [bold('abc')]), node('p', [bold('def')])], caret([1, 0], 0))
+    const tx = cmdDeleteBackward(s)!
+    expect(tx.doc_after.content).toEqual([node('p', [bold('abcdef')])])
+    expect(tx.sel_after).toEqual(caret([0, 0], 3))
+  })
+
+  it('keeps distinct adjacent marks as separate leaves when joining', () => {
+    const s = state('doc', [node('p', [italic('abc')]), node('p', [bold('def')])], caret([1, 0], 0))
+    const tx = cmdDeleteBackward(s)!
+    expect(tx.doc_after.content).toEqual([node('p', [italic('abc'), bold('def')])])
+    expect(tx.sel_after).toEqual(caret([0, 0], 3))
+  })
+
+  it('joins a marked block into a plain-text block, preserving the incoming mark', () => {
+    const s = state('doc', [node('p', [text('abc')]), node('p', [bold('def')])], caret([1, 0], 0))
+    const tx = cmdDeleteBackward(s)!
+    expect(tx.doc_after.content).toEqual([node('p', [text('abc'), bold('def')])])
+    expect(tx.sel_after).toEqual(caret([0, 0], 3))
+  })
+
+  it('removes an emptied inline (marked) leaf on backspace, leaving neighbours', () => {
+    // <p>a<b>b</b>c</p>, caret inside the bold leaf — delete its only char, so
+    // the emptied bold leaf is dropped (the "inline cleanup" case).
+    const s = state('doc', [node('p', [text('a'), bold('b'), text('c')])], caret([0, 1], 1))
+    const tx = cmdDeleteBackward(s)!
+    expect(tx.doc_after.content).toEqual([node('p', [text('a'), text('c')])])
+  })
+
+  it('drops an empty previous block when joining backward into it', () => {
+    // <p></p><p>def</p>, backspace at the start of 'def' removes the empty block.
+    const s = state('doc', [node('p', []), node('p', [text('def')])], caret([1, 0], 0))
+    const tx = cmdDeleteBackward(s)!
+    expect(tx.doc_after.content).toEqual([node('p', [text('def')])])
+    expect(tx.sel_after).toEqual(caret([0, 0], 0))
   })
 })
 
