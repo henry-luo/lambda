@@ -569,6 +569,8 @@ typedef struct JsSpawnProcess {
     bool         stdout_pipe_active;
     bool         stderr_pipe_active;
     bool         ipc_pipe_active;
+    int          stdin_pending_writes;
+    bool         stdin_end_requested;
     bool         ipc_disconnect_emitted;
     bool         abort_error_emitted;
     int          abort_kill_signal;
@@ -756,7 +758,8 @@ static void spawn_stdin_write_cb(uv_write_t* req, int status) {
     if (wr->data) mem_free(wr->data);
     mem_free(wr);
     (void)status;
-    if (sp && sp->stdin_pipe_active) {
+    if (sp && sp->stdin_pending_writes > 0) sp->stdin_pending_writes--;
+    if (sp && sp->stdin_pipe_active && sp->stdin_end_requested && sp->stdin_pending_writes == 0) {
         sp->stdin_pipe_active = false;
         uv_close((uv_handle_t*)&sp->stdin_pipe, spawn_handle_close_cb);
     }
@@ -911,25 +914,74 @@ static void spawn_ipc_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t
     }
 }
 
+static bool spawn_write_stdin_chunk(JsSpawnProcess* sp, Item chunk) {
+    if (!sp || !sp->stdin_pipe_active || is_nullish_item(chunk)) return true;
+    const char* data = NULL;
+    size_t len = 0;
+    TypeId type = get_type_id(chunk);
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(chunk);
+        data = s->chars;
+        len = s->len;
+    } else if (js_is_typed_array(chunk)) {
+        data = (const char*)js_typed_array_current_data_ptr(chunk);
+        int byte_len = js_typed_array_byte_length(chunk);
+        len = byte_len > 0 ? (size_t)byte_len : 0;
+    } else if (js_is_arraybuffer(chunk)) {
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(chunk);
+        if (!ab || ab->detached) return true;
+        data = (const char*)ab->data;
+        len = ab->byte_length > 0 ? (size_t)ab->byte_length : 0;
+    } else {
+        Item str = js_to_string(chunk);
+        if (js_exception_pending || get_type_id(str) != LMD_TYPE_STRING) return false;
+        String* s = it2s(str);
+        data = s->chars;
+        len = s->len;
+    }
+    if (len == 0) return true;
+
+    SpawnWriteReq* wr = (SpawnWriteReq*)mem_calloc(1, sizeof(SpawnWriteReq), MEM_CAT_JS_RUNTIME);
+    if (!wr) return false;
+    wr->data = (char*)mem_alloc(len, MEM_CAT_JS_RUNTIME);
+    if (!wr->data) {
+        mem_free(wr);
+        return false;
+    }
+    memcpy(wr->data, data, len);
+    uv_buf_t buf = uv_buf_init(wr->data, (unsigned int)len);
+    sp->stdin_pending_writes++;
+    int r = uv_write(&wr->req, (uv_stream_t*)&sp->stdin_pipe, &buf, 1, spawn_stdin_write_cb);
+    if (r == 0) return true;
+    sp->stdin_pending_writes--;
+    mem_free(wr->data);
+    mem_free(wr);
+    return false;
+}
+
+static void spawn_maybe_close_stdin(JsSpawnProcess* sp) {
+    if (!sp || !sp->stdin_pipe_active || sp->stdin_pending_writes > 0) return;
+    sp->stdin_pipe_active = false;
+    uv_close((uv_handle_t*)&sp->stdin_pipe, spawn_handle_close_cb);
+}
+
+static Item js_spawn_stdin_write(Item env_item, Item chunk) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
+    if (!sp || !sp->stdin_pipe_active || sp->stdin_end_requested) return (Item){.item = ITEM_FALSE};
+    return (Item){.item = b2it(spawn_write_stdin_chunk(sp, chunk))};
+}
+
 static Item js_spawn_stdin_end(Item env_item, Item chunk) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
     if (!sp || !sp->stdin_pipe_active) return make_js_undefined();
 
-    if (get_type_id(chunk) == LMD_TYPE_STRING) {
-        String* s = it2s(chunk);
-        SpawnWriteReq* wr = (SpawnWriteReq*)mem_calloc(1, sizeof(SpawnWriteReq), MEM_CAT_JS_RUNTIME);
-        wr->data = (char*)mem_alloc(s->len, MEM_CAT_JS_RUNTIME);
-        memcpy(wr->data, s->chars, s->len);
-        uv_buf_t buf = uv_buf_init(wr->data, (unsigned int)s->len);
-        int r = uv_write(&wr->req, (uv_stream_t*)&sp->stdin_pipe, &buf, 1, spawn_stdin_write_cb);
-        if (r == 0) return make_js_undefined();
-        if (wr->data) mem_free(wr->data);
-        mem_free(wr);
-    }
-
-    sp->stdin_pipe_active = false;
-    uv_close((uv_handle_t*)&sp->stdin_pipe, spawn_handle_close_cb);
+    // stdin.write() and stdin.end() share one uv pipe; end must wait for
+    // earlier queued writes or cat-style children never receive complete input.
+    sp->stdin_end_requested = true;
+    if (!spawn_write_stdin_chunk(sp, chunk)) return make_js_undefined();
+    spawn_maybe_close_stdin(sp);
     return make_js_undefined();
 }
 
@@ -1560,18 +1612,28 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         Item stdin_obj = js_property_get(obj, make_string_item("stdin"));
         Item* stdin_env = js_alloc_env(1);
         stdin_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+        js_property_set(stdin_obj, make_string_item("write"),
+                        js_new_closure((void*)js_spawn_stdin_write, 1, stdin_env, 1));
         js_property_set(stdin_obj, make_string_item("end"),
                         js_new_closure((void*)js_spawn_stdin_end, 1, stdin_env, 1));
+        js_property_set(stdin_obj, make_string_item("writable"), (Item){.item = ITEM_TRUE});
+        js_property_set(stdin_obj, make_string_item("readable"), (Item){.item = ITEM_FALSE});
     }
     if (sp->stdout_pipe_active) {
         uv_pipe_init(loop, &sp->stdout_pipe, 0);
         sp->stdout_pipe.data = sp;
         sp->handles_expected++;
+        Item stdout_obj = js_property_get(obj, make_string_item("stdout"));
+        js_property_set(stdout_obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
+        js_property_set(stdout_obj, make_string_item("writable"), (Item){.item = ITEM_FALSE});
     }
     if (sp->stderr_pipe_active) {
         uv_pipe_init(loop, &sp->stderr_pipe, 0);
         sp->stderr_pipe.data = sp;
         sp->handles_expected++;
+        Item stderr_obj = js_property_get(obj, make_string_item("stderr"));
+        js_property_set(stderr_obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
+        js_property_set(stderr_obj, make_string_item("writable"), (Item){.item = ITEM_FALSE});
     }
     if (req.ipc) {
         uv_pipe_init(loop, &sp->ipc_pipe, 0);

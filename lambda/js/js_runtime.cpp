@@ -33743,6 +33743,27 @@ static void js_dc_channel_publish_with_stores(Item channel, Item message) {
     js_als_context_call_args(context, publish_fn, channel, &message, 1);
 }
 
+extern "C" Item js_diagnostics_channel_apply_store_context(const char* name, Item message) {
+    if (!name) return (Item){.item = ITEM_JS_UNDEFINED};
+    Item channel_name = js_dc_key(name);
+    Item channel = js_dc_channel_factory(channel_name);
+    Item context = js_dc_build_store_context(channel, message);
+    Item previous = js_als_apply_context(context);
+    js_dc_channel_publish_on(channel, message);
+    return previous;
+}
+
+extern "C" void js_diagnostics_channel_restore_context(Item previous) {
+    js_als_restore_context(previous);
+}
+
+extern "C" void js_diagnostics_channel_publish_named(const char* name, Item message) {
+    if (!name) return;
+    Item channel_name = js_dc_key(name);
+    Item channel = js_dc_channel_factory(channel_name);
+    js_dc_channel_publish_on(channel, message);
+}
+
 static Item js_dc_trace_promise_resolve(Item state, Item result) {
     if (get_type_id(state) != LMD_TYPE_ARRAY || js_array_length(state) < 3) return result;
     Item async_start_ch = js_array_get_int(state, 0);

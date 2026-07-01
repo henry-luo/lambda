@@ -2259,6 +2259,36 @@ static int node_test_current_worker_id(void) {
     return id > 0 ? id : 1;
 }
 
+extern "C" Item js_diagnostics_channel_apply_store_context(const char* name, Item message);
+extern "C" void js_diagnostics_channel_restore_context(Item previous);
+extern "C" void js_diagnostics_channel_publish_named(const char* name, Item message);
+
+static Item node_test_diagnostics_message(Item name, const char* type) {
+    Item message = js_new_object();
+    if (get_type_id(name) == LMD_TYPE_STRING) {
+        js_property_set(message, assert_make_string("name"), name);
+    } else {
+        js_property_set(message, assert_make_string("name"), assert_make_string(""));
+    }
+    js_property_set(message, assert_make_string("type"), assert_make_string(type ? type : "test"));
+    return message;
+}
+
+static Item node_test_diagnostics_start(Item message) {
+    // node:test diagnostics_channel bindStore installs ALS state before callbacks run.
+    return js_diagnostics_channel_apply_store_context("tracing:node.test:start", message);
+}
+
+static void node_test_diagnostics_error(Item message, Item error) {
+    js_property_set(message, assert_make_string("error"), error);
+    js_diagnostics_channel_publish_named("tracing:node.test:error", message);
+}
+
+static void node_test_diagnostics_end(Item message, Item previous_context) {
+    js_diagnostics_channel_publish_named("tracing:node.test:end", message);
+    js_diagnostics_channel_restore_context(previous_context);
+}
+
 // Build a test context (t) passed to test callbacks
 static Item js_build_test_context(void) {
     Item t = js_new_object();
@@ -2351,9 +2381,14 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
         js_property_set(t, assert_make_string("fullName"), name);
     }
 
+    Item diagnostics_message = node_test_diagnostics_message(name, "test");
+    Item diagnostics_previous = node_test_diagnostics_start(diagnostics_message);
+
     node_test_run_hooks(g_node_before_each_hooks, g_node_before_each_count);
     if (js_check_exception()) {
         Item err = js_clear_exception();
+        node_test_diagnostics_error(diagnostics_message, err);
+        node_test_diagnostics_end(diagnostics_message, diagnostics_previous);
         js_throw_value(err);
         return make_js_undefined();
     }
@@ -2376,6 +2411,8 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
         if (js_check_exception()) {
             if (!callback_threw) {
                 Item err = js_clear_exception();
+                node_test_diagnostics_error(diagnostics_message, err);
+                node_test_diagnostics_end(diagnostics_message, diagnostics_previous);
                 js_throw_value(err);
                 return make_js_undefined();
             }
@@ -2384,11 +2421,12 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
     }
 
     if (callback_threw) {
-        (void)callback_error;
+        node_test_diagnostics_error(diagnostics_message, callback_error);
         node_test_note_failure();
     } else {
         g_node_test_pass_count++;
     }
+    node_test_diagnostics_end(diagnostics_message, diagnostics_previous);
 
     return make_js_undefined();
 }
@@ -2417,14 +2455,20 @@ extern "C" Item js_node_test_describe(Item name, Item options_or_fn, Item fn) {
 
     int before_each_mark = g_node_before_each_count;
     int after_each_mark = g_node_after_each_count;
+    Item diagnostics_message = node_test_diagnostics_message(name, "suite");
+    Item diagnostics_previous = node_test_diagnostics_start(diagnostics_message);
     js_call_function(callback, make_js_undefined(), NULL, 0);
     js_microtask_flush();
     g_node_before_each_count = before_each_mark;
     g_node_after_each_count = after_each_mark;
     if (js_check_exception()) {
         Item err = js_clear_exception();
+        node_test_diagnostics_error(diagnostics_message, err);
+        node_test_diagnostics_end(diagnostics_message, diagnostics_previous);
         js_throw_value(err);
+        return make_js_undefined();
     }
+    node_test_diagnostics_end(diagnostics_message, diagnostics_previous);
     return make_js_undefined();
 }
 
