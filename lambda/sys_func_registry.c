@@ -34,6 +34,7 @@ extern Type TYPE_STRING, TYPE_SYMBOL, TYPE_DTIME, TYPE_ANY, TYPE_ERROR, TYPE_TYP
 extern Symbol* fn_symbol(Item item);     // JIT name: fn_symbol1
 extern Item fn_split(Item str, Item sep); // JIT name: fn_split2
 extern Item fn_replace(Item str, Item old_str, Item new_str); // JIT name: fn_replace3
+extern Item fn_replace4(Item str, Item old_str, Item new_str, Item options);
 
 // super property access (js_runtime.cpp)
 extern Item js_super_property_get(Item receiver, Item key);
@@ -571,6 +572,9 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSFUNC_REPLACE, "replace", 3, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_replace3", FPTR(fn_replace), NULL, NULL, false, 0},
+
+    {SYSFUNC_REPLACE4, "replace", 4, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_replace4", FPTR(fn_replace4), NULL, NULL, false, 0},
 
     {SYSFUNC_FIND, "find", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_find2", FPTR(fn_find2), NULL, NULL, false, 0},

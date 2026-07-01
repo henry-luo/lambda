@@ -660,12 +660,12 @@ Lambda uses `Path` literals with unified syntax for both local files and remote 
 
 ```lambda
 // Local paths
-let local = @./data/config.json          // Relative path
-let absolute = @/Users/name/project/     // Absolute path
+let local = /.data.'config.json'         // Relative path
+let absolute = /Users.name.project       // Absolute path
 
 // Remote URLs
-let api = @https://api.example.com/data  // HTTPS URL
-let file_url = @file:///path/to/file     // File URL
+let api = https.'api.example.com'.data   // HTTPS URL
+let file_url = /path.to.file             // File URL
 
 // All work uniformly with I/O functions
 let data = input(local)
@@ -682,43 +682,43 @@ Parse content from a file path or URL.
 
 | Function | Description | Example |
 |----------|-------------|---------|
-| `input(target)` | Parse target (auto-detect format) | `input(@./data.json)` |
+| `input(target)` | Parse target (auto-detect format) | `input(/.'data.json')` |
 | `input(target, format)` | Parse target with specified format | `input("data.json", 'json')` |
 
 **Supported Input Formats**: `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `rtf`, `pdf`, `css`, `ini`, `math`
 
 | Format | Description | Example |
 |--------|-------------|---------|
-| JSON | JavaScript Object Notation | `input(@./data.json, 'json')` |
-| XML | Extensible Markup Language | `input(@./config.xml, 'xml')` |
-| HTML | HyperText Markup Language | `input(@./page.html, 'html')` |
-| YAML | YAML Ain't Markup Language | `input(@./config.yaml, 'yaml')` |
-| TOML | Tom's Obvious Minimal Language | `input(@./config.toml, 'toml')` |
-| Markdown | Markdown markup | `input(@./doc.md, 'markdown')` |
-| CSV | Comma-Separated Values | `input(@./data.csv, 'csv')` |
-| LaTeX | LaTeX markup | `input(@./doc.tex, 'latex')` |
-| RTF | Rich Text Format | `input(@./doc.rtf, 'rtf')` |
-| PDF | Portable Document Format | `input(@./doc.pdf, 'pdf')` |
-| CSS | Cascading Style Sheets | `input(@./style.css, 'css')` |
-| INI | Configuration files | `input(@./config.ini, 'ini')` |
-| Math | Mathematical expressions | `input(@./formula.txt, 'math')` |
+| JSON | JavaScript Object Notation | `input(/.'data.json', 'json')` |
+| XML | Extensible Markup Language | `input(/.'config.xml', 'xml')` |
+| HTML | HyperText Markup Language | `input(/.'page.html', 'html')` |
+| YAML | YAML Ain't Markup Language | `input(/.'config.yaml', 'yaml')` |
+| TOML | Tom's Obvious Minimal Language | `input(/.'config.toml', 'toml')` |
+| Markdown | Markdown markup | `input(/.'doc.md', 'markdown')` |
+| CSV | Comma-Separated Values | `input(/.'data.csv', 'csv')` |
+| LaTeX | LaTeX markup | `input(/.'doc.tex', 'latex')` |
+| RTF | Rich Text Format | `input(/.'doc.rtf', 'rtf')` |
+| PDF | Portable Document Format | `input(/.'doc.pdf', 'pdf')` |
+| CSS | Cascading Style Sheets | `input(/.'style.css', 'css')` |
+| INI | Configuration files | `input(/.'config.ini', 'ini')` |
+| Math | Mathematical expressions | `input(/.'formula.txt', 'math')` |
 
 **Input Function Usage:**
 
 ```lambda
 // Basic input parsing with Path literals
-let data = input(@./file.json, 'json')
-let config = input(@./settings.yaml, 'yaml')
+let data = input(/.'file.json', 'json')
+let config = input(/.'settings.yaml', 'yaml')
 
 // Input from URLs
-let api_data = input(@https://api.example.com/users.json)
+let api_data = input(https.'api.example.com'.'users.json')
 
 // Input with options map
-let math_expr = input(@./formula.txt, {type: 'math', flavor: 'latex'})
-let csv_data = input(@./data.csv, {type: 'csv', delimiter: ','})
+let math_expr = input(/.'formula.txt', {type: 'math', flavor: 'latex'})
+let csv_data = input(/.'data.csv', {type: 'csv', delimiter: ','})
 
 // Auto-detection (based on file extension)
-let auto_data = input(@./document.md)  // Automatically detects Markdown
+let auto_data = input(/.'document.md')  // Automatically detects Markdown
 ```
 
 #### parse(str) / parse(str, format)
@@ -755,11 +755,11 @@ let csv^err = parse("name,age\nAlice,30\nBob,25", 'csv')
 Check if a file, directory, or URL target exists. Returns `true` or `false`.
 
 ```lambda
-let file_exists = exists(@./config.json)
-let dir_exists = exists(@./data/)
+let file_exists = exists(/.'config.json')
+let dir_exists = exists(/.data)
 
-if exists(@./cache.json) {
-    let cached = input(@./cache.json)
+if exists(/.'cache.json') {
+    let cached = input(/.'cache.json')
 }
 ```
 
@@ -792,18 +792,18 @@ Functions that have side effects (I/O, state changes). These are only available 
 | Function | Description | Example |
 |----------|-------------|---------|
 | `print(x)` | Print to console | `print("Hello!")` |
-| `output(data, target)` | Write data to file/URL | `output(data, @./out.json)` |
-| `data \|> target` | Pipe output (write/truncate) | `data \|> @./result.json` |
-| `data \|>> target` | Pipe output (append) | `line \|>> @./log.txt` |
-| `io.copy(src, dst)` | Copy file or directory | `io.copy(@./a.txt, @./b.txt)` |
-| `io.move(src, dst)` | Move/rename file or directory | `io.move(@./old, @./new)` |
-| `io.delete(target)` | Delete file or directory | `io.delete(@./temp.txt)` |
-| `io.mkdir(path)` | Create directory | `io.mkdir(@./data/)` |
-| `io.touch(path)` | Create empty file or update timestamp | `io.touch(@./flag.txt)` |
-| `io.symlink(target, link)` | Create symbolic link | `io.symlink(@./src, @./link)` |
-| `io.chmod(path, mode)` | Change file permissions | `io.chmod(@./script.sh, "755")` |
-| `io.rename(src, dst)` | Rename file or directory | `io.rename(@./a.txt, @./b.txt)` |
-| `io.fetch(url, options)` | HTTP fetch with options | `io.fetch(@https://api.example.com, {method: 'POST'})` |
+| `output(data, target)` | Write data to file/URL | `output(data, /.'out.json')` |
+| `data \|> target` | Pipe output (write/truncate) | `data \|> /.'result.json'` |
+| `data \|>> target` | Pipe output (append) | `line \|>> /.'log.txt'` |
+| `io.copy(src, dst)` | Copy file or directory | `io.copy(/.'a.txt', /.'b.txt')` |
+| `io.move(src, dst)` | Move/rename file or directory | `io.move(/.old, /.new)` |
+| `io.delete(target)` | Delete file or directory | `io.delete(/.'temp.txt')` |
+| `io.mkdir(path)` | Create directory | `io.mkdir(/.data)` |
+| `io.touch(path)` | Create empty file or update timestamp | `io.touch(/.'flag.txt')` |
+| `io.symlink(target, link)` | Create symbolic link | `io.symlink(/.src, /.link)` |
+| `io.chmod(path, mode)` | Change file permissions | `io.chmod(/.'script.sh', "755")` |
+| `io.rename(src, dst)` | Rename file or directory | `io.rename(/.'a.txt', /.'b.txt')` |
+| `io.fetch(url, options)` | HTTP fetch with options | `io.fetch(https.'api.example.com', {method: 'POST'})` |
 | `cmd(command, args...)` | Execute shell command | `cmd("ls", "-la")` |
 | `clock()` | Monotonic clock in seconds | `clock()` |
 
@@ -826,16 +826,16 @@ pn save_data() {
     let data = {name: "Alice", age: 30, scores: [95, 87, 92]}
 
     // Using Path literals
-    output(data, @./result.json)     // Writes JSON
-    output(data, @./result.yaml)     // Writes YAML
-    output(data, @./result.xml)      // Writes XML
+    output(data, /.'result.json')     // Writes JSON
+    output(data, /.'result.yaml')     // Writes YAML
+    output(data, /.'result.xml')      // Writes XML
 
     // Explicit format specification
-    output(data, @./data.txt, 'json')    // Force JSON format
-    output(data, @./data.out, 'yaml')    // Force YAML format
+    output(data, /.'data.txt', 'json')    // Force JSON format
+    output(data, /.'data.out', 'yaml')    // Force YAML format
 
     // With options
-    output(data, @./pretty.json, {type: 'json', indent: 4})
+    output(data, /.'pretty.json', {type: 'json', indent: 4})
 }
 ```
 
@@ -863,10 +863,10 @@ The `|>` operator writes data to a target, truncating existing content:
 ```lambda
 pn generate_report() {
     let report = {title: "Monthly Report", date: today(), items: [...]}
-    report |> @./reports/monthly.json
+    report |> /.reports.'monthly.json'
 
     // Equivalent to:
-    output(report, @./reports/monthly.json)
+    output(report, /.reports.'monthly.json')
 }
 ```
 
@@ -877,12 +877,12 @@ The `|>>` operator appends data to a target:
 ```lambda
 pn log_event(event) {
     let entry = format({time: now(), event: event}, 'json')
-    entry |>> @./logs/events.jsonl
+    entry |>> /.logs.'events.jsonl'
 }
 
 pn process_items(items) {
     for item in items {
-        process(item) |>> @./output.txt
+        process(item) |>> /.'output.txt'
     }
 }
 ```
@@ -892,9 +892,9 @@ pn process_items(items) {
 The `io` module provides procedural functions for file system operations.
 
 > **Import Styles:** The `io` module supports three import styles:
-> - **No import** (default): `io.copy(@./a, @./b)` — always available
-> - **Global import** (`import io;`): `copy(@./a, @./b)` — all functions without prefix
-> - **Aliased import** (`import f:io;`): `f.copy(@./a, @./b)` — use custom prefix
+> - **No import** (default): `io.copy(/.a, /.b)` — always available
+> - **Global import** (`import io;`): `copy(/.a, /.b)` — all functions without prefix
+> - **Aliased import** (`import f:io;`): `f.copy(/.a, /.b)` — use custom prefix
 
 ##### io.copy(source, destination)
 
@@ -902,8 +902,8 @@ Copy a file or directory to a new location.
 
 ```lambda
 pn backup_config() {
-    io.copy(@./config.json, @./backup/config.json)
-    io.copy(@./data/, @./backup/data/)  // Copy directory recursively
+    io.copy(/.'config.json', /.backup.'config.json')
+    io.copy(/.data, /.backup.data)  // Copy directory recursively
 }
 ```
 
@@ -913,7 +913,7 @@ Move or rename a file or directory.
 
 ```lambda
 pn archive_logs() {
-    io.move(@./logs/current.log, @./logs/archive/2024-01.log)
+    io.move(/.logs.'current.log', /.logs.archive.'2024-01.log')
 }
 ```
 
@@ -923,8 +923,8 @@ Delete a file or directory.
 
 ```lambda
 pn cleanup() {
-    io.delete(@./temp.txt)
-    io.delete(@./cache/)  // Delete directory recursively
+    io.delete(/.'temp.txt')
+    io.delete(/.cache)  // Delete directory recursively
 }
 ```
 
@@ -934,9 +934,9 @@ Create a directory (and parent directories if needed).
 
 ```lambda
 pn setup_project() {
-    io.mkdir(@./src/)
-    io.mkdir(@./tests/)
-    io.mkdir(@./docs/api/)  // Creates parent dirs too
+    io.mkdir(/.src)
+    io.mkdir(/.tests)
+    io.mkdir(/.docs.api)  // Creates parent dirs too
 }
 ```
 
@@ -946,7 +946,7 @@ Create an empty file or update its modification timestamp.
 
 ```lambda
 pn mark_complete() {
-    io.touch(@./build/.done)
+    io.touch(/.build.'.done')
 }
 ```
 
@@ -956,7 +956,7 @@ Create a symbolic link.
 
 ```lambda
 pn setup_links() {
-    io.symlink(@./config/production.json, @./config.json)
+    io.symlink(/.config.'production.json', /.'config.json')
 }
 ```
 
@@ -966,8 +966,8 @@ Change file permissions (Unix-style).
 
 ```lambda
 pn make_executable() {
-    io.chmod(@./scripts/deploy.sh, "755")
-    io.chmod(@./secrets.env, "600")
+    io.chmod(/.scripts.'deploy.sh', "755")
+    io.chmod(/.'secrets.env', "600")
 }
 ```
 
@@ -977,7 +977,7 @@ Rename a file or directory (alias for move within same directory).
 
 ```lambda
 pn rename_file() {
-    io.rename(@./draft.txt, @./final.txt)
+    io.rename(/.'draft.txt', /.'final.txt')
 }
 ```
 
@@ -988,13 +988,13 @@ Perform HTTP requests with full control over method, headers, and body.
 ```lambda
 pn api_operations() {
     // GET request
-    let data = io.fetch(@https://api.example.com/users, {
+    let data = io.fetch(https.'api.example.com'.users, {
         method: 'GET',
         headers: {Authorization: "Bearer token123"}
     })
 
     // POST request
-    let result = io.fetch(@https://api.example.com/users, {
+    let result = io.fetch(https.'api.example.com'.users, {
         method: 'POST',
         headers: {Content-Type: "application/json"},
         body: format({name: "Alice", email: "alice@example.com"}, 'json')

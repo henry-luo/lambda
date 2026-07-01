@@ -144,6 +144,15 @@ Lambda supports NumPy-style element-wise operations on arrays:
 [5] + [1, 2, 3]            // [6, 7, 8]
 ```
 
+`+` does not concatenate arrays or lists. It always means numeric addition:
+scalar broadcast for scalar-plus-sequence, and element-wise addition for
+sequence-plus-sequence. Use `++` when the intent is list/array concatenation:
+
+```lambda
+[1, 2] + [3, 4]            // [4, 6]
+[1, 2] ++ [3, 4]           // [1, 2, 3, 4]
+```
+
 ---
 
 ## Comparison Expressions
@@ -1237,6 +1246,7 @@ Available only in procedural (`pn`) functions. See [Lambda Procedural Programmin
 | `++`     | String concat | `"a" ++ "b"`  | `"ab"`         |
 | `++`     | Scalar concat | `42 ++ 10`    | `"4210"`       |
 | `++`     | Array concat  | `[1] ++ [2]`  | `[1, 2]`       |
+| `+`      | Element-wise array/list add | `[1] + [2]` | `[3]` |
 
 ---
 

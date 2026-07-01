@@ -6,100 +6,11 @@ Quick probes against the current `./lambda.exe` show that several items in
 this document have changed since they were first recorded. This was a
 spot-check, not a full audit of every issue below.
 
-### Confirmed fixed or improved
-
-- **#9 single-quote symbol vs double-quote string comparison**: improved.
-  Comparing `'name' == "name"` now fails at compile time with a useful
-  diagnostic instead of silently evaluating false:
-  `comparing 'symbol' with 'string' will always be false`.
-- **#14 / #29 `var` initialized with `""` or `null` cannot be reassigned**:
-  appears fixed in the checked cases. `var s = ""; s = "hello"` returned
-  `"hello"`, and `var x = null; x = { a: 1 }` returned `{ a: 1 }`.
-- **#2 / #28 simple `pn` implicit `if/else` return**: partially improved.
-  A simple `pn` whose body is only an `if/else` expression returned the
-  selected branch value in the checked case.
-
-### Confirmed still present
-
-- **#13 empty string/null conflation**: still present. `"" == null` returned
-  `true`, and `{ name: "" }.name` read back as `null`.
-- **#15 / #30 `let x = if (...) ... else ...` inside `pn`**: still present.
-  The checked `pn` returned `null` for the binding even when the condition was
-  true, while the equivalent `fn` returned the expected value.
-- **#3 multi-argument `print()`**: still present. `print("x=", 1)` compiled
-  but failed at runtime with `fn_call2: cannot call non-function value`.
-- **#5 chained comparisons without parentheses**: still present.
-  `fn is_digit(k) { k >= 48 and k <= 57 }` failed to parse.
-
-### Not rechecked in this pass
-
-The remaining parser, formatter, operator, element-literal, and nested-`pn`
-issues below were not rechecked during this quick status update and should be
-treated as unverified unless separately tested.
-
-## Phase 7 Addendum — Lambda Script Gotchas (2026)
-
-### 24. Empty `else if`/`else` block in `pn` silently breaks the loop
-
-**Severity: HIGH** — Adding an empty branch body (even just a comment) in a `pn` loop causes the loop to break downstream, often with all output disappearing and no error.
-
-```lambda
-pn driver(op) {
-  if (op == "a") { ... }
-  else if (op == "b") { /* comment only */ }   // BAD: breaks loop
-  else { ... }
-}
-```
-
-**Workaround:** Always put a no-op statement in the body, e.g. `st = st`.
-
-**Discovered:** While adding marker-op branches (BMC/EMC/etc.) in PDF interp driver.
-
----
-
-### 25. Sentinel string compare bug — `var s = " "` compares unequal to literal `" "`
-
-**Severity: HIGH** — Initializing a `var` with a string literal (e.g. `var s = " "`) and later comparing `s == " "` returns FALSE, even when both print as a single space. This breaks sentinel logic for state machines.
-
-**Workaround:** Use an explicit int flag (e.g. `has_pending_clip = 0/1`) to track state, not sentinel strings.
-
----
-
-### 26. Multi-line `++`/`or`/`and` chains break — newline ends the expression
-
-**Severity: HIGH** — A line ending in `++`, `or`, `and` (or any binary op) does NOT continue to the next line. The trailing `++ x` / `or x` becomes a bare expression that errors. For `++`, function body silently becomes a 2-element list `[error, real_result]`.
-
-**Workaround:** Wrap the whole chain in parens:
-
-```lambda
-let s = ("a" ++
-     "b" ++
-     "c")
-```
-
----
-
-### 28. `pn` does not implicitly return an `if/else` expression value
-
-**Severity: HIGH** — `pn` must use explicit `return` in every branch. Otherwise, callers get `null`/stale value, causing non-terminating loops.
-
----
-
-### 29. `var` declared with a "null-shaped" or empty-string initial value cannot be reassigned
-
-**Severity: HIGH** — `var s = ""` or `var x = null` locks the var as null-typed forever; subsequent assignments are dropped with no error. Use a non-null, non-empty sentinel (e.g. `" "` or `{}`) or an int flag.
-
----
-
-### 30. `let x = if (cond) a else b` returns `null` in `pn`
-
-**Severity: HIGH** — In `pn`, `let x = if (cond) a else b` always returns `null`, even when `cond` is true. Use imperative `if`/`else` with explicit assignment instead.
-
----
-
 ## 1. List `+` is element-wise add, not concat (silent footgun)
 
-**Severity: HIGH** — this caused an infinite loop with no diagnostic.
+**Status: ✅ No Fix / by design (2026-07-01)** — `+` is intentionally
+scalar-broadcast / element-wise arithmetic for arrays and lists. Use `++`
+for list/array concatenation.
 
 ```lambda
 let a = [1, 2]
@@ -114,18 +25,17 @@ shape with one element added. The list **never grows**, the loop variable
 never advances past the synthetic result of the wrong `r`, and the script
 spins forever without an error or warning.
 
-**Asks**:
-- `+` on heterogeneous-shape lists should at least warn or raise.
-- Or: make `+` on lists be concat (matching most scripting languages) and
-  reserve element-wise add for explicit `vec_add` / numeric vectors.
-- Documentation never explicitly says "use `++` for list concat"; the
-  `Lambda_Cheatsheet.md` shows `++` only for strings.
+**Resolution**:
+- Keep `+` as element-wise arithmetic for arrays/lists.
+- Document the rule explicitly: use `++` for list/array concat.
 
 ---
 
 ## 2. `pn` does not implicitly return an `if/else` expression value
 
-**Severity: HIGH** — also caused an infinite loop.
+**Status: ✅ Fixed (2026-07-01)** — verified against the current MIR path.
+`pn` now returns the last body value for both a whole-body `if/else` and a
+final `if/else` that follows procedural statements.
 
 ```lambda
 pn classify(c) {
@@ -134,26 +44,25 @@ pn classify(c) {
 }
 ```
 
-A caller `let r = classify("/")` receives `null` (or stale stack slot),
-even though the same body inside an `fn` returns the chosen branch.
+A caller `let r = classify("/")` now receives the chosen branch value, matching
+the documented rule that a `pn` returns its last expression when no explicit
+`return` is used.
 
-**Workaround**: every branch needs an explicit `return …`:
+The remaining broken case found during verification was a final `if/else`
+after an earlier procedural statement:
 
 ```lambda
 pn classify(c) {
-    if (c == "/") { return read_name(c) }
-    return read_other(c)
+    var seen = 1
+    if (c == "/") { seen + 10 }
+    else          { seen + 20 }
 }
 ```
 
-**Asks**:
-- Either make `pn` implicitly return the body value (consistent with `fn`),
-- Or have the transpiler emit a warning `"pn function reaches end of body
-  without return"` for any branch that doesn't end in `return`/`raise`/loop.
-
-The current behaviour silently propagates whatever happens to be in the
-return slot, which manifests as `0`/`null` and produces non-terminating
-loops downstream.
+That case previously returned `null` because the MIR lowering treated the
+final `if/else` as a procedural side-effect statement and discarded boxed
+branch values. It now returns the branch value (`11` or `21` in the focused
+probe), with coverage in `test/lambda/proc/proc_implicit_if_return.ls`.
 
 ---
 
@@ -709,6 +618,62 @@ bloats output and changes existing goldens).
 - Provide a `make_element(tag, attrs_map, children)` runtime constructor
   that takes the attribute set as an ordinary `map`.
 
+### 24. Empty `else if`/`else` block in `pn` silently breaks the loop
+
+**Severity: HIGH** — Adding an empty branch body (even just a comment) in a `pn` loop causes the loop to break downstream, often with all output disappearing and no error.
+
+```lambda
+pn driver(op) {
+  if (op == "a") { ... }
+  else if (op == "b") { /* comment only */ }   // BAD: breaks loop
+  else { ... }
+}
+```
+
+**Workaround:** Always put a no-op statement in the body, e.g. `st = st`.
+
+**Discovered:** While adding marker-op branches (BMC/EMC/etc.) in PDF interp driver.
+
+---
+
+### 25. Sentinel string compare bug — `var s = " "` compares unequal to literal `" "`
+
+**Severity: HIGH** — Initializing a `var` with a string literal (e.g. `var s = " "`) and later comparing `s == " "` returns FALSE, even when both print as a single space. This breaks sentinel logic for state machines.
+
+**Workaround:** Use an explicit int flag (e.g. `has_pending_clip = 0/1`) to track state, not sentinel strings.
+
+---
+
+### 26. Multi-line `++`/`or`/`and` chains break — newline ends the expression
+
+**Severity: HIGH** — A line ending in `++`, `or`, `and` (or any binary op) does NOT continue to the next line. The trailing `++ x` / `or x` becomes a bare expression that errors. For `++`, function body silently becomes a 2-element list `[error, real_result]`.
+
+**Workaround:** Wrap the whole chain in parens:
+
+```lambda
+let s = ("a" ++
+     "b" ++
+     "c")
+```
+
+---
+
+### 28. `pn` does not implicitly return an `if/else` expression value
+
+**Severity: HIGH** — `pn` must use explicit `return` in every branch. Otherwise, callers get `null`/stale value, causing non-terminating loops.
+
+---
+
+### 29. `var` declared with a "null-shaped" or empty-string initial value cannot be reassigned
+
+**Severity: HIGH** — `var s = ""` or `var x = null` locks the var as null-typed forever; subsequent assignments are dropped with no error. Use a non-null, non-empty sentinel (e.g. `" "` or `{}`) or an int flag.
+
+---
+
+### 30. `let x = if (cond) a else b` returns `null` in `pn`
+
+**Severity: HIGH** — In `pn`, `let x = if (cond) a else b` always returns `null`, even when `cond` is true. Use imperative `if`/`else` with explicit assignment instead.
+
 ---
 
 ## Summary of recurring themes
@@ -725,9 +690,9 @@ bloats output and changes existing goldens).
    `var x = null`) becomes a permanent null sink that swallows every
    subsequent assignment with no error. These two interact catastrophically
    with #15.
-3. **Operator overloading footguns** — list `+` is broadcast-add not
-   concat (#1); `'sym' == \"sym\"` is false (#9). Both compile cleanly
-   and silently produce wrong results.
+3. **Operator overloading gotchas** — list `+` is by-design broadcast /
+   element-wise add rather than concat (#1); `'sym' == \"sym\"` is false
+   (#9). The list case must be documented clearly as `++` for concat.
 4. **Error messages with raw type IDs** (`type 5 vs type 4`, #6) and
    misleading messages (`\"non-function value\"` for arity errors, #3)
    send users hunting in the wrong direction.

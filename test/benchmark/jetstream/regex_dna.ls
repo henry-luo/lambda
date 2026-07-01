@@ -6,7 +6,7 @@
 // Pattern for stripping FASTA headers and newlines
 type Fasta = ">" \.* "\n" | "\n"
 
-// 9 DNA matching patterns (lowercase to match pre-lowercased DNA)
+// 9 DNA matching patterns
 // JS originals use /ig flag for case-insensitive global matching
 type Pat1 = "agggtaaa" | "tttaccct"
 type Pat2 = ("c" | "g" | "t") "gggtaaa" | "tttaccc" ("a" | "c" | "g")
@@ -18,24 +18,14 @@ type Pat7 = "agggt" ("c" | "g" | "t") "aa" | "tt" ("a" | "c" | "g") "accct"
 type Pat8 = "agggta" ("c" | "g" | "t") "a" | "t" ("a" | "c" | "g") "taccct"
 type Pat9 = "agggtaa" ("c" | "g" | "t") | ("a" | "c" | "g") "ttaccct"
 
-// Replace first occurrence only (JS string.replace with string arg replaces first match only)
-pn replace_first(s, search, repl) {
-    var matches = find(s, search)
-    if (len(matches) == 0) {
-        return s
-    }
-    var pos = matches[0].index
-    var slen = len(search)
-    return slice(s, 0, pos) ++ repl ++ slice(s, pos + slen)
-}
-
 pn main() {
     // Load DNA data from JSON (not timed)
     let data^err = input("./test/benchmark/jetstream/regex_dna_data.json", "json")
     var dna_raw = data.dna_raw
-    var dna_lower = data.dna_lower
     var expected_output = data.expected_output
     var expected_dna = data.expected_dna
+    let match_options = {ignore_case: true}
+    let first_only = {limit: 1}
 
     var __t0 = clock()
     var pass = true
@@ -47,16 +37,16 @@ pn main() {
         // Strip FASTA headers and newlines
         dna = replace(dna, Fasta, "")
 
-        // Count regex matches on lowercase DNA
-        var c1 = len(find(dna_lower, Pat1))
-        var c2 = len(find(dna_lower, Pat2))
-        var c3 = len(find(dna_lower, Pat3))
-        var c4 = len(find(dna_lower, Pat4))
-        var c5 = len(find(dna_lower, Pat5))
-        var c6 = len(find(dna_lower, Pat6))
-        var c7 = len(find(dna_lower, Pat7))
-        var c8 = len(find(dna_lower, Pat8))
-        var c9 = len(find(dna_lower, Pat9))
+        // Count regex matches using the JS benchmark's /ig behavior
+        var c1 = len(find(dna, Pat1, match_options))
+        var c2 = len(find(dna, Pat2, match_options))
+        var c3 = len(find(dna, Pat3, match_options))
+        var c4 = len(find(dna, Pat4, match_options))
+        var c5 = len(find(dna, Pat5, match_options))
+        var c6 = len(find(dna, Pat6, match_options))
+        var c7 = len(find(dna, Pat7, match_options))
+        var c8 = len(find(dna, Pat8, match_options))
+        var c9 = len(find(dna, Pat9, match_options))
 
         // Build output string for validation
         var output = ""
@@ -77,18 +67,18 @@ pn main() {
             pass = false
         }
 
-        // Apply IUPAC substitutions on mixed-case DNA (first occurrence only)
-        dna = replace_first(dna, "B", "(c|g|t)")
-        dna = replace_first(dna, "D", "(a|g|t)")
-        dna = replace_first(dna, "H", "(a|c|t)")
-        dna = replace_first(dna, "K", "(g|t)")
-        dna = replace_first(dna, "M", "(a|c)")
-        dna = replace_first(dna, "N", "(a|c|g|t)")
-        dna = replace_first(dna, "R", "(a|g)")
-        dna = replace_first(dna, "S", "(c|t)")
-        dna = replace_first(dna, "V", "(a|c|g)")
-        dna = replace_first(dna, "W", "(a|t)")
-        dna = replace_first(dna, "Y", "(c|t)")
+        // Apply IUPAC substitutions on mixed-case DNA (JS string.replace replaces the first string match)
+        dna = replace(dna, "B", "(c|g|t)", first_only)
+        dna = replace(dna, "D", "(a|g|t)", first_only)
+        dna = replace(dna, "H", "(a|c|t)", first_only)
+        dna = replace(dna, "K", "(g|t)", first_only)
+        dna = replace(dna, "M", "(a|c)", first_only)
+        dna = replace(dna, "N", "(a|c|g|t)", first_only)
+        dna = replace(dna, "R", "(a|g)", first_only)
+        dna = replace(dna, "S", "(c|t)", first_only)
+        dna = replace(dna, "V", "(a|c|g)", first_only)
+        dna = replace(dna, "W", "(a|t)", first_only)
+        dna = replace(dna, "Y", "(c|t)", first_only)
 
         // Validate substituted DNA
         if (dna != expected_dna) {

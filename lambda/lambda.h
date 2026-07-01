@@ -367,6 +367,7 @@ typedef enum SysFunc {
     SYSFUNC_SPLIT3,         // split(str, sep, keep_delim) with 3 args
     SYSFUNC_JOIN,           // join(strs, sep) for strings
     SYSFUNC_REPLACE,
+    SYSFUNC_REPLACE4,       // replace(str, old, new, options) - with options
     SYSFUNC_FIND,           // find(str, pattern) - find all matches
     SYSFUNC_FIND3,          // find(str, pattern, options) - with options
     SYSFUNC_ORD,            // ord(str) - Unicode code point of first character
@@ -1628,6 +1629,7 @@ extern "C" {
     Item fn_join2(Item list, Item sep);
     Item fn_replace(Item str, Item old_str, Item new_str);
     Item fn_replace3(Item str, Item old_str, Item new_str);  // overloaded alias for fn_replace
+    Item fn_replace4(Item str, Item old_str, Item new_str, Item options);
     Item fn_find2(Item source, Item pattern);
     Item fn_find3(Item source, Item pattern, Item options);
 
