@@ -14,7 +14,7 @@ pub fn parse_log_entry(log_line: string) {
     // Simulate pattern extraction (in real Lambda, would use regex functions)
     let components = {
         timestamp: if (contains(log_line, "2024-")) 
-            substring(log_line, 0, 19) else null,
+            slice(log_line, 0, 19) else null,
         ip_address: if (contains(log_line, ".")) {
             // Simplified IP extraction
             let parts = string(log_line);  // would split on whitespace

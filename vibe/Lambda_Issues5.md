@@ -189,21 +189,27 @@ are emitted as normal HTML attributes.
 
 ## 9. Single-quote vs double-quote strings produce non-equal values
 
+**Status: ✅ No Fix / by design (2026-07-01)** — single-quoted literals are
+`symbol` values; double-quoted literals are `string` values. Equality does not
+coerce between `symbol` and `string`, even when their spelling is identical.
+
 ```lambda
 let t = 'name'    // symbol
 let s = "name"    // string
 print(t == s)     // false
 ```
 
-Parser output uses string `"indirect_ref"` for the `type:` field of
-indirect-reference maps. Comparing against `'indirect_ref'` (the natural
-"tag" form) silently never matches. Worth documenting prominently or
-adding implicit coercion for `==` between symbol and string of equal
-spelling.
+This is intentional: symbols are interned identifiers/tags, while strings are
+text data. When a field stores a string value such as `"indirect_ref"`, compare
+against a string literal, or convert explicitly with `string(...)` /
+`symbol(...)` at the boundary.
 
 ---
 
 ## 10. `let` bindings cannot be reassigned inside `pn`
+
+**Status: ✅ No Fix / by design (2026-07-01)** — `let` bindings are immutable in
+both `fn` and `pn`; use `var` for any local that must be reassigned.
 
 ```lambda
 pn build() {
@@ -212,17 +218,17 @@ pn build() {
 }
 ```
 
-Easy to forget — `var` is required for any value that participates in a
-loop or mutation. The error currently just says "cannot assign to let
-binding" which is fine, but it would be nice if the suggestion was
-"declare with `var` instead of `let`".
+The diagnostic now keeps this as a compile-time immutable-assignment error and
+adds the actionable hint: ``cannot assign to let binding 'm'. declare with `var` instead of `let`.``.
 
 ---
 
 ## 11. No string slicing builtin
 
-There is no `substring(s, a, b)` or `s[a..b]`. Every parser ends up
-hand-rolling:
+**Status: ✅ Fixed (2026-07-01)** — Lambda supports both `slice(string, a, b)`
+and range subscript syntax `str[a to b]` for string slicing.
+
+Original concern: without a primitive, every parser had to hand-roll:
 
 ```lambda
 pn slice_str(s, a, b) {
@@ -233,13 +239,9 @@ pn slice_str(s, a, b) {
 }
 ```
 
-This is O(n²) for repeated appends because `++` allocates a new string
-each iteration. For a tokenizer scanning a 250-byte content stream this
-is fine, but for any larger document it becomes the bottleneck.
-
-**Asks**:
-- Add `slice(s, a, b)` / `s[a..b]` / `string_slice(s, a, b)` as a
-  primitive that does a single allocation.
+That O(n²) repeated-append workaround is no longer needed. Use
+`slice(s, start, end)` for `[start, end)` slicing, `slice(s, start)` to slice to
+the end, or `s[start to end]` for inclusive range-subscript syntax.
 
 ---
 
