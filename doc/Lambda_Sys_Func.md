@@ -464,7 +464,7 @@ url_resolve("https://example.com/a/", "page.html") // "https://example.com/a/pag
 
 ### ord(str)
 
-Return the Unicode code point (integer) of the first character. Works on both strings and symbols.
+Return the Unicode code point (`int`) of the first character. Works on both strings and symbols.
 
 ```lambda
 ord("A")             // 65

@@ -121,21 +121,25 @@ range checker, of which a tokenizer has dozens.
 
 ## 6. `ord(c)` returns "wider int" that is rejected by `int` parameters
 
+**Status: ✅ Fixed (2026-07-01)** — `ord()` now has Lambda-level return type
+`int`. The C ABI still returns `int64_t`, but Unicode code points fit within
+the compact `int` value range, so callers annotated with `int` can accept
+`ord()` directly.
+
 ```lambda
 fn is_digit(k: int) { (k >= 48) and (k <= 57) }
 is_digit(ord("0"))
-// error[E201]: argument 1 has incompatible type 5, expected 4
+// true
 ```
 
-`ord` returns "type 5" (presumably `int64`), but the parameter annotation
-`int` accepts only "type 4". The fix is to drop the annotation entirely.
+`ord` previously returned "type 5" (`int64`), while the parameter annotation
+`int` accepted only "type 4". Since the widest Unicode scalar value is
+`U+10FFFF`, `ord()` does not need the wider Lambda `int64` type.
 
 **Asks**:
-- Auto-widen / coerce on call (this is just `int → int64`, never lossy).
-- Or expose the wider type by name (e.g. `int64`, `i64`) so users can
-  annotate without guessing.
-- The error message gives raw type IDs (`5`, `4`) instead of names — even
-  `expected int, got int64` would save a search.
+- Completed by narrowing `ord()`'s Lambda-level return type to `int`.
+- Completed by changing compile-time type mismatch diagnostics to print type
+  names instead of raw IDs, e.g. `expected int, got int64`.
 
 ---
 

@@ -1957,9 +1957,12 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                 compatible = typed_array_argument_compatible(arg, full_type);
             }
             if (arg->type && !compatible) {
+                // surface language type names; raw TypeId numbers made call errors hard to act on.
                 record_type_error(tp, line,
-                    "argument %d has incompatible type %d, expected %d",
-                    arg_index + 1, arg->type->type_id, expected_param->type_id);
+                    "argument %d expected %s, got %s",
+                    arg_index + 1,
+                    get_type_name(expected_param->type_id),
+                    get_type_name(arg->type->type_id));
                 if (!should_continue_transpiling(tp)) {
                     ast_node->type = &TYPE_ERROR;
                     return (AstNode*)ast_node;
@@ -6957,9 +6960,10 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
         if (!types_compatible(ast_node->body->type, fn_type->returned)) {
             int line = ts_node_start_point(func_node).row + 1;
             record_type_error(tp, line,
-                "function '%.*s' body returns type %d, declared return type %d",
+                "function '%.*s' body returns type %s, declared return type %s",
                 (int)ast_node->name->len, ast_node->name->chars,
-                ast_node->body->type->type_id, fn_type->returned->type_id);
+                get_type_name(ast_node->body->type->type_id),
+                get_type_name(fn_type->returned->type_id));
             // Keep declared return type for interface consistency
         }
     }

@@ -4018,7 +4018,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
 }
 
 // ord(str) - return Unicode code point of first character
-// ord native: String* in, int64_t out (no Item boxing)
+// ord native: String* in, int64_t ABI out; registry exposes compact Lambda int
 int64_t fn_ord_str(String* str) {
     if (!str || str->len == 0) return 0;
     uint32_t codepoint = 0;
