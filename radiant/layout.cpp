@@ -165,9 +165,9 @@ static bool root_child_margins_are_self_collapsing(ViewBlock* block) {
         return false;
     }
 
-    bool creates_bfc = block->scroller &&
-        (block->scroller->overflow_x != CSS_VALUE_VISIBLE ||
-         block->scroller->overflow_y != CSS_VALUE_VISIBLE);
+    // Use the shared BFC predicate so root-body overflow propagation does not
+    // make an otherwise empty body count both adjoining margins in root height.
+    bool creates_bfc = block_context_establishes_bfc(block);
     if (creates_bfc) return false;
     if (block->position && element_has_float(block)) return false;
     if (block->display.inner == CSS_VALUE_FLOW_ROOT ||
@@ -2077,8 +2077,8 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 ViewSpan* marker_span = lam::view_require_element(set_view(lycon, RDT_VIEW_MARKER, elem));
                 if (marker_span) {
                     marker_span->width = marker_prop->width;
-                    // Use CSS computed line-height for marker height (not raw font metrics)
-                    marker_span->height = lycon->block.line_height;
+                    marker_span->height = (marker_prop->loaded_image && marker_prop->height > 0.0f) ?
+                        marker_prop->height : lycon->block.line_height;
 
                     if (marker_prop->is_outside) {
                         // Outside marker: position to the left of content area
@@ -2093,7 +2093,19 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                         lycon->line.advance_x += marker_prop->width;
                     }
 
-                    if (!marker_prop->is_outside) {
+                    bool raster_image_raises_line = marker_prop->loaded_image &&
+                        marker_prop->loaded_image->format != IMAGE_FORMAT_SVG &&
+                        marker_span->height > lycon->block.line_height;
+                    if (raster_image_raises_line) {
+                        // Image markers participate in first-line metrics; ignore SVG fallback
+                        // dimensions so unresolved vector markers do not inflate list items.
+                        if (marker_span->height > lycon->line.max_ascender) {
+                            lycon->line.max_ascender = marker_span->height;
+                        }
+                        if (!lycon->line.start_view) lycon->line.start_view = (View*)marker_span;
+                        lycon->line.is_line_start = false;
+                        lycon->line.has_replaced_content = true;
+                    } else if (!marker_prop->is_outside) {
                         // Inside markers contribute to line height and mark the line as non-empty
                         // Apply half-leading model same as inline text (CSS 2.1 §10.8.1)
                         float ascender = 0, descender = 0;
@@ -2129,8 +2141,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                             lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_lh);
                         }
                     }
-                    // Outside markers: positioned outside content area, don't create a line box
-                    // They are placed at advance_y and will align with the first content line
 
                     log_debug("%s [MARKER] Laid out %s marker width=%.1f, height=%.1f at (%.1f, %.1f)", node->source_loc(),
                              marker_prop->is_outside ? "outside" : "inside",
