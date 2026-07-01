@@ -247,15 +247,10 @@ the end, or `s[start to end]` for inclusive range-subscript syntax.
 
 ## 12. `pn main()` does not auto-print its return value
 
-`./lambda.exe run script.ls` calls `main()` but discards the return value.
-Functional scripts without `pn main()` print the top-level expression.
-This dual behaviour is fine but not obvious from the help text — first
-runs of `pn main() { compute() }` produce zero output and look broken.
-
-**Asks**:
-- Either auto-print the return value of `main`,
-- Or make the help/REPL banner mention "use `print(...)` to emit output
-  from `pn main()`".
+**Status: ✅ Fixed (2026-07-01)** — `./lambda.exe run script.ls` now prints a
+non-null return value from `pn main()`, matching the functional script path's
+auto-print behavior. `null` returns remain silent so existing print-only
+procedural scripts do not emit a stray `null`.
 
 ---
 

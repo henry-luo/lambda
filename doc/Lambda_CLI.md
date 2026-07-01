@@ -95,7 +95,8 @@ Example snapshot:
 
 ### `run` — Run a Procedural Script
 
-Executes a Lambda script with `main()` procedure entry point.
+Executes a Lambda script with `main()` procedure entry point. If `main()`
+returns a non-null value, that value is printed to stdout.
 
 ```
 lambda run [options] <script.ls>
