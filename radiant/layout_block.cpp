@@ -178,6 +178,35 @@ static bool css_content_replacement_image(const CssValue* value, CssContentImage
     return false;
 }
 
+static bool css_content_value_is_image_set(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+        (css_function_name_is(value->data.function, "image-set") ||
+         css_function_name_is(value->data.function, "-webkit-image-set"))) {
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < value->data.list.count; i++) {
+            if (css_content_value_is_image_set(value->data.list.values[i])) return true;
+        }
+    }
+    return false;
+}
+
+static bool block_has_auto_content_image_set(ViewBlock* block) {
+    if (!block || !block->specified_style) return false;
+    CssDeclaration* content_decl = style_tree_get_declaration(block->specified_style, CSS_PROPERTY_CONTENT);
+    if (!content_decl || !css_content_value_is_image_set(content_decl->value)) return false;
+
+    bool width_auto = !block->blk || block->blk->given_width < 0.0f ||
+        block->blk->given_width_type == CSS_VALUE_AUTO ||
+        block->blk->given_width_type == CSS_VALUE__UNDEF;
+    bool height_auto = !block->blk || block->blk->given_height < 0.0f ||
+        block->blk->given_height_type == CSS_VALUE_AUTO ||
+        block->blk->given_height_type == CSS_VALUE__UNDEF;
+    return width_auto || height_auto;
+}
+
 static int pseudo_check_quote_content(const CssValue* value) {
     if (!value) return 0;
     if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
@@ -6073,6 +6102,26 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             log_debug("%s resolved percentage width %.0f%% against containing block %.1f -> %.1f",
                       block->source_loc(), block->blk->given_width_percent,
                       container_width, lycon->block.given_width);
+        }
+    }
+
+    if (block_has_auto_content_image_set(block)) {
+        // CSS content:image-set() does not make the originating element's auto
+        // block size fill its containing block; Chromium exposes a zero used box.
+        if (!block->blk) block->blk = alloc_block_prop(lycon);
+        if (lycon->block.given_width < 0.0f &&
+            (block->blk->given_width < 0.0f || block->blk->given_width_type == CSS_VALUE_AUTO ||
+             block->blk->given_width_type == CSS_VALUE__UNDEF)) {
+            lycon->block.given_width = 0.0f;
+            block->blk->given_width = 0.0f;
+            block->blk->given_width_type = CSS_VALUE__UNDEF;
+        }
+        if (lycon->block.given_height < 0.0f &&
+            (block->blk->given_height < 0.0f || block->blk->given_height_type == CSS_VALUE_AUTO ||
+             block->blk->given_height_type == CSS_VALUE__UNDEF)) {
+            lycon->block.given_height = 0.0f;
+            block->blk->given_height = 0.0f;
+            block->blk->given_height_type = CSS_VALUE__UNDEF;
         }
     }
 
