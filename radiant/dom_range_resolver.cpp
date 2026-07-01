@@ -1160,6 +1160,93 @@ static void find_text_edge_boundary_hit(View* node, float vx, float vy,
     }
 }
 
+// Replaced / void / form elements cannot hold a text caret inside them; a
+// click on one resolves to a caret in the parent, before or after the element.
+static bool is_non_caret_container_element(DomElement* el) {
+    if (!el) return true;
+    uintptr_t tag = el->tag();
+    return tag == HTM_TAG_IMG || tag == HTM_TAG_HR || tag == HTM_TAG_BR ||
+        tag == HTM_TAG_INPUT || tag == HTM_TAG_TEXTAREA || tag == HTM_TAG_SELECT ||
+        tag == HTM_TAG_VIDEO || tag == HTM_TAG_CANVAS || tag == HTM_TAG_EMBED ||
+        tag == HTM_TAG_OBJECT || tag == HTM_TAG_IFRAME || tag == HTM_TAG_AUDIO;
+}
+
+// True if the subtree holds any non-empty text — used to keep this fallback
+// scoped to genuinely empty elements (a block with text is handled by the
+// text-edge hit tests, which place the caret adjacent to its text).
+static bool subtree_has_caret_text(DomNode* node) {
+    if (!node) return false;
+    if (node->is_text()) {
+        DomText* t = lam::dom_require_text(node);
+        return t && dom_text_utf16_length(t) > 0;
+    }
+    if (!node->is_element()) return false;
+    for (DomNode* c = lam::dom_require_element(node)->first_child; c;
+         c = c->next_sibling) {
+        if (subtree_has_caret_text(c)) return true;
+    }
+    return false;
+}
+
+// Fallback for clicks that resolve to no text: place a caret inside the
+// deepest editable element whose layout box contains the point. Handles empty
+// editable blocks (an empty <li>, an empty <p>, a heading with no text) and
+// blocks whose only content is a replaced element (an image) — cases the
+// text-only hit tests cannot resolve, which otherwise leave the caret unplaced
+// or snapped to a neighbouring block's text. Returns true and fills *out with
+// an (element, child-index) boundary.
+static bool find_editable_element_boundary(View* node, float vx, float vy,
+                                           float abs_x, float abs_y,
+                                           bool inside_editable,
+                                           DomBoundary* out) {
+    if (!node || !node->view_type || !node->is_element()) return false;
+    float box_x = abs_x + node->x;
+    float box_y = abs_y + node->y;
+    // Point must lie within this element's border box; if not, no descendant
+    // (laid out within the box) can contain it either.
+    if (!(node->width > 0.0f && node->height > 0.0f &&
+          vx >= box_x && vx < box_x + node->width &&
+          vy >= box_y && vy < box_y + node->height)) {
+        return false;
+    }
+
+    DomElement* el = lam::dom_require_element(node);
+    // A replaced element (image, etc.) has no interior caret position: let the
+    // parent place a caret before/after it.
+    if (is_non_caret_container_element(el)) return false;
+
+    bool here_editable = inside_editable || is_rich_editable_host(node);
+    float cx = abs_x, cy = abs_y;
+    child_content_origin_for_view(node, abs_x, abs_y, &cx, &cy);
+
+    // Prefer the deepest editable element that also contains the point.
+    for (DomNode* c = el->first_child; c; c = c->next_sibling) {
+        if (find_editable_element_boundary(static_cast<View*>(c), vx, vy,
+                                           cx, cy, here_editable, out)) {
+            return true;
+        }
+    }
+
+    // Record a caret here only if this element is editable and holds no text
+    // (a block with text is left to the text-edge hit tests). The offset is the
+    // child index just past the children above the point, so an empty element
+    // yields (element, 0) and a block holding only an image yields a caret
+    // before or after the image.
+    if (!here_editable || subtree_has_caret_text(static_cast<DomNode*>(node))) {
+        return false;
+    }
+    uint32_t offset = 0;
+    for (DomNode* c = el->first_child; c; c = c->next_sibling) {
+        View* cv = static_cast<View*>(c);
+        if (!cv->view_type) continue;
+        if (vy >= cy + cv->y + cv->height) offset++;
+        else break;
+    }
+    out->node = static_cast<DomNode*>(node);
+    out->offset = offset;
+    return true;
+}
+
 // Linear-search byte offset within a TextRect for a local x position.
 static int byte_offset_for_x(DomText* text, const TextRect* r, float local_x) {
     if (!r || r->length <= 0) return r ? r->start_index : 0;
@@ -1204,6 +1291,15 @@ extern "C" DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float
             b.node = static_cast<DomNode*>(vertical_hit.text);
             b.offset = vertical_hit.offset;
             return b;
+        }
+        // Before snapping to a neighbouring block's text edge: if the click is
+        // inside an empty / non-text editable element (empty list item, empty
+        // paragraph, a block holding only an image), place the caret there so
+        // it is focusable/typable rather than jumping to an adjacent block.
+        DomBoundary elem_b = { NULL, 0 };
+        if (find_editable_element_boundary(root_view, vx, vy, 0, 0, false,
+                                           &elem_b)) {
+            return elem_b;
         }
         EditableBoundaryHit text_hit = { NULL, NULL, { NULL, 0 }, false, 0.0f, -1.0f };
         find_text_edge_boundary_hit(root_view, vx, vy, 0, 0, &text_hit);

@@ -1211,6 +1211,11 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             ev->expected_view_type = not_type;
             ev->negate_view_type = true;
         }
+        // Optional `target` selector: assert the caret is inside a specific
+        // node (the caret view is that element or a descendant of it). Lets
+        // tests pin the caret to a specific non-text element — e.g. an empty
+        // <li> — which view_type + offset alone cannot identify.
+        parse_target(reader, ev);
     }
     else if (strcmp(type_str, "assert_selection") == 0) {
         ev->type = SIM_EVENT_ASSERT_SELECTION;
@@ -2794,6 +2799,34 @@ static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
             log_error("event_sim: assert_caret - char_offset mismatch: expected %d, got %d",
                      ev->expected_char_offset, has_caret_offset ? caret_offset : -1);
             passed = false;
+        }
+    }
+
+    // Optional target: assert the caret lands inside a specific node. The caret
+    // view is the projected boundary view (the element itself for an
+    // element-offset caret such as an empty <li>, or a text view whose ancestor
+    // is the target for a text caret), so a match means caret_view == target or
+    // a descendant of it.
+    if (ev->target_selector) {
+        View* target = resolve_target_element(ev, doc);
+        if (!target) {
+            log_error("event_sim: assert_caret - target selector '%s' not found",
+                     ev->target_selector);
+            passed = false;
+        } else if (!caret_view) {
+            log_error("event_sim: assert_caret - no caret view (expected inside '%s')",
+                     ev->target_selector);
+            passed = false;
+        } else {
+            bool in_target = false;
+            for (DomNode* n = static_cast<DomNode*>(caret_view); n; n = n->parent) {
+                if (n == static_cast<DomNode*>(target)) { in_target = true; break; }
+            }
+            if (!in_target) {
+                log_error("event_sim: assert_caret - caret not inside target '%s'",
+                         ev->target_selector);
+                passed = false;
+            }
         }
     }
 
