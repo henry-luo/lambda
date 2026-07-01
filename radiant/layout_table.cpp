@@ -6201,7 +6201,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         // CSS 2.1 §17.4: A table with only a caption is valid; the caption
         // is rendered as a block box and the table wrapper box accommodates it.
         if (caption) {
-            // Use caption's explicit CSS width if set, otherwise use the container width
+            // Use caption's explicit CSS width if set, otherwise shrink auto
+            // captions to their intrinsic width before sizing the table wrapper.
             float table_width = caption->width;
             if (caption->blk && caption->blk->given_width > 0) {
                 table_width = caption->blk->given_width;
@@ -6212,6 +6213,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         table_width += caption->bound->border->width.left + caption->bound->border->width.right;
                     }
                 }
+            } else if (DomElement* caption_elem = caption->as_element()) {
+                IntrinsicSizes caption_sizes = layout_measure_intrinsic_widths(
+                    lycon, caption_elem, "caption-only table caption");
+                float available_width = lycon->block.content_width;
+                if (available_width <= 0.0f) {
+                    available_width = lycon->line.right - lycon->line.left;
+                }
+                AvailableSize available = (available_width > 0.0f)
+                    ? AvailableSize::make_definite(available_width)
+                    : AvailableSize::make_indefinite();
+                table_width = ceilf(compute_shrink_to_fit_width(
+                    caption_sizes.min_content, caption_sizes.max_content, available));
+                table_width = adjust_min_max_width(caption, table_width);
             }
             float caption_box_width = table_width;  // Caption's own box width (without margins)
             // CSS 2.1 §17.4: The table wrapper must accommodate the caption's margin-box.
@@ -9546,6 +9560,10 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
 
                 if (disp == CSS_VALUE_TABLE_CELL) {
                     has_cells = true;
+                    needs_table = true;
+                } else if (disp == CSS_VALUE_TABLE_CAPTION) {
+                    // Orphan captions are proper table children, so they need the
+                    // anonymous table wrapper but must not be wrapped in a row.
                     needs_table = true;
                 } else if (disp == CSS_VALUE_TABLE_ROW ||
                            disp == CSS_VALUE_TABLE_ROW_GROUP ||

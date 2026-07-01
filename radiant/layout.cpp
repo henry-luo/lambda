@@ -1360,6 +1360,33 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         float vertical_offset = calculate_vertical_align_offset(lycon, align, item_height,
             line_height, baseline_pos, item_baseline, valign_offset);
         block->y = lycon->block.advance_y + max(vertical_offset, 0) + (block->bound ? block->bound->margin.top : 0);
+        bool has_inline_margins = block->bound &&
+            (block->bound->margin.top != 0.0f ||
+             block->bound->margin.right != 0.0f ||
+             block->bound->margin.bottom != 0.0f ||
+             block->bound->margin.left != 0.0f);
+        bool zero_sized_atomic = block->width == 0.0f && block->height == 0.0f &&
+            !has_inline_margins;
+        if (zero_sized_atomic) {
+            bool vertical_lr_inline_context = false;
+            for (DomNode* wm_node = block->parent; wm_node; wm_node = wm_node->parent) {
+                if (!wm_node->is_element()) continue;
+                ViewBlock* wm_block = lam::view_as_block(static_cast<View*>(wm_node->as_element()));
+                if (!wm_block || !wm_block->embed || !wm_block->embed->flex) continue;
+                WritingMode wm = wm_block->embed->flex->writing_mode;
+                if (wm == WM_VERTICAL_LR) {
+                    vertical_lr_inline_context = true;
+                }
+                if (wm == WM_VERTICAL_LR || wm == WM_VERTICAL_RL || wm == WM_HORIZONTAL_TB) {
+                    break;
+                }
+            }
+            if (vertical_lr_inline_context) {
+                // The second vertical-align pass must preserve the vertical-lr
+                // inline-start static position chosen during inline-block placement.
+                block->y = lycon->block.advance_y;
+            }
+        }
         // CSS 2.1 §9.4.3: Apply relative positioning to inline-blocks after vertical
         // alignment has set the final y position. This is deferred from layout_block()
         // because the vertical alignment second pass overwrites y.

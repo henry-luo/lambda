@@ -7933,6 +7933,37 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // After the max_ascender update above, offset should already be >= 0
                 // for baseline-relative alignment.
                 block->y = lycon->block.advance_y + max(offset, 0.0f);  // block->bound->margin.top will be added below
+                bool has_inline_margins = block->bound &&
+                    (block->bound->margin.top != 0.0f ||
+                     block->bound->margin.right != 0.0f ||
+                     block->bound->margin.bottom != 0.0f ||
+                     block->bound->margin.left != 0.0f);
+                bool zero_sized_atomic = block->width == 0.0f && block->height == 0.0f &&
+                    !has_inline_margins;
+                if (zero_sized_atomic) {
+                    bool vertical_lr_inline_context = false;
+                    for (DomNode* wm_node = block->parent; wm_node; wm_node = wm_node->parent) {
+                        if (!wm_node->is_element()) continue;
+                        ViewBlock* wm_block = lam::view_as_block(static_cast<View*>(wm_node->as_element()));
+                        if (!wm_block || !wm_block->embed || !wm_block->embed->flex) continue;
+                        WritingMode wm = wm_block->embed->flex->writing_mode;
+                        if (wm == WM_VERTICAL_LR) {
+                            vertical_lr_inline_context = true;
+                        }
+                        if (wm == WM_VERTICAL_LR || wm == WM_VERTICAL_RL || wm == WM_HORIZONTAL_TB) {
+                            break;
+                        }
+                    }
+                    if (vertical_lr_inline_context) {
+                        float line_cross_size = lycon->block.line_height > 0.0f
+                            ? lycon->block.line_height
+                            : lycon->block.init_ascender + lycon->block.init_descender;
+                        // In vertical-lr inline flow, a zero-size atomic inline still exposes
+                        // its static position at inline-start and centered in the line box.
+                        block->x = lycon->line.left + line_cross_size / 2.0f;
+                        block->y = lycon->block.advance_y;
+                    }
+                }
                 log_debug("%s valigned-inline-block: offset %f, line %f, block %f, adv: %f, y: %f, va:%d", elmt->source_loc(),
                     offset, line_height, block->height, lycon->block.advance_y, block->y, valign);
                 // max_ascender/max_descender already updated above for
