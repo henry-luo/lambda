@@ -141,6 +141,90 @@ void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
     MIR_append_insn(mt->ctx, mt->current_func_item, label);
 }
 
+static int jm_find_current_scope_env_slot(JsMirTranspiler* mt, const char* name) {
+    if (!mt || !name || !mt->current_fc || !mt->current_fc->scope_env_names) return -1;
+    for (int i = 0; i < mt->current_fc->scope_env_count; i++) {
+        if (strcmp(mt->current_fc->scope_env_names[i], name) == 0) return i;
+    }
+    return -1;
+}
+
+void jm_emit_begin_lexical_this_rebind(JsMirTranspiler* mt, MIR_reg_t value,
+        JsMirLexicalThisRebind* state, bool restore_binding) {
+    if (!state) return;
+    memset(state, 0, sizeof(*state));
+    state->scope_env_slot = -1;
+    if (!mt || !value) return;
+
+    state->saved_force_closure_env_copy = mt->force_closure_env_copy;
+    state->restore_binding = restore_binding;
+    // field-initializer arrows must capture the instance/class `this`, not the
+    // enclosing function's shared `_js_this` cell that is restored after init.
+    mt->force_closure_env_copy = true;
+
+    JsMirVarEntry* js_this_var = jm_find_var(mt, "_js_this");
+    if (js_this_var && js_this_var->reg != 0) {
+        state->var_reg = js_this_var->reg;
+        if (restore_binding) {
+            state->saved_var_reg = jm_new_reg(mt, "prev_jt", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, state->saved_var_reg),
+                MIR_new_reg_op(mt->ctx, state->var_reg)));
+        }
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, state->var_reg),
+            MIR_new_reg_op(mt->ctx, value)));
+    }
+
+    int scope_slot = -1;
+    MIR_reg_t scope_reg = 0;
+    if (mt->scope_env_reg != 0) {
+        scope_slot = jm_find_current_scope_env_slot(mt, "_js_this");
+        if (scope_slot >= 0) scope_reg = mt->scope_env_reg;
+    }
+    if (scope_slot < 0 && js_this_var && js_this_var->scope_env_reg != 0 &&
+            js_this_var->scope_env_slot >= 0) {
+        scope_slot = js_this_var->scope_env_slot;
+        scope_reg = js_this_var->scope_env_reg;
+    }
+    if (scope_reg != 0 && scope_slot >= 0) {
+        state->scope_env_reg = scope_reg;
+        state->scope_env_slot = scope_slot;
+        if (restore_binding) {
+            state->saved_scope_env_value_reg = jm_new_reg(mt, "prev_jt_env", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, state->saved_scope_env_value_reg),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                    scope_slot * (int)sizeof(uint64_t), scope_reg, 0, 1)));
+        }
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                scope_slot * (int)sizeof(uint64_t), scope_reg, 0, 1),
+            MIR_new_reg_op(mt->ctx, value)));
+    }
+}
+
+void jm_emit_end_lexical_this_rebind(JsMirTranspiler* mt,
+        const JsMirLexicalThisRebind* state) {
+    if (!mt || !state) return;
+    if (state->restore_binding) {
+        if (state->scope_env_reg != 0 && state->scope_env_slot >= 0 &&
+                state->saved_scope_env_value_reg != 0) {
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                    state->scope_env_slot * (int)sizeof(uint64_t),
+                    state->scope_env_reg, 0, 1),
+                MIR_new_reg_op(mt->ctx, state->saved_scope_env_value_reg)));
+        }
+        if (state->var_reg != 0 && state->saved_var_reg != 0) {
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, state->var_reg),
+                MIR_new_reg_op(mt->ctx, state->saved_var_reg)));
+        }
+    }
+    mt->force_closure_env_copy = state->saved_force_closure_env_copy;
+}
+
 // Eval completion value: reset completion register to undefined.
 // Called at the point where the ES spec says "Let V = undefined" for compound statements.
 void jm_eval_cptn_reset(JsMirTranspiler* mt) {
