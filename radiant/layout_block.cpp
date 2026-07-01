@@ -73,6 +73,23 @@ static const char* pseudo_css_value_extract_name(const CssValue* value) {
     return nullptr;
 }
 
+static const char* css_content_replacement_url(const CssValue* value) {
+    if (!value) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_URL) return value->data.url;
+    if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+        value->data.function->name && strcmp(value->data.function->name, "url") == 0 &&
+        value->data.function->arg_count > 0 && value->data.function->args[0]) {
+        return pseudo_css_value_extract_name(value->data.function->args[0]);
+    }
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < value->data.list.count; i++) {
+            const char* url = css_content_replacement_url(value->data.list.values[i]);
+            if (url && url[0]) return url;
+        }
+    }
+    return nullptr;
+}
+
 static int pseudo_check_quote_content(const CssValue* value) {
     if (!value) return 0;
     if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
@@ -5747,11 +5764,20 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     bool image_height_auto_derived = false;
     bool image_width_auto_derived = false;
 
-    if (elmt_name == HTM_TAG_IMG) { // load image intrinsic width and height
-        log_debug("[IMG LAYOUT] Processing IMG element: %s", block->source_loc());
-        const char *value;
-        value = block->get_attribute("src");
-        log_debug("%s [IMG LAYOUT] src attribute: %s", block->source_loc(), value ? value : "NULL");
+    CssDeclaration* content_replacement_decl = nullptr;
+    const char* content_replacement_raw_url = nullptr;
+    if (elmt_name != HTM_TAG_IMG && block->display.inner == RDT_DISPLAY_REPLACED &&
+        block->specified_style) {
+        content_replacement_decl = style_tree_get_declaration(block->specified_style, CSS_PROPERTY_CONTENT);
+        content_replacement_raw_url = content_replacement_decl ?
+            css_content_replacement_url(content_replacement_decl->value) : nullptr;
+    }
+    bool is_generated_content_image = content_replacement_raw_url && content_replacement_raw_url[0];
+
+    if (elmt_name == HTM_TAG_IMG || is_generated_content_image) { // load image intrinsic width and height
+        log_debug("[IMG LAYOUT] Processing image-backed element: %s", block->source_loc());
+        const char *value = is_generated_content_image ? content_replacement_raw_url : block->get_attribute("src");
+        log_debug("%s [IMG LAYOUT] source: %s", block->source_loc(), value ? value : "NULL");
         bool has_src_attr = value && value[0] != '\0';
         if (has_src_attr) {
             size_t value_len = strlen(value);
@@ -5761,7 +5787,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             if (!block->embed) {
                 block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
             }
-            block->embed->img = load_image(lycon->ui_context, src->str);
+            char* resolved_content_url = is_generated_content_image ?
+                pseudo_resolve_content_url(lycon, content_replacement_decl, src->str) : nullptr;
+            const char* image_url = resolved_content_url ? resolved_content_url : src->str;
+            // content:url() has no src attribute, but it still creates a replaced image object.
+            block->embed->img = load_image(lycon->ui_context, image_url);
             strbuf_free(src);
             if (!block->embed->img) {
                 log_debug("%s Failed to load image", block->source_loc());

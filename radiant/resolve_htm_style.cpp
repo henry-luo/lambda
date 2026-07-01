@@ -705,6 +705,19 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->bound->border->bottom_color.r = block->bound->border->bottom_color.g =
             block->bound->border->bottom_color.b = 192; block->bound->border->bottom_color.a = 255;
         block->bound->border->right_color = block->bound->border->bottom_color;
+        const char* frameborder_attr = elmt->get_attribute("frameborder");
+        if (frameborder_attr) {
+            size_t frameborder_len = strlen(frameborder_attr);
+            bool no_frameborder = str_ieq_const(frameborder_attr, frameborder_len, "0") ||
+                str_ieq_const(frameborder_attr, frameborder_len, "no");
+            if (no_frameborder) {
+                // Legacy frameborder=0 suppresses the iframe UA border before author CSS overrides.
+                block->bound->border->width.top = block->bound->border->width.right =
+                    block->bound->border->width.bottom = block->bound->border->width.left = 0.0f;
+                block->bound->border->top_style = block->bound->border->right_style =
+                    block->bound->border->bottom_style = block->bound->border->left_style = CSS_VALUE_NONE;
+            }
+        }
         if (!block->scroller) { block->scroller = alloc_scroll_prop(lycon); }
         block->scroller->overflow_x = CSS_VALUE_AUTO;
         block->scroller->overflow_y = CSS_VALUE_AUTO;
@@ -769,7 +782,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             if (w_len > 0 && w_attr[0] >= '0' && w_attr[0] <= '9') {
                 StrView w_view = strview_init(w_attr, w_len);
                 float w = strview_to_int(&w_view);
-                if (w >= 0.0f) lycon->block.given_width = w;
+                if (w >= 0.0f) {
+                    // HTML dimension attributes must persist in BlockProp for later replaced layout passes.
+                    if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                    lycon->block.given_width = w;
+                    block->blk->given_width = w;
+                }
             }
         }
         if (const char* h_attr = elmt->get_attribute("height")) {
@@ -777,7 +795,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             if (h_len > 0 && h_attr[0] >= '0' && h_attr[0] <= '9') {
                 StrView h_view = strview_init(h_attr, h_len);
                 float h = strview_to_int(&h_view);
-                if (h >= 0.0f) lycon->block.given_height = h;
+                if (h >= 0.0f) {
+                    if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                    lycon->block.given_height = h;
+                    block->blk->given_height = h;
+                }
             }
         }
         break;
@@ -966,6 +988,29 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
             block->blk->given_width = 300;
             block->blk->given_height = 150;
+            if (const char* w_attr = elmt->get_attribute("width")) {
+                size_t w_len = strlen(w_attr);
+                if (w_len > 0 && w_attr[0] >= '0' && w_attr[0] <= '9') {
+                    StrView w_view = strview_init(w_attr, w_len);
+                    float w = strview_to_int(&w_view);
+                    if (w >= 0.0f) {
+                        // Object replaced sizing follows its legacy HTML dimension attributes.
+                        lycon->block.given_width = w;
+                        block->blk->given_width = w;
+                    }
+                }
+            }
+            if (const char* h_attr = elmt->get_attribute("height")) {
+                size_t h_len = strlen(h_attr);
+                if (h_len > 0 && h_attr[0] >= '0' && h_attr[0] <= '9') {
+                    StrView h_view = strview_init(h_attr, h_len);
+                    float h = strview_to_int(&h_view);
+                    if (h >= 0.0f) {
+                        lycon->block.given_height = h;
+                        block->blk->given_height = h;
+                    }
+                }
+            }
         }
         break;
     case HTM_TAG_HR:

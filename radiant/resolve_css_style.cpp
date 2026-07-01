@@ -1687,6 +1687,21 @@ DisplayValue blockify_display(DisplayValue display) {
     return display;
 }
 
+static bool css_content_value_has_image_url(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_URL) return true;
+    if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+        value->data.function->name && strcmp(value->data.function->name, "url") == 0) {
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < value->data.list.count; i++) {
+            if (css_content_value_has_image_url(value->data.list.values[i])) return true;
+        }
+    }
+    return false;
+}
+
 DisplayValue resolve_display_value(void* child) {
     // Resolve display value for a DOM node
     DisplayValue display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
@@ -1778,6 +1793,14 @@ DisplayValue resolve_display_value(void* child) {
                             (tag_id == HTM_TAG_OBJECT && dom_elem && dom_elem->get_attribute("data")) ||
                             (tag_id == HTM_TAG_AUDIO && dom_elem && dom_elem->has_attribute("controls")) ||
                             tag_id == HTM_TAG_EMBED);
+        if (dom_elem && dom_elem->specified_style) {
+            CssDeclaration* content_decl = style_tree_get_declaration(
+                dom_elem->specified_style, CSS_PROPERTY_CONTENT);
+            if (content_decl && css_content_value_has_image_url(content_decl->value)) {
+                // CSS Generated Content replaces the element contents with an image object.
+                is_replaced = true;
+            }
+        }
 
         // first, try to get display from CSS
         if (dom_elem && dom_elem->specified_style) {
@@ -2162,6 +2185,10 @@ DisplayValue resolve_display_value(void* child) {
         // CSS 2.1 §9.7: Apply blockification to tag-based defaults too.
         // Floated or absolutely positioned elements become block-level
         // regardless of how their display value was determined.
+        if (is_replaced && display.outer != CSS_VALUE_NONE && display.inner == CSS_VALUE_FLOW) {
+            // content:url() keeps the element's outer display but uses replaced sizing.
+            display.inner = RDT_DISPLAY_REPLACED;
+        }
         return needs_blockify ? blockify_display(display) : display;
     }
     return display;
