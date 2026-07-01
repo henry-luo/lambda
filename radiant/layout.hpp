@@ -210,6 +210,7 @@ typedef struct Linebox {
     float advance_x;
     float max_ascender;
     float max_descender;
+    float max_css_baseline_ascender; // font-table baseline for replaced inline alignment
     unsigned char* last_space;      // last space character in the line
     float last_space_pos;             // position of the last space in the line
     BreakKind last_space_kind;        // semantic type of the last recorded break opportunity

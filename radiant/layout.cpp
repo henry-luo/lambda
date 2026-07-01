@@ -1259,6 +1259,13 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         }
     }
     float baseline_pos = max(lycon->line.max_ascender, strut_baseline);
+    float replaced_baseline_pos = baseline_pos;
+    if (lycon->line.has_replaced_content &&
+        lycon->line.max_css_baseline_ascender > replaced_baseline_pos) {
+        // Replaced inline boxes align to the CSS font baseline, not the platform
+        // text DOMRect ascent used to size glyph bounds.
+        replaced_baseline_pos = lycon->line.max_css_baseline_ascender;
+    }
     // CSS 2.1 §10.8.1: When a bottom-aligned element is taller than the tentative
     // line box (from baseline-aligned content), the line box extends upward,
     // shifting the baseline down relative to the new line box top.
@@ -1357,8 +1364,10 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             // Recompute line_height with updated max_ascender
             line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
         }
+        float align_baseline_pos = block->display.inner == RDT_DISPLAY_REPLACED ?
+            replaced_baseline_pos : baseline_pos;
         float vertical_offset = calculate_vertical_align_offset(lycon, align, item_height,
-            line_height, baseline_pos, item_baseline, valign_offset);
+            line_height, align_baseline_pos, item_baseline, valign_offset);
         block->y = lycon->block.advance_y + max(vertical_offset, 0) + (block->bound ? block->bound->margin.top : 0);
         bool has_inline_margins = block->bound &&
             (block->bound->margin.top != 0.0f ||
