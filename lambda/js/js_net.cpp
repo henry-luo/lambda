@@ -2181,15 +2181,26 @@ static Item bound_socket_throw_adopted(void) {
                                     "Socket handle has been adopted");
 }
 
-static void bound_socket_close_fd(JsBoundSocket* bound) {
+static void bound_socket_free_after_close_cb(uv_handle_t* handle) {
+    JsBoundSocket* bound = (JsBoundSocket*)handle->data;
+    if (bound) mem_free(bound);
+}
+
+static void bound_socket_close_handle(JsBoundSocket* bound,
+                                      bool clear_js_handle,
+                                      bool free_after_close) {
     if (!bound || bound->closed) return;
-    uv_os_fd_t fd;
-    if (uv_fileno((const uv_handle_t*)&bound->tcp, &fd) == 0) {
-#ifndef _WIN32
-        close((int)fd);
-#endif
-    }
     bound->closed = true;
+    if (clear_js_handle && bound->js_object.item) {
+        js_property_set(bound->js_object, make_string_item("__bound_socket_handle__"),
+                        make_undefined_item());
+    }
+    if (!uv_is_closing((uv_handle_t*)&bound->tcp)) {
+        // The bound fd belongs to libuv; closing the uv handle avoids leaving a
+        // live handle around a manually closed descriptor after close/adoption.
+        uv_close((uv_handle_t*)&bound->tcp,
+                 free_after_close ? bound_socket_free_after_close_cb : NULL);
+    }
 }
 
 static int bound_socket_dup_fd(JsBoundSocket* bound) {
@@ -2202,7 +2213,7 @@ static int bound_socket_dup_fd(JsBoundSocket* bound) {
     int dup_fd = dup((int)fd);
     if (dup_fd >= 0) {
         bound->adopted = true;
-        bound_socket_close_fd(bound);
+        bound_socket_close_handle(bound, false, false);
     }
     return dup_fd;
 #endif
@@ -2256,7 +2267,7 @@ static Item js_bound_socket_close(void) {
     JsBoundSocket* bound = bound_socket_from_item(self);
     if (!bound) return make_undefined_item();
     if (bound->adopted) return bound_socket_throw_adopted();
-    bound_socket_close_fd(bound);
+    bound_socket_close_handle(bound, true, true);
     return make_undefined_item();
 }
 
@@ -2352,7 +2363,7 @@ extern "C" Item js_net_BoundSocket(Item options) {
     r = uv_tcp_bind(&bound->tcp, (const struct sockaddr*)&addr, (unsigned int)flags);
     if (r != 0) {
         Item err = make_uv_error(r, "bind", host_buf, port);
-        mem_free(bound);
+        bound_socket_close_handle(bound, false, true);
         js_throw_value(err);
         return ItemNull;
     }

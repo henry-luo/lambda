@@ -192,6 +192,7 @@ static bool js_stream_chunk_is_arraybuffer_view(Item chunk);
 static bool js_stream_is_abort_signal(Item signal);
 static Item js_stream_attach_abort_signal(Item signal, Item stream);
 static bool js_stream_is_stream_like(Item stream);
+static bool js_stream_is_native_stream(Item stream);
 static Item js_stream_iter_push(Item options_or_transform);
 static Item js_stream_iter_make_abort_error(void);
 static int64_t js_stream_iter_chunk_byte_length(Item chunk);
@@ -7719,12 +7720,40 @@ static Item js_stream_pipeline_to_stream(Item value) {
     return js_readable_from(value);
 }
 
+static bool js_stream_pipeline_destroy_erred_legacy_stream(Item stream) {
+    if (js_stream_is_native_stream(stream) ||
+        js_item_is_true(js_property_get(stream, key_destroyed))) {
+        return false;
+    }
+
+    Item destroy = js_property_get(stream, key_destroy);
+    if (get_type_id(destroy) == LMD_TYPE_FUNC) {
+        js_stream_mark_destroyed(stream);
+        // legacy streams keep cleanup on public destroy(); stored-error streams
+        // were skipped to avoid duplicate error emission, so invoke it directly.
+        js_call_function(destroy, stream, NULL, 0);
+        return true;
+    }
+
+    Item close = js_property_get(stream, make_string_item("close"));
+    if (get_type_id(close) == LMD_TYPE_FUNC) {
+        js_stream_mark_destroyed(stream);
+        js_call_function(close, stream, NULL, 0);
+        return true;
+    }
+
+    return false;
+}
+
 static void js_stream_pipeline_destroy_stream_array(Item streams, Item err) {
     if (!js_stream_has_error(err) || get_type_id(streams) != LMD_TYPE_ARRAY) return;
     int64_t len = js_array_length(streams);
     for (int64_t i = 0; i < len; i++) {
         Item stream = js_array_get_int(streams, i);
-        if (js_stream_has_stored_error(stream)) continue;
+        if (js_stream_has_stored_error(stream)) {
+            js_stream_pipeline_destroy_erred_legacy_stream(stream);
+            continue;
+        }
         js_stream_destroy(stream, err);
     }
 }

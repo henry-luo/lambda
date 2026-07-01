@@ -572,6 +572,7 @@ typedef struct JsSpawnProcess {
     int          stdin_pending_writes;
     bool         stdin_end_requested;
     bool         ipc_disconnect_emitted;
+    bool         ipc_unref_requested;
     bool         abort_error_emitted;
     int          abort_kill_signal;
     Item         abort_signal;
@@ -713,10 +714,24 @@ static Item spawn_kill_with_env(Item env_item, Item signal_item) {
 static Item spawn_ref_with_env(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
+    if (sp) sp->ipc_unref_requested = false;
     if (sp && !uv_is_closing((uv_handle_t*)&sp->process)) {
         uv_ref((uv_handle_t*)&sp->process);
     }
+    if (sp && sp->ipc_pipe_active && !uv_is_closing((uv_handle_t*)&sp->ipc_pipe)) {
+        uv_ref((uv_handle_t*)&sp->ipc_pipe);
+    }
     return js_get_this();
+}
+
+static Item spawn_unref_ipc_later(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
+    if (sp && sp->ipc_unref_requested &&
+        sp->ipc_pipe_active && !uv_is_closing((uv_handle_t*)&sp->ipc_pipe)) {
+        uv_unref((uv_handle_t*)&sp->ipc_pipe);
+    }
+    return make_js_undefined();
 }
 
 static Item spawn_unref_with_env(Item env_item) {
@@ -724,6 +739,14 @@ static Item spawn_unref_with_env(Item env_item) {
     JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
     if (sp && !uv_is_closing((uv_handle_t*)&sp->process)) {
         uv_unref((uv_handle_t*)&sp->process);
+    }
+    if (sp && sp->ipc_pipe_active && !uv_is_closing((uv_handle_t*)&sp->ipc_pipe)) {
+        sp->ipc_unref_requested = true;
+        // fork() owns an IPC pipe; unref it after one tick so stdout writes made
+        // just before ChildProcess.unref() can flush to the fork parent.
+        Item* tick_env = js_alloc_env(1);
+        tick_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+        js_next_tick_enqueue(js_new_closure((void*)spawn_unref_ipc_later, 0, tick_env, 1));
     }
     return js_get_this();
 }
@@ -1241,6 +1264,7 @@ typedef struct SpawnRequest {
     Item args;
     Item options;
     bool shell;
+    bool detached;
     bool ipc;
     int stdio_mode[3]; // 0 default pipe/ignore, 1 inherit, 2 ignore
     Item env;
@@ -1357,6 +1381,7 @@ static bool normalize_spawn_request(Item rest_args, SpawnRequest* req) {
     req->args = js_array_new(0);
     req->options = make_js_undefined();
     req->shell = false;
+    req->detached = false;
     req->ipc = false;
     req->stdio_mode[0] = 0;
     req->stdio_mode[1] = 0;
@@ -1419,6 +1444,8 @@ static bool normalize_spawn_request(Item rest_args, SpawnRequest* req) {
         if (!validate_uid_gid_option(req->options, "gid")) return false;
         Item shell = js_property_get(req->options, make_string_item("shell"));
         req->shell = get_type_id(shell) == LMD_TYPE_BOOL && it2b(shell);
+        Item detached = js_property_get(req->options, make_string_item("detached"));
+        req->detached = get_type_id(detached) == LMD_TYPE_BOOL && it2b(detached);
         Item env = js_property_get(req->options, make_string_item("env"));
         if (is_object_item(env)) req->env = env;
         if (!normalize_stdio_options(req)) return false;
@@ -1683,6 +1710,9 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     opts.stdio = stdio;
     opts.stdio_count = req.ipc ? 4 : 3;
     opts.exit_cb = spawn_exit_cb;
+    // detached children must start in their own process group; otherwise
+    // unref() cannot let the intermediate parent exit before its child.
+    if (req.detached) opts.flags |= UV_PROCESS_DETACHED;
     int env_count = 0;
     char** envp = build_envp(req.env, &env_count);
     if (req.ipc && envp) {
@@ -2008,6 +2038,10 @@ extern "C" Item js_cp_fork(Item rest_args) {
     if (is_object_item(options)) {
         Item env = js_property_get(options, make_string_item("env"));
         if (is_object_item(env)) js_property_set(spawn_options, make_string_item("env"), env);
+        Item detached = js_property_get(options, make_string_item("detached"));
+        if (get_type_id(detached) == LMD_TYPE_BOOL) {
+            js_property_set(spawn_options, make_string_item("detached"), detached);
+        }
     }
     Item stdio = js_array_new(0);
     bool copied_stdio = false;
@@ -2040,9 +2074,13 @@ extern "C" Item js_cp_fork(Item rest_args) {
         }
     }
     if (!copied_stdio) {
-        js_array_push(stdio, make_string_item("ignore"));
-        js_array_push(stdio, make_string_item("ignore"));
-        js_array_push(stdio, make_string_item("ignore"));
+        Item silent = is_object_item(options) ? js_property_get(options, make_string_item("silent")) : make_js_undefined();
+        const char* default_stdio = (get_type_id(silent) == LMD_TYPE_BOOL && it2b(silent)) ? "pipe" : "ignore";
+        // fork({ silent: true }) exposes child stdout/stderr; using the default
+        // ignore mode hides child output and breaks detached child handshakes.
+        js_array_push(stdio, make_string_item(default_stdio));
+        js_array_push(stdio, make_string_item(default_stdio));
+        js_array_push(stdio, make_string_item(default_stdio));
     }
     if (!stdio_has_ipc) js_array_push(stdio, make_string_item("ipc"));
     js_property_set(spawn_options, make_string_item("stdio"), stdio);

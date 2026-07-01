@@ -1958,9 +1958,12 @@ extern "C" void js_assert_reset(void) {
 static Item node_test_namespace = {0};
 static Item g_node_before_each_store = {0};
 static Item g_node_after_each_store = {0};
+static Item g_node_test_event_queue = {0};
 static int g_node_test_total_count = 0;
 static int g_node_test_pass_count = 0;
 static int g_node_test_fail_count = 0;
+static int64_t g_node_test_next_id = 1;
+static bool g_node_test_roots_registered = false;
 
 #define MAX_NODE_TEST_HOOKS 64
 static Item g_node_before_each_hooks[MAX_NODE_TEST_HOOKS];
@@ -2231,7 +2234,75 @@ static bool node_test_is_promise_like(Item value) {
 
 static void node_test_note_failure(void) {
     g_node_test_fail_count++;
+    if (get_type_id(g_node_test_event_queue) == LMD_TYPE_ARRAY) return;
     js_process_set_exitCode((Item){.item = i2it(1)});
+}
+
+static void node_test_register_roots(void) {
+    if (g_node_test_roots_registered) return;
+    heap_register_gc_root(&g_node_test_event_queue.item);
+    g_node_test_roots_registered = true;
+}
+
+static bool node_test_event_queue_active(void) {
+    return get_type_id(g_node_test_event_queue) == LMD_TYPE_ARRAY;
+}
+
+static void node_test_emit_event(const char* type, Item name, int64_t test_id, Item error) {
+    if (!node_test_event_queue_active()) return;
+    Item event = js_new_object();
+    Item data = js_new_object();
+    js_property_set(event, assert_make_string("type"), assert_make_string(type));
+    js_property_set(data, assert_make_string("name"),
+        get_type_id(name) == LMD_TYPE_STRING ? name : assert_make_string(""));
+    js_property_set(data, assert_make_string("testId"), (Item){.item = i2it((int)test_id)});
+    if (get_type_id(error) != LMD_TYPE_UNDEFINED) {
+        js_property_set(data, assert_make_string("error"), error);
+    }
+    js_property_set(event, assert_make_string("data"), data);
+    js_array_push(g_node_test_event_queue, event);
+}
+
+static Item node_test_event_stream_identity(void) {
+    return js_get_this();
+}
+
+static Item node_test_event_stream_next(void) {
+    extern Item js_promise_resolve(Item value);
+
+    Item self = js_get_this();
+    Item events = js_property_get(self, assert_make_string("__events__"));
+    Item index_item = js_property_get(self, assert_make_string("__index__"));
+    int64_t index = get_type_id(index_item) == LMD_TYPE_INT ? it2i(index_item) : 0;
+    int64_t len = get_type_id(events) == LMD_TYPE_ARRAY ? js_array_length(events) : 0;
+
+    Item result = js_new_object();
+    if (index < len) {
+        js_property_set(result, assert_make_string("value"), js_array_get_int(events, index));
+        js_property_set(result, assert_make_string("done"), (Item){.item = b2it(false)});
+        js_property_set(self, assert_make_string("__index__"), (Item){.item = i2it(index + 1)});
+    } else {
+        js_property_set(result, assert_make_string("value"), make_js_undefined());
+        js_property_set(result, assert_make_string("done"), (Item){.item = b2it(true)});
+    }
+    return js_promise_resolve(result);
+}
+
+static Item node_test_make_event_stream(Item events) {
+    Item stream = js_new_object();
+    js_property_set(stream, assert_make_string("__events__"), events);
+    js_property_set(stream, assert_make_string("__index__"), (Item){.item = i2it(0)});
+    js_property_set(stream, assert_make_string("next"),
+                    js_new_function((void*)node_test_event_stream_next, 0));
+    Item identity = js_new_function((void*)node_test_event_stream_identity, 0);
+    Item async_key = assert_make_string("__sym_5");
+    Item iter_key = assert_make_string("__sym_1");
+    // node:test run() returns an async iterable stream, not a materialized array.
+    js_property_set(stream, async_key, identity);
+    js_property_set(stream, iter_key, identity);
+    js_mark_non_enumerable(stream, async_key);
+    js_mark_non_enumerable(stream, iter_key);
+    return stream;
 }
 
 extern "C" void js_node_test_reset_counts(void) {
@@ -2371,6 +2442,7 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
     }
 
     g_node_test_total_count++;
+    int64_t test_id = g_node_test_next_id++;
 
     // create test context with t.mock, t.assert, t.skip, etc.
     Item t = js_build_test_context();
@@ -2381,12 +2453,20 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
         js_property_set(t, assert_make_string("fullName"), name);
     }
 
+    // node:test run() consumers need instance IDs, not source-location IDs:
+    // concurrent generated subtests at the same callsite must stay distinct.
+    node_test_emit_event("test:enqueue", name, test_id, make_js_undefined());
+    node_test_emit_event("test:dequeue", name, test_id, make_js_undefined());
+    node_test_emit_event("test:start", name, test_id, make_js_undefined());
+
     Item diagnostics_message = node_test_diagnostics_message(name, "test");
     Item diagnostics_previous = node_test_diagnostics_start(diagnostics_message);
 
     node_test_run_hooks(g_node_before_each_hooks, g_node_before_each_count);
     if (js_check_exception()) {
         Item err = js_clear_exception();
+        node_test_emit_event("test:fail", name, test_id, err);
+        node_test_emit_event("test:complete", name, test_id, make_js_undefined());
         node_test_diagnostics_error(diagnostics_message, err);
         node_test_diagnostics_end(diagnostics_message, diagnostics_previous);
         js_throw_value(err);
@@ -2404,6 +2484,13 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
     if (js_check_exception()) {
         callback_error = js_clear_exception();
         callback_threw = true;
+    }
+    if (!callback_threw && callback_is_async) {
+        const char* state = js_promise_state_name(callback_result);
+        if (state && strcmp(state, "rejected") == 0) {
+            callback_error = make_js_undefined();
+            callback_threw = true;
+        }
     }
 
     if (!callback_is_async) {
@@ -2423,9 +2510,12 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
     if (callback_threw) {
         node_test_diagnostics_error(diagnostics_message, callback_error);
         node_test_note_failure();
+        node_test_emit_event("test:fail", name, test_id, callback_error);
     } else {
         g_node_test_pass_count++;
+        node_test_emit_event("test:pass", name, test_id, make_js_undefined());
     }
+    node_test_emit_event("test:complete", name, test_id, make_js_undefined());
     node_test_diagnostics_end(diagnostics_message, diagnostics_previous);
 
     return make_js_undefined();
@@ -2499,6 +2589,50 @@ extern "C" Item js_node_test_after_each(Item fn, Item options) {
     return make_js_undefined();
 }
 
+static Item js_node_test_run_files(Item options) {
+    extern Item js_require(Item specifier);
+    extern int js_check_exception(void);
+    extern Item js_clear_exception(void);
+
+    node_test_register_roots();
+    Item previous_queue = g_node_test_event_queue;
+    int before_each_mark = g_node_before_each_count;
+    int after_each_mark = g_node_after_each_count;
+    int64_t previous_next_id = g_node_test_next_id;
+
+    g_node_test_event_queue = js_array_new(0);
+    g_node_test_next_id = 1;
+
+    if (get_type_id(options) == LMD_TYPE_MAP) {
+        Item files = js_property_get(options, assert_make_string("files"));
+        if (get_type_id(files) == LMD_TYPE_ARRAY) {
+            int64_t len = js_array_length(files);
+            for (int64_t i = 0; i < len; i++) {
+                Item file = js_array_get_int(files, i);
+                if (get_type_id(file) != LMD_TYPE_STRING) continue;
+                js_require(file);
+                js_microtask_flush();
+                if (js_check_exception()) {
+                    Item err = js_clear_exception();
+                    int64_t id = g_node_test_next_id++;
+                    node_test_emit_event("test:enqueue", file, id, make_js_undefined());
+                    node_test_emit_event("test:dequeue", file, id, make_js_undefined());
+                    node_test_emit_event("test:start", file, id, make_js_undefined());
+                    node_test_emit_event("test:fail", file, id, err);
+                    node_test_emit_event("test:complete", file, id, make_js_undefined());
+                }
+            }
+        }
+    }
+
+    Item events = g_node_test_event_queue;
+    g_node_test_event_queue = previous_queue;
+    g_node_test_next_id = previous_next_id;
+    g_node_before_each_count = before_each_mark;
+    g_node_after_each_count = after_each_mark;
+    return node_test_make_event_stream(events);
+}
+
 extern "C" Item js_get_node_test_namespace(void) {
     if (node_test_namespace.item != 0) return node_test_namespace;
 
@@ -2529,9 +2663,9 @@ extern "C" Item js_get_node_test_namespace(void) {
     // MockTracker class — same as mock
     js_property_set(node_test_namespace, assert_make_string("MockTracker"), mock_obj);
 
-    // run — stub (just returns undefined, real runner needs stream support)
+    // run — in-process file runner that returns a test event iterable
     js_property_set(node_test_namespace, assert_make_string("run"),
-                    js_new_function((void*)js_mock_reset_impl, 0));
+                    js_new_function((void*)js_node_test_run_files, 1));
 
     // getTestContext — stub
     js_property_set(node_test_namespace, assert_make_string("getTestContext"),

@@ -1,6 +1,0 @@
-meta-backspace-line ok=true html="<p>one\n three</p>" expected=true before=deleteSoftLineBackward:1:true,4,true,7 expectedBefore=deleteSoftLineBackward:1:true,4,true,7 input=deleteSoftLineBackward:0 focus=true:4 focusExpected=4
-meta-delete-line ok=true html="<p>one\n</p>" expected=true before=deleteSoftLineForward:1:true,4,true,13 expectedBefore=deleteSoftLineForward:1:true,4,true,13 input=deleteSoftLineForward:0 focus=true:4 focusExpected=4
-alt-backspace-word ok=true html="<p>one two </p>" expected=true before=deleteWordBackward:1:true,8,true,13 expectedBefore=deleteWordBackward:1:true,8,true,13 input=deleteWordBackward:0 focus=true:8 focusExpected=8
-alt-delete-word ok=true html="<p>one  three</p>" expected=true before=deleteWordForward:1:true,4,true,7 expectedBefore=deleteWordForward:1:true,4,true,7 input=deleteWordForward:0 focus=true:4 focusExpected=4
-ctrl-backspace-word ok=true html="<p>one two </p>" expected=true before=deleteWordBackward:1:true,8,true,13 expectedBefore=deleteWordBackward:1:true,8,true,13 input=deleteWordBackward:0 focus=true:8 focusExpected=8
-ctrl-delete-word ok=true html="<p>one  three</p>" expected=true before=deleteWordForward:1:true,4,true,7 expectedBefore=deleteWordForward:1:true,4,true,7 input=deleteWordForward:0 focus=true:4 focusExpected=4

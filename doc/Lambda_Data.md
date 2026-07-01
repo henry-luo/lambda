@@ -725,6 +725,14 @@ sort(arr)          // [10, 20, 30]
 unique([1,1,2,2])  // [1, 2]
 ```
 
+Use `++` for list/array concatenation. The `+` operator is numeric vector
+arithmetic on arrays/lists, not append:
+
+```lambda
+[1, 2] + [3, 4]    // [4, 6]
+[1, 2] ++ [3, 4]   // [1, 2, 3, 4]
+```
+
 ### Maps
 
 Key-value mappings with structural typing:
@@ -940,6 +948,9 @@ let updated = {*base, x: 10}  // {x: 10, y: 2}
 // Path concatenation
 /home.user ++ "config"      // /home.user.config
 ```
+
+For arrays/lists, `+` remains element-wise numeric addition. Use `++` when
+the result should grow the collection.
 
 ### Conditional Construction
 

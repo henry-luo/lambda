@@ -70,6 +70,8 @@ re2::RE2* pattern_get_unanchored(TypePattern* pattern);
  * @return List of match maps (empty list if no matches)
  */
 List* pattern_find_all(TypePattern* pattern, const char* str, size_t len);
+List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len,
+                               int64_t limit, bool ignore_case);
 
 /**
  * Replace all non-overlapping matches of pattern in string.
@@ -82,6 +84,9 @@ List* pattern_find_all(TypePattern* pattern, const char* str, size_t len);
  */
 String* pattern_replace_all(TypePattern* pattern, const char* str, size_t str_len,
                             const char* repl, size_t repl_len);
+String* pattern_replace_all_options(TypePattern* pattern, const char* str, size_t str_len,
+                                    const char* repl, size_t repl_len,
+                                    int64_t limit, bool ignore_case);
 
 /**
  * Split string by pattern matches.

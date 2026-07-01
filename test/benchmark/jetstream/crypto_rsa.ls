@@ -10,8 +10,8 @@
 
 // ================= BigInteger Constants =================
 let BI_DB = 28
-let BI_DM = 268435455    // (1<<28)-1
-let BI_DV = 268435456    // (1<<28)
+let BI_DM = 0xFFFFFFF    // (1<<28)-1
+let BI_DV = 0x10000000   // (1<<28)
 let BI_FP = 52
 let BI_FV = 4503599627370496.0  // 2^52 as float
 let BI_F1 = 24           // 52-28
@@ -92,15 +92,15 @@ pn bi_from_int(x: int) {
 // Compute w_a[j..j+n-1] += bi_a[i..i+n-1] * x, propagate carries
 // Returns final carry
 pn am3(bi_a, i: int, x: int, w_a, j: int, c: int, n: int) {
-    var xl = band(x, 16383)
+    var xl = band(x, 0x3FFF)
     var xh = shr(x, 14)
     while (n > 0) {
         n = n - 1
-        var l = band(bi_a[i], 16383)
+        var l = band(bi_a[i], 0x3FFF)
         var h = shr(bi_a[i], 14)
         i = i + 1
         var m = xh * l + h * xl
-        l = xl * l + shl(band(m, 16383), 14) + w_a[j] + c
+        l = xl * l + shl(band(m, 0x3FFF), 14) + w_a[j] + c
         c = shr(l, 28) + shr(m, 14) + xh * h
         w_a[j] = band(l, BI_DM)
         j = j + 1
@@ -164,7 +164,7 @@ pn bi_from_string(s: string, b: int) {
         i = i - 1
         var x: int = 0
         if (k == 8) {
-            x = band(ord(s[i]), 255)
+            x = band(ord(s[i]), 0xFF)
         } else {
             x = intAt(s, i)
         }
@@ -193,7 +193,7 @@ pn bi_from_string(s: string, b: int) {
             if (sh >= BI_DB) { sh = sh - BI_DB }
         }
     }
-    if (k == 8 and band(ord(s[0]), 128) != 0) {
+    if (k == 8 and band(ord(s[0]), 0x80) != 0) {
         bi.s = -1
         if (sh > 0) {
             ba[bi.t - 1] = bor(ba[bi.t - 1], shl(shl(1, BI_DB - sh) - 1, sh))
@@ -218,7 +218,7 @@ pn bi_from_byte_array(ba) {
     var bia = bi.a
     while (i > 0) {
         i = i - 1
-        var x = band(ba[i], 255)
+        var x = band(ba[i], 0xFF)
         if (sh == 0) {
             bi_ensure(bi, bi.t + 1)
             bia = bi.a
@@ -238,7 +238,7 @@ pn bi_from_byte_array(ba) {
         sh = sh + 8
         if (sh >= BI_DB) { sh = sh - BI_DB }
     }
-    if (band(ba[0], 128) != 0) {
+    if (band(ba[0], 0x80) != 0) {
         bi.s = -1
         if (sh > 0) {
             bia[bi.t - 1] = bor(bia[bi.t - 1], shl(shl(1, BI_DB - sh) - 1, sh))
@@ -307,9 +307,9 @@ pn bi_test_bit(bi, n: int) {
 pn lbit(x: int) {
     if (x == 0) { return -1 }
     var r: int = 0
-    if (band(x, 65535) == 0) { x = shr(x, 16); r = r + 16 }
-    if (band(x, 255) == 0) { x = shr(x, 8); r = r + 8 }
-    if (band(x, 15) == 0) { x = shr(x, 4); r = r + 4 }
+    if (band(x, 0xFFFF) == 0) { x = shr(x, 16); r = r + 16 }
+    if (band(x, 0xFF) == 0) { x = shr(x, 8); r = r + 8 }
+    if (band(x, 0xF) == 0) { x = shr(x, 4); r = r + 4 }
     if (band(x, 3) == 0) { x = shr(x, 2); r = r + 2 }
     if (band(x, 1) == 0) { r = r + 1 }
     return r
@@ -830,9 +830,9 @@ pn bi_inv_digit(bi) {
     var x = a[0]
     if (band(x, 1) == 0) { return 0 }
     var y = band(x, 3)
-    y = band(y * (2 - band(x, 15) * y), 15)
-    y = band(y * (2 - band(x, 255) * y), 255)
-    y = band(y * (2 - band(band(x, 65535) * y, 65535)), 65535)
+    y = band(y * (2 - band(x, 0xF) * y), 0xF)
+    y = band(y * (2 - band(x, 0xFF) * y), 0xFF)
+    y = band(y * (2 - band(band(x, 0xFFFF) * y, 0xFFFF)), 0xFFFF)
     y = (y * (2 - x * y % BI_DV)) % BI_DV
     if (y > 0) { return BI_DV - y }
     return 0 - y
@@ -907,11 +907,11 @@ pn bi_to_byte_array(bi) {
                 d = bor(d, shr(a[i], p))
             } else {
                 p = p - 8
-                d = band(shr(a[i], p), 255)
+                d = band(shr(a[i], p), 0xFF)
                 if (p <= 0) { p = p + BI_DB; i = i - 1 }
             }
-            if (band(d, 128) != 0) { d = bor(d, -256) }
-            if (k == 0 and band(bi.s, 128) != band(d, 128)) { k = k + 1 }
+            if (band(d, 0x80) != 0) { d = bor(d, -256) }
+            if (k == 0 and band(bi.s, 0x80) != band(d, 0x80)) { k = k + 1 }
             if (k > 0 or d != bi.s) {
                 // grow result array
                 var rlen = len(result)
@@ -1068,7 +1068,7 @@ pn mont_new(m) {
         type: RED_MONTGOMERY,
         m: m,
         mp: mp,
-        mpl: band(mp, 32767),
+        mpl: band(mp, 0x7FFF),
         mph: shr(mp, 15),
         um: shl(1, BI_DB - 15) - 1,
         mt2: 2 * m.t
@@ -1103,8 +1103,8 @@ pn mont_reduce(z, x) {
     var ma = z.m.a
     var i: int = 0
     while (i < z.m.t) {
-        var j2 = band(xa[i], 32767)
-        var u0 = band(j2 * z.mpl + band(shr(j2 * z.mph + shr(xa[i], 15) * z.mpl, 0), z.um) * 32768, BI_DM)
+        var j2 = band(xa[i], 0x7FFF)
+        var u0 = band(j2 * z.mpl + band(shr(j2 * z.mph + shr(xa[i], 15) * z.mpl, 0), z.um) * 0x8000, BI_DM)
         // Workaround: shr(..., 0) is a no-op but matches JS semantics
         var jj = i + z.m.t
         xa[jj] = xa[jj] + am3(ma, 0, u0, xa, i, 0, z.m.t)
@@ -1216,7 +1216,7 @@ pn red_mul_to(z, x, y, r) {
 
 // exp: this^e, e < 2^32, using reducer z (HAC 14.79)
 pn bi_exp(base, e: int, z) {
-    if (e > 4294967295 or e < 1) { return bi_from_int(1) }
+    if (e > 0xFFFFFFFF or e < 1) { return bi_from_int(1) }
     var r = nbi()
     var r2 = nbi()
     var g = red_convert(z, base)
@@ -1362,7 +1362,7 @@ pn arc4_init(ctx, key) {
     var klen = int(len(key))
     i = 0
     while (i < 256) {
-        j = band(j + s_arr[i] + key[i % klen], 255)
+        j = band(j + s_arr[i] + key[i % klen], 0xFF)
         var tmp = s_arr[i]
         s_arr[i] = s_arr[j]
         s_arr[j] = tmp
@@ -1374,12 +1374,12 @@ pn arc4_init(ctx, key) {
 
 pn arc4_next(ctx) {
     var s_arr = ctx.s
-    ctx.i = band(ctx.i + 1, 255)
-    ctx.j = band(ctx.j + s_arr[ctx.i], 255)
+    ctx.i = band(ctx.i + 1, 0xFF)
+    ctx.j = band(ctx.j + s_arr[ctx.i], 0xFF)
     var tmp = s_arr[ctx.i]
     s_arr[ctx.i] = s_arr[ctx.j]
     s_arr[ctx.j] = tmp
-    return s_arr[band(tmp + s_arr[ctx.i], 255)]
+    return s_arr[band(tmp + s_arr[ctx.i], 0xFF)]
 }
 
 // ================= RNG =================
@@ -1393,19 +1393,19 @@ pn rng_new() {
         // use LCG-style deterministic seeding matching JS Math.random() sequence
         var t = int(65536 * (float(i * 1103515245 + 12345) / 2147483648.0)) % 65536
         if (t < 0) { t = 0 - t }
-        pool[pptr] = band(shr(t, 8), 255)
+        pool[pptr] = band(shr(t, 8), 0xFF)
         pptr = pptr + 1
-        pool[pptr] = band(t, 255)
+        pool[pptr] = band(t, 0xFF)
         pptr = pptr + 1
         if (pptr >= 256) { pptr = pptr - 256 }
         i = i + 1
     }
     // mix in fixed timestamp (same as JS benchmark)
     var ts = 1122926989487
-    pool[pptr] = bxor(pool[pptr], band(ts, 255)); pptr = pptr + 1
-    pool[pptr] = bxor(pool[pptr], band(shr(ts, 8), 255)); pptr = pptr + 1
-    pool[pptr] = bxor(pool[pptr], band(shr(ts, 16), 255)); pptr = pptr + 1
-    pool[pptr] = bxor(pool[pptr], band(shr(ts, 24), 255)); pptr = pptr + 1
+    pool[pptr] = bxor(pool[pptr], band(ts, 0xFF)); pptr = pptr + 1
+    pool[pptr] = bxor(pool[pptr], band(shr(ts, 8), 0xFF)); pptr = pptr + 1
+    pool[pptr] = bxor(pool[pptr], band(shr(ts, 16), 0xFF)); pptr = pptr + 1
+    pool[pptr] = bxor(pool[pptr], band(shr(ts, 24), 0xFF)); pptr = pptr + 1
 
     var state = arc4_new()
     arc4_init(state, pool)

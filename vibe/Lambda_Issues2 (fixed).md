@@ -87,24 +87,21 @@ print(string(sched.list))  // prints some_value
 
 ---
 
-## 4. No Hexadecimal Literal Support
+## 4. No Hexadecimal Literal Support — Fixed
 
+**Status**: ✅ **FIXED**
 **Severity**: Compilation error  
 **Affected benchmarks**: crypto_sha1, richards
 
-Lambda does not support hex literals like `0xFF` or `0xD008`. These produce parse errors.
-
-**Workaround**: Manually convert all hex values to decimal.
+Lambda now supports hexadecimal integer literals like `0xFF` and `0xD008`, including uppercase `0X` prefixes. Hex literals can also carry fixed-width integer suffixes (`i8/i16/i32/i64/u8/u16/u32/u64`), so ported bit-mask code can preserve explicit wraparound semantics:
 
 ```lambda
-// FAILS
 var mask = 0xFFFFFFFF
-
-// WORKS
-var mask = 4294967295
+var byte_mask = 0xFFu8
+var signed_mask = 0xFFi8
 ```
 
-Common conversions needed:
+Common conversions no longer need manual decimal rewriting:
 - `0x80` → `128`
 - `0xFF` → `255`
 - `0xF` → `15`
@@ -112,7 +109,9 @@ Common conversions needed:
 - `0x5A827999` → `1518500249`
 - `0xFFFFFFFF` → `4294967295`
 
-**Suggestion**: Add hex literal support (`0x...`). This is standard in nearly every language and essential for bitwise/crypto code.
+**Fix**: The Lambda grammar accepts `0x`/`0X` integer tokens in both plain and sized-integer literal forms. The AST builder parses sized literals as raw integer bits before applying the target annotation, so values like `0xFFi8` wrap to `-1i8` while `0xFFu8` stays `255u8`.
+
+**Regression coverage**: `test/lambda/hex_literals.ls` covers plain hex values, uppercase prefix parsing, typed suffixes, wraparound, and bitwise expressions. `test/lambda/proc/proc_hex_literals.ls` covers procedural `var` initialization with `0xFFi8`.
 
 ---
 
@@ -356,36 +355,40 @@ pn rol(num: int, cnt: int) {
 
 ---
 
-## 13. `@` Path Literals Do Not Parse
+## 13. `@` Path Literals Do Not Parse — Fixed in Docs
 
-**Severity**: Compilation error (parse error)  
+**Status**: ✅ **Fixed in documentation**.
+**Severity**: Documentation bug / stale syntax
 **Affected benchmarks**: regex_dna
 
-The documentation describes `@` path literals for file I/O operations (e.g., `input(@./data.json)`), but these do not parse at all — neither relative nor absolute paths:
+The documentation used to describe `@` path literals for file I/O operations (e.g., `input(@./data.json)`), but `@` is not the Lambda path-literal syntax and those examples do not parse:
 
 ```
 error[E100]: Unexpected syntax near '@./' [ERROR, ., /]
 error[E100]: Unexpected syntax near '@/' [ERROR, /]
 ```
 
-Both forms fail:
+The correct path syntax follows `vibe/Lambda_Expr_Path.md`: path segments are dot-separated, and segments containing `.` are quoted.
 
 ```lambda
-// FAILS: relative path literal
-let data = input(@./data.json, 'json')
+// relative-style examples used by current I/O docs
+let data = input(/.'data.json', 'json')
+io.copy(/.a, /.b)
+io.copy(/.data, /.backup.data)
 
-// FAILS: absolute path literal
-let data = input(@/Users/name/data.json, 'json')
+// absolute file path
+let hosts = input(/etc.hosts, 'text')
 ```
 
-**Workaround**: Use plain string paths instead of `@` path literals.
+**Former workaround**: Use plain string paths instead of stale `@` literals.
 
 ```lambda
-// WORKS
 let data^err = input("./data.json", "json")
 ```
 
-**Note**: The `Lambda_Sys_Func.md` documentation extensively shows `@` path literals in examples, but they appear to be unimplemented (or the grammar doesn't support them in the current build).
+**Fix notes**:
+- `doc/Lambda_Sys_Func.md` now uses `/.a`, `/.b`, `/.backup.data`, quoted file-extension segments such as `/.'data.json'`, and URL paths such as `https.'api.example.com'.users`.
+- `@` examples were removed from the system-function I/O documentation; `@` remains invalid syntax.
 
 ---
 
@@ -413,55 +416,59 @@ slice([1, 2, 3, 4], -2)   // [3, 4]
 
 ---
 
-## 15. No Case-Insensitive Mode for String Patterns
+## 15. No Case-Insensitive Mode for String Patterns — Fixed
 
 **Severity**: Missing feature (affects correctness)  
 **Affected benchmarks**: regex_dna
 
-Lambda's string patterns (which compile to RE2 regex) are always case-sensitive. There is no way to perform case-insensitive matching — neither via an inline flag like `(?i:...)` nor via a pattern modifier.
+**Status**: ✅ **Fixed**.
 
-JavaScript's regex-dna benchmark uses `/agggtaaa|tttaccct/ig` — the `i` flag for case-insensitive matching is essential because the DNA data contains mixed-case characters.
+Lambda's `find()` and `replace()` now accept an options map with `ignore_case: true` for both literal string searches and Lambda string patterns.
+
+JavaScript's regex-dna benchmark uses `/agggtaaa|tttaccct/ig`; Lambda can now express the same case-insensitive global matching directly:
 
 ```lambda
 string Pat = "abc" | "def"
 
-// This pattern only matches lowercase — no way to make it case-insensitive
-find("ABCdefABC", Pat)  // finds only "def", misses "ABC"
+find("ABCdefABC", Pat, {ignore_case: true})
 ```
 
-**Workaround**: Pre-lowercase the input data and use lowercase patterns.
+**Former workaround**: Pre-lowercase the input data and use lowercase patterns.
 
 ```lambda
-// Precompute lowercase DNA (outside the benchmark loop)
 var dna_lower = lower(dna)
-
-// Then match with lowercase patterns
 string Pat = "agggtaaa" | "tttaccct"
 find(dna_lower, Pat)
 ```
 
-**Suggestion**: Add case-insensitive support, either:
-- A pattern modifier: `string Pat = "abc" | "def" /i`
-- Or an optional flag on `find()`/`replace()`: `find(str, Pat, {case_insensitive: true})`
+That workaround is no longer needed. `test/benchmark/jetstream/regex_dna.ls` and `test/benchmark/beng/regexredux.ls` now use `find(seq, Pat, {ignore_case: true})`, keeping the benchmark scripts closer to the original `/ig` behavior.
+
+**Fix notes**:
+- `find(str, search, {ignore_case: true})` returns all case-insensitive matches by default.
+- `replace(str, search, repl, {ignore_case: true})` performs case-insensitive replacement.
+- `ignore_case` can be combined with `limit`.
+- `test/lambda/find_replace_options.ls` covers literal and pattern matching with `ignore_case`.
 
 ---
 
-## 16. No Built-in Replace-First Function
+## 16. No Built-in Replace-First Function — Fixed
 
 **Severity**: Missing feature  
 **Affected benchmarks**: regex_dna
 
-Lambda's `replace()` always replaces **all** occurrences (global replacement), with both plain strings and patterns. There is no way to replace only the first occurrence.
+**Status**: ✅ **Fixed**.
+
+Lambda's `replace()` now accepts an options map with `limit` to control which matches are replaced.
 
 This differs from JavaScript, where `str.replace(string, string)` only replaces the first match (global requires `str.replace(/regex/g, repl)` or `str.replaceAll()`).
 
 ```lambda
 replace("aBcBdB", "B", "X")  // "aXcXdX" — all replaced
-
-// No way to get "aXcBdB" (first only) without manual implementation
+replace("aBcBdB", "B", "X", {limit: 1})   // "aXcBdB" — first only
+replace("aBcBdB", "B", "X", {limit: -1})  // "aBcBdX" — last only
 ```
 
-**Workaround**: Implement `replace_first()` manually using `find()` and `slice()`:
+**Former workaround**: Implement `replace_first()` manually using `find()` and `slice()`:
 
 ```lambda
 pn replace_first(s, search, repl) {
@@ -475,9 +482,13 @@ pn replace_first(s, search, repl) {
 }
 ```
 
-**Note**: This workaround is inefficient for large strings because `find()` locates *all* matches when we only need the first. A built-in `replace_first()` or an optional `count` parameter on `replace()` would be more efficient.
+That workaround is no longer needed. `test/benchmark/jetstream/regex_dna.ls` now uses `replace(dna, search, repl, {limit: 1})` for the JavaScript string-replace phase.
 
-**Suggestion**: Add either `replace_first(str, pattern, repl)` or extend `replace()` with an optional count: `replace(str, pattern, repl, 1)`.
+**Fix notes**:
+- `limit: 1` replaces the first match; `limit: 5` replaces the first five matches.
+- `limit: -1` replaces the last match; `limit: -5` replaces the last five matches.
+- `limit: 0` or an omitted limit keeps the existing replace-all behavior.
+- `test/lambda/find_replace_options.ls` covers first/last limited replacement and no-match behavior.
 
 ---
 
@@ -527,7 +538,7 @@ pn show() {
 | 1 | `float[]` rejects list literals | Type system | **Fixed**; benchmark workarounds removed |
 | 2 | Can't assign through parenthesized access | Syntax | 4 benchmarks, core pattern |
 | 3 | `list` field name silent failure | Reserved word | 1 benchmark, hours of debugging |
-| 4 | No hex literals | Missing feature | 2 benchmarks, tedious manual conversion |
+| 4 | No hex literals | Missing feature | **Fixed**; supports plain `0x`/`0X` literals and sized integer suffixes |
 | 5 | Integer overflow errors | Arithmetic | **Fixed**; splay PRNG and SHA-1 word arithmetic now use `u32` |
 | 6 | No unsigned right shift | Bitwise ops | **Fixed for typed unsigned ints**; `shr(u32, n)` zero-fills |
 | 7 | `fill(0, x)` returns null | Edge case | **Fixed**; DeltaBlue now concatenates from empty fill arrays directly |
@@ -536,8 +547,8 @@ pn show() {
 | 10 | Immutable parameters | Language design | **Fixed for `pn`**; procedural parameters are mutable, `fn` parameters remain immutable |
 | 11 | Integer division returns float | Runtime bug | **Fixed**; `/` stays float and `slice` accepts integer-valued float indices |
 | 12 | `shl` 64-bit overflow | Bitwise ops | **Fixed for typed `u32` code**; SHA-1/MD5 rotate helpers use compact shifts |
-| 13 | `@` path literals don't parse | Missing feature | 1 benchmark, doc mismatch |
+| 13 | `@` path literals don't parse | Documentation bug | **Fixed in docs**; Sys_Func now uses dot-separated path literals |
 | 14 | `slice()` no 2-argument form | Missing feature | **Fixed**; `slice(vec,start)` delegates to slice-to-end |
-| 15 | No case-insensitive patterns | Missing feature | 1 benchmark, workaround needed |
-| 16 | No replace-first function | Missing feature | 1 benchmark, manual workaround |
+| 15 | No case-insensitive patterns | Missing feature | **Fixed**; `find`/`replace` support `{ignore_case: true}` |
+| 16 | No replace-first function | Missing feature | **Fixed**; `replace` supports positive/negative `{limit: n}` |
 | 17 | Decimal args become zero | Runtime bug | **Fixed**; decimal values pass correctly through `pn` and `fn` arguments |

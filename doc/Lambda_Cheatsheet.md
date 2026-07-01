@@ -265,6 +265,7 @@ expr[T]          // child-level query (direct only)
 ```lambda
 1+[2,3] = [3,4]  [1,2]*2 = [2,4]  [1,2]+[3,4] = [4,6]
 ```
+Use `++` for list/array concat: `[1,2] ++ [3,4] = [1,2,3,4]`.
 
 ## Pipe Expressions
 

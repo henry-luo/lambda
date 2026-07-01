@@ -19,6 +19,7 @@ function comma_sep(rule) {
 const linebreak = /\r\n|\n/;
 const decimal_digits = /\d+/;
 const integer_literal = seq(choice('0', seq(/[1-9]/, optional(decimal_digits))));
+const hex_integer_literal = seq('0', choice('x', 'X'), /[0-9a-fA-F]+/);
 const exponent_part = seq(choice('e', 'E'), optional(choice('+', '-')), decimal_digits);
 const float_literal = choice(
   seq(integer_literal, '.', decimal_digits, optional(exponent_part)),
@@ -242,7 +243,7 @@ module.exports = grammar({
 
     _number: $ => choice($.integer, $.float, $.decimal, $.sized_integer, $.sized_float),
 
-    integer: _ => token(integer_literal),
+    integer: _ => token(choice(hex_integer_literal, integer_literal)),
 
     float: _ => token(float_literal),
 
@@ -253,7 +254,7 @@ module.exports = grammar({
 
     // sized integer: integer literal with type suffix (i8, i16, i32, i64, u8, u16, u32, u64)
     sized_integer: _ => token(seq(
-      choice('0', seq(/[1-9]/, optional(/\d+/))),
+      choice(hex_integer_literal, integer_literal),
       sized_int_suffix
     )),
 
