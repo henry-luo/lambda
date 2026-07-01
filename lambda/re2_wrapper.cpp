@@ -11,6 +11,7 @@
 #include "../lib/mempool.h"
 
 #include <re2/re2.h>
+#include <stdint.h>
 #include <string>
 
 // runtime functions needed for pattern_find_all, pattern_split
@@ -457,6 +458,68 @@ void re2_release(re2::RE2* re) {
     delete re; // NEW_DELETE_OK: paired with new in re2_compile().
 }
 
+#ifndef SIMPLE_SCHEMA_PARSER
+static void select_match_window(int64_t total, int64_t limit, int64_t* first, int64_t* count) {
+    *first = 0;
+    *count = total;
+    if (total <= 0) {
+        *count = 0;
+        return;
+    }
+    if (limit > 0 && limit < total) {
+        *count = limit;
+    } else if (limit < 0) {
+        int64_t requested = (limit == INT64_MIN) ? INT64_MAX : -limit;
+        if (requested < total) {
+            *first = total - requested;
+            *count = requested;
+        }
+    }
+}
+
+static re2::RE2* pattern_get_unanchored_options(TypePattern* pattern, bool ignore_case, bool* must_release) {
+    *must_release = false;
+    if (!ignore_case) return pattern_get_unanchored(pattern);
+    if (!pattern || !pattern->source) return nullptr;
+
+    const char* src = pattern->source->chars;
+    size_t len = pattern->source->len;
+    if (len < 2 || src[0] != '^' || src[len - 1] != '$') {
+        log_error("pattern_get_unanchored_options: unexpected source format: %s", src);
+        return nullptr;
+    }
+    std::string unanchored(src + 1, len - 2); // STD_CONTAINER_OK: re2::RE2 ctor takes std::string.
+
+    re2::RE2::Options opts;
+    opts.set_log_errors(false);
+    opts.set_case_sensitive(false);
+    re2::RE2* re = new re2::RE2(unanchored, opts); // NEW_DELETE_OK: one-shot case-folded regex for option-specific find/replace.
+    if (!re->ok()) {
+        log_error("pattern_get_unanchored_options: failed to compile unanchored regex: %s", re->error().c_str());
+        delete re; // NEW_DELETE_OK: paired with new above on compile failure.
+        return nullptr;
+    }
+    *must_release = true;
+    return re;
+}
+
+static int64_t pattern_count_matches_with_re(re2::RE2* re, const char* str, size_t len) {
+    re2::StringPiece input(str, len);
+    re2::StringPiece match;
+    size_t pos = 0;
+    int64_t count = 0;
+    while (pos <= len) {
+        if (!re->Match(input, pos, len, re2::RE2::UNANCHORED, &match, 1)) break;
+        int64_t match_start = (int64_t)(match.data() - str);
+        size_t match_len_val = match.size();
+        count++;
+        pos = match_start + match_len_val;
+        if (match_len_val == 0) pos++;
+    }
+    return count;
+}
+#endif
+
 // Get or create unanchored RE2 for partial matching operations.
 // The source string is stored as "^<regex>$"; we strip the anchors.
 re2::RE2* pattern_get_unanchored(TypePattern* pattern) {
@@ -564,18 +627,29 @@ Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
     return mp;
 }
 
-// Find all non-overlapping matches of pattern in string
-List* pattern_find_all(TypePattern* pattern, const char* str, size_t len) {
+List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len,
+                               int64_t limit, bool ignore_case) {
     List* result = list();
     result->is_content = 1;
     if (!pattern || !str || len == 0) return result;
 
-    re2::RE2* re = pattern_get_unanchored(pattern);
+    bool must_release = false;
+    re2::RE2* re = pattern_get_unanchored_options(pattern, ignore_case, &must_release);
     if (!re) return result;
+
+    int64_t total = pattern_count_matches_with_re(re, str, len);
+    int64_t first = 0, selected_count = 0;
+    select_match_window(total, limit, &first, &selected_count);
+    if (selected_count == 0) {
+        if (must_release) delete re; // NEW_DELETE_OK: paired with option-specific new in pattern_get_unanchored_options().
+        return result;
+    }
 
     re2::StringPiece input(str, len);
     re2::StringPiece match;
     size_t pos = 0;
+    int64_t ordinal = 0;
+    int64_t pushed = 0;
 
     while (pos <= len) {
         if (!re->Match(input, pos, len, re2::RE2::UNANCHORED, &match, 1)) {
@@ -585,14 +659,76 @@ List* pattern_find_all(TypePattern* pattern, const char* str, size_t len) {
         int64_t match_start = (int64_t)(match.data() - str);
         size_t match_len_val = match.size();
 
-        Map* m = create_match_map(match.data(), match_len_val, match_start);
-        list_push(result, {.map = m});
+        if (ordinal >= first && pushed < selected_count) {
+            Map* m = create_match_map(match.data(), match_len_val, match_start);
+            list_push(result, {.map = m});
+            pushed++;
+        }
+        ordinal++;
 
         // advance past match; if zero-length match, advance by 1 char
         pos = match_start + match_len_val;
         if (match_len_val == 0) pos++;
+        if (pushed >= selected_count) break;
     }
 
+    if (must_release) delete re; // NEW_DELETE_OK: paired with option-specific new in pattern_get_unanchored_options().
+    return result;
+}
+
+// Find all non-overlapping matches of pattern in string
+List* pattern_find_all(TypePattern* pattern, const char* str, size_t len) {
+    return pattern_find_all_options(pattern, str, len, 0, false);
+}
+
+String* pattern_replace_all_options(TypePattern* pattern, const char* str, size_t str_len,
+                                    const char* repl, size_t repl_len,
+                                    int64_t limit, bool ignore_case) {
+    if (!pattern || !str) return nullptr;
+
+    bool must_release = false;
+    re2::RE2* re = pattern_get_unanchored_options(pattern, ignore_case, &must_release);
+    if (!re) return nullptr;
+
+    int64_t total = pattern_count_matches_with_re(re, str, str_len);
+    int64_t first = 0, selected_count = 0;
+    select_match_window(total, limit, &first, &selected_count);
+    if (selected_count == 0) {
+        if (must_release) delete re; // NEW_DELETE_OK: paired with option-specific new in pattern_get_unanchored_options().
+        return make_heap_string(str, str_len);
+    }
+
+    StrBuf* out = strbuf_new_cap(str_len + 1);
+    re2::StringPiece input(str, str_len);
+    re2::StringPiece match;
+    size_t pos = 0;
+    size_t copy_pos = 0;
+    int64_t ordinal = 0;
+    int64_t replaced = 0;
+
+    while (pos <= str_len) {
+        if (!re->Match(input, pos, str_len, re2::RE2::UNANCHORED, &match, 1)) break;
+        size_t match_start = (size_t)(match.data() - str);
+        size_t match_len_val = match.size();
+        bool selected = ordinal >= first && replaced < selected_count;
+
+        if (selected) {
+            if (match_start > copy_pos) strbuf_append_str_n(out, str + copy_pos, match_start - copy_pos);
+            if (repl && repl_len > 0) strbuf_append_str_n(out, repl, repl_len);
+            copy_pos = match_start + match_len_val;
+            replaced++;
+        }
+
+        ordinal++;
+        pos = match_start + match_len_val;
+        if (match_len_val == 0) pos++;
+        if (replaced >= selected_count) break;
+    }
+    if (copy_pos < str_len) strbuf_append_str_n(out, str + copy_pos, str_len - copy_pos);
+
+    String* result = make_heap_string(out->str, out->length);
+    strbuf_free(out);
+    if (must_release) delete re; // NEW_DELETE_OK: paired with option-specific new in pattern_get_unanchored_options().
     return result;
 }
 

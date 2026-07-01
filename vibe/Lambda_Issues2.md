@@ -412,55 +412,59 @@ slice([1, 2, 3, 4], -2)   // [3, 4]
 
 ---
 
-## 15. No Case-Insensitive Mode for String Patterns
+## 15. No Case-Insensitive Mode for String Patterns — Fixed
 
 **Severity**: Missing feature (affects correctness)  
 **Affected benchmarks**: regex_dna
 
-Lambda's string patterns (which compile to RE2 regex) are always case-sensitive. There is no way to perform case-insensitive matching — neither via an inline flag like `(?i:...)` nor via a pattern modifier.
+**Status**: ✅ **Fixed**.
 
-JavaScript's regex-dna benchmark uses `/agggtaaa|tttaccct/ig` — the `i` flag for case-insensitive matching is essential because the DNA data contains mixed-case characters.
+Lambda's `find()` and `replace()` now accept an options map with `ignore_case: true` for both literal string searches and Lambda string patterns.
+
+JavaScript's regex-dna benchmark uses `/agggtaaa|tttaccct/ig`; Lambda can now express the same case-insensitive global matching directly:
 
 ```lambda
 string Pat = "abc" | "def"
 
-// This pattern only matches lowercase — no way to make it case-insensitive
-find("ABCdefABC", Pat)  // finds only "def", misses "ABC"
+find("ABCdefABC", Pat, {ignore_case: true})
 ```
 
-**Workaround**: Pre-lowercase the input data and use lowercase patterns.
+**Former workaround**: Pre-lowercase the input data and use lowercase patterns.
 
 ```lambda
-// Precompute lowercase DNA (outside the benchmark loop)
 var dna_lower = lower(dna)
-
-// Then match with lowercase patterns
 string Pat = "agggtaaa" | "tttaccct"
 find(dna_lower, Pat)
 ```
 
-**Suggestion**: Add case-insensitive support, either:
-- A pattern modifier: `string Pat = "abc" | "def" /i`
-- Or an optional flag on `find()`/`replace()`: `find(str, Pat, {case_insensitive: true})`
+That workaround is no longer needed. `test/benchmark/jetstream/regex_dna.ls` and `test/benchmark/beng/regexredux.ls` now use `find(seq, Pat, {ignore_case: true})`, keeping the benchmark scripts closer to the original `/ig` behavior.
+
+**Fix notes**:
+- `find(str, search, {ignore_case: true})` returns all case-insensitive matches by default.
+- `replace(str, search, repl, {ignore_case: true})` performs case-insensitive replacement.
+- `ignore_case` can be combined with `limit`.
+- `test/lambda/find_replace_options.ls` covers literal and pattern matching with `ignore_case`.
 
 ---
 
-## 16. No Built-in Replace-First Function
+## 16. No Built-in Replace-First Function — Fixed
 
 **Severity**: Missing feature  
 **Affected benchmarks**: regex_dna
 
-Lambda's `replace()` always replaces **all** occurrences (global replacement), with both plain strings and patterns. There is no way to replace only the first occurrence.
+**Status**: ✅ **Fixed**.
+
+Lambda's `replace()` now accepts an options map with `limit` to control which matches are replaced.
 
 This differs from JavaScript, where `str.replace(string, string)` only replaces the first match (global requires `str.replace(/regex/g, repl)` or `str.replaceAll()`).
 
 ```lambda
 replace("aBcBdB", "B", "X")  // "aXcXdX" — all replaced
-
-// No way to get "aXcBdB" (first only) without manual implementation
+replace("aBcBdB", "B", "X", {limit: 1})   // "aXcBdB" — first only
+replace("aBcBdB", "B", "X", {limit: -1})  // "aBcBdX" — last only
 ```
 
-**Workaround**: Implement `replace_first()` manually using `find()` and `slice()`:
+**Former workaround**: Implement `replace_first()` manually using `find()` and `slice()`:
 
 ```lambda
 pn replace_first(s, search, repl) {
@@ -474,9 +478,13 @@ pn replace_first(s, search, repl) {
 }
 ```
 
-**Note**: This workaround is inefficient for large strings because `find()` locates *all* matches when we only need the first. A built-in `replace_first()` or an optional `count` parameter on `replace()` would be more efficient.
+That workaround is no longer needed. `test/benchmark/jetstream/regex_dna.ls` now uses `replace(dna, search, repl, {limit: 1})` for the JavaScript string-replace phase.
 
-**Suggestion**: Add either `replace_first(str, pattern, repl)` or extend `replace()` with an optional count: `replace(str, pattern, repl, 1)`.
+**Fix notes**:
+- `limit: 1` replaces the first match; `limit: 5` replaces the first five matches.
+- `limit: -1` replaces the last match; `limit: -5` replaces the last five matches.
+- `limit: 0` or an omitted limit keeps the existing replace-all behavior.
+- `test/lambda/find_replace_options.ls` covers first/last limited replacement and no-match behavior.
 
 ---
 
@@ -537,6 +545,6 @@ pn show() {
 | 12 | `shl` 64-bit overflow | Bitwise ops | **Fixed for typed `u32` code**; SHA-1/MD5 rotate helpers use compact shifts |
 | 13 | `@` path literals don't parse | Missing feature | 1 benchmark, doc mismatch |
 | 14 | `slice()` no 2-argument form | Missing feature | **Fixed**; `slice(vec,start)` delegates to slice-to-end |
-| 15 | No case-insensitive patterns | Missing feature | 1 benchmark, workaround needed |
-| 16 | No replace-first function | Missing feature | 1 benchmark, manual workaround |
+| 15 | No case-insensitive patterns | Missing feature | **Fixed**; `find`/`replace` support `{ignore_case: true}` |
+| 16 | No replace-first function | Missing feature | **Fixed**; `replace` supports positive/negative `{limit: n}` |
 | 17 | Decimal args become zero | Runtime bug | **Fixed**; decimal values pass correctly through `pn` and `fn` arguments |

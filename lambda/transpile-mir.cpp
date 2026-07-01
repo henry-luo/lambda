@@ -6918,6 +6918,30 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             return result;
         }
 
+        // 4-arg system functions use fixed C ABIs; routing them through the vararg fallback shifts arguments.
+        if (arg_count == 4) {
+            arg = call_node->argument;
+            MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
+
+            arg = arg->next;
+            MIR_reg_t boxed_a2 = transpile_box_item(mt, arg);
+
+            arg = arg->next;
+            MIR_reg_t boxed_a3 = transpile_box_item(mt, arg);
+
+            arg = arg->next;
+            MIR_reg_t boxed_a4 = transpile_box_item(mt, arg);
+
+            MIR_reg_t result = emit_call_4(mt, sys_fn_name, mir_ret_type,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a3),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a4));
+            POST_PROCESS_DTIME(result);
+            POST_PROCESS_UNBOX(result);
+            return result;
+        }
+
         // Fallback for more args: use vararg call
         {
             arg = call_node->argument;
