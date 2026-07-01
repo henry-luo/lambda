@@ -13,7 +13,11 @@
 #include "../lib/memtrack.h"
 #include "../lib/base64.h"
 #include "../lib/url.h"
+#include "../lib/file.h"
 #include "../lambda/input/input.hpp"  // for download_http_content
+
+#include <unistd.h>
+
 typedef struct ImageEntry {
     // ImageFormat format;
     const char* path;  // todo: change to URL
@@ -21,6 +25,86 @@ typedef struct ImageEntry {
 } ImageEntry;
 
 HASHMAP_DEFINE_STRKEY(image, ImageEntry, path)
+
+static char* try_join_absolute_resource(const char* root, const char* abs_path) {
+    if (!root || !abs_path || abs_path[0] != '/') return nullptr;
+    size_t root_len = strlen(root);
+    size_t path_len = strlen(abs_path);
+    char* candidate = (char*)mem_alloc(root_len + path_len + 1, MEM_CAT_RENDER);
+    if (!candidate) return nullptr;
+    memcpy(candidate, root, root_len);
+    memcpy(candidate + root_len, abs_path, path_len);
+    candidate[root_len + path_len] = '\0';
+    if (file_exists(candidate)) return candidate;
+    mem_free(candidate);
+    return nullptr;
+}
+
+static char* resolve_wpt_absolute_image_path(UiContext* uicon, const char* img_url) {
+    if (!uicon || !uicon->document || !uicon->document->url ||
+        !img_url || img_url[0] != '/' || img_url[1] == '/') {
+        return nullptr;
+    }
+
+    char* doc_path = url_to_local_path(uicon->document->url);
+    if (doc_path) {
+        const char* wpt_marker = strstr(doc_path, "/ref/wpt/");
+        if (wpt_marker) {
+            size_t root_len = (size_t)(wpt_marker - doc_path) + strlen("/ref/wpt");
+            char* root = (char*)mem_alloc(root_len + 1, MEM_CAT_RENDER);
+            if (root) {
+                memcpy(root, doc_path, root_len);
+                root[root_len] = '\0';
+                char* resolved = try_join_absolute_resource(root, img_url);
+                mem_free(root);
+                if (resolved) {
+                    mem_free(doc_path);
+                    return resolved;
+                }
+            }
+        }
+
+        const char* data_marker = strstr(doc_path, "/layout/data/");
+        if (data_marker) {
+            size_t root_len = (size_t)(data_marker - doc_path) + strlen("/layout/data");
+            char* root = (char*)mem_alloc(root_len + strlen("/support") + 1, MEM_CAT_RENDER);
+            if (root) {
+                memcpy(root, doc_path, root_len);
+                memcpy(root + root_len, "/support", strlen("/support") + 1);
+                char* resolved = try_join_absolute_resource(root, img_url);
+                mem_free(root);
+                if (resolved) {
+                    mem_free(doc_path);
+                    return resolved;
+                }
+            }
+        }
+        mem_free(doc_path);
+    }
+
+    char cwd[4096];
+    if (getcwd(cwd, sizeof(cwd))) {
+        char* wpt_root = try_join_absolute_resource(cwd, "/ref/wpt");
+        if (wpt_root) {
+            char* resolved = try_join_absolute_resource(wpt_root, img_url);
+            mem_free(wpt_root);
+            return resolved;
+        }
+
+        size_t cwd_len = strlen(cwd);
+        const char* support_root_suffix = "/test/layout/data/support";
+        size_t suffix_len = strlen(support_root_suffix);
+        char* support_root = (char*)mem_alloc(cwd_len + suffix_len + 1, MEM_CAT_RENDER);
+        if (!support_root) return nullptr;
+        memcpy(support_root, cwd, cwd_len);
+        memcpy(support_root + cwd_len, support_root_suffix, suffix_len + 1);
+        char* resolved = try_join_absolute_resource(support_root, img_url);
+        mem_free(support_root);
+        return resolved;
+    }
+
+    return nullptr;
+}
 
 // Detect if memory content is SVG by checking for XML/SVG signature
 static bool is_svg_content(const unsigned char* data, size_t size) {
@@ -541,6 +625,16 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             log_error("Invalid local URL: %s", img_url);
             url_destroy(abs_url);
             return NULL;
+        }
+        if (img_url[0] == '/' && img_url[1] != '/' && !file_exists(file_path)) {
+            // Local WPT runs emulate an HTTP server; URL-absolute resources are
+            // rooted at the WPT tree, not at the host filesystem root.
+            char* wpt_path = resolve_wpt_absolute_image_path(uicon, img_url);
+            if (wpt_path) {
+                log_debug("[image] Resolved WPT absolute resource %s -> %s", img_url, wpt_path);
+                mem_free(file_path);
+                file_path = wpt_path;
+            }
         }
     }
 

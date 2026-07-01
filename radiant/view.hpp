@@ -987,10 +987,11 @@ typedef struct PositionProp {
 typedef struct MarkerProp {
     CssEnum marker_type;     // CSS_VALUE_DISC, CSS_VALUE_CIRCLE, CSS_VALUE_SQUARE, CSS_VALUE_DECIMAL, etc.
     float width;             // Fixed marker width (typically ~1.4em = 22px at 16px font)
+    float height;            // Used marker box height; image markers can exceed line-height
     float bullet_size;       // Size of the bullet shape (typically ~0.35em = 5-6px)
     char* text_content;      // Text content for numbered markers (decimal, roman, alpha)
     char* image_url;         // list-style-image URL (data URI or external URL)
-    ImageSurface* loaded_image; // cached loaded image (set during first render)
+    ImageSurface* loaded_image; // cached loaded image for layout and render
     bool is_outside;         // true = outside position (rendered in margin area, no inline advance)
 } MarkerProp;
 
@@ -1245,6 +1246,7 @@ typedef struct GridProp {
 
 typedef struct EmbedProp {
     ImageSurface* img;  // image surface
+    float content_image_resolution; // CSS image-set() density for intrinsic sizing, 0 means 1x
     DomDocument* doc;   // iframe document
     struct WebViewProp* webview;  // native OS web view (WKWebView/WebView2/WebKitGTK)
     FlexProp* flex;

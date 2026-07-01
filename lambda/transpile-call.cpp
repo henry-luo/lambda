@@ -475,6 +475,26 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         AstNode* second_arg = first_arg ? first_arg->next : NULL;
         SysFunc fn_id = sys_fn_node->fn_info->fn;
 
+        if (fn_id == SYSPROC_PRINT) {
+            // Multi-arg print is lowered as repeated single-value prints with
+            // an explicit separator, not as an invalid multi-arg pn_print ABI.
+            strbuf_append_str(tp->code_buf, "({");
+            AstNode* print_arg = first_arg;
+            bool first_print_arg = true;
+            while (print_arg) {
+                if (!first_print_arg) {
+                    strbuf_append_str(tp->code_buf, "pn_print(s2it(heap_strcpy(\" \",1)));");
+                }
+                strbuf_append_str(tp->code_buf, "pn_print(");
+                transpile_box_item(tp, print_arg);
+                strbuf_append_str(tp->code_buf, ");");
+                first_print_arg = false;
+                print_arg = print_arg->next;
+            }
+            strbuf_append_str(tp->code_buf, "ItemNull;})");
+            return;
+        }
+
         // ==== PRIORITY 1: Integer-specific unboxed functions ====
         // These take precedence over generic float-based native math
         if (first_arg && !first_arg->next && first_arg->type) {

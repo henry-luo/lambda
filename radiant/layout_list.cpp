@@ -22,6 +22,19 @@
 // Static helpers: extract counter property values from element CSS
 // ============================================================================
 
+static bool marker_image_orientation_uses_from_image(DomElement* element) {
+    for (DomElement* cur = element; cur; cur = dom_element_get_parent(cur)) {
+        CssDeclaration* decl = dom_element_get_specified_value(cur, CSS_PROPERTY_IMAGE_ORIENTATION);
+        if (!decl || !decl->value) continue;
+        if (decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+            decl->value->data.keyword == CSS_VALUE_NONE) {
+            return false;
+        }
+        return true;
+    }
+    return true;
+}
+
 // Extract counter-increment value for a specific counter from element's CSS
 static bool get_element_counter_inc(DomElement* elem, const char* counter_name, int* out_value) {
     if (!elem || !elem->specified_style || !elem->specified_style->tree) return false;
@@ -454,6 +467,7 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
     // CSS 2.1 §12.5: list-style-image overrides list-style-type when image loads successfully
     if (image_url && strcmp(image_url, "none") != 0) {
         marker_prop->image_url = lam::promote_to_arena(parent_elem->doc->arena, image_url).get();
+        marker_prop->loaded_image = load_image(lycon->ui_context, marker_prop->image_url);
     }
 
     if (marker_css_content) {
@@ -478,7 +492,18 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
 
     // CSS Lists 3 §4.2: compute marker width from content
     // For text markers, measure actual text width; for bullets, use fixed bullet size + padding
-    if (marker_prop->text_content && font_handle) {
+    if (marker_prop->loaded_image) {
+        ImageSurface* img = marker_prop->loaded_image;
+        bool from_image_orientation = marker_image_orientation_uses_from_image(parent_elem);
+        float image_width = (from_image_orientation || img->encoded_width <= 0) ?
+            (float)img->width : (float)img->encoded_width;
+        float image_height = (from_image_orientation || img->encoded_height <= 0) ?
+            (float)img->height : (float)img->encoded_height;
+        if (image_width > 0.0f && image_height > 0.0f) {
+            marker_prop->width = image_width;
+            marker_prop->height = image_height;
+        }
+    } else if (marker_prop->text_content && font_handle) {
         TextExtents extents = font_measure_text(font_handle, marker_prop->text_content,
                                                  (int)strlen(marker_prop->text_content)); // INT_CAST_OK: string length
         marker_prop->width = extents.width;
@@ -489,7 +514,6 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
         // fallback: use em-based estimate
         marker_prop->width = font_size * 1.375f;
     }
-
     marker_elem->view_type = RDT_VIEW_MARKER;
     marker_elem->blk = (BlockProp*)marker_prop;
 

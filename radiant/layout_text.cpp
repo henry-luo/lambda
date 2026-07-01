@@ -1506,6 +1506,42 @@ static bool fixup_view_is_out_of_flow(View* view) {
         elem->position->float_prop == CSS_VALUE_RIGHT;
 }
 
+static void align_forced_break_rect_to_line_baseline(LayoutContext* lycon) {
+    if (!lycon || !lycon->view || lycon->view->view_type != RDT_VIEW_BR) return;
+
+    View* br_view = lycon->view;
+    float br_ascender = 0.0f;
+    float br_descender = 0.0f;
+    if (lycon->font.font_handle) {
+        font_get_content_area_split(lycon->font.font_handle, &br_ascender, &br_descender);
+    }
+    if (br_ascender <= 0.0f) {
+        br_ascender = lycon->block.init_ascender > 0.0f
+            ? lycon->block.init_ascender
+            : br_view->height;
+    }
+
+    float baseline_line_height = max(lycon->block.line_height,
+        lycon->line.max_ascender + lycon->line.max_descender);
+    float strut_baseline = lycon->block.init_ascender + lycon->block.lead_y;
+    if (!lycon->block.line_height_is_normal) {
+        float strut_content_height = lycon->block.init_ascender + lycon->block.init_descender;
+        if (strut_content_height > 0.0f) {
+            strut_baseline = lycon->block.init_ascender +
+                (lycon->block.line_height - strut_content_height) / 2.0f;
+        }
+    }
+
+    float baseline_pos = max(lycon->line.max_ascender, strut_baseline);
+    if (lycon->line.max_bottom_height > baseline_line_height) {
+        baseline_pos += lycon->line.max_bottom_height - baseline_line_height;
+    }
+
+    // A forced break exposes a zero-width inline box on the line it terminates;
+    // align it to the finalized baseline after replaced content expands the line.
+    br_view->y = lycon->block.advance_y + baseline_pos - br_ascender;
+}
+
 static bool fixup_span_children_have_no_line_content(ViewSpan* span);
 
 static bool fixup_view_has_line_content(View* view) {
@@ -1882,6 +1918,8 @@ void line_break(LayoutContext* lycon) {
         }
     }
     // else no change to vertical alignment
+
+    align_forced_break_rect_to_line_baseline(lycon);
 
     // horizontal text alignment
     line_align(lycon);

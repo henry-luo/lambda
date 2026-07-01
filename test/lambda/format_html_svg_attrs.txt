@@ -1,0 +1,5 @@
+{
+  div_class: true,
+  svg_width: true,
+  rect_attrs: true
+}
