@@ -160,11 +160,30 @@ children expression has any whitespace.
 
 ## 8. `format(elem, 'html')` strips attributes from non-HTML elements
 
+**Status: ✅ Fixed / verified (2026-07-01)** — current `format(..., 'html')`
+preserves attributes on non-HTML/SVG elements inside an HTML tree.
+
+```lambda
+let tree = <div class: "wrap";
+    <svg width: 100, height: 50;
+        <rect width: 10, height: 5, fill: "red">
+    >
+>
+
+let html = format(tree, 'html')
+// contains: <svg width="100" height="50">
+// contains: <rect width="10" height="5" fill="red">
+```
+
 When an SVG subtree (`<rect width: 10; height: 5>`) is embedded inside a
 larger HTML/element tree and formatted with `'html'`, the formatter drops
 all attributes from non-HTML tags. Switching to `format(root, 'xml')`
 preserves them. This is undocumented; users building SVG-in-HTML pages
 trip over this immediately.
+
+The current formatter walks the element shape fields for every tag rather than
+filtering by known HTML tag names, so SVG and other non-HTML element attributes
+are emitted as normal HTML attributes.
 
 ---
 
