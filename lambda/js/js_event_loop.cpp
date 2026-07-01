@@ -308,6 +308,7 @@ typedef struct JsTimerHandle {
     uv_timer_t timer;
     int64_t    id;
     Item       callback;
+    Item       object;
     Item       async_resource;
     Item       als_context;
     Item       domain;
@@ -428,6 +429,7 @@ static void timer_unregister_gc_roots(JsTimerHandle *th) {
     JsTimerRuntimeScope scope;
     if (timer_runtime_enter(th, &scope)) {
         heap_unregister_gc_root(&th->callback.item);
+        if (th->object.item) heap_unregister_gc_root(&th->object.item);
         heap_unregister_gc_root(&th->async_resource.item);
         heap_unregister_gc_root(&th->als_context.item);
         heap_unregister_gc_root(&th->domain.item);
@@ -461,6 +463,7 @@ static void timer_register_gc_roots(JsTimerHandle *th) {
     JsTimerRuntimeScope scope;
     if (!timer_runtime_enter(th, &scope)) return;
     heap_register_gc_root(&th->callback.item);
+    if (th->object.item) heap_register_gc_root(&th->object.item);
     heap_register_gc_root(&th->async_resource.item);
     heap_register_gc_root(&th->als_context.item);
     heap_register_gc_root(&th->domain.item);
@@ -483,6 +486,14 @@ static void timer_close_handle(JsTimerHandle *th) {
     }
     uv_timer_stop(&th->timer);
     uv_close((uv_handle_t *)&th->timer, timer_close_cb);
+}
+
+static void timer_mark_object_destroyed(JsTimerHandle* th) {
+    if (!th || !th->object.item) return;
+    // The JS Timeout object is separate from the libuv handle; update it on
+    // observable clear/fire paths, not during process-exit cleanup of unref'd intervals.
+    js_property_set(th->object, (Item){.item = s2it(heap_create_name("_destroyed", 10))},
+                    (Item){.item = b2it(true)});
 }
 
 static void timer_fire_cb(uv_timer_t *handle) {
@@ -511,6 +522,7 @@ static void timer_fire_cb(uv_timer_t *handle) {
         log_error("event_loop: timer fired without captured JS runtime");
     }
     if (!th->is_interval) {
+        timer_mark_object_destroyed(th);
         timer_close_handle(th);
     }
     js_microtask_flush();
@@ -652,6 +664,8 @@ static Item make_timer_object(int64_t id, JsClass cls) {
     Item obj = js_new_object();
     js_property_set(obj, (Item){.item = s2it(heap_create_name("_timerId", 8))},
                     (Item){.item = i2it(id)});
+    js_property_set(obj, (Item){.item = s2it(heap_create_name("_destroyed", 10))},
+                    (Item){.item = b2it(false)});
 
     // bind methods
     extern Item js_new_function(void* fn, int nargs);
@@ -724,13 +738,15 @@ extern "C" Item js_setTimeout(Item callback, Item delay) {
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, ms, 0);
+    Item timer_obj = make_timer_object(th->id, JS_CLASS_TIMEOUT);
+    th->object = timer_obj;
     timer_register_gc_roots(th);
 
     if (timer_handle_count < MAX_TIMER_HANDLES) {
         timer_handles[timer_handle_count++] = th;
     }
 
-    return make_timer_object(th->id, JS_CLASS_TIMEOUT);
+    return timer_obj;
 }
 
 // setTimeout with extra args passed as a JS array
@@ -771,13 +787,15 @@ extern "C" Item js_setTimeout_args(Item callback, Item delay, Item args_array) {
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, ms, 0);
+    Item timer_obj = make_timer_object(th->id, JS_CLASS_TIMEOUT);
+    th->object = timer_obj;
     timer_register_gc_roots(th);
 
     if (timer_handle_count < MAX_TIMER_HANDLES) {
         timer_handles[timer_handle_count++] = th;
     }
 
-    return make_timer_object(th->id, JS_CLASS_TIMEOUT);
+    return timer_obj;
 }
 
 static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args) {
@@ -814,14 +832,17 @@ static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args) 
     timer_capture_runtime(th, "Immediate", 9);
 
     uv_timer_init(loop, &th->timer);
-    uv_timer_start(&th->timer, timer_fire_cb, 0, 0);
+    // Immediates queued while draining the current check phase belong to the next turn.
+    uv_timer_start(&th->timer, timer_fire_cb, 1, 0);
+    Item timer_obj = make_timer_object(th->id, JS_CLASS_IMMEDIATE);
+    th->object = timer_obj;
     timer_register_gc_roots(th);
 
     if (timer_handle_count < MAX_TIMER_HANDLES) {
         timer_handles[timer_handle_count++] = th;
     }
 
-    return make_timer_object(th->id, JS_CLASS_IMMEDIATE);
+    return timer_obj;
 }
 
 extern "C" Item js_setImmediate_timer(Item callback) {
@@ -903,13 +924,15 @@ extern "C" Item js_setInterval(Item callback, Item delay) {
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, ms, ms);
+    Item timer_obj = make_timer_object(th->id, JS_CLASS_TIMEOUT);
+    th->object = timer_obj;
     timer_register_gc_roots(th);
 
     if (timer_handle_count < MAX_TIMER_HANDLES) {
         timer_handles[timer_handle_count++] = th;
     }
 
-    return make_timer_object(th->id, JS_CLASS_TIMEOUT);
+    return timer_obj;
 }
 
 // setInterval with extra args passed as a JS array
@@ -950,13 +973,15 @@ extern "C" Item js_setInterval_args(Item callback, Item delay, Item args_array) 
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, ms, ms);
+    Item timer_obj = make_timer_object(th->id, JS_CLASS_TIMEOUT);
+    th->object = timer_obj;
     timer_register_gc_roots(th);
 
     if (timer_handle_count < MAX_TIMER_HANDLES) {
         timer_handles[timer_handle_count++] = th;
     }
 
-    return make_timer_object(th->id, JS_CLASS_TIMEOUT);
+    return timer_obj;
 }
 
 // =============================================================================
@@ -1147,7 +1172,8 @@ extern "C" Item js_setImmediate_promise(Item value, Item options) {
     timer_capture_runtime(th, "Immediate", 9);
 
     uv_timer_init(loop, &th->timer);
-    uv_timer_start(&th->timer, timer_fire_cb, 0, 0);
+    // Promise immediates share setImmediate's next-turn scheduling invariant.
+    uv_timer_start(&th->timer, timer_fire_cb, 1, 0);
     timer_register_gc_roots(th);
 
     if (timer_handle_count < MAX_TIMER_HANDLES) {
@@ -1194,6 +1220,7 @@ extern "C" void js_clearTimeout(Item timer_id) {
     for (int i = 0; i < timer_handle_count; i++) {
         if (timer_handles[i]->id == id) {
             JsTimerHandle *th = timer_handles[i];
+            timer_mark_object_destroyed(th);
             timer_close_handle(th);
             return;
         }

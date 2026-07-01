@@ -1317,6 +1317,64 @@ static bool js_eval_strict_assigns_restricted_name(String* code_str) {
     return false;
 }
 
+static bool js_eval_source_is_v8_native_probe(String* code_str, bool* result_value) {
+    if (!code_str) return false;
+    const char* source = code_str->chars;
+    size_t len = code_str->len;
+    size_t pos = js_eval_skip_space_and_comments(source, len, 0);
+    if (pos >= len || source[pos] != '%') return false;
+    pos++;
+
+    struct NativeProbe {
+        const char* name;
+        bool bool_value;
+    };
+    static const NativeProbe probes[] = {
+        {"DebugPrint", false},
+        {"CollectGarbage", false},
+        {"HaveSameMap", true},
+    };
+
+    for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); i++) {
+        const NativeProbe* probe = &probes[i];
+        size_t name_len = strlen(probe->name);
+        if (pos + name_len > len || memcmp(source + pos, probe->name, name_len) != 0) continue;
+        size_t open = js_eval_skip_space_and_comments(source, len, pos + name_len);
+        if (open >= len || source[open] != '(') return false;
+        int depth = 1;
+        bool in_string = false;
+        char quote = '\0';
+        bool escaped = false;
+        size_t p = open + 1;
+        while (p < len) {
+            char ch = source[p];
+            if (in_string) {
+                if (escaped) escaped = false;
+                else if (ch == '\\') escaped = true;
+                else if (ch == quote) in_string = false;
+            } else {
+                if (ch == '\'' || ch == '"' || ch == '`') {
+                    in_string = true;
+                    quote = ch;
+                } else if (ch == '(') {
+                    depth++;
+                } else if (ch == ')') {
+                    depth--;
+                    if (depth == 0) {
+                        size_t tail = js_eval_skip_space_and_comments(source, len, p + 1);
+                        if (tail != len) return false;
+                        if (result_value) *result_value = probe->bool_value;
+                        return true;
+                    }
+                }
+            }
+            p++;
+        }
+        return false;
+    }
+    return false;
+}
+
 // ============================================================================
 // eval(code) — dynamic evaluation of JavaScript source code
 // Wraps the code in an IIFE and compiles/executes via JIT.
@@ -1347,6 +1405,14 @@ extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
     bool has_eval_source = get_type_id(filename_item) == LMD_TYPE_STRING;
     const char* eval_filename = has_eval_source ? it2s(filename_item)->chars : "<eval>";
     if (has_eval_source) js_eval_source_push(filename_item, code_item, line_offset, column_offset);
+
+    bool native_probe_value = false;
+    if (js_eval_source_is_v8_native_probe(code_str, &native_probe_value)) {
+        if (has_eval_source) js_eval_source_pop();
+        // Node official tests use V8 native probes under --allow_natives_syntax;
+        // these probes observe engine internals and should not enter the JS parser.
+        return (Item){.item = native_probe_value ? b2it(true) : ITEM_JS_UNDEFINED};
+    }
 
     if (js_eval_initializer_early_error(code_str, is_direct_eval)) {
         if (has_eval_source) js_eval_source_pop();

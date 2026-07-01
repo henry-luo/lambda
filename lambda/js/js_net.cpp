@@ -845,6 +845,7 @@ static void socket_handle_remote_eof(JsSocket* sock) {
     if (!sock || sock->destroyed) return;
 
     sock->remote_ended = true;
+    js_property_set(sock->js_object, make_string_item("__remote_ended__"), (Item){.item = ITEM_TRUE});
     sock->reading = false;
     socket_update_readable(sock, false);
 
@@ -1099,6 +1100,16 @@ static void socket_flush_pending_writes(JsSocket* sock) {
 }
 
 static Item socket_write_data(Item self, JsSocket* sock, Item data_item, Item callback) {
+    Item remote_ended_marker = js_property_get(self, make_string_item("__remote_ended__"));
+    if (((sock && sock->remote_ended) || remote_ended_marker.item == ITEM_TRUE) &&
+        !socket_allow_half_open(self)) {
+        // A peer FIN can clear/free the native handle before the next write;
+        // preserve that semantic state as EPIPE instead of generic stream destroy.
+        Item err = socket_make_error("EPIPE", "This socket has been ended by the other party");
+        socket_report_write_error(sock, callback, err);
+        socket_schedule_error_event(sock, err);
+        return (Item){.item = b2it(false)};
+    }
     if (!sock || sock->destroyed) {
         if (is_callable(callback)) {
             Item err = socket_make_error(
@@ -1124,12 +1135,6 @@ static Item socket_write_data(Item self, JsSocket* sock, Item data_item, Item ca
             data_item);
     }
 
-    if (sock->remote_ended && !socket_allow_half_open(self)) {
-        Item err = socket_make_error("EPIPE", "This socket has been ended by the other party");
-        socket_report_write_error(sock, callback, err);
-        socket_schedule_error_event(sock, err);
-        return (Item){.item = b2it(false)};
-    }
     Item handle = js_property_get(self, make_string_item("_handle"));
     if (sock->handle_closed_by_user || handle.item == ITEM_NULL || is_undefined_item(handle)) {
         Item err = ItemNull;
@@ -1924,6 +1929,42 @@ static Item make_socket_object(JsSocket* sock, bool expose_handle) {
                     js_new_function((void*)js_socket_address, 0));
     sock->js_object = obj;
     net_active_add(net_active_sockets, NET_ACTIVE_SOCKET_MAX, obj);
+    return obj;
+}
+
+extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe) {
+    if (!pipe || uv_pipe_pending_count(pipe) <= 0 ||
+        uv_pipe_pending_type(pipe) != UV_TCP) {
+        return make_undefined_item();
+    }
+
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) return make_undefined_item();
+
+    JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
+    if (!sock) return make_undefined_item();
+    sock->high_water_mark = 16 * 1024;
+    uv_tcp_init(loop, &sock->tcp);
+    sock->tcp.data = sock;
+
+    int r = uv_accept((uv_stream_t*)pipe, (uv_stream_t*)&sock->tcp);
+    if (r != 0) {
+        // pending IPC handles are one-shot; close the initialized wrapper when
+        // adoption fails so the rejected descriptor does not linger in libuv.
+        uv_close((uv_handle_t*)&sock->tcp, [](uv_handle_t* h) {
+            JsSocket* s = h ? (JsSocket*)h->data : NULL;
+            if (s) mem_free(s);
+        });
+        return make_undefined_item();
+    }
+
+    Item obj = make_socket_object(sock, true);
+    sock->connected = true;
+    sock->is_server_side = true;
+    socket_update_state_properties(sock);
+    socket_update_address_properties(sock);
+    net_active_add(net_active_sockets, NET_ACTIVE_SOCKET_MAX, obj);
+    socket_start_read(sock);
     return obj;
 }
 
@@ -3986,6 +4027,54 @@ static Item make_server_handle_object(JsServer* srv) {
     js_property_set(handle, make_string_item("onconnection"),
                     js_new_function((void*)js_server_handle_onconnection, 2));
     return handle;
+}
+
+static int net_dup_uv_fd(const uv_handle_t* handle) {
+#ifdef _WIN32
+    (void)handle;
+    return -1;
+#else
+    if (!handle) return -1;
+    uv_os_fd_t fd;
+    if (uv_fileno(handle, &fd) != 0) return -1;
+    return dup((int)fd);
+#endif
+}
+
+extern "C" int js_net_dup_ipc_stdio_fd(Item handle_item) {
+    if (!net_is_object_like(handle_item)) return -1;
+    JsServer* srv = server_from_handle_object(handle_item);
+    if (srv && !uv_is_closing((uv_handle_t*)&srv->tcp)) {
+        return net_dup_uv_fd((const uv_handle_t*)&srv->tcp);
+    }
+    JsSocket* sock = socket_from_handle_object(handle_item);
+    if (sock && !uv_is_closing((uv_handle_t*)&sock->tcp)) {
+        return net_dup_uv_fd((const uv_handle_t*)&sock->tcp);
+    }
+
+    Item inner = js_property_get(handle_item, make_string_item("_handle"));
+    if (net_is_object_like(inner) && inner.item != handle_item.item) {
+        // node stdio arrays receive public socket/server objects as well as
+        // their internal _handle objects; unwrap once to preserve fd ownership.
+        return js_net_dup_ipc_stdio_fd(inner);
+    }
+    return -1;
+}
+
+extern "C" uv_stream_t* js_net_stream_from_ipc_send_handle(Item handle_item) {
+    if (!net_is_object_like(handle_item)) return NULL;
+    JsSocket* sock = socket_from_handle_object(handle_item);
+    if (sock && !uv_is_closing((uv_handle_t*)&sock->tcp)) {
+        return (uv_stream_t*)&sock->tcp;
+    }
+
+    Item inner = js_property_get(handle_item, make_string_item("_handle"));
+    if (net_is_object_like(inner) && inner.item != handle_item.item) {
+        // sendHandle normally receives a net.Socket; unwrap its public object
+        // to the native TCP handle used by uv_write2 descriptor passing.
+        return js_net_stream_from_ipc_send_handle(inner);
+    }
+    return NULL;
 }
 
 static void server_connection_cb(uv_stream_t* server, int status) {

@@ -2116,11 +2116,14 @@ int main(int argc, char *argv[]) {
             bool unhandled_rejections_strict = false;
             bool tls_min_v13 = false;
             bool tls_max_v12 = false;
+            bool force_interactive = false;
             int js_file_arg_index = -1;
             int eval_option_index = -1;
             for (int i = 2; i < argc; i++) {
                 if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) {
                     html_file = argv[++i];
+                } else if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) {
+                    force_interactive = true;
                 } else if (strcmp(argv[i], "--input-type=module") == 0) {
                     input_type_module = true;
                 } else if (strcmp(argv[i], "--unhandled-rejections=strict") == 0) {
@@ -2264,6 +2267,7 @@ int main(int argc, char *argv[]) {
                 }
                 for (int i = 2; i < argc && js_exec_argc_store < 32; i++) {
                     if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
+                    if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) continue;
                     if (strcmp(argv[i], "--input-type=module") == 0) continue;
                     if (strcmp(argv[i], "--mir-interp") == 0) continue;
                     if (strcmp(argv[i], "--diagnose") == 0) continue;
@@ -2293,6 +2297,7 @@ int main(int argc, char *argv[]) {
                 // Pass remaining non-option arguments
                 for (int i = 2; i < argc && js_argc_store < 64; i++) {
                     if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
+                    if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) continue;
                     if (strcmp(argv[i], "--input-type=module") == 0) continue;
                     if (strcmp(argv[i], "--mir-interp") == 0) continue;
                     if (strcmp(argv[i], "--diagnose") == 0) continue;
@@ -2321,6 +2326,12 @@ int main(int argc, char *argv[]) {
             }
 
 #if !defined(_WIN32)
+            if (force_interactive && eval_mode) {
+                // Node's `-i -e` prints the interactive prompt before evaluating
+                // source; child-process REPL tests wait for that observable prefix.
+                fputs("> ", stdout);
+                fflush(stdout);
+            }
             Item result = html_file
                 ? transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file)
                 : js_cli_transpile_with_execution_stack(&runtime, js_source, js_source_len, js_file);

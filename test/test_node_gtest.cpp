@@ -18,6 +18,7 @@
 //   --update-baseline            Update baseline file with current passing set
 //   --timeout=<ms>               Per-test timeout in ms (default: 60000)
 //   --include-slow               Include tests listed in test/node/official_slow_list.txt
+//   --no-update-slow-list        Do not rewrite official_slow_list.txt from timings
 //   --baseline-only              Run only tests listed in official_baseline.txt
 //
 // Usage:
@@ -91,6 +92,7 @@ static const double SLOW_TEST_THRESHOLD_MS = 10000.0;
 static int         g_timeout_ms    = 60000;    // per-test timeout (60s for JIT compilation)
 static bool        g_update_baseline = false;
 static bool        g_include_slow = false;
+static bool        g_update_slow_list = true;
 static bool        g_baseline_only = false;
 static double      g_node_run_wall_secs = 0.0;
 static std::chrono::steady_clock::time_point g_node_program_start;
@@ -1292,6 +1294,9 @@ static void write_failure_outputs(const std::vector<NodeOfficialParam>& tests) {
 }
 
 static void write_slow_list_if_needed(const std::vector<NodeOfficialParam>& tests) {
+    // host timing jitter can turn verification runs into unrelated policy edits.
+    if (!g_update_slow_list) return;
+
     load_slow_list();
 
     bool changed = false;
@@ -1607,6 +1612,8 @@ int main(int argc, char** argv) {
             g_update_baseline = true;
         } else if (strcmp(argv[i], "--include-slow") == 0) {
             g_include_slow = true;
+        } else if (strcmp(argv[i], "--no-update-slow-list") == 0) {
+            g_update_slow_list = false;
         } else if (strcmp(argv[i], "--baseline-only") == 0) {
             g_baseline_only = true;
         } else if (strncmp(argv[i], "--timeout=", 10) == 0) {

@@ -33,11 +33,15 @@ extern "C" Item js_stream_on(Item self, Item event_item, Item listener);
 extern "C" Item js_stream_destroy(Item self, Item err);
 extern "C" Item js_net_createConnection(Item rest_args);
 extern "C" Item js_buffer_from_bytes(const char* data, int len);
+extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item);
 extern "C" Item js_async_hooks_enter_resource(Item resource);
 extern "C" void js_async_hooks_restore_resource(Item previous);
+extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_len);
+extern "C" void js_async_hooks_emit_destroy_resource(Item resource);
 extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
 extern "C" void js_throw_value(Item error);
+extern "C" Item js_process_emit(Item event_name, Item arg1);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -56,6 +60,26 @@ static inline Item make_js_undefined() {
 
 static inline bool js_http_is_callable(Item item) {
     return get_type_id(item) == LMD_TYPE_FUNC;
+}
+
+static bool js_http_is_object_like(Item item) {
+    TypeId type = get_type_id(item);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+}
+
+static bool js_http_object_has_key(Item obj, const char* key) {
+    if (!js_http_is_object_like(obj) || !key) return false;
+    Item keys = js_object_keys(obj);
+    if (get_type_id(keys) != LMD_TYPE_ARRAY) return false;
+    int64_t len = js_array_length(keys);
+    size_t key_len = strlen(key);
+    for (int64_t idx = 0; idx < len; idx++) {
+        Item item = js_array_get_int(keys, idx);
+        if (get_type_id(item) != LMD_TYPE_STRING) continue;
+        String* s = it2s(item);
+        if (s && (size_t)s->len == key_len && memcmp(s->chars, key, key_len) == 0) return true;
+    }
+    return false;
 }
 
 static bool js_http_has_marker(Item obj, const char* name) {
@@ -557,6 +581,7 @@ typedef struct JsHttpConn {
     bool         destroyed;
     bool         read_ended;
     bool         is_pipe;
+    bool         request_body_chunked;
     bool         close_after_response_writes;
 } JsHttpConn;
 
@@ -569,6 +594,8 @@ static void http_server_note_conn_closed(JsHttpConn* conn);
 static void http_conn_close_now(JsHttpConn* conn);
 static bool http_conn_write_bytes(JsHttpConn* conn, Item data_item, bool close_after);
 static void http_conn_maybe_close_after_response_writes(JsHttpConn* conn);
+static void http_response_close_request(Item res);
+static void http_response_flush_partial(Item self);
 
 typedef struct HttpResponseWriteReq {
     char* data;
@@ -637,6 +664,20 @@ static bool http_item_bytes(Item item, const char** data, int* len) {
     return false;
 }
 
+static Item http_encode_write_chunk(Item chunk_item, Item encoding_item) {
+    if (get_type_id(chunk_item) == LMD_TYPE_STRING &&
+        get_type_id(encoding_item) == LMD_TYPE_STRING) {
+        return js_buffer_from(chunk_item, encoding_item, make_js_undefined());
+    }
+    return chunk_item;
+}
+
+static void http_call_write_callback(Item callback) {
+    if (!js_http_is_callable(callback)) return;
+    js_call_function(callback, make_js_undefined(), NULL, 0);
+    js_microtask_flush();
+}
+
 static void http_response_append_body(Item self, Item chunk_item) {
     const char* chunk_data = NULL;
     int chunk_len = 0;
@@ -666,37 +707,7 @@ static void http_response_append_body(Item self, Item chunk_item) {
 }
 
 static void http_response_append_body_encoded(Item self, Item chunk_item, Item encoding_item) {
-    if (get_type_id(encoding_item) != LMD_TYPE_STRING ||
-        get_type_id(chunk_item) != LMD_TYPE_STRING) {
-        http_response_append_body(self, chunk_item);
-        return;
-    }
-
-    String* enc = it2s(encoding_item);
-    bool utf16le = false;
-    if (enc->len == 7) {
-        char folded[8];
-        for (int i = 0; i < 7; i++) {
-            char c = enc->chars[i];
-            folded[i] = (c >= 'A' && c <= 'Z') ? c + 32 : c;
-        }
-        folded[7] = '\0';
-        utf16le = memcmp(folded, "utf16le", 7) == 0;
-    }
-    if (!utf16le) {
-        http_response_append_body(self, chunk_item);
-        return;
-    }
-
-    String* s = it2s(chunk_item);
-    int out_len = (int)s->len * 2;
-    char* out = (char*)mem_alloc(out_len, MEM_CAT_JS_RUNTIME);
-    for (int i = 0; i < (int)s->len; i++) {
-        out[i * 2] = s->chars[i];
-        out[i * 2 + 1] = '\0';
-    }
-    http_response_append_body(self, make_string_item(out, out_len));
-    mem_free(out);
+    http_response_append_body(self, http_encode_write_chunk(chunk_item, encoding_item));
 }
 
 static bool http_response_bool_prop(Item self, const char* name) {
@@ -1142,6 +1153,7 @@ static Item http_response_writeHead(Item self, Item status_item, Item reason_or_
     }
 
     js_property_set(self, make_string_item("__write_head_called__"), (Item){.item = b2it(true)});
+    js_property_set(self, make_string_item("__explicit_write_head_called__"), (Item){.item = b2it(true)});
     js_property_set(self, make_string_item("__write_head_status__"), (Item){.item = i2it(status)});
     js_property_set(self, make_string_item("__write_head_status_message__"), status_message_item);
     js_property_set(self, make_string_item("headersSent"), (Item){.item = b2it(true)});
@@ -1221,8 +1233,12 @@ extern "C" Item js_http_res_hasHeader(Item self, Item name_item) {
     return (Item){.item = b2it(type != LMD_TYPE_UNDEFINED && type != LMD_TYPE_NULL)};
 }
 
-// response.write(chunk) — accumulate body data
-extern "C" Item js_http_res_write(Item self, Item chunk_item, Item encoding_item) {
+static Item http_res_write_ex(Item self, Item chunk_item, Item encoding_item, Item callback_item) {
+    if (js_http_is_callable(encoding_item)) {
+        callback_item = encoding_item;
+        encoding_item = make_js_undefined();
+    }
+    bool had_explicit_write_head = http_response_bool_prop(self, "__explicit_write_head_called__");
     bool reject_body = http_response_bool_prop(self, "__reject_nonstandard_body_writes__");
     int status = http_response_int_prop(self, "statusCode");
     bool head_request = false;
@@ -1240,7 +1256,20 @@ extern "C" Item js_http_res_write(Item self, Item chunk_item, Item encoding_item
     js_property_set(self, make_string_item("__headers_sent__"), (Item){.item = b2it(true)});
     js_property_set(self, make_string_item("__write_head_called__"), (Item){.item = b2it(true)});
     js_property_set(self, make_string_item("headersSent"), (Item){.item = b2it(true)});
+    // response bodies are buffered until end(), so write callbacks must be
+    // acknowledged at the write point or nested write/end sequences stall.
+    http_call_write_callback(callback_item);
+    if (had_explicit_write_head &&
+        !http_response_bool_prop(self, "__ending__") &&
+        !http_response_bool_prop(self, "__partial_sent__")) {
+        http_response_flush_partial(self);
+    }
     return (Item){.item = b2it(true)};
+}
+
+// response.write(chunk) — accumulate body data
+extern "C" Item js_http_res_write(Item self, Item chunk_item, Item encoding_item) {
+    return http_res_write_ex(self, chunk_item, encoding_item, make_js_undefined());
 }
 
 extern "C" Item js_http_res_send_internal(Item self, Item chunk_item) {
@@ -1487,6 +1516,7 @@ static void http_response_flush(Item self) {
         // will never be delivered by an async uv_write completion.
         js_property_set(self, make_string_item("writableFinished"), (Item){.item = b2it(true)});
         http_response_emit(self, "finish", NULL, 0, false);
+        http_response_close_request(self);
         if (js_http_is_callable(write_req->callback)) {
             js_call_function(write_req->callback, make_js_undefined(), NULL, 0);
         }
@@ -1508,6 +1538,7 @@ static void http_response_flush(Item self) {
         js_property_set(self, make_string_item("headersSent"), (Item){.item = b2it(true)});
         js_property_set(self, make_string_item("writableFinished"), (Item){.item = b2it(true)});
         http_response_emit(self, "finish", NULL, 0, false);
+        http_response_close_request(self);
         if (js_http_is_callable(write_req->callback)) {
             js_call_function(write_req->callback, make_js_undefined(), NULL, 0);
         }
@@ -1521,12 +1552,49 @@ static void http_response_flush(Item self) {
     js_property_set(self, make_string_item("headersSent"), (Item){.item = b2it(true)});
 }
 
-// response.end([data], [callback]) — finalize and send
-extern "C" Item js_http_res_end(Item self, Item data_item, Item callback_item) {
+static void http_response_flush_partial(Item self) {
+    Item handle_item = js_property_get(self, make_string_item("__conn__"));
+    if (get_type_id(handle_item) != LMD_TYPE_INT) return;
+    JsHttpConn* conn = (JsHttpConn*)(uintptr_t)it2i(handle_item);
+    if (!conn || conn->destroyed) return;
+
+    Item status_item = js_property_get(self, make_string_item("statusCode"));
+    int status = get_type_id(status_item) == LMD_TYPE_INT ? (int)it2i(status_item) : 200;
+    const char* status_message = http_response_status_message(self, status);
+    Item body = js_property_get(self, make_string_item("__body__"));
+    const char* body_data = "";
+    int body_len = 0;
+    if (get_type_id(body) == LMD_TYPE_STRING) {
+        String* bs = it2s(body);
+        body_data = bs->chars;
+        body_len = (int)bs->len;
+    }
+
+    char head[1024];
+    int head_len = snprintf(head, sizeof(head),
+                            "HTTP/1.1 %d %s\r\nConnection: keep-alive\r\n\r\n",
+                            status, status_message);
+    int total = head_len + body_len;
+    char* full = (char*)mem_alloc(total, MEM_CAT_JS_RUNTIME);
+    memcpy(full, head, (size_t)head_len);
+    if (body_len > 0) memcpy(full + head_len, body_data, (size_t)body_len);
+    // explicit writeHead()+write() can leave the response open; flushing
+    // headers/body now lets clients receive and destroy the IncomingMessage.
+    http_conn_write_bytes(conn, make_string_item(full, total), false);
+    mem_free(full);
+    js_property_set(self, make_string_item("__partial_sent__"), (Item){.item = b2it(true)});
+    js_property_set(self, make_string_item("headersSent"), (Item){.item = b2it(true)});
+}
+
+static Item http_res_end_ex(Item self, Item data_item, Item encoding_item, Item callback_item) {
     Item callback = callback_item;
     if (js_http_is_callable(data_item)) {
         callback = data_item;
         data_item = make_js_undefined();
+        encoding_item = make_js_undefined();
+    } else if (js_http_is_callable(encoding_item)) {
+        callback = encoding_item;
+        encoding_item = make_js_undefined();
     }
     bool already_ended = http_response_bool_prop(self, "writableEnded") ||
                          http_response_bool_prop(self, "finished");
@@ -1551,13 +1619,18 @@ extern "C" Item js_http_res_end(Item self, Item data_item, Item callback_item) {
     }
     js_property_set(self, make_string_item("__ending__"), (Item){.item = b2it(true)});
     if (get_type_id(data_item) != LMD_TYPE_UNDEFINED && data_item.item != ITEM_NULL) {
-        js_http_res_write(self, data_item, make_js_undefined());
+        http_res_write_ex(self, data_item, encoding_item, make_js_undefined());
     }
     js_property_set(self, make_string_item("__ending__"), (Item){.item = b2it(false)});
     js_property_set(self, make_string_item("finished"), (Item){.item = b2it(true)});
     js_property_set(self, make_string_item("writableEnded"), (Item){.item = b2it(true)});
     http_response_flush(self);
     return self;
+}
+
+// response.end([data], [callback]) — finalize and send
+extern "C" Item js_http_res_end(Item self, Item data_item, Item callback_item) {
+    return http_res_end_ex(self, data_item, make_js_undefined(), callback_item);
 }
 
 static Item js_http_res_inst_writeHead(Item maybe_self, Item status_item, Item headers_item) {
@@ -1603,12 +1676,12 @@ static Item js_http_res_inst_removeHeader(Item maybe_self, Item name_item) {
     return js_http_res_removeHeader(self, self.item == maybe_self.item ? name_item : maybe_self);
 }
 
-static Item js_http_res_inst_write(Item maybe_self, Item chunk_item) {
+static Item js_http_res_inst_write(Item maybe_self, Item chunk_item, Item encoding_or_callback) {
     Item self = js_http_receiver(maybe_self, "__conn__");
     if (self.item == maybe_self.item) {
-        return js_http_res_write(self, chunk_item, make_js_undefined());
+        return http_res_write_ex(self, chunk_item, encoding_or_callback, make_js_undefined());
     }
-    return js_http_res_write(self, maybe_self, chunk_item);
+    return http_res_write_ex(self, maybe_self, chunk_item, encoding_or_callback);
 }
 
 static Item js_http_res_inst_send_internal(Item maybe_self, Item chunk_item) {
@@ -1619,9 +1692,9 @@ static Item js_http_res_inst_send_internal(Item maybe_self, Item chunk_item) {
 static Item js_http_res_inst_end(Item maybe_self, Item data_item, Item callback_item) {
     Item self = js_http_receiver(maybe_self, "__conn__");
     if (self.item == maybe_self.item) {
-        return js_http_res_end(self, data_item, callback_item);
+        return http_res_end_ex(self, data_item, make_js_undefined(), callback_item);
     }
-    return js_http_res_end(self, maybe_self, data_item);
+    return http_res_end_ex(self, maybe_self, data_item, callback_item);
 }
 
 static Item js_http_res_inst_flushHeaders(Item maybe_self) {
@@ -1632,10 +1705,15 @@ static Item js_http_res_inst_flushHeaders(Item maybe_self) {
 
 static Item js_http_res_inst_writeContinue(Item maybe_self) {
     Item self = js_http_receiver(maybe_self, "__conn__");
+    Item callback = self.item == maybe_self.item ? make_js_undefined() : maybe_self;
     Item handle_item = js_property_get(self, make_string_item("__conn__"));
     if (get_type_id(handle_item) == LMD_TYPE_INT) {
         JsHttpConn* conn = (JsHttpConn*)(uintptr_t)it2i(handle_item);
-        http_conn_write_bytes(conn, make_string_item("HTTP/1.1 100 Continue\r\n\r\n"), false);
+        if (http_conn_write_bytes(conn, make_string_item("HTTP/1.1 100 Continue\r\n\r\n"), false)) {
+            // writeContinue has no body buffer; the callback represents libuv
+            // accepting the informational response for delivery.
+            http_call_write_callback(callback);
+        }
     }
     return self;
 }
@@ -1756,6 +1834,8 @@ static void http_request_headers_append(Item headers, const char* name, const ch
 }
 
 static Item http_conn_socket_object(JsHttpConn* conn);
+static bool http_request_is_chunked(ParsedRequest* req);
+static Item js_http_server_req_destroy(Item maybe_self, Item err_item);
 
 static Item make_request_object(JsHttpConn* conn, ParsedRequest* req) {
     Item msg = js_readable_new(ItemNull);
@@ -1782,7 +1862,13 @@ static Item make_request_object(JsHttpConn* conn, ParsedRequest* req) {
         Item socket = http_conn_socket_object(conn);
         js_property_set(msg, make_string_item("socket"), socket);
         js_property_set(msg, make_string_item("connection"), socket);
+        js_property_set(msg, make_string_item("__server_req_conn__"),
+                        (Item){.item = i2it((int64_t)(uintptr_t)conn)});
+        js_property_set(msg, make_string_item("destroy"),
+                        js_new_function((void*)js_http_server_req_destroy, 2));
     }
+    Item async_resource = js_async_hooks_create_resource("HTTPINCOMINGMESSAGE", 19);
+    js_property_set(msg, make_string_item("__async_resource__"), async_resource);
 
     // headers as lowercase-key object
     Item headers = http_new_header_object();
@@ -1870,6 +1956,11 @@ static void http_request_emit_close_now(Item req) {
     Item close_emitted_key = make_string_item("__close_emitted__");
     if (http_response_bool_prop(req, "__close_emitted__")) return;
     js_property_set(req, close_emitted_key, (Item){.item = b2it(true)});
+    js_property_set(req, make_string_item("closed"), (Item){.item = b2it(true)});
+    Item async_resource = js_property_get(req, make_string_item("__async_resource__"));
+    // IncomingMessage async resources outlive the parser callback; destroy
+    // them when the message closes so async_hooks init/destroy pairs balance.
+    js_async_hooks_emit_destroy_resource(async_resource);
     Item emit_fn = js_property_get(req, make_string_item("emit"));
     if (get_type_id(emit_fn) == LMD_TYPE_FUNC) {
         Item close_event = make_string_item("close");
@@ -1878,13 +1969,40 @@ static void http_request_emit_close_now(Item req) {
     }
 }
 
+static void http_response_close_request(Item res) {
+    Item req = js_property_get(res, make_string_item("__request__"));
+    http_request_emit_close_now(req);
+}
+
 static void http_conn_destroy_unfinished_request(JsHttpConn* conn) {
-    if (!conn || conn->current_request.item == 0 || conn->request_body_remaining <= 0) return;
+    if (!conn || conn->current_request.item == 0 ||
+        (!conn->request_body_chunked && conn->request_body_remaining <= 0)) return;
     Item req = conn->current_request;
     js_stream_destroy(req, make_js_undefined());
     http_request_emit_close_now(req);
     conn->current_request = make_js_undefined();
     conn->request_body_remaining = 0;
+    conn->request_body_chunked = false;
+}
+
+static Item js_http_server_req_destroy(Item maybe_self, Item err_item) {
+    Item self = js_http_receiver(maybe_self, "__server_req_conn__");
+    Item actual_err = self.item == maybe_self.item ? err_item : maybe_self;
+    TypeId err_type = get_type_id(actual_err);
+    if (actual_err.item != 0 && err_type != LMD_TYPE_UNDEFINED && err_type != LMD_TYPE_NULL) {
+        js_property_set(self, make_string_item("errored"), actual_err);
+    }
+    // Server-side IncomingMessage.destroy(err) aborts the socket, not an
+    // uncaught stream error on the request object.
+    js_property_set(self, make_string_item("destroyed"), (Item){.item = b2it(true)});
+    js_property_set(self, make_string_item("readableAborted"), (Item){.item = b2it(true)});
+    http_request_emit_close_now(self);
+    Item handle_item = js_property_get(self, make_string_item("__server_req_conn__"));
+    if (get_type_id(handle_item) == LMD_TYPE_INT) {
+        JsHttpConn* conn = (JsHttpConn*)(uintptr_t)it2i(handle_item);
+        http_conn_close_now(conn);
+    }
+    return self;
 }
 
 static void http_conn_close_now(JsHttpConn* conn) {
@@ -2048,7 +2166,34 @@ static bool http_request_has_invalid_method_start(const char* data, int len) {
 }
 
 static void http_conn_feed_request_body(JsHttpConn* conn) {
-    if (!conn || conn->current_request.item == 0 || conn->request_body_remaining <= 0) return;
+    if (!conn || conn->current_request.item == 0) return;
+    if (conn->request_body_chunked) {
+        // Expect/continue requests can stream chunked body bytes after the
+        // headers have already dispatched the IncomingMessage.
+        if (conn->recv_len <= 0) return;
+        int consumed = 0;
+        bool complete = false;
+        int decoded_len = http_decode_chunked_request_body(conn->recv_buf, conn->recv_len,
+                                                           NULL, &consumed, &complete, false);
+        if (!complete || decoded_len < 0 || consumed <= 0 || consumed > conn->recv_len) {
+            return;
+        }
+        ParsedRequest trailer_req;
+        memset(&trailer_req, 0, sizeof(trailer_req));
+        decoded_len = http_decode_chunked_request_body(conn->recv_buf, conn->recv_len,
+                                                       &trailer_req, &consumed, &complete, true);
+        if (decoded_len > 0) {
+            js_readable_push(conn->current_request, make_string_item(conn->recv_buf, decoded_len));
+        }
+        js_readable_push(conn->current_request, ItemNull);
+        int remaining = conn->recv_len - consumed;
+        if (remaining > 0) memmove(conn->recv_buf, conn->recv_buf + consumed, (size_t)remaining);
+        conn->recv_len = remaining;
+        conn->current_request = make_js_undefined();
+        conn->request_body_chunked = false;
+        return;
+    }
+    if (conn->request_body_remaining <= 0) return;
     while (conn->recv_len > 0 && conn->request_body_remaining > 0) {
         int take = conn->recv_len < conn->request_body_remaining ?
             conn->recv_len : conn->request_body_remaining;
@@ -2063,6 +2208,7 @@ static void http_conn_feed_request_body(JsHttpConn* conn) {
     if (conn->request_body_remaining == 0) {
         js_readable_push(conn->current_request, ItemNull);
         conn->current_request = make_js_undefined();
+        conn->request_body_chunked = false;
     }
 }
 
@@ -2097,6 +2243,11 @@ static bool http_request_wants_keep_alive(ParsedRequest* req, bool has_buffered_
 static bool http_request_has_expect_continue(ParsedRequest* req) {
     const char* expect = http_request_header(req, "expect");
     return expect && http_header_has_token(expect, "100-continue");
+}
+
+static bool http_request_is_chunked(ParsedRequest* req) {
+    const char* transfer_encoding = http_request_header(req, "transfer-encoding");
+    return transfer_encoding && http_header_has_token(transfer_encoding, "chunked");
 }
 
 static bool http_request_accepts_chunked_response(ParsedRequest* req) {
@@ -2168,7 +2319,8 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
         conn->recv_len += (int)nread;
 
         while (conn->recv_len > 0 && !conn->destroyed) {
-            if (conn->current_request.item != 0 && conn->request_body_remaining > 0) {
+            if (conn->current_request.item != 0 &&
+                (conn->request_body_remaining > 0 || conn->request_body_chunked)) {
                 http_conn_feed_request_body(conn);
                 if (conn->recv_len <= 0) break;
                 continue;
@@ -2237,9 +2389,11 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                 if (conn->async_resource.item == 0) conn->async_resource = js_new_object();
                 Item req_obj = make_request_object(conn, &req);
                 Item res_obj = http_response_for_request(conn, &req, false, false, has_buffered_request);
+                js_property_set(res_obj, make_string_item("__request__"), req_obj);
                 if (!req.body_complete) {
                     conn->current_request = req_obj;
                     conn->request_body_remaining = req.content_length - req.body_len;
+                    conn->request_body_chunked = http_request_is_chunked(&req);
                 }
 
                 Item args[2] = { req_obj, res_obj };
@@ -2298,9 +2452,11 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                         if (conn->async_resource.item == 0) conn->async_resource = js_new_object();
                         Item req_obj = make_request_object(conn, &req);
                         Item res_obj = http_response_for_request(conn, &req, true, false, false);
+                        js_property_set(res_obj, make_string_item("__request__"), req_obj);
                         if (!req.body_complete) {
                             conn->current_request = req_obj;
                             conn->request_body_remaining = req.content_length - req.body_len;
+                            conn->request_body_chunked = http_request_is_chunked(&req);
                         }
                         Item args[2] = { req_obj, res_obj };
                         if (has_check_continue) {
@@ -2433,6 +2589,59 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
         int len = (int)h->len < 255 ? (int)h->len : 255;
         memcpy(host_buf, h->chars, (size_t)len);
         host_buf[len] = '\0';
+    }
+
+    if (js_http_is_object_like(port_item) && js_http_object_has_key(port_item, "fd")) {
+        Item fd_item = js_property_get(port_item, make_string_item("fd"));
+        TypeId fd_type = get_type_id(fd_item);
+        bool valid_fd_number = false;
+        int64_t fd_value = 0;
+        if (fd_type == LMD_TYPE_INT) {
+            fd_value = it2i(fd_item);
+            valid_fd_number = true;
+        } else if (fd_type == LMD_TYPE_INT64) {
+            fd_value = it2l(fd_item);
+            valid_fd_number = true;
+        }
+        if (!valid_fd_number || fd_value < 0) {
+            return js_throw_type_error_code(
+                "ERR_INVALID_ARG_VALUE",
+                "The argument 'options.fd' must be a non-negative number");
+        }
+        srv->is_pipe = false;
+        uv_tcp_init(lambda_uv_loop(), &srv->tcp);
+        srv->tcp.data = srv;
+        srv->handle_initialized = true;
+        // HTTP listen(options) used to ignore fd and bind a fresh port, so
+        // inherited-fd children announced readiness without accepting traffic.
+        int open_r = uv_tcp_open(&srv->tcp, (uv_os_sock_t)fd_value);
+        if (open_r != 0) {
+            log_error("http: server fd open failed: %s", uv_strerror(open_r));
+            Item err = js_new_error(make_string_item(uv_strerror(open_r)));
+            Item on_err = js_property_get(self, make_string_item("__on_error__"));
+            if (get_type_id(on_err) == LMD_TYPE_FUNC) {
+                js_call_function(on_err, self, &err, 1);
+            }
+            return self;
+        }
+        int listen_r = uv_listen(http_server_stream(srv), 128, http_server_connection_cb);
+        if (listen_r != 0) {
+            log_error("http: server fd listen failed: %s", uv_strerror(listen_r));
+            Item err = js_new_error(make_string_item(uv_strerror(listen_r)));
+            Item on_err = js_property_get(self, make_string_item("__on_error__"));
+            if (get_type_id(on_err) == LMD_TYPE_FUNC) {
+                js_call_function(on_err, self, &err, 1);
+            }
+            return self;
+        }
+        js_property_set(self, make_string_item("listening"), (Item){.item = b2it(true)});
+
+        Item* env = js_alloc_env(2);
+        env[0] = self;
+        env[1] = callback;
+        Item tick = js_new_closure((void*)js_http_server_listening_tick, 0, env, 2);
+        js_next_tick_enqueue(tick);
+        return self;
     }
 
     int r = 0;
@@ -2704,6 +2913,7 @@ typedef struct JsHttpClientReq {
     Item       js_object;        // the ClientRequest object
     Item       callback;          // response callback
     Item       als_context;
+    Item       async_resource;
     Item       response;
     char*      send_buf;
     int        send_len;
@@ -2723,6 +2933,7 @@ typedef struct JsHttpClientReq {
     bool       has_content_length;
     bool       content_length_explicit;
     bool       close_after_send;
+    bool       request_chunked_body;
     bool       is_pipe;
     bool       abort_handler_set;
     bool       abort_scheduled;
@@ -2920,7 +3131,30 @@ static int parse_http_response_head(const char* data, int data_len,
 
 // response.on(event, cb) for client responses
 extern "C" Item js_http_client_res_on(Item self2, Item ev2, Item cb2) {
+    if (get_type_id(ev2) == LMD_TYPE_STRING && js_http_is_callable(cb2)) {
+        String* ev = it2s(ev2);
+        if (ev->len == 5 && memcmp(ev->chars, "close", 5) == 0 &&
+            http_response_bool_prop(self2, "destroyed") &&
+            !http_response_bool_prop(self2, "__close_emitted__")) {
+            js_property_set(self2, make_string_item("__close_emitted__"), (Item){.item = b2it(true)});
+            js_property_set(self2, make_string_item("closed"), (Item){.item = b2it(true)});
+            js_stream_on(self2, ev2, cb2);
+            // Client response destroy can happen before close listeners are
+            // attached, so late close listeners must observe the pending close.
+            js_call_function(cb2, self2, NULL, 0);
+            js_microtask_flush();
+            return self2;
+        }
+    }
     return js_stream_on(self2, ev2, cb2);
+}
+
+static Item js_http_client_res_inst_on(Item maybe_self, Item event_item, Item callback) {
+    Item self = js_http_receiver(maybe_self, "__client__");
+    if (self.item == maybe_self.item) {
+        return js_http_client_res_on(self, event_item, callback);
+    }
+    return js_http_client_res_on(self, maybe_self, event_item);
 }
 
 static void js_http_close_client_req(JsHttpClientReq* creq);
@@ -2928,7 +3162,21 @@ static void js_http_close_client_req(JsHttpClientReq* creq);
 static Item js_http_client_res_destroy(Item maybe_self, Item err_item) {
     Item self = js_http_receiver(maybe_self, "__client__");
     Item actual_err = self.item == maybe_self.item ? err_item : maybe_self;
-    js_stream_destroy(self, actual_err);
+    TypeId actual_err_type = get_type_id(actual_err);
+    if (actual_err.item != 0 &&
+        actual_err_type != LMD_TYPE_UNDEFINED &&
+        actual_err_type != LMD_TYPE_NULL) {
+        js_property_set(self, make_string_item("errored"), actual_err);
+    }
+    js_stream_destroy(self, make_js_undefined());
+    if (actual_err.item != 0 &&
+        actual_err_type != LMD_TYPE_UNDEFINED &&
+        actual_err_type != LMD_TYPE_NULL) {
+        // Client IncomingMessage.destroy(err) surfaces the error to process;
+        // otherwise callers waiting in uncaughtException keep the server open.
+        js_process_emit(make_string_item("uncaughtException"), actual_err);
+        js_microtask_flush();
+    }
     Item handle_item = js_property_get(self, make_string_item("__client__"));
     if (get_type_id(handle_item) == LMD_TYPE_INT) {
         JsHttpClientReq* creq = (JsHttpClientReq*)(uintptr_t)it2i(handle_item);
@@ -2939,6 +3187,11 @@ static Item js_http_client_res_destroy(Item maybe_self, Item err_item) {
         }
     }
     return self;
+}
+
+static Item js_http_client_res_inst_destroy(Item maybe_self, Item err_item) {
+    Item self = js_http_receiver(maybe_self, "__client__");
+    return js_http_client_res_destroy(self, self.item == maybe_self.item ? err_item : maybe_self);
 }
 
 static Item js_http_econnreset_error(Item err) {
@@ -3058,6 +3311,7 @@ static bool js_http_client_configure_abort_signal(JsHttpClientReq* creq, Item si
 
 static void js_http_free_client_req(JsHttpClientReq* creq) {
     if (!creq) return;
+    js_async_hooks_emit_destroy_resource(creq->async_resource);
     if (creq->send_buf) mem_free(creq->send_buf);
     if (creq->recv_buf) mem_free(creq->recv_buf);
     mem_free(creq);
@@ -3250,7 +3504,11 @@ static bool js_http_client_try_emit_response(JsHttpClientReq* creq) {
     js_property_set(res, make_string_item("headers"), headers);
     js_property_set(res, make_string_item("rawHeaders"), raw_headers);
     js_property_set(res, make_string_item("destroy"),
-                    js_new_function((void*)js_http_client_res_destroy, 2));
+                    js_new_function((void*)js_http_client_res_inst_destroy, 2));
+    js_property_set(res, make_string_item("on"),
+                    js_new_function((void*)js_http_client_res_inst_on, 3));
+    js_property_set(res, make_string_item("once"),
+                    js_new_function((void*)js_http_client_res_inst_on, 3));
 
     int body_len = creq->recv_len - hdr_size;
     bool chunked = strcmp(creq->method, "HEAD") != 0 &&
@@ -3365,7 +3623,11 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                 js_property_set(res, make_string_item("headers"), headers);
                 js_property_set(res, make_string_item("rawHeaders"), raw_headers);
                 js_property_set(res, make_string_item("destroy"),
-                                js_new_function((void*)js_http_client_res_destroy, 2));
+                                js_new_function((void*)js_http_client_res_inst_destroy, 2));
+                js_property_set(res, make_string_item("on"),
+                                js_new_function((void*)js_http_client_res_inst_on, 3));
+                js_property_set(res, make_string_item("once"),
+                                js_new_function((void*)js_http_client_res_inst_on, 3));
 
                 int body_len = creq->recv_len - hdr_size;
                 if (body_len > 0) {
@@ -3385,6 +3647,15 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                 creq->response = res;
                 js_http_emit_client_response(creq, res);
             }
+        } else {
+            // A closed socket before response headers is a request failure,
+            // not a quiet EOF; server-side req.destroy() relies on this.
+            Item err = js_http_econnreset_error(make_js_undefined());
+            Item on_err = js_property_get(creq->js_object, make_string_item("__on_error__"));
+            if (get_type_id(on_err) == LMD_TYPE_FUNC) {
+                js_call_function(on_err, creq->js_object, &err, 1);
+                js_microtask_flush();
+            }
         }
 
         // cleanup
@@ -3393,7 +3664,7 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
         creq->recv_buf = NULL;
         uv_close((uv_handle_t*)stream, [](uv_handle_t* h) {
             JsHttpClientReq* c = (JsHttpClientReq*)h->data;
-            if (c) mem_free(c);
+            js_http_free_client_req(c);
         });
     }
 }
@@ -3401,12 +3672,14 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
 typedef struct HttpClientWriteReq {
     char* data;
     JsHttpClientReq* creq;
+    Item  callback;
 } HttpClientWriteReq;
 
 static void http_client_write_cb(uv_write_t* req, int status) {
     HttpClientWriteReq* write_req = (HttpClientWriteReq*)req->data;
     JsHttpClientReq* creq = write_req ? write_req->creq : NULL;
     if (write_req) {
+        http_call_write_callback(write_req->callback);
         if (write_req->data) mem_free(write_req->data);
         mem_free(write_req);
     }
@@ -3419,18 +3692,50 @@ static void http_client_write_cb(uv_write_t* req, int status) {
     mem_free(req);
 }
 
-static void http_client_write_chunk(JsHttpClientReq* creq, String* chunk) {
-    if (!creq || !chunk || chunk->len == 0 || creq->destroyed || !creq->connected) return;
-    char* copy = (char*)mem_alloc(chunk->len, MEM_CAT_JS_RUNTIME);
-    memcpy(copy, chunk->chars, chunk->len);
-    uv_buf_t buf = uv_buf_init(copy, (unsigned int)chunk->len);
+static void http_client_write_bytes(JsHttpClientReq* creq, const char* data, int len, Item callback) {
+    if (!creq || !data || len <= 0 || creq->destroyed || !creq->connected) {
+        http_call_write_callback(callback);
+        return;
+    }
+    char* copy = (char*)mem_alloc(len, MEM_CAT_JS_RUNTIME);
+    memcpy(copy, data, (size_t)len);
+    uv_buf_t buf = uv_buf_init(copy, (unsigned int)len);
     uv_write_t* wreq = (uv_write_t*)mem_calloc(1, sizeof(uv_write_t), MEM_CAT_JS_RUNTIME);
     HttpClientWriteReq* write_req =
         (HttpClientWriteReq*)mem_calloc(1, sizeof(HttpClientWriteReq), MEM_CAT_JS_RUNTIME);
     write_req->data = copy;
     write_req->creq = creq;
+    write_req->callback = callback;
     wreq->data = write_req;
     uv_write(wreq, http_client_stream(creq), &buf, 1, http_client_write_cb);
+}
+
+static void http_client_write_chunk(JsHttpClientReq* creq, String* chunk, Item callback) {
+    if (!creq || !chunk || chunk->len == 0) {
+        http_call_write_callback(callback);
+        return;
+    }
+    http_client_write_bytes(creq, chunk->chars, (int)chunk->len, callback);
+}
+
+static void http_client_write_chunked_body(JsHttpClientReq* creq, Item chunk_item, Item callback) {
+    const char* data = NULL;
+    int len = 0;
+    if (!http_item_bytes(chunk_item, &data, &len) || len <= 0) {
+        http_call_write_callback(callback);
+        return;
+    }
+    int frame_cap = len + 32;
+    char* frame = (char*)mem_alloc(frame_cap, MEM_CAT_JS_RUNTIME);
+    int pos = snprintf(frame, frame_cap, "%X\r\n", (unsigned int)len);
+    memcpy(frame + pos, data, (size_t)len);
+    pos += len;
+    memcpy(frame + pos, "\r\n", 2);
+    pos += 2;
+    // Expect/continue requests without a known length use chunk framing; the
+    // server parser only recognizes streamed bodies when each write is framed.
+    http_client_write_bytes(creq, frame, pos, callback);
+    mem_free(frame);
 }
 
 static void http_client_update_pending_body(JsHttpClientReq* creq, Item req_obj) {
@@ -3531,6 +3836,7 @@ static void http_client_connect_cb(uv_connect_t* req, int status) {
             (HttpClientWriteReq*)mem_calloc(1, sizeof(HttpClientWriteReq), MEM_CAT_JS_RUNTIME);
         write_req->data = creq->send_buf;
         write_req->creq = creq;
+        write_req->callback = make_js_undefined();
         wreq->data = write_req;
         creq->send_buf = NULL; // ownership transferred
         creq->sent = true;
@@ -3541,15 +3847,19 @@ static void http_client_connect_cb(uv_connect_t* req, int status) {
     uv_read_start(http_client_stream(creq), http_client_alloc_cb, http_client_read_cb);
 }
 
-// ClientRequest.write(data) — for request body
-extern "C" Item js_http_client_write(Item self, Item data_item) {
+static Item http_client_write_ex(Item self, Item data_item, Item encoding_item, Item callback_item) {
+    if (js_http_is_callable(encoding_item)) {
+        callback_item = encoding_item;
+        encoding_item = make_js_undefined();
+    }
     // store body data (will be sent on end())
     Item body = js_property_get(self, make_string_item("__req_body__"));
     if (get_type_id(body) != LMD_TYPE_STRING) body = make_string_item("", 0);
 
+    Item encoded_item = http_encode_write_chunk(data_item, encoding_item);
     const char* chunk_data = NULL;
     int chunk_len = 0;
-    if (http_item_bytes(data_item, &chunk_data, &chunk_len)) {
+    if (http_item_bytes(encoded_item, &chunk_data, &chunk_len)) {
         String* existing = it2s(body);
         int new_len = (int)existing->len + chunk_len;
         char* buf = (char*)mem_alloc(new_len + 1, MEM_CAT_JS_RUNTIME);
@@ -3562,21 +3872,44 @@ extern "C" Item js_http_client_write(Item self, Item data_item) {
         Item handle_item = js_property_get(self, make_string_item("__client__"));
         if (handle_item.item != 0) {
             JsHttpClientReq* creq = (JsHttpClientReq*)(uintptr_t)it2i(handle_item);
-            if (creq && creq->has_content_length) {
+            if (creq) {
                 if (creq->sent) {
-                    Item chunk_item = make_string_item(chunk_data, chunk_len);
-                    http_client_write_chunk(creq, it2s(chunk_item));
+                    if (creq->request_chunked_body) {
+                        http_client_write_chunked_body(creq, make_string_item(chunk_data, chunk_len), callback_item);
+                    } else if (creq->has_content_length) {
+                        Item chunk_item = make_string_item(chunk_data, chunk_len);
+                        http_client_write_chunk(creq, it2s(chunk_item), callback_item);
+                    } else {
+                        http_call_write_callback(callback_item);
+                    }
                 } else {
                     http_client_update_pending_body(creq, self);
+                    http_call_write_callback(callback_item);
                 }
+            } else {
+                http_call_write_callback(callback_item);
             }
         }
+    } else {
+        http_call_write_callback(callback_item);
     }
     return self;
 }
 
-// ClientRequest.end([data]) — finalize request
-extern "C" Item js_http_client_end(Item self, Item data_item) {
+// ClientRequest.write(data) — for request body
+extern "C" Item js_http_client_write(Item self, Item data_item) {
+    return http_client_write_ex(self, data_item, make_js_undefined(), make_js_undefined());
+}
+
+static Item http_client_end_ex(Item self, Item data_item, Item encoding_item, Item callback_item) {
+    if (js_http_is_callable(data_item)) {
+        callback_item = data_item;
+        data_item = make_js_undefined();
+        encoding_item = make_js_undefined();
+    } else if (js_http_is_callable(encoding_item)) {
+        callback_item = encoding_item;
+        encoding_item = make_js_undefined();
+    }
     Item ended = js_property_get(self, make_string_item("writableEnded"));
     if (get_type_id(ended) == LMD_TYPE_BOOL && it2b(ended)) {
         return self;
@@ -3584,13 +3917,18 @@ extern "C" Item js_http_client_end(Item self, Item data_item) {
     TypeId data_type = get_type_id(data_item);
     if (data_item.item != 0 && data_item.item != ITEM_NULL &&
         data_type != LMD_TYPE_UNDEFINED && data_type != LMD_TYPE_NULL) {
-        js_http_client_write(self, data_item);
+        http_client_write_ex(self, data_item, encoding_item, make_js_undefined());
     }
     js_property_set(self, make_string_item("writableEnded"), (Item){.item = b2it(true)});
     Item handle_item = js_property_get(self, make_string_item("__client__"));
     if (handle_item.item != 0) {
         JsHttpClientReq* creq = (JsHttpClientReq*)(uintptr_t)it2i(handle_item);
         if (creq) creq->end_called = true;
+        if (creq && creq->sent && creq->request_chunked_body) {
+            http_client_write_bytes(creq, "0\r\n\r\n", 5, callback_item);
+            http_client_schedule_finish(self);
+            return self;
+        }
         if (creq && !creq->sent && creq->send_buf) {
             Item body = js_property_get(self, make_string_item("__req_body__"));
             if (get_type_id(body) == LMD_TYPE_STRING) {
@@ -3620,7 +3958,13 @@ extern "C" Item js_http_client_end(Item self, Item data_item) {
     // the actual send happens in connect_cb; for simplicity we pre-build
     // the full request at creation time. end() is a no-op for GET requests.
     http_client_schedule_finish(self);
+    http_call_write_callback(callback_item);
     return self;
+}
+
+// ClientRequest.end([data]) — finalize request
+extern "C" Item js_http_client_end(Item self, Item data_item) {
+    return http_client_end_ex(self, data_item, make_js_undefined(), make_js_undefined());
 }
 
 // ClientRequest.on(event, callback)
@@ -3653,11 +3997,7 @@ extern "C" Item js_http_client_destroy(Item self, Item err_item) {
     if (handle && !uv_is_closing(handle)) {
         uv_close(handle, [](uv_handle_t* h) {
             JsHttpClientReq* c = (JsHttpClientReq*)h->data;
-            if (c) {
-                if (c->send_buf) mem_free(c->send_buf);
-                if (c->recv_buf) mem_free(c->recv_buf);
-                mem_free(c);
-            }
+            js_http_free_client_req(c);
         });
     }
     return self;
@@ -3717,14 +4057,20 @@ extern "C" Item js_http_client_setHeader(Item self, Item name_item, Item value_i
     return self;
 }
 
-static Item js_http_client_inst_write(Item maybe_self, Item data_item) {
+static Item js_http_client_inst_write(Item maybe_self, Item data_item, Item encoding_or_callback) {
     Item self = js_http_receiver(maybe_self, "__client__");
-    return js_http_client_write(self, self.item == maybe_self.item ? data_item : maybe_self);
+    if (self.item == maybe_self.item) {
+        return http_client_write_ex(self, data_item, encoding_or_callback, make_js_undefined());
+    }
+    return http_client_write_ex(self, maybe_self, data_item, encoding_or_callback);
 }
 
-static Item js_http_client_inst_end(Item maybe_self, Item data_item) {
+static Item js_http_client_inst_end(Item maybe_self, Item data_item, Item encoding_or_callback) {
     Item self = js_http_receiver(maybe_self, "__client__");
-    return js_http_client_end(self, self.item == maybe_self.item ? data_item : maybe_self);
+    if (self.item == maybe_self.item) {
+        return http_client_end_ex(self, data_item, make_js_undefined(), encoding_or_callback);
+    }
+    return http_client_end_ex(self, maybe_self, data_item, encoding_or_callback);
 }
 
 static Item js_http_client_inst_on(Item maybe_self, Item event_item, Item callback) {
@@ -3771,9 +4117,9 @@ static Item http_client_make_request_object(JsHttpClientReq* creq,
     js_property_set(obj, make_string_item("method"),
                     make_string_item((method && method[0]) ? method : "GET"));
     js_property_set(obj, make_string_item("write"),
-                    js_new_function((void*)js_http_client_inst_write, 2));
+                    js_new_function((void*)js_http_client_inst_write, 3));
     js_property_set(obj, make_string_item("end"),
-                    js_new_function((void*)js_http_client_inst_end, 2));
+                    js_new_function((void*)js_http_client_inst_end, 3));
     js_property_set(obj, make_string_item("on"),
                     js_new_function((void*)js_http_client_inst_on, 3));
     js_property_set(obj, make_string_item("once"),
@@ -4152,6 +4498,8 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
     bool has_headers_array = get_type_id(custom_headers) == LMD_TYPE_ARRAY;
     bool has_connection_header = http_client_headers_have_name(custom_headers, "connection", 10);
     bool has_expect_header = http_client_headers_have_name(custom_headers, "expect", 6);
+    bool use_chunked_request_body = has_expect_header && !explicit_content_length &&
+                                    !http_client_headers_have_name(custom_headers, "transfer-encoding", 17);
 
     if (set_default_headers && set_host && !has_headers_array) {
         if (port == 80) {
@@ -4190,6 +4538,9 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
         rlen += snprintf(req_str + rlen, sizeof(req_str) - rlen, "Content-Length: 0\r\n");
         has_content_length = true;
     }
+    if (use_chunked_request_body) {
+        rlen += snprintf(req_str + rlen, sizeof(req_str) - rlen, "Transfer-Encoding: chunked\r\n");
+    }
 
     rlen += snprintf(req_str + rlen, sizeof(req_str) - rlen, "\r\n");
 
@@ -4205,6 +4556,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
     }
     creq->callback = callback;
     creq->als_context = js_als_capture_context();
+    creq->async_resource = js_async_hooks_create_resource("HTTPCLIENTREQUEST", 17);
     creq->recv_cap = 16384;
     creq->recv_buf = (char*)mem_alloc(creq->recv_cap, MEM_CAT_JS_RUNTIME);
 
@@ -4213,6 +4565,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
     creq->send_head_len = rlen;
     creq->has_content_length = has_content_length;
     creq->content_length_explicit = explicit_content_length;
+    creq->request_chunked_body = use_chunked_request_body;
     snprintf(creq->method, sizeof(creq->method), "%s", method_buf);
     creq->send_buf = (char*)mem_alloc(rlen, MEM_CAT_JS_RUNTIME);
     memcpy(creq->send_buf, req_str, rlen);

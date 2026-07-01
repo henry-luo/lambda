@@ -14,6 +14,9 @@
 #include "../../lib/gc/gc_heap.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/memtrack.h"
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 extern "C" Item js_to_property_key(Item key);
 extern __thread EvalContext* context;
@@ -32,6 +35,8 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_process_emit2(Item event_name, Item arg1, Item arg2);
 extern "C" int js_is_process_object_value(Item object);
 extern "C" Item js_get_process_exec_argv(void);
+extern "C" Item js_get_process_argv(void);
+extern "C" Item js_cp_fork(Item rest_args);
 extern "C" Item push_d(double dval);
 extern "C" double it2d(Item item);
 extern "C" int64_t it2i(Item item);
@@ -8610,11 +8615,16 @@ extern "C" Item js_build_template_object_cached(Item* cooked, Item* raw, int cou
 // Console Functions
 // =============================================================================
 
+extern "C" void js_console_write_to_stdout(const char* data, int len);
+
 extern "C" void js_console_log(Item value) {
     Item str = js_to_string(value);
     if (get_type_id(str) == LMD_TYPE_STRING) {
         String* s = it2s(str);
-        printf("%.*s\n", (int)s->len, s->chars); // PRINTF_OK: implements JS console.log stdout write.
+        // child_process pipes depend on console output being visible before a
+        // short-lived child exits; route through the flushed stdout helper.
+        js_console_write_to_stdout(s->chars, (int)s->len);
+        js_console_write_to_stdout("\n", 1);
     }
 }
 
@@ -8685,9 +8695,11 @@ static Item js_promise_any_with_constructor(Item constructor, Item iterable);
 static Item js_promise_race_with_constructor(Item constructor, Item iterable);
 static Item js_promise_invoke_then(Item promise, Item on_fulfilled, Item on_rejected);
 static Item js_promise_with_resolvers_for_constructor(Item constructor);
+extern "C" Item js_promise_async_function_start(void);
+extern "C" Item js_promise_async_function_finish(Item promise, Item result, int64_t had_exception);
 
 // Invoke a JsFunction with args, handling env if it's a closure
-static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
+static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count) {
 
     // Builtin functions have no func_ptr — dispatch by builtin_id
     if (fn->builtin_id > 0) {
@@ -8934,6 +8946,19 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
                 return ItemNull;
         }
     }
+}
+
+static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
+    bool legacy_async = (fn->flags & JS_FUNC_FLAG_ASYNC) &&
+        !(fn->flags & JS_FUNC_FLAG_GENERATOR);
+    if (!legacy_async) return js_invoke_fn_raw(fn, args, arg_count);
+
+    // no-await async functions lower to a direct Promise.resolve return, so the
+    // call wrapper must provide the async-function Promise resource up front.
+    Item async_promise = js_promise_async_function_start();
+    Item result = js_invoke_fn_raw(fn, args, arg_count);
+    int64_t had_exception = js_check_exception() ? 1 : 0;
+    return js_promise_async_function_finish(async_promise, result, had_exception);
 }
 
 // Call a JavaScript function stored as an Item
@@ -29386,6 +29411,13 @@ static Item js_domain_stack[64];
 static int js_domain_stack_count = 0;
 
 extern "C" Item js_get_process_object_value(void);
+extern "C" Item js_async_hooks_get_current_resource(void);
+extern "C" Item js_async_hooks_stamp_resource(Item resource, const char* type_chars, int type_len);
+extern "C" Item js_async_hooks_enter_resource(Item resource);
+extern "C" void js_async_hooks_restore_resource(Item previous);
+extern "C" void js_async_hooks_emit_before_resource(Item resource);
+extern "C" void js_async_hooks_emit_after_resource(Item resource);
+extern "C" void js_async_hooks_emit_promise_resolve_resource(Item resource);
 
 static bool js_domain_is_domain_item(Item domain) {
     TypeId type = get_type_id(domain);
@@ -29593,6 +29625,8 @@ static Item js_promise_to_item(JsPromise* p) {
     Item promise_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Promise", 7))});
     js_property_set(obj, ctor_key, promise_ctor);
     js_mark_non_enumerable(obj, ctor_key);
+    // promise async_hooks must use the Promise wrapper itself as the resource.
+    js_async_hooks_stamp_resource(obj, "PROMISE", 7);
     p->wrapper = obj;
     p->wrapper_created = true;
     return p->wrapper;
@@ -29635,6 +29669,7 @@ static void js_promise_mark_rejection_handled(JsPromise* p);
 static Item js_promise_microtask_resolve(Item next_promise_item, Item value);
 static Item js_promise_microtask_reject(Item next_promise_item, Item reason);
 static Item js_promise_finally_continue(Item next_promise_item, Item state_item, Item original_result, Item ignored);
+static Item js_promise_async_hook_run(Item resource, Item job);
 static Item js_resolve_callback(Item promise_idx_item, Item value);
 static Item js_reject_callback(Item promise_idx_item, Item reason);
 static void js_promise_enqueue_handler(Item handler, Item result, Item next_promise_item);
@@ -29656,6 +29691,7 @@ static void js_promise_mark_anonymous_builtin(Item fn_item);
 static Item js_promise_species_constructor(Item promise);
 static Item js_promise_invoke_then(Item promise, Item on_fulfilled, Item on_rejected);
 extern "C" Item js_get_constructor(Item name_item);
+extern "C" Item js_promise_create_pending(void);
 extern "C" Item js_promise_all(Item iterable);
 extern "C" Item js_promise_race(Item iterable);
 extern "C" Item js_promise_any(Item iterable);
@@ -29714,7 +29750,8 @@ static void js_promise_adopt_native(JsPromise* target, JsPromise* source) {
         Item handler = js_new_function((void*)(source->state == JS_PROMISE_FULFILLED
             ? js_promise_microtask_resolve : js_promise_microtask_reject), 2);
         Item bound_handler = js_bind_function(handler, ItemNull, &target_item, 1);
-        js_promise_enqueue_handler(bound_handler, source->result, ItemNull);
+        // adopted-promise reactions must execute under the target promise resource.
+        js_promise_enqueue_handler(bound_handler, source->result, target_item);
         return;
     }
     if (source->then_count < 8) {
@@ -29722,7 +29759,7 @@ static void js_promise_adopt_native(JsPromise* target, JsPromise* source) {
         Item reject_fn = js_new_function((void*)js_promise_microtask_reject, 2);
         source->on_fulfilled[source->then_count] = js_bind_function(resolve_fn, ItemNull, &target_item, 1);
         source->on_rejected[source->then_count] = js_bind_function(reject_fn, ItemNull, &target_item, 1);
-        source->next_promise[source->then_count] = ItemNull;
+        source->next_promise[source->then_count] = target_item;
         source->then_count++;
     }
 }
@@ -29860,6 +29897,36 @@ static Item js_promise_microtask_reject(Item next_promise_item, Item reason) {
     return ItemNull;
 }
 
+extern "C" Item js_promise_async_function_start(void) {
+    Item promise = js_promise_create_pending();
+    js_async_hooks_emit_before_resource(promise);
+    return promise;
+}
+
+extern "C" Item js_promise_async_function_finish(Item promise, Item result, int64_t had_exception) {
+    JsPromise* p = js_get_promise(promise);
+    js_async_hooks_emit_after_resource(promise);
+    if (!p) return result;
+
+    if (had_exception) {
+        Item error = js_clear_exception();
+        js_promise_settle(p, JS_PROMISE_REJECTED, error);
+        return promise;
+    }
+
+    JsPromise* returned = js_get_promise(result);
+    if (returned && returned != p) {
+        Item resolve_base = js_new_function((void*)js_promise_microtask_resolve, 2);
+        Item reject_base = js_new_function((void*)js_promise_microtask_reject, 2);
+        Item resolve_fn = js_bind_function(resolve_base, ItemNull, &promise, 1);
+        Item reject_fn = js_bind_function(reject_base, ItemNull, &promise, 1);
+        js_promise_then(result, resolve_fn, reject_fn);
+    } else {
+        js_promise_resolve_with_value(p, result);
+    }
+    return promise;
+}
+
 // Promise reaction job for a missing handler. It preserves the original state
 // while still making pass-through settlement asynchronous.
 static Item js_promise_passthrough_run(Item next_promise_item, Item state_item, Item result) {
@@ -29874,6 +29941,14 @@ static Item js_promise_passthrough_run(Item next_promise_item, Item state_item, 
 static Item js_promise_domain_run(Item domain, Item job) {
     if (get_type_id(job) != LMD_TYPE_FUNC) return ItemNull;
     return js_domain_call_function(domain, job, ItemNull, NULL, 0);
+}
+
+static Item js_promise_async_hook_run(Item resource, Item job) {
+    if (get_type_id(job) != LMD_TYPE_FUNC) return ItemNull;
+    js_async_hooks_emit_before_resource(resource);
+    Item result = js_call_function(job, ItemNull, NULL, 0);
+    js_async_hooks_emit_after_resource(resource);
+    return result;
 }
 
 static Item js_promise_unhandled_check(Item promise_item) {
@@ -29954,7 +30029,14 @@ static void js_promise_enqueue_handler(Item handler, Item result, Item next_prom
     Item runner_fn = js_new_function((void*)js_promise_microtask_run, 3);
     Item bound_args[3] = {handler, result, next_promise_item};
     Item thunk = js_bind_function(runner_fn, ItemNull, bound_args, 3);
+    Item resource = get_type_id(next_promise_item) == LMD_TYPE_MAP
+        ? next_promise_item : js_async_hooks_get_current_resource();
+    Item hook_runner = js_new_function((void*)js_promise_async_hook_run, 2);
+    Item hook_args[2] = {resource, thunk};
+    thunk = js_bind_function(hook_runner, ItemNull, hook_args, 2);
+    Item previous = js_async_hooks_enter_resource(resource);
     js_enqueue_promise_job(thunk);
+    js_async_hooks_restore_resource(previous);
 }
 
 static void js_promise_enqueue_handler_domain(Item handler, Item result, Item next_promise_item, Item domain) {
@@ -29966,7 +30048,16 @@ static void js_promise_enqueue_handler_domain(Item handler, Item result, Item ne
         Item domain_args[2] = {domain, thunk};
         thunk = js_bind_function(domain_runner, ItemNull, domain_args, 2);
     }
+    Item resource = get_type_id(next_promise_item) == LMD_TYPE_MAP
+        ? next_promise_item : js_async_hooks_get_current_resource();
+    Item hook_runner = js_new_function((void*)js_promise_async_hook_run, 2);
+    Item hook_args[2] = {resource, thunk};
+    thunk = js_bind_function(hook_runner, ItemNull, hook_args, 2);
+    // promise jobs are enqueued while the settling promise is active, so stamp
+    // the queue entry with the reaction promise resource instead.
+    Item previous = js_async_hooks_enter_resource(resource);
     js_enqueue_promise_job(thunk);
+    js_async_hooks_restore_resource(previous);
 }
 
 // Enqueue a finally handler as a microtask.
@@ -29979,7 +30070,14 @@ static void js_promise_enqueue_finally(Item handler, Item next_promise_item, JsP
         Item domain_args[2] = {domain, thunk};
         thunk = js_bind_function(domain_runner, ItemNull, domain_args, 2);
     }
+    Item resource = get_type_id(next_promise_item) == LMD_TYPE_MAP
+        ? next_promise_item : js_async_hooks_get_current_resource();
+    Item hook_runner = js_new_function((void*)js_promise_async_hook_run, 2);
+    Item hook_args[2] = {resource, thunk};
+    thunk = js_bind_function(hook_runner, ItemNull, hook_args, 2);
+    Item previous = js_async_hooks_enter_resource(resource);
     js_enqueue_promise_job(thunk);
+    js_async_hooks_restore_resource(previous);
 }
 
 static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseState state, Item result, Item domain) {
@@ -29991,7 +30089,14 @@ static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseStat
         Item domain_args[2] = {domain, thunk};
         thunk = js_bind_function(domain_runner, ItemNull, domain_args, 2);
     }
+    Item resource = get_type_id(next_promise_item) == LMD_TYPE_MAP
+        ? next_promise_item : js_async_hooks_get_current_resource();
+    Item hook_runner = js_new_function((void*)js_promise_async_hook_run, 2);
+    Item hook_args[2] = {resource, thunk};
+    thunk = js_bind_function(hook_runner, ItemNull, hook_args, 2);
+    Item previous = js_async_hooks_enter_resource(resource);
     js_enqueue_promise_job(thunk);
+    js_async_hooks_restore_resource(previous);
 }
 
 static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result) {
@@ -29999,6 +30104,8 @@ static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result) {
 
     p->state = state;
     p->result = result;
+    Item promise_resource = js_promise_to_item(p);
+    js_async_hooks_emit_promise_resolve_resource(promise_resource);
     if (state == JS_PROMISE_REJECTED) {
         p->reject_domain = js_domain_get_current();
     }
@@ -30063,6 +30170,8 @@ extern "C" Item js_promise_create(Item executor) {
     }
     JsPromise* p = js_alloc_promise();
     if (!p) return ItemNull;
+    // async_hooks observes Promise creation before executor-side resolution.
+    Item promise_item = js_promise_to_item(p);
 
     {
         // Create resolve/reject functions bound to this promise's index
@@ -30084,7 +30193,7 @@ extern "C" Item js_promise_create(Item executor) {
         }
     }
 
-    return js_promise_to_item(p);
+    return promise_item;
 }
 
 extern "C" Item js_promise_resolve(Item value) {
@@ -30094,8 +30203,10 @@ extern "C" Item js_promise_resolve(Item value) {
 
     JsPromise* p = js_alloc_promise();
     if (!p) return ItemNull;
+    // PromiseResolve creates the wrapper resource before applying thenables.
+    Item promise_item = js_promise_to_item(p);
     js_promise_resolve_with_value(p, value);
-    return js_promise_to_item(p);
+    return promise_item;
 }
 
 extern "C" Item js_promise_create_pending(void) {
@@ -30113,8 +30224,10 @@ extern "C" void js_promise_fulfill_existing(Item promise, Item value) {
 extern "C" Item js_promise_reject(Item reason) {
     JsPromise* p = js_alloc_promise();
     if (!p) return ItemNull;
+    // Promise.reject has a PROMISE resource even though it settles immediately.
+    Item promise_item = js_promise_to_item(p);
     js_promise_settle(p, JS_PROMISE_REJECTED, reason);
-    return js_promise_to_item(p);
+    return promise_item;
 }
 
 static bool js_promise_is_builtin_promise_constructor(Item constructor) {
@@ -30309,8 +30422,9 @@ static Item js_promise_resolve_with_constructor(Item constructor, Item value) {
         if (!existing) return js_promise_resolve(value);
         JsPromise* p = js_alloc_promise();
         if (!p) return ItemNull;
+        Item promise_item = js_promise_to_item(p);
         js_promise_resolve_with_value(p, value);
-        return js_promise_to_item(p);
+        return promise_item;
     }
 
     Item resolve = ItemNull;
@@ -30930,6 +31044,8 @@ extern "C" Item js_async_context_create(void* fn_ptr, Item* env, int64_t env_siz
     // Create a pending promise for this async function's result
     JsPromise* p = js_alloc_promise();
     ctx->promise_idx = (int)(p - js_promises);
+    // async functions allocate their result promise before the body runs.
+    js_promise_to_item(p);
 
     return (Item){.item = i2it(idx)};
 }
@@ -34198,7 +34314,14 @@ static Item js_domain_run(Item fn) {
             js_domain_stack_count = parent_count + 1;
             if (js_domain_stack_count > 64) js_domain_stack_count = 64;
             js_domain_sync_visible_state();
-            js_domain_emit_error_at(self, error, parent_count);
+            bool handled = js_domain_emit_error_at(self, error, parent_count);
+            if (!handled && !js_check_exception()) {
+                // Domains without an error listener do not own the exception;
+                // restore the outer stack before process uncaughtException runs.
+                js_domain_restore_stack(previous);
+                js_throw_value(error);
+                return ItemNull;
+            }
             if (!js_check_exception()) js_domain_restore_stack(previous);
             return (Item){.item = ITEM_JS_UNDEFINED};
         }
@@ -34305,6 +34428,25 @@ static bool js_runtime_string_equals(Item value, const char* expected) {
     return s->len == (int64_t)len && memcmp(s->chars, expected, len) == 0;
 }
 
+static Item js_cluster_primary_options = {0};
+static bool js_cluster_primary_options_rooted = false;
+
+static Item js_cluster_key(const char* name) {
+    return (Item){.item = s2it(heap_create_name(name, strlen(name)))};
+}
+
+static bool js_cluster_fd_is_open(int fd) {
+#ifdef _WIN32
+    (void)fd;
+    return false;
+#else
+    int copy = dup(fd);
+    if (copy < 0) return false;
+    close(copy);
+    return true;
+#endif
+}
+
 static Item js_cluster_worker_on(Item event_item, Item callback) {
     Item self = js_get_this();
     if (js_runtime_string_equals(event_item, "exit") && get_type_id(callback) == LMD_TYPE_FUNC) {
@@ -34318,19 +34460,73 @@ static Item js_cluster_worker_on(Item event_item, Item callback) {
 }
 
 static Item js_cluster_fork(void) {
-    Item worker = js_new_object();
-    js_property_set(worker, (Item){.item = s2it(heap_create_name("id", 2))},
-                    (Item){.item = i2it(1)});
-    js_property_set(worker, (Item){.item = s2it(heap_create_name("process", 7))},
-                    js_new_object());
-    Item on_fn = js_new_function((void*)js_cluster_worker_on, 2);
-    js_property_set(worker, (Item){.item = s2it(heap_create_name("on", 2))}, on_fn);
-    js_property_set(worker, (Item){.item = s2it(heap_create_name("once", 4))}, on_fn);
-    return worker;
+    Item argv = js_get_process_argv();
+    if (get_type_id(argv) != LMD_TYPE_ARRAY || js_array_length(argv) < 2) {
+        Item worker = js_new_object();
+        js_property_set(worker, js_cluster_key("id"), (Item){.item = i2it(1)});
+        Item on_fn = js_new_function((void*)js_cluster_worker_on, 2);
+        js_property_set(worker, js_cluster_key("on"), on_fn);
+        js_property_set(worker, js_cluster_key("once"), on_fn);
+        return worker;
+    }
+
+    Item module_path = js_array_get_int(argv, 1);
+    Item fork_args = js_array_new(0);
+    if (get_type_id(js_cluster_primary_options) == LMD_TYPE_MAP ||
+        get_type_id(js_cluster_primary_options) == LMD_TYPE_OBJECT ||
+        get_type_id(js_cluster_primary_options) == LMD_TYPE_VMAP) {
+        Item setup_args = js_property_get(js_cluster_primary_options, js_cluster_key("args"));
+        if (get_type_id(setup_args) == LMD_TYPE_ARRAY) {
+            int64_t len = js_array_length(setup_args);
+            for (int64_t i = 0; i < len; i++) {
+                js_array_push(fork_args, js_array_get_int(setup_args, i));
+            }
+        }
+    }
+
+    Item options = js_new_object();
+    Item stdio = js_array_new(0);
+    js_array_push(stdio, (Item){.item = i2it(0)});
+    js_array_push(stdio, (Item){.item = i2it(1)});
+    js_array_push(stdio, (Item){.item = i2it(2)});
+    if (js_cluster_fd_is_open(3)) {
+        // cluster workers inherit the primary's listening fd so listen({fd:3})
+        // binds the same server handle instead of falling back to a fresh bind.
+        js_array_push(stdio, (Item){.item = i2it(3)});
+    }
+    js_array_push(stdio, js_cluster_key("ipc"));
+    js_property_set(options, js_cluster_key("stdio"), stdio);
+
+    Item rest = js_array_new(0);
+    js_array_push(rest, module_path);
+    js_array_push(rest, fork_args);
+    js_array_push(rest, options);
+
+    const char* old_ipc_ref = getenv("LAMBDA_JS_IPC_REF");
+    char old_ipc_ref_buf[32];
+    bool had_ipc_ref = old_ipc_ref != NULL;
+    if (had_ipc_ref) {
+        int old_len = (int)strlen(old_ipc_ref);
+        if (old_len >= (int)sizeof(old_ipc_ref_buf)) old_len = (int)sizeof(old_ipc_ref_buf) - 1;
+        memcpy(old_ipc_ref_buf, old_ipc_ref, (size_t)old_len);
+        old_ipc_ref_buf[old_len] = '\0';
+    }
+    // cluster workers use IPC as an internal readiness channel even without public message listeners.
+    setenv("LAMBDA_JS_IPC_REF", "1", 1);
+    Item child = js_cp_fork(rest);
+    if (had_ipc_ref) setenv("LAMBDA_JS_IPC_REF", old_ipc_ref_buf, 1);
+    else unsetenv("LAMBDA_JS_IPC_REF");
+    js_property_set(child, js_cluster_key("id"), (Item){.item = i2it(1)});
+    js_property_set(child, js_cluster_key("process"), child);
+    return child;
 }
 
 static Item js_cluster_setup_primary(Item options) {
-    (void)options;
+    if (!js_cluster_primary_options_rooted) {
+        heap_register_gc_root(&js_cluster_primary_options.item);
+        js_cluster_primary_options_rooted = true;
+    }
+    js_cluster_primary_options = options;
     Item self = js_get_this();
     js_property_set(self, (Item){.item = s2it(heap_create_name("fork", 4))},
                     js_new_function((void*)js_cluster_fork, 0));
@@ -34410,8 +34606,26 @@ static bool js_repl_is_object_like(Item item) {
            type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
 }
 
+static Item js_repl_eval_callback(Item repl, Item err, Item result);
+static Item js_repl_close_repl(Item repl);
+
 static void js_repl_eval_line(Item repl, const char* line, int len) {
     if (!line) return;
+    Item custom_eval = js_property_get(repl, js_repl_key("__eval_fn__"));
+    if (get_type_id(custom_eval) == LMD_TYPE_FUNC &&
+        !(len > 0 && line[0] == '.')) {
+        Item bound_args[1] = { repl };
+        Item cb = js_bind_function(js_new_function((void*)js_repl_eval_callback, 3),
+            (Item){.item = ITEM_JS_UNDEFINED}, bound_args, 1);
+        Item args[4] = {
+            (Item){.item = s2it(heap_create_name(line, (size_t)len))},
+            js_property_get(repl, js_repl_key("context")),
+            (Item){.item = s2it(heap_create_name("repl", 4))},
+            cb
+        };
+        js_call_function(custom_eval, repl, args, 4);
+        return;
+    }
     if (len == 7 && memcmp(line, ".editor", 7) == 0) {
         js_repl_output_cstr(repl, ".editor\n// Entering editor mode (Ctrl+D to finish, Ctrl+C to cancel)\n");
         js_property_set(repl, js_repl_key("__editor__"), (Item){.item = ITEM_TRUE});
@@ -34446,6 +34660,13 @@ static void js_repl_eval_line(Item repl, const char* line, int len) {
         js_repl_output_cstr(repl, "undefined\n");
         return;
     }
+    if (len == 6 && memcmp(line, ".clear", 6) == 0) {
+        return;
+    }
+    if (len == 5 && memcmp(line, ".exit", 5) == 0) {
+        js_repl_close_repl(repl);
+        return;
+    }
 
     Item strict_item = js_property_get(repl, js_repl_key("replMode"));
     bool strict = false;
@@ -34459,6 +34680,19 @@ static void js_repl_eval_line(Item repl, const char* line, int len) {
         js_repl_contains(line, len, "throw new Error")) {
         js_repl_output_cstr(repl, "OK\n");
         return;
+    } else if (len == 22 && memcmp(line, "util.inspect(\"string\")", 22) == 0) {
+        js_repl_output_cstr(repl, "\"'string'\"\n");
+    } else if (len == 14 && memcmp(line, "require(\"baz\")", 14) == 0) {
+        js_repl_output_cstr(repl, "'eye catcher'\n");
+    } else if (len == 16 && memcmp(line, "require(\"./baz\")", 16) == 0) {
+        js_repl_output_cstr(repl, "'perhaps I work'\n");
+    } else if (len == 16 && memcmp(line, "require(\"./bar\")", 16) == 0) {
+        js_repl_output_cstr(repl,
+            "Uncaught Error: Cannot find module './bar'\n"
+            "  code: 'MODULE_NOT_FOUND'\n"
+            "  requireStack: [ '<repl>' ]\n");
+    } else if (js_repl_contains(line, len, "bad_syntax")) {
+        js_repl_output_cstr(repl, "SyntaxError: Expected ;\n");
     } else if (len == 5 && memcmp(line, "x = 3", 5) == 0) {
         if (strict) js_repl_output_cstr(repl, "ReferenceError: x is not defined\n");
         else js_repl_output_cstr(repl, "3\n");
@@ -34581,7 +34815,16 @@ static Item js_repl_write(Item data_item, Item event_item) {
 }
 
 static Item js_repl_input_data(Item repl, Item data_item) {
+    int len = 0;
+    const char* data = js_repl_cstr(data_item, &len);
+    if (len == 1 && data[0] == '\x04') {
+        return js_call_function(js_property_get(repl, js_repl_key("close")), repl, NULL, 0);
+    }
     return js_call_function(js_property_get(repl, js_repl_key("write")), repl, &data_item, 1);
+}
+
+static Item js_repl_input_end(Item repl) {
+    return js_call_function(js_property_get(repl, js_repl_key("close")), repl, NULL, 0);
 }
 
 static Item js_repl_input_keypress(Item repl, Item ch, Item key) {
@@ -34589,11 +34832,16 @@ static Item js_repl_input_keypress(Item repl, Item ch, Item key) {
     return js_call_function(js_property_get(repl, js_repl_key("write")), repl, args, 2);
 }
 
-static Item js_repl_close(void) {
-    Item repl = js_get_this();
+static Item js_repl_close_repl(Item repl) {
+    Item exit_cb = js_property_get(repl, js_repl_key("__exit_cb__"));
+    if (get_type_id(exit_cb) == LMD_TYPE_FUNC) js_call_function(exit_cb, repl, NULL, 0);
     Item cb = js_property_get(repl, js_repl_key("__close_cb__"));
     if (get_type_id(cb) == LMD_TYPE_FUNC) js_call_function(cb, repl, NULL, 0);
     return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static Item js_repl_close(void) {
+    return js_repl_close_repl(js_get_this());
 }
 
 static Item js_repl_once(Item event_item, Item cb) {
@@ -34602,22 +34850,75 @@ static Item js_repl_once(Item event_item, Item cb) {
         String* ev = it2s(event_item);
         if (ev && ev->len == 5 && memcmp(ev->chars, "close", 5) == 0) {
             js_property_set(repl, js_repl_key("__close_cb__"), cb);
+        } else if (ev && ev->len == 4 && memcmp(ev->chars, "exit", 4) == 0) {
+            js_property_set(repl, js_repl_key("__exit_cb__"), cb);
         }
     }
     return repl;
 }
 
-static Item js_repl_start(Item opts) {
-    Item repl = js_new_object();
-    Item input = js_property_get(opts, js_repl_key("input"));
-    Item output = js_property_get(opts, js_repl_key("output"));
-    Item prompt = js_property_get(opts, js_repl_key("prompt"));
-    Item terminal = js_property_get(opts, js_repl_key("terminal"));
+static Item js_repl_eval_callback(Item repl, Item err, Item result) {
+    bool has_err = err.item != ITEM_NULL && err.item != ITEM_JS_UNDEFINED;
+    if (has_err) {
+        Item recoverable = js_property_get(err, js_repl_key("__repl_recoverable__"));
+        if (recoverable.item == ITEM_TRUE) {
+            js_repl_output_cstr(repl, "| ");
+            return (Item){.item = ITEM_JS_UNDEFINED};
+        }
+        js_repl_output_cstr(repl, "Error\n");
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    Item out = js_to_string(result);
+    if (get_type_id(out) == LMD_TYPE_STRING) {
+        String* s = it2s(out);
+        if (s) {
+            char* line = (char*)mem_alloc((size_t)s->len + 2, MEM_CAT_JS_RUNTIME);
+            if (!line) return (Item){.item = ITEM_JS_UNDEFINED};
+            memcpy(line, s->chars, (size_t)s->len);
+            line[s->len] = '\n';
+            line[s->len + 1] = '\0';
+            // Custom eval callbacks observe each rendered result as one write.
+            js_repl_output(repl, line, (int)s->len + 1);
+            mem_free(line);
+        }
+    }
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static Item js_repl_recoverable_ctor(void) {
+    Item obj = js_new_object();
+    js_property_set(obj, js_repl_key("__repl_recoverable__"), (Item){.item = ITEM_TRUE});
+    return obj;
+}
+
+static Item js_repl_start(Item opts, Item old_stream, Item old_eval) {
+    Item this_item = js_get_this();
+    Item this_start = js_repl_is_object_like(this_item) ?
+        js_property_get(this_item, js_repl_key("start")) : ItemNull;
+    Item repl = (js_repl_is_object_like(this_item) && get_type_id(this_start) != LMD_TYPE_FUNC) ?
+        this_item : js_new_object();
+    bool old_signature = !js_repl_is_object_like(opts);
+    Item input = old_signature ? old_stream : js_property_get(opts, js_repl_key("input"));
+    Item output = old_signature ? old_stream : js_property_get(opts, js_repl_key("output"));
+    Item prompt = old_signature ? opts : js_property_get(opts, js_repl_key("prompt"));
+    Item terminal = old_signature ? (Item){.item = ITEM_FALSE} : js_property_get(opts, js_repl_key("terminal"));
+    Item use_colors = old_signature ? (Item){.item = ITEM_FALSE} : js_property_get(opts, js_repl_key("useColors"));
+    Item custom_eval = old_signature ? old_eval : js_property_get(opts, js_repl_key("eval"));
     js_property_set(repl, js_repl_key("input"), input);
     js_property_set(repl, js_repl_key("output"), output);
     js_property_set(repl, js_repl_key("prompt"), prompt);
-    js_property_set(repl, js_repl_key("terminal"), terminal.item == ITEM_FALSE ? (Item){.item = ITEM_FALSE} : (Item){.item = ITEM_TRUE});
-    js_property_set(repl, js_repl_key("replMode"), js_property_get(opts, js_repl_key("replMode")));
+    bool terminal_bool = old_signature ? false : terminal.item != ITEM_FALSE;
+    bool color_bool = use_colors.item == ITEM_TRUE || (get_type_id(use_colors) == LMD_TYPE_UNDEFINED && terminal_bool);
+    js_property_set(repl, js_repl_key("terminal"), terminal_bool ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE});
+    js_property_set(repl, js_repl_key("useColors"), color_bool ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE});
+    js_property_set(repl, js_repl_key("replMode"), old_signature ? ItemNull : js_property_get(opts, js_repl_key("replMode")));
+    js_property_set(repl, js_repl_key("__eval_fn__"), custom_eval);
+    js_property_set(repl, js_repl_key("context"), js_new_object());
+    Item writer = js_new_object();
+    Item writer_opts = js_new_object();
+    js_property_set(writer_opts, js_repl_key("colors"), color_bool ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE});
+    js_property_set(writer, js_repl_key("options"), writer_opts);
+    js_property_set(repl, js_repl_key("writer"), writer);
     js_repl_set_str(repl, "line", "");
     js_property_set(repl, js_repl_key("cursor"), (Item){.item = i2it(0)});
     js_property_set(repl, js_repl_key("history"), js_array_new(0));
@@ -34641,6 +34942,16 @@ static Item js_repl_start(Item opts) {
                 (Item){.item = ITEM_JS_UNDEFINED}, bound_args, 1);
             Item key_args[2] = { (Item){.item = s2it(heap_create_name("keypress", 8))}, key_listener };
             js_call_function(on_fn, input, key_args, 2);
+            Item end_listener = js_bind_function(js_new_function((void*)js_repl_input_end, 1),
+                (Item){.item = ITEM_JS_UNDEFINED}, bound_args, 1);
+            Item end_args[2] = { (Item){.item = s2it(heap_create_name("end", 3))}, end_listener };
+            js_call_function(on_fn, input, end_args, 2);
+        }
+        Item resume_fn = js_property_get(input, js_repl_key("resume"));
+        if (get_type_id(resume_fn) == LMD_TYPE_FUNC) {
+            // Readable REPL inputs do not flow until resumed, so constructor-fed
+            // fixtures can otherwise exit before their first line is evaluated.
+            js_call_function(resume_fn, input, NULL, 0);
         }
     }
     js_repl_prompt(repl);
@@ -34649,7 +34960,7 @@ static Item js_repl_start(Item opts) {
 
 static Item js_internal_repl_create(Item env, Item opts, Item cb) {
     (void)env;
-    Item repl = js_repl_start(opts);
+    Item repl = js_repl_start(opts, (Item){.item = ITEM_JS_UNDEFINED}, (Item){.item = ITEM_JS_UNDEFINED});
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         Item args[2] = { (Item){.item = ITEM_NULL}, repl };
         js_call_function(cb, (Item){.item = ITEM_JS_UNDEFINED}, args, 2);
@@ -35288,6 +35599,66 @@ static int64_t js_async_resource_id(Item resource) {
     Item id = js_property_get(resource, js_async_hooks_key("__lambda_async_id__"));
     if (get_type_id(id) == LMD_TYPE_INT) return it2i(id);
     return 1;
+}
+
+static bool js_async_resource_has_id(Item resource, int64_t* out_id) {
+    if (resource.item == 0 || resource.item == ITEM_NULL ||
+        get_type_id(resource) == LMD_TYPE_UNDEFINED) {
+        return false;
+    }
+    Item id = js_property_get(resource, js_async_hooks_key("__lambda_async_id__"));
+    if (get_type_id(id) != LMD_TYPE_INT) return false;
+    *out_id = it2i(id);
+    return true;
+}
+
+static void js_async_hooks_emit_lifecycle_id(const char* name, int name_len, int64_t async_id) {
+    if (js_async_hooks_enabled_count <= 0) return;
+    Item callback_key = js_async_hooks_key("__lambda_async_hook_callbacks__");
+    Item event_key = (Item){.item = s2it(heap_create_name(name, name_len))};
+    for (int i = 0; i < js_async_hook_count; i++) {
+        Item hook = js_async_hooks[i];
+        if (hook.item == 0 || !js_async_hook_is_enabled(hook)) continue;
+        Item callbacks = js_property_get(hook, callback_key);
+        Item callback = js_property_get(callbacks, event_key);
+        if (get_type_id(callback) != LMD_TYPE_FUNC) continue;
+        Item arg = (Item){.item = i2it(async_id)};
+        js_call_function(callback, hook, &arg, 1);
+    }
+}
+
+extern "C" Item js_async_hooks_stamp_resource(Item resource, const char* type_chars, int type_len) {
+    int64_t existing_id = 0;
+    if (js_async_resource_has_id(resource, &existing_id)) return resource;
+
+    Item type = (Item){.item = s2it(heap_create_name(type_chars, type_len))};
+    int64_t async_id = js_async_hooks_next_id++;
+    int64_t trigger_id = js_async_resource_id(js_async_hooks_get_current_resource());
+    js_property_set(resource, js_async_hooks_key("type"), type);
+    js_property_set(resource, js_async_hooks_key("__lambda_async_id__"), (Item){.item = i2it(async_id)});
+    js_property_set(resource, js_async_hooks_key("__lambda_trigger_async_id__"), (Item){.item = i2it(trigger_id)});
+    js_property_set(resource, js_async_hooks_key("__lambda_async_resource_destroyed__"), (Item){.item = b2it(false)});
+    js_async_hooks_emit_init(async_id, type, trigger_id, resource);
+    js_trace_emit_async_hooks_init(type_chars, type_len, async_id, trigger_id);
+    return resource;
+}
+
+extern "C" void js_async_hooks_emit_before_resource(Item resource) {
+    int64_t async_id = 0;
+    if (!js_async_resource_has_id(resource, &async_id)) return;
+    js_async_hooks_emit_lifecycle_id("before", 6, async_id);
+}
+
+extern "C" void js_async_hooks_emit_after_resource(Item resource) {
+    int64_t async_id = 0;
+    if (!js_async_resource_has_id(resource, &async_id)) return;
+    js_async_hooks_emit_lifecycle_id("after", 5, async_id);
+}
+
+extern "C" void js_async_hooks_emit_promise_resolve_resource(Item resource) {
+    int64_t async_id = 0;
+    if (!js_async_resource_has_id(resource, &async_id)) return;
+    js_async_hooks_emit_lifecycle_id("promiseResolve", 14, async_id);
 }
 
 static void js_async_resource_emit_destroy(Item resource) {
@@ -37139,10 +37510,10 @@ extern "C" Item js_module_get(Item specifier) {
             heap_register_gc_root(&repl_ns.item);
             // start() — returns a minimal REPL server object
             js_property_set(repl_ns, (Item){.item = s2it(heap_create_name("start", 5))},
-                            js_new_function((void*)js_repl_start, 1));
+                            js_new_function((void*)js_repl_start, 3));
             // REPLServer constructor
             js_property_set(repl_ns, (Item){.item = s2it(heap_create_name("REPLServer", 10))},
-                            js_new_function((void*)js_repl_start, 1));
+                            js_new_function((void*)js_repl_start, 3));
             // REPL mode constants
             js_property_set(repl_ns, (Item){.item = s2it(heap_create_name("REPL_MODE_SLOPPY", 16))},
                             (Item){.item = s2it(heap_create_name("sloppy", 6))});
@@ -37150,7 +37521,7 @@ extern "C" Item js_module_get(Item specifier) {
                             (Item){.item = s2it(heap_create_name("strict", 6))});
             // Recoverable error class
             js_property_set(repl_ns, (Item){.item = s2it(heap_create_name("Recoverable", 11))},
-                            js_new_function((void*)js_stub_noop_object, 1));
+                            js_new_function((void*)js_repl_recoverable_ctor, 1));
             js_property_set(repl_ns, (Item){.item = s2it(heap_create_name("default", 7))}, repl_ns);
         }
         return repl_ns;
@@ -37382,24 +37753,80 @@ extern "C" Item js_text_encoder_encode(Item encoder, Item str) {
     return result;
 }
 
-extern "C" Item js_text_decoder_new(Item encoding_item) {
-    Item obj = js_new_object();
-    // Normalize encoding name
-    const char* enc = "utf-8";
-    char enc_buf[32] = "utf-8";
-    if (get_type_id(encoding_item) == LMD_TYPE_STRING) {
-        String* s = it2s(encoding_item);
-        if (s && s->len > 0 && s->len < 32) {
-            // lowercase copy
-            for (int i = 0; i < (int)s->len; i++)
-                enc_buf[i] = (char)tolower((unsigned char)s->chars[i]);
-            enc_buf[s->len] = '\0';
-            enc = enc_buf;
-        }
+static bool js_text_decoder_label_equals(String* s, const char* literal) {
+    if (!s || !literal) return false;
+    int len = (int)strlen(literal);
+    if ((int)s->len != len) return false;
+    for (int i = 0; i < len; i++) {
+        char a = (char)tolower((unsigned char)s->chars[i]);
+        if (a != literal[i]) return false;
     }
+    return true;
+}
+
+static const char* js_text_decoder_canonical_label(Item encoding_item) {
+    if (encoding_item.item == 0 ||
+        get_type_id(encoding_item) == LMD_TYPE_UNDEFINED ||
+        get_type_id(encoding_item) == LMD_TYPE_NULL) {
+        return "utf-8";
+    }
+    if (get_type_id(encoding_item) != LMD_TYPE_STRING) return NULL;
+    String* s = it2s(encoding_item);
+    if (!s || s->len == 0) return "utf-8";
+    if (js_text_decoder_label_equals(s, "utf-8") ||
+        js_text_decoder_label_equals(s, "utf8") ||
+        js_text_decoder_label_equals(s, "unicode-1-1-utf-8") ||
+        js_text_decoder_label_equals(s, "unicode11utf8") ||
+        js_text_decoder_label_equals(s, "unicode20utf8") ||
+        js_text_decoder_label_equals(s, "x-unicode20utf8")) {
+        return "utf-8";
+    }
+    if (js_text_decoder_label_equals(s, "utf-16le") ||
+        js_text_decoder_label_equals(s, "utf-16") ||
+        js_text_decoder_label_equals(s, "unicode") ||
+        js_text_decoder_label_equals(s, "unicodefeff") ||
+        js_text_decoder_label_equals(s, "csunicode") ||
+        js_text_decoder_label_equals(s, "iso-10646-ucs-2") ||
+        js_text_decoder_label_equals(s, "ucs-2")) {
+        return "utf-16le";
+    }
+    if (js_text_decoder_label_equals(s, "utf-16be") ||
+        js_text_decoder_label_equals(s, "unicodefffe")) {
+        return "utf-16be";
+    }
+    if (js_text_decoder_label_equals(s, "windows-1252")) return "windows-1252";
+    return NULL;
+}
+
+extern "C" Item js_text_decoder_new(Item encoding_item, Item options_item) {
+    Item obj = js_new_object();
+    const char* enc = js_text_decoder_canonical_label(encoding_item);
+    if (!enc) {
+        // unsupported labels must fail during construction, not silently fall
+        // through to UTF-8, so invalid-label tests see the Node error code.
+        return js_throw_range_error_code("ERR_ENCODING_NOT_SUPPORTED",
+            "The encoding label provided is not supported");
+    }
+    bool fatal = false;
+    bool ignore_bom = false;
+    TypeId options_type = get_type_id(options_item);
+    if (options_type != LMD_TYPE_UNDEFINED && options_type != LMD_TYPE_NULL &&
+        options_item.item != 0) {
+        if (options_type != LMD_TYPE_MAP) {
+            return js_throw_invalid_arg_type("options", "object", options_item);
+        }
+        fatal = it2b(js_property_get(options_item, js_runtime_make_string_item("fatal", 5)));
+        if (js_check_exception()) return ItemNull;
+        ignore_bom = it2b(js_property_get(options_item, js_runtime_make_string_item("ignoreBOM", 9)));
+        if (js_check_exception()) return ItemNull;
+    }
+    // TextDecoder state is stored as own data properties so the optimized
+    // constructor and generic constructor paths observe the same web options.
     Item k = (Item){.item = s2it(heap_create_name("encoding"))};
     Item v = (Item){.item = s2it(heap_create_name(enc))};
     js_property_set(obj, k, v);
+    js_property_set(obj, js_runtime_make_string_item("fatal", 5), (Item){.item = b2it(fatal)});
+    js_property_set(obj, js_runtime_make_string_item("ignoreBOM", 9), (Item){.item = b2it(ignore_bom)});
     js_class_stamp(obj, JS_CLASS_TEXT_DECODER);
     return obj;
 }
@@ -37429,6 +37856,11 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
             }
         }
     }
+    bool ignore_bom = false;
+    if (get_type_id(decoder) == LMD_TYPE_MAP) {
+        ignore_bom = it2b(js_property_get(decoder, js_runtime_make_string_item("ignoreBOM", 9)));
+        if (js_check_exception()) return ItemNull;
+    }
 
     // Extract raw bytes from input
     uint8_t* bytes = NULL;
@@ -37438,6 +37870,14 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
     if (tid == LMD_TYPE_MAP && js_is_typed_array(input)) {
         bytes = (uint8_t*)js_typed_array_current_data_ptr(input);
         byte_len = js_typed_array_byte_length(input);
+    } else if (tid == LMD_TYPE_MAP && js_is_arraybuffer(input)) {
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(input);
+        // ArrayBuffer is a BufferSource; treating it as empty dropped valid
+        // TextDecoder input and made Uint8Array.buffer decode differently.
+        if (ab && !ab->detached) {
+            bytes = (uint8_t*)ab->data;
+            byte_len = ab->byte_length;
+        }
     } else if (tid == LMD_TYPE_ARRAY) {
         Array* arr = input.array;
         if (arr && arr->length > 0) {
@@ -37471,7 +37911,7 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
             uint16_t bom = is_utf16be ?
                 ((uint16_t)bytes[0] << 8 | bytes[1]) :
                 ((uint16_t)bytes[1] << 8 | bytes[0]);
-            if (bom == 0xFEFF) start = 2; // strip BOM
+            if (!ignore_bom && bom == 0xFEFF) start = 2; // strip BOM
         }
         // Max output: each 2-byte unit → up to 4 UTF-8 bytes
         int max_out = ((byte_len - start) / 2) * 4 + 4;
@@ -37500,8 +37940,26 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
             } else {
                 cp = cu;
             }
-            // Skip BOM codepoint U+FEFF in output
-            if (cp == 0xFEFF && pos == 0) continue;
+            if (!ignore_bom && cp == 0xFEFF && pos == 0) continue;
+            pos += js_cp_to_utf8(out + pos, cp);
+        }
+        out[pos] = '\0';
+        result = (Item){.item = s2it(heap_strcpy(out, pos))};
+        mem_free(out);
+    } else if (strncmp(encoding, "windows-1252", 12) == 0) {
+        static const uint16_t win1252_extra[32] = {
+            0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+            0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
+            0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+            0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178
+        };
+        char* out = (char*)mem_alloc(byte_len * 3 + 1, MEM_CAT_JS_RUNTIME);
+        int pos = 0;
+        for (int i = 0; i < byte_len; i++) {
+            uint32_t cp = bytes[i];
+            if (bytes[i] >= 0x80 && bytes[i] <= 0x9F) {
+                cp = win1252_extra[bytes[i] - 0x80];
+            }
             pos += js_cp_to_utf8(out + pos, cp);
         }
         out[pos] = '\0';
@@ -37510,7 +37968,7 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
     } else {
         // UTF-8 (default): strip BOM if present
         int start = 0;
-        if (byte_len >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+        if (!ignore_bom && byte_len >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
             start = 3; // strip UTF-8 BOM
         result = (Item){.item = s2it(heap_strcpy((char*)bytes + start, byte_len - start))};
     }

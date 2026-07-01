@@ -35,6 +35,7 @@ struct TlsConfig {
     const char *cipher_list;        // cipher suites (NULL for defaults)
     int verify_peer;                // verify client certificates (0/1)
     int min_version;                // minimum TLS version (0 = TLS 1.2)
+    int is_client;                  // non-zero for client-side TLS contexts
 };
 
 TlsConfig tls_config_default(void);
@@ -69,12 +70,16 @@ struct TlsConnection {
     mbedtls_ssl_context *ssl;
     TlsContext          *ctx;       // shared context
     uv_tcp_t            *client;    // underlying TCP handle
+    unsigned char       *input;     // encrypted bytes supplied by libuv
+    size_t               input_len;
+    size_t               input_pos;
     int                  handshake_done;
 };
 
 // create TLS connection wrapper for an accepted client
 TlsConnection* tls_connection_create(TlsContext *ctx, uv_tcp_t *client);
 void            tls_connection_destroy(TlsConnection *conn);
+int             tls_connection_feed(TlsConnection *conn, const unsigned char *buf, size_t len);
 
 // perform TLS handshake (may need multiple calls for non-blocking I/O)
 // returns 0 on success, positive if in progress, negative on error
