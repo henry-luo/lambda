@@ -1691,8 +1691,10 @@ static bool css_content_value_has_image_url(const CssValue* value) {
     if (!value) return false;
     if (value->type == CSS_VALUE_TYPE_URL) return true;
     if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
-        value->data.function->name && strcmp(value->data.function->name, "url") == 0) {
-        return true;
+        value->data.function->name) {
+        const char* fn = value->data.function->name;
+        size_t fn_len = strlen(fn);
+        if (str_ieq_const(fn, fn_len, "url")) return true;
     }
     if (value->type == CSS_VALUE_TYPE_LIST) {
         for (int i = 0; i < value->data.list.count; i++) {
@@ -1797,7 +1799,8 @@ DisplayValue resolve_display_value(void* child) {
             CssDeclaration* content_decl = style_tree_get_declaration(
                 dom_elem->specified_style, CSS_PROPERTY_CONTENT);
             if (content_decl && css_content_value_has_image_url(content_decl->value)) {
-                // CSS Generated Content replaces the element contents with an image object.
+                // content:url() exposes a replaced object box in this layout path;
+                // image-set() must not assign its intrinsic size to the DOM element.
                 is_replaced = true;
             }
         }

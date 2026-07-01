@@ -1246,6 +1246,7 @@ typedef struct GridProp {
 
 typedef struct EmbedProp {
     ImageSurface* img;  // image surface
+    float content_image_resolution; // CSS image-set() density for intrinsic sizing, 0 means 1x
     DomDocument* doc;   // iframe document
     struct WebViewProp* webview;  // native OS web view (WKWebView/WebView2/WebKitGTK)
     FlexProp* flex;
