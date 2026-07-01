@@ -138,4 +138,82 @@ Added `test/js/class_field_arrow_nested_this.{js,txt}` covering:
 - `./lambda.exe js test/js/class_field_arrow_nested_this.js --no-log` → matches expected output
 - `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/*class_field_arrow_nested_this*'` → passed
 - `make build` → passed
+
+---
+---
+
+# Bug 2 — residual: class field-arrow with MIXED captures (`this` + a called module binding) still loses `this`
+
+**Date:** 2026-07-01 · **Component:** same (JS→MIR class field-init `this` capture) · **Status:** FIXED
+**Discovered by:** Stage 4C — Bug 1's fix unblocked the simple cases, but `test/editor-js/test/view/editor-view-dom.test.ts` (~9) + `full-editor-dom.test.ts` (~14) still crash: the editor **mounts** (constructor `this` now correct), then the first `beforeinput` dispatch fails.
+
+## 1. The issue (what remains)
+
+Bug 1's fix forces a private (copied) closure env for a field-initializer arrow **only when the arrow's captures are *exclusively* lexical meta bindings** (`_js_this` / `_js_new.target` / `_js_arguments`). But a real event handler almost always **also captures an ordinary binding** — e.g. it calls an imported/module function. `EditorViewDom.handleBeforeInput = (ev) => { const intent = intentFromInputEvent(ev); … this.state … }` captures **both** `_js_this` **and** `intentFromInputEvent`. For such a **mixed-capture** arrow the guard is bypassed, the arrow reverts to the enclosing function's shared scope-env `_js_this`, and `this` is lost again — reintroducing Bug 1 for the dominant real-world shape.
+
+## 2. Symptom
+
+`this` is `undefined` at the very start of the dispatched field-arrow handler:
+`TypeError: Cannot read properties of undefined (reading 'state')` (from `handleBeforeInput`'s `const cur = this.state`), swallowed by `fire_listeners` as `event listener for 'beforeinput' threw; continuing dispatch`; in a full bundle it surfaces as the same `AddressSanitizer: BUS` in `js_debug_check_callee` → `get_type_id` (`lambda/js/js_runtime.cpp:8943`). The editor mounts fine (Bug 1 fixed constructor-time `this`), then the first `beforeinput` dispatch throws/crashes.
+
+## 3. Minimal reproduce
+
+Single class, one imported function called from the handler — `temp/4c-spikes/min2crash.js`:
+```js
+import { intentFromInputEvent } from './src/view/intent-from-input-event.js'  // any cross-module fn
+class A {
+  state = { n: 1 }; d;
+  constructor(){ this.d = document.createElement('div'); document.body.appendChild(this.d);
+                 this.d.addEventListener('beforeinput', this.h); }
+  h = (ev) => { intentFromInputEvent(ev);                 // <-- captures a module binding
+                globalThis.__A = (this && this.state) ? 'OK' : 'THIS-UNDEF'; }
+}
+new A().d.dispatchEvent(new InputEvent('beforeinput', { bubbles:true }));
+console.log(globalThis.__A);
+```
+esbuild → IIFE, run `./lambda.exe js min2crash.js --document page.html`.
+- **Expected:** `OK` · **Actual:** `THIS-UNDEF`
+
+**Control matrix** (single variable isolated — `temp/4c-spikes/call.js`, `mixed.js`):
+
+| Field-arrow handler body | `this` |
+|---|---|
+| calls an **imported (cross-module)** function + reads `this` | **THIS-UNDEF (bug)** |
+| same class, imports present, but handler does **not** call it | OK |
+| calls a **local (same-file)** function + reads `this` | OK |
+| captures an outer local **var** + reads `this` | OK |
+| reads `this` only (the Bug-1 shape) | OK (fixed) |
+
+The single trigger: **the field-arrow captures `this` *and* a cross-module binding (calls an imported function).**
+
+## 4. Root cause diagnosis
+
+MIR dump of `min2crash.js` (`JS_MIR_DUMP=1 ./lambda.exe js temp/4c-spikes/min2crash.js --document page.html` → `temp/js_mir_dump.txt`): the handler arrow `_js_anon0_1251` has **both** `_js_intentFromInputEvent_171` and `_js_this_172` in its locals, and reads `_js_this` from its **closure env slot**:
+```
+_js_anon0_1251: func i64, i64:_js.env, i64:_js_ev
+    …
+    mov  _js_this_172, i64:16(_js.env)                 # _js_this from closure env (slot 2)
+    call js_resolve_lexical_this, …, _js_this_172
+```
+That env slot was populated at closure creation from the **enclosing function's shared scope-env `_js_this`** (undefined in the IIFE) — because Bug 1's `force_closure_env_copy` guard **did not fire** for this arrow: its capture set is **not exclusively** lexical meta bindings (it also captures `intentFromInputEvent`).
+
+**Residual root cause:** the guard condition is **too narrow**. It forces the private-closure-env copy + `_js_this` rebind only for arrows whose captures are *purely* `_js_this`/meta, not for the (dominant) case of an arrow capturing `_js_this` **plus** one or more ordinary bindings. Same layer (JS→MIR lowering); reproduces identically under `JS_MIR_INTERP=1`.
+
+## 5. Fix landed
+
+Widened Bug 1's capture guard — `jm_force_copied_env_for_field_initializer` (`lambda/js/js_mir_expression_lowering.cpp` ~12460). The old test forced the private closure-env copy only when **every** capture was a lexical meta binding (`for (…) if (!is_meta(cap)) return false; return true;`). It now forces the copy when the arrow captures a meta binding **at all**, regardless of other captures:
+```c
+for (int ci = 0; ci < fc->capture_count; ci++)
+    if (jm_capture_is_lexical_meta_binding(fc->captures[ci].name)) return true;
+return false;
+```
+`mt->force_closure_env_copy` is set only during field initialization, so this only affects field-initializer arrows. (Rare edge case knowingly accepted: a field-init arrow that captures `this` **and mutates** an ordinary outer binding now gets a copied env, so that mutation would not persist to the outer scope — but such an arrow's `this` was already broken, and the real-world captures are read-only function references.)
+
+### Validation
+- `./lambda.exe js temp/4c-spikes/min2crash.js --document page.html` → `OK` (was `THIS-UNDEF`)
+- `./lambda.exe js temp/4c-spikes/call.js --document page.html` → A and B both correct; `mixed.js` D/E correct
+- Bug 1 unchanged: `min_this.js` → `INSTANCE`; `test_js_gtest` `*class_field_arrow_nested_this*` passes
+- No regression: Stage-4C core **207/209**, tier_e **520/520**; `test_js_gtest` **299 passed** (only pre-existing `vm_runincontext_cross_unit` fails); `make build` clean
+- Stage-4C view bundle `editor-view-dom`: **crash → runs (3/9)** — the this-capture crash is gone. *(Remaining `editor-view-dom` failures ("…reading 'doc'": the edit pipeline yields no transaction) and the `full-editor-dom` crash are SEPARATE follow-ups, not this bug.)*
+- Recommended before merge: `make node-baseline` (class `this` is load-bearing).
 - `git diff --check` → clean

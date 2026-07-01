@@ -12460,10 +12460,19 @@ static bool jm_capture_is_lexical_meta_binding(const char* name) {
 static bool jm_force_copied_env_for_field_initializer(JsMirTranspiler* mt,
         JsFuncCollected* fc) {
     if (!mt || !fc || !mt->force_closure_env_copy) return false;
+    // Bug 2 (vibe/Lambda_Bug.md): force a private (copied) closure env whenever a
+    // field-initializer arrow captures a lexical meta binding (_js_this /
+    // new.target / arguments) AT ALL — not only when its captures are
+    // EXCLUSIVELY meta bindings. A real event handler captures `this` AND an
+    // ordinary binding (e.g. an imported function it calls); the old "all
+    // captures must be meta" test bypassed the copy for that dominant shape, so
+    // the arrow reverted to the enclosing shared scope-env `this` (undefined in
+    // an esbuild IIFE) and lost `this` again. `force_closure_env_copy` is set
+    // only during field initialization, so this only affects field-init arrows.
     for (int ci = 0; ci < fc->capture_count; ci++) {
-        if (!jm_capture_is_lexical_meta_binding(fc->captures[ci].name)) return false;
+        if (jm_capture_is_lexical_meta_binding(fc->captures[ci].name)) return true;
     }
-    return true;
+    return false;
 }
 
 MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
