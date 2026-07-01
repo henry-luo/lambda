@@ -809,6 +809,50 @@ static Item http_validate_header_value(Item name_item, Item value_item) {
     return value_item;
 }
 
+static int http_append_invalid_arg_received(char* msg, int pos, int cap, Item value) {
+    TypeId type = get_type_id(value);
+    if (!msg || cap <= 0 || pos >= cap - 1) return pos;
+    if (type == LMD_TYPE_NULL) {
+        return pos + snprintf(msg + pos, (size_t)(cap - pos), " Received null");
+    }
+    if (type == LMD_TYPE_UNDEFINED) {
+        return pos + snprintf(msg + pos, (size_t)(cap - pos), " Received undefined");
+    }
+    if (type == LMD_TYPE_BOOL) {
+        return pos + snprintf(msg + pos, (size_t)(cap - pos), " Received type boolean (%s)",
+                              it2b(value) ? "true" : "false");
+    }
+    if (type == LMD_TYPE_INT) {
+        return pos + snprintf(msg + pos, (size_t)(cap - pos), " Received type number (%lld)",
+                              (long long)it2i(value));
+    }
+    if (type == LMD_TYPE_INT64) {
+        return pos + snprintf(msg + pos, (size_t)(cap - pos), " Received type number (%lld)",
+                              (long long)it2l(value));
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        return pos + snprintf(msg + pos, (size_t)(cap - pos), " Received type number");
+    }
+    if (type == LMD_TYPE_ARRAY) {
+        return pos + snprintf(msg + pos, (size_t)(cap - pos), " Received an instance of Array");
+    }
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP) {
+        return pos + snprintf(msg + pos, (size_t)(cap - pos), " Received an instance of Object");
+    }
+    if (type == LMD_TYPE_SYMBOL) {
+        return pos + snprintf(msg + pos, (size_t)(cap - pos), " Received type symbol");
+    }
+    return pos + snprintf(msg + pos, (size_t)(cap - pos), " Received type object");
+}
+
+static Item http_throw_invalid_method_type(Item method_item) {
+    char msg[512];
+    int pos = snprintf(msg, sizeof(msg),
+                       "The \"options.method\" property must be of type string.");
+    http_append_invalid_arg_received(msg, pos, (int)sizeof(msg), method_item);
+    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+}
+
 static Item http_response_raw_headers(Item self) {
     Item raw = js_property_get(self, make_string_item("__raw_headers__"));
     if (get_type_id(raw) != LMD_TYPE_ARRAY) {
@@ -4022,6 +4066,9 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
                 memcpy(method_buf, ms->chars, (size_t)len);
                 method_buf[len] = '\0';
             }
+        } else if (get_type_id(m) != LMD_TYPE_UNDEFINED && get_type_id(m) != LMD_TYPE_NULL) {
+            // invalid methods must fail before socket allocation; otherwise mustNotCall callbacks can leak into live requests.
+            return http_throw_invalid_method_type(m);
         }
         Item pa = js_property_get(options_item, make_string_item("path"));
         if (get_type_id(pa) == LMD_TYPE_STRING) {

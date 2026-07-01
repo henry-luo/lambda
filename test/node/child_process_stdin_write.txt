@@ -1,0 +1,5 @@
+stdin write type: function
+stdin writable: true
+stdin readable: false
+stdout end: hello world
+child close: 0

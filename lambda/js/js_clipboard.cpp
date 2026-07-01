@@ -39,6 +39,7 @@ extern "C" Item js_promise_resolve(Item value);
 extern "C" Item js_promise_reject(Item reason);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
 extern "C" Item js_throw_type_error(const char* message);
+extern "C" Item js_throw_invalid_arg_type(const char* name, const char* expected, Item actual);
 extern "C" Item js_get_global_this(void);
 extern "C" void js_set_function_name(Item fn_item, Item name_item);
 extern "C" Item js_object_keys(Item obj);
@@ -117,39 +118,66 @@ static const char* str_prop_get(Item obj, const char* key, size_t* out_len) {
 // fall through and are silently skipped (the previous shim coerced via
 // String(), but no in-scope test exercises that path).
 
-static void blob_append_part(StrBuf* sb, Item part) {
+static bool blob_reject_shared_buffer_part(Item part) {
+    js_throw_invalid_arg_type("sources", "string, Blob, ArrayBuffer, TypedArray, or DataView", part);
+    return false;
+}
+
+static bool blob_part_has_shared_backing(Item part) {
+    if (js_is_sharedarraybuffer(part)) return true;
+    if (get_type_id(part) != LMD_TYPE_MAP) return false;
+    if (js_is_typed_array(part) || js_is_dataview(part)) {
+        Item buffer = js_property_get(part, make_str("buffer"));
+        if (js_is_sharedarraybuffer(buffer)) return true;
+    }
+    if (js_is_typed_array(part)) {
+        JsTypedArray* ta = js_get_typed_array_ptr(part.map);
+        if (ta && ta->buffer && ta->buffer->is_shared) return true;
+    }
+    if (js_is_dataview(part)) {
+        JsDataView* dv = js_get_dataview_ptr(part);
+        if (dv && dv->buffer && dv->buffer->is_shared) return true;
+    }
+    return false;
+}
+
+static bool blob_append_part(StrBuf* sb, Item part) {
     TypeId tid = get_type_id(part);
     if (tid == LMD_TYPE_STRING) {
         String* s = it2s(part);
         if (s && s->len > 0) strbuf_append_str_n(sb, s->chars, s->len);
-        return;
+        return true;
     }
     // ArrayBuffer / TypedArray / DataView — append raw bytes verbatim.
     if (js_is_arraybuffer(part)) {
+        // SharedArrayBuffer-backed Blob parts must be rejected before copying;
+        // otherwise WebIDL callers can observe shared memory or crash on view metadata.
+        if (blob_part_has_shared_backing(part)) return blob_reject_shared_buffer_part(part);
         JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(part);
         if (ab && ab->data && ab->byte_length > 0 && !ab->detached) {
             strbuf_append_str_n(sb, (const char*)ab->data, (size_t)ab->byte_length);
         }
-        return;
+        return true;
     }
     if (js_is_typed_array(part)) {
+        if (blob_part_has_shared_backing(part)) return blob_reject_shared_buffer_part(part);
         const char* data = (const char*)js_typed_array_current_data_ptr(part);
         int byte_length = js_typed_array_byte_length(part);
         if (data && byte_length > 0) {
             strbuf_append_str_n(sb, data, (size_t)byte_length);
         }
-        return;
+        return true;
     }
     if (js_is_dataview(part)) {
-        Map* m = part.map;
-        JsDataView* dv = (JsDataView*)m->data;
+        if (blob_part_has_shared_backing(part)) return blob_reject_shared_buffer_part(part);
+        JsDataView* dv = js_get_dataview_ptr(part);
         if (dv && dv->buffer && dv->buffer->data && dv->byte_length > 0 &&
             !dv->buffer->detached) {
             strbuf_append_str_n(sb,
                 (const char*)dv->buffer->data + dv->byte_offset,
                 (size_t)dv->byte_length);
         }
-        return;
+        return true;
     }
     if (tid == LMD_TYPE_MAP) {
         // Blob? Pull _text.
@@ -157,10 +185,11 @@ static void blob_append_part(StrBuf* sb, Item part) {
             size_t n = 0;
             const char* t = str_prop_get(part, "_text", &n);
             if (t && n > 0) strbuf_append_str_n(sb, t, n);
-            return;
+            return true;
         }
     }
     // Fallback: silently skip unsupported part types.
+    return true;
 }
 
 extern "C" Item js_blob_new(Item parts, Item options) {
@@ -169,12 +198,18 @@ extern "C" Item js_blob_new(Item parts, Item options) {
         int64_t n = js_array_length(parts);
         for (int64_t i = 0; i < n; i++) {
             Item p = js_array_get_int(parts, i);
-            blob_append_part(sb, p);
+            if (!blob_append_part(sb, p)) {
+                strbuf_free(sb);
+                return ItemNull;
+            }
         }
     } else if (get_type_id(parts) != LMD_TYPE_NULL) {
         // Per spec the parts argument must be iterable; if it's a single string
         // we accept it as a one-element sequence (matches the shim's behavior).
-        blob_append_part(sb, parts);
+        if (!blob_append_part(sb, parts)) {
+            strbuf_free(sb);
+            return ItemNull;
+        }
     }
 
     // Resolve `type` from options (lowercased; empty if any byte outside 0x20..0x7e).

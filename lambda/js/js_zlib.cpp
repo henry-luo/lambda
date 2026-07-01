@@ -21,6 +21,8 @@ extern "C" Item js_get_stream_namespace(void);
 extern "C" Item js_transform_new(Item opts);
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" Item js_readable_push(Item self, Item chunk);
+extern "C" void js_stream_flush_data_if_flowing(Item self);
+extern "C" void js_stream_transform_flush_drained(Item self);
 extern "C" void js_next_tick_enqueue(Item callback);
 extern "C" void js_mark_non_writable(Item object, Item name);
 extern "C" void js_mark_non_configurable(Item object, Item name);
@@ -1095,6 +1097,10 @@ static Item js_zlib_transform_flush(Item callback) {
     bool ok = zlib_stream_run(state, NULL, 0, Z_FINISH, &result, &zret);
     if (ok && get_type_id(result) != LMD_TYPE_UNDEFINED) {
         js_readable_push(self, result);
+        js_stream_flush_data_if_flowing(self);
+        // zlib flush exposes pending compressed bytes; drain the writable side
+        // only after those bytes have reached the readable consumer.
+        js_stream_transform_flush_drained(self);
     }
     zlib_stream_clear_state(self);
 
@@ -1147,6 +1153,9 @@ static Item js_zlib_stream_flush_method(Item kind_item, Item callback_item) {
     bool ok = zlib_stream_run(state, NULL, 0, flush, &result, &zret);
     if (ok && get_type_id(result) != LMD_TYPE_UNDEFINED) {
         js_readable_push(self, result);
+        js_stream_flush_data_if_flowing(self);
+        // zlib manual flush releases data that was holding transform backpressure.
+        js_stream_transform_flush_drained(self);
     }
 
     if (!ok) {

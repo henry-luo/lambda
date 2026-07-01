@@ -179,6 +179,7 @@ extern "C" Item js_stream_emit(Item self, Item event_item, Item arg1);
 extern "C" Item js_stream_on(Item self, Item event_item, Item listener);
 static void js_stream_flush_buffered_data(Item self);
 static void js_stream_schedule_close(Item self);
+static void js_stream_emit_or_schedule_drain(Item self);
 static void js_stream_async_iterators_drain(Item stream, Item err);
 static void js_writable_maybe_finish_deferred(Item self);
 static void js_transform_maybe_finish_deferred(Item self);
@@ -1153,6 +1154,59 @@ static Item js_stream_emit_drain_tick_closure(Item env_item) {
     return js_stream_emit_drain_tick(env[0]);
 }
 
+static Item js_stream_transform_deferred_drain_key(void) {
+    return make_string_item("__transform_deferred_drain__");
+}
+
+static Item js_stream_transform_deferred_drain_tick(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item self = env[0];
+    Item pending_key = js_stream_transform_deferred_drain_key();
+    if (!js_item_is_true(js_property_get(self, pending_key))) {
+        return make_js_undefined();
+    }
+    js_property_set(self, pending_key, js_bool_item(false));
+    Item state = js_property_get(self, key_writable_state);
+    if (!js_state_get_bool(state, "needDrain")) return make_js_undefined();
+    js_state_set_bool(state, "needDrain", false);
+    js_stream_emit_or_schedule_drain(self);
+    return make_js_undefined();
+}
+
+static void js_stream_defer_transform_drain(Item self) {
+    Item pending_key = js_stream_transform_deferred_drain_key();
+    if (js_item_is_true(js_property_get(self, pending_key))) return;
+    js_property_set(self, pending_key, js_bool_item(true));
+    Item* env = js_alloc_env(1);
+    env[0] = self;
+    Item tick = js_new_closure((void*)js_stream_transform_deferred_drain_tick, 0, env, 1);
+    js_next_tick_enqueue(tick);
+}
+
+static Item js_stream_drain_on_listener_key(void) {
+    return make_string_item("__drain_on_listener__");
+}
+
+extern "C" void js_stream_transform_flush_drained(Item self) {
+    ensure_keys();
+    Item state = js_property_get(self, key_writable_state);
+    Item deferred_key = js_stream_transform_deferred_drain_key();
+    bool need_drain = js_state_get_bool(state, "needDrain");
+    bool deferred_drain = js_item_is_true(js_property_get(self, deferred_key));
+    if (!need_drain && !deferred_drain) return;
+    js_state_set_bool(state, "needDrain", false);
+    js_property_set(self, deferred_key, js_bool_item(false));
+    if (!js_stream_has_event_listeners(self, "drain")) {
+        js_property_set(self, js_stream_drain_on_listener_key(), js_bool_item(true));
+        return;
+    }
+    Item* env = js_alloc_env(1);
+    env[0] = self;
+    Item tick = js_new_closure((void*)js_stream_emit_drain_tick_closure, 0, env, 1);
+    js_next_tick_enqueue(tick);
+}
+
 static void js_stream_emit_or_schedule_drain(Item self) {
     Item state = js_property_get(self, key_readable_state);
     bool readable_pending = js_state_get_bool(state, "readableListening") &&
@@ -2069,6 +2123,12 @@ extern "C" void js_stream_flush_data_now(Item self) {
     js_stream_flush_buffered_data(self);
 }
 
+extern "C" void js_stream_flush_data_if_flowing(Item self) {
+    ensure_keys();
+    if (!js_item_is_true(js_property_get(self, key_flowing))) return;
+    js_stream_flush_data_now(self);
+}
+
 // on(event, listener)
 extern "C" Item js_stream_on(Item self, Item event_item, Item listener) {
     ensure_keys();
@@ -2091,6 +2151,7 @@ extern "C" Item js_stream_on(Item self, Item event_item, Item listener) {
     bool is_data_event = js_stream_string_equals(event_item, "data");
     bool is_readable_event = js_stream_string_equals(event_item, "readable");
     bool is_finish_event = js_stream_string_equals(event_item, "finish");
+    bool is_drain_event = js_stream_string_equals(event_item, "drain");
 
     if (is_readable_event) {
         Item state = js_property_get(self, key_readable_state);
@@ -2131,6 +2192,15 @@ extern "C" Item js_stream_on(Item self, Item event_item, Item listener) {
         if (get_type_id(listener) == LMD_TYPE_FUNC) {
             Item result = js_call_function(listener, self, NULL, 0);
             js_stream_maybe_capture_rejection(self, "finish", result);
+        }
+    }
+    if (is_drain_event && js_item_is_true(js_property_get(self, js_stream_drain_on_listener_key()))) {
+        js_property_set(self, js_stream_drain_on_listener_key(), js_bool_item(false));
+        if (get_type_id(listener) == LMD_TYPE_FUNC) {
+            // zlib flush can clear backpressure before user code attaches drain;
+            // replay the pending drain once so the edge is not lost.
+            Item result = js_call_function(listener, self, NULL, 0);
+            js_stream_maybe_capture_rejection(self, "drain", result);
         }
     }
     return self;
@@ -7463,6 +7533,13 @@ extern "C" Item js_transform_write(Item self, Item chunk, Item encoding, Item ca
             }
         }
         if (js_stream_mark_transform_readable_backpressure(self)) accepted = false;
+        if (!accepted && !js_state_get_bool(js_property_get(self, key_writable_state), "needDrain") &&
+            !js_item_is_true(js_property_get(self, make_string_item("_writing")))) {
+            // synchronous _transform callbacks can clear needDrain before write() returns;
+            // defer the drain so callers observe the backpressure edge they just caused.
+            js_state_set_bool(js_property_get(self, key_writable_state), "needDrain", true);
+            js_stream_defer_transform_drain(self);
+        }
         return js_bool_item(accepted);
     } else {
         // no _transform method — throw ERR_METHOD_NOT_IMPLEMENTED

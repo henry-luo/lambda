@@ -1,9 +1,44 @@
 # Transpile Node Tune5 Proposal
 
-Date: 2026-06-29
-Status: Node5 baseline refreshed; Track A/B/C slices landed
+Date: 2026-06-29; refreshed 2026-07-01
+Status: Node5 accepted as a completed structural slice; latest recorded
+baseline-only gate is green, and Node6 should start from the remaining
+post-Node5 failure shape.
 Scope: structural LambdaJS Node.js compatibility work against official Node.js
 parallel tests.
+
+## Latest Status Summary
+
+Node5 moved the locked official Node baseline from the 2026-06-29
+1,930-pass proposal state to the current 2,047-pass checked-in baseline header
+against `ref/node` commit `92b72d4f601`. The active non-skip/non-slow inventory
+currently reports 2,046 baseline passes in the active set and 1,473
+baseline-inferred failures. The one-test difference is an artifact of the
+baseline file versus active inventory filtering and should be reconciled in the
+next measurement pass before Node6 work changes runtime behavior.
+
+The final Node5 implementation diary records a full baseline-only rerun with
+2,046/2,046 passing baseline tests, 0 regressions, 0 crashes, and 0 timeouts.
+Node5 therefore meets its acceptance bar: it produced a refreshed inventory,
+kept the passing baseline stable, and landed measured cluster wins across
+stream/I/O, async/diagnostics, fidelity modules, asymmetric crypto,
+worker/process compatibility, and VM/module isolation.
+
+The important leftovers are now explicitly Node6 material:
+
+- refresh/reconcile the baseline header, active inventory count, and generated
+  `temp/node_official_report.md` after a full current baseline-only run;
+- keep `test-stream-pipeline.js` skip-listed until its remaining
+  `mustCall`/shutdown-leak blockers are fixed;
+- continue the Track E decision that `worker_threads` is a single-process
+  compatibility surface for now, while real worker isolates and cluster worker
+  process modeling remain deferred;
+- treat `await using`, async/generator disposal, suppressed-error fidelity, and
+  broader unboxed float arithmetic as follow-up runtime work, not Node5
+  acceptance blockers;
+- preserve the Node5 non-goals: no HTTP/2, dgram, WASI, full ICU, V8 snapshots,
+  SEA, or native addons in this tune unless a later proposal explicitly
+  re-scopes them.
 
 ## Goal
 
@@ -47,22 +82,25 @@ local socket preflight for `http` / `https` / `net` / `tls` tests.
 
 ## Baseline Snapshot
 
-`test/node/official_baseline.txt` currently records the successful
-2026-06-29 baseline refresh:
+`test/node/official_baseline.txt` now records the successful post-Node5
+baseline refresh:
 
 | Metric | Count |
 | --- | ---: |
-| Passing baseline | 1930 |
-| Total tests in recorded run | 3538 |
-| Failed | 1608 |
+| Passing baseline in header | 2047 |
+| Passing baseline in active inventory | 2046 |
+| Total tests in recorded baseline run | 3534 |
+| Active tests in generated report | 3519 |
+| Failed / baseline-inferred failures | 1473 |
 | Missing | 0 |
 | Timed out | 0 |
-| Crashed in recorded run | 0 |
-| Previous baseline | 1913 |
+| Crashed in recorded baseline update | 1 non-baseline |
+| Latest recorded baseline-only gate | 2046 / 2046 pass |
+| Previous baseline | 1930 |
 | Regressions | 0 |
-| Improvements | 17 |
-| Slow list | 34 tests |
-| Skip list | 95 tests |
+| Improvements | 118 |
+| Slow-list exclusions in report | 39 tests |
+| Skip list | 109 tests |
 
 The local `ref/node` checkout was refreshed to upstream `92b72d4f601` after the
 initial Tune5 analysis. That resolved the earlier local drift where 75 passing
@@ -71,42 +109,45 @@ baseline header now records `ref/node` commit `92b72d4f601`, and the generated
 inventory report confirms zero passing-baseline filenames are missing from the
 checkout.
 
-The follow-up baseline rerun after updating `ref/node` and removing stale
-missing baseline entries completed with no recorded crashers or timeouts. The
-previously observed `test-child-process-reject-null-bytes.js` crasher remains
-outside the passing baseline and is covered by the skip-list policy.
+The final Node5 baseline-only gate completed with no recorded regressions,
+crashes, or timeouts. The current generated report has zero missing baseline
+names, but its latest timing sample may be from a focused run; rerun the full
+baseline-only/report pair before changing Node6 baselines.
 
 ## Failure Shape
 
 Using the current checkout's runner prefix rules, updated `ref/node`
-`92b72d4f601`, and the refreshed skip/slow lists, the current non-skip/non-slow
-official tree has 3538 active tests. Of those, 1930 are in the passing baseline
-and 1608 are baseline-inferred failures.
+`92b72d4f601`, and the refreshed skip/slow lists, the current generated
+inventory has 3519 active tests. Of those, 2046 are in the active passing
+baseline set and 1473 are baseline-inferred failures.
 
 The largest active failing clusters are:
 
 | Prefix | Pass | Fail | Total | Read |
 | --- | ---: | ---: | ---: | --- |
-| `http` | 163 | 207 | 396 | request/response lifecycle and stream-body semantics |
-| `tls` | 96 | 114 | 218 | certificate/options/session fidelity and async lexical/event ordering |
-| `worker` | 30 | 109 | 139 | mostly stubbed worker model |
-| `crypto` | 63 | 68 | 134 | asymmetric crypto, KeyObject, async sign/verify |
-| `cluster` | 15 | 67 | 83 | fork/IPC/process supervision semantics |
-| `vm` | 30 | 62 | 98 | context isolation and timeout semantics |
-| `repl` | 45 | 60 | 106 | lower priority, CLI/debuggability surface |
-| `diagnostics` | 26 | 42 | 68 | diagnostics_channel and async context binding |
-| `child-process` | 45 | 50 | 109 | IPC/fork/stdio fidelity |
-| `process` | 38 | 50 | 93 | process binding/env/signal/message fidelity |
-| `whatwg` | 14 | 49 | 63 | TextEncoder/Decoder, web platform shims |
-| `permission` | 16 | 43 | 59 | Node permission model and CLI flags |
-| `zlib` | 24 | 39 | 64 | brotli/zstd plus stream transform fidelity |
-| `buffer` | 31 | 36 | 69 | ArrayBuffer/exotic/fidelity gaps |
-| `fs` | 217 | 35 | 257 | near-strong, but async/watch/FileHandle gaps remain |
-| `stream` | 178 | 33 | 215 | remaining state-machine and validation gaps |
+| `http` | 164 | 206 | 396 | request/response lifecycle, agent behavior, body stream semantics |
+| `worker` | 33 | 104 | 139 | single-process compatibility only; real isolates deferred |
+| `tls` | 107 | 103 | 218 | certificate/options/session fidelity and async ordering |
+| `cluster` | 15 | 62 | 83 | fork/IPC/process supervision semantics |
+| `crypto` | 64 | 67 | 134 | remaining KeyObject, X509, WebCrypto, option/error fidelity |
+| `repl` | 50 | 55 | 106 | lower priority, CLI/debuggability surface |
+| `process` | 39 | 49 | 93 | process binding/env/signal/message fidelity |
+| `whatwg` | 14 | 49 | 63 | TextEncoder/Decoder and web platform shims |
+| `child-process` | 47 | 48 | 109 | IPC/fork/stdio and spawn option fidelity |
+| `permission` | 16 | 38 | 59 | Node permission model and CLI flags |
+| `zlib` | 27 | 36 | 64 | brotli/zstd plus transform fidelity |
+| `vm` | 57 | 35 | 98 | remaining context, timeout, cache, realm edges |
+| `buffer` | 33 | 34 | 69 | ArrayBuffer/exotic/message fidelity gaps |
+| `diagnostics` | 34 | 34 | 68 | remaining diagnostics_channel and async context edges |
+| `https` | 28 | 33 | 64 | agent/session/TLS-over-HTTP fidelity |
+| `stream` | 178 | 33 | 215 | remaining state-machine, pipeline, and validation gaps |
+| `fs` | 220 | 32 | 257 | near-strong, but async/watch/FileHandle gaps remain |
 
 This ranking is not just "stream leftovers." Streams remain important, but the
-current failing surface says Tune5 also needs async context, diagnostics,
-worker/cluster process modeling, crypto, VM isolation, and fidelity work.
+post-Node5 failing surface now points Node6 toward HTTP/TLS lifecycle,
+worker/cluster/process modeling, crypto/X509/WebCrypto, web platform shims,
+permission/runner fidelity, and a smaller but still important stream pipeline
+tail.
 
 ## Original Representative Failure Samples
 

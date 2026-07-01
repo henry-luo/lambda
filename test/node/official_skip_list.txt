@@ -8,6 +8,9 @@
 #
 # Categories:
 #   [fork]       Uses child_process.fork() which spawns a Node binary
+#   [http2]      Requires Node.js HTTP/2/nghttp2 support
+#   [dgram]      Requires Node.js UDP/datagram socket support
+#   [wasi]       Requires Node.js WASI support
 #   [icu]        Requires full ICU internationalization support
 #   [sea]        Requires Node.js Single Executable Application support
 #   [snapshot]   Requires V8 snapshot building API
@@ -32,13 +35,30 @@ test-child-process-fork-ref.js              # [fork] uses child_process.fork
 test-child-process-fork-ref2.js             # [fork] uses child_process.fork
 test-child-process-fork-stdio.js            # [fork] uses child_process.fork
 
+# --- HTTP/2 (no nghttp2/http2 module support) ---
+test-worker-http2-generic-streams-terminate.js # [http2] requires worker + HTTP/2 stream termination support
+test-worker-http2-stream-terminate.js       # [http2] requires worker + HTTP/2 stream termination support
+
+# --- dgram / UDP (no dgram module support) ---
+test-cluster-child-index-dgram.js           # [dgram] requires cluster worker UDP socket support
+test-cluster-dgram-1.js                     # [dgram] requires cluster worker UDP socket support
+test-cluster-dgram-2.js                     # [dgram] requires cluster worker UDP socket support
+test-cluster-dgram-ipv6only.js              # [dgram] requires cluster worker UDP socket support
+test-cluster-dgram-reuse.js                 # [dgram] requires cluster worker UDP socket reuse support
+
+# --- WASI (no WASI runtime support) ---
+test-permission-allow-wasi-cli.js           # [wasi] requires Node WASI permission flag semantics
+test-permission-wasi.js                     # [wasi] requires Node WASI permission integration
+
 # --- ICU / Intl (no full ICU in engine) ---
+test-intl.js                                # [icu] requires full ICU / Intl locale behavior
 test-icu-data-dir.js                        # [icu] requires ICU data dir loading + internalBinding('config')
 test-icu-env.js                             # [icu] requires full ICU locale data + ICU version fixtures
 test-icu-minimum-version.js                 # [icu] reads V8 source tree for ICU version check
 test-icu-stringwidth.js                     # [icu] requires internal/util/inspect.getStringWidth with ICU tables
 
 # --- Single Executable Application (no SEA support) ---
+test-sea-assets-not-in-sea.js               # [sea] requires node:sea not-in-SEA asset behavior
 test-sea-get-asset-keys.js                  # [sea] requires node:sea module
 
 # --- V8 Snapshot API (no V8) ---
@@ -46,6 +66,9 @@ test-snapshot-api.js                        # [snapshot] requires v8.startupSnap
 
 # --- Native addons ---
 test-crypto-fips.js                         # [native] requires FIPS OpenSSL build
+test-no-addons-resolution-condition.js      # [native] requires Node addon resolution-condition semantics
+test-permission-allow-addons-cli.js         # [native] requires Node native-addon permission flag semantics
+test-permission-no-addons.js                # [native] requires Node native-addon permission enforcement
 
 # --- Known hangs (timeout / infinite loop) ---
 test-http-outgoing-message-capture-rejection.js  # [timeout] HTTP captureRejections/backpressure drain fixture times out
