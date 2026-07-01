@@ -68,34 +68,35 @@ probe), with coverage in `test/lambda/proc/proc_implicit_if_return.ls`.
 
 ## 3. `print()` is single-argument; multi-arg call type-errors at runtime
 
+**Status: ✅ Fixed (2026-07-01)** — `print` is variadic. Each argument is
+stringified and adjacent arguments are separated by one space.
+
 ```lambda
 print("x=", x)
-// runtime error [212]: fn_call2: cannot call non-function value
+// prints: x= 42
 ```
 
-Every sane print expects varargs. The runtime error message also doesn't
-mention `print` or "too many arguments" — it says "non-function value",
-which sent me hunting for a missing import.
-
-**Asks**:
-- Make `print` variadic and space-join (or stringify-join) like most
-  REPLs.
-- At minimum, raise `"print expects 1 argument, got N"`.
+The default separator is currently a literal space. If Lambda grows a global
+runtime print configuration later, that separator is the intended extension
+point.
 
 ---
 
 ## 4. `?` post-fix error propagation does not work in `let`
 
+**Status: ✅ No Fix / by design (2026-07-01)** — `?` is not Lambda's
+error-propagation syntax. The current postfix propagation operator is `^`,
+including on the right-hand side of a `let`.
+
 ```lambda
-let doc = input("file.pdf", 'pdf')?    // syntax error
-let doc^err = input("file.pdf", 'pdf') // works
+let doc = input("file.pdf", 'pdf')?    // wrong: stale syntax
+let doc = input("file.pdf", 'pdf')^    // correct: propagate on error
+let doc^err = input("file.pdf", 'pdf') // correct: capture value/error
 ```
 
-`?` is documented in `doc/Lambda_Error_Handling.md` as a propagation
-operator and works in expression context, but the parser rejects it on the
-right-hand side of a `let`. This is surprising because `let a^err = …` is
-the common destructuring form documented elsewhere — both should work or
-the docs should call out the restriction.
+The older issue came from stale examples that described `?` as propagation.
+Current docs should use `^` for propagation and keep `let a^err = ...` for
+explicit value/error destructuring.
 
 ---
 

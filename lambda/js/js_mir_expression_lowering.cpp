@@ -11030,11 +11030,8 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
         }
 
-        // process.argv
-        if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "process", 7) == 0 &&
-            prop->name && prop->name->len == 4 && strncmp(prop->name->chars, "argv", 4) == 0) {
-            return jm_call_0(mt, "js_get_process_argv", MIR_T_I64);
-        }
+        // process.argv is mutable; route through normal property lookup so CLI
+        // shims that assign process.argv observe their replacement array.
 
         // Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER, etc. → js_number_property
         if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Number", 6) == 0) {

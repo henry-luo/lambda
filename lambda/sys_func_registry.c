@@ -789,7 +789,7 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_TODAY, "today", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY, false,
      C_RET_DTIME, C_ARG_ITEM, "pn_today", NULL, NULL, NULL, false, 0},  // unimplemented
 
-    {SYSPROC_PRINT, "print", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, false,
+    {SYSPROC_PRINT, "print", -1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "pn_print", FPTR(pn_print), NULL, NULL, false, 0},
 
     {SYSPROC_CLOCK, "clock", 0, &TYPE_FLOAT, true, false, false, LMD_TYPE_ANY, false,

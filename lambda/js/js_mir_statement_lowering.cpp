@@ -2996,8 +2996,11 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     }
     if (ctor_len == 11 && strncmp(ctor_name, "TextDecoder", 11) == 0) {
         MIR_reg_t enc_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
-        return jm_call_1(mt, "js_text_decoder_new", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, enc_arg));
+        JsAstNode* options_node = call->arguments ? call->arguments->next : NULL;
+        MIR_reg_t options_arg = options_node ? jm_transpile_box_item(mt, options_node) : jm_emit_undefined(mt);
+        return jm_call_2(mt, "js_text_decoder_new", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, enc_arg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, options_arg));
     }
 
     // OffscreenCanvas(width, height)
@@ -4664,14 +4667,18 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             MIR_new_label_op(mt->ctx, l_no_delayed_ret),
             MIR_new_reg_op(mt->ctx, forit_has_return)));
         // Propagate return to outer try context if any
-        if (mt->try_ctx_depth > 0) {
-            JsTryContext* outer = &mt->try_ctx_stack[mt->try_ctx_depth - 1];
+        int outer_d = mt->try_ctx_depth - 1;
+        while (outer_d >= 0 && mt->try_ctx_stack[outer_d].yield_state_only) outer_d--;
+        if (outer_d >= 0) {
+            JsTryContext* outer = &mt->try_ctx_stack[outer_d];
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, outer->return_val_reg),
                 MIR_new_reg_op(mt->ctx, forit_return_val)));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, outer->has_return_reg),
                 MIR_new_int_op(mt->ctx, 1)));
+            // finally-body loops have synthetic resume contexts with no branch target;
+            // delayed returns must propagate to the nearest real try/finally instead.
             MIR_label_t target = outer->has_finally ? outer->finally_label : outer->end_label;
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                 MIR_new_label_op(mt->ctx, target)));

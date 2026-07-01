@@ -56,6 +56,8 @@ extern double js_get_number(Item value);
 #include <cerrno>
 #include <time.h>
 
+extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe);
+
 static bool js_reflect_define_property_mode = false;
 static bool js_reflect_define_property_failed = false;
 
@@ -1143,6 +1145,19 @@ static bool js_try_exotic_own_property_descriptor(Item obj, Item name,
 // Process I/O
 // =============================================================================
 
+extern "C" Item js_buffer_from_bytes(const char* data, int len);
+
+static Item js_process_stdio_key(const char* key, int len) {
+    return (Item){.item = s2it(heap_create_name(key, len))};
+}
+
+static bool js_process_string_equals(Item item, const char* expected, int expected_len) {
+    if (get_type_id(item) != LMD_TYPE_STRING) return false;
+    String* s = it2s(item);
+    return s && s->len == (size_t)expected_len &&
+           memcmp(s->chars, expected, (size_t)expected_len) == 0;
+}
+
 extern "C" Item js_process_stdout_write(Item str_item) {
     TypeId type = get_type_id(str_item);
     if (type == LMD_TYPE_STRING) {
@@ -1201,6 +1216,101 @@ extern "C" Item js_process_stdin_destroy(void) {
 extern "C" Item js_process_stdin_setRawMode(Item mode_item) {
     (void)mode_item;
     return make_js_undefined();
+}
+
+static void js_process_stdin_add_listener(Item self, const char* event_name,
+                                          int event_len, Item callback) {
+    Item key = event_len == 4 && memcmp(event_name, "data", 4) == 0
+        ? js_process_stdio_key("__stdin_data__", 14)
+        : js_process_stdio_key("__stdin_end__", 13);
+    Item existing = js_property_get(self, key);
+    if (get_type_id(existing) != LMD_TYPE_ARRAY) {
+        existing = js_array_new(0);
+        js_property_set(self, key, existing);
+    }
+    js_array_push(existing, callback);
+}
+
+static void js_process_stdin_emit_list(Item listeners, Item arg, bool has_arg) {
+    if (get_type_id(listeners) != LMD_TYPE_ARRAY) return;
+    int64_t count = js_array_length(listeners);
+    for (int64_t i = 0; i < count; i++) {
+        Item cb = js_array_get_int(listeners, i);
+        if (get_type_id(cb) != LMD_TYPE_FUNC) continue;
+        if (has_arg) js_call_function(cb, make_js_undefined(), &arg, 1);
+        else js_call_function(cb, make_js_undefined(), NULL, 0);
+        if (js_check_exception()) return;
+    }
+}
+
+static void js_process_stdin_drain(Item self, Item dest, bool pipe_to_dest) {
+    Item drained_key = js_process_stdio_key("__stdin_drained__", 17);
+    Item drained = js_property_get(self, drained_key);
+    if (get_type_id(drained) == LMD_TYPE_BOOL && it2b(drained)) return;
+    js_property_set(self, drained_key, (Item){.item = b2it(true)});
+
+    Item data_listeners = js_property_get(self, js_process_stdio_key("__stdin_data__", 14));
+    Item end_listeners = js_property_get(self, js_process_stdio_key("__stdin_end__", 13));
+    Item write_fn = pipe_to_dest
+        ? js_property_get(dest, js_process_stdio_key("write", 5))
+        : make_js_undefined();
+
+    char buf[65536];
+    while (true) {
+        size_t nread = fread(buf, 1, sizeof(buf), stdin);
+        if (nread > 0) {
+            if (pipe_to_dest && get_type_id(write_fn) == LMD_TYPE_FUNC) {
+                Item chunk_str = (Item){.item = s2it(heap_create_name(buf, nread))};
+                js_call_function(write_fn, dest, &chunk_str, 1);
+                if (js_check_exception()) return;
+            }
+            if (get_type_id(data_listeners) == LMD_TYPE_ARRAY) {
+                Item chunk = js_buffer_from_bytes(buf, (int)nread);
+                js_process_stdin_emit_list(data_listeners, chunk, true);
+                if (js_check_exception()) return;
+            }
+        }
+        if (nread < sizeof(buf)) break;
+    }
+    js_process_stdin_emit_list(end_listeners, make_js_undefined(), false);
+}
+
+extern "C" Item js_process_stdin_on(Item event_item, Item callback) {
+    Item self = js_get_this();
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return self;
+    if (js_process_string_equals(event_item, "data", 4)) {
+        js_process_stdin_add_listener(self, "data", 4, callback);
+    } else if (js_process_string_equals(event_item, "end", 3)) {
+        js_process_stdin_add_listener(self, "end", 3, callback);
+    } else {
+        return self;
+    }
+
+    Item data_listeners = js_property_get(self, js_process_stdio_key("__stdin_data__", 14));
+    Item end_listeners = js_property_get(self, js_process_stdio_key("__stdin_end__", 13));
+    if (!isatty(0) && get_type_id(data_listeners) == LMD_TYPE_ARRAY &&
+        get_type_id(end_listeners) == LMD_TYPE_ARRAY) {
+        // Non-TTY child stdin has no libuv reader yet; drain after data/end
+        // listeners are present so short child processes do not exit early.
+        js_process_stdin_drain(self, make_js_undefined(), false);
+    }
+    return self;
+}
+
+extern "C" Item js_process_stdin_resume(void) {
+    return js_get_this();
+}
+
+extern "C" Item js_process_stdin_pause(void) {
+    return js_get_this();
+}
+
+extern "C" Item js_process_stdin_pipe(Item dest) {
+    Item self = js_get_this();
+    if (!isatty(0)) {
+        js_process_stdin_drain(self, dest, true);
+    }
+    return dest;
 }
 
 extern "C" Item js_process_hrtime_bigint(void) {
@@ -2619,11 +2729,19 @@ static Item build_process_stdin(void) {
         js_new_function((void*)js_process_stdin_destroy, 0));
     js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("setRawMode", 10))},
         js_new_function((void*)js_process_stdin_setRawMode, 1));
+    js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("on", 2))},
+        js_new_function((void*)js_process_stdin_on, 2));
+    js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("addListener", 11))},
+        js_new_function((void*)js_process_stdin_on, 2));
+    js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("pipe", 4))},
+        js_new_function((void*)js_process_stdin_pipe, 1));
+    js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("resume", 6))},
+        js_new_function((void*)js_process_stdin_resume, 0));
+    js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("pause", 5))},
+        js_new_function((void*)js_process_stdin_pause, 0));
     js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("fd", 2))}, (Item){.item = i2it(0)});
     js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("isTTY", 5))},
         (Item){.item = b2it(isatty(0))});
-    // setEncoding — stub that just records encoding
-    // resume/pause — stubs for stream interface
     return stdin_obj;
 }
 
@@ -2774,9 +2892,9 @@ extern "C" Item js_process_setgroups(Item groups) {
 #endif
 
 // process.emitWarning(warning, type, code) — emit a warning
-// Node.js: emits 'warning' event on process; for us, log and call listeners
+// Node.js: emits 'warning' event on process after the default stderr write.
 extern "C" Item js_process_emit(Item event_name, Item arg1);
-static Item js_process_emitWarning(Item warning, Item type_item, Item code_item) {
+extern "C" Item js_process_emitWarning(Item warning, Item type_item, Item code_item) {
     // Build a Warning object if warning is a string
     Item warning_obj;
     if (get_type_id(warning) == LMD_TYPE_STRING) {
@@ -2807,7 +2925,32 @@ static Item js_process_emitWarning(Item warning, Item type_item, Item code_item)
         warning_obj = warning;
     }
 
-    // Emit 'warning' event on process
+    Item warning_message = js_property_get(warning_obj, (Item){.item = s2it(heap_create_name("message", 7))});
+    if (get_type_id(warning_message) == LMD_TYPE_STRING) {
+        String* msg = it2s(warning_message);
+        if (msg) {
+            char* line = (char*)mem_alloc(msg->len + 2, MEM_CAT_JS_RUNTIME);
+            memcpy(line, msg->chars, msg->len);
+            line[msg->len] = '\n';
+            line[msg->len + 1] = '\0';
+            Item line_item = (Item){.item = s2it(heap_strcpy(line, msg->len + 1))};
+            mem_free(line);
+
+            // warning observers expect the default stderr write to happen
+            // before process emits the public 'warning' event.
+            Item stderr_obj = js_property_get(js_process_object,
+                (Item){.item = s2it(heap_create_name("stderr", 6))});
+            Item write_fn = js_property_get(stderr_obj,
+                (Item){.item = s2it(heap_create_name("write", 5))});
+            if (get_type_id(write_fn) == LMD_TYPE_FUNC) {
+                js_call_function(write_fn, stderr_obj, &line_item, 1);
+                if (js_check_exception()) return ItemNull;
+            } else {
+                js_process_stderr_write(line_item);
+            }
+        }
+    }
+
     js_process_emit((Item){.item = s2it(heap_create_name("warning", 7))}, warning_obj);
     return make_js_undefined();
 }
@@ -3058,6 +3201,7 @@ static Item process_listener_map = {0}; // general event → listener array map
 static int process_total_listener_count = 0;
 
 static void js_process_ipc_refresh_ref(void);
+static void js_process_ipc_flush_pending(void);
 
 static Item get_process_listener_map() {
     if (process_listener_map.item == 0) {
@@ -3120,6 +3264,9 @@ extern "C" Item js_process_on(Item event_name, Item listener) {
     if (process_event_name_equals(event_name, "message", 7) ||
         process_event_name_equals(event_name, "disconnect", 10)) {
         js_process_ipc_refresh_ref();
+        if (process_event_name_equals(event_name, "message", 7)) {
+            js_process_ipc_flush_pending();
+        }
     }
 
     // return process for chaining
@@ -3394,12 +3541,32 @@ static uv_pipe_t js_process_ipc_pipe;
 static bool js_process_ipc_active = false;
 static bool js_process_ipc_closing = false;
 static bool js_process_ipc_disconnect_emitted = false;
+static bool js_process_ipc_force_ref = false;
+static Item js_process_ipc_pending_messages = {0};
+static bool js_process_ipc_pending_rooted = false;
 static char* js_process_ipc_buf = NULL;
 static size_t js_process_ipc_len = 0;
 static size_t js_process_ipc_cap = 0;
 
 static void js_process_ipc_refresh_ref(void) {
-    (void)js_process_ipc_active;
+    if (!js_process_ipc_active || js_process_ipc_closing) return;
+    bool should_ref = js_process_ipc_force_ref;
+    if (process_listener_map.item != 0) {
+        Item message_arr = js_property_get(process_listener_map,
+            (Item){.item = s2it(heap_create_name("message", 7))});
+        Item disconnect_arr = js_property_get(process_listener_map,
+            (Item){.item = s2it(heap_create_name("disconnect", 10))});
+        should_ref =
+            (get_type_id(message_arr) == LMD_TYPE_ARRAY && js_array_length(message_arr) > 0) ||
+            (get_type_id(disconnect_arr) == LMD_TYPE_ARRAY && js_array_length(disconnect_arr) > 0);
+    }
+    // child IPC starts unref'd in Node; only message/disconnect listeners make it a liveness root.
+    uv_handle_t* handle = (uv_handle_t*)&js_process_ipc_pipe;
+    if (should_ref) {
+        if (!uv_has_ref(handle)) uv_ref(handle);
+    } else {
+        if (uv_has_ref(handle)) uv_unref(handle);
+    }
 }
 
 static void js_process_set_connected(bool connected) {
@@ -3448,12 +3615,75 @@ static void js_process_ipc_alloc_cb(uv_handle_t* handle, size_t suggested_size, 
     buf->len = buf->base ? suggested_size : 0;
 }
 
+static bool js_process_ipc_is_undefined(Item item) {
+    return item.item == ITEM_JS_UNDEFINED || get_type_id(item) == LMD_TYPE_UNDEFINED;
+}
+
+static Item js_process_ipc_take_pending_handle(void) {
+    Item handle = js_net_accept_ipc_tcp_handle(&js_process_ipc_pipe);
+    if (handle.item == 0) return make_js_undefined();
+    return handle;
+}
+
+static bool js_process_has_message_listener(void) {
+    Item map = get_process_listener_map();
+    Item arr = js_property_get(map, (Item){.item = s2it(heap_create_name("message", 7))});
+    return get_type_id(arr) == LMD_TYPE_ARRAY && js_array_length(arr) > 0;
+}
+
+static void js_process_ipc_queue_message(Item message, Item handle) {
+    if (js_process_ipc_pending_messages.item == 0) {
+        js_process_ipc_pending_messages = js_array_new(0);
+        if (!js_process_ipc_pending_rooted) {
+            heap_register_gc_root(&js_process_ipc_pending_messages.item);
+            js_process_ipc_pending_rooted = true;
+        }
+    }
+    Item entry = js_new_object();
+    js_property_set(entry, (Item){.item = s2it(heap_create_name("message", 7))}, message);
+    js_property_set(entry, (Item){.item = s2it(heap_create_name("handle", 6))}, handle);
+    js_array_push(js_process_ipc_pending_messages, entry);
+}
+
+static void js_process_ipc_emit_message(Item message, Item handle) {
+    if (!js_process_ipc_is_undefined(handle)) {
+        Item args[2] = { message, handle };
+        js_process_emit_args((Item){.item = s2it(heap_create_name("message", 7))}, args, 2);
+    } else {
+        js_process_emit((Item){.item = s2it(heap_create_name("message", 7))}, message);
+    }
+}
+
+static void js_process_ipc_flush_pending(void) {
+    if (js_process_ipc_pending_messages.item == 0 ||
+        get_type_id(js_process_ipc_pending_messages) != LMD_TYPE_ARRAY ||
+        !js_process_has_message_listener()) {
+        return;
+    }
+    Item pending = js_process_ipc_pending_messages;
+    js_process_ipc_pending_messages = js_array_new(0);
+    int64_t len = js_array_length(pending);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(pending, i);
+        Item message = js_property_get(entry, (Item){.item = s2it(heap_create_name("message", 7))});
+        Item handle = js_property_get(entry, (Item){.item = s2it(heap_create_name("handle", 6))});
+        js_process_ipc_emit_message(message, handle);
+    }
+}
+
 static void js_process_ipc_handle_line(const char* chars, int len) {
     if (!chars || len <= 0) return;
     Item json = (Item){.item = s2it(heap_create_name(chars, len))};
     Item message = js_json_parse(json);
     if (js_check_exception()) return;
-    js_process_emit((Item){.item = s2it(heap_create_name("message", 7))}, message);
+    Item handle = js_process_ipc_take_pending_handle();
+    if (!js_process_has_message_listener()) {
+        // parent IPC can arrive before user code registers process.on('message');
+        // queue it with any accepted handle instead of dropping the one-shot fd.
+        js_process_ipc_queue_message(message, handle);
+    } else {
+        js_process_ipc_emit_message(message, handle);
+    }
 }
 
 static void js_process_ipc_consume_lines(void) {
@@ -3513,7 +3743,8 @@ static void js_process_ipc_init_from_env(void) {
         log_error("process_ipc: event loop not initialized");
         return;
     }
-    uv_pipe_init(loop, &js_process_ipc_pipe, 0);
+    // child IPC pipes must opt into descriptor passing for ChildProcess.send(handle).
+    uv_pipe_init(loop, &js_process_ipc_pipe, 1);
     int r = uv_pipe_open(&js_process_ipc_pipe, fd);
     if (r != 0) {
         log_error("process_ipc: failed to open fd %d: %s", fd, uv_strerror(r));
@@ -3523,6 +3754,7 @@ static void js_process_ipc_init_from_env(void) {
     js_process_ipc_active = true;
     js_process_ipc_closing = false;
     js_process_ipc_disconnect_emitted = false;
+    js_process_ipc_force_ref = getenv("LAMBDA_JS_IPC_REF") != NULL;
     js_process_set_connected(true);
     r = uv_read_start((uv_stream_t*)&js_process_ipc_pipe, js_process_ipc_alloc_cb, js_process_ipc_read_cb);
     if (r != 0) {
@@ -14459,6 +14691,8 @@ extern "C" void js_globals_batch_reset() {
     js_process_ipc_active = false;
     js_process_ipc_closing = false;
     js_process_ipc_disconnect_emitted = false;
+    js_process_ipc_force_ref = false;
+    js_process_ipc_pending_messages = (Item){0};
     if (js_process_ipc_buf) {
         mem_free(js_process_ipc_buf);
         js_process_ipc_buf = NULL;
@@ -15540,13 +15774,13 @@ extern "C" Item js_get_global_this() {
         // TextEncoder / TextDecoder constructors as globals
         {
             extern Item js_text_encoder_new(void);
-            extern Item js_text_decoder_new(Item encoding);
+            extern Item js_text_decoder_new(Item encoding, Item options);
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("TextEncoder", 11))},
                 js_new_function((void*)js_text_encoder_new, 0));
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("TextDecoder", 11))},
-                js_new_function((void*)js_text_decoder_new, 1));
+                js_new_function((void*)js_text_decoder_new, 2));
         }
 
         // Web Streams constructors as globals
@@ -15768,6 +16002,12 @@ extern "C" Item* js_with_capture_stack(int* out_depth) {
     if (out_depth) *out_depth = js_with_stack_depth;
     if (js_with_stack_depth <= 0) return NULL;
     Item* captured = (Item*)pool_calloc(js_input->pool, sizeof(Item) * js_with_stack_depth);
+    // async cleanup can create handlers after the input pool stops accepting
+    // allocations; a missing capture is safer than dereferencing null storage.
+    if (!captured) {
+        if (out_depth) *out_depth = 0;
+        return NULL;
+    }
     for (int i = 0; i < js_with_stack_depth; i++) {
         captured[i] = js_with_stack[i];
     }

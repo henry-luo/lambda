@@ -1828,6 +1828,11 @@ extern "C" Item js_get_util_namespace(void) {
         Item inspect_fn = js_property_get(util_namespace, make_string_item("inspect"));
         Item custom_sym = js_symbol_for(make_string_item("nodejs.util.inspect.custom"));
         js_property_set(inspect_fn, make_string_item("custom"), custom_sym);
+        Item default_options = js_new_object();
+        // util.inspect.defaultOptions is observable and must stay separate from
+        // REPL-local writer options so enabling REPL colors does not leak global state.
+        js_property_set(default_options, make_string_item("colors"), (Item){.item = b2it(false)});
+        js_property_set(inspect_fn, make_string_item("defaultOptions"), default_options);
     }
     js_util_set_method(util_namespace, "promisify",           (void*)js_util_promisify, 1);
     {
@@ -1902,9 +1907,9 @@ extern "C" Item js_get_util_namespace(void) {
 
     // TextEncoder/TextDecoder — expose constructors on util namespace
     extern Item js_text_encoder_new(void);
-    extern Item js_text_decoder_new(Item encoding_item);
+    extern Item js_text_decoder_new(Item encoding_item, Item options_item);
     Item te_ctor = js_new_function((void*)js_text_encoder_new, 0);
-    Item td_ctor = js_new_function((void*)js_text_decoder_new, 1);
+    Item td_ctor = js_new_function((void*)js_text_decoder_new, 2);
     js_property_set(util_namespace, make_string_item("TextEncoder"), te_ctor);
     js_property_set(util_namespace, make_string_item("TextDecoder"), td_ctor);
 

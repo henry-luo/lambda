@@ -159,6 +159,31 @@ static size_t js_mir_large_source_interp_threshold(void) {
     return (size_t)parsed;
 }
 
+static void js_mir_destroy_unowned_eval_context(EvalContext* local_context, EvalContext* old_context, bool reusing_context) {
+    if (!reusing_context && local_context) {
+        context = local_context;
+        // MIR setup can fail after a one-shot JS heap is created; destroy it here because
+        // runtime_cleanup() only owns heaps that reached the normal runtime stash point.
+        if (local_context->name_pool) {
+            name_pool_release(local_context->name_pool);
+            local_context->name_pool = NULL;
+        }
+        if (local_context->type_list) {
+            arraylist_free((ArrayList*)local_context->type_list);
+            local_context->type_list = NULL;
+        }
+        if (local_context->heap) {
+            heap_destroy();
+            local_context->heap = NULL;
+        }
+        if (local_context->nursery) {
+            gc_nursery_destroy(local_context->nursery);
+            local_context->nursery = NULL;
+        }
+    }
+    context = old_context;
+}
+
 Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast, const char* filename) {
     log_debug("js-mir-ast: transpiling pre-built AST for '%s'", filename ? filename : "<string>");
 
@@ -204,7 +229,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (!ctx) {
         log_error("js-mir-ast: MIR context init failed");
-        context = old_context;
+        js_mir_destroy_unowned_eval_context(&js_context, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -212,7 +237,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, filename, false, 64, 32, 16, "js-mir-ast");
     if (!mt) {
         MIR_finish(ctx);
-        context = old_context;
+        js_mir_destroy_unowned_eval_context(&js_context, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -263,6 +288,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
+        js_mir_destroy_unowned_eval_context(&js_context, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -275,7 +301,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         log_error("js-mir-ast: failed to find js_main");
         jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
-        context = old_context;
+        js_mir_destroy_unowned_eval_context(&js_context, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -671,6 +697,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         js_transpiler_destroy(tp);
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
+        js_mir_destroy_unowned_eval_context(&js_context, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
     g_active_mir_ctx = ctx;  // track for batch timeout recovery
@@ -689,6 +716,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         js_transpiler_destroy(tp);
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
+        js_mir_destroy_unowned_eval_context(&js_context, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
     jm_track_active_js_transpile(NULL, mt, NULL);
@@ -769,6 +797,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         js_transpiler_destroy(tp);
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
+        js_mir_destroy_unowned_eval_context(&js_context, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -876,6 +905,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         js_transpiler_destroy(tp);
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
+        js_mir_destroy_unowned_eval_context(&js_context, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 

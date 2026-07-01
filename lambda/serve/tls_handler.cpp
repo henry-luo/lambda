@@ -32,6 +32,9 @@
 #include <string.h>
 #include <time.h>
 
+static int tls_uv_send(void *ctx, const unsigned char *buf, size_t len);
+static int tls_uv_recv(void *ctx, unsigned char *buf, size_t len);
+
 // ============================================================================
 // Global init/cleanup
 // ============================================================================
@@ -92,9 +95,9 @@ TlsContext* tls_context_create(const TlsConfig *config) {
         return NULL;
     }
 
-    // configure SSL defaults (server, TLS, standard I/O)
+    // configure SSL defaults (server/client, TLS, standard I/O)
     ret = mbedtls_ssl_config_defaults(ctx->ssl_config,
-                                       MBEDTLS_SSL_IS_SERVER,
+                                       (config && config->is_client) ? MBEDTLS_SSL_IS_CLIENT : MBEDTLS_SSL_IS_SERVER,
                                        MBEDTLS_SSL_TRANSPORT_STREAM,
                                        MBEDTLS_SSL_PRESET_DEFAULT);
     if (ret != 0) {
@@ -273,6 +276,9 @@ TlsConnection* tls_connection_create(TlsContext *ctx, uv_tcp_t *client) {
     conn->ctx = ctx;
     conn->client = client;
     conn->handshake_done = 0;
+    // mbedTLS does not know about libuv handles unless explicit BIO callbacks
+    // bridge encrypted records into and out of the event-loop transport.
+    mbedtls_ssl_set_bio(conn->ssl, conn, tls_uv_send, tls_uv_recv, NULL);
 
     return conn;
 }
@@ -283,7 +289,28 @@ void tls_connection_destroy(TlsConnection *conn) {
         mbedtls_ssl_free(conn->ssl);
         serve_free(conn->ssl);
     }
+    if (conn->input) serve_free(conn->input);
     serve_free(conn);
+}
+
+int tls_connection_feed(TlsConnection *conn, const unsigned char *buf, size_t len) {
+    if (!conn || !buf || len == 0) return 0;
+
+    size_t pending = conn->input_len > conn->input_pos ? conn->input_len - conn->input_pos : 0;
+    if (pending == 0) {
+        conn->input_pos = 0;
+        conn->input_len = 0;
+    }
+
+    unsigned char *next = (unsigned char*)serve_malloc(pending + len);
+    if (!next) return -1;
+    if (pending > 0) memcpy(next, conn->input + conn->input_pos, pending);
+    memcpy(next + pending, buf, len);
+    if (conn->input) serve_free(conn->input);
+    conn->input = next;
+    conn->input_pos = 0;
+    conn->input_len = pending + len;
+    return 0;
 }
 
 // ============================================================================
@@ -321,6 +348,34 @@ int tls_read(TlsConnection *conn, unsigned char *buf, size_t len) {
 int tls_write(TlsConnection *conn, const unsigned char *buf, size_t len) {
     if (!conn || !conn->ssl || !conn->handshake_done) return -1;
     return mbedtls_ssl_write(conn->ssl, buf, len);
+}
+
+static int tls_uv_send(void *ctx, const unsigned char *buf, size_t len) {
+    TlsConnection *conn = (TlsConnection*)ctx;
+    if (!conn || !conn->client || !buf || len == 0) return MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
+    uv_buf_t uvbuf = uv_buf_init((char*)buf, (unsigned int)len);
+    int ret = uv_try_write((uv_stream_t*)conn->client, &uvbuf, 1);
+    if (ret == UV_EAGAIN || ret == UV_ENOSYS) return MBEDTLS_ERR_SSL_WANT_WRITE;
+    if (ret < 0) return MBEDTLS_ERR_NET_SEND_FAILED;
+    return ret;
+}
+
+static int tls_uv_recv(void *ctx, unsigned char *buf, size_t len) {
+    TlsConnection *conn = (TlsConnection*)ctx;
+    if (!conn || !buf || len == 0) return MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
+    if (!conn->input || conn->input_pos >= conn->input_len) return MBEDTLS_ERR_SSL_WANT_READ;
+
+    size_t available = conn->input_len - conn->input_pos;
+    size_t take = available < len ? available : len;
+    memcpy(buf, conn->input + conn->input_pos, take);
+    conn->input_pos += take;
+    if (conn->input_pos >= conn->input_len) {
+        serve_free(conn->input);
+        conn->input = NULL;
+        conn->input_pos = 0;
+        conn->input_len = 0;
+    }
+    return (int)take;
 }
 
 // ============================================================================
