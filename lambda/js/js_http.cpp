@@ -13,6 +13,7 @@
 #include "js_event_loop.h"
 #include "js_class.h"
 #include "js_typed_array.h"
+#include "js_permission.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -32,6 +33,8 @@ extern "C" Item js_readable_push(Item self, Item chunk);
 extern "C" Item js_stream_on(Item self, Item event_item, Item listener);
 extern "C" Item js_stream_destroy(Item self, Item err);
 extern "C" Item js_net_createConnection(Item rest_args);
+extern "C" Item js_net_get_socket_prototype(void);
+extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" Item js_buffer_from_bytes(const char* data, int len);
 extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item);
 extern "C" Item js_async_hooks_enter_resource(Item resource);
@@ -57,6 +60,13 @@ static Item make_string_item(const char* str) {
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
 }
+
+static Item http_server_prototype = {0};
+// release LTO binds these constructor prototypes from helper-created objects;
+// keeping concrete definitions avoids unresolved optimized references.
+Item http_incoming_message_prototype = {0};
+Item http_server_response_prototype = {0};
+static Item http_outgoing_message_prototype = {0};
 
 static inline bool js_http_is_callable(Item item) {
     return get_type_id(item) == LMD_TYPE_FUNC;
@@ -260,6 +270,7 @@ typedef struct ParsedRequest {
     int  body_len;
     int  content_length;
     bool body_complete;
+    int  error_status;
 } ParsedRequest;
 
 static const char* http_request_header(ParsedRequest* req, const char* name) {
@@ -358,6 +369,7 @@ static int http_decode_chunked_request_body(char* data, int len, ParsedRequest* 
         int size = 0;
         bool saw_digit = false;
         bool in_extension = false;
+        int extension_len = 0;
         for (int i = line_start; i < line_end; i++) {
             char c = data[i];
             if (c == ';') {
@@ -366,6 +378,8 @@ static int http_decode_chunked_request_body(char* data, int len, ParsedRequest* 
             }
             if (in_extension) {
                 if (c == '\r' || c == '\n') return -1;
+                extension_len++;
+                if (extension_len > 16384) return -2;
                 continue;
             }
             if (c == ' ' || c == '\t') continue;
@@ -519,6 +533,7 @@ static int parse_http_request(char* data, int data_len, ParsedRequest* req, int*
             req->body = NULL;
             req->body_len = 0;
             req->body_complete = true;
+            req->error_status = decoded_len == -2 ? 413 : 400;
             *consumed = hdr_size;
             return 0;
         }
@@ -564,6 +579,7 @@ typedef struct JsHttpServer {
     Item      request_handler;     // callback(req, res)
     Item      incoming_message_ctor;
     Item      server_response_ctor;
+    Item      timeout_callback;
     bool      reject_nonstandard_body_writes;
     bool      is_pipe;
     bool      handle_initialized;
@@ -571,6 +587,7 @@ typedef struct JsHttpServer {
     bool      handle_closed;
     bool      close_event_emitted;
     int       connection_count;
+    int       timeout_msecs;
 } JsHttpServer;
 
 typedef struct JsHttpConn {
@@ -580,6 +597,9 @@ typedef struct JsHttpConn {
     Item         async_resource;
     Item         socket_object;
     Item         current_request;
+    Item         current_response;
+    Item         request_timeout_callback;
+    Item         response_timeout_callback;
     char*        recv_buf;
     int          recv_len;
     int          recv_cap;
@@ -587,11 +607,13 @@ typedef struct JsHttpConn {
     int          request_body_remaining;
     int          pending_response_writes;
     int          open_response_count;
+    Item         timeout_timer;
     bool         destroyed;
     bool         read_ended;
     bool         is_pipe;
     bool         request_body_chunked;
     bool         close_after_response_writes;
+    bool         timeout_timer_active;
 } JsHttpConn;
 
 static uv_stream_t* http_conn_stream(JsHttpConn* conn) {
@@ -601,6 +623,8 @@ static uv_stream_t* http_conn_stream(JsHttpConn* conn) {
 
 static void http_server_note_conn_closed(JsHttpConn* conn);
 static void http_conn_close_now(JsHttpConn* conn);
+static void http_conn_clear_timeout(JsHttpConn* conn);
+static void http_conn_start_timeout(JsHttpConn* conn, int64_t delay);
 static bool http_conn_write_bytes(JsHttpConn* conn, Item data_item, bool close_after);
 static void http_conn_maybe_close_after_response_writes(JsHttpConn* conn);
 static void http_response_close_request(Item res);
@@ -631,6 +655,17 @@ static void http_response_emit(Item self, const char* event, Item* args, int arg
 static Item http_error_with_code(const char* code, const char* message) {
     Item err = js_new_error(make_string_item(message));
     js_property_set(err, make_string_item("code"), make_string_item(code));
+    return err;
+}
+
+static Item http_error_from_uv(int status) {
+    Item err = js_new_error(make_string_item(uv_strerror(status)));
+    const char* code = uv_err_name(status);
+    if (code) {
+        // Node tests branch on err.code before cleanup; missing uv codes can
+        // skip close handlers and leave server handles alive until drain.
+        js_property_set(err, make_string_item("code"), make_string_item(code));
+    }
     return err;
 }
 
@@ -1727,6 +1762,8 @@ static Item js_http_res_inst_writeContinue(Item maybe_self) {
     return self;
 }
 
+static Item js_http_res_inst_setTimeout(Item maybe_self, Item msecs_item, Item callback_item);
+
 static Item js_http_res_inst_on(Item maybe_self, Item event_item, Item callback) {
     Item self = js_http_receiver(maybe_self, "__conn__");
     if (self.item != maybe_self.item) {
@@ -1752,6 +1789,9 @@ static Item make_response_object(JsHttpConn* conn) {
     Item res = js_new_object();
     // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(res, JS_CLASS_SERVER_RESPONSE);  // A3-T3b
+    if (get_type_id(http_server_response_prototype) == LMD_TYPE_MAP) {
+        js_set_prototype(res, http_server_response_prototype);
+    }
     js_property_set(res, make_string_item("__conn__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)conn)});
     js_property_set(res, make_string_item("statusCode"), (Item){.item = i2it(200)});
@@ -1802,6 +1842,8 @@ static Item make_response_object(JsHttpConn* conn) {
                     js_new_function((void*)js_http_res_inst_flushHeaders, 1));
     js_property_set(res, make_string_item("writeContinue"),
                     js_new_function((void*)js_http_res_inst_writeContinue, 1));
+    js_property_set(res, make_string_item("setTimeout"),
+                    js_new_function((void*)js_http_res_inst_setTimeout, 3));
     js_property_set(res, make_string_item("on"),
                     js_new_function((void*)js_http_res_inst_on, 3));
 
@@ -1846,11 +1888,15 @@ static void http_request_headers_append(Item headers, const char* name, const ch
 static Item http_conn_socket_object(JsHttpConn* conn);
 static bool http_request_is_chunked(ParsedRequest* req);
 static Item js_http_server_req_destroy(Item maybe_self, Item err_item);
+static Item js_http_server_req_setTimeout(Item maybe_self, Item msecs_item, Item callback_item);
 
 static Item make_request_object(JsHttpConn* conn, ParsedRequest* req) {
     Item msg = js_readable_new(ItemNull);
     // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(msg, JS_CLASS_INCOMING_MESSAGE);  // A3-T3b
+    if (get_type_id(http_incoming_message_prototype) == LMD_TYPE_MAP) {
+        js_set_prototype(msg, http_incoming_message_prototype);
+    }
 
     js_property_set(msg, make_string_item("method"), make_string_item(req->method));
     js_property_set(msg, make_string_item("url"), make_string_item(req->url));
@@ -1876,6 +1922,8 @@ static Item make_request_object(JsHttpConn* conn, ParsedRequest* req) {
                         (Item){.item = i2it((int64_t)(uintptr_t)conn)});
         js_property_set(msg, make_string_item("destroy"),
                         js_new_function((void*)js_http_server_req_destroy, 2));
+        js_property_set(msg, make_string_item("setTimeout"),
+                        js_new_function((void*)js_http_server_req_setTimeout, 3));
     }
     Item async_resource = js_async_hooks_create_resource("HTTPINCOMINGMESSAGE", 19);
     js_property_set(msg, make_string_item("__async_resource__"), async_resource);
@@ -1961,12 +2009,67 @@ static void http_server_note_conn_closed(JsHttpConn* conn) {
     http_server_maybe_finish_close(srv);
 }
 
+static void http_server_close_failed_listen(JsHttpServer* srv, Item self);
+
+static Item http_server_error_tick(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    Item self = env[0];
+    Item err = env[1];
+    JsHttpServer* failed_srv = NULL;
+    if (get_type_id(env[2]) == LMD_TYPE_INT) {
+        failed_srv = (JsHttpServer*)(uintptr_t)it2i(env[2]);
+    }
+    Item on_err = js_property_get(self, make_string_item("__on_error__"));
+    if (get_type_id(on_err) == LMD_TYPE_FUNC) {
+        js_call_function(on_err, self, &err, 1);
+        js_microtask_flush();
+    }
+    if (failed_srv) {
+        http_server_close_failed_listen(failed_srv, self);
+    }
+    return make_js_undefined();
+}
+
+static void http_server_schedule_error(Item self, Item err, JsHttpServer* failed_srv) {
+    Item* env = js_alloc_env(3);
+    env[0] = self;
+    env[1] = err;
+    env[2] = failed_srv ? (Item){.item = i2it((int64_t)(uintptr_t)failed_srv)} : make_js_undefined();
+    Item tick = js_new_closure((void*)http_server_error_tick, 0, env, 3);
+    js_next_tick_enqueue(tick);
+}
+
+static void http_server_close_failed_listen(JsHttpServer* srv, Item self) {
+    if (!srv) return;
+    js_property_set(self, make_string_item("listening"), (Item){.item = b2it(false)});
+    js_property_set(self, make_string_item("__server__"), ItemNull);
+    uv_handle_t* handle = http_server_handle(srv);
+    if (handle && !uv_is_closing(handle)) {
+        // failed bind/listen still owns an initialized libuv handle; closing it
+        // here prevents tiny error-path tests from waiting for the drain guard.
+        uv_close(handle, [](uv_handle_t* h) {
+            JsHttpServer* s = (JsHttpServer*)h->data;
+            if (s) mem_free(s);
+        });
+        return;
+    }
+    if (!handle) {
+        mem_free(srv);
+    }
+}
+
 static void http_request_emit_close_now(Item req) {
     if (req.item == 0 || get_type_id(req) == LMD_TYPE_UNDEFINED) return;
     Item close_emitted_key = make_string_item("__close_emitted__");
     if (http_response_bool_prop(req, "__close_emitted__")) return;
     js_property_set(req, close_emitted_key, (Item){.item = b2it(true)});
     js_property_set(req, make_string_item("closed"), (Item){.item = b2it(true)});
+    Item handle_item = js_property_get(req, make_string_item("__server_req_conn__"));
+    if (get_type_id(handle_item) == LMD_TYPE_INT) {
+        JsHttpConn* conn = (JsHttpConn*)(uintptr_t)it2i(handle_item);
+        if (conn) conn->request_timeout_callback = make_js_undefined();
+    }
     Item async_resource = js_property_get(req, make_string_item("__async_resource__"));
     // IncomingMessage async resources outlive the parser callback; destroy
     // them when the message closes so async_hooks init/destroy pairs balance.
@@ -2017,6 +2120,9 @@ static Item js_http_server_req_destroy(Item maybe_self, Item err_item) {
 
 static void http_conn_close_now(JsHttpConn* conn) {
     if (!conn || conn->destroyed) return;
+    // server-side socket timers capture this connection; clear before close so
+    // timeout fixtures do not drain on stale timer handles.
+    http_conn_clear_timeout(conn);
     http_conn_destroy_unfinished_request(conn);
     conn->destroyed = true;
     if (conn->socket_object.item != 0) {
@@ -2126,19 +2232,167 @@ static Item js_http_conn_socket_destroy(Item maybe_self) {
     return self;
 }
 
+static void http_conn_socket_emit(JsHttpConn* conn, const char* event) {
+    if (!conn || conn->socket_object.item == 0 || !event) return;
+    char key[64];
+    snprintf(key, sizeof(key), "__on_%s__", event);
+    Item cb = js_property_get(conn->socket_object, make_string_item(key));
+    if (js_http_is_callable(cb)) {
+        Item socket = conn->socket_object;
+        js_call_function(cb, conn->socket_object, &socket, 1);
+        js_microtask_flush();
+    }
+}
+
+static void http_conn_clear_timeout(JsHttpConn* conn) {
+    if (!conn || !conn->timeout_timer_active) return;
+    log_error("HTTP_TRACE clear_timeout conn=%p destroyed=%d", conn, conn->destroyed ? 1 : 0);
+    js_clearTimeout(conn->timeout_timer);
+    conn->timeout_timer = make_js_undefined();
+    conn->timeout_timer_active = false;
+}
+
+static Item js_http_conn_socket_timeout_fire(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    // timer env stores the native pointer as a tagged Lambda int; decode it
+    // before use or timeout callbacks jump to stale/non-pointer addresses.
+    JsHttpConn* conn = (env && get_type_id(env[0]) == LMD_TYPE_INT) ?
+        (JsHttpConn*)(uintptr_t)it2i(env[0]) : NULL;
+    if (!conn || conn->destroyed) return make_js_undefined();
+    log_error("HTTP_TRACE fire_timeout conn=%p destroyed=%d", conn, conn->destroyed ? 1 : 0);
+    conn->timeout_timer_active = false;
+    conn->timeout_timer = make_js_undefined();
+    Item socket = http_conn_socket_object(conn);
+    if (js_http_is_callable(conn->request_timeout_callback)) {
+        js_call_function(conn->request_timeout_callback, socket, &socket, 1);
+        js_microtask_flush();
+    }
+    if (js_http_is_callable(conn->response_timeout_callback)) {
+        js_call_function(conn->response_timeout_callback, socket, &socket, 1);
+        js_microtask_flush();
+    }
+    if (conn->current_response.item != 0 &&
+        get_type_id(conn->current_response) != LMD_TYPE_UNDEFINED) {
+        Item res_timeout = js_property_get(conn->current_response, make_string_item("__on_timeout__"));
+        if (js_http_is_callable(res_timeout)) {
+            js_call_function(res_timeout, conn->current_response, &socket, 1);
+            js_microtask_flush();
+        }
+    }
+    http_conn_socket_emit(conn, "timeout");
+    if (conn->server) {
+        Item server_cb = conn->server->timeout_callback;
+        if (!js_http_is_callable(server_cb)) {
+            server_cb = js_property_get(conn->server->js_object, make_string_item("__on_timeout__"));
+        }
+        if (js_http_is_callable(server_cb)) {
+            js_call_function(server_cb, conn->server->js_object, &socket, 1);
+            js_microtask_flush();
+        }
+    }
+    return make_js_undefined();
+}
+
+static void http_conn_start_timeout(JsHttpConn* conn, int64_t delay) {
+    if (!conn || conn->destroyed) return;
+    if (delay < 0) delay = 0;
+    http_conn_clear_timeout(conn);
+    if (delay <= 0) return;
+    log_error("HTTP_TRACE start_timeout conn=%p delay=%lld", conn, (long long)delay);
+    Item* env = js_alloc_env(1);
+    env[0] = (Item){.item = i2it((int64_t)(uintptr_t)conn)};
+    // all HTTP timeout APIs share the accepted socket timer; creating separate
+    // timers per request/response leaves closed servers alive until the drain watchdog.
+    Item timer = js_setTimeout(js_new_closure((void*)js_http_conn_socket_timeout_fire, 0, env, 1),
+                               (Item){.item = i2it(delay)});
+    conn->timeout_timer = timer;
+    conn->timeout_timer_active = true;
+}
+
+static Item js_http_conn_socket_on(Item maybe_self, Item event_item, Item callback_item) {
+    Item self = js_http_receiver(maybe_self, "__http_conn__");
+    Item actual_event = self.item == maybe_self.item ? event_item : maybe_self;
+    Item actual_callback = self.item == maybe_self.item ? callback_item : event_item;
+    if (get_type_id(actual_event) != LMD_TYPE_STRING) return self;
+    String* ev = it2s(actual_event);
+    char key[64];
+    snprintf(key, sizeof(key), "__on_%.*s__", (int)ev->len, ev->chars);
+    js_property_set(self, make_string_item(key), actual_callback);
+    return self;
+}
+
+static Item js_http_conn_socket_setTimeout(Item maybe_self, Item msecs_item, Item callback_item) {
+    Item self = js_http_receiver(maybe_self, "__http_conn__");
+    Item actual_msecs = self.item == maybe_self.item ? msecs_item : maybe_self;
+    Item actual_callback = self.item == maybe_self.item ? callback_item : msecs_item;
+    JsHttpConn* conn = http_conn_from_socket_object(self);
+    if (!conn || conn->destroyed) return self;
+    if (js_http_is_callable(actual_callback)) {
+        js_http_conn_socket_on(self, make_string_item("timeout"), actual_callback);
+    }
+    int64_t delay = 0;
+    if (get_type_id(actual_msecs) == LMD_TYPE_INT) delay = it2i(actual_msecs);
+    if (delay < 0) delay = 0;
+    http_conn_start_timeout(conn, delay);
+    return self;
+}
+
+static Item js_http_server_req_setTimeout(Item maybe_self, Item msecs_item, Item callback_item) {
+    Item self = js_http_receiver(maybe_self, "__server_req_conn__");
+    Item actual_msecs = self.item == maybe_self.item ? msecs_item : maybe_self;
+    Item actual_callback = self.item == maybe_self.item ? callback_item : msecs_item;
+    Item handle_item = js_property_get(self, make_string_item("__server_req_conn__"));
+    if (get_type_id(handle_item) != LMD_TYPE_INT) return self;
+    JsHttpConn* conn = (JsHttpConn*)(uintptr_t)it2i(handle_item);
+    if (!conn || conn->destroyed) return self;
+    if (js_http_is_callable(actual_callback)) conn->request_timeout_callback = actual_callback;
+    int64_t delay = 0;
+    if (get_type_id(actual_msecs) == LMD_TYPE_INT) delay = it2i(actual_msecs);
+    http_conn_start_timeout(conn, delay);
+    return self;
+}
+
+static Item js_http_res_inst_setTimeout(Item maybe_self, Item msecs_item, Item callback_item) {
+    Item self = js_http_receiver(maybe_self, "__conn__");
+    Item actual_msecs = self.item == maybe_self.item ? msecs_item : maybe_self;
+    Item actual_callback = self.item == maybe_self.item ? callback_item : msecs_item;
+    Item handle_item = js_property_get(self, make_string_item("__conn__"));
+    if (get_type_id(handle_item) != LMD_TYPE_INT) return self;
+    JsHttpConn* conn = (JsHttpConn*)(uintptr_t)it2i(handle_item);
+    if (!conn || conn->destroyed) return self;
+    if (js_http_is_callable(actual_callback)) conn->response_timeout_callback = actual_callback;
+    int64_t delay = 0;
+    if (get_type_id(actual_msecs) == LMD_TYPE_INT) delay = it2i(actual_msecs);
+    http_conn_start_timeout(conn, delay);
+    return self;
+}
+
 static Item http_conn_socket_object(JsHttpConn* conn) {
     if (!conn) return make_js_undefined();
     if (conn->socket_object.item != 0) return conn->socket_object;
 
     Item obj = js_new_object();
+    js_class_stamp(obj, JS_CLASS_SOCKET);
+    Item net_proto = js_net_get_socket_prototype();
+    if (get_type_id(net_proto) == LMD_TYPE_MAP) {
+        // HTTP accepted sockets are net.Socket instances; missing the shared
+        // prototype makes instanceof checks skip timeout cleanup handlers.
+        js_set_prototype(obj, net_proto);
+    }
     js_property_set(obj, make_string_item("__http_conn__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)conn)});
+    js_property_set(obj, make_string_item("on"),
+                    js_new_function((void*)js_http_conn_socket_on, 3));
+    js_property_set(obj, make_string_item("once"),
+                    js_new_function((void*)js_http_conn_socket_on, 3));
     js_property_set(obj, make_string_item("write"),
                     js_new_function((void*)js_http_conn_socket_write, 2));
     js_property_set(obj, make_string_item("end"),
                     js_new_function((void*)js_http_conn_socket_end, 2));
     js_property_set(obj, make_string_item("destroy"),
                     js_new_function((void*)js_http_conn_socket_destroy, 1));
+    js_property_set(obj, make_string_item("setTimeout"),
+                    js_new_function((void*)js_http_conn_socket_setTimeout, 3));
     js_property_set(obj, make_string_item("destroyed"), (Item){.item = b2it(false)});
     Item hwm = (Item){.item = i2it(16 * 1024)};
     Item readable_state = js_new_object();
@@ -2166,13 +2420,11 @@ static bool http_server_max_requests_is_null(JsHttpServer* srv) {
     return get_type_id(value) == LMD_TYPE_NULL;
 }
 
-static bool http_is_alpha(char c) {
-    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
-}
-
 static bool http_request_has_invalid_method_start(const char* data, int len) {
     if (!data || len <= 0) return false;
-    return !http_is_alpha(data[0]);
+    // Pipelined garbage such as leftover body bytes must be rejected promptly;
+    // treating lowercase text as an incomplete method leaves the HTTP conn open until drain.
+    return data[0] < 'A' || data[0] > 'Z';
 }
 
 static void http_conn_feed_request_body(JsHttpConn* conn) {
@@ -2240,6 +2492,23 @@ static bool http_server_emit_client_error(JsHttpConn* conn, const char* code,
     return true;
 }
 
+static void http_server_send_default_error(JsHttpConn* conn, int status) {
+    if (!conn || conn->destroyed) return;
+    const char* reason = http_status_text(status);
+    char response[160];
+    int len = snprintf(response, sizeof(response),
+                       "HTTP/1.1 %d %s\r\nConnection: close\r\n\r\n",
+                       status, reason ? reason : "Error");
+    if (len < 0) {
+        http_conn_close_now(conn);
+        return;
+    }
+    if (len > (int)sizeof(response)) len = (int)sizeof(response);
+    // parser errors with no clientError listener still owe the client a final
+    // HTTP error response; otherwise the accepted socket stays referenced until the drain watchdog.
+    http_conn_write_bytes(conn, make_string_item(response, len), true);
+}
+
 static bool http_request_wants_keep_alive(ParsedRequest* req, bool has_buffered_request) {
     const char* connection = http_request_header(req, "connection");
     if (connection && http_header_has_token(connection, "close")) return false;
@@ -2273,7 +2542,10 @@ static bool http_request_accepts_chunked_response(ParsedRequest* req) {
 static Item http_response_for_request(JsHttpConn* conn, ParsedRequest* req, bool force_close,
                                       bool over_max, bool has_buffered_request) {
     Item res_obj = make_response_object(conn);
-    if (conn) conn->open_response_count++;
+    if (conn) {
+        conn->open_response_count++;
+        conn->current_response = res_obj;
+    }
     bool keep_alive = !force_close && !over_max && http_request_wants_keep_alive(req, has_buffered_request);
     int max_requests = http_server_max_requests(conn ? conn->server : NULL);
     bool close_after = !keep_alive || (max_requests > 0 && conn && conn->request_count >= max_requests);
@@ -2376,7 +2648,7 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                     "Parse Error: Invalid method encountered",
                     1);
                 if (!handled) {
-                    http_conn_close_now(conn);
+                    http_server_send_default_error(conn, 400);
                     break;
                 }
                 if (conn->destroyed) break;
@@ -2389,6 +2661,11 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
             ParsedRequest req;
             int consumed = 0;
             if (parse_http_request(conn->recv_buf, conn->recv_len, &req, &consumed) != 0) {
+                break;
+            }
+            if (req.error_status > 0) {
+                http_server_send_default_error(conn, req.error_status);
+                conn->recv_len = 0;
                 break;
             }
             bool expect_continue = http_request_has_expect_continue(&req);
@@ -2479,6 +2756,10 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
             int consumed = 0;
             if (parse_http_request(conn->recv_buf, conn->recv_len, &req, &consumed) == 0 &&
                 consumed > 0 && consumed <= conn->recv_len) {
+                if (req.error_status > 0) {
+                    http_server_send_default_error(conn, req.error_status);
+                    conn->recv_len = 0;
+                } else {
                 bool expect_continue = http_request_has_expect_continue(&req);
                 bool expect_unknown = http_request_has_expect_header(&req) && !expect_continue;
                 JsHttpServer* srv = conn->server;
@@ -2534,6 +2815,7 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                 int remaining = conn->recv_len - consumed;
                 if (remaining > 0) memmove(conn->recv_buf, conn->recv_buf + consumed, (size_t)remaining);
                 conn->recv_len = remaining;
+                }
             }
         }
         http_conn_destroy_unfinished_request(conn);
@@ -2573,6 +2855,7 @@ static void http_server_connection_cb(uv_stream_t* server, int status) {
 
     if (uv_accept(server, http_conn_stream(conn)) == 0) {
         srv->connection_count++;
+        if (srv->timeout_msecs > 0) http_conn_start_timeout(conn, srv->timeout_msecs);
         uv_read_start(http_conn_stream(conn), http_server_alloc_cb, http_server_read_cb);
     } else {
         mem_free(conn->recv_buf);
@@ -2665,21 +2948,15 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
         int open_r = uv_tcp_open(&srv->tcp, (uv_os_sock_t)fd_value);
         if (open_r != 0) {
             log_error("http: server fd open failed: %s", uv_strerror(open_r));
-            Item err = js_new_error(make_string_item(uv_strerror(open_r)));
-            Item on_err = js_property_get(self, make_string_item("__on_error__"));
-            if (get_type_id(on_err) == LMD_TYPE_FUNC) {
-                js_call_function(on_err, self, &err, 1);
-            }
+            Item err = http_error_from_uv(open_r);
+            http_server_schedule_error(self, err, srv);
             return self;
         }
         int listen_r = uv_listen(http_server_stream(srv), 128, http_server_connection_cb);
         if (listen_r != 0) {
             log_error("http: server fd listen failed: %s", uv_strerror(listen_r));
-            Item err = js_new_error(make_string_item(uv_strerror(listen_r)));
-            Item on_err = js_property_get(self, make_string_item("__on_error__"));
-            if (get_type_id(on_err) == LMD_TYPE_FUNC) {
-                js_call_function(on_err, self, &err, 1);
-            }
+            Item err = http_error_from_uv(listen_r);
+            http_server_schedule_error(self, err, srv);
             return self;
         }
         js_property_set(self, make_string_item("listening"), (Item){.item = b2it(true)});
@@ -2710,22 +2987,16 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
     }
     if (r != 0) {
         log_error("http: server bind failed: %s", uv_strerror(r));
-        Item err = js_new_error(make_string_item(uv_strerror(r)));
-        Item on_err = js_property_get(self, make_string_item("__on_error__"));
-        if (get_type_id(on_err) == LMD_TYPE_FUNC) {
-            js_call_function(on_err, self, &err, 1);
-        }
+        Item err = http_error_from_uv(r);
+        http_server_schedule_error(self, err, srv);
         return self;
     }
 
     r = uv_listen(http_server_stream(srv), 128, http_server_connection_cb);
     if (r != 0) {
         log_error("http: server listen failed: %s", uv_strerror(r));
-        Item err = js_new_error(make_string_item(uv_strerror(r)));
-        Item on_err = js_property_get(self, make_string_item("__on_error__"));
-        if (get_type_id(on_err) == LMD_TYPE_FUNC) {
-            js_call_function(on_err, self, &err, 1);
-        }
+        Item err = http_error_from_uv(r);
+        http_server_schedule_error(self, err, srv);
         return self;
     }
 
@@ -2899,6 +3170,24 @@ static Item js_http_server_inst_unref(Item maybe_self) {
     return self;
 }
 
+static Item js_http_server_inst_setTimeout(Item maybe_self, Item msecs_item, Item callback_item) {
+    Item this_obj = js_get_this();
+    Item self = js_class_id(this_obj) == JS_CLASS_SERVER ?
+        this_obj : js_http_receiver(maybe_self, "__server__");
+    Item actual_msecs = self.item == maybe_self.item ? msecs_item : maybe_self;
+    Item actual_callback = self.item == maybe_self.item ? callback_item : msecs_item;
+    Item handle_item = js_property_get(self, make_string_item("__server__"));
+    if (get_type_id(handle_item) != LMD_TYPE_INT) return self;
+    JsHttpServer* srv = (JsHttpServer*)(uintptr_t)it2i(handle_item);
+    if (!srv) return self;
+    int64_t delay = 0;
+    if (get_type_id(actual_msecs) == LMD_TYPE_INT) delay = it2i(actual_msecs);
+    if (delay < 0) delay = 0;
+    srv->timeout_msecs = delay > 2147483647 ? 2147483647 : (int)delay;
+    if (js_http_is_callable(actual_callback)) srv->timeout_callback = actual_callback;
+    return self;
+}
+
 // http.createServer([options], [requestListener])
 extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler) {
     uv_loop_t* loop = lambda_uv_loop();
@@ -2929,6 +3218,9 @@ extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler
     Item obj = js_new_object();
     // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(obj, JS_CLASS_SERVER);  // A3-T3b
+    if (get_type_id(http_server_prototype) == LMD_TYPE_MAP) {
+        js_set_prototype(obj, http_server_prototype);
+    }
     js_property_set(obj, make_string_item("__server__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)srv)});
     js_property_set(obj, make_string_item("listen"),
@@ -2939,6 +3231,8 @@ extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler
                     js_new_function((void*)js_http_server_inst_getConnections, 2));
     js_property_set(obj, make_string_item("on"),
                     js_new_function((void*)js_http_server_inst_on, 3));
+    js_property_set(obj, make_string_item("setTimeout"),
+                    js_new_function((void*)js_http_server_inst_setTimeout, 3));
     js_property_set(obj, make_string_item("address"),
                     js_new_function((void*)js_http_server_inst_address, 1));
     js_property_set(obj, make_string_item("ref"),
@@ -4644,6 +4938,17 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
     }
     if (abort_before_connect) return obj;
 
+    if (!js_permission_has_net()) {
+        // permission denial must happen before uv_connect; otherwise the denied
+        // request leaves an idle handle that waits for the drain watchdog.
+        Item err = js_permission_make_net_error("connect", host_buf);
+        Item bound_args[2] = { obj, err };
+        Item tick = js_bind_function(js_new_function((void*)js_http_agent_socket_error_tick, 2),
+                                     make_js_undefined(), bound_args, 2);
+        js_next_tick_enqueue(tick);
+        return obj;
+    }
+
     if (get_type_id(options_item) == LMD_TYPE_MAP) {
         Item agent = js_property_get(options_item, make_string_item("agent"));
         if (get_type_id(agent) == LMD_TYPE_MAP) {
@@ -4846,6 +5151,21 @@ static void http_set_method(Item ns, const char* name, void* func_ptr, int param
     js_property_set(ns, key, fn);
 }
 
+static Item http_constructor_prototype(Item ctor, JsClass cls) {
+    Item proto = js_property_get(ctor, make_string_item("prototype"));
+    if (get_type_id(proto) != LMD_TYPE_MAP) {
+        proto = js_new_object();
+        js_property_set(ctor, make_string_item("prototype"), proto);
+    }
+    js_class_stamp(proto, cls);
+    js_property_set(proto, make_string_item("constructor"), ctor);
+    js_mark_non_enumerable(proto, make_string_item("constructor"));
+    if (get_type_id(ctor) == LMD_TYPE_FUNC) {
+        js_function_set_prototype(ctor, proto);
+    }
+    return proto;
+}
+
 extern "C" Item js_get_http_namespace(void) {
     if (http_namespace.item != 0) return http_namespace;
 
@@ -4856,7 +5176,9 @@ extern "C" Item js_get_http_namespace(void) {
     http_set_method(http_namespace, "get",           (void*)js_http_get, 2);
 
     // Server — alias for createServer (Node.js allows http.Server(cb))
-    http_set_method(http_namespace, "Server",       (void*)js_http_createServer, 2);
+    Item server_fn = js_new_function((void*)js_http_createServer, 2);
+    js_property_set(http_namespace, make_string_item("Server"), server_fn);
+    http_server_prototype = http_constructor_prototype(server_fn, JS_CLASS_SERVER);
 
     // STATUS_CODES
     js_property_set(http_namespace, make_string_item("STATUS_CODES"), build_status_codes());
@@ -4888,10 +5210,22 @@ extern "C" Item js_get_http_namespace(void) {
     js_property_set(http_namespace, make_string_item("globalAgent"), agent);
 
     // Stub constructors for IncomingMessage, ServerResponse, ClientRequest, OutgoingMessage
-    http_set_method(http_namespace, "IncomingMessage", (void*)js_http_stub_ctor, 0);
-    http_set_method(http_namespace, "ServerResponse",  (void*)js_http_stub_ctor, 0);
+    Item incoming_fn = js_new_function((void*)js_http_stub_ctor, 0);
+    js_property_set(http_namespace, make_string_item("IncomingMessage"), incoming_fn);
+    http_incoming_message_prototype =
+        http_constructor_prototype(incoming_fn, JS_CLASS_INCOMING_MESSAGE);
+    Item outgoing_fn = js_new_function((void*)js_http_stub_ctor, 0);
+    js_property_set(http_namespace, make_string_item("OutgoingMessage"), outgoing_fn);
+    http_outgoing_message_prototype =
+        http_constructor_prototype(outgoing_fn, JS_CLASS_OBJECT);
+    Item response_fn = js_new_function((void*)js_http_stub_ctor, 0);
+    js_property_set(http_namespace, make_string_item("ServerResponse"), response_fn);
+    http_server_response_prototype =
+        http_constructor_prototype(response_fn, JS_CLASS_SERVER_RESPONSE);
+    if (get_type_id(http_outgoing_message_prototype) == LMD_TYPE_MAP) {
+        js_set_prototype(http_server_response_prototype, http_outgoing_message_prototype);
+    }
     http_set_method(http_namespace, "ClientRequest",   (void*)js_http_ClientRequest, 2);
-    http_set_method(http_namespace, "OutgoingMessage",  (void*)js_http_stub_ctor, 0);
 
     Item default_key = make_string_item("default");
     js_property_set(http_namespace, default_key, http_namespace);

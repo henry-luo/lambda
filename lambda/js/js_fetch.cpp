@@ -8,6 +8,7 @@
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
+#include "js_permission.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -525,6 +526,15 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         return js_promise_resolve(resp);
     }
     // ---------------------------------------------------------------------------
+
+    if (!js_permission_has_net()) {
+        // blocked network fetches must reject before queueing curl work, or the
+        // permission fixture waits for the worker/drain timeout instead of catch().
+        Item cause = js_permission_make_net_error("connect", url);
+        Item err = js_new_error_with_name(make_string_item("TypeError"), make_string_item("fetch failed"));
+        js_property_set(err, make_string_item("cause"), cause);
+        return js_promise_reject(err);
+    }
 
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) {
