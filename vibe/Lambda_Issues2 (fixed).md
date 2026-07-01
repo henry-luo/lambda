@@ -355,36 +355,40 @@ pn rol(num: int, cnt: int) {
 
 ---
 
-## 13. `@` Path Literals Do Not Parse
+## 13. `@` Path Literals Do Not Parse — Fixed in Docs
 
-**Severity**: Compilation error (parse error)  
+**Status**: ✅ **Fixed in documentation**.
+**Severity**: Documentation bug / stale syntax
 **Affected benchmarks**: regex_dna
 
-The documentation describes `@` path literals for file I/O operations (e.g., `input(@./data.json)`), but these do not parse at all — neither relative nor absolute paths:
+The documentation used to describe `@` path literals for file I/O operations (e.g., `input(@./data.json)`), but `@` is not the Lambda path-literal syntax and those examples do not parse:
 
 ```
 error[E100]: Unexpected syntax near '@./' [ERROR, ., /]
 error[E100]: Unexpected syntax near '@/' [ERROR, /]
 ```
 
-Both forms fail:
+The correct path syntax follows `vibe/Lambda_Expr_Path.md`: path segments are dot-separated, and segments containing `.` are quoted.
 
 ```lambda
-// FAILS: relative path literal
-let data = input(@./data.json, 'json')
+// relative-style examples used by current I/O docs
+let data = input(/.'data.json', 'json')
+io.copy(/.a, /.b)
+io.copy(/.data, /.backup.data)
 
-// FAILS: absolute path literal
-let data = input(@/Users/name/data.json, 'json')
+// absolute file path
+let hosts = input(/etc.hosts, 'text')
 ```
 
-**Workaround**: Use plain string paths instead of `@` path literals.
+**Former workaround**: Use plain string paths instead of stale `@` literals.
 
 ```lambda
-// WORKS
 let data^err = input("./data.json", "json")
 ```
 
-**Note**: The `Lambda_Sys_Func.md` documentation extensively shows `@` path literals in examples, but they appear to be unimplemented (or the grammar doesn't support them in the current build).
+**Fix notes**:
+- `doc/Lambda_Sys_Func.md` now uses `/.a`, `/.b`, `/.backup.data`, quoted file-extension segments such as `/.'data.json'`, and URL paths such as `https.'api.example.com'.users`.
+- `@` examples were removed from the system-function I/O documentation; `@` remains invalid syntax.
 
 ---
 
@@ -543,7 +547,7 @@ pn show() {
 | 10 | Immutable parameters | Language design | **Fixed for `pn`**; procedural parameters are mutable, `fn` parameters remain immutable |
 | 11 | Integer division returns float | Runtime bug | **Fixed**; `/` stays float and `slice` accepts integer-valued float indices |
 | 12 | `shl` 64-bit overflow | Bitwise ops | **Fixed for typed `u32` code**; SHA-1/MD5 rotate helpers use compact shifts |
-| 13 | `@` path literals don't parse | Missing feature | 1 benchmark, doc mismatch |
+| 13 | `@` path literals don't parse | Documentation bug | **Fixed in docs**; Sys_Func now uses dot-separated path literals |
 | 14 | `slice()` no 2-argument form | Missing feature | **Fixed**; `slice(vec,start)` delegates to slice-to-end |
 | 15 | No case-insensitive patterns | Missing feature | **Fixed**; `find`/`replace` support `{ignore_case: true}` |
 | 16 | No replace-first function | Missing feature | **Fixed**; `replace` supports positive/negative `{limit: n}` |
