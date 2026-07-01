@@ -1,0 +1,75 @@
+'===== FIND REPLACE OPTIONS TESTS ====='
+'Test 1: Literal Find Limits'
+1
+{
+  value: "ab",
+  index: 0
+}
+{
+  value: "ab",
+  index: 4
+}
+2
+{
+  value: "ab",
+  index: 8
+}
+{
+  value: "ab",
+  index: 12
+}
+'Test 2: Literal Find Ignore Case'
+3
+{
+  value: "ab",
+  index: 0
+}
+{
+  value: "AB",
+  index: 4
+}
+{
+  value: "aB",
+  index: 8
+}
+4
+{
+  value: "aB",
+  index: 8
+}
+'Test 3: Literal Replace Limits'
+5
+"X--X--ab--ab"
+6
+"ab--ab--X--X"
+7
+"X--X--X--X"
+8
+"ab--AB--X"
+'Test 4: Pattern Options'
+9
+{
+  value: "AB",
+  index: 4
+}
+{
+  value: "aB",
+  index: 8
+}
+10
+{
+  value: "ab",
+  index: 0
+}
+{
+  value: "ab",
+  index: 4
+}
+{
+  value: "ab",
+  index: 8
+}
+11
+"Y--Y--aB"
+12
+"ab--AB--Y"

@@ -632,6 +632,8 @@ static void jm_emit_public_instance_fields_for_super(JsMirTranspiler* mt, MIR_re
     jm_call_void_1(mt, "js_set_this",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, obj));
     jm_emit_update_lexical_this_binding(mt, obj);
+    bool saved_force_closure_env_copy = mt->force_closure_env_copy;
+    mt->force_closure_env_copy = true;
 
     JsClassEntry* saved_current_class = mt->current_class;
     mt->current_class = ce;
@@ -671,6 +673,7 @@ static void jm_emit_public_instance_fields_for_super(JsMirTranspiler* mt, MIR_re
         jm_emit_exc_propagate_check(mt);
     }
     mt->current_class = saved_current_class;
+    mt->force_closure_env_copy = saved_force_closure_env_copy;
 
     jm_call_void_1(mt, "js_set_this",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, prev_this));
@@ -12448,6 +12451,21 @@ static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
     mt->last_closure_has_env = count > 0;
 }
 
+static bool jm_capture_is_lexical_meta_binding(const char* name) {
+    return name && (strcmp(name, "_js_this") == 0 ||
+        strcmp(name, "_js_new.target") == 0 ||
+        strcmp(name, "_js_arguments") == 0);
+}
+
+static bool jm_force_copied_env_for_field_initializer(JsMirTranspiler* mt,
+        JsFuncCollected* fc) {
+    if (!mt || !fc || !mt->force_closure_env_copy) return false;
+    for (int ci = 0; ci < fc->capture_count; ci++) {
+        if (!jm_capture_is_lexical_meta_binding(fc->captures[ci].name)) return false;
+    }
+    return true;
+}
+
 MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
     if (!fc || !fc->func_item) return jm_emit_null(mt);
     int pc = fc->param_count;
@@ -12485,7 +12503,9 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Share scope env so var-scoped closures can persist mutations to outer
         // variables.  But in loops, if any captured variable is let/const, we must
         // NOT share — let/const need per-iteration binding semantics.
-        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
+        bool force_copied_field_env = jm_force_copied_env_for_field_initializer(mt, fc);
+        bool use_scope_env = (!force_copied_field_env &&
+            mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
         if (use_scope_env) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
@@ -12703,7 +12723,9 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 fc->captures[ci].is_let_const = true;
             }
         }
-        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
+        bool force_copied_field_env = jm_force_copied_env_for_field_initializer(mt, fc);
+        bool use_scope_env = (!force_copied_field_env &&
+            mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
         if (use_scope_env) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
@@ -14383,17 +14405,8 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             MIR_reg_t static_new_target = jm_emit_undefined(mt);
             jm_call_void_1(mt, "js_set_direct_new_target",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, static_new_target));
-            JsMirVarEntry* static_js_this_var = jm_find_var(mt, "_js_this");
-            MIR_reg_t prev_static_js_this = 0;
-            if (static_js_this_var) {
-                prev_static_js_this = jm_new_reg(mt, "prev_static_jt", MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, prev_static_js_this),
-                    MIR_new_reg_op(mt->ctx, static_js_this_var->reg)));
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, static_js_this_var->reg),
-                    MIR_new_reg_op(mt->ctx, cls_obj)));
-            }
+            JsMirLexicalThisRebind static_this_rebind;
+            jm_emit_begin_lexical_this_rebind(mt, cls_obj, &static_this_rebind, true);
             jm_call_void_0(mt, "js_private_field_init_begin");
             bool emitted_ordered_static_elements = false;
             if (ce && ce->node && ce->node->body && ce->node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
@@ -14571,11 +14584,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     jm_emit_class_static_block(mt, ce, ce->static_blocks[si]);
                 }
             }
-            if (static_js_this_var) {
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, static_js_this_var->reg),
-                    MIR_new_reg_op(mt->ctx, prev_static_js_this)));
-            }
+            jm_emit_end_lexical_this_rebind(mt, &static_this_rebind);
             jm_call_void_1(mt, "js_set_this",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, prev_static_this));
             jm_call_void_1(mt, "js_set_direct_new_target",

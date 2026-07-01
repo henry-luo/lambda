@@ -4185,9 +4185,103 @@ Item fn_join2(Item list_item, Item sep_item) {
     return {.item = s2it(result)};
 }
 
-// replace(str, old, new) - replace all occurrences of old with new
-Item fn_replace(Item str_item, Item old_item, Item new_item) {
-    GUARD_ERROR3(str_item, old_item, new_item);
+typedef struct FindReplaceOptions {
+    int64_t limit;
+    bool ignore_case;
+} FindReplaceOptions;
+
+static bool parse_find_replace_options(Item options_item, FindReplaceOptions* options) {
+    options->limit = 0;
+    options->ignore_case = false;
+    TypeId options_type = get_type_id(options_item);
+    if (options_type == LMD_TYPE_NULL) return true;
+    if (options_type != LMD_TYPE_MAP && options_type != LMD_TYPE_OBJECT) {
+        log_debug("parse_find_replace_options: options must be a map");
+        return false;
+    }
+
+    Map* options_map = (options_type == LMD_TYPE_MAP) ? options_item.map : (Map*)options_item.object;
+    bool is_found = false;
+    Item limit_item = _map_get((TypeMap*)options_map->type, options_map->data, "limit", &is_found);
+    if (is_found && get_type_id(limit_item) != LMD_TYPE_NULL) {
+        int64_t limit = 0;
+        if (!item_to_integral_index(limit_item, &limit)) {
+            log_debug("parse_find_replace_options: limit must be an integer");
+            return false;
+        }
+        options->limit = limit;
+    }
+
+    is_found = false;
+    Item ignore_item = _map_get((TypeMap*)options_map->type, options_map->data, "ignore_case", &is_found);
+    if (is_found && get_type_id(ignore_item) != LMD_TYPE_NULL) {
+        if (get_type_id(ignore_item) != LMD_TYPE_BOOL) {
+            log_debug("parse_find_replace_options: ignore_case must be bool");
+            return false;
+        }
+        options->ignore_case = it2b(ignore_item);
+    }
+    return true;
+}
+
+static unsigned char ascii_case_fold(unsigned char c) {
+    return (c >= 'A' && c <= 'Z') ? (unsigned char)(c + ('a' - 'A')) : c;
+}
+
+static bool literal_match_at(const char* src, const char* needle, size_t len, bool ignore_case) {
+    if (!ignore_case) return memcmp(src, needle, len) == 0;
+    for (size_t i = 0; i < len; i++) {
+        if (ascii_case_fold((unsigned char)src[i]) != ascii_case_fold((unsigned char)needle[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void select_match_window(int64_t total, int64_t limit, int64_t* first, int64_t* count) {
+    *first = 0;
+    *count = total;
+    if (total <= 0) {
+        *count = 0;
+        return;
+    }
+    if (limit > 0 && limit < total) {
+        *count = limit;
+    } else if (limit < 0) {
+        int64_t requested = (limit == LLONG_MIN) ? LLONG_MAX : -limit;
+        if (requested < total) {
+            *first = total - requested;
+            *count = requested;
+        }
+    }
+}
+
+static int64_t count_literal_matches(const char* str_chars, size_t str_len,
+                                     const char* needle, size_t needle_len,
+                                     bool ignore_case) {
+    if (!str_chars || !needle || str_len == 0 || needle_len == 0 || needle_len > str_len) return 0;
+    int64_t count = 0;
+    const char* p = str_chars;
+    const char* end = str_chars + str_len;
+    while (p <= end - needle_len) {
+        if (literal_match_at(p, needle, needle_len, ignore_case)) {
+            count++;
+            p += needle_len;
+        } else {
+            p++;
+        }
+    }
+    return count;
+}
+
+static bool item_string_is_ascii(Item item, TypeId item_type) {
+    if (item_type == LMD_TYPE_NULL || item_type == LMD_TYPE_SYMBOL) return true;
+    if (item_type != LMD_TYPE_STRING) return false;
+    String* str = item.get_safe_string();
+    return str && str->is_ascii != 0;
+}
+
+static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindReplaceOptions options) {
     TypeId str_type = get_type_id(str_item);
     TypeId old_type = get_type_id(old_item);
     TypeId new_type = get_type_id(new_item);
@@ -4201,7 +4295,7 @@ Item fn_replace(Item str_item, Item old_item, Item new_item) {
     bool new_is_null = (new_type == LMD_TYPE_NULL);
     if (new_is_null) new_type = LMD_TYPE_STRING;
 
-    // pattern-based replacement: replace(str, pattern, repl_str)
+    // pattern-based replacement: replace(str, pattern, repl_str[, options])
     if (old_type == LMD_TYPE_TYPE) {
         Type* type = (Type*)(old_item.item & 0x00FFFFFFFFFFFFFF);
         if (type && type->kind == TYPE_KIND_PATTERN) {
@@ -4221,8 +4315,12 @@ Item fn_replace(Item str_item, Item old_item, Item new_item) {
 
             if (!str_chars || str_len == 0) return str_item;
 
-            String* result = pattern_replace_all(pattern, str_chars, str_len,
-                                                  repl_chars ? repl_chars : "", repl_chars ? repl_len : 0);
+            String* result = (!options.ignore_case && options.limit == 0)
+                ? pattern_replace_all(pattern, str_chars, str_len,
+                                      repl_chars ? repl_chars : "", repl_chars ? repl_len : 0)
+                : pattern_replace_all_options(pattern, str_chars, str_len,
+                                              repl_chars ? repl_chars : "", repl_chars ? repl_len : 0,
+                                              options.limit, options.ignore_case);
             if (!result) return str_item;
             return {.item = s2it(result)};
         }
@@ -4242,103 +4340,84 @@ Item fn_replace(Item str_item, Item old_item, Item new_item) {
     const char* new_chars = new_is_null ? "" : new_item.get_chars();
     uint32_t new_len_val = new_is_null ? 0 : new_item.get_len();
 
-    if (!str_chars || str_len == 0) {
-        return str_item;
+    if (!str_chars || str_len == 0) return str_item;
+    if (!old_chars || old_len == 0) return str_item;  // nothing to replace
+
+    int64_t total = count_literal_matches(str_chars, str_len, old_chars, old_len, options.ignore_case);
+    int64_t first = 0, replace_count = 0;
+    // Limit is applied before replacement so first/last-N semantics match find().
+    select_match_window(total, options.limit, &first, &replace_count);
+    if (replace_count == 0) return str_item;
+
+    size_t replacement_len = new_chars ? new_len_val : 0;
+    size_t new_len = str_len + (size_t)replace_count * (replacement_len - old_len);
+
+    char* dest = NULL;
+    String* result = NULL;
+    char* symbol_buf = NULL;
+    if (str_type == LMD_TYPE_SYMBOL) {
+        symbol_buf = (char*)pool_alloc(context->pool, new_len + 1);
+        dest = symbol_buf;
+    } else {
+        result = (String *)heap_alloc(sizeof(String) + new_len + 1, LMD_TYPE_STRING);
+        result->len = new_len;
+        // Preserve is_ascii when both source and replacement are ASCII; otherwise byte-indexing callers may fall back to UTF-8 scans.
+        bool src_ascii = item_string_is_ascii(str_item, str_type);
+        bool repl_ascii = new_is_null || item_string_is_ascii(new_item, new_type);
+        result->is_ascii = (src_ascii && repl_ascii) ? 1 : 0;
+        dest = result->chars;
     }
 
-    if (!old_chars || old_len == 0) {
-        return str_item;  // nothing to replace
-    }
-
-    // count occurrences
-    int count = 0;
     const char* p = str_chars;
     const char* end = str_chars + str_len;
+    int64_t ordinal = 0;
+    int64_t replaced = 0;
     while (p <= end - old_len) {
-        if (memcmp(p, old_chars, old_len) == 0) {
-            count++;
-            p += old_len;
-        } else {
-            p++;
-        }
-    }
-
-    if (count == 0) {
-        return str_item;  // no occurrences found
-    }
-
-    // calculate new length
-    size_t new_str_len = new_chars ? new_len_val : 0;
-    size_t new_len = str_len + count * (new_str_len - old_len);
-
-    // allocate result - preserve type
-    if (str_type == LMD_TYPE_SYMBOL) {
-        char* buf = (char*)pool_alloc(context->pool, new_len + 1);
-        char* dest = buf;
-        p = str_chars;
-        while (p <= end - old_len) {
-            if (memcmp(p, old_chars, old_len) == 0) {
-                if (new_str_len > 0) {
-                    memcpy(dest, new_chars, new_str_len);
-                    dest += new_str_len;
+        if (literal_match_at(p, old_chars, old_len, options.ignore_case)) {
+            bool selected = ordinal >= first && replaced < replace_count;
+            if (selected) {
+                if (replacement_len > 0) {
+                    memcpy(dest, new_chars, replacement_len);
+                    dest += replacement_len;
                 }
-                p += old_len;
+                replaced++;
             } else {
-                *dest++ = *p++;
+                memcpy(dest, p, old_len);
+                dest += old_len;
             }
-        }
-        // copy remaining
-        while (p < end) {
-            *dest++ = *p++;
-        }
-        *dest = '\0';
-        return {.item = y2it(heap_create_symbol(buf, new_len))};
-    }
-
-    String* result = (String *)heap_alloc(sizeof(String) + new_len + 1, LMD_TYPE_STRING);
-    result->len = new_len;
-    // Preserve is_ascii when both source and replacement are ASCII —
-    // a non-ASCII flag forces every `bytes[i]` access onto the UTF-8
-    // codepoint path (see item_at), turning parser loops over the
-    // result into O(N^2) per-byte scans. The conservative `0` default
-    // was correct in general but disastrous when callers rewrite a
-    // pure-ASCII content stream.
-    {
-        bool src_ascii = (str_type == LMD_TYPE_STRING)
-            ? (str_item.get_safe_string() && str_item.get_safe_string()->is_ascii != 0) : true;
-        bool repl_ascii = (new_is_null || new_type != LMD_TYPE_STRING)
-            ? true : (new_item.get_safe_string() && new_item.get_safe_string()->is_ascii != 0);
-        result->is_ascii = (src_ascii && repl_ascii) ? 1 : 0;
-    }
-
-    // build result
-    char* dest = result->chars;
-    p = str_chars;
-    while (p <= end - old_len) {
-        if (memcmp(p, old_chars, old_len) == 0) {
-            if (new_str_len > 0) {
-                memcpy(dest, new_chars, new_str_len);
-                dest += new_str_len;
-            }
+            ordinal++;
             p += old_len;
         } else {
             *dest++ = *p++;
         }
     }
-    // copy remaining
-    while (p < end) {
-        *dest++ = *p++;
-    }
-    result->chars[new_len] = '\0';
+    while (p < end) *dest++ = *p++;
+    *dest = '\0';
 
+    if (str_type == LMD_TYPE_SYMBOL) return {.item = y2it(heap_create_symbol(symbol_buf, new_len))};
     return {.item = s2it(result)};
 }
 
-// find(str, pattern_or_string) -> [{value, index}, ...]
-// Finds all non-overlapping matches in the source string.
-// Second argument can be a string literal or a compiled pattern.
-Item fn_find2(Item source_item, Item pattern_item) {
-    GUARD_ERROR2(source_item, pattern_item);
+// replace(str, old, new) - replace all occurrences of old with new
+Item fn_replace(Item str_item, Item old_item, Item new_item) {
+    GUARD_ERROR3(str_item, old_item, new_item);
+    FindReplaceOptions options = {0, false};
+    return fn_replace_impl(str_item, old_item, new_item, options);
+}
+
+Item fn_replace3(Item str_item, Item old_item, Item new_item) {
+    return fn_replace(str_item, old_item, new_item);
+}
+
+Item fn_replace4(Item str_item, Item old_item, Item new_item, Item options_item) {
+    GUARD_ERROR3(str_item, old_item, new_item);
+    if (get_type_id(options_item) == LMD_TYPE_ERROR) return options_item;
+    FindReplaceOptions options;
+    if (!parse_find_replace_options(options_item, &options)) return ItemError;
+    return fn_replace_impl(str_item, old_item, new_item, options);
+}
+
+static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions options) {
     TypeId source_type = get_type_id(source_item);
     TypeId pattern_type = get_type_id(pattern_item);
 
@@ -4360,7 +4439,7 @@ Item fn_find2(Item source_item, Item pattern_item) {
         Type* type = (Type*)(pattern_item.item & 0x00FFFFFFFFFFFFFF);
         if (type && type->kind == TYPE_KIND_PATTERN) {
             TypePattern* pattern = (TypePattern*)type;
-            List* r = pattern_find_all(pattern, str_chars, str_len);
+            List* r = pattern_find_all_options(pattern, str_chars, str_len, options.limit, options.ignore_case);
             if (r) r->is_content = 1;
             return {.array = r};
         }
@@ -4379,15 +4458,27 @@ Item fn_find2(Item source_item, Item pattern_item) {
     result->is_content = 1;
     if (!needle || needle_len == 0) return {.array = result};
 
-    // find all non-overlapping occurrences of the literal substring
+    int64_t total = count_literal_matches(str_chars, str_len, needle, needle_len, options.ignore_case);
+    int64_t first = 0, selected_count = 0;
+    // Limit selects the visible match window; replacement uses the same helper.
+    select_match_window(total, options.limit, &first, &selected_count);
+    if (selected_count == 0) return {.array = result};
+
     const char* p = str_chars;
     const char* end = str_chars + str_len;
+    int64_t ordinal = 0;
+    int64_t pushed = 0;
     while (p <= end - needle_len) {
-        if (memcmp(p, needle, needle_len) == 0) {
-            int64_t index = (int64_t)(p - str_chars);
-            Map* m = create_match_map_ext(p, needle_len, index);
-            list_push(result, {.map = m});
+        if (literal_match_at(p, needle, needle_len, options.ignore_case)) {
+            if (ordinal >= first && pushed < selected_count) {
+                int64_t index = (int64_t)(p - str_chars);
+                Map* m = create_match_map_ext(p, needle_len, index);
+                list_push(result, {.map = m});
+                pushed++;
+            }
+            ordinal++;
             p += needle_len;
+            if (pushed >= selected_count) break;
         } else {
             p++;
         }
@@ -4396,12 +4487,21 @@ Item fn_find2(Item source_item, Item pattern_item) {
     return {.array = result};
 }
 
+// find(str, pattern_or_string) -> [{value, index}, ...]
+// Finds all non-overlapping matches in the source string.
+// Second argument can be a string literal or a compiled pattern.
+Item fn_find2(Item source_item, Item pattern_item) {
+    GUARD_ERROR2(source_item, pattern_item);
+    FindReplaceOptions options = {0, false};
+    return fn_find_impl(source_item, pattern_item, options);
+}
+
 // find(str, pattern, options) -> [{value, index}, ...]
-// 3-arg version with options map (for future: {limit, ignore_case})
 Item fn_find3(Item source_item, Item pattern_item, Item options_item) {
-    // for now, ignore options and delegate to 2-arg version
-    (void)options_item;
-    return fn_find2(source_item, pattern_item);
+    GUARD_ERROR3(source_item, pattern_item, options_item);
+    FindReplaceOptions options;
+    if (!parse_find_replace_options(options_item, &options)) return ItemError;
+    return fn_find_impl(source_item, pattern_item, options);
 }
 
 // normalize with 1 arg (defaults to NFC)

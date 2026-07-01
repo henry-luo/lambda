@@ -728,6 +728,23 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         init_type = LMD_TYPE_ANY;
                     }
 
+                    // Stage 4C: a user function's numeric (INT/FLOAT) return type is a
+                    // SPECULATIVE inference, not a language guarantee — the callee may
+                    // return a non-number in some branch, and the return-type inference
+                    // itself can be unsound (it inferred numeric for functions that
+                    // actually return objects, e.g. the editor's stepMap chain). The
+                    // native var path below unboxes the initializer with an UNCHECKED
+                    // it2d/d2i, which silently collapses a boxed object to 0. So keep a
+                    // call-initialized binding boxed unless the type is GUARANTEED numeric
+                    // (a Math.* builtin). Boxing is always correct; only guaranteed
+                    // numerics keep the native fast path.
+                    if (d->init && d->init->node_type == JS_AST_NODE_CALL_EXPRESSION &&
+                        (init_type == LMD_TYPE_INT || init_type == LMD_TYPE_FLOAT) &&
+                        !jm_get_math_method((JsCallNode*)d->init)) {
+                        log_debug("Stage 4C: boxing var '%s' — call result numeric type is speculative, not guaranteed", vname);
+                        init_type = LMD_TYPE_ANY;
+                    }
+
                     if (init_type == LMD_TYPE_INT) {
                         // native int variable
                         MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_I64);
@@ -2137,6 +2154,11 @@ static void jm_emit_own_instance_fields_on_object(JsMirTranspiler* mt, JsClassEn
     if (!mt || !ce || !obj) return;
     JsClassEntry* saved_current_class = mt->current_class;
     mt->current_class = ce;
+    MIR_reg_t prev_this = jm_call_0(mt, "js_get_this", MIR_T_I64);
+    jm_call_void_1(mt, "js_set_this",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj));
+    JsMirLexicalThisRebind this_rebind;
+    jm_emit_begin_lexical_this_rebind(mt, obj, &this_rebind, true);
     // js_private_field_init_begin keeps the field-initializer early-error context
     // (eval restrictions) on. The brand-check bypass is NOT taken from this flag:
     // each field's *declaration* set goes through js_private_field_define (scoped
@@ -2188,6 +2210,9 @@ static void jm_emit_own_instance_fields_on_object(JsMirTranspiler* mt, JsClassEn
         jm_emit_exc_propagate_check(mt);
     }
     jm_call_void_0(mt, "js_private_field_init_end");
+    jm_emit_end_lexical_this_rebind(mt, &this_rebind);
+    jm_call_void_1(mt, "js_set_this",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, prev_this));
     mt->current_class = saved_current_class;
 }
 
@@ -3182,18 +3207,8 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_reg_t prev_this_fi = jm_call_0(mt, "js_get_this", MIR_T_I64);
             jm_call_void_1(mt, "js_set_this",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, obj));
-            // Also update _js_this if it exists (for field inits inside arrow contexts)
-            JsMirVarEntry* js_this_var = jm_find_var(mt, "_js_this");
-            MIR_reg_t prev_js_this_val = 0;
-            if (js_this_var) {
-                prev_js_this_val = jm_new_reg(mt, "prev_jt", MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, prev_js_this_val),
-                    MIR_new_reg_op(mt->ctx, js_this_var->reg)));
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, js_this_var->reg),
-                    MIR_new_reg_op(mt->ctx, obj)));
-            }
+            JsMirLexicalThisRebind this_rebind;
+            jm_emit_begin_lexical_this_rebind(mt, obj, &this_rebind, true);
             // Collect chain: chain[0] = most-base, chain[n-1] = immediate parent
             JsClassEntry* field_chain[32];
             int field_chain_len = 0;
@@ -3372,11 +3387,7 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             // Restore 'this' after field initialization
             jm_call_void_1(mt, "js_set_this",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, prev_this_fi));
-            if (js_this_var) {
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, js_this_var->reg),
-                    MIR_new_reg_op(mt->ctx, prev_js_this_val)));
-            }
+            jm_emit_end_lexical_this_rebind(mt, &this_rebind);
         }
 
         // v20: constructor property is inherited from prototype (prototype.constructor = Class)
@@ -5663,17 +5674,8 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     MIR_reg_t static_new_target = jm_emit_undefined(mt);
                     jm_call_void_1(mt, "js_set_direct_new_target",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, static_new_target));
-                    JsMirVarEntry* static_js_this_var = jm_find_var(mt, "_js_this");
-                    MIR_reg_t prev_static_js_this = 0;
-                    if (static_js_this_var) {
-                        prev_static_js_this = jm_new_reg(mt, "prev_static_jt", MIR_T_I64);
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, prev_static_js_this),
-                            MIR_new_reg_op(mt->ctx, static_js_this_var->reg)));
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, static_js_this_var->reg),
-                            MIR_new_reg_op(mt->ctx, cls_obj)));
-                    }
+                    JsMirLexicalThisRebind static_this_rebind;
+                    jm_emit_begin_lexical_this_rebind(mt, cls_obj, &static_this_rebind, true);
                     jm_call_void_0(mt, "js_private_field_init_begin");
                     bool emitted_ordered_static_elements = false;
                     if (ce->node && ce->node->body && ce->node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
@@ -5839,11 +5841,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             jm_emit_class_static_block(mt, ce, ce->static_blocks[si]);
                         }
                     }
-                    if (static_js_this_var) {
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, static_js_this_var->reg),
-                            MIR_new_reg_op(mt->ctx, prev_static_js_this)));
-                    }
+                    jm_emit_end_lexical_this_rebind(mt, &static_this_rebind);
                     jm_call_void_1(mt, "js_set_this",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, prev_static_this));
                     jm_call_void_1(mt, "js_set_direct_new_target",

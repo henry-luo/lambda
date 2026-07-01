@@ -1573,6 +1573,20 @@ extern "C" void js_dom_selection_install_globals(void) {
         // window is already a real object — install getSelection on it too
         js_property_set(existing, make_key("getSelection"), fn);
     }
+    // Stage 4C: `window.document` must resolve to the document proxy. Bare
+    // `document` is special-cased in the transpiler (js_mir_expression_lowering
+    // rewrites the identifier to a direct proxy access), so it never becomes a
+    // real property on the window/global object — which left `window.document`
+    // (a plain member access) `undefined`, breaking e.g.
+    // `window.document.createRange()` in dom-bridge. Install it explicitly. The
+    // proxy is a stable wrapper whose methods route to the current main document,
+    // and it is the same item bare `document` yields, so `window.document ===
+    // document` holds.
+    Item doc_proxy = js_get_document_object_value();
+    js_property_set(global, make_key("document"), doc_proxy);
+    if (get_type_id(existing) == LMD_TYPE_MAP)
+        js_property_set(existing, make_key("document"), doc_proxy);
+
     Item flush_fn = js_new_function((void*)js_dom_flush_selectionchange, 0);
     js_property_set(global, make_key("__lambdaFlushSelectionChange"), flush_fn);
     if (get_type_id(existing) == LMD_TYPE_MAP)

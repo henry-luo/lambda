@@ -451,6 +451,7 @@ struct JsMirTranspiler {
     bool last_closure_has_env;
     bool allow_loop_let_scope_env_for_immediate_call;
     bool preserve_last_closure_env_after_readback;
+    bool force_closure_env_copy;    // class field initializers need a stable lexical this cell
 
     // Assignment target hint for closure self-capture detection in copy-env path
     const char* assign_target_vname;  // set before RHS eval, NULL otherwise

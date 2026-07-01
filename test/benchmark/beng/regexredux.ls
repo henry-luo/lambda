@@ -29,17 +29,18 @@ pn main() {
     var seq = replace(text, header_pat, "")
     seq = replace(seq, "\n", "")
     var clean_len = len(seq)
+    let match_options = {ignore_case: true}
 
-    // step 2: count matches for each of 9 patterns
-    print("agggtaaa|tttaccct " ++ len(find(seq, pat1)) ++ "\n")
-    print("[cgt]gggtaaa|tttaccc[acg] " ++ len(find(seq, pat2)) ++ "\n")
-    print("a[act]ggtaaa|tttacc[agt]t " ++ len(find(seq, pat3)) ++ "\n")
-    print("ag[act]gtaaa|tttac[agt]ct " ++ len(find(seq, pat4)) ++ "\n")
-    print("agg[act]taaa|ttta[agt]cct " ++ len(find(seq, pat5)) ++ "\n")
-    print("aggg[acg]aaa|ttt[cgt]ccct " ++ len(find(seq, pat6)) ++ "\n")
-    print("agggt[cgt]aa|tt[acg]taccct " ++ len(find(seq, pat7)) ++ "\n")
-    print("agggta[cgt]a|t[acg]ataccct " ++ len(find(seq, pat8)) ++ "\n")
-    print("agggtaa[cgt]|[acg]aataccct " ++ len(find(seq, pat9)) ++ "\n")
+    // step 2: count matches for each of 9 patterns using benchmarksgame /ig semantics
+    print("agggtaaa|tttaccct " ++ len(find(seq, pat1, match_options)) ++ "\n")
+    print("[cgt]gggtaaa|tttaccc[acg] " ++ len(find(seq, pat2, match_options)) ++ "\n")
+    print("a[act]ggtaaa|tttacc[agt]t " ++ len(find(seq, pat3, match_options)) ++ "\n")
+    print("ag[act]gtaaa|tttac[agt]ct " ++ len(find(seq, pat4, match_options)) ++ "\n")
+    print("agg[act]taaa|ttta[agt]cct " ++ len(find(seq, pat5, match_options)) ++ "\n")
+    print("aggg[acg]aaa|ttt[cgt]ccct " ++ len(find(seq, pat6, match_options)) ++ "\n")
+    print("agggt[cgt]aa|tt[acg]taccct " ++ len(find(seq, pat7, match_options)) ++ "\n")
+    print("agggta[cgt]a|t[acg]ataccct " ++ len(find(seq, pat8, match_options)) ++ "\n")
+    print("agggtaa[cgt]|[acg]aataccct " ++ len(find(seq, pat9, match_options)) ++ "\n")
 
     // step 3: IUPAC code substitutions — each single letter expands to alternatives
     var result = seq
