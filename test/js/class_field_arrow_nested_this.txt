@@ -1,0 +1,3 @@
+decl: a,b
+static decl: static-decl
+expr: expr

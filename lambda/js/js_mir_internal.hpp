@@ -67,6 +67,16 @@ typedef struct JsMirReference {
     const char* profile_label;
 } JsMirReference;
 
+typedef struct JsMirLexicalThisRebind {
+    bool saved_force_closure_env_copy;
+    bool restore_binding;
+    MIR_reg_t var_reg;
+    MIR_reg_t saved_var_reg;
+    MIR_reg_t scope_env_reg;
+    MIR_reg_t saved_scope_env_value_reg;
+    int scope_env_slot;
+} JsMirLexicalThisRebind;
+
 // internal function declarations
 int js_import_cache_cmp(const void *a, const void *b, void *udata);
 uint64_t js_import_cache_hash(const void *item, uint64_t seed0, uint64_t seed1);
@@ -200,6 +210,10 @@ void jm_emit_set_function_name(JsMirTranspiler* mt, MIR_reg_t fn_reg, const char
 void jm_emit_set_class_assignment_name(JsMirTranspiler* mt, JsAssignmentNode* asgn, MIR_reg_t rhs, String* name);
 void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFunctionNode* fn_node);
 void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNode* cls_node);
+void jm_emit_begin_lexical_this_rebind(JsMirTranspiler* mt, MIR_reg_t value,
+    JsMirLexicalThisRebind* state, bool restore_binding);
+void jm_emit_end_lexical_this_rebind(JsMirTranspiler* mt,
+    const JsMirLexicalThisRebind* state);
 void jm_emit_class_ctor_shape_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
 void jm_emit_formal_length(JsMirTranspiler* mt, MIR_reg_t fn_reg, int formal_length);
 MIR_reg_t jm_build_error_stack_string(JsMirTranspiler* mt, const char* error_type);
