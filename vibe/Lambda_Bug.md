@@ -217,3 +217,103 @@ return false;
 - Stage-4C view bundle `editor-view-dom`: **crash → runs (3/9)** — the this-capture crash is gone. *(Remaining `editor-view-dom` failures ("…reading 'doc'": the edit pipeline yields no transaction) and the `full-editor-dom` crash are SEPARATE follow-ups, not this bug.)*
 - Recommended before merge: `make node-baseline` (class `this` is load-bearing).
 - `git diff --check` → clean
+
+---
+---
+
+# Bug 3 — LambdaJS headless (`lambda.exe js --document`): post-dispatch `process.exitCode` lookup interns with `context == NULL`
+
+**Date:** 2026-07-01 · **Component:** LambdaJS runtime — `process.exitCode` bridge across JS `EvalContext` lifetime · **Status:** FIXED — and confirmed to be a RED HERRING for the editor (the real editor blocker is a separate `onChange is not a function` / "Bug 4")
+**Discovered by:** Stage 4C — while chasing the editor's post-Bug-2 `editor-view-dom` failures.
+
+> **READ §5–§6 FIRST.** §1–§4 preserve the *initial* diagnosis and are partly superseded. The live repro showed the failing intern happens **after** the dispatched handler and after `transpile_js_to_mir` restores `context` to the caller's old value (`NULL` on CLI `js --document`), when `main.cpp` asks `js_process_current_exit_code()` one more time. It is a genuine runtime boundary bug, but it is NOT what breaks the Stage-4C view tests.
+
+## 1. The issue
+
+`heap_create_name()` (`lambda/lambda-mem.cpp:557`) interns structural identifiers (map keys, element tags, attribute/mark names) via `context->name_pool`, where `context` is the thread-local `EvalContext*`:
+```c
+String* heap_create_name(const char* name, size_t len) {
+    if (!context || !context->name_pool) { log_error("heap_create_name called with invalid context or name_pool"); return nullptr; }
+    return name_pool_create_len(context->name_pool, name, len);
+}
+```
+On the `lambda.exe js --document` path, the original suspicion was that `context`/`context->name_pool` became invalid inside `js_dom_dispatch_event` → `fire_listeners` → `js_call_function`. That framing was wrong. The handler's own dynamic object/Map interning succeeds; the invalid intern happens later, after JS execution has completed and the CLI queries process exit state without an active JS `EvalContext`.
+
+## 2. Symptom
+
+Log (even with most logging off):
+```
+[ERR!] heap_create_name called with invalid context or name_pool
+[ERR!] map_get: key must be string or symbol, got type null
+```
+For trivial handler code the JS-visible result still looks right (the value semantics survive a failed intern). ~~For the editor, the null names corrupt the produced transaction…~~ **Correction (see §5):** this causal link was WRONG. The editor's transaction is produced correctly (`P5 tx=ok`); the failing interns observed (`'exitCode'`) are post-dispatch noise, and the `editor-view-dom` "reading 'doc'" failures come from a *separate* bug (`onChange is not a function`, Bug 4), not from Bug 3.
+
+## 3. Minimal reproduce
+
+`temp/4c-spikes/interncmp.js` — intern in a plain call (OK) vs a dispatched handler (fails):
+```js
+"use strict";
+function doIntern(t){ var o = {}; o['k'+t] = 1; var m = new Map(); m.set('key'+t, 2); return o['k'+t] + m.get('key'+t); }
+console.log('A plain-call=' + doIntern('A'));                       // 0 heap_create_name errors
+var d = document.createElement('div'); document.body.appendChild(d);
+d.addEventListener('keydown', function(){ globalThis.__B = doIntern('B'); });
+d.dispatchEvent(new KeyboardEvent('keydown', { key:'x', bubbles:true }));  // 2 heap_create_name errors in log.txt
+console.log('B dispatched=' + globalThis.__B);
+```
+Run: `./lambda.exe js interncmp.js --document page.html` (WITHOUT `--no-log`), then inspect `log.txt`:
+- **Expected:** 0 `heap_create_name … invalid context` errors
+- **Actual before fix:** 2 errors, but log ordering proves they occur after `js-mir: transpilation completed`, not inside the handler body.
+
+End-to-end editor probe (`temp/4c-spikes/pipe2.js`): a real `EditorViewDom`-shaped handler runs and prints `P5 tx=ok steps=1` (the tx IS produced). The `heap_create_name` errors were post-dispatch noise, not the editor blocker.
+
+## 4. Root cause diagnosis
+
+`context` (thread-local `EvalContext*`) is the source of `name_pool` for `heap_create_name`. It is established for the top-level script run and remains valid through the synchronous DOM dispatch. The actual failing path is the CLI/process bridge after the JS MIR entrypoint returns:
+
+1. `transpile_js_to_mir_core_len()` calls `js_process_current_exit_code()` while the JS context is still active, which synchronizes the C-side `js_process_exit_code_value` cache from `process.exitCode`.
+2. The entrypoint then restores `context = old_context`; on standalone `lambda.exe js --document`, `old_context` is `NULL`.
+3. `lambda/main.cpp` computes the final exit code by calling `js_process_current_exit_code()` again.
+4. The old implementation tried to read `process.exitCode` from the JS object every time, so it called `heap_create_name("exitCode")` with `context == NULL`, producing the two `heap_create_name` errors and the null-key `map_get` error.
+
+Confirmed by `log.txt`: before the fix, the invalid-context errors appear after `js-mir: transpilation completed`, not between the dispatch-site and handler-call logs. The first failing intern is `"exitCode"`.
+
+**Correction (see §5–§6):** the initial framing above — "the dispatch path does not re-establish `context`" — is incorrect. `js_call_function` does not touch `context`, and `context` is valid at the dispatch site. The pointer is restored to `NULL` only after JS execution completes.
+
+### Key files
+- `lambda/lambda-mem.cpp:557` `heap_create_name` (the `context->name_pool` guard)
+- `lambda/js/js_globals.cpp:2641` `js_process_current_exit_code` (fixed boundary)
+- `lambda/js/js_mir_entrypoints_require.cpp:995`/`:1009` syncs process exit code while JS context is active
+- `lambda/js/js_mir_entrypoints_require.cpp:1052` restores `context = old_context`
+- `lambda/main.cpp:2387` asks for final JS exit code after the JS entrypoint has returned
+
+## 5. Refined findings + attempt log (2026-07-01)
+
+Deeper diagnosis with a pointer-level probe (log `context` / `context->name_pool` / `_lambda_rt` at the dispatch site vs at the `heap_create_name` failure), plus final log ordering:
+- **At the dispatch site** (`fire_listeners`, before `js_call_function`): `context`, `context->name_pool`, and `_lambda_rt` are ALL valid and consistent.
+- **At the failure point**: **`context == NULL`** (not merely a null `name_pool`) and first failing intern is `"exitCode"`.
+- **Ordering proof**: `log.txt` shows the invalid-context errors after `js-mir: transpilation completed`, so the failure is outside the dispatched handler body.
+
+So the loss is not at the dispatch boundary, and not inside the handler's own interning. The correct invariant is: `js_process_current_exit_code()` may read the JS `process` object only while an `EvalContext` is active; after the JS entrypoint returns, it must use the scalar exit-code cache that was already synchronized while the context was live.
+
+### Attempts (both reverted)
+1. **Restore `context` from `_lambda_rt` at the `fire_listeners` dispatch site** — no effect: `context` is valid there and gets nulled later. Reverted.
+2. **Fallback in `heap_create_name`: use `_lambda_rt`'s `name_pool` when `context`/`name_pool` is null** — eliminated the interning errors (`interncmp.js` 2→0), **but** (a) regressed the JS unit suite by ~13 (299→286: typed-array/DataView/child_process/fuzz) because `heap_create_name` is core and `_lambda_rt` is stale in contexts where `context` is *legitimately* null, and (b) **did NOT fix the editor**. Reverted.
+
+### IMPORTANT — `heap_create_name` was a RED HERRING for the editor
+Fixing the interning errors left `editor-view-dom` at **3/9** unchanged. The `'exitCode'` interning failures are post-dispatch noise, not the edit-pipeline blocker. The transaction IS produced (`P5 tx=ok`). **The editor's real blocker is a SEPARATE bug:** `editor-view-dom` fails with **`onChange is not a function`** — inside `EditorViewDom.dispatch = (action) => { … this.onChange?.(this.state) }`, `this.onChange` holds a non-function (the empty `seenStates` → `Cannot read properties of undefined (reading 'doc')` cascades from that). This looks like *another* instance-field/`this`-binding corruption in the dispatched path (`this.onChange` was set from `opts.onChange`, a function) and should be filed/diagnosed as **Bug 4** — it, not Bug 3, is what blocks the Stage-4C view tests.
+
+## 6. Fix landed
+
+`js_process_current_exit_code()` now reads `process.exitCode` from the JS object only when `context && context->name_pool` is valid. After the JS entrypoint has restored `context` to the CLI caller's old value, it returns the already-synchronized `js_process_exit_code_value` scalar instead. This keeps `heap_create_name()` strict and avoids the reverted `_lambda_rt` fallback.
+
+Regression added:
+- `test/js/js_document_exit_context.{js,html,txt}` covers the visible `js --document` behavior.
+- `JavaScriptRegression.DocumentExitCodeAfterContextRestoreDoesNotInternWithNullContext` runs the same script without `--no-log`, then asserts `log.txt` has no `heap_create_name called with invalid context or name_pool` or null-key `map_get` errors.
+
+Validation:
+- `./lambda.exe js temp/4c-spikes/interncmp.js --document temp/4c-spikes/page.html` → `A plain-call=3`, `B dispatched=3`, 0 invalid-context errors.
+- `./lambda.exe js test/js/js_document_exit_context.js --document test/js/js_document_exit_context.html` → same output, 0 invalid-context errors.
+- `make build` → passed.
+- `make build-test` → passed (pre-existing warning noise only).
+- `./test/test_js_gtest.exe --gtest_filter=JavaScriptRegression.DocumentExitCodeAfterContextRestoreDoesNotInternWithNullContext` → passed.
+- `./test/test_js_gtest.exe --gtest_filter=JavaScriptTests/JsFileTest.Run/js_document_exit_context` → passed.
