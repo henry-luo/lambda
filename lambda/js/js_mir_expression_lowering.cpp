@@ -12558,7 +12558,10 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 JsMirVarEntry* var = jm_find_var(mt, fc->captures[ci].name);
                 MIR_reg_t val;
                 if (var) {
-                    if (var->in_scope_env && var->scope_env_reg != 0 && var->scope_env_slot >= 0) {
+                    // async for-of loop lets may inherit a stale scope-env slot;
+                    // per-iteration closures must copy the freshly assigned register.
+                    if (var->in_scope_env && var->scope_env_reg != 0 && var->scope_env_slot >= 0 &&
+                        !jm_capture_is_current_loop_lexical(mt, fc->captures[ci].name, var)) {
                         val = jm_new_reg(mt, "cenv_senv_live", MIR_T_I64);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, val),
@@ -12803,7 +12806,10 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 JsMirVarEntry* var = jm_find_var(mt, fc->captures[i].name);
                 if (var) {
                     MIR_reg_t value_to_store;
-                    if (var->in_scope_env && var->scope_env_reg != 0 && var->scope_env_slot >= 0) {
+                    // async for-of loop lets may inherit a stale scope-env slot;
+                    // per-iteration closures must copy the freshly assigned register.
+                    if (var->in_scope_env && var->scope_env_reg != 0 && var->scope_env_slot >= 0 &&
+                        !jm_capture_is_current_loop_lexical(mt, fc->captures[i].name, var)) {
                         value_to_store = jm_new_reg(mt, "fenv_senv_live", MIR_T_I64);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, value_to_store),

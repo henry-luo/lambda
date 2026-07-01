@@ -53,6 +53,7 @@ extern double js_get_number(Item value);
 #include <cstdio>
 #include <cmath>
 #include <cstdlib>
+#include <cerrno>
 #include <time.h>
 
 static bool js_reflect_define_property_mode = false;
@@ -2838,7 +2839,23 @@ extern "C" Item js_process_kill(Item pid_item, Item signal_item) {
     }
     int r = kill(pid, sig);
     if (r != 0) {
-        log_error("process.kill: failed to send signal %d to pid %d", sig, pid);
+        int saved_errno = errno;
+        const char* code = saved_errno == ESRCH ? "ESRCH" : uv_err_name(uv_translate_sys_error(saved_errno));
+        char message[128];
+        snprintf(message, sizeof(message), "kill %s", code ? code : "UNKNOWN");
+        // process.kill must surface kernel errors synchronously; logging and
+        // returning true hides exited children from Node's detached-process tests.
+        Item err = js_new_error((Item){.item = s2it(heap_create_name(message, (int)strlen(message)))});
+        if (code) {
+            js_property_set(err, (Item){.item = s2it(heap_create_name("code", 4))},
+                            (Item){.item = s2it(heap_create_name(code, (int)strlen(code)))});
+        }
+        js_property_set(err, (Item){.item = s2it(heap_create_name("errno", 5))},
+                        (Item){.item = i2it((int64_t)-saved_errno)});
+        js_property_set(err, (Item){.item = s2it(heap_create_name("syscall", 7))},
+                        (Item){.item = s2it(heap_create_name("kill", 4))});
+        js_throw_value(err);
+        return ItemNull;
     }
     return (Item){.item = ITEM_TRUE};
 }
@@ -18341,10 +18358,84 @@ static Item js_readable_stream_controller_close(Item env_item) {
     return make_js_undefined();
 }
 
-static Item js_readable_stream_reader_read(Item env_item) {
+static Item js_readable_stream_error_with_code(const char* name, const char* code, const char* message) {
+    Item err = js_new_error_with_name(js_web_stream_key(name), js_web_stream_key(message));
+    js_property_set(err, js_web_stream_key("code"), js_web_stream_key(code));
+    return err;
+}
+
+static bool js_web_stream_item_is_true(Item item) {
+    return get_type_id(item) == LMD_TYPE_BOOL && it2b(item);
+}
+
+static bool js_readable_stream_view_is_detached(Item view) {
+    if (!js_is_typed_array(view)) return true;
+    JsTypedArray* ta = js_get_typed_array_ptr(view.map);
+    return !ta || !ta->buffer || ta->buffer->detached ||
+           js_typed_array_is_out_of_bounds_item(view);
+}
+
+static void js_readable_stream_detach_byob_view(Item view) {
+    if (!js_is_typed_array(view)) return;
+    JsTypedArray* ta = js_get_typed_array_ptr(view.map);
+    if (!ta || !ta->buffer || ta->buffer->detached) return;
+    if (ta->buffer_item) {
+        js_arraybuffer_detach((Item){.item = ta->buffer_item});
+    } else {
+        ta->buffer->detached = true;
+        ta->buffer->byte_length = 0;
+    }
+}
+
+static int js_readable_stream_view_buffer_length(Item view) {
+    if (!js_is_typed_array(view)) return -1;
+    JsTypedArray* ta = js_get_typed_array_ptr(view.map);
+    if (!ta || !ta->buffer || ta->buffer->detached) return -1;
+    return ta->buffer->byte_length;
+}
+
+static Item js_readable_stream_byob_respond_with_new_view(Item env_item, Item view) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    Item stream = env ? env[0] : make_js_undefined();
+    if (!js_is_typed_array(view) || js_readable_stream_view_is_detached(view)) {
+        return js_throw_type_error_code("ERR_INVALID_STATE",
+            "Invalid state: View buffer is detached");
+    }
+    if (js_web_stream_item_is_true(js_property_get(stream, js_web_stream_key("__closed__")))) {
+        int view_len = js_typed_array_byte_length(view);
+        int buffer_len = js_readable_stream_view_buffer_length(view);
+        // Byte-stream BYOB close keeps the read request's backing store invariant;
+        // zero-length views over non-empty buffers are invalid instead of empty.
+        if (view_len == 0 && buffer_len != 0) {
+            return js_throw_range_error_code("ERR_INVALID_ARG_VALUE",
+                "The argument 'view' is invalid");
+        }
+    }
+    return make_js_undefined();
+}
+
+static Item js_readable_stream_make_byob_request(Item stream, Item view) {
+    Item* env = js_alloc_env(2);
+    env[0] = stream;
+    env[1] = view;
+    Item request = js_new_object();
+    js_property_set(request, js_web_stream_key("respondWithNewView"),
+                    js_new_closure((void*)js_readable_stream_byob_respond_with_new_view,
+                                   1, env, 2));
+    return request;
+}
+
+static Item js_readable_stream_reader_read(Item env_item, Item view) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return js_promise_resolve(make_js_undefined());
     Item stream = env[0];
+    bool is_byob = js_web_stream_item_is_true(env[1]);
+
+    if (is_byob && js_is_typed_array(view) && js_typed_array_byte_length(view) == 0) {
+        return js_promise_reject(js_readable_stream_error_with_code("TypeError",
+            "ERR_INVALID_STATE", "Invalid state: View has zero byteLength"));
+    }
+
     Item chunks = js_property_get(stream, js_web_stream_key("__chunks__"));
     int64_t index = 0;
     Item index_item = js_property_get(stream, js_web_stream_key("__read_index__"));
@@ -18357,19 +18448,59 @@ static Item js_readable_stream_reader_read(Item env_item) {
         js_property_set(result, js_web_stream_key("done"), (Item){.item = b2it(false)});
         js_property_set(stream, js_web_stream_key("__read_index__"), (Item){.item = i2it(index + 1)});
     } else {
+        Item pull_fn = js_property_get(stream, js_web_stream_key("__pull__"));
+        if (get_type_id(pull_fn) == LMD_TYPE_FUNC &&
+            !js_web_stream_item_is_true(js_property_get(stream, js_web_stream_key("__closed__")))) {
+            Item* controller_env = js_alloc_env(2);
+            controller_env[0] = stream;
+            controller_env[1] = view;
+            Item controller = js_new_object();
+            js_property_set(controller, js_web_stream_key("enqueue"),
+                            js_new_closure((void*)js_readable_stream_controller_enqueue, 1,
+                                           controller_env, 2));
+            js_property_set(controller, js_web_stream_key("close"),
+                            js_new_closure((void*)js_readable_stream_controller_close, 0,
+                                           controller_env, 2));
+            js_property_set(controller, js_web_stream_key("byobRequest"),
+                            js_readable_stream_make_byob_request(stream, view));
+            js_call_function(pull_fn, js_property_get(stream, js_web_stream_key("__source__")),
+                             &controller, 1);
+            if (js_check_exception()) return ItemNull;
+            chunks = js_property_get(stream, js_web_stream_key("__chunks__"));
+            len = get_type_id(chunks) == LMD_TYPE_ARRAY ? js_array_length(chunks) : 0;
+            if (index < len) {
+                js_property_set(result, js_web_stream_key("value"), js_array_get_int(chunks, index));
+                js_property_set(result, js_web_stream_key("done"), (Item){.item = b2it(false)});
+                js_property_set(stream, js_web_stream_key("__read_index__"), (Item){.item = i2it(index + 1)});
+                return js_promise_resolve(result);
+            }
+        }
+        if (is_byob && js_is_typed_array(view) &&
+            js_web_stream_item_is_true(js_property_get(stream, js_web_stream_key("__closed__")))) {
+            js_readable_stream_detach_byob_view(view);
+        }
         js_property_set(result, js_web_stream_key("value"), make_js_undefined());
         js_property_set(result, js_web_stream_key("done"), (Item){.item = b2it(true)});
     }
     return js_promise_resolve(result);
 }
 
-static Item js_readable_stream_get_reader_stub(void) {
+static Item js_readable_stream_get_reader_stub(Item options) {
     Item stream = js_get_this();
-    Item* env = js_alloc_env(1);
+    bool byob = false;
+    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_ELEMENT) {
+        Item mode = js_property_get(options, js_web_stream_key("mode"));
+        if (get_type_id(mode) == LMD_TYPE_STRING) {
+            String* s = it2s(mode);
+            byob = s && s->len == 4 && memcmp(s->chars, "byob", 4) == 0;
+        }
+    }
+    Item* env = js_alloc_env(2);
     env[0] = stream;
+    env[1] = (Item){.item = b2it(byob)};
     Item reader = js_new_object();
     js_property_set(reader, js_web_stream_key("read"),
-                    js_new_closure((void*)js_readable_stream_reader_read, 0, env, 1));
+                    js_new_closure((void*)js_readable_stream_reader_read, 1, env, 2));
     return reader;
 }
 
@@ -18380,8 +18511,11 @@ extern "C" Item js_readable_stream_new(Item underlying_source) {
     js_property_set(obj, js_web_stream_key("__closed__"), (Item){.item = b2it(false)});
     js_property_set(obj, js_web_stream_key("__read_index__"), (Item){.item = i2it(0)});
     Item get_reader_key = (Item){.item = s2it(heap_create_name("getReader"))};
-    Item get_reader_fn = js_new_function((void*)js_readable_stream_get_reader_stub, 0);
+    Item get_reader_fn = js_new_function((void*)js_readable_stream_get_reader_stub, 1);
     js_property_set(obj, get_reader_key, get_reader_fn);
+    js_property_set(obj, js_web_stream_key("__source__"), underlying_source);
+    js_property_set(obj, js_web_stream_key("__pull__"),
+                    js_property_get(underlying_source, js_web_stream_key("pull")));
 
     Item start_fn = js_property_get(underlying_source, js_web_stream_key("start"));
     if (get_type_id(start_fn) == LMD_TYPE_FUNC) {

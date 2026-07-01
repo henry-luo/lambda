@@ -1,0 +1,1 @@
+stream pipeline legacy error destroy ok
