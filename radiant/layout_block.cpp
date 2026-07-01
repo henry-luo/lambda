@@ -73,6 +73,140 @@ static const char* pseudo_css_value_extract_name(const CssValue* value) {
     return nullptr;
 }
 
+typedef struct CssContentImage {
+    const char* url;
+    float resolution;
+} CssContentImage;
+
+static bool css_function_name_is(const CssFunction* func, const char* name) {
+    return func && func->name && name &&
+        str_ieq_const(func->name, strlen(func->name), name);
+}
+
+static bool css_image_set_resolution_from_value(const CssValue* value, float* out_resolution) {
+    if (!value || !out_resolution) return false;
+
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        float resolution = (float)value->data.length.value;
+        if (value->data.length.unit == CSS_UNIT_DPPX) {
+            *out_resolution = resolution;
+            return resolution > 0.0f;
+        }
+        if (value->data.length.unit == CSS_UNIT_DPI) {
+            *out_resolution = resolution / 96.0f;
+            return resolution > 0.0f;
+        }
+        if (value->data.length.unit == CSS_UNIT_DPCM) {
+            *out_resolution = resolution * 2.54f / 96.0f;
+            return resolution > 0.0f;
+        }
+    }
+
+    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+        const char* text = value->data.custom_property.name;
+        char* end = nullptr;
+        double parsed = strtod(text, &end);
+        if (end && *end == 'x' && end[1] == '\0' && parsed > 0.0) {
+            *out_resolution = (float)parsed;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool css_image_set_candidate_from_value(const CssValue* value, CssContentImage* out_image) {
+    if (!value || !out_image) return false;
+
+    const char* url = nullptr;
+    float resolution = 1.0f;
+    if (value->type == CSS_VALUE_TYPE_URL) {
+        url = value->data.url;
+    } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+               css_function_name_is(value->data.function, "url") &&
+               value->data.function->arg_count > 0 && value->data.function->args[0]) {
+        url = pseudo_css_value_extract_name(value->data.function->args[0]);
+    } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.values) {
+        for (int i = 0; i < value->data.list.count; i++) {
+            CssValue* item = value->data.list.values[i];
+            CssContentImage nested = {nullptr, 1.0f};
+            float item_resolution = 1.0f;
+            if (!url && css_image_set_candidate_from_value(item, &nested)) {
+                url = nested.url;
+                resolution = nested.resolution;
+            } else if (css_image_set_resolution_from_value(item, &item_resolution)) {
+                resolution = item_resolution;
+            }
+        }
+    }
+
+    if (!url || !url[0] || resolution <= 0.0f) return false;
+    out_image->url = url;
+    out_image->resolution = resolution;
+    return true;
+}
+
+static bool css_content_replacement_image(const CssValue* value, CssContentImage* out_image) {
+    if (!value || !out_image) return false;
+    if (value->type == CSS_VALUE_TYPE_URL) {
+        out_image->url = value->data.url;
+        out_image->resolution = 1.0f;
+        return out_image->url && out_image->url[0];
+    }
+    if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+        css_function_name_is(value->data.function, "url") &&
+        value->data.function->arg_count > 0 && value->data.function->args[0]) {
+        out_image->url = pseudo_css_value_extract_name(value->data.function->args[0]);
+        out_image->resolution = 1.0f;
+        return out_image->url && out_image->url[0];
+    }
+    if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+        (css_function_name_is(value->data.function, "image-set") ||
+         css_function_name_is(value->data.function, "-webkit-image-set"))) {
+        for (int i = 0; i < value->data.function->arg_count; i++) {
+            if (css_image_set_candidate_from_value(value->data.function->args[i], out_image)) {
+                // CSS Images: a selected image's density converts resource pixels to CSS px.
+                return true;
+            }
+        }
+    }
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < value->data.list.count; i++) {
+            if (css_content_replacement_image(value->data.list.values[i], out_image)) return true;
+        }
+    }
+    return false;
+}
+
+static bool css_content_value_is_image_set(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+        (css_function_name_is(value->data.function, "image-set") ||
+         css_function_name_is(value->data.function, "-webkit-image-set"))) {
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < value->data.list.count; i++) {
+            if (css_content_value_is_image_set(value->data.list.values[i])) return true;
+        }
+    }
+    return false;
+}
+
+static bool block_has_auto_content_image_set(ViewBlock* block) {
+    if (!block || !block->specified_style) return false;
+    CssDeclaration* content_decl = style_tree_get_declaration(block->specified_style, CSS_PROPERTY_CONTENT);
+    if (!content_decl || !css_content_value_is_image_set(content_decl->value)) return false;
+
+    bool width_auto = !block->blk || block->blk->given_width < 0.0f ||
+        block->blk->given_width_type == CSS_VALUE_AUTO ||
+        block->blk->given_width_type == CSS_VALUE__UNDEF;
+    bool height_auto = !block->blk || block->blk->given_height < 0.0f ||
+        block->blk->given_height_type == CSS_VALUE_AUTO ||
+        block->blk->given_height_type == CSS_VALUE__UNDEF;
+    return width_auto || height_auto;
+}
+
 static int pseudo_check_quote_content(const CssValue* value) {
     if (!value) return 0;
     if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
@@ -681,16 +815,10 @@ static bool pseudo_materialize_content_children(LayoutContext* lycon, DomElement
         CssValue* item = (value->type == CSS_VALUE_TYPE_LIST) ? value->data.list.values[i] : value;
         if (!item) continue;
 
-        const char* raw_url = nullptr;
-        if (item->type == CSS_VALUE_TYPE_URL) {
-            raw_url = item->data.url;
-        } else if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function &&
-                   item->data.function->name && strcmp(item->data.function->name, "url") == 0 &&
-                   item->data.function->arg_count > 0 && item->data.function->args[0]) {
-            raw_url = pseudo_css_value_extract_name(item->data.function->args[0]);
-        }
+        CssContentImage content_image = {nullptr, 1.0f};
+        bool has_content_image = css_content_replacement_image(item, &content_image);
 
-        if (raw_url && raw_url[0]) {
+        if (has_content_image) {
             if (text_buf->length > 0) {
                 pseudo_append_text_child(pseudo_elem, text_buf->str);
                 text_buf->length = 0;
@@ -698,8 +826,9 @@ static bool pseudo_materialize_content_children(LayoutContext* lycon, DomElement
                 appended_any = true;
             }
 
-            DomElement* img_elem = pseudo_create_image_child(lycon, pseudo_elem, content_decl, raw_url);
+            DomElement* img_elem = pseudo_create_image_child(lycon, pseudo_elem, content_decl, content_image.url);
             if (img_elem) {
+                img_elem->embed->content_image_resolution = content_image.resolution;
                 pseudo_append_child(pseudo_elem, static_cast<DomNode*>(img_elem));
                 appended_any = true;
             }
@@ -5747,11 +5876,21 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     bool image_height_auto_derived = false;
     bool image_width_auto_derived = false;
 
-    if (elmt_name == HTM_TAG_IMG) { // load image intrinsic width and height
-        log_debug("[IMG LAYOUT] Processing IMG element: %s", block->source_loc());
-        const char *value;
-        value = block->get_attribute("src");
-        log_debug("%s [IMG LAYOUT] src attribute: %s", block->source_loc(), value ? value : "NULL");
+    CssDeclaration* content_replacement_decl = nullptr;
+    CssContentImage content_replacement_image = {nullptr, 1.0f};
+    if (elmt_name != HTM_TAG_IMG && block->display.inner == RDT_DISPLAY_REPLACED &&
+        block->specified_style) {
+        content_replacement_decl = style_tree_get_declaration(block->specified_style, CSS_PROPERTY_CONTENT);
+        if (content_replacement_decl) {
+            css_content_replacement_image(content_replacement_decl->value, &content_replacement_image);
+        }
+    }
+    bool is_generated_content_image = content_replacement_image.url && content_replacement_image.url[0];
+
+    if (elmt_name == HTM_TAG_IMG || is_generated_content_image) { // load image intrinsic width and height
+        log_debug("[IMG LAYOUT] Processing image-backed element: %s", block->source_loc());
+        const char *value = is_generated_content_image ? content_replacement_image.url : block->get_attribute("src");
+        log_debug("%s [IMG LAYOUT] source: %s", block->source_loc(), value ? value : "NULL");
         bool has_src_attr = value && value[0] != '\0';
         if (has_src_attr) {
             size_t value_len = strlen(value);
@@ -5761,7 +5900,13 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             if (!block->embed) {
                 block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
             }
-            block->embed->img = load_image(lycon->ui_context, src->str);
+            block->embed->content_image_resolution = is_generated_content_image ?
+                content_replacement_image.resolution : 0.0f;
+            char* resolved_content_url = is_generated_content_image ?
+                pseudo_resolve_content_url(lycon, content_replacement_decl, src->str) : nullptr;
+            const char* image_url = resolved_content_url ? resolved_content_url : src->str;
+            // content:url() has no src attribute, but it still creates a replaced image object.
+            block->embed->img = load_image(lycon->ui_context, image_url);
             strbuf_free(src);
             if (!block->embed->img) {
                 log_debug("%s Failed to load image", block->source_loc());
@@ -5776,6 +5921,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             bool from_image_orientation = image_orientation_uses_from_image(block->as_element());
             float w = (from_image_orientation || img->encoded_width <= 0) ? img->width : img->encoded_width;
             float h = (from_image_orientation || img->encoded_height <= 0) ? img->height : img->encoded_height;
+            float image_resolution = block->embed->content_image_resolution > 0.0f ?
+                block->embed->content_image_resolution : 1.0f;
+            w /= image_resolution;
+            h /= image_resolution;
             ObjectViewBoxUsedRect object_view_box = img->has_intrinsic_size
                 ? resolve_object_view_box_rect(lycon, block->as_element(), w, h)
                 : ObjectViewBoxUsedRect{false, 0.0f, 0.0f, w, h};
@@ -5953,6 +6102,26 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             log_debug("%s resolved percentage width %.0f%% against containing block %.1f -> %.1f",
                       block->source_loc(), block->blk->given_width_percent,
                       container_width, lycon->block.given_width);
+        }
+    }
+
+    if (block_has_auto_content_image_set(block)) {
+        // CSS content:image-set() does not make the originating element's auto
+        // block size fill its containing block; Chromium exposes a zero used box.
+        if (!block->blk) block->blk = alloc_block_prop(lycon);
+        if (lycon->block.given_width < 0.0f &&
+            (block->blk->given_width < 0.0f || block->blk->given_width_type == CSS_VALUE_AUTO ||
+             block->blk->given_width_type == CSS_VALUE__UNDEF)) {
+            lycon->block.given_width = 0.0f;
+            block->blk->given_width = 0.0f;
+            block->blk->given_width_type = CSS_VALUE__UNDEF;
+        }
+        if (lycon->block.given_height < 0.0f &&
+            (block->blk->given_height < 0.0f || block->blk->given_height_type == CSS_VALUE_AUTO ||
+             block->blk->given_height_type == CSS_VALUE__UNDEF)) {
+            lycon->block.given_height = 0.0f;
+            block->blk->given_height = 0.0f;
+            block->blk->given_height_type = CSS_VALUE__UNDEF;
         }
     }
 

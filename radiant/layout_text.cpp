@@ -1390,6 +1390,7 @@ static void propagate_text_trim(ViewText* text_view, float trim_amount) {
 void line_reset(LayoutContext* lycon) {
     log_debug("initialize new line");
     lycon->line.max_ascender = lycon->line.max_descender = 0;
+    lycon->line.max_css_baseline_ascender = 0;
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
     lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;  lycon->line.last_space_kind = BRK_TEXT;
     lycon->line.last_non_shy_space = NULL;  lycon->line.last_non_shy_space_pos = 0;
@@ -1504,6 +1505,42 @@ static bool fixup_view_is_out_of_flow(View* view) {
         elem->position->position == CSS_VALUE_FIXED ||
         elem->position->float_prop == CSS_VALUE_LEFT ||
         elem->position->float_prop == CSS_VALUE_RIGHT;
+}
+
+static void align_forced_break_rect_to_line_baseline(LayoutContext* lycon) {
+    if (!lycon || !lycon->view || lycon->view->view_type != RDT_VIEW_BR) return;
+
+    View* br_view = lycon->view;
+    float br_ascender = 0.0f;
+    float br_descender = 0.0f;
+    if (lycon->font.font_handle) {
+        font_get_content_area_split(lycon->font.font_handle, &br_ascender, &br_descender);
+    }
+    if (br_ascender <= 0.0f) {
+        br_ascender = lycon->block.init_ascender > 0.0f
+            ? lycon->block.init_ascender
+            : br_view->height;
+    }
+
+    float baseline_line_height = max(lycon->block.line_height,
+        lycon->line.max_ascender + lycon->line.max_descender);
+    float strut_baseline = lycon->block.init_ascender + lycon->block.lead_y;
+    if (!lycon->block.line_height_is_normal) {
+        float strut_content_height = lycon->block.init_ascender + lycon->block.init_descender;
+        if (strut_content_height > 0.0f) {
+            strut_baseline = lycon->block.init_ascender +
+                (lycon->block.line_height - strut_content_height) / 2.0f;
+        }
+    }
+
+    float baseline_pos = max(lycon->line.max_ascender, strut_baseline);
+    if (lycon->line.max_bottom_height > baseline_line_height) {
+        baseline_pos += lycon->line.max_bottom_height - baseline_line_height;
+    }
+
+    // A forced break exposes a zero-width inline box on the line it terminates;
+    // align it to the finalized baseline after replaced content expands the line.
+    br_view->y = lycon->block.advance_y + baseline_pos - br_ascender;
 }
 
 static bool fixup_span_children_have_no_line_content(ViewSpan* span);
@@ -1882,6 +1919,8 @@ void line_break(LayoutContext* lycon) {
         }
     }
     // else no change to vertical alignment
+
+    align_forced_break_rect_to_line_baseline(lycon);
 
     // horizontal text alignment
     line_align(lycon);
@@ -2446,12 +2485,25 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
         }
     }
     if (ascender > 0 || descender > 0) {
+        float half_leading = 0.0f;
+        float css_baseline_ascender = ascender;
         if (!lycon->block.line_height_is_normal) {
             // Half-leading model: adjust ascender/descender so their sum equals line-height
             float content_height = ascender + descender;
-            float half_leading = (lycon->block.line_height - content_height) / 2.0f;
+            half_leading = (lycon->block.line_height - content_height) / 2.0f;
             ascender += half_leading;
             descender += half_leading;
+            css_baseline_ascender = ascender;
+            const FontMetrics* m = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle) : NULL;
+            if (m) {
+                float table_ascender = (m->use_typo_metrics &&
+                    (m->typo_ascender > 0.0f || m->typo_descender > 0.0f))
+                    ? m->typo_ascender
+                    : m->hhea_ascender;
+                if (table_ascender > 0.0f) {
+                    css_baseline_ascender = table_ascender + half_leading;
+                }
+            }
         }
         // CSS 2.1 §10.8.1: vertical-align offset shifts the inline box position,
         // which affects the line box height. A positive offset raises the box,
@@ -2460,6 +2512,7 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
         if (va_offset != 0) {
             ascender += va_offset;
             descender -= va_offset;
+            css_baseline_ascender += va_offset;
         }
         log_debug("output_text BEFORE: prev_max_asc=%.1f prev_max_desc=%.1f new_asc=%.1f new_desc=%.1f va_off=%.1f va=%d",
             lycon->line.max_ascender, lycon->line.max_descender, ascender, descender, va_offset, lycon->line.vertical_align);
@@ -2481,6 +2534,10 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
             lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
             lycon->line.max_descender = max(lycon->line.max_descender, descender);
         }
+        // Replaced inline boxes align to the CSS font-table baseline, while text
+        // DOMRects can use platform raster ascents for their own visual bounds.
+        lycon->line.max_css_baseline_ascender =
+            max(lycon->line.max_css_baseline_ascender, css_baseline_ascender);
         // CSS 2.1 §10.8.1: Track if any inline text uses a different font from the
         // block's strut. When the strut font differs, the vertical alignment pass must
         // run to position content relative to the strut's baseline.

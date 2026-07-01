@@ -250,6 +250,31 @@ string ws = \s+                  // one or more whitespace chars
 string word = \w+                // word characters
 ```
 
+### slice(str, start, end?)
+
+Extract a UTF-8 character slice from a string. `slice(str, start, end)` uses a
+zero-based start index inclusive and end index exclusive (`[start, end)`);
+`slice(str, start)` slices from `start` to the end. Negative indices count from
+the end, and out-of-range indices are clamped.
+
+Range subscript syntax is also supported: `str[a to b]` returns characters
+`a` through `b`, inclusive. In other words, `str[a to b]` is equivalent to
+`slice(str, a, b + 1)`.
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `slice(str, i, j)` | Characters `[i, j)` | `slice("hello", 1, 4)` | `"ell"` |
+| `slice(str, i)` | Characters `[i, end)` | `slice("hello", 2)` | `"llo"` |
+| `str[i to j]` | Characters `i` through `j`, inclusive | `"hello"[1 to 3]` | `"ell"` |
+
+```lambda
+slice("hello", 0, 2)      // "he"
+slice("hello", 2)         // "llo"
+slice("café", 2, 4)       // "fé"  — UTF-8 character indices
+"hello"[0 to 4]           // "hello"
+"hello"[1 to 3]           // "ell"
+```
+
 ### replace(str, pattern_or_string, replacement)
 
 Replace all occurrences of a pattern or substring in a string. Returns a new string.
@@ -464,7 +489,7 @@ url_resolve("https://example.com/a/", "page.html") // "https://example.com/a/pag
 
 ### ord(str)
 
-Return the Unicode code point (integer) of the first character. Works on both strings and symbols.
+Return the Unicode code point (`int`) of the first character. Works on both strings and symbols.
 
 ```lambda
 ord("A")             // 65
@@ -791,7 +816,7 @@ Functions that have side effects (I/O, state changes). These are only available 
 
 | Function | Description | Example |
 |----------|-------------|---------|
-| `print(x)` | Print to console | `print("Hello!")` |
+| `print(args...)` | Print values to console | `print("x =", x)` |
 | `output(data, target)` | Write data to file/URL | `output(data, /.'out.json')` |
 | `data \|> target` | Pipe output (write/truncate) | `data \|> /.'result.json'` |
 | `data \|>> target` | Pipe output (append) | `line \|>> /.'log.txt'` |
@@ -807,14 +832,16 @@ Functions that have side effects (I/O, state changes). These are only available 
 | `cmd(command, args...)` | Execute shell command | `cmd("ls", "-la")` |
 | `clock()` | Monotonic clock in seconds | `clock()` |
 
-#### print(x)
+#### print(args...)
 
-Prints a value to the console (stdout).
+Prints values to the console (stdout). Arguments are stringified and joined
+with a single space separator.
 
 ```lambda
 print("Hello, world!")
 print(42)
 print([1, 2, 3])
+print("x =", 42)
 ```
 
 #### output(data, target) / output(data, target, format)
@@ -1195,7 +1222,7 @@ if (result is error) {
 ### I/O Functions (Procedural)
 | Function | Args | Description |
 |----------|------|-------------|
-| `print` | 1 | Print to console |
+| `print` | 0+ | Print values to console |
 | `output` | 2-3 | Write to file/URL |
 | `\|>` | 2 | Pipe write (truncate) |
 | `\|>>` | 2 | Pipe write (append) |

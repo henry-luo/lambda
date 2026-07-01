@@ -138,4 +138,182 @@ Added `test/js/class_field_arrow_nested_this.{js,txt}` covering:
 - `./lambda.exe js test/js/class_field_arrow_nested_this.js --no-log` → matches expected output
 - `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/*class_field_arrow_nested_this*'` → passed
 - `make build` → passed
+
+---
+---
+
+# Bug 2 — residual: class field-arrow with MIXED captures (`this` + a called module binding) still loses `this`
+
+**Date:** 2026-07-01 · **Component:** same (JS→MIR class field-init `this` capture) · **Status:** FIXED
+**Discovered by:** Stage 4C — Bug 1's fix unblocked the simple cases, but `test/editor-js/test/view/editor-view-dom.test.ts` (~9) + `full-editor-dom.test.ts` (~14) still crash: the editor **mounts** (constructor `this` now correct), then the first `beforeinput` dispatch fails.
+
+## 1. The issue (what remains)
+
+Bug 1's fix forces a private (copied) closure env for a field-initializer arrow **only when the arrow's captures are *exclusively* lexical meta bindings** (`_js_this` / `_js_new.target` / `_js_arguments`). But a real event handler almost always **also captures an ordinary binding** — e.g. it calls an imported/module function. `EditorViewDom.handleBeforeInput = (ev) => { const intent = intentFromInputEvent(ev); … this.state … }` captures **both** `_js_this` **and** `intentFromInputEvent`. For such a **mixed-capture** arrow the guard is bypassed, the arrow reverts to the enclosing function's shared scope-env `_js_this`, and `this` is lost again — reintroducing Bug 1 for the dominant real-world shape.
+
+## 2. Symptom
+
+`this` is `undefined` at the very start of the dispatched field-arrow handler:
+`TypeError: Cannot read properties of undefined (reading 'state')` (from `handleBeforeInput`'s `const cur = this.state`), swallowed by `fire_listeners` as `event listener for 'beforeinput' threw; continuing dispatch`; in a full bundle it surfaces as the same `AddressSanitizer: BUS` in `js_debug_check_callee` → `get_type_id` (`lambda/js/js_runtime.cpp:8943`). The editor mounts fine (Bug 1 fixed constructor-time `this`), then the first `beforeinput` dispatch throws/crashes.
+
+## 3. Minimal reproduce
+
+Single class, one imported function called from the handler — `temp/4c-spikes/min2crash.js`:
+```js
+import { intentFromInputEvent } from './src/view/intent-from-input-event.js'  // any cross-module fn
+class A {
+  state = { n: 1 }; d;
+  constructor(){ this.d = document.createElement('div'); document.body.appendChild(this.d);
+                 this.d.addEventListener('beforeinput', this.h); }
+  h = (ev) => { intentFromInputEvent(ev);                 // <-- captures a module binding
+                globalThis.__A = (this && this.state) ? 'OK' : 'THIS-UNDEF'; }
+}
+new A().d.dispatchEvent(new InputEvent('beforeinput', { bubbles:true }));
+console.log(globalThis.__A);
+```
+esbuild → IIFE, run `./lambda.exe js min2crash.js --document page.html`.
+- **Expected:** `OK` · **Actual:** `THIS-UNDEF`
+
+**Control matrix** (single variable isolated — `temp/4c-spikes/call.js`, `mixed.js`):
+
+| Field-arrow handler body | `this` |
+|---|---|
+| calls an **imported (cross-module)** function + reads `this` | **THIS-UNDEF (bug)** |
+| same class, imports present, but handler does **not** call it | OK |
+| calls a **local (same-file)** function + reads `this` | OK |
+| captures an outer local **var** + reads `this` | OK |
+| reads `this` only (the Bug-1 shape) | OK (fixed) |
+
+The single trigger: **the field-arrow captures `this` *and* a cross-module binding (calls an imported function).**
+
+## 4. Root cause diagnosis
+
+MIR dump of `min2crash.js` (`JS_MIR_DUMP=1 ./lambda.exe js temp/4c-spikes/min2crash.js --document page.html` → `temp/js_mir_dump.txt`): the handler arrow `_js_anon0_1251` has **both** `_js_intentFromInputEvent_171` and `_js_this_172` in its locals, and reads `_js_this` from its **closure env slot**:
+```
+_js_anon0_1251: func i64, i64:_js.env, i64:_js_ev
+    …
+    mov  _js_this_172, i64:16(_js.env)                 # _js_this from closure env (slot 2)
+    call js_resolve_lexical_this, …, _js_this_172
+```
+That env slot was populated at closure creation from the **enclosing function's shared scope-env `_js_this`** (undefined in the IIFE) — because Bug 1's `force_closure_env_copy` guard **did not fire** for this arrow: its capture set is **not exclusively** lexical meta bindings (it also captures `intentFromInputEvent`).
+
+**Residual root cause:** the guard condition is **too narrow**. It forces the private-closure-env copy + `_js_this` rebind only for arrows whose captures are *purely* `_js_this`/meta, not for the (dominant) case of an arrow capturing `_js_this` **plus** one or more ordinary bindings. Same layer (JS→MIR lowering); reproduces identically under `JS_MIR_INTERP=1`.
+
+## 5. Fix landed
+
+Widened Bug 1's capture guard — `jm_force_copied_env_for_field_initializer` (`lambda/js/js_mir_expression_lowering.cpp` ~12460). The old test forced the private closure-env copy only when **every** capture was a lexical meta binding (`for (…) if (!is_meta(cap)) return false; return true;`). It now forces the copy when the arrow captures a meta binding **at all**, regardless of other captures:
+```c
+for (int ci = 0; ci < fc->capture_count; ci++)
+    if (jm_capture_is_lexical_meta_binding(fc->captures[ci].name)) return true;
+return false;
+```
+`mt->force_closure_env_copy` is set only during field initialization, so this only affects field-initializer arrows. (Rare edge case knowingly accepted: a field-init arrow that captures `this` **and mutates** an ordinary outer binding now gets a copied env, so that mutation would not persist to the outer scope — but such an arrow's `this` was already broken, and the real-world captures are read-only function references.)
+
+### Validation
+- `./lambda.exe js temp/4c-spikes/min2crash.js --document page.html` → `OK` (was `THIS-UNDEF`)
+- `./lambda.exe js temp/4c-spikes/call.js --document page.html` → A and B both correct; `mixed.js` D/E correct
+- Bug 1 unchanged: `min_this.js` → `INSTANCE`; `test_js_gtest` `*class_field_arrow_nested_this*` passes
+- No regression: Stage-4C core **207/209**, tier_e **520/520**; `test_js_gtest` **299 passed** (only pre-existing `vm_runincontext_cross_unit` fails); `make build` clean
+- Stage-4C view bundle `editor-view-dom`: **crash → runs (3/9)** — the this-capture crash is gone. *(Remaining `editor-view-dom` failures ("…reading 'doc'": the edit pipeline yields no transaction) and the `full-editor-dom` crash are SEPARATE follow-ups, not this bug.)*
+- Recommended before merge: `make node-baseline` (class `this` is load-bearing).
 - `git diff --check` → clean
+
+---
+---
+
+# Bug 3 — LambdaJS headless (`lambda.exe js --document`): post-dispatch `process.exitCode` lookup interns with `context == NULL`
+
+**Date:** 2026-07-01 · **Component:** LambdaJS runtime — `process.exitCode` bridge across JS `EvalContext` lifetime · **Status:** FIXED — and confirmed to be a RED HERRING for the editor (the real editor blocker is a separate `onChange is not a function` / "Bug 4")
+**Discovered by:** Stage 4C — while chasing the editor's post-Bug-2 `editor-view-dom` failures.
+
+> **READ §5–§6 FIRST.** §1–§4 preserve the *initial* diagnosis and are partly superseded. The live repro showed the failing intern happens **after** the dispatched handler and after `transpile_js_to_mir` restores `context` to the caller's old value (`NULL` on CLI `js --document`), when `main.cpp` asks `js_process_current_exit_code()` one more time. It is a genuine runtime boundary bug, but it is NOT what breaks the Stage-4C view tests.
+
+## 1. The issue
+
+`heap_create_name()` (`lambda/lambda-mem.cpp:557`) interns structural identifiers (map keys, element tags, attribute/mark names) via `context->name_pool`, where `context` is the thread-local `EvalContext*`:
+```c
+String* heap_create_name(const char* name, size_t len) {
+    if (!context || !context->name_pool) { log_error("heap_create_name called with invalid context or name_pool"); return nullptr; }
+    return name_pool_create_len(context->name_pool, name, len);
+}
+```
+On the `lambda.exe js --document` path, the original suspicion was that `context`/`context->name_pool` became invalid inside `js_dom_dispatch_event` → `fire_listeners` → `js_call_function`. That framing was wrong. The handler's own dynamic object/Map interning succeeds; the invalid intern happens later, after JS execution has completed and the CLI queries process exit state without an active JS `EvalContext`.
+
+## 2. Symptom
+
+Log (even with most logging off):
+```
+[ERR!] heap_create_name called with invalid context or name_pool
+[ERR!] map_get: key must be string or symbol, got type null
+```
+For trivial handler code the JS-visible result still looks right (the value semantics survive a failed intern). ~~For the editor, the null names corrupt the produced transaction…~~ **Correction (see §5):** this causal link was WRONG. The editor's transaction is produced correctly (`P5 tx=ok`); the failing interns observed (`'exitCode'`) are post-dispatch noise, and the `editor-view-dom` "reading 'doc'" failures come from a *separate* bug (`onChange is not a function`, Bug 4), not from Bug 3.
+
+## 3. Minimal reproduce
+
+`temp/4c-spikes/interncmp.js` — intern in a plain call (OK) vs a dispatched handler (fails):
+```js
+"use strict";
+function doIntern(t){ var o = {}; o['k'+t] = 1; var m = new Map(); m.set('key'+t, 2); return o['k'+t] + m.get('key'+t); }
+console.log('A plain-call=' + doIntern('A'));                       // 0 heap_create_name errors
+var d = document.createElement('div'); document.body.appendChild(d);
+d.addEventListener('keydown', function(){ globalThis.__B = doIntern('B'); });
+d.dispatchEvent(new KeyboardEvent('keydown', { key:'x', bubbles:true }));  // 2 heap_create_name errors in log.txt
+console.log('B dispatched=' + globalThis.__B);
+```
+Run: `./lambda.exe js interncmp.js --document page.html` (WITHOUT `--no-log`), then inspect `log.txt`:
+- **Expected:** 0 `heap_create_name … invalid context` errors
+- **Actual before fix:** 2 errors, but log ordering proves they occur after `js-mir: transpilation completed`, not inside the handler body.
+
+End-to-end editor probe (`temp/4c-spikes/pipe2.js`): a real `EditorViewDom`-shaped handler runs and prints `P5 tx=ok steps=1` (the tx IS produced). The `heap_create_name` errors were post-dispatch noise, not the editor blocker.
+
+## 4. Root cause diagnosis
+
+`context` (thread-local `EvalContext*`) is the source of `name_pool` for `heap_create_name`. It is established for the top-level script run and remains valid through the synchronous DOM dispatch. The actual failing path is the CLI/process bridge after the JS MIR entrypoint returns:
+
+1. `transpile_js_to_mir_core_len()` calls `js_process_current_exit_code()` while the JS context is still active, which synchronizes the C-side `js_process_exit_code_value` cache from `process.exitCode`.
+2. The entrypoint then restores `context = old_context`; on standalone `lambda.exe js --document`, `old_context` is `NULL`.
+3. `lambda/main.cpp` computes the final exit code by calling `js_process_current_exit_code()` again.
+4. The old implementation tried to read `process.exitCode` from the JS object every time, so it called `heap_create_name("exitCode")` with `context == NULL`, producing the two `heap_create_name` errors and the null-key `map_get` error.
+
+Confirmed by `log.txt`: before the fix, the invalid-context errors appear after `js-mir: transpilation completed`, not between the dispatch-site and handler-call logs. The first failing intern is `"exitCode"`.
+
+**Correction (see §5–§6):** the initial framing above — "the dispatch path does not re-establish `context`" — is incorrect. `js_call_function` does not touch `context`, and `context` is valid at the dispatch site. The pointer is restored to `NULL` only after JS execution completes.
+
+### Key files
+- `lambda/lambda-mem.cpp:557` `heap_create_name` (the `context->name_pool` guard)
+- `lambda/js/js_globals.cpp:2641` `js_process_current_exit_code` (fixed boundary)
+- `lambda/js/js_mir_entrypoints_require.cpp:995`/`:1009` syncs process exit code while JS context is active
+- `lambda/js/js_mir_entrypoints_require.cpp:1052` restores `context = old_context`
+- `lambda/main.cpp:2387` asks for final JS exit code after the JS entrypoint has returned
+
+## 5. Refined findings + attempt log (2026-07-01)
+
+Deeper diagnosis with a pointer-level probe (log `context` / `context->name_pool` / `_lambda_rt` at the dispatch site vs at the `heap_create_name` failure), plus final log ordering:
+- **At the dispatch site** (`fire_listeners`, before `js_call_function`): `context`, `context->name_pool`, and `_lambda_rt` are ALL valid and consistent.
+- **At the failure point**: **`context == NULL`** (not merely a null `name_pool`) and first failing intern is `"exitCode"`.
+- **Ordering proof**: `log.txt` shows the invalid-context errors after `js-mir: transpilation completed`, so the failure is outside the dispatched handler body.
+
+So the loss is not at the dispatch boundary, and not inside the handler's own interning. The correct invariant is: `js_process_current_exit_code()` may read the JS `process` object only while an `EvalContext` is active; after the JS entrypoint returns, it must use the scalar exit-code cache that was already synchronized while the context was live.
+
+### Attempts (both reverted)
+1. **Restore `context` from `_lambda_rt` at the `fire_listeners` dispatch site** — no effect: `context` is valid there and gets nulled later. Reverted.
+2. **Fallback in `heap_create_name`: use `_lambda_rt`'s `name_pool` when `context`/`name_pool` is null** — eliminated the interning errors (`interncmp.js` 2→0), **but** (a) regressed the JS unit suite by ~13 (299→286: typed-array/DataView/child_process/fuzz) because `heap_create_name` is core and `_lambda_rt` is stale in contexts where `context` is *legitimately* null, and (b) **did NOT fix the editor**. Reverted.
+
+### IMPORTANT — `heap_create_name` was a RED HERRING for the editor
+Fixing the interning errors left `editor-view-dom` at **3/9** unchanged. The `'exitCode'` interning failures are post-dispatch noise, not the edit-pipeline blocker. The transaction IS produced (`P5 tx=ok`). **The editor's real blocker is a SEPARATE bug:** `editor-view-dom` fails with **`onChange is not a function`** — inside `EditorViewDom.dispatch = (action) => { … this.onChange?.(this.state) }`, `this.onChange` holds a non-function (the empty `seenStates` → `Cannot read properties of undefined (reading 'doc')` cascades from that). This looks like *another* instance-field/`this`-binding corruption in the dispatched path (`this.onChange` was set from `opts.onChange`, a function) and should be filed/diagnosed as **Bug 4** — it, not Bug 3, is what blocks the Stage-4C view tests.
+
+## 6. Fix landed
+
+`js_process_current_exit_code()` now reads `process.exitCode` from the JS object only when `context && context->name_pool` is valid. After the JS entrypoint has restored `context` to the CLI caller's old value, it returns the already-synchronized `js_process_exit_code_value` scalar instead. This keeps `heap_create_name()` strict and avoids the reverted `_lambda_rt` fallback.
+
+Regression added:
+- `test/js/js_document_exit_context.{js,html,txt}` covers the visible `js --document` behavior.
+- `JavaScriptRegression.DocumentExitCodeAfterContextRestoreDoesNotInternWithNullContext` runs the same script without `--no-log`, then asserts `log.txt` has no `heap_create_name called with invalid context or name_pool` or null-key `map_get` errors.
+
+Validation:
+- `./lambda.exe js temp/4c-spikes/interncmp.js --document temp/4c-spikes/page.html` → `A plain-call=3`, `B dispatched=3`, 0 invalid-context errors.
+- `./lambda.exe js test/js/js_document_exit_context.js --document test/js/js_document_exit_context.html` → same output, 0 invalid-context errors.
+- `make build` → passed.
+- `make build-test` → passed (pre-existing warning noise only).
+- `./test/test_js_gtest.exe --gtest_filter=JavaScriptRegression.DocumentExitCodeAfterContextRestoreDoesNotInternWithNullContext` → passed.
+- `./test/test_js_gtest.exe --gtest_filter=JavaScriptTests/JsFileTest.Run/js_document_exit_context` → passed.

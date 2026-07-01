@@ -148,6 +148,13 @@ static void annotate_css_stylesheet_source_file(CssStylesheet* stylesheet, const
     }
 }
 
+static bool resolve_wpt_root_resource_path(const char* href, char* out_path, size_t out_size) {
+    // WPT server-root fixtures such as /fonts/... live outside test/layout/data/support.
+    if (strlen("ref/wpt") + strlen(href) + 1 > out_size) return false;
+    snprintf(out_path, out_size, "ref/wpt%s", href);
+    return access(out_path, R_OK) == 0;
+}
+
 static bool resolve_layout_support_resource_path(const char* href, const char* base_path,
                                                  char* out_path, size_t out_size) {
     if (!href || href[0] != '/' || href[1] == '/' || !base_path || !out_path || out_size == 0) {
@@ -173,7 +180,8 @@ static bool resolve_layout_support_resource_path(const char* href, const char* b
     if (!data_marker) {
         if (strlen("test/layout/data/support") + strlen(href) + 1 > out_size) return false;
         snprintf(out_path, out_size, "test/layout/data/support%s", href);
-        return access(out_path, R_OK) == 0;
+        if (access(out_path, R_OK) == 0) return true;
+        return resolve_wpt_root_resource_path(href, out_path, out_size);
     }
 
     size_t data_root_len = data_marker - base_local + marker_prefix_len + strlen("data");
@@ -183,7 +191,8 @@ static bool resolve_layout_support_resource_path(const char* href, const char* b
     out_path[data_root_len] = '\0';
     strncat(out_path, "/support", out_size - strlen(out_path) - 1);
     strncat(out_path, href, out_size - strlen(out_path) - 1);
-    return access(out_path, R_OK) == 0;
+    if (access(out_path, R_OK) == 0) return true;
+    return resolve_wpt_root_resource_path(href, out_path, out_size);
 }
 
 static bool css_file_url_to_local_path(const char* href, char* out_path, size_t out_size) {

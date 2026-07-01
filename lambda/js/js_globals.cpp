@@ -37,6 +37,7 @@ extern "C" Item js_internal_binding(Item name);
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" void js_note_array_prototype_push_tamper(Item object, Item key);
 extern double js_get_number(Item value);
+extern __thread EvalContext* context;
 
 #define JS_FUNC_FLAG_HAS_BOUND_THIS_G 16
 
@@ -2640,13 +2641,15 @@ extern "C" Item js_process_set_exitCode(Item code_item) {
 
 extern "C" int js_process_current_exit_code(void) {
     int code = js_process_exit_code_value;
-    if (js_process_object.item != ITEM_NULL) {
+    if (js_process_object.item != ITEM_NULL && context && context->name_pool) {
         Item prop = js_property_get(js_process_object,
             (Item){.item = s2it(heap_create_name("exitCode", 8))});
         TypeId type = get_type_id(prop);
         if (type == LMD_TYPE_INT) code = (int)it2i(prop);
         else if (type == LMD_TYPE_FLOAT) code = (int)it2d(prop);
     }
+    // process exit code is queried once more by the CLI after the JS EvalContext
+    // has been restored; at that boundary only the synchronized scalar is valid.
     js_process_exit_code_value = code;
     return code;
 }

@@ -68,34 +68,35 @@ probe), with coverage in `test/lambda/proc/proc_implicit_if_return.ls`.
 
 ## 3. `print()` is single-argument; multi-arg call type-errors at runtime
 
+**Status: ✅ Fixed (2026-07-01)** — `print` is variadic. Each argument is
+stringified and adjacent arguments are separated by one space.
+
 ```lambda
 print("x=", x)
-// runtime error [212]: fn_call2: cannot call non-function value
+// prints: x= 42
 ```
 
-Every sane print expects varargs. The runtime error message also doesn't
-mention `print` or "too many arguments" — it says "non-function value",
-which sent me hunting for a missing import.
-
-**Asks**:
-- Make `print` variadic and space-join (or stringify-join) like most
-  REPLs.
-- At minimum, raise `"print expects 1 argument, got N"`.
+The default separator is currently a literal space. If Lambda grows a global
+runtime print configuration later, that separator is the intended extension
+point.
 
 ---
 
 ## 4. `?` post-fix error propagation does not work in `let`
 
+**Status: ✅ No Fix / by design (2026-07-01)** — `?` is not Lambda's
+error-propagation syntax. The current postfix propagation operator is `^`,
+including on the right-hand side of a `let`.
+
 ```lambda
-let doc = input("file.pdf", 'pdf')?    // syntax error
-let doc^err = input("file.pdf", 'pdf') // works
+let doc = input("file.pdf", 'pdf')?    // wrong: stale syntax
+let doc = input("file.pdf", 'pdf')^    // correct: propagate on error
+let doc^err = input("file.pdf", 'pdf') // correct: capture value/error
 ```
 
-`?` is documented in `doc/Lambda_Error_Handling.md` as a propagation
-operator and works in expression context, but the parser rejects it on the
-right-hand side of a `let`. This is surprising because `let a^err = …` is
-the common destructuring form documented elsewhere — both should work or
-the docs should call out the restriction.
+The older issue came from stale examples that described `?` as propagation.
+Current docs should use `^` for propagation and keep `let a^err = ...` for
+explicit value/error destructuring.
 
 ---
 
@@ -120,21 +121,25 @@ range checker, of which a tokenizer has dozens.
 
 ## 6. `ord(c)` returns "wider int" that is rejected by `int` parameters
 
+**Status: ✅ Fixed (2026-07-01)** — `ord()` now has Lambda-level return type
+`int`. The C ABI still returns `int64_t`, but Unicode code points fit within
+the compact `int` value range, so callers annotated with `int` can accept
+`ord()` directly.
+
 ```lambda
 fn is_digit(k: int) { (k >= 48) and (k <= 57) }
 is_digit(ord("0"))
-// error[E201]: argument 1 has incompatible type 5, expected 4
+// true
 ```
 
-`ord` returns "type 5" (presumably `int64`), but the parameter annotation
-`int` accepts only "type 4". The fix is to drop the annotation entirely.
+`ord` previously returned "type 5" (`int64`), while the parameter annotation
+`int` accepted only "type 4". Since the widest Unicode scalar value is
+`U+10FFFF`, `ord()` does not need the wider Lambda `int64` type.
 
 **Asks**:
-- Auto-widen / coerce on call (this is just `int → int64`, never lossy).
-- Or expose the wider type by name (e.g. `int64`, `i64`) so users can
-  annotate without guessing.
-- The error message gives raw type IDs (`5`, `4`) instead of names — even
-  `expected int, got int64` would save a search.
+- Completed by narrowing `ord()`'s Lambda-level return type to `int`.
+- Completed by changing compile-time type mismatch diagnostics to print type
+  names instead of raw IDs, e.g. `expected int, got int64`.
 
 ---
 
@@ -155,15 +160,38 @@ children expression has any whitespace.
 
 ## 8. `format(elem, 'html')` strips attributes from non-HTML elements
 
+**Status: ✅ Fixed / verified (2026-07-01)** — current `format(..., 'html')`
+preserves attributes on non-HTML/SVG elements inside an HTML tree.
+
+```lambda
+let tree = <div class: "wrap";
+    <svg width: 100, height: 50;
+        <rect width: 10, height: 5, fill: "red">
+    >
+>
+
+let html = format(tree, 'html')
+// contains: <svg width="100" height="50">
+// contains: <rect width="10" height="5" fill="red">
+```
+
 When an SVG subtree (`<rect width: 10; height: 5>`) is embedded inside a
 larger HTML/element tree and formatted with `'html'`, the formatter drops
 all attributes from non-HTML tags. Switching to `format(root, 'xml')`
 preserves them. This is undocumented; users building SVG-in-HTML pages
 trip over this immediately.
 
+The current formatter walks the element shape fields for every tag rather than
+filtering by known HTML tag names, so SVG and other non-HTML element attributes
+are emitted as normal HTML attributes.
+
 ---
 
 ## 9. Single-quote vs double-quote strings produce non-equal values
+
+**Status: ✅ No Fix / by design (2026-07-01)** — single-quoted literals are
+`symbol` values; double-quoted literals are `string` values. Equality does not
+coerce between `symbol` and `string`, even when their spelling is identical.
 
 ```lambda
 let t = 'name'    // symbol
@@ -171,15 +199,17 @@ let s = "name"    // string
 print(t == s)     // false
 ```
 
-Parser output uses string `"indirect_ref"` for the `type:` field of
-indirect-reference maps. Comparing against `'indirect_ref'` (the natural
-"tag" form) silently never matches. Worth documenting prominently or
-adding implicit coercion for `==` between symbol and string of equal
-spelling.
+This is intentional: symbols are interned identifiers/tags, while strings are
+text data. When a field stores a string value such as `"indirect_ref"`, compare
+against a string literal, or convert explicitly with `string(...)` /
+`symbol(...)` at the boundary.
 
 ---
 
 ## 10. `let` bindings cannot be reassigned inside `pn`
+
+**Status: ✅ No Fix / by design (2026-07-01)** — `let` bindings are immutable in
+both `fn` and `pn`; use `var` for any local that must be reassigned.
 
 ```lambda
 pn build() {
@@ -188,17 +218,17 @@ pn build() {
 }
 ```
 
-Easy to forget — `var` is required for any value that participates in a
-loop or mutation. The error currently just says "cannot assign to let
-binding" which is fine, but it would be nice if the suggestion was
-"declare with `var` instead of `let`".
+The diagnostic now keeps this as a compile-time immutable-assignment error and
+adds the actionable hint: ``cannot assign to let binding 'm'. declare with `var` instead of `let`.``.
 
 ---
 
 ## 11. No string slicing builtin
 
-There is no `substring(s, a, b)` or `s[a..b]`. Every parser ends up
-hand-rolling:
+**Status: ✅ Fixed (2026-07-01)** — Lambda supports both `slice(string, a, b)`
+and range subscript syntax `str[a to b]` for string slicing.
+
+Original concern: without a primitive, every parser had to hand-roll:
 
 ```lambda
 pn slice_str(s, a, b) {
@@ -209,27 +239,18 @@ pn slice_str(s, a, b) {
 }
 ```
 
-This is O(n²) for repeated appends because `++` allocates a new string
-each iteration. For a tokenizer scanning a 250-byte content stream this
-is fine, but for any larger document it becomes the bottleneck.
-
-**Asks**:
-- Add `slice(s, a, b)` / `s[a..b]` / `string_slice(s, a, b)` as a
-  primitive that does a single allocation.
+That O(n²) repeated-append workaround is no longer needed. Use
+`slice(s, start, end)` for `[start, end)` slicing, `slice(s, start)` to slice to
+the end, or `s[start to end]` for inclusive range-subscript syntax.
 
 ---
 
 ## 12. `pn main()` does not auto-print its return value
 
-`./lambda.exe run script.ls` calls `main()` but discards the return value.
-Functional scripts without `pn main()` print the top-level expression.
-This dual behaviour is fine but not obvious from the help text — first
-runs of `pn main() { compute() }` produce zero output and look broken.
-
-**Asks**:
-- Either auto-print the return value of `main`,
-- Or make the help/REPL banner mention "use `print(...)` to emit output
-  from `pn main()`".
+**Status: ✅ Fixed (2026-07-01)** — `./lambda.exe run script.ls` now prints a
+non-null return value from `pn main()`, matching the functional script path's
+auto-print behavior. `null` returns remain silent so existing print-only
+procedural scripts do not emit a stray `null`.
 
 ---
 

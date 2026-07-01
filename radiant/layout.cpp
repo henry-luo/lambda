@@ -165,9 +165,9 @@ static bool root_child_margins_are_self_collapsing(ViewBlock* block) {
         return false;
     }
 
-    bool creates_bfc = block->scroller &&
-        (block->scroller->overflow_x != CSS_VALUE_VISIBLE ||
-         block->scroller->overflow_y != CSS_VALUE_VISIBLE);
+    // Use the shared BFC predicate so root-body overflow propagation does not
+    // make an otherwise empty body count both adjoining margins in root height.
+    bool creates_bfc = block_context_establishes_bfc(block);
     if (creates_bfc) return false;
     if (block->position && element_has_float(block)) return false;
     if (block->display.inner == CSS_VALUE_FLOW_ROOT ||
@@ -1259,6 +1259,13 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         }
     }
     float baseline_pos = max(lycon->line.max_ascender, strut_baseline);
+    float replaced_baseline_pos = baseline_pos;
+    if (lycon->line.has_replaced_content &&
+        lycon->line.max_css_baseline_ascender > replaced_baseline_pos) {
+        // Replaced inline boxes align to the CSS font baseline, not the platform
+        // text DOMRect ascent used to size glyph bounds.
+        replaced_baseline_pos = lycon->line.max_css_baseline_ascender;
+    }
     // CSS 2.1 §10.8.1: When a bottom-aligned element is taller than the tentative
     // line box (from baseline-aligned content), the line box extends upward,
     // shifting the baseline down relative to the new line box top.
@@ -1357,8 +1364,10 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             // Recompute line_height with updated max_ascender
             line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
         }
+        float align_baseline_pos = block->display.inner == RDT_DISPLAY_REPLACED ?
+            replaced_baseline_pos : baseline_pos;
         float vertical_offset = calculate_vertical_align_offset(lycon, align, item_height,
-            line_height, baseline_pos, item_baseline, valign_offset);
+            line_height, align_baseline_pos, item_baseline, valign_offset);
         block->y = lycon->block.advance_y + max(vertical_offset, 0) + (block->bound ? block->bound->margin.top : 0);
         bool has_inline_margins = block->bound &&
             (block->bound->margin.top != 0.0f ||
@@ -2077,8 +2086,8 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 ViewSpan* marker_span = lam::view_require_element(set_view(lycon, RDT_VIEW_MARKER, elem));
                 if (marker_span) {
                     marker_span->width = marker_prop->width;
-                    // Use CSS computed line-height for marker height (not raw font metrics)
-                    marker_span->height = lycon->block.line_height;
+                    marker_span->height = (marker_prop->loaded_image && marker_prop->height > 0.0f) ?
+                        marker_prop->height : lycon->block.line_height;
 
                     if (marker_prop->is_outside) {
                         // Outside marker: position to the left of content area
@@ -2093,7 +2102,19 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                         lycon->line.advance_x += marker_prop->width;
                     }
 
-                    if (!marker_prop->is_outside) {
+                    bool raster_image_raises_line = marker_prop->loaded_image &&
+                        marker_prop->loaded_image->format != IMAGE_FORMAT_SVG &&
+                        marker_span->height > lycon->block.line_height;
+                    if (raster_image_raises_line) {
+                        // Image markers participate in first-line metrics; ignore SVG fallback
+                        // dimensions so unresolved vector markers do not inflate list items.
+                        if (marker_span->height > lycon->line.max_ascender) {
+                            lycon->line.max_ascender = marker_span->height;
+                        }
+                        if (!lycon->line.start_view) lycon->line.start_view = (View*)marker_span;
+                        lycon->line.is_line_start = false;
+                        lycon->line.has_replaced_content = true;
+                    } else if (!marker_prop->is_outside) {
                         // Inside markers contribute to line height and mark the line as non-empty
                         // Apply half-leading model same as inline text (CSS 2.1 §10.8.1)
                         float ascender = 0, descender = 0;
@@ -2129,8 +2150,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                             lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_lh);
                         }
                     }
-                    // Outside markers: positioned outside content area, don't create a line box
-                    // They are placed at advance_y and will align with the first content line
 
                     log_debug("%s [MARKER] Laid out %s marker width=%.1f, height=%.1f at (%.1f, %.1f)", node->source_loc(),
                              marker_prop->is_outside ? "outside" : "inside",

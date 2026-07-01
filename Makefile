@@ -1202,7 +1202,7 @@ test-input-baseline: build-test ensure-yaml-submodule
 	echo "{\"total_passed\":$$total_passed,\"total_failed\":$$total_failed,\"suites\":[{\"name\":\"HTML5 WPT Parser\",\"passed\":$$wpt_passed,\"failed\":$$wpt_failed},{\"name\":\"CommonMark Markdown\",\"passed\":$$md_passed,\"failed\":$$md_failed},{\"name\":\"YAML Suite\",\"passed\":$$yaml_passed,\"failed\":$$yaml_failed},{\"name\":\"ASCII Math\",\"passed\":$$math_passed,\"failed\":$$math_failed},{\"name\":\"LaTeX Math\",\"passed\":$$latex_math_passed,\"failed\":$$latex_math_failed}]}" > test_output/input_baseline_results.json
 
 # Layout baseline suites - add new suites here (each must have baseline.txt in its data dir)
-LAYOUT_BASELINE_SUITES ?= baseline form wpt-css-text wpt-css-inline wpt-css-multicol puppertino markdown
+LAYOUT_BASELINE_SUITES ?= baseline form wpt-css-text wpt-css-inline wpt-css-images wpt-css-multicol puppertino markdown
 
 test-radiant-baseline: build-test
 	@$(MAKE) --no-print-directory run-radiant-baseline
@@ -1305,7 +1305,7 @@ run-radiant-baseline:
 		output=$$(cat "temp/_radiant_ui_automation.log"); \
 		echo "$$output" | grep -E "^\[|tests executed" | tail -5; \
 		ui_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		ui_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | tail -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		ui_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \][[:space:]]+[0-9]+ test" | head -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		ui_passed=$${ui_passed:-0}; ui_failed=$${ui_failed:-0}; \
 		if [ "$$ui_failed" = "0" ] || [ -z "$$ui_failed" ]; then ui_status="✅ PASS"; ui_failed=0; else ui_status="❌ FAIL"; any_failed=1; fi; \
 	else \
@@ -1319,7 +1319,7 @@ run-radiant-baseline:
 		output=$$(cat "temp/_radiant_view_cmd.log"); \
 		echo "$$output" | grep -E "^\[|tests executed" | tail -5; \
 		radiant_view_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		radiant_view_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | tail -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		radiant_view_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \][[:space:]]+[0-9]+ test" | head -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		radiant_view_passed=$${radiant_view_passed:-0}; radiant_view_failed=$${radiant_view_failed:-0}; \
 		if [ "$$radiant_view_failed" = "0" ] || [ -z "$$radiant_view_failed" ]; then radiant_view_status="✅ PASS"; radiant_view_failed=0; else radiant_view_status="❌ FAIL"; any_failed=1; fi; \
 	else \
@@ -1333,7 +1333,7 @@ run-radiant-baseline:
 		output=$$(cat "temp/_radiant_page_load.log"); \
 		echo "$$output" | grep -E "^\[|pages loaded" | tail -5; \
 		page_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		page_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | tail -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		page_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \][[:space:]]+[0-9]+ test" | head -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		page_passed=$${page_passed:-0}; page_failed=$${page_failed:-0}; \
 		if [ "$$page_failed" = "0" ] || [ -z "$$page_failed" ]; then page_status="✅ PASS"; page_failed=0; else page_status="❌ FAIL"; any_failed=1; fi; \
 	else \
@@ -1346,7 +1346,7 @@ run-radiant-baseline:
 		output=$$(./test/test_fuzzy_crash_gtest.exe 2>&1) || true; \
 		echo "$$output" | grep -E "^\[|fuzzy files tested" | tail -5; \
 		fuzzy_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		fuzzy_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | tail -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		fuzzy_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \][[:space:]]+[0-9]+ test" | head -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		fuzzy_passed=$${fuzzy_passed:-0}; fuzzy_failed=$${fuzzy_failed:-0}; \
 		if [ "$$fuzzy_failed" = "0" ] || [ -z "$$fuzzy_failed" ]; then fuzzy_status="✅ PASS"; fuzzy_failed=0; else fuzzy_status="❌ FAIL"; any_failed=1; fi; \
 	else \

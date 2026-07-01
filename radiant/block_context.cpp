@@ -164,10 +164,21 @@ bool block_context_establishes_bfc(ViewBlock* block) {
         return true;
     }
 
+    bool is_viewport_body = block->tag_id == HTM_TAG_BODY &&
+        block->parent && block->parent->is_element() &&
+        block->parent->tag() == HTM_TAG_HTML;
+    ViewBlock* html_block = is_viewport_body ? lam::view_require_block(block->parent) : nullptr;
+    bool html_overflow_visible = !html_block || !html_block->scroller ||
+        (html_block->scroller->overflow_x == CSS_VALUE_VISIBLE &&
+         html_block->scroller->overflow_y == CSS_VALUE_VISIBLE);
+    bool body_overflow_propagates = is_viewport_body && html_overflow_visible;
+
     // 6. Overflow != visible (creates BFC)
     if (block->scroller &&
         (block->scroller->overflow_x != CSS_VALUE_VISIBLE ||
          block->scroller->overflow_y != CSS_VALUE_VISIBLE)) {
+        // Root body overflow propagates only when the root html overflow is visible.
+        if (body_overflow_propagates) return false;
         return true;
     }
 

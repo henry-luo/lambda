@@ -1623,8 +1623,8 @@ extern "C" {
     Item fn_math_cumsum1(Item arr);    Item fn_math_cumsum2(Item arr, Item axis);
     Item fn_math_cumprod1(Item arr);   Item fn_math_cumprod2(Item arr, Item axis);
     Item fn_split2(Item str, Item sep);  // overloaded alias for fn_split
-    int64_t fn_ord(Item str);           // ord(str) - Unicode code point of first character
-    int64_t fn_ord_str(String* str);    // native String* variant
+    int64_t fn_ord(Item str);           // ord(str) - Unicode code point, semantically Lambda int
+    int64_t fn_ord_str(String* str);    // native String* variant, semantically Lambda int
     Item fn_chr(Item codepoint);        // chr(int) - 1-char string from Unicode code point
     Item fn_join2(Item list, Item sep);
     Item fn_replace(Item str, Item old_str, Item new_str);
