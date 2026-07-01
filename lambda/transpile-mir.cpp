@@ -210,6 +210,7 @@ struct MirTranspiler {
 
     // Whether we're inside a proc function body (pn)
     bool in_proc;
+    bool preserve_proc_if_result;
 
     // P4-3.2: Current function/script body for mutation analysis
     // Set to script->child at module level, fn_node->body inside functions
@@ -3091,10 +3092,9 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
                         then_mir != else_mir ||
                         then_mir != type_to_mir(if_tid));
 
-    // In proc context, if/else is a statement — the result is typically unused.
-    // If boxing is needed (expensive for FLOAT→Item in tight loops), skip it
-    // and just assign a dummy null. Saves push_d allocations per iteration.
-    bool proc_discard = mt->in_proc && need_boxing;
+    // In proc statement context the if/else result is unused, but a final
+    // pn-body if/else is the implicit return value and must keep branch values.
+    bool proc_discard = mt->in_proc && need_boxing && !mt->preserve_proc_if_result;
 
     MIR_type_t result_type = need_boxing ? MIR_T_I64 : type_to_mir(if_tid);
     MIR_reg_t result = new_reg(mt, "if_res", result_type);
@@ -4570,8 +4570,8 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
 
     // Detect proc context: either we're inside a pn function (mt->in_proc),
     // or the content block contains proc-only nodes like VAR_STAM.
-    // In proc context, IF_EXPR/WHILE_STAM/FOR_STAM are side-effect statements,
-    // and only the LAST value expression contributes to the result.
+    // In proc context, loops are side-effect statements, and only the LAST
+    // value expression contributes to the result.
     bool is_proc = mt->in_proc;
     if (!is_proc) {
         AstNode* scan = list_node->item;
@@ -4591,8 +4591,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
         } else if (is_side_effect_stam(scan->node_type)) {
             stam_count++;
         } else if (is_proc &&
-                   (scan->node_type == AST_NODE_IF_EXPR ||
-                    scan->node_type == AST_NODE_WHILE_STAM ||
+                   (scan->node_type == AST_NODE_WHILE_STAM ||
                     scan->node_type == AST_NODE_FOR_STAM)) {
             // In proc context, these are side-effect statements
             stam_count++;
@@ -4620,13 +4619,13 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 }
             } else if (is_side_effect_stam(item->node_type)) {
                 transpile_expr(mt, item);
+            } else if (item == last_value) {
+                // Last value expression: this is the return value
+                result = transpile_box_item(mt, item);
             } else if (item->node_type == AST_NODE_IF_EXPR ||
                        item->node_type == AST_NODE_WHILE_STAM ||
                        item->node_type == AST_NODE_FOR_STAM) {
                 transpile_expr(mt, item);
-            } else if (item == last_value) {
-                // Last value expression: this is the return value
-                result = transpile_box_item(mt, item);
             } else {
                 // Non-last value expression in proc: side effect only
                 transpile_expr(mt, item);
@@ -4657,14 +4656,13 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 // Func defs handled in module-level pre-pass
             } else if (is_side_effect_stam(item->node_type)) {
                 transpile_expr(mt, item); // execute for side effects
-            } else if (is_proc &&
-                       (item->node_type == AST_NODE_IF_EXPR ||
-                        item->node_type == AST_NODE_WHILE_STAM ||
-                        item->node_type == AST_NODE_FOR_STAM)) {
-                transpile_expr(mt, item); // proc context side effect
-            } else {
+            } else if (item == last_value) {
                 // This is the single value expression
                 result = transpile_box_item(mt, item);
+            } else if (is_proc &&
+                       (item->node_type == AST_NODE_WHILE_STAM ||
+                        item->node_type == AST_NODE_FOR_STAM)) {
+                transpile_expr(mt, item); // proc context side effect
             }
             item = item->next;
         }
@@ -4692,8 +4690,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
             } else if (is_side_effect_stam(item->node_type)) {
                 transpile_expr(mt, item);
             } else if (is_proc &&
-                       (item->node_type == AST_NODE_IF_EXPR ||
-                        item->node_type == AST_NODE_WHILE_STAM ||
+                       (item->node_type == AST_NODE_WHILE_STAM ||
                         item->node_type == AST_NODE_FOR_STAM)) {
                 transpile_expr(mt, item); // proc context side effect
             }
@@ -8354,8 +8351,15 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
         }
     }
 
-    // Evaluate expression then box
+    // Evaluate expression then box. A final pn-body if/else reaches here as
+    // the implicit return value; preserve branch results instead of using the
+    // proc statement discard path.
+    bool saved_preserve_proc_if_result = mt->preserve_proc_if_result;
+    if (node->node_type == AST_NODE_IF_EXPR) {
+        mt->preserve_proc_if_result = true;
+    }
     MIR_reg_t val = transpile_expr(mt, node);
+    mt->preserve_proc_if_result = saved_preserve_proc_if_result;
 
     // If the expression already emitted a return (e.g. RETURN_STAM in a proc),
     // the val is a dummy register and any further boxing would be dead code.
