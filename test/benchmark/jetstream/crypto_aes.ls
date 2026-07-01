@@ -76,10 +76,10 @@ pn MixColumns(s) {
         var b1 = shl(a1, 1)
         var b2 = shl(a2, 1)
         var b3 = shl(a3, 1)
-        if (band(a0, 128) != 0) { b0 = bxor(b0, 283) }
-        if (band(a1, 128) != 0) { b1 = bxor(b1, 283) }
-        if (band(a2, 128) != 0) { b2 = bxor(b2, 283) }
-        if (band(a3, 128) != 0) { b3 = bxor(b3, 283) }
+        if (band(a0, 0x80) != 0) { b0 = bxor(b0, 0x11B) }
+        if (band(a1, 0x80) != 0) { b1 = bxor(b1, 0x11B) }
+        if (band(a2, 0x80) != 0) { b2 = bxor(b2, 0x11B) }
+        if (band(a3, 0x80) != 0) { b3 = bxor(b3, 0x11B) }
         s[0 + c * 4] = bxor(bxor(bxor(b0, a1), b1), bxor(a2, a3))
         s[1 + c * 4] = bxor(bxor(bxor(a0, b1), a2), bxor(b2, a3))
         s[2 + c * 4] = bxor(bxor(bxor(a0, a1), b2), bxor(a3, b3))
@@ -224,17 +224,17 @@ pn make_counter_block(nonce: int, nonce_hi: int, b: int) {
     var cb = fill(16, 0)
     var i: int = 0
     while (i < 4) {
-        cb[i] = band(shr(nonce, i * 8), 255)
+        cb[i] = band(shr(nonce, i * 8), 0xFF)
         i = i + 1
     }
     i = 0
     while (i < 4) {
-        cb[i + 4] = band(shr(nonce_hi, i * 8), 255)
+        cb[i + 4] = band(shr(nonce_hi, i * 8), 0xFF)
         i = i + 1
     }
     var c: int = 0
     while (c < 4) {
-        cb[15 - c] = band(shr(b, c * 8), 255)
+        cb[15 - c] = band(shr(b, c * 8), 0xFF)
         c = c + 1
     }
     return cb
@@ -246,7 +246,7 @@ pn derive_key_schedule(password, nBits: int) {
     var pwBytes = fill(nBytes, 0)
     var i: int = 0
     while (i < nBytes) {
-        pwBytes[i] = band(ord(password[i]), 255)
+        pwBytes[i] = band(ord(password[i]), 0xFF)
         i = i + 1
     }
     var key = AesCipher(pwBytes, KeyExpansion(pwBytes))
@@ -264,7 +264,7 @@ pn run() {
     var nBits: int = 256
     var blockSize: int = 16
     var nonce: int = 1311788257000
-    var nonce_hi = int(nonce / 4294967296)
+    var nonce_hi = int(nonce / 0x100000000)
 
     // Derive key
     var keySchedule = derive_key_schedule(password, nBits)

@@ -1,4 +1,0 @@
-child-block-to-parent ok=true html=<div><p>abcdef</p></div> expected=true before=deleteContentBackward:1:true,3,true,0 input=deleteContentBackward:0 focus=true:3 focusExpected=3
-child-block-to-parent-whitespace ok=true html=<div><p>abcdef</p></div> expected=true before=deleteContentBackward:1:true,3,true,3 input=deleteContentBackward:0 focus=true:3 focusExpected=3
-parent-text-to-child-block ok=true html=<div>abcdef</div> expected=true before=deleteContentBackward:1:true,3,true,0 input=deleteContentBackward:0 focus=true:3 focusExpected=3
-parent-text-to-child-block-whitespace ok=true html=<div>abcdef</div> expected=true before=deleteContentBackward:1:true,3,true,3 input=deleteContentBackward:0 focus=true:3 focusExpected=3

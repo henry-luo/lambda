@@ -4,7 +4,7 @@
 // Tests bitwise operations, array manipulation, and string processing
 
 let CHRSZ = 8  // bits per input character (ASCII)
-let MASK32 = 4294967295
+let MASK32 = 0xFFFFFFFF
 
 // 32-bit addition relies on u32 wraparound.
 pn safe_add(x: int, y: int) {
@@ -36,15 +36,15 @@ pn sha1_ft(t: int, b: int, c: int, d: int) {
 // SHA-1 round constant
 pn sha1_kt(t: int) {
     if (t < 20) {
-        return 1518500249
+        return 0x5A827999
     }
     if (t < 40) {
-        return 1859775393
+        return 0x6ED9EBA1
     }
     if (t < 60) {
-        return 2400959708  // 0x8F1BBCDC
+        return 0x8F1BBCDC
     }
-    return 3395469782  // 0xCA62C1D6
+    return 0xCA62C1D6
 }
 
 // Convert string to array of big-endian words
@@ -82,17 +82,17 @@ pn core_sha1(x_in, input_len) {
     }
     // Append padding bit
     var pad_idx = shr(input_len, 5)
-    x[pad_idx] = bor(x[pad_idx], shl(128, 24 - (input_len % 32)))
+    x[pad_idx] = bor(x[pad_idx], shl(0x80, 24 - (input_len % 32)))
     // Append length
     var len_idx = shl(padded_len, 4) + 15
     x[len_idx] = input_len
 
     var w = fill(80, 0)
-    var a = 1732584193   // 0x67452301
-    var b = 4023233417   // 0xEFCDAB89
-    var c = 2562383102   // 0x98BADCFE
-    var d = 271733878    // 0x10325476
-    var e = 3285377520   // 0xC3D2E1F0
+    var a = 0x67452301
+    var b = 0xEFCDAB89
+    var c = 0x98BADCFE
+    var d = 0x10325476
+    var e = 0xC3D2E1F0
 
     var i: int = 0
     while (i < len_idx + 1) {
@@ -138,8 +138,8 @@ pn binb2hex(binarray) {
     while (i < len(binarray) * 4) {
         var word_idx = shr(i, 2)
         var byte_shift = (3 - (i % 4)) * 8
-        var hi = band(shr(binarray[word_idx], byte_shift + 4), 15)
-        var lo = band(shr(binarray[word_idx], byte_shift), 15)
+        var hi = band(shr(binarray[word_idx], byte_shift + 4), 0xF)
+        var lo = band(shr(binarray[word_idx], byte_shift), 0xF)
         result = result ++ slice(hex_chars, hi, hi + 1) ++ slice(hex_chars, lo, lo + 1)
         i = i + 1
     }

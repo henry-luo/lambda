@@ -1,2 +1,0 @@
-after-inline ok=true html=<p>ac</p> expected=true before=deleteContentBackward:1:true,1,true,0 input=deleteContentBackward:0 focus=true:1 focusExpected=1
-inside-inline ok=true html=<p>ac</p> expected=true before=deleteContentBackward:1:true,1,true,2 input=deleteContentBackward:0 focus=true:1 focusExpected=1

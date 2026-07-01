@@ -1,0 +1,21 @@
+{
+  "name": "editor4b: clicking an empty/new paragraph places a caret in it (typable)",
+  "_note": "Same empty-element caret fix as empty-list-item-caret, for an empty <p> created via Enter at the end of a paragraph.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 350},
+    {"type": "click", "target": {"selector": ".rdt-surface [data-source-path=\"7,0\"]"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "wait", "ms": 80},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 50},
+    {"type": "click", "target": {"selector": ".rdt-surface [data-source-path=\"8\"]"}},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_caret", "view_type": 7, "char_offset": 0, "target": {"selector": ".rdt-surface [data-source-path=\"8\"]"}},
+    {"type": "type", "target": {"selector": ".rdt-surface"}, "text": "PP"},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface [data-source-path=\"8\"]"}, "contains": "PP"}
+  ]
+}

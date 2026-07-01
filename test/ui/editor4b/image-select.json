@@ -1,0 +1,12 @@
+{
+  "name": "editor4b: clicking an image selects it (resize overlay appears)",
+  "_note": "Regression guard for the picker fix — a replaced element (img) inside a contenteditable is now a hit-testable block, so the click reaches the editor's onClick and selects the image (kind:'node'), which renders .rdt-img-overlay. Previously the click snapped to the nearest heading text via the margin-text-hit and the image was unselectable.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 400},
+    {"type": "click", "target": {"selector": ".rdt-surface img"}},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_count", "target": {"selector": ".rdt-img-overlay"}, "min": 1}
+  ]
+}

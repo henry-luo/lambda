@@ -1179,8 +1179,19 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     }
     evcon->font = pa_font;
 
+    // A replaced element (image, etc.) inside a rich editable IS a hit-testable
+    // block — clicking it must target the element so the editor can select it.
+    // Without this, block hit-testing is skipped for editable content (which is
+    // assumed to be all text) and the click snaps to the nearest text via the
+    // margin-text-hit above, so the image can never be clicked/selected.
+    uintptr_t self_tag = block->tag();
+    bool is_replaced_block = self_tag == HTM_TAG_IMG || self_tag == HTM_TAG_VIDEO ||
+        self_tag == HTM_TAG_CANVAS || self_tag == HTM_TAG_IFRAME ||
+        self_tag == HTM_TAG_EMBED || self_tag == HTM_TAG_OBJECT ||
+        self_tag == HTM_TAG_HR;
     if (!evcon->target &&
-        !(is_in_rich_editable_subtree(static_cast<View*>(block)) && !is_rich_editable_host(static_cast<View*>(block)))) { // check the block itself
+        (is_replaced_block ||
+         !(is_in_rich_editable_subtree(static_cast<View*>(block)) && !is_rich_editable_host(static_cast<View*>(block))))) { // check the block itself
         // use the block's own accumulated position (parent + block offset),
         // not the restored parent position
         float x = evcon->block.x + block->x, y = evcon->block.y + block->y;
@@ -6988,7 +6999,38 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
             }
 
-            if (!evcon.default_prevented && evcon.target->view_type != RDT_VIEW_TEXT &&
+            // A click that lands in an empty / non-text editable element (an
+            // empty <li>, an empty <p>, a block holding only an image) resolves
+            // to an *element* boundary rather than text. Place the caret there
+            // so the element is focusable/typable, before the text-snapping and
+            // host-last-text fallbacks below (which would jump to a neighbour).
+            bool placed_element_caret = false;
+            if (!evcon.default_prevented) {
+                DomDocument* mdoc = event_context_target_document(&evcon);
+                View* mroot = (mdoc && mdoc->view_tree)
+                    ? static_cast<View*>(mdoc->view_tree->root) : nullptr;
+                if (mroot) {
+                    DomBoundary eb = dom_hit_test_to_boundary(
+                        mroot, (float)btn_event->x, (float)btn_event->y);
+                    if (eb.node && eb.node->node_type == DOM_NODE_ELEMENT) {
+                        EditingSurface esurf;
+                        if (editing_surface_from_target(static_cast<View*>(eb.node),
+                                &esurf) && editing_surface_is_rich(&esurf)) {
+                            const char* exc = nullptr;
+                            if (state_store_set_selection(state, &eb, &eb, &exc)) {
+                                editing_interaction_set_active_surface(state, &esurf);
+                                placed_element_caret = true;
+                                evcon.need_repaint = true;
+                                log_debug("rich_mouse_empty_element_caret: node=%p offset=%u",
+                                          (void*)eb.node, eb.offset);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!placed_element_caret && !evcon.default_prevented &&
+                evcon.target->view_type != RDT_VIEW_TEXT &&
                 !is_view_focusable(evcon.target)) {
                 DomElement* rich_host = rich_editable_from_target(evcon.target);
                 DomText* fallback_text = editing_rich_find_text_descendant(
@@ -7013,7 +7055,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Handle click in text - position caret or start selection.
             // This is a mousedown default action, so a canceled mousedown must
             // leave the existing text-control selection intact.
-            if (!evcon.default_prevented && evcon.target->view_type == RDT_VIEW_TEXT &&
+            if (!placed_element_caret &&
+                !evcon.default_prevented && evcon.target->view_type == RDT_VIEW_TEXT &&
                 evcon.target_text_rect && text_target_allows_caret(evcon.target)) {
                 ViewText* text = lam::view_require_text(evcon.target);
                 TextRect* rect = evcon.target_text_rect;

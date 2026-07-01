@@ -1,3 +1,0 @@
-list-item-text ok=true html=<ol><li>abcdef</li></ol> expected=true before=deleteContentBackward:1:true,3,true,0 input=deleteContentBackward:0 focus=true:3 focusExpected=3
-list-item-whitespace ok=true html=<ul><li>abcdef</li></ul> expected=true before=deleteContentBackward:1:true,3,true,3 input=deleteContentBackward:0 focus=true:3 focusExpected=3
-list-item-inline-fragment ok=true html=<ul><li><b>ab</b><i>c</i><em>d</em><u>ef</u></li></ul> expected=true before=deleteContentBackward:1:true,1,true,0 input=deleteContentBackward:0 focus=true:1 focusExpected=1

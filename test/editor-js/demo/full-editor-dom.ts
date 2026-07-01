@@ -172,6 +172,16 @@ export class FullEditorDom {
 
     this.render()
     this.surface.focus()
+    // Radiant lays out JS-reconciled content on mount but does not commit view
+    // positions for hit-testing/geometry until a subsequent reflow — replaced
+    // elements (images) end up sized but positioned at (0,0), so clicks miss
+    // them and resize overlays mis-anchor. Nudge one reflow after the mount
+    // settles (a benign attribute mutation requests a layout pass), then
+    // re-sync overlays against the now-committed geometry.
+    setTimeout(() => {
+      this.surface.setAttribute('data-rdt-ready', '1')
+      this.syncOverlays()
+    }, 0)
   }
 
   destroy(): void {

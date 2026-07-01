@@ -165,7 +165,7 @@ pn run_idle(sched: Scheduler, blocks, tcb: TCB, packet) {
         tcb.v1 = shr(tcb.v1, 1)
         return scheduler_release(sched, blocks, ID_DEVICE_A)
     } else {
-        tcb.v1 = bxor(shr(tcb.v1, 1), 53256)
+        tcb.v1 = bxor(shr(tcb.v1, 1), 0xD008)
         return scheduler_release(sched, blocks, ID_DEVICE_B)
     }
 }

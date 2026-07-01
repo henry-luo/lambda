@@ -2509,7 +2509,7 @@ Type* build_lit_int64(Transpiler* tp, TSNode node) {
     TypeInt64* item_type = (TypeInt64*)alloc_type(tp->pool, LMD_TYPE_INT64, sizeof(TypeInt64));
     StrView source = ts_node_source(tp, node);
     char* endptr;
-    int64_t value = strtoll(source.str, &endptr, 10);
+    int64_t value = strtoll(source.str, &endptr, 0);
     item_type->int64_val = value;
     arraylist_append(tp->const_list, &item_type->int64_val);
     item_type->const_index = tp->const_list->length - 1;
@@ -2624,13 +2624,12 @@ Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
     num_str[source.length - suffix_len] = '\0';  // strip suffix
 
     char* endptr;
-    int64_t value = 0;
-    uint64_t uvalue = 0;
-    if (num_type == 0xFE) {
-        uvalue = strtoull(num_str, &endptr, 10);
-    } else {
-        value = strtoll(num_str, &endptr, 10);
-    }
+    errno = 0;
+    uint64_t raw_value = strtoull(num_str, &endptr, 0);
+    // sized integer literals are fixed-width, so hex input must be parsed as
+    // unsigned bits first and then wrapped/truncated by the target annotation.
+    int64_t value;
+    __builtin_memcpy(&value, &raw_value, sizeof(value));
     mem_free(num_str);
 
     // i64 suffix → use existing INT64 type
@@ -2648,9 +2647,9 @@ Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
     // u64 suffix → use UINT64 type
     if (num_type == 0xFE) {
         TypeUint64* item_type = (TypeUint64*)alloc_type(tp->pool, LMD_TYPE_UINT64, sizeof(TypeUint64));
-        item_type->uint64_val = uvalue;
+        item_type->uint64_val = raw_value;
         uint64_t* heap_val = (uint64_t*)pool_alloc(tp->pool, sizeof(uint64_t));
-        *heap_val = uvalue;
+        *heap_val = raw_value;
         arraylist_append(tp->const_list, heap_val);
         item_type->const_index = tp->const_list->length - 1;
         item_type->is_const = 1;  item_type->is_literal = 1;
@@ -2662,12 +2661,12 @@ Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
     item_type->num_type = num_type;
     // store raw 32-bit value based on sub-type
     switch (num_type) {
-        case NUM_INT8:   item_type->raw_bits = (uint32_t)(uint8_t)(int8_t)value; break;
-        case NUM_INT16:  item_type->raw_bits = (uint32_t)(uint16_t)(int16_t)value; break;
-        case NUM_INT32:  item_type->raw_bits = (uint32_t)(int32_t)value; break;
-        case NUM_UINT8:  item_type->raw_bits = (uint32_t)(uint8_t)value; break;
-        case NUM_UINT16: item_type->raw_bits = (uint32_t)(uint16_t)value; break;
-        case NUM_UINT32: item_type->raw_bits = (uint32_t)value; break;
+        case NUM_INT8:   item_type->raw_bits = (uint32_t)(uint8_t)raw_value; break;
+        case NUM_INT16:  item_type->raw_bits = (uint32_t)(uint16_t)raw_value; break;
+        case NUM_INT32:  item_type->raw_bits = (uint32_t)(uint32_t)raw_value; break;
+        case NUM_UINT8:  item_type->raw_bits = (uint32_t)(uint8_t)raw_value; break;
+        case NUM_UINT16: item_type->raw_bits = (uint32_t)(uint16_t)raw_value; break;
+        case NUM_UINT32: item_type->raw_bits = (uint32_t)raw_value; break;
         default: item_type->raw_bits = 0; break;
     }
     item_type->is_const = 1;  item_type->is_literal = 1;
@@ -2879,7 +2878,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
 
         char* endptr;
         errno = 0;
-        int64_t value = strtoll(num_str, &endptr, 10);
+        int64_t value = strtoll(num_str, &endptr, 0);
         mem_free(num_str);
 
         log_debug("build_primary_expr SYM_INT: parsed value %lld", value);
@@ -7782,7 +7781,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         num_str[source.length] = '\0';
 
         char* endptr;
-        int64_t value = strtoll(num_str, &endptr, 10);
+        int64_t value = strtoll(num_str, &endptr, 0);
         mem_free(num_str);
 
         log_debug("SYM_INT: parsed value %lld, checking range", value);

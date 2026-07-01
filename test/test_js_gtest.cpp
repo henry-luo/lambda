@@ -550,11 +550,10 @@ static std::vector<JsTestParam> discover_all_js_tests() {
         auto v = discover_js_tests_in_dir(d);
         all.insert(all.end(), v.begin(), v.end());
     }
-    const char* include_editing = getenv("LAMBDA_JS_INCLUDE_EDITING_TESTS");
-    if (include_editing && strcmp(include_editing, "1") == 0) {
-        auto v = discover_js_tests_in_dir("test/js/editing");
-        all.insert(all.end(), v.begin(), v.end());
-    }
+    // (test/js/editing was retired: those tests asserted native-engine
+    // deleteContentBackward DOM parity, which was deleted in Stage 4B Phase 5.
+    // Their source-model coverage now lives in the JS editor's own suite —
+    // test/editor-js/test/commands/text-commands.test.ts.)
     std::sort(all.begin(), all.end(),
               [](const JsTestParam& a, const JsTestParam& b) {
                   return a.test_name < b.test_name;
