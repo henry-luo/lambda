@@ -1517,6 +1517,13 @@ float compute_text_height_at_width(LayoutContext* lycon,
 static bool is_inline_level_element(DomElement* element) {
     if (!element) return false;
 
+    // Anonymous inline-table wrappers store resolved display on the DOM element
+    // before a view box exists, so intrinsic sizing must read it directly.
+    if (element->display.outer == CSS_VALUE_INLINE ||
+        element->display.outer == CSS_VALUE_INLINE_BLOCK) {
+        return true;
+    }
+
     // First check if the view has been styled. Inline-block and inline-table
     // are inline-level boxes for intrinsic inline-run accumulation.
     ViewBlock* view = lam::unsafe_view_block_element_storage(element);
@@ -1600,6 +1607,94 @@ static bool is_inline_level_element(DomElement* element) {
     return false;
 }
 
+static bool intrinsic_white_space_collapses_space_advance(CssEnum white_space) {
+    return !intrinsic_white_space_preserves_space_advance(white_space);
+}
+
+static bool intrinsic_node_is_collapsible_space_only(DomNode* node) {
+    if (!node) return false;
+    if (node->is_text()) {
+        return text_node_is_ascii_whitespace(node) &&
+            intrinsic_white_space_collapses_space_advance(get_white_space_value(node));
+    }
+    if (!node->is_element()) return false;
+
+    DomElement* element = node->as_element();
+    if (!is_inline_level_element(element)) return false;
+    bool saw_child = false;
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (child->is_comment()) continue;
+        if (!intrinsic_node_is_collapsible_space_only(child)) return false;
+        saw_child = true;
+    }
+    return saw_child;
+}
+
+static bool intrinsic_node_has_inline_boundary_content(DomNode* node) {
+    if (!node) return false;
+    if (node->is_text()) {
+        if (!text_node_is_ascii_whitespace(node)) return true;
+        return intrinsic_white_space_preserves_space_advance(get_white_space_value(node));
+    }
+    if (!node->is_element()) return false;
+
+    DomElement* element = node->as_element();
+    // Anonymous table repair contributes atomic inline-table boxes; whitespace
+    // before them must survive max-content sizing just like before text.
+    if (node_is_table_cell_like(node) || element->display.inner == CSS_VALUE_TABLE) return true;
+    if (!is_inline_level_element(element)) return false;
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (child->is_comment()) continue;
+        if (intrinsic_node_has_inline_boundary_content(child)) return true;
+    }
+    return false;
+}
+
+static bool intrinsic_has_following_inline_boundary_content(DomNode* node) {
+    DomNode* current = node;
+    while (current) {
+        for (DomNode* sibling = current->next_sibling; sibling; sibling = sibling->next_sibling) {
+            if (sibling->is_comment()) continue;
+            if (intrinsic_node_has_inline_boundary_content(sibling)) return true;
+            if (intrinsic_node_is_collapsible_space_only(sibling)) continue;
+            if (sibling->is_element() && !is_inline_level_element(sibling->as_element())) return false;
+        }
+
+        DomNode* parent = current->parent;
+        if (!parent || !parent->is_element()) break;
+        if (!is_inline_level_element(parent->as_element())) break;
+        current = parent;
+    }
+    return false;
+}
+
+static bool intrinsic_node_ends_with_collapsible_space(DomNode* node) {
+    if (!node) return false;
+    if (node->is_text()) {
+        return intrinsic_text_ends_with_whitespace((const char*)node->text_data()) &&
+            intrinsic_white_space_collapses_space_advance(get_white_space_value(node));
+    }
+    if (!node->is_element()) return false;
+
+    DomElement* element = node->as_element();
+    if (!is_inline_level_element(element)) return false;
+    for (DomNode* child = element->last_child; child; child = child->prev_sibling) {
+        if (child->is_comment()) continue;
+        return intrinsic_node_ends_with_collapsible_space(child);
+    }
+    return false;
+}
+
+static float intrinsic_collapsed_space_width(LayoutContext* lycon) {
+    float width = measure_current_space_advance(
+        lycon, lycon->font.font_handle, lycon->font.style);
+    if (lycon && lycon->font.style) {
+        width += lycon->font.style->word_spacing;
+        width += lycon->font.style->letter_spacing;
+    }
+    return width;
+}
+
 static bool intrinsic_table_resolve_border_spacing_value(LayoutContext* lycon, const CssValue* value,
         float* spacing, bool* keep_inheriting) {
     if (keep_inheriting) *keep_inheriting = false;
@@ -1678,6 +1773,73 @@ static bool intrinsic_is_table_structure_container(CssEnum inner_display) {
            inner_display == CSS_VALUE_TABLE_ROW_GROUP ||
            inner_display == CSS_VALUE_TABLE_HEADER_GROUP ||
            inner_display == CSS_VALUE_TABLE_FOOTER_GROUP;
+}
+
+static bool intrinsic_subtree_contains_node(DomNode* root, DomNode* target) {
+    if (!root || !target) return false;
+    if (root == target) return true;
+    if (!root->is_element()) return false;
+
+    DomElement* element = root->as_element();
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (intrinsic_subtree_contains_node(child, target)) return true;
+    }
+    return false;
+}
+
+static bool intrinsic_pseudo_child_is_materialized(DomElement* element, bool is_before) {
+    if (!element || !element->pseudo) return false;
+
+    DomElement* pseudo = is_before ? element->pseudo->before : element->pseudo->after;
+    if (!pseudo) return false;
+
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (intrinsic_subtree_contains_node(child, static_cast<DomNode*>(pseudo))) return true;
+    }
+    return false;
+}
+
+static bool intrinsic_pseudo_needs_table_repair(DomElement* element, bool is_before) {
+    if (!element) return false;
+    StyleTree* pseudo_styles = is_before ? element->before_styles : element->after_styles;
+    if (!pseudo_styles || !pseudo_styles->tree) return false;
+
+    CssDeclaration* display_decl = style_tree_get_declaration(
+        pseudo_styles, CSS_PROPERTY_DISPLAY);
+    if (!display_decl || !display_decl->value ||
+        display_decl->value->type != CSS_VALUE_TYPE_KEYWORD) {
+        return false;
+    }
+    return is_table_internal_display(display_decl->value->data.keyword);
+}
+
+static void intrinsic_materialize_pseudo_content(LayoutContext* lycon, DomElement* element) {
+    if (!lycon || !element) return;
+
+    bool needs_before = dom_element_has_before_content(element) &&
+        intrinsic_pseudo_needs_table_repair(element, true);
+    bool needs_after = dom_element_has_after_content(element) &&
+        intrinsic_pseudo_needs_table_repair(element, false);
+    if (!needs_before && !needs_after) return;
+
+    ViewBlock* block = lam::unsafe_view_block_element_storage(element);
+    element->pseudo = alloc_pseudo_content_prop(lycon, block);
+    if (!element->pseudo) return;
+
+    // Generated table-internal pseudo boxes must exist before anonymous table
+    // repair, or shrink-to-fit misses their inline contribution.
+    if (needs_before) {
+        generate_pseudo_element_content(lycon, block, true);
+    }
+    if (needs_after) {
+        generate_pseudo_element_content(lycon, block, false);
+    }
+    if (needs_before && element->pseudo->before) {
+        insert_pseudo_into_dom(element, element->pseudo->before, true);
+    }
+    if (needs_after && element->pseudo->after) {
+        insert_pseudo_into_dom(element, element->pseudo->after, false);
+    }
 }
 
 static void intrinsic_prepare_anonymous_table_children(LayoutContext* lycon,
@@ -3342,12 +3504,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
 
+    intrinsic_materialize_pseudo_content(lycon, element);
     intrinsic_prepare_anonymous_table_children(lycon, element);
 
     // Track inline-level content separately
     float inline_min_sum = 0.0f;  // Max of min-content widths for inline children
     float inline_max_sum = 0.0f;  // Sum of max-content widths for inline children
     bool has_inline_content = false;
+    bool inline_run_ends_with_collapsible_space = false;
     float first_inline_child_min = -1.0f;  // First inline child's min-content (for text-indent)
     float nonfirst_inline_min_max = 0.0f;  // Max min-content of non-first inline children (for neg text-indent)
     // CSS Text 3 §5.2: Track forced line breaks in inline content for propagation
@@ -3377,7 +3541,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // whitespace is preserved as inter-word spacing instead of trimmed as
     // leading whitespace.
     bool has_generated_inline_before = false;
-    if (dom_element_has_before_content(element) && element->before_styles && element->before_styles->tree) {
+    if (!intrinsic_pseudo_child_is_materialized(element, true) &&
+        dom_element_has_before_content(element) && element->before_styles && element->before_styles->tree) {
         bool before_is_inline = true;
         CssDeclaration* pd_decl = style_tree_get_declaration(element->before_styles, CSS_PROPERTY_DISPLAY);
         if (pd_decl && pd_decl->value && pd_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -3405,6 +3570,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
             has_inline_content = true;
             has_generated_inline_before = true;
+            inline_run_ends_with_collapsible_space = false;
             inline_max_sum += before_width;
             inline_min_sum = max(inline_min_sum, tw.min_content);
             if (first_inline_child_min < 0) {
@@ -3804,7 +3970,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             next = next->next_sibling;
                         }
                         if (next && next->is_element()) {
-                            has_inline_after = is_inline_level_element(next->as_element());
+                            // Table-cell boxes inside inline content are wrapped in anonymous
+                            // inline-table boxes, so preceding collapsed spaces still render.
+                            has_inline_after = is_inline_level_element(next->as_element()) ||
+                                (is_inline_level_element(element) && node_is_table_cell_like(next));
                         }
                     }
                     if (!has_inline_after) {
@@ -3983,7 +4152,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 continue;
             }
 
-            is_inline = is_inline_level_element(child_elem);
+            // CSS 2.1 §17.2.1 wraps table-cell boxes in anonymous table boxes;
+            // inside an inline parent those wrappers participate as inline-table.
+            is_inline = is_inline_level_element(child_elem) ||
+                (is_inline_level_element(element) && node_is_table_cell_like(child));
 
             log_debug("  child %s: min=%.1f, max=%.1f, is_inline=%d",
                       child_elem->node_name(), child_sizes.min_content, child_sizes.max_content, is_inline);
@@ -4158,6 +4330,18 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // and take max of min-content (can wrap between items)
             has_inline_content = true;
 
+            bool is_collapsible_space_only = intrinsic_node_is_collapsible_space_only(child);
+            if (is_collapsible_space_only) {
+                // Recursive inline measurement trims edge spaces inside each inline
+                // box, so the parent must own collapsed whitespace runs across boxes.
+                if (inline_max_sum > 0.0f && !inline_run_ends_with_collapsible_space &&
+                    intrinsic_has_following_inline_boundary_content(child)) {
+                    inline_max_sum += intrinsic_collapsed_space_width(lycon);
+                    inline_run_ends_with_collapsible_space = true;
+                }
+                continue;
+            }
+
             // Detect <br> elements as forced line breaks. Unlike text nodes with
             // preserved newlines, <br> is an element that doesn't set has_forced_break
             // on its own IntrinsicSizes. Handle it directly as a forced break point.
@@ -4190,6 +4374,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // Start new inline run after the break
                 inline_max_sum = 0;
                 inline_min_sum = 0;
+                inline_run_ends_with_collapsible_space = false;
                 // Don't reset first_inline_child_min — text-indent only applies to first line
                 continue;
             }
@@ -4228,8 +4413,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 sizes.max_content = max(sizes.max_content, child_sizes.max_content);
                 // Start new inline run with the last line width
                 inline_max_sum = child_sizes.last_line_max;
+                inline_run_ends_with_collapsible_space = false;
             } else {
                 inline_max_sum += child_sizes.max_content;
+                inline_run_ends_with_collapsible_space =
+                    child_sizes.max_content > 0.0f && intrinsic_node_ends_with_collapsible_space(child);
             }
             inline_min_sum = max(inline_min_sum, child_sizes.min_content);
             // Track first inline child's min-content for text-indent calculation
@@ -4283,6 +4471,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // Reset for next inline run after the block
                 inline_max_sum = 0;
                 inline_min_sum = 0;
+                inline_run_ends_with_collapsible_space = false;
             }
 
             // For block-level children: take max of each
@@ -4524,6 +4713,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         float pseudo_extra_width = 0;
         for (int pi = 1; pi < 2; pi++) {
             bool is_before = (pi == 0);
+            if (intrinsic_pseudo_child_is_materialized(element, is_before)) continue;
             bool has_pseudo = is_before ? dom_element_has_before_content(element)
                                         : dom_element_has_after_content(element);
             if (!has_pseudo) continue;
