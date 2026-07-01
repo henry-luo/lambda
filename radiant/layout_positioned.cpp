@@ -2437,7 +2437,10 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
 
     // Convert final Y position back to parent-relative coordinates and apply
     float final_y_local = final_y_bfc - parent_y_in_bfc;
-    float new_y = final_y_local + margin_top;
+    bool clearance_applied = has_clear && block->bound && block->bound->has_clearance;
+    // Uncleared clear floats already include margin-top in block->y; when clearance
+    // moves the float to a clear edge, the margin applies after that edge.
+    float new_y = (has_clear && !clearance_applied) ? final_y_local : final_y_local + margin_top;
 
     if (new_y != block->y) {
         log_debug("[FLOAT_LAYOUT] Float Y shifted: old=%.1f, new=%.1f (delta=%.1f)",
@@ -2627,6 +2630,9 @@ void layout_clear_element(LayoutContext* lycon, ViewBlock* block) {
         // affecting the parent container's flow height. BFC roots handle float containment
         // separately via §10.6.7 height expansion.
         bool is_float = block->position && element_has_float(block);
+        if (block->bound) {
+            block->bound->has_clearance = true;
+        }
         if (!is_float && lycon->block.parent) {
             lycon->block.parent->advance_y += delta;
             log_debug("Updated parent advance_y by %.1f to %.1f", delta, lycon->block.parent->advance_y);

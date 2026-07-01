@@ -3625,10 +3625,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             } else {
                 // Preserve spaces - just advance one character
                 str++;
-                // CSS 2.1 §16.6.1: Preserved spaces ARE content — mark line as started.
-                // Without this, a line containing only preserved spaces (white-space: pre)
-                // would be treated as empty and not commit a line box.
+                // Preserved spaces are content and break collapsible-space runs, so
+                // stale normal-space state must not collapse a later normal space.
                 lycon->line.is_line_start = false;
+                lycon->line.has_space = false;
+                lycon->line.trailing_space_width = 0;
             }
             lycon->line.last_space = str - 1;  lycon->line.last_space_pos = rect->width;
             lycon->line.last_space_kind = BRK_SPACE;
