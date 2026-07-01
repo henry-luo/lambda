@@ -41,7 +41,9 @@ The editor's **1960-test vitest suite is green under `jsdom` (Node)** — a brow
    - **Module-state dependent** (fragile to minimize). Reliable repros: `temp/4c-spikes/min.js` (real bundled `stepMap`) + `temp/4c-spikes/depth.js` (self-contained). Diagnostics: `JS_MIR_DUMP=1 ./lambda.exe js <bundle>` → `temp/js_mir_dump.txt`; `JS_MIR_INTERP=1` = interpreter (JIT-vs-lowering bisection).
    - **⚠️ Fix caution:** this numeric/int inference is load-bearing (GC rooting, deltablue); scope the fix to call-result bindings and run the full lambda + node baselines.
 
-**Not yet started:** fixture-inlining for the tier corpora (≈1601; LambdaJS has no `fs`/`require` — verified), the `view/*.ts` tests under `--document`, and all of Phase B. Spikes live in `./temp/4c-spikes/` (ephemeral; regenerate via `build-conformance.mjs`).
+**Phase A largely done — 1906/1931 (98.7%) green under `lambda.exe js` (2026-07-01).** After the inference fix (#3) + tier fixture-inlining (`tools/build-tier.mjs` — virtual FS shimming `node:fs`/`node:path`/`node:url` + inlined fixtures, run under `--document`): commands+model+input 207/209 · helpers+smoke 8/9 · **drawing 50/50** · **all tiers 1601/1601** (Slate 293 · PM 212 · HTML 520 · Chromium 163 · structural 22 · drawing 391) · view 40/62. **Remaining 25 = two buckets:** (a) **2 `Intl.Segmenter`** (caret word-nav — engine feature); (b) **23 DOM-fidelity** (22 view + 1 smoke): SVG `createElementNS` namespace, image node-selection, clipboard HTML serialization, reconcile selection-preservation, custom-element parse (the §5 items — bleed into Phase B).
+
+**Not yet started:** the last two Phase-A buckets above (Intl + DOM-fidelity), and all of Phase B. Spikes/bundles live in `./temp/4c-spikes/` (ephemeral; regenerate via `tools/build-conformance.mjs` / `tools/build-tier.mjs`).
 
 ---
 
