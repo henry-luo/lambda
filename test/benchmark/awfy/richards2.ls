@@ -257,7 +257,7 @@ pn task_fn_idle(work, data, sched, task_table) {
         data.control = nctrl
         return release_task(sched, task_table, DEVICE_A, ct)
     }
-    var nctrl2 = bxor(shr(ctrl, 1), 53256)
+    var nctrl2 = bxor(shr(ctrl, 1), 0xD008)
     data.control = nctrl2
     return release_task(sched, task_table, DEVICE_B, ct)
 }

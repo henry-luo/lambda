@@ -266,31 +266,62 @@
     "integer": {
       "type": "TOKEN",
       "content": {
-        "type": "SEQ",
+        "type": "CHOICE",
         "members": [
           {
-            "type": "CHOICE",
+            "type": "SEQ",
             "members": [
               {
                 "type": "STRING",
                 "value": "0"
               },
               {
-                "type": "SEQ",
+                "type": "CHOICE",
                 "members": [
                   {
-                    "type": "PATTERN",
-                    "value": "[1-9]"
+                    "type": "STRING",
+                    "value": "x"
                   },
                   {
-                    "type": "CHOICE",
+                    "type": "STRING",
+                    "value": "X"
+                  }
+                ]
+              },
+              {
+                "type": "PATTERN",
+                "value": "[0-9a-fA-F]+"
+              }
+            ]
+          },
+          {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": "0"
+                  },
+                  {
+                    "type": "SEQ",
                     "members": [
                       {
                         "type": "PATTERN",
-                        "value": "\\d+"
+                        "value": "[1-9]"
                       },
                       {
-                        "type": "BLANK"
+                        "type": "CHOICE",
+                        "members": [
+                          {
+                            "type": "PATTERN",
+                            "value": "\\d+"
+                          },
+                          {
+                            "type": "BLANK"
+                          }
+                        ]
                       }
                     ]
                   }
@@ -691,25 +722,61 @@
             "type": "CHOICE",
             "members": [
               {
-                "type": "STRING",
-                "value": "0"
-              },
-              {
                 "type": "SEQ",
                 "members": [
                   {
-                    "type": "PATTERN",
-                    "value": "[1-9]"
+                    "type": "STRING",
+                    "value": "0"
                   },
                   {
                     "type": "CHOICE",
                     "members": [
                       {
-                        "type": "PATTERN",
-                        "value": "\\d+"
+                        "type": "STRING",
+                        "value": "x"
                       },
                       {
-                        "type": "BLANK"
+                        "type": "STRING",
+                        "value": "X"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "PATTERN",
+                    "value": "[0-9a-fA-F]+"
+                  }
+                ]
+              },
+              {
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "STRING",
+                        "value": "0"
+                      },
+                      {
+                        "type": "SEQ",
+                        "members": [
+                          {
+                            "type": "PATTERN",
+                            "value": "[1-9]"
+                          },
+                          {
+                            "type": "CHOICE",
+                            "members": [
+                              {
+                                "type": "PATTERN",
+                                "value": "\\d+"
+                              },
+                              {
+                                "type": "BLANK"
+                              }
+                            ]
+                          }
+                        ]
                       }
                     ]
                   }

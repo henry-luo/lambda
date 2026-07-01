@@ -4,7 +4,7 @@
 // Tests bitwise operations, array manipulation, and string processing
 
 let CHRSZ = 8
-let MASK32 = 4294967295
+let MASK32 = 0xFFFFFFFF
 
 // Safe 32-bit addition
 pn safe_add(x: int, y: int) {
@@ -66,8 +66,8 @@ pn binl2hex(binarray) {
     while (i < len(binarray) * 4) {
         var word_idx = shr(i, 2)
         var byte_shift = (i % 4) * 8
-        var hi = band(shr(binarray[word_idx], byte_shift + 4), 15)
-        var lo = band(shr(binarray[word_idx], byte_shift), 15)
+        var hi = band(shr(binarray[word_idx], byte_shift + 4), 0xF)
+        var lo = band(shr(binarray[word_idx], byte_shift), 0xF)
         result = result ++ slice(hex_tab, hi, hi + 1) ++ slice(hex_tab, lo, lo + 1)
         i = i + 1
     }
@@ -93,14 +93,14 @@ pn core_md5(x_in, input_len: int) {
         ci = ci + 1
     }
     // Append padding
-    x[pad_word] = bor(x[pad_word], shl(128, input_len % 32))
+    x[pad_word] = bor(x[pad_word], shl(0x80, input_len % 32))
     // Append length
     x[block_idx] = input_len
 
-    var a: int = 1732584193    // 0x67452301
-    var b: int = 4023233417    // 0xEFCDAB89
-    var c: int = 2562383102    // 0x98BADCFE
-    var d: int = 271733878     // 0x10325476
+    var a: int = 0x67452301
+    var b: int = 0xEFCDAB89
+    var c: int = 0x98BADCFE
+    var d: int = 0x10325476
 
     var i: int = 0
     while (i < block_idx + 1) {
@@ -110,73 +110,73 @@ pn core_md5(x_in, input_len: int) {
         var oldd = d
 
         // Use unsigned 32-bit constants (negatives converted from JS)
-        a = md5_ff(a, b, c, d, x[i+ 0], 7 , 3614090360)   // -680876936
-        d = md5_ff(d, a, b, c, x[i+ 1], 12, 3905402710)   // -389564586
-        c = md5_ff(c, d, a, b, x[i+ 2], 17, 606105819)
-        b = md5_ff(b, c, d, a, x[i+ 3], 22, 3250441966)   // -1044525330
-        a = md5_ff(a, b, c, d, x[i+ 4], 7 , 4118548399)   // -176418897
-        d = md5_ff(d, a, b, c, x[i+ 5], 12, 1200080426)
-        c = md5_ff(c, d, a, b, x[i+ 6], 17, 2821735955)   // -1473231341
-        b = md5_ff(b, c, d, a, x[i+ 7], 22, 4249261313)   // -45705983
-        a = md5_ff(a, b, c, d, x[i+ 8], 7 , 1770035416)
-        d = md5_ff(d, a, b, c, x[i+ 9], 12, 2336552879)   // -1958414417
-        c = md5_ff(c, d, a, b, x[i+10], 17, 4294925233)   // -42063
-        b = md5_ff(b, c, d, a, x[i+11], 22, 2304563134)   // -1990404162
-        a = md5_ff(a, b, c, d, x[i+12], 7 , 1804603682)
-        d = md5_ff(d, a, b, c, x[i+13], 12, 4254626195)   // -40341101
-        c = md5_ff(c, d, a, b, x[i+14], 17, 2792965006)   // -1502002290
-        b = md5_ff(b, c, d, a, x[i+15], 22, 1236535329)
+        a = md5_ff(a, b, c, d, x[i+ 0], 7 , 0xD76AA478)
+        d = md5_ff(d, a, b, c, x[i+ 1], 12, 0xE8C7B756)
+        c = md5_ff(c, d, a, b, x[i+ 2], 17, 0x242070DB)
+        b = md5_ff(b, c, d, a, x[i+ 3], 22, 0xC1BDCEEE)
+        a = md5_ff(a, b, c, d, x[i+ 4], 7 , 0xF57C0FAF)
+        d = md5_ff(d, a, b, c, x[i+ 5], 12, 0x4787C62A)
+        c = md5_ff(c, d, a, b, x[i+ 6], 17, 0xA8304613)
+        b = md5_ff(b, c, d, a, x[i+ 7], 22, 0xFD469501)
+        a = md5_ff(a, b, c, d, x[i+ 8], 7 , 0x698098D8)
+        d = md5_ff(d, a, b, c, x[i+ 9], 12, 0x8B44F7AF)
+        c = md5_ff(c, d, a, b, x[i+10], 17, 0xFFFF5BB1)
+        b = md5_ff(b, c, d, a, x[i+11], 22, 0x895CD7BE)
+        a = md5_ff(a, b, c, d, x[i+12], 7 , 0x6B901122)
+        d = md5_ff(d, a, b, c, x[i+13], 12, 0xFD987193)
+        c = md5_ff(c, d, a, b, x[i+14], 17, 0xA679438E)
+        b = md5_ff(b, c, d, a, x[i+15], 22, 0x49B40821)
 
-        a = md5_gg(a, b, c, d, x[i+ 1], 5 , 4129170786)   // -165796510
-        d = md5_gg(d, a, b, c, x[i+ 6], 9 , 3225465664)   // -1069501632
-        c = md5_gg(c, d, a, b, x[i+11], 14, 643717713)
-        b = md5_gg(b, c, d, a, x[i+ 0], 20, 3921069994)   // -373897302
-        a = md5_gg(a, b, c, d, x[i+ 5], 5 , 3593408605)   // -701558691
-        d = md5_gg(d, a, b, c, x[i+10], 9 , 38016083)
-        c = md5_gg(c, d, a, b, x[i+15], 14, 3634488961)   // -660478335
-        b = md5_gg(b, c, d, a, x[i+ 4], 20, 3889429448)   // -405537848
-        a = md5_gg(a, b, c, d, x[i+ 9], 5 , 568446438)
-        d = md5_gg(d, a, b, c, x[i+14], 9 , 3275163606)   // -1019803690
-        c = md5_gg(c, d, a, b, x[i+ 3], 14, 4107603335)   // -187363961
-        b = md5_gg(b, c, d, a, x[i+ 8], 20, 1163531501)
-        a = md5_gg(a, b, c, d, x[i+13], 5 , 2850285829)   // -1444681467
-        d = md5_gg(d, a, b, c, x[i+ 2], 9 , 4243563512)   // -51403784
-        c = md5_gg(c, d, a, b, x[i+ 7], 14, 1735328473)
-        b = md5_gg(b, c, d, a, x[i+12], 20, 2368359562)   // -1926607734
+        a = md5_gg(a, b, c, d, x[i+ 1], 5 , 0xF61E2562)
+        d = md5_gg(d, a, b, c, x[i+ 6], 9 , 0xC040B340)
+        c = md5_gg(c, d, a, b, x[i+11], 14, 0x265E5A51)
+        b = md5_gg(b, c, d, a, x[i+ 0], 20, 0xE9B6C7AA)
+        a = md5_gg(a, b, c, d, x[i+ 5], 5 , 0xD62F105D)
+        d = md5_gg(d, a, b, c, x[i+10], 9 , 0x02441453)
+        c = md5_gg(c, d, a, b, x[i+15], 14, 0xD8A1E681)
+        b = md5_gg(b, c, d, a, x[i+ 4], 20, 0xE7D3FBC8)
+        a = md5_gg(a, b, c, d, x[i+ 9], 5 , 0x21E1CDE6)
+        d = md5_gg(d, a, b, c, x[i+14], 9 , 0xC33707D6)
+        c = md5_gg(c, d, a, b, x[i+ 3], 14, 0xF4D50D87)
+        b = md5_gg(b, c, d, a, x[i+ 8], 20, 0x455A14ED)
+        a = md5_gg(a, b, c, d, x[i+13], 5 , 0xA9E3E905)
+        d = md5_gg(d, a, b, c, x[i+ 2], 9 , 0xFCEFA3F8)
+        c = md5_gg(c, d, a, b, x[i+ 7], 14, 0x676F02D9)
+        b = md5_gg(b, c, d, a, x[i+12], 20, 0x8D2A4C8A)
 
-        a = md5_hh(a, b, c, d, x[i+ 5], 4 , 4294588738)   // -378558
-        d = md5_hh(d, a, b, c, x[i+ 8], 11, 2272392833)   // -2022574463
-        c = md5_hh(c, d, a, b, x[i+11], 16, 1839030562)
-        b = md5_hh(b, c, d, a, x[i+14], 23, 4259657740)   // -35309556
-        a = md5_hh(a, b, c, d, x[i+ 1], 4 , 2763975236)   // -1530992060
-        d = md5_hh(d, a, b, c, x[i+ 4], 11, 1272893353)
-        c = md5_hh(c, d, a, b, x[i+ 7], 16, 4139469664)   // -155497632
-        b = md5_hh(b, c, d, a, x[i+10], 23, 3200236656)   // -1094730640
-        a = md5_hh(a, b, c, d, x[i+13], 4 , 681279174)
-        d = md5_hh(d, a, b, c, x[i+ 0], 11, 3936430074)   // -358537222
-        c = md5_hh(c, d, a, b, x[i+ 3], 16, 3572445317)   // -722521979
-        b = md5_hh(b, c, d, a, x[i+ 6], 23, 76029189)
-        a = md5_hh(a, b, c, d, x[i+ 9], 4 , 3654602809)   // -640364487
-        d = md5_hh(d, a, b, c, x[i+12], 11, 3873151461)   // -421815835
-        c = md5_hh(c, d, a, b, x[i+15], 16, 530742520)
-        b = md5_hh(b, c, d, a, x[i+ 2], 23, 3299628645)   // -995338651
+        a = md5_hh(a, b, c, d, x[i+ 5], 4 , 0xFFFA3942)
+        d = md5_hh(d, a, b, c, x[i+ 8], 11, 0x8771F681)
+        c = md5_hh(c, d, a, b, x[i+11], 16, 0x6D9D6122)
+        b = md5_hh(b, c, d, a, x[i+14], 23, 0xFDE5380C)
+        a = md5_hh(a, b, c, d, x[i+ 1], 4 , 0xA4BEEA44)
+        d = md5_hh(d, a, b, c, x[i+ 4], 11, 0x4BDECFA9)
+        c = md5_hh(c, d, a, b, x[i+ 7], 16, 0xF6BB4B60)
+        b = md5_hh(b, c, d, a, x[i+10], 23, 0xBEBFBC70)
+        a = md5_hh(a, b, c, d, x[i+13], 4 , 0x289B7EC6)
+        d = md5_hh(d, a, b, c, x[i+ 0], 11, 0xEAA127FA)
+        c = md5_hh(c, d, a, b, x[i+ 3], 16, 0xD4EF3085)
+        b = md5_hh(b, c, d, a, x[i+ 6], 23, 0x04881D05)
+        a = md5_hh(a, b, c, d, x[i+ 9], 4 , 0xD9D4D039)
+        d = md5_hh(d, a, b, c, x[i+12], 11, 0xE6DB99E5)
+        c = md5_hh(c, d, a, b, x[i+15], 16, 0x1FA27CF8)
+        b = md5_hh(b, c, d, a, x[i+ 2], 23, 0xC4AC5665)
 
-        a = md5_ii(a, b, c, d, x[i+ 0], 6 , 4096336452)   // -198630844
-        d = md5_ii(d, a, b, c, x[i+ 7], 10, 1126891415)
-        c = md5_ii(c, d, a, b, x[i+14], 15, 2878612391)   // -1416354905
-        b = md5_ii(b, c, d, a, x[i+ 5], 21, 4237533241)   // -57434055
-        a = md5_ii(a, b, c, d, x[i+12], 6 , 1700485571)
-        d = md5_ii(d, a, b, c, x[i+ 3], 10, 2399980690)   // -1894986606
-        c = md5_ii(c, d, a, b, x[i+10], 15, 4293915773)   // -1051523
-        b = md5_ii(b, c, d, a, x[i+ 1], 21, 2240044497)   // -2054922799
-        a = md5_ii(a, b, c, d, x[i+ 8], 6 , 1873313359)
-        d = md5_ii(d, a, b, c, x[i+15], 10, 4264355552)   // -30611744
-        c = md5_ii(c, d, a, b, x[i+ 6], 15, 2734768916)   // -1560198380
-        b = md5_ii(b, c, d, a, x[i+13], 21, 1309151649)
-        a = md5_ii(a, b, c, d, x[i+ 4], 6 , 4149444226)   // -145523070
-        d = md5_ii(d, a, b, c, x[i+11], 10, 3174756917)   // -1120210379
-        c = md5_ii(c, d, a, b, x[i+ 2], 15, 718787259)
-        b = md5_ii(b, c, d, a, x[i+ 9], 21, 3951481745)   // -343485551
+        a = md5_ii(a, b, c, d, x[i+ 0], 6 , 0xF4292244)
+        d = md5_ii(d, a, b, c, x[i+ 7], 10, 0x432AFF97)
+        c = md5_ii(c, d, a, b, x[i+14], 15, 0xAB9423A7)
+        b = md5_ii(b, c, d, a, x[i+ 5], 21, 0xFC93A039)
+        a = md5_ii(a, b, c, d, x[i+12], 6 , 0x655B59C3)
+        d = md5_ii(d, a, b, c, x[i+ 3], 10, 0x8F0CCC92)
+        c = md5_ii(c, d, a, b, x[i+10], 15, 0xFFEFF47D)
+        b = md5_ii(b, c, d, a, x[i+ 1], 21, 0x85845DD1)
+        a = md5_ii(a, b, c, d, x[i+ 8], 6 , 0x6FA87E4F)
+        d = md5_ii(d, a, b, c, x[i+15], 10, 0xFE2CE6E0)
+        c = md5_ii(c, d, a, b, x[i+ 6], 15, 0xA3014314)
+        b = md5_ii(b, c, d, a, x[i+13], 21, 0x4E0811A1)
+        a = md5_ii(a, b, c, d, x[i+ 4], 6 , 0xF7537E82)
+        d = md5_ii(d, a, b, c, x[i+11], 10, 0xBD3AF235)
+        c = md5_ii(c, d, a, b, x[i+ 2], 15, 0x2AD7D2BB)
+        b = md5_ii(b, c, d, a, x[i+ 9], 21, 0xEB86D391)
 
         a = safe_add(a, olda)
         b = safe_add(b, oldb)

@@ -4020,6 +4020,12 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                 // const loop declarations still receive a fresh value each
                 // iteration, but writes from the loop body must throw.
                 ve->is_const = is_const_loop;
+                // async functions predeclare captured locals in a scope env;
+                // loop lexical bindings need a fresh per-iteration cell instead.
+                ve->in_scope_env = false;
+                ve->scope_env_slot = -1;
+                ve->scope_env_reg = 0;
+                ve->from_env = false;
             }
         }
     } else {
@@ -4352,9 +4358,11 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         MIR_new_reg_op(mt->ctx, iter_exc)));
 
     // In generators: register iterator and loop_var as env-stored variables
+    int loop_var_env_slot = -1;
     if (mt->in_generator && mt->gen_env_reg) {
         int iter_slot = mt->gen_local_slot_count++;
         int lv_slot  = mt->gen_local_slot_count++;
+        loop_var_env_slot = lv_slot;
         {
             JsVarScopeEntry entry;
             memset(&entry, 0, sizeof(entry));
@@ -4507,6 +4515,14 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     } else {
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, loop_var), MIR_new_reg_op(mt->ctx, step_result)));
+    }
+    if (loop_var_env_slot >= 0) {
+        // async state-machine closures read env-backed loop variables, so each
+        // iteration must publish the freshly assigned value before body closures run.
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                loop_var_env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+            MIR_new_reg_op(mt->ctx, loop_var)));
     }
 
     // Write-back loop variable to module var / global property / scope_env

@@ -37,9 +37,9 @@ pn b64_encode(bytes, nbytes: int) {
         var b1 = bytes[i + 1]
         var b2 = bytes[i + 2]
         out[oi] = ENC[shr(b0, 2)]
-        out[oi + 1] = ENC[band(shl(band(b0, 3), 4) + shr(b1, 4), 63)]
-        out[oi + 2] = ENC[band(shl(band(b1, 15), 2) + shr(b2, 6), 63)]
-        out[oi + 3] = ENC[band(b2, 63)]
+        out[oi + 1] = ENC[band(shl(band(b0, 0x3), 4) + shr(b1, 4), 0x3F)]
+        out[oi + 2] = ENC[band(shl(band(b1, 0xF), 2) + shr(b2, 6), 0x3F)]
+        out[oi + 3] = ENC[band(b2, 0x3F)]
         oi = oi + 4
         i = i + 3
     }
@@ -48,7 +48,7 @@ pn b64_encode(bytes, nbytes: int) {
     if (nbytes % 3 == 1) {
         var b0 = bytes[i]
         out[oi] = ENC[shr(b0, 2)]
-        out[oi + 1] = ENC[shl(band(b0, 3), 4)]
+        out[oi + 1] = ENC[shl(band(b0, 0x3), 4)]
         out[oi + 2] = PAD
         out[oi + 3] = PAD
         oi = oi + 4
@@ -57,8 +57,8 @@ pn b64_encode(bytes, nbytes: int) {
         var b0 = bytes[i]
         var b1 = bytes[i + 1]
         out[oi] = ENC[shr(b0, 2)]
-        out[oi + 1] = ENC[band(shl(band(b0, 3), 4) + shr(b1, 4), 63)]
-        out[oi + 2] = ENC[shl(band(b1, 15), 2)]
+        out[oi + 1] = ENC[band(shl(band(b0, 0x3), 4) + shr(b1, 4), 0x3F)]
+        out[oi + 2] = ENC[shl(band(b1, 0xF), 2)]
         out[oi + 3] = PAD
         oi = oi + 4
     }
@@ -78,7 +78,7 @@ pn b64_decode(enc, enc_len: int) {
     while (i < enc_len) {
         var ch = enc[i]
         var padding = (ch == PAD)
-        var c = DEC[band(ch, 127)]
+        var c = DEC[band(ch, 0x7F)]
         // Skip illegal characters
         if (c == -1) {
             i = i + 1
@@ -93,7 +93,7 @@ pn b64_decode(enc, enc_len: int) {
         if (leftbits >= 8) {
             leftbits = leftbits - 8
             if (padding == false) {
-                out[oi] = band(shr(leftdata, leftbits), 255)
+                out[oi] = band(shr(leftdata, leftbits), 0xFF)
                 oi = oi + 1
             }
             leftdata = band(leftdata, shl(1, leftbits) - 1)

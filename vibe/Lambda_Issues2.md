@@ -87,24 +87,21 @@ print(string(sched.list))  // prints some_value
 
 ---
 
-## 4. No Hexadecimal Literal Support
+## 4. No Hexadecimal Literal Support — Fixed
 
+**Status**: ✅ **FIXED**
 **Severity**: Compilation error  
 **Affected benchmarks**: crypto_sha1, richards
 
-Lambda does not support hex literals like `0xFF` or `0xD008`. These produce parse errors.
-
-**Workaround**: Manually convert all hex values to decimal.
+Lambda now supports hexadecimal integer literals like `0xFF` and `0xD008`, including uppercase `0X` prefixes. Hex literals can also carry fixed-width integer suffixes (`i8/i16/i32/i64/u8/u16/u32/u64`), so ported bit-mask code can preserve explicit wraparound semantics:
 
 ```lambda
-// FAILS
 var mask = 0xFFFFFFFF
-
-// WORKS
-var mask = 4294967295
+var byte_mask = 0xFFu8
+var signed_mask = 0xFFi8
 ```
 
-Common conversions needed:
+Common conversions no longer need manual decimal rewriting:
 - `0x80` → `128`
 - `0xFF` → `255`
 - `0xF` → `15`
@@ -112,7 +109,9 @@ Common conversions needed:
 - `0x5A827999` → `1518500249`
 - `0xFFFFFFFF` → `4294967295`
 
-**Suggestion**: Add hex literal support (`0x...`). This is standard in nearly every language and essential for bitwise/crypto code.
+**Fix**: The Lambda grammar accepts `0x`/`0X` integer tokens in both plain and sized-integer literal forms. The AST builder parses sized literals as raw integer bits before applying the target annotation, so values like `0xFFi8` wrap to `-1i8` while `0xFFu8` stays `255u8`.
+
+**Regression coverage**: `test/lambda/hex_literals.ls` covers plain hex values, uppercase prefix parsing, typed suffixes, wraparound, and bitwise expressions. `test/lambda/proc/proc_hex_literals.ls` covers procedural `var` initialization with `0xFFi8`.
 
 ---
 
@@ -527,7 +526,7 @@ pn show() {
 | 1 | `float[]` rejects list literals | Type system | **Fixed**; benchmark workarounds removed |
 | 2 | Can't assign through parenthesized access | Syntax | 4 benchmarks, core pattern |
 | 3 | `list` field name silent failure | Reserved word | 1 benchmark, hours of debugging |
-| 4 | No hex literals | Missing feature | 2 benchmarks, tedious manual conversion |
+| 4 | No hex literals | Missing feature | **Fixed**; supports plain `0x`/`0X` literals and sized integer suffixes |
 | 5 | Integer overflow errors | Arithmetic | **Fixed**; splay PRNG and SHA-1 word arithmetic now use `u32` |
 | 6 | No unsigned right shift | Bitwise ops | **Fixed for typed unsigned ints**; `shr(u32, n)` zero-fills |
 | 7 | `fill(0, x)` returns null | Edge case | **Fixed**; DeltaBlue now concatenates from empty fill arrays directly |
