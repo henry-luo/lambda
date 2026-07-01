@@ -728,6 +728,23 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         init_type = LMD_TYPE_ANY;
                     }
 
+                    // Stage 4C: a user function's numeric (INT/FLOAT) return type is a
+                    // SPECULATIVE inference, not a language guarantee — the callee may
+                    // return a non-number in some branch, and the return-type inference
+                    // itself can be unsound (it inferred numeric for functions that
+                    // actually return objects, e.g. the editor's stepMap chain). The
+                    // native var path below unboxes the initializer with an UNCHECKED
+                    // it2d/d2i, which silently collapses a boxed object to 0. So keep a
+                    // call-initialized binding boxed unless the type is GUARANTEED numeric
+                    // (a Math.* builtin). Boxing is always correct; only guaranteed
+                    // numerics keep the native fast path.
+                    if (d->init && d->init->node_type == JS_AST_NODE_CALL_EXPRESSION &&
+                        (init_type == LMD_TYPE_INT || init_type == LMD_TYPE_FLOAT) &&
+                        !jm_get_math_method((JsCallNode*)d->init)) {
+                        log_debug("Stage 4C: boxing var '%s' — call result numeric type is speculative, not guaranteed", vname);
+                        init_type = LMD_TYPE_ANY;
+                    }
+
                     if (init_type == LMD_TYPE_INT) {
                         // native int variable
                         MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_I64);
