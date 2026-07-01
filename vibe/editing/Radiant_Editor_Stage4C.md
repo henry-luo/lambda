@@ -21,6 +21,22 @@ The editor's **1960-test vitest suite is green under `jsdom` (Node)** — a brow
 
 ---
 
+## Progress (2026-07-01)
+
+**Phase 0 — harness foundation: DONE & proven.**
+- `test/editor-js/harness/inengine.ts` — a vitest-compatible in-engine shim (`describe`/`it`/`it.skip`/`expect` + the matchers the suite uses + `beforeEach`/`afterEach` + `vi.fn`). Prints `HARNESS pass=N fail=M skip=K` + one `FAIL <name>: <msg>` per failure. Sync-only (async tests not yet supported).
+- `test/editor-js/tools/build-conformance.mjs` — esbuild-bundles chosen `.test.ts` files to a classic IIFE, aliases `vitest`→the shim, appends `__harnessRun()`. Rejects `.tsx`.
+- **Verified:** the editor's real `.test.ts` files run **unmodified** under `lambda.exe js`. Core editor (commands+model+input, 209 tests) → **198 pass / 11 fail**; a 94-test slice → 92/94. The pipeline works end-to-end (bundle → run → machine-readable report).
+
+**Phase A gap inventory (empirical, from the 11 core failures — all in tight clusters):**
+1. **`Intl` not defined** (2) — `src/commands/caret.ts:97` uses `new Intl.Segmenter(…,{granularity:'word'})` for word-boundary nav. → implement `Intl.Segmenter` in LambdaJS, or a word-seg fallback.
+2. **`parseHtmlToDoc` DOM-parse fidelity** — inline-atom HTML round-trip + **all drawing tests (~28)** fail ("null is not iterable"); the LambdaJS DOM parser (`--document`) doesn't match jsdom for this markup. → §5 (drawing itself is Stage-5 scope, excluded from the green target).
+3. **LambdaJS JIT codegen bug** (explains `selMap` 1 + gap-cursor 4 + `cmdMoveNode` 3) — `stepMap`/`stepMapBias`/`mapReplaceBias` (`src/model/step.ts`): the branches that **construct** a new `SourcePos` via `pos([...listTake(…), newCi, ...listDrop(…)], p.offset)` return `{path:undefined, offset:undefined}`; the `return p` passthrough works. **Only reproduces with the real bundled `step.ts`** — a hand-written standalone equivalent, and `pos`/`listTake`/`listDrop`/spread in isolation, all work. So it's a **compiled-module-specific codegen bug**, not a missing feature. **Next: MIR dump** of `stepMapBias`/`mapReplaceBias` (debug build → `temp/mir_dump.txt`) — highest-value fix (unblocks ≥8 tests, likely more across the tiers).
+
+**Not yet started:** fixture-inlining for the tier corpora (≈1601; LambdaJS has no `fs`/`require` — verified), the `view/*.ts` tests under `--document`, and all of Phase B. Spikes live in `./temp/4c-spikes/` (ephemeral; regenerate via `build-conformance.mjs`).
+
+---
+
 ## 1. Goal, scope, target number
 
 ### 1.1 Goals
