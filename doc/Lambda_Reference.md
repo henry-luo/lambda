@@ -344,7 +344,7 @@ fn divide(a, b) int^ {
     else a / b
 }
 
-// Propagate error with ?
+// Propagate error with ^
 let result = divide(10, x)^
 
 // Or destructure to handle locally
@@ -499,4 +499,3 @@ Concise syntax for complex operations:
 3. **Query Expressions**: jQuery-style search with `?` (descendants), `.?` (self-inclusive), and `[T]` (child-level)
 4. **Pattern Matching**: Type-based pattern matching with `is`
 5. **Document Processing**: Built-in support for markup and data formats
-

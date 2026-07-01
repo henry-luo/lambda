@@ -84,16 +84,19 @@ point.
 
 ## 4. `?` post-fix error propagation does not work in `let`
 
+**Status: ✅ No Fix / by design (2026-07-01)** — `?` is not Lambda's
+error-propagation syntax. The current postfix propagation operator is `^`,
+including on the right-hand side of a `let`.
+
 ```lambda
-let doc = input("file.pdf", 'pdf')?    // syntax error
-let doc^err = input("file.pdf", 'pdf') // works
+let doc = input("file.pdf", 'pdf')?    // wrong: stale syntax
+let doc = input("file.pdf", 'pdf')^    // correct: propagate on error
+let doc^err = input("file.pdf", 'pdf') // correct: capture value/error
 ```
 
-`?` is documented in `doc/Lambda_Error_Handling.md` as a propagation
-operator and works in expression context, but the parser rejects it on the
-right-hand side of a `let`. This is surprising because `let a^err = …` is
-the common destructuring form documented elsewhere — both should work or
-the docs should call out the restriction.
+The older issue came from stale examples that described `?` as propagation.
+Current docs should use `^` for propagation and keep `let a^err = ...` for
+explicit value/error destructuring.
 
 ---
 
