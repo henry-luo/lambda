@@ -68,19 +68,17 @@ probe), with coverage in `test/lambda/proc/proc_implicit_if_return.ls`.
 
 ## 3. `print()` is single-argument; multi-arg call type-errors at runtime
 
+**Status: ✅ Fixed (2026-07-01)** — `print` is variadic. Each argument is
+stringified and adjacent arguments are separated by one space.
+
 ```lambda
 print("x=", x)
-// runtime error [212]: fn_call2: cannot call non-function value
+// prints: x= 42
 ```
 
-Every sane print expects varargs. The runtime error message also doesn't
-mention `print` or "too many arguments" — it says "non-function value",
-which sent me hunting for a missing import.
-
-**Asks**:
-- Make `print` variadic and space-join (or stringify-join) like most
-  REPLs.
-- At minimum, raise `"print expects 1 argument, got N"`.
+The default separator is currently a literal space. If Lambda grows a global
+runtime print configuration later, that separator is the intended extension
+point.
 
 ---
 

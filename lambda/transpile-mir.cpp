@@ -6569,6 +6569,27 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
         int arg_count = 0;
         while (arg) { arg_count++; arg = arg->next; }
 
+        if (info->fn == SYSPROC_PRINT) {
+            arg = call_node->argument;
+            bool first_print_arg = true;
+            while (arg) {
+                if (!first_print_arg) {
+                    // Multi-arg print is one logical print call; keep the
+                    // separator explicit so future config can replace it here.
+                    MIR_reg_t sep_ptr = emit_call_2(mt, "heap_strcpy", MIR_T_P,
+                        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)" "),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
+                    MIR_reg_t sep_item = emit_box_string(mt, sep_ptr);
+                    emit_call_1(mt, "pn_print", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, sep_item));
+                }
+                MIR_reg_t boxed_arg = transpile_box_item(mt, arg);
+                emit_call_1(mt, "pn_print", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_arg));
+                first_print_arg = false;
+                arg = arg->next;
+            }
+            return emit_null_item_reg(mt);
+        }
+
         // ==== VMap: map() and map(arr) ====
         if (info->fn == SYSFUNC_VMAP_NEW) {
             if (arg_count == 0) {

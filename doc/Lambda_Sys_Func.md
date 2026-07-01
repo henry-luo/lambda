@@ -791,7 +791,7 @@ Functions that have side effects (I/O, state changes). These are only available 
 
 | Function | Description | Example |
 |----------|-------------|---------|
-| `print(x)` | Print to console | `print("Hello!")` |
+| `print(args...)` | Print values to console | `print("x =", x)` |
 | `output(data, target)` | Write data to file/URL | `output(data, /.'out.json')` |
 | `data \|> target` | Pipe output (write/truncate) | `data \|> /.'result.json'` |
 | `data \|>> target` | Pipe output (append) | `line \|>> /.'log.txt'` |
@@ -807,14 +807,16 @@ Functions that have side effects (I/O, state changes). These are only available 
 | `cmd(command, args...)` | Execute shell command | `cmd("ls", "-la")` |
 | `clock()` | Monotonic clock in seconds | `clock()` |
 
-#### print(x)
+#### print(args...)
 
-Prints a value to the console (stdout).
+Prints values to the console (stdout). Arguments are stringified and joined
+with a single space separator.
 
 ```lambda
 print("Hello, world!")
 print(42)
 print([1, 2, 3])
+print("x =", 42)
 ```
 
 #### output(data, target) / output(data, target, format)
@@ -1195,7 +1197,7 @@ if (result is error) {
 ### I/O Functions (Procedural)
 | Function | Args | Description |
 |----------|------|-------------|
-| `print` | 1 | Print to console |
+| `print` | 0+ | Print values to console |
 | `output` | 2-3 | Write to file/URL |
 | `\|>` | 2 | Pipe write (truncate) |
 | `\|>>` | 2 | Pipe write (append) |
