@@ -250,6 +250,31 @@ string ws = \s+                  // one or more whitespace chars
 string word = \w+                // word characters
 ```
 
+### slice(str, start, end?)
+
+Extract a UTF-8 character slice from a string. `slice(str, start, end)` uses a
+zero-based start index inclusive and end index exclusive (`[start, end)`);
+`slice(str, start)` slices from `start` to the end. Negative indices count from
+the end, and out-of-range indices are clamped.
+
+Range subscript syntax is also supported: `str[a to b]` returns characters
+`a` through `b`, inclusive. In other words, `str[a to b]` is equivalent to
+`slice(str, a, b + 1)`.
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `slice(str, i, j)` | Characters `[i, j)` | `slice("hello", 1, 4)` | `"ell"` |
+| `slice(str, i)` | Characters `[i, end)` | `slice("hello", 2)` | `"llo"` |
+| `str[i to j]` | Characters `i` through `j`, inclusive | `"hello"[1 to 3]` | `"ell"` |
+
+```lambda
+slice("hello", 0, 2)      // "he"
+slice("hello", 2)         // "llo"
+slice("café", 2, 4)       // "fé"  — UTF-8 character indices
+"hello"[0 to 4]           // "hello"
+"hello"[1 to 3]           // "ell"
+```
+
 ### replace(str, pattern_or_string, replacement)
 
 Replace all occurrences of a pattern or substring in a string. Returns a new string.
