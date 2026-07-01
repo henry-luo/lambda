@@ -142,6 +142,7 @@ static const char* http_status_text(int code) {
         case 414: return "URI Too Long";
         case 415: return "Unsupported Media Type";
         case 416: return "Range Not Satisfiable";
+        case 417: return "Expectation Failed";
         case 422: return "Unprocessable Entity";
         case 429: return "Too Many Requests";
         case 500: return "Internal Server Error";
@@ -157,6 +158,14 @@ static const char* http_response_status_message(Item response, int status) {
     Item status_message = js_property_get(response, make_string_item("statusMessage"));
     if (get_type_id(status_message) == LMD_TYPE_STRING) {
         String* sm = it2s(status_message);
+        Item default_status_message = js_property_get(response, make_string_item("__default_status_message__"));
+        if (get_type_id(default_status_message) == LMD_TYPE_STRING) {
+            String* dm = it2s(default_status_message);
+            if (sm->len == dm->len && memcmp(sm->chars, dm->chars, sm->len) == 0) {
+                // statusCode assignment leaves the initial statusMessage untouched; serialize the phrase for the final code.
+                return http_status_text(status);
+            }
+        }
         if (sm->len > 0) return sm->chars;
     }
     return http_status_text(status);
@@ -1760,6 +1769,7 @@ static Item make_response_object(JsHttpConn* conn) {
     js_property_set(res, make_string_item("__chunks__"), js_array_new(0));
     js_property_set(res, make_string_item("__ending__"), (Item){.item = b2it(false)});
     js_property_set(res, make_string_item("statusMessage"), make_string_item(http_status_text(200)));
+    js_property_set(res, make_string_item("__default_status_message__"), make_string_item(http_status_text(200)));
     js_property_set(res, make_string_item("finished"), (Item){.item = b2it(false)});
     js_property_set(res, make_string_item("writableEnded"), (Item){.item = b2it(false)});
     js_property_set(res, make_string_item("writableFinished"), (Item){.item = b2it(false)});
@@ -2245,6 +2255,11 @@ static bool http_request_has_expect_continue(ParsedRequest* req) {
     return expect && http_header_has_token(expect, "100-continue");
 }
 
+static bool http_request_has_expect_header(ParsedRequest* req) {
+    const char* expect = http_request_header(req, "expect");
+    return expect && expect[0] != '\0';
+}
+
 static bool http_request_is_chunked(ParsedRequest* req) {
     const char* transfer_encoding = http_request_header(req, "transfer-encoding");
     return transfer_encoding && http_header_has_token(transfer_encoding, "chunked");
@@ -2285,6 +2300,16 @@ static void http_server_send_service_unavailable(JsHttpConn* conn) {
     http_response_flush(res_obj);
 }
 
+static void http_server_send_expectation_failed(JsHttpConn* conn, ParsedRequest* req,
+                                                bool has_buffered_request) {
+    if (!conn || conn->destroyed) return;
+    Item res_obj = http_response_for_request(conn, req, false, false, has_buffered_request);
+    js_property_set(res_obj, make_string_item("statusCode"), (Item){.item = i2it(417)});
+    js_property_set(res_obj, make_string_item("statusMessage"), make_string_item("Expectation Failed"));
+    js_property_set(res_obj, make_string_item("__body__"), make_string_item("", 0));
+    http_response_flush(res_obj);
+}
+
 static void http_server_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
     buf->base = (char*)mem_alloc(suggested_size, MEM_CAT_JS_RUNTIME);
     buf->len = buf->base ? suggested_size : 0;
@@ -2321,8 +2346,14 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
         while (conn->recv_len > 0 && !conn->destroyed) {
             if (conn->current_request.item != 0 &&
                 (conn->request_body_remaining > 0 || conn->request_body_chunked)) {
+                int before_body_len = conn->recv_len;
                 http_conn_feed_request_body(conn);
                 if (conn->recv_len <= 0) break;
+                if ((conn->request_body_remaining > 0 || conn->request_body_chunked) &&
+                    conn->recv_len == before_body_len) {
+                    // partial streamed bodies must yield to libuv; spinning here starves timers and later reads.
+                    break;
+                }
                 continue;
             }
 
@@ -2361,7 +2392,8 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                 break;
             }
             bool expect_continue = http_request_has_expect_continue(&req);
-            if (!req.body_complete && !expect_continue) {
+            bool expect_unknown = http_request_has_expect_header(&req) && !expect_continue;
+            if (!req.body_complete && !expect_continue && !expect_unknown) {
                 break;
             }
             if (consumed <= 0 || consumed > conn->recv_len) break;
@@ -2374,13 +2406,23 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                 http_server_send_service_unavailable(conn);
             } else if (srv) {
                 Item on_req = js_property_get(srv->js_object, make_string_item("__on_request__"));
-                Item on_continue = expect_continue ?
+                Item on_expect = expect_continue ?
                     js_property_get(srv->js_object, make_string_item("__on_checkContinue__")) :
-                    make_js_undefined();
+                    (expect_unknown ?
+                     js_property_get(srv->js_object, make_string_item("__on_checkExpectation__")) :
+                     make_js_undefined());
                 bool has_handler = get_type_id(srv->request_handler) == LMD_TYPE_FUNC;
                 bool has_request_event = get_type_id(on_req) == LMD_TYPE_FUNC;
-                bool has_check_continue = get_type_id(on_continue) == LMD_TYPE_FUNC;
-                if (!has_check_continue && !has_handler && !has_request_event) {
+                bool has_expect_handler = get_type_id(on_expect) == LMD_TYPE_FUNC;
+                if (expect_unknown && !has_expect_handler) {
+                    // unknown Expect values are answered at header time; waiting for a body can deadlock chunked clients.
+                    http_server_send_expectation_failed(conn, &req, has_buffered_request);
+                    int remaining = conn->recv_len - consumed;
+                    if (remaining > 0) memmove(conn->recv_buf, conn->recv_buf + consumed, (size_t)remaining);
+                    conn->recv_len = remaining;
+                    continue;
+                }
+                if (!has_expect_handler && !has_handler && !has_request_event) {
                     int remaining = conn->recv_len - consumed;
                     if (remaining > 0) memmove(conn->recv_buf, conn->recv_buf + consumed, (size_t)remaining);
                     conn->recv_len = remaining;
@@ -2397,9 +2439,9 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                 }
 
                 Item args[2] = { req_obj, res_obj };
-                if (has_check_continue) {
+                if (has_expect_handler) {
                     Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                    js_call_function(on_continue, srv->js_object, args, 2);
+                    js_call_function(on_expect, srv->js_object, args, 2);
                     js_async_hooks_restore_resource(previous_resource);
                     js_microtask_flush();
                 } else {
@@ -2438,17 +2480,23 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
             if (parse_http_request(conn->recv_buf, conn->recv_len, &req, &consumed) == 0 &&
                 consumed > 0 && consumed <= conn->recv_len) {
                 bool expect_continue = http_request_has_expect_continue(&req);
+                bool expect_unknown = http_request_has_expect_header(&req) && !expect_continue;
                 JsHttpServer* srv = conn->server;
                 conn->request_count++;
                 if (srv) {
                     Item on_req = js_property_get(srv->js_object, make_string_item("__on_request__"));
-                    Item on_continue = expect_continue ?
+                    Item on_expect = expect_continue ?
                         js_property_get(srv->js_object, make_string_item("__on_checkContinue__")) :
-                        make_js_undefined();
+                        (expect_unknown ?
+                         js_property_get(srv->js_object, make_string_item("__on_checkExpectation__")) :
+                         make_js_undefined());
                     bool has_handler = get_type_id(srv->request_handler) == LMD_TYPE_FUNC;
                     bool has_request_event = get_type_id(on_req) == LMD_TYPE_FUNC;
-                    bool has_check_continue = get_type_id(on_continue) == LMD_TYPE_FUNC;
-                    if (has_check_continue || has_handler || has_request_event) {
+                    bool has_expect_handler = get_type_id(on_expect) == LMD_TYPE_FUNC;
+                    if (expect_unknown && !has_expect_handler) {
+                        // unknown Expect values are answered at header time; waiting for a body can deadlock chunked clients.
+                        http_server_send_expectation_failed(conn, &req, false);
+                    } else if (has_expect_handler || has_handler || has_request_event) {
                         if (conn->async_resource.item == 0) conn->async_resource = js_new_object();
                         Item req_obj = make_request_object(conn, &req);
                         Item res_obj = http_response_for_request(conn, &req, true, false, false);
@@ -2459,9 +2507,9 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                             conn->request_body_chunked = http_request_is_chunked(&req);
                         }
                         Item args[2] = { req_obj, res_obj };
-                        if (has_check_continue) {
+                        if (has_expect_handler) {
                             Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                            js_call_function(on_continue, srv->js_object, args, 2);
+                            js_call_function(on_expect, srv->js_object, args, 2);
                             js_async_hooks_restore_resource(previous_resource);
                             js_microtask_flush();
                         } else {
@@ -4657,7 +4705,7 @@ static Item build_status_codes(void) {
     Item codes = js_new_object();
     static const int code_list[] = {
         100,101,200,201,202,204,206,301,302,303,304,307,308,
-        400,401,403,404,405,406,408,409,410,411,413,414,415,416,422,429,
+        400,401,403,404,405,406,408,409,410,411,413,414,415,416,417,422,429,
         500,501,502,503,504
     };
     for (int i = 0; i < (int)(sizeof(code_list)/sizeof(code_list[0])); i++) {

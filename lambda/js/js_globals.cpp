@@ -12943,18 +12943,28 @@ extern "C" Item js_json_parse(Item str_item) {
         return ItemNull;
     }
 
-    // null-terminate for the parser
-    char* buf = LAMBDA_ALLOCA(s->len + 1, char);
-    memcpy(buf, s->chars, s->len);
-    buf[s->len] = '\0';
-
     if (!js_input) {
         log_error("js_json_parse: no input context");
         return ItemNull;
     }
 
+    // large IPC JSON payloads still need a nul copy, but must not overflow
+    // the bounded stack buffer.
+    size_t buf_len = (size_t)s->len + 1;
+    bool heap_buf = buf_len > LAMBDA_ALLOCA_MAX_BYTES;
+    char* buf = heap_buf
+        ? (char*)mem_alloc(buf_len, MEM_CAT_JS_RUNTIME)
+        : LAMBDA_ALLOCA(buf_len, char);
+    if (!buf) {
+        js_throw_range_error("Invalid string length");
+        return ItemNull;
+    }
+    memcpy(buf, s->chars, s->len);
+    buf[s->len] = '\0';
+
     bool ok = false;
     Item result = parse_json_to_item_strict(js_input, buf, &ok);
+    if (heap_buf) mem_free(buf);
     if (!ok) {
         js_throw_syntax_error((Item){.item = s2it(heap_create_name("Unexpected token in JSON"))});
         return ItemNull;

@@ -3605,6 +3605,8 @@ static JsSocket* socket_reattach_for_connect(Item self) {
                     (Item){.item = i2it((int64_t)(uintptr_t)sock)});
     js_property_set(self, make_string_item("_handle"), make_socket_handle_object(sock));
     sock->handle_exposed = true;
+    // reconnect reuses the JS Socket object; clear the prior peer-FIN marker so new writes are not EPIPE.
+    js_property_set(self, make_string_item("__remote_ended__"), make_undefined_item());
     js_property_set(self, make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
     js_property_set(self, make_string_item("readable"), (Item){.item = ITEM_TRUE});
     js_property_set(self, make_string_item("writable"), (Item){.item = ITEM_TRUE});
