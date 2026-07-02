@@ -122,8 +122,10 @@ static int js_exec_timeout_seconds(size_t source_len) {
     }
 
     int seconds = JS_EXEC_TIMEOUT_BASE_SECONDS;
-    if (source_len > 65536) {
-        seconds += (int)(source_len / 65536) * JS_EXEC_TIMEOUT_BASE_SECONDS;
+    if (source_len > 32768) {
+        // the watchdog covers parse/transpile as well as execution; medium
+        // minified browser libraries can exceed 5s in debug without hanging.
+        seconds += (int)((source_len + 32767) / 32768) * JS_EXEC_TIMEOUT_BASE_SECONDS;
     }
     if (seconds > JS_EXEC_TIMEOUT_MAX_SECONDS) seconds = JS_EXEC_TIMEOUT_MAX_SECONDS;
     return seconds;

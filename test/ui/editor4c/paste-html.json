@@ -1,0 +1,17 @@
+{
+  "name": "editor4c: pasting text/html preserves inline formatting",
+  "_note": "Phase B — paste text/html path. paste_text with an html payload (<b>) writes both text/html and text/plain to the clipboard; the editor's onPaste prefers text/html, parses it to a slice, and inserts with the bold mark. Verifies the pasted 'BB' text lands and carries font-weight:bold. Exercises the store-backed clipboardData getData('text/html') path added for rich surfaces.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 60},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "wait", "ms": 80},
+    {"type": "paste_text", "text": "BB", "html": "<b>BB</b>"},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface"}, "contains": "BB"},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface [data-source-path=\"0,0\"]"}, "attribute": "style", "contains": "font-weight:bold"}
+  ]
+}

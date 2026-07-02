@@ -890,12 +890,21 @@ char* mem_strndup(const char* str, size_t max_len, MemCategory category) {
 void memtrack_get_stats(MemtrackStats* stats) {
     lock_tracker();
     memcpy(stats, &g_memtrack.stats, sizeof(MemtrackStats));
+    if (stats->current_count == 0) {
+        // live-byte telemetry must follow the live-allocation invariant; the
+        // debug allocation map is authoritative when every allocation is gone.
+        stats->current_bytes = 0;
+    }
     unlock_tracker();
 }
 
 void memtrack_get_category_stats(MemCategory category, MemtrackCategoryStats* stats) {
     lock_tracker();
     memcpy(stats, &g_memtrack.stats.categories[category], sizeof(MemtrackCategoryStats));
+    if (stats->current_count == 0) {
+        // keep per-category live bytes consistent with no live allocations.
+        stats->current_bytes = 0;
+    }
     unlock_tracker();
 }
 

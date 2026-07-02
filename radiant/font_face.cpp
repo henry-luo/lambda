@@ -38,6 +38,34 @@ static bool is_http_url(const char* url) {
     return url && (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
 }
 
+static bool is_supported_web_font_source(const char* url, const char* format) {
+    if (format && *format) {
+        if (strcasecmp(format, "woff2") == 0 ||
+            strcasecmp(format, "woff") == 0 ||
+            strcasecmp(format, "truetype") == 0 ||
+            strcasecmp(format, "opentype") == 0 ||
+            strcasecmp(format, "ttf") == 0 ||
+            strcasecmp(format, "otf") == 0) {
+            return true;
+        }
+        return false;
+    }
+
+    if (!url) return false;
+    const char* clean_end = url + strlen(url);
+    const char* query = strchr(url, '?');
+    const char* fragment = strchr(url, '#');
+    if (query && query < clean_end) clean_end = query;
+    if (fragment && fragment < clean_end) clean_end = fragment;
+
+    size_t len = (size_t)(clean_end - url);
+    return (len >= 6 && strncasecmp(clean_end - 6, ".woff2", 6) == 0) ||
+           (len >= 5 && strncasecmp(clean_end - 5, ".woff", 5) == 0) ||
+           (len >= 4 && strncasecmp(clean_end - 4, ".ttf", 4) == 0) ||
+           (len >= 4 && strncasecmp(clean_end - 4, ".otf", 4) == 0) ||
+           (len >= 4 && strncasecmp(clean_end - 4, ".ttc", 4) == 0);
+}
+
 // Text flow logging categories
 log_category_t* font_log = NULL;
 log_category_t* text_log = NULL;
@@ -172,8 +200,26 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
 
         // Download remote font URLs to local cache
         if (css_desc->src_urls) {
+            bool attempted_fallback_source = false;
             for (int j = 0; j < css_desc->src_count; j++) {
                 if (is_http_url(css_desc->src_urls[j].url)) {
+                    if (!is_supported_web_font_source(css_desc->src_urls[j].url, css_desc->src_urls[j].format)) {
+                        clog_debug(font_log, "Skipping unsupported remote font source: %s (format: %s)",
+                                   css_desc->src_urls[j].url,
+                                   css_desc->src_urls[j].format ? css_desc->src_urls[j].format : "?");
+                        mem_free(css_desc->src_urls[j].url);
+                        css_desc->src_urls[j].url = nullptr;
+                        continue;
+                    }
+                    if (attempted_fallback_source) {
+                        // @font-face src is an ordered fallback list; fetching
+                        // every remote source serially turns legacy lists into
+                        // page-load timeouts before CSS font fallback can work.
+                        mem_free(css_desc->src_urls[j].url);
+                        css_desc->src_urls[j].url = nullptr;
+                        continue;
+                    }
+                    attempted_fallback_source = true;
                     char* local_path = download_font_url(css_desc->src_urls[j].url);
                     if (local_path) {
                         clog_info(font_log, "Downloaded remote font '%s' -> %s",
@@ -190,22 +236,43 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
             }
         }
         if (is_http_url(css_desc->src_url)) {
-            char* local_path = download_font_url(css_desc->src_url);
-            if (local_path) {
-                clog_info(font_log, "Downloaded remote font '%s' -> %s",
-                          css_desc->src_url, local_path);
-                mem_free(css_desc->src_url);
-                css_desc->src_url = local_path;
-            } else {
-                clog_warn(font_log, "Failed to download remote font: %s",
-                          css_desc->src_url);
+            if (css_desc->src_urls && css_desc->src_count > 0) {
+                // the legacy src_url mirror points at the first list entry;
+                // once src_urls was processed, downloading it again repeats
+                // unsupported formats such as embedded-opentype .eot.
                 mem_free(css_desc->src_url);
                 css_desc->src_url = nullptr;
+            } else if (!is_supported_web_font_source(css_desc->src_url, nullptr)) {
+                mem_free(css_desc->src_url);
+                css_desc->src_url = nullptr;
+            } else {
+                char* local_path = download_font_url(css_desc->src_url);
+                if (local_path) {
+                    clog_info(font_log, "Downloaded remote font '%s' -> %s",
+                              css_desc->src_url, local_path);
+                    mem_free(css_desc->src_url);
+                    css_desc->src_url = local_path;
+                } else {
+                    clog_warn(font_log, "Failed to download remote font: %s",
+                              css_desc->src_url);
+                    mem_free(css_desc->src_url);
+                    css_desc->src_url = nullptr;
+                }
+            }
+        }
+
+        bool has_loadable_source = css_desc->src_url || css_desc->src_local;
+        if (css_desc->src_urls) {
+            for (int j = 0; j < css_desc->src_count; j++) {
+                if (css_desc->src_urls[j].url) {
+                    has_loadable_source = true;
+                    break;
+                }
             }
         }
 
         // Skip fonts without any loadable source
-        if ((!css_desc->src_urls || css_desc->src_count == 0) && !css_desc->src_url && !css_desc->src_local) {
+        if (!has_loadable_source) {
             clog_debug(font_log, "Skipping @font-face '%s': no local source available",
                        css_desc->family_name ? css_desc->family_name : "(unnamed)");
             css_font_face_descriptor_free(css_desc);
@@ -224,12 +291,21 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
 
             // Copy src_urls array for multi-format fallback
             if (css_desc->src_urls && css_desc->src_count > 0) {
-                descriptor->src_entries = (FontFaceSrc*)mem_calloc(css_desc->src_count, sizeof(FontFaceSrc), MEM_CAT_LAYOUT);
+                int loadable_src_count = 0;
+                for (int j = 0; j < css_desc->src_count; j++) {
+                    if (css_desc->src_urls[j].url) loadable_src_count++;
+                }
+                descriptor->src_entries = loadable_src_count > 0
+                    ? (FontFaceSrc*)mem_calloc(loadable_src_count, sizeof(FontFaceSrc), MEM_CAT_LAYOUT)
+                    : nullptr;
                 if (descriptor->src_entries) {
-                    descriptor->src_count = css_desc->src_count;
+                    descriptor->src_count = loadable_src_count;
+                    int dst = 0;
                     for (int j = 0; j < css_desc->src_count; j++) {
-                        descriptor->src_entries[j].path = css_desc->src_urls[j].url ? mem_strdup(css_desc->src_urls[j].url, MEM_CAT_LAYOUT) : nullptr;
-                        descriptor->src_entries[j].format = css_desc->src_urls[j].format ? mem_strdup(css_desc->src_urls[j].format, MEM_CAT_LAYOUT) : nullptr;
+                        if (!css_desc->src_urls[j].url) continue;
+                        descriptor->src_entries[dst].path = mem_strdup(css_desc->src_urls[j].url, MEM_CAT_LAYOUT);
+                        descriptor->src_entries[dst].format = css_desc->src_urls[j].format ? mem_strdup(css_desc->src_urls[j].format, MEM_CAT_LAYOUT) : nullptr;
+                        dst++;
                     }
                     clog_debug(font_log, "Copied %d src entries for @font-face '%s'",
                         descriptor->src_count, descriptor->family_name);

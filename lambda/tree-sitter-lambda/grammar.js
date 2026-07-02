@@ -701,11 +701,11 @@ module.exports = grammar({
 
     // Block-form if: if cond { stam } [else { stam } | else if_stam | else expr]
     // Condition without required parens. Block body. Else can be expr (NEW).
-    if_stam: $ => prec.right(seq(
+    if_stam: $ => prec.right(1, seq(
       'if', field('cond', $._expr),
-      '{', field('then', $.content), '}',
+      '{', optional(field('then', $.content)), '}',
       optional(seq('else', choice(
-        prec.dynamic(1, seq('{', field('else', $.content), '}')),
+        prec.dynamic(1, seq('{', optional(field('else', $.content)), '}')),
         field('else', $.if_stam),
         field('else', $._expr),
       ))),
