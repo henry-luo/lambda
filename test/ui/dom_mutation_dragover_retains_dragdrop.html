@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>DOM mutation dragover retains DragDropState</title>
+<style>
+  body { font-family: sans-serif; margin: 24px; }
+  .row { display: flex; gap: 24px; align-items: center; }
+  .box {
+    width: 150px;
+    height: 90px;
+    border: 2px solid #333;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+  }
+  #drag-src { background: rgb(70, 120, 210); color: white; cursor: grab; }
+  #drop-zone { background: rgb(190, 235, 190); border-style: dashed; }
+  #drop-line { width: 220px; height: 6px; margin-top: 18px; background: rgb(210, 40, 70); }
+  #status { margin-top: 18px; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div id="drag-src" class="box" draggable="true">Drag source</div>
+    <div id="drop-zone" class="box" dropzone="copy">Drop target</div>
+  </div>
+  <p id="status">ready</p>
+  <script>
+    const src = document.getElementById('drag-src');
+    const zone = document.getElementById('drop-zone');
+    const status = document.getElementById('status');
+
+    src.addEventListener('dragstart', (event) => {
+      event.dataTransfer.setData('text/plain', 'payload');
+      status.textContent = 'dragstart';
+    });
+
+    zone.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      if (!document.getElementById('drop-line')) {
+        const line = document.createElement('div');
+        line.id = 'drop-line';
+        document.body.insertBefore(line, status);
+      }
+      status.textContent = 'dragover mutated';
+    });
+
+    zone.addEventListener('drop', (event) => {
+      event.preventDefault();
+      status.textContent = 'drop complete';
+    });
+
+    src.addEventListener('dragend', () => {
+      if (status.textContent === 'drop complete') {
+        status.textContent = 'drop complete dragend';
+      }
+    });
+  </script>
+</body>
+</html>

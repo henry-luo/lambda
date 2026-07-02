@@ -247,6 +247,24 @@ static void release_grid_prop(GridProp* grid) {
     }
 }
 
+static void release_view_owned_resources_in_node(DomNode* node);
+
+static void release_pseudo_content_prop(DomElement* elem) {
+    if (!elem || !elem->pseudo) {
+        return;
+    }
+
+    // Generated marker/before/after nodes can be held from PseudoContentProp
+    // without being reachable through first_child; release their FontProp
+    // handles before the view pool is discarded.
+    release_view_owned_resources_in_node(static_cast<DomNode*>(elem->pseudo->before));
+    release_view_owned_resources_in_node(static_cast<DomNode*>(elem->pseudo->after));
+    release_view_owned_resources_in_node(static_cast<DomNode*>(elem->pseudo->marker));
+    elem->pseudo->before = nullptr;
+    elem->pseudo->after = nullptr;
+    elem->pseudo->marker = nullptr;
+}
+
 static void release_embed_prop(DomElement* elem) {
     if (!elem || !elem->embed) {
         return;
@@ -294,10 +312,9 @@ static bool release_should_walk_dom_children(DomElement* elem) {
     }
 
     if (elem->display.inner == RDT_DISPLAY_REPLACED) {
-        // Select and textarea keep real DOM children used for option/text state.
-        // Other replaced elements render external content or fallback outside the
-        // normal child layout tree, so their child slots are not view-owned.
-        return tag == HTM_TAG_SELECT || tag == HTM_TAG_TEXTAREA;
+        // Select, textarea, and button keep real DOM children/state that can own
+        // layout handles; skipping them leaks fallback font handles on removal.
+        return tag == HTM_TAG_SELECT || tag == HTM_TAG_TEXTAREA || tag == HTM_TAG_BUTTON;
     }
 
     return true;
@@ -322,6 +339,7 @@ static void release_view_owned_resources_in_node(DomNode* node) {
         if (elem->font) {
             font_prop_release_handle(elem->font);
         }
+        release_pseudo_content_prop(elem);
         release_embed_prop(elem);
         release_form_control_prop(elem);
         return;
@@ -540,6 +558,62 @@ void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span) {
         prop->has_explicit_grid_column_end = false;
         prop->is_grid_auto_placed = true;
     }
+}
+
+static void clear_view_owned_pointers_in_node(DomNode* node) {
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            DomNode* child = elem->first_child;
+            PseudoContentProp* pseudo = elem->pseudo;
+            if (pseudo) {
+                clear_view_owned_pointers_in_node(static_cast<DomNode*>(pseudo->before));
+                clear_view_owned_pointers_in_node(static_cast<DomNode*>(pseudo->after));
+                clear_view_owned_pointers_in_node(static_cast<DomNode*>(pseudo->marker));
+            }
+            elem->font = nullptr;
+            elem->bound = nullptr;
+            elem->in_line = nullptr;
+            elem->blk = nullptr;
+            elem->scroller = nullptr;
+            elem->embed = nullptr;
+            elem->position = nullptr;
+            elem->transform = nullptr;
+            elem->filter = nullptr;
+            elem->backdrop_filter = nullptr;
+            elem->multicol = nullptr;
+            elem->pseudo = nullptr;
+            elem->vpath = nullptr;
+            elem->layout_cache = nullptr;
+            elem->view_type = RDT_VIEW_NONE;
+            elem->content_width = 0.0f;
+            elem->content_height = 0.0f;
+            elem->has_cached_intrinsic_widths = false;
+            elem->styles_resolved = false;
+            elem->float_prelaid = false;
+            elem->fi = nullptr;
+            elem->item_prop_type = DomElement::ITEM_PROP_NONE;
+            if (child) {
+                clear_view_owned_pointers_in_node(child);
+            }
+        } else if (node->is_text()) {
+            DomText* text = node->as_text();
+            text->rect = nullptr;
+            text->font = nullptr;
+            text->view_type = RDT_VIEW_NONE;
+        }
+        node = node->next_sibling;
+    }
+}
+
+void view_pool_release_detached_subtree(DomNode* root) {
+    if (!root) return;
+
+    // JS DOM removals can leave detached nodes alive after they stop being part
+    // of the document view tree; release their layout-owned handles before the
+    // final view_pool_destroy walk loses reachability to that subtree.
+    release_view_owned_resources_in_node(root);
+    clear_view_owned_pointers_in_node(root);
 }
 
 void view_pool_init(ViewTree* tree) {

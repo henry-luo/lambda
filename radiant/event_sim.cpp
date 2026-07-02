@@ -4942,21 +4942,37 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 }
             }
             DragDropState* drag_drop = state ? state->drag_drop : NULL;
-            if (drag_drop && ev->has_expected_drag_drop_pending && (drag_drop->pending != ev->expected_drag_drop_pending)) {
-                log_error("event_sim: assert_state_store FAIL - drag_drop pending expectation mismatch");
-                passed = false;
+            if (ev->has_expected_drag_drop_pending) {
+                bool actual = drag_drop ? drag_drop->pending : false;
+                if (actual != ev->expected_drag_drop_pending) {
+                    log_error("event_sim: assert_state_store FAIL - drag_drop pending expected %s, got %s",
+                        ev->expected_drag_drop_pending ? "true" : "false",
+                        actual ? "true" : "false");
+                    passed = false;
+                }
             }
-            if (drag_drop && ev->has_expected_drag_drop_active && (drag_drop->active != ev->expected_drag_drop_active)) {
-                log_error("event_sim: assert_state_store FAIL - drag_drop active expectation mismatch");
-                passed = false;
+            if (ev->has_expected_drag_drop_active) {
+                bool actual = drag_drop ? drag_drop->active : false;
+                if (actual != ev->expected_drag_drop_active) {
+                    log_error("event_sim: assert_state_store FAIL - drag_drop active expected %s, got %s",
+                        ev->expected_drag_drop_active ? "true" : "false",
+                        actual ? "true" : "false");
+                    passed = false;
+                }
             }
-            if (drag_drop && elem && ev->has_expected_drag_drop_source && ((drag_drop->source_view == elem) != ev->expected_drag_drop_source)) {
-                log_error("event_sim: assert_state_store FAIL - drag_drop source expectation mismatch");
-                passed = false;
+            if (elem && ev->has_expected_drag_drop_source) {
+                bool actual = drag_drop && drag_drop->source_view == elem;
+                if (actual != ev->expected_drag_drop_source) {
+                    log_error("event_sim: assert_state_store FAIL - drag_drop source expectation mismatch");
+                    passed = false;
+                }
             }
-            if (drag_drop && elem && ev->has_expected_drag_drop_target && ((drag_drop->drop_target == elem) != ev->expected_drag_drop_target)) {
-                log_error("event_sim: assert_state_store FAIL - drag_drop target expectation mismatch");
-                passed = false;
+            if (elem && ev->has_expected_drag_drop_target) {
+                bool actual = drag_drop && drag_drop->drop_target == elem;
+                if (actual != ev->expected_drag_drop_target) {
+                    log_error("event_sim: assert_state_store FAIL - drag_drop target expectation mismatch");
+                    passed = false;
+                }
             }
             if (state && elem && ev->has_expected_open_dropdown && ((state->open_dropdown == elem) != ev->expected_open_dropdown)) {
                 log_error("event_sim: assert_state_store FAIL - open dropdown expectation mismatch");

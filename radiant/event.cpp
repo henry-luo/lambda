@@ -4345,49 +4345,12 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     DocState* state = (DocState*)doc->state;
 
-    // A full rebuild frees the entire view tree, so the focused View* must be
-    // cleared (below) to avoid a dangling pointer. For a script-driven rich
-    // editor (Stage 4B) that would silently blur the contenteditable host and
-    // drop all subsequent input. The DOM tree survives the view-tree teardown,
-    // so capture the focused editing host element here and re-focus it after
-    // relayout — mirroring rebuild_lambda_doc and restore_form_text_focus_after_input.
-    DomElement* refocus_host = nullptr;
-
-    // Clear interaction targets before freeing views so transition helpers can
-    // still update pseudo-state mirrors on the old tree.
+    // The fallback drops the layout epoch, not the DOM identity epoch. Keep
+    // StateStore owners for connected DOM nodes; after relayout we prune only
+    // state whose node was actually removed by the mutation.
     if (state) {
-        bool preserve_rich_editing =
-            state->editing.has_active_surface &&
-            editing_surface_is_rich(&state->editing.active_surface);
-        bool preserve_text_control_selection =
-            state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
-            state->sel.control && tc_is_text_control(state->sel.control);
         doc_state_close_dropdown(state, NULL);
         doc_state_close_context_menu(state);
-        doc_state_set_hover_target(state, NULL);
-        doc_state_set_active_target(state, NULL);
-        doc_state_set_drag_state(state, NULL, false);
-        if (focus_has_current(state)) {
-            // Capture from the live focus (active_surface may already have been
-            // cleared by the reconcile's focus/caret churn): if the focused
-            // element resolves to a rich editing host, remember it for re-focus.
-            View* focused_view = focus_get(state);
-            DomElement* focused_elem = focused_view
-                ? radiant_view_to_dom_element(focused_view) : nullptr;
-            EditingSurface focused_surface;
-            if (focused_elem &&
-                editing_surface_from_target(static_cast<View*>(focused_elem),
-                                            &focused_surface) &&
-                editing_surface_is_rich(&focused_surface)) {
-                refocus_host = focused_surface.owner;
-            }
-            focus_clear(state);
-        } else if (!preserve_rich_editing && !preserve_text_control_selection) {
-            state_store_legacy_selection_clear(state);
-            state_store_legacy_caret_clear(state);
-        } else if (preserve_text_control_selection) {
-            state_store_refresh_caret_projection(state);
-        }
     }
 
     // Force full relayout by clearing view tree
@@ -4397,14 +4360,9 @@ static void post_html_handler_rebuild(EventContext* evcon,
         doc->view_tree = nullptr;
     }
 
-    // Clear stale view pointers in DocState — old views are now freed
+    // Clear stale layout-pool targets. DOM-backed StateStore entries survive
+    // and are pruned/rebound after relayout below.
     if (state) {
-        if (state->cursor) state->cursor->view = nullptr;
-        doc_state_clear_drag_drop(state);
-        // Clear per-view state entries — they reference old view pointers as keys
-        if (state->state_map) {
-            hashmap_clear(state->state_map, false);
-        }
         // Drop CSS animations/transitions whose View* targets were just freed; relayout
         // below re-creates them for elements that still have them. Without this, the next
         // animation_scheduler_tick dereferences a dangling View* (use-after-free).
@@ -4421,22 +4379,9 @@ static void post_html_handler_rebuild(EventContext* evcon,
     layout_html_doc(evcon->ui_context, doc, false);
     if (evcon->ui_context) evcon->ui_context->document = saved_doc;
 
-    // Re-focus the editing host the rebuild blurred, provided it is still
-    // connected to the document (the host survives a child-subtree reconcile;
-    // a whole-document replace keeps it too). Without this the contenteditable
-    // surface stays blurred after a structural edit and silently drops further
-    // input. The DOM element persists across the view-tree rebuild, so the
-    // freshly-laid-out element node is itself the focus target.
-    if (state && refocus_host && !focus_has_current(state)) {
-        bool connected = false;
-        for (DomNode* p = static_cast<DomNode*>(refocus_host); p; p = p->parent) {
-            if (p == static_cast<DomNode*>(doc->root)) { connected = true; break; }
-        }
-        if (connected) {
-            focus_set(state, static_cast<View*>(refocus_host), false);
-            log_debug("post_html_handler_rebuild: restored focus to rich editing host %p",
-                      refocus_host);
-        }
+    if (state) {
+        state_store_prune_after_reflow(state);
+        state_store_refresh_caret_projection(state);
     }
 
     auto t2 = high_resolution_clock::now();
@@ -4837,12 +4782,10 @@ static bool radiant_dispatch_drag_event(EventContext* evcon, View* target,
 // DragDropState at a time). `drop_allowed` mirrors HTML5: a drop fires only
 // when the most recent dragover on the target called preventDefault().
 //
-// This lifecycle is DELIBERATELY decoupled from the native DragDropState:
-// script editors mutate the DOM inside dragover (e.g. inserting a drop-line),
-// which triggers Radiant's full view-tree rebuild → doc_state_clear_drag_drop,
-// wiping the native drag mid-gesture. Our flag + a DOM-node source (which
-// survives the rebuild; only layout views are freed) keep the JS DnD sequence
-// running dragstart→dragover*→drop→dragend regardless.
+// This JS-facing lifecycle carries HTML5 DataTransfer/drop-allowed state while
+// native DragDropState remains the StateStore-owned gesture source. Script
+// editors may mutate the DOM inside dragover; fallback relayout must retain the
+// native drag when the source DOM node is still connected.
 static bool  g_jsdnd_active = false;
 static bool  g_jsdnd_drop_allowed = false;
 static View* g_jsdnd_source = nullptr;  // drag source as a DOM element (survives relayout)
@@ -6661,9 +6604,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
-        // Stage 4C: JS dragover to the element under the cursor, driven by our
-        // own flag so it keeps firing even after the native DragDropState was
-        // cleared by a DOM mutation in a prior dragover handler. Its
+        // Stage 4C: JS dragover to the element under the cursor. Its
         // preventDefault() decides whether a drop is allowed on release.
         if (g_jsdnd_active && evcon.target) {
             g_jsdnd_drop_allowed = radiant_dispatch_drag_event(&evcon,
@@ -7477,12 +7418,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (up_prevented) evcon.default_prevented = true;
             }
 
-            // Stage 4C: JS drop + dragend for script editors, driven by our own
-            // flag (the native DragDropState is typically already cleared here
-            // because the editor mutated the DOM during dragover). Fire a final
-            // dragover at the release point; a drop follows only if that (the
-            // last dragover) was canceled — HTML5 gates drop on preventDefault.
-            // Then dragend to the source DOM element (survived any relayout).
+            // Stage 4C: JS drop + dragend for script editors. Fire a final
+            // dragover at the release point; a drop follows only if that
+            // dragover (or the previous one) was canceled — HTML5 gates drop on
+            // preventDefault. Then dragend to the source DOM element.
             if (g_jsdnd_active) {
                 if (evcon.target) {
                     bool ov = radiant_dispatch_drag_event(&evcon,

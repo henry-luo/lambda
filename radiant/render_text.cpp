@@ -305,8 +305,9 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 if (bytes <= 0) { p++;  codepoint = 0;  char_index++; }
                 else { p += bytes;  char_index++; }
 
-                // skip soft hyphen (U+00AD) — invisible unless line breaks there
-                if (codepoint == 0x00AD) continue;
+                // Variation selectors are consumed by the preceding glyph; asking
+                // CoreText to paint them standalone triggers hidden UI-font lookup.
+                if (codepoint == 0x00AD || text_codepoint_has_zero_advance(codepoint)) continue;
 
                 // Apply text-transform before loading glyph
                 uint32_t tt_out[3];
@@ -317,6 +318,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 for (int tti = 0; tti < tt_count; tti++) {
                     uint32_t render_cp = tt_out[tti];
                     if (render_cp == 0) continue;
+                    if (text_codepoint_has_zero_advance(render_cp)) continue;
 
                     static int glyph_debug_count = 0;
                     if (render_text_trace_enabled() && glyph_debug_count < 500) {
@@ -873,7 +875,7 @@ static int collect_skip_ink_gaps(RenderContext* rdcon, unsigned char* str,
             continue;
         }
         p += bytes;
-        if (codepoint == 0x00AD) continue;
+        if (codepoint == 0x00AD || text_codepoint_has_zero_advance(codepoint)) continue;
 
         LoadedGlyph* glyph = font_load_glyph(rdcon->font.font_handle, &sd, codepoint, true);
         if (!glyph) {

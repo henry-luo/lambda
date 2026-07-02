@@ -216,11 +216,13 @@ typedef struct CursorState {
  */
 typedef struct DragDropState {
     View* source_view;             // the view being dragged
+    uint32_t source_node_id;       // stable DOM id for fallback rebind/prune
     float start_x, start_y;       // mousedown position (physical px)
     float current_x, current_y;   // current drag position (physical px)
     bool active;                   // true after movement exceeds threshold
     bool pending;                  // true between mousedown and threshold check
     View* drop_target;             // current drop target under cursor (has dropzone attr)
+    uint32_t drop_target_node_id;  // stable DOM id for fallback rebind/prune
     bool has_drop_range;           // true when drop_start/drop_end are valid
     DomBoundary drop_start;        // target range captured during live dragover
     DomBoundary drop_end;
@@ -577,6 +579,7 @@ bool view_state_get_focused(DocState* state, View* view);
  */
 uint32_t view_state_detach_subtree(DocState* state, DomNode* root);
 uint32_t view_state_prune_orphans(DocState* state);
+uint32_t state_store_prune_after_reflow(DocState* state);
 
 /**
  * Read dynamic pseudo-state through canonical StateStore/ViewState data.

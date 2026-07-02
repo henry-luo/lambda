@@ -20,6 +20,7 @@
 #include "form_control.hpp"
 #include "editing_host.hpp"
 #include "text_control.hpp"
+#include "render_export_support.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_value.hpp"
@@ -1067,6 +1068,13 @@ void dom_mutation_pre_remove(DocState* state, DomNode* child) {
     resync_selection_after_mutation(state);
 }
 
+static void dom_range_pre_remove(DocState* state, DomNode* child) {
+    dom_mutation_pre_remove(state, child);
+    // Native Range/editing removals bypass the JS DOM removal hook; release
+    // view-pool handles here before the detached subtree becomes unreachable.
+    view_pool_release_detached_subtree(child);
+}
+
 void dom_mutation_post_insert(DocState* state, DomNode* parent, DomNode* node) {
     if (!state || !parent || !node) return;
     if (node->parent != parent) return;
@@ -1498,11 +1506,11 @@ static DomElement* range_process_contents(DomRange* r, RangeOp op,
                 DomNode* clone = dom_node_clone(c, /*deep=*/true);
                 if (clone && fragment) (static_cast<DomNode*>(fragment))->append_child(clone);
             } else if (op == ROP_EXTRACT) {
-                dom_mutation_pre_remove(r->state, c);
+                dom_range_pre_remove(r->state, c);
                 parent->remove_child(c);
                 if (fragment) (static_cast<DomNode*>(fragment))->append_child(c);
             } else {
-                dom_mutation_pre_remove(r->state, c);
+                dom_range_pre_remove(r->state, c);
                 parent->remove_child(c);
             }
         }
@@ -1575,7 +1583,7 @@ bool dom_range_insert_node(DomRange* r, DomNode* node, const char** out_exceptio
 
     // Detach node from its current parent.
     if (node->parent) {
-        dom_mutation_pre_remove(r->state, node);
+        dom_range_pre_remove(r->state, node);
         node->parent->remove_child(node);
     }
 
@@ -1651,7 +1659,7 @@ bool dom_range_surround_contents(DomRange* r, DomNode* node, const char** out_ex
 
     // Detach `node` and clear its children.
     if (node->parent) {
-        dom_mutation_pre_remove(r->state, node);
+        dom_range_pre_remove(r->state, node);
         node->parent->remove_child(node);
     }
     if (node->is_element()) {
@@ -1659,7 +1667,7 @@ bool dom_range_surround_contents(DomRange* r, DomNode* node, const char** out_ex
         DomNode* c = en_el->first_child;
         while (c) {
             DomNode* next = c->next_sibling;
-            dom_mutation_pre_remove(r->state, c);
+            dom_range_pre_remove(r->state, c);
             en_el->remove_child(c);
             c = next;
         }
