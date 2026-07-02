@@ -9,7 +9,7 @@ pn main() {
     }
 
     // T1: listing returns correct count (3 entries: data.csv, hello.txt, subdir)
-    print("T1:" ++ string(len(entries)))
+    print("T1:" ++ (len(entries)))
 
     // find specific entries by name
     var txt_entry = null
@@ -28,19 +28,19 @@ pn main() {
     print(" T2:" ++ txt_entry.name)
 
     // T3: extension property
-    print(" T3:" ++ string(txt_entry.extension))
+    print(" T3:" ++ (txt_entry.extension))
 
     // T4: is_dir for file
-    print(" T4:" ++ string(txt_entry.is_dir))
+    print(" T4:" ++ (txt_entry.is_dir))
 
     // T5: is_dir for directory
-    print(" T5:" ++ string(dir_entry.is_dir))
+    print(" T5:" ++ (dir_entry.is_dir))
 
     // T6: size of hello.txt (6 bytes: "hello\n")
-    print(" T6:" ++ string(txt_entry.size))
+    print(" T6:" ++ (txt_entry.size))
 
     // T7: size of data.csv (5 bytes: "data\n")
-    print(" T7:" ++ string(csv_entry.size))
+    print(" T7:" ++ (csv_entry.size))
 
     // T8: csv extension
     print(" T8:" ++ csv_entry.extension)
@@ -49,13 +49,13 @@ pn main() {
     print(" T9:" ++ txt_entry.scheme)
 
     // T10: path contains the directory name
-    print(" T10:" ++ string(contains(txt_entry.path, "test_dir_listing")))
+    print(" T10:" ++ (contains(txt_entry.path, "test_dir_listing")))
 
     // T11: modified is a datetime (non-null)
-    print(" T11:" ++ string(txt_entry.modified != null))
+    print(" T11:" ++ (txt_entry.modified != null))
 
     // T12: string() conversion works on path
-    print(" T12:" ++ string(string(csv_entry) != null))
+    print(" T12:" ++ (string(csv_entry) != null))
 
     "done"
 }

@@ -186,7 +186,11 @@ Strings are UTF-8 text values enclosed in double quotes:
 "hello world"
 "line1\nline2"        // with escape sequences
 "unicode: 你好"       // Unicode supported
+""                    // null
 ```
+
+The empty string literal `""` is normalized to `null`. For user data, treat
+`string` values as non-empty and use `null` for the empty case.
 
 ### Symbols
 
@@ -200,6 +204,7 @@ Symbols are interned identifiers enclosed in single quotes. They are used for:
 'hello'
 'json'
 'content-type'
+''                    // null
 
 // Common uses
 let format = 'json'
@@ -207,10 +212,14 @@ let tag = 'div'
 {name: "Alice", type: 'user'}
 ```
 
+The empty symbol literal `''` is normalized to `null`. For user data, treat
+`symbol` values as non-empty and use `null` for the empty case.
+
 **Key differences from strings:**
 - Symbols are interned (only one copy exists in memory)
 - Faster equality comparison (pointer comparison)
 - Used for structural identifiers, not arbitrary text
+- Empty symbol literal `''` is `null`
 
 ### Symbol Operations
 

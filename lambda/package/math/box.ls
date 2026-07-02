@@ -731,7 +731,7 @@ pub fn with_style(bx, style_str) => {
 pub fn with_scale(bx, scale) {
     if (scale == 1.0) bx
     else
-        (let pct = string(round(scale * 1000.0) / 10.0) ++ "%",
+        (let pct = (round(scale * 1000.0) / 10.0) ++ "%",
          {
             element: <span style: "font-size:" ++ pct; bx.element>,
             height: bx.height * scale,

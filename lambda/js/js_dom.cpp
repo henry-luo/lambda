@@ -114,6 +114,14 @@ typedef struct JsDomRichHistorySelection {
 
 static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
                                       bool notify_mutation);
+
+// Reserved-attribute filter: attribute names starting with "__lambda_" are used
+// internally (e.g. createElementNS records the namespace URI as
+// "__lambda_ns_uri") and must not leak through JS-facing attribute
+// enumeration, getAttribute lookup, or serialization.
+static inline bool js_dom_is_internal_attr(const char* name) {
+    return name && strncmp(name, "__lambda_", 9) == 0;
+}
 static char* js_dom_rich_history_snapshot(DomElement* owner);
 static bool js_dom_rich_history_capture_selection(
     DocState* state, DomElement* owner, JsDomRichHistorySelection* out);
@@ -1682,6 +1690,43 @@ static Item js_dom_matches_method(Item selector) {
     Item self = js_get_this();
     Item method = (Item){.item = s2it(heap_create_name("matches"))};
     return js_dom_element_method(self, method, &selector, 1);
+}
+
+// Trampolines so property access to these method names returns a real,
+// callable function instead of the ITEM_TRUE feature-detection sentinel.
+// Direct calls (`el.querySelector(sel)`) are handled by the interpreter's
+// method-invocation shortcut in js_dom_element_method; without a callable
+// property, optional-chaining calls (`el?.querySelector(sel)`) fall through
+// to `(true)(sel)` and throw "is not a function".
+static Item js_dom_query_selector_method(Item selector) {
+    Item self = js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("querySelector"))};
+    return js_dom_element_method(self, method, &selector, 1);
+}
+static Item js_dom_query_selector_all_method(Item selector) {
+    Item self = js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("querySelectorAll"))};
+    return js_dom_element_method(self, method, &selector, 1);
+}
+static Item js_dom_closest_method(Item selector) {
+    Item self = js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("closest"))};
+    return js_dom_element_method(self, method, &selector, 1);
+}
+static Item js_dom_get_attribute_method(Item name) {
+    Item self = js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("getAttribute"))};
+    return js_dom_element_method(self, method, &name, 1);
+}
+static Item js_dom_has_attribute_method(Item name) {
+    Item self = js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("hasAttribute"))};
+    return js_dom_element_method(self, method, &name, 1);
+}
+static Item js_dom_contains_method(Item other) {
+    Item self = js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("contains"))};
+    return js_dom_element_method(self, method, &other, 1);
 }
 
 static Item js_dom_focus_method(Item elem_item) {
@@ -4165,6 +4210,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
                 const char* name = attr_names[i];
                 const char* value = dom_element_get_attribute(elem, name);
                 if (!name || !value) continue;
+                if (js_dom_is_internal_attr(name)) continue;
                 strbuf_append_char(sb, ' ');
                 strbuf_append_str(sb, name);
                 strbuf_append_str(sb, "=\"");
@@ -4920,10 +4966,14 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         return js_dom_wrap_element(dom_elem);
     }
 
-    // createElementNS(namespace, tagName) — treat same as createElement, ignoring namespace
+    // createElementNS(namespace, tagName). We create the element the same way
+    // as createElement but remember the requested namespace URI so that
+    // `element.namespaceURI` reads back the caller's value (e.g. the SVG ns).
+    // Stored as a reserved internal attribute — filtered from user-visible
+    // attribute enumeration/lookup (see JM_NS_INTERNAL_ATTR below).
     if (strcmp(method, "createElementNS") == 0) {
         if (argc < 2) return ItemNull;
-        // args[0] = namespace URI (ignored), args[1] = qualified tag name
+        const char* ns  = fn_to_cstr(args[0]);
         const char* tag = fn_to_cstr(args[1]);
         if (!tag) return ItemNull;
 
@@ -4932,6 +4982,9 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
 
         Element* elem = elem_item.element;
         DomElement* dom_elem = dom_element_create(doc, tag, elem);
+        if (dom_elem && ns && ns[0] != '\0') {
+            dom_element_set_attribute(dom_elem, "__lambda_ns_uri", ns);
+        }
         return js_dom_wrap_element(dom_elem);
     }
 
@@ -7357,6 +7410,9 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
             }
             return ItemNull;
         }
+        if (strcmp(prop, "isConnected") == 0) {
+            return (Item){.item = b2it(js_dom_node_is_connected((DomNode*)text_node) ? 1 : 0)};
+        }
         if (strcmp(prop, "nextSibling") == 0) {
             DomNode* sib = js_dom_next_script_visible_sibling((DomNode*)text_node);
             if (!sib) return ItemNull;
@@ -7440,6 +7496,9 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
             }
             return ItemNull;
         }
+        if (strcmp(prop, "isConnected") == 0) {
+            return (Item){.item = b2it(js_dom_node_is_connected((DomNode*)comment_node) ? 1 : 0)};
+        }
         // childNodes — comment nodes have no children; return empty NodeList
         if (strcmp(prop, "childNodes") == 0) {
             Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
@@ -7483,8 +7542,26 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         return (Item){.item = s2it(heap_create_name(tn))};
     }
 
-    // namespaceURI — HTML elements live in the XHTML namespace.
+    // <template>.content — spec-wise a DocumentFragment separate from the
+    // template's child list; we shim it as the template element itself so
+    // querySelector / firstChild / childNodes on `.content` walk the parsed
+    // children (they already attach to the template when innerHTML is set).
+    // Sufficient for fixture-parsing tests; a caller that mutates via
+    // .content.appendChild would still see the mutation reflected in the
+    // template (a fidelity gap only visible for that specific pattern).
+    if (strcmp(prop, "content") == 0 &&
+        elem->tag_name && strcasecmp(elem->tag_name, "template") == 0) {
+        return js_dom_wrap_element(elem);
+    }
+
+    // namespaceURI. Prefer the URI recorded by createElementNS (kept as a
+    // reserved internal attribute); otherwise HTML elements live in the XHTML
+    // namespace. See createElementNS in js_document_method.
     if (strcmp(prop, "namespaceURI") == 0) {
+        const char* ns = dom_element_get_attribute(elem, "__lambda_ns_uri");
+        if (ns && ns[0] != '\0') {
+            return (Item){.item = s2it(heap_create_name(ns))};
+        }
         return (Item){.item = s2it(heap_create_name("http://www.w3.org/1999/xhtml"))};
     }
 
@@ -7611,6 +7688,42 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
             return js_dom_wrap_element(parent->as_element());
         }
         return ItemNull;
+    }
+
+    // isConnected — true iff the shadow-inclusive root is the Document.
+    if (strcmp(prop, "isConnected") == 0) {
+        return (Item){.item = b2it(js_dom_node_is_connected((DomNode*)elem) ? 1 : 0)};
+    }
+
+    // attributes → a NamedNodeMap-like array of {name, value} entries with
+    // .length and indexed access. Not a full NamedNodeMap (getNamedItem etc.
+    // are unimplemented), but sufficient for the reconciler's
+    // stale-attribute removal loop `for (i=0; i<elem.attributes.length; i++)
+    // ... elem.attributes[i].name`. Internal (__lambda_*) attributes are
+    // filtered so they don't leak to script.
+    if (strcmp(prop, "attributes") == 0) {
+        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+        arr->type_id = LMD_TYPE_ARRAY;
+        arr->items = nullptr;
+        arr->length = 0;
+        arr->capacity = 0;
+        Item arr_item = (Item){.array = arr};
+        int attr_count = 0;
+        const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+        for (int i = 0; attr_names && i < attr_count; i++) {
+            const char* name = attr_names[i];
+            if (js_dom_is_internal_attr(name)) continue;
+            const char* value = dom_element_get_attribute(elem, name);
+            Item pair = js_new_object();
+            js_property_set(pair,
+                (Item){.item = s2it(heap_create_name("name"))},
+                (Item){.item = s2it(heap_create_name(name))});
+            js_property_set(pair,
+                (Item){.item = s2it(heap_create_name("value"))},
+                (Item){.item = s2it(heap_create_name(value ? value : ""))});
+            js_array_push(arr_item, pair);
+        }
+        return arr_item;
     }
 
     // ownerDocument — returns the document proxy for any element.
@@ -8641,6 +8754,21 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         strcmp(prop, "msMatchesSelector") == 0) {
         return js_new_function((void*)js_dom_matches_method, 1);
     }
+    // Return callable trampolines for common query/inspection methods so that
+    // optional-chaining calls (`el?.querySelector(sel)`) work — see the ITEM_TRUE
+    // feature-detection note below.
+    if (strcmp(prop, "querySelector") == 0)
+        return js_new_function((void*)js_dom_query_selector_method, 1);
+    if (strcmp(prop, "querySelectorAll") == 0)
+        return js_new_function((void*)js_dom_query_selector_all_method, 1);
+    if (strcmp(prop, "closest") == 0)
+        return js_new_function((void*)js_dom_closest_method, 1);
+    if (strcmp(prop, "getAttribute") == 0)
+        return js_new_function((void*)js_dom_get_attribute_method, 1);
+    if (strcmp(prop, "hasAttribute") == 0)
+        return js_new_function((void*)js_dom_has_attribute_method, 1);
+    if (strcmp(prop, "contains") == 0)
+        return js_new_function((void*)js_dom_contains_method, 1);
 
     // DOM method names accessed as properties (not calls) return ITEM_TRUE
     // so that feature-detection patterns like `elem.getAttribute && elem.getAttribute("class")`
@@ -10351,6 +10479,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         if (argc < 1) return ItemNull;
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return ItemNull;
+        if (js_dom_is_internal_attr(attr_name)) return ItemNull;
         const char* val = dom_element_get_attribute(elem, attr_name);
         if (val) return (Item){.item = s2it(heap_create_name(val))};
         if (dom_element_has_attribute(elem, attr_name))
@@ -10364,6 +10493,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         const char* attr_name = fn_to_cstr(args[0]);
         const char* attr_val = js_dom_to_attr_cstr(args[1]);
         if (!attr_name || !attr_val) return ItemNull;
+        if (js_dom_is_internal_attr(attr_name)) return ItemNull;
         dom_element_set_attribute(elem, attr_name, attr_val);
         js_dom_compile_event_attr_to_expando(elem, attr_name, attr_val);
         if (_is_tag(elem, "option") && strcasecmp(attr_name, "selected") == 0) {
@@ -10380,6 +10510,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         if (argc < 1) return (Item){.item = ITEM_FALSE};
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return (Item){.item = ITEM_FALSE};
+        if (js_dom_is_internal_attr(attr_name)) return (Item){.item = ITEM_FALSE};
         bool has = dom_element_has_attribute(elem, attr_name);
         return (Item){.item = b2it(has ? 1 : 0)};
     }
@@ -10395,6 +10526,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         int attr_count = 0;
         const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
         for (int i = 0; attr_names && i < attr_count; i++) {
+            if (js_dom_is_internal_attr(attr_names[i])) continue;
             js_array_push(arr_item, (Item){.item = s2it(heap_create_name(attr_names[i]))});
         }
         return arr_item;

@@ -888,8 +888,8 @@ fn fmt_font_pct(scale) {
     let pct = scale * 100.0
     let rounded = round(pct * 100.0) / 100.0
     let as_int = int(rounded + 0.000001)
-    if (abs(rounded - float(as_int)) < 0.001) string(as_int) ++ "%"
-    else util.fmt_num(rounded, 2) ++ "%"
+    if (abs(rounded - float(as_int)) < 0.001) { (as_int) ++ "%" }
+    else { util.fmt_num(rounded, 2) ++ "%" }
 }
 
 fn can_merge_script_text(a, b) {
@@ -900,7 +900,7 @@ fn can_merge_script_text(a, b) {
 }
 
 fn merge_script_two(a, b) {
-    let txt = string(a[0]) ++ string(b[0])
+    let txt = (a[0]) ++ (b[0])
     <span class: a.class; txt>
 }
 

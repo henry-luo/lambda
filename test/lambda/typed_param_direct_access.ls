@@ -82,7 +82,7 @@ type NamedVal {
     label: string,
     num: int;
 }
-fn format_nv(nv: NamedVal) => nv.label ++ "=" ++ string(nv.num)
+fn format_nv(nv: NamedVal) => nv.label ++ "=" ++ (nv.num)
 let nv1 = <NamedVal label: "score", num: 42>
 format_nv(nv1)
 

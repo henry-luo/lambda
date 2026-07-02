@@ -44,7 +44,12 @@ pn test_arith_float(n) {
     return n + 1.0
 }
 
-// Test 6: Chain of float comparisons (simulates splay tree key routing)
+// Test 6: Typed int parameter arithmetic can feed string()
+pn test_typed_int_string(n: int) {
+    return "Page " ++ (n + 1)
+}
+
+// Test 7: Chain of float comparisons (simulates splay tree key routing)
 pn insert_key(tree, key, value) {
     if (tree.root == null) {
         tree.root = {key: key, left: null, right: null, value: value}
@@ -86,17 +91,20 @@ pn main() {
 
     // Test 4: int arithmetic still works (INT inference for arithmetic is correct)
     var r4 = test_arith_int(10)
-    print("T4:" ++ string(r4))
+    print("T4:" ++ (r4))
 
     // Test 5: float arithmetic with literal
     var r5 = test_arith_float(2.5)
-    print("T5:" ++ string(r5))
+    print("T5:" ++ (r5))
 
-    // Test 6: chain insert with float keys
+    // Test 6: typed int parameter arithmetic string conversion
+    print("T6:" ++ test_typed_int_string(0))
+
+    // Test 7: chain insert with float keys
     var tree6 = {root: null}
     insert_key(tree6, 0.5, "first")
     insert_key(tree6, 0.5, "updated")
     insert_key(tree6, 0.3, "left")
     insert_key(tree6, 0.7, "right")
-    print("T6:" ++ (tree6.root).value ++ "," ++ ((tree6.root).left).key ++ "," ++ ((tree6.root).right).key)
+    print("T7:" ++ (tree6.root).value ++ "," ++ ((tree6.root).left).key ++ "," ++ ((tree6.root).right).key)
 }

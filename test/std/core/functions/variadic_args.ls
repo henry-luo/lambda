@@ -14,7 +14,7 @@ count_args("a", "b")
 count_args()
 
 // ===== Variadic with leading params =====
-fn prepend(prefix: string, items...) => items | prefix ++ string(~)
+fn prepend(prefix: string, items...) => items | prefix ++ (~)
 prepend("item_", 1, 2, 3)
 
 // ===== Variadic forwarding =====

@@ -10,7 +10,7 @@ r1
 
 // Test 2: edit template with state compiles
 edit string state count: 0 {
-  ~ ++ ":" ++ string(count)
+  ~ ++ ":" ++ (count)
 }
 let r2 = apply("hello", {mode: "edit"})
 r2
@@ -44,7 +44,7 @@ apply(null, {mode: "edit"})
 
 // Test 8: edit mode falls back to named view template when no edit template matches
 view fallback_named: float {
-  "view-float:" ++ string(~)
+  "view-float:" ++ (~)
 }
 apply(2.5, {mode: "edit", template: "fallback_named"})
 0

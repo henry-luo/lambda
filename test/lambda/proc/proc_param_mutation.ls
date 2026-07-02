@@ -6,13 +6,13 @@ pn swap_and_print(x, y) {
     let temp = x
     x = y
     y = temp
-    print(string(x) ++ " " ++ string(y) ++ "\n")
+    print((x) ++ " " ++ (y) ++ "\n")
 }
 
 // Case 2: counter pattern - decrement param
 pn countdown(n) {
     while (n > 0) {
-        print(string(n) ++ "\n")
+        print((n) ++ "\n")
         n = n - 1
     }
     print("done\n")
@@ -25,7 +25,7 @@ pn accumulate(acc, items) {
         acc = acc + items[i]
         i = i + 1
     }
-    print(string(acc) ++ "\n")
+    print((acc) ++ "\n")
 }
 
 // Case 4: string param mutation
@@ -39,7 +39,7 @@ pn find_first_positive(arr, idx) {
     while (idx < len(arr) and arr[idx] <= 0) {
         idx = idx + 1
     }
-    if (idx < len(arr)) { print(string(arr[idx]) ++ "\n") }
+    if (idx < len(arr)) { print((arr[idx]) ++ "\n") }
     else { print("none\n") }
 }
 

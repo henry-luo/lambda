@@ -151,7 +151,7 @@ fn check_object(schema_obj, value, all_schemas, path) {
         let req_errors = if (props != null) {
             for (field_name, _ at props
                  where util.list_contains(required, string(field_name))) {
-                let field_path = if (len(path) > 0) path ++ "." ++ string(field_name)
+                let field_path = if (len(path) > 0) path ++ "." ++ (field_name)
                                  else string(field_name);
                 if (value[string(field_name)] == null)
                     {path: field_path, message: "required field missing",
@@ -164,7 +164,7 @@ fn check_object(schema_obj, value, all_schemas, path) {
         let type_errors = if (props != null) {
             for (field_name, field_schema at props
                  where value[string(field_name)] != null) {
-                let field_path = if (len(path) > 0) path ++ "." ++ string(field_name)
+                let field_path = if (len(path) > 0) path ++ "." ++ (field_name)
                                  else string(field_name);
                 check_value(field_schema, value[string(field_name)], all_schemas, field_path)
             }
@@ -192,19 +192,19 @@ fn check_array(schema_obj, value, all_schemas, path) {
         let len_errors = [
             if (len(value) < min_items)
                 {path: path, message: "array too short",
-                 expected: "minItems " ++ string(min_items),
+                 expected: "minItems " ++ (min_items),
                  actual: string(len(value))}
             else null,
             if (max_items >= 0 and len(value) > max_items)
                 {path: path, message: "array too long",
-                 expected: "maxItems " ++ string(max_items),
+                 expected: "maxItems " ++ (max_items),
                  actual: string(len(value))}
             else null
         ];
 
         let item_errors = if (items_schema != null) {
             for (i in 0 to len(value) - 1 where len(value) > 0) {
-                let item_path = path ++ "[" ++ string(i) ++ "]";
+                let item_path = path ++ "[" ++ (i) ++ "]";
                 check_value(items_schema, value[i], all_schemas, item_path)
             }
         } else [];
@@ -235,12 +235,12 @@ fn check_one_of(variants, value, all_schemas, path) {
     if (len(matches) == 1) []
     else if (len(matches) == 0)
         [{path: path, message: "value matches none of oneOf variants",
-          expected: "one of " ++ string(len(variants)) ++ " variants",
+          expected: "one of " ++ (len(variants)) ++ " variants",
           actual: string(type(value))}]
     else
         [{path: path, message: "value matches multiple oneOf variants",
           expected: "exactly one variant",
-          actual: string(len(matches)) ++ " variants matched"}]
+          actual: (len(matches)) ++ " variants matched"}]
 }
 
 fn check_any_of(variants, value, all_schemas, path) {
@@ -248,7 +248,7 @@ fn check_any_of(variants, value, all_schemas, path) {
                        where len(check_value(v, value, all_schemas, path)) == 0) v;
     if (len(matches) > 0) []
     else [{path: path, message: "value matches none of anyOf variants",
-           expected: "at least one of " ++ string(len(variants)) ++ " variants",
+           expected: "at least one of " ++ (len(variants)) ++ " variants",
            actual: string(type(value))}]
 }
 
@@ -274,12 +274,12 @@ fn check_primitive(schema_obj, value, path) {
             [
                 if (min_len >= 0 and len(value) < min_len)
                     {path: path, message: "string too short",
-                     expected: "minLength " ++ string(min_len),
+                     expected: "minLength " ++ (min_len),
                      actual: string(len(value))}
                 else null,
                 if (max_len >= 0 and len(value) > max_len)
                     {path: path, message: "string too long",
-                     expected: "maxLength " ++ string(max_len),
+                     expected: "maxLength " ++ (max_len),
                      actual: string(len(value))}
                 else null
             ] that (~ != null)
@@ -292,12 +292,12 @@ fn check_primitive(schema_obj, value, path) {
             [
                 if (minimum != null and value < minimum)
                     {path: path, message: "value below minimum",
-                     expected: "minimum " ++ string(minimum),
+                     expected: "minimum " ++ (minimum),
                      actual: string(value)}
                 else null,
                 if (maximum != null and value > maximum)
                     {path: path, message: "value above maximum",
-                     expected: "maximum " ++ string(maximum),
+                     expected: "maximum " ++ (maximum),
                      actual: string(value)}
                 else null
             ] that (~ != null)

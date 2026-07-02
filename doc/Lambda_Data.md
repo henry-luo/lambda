@@ -89,6 +89,11 @@ false
 null
 ```
 
+Lambda also treats empty text identifiers as null: the empty string literal
+`""` and the empty symbol literal `''` are normalized to `null`. For user data,
+treat `string` and `symbol` values as non-empty, with `null` representing the
+empty case.
+
 ### Numeric Literals
 
 ```lambda
@@ -143,12 +148,15 @@ nan
 
 String literals use double quotes. Single quotes do not create strings in
 Lambda; they create `symbol` values (see [Symbol Literals](#symbol-literals)).
+The empty string literal `""` is normalized to `null`; for user data, use
+`null` to represent the empty case.
 
 ```lambda
 // Basic strings
 "hello world"
 "multiline strings
 can span multiple lines"
+""                  // null
 
 // Escape sequences
 "line 1\nline 2"
@@ -202,7 +210,11 @@ Symbols are interned identifiers, often used as keys or tags:
 'CamelCase'
 'json'
 'markdown'
+''                  // null
 ```
+
+The empty symbol literal `''` is normalized to `null`; for user data, use
+`null` to represent the empty case.
 
 **Symbol vs String**:
 - Symbols are interned (only one copy exists in memory)
@@ -941,6 +953,18 @@ let extended = {*base, z: 3}  // {x: 1, y: 2, z: 3}
 // Override values
 let updated = {*base, x: 10}  // {x: 10, y: 2}
 ```
+
+When updating an existing map or record-shaped state, spread the original value
+first and then list the fields to change:
+
+```lambda
+let next_state = {*state, fill: "red", font_size: 12}
+```
+
+A fresh map literal contains exactly the fields written in the literal. It does
+not copy omitted fields from any input value unless that value is explicitly
+spread. Prefer the `{*base, key: value}` pattern for "with" constructors and
+state updates.
 
 ### Concatenation
 

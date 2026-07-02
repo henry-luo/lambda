@@ -144,5 +144,5 @@ pub fn rule_thickness(ctx) => get_metric(ctx, met.defaultRuleThickness)
 pub fn font_size_css(ctx) {
     let s = context_scale(ctx)
     if (s == 1.0) null
-    else string(round(s * 1000.0) / 10.0) ++ "%"
+    else (round(s * 1000.0) / 10.0) ++ "%"
 }

@@ -3759,7 +3759,14 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
         if (declare->node_type == AST_NODE_ASSIGN) {
             AstNamedNode* asn = (AstNamedNode*)declare;
             if (asn->as) {
+                bool saved_preserve_proc_if_result = mt->preserve_proc_if_result;
+                if (mt->in_proc && asn->as->node_type == AST_NODE_IF_EXPR) {
+                    // let/var initializers consume the if-expression value; without
+                    // this, proc-mode branch boxing treats it like a discarded statement.
+                    mt->preserve_proc_if_result = true;
+                }
                 MIR_reg_t val = transpile_expr(mt, asn->as);
+                mt->preserve_proc_if_result = saved_preserve_proc_if_result;
                 char name_buf[128];
                 snprintf(name_buf, sizeof(name_buf), "%.*s", (int)asn->name->len, asn->name->chars);
                 TypeId expr_tid = get_effective_type(mt, asn->as);

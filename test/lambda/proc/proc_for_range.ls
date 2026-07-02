@@ -10,7 +10,7 @@
 pn t_sum() {
     var s = 0
     for i in 1 to 5 { s = s + i }
-    print("sum=" ++ string(s) ++ "\n")
+    print("sum=" ++ (s) ++ "\n")
 }
 
 // Typed numeric array (fill → ArrayNum), loop var as assignment index
@@ -41,14 +41,14 @@ pn t_var_bound(n) {
 pn t_float_array() {
     var arr:float[] = fill(3, 0.0)
     for i in 0 to 2 { arr[i] = i * 1.5 }
-    print("float=" ++ string(arr[0]) ++ " " ++ string(arr[1]) ++ " " ++ string(arr[2]) ++ "\n")
+    print("float=" ++ (arr[0]) ++ " " ++ (arr[1]) ++ " " ++ (arr[2]) ++ "\n")
 }
 
 // Generic array ([null,...]) with range loop var as index (fn_index_assign path)
 pn t_generic_array() {
     var arr = [null, null, null]
     for i in 0 to 2 { arr[i] = i * 100 }
-    print("generic=" ++ string(int(arr[0])) ++ " " ++ string(int(arr[1])) ++ " " ++ string(int(arr[2])) ++ "\n")
+    print("generic=" ++ (int(arr[0])) ++ " " ++ (int(arr[1])) ++ " " ++ (int(arr[2])) ++ "\n")
 }
 
 // Nested for-statements, flattened index into a typed array

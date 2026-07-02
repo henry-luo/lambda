@@ -1525,6 +1525,32 @@ test-reactive-ui: build
 	echo "Reactive UI: $$PASS/$$TOTAL passed"; \
 	if [ $$FAIL -gt 0 ]; then exit 1; fi
 
+# Stage 4C Phase B — editor event-driven UI automation under lambda.exe view + event_sim.
+# Runs the 4B baseline set (test/ui/editor4b/*.json) + the 4C set
+# (test/ui/editor4c/*.json). Known-open Phase-B blockers live under
+# temp/editor4c-open/ (see vibe/editing/Radiant_Editor_Stage4C.md); run them
+# manually with `./lambda.exe view test/html/editor-dom.html --event-file <path>
+# --headless` to reproduce a diagnostic. They are not in this target's pass count.
+editor-4c-view: build
+	@echo "Running Stage 4C Phase B editor UI test suite..."
+	@echo "=============================================================="
+	@PASS=0; FAIL=0; TOTAL=0; \
+	for json in test/ui/editor4b/*.json test/ui/editor4c/*.json; do \
+		[ -f "$$json" ] || continue; \
+		name=$$(basename $$json .json); \
+		TOTAL=$$((TOTAL + 1)); \
+		if ./lambda.exe view test/html/editor-dom.html --event-file $$json --headless >/dev/null 2>&1; then \
+			PASS=$$((PASS + 1)); \
+			printf "  \033[32m✓\033[0m %s\n" "$$name"; \
+		else \
+			FAIL=$$((FAIL + 1)); \
+			printf "  \033[31m✗\033[0m %s\n" "$$name"; \
+		fi; \
+	done; \
+	echo "=============================================================="; \
+	echo "editor-4c-view: $$PASS/$$TOTAL passed  (open blockers in temp/editor4c-open/)"; \
+	if [ $$FAIL -gt 0 ]; then exit 1; fi
+
 # Save/check/diff layout suite snapshots for regression detection outside baseline
 layout-snapshot:
 	@SUITE_VAR="$(or $(suite),$(SUITE))"; \

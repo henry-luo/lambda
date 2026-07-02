@@ -14,7 +14,7 @@ type Entry {
     label: string,
     count: int,
     active: bool;
-    fn summary() => label ++ ":" ++ string(count)
+    fn summary() => label ++ ":" ++ (count)
     fn is_active() => active
 }
 let e = <Entry label: "hits", count: 42, active: true>

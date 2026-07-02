@@ -102,6 +102,9 @@ const char* tls_get_cipher_name(TlsConnection *conn);
 // get negotiated protocol version string
 const char* tls_get_protocol_version(TlsConnection *conn);
 
+// get mbedTLS peer certificate verification flags after handshake
+unsigned int tls_get_verify_result(TlsConnection *conn);
+
 // ============================================================================
 // Self-signed certificate generation (for development)
 // ============================================================================

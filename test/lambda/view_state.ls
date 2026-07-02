@@ -2,7 +2,7 @@
 
 // Test 1: View with state reads default value in body
 view int state count: 0 {
-  "count:" ++ string(count)
+  "count:" ++ (count)
 }
 apply(42)
 0
@@ -23,7 +23,7 @@ apply(true)
 
 // Test 4: Multiple state variables in one view
 view float state x: 1, y: 2 {
-  string(x) ++ "," ++ string(y)
+  (x) ++ "," ++ (y)
 }
 apply(3.14)
 0

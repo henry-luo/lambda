@@ -37,5 +37,5 @@ pn main() {
     arr_set(a, 0, 123)
     var churn = fill(500000, 0)
     var n = arr_get(a, 0)
-    print("gc nested: " ++ string(int(n)) ++ " churn=" ++ string(len(churn)) ++ "\n")
+    print("gc nested: " ++ (int(n)) ++ " churn=" ++ (len(churn)) ++ "\n")
 }

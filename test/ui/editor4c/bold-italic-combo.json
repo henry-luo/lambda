@@ -1,0 +1,19 @@
+{
+  "name": "editor4c: Bold + Italic marks compose (both applied to a selection)",
+  "_note": "Phase B — mark composition. Verifies that Bold and Italic marks combine cleanly on the same range (rather than one canceling the other). Cmd+A, click Bold, click Italic; the leaf's style should carry both font-weight:bold AND font-style:italic.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 60},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "wait", "ms": 80},
+    {"type": "click", "target": {"selector": ".rdt-toolbar button[title=\"Bold (Cmd+B)\"]"}},
+    {"type": "wait", "ms": 120},
+    {"type": "click", "target": {"selector": ".rdt-toolbar button[title=\"Italic (Cmd+I)\"]"}},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface [data-source-path=\"0,0\"]"}, "attribute": "style", "contains": "font-weight:bold"},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface [data-source-path=\"0,0\"]"}, "attribute": "style", "contains": "font-style:italic"}
+  ]
+}

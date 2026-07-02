@@ -115,6 +115,9 @@ let a = [1, 2, 3]
 let b = (10, 20)
 (*a, *b)               // (1, 2, 3, 10, 20) — spread into tuple
 
+let base = {x: 1, y: 2}
+{*base, x: 10}         // {x: 10, y: 2} — copy map fields, override x
+
 // Spread in function calls
 fn sum_all(...args) = args | reduce((a, b) => a + b, 0)
 sum_all(*[10, 20, 30])  // 60
@@ -123,6 +126,9 @@ sum_all(*[10, 20, 30])  // 60
 let nested = [[1, 2], [3, 4]]
 [*nested[0], *nested[1]]  // [1, 2, 3, 4]
 ```
+
+Map literals construct only the fields they list. Use map spread when an update
+should preserve the fields of an existing map or record-shaped value.
 
 ### Vector Arithmetic
 
@@ -301,12 +307,12 @@ Lambda has simple truthiness rules:
 | `null`       |                                                                      |
 | `false`      |                                                                      |
 | `error`      | error is falsy, which allows idiom like: `err or fallback`           |
-| "", ''       | Empty string`""` or symbol `''` is normalised to `null` under Lambda |
+| `""`, `''`   | Empty string and empty symbol literals are normalized to `null`      |
 
 | Truthy Values (Everything Else)                          |
 | -------------------------------------------------------- |
 | `true`, all numbers (including `0`)                      |
-| All strings, symbols (Lambda string/symbol is non-empty) |
+| All non-empty string and symbol values                   |
 | All collections (including `[]`, `{}`)                   |
 | All functions                                            |
 **Important**: Unlike many languages, `0` and empty collections are **truthy** in Lambda.
@@ -316,7 +322,8 @@ if (0) "yes" else "no"           // "yes" - 0 is truthy
 if ([]) "yes" else "no"          // "yes" - empty array is truthy
 if (null) "yes" else "no"        // "no" - null is falsy
 if (false) "yes" else "no"       // "no" - false is falsy
-if ("") "yes" else "no"          // "no" - empty string is falsy
+if ("") "yes" else "no"          // "no" - "" is normalized to null
+if ('') "yes" else "no"          // "no" - '' is normalized to null
 ```
 
 ---

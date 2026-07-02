@@ -129,7 +129,7 @@ pub fn form_content(pdf, page, name) {
 // ============================================================
 
 fn _img_url(obj_num) {
-    "img:" ++ string(obj_num)
+    "img:" ++ (obj_num)
 }
 
 // Emit a single <g><image/></g> for an Image XObject. obj_num=0 is dropped.
@@ -367,7 +367,7 @@ fn _row_bytes(w, ncomp, bpc) {
 }
 
 fn _rgb_int(r, g, b) {
-    "rgb(" ++ string(r) ++ "," ++ string(g) ++ "," ++ string(b) ++ ")"
+    "rgb(" ++ (r) ++ "," ++ (g) ++ "," ++ (b) ++ ")"
 }
 
 fn _gamma_num(v, fallback) {

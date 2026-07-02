@@ -14,9 +14,9 @@ pn main() {
         i = i + 1
     }
     let t2 = clock()
-    print("clock works: " ++ string(t2 >= t1))
+    print("clock works: " ++ (t2 >= t1))
     
     // ===== cmd =====
     let result = cmd("echo", "hello")
-    print("cmd result: " ++ string(result))
+    print("cmd result: " ++ (result))
 }

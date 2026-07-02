@@ -15708,6 +15708,8 @@ extern "C" Item js_get_global_this() {
         // populate namespace objects on globalThis (Math, JSON, Reflect, console)
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Math", 4))}, js_get_math_object_value());
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("JSON", 4))}, js_get_json_object_value());
+        extern Item js_get_intl_object_value(void);
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Intl", 4))}, js_get_intl_object_value());
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Reflect", 7))}, js_get_reflect_object_value());
         extern Item js_get_atomics_object_value(void);
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Atomics", 7))}, js_get_atomics_object_value());
