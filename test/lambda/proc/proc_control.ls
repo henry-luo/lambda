@@ -118,6 +118,13 @@ pn test_nested_if() {
     result  // should be 3
 }
 
+// Test 12: if/else expression used as a let initializer inside pn
+pn test_if_expr_let_initializer() {
+    let xs = [{a: 1}, {b: 2}]
+    let op0 = if (len(xs) >= 1) xs[0] else null
+    {op0: op0}
+}
+
 // Main procedure to run tests
 pn main() {
     print("T1:")
@@ -142,5 +149,7 @@ pn main() {
     print(test_if_else())
     print(" T11:")
     print(test_nested_if())
+    print(" T12:")
+    print(test_if_expr_let_initializer())
     "done"
 }

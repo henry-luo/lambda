@@ -316,13 +316,14 @@ Regression coverage: `test/lambda/proc/proc_var.ls` now checks both
 
 ## 15. `if (cond) X else Y` expression returns `null` inside `pn`
 
-**Severity: HIGH** — combined with #2 this means `pn` cannot use
-expression-style conditionals at all.
+**Status: ✅ Fixed (2026-07-02)** — `let`/`var` initializers inside `pn` now
+preserve the value of expression-style `if/else` forms, including mixed
+branch types that box to `ANY`.
 
 ```lambda
 pn demo(xs) {
     let op0 = if (len(xs) >= 1) xs[0] else null
-    print({ op0: op0 })       // -> { op0: null }   even when len(xs) == 2
+    print({ op0: op0 })       // -> { op0: { a: 1 } }
 }
 
 fn demo_fn(xs) {
@@ -331,18 +332,15 @@ fn demo_fn(xs) {
 }
 ```
 
-Same construct, different result depending on `pn` vs `fn`. Wrapping
-in parens does not help; using a `var` and an imperative `if` body also
-fails (because the var hits #14).
+Root cause: the MIR procedural path deliberately discarded boxed
+if-expression branch results when an `if` was used as a side-effect-only
+statement. `let op0 = if (...) ... else ...` was also evaluating its RHS
+through that procedural discard path, so mixed branch values were replaced
+with `null` before the binding was stored.
 
-**Workaround**: write all dispatcher / branching logic as `fn`. Use `pn`
-only as the outermost driver with `while`-loops and `var` whose initial
-value matches the eventual shape (`var out = []`, not `var out = null`).
-
-**Asks**:
-- Make `let x = if (c) a else b` work in `pn` (it's the natural form).
-- Or emit a syntax error: "if-expression value not bound in pn; use
-  `if (c) { x = a } else { x = b }`".
+Regression coverage: `test/lambda/proc/proc_control.ls` now checks
+`let op0 = if (len(xs) >= 1) xs[0] else null` inside a `pn` and verifies that
+the resulting map preserves `{ a: 1 }`.
 
 ---
 
