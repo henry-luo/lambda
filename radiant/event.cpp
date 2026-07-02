@@ -4787,6 +4787,26 @@ static bool radiant_dispatch_simple_event(EventContext* evcon, View* target,
     return prevented;
 }
 
+// Stage 4C Phase B: dispatch a JS clipboard event (paste/copy/cut) with a
+// store-backed clipboardData to a rich/contenteditable surface, so script-owned
+// editors that use addEventListener('paste'|'copy') work under `lambda.exe view`
+// (there is no OS clipboard-event delivery in headless view). Returns true if
+// the handler called preventDefault().
+extern "C" bool js_dispatch_clipboard_event_to_element(Item target_item, const char* type);
+static bool radiant_dispatch_clipboard_event(EventContext* evcon, View* target,
+                                             const char* type)
+{
+    DomElement* dom_target = radiant_view_to_dom_element(target);
+    if (!dom_target) return false;
+    JsCtxScope scope;
+    if (!radiant_js_ctx_enter(&scope, evcon)) return false;
+    auto t_start = std::chrono::high_resolution_clock::now();
+    Item target_item = js_dom_wrap_element(dom_target);
+    bool prevented = js_dispatch_clipboard_event_to_element(target_item, type);
+    radiant_js_ctx_exit(&scope, evcon, t_start);
+    return prevented;
+}
+
 /**
  * §7 unification (U-5): dispatch a "wheel" event via the JS EventTarget
  * pipeline. Returns true if default action (native scroll) should be
@@ -7994,6 +8014,27 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
             evcon.need_repaint = true;
             break;
+        }
+
+        // Clipboard on a rich/contenteditable surface: fire the JS 'paste'/'copy'
+        // ClipboardEvent (with a store-backed clipboardData) so a script-owned
+        // editor's addEventListener('paste'|'copy') handler runs — browsers fire
+        // these on Cmd/Ctrl+V and Cmd/Ctrl+C. If the handler preventDefault()s
+        // (the editor performs the paste/copy itself), stop here; otherwise fall
+        // through to the native default (rich paste transaction / selection copy).
+        if ((key_event->mods & (RDT_MOD_SUPER | RDT_MOD_CTRL)) &&
+            (key_event->key == RDT_KEY_V || key_event->key == RDT_KEY_C)) {
+            EditingSurface clip_surface;
+            if (intent_target &&
+                editing_surface_from_target(intent_target, &clip_surface) &&
+                editing_surface_is_rich(&clip_surface) && focused) {
+                const char* clip_type = key_event->key == RDT_KEY_V ? "paste" : "copy";
+                if (radiant_dispatch_clipboard_event(&evcon, focused, clip_type)) {
+                    evcon.default_prevented = true;
+                    evcon.need_repaint = true;
+                    break;
+                }
+            }
         }
 
         // Space toggles a focused checkbox / radio (matches native browser

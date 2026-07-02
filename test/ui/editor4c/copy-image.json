@@ -1,0 +1,14 @@
+{
+  "name": "editor4c: copying a selected image node writes HTML to the clipboard",
+  "_note": "Phase B — copy wiring. Click the image to select it as a node, Cmd+C → the editor's onCopy serializes the node as text/html. Covers §4.2 'copy'.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface img"}},
+    {"type": "wait", "ms": 100},
+    {"type": "key_combo", "key": "c", "mods_str": "super"},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_clipboard", "mime": "text/html", "contains": "img"}
+  ]
+}
