@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <stdlib.h>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -39,6 +40,16 @@
 #include <windows.h>
 #include <shlobj.h>
 #endif
+
+static int font_platform_trace_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        // Platform metric probes are called per font/size during layout and
+        // render; detailed CoreText traces stay opt-in for full-page stability.
+        enabled = getenv("RADIANT_TRACE_FONT") ? 1 : 0;
+    }
+    return enabled != 0;
+}
 
 // ============================================================================
 // Platform font directories
@@ -464,8 +475,10 @@ int get_font_metrics_platform(const char* font_family, float font_size,
         strcmp(font_family, "Courier") == 0) {
         float adjustment = floorf(((ascent + descent) * 0.15f) + 0.5f);
         ascent += adjustment;
-        log_debug("CoreText macOS font hack: +%.0f for %s (asc=%.0f, desc=%.0f)",
-                  adjustment, font_family, ascent, descent);
+        if (font_platform_trace_enabled()) {
+            log_debug("CoreText macOS font hack: +%.0f for %s (asc=%.0f, desc=%.0f)",
+                      adjustment, font_family, ascent, descent);
+        }
     }
 
     float line_height = ascent + descent + leading;
@@ -474,8 +487,10 @@ int get_font_metrics_platform(const char* font_family, float font_size,
     if (out_descent) *out_descent = descent;
     if (out_line_height) *out_line_height = line_height;
 
-    log_debug("CoreText metrics for %s@%.1f: ascent=%.0f, descent=%.0f, leading=%.0f, lineHeight=%.0f",
-              font_family, font_size, ascent, descent, leading, line_height);
+    if (font_platform_trace_enabled()) {
+        log_debug("CoreText metrics for %s@%.1f: ascent=%.0f, descent=%.0f, leading=%.0f, lineHeight=%.0f",
+                  font_family, font_size, ascent, descent, leading, line_height);
+    }
 
     return 1;
 }
@@ -489,8 +504,10 @@ float get_cjk_system_line_height(float font_size) {
     for (int i = 0; cjk_fonts[i]; i++) {
         float ascent, descent, lh;
         if (get_font_metrics_platform(cjk_fonts[i], font_size, &ascent, &descent, &lh)) {
-            log_debug("CJK system line-height: %s@%.1f → %.0f (asc=%.0f, desc=%.0f)",
-                      cjk_fonts[i], font_size, lh, ascent, descent);
+            if (font_platform_trace_enabled()) {
+                log_debug("CJK system line-height: %s@%.1f → %.0f (asc=%.0f, desc=%.0f)",
+                          cjk_fonts[i], font_size, lh, ascent, descent);
+            }
             return lh;
         }
     }

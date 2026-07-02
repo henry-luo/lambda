@@ -7967,12 +7967,30 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
-        // Tab navigation
-        if (key_event->key == RDT_KEY_TAB && !rich_editable_from_target(intent_target)) {
-            bool forward = !(key_event->mods & RDT_MOD_SHIFT);
-            DomDocument* focus_doc = evcon.target_document ? evcon.target_document : doc;
-            if (focus_doc && focus_doc->view_tree && focus_doc->view_tree->root) {
-                focus_move(state, focus_doc->view_tree->root, forward);
+        // Tab is a keydown-only interaction in browsers — no beforeinput is
+        // fired for it. A JS keydown listener on the focused element (e.g. a
+        // contenteditable editor that indents/outdents list items on Tab) must
+        // get first crack and be able to preventDefault. Dispatch keydown here
+        // (for BOTH plain and rich/script-owned surfaces — native rich editing
+        // is retired, so all editing is script-owned), and only fall back to
+        // focus navigation when the default was not prevented. Handling Tab here
+        // preempts the rich-intent beforeinput path below (which would otherwise
+        // translate Tab into a formatIndent beforeinput the editor never asked
+        // for) and the generic keydown dispatch (avoiding a double keydown).
+        if (key_event->key == RDT_KEY_TAB) {
+            bool tab_prevented = false;
+            if (focused) {
+                tab_prevented = radiant_dispatch_keyboard_event(&evcon, focused,
+                    "keydown", key_event->key, key_event->mods, false);
+                if (tab_prevented) evcon.default_prevented = true;
+                focused = focus_get(state);
+            }
+            if (!tab_prevented) {
+                bool forward = !(key_event->mods & RDT_MOD_SHIFT);
+                DomDocument* focus_doc = evcon.target_document ? evcon.target_document : doc;
+                if (focus_doc && focus_doc->view_tree && focus_doc->view_tree->root) {
+                    focus_move(state, focus_doc->view_tree->root, forward);
+                }
             }
             evcon.need_repaint = true;
             break;

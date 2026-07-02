@@ -573,6 +573,7 @@ FontHandle* font_load_from_data_uri(FontContext* ctx, const char* data_uri,
     size_t decoded_len = 0;
     uint8_t* decoded = base64_decode(comma, b64_len, &decoded_len);
     if (!decoded || decoded_len == 0) {
+        if (decoded) mem_free(decoded);
         log_error("font_loader: base64 decode failed");
         return NULL;
     }
@@ -580,9 +581,13 @@ FontHandle* font_load_from_data_uri(FontContext* ctx, const char* data_uri,
     float pixel_ratio = ctx->config.pixel_ratio;
     float physical_size = style->size_px * pixel_ratio;
 
-    return font_load_memory_internal(ctx, decoded, decoded_len, 0,
-                                      style->size_px, physical_size,
-                                      style->weight, style->slant);
+    FontHandle* handle = font_load_memory_internal(ctx, decoded, decoded_len, 0,
+                                                   style->size_px, physical_size,
+                                                   style->weight, style->slant);
+    // font_load_memory_internal copies the bytes into the font cache; the
+    // decoded data URI buffer is temporary and otherwise leaks per @font-face.
+    mem_free(decoded);
+    return handle;
 }
 
 // ============================================================================

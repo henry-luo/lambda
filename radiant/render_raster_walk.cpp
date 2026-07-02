@@ -11,6 +11,17 @@
 #include "../lambda/input/css/dom_element.hpp"
 
 #include <chrono>
+#include <stdlib.h>
+
+static bool render_trace_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        // Per-box render diagnostics scale with page size; make them opt-in so
+        // online-page rendering is measured by rendering work, not log volume.
+        enabled = getenv("RADIANT_TRACE_RENDER") ? 1 : 0;
+    }
+    return enabled != 0;
+}
 
 static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
                                          bool skip_positioned_in_normal_flow) {
@@ -26,16 +37,18 @@ static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
         return;
     }
 
-    log_debug("[RENDER DISPATCH] view_type=%d, embed=%p, img=%p, width=%.0f, height=%.0f",
-              block->view_type, block->embed,
-              block->embed ? block->embed->img : NULL, block->width, block->height);
+    if (render_trace_enabled()) {
+        log_debug("[RENDER DISPATCH] view_type=%d, embed=%p, img=%p, width=%.0f, height=%.0f",
+                  block->view_type, block->embed,
+                  block->embed ? block->embed->img : NULL, block->width, block->height);
+    }
     if (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form) {
-        log_debug("[RENDER DISPATCH] calling render_block_view for form control");
+        if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_block_view for form control");
         render_block_view(rdcon, block);
     }
     else if (block->tag_id == HTM_TAG_SVG) {
         if (block->bound) { render_bound(rdcon, block); }
-        log_debug("[RENDER DISPATCH] calling render_inline_svg for inline SVG");
+        if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_inline_svg for inline SVG");
         auto ts1 = std::chrono::high_resolution_clock::now();
         render_inline_svg(rdcon, block);
         auto ts2 = std::chrono::high_resolution_clock::now();
@@ -43,7 +56,7 @@ static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
             std::chrono::duration<double, std::milli>(ts2 - ts1).count());
     }
     else if (block->embed && block->embed->img) {
-        log_debug("[RENDER DISPATCH] calling render_image_view");
+        if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_image_view");
         auto ti1 = std::chrono::high_resolution_clock::now();
         render_image_view(rdcon, block);
         auto ti2 = std::chrono::high_resolution_clock::now();
@@ -51,7 +64,7 @@ static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
             std::chrono::duration<double, std::milli>(ti2 - ti1).count());
     }
     else if (block->embed && block->embed->video) {
-        log_debug("[RENDER DISPATCH] calling render_video_content for <video>");
+        if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_video_content for <video>");
         if (!render_block_dirty_misses(rdcon, block)) {
             if (!render_block_try_retained_fragment(rdcon, block)) {
                 RenderElementMarkerScope marker_scope = render_element_marker_begin(rdcon, block);
@@ -64,7 +77,7 @@ static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
         }
     }
     else if (render_media_is_webview_layer(block)) {
-        log_debug("[RENDER DISPATCH] calling render_webview_layer_content");
+        if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_webview_layer_content");
         if (!render_block_dirty_misses(rdcon, block)) {
             if (!render_block_try_retained_fragment(rdcon, block)) {
                 RenderElementMarkerScope marker_scope = render_element_marker_begin(rdcon, block);

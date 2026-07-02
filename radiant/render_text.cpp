@@ -15,7 +15,18 @@
 
 #include <chrono>
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
+
+static bool render_text_trace_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        // Browser-scale pages hit text and glyph loops thousands of times; keep
+        // those diagnostics opt-in so normal rendering is not log-bound.
+        enabled = (getenv("RADIANT_TRACE_TEXT") || getenv("RADIANT_TRACE_RENDER")) ? 1 : 0;
+    }
+    return enabled != 0;
+}
 
 static void render_text_inline_background(RenderContext* rdcon, ViewText* text_view,
                                           TextRect* text_rect, DomElement* parent_elem,
@@ -174,9 +185,11 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         render_text_inline_background(rdcon, text_view, text_rect, parent_elem, x, y);
 
         unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + text_rect->length;
-        log_debug("draw text:'%t', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f), white_space:%d, preserve:%d, color:0x%08x",
-            str, text_rect->start_index, text_rect->length, text_rect->x, text_rect->y, text_rect->width, text_rect->height, x, y,
-            white_space, preserve_spaces, rdcon->color.c);
+        if (render_text_trace_enabled()) {
+            log_debug("draw text:'%t', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f), white_space:%d, preserve:%d, color:0x%08x",
+                str, text_rect->start_index, text_rect->length, text_rect->x, text_rect->y, text_rect->width, text_rect->height, x, y,
+                white_space, preserve_spaces, rdcon->color.c);
+        }
 
         // Calculate natural text width and space count for justify rendering
         // Note: space_width is in CSS pixels (scaled down for layout), need to scale up for render
@@ -228,8 +241,10 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             // This text is explicitly justified - distribute extra space across spaces
             float extra_space = (text_rect->width * s) - natural_width;
             space_width += (extra_space / space_count);
-            log_debug("apply justification: text_align=JUSTIFY, natural_width=%f, text_rect->width=%f, space_count=%d, space_width=%f -> %f",
-                natural_width, text_rect->width * s, space_count, scaled_space_width, space_width);
+            if (render_text_trace_enabled()) {
+                log_debug("apply justification: text_align=JUSTIFY, natural_width=%f, text_rect->width=%f, space_count=%d, space_width=%f -> %f",
+                    natural_width, text_rect->width * s, space_count, scaled_space_width, space_width);
+            }
         }
 
         // Render the text with adjusted spacing
@@ -303,9 +318,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     uint32_t render_cp = tt_out[tti];
                     if (render_cp == 0) continue;
 
-                    // Debug: Log the font face being used for this glyph
                     static int glyph_debug_count = 0;
-                    if (glyph_debug_count < 500) {
+                    if (render_text_trace_enabled() && glyph_debug_count < 500) {
                         log_debug("[GLYPH DEBUG] loading glyph U+%04X from font '%s' (family=%s) y_ppem=%d css_size=%.2f",
                                   codepoint,
                                   rdcon->font.font_handle ? font_handle_get_family_name(rdcon->font.font_handle) : "NULL",

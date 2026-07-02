@@ -9127,12 +9127,21 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     CssEnum right = values[1]->data.keyword;
                     CssEnum bottom = values[2]->data.keyword;
                     CssEnum left = values[3]->data.keyword;
-                    span->bound->border->top_style = top;
-                    span->bound->border->right_style = right;
-                    span->bound->border->bottom_style = bottom;
-                    span->bound->border->left_style = left;
-                    log_debug("[CSS] Border-style (4 values): %s %s %s %s", values[0]->data.keyword, values[1]->data.keyword, values[2]->data.keyword, values[3]->data.keyword);
-                }
+	                    span->bound->border->top_style = top;
+	                    span->bound->border->right_style = right;
+	                    span->bound->border->bottom_style = bottom;
+	                    span->bound->border->left_style = left;
+	                    const CssEnumInfo* info_t = css_enum_info(top);
+	                    const CssEnumInfo* info_r = css_enum_info(right);
+	                    const CssEnumInfo* info_b = css_enum_info(bottom);
+	                    const CssEnumInfo* info_l = css_enum_info(left);
+	                    // CSS enum ids are not string pointers; log the resolved names to keep diagnostics safe.
+	                    log_debug("[CSS] Border-style (4 values): %s %s %s %s",
+	                        info_t ? info_t->name : "unknown",
+	                        info_r ? info_r->name : "unknown",
+	                        info_b ? info_b->name : "unknown",
+	                        info_l ? info_l->name : "unknown");
+	                }
             }
             break;
         }

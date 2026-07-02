@@ -944,6 +944,7 @@ bool js_is_proxy(Item obj);
 JsProxyData* js_get_proxy_data(Item obj);
 // Get the ultimate non-proxy target (unwrap nested proxies)
 Item js_proxy_get_target(Item obj);
+
 bool js_proxy_has_callable_target(Item obj);
 
 // Proxy trap dispatch functions (called from js_globals.cpp)

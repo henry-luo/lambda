@@ -1126,7 +1126,9 @@ static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
         View* child = static_cast<View*>(block->first_child);
         float max_bottom = 0;
         while (child) {
-            if (child->is_element()) {
+            if (child->is_block()) {
+                // multicol rule geometry only uses block boxes; inline element
+                // children can appear here before inline layout wraps them.
                 ViewBlock* child_block = lam::view_require_block(child);
                 float child_bottom = child_block->y + child_block->height;
                 if (child_bottom > max_bottom) max_bottom = child_bottom;

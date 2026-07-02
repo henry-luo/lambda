@@ -88,16 +88,25 @@ void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
         if (mt->last_closure_capture_is_nfe[i]) continue;
         if (strcmp(mt->last_closure_capture_names[i], name) != 0) continue;
         int slot = mt->last_closure_capture_slots[i] >= 0 ? mt->last_closure_capture_slots[i] : i;
+        MIR_reg_t target_env = mt->last_closure_env_reg;
+        if (mt->last_closure_capture_is_transitive[i]) {
+            JsMirVarEntry* var = jm_find_var(mt, name);
+            if (!var || !var->from_env || var->env_reg == 0 || var->env_slot < 0) return;
+            target_env = var->env_reg;
+            slot = var->env_slot;
+        }
         MIR_reg_t val = val_reg;
         if (jm_is_native_type(type_id)) {
             val = jm_box_native(mt, val_reg, type_id);
         }
         // closures created before a same-scope let/const initializer copy the
         // TDZ value. Write the initialized value into that fresh env so the
-        // closure observes JS's by-reference lexical binding semantics.
+        // closure observes JS's by-reference lexical binding semantics. For
+        // transitive captures, write through the outer env backing; writing the
+        // child env slot can overwrite its parent-env link with a JS value.
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t),
-                mt->last_closure_env_reg, 0, 1),
+                target_env, 0, 1),
             MIR_new_reg_op(mt->ctx, val)));
         return;
     }
