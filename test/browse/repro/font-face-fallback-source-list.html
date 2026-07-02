@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Font face fallback source list</title>
+  <style>
+    @font-face {
+      font-family: "Fallback Source Repro";
+      src: url("https://example.com/legacy-font.eot") format("embedded-opentype"),
+           url("https://example.com/font.woff") format("woff"),
+           url("https://example.com/font.ttf") format("truetype");
+      font-weight: 400;
+      font-style: normal;
+    }
+    body {
+      font-family: "Fallback Source Repro", sans-serif;
+      margin: 24px;
+    }
+  </style>
+</head>
+<body>
+  <p>@font-face src is an ordered fallback list. Unsupported legacy formats should be skipped, and only one viable remote source should be attempted before normal CSS font fallback continues.</p>
+</body>
+</html>
