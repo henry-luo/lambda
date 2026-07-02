@@ -26,6 +26,7 @@
 #include "js_runtime.h"
 #include "js_typed_array.h"
 #include "js_class.h"
+#include "js_dom_events.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -990,6 +991,64 @@ extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
     }
     dt_recompute_views(dt);
     return dt;
+}
+
+// Read a text/<mime> record's value out of a DataTransfer's _items array.
+// Returns NULL if absent. The returned pointer is owned by the JS string.
+static const char* dt_read_record(Item dt, const char* mime) {
+    Item rec_arr = js_property_get(dt, make_str("_items"));
+    if (get_type_id(rec_arr) != LMD_TYPE_ARRAY) return NULL;
+    int64_t n = js_array_length(rec_arr);
+    for (int64_t i = 0; i < n; i++) {
+        Item r = js_array_get_int(rec_arr, i);
+        if (get_type_id(r) != LMD_TYPE_MAP) continue;
+        Item type = js_property_get(r, make_str("type"));
+        if (get_type_id(type) != LMD_TYPE_STRING) continue;
+        String* ts = it2s(type);
+        if (!ts || strcmp(ts->chars, mime) != 0) continue;
+        Item val = js_property_get(r, make_str("value"));
+        if (get_type_id(val) != LMD_TYPE_STRING) return "";
+        String* vs = it2s(val);
+        return vs ? vs->chars : "";
+    }
+    return NULL;
+}
+
+// Stage 4C Phase B: dispatch a synthetic clipboard event (paste / copy / cut)
+// to a DOM element with a store-backed `clipboardData`, so script-owned rich
+// editors that use addEventListener('paste'|'copy'|'cut') work under
+// `lambda.exe view` (native has no real OS clipboard-event delivery there).
+//   - paste: clipboardData is pre-populated from the C clipboard store
+//     (text/plain + text/html); the handler reads via getData().
+//   - copy/cut: clipboardData starts empty; whatever the handler writes via
+//     setData() is persisted back into the store after dispatch.
+// Returns true if the handler called preventDefault().
+extern "C" bool js_dispatch_clipboard_event_to_element(Item target_item, const char* type) {
+    bool is_paste = (strcmp(type, "paste") == 0);
+    Item dt;
+    if (is_paste) {
+        // clipboard_store_read_mime returns a pointer into a single reused
+        // buffer — the second call invalidates the first, so copy text/plain
+        // before reading text/html.
+        const char* plain_raw = clipboard_store_read_mime("text/plain");
+        char* plain = (plain_raw && *plain_raw) ? strdup(plain_raw) : NULL;
+        const char* html = clipboard_store_read_mime("text/html");
+        dt = js_data_transfer_new_with_strings(plain, html);
+        free(plain);
+    } else {
+        dt = js_make_data_transfer_object();
+    }
+    Item ev = js_create_event(type, /*bubbles=*/1, /*cancelable=*/1);
+    js_property_set(ev, make_str("clipboardData"), dt);
+    js_dom_dispatch_event(target_item, ev);
+    bool prevented = js_event_is_default_prevented(ev);
+    if (!is_paste) {
+        const char* plain = dt_read_record(dt, "text/plain");
+        const char* html  = dt_read_record(dt, "text/html");
+        if (html && *html) clipboard_store_write_html(html, plain ? plain : "");
+        else if (plain && *plain) clipboard_store_write_text(plain);
+    }
+    return prevented;
 }
 
 // =============================================================================

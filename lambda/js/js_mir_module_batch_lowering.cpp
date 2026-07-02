@@ -5026,9 +5026,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // may modify them later). Fix: store the parent env pointer in slot 0 of the scope env,
     // shift all other slots by 1, and mark transitive captures so children read them
     // from the grandparent env (via the parent env link) instead of from the stale copy.
-    for (int fi = 0; fi < mt->func_count; fi++) {
+    for (int fi = mt->func_count - 1; fi >= 0; fi--) {
         JsFuncCollected* parent_fc = &mt->func_entries[fi];
         parent_fc->has_parent_env_link = false;
+        parent_fc->parent_env_link_uses_grandparent = false;
         if (!parent_fc->has_scope_env || parent_fc->scope_env_count == 0) continue;
         if (parent_fc->reuse_parent_env) continue;  // Phase 1.7b already handles pure-transitive
         if (parent_fc->capture_count == 0) continue; // no captures = no transitive vars possible
@@ -5059,6 +5060,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // Also exclude vars that are LOCAL to the parent (shadowing the capture).
         bool has_transitive = false;
         bool has_local = false;
+        bool parent_link_uses_grandparent = false;
         for (int s = 0; s < parent_fc->scope_env_count; s++) {
             bool is_capture = false;
             // Check if this scope env var is a local of the parent (including function declarations)
@@ -5068,9 +5070,12 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             if (!is_parent_local) {
                 for (int c = 0; c < parent_fc->capture_count; c++) {
                     if (strcmp(parent_fc->scope_env_names[s], parent_fc->captures[c].name) == 0) {
-                        // Only transitive if parent reads this from its own parent's scope env
-                        if (parent_fc->captures[c].scope_env_slot >= 0) {
-                            is_capture = true;
+                        // any parent capture is transitive for the child; if it is
+                        // not backed by a shared scope_env slot, the parent's dense
+                        // closure-env capture slot is still the live binding cell.
+                        is_capture = true;
+                        if (parent_fc->captures[c].grandparent_slot >= 0) {
+                            parent_link_uses_grandparent = true;
                         }
                         break;
                     }
@@ -5082,10 +5087,16 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
         hashmap_free(parent_locals);
 
-        if (!has_transitive || !has_local) continue; // pure-local or pure-transitive (handled by 1.7b)
+        if (!has_transitive) continue; // pure-local scope envs do not need a parent link
+        // a non-reused env with a transitive capture must preserve the original
+        // parent binding cell; local-name collection can miss mixed callback
+        // shapes, and copying the transitive value makes sibling closures mutate
+        // independent cells (e.g. captured --waiting in nested event callbacks).
+        (void)has_local;
 
         // Mixed scope env: add parent env link at the LAST slot (no shifting needed)
         parent_fc->has_parent_env_link = true;
+        parent_fc->parent_env_link_uses_grandparent = parent_link_uses_grandparent;
         int parent_env_link_slot = parent_fc->scope_env_count; // last slot = parent env pointer
         (void)parent_env_link_slot;
         // scope_env_names was allocated with +2 extra slots for this
@@ -5127,14 +5138,27 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 // Only for captures the parent reads from its own parent's scope env
                 for (int pc = 0; pc < parent_fc->capture_count; pc++) {
                     if (strcmp(child->captures[k].name, parent_fc->captures[pc].name) == 0) {
-                        // This is transitive — child should read from grandparent env
-                        int grandparent_slot = parent_fc->captures[pc].scope_env_slot;
-                        if (grandparent_slot < 0) {
-                            // Parent closures that do not use a shared scope env
+                        int grandparent_slot = parent_fc->captures[pc].grandparent_slot;
+                        if (grandparent_slot >= 0) {
+                            child->captures[k].grandparent_slot = grandparent_slot;
+                        } else if (parent_fc->captures[pc].scope_env_slot >= 0) {
+                            if (!parent_link_uses_grandparent) {
+                                // the parent link names the immediate parent env here;
+                                // reusing scope_env_slot would collide with the child's
+                                // own scope-env layout in mixed callback closures.
+                                child->captures[k].grandparent_slot = parent_fc->captures[pc].scope_env_slot;
+                            } else {
+                                child->captures[k].scope_env_slot = -1;
+                                child->captures[k].grandparent_slot = -1;
+                                break;
+                            }
+                        } else if (!parent_link_uses_grandparent) {
+                            // parent closures that do not use a shared scope env
                             // store captures densely by capture index.
-                            grandparent_slot = pc;
+                            child->captures[k].grandparent_slot = pc;
+                        } else {
+                            break;
                         }
-                        child->captures[k].grandparent_slot = grandparent_slot;
                         log_debug("js-mir: Phase 1.7c: capture '%s' in '%s' → grandparent slot %d (parent env at slot %d)",
                             child->captures[k].name, child->name, child->captures[k].grandparent_slot, parent_env_link_slot);
                         break;

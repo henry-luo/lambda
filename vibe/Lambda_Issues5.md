@@ -597,13 +597,23 @@ unrelated call), with no hint that the offending `++` was the culprit.
 
 ## 23. Element literal attribute set is fully static — no spread / no conditional
 
-**Severity: MEDIUM** — workable but surprising; forces N-fold
-duplication of element literals when only one attribute varies.
+**Status: Still open (2026-07-02)** — attribute spread is still unsupported,
+and the intended inline `if` expression form for attribute values still fails
+because of the current grammar. This is workable but surprising; it forces
+N-fold duplication of element literals when only one attribute varies.
 
 ```lambda
 // What you'd want:
 <path d: d, fill: f, stroke: s,
       'stroke-dasharray': if (has_dash) dash else "none">     // syntax error
+
+// Current accepted workaround:
+<path d: d, fill: f, stroke: s,
+      'stroke-dasharray': (if (has_dash) dash else "none")>
+
+// Also accepted:
+<path d: d, fill: f, stroke: s,
+      'stroke-dasharray': if (has_dash) { dash } else { "none" }>
 
 // What works: branch the entire element:
 if (has_extras) {
@@ -620,31 +630,54 @@ conditional attribute (`attr?: value when cond`), and no way to build
 a dynamic attribute set programmatically and apply it to an element
 literal.
 
+**Diagnosis (2026-07-02)**:
+- The grammar intends to allow `if_expr` in attributes:
+  `_attr_expr` includes `$.if_expr`.
+- But `if_expr` parses its unbraced `then` and `else` arms using full
+  `$._expr`, not an attribute-safe expression grammar.
+- Full `$._expr` includes relational `>`, so in
+  `"none">` the closing element delimiter can be consumed as a binary
+  operator inside the else expression. Tree-sitter then produces an `ERROR`
+  node, and Lambda reports `error[E100]: Missing { } for if-statement`.
+- Parentheses or braced arms work because they create an explicit boundary
+  before the element-closing `>`.
+
 For SVG/HTML emitters this means each element with N optional
 attributes needs `2^N` literal forms — or the emitter must always emit
 defaults like `stroke-dasharray="none"`, `fill-opacity="1"` (which
 bloats output and changes existing goldens).
 
 **Asks**:
+- Modify the grammar so attribute-context `if_expr` arms use an
+  attribute-safe expression grammar, allowing
+  `attr: if (cond) a else b` to parse correctly before the element `>`.
 - Either add spread/conditional attribute syntax, or
 - Provide a `make_element(tag, attrs_map, children)` runtime constructor
   that takes the attribute set as an ordinary `map`.
 
 ### 24. Empty `else if`/`else` block in `pn` silently breaks the loop
 
-**Severity: HIGH** — Adding an empty branch body (even just a comment) in a `pn` loop causes the loop to break downstream, often with all output disappearing and no error.
+**Status: ✅ Fixed (2026-07-02)** — Empty and comment-only statement-form `if` branches are now legal no-op branches in `pn`. The loop continues without requiring a dummy assignment.
 
 ```lambda
 pn driver(op) {
   if (op == "a") { ... }
-  else if (op == "b") { /* comment only */ }   // BAD: breaks loop
+  else if (op == "b") { /* comment only */ }   // OK: no-op branch
   else { ... }
 }
 ```
 
-**Workaround:** Always put a no-op statement in the body, e.g. `st = st`.
+The current failure was a grammar/AST mismatch: statement-form `if_stam` required
+`content` inside every branch block, but comments are grammar extras. Both `{}`
+and `{ /* comment only */ }` therefore had no branch `content` node and failed
+to parse with `error[E102]: Expected 'identifier'`.
 
-**Discovered:** While adding marker-op branches (BMC/EMC/etc.) in PDF interp driver.
+The grammar now allows optional statement-branch content, and the AST builder
+represents missing branch bodies as null no-ops so procedural control flow can
+continue normally.
+
+**Regression coverage:** `test/lambda/proc/proc_empty_if_branch.ls` covers both
+truly empty `else if` blocks and comment-only branches inside a `pn` loop.
 
 ---
 
@@ -667,12 +700,6 @@ let s = ("a" ++
      "b" ++
      "c")
 ```
-
----
-
-### 29. `var` declared with a "null-shaped" or empty-string initial value cannot be reassigned
-
-**Severity: HIGH** — `var s = ""` or `var x = null` locks the var as null-typed forever; subsequent assignments are dropped with no error. Use a non-null, non-empty sentinel (e.g. `" "` or `{}`) or an int flag.
 
 ---
 

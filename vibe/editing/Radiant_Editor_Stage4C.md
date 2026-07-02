@@ -1,6 +1,6 @@
 # Radiant Rich Editor — Stage 4C: The Editor's Test Suite Green on the Lambda Runtime (two phases)
 
-**Date:** 2026-07-02 · **Status:** **Phase A + Phase B GREEN, integrated under `make editor-4c`** — Phase A **1931/1931** (`make editor-4c-js`, headless `lambda.exe js`), Phase B **28/28** (`make editor-4c-view`, `lambda.exe view` + `event_sim`). All 5 LambdaJS runtime bugs + all 4 Phase-B substrate blockers fixed (arrow-caret nav, selectionchange nested-CE, Shift+Enter state_machine invariant, Tab routing). `make test-radiant-baseline` 5934/5934, `test_js_gtest` 302/303 (pre-existing only). Remaining: Milestone-3 parity report + CI wiring; React `.test.tsx` stays out (§1.2). Two-phase plan + Lane B pick unchanged (§4.2).
+**Date:** 2026-07-02 · **Status:** **Phase A + Phase B GREEN, integrated under `make editor-4c`** — Phase A **1931/1931** (`make editor-4c-js`, headless `lambda.exe js`), Phase B **32/32** (`make editor-4c-view`, `lambda.exe view` + `event_sim`). All 5 LambdaJS runtime bugs + all 4 Phase-B substrate blockers fixed (arrow-caret nav, selectionchange nested-CE, Shift+Enter state_machine invariant, Tab routing). `make test-radiant-baseline` 5934/5934, `test_js_gtest` 302/303 (pre-existing only). Remaining: Milestone-3 parity report + CI wiring; React `.test.tsx` stays out (§1.2). Two-phase plan + Lane B pick unchanged (§4.2).
 **Scope/goal:** Prove the **plain-DOM JS editor** works on the runtime it ships on, in two phases:
 - **Phase A — `lambda.exe js`:** the **full ~1931-test plain-DOM suite** runs and passes on the headless **LambdaJS** runtime — *does the editor's own test corpus pass at the JS level under Lambda?*
 - **Phase B — `lambda.exe view` + `event_sim`:** a **curated subset** (§4.2) runs as true **end-to-end UI automation** under the full Radiant stack (real layout, event dispatch, caret/selection rendering) — *does real interactive editing work end-to-end?*
@@ -70,7 +70,7 @@ Current view-lane tally: `dom-bridge` 7/7 · `render-vnode` 9/9 · `html-parser`
 
 **Bug 5 fix (2026-07-02):** `full-editor-dom` stack overflow — a deeply-nested closure captured the IIFE-scope import `cmdInsertText`, which was registered as `MCONST_MODVAR` but not distinguished from ordinary wrapper-local decls in capture/shadow analysis. The inner arrow snapshotted the wrapper's callable → self-recursive resolution → stack blows. Fix: new `is_iife_func_decl` marker + `jm_modvar_is_iife_scope_binding()` filter in `js_mir_context.hpp` + `js_mir_module_batch_lowering.cpp`. Full detail in [Lambda_Bug.md](../Lambda_Bug.md) §"Bug 5".
 
-**Phase B — 28/28 pass, all blockers fixed (2026-07-02):** `make editor-4c-view` runs the 4B baseline + the Stage-4C fixture set (`test/ui/editor4c/`) under `lambda.exe view --event-file` + `event_sim`. **28/28 pass** (13 baseline + 15 new). No `_open_` blockers remain — all 4 were root-caused and fixed.
+**Phase B — 28/28 (blockers) → 32/32 (gestures), all green (2026-07-02):** `make editor-4c-view` runs the 4B baseline + the Stage-4C fixture set (`test/ui/editor4c/`) under `lambda.exe view --event-file` + `event_sim`. **28/28 pass** (13 baseline + 15 new). No `_open_` blockers remain — all 4 were root-caused and fixed.
 
 New Stage-4C fixtures:
 - typing/editing: `type-in-list`, `delete-forward`, `enter-in-list`, `backspace-join`, `multi-typing`, `select-all-delete`, `replace-then-mark`, `shift-enter-linebreak`
@@ -87,11 +87,21 @@ New Stage-4C fixtures:
 
 Structured-model assertion (`assert_editor_doc`) still not needed: existing `assert_attribute` on `[data-source-path]` + `assert_text` + `not_contains` cover every case authored so far.
 
+**Phase B gesture expansion (2026-07-02) — 28 → 32/32:** added `color-picker`, `paste-plain`, `paste-html`, `copy-image`.
+- **Clipboard for rich surfaces (B0 prerequisite, substrate feature):** the script-owned editor uses `addEventListener('paste'|'copy')`, but under `lambda.exe view` Radiant fired no JS ClipboardEvent for rich/contenteditable surfaces (Cmd+V went through the rich beforeinput intent; Cmd+C through native selection-copy) — so paste/copy silently did nothing. Added `js_dispatch_clipboard_event_to_element()` (`lambda/js/js_clipboard.cpp`): builds a `clipboardData` (DataTransfer) backed by the C clipboard store — pre-populated from the store for `paste`, written back to the store after dispatch for `copy`/`cut` — and dispatches a cancelable JS ClipboardEvent. Wired in `radiant/event.cpp` (`radiant_dispatch_clipboard_event` + a Cmd/Ctrl+V/C block in the keydown path): fire the JS event first; if the handler `preventDefault`s, stop; else fall through to the native default. (Bug fixed en route: `clipboard_store_read_mime` returns a single reused buffer, so text/plain must be copied before reading text/html — use-after-free otherwise.)
+- **color-picker** needed no new infra (toolbar swatch → `cmdSetMark('color')`, like the bold/italic fixtures).
+
+**Remaining §4.2 gestures — deferred (each needs a distinct larger substrate feature, not yet built):**
+- **markdown autoformat** (`- `/`# `) — NOT an interaction for this editor: `FullEditorDom` does not wire `commands/input-rules.ts` into its beforeinput pipeline (autoformat is Phase-A unit-tested only). Would require an editor change, not a Radiant one.
+- **link popover / mention** — the toolbar handlers call `window.prompt(...)`, which returns null under headless `view` (no dialog); needs `event_sim` prompt-answer support or an editor seam.
+- **drag-reorder** — uses HTML5 drag-and-drop (`dragstart`/`dragover`/`drop`); `event_sim`'s `mouse_drag` only synthesizes raw mouse events, so it needs synthetic HTML5 DnD event generation + the JS-subtree layout geometry (§5.2).
+- **image-resize / table col-resize** — coordinate-driven mouse drags on overlay handles; need the §5.2 JS-subtree geometry fix so the handles resolve to real layout boxes.
+
 **Regression check:** `test_js_gtest` 302/303 (only pre-existing `vm_runincontext_cross_unit`); `test_ui_automation_gtest` 219/219; `test_radiant_view_gtest` 20/20; `make test-radiant-baseline` 5934/5934 (fully green; state_machine / state_store / event / event_sim changes verified non-regressing).
 
 **Milestone 3 — integration (2026-07-02):** the whole Stage-4C suite is now reproducible via `make`:
 - **`make editor-4c-js`** → `test/editor-js/tools/run-phase-a.mjs` bundles each group (core, view, drawing, and the 6 populated tier corpora) to an IIFE, runs it under `lambda.exe js` (`--document` where DOM is needed), and aggregates the in-engine `HARNESS pass=/fail=/skip=` lines. React `.test.tsx` excluded by construction; the README-only `tier_c_wpt` placeholder is skipped. **PHASE-A TOTAL 1931/1931.**
-- **`make editor-4c-view`** → the Phase-B fixtures under `lambda.exe view` + `event_sim`. **28/28.**
+- **`make editor-4c-view`** → the Phase-B fixtures under `lambda.exe view` + `event_sim`. **32/32.**
 - **`make editor-4c`** → runs both; exits non-zero on any failure. Confirmed green end-to-end.
 
 Still open in Milestone 3: a machine parity report cross-checking the Radiant pass-set vs. the jsdom/vitest oracle, and CI wiring.
@@ -253,9 +263,9 @@ APIs exist (§3.1); **semantics** need hardening. Surfaced by Phase A's `view/*.
 | **A1 — Logic/tier bulk under `js`** | ✅ **done** | model/commands/input/drawing + 6 tier corpora green under `lambda.exe js` | ~1866 green (207 core + 8 misc + 50 drawing + 1601 tier); jsdom parity |
 | **A2 — `view/*.ts` under `js`** | ✅ **done** | the 7 plain-DOM view tests green under `js --document`; the JS-runtime bug chain (Bugs 1-5 all fixed) + tail DOM-fidelity & `Intl.Segmenter` fixes | 63/63 across the 7 view files + caret 11/11 + smoke 3/3; Phase A total 1931/1931 |
 | **B0 — event_sim + geometry prerequisites** | ◑ partial | structured-model assertion (§6.1) — DEFERRED (existing `assert_attribute` on `[data-source-path]` + `assert_text` cover the pilot); the JS-subtree geometry fix (§5.2) so chrome clicks land — not needed yet by the pilot fixtures | editor-4c-view 17/17 without it; add when the first non-covered case surfaces |
-| **B1 — Lane B subset** | ✅ **done (initial set)** | `make editor-4c-view` runs `test/ui/editor4b/*.json` (13) + `test/ui/editor4c/*.json` (15 new); all 4 former `_open_` blockers root-caused + fixed in the Radiant substrate (state_machine caret-projection guard, Tab keydown-first routing, `event_sim` Arrow* aliases, per-fixture `html`) | **28/28 pass**; **`make test-radiant-baseline` 5934/5934** (fully green — the substrate fixes also cleared the 3 form-drag + 1 view-cmd pre-existing failures) |
+| **B1 — Lane B subset** | ✅ **done (initial set)** | `make editor-4c-view` runs `test/ui/editor4b/*.json` (13) + `test/ui/editor4c/*.json` (19 new); all 4 former `_open_` blockers root-caused + fixed in the Radiant substrate (state_machine caret-projection guard, Tab keydown-first routing, `event_sim` Arrow* aliases, per-fixture `html`) | **32/32 pass**; **`make test-radiant-baseline` 5934/5934** (fully green — the substrate fixes also cleared the 3 form-drag + 1 view-cmd pre-existing failures) |
 | **B1 expansion — remaining Lane-B files** | ⬚ not started | convert `commands/{text-commands,structural-commands,caret,paste,input-rules}` cases (~98 tests) + expand `view/{editor-view-dom,full-editor-dom,reconcile}` (~29) as fixtures; investigate the 2 `_open_` blockers | Lane-B subset green under `lambda.exe view` + `event_sim` |
-| **3 — Integration & parity** | ◑ **make targets landed** | `make editor-4c-js` (Phase A via `tools/run-phase-a.mjs`), `make editor-4c-view` (Phase B), `make editor-4c` (both) | **`make editor-4c` green: Phase A 1931/1931 + Phase B 28/28.** Parity report vs. vitest + CI wiring still TODO |
+| **3 — Integration & parity** | ◑ **make targets landed** | `make editor-4c-js` (Phase A via `tools/run-phase-a.mjs`), `make editor-4c-view` (Phase B), `make editor-4c` (both) | **`make editor-4c` green: Phase A 1931/1931 + Phase B 32/32.** Parity report vs. vitest + CI wiring still TODO |
 
 **Guard (every milestone):** never regress `make test-radiant-baseline` or the jsdom suite; triage every divergence to a cause (LambdaJS/`js_dom`/substrate **or** a legitimate editor difference) before accepting or fixing it.
 

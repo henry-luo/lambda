@@ -5836,7 +5836,7 @@
     },
     "if_stam": {
       "type": "PREC_RIGHT",
-      "value": 0,
+      "value": 1,
       "content": {
         "type": "SEQ",
         "members": [
@@ -5857,12 +5857,20 @@
             "value": "{"
           },
           {
-            "type": "FIELD",
-            "name": "then",
-            "content": {
-              "type": "SYMBOL",
-              "name": "content"
-            }
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "then",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "content"
+                }
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
           },
           {
             "type": "STRING",
@@ -5892,12 +5900,20 @@
                               "value": "{"
                             },
                             {
-                              "type": "FIELD",
-                              "name": "else",
-                              "content": {
-                                "type": "SYMBOL",
-                                "name": "content"
-                              }
+                              "type": "CHOICE",
+                              "members": [
+                                {
+                                  "type": "FIELD",
+                                  "name": "else",
+                                  "content": {
+                                    "type": "SYMBOL",
+                                    "name": "content"
+                                  }
+                                },
+                                {
+                                  "type": "BLANK"
+                                }
+                              ]
                             },
                             {
                               "type": "STRING",

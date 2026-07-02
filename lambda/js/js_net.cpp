@@ -84,6 +84,10 @@ static double net_number_value(Item value) {
 // Socket — wraps uv_tcp_t with event model
 // =============================================================================
 
+// Net sockets default to a 64 KiB water mark; a 16 KiB generic stream default
+// makes throttle tests fit in one kernel read before pause() can gate input.
+#define NET_SOCKET_DEFAULT_HIGH_WATER_MARK (64 * 1024)
+
 typedef struct PendingSocketWrite PendingSocketWrite;
 typedef struct SocketAutoAttemptTimerReq SocketAutoAttemptTimerReq;
 typedef struct JsServer JsServer;
@@ -1940,7 +1944,7 @@ static Item make_socket_handle_object(JsSocket* sock) {
 
 // create a JS socket object wrapping a JsSocket
 static Item make_socket_object(JsSocket* sock, bool expose_handle) {
-    if (sock->high_water_mark < 0) sock->high_water_mark = 16 * 1024;
+    if (sock->high_water_mark < 0) sock->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
     Item obj = js_new_object();
     // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(obj, JS_CLASS_SOCKET);  // A3-T3b
@@ -2047,7 +2051,7 @@ extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe) {
 
     JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
     if (!sock) return make_undefined_item();
-    sock->high_water_mark = 16 * 1024;
+    sock->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
     uv_tcp_init(loop, &sock->tcp);
     sock->tcp.data = sock;
 
@@ -3762,7 +3766,7 @@ static Item create_socket_for_connect(const NetConnectOptions* options) {
     }
 
     JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
-    sock->high_water_mark = 16 * 1024;
+    sock->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
     uv_tcp_init(loop, &sock->tcp);
     sock->tcp.data = sock;
 
@@ -3809,7 +3813,7 @@ static JsSocket* socket_reattach_for_connect(Item self) {
     if (!loop) return NULL;
 
     JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
-    sock->high_water_mark = 16 * 1024;
+    sock->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
     sock->js_object = self;
     uv_tcp_init(loop, &sock->tcp);
     sock->tcp.data = sock;
@@ -4309,7 +4313,7 @@ static void server_connection_cb(uv_stream_t* server, int status) {
     uv_loop_t* loop = server->loop;
 
     JsSocket* client = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
-    client->high_water_mark = 16 * 1024;
+    client->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
     uv_tcp_init(loop, &client->tcp);
     client->tcp.data = client;
 
@@ -5088,7 +5092,7 @@ extern "C" Item js_net_Socket(Item options) {
     }
 
     JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
-    sock->high_water_mark = 16 * 1024;
+    sock->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
     if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT ||
         get_type_id(options) == LMD_TYPE_VMAP) {
         Item hwm = js_property_get(options, make_string_item("highWaterMark"));
