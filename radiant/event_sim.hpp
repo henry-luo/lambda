@@ -194,6 +194,8 @@ struct SimEvent {
     char* assert_equals;         // for assert_text: exact match
     char* assert_not_contains;   // for assert_attribute: negative substring match (pass when absent OR does not include)
     char* state_snapshot_name;   // for snapshot_state_store/assert_state_store_snapshot
+    bool has_expected_snapshot_removed;
+    bool expected_snapshot_removed;
     char* clipboard_mime;        // for assert_clipboard: MIME representation to read
     char* clipboard_html;        // optional text/html payload for paste/drop
     bool expected_visible;       // for assert_visible

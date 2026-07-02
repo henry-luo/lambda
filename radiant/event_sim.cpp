@@ -1718,8 +1718,13 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         parse_target(reader, ev);
         const char* name = reader.get("name").cstring();
         if (name) ev->state_snapshot_name = mem_strdup(name, MEM_CAT_LAYOUT);
-        if (!ev->state_snapshot_name || (!ev->target_selector && !ev->target_text)) {
-            log_error("event_sim: assert_state_store_snapshot requires 'name' and target");
+        if (reader.has("removed")) {
+            ev->has_expected_snapshot_removed = true;
+            ev->expected_snapshot_removed = reader.get("removed").asBool();
+        }
+        if (!ev->state_snapshot_name ||
+            (!ev->has_expected_snapshot_removed && !ev->target_selector && !ev->target_text)) {
+            log_error("event_sim: assert_state_store_snapshot requires 'name' and target unless removed is set");
             mem_free(ev);
             return NULL;
         }
@@ -2542,6 +2547,18 @@ static bool event_sim_capture_state_snapshot(EventSimContext* ctx,
     return true;
 }
 
+static bool event_sim_view_state_id_present(DocState* state, uint32_t dom_id) {
+    if (!state || !state->view_state_map || dom_id == 0) return false;
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(state->view_state_map, &iter, &item)) {
+        ViewStateEntry* entry = (ViewStateEntry*)item;
+        if (entry && entry->view_id == dom_id) return true;
+        if (entry && entry->state && entry->state->view_id == dom_id) return true;
+    }
+    return false;
+}
+
 static void event_sim_snapshot_state_store(EventSimContext* ctx,
                                            UiContext* uicon,
                                            SimEvent* ev) {
@@ -2590,6 +2607,30 @@ static void event_sim_assert_state_store_snapshot(EventSimContext* ctx,
         log_error("event_sim: assert_state_store_snapshot FAIL - snapshot '%s' not found",
                   ev->state_snapshot_name);
         ctx->fail_count++;
+        return;
+    }
+
+    DomDocument* doc = uicon ? uicon->document : NULL;
+    DocState* state = doc ? (DocState*)doc->state : NULL;
+    if (ev->has_expected_snapshot_removed && ev->expected_snapshot_removed) {
+        // Removed-node snapshots cannot resolve by selector; the saved DOM id
+        // is the stable key that proves fallback pruning actually ran.
+        bool stale_state = event_sim_view_state_id_present(state, snap->dom_id);
+        bool target_still_resolves = false;
+        if (doc && (ev->target_selector || ev->target_text)) {
+            target_still_resolves = resolve_target_element(ev, doc) != NULL;
+        }
+        if (!stale_state && !target_still_resolves) {
+            log_info("event_sim: assert_state_store_snapshot PASS - '%s' removed id=%u",
+                     ev->state_snapshot_name, snap->dom_id);
+            ctx->pass_count++;
+        } else {
+            log_error("event_sim: assert_state_store_snapshot FAIL - removed id=%u stale_state=%s target=%s",
+                      snap->dom_id,
+                      stale_state ? "true" : "false",
+                      target_still_resolves ? "present" : "absent");
+            ctx->fail_count++;
+        }
         return;
     }
 
