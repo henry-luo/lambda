@@ -74,6 +74,27 @@ static const char* css_font_family_name_from_value(const CssValue* value) {
     return NULL;
 }
 
+static char* duplicate_view_pool_layout_string(LayoutContext* lycon, const char* value) {
+    if (!value || !lycon || !lycon->doc || !lycon->doc->view_tree || !lycon->doc->view_tree->pool) {
+        return nullptr;
+    }
+    return pool_strdup(lycon->doc->view_tree->pool, value);
+}
+
+static void replace_view_pool_layout_string(LayoutContext* lycon, char** target, const char* value) {
+    if (!target) return;
+    // Grid item props are view-pool objects and can be repurposed through the
+    // item-prop union, so attached names must share the pool lifetime.
+    *target = duplicate_view_pool_layout_string(lycon, value);
+}
+
+static void replace_view_pool_layout_const_string(LayoutContext* lycon, const char** target, const char* value) {
+    if (!target) return;
+    // Grid item props are view-pool objects and can be repurposed through the
+    // item-prop union, so attached names must share the pool lifetime.
+    *target = duplicate_view_pool_layout_string(lycon, value);
+}
+
 static bool css_font_face_source_is_available(const char* path) {
     if (!path || !*path) return false;
     if (strncmp(path, "data:", 5) == 0) return true;
@@ -2396,6 +2417,15 @@ static float evaluate_calc_expression(LayoutContext* lycon, uintptr_t raw_prop,
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value) {
     if (!value) { log_debug("resolve_length_value: null value");  return 0.0f; }
 
+    static thread_local int length_resolve_depth = 0;
+    if (length_resolve_depth > 64) {
+        // Cyclic or extremely deep var()/calc() chains from live CSS must fail
+        // as unresolved values instead of recursing until the process stack dies.
+        log_warn("resolve_length_value: exceeded CSS variable/function recursion limit");
+        return NAN;
+    }
+    length_resolve_depth++;
+
     // Check if we're in "raw mode" (negative property) - used for calc() operands
     // In raw mode, NUMBER values are not multiplied by font-size for line-height
     bool raw_number_mode = (intptr_t)property < 0;
@@ -2828,6 +2858,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         break;
     }
     log_debug("resolved length value: type %d -> %.2f px", value->type, result);
+    length_resolve_depth--;
     return result;
 }
 
@@ -10765,16 +10796,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // 2. A shorthand for row-start / column-start / row-end / column-end
             if (value->type == CSS_VALUE_TYPE_STRING) {
                 // Named area (quoted string)
-                if (span->gi->grid_area) mem_free(span->gi->grid_area);
-                span->gi->grid_area = mem_strdup(value->data.string, MEM_CAT_LAYOUT);
+                replace_view_pool_layout_string(lycon, &span->gi->grid_area, value->data.string);
                 log_debug("[CSS] grid-area: named area (string) '%s'", span->gi->grid_area);
             }
             else if (value->type == CSS_VALUE_TYPE_CUSTOM) {
                 // Named area (unquoted identifier like "header")
                 // Stored as custom property reference when not a known keyword
                 if (value->data.custom_property.name) {
-                    if (span->gi->grid_area) mem_free(span->gi->grid_area);
-                    span->gi->grid_area = mem_strdup(value->data.custom_property.name, MEM_CAT_LAYOUT);
+                    replace_view_pool_layout_string(lycon, &span->gi->grid_area, value->data.custom_property.name);
                     log_debug("[CSS] grid-area: named area (custom) '%s'", span->gi->grid_area);
                 }
             }
@@ -10782,8 +10811,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 // Can be "auto" or an identifier (area name)
                 const char* name = css_enum_info(value->data.keyword)->name;
                 if (value->data.keyword != CSS_VALUE_AUTO) {
-                    if (span->gi->grid_area) mem_free(span->gi->grid_area);
-                    span->gi->grid_area = mem_strdup(name, MEM_CAT_LAYOUT);
+                    replace_view_pool_layout_string(lycon, &span->gi->grid_area, name);
                     log_debug("[CSS] grid-area: named area (keyword) '%s'", span->gi->grid_area);
                 }
             }
@@ -10856,7 +10884,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 } else {
                     const CssEnumInfo* ki = css_enum_info(value->data.keyword);
                     if (ki && ki->name) {
-                        span->gi->grid_column_start_name = mem_strdup(ki->name, MEM_CAT_LAYOUT);
+                        replace_view_pool_layout_const_string(lycon, &span->gi->grid_column_start_name, ki->name);
                         span->gi->has_explicit_grid_column_start = true;
                         span->gi->is_grid_auto_placed = false;
                         log_debug("[CSS] grid-column-start: named line '%s'", ki->name);
@@ -10865,7 +10893,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
                 const char* n = value->data.custom_property.name;
                 if (n[0] != '[' && n[0] != ']' && strcmp(n, "span") != 0) {
-                    span->gi->grid_column_start_name = mem_strdup(n, MEM_CAT_LAYOUT);
+                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_column_start_name, n);
                     span->gi->has_explicit_grid_column_start = true;
                     span->gi->is_grid_auto_placed = false;
                     log_debug("[CSS] grid-column-start: named line '%s'", n);
@@ -10889,7 +10917,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const CssEnumInfo* ki = css_enum_info(value->data.keyword);
                 if (ki && ki->name) {
-                    span->gi->grid_column_end_name = mem_strdup(ki->name, MEM_CAT_LAYOUT);
+                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_column_end_name, ki->name);
                     span->gi->has_explicit_grid_column_end = true;
                     span->gi->is_grid_auto_placed = false;
                     log_debug("[CSS] grid-column-end: named line '%s'", ki->name);
@@ -10897,7 +10925,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
                 const char* n = value->data.custom_property.name;
                 if (n[0] != '[' && n[0] != ']' && strcmp(n, "span") != 0) {
-                    span->gi->grid_column_end_name = mem_strdup(n, MEM_CAT_LAYOUT);
+                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_column_end_name, n);
                     span->gi->has_explicit_grid_column_end = true;
                     span->gi->is_grid_auto_placed = false;
                     log_debug("[CSS] grid-column-end: named line '%s'", n);
@@ -10945,7 +10973,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const CssEnumInfo* ki = css_enum_info(value->data.keyword);
                 if (ki && ki->name) {
-                    span->gi->grid_row_start_name = mem_strdup(ki->name, MEM_CAT_LAYOUT);
+                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_row_start_name, ki->name);
                     span->gi->has_explicit_grid_row_start = true;
                     span->gi->is_grid_auto_placed = false;
                     log_debug("[CSS] grid-row-start: named line '%s'", ki->name);
@@ -10953,7 +10981,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
                 const char* n = value->data.custom_property.name;
                 if (n[0] != '[' && n[0] != ']' && strcmp(n, "span") != 0) {
-                    span->gi->grid_row_start_name = mem_strdup(n, MEM_CAT_LAYOUT);
+                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_row_start_name, n);
                     span->gi->has_explicit_grid_row_start = true;
                     span->gi->is_grid_auto_placed = false;
                     log_debug("[CSS] grid-row-start: named line '%s'", n);
@@ -10977,7 +11005,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const CssEnumInfo* ki = css_enum_info(value->data.keyword);
                 if (ki && ki->name) {
-                    span->gi->grid_row_end_name = mem_strdup(ki->name, MEM_CAT_LAYOUT);
+                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_row_end_name, ki->name);
                     span->gi->has_explicit_grid_row_end = true;
                     span->gi->is_grid_auto_placed = false;
                     log_debug("[CSS] grid-row-end: named line '%s'", ki->name);
@@ -10985,7 +11013,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
                 const char* n = value->data.custom_property.name;
                 if (n[0] != '[' && n[0] != ']' && strcmp(n, "span") != 0) {
-                    span->gi->grid_row_end_name = mem_strdup(n, MEM_CAT_LAYOUT);
+                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_row_end_name, n);
                     span->gi->has_explicit_grid_row_end = true;
                     span->gi->is_grid_auto_placed = false;
                     log_debug("[CSS] grid-row-end: named line '%s'", n);
@@ -11118,10 +11146,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 } else if (strcmp(info->name, "auto") != 0) {
                                     // CSS keyword used as a named line reference (e.g. "start", "end")
                                     if (value_idx == 0) {
-                                        span->gi->grid_column_start_name = mem_strdup(info->name, MEM_CAT_LAYOUT);
+                                        replace_view_pool_layout_const_string(lycon, &span->gi->grid_column_start_name, info->name);
                                         span->gi->has_explicit_grid_column_start = true;
                                     } else {
-                                        span->gi->grid_column_end_name = mem_strdup(info->name, MEM_CAT_LAYOUT);
+                                        replace_view_pool_layout_const_string(lycon, &span->gi->grid_column_end_name, info->name);
                                         span->gi->has_explicit_grid_column_end = true;
                                     }
                                 }
@@ -11137,10 +11165,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             } else if (name && name[0] != '[' && name[0] != ']') {
                                 // Named line reference (e.g. grid-column: header-start / content-end)
                                 if (value_idx == 0) {
-                                    span->gi->grid_column_start_name = mem_strdup(name, MEM_CAT_LAYOUT);
+                                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_column_start_name, name);
                                     span->gi->has_explicit_grid_column_start = true;
                                 } else {
-                                    span->gi->grid_column_end_name = mem_strdup(name, MEM_CAT_LAYOUT);
+                                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_column_end_name, name);
                                     span->gi->has_explicit_grid_column_end = true;
                                 }
                             }
@@ -11267,10 +11295,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 } else if (strcmp(info->name, "auto") != 0) {
                                     // CSS keyword used as a named line reference (e.g. "top", "center")
                                     if (value_idx == 0) {
-                                        span->gi->grid_row_start_name = mem_strdup(info->name, MEM_CAT_LAYOUT);
+                                        replace_view_pool_layout_const_string(lycon, &span->gi->grid_row_start_name, info->name);
                                         span->gi->has_explicit_grid_row_start = true;
                                     } else {
-                                        span->gi->grid_row_end_name = mem_strdup(info->name, MEM_CAT_LAYOUT);
+                                        replace_view_pool_layout_const_string(lycon, &span->gi->grid_row_end_name, info->name);
                                         span->gi->has_explicit_grid_row_end = true;
                                     }
                                 }
@@ -11286,10 +11314,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             } else if (name && name[0] != '[' && name[0] != ']') {
                                 // Named line reference (e.g. grid-row: header-start / content-end)
                                 if (value_idx == 0) {
-                                    span->gi->grid_row_start_name = mem_strdup(name, MEM_CAT_LAYOUT);
+                                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_row_start_name, name);
                                     span->gi->has_explicit_grid_row_start = true;
                                 } else {
-                                    span->gi->grid_row_end_name = mem_strdup(name, MEM_CAT_LAYOUT);
+                                    replace_view_pool_layout_const_string(lycon, &span->gi->grid_row_end_name, name);
                                     span->gi->has_explicit_grid_row_end = true;
                                 }
                             }

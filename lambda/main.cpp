@@ -305,16 +305,27 @@ extern "C" {
 
 static bool g_lambda_main_memtrack_shutdown_done = false;
 static bool g_lambda_main_mempool_cleanup_done = false;
+static bool g_lambda_main_pre_memtrack_cleanup_done = false;
 
 extern "C" void log_mem_stage(const char* stage);
+
+static void lambda_main_pre_memtrack_cleanup_once(void) {
+    if (g_lambda_main_pre_memtrack_cleanup_done) {
+        return;
+    }
+    g_lambda_main_pre_memtrack_cleanup_done = true;
+    // JS helper globals outlive Runtime teardown, so release them before
+    // emitting live-allocation telemetry or entering memtrack shutdown.
+    js_args_stack_cleanup();
+    js_array_runtime_items_cleanup_all();
+}
 
 static size_t lambda_main_memtrack_shutdown_once(void) {
     if (g_lambda_main_memtrack_shutdown_done) {
         return 0;
     }
     g_lambda_main_memtrack_shutdown_done = true;
-    js_args_stack_cleanup();
-    js_array_runtime_items_cleanup_all();
+    lambda_main_pre_memtrack_cleanup_once();
     return memtrack_shutdown();
 }
 
@@ -339,6 +350,7 @@ static int lambda_main_finish(int ret_code) {
     // and frees its global pool — otherwise those outlive the process and show
     // up as memtrack leaks at shutdown.
     InputManager::destroy_global();
+    lambda_main_pre_memtrack_cleanup_once();
     log_finish();
     MemtrackStats mem_stats = {};
     memtrack_get_stats(&mem_stats);

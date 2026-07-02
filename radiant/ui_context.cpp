@@ -223,6 +223,28 @@ static void destroy_form_props_in_dom(DomNode* node) {
     form_control_release_prop(elem);
 }
 
+static void destroy_dom_owned_embed_images(DomNode* node) {
+    if (!node || !node->is_element()) return;
+    DomElement* elem = node->as_element();
+    DomNode* child = elem->first_child;
+    while (child) {
+        destroy_dom_owned_embed_images(child);
+        child = child->next_sibling;
+    }
+
+    if (!elem->embed) return;
+    // Async network resource loading can attach ImageSurface values directly to
+    // DOM embeds after layout, bypassing the UiContext image cache owner.
+    if (elem->embed->img && !elem->embed->img->url) {
+        image_surface_destroy(elem->embed->img);
+        elem->embed->img = nullptr;
+    }
+    if (elem->embed->poster && !elem->embed->poster->url) {
+        image_surface_destroy(elem->embed->poster);
+        elem->embed->poster = nullptr;
+    }
+}
+
 void free_document(DomDocument* doc) {
     if (!doc) return;
 
@@ -237,6 +259,8 @@ void free_document(DomDocument* doc) {
     script_runner_cleanup_js_state(doc);
 
     radiant_document_destroy_state(doc);
+
+    destroy_dom_owned_embed_images((DomNode*)doc->root);
 
     if (!doc->view_tree) {
         destroy_form_props_in_dom((DomNode*)doc->root);

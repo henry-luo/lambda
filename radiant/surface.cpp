@@ -586,7 +586,30 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         log_debug("[BG-IMAGE] Loaded data URI image: %dx%d", surface->width, surface->height);
         return surface;
     }
-    Url* abs_url = parse_url(uicon->document->url, img_url);
+    const char* resolved_img_url = img_url;
+    char* local_file_url = nullptr;
+    if (file_exists(img_url)) {
+        char abs_path[4096];
+        if (img_url[0] == '/') {
+            str_copy(abs_path, sizeof(abs_path), img_url, strlen(img_url));
+        } else {
+            char cwd_buf[4096];
+            if (getcwd(cwd_buf, sizeof(cwd_buf))) {
+                str_fmt(abs_path, sizeof(abs_path), "%s/%s", cwd_buf, img_url);
+            } else {
+                abs_path[0] = '\0';
+            }
+        }
+        if (abs_path[0]) {
+            // Cached network resources are local files even when the document
+            // base URL is HTTP, so resolve them as file URLs.
+            local_file_url = url_from_local_path(abs_path);
+            if (local_file_url) resolved_img_url = local_file_url;
+        }
+    }
+
+    Url* abs_url = parse_url(uicon->document->url, resolved_img_url);
+    if (local_file_url) mem_free(local_file_url);
     if (!abs_url) {
         log_error("Failed to parse URL: %s", img_url);
         return NULL;
@@ -667,6 +690,17 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         log_debug("[image] HTTP image format detection: is_svg=%s", is_svg ? "yes" : "no");
     } else {
         is_svg = (slen > 4 && strcmp(file_path + slen - 4, ".svg") == 0);
+        if (!is_svg) {
+            FILE* svg_probe = fopen(file_path, "rb");
+            if (svg_probe) {
+                unsigned char probe_buf[512];
+                size_t probe_size = fread(probe_buf, 1, sizeof(probe_buf), svg_probe);
+                fclose(svg_probe);
+                // Network cache files do not preserve extensions, so SVG
+                // detection must fall back to content sniffing for local paths.
+                is_svg = is_svg_content(probe_buf, probe_size);
+            }
+        }
     }
 
     if (is_svg) {

@@ -1058,13 +1058,16 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
 
         ui_context.document = doc;
 
-        // Initialize network support for HTTP-loaded documents
-        // This enables async resource loading (CSS, images, fonts) during rendering.
-        if (doc->html_root && file_to_load &&
-            (strncmp(file_to_load, "http://", 7) == 0 || strncmp(file_to_load, "https://", 8) == 0)) {
+        // Initialize network support for HTTP-loaded documents.
+        // Top-level URL views may be staged through ./temp after content-type
+        // probing, so use the parsed document URL instead of the local path.
+        bool doc_url_is_http = doc->url &&
+            (doc->url->scheme == URL_SCHEME_HTTP || doc->url->scheme == URL_SCHEME_HTTPS);
+        if (doc->html_root && doc_url_is_http) {
             network_downloader_init_shared();
             file_cache = enhanced_cache_create("./temp/cache", 100 * 1024 * 1024, 10000);
             if (radiant_init_network_support(doc, NULL, file_cache) == 0) {
+                resource_manager_set_ui_context(doc->resource_manager, &ui_context);
                 if (!headless && doc->resource_manager) {
                     resource_manager_set_wake_callback(doc->resource_manager,
                                                        network_wake_glfw, NULL);
@@ -1109,6 +1112,17 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             double wait_time = glfwGetTime() - wait_start;
             if (wait_time > 0.01) {
                 log_info("view: waited %.2fs for network resources before layout", wait_time);
+            }
+            int total_resources = 0;
+            int completed_resources = 0;
+            int failed_resources = 0;
+            resource_manager_get_stats(doc->resource_manager, &total_resources,
+                                       &completed_resources, &failed_resources);
+            log_info("view: network resource stats total=%d completed=%d failed=%d",
+                     total_resources, completed_resources, failed_resources);
+            if (failed_resources > 0) {
+                log_error("view: network resource failures detected: %d of %d",
+                          failed_resources, total_resources);
             }
         }
 
