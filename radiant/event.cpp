@@ -3933,6 +3933,37 @@ static void dom_js_mutation_log_records(DomDocument* doc) {
 #endif
 }
 
+static void dom_js_record_reconcile(DomDocument* doc,
+                                    DomReconcileMode mode,
+                                    const char* reason,
+                                    int mutations,
+                                    int records,
+                                    int overflow) {
+    if (!doc) return;
+    doc->last_dom_reconcile_mode = mode;
+    doc->last_dom_reconcile_reason = reason ? reason : "none";
+    doc->last_dom_reconcile_mutations = mutations;
+    doc->last_dom_reconcile_records = records;
+    doc->last_dom_reconcile_record_overflow = overflow;
+
+    DocState* state = (DocState*)doc->state;
+    if (!state || !event_state_log_enabled(state->active_event_log)) return;
+
+    char buf[1024];
+    JsonWriter w;
+    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
+                                 "dom.reconcile", state->active_cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "mode", dom_reconcile_mode_name(mode));
+        jw_kv_str(&w, "reason", doc->last_dom_reconcile_reason);
+        jw_kv_int(&w, "mutations", mutations);
+        jw_kv_int(&w, "records", records);
+        jw_kv_int(&w, "record_overflow", overflow);
+    jw_obj_end(&w);
+    event_state_log_finish_record(state->active_event_log, &w);
+}
+
 static void dom_js_clear_layout_dirty_recursive(DomNode* node) {
     if (!node) return;
     node->layout_dirty = false;
@@ -4194,14 +4225,17 @@ static bool post_html_handler_incremental_rebuild(
         EventContext* evcon, DomDocument* doc,
         std::chrono::high_resolution_clock::time_point t_start,
         std::chrono::high_resolution_clock::time_point t0,
-        int mutations) {
+        int mutations,
+        const char** fallback_reason_out) {
     using namespace std::chrono;
 
     const char* reason = nullptr;
     if (!dom_js_mutation_can_incremental(doc, &reason)) {
         log_info("html handler incremental: fallback=%s", reason ? reason : "unknown");
+        if (fallback_reason_out) *fallback_reason_out = reason ? reason : "unknown";
         return false;
     }
+    if (fallback_reason_out) *fallback_reason_out = "eligible";
 
     Pool* pool = doc->pool;
     SelectorMatcher* matcher = selector_matcher_create(pool);
@@ -4293,6 +4327,11 @@ static bool post_html_handler_incremental_rebuild(
              selective_dirty ? "dirty-rects" : "full",
              dirty_rect_count,
              repaint_reason ? repaint_reason : "none");
+    // Tests read this structured result; timing logs alone cannot distinguish
+    // incremental mutation handling from a broad fallback path.
+    dom_js_record_reconcile(doc, DOM_RECONCILE_INCREMENTAL, "eligible",
+                            mutations, doc->js_mutation_record_count,
+                            doc->js_mutation_record_overflow);
     return true;
 }
 
@@ -4315,7 +4354,9 @@ static void post_html_handler_rebuild(EventContext* evcon,
     auto t0 = high_resolution_clock::now();
     dom_js_mutation_log_records(doc);
 
-    if (post_html_handler_incremental_rebuild(evcon, doc, t_start, t0, mutations)) {
+    const char* fallback_reason = "none";
+    if (post_html_handler_incremental_rebuild(evcon, doc, t_start, t0,
+                                              mutations, &fallback_reason)) {
         dom_js_mutation_reset_records(doc);
         return;
     }
@@ -4399,6 +4440,12 @@ static void post_html_handler_rebuild(EventContext* evcon,
              duration<double, std::milli>(t3 - t2).count(),
              duration<double, std::milli>(t3 - t_start).count(),
              mutations);
+    // Full fallback is still a DOM-preserving broad reconcile; keep the reason
+    // test-visible so state-retention fixtures do not have to scrape log.txt.
+    dom_js_record_reconcile(doc, DOM_RECONCILE_FULL,
+                            fallback_reason ? fallback_reason : "unknown",
+                            mutations, doc->js_mutation_record_count,
+                            doc->js_mutation_record_overflow);
 
     // Reset mutation count for next event
     dom_js_mutation_reset_records(doc);

@@ -1719,6 +1719,30 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             return NULL;
         }
     }
+    else if (strcmp(type_str, "assert_reconcile_mode") == 0) {
+        ev->type = SIM_EVENT_ASSERT_RECONCILE_MODE;
+        const char* mode = reader.get("mode").cstring();
+        if (mode) ev->expected_reconcile_mode = mem_strdup(mode, MEM_CAT_LAYOUT);
+        const char* reason = reader.get("reason").cstring();
+        if (reason) ev->expected_reconcile_reason = mem_strdup(reason, MEM_CAT_LAYOUT);
+        if (reader.has("mutations")) {
+            ev->has_expected_reconcile_mutations = true;
+            ev->expected_reconcile_mutations = reader.get("mutations").asInt32();
+        }
+        if (reader.has("records")) {
+            ev->has_expected_reconcile_records = true;
+            ev->expected_reconcile_records = reader.get("records").asInt32();
+        }
+        if (reader.has("record_overflow")) {
+            ev->has_expected_reconcile_record_overflow = true;
+            ev->expected_reconcile_record_overflow = reader.get("record_overflow").asInt32();
+        }
+        if (!ev->expected_reconcile_mode) {
+            log_error("event_sim: assert_reconcile_mode requires 'mode' field");
+            mem_free(ev);
+            return NULL;
+        }
+    }
     else if (strcmp(type_str, "assert_editing_event") == 0) {
         ev->type = SIM_EVENT_ASSERT_EDITING_EVENT;
         const char* event_type = reader.get("event").cstring();
@@ -2251,6 +2275,8 @@ void event_sim_free(EventSimContext* ctx) {
             if (ev->editing_owned_by) mem_free(ev->editing_owned_by);
             if (ev->replay_event_name) mem_free(ev->replay_event_name);
             if (ev->state_dump_reference) mem_free(ev->state_dump_reference);
+            if (ev->expected_reconcile_mode) mem_free(ev->expected_reconcile_mode);
+            if (ev->expected_reconcile_reason) mem_free(ev->expected_reconcile_reason);
             mem_free(ev);
         }
         arraylist_free(ctx->events);
@@ -5104,6 +5130,60 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 
         case SIM_EVENT_ASSERT_EVENT_LOG: {
             assert_event_log_impl(ctx, uicon, ev);
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_RECONCILE_MODE: {
+            DomDocument* doc = uicon ? uicon->document : NULL;
+            bool passed = true;
+            if (!doc) {
+                log_error("event_sim: assert_reconcile_mode FAIL - no document");
+                passed = false;
+            } else {
+                const char* actual_mode = dom_reconcile_mode_name(doc->last_dom_reconcile_mode);
+                const char* actual_reason = doc->last_dom_reconcile_reason
+                    ? doc->last_dom_reconcile_reason : "none";
+                if (strcmp(actual_mode, ev->expected_reconcile_mode) != 0) {
+                    log_error("event_sim: assert_reconcile_mode FAIL - mode expected '%s', got '%s'",
+                              ev->expected_reconcile_mode, actual_mode);
+                    passed = false;
+                }
+                if (ev->expected_reconcile_reason &&
+                    strcmp(actual_reason, ev->expected_reconcile_reason) != 0) {
+                    log_error("event_sim: assert_reconcile_mode FAIL - reason expected '%s', got '%s'",
+                              ev->expected_reconcile_reason, actual_reason);
+                    passed = false;
+                }
+                if (ev->has_expected_reconcile_mutations &&
+                    doc->last_dom_reconcile_mutations != ev->expected_reconcile_mutations) {
+                    log_error("event_sim: assert_reconcile_mode FAIL - mutations expected %d, got %d",
+                              ev->expected_reconcile_mutations,
+                              doc->last_dom_reconcile_mutations);
+                    passed = false;
+                }
+                if (ev->has_expected_reconcile_records &&
+                    doc->last_dom_reconcile_records != ev->expected_reconcile_records) {
+                    log_error("event_sim: assert_reconcile_mode FAIL - records expected %d, got %d",
+                              ev->expected_reconcile_records,
+                              doc->last_dom_reconcile_records);
+                    passed = false;
+                }
+                if (ev->has_expected_reconcile_record_overflow &&
+                    doc->last_dom_reconcile_record_overflow != ev->expected_reconcile_record_overflow) {
+                    log_error("event_sim: assert_reconcile_mode FAIL - record_overflow expected %d, got %d",
+                              ev->expected_reconcile_record_overflow,
+                              doc->last_dom_reconcile_record_overflow);
+                    passed = false;
+                }
+            }
+            if (passed) {
+                log_info("event_sim: assert_reconcile_mode PASS - mode=%s reason=%s",
+                         ev->expected_reconcile_mode,
+                         ev->expected_reconcile_reason ? ev->expected_reconcile_reason : "(any)");
+                ctx->pass_count++;
+            } else {
+                ctx->fail_count++;
+            }
             break;
         }
 

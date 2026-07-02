@@ -35,6 +35,7 @@
  *     {"type": "assert_focus", "target": {"selector": "input#email"}},
  *     {"type": "assert_state", "target": {"selector": "button"}, "state": ":hover", "value": true},
  *     {"type": "assert_state_store", "target": {"selector": "#pane"}, "view_state": true, "kind": "scroll"},
+ *     {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "eligible"},
  *     {"type": "assert_state_dump", "reference": "test/ui/state/form_after_paste.mark"},
  *     {"type": "assert_event_log", "contains": "\"type\":\"editing.history\"", "min": 1},
  *     {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "insertText", "min": 1},
@@ -137,6 +138,7 @@ enum SimEventType {
     SIM_EVENT_ASSERT_EDITING_VALUE, // verify live form value / contenteditable text
     SIM_EVENT_ASSERT_PIXEL,      // verify a rendered pixel's color channel ranges
     SIM_EVENT_ASSERT_STATE_DUMP, // compare in-memory Mark state dump against fixture
+    SIM_EVENT_ASSERT_RECONCILE_MODE, // verify last DOM-mutation reconcile mode/reason
     SIM_EVENT_ASSERT_SNAPSHOT,   // pixel-compare rendered surface against browser reference PNG
     // Mutation helpers
     SIM_EVENT_SCROLL_TO,         // scroll to absolute position or element
@@ -312,6 +314,15 @@ struct SimEvent {
     char* snapshot_actual_path;  // optional: save actual image for debugging
     // assert_state_dump fields
     char* state_dump_reference;  // path to reference Mark dump
+    // assert_reconcile_mode fields
+    char* expected_reconcile_mode;
+    char* expected_reconcile_reason;
+    bool has_expected_reconcile_mutations;
+    bool has_expected_reconcile_records;
+    bool has_expected_reconcile_record_overflow;
+    int expected_reconcile_mutations;
+    int expected_reconcile_records;
+    int expected_reconcile_record_overflow;
     // assert_pixel fields. Values < 0 mean "do not check this bound".
     int pixel_min_r, pixel_min_g, pixel_min_b, pixel_min_a;
     int pixel_max_r, pixel_max_g, pixel_max_b, pixel_max_a;

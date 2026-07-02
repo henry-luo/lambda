@@ -68,6 +68,27 @@ typedef struct DomJsMutationRecord {
 
 #define DOM_JS_MUTATION_RECORD_CAP 64
 
+typedef enum DomReconcileMode {
+    DOM_RECONCILE_NONE = 0,
+    DOM_RECONCILE_INCREMENTAL = 1,
+    DOM_RECONCILE_FULL = 2,
+    DOM_RECONCILE_RETAINED_FULL_LAYOUT = 3,
+    DOM_RECONCILE_DESTRUCTIVE_REBUILD = 4,
+    DOM_RECONCILE_DOCUMENT_REBUILD = 5
+} DomReconcileMode;
+
+static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {
+    switch (mode) {
+        case DOM_RECONCILE_INCREMENTAL: return "incremental";
+        case DOM_RECONCILE_FULL: return "full";
+        case DOM_RECONCILE_RETAINED_FULL_LAYOUT: return "retained_full_layout";
+        case DOM_RECONCILE_DESTRUCTIVE_REBUILD: return "destructive_rebuild";
+        case DOM_RECONCILE_DOCUMENT_REBUILD: return "document_rebuild";
+        case DOM_RECONCILE_NONE:
+        default: return "none";
+    }
+}
+
 /**
  * DomDocument - Root container for DOM tree
  * Manages memory (arena) and Lambda integration (Input*)
@@ -146,6 +167,15 @@ struct DomDocument {
     int js_mutation_record_overflow;
     DomJsMutationRecord js_mutation_records[DOM_JS_MUTATION_RECORD_CAP];
 
+    // Last DOM reconcile result. Tests assert this instead of parsing log.txt,
+    // so fallback/state-retention coverage can distinguish broad reflow from
+    // destructive document rebuild.
+    DomReconcileMode last_dom_reconcile_mode;
+    const char* last_dom_reconcile_reason;
+    int last_dom_reconcile_mutations;
+    int last_dom_reconcile_records;
+    int last_dom_reconcile_record_overflow;
+
     // JS/meta requested document navigation. The loader follows this after
     // load-time scripts and refresh metadata have been processed.
     char* pending_navigation_url;
@@ -196,6 +226,11 @@ struct DomDocument {
                     js_mutation_sequence(0), js_mutation_kind_mask(0),
                     js_mutation_record_count(0), js_mutation_record_overflow(0),
                     js_mutation_records{},
+                    last_dom_reconcile_mode(DOM_RECONCILE_NONE),
+                    last_dom_reconcile_reason("none"),
+                    last_dom_reconcile_mutations(0),
+                    last_dom_reconcile_records(0),
+                    last_dom_reconcile_record_overflow(0),
                     pending_navigation_url(nullptr),
                     keyframe_registry(nullptr),
                     js_mir_ctx(nullptr), js_preamble_state(nullptr),
