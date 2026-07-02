@@ -4778,18 +4778,6 @@ static bool radiant_dispatch_drag_event(EventContext* evcon, View* target,
     return prevented;
 }
 
-// JS-DnD overlay state for the single active drag gesture (Radiant tracks one
-// DragDropState at a time). `drop_allowed` mirrors HTML5: a drop fires only
-// when the most recent dragover on the target called preventDefault().
-//
-// This JS-facing lifecycle carries HTML5 DataTransfer/drop-allowed state while
-// native DragDropState remains the StateStore-owned gesture source. Script
-// editors may mutate the DOM inside dragover; fallback relayout must retain the
-// native drag when the source DOM node is still connected.
-static bool  g_jsdnd_active = false;
-static bool  g_jsdnd_drop_allowed = false;
-static View* g_jsdnd_source = nullptr;  // drag source as a DOM element (survives relayout)
-
 /**
  * §7 unification (U-5): dispatch a "wheel" event via the JS EventTarget
  * pipeline. Returns true if default action (native scroll) should be
@@ -6527,11 +6515,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     dispatch_lambda_handler(&evcon, dd->source_view, "dragstart");
                     // Stage 4C: also fire a real JS DragEvent so script editors
                     // (addEventListener) get a DataTransfer. The session is
-                    // opened inside the dispatch (needs the JS ctx). Coord space
-                    // matches the JS mouse events.
-                    g_jsdnd_active = true;
-                    g_jsdnd_drop_allowed = false;
-                    g_jsdnd_source = dd->source_view;
+                    // opened inside the dispatch (needs the JS ctx) on "dragstart".
+                    // Coord space matches the JS mouse events. The native
+                    // DragDropState (source_view is a DOM element; active/pending
+                    // flags) now survives handler-driven DOM mutation via
+                    // fallback retention, so JS DnD rides on it directly.
                     radiant_dispatch_drag_event(&evcon, dd->source_view, "dragstart",
                                                 (int)dd->current_x, (int)dd->current_y);
                 }
@@ -6598,18 +6586,20 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // dispatch "dragmove" to source (throttled by frame rate inherently)
                 dispatch_lambda_handler(&evcon, dd->source_view, "dragmove");
 
+                // Stage 4C: JS dragover to the element under the cursor,
+                // independent of the dropzone-based native drop_target. The
+                // handler may mutate the DOM (drop-line) → fallback relayout,
+                // but dd->active is retained so this keeps firing each move.
+                if (evcon.target) {
+                    radiant_dispatch_drag_event(&evcon,
+                        static_cast<View*>(evcon.target), "dragover",
+                        (int)motion->x, (int)motion->y);
+                }
+
                 // set cursor to grabbing
                 evcon.new_cursor = CSS_VALUE_POINTER;
                 evcon.need_repaint = true;
             }
-        }
-
-        // Stage 4C: JS dragover to the element under the cursor. Its
-        // preventDefault() decides whether a drop is allowed on release.
-        if (g_jsdnd_active && evcon.target) {
-            g_jsdnd_drop_allowed = radiant_dispatch_drag_event(&evcon,
-                static_cast<View*>(evcon.target), "dragover",
-                (int)motion->x, (int)motion->y);
         }
 
         // Handle text selection drag (supports cross-view selection)
@@ -7418,28 +7408,28 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (up_prevented) evcon.default_prevented = true;
             }
 
-            // Stage 4C: JS drop + dragend for script editors. Fire a final
-            // dragover at the release point; a drop follows only if that
-            // dragover (or the previous one) was canceled — HTML5 gates drop on
-            // preventDefault. Then dragend to the source DOM element.
-            if (g_jsdnd_active) {
+            // Stage 4C: JS drop + dragend for script editors, gated on the
+            // (now retention-safe) native drag. Fire a final dragover at the
+            // release point; a drop follows only if that last dragover was
+            // canceled — HTML5 gates drop on preventDefault. Then dragend to the
+            // source DOM element (survives any fallback relayout).
+            if (state && state->drag_drop && state->drag_drop->active) {
+                View* drag_src = state->drag_drop->source_view;
                 if (evcon.target) {
                     bool ov = radiant_dispatch_drag_event(&evcon,
                         static_cast<View*>(evcon.target), "dragover",
                         (int)btn_event->x, (int)btn_event->y);
-                    if (ov || g_jsdnd_drop_allowed) {
+                    if (ov) {
                         radiant_dispatch_drag_event(&evcon,
                             static_cast<View*>(evcon.target), "drop",
                             (int)btn_event->x, (int)btn_event->y);
                     }
                 }
-                if (g_jsdnd_source) {
-                    radiant_dispatch_drag_event(&evcon, g_jsdnd_source,
+                if (drag_src) {
+                    radiant_dispatch_drag_event(&evcon, drag_src,
                         "dragend", (int)btn_event->x, (int)btn_event->y);
                 }
                 js_drag_session_end();
-                g_jsdnd_active = false;
-                g_jsdnd_source = nullptr;
             }
 
             // Handle drag-and-drop completion first

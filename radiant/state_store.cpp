@@ -1167,6 +1167,13 @@ extern "C" void state_store_refresh_editing_selection_shadow(DocState* state) {
     if (!state) return;
 
     EditingSelection* shadow = &state->sel;
+    if (shadow->kind == EDIT_SEL_TEXT_CONTROL && shadow->control &&
+        tc_is_text_control(shadow->control) &&
+        focus_get(state) == static_cast<View*>(shadow->control)) {
+        // unrelated DOM mutations resync document ranges; focused text controls
+        // keep their separate selection model until focus or form selection moves.
+        return;
+    }
     memset(shadow, 0, sizeof(*shadow));
     shadow->kind = EDIT_SEL_NONE;
     shadow->direction = DOM_SEL_DIR_NONE;
@@ -1837,8 +1844,10 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
         FormControlProp* form = control->form;
         if (!form) return;
 
-        uint32_t start_u16 = form->selection_start;
-        uint32_t end_u16 = form->selection_end;
+        // fallback relayout may restore stale form fields; StateStore remains
+        // authoritative for the active text-control selection.
+        uint32_t start_u16 = current->start_u16;
+        uint32_t end_u16 = current->end_u16;
         if (start_u16 > form->current_value_u16_len) {
             start_u16 = form->current_value_u16_len;
         }
@@ -1846,8 +1855,8 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
             end_u16 = form->current_value_u16_len;
         }
         if (start_u16 > end_u16) start_u16 = end_u16;
-        uint8_t direction = form->selection_direction & 3;
-        if (direction > 2) direction = 0;
+        uint8_t direction = start_u16 == end_u16 ? 0 :
+            (current->direction == DOM_SEL_DIR_BACKWARD ? 2 : 1);
 
         DomSelectionDirection editing_direction =
             editing_direction_from_text_control(start_u16, end_u16, direction);
@@ -4462,8 +4471,20 @@ bool form_control_restore_text_control_state(DocState* state, View* view) {
         form->current_value_u16_len = tc_utf8_to_utf16_length(
             form->current_value, form->current_value_len);
     }
-    form->selection_start = view_state->data.form.selection_start;
-    form->selection_end = view_state->data.form.selection_end;
+    uint32_t restore_start = view_state->data.form.selection_start;
+    uint32_t restore_end = view_state->data.form.selection_end;
+    uint8_t restore_direction = view_state->data.form.selection_direction;
+    if (state && state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
+        state->sel.control == elem) {
+        // fallback relayout can run while the replacement caret is newer than
+        // the cached ViewState; keep StateStore selection authoritative.
+        restore_start = state->sel.start_u16;
+        restore_end = state->sel.end_u16;
+        restore_direction = restore_start == restore_end ? 0 :
+            (state->sel.direction == DOM_SEL_DIR_BACKWARD ? 2 : 1);
+    }
+    form->selection_start = restore_start;
+    form->selection_end = restore_end;
     if (form->selection_start > form->current_value_u16_len) {
         form->selection_start = form->current_value_u16_len;
     }
@@ -4473,7 +4494,7 @@ bool form_control_restore_text_control_state(DocState* state, View* view) {
     if (form->selection_end < form->selection_start) {
         form->selection_end = form->selection_start;
     }
-    form->selection_direction = view_state->data.form.selection_direction;
+    form->selection_direction = restore_direction;
     if (form->selection_direction > 2) form->selection_direction = 0;
     form->tc_initialized = 1;
     form->state_ref = state;

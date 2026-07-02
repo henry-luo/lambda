@@ -322,6 +322,9 @@ bool te_replace_byte_range_no_events(DomElement* elem, DocState* state, void* ta
     uint32_t new_caret = start + repl_len;
     if (selection_has_projection(state)) state_store_legacy_selection_clear(state);
     state_store_legacy_caret_set(state, (View*)target, (int)new_caret);
+    // tc_set_value() temporarily collapses text controls at value-end; publish
+    // the replacement caret afterward so fallback reflow keeps the live cursor.
+    tc_sync_legacy_to_form(elem, state);
 
     // tc_set_value already pushed an undo entry; just notify selection
     // observers and we're done.
