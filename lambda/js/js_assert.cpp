@@ -1515,6 +1515,13 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
         return true; // any rejection is fine
     }
 
+    Item same_expected = js_strict_equal(thrown, error_expected);
+    if (get_type_id(same_expected) == LMD_TYPE_BOOL && it2b(same_expected)) {
+        // Error instances passed as the expected value match by identity; otherwise
+        // their enumerable fields are mistaken for an object validation pattern.
+        return true;
+    }
+
     if (exp_type == LMD_TYPE_FUNC) {
         // Error class: check instanceof only for constructor-like functions.
         Item proto = js_property_get(error_expected, assert_make_string("prototype"));

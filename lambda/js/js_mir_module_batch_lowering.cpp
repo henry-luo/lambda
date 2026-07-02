@@ -1714,8 +1714,8 @@ void jm_resolve_module_path(const char* base_file, const char* specifier, int sp
             "worker_threads", "cluster", "vm", "v8", "tty", "perf_hooks",
             "diagnostics_channel", "async_hooks", "domain",
             "internal/util", "internal/util/inspect", "internal/async_hooks", "internal/async_context_frame",
-            "internal/test/binding", "internal/streams/add-abort-signal",
-            "internal/streams/state", NULL
+            "internal/test/binding", "internal/js_stream_socket", "internal/streams/add-abort-signal",
+            "internal/streams/end-of-stream", "internal/streams/state", NULL
         };
         bool is_builtin = has_node_prefix;
         if (!is_builtin) {

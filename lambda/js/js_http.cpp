@@ -1287,7 +1287,6 @@ static Item http_res_write_ex(Item self, Item chunk_item, Item encoding_item, It
         callback_item = encoding_item;
         encoding_item = make_js_undefined();
     }
-    bool had_explicit_write_head = http_response_bool_prop(self, "__explicit_write_head_called__");
     bool reject_body = http_response_bool_prop(self, "__reject_nonstandard_body_writes__");
     int status = http_response_int_prop(self, "statusCode");
     bool head_request = false;
@@ -1308,9 +1307,9 @@ static Item http_res_write_ex(Item self, Item chunk_item, Item encoding_item, It
     // response bodies are buffered until end(), so write callbacks must be
     // acknowledged at the write point or nested write/end sequences stall.
     http_call_write_callback(callback_item);
-    if (had_explicit_write_head &&
-        !http_response_bool_prop(self, "__ending__") &&
-        !http_response_bool_prop(self, "__partial_sent__")) {
+    if (!http_response_bool_prop(self, "__ending__")) {
+        // ServerResponse.write() must commit implicit headers immediately;
+        // buffering until end() leaves streaming clients waiting forever.
         http_response_flush_partial(self);
     }
     return (Item){.item = b2it(true)};
@@ -1340,6 +1339,51 @@ static void http_response_flush(Item self) {
 
     Item sent = js_property_get(self, make_string_item("__sent__"));
     if (get_type_id(sent) == LMD_TYPE_BOOL && it2b(sent)) return; // already sent
+    if (http_response_bool_prop(self, "__partial_sent__")) {
+        if (conn->open_response_count > 0) conn->open_response_count--;
+        if (conn->timeout_response.item == self.item) {
+            conn->timeout_response = make_js_undefined();
+            conn->response_timeout_callback = make_js_undefined();
+        }
+        if (conn->current_response.item == self.item) {
+            conn->current_response = make_js_undefined();
+        }
+
+        Item body = js_property_get(self, make_string_item("__body__"));
+        const char* body_data = "";
+        int body_len = 0;
+        if (get_type_id(body) == LMD_TYPE_STRING) {
+            String* bs = it2s(body);
+            body_data = bs->chars;
+            body_len = (int)bs->len;
+        }
+        int sent_len = http_response_int_prop(self, "__partial_body_len__");
+        if (sent_len < 0) sent_len = 0;
+        if (sent_len > body_len) sent_len = body_len;
+        int remaining_len = body_len - sent_len;
+
+        // Partial responses have already committed headers without a known
+        // final length, so connection close is the body delimiter at end().
+        if (remaining_len > 0) {
+            http_conn_write_bytes(conn, make_string_item(body_data + sent_len, remaining_len), true);
+            js_property_set(self, make_string_item("__partial_body_len__"),
+                            (Item){.item = i2it(body_len)});
+        } else {
+            http_conn_write_bytes(conn, make_string_item("", 0), true);
+        }
+        js_property_set(self, make_string_item("__sent__"), (Item){.item = b2it(true)});
+        js_property_set(self, make_string_item("__write_head_called__"), (Item){.item = b2it(true)});
+        js_property_set(self, make_string_item("headersSent"), (Item){.item = b2it(true)});
+        js_property_set(self, make_string_item("writableFinished"), (Item){.item = b2it(true)});
+        http_response_emit(self, "finish", NULL, 0, false);
+        http_response_close_request(self);
+        Item callback = js_property_get(self, make_string_item("__end_callback__"));
+        if (js_http_is_callable(callback)) {
+            js_call_function(callback, make_js_undefined(), NULL, 0);
+        }
+        js_microtask_flush();
+        return;
+    }
     bool has_open_responses_after_this = false;
     if (conn->open_response_count > 0) conn->open_response_count--;
     has_open_responses_after_this = conn->open_response_count > 0;
@@ -1630,20 +1674,51 @@ static void http_response_flush_partial(Item self) {
         body_data = bs->chars;
         body_len = (int)bs->len;
     }
+    int sent_len = http_response_int_prop(self, "__partial_body_len__");
+    if (sent_len < 0) sent_len = 0;
+    if (sent_len > body_len) sent_len = body_len;
+    bool first_partial = !http_response_bool_prop(self, "__partial_sent__");
+    if (!first_partial && sent_len == body_len) return;
 
-    char head[1024];
-    int head_len = snprintf(head, sizeof(head),
-                            "HTTP/1.1 %d %s\r\nConnection: keep-alive\r\n\r\n",
-                            status, status_message);
-    int total = head_len + body_len;
+    char head[4096];
+    int head_len = 0;
+    if (first_partial) {
+        bool has_content_length = false;
+        bool has_content_type = false;
+        bool has_connection = false;
+        bool has_keep_alive = false;
+        bool has_transfer_encoding = false;
+        bool has_date = false;
+        head_len += snprintf(head + head_len, sizeof(head) - head_len,
+                             "HTTP/1.1 %d %s\r\n", status, status_message);
+        head_len = http_response_append_headers(head, head_len, (int)sizeof(head), self,
+                                                &has_content_length, &has_content_type,
+                                                &has_connection, &has_keep_alive,
+                                                &has_transfer_encoding, &has_date);
+        if (!has_content_type) {
+            head_len += snprintf(head + head_len, sizeof(head) - head_len,
+                                 "Content-Type: text/plain\r\n");
+        }
+        if (!has_connection) {
+            head_len += snprintf(head + head_len, sizeof(head) - head_len,
+                                 "Connection: close\r\n");
+        }
+        head_len += snprintf(head + head_len, sizeof(head) - head_len, "\r\n");
+    }
+
+    int emit_len = body_len - sent_len;
+    int total = head_len + emit_len;
     char* full = (char*)mem_alloc(total, MEM_CAT_JS_RUNTIME);
-    memcpy(full, head, (size_t)head_len);
-    if (body_len > 0) memcpy(full + head_len, body_data, (size_t)body_len);
-    // explicit writeHead()+write() can leave the response open; flushing
-    // headers/body now lets clients receive and destroy the IncomingMessage.
+    if (head_len > 0) memcpy(full, head, (size_t)head_len);
+    if (emit_len > 0) memcpy(full + head_len, body_data + sent_len, (size_t)emit_len);
+    // response.write() can leave the response open; flushing the newly
+    // buffered bytes lets clients receive/destroy the IncomingMessage.
     http_conn_write_bytes(conn, make_string_item(full, total), false);
     mem_free(full);
     js_property_set(self, make_string_item("__partial_sent__"), (Item){.item = b2it(true)});
+    js_property_set(self, make_string_item("__partial_body_len__"), (Item){.item = i2it(body_len)});
+    js_property_set(self, make_string_item("__headers_sent__"), (Item){.item = b2it(true)});
+    js_property_set(self, make_string_item("__write_head_called__"), (Item){.item = b2it(true)});
     js_property_set(self, make_string_item("headersSent"), (Item){.item = b2it(true)});
 }
 
