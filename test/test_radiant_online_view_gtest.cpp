@@ -313,6 +313,76 @@ static const RadiantOnlineViewCase g_online_view_cases[] = {
     {"mariadb_docs", "https://mariadb.com/kb/en/documentation/", true},
     {"duckdb_docs", "https://duckdb.org/docs/", true},
     {"grafana_loki_docs", "https://grafana.com/docs/loki/latest/", true},
+    {"cern_www_project", "http://info.cern.ch/hypertext/WWW/TheProject.html", false},
+    {"w3c_www_history", "https://www.w3.org/History/19921103-hypertext/hypertext/WWW/TheProject.html", false},
+    {"web_dev", "https://web.dev/", true},
+    {"chrome_developers", "https://developer.chrome.com/docs/", true},
+    {"webassembly", "https://webassembly.org/", true},
+    {"emscripten_docs", "https://emscripten.org/docs/", true},
+    {"wasm_core_spec", "https://webassembly.github.io/spec/core/", true},
+    {"wasi_docs", "https://wasi.dev/", true},
+    {"wasmtime_docs", "https://docs.wasmtime.dev/", true},
+    {"mlir_docs", "https://mlir.llvm.org/docs/", true},
+    {"zig_docs", "https://ziglang.org/documentation/master/", true},
+    {"nim_docs", "https://nim-lang.org/documentation.html", true},
+    {"crystal_docs", "https://crystal-lang.org/reference/latest/", true},
+    {"dart_docs", "https://dart.dev/guides", true},
+    {"flutter_docs", "https://docs.flutter.dev/", true},
+    {"ruby_docs", "https://docs.ruby-lang.org/en/master/", true},
+    {"rails_guides", "https://guides.rubyonrails.org/", true},
+    {"django_docs", "https://docs.djangoproject.com/en/stable/", true},
+    {"flask_docs", "https://flask.palletsprojects.com/en/stable/", true},
+    {"fastapi_docs", "https://fastapi.tiangolo.com/", true},
+    {"sqlalchemy_docs", "https://docs.sqlalchemy.org/en/20/", true},
+    {"pandas_docs", "https://pandas.pydata.org/docs/", true},
+    {"numpy_docs", "https://numpy.org/doc/stable/", true},
+    {"scipy_docs", "https://docs.scipy.org/doc/scipy/", true},
+    {"matplotlib_docs", "https://matplotlib.org/stable/", true},
+    {"jupyter_docs", "https://docs.jupyter.org/en/latest/", true},
+    {"pytorch_docs", "https://pytorch.org/docs/stable/index.html", true},
+    {"tensorflow_guide", "https://www.tensorflow.org/guide", true},
+    {"sklearn_docs", "https://scikit-learn.org/stable/", true},
+    {"huggingface_docs", "https://huggingface.co/docs", true},
+    {"opencv_docs", "https://docs.opencv.org/4.x/", true},
+    {"ffmpeg_docs", "https://ffmpeg.org/documentation.html", true},
+    {"imagemagick_docs", "https://imagemagick.org/script/command-line-processing.php", true},
+    {"blender_manual", "https://docs.blender.org/manual/en/latest/", true},
+    {"godot_docs", "https://docs.godotengine.org/en/stable/", true},
+    {"unity_manual", "https://docs.unity3d.com/Manual/index.html", true},
+    {"unreal_docs", "https://dev.epicgames.com/documentation/en-us/unreal-engine", true},
+    {"pygame_docs", "https://www.pygame.org/docs/", true},
+    {"mdn_canvas", "https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API", true},
+    {"caniuse", "https://caniuse.com/", true},
+    {"css_tricks_flexbox", "https://css-tricks.com/snippets/css/a-guide-to-flexbox/", true},
+    {"ietf_datatracker", "https://datatracker.ietf.org/", true},
+    {"cve_mitre", "https://cve.mitre.org/", true},
+    {"nvd_nist", "https://nvd.nist.gov/", true},
+    {"owasp_top_ten", "https://owasp.org/www-project-top-ten/", true},
+    {"letsencrypt_docs", "https://letsencrypt.org/docs/", true},
+    {"certbot_docs", "https://eff-certbot.readthedocs.io/en/stable/", true},
+    {"tor_support", "https://support.torproject.org/", true},
+    {"wireshark_docs", "https://www.wireshark.org/docs/", true},
+    {"nmap_book", "https://nmap.org/book/man.html", true},
+    {"rsync_samba", "https://rsync.samba.org/", true},
+    {"samba_docs", "https://www.samba.org/samba/docs/", true},
+    {"systemd_docs", "https://systemd.io/", true},
+    {"archwiki_main", "https://wiki.archlinux.org/title/Main_page", true},
+    {"gentoo_wiki_main", "https://wiki.gentoo.org/wiki/Main_Page", true},
+    {"ubuntu_docs", "https://documentation.ubuntu.com/", true},
+    {"redhat_docs", "https://docs.redhat.com/", true},
+    {"fedora_docs", "https://docs.fedoraproject.org/en-US/docs/", true},
+    {"alpine_wiki_main", "https://wiki.alpinelinux.org/wiki/Main_Page", true},
+    {"nixos_manual", "https://nixos.org/manual/nixos/stable/", true},
+    {"homebrew_docs", "https://docs.brew.sh/", true},
+    {"macports_guide", "https://guide.macports.org/", true},
+    {"freebsd_handbook", "https://docs.freebsd.org/en/books/handbook/", true},
+    {"openbsd_faq", "https://www.openbsd.org/faq/", true},
+    {"netbsd_docs", "https://www.netbsd.org/docs/", true},
+    {"qemu_docs", "https://www.qemu.org/docs/master/", true},
+    {"virtualbox_manual", "https://www.virtualbox.org/manual/", true},
+    {"podman_docs", "https://docs.podman.io/en/latest/", true},
+    {"helm_docs", "https://helm.sh/docs/", true},
+    {"envoy_docs", "https://www.envoyproxy.io/docs/envoy/latest/", true},
 };
 
 static bool online_view_file_readable(const char* path) {
@@ -1142,6 +1212,34 @@ TEST(RadiantOnlineViewTest, LoadsNewOnlinePages131To140) {
 
 TEST(RadiantOnlineViewTest, LoadsNewOnlinePages141To150) {
     online_view_expect_case_range(241, 251);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages151To160) {
+    online_view_expect_case_range(251, 261);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages161To170) {
+    online_view_expect_case_range(261, 271);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages171To180) {
+    online_view_expect_case_range(271, 281);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages181To190) {
+    online_view_expect_case_range(281, 291);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages191To200) {
+    online_view_expect_case_range(291, 301);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages201To210) {
+    online_view_expect_case_range(301, 311);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages211To220) {
+    online_view_expect_case_range(311, 321);
 }
 
 #endif

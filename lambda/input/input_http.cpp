@@ -179,6 +179,18 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
 
     log_debug("HTTP: Successfully downloaded %zu bytes from %s (HTTP %ld)\n", response.size, url, response_code);
 
+    if (!response.data) {
+        // Successful zero-byte responses do not call the curl write callback;
+        // return an allocated empty buffer so callers can distinguish them from
+        // transport failures.
+        response.data = (char*)mem_alloc(1, MEM_CAT_TEMP);
+        if (!response.data) {
+            curl_easy_cleanup(curl);
+            return NULL;
+        }
+        response.data[0] = '\0';
+    }
+
     // Capture effective URL after redirects (may differ from original url)
     if (effective_url) {
         char* eff_url = NULL;

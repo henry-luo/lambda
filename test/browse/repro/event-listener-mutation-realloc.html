@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>event listener mutation realloc repro</title>
+  <script>
+    document.addEventListener("radiant-repro", function firstListener() {
+      for (let i = 0; i < 24; i++) {
+        document.addEventListener("radiant-repro", function addedListener() {});
+      }
+    });
+
+    for (let i = 0; i < 7; i++) {
+      document.addEventListener("radiant-repro", function existingListener() {});
+    }
+
+    document.dispatchEvent(new Event("radiant-repro"));
+  </script>
+</head>
+<body>
+  <p>Listener-list growth during dispatch should not invalidate the active snapshot.</p>
+</body>
+</html>
