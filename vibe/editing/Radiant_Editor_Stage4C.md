@@ -1,6 +1,6 @@
 # Radiant Rich Editor — Stage 4C: The Editor's Test Suite Green on the Lambda Runtime (two phases)
 
-**Date:** 2026-07-01 · **Status:** Proposal (pre-implementation) — grounded in empirical spikes (§3); two-phase plan agreed; Lane B initial pick set (§4.2).
+**Date:** 2026-07-01 · **Status:** In progress — **Phase A milestones 0 + A1 done** (logic + tier bulk green under `lambda.exe js`, ~1866 tests); **A2 (view lane) nearly done** — the chain of LambdaJS runtime bugs (Bug 1/2/3) plus **Bug 4 (`onChange`) is now FIXED** (see Progress + [Lambda_Bug.md](../Lambda_Bug.md)); `editor-view-dom` **3/9 → 9/9**. Remaining A2: `full-editor-dom` stack-overflow crash (separate deeper issue) + 2 reconcile DOM-fidelity gaps. Phase B not started. Two-phase plan + Lane B pick unchanged (§4.2).
 **Scope/goal:** Prove the **plain-DOM JS editor** works on the runtime it ships on, in two phases:
 - **Phase A — `lambda.exe js`:** the **full ~1931-test plain-DOM suite** runs and passes on the headless **LambdaJS** runtime — *does the editor's own test corpus pass at the JS level under Lambda?*
 - **Phase B — `lambda.exe view` + `event_sim`:** a **curated subset** (§4.2) runs as true **end-to-end UI automation** under the full Radiant stack (real layout, event dispatch, caret/selection rendering) — *does real interactive editing work end-to-end?*
@@ -30,7 +30,7 @@ The editor's **1960-test vitest suite is green under `jsdom` (Node)** — a brow
 
 **Phase A gap inventory (empirical, from the 11 core failures — all in tight clusters):**
 1. **`Intl` not defined** (2) — `src/commands/caret.ts:97` uses `new Intl.Segmenter(…,{granularity:'word'})` for word-boundary nav. → implement `Intl.Segmenter` in LambdaJS, or a word-seg fallback.
-2. **`parseHtmlToDoc` DOM-parse fidelity** — inline-atom HTML round-trip + **all drawing tests (~28)** fail ("null is not iterable"); the LambdaJS DOM parser (`--document`) doesn't match jsdom for this markup. → §5 (drawing itself is Stage-5 scope, excluded from the green target).
+2. ~~**`parseHtmlToDoc` DOM-parse fidelity** — drawing tests fail ("null is not iterable")~~ **RESOLVED / mis-attributed.** The drawing "null is not iterable" failures were actually the **numeric-inference bug (#3)**, not a parser gap — after the #3 fix, **drawing runs 50/50** and the tiers (which also use `parseHtmlToDoc`) are 1601/1601. `parseHtmlToDoc` fidelity under `--document` is fine for editing markup.
 3. **LambdaJS numeric type-inference bug in JS→MIR lowering — ROOT-CAUSED & FIXED (2026-07-01)** (fixed `selMap` 1 + gap-cursor 4 + `cmdMoveNode` 3 → core bundle **198→207/209**).
    - **Fix:** `lambda/js/js_mir_statement_lowering.cpp` — for a var/const whose initializer is a `CALL_EXPRESSION` inferred INT/FLOAT, keep it **boxed** (widen to ANY) unless it's a guaranteed-numeric `Math.*` builtin. A user function's numeric return type is speculative; the native var path unboxed it with an unchecked `it2d`/`d2i` that collapsed the boxed object to 0.
    - **Regression check: ZERO.** node-baseline's 2 flagged "regressions" + `test_js_gtest`'s 1 fail all fail identically on the pre-fix binary (pre-existing/stale-baseline), verified by git-stash + rebuild. (`vm_runincontext_cross_unit` shows the same object→undefined signature — a same-class case my narrow fix doesn't reach; follow-up candidate.)
@@ -41,9 +41,25 @@ The editor's **1960-test vitest suite is green under `jsdom` (Node)** — a brow
    - **Module-state dependent** (fragile to minimize). Reliable repros: `temp/4c-spikes/min.js` (real bundled `stepMap`) + `temp/4c-spikes/depth.js` (self-contained). Diagnostics: `JS_MIR_DUMP=1 ./lambda.exe js <bundle>` → `temp/js_mir_dump.txt`; `JS_MIR_INTERP=1` = interpreter (JIT-vs-lowering bisection).
    - **⚠️ Fix caution:** this numeric/int inference is load-bearing (GC rooting, deltablue); scope the fix to call-result bindings and run the full lambda + node baselines.
 
-**Phase A largely done — 1906/1931 (98.7%) green under `lambda.exe js` (2026-07-01).** After the inference fix (#3) + tier fixture-inlining (`tools/build-tier.mjs` — virtual FS shimming `node:fs`/`node:path`/`node:url` + inlined fixtures, run under `--document`): commands+model+input 207/209 · helpers+smoke 8/9 · **drawing 50/50** · **all tiers 1601/1601** (Slate 293 · PM 212 · HTML 520 · Chromium 163 · structural 22 · drawing 391) · view 40/62. **Remaining 25 = two buckets:** (a) **2 `Intl.Segmenter`** (caret word-nav — engine feature); (b) **23 DOM-fidelity** (22 view + 1 smoke): SVG `createElementNS` namespace, image node-selection, clipboard HTML serialization, reconcile selection-preservation, custom-element parse (the §5 items — bleed into Phase B).
+**Phase A logic + tier bulk — GREEN (2026-07-01).** After the inference fix (#3) + tier fixture-inlining (`tools/build-tier.mjs` — virtual FS shimming `node:fs`/`node:path`/`node:url` + inlined fixtures, run under `--document`), the DOM-independent surface is fully green:
+- commands+model+input **207/209** (2 = `Intl.Segmenter`) · helpers+smoke **8/9** (1 = custom-element parse) · **drawing 50/50** · **all tiers 1601/1601** (Slate 293 · PM 212 · HTML 520 · Chromium 163 · structural 22 · drawing 391).
 
-**Not yet started:** the last two Phase-A buckets above (Intl + DOM-fidelity), and all of Phase B. Spikes/bundles live in `./temp/4c-spikes/` (ephemeral; regenerate via `tools/build-conformance.mjs` / `tools/build-tier.mjs`).
+**Phase A view lane — in progress (the hard part).** The 7 plain-DOM `view/*.ts` files exercise the real mount → event → command → reconcile → DOM/selection loop, which surfaced a **chain of LambdaJS runtime bugs** (all documented with symptom / root-cause / minimal-repro / fix in **[vibe/Lambda_Bug.md](../Lambda_Bug.md)**):
+| # | Bug (JS runtime) | Status | Effect |
+|---|---|---|---|
+| — | **`window.document` was `undefined`** (bare `document` is transpiler-special-cased, never a real global prop) → `window.document.createRange()` threw | **FIXED** (`js_dom_selection.cpp`) | unblocked dom-bridge/render-vnode/etc. |
+| 1 | **class field-arrow loses `this` in a nested function scope** (esbuild wraps bundles in an IIFE) → dispatched handler `this` = undefined → BUS crash | **FIXED** | `editor-view-dom` **crash → runs** |
+| 2 | **residual: field-arrow with MIXED captures** (`this` + a called import) still lost `this` — Bug-1 guard too narrow | **FIXED** | removed the remaining crash class |
+| 3 | **`heap_create_name` fails inside dispatched handler** — CLI queries `process.exitCode` after the EvalContext is restored to NULL | **FIXED** (`js_globals.cpp`, guarded the intern) | eliminated spurious interning errors *(was a **red herring** for the editor)* |
+| 4 | **`onChange is not a function`** — NOT a `this` bug: a hoisted **IIFE-scope function declaration** (esbuild-inlined import) is never written to its **module-var slot**, so a nested inline-`new` field-arrow that captures it reads garbage → `intentFromInputEvent is not a function` aborts `handleBeforeInput` before `dispatch`/`onChange` run | **FIXED** (`js_mir_function_class_lowering.cpp` — `jm_hoisted_func_modvar_write_through` at both inner-func-decl hoist sites) | `editor-view-dom` **3/9 → 9/9** |
+
+Current view-lane tally: `dom-bridge` 7/7 · `render-vnode` 9/9 · `html-parser` 12/12 · `use-editor-state` 5/5 · `reconcile` **4/6** (2 DOM-fidelity: SVG `createElementNS` namespace, selection-survives-a-patch) · `editor-view-dom` **9/9** (Bug 4 fixed; the last case also needed `toHaveBeenCalled*` mock matchers added to the in-engine harness) · `full-editor-dom` **crash** (now a **stack overflow** — `Item::type_id` at a stack address; a distinct render/reconcile-loop or DOM-fidelity issue, NOT Bug 4).
+
+**Overall: ~1912/1931 green under `lambda.exe js`.** Remaining work: **`full-editor-dom` stack overflow** (new #5, separate), then the small tail — **2 `Intl.Segmenter`**, **2 reconcile DOM-fidelity** gaps, **1 custom-element parse** — after which Phase A is done and **Phase B** (view + event_sim) can start.
+
+**Bug 4 fix (2026-07-01):** root-caused via `temp/4c-spikes/t3.js` (minimal: nested inline-`new` of a class whose field-arrow captures an IIFE-scope function decl). The hoist of an inner function declaration wrote the closure only to its local reg + shared scope env, never to the **module-var slot** that nested-closure captures resolve through (`js_get_module_var`). Fix: `jm_hoisted_func_modvar_write_through()` mirrors the write-through the non-direct statement path already does. Regression: `test/js/class_field_decl_capture_nested_new.{js,txt}`. Validated: `test_js_gtest` 301/302, lambda baseline 3227/3228 (only pre-existing `vm_runincontext_cross_unit`), zero regression. Full detail in [Lambda_Bug.md](../Lambda_Bug.md) §"Bug 4".
+
+**Spikes/bundles** live in `./temp/4c-spikes/` (ephemeral; regenerate via `tools/build-conformance.mjs` / `tools/build-tier.mjs`).
 
 ---
 
@@ -190,14 +206,14 @@ APIs exist (§3.1); **semantics** need hardening. Surfaced by Phase A's `view/*.
 
 ## 8. Phases & milestones
 
-| Milestone | Deliverable | Exit gate |
-|---|---|---|
-| **0 — Harness foundation** | `build-conformance.mjs` (bundle + `describe/it/expect` shim + fixture inlining); `make editor-4c-js`; a **10-test slice** green under `lambda.exe js` | Slice green; exact ~1931 count enumerated; pipeline reproducible |
-| **A1 — Logic/tier bulk under `js`** | model/commands/input/drawing + 6 tier corpora green under `lambda.exe js` | ≈1869 green; jsdom parity |
-| **A2 — `view/*.ts` under `js`** | the 7 plain-DOM view tests green under `js --document`; **`js_dom` fidelity fixes** (§5.1,5.4,5.5) landed | ~1931 green under `js`; parity report clean |
-| **B0 — event_sim + geometry prerequisites** | structured-model assertion (§6.1); the JS-subtree geometry fix (§5.2) so chrome clicks land | editor4b still 10/10; new assertions usable |
-| **B1 — Lane B subset** | the ~8-file pick as event-driven fixtures under `lambda.exe view` | subset green; `make test-radiant-baseline` unchanged |
-| **3 — Integration & parity** | `make editor-4c` (A + B) + a parity report vs. vitest; CI wiring; docs | ~1931 (A) + subset (B) green; 0 undocumented divergences |
+| Milestone | Status | Deliverable | Exit gate |
+|---|---|---|---|
+| **0 — Harness foundation** | ✅ **done** | `build-conformance.mjs` (bundle + `describe/it/expect` shim + fixture inlining); a **10-test slice** green under `lambda.exe js` | Slice green; exact ~1931 count enumerated; pipeline reproducible |
+| **A1 — Logic/tier bulk under `js`** | ✅ **done** | model/commands/input/drawing + 6 tier corpora green under `lambda.exe js` | ~1866 green (207 core + 8 misc + 50 drawing + 1601 tier); jsdom parity |
+| **A2 — `view/*.ts` under `js`** | ◑ **in progress** | the 7 plain-DOM view tests green under `js --document`; the JS-runtime bug chain (Bug 1/2/3/**4 all fixed**) + 2 reconcile DOM-fidelity gaps | **6/7 view files green** (`editor-view-dom` now 9/9); remaining: `full-editor-dom` stack overflow (#5) + SVG-ns / selection-survives |
+| **B0 — event_sim + geometry prerequisites** | ⬚ not started | structured-model assertion (§6.1); the JS-subtree geometry fix (§5.2) so chrome clicks land | editor4b still 10/10; new assertions usable |
+| **B1 — Lane B subset** | ⬚ not started | the ~8-file pick as event-driven fixtures under `lambda.exe view` | subset green; `make test-radiant-baseline` unchanged |
+| **3 — Integration & parity** | ⬚ not started | `make editor-4c` (A + B) + a parity report vs. vitest; CI wiring; docs | ~1931 (A) + subset (B) green; 0 undocumented divergences |
 
 **Guard (every milestone):** never regress `make test-radiant-baseline` or the jsdom suite; triage every divergence to a cause (LambdaJS/`js_dom`/substrate **or** a legitimate editor difference) before accepting or fixing it.
 

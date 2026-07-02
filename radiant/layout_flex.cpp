@@ -166,7 +166,9 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
     // create embed structure if it doesn't exist
     if (!container->embed) {
-        container->embed = (EmbedProp*)mem_calloc(1, sizeof(EmbedProp), MEM_CAT_LAYOUT);
+        // Flex containers share EmbedProp ownership with the view pool; heap
+        // allocation leaked synthesized embeds during online page shutdown.
+        container->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
     }
 
     FlexContainerLayout* flex = (FlexContainerLayout*)mem_calloc(1, sizeof(FlexContainerLayout), MEM_CAT_LAYOUT);

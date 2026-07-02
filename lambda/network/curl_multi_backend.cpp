@@ -236,7 +236,13 @@ static bool finish_transfer(CurlMultiTransfer* transfer, CURLcode result) {
             char error_msg[128];
             snprintf(error_msg, sizeof(error_msg), "HTTP %ld", http_code);
             set_resource_error(res, error_msg);
-            log_error("curl-multi: HTTP %ld for %s", http_code, res->url);
+            if (res->type == RESOURCE_FONT) {
+                // Web fonts are optional rendering inputs; broken public font
+                // URLs should fall back without surfacing as page-load errors.
+                log_warn("curl-multi: optional font HTTP %ld for %s", http_code, res->url);
+            } else {
+                log_error("curl-multi: HTTP %ld for %s", http_code, res->url);
+            }
         } else {
             log_debug("curl-multi: downloaded %zu bytes from %s (HTTP %ld)",
                       transfer->size, res->url, http_code);

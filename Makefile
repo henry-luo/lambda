@@ -494,7 +494,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
-	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-pdf-render test-extended test-input run help \
+	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint lint-full docs intellisense analyze-binary \
 	    build-debug build-release build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
@@ -554,6 +554,7 @@ help:
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
 	@echo "  test-radiant-baseline - Run RADIANT layout baseline (baseline, wpt-css-text, pretext, form, wpt-css-multicol, puppertino) + render visual + other checks"
+	@echo "  test-radiant-online - Run Radiant online URL smoke tests"
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
 	@echo "  test-pdf-render - Run PDF render visual gtest suite"
@@ -1474,6 +1475,16 @@ test-page-load: build-test
 		./test/test_page_load_gtest.exe; \
 	else \
 		echo "Error: test/test_page_load_gtest.exe not found - run 'make build-test' first"; \
+		exit 1; \
+	fi
+
+test-radiant-online: build-test
+	@echo "Running Radiant online URL smoke test suite..."
+	@echo "=============================================================="
+	@if [ -f "test/test_radiant_online_view_gtest.exe" ]; then \
+		./test/test_radiant_online_view_gtest.exe; \
+	else \
+		echo "Error: test/test_radiant_online_view_gtest.exe not found - run 'make build-test' first"; \
 		exit 1; \
 	fi
 

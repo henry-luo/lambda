@@ -7,6 +7,7 @@
 #include "resource_loaders.h"
 #include "cookie_jar.h"
 #include "../input/css/dom_element.hpp"
+#include "../../radiant/view.hpp"
 #include "../../radiant/state_store.hpp"
 #include "../../lib/url.h"
 #include "../../lib/log.h"
@@ -69,9 +70,52 @@ NetworkResource* create_network_resource(const char* url,
     return res;
 }
 
+void detach_image_surface_from_tree(DomNode* node, ImageSurface* surface) {
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            if (elem->embed) {
+                if (elem->embed->img == surface) {
+                    elem->embed->img = nullptr;
+                }
+                if (elem->embed->poster == surface) {
+                    elem->embed->poster = nullptr;
+                }
+            }
+            detach_image_surface_from_tree(elem->first_child, surface);
+        }
+        node = node->next_sibling;
+    }
+}
+
 // free network resource
 void free_network_resource(NetworkResource* res) {
     if (!res) return;
+
+    if (res->type == RESOURCE_IMAGE && res->image_surface) {
+        // NetworkResource-owned images and UI-cache-owned SVG images share DOM
+        // borrow slots, so always detach before releasing whichever owner applies.
+        if (res->manager && res->manager->document) {
+            DomDocument* doc = res->manager->document;
+            detach_image_surface_from_tree((DomNode*)doc->root, res->image_surface);
+            if (doc->view_tree && doc->view_tree->root &&
+                    doc->view_tree->root != (View*)doc->root) {
+                detach_image_surface_from_tree((DomNode*)doc->view_tree->root, res->image_surface);
+            }
+        }
+        if (!res->image_surface_borrowed) {
+            image_surface_destroy(res->image_surface);
+        }
+        res->image_surface = nullptr;
+    } else if (res->type == RESOURCE_IMAGE && res->owner_element && res->owner_element->embed) {
+        EmbedProp* embed = res->owner_element->embed;
+        // Image resources processed by the async loader attach directly to the
+        // owner element and may be detached from the final DOM/view cleanup path.
+        if (embed->img && !embed->img->url) {
+            image_surface_destroy(embed->img);
+            embed->img = nullptr;
+        }
+    }
     
     mem_free(res->url);
     mem_free(res->local_path);
@@ -225,8 +269,21 @@ static void process_failed_resource_on_main(NetworkResourceManager* mgr, Network
         handle_resource_failure(res, mgr->document);
     }
 
+    if (res->type == RESOURCE_FONT) {
+        pthread_mutex_lock(&mgr->mutex);
+        // Fonts are recoverable via CSS fallback; count failed downloads as
+        // settled optional resources so page diagnostics stay focused on hard
+        // document, stylesheet, script, and image failures.
+        res->state = STATE_COMPLETED;
+        pthread_mutex_unlock(&mgr->mutex);
+    }
+
     mark_processed(res);
-    count_failed_if_needed(mgr, res);
+    if (res->type == RESOURCE_FONT) {
+        count_completed_if_needed(mgr, res);
+    } else {
+        count_failed_if_needed(mgr, res);
+    }
 }
 
 // download completion function (called by the scheduler backend)
@@ -279,8 +336,13 @@ static void download_completion_fn(void* task_data, bool success) {
                     res->end_time = get_time_seconds();
                     queue_failed_resource_locked(res->manager, res);
                     queued_for_main = true;
-                    log_error("network: download failed: %s - %s, queued for main thread",
-                              res->url, res->error_message ? res->error_message : "unknown error");
+                    if (res->type == RESOURCE_FONT) {
+                        log_warn("network: optional font download failed: %s - %s, queued for fallback",
+                                 res->url, res->error_message ? res->error_message : "unknown error");
+                    } else {
+                        log_error("network: download failed: %s - %s, queued for main thread",
+                                  res->url, res->error_message ? res->error_message : "unknown error");
+                    }
                 } else {
                     log_debug("network: failed download discarded because resource state changed: %s", res->url);
                 }
@@ -479,7 +541,8 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
         // if already completed or cached, return immediately
         if (res->state == STATE_COMPLETED || res->state == STATE_CACHED) {
             log_debug("network: reusing completed resource: %s", url);
-            resource_retain(res);
+            // Discovery callers do not own returned resources; retaining here
+            // leaked duplicate URL requests until shutdown memtrack.
             pthread_mutex_unlock(&mgr->mutex);
             return res;
         }
@@ -487,7 +550,8 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
         // if still downloading, just wait for it
         if (res->state == STATE_DOWNLOADING || res->state == STATE_PENDING) {
             log_debug("network: resource already loading: %s", url);
-            resource_retain(res);
+            // The manager hashmap is the owning reference; duplicate callers
+            // only need the shared load to continue.
             pthread_mutex_unlock(&mgr->mutex);
             return res;
         }
@@ -495,7 +559,8 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
         // if failed, might want to retry - for now, return failed resource
         if (res->state == STATE_FAILED) {
             log_debug("network: returning previously failed resource: %s", url);
-            resource_retain(res);
+            // Failed resources stay manager-owned so diagnostics remain
+            // available without leaking an unbalanced caller reference.
             pthread_mutex_unlock(&mgr->mutex);
             return res;
         }

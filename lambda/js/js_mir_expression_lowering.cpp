@@ -9070,7 +9070,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     }
                     // Yield in args inside a generator breaks P3 (args evaluated into raw regs across yield)
                     if (p3_method && jm_call_yield_blocks_direct(mt, call->arguments)) p3_method = NULL;
-                    if (p3_method && p3_method->param_count > 0) p3_method = NULL;
+                    // Collected method metadata from complex live scripts can be
+                    // incomplete; P3 only has a zero-parameter call shape.
+                    if (p3_method && p3_method->param_count != 0) p3_method = NULL;
                     if (p3_method && p3_method->fc->func_item && p3_method->fc->capture_count == 0 && !p3_overridden) {
                         log_debug("P3: direct method call %.*s.%.*s() in %s",
                             (int)(p3_ce->name ? p3_ce->name->len : 0),
