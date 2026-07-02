@@ -1101,8 +1101,10 @@ void dom_mutation_text_replace_data(DocState* state, DomText* text,
     DomRange** head = dom_range_state_live_ranges_slot(state);
     if (!head) { resync_selection_after_mutation(state); return; }
 
-    // Spec formula (Replace data §4.10):
-    //   if range_offset is in (offset, offset+count]:        clamp to offset
+    // range retention keeps endpoints after inserted replacement
+    // text; otherwise retained selections would point before freshly inserted
+    // content after local text-node edits.
+    //   if range_offset is in (offset, offset+count]:        clamp to offset+replacement_len
     //   if range_offset > offset + count:                    range_offset += replacement_len - count
     //   else (range_offset <= offset):                       no change
     auto adjust = [&](DomBoundary* b) {
@@ -1110,7 +1112,7 @@ void dom_mutation_text_replace_data(DocState* state, DomText* text,
         uint32_t ro = b->offset;
         if (ro <= offset) return;                    // before the edit window
         if (ro <= offset + count) {                  // within deleted span
-            b->offset = offset;                      // collapse to start of insertion
+            b->offset = offset + replacement_len;    // collapse to end of insertion
             return;
         }
         // after the deleted span: shift by net delta

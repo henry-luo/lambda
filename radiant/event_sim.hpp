@@ -35,6 +35,7 @@
  *     {"type": "assert_focus", "target": {"selector": "input#email"}},
  *     {"type": "assert_state", "target": {"selector": "button"}, "state": ":hover", "value": true},
  *     {"type": "assert_state_store", "target": {"selector": "#pane"}, "view_state": true, "kind": "scroll"},
+ *     {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "eligible"},
  *     {"type": "assert_state_dump", "reference": "test/ui/state/form_after_paste.mark"},
  *     {"type": "assert_event_log", "contains": "\"type\":\"editing.history\"", "min": 1},
  *     {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "insertText", "min": 1},
@@ -110,6 +111,7 @@ enum SimEventType {
     SIM_EVENT_IME_COMPOSE,     // drive shared composition start/update/end
     SIM_EVENT_SET_EDITING_SELECTION, // set editing selection by selector + offsets
     SIM_EVENT_SET_EDITING_VALUE, // set live editing value for deterministic setup
+    SIM_EVENT_SNAPSHOT_STATE_STORE, // capture DOM/ViewState binding for later comparison
     // Assertions
     SIM_EVENT_ASSERT_CARET,
     SIM_EVENT_ASSERT_SELECTION,
@@ -131,12 +133,14 @@ enum SimEventType {
     SIM_EVENT_ASSERT_ATTRIBUTE,  // verify HTML attribute value
     SIM_EVENT_ASSERT_COUNT,      // verify number of elements matching a selector
     SIM_EVENT_ASSERT_STATE_STORE, // verify DocState/ViewState store invariants
+    SIM_EVENT_ASSERT_STATE_STORE_SNAPSHOT, // compare current state binding against snapshot
     SIM_EVENT_ASSERT_EVENT_LOG, // verify event/state JSONL contains records
     SIM_EVENT_ASSERT_EDITING_EVENT, // structured editing event-state log assertion
     SIM_EVENT_ASSERT_EDITING_SELECTION, // verify form/rich editing selection range
     SIM_EVENT_ASSERT_EDITING_VALUE, // verify live form value / contenteditable text
     SIM_EVENT_ASSERT_PIXEL,      // verify a rendered pixel's color channel ranges
     SIM_EVENT_ASSERT_STATE_DUMP, // compare in-memory Mark state dump against fixture
+    SIM_EVENT_ASSERT_RECONCILE_MODE, // verify last DOM-mutation reconcile mode/reason
     SIM_EVENT_ASSERT_SNAPSHOT,   // pixel-compare rendered surface against browser reference PNG
     // Mutation helpers
     SIM_EVENT_SCROLL_TO,         // scroll to absolute position or element
@@ -189,6 +193,9 @@ struct SimEvent {
     char* assert_contains;       // for assert_text: substring match
     char* assert_equals;         // for assert_text: exact match
     char* assert_not_contains;   // for assert_attribute: negative substring match (pass when absent OR does not include)
+    char* state_snapshot_name;   // for snapshot_state_store/assert_state_store_snapshot
+    bool has_expected_snapshot_removed;
+    bool expected_snapshot_removed;
     char* clipboard_mime;        // for assert_clipboard: MIME representation to read
     char* clipboard_html;        // optional text/html payload for paste/drop
     bool expected_visible;       // for assert_visible
@@ -312,6 +319,15 @@ struct SimEvent {
     char* snapshot_actual_path;  // optional: save actual image for debugging
     // assert_state_dump fields
     char* state_dump_reference;  // path to reference Mark dump
+    // assert_reconcile_mode fields
+    char* expected_reconcile_mode;
+    char* expected_reconcile_reason;
+    bool has_expected_reconcile_mutations;
+    bool has_expected_reconcile_records;
+    bool has_expected_reconcile_record_overflow;
+    int expected_reconcile_mutations;
+    int expected_reconcile_records;
+    int expected_reconcile_record_overflow;
     // assert_pixel fields. Values < 0 mean "do not check this bound".
     int pixel_min_r, pixel_min_g, pixel_min_b, pixel_min_a;
     int pixel_max_r, pixel_max_g, pixel_max_b, pixel_max_a;
@@ -378,6 +394,7 @@ struct EventSimContext {
     float replay_expected_scroll_x;
     float replay_expected_scroll_y;
     bool replay_has_scroll;
+    ArrayList* state_store_snapshots;
 };
 
 // Load events from JSON file

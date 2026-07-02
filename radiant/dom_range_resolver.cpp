@@ -1106,10 +1106,12 @@ static void find_editable_boundary_hit(View* node, float vx, float vy,
 
 static void find_text_edge_boundary_hit(View* node, float vx, float vy,
                                         float abs_x, float abs_y,
+                                        bool inside_editable,
                                         EditableBoundaryHit* hit) {
     if (!node || !hit) return;
 
     if (node->is_text()) {
+        if (!inside_editable) return;
         DomText* text = lam::dom_require_text(node);
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
             if (rect->height <= 0.0f) continue;
@@ -1149,6 +1151,7 @@ static void find_text_edge_boundary_hit(View* node, float vx, float vy,
     }
 
     if (!node->is_element()) return;
+    bool child_inside_editable = inside_editable || is_rich_editable_host(node);
     float cx = abs_x;
     float cy = abs_y;
     child_content_origin_for_view(node, abs_x, abs_y, &cx, &cy);
@@ -1156,7 +1159,8 @@ static void find_text_edge_boundary_hit(View* node, float vx, float vy,
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
         View* child_view = static_cast<View*>(child);
         if (!child_view->view_type) continue;
-        find_text_edge_boundary_hit(child_view, vx, vy, cx, cy, hit);
+        find_text_edge_boundary_hit(child_view, vx, vy, cx, cy,
+                                    child_inside_editable, hit);
     }
 }
 
@@ -1302,7 +1306,10 @@ extern "C" DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float
             return elem_b;
         }
         EditableBoundaryHit text_hit = { NULL, NULL, { NULL, 0 }, false, 0.0f, -1.0f };
-        find_text_edge_boundary_hit(root_view, vx, vy, 0, 0, &text_hit);
+        // text-edge snapping is an editing affordance; generic DOM hit tests
+        // outside all text rects must remain null instead of fabricating a
+        // nearest text boundary.
+        find_text_edge_boundary_hit(root_view, vx, vy, 0, 0, false, &text_hit);
         if (text_hit.text && text_hit.rect) {
             t = text_hit.text;
             rect = text_hit.rect;

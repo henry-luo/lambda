@@ -893,15 +893,6 @@ static Item js_fs_readstream_close(Item callback_item) {
     return js_stream_destroy(stream, make_js_undefined());
 }
 
-static Item js_fs_readstream_end_later(Item stream) {
-    Item destroyed = js_property_get(stream, make_string_item("__destroyed__"));
-    if (get_type_id(destroyed) == LMD_TYPE_BOOL && it2b(destroyed)) {
-        return make_js_undefined();
-    }
-    js_readable_push(stream, ItemNull);
-    return make_js_undefined();
-}
-
 extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
     if (!fs_validate_encoding_options(options_item)) return ItemNull;
     char path_buf[1024];
@@ -921,6 +912,9 @@ extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
     js_property_set(stream, make_string_item("__readstream_path__"), path_item);
     js_property_set(stream, make_string_item("__readstream_drained__"), (Item){.item = b2it(false)});
     js_property_set(stream, make_string_item("close"), js_new_function((void*)js_fs_readstream_close, 1));
+    // keep Readable.on() intact so late 'data' listeners switch buffered
+    // fs streams into flowing mode; the fs-only drain path missed data-only consumers.
+    js_property_set(stream, make_string_item("pipe"), js_new_function((void*)js_fs_readstream_pipe, 1));
 
     Item chunk = js_fs_read_file_buffer(path);
     if (js_check_exception()) {
@@ -929,10 +923,10 @@ extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
         return stream;
     }
 
+    // Buffer the whole fixture now; generic Readable listeners must own the
+    // later data flow so pause/resume and data-only consumers see the chunk.
     js_readable_push(stream, chunk);
-    Item end_fn = js_bind_function(js_new_function((void*)js_fs_readstream_end_later, 1),
-                                   make_js_undefined(), &stream, 1);
-    js_setImmediate(end_fn);
+    js_readable_push(stream, ItemNull);
     return stream;
 }
 

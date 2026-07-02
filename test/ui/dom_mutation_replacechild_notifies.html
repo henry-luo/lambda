@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>DOM mutation replaceChild notifies</title>
+</head>
+<body>
+  <label for="trigger">Trigger</label>
+  <input id="trigger" value="ready">
+  <div id="container">
+    <span id="old-child">old child</span>
+  </div>
+  <p id="status" data-state="waiting">waiting</p>
+  <script>
+    const trigger = document.getElementById('trigger');
+    const container = document.getElementById('container');
+    const status = document.getElementById('status');
+    let replaced = false;
+
+    trigger.addEventListener('keydown', () => {
+      if (replaced) return;
+      replaced = true;
+      const oldChild = document.getElementById('old-child');
+      const newChild = document.createElement('span');
+      newChild.id = 'new-child';
+      newChild.setAttribute('data-label', 'replacement child');
+      container.replaceChild(newChild, oldChild);
+      status.setAttribute('data-state', 'replaceChild complete');
+    });
+  </script>
+</body>
+</html>

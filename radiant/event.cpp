@@ -3933,6 +3933,37 @@ static void dom_js_mutation_log_records(DomDocument* doc) {
 #endif
 }
 
+static void dom_js_record_reconcile(DomDocument* doc,
+                                    DomReconcileMode mode,
+                                    const char* reason,
+                                    int mutations,
+                                    int records,
+                                    int overflow) {
+    if (!doc) return;
+    doc->last_dom_reconcile_mode = mode;
+    doc->last_dom_reconcile_reason = reason ? reason : "none";
+    doc->last_dom_reconcile_mutations = mutations;
+    doc->last_dom_reconcile_records = records;
+    doc->last_dom_reconcile_record_overflow = overflow;
+
+    DocState* state = (DocState*)doc->state;
+    if (!state || !event_state_log_enabled(state->active_event_log)) return;
+
+    char buf[1024];
+    JsonWriter w;
+    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
+                                 "dom.reconcile", state->active_cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "mode", dom_reconcile_mode_name(mode));
+        jw_kv_str(&w, "reason", doc->last_dom_reconcile_reason);
+        jw_kv_int(&w, "mutations", mutations);
+        jw_kv_int(&w, "records", records);
+        jw_kv_int(&w, "record_overflow", overflow);
+    jw_obj_end(&w);
+    event_state_log_finish_record(state->active_event_log, &w);
+}
+
 static void dom_js_clear_layout_dirty_recursive(DomNode* node) {
     if (!node) return;
     node->layout_dirty = false;
@@ -4194,14 +4225,17 @@ static bool post_html_handler_incremental_rebuild(
         EventContext* evcon, DomDocument* doc,
         std::chrono::high_resolution_clock::time_point t_start,
         std::chrono::high_resolution_clock::time_point t0,
-        int mutations) {
+        int mutations,
+        const char** fallback_reason_out) {
     using namespace std::chrono;
 
     const char* reason = nullptr;
     if (!dom_js_mutation_can_incremental(doc, &reason)) {
         log_info("html handler incremental: fallback=%s", reason ? reason : "unknown");
+        if (fallback_reason_out) *fallback_reason_out = reason ? reason : "unknown";
         return false;
     }
+    if (fallback_reason_out) *fallback_reason_out = "eligible";
 
     Pool* pool = doc->pool;
     SelectorMatcher* matcher = selector_matcher_create(pool);
@@ -4293,6 +4327,11 @@ static bool post_html_handler_incremental_rebuild(
              selective_dirty ? "dirty-rects" : "full",
              dirty_rect_count,
              repaint_reason ? repaint_reason : "none");
+    // Tests read this structured result; timing logs alone cannot distinguish
+    // incremental mutation handling from a broad fallback path.
+    dom_js_record_reconcile(doc, DOM_RECONCILE_INCREMENTAL, "eligible",
+                            mutations, doc->js_mutation_record_count,
+                            doc->js_mutation_record_overflow);
     return true;
 }
 
@@ -4315,7 +4354,9 @@ static void post_html_handler_rebuild(EventContext* evcon,
     auto t0 = high_resolution_clock::now();
     dom_js_mutation_log_records(doc);
 
-    if (post_html_handler_incremental_rebuild(evcon, doc, t_start, t0, mutations)) {
+    const char* fallback_reason = "none";
+    if (post_html_handler_incremental_rebuild(evcon, doc, t_start, t0,
+                                              mutations, &fallback_reason)) {
         dom_js_mutation_reset_records(doc);
         return;
     }
@@ -4399,6 +4440,12 @@ static void post_html_handler_rebuild(EventContext* evcon,
              duration<double, std::milli>(t3 - t2).count(),
              duration<double, std::milli>(t3 - t_start).count(),
              mutations);
+    // Full fallback is still a DOM-preserving broad reconcile; keep the reason
+    // test-visible so state-retention fixtures do not have to scrape log.txt.
+    dom_js_record_reconcile(doc, DOM_RECONCILE_FULL,
+                            fallback_reason ? fallback_reason : "unknown",
+                            mutations, doc->js_mutation_record_count,
+                            doc->js_mutation_record_overflow);
 
     // Reset mutation count for next event
     dom_js_mutation_reset_records(doc);
@@ -4777,18 +4824,6 @@ static bool radiant_dispatch_drag_event(EventContext* evcon, View* target,
     log_debug("JSDND: dispatched '%s' at (%d,%d) prevented=%d", type, cx, cy, prevented);
     return prevented;
 }
-
-// JS-DnD overlay state for the single active drag gesture (Radiant tracks one
-// DragDropState at a time). `drop_allowed` mirrors HTML5: a drop fires only
-// when the most recent dragover on the target called preventDefault().
-//
-// This JS-facing lifecycle carries HTML5 DataTransfer/drop-allowed state while
-// native DragDropState remains the StateStore-owned gesture source. Script
-// editors may mutate the DOM inside dragover; fallback relayout must retain the
-// native drag when the source DOM node is still connected.
-static bool  g_jsdnd_active = false;
-static bool  g_jsdnd_drop_allowed = false;
-static View* g_jsdnd_source = nullptr;  // drag source as a DOM element (survives relayout)
 
 /**
  * §7 unification (U-5): dispatch a "wheel" event via the JS EventTarget
@@ -6527,11 +6562,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     dispatch_lambda_handler(&evcon, dd->source_view, "dragstart");
                     // Stage 4C: also fire a real JS DragEvent so script editors
                     // (addEventListener) get a DataTransfer. The session is
-                    // opened inside the dispatch (needs the JS ctx). Coord space
-                    // matches the JS mouse events.
-                    g_jsdnd_active = true;
-                    g_jsdnd_drop_allowed = false;
-                    g_jsdnd_source = dd->source_view;
+                    // opened inside the dispatch (needs the JS ctx) on "dragstart".
+                    // Coord space matches the JS mouse events. The native
+                    // DragDropState (source_view is a DOM element; active/pending
+                    // flags) now survives handler-driven DOM mutation via
+                    // fallback retention, so JS DnD rides on it directly.
                     radiant_dispatch_drag_event(&evcon, dd->source_view, "dragstart",
                                                 (int)dd->current_x, (int)dd->current_y);
                 }
@@ -6598,18 +6633,20 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // dispatch "dragmove" to source (throttled by frame rate inherently)
                 dispatch_lambda_handler(&evcon, dd->source_view, "dragmove");
 
+                // Stage 4C: JS dragover to the element under the cursor,
+                // independent of the dropzone-based native drop_target. The
+                // handler may mutate the DOM (drop-line) → fallback relayout,
+                // but dd->active is retained so this keeps firing each move.
+                if (evcon.target) {
+                    radiant_dispatch_drag_event(&evcon,
+                        static_cast<View*>(evcon.target), "dragover",
+                        (int)motion->x, (int)motion->y);
+                }
+
                 // set cursor to grabbing
                 evcon.new_cursor = CSS_VALUE_POINTER;
                 evcon.need_repaint = true;
             }
-        }
-
-        // Stage 4C: JS dragover to the element under the cursor. Its
-        // preventDefault() decides whether a drop is allowed on release.
-        if (g_jsdnd_active && evcon.target) {
-            g_jsdnd_drop_allowed = radiant_dispatch_drag_event(&evcon,
-                static_cast<View*>(evcon.target), "dragover",
-                (int)motion->x, (int)motion->y);
         }
 
         // Handle text selection drag (supports cross-view selection)
@@ -7123,6 +7160,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // Set caret at clicked position for a fresh placement. A
                     // shift-click must preserve the existing collapsed
                     // selection anchor so state_store_legacy_selection_extend() can use it.
+                    View* focused = focus_get(state);
+                    if (focused && focused->is_element()) {
+                        DomElement* focused_elem = lam::dom_require_element(focused);
+                        DomNode* target_node = static_cast<DomNode*>(evcon.target);
+                        DomNode* focused_node = static_cast<DomNode*>(focused);
+                        if (tc_is_text_control(focused_elem) &&
+                            !dom_node_is_descendant_of(target_node, focused_node)) {
+                            // plain document text clicks must transfer caret ownership
+                            // away from the focused text control before StateStore
+                            // refresh preserves that control's selection shadow.
+                            update_focus_state(&evcon, NULL, false);
+                        }
+                    }
                     collapse_active_text_control_selection_for_rich_target(state, evcon.target);
                     state_store_legacy_caret_set(state, evcon.target, char_offset);
                 }
@@ -7418,28 +7468,28 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (up_prevented) evcon.default_prevented = true;
             }
 
-            // Stage 4C: JS drop + dragend for script editors. Fire a final
-            // dragover at the release point; a drop follows only if that
-            // dragover (or the previous one) was canceled — HTML5 gates drop on
-            // preventDefault. Then dragend to the source DOM element.
-            if (g_jsdnd_active) {
+            // Stage 4C: JS drop + dragend for script editors, gated on the
+            // (now retention-safe) native drag. Fire a final dragover at the
+            // release point; a drop follows only if that last dragover was
+            // canceled — HTML5 gates drop on preventDefault. Then dragend to the
+            // source DOM element (survives any fallback relayout).
+            if (state && state->drag_drop && state->drag_drop->active) {
+                View* drag_src = state->drag_drop->source_view;
                 if (evcon.target) {
                     bool ov = radiant_dispatch_drag_event(&evcon,
                         static_cast<View*>(evcon.target), "dragover",
                         (int)btn_event->x, (int)btn_event->y);
-                    if (ov || g_jsdnd_drop_allowed) {
+                    if (ov) {
                         radiant_dispatch_drag_event(&evcon,
                             static_cast<View*>(evcon.target), "drop",
                             (int)btn_event->x, (int)btn_event->y);
                     }
                 }
-                if (g_jsdnd_source) {
-                    radiant_dispatch_drag_event(&evcon, g_jsdnd_source,
+                if (drag_src) {
+                    radiant_dispatch_drag_event(&evcon, drag_src,
                         "dragend", (int)btn_event->x, (int)btn_event->y);
                 }
                 js_drag_session_end();
-                g_jsdnd_active = false;
-                g_jsdnd_source = nullptr;
             }
 
             // Handle drag-and-drop completion first

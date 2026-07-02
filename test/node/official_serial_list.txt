@@ -11,3 +11,5 @@
 
 test-http-head-request.js  # [parallel-conflict] passes alone but failed during fully parallel baseline run
 test-https-agent-session-eviction.js  # [parallel-conflict] passes alone but crashed during parallel baseline run
+test-child-process-detached.js  # [parallel-conflict] detached child cleanup can be signaled by neighboring process tests
+test-repl-unexpected-token-recoverable.js  # [parallel-conflict] spawned interactive REPL can receive signal/pipe interference in full pool

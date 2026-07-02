@@ -34,6 +34,7 @@ extern "C" Item js_stream_on(Item self, Item event_item, Item listener);
 extern "C" Item js_stream_destroy(Item self, Item err);
 extern "C" Item js_net_createConnection(Item rest_args);
 extern "C" Item js_net_get_socket_prototype(void);
+extern "C" void js_cluster_notify_worker_listening(void);
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" Item js_buffer_from_bytes(const char* data, int len);
 extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item);
@@ -67,6 +68,8 @@ static Item http_server_prototype = {0};
 Item http_incoming_message_prototype = {0};
 Item http_server_response_prototype = {0};
 static Item http_outgoing_message_prototype = {0};
+
+#define HTTP_CONN_HIGH_WATER_MARK (16 * 1024)
 
 static inline bool js_http_is_callable(Item item) {
     return get_type_id(item) == LMD_TYPE_FUNC;
@@ -162,6 +165,23 @@ static const char* http_status_text(int code) {
         case 504: return "Gateway Timeout";
         default:  return "unknown";
     }
+}
+
+static const char* http_cached_date_header(int* out_len) {
+    static time_t cached_second = 0;
+    static char cached_date[64];
+    static int cached_len = 0;
+    time_t now = time(NULL);
+    if (cached_len <= 0 || now != cached_second) {
+        struct tm tm_utc;
+        memset(&tm_utc, 0, sizeof(tm_utc));
+        gmtime_r(&now, &tm_utc);
+        cached_len = (int)strftime(cached_date, sizeof(cached_date),
+                                   "%a, %d %b %Y %H:%M:%S GMT", &tm_utc);
+        cached_second = now;
+    }
+    if (out_len) *out_len = cached_len;
+    return cached_date;
 }
 
 static const char* http_response_status_message(Item response, int status) {
@@ -427,7 +447,18 @@ static int http_decode_chunked_request_body(char* data, int len, ParsedRequest* 
 // parse an HTTP request from raw bytes. Returns 0 on success, -1 on incomplete/error.
 // Sets *consumed to the number of bytes consumed (headers + body).
 static int parse_http_request(char* data, int data_len, ParsedRequest* req, int* consumed) {
-    memset(req, 0, sizeof(ParsedRequest));
+    // ParsedRequest owns large fixed header/trailer arrays; clearing the whole
+    // struct for every pipelined request turns tiny GET parsing into bulk zeroing.
+    req->method[0] = '\0';
+    req->url[0] = '\0';
+    req->http_version[0] = '\0';
+    req->header_count = 0;
+    req->trailer_count = 0;
+    req->body = NULL;
+    req->body_len = 0;
+    req->content_length = 0;
+    req->body_complete = false;
+    req->error_status = 0;
     *consumed = 0;
 
     // find end of headers
@@ -609,6 +640,9 @@ typedef struct JsHttpConn {
     int          request_body_remaining;
     int          pending_response_writes;
     int          open_response_count;
+    int64_t      bytes_read;
+    int64_t      bytes_written;
+    int64_t      pending_write_bytes;
     JsHttpConn*  server_prev;
     JsHttpConn*  server_next;
     Item         timeout_timer;
@@ -619,6 +653,7 @@ typedef struct JsHttpConn {
     bool         close_after_response_writes;
     bool         timeout_timer_active;
     bool         handle_closed;
+    bool         read_paused_for_backpressure;
 } JsHttpConn;
 
 static uv_stream_t* http_conn_stream(JsHttpConn* conn) {
@@ -639,13 +674,65 @@ static void http_conn_start_timeout(JsHttpConn* conn, int64_t delay);
 static bool http_conn_write_bytes(JsHttpConn* conn, Item data_item, bool close_after);
 static void http_conn_maybe_close_after_response_writes(JsHttpConn* conn);
 static void http_conn_maybe_close_for_server_close(JsHttpConn* conn);
+static Item http_conn_socket_object(JsHttpConn* conn);
 static void http_response_close_request(Item res);
-static void http_response_flush_partial(Item self);
+static bool http_response_flush_partial(Item self);
+static void http_server_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf);
+static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf);
+
+static void http_conn_update_socket_counters(JsHttpConn* conn) {
+    if (!conn || conn->socket_object.item == 0) return;
+    js_property_set(conn->socket_object, make_string_item("bytesRead"),
+                    (Item){.item = i2it(conn->bytes_read)});
+    js_property_set(conn->socket_object, make_string_item("bytesWritten"),
+                    (Item){.item = i2it(conn->bytes_written)});
+    js_property_set(conn->socket_object, make_string_item("bufferSize"),
+                    (Item){.item = i2it(conn->pending_write_bytes)});
+}
+
+static void http_conn_pause_read_for_backpressure(JsHttpConn* conn) {
+    if (!conn || conn->destroyed || conn->read_paused_for_backpressure) return;
+    uv_stream_t* stream = http_conn_stream(conn);
+    if (!stream) return;
+    // Flood prevention depends on stopping socket reads once response writes
+    // outpace the kernel buffer; otherwise pipelined requests grow unbounded.
+    uv_read_stop(stream);
+    conn->read_paused_for_backpressure = true;
+}
+
+static void http_conn_resume_read_after_backpressure(JsHttpConn* conn) {
+    if (!conn || conn->destroyed || conn->read_ended || !conn->read_paused_for_backpressure) return;
+    if (conn->pending_write_bytes > HTTP_CONN_HIGH_WATER_MARK) return;
+    uv_stream_t* stream = http_conn_stream(conn);
+    if (!stream || uv_is_closing((uv_handle_t*)stream)) return;
+    conn->read_paused_for_backpressure = false;
+    uv_read_start(stream, http_server_alloc_cb, http_server_read_cb);
+}
+
+static bool http_conn_note_write_queued(JsHttpConn* conn, int len) {
+    if (!conn || len <= 0) return true;
+    conn->pending_write_bytes += len;
+    http_conn_update_socket_counters(conn);
+    if (conn->pending_write_bytes > HTTP_CONN_HIGH_WATER_MARK) {
+        http_conn_pause_read_for_backpressure(conn);
+        return false;
+    }
+    return true;
+}
+
+static void http_conn_note_write_done(JsHttpConn* conn, int len) {
+    if (!conn || len <= 0) return;
+    conn->pending_write_bytes -= len;
+    if (conn->pending_write_bytes < 0) conn->pending_write_bytes = 0;
+    http_conn_update_socket_counters(conn);
+    http_conn_resume_read_after_backpressure(conn);
+}
 
 typedef struct HttpResponseWriteReq {
     char* data;
     Item  response;
     Item  callback;
+    int   len;
     bool  close_after;
     bool  final;
 } HttpResponseWriteReq;
@@ -663,6 +750,8 @@ static void http_response_emit(Item self, const char* event, Item* args, int arg
         if (flush_tasks) js_microtask_flush();
     }
 }
+
+static int http_response_int_prop(Item self, const char* name);
 
 static Item http_error_with_code(const char* code, const char* message) {
     Item err = js_new_error(make_string_item(message));
@@ -740,26 +829,17 @@ static void http_response_append_body(Item self, Item chunk_item) {
     if (!http_item_bytes(chunk_item, &chunk_data, &chunk_len)) return;
     if (chunk_len <= 0) return;
 
-    Item body = js_property_get(self, make_string_item("__body__"));
-    const char* existing_data = "";
-    int existing_len = 0;
-    if (get_type_id(body) == LMD_TYPE_STRING) {
-        String* existing = it2s(body);
-        existing_data = existing->chars;
-        existing_len = (int)existing->len;
-    }
-
-    int new_len = existing_len + chunk_len;
-    char* buf = (char*)mem_alloc(new_len, MEM_CAT_JS_RUNTIME);
-    if (existing_len > 0) memcpy(buf, existing_data, (size_t)existing_len);
-    memcpy(buf + existing_len, chunk_data, (size_t)chunk_len);
-    js_property_set(self, make_string_item("__body__"), make_string_item(buf, new_len));
-    mem_free(buf);
-
     Item chunks = js_property_get(self, make_string_item("__chunks__"));
     if (get_type_id(chunks) == LMD_TYPE_ARRAY) {
-        js_array_push(chunks, make_string_item(chunk_data, chunk_len));
+        // response writes already keep byte-like chunks alive in __chunks__;
+        // copying each Buffer to a String makes large pipelined responses pay
+        // an avoidable per-response body clone before serialization.
+        js_array_push(chunks, chunk_item);
     }
+    int total_len = http_response_int_prop(self, "__body_len__") + chunk_len;
+    // Large response streams append thousands of chunks; rebuilding __body__
+    // per write is quadratic, so keep chunks authoritative until final flush.
+    js_property_set(self, make_string_item("__body_len__"), (Item){.item = i2it(total_len)});
 }
 
 static void http_response_append_body_encoded(Item self, Item chunk_item, Item encoding_item) {
@@ -775,6 +855,105 @@ static int http_response_int_prop(Item self, const char* name) {
     Item value = js_property_get(self, make_string_item(name));
     if (get_type_id(value) == LMD_TYPE_INT) return (int)it2i(value);
     return 0;
+}
+
+static int http_response_body_len(Item self) {
+    int prop_len = http_response_int_prop(self, "__body_len__");
+    Item chunks = js_property_get(self, make_string_item("__chunks__"));
+    if (get_type_id(chunks) == LMD_TYPE_ARRAY) {
+        int64_t chunk_count = js_array_length(chunks);
+        if (chunk_count > 0) {
+            if (prop_len > 0) return prop_len;
+            int total = 0;
+            for (int64_t i = 0; i < chunk_count; i++) {
+                Item chunk = js_array_get_int(chunks, i);
+                const char* data = NULL;
+                int len = 0;
+                if (http_item_bytes(chunk, &data, &len)) total += len;
+            }
+            return total;
+        }
+    }
+    Item body = js_property_get(self, make_string_item("__body__"));
+    if (get_type_id(body) == LMD_TYPE_STRING) {
+        String* bs = it2s(body);
+        if ((int)bs->len > prop_len) return (int)bs->len;
+    }
+    return prop_len;
+}
+
+static int http_response_copy_body_range(Item self, char* dest, int start, int len) {
+    if (!dest || start < 0 || len <= 0) return 0;
+    int copied = 0;
+    Item chunks = js_property_get(self, make_string_item("__chunks__"));
+    if (get_type_id(chunks) == LMD_TYPE_ARRAY && js_array_length(chunks) > 0) {
+        int skip = start;
+        int64_t chunk_count = js_array_length(chunks);
+        for (int64_t i = 0; i < chunk_count && copied < len; i++) {
+            Item chunk = js_array_get_int(chunks, i);
+            const char* chunk_data = NULL;
+            int chunk_len = 0;
+            if (!http_item_bytes(chunk, &chunk_data, &chunk_len)) continue;
+            if (skip >= chunk_len) {
+                skip -= chunk_len;
+                continue;
+            }
+            int offset = skip;
+            int take = chunk_len - offset;
+            if (take > len - copied) take = len - copied;
+            if (take > 0) {
+                memcpy(dest + copied, chunk_data + offset, (size_t)take);
+                copied += take;
+            }
+            skip = 0;
+        }
+        return copied;
+    }
+
+    Item body = js_property_get(self, make_string_item("__body__"));
+    if (get_type_id(body) == LMD_TYPE_STRING) {
+        String* bs = it2s(body);
+        if (start < (int)bs->len) {
+            int take = (int)bs->len - start;
+            if (take > len) take = len;
+            memcpy(dest, bs->chars + start, (size_t)take);
+            copied = take;
+        }
+    }
+    return copied;
+}
+
+static Item http_response_materialize_body(Item self) {
+    int body_len = http_response_body_len(self);
+    Item body = js_property_get(self, make_string_item("__body__"));
+    if (get_type_id(body) == LMD_TYPE_STRING) {
+        String* bs = it2s(body);
+        if ((int)bs->len == body_len) return body;
+    }
+    if (body_len <= 0) {
+        body = make_string_item("", 0);
+        js_property_set(self, make_string_item("__body__"), body);
+        js_property_set(self, make_string_item("__body_len__"), (Item){.item = i2it(0)});
+        return body;
+    }
+    char* buf = (char*)mem_alloc(body_len, MEM_CAT_JS_RUNTIME);
+    int copied = http_response_copy_body_range(self, buf, 0, body_len);
+    body = make_string_item(buf, copied);
+    mem_free(buf);
+    js_property_set(self, make_string_item("__body__"), body);
+    js_property_set(self, make_string_item("__body_len__"), (Item){.item = i2it(copied)});
+    return body;
+}
+
+static bool http_response_single_body_bytes(Item self, const char** data, int* len) {
+    if (!data || !len) return false;
+    *data = NULL;
+    *len = 0;
+    Item chunks = js_property_get(self, make_string_item("__chunks__"));
+    if (get_type_id(chunks) != LMD_TYPE_ARRAY || js_array_length(chunks) != 1) return false;
+    Item chunk = js_array_get_int(chunks, 0);
+    if (!http_item_bytes(chunk, data, len)) return false;
+    return *len == http_response_body_len(self);
 }
 
 static bool http_header_name_case_equals(Item a, Item b) {
@@ -1311,16 +1490,17 @@ static Item http_res_write_ex(Item self, Item chunk_item, Item encoding_item, It
     js_property_set(self, make_string_item("__headers_sent__"), (Item){.item = b2it(true)});
     js_property_set(self, make_string_item("__write_head_called__"), (Item){.item = b2it(true)});
     js_property_set(self, make_string_item("headersSent"), (Item){.item = b2it(true)});
+    bool below_hwm = true;
     if (!http_response_bool_prop(self, "__ending__")) {
         // ServerResponse.write() must commit implicit headers immediately;
         // buffering until end() leaves streaming clients waiting forever.
-        http_response_flush_partial(self);
+        below_hwm = http_response_flush_partial(self);
     }
     // write callbacks can synchronously nest more writes; run them only after
     // the partial-send flag is set so a nested end() cannot emit a full reply
     // before the outer write commits its header/body boundary.
     http_call_write_callback(callback_item);
-    return (Item){.item = b2it(true)};
+    return (Item){.item = b2it(below_hwm)};
 }
 
 // response.write(chunk) — accumulate body data
@@ -1382,14 +1562,7 @@ static void http_response_flush(Item self) {
             conn->current_response = make_js_undefined();
         }
 
-        Item body = js_property_get(self, make_string_item("__body__"));
-        const char* body_data = "";
-        int body_len = 0;
-        if (get_type_id(body) == LMD_TYPE_STRING) {
-            String* bs = it2s(body);
-            body_data = bs->chars;
-            body_len = (int)bs->len;
-        }
+        int body_len = http_response_body_len(self);
         int sent_len = http_response_int_prop(self, "__partial_body_len__");
         if (sent_len < 0) sent_len = 0;
         if (sent_len > body_len) sent_len = body_len;
@@ -1398,7 +1571,10 @@ static void http_response_flush(Item self) {
         // Partial responses have already committed headers without a known
         // final length, so connection close is the body delimiter at end().
         if (remaining_len > 0) {
-            http_conn_write_bytes(conn, make_string_item(body_data + sent_len, remaining_len), true);
+            char* remaining = (char*)mem_alloc(remaining_len, MEM_CAT_JS_RUNTIME);
+            int copied = http_response_copy_body_range(self, remaining, sent_len, remaining_len);
+            http_conn_write_bytes(conn, make_string_item(remaining, copied), true);
+            mem_free(remaining);
             js_property_set(self, make_string_item("__partial_body_len__"),
                             (Item){.item = i2it(body_len)});
         } else {
@@ -1457,13 +1633,17 @@ static void http_response_flush(Item self) {
                     "HTTP/1.1 %d %s\r\n", status, status_message);
 
     // body
-    Item body = js_property_get(self, make_string_item("__body__"));
     const char* body_data = "";
     int body_len = 0;
-    if (get_type_id(body) == LMD_TYPE_STRING) {
-        String* bs = it2s(body);
-        body_data = bs->chars;
-        body_len = (int)bs->len;
+    if (!http_response_single_body_bytes(self, &body_data, &body_len)) {
+        // single byte chunks can be serialized directly; multi-chunk bodies
+        // still materialize so later range copies preserve write ordering.
+        Item body = http_response_materialize_body(self);
+        if (get_type_id(body) == LMD_TYPE_STRING) {
+            String* bs = it2s(body);
+            body_data = bs->chars;
+            body_len = (int)bs->len;
+        }
     }
 
     bool has_content_length = false;
@@ -1513,16 +1693,13 @@ static void http_response_flush(Item self) {
         send_date = false;
     }
     if (send_date && !has_date) {
-        char date_buf[64];
-        time_t now = time(NULL);
-        struct tm tm_utc;
-        memset(&tm_utc, 0, sizeof(tm_utc));
-        gmtime_r(&now, &tm_utc);
-        size_t date_len = strftime(date_buf, sizeof(date_buf),
-                                   "%a, %d %b %Y %H:%M:%S GMT", &tm_utc);
+        int date_len = 0;
+        const char* date_buf = http_cached_date_header(&date_len);
         if (date_len > 0) {
+            // pipelined responses in one event-loop turn share the same Date;
+            // formatting it per response dominates tiny HTTP stress handlers.
             pos += snprintf(resp_buf + pos, sizeof(resp_buf) - pos,
-                            "Date: %.*s\r\n", (int)date_len, date_buf);
+                            "Date: %.*s\r\n", date_len, date_buf);
         }
     }
     bool server_close_requested = conn && conn->server && conn->server->close_requested;
@@ -1572,9 +1749,11 @@ static void http_response_flush(Item self) {
             int64_t chunk_count = js_array_length(chunks);
             for (int64_t i = 0; i < chunk_count; i++) {
                 Item chunk = js_array_get_int(chunks, i);
-                if (get_type_id(chunk) != LMD_TYPE_STRING) continue;
-                String* cs = it2s(chunk);
-                chunk_cap += (int)cs->len + 32;
+                const char* chunk_data = NULL;
+                int chunk_len = 0;
+                if (http_item_bytes(chunk, &chunk_data, &chunk_len)) {
+                    chunk_cap += chunk_len + 32;
+                }
             }
         }
         output_body = (char*)mem_alloc(chunk_cap, MEM_CAT_JS_RUNTIME);
@@ -1583,12 +1762,12 @@ static void http_response_flush(Item self) {
             int64_t chunk_count = js_array_length(chunks);
             for (int64_t i = 0; i < chunk_count; i++) {
                 Item chunk = js_array_get_int(chunks, i);
-                if (get_type_id(chunk) != LMD_TYPE_STRING) continue;
-                String* cs = it2s(chunk);
-                if (cs->len <= 0) continue;
-                cpos += snprintf(output_body + cpos, chunk_cap - cpos, "%X\r\n", (unsigned int)cs->len);
-                memcpy(output_body + cpos, cs->chars, cs->len);
-                cpos += (int)cs->len;
+                const char* chunk_data = NULL;
+                int chunk_len = 0;
+                if (!http_item_bytes(chunk, &chunk_data, &chunk_len) || chunk_len <= 0) continue;
+                cpos += snprintf(output_body + cpos, chunk_cap - cpos, "%X\r\n", (unsigned int)chunk_len);
+                memcpy(output_body + cpos, chunk_data, (size_t)chunk_len);
+                cpos += chunk_len;
                 memcpy(output_body + cpos, "\r\n", 2);
                 cpos += 2;
             }
@@ -1618,10 +1797,15 @@ static void http_response_flush(Item self) {
     write_req->data = full;
     write_req->response = self;
     write_req->callback = js_property_get(self, make_string_item("__end_callback__"));
+    write_req->len = total;
     write_req->close_after = close_after;
     write_req->final = true;
     wreq->data = write_req;
     conn->pending_response_writes++;
+    conn->bytes_written += total;
+    // HTTP accepted sockets share net.Socket counters; update when bytes are
+    // queued so response callbacks can observe bytesWritten before flush.
+    http_conn_update_socket_counters(conn);
 
     int write_status = uv_write(wreq, http_conn_stream(conn), &buf, 1,
         [](uv_write_t* req, int status) {
@@ -1634,6 +1818,7 @@ static void http_response_flush(Item self) {
             if (write_req) {
                 (void)status;
                 close_after = write_req->close_after;
+                http_conn_note_write_done(c, write_req->len);
                 if (write_req->data) mem_free(write_req->data);
                 mem_free(write_req);
             }
@@ -1648,6 +1833,10 @@ static void http_response_flush(Item self) {
         });
     if (write_status != 0) {
         if (conn->pending_response_writes > 0) conn->pending_response_writes--;
+        conn->bytes_written -= total;
+        if (conn->bytes_written < 0) conn->bytes_written = 0;
+        http_conn_note_write_done(conn, total);
+        http_conn_update_socket_counters(conn);
         // large pipelined responses can hit a synchronous libuv write error.
         // still settle the ServerResponse bookkeeping and end callback here;
         // otherwise common/countdown-style Node tests wait for a callback that
@@ -1667,6 +1856,7 @@ static void http_response_flush(Item self) {
             http_conn_maybe_close_after_response_writes(conn);
         }
     } else {
+        http_conn_note_write_queued(conn, total);
         // ServerResponse completion is JS stream bookkeeping: once bytes are
         // accepted by libuv, finish/end callbacks can run independently from
         // the slower kernel/socket flush. The native uv_write callback above
@@ -1690,28 +1880,21 @@ static void http_response_flush(Item self) {
     js_property_set(self, make_string_item("headersSent"), (Item){.item = b2it(true)});
 }
 
-static void http_response_flush_partial(Item self) {
+static bool http_response_flush_partial(Item self) {
     Item handle_item = js_property_get(self, make_string_item("__conn__"));
-    if (get_type_id(handle_item) != LMD_TYPE_INT) return;
+    if (get_type_id(handle_item) != LMD_TYPE_INT) return true;
     JsHttpConn* conn = (JsHttpConn*)(uintptr_t)it2i(handle_item);
-    if (!conn || conn->destroyed) return;
+    if (!conn || conn->destroyed) return true;
 
     Item status_item = js_property_get(self, make_string_item("statusCode"));
     int status = get_type_id(status_item) == LMD_TYPE_INT ? (int)it2i(status_item) : 200;
     const char* status_message = http_response_status_message(self, status);
-    Item body = js_property_get(self, make_string_item("__body__"));
-    const char* body_data = "";
-    int body_len = 0;
-    if (get_type_id(body) == LMD_TYPE_STRING) {
-        String* bs = it2s(body);
-        body_data = bs->chars;
-        body_len = (int)bs->len;
-    }
+    int body_len = http_response_body_len(self);
     int sent_len = http_response_int_prop(self, "__partial_body_len__");
     if (sent_len < 0) sent_len = 0;
     if (sent_len > body_len) sent_len = body_len;
     bool first_partial = !http_response_bool_prop(self, "__partial_sent__");
-    if (!first_partial && sent_len == body_len) return;
+    if (!first_partial && sent_len == body_len) return conn->pending_write_bytes <= HTTP_CONN_HIGH_WATER_MARK;
 
     char head[4096];
     int head_len = 0;
@@ -1743,16 +1926,17 @@ static void http_response_flush_partial(Item self) {
     int total = head_len + emit_len;
     char* full = (char*)mem_alloc(total, MEM_CAT_JS_RUNTIME);
     if (head_len > 0) memcpy(full, head, (size_t)head_len);
-    if (emit_len > 0) memcpy(full + head_len, body_data + sent_len, (size_t)emit_len);
+    if (emit_len > 0) http_response_copy_body_range(self, full + head_len, sent_len, emit_len);
     // response.write() can leave the response open; flushing the newly
     // buffered bytes lets clients receive/destroy the IncomingMessage.
-    http_conn_write_bytes(conn, make_string_item(full, total), false);
+    bool below_hwm = http_conn_write_bytes(conn, make_string_item(full, total), false);
     mem_free(full);
     js_property_set(self, make_string_item("__partial_sent__"), (Item){.item = b2it(true)});
     js_property_set(self, make_string_item("__partial_body_len__"), (Item){.item = i2it(body_len)});
     js_property_set(self, make_string_item("__headers_sent__"), (Item){.item = b2it(true)});
     js_property_set(self, make_string_item("__write_head_called__"), (Item){.item = b2it(true)});
     js_property_set(self, make_string_item("headersSent"), (Item){.item = b2it(true)});
+    return below_hwm;
 }
 
 static Item http_res_end_ex(Item self, Item data_item, Item encoding_item, Item callback_item) {
@@ -1922,6 +2106,7 @@ static Item make_response_object(JsHttpConn* conn) {
     js_property_set(res, make_string_item("statusCode"), (Item){.item = i2it(200)});
     js_property_set(res, make_string_item("__headers__"), http_new_header_object());
     js_property_set(res, make_string_item("__body__"), make_string_item("", 0));
+    js_property_set(res, make_string_item("__body_len__"), (Item){.item = i2it(0)});
     js_property_set(res, make_string_item("__sent__"), (Item){.item = b2it(false)});
     js_property_set(res, make_string_item("__headers_sent__"), (Item){.item = b2it(false)});
     js_property_set(res, make_string_item("__write_head_called__"), (Item){.item = b2it(false)});
@@ -1940,6 +2125,11 @@ static Item make_response_object(JsHttpConn* conn) {
     js_property_set(res, make_string_item("writableFinished"), (Item){.item = b2it(false)});
     js_property_set(res, make_string_item("writable"), (Item){.item = b2it(true)});
     js_property_set(res, make_string_item("writableCorked"), (Item){.item = i2it(0)});
+    if (conn) {
+        Item socket = http_conn_socket_object(conn);
+        js_property_set(res, make_string_item("socket"), socket);
+        js_property_set(res, make_string_item("connection"), socket);
+    }
 
     js_property_set(res, make_string_item("writeHead"),
                     js_new_function((void*)js_http_res_inst_writeHead, 3));
@@ -2333,6 +2523,7 @@ static void http_conn_maybe_close_after_response_writes(JsHttpConn* conn) {
 
 typedef struct HttpConnWriteReq {
     char* data;
+    int   len;
     bool  close_after;
 } HttpConnWriteReq;
 
@@ -2351,6 +2542,7 @@ static bool http_conn_write_bytes(JsHttpConn* conn, Item data_item, bool close_a
         memcpy(copy, data, (size_t)len);
     }
     write_req->data = copy;
+    write_req->len = len;
     write_req->close_after = close_after;
     req->data = write_req;
 
@@ -2359,12 +2551,13 @@ static bool http_conn_write_bytes(JsHttpConn* conn, Item data_item, bool close_a
         [](uv_write_t* req, int status) {
             HttpConnWriteReq* write_req = (HttpConnWriteReq*)req->data;
             bool close_after = false;
+            JsHttpConn* c = req && req->handle ? (JsHttpConn*)((uv_stream_t*)req->handle)->data : NULL;
             if (write_req) {
                 close_after = write_req->close_after;
+                http_conn_note_write_done(c, write_req->len);
                 if (write_req->data) mem_free(write_req->data);
                 mem_free(write_req);
             }
-            JsHttpConn* c = (JsHttpConn*)((uv_stream_t*)req->handle)->data;
             if (close_after && c && !c->destroyed) {
                 http_conn_close_now(c);
             }
@@ -2377,7 +2570,9 @@ static bool http_conn_write_bytes(JsHttpConn* conn, Item data_item, bool close_a
         if (close_after) http_conn_close_now(conn);
         return false;
     }
-    return true;
+    conn->bytes_written += len;
+    http_conn_update_socket_counters(conn);
+    return http_conn_note_write_queued(conn, len);
 }
 
 static JsHttpConn* http_conn_from_socket_object(Item self) {
@@ -2604,6 +2799,9 @@ static Item http_conn_socket_object(JsHttpConn* conn) {
     js_property_set(obj, make_string_item("setTimeout"),
                     js_new_function((void*)js_http_conn_socket_setTimeout, 3));
     js_property_set(obj, make_string_item("destroyed"), (Item){.item = b2it(false)});
+    js_property_set(obj, make_string_item("bytesRead"), (Item){.item = i2it(conn->bytes_read)});
+    js_property_set(obj, make_string_item("bytesWritten"), (Item){.item = i2it(conn->bytes_written)});
+    js_property_set(obj, make_string_item("bufferSize"), (Item){.item = i2it(0)});
     Item hwm = (Item){.item = i2it(16 * 1024)};
     Item readable_state = js_new_object();
     js_property_set(readable_state, make_string_item("highWaterMark"), hwm);
@@ -2818,6 +3016,8 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
     }
 
     if (nread > 0) {
+        conn->bytes_read += (int64_t)nread;
+        http_conn_update_socket_counters(conn);
         // accumulate data
         if (conn->recv_len + (int)nread > conn->recv_cap) {
             int new_cap = conn->recv_cap * 2;
@@ -3095,6 +3295,7 @@ static Item js_http_server_listening_tick(Item env_item) {
     if (get_type_id(on_listening) == LMD_TYPE_FUNC) {
         js_call_function(on_listening, self, NULL, 0);
     }
+    js_cluster_notify_worker_listening();
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
         js_call_function(callback, self, NULL, 0);
     }
