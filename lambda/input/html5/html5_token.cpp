@@ -93,8 +93,12 @@ void html5_token_add_attribute(Html5Token* token, String* name, Item value, Inpu
 
     // Add attribute to map - value is already a tagged Item (ITEM_NULL for empty attrs)
     map_put(token->attributes, name, value, input);
+#ifdef LAMBDA_TRACE_HTML5_TOKEN_ATTRIBUTES
     String* str = value.get_safe_string();
+    // Attribute-level tracing is intentionally opt-in; large registry pages
+    // can contain enough links to make debug logging dominate parse time.
     log_debug("html5_token_add_attribute: %s=%s", name->chars, str ? str->chars : "");
+#endif
 }
 
 void html5_token_append_to_tag_name(Html5Token* token, char c) {

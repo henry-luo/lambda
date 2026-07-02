@@ -292,7 +292,9 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
                 }
             }
             if (!img_surface) {
-                log_error("network: failed to load image: %s", res->local_path);
+                // Optional images can be corrupt or in an unsupported format;
+                // keep the DOM alive and repaint with the broken-image path.
+                log_warn("network: optional image unavailable: %s", res->local_path);
                 // schedule repaint to show broken image indicator
                 if (res->manager) {
                     resource_manager_schedule_repaint(res->manager, img_element);
