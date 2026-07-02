@@ -1382,6 +1382,23 @@ extern "C" Item js_create_native_mouse_event(const char* type,
     return ev;
 }
 
+extern "C" Item js_create_native_drag_event(const char* type,
+    int client_x, int client_y, Item data_transfer,
+    bool ctrl, bool shift, bool alt, bool meta)
+{
+    // DragEvent extends MouseEvent; reuse the MouseEvent ctor for geometry and
+    // attach the shared DataTransfer afterward (as js_create_native_input_event
+    // stamps fields onto the constructed event). button/buttons=0/1 mirror a
+    // primary-button drag.
+    Item ev = js_create_native_mouse_event(type, client_x, client_y,
+        /*button=*/0, /*buttons=*/1, ctrl, shift, alt, meta,
+        /*detail=*/0, ItemNull);
+    if (data_transfer.item != 0 && data_transfer.item != ITEM_NULL) {
+        event_set_item(ev, "dataTransfer", data_transfer);
+    }
+    return ev;
+}
+
 extern "C" Item js_create_native_keyboard_event(const char* type,
     const char* key, const char* code,
     bool ctrl, bool shift, bool alt, bool meta,

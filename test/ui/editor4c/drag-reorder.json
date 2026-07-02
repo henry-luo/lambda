@@ -1,0 +1,17 @@
+{
+  "name": "editor4c: dragging an image reorders its block to the top",
+  "_note": "Phase B — block drag-reorder via HTML5 drag-and-drop. The seed doc's <figure><img> is the 7th top block (index 6), immediately after the 'Image' <h2>. Images are draggable by default, so drag_and_drop starts a native drag on the img; the substrate now dispatches real JS DragEvents (dragstart/dragover/drop/dragend) carrying a session DataTransfer to the editor's addEventListener handlers. onDragStart records the figure's block index; onDragOver preventDefaults (gating the drop) and mutates the DOM (drop-line) — which wipes the native DragDropState, so JS-DnD is driven by an independent flag; onDrop runs cmdMoveNode, dropping at the top → figure becomes the 1st block. Verifies the reorder: the figure no longer sits right after the 'Image' h2, and is now the first top block — while still present with its img intact.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface h2 + figure"}, "equals": 1},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface figure"}, "equals": 1},
+    {"type": "drag_and_drop", "target": {"selector": ".rdt-surface figure img"}, "to_target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 200},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface figure"}, "equals": 1},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface figure img"}, "equals": 1},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface h2 + figure"}, "equals": 0},
+    {"type": "assert_count", "target": {"selector": ".rdt-editor > figure:nth-child(1)"}, "equals": 1}
+  ]
+}

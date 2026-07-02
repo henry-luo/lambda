@@ -1071,6 +1071,14 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->to_x = reader.get("to_x").asInt32();
         ev->to_y = reader.get("to_y").asInt32();
         ev->button = reader.get("button").asInt32();
+        // Relative delta form: with a `target` start and dx/dy, the destination
+        // is start+(dx,dy). Lets a fixture drag a resolved element (e.g. a resize
+        // handle whose absolute position isn't known statically) by an offset.
+        if (reader.has("dx") || reader.has("dy")) {
+            ev->has_drag_delta = true;
+            ev->drag_dx = reader.get("dx").asInt32();
+            ev->drag_dy = reader.get("dy").asInt32();
+        }
         parse_target(reader, ev);
         // Parse to_target for destination selector/text
         ItemReader to_target_item = reader.get("to_target");
@@ -3376,8 +3384,13 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             if (ev->target_selector || ev->target_text) {
                 if (!resolve_target(ev, uicon->document, &drag_x, &drag_y)) break;
             }
-            // Resolve end position from to_target or raw to_x/to_y
+            // Resolve end position: relative delta from the resolved start,
+            // else to_target, else raw to_x/to_y.
             int drag_to_x = ev->to_x, drag_to_y = ev->to_y;
+            if (ev->has_drag_delta) {
+                drag_to_x = drag_x + ev->drag_dx;
+                drag_to_y = drag_y + ev->drag_dy;
+            }
             if (ev->to_target_selector && uicon->document) {
                 View* to_elem = find_element_by_selector(uicon->document, ev->to_target_selector);
                 if (to_elem) {
@@ -3430,11 +3443,22 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            // Verify draggable attribute
+            // Verify draggable attribute. Browser-faithful: <img> and <a href>
+            // are draggable by default (no explicit draggable attr) unless
+            // draggable="false" — mirror the native drag-initiation check.
             DomElement* src_dom = src_view->as_element();
             if (src_dom) {
                 const char* draggable = dom_element_get_attribute(src_dom, "draggable");
-                if (!draggable || strcmp(draggable, "true") != 0) {
+                bool ok = draggable && strcmp(draggable, "true") == 0;
+                if (!ok && !(draggable && strcmp(draggable, "false") == 0)) {
+                    const char* tag = src_dom->tag_name;
+                    if (tag && (strcasecmp(tag, "img") == 0 ||
+                                (strcasecmp(tag, "a") == 0 &&
+                                 dom_element_get_attribute(src_dom, "href")))) {
+                        ok = true;
+                    }
+                }
+                if (!ok) {
                     log_error("event_sim: drag_and_drop - source '%s' is not draggable (draggable='%s')",
                         ev->target_selector, draggable ? draggable : "null");
                     ctx->fail_count++;

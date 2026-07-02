@@ -4807,6 +4807,46 @@ static bool radiant_dispatch_clipboard_event(EventContext* evcon, View* target,
     return prevented;
 }
 
+// Stage 4C Phase B: HTML5 drag-and-drop JS event dispatch. The native drag
+// machinery (DragDropState) only invokes Lambda-template handlers and only on
+// `dropzone`-attributed elements; script editors that reorder blocks via
+// addEventListener('dragstart'|'dragover'|'drop') with a DataTransfer never see
+// those. These helpers dispatch real JS DragEvents to the element under the
+// cursor with a session-persistent DataTransfer, independent of `dropzone`.
+extern "C" void js_drag_session_begin(void);
+extern "C" void js_drag_session_end(void);
+extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
+        const char* type, int client_x, int client_y);
+
+static bool radiant_dispatch_drag_event(EventContext* evcon, View* target,
+                                        const char* type, int cx, int cy)
+{
+    DomElement* dom_target = radiant_view_to_dom_element(target);
+    if (!dom_target) return false;
+    JsCtxScope scope;
+    if (!radiant_js_ctx_enter(&scope, evcon)) return false;
+    auto t_start = std::chrono::high_resolution_clock::now();
+    Item target_item = js_dom_wrap_element(dom_target);
+    bool prevented = js_dispatch_drag_event_to_element(target_item, type, cx, cy);
+    radiant_js_ctx_exit(&scope, evcon, t_start);
+    log_debug("JSDND: dispatched '%s' at (%d,%d) prevented=%d", type, cx, cy, prevented);
+    return prevented;
+}
+
+// JS-DnD overlay state for the single active drag gesture (Radiant tracks one
+// DragDropState at a time). `drop_allowed` mirrors HTML5: a drop fires only
+// when the most recent dragover on the target called preventDefault().
+//
+// This lifecycle is DELIBERATELY decoupled from the native DragDropState:
+// script editors mutate the DOM inside dragover (e.g. inserting a drop-line),
+// which triggers Radiant's full view-tree rebuild → doc_state_clear_drag_drop,
+// wiping the native drag mid-gesture. Our flag + a DOM-node source (which
+// survives the rebuild; only layout views are freed) keep the JS DnD sequence
+// running dragstart→dragover*→drop→dragend regardless.
+static bool  g_jsdnd_active = false;
+static bool  g_jsdnd_drop_allowed = false;
+static View* g_jsdnd_source = nullptr;  // drag source as a DOM element (survives relayout)
+
 /**
  * §7 unification (U-5): dispatch a "wheel" event via the JS EventTarget
  * pipeline. Returns true if default action (native scroll) should be
@@ -6542,6 +6582,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     log_debug("DRAG START: source=%p distance=%.1f", dd->source_view, sqrtf(dx*dx + dy*dy));
                     // dispatch "dragstart" to source element
                     dispatch_lambda_handler(&evcon, dd->source_view, "dragstart");
+                    // Stage 4C: also fire a real JS DragEvent so script editors
+                    // (addEventListener) get a DataTransfer. The session is
+                    // opened inside the dispatch (needs the JS ctx). Coord space
+                    // matches the JS mouse events.
+                    g_jsdnd_active = true;
+                    g_jsdnd_drop_allowed = false;
+                    g_jsdnd_source = dd->source_view;
+                    radiant_dispatch_drag_event(&evcon, dd->source_view, "dragstart",
+                                                (int)dd->current_x, (int)dd->current_y);
                 }
             }
 
@@ -6610,6 +6659,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 evcon.new_cursor = CSS_VALUE_POINTER;
                 evcon.need_repaint = true;
             }
+        }
+
+        // Stage 4C: JS dragover to the element under the cursor, driven by our
+        // own flag so it keeps firing even after the native DragDropState was
+        // cleared by a DOM mutation in a prior dragover handler. Its
+        // preventDefault() decides whether a drop is allowed on release.
+        if (g_jsdnd_active && evcon.target) {
+            g_jsdnd_drop_allowed = radiant_dispatch_drag_event(&evcon,
+                static_cast<View*>(evcon.target), "dragover",
+                (int)motion->x, (int)motion->y);
         }
 
         // Handle text selection drag (supports cross-view selection)
@@ -7362,7 +7421,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (node->node_type == DOM_NODE_ELEMENT) {
                     DomElement* elem = lam::dom_require_element(node);
                     const char* draggable = dom_element_get_attribute(elem, "draggable");
-                    if (draggable && strcmp(draggable, "true") == 0) {
+                    bool is_draggable = draggable && strcmp(draggable, "true") == 0;
+                    // Browser-faithful: <img> and <a href> are draggable by
+                    // default (no draggable attr) unless draggable="false".
+                    if (!is_draggable &&
+                        !(draggable && strcmp(draggable, "false") == 0)) {
+                        const char* tag = elem->tag_name;
+                        if (tag && (strcasecmp(tag, "img") == 0 ||
+                                    (strcasecmp(tag, "a") == 0 &&
+                                     dom_element_get_attribute(elem, "href")))) {
+                            is_draggable = true;
+                        }
+                    }
+                    if (is_draggable) {
                         draggable_elem = elem;
                         break;
                     }
@@ -7388,6 +7459,50 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         if (event->type == RDT_EVENT_MOUSE_UP) {
+            // Dispatch the JS 'mouseup' event through the EventTarget pipeline
+            // (browsers fire mouseup before click). Only mousedown + click were
+            // dispatched before, so window/document-level drag listeners that
+            // finish on mouseup — e.g. an editor's image-resize / block
+            // drag-reorder using window.addEventListener('mouseup') — never ran
+            // under `view`. It bubbles to document/window like mousedown does.
+            if (evcon.target) {
+                bool up_prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
+                    "mouseup", btn_event->x, btn_event->y,
+                    btn_event->button, 1 << btn_event->button,
+                    (btn_event->mods & GLFW_MOD_CONTROL) != 0,
+                    (btn_event->mods & GLFW_MOD_SHIFT) != 0,
+                    (btn_event->mods & GLFW_MOD_ALT) != 0,
+                    (btn_event->mods & GLFW_MOD_SUPER) != 0,
+                    1);
+                if (up_prevented) evcon.default_prevented = true;
+            }
+
+            // Stage 4C: JS drop + dragend for script editors, driven by our own
+            // flag (the native DragDropState is typically already cleared here
+            // because the editor mutated the DOM during dragover). Fire a final
+            // dragover at the release point; a drop follows only if that (the
+            // last dragover) was canceled — HTML5 gates drop on preventDefault.
+            // Then dragend to the source DOM element (survived any relayout).
+            if (g_jsdnd_active) {
+                if (evcon.target) {
+                    bool ov = radiant_dispatch_drag_event(&evcon,
+                        static_cast<View*>(evcon.target), "dragover",
+                        (int)btn_event->x, (int)btn_event->y);
+                    if (ov || g_jsdnd_drop_allowed) {
+                        radiant_dispatch_drag_event(&evcon,
+                            static_cast<View*>(evcon.target), "drop",
+                            (int)btn_event->x, (int)btn_event->y);
+                    }
+                }
+                if (g_jsdnd_source) {
+                    radiant_dispatch_drag_event(&evcon, g_jsdnd_source,
+                        "dragend", (int)btn_event->x, (int)btn_event->y);
+                }
+                js_drag_session_end();
+                g_jsdnd_active = false;
+                g_jsdnd_source = nullptr;
+            }
+
             // Handle drag-and-drop completion first
             bool drag_handled = false;
             if (state && state->drag_drop) {
