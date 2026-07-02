@@ -213,6 +213,106 @@ static const RadiantOnlineViewCase g_online_view_cases[] = {
     {"go_doc", "https://go.dev/doc/", true},
     {"go_spec", "https://go.dev/ref/spec", true},
     {"php_manual", "https://www.php.net/manual/en/", true},
+    {"mdn_html", "https://developer.mozilla.org/en-US/docs/Web/HTML", true},
+    {"mdn_css", "https://developer.mozilla.org/en-US/docs/Web/CSS", true},
+    {"mdn_js_reference", "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference", true},
+    {"whatwg_html", "https://html.spec.whatwg.org/multipage/", true},
+    {"whatwg_dom", "https://dom.spec.whatwg.org/", true},
+    {"whatwg_fetch", "https://fetch.spec.whatwg.org/", true},
+    {"tc39_ecma262", "https://tc39.es/ecma262/", true},
+    {"tc39_ecma402", "https://tc39.es/ecma402/", true},
+    {"nodejs_api", "https://nodejs.org/api/", true},
+    {"nodejs_fs", "https://nodejs.org/api/fs.html", true},
+    {"typescript_docs", "https://www.typescriptlang.org/docs/", true},
+    {"typescript_handbook", "https://www.typescriptlang.org/docs/handbook/intro.html", true},
+    {"go_effective", "https://go.dev/doc/effective_go", true},
+    {"go_pkg_std", "https://pkg.go.dev/std", true},
+    {"rust_cargo_book", "https://doc.rust-lang.org/cargo/", true},
+    {"rust_reference", "https://doc.rust-lang.org/reference/", true},
+    {"boost_docs", "https://www.boost.org/doc/libs/", true},
+    {"eigen_docs", "https://eigen.tuxfamily.org/dox/", true},
+    {"qt_docs", "https://doc.qt.io/qt-6/", true},
+    {"gtk_docs", "https://docs.gtk.org/gtk4/", true},
+    {"webkit", "https://webkit.org/", true},
+    {"mesa3d", "https://www.mesa3d.org/", true},
+    {"ninja_manual", "https://ninja-build.org/manual.html", false},
+    {"meson_docs", "https://mesonbuild.com/", true},
+    {"bazel_docs", "https://bazel.build/docs", true},
+    {"clang_docs", "https://clang.llvm.org/docs/", true},
+    {"lld_docs", "https://lld.llvm.org/", true},
+    {"gdb_docs", "https://sourceware.org/gdb/documentation/", true},
+    {"binutils_docs", "https://sourceware.org/binutils/docs/", true},
+    {"gitlab_docs", "https://docs.gitlab.com/", true},
+    {"github_docs", "https://docs.github.com/en", true},
+    {"docker_docs", "https://docs.docker.com/", true},
+    {"kubernetes_docs", "https://kubernetes.io/docs/home/", true},
+    {"prometheus_docs", "https://prometheus.io/docs/introduction/overview/", true},
+    {"grafana_docs", "https://grafana.com/docs/", true},
+    {"terraform_docs", "https://developer.hashicorp.com/terraform/docs", true},
+    {"ansible_docs", "https://docs.ansible.com/ansible/latest/index.html", true},
+    {"cmake_buildsystem", "https://cmake.org/cmake/help/latest/manual/cmake-buildsystem.7.html", true},
+    {"python_pep8", "https://peps.python.org/pep-0008/", true},
+    {"python_pep3333", "https://peps.python.org/pep-3333/", true},
+    {"java_jls", "https://docs.oracle.com/javase/specs/jls/se21/html/index.html", true},
+    {"java_api", "https://docs.oracle.com/en/java/javase/21/docs/api/index.html", true},
+    {"kotlin_docs", "https://kotlinlang.org/docs/home.html", true},
+    {"scala_docs", "https://docs.scala-lang.org/", true},
+    {"clojure", "https://clojure.org/", true},
+    {"erlang_docs", "https://www.erlang.org/doc/", true},
+    {"elixir_docs", "https://hexdocs.pm/elixir/", true},
+    {"ocaml_docs", "https://ocaml.org/docs", true},
+    {"haskell_docs", "https://www.haskell.org/documentation/", true},
+    {"racket_docs", "https://docs.racket-lang.org/", true},
+    {"w3c_css_snapshot", "https://www.w3.org/TR/CSS/", true},
+    {"w3c_webgpu", "https://www.w3.org/TR/webgpu/", true},
+    {"w3c_websockets", "https://www.w3.org/TR/websockets/", true},
+    {"w3c_wai_aria", "https://www.w3.org/TR/wai-aria-1.2/", true},
+    {"chromium_docs", "https://www.chromium.org/developers/", true},
+    {"v8_docs", "https://v8.dev/docs", true},
+    {"webkit_blog", "https://webkit.org/blog/", true},
+    {"servo_docs", "https://servo.org/", true},
+    {"electron_docs", "https://www.electronjs.org/docs/latest/", true},
+    {"deno_docs", "https://docs.deno.com/", true},
+    {"bun_docs", "https://bun.sh/docs", true},
+    {"npm_docs", "https://docs.npmjs.com/", true},
+    {"yarn_docs", "https://yarnpkg.com/getting-started", true},
+    {"pnpm_docs", "https://pnpm.io/", true},
+    {"vite_docs", "https://vite.dev/guide/", true},
+    {"webpack_docs", "https://webpack.js.org/concepts/", true},
+    {"rollup_docs", "https://rollupjs.org/introduction/", true},
+    {"eslint_docs", "https://eslint.org/docs/latest/", true},
+    {"prettier_docs", "https://prettier.io/docs/", true},
+    {"react_docs", "https://react.dev/learn", true},
+    {"vue_docs", "https://vuejs.org/guide/introduction.html", true},
+    {"svelte_docs", "https://svelte.dev/docs", true},
+    {"angular_docs", "https://angular.dev/overview", true},
+    {"solid_docs", "https://docs.solidjs.com/", true},
+    {"nextjs_docs", "https://nextjs.org/docs", true},
+    {"nuxt_docs", "https://nuxt.com/docs/getting-started/introduction", true},
+    {"astro_docs", "https://docs.astro.build/en/getting-started/", true},
+    {"remix_docs", "https://remix.run/docs/en/main", true},
+    {"tailwind_docs", "https://tailwindcss.com/docs", true},
+    {"bootstrap_docs", "https://getbootstrap.com/docs/5.3/getting-started/introduction/", true},
+    {"bulma_docs", "https://bulma.io/documentation/", true},
+    {"material_ui_docs", "https://mui.com/material-ui/getting-started/", true},
+    {"ant_design_docs", "https://ant.design/docs/react/introduce", true},
+    {"chakra_docs", "https://chakra-ui.com/docs/get-started/installation", true},
+    {"cloudflare_docs", "https://developers.cloudflare.com/", true},
+    {"aws_docs", "https://docs.aws.amazon.com/", true},
+    {"azure_docs", "https://learn.microsoft.com/en-us/azure/", true},
+    {"gcp_docs", "https://cloud.google.com/docs", true},
+    {"digitalocean_docs", "https://docs.digitalocean.com/", true},
+    {"supabase_docs", "https://supabase.com/docs", true},
+    {"firebase_docs", "https://firebase.google.com/docs", true},
+    {"vercel_docs", "https://vercel.com/docs", true},
+    {"netlify_docs", "https://docs.netlify.com/", true},
+    {"nginx_unit_docs", "https://unit.nginx.org/", true},
+    {"redis_docs", "https://redis.io/docs/latest/", true},
+    {"mongodb_docs", "https://www.mongodb.com/docs/", true},
+    {"mysql_docs", "https://dev.mysql.com/doc/", true},
+    {"mariadb_docs", "https://mariadb.com/kb/en/documentation/", true},
+    {"duckdb_docs", "https://duckdb.org/docs/", true},
+    {"grafana_loki_docs", "https://grafana.com/docs/loki/latest/", true},
 };
 
 static bool online_view_file_readable(const char* path) {
@@ -1002,6 +1102,46 @@ TEST(RadiantOnlineViewTest, LoadsNewOnlinePages031To040) {
 
 TEST(RadiantOnlineViewTest, LoadsNewOnlinePages041To050) {
     online_view_expect_case_range(141, 151);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages051To060) {
+    online_view_expect_case_range(151, 161);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages061To070) {
+    online_view_expect_case_range(161, 171);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages071To080) {
+    online_view_expect_case_range(171, 181);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages081To090) {
+    online_view_expect_case_range(181, 191);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages091To100) {
+    online_view_expect_case_range(191, 201);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages101To110) {
+    online_view_expect_case_range(201, 211);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages111To120) {
+    online_view_expect_case_range(211, 221);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages121To130) {
+    online_view_expect_case_range(221, 231);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages131To140) {
+    online_view_expect_case_range(231, 241);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages141To150) {
+    online_view_expect_case_range(241, 251);
 }
 
 #endif

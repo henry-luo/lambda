@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Script total budget skip repro</title>
+  <script>
+    window.__radiantBudgetProbe = "first script ran";
+  </script>
+  <script>
+    window.__radiantBudgetProbe += " and second script ran";
+    window.__radiantBudgetPadding = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  </script>
+</head>
+<body>
+  <h1>Script total budget skip repro</h1>
+  <p>Later page scripts should be skippable when the browser JS source budget is exhausted.</p>
+</body>
+</html>

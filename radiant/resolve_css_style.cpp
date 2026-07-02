@@ -282,7 +282,13 @@ static const char* css_select_font_shorthand_family(LayoutContext* lycon,
 static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var_name) {
     if (!lycon || !lycon->view || !var_name) return nullptr;
 
-    DomElement* element = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
+    DomNode* current = lycon->view;
+    while (current && !current->is_element()) {
+        current = current->parent;
+    }
+    // Custom properties inherit through elements; layout can resolve var()
+    // while the active view is a text node, so start from its nearest element.
+    DomElement* element = current ? lam::dom_require<DOM_NODE_ELEMENT>(current) : nullptr;
 
     // Search up the DOM tree (CSS variables inherit)
     while (element) {
@@ -1045,10 +1051,16 @@ static bool apply_corner_radius_value(LayoutContext* lycon, int prop_id, Corner*
     return true;
 }
 
-// Helper: resolve var() function to get the actual CSS value
-// Returns the resolved value, or the original value if not a var() function
-// Recursively resolves nested var() calls
-const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value) {
+static bool css_var_stack_contains(const char** var_stack, int stack_count, const char* var_name) {
+    if (!var_stack || !var_name) return false;
+    for (int i = 0; i < stack_count; i++) {
+        if (var_stack[i] && strcmp(var_stack[i], var_name) == 0) return true;
+    }
+    return false;
+}
+
+static const CssValue* resolve_var_function_inner(LayoutContext* lycon, const CssValue* value,
+                                                  const char** var_stack, int stack_count) {
     if (!value || value->type != CSS_VALUE_TYPE_FUNCTION) {
         return value;  // Not a function, return as-is
     }
@@ -1072,24 +1084,49 @@ const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value
     if (!var_name) {
         // No variable name found, try fallback
         if (func->arg_count >= 2 && func->args[1]) {
-            return resolve_var_function(lycon, func->args[1]);
+            return resolve_var_function_inner(lycon, func->args[1], var_stack, stack_count);
         }
         return nullptr;  // No value found
+    }
+
+    // Custom properties can legally form cycles on real pages; a cycle makes
+    // the substituted value invalid, but Radiant must not recurse forever.
+    if (stack_count >= 32 || css_var_stack_contains(var_stack, stack_count, var_name)) {
+        if (func->arg_count >= 2 && func->args[1]) {
+            return resolve_var_function_inner(lycon, func->args[1], var_stack, stack_count);
+        }
+        return nullptr;
     }
 
     // Look up the variable
     const CssValue* var_value = lookup_css_variable(lycon, var_name);
     if (var_value) {
         // Recursively resolve in case the variable value is also a var()
-        return resolve_var_function(lycon, var_value);
+        const char* next_stack[32];
+        for (int i = 0; i < stack_count; i++) next_stack[i] = var_stack[i];
+        next_stack[stack_count] = var_name;
+        const CssValue* resolved = resolve_var_function_inner(lycon, var_value, next_stack, stack_count + 1);
+        if (resolved) return resolved;
+        if (func->arg_count >= 2 && func->args[1]) {
+            return resolve_var_function_inner(lycon, func->args[1], var_stack, stack_count);
+        }
+        return nullptr;
     }
 
     // Variable not found, try fallback
     if (func->arg_count >= 2 && func->args[1]) {
-        return resolve_var_function(lycon, func->args[1]);
+        return resolve_var_function_inner(lycon, func->args[1], var_stack, stack_count);
     }
 
     return nullptr;  // No value found
+}
+
+// Helper: resolve var() function to get the actual CSS value
+// Returns the resolved value, or the original value if not a var() function
+// Recursively resolves nested var() calls
+const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value) {
+    const char* var_stack[32];
+    return resolve_var_function_inner(lycon, value, var_stack, 0);
 }
 
 // Helper: extract a numeric value from a CssValue (number, percentage, length)
@@ -3324,6 +3361,25 @@ static GridTrackList* replace_grid_track_list(GridTrackList** track_list_ptr, in
     return *track_list_ptr;
 }
 
+static bool css_value_can_be_grid_track_size(const CssValue* val) {
+    return val && (val->type == CSS_VALUE_TYPE_LENGTH ||
+                   val->type == CSS_VALUE_TYPE_PERCENTAGE ||
+                   val->type == CSS_VALUE_TYPE_KEYWORD ||
+                   val->type == CSS_VALUE_TYPE_NUMBER ||
+                   val->type == CSS_VALUE_TYPE_FUNCTION);
+}
+
+static void append_grid_track_size(GridTrackList* track_list, GridTrackSize* track_size) {
+    if (!track_size) return;
+    // The first pass estimates capacity from parsed CSS values; keep this guard
+    // so future valid track forms degrade without writing past the track array.
+    if (!track_list || track_list->track_count >= track_list->allocated_tracks) {
+        destroy_grid_track_size(track_size);
+        return;
+    }
+    track_list->tracks[track_list->track_count++] = track_size;
+}
+
 // Parse grid track list from CSS value list, handling repeat() functions
 // The list may contain: lengths, percentages, keywords, or repeat(count, track-size)
 // Parse grid track list from CSS value list
@@ -3360,9 +3416,7 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
                 // minmax(), fit-content() - count as 1 track
                 total_tracks += 1;
             }
-        } else if (val->type == CSS_VALUE_TYPE_LENGTH ||
-                   val->type == CSS_VALUE_TYPE_PERCENTAGE ||
-                   val->type == CSS_VALUE_TYPE_KEYWORD) {
+        } else if (css_value_can_be_grid_track_size(val)) {
             total_tracks++;
         }
         // Legacy CUSTOM handling for old-style parsing
@@ -3376,9 +3430,7 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
                     for (int j = i + 2; j < count; j++) {
                         CssValue* tv = values[j];
                         if (!tv || tv->type == CSS_VALUE_TYPE_CUSTOM) break;
-                        if (tv->type == CSS_VALUE_TYPE_LENGTH ||
-                            tv->type == CSS_VALUE_TYPE_PERCENTAGE ||
-                            tv->type == CSS_VALUE_TYPE_KEYWORD) {
+                        if (css_value_can_be_grid_track_size(tv)) {
                             track_values++;
                         }
                     }
@@ -3423,7 +3475,7 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
                     // Keep repeat() as a single track - will be expanded at layout time
                     GridTrackSize* ts = parse_repeat_function(val);
                     if (ts) {
-                        track_list->tracks[track_list->track_count++] = ts;
+                        append_grid_track_size(track_list, ts);
                         track_list->is_repeat = true;
                     }
                 } else if (count_val && count_val->type == CSS_VALUE_TYPE_NUMBER) {
@@ -3434,7 +3486,7 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
                         for (int a = 1; a < val->data.function->arg_count && track_list->track_count < track_list->allocated_tracks; a++) {
                             GridTrackSize* ts = parse_css_value_to_track_size(val->data.function->args[a]);
                             if (ts) {
-                                track_list->tracks[track_list->track_count++] = ts;
+                                append_grid_track_size(track_list, ts);
                             }
                         }
                     }
@@ -3443,7 +3495,7 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
                 // minmax() or other function
                 GridTrackSize* ts = parse_css_value_to_track_size(val);
                 if (ts) {
-                    track_list->tracks[track_list->track_count++] = ts;
+                    append_grid_track_size(track_list, ts);
                 }
             }
             i++;
@@ -3504,9 +3556,7 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
                     CssValue* tv = values[i];
                     if (!tv) break;
                     if (tv->type == CSS_VALUE_TYPE_CUSTOM) { i++; break; }
-                    if (tv->type == CSS_VALUE_TYPE_LENGTH ||
-                        tv->type == CSS_VALUE_TYPE_PERCENTAGE ||
-                        tv->type == CSS_VALUE_TYPE_KEYWORD) {
+                    if (css_value_can_be_grid_track_size(tv)) {
                         repeat_tracks[repeat_track_count++] = tv;
                     }
                     i++;
@@ -3516,7 +3566,7 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
                     for (int t = 0; t < repeat_track_count && track_list->track_count < track_list->allocated_tracks; t++) {
                         GridTrackSize* ts = parse_css_value_to_track_size(repeat_tracks[t]);
                         if (ts) {
-                            track_list->tracks[track_list->track_count++] = ts;
+                            append_grid_track_size(track_list, ts);
                         }
                     }
                 }
@@ -3529,7 +3579,7 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
         // Regular track value
         GridTrackSize* ts = parse_css_value_to_track_size(val);
         if (ts) {
-            track_list->tracks[track_list->track_count++] = ts;
+            append_grid_track_size(track_list, ts);
         }
         i++;
     }

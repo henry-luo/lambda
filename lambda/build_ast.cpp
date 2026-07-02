@@ -11,6 +11,7 @@
 #include "../lib/str.h"
 #include "../lib/strview.h"
 #include "../lib/arraylist.h"
+#include "../lib/file.h"
 #include "../lib/recursion_guard.hpp"
 #include <errno.h>
 #include <algorithm>  // for std::max
@@ -8028,6 +8029,20 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
     }
 }
 
+#ifndef SIMPLE_SCHEMA_PARSER
+static bool record_existing_lambda_import_failure(Transpiler* tp, TSNode import_node,
+        AstImportNode* ast_node, const char* resolved_path) {
+    if (!file_exists(resolved_path)) return false;
+
+    // Existing .ls modules that fail parse/compile must poison the importer;
+    // otherwise the fallback path can let the caller compile and run anyway.
+    record_semantic_error(tp, import_node, ERR_IMPORT_ERROR,
+        "failed to import Lambda module '%.*s': existing source '%s' did not compile",
+        (int)ast_node->module.length, ast_node->module.str, resolved_path);
+    return true;
+}
+#endif
+
 AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
     log_debug("build_module_import");
     AstImportNode* ast_node = (AstImportNode*)alloc_ast_node(
@@ -8127,6 +8142,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
             }
             else {
                 #ifndef SIMPLE_SCHEMA_PARSER
+                if (!record_existing_lambda_import_failure(tp, import_node, ast_node, buf->str)) {
                 // .ls failed — try .js fallback for cross-language import
                 buf->str[buf->length - 2] = 'j';
                 buf->str[buf->length - 1] = 's';
@@ -8168,6 +8184,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
 #ifdef LAMBDA_PYTHON
                     }
 #endif
+                }
                 }
                 #endif
             }
@@ -8224,6 +8241,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
             }
             else {
                 #ifndef SIMPLE_SCHEMA_PARSER
+                if (!record_existing_lambda_import_failure(tp, import_node, ast_node, buf->str)) {
                 // .ls failed — try .js fallback for cross-language import
                 buf->str[buf->length - 2] = 'j';
                 buf->str[buf->length - 1] = 's';
@@ -8263,6 +8281,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
 #ifdef LAMBDA_PYTHON
                     }
 #endif
+                }
                 }
                 #endif
             }
