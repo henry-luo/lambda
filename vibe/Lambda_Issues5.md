@@ -254,7 +254,14 @@ procedural scripts do not emit a stray `null`.
 
 ---
 
-```
+## 13. Empty string/null conflation
+
+**Status: ✅ No Fix / by design (2026-07-02)** — Lambda normalizes empty
+string literal `""` and empty symbol literal `''` to `null` in its value/null
+semantics. Treat user data strings and symbols as non-empty values; use `null`
+for the empty case.
+
+```lambda
 let s = ""
 print(s == null)         // -> true
 print(len(s))            // -> 0
@@ -262,16 +269,16 @@ let m = { name: "" }
 print(m.name)            // -> null     (NOT "")
 ```
 
-`len("") == 0` but `"" == null` is `true`. This means any record field
-or `var` initialised with `""` reads back as `null`, and downstream code
-that branches on `field == null` takes the wrong path.
+`len("") == 0` because `""` is normalized to `null`, and `len(null)` is `0`.
+This means any record field or `var` initialised with `""` reads back as
+`null`, and downstream code that branches on `field == null` takes the null
+path by design.
 
-**Asks**:
-- Treat `""` as a real empty string distinct from null.
-- At minimum, document this prominently — it is a one-line cause of
-  hours-long debugging.
-```
-```
+**Documentation resolution**:
+- Document prominently that `""` and `''` are `null` in Lambda.
+- Call out that Lambda string and symbol user-data values should be treated as
+  non-empty, with `null` representing the empty case.
+
 ---
 
 ## 14. `var` declared with a "null-shaped" initial value cannot be reassigned
@@ -300,7 +307,7 @@ subsequent assignments of differently-typed values are silently dropped
 — no error, no warning, the variable just stays `null`.
 
 This combines lethally with #13: `var s = ""; while (...) { s = s ++ ch }`
-appears reasonable but produces an empty string forever.
+appears reasonable but stays `null` forever.
 
 **Asks**:
 - Either widen the inferred type on assignment, or raise a type error.
@@ -679,21 +686,9 @@ let s = ("a" ++
 
 ---
 
-### 28. `pn` does not implicitly return an `if/else` expression value
-
-**Severity: HIGH** — `pn` must use explicit `return` in every branch. Otherwise, callers get `null`/stale value, causing non-terminating loops.
-
----
-
 ### 29. `var` declared with a "null-shaped" or empty-string initial value cannot be reassigned
 
 **Severity: HIGH** — `var s = ""` or `var x = null` locks the var as null-typed forever; subsequent assignments are dropped with no error. Use a non-null, non-empty sentinel (e.g. `" "` or `{}`) or an int flag.
-
----
-
-### 30. `let x = if (cond) a else b` returns `null` in `pn`
-
-**Severity: HIGH** — In `pn`, `let x = if (cond) a else b` always returns `null`, even when `cond` is true. Use imperative `if`/`else` with explicit assignment instead.
 
 ---
 
@@ -706,9 +701,9 @@ let s = ("a" ++
    they push all real logic into `fn` and reduce `pn` to a thin
    imperative shell — which is the opposite of how the docs frame the
    two modes.
-2. **Null/empty conflation and var-locking** (#13, #14) silently corrupt
-   data. `""` reads as null from a record field; `var s = ""` (or
-   `var x = null`) becomes a permanent null sink that swallows every
+2. **Empty text normalization and var-locking** (#13, #14) silently surprise
+   users when undocumented. `""` and `''` are null by design; `var s = ""`
+   (or `var x = null`) becomes a permanent null sink that swallows every
    subsequent assignment with no error. These two interact catastrophically
    with #15.
 3. **Operator overloading gotchas** — list `+` is by-design broadcast /
@@ -732,5 +727,5 @@ let s = ("a" ++
    error. Silent assignment failure is the worst possible outcome.
 2. Make `pn` either implicitly return its body value, or error at
    compile time when a branch reaches the end without `return`.
-3. Make `\"\" == null` false (or at least make field reads of `\"\"`
-   return `\"\"`, not `null`).
+3. Prominently document that `\"\"` and `''` normalize to `null`, and avoid
+   using them as mutable string/symbol sentinels.

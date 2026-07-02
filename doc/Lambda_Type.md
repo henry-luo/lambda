@@ -687,6 +687,10 @@ int that (5 < ~ < 10)              // Integer between 5 and 10 (exclusive)
 string that (len(~) > 0)           // Non-empty string
 ```
 
+Lambda normalizes `""` and `''` to `null`, so user-data `string` and `symbol`
+values should be treated as non-empty. A non-empty string constraint is still
+useful as an explicit validation rule, and it rejects `null`.
+
 #### Type Aliases with Constraints
 
 Name constrained types for reuse:
@@ -703,7 +707,7 @@ type Between5And10 = int that (5 < ~ < 10)
 50 is Percentage       // true
 110 is Percentage      // false
 "hi" is NonEmpty       // true
-"" is NonEmpty         // false
+"" is NonEmpty         // false ("" is null, not string)
 7 is Between5And10     // true
 5 is Between5And10     // false (not > 5)
 ```

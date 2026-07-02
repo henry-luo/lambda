@@ -107,6 +107,10 @@ The Lambda language documentation is organized into focused sub-documents for ea
 types, so `'json' == "json"` is `false`; convert explicitly with `string(...)`
 or `symbol(...)` when needed.
 
+Empty text identifiers normalize to `null`: `"" == null` and `'' == null` are
+both `true`. For user data, treat strings and symbols as non-empty and use
+`null` for the empty case.
+
 #### Type System (see [Lambda_Type.md](Lambda_Type.md))
 
 ```lambda
