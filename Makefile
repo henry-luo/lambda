@@ -1525,6 +1525,16 @@ test-reactive-ui: build
 	echo "Reactive UI: $$PASS/$$TOTAL passed"; \
 	if [ $$FAIL -gt 0 ]; then exit 1; fi
 
+# Stage 4C Phase A — the full plain-DOM editor suite headless under `lambda.exe js`.
+# The runner (test/editor-js/tools/run-phase-a.mjs) bundles each test group
+# (core/view/drawing + 6 tier corpora) to an IIFE, runs it, and aggregates the
+# in-engine harness summaries. React `.test.tsx` are excluded by construction.
+editor-4c-js: build
+	@echo "Running Stage 4C Phase A (plain-DOM suite under lambda.exe js)..."
+	@echo "=============================================================="
+	@cd test/editor-js && node tools/run-phase-a.mjs
+	@echo "=============================================================="
+
 # Stage 4C Phase B — editor event-driven UI automation under lambda.exe view + event_sim.
 # Runs the 4B baseline set (test/ui/editor4b/*.json) + the 4C set
 # (test/ui/editor4c/*.json). Each fixture may name its own harness page via the
@@ -1550,6 +1560,11 @@ editor-4c-view: build
 	echo "=============================================================="; \
 	echo "editor-4c-view: $$PASS/$$TOTAL passed"; \
 	if [ $$FAIL -gt 0 ]; then exit 1; fi
+
+# Stage 4C — full editor conformance: Phase A (js breadth) + Phase B (view depth).
+editor-4c: editor-4c-js editor-4c-view
+	@echo "=============================================================="
+	@echo "Stage 4C complete: Phase A (lambda.exe js) + Phase B (lambda.exe view + event_sim) both green."
 
 # Save/check/diff layout suite snapshots for regression detection outside baseline
 layout-snapshot:
