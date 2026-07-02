@@ -41,6 +41,7 @@ THREAD_LOCAL char log_indent_buffer[LOG_MAX_INDENT_LEVEL * 2 + 1] = {0};
 /* Forward declarations */
 static int log_parse_zlog_config(const char *config);
 static int log_parse_simple_config(const char *config);
+static int parse_log_level(const char *level_str);
 
 /* Configuration constants */
 #define MAX_CATEGORIES 32
@@ -68,6 +69,7 @@ static int rules_count = 0;
 static int log_initialized = 0;
 static int timestamps_enabled = 1;
 static int colors_enabled = 0;
+static int env_min_level = 0;
 
 /* Default format configuration */
 static log_format_t default_format = {
@@ -677,6 +679,7 @@ static void format_user_message_with_sanitize(char *output, size_t output_size, 
 /* Core logging implementation */
 static int log_output(log_category_t *category, int level, const char *format, va_list args) {
     if (!category || !category->enabled) { return LOG_OK; }
+    if (env_min_level > 0 && level < env_min_level) { return LOG_OK; }
     if (level < category->level) { return LOG_OK; }
 
     // Format the user message first
@@ -767,6 +770,18 @@ int log_init(const char *config) {
     if (config && strlen(config) > 0) {
         if (log_parse_config_string(config) != LOG_OK) {
             fprintf(stderr, "[LOG] Warning: Failed to parse config, using defaults\n");
+        }
+    }
+
+    const char* env_level = getenv("LAMBDA_LOG_LEVEL");
+    if (env_level && env_level[0]) {
+        int level = parse_log_level(env_level);
+        // Online/browser smoke runs need warnings and errors, but debug traces
+        // from parser/layout hot loops can dominate large-page execution.
+        env_min_level = level;
+        log_set_level(&default_category, level);
+        for (int i = 0; i < categories_count; i++) {
+            log_set_level(&categories[i], level);
         }
     }
 

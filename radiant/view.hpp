@@ -377,6 +377,7 @@ typedef struct ImageSurface {
 #endif
     int max_render_width;  // maximum width for rendering the image
     Url* url;        // the resolved absolute URL of the image
+    bool cache_owned;      // true when UiContext image_cache owns this surface
     char* source_path;     // local file path for lazy decode (NULL if already decoded or HTTP)
     unsigned char* source_data;  // in-memory data for lazy decode of HTTP images (NULL if file-based)
     size_t source_data_len;      // length of source_data

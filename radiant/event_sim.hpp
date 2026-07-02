@@ -161,6 +161,8 @@ struct SimEvent {
     SimEventType type;
     int x, y;                    // mouse position
     int to_x, to_y;              // for drag: destination
+    int drag_dx, drag_dy;        // for mouse_drag: relative delta from the resolved start (used when no to_x/to_y/to_target)
+    bool has_drag_delta;         // true if drag_dx/drag_dy were provided
     int button;                  // mouse button (0=left, 1=right, 2=middle)
     int mods;                    // modifier keys (RDT_MOD_*)
     int key;                     // GLFW key code

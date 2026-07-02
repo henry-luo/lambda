@@ -438,7 +438,11 @@ static double parse_media_length(const char* value) {
 static bool evaluate_media_feature(CssEngine* engine, const char* feature, const char* value) {
     if (!engine || !feature) return false;
 
+#ifdef RADIANT_TRACE_MEDIA_QUERY
+    // Media query feature tracing is opt-in; cascade evaluates these for many
+    // element/rule pairs and can otherwise dominate page-load time.
     log_debug("[Media Query] Evaluating feature: %s = %s", feature, value ? value : "(no value)");
+#endif
 
     double viewport_width = engine->context.viewport_width;
     double viewport_height = engine->context.viewport_height;
@@ -448,8 +452,10 @@ static bool evaluate_media_feature(CssEngine* engine, const char* feature, const
         double min_w = parse_media_length(value);
         if (min_w < 0) return false;
         bool result = viewport_width >= min_w;
+#ifdef RADIANT_TRACE_MEDIA_QUERY
         log_debug("[Media Query] min-width: viewport=%f >= min=%f -> %s",
                   viewport_width, min_w, result ? "true" : "false");
+#endif
         return result;
     }
 
@@ -458,8 +464,10 @@ static bool evaluate_media_feature(CssEngine* engine, const char* feature, const
         double max_w = parse_media_length(value);
         if (max_w < 0) return false;
         bool result = viewport_width <= max_w;
+#ifdef RADIANT_TRACE_MEDIA_QUERY
         log_debug("[Media Query] max-width: viewport=%f <= max=%f -> %s",
                   viewport_width, max_w, result ? "true" : "false");
+#endif
         return result;
     }
 
@@ -468,8 +476,10 @@ static bool evaluate_media_feature(CssEngine* engine, const char* feature, const
         double min_h = parse_media_length(value);
         if (min_h < 0) return false;
         bool result = viewport_height >= min_h;
+#ifdef RADIANT_TRACE_MEDIA_QUERY
         log_debug("[Media Query] min-height: viewport=%f >= min=%f -> %s",
                   viewport_height, min_h, result ? "true" : "false");
+#endif
         return result;
     }
 
@@ -478,8 +488,10 @@ static bool evaluate_media_feature(CssEngine* engine, const char* feature, const
         double max_h = parse_media_length(value);
         if (max_h < 0) return false;
         bool result = viewport_height <= max_h;
+#ifdef RADIANT_TRACE_MEDIA_QUERY
         log_debug("[Media Query] max-height: viewport=%f <= max=%f -> %s",
                   viewport_height, max_h, result ? "true" : "false");
+#endif
         return result;
     }
 
@@ -572,9 +584,11 @@ static bool evaluate_media_type(const char* type) {
 bool css_evaluate_media_query(CssEngine* engine, const char* media_query) {
     if (!engine || !media_query) return true;  // Empty query matches all
 
+#ifdef RADIANT_TRACE_MEDIA_QUERY
     log_debug("[Media Query] Evaluating: '%s'", media_query);
     log_debug("[Media Query] Viewport: %f x %f",
               engine->context.viewport_width, engine->context.viewport_height);
+#endif
 
     // Make a copy we can modify
     size_t len = strlen(media_query);
@@ -597,7 +611,9 @@ bool css_evaluate_media_query(CssEngine* engine, const char* media_query) {
             continue;
         }
 
+#ifdef RADIANT_TRACE_MEDIA_QUERY
         log_debug("[Media Query] Processing part: '%s'", query_part);
+#endif
 
         // Check for 'not' prefix
         bool negated = false;
@@ -689,18 +705,24 @@ bool css_evaluate_media_query(CssEngine* engine, const char* media_query) {
             part_result = !part_result;
         }
 
+#ifdef RADIANT_TRACE_MEDIA_QUERY
         log_debug("[Media Query] Part result: %s", part_result ? "true" : "false");
+#endif
 
         // If any comma-separated part matches, the whole query matches
         if (part_result) {
+#ifdef RADIANT_TRACE_MEDIA_QUERY
             log_debug("[Media Query] MATCHES: '%s'", media_query);
+#endif
             return true;
         }
 
         query_part = strtok_r(NULL, ",", &saveptr1);
     }
 
+#ifdef RADIANT_TRACE_MEDIA_QUERY
     log_debug("[Media Query] DOES NOT MATCH: '%s'", media_query);
+#endif
     return false;
 }
 

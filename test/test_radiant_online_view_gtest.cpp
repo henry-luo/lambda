@@ -413,6 +413,9 @@ static bool online_view_run_case(const RadiantOnlineViewCase* view_case,
         setpgid(0, 0);
         setenv("VIEW_MEM_STAGES", "1", 1);
         setenv("LAMBDA_LOG_FILE", result->lambda_log_path, 1);
+        // Keep smoke-test diagnostics at warning/error level; per-node debug
+        // traces can make large real pages time out before layout finishes.
+        setenv("LAMBDA_LOG_LEVEL", "INFO", 1);
         execl(LAMBDA_EXE, LAMBDA_EXE, "view", view_case->url,
               "--event-file", event_path, "--headless", (char*)NULL);
         _exit(127);

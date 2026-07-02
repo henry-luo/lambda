@@ -1,0 +1,16 @@
+{
+  "name": "editor4c: dragging an image resize handle changes its dimensions",
+  "_note": "Phase B — image resize gesture. Click the image to select it (resize overlay + 4 corner handles appear), then drag the SE handle by a relative dx/dy via mouse_drag. The editor's window mousemove/mouseup listeners resize the overlay and commit cmdResizeImage on mouseup → the img gains width & height attributes (it had none initially). Exercises coordinate hit-testing on a JS-created overlay handle end to end (§5.2 geometry).",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface img"}},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_count", "target": {"selector": ".rdt-img-handle"}, "equals": 4},
+    {"type": "mouse_drag", "target": {"selector": ".rdt-img-handle.rdt-h-se"}, "dx": 60, "dy": 45},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface img"}, "attribute": "width"},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface img"}, "attribute": "height"}
+  ]
+}
