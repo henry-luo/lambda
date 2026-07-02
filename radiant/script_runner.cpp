@@ -562,14 +562,14 @@ static char* load_script_content(const char* resolved_path, bool is_http) {
         if (content) {
             log_debug("script_runner: downloaded external script from URL: %s (%zu bytes)", resolved_path, content_size);
         } else {
-            log_error("script_runner: failed to download external script: %s", resolved_path);
+            log_warn("script_runner: optional external script unavailable: %s", resolved_path);
         }
     } else {
         content = read_text_file(resolved_path);
         if (content) {
             log_debug("script_runner: loaded external script from file: %s (%zu bytes)", resolved_path, strlen(content));
         } else {
-            log_error("script_runner: failed to read external script file: %s", resolved_path);
+            log_warn("script_runner: optional external script file unavailable: %s", resolved_path);
         }
     }
     return content;
@@ -681,6 +681,36 @@ static size_t script_prelayout_defer_limit_bytes() {
             return (size_t)parsed;
         }
     }
+    return 128 * 1024;
+}
+
+static size_t script_external_compile_limit_bytes() {
+    const char* env = getenv("RADIANT_JS_EXTERNAL_SCRIPT_BYTES");
+    if (env && env[0]) {
+        char* end = nullptr;
+        long parsed = strtol(env, &end, 10);
+        if (end != env) {
+            if (parsed <= 0) return (size_t)-1;
+            return (size_t)parsed;
+        }
+    }
+    // Keep external bundles within the same browser-compat budget as deferred
+    // pre-layout scripts so unsupported app runtimes degrade before JIT setup.
+    return 128 * 1024;
+}
+
+static size_t script_total_compile_limit_bytes() {
+    const char* env = getenv("RADIANT_JS_TOTAL_SCRIPT_BYTES");
+    if (env && env[0]) {
+        char* end = nullptr;
+        long parsed = strtol(env, &end, 10);
+        if (end != env) {
+            if (parsed <= 0) return (size_t)-1;
+            return (size_t)parsed;
+        }
+    }
+    // Public pages can contain many individually small app-runtime scripts;
+    // cap cumulative browser JS until LambdaJS supports those runtimes safely.
     return 128 * 1024;
 }
 
@@ -1461,6 +1491,8 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
                                       const char* phase_name) {
     bool fatal_error = false;
     if (!queue) return true;
+    size_t accepted_source_bytes = 0;
+    size_t total_compile_limit = script_total_compile_limit_bytes();
     for (int i = 0; i < queue->length; i++) {
         JsScriptTask* task = (JsScriptTask*)arraylist_get(queue, i);
         if (!script_task_is_executable(task)) continue;
@@ -1468,6 +1500,31 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
         char filename_buf[64];
         const char* filename = script_task_filename(task, filename_buf, sizeof(filename_buf));
         const char* source = task->source ? task->source : "";
+        size_t external_compile_limit = script_external_compile_limit_bytes();
+        if (task->external && task->source_len > external_compile_limit) {
+            // Some modern sites ship multi-megabyte bundles that exceed the
+            // current LambdaJS browser-compat budget; skip them before MIR
+            // compilation can exhaust memory or crash the smoke viewer.
+            task->status = JS_SCRIPT_TASK_SKIPPED_LARGE_DEFER;
+            log_info("execute_document_scripts: skipping large external script before layout: %zu bytes > %zu (%s)",
+                     task->source_len,
+                     external_compile_limit,
+                     filename ? filename : "<external-script>");
+            continue;
+        }
+        if (total_compile_limit != (size_t)-1 &&
+            (accepted_source_bytes >= total_compile_limit ||
+             task->source_len > total_compile_limit - accepted_source_bytes)) {
+            // Browser smoke loads should keep rendering after the current JS
+            // compatibility budget is exhausted, rather than crashing in JIT.
+            task->status = JS_SCRIPT_TASK_SKIPPED_LARGE_DEFER;
+            log_info("execute_document_scripts: skipping script after total browser JS budget: %zu + %zu > %zu (%s)",
+                     accepted_source_bytes,
+                     task->source_len,
+                     total_compile_limit,
+                     filename ? filename : "<script>");
+            continue;
+        }
         size_t prelayout_defer_limit = script_prelayout_defer_limit_bytes();
         if (task->external &&
             (task->scheduling == JS_SCRIPT_SCHED_DEFER ||
@@ -1481,6 +1538,7 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
                      filename ? filename : "<external-script>");
             continue;
         }
+        accepted_source_bytes += task->source_len;
 #ifndef NDEBUG
         bool timing_enabled = script_task_timing_enabled();
         long task_start_us = timing_enabled ? script_runner_wall_now_us() : 0;
@@ -1761,6 +1819,18 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     if (loaded_external_scripts > 0 || failed_external_scripts > 0) {
         log_info("script_runner: external scripts: %d loaded, %d failed",
             loaded_external_scripts, failed_external_scripts);
+    }
+
+    size_t browser_js_limit = script_total_compile_limit_bytes();
+    if (browser_js_limit != (size_t)-1 && watchdog_source_len > browser_js_limit) {
+        // Large browser-app bundles still exercise unsupported LambdaJS/runtime
+        // paths; skip document JS before JIT setup and render the parsed DOM/CSS.
+        log_info("execute_document_scripts: skipping document JS after browser source budget: %zu > %zu",
+                 watchdog_source_len,
+                 browser_js_limit);
+        script_task_collection_free(&script_tasks);
+        script_runner_cleanup_source_cache();
+        return;
     }
 
 #ifndef NDEBUG

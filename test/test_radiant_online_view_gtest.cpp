@@ -213,6 +213,56 @@ static const RadiantOnlineViewCase g_online_view_cases[] = {
     {"go_doc", "https://go.dev/doc/", true},
     {"go_spec", "https://go.dev/ref/spec", true},
     {"php_manual", "https://www.php.net/manual/en/", true},
+    {"mdn_html", "https://developer.mozilla.org/en-US/docs/Web/HTML", true},
+    {"mdn_css", "https://developer.mozilla.org/en-US/docs/Web/CSS", true},
+    {"mdn_js_reference", "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference", true},
+    {"whatwg_html", "https://html.spec.whatwg.org/multipage/", true},
+    {"whatwg_dom", "https://dom.spec.whatwg.org/", true},
+    {"whatwg_fetch", "https://fetch.spec.whatwg.org/", true},
+    {"tc39_ecma262", "https://tc39.es/ecma262/", true},
+    {"tc39_ecma402", "https://tc39.es/ecma402/", true},
+    {"nodejs_api", "https://nodejs.org/api/", true},
+    {"nodejs_fs", "https://nodejs.org/api/fs.html", true},
+    {"typescript_docs", "https://www.typescriptlang.org/docs/", true},
+    {"typescript_handbook", "https://www.typescriptlang.org/docs/handbook/intro.html", true},
+    {"go_effective", "https://go.dev/doc/effective_go", true},
+    {"go_pkg_std", "https://pkg.go.dev/std", true},
+    {"rust_cargo_book", "https://doc.rust-lang.org/cargo/", true},
+    {"rust_reference", "https://doc.rust-lang.org/reference/", true},
+    {"boost_docs", "https://www.boost.org/doc/libs/", true},
+    {"eigen_docs", "https://eigen.tuxfamily.org/dox/", true},
+    {"qt_docs", "https://doc.qt.io/qt-6/", true},
+    {"gtk_docs", "https://docs.gtk.org/gtk4/", true},
+    {"webkit", "https://webkit.org/", true},
+    {"mesa3d", "https://www.mesa3d.org/", true},
+    {"ninja_manual", "https://ninja-build.org/manual.html", false},
+    {"meson_docs", "https://mesonbuild.com/", true},
+    {"bazel_docs", "https://bazel.build/docs", true},
+    {"clang_docs", "https://clang.llvm.org/docs/", true},
+    {"lld_docs", "https://lld.llvm.org/", true},
+    {"gdb_docs", "https://sourceware.org/gdb/documentation/", true},
+    {"binutils_docs", "https://sourceware.org/binutils/docs/", true},
+    {"gitlab_docs", "https://docs.gitlab.com/", true},
+    {"github_docs", "https://docs.github.com/en", true},
+    {"docker_docs", "https://docs.docker.com/", true},
+    {"kubernetes_docs", "https://kubernetes.io/docs/home/", true},
+    {"prometheus_docs", "https://prometheus.io/docs/introduction/overview/", true},
+    {"grafana_docs", "https://grafana.com/docs/", true},
+    {"terraform_docs", "https://developer.hashicorp.com/terraform/docs", true},
+    {"ansible_docs", "https://docs.ansible.com/ansible/latest/index.html", true},
+    {"cmake_buildsystem", "https://cmake.org/cmake/help/latest/manual/cmake-buildsystem.7.html", true},
+    {"python_pep8", "https://peps.python.org/pep-0008/", true},
+    {"python_pep3333", "https://peps.python.org/pep-3333/", true},
+    {"java_jls", "https://docs.oracle.com/javase/specs/jls/se21/html/index.html", true},
+    {"java_api", "https://docs.oracle.com/en/java/javase/21/docs/api/index.html", true},
+    {"kotlin_docs", "https://kotlinlang.org/docs/home.html", true},
+    {"scala_docs", "https://docs.scala-lang.org/", true},
+    {"clojure", "https://clojure.org/", true},
+    {"erlang_docs", "https://www.erlang.org/doc/", true},
+    {"elixir_docs", "https://hexdocs.pm/elixir/", true},
+    {"ocaml_docs", "https://ocaml.org/docs", true},
+    {"haskell_docs", "https://www.haskell.org/documentation/", true},
+    {"racket_docs", "https://docs.racket-lang.org/", true},
 };
 
 static bool online_view_file_readable(const char* path) {
@@ -1002,6 +1052,26 @@ TEST(RadiantOnlineViewTest, LoadsNewOnlinePages031To040) {
 
 TEST(RadiantOnlineViewTest, LoadsNewOnlinePages041To050) {
     online_view_expect_case_range(141, 151);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages051To060) {
+    online_view_expect_case_range(151, 161);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages061To070) {
+    online_view_expect_case_range(161, 171);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages071To080) {
+    online_view_expect_case_range(171, 181);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages081To090) {
+    online_view_expect_case_range(181, 191);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages091To100) {
+    online_view_expect_case_range(191, 201);
 }
 
 #endif

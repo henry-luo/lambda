@@ -21,6 +21,11 @@ Suggested local runs:
 ./lambda.exe view test/browse/repro/http-background-image-no-sync-fetch.html --headless
 ./lambda.exe view test/browse/repro/large-registry-table-layout.html --headless
 ./lambda.exe view test/browse/repro/data-uri-svg-cache-ownership.html --headless
+./lambda.exe view test/browse/repro/optional-missing-subresources.html --headless
+RADIANT_JS_EXTERNAL_SCRIPT_BYTES=128 ./lambda.exe view test/browse/repro/large-external-script-skip.html --headless
+RADIANT_JS_TOTAL_SCRIPT_BYTES=128 ./lambda.exe view test/browse/repro/script-total-budget-skip.html --headless
+./lambda.exe view test/browse/repro/unsupported-image-fallback.html --headless
+./lambda.exe view test/browse/repro/css-var-on-text-layout.html --headless
 ```
 
 For `http-header-before-head-relative-resource.html`, serve the repository root
@@ -68,3 +73,24 @@ bounded during layout.
 `data-uri-svg-cache-ownership.html` captures repeated inline SVG images. SVG
 data URI surfaces live in the shared image cache, and DOM embed cleanup must not
 free the borrowed pointer before cache shutdown.
+
+`optional-missing-subresources.html` captures missing linked CSS, script, font,
+and image resources. Online pages often reference stale optional assets; Radiant
+should fall back without turning a successfully rendered document into a page
+load failure.
+
+`large-external-script-skip.html` documents the browser-script compatibility
+guard. Use a low `RADIANT_JS_EXTERNAL_SCRIPT_BYTES` value to exercise the skip
+path locally; the online failures used multi-megabyte bundles.
+
+`script-total-budget-skip.html` captures pages that accumulate many smaller
+scripts. Once the browser JS source budget is exhausted, remaining scripts
+should be skipped gracefully instead of entering unstable JIT/runtime paths.
+
+`unsupported-image-fallback.html` captures unsupported optional image payloads.
+They should paint as placeholders without reporting runtime errors or leaking
+lazy decode buffers.
+
+`css-var-on-text-layout.html` captures inherited custom properties resolved
+while layout is operating on a text node. Variable lookup should climb to the
+nearest element instead of assuming the active layout view is always an element.

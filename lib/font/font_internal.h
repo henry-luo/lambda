@@ -71,6 +71,7 @@ struct FontHandle {
     void*       platform_aux_ref;        // secondary platform object (CT advance font/etc.)
     FontTables* tables;                 // parsed TTF/OTF tables (NULL if not available)
     int         ref_count;              // reference counting
+    bool        resources_destroyed;    // native/file resources already released
 
     // cached metrics (computed lazily on first font_get_metrics call)
     FontMetrics metrics;

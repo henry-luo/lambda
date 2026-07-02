@@ -642,7 +642,9 @@ unsigned char* image_load(const char* filename, int* width, int* height, int* ch
             return load_gif(filename, width, height, channels, req_channels);
 
         default:
-            log_error("Unsupported image format: %s", filename);
+            // Optional web images can use formats this backend does not decode;
+            // callers render placeholders, so report a graceful fallback.
+            log_warn("image: unsupported image format: %s", filename);
             return NULL;
     }
 }
@@ -697,7 +699,18 @@ static unsigned char* load_png_scaled(const char* filename,
     png_infop info_ptr = png_create_info_struct(png_ptr);
     if (!info_ptr) { png_destroy_read_struct(&png_ptr, NULL, NULL); fclose(fp); return NULL; }
 
+    unsigned char* image_data = NULL;
+    png_bytep* row_pointers = NULL;
+    unsigned char* row_buf = NULL;
+    uint32_t* accum = NULL;
+
     if (setjmp(png_jmpbuf(png_ptr))) {
+        // libpng longjmps after partial allocation on corrupt IDAT data; clean
+        // buffers here so lazy decode failures do not leak cached image memory.
+        if (accum) mem_free(accum);
+        if (row_buf) mem_free(row_buf);
+        if (row_pointers) mem_free(row_pointers);
+        if (image_data) mem_free(image_data);
         log_error("Error during PNG reading (scaled): %s", filename);
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
         fclose(fp);
@@ -735,7 +748,7 @@ static unsigned char* load_png_scaled(const char* filename,
     *height = out_h;
     *channels = 4;
 
-    unsigned char* image_data = (unsigned char*)mem_alloc((size_t)out_w * out_h * 4, MEM_CAT_IMAGE);
+    image_data = (unsigned char*)mem_alloc((size_t)out_w * out_h * 4, MEM_CAT_IMAGE);
     if (!image_data) {
         log_error("Failed to allocate PNG output buffer");
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
@@ -745,17 +758,18 @@ static unsigned char* load_png_scaled(const char* filename,
 
     if (step == 1) {
         // No downsample requested — read all rows directly into output.
-        png_bytep* row_pointers = (png_bytep*)mem_alloc(sizeof(png_bytep) * natural_h, MEM_CAT_IMAGE);
+        row_pointers = (png_bytep*)mem_alloc(sizeof(png_bytep) * natural_h, MEM_CAT_IMAGE);
         for (int y = 0; y < natural_h; y++) {
             row_pointers[y] = image_data + (size_t)y * natural_w * 4;
         }
         png_read_image(png_ptr, row_pointers);
         png_read_end(png_ptr, NULL);
         mem_free(row_pointers);
+        row_pointers = NULL;
     } else {
         // Box-average downsample: read step rows at a time, accumulate, write one row.
-        unsigned char* row_buf = (unsigned char*)mem_alloc((size_t)natural_w * 4, MEM_CAT_IMAGE);
-        uint32_t* accum = (uint32_t*)mem_alloc((size_t)out_w * 4 * sizeof(uint32_t), MEM_CAT_IMAGE);
+        row_buf = (unsigned char*)mem_alloc((size_t)natural_w * 4, MEM_CAT_IMAGE);
+        accum = (uint32_t*)mem_alloc((size_t)out_w * 4 * sizeof(uint32_t), MEM_CAT_IMAGE);
         int divisor = step * step;
         for (int oy = 0; oy < out_h; oy++) {
             memset(accum, 0, (size_t)out_w * 4 * sizeof(uint32_t));

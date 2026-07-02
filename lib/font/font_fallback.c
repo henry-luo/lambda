@@ -239,6 +239,12 @@ static PlatformFbEntry s_platform_fb[PLATFORM_FB_CACHE_SIZE];
 static int             s_platform_fb_count = 0;
 
 void font_fallback_reset_platform_cache(void) {
+    for (int i = 0; i < s_platform_fb_count; i++) {
+        if (s_platform_fb[i].handle) {
+            font_handle_release(s_platform_fb[i].handle);
+        }
+        memset(&s_platform_fb[i], 0, sizeof(PlatformFbEntry));
+    }
     s_platform_fb_count = 0;
 }
 
@@ -264,6 +270,9 @@ static void platform_fb_insert(FontHandle* handle, int face_index, float size_px
         if (s_platform_fb[i].handle == handle) return;
     }
     if (s_platform_fb_count < PLATFORM_FB_CACHE_SIZE) {
+        // The static platform cache outlives individual lookup callers, so it
+        // owns a retained handle until reset during document/context cleanup.
+        font_handle_retain(handle);
         s_platform_fb[s_platform_fb_count].path = handle->file_data_path;
         s_platform_fb[s_platform_fb_count].face_index = face_index;
         s_platform_fb[s_platform_fb_count].size_px = size_px;

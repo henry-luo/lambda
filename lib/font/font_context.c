@@ -184,6 +184,10 @@ void font_context_destroy(FontContext* ctx) {
     // clear @font-face descriptors (handles are released via face_cache cleanup)
     font_face_clear(ctx);
 
+    // Platform fallback cache keeps retained handles outside the per-context
+    // hashmaps; release it before tearing down the file-data cache it references.
+    font_fallback_reset_platform_cache();
+
     // release cached emoji handle before face cache teardown
     if (ctx->cached_emoji_handle) {
         font_handle_release(ctx->cached_emoji_handle);
@@ -284,10 +288,9 @@ void font_context_reset_document_fonts(FontContext* ctx) {
     // producing wrong line-height metrics. Clearing all entries is safe
     // because glyph caches are also cleared between documents.
     //
-    // IMPORTANT: clear the static platform-fallback handle cache FIRST.
-    // It holds raw (non-retained) pointers to handles owned by the codepoint
-    // cache. Clearing the codepoint cache releases those handles, so the
-    // platform cache must be invalidated beforehand to avoid dangling pointers.
+    // IMPORTANT: clear the static platform-fallback handle cache FIRST. It
+    // retains handles and borrows their path strings, so release it before
+    // clearing the codepoint cache and font file-data cache.
     font_fallback_reset_platform_cache();
     if (ctx->codepoint_fallback_cache) {
         hashmap_clear(ctx->codepoint_fallback_cache, true);
@@ -432,13 +435,14 @@ bool font_handle_get_style(FontHandle* handle, const char** out_family,
 void font_handle_release(FontHandle* handle) {
     if (!handle) return;
     handle->ref_count--;
-    if (handle->ref_count <= 0) {
-        // When the owning FontContext is being destroyed, skip all pool_free
-        // calls. pool_destroy → rpmalloc_heap_free_all will free all pool
-        // memory in one bulk operation. Individual pool_free calls during
-        // teardown can corrupt rpmalloc span linked lists under memory
-        // pressure, causing SIGSEGV in heap_free_all.
-        bool bulk_destroy = (handle->ctx && handle->ctx->destroying);
+    // When the owning FontContext is being destroyed, skip all pool_free calls.
+    // pool_destroy → rpmalloc_heap_free_all will free pool memory in bulk.
+    bool bulk_destroy = (handle->ctx && handle->ctx->destroying);
+    if (handle->ref_count <= 0 || bulk_destroy) {
+        if (handle->resources_destroyed) return;
+        handle->resources_destroyed = true;
+        // Teardown invalidates all external FontProp refs; release native/file
+        // resources on first cache release even if a stale ref kept count > 0.
 
         font_backend_destroy(handle);
         // destroy FontTables (pool-allocated — skip during bulk destroy)
@@ -457,24 +461,28 @@ void font_handle_release(FontHandle* handle) {
             handle->kern_cache = NULL;
         }
         // free font file data: decrement ref in file_data_cache, or free directly
-        if (handle->file_data_path && handle->ctx->file_data_cache) {
-            FontFileDataEntry search = {.path = handle->file_data_path, .data = NULL, .data_len = 0};
-            FontFileDataEntry* cached = (FontFileDataEntry*)hashmap_get(
-                handle->ctx->file_data_cache, &search);
-            if (cached) {
-                cached->ref_count--;
-                if (cached->ref_count <= 0) {
-                    // remove from cache — hashmap_delete returns copy in spare,
-                    // does NOT call free callback. We must free manually.
-                    const FontFileDataEntry* removed = (const FontFileDataEntry*)hashmap_delete(
-                        handle->ctx->file_data_cache, &search);
-                    if (removed) {
-                        if (removed->is_mmap) { munmap(removed->data, removed->data_len); }
-                        else { mem_free(removed->data); }
-                        mem_free(removed->path);
+        if (handle->file_data_path) {
+            if (handle->ctx && handle->ctx->file_data_cache) {
+                FontFileDataEntry search = {.path = handle->file_data_path, .data = NULL, .data_len = 0};
+                FontFileDataEntry* cached = (FontFileDataEntry*)hashmap_get(
+                    handle->ctx->file_data_cache, &search);
+                if (cached) {
+                    cached->ref_count--;
+                    if (cached->ref_count <= 0) {
+                        // remove from cache — hashmap_delete returns copy in spare,
+                        // does NOT call free callback. We must free manually.
+                        const FontFileDataEntry* removed = (const FontFileDataEntry*)hashmap_delete(
+                            handle->ctx->file_data_cache, &search);
+                        if (removed) {
+                            if (removed->is_mmap) { munmap(removed->data, removed->data_len); }
+                            else { mem_free(removed->data); }
+                            mem_free(removed->path);
+                        }
                     }
                 }
             }
+            // file_data_path is allocated outside the font pool; free it even
+            // when context teardown skips pool frees for bulk destruction.
             mem_free(handle->file_data_path);
             handle->file_data_path = NULL;
             // memory_buffer points into cached file_data — don't free separately

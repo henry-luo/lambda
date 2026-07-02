@@ -256,6 +256,13 @@ static void process_ready_resource_on_main(NetworkResourceManager* mgr, NetworkR
     count_completed_if_needed(mgr, res);
 }
 
+static bool resource_failure_is_optional(NetworkResource* res) {
+    if (!res) return false;
+    return res->type == RESOURCE_CSS || res->type == RESOURCE_IMAGE ||
+           res->type == RESOURCE_FONT || res->type == RESOURCE_SVG ||
+           res->type == RESOURCE_SCRIPT;
+}
+
 static void process_failed_resource_on_main(NetworkResourceManager* mgr, NetworkResource* res) {
     if (!mgr || !res || is_processed(res)) return;
     if (res->state != STATE_FAILED) return;
@@ -269,17 +276,17 @@ static void process_failed_resource_on_main(NetworkResourceManager* mgr, Network
         handle_resource_failure(res, mgr->document);
     }
 
-    if (res->type == RESOURCE_FONT) {
+    if (resource_failure_is_optional(res)) {
         pthread_mutex_lock(&mgr->mutex);
-        // Fonts are recoverable via CSS fallback; count failed downloads as
-        // settled optional resources so page diagnostics stay focused on hard
-        // document, stylesheet, script, and image failures.
+        // Subresources on public pages can be blocked, stale, or timed out; once
+        // the document itself loaded, fall back instead of failing the page.
+        res->optional_failure = true;
         res->state = STATE_COMPLETED;
         pthread_mutex_unlock(&mgr->mutex);
     }
 
     mark_processed(res);
-    if (res->type == RESOURCE_FONT) {
+    if (res->optional_failure) {
         count_completed_if_needed(mgr, res);
     } else {
         count_failed_if_needed(mgr, res);
@@ -336,8 +343,11 @@ static void download_completion_fn(void* task_data, bool success) {
                     res->end_time = get_time_seconds();
                     queue_failed_resource_locked(res->manager, res);
                     queued_for_main = true;
-                    if (res->type == RESOURCE_FONT) {
-                        log_warn("network: optional font download failed: %s - %s, queued for fallback",
+                    if (resource_failure_is_optional(res)) {
+                        // Missing linked subresources should degrade rendering,
+                        // not surface as a hard online page-load error.
+                        res->optional_failure = true;
+                        log_warn("network: optional subresource unavailable: %s - %s, queued for fallback",
                                  res->url, res->error_message ? res->error_message : "unknown error");
                     } else {
                         log_error("network: download failed: %s - %s, queued for main thread",

@@ -282,7 +282,13 @@ static const char* css_select_font_shorthand_family(LayoutContext* lycon,
 static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var_name) {
     if (!lycon || !lycon->view || !var_name) return nullptr;
 
-    DomElement* element = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
+    DomNode* current = lycon->view;
+    while (current && !current->is_element()) {
+        current = current->parent;
+    }
+    // Custom properties inherit through elements; layout can resolve var()
+    // while the active view is a text node, so start from its nearest element.
+    DomElement* element = current ? lam::dom_require<DOM_NODE_ELEMENT>(current) : nullptr;
 
     // Search up the DOM tree (CSS variables inherit)
     while (element) {
