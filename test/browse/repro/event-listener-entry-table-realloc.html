@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>event listener entry table realloc repro</title>
+  <script>
+    document.addEventListener("radiant-entry-table-repro", function firstListener() {
+      for (let i = 0; i < 40; i++) {
+        const child = document.createElement("div");
+        child.addEventListener("radiant-entry-table-repro", function addedTargetListener() {});
+        document.body.appendChild(child);
+      }
+    });
+
+    document.addEventListener("radiant-entry-table-repro", function secondListener() {
+      document.documentElement.setAttribute("data-dispatch-finished", "true");
+    });
+
+    document.addEventListener("DOMContentLoaded", function() {
+      document.dispatchEvent(new Event("radiant-entry-table-repro"));
+    });
+  </script>
+</head>
+<body>
+  <p>Adding listeners on many new targets during dispatch must not invalidate the active target listener list.</p>
+</body>
+</html>

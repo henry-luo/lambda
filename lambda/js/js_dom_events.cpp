@@ -38,6 +38,7 @@ extern Item js_array_push(Item array, Item value);
 extern Item js_get_document_object_value();
 extern "C" Item js_get_global_this();
 extern "C" int js_check_exception(void);
+extern Item js_clear_exception(void);
 
 // Form-control IDL helpers from js_dom.cpp — used by HTMLElement click
 // activation behavior (HTML §6.4.4).
@@ -181,18 +182,8 @@ static double event_now_ms() {
     return floor(ms / 0.005) * 0.005;
 }
 
-// Report an exception thrown by an event listener / handler to
-// `window.onerror` (HTML spec: report exception). Best-effort: if
-// onerror is not a function, just swallow.
-static void report_exception_to_window_onerror(Item err, const char* type) {
-    extern Item js_get_global_this(void);
+static Item event_exception_message(Item err) {
     extern Item js_to_string(Item value);
-    Item global = js_get_global_this();
-    if (global.item == 0) return;
-    Item onerr_key = (Item){.item = s2it(heap_create_name("onerror"))};
-    Item onerr = js_property_get(global, onerr_key);
-    if (get_type_id(onerr) != LMD_TYPE_FUNC) return;
-    // build message string from error value
     Item msg = err;
     if (get_type_id(err) == LMD_TYPE_MAP || get_type_id(err) == LMD_TYPE_OBJECT) {
         Item m_key = (Item){.item = s2it(heap_create_name("message"))};
@@ -202,6 +193,39 @@ static void report_exception_to_window_onerror(Item err, const char* type) {
     } else if (get_type_id(err) != LMD_TYPE_STRING) {
         msg = js_to_string(err);
     }
+    if (js_check_exception()) {
+        (void)js_clear_exception();
+        msg = (Item){.item = s2it(heap_create_name("<error while formatting exception>"))};
+    }
+    return msg;
+}
+
+static void log_event_exception_detail(const char* source, const char* type, Item err) {
+    // Online pages often expose unsupported DOM APIs inside event callbacks; log
+    // the thrown message so the compatibility ledger can name the missing API.
+    Item msg = event_exception_message(err);
+    if (get_type_id(msg) == LMD_TYPE_STRING) {
+        String* s = it2s(msg);
+        log_error("%s for '%s' threw: %.*s; continuing dispatch",
+            source ? source : "event callback", type ? type : "", s ? (int)s->len : 0, s ? s->chars : "");
+    }
+    else {
+        log_error("%s for '%s' threw item type=%d; continuing dispatch",
+            source ? source : "event callback", type ? type : "", get_type_id(msg));
+    }
+}
+
+// Report an exception thrown by an event listener / handler to
+// `window.onerror` (HTML spec: report exception). Best-effort: if
+// onerror is not a function, just swallow.
+static void report_exception_to_window_onerror(Item err, const char* type) {
+    extern Item js_get_global_this(void);
+    Item global = js_get_global_this();
+    if (global.item == 0) return;
+    Item onerr_key = (Item){.item = s2it(heap_create_name("onerror"))};
+    Item onerr = js_property_get(global, onerr_key);
+    if (get_type_id(onerr) != LMD_TYPE_FUNC) return;
+    Item msg = event_exception_message(err);
     Item args[5] = { msg, ItemNull, (Item){.item = b2it(false)}, (Item){.item = b2it(false)}, err };
     js_call_function(onerr, global, args, 5);
     if (js_check_exception()) (void)js_clear_exception();
@@ -1695,7 +1719,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         if (js_check_exception()) {
             // Report and swallow — dispatch must continue.
             Item err = js_clear_exception();
-            log_error("event handler (on%s) threw an exception", type);
+            log_event_exception_detail("event handler", type, err);
             report_exception_to_window_onerror(err, type);
         }
         if (!js_check_exception() && get_type_id(on_result) == LMD_TYPE_BOOL && !it2b(on_result)) {
@@ -1708,6 +1732,9 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         }
     }
 
+    // IDL handlers and page callbacks can add listeners on new targets, which
+    // may reallocate the global listener-entry table that owns `nl`.
+    nl = find_listeners(key);
     if (!nl) return;
 
     // Build a value snapshot: addEventListener() can grow and reallocate the
@@ -1738,7 +1765,8 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
     for (int i = 0; i < snap_count; i++) {
         if (_STOP_IMM) break;
         EventListenerSnapshot* el = &snap[i];
-        EventListener* live = nl_find_snapshot_listener(nl, el);
+        NodeListeners* live_nl = find_listeners(key);
+        EventListener* live = nl_find_snapshot_listener(live_nl, el);
         // re-check tombstone in case a prior listener removed this one
         if (!live) continue;
         if (signal_is_aborted(el->signal)) { live->removed = true; continue; }
@@ -1771,7 +1799,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         js_call_function(callback, this_for_call, args, 1);
         if (js_check_exception()) {
             Item err = js_clear_exception();
-            log_error("event listener for '%s' threw; continuing dispatch", type);
+            log_event_exception_detail("event listener", type, err);
             report_exception_to_window_onerror(err, type);
         }
 

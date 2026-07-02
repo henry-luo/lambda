@@ -10969,6 +10969,9 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         dom_post_insert((DomNode*)elem, new_child);
         dom_pre_remove(old_child);
         ((DomNode*)elem)->remove_child(old_child);
+        // replaceChild pre-records insert/remove details above; it still must
+        // publish one mutation so the handler requests reflow for the new tree.
+        js_dom_mutation_notify();
         return args[1]; // return removed old child
     }
 

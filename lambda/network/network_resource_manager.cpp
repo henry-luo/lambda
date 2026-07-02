@@ -263,6 +263,17 @@ static bool resource_failure_is_optional(NetworkResource* res) {
            res->type == RESOURCE_SCRIPT;
 }
 
+static void configure_resource_timeout_and_retry(NetworkResourceManager* mgr, NetworkResource* res) {
+    if (!mgr || !res) return;
+    res->timeout_ms = mgr->default_timeout_ms;
+    res->max_retries = 3;
+    if (resource_failure_is_optional(res)) {
+        // Optional browser subresources already have CSS/font/image/script
+        // fallbacks; retrying each timeout can block page layout for minutes.
+        res->max_retries = 0;
+    }
+}
+
 static void process_failed_resource_on_main(NetworkResourceManager* mgr, NetworkResource* res) {
     if (!mgr || !res || is_processed(res)) return;
     if (res->state != STATE_FAILED) return;
@@ -621,7 +632,7 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
     // set manager reference and cache
     res->manager = mgr;
     res->cache = mgr->file_cache;
-    res->timeout_ms = mgr->default_timeout_ms;
+    configure_resource_timeout_and_retry(mgr, res);
     res->document_id = mgr->document_id;
     res->navigation_id = mgr->navigation_id;
     atomic_store(&res->cancel_requested, false);

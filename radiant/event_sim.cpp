@@ -89,6 +89,15 @@ void parse_json(Input* input, const char* json_string);
 
 static bool g_replay_assert_state = false;
 
+typedef struct EventSimStateStoreSnapshot {
+    char* name;
+    uint32_t dom_id;
+    bool view_state_exists;
+    int view_state_kind;
+    bool weak_ref;
+    bool focused;
+} EventSimStateStoreSnapshot;
+
 void event_sim_set_replay_assert_state(bool assert_state) {
     g_replay_assert_state = assert_state;
 }
@@ -109,6 +118,7 @@ static EventSimContext* event_sim_create_context() {
     ctx->replay_expected_focus_id = -1;
     ctx->replay_expected_caret_id = -1;
     ctx->replay_expected_caret_offset = -1;
+    ctx->state_store_snapshots = arraylist_new(4);
     return ctx;
 }
 
@@ -1692,6 +1702,33 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         }
         if (ev->scroll_tolerance <= 0) ev->scroll_tolerance = 1.0f;
     }
+    else if (strcmp(type_str, "snapshot_state_store") == 0) {
+        ev->type = SIM_EVENT_SNAPSHOT_STATE_STORE;
+        parse_target(reader, ev);
+        const char* name = reader.get("name").cstring();
+        if (name) ev->state_snapshot_name = mem_strdup(name, MEM_CAT_LAYOUT);
+        if (!ev->state_snapshot_name || (!ev->target_selector && !ev->target_text)) {
+            log_error("event_sim: snapshot_state_store requires 'name' and target");
+            mem_free(ev);
+            return NULL;
+        }
+    }
+    else if (strcmp(type_str, "assert_state_store_snapshot") == 0) {
+        ev->type = SIM_EVENT_ASSERT_STATE_STORE_SNAPSHOT;
+        parse_target(reader, ev);
+        const char* name = reader.get("name").cstring();
+        if (name) ev->state_snapshot_name = mem_strdup(name, MEM_CAT_LAYOUT);
+        if (reader.has("removed")) {
+            ev->has_expected_snapshot_removed = true;
+            ev->expected_snapshot_removed = reader.get("removed").asBool();
+        }
+        if (!ev->state_snapshot_name ||
+            (!ev->has_expected_snapshot_removed && !ev->target_selector && !ev->target_text)) {
+            log_error("event_sim: assert_state_store_snapshot requires 'name' and target unless removed is set");
+            mem_free(ev);
+            return NULL;
+        }
+    }
     else if (strcmp(type_str, "assert_event_log") == 0) {
         ev->type = SIM_EVENT_ASSERT_EVENT_LOG;
         const char* contains = reader.get("contains").cstring();
@@ -2245,6 +2282,7 @@ void event_sim_free(EventSimContext* ctx) {
             if (ev->assert_contains) mem_free(ev->assert_contains);
             if (ev->assert_equals) mem_free(ev->assert_equals);
             if (ev->assert_not_contains) mem_free(ev->assert_not_contains);
+            if (ev->state_snapshot_name) mem_free(ev->state_snapshot_name);
             if (ev->clipboard_mime) mem_free(ev->clipboard_mime);
             if (ev->clipboard_html) mem_free(ev->clipboard_html);
             if (ev->option_value) mem_free(ev->option_value);
@@ -2280,6 +2318,17 @@ void event_sim_free(EventSimContext* ctx) {
             mem_free(ev);
         }
         arraylist_free(ctx->events);
+    }
+
+    if (ctx->state_store_snapshots) {
+        for (int i = 0; i < ctx->state_store_snapshots->length; i++) {
+            EventSimStateStoreSnapshot* snap =
+                (EventSimStateStoreSnapshot*)ctx->state_store_snapshots->data[i];
+            if (!snap) continue;
+            if (snap->name) mem_free(snap->name);
+            mem_free(snap);
+        }
+        arraylist_free(ctx->state_store_snapshots);
     }
 
     if (ctx->test_name) mem_free(ctx->test_name);
@@ -2448,6 +2497,184 @@ static bool sim_state_dump_update_enabled(void) {
     const char* env = getenv("RADIANT_UPDATE_STATE_DUMPS");
     return env && (strcmp(env, "1") == 0 || strcasecmp(env, "true") == 0 ||
                    strcasecmp(env, "yes") == 0);
+}
+
+static const char* event_sim_view_state_kind_name(int kind) {
+    switch ((ViewStateKind)kind) {
+        case VIEW_STATE_BASE: return "base";
+        case VIEW_STATE_SCROLL: return "scroll";
+        case VIEW_STATE_FORM_CONTROL: return "form";
+        case VIEW_STATE_CUSTOM: return "custom";
+        default: return "none";
+    }
+}
+
+static EventSimStateStoreSnapshot* event_sim_find_state_snapshot(EventSimContext* ctx,
+                                                                 const char* name) {
+    if (!ctx || !ctx->state_store_snapshots || !name) return NULL;
+    for (int i = 0; i < ctx->state_store_snapshots->length; i++) {
+        EventSimStateStoreSnapshot* snap =
+            (EventSimStateStoreSnapshot*)ctx->state_store_snapshots->data[i];
+        if (snap && snap->name && strcmp(snap->name, name) == 0) return snap;
+    }
+    return NULL;
+}
+
+static bool event_sim_capture_state_snapshot(EventSimContext* ctx,
+                                             UiContext* uicon,
+                                             SimEvent* ev,
+                                             EventSimStateStoreSnapshot* out) {
+    if (!ctx || !uicon || !ev || !out) return false;
+    DomDocument* doc = uicon->document;
+    if (!doc) {
+        log_error("event_sim: state snapshot FAIL - no document");
+        return false;
+    }
+    View* elem = resolve_target_element(ev, doc);
+    if (!elem) {
+        log_error("event_sim: state snapshot FAIL - target element not found");
+        return false;
+    }
+
+    DocState* state = (DocState*)doc->state;
+    DomNode* node = static_cast<DomNode*>(elem);
+    ViewState* view_state = elem->view_state_ref;
+    out->dom_id = node ? node->id : 0;
+    out->view_state_exists = view_state != NULL;
+    out->view_state_kind = view_state ? (int)view_state->kind : -1;
+    out->weak_ref = view_state != NULL && elem->view_state_ref == view_state;
+    out->focused = state && focus_get(state) == elem;
+    return true;
+}
+
+static bool event_sim_view_state_id_present(DocState* state, uint32_t dom_id) {
+    if (!state || !state->view_state_map || dom_id == 0) return false;
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(state->view_state_map, &iter, &item)) {
+        ViewStateEntry* entry = (ViewStateEntry*)item;
+        if (entry && entry->view_id == dom_id) return true;
+        if (entry && entry->state && entry->state->view_id == dom_id) return true;
+    }
+    return false;
+}
+
+static void event_sim_snapshot_state_store(EventSimContext* ctx,
+                                           UiContext* uicon,
+                                           SimEvent* ev) {
+    if (!ctx || !ev || !ev->state_snapshot_name) return;
+    EventSimStateStoreSnapshot current = {};
+    if (!event_sim_capture_state_snapshot(ctx, uicon, ev, &current)) {
+        ctx->fail_count++;
+        return;
+    }
+
+    EventSimStateStoreSnapshot* snap =
+        event_sim_find_state_snapshot(ctx, ev->state_snapshot_name);
+    if (!snap) {
+        snap = (EventSimStateStoreSnapshot*)mem_calloc(
+            1, sizeof(EventSimStateStoreSnapshot), MEM_CAT_LAYOUT);
+        if (!snap) {
+            log_error("event_sim: snapshot_state_store FAIL - allocation failed");
+            ctx->fail_count++;
+            return;
+        }
+        snap->name = mem_strdup(ev->state_snapshot_name, MEM_CAT_LAYOUT);
+        arraylist_append(ctx->state_store_snapshots, snap);
+    }
+
+    snap->dom_id = current.dom_id;
+    snap->view_state_exists = current.view_state_exists;
+    snap->view_state_kind = current.view_state_kind;
+    snap->weak_ref = current.weak_ref;
+    snap->focused = current.focused;
+    log_info("event_sim: snapshot_state_store '%s' id=%u view_state=%s kind=%s weak_ref=%s focused=%s",
+             ev->state_snapshot_name,
+             snap->dom_id,
+             snap->view_state_exists ? "true" : "false",
+             event_sim_view_state_kind_name(snap->view_state_kind),
+             snap->weak_ref ? "true" : "false",
+             snap->focused ? "true" : "false");
+}
+
+static void event_sim_assert_state_store_snapshot(EventSimContext* ctx,
+                                                  UiContext* uicon,
+                                                  SimEvent* ev) {
+    if (!ctx || !ev || !ev->state_snapshot_name) return;
+    EventSimStateStoreSnapshot* snap =
+        event_sim_find_state_snapshot(ctx, ev->state_snapshot_name);
+    if (!snap) {
+        log_error("event_sim: assert_state_store_snapshot FAIL - snapshot '%s' not found",
+                  ev->state_snapshot_name);
+        ctx->fail_count++;
+        return;
+    }
+
+    DomDocument* doc = uicon ? uicon->document : NULL;
+    DocState* state = doc ? (DocState*)doc->state : NULL;
+    if (ev->has_expected_snapshot_removed && ev->expected_snapshot_removed) {
+        // Removed-node snapshots cannot resolve by selector; the saved DOM id
+        // is the stable key that proves fallback pruning actually ran.
+        bool stale_state = event_sim_view_state_id_present(state, snap->dom_id);
+        bool target_still_resolves = false;
+        if (doc && (ev->target_selector || ev->target_text)) {
+            target_still_resolves = resolve_target_element(ev, doc) != NULL;
+        }
+        if (!stale_state && !target_still_resolves) {
+            log_info("event_sim: assert_state_store_snapshot PASS - '%s' removed id=%u",
+                     ev->state_snapshot_name, snap->dom_id);
+            ctx->pass_count++;
+        } else {
+            log_error("event_sim: assert_state_store_snapshot FAIL - removed id=%u stale_state=%s target=%s",
+                      snap->dom_id,
+                      stale_state ? "true" : "false",
+                      target_still_resolves ? "present" : "absent");
+            ctx->fail_count++;
+        }
+        return;
+    }
+
+    EventSimStateStoreSnapshot current = {};
+    bool passed = event_sim_capture_state_snapshot(ctx, uicon, ev, &current);
+    if (passed && current.dom_id != snap->dom_id) {
+        log_error("event_sim: assert_state_store_snapshot FAIL - dom_id expected %u, got %u",
+                  snap->dom_id, current.dom_id);
+        passed = false;
+    }
+    if (passed && current.view_state_exists != snap->view_state_exists) {
+        log_error("event_sim: assert_state_store_snapshot FAIL - view_state expected %s, got %s",
+                  snap->view_state_exists ? "true" : "false",
+                  current.view_state_exists ? "true" : "false");
+        passed = false;
+    }
+    if (passed && current.view_state_kind != snap->view_state_kind) {
+        log_error("event_sim: assert_state_store_snapshot FAIL - kind expected %s, got %s",
+                  event_sim_view_state_kind_name(snap->view_state_kind),
+                  event_sim_view_state_kind_name(current.view_state_kind));
+        passed = false;
+    }
+    if (passed && current.weak_ref != snap->weak_ref) {
+        log_error("event_sim: assert_state_store_snapshot FAIL - weak_ref expected %s, got %s",
+                  snap->weak_ref ? "true" : "false",
+                  current.weak_ref ? "true" : "false");
+        passed = false;
+    }
+    if (passed && current.focused != snap->focused) {
+        log_error("event_sim: assert_state_store_snapshot FAIL - focused expected %s, got %s",
+                  snap->focused ? "true" : "false",
+                  current.focused ? "true" : "false");
+        passed = false;
+    }
+
+    if (passed) {
+        log_info("event_sim: assert_state_store_snapshot PASS - '%s' id=%u kind=%s",
+                 ev->state_snapshot_name,
+                 current.dom_id,
+                 event_sim_view_state_kind_name(current.view_state_kind));
+        ctx->pass_count++;
+    } else {
+        ctx->fail_count++;
+    }
 }
 
 static StrBuf* sim_normalize_state_dump_text(const char* text) {
@@ -4890,6 +5117,16 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             } else {
                 ctx->fail_count++;
             }
+            break;
+        }
+
+        case SIM_EVENT_SNAPSHOT_STATE_STORE: {
+            event_sim_snapshot_state_store(ctx, uicon, ev);
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_STATE_STORE_SNAPSHOT: {
+            event_sim_assert_state_store_snapshot(ctx, uicon, ev);
             break;
         }
 

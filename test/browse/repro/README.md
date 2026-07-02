@@ -29,8 +29,10 @@ RADIANT_JS_TOTAL_SCRIPT_BYTES=128 ./lambda.exe view test/browse/repro/script-tot
 ./lambda.exe view test/browse/repro/grid-track-unitless-zero-overflow.html --headless
 ./lambda.exe view test/browse/repro/css-var-self-reference.html --headless
 ./lambda.exe view test/browse/repro/event-listener-mutation-realloc.html --headless
+./lambda.exe view test/browse/repro/event-listener-entry-table-realloc.html --headless
 ./lambda.exe view test/browse/repro/element-scroll-method.html --headless
 ./lambda.exe view test/browse/repro/event-listener-onerror-reentry.html --headless
+./lambda.exe view test/browse/repro/optional-font-retry-storm.html --headless
 ```
 
 For `http-header-before-head-relative-resource.html`, serve the repository root
@@ -112,6 +114,11 @@ of recursing until stack overflow.
 an event dispatch is iterating a snapshot. Dispatch must not keep pointers into
 storage that `addEventListener()` can reallocate.
 
+`event-listener-entry-table-realloc.html` captures listener-entry table growth
+while an event dispatch is iterating an existing target. Dispatch must re-find
+the target's listener list after callbacks run because adding listeners on new
+targets can reallocate the entry table that stores `NodeListeners`.
+
 `empty-network-resource.html` captures empty linked resources. Temporary network
 read buffers for zero-byte files must be freed on the early-return path, and a
 successful zero-byte HTTP response should be treated as an empty no-op resource.
@@ -129,3 +136,7 @@ queue/update scroll state without crashing when no scroll pane exists yet.
 `event-listener-onerror-reentry.html` captures listener exception reporting
 while a page-owned `window.onerror` handler is present. Dispatch should report
 and swallow the original listener failure without crashing the page load.
+
+`optional-font-retry-storm.html` captures pages with many optional web fonts that
+fail to load. Font fallback should happen promptly; each failed optional font
+must not consume repeated network retry rounds before layout can continue.
