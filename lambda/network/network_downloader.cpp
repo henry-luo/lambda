@@ -326,7 +326,13 @@ bool network_download_resource(NetworkResource* res) {
     res->http_status_code = (int)http_code;
     
     if (http_code >= 400) {
-        log_error("network: HTTP %ld for %s", http_code, res->url);
+        if (res->type == RESOURCE_FONT) {
+            // Web font downloads are best-effort because CSS font fallback is
+            // the recovery path for stale or legacy @font-face source lists.
+            log_warn("network: optional font HTTP %ld for %s", http_code, res->url);
+        } else {
+            log_error("network: HTTP %ld for %s", http_code, res->url);
+        }
         
         // Set appropriate error message
         char error_msg[128];

@@ -8,6 +8,7 @@
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_class.h"
+#include "js_permission.h"
 #include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
@@ -1999,6 +2000,23 @@ typedef struct NetConnectOptions {
     bool allow_half_open;
 } NetConnectOptions;
 
+static bool net_permission_allowed(void) {
+    return js_permission_has_net() != 0;
+}
+
+static Item make_net_permission_error(const NetConnectOptions* options) {
+    char resource[320];
+    resource[0] = '\0';
+    if (options) {
+        if (options->has_path) {
+            snprintf(resource, sizeof(resource), "%s", options->path);
+        } else if (options->host[0]) {
+            snprintf(resource, sizeof(resource), "%s:%d", options->host, options->port);
+        }
+    }
+    return js_permission_make_net_error("connect", resource[0] ? resource : NULL);
+}
+
 typedef struct NetResolveReq {
     uv_getaddrinfo_t req;
     JsSocket* sock;
@@ -3571,6 +3589,14 @@ static Item create_socket_for_connect(const NetConnectOptions* options) {
     if (options->has_signal && socket_configure_abort_signal(sock, options->signal)) return obj;
     if (is_callable(options->callback)) socket_set_listener(obj, "connect", options->callback);
 
+    if (!net_permission_allowed()) {
+        Item err = make_net_permission_error(options);
+        // permission-denied connects must not start lookup/connect handles that
+        // would survive until the event-loop drain watchdog.
+        socket_schedule_error_close_event(sock, err);
+        return obj;
+    }
+
     if (options->has_path) {
         Item err = make_path_connect_error(UV_ENOENT, options->path);
         socket_schedule_error_close_event(sock, err);
@@ -3636,6 +3662,14 @@ static Item js_socket_connect_args(Item self, Item rest_args) {
     if (options.has_onread) socket_configure_onread(sock, options.onread);
     if (options.has_signal && socket_configure_abort_signal(sock, options.signal)) return self;
     if (is_callable(options.callback)) socket_set_listener(self, "connect", options.callback);
+
+    if (!net_permission_allowed()) {
+        Item err = make_net_permission_error(&options);
+        // permission-denied connects must not start lookup/connect handles that
+        // would survive until the event-loop drain watchdog.
+        socket_schedule_error_close_event(sock, err);
+        return self;
+    }
 
     if (options.has_path) {
         Item err = make_path_connect_error(UV_ENOENT, options.path);
@@ -4283,6 +4317,14 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
         host_item = make_undefined_item();
     } else if (is_undefined_item(port_item) || port_item.item == ITEM_NULL) {
         port_item = (Item){.item = i2it(0)};
+    }
+
+    if (!net_permission_allowed()) {
+        // listen denial is synchronous in Node, and checking before bind/listen
+        // avoids leaving socket files or referenced server handles behind.
+        Item err = js_permission_make_net_error("listen", NULL);
+        js_throw_value(err);
+        return ItemNull;
     }
 
     if (srv->closed && srv->close_requested && !srv->handle_closed) {
@@ -5150,6 +5192,13 @@ extern "C" Item js_get_net_namespace(void) {
     }
 
     return net_namespace;
+}
+
+extern "C" Item js_net_get_socket_prototype(void) {
+    if (get_type_id(net_socket_prototype) != LMD_TYPE_MAP) {
+        js_get_net_namespace();
+    }
+    return net_socket_prototype;
 }
 
 extern "C" void js_net_reset(void) {

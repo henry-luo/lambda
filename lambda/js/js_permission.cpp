@@ -88,6 +88,10 @@ extern "C" int js_permission_enabled(void) {
     return g_permission_enabled ? 1 : 0;
 }
 
+extern "C" int js_permission_has_net(void) {
+    return (!g_permission_enabled || g_permission_net) ? 1 : 0;
+}
+
 static void js_perm_normalize_absolute(const char* in, char* out, int out_size) {
     if (!out || out_size <= 0) return;
     out[0] = '\0';
@@ -366,6 +370,17 @@ extern "C" Item js_permission_make_fs_error(const char* permission, const char* 
     Item err = js_new_error(js_perm_string_item(message));
     js_property_set(err, js_perm_string_item("code"), js_perm_string_item("ERR_ACCESS_DENIED"));
     if (permission) js_property_set(err, js_perm_string_item("permission"), js_perm_string_item(permission));
+    if (resource) js_property_set(err, js_perm_string_item("resource"), js_perm_string_item(resource));
+    return err;
+}
+
+extern "C" Item js_permission_make_net_error(const char* syscall, const char* resource) {
+    const char* message =
+        "Access to this API has been restricted. Use --allow-net to manage permissions.";
+    Item err = js_new_error(js_perm_string_item(message));
+    js_property_set(err, js_perm_string_item("code"), js_perm_string_item("ERR_ACCESS_DENIED"));
+    js_property_set(err, js_perm_string_item("permission"), js_perm_string_item("Net"));
+    if (syscall) js_property_set(err, js_perm_string_item("syscall"), js_perm_string_item(syscall));
     if (resource) js_property_set(err, js_perm_string_item("resource"), js_perm_string_item(resource));
     return err;
 }

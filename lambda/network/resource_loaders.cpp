@@ -55,18 +55,40 @@ static char* read_file_to_string(const char* path, size_t* out_size) {
     return content;
 }
 
+static bool resource_url_has_extension(const char* url, const char* ext) {
+    if (!url || !ext) return false;
+    size_t ext_len = strlen(ext);
+    const char* end = url + strlen(url);
+    const char* query = strchr(url, '?');
+    const char* fragment = strchr(url, '#');
+    if (query && query < end) end = query;
+    if (fragment && fragment < end) end = fragment;
+    return (size_t)(end - url) >= ext_len &&
+           strncasecmp(end - ext_len, ext, ext_len) == 0;
+}
+
 // Helper: Add stylesheet to document
 static bool add_stylesheet_to_document(DomDocument* doc, CssStylesheet* sheet) {
     if (!doc || !sheet) return false;
 
-    // ensure capacity
     if (doc->stylesheet_count >= doc->stylesheet_capacity) {
         int new_capacity = doc->stylesheet_capacity == 0 ? 4 : doc->stylesheet_capacity * 2;
-        CssStylesheet** new_sheets = (CssStylesheet**)mem_realloc(
-            doc->stylesheets, new_capacity * sizeof(CssStylesheet*), MEM_CAT_NETWORK);
+        if (!doc->pool) {
+            log_error("resource_loaders: cannot expand stylesheet array without document pool");
+            return false;
+        }
+
+        // document stylesheet arrays are pool-owned after initial HTML load, so
+        // network CSS must grow by copying instead of reallocating pool memory.
+        size_t new_size = (size_t)new_capacity * sizeof(CssStylesheet*);
+        CssStylesheet** new_sheets = (CssStylesheet**)pool_calloc(doc->pool, new_size);
         if (!new_sheets) {
             log_error("resource_loaders: failed to expand stylesheet array");
             return false;
+        }
+        if (doc->stylesheets && doc->stylesheet_count > 0) {
+            memcpy(new_sheets, doc->stylesheets,
+                   (size_t)doc->stylesheet_count * sizeof(CssStylesheet*));
         }
         doc->stylesheets = new_sheets;
         doc->stylesheet_capacity = new_capacity;
@@ -202,8 +224,29 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
     int img_width = 0;
     int img_height = 0;
     ImageSurface* img_surface = NULL;
+    bool source_is_svg = resource_url_has_extension(res->url, ".svg");
+    bool source_is_webp = resource_url_has_extension(res->url, ".webp");
 
-    if (image_get_dimensions(res->local_path, &img_width, &img_height)) {
+    if (source_is_svg && res->manager && res->manager->ui_context) {
+        // SVG resources must bypass the raster probe because cache filenames
+        // use .cache and the raster decoder logs unsupported before fallback.
+        img_surface = load_image((UiContext*)res->manager->ui_context, res->local_path);
+        if (img_surface) {
+            res->image_surface_borrowed = true;
+        }
+    }
+
+    if (!img_surface && source_is_webp) {
+        // WebP decoding is not available in the current image backend. Treat it
+        // as a graceful placeholder instead of reporting a runtime load error.
+        log_warn("network: unsupported WebP image, using placeholder: %s", res->url);
+        if (res->manager) {
+            resource_manager_schedule_repaint(res->manager, img_element);
+        }
+        return;
+    }
+
+    if (!img_surface && image_get_dimensions(res->local_path, &img_width, &img_height)) {
         img_surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
         if (img_surface) {
             img_surface->width = img_width;
@@ -220,22 +263,33 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
         int channels = 0;
         unsigned char* data = image_load(res->local_path, &img_width, &img_height, &channels, 4);
         if (!data) {
-            log_error("network: failed to load image: %s", res->local_path);
-            // schedule repaint to show broken image indicator
-            if (res->manager) {
-                resource_manager_schedule_repaint(res->manager, img_element);
+            if (res->manager && res->manager->ui_context) {
+                // Cached SVGs have hashed .cache names, so the generic raster
+                // decoder cannot infer their format; use Radiant's content-aware
+                // image loader and borrow the UI cache surface.
+                img_surface = load_image((UiContext*)res->manager->ui_context, res->local_path);
+                if (img_surface) {
+                    res->image_surface_borrowed = true;
+                }
             }
-            return;
-        }
+            if (!img_surface) {
+                log_error("network: failed to load image: %s", res->local_path);
+                // schedule repaint to show broken image indicator
+                if (res->manager) {
+                    resource_manager_schedule_repaint(res->manager, img_element);
+                }
+                return;
+            }
+        } else {
+            log_debug("network: image decoded during fallback: %dx%d, channels=%d",
+                      img_width, img_height, channels);
 
-        log_debug("network: image decoded during fallback: %dx%d, channels=%d",
-                  img_width, img_height, channels);
-
-        img_surface = image_surface_create_from(img_width, img_height, data);
-        if (!img_surface) {
-            log_error("network: failed to create image surface: %s", res->url);
-            image_free(data);
-            return;
+            img_surface = image_surface_create_from(img_width, img_height, data);
+            if (!img_surface) {
+                log_error("network: failed to create image surface: %s", res->url);
+                image_free(data);
+                return;
+            }
         }
     }
 
@@ -271,9 +325,15 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
         }
     }
 
-    // store image in element's embed property
-    // free any previous image first
-    if (img_element->embed->img) {
+    if (res->image_surface && res->image_surface != img_surface && !res->image_surface_borrowed) {
+        image_surface_destroy(res->image_surface);
+    }
+    res->image_surface = img_surface;
+
+    // Async-loaded images are owned by the NetworkResource so teardown does not
+    // depend on which DOM/view embed survives reflow.
+    if (img_element->embed->img && img_element->embed->img != img_surface &&
+            !img_element->embed->img->url && !res->image_surface_borrowed) {
         image_surface_destroy(img_element->embed->img);
     }
     img_element->embed->img = img_surface;

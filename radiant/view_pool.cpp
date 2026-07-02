@@ -252,6 +252,16 @@ static void release_embed_prop(DomElement* elem) {
         return;
     }
 
+    // Network resource loading attaches images directly to embed->img, bypassing
+    // the UiContext image cache that normally owns URL-backed ImageSurface values.
+    if (elem->embed->img && !elem->embed->img->url) {
+        image_surface_destroy(elem->embed->img);
+        elem->embed->img = nullptr;
+    }
+    if (elem->embed->poster && !elem->embed->poster->url) {
+        image_surface_destroy(elem->embed->poster);
+        elem->embed->poster = nullptr;
+    }
     release_media_prop(elem->embed);
     release_embedded_document(elem);
     release_grid_prop(elem->embed->grid);

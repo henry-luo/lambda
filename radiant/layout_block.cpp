@@ -5906,7 +5906,15 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 pseudo_resolve_content_url(lycon, content_replacement_decl, src->str) : nullptr;
             const char* image_url = resolved_content_url ? resolved_content_url : src->str;
             // content:url() has no src attribute, but it still creates a replaced image object.
-            block->embed->img = load_image(lycon->ui_context, image_url);
+            ImageSurface* loaded_img = load_image(lycon->ui_context, image_url);
+            // Async network images are pre-attached to the embed; a null sync
+            // load during reflow means "still owned by resource manager path".
+            if (loaded_img) {
+                if (block->embed->img && block->embed->img != loaded_img && !block->embed->img->url) {
+                    image_surface_destroy(block->embed->img);
+                }
+                block->embed->img = loaded_img;
+            }
             strbuf_free(src);
             if (!block->embed->img) {
                 log_debug("%s Failed to load image", block->source_loc());
