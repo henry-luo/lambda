@@ -68,6 +68,16 @@ static const RadiantOnlineViewCase g_online_view_cases[] = {
     {"libpng", "https://www.libpng.org/pub/png/", false},
     {"lua", "https://www.lua.org/", true},
     {"zlib", "https://www.zlib.net/", false},
+    {"example_org", "https://example.org/", false},
+    {"iana_reserved", "https://www.iana.org/domains/reserved", false},
+    {"netlib", "https://www.netlib.org/", false},
+    {"sqlite", "https://www.sqlite.org/index.html", true},
+    {"scheme", "https://www.scheme.org/", false},
+    {"mercurial_scm", "https://www.mercurial-scm.org/", true},
+    {"subversion", "https://subversion.apache.org/", true},
+    {"busybox", "https://www.busybox.net/", false},
+    {"musl_libc", "https://www.musl-libc.org/", false},
+    {"linux_from_scratch", "https://www.linuxfromscratch.org/", true},
 };
 
 static bool online_view_file_readable(const char* path) {
@@ -487,6 +497,46 @@ TEST(RadiantOnlineViewTest, LoadsLuaOrg) {
 
 TEST(RadiantOnlineViewTest, LoadsZlibNet) {
     online_view_expect_case(15);
+}
+
+TEST(RadiantOnlineViewTest, LoadsExampleDotOrg) {
+    online_view_expect_case(16);
+}
+
+TEST(RadiantOnlineViewTest, LoadsIANAReservedDomains) {
+    online_view_expect_case(17);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNetlibOrg) {
+    online_view_expect_case(18);
+}
+
+TEST(RadiantOnlineViewTest, LoadsSQLiteOrg) {
+    online_view_expect_case(19);
+}
+
+TEST(RadiantOnlineViewTest, LoadsSchemeOrg) {
+    online_view_expect_case(20);
+}
+
+TEST(RadiantOnlineViewTest, LoadsMercurialSCMOrg) {
+    online_view_expect_case(21);
+}
+
+TEST(RadiantOnlineViewTest, LoadsSubversionApacheOrg) {
+    online_view_expect_case(22);
+}
+
+TEST(RadiantOnlineViewTest, LoadsBusyBoxNet) {
+    online_view_expect_case(23);
+}
+
+TEST(RadiantOnlineViewTest, LoadsMuslLibcOrg) {
+    online_view_expect_case(24);
+}
+
+TEST(RadiantOnlineViewTest, LoadsLinuxFromScratchOrg) {
+    online_view_expect_case(25);
 }
 
 #endif
