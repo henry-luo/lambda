@@ -295,37 +295,6 @@ static inline int gettimeofday(struct timeval* tv, void* tz) {
 static inline size_t get_rss_bytes() { return 0; }
 #endif
 
-static bool html_tag_name_boundary(char c) {
-    return c == '>' || c == '/' || c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f';
-}
-
-static int lambda_ascii_strncasecmp(const char* a, const char* b, size_t len) {
-#ifdef _WIN32
-    return _strnicmp(a, b, len);
-#else
-    return strncasecmp(a, b, len);
-#endif
-}
-
-static const char* find_html_start_tag(const char* html, const char* tag_name) {
-    if (!html || !tag_name) return NULL;
-    size_t tag_len = strlen(tag_name);
-    const char* scan = html;
-    while ((scan = strcasestr(scan, "<")) != NULL) {
-        const char* name_start = scan + 1;
-        if (*name_start == '/') {
-            scan++;
-            continue;
-        }
-        if (lambda_ascii_strncasecmp(name_start, tag_name, tag_len) == 0 &&
-            html_tag_name_boundary(name_start[tag_len])) {
-            return scan;
-        }
-        scan++;
-    }
-    return NULL;
-}
-
 // Forward declare additional transpiler functions
 extern "C" {
     char* read_text_file(const char *filename);
@@ -3435,6 +3404,7 @@ int main(int argc, char *argv[]) {
         // For HTTP URLs, fetch content and determine type from Content-Type header
         const char* effective_ext = nullptr;
         char* temp_file_path = nullptr;
+        bool temp_file_path_is_local = false;
         const char* original_url = nullptr;  // preserve original URL for base tag injection
         if (is_http_url) {
             original_url = filename;  // save original URL before we change filename
@@ -3459,64 +3429,28 @@ int main(int argc, char *argv[]) {
                      response->content_type ? response->content_type : "(none)",
                      effective_ext ? effective_ext : "(none)");
 
-            // Write to temp file with appropriate extension
-            char temp_path[256];
-            snprintf(temp_path, sizeof(temp_path), "./temp/lambda_view_http%s", effective_ext ? effective_ext : ".html");
-            FILE* f = fopen(temp_path, "wb");
-            if (f) {
-                // For HTML content, inject a <base> tag to preserve the original URL context
-                // This ensures relative URLs (CSS, images, etc.) resolve correctly
-                if (effective_ext && strcmp(effective_ext, ".html") == 0) {
-                    // Find where to inject the base tag (after <head> or at start of content)
-                    // `<head` also matches `<header>`; only real start tags keep
-                    // the injected base in the parser's head where URL resolution sees it.
-                    const char* head_tag = find_html_start_tag(response->data, "head");
-                    const char* html_tag = find_html_start_tag(response->data, "html");
-
-                    if (head_tag) {
-                        // Find the end of the <head> tag
-                        const char* head_end = strchr(head_tag, '>');
-                        if (head_end) {
-                            head_end++; // Move past the '>'
-                            // Write content before insertion point
-                            fwrite(response->data, 1, head_end - response->data, f);
-                            // Inject base tag
-                            fprintf(f, "\n<base href=\"%s\">\n", base_url_for_inject);
-                            // Write rest of content
-                            fwrite(head_end, 1, response->size - (head_end - response->data), f);
-                            log_info("Injected <base href=\"%s\"> into HTML", base_url_for_inject);
-                        } else {
-                            fwrite(response->data, 1, response->size, f);
-                        }
-                    } else if (html_tag) {
-                        // Find the end of the <html> tag and inject after it
-                        const char* html_end = strchr(html_tag, '>');
-                        if (html_end) {
-                            html_end++;
-                            fwrite(response->data, 1, html_end - response->data, f);
-                            fprintf(f, "\n<head><base href=\"%s\"></head>\n", base_url_for_inject);
-                            fwrite(html_end, 1, response->size - (html_end - response->data), f);
-                            log_info("Injected <head><base href=\"%s\"></head> into HTML", base_url_for_inject);
-                        } else {
-                            fwrite(response->data, 1, response->size, f);
-                        }
-                    } else {
-                        // No head or html tag, prepend base tag
-                        fprintf(f, "<base href=\"%s\">\n", base_url_for_inject);
-                        fwrite(response->data, 1, response->size, f);
-                        log_info("Prepended <base href=\"%s\"> to HTML", base_url_for_inject);
-                    }
-                } else {
-                    fwrite(response->data, 1, response->size, f);
+            if (effective_ext && strcmp(effective_ext, ".html") == 0) {
+                // Keep HTML URL views as HTTP documents; staging them as local
+                // files hides the document URL from Radiant resource discovery.
+                temp_file_path = mem_strdup(base_url_for_inject, MEM_CAT_TEMP);
+                filename = temp_file_path ? temp_file_path : base_url_for_inject;
+                log_info("HTTP HTML document will be loaded directly: %s", filename);
+            } else {
+                // Write non-HTML content to temp file with appropriate extension
+                char temp_path[256];
+                snprintf(temp_path, sizeof(temp_path), "./temp/lambda_view_http%s", effective_ext ? effective_ext : ".html");
+                FILE* f = fopen(temp_path, "wb");
+                if (!f) {
+                    printf("Error: Failed to create temp file for HTTP content\n");
+                    free_fetch_response(response);
+                    return lambda_main_finish(1);
                 }
+                fwrite(response->data, 1, response->size, f);
                 fclose(f);
                 temp_file_path = mem_strdup(temp_path, MEM_CAT_TEMP);
+                temp_file_path_is_local = true;
                 filename = temp_file_path;
                 log_debug("Saved HTTP content to: %s (%zu bytes)", temp_file_path, response->size);
-            } else {
-                printf("Error: Failed to create temp file for HTTP content\n");
-                free_fetch_response(response);
-                return lambda_main_finish(1);
             }
             free_fetch_response(response);
         }
@@ -3624,7 +3558,10 @@ int main(int argc, char *argv[]) {
             pdf_bridge_source = build_pdf_to_html_bridge_script(filename, "{max_pages: 48}", "view");
             if (!pdf_bridge_source) {
                 printf("Error: Failed to prepare PDF view bridge for '%s'\n", filename);
-                if (temp_file_path) { file_delete(temp_file_path); mem_free(temp_file_path); }
+                if (temp_file_path) {
+                    if (temp_file_path_is_local) file_delete(temp_file_path);
+                    mem_free(temp_file_path);
+                }
                 return lambda_main_finish(1);
             }
 
@@ -3637,7 +3574,7 @@ int main(int argc, char *argv[]) {
 
             mem_free(pdf_bridge_source);
             if (temp_file_path) {
-                file_delete(temp_file_path);
+                if (temp_file_path_is_local) file_delete(temp_file_path);
                 mem_free(temp_file_path);
             }
 
@@ -3667,13 +3604,16 @@ int main(int argc, char *argv[]) {
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
             printf("Supported formats: .pdf, .html, .md, .tex, .ls, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
-            if (temp_file_path) { file_delete(temp_file_path); mem_free(temp_file_path); }
+            if (temp_file_path) {
+                if (temp_file_path_is_local) file_delete(temp_file_path);
+                mem_free(temp_file_path);
+            }
             return lambda_main_finish(1);
         }
 
         // Cleanup temp file if we created one from HTTP URL
         if (temp_file_path) {
-            file_delete(temp_file_path);
+            if (temp_file_path_is_local) file_delete(temp_file_path);
             mem_free(temp_file_path);
         }
         log_info("view command completed with result: %d", exit_code);

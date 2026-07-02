@@ -163,6 +163,56 @@ static const RadiantOnlineViewCase g_online_view_cases[] = {
     {"httpd_24_docs", "https://httpd.apache.org/docs/2.4/", true},
     {"apr_generated_docs", "https://apr.apache.org/docs/apr/1.7/", true},
     {"iana_protocols", "https://www.iana.org/protocols", true},
+    {"rfc_ascii_20", "https://www.rfc-editor.org/rfc/rfc20.html", false},
+    {"rfc_ipv4_791", "https://www.rfc-editor.org/rfc/rfc791.html", false},
+    {"rfc_tcp_793", "https://www.rfc-editor.org/rfc/rfc793.html", false},
+    {"rfc_uri_3986", "https://www.rfc-editor.org/rfc/rfc3986.html", false},
+    {"rfc_tls13_8446", "https://www.rfc-editor.org/rfc/rfc8446.html", false},
+    {"w3c_html52", "https://www.w3.org/TR/html52/", true},
+    {"w3c_css_cascade", "https://www.w3.org/TR/css-cascade-5/", true},
+    {"w3c_css_flexbox", "https://www.w3.org/TR/css-flexbox-1/", true},
+    {"w3c_wcag22", "https://www.w3.org/TR/WCAG22/", true},
+    {"w3c_xml", "https://www.w3.org/TR/xml/", true},
+    {"python_docs", "https://docs.python.org/3/", true},
+    {"python_tutorial", "https://docs.python.org/3/tutorial/", true},
+    {"python_library", "https://docs.python.org/3/library/index.html", true},
+    {"python_whatsnew", "https://docs.python.org/3/whatsnew/3.13.html", true},
+    {"python_capi", "https://docs.python.org/3/c-api/index.html", true},
+    {"postgres_docs", "https://www.postgresql.org/docs/current/", true},
+    {"postgres_sql_select", "https://www.postgresql.org/docs/current/sql-select.html", true},
+    {"postgres_datatypes", "https://www.postgresql.org/docs/current/datatype.html", true},
+    {"sqlite_quickstart", "https://www.sqlite.org/quickstart.html", true},
+    {"sqlite_json1", "https://www.sqlite.org/json1.html", true},
+    {"sqlite_select", "https://www.sqlite.org/lang_select.html", true},
+    {"curl_libcurl_tutorial", "https://curl.se/libcurl/c/libcurl-tutorial.html", true},
+    {"curl_easy_setopt", "https://curl.se/libcurl/c/curl_easy_setopt.html", true},
+    {"curl_easy_perform", "https://curl.se/libcurl/c/curl_easy_perform.html", true},
+    {"nginx_beginners", "https://nginx.org/en/docs/beginners_guide.html", true},
+    {"nginx_https", "https://nginx.org/en/docs/http/configuring_https_servers.html", true},
+    {"httpd_getting_started", "https://httpd.apache.org/docs/2.4/getting-started.html", true},
+    {"httpd_core", "https://httpd.apache.org/docs/2.4/mod/core.html", true},
+    {"cmake_help", "https://cmake.org/cmake/help/latest/", true},
+    {"cmake_add_executable", "https://cmake.org/cmake/help/latest/command/add_executable.html", true},
+    {"llvm_getting_started", "https://llvm.org/docs/GettingStarted.html", true},
+    {"llvm_langref", "https://llvm.org/docs/LangRef.html", true},
+    {"gcc_manual", "https://gcc.gnu.org/onlinedocs/gcc/", true},
+    {"gcc_option_summary", "https://gcc.gnu.org/onlinedocs/gcc/Option-Summary.html", true},
+    {"gnu_emacs", "https://www.gnu.org/software/emacs/", true},
+    {"gnu_gcc", "https://www.gnu.org/software/gcc/", true},
+    {"gnu_libc", "https://www.gnu.org/software/libc/", true},
+    {"gnu_guile", "https://www.gnu.org/software/guile/", true},
+    {"git_docs_git", "https://git-scm.com/docs/git", true},
+    {"git_book_v2", "https://git-scm.com/book/en/v2", true},
+    {"kernel_docs", "https://www.kernel.org/doc/html/latest/", true},
+    {"kernel_process_docs", "https://www.kernel.org/doc/html/latest/process/", true},
+    {"man7_ls", "https://man7.org/linux/man-pages/man1/ls.1.html", true},
+    {"man7_open", "https://man7.org/linux/man-pages/man2/open.2.html", true},
+    {"openbsd_man_ls", "https://man.openbsd.org/ls", true},
+    {"rust_book", "https://doc.rust-lang.org/book/", true},
+    {"rust_std", "https://doc.rust-lang.org/std/", true},
+    {"go_doc", "https://go.dev/doc/", true},
+    {"go_spec", "https://go.dev/ref/spec", true},
+    {"php_manual", "https://www.php.net/manual/en/", true},
 };
 
 static bool online_view_file_readable(const char* path) {
@@ -520,6 +570,14 @@ static void online_view_expect_case(size_t index) {
         << ", lambda log: " << result.lambda_log_path;
 
     online_view_buffer_free(&result.output);
+}
+
+static void online_view_expect_case_range(size_t first, size_t past_end) {
+    for (size_t i = first; i < past_end; i++) {
+        SCOPED_TRACE(i);
+        online_view_expect_case(i);
+        if (::testing::Test::HasFatalFailure()) return;
+    }
 }
 
 TEST(RadiantOnlineViewTest, LoadsExampleDotCom) {
@@ -924,6 +982,26 @@ TEST(RadiantOnlineViewTest, LoadsAPRGeneratedDocs) {
 
 TEST(RadiantOnlineViewTest, LoadsIANAProtocols) {
     online_view_expect_case(100);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages001To010) {
+    online_view_expect_case_range(101, 111);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages011To020) {
+    online_view_expect_case_range(111, 121);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages021To030) {
+    online_view_expect_case_range(121, 131);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages031To040) {
+    online_view_expect_case_range(131, 141);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages041To050) {
+    online_view_expect_case_range(141, 151);
 }
 
 #endif
