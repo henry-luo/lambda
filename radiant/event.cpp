@@ -7113,6 +7113,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // Set caret at clicked position for a fresh placement. A
                     // shift-click must preserve the existing collapsed
                     // selection anchor so state_store_legacy_selection_extend() can use it.
+                    View* focused = focus_get(state);
+                    if (focused && focused->is_element()) {
+                        DomElement* focused_elem = lam::dom_require_element(focused);
+                        DomNode* target_node = static_cast<DomNode*>(evcon.target);
+                        DomNode* focused_node = static_cast<DomNode*>(focused);
+                        if (tc_is_text_control(focused_elem) &&
+                            !dom_node_is_descendant_of(target_node, focused_node)) {
+                            // plain document text clicks must transfer caret ownership
+                            // away from the focused text control before StateStore
+                            // refresh preserves that control's selection shadow.
+                            update_focus_state(&evcon, NULL, false);
+                        }
+                    }
                     collapse_active_text_control_selection_for_rich_target(state, evcon.target);
                     state_store_legacy_caret_set(state, evcon.target, char_offset);
                 }
