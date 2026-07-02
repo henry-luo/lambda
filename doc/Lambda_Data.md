@@ -954,6 +954,18 @@ let extended = {*base, z: 3}  // {x: 1, y: 2, z: 3}
 let updated = {*base, x: 10}  // {x: 10, y: 2}
 ```
 
+When updating an existing map or record-shaped state, spread the original value
+first and then list the fields to change:
+
+```lambda
+let next_state = {*state, fill: "red", font_size: 12}
+```
+
+A fresh map literal contains exactly the fields written in the literal. It does
+not copy omitted fields from any input value unless that value is explicitly
+spread. Prefer the `{*base, key: value}` pattern for "with" constructors and
+state updates.
+
 ### Concatenation
 
 ```lambda

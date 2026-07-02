@@ -501,8 +501,10 @@ non-default fields.
 
 ## 21. Map "spread + override" constructors silently drop fields not listed
 
-**Severity: MEDIUM** — silent: constructed record is missing fields you
-forgot to copy.
+**Status: ✅ No Fix / by design (2026-07-02)** — map literals construct exactly
+the fields listed in the literal. They do not implicitly copy fields from an
+input state record. Use map spread when the intent is "copy this record, then
+override these fields."
 
 ```lambda
 fn _with(st, tm, tlm, name, size, info, leading, in_text) {
@@ -527,15 +529,24 @@ spread form `{*: st, key: value}` precisely for this case. It's easy to
 forget to use it, and there is no warning when a record-typed value
 loses a field across a constructor call.
 
-**Workarounds**:
+Changing the runtime semantics would be wrong: a fresh map literal must remain a
+fresh constructor, and silently preserving fields from an input parameter would
+make map construction context-dependent. The fix is to make the intended update
+form prominent in the docs and use it consistently in state-update helpers.
+
+**Resolution**:
 - Always prefer `{*: base, key: override, …}` over hand-listing fields.
 - Or define the record as a typed shape so the type system catches the
   missing field.
+- Documented this more prominently in `doc/Lambda_Data.md` and
+  `doc/Lambda_Expr_Stam.md`: fresh map literals do not preserve omitted fields;
+  spread the base value first for copy-with-override updates.
 
-**Asks**:
-- A warning when a `fn`/`pn` returns a map literal that has a strictly
-  smaller field set than a same-named map flowing through the function
-  on its inputs would catch this whole class of bug.
+**Possible future improvement**:
+- An opt-in lint warning could flag a helper that accepts a map-like parameter
+  and returns a smaller map literal without spreading it. This should not be a
+  runtime warning/error because smaller map construction is valid Lambda code and
+  many intentional constructors would otherwise become noisy.
 
 ---
 
