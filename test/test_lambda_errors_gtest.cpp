@@ -587,6 +587,16 @@ TEST_F(NegativeScriptTest, InvalidTypeAnnotation) {
     ExpectErrorWithoutCrash("test/lambda/negative/invalid_type_annotation.ls");
 }
 
+TEST_F(NegativeScriptTest, ImportParseErrorBlocksExecution) {
+    ScriptResult result = run_lambda_script("test/lambda/negative/import_parse_error_driver.ls");
+
+    EXPECT_NE(result.exit_code, 0);
+    EXPECT_NE(strstr(result.output.c_str(), "error[E217]"), nullptr)
+        << "Expected import failure diagnostic.\nOutput: " << result.output;
+    EXPECT_EQ(strstr(result.output.c_str(), "\"DRIVER_RAN\""), nullptr)
+        << "Importer executed after imported module parse failure.\nOutput: " << result.output;
+}
+
 //==============================================================================
 // Categorized Negative Tests - Organized by error category
 //==============================================================================
