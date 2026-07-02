@@ -1,0 +1,20 @@
+{
+  "name": "editor4c: Delete removes the character to the right of the caret",
+  "_note": "Phase B pilot — 4B's backspace-delete.json exercises Backspace (deleteContentBackward). This covers deleteContentForward, the sibling case with distinct browser event handling and separate reducer branches. Uses Cmd+A + type to normalise the h1 to exactly 'ABC', then Home + Delete → 'BC' (equals, not just contains).",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 60},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "wait", "ms": 60},
+    {"type": "type", "target": {"selector": ".rdt-surface"}, "text": "ABC"},
+    {"type": "wait", "ms": 100},
+    {"type": "key_combo", "key": "Home"},
+    {"type": "wait", "ms": 60},
+    {"type": "key_press", "key": "Delete"},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface h1"}, "equals": "BC"}
+  ]
+}
