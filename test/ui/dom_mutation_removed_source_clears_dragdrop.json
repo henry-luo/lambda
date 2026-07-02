@@ -1,0 +1,19 @@
+{
+  "name": "DOM mutation removing drag source clears native DragDropState",
+  "html": "test/ui/dom_mutation_removed_source_clears_dragdrop.html",
+  "viewport": {"width": 700, "height": 360},
+  "events": [
+    {"type": "wait", "ms": 200},
+    {"type": "mouse_down", "target": {"selector": "#drag-src"}},
+    {"type": "mouse_move", "target": {"selector": "#drop-zone"}},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_count", "target": {"selector": "#drag-src"}, "equals": 0},
+    {"type": "assert_text", "target": {"selector": "#status"}, "contains": "source removed"},
+    {"type": "assert_reconcile_mode", "mode": "retained_full_layout", "reason": "structural-css-risk"},
+    {"type": "assert_state_store", "drag_drop": false},
+    {"type": "mouse_up", "target": {"selector": "#drop-zone"}},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_text", "target": {"selector": "#status"}, "contains": "source removed"},
+    {"type": "assert_state_store", "drag_drop": false}
+  ]
+}

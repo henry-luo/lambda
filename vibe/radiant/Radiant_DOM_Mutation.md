@@ -10,7 +10,9 @@
 keeps the `ViewTree` shell and retained DOM/view nodes, runs
 `layout_html_doc(..., true)`, and prunes/reprojects StateStore afterward.
 `view_pool_destroy` remains reserved for document/root teardown. The overflow
-fixture is now covered by `dom_mutation_overflow_retained_full`.
+fixture is now covered by `dom_mutation_overflow_retained_full`. Native
+`DragDropState` source removal is covered by
+`dom_mutation_removed_source_clears_dragdrop`.
 
 ## 1. Problem Statement
 
@@ -443,6 +445,9 @@ Verification:
   `dom_mutation_stylesheet_fallback_retains_state`, and
   `dom_mutation_innerhtml_parent_retains_child_prunes` now assert
   `retained_full_layout`.
+- `dom_mutation_removed_source_clears_dragdrop` verifies that removing the
+  active drag source clears native `DragDropState` deliberately instead of
+  leaving a stale `View*`.
 - The recent editor/list/form regressions were rerun after this slice:
   `test_list_reflow`, `test_form_beforeinput_target_ranges`,
   `test_rich_text_editor`, and `test_rich_text_editor_typing`.
@@ -541,7 +546,7 @@ Add fixtures under `test/ui` with matching `.html` and `.json` files:
 | `dom_mutation_overflow_retained_full` | More mutation records than `DOM_JS_MUTATION_RECORD_CAP`. | retained full layout, connected focus/state survives |
 | `dom_mutation_replacechild_notifies` | Regression for structural paths that pre-record details but miss final notify. | reconcile runs, layout/text reflects replacement |
 | `dom_mutation_dragover_retains_dragdrop` | During native drag, `dragover` mutates DOM. | mid-drag `drag_drop=true`, `drag_drop_active=true`, source rebound, drop/dragend completes |
-| `dom_mutation_removed_source_clears_dragdrop` | Drag source is removed by handler. | drag/drop clears deliberately, no stale source pointer |
+| `dom_mutation_removed_source_clears_dragdrop` | Drag source is removed by handler. | implemented; drag/drop clears deliberately, no stale source pointer |
 
 Existing `test/ui/editor4c/drag-reorder.json` should remain as a behavior
 regression, but it is not enough by itself because it currently proves the

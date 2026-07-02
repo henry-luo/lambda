@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>DOM mutation removing drag source clears DragDropState</title>
+<style>
+  body { font-family: sans-serif; margin: 24px; }
+  .row { display: flex; gap: 24px; align-items: center; }
+  .box {
+    width: 150px;
+    height: 90px;
+    border: 2px solid #333;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+  }
+  #drag-src { background: rgb(70, 120, 210); color: white; cursor: grab; }
+  #drop-zone { background: rgb(235, 225, 185); border-style: dashed; }
+  #status { margin-top: 18px; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div id="drag-src" class="box" draggable="true">Drag source</div>
+    <div id="drop-zone" class="box" dropzone="copy">Drop target</div>
+  </div>
+  <p id="status">ready</p>
+  <script>
+    const src = document.getElementById('drag-src');
+    const zone = document.getElementById('drop-zone');
+    const status = document.getElementById('status');
+    let removed = false;
+
+    src.addEventListener('dragstart', (event) => {
+      event.dataTransfer.setData('text/plain', 'payload');
+      status.textContent = 'dragstart';
+    });
+
+    zone.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      if (!removed) {
+        removed = true;
+        src.remove();
+      }
+      status.textContent = 'source removed';
+    });
+
+    zone.addEventListener('drop', (event) => {
+      event.preventDefault();
+      status.textContent = 'unexpected drop';
+    });
+  </script>
+</body>
+</html>
