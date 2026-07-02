@@ -283,17 +283,20 @@ path by design.
 
 ## 14. `var` declared with a "null-shaped" initial value cannot be reassigned
 
-**Severity: HIGH** — silent assignment failure.
+**Status: ✅ Fixed (2026-07-02)** — unannotated `var` bindings now widen even
+when their initial value is `null` or an empty text literal normalized to
+`null`. Reassigned values survive both direct reads and later map/record
+packing.
 
 ```lambda
 pn demo() {
-    var s = ""             // ← s is locked as null-typed
+    var s = ""             // "" normalizes to null
     s = "hello"
-    print({ s: s })        // -> { s: null }   (assignment dropped!)
+    print({ s: s })        // -> { s: "hello" }
 
     var x = null
     x = { a: 1 }
-    print({ x: x })        // -> { x: null }   (also dropped)
+    print({ x: x })        // -> { x: { a: 1 } }
 
     var m = { x: 0 }       // ← concrete shape: works
     m = { x: 99 }
@@ -301,17 +304,13 @@ pn demo() {
 }
 ```
 
-The `var` is type-inferred from its initial expression. If the initial
-value is `null` (or anything that becomes null, e.g. `""` per #13),
-subsequent assignments of differently-typed values are silently dropped
-— no error, no warning, the variable just stays `null`.
+Root cause: the MIR runtime variable already widened to boxed `ANY`, but the
+AST name entry and later identifier nodes kept the initializer's static
+`null` type. Map literals such as `{s: s}` then compiled a null-shaped field
+and discarded the reassigned boxed value during field packing.
 
-This combines lethally with #13: `var s = ""; while (...) { s = s ++ ch }`
-appears reasonable but stays `null` forever.
-
-**Asks**:
-- Either widen the inferred type on assignment, or raise a type error.
-- Silent assignment failure is the worst possible outcome.
+Regression coverage: `test/lambda/proc/proc_var.ls` now checks both
+`var x = null; x = {a: 1}; {x: x}` and `var s = ""; s = "hello"; {s: s}`.
 
 ---
 
