@@ -1,0 +1,18 @@
+{
+  "name": "editor4c: text color picker applies a color mark to the selection",
+  "_note": "Phase B — toolbar color palette. Cmd+A selects the h1, the 'Text color' toggle opens the palette, clicking a swatch (title is the hex color) applies a color mark → the rendered leaf carries style color:<hex>. Covers the §4.2 'color' interaction.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 60},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "wait", "ms": 80},
+    {"type": "click", "target": {"selector": ".rdt-toolbar button[title=\"Text color\"]"}},
+    {"type": "wait", "ms": 100},
+    {"type": "click", "target": {"selector": ".rdt-palette button[title=\"#ef4444\"]"}},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface [data-source-path=\"0,0\"]"}, "attribute": "style", "contains": "color:#ef4444"}
+  ]
+}
