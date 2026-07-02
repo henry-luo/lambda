@@ -1769,6 +1769,32 @@ static void caret_local_from_absolute(View* view, float abs_x, float abs_y,
     if (out_y) *out_y = y;
 }
 
+// Mirror of state_machine.cpp's legacy_view_offset_limit: the maximum caret
+// char_offset a view can legally hold. Used to reject a geometry-resolved caret
+// target that would violate the DocState interaction invariant (e.g. a void/
+// atomic element like <br> whose boundary length is 0).
+static bool caret_target_offset_valid(View* view, int offset) {
+    if (!view) return true;
+    if (offset < 0) return false;
+    DomNode* node = static_cast<DomNode*>(view);
+    uint32_t limit;
+    if (node->is_text()) {
+        DomText* text = lam::dom_require_text(node);
+        limit = dom_text_utf16_to_utf8(text, dom_text_utf16_length(text));
+    } else if (node->is_element()) {
+        DomElement* elem = lam::dom_require_element(node);
+        if (tc_is_text_control(elem)) {
+            tc_ensure_init(elem);
+            limit = elem->form ? elem->form->current_value_len : 0;
+        } else {
+            limit = dom_node_boundary_length(node);
+        }
+    } else {
+        limit = dom_node_boundary_length(node);
+    }
+    return (uint32_t)offset <= limit;
+}
+
 static void dom_boundary_to_legacy_projection(const DomBoundary& boundary,
                                               View** out_view, int* out_offset) {
     DomNode* node = boundary.node;
@@ -1996,7 +2022,16 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
                     : static_cast<View*>(r->start_view);
                 int resolved_caret_offset = focus_at_end
                     ? r->end_byte_offset : r->start_byte_offset;
-                if (dom_collapsed && resolved_caret_view) {
+                // The resolver picks the nearest laid-out box for caret GEOMETRY
+                // (x/y/height) — e.g. a trailing <br>'s edge for a caret at
+                // end-of-block-after-<br>. Only adopt it as the LOGICAL caret
+                // view/offset when that offset is valid for the target; a void/
+                // atomic element (br) would carry an out-of-bounds offset and
+                // trip the DocState interaction invariant. Otherwise keep the
+                // boundary projection (foc_view/foc_off), which is a valid block
+                // boundary, and still use the resolved x/y/height below.
+                if (dom_collapsed && resolved_caret_view &&
+                    caret_target_offset_valid(resolved_caret_view, resolved_caret_offset)) {
                     caret->view = resolved_caret_view;
                     caret->char_offset = resolved_caret_offset;
                 }
