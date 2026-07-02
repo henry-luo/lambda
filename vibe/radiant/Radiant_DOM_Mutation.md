@@ -357,12 +357,16 @@ create new nodes.
 - `doc_state_begin_drag_drop(...)` allocates it from the StateStore arena;
 - `doc_state_clear_drag_drop(...)` zeroes the struct.
 
-So the owner is retained, but the live drag payload is not retained across
-fallback because:
+**Implemented status.** The owner is retained, and active drag/drop now survives
+DOM mutation as long as the dragged source remains connected:
 
-- `DragDropState::source_view` is a raw `View*`;
-- `DragDropState::drop_target` is a raw `View*`;
-- fallback calls `doc_state_clear_drag_drop(state)`.
+- `DragDropState::source_node_id` and `drop_target_node_id` are recorded in
+  `radiant/state_store.hpp`;
+- retained-full fallback no longer calls `doc_state_clear_drag_drop(state)` for
+  connected sources;
+- `doc_state_rebind_after_layout(...)` clears drag/drop only when the source
+  view disappeared, and clears only the drop target/range when the target
+  disappeared.
 
 ### 7.2 Target Shape
 
@@ -401,8 +405,10 @@ On fallback after reflow:
 - re-hit-test or re-resolve the drop target from pointer coordinates/range;
 - continue dispatching `dragover`, `drop`, and `dragend` from StateStore state.
 
-This lets the Stage 4C `g_jsdnd_active` / `g_jsdnd_source` workaround be
-deleted once the native DragDropState survives mutation.
+The old Stage 4C `g_jsdnd_active` / `g_jsdnd_source` workaround is no longer
+present in the editor bundle. `test/ui/editor4c/drag-reorder.json` now runs on
+the native drag session plus the editor's local source index, while the focused
+`dom_mutation_dragover_retains_dragdrop` fixture proves StateStore retention.
 
 ## 8. Proposed Implementation Phases
 
@@ -421,15 +427,17 @@ Work:
 - Preserve `view_state_map` entries by `ViewId`; prune only ids absent from the
   live DOM.
 - Preserve focus/caret/selection through DOM anchors.
-- Preserve `DragDropState` through source DOM id and active/pending flags.
+- **Implemented:** preserve `DragDropState` through source DOM id and
+  active/pending flags.
 - Keep animation retention conservative: if animation targets can be rebound by
   DOM id, retain; otherwise drop only animations whose targets cannot be found.
 
 Verification:
 
-- `test/ui/editor4c/drag-reorder.json` should pass without `g_jsdnd_*`.
-- Add a focused test where `dragover` mutates DOM and native `DragDropState`
-  remains active through `mouseup`.
+- **Implemented:** `test/ui/editor4c/drag-reorder.json` passes without
+  `g_jsdnd_*`.
+- **Implemented:** add a focused test where `dragover` mutates DOM and native
+  `DragDropState` remains active through `mouseup`.
 - **Implemented:** add a focus/caret test where a handler mutates a sibling
   subtree and caret remains on the focused editable host.
 
@@ -557,9 +565,8 @@ Add small, explicit assertion hooks rather than inferring behavior from logs:
 - **Implemented:** tighten `assert_state_store` so `drag_drop_active`, `drag_drop_pending`,
   `drag_drop_source`, and `drag_drop_target` fail when `state->drag_drop` is
   absent.
-- Add optional `drag_step` or paused-drag support if primitive
-  `mouse_down`/`mouse_move`/`mouse_up` steps are not enough to assert mid-drag
-  state after a `dragover` mutation.
+- **Not needed so far:** primitive `mouse_down`/`mouse_move`/`mouse_up` steps
+  are enough to assert mid-drag state after a `dragover` mutation.
 
 The reconcile-mode assertion should read structured state stored on the document
 or DocState during reconciliation, not parse `./log.txt`.
@@ -579,12 +586,13 @@ Add fixtures under `test/ui` with matching `.html` and `.json` files:
 | `dom_mutation_overflow_retained_full` | More mutation records than `DOM_JS_MUTATION_RECORD_CAP`. | retained full layout, connected focus/state survives |
 | `dom_mutation_retained_full_preserves_textarea_caret` | Textarea input mutates a sibling stylesheet and forces broad retained full layout. | implemented; retained full layout, form state retained, typed value/caret preserved |
 | `dom_mutation_replacechild_notifies` | Regression for structural paths that pre-record details but miss final notify. | reconcile runs, layout/text reflects replacement |
-| `dom_mutation_dragover_retains_dragdrop` | During native drag, `dragover` mutates DOM. | mid-drag `drag_drop=true`, `drag_drop_active=true`, source rebound, drop/dragend completes |
+| `dom_mutation_dragover_retains_dragdrop` | During native drag, `dragover` mutates DOM. | implemented; mid-drag `drag_drop=true`, `drag_drop_active=true`, source retained, drop/dragend completes |
 | `dom_mutation_removed_source_clears_dragdrop` | Drag source is removed by handler. | implemented; drag/drop clears deliberately, no stale source pointer |
 
-Existing `test/ui/editor4c/drag-reorder.json` should remain as a behavior
-regression, but it is not enough by itself because it currently proves the
-`g_jsdnd_*` workaround rather than native `DragDropState` retention.
+Existing `test/ui/editor4c/drag-reorder.json` remains as an editor behavior
+regression. It complements, but does not replace,
+`dom_mutation_dragover_retains_dragdrop`, which is the focused native
+StateStore-retention assertion.
 
 ### 9.4 Example Development Commands
 
