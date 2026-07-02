@@ -3733,6 +3733,23 @@ static bool js_process_ipc_is_disconnect_control(Item message) {
     return value.item == ITEM_TRUE || value.item == b2it(true);
 }
 
+static bool js_process_ipc_unwrap_handle_message(Item* message) {
+    if (!message || (get_type_id(*message) != LMD_TYPE_MAP &&
+        get_type_id(*message) != LMD_TYPE_OBJECT &&
+        get_type_id(*message) != LMD_TYPE_VMAP)) {
+        return false;
+    }
+    Item has_handle = js_property_get(*message,
+        (Item){.item = s2it(heap_create_name("__lambda_ipc_has_handle__", 25))});
+    if (has_handle.item != ITEM_TRUE && has_handle.item != b2it(true)) return false;
+    Item payload = js_property_get(*message,
+        (Item){.item = s2it(heap_create_name("__lambda_ipc_payload__", 22))});
+    // only handle-bearing IPC messages consume a pending descriptor; otherwise
+    // a later no-handle control/user message can steal an earlier queued fd.
+    *message = payload;
+    return true;
+}
+
 static void js_process_ipc_close_from_control(void) {
     if (!js_process_ipc_active || js_process_ipc_closing) return;
     js_process_ipc_closing = true;
@@ -3753,7 +3770,8 @@ static void js_process_ipc_handle_line(const char* chars, int len) {
         js_process_ipc_close_from_control();
         return;
     }
-    Item handle = js_process_ipc_take_pending_handle();
+    bool has_handle = js_process_ipc_unwrap_handle_message(&message);
+    Item handle = has_handle ? js_process_ipc_take_pending_handle() : make_js_undefined();
     if (!js_process_has_message_listener()) {
         // parent IPC can arrive before user code registers process.on('message');
         // queue it with any accepted handle instead of dropping the one-shot fd.
@@ -3870,6 +3888,28 @@ extern "C" Item js_process_send(Item msg, Item callback) {
     mem_free(wr);
     log_error("process_ipc: write failed: %s", uv_strerror(r));
     return (Item){.item = b2it(false)};
+}
+
+extern "C" void js_process_ipc_notify_socket_closed(void) {
+    if (!js_process_ipc_active || js_process_ipc_closing) return;
+    Item control = js_new_object();
+    js_property_set(control,
+        (Item){.item = s2it(heap_create_name("__lambda_ipc_socket_closed__", 28))},
+        (Item){.item = ITEM_TRUE});
+    // receiver-side socket close is an internal accounting edge for a
+    // transferred fd; userland must not observe this as a message event.
+    (void)js_process_send(control, make_js_undefined());
+}
+
+extern "C" void js_process_ipc_notify_handle_accepted(void) {
+    if (!js_process_ipc_active || js_process_ipc_closing) return;
+    Item control = js_new_object();
+    js_property_set(control,
+        (Item){.item = s2it(heap_create_name("__lambda_ipc_handle_accepted__", 30))},
+        (Item){.item = ITEM_TRUE});
+    // descriptor ownership transfers only after uv_accept succeeds in the
+    // receiver; this internal frame lets the sender close its endpoint then.
+    (void)js_process_send(control, make_js_undefined());
 }
 
 extern "C" Item js_process_send_compat(Item msg) {

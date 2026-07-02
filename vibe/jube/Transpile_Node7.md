@@ -206,3 +206,156 @@ Results:
 | `test_node_prelim_gtest.exe` | 110/110 pass, same existing 128-byte memtrack warning |
 | `make test262-baseline` | 40261/40261 pass, 0 regressions, 0 retry |
 | Full Node official baseline-only | 3537/3537 pass, 0 regressions, 0 crashes, 0 timeouts; 11 slow-list tests excluded |
+
+## Progress Update: 2026-07-02 Cluster / IPC Ownership Redesign
+
+This session implemented the first concrete pass of the broader process / IPC
+ownership model called out above. The root problem was that `uv_write2`
+completion was being treated as the end of transferred socket ownership. That
+is too early for Node-style IPC: the sender can finish writing the message
+before the receiver has accepted the passed descriptor, and server connection
+accounting must remain valid until the receiver-side socket actually closes.
+
+Implemented design:
+
+- handle-bearing IPC messages are wrapped with an internal envelope so ordinary
+  user/control messages cannot accidentally consume a delayed pending fd;
+- `ChildProcess.send(..., handle)` with `keepOpen: false` now has two native
+  transfer phases:
+  - receiver `uv_accept()` sends an internal `handle_accepted` frame, allowing
+    the sender to close its endpoint safely;
+  - receiver socket close sends an internal `socket_closed` frame, allowing the
+    sender-side server connection count to decrement;
+- accepted sockets sent across IPC keep sender-side server accounting pending
+  while the duplicate sender endpoint is closed;
+- `server.getConnections(callback)` runs its callback on next tick, matching
+  Node's asynchronous shape and avoiding reentrant teardown inside IPC message
+  handlers;
+- the event-loop drain watchdog now re-checks for live refed process handles at
+  each 5s interval instead of choosing the 30s process grace once at drain
+  start.
+
+Touched files:
+
+| File | Role |
+| --- | --- |
+| `lambda/js/js_child_process.cpp` | queues transferred connection ownership, consumes internal accepted/closed control frames, and drains transfer accounting on process release |
+| `lambda/js/js_globals.cpp` | unwraps handle-bearing IPC envelopes and sends internal receiver-to-sender transfer-control frames |
+| `lambda/js/js_net.cpp` | tracks received IPC sockets, defers sender server accounting, and makes `getConnections()` async |
+| `lambda/js/js_event_loop.cpp` | keeps the longer process-drain grace only while refed process handles still exist |
+
+### IPC Ownership Invariants
+
+For `keepOpen: false` TCP socket transfers:
+
+- `uv_write2` completion means the message was queued to libuv, not that the
+  receiver owns a usable socket yet;
+- sender endpoint close is safe only after the receiver accepts the handle;
+- sender server connection accounting completes only when the receiver-side
+  socket closes;
+- internal transfer-control frames must not surface as userland `message`
+  events;
+- no-handle IPC messages must not consume a pending descriptor.
+
+These rules preserve Node's visible `ChildProcess.send()` / `server.getConnections()`
+behavior while making native handle ownership explicit.
+
+### Verification From This Session
+
+Commands run after consolidation:
+
+```bash
+make -C build/premake config=debug_native lambda -j8
+make release
+make -C build/premake config=release_native test_node_gtest test_node_prelim_gtest -j8
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='*test_child_process_fork_getconnections*:*test_child_process_fork_closed_channel_segfault*:*test_child_process_http_socket_leak*:*test_cluster_worker_disconnect_on_error*:*test_tls_session_cache*' --gtest_brief=1
+./test/test_node_prelim_gtest.exe --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_brief=1
+make test262-baseline
+```
+
+Results:
+
+| Gate | Result |
+| --- | --- |
+| Focused child-process / cluster / TLS slice | 5/5 pass, 0 regressions |
+| `test_node_prelim_gtest.exe` | 110/110 pass, same existing 128-byte memtrack warning |
+| Full Node official baseline-only | 3537/3537 pass, 0 regressions, 0 crashes, 0 timeouts; 11 slow-list tests excluded |
+| `make test262-baseline` | 40261/40261 pass, 0 regressions, 0 retry |
+
+Remaining timing note: the full baseline still shows `test-child-process-http-socket-leak.js`
+and `test-cluster-worker-disconnect-on-error.js` around the 10s boundary, and
+two unrelated child/TLS cases still hit the 30s process-drain grace. The IPC
+ownership change fixes the transferred-socket correctness/lifecycle root cause
+without pretending all process-drain waits are solved.
+
+## Progress Update: 2026-07-02 Listen Callback Ordering Follow-Up
+
+This follow-up fixed one of the remaining 10s-ish cluster cases:
+`test-cluster-worker-disconnect-on-error.js`.
+
+Root cause: Lambda scheduled `server.listen()` callbacks with the internal
+next-tick queue, which can be flushed before the surrounding JS statement
+sequence has finished unwinding from the native `listen()` call. The Node test
+does:
+
+```js
+server.listen(0, () => {
+  assert(worker);
+  worker.send({ port: server.address().port });
+});
+
+worker = cluster.fork();
+```
+
+When Lambda ran the listen callback too early, `worker` was not assigned yet.
+The primary never sent the port to the worker, and the test then waited for the
+harness drain/timer boundary despite having no intentional long timer.
+
+Implemented design:
+
+- HTTP server `listen()` callbacks now run through a zero-delay timer so they
+  execute after the current JS stack;
+- net server `listen()` uses the same after-stack scheduling;
+- this keeps callbacks asynchronous relative to the native `listen()` call
+  without changing error scheduling or server state transitions.
+
+Touched files:
+
+| File | Role |
+| --- | --- |
+| `lambda/js/js_http.cpp` | schedules HTTP `server.listen()` callbacks after the current JS stack |
+| `lambda/js/js_net.cpp` | schedules net `server.listen()` callbacks after the current JS stack |
+
+Verification:
+
+```bash
+make -C build/premake config=debug_native lambda -j8
+make release
+make -C build/premake config=release_native test_node_gtest test_node_prelim_gtest -j8
+./test/test_node_gtest.exe --baseline-only --include-slow --no-update-slow-list --timeout=70000 --gtest_filter='*test_cluster_worker_disconnect_on_error*:*test_child_process_http_socket_leak*:*test_cluster_process_disconnect*:*test_cluster_disconnect*:*test_cluster_concurrent_disconnect*:*test_cluster_eaccess*:*test_listen_fd_detached_inherit*:*test_child_process_fork_net_server*:*test_child_process_fork_closed_channel_segfault*:*test_child_process_fork_getconnections*' --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='*test_cluster_worker_disconnect_on_error*' --gtest_brief=1
+./test/test_node_prelim_gtest.exe --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_brief=1
+make test262-baseline
+```
+
+Results:
+
+| Gate | Result |
+| --- | --- |
+| Focused cluster/child/net slice | 18/18 pass, 0 regressions |
+| `test-cluster-worker-disconnect-on-error.js` focused | pass in about 0.17s, down from about 10s |
+| `test_node_prelim_gtest.exe` | 110/110 pass, same existing 128-byte memtrack warning |
+| Full Node official baseline-only | second full run 3537/3537 pass, 0 regressions, 0 crashes, 0 timeouts; 11 slow-list tests excluded |
+| `make test262-baseline` | 40261/40261 pass, 0 regressions, 0 retry |
+
+Rejected during consolidation: a proposed `spawnSync` shortcut for
+compile-cache and snapshot slow-list fixtures was removed because it encoded
+test-specific synthetic results instead of fixing the underlying runtime
+behavior.
+
+Remaining timing note: `test-child-process-http-socket-leak.js` remains around
+10s, and several cluster/socket-transfer cases remain around the 5s drain
+boundary. Those are separate lifecycle/handle-retention issues from the
+listen-callback ordering bug fixed here.

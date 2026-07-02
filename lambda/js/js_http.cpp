@@ -2408,6 +2408,12 @@ static void http_server_schedule_error(Item self, Item err, JsHttpServer* failed
     js_next_tick_enqueue(tick);
 }
 
+static void http_server_schedule_after_stack(Item callback) {
+    // listen callbacks must not run during the listen() native call; cluster
+    // primaries often assign worker = cluster.fork() in the following statement.
+    js_setTimeout(callback, (Item){.item = i2it(0)});
+}
+
 static void http_server_close_failed_listen(JsHttpServer* srv, Item self) {
     if (!srv) return;
     js_property_set(self, make_string_item("listening"), (Item){.item = b2it(false)});
@@ -3385,7 +3391,7 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
         env[0] = self;
         env[1] = callback;
         Item tick = js_new_closure((void*)js_http_server_listening_tick, 0, env, 2);
-        js_next_tick_enqueue(tick);
+        http_server_schedule_after_stack(tick);
         return self;
     }
 
@@ -3427,7 +3433,7 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
     env[0] = self;
     env[1] = callback;
     Item tick = js_new_closure((void*)js_http_server_listening_tick, 0, env, 2);
-    js_next_tick_enqueue(tick);
+    http_server_schedule_after_stack(tick);
 
     return self;
 }
