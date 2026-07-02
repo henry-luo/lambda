@@ -117,6 +117,20 @@ function makeExpect(actual: any, negate: boolean) {
         pass = typeof expected === 'string' ? m.indexOf(expected) >= 0 : (expected instanceof RegExp ? expected.test(m) : true)
       }
       ok(pass, `expected function ${negate ? 'not ' : ''}to throw${expected !== undefined ? ' ' + fmt(expected) : ''}`)
+    },
+    // vi.fn() mock matchers — read the recorded calls off actual.mock.calls
+    toHaveBeenCalled() {
+      const calls = actual && actual.mock ? actual.mock.calls : null
+      ok(!!calls && calls.length > 0, `expected mock ${negate ? 'not ' : ''}to have been called`)
+    },
+    toHaveBeenCalledTimes(n: number) {
+      const calls = actual && actual.mock ? actual.mock.calls : null
+      ok(!!calls && calls.length === n, `expected mock ${negate ? 'not ' : ''}to have been called ${n} time(s), got ${calls ? calls.length : 'non-mock'}`)
+    },
+    toHaveBeenCalledWith(...args: any[]) {
+      const calls = actual && actual.mock ? actual.mock.calls : null
+      const pass = !!calls && calls.some((c: any[]) => deepEqual(c, args))
+      ok(pass, `expected mock ${negate ? 'not ' : ''}to have been called with ${fmt(args)}`)
     }
   }
 }

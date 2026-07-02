@@ -317,3 +317,54 @@ Validation:
 - `make build-test` → passed (pre-existing warning noise only).
 - `./test/test_js_gtest.exe --gtest_filter=JavaScriptRegression.DocumentExitCodeAfterContextRestoreDoesNotInternWithNullContext` → passed.
 - `./test/test_js_gtest.exe --gtest_filter=JavaScriptTests/JsFileTest.Run/js_document_exit_context` → passed.
+
+---
+---
+
+# Bug 4 — hoisted IIFE-scope function declaration not written to its module-var slot → nested inline-`new` field-arrow captures garbage ("X is not a function")
+
+**Date:** 2026-07-01 · **Component:** LambdaJS JS→MIR lowering — function-declaration hoisting / module-var write-through · **Status:** FIXED
+**Discovered by:** Stage 4C — the real editor blocker behind `editor-view-dom` (`onChange is not a function` / `Cannot read properties of undefined (reading 'doc')`). This is the "Bug 4" flagged as a red herring away from Bug 3. See `vibe/editing/Radiant_Editor_Stage4C.md`.
+
+## 1. The issue
+
+A **class field-initializer arrow** that captures an **outer-scope function declaration** reads garbage for that function **when the class is inline-`new`'d inside a nested function**. After esbuild bundles the editor into an IIFE, every module import becomes an IIFE-scope function/const; the editor's `EditorViewDom.handleBeforeInput = (ev) => { intentFromInputEvent(ev); … this.dispatch(…) }` captures such a binding, and the view is constructed inside a nested `mount()`/`it()` closure — so the capture resolves to an undefined slot and calling it throws `intentFromInputEvent is not a function`, aborting the handler before `dispatch` runs (→ `onChange` never fires → downstream `reading 'doc'` on the empty `seenStates`).
+
+## 2. Symptom
+
+Inside the dispatched field-arrow, `typeof <captured outer fn>` is `"object"` (garbage), and calling it throws `is not a function`. In a full editor bundle the wild value can also be a stack/heap pointer → `EXC_BAD_ACCESS` in `Item::type_id` via `js_debug_check_callee`. `editor-view-dom` sat at 3/9; the whole typing pipeline failed.
+
+## 3. Minimal reproduce — `temp/4c-spikes/t3.js`
+```js
+"use strict";
+(() => {
+  function helper(){ return 42; }
+  class A { m = () => helper(); }
+  function mount(){ return new A(); }        // inline-new INSIDE a nested function
+  console.log(mount().m());                  // expected 42; actual: throws "is not a function"
+})();
+```
+Reproduces identically under `JS_MIR_INTERP=1` (lowering bug, not JIT). Variants that WORK isolate the trigger: (a) top-level `new A()` — OK; (b) a nested plain closure reading `helper` — OK. Only **nested inline-`new` + field-arrow capture of an IIFE-scope decl** fails.
+
+## 4. Root cause
+
+`helper` is a function declaration local to the IIFE. Its binding is promoted to a **module-var slot** (`module_consts` entry `MCONST_MODVAR`, `int_val = 2`), and a nested closure's field-arrow capture resolves it via `js_get_module_var(2)` (`jm_create_func_or_closure`, `lambda/js/js_mir_expression_lowering.cpp` ~12612 — the fallback taken because `jm_find_var("_js_helper")` misses inside `mount`). But the **inner-function-declaration hoist** (`jm_function_class_lowering.cpp` ~542 and ~3046) wrote the closure only to its local reg + the shared scope env via `jm_scope_env_mark_and_writeback` — it **never wrote the module-var slot**. So `js_get_module_var(2)` returned an undefined/garbage slot. (At top level the capture instead reads the closure from the scope-env slot directly via `jm_find_var`, so it was fine — hence top-level `new` worked and only nested `new` failed.) `is_iife_var` is `false` on this entry; the missing write-through is unconditional, matching the non-direct function-declaration statement path in `js_mir_statement_lowering.cpp` which already writes the module var for `MCONST_MODVAR`/`var_kind==0`.
+
+### Key files
+- `lambda/js/js_mir_function_class_lowering.cpp` — the two "Hoist inner function declarations" loops (~542, ~3046) that created the closure without a module-var write.
+- `lambda/js/js_mir_expression_lowering.cpp:~12612` — the capture-fill fallback that reads `js_get_module_var(int_val)`.
+- `lambda/js/js_mir_statement_lowering.cpp:~5175` — the existing (non-direct) write-through this mirrors.
+
+## 5. Fix landed
+
+Added `jm_hoisted_func_modvar_write_through(mt, vname, val_reg)` and called it right after both inner-function-declaration hoist writes. It looks up `vname` in `module_consts` and, for `MCONST_MODVAR` / `var_kind==0` / not `annexb_suppressed`, emits `js_set_module_var(int_val, closure)` — so every resolution path (module-var readers + scope-env readers) sees the same closure. Same condition the non-direct statement path already uses (no `is_iife_var` gate).
+
+### Validation
+- `./lambda.exe js temp/4c-spikes/t3.js` → `42` (was: throws). Same under `JS_MIR_INTERP=1`.
+- Stage-4C `view/editor-view-dom` bundle: **3/9 → 9/9** (added the missing `toHaveBeenCalled`/`toHaveBeenCalledTimes`/`toHaveBeenCalledWith` mock matchers to the in-engine harness for the last case). `render-vnode` 9/9, `dom-bridge` 7/7, `html-parser` 12/12, `use-editor-state` 5/5, `reconcile` 4/6 (pre-existing DOM-fidelity gaps).
+- Regression: `test/js/class_field_decl_capture_nested_new.{js,txt}` (top-level + nested inline-new + capture-with-`this` + sibling arrows) — passes in `test_js_gtest`.
+- No regression: `test_js_gtest` **301/302** (only pre-existing `vm_runincontext_cross_unit`). `make build` clean.
+
+### Remaining (separate, NOT this bug)
+- `view/full-editor-dom` still crashes — a **stack overflow** (`Item::type_id` at a stack address), a distinct deeper issue (render/reconcile loop or DOM-fidelity gap), matching Stage-4C's "Bug 4 + possibly more".
+- Hand-repro `temp/4c-spikes/nest3c.js` exposes an adjacent **env-sizing** bug: a mixed-capture field arrow that reuses `mount`'s size-1 scope env reads a captured fn from an out-of-bounds slot. Pre-existing, does not affect the real editor tests; filed as a follow-up.
