@@ -169,7 +169,7 @@ fn make_stacked_delim(level) {     // was (level, h, d)
 }
 ```
 
-**Status: Fixed (2026-07-02).** Reproduced with a compact cross-function
+**Status: ✅ Fixed (2026-07-02).** Reproduced with a compact cross-function
 script before the fix:
 
 ```lambda
@@ -213,26 +213,27 @@ Regression coverage: `test/lambda/transpile_float_tco_cross_call.ls`.
 
 ## 35. Parse errors are non-fatal; broken functions load and run
 
-**Severity: HIGH** (masks #31–#33) — When a `.ls` module has a parse error
-(E100), `./lambda.exe` prints the diagnostic to stderr **but continues**: it
-JIT-compiles and runs the script, and a downstream `import` of the broken
-module still succeeds enough that a probe expression evaluates. There is no
-non-zero exit specifically for "this module failed to parse," and the broken
-function silently degrades (returns wrong data, or hangs).
+**Severity: HIGH** (masks #31–#33) — Previously, when an imported `.ls` module
+had a parse error, `./lambda.exe` printed the imported module diagnostic but
+still compiled and ran the importing script. A downstream `import` of the broken
+module could therefore succeed enough for a probe expression to evaluate.
 
-Observed: a probe that does `import math: lambda.package.math.math` and prints
-`"PKG_OK"` printed `"PKG_OK"` even while `delimiters.ls` had the issue-#31 parse
-error — the broken `stk_walk` simply wasn't exercised by the probe. Only a
-script that actually *rendered a vertical bar* surfaced the failure (as a hang,
-issue #33 / an MIR error, issue #34).
+Root cause: `transpile_script()` already stopped on Tree-sitter parse errors, but
+`build_module_import()` treated the failed Lambda module like an absent `.ls`
+file: it attempted cross-language fallback and did not record a compile error on
+the importer. The importer could then continue to MIR compilation.
 
-**Mitigation (workflow, not a code fix):**
-1. After any package edit, render a script that exercises the changed code path
-   (not just an `import`), and `grep` its stderr for `error[E`, `operand mode`,
-   `Unexpected syntax`.
-2. Treat `1 error(s) found.` as fatal regardless of exit code.
+Fix: if an import resolves to an existing `.ls` file and `load_script()` returns
+no usable AST, `build_module_import()` now records `ERR_IMPORT_ERROR` on the
+import statement and skips `.js`/`.py` fallback. Missing `.ls` files still retain
+the existing cross-language fallback behavior.
 
-**Status: UNFIXED (diagnostic/robustness gap).**
+Regression: `test/lambda/negative/import_parse_error_driver.ls` imports a module
+with an E102 parse error and contains a split `"DRIVER_" ++ "RAN"` marker. The
+focused gtest verifies the process exits non-zero, reports `error[E217]`, and
+does not print `"DRIVER_RAN"`.
+
+**Status: ✅ FIXED.**
 
 ## 36. `parse()` leaks its `parse://inline` URL at shutdown
 
