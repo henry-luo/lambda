@@ -229,6 +229,12 @@ pn test_empty_string_var_map_pack() {
     {s: s}
 }
 
+// Test 22: single-space string var compares equal to the same literal
+pn test_space_string_var_compare() {
+    var s = " "
+    "eq=" ++ (s == " ") ++ ",ne=" ++ (s != " ") ++ ",type=" ++ type(s)
+}
+
 // Main procedure to run tests
 pn main() {
     print("T1:")
@@ -273,5 +279,7 @@ pn main() {
     print(test_null_var_map_pack())
     print(" T21:")
     print(test_empty_string_var_map_pack())
+    print(" T22:")
+    print(test_space_string_var_compare())
     "done"
 }
