@@ -9990,6 +9990,12 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (fc && fc->is_reassigned) fc = NULL;
             if (fc && fc->node && fc->node->is_async) fc = NULL;
             if (fc && fc->node && fc->node->is_generator && jm_count_params(fc->node) == 0) fc = NULL;
+            if (fc && mt->current_fc && fc == mt->current_fc &&
+                    (!mt->tco_func || !mt->in_tail_position ||
+                     !jm_is_recursive_call(call, mt->tco_func))) {
+                // non-tail self recursion must use js_call_function so the call-depth RangeError is catchable.
+                fc = NULL;
+            }
             if (fc && (mt->with_depth > 0 ||
                     jm_node_has_with_ancestor_until_function((JsAstNode*)call) ||
                     jm_node_has_with_ancestor_until_function((JsAstNode*)resolved_fn) ||
@@ -13199,7 +13205,7 @@ MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
         // Math calls and other built-in calls return boxed Items.
         JsCallNode* call_item = (JsCallNode*)item;
         JsFuncCollected* fc = jm_resolve_native_call(mt, call_item);
-        if (fc) {
+        if (fc && jm_call_result_uses_native_register(mt, call_item, fc)) {
             MIR_reg_t result = jm_transpile_expression(mt, item);
             return jm_box_native(mt, result, fc->return_type);
         }

@@ -2605,8 +2605,13 @@ extern "C" Item js_process_chdir(Item dir_item) {
 
 // process.exit([code])
 static int js_process_exit_code_value = 0;
+static bool js_process_exit_requested_value = false;
 extern "C" void js_process_emit_exit(int code); // forward declaration
 extern "C" void js_process_emit_before_exit(int code); // forward declaration
+
+extern "C" bool js_process_exit_requested(void) {
+    return js_process_exit_requested_value;
+}
 
 extern "C" Item js_process_exit(Item code_item) {
     int code = js_process_exit_code_value; // default to exitCode
@@ -2621,6 +2626,9 @@ extern "C" Item js_process_exit(Item code_item) {
         buf[len] = '\0';
         code = atoi(buf);
     }
+    // process.exit is a hard termination request; any remaining refed handles
+    // are cleanup work, not event-loop liveness roots.
+    js_process_exit_requested_value = true;
     // Fire 'exit' listeners before terminating (Node.js compatibility)
     js_process_emit_exit(code);
     exit(code);
@@ -2981,8 +2989,11 @@ extern "C" Item js_process_kill(Item pid_item, Item signal_item) {
         else if (s->len == 7 && memcmp(s->chars, "SIGHUP", 6) == 0) sig = SIGHUP;
         else if (s->len == 7 && memcmp(s->chars, "SIGUSR1", 7) == 0) sig = SIGUSR1;
         else if (s->len == 7 && memcmp(s->chars, "SIGUSR2", 7) == 0) sig = SIGUSR2;
+        else if (s->len == 7 && memcmp(s->chars, "SIGCONT", 7) == 0) sig = SIGCONT;
         else if (s->len == 1 && s->chars[0] == '0') sig = 0;
     }
+    // Node's common.isAlive probes with signal 0/SIGCONT; falling back to
+    // SIGTERM turns a harmless liveness check into exit 143.
     int r = kill(pid, sig);
     if (r != 0) {
         int saved_errno = errno;
@@ -3202,6 +3213,7 @@ static int process_uncaught_listener_count = 0;
 static bool js_process_exiting = false;
 static Item process_listener_map = {0}; // general event → listener array map
 static int process_total_listener_count = 0;
+static int process_ipc_liveness_listener_count = 0;
 
 static void js_process_ipc_refresh_ref(void);
 static void js_process_ipc_flush_pending(void);
@@ -3266,6 +3278,9 @@ extern "C" Item js_process_on(Item event_name, Item listener) {
 
     if (process_event_name_equals(event_name, "message", 7) ||
         process_event_name_equals(event_name, "disconnect", 10)) {
+        // IPC message/disconnect listeners are liveness roots; delayed
+        // fork().send() must not lose the child before the parent writes.
+        process_ipc_liveness_listener_count++;
         js_process_ipc_refresh_ref();
         if (process_event_name_equals(event_name, "message", 7)) {
             js_process_ipc_flush_pending();
@@ -3332,14 +3347,16 @@ extern "C" void js_process_reset_listeners(void) {
     process_exit_listener_count = 0;
     process_uncaught_listener_count = 0;
     js_process_exiting = false;
+    js_process_exit_requested_value = false;
     process_total_listener_count = 0;
+    process_ipc_liveness_listener_count = 0;
     // don't reset process_listener_map — it'll be GC'd
     process_listener_map = (Item){0};
 }
 
 extern "C" Item js_process_removeListener(Item event_name, Item listener);
 
-static Item js_process_once_wrapper(Item env_item, Item arg1) {
+static Item js_process_once_wrapper(Item env_item, Item arg1, Item arg2) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
     Item event_name = env[0];
@@ -3347,7 +3364,10 @@ static Item js_process_once_wrapper(Item env_item, Item arg1) {
     Item wrapper = env[2];
     js_process_removeListener(event_name, wrapper);
     if (get_type_id(listener) == LMD_TYPE_FUNC) {
-        Item result = js_call_function(listener, js_process_object, &arg1, 1);
+        // IPC message events carry the transferred handle as argv[1]; dropping
+        // it leaves forked socket owners alive until the parent drain watchdog.
+        Item args[2] = { arg1, arg2 };
+        Item result = js_call_function(listener, js_process_object, args, 2);
         js_process_ipc_refresh_ref();
         return result;
     }
@@ -3365,7 +3385,7 @@ extern "C" Item js_process_once(Item event_name, Item listener) {
     Item* env = js_alloc_env(3);
     env[0] = event_name;
     env[1] = listener;
-    Item wrapper = js_new_closure((void*)js_process_once_wrapper, 1, env, 3);
+    Item wrapper = js_new_closure((void*)js_process_once_wrapper, 2, env, 3);
     env[2] = wrapper;
     return js_process_on(event_name, wrapper);
 }
@@ -3424,6 +3444,8 @@ extern "C" Item js_process_removeListener(Item event_name, Item listener) {
         js_process_update_events_count();
         if (process_event_name_equals(event_name, "message", 7) ||
             process_event_name_equals(event_name, "disconnect", 10)) {
+            process_ipc_liveness_listener_count -= (int)removed;
+            if (process_ipc_liveness_listener_count < 0) process_ipc_liveness_listener_count = 0;
             js_process_ipc_refresh_ref();
         }
     }
@@ -3438,6 +3460,7 @@ extern "C" Item js_process_removeAllListeners(Item event_name) {
         process_exit_listener_count = 0;
         process_uncaught_listener_count = 0;
         process_total_listener_count = 0;
+        process_ipc_liveness_listener_count = 0;
         process_listener_map = js_new_object();
         heap_register_gc_root(&process_listener_map.item);
         js_process_update_events_count();
@@ -3470,6 +3493,7 @@ extern "C" Item js_process_removeAllListeners(Item event_name) {
     }
     if (process_event_name_equals(event_name, "message", 7) ||
         process_event_name_equals(event_name, "disconnect", 10)) {
+        process_ipc_liveness_listener_count = 0;
         js_process_ipc_refresh_ref();
     }
     return js_process_object;
@@ -3553,13 +3577,13 @@ static size_t js_process_ipc_cap = 0;
 
 static void js_process_ipc_refresh_ref(void) {
     if (!js_process_ipc_active || js_process_ipc_closing) return;
-    bool should_ref = js_process_ipc_force_ref;
+    bool should_ref = js_process_ipc_force_ref || process_ipc_liveness_listener_count > 0;
     if (process_listener_map.item != 0) {
         Item message_arr = js_property_get(process_listener_map,
             (Item){.item = s2it(heap_create_name("message", 7))});
         Item disconnect_arr = js_property_get(process_listener_map,
             (Item){.item = s2it(heap_create_name("disconnect", 10))});
-        should_ref =
+        should_ref = should_ref ||
             (get_type_id(message_arr) == LMD_TYPE_ARRAY && js_array_length(message_arr) > 0) ||
             (get_type_id(disconnect_arr) == LMD_TYPE_ARRAY && js_array_length(disconnect_arr) > 0);
     }
@@ -3570,6 +3594,13 @@ static void js_process_ipc_refresh_ref(void) {
     } else {
         if (uv_has_ref(handle)) uv_unref(handle);
     }
+}
+
+extern "C" void js_process_ipc_clear_force_ref(void) {
+    // Cluster only force-refs IPC until the internal online/listening handshake;
+    // keeping it forced afterwards leaves idle workers alive until the watchdog.
+    js_process_ipc_force_ref = false;
+    js_process_ipc_refresh_ref();
 }
 
 static void js_process_set_connected(bool connected) {
@@ -3662,6 +3693,14 @@ static void js_process_ipc_emit_message(Item message, Item handle) {
         Item handled = js_process_emit(
             (Item){.item = s2it(heap_create_name("uncaughtException", 17))}, error);
         if (handled.item != ITEM_TRUE && handled.item != b2it(true)) {
+            if (js_process_ipc_active && !js_process_ipc_closing) {
+                // Unhandled IPC listener errors terminate the child in Node;
+                // keep the pipe from remaining refed until the drain watchdog.
+                js_process_ipc_closing = true;
+                js_process_ipc_emit_disconnect_once();
+                uv_read_stop((uv_stream_t*)&js_process_ipc_pipe);
+                uv_close((uv_handle_t*)&js_process_ipc_pipe, js_process_ipc_close_cb);
+            }
             js_throw_value(error);
         }
     }

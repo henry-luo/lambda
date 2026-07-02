@@ -246,6 +246,17 @@ bool jm_is_recursive_call(JsCallNode* call, JsFuncCollected* fc) {
             memcmp(id->name->chars, fn_name->chars, fn_name->len) == 0);
 }
 
+bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, JsFuncCollected* fc) {
+    if (!mt || !call || !fc) return false;
+    // non-tail self recursion is deliberately routed through js_call_function, so
+    // the MIR result is a boxed Item even when the function has a native body.
+    if (mt->current_fc && fc == mt->current_fc &&
+        (!mt->tco_func || !mt->in_tail_position || !jm_is_recursive_call(call, mt->tco_func))) {
+        return false;
+    }
+    return true;
+}
+
 // Walk JS AST to find if there's at least one tail-recursive call.
 // A tail call is: return f(...) where f is the function itself.
 bool jm_has_tail_call(JsAstNode* node, JsFuncCollected* fc) {

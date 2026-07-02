@@ -37,6 +37,7 @@ extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, 
 extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" void js_promise_flush_unhandled_checks(void);
+extern "C" bool js_process_exit_requested(void);
 extern "C" Item js_domain_get_current(void);
 extern "C" Item js_domain_set_current(Item domain);
 extern "C" void js_domain_restore(Item previous);
@@ -332,6 +333,21 @@ static bool timer_force_shutdown = false;
 static bool timer_nan_warning_emitted = false;
 static bool timer_negative_warning_emitted = false;
 
+#define MAX_MOCK_SCHEDULER_WAITS 128
+typedef struct JsMockSchedulerWait {
+    Item    promise;
+    Item    resolve;
+    Item    reject;
+    Item    signal;
+    int64_t due_ms;
+    bool    active;
+} JsMockSchedulerWait;
+
+static bool mock_scheduler_enabled = false;
+static int64_t mock_scheduler_now_ms = 0;
+static JsMockSchedulerWait mock_scheduler_waits[MAX_MOCK_SCHEDULER_WAITS];
+static bool mock_scheduler_roots_registered = false;
+
 static void close_all_timer_handles(void);
 
 typedef struct JsTimerRuntimeScope {
@@ -538,6 +554,7 @@ static void timer_abandon_all_without_uv(const char* reason_prefix) {
 
 static void timer_fire_cb(uv_timer_t *handle) {
     JsTimerHandle *th = (JsTimerHandle *)handle->data;
+    bool close_after_fire = th && !th->is_interval;
     JsTimerRuntimeScope scope;
     if (timer_runtime_enter(th, &scope)) {
         Item previous_resource = js_async_hooks_enter_resource(th->async_resource);
@@ -561,7 +578,15 @@ static void timer_fire_cb(uv_timer_t *handle) {
     } else {
         log_error("event_loop: timer fired without captured JS runtime");
     }
-    if (!th->is_interval) {
+    if (th && th->is_interval && js_check_exception() && !th->closing) {
+        // An interval callback that throws before its clearInterval call can
+        // otherwise re-enter forever and starve the drain watchdog.
+        timer_mark_object_destroyed(th);
+        timer_close_handle(th);
+    }
+    if (close_after_fire && th && !th->closing) {
+        // one-shot timers must close even when their callback throws and an
+        // uncaughtException listener handles it, or the refed handle never drains.
         timer_mark_object_destroyed(th);
         timer_close_handle(th);
     }
@@ -735,7 +760,9 @@ static int64_t extract_timer_id(Item timer_id) {
     TypeId tid = get_type_id(timer_id);
     if (tid == LMD_TYPE_INT) {
         return it2i(timer_id);
-    } else if (tid == LMD_TYPE_MAP) {
+    } else if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_OBJECT || tid == LMD_TYPE_VMAP) {
+        // Timeout objects may be class-stamped object shapes; clearInterval
+        // must still recover _timerId or the active interval survives throws.
         Item id = js_property_get(timer_id, (Item){.item = s2it(heap_create_name("_timerId", 8))});
         if (get_type_id(id) == LMD_TYPE_INT) return it2i(id);
     }
@@ -1097,6 +1124,91 @@ static int check_timer_options(Item options, Item* reject_out) {
     return 0;
 }
 
+extern "C" void js_mock_scheduler_enable(void) {
+    mock_scheduler_enabled = true;
+    mock_scheduler_now_ms = 0;
+    memset(mock_scheduler_waits, 0, sizeof(mock_scheduler_waits));
+}
+
+extern "C" void js_mock_scheduler_reset(void) {
+    mock_scheduler_enabled = false;
+    mock_scheduler_now_ms = 0;
+    memset(mock_scheduler_waits, 0, sizeof(mock_scheduler_waits));
+}
+
+extern "C" void js_mock_scheduler_tick(Item delay) {
+    if (!mock_scheduler_enabled) return;
+    mock_scheduler_now_ms += (int64_t)normalize_timer_delay(delay);
+    Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+
+    for (int i = 0; i < MAX_MOCK_SCHEDULER_WAITS; i++) {
+        JsMockSchedulerWait* wait = &mock_scheduler_waits[i];
+        if (!wait->active || wait->due_ms > mock_scheduler_now_ms) continue;
+        wait->active = false;
+        if (get_type_id(wait->signal) == LMD_TYPE_MAP ||
+            get_type_id(wait->signal) == LMD_TYPE_OBJECT) {
+            Item aborted = js_property_get(wait->signal,
+                (Item){.item = s2it(heap_create_name("aborted", 7))});
+            if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
+                Item err = make_abort_error(wait->signal);
+                Item args[1] = { err };
+                js_call_function(wait->reject, ItemNull, args, 1);
+                continue;
+            }
+        }
+        Item args[1] = { undef };
+        js_call_function(wait->resolve, ItemNull, args, 1);
+    }
+    js_microtask_flush();
+}
+
+static Item js_mock_scheduler_wait(Item delay, Item options) {
+    extern Item js_promise_with_resolvers(void);
+    extern Item js_promise_reject(Item reason);
+
+    Item reject_out = ItemNull;
+    int opt_rc = check_timer_options(options, &reject_out);
+    if (opt_rc != 0) return reject_out;
+
+    Item resolvers = js_promise_with_resolvers();
+    Item promise = js_property_get(resolvers, (Item){.item = s2it(heap_create_name("promise", 7))});
+    Item resolve_fn = js_property_get(resolvers, (Item){.item = s2it(heap_create_name("resolve", 7))});
+    Item reject_fn = js_property_get(resolvers, (Item){.item = s2it(heap_create_name("reject", 6))});
+
+    Item signal = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT) {
+        signal = js_property_get(options, (Item){.item = s2it(heap_create_name("signal", 6))});
+    }
+
+    for (int i = 0; i < MAX_MOCK_SCHEDULER_WAITS; i++) {
+        JsMockSchedulerWait* wait = &mock_scheduler_waits[i];
+        if (wait->active) continue;
+        wait->promise = promise;
+        wait->resolve = resolve_fn;
+        wait->reject = reject_fn;
+        wait->signal = signal;
+        wait->due_ms = mock_scheduler_now_ms + (int64_t)normalize_timer_delay(delay);
+        wait->active = true;
+        // Mock scheduler waits must not allocate real uv timers; otherwise
+        // official fake-timer tests sleep for the virtual delay before passing.
+        return promise;
+    }
+
+    return js_promise_reject(js_new_error(
+        (Item){.item = s2it(heap_create_name("Mock scheduler wait queue full", 35))}));
+}
+
+static void mock_scheduler_register_gc_roots(void) {
+    if (mock_scheduler_roots_registered) return;
+    for (int i = 0; i < MAX_MOCK_SCHEDULER_WAITS; i++) {
+        heap_register_gc_root(&mock_scheduler_waits[i].promise.item);
+        heap_register_gc_root(&mock_scheduler_waits[i].resolve.item);
+        heap_register_gc_root(&mock_scheduler_waits[i].reject.item);
+        heap_register_gc_root(&mock_scheduler_waits[i].signal.item);
+    }
+    mock_scheduler_roots_registered = true;
+}
+
 // setTimeout(delay, value, options) → Promise that resolves to value after delay ms
 extern "C" Item js_setTimeout_promise(Item delay, Item value, Item options) {
     extern Item js_promise_with_resolvers(void);
@@ -1244,6 +1356,7 @@ extern "C" Item js_setImmediate_promise(Item value, Item options) {
 
 // scheduler.wait(delay, options) → setTimeout promise with undefined value
 extern "C" Item js_scheduler_wait(Item delay, Item options) {
+    if (mock_scheduler_enabled) return js_mock_scheduler_wait(delay, options);
     Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
     return js_setTimeout_promise(delay, undef, options);
 }
@@ -1365,6 +1478,9 @@ extern "C" void js_event_loop_init(void) {
         heap_register_gc_root_range((uint64_t*)microtask_als_ring, MICROTASK_CAPACITY);
         heap_register_gc_root_range((uint64_t*)microtask_domain_ring, MICROTASK_CAPACITY);
         heap_register_gc_root_range((uint64_t*)raf_callback_ring, RAF_CAPACITY);
+        // Mock scheduler waits are static, so queued promise resolvers must be
+        // rooted individually rather than via the whole struct with non-Item fields.
+        mock_scheduler_register_gc_roots();
         statics_rooted = true;
     }
 
@@ -1447,6 +1563,7 @@ static void event_loop_sigsegv_handler(int sig, siginfo_t* info, void* ctx) {
 // forcefully stopped.  Prevents infinite blocking from setInterval() or
 // long-running timers in document scripts (e.g. CSS animation test pages).
 #define EVENT_LOOP_DRAIN_TIMEOUT_MS 5000
+#define EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS 30000
 
 #ifndef NDEBUG
 typedef struct JsUvDumpState {
@@ -1479,11 +1596,38 @@ static void event_loop_dump_active_handles(void) {
 #endif
 
 static void drain_watchdog_cb(uv_timer_t* handle) {
-    log_debug("event_loop: drain timeout (%d ms) — stopping loop", EVENT_LOOP_DRAIN_TIMEOUT_MS);
+    log_debug("event_loop: drain watchdog fired — stopping loop");
 #ifndef NDEBUG
     event_loop_dump_active_handles();
 #endif
     lambda_uv_stop();
+}
+
+typedef struct JsCloseRefedState {
+    uv_handle_t* skip;
+    int closed;
+} JsCloseRefedState;
+
+static void event_loop_close_refed_handle_cb(uv_handle_t* h, void* arg) {
+    JsCloseRefedState* state = (JsCloseRefedState*)arg;
+    if (!state || !h || h == state->skip || uv_is_closing(h) || !uv_has_ref(h)) return;
+    // Watchdog exit leaves stale refed native handles behind; close them here
+    // or global uv cleanup repeats the same wait during process teardown.
+    uv_close(h, NULL);
+    state->closed++;
+}
+
+static int event_loop_close_refed_handles_after_watchdog(uv_loop_t* loop, uv_handle_t* skip) {
+    if (!loop) return 0;
+    JsCloseRefedState state;
+    state.skip = skip;
+    state.closed = 0;
+    event_loop_shutting_down = true;
+    uv_walk(loop, event_loop_close_refed_handle_cb, &state);
+    for (int i = 0; i < 8 && state.closed > 0; i++) {
+        uv_run(loop, UV_RUN_NOWAIT);
+    }
+    return state.closed;
 }
 
 typedef struct JsRefedHandleState {
@@ -1503,6 +1647,24 @@ extern "C" bool js_event_loop_has_refed_handles(void) {
     state.has_refed = false;
     uv_walk(loop, event_loop_refed_handle_cb, &state);
     return state.has_refed;
+}
+
+static void event_loop_refed_process_handle_cb(uv_handle_t* h, void* arg) {
+    bool* has_process = (bool*)arg;
+    if (!has_process || *has_process || !h || h->type != UV_PROCESS ||
+        uv_is_closing(h) || !uv_is_active(h)) {
+        return;
+    }
+    if (uv_has_ref(h)) *has_process = true;
+}
+
+static int event_loop_drain_watchdog_ms(uv_loop_t* loop) {
+    if (!loop) return EVENT_LOOP_DRAIN_TIMEOUT_MS;
+    bool has_process = false;
+    uv_walk(loop, event_loop_refed_process_handle_cb, &has_process);
+    // Forked Node official children may spend several seconds compiling common
+    // before replying on IPC; the generic 5s watchdog races and drops the child.
+    return has_process ? EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS : EVENT_LOOP_DRAIN_TIMEOUT_MS;
 }
 
 // Stop and close all active interval timers so they don't keep the event
@@ -1609,6 +1771,14 @@ extern "C" int js_event_loop_drain(void) {
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return 0;
 
+    if (js_process_exit_requested()) {
+        // process.exit() must bypass ordinary libuv liveness; Node does not wait
+        // for servers or sockets once user code requested hard termination.
+        close_all_timer_handles();
+        uv_run(loop, UV_RUN_NOWAIT);
+        return 0;
+    }
+
     if (auto_close_mode) {
         for (int turn = 0; turn < 4; turn++) {
             int active = uv_run(loop, UV_RUN_NOWAIT);
@@ -1638,17 +1808,28 @@ extern "C" int js_event_loop_drain(void) {
 #endif
         // install watchdog timer to prevent infinite blocking from setInterval
         uv_timer_t watchdog;
+        bool watchdog_fired = false;
         uv_timer_init(loop, &watchdog);
+        watchdog.data = &watchdog_fired;
         uv_unref((uv_handle_t*)&watchdog); // don't let watchdog itself keep loop alive when alone
-	        uv_timer_start(&watchdog, drain_watchdog_cb, EVENT_LOOP_DRAIN_TIMEOUT_MS, 0);
-	
-	        // Browser page-load drains should not wait for persistent intervals; close
-	        // them before blocking so recurring timers cannot stall static rendering.
-	        stop_all_interval_timers();
-	        uv_run(loop, UV_RUN_NOWAIT);
+        int watchdog_ms = event_loop_drain_watchdog_ms(loop);
+        uv_timer_start(&watchdog, [](uv_timer_t* handle) {
+            bool* fired = handle ? (bool*)handle->data : NULL;
+            if (fired) *fired = true;
+            drain_watchdog_cb(handle);
+        }, watchdog_ms, 0);
 
-	        // run libuv event loop until all one-shot timers/handles are done (or watchdog fires)
-	        result = lambda_uv_run();
+        // Browser page-load drains should not wait for persistent intervals; close
+        // them before blocking so recurring timers cannot stall static rendering.
+        stop_all_interval_timers();
+        uv_run(loop, UV_RUN_NOWAIT);
+
+        // run libuv event loop until all one-shot timers/handles are done (or watchdog fires)
+        result = lambda_uv_run();
+
+        if (watchdog_fired) {
+            event_loop_close_refed_handles_after_watchdog(loop, (uv_handle_t*)&watchdog);
+        }
 
         // clean up watchdog
         uv_timer_stop(&watchdog);
@@ -1656,8 +1837,8 @@ extern "C" int js_event_loop_drain(void) {
         // run once more to process the close callback
         uv_run(loop, UV_RUN_NOWAIT);
 
-	        // stop any interval timers created by one-shot callbacks during drain
-	        stop_all_interval_timers();
+        // stop any interval timers created by one-shot callbacks during drain
+        stop_all_interval_timers();
         // drain close callbacks from stopped intervals
         uv_run(loop, UV_RUN_NOWAIT);
 

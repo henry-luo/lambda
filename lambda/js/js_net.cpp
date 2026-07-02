@@ -39,6 +39,7 @@ extern "C" Item js_timeout_ref(Item this_val);
 extern "C" Item js_timeout_unref(Item this_val);
 extern "C" Item js_net_Socket(Item options);
 extern "C" Item js_object_keys(Item object);
+extern "C" void js_cluster_notify_worker_listening(void);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -1235,15 +1236,8 @@ static void socket_flush_pending_writes(JsSocket* sock) {
 }
 
 static Item socket_write_data(Item self, JsSocket* sock, Item data_item, Item callback) {
-    if (sock && sock->adopted_by_tls && !sock->tls_close_notified) {
-        Item write_fn = js_property_get(sock->tls_socket, make_string_item("write"));
-        if (is_callable(write_fn)) {
-            Item args[2] = { data_item, callback };
-            // After TLS adopts a net.Socket, plaintext writes must pass through
-            // mbedTLS rather than the borrowed raw TCP handle.
-            return js_call_function(write_fn, sock->tls_socket, args, is_callable(callback) ? 2 : 1);
-        }
-    }
+    // The borrowed net.Socket remains the raw transport after TLS adoption;
+    // routing its writes through TLS hides fixtures that inject malformed records.
     Item remote_ended_marker = js_property_get(self, make_string_item("__remote_ended__"));
     if (((sock && sock->remote_ended) || remote_ended_marker.item == ITEM_TRUE) &&
         !socket_allow_half_open(self)) {
@@ -1321,17 +1315,8 @@ extern "C" Item js_socket_write(Item rest_args) {
 
 static void socket_shutdown_writes(JsSocket* sock, Item callback) {
     if (!sock || sock->destroyed || !sock->connected) return;
-    if (sock->adopted_by_tls && !sock->tls_close_notified) {
-        Item end_fn = js_property_get(sock->tls_socket, make_string_item("end"));
-        if (is_callable(end_fn)) {
-            Item args[1] = { callback };
-            // TLS owns shutdown sequencing for adopted transports so the final
-            // close_notify and TCP close have one native owner.
-            js_call_function(end_fn, sock->tls_socket, args, is_callable(callback) ? 1 : 0);
-            js_microtask_flush();
-        }
-        return;
-    }
+    // Borrowed raw socket end() may intentionally write non-TLS bytes; only
+    // close/destroy ownership is delegated to TLSSocket after adoption.
     SocketShutdownReq* sreq =
         (SocketShutdownReq*)mem_calloc(1, sizeof(SocketShutdownReq), MEM_CAT_JS_RUNTIME);
     sreq->sock = sock;
@@ -1995,6 +1980,8 @@ static Item js_socket_address(void) {
     return result;
 }
 
+extern "C" Item js_net_createServer(Item rest_args);
+
 static Item net_socket_prototype = {0};
 static Item net_server_prototype = {0};
 static Item net_socket_connect_fn = {0};
@@ -2138,6 +2125,20 @@ static Item make_socket_object(JsSocket* sock, bool expose_handle) {
     return obj;
 }
 
+static bool net_fd_is_listening_socket(int fd) {
+#ifdef _WIN32
+    (void)fd;
+    return false;
+#else
+    int accepting = 0;
+    socklen_t accepting_len = sizeof(accepting);
+    if (getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN, &accepting, &accepting_len) != 0) return false;
+    return accepting != 0;
+#endif
+}
+
+static Item make_server_object_from_fd(uv_loop_t* loop, int fd);
+
 extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe) {
     if (!pipe || uv_pipe_pending_count(pipe) <= 0 ||
         uv_pipe_pending_type(pipe) != UV_TCP) {
@@ -2147,16 +2148,56 @@ extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe) {
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return make_undefined_item();
 
-    JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
-    if (!sock) return make_undefined_item();
-    sock->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
-    uv_tcp_init(loop, &sock->tcp);
-    sock->tcp.data = sock;
+    uv_tcp_t* accepted = (uv_tcp_t*)mem_calloc(1, sizeof(uv_tcp_t), MEM_CAT_JS_RUNTIME);
+    if (!accepted) return make_undefined_item();
+    uv_tcp_init(loop, accepted);
+    accepted->data = accepted;
 
-    int r = uv_accept((uv_stream_t*)pipe, (uv_stream_t*)&sock->tcp);
+    int r = uv_accept((uv_stream_t*)pipe, (uv_stream_t*)accepted);
     if (r != 0) {
         // pending IPC handles are one-shot; close the initialized wrapper when
         // adoption fails so the rejected descriptor does not linger in libuv.
+        uv_close((uv_handle_t*)accepted, [](uv_handle_t* h) {
+            if (h) mem_free(h);
+        });
+        return make_undefined_item();
+    }
+
+#ifdef _WIN32
+    int fd = -1;
+#else
+    uv_os_fd_t raw_fd;
+    int fd = -1;
+    if (uv_fileno((const uv_handle_t*)accepted, &raw_fd) == 0) {
+        fd = dup((int)raw_fd);
+    }
+#endif
+    bool is_listener = fd >= 0 && net_fd_is_listening_socket(fd);
+    uv_close((uv_handle_t*)accepted, [](uv_handle_t* h) {
+        if (h) mem_free(h);
+    });
+    if (fd < 0) return make_undefined_item();
+
+    if (is_listener) {
+        // IPC TCP handles can be listening servers; treating them as sockets
+        // breaks cluster server transfer and leaves worker IPC alive to timeout.
+        return make_server_object_from_fd(loop, fd);
+    }
+
+    JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
+    if (!sock) {
+#ifndef _WIN32
+        close(fd);
+#endif
+        return make_undefined_item();
+    }
+    sock->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
+    uv_tcp_init(loop, &sock->tcp);
+    sock->tcp.data = sock;
+    if (uv_tcp_open(&sock->tcp, (uv_os_sock_t)fd) != 0) {
+#ifndef _WIN32
+        close(fd);
+#endif
         uv_close((uv_handle_t*)&sock->tcp, [](uv_handle_t* h) {
             JsSocket* s = h ? (JsSocket*)h->data : NULL;
             if (s) mem_free(s);
@@ -2170,7 +2211,8 @@ extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe) {
     socket_update_state_properties(sock);
     socket_update_address_properties(sock);
     net_active_add(net_active_sockets, NET_ACTIVE_SOCKET_MAX, obj);
-    socket_start_read(sock);
+    // IPC-adopted sockets are delivered paused; eager uv_read_start can close
+    // a delayed SCM_RIGHTS descriptor before userland performs the first write.
     return obj;
 }
 
@@ -4029,6 +4071,8 @@ struct JsServer {
     Item     pending_listen_callback;
 };
 
+static JsServer* server_from_object(Item self);
+
 static Item server_make_listener_record(Item listener, bool once) {
     Item record = js_new_object();
     js_property_set(record, make_string_item("listener"), listener);
@@ -4139,6 +4183,30 @@ static void server_maybe_finish_close(JsServer* srv) {
             js_microtask_flush();
         }
     }
+}
+
+static void server_close_handle_now(JsServer* srv) {
+    if (!srv) return;
+    srv->closed = true;
+    srv->close_requested = true;
+    srv->listen_pending = false;
+    if (!uv_is_closing((uv_handle_t*)&srv->tcp)) {
+        uv_close((uv_handle_t*)&srv->tcp, [](uv_handle_t* h) {
+            JsServer* s = h ? (JsServer*)h->data : NULL;
+            if (s) {
+                s->handle_closed = true;
+                server_maybe_finish_close(s);
+            }
+        });
+    } else if (srv->handle_closed) {
+        server_maybe_finish_close(srv);
+    }
+}
+
+static void server_close_after_listen_error(JsServer* srv) {
+    // Failed bind/listen still leaves an initialized TCP handle; close it so
+    // error-only servers do not keep cluster workers alive until the watchdog.
+    server_close_handle_now(srv);
 }
 
 static void socket_note_closed(JsSocket* sock) {
@@ -4388,6 +4456,10 @@ extern "C" int js_net_dup_ipc_stdio_fd(Item handle_item) {
 
 extern "C" uv_stream_t* js_net_stream_from_ipc_send_handle(Item handle_item) {
     if (!net_is_object_like(handle_item)) return NULL;
+    JsServer* srv = server_from_handle_object(handle_item);
+    if (srv && !uv_is_closing((uv_handle_t*)&srv->tcp)) {
+        return (uv_stream_t*)&srv->tcp;
+    }
     JsSocket* sock = socket_from_handle_object(handle_item);
     if (sock && !uv_is_closing((uv_handle_t*)&sock->tcp)) {
         return (uv_stream_t*)&sock->tcp;
@@ -4400,6 +4472,55 @@ extern "C" uv_stream_t* js_net_stream_from_ipc_send_handle(Item handle_item) {
         return js_net_stream_from_ipc_send_handle(inner);
     }
     return NULL;
+}
+
+static JsServer* server_from_ipc_stream(uv_stream_t* stream) {
+    if (!stream || stream->type != UV_TCP) return NULL;
+    JsServer* srv = (JsServer*)stream->data;
+    if (!srv || (uv_stream_t*)&srv->tcp != stream) return NULL;
+    for (int i = 0; i < NET_ACTIVE_SERVER_MAX; i++) {
+        if (net_active_servers[i].item == srv->js_object.item) return srv;
+    }
+    return NULL;
+}
+
+static JsSocket* socket_from_ipc_stream(uv_stream_t* stream) {
+    if (!stream || stream->type != UV_TCP) return NULL;
+    JsSocket* sock = (JsSocket*)stream->data;
+    if (!sock || (uv_stream_t*)&sock->tcp != stream) return NULL;
+    for (int i = 0; i < NET_ACTIVE_SOCKET_MAX; i++) {
+        if (net_active_sockets[i].item == sock->js_object.item) return sock;
+    }
+    return NULL;
+}
+
+extern "C" void js_net_close_ipc_sent_stream(uv_stream_t* stream) {
+    if (!stream || stream->type != UV_TCP || uv_is_closing((uv_handle_t*)stream)) return;
+    JsServer* srv = server_from_ipc_stream(stream);
+    if (srv) {
+        // IPC keepOpen=false transfers the sender's listening fd ownership;
+        // leaving the server refed makes cluster tests wait for the drain watchdog.
+        server_close_handle_now(srv);
+        return;
+    }
+    JsSocket* sock = socket_from_ipc_stream(stream);
+    if (!sock || sock->destroyed) return;
+    socket_close_now(sock);
+}
+
+extern "C" void js_net_close_all_active_servers(void) {
+    Item servers[NET_ACTIVE_SERVER_MAX];
+    int count = 0;
+    for (int i = 0; i < NET_ACTIVE_SERVER_MAX; i++) {
+        if (net_active_servers[i].item) servers[count++] = net_active_servers[i];
+    }
+    for (int i = 0; i < count; i++) {
+        JsServer* srv = server_from_object(servers[i]);
+        if (!srv) continue;
+        // cluster worker disconnect drains server handles before IPC closes;
+        // otherwise worker-owned listeners keep the child alive until watchdog.
+        server_close_handle_now(srv);
+    }
 }
 
 static void server_connection_cb(uv_stream_t* server, int status) {
@@ -4488,6 +4609,7 @@ static Item js_server_emit_listening_scheduled(Item env_item) {
 
     srv->listen_pending = false;
     server_emit(self, "listening", NULL, 0);
+    js_cluster_notify_worker_listening();
     if (is_callable(callback)) {
         js_call_function(callback, self, NULL, 0);
     }
@@ -4668,12 +4790,14 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
 #endif
             Item err = make_uv_error(open_r, "listen", NULL, -1);
             server_schedule_error(self, err);
+            server_close_after_listen_error(srv);
             return self;
         }
         int listen_r = uv_listen((uv_stream_t*)&srv->tcp, 128, server_connection_cb);
         if (listen_r != 0) {
             Item err = make_uv_error(listen_r, "listen", NULL, -1);
             server_schedule_error(self, err);
+            server_close_after_listen_error(srv);
             return self;
         }
         net_active_add(net_active_servers, NET_ACTIVE_SERVER_MAX, self);
@@ -4714,12 +4838,14 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
             if (open_r != 0) {
                 Item err = make_uv_error(open_r, "listen", NULL, -1);
                 server_schedule_error(self, err);
+                server_close_after_listen_error(srv);
                 return self;
             }
             int listen_r = uv_listen((uv_stream_t*)&srv->tcp, 128, server_connection_cb);
             if (listen_r != 0) {
                 Item err = make_uv_error(listen_r, "listen", NULL, -1);
                 server_schedule_error(self, err);
+                server_close_after_listen_error(srv);
                 return self;
             }
             net_active_add(net_active_servers, NET_ACTIVE_SERVER_MAX, self);
@@ -4827,6 +4953,7 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
         srv->listen_pending = false;
         Item err = make_uv_error(r, "listen", host_buf, port);
         server_schedule_error(self, err);
+        server_close_after_listen_error(srv);
         return self;
     }
     server_update_connection_key(self, srv, port);
@@ -4836,6 +4963,7 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
         srv->listen_pending = false;
         Item err = make_uv_error(r, "listen", host_buf, port);
         server_schedule_error(self, err);
+        server_close_after_listen_error(srv);
         return self;
     }
 
@@ -4937,15 +5065,7 @@ extern "C" Item js_server_close(Item callback) {
         js_property_set(self, make_string_item("__close_callback__"), callback);
     }
 
-    if (!uv_is_closing((uv_handle_t*)&srv->tcp)) {
-        uv_close((uv_handle_t*)&srv->tcp, [](uv_handle_t* h) {
-            JsServer* s = (JsServer*)h->data;
-            if (s) {
-                s->handle_closed = true;
-                server_maybe_finish_close(s);
-            }
-        });
-    }
+    server_close_handle_now(srv);
     return self;
 }
 
@@ -5109,6 +5229,33 @@ extern "C" Item js_net_createServer(Item rest_args) {
 
     srv->js_object = obj;
     net_active_add(net_active_servers, NET_ACTIVE_SERVER_MAX, obj);
+    return obj;
+}
+
+static Item make_server_object_from_fd(uv_loop_t* loop, int fd) {
+    (void)loop;
+    Item args = js_array_new(0);
+    Item obj = js_net_createServer(args);
+    JsServer* srv = server_from_object(obj);
+    if (!srv) {
+#ifndef _WIN32
+        close(fd);
+#endif
+        return make_undefined_item();
+    }
+    int open_r = uv_tcp_open(&srv->tcp, (uv_os_sock_t)fd);
+    if (open_r != 0) {
+#ifndef _WIN32
+        close(fd);
+#endif
+        return make_undefined_item();
+    }
+    int listen_r = uv_listen((uv_stream_t*)&srv->tcp, 128, server_connection_cb);
+    if (listen_r != 0) {
+        server_close_handle_now(srv);
+        return make_undefined_item();
+    }
+    js_property_set(obj, make_string_item("listening"), (Item){.item = ITEM_TRUE});
     return obj;
 }
 

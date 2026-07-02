@@ -1984,6 +1984,10 @@ static Item js_mock_method_impl(Item object, Item method_name, Item implementati
 static Item js_mock_create_context(void);
 static Item js_mock_reset_impl(void);
 static Item js_mock_restore_all_impl(void);
+static Item js_mock_call_count_impl(void);
+static Item js_mock_timers_enable_impl(Item options);
+static Item js_mock_timers_reset_impl(void);
+static Item js_mock_timers_tick_impl(Item delay);
 
 // ---------------------------------------------------------------------------
 // mock.fn(original?) — creates a mock function that records calls
@@ -2093,7 +2097,8 @@ static Item js_mock_fn_impl(Item original_fn) {
     // create .mock property pointing to the live calls array
     Item mock_prop = js_new_object();
     js_property_set(mock_prop, assert_make_string("calls"), g_mock_slots[slot].calls);
-    js_property_set(mock_prop, assert_make_string("callCount"), (Item){.item = i2it(0)});
+    js_property_set(mock_prop, assert_make_string("callCount"),
+                    js_new_function((void*)js_mock_call_count_impl, 0));
     js_property_set(mock_prop, assert_make_string("_slot"), (Item){.item = i2it(slot)});
 
     // mock.restore() — no-op for fn mocks
@@ -2136,6 +2141,39 @@ static Item js_mock_restore_all_impl(void) {
     return make_js_undefined();
 }
 
+static Item js_mock_call_count_impl(void) {
+    Item self = js_get_this();
+    Item slot_item = js_property_get(self, assert_make_string("_slot"));
+    if (get_type_id(slot_item) != LMD_TYPE_INT) return (Item){.item = i2it(0)};
+    int slot = (int)it2i(slot_item);
+    if (slot < 0 || slot >= MAX_MOCK_SLOTS || !g_mock_slots[slot].in_use) {
+        return (Item){.item = i2it(0)};
+    }
+    return (Item){.item = i2it(g_mock_slots[slot].call_count)};
+}
+
+extern "C" void js_mock_scheduler_enable(void);
+extern "C" void js_mock_scheduler_reset(void);
+extern "C" void js_mock_scheduler_tick(Item delay);
+
+static Item js_mock_timers_enable_impl(Item options) {
+    (void)options;
+    // The current node:test mock timer surface only virtualizes scheduler.wait;
+    // leaving it as a stub makes official tests wait for real 9999ms timers.
+    js_mock_scheduler_enable();
+    return make_js_undefined();
+}
+
+static Item js_mock_timers_reset_impl(void) {
+    js_mock_scheduler_reset();
+    return make_js_undefined();
+}
+
+static Item js_mock_timers_tick_impl(Item delay) {
+    js_mock_scheduler_tick(delay);
+    return make_js_undefined();
+}
+
 // mock.getter(object, property) — stub
 static Item js_mock_getter_impl(Item object, Item property) {
     return js_mock_method_impl(object, property, make_js_undefined());
@@ -2164,11 +2202,11 @@ static Item js_mock_create_context(void) {
     // timers sub-object
     Item timers_obj = js_new_object();
     js_property_set(timers_obj, assert_make_string("enable"),
-                    js_new_function((void*)js_mock_reset_impl, 0));
+                    js_new_function((void*)js_mock_timers_enable_impl, 1));
     js_property_set(timers_obj, assert_make_string("reset"),
-                    js_new_function((void*)js_mock_reset_impl, 0));
+                    js_new_function((void*)js_mock_timers_reset_impl, 0));
     js_property_set(timers_obj, assert_make_string("tick"),
-                    js_new_function((void*)js_mock_reset_impl, 1));
+                    js_new_function((void*)js_mock_timers_tick_impl, 1));
     js_property_set(mock_obj, assert_make_string("timers"), timers_obj);
     return mock_obj;
 }
@@ -2682,6 +2720,8 @@ extern "C" Item js_get_node_test_namespace(void) {
 }
 
 extern "C" void js_node_test_reset(void) {
+    extern void js_mock_scheduler_reset(void);
+    js_mock_scheduler_reset();
     node_test_namespace = (Item){0};
     g_node_before_each_store = (Item){0};
     g_node_after_each_store = (Item){0};
