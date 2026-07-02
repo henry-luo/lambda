@@ -1,6 +1,6 @@
 # Radiant Rich Editor — Stage 4C: The Editor's Test Suite Green on the Lambda Runtime (two phases)
 
-**Date:** 2026-07-02 · **Status:** **Phase A DONE** (~1931/1931 under `lambda.exe js`) · **Phase B — 28/28 pass** under `make editor-4c-view` (13 baseline + 15 new fixtures); **all 4 former `_open_` blockers now FIXED** (arrow-caret nav, selectionchange nested-CE, Shift+Enter state_machine invariant, Tab-not-reaching-handler). Milestones 0 + A1 + A2 all green; the chain of LambdaJS runtime bugs (Bug 1/2/3/4/5) and the DOM-fidelity + `Intl.Segmenter` tail all fixed (see Progress + [Lambda_Bug.md](../Lambda_Bug.md)). `event_sim` grew a `not_contains` predicate + `Arrow*` key aliases; the runner honors each fixture's `html` field. B0 (structured-model assertion) still deferred (not needed yet). Two-phase plan + Lane B pick unchanged (§4.2).
+**Date:** 2026-07-02 · **Status:** **Phase A + Phase B GREEN, integrated under `make editor-4c`** — Phase A **1931/1931** (`make editor-4c-js`, headless `lambda.exe js`), Phase B **28/28** (`make editor-4c-view`, `lambda.exe view` + `event_sim`). All 5 LambdaJS runtime bugs + all 4 Phase-B substrate blockers fixed (arrow-caret nav, selectionchange nested-CE, Shift+Enter state_machine invariant, Tab routing). `make test-radiant-baseline` 5934/5934, `test_js_gtest` 302/303 (pre-existing only). Remaining: Milestone-3 parity report + CI wiring; React `.test.tsx` stays out (§1.2). Two-phase plan + Lane B pick unchanged (§4.2).
 **Scope/goal:** Prove the **plain-DOM JS editor** works on the runtime it ships on, in two phases:
 - **Phase A — `lambda.exe js`:** the **full ~1931-test plain-DOM suite** runs and passes on the headless **LambdaJS** runtime — *does the editor's own test corpus pass at the JS level under Lambda?*
 - **Phase B — `lambda.exe view` + `event_sim`:** a **curated subset** (§4.2) runs as true **end-to-end UI automation** under the full Radiant stack (real layout, event dispatch, caret/selection rendering) — *does real interactive editing work end-to-end?*
@@ -87,7 +87,14 @@ New Stage-4C fixtures:
 
 Structured-model assertion (`assert_editor_doc`) still not needed: existing `assert_attribute` on `[data-source-path]` + `assert_text` + `not_contains` cover every case authored so far.
 
-**Regression check:** `test_js_gtest` 302/303 (only pre-existing `vm_runincontext_cross_unit`); `test_ui_automation_gtest` 219/219; `test_radiant_view_gtest` 20/20; `make test-radiant-baseline` unchanged (state_machine / state_store / event / event_sim changes verified non-regressing).
+**Regression check:** `test_js_gtest` 302/303 (only pre-existing `vm_runincontext_cross_unit`); `test_ui_automation_gtest` 219/219; `test_radiant_view_gtest` 20/20; `make test-radiant-baseline` 5934/5934 (fully green; state_machine / state_store / event / event_sim changes verified non-regressing).
+
+**Milestone 3 — integration (2026-07-02):** the whole Stage-4C suite is now reproducible via `make`:
+- **`make editor-4c-js`** → `test/editor-js/tools/run-phase-a.mjs` bundles each group (core, view, drawing, and the 6 populated tier corpora) to an IIFE, runs it under `lambda.exe js` (`--document` where DOM is needed), and aggregates the in-engine `HARNESS pass=/fail=/skip=` lines. React `.test.tsx` excluded by construction; the README-only `tier_c_wpt` placeholder is skipped. **PHASE-A TOTAL 1931/1931.**
+- **`make editor-4c-view`** → the Phase-B fixtures under `lambda.exe view` + `event_sim`. **28/28.**
+- **`make editor-4c`** → runs both; exits non-zero on any failure. Confirmed green end-to-end.
+
+Still open in Milestone 3: a machine parity report cross-checking the Radiant pass-set vs. the jsdom/vitest oracle, and CI wiring.
 
 **Phase B next up:** more Lane-B fixture translations — block-type-select (h1↔p), gap-cursor around images, table cell selection, paste plain text (via `paste_text` event), link toolbar. Then diagnose the 4 `_open_` blockers — the arrow-caret + selectionchange pair are likely the same nested-CE topology issue (§5.3); the shift-enter state_machine invariant + Tab-not-reaching-handler need separate Radiant substrate investigation.
 
@@ -248,7 +255,7 @@ APIs exist (§3.1); **semantics** need hardening. Surfaced by Phase A's `view/*.
 | **B0 — event_sim + geometry prerequisites** | ◑ partial | structured-model assertion (§6.1) — DEFERRED (existing `assert_attribute` on `[data-source-path]` + `assert_text` cover the pilot); the JS-subtree geometry fix (§5.2) so chrome clicks land — not needed yet by the pilot fixtures | editor-4c-view 17/17 without it; add when the first non-covered case surfaces |
 | **B1 — Lane B subset** | ✅ **done (initial set)** | `make editor-4c-view` runs `test/ui/editor4b/*.json` (13) + `test/ui/editor4c/*.json` (15 new); all 4 former `_open_` blockers root-caused + fixed in the Radiant substrate (state_machine caret-projection guard, Tab keydown-first routing, `event_sim` Arrow* aliases, per-fixture `html`) | **28/28 pass**; **`make test-radiant-baseline` 5934/5934** (fully green — the substrate fixes also cleared the 3 form-drag + 1 view-cmd pre-existing failures) |
 | **B1 expansion — remaining Lane-B files** | ⬚ not started | convert `commands/{text-commands,structural-commands,caret,paste,input-rules}` cases (~98 tests) + expand `view/{editor-view-dom,full-editor-dom,reconcile}` (~29) as fixtures; investigate the 2 `_open_` blockers | Lane-B subset green under `lambda.exe view` + `event_sim` |
-| **3 — Integration & parity** | ⬚ not started | `make editor-4c` (A + B) + a parity report vs. vitest; CI wiring; docs | ~1931 (A) + Lane-B subset (B) green; 0 undocumented divergences |
+| **3 — Integration & parity** | ◑ **make targets landed** | `make editor-4c-js` (Phase A via `tools/run-phase-a.mjs`), `make editor-4c-view` (Phase B), `make editor-4c` (both) | **`make editor-4c` green: Phase A 1931/1931 + Phase B 28/28.** Parity report vs. vitest + CI wiring still TODO |
 
 **Guard (every milestone):** never regress `make test-radiant-baseline` or the jsdom suite; triage every divergence to a cause (LambdaJS/`js_dom`/substrate **or** a legitimate editor difference) before accepting or fixing it.
 
