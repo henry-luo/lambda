@@ -242,7 +242,7 @@ fn replace_params(text, invocation, param_num) {
 }
 
 fn do_replace_param(text, invocation, param_num) {
-    let placeholder = "#" ++ string(param_num)
+    let placeholder = "#" ++ (param_num)
     let arg_idx = param_num - 1
     let arg = if (arg_idx < len(invocation)) get_invocation_arg(invocation, arg_idx) else ""
     let replaced = replace_all_occurrences(text, placeholder, arg)

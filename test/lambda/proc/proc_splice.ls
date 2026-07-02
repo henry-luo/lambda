@@ -7,7 +7,7 @@ pn join_ints(v) {
     var i = 0
     while (i < len(v)) {
         if (i > 0) { s = s ++ "," }
-        s = s ++ string(int(v[i]))
+        s = s ++ (int(v[i]))
         i = i + 1
     }
     return s
@@ -67,7 +67,7 @@ pn main() {
     push(q, 8)
     push(q, 9)
     var f1 = dequeue(q)
-    print("drain:" ++ string(int(f1)) ++ "|" ++ join_ints(q) ++ "\n")
+    print("drain:" ++ (int(f1)) ++ "|" ++ join_ints(q) ++ "\n")
 
     // generic array of objects: by-id middle removal
     var v = []
@@ -75,7 +75,7 @@ pn main() {
     push(v, {id: 2})
     push(v, {id: 3})
     remove_by_id(v, 2)
-    print("obj-remove: len=" ++ string(len(v)) ++ " ids=" ++ string(int((v[0]).id)) ++ "," ++ string(int((v[1]).id)) ++ "\n")
+    print("obj-remove: len=" ++ (len(v)) ++ " ids=" ++ (int((v[0]).id)) ++ "," ++ (int((v[1]).id)) ++ "\n")
 
     // setter whose body is a bare index-assignment (returns null, must not MIR-crash)
     var g = [0, 0, 0]

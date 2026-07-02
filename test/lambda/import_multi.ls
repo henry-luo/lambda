@@ -8,4 +8,4 @@ import .mod_vars, .mod_compute
 [doubled, total]
 
 // cross-module: mix values from both modules
-name ++ " v" ++ string(version) ++ " has " ++ string(total) ++ " items"
+name ++ " v" ++ (version) ++ " has " ++ (total) ++ " items"

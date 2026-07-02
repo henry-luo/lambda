@@ -151,7 +151,7 @@ edit <todo_list> state adding: false, new_text: "", drag_over: false {
   let items = ~.items
   let item_count = len(items)
   let done_count = len(for (i in items where i.done) i)
-  let count_text = string(done_count) ++ "/" ++ string(item_count)
+  let count_text = (done_count) ++ "/" ++ (item_count)
   let header_class = if (drag_over) "list-header drop-active" else "list-header"
   <div class:"todo-list"
     <div class:header_class, dropzone:"todo-item"
@@ -631,7 +631,7 @@ edit <todo_app> state active_file: "", creating_file: false, new_file_name: "", 
           let all_items = [for (lst in file_data.lists) for (item in lst.items) item]
           let total = len(all_items)
           let done_total = len(for (item in all_items where item.done) item)
-          (string(done_total) ++ " of " ++ string(total) ++ " tasks completed")
+          ((done_total) ++ " of " ++ (total) ++ " tasks completed")
         } else {
           "No file selected"
         }

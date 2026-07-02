@@ -1514,7 +1514,7 @@ fn accent_body_height_raw(key) {
 
 fn fmt_accent_em(v) {
     let rounded = round(v * 100.0) / 100.0
-    string(rounded) ++ "em"
+    (rounded) ++ "em"
 }
 
 // ============================================================
@@ -2676,7 +2676,7 @@ fn render_size_switch_tail(node, context, i) {
     let spaced = apply_spacing(children, sized_context)
     let hb = transparent_hbox(spaced)
     let elements = box.child_elements(spaced)
-    let pct = string(round(scale * 1000.0) / 10.0) ++ "%"
+    let pct = (round(scale * 1000.0) / 10.0) ++ "%"
     let scaled_height = hb.height * scale
     let scaled_depth = hb.depth * scale
     let scaled_render_height = if (hb.render_height != null) hb.render_height * scale else null

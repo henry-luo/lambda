@@ -33,7 +33,7 @@ fn run_test(test_name) {
         return {
             test: test_name,
             passed: false,
-            error: "Failed to load source: " ++ string(html_content)
+            error: "Failed to load source: " ++ (html_content)
         }
     };
     
@@ -43,7 +43,7 @@ fn run_test(test_name) {
         return {
             test: test_name,
             passed: false,
-            error: "Failed to load expected metadata: " ++ string(expected_json)
+            error: "Failed to load expected metadata: " ++ (expected_json)
         }
     };
     
@@ -116,9 +116,9 @@ fn compare_field(actual, expected, field_name) {
         }
         else {
             {
-                passed: false, 
-                message: field_name ++ " mismatch: expected '" ++ string(expected) ++ 
-                         "', got '" ++ string(actual) ++ "'"
+                passed: false,
+                message: field_name ++ " mismatch: expected '" ++ (expected) ++
+                         "', got '" ++ (actual) ++ "'"
             }
         }
     }
@@ -136,7 +136,7 @@ fn run_all_tests() {
     let total_count = len(CORE_TEST_CASES);
     
     {
-        summary: "Passed " ++ string(passed_count) ++ "/" ++ string(total_count) ++ " tests",
+        summary: "Passed " ++ (passed_count) ++ "/" ++ (total_count) ++ " tests",
         results: results
     }
 }
@@ -146,5 +146,5 @@ fn run_all_tests() {
 // ============================================
 
 "=== Readability Test Suite ===" ++ "\n" ++
-"Running " ++ string(len(CORE_TEST_CASES)) ++ " core test cases..." ++ "\n\n" ++
+"Running " ++ (len(CORE_TEST_CASES)) ++ " core test cases..." ++ "\n\n" ++
 format(run_all_tests(), 'json)

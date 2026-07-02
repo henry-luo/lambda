@@ -166,9 +166,9 @@ fn curved_at(points, radius, i, last_i, acc) {
     let out_len = min(radius, hypot(next.x - cur.x, next.y - cur.y) / 2.0)
     let p1 = {x: cur.x - in_dx * in_len,  y: cur.y - in_dy * in_len}
     let p2 = {x: cur.x + out_dx * out_len, y: cur.y + out_dy * out_len}
-    let seg = " L " ++ string(p1.x) ++ " " ++ string(p1.y) ++
-              " Q " ++ string(cur.x) ++ " " ++ string(cur.y) ++
-              " " ++ string(p2.x) ++ " " ++ string(p2.y)
+    let seg = " L " ++ (p1.x) ++ " " ++ (p1.y) ++
+              " Q " ++ (cur.x) ++ " " ++ (cur.y) ++
+              " " ++ (p2.x) ++ " " ++ (p2.y)
     curved_at(points, radius, i + 1, last_i, acc ++ seg)
   }
 }
@@ -180,9 +180,9 @@ pub fn route_to_curved_svg_path(points, radius) {
   else {
     let head = points[0]
     let body = curved_at(points, radius, 1, len(points) - 1,
-                         "M " ++ string(head.x) ++ " " ++ string(head.y))
+                         "M " ++ (head.x) ++ " " ++ (head.y))
     let last = points[len(points) - 1]
-    body ++ " L " ++ string(last.x) ++ " " ++ string(last.y)
+    body ++ " L " ++ (last.x) ++ " " ++ (last.y)
   }
 }
 

@@ -10,7 +10,7 @@ import util: .util
 pub fn svg_root(width: int, height: int, children) {
     <svg xmlns: "http://www.w3.org/2000/svg",
          width: width, height: height,
-         viewBox: "0 0 " ++ string(width) ++ " " ++ string(height);
+         viewBox: "0 0 " ++ (width) ++ " " ++ (height);
         for (child in children) child
     >
 }
@@ -77,7 +77,7 @@ pub fn C(x1, y1, x2, y2, x, y) string {
 
 // arc command
 pub fn A(rx, ry, rotation, large_arc, sweep, x, y) string {
-    "A" ++ util.fmt_num(rx) ++ " " ++ util.fmt_num(ry) ++ " " ++ string(rotation) ++ " " ++ string(large_arc) ++ " " ++ string(sweep) ++ " " ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
+    "A" ++ util.fmt_num(rx) ++ " " ++ util.fmt_num(ry) ++ " " ++ (rotation) ++ " " ++ (large_arc) ++ " " ++ (sweep) ++ " " ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y)
 }
 
 // build a path string from a list of points using line segments

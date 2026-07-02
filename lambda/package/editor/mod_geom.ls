@@ -162,14 +162,14 @@ pub fn point_in_ellipse(p, bbox) {
 
 fn pld_at(points, i, n, acc) {
   if (i >= n) { acc }
-  else { pld_at(points, i + 1, n, acc ++ " L " ++ string(points[i].x) ++ " " ++ string(points[i].y)) }
+  else { pld_at(points, i + 1, n, acc ++ " L " ++ (points[i].x) ++ " " ++ (points[i].y)) }
 }
 
 pub fn polyline_to_svg_d(points) {
   if (len(points) == 0) { "" }
   else {
     let head = points[0]
-    pld_at(points, 1, len(points), "M " ++ string(head.x) ++ " " ++ string(head.y))
+    pld_at(points, 1, len(points), "M " ++ (head.x) ++ " " ++ (head.y))
   }
 }
 

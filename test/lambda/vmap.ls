@@ -33,7 +33,7 @@ outer.child.x
 
 // Test 9: For-loop with 'in' (k, v)
 let m5 = map(["a", 1, "b", 2, "c", 3])
-[for (k, v in m5) k ++ "=" ++ string(v)]
+[for (k, v in m5) k ++ "=" ++ (v)]
 
 // Test 10: For-loop collect values
 [for (k, v in m5) v]

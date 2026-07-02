@@ -364,21 +364,25 @@ documented; defensively bracing every branch is the safe form.
 
 ## 17. `fn` cannot call `pn` (E224) — viral propagation up the call graph
 
+**Status: No Fix / by design** — `fn` cannot call `pn`. Functional Lambda
+functions must remain pure expression contexts, while `pn` is the procedural
+context that permits mutation, statement sequencing, early `return`, and other
+imperative effects. A caller that needs to invoke a procedure must itself be a
+`pn`.
+
 ```lambda
 pn helper(s) { var i = 0; ...; return out }
 fn caller(x) { helper(x) }
 // error[E224]: procedure 'helper' cannot be called in a function
 ```
 
-Once you write a `pn` somewhere, every transitive caller must also be
-`pn`, even if they have no mutation. Combined with #2 / #14 / #15 this
-forces `pn` callers into awkward gymnastics that defeat the purpose of
-the procedural mode.
+This propagation is intentional: allowing a pure `fn` to call a procedural
+`pn` would leak procedural effects into expression-only code and blur the
+language boundary between pure functions and procedures.
 
-**Workaround during PDF Phase 2**: rewrote `decode_hex` and
-`decode_literal` from `pn` (with `var out = ""; while …`) to `fn` using
-list comprehensions + `join("")`. Functional form is cleaner anyway,
-but the engine forced the change.
+Guidance: keep reusable pure helpers as `fn`. Use `pn` for drivers and helpers
+that require mutation or procedural control flow, and keep their transitive
+callers procedural too.
 
 ---
 
@@ -429,35 +433,32 @@ parses as two statements; the trailing `or (...)` becomes an
 
 ## 19. `pn` parameter with `: int` annotation breaks `string(p + 1)`
 
-**Severity: HIGH** — silent: produces an `error` value.
+**Status: ✅ Fixed / verified (2026-07-02)** — current MIR direct execution
+handles `string(page_index + 1)` correctly when `page_index` is a `pn`
+parameter annotated as `: int`.
 
 ```lambda
 pn render(page_index: int) {
     let s = "Page " ++ string(page_index + 1)
-    print({ s: s })       // -> { s: "Page <error>" }
+    print({ s: s })       // -> { s: "Page 1" }
 }
 
 pn render2(page_index) {  // no annotation
     let s = "Page " ++ string(page_index + 1)
     print({ s: s })       // -> { s: "Page 1" }
 }
-render(0); render2(0)
+
+pn main() {
+    render(0)
+    render2(0)
+}
 ```
 
-When `page_index` is annotated `: int` and called from a `pn` chain
-with the same caller-side type, `string(page_index + 1)` returns an
-error value (which prints as `<error>` and silently corrupts the
-output string).
+Verified repro output: both the annotated and unannotated forms print
+`{ s: "Page 1" }` under `./lambda.exe run`.
 
-This is likely the same root cause as #6 (int4 vs int5 type mismatch
-in `ord`) but reproduced through a much more innocuous code path —
-just a typed parameter and an arithmetic expression.
-
-**Asks**:
-- Make `int` parameters accept and produce the same int width
-  consistently across `pn` boundaries.
-- Or simply: stop silently producing an error value out of arithmetic
-  on a typed parameter — raise instead.
+Regression coverage: `test/lambda/proc/proc_param_type_infer.ls` now checks
+`pn test_typed_int_string(n: int) { "Page " ++ string(n + 1) }`.
 
 ---
 

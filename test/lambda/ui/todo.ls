@@ -32,7 +32,7 @@ edit <todo_list> state new_text: "" {
   let items = ~.items
   let item_count = len(items)
   let done_count = len(for (i in items where i.done) i)
-  let count_text = string(done_count) ++ "/" ++ string(item_count)
+  let count_text = (done_count) ++ "/" ++ (item_count)
   <div class:"todo-list"
     <div class:"list-header"
       <span class:"list-name"; ~.name>
@@ -267,7 +267,7 @@ on delete_item(evt) {
       let all_items = [for (lst in data.lists) for (item in lst.items) item]
       let total = len(all_items)
       let done = len(for (item in all_items where item.done) item)
-      (string(done) ++ " of " ++ string(total) ++ " tasks completed")
+      ((done) ++ " of " ++ (total) ++ " tasks completed")
     >
   >
 >

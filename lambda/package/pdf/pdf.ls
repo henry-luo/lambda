@@ -41,7 +41,7 @@ fn _label_layer(rect, page_index) {
     let label_y = rect.y + 18.0
     let label_xform = ("matrix(1 0 0 1 " ++ util.fmt_num(label_x)
                        ++ " " ++ util.fmt_num(label_y) ++ ")")
-    let txt = "Page " ++ string(page_index + 1)
+    let txt = "Page " ++ (page_index + 1)
     svg.text_run(label_xform, "Helvetica", 12.0, "rgb(80,80,80)", txt)
 }
 
@@ -118,7 +118,7 @@ fn render_page_div(pdf, page, page_index, opts) {
 fn render_missing(page_index: int) {
     svg.svg_root("0 0 612 792", 612, 792, [
         svg.text_run("matrix(1 0 0 1 50 50)", "Helvetica", 14.0, "rgb(180,0,0)",
-                     "Page " ++ string(page_index + 1) ++ " not available")
+                     "Page " ++ (page_index + 1) ++ " not available")
     ])
 }
 

@@ -1665,11 +1665,11 @@ pn main() {
     // Build merged external libraries
     print("Building external library map...")
     var ext_libs = build_external_libs(config, platform)
-    print("  ext_libs: " ++ string(len(ext_libs)) ++ " entries")
+    print("  ext_libs: " ++ (len(ext_libs)) ++ " entries")
 
     // Compute build options from config + platform flags
     var build_opts = build_platform_build_opts(config, platform)
-    print("  build_opts: " ++ string(len(build_opts)))
+    print("  build_opts: " ++ (len(build_opts)))
 
     // Check if ASAN should be disabled
     var plats = config.platforms or {}
@@ -1681,26 +1681,26 @@ pn main() {
         var lin = plats.linux or {}
         disable_asan = lin.disable_sanitizer or false
     }
-    print("  disable_asan: " ++ string(disable_asan))
+    print("  disable_asan: " ++ (disable_asan))
 
     // Compute include lists
     print("Computing includes...")
     var lib_includes = build_lib_includes(config, platform, ext_libs)
-    print("  lib_includes: " ++ string(len(lib_includes)))
+    print("  lib_includes: " ++ (len(lib_includes)))
 
     var input_includes = build_input_includes(config, platform, ext_libs)
-    print("  input_includes: " ++ string(len(input_includes)))
+    print("  input_includes: " ++ (len(input_includes)))
 
     var full_includes = build_full_includes(config, platform, ext_libs)
-    print("  full_includes: " ++ string(len(full_includes)))
+    print("  full_includes: " ++ (len(full_includes)))
 
     // Compute static paths
     print("Computing library paths...")
     var input_static_paths = build_input_static_paths(config, ext_libs, platform)
-    print("  input_static_paths: " ++ string(len(input_static_paths)))
+    print("  input_static_paths: " ++ (len(input_static_paths)))
 
     var input_dyn_links = build_input_dyn_links(config, ext_libs, platform)
-    print("  input_dyn_links: " ++ string(input_dyn_links))
+    print("  input_dyn_links: " ++ (input_dyn_links))
 
     // Build platform-specific defines for input-full-cpp
     var targets = config.targets or []
@@ -1711,13 +1711,13 @@ pn main() {
     // Enumerate source files for main exe (using input(dir, "dir"))
     print("Enumerating source files...")
     var exe_files = enumerate_sources(config, platform)
-    print("  exe_files: " ++ string(len(exe_files)))
+    print("  exe_files: " ++ (len(exe_files)))
 
     var exe_static_paths = build_exe_static_paths(config, platform, ext_libs)
-    print("  exe_static_paths: " ++ string(len(exe_static_paths)))
+    print("  exe_static_paths: " ++ (len(exe_static_paths)))
 
     var exe_dyn_libs = build_exe_dyn_libs(config, ext_libs, platform)
-    print("  exe_dyn_libs: " ++ string(len(exe_dyn_libs)))
+    print("  exe_dyn_libs: " ++ (len(exe_dyn_libs)))
 
     // Build force-load options and input-full test linkopts
     var force_load_opts = build_force_load_opts(ext_libs, platform)
@@ -1820,7 +1820,7 @@ pn main() {
         }
         suite_idx = suite_idx + 1
     }
-    print("  " ++ string(test_count) ++ " test projects OK (" ++ string(skip_count) ++ " skipped)")
+    print("  " ++ (test_count) ++ " test projects OK (" ++ (skip_count) ++ " skipped)")
 
     // Write output
     var outpath = if (platform == "macos") "temp/premake5_v2.mac.lua"
@@ -1838,7 +1838,7 @@ pn main() {
     out |> outpath
 
     print("Output: " ++ outpath)
-    print("Size: " ++ string(len(out)) ++ " chars")
+    print("Size: " ++ (len(out)) ++ " chars")
     print("Done!")
 
     return 0

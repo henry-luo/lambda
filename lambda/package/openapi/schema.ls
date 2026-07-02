@@ -84,7 +84,7 @@ fn convert_object(schema, all_schemas) {
             let type_str = convert_schema(field_schema, all_schemas);
             let is_required = util.list_contains(required, string(field_name));
             let suffix = if (is_required) "" else "?";
-            "    " ++ string(field_name) ++ ": " ++ type_str ++ suffix
+            "    " ++ (field_name) ++ ": " ++ type_str ++ suffix
         };
         "{\n" ++ join(fields, ",\n") ++ "\n}"
     }

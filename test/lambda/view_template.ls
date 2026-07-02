@@ -21,7 +21,7 @@ apply("world")
 
 // Test 4: Bool view
 view bool {
-  string(~) ++ "!"
+  (~) ++ "!"
 }
 apply(true)
 0  // separator

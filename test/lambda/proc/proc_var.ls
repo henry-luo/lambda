@@ -188,7 +188,7 @@ pn test_assign_with_array_index() {
 // Test 17: assignment with string concat and function call
 pn test_assign_concat_fn_call() {
     var msg = "Hello"
-    msg = msg ++ string(42)   // test ++ with function call
+    msg = msg ++ (42)   // test ++ with function call
     msg  // should be "Hello42"
 }
 

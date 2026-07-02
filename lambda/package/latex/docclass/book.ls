@@ -33,11 +33,11 @@ pub fn format_section_number(counters, counter_name, in_appendix) {
         case "chapter":
             chap
         case "section":
-            chap ++ "." ++ string(counters.section)
+            chap ++ "." ++ (counters.section)
         case "subsection":
-            chap ++ "." ++ string(counters.section) ++ "." ++ string(counters.subsection)
+            chap ++ "." ++ (counters.section) ++ "." ++ (counters.subsection)
         case "subsubsection":
-            chap ++ "." ++ string(counters.section) ++ "." ++ string(counters.subsection) ++ "." ++ string(counters.subsubsection)
+            chap ++ "." ++ (counters.section) ++ "." ++ (counters.subsection) ++ "." ++ (counters.subsubsection)
         default: null
     }
 }
@@ -65,15 +65,15 @@ pub fn step_counter(counters, counter_name) {
 
 // book: figures/tables numbered by chapter: "Figure 1.3"
 pub fn figure_label(counters, num) {
-    "Figure " ++ string(counters.chapter) ++ "." ++ string(num)
+    "Figure " ++ (counters.chapter) ++ "." ++ (num)
 }
 
 pub fn table_label(counters, num) {
-    "Table " ++ string(counters.chapter) ++ "." ++ string(num)
+    "Table " ++ (counters.chapter) ++ "." ++ (num)
 }
 
 pub fn equation_label(counters, num) {
-    "(" ++ string(counters.chapter) ++ "." ++ string(num) ++ ")"
+    "(" ++ (counters.chapter) ++ "." ++ (num) ++ ")"
 }
 
 // ============================================================
@@ -91,7 +91,7 @@ pub ABSTRACT_POSITION = "after_title"
 // ============================================================
 
 pub fn theorem_label(env_display_name, counters, num) {
-    env_display_name ++ " " ++ string(counters.chapter) ++ "." ++ string(num)
+    env_display_name ++ " " ++ (counters.chapter) ++ "." ++ (num)
 }
 
 // ============================================================

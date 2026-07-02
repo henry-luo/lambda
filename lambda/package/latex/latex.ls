@@ -115,10 +115,10 @@ fn render_footnotes_section(info) {
 fn render_footnote_item(fn_entry, info) {
     let fn_num = fn_entry.number
     let content = dispatcher.render_children_of(fn_entry.node, info)
-    <li id: "fn-" ++ string(fn_num);
+    <li id: "fn-" ++ (fn_num);
         for c in content { c }
         " "
-        <a class: "footnote-backref", href: "#fnref-" ++ string(fn_num); "\u21A9">
+        <a class: "footnote-backref", href: "#fnref-" ++ (fn_num); "\u21A9">
     >
 }
 

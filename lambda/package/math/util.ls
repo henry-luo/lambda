@@ -16,7 +16,7 @@ pub fn fmt_fixed(x, decimals) {
     let whole = int(scaled / factor)
     let frac = scaled % factor
     let frac_s = pad_left(string(frac), decimals, "0")
-    (if (x < 0.0) "-" else "") ++ string(whole) ++ "." ++ frac_s
+    (if (x < 0.0) "-" else "") ++ (whole) ++ "." ++ frac_s
 }
 
 fn pad_left(s, width, ch) {
@@ -86,7 +86,7 @@ pub fn str_repeat(s, n) {
 pub fn str_join(arr, sep) {
     if (len(arr) == 0) ""
     else if (len(arr) == 1) string(arr[0])
-    else string(arr[0]) ++ sep ++ str_join(slice(arr, 1, len(arr)), sep)
+    else (arr[0]) ++ sep ++ str_join(slice(arr, 1, len(arr)), sep)
 }
 
 // check if string starts with a prefix
