@@ -793,8 +793,8 @@ person.address   // null (key doesn't exist)
 ```lambda
 len(person)               // 2
 
-// Wrapping/spreading map in new map
-let wrapped = {person, gender: 'male'}
+// Spreading a map into a new map
+let wrapped = {*:person, gender: 'male'}
 // {name: "Charlie", age: 25, gender: 'male'}
 ```
 
@@ -948,22 +948,22 @@ let b = [0, *a, 4]        // [0, 1, 2, 3, 4]
 
 // Map spread (merge)
 let base = {x: 1, y: 2}
-let extended = {*base, z: 3}  // {x: 1, y: 2, z: 3}
+let extended = {*:base, z: 3}  // {x: 1, y: 2, z: 3}
 
 // Override values
-let updated = {*base, x: 10}  // {x: 10, y: 2}
+let updated = {*:base, x: 10}  // {x: 10, y: 2}
 ```
 
 When updating an existing map or record-shaped state, spread the original value
 first and then list the fields to change:
 
 ```lambda
-let next_state = {*state, fill: "red", font_size: 12}
+let next_state = {*:state, fill: "red", font_size: 12}
 ```
 
 A fresh map literal contains exactly the fields written in the literal. It does
 not copy omitted fields from any input value unless that value is explicitly
-spread. Prefer the `{*base, key: value}` pattern for "with" constructors and
+spread. Prefer the `{*:base, key: value}` pattern for "with" constructors and
 state updates.
 
 ### Concatenation

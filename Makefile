@@ -1527,10 +1527,8 @@ test-reactive-ui: build
 
 # Stage 4C Phase B — editor event-driven UI automation under lambda.exe view + event_sim.
 # Runs the 4B baseline set (test/ui/editor4b/*.json) + the 4C set
-# (test/ui/editor4c/*.json). Known-open Phase-B blockers live under
-# temp/editor4c-open/ (see vibe/editing/Radiant_Editor_Stage4C.md); run them
-# manually with `./lambda.exe view test/html/editor-dom.html --event-file <path>
-# --headless` to reproduce a diagnostic. They are not in this target's pass count.
+# (test/ui/editor4c/*.json). Each fixture may name its own harness page via the
+# "html" field (default test/html/editor-dom.html).
 editor-4c-view: build
 	@echo "Running Stage 4C Phase B editor UI test suite..."
 	@echo "=============================================================="
@@ -1539,7 +1537,9 @@ editor-4c-view: build
 		[ -f "$$json" ] || continue; \
 		name=$$(basename $$json .json); \
 		TOTAL=$$((TOTAL + 1)); \
-		if ./lambda.exe view test/html/editor-dom.html --event-file $$json --headless >/dev/null 2>&1; then \
+		page=$$(sed -n 's/.*"html"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$$json" | head -1); \
+		[ -n "$$page" ] || page="test/html/editor-dom.html"; \
+		if ./lambda.exe view "$$page" --event-file $$json --headless >/dev/null 2>&1; then \
 			PASS=$$((PASS + 1)); \
 			printf "  \033[32m✓\033[0m %s\n" "$$name"; \
 		else \
@@ -1548,7 +1548,7 @@ editor-4c-view: build
 		fi; \
 	done; \
 	echo "=============================================================="; \
-	echo "editor-4c-view: $$PASS/$$TOTAL passed  (open blockers in temp/editor4c-open/)"; \
+	echo "editor-4c-view: $$PASS/$$TOTAL passed"; \
 	if [ $$FAIL -gt 0 ]; then exit 1; fi
 
 # Save/check/diff layout suite snapshots for regression detection outside baseline

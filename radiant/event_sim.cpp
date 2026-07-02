@@ -133,10 +133,17 @@ static int key_name_to_glfw(const char* name) {
     if (str_ieq_const(name, name_len, "backspace")) return GLFW_KEY_BACKSPACE;
     if (str_ieq_const(name, name_len, "delete")) return GLFW_KEY_DELETE;
     if (str_ieq_const(name, name_len, "escape") || str_ieq_const(name, name_len, "esc")) return GLFW_KEY_ESCAPE;
-    if (str_ieq_const(name, name_len, "left")) return GLFW_KEY_LEFT;
-    if (str_ieq_const(name, name_len, "right")) return GLFW_KEY_RIGHT;
-    if (str_ieq_const(name, name_len, "up")) return GLFW_KEY_UP;
-    if (str_ieq_const(name, name_len, "down")) return GLFW_KEY_DOWN;
+    // Accept both the short names and the DOM KeyboardEvent.key names
+    // ("ArrowLeft" etc.) so fixtures can use the same key strings the JS-side
+    // vitest tests do.
+    if (str_ieq_const(name, name_len, "left") ||
+        str_ieq_const(name, name_len, "arrowleft")) return GLFW_KEY_LEFT;
+    if (str_ieq_const(name, name_len, "right") ||
+        str_ieq_const(name, name_len, "arrowright")) return GLFW_KEY_RIGHT;
+    if (str_ieq_const(name, name_len, "up") ||
+        str_ieq_const(name, name_len, "arrowup")) return GLFW_KEY_UP;
+    if (str_ieq_const(name, name_len, "down") ||
+        str_ieq_const(name, name_len, "arrowdown")) return GLFW_KEY_DOWN;
     if (str_ieq_const(name, name_len, "home")) return GLFW_KEY_HOME;
     if (str_ieq_const(name, name_len, "end")) return GLFW_KEY_END;
     if (str_ieq_const(name, name_len, "pageup")) return GLFW_KEY_PAGE_UP;

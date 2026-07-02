@@ -364,7 +364,7 @@ documented; defensively bracing every branch is the safe form.
 
 ## 17. `fn` cannot call `pn` (E224) — viral propagation up the call graph
 
-**Status: No Fix / by design** — `fn` cannot call `pn`. Functional Lambda
+**Status:  ✅ No Fix / by design** — `fn` cannot call `pn`. Functional Lambda
 functions must remain pure expression contexts, while `pn` is the procedural
 context that permits mutation, statement sequencing, early `return`, and other
 imperative effects. A caller that needs to invoke a procedure must itself be a
@@ -525,9 +525,10 @@ silently dropped the colour that `rg` had set just before. Result: text
 rendered black even when the surrounding code looked correct.
 
 This is "user error" in one sense, but the Lambda map syntax has a
-spread form `{*: st, key: value}` precisely for this case. It's easy to
+spread form `{*:st, key: value}` precisely for this case. It's easy to
 forget to use it, and there is no warning when a record-typed value
-loses a field across a constructor call.
+loses a field across a constructor call. Verified on 2026-07-02: the
+plain-map shorthand `{st, key: value}` does not parse; use `{*:st, ...}`.
 
 Changing the runtime semantics would be wrong: a fresh map literal must remain a
 fresh constructor, and silently preserving fields from an input parameter would
@@ -535,7 +536,7 @@ make map construction context-dependent. The fix is to make the intended update
 form prominent in the docs and use it consistently in state-update helpers.
 
 **Resolution**:
-- Always prefer `{*: base, key: override, …}` over hand-listing fields.
+- Always prefer `{*:base, key: override, …}` over hand-listing fields.
 - Or define the record as a typed shape so the type system catches the
   missing field.
 - Documented this more prominently in `doc/Lambda_Data.md` and

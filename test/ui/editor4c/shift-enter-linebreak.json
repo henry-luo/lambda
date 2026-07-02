@@ -1,0 +1,79 @@
+{
+  "name": "editor4c: Shift+Enter inserts a line break within the current block",
+  "_note": "Phase B \u2014 Shift+Enter (insertLineBreak) within a block. Formerly an _open_ blocker: it tripped the state_machine caret-projection invariant (radiant/state_machine.cpp) because the geometry resolver mapped the caret at end-of-block-after-<br> onto the void <br> element at offset 1 (out of bounds). Fixed by guarding both caret-projection paths (state_store_refresh_caret_projection + expected_legacy_caret_projection) to keep the valid boundary projection when the geometry endpoint is invalid. Verifies AA then Shift+Enter then BB all land in the h1.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {
+    "width": 900,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "wait",
+      "ms": 250
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".rdt-surface h1"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 60
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "wait",
+      "ms": 60
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": ".rdt-surface"
+      },
+      "text": "AA"
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "key_combo",
+      "key": "Enter",
+      "mods_str": "shift"
+    },
+    {
+      "type": "wait",
+      "ms": 120
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": ".rdt-surface"
+      },
+      "text": "BB"
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".rdt-surface h1"
+      },
+      "contains": "AA"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".rdt-surface h1"
+      },
+      "contains": "BB"
+    }
+  ]
+}

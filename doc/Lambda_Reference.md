@@ -100,7 +100,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | `int[]`   | Typed int array                  | `var a: int[] = [1, 2]`       |
 | `float[]` | Typed float array                | `var b: float[] = [0.1]`      |
 | `map`     | Key-value mapping                | `{name: "Alice"}`             |
-| `object`  | Nominally-typed map with methods | `{Point x: 1, y: 2}`          |
+| `object`  | Nominally-typed map with methods | `<Point x: 1, y: 2>`          |
 | `element` | Markup element                   | `<div "content">`             |
 
 `"..."` creates a `string`; `'...'` creates a `symbol`. They are different
@@ -141,8 +141,8 @@ type Point {
     fn distance(other: Point) => math.sqrt((x - other.x)**2 + (y - other.y)**2)
 }
 type Circle : Point { radius: float; }   // Inheritance
-let p = {Point x: 3.0, y: 4.0}           // Object literal
-p.distance({Point x: 0.0, y: 0.0})       // Method call
+let p = <Point x: 3.0, y: 4.0>           // Object literal
+p.distance(<Point x: 0.0, y: 0.0>)       // Method call
 p is Point                                // true (nominal)
 ```
 
@@ -266,7 +266,7 @@ pub type Angle = float
 pub type Vec2 {
     x: float = 0.0, y: float = 0.0;
     fn len() => math.sqrt(x**2 + y**2)
-    fn scale(f) => {Vec2 x: x*f, y: y*f}
+    fn scale(f) => <Vec2 x: x*f, y: y*f>
 }
 
 // Public with error destructuring
@@ -289,7 +289,7 @@ let area = PI * square(radius)
 
 // Imported types can be used for annotations, construction, and type checks
 let angle: Angle = 1.57
-let v = {Vec2 x: 3.0, y: 4.0}
+let v = <Vec2 x: 3.0, y: 4.0>
 v.len()          // 5.0
 v is Vec2        // true
 
