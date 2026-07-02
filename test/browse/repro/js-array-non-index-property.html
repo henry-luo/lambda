@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>array non-index property repro</title>
+</head>
+<body>
+<main id="result">pending</main>
+<script>
+  const values = [];
+
+  values[1.5] = "fractional";
+  values[-1] = "negative";
+  values[NaN] = "nan";
+  values["named-property"] = "named";
+
+  const ok =
+    values.length === 0 &&
+    values[1.5] === "fractional" &&
+    values[-1] === "negative" &&
+    values[NaN] === "nan" &&
+    values["named-property"] === "named";
+
+  document.getElementById("result").textContent = ok ? "pass" : "fail";
+</script>
+</body>
+</html>
+
