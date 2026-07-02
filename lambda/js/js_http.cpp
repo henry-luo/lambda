@@ -588,6 +588,7 @@ typedef struct JsHttpServer {
     bool      close_event_emitted;
     int       connection_count;
     int       timeout_msecs;
+    struct JsHttpConn* connections_head;
 } JsHttpServer;
 
 typedef struct JsHttpConn {
@@ -598,6 +599,7 @@ typedef struct JsHttpConn {
     Item         socket_object;
     Item         current_request;
     Item         current_response;
+    Item         timeout_response;
     Item         request_timeout_callback;
     Item         response_timeout_callback;
     char*        recv_buf;
@@ -607,6 +609,8 @@ typedef struct JsHttpConn {
     int          request_body_remaining;
     int          pending_response_writes;
     int          open_response_count;
+    JsHttpConn*  server_prev;
+    JsHttpConn*  server_next;
     Item         timeout_timer;
     bool         destroyed;
     bool         read_ended;
@@ -627,6 +631,7 @@ static void http_conn_clear_timeout(JsHttpConn* conn);
 static void http_conn_start_timeout(JsHttpConn* conn, int64_t delay);
 static bool http_conn_write_bytes(JsHttpConn* conn, Item data_item, bool close_after);
 static void http_conn_maybe_close_after_response_writes(JsHttpConn* conn);
+static void http_conn_maybe_close_for_server_close(JsHttpConn* conn);
 static void http_response_close_request(Item res);
 static void http_response_flush_partial(Item self);
 
@@ -1338,6 +1343,15 @@ static void http_response_flush(Item self) {
     bool has_open_responses_after_this = false;
     if (conn->open_response_count > 0) conn->open_response_count--;
     has_open_responses_after_this = conn->open_response_count > 0;
+    if (conn->timeout_response.item == self.item) {
+        // response timeout ownership is valid only while that response is open;
+        // completed pipelined responses must not consume later socket timeouts.
+        conn->timeout_response = make_js_undefined();
+        conn->response_timeout_callback = make_js_undefined();
+    }
+    if (conn->current_response.item == self.item) {
+        conn->current_response = make_js_undefined();
+    }
 
     // get status code
     Item status_item = js_property_get(self, make_string_item("statusCode"));
@@ -1549,6 +1563,9 @@ static void http_response_flush(Item self) {
             if (close_after && c && !c->destroyed) {
                 c->close_after_response_writes = true;
                 http_conn_maybe_close_after_response_writes(c);
+            }
+            if (c && !c->destroyed) {
+                http_conn_maybe_close_for_server_close(c);
             }
             mem_free(req);
         });
@@ -1956,6 +1973,11 @@ static Item make_request_object(JsHttpConn* conn, ParsedRequest* req) {
     }
     if (req->body_complete) {
         js_readable_push(msg, ItemNull);
+        // req.setTimeout() after a fully parsed request may still arm the
+        // socket/server timeout, but the ended IncomingMessage must not fire.
+        js_property_set(msg, make_string_item("__server_req_complete__"), (Item){.item = b2it(true)});
+    } else {
+        js_property_set(msg, make_string_item("__server_req_complete__"), (Item){.item = b2it(false)});
     }
 
     if (conn && conn->server) {
@@ -1984,6 +2006,53 @@ static uv_handle_t* http_server_handle(JsHttpServer* srv) {
     return (uv_handle_t*)http_server_stream(srv);
 }
 
+static void http_server_link_conn(JsHttpServer* srv, JsHttpConn* conn) {
+    if (!srv || !conn) return;
+    conn->server_prev = NULL;
+    conn->server_next = srv->connections_head;
+    if (srv->connections_head) srv->connections_head->server_prev = conn;
+    srv->connections_head = conn;
+}
+
+static void http_server_unlink_conn(JsHttpConn* conn) {
+    if (!conn || !conn->server) return;
+    JsHttpServer* srv = conn->server;
+    if (conn->server_prev) {
+        conn->server_prev->server_next = conn->server_next;
+    } else if (srv->connections_head == conn) {
+        srv->connections_head = conn->server_next;
+    }
+    if (conn->server_next) conn->server_next->server_prev = conn->server_prev;
+    conn->server_prev = NULL;
+    conn->server_next = NULL;
+}
+
+static bool http_conn_is_idle(JsHttpConn* conn) {
+    if (!conn || conn->destroyed) return false;
+    if (conn->open_response_count > 0 || conn->pending_response_writes > 0) return false;
+    if (conn->current_request.item != 0 &&
+        get_type_id(conn->current_request) != LMD_TYPE_UNDEFINED) return false;
+    return conn->request_body_remaining <= 0 && !conn->request_body_chunked;
+}
+
+static void http_conn_maybe_close_for_server_close(JsHttpConn* conn) {
+    if (!conn || !conn->server || !conn->server->close_requested) return;
+    if (!http_conn_is_idle(conn)) return;
+    // HTTP/1.1 keep-alive sockets stay referenced after their response; once
+    // server.close() starts, idle accepted sockets must be actively drained.
+    http_conn_close_now(conn);
+}
+
+static void http_server_close_idle_connections(JsHttpServer* srv) {
+    if (!srv || !srv->close_requested) return;
+    JsHttpConn* conn = srv->connections_head;
+    while (conn) {
+        JsHttpConn* next = conn->server_next;
+        http_conn_maybe_close_for_server_close(conn);
+        conn = next;
+    }
+}
+
 static void http_server_maybe_finish_close(JsHttpServer* srv) {
     if (!srv || !srv->close_requested || !srv->handle_closed) return;
     if (srv->connection_count > 0) return;
@@ -2004,6 +2073,7 @@ static void http_server_maybe_finish_close(JsHttpServer* srv) {
 static void http_server_note_conn_closed(JsHttpConn* conn) {
     if (!conn || !conn->server) return;
     JsHttpServer* srv = conn->server;
+    http_server_unlink_conn(conn);
     if (srv->connection_count > 0) srv->connection_count--;
     conn->server = NULL;
     http_server_maybe_finish_close(srv);
@@ -2246,7 +2316,6 @@ static void http_conn_socket_emit(JsHttpConn* conn, const char* event) {
 
 static void http_conn_clear_timeout(JsHttpConn* conn) {
     if (!conn || !conn->timeout_timer_active) return;
-    log_error("HTTP_TRACE clear_timeout conn=%p destroyed=%d", conn, conn->destroyed ? 1 : 0);
     js_clearTimeout(conn->timeout_timer);
     conn->timeout_timer = make_js_undefined();
     conn->timeout_timer_active = false;
@@ -2259,7 +2328,6 @@ static Item js_http_conn_socket_timeout_fire(Item env_item) {
     JsHttpConn* conn = (env && get_type_id(env[0]) == LMD_TYPE_INT) ?
         (JsHttpConn*)(uintptr_t)it2i(env[0]) : NULL;
     if (!conn || conn->destroyed) return make_js_undefined();
-    log_error("HTTP_TRACE fire_timeout conn=%p destroyed=%d", conn, conn->destroyed ? 1 : 0);
     conn->timeout_timer_active = false;
     conn->timeout_timer = make_js_undefined();
     Item socket = http_conn_socket_object(conn);
@@ -2267,15 +2335,29 @@ static Item js_http_conn_socket_timeout_fire(Item env_item) {
         js_call_function(conn->request_timeout_callback, socket, &socket, 1);
         js_microtask_flush();
     }
-    if (js_http_is_callable(conn->response_timeout_callback)) {
-        js_call_function(conn->response_timeout_callback, socket, &socket, 1);
+    Item timeout_response = conn->timeout_response;
+    Item response_timeout_callback = conn->response_timeout_callback;
+    if (timeout_response.item != 0 &&
+        get_type_id(timeout_response) != LMD_TYPE_UNDEFINED) {
+        // A pipelined socket can parse later responses before the head response
+        // times out; fire the callback for the response that armed the timer.
+        conn->timeout_response = make_js_undefined();
+        conn->response_timeout_callback = make_js_undefined();
+    }
+    if (js_http_is_callable(response_timeout_callback)) {
+        js_call_function(response_timeout_callback, socket, &socket, 1);
         js_microtask_flush();
     }
-    if (conn->current_response.item != 0 &&
-        get_type_id(conn->current_response) != LMD_TYPE_UNDEFINED) {
-        Item res_timeout = js_property_get(conn->current_response, make_string_item("__on_timeout__"));
+    Item response_event_target = timeout_response;
+    if (response_event_target.item == 0 ||
+        get_type_id(response_event_target) == LMD_TYPE_UNDEFINED) {
+        response_event_target = conn->current_response;
+    }
+    if (response_event_target.item != 0 &&
+        get_type_id(response_event_target) != LMD_TYPE_UNDEFINED) {
+        Item res_timeout = js_property_get(response_event_target, make_string_item("__on_timeout__"));
         if (js_http_is_callable(res_timeout)) {
-            js_call_function(res_timeout, conn->current_response, &socket, 1);
+            js_call_function(res_timeout, response_event_target, &socket, 1);
             js_microtask_flush();
         }
     }
@@ -2298,7 +2380,6 @@ static void http_conn_start_timeout(JsHttpConn* conn, int64_t delay) {
     if (delay < 0) delay = 0;
     http_conn_clear_timeout(conn);
     if (delay <= 0) return;
-    log_error("HTTP_TRACE start_timeout conn=%p delay=%lld", conn, (long long)delay);
     Item* env = js_alloc_env(1);
     env[0] = (Item){.item = i2it((int64_t)(uintptr_t)conn)};
     // all HTTP timeout APIs share the accepted socket timer; creating separate
@@ -2345,7 +2426,12 @@ static Item js_http_server_req_setTimeout(Item maybe_self, Item msecs_item, Item
     if (get_type_id(handle_item) != LMD_TYPE_INT) return self;
     JsHttpConn* conn = (JsHttpConn*)(uintptr_t)it2i(handle_item);
     if (!conn || conn->destroyed) return self;
-    if (js_http_is_callable(actual_callback)) conn->request_timeout_callback = actual_callback;
+    if (!http_response_bool_prop(self, "__server_req_complete__") &&
+        js_http_is_callable(actual_callback)) {
+        conn->request_timeout_callback = actual_callback;
+    } else {
+        conn->request_timeout_callback = make_js_undefined();
+    }
     int64_t delay = 0;
     if (get_type_id(actual_msecs) == LMD_TYPE_INT) delay = it2i(actual_msecs);
     http_conn_start_timeout(conn, delay);
@@ -2360,7 +2446,19 @@ static Item js_http_res_inst_setTimeout(Item maybe_self, Item msecs_item, Item c
     if (get_type_id(handle_item) != LMD_TYPE_INT) return self;
     JsHttpConn* conn = (JsHttpConn*)(uintptr_t)it2i(handle_item);
     if (!conn || conn->destroyed) return self;
-    if (js_http_is_callable(actual_callback)) conn->response_timeout_callback = actual_callback;
+    if (conn->timeout_response.item != 0 &&
+        get_type_id(conn->timeout_response) != LMD_TYPE_UNDEFINED &&
+        conn->timeout_response.item != self.item) {
+        // pipelined responses share one socket timer; a later response must not
+        // steal the timeout callback from the earlier response still in flight.
+        return self;
+    }
+    conn->timeout_response = self;
+    if (js_http_is_callable(actual_callback)) {
+        conn->response_timeout_callback = actual_callback;
+    } else {
+        conn->response_timeout_callback = make_js_undefined();
+    }
     int64_t delay = 0;
     if (get_type_id(actual_msecs) == LMD_TYPE_INT) delay = it2i(actual_msecs);
     http_conn_start_timeout(conn, delay);
@@ -2448,6 +2546,9 @@ static void http_conn_feed_request_body(JsHttpConn* conn) {
             js_readable_push(conn->current_request, make_string_item(conn->recv_buf, decoded_len));
         }
         js_readable_push(conn->current_request, ItemNull);
+        js_property_set(conn->current_request, make_string_item("__server_req_complete__"),
+                        (Item){.item = b2it(true)});
+        conn->request_timeout_callback = make_js_undefined();
         int remaining = conn->recv_len - consumed;
         if (remaining > 0) memmove(conn->recv_buf, conn->recv_buf + consumed, (size_t)remaining);
         conn->recv_len = remaining;
@@ -2469,6 +2570,9 @@ static void http_conn_feed_request_body(JsHttpConn* conn) {
     }
     if (conn->request_body_remaining == 0) {
         js_readable_push(conn->current_request, ItemNull);
+        js_property_set(conn->current_request, make_string_item("__server_req_complete__"),
+                        (Item){.item = b2it(true)});
+        conn->request_timeout_callback = make_js_undefined();
         conn->current_request = make_js_undefined();
         conn->request_body_chunked = false;
     }
@@ -2510,13 +2614,15 @@ static void http_server_send_default_error(JsHttpConn* conn, int status) {
 }
 
 static bool http_request_wants_keep_alive(ParsedRequest* req, bool has_buffered_request) {
+    (void)has_buffered_request;
     const char* connection = http_request_header(req, "connection");
     if (connection && http_header_has_token(connection, "close")) return false;
     if (strcmp(req->http_version, "HTTP/1.0") == 0) {
         return connection && http_header_has_token(connection, "keep-alive");
     }
-    if (connection && http_header_has_token(connection, "keep-alive")) return true;
-    return has_buffered_request;
+    // HTTP/1.1 persistence is the default; tying it to bytes already buffered
+    // drops pipelined requests that arrive in a later libuv read after /1 ends.
+    return true;
 }
 
 static bool http_request_has_expect_continue(ParsedRequest* req) {
@@ -2670,9 +2776,9 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
             }
             bool expect_continue = http_request_has_expect_continue(&req);
             bool expect_unknown = http_request_has_expect_header(&req) && !expect_continue;
-            if (!req.body_complete && !expect_continue && !expect_unknown) {
-                break;
-            }
+            // Node emits the request after headers and streams incomplete
+            // framed bodies; waiting for the terminal chunk/end prevents
+            // req.setTimeout() from observing clients that never finish.
             if (consumed <= 0 || consumed > conn->recv_len) break;
 
             JsHttpServer* srv = conn->server;
@@ -2855,6 +2961,7 @@ static void http_server_connection_cb(uv_stream_t* server, int status) {
 
     if (uv_accept(server, http_conn_stream(conn)) == 0) {
         srv->connection_count++;
+        http_server_link_conn(srv, conn);
         if (srv->timeout_msecs > 0) http_conn_start_timeout(conn, srv->timeout_msecs);
         uv_read_start(http_conn_stream(conn), http_server_alloc_cb, http_server_read_cb);
     } else {
@@ -3037,6 +3144,7 @@ extern "C" Item js_http_server_close(Item self, Item callback) {
 
     js_property_set(self, make_string_item("listening"), (Item){.item = b2it(false)});
     srv->close_requested = true;
+    http_server_close_idle_connections(srv);
 
     uv_handle_t* handle = http_server_handle(srv);
     if (handle && !uv_is_closing(handle)) {
@@ -4150,6 +4258,84 @@ static void http_client_update_pending_body(JsHttpClientReq* creq, Item req_obj)
     http_client_sync_header_property(creq, req_obj);
 }
 
+static bool http_client_pending_append_chunk(JsHttpClientReq* creq, Item req_obj,
+                                             const char* data, int len, bool final_chunk) {
+    if (!creq || !creq->send_buf || len < 0) return false;
+    char frame_head[32];
+    int frame_head_len = final_chunk ? 0 :
+        snprintf(frame_head, sizeof(frame_head), "%X\r\n", (unsigned int)len);
+    const char* final = "0\r\n\r\n";
+    int final_len = final_chunk ? 5 : 0;
+    int frame_len = final_chunk ? final_len : frame_head_len + len + 2;
+    char* next = (char*)mem_alloc(creq->send_len + frame_len, MEM_CAT_JS_RUNTIME);
+    memcpy(next, creq->send_buf, (size_t)creq->send_len);
+    int pos = creq->send_len;
+    if (final_chunk) {
+        memcpy(next + pos, final, (size_t)final_len);
+        pos += final_len;
+    } else {
+        memcpy(next + pos, frame_head, (size_t)frame_head_len);
+        pos += frame_head_len;
+        if (len > 0) {
+            memcpy(next + pos, data, (size_t)len);
+            pos += len;
+        }
+        memcpy(next + pos, "\r\n", 2);
+        pos += 2;
+    }
+    mem_free(creq->send_buf);
+    creq->send_buf = next;
+    creq->send_len = pos;
+    http_client_sync_header_property(creq, req_obj);
+    return true;
+}
+
+static bool http_client_convert_pending_body_to_chunked(JsHttpClientReq* creq, Item req_obj,
+                                                        const char* data, int len) {
+    if (!creq || !creq->send_buf || creq->sent || creq->content_length_explicit) return false;
+    int line_start = -1;
+    int line_end = -1;
+    const char* p = creq->send_buf;
+    const char* end = creq->send_buf + creq->send_head_len;
+    while (p < end) {
+        const char* line = p;
+        const char* nl = (const char*)memchr(p, '\n', (size_t)(end - p));
+        if (!nl) break;
+        const char* colon = (const char*)memchr(line, ':', (size_t)(nl - line));
+        if (colon && http_token_equals_ci(line, (int)(colon - line), "content-length")) {
+            line_start = (int)(line - creq->send_buf);
+            line_end = (int)(nl - creq->send_buf) + 1;
+            break;
+        }
+        p = nl + 1;
+    }
+    const char* te = "Transfer-Encoding: chunked\r\n";
+    int te_len = (int)strlen(te);
+    int remove_len = line_start >= 0 ? line_end - line_start : 0;
+    int insert_at = line_start >= 0 ? line_start : creq->send_head_len;
+    if (line_start < 0 && insert_at >= 2 &&
+        creq->send_buf[insert_at - 2] == '\r' &&
+        creq->send_buf[insert_at - 1] == '\n') {
+        insert_at -= 2;
+    }
+    int new_head_len = creq->send_head_len - remove_len + te_len;
+    char* next = (char*)mem_alloc(new_head_len, MEM_CAT_JS_RUNTIME);
+    memcpy(next, creq->send_buf, (size_t)insert_at);
+    memcpy(next + insert_at, te, (size_t)te_len);
+    int tail_start = line_start >= 0 ? line_end : insert_at;
+    int tail_len = creq->send_head_len - tail_start;
+    if (tail_len > 0) memcpy(next + insert_at + te_len, creq->send_buf + tail_start, (size_t)tail_len);
+    mem_free(creq->send_buf);
+    creq->send_buf = next;
+    creq->send_head_len = new_head_len;
+    creq->send_len = new_head_len;
+    creq->has_content_length = false;
+    creq->request_chunked_body = true;
+    // Writes before end() must not synthesize a complete Content-Length body;
+    // chunked framing leaves the request open until ClientRequest.end().
+    return http_client_pending_append_chunk(creq, req_obj, data, len, false);
+}
+
 static void http_client_connect_cb(uv_connect_t* req, int status) {
     JsHttpClientReq* creq = (JsHttpClientReq*)req->data;
     mem_free(req);
@@ -4225,7 +4411,15 @@ static Item http_client_write_ex(Item self, Item data_item, Item encoding_item, 
                         http_call_write_callback(callback_item);
                     }
                 } else {
-                    http_client_update_pending_body(creq, self);
+                    if (!creq->content_length_explicit) {
+                        if (creq->request_chunked_body) {
+                            http_client_pending_append_chunk(creq, self, chunk_data, chunk_len, false);
+                        } else {
+                            http_client_convert_pending_body_to_chunked(creq, self, chunk_data, chunk_len);
+                        }
+                    } else if (creq->has_content_length) {
+                        http_client_update_pending_body(creq, self);
+                    }
                     http_call_write_callback(callback_item);
                 }
             } else {
@@ -4271,11 +4465,23 @@ static Item http_client_end_ex(Item self, Item data_item, Item encoding_item, It
             http_client_schedule_finish(self);
             return self;
         }
+        if (creq && !creq->sent && creq->request_chunked_body && creq->send_buf) {
+            int new_len = creq->send_len + 5;
+            char* new_buf = (char*)mem_alloc(new_len, MEM_CAT_JS_RUNTIME);
+            memcpy(new_buf, creq->send_buf, (size_t)creq->send_len);
+            memcpy(new_buf + creq->send_len, "0\r\n\r\n", 5);
+            mem_free(creq->send_buf);
+            creq->send_buf = new_buf;
+            creq->send_len = new_len;
+        }
         if (creq && !creq->sent && creq->send_buf) {
             Item body = js_property_get(self, make_string_item("__req_body__"));
             if (get_type_id(body) == LMD_TYPE_STRING) {
                 String* bs = it2s(body);
-                if (bs->len > 0 && creq->has_content_length) {
+                if (bs->len > 0 && creq->request_chunked_body) {
+                    // pending writes are already chunk-framed; rewriting them
+                    // as Content-Length here would make an unfinished request complete.
+                } else if (bs->len > 0 && creq->has_content_length) {
                     http_client_update_pending_body(creq, self);
                 } else if (bs->len > 0 && creq->send_len >= 2) {
                     char len_header[64];
@@ -4840,8 +5046,8 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
     bool has_headers_array = get_type_id(custom_headers) == LMD_TYPE_ARRAY;
     bool has_connection_header = http_client_headers_have_name(custom_headers, "connection", 10);
     bool has_expect_header = http_client_headers_have_name(custom_headers, "expect", 6);
-    bool use_chunked_request_body = has_expect_header && !explicit_content_length &&
-                                    !http_client_headers_have_name(custom_headers, "transfer-encoding", 17);
+    bool has_transfer_encoding = http_client_headers_have_name(custom_headers, "transfer-encoding", 17);
+    bool use_chunked_request_body = !explicit_content_length && (has_expect_header || has_transfer_encoding);
 
     if (set_default_headers && set_host && !has_headers_array) {
         if (port == 80) {
@@ -4874,13 +5080,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
         rlen = http_client_append_basic_auth(req_str, rlen, (int)sizeof(req_str), auth_item);
     }
 
-    if (set_default_headers &&
-        (strcmp(method_buf, "POST") == 0 || strcmp(method_buf, "PUT") == 0) &&
-        !has_content_length && !has_expect_header) {
-        rlen += snprintf(req_str + rlen, sizeof(req_str) - rlen, "Content-Length: 0\r\n");
-        has_content_length = true;
-    }
-    if (use_chunked_request_body) {
+    if (has_expect_header && !explicit_content_length && !has_transfer_encoding) {
         rlen += snprintf(req_str + rlen, sizeof(req_str) - rlen, "Transfer-Encoding: chunked\r\n");
     }
 
