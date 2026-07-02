@@ -33,6 +33,11 @@ RADIANT_JS_TOTAL_SCRIPT_BYTES=128 ./lambda.exe view test/browse/repro/script-tot
 ./lambda.exe view test/browse/repro/element-scroll-method.html --headless
 ./lambda.exe view test/browse/repro/event-listener-onerror-reentry.html --headless
 ./lambda.exe view test/browse/repro/optional-font-retry-storm.html --headless
+./lambda.exe view test/browse/repro/js-regex-wrapper-cache-leak.html --headless
+./lambda.exe view test/browse/repro/many-remote-font-faces-fallback.html --headless
+./lambda.exe view test/browse/repro/onetrust-branch-closure-readback.html --headless
+./lambda.exe view test/browse/repro/spring-onetrust-external-script.html --headless
+./lambda.exe view test/browse/repro/d3-observable-made-by-custom-element.html --headless
 ```
 
 For `http-header-before-head-relative-resource.html`, serve the repository root
@@ -140,3 +145,26 @@ and swallow the original listener failure without crashing the page load.
 `optional-font-retry-storm.html` captures pages with many optional web fonts that
 fail to load. Font fallback should happen promptly; each failed optional font
 must not consume repeated network retry rounds before layout can continue.
+
+`js-regex-wrapper-cache-leak.html` captures RegExp wrapper ownership during
+browser-script batch cleanup. Cached compiled RegExp entries must release their
+native wrapper state before shutdown so MEM_CAT_JS allocations do not leak.
+
+`many-remote-font-faces-fallback.html` captures large `@font-face` source lists
+with remote WOFF/WOFF2 files. CSS parsing should record the font family, but
+layout startup must not synchronously download every source before browser font
+fallback can choose a local substitute.
+
+`onetrust-branch-closure-readback.html` captures closure environment tracking
+across conditional/switch branches. A closure created inside one branch must not
+leave its environment register as the later readback target after control-flow
+merge.
+
+`spring-onetrust-external-script.html` uses the local `otSDKStub.js` fixture,
+trimmed from the Spring Framework docs OneTrust script. It covers the cached
+function-declaration variant of the same branch-local closure readback bug.
+
+`d3-observable-made-by-custom-element.html` uses the local
+`observable-made-by.js` fixture from D3's docs. The bundle previously reached an
+identifier-shaped AST node without a parsed name and crashed during LambdaJS MIR
+lowering; Radiant should now log the nameless-node fallback and keep loading.

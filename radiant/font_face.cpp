@@ -3,7 +3,6 @@
 #include "../lib/font/font.h"  // unified font module — font_face_register, font_family_exists
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_font_face.hpp"
-#include "../lambda/input/input.hpp"  // download_to_cache
 extern "C" {
 #include "../lib/url.h"
 #include "../lib/memtrack.h"
@@ -14,25 +13,6 @@ extern "C" {
 #include <strings.h>  // for strcasecmp
 #include <stdlib.h>
 #include "../lib/file.h"
-
-static const char* FONT_CACHE_DIR = "./temp/font_cache";
-
-// Download a remote font URL to cache and return the local cache path.
-// Returns a mem_strdup'd path on success, nullptr on failure.
-static char* download_font_url(const char* url) {
-    char* cache_path = nullptr;
-    char* content = download_to_cache(url, FONT_CACHE_DIR, &cache_path);
-    if (content) {
-        mem_free(content);  // we only need the cache file path, not the in-memory content
-    }
-    if (cache_path) {
-        // convert stdlib path to mem-tracked string
-        char* result = mem_strdup(cache_path, MEM_CAT_LAYOUT);
-        mem_free(cache_path);
-        return result;
-    }
-    return nullptr;
-}
 
 static bool is_http_url(const char* url) {
     return url && (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
@@ -198,67 +178,25 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
         CssFontFaceDescriptor* css_desc = css_descs[i];
         if (!css_desc) continue;
 
-        // Download remote font URLs to local cache
+        // Remote web fonts are discovered by the network resource manager and
+        // installed when their downloads complete; synchronously downloading
+        // every @font-face source here blocks large docs before layout starts.
         if (css_desc->src_urls) {
-            bool attempted_fallback_source = false;
             for (int j = 0; j < css_desc->src_count; j++) {
                 if (is_http_url(css_desc->src_urls[j].url)) {
                     if (!is_supported_web_font_source(css_desc->src_urls[j].url, css_desc->src_urls[j].format)) {
                         clog_debug(font_log, "Skipping unsupported remote font source: %s (format: %s)",
                                    css_desc->src_urls[j].url,
                                    css_desc->src_urls[j].format ? css_desc->src_urls[j].format : "?");
-                        mem_free(css_desc->src_urls[j].url);
-                        css_desc->src_urls[j].url = nullptr;
-                        continue;
                     }
-                    if (attempted_fallback_source) {
-                        // @font-face src is an ordered fallback list; fetching
-                        // every remote source serially turns legacy lists into
-                        // page-load timeouts before CSS font fallback can work.
-                        mem_free(css_desc->src_urls[j].url);
-                        css_desc->src_urls[j].url = nullptr;
-                        continue;
-                    }
-                    attempted_fallback_source = true;
-                    char* local_path = download_font_url(css_desc->src_urls[j].url);
-                    if (local_path) {
-                        clog_info(font_log, "Downloaded remote font '%s' -> %s",
-                                  css_desc->src_urls[j].url, local_path);
-                        mem_free(css_desc->src_urls[j].url);
-                        css_desc->src_urls[j].url = local_path;
-                    } else {
-                        clog_warn(font_log, "Failed to download remote font: %s",
-                                  css_desc->src_urls[j].url);
-                        mem_free(css_desc->src_urls[j].url);
-                        css_desc->src_urls[j].url = nullptr;
-                    }
+                    mem_free(css_desc->src_urls[j].url);
+                    css_desc->src_urls[j].url = nullptr;
                 }
             }
         }
         if (is_http_url(css_desc->src_url)) {
-            if (css_desc->src_urls && css_desc->src_count > 0) {
-                // the legacy src_url mirror points at the first list entry;
-                // once src_urls was processed, downloading it again repeats
-                // unsupported formats such as embedded-opentype .eot.
-                mem_free(css_desc->src_url);
-                css_desc->src_url = nullptr;
-            } else if (!is_supported_web_font_source(css_desc->src_url, nullptr)) {
-                mem_free(css_desc->src_url);
-                css_desc->src_url = nullptr;
-            } else {
-                char* local_path = download_font_url(css_desc->src_url);
-                if (local_path) {
-                    clog_info(font_log, "Downloaded remote font '%s' -> %s",
-                              css_desc->src_url, local_path);
-                    mem_free(css_desc->src_url);
-                    css_desc->src_url = local_path;
-                } else {
-                    clog_warn(font_log, "Failed to download remote font: %s",
-                              css_desc->src_url);
-                    mem_free(css_desc->src_url);
-                    css_desc->src_url = nullptr;
-                }
-            }
+            mem_free(css_desc->src_url);
+            css_desc->src_url = nullptr;
         }
 
         bool has_loadable_source = css_desc->src_url || css_desc->src_local;

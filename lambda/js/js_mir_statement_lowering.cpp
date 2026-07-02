@@ -1323,6 +1323,9 @@ static bool jm_branch_dead_safe(JsAstNode* n) {
 }
 
 void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
+    JsMirLastClosureSnapshot saved_last_closure;
+    jm_save_last_closure_snapshot(mt, &saved_last_closure);
+
     // Tune3 §3: constant-fold the condition and drop the dead branch entirely.
     if (jm_const_fold_enabled()) {
         JsFoldVal fv;
@@ -1333,6 +1336,9 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
             if (jm_branch_dead_safe(dead)) {
                 jm_eval_cptn_reset(mt);
                 jm_transpile_if_branch(mt, live);
+                // Constant-folded branches are still path-local for closure
+                // readback, so do not let their env register escape.
+                jm_restore_last_closure_snapshot(mt, &saved_last_closure);
                 return;
             }
         }
@@ -1413,6 +1419,10 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
         if (alternate_narrowed) jm_pop_scope(mt);
     }
     jm_emit_label(mt, l_end);
+
+    // Branch-local closure env registers do not dominate the merge point; keep
+    // later callback readback tied to the pre-if env instead of a path-local one.
+    jm_restore_last_closure_snapshot(mt, &saved_last_closure);
 }
 
 // Reload all in-scope-env variables from the shared scope env into their local registers.
@@ -3665,6 +3675,9 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
 
 // switch statement
 void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
+    JsMirLastClosureSnapshot saved_last_closure;
+    jm_save_last_closure_snapshot(mt, &saved_last_closure);
+
     MIR_reg_t discriminant = jm_transpile_box_item(mt, sw->discriminant);
     MIR_label_t l_end = jm_new_label(mt);
 
@@ -3746,6 +3759,9 @@ void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
     }
 
     jm_emit_label(mt, l_end);
+    // Case-local closure env registers are path-specific; after switch merge,
+    // later callback readback must not use an env allocated in only one case.
+    jm_restore_last_closure_snapshot(mt, &saved_last_closure);
     if (mt->loop_depth > 0) mt->loop_depth--;
     mt->scope_env_reg = saved_scope_env_reg;
     mt->scope_env_slot_count = saved_scope_env_slot_count;

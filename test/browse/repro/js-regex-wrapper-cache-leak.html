@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>regex wrapper cache leak repro</title>
+</head>
+<body>
+  <p>RegExp wrapper-backed literals should not leak compiled native state.</p>
+  <script>
+    const checks = [
+      /(\w+)\s+\1/.test("alpha alpha"),
+      /(?=Micronaut)(Micro)\w+/.test("Micronaut")
+    ];
+    document.body.setAttribute("data-regex-ok", String(checks.every(Boolean)));
+  </script>
+</body>
+</html>

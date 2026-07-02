@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>many remote font faces fallback repro</title>
+  <style>
+    @font-face { font-family: ManyRemoteA; src: url("http://127.0.0.1:9/a.woff2") format("woff2"); }
+    @font-face { font-family: ManyRemoteB; src: url("http://127.0.0.1:9/b.woff2") format("woff2"); }
+    @font-face { font-family: ManyRemoteC; src: url("http://127.0.0.1:9/c.woff2") format("woff2"); }
+    @font-face { font-family: ManyRemoteD; src: url("http://127.0.0.1:9/d.woff2") format("woff2"); }
+    @font-face { font-family: ManyRemoteE; src: url("http://127.0.0.1:9/e.woff2") format("woff2"); }
+    @font-face { font-family: ManyRemoteF; src: url("http://127.0.0.1:9/f.woff2") format("woff2"); }
+    @font-face { font-family: ManyRemoteG; src: url("http://127.0.0.1:9/g.woff2") format("woff2"); }
+    @font-face { font-family: ManyRemoteH; src: url("http://127.0.0.1:9/h.woff2") format("woff2"); }
+    body { font-family: ManyRemoteA, ManyRemoteB, ManyRemoteC, serif; }
+  </style>
+</head>
+<body>
+  <p>Remote web fonts should not be synchronously downloaded during font-face registration.</p>
+</body>
+</html>

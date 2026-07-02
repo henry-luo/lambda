@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <script src="otSDKStub.js" data-domain-script="018ee325-b3a7-7753-937b-b8b3e643b1a7"></script>
+  <script>function OptanonWrapper() {}</script>
+  <script>
+function setGTM(w, d, s, l, i) {
+  w[l] = w[l] || [];
+  w[l].push({ "gtm.start": new Date().getTime(), event: "gtm.js" });
+  var f = d.getElementsByTagName(s)[0], j = d.createElement(s), dl = l != "dataLayer" ? "&l=" + l : "";
+  j.async = true;
+  j.src = "https://www.googletagmanager.com/gtm.js?id=" + i + dl;
+  f.parentNode.insertBefore(j, f);
+}
+if (document.cookie.indexOf("OptanonConsent") > -1 && document.cookie.indexOf("groups=") > -1) {
+  setGTM(window, document, "script", "dataLayer", "GTM-W8CQ8TL");
+} else {
+  waitForOnetrustActiveGroups();
+}
+var timer;
+function waitForOnetrustActiveGroups() {
+  if (document.cookie.indexOf("OptanonConsent") > -1 && document.cookie.indexOf("groups=") > -1) {
+    clearTimeout(timer);
+    setGTM(window, document, "script", "dataLayer", "GTM-W8CQ8TL");
+  } else {
+    timer = setTimeout(waitForOnetrustActiveGroups, 250);
+  }
+}
+  </script>
+  <meta charset="utf-8">
+  <title>Spring OneTrust repro</title>
+  <script>
+!function (theme, navWidth) {
+  if (theme === "dark") document.documentElement.classList.add("dark-theme")
+  if (navWidth) document.documentElement.style.setProperty("--nav-width", `${navWidth}px`)
+}(localStorage && localStorage.getItem("theme") || (matchMedia("(prefers-color-scheme: dark)")?.matches && "dark"),
+  localStorage && localStorage.getItem("nav-width"))
+  </script>
+</head>
+<body class="article">
+  <label class="theme-toggler">
+    <input type="checkbox" id="switch-theme-checkbox" name="switch-theme-checkbox">
+    <span>light</span>
+  </label>
+  <script>
+!function (theme) {
+  if (theme === "dark") {
+    document.getElementById("switch-theme-checkbox").parentElement.classList.add("active")
+  }
+}(localStorage && localStorage.getItem("theme") || (matchMedia("(prefers-color-scheme: dark)")?.matches && "dark"))
+  </script>
+  <aside class="nav"></aside>
+  <script>
+!function (sidebar) {
+  if (sidebar) {
+    document.body.classList.add("nav-sm")
+  }
+}(localStorage && localStorage.getItem("sidebar") === "close")
+  </script>
+  <main class="article">
+    <h1>Spring OneTrust external-script repro</h1>
+  </main>
+</body>
+</html>
