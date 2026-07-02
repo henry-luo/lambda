@@ -1612,7 +1612,14 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                     css_file_size = content_size;
                 }
             }
-            if (css_content) {
+            bool css_content_empty = css_content && css_file_size == 0 && css_content[0] == '\0';
+            if (css_content_empty) {
+                // Empty linked stylesheets are valid CSS; skip them before
+                // parser setup so zero-byte resources do not look failed.
+                log_debug("[CSS] Skipping empty linked stylesheet: %s", css_path);
+                mem_free(css_content);
+            } else if (css_content) {
+
                 // Use binary size when available (handles null bytes); fallback to strlen
                 size_t css_len = css_file_size > 0 ? css_file_size : strlen(css_content);
 
@@ -2379,10 +2386,16 @@ static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorM
     // Handle media rules by evaluating the condition
     if (rule->type == CSS_RULE_MEDIA) {
         const char* media_condition = rule->data.conditional_rule.condition;
+#ifdef RADIANT_TRACE_MEDIA_QUERY
+        // Media query evaluation happens for every candidate rule/element pair;
+        // keep per-element trace opt-in so large tables do not stall on logging.
         log_debug("[MediaQuery] Evaluating condition: '%s' for element <%s>",
                   media_condition ? media_condition : "(null)", elem->tag_name ? elem->tag_name : "?");
+#endif
         bool matches = css_evaluate_media_query(engine, media_condition);
+#ifdef RADIANT_TRACE_MEDIA_QUERY
         log_debug("[MediaQuery] Result: %s", matches ? "MATCHES" : "does not match");
+#endif
         if (matches) {
             for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
                 CssRule* nested_rule = rule->data.conditional_rule.rules[i];

@@ -4,16 +4,16 @@
   }, caret: {
     target: "#name",
     offset: 5
-  }, render: {
+  }, hover: "#name", render: {
     dirty: true,
     repaint: true,
     rects: 1
   }, editing: {
     active_surface: true
   }
-  <html index: 1, flags: ['focus-within']
-    <body index: 2, flags: ['focus-within']
-      <input index: 1, id: "name", flags: ['focus', 'focus-within', 'valid', 'optional'], form: {
+  <html index: 1, flags: ['hover', 'focus-within']
+    <body index: 2, flags: ['hover', 'focus-within']
+      <input index: 1, id: "name", flags: ['hover', 'focus', 'focus-within', 'valid', 'optional'], form: {
           value: "abcdY",
           sel: [5, 5]
         }>>>>

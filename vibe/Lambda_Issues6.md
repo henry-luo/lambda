@@ -169,55 +169,73 @@ fn make_stacked_delim(level) {     // was (level, h, d)
 }
 ```
 
-**Could not reproduce in isolation.** Several minimal scripts with the same
-*shape* (float params first-used as `h + d`, forwarded into a recursive walk
-with an int index, called with float literals) all ran correctly and returned
-the right value. The conflict only manifested in the full
-`render_vertical_mult` → `make_stacked_delim` → `stk_walk` chain, possibly in
-interaction with issue #33 which was simultaneously corrupting the entry list
-with `error` values at the time. So the precise trigger is **uncertain**; what
-is certain is the exact error message above and that moving the float constants
-inside the function eliminated it.
+**Status: ✅ Fixed (2026-07-02).** Reproduced with a compact cross-function
+script before the fix:
 
-**Status: UNFIXED in the transpiler (workaround only).** A robust authoring
-rule: prefer reading known-typed module constants over passing scalar floats
-into recursive helpers when the first use of the param is type-ambiguous.
+```lambda
+fn stack_helper(level: int, h: float, d: float, acc: float) float {
+    if (level <= 0) {
+        acc + h + d
+    } else {
+        stack_helper(level - 1, h, d, acc + h + d + level)
+    }
+}
+
+fn make_stacked_delim(level: int, h: float, d: float) float {
+    let rht = h + d
+    stack_helper(level, h, d, rht)
+}
+
+make_stacked_delim(3, 0.606, 0.0 - 0.00599)
+```
+
+Before the fix, this failed during MIR verification with:
+
+```
+func _stack_helper_0: in instruction 'mov':
+  unexpected operand mode for operand #1. Got 'double', expected 'int'
+```
+
+Root cause: the tail-recursive rewrite creates unreachable dummy values for the
+rewritten branch, but those dummies still participate in enclosing `if` result
+typing and MIR validation. The TCO path used an integer-shaped dummy and the
+terminal-branch handling in `transpile_if` wrote `MOV 0` into a result register
+that could be `double`. MIR correctly rejected that operand-mode mismatch.
+
+Fix: TCO now uses the resolved MIR local parameter type when converting
+recursive arguments, returns a type-shaped dummy for rewritten tail calls, and
+`transpile_if` writes terminal-branch dummies with `DMOV 0.0` when the `if`
+result register is `double`.
+
+Regression coverage: `test/lambda/transpile_float_tco_cross_call.ls`.
 
 ---
 
 ## 35. Parse errors are non-fatal; broken functions load and run
 
-**Severity: HIGH** (masks #31–#33) — When a `.ls` module has a parse error
-(E100), `./lambda.exe` prints the diagnostic to stderr **but continues**: it
-JIT-compiles and runs the script, and a downstream `import` of the broken
-module still succeeds enough that a probe expression evaluates. There is no
-non-zero exit specifically for "this module failed to parse," and the broken
-function silently degrades (returns wrong data, or hangs).
+**Severity: HIGH** (masks #31–#33) — Previously, when an imported `.ls` module
+had a parse error, `./lambda.exe` printed the imported module diagnostic but
+still compiled and ran the importing script. A downstream `import` of the broken
+module could therefore succeed enough for a probe expression to evaluate.
 
-Observed: a probe that does `import math: lambda.package.math.math` and prints
-`"PKG_OK"` printed `"PKG_OK"` even while `delimiters.ls` had the issue-#31 parse
-error — the broken `stk_walk` simply wasn't exercised by the probe. Only a
-script that actually *rendered a vertical bar* surfaced the failure (as a hang,
-issue #33 / an MIR error, issue #34).
+Root cause: `transpile_script()` already stopped on Tree-sitter parse errors, but
+`build_module_import()` treated the failed Lambda module like an absent `.ls`
+file: it attempted cross-language fallback and did not record a compile error on
+the importer. The importer could then continue to MIR compilation.
 
-**Mitigation (workflow, not a code fix):**
-1. After any package edit, render a script that exercises the changed code path
-   (not just an `import`), and `grep` its stderr for `error[E`, `operand mode`,
-   `Unexpected syntax`.
-2. Treat `1 error(s) found.` as fatal regardless of exit code.
+Fix: if an import resolves to an existing `.ls` file and `load_script()` returns
+no usable AST, `build_module_import()` now records `ERR_IMPORT_ERROR` on the
+import statement and skips `.js`/`.py` fallback. Missing `.ls` files still retain
+the existing cross-language fallback behavior.
 
-**Status: UNFIXED (diagnostic/robustness gap).**
+Regression: `test/lambda/negative/import_parse_error_driver.ls` imports a module
+with an E102 parse error and contains a split `"DRIVER_" ++ "RAN"` marker. The
+focused gtest verifies the process exits non-zero, reports `error[E217]`, and
+does not print `"DRIVER_RAN"`.
 
----
+**Status: ✅ FIXED.**
 
-## Runtime / environment observations (not language bugs, but worth recording)
-
-- **`R3` from a prior note no longer reproduces.** `fn g(a,b){ a / 2.0 + b }`
-  now returns the correct value (`g(10.0,1.0)` → `6`). The earlier
-  "`a/2.0+b` mis-parses" note appears resolved (or was context-specific);
-  no current repro.
-
-## 36. `parse()` leaks its `parse://inline` URL at shutdown — FIXED
+## 36. `parse()` leaks its `parse://inline` URL at shutdown
 
 **Severity: MEDIUM** (memtrack leak) — Every `parse(str, {...})` call leaked one
 `Url` (96 B) plus its ~5 component `String`s, reported at shutdown:
@@ -263,9 +281,9 @@ Result: `parse()` / math render / `convert` (json, xml, yaml, md, toml, csv)
 all run **leak-free, no ASan errors, exit 0**. Verified across 5+ runs and the
 full math gate (823/921, unchanged).
 
-**Status: FIXED.**
+**Status: ✅ FIXED.**
 
-## 37. `./lambda.exe layout` URL leaks + a masked double-free — FIXED
+## 37. `./lambda.exe layout` URL leaks + a masked double-free
 
 **Severity: MEDIUM** (leak) / **HIGH** (the masked UAF) — Two URL-ownership bugs
 in `radiant/cmd_layout.cpp`, exposed while fixing #36.
@@ -294,7 +312,7 @@ covers the case where doc creation failed after the input parsed. Now html,
 txt, svg, xml, wiki, ls layout are all leak-free and exit 0; markdown/latex no
 longer crash.
 
-**Status: FIXED (37a + 37b).**
+**Status: ✅ FIXED (37a + 37b).**
 
 - **Residual: markdown/latex layout leaks ~48 `FontFaceDescriptor`s — SEPARATE,
   pre-existing, UNFIXED.** Once 37b stopped the crash, markdown/latex layout
@@ -329,19 +347,19 @@ longer crash.
 
 ## Summary table
 
-| # | Layer | Issue | Repro | Fix status |
-|---|-------|-------|-------|------------|
-| 31 | parser | bare map as `if` branch → E100 | minimal ✅ | workaround (block form) |
-| 32 | parser | `(let x={...}, x)` branch form → E100 | minimal ✅ | workaround (block form) |
-| 33 | parser | multi-line `++` → `error` elements, no diagnostic | minimal ✅ | workaround (one line) |
-| 34 | MIR | float param inferred `int` → JIT verify error | real only ⚠️ | workaround (constants inside) |
-| 35 | runtime | parse errors non-fatal, broken module runs | observed ✅ | workflow mitigation |
-| 36 | runtime | `parse()` leaks `parse://inline` URL (InputManager never torn down) | minimal ✅ | **FIXED** (destroy_global + 2 double-frees) |
-| 37a | runtime | `layout` leaks `cwd` URL (never freed) | observed ✅ | **FIXED** (url_destroy(cwd)) |
-| 37b | runtime | `layout x.md`/`.tex`/… UAF — `input_url` double-free (was masked) | observed ✅ | **FIXED** (InputManager::detach_url) |
-| — | layout | markdown/latex leak ~48 FontFaceDescriptors (font subsystem) | observed ✅ | unfixed, pre-existing, separate |
-| — | runtime | `expected a map, got array` on load | observed ✅ | unfixed, low pri |
-| — | env | ~9 s cold JIT start (test-timeout trap) | observed ✅ | n/a |
+| #   | Layer   | Issue                                                               | Repro        | Fix status                                  |
+| --- | ------- | ------------------------------------------------------------------- | ------------ | ------------------------------------------- |
+| 31  | parser  | bare map as `if` branch → E100                                      | minimal ✅    | workaround (block form)                     |
+| 32  | parser  | `(let x={...}, x)` branch form → E100                               | minimal ✅    | workaround (block form)                     |
+| 33  | parser  | multi-line `++` → `error` elements, no diagnostic                   | minimal ✅    | workaround (one line)                       |
+| 34  | MIR     | float param inferred `int` → JIT verify error                       | real only ⚠️ | workaround (constants inside)               |
+| 35  | runtime | parse errors non-fatal, broken module runs                          | observed ✅   | workflow mitigation                         |
+| 36  | runtime | `parse()` leaks `parse://inline` URL (InputManager never torn down) | minimal ✅    | **FIXED** (destroy_global + 2 double-frees) |
+| 37a | runtime | `layout` leaks `cwd` URL (never freed)                              | observed ✅   | **FIXED** (url_destroy(cwd))                |
+| 37b | runtime | `layout x.md`/`.tex`/… UAF — `input_url` double-free (was masked)   | observed ✅   | **FIXED** (InputManager::detach_url)        |
+| —   | layout  | markdown/latex leak ~48 FontFaceDescriptors (font subsystem)        | observed ✅   | unfixed, pre-existing, separate             |
+| —   | runtime | `expected a map, got array` on load                                 | observed ✅   | unfixed, low pri                            |
+| —   | env     | ~9 s cold JIT start (test-timeout trap)                             | observed ✅   | n/a                                         |
 
 **Note on exit code:** contrary to this doc's first draft, no memtrack leak sets
 exit code 1 — a successful run returns 0 regardless. Exit code *is* a reliable

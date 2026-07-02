@@ -2988,6 +2988,7 @@
                             "radiant/dom_range.cpp",
                             "radiant/dom_range_resolver.cpp",
                             "radiant/editing_host.cpp",
+                            "test/test_dom_range_stubs.cpp",
                             "lib/test_utils.c",
                             "lib/test_utils_pool.c"
                         ],
@@ -3016,6 +3017,7 @@
                             "radiant/dom_range_resolver.cpp",
                             "radiant/source_pos_bridge.cpp",
                             "radiant/editing_host.cpp",
+                            "test/test_dom_range_stubs.cpp",
                             "lib/test_utils.c",
                             "lib/test_utils_pool.c"
                         ],

@@ -3933,6 +3933,37 @@ static void dom_js_mutation_log_records(DomDocument* doc) {
 #endif
 }
 
+static void dom_js_record_reconcile(DomDocument* doc,
+                                    DomReconcileMode mode,
+                                    const char* reason,
+                                    int mutations,
+                                    int records,
+                                    int overflow) {
+    if (!doc) return;
+    doc->last_dom_reconcile_mode = mode;
+    doc->last_dom_reconcile_reason = reason ? reason : "none";
+    doc->last_dom_reconcile_mutations = mutations;
+    doc->last_dom_reconcile_records = records;
+    doc->last_dom_reconcile_record_overflow = overflow;
+
+    DocState* state = (DocState*)doc->state;
+    if (!state || !event_state_log_enabled(state->active_event_log)) return;
+
+    char buf[1024];
+    JsonWriter w;
+    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
+                                 "dom.reconcile", state->active_cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "mode", dom_reconcile_mode_name(mode));
+        jw_kv_str(&w, "reason", doc->last_dom_reconcile_reason);
+        jw_kv_int(&w, "mutations", mutations);
+        jw_kv_int(&w, "records", records);
+        jw_kv_int(&w, "record_overflow", overflow);
+    jw_obj_end(&w);
+    event_state_log_finish_record(state->active_event_log, &w);
+}
+
 static void dom_js_clear_layout_dirty_recursive(DomNode* node) {
     if (!node) return;
     node->layout_dirty = false;
@@ -4194,14 +4225,17 @@ static bool post_html_handler_incremental_rebuild(
         EventContext* evcon, DomDocument* doc,
         std::chrono::high_resolution_clock::time_point t_start,
         std::chrono::high_resolution_clock::time_point t0,
-        int mutations) {
+        int mutations,
+        const char** fallback_reason_out) {
     using namespace std::chrono;
 
     const char* reason = nullptr;
     if (!dom_js_mutation_can_incremental(doc, &reason)) {
         log_info("html handler incremental: fallback=%s", reason ? reason : "unknown");
+        if (fallback_reason_out) *fallback_reason_out = reason ? reason : "unknown";
         return false;
     }
+    if (fallback_reason_out) *fallback_reason_out = "eligible";
 
     Pool* pool = doc->pool;
     SelectorMatcher* matcher = selector_matcher_create(pool);
@@ -4293,6 +4327,11 @@ static bool post_html_handler_incremental_rebuild(
              selective_dirty ? "dirty-rects" : "full",
              dirty_rect_count,
              repaint_reason ? repaint_reason : "none");
+    // Tests read this structured result; timing logs alone cannot distinguish
+    // incremental mutation handling from a broad fallback path.
+    dom_js_record_reconcile(doc, DOM_RECONCILE_INCREMENTAL, "eligible",
+                            mutations, doc->js_mutation_record_count,
+                            doc->js_mutation_record_overflow);
     return true;
 }
 
@@ -4315,7 +4354,9 @@ static void post_html_handler_rebuild(EventContext* evcon,
     auto t0 = high_resolution_clock::now();
     dom_js_mutation_log_records(doc);
 
-    if (post_html_handler_incremental_rebuild(evcon, doc, t_start, t0, mutations)) {
+    const char* fallback_reason = "none";
+    if (post_html_handler_incremental_rebuild(evcon, doc, t_start, t0,
+                                              mutations, &fallback_reason)) {
         dom_js_mutation_reset_records(doc);
         return;
     }
@@ -4345,49 +4386,12 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     DocState* state = (DocState*)doc->state;
 
-    // A full rebuild frees the entire view tree, so the focused View* must be
-    // cleared (below) to avoid a dangling pointer. For a script-driven rich
-    // editor (Stage 4B) that would silently blur the contenteditable host and
-    // drop all subsequent input. The DOM tree survives the view-tree teardown,
-    // so capture the focused editing host element here and re-focus it after
-    // relayout — mirroring rebuild_lambda_doc and restore_form_text_focus_after_input.
-    DomElement* refocus_host = nullptr;
-
-    // Clear interaction targets before freeing views so transition helpers can
-    // still update pseudo-state mirrors on the old tree.
+    // The fallback drops the layout epoch, not the DOM identity epoch. Keep
+    // StateStore owners for connected DOM nodes; after relayout we prune only
+    // state whose node was actually removed by the mutation.
     if (state) {
-        bool preserve_rich_editing =
-            state->editing.has_active_surface &&
-            editing_surface_is_rich(&state->editing.active_surface);
-        bool preserve_text_control_selection =
-            state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
-            state->sel.control && tc_is_text_control(state->sel.control);
         doc_state_close_dropdown(state, NULL);
         doc_state_close_context_menu(state);
-        doc_state_set_hover_target(state, NULL);
-        doc_state_set_active_target(state, NULL);
-        doc_state_set_drag_state(state, NULL, false);
-        if (focus_has_current(state)) {
-            // Capture from the live focus (active_surface may already have been
-            // cleared by the reconcile's focus/caret churn): if the focused
-            // element resolves to a rich editing host, remember it for re-focus.
-            View* focused_view = focus_get(state);
-            DomElement* focused_elem = focused_view
-                ? radiant_view_to_dom_element(focused_view) : nullptr;
-            EditingSurface focused_surface;
-            if (focused_elem &&
-                editing_surface_from_target(static_cast<View*>(focused_elem),
-                                            &focused_surface) &&
-                editing_surface_is_rich(&focused_surface)) {
-                refocus_host = focused_surface.owner;
-            }
-            focus_clear(state);
-        } else if (!preserve_rich_editing && !preserve_text_control_selection) {
-            state_store_legacy_selection_clear(state);
-            state_store_legacy_caret_clear(state);
-        } else if (preserve_text_control_selection) {
-            state_store_refresh_caret_projection(state);
-        }
     }
 
     // Force full relayout by clearing view tree
@@ -4397,14 +4401,9 @@ static void post_html_handler_rebuild(EventContext* evcon,
         doc->view_tree = nullptr;
     }
 
-    // Clear stale view pointers in DocState — old views are now freed
+    // Clear stale layout-pool targets. DOM-backed StateStore entries survive
+    // and are pruned/rebound after relayout below.
     if (state) {
-        if (state->cursor) state->cursor->view = nullptr;
-        doc_state_clear_drag_drop(state);
-        // Clear per-view state entries — they reference old view pointers as keys
-        if (state->state_map) {
-            hashmap_clear(state->state_map, false);
-        }
         // Drop CSS animations/transitions whose View* targets were just freed; relayout
         // below re-creates them for elements that still have them. Without this, the next
         // animation_scheduler_tick dereferences a dangling View* (use-after-free).
@@ -4421,22 +4420,9 @@ static void post_html_handler_rebuild(EventContext* evcon,
     layout_html_doc(evcon->ui_context, doc, false);
     if (evcon->ui_context) evcon->ui_context->document = saved_doc;
 
-    // Re-focus the editing host the rebuild blurred, provided it is still
-    // connected to the document (the host survives a child-subtree reconcile;
-    // a whole-document replace keeps it too). Without this the contenteditable
-    // surface stays blurred after a structural edit and silently drops further
-    // input. The DOM element persists across the view-tree rebuild, so the
-    // freshly-laid-out element node is itself the focus target.
-    if (state && refocus_host && !focus_has_current(state)) {
-        bool connected = false;
-        for (DomNode* p = static_cast<DomNode*>(refocus_host); p; p = p->parent) {
-            if (p == static_cast<DomNode*>(doc->root)) { connected = true; break; }
-        }
-        if (connected) {
-            focus_set(state, static_cast<View*>(refocus_host), false);
-            log_debug("post_html_handler_rebuild: restored focus to rich editing host %p",
-                      refocus_host);
-        }
+    if (state) {
+        state_store_prune_after_reflow(state);
+        state_store_refresh_caret_projection(state);
     }
 
     auto t2 = high_resolution_clock::now();
@@ -4454,6 +4440,12 @@ static void post_html_handler_rebuild(EventContext* evcon,
              duration<double, std::milli>(t3 - t2).count(),
              duration<double, std::milli>(t3 - t_start).count(),
              mutations);
+    // Full fallback is still a DOM-preserving broad reconcile; keep the reason
+    // test-visible so state-retention fixtures do not have to scrape log.txt.
+    dom_js_record_reconcile(doc, DOM_RECONCILE_FULL,
+                            fallback_reason ? fallback_reason : "unknown",
+                            mutations, doc->js_mutation_record_count,
+                            doc->js_mutation_record_overflow);
 
     // Reset mutation count for next event
     dom_js_mutation_reset_records(doc);
@@ -4804,6 +4796,32 @@ static bool radiant_dispatch_clipboard_event(EventContext* evcon, View* target,
     Item target_item = js_dom_wrap_element(dom_target);
     bool prevented = js_dispatch_clipboard_event_to_element(target_item, type);
     radiant_js_ctx_exit(&scope, evcon, t_start);
+    return prevented;
+}
+
+// Stage 4C Phase B: HTML5 drag-and-drop JS event dispatch. The native drag
+// machinery (DragDropState) only invokes Lambda-template handlers and only on
+// `dropzone`-attributed elements; script editors that reorder blocks via
+// addEventListener('dragstart'|'dragover'|'drop') with a DataTransfer never see
+// those. These helpers dispatch real JS DragEvents to the element under the
+// cursor with a session-persistent DataTransfer, independent of `dropzone`.
+extern "C" void js_drag_session_begin(void);
+extern "C" void js_drag_session_end(void);
+extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
+        const char* type, int client_x, int client_y);
+
+static bool radiant_dispatch_drag_event(EventContext* evcon, View* target,
+                                        const char* type, int cx, int cy)
+{
+    DomElement* dom_target = radiant_view_to_dom_element(target);
+    if (!dom_target) return false;
+    JsCtxScope scope;
+    if (!radiant_js_ctx_enter(&scope, evcon)) return false;
+    auto t_start = std::chrono::high_resolution_clock::now();
+    Item target_item = js_dom_wrap_element(dom_target);
+    bool prevented = js_dispatch_drag_event_to_element(target_item, type, cx, cy);
+    radiant_js_ctx_exit(&scope, evcon, t_start);
+    log_debug("JSDND: dispatched '%s' at (%d,%d) prevented=%d", type, cx, cy, prevented);
     return prevented;
 }
 
@@ -6542,6 +6560,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     log_debug("DRAG START: source=%p distance=%.1f", dd->source_view, sqrtf(dx*dx + dy*dy));
                     // dispatch "dragstart" to source element
                     dispatch_lambda_handler(&evcon, dd->source_view, "dragstart");
+                    // Stage 4C: also fire a real JS DragEvent so script editors
+                    // (addEventListener) get a DataTransfer. The session is
+                    // opened inside the dispatch (needs the JS ctx) on "dragstart".
+                    // Coord space matches the JS mouse events. The native
+                    // DragDropState (source_view is a DOM element; active/pending
+                    // flags) now survives handler-driven DOM mutation via
+                    // fallback retention, so JS DnD rides on it directly.
+                    radiant_dispatch_drag_event(&evcon, dd->source_view, "dragstart",
+                                                (int)dd->current_x, (int)dd->current_y);
                 }
             }
 
@@ -6605,6 +6632,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 // dispatch "dragmove" to source (throttled by frame rate inherently)
                 dispatch_lambda_handler(&evcon, dd->source_view, "dragmove");
+
+                // Stage 4C: JS dragover to the element under the cursor,
+                // independent of the dropzone-based native drop_target. The
+                // handler may mutate the DOM (drop-line) → fallback relayout,
+                // but dd->active is retained so this keeps firing each move.
+                if (evcon.target) {
+                    radiant_dispatch_drag_event(&evcon,
+                        static_cast<View*>(evcon.target), "dragover",
+                        (int)motion->x, (int)motion->y);
+                }
 
                 // set cursor to grabbing
                 evcon.new_cursor = CSS_VALUE_POINTER;
@@ -7123,6 +7160,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // Set caret at clicked position for a fresh placement. A
                     // shift-click must preserve the existing collapsed
                     // selection anchor so state_store_legacy_selection_extend() can use it.
+                    View* focused = focus_get(state);
+                    if (focused && focused->is_element()) {
+                        DomElement* focused_elem = lam::dom_require_element(focused);
+                        DomNode* target_node = static_cast<DomNode*>(evcon.target);
+                        DomNode* focused_node = static_cast<DomNode*>(focused);
+                        if (tc_is_text_control(focused_elem) &&
+                            !dom_node_is_descendant_of(target_node, focused_node)) {
+                            // plain document text clicks must transfer caret ownership
+                            // away from the focused text control before StateStore
+                            // refresh preserves that control's selection shadow.
+                            update_focus_state(&evcon, NULL, false);
+                        }
+                    }
                     collapse_active_text_control_selection_for_rich_target(state, evcon.target);
                     state_store_legacy_caret_set(state, evcon.target, char_offset);
                 }
@@ -7362,7 +7412,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (node->node_type == DOM_NODE_ELEMENT) {
                     DomElement* elem = lam::dom_require_element(node);
                     const char* draggable = dom_element_get_attribute(elem, "draggable");
-                    if (draggable && strcmp(draggable, "true") == 0) {
+                    bool is_draggable = draggable && strcmp(draggable, "true") == 0;
+                    // Browser-faithful: <img> and <a href> are draggable by
+                    // default (no draggable attr) unless draggable="false".
+                    if (!is_draggable &&
+                        !(draggable && strcmp(draggable, "false") == 0)) {
+                        const char* tag = elem->tag_name;
+                        if (tag && (strcasecmp(tag, "img") == 0 ||
+                                    (strcasecmp(tag, "a") == 0 &&
+                                     dom_element_get_attribute(elem, "href")))) {
+                            is_draggable = true;
+                        }
+                    }
+                    if (is_draggable) {
                         draggable_elem = elem;
                         break;
                     }
@@ -7388,6 +7450,48 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         if (event->type == RDT_EVENT_MOUSE_UP) {
+            // Dispatch the JS 'mouseup' event through the EventTarget pipeline
+            // (browsers fire mouseup before click). Only mousedown + click were
+            // dispatched before, so window/document-level drag listeners that
+            // finish on mouseup — e.g. an editor's image-resize / block
+            // drag-reorder using window.addEventListener('mouseup') — never ran
+            // under `view`. It bubbles to document/window like mousedown does.
+            if (evcon.target) {
+                bool up_prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
+                    "mouseup", btn_event->x, btn_event->y,
+                    btn_event->button, 1 << btn_event->button,
+                    (btn_event->mods & GLFW_MOD_CONTROL) != 0,
+                    (btn_event->mods & GLFW_MOD_SHIFT) != 0,
+                    (btn_event->mods & GLFW_MOD_ALT) != 0,
+                    (btn_event->mods & GLFW_MOD_SUPER) != 0,
+                    1);
+                if (up_prevented) evcon.default_prevented = true;
+            }
+
+            // Stage 4C: JS drop + dragend for script editors, gated on the
+            // (now retention-safe) native drag. Fire a final dragover at the
+            // release point; a drop follows only if that last dragover was
+            // canceled — HTML5 gates drop on preventDefault. Then dragend to the
+            // source DOM element (survives any fallback relayout).
+            if (state && state->drag_drop && state->drag_drop->active) {
+                View* drag_src = state->drag_drop->source_view;
+                if (evcon.target) {
+                    bool ov = radiant_dispatch_drag_event(&evcon,
+                        static_cast<View*>(evcon.target), "dragover",
+                        (int)btn_event->x, (int)btn_event->y);
+                    if (ov) {
+                        radiant_dispatch_drag_event(&evcon,
+                            static_cast<View*>(evcon.target), "drop",
+                            (int)btn_event->x, (int)btn_event->y);
+                    }
+                }
+                if (drag_src) {
+                    radiant_dispatch_drag_event(&evcon, drag_src,
+                        "dragend", (int)btn_event->x, (int)btn_event->y);
+                }
+                js_drag_session_end();
+            }
+
             // Handle drag-and-drop completion first
             bool drag_handled = false;
             if (state && state->drag_drop) {

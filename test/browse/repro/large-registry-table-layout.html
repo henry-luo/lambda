@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>large registry table layout</title>
+  <style>
+    body { font-family: sans-serif; margin: 12px; }
+    table { border-collapse: collapse; width: 100%; table-layout: auto; }
+    th, td { border: 1px solid #bbb; padding: 2px 4px; vertical-align: top; }
+    code { white-space: normal; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <table>
+    <thead>
+      <tr><th>Value</th><th>Name</th><th>Reference</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>0</td><td>Reserved</td><td>RFC 0000</td><td><code>registry-token-alpha-beta-gamma-delta-epsilon</code></td></tr>
+      <tr><td>1</td><td>Control</td><td>RFC 0791</td><td><code>long.registry.example.value.with.many.parts.and.no.good.breakpoints</code></td></tr>
+      <tr><td>2</td><td>Experimental</td><td>RFC 3692</td><td><code>iana-registry-entry-used-for-browser-layout-stability-testing</code></td></tr>
+      <tr><td>3</td><td>Assigned</td><td>RFC 5234</td><td><code>ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz</code></td></tr>
+      <tr><td>4</td><td>Private Use</td><td>RFC 8126</td><td><code>private-use-registry-entry-with-a-very-long-description-field</code></td></tr>
+      <tr><td>5</td><td>Standards Action</td><td>RFC 8126</td><td><code>standards-action-registration-policy-layout-regression-token</code></td></tr>
+      <tr><td>6</td><td>Specification Required</td><td>RFC 8126</td><td><code>specification-required-change-controller-and-reviewer-notes</code></td></tr>
+      <tr><td>7</td><td>First Come First Served</td><td>RFC 8126</td><td><code>first-come-first-served-registration-row-with-long-reference</code></td></tr>
+      <tr><td>8</td><td>Expert Review</td><td>RFC 8126</td><td><code>designated-expert-review-long-unbroken-registry-token</code></td></tr>
+      <tr><td>9</td><td>Deprecated</td><td>RFC 9999</td><td><code>deprecated-but-present-for-backward-compatible-registry-pages</code></td></tr>
+    </tbody>
+  </table>
+</body>
+</html>

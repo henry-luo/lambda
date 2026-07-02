@@ -683,9 +683,23 @@ truly empty `else if` blocks and comment-only branches inside a `pn` loop.
 
 ### 25. Sentinel string compare bug — `var s = " "` compares unequal to literal `" "`
 
-**Severity: HIGH** — Initializing a `var` with a string literal (e.g. `var s = " "`) and later comparing `s == " "` returns FALSE, even when both print as a single space. This breaks sentinel logic for state machines.
+**Status: ✅ Fixed / not reproducible (2026-07-02)** — Initializing a `var`
+with a single-space string literal now preserves the string value, and comparing
+it against the same literal works correctly.
 
-**Workaround:** Use an explicit int flag (e.g. `has_pending_clip = 0/1`) to track state, not sentinel strings.
+Verified current behavior:
+
+```lambda
+pn main() {
+  var s = " "
+  print(s == " ")   // true
+  print(s != " ")   // false
+  print(type(s))    // string
+}
+```
+
+Regression coverage: `test/lambda/proc/proc_var.ls` test 22 now checks
+`var s = " "` yields `eq=true,ne=false,type=string`.
 
 ---
 

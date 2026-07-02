@@ -82,6 +82,7 @@ typedef struct NetworkResource {
     // Decoded resource owned by this network entry and borrowed by the DOM.
     struct ImageSurface* image_surface;
     bool image_surface_borrowed;
+    bool optional_failure;       // true when a failed subresource can fall back
     
     // Reference count for cleanup
     int ref_count;

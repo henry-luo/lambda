@@ -318,7 +318,12 @@ static inline uint32_t typemap_shape_entry_name_id(ShapeEntry* entry) {
 }
 
 static inline bool typemap_ptr_is_plausible(void* p) {
-    return p && (uintptr_t)p <= 0x0000FFFFFFFFFFFFULL;
+    uintptr_t addr = (uintptr_t)p;
+    // stale inline caches can retain tagged/scalar debris; TypeMap pointers
+    // are aligned heap allocations, never low-page or odd addresses.
+    return p && addr >= 0x10000ULL &&
+        (addr & (sizeof(void*) - 1)) == 0 &&
+        addr <= 0x0000FFFFFFFFFFFFULL;
 }
 
 static inline ShapeEntry** typemap_hash_slots(TypeMap* tm) {

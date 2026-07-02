@@ -1,0 +1,22 @@
+{
+  "name": "DOM mutation during dragover retains native DragDropState",
+  "html": "test/ui/dom_mutation_dragover_retains_dragdrop.html",
+  "viewport": {"width": 700, "height": 360},
+  "events": [
+    {"type": "wait", "ms": 200},
+    {"type": "mouse_down", "target": {"selector": "#drag-src"}},
+    {"type": "mouse_move", "target": {"selector": "#drop-zone"}},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_count", "target": {"selector": "#drop-line"}, "equals": 1},
+    {
+      "type": "assert_state_store",
+      "target": {"selector": "#drag-src"},
+      "drag_drop": true,
+      "drag_drop_active": true,
+      "drag_drop_source": true
+    },
+    {"type": "mouse_up", "target": {"selector": "#drop-zone"}},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_text", "target": {"selector": "#status"}, "contains": "drop complete"}
+  ]
+}

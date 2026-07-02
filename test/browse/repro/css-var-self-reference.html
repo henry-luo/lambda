@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>css var self reference repro</title>
+  <style>
+    :root {
+      --loop: var(--loop);
+    }
+
+    .box {
+      color: var(--loop, #333);
+      width: var(--loop, 12px);
+    }
+  </style>
+</head>
+<body>
+  <div class="box">self-referential var() should fall back gracefully</div>
+</body>
+</html>

@@ -1051,6 +1051,52 @@ extern "C" bool js_dispatch_clipboard_event_to_element(Item target_item, const c
     return prevented;
 }
 
+// Stage 4C Phase B: HTML5 drag-and-drop JS event dispatch. Radiant's native
+// drag machinery only invokes Lambda-template handlers, and only on elements
+// carrying a `dropzone` attribute; script editors that use
+// addEventListener('dragstart'|'dragover'|'drop') with a DataTransfer never see
+// those. A single DataTransfer persists across the whole gesture
+// (dragstart→dragover→drop→dragend) so setData() in dragstart is visible to
+// getData() in drop, matching the browser. The Item lives in a GC root
+// registered once at the stable static-address (never re-registered).
+static Item g_drag_data_transfer = { .item = ITEM_NULL };
+static bool g_drag_root_registered = false;
+
+extern "C" void js_drag_session_begin(void) {
+    if (!g_drag_root_registered) {
+        heap_register_gc_root(&g_drag_data_transfer.item);
+        g_drag_root_registered = true;
+    }
+    g_drag_data_transfer = js_data_transfer_new();
+}
+
+extern "C" void js_drag_session_end(void) {
+    // keep the root registered; clearing to null makes GC ignore the slot.
+    g_drag_data_transfer.item = ITEM_NULL;
+}
+
+// Dispatch one synthetic DragEvent (dragstart/dragover/drop/dragend/...) to a
+// DOM element carrying the session DataTransfer plus clientX/clientY. Returns
+// true if the handler called preventDefault() (used to gate whether a drop is
+// allowed, per HTML5: drop fires only when the preceding dragover was
+// canceled).
+extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
+        const char* type, int client_x, int client_y) {
+    // The session DataTransfer must be allocated inside the JS runtime context
+    // (js_new_object needs the active heap/nursery), so open it here — the
+    // caller enters the ctx scope before dispatching. dragstart always starts a
+    // fresh session; later points reuse it (or begin lazily if one was missed).
+    if (type && strcmp(type, "dragstart") == 0) {
+        js_drag_session_begin();
+    } else if (g_drag_data_transfer.item == ITEM_NULL) {
+        js_drag_session_begin();
+    }
+    Item ev = js_create_native_drag_event(type, client_x, client_y,
+        g_drag_data_transfer, false, false, false, false);
+    js_dom_dispatch_event(target_item, ev);
+    return js_event_is_default_prevented(ev);
+}
+
 // =============================================================================
 // navigator.clipboard — backed by radiant/clipboard.{hpp,cpp}
 // =============================================================================

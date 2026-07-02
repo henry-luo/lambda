@@ -140,6 +140,15 @@ Item js_create_native_wheel_event(const char* type,
     int buttons,
     bool ctrl, bool shift, bool alt, bool meta);
 
+// Stage 4C Phase B: native DragEvent factory. DragEvent extends MouseEvent
+// (same clientX/clientY/button geometry) plus a `dataTransfer`. `type` is one
+// of dragstart/dragenter/dragover/dragleave/drop/dragend. The `data_transfer`
+// is the single session DataTransfer shared across the whole gesture so
+// setData() in dragstart is visible to getData() in drop (browser-faithful).
+Item js_create_native_drag_event(const char* type,
+    int client_x, int client_y, Item data_transfer,
+    bool ctrl, bool shift, bool alt, bool meta);
+
 // CE-3 (Radiant_Design_Content_Editable.md §6): native InputEvent factory.
 // `type` is "beforeinput" or "input"; the former is cancelable, the latter is
 // not (Input Events Level 2 §3.2). `data_transfer` may be ItemNull.

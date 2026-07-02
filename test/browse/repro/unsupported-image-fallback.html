@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Unsupported image fallback repro</title>
+  <style>
+    body {
+      margin: 24px;
+      font: 16px sans-serif;
+      background-image: url("unsupported-image-fallback.webp");
+    }
+  </style>
+</head>
+<body>
+  <h1>Unsupported image fallback</h1>
+  <p>Unsupported or corrupt optional images should render placeholders without runtime errors.</p>
+  <img src="unsupported-image-fallback.webp" alt="unsupported image">
+</body>
+</html>

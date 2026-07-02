@@ -1965,7 +1965,9 @@ static void render_background_image(RenderContext* rdcon, ViewBlock* view, Backg
     // Load image via the image cache
     ImageSurface* img = load_image(rdcon->ui_context, image_url);
     if (!img) {
-        log_error("[BG-IMAGE] Failed to load image '%s'", image_url);
+        // Background images are optional paint layers; network-managed pages
+        // may skip late/blocking fetches and keep rendering the base layer.
+        log_warn("[BG-IMAGE] Image unavailable, skipping paint layer '%s'", image_url);
         return;
     }
 

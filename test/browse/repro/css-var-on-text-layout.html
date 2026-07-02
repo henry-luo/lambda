@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>CSS variable text layout repro</title>
+  <style>
+    .shell {
+      --line-height: 1.4;
+      display: flex;
+      flex-direction: column;
+    }
+    .item {
+      display: flex;
+      line-height: var(--line-height);
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="item">Text nodes inherit custom properties through their parent element.</div>
+  </div>
+</body>
+</html>

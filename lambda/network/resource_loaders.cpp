@@ -181,8 +181,15 @@ void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
     // read CSS content from local file
     size_t css_size = 0;
     char* css_content = read_file_to_string(res->local_path, &css_size);
-    if (!css_content || css_size == 0) {
+    if (!css_content) {
         log_error("network: failed to read CSS file: %s", res->local_path);
+        return;
+    }
+    if (css_size == 0) {
+        // Empty stylesheets are valid CSS; treat them as no-op resources so
+        // zero-byte downloads do not surface as parser/read failures.
+        mem_free(css_content);
+        log_debug("network: skipping empty CSS resource: %s", res->url);
         return;
     }
 
@@ -292,7 +299,9 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
                 }
             }
             if (!img_surface) {
-                log_error("network: failed to load image: %s", res->local_path);
+                // Optional images can be corrupt or in an unsupported format;
+                // keep the DOM alive and repaint with the broken-image path.
+                log_warn("network: optional image unavailable: %s", res->local_path);
                 // schedule repaint to show broken image indicator
                 if (res->manager) {
                     resource_manager_schedule_repaint(res->manager, img_element);
@@ -438,6 +447,9 @@ void process_svg_resource(NetworkResource* res, struct DomElement* use_element) 
     size_t svg_size = 0;
     char* svg_content = read_file_to_string(res->local_path, &svg_size);
     if (!svg_content || svg_size == 0) {
+        // Empty downloads still allocate a NUL buffer; free it before
+        // treating the external SVG reference as unavailable.
+        if (svg_content) mem_free(svg_content);
         log_error("network: failed to read SVG file: %s", res->local_path);
         return;
     }

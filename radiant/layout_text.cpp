@@ -2874,8 +2874,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             rect->y = lycon->block.advance_y + lycon->block.lead_y;
         }
     }
+#ifdef RADIANT_TRACE_TEXT_LAYOUT
+    // Text-run tracing is opt-in because large documents otherwise emit one
+    // debug record per run and spend most of layout time writing logs.
     log_debug("layout text: '%t', start_index %d, x: %f, y: %f, advance_y: %f, lead_y: %f, font_face: '%s', font_size: %f",
         str, rect->start_index, rect->x, rect->y, lycon->block.advance_y, lycon->block.lead_y, lycon->font.style->family, lycon->font.style->font_size);
+#endif
 
     // layout the text glyphs
     bool zwj_preceded = false;  // UAX #14: ZWJ suppresses break between adjacent characters
@@ -3251,8 +3255,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             lycon->line.prev_codepoint = codepoint;
         }
+#ifdef RADIANT_TRACE_TEXT_LAYOUT
+        // Character-level tracing is only useful for targeted line breaking
+        // debugging; keeping it always-on makes long pages non-interactive.
         log_debug("layout char: '%c', x: %f, width: %f, wd: %f, line right: %f",
             *str == '\n' || *str == '\r' ? '^' : *str, rect->x, rect->width, wd, lycon->line.right);
+#endif
         prev_is_zwj_base = is_zwj_composition_base(codepoint);
         // CSS Text 3 §4.1.2: track last non-whitespace codepoint for segment break transformation
         if (!is_space(codepoint)) last_processed_cp = codepoint;
