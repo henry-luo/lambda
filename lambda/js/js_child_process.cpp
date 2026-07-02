@@ -36,6 +36,7 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" void js_next_tick_enqueue(Item callback);
 extern "C" Item js_json_parse(Item str_item);
 extern "C" Item js_json_stringify(Item value);
+extern "C" Item js_clear_exception(void);
 extern "C" Item js_buffer_from_bytes(const char* data, int len);
 extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe);
 extern "C" int js_net_dup_ipc_stdio_fd(Item handle_item);
@@ -584,9 +585,13 @@ typedef struct JsSpawnProcess {
     Item         abort_signal;
     Item         abort_listener;
     Item*        stdin_env;
+    Item*        stdin_destroy_env;
+    Item*        stdout_env;
+    Item*        stderr_env;
     Item*        send_env;
     Item*        disconnect_env;
     Item*        kill_env;
+    Item*        dispose_env;
     Item*        ref_env;
     Item*        unref_env;
     Item*        abort_env;
@@ -599,6 +604,7 @@ typedef struct SpawnWriteReq {
     uv_write_t req;
     char* data;
     size_t len;
+    bool close_ipc_after;
 } SpawnWriteReq;
 
 static Item spawn_signal_name_item(int signal_number);
@@ -794,14 +800,29 @@ static Item spawn_signal_name_item(int signal_number) {
     }
 }
 
+static void spawn_set_process_signal_state(JsSpawnProcess* sp, int signal_number) {
+    if (!sp) return;
+    js_property_set(sp->js_object, make_string_item("signalCode"),
+                    signal_number == 0 ? ItemNull : spawn_signal_name_item(signal_number));
+}
+
 static Item spawn_kill_with_env(Item env_item, Item signal_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
     if (!sp || sp->process_exited || uv_is_closing((uv_handle_t*)&sp->process)) {
         return (Item){.item = ITEM_FALSE};
     }
-    int r = uv_process_kill(&sp->process, spawn_signal_number(signal_item));
+    int signal_number = spawn_signal_number(signal_item);
+    int r = uv_process_kill(&sp->process, signal_number);
+    if (r == 0) {
+        js_property_set(sp->js_object, make_string_item("killed"), (Item){.item = ITEM_TRUE});
+    }
     return (Item){.item = b2it(r == 0)};
+}
+
+static Item spawn_dispose_with_env(Item env_item) {
+    (void)spawn_kill_with_env(env_item, make_string_item("SIGTERM"));
+    return make_js_undefined();
 }
 
 static Item spawn_ref_with_env(Item env_item) {
@@ -867,9 +888,13 @@ static void spawn_release_process(JsSpawnProcess* sp) {
     // JS closures outlive libuv handles, so clear their native pointer slots
     // before releasing the process state they were capturing.
     spawn_clear_env(sp->stdin_env);
+    spawn_clear_env(sp->stdin_destroy_env);
+    spawn_clear_env(sp->stdout_env);
+    spawn_clear_env(sp->stderr_env);
     spawn_clear_env(sp->send_env);
     spawn_clear_env(sp->disconnect_env);
     spawn_clear_env(sp->kill_env);
+    spawn_clear_env(sp->dispose_env);
     spawn_clear_env(sp->ref_env);
     spawn_clear_env(sp->unref_env);
     spawn_clear_env(sp->abort_env);
@@ -904,9 +929,16 @@ static void spawn_stdin_write_cb(uv_write_t* req, int status) {
 
 static void spawn_ipc_write_cb(uv_write_t* req, int status) {
     SpawnWriteReq* wr = (SpawnWriteReq*)req;
+    JsSpawnProcess* sp = req->handle ? (JsSpawnProcess*)req->handle->data : NULL;
+    bool close_ipc_after = wr->close_ipc_after;
     if (wr->data) mem_free(wr->data);
     mem_free(wr);
     (void)status;
+    if (close_ipc_after && sp && sp->ipc_pipe_active && !uv_is_closing((uv_handle_t*)&sp->ipc_pipe)) {
+        sp->ipc_pipe_active = false;
+        uv_read_stop((uv_stream_t*)&sp->ipc_pipe);
+        uv_close((uv_handle_t*)&sp->ipc_pipe, spawn_handle_close_cb);
+    }
 }
 
 static void spawn_emit_disconnect_once(JsSpawnProcess* sp) {
@@ -1003,6 +1035,39 @@ static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message, uv_stream_t* 
     mem_free(wr->data);
     mem_free(wr);
     return false;
+}
+
+static void spawn_ipc_send_disconnect_and_close(JsSpawnProcess* sp) {
+    if (!sp || !sp->ipc_pipe_active || uv_is_closing((uv_handle_t*)&sp->ipc_pipe)) return;
+    Item control = js_new_object();
+    js_property_set(control, make_string_item("__lambda_ipc_disconnect__"), (Item){.item = ITEM_TRUE});
+    Item json = js_json_stringify(control);
+    if (!js_check_exception() && get_type_id(json) == LMD_TYPE_STRING) {
+        String* s = it2s(json);
+        size_t len = s ? s->len + 1 : 0;
+        SpawnWriteReq* wr = (SpawnWriteReq*)mem_calloc(1, sizeof(SpawnWriteReq), MEM_CAT_JS_RUNTIME);
+        if (wr && len > 0) {
+            wr->data = (char*)mem_alloc(len, MEM_CAT_JS_RUNTIME);
+            if (wr->data) {
+                wr->len = len;
+                wr->close_ipc_after = true;
+                memcpy(wr->data, s->chars, s->len);
+                wr->data[s->len] = '\n';
+                uv_buf_t buf = uv_buf_init(wr->data, (unsigned int)len);
+                int r = uv_write(&wr->req, (uv_stream_t*)&sp->ipc_pipe, &buf, 1, spawn_ipc_write_cb);
+                if (r == 0) return;
+                mem_free(wr->data);
+            }
+            mem_free(wr);
+        }
+    } else if (js_check_exception()) {
+        js_clear_exception();
+    }
+    sp->ipc_pipe_active = false;
+    // parent disconnect sends an internal close frame when possible; if the
+    // frame cannot be queued, close locally so the parent does not watchdog-wait.
+    uv_read_stop((uv_stream_t*)&sp->ipc_pipe);
+    uv_close((uv_handle_t*)&sp->ipc_pipe, spawn_handle_close_cb);
 }
 
 static void spawn_ipc_handle_line(JsSpawnProcess* sp, const char* chars, int len) {
@@ -1191,6 +1256,9 @@ static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
     sp->exit_signal = term_signal;
     sp->process_exited = true;
     spawn_remove_abort_signal(sp);
+    js_property_set(sp->js_object, make_string_item("exitCode"),
+                    term_signal == 0 ? (Item){.item = i2it(exit_status)} : ItemNull);
+    spawn_set_process_signal_state(sp, term_signal);
 
     Item args[2] = {
         term_signal == 0 ? (Item){.item = i2it(exit_status)} : ItemNull,
@@ -1205,6 +1273,7 @@ static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
     if (sp->ipc_pipe_active) {
         sp->ipc_pipe_active = false;
         spawn_emit_disconnect_once(sp);
+        uv_read_stop((uv_stream_t*)&sp->ipc_pipe);
         uv_close((uv_handle_t*)&sp->ipc_pipe, spawn_handle_close_cb);
     }
     spawn_maybe_emit_process_close(sp);
@@ -1212,10 +1281,58 @@ static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
 }
 
 extern "C" Item js_spawn_stream_on(Item event_item, Item callback);
+static Item spawn_add_listener(Item self, Item event_item, Item callback);
 
 static Item js_spawn_stream_set_encoding(Item encoding) {
     (void)encoding;
     return js_get_this();
+}
+
+static Item spawn_stream_pipe_on_data(Item env_item, Item chunk) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    Item dest = env ? env[0] : make_js_undefined();
+    Item write = js_property_get(dest, make_string_item("write"));
+    if (is_callable(write)) {
+        js_call_function(write, dest, &chunk, 1);
+        js_microtask_flush();
+    }
+    return make_js_undefined();
+}
+
+static Item spawn_stream_pipe_on_end(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    Item dest = env ? env[0] : make_js_undefined();
+    bool should_end = !env || env[1].item != ITEM_FALSE;
+    if (should_end) {
+        Item end = js_property_get(dest, make_string_item("end"));
+        if (is_callable(end)) {
+            js_call_function(end, dest, NULL, 0);
+            js_microtask_flush();
+        }
+    }
+    return make_js_undefined();
+}
+
+static Item js_spawn_stream_pipe(Item dest, Item options) {
+    Item source = js_get_this();
+    Item* data_env = js_alloc_env(1);
+    data_env[0] = dest;
+    spawn_add_listener(source, make_string_item("data"),
+                       js_new_closure((void*)spawn_stream_pipe_on_data, 1, data_env, 1));
+
+    Item should_end = (Item){.item = ITEM_TRUE};
+    if (is_object_item(options)) {
+        Item end_opt = js_property_get(options, make_string_item("end"));
+        if (end_opt.item == ITEM_FALSE) should_end = (Item){.item = ITEM_FALSE};
+    }
+    Item* end_env = js_alloc_env(2);
+    end_env[0] = dest;
+    end_env[1] = should_end;
+    // child stdio streams are lightweight readables; missing pipe() aborts
+    // silent fork setup and leaves the IPC child alive until the drain watchdog.
+    spawn_add_listener(source, make_string_item("end"),
+                       js_new_closure((void*)spawn_stream_pipe_on_end, 0, end_env, 2));
+    return dest;
 }
 
 // create a stream-like object with on('data', cb) / on('close', cb)
@@ -1225,6 +1342,8 @@ static Item make_stream_object(void) {
                     js_new_function((void*)js_spawn_stream_on, 2));
     js_property_set(obj, make_string_item("setEncoding"),
                     js_new_function((void*)js_spawn_stream_set_encoding, 1));
+    js_property_set(obj, make_string_item("pipe"),
+                    js_new_function((void*)js_spawn_stream_pipe, 2));
     return obj;
 }
 
@@ -1259,6 +1378,61 @@ extern "C" Item js_spawn_on(Item event_item, Item callback) {
 // on() for stdout/stderr stream sub-objects
 extern "C" Item js_spawn_stream_on(Item event_item, Item callback) {
     return spawn_add_listener(js_get_this(), event_item, callback);
+}
+
+static void spawn_mark_stream_destroyed(Item stream_obj) {
+    js_property_set(stream_obj, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
+    js_property_set(stream_obj, make_string_item("closed"), (Item){.item = ITEM_TRUE});
+    js_property_set(stream_obj, make_string_item("readable"), (Item){.item = ITEM_FALSE});
+    js_property_set(stream_obj, make_string_item("writable"), (Item){.item = ITEM_FALSE});
+}
+
+static void spawn_destroy_stdio_pipe(JsSpawnProcess* sp, int kind, Item stream_obj) {
+    if (!sp) return;
+    uv_handle_t* handle = NULL;
+    bool* active = NULL;
+    if (kind == 0) {
+        handle = (uv_handle_t*)&sp->stdin_pipe;
+        active = &sp->stdin_pipe_active;
+    } else if (kind == 1) {
+        handle = (uv_handle_t*)&sp->stdout_pipe;
+        active = &sp->stdout_pipe_active;
+    } else if (kind == 2) {
+        handle = (uv_handle_t*)&sp->stderr_pipe;
+        active = &sp->stderr_pipe_active;
+    }
+    if (!handle || !active || !*active || uv_is_closing(handle)) return;
+
+    *active = false;
+    // destroyed child stdio is no longer part of the close barrier; leaving
+    // the native pipe referenced makes tiny IPC children wait for the drain watchdog.
+    if (kind != 0) uv_read_stop((uv_stream_t*)handle);
+    uv_close(handle, spawn_handle_close_cb);
+    spawn_mark_stream_destroyed(stream_obj);
+    spawn_emit_event(stream_obj, "close", NULL, 0);
+    spawn_maybe_emit_process_close(sp);
+}
+
+static Item js_spawn_stream_destroy(Item env_item, Item error_item) {
+    (void)error_item;
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
+    int kind = 0;
+    if (env && get_type_id(env[1]) == LMD_TYPE_INT) kind = (int)it2i(env[1]);
+    spawn_destroy_stdio_pipe(sp, kind, js_get_this());
+    return js_get_this();
+}
+
+static void install_spawn_stream_destroy(Item stream_obj, JsSpawnProcess* sp,
+                                         int kind, Item** out_env) {
+    Item* env = js_alloc_env(2);
+    env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    env[1] = (Item){.item = i2it(kind)};
+    if (out_env) *out_env = env;
+    js_property_set(stream_obj, make_string_item("destroy"),
+                    js_new_closure((void*)js_spawn_stream_destroy, 1, env, 2));
+    js_property_set(stream_obj, make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
+    js_property_set(stream_obj, make_string_item("closed"), (Item){.item = ITEM_FALSE});
 }
 
 static Item js_spawn_send_with_env(Item env_item, Item message, Item send_handle, Item options, Item callback) {
@@ -1337,8 +1511,7 @@ static Item js_spawn_disconnect_with_env(Item env_item) {
     Item self = js_get_this();
     spawn_set_connected(self, false);
     if (sp && sp->ipc_pipe_active) {
-        sp->ipc_pipe_active = false;
-        uv_close((uv_handle_t*)&sp->ipc_pipe, spawn_handle_close_cb);
+        spawn_ipc_send_disconnect_and_close(sp);
     }
     if (sp) spawn_emit_disconnect_once(sp);
     else spawn_emit_event(self, "disconnect", NULL, 0);
@@ -1369,6 +1542,9 @@ static Item make_child_process_object(void) {
     js_property_set(obj, make_string_item("on"),
                     js_new_function((void*)js_spawn_on, 2));
     js_property_set(obj, make_string_item("pid"), make_js_undefined());
+    js_property_set(obj, make_string_item("killed"), (Item){.item = ITEM_FALSE});
+    js_property_set(obj, make_string_item("exitCode"), ItemNull);
+    js_property_set(obj, make_string_item("signalCode"), ItemNull);
     return obj;
 }
 
@@ -1392,6 +1568,14 @@ static void install_spawn_lifecycle_surface(Item obj, JsSpawnProcess* sp) {
     sp->kill_env = kill_env;
     js_property_set(obj, make_string_item("kill"),
                     js_new_closure((void*)spawn_kill_with_env, 1, kill_env, 1));
+    Item* dispose_env = js_alloc_env(1);
+    dispose_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    sp->dispose_env = dispose_env;
+    Item dispose_key = js_symbol_well_known(make_string_item("dispose"));
+    // Symbol.dispose must drive the native kill path; treating it as a missing
+    // JS method leaves cat-style children alive until the drain watchdog.
+    js_property_set(obj, dispose_key,
+                    js_new_closure((void*)spawn_dispose_with_env, 0, dispose_env, 1));
 
     Item* ref_env = js_alloc_env(1);
     ref_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
@@ -1817,6 +2001,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
                         js_new_closure((void*)js_spawn_stdin_write, 1, stdin_env, 1));
         js_property_set(stdin_obj, make_string_item("end"),
                         js_new_closure((void*)js_spawn_stdin_end, 1, stdin_env, 1));
+        install_spawn_stream_destroy(stdin_obj, sp, 0, &sp->stdin_destroy_env);
         js_property_set(stdin_obj, make_string_item("writable"), (Item){.item = ITEM_TRUE});
         js_property_set(stdin_obj, make_string_item("readable"), (Item){.item = ITEM_FALSE});
     }
@@ -1825,6 +2010,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         sp->stdout_pipe.data = sp;
         sp->handles_expected++;
         Item stdout_obj = js_property_get(obj, make_string_item("stdout"));
+        install_spawn_stream_destroy(stdout_obj, sp, 1, &sp->stdout_env);
         js_property_set(stdout_obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
         js_property_set(stdout_obj, make_string_item("writable"), (Item){.item = ITEM_FALSE});
     }
@@ -1833,6 +2019,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         sp->stderr_pipe.data = sp;
         sp->handles_expected++;
         Item stderr_obj = js_property_get(obj, make_string_item("stderr"));
+        install_spawn_stream_destroy(stderr_obj, sp, 2, &sp->stderr_env);
         js_property_set(stderr_obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
         js_property_set(stderr_obj, make_string_item("writable"), (Item){.item = ITEM_FALSE});
     }
