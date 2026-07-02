@@ -86,6 +86,39 @@ static bool js_test262_global_flag_is_true(const char* name) {
 static const int JS_DOCUMENT_VIEWPORT_WIDTH = 800;
 static const int JS_DOCUMENT_VIEWPORT_HEIGHT = 600;
 
+static char ascii_lower_char(char ch) {
+    return (ch >= 'A' && ch <= 'Z') ? (char)(ch + ('a' - 'A')) : ch;
+}
+
+static bool ascii_case_ext_equals(const char* ext, const char* end, const char* expected) {
+    if (!ext || !end || !expected) return false;
+    size_t len = (size_t)(end - ext);
+    if (strlen(expected) != len) return false;
+    for (size_t i = 0; i < len; i++) {
+        if (ascii_lower_char(ext[i]) != ascii_lower_char(expected[i])) return false;
+    }
+    return true;
+}
+
+static bool lambda_view_http_url_is_likely_html_document(const char* url) {
+    if (!url || (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0)) return false;
+
+    const char* end = url;
+    while (*end && *end != '?' && *end != '#') end++;
+
+    const char* last_slash = nullptr;
+    const char* last_dot = nullptr;
+    for (const char* p = url; p < end; p++) {
+        if (*p == '/') last_slash = p;
+        else if (*p == '.') last_dot = p;
+    }
+
+    if (last_slash && last_slash + 1 == end) return true;
+    if (!last_dot || (last_slash && last_dot < last_slash)) return true;
+    return ascii_case_ext_equals(last_dot, end, ".html") ||
+           ascii_case_ext_equals(last_dot, end, ".htm");
+}
+
 struct JsDocumentSession {
     UiContext uicon;
     bool initialized;
@@ -3401,58 +3434,68 @@ int main(int argc, char *argv[]) {
             return lambda_main_finish(1);
         }
 
-        // For HTTP URLs, fetch content and determine type from Content-Type header
+        // For HTTP URLs, route likely HTML documents directly and probe only
+        // URLs that look like non-HTML resources.
         const char* effective_ext = nullptr;
         char* temp_file_path = nullptr;
         bool temp_file_path_is_local = false;
         const char* original_url = nullptr;  // preserve original URL for base tag injection
         if (is_http_url) {
             original_url = filename;  // save original URL before we change filename
-            log_info("Fetching URL: %s", filename);
-            FetchResponse* response = http_fetch(filename, nullptr);
-            if (!response || !response->data || response->status_code >= 400) {
-                printf("Error: Failed to fetch URL '%s'", filename);
-                if (response && response->status_code >= 400) {
-                    printf(" (HTTP %ld)", response->status_code);
-                }
-                printf("\n");
-                if (response) free_fetch_response(response);
-                return lambda_main_finish(1);
-            }
-
-            // Use effective URL (after redirects) for base tag injection
-            const char* base_url_for_inject = (response->effective_url) ? response->effective_url : original_url;
-
-            // Get file extension from Content-Type
-            effective_ext = content_type_to_extension(response->content_type);
-            log_info("HTTP Content-Type: %s -> extension: %s",
-                     response->content_type ? response->content_type : "(none)",
-                     effective_ext ? effective_ext : "(none)");
-
-            if (effective_ext && strcmp(effective_ext, ".html") == 0) {
-                // Keep HTML URL views as HTTP documents; staging them as local
-                // files hides the document URL from Radiant resource discovery.
-                temp_file_path = mem_strdup(base_url_for_inject, MEM_CAT_TEMP);
-                filename = temp_file_path ? temp_file_path : base_url_for_inject;
-                log_info("HTTP HTML document will be loaded directly: %s", filename);
+            if (lambda_view_http_url_is_likely_html_document(filename)) {
+                // Likely HTML URLs should be fetched once by Radiant's loader;
+                // a blocking type probe can time out before browser fallback begins.
+                effective_ext = ".html";
+                temp_file_path = mem_strdup(original_url, MEM_CAT_TEMP);
+                filename = temp_file_path ? temp_file_path : original_url;
+                log_info("HTTP document URL will be loaded directly: %s", filename);
             } else {
-                // Write non-HTML content to temp file with appropriate extension
-                char temp_path[256];
-                snprintf(temp_path, sizeof(temp_path), "./temp/lambda_view_http%s", effective_ext ? effective_ext : ".html");
-                FILE* f = fopen(temp_path, "wb");
-                if (!f) {
-                    printf("Error: Failed to create temp file for HTTP content\n");
-                    free_fetch_response(response);
+                log_info("Fetching URL: %s", filename);
+                FetchResponse* response = http_fetch(filename, nullptr);
+                if (!response || !response->data || response->status_code >= 400) {
+                    printf("Error: Failed to fetch URL '%s'", filename);
+                    if (response && response->status_code >= 400) {
+                        printf(" (HTTP %ld)", response->status_code);
+                    }
+                    printf("\n");
+                    if (response) free_fetch_response(response);
                     return lambda_main_finish(1);
                 }
-                fwrite(response->data, 1, response->size, f);
-                fclose(f);
-                temp_file_path = mem_strdup(temp_path, MEM_CAT_TEMP);
-                temp_file_path_is_local = true;
-                filename = temp_file_path;
-                log_debug("Saved HTTP content to: %s (%zu bytes)", temp_file_path, response->size);
+
+                // Use effective URL (after redirects) for base tag injection
+                const char* base_url_for_inject = (response->effective_url) ? response->effective_url : original_url;
+
+                // Get file extension from Content-Type
+                effective_ext = content_type_to_extension(response->content_type);
+                log_info("HTTP Content-Type: %s -> extension: %s",
+                         response->content_type ? response->content_type : "(none)",
+                         effective_ext ? effective_ext : "(none)");
+
+                if (effective_ext && strcmp(effective_ext, ".html") == 0) {
+                    // Keep HTML URL views as HTTP documents; staging them as local
+                    // files hides the document URL from Radiant resource discovery.
+                    temp_file_path = mem_strdup(base_url_for_inject, MEM_CAT_TEMP);
+                    filename = temp_file_path ? temp_file_path : base_url_for_inject;
+                    log_info("HTTP HTML document will be loaded directly: %s", filename);
+                } else {
+                    // Write non-HTML content to temp file with appropriate extension
+                    char temp_path[256];
+                    snprintf(temp_path, sizeof(temp_path), "./temp/lambda_view_http%s", effective_ext ? effective_ext : ".html");
+                    FILE* f = fopen(temp_path, "wb");
+                    if (!f) {
+                        printf("Error: Failed to create temp file for HTTP content\n");
+                        free_fetch_response(response);
+                        return lambda_main_finish(1);
+                    }
+                    fwrite(response->data, 1, response->size, f);
+                    fclose(f);
+                    temp_file_path = mem_strdup(temp_path, MEM_CAT_TEMP);
+                    temp_file_path_is_local = true;
+                    filename = temp_file_path;
+                    log_debug("Saved HTTP content to: %s (%zu bytes)", temp_file_path, response->size);
+                }
+                free_fetch_response(response);
             }
-            free_fetch_response(response);
         }
 
         // Detect file type by extension
