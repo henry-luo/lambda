@@ -169,19 +169,45 @@ fn make_stacked_delim(level) {     // was (level, h, d)
 }
 ```
 
-**Could not reproduce in isolation.** Several minimal scripts with the same
-*shape* (float params first-used as `h + d`, forwarded into a recursive walk
-with an int index, called with float literals) all ran correctly and returned
-the right value. The conflict only manifested in the full
-`render_vertical_mult` → `make_stacked_delim` → `stk_walk` chain, possibly in
-interaction with issue #33 which was simultaneously corrupting the entry list
-with `error` values at the time. So the precise trigger is **uncertain**; what
-is certain is the exact error message above and that moving the float constants
-inside the function eliminated it.
+**Status: Fixed (2026-07-02).** Reproduced with a compact cross-function
+script before the fix:
 
-**Status: UNFIXED in the transpiler (workaround only).** A robust authoring
-rule: prefer reading known-typed module constants over passing scalar floats
-into recursive helpers when the first use of the param is type-ambiguous.
+```lambda
+fn stack_helper(level: int, h: float, d: float, acc: float) float {
+    if (level <= 0) {
+        acc + h + d
+    } else {
+        stack_helper(level - 1, h, d, acc + h + d + level)
+    }
+}
+
+fn make_stacked_delim(level: int, h: float, d: float) float {
+    let rht = h + d
+    stack_helper(level, h, d, rht)
+}
+
+make_stacked_delim(3, 0.606, 0.0 - 0.00599)
+```
+
+Before the fix, this failed during MIR verification with:
+
+```
+func _stack_helper_0: in instruction 'mov':
+  unexpected operand mode for operand #1. Got 'double', expected 'int'
+```
+
+Root cause: the tail-recursive rewrite creates unreachable dummy values for the
+rewritten branch, but those dummies still participate in enclosing `if` result
+typing and MIR validation. The TCO path used an integer-shaped dummy and the
+terminal-branch handling in `transpile_if` wrote `MOV 0` into a result register
+that could be `double`. MIR correctly rejected that operand-mode mismatch.
+
+Fix: TCO now uses the resolved MIR local parameter type when converting
+recursive arguments, returns a type-shaped dummy for rewritten tail calls, and
+`transpile_if` writes terminal-branch dummies with `DMOV 0.0` when the `if`
+result register is `double`.
+
+Regression coverage: `test/lambda/transpile_float_tco_cross_call.ls`.
 
 ---
 
