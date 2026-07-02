@@ -1,0 +1,19 @@
+{
+  "name": "DOM mutation textContent incremental",
+  "html": "test/ui/dom_mutation_textcontent_incremental.html",
+  "viewport": {"width": 640, "height": 320},
+  "events": [
+    {"type": "wait", "ms": 200},
+    {"type": "click", "target": {"selector": "#name"}},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_focus", "target": {"selector": "#name"}},
+    {"type": "assert_state_store", "target": {"selector": "#name"}, "view_state": true, "kind": "form", "weak_ref": true},
+    {"type": "snapshot_state_store", "name": "focused-input", "target": {"selector": "#name"}},
+    {"type": "key_press", "key": "b"},
+    {"type": "wait", "ms": 160},
+    {"type": "assert_count", "target": {"selector": "#old-child"}, "equals": 0},
+    {"type": "assert_text", "target": {"selector": "#target"}, "contains": "replacement from key"},
+    {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "eligible"},
+    {"type": "assert_state_store_snapshot", "name": "focused-input", "target": {"selector": "#name"}}
+  ]
+}

@@ -4456,10 +4456,15 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
             if (type == LMD_TYPE_ELEMENT) {
                 DomElement* child_dom = build_dom_tree_from_element(
                     body_elem->items[i].element, doc, nullptr);
-                if (child_dom) dom_element_append_child(elem, child_dom);
+                if (child_dom && dom_element_append_child(elem, child_dom)) {
+                    dom_post_insert((DomNode*)elem, (DomNode*)child_dom);
+                }
             } else if (type == LMD_TYPE_STRING) {
                 String* s = it2s(body_elem->items[i]);
-                if (s) dom_element_append_text(elem, s->chars);
+                if (s) {
+                    DomText* text_dom = dom_element_append_text(elem, s->chars);
+                    if (text_dom) dom_post_insert((DomNode*)elem, (DomNode*)text_dom);
+                }
             }
         }
     }
@@ -4467,8 +4472,9 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
     js_dom_register_named_elements(elem);
     _select_refresh_cached_selected_options_for_node((DomNode*)elem);
     if (notify_mutation) {
-        js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
-                               (DomNode*)elem, elem->parent);
+        // innerHTML replaces children under the same parent; preserving the
+        // remove/insert records avoids broad TREE_REPLACE fallback for local edits.
+        js_dom_mutation_notify();
     }
     log_debug("js_dom_replace_inner_html: replaced <%s>",
               elem->tag_name ? elem->tag_name : "?");
@@ -9192,7 +9198,9 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             }
             log_debug("js_dom_set_property: set innerText on <%s>",
                       elem->tag_name ? elem->tag_name : "?");
-            js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE, (DomNode*)elem, elem->parent);
+            // innerText is parent-local child replacement, so keep the detailed
+            // remove/insert records for incremental reconcile.
+            js_dom_mutation_notify();
         }
         return value;
     }
@@ -9225,7 +9233,9 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             }
             log_debug("js_dom_set_property: set textContent on <%s>",
                       elem->tag_name ? elem->tag_name : "?");
-            js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE, (DomNode*)elem, elem->parent);
+            // textContent replaces children under the same parent; the existing
+            // remove/insert records are precise enough for retained reconcile.
+            js_dom_mutation_notify();
         }
         return value;
     }

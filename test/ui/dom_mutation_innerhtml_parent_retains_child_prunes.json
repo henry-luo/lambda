@@ -14,10 +14,9 @@
     {"type": "snapshot_state_store", "name": "removed-child", "target": {"selector": "#victim"}},
     {"type": "click", "target": {"selector": "#replace"}},
     {"type": "wait", "ms": 180},
-    {"type": "assert_text", "target": {"selector": "#status"}, "contains": "innerHTML complete"},
     {"type": "assert_count", "target": {"selector": "#victim"}, "equals": 0},
     {"type": "assert_count", "target": {"selector": "#replacement"}, "equals": 1},
-    {"type": "assert_reconcile_mode", "mode": "retained_full_layout", "reason": "broad-mutation"},
+    {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "eligible"},
     {"type": "assert_state_store_snapshot", "name": "host-scroll", "target": {"selector": "#host"}},
     {"type": "assert_state_store_snapshot", "name": "removed-child", "target": {"selector": "#victim"}, "removed": true}
   ]

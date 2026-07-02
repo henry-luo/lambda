@@ -16,6 +16,9 @@ fixture is now covered by `dom_mutation_overflow_retained_full`. Native
 keeps the `structural-css-risk` fallback when loaded selectors depend on
 sibling/child structure (`:first-child`, `:nth-*`, sibling combinators,
 `:has(...)`, etc.); simple styled structural mutations remain incremental.
+Parent-local `innerHTML`, `innerText`, and element `textContent` replacements
+now keep their detailed child remove/insert records instead of forcing a broad
+`TREE_REPLACE` fallback.
 
 ## 1. Problem Statement
 
@@ -219,10 +222,10 @@ Target modes:
 The critical change is that "full recascade" should not imply "destroy
 `ViewTree`".
 
-### 5.3 Downgrade `TREE_REPLACE`
+### 5.3 Downgrade Parent-Local `TREE_REPLACE`
 
-`innerHTML`, `textContent`, and `innerText` currently record
-`DOM_JS_MUTATION_TREE_REPLACE`, which forces fallback.
+`innerHTML`, `textContent`, and `innerText` used to record
+`DOM_JS_MUTATION_TREE_REPLACE`, which forced fallback.
 
 Most tree replacement is still local:
 
@@ -230,14 +233,19 @@ Most tree replacement is still local:
 - new children are inserted under the same parent;
 - the parent DOM node survives.
 
-Proposal:
+Implemented approach:
 
-- replace broad `TREE_REPLACE` with a structured record:
-  - `parent`;
-  - removed child range or "all children";
-  - inserted first/last child;
-  - mutation kind `CHILD_REPLACE`;
-  - bool `parent_survives = true`.
+- keep the existing child remove/insert records emitted by
+  `dom_pre_remove(...)` / `dom_post_insert(...)`;
+- finalize the mutation with `js_dom_mutation_notify()` without adding a broad
+  tree-replace record;
+- treat the parent as the surviving mutation root.
+
+The original `CHILD_REPLACE` proposal is no longer necessary for these local
+setters because the remove/insert record sequence is already precise enough.
+
+Policy:
+
 - if the parent remains connected, use retained reflow.
 - detach StateStore entries for removed descendants only.
 - keep parent-owned state.
@@ -445,8 +453,12 @@ Work:
 Verification:
 
 - `dom_mutation_stylesheet_fallback_retains_state` and
-  `dom_mutation_innerhtml_parent_retains_child_prunes` still assert
-  `retained_full_layout`.
+  `dom_mutation_overflow_retained_full` still assert `retained_full_layout`.
+- `dom_mutation_innerhtml_parent_retains_child_prunes` now asserts incremental
+  reconcile for parent-local `innerHTML`, with parent state retained and removed
+  child state pruned.
+- `dom_mutation_textcontent_incremental` asserts incremental reconcile for
+  element `textContent`, while preserving unrelated focused input state.
 - `dom_mutation_structural_css_retains_state` now asserts `incremental` for a
   simple stylesheet, while `dom_mutation_structural_css_risk_retained_full`
   asserts `retained_full_layout` for a real structural selector dependency.
@@ -470,8 +482,10 @@ Work:
   a conservative selector dependency scan. Child insert/remove now stays
   incremental for simple class/id/tag/attribute/descendant/child selectors, and
   falls back only for sibling/position-sensitive selectors.
-- Introduce `CHILD_REPLACE` records for `innerHTML`/`textContent` parent-local
-  replacement.
+- **Implemented:** downgrade parent-local `innerHTML`, `innerText`, and element
+  `textContent` replacement by preserving detailed child remove/insert records
+  instead of adding a broad `TREE_REPLACE` record. A dedicated `CHILD_REPLACE`
+  enum was not needed for this slice.
 - **Implemented:** treat record overflow as retained full layout rather than
   state-discarding fallback.
 - Add mutation logging that reports:
@@ -552,7 +566,8 @@ Add fixtures under `test/ui` with matching `.html` and `.json` files:
 | `dom_mutation_structural_css_retains_state` | Styled document inserts/removes a sibling node under simple selectors. | implemented; incremental reconcile, state snapshot before/after retained |
 | `dom_mutation_structural_css_risk_retained_full` | Styled document inserts before a `:first-child` match. | implemented; retained full layout with `structural-css-risk` |
 | `dom_mutation_stylesheet_fallback_retains_state` | Mutating a `<style>` element still needs broad recascade. | connected state retained even when layout scope is broad |
-| `dom_mutation_innerhtml_parent_retains_child_prunes` | `innerHTML` / `textContent` replaces children but parent survives. | parent state retained, removed child state pruned, still broad `TREE_REPLACE` fallback |
+| `dom_mutation_innerhtml_parent_retains_child_prunes` | `innerHTML` replaces children but parent survives. | implemented; incremental reconcile, parent state retained, removed child state pruned |
+| `dom_mutation_textcontent_incremental` | Element `textContent` replaces children while unrelated focused state survives. | implemented; incremental reconcile, focus/form state retained |
 | `dom_mutation_overflow_retained_full` | More mutation records than `DOM_JS_MUTATION_RECORD_CAP`. | retained full layout, connected focus/state survives |
 | `dom_mutation_replacechild_notifies` | Regression for structural paths that pre-record details but miss final notify. | reconcile runs, layout/text reflects replacement |
 | `dom_mutation_dragover_retains_dragdrop` | During native drag, `dragover` mutates DOM. | mid-drag `drag_drop=true`, `drag_drop_active=true`, source rebound, drop/dragend completes |

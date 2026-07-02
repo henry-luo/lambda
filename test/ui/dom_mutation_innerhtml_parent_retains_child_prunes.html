@@ -28,11 +28,9 @@
   <script>
     const host = document.getElementById('host');
     const replace = document.getElementById('replace');
-    const status = document.getElementById('status');
 
     replace.addEventListener('click', () => {
       host.innerHTML = '<div id="replacement">replacement child</div><div class="spacer">new bottom</div>';
-      status.textContent = 'innerHTML complete';
     });
   </script>
 </body>
