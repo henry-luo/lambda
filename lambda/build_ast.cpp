@@ -2134,6 +2134,11 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
                     }
                 }
             }
+            if (entry->is_mutable && entry->type_widened && !entry->has_type_annotation) {
+                // widened vars must read as ANY so later map/element shapes do not
+                // retain the null-shaped initializer and discard reassigned values.
+                ast_node->type = &TYPE_ANY;
+            }
             if (!ast_node->type) {
                 log_warn("Warning: entry->node->type is null for identifier %.*s, using TYPE_ANY",
                     (int)entry->name->len, entry->name->chars);
@@ -6660,8 +6665,9 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
                     }
                 } else if (!entry->type_widened) {
                     // non-annotated var: widen to Item if types differ
-                    // skip if var is already Item-typed (NULL or ANY)
-                    if (var_tid != LMD_TYPE_NULL && var_tid != LMD_TYPE_ANY) {
+                    // null-initialized vars must widen too; otherwise later map
+                    // literals keep a null-shaped field and drop reassigned values.
+                    if (var_tid != LMD_TYPE_ANY) {
                         entry->type_widened = true;
                         log_debug("var '%.*s' widened to Item (was %s, assigned %s)",
                             (int)target_str.length, target_str.str,
