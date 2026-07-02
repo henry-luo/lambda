@@ -76,11 +76,11 @@ New Stage-4C fixtures (in the pass count):
 - `type-in-list`, `italic-toolbar`, `delete-forward`, `enter-in-list` (pilot set); plus expansion set —
 - `backspace-join` (Backspace at start of block joins with the previous), `bold-italic-combo` (mark composition), `mark-toggle-off` (toggle bold OFF; uses the new `not_contains` predicate), `multi-typing` (mixed contexts p→li), `replace-then-mark` (select-all + type + Cmd+A + Bold), `select-all-delete` (Backspace on full selection), `undo-redo-typing` (Cmd+Z / Cmd+Shift+Z shortcuts).
 
-Known-open blockers (`_open_` prefix, deferred):
-1. `_open_arrow-caret-nav` — arrow keys don't move the model selection under `view`. Likely the `selectionchange` nested-CE topology issue (§5.3).
-2. `_open_selectionchange-delivery` — the 4B-era known blocker, preserved.
-3. `_open_shift-enter-linebreak` — Shift+Enter (insertLineBreak) trips the state_machine invariant assertion in `radiant/state_machine.cpp:1644` ("caret offset exceeds target length" after `focus_transition`) → SIGABRT in debug builds. The DOM-side vitest twin passes (`editor-view-dom` 9/9 under `lambda.exe js`), so this is a Radiant substrate bug in the view lane, not the editor.
-4. `_open_tab-indent-list` — Tab keydown doesn't reach `FullEditorDom.handleKeyDown` under `view` (both `key_press Tab` and `key_combo Tab` fail). Suspect Radiant consumes Tab for focus rotation before the JS handler sees it, or `event_sim`'s `key_press Tab` isn't dispatching a synthetic keydown to the contentEditable.
+Known-open blockers (kept as diagnostic scripts in `temp/editor4c-open/`, not in the pass count; run manually with `./lambda.exe view test/html/editor-dom.html --event-file <path> --headless`):
+1. `_open_arrow-caret-nav.json` — arrow keys don't move the model selection under `view`. Likely the `selectionchange` nested-CE topology issue (§5.3).
+2. `_open_selectionchange-delivery.json` — the 4B-era known blocker, preserved verbatim.
+3. `_open_shift-enter-linebreak.json` — Shift+Enter (insertLineBreak) trips the state_machine invariant assertion in `radiant/state_machine.cpp:1644` ("caret offset exceeds target length" after `focus_transition`) → SIGABRT in debug builds. The DOM-side vitest twin passes (`editor-view-dom` 9/9 under `lambda.exe js`), so this is a Radiant substrate bug in the view lane, not the editor.
+4. `_open_tab-indent-list.json` — Tab keydown doesn't reach `FullEditorDom.handleKeyDown` under `view` (both `key_press Tab` and `key_combo Tab` fail). Suspect Radiant consumes Tab for focus rotation before the JS handler sees it, or `event_sim`'s `key_press Tab` isn't dispatching a synthetic keydown to the contentEditable.
 
 **event_sim enhancement:** added `not_contains` to `assert_attribute` (`radiant/event_sim.cpp` + `.hpp` + `assert_not_contains` field). Passes when the attribute is missing OR does not include the substring — needed for "mark toggled off" / "style cleared" assertions. Kept the same shape as existing `contains`/`equals` predicates.
 

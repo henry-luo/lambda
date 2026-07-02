@@ -1530,6 +1530,11 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         if (eq) ev->assert_equals = mem_strdup(eq, MEM_CAT_LAYOUT);
         const char* cont = reader.get("contains").cstring();
         if (cont) ev->assert_contains = mem_strdup(cont, MEM_CAT_LAYOUT);
+        // Stage 4C Phase B: not_contains negates the contains check — passes
+        // when the attribute is missing OR does not include the substring.
+        // Useful for asserting a mark was toggled off, a style was cleared, etc.
+        const char* ncont = reader.get("not_contains").cstring();
+        if (ncont) ev->assert_not_contains = mem_strdup(ncont, MEM_CAT_LAYOUT);
         if (!ev->target_selector && !ev->target_text) {
             log_error("event_sim: assert_attribute missing 'target'");
             mem_free(ev);
@@ -2200,6 +2205,7 @@ void event_sim_free(EventSimContext* ctx) {
             if (ev->input_text) mem_free(ev->input_text);
             if (ev->assert_contains) mem_free(ev->assert_contains);
             if (ev->assert_equals) mem_free(ev->assert_equals);
+            if (ev->assert_not_contains) mem_free(ev->assert_not_contains);
             if (ev->clipboard_mime) mem_free(ev->clipboard_mime);
             if (ev->clipboard_html) mem_free(ev->clipboard_html);
             if (ev->option_value) mem_free(ev->option_value);
@@ -4766,6 +4772,18 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     log_error("event_sim: assert_attribute FAIL '%s' does not contain '%s', actual='%s' on '%s'",
                         ev->attribute_name, ev->assert_contains,
                         actual ? actual : "(null)", ev->target_selector);
+                    ctx->fail_count++;
+                }
+            } else if (ev->assert_not_contains) {
+                // Pass when the attribute is missing OR does not include the substring.
+                if (!actual || !strstr(actual, ev->assert_not_contains)) {
+                    log_info("event_sim: assert_attribute PASS '%s' does not contain '%s' on '%s'",
+                        ev->attribute_name, ev->assert_not_contains, ev->target_selector);
+                    ctx->pass_count++;
+                } else {
+                    log_error("event_sim: assert_attribute FAIL '%s' should not contain '%s', actual='%s' on '%s'",
+                        ev->attribute_name, ev->assert_not_contains,
+                        actual, ev->target_selector);
                     ctx->fail_count++;
                 }
             } else {
