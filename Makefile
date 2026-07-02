@@ -1526,34 +1526,29 @@ test-reactive-ui: build
 	if [ $$FAIL -gt 0 ]; then exit 1; fi
 
 # Stage 4C Phase B — editor event-driven UI automation under lambda.exe view + event_sim.
-# Runs the 4B baseline set (test/ui/editor4b/*.json) + the 4C pilot set
-# (test/ui/editor4c/*.json). Fixtures whose basename starts with "_open_" are
-# known-open Phase-B blockers (see vibe/editing/Radiant_Editor_Stage4C.md) and
-# are still executed but not counted toward pass/fail.
+# Runs the 4B baseline set (test/ui/editor4b/*.json) + the 4C set
+# (test/ui/editor4c/*.json). Known-open Phase-B blockers live under
+# temp/editor4c-open/ (see vibe/editing/Radiant_Editor_Stage4C.md); run them
+# manually with `./lambda.exe view test/html/editor-dom.html --event-file <path>
+# --headless` to reproduce a diagnostic. They are not in this target's pass count.
 editor-4c-view: build
 	@echo "Running Stage 4C Phase B editor UI test suite..."
 	@echo "=============================================================="
-	@PASS=0; FAIL=0; TOTAL=0; OPEN_PASS=0; OPEN_FAIL=0; \
+	@PASS=0; FAIL=0; TOTAL=0; \
 	for json in test/ui/editor4b/*.json test/ui/editor4c/*.json; do \
 		[ -f "$$json" ] || continue; \
 		name=$$(basename $$json .json); \
-		is_open=0; case $$name in _open_*) is_open=1 ;; esac; \
+		TOTAL=$$((TOTAL + 1)); \
 		if ./lambda.exe view test/html/editor-dom.html --event-file $$json --headless >/dev/null 2>&1; then \
-			if [ $$is_open -eq 1 ]; then OPEN_PASS=$$((OPEN_PASS + 1)); \
-				printf "  \033[33m? %s (open — passed unexpectedly)\033[0m\n" "$$name"; \
-			else PASS=$$((PASS + 1)); TOTAL=$$((TOTAL + 1)); \
-				printf "  \033[32m✓\033[0m %s\n" "$$name"; \
-			fi; \
+			PASS=$$((PASS + 1)); \
+			printf "  \033[32m✓\033[0m %s\n" "$$name"; \
 		else \
-			if [ $$is_open -eq 1 ]; then OPEN_FAIL=$$((OPEN_FAIL + 1)); \
-				printf "  \033[33m~ %s (open — known blocker)\033[0m\n" "$$name"; \
-			else FAIL=$$((FAIL + 1)); TOTAL=$$((TOTAL + 1)); \
-				printf "  \033[31m✗\033[0m %s\n" "$$name"; \
-			fi; \
+			FAIL=$$((FAIL + 1)); \
+			printf "  \033[31m✗\033[0m %s\n" "$$name"; \
 		fi; \
 	done; \
 	echo "=============================================================="; \
-	echo "editor-4c-view: $$PASS/$$TOTAL passed  ($$OPEN_PASS+$$OPEN_FAIL open cases: $$OPEN_PASS pass / $$OPEN_FAIL fail)"; \
+	echo "editor-4c-view: $$PASS/$$TOTAL passed  (open blockers in temp/editor4c-open/)"; \
 	if [ $$FAIL -gt 0 ]; then exit 1; fi
 
 # Save/check/diff layout suite snapshots for regression detection outside baseline
