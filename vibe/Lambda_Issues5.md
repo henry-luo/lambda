@@ -679,21 +679,9 @@ let s = ("a" ++
 
 ---
 
-### 28. `pn` does not implicitly return an `if/else` expression value
-
-**Severity: HIGH** — `pn` must use explicit `return` in every branch. Otherwise, callers get `null`/stale value, causing non-terminating loops.
-
----
-
 ### 29. `var` declared with a "null-shaped" or empty-string initial value cannot be reassigned
 
 **Severity: HIGH** — `var s = ""` or `var x = null` locks the var as null-typed forever; subsequent assignments are dropped with no error. Use a non-null, non-empty sentinel (e.g. `" "` or `{}`) or an int flag.
-
----
-
-### 30. `let x = if (cond) a else b` returns `null` in `pn`
-
-**Severity: HIGH** — In `pn`, `let x = if (cond) a else b` always returns `null`, even when `cond` is true. Use imperative `if`/`else` with explicit assignment instead.
 
 ---
 
