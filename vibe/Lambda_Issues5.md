@@ -657,27 +657,49 @@ bloats output and changes existing goldens).
 
 ### 24. Empty `else if`/`else` block in `pn` silently breaks the loop
 
-**Severity: HIGH** — Adding an empty branch body (even just a comment) in a `pn` loop causes the loop to break downstream, often with all output disappearing and no error.
+**Status: ✅ Fixed (2026-07-02)** — Empty and comment-only statement-form `if` branches are now legal no-op branches in `pn`. The loop continues without requiring a dummy assignment.
 
 ```lambda
 pn driver(op) {
   if (op == "a") { ... }
-  else if (op == "b") { /* comment only */ }   // BAD: breaks loop
+  else if (op == "b") { /* comment only */ }   // OK: no-op branch
   else { ... }
 }
 ```
 
-**Workaround:** Always put a no-op statement in the body, e.g. `st = st`.
+The current failure was a grammar/AST mismatch: statement-form `if_stam` required
+`content` inside every branch block, but comments are grammar extras. Both `{}`
+and `{ /* comment only */ }` therefore had no branch `content` node and failed
+to parse with `error[E102]: Expected 'identifier'`.
 
-**Discovered:** While adding marker-op branches (BMC/EMC/etc.) in PDF interp driver.
+The grammar now allows optional statement-branch content, and the AST builder
+represents missing branch bodies as null no-ops so procedural control flow can
+continue normally.
+
+**Regression coverage:** `test/lambda/proc/proc_empty_if_branch.ls` covers both
+truly empty `else if` blocks and comment-only branches inside a `pn` loop.
 
 ---
 
 ### 25. Sentinel string compare bug — `var s = " "` compares unequal to literal `" "`
 
-**Severity: HIGH** — Initializing a `var` with a string literal (e.g. `var s = " "`) and later comparing `s == " "` returns FALSE, even when both print as a single space. This breaks sentinel logic for state machines.
+**Status: ✅ Fixed / not reproducible (2026-07-02)** — Initializing a `var`
+with a single-space string literal now preserves the string value, and comparing
+it against the same literal works correctly.
 
-**Workaround:** Use an explicit int flag (e.g. `has_pending_clip = 0/1`) to track state, not sentinel strings.
+Verified current behavior:
+
+```lambda
+pn main() {
+  var s = " "
+  print(s == " ")   // true
+  print(s != " ")   // false
+  print(type(s))    // string
+}
+```
+
+Regression coverage: `test/lambda/proc/proc_var.ls` test 22 now checks
+`var s = " "` yields `eq=true,ne=false,type=string`.
 
 ---
 

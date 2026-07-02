@@ -183,6 +183,8 @@ typedef struct JsSocket {
     bool      auto_select_family;
     bool      handle_closed_by_user;
     bool      adopted_bound_socket;
+    bool      adopted_by_tls;
+    bool      tls_close_notified;
     int64_t   bytes_read;
     int64_t   bytes_written;
     int64_t   buffer_size;
@@ -206,6 +208,7 @@ typedef struct JsSocket {
     Item      onread_buffer_source;
     Item      onread_buffer;
     Item      onread_callback;
+    Item      tls_socket;
     PendingSocketWrite* pending_writes_head;
     PendingSocketWrite* pending_writes_tail;
     SocketAutoAttemptTimerReq* auto_attempt_timer;
@@ -395,8 +398,10 @@ static void socket_configure_onread(JsSocket* sock, Item onread);
 static bool socket_schedule_auto_retry(JsSocket* sock);
 static void socket_shutdown_writes(JsSocket* sock, Item callback);
 static void socket_update_writable(JsSocket* sock, bool writable);
+static void socket_update_readable(JsSocket* sock, bool readable);
 static Item make_uv_error(int status, const char* syscall, const char* host, int port);
 static Item make_socket_handle_object(JsSocket* sock);
+static bool socket_delegate_close_to_tls(JsSocket* sock, Item error_item);
 
 static void socket_expose_handle(JsSocket* sock) {
     if (!sock || !sock->js_object.item || sock->handle_exposed) return;
@@ -909,6 +914,30 @@ static void socket_schedule_error_close_event(JsSocket* sock, Item err) {
     js_next_tick_enqueue(fn);
 }
 
+static bool socket_delegate_close_to_tls(JsSocket* sock, Item error_item) {
+    if (!sock || !sock->adopted_by_tls || sock->tls_close_notified) return false;
+    sock->destroyed = true;
+    sock->reading = false;
+    socket_clear_auto_attempt_timer(sock);
+    socket_clear_timeout(sock);
+    socket_remove_abort_listener(sock);
+    socket_update_writable(sock, false);
+    socket_update_readable(sock, false);
+    js_property_set(sock->js_object, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
+    socket_update_state_properties(sock);
+    if (!is_undefined_item(error_item) && error_item.item != ITEM_NULL) {
+        socket_emit(sock->js_object, "error", &error_item, 1);
+    }
+    Item destroy_fn = js_property_get(sock->tls_socket, make_string_item("destroy"));
+    if (is_callable(destroy_fn)) {
+        // TLS owns the shared uv_tcp_t after adoption; net may only request
+        // TLSSocket teardown or both objects can close the same libuv handle.
+        js_call_function(destroy_fn, sock->tls_socket, NULL, 0);
+        js_microtask_flush();
+    }
+    return true;
+}
+
 static void socket_update_writable(JsSocket* sock, bool writable) {
     if (!sock || !sock->js_object.item) return;
     js_property_set(sock->js_object, make_string_item("writable"),
@@ -1206,6 +1235,15 @@ static void socket_flush_pending_writes(JsSocket* sock) {
 }
 
 static Item socket_write_data(Item self, JsSocket* sock, Item data_item, Item callback) {
+    if (sock && sock->adopted_by_tls && !sock->tls_close_notified) {
+        Item write_fn = js_property_get(sock->tls_socket, make_string_item("write"));
+        if (is_callable(write_fn)) {
+            Item args[2] = { data_item, callback };
+            // After TLS adopts a net.Socket, plaintext writes must pass through
+            // mbedTLS rather than the borrowed raw TCP handle.
+            return js_call_function(write_fn, sock->tls_socket, args, is_callable(callback) ? 2 : 1);
+        }
+    }
     Item remote_ended_marker = js_property_get(self, make_string_item("__remote_ended__"));
     if (((sock && sock->remote_ended) || remote_ended_marker.item == ITEM_TRUE) &&
         !socket_allow_half_open(self)) {
@@ -1283,6 +1321,17 @@ extern "C" Item js_socket_write(Item rest_args) {
 
 static void socket_shutdown_writes(JsSocket* sock, Item callback) {
     if (!sock || sock->destroyed || !sock->connected) return;
+    if (sock->adopted_by_tls && !sock->tls_close_notified) {
+        Item end_fn = js_property_get(sock->tls_socket, make_string_item("end"));
+        if (is_callable(end_fn)) {
+            Item args[1] = { callback };
+            // TLS owns shutdown sequencing for adopted transports so the final
+            // close_notify and TCP close have one native owner.
+            js_call_function(end_fn, sock->tls_socket, args, is_callable(callback) ? 1 : 0);
+            js_microtask_flush();
+        }
+        return;
+    }
     SocketShutdownReq* sreq =
         (SocketShutdownReq*)mem_calloc(1, sizeof(SocketShutdownReq), MEM_CAT_JS_RUNTIME);
     sreq->sock = sock;
@@ -1368,6 +1417,7 @@ extern "C" Item js_socket_destroy(Item error_item) {
     Item self = js_get_this();
     JsSocket* sock = socket_from_object(self);
     if (!sock || sock->destroyed) return self;
+    if (socket_delegate_close_to_tls(sock, error_item)) return self;
 
     sock->destroyed = true;
     socket_update_writable(sock, false);
@@ -1391,6 +1441,7 @@ extern "C" Item js_socket_resetAndDestroy(Item error_item) {
     Item self = js_get_this();
     JsSocket* sock = socket_from_object(self);
     if (!sock || sock->destroyed) return self;
+    if (socket_delegate_close_to_tls(sock, error_item)) return self;
 
     sock->destroyed = true;
     socket_update_writable(sock, false);
@@ -1403,6 +1454,7 @@ extern "C" Item js_socket_resetAndDestroy(Item error_item) {
 
 static void socket_close_now(JsSocket* sock) {
     if (!sock) return;
+    if (socket_delegate_close_to_tls(sock, make_undefined_item())) return;
     if (!uv_is_closing((uv_handle_t*)&sock->tcp)) {
         sock->reading = false;
         sock->destroyed = true;
@@ -1432,6 +1484,7 @@ static void socket_close_now(JsSocket* sock) {
 
 static void socket_close_reset_now(JsSocket* sock) {
     if (!sock) return;
+    if (socket_delegate_close_to_tls(sock, make_undefined_item())) return;
     if (!uv_is_closing((uv_handle_t*)&sock->tcp)) {
         sock->reading = false;
         sock->destroyed = true;
@@ -1473,6 +1526,48 @@ static void socket_close_reset_now(JsSocket* sock) {
             });
         }
     }
+}
+
+extern "C" uv_tcp_t* js_net_socket_adopt_for_tls(Item socket_obj, Item tls_obj) {
+    JsSocket* sock = socket_from_object(socket_obj);
+    if (!sock || sock->destroyed || sock->adopted_by_tls) return NULL;
+    if (uv_is_closing((uv_handle_t*)&sock->tcp)) return NULL;
+    if (sock->reading) {
+        uv_read_stop((uv_stream_t*)&sock->tcp);
+        sock->reading = false;
+    }
+    sock->paused = true;
+    sock->adopted_by_tls = true;
+    sock->tls_close_notified = false;
+    sock->tls_socket = tls_obj;
+    js_property_set(sock->js_object, make_string_item("__tls_socket__"), tls_obj);
+    // From this point TLS is the sole native owner; net keeps JS state only
+    // so borrowed-socket close paths cannot interpret handle->data as JsSocket.
+    return &sock->tcp;
+}
+
+extern "C" void js_net_socket_tls_closed(Item socket_obj, bool had_error) {
+    JsSocket* sock = socket_from_object(socket_obj);
+    if (!sock || sock->tls_close_notified) return;
+    sock->tls_close_notified = true;
+    sock->adopted_by_tls = false;
+    sock->destroyed = true;
+    sock->connected = false;
+    sock->reading = false;
+    socket_clear_auto_attempt_timer(sock);
+    socket_clear_timeout(sock);
+    socket_remove_abort_listener(sock);
+    socket_hide_handle(sock);
+    socket_update_writable(sock, false);
+    socket_update_readable(sock, false);
+    js_property_set(sock->js_object, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
+    js_property_set(sock->js_object, make_string_item("__handle__"), ItemNull);
+    js_property_set(sock->js_object, make_string_item("__tls_socket__"), make_undefined_item());
+    socket_update_state_properties(sock);
+    net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, sock->js_object);
+    socket_emit_close(sock->js_object, had_error);
+    socket_note_closed(sock);
+    mem_free(sock);
 }
 
 static Item js_socket_timeout_fire(Item env_item) {
@@ -1821,6 +1916,7 @@ static void server_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_b
 
 static bool socket_start_read(JsSocket* sock) {
     if (!sock || sock->destroyed || sock->reading) return false;
+    if (sock->adopted_by_tls) return false;
     Item js_handle = make_undefined_item();
     if (socket_has_js_read_handle(sock, &js_handle)) {
         Item read_start = js_property_get(js_handle, make_string_item("readStart"));
@@ -1844,6 +1940,7 @@ static Item js_socket_resume(void) {
     JsSocket* sock = socket_from_object(self);
     if (sock) {
         sock->paused = false;
+        if (sock->adopted_by_tls) return self;
         if (!uv_is_closing((uv_handle_t*)&sock->tcp)) {
             uv_ref((uv_handle_t*)&sock->tcp);
         }
@@ -1858,6 +1955,7 @@ static Item js_socket_pause(void) {
     JsSocket* sock = socket_from_object(self);
     if (sock && !sock->destroyed) {
         sock->paused = true;
+        if (sock->adopted_by_tls) return self;
         int r = uv_read_stop((uv_stream_t*)&sock->tcp);
         if (r == 0) sock->reading = false;
         if (!sock->connected && !uv_is_closing((uv_handle_t*)&sock->tcp)) {

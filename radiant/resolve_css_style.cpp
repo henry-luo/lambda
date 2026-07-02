@@ -4518,7 +4518,11 @@ void set_multi_value(MultiValue* mv, const CssValue* value) {
 }
 
 void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon) {
+#ifdef RADIANT_TRACE_CSS_PROPERTIES
+    // Property-level tracing is opt-in; cascade runs for every matched
+    // declaration and otherwise overwhelms large online registry pages.
     log_debug("[Lambda CSS Property] resolve_css_property called: prop_id=%d", prop_id);
+#endif
     if (!decl || !lycon || !lycon->view) {
         log_debug("[Lambda CSS Property] Early return: decl=%p, lycon=%p, view=%p",
             (void*)decl, (void*)lycon, lycon ? (void*)lycon->view : NULL);
@@ -4526,10 +4530,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
     }
     const CssValue* value = decl->value;
     if (!value) { log_debug("No value in declaration");  return; }
+#ifdef RADIANT_TRACE_CSS_PROPERTIES
     log_debug("[Lambda CSS Property] Processing property %d, %s, value type=%d",
         prop_id, css_property_name_from_id(prop_id), value->type);
+#endif
     int64_t specificity = get_cascade_priority(decl);
+#ifdef RADIANT_TRACE_CSS_PROPERTIES
     log_debug("[Lambda CSS Property] Specificity: %lld", (long long)specificity);
+#endif
 
     // Handle CSS custom properties (--variable-name: value)
     if (decl->property_name && decl->property_name[0] == '-' && decl->property_name[1] == '-') {

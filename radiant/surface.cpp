@@ -523,11 +523,24 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         return NULL;
     }
 
+    if (uicon->image_cache == NULL) {
+        // create a new hash map. 2nd argument is the initial capacity.
+        // 3rd and 4th arguments are optional seeds that are passed to the following hash function.
+        uicon->image_cache = image_new(10);
+    }
+
     // Handle data: URIs
     if (strncmp(img_url, "data:", 5) == 0) {
+        ImageEntry search_key = {.path = (char*)img_url, .image = NULL};
+        ImageEntry* entry = (ImageEntry*) hashmap_get(uicon->image_cache, &search_key);
+        if (entry) {
+            log_debug("[BG-IMAGE] Data URI image loaded from cache");
+            return entry->image;
+        }
+
         const char* comma = strchr(img_url, ',');
         if (!comma) {
-            log_error("[BG-IMAGE] Invalid data URI (no comma)");
+            log_warn("image: invalid data URI placeholder (no comma)");
             return NULL;
         }
 
@@ -553,7 +566,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             decoded = (uint8_t*)url_decode_component(data_str, data_str_len, &decoded_len);
         }
         if (!decoded || decoded_len == 0) {
-            log_error("[BG-IMAGE] Failed to decode data URI");
+            log_warn("image: data URI payload unavailable, using placeholder");
             return NULL;
         }
         // Detect format from MIME type or content
@@ -577,10 +590,17 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         } else {
             int width, height, channels;
             int orientation = jpeg_exif_orientation_from_memory(decoded, decoded_len);
+            if (!image_get_dimensions_from_memory(decoded, decoded_len, &width, &height)) {
+                // Invalid inline payloads are common in scraped pages; probe
+                // before full decode so placeholders do not emit backend errors.
+                mem_free(decoded);
+                log_warn("image: unsupported data URI image, using placeholder");
+                return NULL;
+            }
             unsigned char* data = image_load_from_memory(decoded, decoded_len, &width, &height, &channels);
             mem_free(decoded);
             if (!data) {
-                log_error("[BG-IMAGE] Failed to decode data URI image");
+                log_warn("image: unsupported data URI image, using placeholder");
                 return NULL;
             }
             surface = image_surface_create_from(width, height, data);
@@ -596,6 +616,16 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                 image_surface_apply_orientation_metadata(surface, 1);
             }
         }
+        char* cache_path = mem_strdup(img_url, MEM_CAT_RENDER);
+        if (!cache_path) {
+            image_surface_destroy(surface);
+            return NULL;
+        }
+        // Inline image surfaces used to escape the shared cache, so shutdown
+        // had no owner to release their decoded pixels.
+        surface->cache_owned = true;
+        ImageEntry new_entry = {.path = (char*)cache_path, .image = surface};
+        hashmap_set(uicon->image_cache, &new_entry);
         log_debug("[BG-IMAGE] Loaded data URI image: %dx%d", surface->width, surface->height);
         return surface;
     }
@@ -634,19 +664,13 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     unsigned char* downloaded_data = nullptr;
     size_t downloaded_size = 0;
 
-    if (uicon->image_cache == NULL) {
-        // create a new hash map. 2nd argument is the initial capacity.
-        // 3rd and 4th arguments are optional seeds that are passed to the following hash function.
-        uicon->image_cache = image_new(10);
-    }
-
     if (is_http) {
-        // During async discovery/layout, network images are owned by the
-        // resource manager. Render-time CSS backgrounds can be discovered after
-        // the queue drains, so allow a final sync fetch once loading is done.
-        if (uicon->document->resource_manager &&
-            !resource_manager_is_fully_loaded(uicon->document->resource_manager)) {
-            log_debug("[image] Skipping sync download (resource manager active): %s", url_get_href(abs_url));
+        // Network-managed documents cannot let layout/render perform blocking
+        // HTTP fetches; failed or late-discovered images fall back to a missing
+        // image instead of stalling shutdown for per-image timeouts.
+        if (uicon->document->resource_manager) {
+            log_debug("[image] Skipping sync HTTP image fetch (resource manager active): %s",
+                      url_get_href(abs_url));
             url_destroy(abs_url);
             return NULL;
         }
@@ -920,6 +944,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     }
 
     ImageEntry new_entry = {.path = (char*)file_path, .image = surface};
+    surface->cache_owned = true;
     hashmap_set(uicon->image_cache, &new_entry);
     return surface;
 }
@@ -1047,7 +1072,10 @@ void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h)
             log_debug("[image] Decoded local image on demand: %dx%d (intrinsic %dx%d, target %dx%d) from %s",
                       width, height, img->width, img->height, target_w, target_h, img->source_path);
         } else {
-            log_error("[image] Failed to decode local image: %s", img->source_path);
+            // Lazy decode happens after layout chose an intrinsic placeholder;
+            // unsupported/corrupt payloads must not escalate to page failure.
+            log_warn("image: local image decode unavailable, keeping placeholder: %s",
+                     img->source_path);
         }
     } else if (img->source_data) {
         // decode from memory buffer
@@ -1066,7 +1094,9 @@ void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h)
             log_debug("[image] Decoded HTTP image on demand: %dx%d (intrinsic %dx%d, target %dx%d)",
                       width, height, img->width, img->height, target_w, target_h);
         } else {
-            log_error("[image] Failed to decode HTTP image from memory");
+            // Lazy decode happens after network metadata was accepted; keep
+            // rendering stable when the payload is unsupported or corrupt.
+            log_warn("image: HTTP image decode unavailable, keeping placeholder");
         }
         if (img->decoded_width >= img->width && img->decoded_height >= img->height) {
             mem_free(img->source_data);

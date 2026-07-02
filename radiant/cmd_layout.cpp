@@ -2379,10 +2379,16 @@ static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorM
     // Handle media rules by evaluating the condition
     if (rule->type == CSS_RULE_MEDIA) {
         const char* media_condition = rule->data.conditional_rule.condition;
+#ifdef RADIANT_TRACE_MEDIA_QUERY
+        // Media query evaluation happens for every candidate rule/element pair;
+        // keep per-element trace opt-in so large tables do not stall on logging.
         log_debug("[MediaQuery] Evaluating condition: '%s' for element <%s>",
                   media_condition ? media_condition : "(null)", elem->tag_name ? elem->tag_name : "?");
+#endif
         bool matches = css_evaluate_media_query(engine, media_condition);
+#ifdef RADIANT_TRACE_MEDIA_QUERY
         log_debug("[MediaQuery] Result: %s", matches ? "MATCHES" : "does not match");
+#endif
         if (matches) {
             for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
                 CssRule* nested_rule = rule->data.conditional_rule.rules[i];

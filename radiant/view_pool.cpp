@@ -252,13 +252,13 @@ static void release_embed_prop(DomElement* elem) {
         return;
     }
 
-    // Network resource loading attaches images directly to embed->img, bypassing
-    // the UiContext image cache that normally owns URL-backed ImageSurface values.
-    if (elem->embed->img && !elem->embed->img->url) {
+    // Cached data URI SVGs have no URL, so ownership must come from the cache
+    // marker rather than URL presence to avoid freeing a borrowed cache surface.
+    if (elem->embed->img && !elem->embed->img->url && !elem->embed->img->cache_owned) {
         image_surface_destroy(elem->embed->img);
         elem->embed->img = nullptr;
     }
-    if (elem->embed->poster && !elem->embed->poster->url) {
+    if (elem->embed->poster && !elem->embed->poster->url && !elem->embed->poster->cache_owned) {
         image_surface_destroy(elem->embed->poster);
         elem->embed->poster = nullptr;
     }

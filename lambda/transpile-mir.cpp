@@ -3111,11 +3111,15 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
         MIR_reg_t then_val = transpile_expr(mt, if_node->then);
         if (mt->block_returned) {
             // Branch contains a terminal statement (return/break/continue).
-            // Code after MIR_RET is unreachable, but MIR still validates types.
-            // Assign a dummy I64 value to the result register instead of boxing
-            // (which could cause type mismatch: e.g. emit_box_float on an I64).
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                MIR_new_int_op(mt->ctx, 0)));
+            // Code after MIR_RET/TCO is unreachable, but MIR still validates
+            // operand modes, so the dummy must match the if-result register.
+            if (result_type == MIR_T_D) {
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_double_op(mt->ctx, 0.0)));
+            } else {
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, 0)));
+            }
             mt->block_returned = false;
         } else if (proc_discard) {
             // Proc context: result unused, skip expensive boxing.
@@ -3158,9 +3162,14 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
         push_scope(mt);  // isolate branch variables
         MIR_reg_t else_val = transpile_expr(mt, if_node->otherwise);
         if (mt->block_returned) {
-            // Same as above: terminal in else branch
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                MIR_new_int_op(mt->ctx, 0)));
+            // Same as above: terminal in else branch still needs a type-shaped dummy.
+            if (result_type == MIR_T_D) {
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_double_op(mt->ctx, 0.0)));
+            } else {
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, 0)));
+            }
             mt->block_returned = false;
         } else if (proc_discard) {
             // Proc context: result unused, skip expensive boxing.
@@ -7279,14 +7288,13 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
                     MIR_reg_t val = transpile_expr(mt, arg);
                     TypeId val_tid = get_effective_type(mt, arg);
 
-                    // Determine the parameter's expected type (matching transpile_func_def logic)
-                    TypeId param_tid = param->type ? param->type->type_id : LMD_TYPE_ANY;
-                    if (param_tid == LMD_TYPE_ANY) {
-                        char pname[64];
-                        snprintf(pname, sizeof(pname), "%.*s", (int)param->name->len, param->name->chars);
-                        MirVarEntry* pvar = find_var(mt, pname);
-                        if (pvar) param_tid = pvar->type_id;
-                    }
+                    // TCO rewrites run after parameter binding; use the resolved MIR
+                    // local type, not the raw TypeParam wrapper, or typed float params
+                    // can be treated as int when recursive args are assigned back.
+                    char pname[64];
+                    snprintf(pname, sizeof(pname), "%.*s", (int)param->name->len, param->name->chars);
+                    MirVarEntry* pvar = find_var(mt, pname);
+                    TypeId param_tid = pvar ? pvar->type_id : LMD_TYPE_ANY;
 
                     // Convert to match parameter's representation
                     if (mir_is_native_param_type(param_tid)) {
@@ -7335,11 +7343,20 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
                     MIR_new_label_op(mt->ctx, mt->tco_label)));
                 mt->block_returned = true;
 
-                // Return a dummy register (unreachable code, but MIR needs a value)
-                MIR_reg_t dummy = new_reg(mt, "tco_dummy", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, dummy),
-                    MIR_new_int_op(mt->ctx, 0)));
+                // Return a type-shaped dummy register. The jump makes this value
+                // unreachable, but enclosing expressions still use its MIR type.
+                TypeId tail_tid = get_effective_type(mt, (AstNode*)call_node);
+                MIR_type_t dummy_type = type_to_mir(tail_tid);
+                MIR_reg_t dummy = new_reg(mt, "tco_dummy", dummy_type);
+                if (dummy_type == MIR_T_D) {
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                        MIR_new_reg_op(mt->ctx, dummy),
+                        MIR_new_double_op(mt->ctx, 0.0)));
+                } else {
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, dummy),
+                        MIR_new_int_op(mt->ctx, 0)));
+                }
                 if (name_buf) strbuf_free(name_buf);
                 return dummy;
             }
