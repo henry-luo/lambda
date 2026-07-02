@@ -38,7 +38,7 @@ fn fp(n) {
     if (len(ks) == 0) { '"' ++ n.text ++ '"' }
     else { '"' ++ n.text ++ '"^' ++ join_plus(ks) }
   }
-  else if (is_node(n)) { string(n.tag) ++ "(" ++ join_parts([for (c in n.content) fp(c)]) ++ ")" }
+  else if (is_node(n)) { (n.tag) ++ "(" ++ join_parts([for (c in n.content) fp(c)]) ++ ")" }
   else { "?" }
 }
 

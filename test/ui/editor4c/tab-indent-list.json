@@ -1,0 +1,41 @@
+{
+  "name": "editor4c: Tab indents the current list item (adds marginInlineStart)",
+  "_note": "Phase B \u2014 Tab indents the current list item. Formerly an _open_ blocker: Radiant consumed Tab for focus rotation / translated it into a formatIndent beforeinput the editor (which handles Tab via keydown) never asked for, so it never reached FullEditorDom.handleKeyDown. Fixed in radiant/event.cpp: Tab is now dispatched as a keydown first (browser-faithful \u2014 Tab fires no beforeinput), with focus-nav only as the not-prevented fallback.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {
+    "width": 900,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "wait",
+      "ms": 250
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".rdt-surface li"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 80
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "wait",
+      "ms": 120
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".rdt-surface li"
+      },
+      "attribute": "style",
+      "contains": "margin-inline-start:1.75em"
+    }
+  ]
+}

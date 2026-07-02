@@ -5906,7 +5906,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 pseudo_resolve_content_url(lycon, content_replacement_decl, src->str) : nullptr;
             const char* image_url = resolved_content_url ? resolved_content_url : src->str;
             // content:url() has no src attribute, but it still creates a replaced image object.
-            ImageSurface* loaded_img = load_image(lycon->ui_context, image_url);
+            // async network loading attaches embed->img before reflow; reuse that
+            // borrowed surface instead of sync-reloading and freeing its owner.
+            ImageSurface* loaded_img = block->embed->img ? block->embed->img :
+                load_image(lycon->ui_context, image_url);
             // Async network images are pre-attached to the embed; a null sync
             // load during reflow means "still owned by resource manager path".
             if (loaded_img) {
@@ -8177,8 +8180,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 bool has_abs_children = false;
                 while (fc && !has_abs_children) {
                     if (fc->is_element()) {
-                        ViewBlock* cb = lam::view_require_block(static_cast<View*>(fc->as_element()));
-                        if (cb->position &&
+                        // inline-level flex/grid containers can have inline
+                        // pseudo children; only block-capable children can be abspos.
+                        ViewBlock* cb = lam::view_as_block(static_cast<View*>(fc->as_element()));
+                        if (cb && cb->position &&
                             (cb->position->position == CSS_VALUE_ABSOLUTE ||
                              cb->position->position == CSS_VALUE_FIXED)) {
                             has_abs_children = true;

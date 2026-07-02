@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>render text trace volume repro</title>
+  <style>
+    body {
+      font: 18px Arial, sans-serif;
+      line-height: 1.45;
+      max-width: 900px;
+      margin: 32px;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Text render trace volume</h1>
+  <p>
+    This page intentionally contains enough visible text to exercise glyph
+    loading, line metrics, and text rendering repeatedly. It should render
+    without per-glyph or per-fragment debug logging unless RADIANT_TRACE_TEXT,
+    RADIANT_TRACE_RENDER, or RADIANT_TRACE_FONT is explicitly enabled.
+  </p>
+  <p>
+    CMake, Unicode, OpenBSD, Git, and other online pages found useful browser
+    compatibility bugs. Local repro pages keep those bugs close to the codebase
+    so the same behavior can be checked without depending on network state.
+  </p>
+  <p>
+    Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi
+    omicron pi rho sigma tau upsilon phi chi psi omega. The quick brown fox
+    jumps over the lazy dog. 0123456789.
+  </p>
+</main>
+</body>
+</html>
+

@@ -1,0 +1,21 @@
+{
+  "name": "editor4c: select-all + type replaces the block, then bold applies to the new text",
+  "_note": "Phase B — composes 4B's select-all-replace with a subsequent mark application. Verifies model+selection continuity across a replace: after the replace the caret is on the new leaf and Cmd+A re-selects it, then Bold applies correctly to the new content (not the old).",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 60},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "wait", "ms": 80},
+    {"type": "type", "target": {"selector": ".rdt-surface"}, "text": "RR"},
+    {"type": "wait", "ms": 100},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "wait", "ms": 80},
+    {"type": "click", "target": {"selector": ".rdt-toolbar button[title=\"Bold (Cmd+B)\"]"}},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface h1"}, "equals": "RR"},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface [data-source-path=\"0,0\"]"}, "attribute": "style", "contains": "font-weight:bold"}
+  ]
+}

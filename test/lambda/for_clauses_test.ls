@@ -57,7 +57,7 @@ let people = [{name: "Alice", age: 30}, {name: "Bob", age: 25}, {name: "Carol", 
 [for (p in people where p.age > 28) p.name]
 
 // Test 18: Map transformation with let
-[for (p in people, let info = p.name ++ " (" ++ string(p.age) ++ ")") info]
+[for (p in people, let info = p.name ++ " (" ++ (p.age) ++ ")") info]
 
 // Test 19: Order by numeric field ascending
 for (p in people order by p.age) p.age

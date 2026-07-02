@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<!--
+  Repro for HTTP staging base-tag insertion.
+  Pages like openbsd.org can contain a <header> before an explicit <head>.
+  The fetch/staging layer must not treat "<header" as the "<head>" start tag;
+  otherwise relative resources are resolved against the staged temp file.
+
+  To exercise the original path, serve this file over localhost and run:
+    ./lambda.exe view http://127.0.0.1:PORT/test/browse/repro/http-header-before-head-relative-resource.html --headless
+-->
+<body>
+<header>
+  <h1>Header before head</h1>
+</header>
+<link rel="stylesheet" href="http-header-before-head-relative-resource.css">
+<main id="base-resource-sentinel">
+  Relative CSS should load when the HTTP staging base is inserted correctly.
+</main>
+</body>
+</html>
+

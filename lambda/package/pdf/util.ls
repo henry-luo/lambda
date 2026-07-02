@@ -31,7 +31,7 @@ pub fn fmt_rgb(r, g, b) {
     let ri = int(round(float(r) * 255.0));
     let gi = int(round(float(g) * 255.0));
     let bi = int(round(float(b) * 255.0));
-    "rgb(" ++ string(ri) ++ "," ++ string(gi) ++ "," ++ string(bi) ++ ")"
+    "rgb(" ++ (ri) ++ "," ++ (gi) ++ "," ++ (bi) ++ ")"
 }
 
 // ============================================================

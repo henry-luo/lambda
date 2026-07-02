@@ -419,6 +419,8 @@ static int boundary_legacy_offset(const DomBoundary* boundary) {
     return (int)boundary->offset;
 }
 
+static uint32_t legacy_view_offset_limit(View* view);
+
 static void expected_legacy_caret_projection(DomSelection* selection,
                                              const DomBoundary* focus,
                                              View** out_view,
@@ -433,9 +435,19 @@ static void expected_legacy_caret_projection(DomSelection* selection,
             bool focus_at_end = selection->direction != DOM_SEL_DIR_BACKWARD;
             View* resolved_view = static_cast<View*>(
                 focus_at_end ? range->end_view : range->start_view);
-            if (resolved_view) {
+            int resolved_off = focus_at_end
+                ? range->end_byte_offset : range->start_byte_offset;
+            // Only adopt the geometry-resolved endpoint as the logical caret
+            // when its offset is valid for that view. The layout resolver may
+            // fall back to a void/atomic element's box edge (e.g. a trailing
+            // <br>) with an out-of-bounds offset used purely for x/y geometry;
+            // keeping the boundary projection there avoids an inconsistent
+            // projection vs. the offset-limit invariant. Mirrors the same guard
+            // in state_store's state_store_refresh_caret_projection.
+            if (resolved_view &&
+                (uint32_t)resolved_off <= legacy_view_offset_limit(resolved_view)) {
                 view = resolved_view;
-                offset = focus_at_end ? range->end_byte_offset : range->start_byte_offset;
+                offset = resolved_off;
             }
         }
     }

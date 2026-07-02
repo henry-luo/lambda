@@ -8415,8 +8415,17 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
     if ((itid == LMD_TYPE_STRING || itid == LMD_TYPE_INT || itid == LMD_TYPE_FLOAT) &&
         !js_key_is_symbol(index) && !js_array_key_is_index(index, NULL)) {
         Item prop_key = (itid == LMD_TYPE_STRING) ? index : js_array_numeric_key_to_property_key(index);
-        JS_PROPERTY_SET_BRANCH("array_set_non_index_to_property");
-        js_property_set(array, prop_key, value);
+        JS_PROPERTY_SET_BRANCH("array_set_non_index_to_companion");
+        Array* arr = array.array;
+        if (arr->extra == 0) {
+            Item obj = js_new_object();
+            obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
+            arr->extra = (int64_t)(uintptr_t)obj.map;
+        }
+        Item map_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
+        // Non-index array keys live in the companion map; re-entering the
+        // array setter here recurses through the same exotic setter path.
+        js_property_set(map_item, prop_key, value);
         return value;
     }
 
@@ -18159,6 +18168,22 @@ static void js_collection_order_remove(JsCollectionData* cd, Item key) {
 static void js_collection_update_size(Item obj, JsCollectionData* cd) {
     (void)obj;
     (void)cd;
+}
+
+extern "C" void js_collection_map_heap_destroy(Map* map, gc_native_seen_t* seen_native) {
+    if (!map) return;
+    bool found = false;
+    Item cd_item = js_map_get_fast(map, "__cd", 4, &found);
+    if (!found) return;
+    TypeId tid = get_type_id(cd_item);
+    if (tid != LMD_TYPE_INT && tid != LMD_TYPE_INT64) return;
+    int64_t ptr_val = it2i(cd_item);
+    if (ptr_val < 4096) return;
+    JsCollectionData* cd = (JsCollectionData*)(uintptr_t)ptr_val;
+    if (cd->hmap && !gc_native_seen_seen_or_add(seen_native, cd->hmap)) {
+        hashmap_free(cd->hmap);
+    }
+    cd->hmap = NULL;
 }
 
 extern "C" Item js_map_collection_new(void) {

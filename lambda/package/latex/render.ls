@@ -419,7 +419,7 @@ fn render_maketitle_div(css_class, el, fallback_text, info) {
 fn render_toc(info) {
     if (len(info.headings) == 0) { null }
     else {
-        let items = (for (h in info.headings, let cls = "toc-l" ++ string(h.level))
+        let items = (for (h in info.headings, let cls = "toc-l" ++ (h.level))
             <li class: cls;
                 <a href: "#" ++ h.id;
                     if (h.number != null) { <span class: "sec-num"; h.number> }
@@ -868,7 +868,7 @@ fn render_figure(el, info) {
     let fig_num = get_figure_num(el, info)
     let caption_el = if (cap_text != null) (
         <figcaption;
-            <strong; "Figure " ++ string(fig_num) ++ ": ">
+            <strong; "Figure " ++ (fig_num) ++ ": ">
             cap_text
         >
     ) else null
@@ -911,7 +911,7 @@ fn render_multicols(el, info) {
 fn render_theorem_env(el, info, display_name, env_type) {
     let items = render_children(el, 0, info)
     let env_num = get_theorem_num(el, info, env_type)
-    let heading = display_name ++ " " ++ string(env_num) ++ "."
+    let heading = display_name ++ " " ++ (env_num) ++ "."
     <div class: "latex-theorem latex-" ++ env_type;
         <strong class: "latex-theorem-head"; heading>
         " "
@@ -963,7 +963,7 @@ fn render_table_env(el, info) {
     let tab_num = get_table_num(el, info)
     let caption_el = if (cap_text != null) (
         <div class: "latex-table-caption";
-            <strong; "Table " ++ string(tab_num) ++ ": ">
+            <strong; "Table " ++ (tab_num) ++ ": ">
             cap_text
         >
     ) else null
@@ -1542,7 +1542,7 @@ fn render_footnote(el, info) {
     let fn_key = util.slugify(content_text)
     let fn_num = find_footnote_num(info.footnotes, fn_key, 0)
     <sup class: "latex-footnote-ref";
-        <a href: "#fn-" ++ string(fn_num), id: "fnref-" ++ string(fn_num);
+        <a href: "#fn-" ++ (fn_num), id: "fnref-" ++ (fn_num);
             string(fn_num)
         >
     >
@@ -1794,7 +1794,7 @@ fn render_custom_theorem(el, info, thm_def) {
     if (thm_def.numbered) {
         // look up counter from theorems list
         let env_num = get_theorem_num(el, info, env_type)
-        let heading = display_name ++ " " ++ string(env_num) ++ "."
+        let heading = display_name ++ " " ++ (env_num) ++ "."
         <div class: "latex-theorem latex-" ++ env_type;
             <strong class: "latex-theorem-head"; heading>
             " "

@@ -283,17 +283,20 @@ path by design.
 
 ## 14. `var` declared with a "null-shaped" initial value cannot be reassigned
 
-**Severity: HIGH** — silent assignment failure.
+**Status: ✅ Fixed (2026-07-02)** — unannotated `var` bindings now widen even
+when their initial value is `null` or an empty text literal normalized to
+`null`. Reassigned values survive both direct reads and later map/record
+packing.
 
 ```lambda
 pn demo() {
-    var s = ""             // ← s is locked as null-typed
+    var s = ""             // "" normalizes to null
     s = "hello"
-    print({ s: s })        // -> { s: null }   (assignment dropped!)
+    print({ s: s })        // -> { s: "hello" }
 
     var x = null
     x = { a: 1 }
-    print({ x: x })        // -> { x: null }   (also dropped)
+    print({ x: x })        // -> { x: { a: 1 } }
 
     var m = { x: 0 }       // ← concrete shape: works
     m = { x: 99 }
@@ -301,29 +304,26 @@ pn demo() {
 }
 ```
 
-The `var` is type-inferred from its initial expression. If the initial
-value is `null` (or anything that becomes null, e.g. `""` per #13),
-subsequent assignments of differently-typed values are silently dropped
-— no error, no warning, the variable just stays `null`.
+Root cause: the MIR runtime variable already widened to boxed `ANY`, but the
+AST name entry and later identifier nodes kept the initializer's static
+`null` type. Map literals such as `{s: s}` then compiled a null-shaped field
+and discarded the reassigned boxed value during field packing.
 
-This combines lethally with #13: `var s = ""; while (...) { s = s ++ ch }`
-appears reasonable but stays `null` forever.
-
-**Asks**:
-- Either widen the inferred type on assignment, or raise a type error.
-- Silent assignment failure is the worst possible outcome.
+Regression coverage: `test/lambda/proc/proc_var.ls` now checks both
+`var x = null; x = {a: 1}; {x: x}` and `var s = ""; s = "hello"; {s: s}`.
 
 ---
 
 ## 15. `if (cond) X else Y` expression returns `null` inside `pn`
 
-**Severity: HIGH** — combined with #2 this means `pn` cannot use
-expression-style conditionals at all.
+**Status: ✅ Fixed (2026-07-02)** — `let`/`var` initializers inside `pn` now
+preserve the value of expression-style `if/else` forms, including mixed
+branch types that box to `ANY`.
 
 ```lambda
 pn demo(xs) {
     let op0 = if (len(xs) >= 1) xs[0] else null
-    print({ op0: op0 })       // -> { op0: null }   even when len(xs) == 2
+    print({ op0: op0 })       // -> { op0: { a: 1 } }
 }
 
 fn demo_fn(xs) {
@@ -332,18 +332,15 @@ fn demo_fn(xs) {
 }
 ```
 
-Same construct, different result depending on `pn` vs `fn`. Wrapping
-in parens does not help; using a `var` and an imperative `if` body also
-fails (because the var hits #14).
+Root cause: the MIR procedural path deliberately discarded boxed
+if-expression branch results when an `if` was used as a side-effect-only
+statement. `let op0 = if (...) ... else ...` was also evaluating its RHS
+through that procedural discard path, so mixed branch values were replaced
+with `null` before the binding was stored.
 
-**Workaround**: write all dispatcher / branching logic as `fn`. Use `pn`
-only as the outermost driver with `while`-loops and `var` whose initial
-value matches the eventual shape (`var out = []`, not `var out = null`).
-
-**Asks**:
-- Make `let x = if (c) a else b` work in `pn` (it's the natural form).
-- Or emit a syntax error: "if-expression value not bound in pn; use
-  `if (c) { x = a } else { x = b }`".
+Regression coverage: `test/lambda/proc/proc_control.ls` now checks
+`let op0 = if (len(xs) >= 1) xs[0] else null` inside a `pn` and verifies that
+the resulting map preserves `{ a: 1 }`.
 
 ---
 
@@ -367,21 +364,25 @@ documented; defensively bracing every branch is the safe form.
 
 ## 17. `fn` cannot call `pn` (E224) — viral propagation up the call graph
 
+**Status:  ✅ No Fix / by design** — `fn` cannot call `pn`. Functional Lambda
+functions must remain pure expression contexts, while `pn` is the procedural
+context that permits mutation, statement sequencing, early `return`, and other
+imperative effects. A caller that needs to invoke a procedure must itself be a
+`pn`.
+
 ```lambda
 pn helper(s) { var i = 0; ...; return out }
 fn caller(x) { helper(x) }
 // error[E224]: procedure 'helper' cannot be called in a function
 ```
 
-Once you write a `pn` somewhere, every transitive caller must also be
-`pn`, even if they have no mutation. Combined with #2 / #14 / #15 this
-forces `pn` callers into awkward gymnastics that defeat the purpose of
-the procedural mode.
+This propagation is intentional: allowing a pure `fn` to call a procedural
+`pn` would leak procedural effects into expression-only code and blur the
+language boundary between pure functions and procedures.
 
-**Workaround during PDF Phase 2**: rewrote `decode_hex` and
-`decode_literal` from `pn` (with `var out = ""; while …`) to `fn` using
-list comprehensions + `join("")`. Functional form is cleaner anyway,
-but the engine forced the change.
+Guidance: keep reusable pure helpers as `fn`. Use `pn` for drivers and helpers
+that require mutation or procedural control flow, and keep their transitive
+callers procedural too.
 
 ---
 
@@ -432,105 +433,78 @@ parses as two statements; the trailing `or (...)` becomes an
 
 ## 19. `pn` parameter with `: int` annotation breaks `string(p + 1)`
 
-**Severity: HIGH** — silent: produces an `error` value.
+**Status: ✅ Fixed / verified (2026-07-02)** — current MIR direct execution
+handles `string(page_index + 1)` correctly when `page_index` is a `pn`
+parameter annotated as `: int`.
 
 ```lambda
 pn render(page_index: int) {
     let s = "Page " ++ string(page_index + 1)
-    print({ s: s })       // -> { s: "Page <error>" }
+    print({ s: s })       // -> { s: "Page 1" }
 }
 
 pn render2(page_index) {  // no annotation
     let s = "Page " ++ string(page_index + 1)
     print({ s: s })       // -> { s: "Page 1" }
 }
-render(0); render2(0)
+
+pn main() {
+    render(0)
+    render2(0)
+}
 ```
 
-When `page_index` is annotated `: int` and called from a `pn` chain
-with the same caller-side type, `string(page_index + 1)` returns an
-error value (which prints as `<error>` and silently corrupts the
-output string).
+Verified repro output: both the annotated and unannotated forms print
+`{ s: "Page 1" }` under `./lambda.exe run`.
 
-This is likely the same root cause as #6 (int4 vs int5 type mismatch
-in `ord`) but reproduced through a much more innocuous code path —
-just a typed parameter and an arithmetic expression.
-
-**Asks**:
-- Make `int` parameters accept and produce the same int width
-  consistently across `pn` boundaries.
-- Or simply: stop silently producing an error value out of arithmetic
-  on a typed parameter — raise instead.
+Regression coverage: `test/lambda/proc/proc_param_type_infer.ls` now checks
+`pn test_typed_int_string(n: int) { "Page " ++ string(n + 1) }`.
 
 ---
 
 ## 20. `pn` calling `pn` returns a stale/default record (nested-pn corruption)
 
-**Severity: HIGH** — silent: returned record looks valid but every
-field is the type's default value.
+**Status: ✅ Fixed / not reproducible (2026-07-02)** — current MIR direct
+execution preserves record fields returned from a child `pn` and consumed by a
+parent `pn`. A focused nested-`pn` probe now returns `weight: "bold"` through
+both the direct child call and the parent binding.
 
 ```lambda
-// font.ls
-pub pn from_basefont(basefont: string) {
-    let s14 = standard14(basefont)              // fn returning a record
-    if (s14 != _UNKNOWN) { return s14 }
-    // …heuristic path returning a record with weight/style filled in…
+pn child_font(name: string) {
+    let weight = if (name == "Helvetica-Bold") { "bold" } else { "normal" }
+    {family: "Helvetica", weight: weight, style: "normal"}
 }
 
-pub pn resolve_font(pdf, page, name: string) {
-    let dict     = resolve.page_font(pdf, page, name)
-    let basefont = _basefont_or(name, dict)
-    let info     = from_basefont(basefont)      // pn → pn call
-    return _make_descriptor(name, info, _to_unicode_or_null(dict))
+pn parent_font(name: string) {
+    let info = child_font(name)
+    {family: info.family, weight: info.weight, style: info.style, info: info}
 }
 ```
 
-Standalone `from_basefont("Helvetica-Bold")` returns
-`{ family: "…", weight: "bold", style: "normal" }`. When invoked from
-within `resolve_font` (also `pn`), the `info` binding receives
-`{ family: "…", weight: "normal", style: "normal" }` — the bold/italic
-information is silently lost. The same call in a probe `pn main()` that
-does not nest two `pn` calls works correctly.
-
-Tested workarounds that did **not** help:
-- Returning the record through more `fn` helpers (`_make_descriptor`,
-  `_pick_info`).
-- Eagerly destructuring `let w = info.weight; …` before any further use.
-- Renaming the binding, splitting the call onto its own statement.
-
-**Workaround that worked**: avoid the `pn → pn` call. Call the `fn`
-variant (`standard14`) directly from `resolve_font` and only fall back
-to the `pn` heuristic when needed:
+Verified output:
 
 ```lambda
-pub pn resolve_font(pdf, page, name) {
-    …
-    let stripped = _strip_subset(basefont)     // fn
-    let s14      = standard14(stripped)        // fn
-    let fb       = from_basefont(basefont)     // pn (still called, but result
-                                               //      no longer the only path)
-    let info     = _pick_info(s14, fb)         // fn helper: if (s != _UNKNOWN) s else fb
-    …
-}
+{ direct: { family: "Helvetica", weight: "bold", style: "normal"}}
+{ nested: { family: "Helvetica", weight: "bold", style: "normal",
+            info: { family: "Helvetica", weight: "bold", style: "normal"}}}
 ```
 
-This is the same family of bug as #2 / #15 — `pn` value-flow is unsafe.
-Combined with #15 (`let x = if …` is null in `pn`) the safe pattern is:
-**push every value-producing branch into a `fn` and have `pn` only
-sequence side effects.**
+Note: the original PDF `font.ls` path has already been rewritten to use `fn`
+helpers (`from_basefont`, `resolve_font`, `_make_descriptor`) rather than the
+old `pn -> pn` chain that exposed this issue.
 
-**Asks**:
-- Either fix `pn → pn` value return (this should be table stakes), or
-- Hard-fail at compile time on `let r = some_pn(…)` inside another `pn`
-  with a dedicated diagnostic ("pn return values are not safely
-  consumable from another pn; route through a fn").
+Regression coverage: `test/lambda/proc/proc_nested_pn_record.ls` verifies
+that a parent `pn` can bind a record returned from a child `pn` without losing
+non-default fields.
 
 ---
 
 ## 21. Map "spread + override" constructors silently drop fields not listed
 
-**Severity: MEDIUM** — silent: constructed record is missing fields you
-forgot to copy.
+**Status: ✅ No Fix / by design (2026-07-02)** — map literals construct exactly
+the fields listed in the literal. They do not implicitly copy fields from an
+input state record. Use map spread when the intent is "copy this record, then
+override these fields."
 
 ```lambda
 fn _with(st, tm, tlm, name, size, info, leading, in_text) {
@@ -551,19 +525,29 @@ silently dropped the colour that `rg` had set just before. Result: text
 rendered black even when the surrounding code looked correct.
 
 This is "user error" in one sense, but the Lambda map syntax has a
-spread form `{*: st, key: value}` precisely for this case. It's easy to
+spread form `{*:st, key: value}` precisely for this case. It's easy to
 forget to use it, and there is no warning when a record-typed value
-loses a field across a constructor call.
+loses a field across a constructor call. Verified on 2026-07-02: the
+plain-map shorthand `{st, key: value}` does not parse; use `{*:st, ...}`.
 
-**Workarounds**:
-- Always prefer `{*: base, key: override, …}` over hand-listing fields.
+Changing the runtime semantics would be wrong: a fresh map literal must remain a
+fresh constructor, and silently preserving fields from an input parameter would
+make map construction context-dependent. The fix is to make the intended update
+form prominent in the docs and use it consistently in state-update helpers.
+
+**Resolution**:
+- Always prefer `{*:base, key: override, …}` over hand-listing fields.
 - Or define the record as a typed shape so the type system catches the
   missing field.
+- Documented this more prominently in `doc/Lambda_Data.md` and
+  `doc/Lambda_Expr_Stam.md`: fresh map literals do not preserve omitted fields;
+  spread the base value first for copy-with-override updates.
 
-**Asks**:
-- A warning when a `fn`/`pn` returns a map literal that has a strictly
-  smaller field set than a same-named map flowing through the function
-  on its inputs would catch this whole class of bug.
+**Possible future improvement**:
+- An opt-in lint warning could flag a helper that accepts a map-like parameter
+  and returns a smaller map literal without spreading it. This should not be a
+  runtime warning/error because smaller map construction is valid Lambda code and
+  many intentional constructors would otherwise become noisy.
 
 ---
 

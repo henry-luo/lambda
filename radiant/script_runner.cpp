@@ -56,6 +56,8 @@ extern "C" void log_mem_stage(const char* stage);  // defined in radiant/window.
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
 extern Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
+extern void jm_cleanup_active_mir(void);
+extern void jm_abandon_active_mir_after_signal(void);
 
 // Crash guard for JS JIT execution (catches SIGSEGV/SIGBUS in compiled code)
 #ifndef _WIN32
@@ -1729,6 +1731,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         log_debug("execute_document_scripts: null parameters, skipping");
         return;
     }
+    js_batch_cleanup_unsafe = 0;
 
     // reset counters
     loaded_external_scripts = 0;
@@ -1826,16 +1829,53 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         sigaction(SIGSEGV, &js_exec_old_segv, NULL);
         sigaction(SIGBUS, &js_exec_old_bus, NULL);
         sigaction(SIGALRM, &js_exec_old_alrm, NULL);
-    } else if (jmp_val == 2) {
-        log_error("execute_document_scripts: JS execution timed out after %ds", timeout_seconds);
-        result = ItemError;
-        js_batch_cleanup_unsafe = 1;
-        if (preamble) { mem_free(preamble); preamble = nullptr; }
-    } else {
-        log_error("execute_document_scripts: recovered from crash in JS JIT code");
-        result = ItemError;
-        if (preamble) { mem_free(preamble); preamble = nullptr; }
-    }
+	    } else if (jmp_val == 2) {
+	        log_error("execute_document_scripts: JS execution timed out after %ds", timeout_seconds);
+	        result = ItemError;
+	        js_batch_cleanup_unsafe = 1;
+	        // siglongjmp skips the normal guarded-execution epilogue; restore
+	        // handlers here so teardown does not run under the JS crash guard.
+	        js_exec_guarded = 0;
+	        alarm(0);
+	        sigaction(SIGSEGV, &js_exec_old_segv, NULL);
+	        sigaction(SIGBUS, &js_exec_old_bus, NULL);
+	        sigaction(SIGALRM, &js_exec_old_alrm, NULL);
+		        // siglongjmp skips MIR/transpiler destructors; clean the active stack
+		        // before releasing the wrapper so large code pages are not orphaned.
+		        jm_cleanup_active_mir();
+	        jm_cleanup_deferred_mir();
+	        if (preamble) {
+	            // siglongjmp can land after MIR preamble ownership was transferred;
+	            // use the normal destroyer so source_buffer/MIR/pools are released.
+	            preamble_state_destroy(preamble);
+	            mem_free(preamble);
+	            preamble = nullptr;
+	        }
+	    } else {
+	        log_error("execute_document_scripts: recovered from crash in JS JIT code");
+	        result = ItemError;
+	        // recovered JS crashes can leave timer/runtime state inconsistent; let
+	        // document teardown abandon handles instead of re-entering them later.
+	        js_batch_cleanup_unsafe = 1;
+	        // siglongjmp skips the normal guarded-execution epilogue; restore
+	        // handlers here so teardown does not run under the JS crash guard.
+	        js_exec_guarded = 0;
+	        alarm(0);
+	        sigaction(SIGSEGV, &js_exec_old_segv, NULL);
+	        sigaction(SIGBUS, &js_exec_old_bus, NULL);
+	        sigaction(SIGALRM, &js_exec_old_alrm, NULL);
+		        // the native signal may have interrupted MIR/JIT state in-place;
+		        // abandon active MIR contexts instead of finalizing corrupted lists.
+		        jm_abandon_active_mir_after_signal();
+	        jm_cleanup_deferred_mir();
+	        if (preamble) {
+	            // siglongjmp can land after MIR preamble ownership was transferred;
+	            // use the normal destroyer so source_buffer/MIR/pools are released.
+	            preamble_state_destroy(preamble);
+	            mem_free(preamble);
+	            preamble = nullptr;
+	        }
+	    }
 #else
     }
 #endif
@@ -1877,16 +1917,27 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
             // Do NOT destroy heap/nursery/pool — they're retained on the document
         } else {
             log_info("execute_document_scripts: releasing transient JS context");
+            // transient scripts can leave timers rooted in this heap, sometimes
+            // without a document pointer; shut down the loop before heap free.
+            js_event_loop_shutdown();
             js_batch_reset();
             script_runner_cleanup_js_state(dom_doc);
         }
     } else {
         // Fallback: no valid preamble — destroy as before
         if (preamble) { mem_free(preamble); }
-        if (!s_retain_js_state) {
+        if (!s_retain_js_state || script_runner_js_batch_cleanup_unsafe()) {
             // Transient document scripts still populate global/module state with
             // heap-bound functions and DOM wrappers. Clear them before tearing
             // down the per-document heap so the next batch file starts clean.
+            // Timers also hold heap-root slots, so close the loop before heap free.
+            if (script_runner_js_batch_cleanup_unsafe()) {
+                // A signal longjmp can invalidate the retained preamble before
+                // normal JS-state retention runs; force DOM wrapper/global reset.
+                js_event_loop_abandon_all_timers();
+            } else {
+                js_event_loop_shutdown();
+            }
             js_batch_reset();
         }
         if (runtime.heap && runtime.heap->gc) {
@@ -1914,6 +1965,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
 
     script_task_collection_free(&script_tasks);
     script_runner_cleanup_source_cache();
+    js_batch_cleanup_unsafe = 0;
 }
 
 extern "C" bool script_runner_js_batch_cleanup_unsafe(void) {

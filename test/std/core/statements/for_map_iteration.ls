@@ -8,7 +8,7 @@
 [for (k, v in {a: 1, b: 2, c: 3}) [k, v]]
 
 // ===== Key-value concatenation =====
-[for (k, v in {a: 1, b: 2, c: 3}) k ++ "=" ++ string(v)]
+[for (k, v in {a: 1, b: 2, c: 3}) k ++ "=" ++ (v)]
 
 // ===== Values only =====
 [for (k, v in {x: 10, y: 20}) v]

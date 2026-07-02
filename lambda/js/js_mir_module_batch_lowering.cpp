@@ -1620,6 +1620,34 @@ void jm_cleanup_active_mir(void) {
     jm_sync_active_js_transpile_top();
 }
 
+void jm_abandon_active_mir_after_signal(void) {
+    for (int i = g_active_js_transpile_count - 1; i >= 0; i--) {
+        ActiveJsTranspileOwner* owner = &g_active_js_transpile_stack[i];
+        if (owner->mt) {
+            jm_destroy_mir_transpiler(owner->mt);
+            owner->mt = NULL;
+        }
+    }
+    jm_sync_active_js_transpile_top();
+    if (g_active_mir_ctx) {
+        // A recovered SIGSEGV/SIGBUS may leave MIR's import/module lists
+        // inconsistent; re-entering MIR_finish can fault while formatting errors.
+        g_active_mir_ctx = NULL;
+    }
+    while (g_active_js_transpile_count > 0) {
+        ActiveJsTranspileOwner* owner = &g_active_js_transpile_stack[g_active_js_transpile_count - 1];
+        JsTranspiler* tp = owner->tp;
+        char* owned_source = owner->owned_source;
+        owner->mt = NULL;
+        owner->tp = NULL;
+        owner->owned_source = NULL;
+        jm_pop_empty_active_js_transpile_owners();
+        if (tp) js_transpiler_destroy(tp);
+        if (owned_source) mem_free(owned_source);
+    }
+    jm_sync_active_js_transpile_top();
+}
+
 void jm_defer_mir_cleanup(MIR_context_t ctx) {
     if (module_mir_context_count < MAX_MODULE_CONTEXTS) {
         module_mir_name_pools[module_mir_context_count] = NULL;

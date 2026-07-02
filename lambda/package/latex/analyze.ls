@@ -381,7 +381,7 @@ fn parse_rgb_float(spec) {
         let r = int(float(trim(parts[0])) * 255.0)
         let g = int(float(trim(parts[1])) * 255.0)
         let b = int(float(trim(parts[2])) * 255.0)
-        "rgb(" ++ string(r) ++ "," ++ string(g) ++ "," ++ string(b) ++ ")"
+        "rgb(" ++ (r) ++ "," ++ (g) ++ "," ++ (b) ++ ")"
     }
     else { spec }
 }
@@ -395,7 +395,7 @@ fn parse_rgb_int(spec) {
 
 fn parse_gray(spec) {
     let val = int(float(spec) * 255.0)
-    "rgb(" ++ string(val) ++ "," ++ string(val) ++ "," ++ string(val) ++ ")"
+    "rgb(" ++ (val) ++ "," ++ (val) ++ "," ++ (val) ++ ")"
 }
 
 // ============================================================
@@ -645,6 +645,6 @@ fn make_unique_slug(base, counts) {
         {slug: base, counts: add_entry(counts, base, 1)}
     } else {
         let next = current + 1
-        {slug: base ++ "-" ++ string(next), counts: add_entry(counts, base, next)}
+        {slug: base ++ "-" ++ (next), counts: add_entry(counts, base, next)}
     }
 }

@@ -23,10 +23,21 @@
 #include "font_gpos.h"
 
 #include <math.h>
+#include <stdlib.h>
 
 // ============================================================================
 // Helpers
 // ============================================================================
+
+static int font_metrics_trace_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        // Font metrics are queried repeatedly during layout and render; verbose
+        // metric traces must be opt-in to keep full-page loads from going log-bound.
+        enabled = getenv("RADIANT_TRACE_FONT") ? 1 : 0;
+    }
+    return enabled != 0;
+}
 
 /**
  * Convert font design units to CSS pixels.
@@ -310,8 +321,10 @@ float font_calc_normal_line_height(FontHandle* handle) {
     // 1. try platform-specific metrics first (CoreText on macOS)
     float ascent, descent, line_height;
     if (get_font_metrics_platform(family, font_size, &ascent, &descent, &line_height)) {
-        log_debug("font_calc_normal_line_height (platform): %.2f for %s@%.1f",
-                  line_height, family, font_size);
+        if (font_metrics_trace_enabled()) {
+            log_debug("font_calc_normal_line_height (platform): %.2f for %s@%.1f",
+                      line_height, family, font_size);
+        }
         return line_height;
     }
 
@@ -361,8 +374,10 @@ float font_calc_normal_line_height(FontHandle* handle) {
         }
     }
 
-    log_debug("font_calc_normal_line_height: %.2f for %s@%.1f (use_typo=%d)",
-              line_height, family, font_size, use_typo);
+    if (font_metrics_trace_enabled()) {
+        log_debug("font_calc_normal_line_height: %.2f for %s@%.1f (use_typo=%d)",
+                  line_height, family, font_size, use_typo);
+    }
     return line_height;
 }
 
@@ -403,8 +418,10 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
         float rl = roundf(m->typo_line_gap);
         *out_ascender = ra + rd;
         *out_descender = rl;
-        log_debug("font_get_normal_lh_split (typo): asc=%f desc=%f for %s@%.1f",
-                  *out_ascender, *out_descender, family, font_size);
+        if (font_metrics_trace_enabled()) {
+            log_debug("font_get_normal_lh_split (typo): asc=%f desc=%f for %s@%.1f",
+                      *out_ascender, *out_descender, family, font_size);
+        }
         return;
     }
 
@@ -416,8 +433,10 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
         *out_ascender = ascent + half_leading;
         *out_descender = descent + half_leading;
         if (*out_descender < 0) *out_descender = 0;
-        log_debug("font_get_normal_lh_split (platform, half-leading): asc=%f desc=%f lead=%f for %s@%.1f",
-                  *out_ascender, *out_descender, leading, family, font_size);
+        if (font_metrics_trace_enabled()) {
+            log_debug("font_get_normal_lh_split (platform, half-leading): asc=%f desc=%f lead=%f for %s@%.1f",
+                      *out_ascender, *out_descender, leading, family, font_size);
+        }
         return;
     }
 

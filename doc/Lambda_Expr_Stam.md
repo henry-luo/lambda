@@ -115,6 +115,9 @@ let a = [1, 2, 3]
 let b = (10, 20)
 (*a, *b)               // (1, 2, 3, 10, 20) — spread into tuple
 
+let base = {x: 1, y: 2}
+{*:base, x: 10}        // {x: 10, y: 2} — copy map fields, override x
+
 // Spread in function calls
 fn sum_all(...args) = args | reduce((a, b) => a + b, 0)
 sum_all(*[10, 20, 30])  // 60
@@ -123,6 +126,9 @@ sum_all(*[10, 20, 30])  // 60
 let nested = [[1, 2], [3, 4]]
 [*nested[0], *nested[1]]  // [1, 2, 3, 4]
 ```
+
+Map literals construct only the fields they list. Use map spread when an update
+should preserve the fields of an existing map or record-shaped value.
 
 ### Vector Arithmetic
 

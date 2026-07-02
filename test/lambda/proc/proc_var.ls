@@ -188,7 +188,7 @@ pn test_assign_with_array_index() {
 // Test 17: assignment with string concat and function call
 pn test_assign_concat_fn_call() {
     var msg = "Hello"
-    msg = msg ++ string(42)   // test ++ with function call
+    msg = msg ++ (42)   // test ++ with function call
     msg  // should be "Hello42"
 }
 
@@ -213,6 +213,20 @@ pn test_var_shadowing_else() {
         y = y + 50
     }
     y  // should be 100 (outer y unchanged)
+}
+
+// Test 20: null-initialized var packed into a map after reassignment
+pn test_null_var_map_pack() {
+    var x = null
+    x = {a: 1}
+    {x: x}
+}
+
+// Test 21: empty string initializer is null-shaped but still widens on assignment
+pn test_empty_string_var_map_pack() {
+    var s = ""
+    s = "hello"
+    {s: s}
 }
 
 // Main procedure to run tests
@@ -255,5 +269,9 @@ pn main() {
     print(test_var_shadowing())
     print(" T19:")
     print(test_var_shadowing_else())
+    print(" T20:")
+    print(test_null_var_map_pack())
+    print(" T21:")
+    print(test_empty_string_var_map_pack())
     "done"
 }

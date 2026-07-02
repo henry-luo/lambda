@@ -6397,7 +6397,12 @@ bool jm_is_document_call(JsCallNode* call) {
     if (!call->callee || call->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return false;
     JsMemberNode* m = (JsMemberNode*)call->callee;
     if (!m->object || m->object->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    if (m->computed || !m->property || m->property->node_type != JS_AST_NODE_IDENTIFIER) return false;
     JsIdentifierNode* obj = (JsIdentifierNode*)m->object;
+    JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
+    // The document fast path passes a literal method name to native DOM glue;
+    // computed or malformed member calls must fall back to generic dispatch.
+    if (!prop->name) return false;
     return obj->name && obj->name->len == 8 && strncmp(obj->name->chars, "document", 8) == 0;
 }
 
@@ -12033,6 +12038,14 @@ struct JsMirBranchState {
     MIR_reg_t scope_env_reg;
     int scope_env_slot_count;
     int scope_depth;
+    bool last_closure_has_env;
+    MIR_reg_t last_closure_env_reg;
+    int last_closure_capture_count;
+    bool preserve_last_closure_env_after_readback;
+    char last_closure_capture_names[JS_MIR_LAST_CLOSURE_CAPTURE_MAX][128];
+    int last_closure_capture_slots[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    bool last_closure_capture_is_transitive[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    bool last_closure_capture_is_nfe[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool scopes_saved;
     struct hashmap* original_var_scopes[64];
     struct hashmap* cloned_var_scopes[64];
@@ -12067,6 +12080,22 @@ static void jm_save_branch_state(JsMirTranspiler* mt, JsMirBranchState* state) {
     state->scope_env_reg = mt->scope_env_reg;
     state->scope_env_slot_count = mt->scope_env_slot_count;
     state->scope_depth = mt->scope_depth;
+    state->last_closure_has_env = mt->last_closure_has_env;
+    state->last_closure_env_reg = mt->last_closure_env_reg;
+    state->last_closure_capture_count = mt->last_closure_capture_count;
+    state->preserve_last_closure_env_after_readback = mt->preserve_last_closure_env_after_readback;
+    int capture_count = mt->last_closure_capture_count;
+    if (capture_count < 0) capture_count = 0;
+    if (capture_count > JS_MIR_LAST_CLOSURE_CAPTURE_MAX) capture_count = JS_MIR_LAST_CLOSURE_CAPTURE_MAX;
+    for (int i = 0; i < capture_count; i++) {
+        snprintf(state->last_closure_capture_names[i],
+            sizeof(state->last_closure_capture_names[i]), "%s",
+            mt->last_closure_capture_names[i]);
+        state->last_closure_capture_slots[i] = mt->last_closure_capture_slots[i];
+        state->last_closure_capture_is_transitive[i] =
+            mt->last_closure_capture_is_transitive[i];
+        state->last_closure_capture_is_nfe[i] = mt->last_closure_capture_is_nfe[i];
+    }
     state->scopes_saved = true;
 
     for (int i = 0; i < 64; i++) {
@@ -12110,6 +12139,25 @@ static void jm_restore_branch_state(JsMirTranspiler* mt, JsMirBranchState* state
     mt->scope_env_reg = state->scope_env_reg;
     mt->scope_env_slot_count = state->scope_env_slot_count;
     mt->scope_depth = state->scope_depth;
+    // Conditional-expression arms do not dominate one another. A closure env
+    // allocated in one arm must not remain the writeback target in its sibling.
+    mt->last_closure_has_env = state->last_closure_has_env;
+    mt->last_closure_env_reg = state->last_closure_env_reg;
+    mt->last_closure_capture_count = state->last_closure_capture_count;
+    mt->preserve_last_closure_env_after_readback =
+        state->preserve_last_closure_env_after_readback;
+    int capture_count = state->last_closure_capture_count;
+    if (capture_count < 0) capture_count = 0;
+    if (capture_count > JS_MIR_LAST_CLOSURE_CAPTURE_MAX) capture_count = JS_MIR_LAST_CLOSURE_CAPTURE_MAX;
+    for (int i = 0; i < capture_count; i++) {
+        snprintf(mt->last_closure_capture_names[i],
+            sizeof(mt->last_closure_capture_names[i]), "%s",
+            state->last_closure_capture_names[i]);
+        mt->last_closure_capture_slots[i] = state->last_closure_capture_slots[i];
+        mt->last_closure_capture_is_transitive[i] =
+            state->last_closure_capture_is_transitive[i];
+        mt->last_closure_capture_is_nfe[i] = state->last_closure_capture_is_nfe[i];
+    }
 
     if (!state->scopes_saved) return;
     for (int i = 0; i <= state->scope_depth && i < 64; i++) {

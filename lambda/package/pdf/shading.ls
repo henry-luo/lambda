@@ -305,7 +305,7 @@ pub fn from_sh_op(pdf, page, ctm, ops, page_w, page_h, ctr) {
         if (d == null) { { defs: [], emit: [] } }
         else {
             let stype = if (d.ShadingType) d.ShadingType else 0
-            let id = "shad" ++ string(ctr)
+            let id = "shad" ++ (ctr)
             if (stype == 2) { _emit_axial(pdf, d, ctm, id, page_w, page_h) }
             else if (stype == 3) { _emit_radial(pdf, d, ctm, id, page_w, page_h) }
             else { { defs: [], emit: [] } }
@@ -430,7 +430,7 @@ fn _tiling_pattern_children_loop(pdf, page, ops, i, n, ctm, stack, fill, defs, r
             _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, color.from_k_ops(operands), defs, rect, out, id)
         }
         else if (opr == "sc" or opr == "scn") {
-            let pc = _pattern_color_from_ops(pdf, page, operands, id ++ "_nested" ++ string(i), ctm, color.from_sc_ops(operands))
+            let pc = _pattern_color_from_ops(pdf, page, operands, id ++ "_nested" ++ (i), ctm, color.from_sc_ops(operands))
             _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, pc.fill, defs ++ pc.defs, rect, out, id)
         }
         else if (opr == "re" and len(operands) >= 4) {
@@ -470,7 +470,7 @@ fn _tiling_pattern_defs_loop(pdf, page, ops, i, n, ctm, stack, fill, defs, id) {
             _tiling_pattern_defs_loop(pdf, page, ops, i + 1, n, util.matrix_mul(mtx, ctm), stack, fill, defs, id)
         }
         else if (opr == "scn") {
-            let pc = _pattern_color_from_ops(pdf, page, operands, id ++ "_nested" ++ string(i), ctm, fill)
+            let pc = _pattern_color_from_ops(pdf, page, operands, id ++ "_nested" ++ (i), ctm, fill)
             _tiling_pattern_defs_loop(pdf, page, ops, i + 1, n, ctm, stack, pc.fill, defs ++ pc.defs, id)
         }
         else { _tiling_pattern_defs_loop(pdf, page, ops, i + 1, n, ctm, stack, fill, defs, id) }

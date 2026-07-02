@@ -6,7 +6,7 @@
 pn t_grow() {
     var v = []
     for i in 0 to 9 { push(v, i * i) }
-    print("grow: len=" ++ string(len(v)) ++ " v0=" ++ string(int(v[0])) ++ " v9=" ++ string(int(v[9])) ++ "\n")
+    print("grow: len=" ++ (len(v)) ++ " v0=" ++ (int(v[0])) ++ " v9=" ++ (int(v[9])) ++ "\n")
 }
 
 // push maps/objects, read fields back
@@ -15,7 +15,7 @@ pn t_maps() {
     push(w, {name: "a", val: 10})
     push(w, {name: "b", val: 20})
     push(w, {name: "c", val: 30})
-    print("maps: len=" ++ string(len(w)) ++ " w1.name=" ++ (w[1]).name ++ " w2.val=" ++ string(int((w[2]).val)) ++ "\n")
+    print("maps: len=" ++ (len(w)) ++ " w1.name=" ++ (w[1]).name ++ " w2.val=" ++ (int((w[2]).val)) ++ "\n")
 }
 
 // push an array value — appended as a single element (no flattening)
@@ -23,7 +23,7 @@ pn t_nested() {
     var z = []
     push(z, [1, 2, 3])
     push(z, [4, 5])
-    print("nested: len=" ++ string(len(z)) ++ " z0.len=" ++ string(len(z[0])) ++ " z1.len=" ++ string(len(z[1])) ++ "\n")
+    print("nested: len=" ++ (len(z)) ++ " z0.len=" ++ (len(z[0])) ++ " z1.len=" ++ (len(z[1])) ++ "\n")
 }
 
 // growable array stored in a map field (chunked-vector replacement pattern)
@@ -34,7 +34,7 @@ pn vadd(v, x) {
 pn t_field() {
     var vec = { data: [], first: 0 }
     for i in 0 to 4 { vadd(vec, i + 100) }
-    print("field: len=" ++ string(len(vec.data)) ++ " d0=" ++ string(int((vec.data)[0])) ++ " d4=" ++ string(int((vec.data)[4])) ++ "\n")
+    print("field: len=" ++ (len(vec.data)) ++ " d0=" ++ (int((vec.data)[0])) ++ " d4=" ++ (int((vec.data)[4])) ++ "\n")
 }
 
 // many appends (stress the doubling growth)
@@ -43,7 +43,7 @@ pn t_stress() {
     for i in 0 to 999 { push(v, i) }
     var sum = 0
     for i in 0 to 999 { sum = sum + int(v[i]) }
-    print("stress: len=" ++ string(len(v)) ++ " sum=" ++ string(sum) ++ "\n")
+    print("stress: len=" ++ (len(v)) ++ " sum=" ++ (sum) ++ "\n")
 }
 
 pn main() {

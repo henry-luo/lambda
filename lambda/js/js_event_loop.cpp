@@ -477,6 +477,9 @@ static void timer_register_gc_roots(JsTimerHandle *th) {
 static void timer_close_handle(JsTimerHandle *th) {
     if (!th || th->closing) return;
     th->closing = true;
+    // close callbacks may run after document/runtime teardown; unregister roots
+    // while the captured heap is still valid so late libuv cleanup only frees.
+    timer_unregister_gc_roots(th);
     if (!timer_force_shutdown) {
         JsTimerRuntimeScope scope;
         if (timer_runtime_enter(th, &scope)) {
@@ -493,7 +496,44 @@ static void timer_mark_object_destroyed(JsTimerHandle* th) {
     // The JS Timeout object is separate from the libuv handle; update it on
     // observable clear/fire paths, not during process-exit cleanup of unref'd intervals.
     js_property_set(th->object, (Item){.item = s2it(heap_create_name("_destroyed", 10))},
-                    (Item){.item = b2it(true)});
+	                    (Item){.item = b2it(true)});
+}
+
+static void timer_forget_unsafe_handle(JsTimerHandle* th) {
+    if (!th) return;
+    th->runtime_doc = nullptr;
+    th->runtime_heap = nullptr;
+    th->runtime_nursery = nullptr;
+    th->runtime_name_pool = nullptr;
+    th->runtime_pool = nullptr;
+    th->roots_registered = false;
+    th->callback = ItemNull;
+    th->object = ItemNull;
+    th->async_resource = ItemNull;
+    th->als_context = ItemNull;
+    th->domain = ItemNull;
+    for (int j = 0; j < th->extra_count; j++) {
+        th->extra_args[j] = ItemNull;
+    }
+    th->extra_count = 0;
+    th->closing = true;
+    mem_free(th);
+}
+
+static void timer_abandon_all_without_uv(const char* reason_prefix) {
+    for (int i = timer_handle_count - 1; i >= 0; i--) {
+        JsTimerHandle* th = timer_handles[i];
+        if (!th) continue;
+        log_debug("%s freeing timer %lld without libuv close",
+                  reason_prefix ? reason_prefix : "[JS_TIMER_ABANDON_UNSAFE]",
+                  (long long)th->id);
+        timer_forget_unsafe_handle(th);
+        timer_handles[i] = nullptr;
+    }
+    timer_handle_count = 0;
+    // Signal watchdog recovery can corrupt libuv queue links; abandon the loop
+    // with the timer records so later global cleanup does not walk stale handles.
+    lambda_uv_abandon();
 }
 
 static void timer_fire_cb(uv_timer_t *handle) {
@@ -1256,32 +1296,22 @@ extern "C" void js_event_loop_cancel_document_timers(void* dom_doc) {
 extern "C" void js_event_loop_abandon_document_timers(void* dom_doc) {
     if (!dom_doc) return;
 
-    for (int i = 0; i < timer_handle_count; ) {
+    bool found = false;
+    for (int i = 0; i < timer_handle_count; i++) {
         JsTimerHandle *th = timer_handles[i];
-        if (!th || th->runtime_doc != dom_doc) {
-            i++;
-            continue;
+        if (th && th->runtime_doc == dom_doc) {
+            found = true;
+            break;
         }
-
-        log_debug("[JS_TIMER_ABANDON] detaching timer %lld for unsafe document %p",
-                  (long long)th->id, dom_doc);
-        th->runtime_doc = nullptr;
-        th->runtime_heap = nullptr;
-        th->runtime_nursery = nullptr;
-        th->runtime_name_pool = nullptr;
-        th->runtime_pool = nullptr;
-        th->roots_registered = false;
-        th->callback = ItemNull;
-        th->async_resource = ItemNull;
-        th->als_context = ItemNull;
-        for (int j = 0; j < th->extra_count; j++) {
-            th->extra_args[j] = ItemNull;
-        }
-        th->extra_count = 0;
-        timer_handles[i] = timer_handles[timer_handle_count - 1];
-        timer_handles[timer_handle_count - 1] = nullptr;
-        timer_handle_count--;
     }
+    if (found) {
+        log_debug("[JS_TIMER_ABANDON] unsafe document %p owns timer handles", dom_doc);
+        timer_abandon_all_without_uv("[JS_TIMER_ABANDON]");
+    }
+}
+
+extern "C" void js_event_loop_abandon_all_timers(void) {
+    timer_abandon_all_without_uv("[JS_TIMER_ABANDON_ALL]");
 }
 
 // =============================================================================
@@ -1481,8 +1511,7 @@ static void stop_all_interval_timers(void) {
     for (int i = timer_handle_count - 1; i >= 0; i--) {
         JsTimerHandle* th = timer_handles[i];
         if (th && th->is_interval) {
-            uv_timer_stop(&th->timer);
-            uv_close((uv_handle_t*)&th->timer, timer_close_cb);
+            timer_close_handle(th);
         }
     }
 }
@@ -1611,10 +1640,15 @@ extern "C" int js_event_loop_drain(void) {
         uv_timer_t watchdog;
         uv_timer_init(loop, &watchdog);
         uv_unref((uv_handle_t*)&watchdog); // don't let watchdog itself keep loop alive when alone
-        uv_timer_start(&watchdog, drain_watchdog_cb, EVENT_LOOP_DRAIN_TIMEOUT_MS, 0);
+	        uv_timer_start(&watchdog, drain_watchdog_cb, EVENT_LOOP_DRAIN_TIMEOUT_MS, 0);
+	
+	        // Browser page-load drains should not wait for persistent intervals; close
+	        // them before blocking so recurring timers cannot stall static rendering.
+	        stop_all_interval_timers();
+	        uv_run(loop, UV_RUN_NOWAIT);
 
-        // run libuv event loop until all timers/handles are done (or watchdog fires)
-        result = lambda_uv_run();
+	        // run libuv event loop until all one-shot timers/handles are done (or watchdog fires)
+	        result = lambda_uv_run();
 
         // clean up watchdog
         uv_timer_stop(&watchdog);
@@ -1622,8 +1656,8 @@ extern "C" int js_event_loop_drain(void) {
         // run once more to process the close callback
         uv_run(loop, UV_RUN_NOWAIT);
 
-        // stop any remaining interval timers that would keep the loop alive
-        stop_all_interval_timers();
+	        // stop any interval timers created by one-shot callbacks during drain
+	        stop_all_interval_timers();
         // drain close callbacks from stopped intervals
         uv_run(loop, UV_RUN_NOWAIT);
 

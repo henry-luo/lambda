@@ -1525,36 +1525,46 @@ test-reactive-ui: build
 	echo "Reactive UI: $$PASS/$$TOTAL passed"; \
 	if [ $$FAIL -gt 0 ]; then exit 1; fi
 
+# Stage 4C Phase A — the full plain-DOM editor suite headless under `lambda.exe js`.
+# The runner (test/editor-js/tools/run-phase-a.mjs) bundles each test group
+# (core/view/drawing + 6 tier corpora) to an IIFE, runs it, and aggregates the
+# in-engine harness summaries. React `.test.tsx` are excluded by construction.
+editor-4c-js: build
+	@echo "Running Stage 4C Phase A (plain-DOM suite under lambda.exe js)..."
+	@echo "=============================================================="
+	@cd test/editor-js && node tools/run-phase-a.mjs
+	@echo "=============================================================="
+
 # Stage 4C Phase B — editor event-driven UI automation under lambda.exe view + event_sim.
-# Runs the 4B baseline set (test/ui/editor4b/*.json) + the 4C pilot set
-# (test/ui/editor4c/*.json). Fixtures whose basename starts with "_open_" are
-# known-open Phase-B blockers (see vibe/editing/Radiant_Editor_Stage4C.md) and
-# are still executed but not counted toward pass/fail.
+# Runs the 4B baseline set (test/ui/editor4b/*.json) + the 4C set
+# (test/ui/editor4c/*.json). Each fixture may name its own harness page via the
+# "html" field (default test/html/editor-dom.html).
 editor-4c-view: build
 	@echo "Running Stage 4C Phase B editor UI test suite..."
 	@echo "=============================================================="
-	@PASS=0; FAIL=0; TOTAL=0; OPEN_PASS=0; OPEN_FAIL=0; \
+	@PASS=0; FAIL=0; TOTAL=0; \
 	for json in test/ui/editor4b/*.json test/ui/editor4c/*.json; do \
 		[ -f "$$json" ] || continue; \
 		name=$$(basename $$json .json); \
-		is_open=0; case $$name in _open_*) is_open=1 ;; esac; \
-		if ./lambda.exe view test/html/editor-dom.html --event-file $$json --headless >/dev/null 2>&1; then \
-			if [ $$is_open -eq 1 ]; then OPEN_PASS=$$((OPEN_PASS + 1)); \
-				printf "  \033[33m? %s (open — passed unexpectedly)\033[0m\n" "$$name"; \
-			else PASS=$$((PASS + 1)); TOTAL=$$((TOTAL + 1)); \
-				printf "  \033[32m✓\033[0m %s\n" "$$name"; \
-			fi; \
+		TOTAL=$$((TOTAL + 1)); \
+		page=$$(sed -n 's/.*"html"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$$json" | head -1); \
+		[ -n "$$page" ] || page="test/html/editor-dom.html"; \
+		if ./lambda.exe view "$$page" --event-file $$json --headless >/dev/null 2>&1; then \
+			PASS=$$((PASS + 1)); \
+			printf "  \033[32m✓\033[0m %s\n" "$$name"; \
 		else \
-			if [ $$is_open -eq 1 ]; then OPEN_FAIL=$$((OPEN_FAIL + 1)); \
-				printf "  \033[33m~ %s (open — known blocker)\033[0m\n" "$$name"; \
-			else FAIL=$$((FAIL + 1)); TOTAL=$$((TOTAL + 1)); \
-				printf "  \033[31m✗\033[0m %s\n" "$$name"; \
-			fi; \
+			FAIL=$$((FAIL + 1)); \
+			printf "  \033[31m✗\033[0m %s\n" "$$name"; \
 		fi; \
 	done; \
 	echo "=============================================================="; \
-	echo "editor-4c-view: $$PASS/$$TOTAL passed  ($$OPEN_PASS+$$OPEN_FAIL open cases: $$OPEN_PASS pass / $$OPEN_FAIL fail)"; \
+	echo "editor-4c-view: $$PASS/$$TOTAL passed"; \
 	if [ $$FAIL -gt 0 ]; then exit 1; fi
+
+# Stage 4C — full editor conformance: Phase A (js breadth) + Phase B (view depth).
+editor-4c: editor-4c-js editor-4c-view
+	@echo "=============================================================="
+	@echo "Stage 4C complete: Phase A (lambda.exe js) + Phase B (lambda.exe view + event_sim) both green."
 
 # Save/check/diff layout suite snapshots for regression detection outside baseline
 layout-snapshot:
