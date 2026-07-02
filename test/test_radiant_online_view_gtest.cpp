@@ -263,6 +263,56 @@ static const RadiantOnlineViewCase g_online_view_cases[] = {
     {"ocaml_docs", "https://ocaml.org/docs", true},
     {"haskell_docs", "https://www.haskell.org/documentation/", true},
     {"racket_docs", "https://docs.racket-lang.org/", true},
+    {"w3c_css_snapshot", "https://www.w3.org/TR/CSS/", true},
+    {"w3c_webgpu", "https://www.w3.org/TR/webgpu/", true},
+    {"w3c_websockets", "https://www.w3.org/TR/websockets/", true},
+    {"w3c_wai_aria", "https://www.w3.org/TR/wai-aria-1.2/", true},
+    {"chromium_docs", "https://www.chromium.org/developers/", true},
+    {"v8_docs", "https://v8.dev/docs", true},
+    {"webkit_blog", "https://webkit.org/blog/", true},
+    {"servo_docs", "https://servo.org/", true},
+    {"electron_docs", "https://www.electronjs.org/docs/latest/", true},
+    {"deno_docs", "https://docs.deno.com/", true},
+    {"bun_docs", "https://bun.sh/docs", true},
+    {"npm_docs", "https://docs.npmjs.com/", true},
+    {"yarn_docs", "https://yarnpkg.com/getting-started", true},
+    {"pnpm_docs", "https://pnpm.io/", true},
+    {"vite_docs", "https://vite.dev/guide/", true},
+    {"webpack_docs", "https://webpack.js.org/concepts/", true},
+    {"rollup_docs", "https://rollupjs.org/introduction/", true},
+    {"eslint_docs", "https://eslint.org/docs/latest/", true},
+    {"prettier_docs", "https://prettier.io/docs/", true},
+    {"react_docs", "https://react.dev/learn", true},
+    {"vue_docs", "https://vuejs.org/guide/introduction.html", true},
+    {"svelte_docs", "https://svelte.dev/docs", true},
+    {"angular_docs", "https://angular.dev/overview", true},
+    {"solid_docs", "https://docs.solidjs.com/", true},
+    {"nextjs_docs", "https://nextjs.org/docs", true},
+    {"nuxt_docs", "https://nuxt.com/docs/getting-started/introduction", true},
+    {"astro_docs", "https://docs.astro.build/en/getting-started/", true},
+    {"remix_docs", "https://remix.run/docs/en/main", true},
+    {"tailwind_docs", "https://tailwindcss.com/docs", true},
+    {"bootstrap_docs", "https://getbootstrap.com/docs/5.3/getting-started/introduction/", true},
+    {"bulma_docs", "https://bulma.io/documentation/", true},
+    {"material_ui_docs", "https://mui.com/material-ui/getting-started/", true},
+    {"ant_design_docs", "https://ant.design/docs/react/introduce", true},
+    {"chakra_docs", "https://chakra-ui.com/docs/get-started/installation", true},
+    {"cloudflare_docs", "https://developers.cloudflare.com/", true},
+    {"aws_docs", "https://docs.aws.amazon.com/", true},
+    {"azure_docs", "https://learn.microsoft.com/en-us/azure/", true},
+    {"gcp_docs", "https://cloud.google.com/docs", true},
+    {"digitalocean_docs", "https://docs.digitalocean.com/", true},
+    {"supabase_docs", "https://supabase.com/docs", true},
+    {"firebase_docs", "https://firebase.google.com/docs", true},
+    {"vercel_docs", "https://vercel.com/docs", true},
+    {"netlify_docs", "https://docs.netlify.com/", true},
+    {"nginx_unit_docs", "https://unit.nginx.org/", true},
+    {"redis_docs", "https://redis.io/docs/latest/", true},
+    {"mongodb_docs", "https://www.mongodb.com/docs/", true},
+    {"mysql_docs", "https://dev.mysql.com/doc/", true},
+    {"mariadb_docs", "https://mariadb.com/kb/en/documentation/", true},
+    {"duckdb_docs", "https://duckdb.org/docs/", true},
+    {"grafana_loki_docs", "https://grafana.com/docs/loki/latest/", true},
 };
 
 static bool online_view_file_readable(const char* path) {
@@ -1072,6 +1122,26 @@ TEST(RadiantOnlineViewTest, LoadsNewOnlinePages081To090) {
 
 TEST(RadiantOnlineViewTest, LoadsNewOnlinePages091To100) {
     online_view_expect_case_range(191, 201);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages101To110) {
+    online_view_expect_case_range(201, 211);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages111To120) {
+    online_view_expect_case_range(211, 221);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages121To130) {
+    online_view_expect_case_range(221, 231);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages131To140) {
+    online_view_expect_case_range(231, 241);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages141To150) {
+    online_view_expect_case_range(241, 251);
 }
 
 #endif

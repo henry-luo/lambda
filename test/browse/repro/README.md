@@ -26,6 +26,8 @@ RADIANT_JS_EXTERNAL_SCRIPT_BYTES=128 ./lambda.exe view test/browse/repro/large-e
 RADIANT_JS_TOTAL_SCRIPT_BYTES=128 ./lambda.exe view test/browse/repro/script-total-budget-skip.html --headless
 ./lambda.exe view test/browse/repro/unsupported-image-fallback.html --headless
 ./lambda.exe view test/browse/repro/css-var-on-text-layout.html --headless
+./lambda.exe view test/browse/repro/grid-track-unitless-zero-overflow.html --headless
+./lambda.exe view test/browse/repro/css-var-self-reference.html --headless
 ```
 
 For `http-header-before-head-relative-resource.html`, serve the repository root
@@ -94,3 +96,11 @@ lazy decode buffers.
 `css-var-on-text-layout.html` captures inherited custom properties resolved
 while layout is operating on a text node. Variable lookup should climb to the
 nearest element instead of assuming the active layout view is always an element.
+
+`grid-track-unitless-zero-overflow.html` captures grid template lists with a
+unitless `0` track. CSS accepts `0` as a length, so the first allocation pass
+must count it before the second parsing pass stores the track.
+
+`css-var-self-reference.html` captures self-referential custom properties such
+as `--loop: var(--loop)`. Variable resolution should fall back gracefully instead
+of recursing until stack overflow.
