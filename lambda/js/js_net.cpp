@@ -40,6 +40,8 @@ extern "C" Item js_timeout_unref(Item this_val);
 extern "C" Item js_net_Socket(Item options);
 extern "C" Item js_object_keys(Item object);
 extern "C" void js_cluster_notify_worker_listening(void);
+extern "C" void js_process_ipc_notify_handle_accepted(void);
+extern "C" void js_process_ipc_notify_socket_closed(void);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -186,6 +188,8 @@ typedef struct JsSocket {
     bool      adopted_bound_socket;
     bool      adopted_by_tls;
     bool      tls_close_notified;
+    bool      ipc_received_socket;
+    bool      transfer_account_pending;
     int64_t   bytes_read;
     int64_t   bytes_written;
     int64_t   buffer_size;
@@ -1453,8 +1457,10 @@ static void socket_close_now(JsSocket* sock) {
         uv_close((uv_handle_t*)&sock->tcp, [](uv_handle_t* handle) {
             JsSocket* s = (JsSocket*)handle->data;
             if (s) {
+                bool notify_ipc_parent = s->ipc_received_socket;
                 net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, s->js_object);
                 js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
+                if (notify_ipc_parent) js_process_ipc_notify_socket_closed();
                 socket_emit_close(s->js_object, false);
                 socket_note_closed(s);
                 if (s->connect_pending) {
@@ -1483,23 +1489,27 @@ static void socket_close_reset_now(JsSocket* sock) {
         int r = uv_tcp_close_reset(&sock->tcp, [](uv_handle_t* handle) {
             JsSocket* s = (JsSocket*)handle->data;
             if (s) {
-                    net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, s->js_object);
-                    js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
-                    socket_emit_close(s->js_object, false);
-                    socket_note_closed(s);
-                    if (s->connect_pending) {
-                        s->free_after_connect_pending = true;
-                    } else {
-                        mem_free(s);
-                    }
+                bool notify_ipc_parent = s->ipc_received_socket;
+                net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, s->js_object);
+                js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
+                if (notify_ipc_parent) js_process_ipc_notify_socket_closed();
+                socket_emit_close(s->js_object, false);
+                socket_note_closed(s);
+                if (s->connect_pending) {
+                    s->free_after_connect_pending = true;
+                } else {
+                    mem_free(s);
                 }
-            });
+            }
+        });
         if (r != 0 && !uv_is_closing((uv_handle_t*)&sock->tcp)) {
             uv_close((uv_handle_t*)&sock->tcp, [](uv_handle_t* handle) {
                 JsSocket* s = (JsSocket*)handle->data;
                 if (s) {
+                    bool notify_ipc_parent = s->ipc_received_socket;
                     net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, s->js_object);
                     js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
+                    if (notify_ipc_parent) js_process_ipc_notify_socket_closed();
                     socket_emit_close(s->js_object, false);
                     socket_note_closed(s);
                     if (s->connect_pending) {
@@ -2162,6 +2172,7 @@ extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe) {
         });
         return make_undefined_item();
     }
+    js_process_ipc_notify_handle_accepted();
 
 #ifdef _WIN32
     int fd = -1;
@@ -2208,6 +2219,7 @@ extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe) {
     Item obj = make_socket_object(sock, true);
     sock->connected = true;
     sock->is_server_side = true;
+    sock->ipc_received_socket = true;
     socket_update_state_properties(sock);
     socket_update_address_properties(sock);
     net_active_add(net_active_sockets, NET_ACTIVE_SOCKET_MAX, obj);
@@ -4212,7 +4224,11 @@ static void server_close_after_listen_error(JsServer* srv) {
 static void socket_note_closed(JsSocket* sock) {
     if (!sock || !sock->owner_server) return;
     JsServer* srv = sock->owner_server;
-    if (srv->connection_count > 0) {
+    if (sock->transfer_account_pending) {
+        // keepOpen:false IPC transfer closes the sender fd here, but server
+        // connection accounting belongs to the receiver until its socket closes.
+        sock->transfer_account_pending = false;
+    } else if (srv->connection_count > 0) {
         srv->connection_count--;
     }
     sock->owner_server = NULL;
@@ -4492,6 +4508,29 @@ static JsSocket* socket_from_ipc_stream(uv_stream_t* stream) {
         if (net_active_sockets[i].item == sock->js_object.item) return sock;
     }
     return NULL;
+}
+
+extern "C" void* js_net_ipc_sent_stream_connection_account(uv_stream_t* stream) {
+    JsSocket* sock = socket_from_ipc_stream(stream);
+    if (!sock || !sock->owner_server) return NULL;
+    return (void*)sock->owner_server;
+}
+
+extern "C" void js_net_complete_transferred_connection_account(void* account) {
+    JsServer* srv = (JsServer*)account;
+    if (!srv) return;
+    if (srv->connection_count > 0) srv->connection_count--;
+    server_maybe_finish_close(srv);
+}
+
+extern "C" void js_net_close_ipc_sent_stream(uv_stream_t* stream);
+
+extern "C" void js_net_close_ipc_sent_stream_defer_account(uv_stream_t* stream) {
+    JsSocket* sock = socket_from_ipc_stream(stream);
+    if (sock && sock->owner_server) {
+        sock->transfer_account_pending = true;
+    }
+    js_net_close_ipc_sent_stream(stream);
 }
 
 extern "C" void js_net_close_ipc_sent_stream(uv_stream_t* stream) {
@@ -5039,14 +5078,33 @@ static Item js_server_unref(void) {
     return self;
 }
 
-// server.getConnections(callback) — stub: always reports 0
+static Item js_server_getConnections_later(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_undefined_item();
+    Item self = env[0];
+    Item callback = env[1];
+    Item count = env[2];
+    if (is_callable(callback)) {
+        Item args[2] = { ItemNull, count };
+        js_call_function(callback, self, args, 2);
+        js_microtask_flush();
+    }
+    return make_undefined_item();
+}
+
+// server.getConnections(callback)
 static Item js_server_getConnections(Item callback) {
     Item self = js_get_this();
     JsServer* srv = server_from_object(self);
     int connections = srv ? srv->connection_count : 0;
     if (is_callable(callback)) {
-        Item args[2] = { ItemNull, (Item){.item = i2it(connections)} };
-        js_call_function(callback, self, args, 2);
+        Item* env = js_alloc_env(3);
+        env[0] = self;
+        env[1] = callback;
+        env[2] = (Item){.item = i2it(connections)};
+        // getConnections is asynchronous in Node; calling the callback inside
+        // an IPC message listener reenters teardown before transfer accounting settles.
+        js_next_tick_enqueue(js_new_closure((void*)js_server_getConnections_later, 0, env, 3));
     }
     return self;
 }

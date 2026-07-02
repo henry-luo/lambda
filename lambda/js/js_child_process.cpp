@@ -47,6 +47,9 @@ extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe);
 extern "C" int js_net_dup_ipc_stdio_fd(Item handle_item);
 extern "C" uv_stream_t* js_net_stream_from_ipc_send_handle(Item handle_item);
 extern "C" void js_net_close_ipc_sent_stream(uv_stream_t* stream);
+extern "C" void js_net_close_ipc_sent_stream_defer_account(uv_stream_t* stream);
+extern "C" void* js_net_ipc_sent_stream_connection_account(uv_stream_t* stream);
+extern "C" void js_net_complete_transferred_connection_account(void* account);
 
 // =============================================================================
 // Helpers
@@ -740,7 +743,16 @@ typedef struct JsSpawnProcess {
     size_t       ipc_cap;
     uv_stream_t* pending_sent_streams[8];
     int          pending_sent_stream_count;
+    struct SpawnTransferredConnection* transferred_connections_head;
+    struct SpawnTransferredConnection* transferred_connections_tail;
 } JsSpawnProcess;
+
+typedef struct SpawnTransferredConnection {
+    void* account;
+    uv_stream_t* sent_handle;
+    bool sender_closed;
+    SpawnTransferredConnection* next;
+} SpawnTransferredConnection;
 
 typedef struct SpawnWriteReq {
     uv_write_t req;
@@ -750,6 +762,7 @@ typedef struct SpawnWriteReq {
     bool close_sent_handle_after;
     bool close_sent_stream_after;
     uv_stream_t* sent_handle;
+    void* transferred_connection_account;
     Item callback;
 } SpawnWriteReq;
 
@@ -890,6 +903,24 @@ static bool spawn_ipc_is_cluster_listening(Item message) {
         return false;
     }
     Item value = js_property_get(message, make_string_item("__lambda_cluster_listening__"));
+    return value.item == ITEM_TRUE || value.item == b2it(true);
+}
+
+static bool spawn_ipc_is_socket_closed_control(Item message) {
+    if (get_type_id(message) != LMD_TYPE_MAP && get_type_id(message) != LMD_TYPE_OBJECT &&
+        get_type_id(message) != LMD_TYPE_VMAP) {
+        return false;
+    }
+    Item value = js_property_get(message, make_string_item("__lambda_ipc_socket_closed__"));
+    return value.item == ITEM_TRUE || value.item == b2it(true);
+}
+
+static bool spawn_ipc_is_handle_accepted_control(Item message) {
+    if (get_type_id(message) != LMD_TYPE_MAP && get_type_id(message) != LMD_TYPE_OBJECT &&
+        get_type_id(message) != LMD_TYPE_VMAP) {
+        return false;
+    }
+    Item value = js_property_get(message, make_string_item("__lambda_ipc_handle_accepted__"));
     return value.item == ITEM_TRUE || value.item == b2it(true);
 }
 
@@ -1104,6 +1135,7 @@ static void spawn_clear_env(Item* env) {
 
 static void spawn_close_pending_sent_stream_wrappers(JsSpawnProcess* sp);
 static void spawn_clear_stdio_handle_properties(JsSpawnProcess* sp);
+static void spawn_drain_transferred_connections(JsSpawnProcess* sp);
 
 static void spawn_release_process(JsSpawnProcess* sp) {
     if (!sp) return;
@@ -1120,6 +1152,7 @@ static void spawn_release_process(JsSpawnProcess* sp) {
     spawn_clear_env(sp->ref_env);
     spawn_clear_env(sp->unref_env);
     spawn_clear_env(sp->abort_env);
+    spawn_drain_transferred_connections(sp);
     spawn_close_pending_sent_stream_wrappers(sp);
     spawn_clear_stdio_handle_properties(sp);
     if (sp->ipc_buf) mem_free(sp->ipc_buf);
@@ -1182,6 +1215,57 @@ static void spawn_close_pending_sent_stream_wrappers(JsSpawnProcess* sp) {
     sp->pending_sent_stream_count = 0;
 }
 
+static void spawn_queue_transferred_connection(JsSpawnProcess* sp, void* account,
+                                               uv_stream_t* sent_handle) {
+    if (!sp || !account) return;
+    SpawnTransferredConnection* node =
+        (SpawnTransferredConnection*)mem_calloc(1, sizeof(SpawnTransferredConnection), MEM_CAT_JS_RUNTIME);
+    if (!node) return;
+    node->account = account;
+    node->sent_handle = sent_handle;
+    if (sp->transferred_connections_tail) {
+        sp->transferred_connections_tail->next = node;
+    } else {
+        sp->transferred_connections_head = node;
+    }
+    sp->transferred_connections_tail = node;
+}
+
+static void spawn_close_next_accepted_transferred_connection(JsSpawnProcess* sp) {
+    if (!sp) return;
+    for (SpawnTransferredConnection* node = sp->transferred_connections_head;
+         node; node = node->next) {
+        if (node->sender_closed) continue;
+        // descriptor passing is complete only after the receiver accepts the
+        // handle; closing at uv_write2 completion can invalidate queued sends.
+        js_net_close_ipc_sent_stream_defer_account(node->sent_handle);
+        node->sent_handle = NULL;
+        node->sender_closed = true;
+        return;
+    }
+}
+
+static void spawn_complete_next_transferred_connection(JsSpawnProcess* sp) {
+    if (!sp || !sp->transferred_connections_head) return;
+    SpawnTransferredConnection* node = sp->transferred_connections_head;
+    sp->transferred_connections_head = node->next;
+    if (!sp->transferred_connections_head) sp->transferred_connections_tail = NULL;
+    if (!node->sender_closed) {
+        js_net_close_ipc_sent_stream_defer_account(node->sent_handle);
+        node->sent_handle = NULL;
+        node->sender_closed = true;
+    }
+    js_net_complete_transferred_connection_account(node->account);
+    mem_free(node);
+}
+
+static void spawn_drain_transferred_connections(JsSpawnProcess* sp) {
+    if (!sp) return;
+    while (sp->transferred_connections_head) {
+        spawn_complete_next_transferred_connection(sp);
+    }
+}
+
 static void spawn_ipc_write_cb(uv_write_t* req, int status) {
     SpawnWriteReq* wr = (SpawnWriteReq*)req;
     JsSpawnProcess* sp = req->handle ? (JsSpawnProcess*)req->handle->data : NULL;
@@ -1189,15 +1273,22 @@ static void spawn_ipc_write_cb(uv_write_t* req, int status) {
     bool close_sent_handle_after = wr->close_sent_handle_after;
     bool close_sent_stream_after = wr->close_sent_stream_after;
     uv_stream_t* sent_handle = wr->sent_handle;
+    void* transferred_connection_account = wr->transferred_connection_account;
     Item callback = wr->callback;
     if (wr->data) mem_free(wr->data);
     mem_free(wr);
     if (close_sent_stream_after) {
         spawn_close_sent_stream_wrapper(sent_handle);
     } else if (close_sent_handle_after) {
-        // IPC socket sends default to keepOpen=false; leaving the sender's
-        // duplicate handle alive keeps transferred sockets referenced until the drain watchdog.
-        js_net_close_ipc_sent_stream(sent_handle);
+        if (status >= 0 && transferred_connection_account) {
+            // IPC keepOpen=false transfers sender ownership in two phases:
+            // receiver accept closes the sender fd, receiver close updates count.
+            spawn_queue_transferred_connection(sp, transferred_connection_account, sent_handle);
+        } else {
+            // IPC socket sends default to keepOpen=false; leaving the sender's
+            // duplicate handle alive keeps transferred sockets referenced until the drain watchdog.
+            js_net_close_ipc_sent_stream(sent_handle);
+        }
     }
     if (is_callable(callback)) {
         Item err = status < 0 ? make_ipc_channel_closed_error() : make_js_undefined();
@@ -1282,7 +1373,14 @@ static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message, uv_stream_t* 
                                  bool close_send_handle_after, bool close_sent_stream_after,
                                  Item callback) {
     if (!sp || !sp->ipc_pipe_active) return false;
-    Item json = js_json_stringify(message);
+    Item wire_message = message;
+    if (send_handle) {
+        wire_message = js_new_object();
+        js_property_set(wire_message, make_string_item("__lambda_ipc_has_handle__"),
+                        (Item){.item = ITEM_TRUE});
+        js_property_set(wire_message, make_string_item("__lambda_ipc_payload__"), message);
+    }
+    Item json = js_json_stringify(wire_message);
     if (js_check_exception() || get_type_id(json) != LMD_TYPE_STRING) return false;
     String* s = it2s(json);
     if (!s) return false;
@@ -1303,6 +1401,10 @@ static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message, uv_stream_t* 
         wr->close_sent_handle_after = close_send_handle_after;
         wr->close_sent_stream_after = close_sent_stream_after;
         wr->sent_handle = send_handle;
+        if (close_send_handle_after) {
+            wr->transferred_connection_account =
+                js_net_ipc_sent_stream_connection_account(send_handle);
+        }
         r = uv_write2(&wr->req, (uv_stream_t*)&sp->ipc_pipe, &buf, 1,
                       send_handle, spawn_ipc_write_cb);
     } else {
@@ -1390,6 +1492,18 @@ static void spawn_ipc_handle_line(JsSpawnProcess* sp, const char* chars, int len
         // cluster readiness is carried over ChildProcess IPC but surfaces as a
         // worker 'listening' event, not as a user-visible message payload.
         spawn_emit_or_queue_cluster_listening(sp->js_object);
+        return;
+    }
+    if (spawn_ipc_is_handle_accepted_control(message)) {
+        // close sender ownership only after uv_accept succeeds in the child;
+        // earlier close can invalidate later queued descriptor transfers.
+        spawn_close_next_accepted_transferred_connection(sp);
+        return;
+    }
+    if (spawn_ipc_is_socket_closed_control(message)) {
+        // receiver-side close completes the sender server's transferred
+        // connection accounting without exposing protocol frames to user JS.
+        spawn_complete_next_transferred_connection(sp);
         return;
     }
     Item handle = js_net_accept_ipc_tcp_handle(&sp->ipc_pipe);
@@ -1577,6 +1691,7 @@ static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
     sp->exit_code = (int)exit_status;
     sp->exit_signal = term_signal;
     sp->process_exited = true;
+    spawn_drain_transferred_connections(sp);
     spawn_remove_abort_signal(sp);
     js_property_set(sp->js_object, make_string_item("exitCode"),
                     term_signal == 0 ? (Item){.item = i2it(exit_status)} : ItemNull);

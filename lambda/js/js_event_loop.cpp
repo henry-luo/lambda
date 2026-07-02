@@ -1658,13 +1658,37 @@ static void event_loop_refed_process_handle_cb(uv_handle_t* h, void* arg) {
     if (uv_has_ref(h)) *has_process = true;
 }
 
-static int event_loop_drain_watchdog_ms(uv_loop_t* loop) {
-    if (!loop) return EVENT_LOOP_DRAIN_TIMEOUT_MS;
+static bool event_loop_has_refed_process_handles(uv_loop_t* loop) {
+    if (!loop) return false;
     bool has_process = false;
     uv_walk(loop, event_loop_refed_process_handle_cb, &has_process);
-    // Forked Node official children may spend several seconds compiling common
-    // before replying on IPC; the generic 5s watchdog races and drops the child.
-    return has_process ? EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS : EVENT_LOOP_DRAIN_TIMEOUT_MS;
+    return has_process;
+}
+
+typedef struct JsDrainWatchdogState {
+    bool fired;
+    uint64_t start_ns;
+} JsDrainWatchdogState;
+
+static void drain_watchdog_timer_cb(uv_timer_t* handle) {
+    JsDrainWatchdogState* state = handle ? (JsDrainWatchdogState*)handle->data : NULL;
+    uint64_t elapsed_ms = state
+        ? (uv_hrtime() - state->start_ns) / 1000000ULL
+        : (uint64_t)EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS;
+    // Process handles get the longer startup grace only while they still exist;
+    // once they close, remaining TCP/timer leaks should hit the normal watchdog.
+    if (event_loop_has_refed_process_handles(lambda_uv_loop()) &&
+        elapsed_ms < (uint64_t)EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS) {
+        uint64_t remaining = (uint64_t)EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS - elapsed_ms;
+        uint64_t next_ms = remaining < (uint64_t)EVENT_LOOP_DRAIN_TIMEOUT_MS
+            ? remaining
+            : (uint64_t)EVENT_LOOP_DRAIN_TIMEOUT_MS;
+        if (next_ms == 0) next_ms = 1;
+        uv_timer_start(handle, drain_watchdog_timer_cb, next_ms, 0);
+        return;
+    }
+    if (state) state->fired = true;
+    drain_watchdog_cb(handle);
 }
 
 // Stop and close all active interval timers so they don't keep the event
@@ -1808,16 +1832,14 @@ extern "C" int js_event_loop_drain(void) {
 #endif
         // install watchdog timer to prevent infinite blocking from setInterval
         uv_timer_t watchdog;
-        bool watchdog_fired = false;
+        JsDrainWatchdogState watchdog_state;
+        watchdog_state.fired = false;
+        watchdog_state.start_ns = uv_hrtime();
         uv_timer_init(loop, &watchdog);
-        watchdog.data = &watchdog_fired;
+        watchdog.data = &watchdog_state;
         uv_unref((uv_handle_t*)&watchdog); // don't let watchdog itself keep loop alive when alone
-        int watchdog_ms = event_loop_drain_watchdog_ms(loop);
-        uv_timer_start(&watchdog, [](uv_timer_t* handle) {
-            bool* fired = handle ? (bool*)handle->data : NULL;
-            if (fired) *fired = true;
-            drain_watchdog_cb(handle);
-        }, watchdog_ms, 0);
+        uv_timer_start(&watchdog, drain_watchdog_timer_cb,
+                       EVENT_LOOP_DRAIN_TIMEOUT_MS, 0);
 
         // Browser page-load drains should not wait for persistent intervals; close
         // them before blocking so recurring timers cannot stall static rendering.
@@ -1827,7 +1849,7 @@ extern "C" int js_event_loop_drain(void) {
         // run libuv event loop until all one-shot timers/handles are done (or watchdog fires)
         result = lambda_uv_run();
 
-        if (watchdog_fired) {
+        if (watchdog_state.fired) {
             event_loop_close_refed_handles_after_watchdog(loop, (uv_handle_t*)&watchdog);
         }
 
