@@ -1,0 +1,21 @@
+{
+  "name": "DOM mutation replaceChild notifies",
+  "html": "test/ui/dom_mutation_replacechild_notifies.html",
+  "viewport": {"width": 560, "height": 280},
+  "events": [
+    {"type": "wait", "ms": 200},
+    {"type": "click", "target": {"selector": "#trigger"}},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_focus", "target": {"selector": "#trigger"}},
+    {"type": "assert_state_store", "target": {"selector": "#trigger"}, "view_state": true, "kind": "form", "weak_ref": true},
+    {"type": "snapshot_state_store", "name": "focused-input", "target": {"selector": "#trigger"}},
+    {"type": "key_press", "key": "r"},
+    {"type": "wait", "ms": 160},
+    {"type": "assert_count", "target": {"selector": "#old-child"}, "equals": 0},
+    {"type": "assert_count", "target": {"selector": "#new-child"}, "equals": 1},
+    {"type": "assert_attribute", "target": {"selector": "#new-child"}, "attribute": "data-label", "equals": "replacement child"},
+    {"type": "assert_attribute", "target": {"selector": "#status"}, "attribute": "data-state", "equals": "replaceChild complete"},
+    {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "eligible"},
+    {"type": "assert_state_store_snapshot", "name": "focused-input", "target": {"selector": "#trigger"}}
+  ]
+}
