@@ -667,8 +667,8 @@ fn _form_content_for_do(pdf, page, ops) {
 
 fn _clip_prefix_for_do(base, ops, index) {
     let nm = _do_name(ops)
-    if (nm == null) { base ++ "_do" ++ string(index) ++ "_" }
-    else { base ++ "_" ++ nm ++ "_" ++ string(index) ++ "_" }
+    if (nm == null) { base ++ "_do" ++ (index) ++ "_" }
+    else { base ++ "_" ++ nm ++ "_" ++ (index) ++ "_" }
 }
 
 fn _is_clip_def(el) {
@@ -881,7 +881,7 @@ fn _pop_graphics_state(ctx) {
 fn _step_color(ctx, opr, operands, pdf, page, clip_prefix) {
     let pattern_nm = if (opr == "scn" or opr == "SCN") { _pattern_name_from_ops(operands) } else { null }
     if (pattern_nm != null) {
-        let pid = clip_prefix ++ "pat" ++ string(ctx.def_ctr)
+        let pid = clip_prefix ++ "pat" ++ (ctx.def_ctr)
         let pat = { defs: [], fill: "url(#" ++ pid ++ ")" }
         if (opr == "scn") {
             _ctx(_set_pattern_fill(ctx.st, pat), ctx.stack, ctx.texts, ctx.paths,
@@ -1020,7 +1020,7 @@ fn _step_path(ctx, opr, operands, pdf, page, clip_prefix) {
     let did_paint = (len(pr.emit) > 0) or (opr == "n")
     let ctx1 = _ctx_with_st(ctx0, st1)
     let ctx2 = if (did_paint and ctx0.has_pending_clip == 1) {
-        let cid = clip_prefix ++ string(ctx0.def_ctr)
+        let cid = clip_prefix ++ (ctx0.def_ctr)
         let cp = _clip_element(cid, ctx.pending_clip_rule, ctx.pending_clip_d, util.fmt_matrix(st1.ctm))
         _ctx(ctx1.st, ctx1.stack, ctx1.texts, ctx1.paths ++ [cp],
              ctx1.pending_clip_d, ctx1.pending_clip_rule, 0,

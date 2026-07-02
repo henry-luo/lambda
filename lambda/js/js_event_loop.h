@@ -66,6 +66,7 @@ void js_clearTimeout(Item timer_id);
 void js_clearInterval(Item timer_id);
 void js_event_loop_cancel_document_timers(void* dom_doc);
 void js_event_loop_abandon_document_timers(void* dom_doc);
+void js_event_loop_abandon_all_timers(void);
 
 // Helper: pack 1-4 items into a JS array (used by transpiler for timer extra args)
 Item js_pack_args_1(Item a1);

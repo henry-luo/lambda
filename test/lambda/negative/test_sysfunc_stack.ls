@@ -24,7 +24,7 @@ fn heavy_computation(data) {
     let b10 = b9 * b9 + b9 * b9
     
     // Now call error() - a sys func
-    error("Computation failed at step " ++ string(b10))
+    error("Computation failed at step " ++ (b10))
 }
 
 fn process_data(items) {

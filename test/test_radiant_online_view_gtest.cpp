@@ -51,6 +51,16 @@ struct RadiantOnlineViewResult {
     RadiantOnlineViewBuffer output;
 };
 
+// Radiant online view tests are real-world browser-compatibility smoke tests.
+// The long-term goal is that `lambda view URL` can stably load arbitrary online
+// pages like a browser: download the top-level document and linked resources,
+// parse HTML/CSS/JS, execute supported JS, gracefully ignore or degrade
+// unsupported JS/DOM/CSS features, perform layout, load images and fonts,
+// render, and shut down without crashes, hangs, swallowed runtime errors, or
+// memtrack leaks. URLs in this table should accumulate over time; a page that
+// exposes a crash, leak, timeout, resource error, parser error, script error,
+// layout failure, render failure, or shutdown issue should drive a Radiant or
+// runtime fix rather than being removed from coverage.
 static const RadiantOnlineViewCase g_online_view_cases[] = {
     {"example", "https://example.com/", false},
     {"wikipedia", "https://www.wikipedia.org/", true},
@@ -58,7 +68,7 @@ static const RadiantOnlineViewCase g_online_view_cases[] = {
     {"reactos", "https://reactos.org/", true},
     {"firefox", "https://www.firefox.com/en-US/", true},
     {"wikipedia_main_page", "https://en.wikipedia.org/wiki/Main_Page", true},
-    {"gnu", "https://www.gnu.org/", true},
+    {"apache_foundation", "https://www.apache.org/foundation/", true},
     {"perl", "https://www.perl.org/", true},
     {"ruby_lang", "https://www.ruby-lang.org/en/", true},
     {"curl", "https://curl.se/", true},
@@ -78,6 +88,81 @@ static const RadiantOnlineViewCase g_online_view_cases[] = {
     {"busybox", "https://www.busybox.net/", false},
     {"musl_libc", "https://www.musl-libc.org/", false},
     {"linux_from_scratch", "https://www.linuxfromscratch.org/", true},
+    {"example_net", "https://example.net/", false},
+    {"curl_manpage", "https://curl.se/docs/manpage.html", true},
+    {"curl_sslcerts", "https://curl.se/docs/sslcerts.html", true},
+    {"nginx_core_module", "https://nginx.org/en/docs/http/ngx_http_core_module.html", true},
+    {"curl_faq", "https://curl.se/docs/faq.html", true},
+    {"sqlite_datatypes", "https://www.sqlite.org/datatype3.html", true},
+    {"tomcat_docs", "https://tomcat.apache.org/tomcat-10.1-doc/", true},
+    {"ant_manual", "https://ant.apache.org/manual/", true},
+    {"curl_docs", "https://curl.se/docs/", true},
+    {"curl_libcurl", "https://curl.se/libcurl/", true},
+    {"nginx_docs", "https://nginx.org/en/docs/", true},
+    {"apache_httpd_docs", "https://httpd.apache.org/docs/", true},
+    {"apache_apr", "https://apr.apache.org/", true},
+    {"apache_tomcat", "https://tomcat.apache.org/", true},
+    {"apache_ant", "https://ant.apache.org/", true},
+    {"apache_maven", "https://maven.apache.org/", true},
+    {"openssl_docs", "https://www.openssl.org/docs/", true},
+    {"maven_guides", "https://maven.apache.org/guides/", true},
+    {"lua_pil", "https://www.lua.org/pil/contents.html", false},
+    {"sqlite_docs", "https://www.sqlite.org/docs.html", true},
+    {"sqlite_lang", "https://www.sqlite.org/lang.html", true},
+    {"sqlite_cli", "https://www.sqlite.org/cli.html", true},
+    {"zlib_manual", "https://www.zlib.net/manual.html", false},
+    {"libpng_intro", "https://www.libpng.org/pub/png/pngintro.html", false},
+    {"sqlite_pragma", "https://www.sqlite.org/pragma.html", true},
+    {"busybox_about", "https://www.busybox.net/about.html", false},
+    {"netlib_lapack", "https://www.netlib.org/lapack/", false},
+    {"netlib_blas", "https://www.netlib.org/blas/", false},
+    {"iana_about", "https://www.iana.org/about", true},
+    {"iana_numbers", "https://www.iana.org/numbers", false},
+    {"openstd_c", "https://www.open-std.org/jtc1/sc22/wg14/", false},
+    {"openstd_cpp", "https://www.open-std.org/jtc1/sc22/wg21/", false},
+    {"tcl_lang", "https://www.tcl-lang.org/", true},
+    {"cpan", "https://www.cpan.org/", true},
+    {"pcre", "https://www.pcre.org/", false},
+    {"sqlite_capi_intro", "https://www.sqlite.org/c3ref/intro.html", true},
+    {"sqlite_result_codes", "https://www.sqlite.org/rescode.html", true},
+    {"cairographics", "https://www.cairographics.org/", true},
+    {"httpd_home", "https://httpd.apache.org/", true},
+    {"x_org", "https://www.x.org/wiki/", false},
+    {"gnu_home", "https://www.gnu.org/", true},
+    {"python", "https://www.python.org/", true},
+    {"kernel", "https://www.kernel.org/", true},
+    {"w3c", "https://www.w3.org/", true},
+    {"iana_home", "https://www.iana.org/", true},
+    {"debian", "https://www.debian.org/", true},
+    {"freebsd", "https://www.freebsd.org/", true},
+    {"postgresql", "https://www.postgresql.org/", true},
+    {"rust_lang", "https://www.rust-lang.org/", true},
+    {"php", "https://www.php.net/", true},
+    {"openbsd", "https://www.openbsd.org/", true},
+    {"vim", "https://www.vim.org/", true},
+    {"r_project", "https://www.r-project.org/", true},
+    {"cmake", "https://cmake.org/", true},
+    {"llvm", "https://llvm.org/", true},
+    {"rfc_editor", "https://www.rfc-editor.org/", true},
+    {"unicode", "https://www.unicode.org/", true},
+    {"git_scm", "https://git-scm.com/", true},
+    {"valgrind", "https://www.valgrind.org/", true},
+    {"gnuplot", "http://www.gnuplot.info/", true},
+    {"gnu_bash", "https://www.gnu.org/software/bash/", true},
+    {"gnu_make", "https://www.gnu.org/software/make/", true},
+    {"gnu_coreutils", "https://www.gnu.org/software/coreutils/", true},
+    {"gnu_grep", "https://www.gnu.org/software/grep/", true},
+    {"gnu_sed", "https://www.gnu.org/software/sed/", true},
+    {"gnu_gawk", "https://www.gnu.org/software/gawk/", true},
+    {"gnu_gdb", "https://www.gnu.org/software/gdb/", true},
+    {"lua_manual", "https://www.lua.org/manual/5.4/", true},
+    {"musl_manual", "https://www.musl-libc.org/manual.html", false},
+    {"tcpdump", "https://www.tcpdump.org/", false},
+    {"libressl", "https://www.libressl.org/", false},
+    {"freedesktop", "https://www.freedesktop.org/wiki/", false},
+    {"httpd_24_docs", "https://httpd.apache.org/docs/2.4/", true},
+    {"apr_generated_docs", "https://apr.apache.org/docs/apr/1.7/", true},
+    {"iana_protocols", "https://www.iana.org/protocols", true},
 };
 
 static bool online_view_file_readable(const char* path) {
@@ -339,8 +424,10 @@ static bool online_view_run_case(const RadiantOnlineViewCase* view_case,
 
 static const char* online_view_first_runtime_error(const RadiantOnlineViewResult* result) {
     static const char* patterns[] = {
-        "AddressSanitizer",
-        "LeakSanitizer",
+        // LLVM pages legitimately mention sanitizer names; match sanitizer report prefixes instead.
+        "ERROR: AddressSanitizer",
+        "AddressSanitizer:DEADLYSIGNAL",
+        "ERROR: LeakSanitizer",
         "Segmentation fault",
         "Assertion failed",
         "SIGSEGV",
@@ -459,7 +546,7 @@ TEST(RadiantOnlineViewTest, LoadsWikipediaMainPage) {
     online_view_expect_case(5);
 }
 
-TEST(RadiantOnlineViewTest, LoadsGNUOrg) {
+TEST(RadiantOnlineViewTest, LoadsApacheFoundation) {
     online_view_expect_case(6);
 }
 
@@ -537,6 +624,306 @@ TEST(RadiantOnlineViewTest, LoadsMuslLibcOrg) {
 
 TEST(RadiantOnlineViewTest, LoadsLinuxFromScratchOrg) {
     online_view_expect_case(25);
+}
+
+TEST(RadiantOnlineViewTest, LoadsExampleDotNet) {
+    online_view_expect_case(26);
+}
+
+TEST(RadiantOnlineViewTest, LoadsCurlManpage) {
+    online_view_expect_case(27);
+}
+
+TEST(RadiantOnlineViewTest, LoadsCurlSSLCerts) {
+    online_view_expect_case(28);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNginxCoreModule) {
+    online_view_expect_case(29);
+}
+
+TEST(RadiantOnlineViewTest, LoadsCurlFAQ) {
+    online_view_expect_case(30);
+}
+
+TEST(RadiantOnlineViewTest, LoadsSQLiteDatatypes) {
+    online_view_expect_case(31);
+}
+
+TEST(RadiantOnlineViewTest, LoadsTomcatDocs) {
+    online_view_expect_case(32);
+}
+
+TEST(RadiantOnlineViewTest, LoadsAntManual) {
+    online_view_expect_case(33);
+}
+
+TEST(RadiantOnlineViewTest, LoadsCurlDocs) {
+    online_view_expect_case(34);
+}
+
+TEST(RadiantOnlineViewTest, LoadsCurlLibcurl) {
+    online_view_expect_case(35);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNginxDocs) {
+    online_view_expect_case(36);
+}
+
+TEST(RadiantOnlineViewTest, LoadsApacheHTTPDDocs) {
+    online_view_expect_case(37);
+}
+
+TEST(RadiantOnlineViewTest, LoadsApacheAPR) {
+    online_view_expect_case(38);
+}
+
+TEST(RadiantOnlineViewTest, LoadsApacheTomcat) {
+    online_view_expect_case(39);
+}
+
+TEST(RadiantOnlineViewTest, LoadsApacheAnt) {
+    online_view_expect_case(40);
+}
+
+TEST(RadiantOnlineViewTest, LoadsApacheMaven) {
+    online_view_expect_case(41);
+}
+
+TEST(RadiantOnlineViewTest, LoadsOpenSSLDocs) {
+    online_view_expect_case(42);
+}
+
+TEST(RadiantOnlineViewTest, LoadsMavenGuides) {
+    online_view_expect_case(43);
+}
+
+TEST(RadiantOnlineViewTest, LoadsLuaPIL) {
+    online_view_expect_case(44);
+}
+
+TEST(RadiantOnlineViewTest, LoadsSQLiteDocs) {
+    online_view_expect_case(45);
+}
+
+TEST(RadiantOnlineViewTest, LoadsSQLiteLang) {
+    online_view_expect_case(46);
+}
+
+TEST(RadiantOnlineViewTest, LoadsSQLiteCLI) {
+    online_view_expect_case(47);
+}
+
+TEST(RadiantOnlineViewTest, LoadsZlibManual) {
+    online_view_expect_case(48);
+}
+
+TEST(RadiantOnlineViewTest, LoadsLibpngIntro) {
+    online_view_expect_case(49);
+}
+
+TEST(RadiantOnlineViewTest, LoadsSQLitePragma) {
+    online_view_expect_case(50);
+}
+
+TEST(RadiantOnlineViewTest, LoadsBusyBoxAbout) {
+    online_view_expect_case(51);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNetlibLAPACK) {
+    online_view_expect_case(52);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNetlibBLAS) {
+    online_view_expect_case(53);
+}
+
+TEST(RadiantOnlineViewTest, LoadsIANAAbout) {
+    online_view_expect_case(54);
+}
+
+TEST(RadiantOnlineViewTest, LoadsIANANumbers) {
+    online_view_expect_case(55);
+}
+
+TEST(RadiantOnlineViewTest, LoadsOpenStdC) {
+    online_view_expect_case(56);
+}
+
+TEST(RadiantOnlineViewTest, LoadsOpenStdCPP) {
+    online_view_expect_case(57);
+}
+
+TEST(RadiantOnlineViewTest, LoadsTclLang) {
+    online_view_expect_case(58);
+}
+
+TEST(RadiantOnlineViewTest, LoadsCPANOrg) {
+    online_view_expect_case(59);
+}
+
+TEST(RadiantOnlineViewTest, LoadsPCREOrg) {
+    online_view_expect_case(60);
+}
+
+TEST(RadiantOnlineViewTest, LoadsSQLiteCAPIIntro) {
+    online_view_expect_case(61);
+}
+
+TEST(RadiantOnlineViewTest, LoadsSQLiteResultCodes) {
+    online_view_expect_case(62);
+}
+
+TEST(RadiantOnlineViewTest, LoadsCairoGraphicsOrg) {
+    online_view_expect_case(63);
+}
+
+TEST(RadiantOnlineViewTest, LoadsHTTPDHome) {
+    online_view_expect_case(64);
+}
+
+TEST(RadiantOnlineViewTest, LoadsXOrg) {
+    online_view_expect_case(65);
+}
+
+TEST(RadiantOnlineViewTest, LoadsGNUHome) {
+    online_view_expect_case(66);
+}
+
+TEST(RadiantOnlineViewTest, LoadsPythonOrg) {
+    online_view_expect_case(67);
+}
+
+TEST(RadiantOnlineViewTest, LoadsKernelOrg) {
+    online_view_expect_case(68);
+}
+
+TEST(RadiantOnlineViewTest, LoadsW3COrg) {
+    online_view_expect_case(69);
+}
+
+TEST(RadiantOnlineViewTest, LoadsIANAHome) {
+    online_view_expect_case(70);
+}
+
+TEST(RadiantOnlineViewTest, LoadsDebianOrg) {
+    online_view_expect_case(71);
+}
+
+TEST(RadiantOnlineViewTest, LoadsFreeBSDOrg) {
+    online_view_expect_case(72);
+}
+
+TEST(RadiantOnlineViewTest, LoadsPostgreSQLOrg) {
+    online_view_expect_case(73);
+}
+
+TEST(RadiantOnlineViewTest, LoadsRustLangOrg) {
+    online_view_expect_case(74);
+}
+
+TEST(RadiantOnlineViewTest, LoadsPHPNet) {
+    online_view_expect_case(75);
+}
+
+TEST(RadiantOnlineViewTest, LoadsOpenBSDOrg) {
+    online_view_expect_case(76);
+}
+
+TEST(RadiantOnlineViewTest, LoadsVimOrg) {
+    online_view_expect_case(77);
+}
+
+TEST(RadiantOnlineViewTest, LoadsRProjectOrg) {
+    online_view_expect_case(78);
+}
+
+TEST(RadiantOnlineViewTest, LoadsCMakeOrg) {
+    online_view_expect_case(79);
+}
+
+TEST(RadiantOnlineViewTest, LoadsLLVMOrg) {
+    online_view_expect_case(80);
+}
+
+TEST(RadiantOnlineViewTest, LoadsRFCEditorOrg) {
+    online_view_expect_case(81);
+}
+
+TEST(RadiantOnlineViewTest, LoadsUnicodeOrg) {
+    online_view_expect_case(82);
+}
+
+TEST(RadiantOnlineViewTest, LoadsGitSCMCom) {
+    online_view_expect_case(83);
+}
+
+TEST(RadiantOnlineViewTest, LoadsValgrindOrg) {
+    online_view_expect_case(84);
+}
+
+TEST(RadiantOnlineViewTest, LoadsGnuplotInfo) {
+    online_view_expect_case(85);
+}
+
+TEST(RadiantOnlineViewTest, LoadsGNUBash) {
+    online_view_expect_case(86);
+}
+
+TEST(RadiantOnlineViewTest, LoadsGNUMake) {
+    online_view_expect_case(87);
+}
+
+TEST(RadiantOnlineViewTest, LoadsGNUCoreutils) {
+    online_view_expect_case(88);
+}
+
+TEST(RadiantOnlineViewTest, LoadsGNUGrep) {
+    online_view_expect_case(89);
+}
+
+TEST(RadiantOnlineViewTest, LoadsGNUSed) {
+    online_view_expect_case(90);
+}
+
+TEST(RadiantOnlineViewTest, LoadsGNUGawk) {
+    online_view_expect_case(91);
+}
+
+TEST(RadiantOnlineViewTest, LoadsGNUGDB) {
+    online_view_expect_case(92);
+}
+
+TEST(RadiantOnlineViewTest, LoadsLuaManual) {
+    online_view_expect_case(93);
+}
+
+TEST(RadiantOnlineViewTest, LoadsMuslManual) {
+    online_view_expect_case(94);
+}
+
+TEST(RadiantOnlineViewTest, LoadsTcpdumpOrg) {
+    online_view_expect_case(95);
+}
+
+TEST(RadiantOnlineViewTest, LoadsLibreSSLOrg) {
+    online_view_expect_case(96);
+}
+
+TEST(RadiantOnlineViewTest, LoadsFreedesktopOrg) {
+    online_view_expect_case(97);
+}
+
+TEST(RadiantOnlineViewTest, LoadsHTTPD24Docs) {
+    online_view_expect_case(98);
+}
+
+TEST(RadiantOnlineViewTest, LoadsAPRGeneratedDocs) {
+    online_view_expect_case(99);
+}
+
+TEST(RadiantOnlineViewTest, LoadsIANAProtocols) {
+    online_view_expect_case(100);
 }
 
 #endif

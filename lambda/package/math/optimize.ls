@@ -9,7 +9,7 @@ fn can_merge(a, b) {
 }
 
 fn merge_two(a, b) {
-    let txt = string(a[0]) ++ string(b[0])
+    let txt = (a[0]) ++ (b[0])
     <span class: a.class; txt>
 }
 

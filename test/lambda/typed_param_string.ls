@@ -32,7 +32,7 @@ pair("x", "y")
 
 // 5. Mixed typed and untyped params
 fn tag(label: string, value) {
-  label ++ "=" ++ string(value)
+  label ++ "=" ++ (value)
 }
 "5. mixed params"
 tag("count", 42)

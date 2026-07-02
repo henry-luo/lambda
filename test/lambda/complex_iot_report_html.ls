@@ -203,7 +203,7 @@ pub fn analyze_traffic_patterns(traffic_data) {
         infrastructure_improvements: for (data in safety_analysis.incident_hotspots where data.risk_level == "high")
                 {
                     location: data.intersection_id,
-                    issue: "High incident rate: " ++ string(data.incident_count) ++ " incidents",
+                    issue: "High incident rate: " ++ (data.incident_count) ++ " incidents",
                     recommendation: "Install additional safety infrastructure (cameras, improved signage)",
                     estimated_cost_category: "medium"
                 }
@@ -778,7 +778,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                         alert_box("alert-warning", [
                             <strong "⚠️ Air Quality Alerts Active">,
                             <br>,
-                            (string(len(environmental_analysis.environmental_analysis.air_quality_trends.air_quality_alerts)) ++ " location(s) exceeding safe PM2.5 levels. Recommend limiting outdoor activities.")
+                            ((len(environmental_analysis.environmental_analysis.air_quality_trends.air_quality_alerts)) ++ " location(s) exceeding safe PM2.5 levels. Recommend limiting outdoor activities.")
                         ])
                     }
                 >
@@ -876,7 +876,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                     alert_box("alert-info", [
                         <strong "🚦 Optimization Opportunity">,
                         <br>,
-                        (string(len(traffic_analysis.optimization_strategies.signal_timing_adjustments)) ++ " intersection(s) identified for signal timing optimization to reduce congestion.")
+                        ((len(traffic_analysis.optimization_strategies.signal_timing_adjustments)) ++ " intersection(s) identified for signal timing optimization to reduce congestion.")
                     ])
                 }
             >
@@ -1028,9 +1028,9 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             <p <strong "Smart City IoT Analytics Platform">>
             <p "Powered by Lambda Script Engine | Real-time Data Processing & Urban Intelligence">
             <p style:"margin-top: 10px; font-size: 0.85em;"
-                ("Data sources: " ++ string(environmental_analysis.data_quality.total_readings or 0) ++ " environmental sensors, " ++
-                string(traffic_analysis.traffic_summary.monitoring_coverage or 0) ++ " traffic intersections, " ++
-                string(energy_analysis.energy_overview.monitored_meters or 0) ++ " energy meters")
+                ("Data sources: " ++ (environmental_analysis.data_quality.total_readings or 0) ++ " environmental sensors, " ++
+                (traffic_analysis.traffic_summary.monitoring_coverage or 0) ++ " traffic intersections, " ++
+                (energy_analysis.energy_overview.monitored_meters or 0) ++ " energy meters")
             >
         >
     >

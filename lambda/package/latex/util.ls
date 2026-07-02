@@ -115,7 +115,7 @@ pub fn str_join(arr, sep) {
 
 fn join_rec(arr, sep, i, n, acc) {
     if (i >= n) acc
-    else join_rec(arr, sep, i + 1, n, acc ++ sep ++ string(arr[i]))
+    else join_rec(arr, sep, i + 1, n, acc ++ sep ++ (arr[i]))
 }
 
 // check if a value is a parbreak symbol

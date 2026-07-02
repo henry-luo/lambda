@@ -97,6 +97,33 @@ static float render_clip_parse_len(const char*& s, float ref) {
     return val;
 }
 
+static bool render_clip_parse_polygon_len(const char*& s, float ref, float* out_value) {
+    while (*s == ' ' || *s == ',') s++;
+    const char* start = s;
+    char* end = nullptr;
+    float val = strtof(s, &end);
+    if (end == start) {
+        return false;
+    }
+    s = end;
+    while (*s == ' ') s++;
+    if (*s == '%') {
+        s++;
+        *out_value = val / 100.0f * ref;
+        return true;
+    }
+    if (s[0] == 'p' && s[1] == 'x') {
+        s += 2;
+        *out_value = val;
+        return true;
+    }
+    if (isalpha((unsigned char)*s) || *s == '(') {
+        return false;
+    }
+    *out_value = val;
+    return true;
+}
+
 static void render_clip_skip_wsp_comma(const char** s) {
     while (**s && (isspace((unsigned char)**s) || **s == ',')) (*s)++;
 }
@@ -324,14 +351,14 @@ static ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, const char*
         while (*scan && *scan != ')') {
             while (*scan == ' ' || *scan == ',') scan++;
             if (*scan == ')') break;
-            strtof(scan, (char**)&scan);
-            while (*scan == ' ') scan++;
-            if (*scan == '%') scan++;
-            if (scan[0] == 'p' && scan[1] == 'x') scan += 2;
-            strtof(scan, (char**)&scan);
-            while (*scan == ' ') scan++;
-            if (*scan == '%') scan++;
-            if (scan[0] == 'p' && scan[1] == 'x') scan += 2;
+            float dummy_x = 0.0f, dummy_y = 0.0f;
+            // Unsupported units/functions such as calc() and rem leave strtof
+            // unable to advance; abort the optional clip-path instead of
+            // spinning forever while rendering the page.
+            if (!render_clip_parse_polygon_len(scan, elem_w, &dummy_x) ||
+                !render_clip_parse_polygon_len(scan, elem_h, &dummy_y)) {
+                return nullptr;
+            }
             count++;
             while (*scan == ' ' || *scan == ',') scan++;
         }
@@ -340,8 +367,14 @@ static ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, const char*
         float* vx = (float*)scratch_alloc(scratch, count * sizeof(float));
         float* vy = (float*)scratch_alloc(scratch, count * sizeof(float));
         for (int i = 0; i < count; i++) {
-            vx[i] = render_clip_parse_len(s, elem_w) + abs_x;
-            vy[i] = render_clip_parse_len(s, elem_h) + abs_y;
+            if (!render_clip_parse_polygon_len(s, elem_w, &vx[i]) ||
+                !render_clip_parse_polygon_len(s, elem_h, &vy[i])) {
+                scratch_free(scratch, vy);
+                scratch_free(scratch, vx);
+                return nullptr;
+            }
+            vx[i] += abs_x;
+            vy[i] += abs_y;
         }
         ClipShape* cs = (ClipShape*)scratch_calloc(scratch, sizeof(ClipShape));
         cs->type = CLIP_SHAPE_POLYGON;

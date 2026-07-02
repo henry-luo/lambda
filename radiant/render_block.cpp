@@ -21,8 +21,19 @@
 #include "../lambda/input/css/dom_element.hpp"
 
 #include <chrono>
+#include <stdlib.h>
 
 #define DEBUG_RENDER_BLOCK 0
+
+static bool render_block_trace_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        // Color inheritance traces fire for nearly every block on full pages;
+        // keep them opt-in to avoid turning rendering into log I/O.
+        enabled = getenv("RADIANT_TRACE_RENDER") ? 1 : 0;
+    }
+    return enabled != 0;
+}
 
 static bool render_block_clip_empty(const Bound* clip) {
     return !clip || clip->right <= clip->left || clip->bottom <= clip->top;
@@ -494,16 +505,20 @@ static bool block_should_paint_children(ViewBlock* block) {
 static void render_block_apply_inherited_color(RenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block) return;
     if (block->in_line && block->in_line->has_color) {
-        log_debug("[RENDER COLOR] element=%s setting color: #%02x%02x%02x (was #%02x%02x%02x) color.c=0x%08x",
-                  block->node_name(),
-                  block->in_line->color.r, block->in_line->color.g, block->in_line->color.b,
-                  rdcon->color.r, rdcon->color.g, rdcon->color.b,
-                  block->in_line->color.c);
+        if (render_block_trace_enabled()) {
+            log_debug("[RENDER COLOR] element=%s setting color: #%02x%02x%02x (was #%02x%02x%02x) color.c=0x%08x",
+                      block->node_name(),
+                      block->in_line->color.r, block->in_line->color.g, block->in_line->color.b,
+                      rdcon->color.r, rdcon->color.g, rdcon->color.b,
+                      block->in_line->color.c);
+        }
         rdcon->color = block->in_line->color;
     } else {
-        log_debug("[RENDER COLOR] element=%s inheriting color #%02x%02x%02x (in_line=%p, color.c=%u)",
-                  block->node_name(), rdcon->color.r, rdcon->color.g, rdcon->color.b,
-                  block->in_line, block->in_line ? block->in_line->color.c : 0);
+        if (render_block_trace_enabled()) {
+            log_debug("[RENDER COLOR] element=%s inheriting color #%02x%02x%02x (in_line=%p, color.c=%u)",
+                      block->node_name(), rdcon->color.r, rdcon->color.g, rdcon->color.b,
+                      block->in_line, block->in_line ? block->in_line->color.c : 0);
+        }
     }
 }
 

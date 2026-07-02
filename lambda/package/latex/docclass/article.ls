@@ -29,9 +29,9 @@ pub fn format_section_number(counters, counter_name, in_appendix) {
         case "section":
             sec
         case "subsection":
-            sec ++ "." ++ string(counters.subsection)
+            sec ++ "." ++ (counters.subsection)
         case "subsubsection":
-            sec ++ "." ++ string(counters.subsection) ++ "." ++ string(counters.subsubsection)
+            sec ++ "." ++ (counters.subsection) ++ "." ++ (counters.subsubsection)
         default: null
     }
 }
@@ -54,15 +54,15 @@ pub fn step_counter(counters, counter_name) {
 // ============================================================
 
 pub fn figure_label(num) {
-    "Figure " ++ string(num)
+    "Figure " ++ (num)
 }
 
 pub fn table_label(num) {
-    "Table " ++ string(num)
+    "Table " ++ (num)
 }
 
 pub fn equation_label(num) {
-    "(" ++ string(num) ++ ")"
+    "(" ++ (num) ++ ")"
 }
 
 // ============================================================
@@ -81,7 +81,7 @@ pub ABSTRACT_POSITION = "before_body"
 // ============================================================
 
 pub fn theorem_label(env_display_name, num) {
-    env_display_name ++ " " ++ string(num)
+    env_display_name ++ " " ++ (num)
 }
 
 // ============================================================

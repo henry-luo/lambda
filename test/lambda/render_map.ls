@@ -2,7 +2,7 @@
 
 // Test 1: apply() records mapping; same source returns same result
 view int state count: 0 {
-  "v:" ++ string(count)
+  "v:" ++ (count)
 }
 let r1 = apply(10)
 r1
@@ -43,6 +43,6 @@ apply(<msg "hi">)
 
 // Test 7: Multiple state vars — state set triggers dirty marking
 view float state x: 1, y: 2 {
-  string(x) ++ "," ++ string(y)
+  (x) ++ "," ++ (y)
 }
 apply(3.14)

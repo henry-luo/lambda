@@ -46,16 +46,16 @@ pn half(n) {
 
 pn main() {
     // 0.5 / 64.0 = 0.0078125  (was 0 before the fix)
-    print("T1:" ++ string(scale(0.5, 64.0)) ++ "\n")
+    print("T1:" ++ (scale(0.5, 64.0)) ++ "\n")
     // 0.01 / 2.0 = 0.005
-    print("T2:" ++ string(scale2(0.01, 2.0)) ++ "\n")
+    print("T2:" ++ (scale2(0.01, 2.0)) ++ "\n")
     // arr=[1.0,5.0], dt=0.5: dx=-4, d2=16, dist=4, mag = 0.5/64 = 0.0078125
     var arr = [1.0, 5.0]
-    print("T3:" ++ string(compute_mag(arr, 0.5)) ++ "\n")
+    print("T3:" ++ (compute_mag(arr, 0.5)) ++ "\n")
     // mag = 0.5/64 = 0.0078125; 0.0078125*100 + 0.5 = 1.28125
-    print("T4:" ++ string(mixed(0.5, 64.0, 100.0)) ++ "\n")
+    print("T4:" ++ (mixed(0.5, 64.0, 100.0)) ++ "\n")
     // regression: int arithmetic still works
-    print("T5:" ++ string(add_one(10)) ++ "\n")
+    print("T5:" ++ (add_one(10)) ++ "\n")
     // regression: int param, true division → float result
-    print("T6:" ++ string(half(7)) ++ "\n")
+    print("T6:" ++ (half(7)) ++ "\n")
 }
