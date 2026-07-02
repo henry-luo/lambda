@@ -814,6 +814,7 @@ static inline void dom_pre_remove(DomNode* child) {
         js_dom_node_contains(child, (DomNode*)js_document_active_element)) {
         js_document_active_element = nullptr;
     }
+    view_pool_release_detached_subtree(child);
     js_dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_REMOVE, child,
                                   child ? child->parent : nullptr, 0);
 }

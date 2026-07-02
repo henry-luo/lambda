@@ -38,7 +38,15 @@ static int face_cache_compare(const void* a, const void* b, void* udata) {
 static void face_cache_free(void* item) {
     FontCacheKey* entry = (FontCacheKey*)item;
     if (entry && entry->handle) {
-        font_handle_release(entry->handle);
+        if (entry->handle->ctx && entry->handle->ctx->destroying) {
+            // FontContext teardown runs after document/view pools are bulk-freed;
+            // drain stale pool-owned FontProp refs so file handles/path copies close.
+            while (entry->handle->ref_count > 0) {
+                font_handle_release(entry->handle);
+            }
+        } else {
+            font_handle_release(entry->handle);
+        }
     }
 }
 
