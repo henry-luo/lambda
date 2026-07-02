@@ -2146,6 +2146,11 @@ int main(int argc, char *argv[]) {
                     unhandled_rejections_strict = true;
                 } else if (strcmp(argv[i], "--unhandled-rejections=none") == 0) {
                     unhandled_rejections_strict = false;
+                } else if (strncmp(argv[i], "--unhandled-rejections=", 23) == 0) {
+                    // invalid CLI modes must fail during bootstrap; otherwise child tests recurse by re-running their script.
+                    fputs("invalid value for --unhandled-rejections\n", stderr);
+                    runtime_cleanup(&runtime);
+                    return lambda_main_finish(9);
                 } else if (strcmp(argv[i], "--tls-min-v1.3") == 0) {
                     tls_min_v13 = true;
                 } else if (strcmp(argv[i], "--tls-max-v1.2") == 0) {

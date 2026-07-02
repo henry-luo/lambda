@@ -618,11 +618,18 @@ typedef struct JsHttpConn {
     bool         request_body_chunked;
     bool         close_after_response_writes;
     bool         timeout_timer_active;
+    bool         handle_closed;
 } JsHttpConn;
 
 static uv_stream_t* http_conn_stream(JsHttpConn* conn) {
     if (!conn) return NULL;
     return conn->is_pipe ? (uv_stream_t*)&conn->pipe : (uv_stream_t*)&conn->tcp;
+}
+
+static void http_conn_free_if_done(JsHttpConn* conn) {
+    if (!conn || !conn->handle_closed) return;
+    if (conn->open_response_count > 0 || conn->pending_response_writes > 0) return;
+    mem_free(conn);
 }
 
 static void http_server_note_conn_closed(JsHttpConn* conn);
@@ -1304,14 +1311,15 @@ static Item http_res_write_ex(Item self, Item chunk_item, Item encoding_item, It
     js_property_set(self, make_string_item("__headers_sent__"), (Item){.item = b2it(true)});
     js_property_set(self, make_string_item("__write_head_called__"), (Item){.item = b2it(true)});
     js_property_set(self, make_string_item("headersSent"), (Item){.item = b2it(true)});
-    // response bodies are buffered until end(), so write callbacks must be
-    // acknowledged at the write point or nested write/end sequences stall.
-    http_call_write_callback(callback_item);
     if (!http_response_bool_prop(self, "__ending__")) {
         // ServerResponse.write() must commit implicit headers immediately;
         // buffering until end() leaves streaming clients waiting forever.
         http_response_flush_partial(self);
     }
+    // write callbacks can synchronously nest more writes; run them only after
+    // the partial-send flag is set so a nested end() cannot emit a full reply
+    // before the outer write commits its header/body boundary.
+    http_call_write_callback(callback_item);
     return (Item){.item = b2it(true)};
 }
 
@@ -1335,10 +1343,35 @@ static void http_response_flush(Item self) {
     Item handle_item = js_property_get(self, make_string_item("__conn__"));
     if (handle_item.item == 0) return;
     JsHttpConn* conn = (JsHttpConn*)(uintptr_t)it2i(handle_item);
-    if (!conn || conn->destroyed) return;
+    if (!conn) return;
 
     Item sent = js_property_get(self, make_string_item("__sent__"));
     if (get_type_id(sent) == LMD_TYPE_BOOL && it2b(sent)) return; // already sent
+    if (conn->destroyed) {
+        // delayed pipelined res.end() timers can fire after the socket closes;
+        // retain the conn until those responses settle, but never write to it.
+        if (conn->open_response_count > 0) conn->open_response_count--;
+        if (conn->timeout_response.item == self.item) {
+            conn->timeout_response = make_js_undefined();
+            conn->response_timeout_callback = make_js_undefined();
+        }
+        if (conn->current_response.item == self.item) {
+            conn->current_response = make_js_undefined();
+        }
+        js_property_set(self, make_string_item("__sent__"), (Item){.item = b2it(true)});
+        js_property_set(self, make_string_item("__write_head_called__"), (Item){.item = b2it(true)});
+        js_property_set(self, make_string_item("headersSent"), (Item){.item = b2it(true)});
+        js_property_set(self, make_string_item("writableFinished"), (Item){.item = b2it(true)});
+        http_response_emit(self, "finish", NULL, 0, false);
+        http_response_close_request(self);
+        Item callback = js_property_get(self, make_string_item("__end_callback__"));
+        if (js_http_is_callable(callback)) {
+            js_call_function(callback, make_js_undefined(), NULL, 0);
+        }
+        js_microtask_flush();
+        http_conn_free_if_done(conn);
+        return;
+    }
     if (http_response_bool_prop(self, "__partial_sent__")) {
         if (conn->open_response_count > 0) conn->open_response_count--;
         if (conn->timeout_response.item == self.item) {
@@ -2280,7 +2313,11 @@ static void http_conn_close_now(JsHttpConn* conn) {
             JsHttpConn* c = (JsHttpConn*)h->data;
             if (c) {
                 if (c->recv_buf) mem_free(c->recv_buf);
-                mem_free(c);
+                c->recv_buf = NULL;
+                c->handle_closed = true;
+                // Response objects keep raw conn pointers for delayed end();
+                // free only after every open response has observed closure.
+                http_conn_free_if_done(c);
             }
         });
     }
@@ -4312,6 +4349,12 @@ static void http_client_update_pending_body(JsHttpClientReq* creq, Item req_obj)
     }
     if (update_content_length && value_start >= 0 && value_end >= value_start && len_buf_len > 0) {
         new_head_len = creq->send_head_len - (value_end - value_start) + len_buf_len;
+    }
+    if (!update_content_length && body_len > 0 &&
+        creq->send_len == creq->send_head_len + body_len &&
+        memcmp(creq->send_buf + creq->send_head_len, bs->chars, (size_t)body_len) == 0) {
+        // equal lengths can still hide stale buffered body bytes; skip rebuild only when the pending body already matches.
+        return;
     }
     int new_len = new_head_len + body_len;
     char* new_buf = (char*)mem_alloc(new_len, MEM_CAT_JS_RUNTIME);

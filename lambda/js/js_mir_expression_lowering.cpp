@@ -12379,6 +12379,7 @@ int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, bool has
     if (!fc) return 0;
     if (!has_remapped) return fc->capture_count;
     int env_size = mt ? mt->scope_env_slot_count : 0;
+    if (fc->capture_count > env_size) env_size = fc->capture_count;
     for (int ci = 0; ci < fc->capture_count; ci++) {
         int slot = fc->captures[ci].scope_env_slot;
         if (slot >= 0 && slot + 1 > env_size) env_size = slot + 1;
@@ -12445,12 +12446,46 @@ static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
         snprintf(mt->last_closure_capture_names[ci],
             sizeof(mt->last_closure_capture_names[ci]), "%s", fc->captures[ci].name);
         mt->last_closure_capture_slots[ci] =
-            use_capture_slots ? fc->captures[ci].scope_env_slot : ci;
+            use_capture_slots && fc->captures[ci].scope_env_slot >= 0 ?
+                fc->captures[ci].scope_env_slot : ci;
         mt->last_closure_capture_is_transitive[ci] =
             fc->captures[ci].grandparent_slot >= 0;
         mt->last_closure_capture_is_nfe[ci] = fc->captures[ci].is_nfe_binding;
     }
     mt->last_closure_has_env = count > 0;
+}
+
+static void jm_copy_parent_env_link_for_copied_closure(JsMirTranspiler* mt,
+        JsFuncCollected* fc, MIR_reg_t env, int env_alloc_size, bool has_remapped) {
+    if (!mt || !fc || env == 0 || mt->scope_env_reg == 0) return;
+    if (!has_remapped) return;
+    bool needs_parent_link = false;
+    for (int ci = 0; ci < fc->capture_count; ci++) {
+        if (fc->captures[ci].grandparent_slot >= 0) {
+            needs_parent_link = true;
+            break;
+        }
+    }
+    if (!needs_parent_link) return;
+    int parent_index = fc->parent_index;
+    if (parent_index < 0 || parent_index >= mt->func_count) return;
+    JsFuncCollected* parent_fc = &mt->func_entries[parent_index];
+    if (!parent_fc->has_parent_env_link || parent_fc->scope_env_count <= 0) return;
+    int parent_env_link_slot = parent_fc->scope_env_count - 1;
+    if (parent_env_link_slot < 0 || parent_env_link_slot >= env_alloc_size) return;
+
+    MIR_reg_t parent_env = jm_new_reg(mt, "copy_parent_env", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, parent_env),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+            parent_env_link_slot * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1)));
+    // only remapped closure envs reserve the parent's scope-env layout; dense
+    // copied envs use this slot for real captures, so writing the link there
+    // corrupts values later coerced by callbacks.
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+            parent_env_link_slot * (int)sizeof(uint64_t), env, 0, 1),
+        MIR_new_reg_op(mt->ctx, parent_env)));
 }
 
 static bool jm_capture_is_lexical_meta_binding(const char* name) {
@@ -12574,7 +12609,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
 
             for (int ci = 0; ci < fc->capture_count; ci++) {
-                int slot = has_remapped ? fc->captures[ci].scope_env_slot : ci;
+                int slot = fc->captures[ci].scope_env_slot >= 0 ? fc->captures[ci].scope_env_slot : ci;
                 if (slot < 0) continue;
 
                 // Skip self-capture — will be patched after closure creation
@@ -12635,6 +12670,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
                     MIR_new_reg_op(mt->ctx, val)));
             }
+            jm_copy_parent_env_link_for_copied_closure(mt, fc, env, env_alloc_size, has_remapped);
             fn_reg = jm_call_4(mt, "js_new_closure", MIR_T_I64,
                 MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
@@ -12823,7 +12859,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
 
             for (int i = 0; i < fc->capture_count; i++) {
-                int slot = has_remapped ? fc->captures[i].scope_env_slot : i;
+                    int slot = fc->captures[i].scope_env_slot >= 0 ? fc->captures[i].scope_env_slot : i;
                 if (slot < 0) continue;
 
                 // Skip self-capture — will be patched after closure creation
@@ -12947,6 +12983,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 }
             }
 
+            jm_copy_parent_env_link_for_copied_closure(mt, fc, env, env_alloc_size, has_remapped);
             jm_track_last_closure_env(mt, env, fc, has_remapped);
 
             fn_reg = jm_call_4(mt, "js_new_closure", MIR_T_I64,

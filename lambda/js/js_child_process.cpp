@@ -27,9 +27,14 @@
 #include <unistd.h>
 #else
 #include <process.h>
+#include <direct.h>
 // On Windows, pclose() returns the exit code directly
 #define WIFEXITED(s)  (1)
 #define WEXITSTATUS(s) (s)
+#endif
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096
 #endif
 
 extern "C" Item js_process_emit(Item event_name, Item arg1);
@@ -3006,17 +3011,34 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
     }
 
     mkdir("temp", 0755);
-    char stdout_path[256];
-    char stderr_path[256];
-    char stdin_path[256];
+    char temp_dir[PATH_MAX];
+#ifndef _WIN32
+    if (getcwd(temp_dir, sizeof(temp_dir))) {
+        int temp_len = (int)strlen(temp_dir);
+        snprintf(temp_dir + temp_len, sizeof(temp_dir) - (size_t)temp_len, "/temp");
+    } else {
+        snprintf(temp_dir, sizeof(temp_dir), "temp");
+    }
+#else
+    if (_getcwd(temp_dir, sizeof(temp_dir))) {
+        int temp_len = (int)strlen(temp_dir);
+        snprintf(temp_dir + temp_len, sizeof(temp_dir) - (size_t)temp_len, "\\temp");
+    } else {
+        snprintf(temp_dir, sizeof(temp_dir), "temp");
+    }
+#endif
+    char stdout_path[PATH_MAX];
+    char stderr_path[PATH_MAX];
+    char stdin_path[PATH_MAX];
 #ifndef _WIN32
     long pid = (long)getpid();
 #else
     long pid = (long)_getpid();
 #endif
-    snprintf(stdout_path, sizeof(stdout_path), "temp/js_spawn_sync_%ld_%p.out", pid, (void*)&stdout_path);
-    snprintf(stderr_path, sizeof(stderr_path), "temp/js_spawn_sync_%ld_%p.err", pid, (void*)&stderr_path);
-    snprintf(stdin_path, sizeof(stdin_path), "temp/js_spawn_sync_%ld_%p.in", pid, (void*)&stdin_path);
+    // spawnSync may prepend "cd <cwd>"; keep capture files anchored in repo ./temp.
+    snprintf(stdout_path, sizeof(stdout_path), "%s/js_spawn_sync_%ld_%p.out", temp_dir, pid, (void*)&stdout_path);
+    snprintf(stderr_path, sizeof(stderr_path), "%s/js_spawn_sync_%ld_%p.err", temp_dir, pid, (void*)&stderr_path);
+    snprintf(stdin_path, sizeof(stdin_path), "%s/js_spawn_sync_%ld_%p.in", temp_dir, pid, (void*)&stdin_path);
     int stdio_mode[3];
     if (!cp_sync_normalize_stdio(effective_options, stdio_mode)) {
         return ItemNull;
