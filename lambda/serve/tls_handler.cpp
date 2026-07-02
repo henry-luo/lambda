@@ -35,6 +35,19 @@
 static int tls_uv_send(void *ctx, const unsigned char *buf, size_t len);
 static int tls_uv_recv(void *ctx, unsigned char *buf, size_t len);
 
+typedef struct TlsUvWriteReq {
+    uv_write_t req;
+    char* data;
+} TlsUvWriteReq;
+
+static void tls_uv_write_done(uv_write_t* req, int status) {
+    (void)status;
+    TlsUvWriteReq* write_req = (TlsUvWriteReq*)req;
+    if (!write_req) return;
+    if (write_req->data) serve_free(write_req->data);
+    serve_free(write_req);
+}
+
 // ============================================================================
 // Global init/cleanup
 // ============================================================================
@@ -129,7 +142,9 @@ TlsContext* tls_context_create(const TlsConfig *config) {
 
     // peer verification
     if (config && config->verify_peer) {
-        mbedtls_ssl_conf_authmode(ctx->ssl_config, MBEDTLS_SSL_VERIFY_REQUIRED);
+        // Node reports authorization on TLSSocket; optional verification lets
+        // mbedTLS compute trust flags without aborting the handshake early.
+        mbedtls_ssl_conf_authmode(ctx->ssl_config, MBEDTLS_SSL_VERIFY_OPTIONAL);
     } else {
         mbedtls_ssl_conf_authmode(ctx->ssl_config, MBEDTLS_SSL_VERIFY_NONE);
     }
@@ -353,11 +368,24 @@ int tls_write(TlsConnection *conn, const unsigned char *buf, size_t len) {
 static int tls_uv_send(void *ctx, const unsigned char *buf, size_t len) {
     TlsConnection *conn = (TlsConnection*)ctx;
     if (!conn || !conn->client || !buf || len == 0) return MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
-    uv_buf_t uvbuf = uv_buf_init((char*)buf, (unsigned int)len);
-    int ret = uv_try_write((uv_stream_t*)conn->client, &uvbuf, 1);
-    if (ret == UV_EAGAIN || ret == UV_ENOSYS) return MBEDTLS_ERR_SSL_WANT_WRITE;
-    if (ret < 0) return MBEDTLS_ERR_NET_SEND_FAILED;
-    return ret;
+    TlsUvWriteReq* write_req = (TlsUvWriteReq*)serve_calloc(1, sizeof(TlsUvWriteReq));
+    if (!write_req) return MBEDTLS_ERR_SSL_ALLOC_FAILED;
+    write_req->data = (char*)serve_malloc(len);
+    if (!write_req->data) {
+        serve_free(write_req);
+        return MBEDTLS_ERR_SSL_ALLOC_FAILED;
+    }
+    memcpy(write_req->data, buf, len);
+    uv_buf_t uvbuf = uv_buf_init(write_req->data, (unsigned int)len);
+    // mbedTLS owns `buf` only until the BIO callback returns; queueing a copy
+    // prevents partial try_write progress from losing encrypted TLS records.
+    int ret = uv_write(&write_req->req, (uv_stream_t*)conn->client, &uvbuf, 1, tls_uv_write_done);
+    if (ret < 0) {
+        if (write_req->data) serve_free(write_req->data);
+        serve_free(write_req);
+        return ret == UV_EAGAIN ? MBEDTLS_ERR_SSL_WANT_WRITE : MBEDTLS_ERR_NET_SEND_FAILED;
+    }
+    return (int)len;
 }
 
 static int tls_uv_recv(void *ctx, unsigned char *buf, size_t len) {
@@ -402,6 +430,11 @@ const char* tls_get_cipher_name(TlsConnection *conn) {
 const char* tls_get_protocol_version(TlsConnection *conn) {
     if (!conn || !conn->ssl) return NULL;
     return mbedtls_ssl_get_version(conn->ssl);
+}
+
+unsigned int tls_get_verify_result(TlsConnection *conn) {
+    if (!conn || !conn->ssl || !conn->handshake_done) return (unsigned int)-1;
+    return (unsigned int)mbedtls_ssl_get_verify_result(conn->ssl);
 }
 
 // ============================================================================

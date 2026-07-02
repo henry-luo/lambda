@@ -1,0 +1,14 @@
+{
+  "name": "editor4c: typing into a list item routes beforeinput -> command -> reconcile",
+  "_note": "Phase B pilot — extends 4B's typing.json (which only exercised the h1) to a nested block context (li). Verifies the typing pipeline survives insideof <ul>/<li> where structural handling is different (empty-item cases, list-join, etc.).",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface li"}},
+    {"type": "wait", "ms": 80},
+    {"type": "type", "target": {"selector": ".rdt-surface"}, "text": "QQ"},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface li"}, "contains": "QQ"}
+  ]
+}
