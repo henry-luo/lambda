@@ -3634,6 +3634,14 @@ AstNode* build_current_expr(Transpiler* tp, TSNode node) {
     }
 }
 
+static AstNode* build_null_noop(Transpiler* tp, TSNode source_node) {
+    AstPrimaryNode* null_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY,
+        source_node, sizeof(AstPrimaryNode));
+    null_node->type = &LIT_NULL;
+    null_node->expr = NULL;
+    return (AstNode*)null_node;
+}
+
 // Unified build_if_expr: handles both expression and block forms
 // When a branch is a content block, creates a new scope for variable shadowing
 AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
@@ -3658,7 +3666,12 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
         then_scope->is_proc = tp->current_scope->is_proc;
         tp->current_scope = then_scope;
     }
-    ast_node->then = build_expr(tp, then_node);
+    if (ts_node_is_null(then_node)) {
+        // empty branch blocks are legal no-ops; represent them as null so pn control flow continues.
+        ast_node->then = build_null_noop(tp, if_node);
+    } else {
+        ast_node->then = build_expr(tp, then_node);
+    }
     if (then_is_block) {
         tp->current_scope = tp->current_scope->parent;  // restore scope
     }
@@ -3673,6 +3686,7 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     // Build 'else' branch — create scope if it's a content block
     TSNode else_node = ts_node_child_by_field_id(if_node, FIELD_ELSE);
     if (ts_node_is_null(else_node)) {
+        // empty else blocks have no content field; missing else and no-op else both evaluate to null.
         ast_node->otherwise = NULL;
     }
     else {
