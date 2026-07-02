@@ -111,6 +111,19 @@ void lambda_uv_cleanup(void) {
     log_debug("uv_loop: cleaned up");
 }
 
+void lambda_uv_abandon(void) {
+    if (!g_loop) return;
+
+    // A signal-aborted JS run can leave libuv queues half-mutated; walking or
+    // closing handles would re-enter corrupted queue links during recovery.
+    mem_free(g_loop);
+    g_loop = NULL;
+    g_prepare_active = 0;
+    g_check_active = 0;
+    g_microtask_drain = NULL;
+    log_error("uv_loop: abandoned unsafe loop without closing handles");
+}
+
 void lambda_uv_set_microtask_drain(void (*drain_fn)(void)) {
     g_microtask_drain = drain_fn;
 }

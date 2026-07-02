@@ -295,6 +295,37 @@ static inline int gettimeofday(struct timeval* tv, void* tz) {
 static inline size_t get_rss_bytes() { return 0; }
 #endif
 
+static bool html_tag_name_boundary(char c) {
+    return c == '>' || c == '/' || c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f';
+}
+
+static int lambda_ascii_strncasecmp(const char* a, const char* b, size_t len) {
+#ifdef _WIN32
+    return _strnicmp(a, b, len);
+#else
+    return strncasecmp(a, b, len);
+#endif
+}
+
+static const char* find_html_start_tag(const char* html, const char* tag_name) {
+    if (!html || !tag_name) return NULL;
+    size_t tag_len = strlen(tag_name);
+    const char* scan = html;
+    while ((scan = strcasestr(scan, "<")) != NULL) {
+        const char* name_start = scan + 1;
+        if (*name_start == '/') {
+            scan++;
+            continue;
+        }
+        if (lambda_ascii_strncasecmp(name_start, tag_name, tag_len) == 0 &&
+            html_tag_name_boundary(name_start[tag_len])) {
+            return scan;
+        }
+        scan++;
+    }
+    return NULL;
+}
+
 // Forward declare additional transpiler functions
 extern "C" {
     char* read_text_file(const char *filename);
@@ -3437,8 +3468,10 @@ int main(int argc, char *argv[]) {
                 // This ensures relative URLs (CSS, images, etc.) resolve correctly
                 if (effective_ext && strcmp(effective_ext, ".html") == 0) {
                     // Find where to inject the base tag (after <head> or at start of content)
-                    const char* head_tag = strcasestr(response->data, "<head");
-                    const char* html_tag = strcasestr(response->data, "<html");
+                    // `<head` also matches `<header>`; only real start tags keep
+                    // the injected base in the parser's head where URL resolution sees it.
+                    const char* head_tag = find_html_start_tag(response->data, "head");
+                    const char* html_tag = find_html_start_tag(response->data, "html");
 
                     if (head_tag) {
                         // Find the end of the <head> tag

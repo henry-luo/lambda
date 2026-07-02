@@ -14,8 +14,19 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include <string.h>
 #include <math.h>
+#include <stdlib.h>
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #include "lib/stb_image_write.h"
+
+static bool render_inline_trace_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        // Inline color traces run per fragment on real pages; make them opt-in
+        // so browser-style tests are not dominated by debug logging.
+        enabled = getenv("RADIANT_TRACE_RENDER") ? 1 : 0;
+    }
+    return enabled != 0;
+}
 
 /**
  * Reset canvas target and draw shapes to buffer.
@@ -215,16 +226,20 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
             setup_font(rdcon->ui_context, &rdcon->font, view_span->font);
         }
         if (view_span->in_line && view_span->in_line->has_color) {
-            log_debug("[RENDER COLOR INLINE] element=%s setting color: #%02x%02x%02x (was #%02x%02x%02x) color.c=0x%08x",
-                      view_span->node_name(),
-                      view_span->in_line->color.r, view_span->in_line->color.g, view_span->in_line->color.b,
-                      pa_color.r, pa_color.g, pa_color.b,
-                      view_span->in_line->color.c);
+            if (render_inline_trace_enabled()) {
+                log_debug("[RENDER COLOR INLINE] element=%s setting color: #%02x%02x%02x (was #%02x%02x%02x) color.c=0x%08x",
+                          view_span->node_name(),
+                          view_span->in_line->color.r, view_span->in_line->color.g, view_span->in_line->color.b,
+                          pa_color.r, pa_color.g, pa_color.b,
+                          view_span->in_line->color.c);
+            }
             rdcon->color = view_span->in_line->color;
         } else {
-            log_debug("[RENDER COLOR INLINE] element=%s inheriting color #%02x%02x%02x (in_line=%p, color.c=%u)",
-                      view_span->node_name(), pa_color.r, pa_color.g, pa_color.b,
-                      view_span->in_line, view_span->in_line ? view_span->in_line->color.c : 0);
+            if (render_inline_trace_enabled()) {
+                log_debug("[RENDER COLOR INLINE] element=%s inheriting color #%02x%02x%02x (in_line=%p, color.c=%u)",
+                          view_span->node_name(), pa_color.r, pa_color.g, pa_color.b,
+                          view_span->in_line, view_span->in_line ? view_span->in_line->color.c : 0);
+            }
         }
         render_children(rdcon, view);
     }

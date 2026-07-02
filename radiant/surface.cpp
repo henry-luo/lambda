@@ -15,6 +15,7 @@
 #include "../lib/url.h"
 #include "../lib/file.h"
 #include "../lambda/input/input.hpp"  // for download_http_content
+#include "../lambda/network/network_resource_manager.h"
 
 #include <unistd.h>
 #include <strings.h>
@@ -633,27 +634,47 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     unsigned char* downloaded_data = nullptr;
     size_t downloaded_size = 0;
 
+    if (uicon->image_cache == NULL) {
+        // create a new hash map. 2nd argument is the initial capacity.
+        // 3rd and 4th arguments are optional seeds that are passed to the following hash function.
+        uicon->image_cache = image_new(10);
+    }
+
     if (is_http) {
-        // When network resource manager is active, images are loaded asynchronously.
-        // Return NULL so layout uses placeholder sizing and reflows when image arrives.
-        if (uicon->document->resource_manager) {
+        // During async discovery/layout, network images are owned by the
+        // resource manager. Render-time CSS backgrounds can be discovered after
+        // the queue drains, so allow a final sync fetch once loading is done.
+        if (uicon->document->resource_manager &&
+            !resource_manager_is_fully_loaded(uicon->document->resource_manager)) {
             log_debug("[image] Skipping sync download (resource manager active): %s", url_get_href(abs_url));
             url_destroy(abs_url);
             return NULL;
         }
         // Download the image from HTTP URL
         const char* url_str = url_get_href(abs_url);
+        file_path = mem_strdup(url_str, MEM_CAT_RENDER);
+        if (!file_path) {
+            url_destroy(abs_url);
+            return NULL;
+        }
+        ImageEntry search_key = {.path = (char*)file_path, .image = NULL};
+        ImageEntry* entry = (ImageEntry*) hashmap_get(uicon->image_cache, &search_key);
+        if (entry) {
+            log_debug("Image loaded from cache: %s", file_path);
+            mem_free(file_path);
+            url_destroy(abs_url);
+            return entry->image;
+        }
         log_debug("[image] Downloading image from URL: %s", url_str);
         downloaded_data = (unsigned char*)download_http_content(url_str, &downloaded_size, nullptr);
         if (!downloaded_data || downloaded_size == 0) {
             log_error("[image] Failed to download image: %s", url_str);
+            if (downloaded_data) mem_free(downloaded_data);
+            mem_free(file_path);
             url_destroy(abs_url);
             return NULL;
         }
         log_debug("[image] Downloaded image: %zu bytes", downloaded_size);
-        // strdup to take ownership: entry->path must always be a malloc'd string
-        // (url_get_href returns a pointer into the Url struct, not a separate allocation)
-        file_path = mem_strdup(url_str, MEM_CAT_RENDER);
     } else {
         file_path = url_to_local_path(abs_url);
         if (!file_path) {
@@ -673,15 +694,13 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         }
     }
 
-    if (uicon->image_cache == NULL) {
-        // create a new hash map. 2nd argument is the initial capacity.
-        // 3rd and 4th arguments are optional seeds that are passed to the following hash function.
-        uicon->image_cache = image_new(10);
-    }
     ImageEntry search_key = {.path = (char*)file_path, .image = NULL};
     ImageEntry* entry = (ImageEntry*) hashmap_get(uicon->image_cache, &search_key);
     if (entry) {
         log_debug("Image loaded from cache: %s", file_path);
+        // HTTP cache lookup normally happens before download; keep this cleanup
+        // for race/fallback paths so a cached surface never drops a fresh buffer.
+        if (downloaded_data) mem_free(downloaded_data);
         mem_free(file_path);  // always malloc-owned: strdup for HTTP, url_to_local_path for local
         url_destroy(abs_url);
         return entry->image;

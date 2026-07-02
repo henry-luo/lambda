@@ -81,9 +81,13 @@ static void gc_finalize_typed_array(JsTypedArray* ta, gc_native_seen_t* seen_nat
 }
 
 extern "C" void js_regex_map_heap_destroy(Map* map, gc_native_seen_t* seen_native);
+extern "C" void js_collection_map_heap_destroy(Map* map, gc_native_seen_t* seen_native);
 
 static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
     if (!map) return;
+    // JS collections keep their native HashMap in a pool-owned side record; the
+    // heap finalizer must release it before the pool record disappears.
+    js_collection_map_heap_destroy(map, seen_native);
     switch (map->map_kind) {
     case MAP_KIND_TYPED_ARRAY: {
         JsTypedArray* ta = gc_typed_array_from_map(map);

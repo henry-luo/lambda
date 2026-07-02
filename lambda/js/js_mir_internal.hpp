@@ -392,6 +392,7 @@ bool jm_try_eval_const_expr(JsMirTranspiler* mt, JsAstNode* node, double* result
 void jm_track_active_js_transpile(JsTranspiler* tp, JsMirTranspiler* mt, char* owned_source);
 void jm_clear_active_js_transpile(JsTranspiler* tp, JsMirTranspiler* mt, char* owned_source);
 void jm_cleanup_active_mir(void);
+void jm_abandon_active_mir_after_signal(void);
 void jm_defer_mir_cleanup(MIR_context_t ctx);
 void jm_cleanup_deferred_mir();
 void* jm_get_last_deferred_mir_ctx();
