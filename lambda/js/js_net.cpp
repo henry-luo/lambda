@@ -30,6 +30,7 @@ extern __thread EvalContext* context;
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" void js_clearTimeout(Item timer_id);
 extern "C" Item js_buffer_from_bytes(const char* data, int len);
+extern "C" Item js_new_aggregate_error(Item errors, Item message);
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
 extern "C" Item js_throw_invalid_arg_type(const char* name, const char* expected, Item actual);
 extern "C" Item js_throw_type_error_code(const char* code, const char* message);
@@ -84,6 +85,7 @@ static double net_number_value(Item value) {
 // =============================================================================
 
 typedef struct PendingSocketWrite PendingSocketWrite;
+typedef struct SocketAutoAttemptTimerReq SocketAutoAttemptTimerReq;
 typedef struct JsServer JsServer;
 typedef struct JsBoundSocket JsBoundSocket;
 
@@ -166,6 +168,7 @@ typedef struct JsSocket {
     bool      end_callback_set;
     bool      remote_ended;
     bool      close_after_write_drain;
+    bool      need_drain;
     bool      tos_set;
     bool      abort_handler_set;
     bool      abort_scheduled;
@@ -186,6 +189,8 @@ typedef struct JsSocket {
     int       connect_port;
     int       auto_addr_count;
     int       auto_addr_index;
+    int       auto_attempt_timeout_ms;
+    int       auto_attempt_generation;
     char      utf8_pending[4];
     char      connect_host[INET6_ADDRSTRLEN];
     char      auto_addrs[8][INET6_ADDRSTRLEN];
@@ -199,8 +204,15 @@ typedef struct JsSocket {
     Item      onread_callback;
     PendingSocketWrite* pending_writes_head;
     PendingSocketWrite* pending_writes_tail;
+    SocketAutoAttemptTimerReq* auto_attempt_timer;
     JsServer* owner_server;
 } JsSocket;
+
+struct SocketAutoAttemptTimerReq {
+    uv_timer_t timer;
+    JsSocket*  sock;
+    int        generation;
+};
 
 struct JsBoundSocket {
     uv_tcp_t tcp;
@@ -376,6 +388,9 @@ static void socket_note_closed(JsSocket* sock);
 static void socket_remove_abort_listener(JsSocket* sock);
 static void socket_release_after_pending_connect(JsSocket* sock);
 static void socket_configure_onread(JsSocket* sock, Item onread);
+static bool socket_schedule_auto_retry(JsSocket* sock);
+static void socket_shutdown_writes(JsSocket* sock, Item callback);
+static void socket_update_writable(JsSocket* sock, bool writable);
 static Item make_uv_error(int status, const char* syscall, const char* host, int port);
 static Item make_socket_handle_object(JsSocket* sock);
 
@@ -399,6 +414,66 @@ static void socket_clear_timeout(JsSocket* sock) {
     if (sock->js_object.item) {
         js_property_set(sock->js_object, make_string_item("__timeout_timer__"), make_undefined_item());
     }
+}
+
+static void socket_auto_attempt_timer_close_cb(uv_handle_t* handle) {
+    SocketAutoAttemptTimerReq* req = handle ? (SocketAutoAttemptTimerReq*)handle->data : NULL;
+    if (req) mem_free(req);
+}
+
+static void socket_clear_auto_attempt_timer(JsSocket* sock) {
+    if (!sock || !sock->auto_attempt_timer) return;
+    SocketAutoAttemptTimerReq* req = sock->auto_attempt_timer;
+    sock->auto_attempt_timer = NULL;
+    req->sock = NULL;
+    if (!uv_is_closing((uv_handle_t*)&req->timer)) {
+        uv_timer_stop(&req->timer);
+        uv_close((uv_handle_t*)&req->timer, socket_auto_attempt_timer_close_cb);
+    }
+}
+
+static void socket_auto_attempt_timer_cb(uv_timer_t* timer) {
+    SocketAutoAttemptTimerReq* req = timer ? (SocketAutoAttemptTimerReq*)timer->data : NULL;
+    JsSocket* sock = req ? req->sock : NULL;
+    if (sock && sock->auto_attempt_timer == req) sock->auto_attempt_timer = NULL;
+    if (req && !uv_is_closing((uv_handle_t*)&req->timer)) {
+        uv_timer_stop(&req->timer);
+        uv_close((uv_handle_t*)&req->timer, socket_auto_attempt_timer_close_cb);
+    }
+    if (!sock || sock->destroyed || req->generation != sock->auto_attempt_generation) return;
+    if (!sock->connect_pending || sock->connected) return;
+    if (sock->auto_addr_index >= sock->auto_addr_count) return;
+    // auto-select attempts can black-hole in the kernel; retry on Node's
+    // bounded attempt window instead of waiting for OS connect timeout.
+    socket_schedule_auto_retry(sock);
+}
+
+static void socket_start_auto_attempt_timer(JsSocket* sock) {
+    if (!sock || sock->auto_attempt_timeout_ms <= 0) return;
+    socket_clear_auto_attempt_timer(sock);
+    if (sock->auto_addr_index >= sock->auto_addr_count) return;
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) return;
+    SocketAutoAttemptTimerReq* req =
+        (SocketAutoAttemptTimerReq*)mem_calloc(1, sizeof(SocketAutoAttemptTimerReq), MEM_CAT_JS_RUNTIME);
+    if (!req) return;
+    if (uv_timer_init(loop, &req->timer) != 0) {
+        mem_free(req);
+        return;
+    }
+    sock->auto_attempt_generation++;
+    req->sock = sock;
+    req->generation = sock->auto_attempt_generation;
+    req->timer.data = req;
+    sock->auto_attempt_timer = req;
+    int r = uv_timer_start(&req->timer, socket_auto_attempt_timer_cb,
+                           (uint64_t)sock->auto_attempt_timeout_ms, 0);
+    if (r != 0) {
+        sock->auto_attempt_timer = NULL;
+        uv_close((uv_handle_t*)&req->timer, socket_auto_attempt_timer_close_cb);
+        return;
+    }
+    uv_unref((uv_handle_t*)&req->timer);
 }
 
 static void socket_update_io_counters(JsSocket* sock) {
@@ -545,7 +620,14 @@ static bool socket_allow_half_open(Item obj) {
 
 static void socket_finish_on_remote_end(JsSocket* sock) {
     if (!sock || socket_allow_half_open(sock->js_object)) return;
-    socket_emit_finish_once(sock);
+    socket_update_writable(sock, false);
+    if (sock->finished) {
+        socket_close_now(sock);
+        return;
+    }
+    // Non-half-open sockets must send their own FIN after peer EOF; emitting
+    // finish alone leaves a live TCP handle until the test harness drain timeout.
+    socket_shutdown_writes(sock, make_undefined_item());
 }
 
 static bool socket_get_write_bytes(Item item, const char** out_data, size_t* out_len) {
@@ -842,9 +924,21 @@ static void socket_maybe_close_after_drain(JsSocket* sock) {
     socket_close_now(sock);
 }
 
+static void socket_maybe_emit_drain(JsSocket* sock) {
+    if (!sock || sock->destroyed || !sock->need_drain) return;
+    size_t write_queue_size = uv_stream_get_write_queue_size((uv_stream_t*)&sock->tcp);
+    if (sock->buffer_size > sock->high_water_mark ||
+        (int64_t)write_queue_size > sock->high_water_mark) {
+        return;
+    }
+    // write(false) establishes a drain edge; without replaying it after libuv
+    // flushes, callers stop producing data and the socket waits for the watchdog.
+    sock->need_drain = false;
+    socket_emit(sock->js_object, "drain", NULL, 0);
+}
+
 static void socket_handle_remote_eof(JsSocket* sock) {
     if (!sock || sock->destroyed) return;
-
     sock->remote_ended = true;
     js_property_set(sock->js_object, make_string_item("__remote_ended__"), (Item){.item = ITEM_TRUE});
     sock->reading = false;
@@ -909,6 +1003,7 @@ static Item socket_submit_write(JsSocket* sock, char* copy, size_t data_len,
                 }
                 js_microtask_flush();
             }
+            socket_maybe_emit_drain(wreq->sock);
             socket_maybe_close_after_drain(wreq->sock);
             if (wreq->data) mem_free(wreq->data);
             mem_free(wreq);
@@ -931,7 +1026,12 @@ static Item socket_submit_write(JsSocket* sock, char* copy, size_t data_len,
     }
 
     size_t write_queue_size = uv_stream_get_write_queue_size((uv_stream_t*)&sock->tcp);
-    return (Item){.item = b2it((int64_t)write_queue_size <= sock->high_water_mark)};
+    // Lambda tracks in-flight write bytes separately from libuv; using only
+    // uv's queue lets large writes report true and spin official drain loops.
+    bool below_hwm = sock->buffer_size <= sock->high_water_mark &&
+                     (int64_t)write_queue_size <= sock->high_water_mark;
+    if (!below_hwm) sock->need_drain = true;
+    return (Item){.item = b2it(below_hwm)};
 }
 
 static void socket_queue_write(JsSocket* sock, char* copy, size_t data_len, Item callback) {
@@ -948,6 +1048,7 @@ static void socket_queue_write(JsSocket* sock, char* copy, size_t data_len, Item
     sock->pending_writes_tail = pending;
     sock->bytes_written += (int64_t)data_len;
     sock->buffer_size += (int64_t)data_len;
+    if (sock->buffer_size > sock->high_water_mark) sock->need_drain = true;
     socket_update_io_counters(sock);
 }
 
@@ -1301,6 +1402,7 @@ static void socket_close_now(JsSocket* sock) {
     if (!uv_is_closing((uv_handle_t*)&sock->tcp)) {
         sock->reading = false;
         sock->destroyed = true;
+        socket_clear_auto_attempt_timer(sock);
         socket_clear_timeout(sock);
         socket_remove_abort_listener(sock);
         socket_hide_handle(sock);
@@ -1329,6 +1431,7 @@ static void socket_close_reset_now(JsSocket* sock) {
     if (!uv_is_closing((uv_handle_t*)&sock->tcp)) {
         sock->reading = false;
         sock->destroyed = true;
+        socket_clear_auto_attempt_timer(sock);
         socket_clear_timeout(sock);
         socket_remove_abort_listener(sock);
         socket_hide_handle(sock);
@@ -1997,6 +2100,7 @@ typedef struct NetConnectOptions {
     bool has_block_list;
     bool auto_select_family;
     bool auto_select_family_set;
+    int auto_select_family_attempt_timeout;
     bool allow_half_open;
 } NetConnectOptions;
 
@@ -2029,6 +2133,7 @@ typedef struct NetResolveReq {
     int local_port;
     char local_address[256];
     bool auto_select_family;
+    int auto_select_family_attempt_timeout;
     Item lookup;
     Item block_list;
     bool has_block_list;
@@ -2827,6 +2932,7 @@ static bool normalize_options_object(Item options, NetConnectOptions* out) {
                 "options.autoSelectFamilyAttemptTimeout", &parsed_timeout)) {
             return false;
         }
+        out->auto_select_family_attempt_timeout = parsed_timeout;
     }
     return true;
 }
@@ -2856,6 +2962,7 @@ static bool normalize_connect_args(Item rest_args, NetConnectOptions* out) {
     out->has_block_list = false;
     out->auto_select_family = false;
     out->auto_select_family_set = false;
+    out->auto_select_family_attempt_timeout = 0;
     out->allow_half_open = false;
 
     int64_t argc64 = js_array_length(rest_args);
@@ -3006,6 +3113,30 @@ static void socket_record_auto_attempt(JsSocket* sock, const char* host, int por
     js_array_push(arr, make_string_item(endpoint));
 }
 
+static Item socket_auto_errors_array(JsSocket* sock, bool create) {
+    if (!sock || !sock->js_object.item) return make_undefined_item();
+    Item key = make_string_item("__auto_select_errors__");
+    Item arr = js_property_get(sock->js_object, key);
+    if (get_type_id(arr) != LMD_TYPE_ARRAY && create) {
+        arr = js_array_new(0);
+        js_property_set(sock->js_object, key, arr);
+    }
+    return arr;
+}
+
+static void socket_record_auto_error(JsSocket* sock, Item err) {
+    Item arr = socket_auto_errors_array(sock, true);
+    if (get_type_id(arr) == LMD_TYPE_ARRAY) js_array_push(arr, err);
+}
+
+static Item socket_auto_select_final_error(JsSocket* sock, Item fallback) {
+    Item arr = socket_auto_errors_array(sock, false);
+    if (get_type_id(arr) != LMD_TYPE_ARRAY || js_array_length(arr) <= 1) return fallback;
+    // auto-select-family reports the whole failed candidate set; surfacing only
+    // the last connect error trips Node tests and leaves later socket cleanup stranded.
+    return js_new_aggregate_error(arr, make_string_item(""));
+}
+
 static bool socket_connect_auto_next(JsSocket* sock) {
     if (!sock || sock->destroyed) return false;
     Item block_list = sock->js_object.item ?
@@ -3019,12 +3150,18 @@ static bool socket_connect_auto_next(JsSocket* sock) {
         if (family == 6) {
             struct sockaddr_in6 addr6;
             if (uv_ip6_addr(host, sock->connect_port, &addr6) == 0) {
-                return socket_connect_resolved(sock, (const struct sockaddr*)&addr6) == 0;
+                if (socket_connect_resolved(sock, (const struct sockaddr*)&addr6) == 0) {
+                    socket_start_auto_attempt_timer(sock);
+                    return true;
+                }
             }
         } else {
             struct sockaddr_in addr4;
             if (uv_ip4_addr(host, sock->connect_port, &addr4) == 0) {
-                return socket_connect_resolved(sock, (const struct sockaddr*)&addr4) == 0;
+                if (socket_connect_resolved(sock, (const struct sockaddr*)&addr4) == 0) {
+                    socket_start_auto_attempt_timer(sock);
+                    return true;
+                }
             }
         }
     }
@@ -3189,9 +3326,18 @@ static Item net_lookup_complete(Item env_item, Item rest_args) {
     if (nr->auto_select_family && get_type_id(value) == LMD_TYPE_ARRAY) {
         int64_t len64 = js_array_length(value);
         int len = len64 > 8 ? 8 : (int)len64;
-        sock->auto_addr_count = 0;
+        char raw_addrs[8][INET6_ADDRSTRLEN];
+        int raw_families[8];
+        bool raw_used[8];
+        int raw_count = 0;
+        memset(raw_addrs, 0, sizeof(raw_addrs));
+        memset(raw_families, 0, sizeof(raw_families));
+        memset(raw_used, 0, sizeof(raw_used));
         sock->auto_addr_index = 0;
+        sock->auto_addr_count = 0;
         sock->connect_port = nr->port;
+        sock->auto_attempt_timeout_ms = nr->auto_select_family_attempt_timeout;
+        js_property_set(sock->js_object, make_string_item("__auto_select_errors__"), js_array_new(0));
         for (int i = 0; i < len; i++) {
             Item record = js_array_get_int(value, i);
             int family = 0;
@@ -3202,11 +3348,38 @@ static Item net_lookup_complete(Item env_item, Item rest_args) {
                 mem_free(nr);
                 return make_undefined_item();
             }
-            if (net_copy_lookup_address(record, sock->auto_addrs[sock->auto_addr_count],
-                    (int)sizeof(sock->auto_addrs[0]), &family)) {
-                sock->auto_families[sock->auto_addr_count] = family;
-                sock->auto_addr_count++;
+            if (net_copy_lookup_address(record, raw_addrs[raw_count],
+                    (int)sizeof(raw_addrs[0]), &family)) {
+                raw_families[raw_count] = family;
+                raw_count++;
             }
+        }
+        int next_family = raw_count > 0 ? raw_families[0] : 4;
+        while (sock->auto_addr_count < raw_count) {
+            int found = -1;
+            for (int i = 0; i < raw_count; i++) {
+                if (!raw_used[i] && raw_families[i] == next_family) {
+                    found = i;
+                    break;
+                }
+            }
+            if (found < 0) {
+                for (int i = 0; i < raw_count; i++) {
+                    if (!raw_used[i]) {
+                        found = i;
+                        break;
+                    }
+                }
+            }
+            if (found < 0) break;
+            // Node alternates resolved families for Happy Eyeballs; preserving
+            // DNS order by family lets a batch of one family stall later tries.
+            raw_used[found] = true;
+            memcpy(sock->auto_addrs[sock->auto_addr_count], raw_addrs[found],
+                   sizeof(sock->auto_addrs[0]));
+            sock->auto_families[sock->auto_addr_count] = raw_families[found];
+            sock->auto_addr_count++;
+            next_family = next_family == 6 ? 4 : 6;
         }
         if (sock->auto_addr_count > 0 && socket_connect_auto_next(sock)) {
             mem_free(nr);
@@ -3381,6 +3554,8 @@ static int socket_start_connect(JsSocket* sock, const NetConnectOptions* options
     uv_ref((uv_handle_t*)&sock->tcp);
     bool auto_select_family = options->auto_select_family_set ?
         options->auto_select_family : net_default_auto_select_family;
+    int auto_select_family_attempt_timeout = options->auto_select_family_attempt_timeout > 0 ?
+        options->auto_select_family_attempt_timeout : net_auto_select_family_timeout;
 
     if (options->has_lookup) {
         uv_loop_t* loop = lambda_uv_loop();
@@ -3396,6 +3571,7 @@ static int socket_start_connect(JsSocket* sock, const NetConnectOptions* options
         nr->local_port = options->local_port;
         memcpy(nr->local_address, options->local_address, sizeof(nr->local_address));
         nr->auto_select_family = auto_select_family;
+        nr->auto_select_family_attempt_timeout = auto_select_family_attempt_timeout;
         nr->lookup = options->lookup;
         nr->block_list = options->block_list;
         nr->has_block_list = options->has_block_list;
@@ -3463,6 +3639,7 @@ static int socket_start_connect(JsSocket* sock, const NetConnectOptions* options
     nr->local_port = options->local_port;
     memcpy(nr->local_address, options->local_address, sizeof(nr->local_address));
     nr->auto_select_family = auto_select_family;
+    nr->auto_select_family_attempt_timeout = auto_select_family_attempt_timeout;
     nr->block_list = options->block_list;
     nr->has_block_list = options->has_block_list;
     snprintf(nr->service, sizeof(nr->service), "%d", options->port);
@@ -3525,6 +3702,7 @@ static void client_connect_cb(uv_connect_t* req, int status) {
     mem_free(req);
 
     if (!sock) return;
+    socket_clear_auto_attempt_timer(sock);
     sock->connect_pending = false;
     socket_update_state_properties(sock);
     if (sock->destroyed) {
@@ -3537,10 +3715,16 @@ static void client_connect_cb(uv_connect_t* req, int status) {
     }
 
     if (status != 0) {
-        if (socket_schedule_auto_retry(sock)) return;
         const char* err_host = sock->connect_host[0] ? sock->connect_host : NULL;
         int err_port = err_host ? sock->connect_port : -1;
         Item err = make_uv_error(status, "connect", err_host, err_port);
+        if (sock->auto_select_family && sock->auto_addr_count > 0) {
+            socket_record_auto_error(sock, err);
+        }
+        if (socket_schedule_auto_retry(sock)) return;
+        if (sock->auto_select_family && sock->auto_addr_count > 0) {
+            err = socket_auto_select_final_error(sock, err);
+        }
         socket_fail_pending_writes(sock, err);
         socket_emit(sock->js_object, "error", &err, 1);
         socket_close_now(sock);
@@ -3548,6 +3732,9 @@ static void client_connect_cb(uv_connect_t* req, int status) {
     }
 
     sock->connected = true;
+    if (sock->auto_select_family && sock->js_object.item) {
+        js_property_set(sock->js_object, make_string_item("__auto_select_errors__"), make_undefined_item());
+    }
     socket_update_state_properties(sock);
     socket_update_address_properties(sock);
     socket_apply_connect_options(sock);
@@ -5040,6 +5227,167 @@ extern "C" Item js_net_BlockList(Item options) {
     return obj;
 }
 
+static Item js_stream_wrap_emit_error(Item env_item, Item err) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_undefined_item();
+    socket_emit(env[0], "error", &err, 1);
+    return make_undefined_item();
+}
+
+static Item js_stream_wrap_emit_end(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_undefined_item();
+    Item wrap = env[0];
+    if (js_property_get(wrap, make_string_item("__stream_wrap_ended__")).item == ITEM_TRUE) {
+        return make_undefined_item();
+    }
+    js_property_set(wrap, make_string_item("__stream_wrap_ended__"), (Item){.item = ITEM_TRUE});
+    js_property_set(wrap, make_string_item("readable"), (Item){.item = ITEM_FALSE});
+    socket_emit(wrap, "end", NULL, 0);
+    return make_undefined_item();
+}
+
+static Item js_stream_wrap_emit_close(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_undefined_item();
+    Item wrap = env[0];
+    if (js_property_get(wrap, make_string_item("__stream_wrap_closed__")).item == ITEM_TRUE) {
+        return make_undefined_item();
+    }
+    js_property_set(wrap, make_string_item("__stream_wrap_closed__"), (Item){.item = ITEM_TRUE});
+    js_property_set(wrap, make_string_item("readable"), (Item){.item = ITEM_FALSE});
+    js_property_set(wrap, make_string_item("writable"), (Item){.item = ITEM_FALSE});
+    js_property_set(wrap, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
+    socket_emit(wrap, "close", NULL, 0);
+    return make_undefined_item();
+}
+
+static bool js_stream_wrap_terminal_event_observed(Item self, Item event_item) {
+    if (get_type_id(event_item) != LMD_TYPE_STRING) return false;
+    String* ev = it2s(event_item);
+    if (!ev) return false;
+    if (ev->len == 3 && memcmp(ev->chars, "end", 3) == 0) {
+        return js_property_get(self, make_string_item("__stream_wrap_ended__")).item == ITEM_TRUE;
+    }
+    if (ev->len == 5 && memcmp(ev->chars, "close", 5) == 0) {
+        return js_property_get(self, make_string_item("__stream_wrap_closed__")).item == ITEM_TRUE;
+    }
+    return false;
+}
+
+static Item js_stream_wrap_replay_terminal_listener(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_undefined_item();
+    Item self = env[0];
+    Item event_item = env[1];
+    Item callback = env[2];
+    if (!js_stream_wrap_terminal_event_observed(self, event_item)) return make_undefined_item();
+    if (env[3].item == ITEM_TRUE) {
+        socket_remove_listener_item(self, event_item, callback);
+    }
+    js_call_function(callback, self, NULL, 0);
+    js_microtask_flush();
+    return make_undefined_item();
+}
+
+static void js_stream_wrap_queue_terminal_replay(Item self, Item event_item,
+                                                 Item callback, bool once) {
+    if (!is_callable(callback) || !js_stream_wrap_terminal_event_observed(self, event_item)) return;
+    Item* env = js_alloc_env(4);
+    env[0] = self;
+    env[1] = event_item;
+    env[2] = callback;
+    env[3] = (Item){.item = b2it(once)};
+    // Underlying sockets can emit EOF/close while JSStreamSocket is being
+    // constructed; replay terminal state to listeners attached just after new.
+    js_next_tick_enqueue(js_new_closure((void*)js_stream_wrap_replay_terminal_listener, 0, env, 4));
+}
+
+static Item js_stream_wrap_on(Item event_item, Item callback) {
+    Item self = js_get_this();
+    socket_add_listener_item(self, event_item, callback, false);
+    js_stream_wrap_queue_terminal_replay(self, event_item, callback, false);
+    return self;
+}
+
+static Item js_stream_wrap_once(Item event_item, Item callback) {
+    Item self = js_get_this();
+    socket_add_listener_item(self, event_item, callback, true);
+    js_stream_wrap_queue_terminal_replay(self, event_item, callback, true);
+    return self;
+}
+
+static Item js_stream_wrap_destroy(void) {
+    Item self = js_get_this();
+    if (js_property_get(self, make_string_item("__stream_wrap_closed__")).item == ITEM_TRUE) {
+        return self;
+    }
+    Item stream = js_property_get(self, make_string_item("stream"));
+    Item destroy = js_property_get(stream, make_string_item("destroy"));
+    if (is_callable(destroy)) {
+        js_call_function(destroy, stream, NULL, 0);
+    } else {
+        Item* env = js_alloc_env(1);
+        env[0] = self;
+        js_stream_wrap_emit_close((Item){.item = i2it((int64_t)(uintptr_t)env)});
+    }
+    return self;
+}
+
+extern "C" Item js_internal_js_stream_socket_constructor(Item stream) {
+    Item wrap = js_new_object();
+    js_property_set(wrap, make_string_item("stream"), stream);
+    js_property_set(wrap, make_string_item("readable"), js_property_get(stream, make_string_item("readable")));
+    js_property_set(wrap, make_string_item("writable"), js_property_get(stream, make_string_item("writable")));
+    js_property_set(wrap, make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
+    js_property_set(wrap, make_string_item("__stream_wrap_ended__"), (Item){.item = ITEM_FALSE});
+    js_property_set(wrap, make_string_item("__stream_wrap_closed__"), (Item){.item = ITEM_FALSE});
+    js_property_set(wrap, make_string_item("on"), js_new_function((void*)js_stream_wrap_on, 2));
+    js_property_set(wrap, make_string_item("once"), js_new_function((void*)js_stream_wrap_once, 2));
+    js_property_set(wrap, make_string_item("removeListener"),
+                    js_new_function((void*)js_socket_removeListener, 2));
+    js_property_set(wrap, make_string_item("off"),
+                    js_new_function((void*)js_socket_removeListener, 2));
+    js_property_set(wrap, make_string_item("destroy"), js_new_function((void*)js_stream_wrap_destroy, 0));
+
+    Item on = js_property_get(stream, make_string_item("on"));
+    if (is_callable(on)) {
+        Item* env = js_alloc_env(1);
+        env[0] = wrap;
+        // JSStreamSocket is a view over a real stream; missing these mirrors
+        // leaves destroy EOF/close tests waiting on unobservable terminal events.
+        Item args[2] = { make_string_item("error"),
+                         js_new_closure((void*)js_stream_wrap_emit_error, 1, env, 1) };
+        js_call_function(on, stream, args, 2);
+        args[0] = make_string_item("end");
+        args[1] = js_new_closure((void*)js_stream_wrap_emit_end, 0, env, 1);
+        js_call_function(on, stream, args, 2);
+        args[0] = make_string_item("close");
+        args[1] = js_new_closure((void*)js_stream_wrap_emit_close, 0, env, 1);
+        js_call_function(on, stream, args, 2);
+    }
+
+    return wrap;
+}
+
+static Item internal_js_stream_socket_ctor = {0};
+static bool internal_js_stream_socket_rooted = false;
+
+extern "C" Item js_get_internal_js_stream_socket_constructor(void) {
+    if (internal_js_stream_socket_ctor.item != 0) return internal_js_stream_socket_ctor;
+    internal_js_stream_socket_ctor =
+        js_new_function((void*)js_internal_js_stream_socket_constructor, 1);
+    js_property_set(internal_js_stream_socket_ctor, make_string_item("StreamWrap"),
+                    internal_js_stream_socket_ctor);
+    js_property_set(internal_js_stream_socket_ctor, make_string_item("default"),
+                    internal_js_stream_socket_ctor);
+    if (!internal_js_stream_socket_rooted) {
+        heap_register_gc_root(&internal_js_stream_socket_ctor.item);
+        internal_js_stream_socket_rooted = true;
+    }
+    return internal_js_stream_socket_ctor;
+}
+
 // =============================================================================
 // net Module Namespace
 // =============================================================================
@@ -5203,6 +5551,7 @@ extern "C" Item js_net_get_socket_prototype(void) {
 
 extern "C" void js_net_reset(void) {
     net_namespace = (Item){0};
+    internal_js_stream_socket_ctor = (Item){0};
     net_socket_prototype = (Item){0};
     net_server_prototype = (Item){0};
     net_socket_connect_fn = (Item){0};

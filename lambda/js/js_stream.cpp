@@ -69,6 +69,7 @@ extern "C" Item js_json_parse(Item str_item);
 extern "C" Item js_util_inspect(Item obj_item, Item options_item);
 extern "C" Item js_to_string(Item value);
 extern "C" Item js_symbol_for(Item key);
+extern "C" Item js_symbol_create(Item description);
 extern "C" Item js_symbol_get_description(Item sym);
 extern "C" Item js_object_get_own_property_symbols(Item object);
 extern "C" Item js_promise_with_resolvers(void);
@@ -153,6 +154,7 @@ static Item stream_duplex_prototype = {0};
 static Item stream_transform_prototype = {0};
 static Item stream_passthrough_prototype = {0};
 static Item internal_stream_state_namespace = {0};
+static Item internal_stream_end_of_stream_namespace = {0};
 static Item stream_iter_namespace = {0};
 static Item stream_web_namespace = {0};
 static int64_t js_stream_default_byte_hwm = 16 * 1024;
@@ -1299,8 +1301,12 @@ static bool js_stream_is_empty_byte_chunk(Item chunk) {
 }
 
 static Item js_stream_maybe_emit_manual_data(Item self, Item chunk) {
-    if (!js_item_is_true(js_property_get(self, key_flowing)) &&
+    bool async_iterator_reading =
+        js_item_is_true(js_property_get(self, make_string_item("__async_iterator_reading__")));
+    if ((!js_item_is_true(js_property_get(self, key_flowing)) || async_iterator_reading) &&
         js_stream_has_event_listeners(self, "data")) {
+        // async iterators can consume a pushed chunk before the flowing data
+        // flush; mirror that read so existing data listeners do not miss it.
         js_property_set(self, make_string_item("__emitting_data__"), js_bool_item(true));
         stream_emit(self, "data", &chunk, 1);
         js_property_set(self, make_string_item("__emitting_data__"), js_bool_item(false));
@@ -1688,14 +1694,18 @@ static void js_stream_schedule_error_immediate(Item self, Item err) {
     env[0] = self;
     env[1] = err;
     Item tick = js_new_closure((void*)js_stream_emit_error_tick_closure, 0, env, 2);
-    js_setTimeout(tick, (Item){.item = i2it(1)});
+    // destroy() queues terminal events before user nextTicks registered after
+    // destroy; timers let late listeners observe close/error incorrectly.
+    js_next_tick_enqueue(tick);
 }
 
 static void js_stream_schedule_close_immediate(Item self) {
     Item* env = js_alloc_env(1);
     env[0] = self;
     Item tick = js_new_closure((void*)js_stream_emit_close_tick_closure, 0, env, 1);
-    js_setTimeout(tick, (Item){.item = i2it(1)});
+    // destroy() close is a terminal nextTick, not a timer, so late nextTick
+    // listeners attached after destroy() do not see stale close events.
+    js_next_tick_enqueue(tick);
 }
 
 static void js_stream_invoke_destroy_callback(Item self, Item err) {
@@ -1714,6 +1724,7 @@ static Item js_stream_after_destroy(Item self, Item err) {
     ensure_keys();
     if (js_stream_has_callback_error(err)) {
         js_stream_set_error_state(self, err);
+        js_property_set(self, make_string_item("__error__"), err);
     }
     if (js_item_is_true(js_property_get(self, make_string_item("__destroying_sync__")))) {
         js_property_set(self, make_string_item("__destroy_cb_done__"), js_bool_item(true));
@@ -1722,7 +1733,17 @@ static Item js_stream_after_destroy(Item self, Item err) {
     }
     js_property_set(self, key_destroy_pending, js_bool_item(false));
     if (js_stream_has_callback_error(err)) {
+        // Iterators created while _destroy(cb) is pending wait for cb's error;
+        // scheduling 'error' alone leaves their next() promises unresolved.
+        js_stream_async_iterators_drain(self, err);
         js_stream_schedule_error(self, err);
+    } else {
+        Item iterators = js_property_get(self, make_string_item("__async_iterators__"));
+        if (get_type_id(iterators) == LMD_TYPE_ARRAY && js_array_length(iterators) > 0) {
+            Item close_err = js_stream_make_error_with_code("ERR_STREAM_PREMATURE_CLOSE",
+                "Premature close");
+            js_stream_async_iterators_drain(self, close_err);
+        }
     }
     js_stream_invoke_destroy_callback(self, err);
     js_stream_schedule_close(self);
@@ -3187,6 +3208,13 @@ static Item js_stream_async_iterator_pending_promise(Item iterator, Item stream)
     return js_property_get(capability, make_string_item("promise"));
 }
 
+static Item js_stream_async_iterator_read_chunk(Item stream) {
+    js_property_set(stream, make_string_item("__async_iterator_reading__"), js_bool_item(true));
+    Item chunk = js_readable_read(stream);
+    js_property_set(stream, make_string_item("__async_iterator_reading__"), js_bool_item(false));
+    return chunk;
+}
+
 static void js_stream_async_iterators_drain(Item stream, Item err) {
     ensure_keys();
     Item iterators = js_property_get(stream, make_string_item("__async_iterators__"));
@@ -3208,13 +3236,18 @@ static void js_stream_async_iterators_drain(Item stream, Item err) {
         }
 
         while (js_stream_async_iterator_pending_count(iterator) > 0) {
-            Item chunk = js_readable_read(stream);
+            Item chunk = js_stream_async_iterator_read_chunk(stream);
             if (js_stream_async_iterator_has_value(chunk)) {
                 js_stream_async_iterator_resolve(iterator,
                     js_stream_iterator_result(chunk, false));
                 continue;
             }
             if (js_stream_async_iterator_stream_done(stream)) {
+                if (js_stream_destroy_pending(stream)) {
+                    // destroyed streams with async _destroy(cb) are not terminal
+                    // for iterators until the callback supplies success or error.
+                    break;
+                }
                 if (js_item_is_true(js_property_get(stream, key_end_pending)) &&
                     !js_item_is_true(js_property_get(stream, key_end_emitted))) {
                     js_stream_emit_end_tick(stream);
@@ -3260,6 +3293,11 @@ static Item js_stream_async_iterator_next(Item iterator) {
         !js_item_is_true(js_property_get(stream, key_end_pending)) &&
         !js_item_is_true(js_property_get(stream, key_end_emitted)) &&
         !js_item_is_true(js_property_get(stream, key_ended))) {
+        if (js_stream_destroy_pending(stream)) {
+            // async _destroy(cb) can still supply the terminal error; rejecting
+            // now would hide the callback error from iterators created mid-destroy.
+            return js_stream_async_iterator_pending_promise(iterator, stream);
+        }
         js_property_set(iterator, make_string_item("__done__"), js_bool_item(true));
         js_stream_async_iterator_detach(iterator);
         return js_promise_reject(js_stream_make_error_with_code("ERR_STREAM_PREMATURE_CLOSE",
@@ -3289,7 +3327,7 @@ static Item js_stream_async_iterator_next(Item iterator) {
         return js_stream_async_iterator_pending_promise(iterator, stream);
     }
 
-    Item chunk = js_readable_read(stream);
+    Item chunk = js_stream_async_iterator_read_chunk(stream);
     if (js_stream_async_iterator_has_value(chunk)) {
         return js_promise_resolve(js_stream_iterator_result(chunk, false));
     }
@@ -3309,7 +3347,7 @@ static Item js_stream_async_iterator_next(Item iterator) {
             js_stream_async_iterator_detach(iterator);
             return js_promise_reject(stored_error);
         }
-        chunk = js_readable_read(stream);
+        chunk = js_stream_async_iterator_read_chunk(stream);
         if (js_stream_async_iterator_has_value(chunk)) {
             return js_promise_resolve(js_stream_iterator_result(chunk, false));
         }
@@ -5723,7 +5761,13 @@ extern "C" Item js_stream_destroy(Item self, Item err) {
             if (js_item_is_true(js_property_get(self, make_string_item("__destroy_cb_done__")))) {
                 Item cb_err = js_property_get(self, make_string_item("__destroy_cb_error__"));
                 js_property_set(self, key_destroy_pending, js_bool_item(false));
-                if (js_stream_has_callback_error(cb_err)) js_stream_schedule_error_immediate(self, cb_err);
+                if (js_stream_has_callback_error(cb_err)) {
+                    js_property_set(self, make_string_item("__error__"), cb_err);
+                    // Synchronous _destroy(cb) errors have the same iterator
+                    // contract as async callbacks: pending next() observes cb_err.
+                    js_stream_async_iterators_drain(self, cb_err);
+                    js_stream_schedule_error_immediate(self, cb_err);
+                }
                 js_stream_invoke_destroy_callback(self, cb_err);
                 js_stream_schedule_close_immediate(self);
             }
@@ -9913,6 +9957,26 @@ extern "C" Item js_get_internal_stream_state_namespace(void) {
     return internal_stream_state_namespace;
 }
 
+extern "C" Item js_get_internal_stream_end_of_stream_namespace(void) {
+    if (internal_stream_end_of_stream_namespace.item != 0)
+        return internal_stream_end_of_stream_namespace;
+    internal_stream_end_of_stream_namespace = js_new_object();
+    Item eos_fn = js_new_function((void*)js_stream_finished_rest, -1);
+    Item finished_fn = js_new_function((void*)js_stream_promises_finished, -1);
+    js_property_set(internal_stream_end_of_stream_namespace, make_string_item("eos"), eos_fn);
+    // Node's internal EOS module exports callback eos() and Promise finished();
+    // sharing eos here makes stream/promises.finished wait forever for a callback.
+    js_property_set(internal_stream_end_of_stream_namespace, make_string_item("finished"), finished_fn);
+    // Node's internal EOS module exports this unique symbol; stream.finished
+    // checks its description so native options can request synchronous callback.
+    js_property_set(internal_stream_end_of_stream_namespace,
+                    make_string_item("kEosNodeSynchronousCallback"),
+                    js_symbol_create(make_string_item("kEosNodeSynchronousCallback")));
+    js_property_set(internal_stream_end_of_stream_namespace, make_string_item("default"),
+                    internal_stream_end_of_stream_namespace);
+    return internal_stream_end_of_stream_namespace;
+}
+
 extern "C" void js_stream_reset(void) {
     stream_namespace = (Item){0};
     stream_web_namespace = (Item){0};
@@ -9923,6 +9987,7 @@ extern "C" void js_stream_reset(void) {
     stream_transform_prototype = (Item){0};
     stream_passthrough_prototype = (Item){0};
     internal_stream_state_namespace = (Item){0};
+    internal_stream_end_of_stream_namespace = (Item){0};
     stream_iter_namespace = (Item){0};
     js_stream_default_byte_hwm = 16 * 1024;
     js_stream_default_object_hwm = 16;

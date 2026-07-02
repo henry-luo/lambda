@@ -36839,6 +36839,12 @@ extern "C" Item js_module_get(Item specifier) {
         extern Item js_get_internal_net_namespace(void);
         return js_get_internal_net_namespace();
     }
+    // internal/js_stream_socket — JSStreamSocket constructor used by stream wrap tests.
+    if ((spec->len == 25 && memcmp(spec->chars, "internal/js_stream_socket", 25) == 0) ||
+        (spec->len == 28 && memcmp(spec->chars, "internal/js_stream_socket.js", 28) == 0)) {
+        extern Item js_get_internal_js_stream_socket_constructor(void);
+        return js_get_internal_js_stream_socket_constructor();
+    }
     // node:tls
     if ((spec->len == 3 && memcmp(spec->chars, "tls", 3) == 0) ||
         (spec->len == 6 && memcmp(spec->chars, "tls.js", 6) == 0) ||
@@ -37461,6 +37467,12 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 36 && memcmp(spec->chars, "internal/streams/add-abort-signal.js", 36) == 0)) {
         extern Item js_get_internal_stream_add_abort_signal_namespace(void);
         return js_get_internal_stream_add_abort_signal_namespace();
+    }
+    // internal/streams/end-of-stream — bounded native EOS shim backed by stream.finished.
+    if ((spec->len == 30 && memcmp(spec->chars, "internal/streams/end-of-stream", 30) == 0) ||
+        (spec->len == 33 && memcmp(spec->chars, "internal/streams/end-of-stream.js", 33) == 0)) {
+        extern Item js_get_internal_stream_end_of_stream_namespace(void);
+        return js_get_internal_stream_end_of_stream_namespace();
     }
     // internal/streams/state — selected stream state helpers used by Node tests.
     if ((spec->len == 22 && memcmp(spec->chars, "internal/streams/state", 22) == 0) ||
