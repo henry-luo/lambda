@@ -8,6 +8,7 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
 
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 void view_pool_destroy(ViewTree* tree);
+void view_pool_reset_retained(ViewTree* tree);
 void view_pool_release_detached_subtree(DomNode* root);
 void image_cache_cleanup(UiContext* uicon);
 

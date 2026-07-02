@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>DOM mutation overflow retained full layout</title>
+<style>
+  body { font-family: sans-serif; margin: 24px; }
+  #name { width: 220px; padding: 8px; border: 2px solid #333; }
+  #items { margin-top: 16px; }
+  .row { padding: 2px 0; }
+</style>
+</head>
+<body>
+  <label for="name">Name</label>
+  <input id="name" value="ready">
+  <div id="items"></div>
+  <p id="status">waiting</p>
+  <script>
+    const input = document.getElementById('name');
+    const items = document.getElementById('items');
+    const status = document.getElementById('status');
+    let inserted = false;
+
+    input.addEventListener('keydown', () => {
+      if (inserted) return;
+      inserted = true;
+      for (let i = 0; i < 70; i++) {
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.textContent = 'row ' + i;
+        items.appendChild(row);
+      }
+      status.textContent = 'overflow mutation complete';
+    });
+  </script>
+</body>
+</html>

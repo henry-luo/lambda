@@ -4394,11 +4394,13 @@ static void post_html_handler_rebuild(EventContext* evcon,
         doc_state_close_context_menu(state);
     }
 
-    // Force full relayout by clearing view tree
-    if (doc->view_tree) {
-        view_pool_destroy(doc->view_tree);
-        mem_free(doc->view_tree);
-        doc->view_tree = nullptr;
+    // Broad DOM fallback is a layout-resource epoch change, not a DOM/view-node
+    // identity change; keep the ViewTree shell and retained nodes for StateStore.
+    if (!doc->view_tree) {
+        doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT);
+        view_pool_reset_retained(doc->view_tree);
+    } else {
+        view_pool_reset_retained(doc->view_tree);
     }
 
     // Clear stale layout-pool targets. DOM-backed StateStore entries survive
@@ -4417,7 +4419,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
     if (evcon->ui_context) evcon->ui_context->document = doc;
-    layout_html_doc(evcon->ui_context, doc, false);
+    layout_html_doc(evcon->ui_context, doc, true);
     if (evcon->ui_context) evcon->ui_context->document = saved_doc;
 
     if (state) {
@@ -4433,16 +4435,16 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     auto t3 = high_resolution_clock::now();
 
-    log_info("[TIMING] html handler rebuild: mode=full cascade=%.2fms layout=%.2fms repaint_req=%.2fms "
+    log_info("[TIMING] html handler rebuild: mode=retained_full_layout cascade=%.2fms layout=%.2fms repaint_req=%.2fms "
              "total=%.2fms (mutations=%d)",
              duration<double, std::milli>(t1 - t0).count(),
              duration<double, std::milli>(t2 - t1).count(),
              duration<double, std::milli>(t3 - t2).count(),
              duration<double, std::milli>(t3 - t_start).count(),
              mutations);
-    // Full fallback is still a DOM-preserving broad reconcile; keep the reason
+    // Retained full layout is still a broad reconcile; keep the reason
     // test-visible so state-retention fixtures do not have to scrape log.txt.
-    dom_js_record_reconcile(doc, DOM_RECONCILE_FULL,
+    dom_js_record_reconcile(doc, DOM_RECONCILE_RETAINED_FULL_LAYOUT,
                             fallback_reason ? fallback_reason : "unknown",
                             mutations, doc->js_mutation_record_count,
                             doc->js_mutation_record_overflow);

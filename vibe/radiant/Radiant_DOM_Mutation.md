@@ -3,7 +3,14 @@
 **Filed:** 2026-07-02  
 **Area:** Radiant JS DOM mutation, layout reconciliation, StateStore retention  
 **Related:** `vibe/radiant/Radiant_Issue4.md`, `vibe/editing/Radiant_Editor_Stage4C.md`  
-**Status:** proposal
+**Status:** implementation in progress
+
+**Implementation update, 2026-07-03:** ordinary DOM mutation fallback now uses
+`DOM_RECONCILE_RETAINED_FULL_LAYOUT`: it releases layout-pool-owned props,
+keeps the `ViewTree` shell and retained DOM/view nodes, runs
+`layout_html_doc(..., true)`, and prunes/reprojects StateStore afterward.
+`view_pool_destroy` remains reserved for document/root teardown. The overflow
+fixture is now covered by `dom_mutation_overflow_retained_full`.
 
 ## 1. Problem Statement
 
@@ -419,20 +426,28 @@ Goal: make broad recascade/reflow retain the `ViewTree` object and node identity
 
 Work:
 
-- Add an explicit "retained full layout" mode:
+- **Implemented:** add an explicit "retained full layout" mode:
   - re-cascade whole DOM;
-  - mark whole DOM `layout_dirty`;
+  - release old layout-pool props and clear per-node layout pointers;
   - call `layout_html_doc(..., true)` or an equivalent full-flow retained pass;
-  - clear dirty flags after layout.
-- Reserve `view_pool_destroy` for document/root epoch replacement, not ordinary
-  DOM mutation.
-- Audit layout props allocated from `ViewTree::pool` to ensure retained full
-  layout either reuses or replaces them without leaking stale per-node props.
+  - report `DOM_RECONCILE_RETAINED_FULL_LAYOUT` to event_sim.
+- **Implemented:** reserve `view_pool_destroy` for document/root epoch
+  replacement, not ordinary DOM mutation.
+- **Partially implemented:** layout props allocated from `ViewTree::pool` are
+  bulk released/replaced by `view_pool_reset_retained(...)`; a broader layout
+  audit is still useful for specialized props and embedded resources.
 
 Verification:
 
-- Compare layout output before/after retained full layout for baseline fixtures.
-- Run editor mutation fixtures that currently hit fallback.
+- `dom_mutation_structural_css_retains_state`,
+  `dom_mutation_stylesheet_fallback_retains_state`, and
+  `dom_mutation_innerhtml_parent_retains_child_prunes` now assert
+  `retained_full_layout`.
+- The recent editor/list/form regressions were rerun after this slice:
+  `test_list_reflow`, `test_form_beforeinput_target_ranges`,
+  `test_rich_text_editor`, and `test_rich_text_editor_typing`.
+- Still pending: compare retained-full layout output across a broader baseline
+  fixture set.
 
 ### Phase 3: Reduce Incremental Fallbacks
 
@@ -444,8 +459,8 @@ Work:
 - Replace `structural-css-risk` with scoped selector invalidation.
 - Introduce `CHILD_REPLACE` records for `innerHTML`/`textContent` parent-local
   replacement.
-- Treat record overflow as retained full layout rather than state-discarding
-  fallback.
+- **Implemented:** treat record overflow as retained full layout rather than
+  state-discarding fallback.
 - Add mutation logging that reports:
   - mutation kinds;
   - chosen recascade scope;
@@ -457,7 +472,8 @@ Verification:
 - Add tests for structural insert/remove in a styled document.
 - Add tests for `innerHTML` replacement preserving parent state but dropping
   removed child state.
-- Add an overflow/batch mutation test that keeps focus/state on connected nodes.
+- **Implemented:** add an overflow/batch mutation test that keeps focus/state on
+  connected nodes.
 
 ## 9. Test Strategy
 
