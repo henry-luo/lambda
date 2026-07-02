@@ -58,6 +58,16 @@ static const RadiantOnlineViewCase g_online_view_cases[] = {
     {"reactos", "https://reactos.org/", true},
     {"firefox", "https://www.firefox.com/en-US/", true},
     {"wikipedia_main_page", "https://en.wikipedia.org/wiki/Main_Page", true},
+    {"gnu", "https://www.gnu.org/", true},
+    {"perl", "https://www.perl.org/", true},
+    {"ruby_lang", "https://www.ruby-lang.org/en/", true},
+    {"curl", "https://curl.se/", true},
+    {"openssl", "https://www.openssl.org/", true},
+    {"nginx", "https://nginx.org/", true},
+    {"apache", "https://www.apache.org/", true},
+    {"libpng", "https://www.libpng.org/pub/png/", false},
+    {"lua", "https://www.lua.org/", true},
+    {"zlib", "https://www.zlib.net/", false},
 };
 
 static bool online_view_file_readable(const char* path) {
@@ -437,6 +447,46 @@ TEST(RadiantOnlineViewTest, LoadsFirefoxCom) {
 
 TEST(RadiantOnlineViewTest, LoadsWikipediaMainPage) {
     online_view_expect_case(5);
+}
+
+TEST(RadiantOnlineViewTest, LoadsGNUOrg) {
+    online_view_expect_case(6);
+}
+
+TEST(RadiantOnlineViewTest, LoadsPerlOrg) {
+    online_view_expect_case(7);
+}
+
+TEST(RadiantOnlineViewTest, LoadsRubyLangOrg) {
+    online_view_expect_case(8);
+}
+
+TEST(RadiantOnlineViewTest, LoadsCurlSE) {
+    online_view_expect_case(9);
+}
+
+TEST(RadiantOnlineViewTest, LoadsOpenSSLOrg) {
+    online_view_expect_case(10);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNginxOrg) {
+    online_view_expect_case(11);
+}
+
+TEST(RadiantOnlineViewTest, LoadsApacheOrg) {
+    online_view_expect_case(12);
+}
+
+TEST(RadiantOnlineViewTest, LoadsLibpngOrg) {
+    online_view_expect_case(13);
+}
+
+TEST(RadiantOnlineViewTest, LoadsLuaOrg) {
+    online_view_expect_case(14);
+}
+
+TEST(RadiantOnlineViewTest, LoadsZlibNet) {
+    online_view_expect_case(15);
 }
 
 #endif
