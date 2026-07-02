@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>optional font retry storm repro</title>
+  <style>
+    @font-face { font-family: retry-storm-a; src: url("http://127.0.0.1:9/font-a.woff") format("woff"); }
+    @font-face { font-family: retry-storm-b; src: url("http://127.0.0.1:9/font-b.woff") format("woff"); }
+    @font-face { font-family: retry-storm-c; src: url("http://127.0.0.1:9/font-c.woff") format("woff"); }
+    @font-face { font-family: retry-storm-d; src: url("http://127.0.0.1:9/font-d.woff") format("woff"); }
+    @font-face { font-family: retry-storm-e; src: url("http://127.0.0.1:9/font-e.woff") format("woff"); }
+    @font-face { font-family: retry-storm-f; src: url("http://127.0.0.1:9/font-f.woff") format("woff"); }
+    body {
+      font-family: retry-storm-a, retry-storm-b, retry-storm-c, retry-storm-d,
+                   retry-storm-e, retry-storm-f, sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <p>Optional font failures should fall back without retrying every failed font.</p>
+</body>
+</html>
