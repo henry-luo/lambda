@@ -288,3 +288,74 @@ and `test-cluster-worker-disconnect-on-error.js` around the 10s boundary, and
 two unrelated child/TLS cases still hit the 30s process-drain grace. The IPC
 ownership change fixes the transferred-socket correctness/lifecycle root cause
 without pretending all process-drain waits are solved.
+
+## Progress Update: 2026-07-02 Listen Callback Ordering Follow-Up
+
+This follow-up fixed one of the remaining 10s-ish cluster cases:
+`test-cluster-worker-disconnect-on-error.js`.
+
+Root cause: Lambda scheduled `server.listen()` callbacks with the internal
+next-tick queue, which can be flushed before the surrounding JS statement
+sequence has finished unwinding from the native `listen()` call. The Node test
+does:
+
+```js
+server.listen(0, () => {
+  assert(worker);
+  worker.send({ port: server.address().port });
+});
+
+worker = cluster.fork();
+```
+
+When Lambda ran the listen callback too early, `worker` was not assigned yet.
+The primary never sent the port to the worker, and the test then waited for the
+harness drain/timer boundary despite having no intentional long timer.
+
+Implemented design:
+
+- HTTP server `listen()` callbacks now run through a zero-delay timer so they
+  execute after the current JS stack;
+- net server `listen()` uses the same after-stack scheduling;
+- this keeps callbacks asynchronous relative to the native `listen()` call
+  without changing error scheduling or server state transitions.
+
+Touched files:
+
+| File | Role |
+| --- | --- |
+| `lambda/js/js_http.cpp` | schedules HTTP `server.listen()` callbacks after the current JS stack |
+| `lambda/js/js_net.cpp` | schedules net `server.listen()` callbacks after the current JS stack |
+
+Verification:
+
+```bash
+make -C build/premake config=debug_native lambda -j8
+make release
+make -C build/premake config=release_native test_node_gtest test_node_prelim_gtest -j8
+./test/test_node_gtest.exe --baseline-only --include-slow --no-update-slow-list --timeout=70000 --gtest_filter='*test_cluster_worker_disconnect_on_error*:*test_child_process_http_socket_leak*:*test_cluster_process_disconnect*:*test_cluster_disconnect*:*test_cluster_concurrent_disconnect*:*test_cluster_eaccess*:*test_listen_fd_detached_inherit*:*test_child_process_fork_net_server*:*test_child_process_fork_closed_channel_segfault*:*test_child_process_fork_getconnections*' --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='*test_cluster_worker_disconnect_on_error*' --gtest_brief=1
+./test/test_node_prelim_gtest.exe --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_brief=1
+make test262-baseline
+```
+
+Results:
+
+| Gate | Result |
+| --- | --- |
+| Focused cluster/child/net slice | 18/18 pass, 0 regressions |
+| `test-cluster-worker-disconnect-on-error.js` focused | pass in about 0.17s, down from about 10s |
+| `test_node_prelim_gtest.exe` | 110/110 pass, same existing 128-byte memtrack warning |
+| Full Node official baseline-only | second full run 3537/3537 pass, 0 regressions, 0 crashes, 0 timeouts; 11 slow-list tests excluded |
+| `make test262-baseline` | 40261/40261 pass, 0 regressions, 0 retry |
+
+Rejected during consolidation: a proposed `spawnSync` shortcut for
+compile-cache and snapshot slow-list fixtures was removed because it encoded
+test-specific synthetic results instead of fixing the underlying runtime
+behavior.
+
+Remaining timing note: `test-child-process-http-socket-leak.js` remains around
+10s, and several cluster/socket-transfer cases remain around the 5s drain
+boundary. Those are separate lifecycle/handle-retention issues from the
+listen-callback ordering bug fixed here.

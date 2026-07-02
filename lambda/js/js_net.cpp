@@ -4664,7 +4664,9 @@ static void server_schedule_listening(Item self, JsServer* srv, Item callback) {
     env[0] = self;
     env[1] = callback;
     Item fn = js_new_closure((void*)js_server_emit_listening_scheduled, 0, env, 2);
-    js_next_tick_enqueue(fn);
+    // listen callbacks must run after the current JS stack, not inside the
+    // listen() native call; cluster setup assigns workers immediately after it.
+    js_setTimeout(fn, (Item){.item = i2it(0)});
 }
 
 static Item js_server_emit_error_scheduled(Item env_item) {
