@@ -28,6 +28,9 @@ RADIANT_JS_TOTAL_SCRIPT_BYTES=128 ./lambda.exe view test/browse/repro/script-tot
 ./lambda.exe view test/browse/repro/css-var-on-text-layout.html --headless
 ./lambda.exe view test/browse/repro/grid-track-unitless-zero-overflow.html --headless
 ./lambda.exe view test/browse/repro/css-var-self-reference.html --headless
+./lambda.exe view test/browse/repro/event-listener-mutation-realloc.html --headless
+./lambda.exe view test/browse/repro/element-scroll-method.html --headless
+./lambda.exe view test/browse/repro/event-listener-onerror-reentry.html --headless
 ```
 
 For `http-header-before-head-relative-resource.html`, serve the repository root
@@ -104,3 +107,25 @@ must count it before the second parsing pass stores the track.
 `css-var-self-reference.html` captures self-referential custom properties such
 as `--loop: var(--loop)`. Variable resolution should fall back gracefully instead
 of recursing until stack overflow.
+
+`event-listener-mutation-realloc.html` captures listener arrays that grow while
+an event dispatch is iterating a snapshot. Dispatch must not keep pointers into
+storage that `addEventListener()` can reallocate.
+
+`empty-network-resource.html` captures empty linked resources. Temporary network
+read buffers for zero-byte files must be freed on the early-return path, and a
+successful zero-byte HTTP response should be treated as an empty no-op resource.
+Serve this directory on localhost, then run:
+
+```sh
+python3 -m http.server 8765 --bind 127.0.0.1
+./lambda.exe view http://127.0.0.1:8765/empty-network-resource.html --headless
+```
+
+`element-scroll-method.html` captures pages that call `Element.scroll`,
+`Element.scrollTo`, and `Element.scrollBy` before layout. These methods should
+queue/update scroll state without crashing when no scroll pane exists yet.
+
+`event-listener-onerror-reentry.html` captures listener exception reporting
+while a page-owned `window.onerror` handler is present. Dispatch should report
+and swallow the original listener failure without crashing the page load.

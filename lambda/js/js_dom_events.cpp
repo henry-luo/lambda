@@ -234,6 +234,16 @@ struct NodeListeners {
     int capacity;
 };
 
+struct EventListenerSnapshot {
+    char* type;
+    Item callback;
+    Item signal;
+    bool capture;
+    bool once;
+    bool passive;
+    bool has_passive;
+};
+
 // flat array mapping void* keys → NodeListeners
 struct NodeListenerEntry {
     void* key;
@@ -324,6 +334,21 @@ static void nl_push(NodeListeners* nl, EventListener listener) {
         nl->capacity = new_cap;
     }
     nl->items[nl->count++] = listener;
+}
+
+static EventListener* nl_find_snapshot_listener(NodeListeners* nl,
+                                                 const EventListenerSnapshot* snap) {
+    if (!nl || !snap) return nullptr;
+    for (int i = 0; i < nl->count; i++) {
+        EventListener* el = &nl->items[i];
+        if (el->removed) continue;
+        if (el->type == snap->type &&
+            el->callback.item == snap->callback.item &&
+            el->capture == snap->capture) {
+            return el;
+        }
+    }
+    return nullptr;
 }
 
 // ============================================================================
@@ -1685,10 +1710,9 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
 
     if (!nl) return;
 
-    // Build snapshot of listener pointers — mutations during dispatch must
-    // not perturb iteration order. Skip tombstoned/aborted/non-matching/wrong-phase
-    // entries up front.
-    EventListener** snap = (EventListener**)alloca(sizeof(EventListener*) * nl->count);
+    // Build a value snapshot: addEventListener() can grow and reallocate the
+    // listener array during dispatch, so snapshots must not point into it.
+    EventListenerSnapshot* snap = (EventListenerSnapshot*)alloca(sizeof(EventListenerSnapshot) * nl->count);
     int snap_count = 0;
     for (int i = 0; i < nl->count; i++) {
         EventListener* el = &nl->items[i];
@@ -1700,16 +1724,24 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         if (phase == 3 && el->capture) continue;
         // signal — if its AbortSignal aborted, treat as removed
         if (signal_is_aborted(el->signal)) { el->removed = true; continue; }
-        snap[snap_count++] = el;
+        EventListenerSnapshot* dst = &snap[snap_count++];
+        dst->type = el->type;
+        dst->callback = el->callback;
+        dst->signal = el->signal;
+        dst->capture = el->capture;
+        dst->once = el->once;
+        dst->passive = el->passive;
+        dst->has_passive = el->has_passive;
     }
 
     // dispatch loop over snapshot
     for (int i = 0; i < snap_count; i++) {
         if (_STOP_IMM) break;
-        EventListener* el = snap[i];
+        EventListenerSnapshot* el = &snap[i];
+        EventListener* live = nl_find_snapshot_listener(nl, el);
         // re-check tombstone in case a prior listener removed this one
-        if (el->removed) continue;
-        if (signal_is_aborted(el->signal)) { el->removed = true; continue; }
+        if (!live) continue;
+        if (signal_is_aborted(el->signal)) { live->removed = true; continue; }
 
         // Resolve callback — function or {handleEvent}
         Item callback = el->callback;
@@ -1732,7 +1764,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
 
         // Mark for once-removal BEFORE invocation so that recursion / re-add
         // sees the slot as removed.
-        if (el->once) el->removed = true;
+        if (el->once) live->removed = true;
 
         // call the callback with event as argument; isolate exceptions per spec
         Item args[1] = { event };

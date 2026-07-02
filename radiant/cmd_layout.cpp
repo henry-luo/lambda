@@ -1612,7 +1612,14 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                     css_file_size = content_size;
                 }
             }
-            if (css_content) {
+            bool css_content_empty = css_content && css_file_size == 0 && css_content[0] == '\0';
+            if (css_content_empty) {
+                // Empty linked stylesheets are valid CSS; skip them before
+                // parser setup so zero-byte resources do not look failed.
+                log_debug("[CSS] Skipping empty linked stylesheet: %s", css_path);
+                mem_free(css_content);
+            } else if (css_content) {
+
                 // Use binary size when available (handles null bytes); fallback to strlen
                 size_t css_len = css_file_size > 0 ? css_file_size : strlen(css_content);
 

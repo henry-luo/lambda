@@ -1759,6 +1759,27 @@ static Item js_dom_scroll_into_view_method(Item elem_item) {
     return js_dom_element_method(self, method, NULL, 0);
 }
 
+static Item js_dom_scroll_method(Item x_arg, Item y_arg) {
+    Item self = js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("scroll"))};
+    Item args[2] = { x_arg, y_arg };
+    return js_dom_element_method(self, method, args, 2);
+}
+
+static Item js_dom_scroll_to_method(Item x_arg, Item y_arg) {
+    Item self = js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("scrollTo"))};
+    Item args[2] = { x_arg, y_arg };
+    return js_dom_element_method(self, method, args, 2);
+}
+
+static Item js_dom_scroll_by_method(Item x_arg, Item y_arg) {
+    Item self = js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("scrollBy"))};
+    Item args[2] = { x_arg, y_arg };
+    return js_dom_element_method(self, method, args, 2);
+}
+
 static Item js_dom_get_client_rects_method(Item elem_item) {
     Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
     Item method = (Item){.item = s2it(heap_create_name("getClientRects"))};
@@ -8726,6 +8747,15 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         return js_bind_function(js_new_function((void*)js_dom_scroll_into_view_method, 1),
             make_js_undefined(), bound_args, 1);
     }
+    if (strcmp(prop, "scroll") == 0) {
+        // Browser pages call Element.scroll* before Radiant has layout panes;
+        // expose real callables so unsupported timing degrades to pending state.
+        return js_new_function((void*)js_dom_scroll_method, 2);
+    }
+    if (strcmp(prop, "scrollTo") == 0)
+        return js_new_function((void*)js_dom_scroll_to_method, 2);
+    if (strcmp(prop, "scrollBy") == 0)
+        return js_new_function((void*)js_dom_scroll_by_method, 2);
     if (strcmp(prop, "getClientRects") == 0) {
         Item bound_args[1] = { elem_item };
         return js_bind_function(js_new_function((void*)js_dom_get_client_rects_method, 1),
@@ -8783,7 +8813,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         "addEventListener", "removeEventListener", "dispatchEvent",
         "remove", "getBoundingClientRect", "getElementsByTagName",
         "getElementsByClassName", "compareDocumentPosition",
-        "append", "prepend", "getClientRects", "scrollIntoView", "focus", "blur",
+        "append", "prepend", "getClientRects", "scrollIntoView", "scroll", "scrollTo", "scrollBy", "focus", "blur",
         "__lambdaTextControlCaretBounds", "__lambdaTextControlBoundaryFromPoint",
         "__lambdaBoundaryFromPoint",
         "toString",
@@ -10183,6 +10213,13 @@ static float js_dom_item_to_float(Item value) {
     return 0.0f;
 }
 
+static Item js_dom_float_item(float value) {
+    double* number = (double*)heap_calloc(sizeof(double), LMD_TYPE_FLOAT);
+    if (!number) return (Item){.item = i2it((int64_t)value)};
+    *number = (double)value;
+    return (Item){.item = d2it(number)};
+}
+
 static Item js_dom_make_plain_boundary_object(DomBoundary boundary) {
     if (!boundary.node) return ItemNull;
     Item out = js_new_object();
@@ -11150,6 +11187,33 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             log_debug("js_dom_scrollIntoView: queued target <%s>",
                       elem->tag_name ? elem->tag_name : "?");
         }
+        return make_js_undefined();
+    }
+
+    if (strcmp(method, "scroll") == 0 ||
+        strcmp(method, "scrollTo") == 0 ||
+        strcmp(method, "scrollBy") == 0) {
+        float x = 0.0f;
+        float y = 0.0f;
+        if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
+            Item left = js_property_get(args[0], js_string_key("left"));
+            Item top = js_property_get(args[0], js_string_key("top"));
+            x = js_dom_item_to_float(left);
+            y = js_dom_item_to_float(top);
+        } else {
+            if (argc >= 1) x = js_dom_item_to_float(args[0]);
+            if (argc >= 2) y = js_dom_item_to_float(args[1]);
+        }
+        if (x != x) x = 0.0f;
+        if (y != y) y = 0.0f;
+        if (strcmp(method, "scrollBy") == 0) {
+            x += js_dom_item_to_float(js_dom_get_property(elem_item, js_string_key("scrollLeft")));
+            y += js_dom_item_to_float(js_dom_get_property(elem_item, js_string_key("scrollTop")));
+        }
+        if (x < 0.0f) x = 0.0f;
+        if (y < 0.0f) y = 0.0f;
+        js_dom_set_property(elem_item, js_string_key("scrollLeft"), js_dom_float_item(x));
+        js_dom_set_property(elem_item, js_string_key("scrollTop"), js_dom_float_item(y));
         return make_js_undefined();
     }
 

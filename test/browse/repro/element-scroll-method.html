@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Element Scroll Method Repro</title>
+  <style>
+    #pane {
+      width: 160px;
+      height: 80px;
+      overflow: auto;
+      border: 1px solid #333;
+    }
+    #content {
+      width: 420px;
+      height: 260px;
+      background: linear-gradient(135deg, #fff, #cfe7ff);
+    }
+  </style>
+</head>
+<body>
+  <div id="pane"><div id="content">scrollable content</div></div>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      var pane = document.getElementById("pane");
+      pane.scroll({ left: 30, top: 40 });
+      pane.scrollTo(50, 60);
+      pane.scrollBy({ left: 5, top: 7 });
+      window.scroll({ left: 2, top: 3 });
+      scroll(4, 5);
+    });
+  </script>
+</body>
+</html>
