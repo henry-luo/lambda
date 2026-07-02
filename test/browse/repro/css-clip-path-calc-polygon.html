@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>clip-path calc polygon repro</title>
+  <style>
+    .button {
+      display: inline-block;
+      margin: 48px;
+      padding: 14px 32px;
+      color: white;
+      background: #1f6feb;
+      clip-path: polygon(
+        0.785rem 0,
+        calc(100% - 0.785rem) 0,
+        100% 50%,
+        calc(100% - 0.785rem) 100%,
+        0.785rem 100%,
+        0% 50%
+      );
+    }
+  </style>
+</head>
+<body>
+<main>
+  <a class="button" href="#done">Learn More</a>
+  <p id="done">Rendering should complete even if calc()/rem clip-path points are not supported yet.</p>
+</main>
+</body>
+</html>
+

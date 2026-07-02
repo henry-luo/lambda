@@ -419,9 +419,9 @@ type User2 {
 }
 
 // Object literals
-let p = {Point x: 3.0, y: 4.0}
-let c = {Counter}                          // All defaults
-let c2 = {Circle x: 0.0, y: 0.0, radius: 5.0}
+let p = <Point x: 3.0, y: 4.0>
+let c = <Counter>                          // All defaults
+let c2 = <Circle x: 0.0, y: 0.0, radius: 5.0>
 
 // Type checking (nominal only)
 p is Point     // true
@@ -430,7 +430,7 @@ p is map       // true (objects are map-compatible)
 {x: 1.0, y: 2.0} is Point  // false (plain maps don't match)
 
 // Object update (copy with overrides)
-let p2 = {Point p, x: 10.0}   // copy p, override x
+let p2 = <Point *:p, x: 10.0>   // copy p, override x
 ```
 
 ---
@@ -745,9 +745,9 @@ type User {
     email: string;
 }
 
-{User name: "Alice", age: 30, email: "a@x.com"} is User   // true
-{User name: "", age: 30, email: "a@x.com"} is User         // false (empty name)
-{User name: "Bob", age: -5, email: "b@x.com"} is User      // false (negative age)
+<User name: "Alice", age: 30, email: "a@x.com"> is User   // true
+<User name: "", age: 30, email: "a@x.com"> is User         // false (empty name)
+<User name: "Bob", age: -5, email: "b@x.com"> is User      // false (negative age)
 ```
 
 #### Object-Level Constraints
@@ -761,8 +761,8 @@ type DateRange {
     that (~.end > ~.start)
 }
 
-{DateRange start: 1, end: 10} is DateRange    // true
-{DateRange start: 10, end: 1} is DateRange    // false
+<DateRange start: 1, end: 10> is DateRange    // true
+<DateRange start: 10, end: 1> is DateRange    // false
 ```
 
 Field-level and object-level constraints can be combined:

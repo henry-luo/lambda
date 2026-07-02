@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>document computed call repro</title>
+</head>
+<body>
+<main id="target">pending</main>
+<script>
+  const getById = "getElementById";
+  const create = "createElement";
+
+  const target = document[getById]("target");
+  const marker = document[create]("span");
+  marker.id = "computed-document-call-marker";
+  marker.textContent = "pass";
+  target.textContent = "";
+  target.appendChild(marker);
+</script>
+</body>
+</html>
+

@@ -461,7 +461,7 @@ type Counter {
     pn reset() { count = 0 }               // Mutates field in-place
 }
 
-let c = {Counter}
+let c = <Counter>
 c.increment()       // c.count is now 1
 c.increment()       // c.count is now 2
 c.value()           // 2

@@ -72,11 +72,11 @@ type Circle : Shape { radius: float; }  // Inheritance
 
 **Literals & Access:**
 ```lambda
-let p = {Point x: 1.0, y: 2.0}   // Object literal
-let c = {Counter}                // All defaults
+let p = <Point x: 1.0, y: 2.0>   // Object literal
+let c = <Counter>                // All defaults
 p.x                              // Field access
 c.double()                       // Method call
-{p, x: 5.0}                      // Wrap and override
+<Point *:p, x: 5.0>              // Copy and override
 ```
 
 **Type Checking (nominal only):**
@@ -115,6 +115,7 @@ type Vec {
 123.45n   // Decimal128 (~34 digits)
 123.45N   // Decimal (ultra precision, 200 digits)
 inf  nan  // Special values
+0xFF      // hexdecimal literal for int value
 
 // Sized numeric literals (postfix suffix)
 42i8  -128i8  1000i16  100000i32  100i64
@@ -590,7 +591,7 @@ pub type Vec2 { x: float, y: float; fn len() =>
 // In main.ls:
 import .math_utils
 let area = PI * r ** 2
-let v = {Vec2 x: 3.0, y: 4.0}
+let v = <Vec2 x: 3.0, y: 4.0>
 v.len()        // 5.0
 v is Vec2      // true
 ```

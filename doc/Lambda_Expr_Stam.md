@@ -116,7 +116,7 @@ let b = (10, 20)
 (*a, *b)               // (1, 2, 3, 10, 20) — spread into tuple
 
 let base = {x: 1, y: 2}
-{*base, x: 10}         // {x: 10, y: 2} — copy map fields, override x
+{*:base, x: 10}        // {x: 10, y: 2} — copy map fields, override x
 
 // Spread in function calls
 fn sum_all(...args) = args | reduce((a, b) => a + b, 0)
