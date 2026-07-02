@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>DOM mutation textarea defaultValue incremental</title>
+<style>
+  body { font-family: sans-serif; margin: 24px; }
+  textarea {
+    display: block;
+    margin-top: 16px;
+    width: 280px;
+    height: 72px;
+  }
+</style>
+</head>
+<body>
+  <input id="name" value="ready">
+  <textarea id="notes">old default</textarea>
+  <script>
+    const nameField = document.getElementById('name');
+    const notes = document.getElementById('notes');
+
+    nameField.addEventListener('keydown', () => {
+      notes.defaultValue = 'new default text';
+    });
+  </script>
+</body>
+</html>

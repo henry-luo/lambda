@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>DOM mutation retained full preserves textarea caret</title>
+<style id="dynamic-style">
+  #box { color: rgb(20, 80, 160); }
+</style>
+<style>
+  body { font-family: sans-serif; margin: 24px; }
+  textarea {
+    display: block;
+    width: 300px;
+    height: 80px;
+  }
+  #box { margin-top: 16px; }
+</style>
+</head>
+<body>
+  <textarea id="editor">abcd</textarea>
+  <div id="box">styled sibling</div>
+  <script>
+    const editor = document.getElementById('editor');
+    const dynamicStyle = document.getElementById('dynamic-style');
+    let mutated = false;
+
+    editor.addEventListener('input', () => {
+      if (mutated) return;
+      mutated = true;
+      dynamicStyle.textContent = '#box { color: rgb(180, 40, 40); }';
+    });
+  </script>
+</body>
+</html>

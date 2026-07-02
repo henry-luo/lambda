@@ -9552,9 +9552,11 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
                 // textarea.defaultValue setter: replace descendant text
                 // content with a single text node holding the new value.
+                bool dom_children_changed = elem->first_child != nullptr || *s;
                 DomNode* child = elem->first_child;
                 while (child) {
                     DomNode* next = child->next_sibling;
+                    dom_pre_remove(child);
                     child->parent = nullptr;
                     child->next_sibling = nullptr;
                     child->prev_sibling = nullptr;
@@ -9569,13 +9571,18 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                         tn->parent = elem;
                         elem->first_child = tn;
                         elem->last_child = tn;
+                        dom_post_insert((DomNode*)elem, (DomNode*)tn);
                     }
                 }
                 // Per spec: API value updates only when dirty flag is false.
                 if (!_value_is_dirty(elem)) {
                     tc_set_value(elem, s, strlen(s));
                 }
-                js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE, (DomNode*)elem, elem->parent);
+                if (dom_children_changed) {
+                    // textarea.defaultValue is a local child replacement; keeping
+                    // remove/insert records avoids broad TREE_REPLACE fallback.
+                    js_dom_mutation_notify();
+                }
                 return value;
             }
             // input.defaultValue setter: reflects "value" attribute.

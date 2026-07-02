@@ -3893,14 +3893,12 @@ static void dom_js_mutation_reset_records(DomDocument* doc) {
     doc->js_mutation_record_overflow = 0;
 }
 
-#ifndef NDEBUG
 static bool dom_js_mutation_kind_seen(DomDocument* doc, DomJsMutationKind kind) {
     if (!doc) return false;
     uint32_t slot = (uint32_t)kind;
     if (slot >= 31) slot = 0;
     return (doc->js_mutation_kind_mask & (1u << slot)) != 0;
 }
-#endif
 
 static void dom_js_mutation_log_records(DomDocument* doc) {
 #ifndef NDEBUG
@@ -3938,13 +3936,39 @@ static void dom_js_record_reconcile(DomDocument* doc,
                                     const char* reason,
                                     int mutations,
                                     int records,
-                                    int overflow) {
+                                    int overflow,
+                                    const char* recascade_scope,
+                                    const char* layout_scope,
+                                    const char* state_action,
+                                    int state_pruned) {
     if (!doc) return;
     doc->last_dom_reconcile_mode = mode;
     doc->last_dom_reconcile_reason = reason ? reason : "none";
     doc->last_dom_reconcile_mutations = mutations;
     doc->last_dom_reconcile_records = records;
     doc->last_dom_reconcile_record_overflow = overflow;
+
+    // Keep the reconcile decision self-contained in logs: mutation details are
+    // otherwise separated from the layout/state-retention decision.
+    log_info("dom mutation reconcile: mode=%s reason=%s recascade=%s layout=%s state=%s pruned=%d "
+             "mutations=%d records=%d overflow=%d kinds=[insert:%d remove:%d text:%d attr:%d style:%d style_repaint:%d tree:%d unknown:%d]",
+             dom_reconcile_mode_name(mode),
+             doc->last_dom_reconcile_reason,
+             recascade_scope ? recascade_scope : "unknown",
+             layout_scope ? layout_scope : "unknown",
+             state_action ? state_action : "unknown",
+             state_pruned,
+             mutations,
+             records,
+             overflow,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_CHILD_INSERT) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_CHILD_REMOVE) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_TEXT) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_ATTRIBUTE) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_STYLE) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_STYLE_REPAINT) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_TREE_REPLACE) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_UNKNOWN) ? 1 : 0);
 
     DocState* state = (DocState*)doc->state;
     if (!state || !event_state_log_enabled(state->active_event_log)) return;
@@ -3960,6 +3984,10 @@ static void dom_js_record_reconcile(DomDocument* doc,
         jw_kv_int(&w, "mutations", mutations);
         jw_kv_int(&w, "records", records);
         jw_kv_int(&w, "record_overflow", overflow);
+        jw_kv_str(&w, "recascade_scope", recascade_scope ? recascade_scope : "unknown");
+        jw_kv_str(&w, "layout_scope", layout_scope ? layout_scope : "unknown");
+        jw_kv_str(&w, "state_action", state_action ? state_action : "unknown");
+        jw_kv_int(&w, "state_pruned", state_pruned);
     jw_obj_end(&w);
     event_state_log_finish_record(state->active_event_log, &w);
 }
@@ -4478,7 +4506,9 @@ static bool post_html_handler_incremental_rebuild(
     // incremental mutation handling from a broad fallback path.
     dom_js_record_reconcile(doc, DOM_RECONCILE_INCREMENTAL, "eligible",
                             mutations, doc->js_mutation_record_count,
-                            doc->js_mutation_record_overflow);
+                            doc->js_mutation_record_overflow,
+                            "mutation-subtrees", "incremental-layout",
+                            "retained", 0);
     return true;
 }
 
@@ -4569,8 +4599,9 @@ static void post_html_handler_rebuild(EventContext* evcon,
     layout_html_doc(evcon->ui_context, doc, true);
     if (evcon->ui_context) evcon->ui_context->document = saved_doc;
 
+    int state_pruned = 0;
     if (state) {
-        state_store_prune_after_reflow(state);
+        state_pruned = (int)state_store_prune_after_reflow(state); // INT_CAST_OK: log/test telemetry count
         state_store_refresh_caret_projection(state);
     }
 
@@ -4594,7 +4625,9 @@ static void post_html_handler_rebuild(EventContext* evcon,
     dom_js_record_reconcile(doc, DOM_RECONCILE_RETAINED_FULL_LAYOUT,
                             fallback_reason ? fallback_reason : "unknown",
                             mutations, doc->js_mutation_record_count,
-                            doc->js_mutation_record_overflow);
+                            doc->js_mutation_record_overflow,
+                            "full-document", "full-flow-retained",
+                            "retained-pruned-after-reflow", state_pruned);
 
     // Reset mutation count for next event
     dom_js_mutation_reset_records(doc);
