@@ -28,6 +28,8 @@ extern "C" int64_t js_array_length(Item array);
 extern "C" Item js_array_get_int(Item array, int64_t index);
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" Item js_tls_socket_getSession(void);
+extern "C" uv_tcp_t* js_net_socket_adopt_for_tls(Item socket_obj, Item tls_obj);
+extern "C" void js_net_socket_tls_closed(Item socket_obj, bool had_error);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -539,6 +541,8 @@ typedef struct JsTlsSocket {
     bool           need_drain;
     bool           drain_check_scheduled;
     bool           has_borrowed_socket;
+    bool           close_emitted;
+    bool           close_had_error;
     int            connect_port;
     int64_t        high_water_mark;
     char*          pending_write_data;
@@ -611,9 +615,33 @@ static void tls_server_note_socket_closed(JsTlsSocket* sock) {
     tls_server_maybe_destroy(srv);
 }
 
+static void tls_socket_emit(Item obj, const char* event, Item* args, int argc);
+
 static void tls_socket_detach_js_object(Item obj) {
     js_property_set(obj, make_string_item("__handle__"), ItemNull);
     js_property_set(obj, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
+}
+
+static void tls_socket_finalize_closed(JsTlsSocket* sock, bool had_error) {
+    if (!sock) return;
+    if (!sock->close_emitted) {
+        sock->close_emitted = true;
+        tls_socket_emit(sock->js_object, "close", NULL, 0);
+    }
+    if (sock->has_borrowed_socket) {
+        // Borrowed net.Socket wrappers keep JS state, but TLS is the sole
+        // native close owner once it adopts their uv_tcp_t.
+        js_net_socket_tls_closed(sock->borrowed_socket, had_error);
+        sock->has_borrowed_socket = false;
+        sock->borrowed_socket = make_js_undefined();
+    }
+    tls_server_note_socket_closed(sock);
+    tls_socket_detach_js_object(sock->js_object);
+    if (sock->owns_context && sock->tls_ctx) {
+        tls_context_destroy(sock->tls_ctx);
+        sock->tls_ctx = NULL;
+    }
+    mem_free(sock);
 }
 
 static void tls_socket_destroy_pending_borrowed_socket(JsTlsSocket* sock) {
@@ -628,6 +656,8 @@ static void tls_socket_destroy_pending_borrowed_socket(JsTlsSocket* sock) {
         js_call_function(destroy_fn, sock->borrowed_socket, NULL, 0);
         js_microtask_flush();
     }
+    sock->has_borrowed_socket = false;
+    sock->borrowed_socket = make_js_undefined();
 }
 
 // emit event on TLS socket JS object
@@ -850,12 +880,7 @@ static void tls_socket_shutdown_transport(JsTlsSocket* sock) {
             // allowHalfOpen support here, so the native handle must close too.
             uv_close((uv_handle_t*)tcp, [](uv_handle_t* handle) {
                 JsTlsSocket* s = (JsTlsSocket*)handle->data;
-                if (!s) return;
-                tls_socket_emit(s->js_object, "close", NULL, 0);
-                tls_server_note_socket_closed(s);
-                tls_socket_detach_js_object(s->js_object);
-                if (s->owns_context && s->tls_ctx) tls_context_destroy(s->tls_ctx);
-                mem_free(s);
+                tls_socket_finalize_closed(s, false);
             });
         });
 }
@@ -1047,21 +1072,11 @@ extern "C" Item js_tls_socket_destroy(void) {
         sock->tls_ctx = NULL;
     }
     if (!sock->tcp_initialized) {
-        tls_socket_emit(sock->js_object, "close", NULL, 0);
-        tls_server_note_socket_closed(sock);
-        // Deferred TLS callbacks may still hold the JS object; detach before
-        // freeing so they cannot recover a stale native socket pointer.
-        tls_socket_detach_js_object(sock->js_object);
-        mem_free(sock);
+        tls_socket_finalize_closed(sock, false);
     } else if (tls_socket_tcp(sock) && !uv_is_closing((uv_handle_t*)tls_socket_tcp(sock))) {
         uv_close((uv_handle_t*)tls_socket_tcp(sock), [](uv_handle_t* handle) {
             JsTlsSocket* s = (JsTlsSocket*)handle->data;
-            if (s) {
-                tls_socket_emit(s->js_object, "close", NULL, 0);
-                tls_server_note_socket_closed(s);
-                tls_socket_detach_js_object(s->js_object);
-                mem_free(s);
-            }
+            tls_socket_finalize_closed(s, false);
         });
     }
     return self;
@@ -1271,13 +1286,10 @@ static void tls_socket_close_after_error(JsTlsSocket* sock) {
     if (tcp && !uv_is_closing((uv_handle_t*)tcp)) {
         uv_close((uv_handle_t*)tcp, [](uv_handle_t* h) {
             JsTlsSocket* s = (JsTlsSocket*)h->data;
-            if (!s) return;
-            tls_socket_emit(s->js_object, "close", NULL, 0);
-            tls_server_note_socket_closed(s);
-            tls_socket_detach_js_object(s->js_object);
-            if (s->owns_context && s->tls_ctx) tls_context_destroy(s->tls_ctx);
-            mem_free(s);
+            tls_socket_finalize_closed(s, true);
         });
+    } else if (!tcp) {
+        tls_socket_finalize_closed(sock, true);
     }
 }
 
@@ -1377,19 +1389,14 @@ static void tls_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_
             tls_socket_pipe_end(sock->js_object);
         }
         sock->destroyed = true;
+        sock->close_had_error = nread != UV_EOF;
         if (sock->tls_conn) {
             tls_connection_destroy(sock->tls_conn);
             sock->tls_conn = NULL;
         }
         uv_close((uv_handle_t*)stream, [](uv_handle_t* h) {
             JsTlsSocket* s = (JsTlsSocket*)h->data;
-            if (s) {
-                tls_socket_emit(s->js_object, "close", NULL, 0);
-                tls_server_note_socket_closed(s);
-                tls_socket_detach_js_object(s->js_object);
-                if (s->owns_context && s->tls_ctx) tls_context_destroy(s->tls_ctx);
-                mem_free(s);
-            }
+            tls_socket_finalize_closed(s, s ? s->close_had_error : true);
         });
     }
 }
@@ -1406,12 +1413,7 @@ static void tls_client_connect_cb(uv_connect_t* req, int status) {
             if (tcp && !uv_is_closing((uv_handle_t*)tcp)) {
                 uv_close((uv_handle_t*)tcp, [](uv_handle_t* handle) {
                     JsTlsSocket* s = (JsTlsSocket*)handle->data;
-                    if (s) {
-                        tls_socket_emit(s->js_object, "close", NULL, 0);
-                        tls_socket_detach_js_object(s->js_object);
-                        if (s->owns_context && s->tls_ctx) tls_context_destroy(s->tls_ctx);
-                        mem_free(s);
-                    }
+                    tls_socket_finalize_closed(s, true);
                 });
             }
         }
@@ -1479,16 +1481,15 @@ static Item tls_attach_existing_socket_now(Item env_item) {
         js_microtask_flush();
     }
 
-    Item handle_item = js_property_get(socket_obj, make_string_item("__handle__"));
-    if (get_type_id(handle_item) != LMD_TYPE_INT) {
+    uv_tcp_t* tcp = js_net_socket_adopt_for_tls(socket_obj, tls_obj);
+    if (!tcp) {
         Item err = make_tls_econnreset_error(sock);
         tls_socket_emit(tls_obj, "error", &err, 1);
+        tls_socket_close_after_error(sock);
         return make_js_undefined();
     }
-
-    uv_tcp_t* tcp = (uv_tcp_t*)(uintptr_t)it2i(handle_item);
-    // net.Socket stores uv_tcp_t as the first native field; TLS adopts that
-    // transport after pausing net reads so encrypted bytes reach mbedTLS.
+    // net.Socket has transferred native ownership; TLS may now replace
+    // handle->data and becomes the only closer for the shared uv_tcp_t.
     tcp->data = sock;
     sock->tcp_handle = tcp;
     sock->tcp_initialized = true;
@@ -1716,10 +1717,12 @@ extern "C" Item js_tls_connect(Item options_item) {
     }
 
     JsTlsSocket* sock = (JsTlsSocket*)mem_calloc(1, sizeof(JsTlsSocket), MEM_CAT_JS_RUNTIME);
-    uv_tcp_init(loop, &sock->tcp);
-    sock->tcp.data = sock;
-    sock->tcp_handle = &sock->tcp;
-    sock->tcp_initialized = true;
+    if (!use_existing_socket) {
+        uv_tcp_init(loop, &sock->tcp);
+        sock->tcp.data = sock;
+        sock->tcp_handle = &sock->tcp;
+        sock->tcp_initialized = true;
+    }
     sock->tls_ctx = ctx;
     sock->owns_context = true;
     sock->is_server = false;
@@ -1740,11 +1743,6 @@ extern "C" Item js_tls_connect(Item options_item) {
     }
 
     if (use_existing_socket) {
-        // tls.connect({ socket }) borrows the net.Socket transport, so the
-        // placeholder handle created for normal connects must not stay live.
-        if (!uv_is_closing((uv_handle_t*)&sock->tcp)) uv_close((uv_handle_t*)&sock->tcp, NULL);
-        sock->tcp_handle = NULL;
-        sock->tcp_initialized = false;
         sock->borrowed_socket = existing_socket_item;
         sock->has_borrowed_socket = true;
         js_property_set(obj, make_string_item("__underlying_socket__"), existing_socket_item);
@@ -1771,11 +1769,7 @@ extern "C" Item js_tls_connect(Item options_item) {
         if (tcp && !uv_is_closing((uv_handle_t*)tcp)) {
             uv_close((uv_handle_t*)tcp, [](uv_handle_t* handle) {
                 JsTlsSocket* s = (JsTlsSocket*)handle->data;
-                if (s) {
-                    tls_socket_detach_js_object(s->js_object);
-                    if (s->owns_context && s->tls_ctx) tls_context_destroy(s->tls_ctx);
-                    mem_free(s);
-                }
+                tls_socket_finalize_closed(s, true);
             });
         }
         return obj;
@@ -1813,20 +1807,14 @@ static void tls_server_client_read_cb(uv_stream_t* stream, ssize_t nread, const 
             tls_socket_pipe_end(sock->js_object);
         }
         sock->destroyed = true;
+        sock->close_had_error = nread != UV_EOF;
         if (sock->tls_conn) {
             tls_connection_destroy(sock->tls_conn);
             sock->tls_conn = NULL;
         }
         uv_close((uv_handle_t*)stream, [](uv_handle_t* h) {
             JsTlsSocket* s = (JsTlsSocket*)h->data;
-            if (s) {
-                tls_socket_emit(s->js_object, "close", NULL, 0);
-                tls_server_note_socket_closed(s);
-                // Deferred shutdown/session callbacks keep only the JS object;
-                // detach before freeing this server-side accepted socket.
-                tls_socket_detach_js_object(s->js_object);
-                mem_free(s);
-            }
+            tls_socket_finalize_closed(s, s ? s->close_had_error : true);
         });
     }
 }
