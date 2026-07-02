@@ -67,6 +67,23 @@ static bool resource_url_has_extension(const char* url, const char* ext) {
            strncasecmp(end - ext_len, ext, ext_len) == 0;
 }
 
+static bool resource_file_looks_like_svg(const char* path) {
+    if (!path) return false;
+    FILE* file = fopen(path, "rb");
+    if (!file) return false;
+    unsigned char probe[512];
+    size_t size = fread(probe, 1, sizeof(probe), file);
+    fclose(file);
+    if (size == 0) return false;
+    for (size_t i = 0; i + 4 < size; i++) {
+        if (probe[i] == '<' &&
+            strncasecmp((const char*)probe + i + 1, "svg", 3) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Helper: Add stylesheet to document
 static bool add_stylesheet_to_document(DomDocument* doc, CssStylesheet* sheet) {
     if (!doc || !sheet) return false;
@@ -226,10 +243,12 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
     ImageSurface* img_surface = NULL;
     bool source_is_svg = resource_url_has_extension(res->url, ".svg");
     bool source_is_webp = resource_url_has_extension(res->url, ".webp");
+    bool cached_file_is_svg = !source_is_svg && !source_is_webp &&
+        resource_file_looks_like_svg(res->local_path);
 
-    if (source_is_svg && res->manager && res->manager->ui_context) {
-        // SVG resources must bypass the raster probe because cache filenames
-        // use .cache and the raster decoder logs unsupported before fallback.
+    if ((source_is_svg || cached_file_is_svg) && res->manager && res->manager->ui_context) {
+        // SVG resources, including extensionless URLs cached as .cache files,
+        // must bypass raster probes that report ordinary SVG content as errors.
         img_surface = load_image((UiContext*)res->manager->ui_context, res->local_path);
         if (img_surface) {
             res->image_surface_borrowed = true;
@@ -298,16 +317,19 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
         return;
     }
 
-    // detect format from URL extension
-    img_surface->format = IMAGE_FORMAT_PNG;  // default
-    const char* ext = strrchr(res->url, '.');
-    if (ext) {
-        if (str_ieq_const(ext, strlen(ext), ".jpg") || str_ieq_const(ext, strlen(ext), ".jpeg")) {
-            img_surface->format = IMAGE_FORMAT_JPEG;
-        } else if (str_ieq_const(ext, strlen(ext), ".gif")) {
-            img_surface->format = IMAGE_FORMAT_GIF;
+    // Preserve content-detected formats such as extensionless SVG cache files;
+    // only raster fallback surfaces need URL-extension format inference.
+    if (img_surface->format != IMAGE_FORMAT_SVG) {
+        img_surface->format = IMAGE_FORMAT_PNG;  // default
+        const char* ext = strrchr(res->url, '.');
+        if (ext) {
+            if (str_ieq_const(ext, strlen(ext), ".jpg") || str_ieq_const(ext, strlen(ext), ".jpeg")) {
+                img_surface->format = IMAGE_FORMAT_JPEG;
+            } else if (str_ieq_const(ext, strlen(ext), ".gif")) {
+                img_surface->format = IMAGE_FORMAT_GIF;
+            }
+            // PNG is the default, WEBP not yet supported in ImageFormat enum
         }
-        // PNG is the default, WEBP not yet supported in ImageFormat enum
     }
 
     // ensure element has embed property allocated

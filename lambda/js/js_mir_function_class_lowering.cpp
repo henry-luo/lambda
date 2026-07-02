@@ -2436,15 +2436,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 bool is_self_capture = (self_capture_name[0] &&
                     strcmp(fc->captures[i].name, self_capture_name) == 0);
                 if (!has_scope_slot && !is_self_capture) {
-                    // When parent uses shared scope env but this capture didn't get a
-                    // slot (scope_env overflow), skip loading — the dense index 'i'
-                    // would read the wrong slot. Let identifier resolution handle it
-                    // (via id->entry for function decls, or module_consts for MODVARs).
-                    int pi = fc->parent_index;
-                    if (pi >= 0 && pi < mt->func_count && mt->func_entries[pi].has_scope_env &&
-                        fc->captures[i].grandparent_slot < 0) {
-                        continue;
-                    }
+                    // Unremapped captures force a private dense closure env; skipping
+                    // them here drops values such as nested TLS callbacks' const `ok`.
                     // For per-closure envs, also skip MODVAR captures
                     if (mt->module_consts) {
                         JsModuleConstEntry mclookup;

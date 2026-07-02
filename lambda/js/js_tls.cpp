@@ -247,11 +247,47 @@ static bool tls_material_to_cstr(Item value, char* buf, int buf_size) {
     return item_to_cstr(text, buf, buf_size) != NULL;
 }
 
-static bool tls_first_material_to_cstr(Item value, char* buf, int buf_size) {
-    if (get_type_id(value) == LMD_TYPE_ARRAY && js_array_length(value) > 0) {
-        value = js_array_get_int(value, 0);
+static bool tls_append_material_bytes(char* buf, int* pos, int buf_size,
+                                      const char* data, int len) {
+    if (!buf || !pos || !data || len <= 0 || buf_size <= 0) return false;
+    if (*pos > 0 && buf[*pos - 1] != '\n') {
+        if (*pos >= buf_size - 1) return false;
+        buf[(*pos)++] = '\n';
     }
-    return tls_material_to_cstr(value, buf, buf_size);
+    if (len > buf_size - 1 - *pos) return false;
+    memcpy(buf + *pos, data, (size_t)len);
+    *pos += len;
+    buf[*pos] = '\0';
+    return true;
+}
+
+static bool tls_material_list_append(Item value, char* buf, int* pos, int buf_size) {
+    if (tls_is_missing(value)) return false;
+    if (get_type_id(value) == LMD_TYPE_ARRAY) {
+        bool appended = false;
+        int64_t len = js_array_length(value);
+        for (int64_t i = 0; i < len; i++) {
+            if (tls_material_list_append(js_array_get_int(value, i), buf, pos, buf_size)) {
+                appended = true;
+            }
+        }
+        return appended;
+    }
+
+    Item text = make_js_undefined();
+    if (!tls_item_to_cert_string(value, &text) || get_type_id(text) != LMD_TYPE_STRING) return false;
+    String* s = it2s(text);
+    if (!s || s->len > (uint64_t)(buf_size - 1)) return false;
+    return tls_append_material_bytes(buf, pos, buf_size, s->chars, (int)s->len);
+}
+
+static bool tls_material_list_to_cstr(Item value, char* buf, int buf_size) {
+    if (!buf || buf_size <= 0) return false;
+    buf[0] = '\0';
+    int pos = 0;
+    // CA arrays are one trust store; keeping only the first entry leaves later
+    // issuer chains unauthorized and fixtures skip their server.close() path.
+    return tls_material_list_append(value, buf, &pos, buf_size);
 }
 
 static const char* tls_builtin_root_certificate =
@@ -466,8 +502,12 @@ typedef struct JsTlsServer {
     TlsContext*  tls_ctx;
     Item         js_object;
     Item         connection_handler;
+    Item         close_callback;
     char         ticket_keys[48];
     int          ticket_keys_len;
+    int          active_connections;
+    bool         closing;
+    bool         listen_closed;
 } JsTlsServer;
 
 typedef struct JsTlsSocket {
@@ -476,6 +516,7 @@ typedef struct JsTlsSocket {
     TlsContext*    tls_ctx;        // shared context (owned by this if client-created)
     TlsConnection* tls_conn;       // per-connection TLS state
     Item           js_object;
+    Item           borrowed_socket;
     Item           pending_read;
     JsTlsServer*   owner_server;
     bool           connected;
@@ -495,7 +536,11 @@ typedef struct JsTlsSocket {
     bool           session_reused;
     bool           session_pending;
     bool           session_emitted;
+    bool           need_drain;
+    bool           drain_check_scheduled;
+    bool           has_borrowed_socket;
     int            connect_port;
+    int64_t        high_water_mark;
     char*          pending_write_data;
     size_t         pending_write_len;
     char           connect_host[256];
@@ -549,9 +594,40 @@ static JsTlsSocket* tls_socket_from_object(Item obj) {
 
 static JsTlsServer* tls_server_from_object(Item self);
 
+static void tls_server_maybe_destroy(JsTlsServer* srv) {
+    if (!srv || !srv->closing || !srv->listen_closed || srv->active_connections > 0) return;
+    if (srv->tls_ctx) {
+        tls_context_destroy(srv->tls_ctx);
+        srv->tls_ctx = NULL;
+    }
+    mem_free(srv);
+}
+
+static void tls_server_note_socket_closed(JsTlsSocket* sock) {
+    if (!sock || !sock->is_server || !sock->owner_server) return;
+    JsTlsServer* srv = sock->owner_server;
+    sock->owner_server = NULL;
+    if (srv->active_connections > 0) srv->active_connections--;
+    tls_server_maybe_destroy(srv);
+}
+
 static void tls_socket_detach_js_object(Item obj) {
     js_property_set(obj, make_string_item("__handle__"), ItemNull);
     js_property_set(obj, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
+}
+
+static void tls_socket_destroy_pending_borrowed_socket(JsTlsSocket* sock) {
+    if (!sock || !sock->has_borrowed_socket || sock->tcp_initialized) return;
+    Item destroy_fn = js_property_get(sock->borrowed_socket, make_string_item("resetAndDestroy"));
+    if (!is_callable(destroy_fn)) {
+        destroy_fn = js_property_get(sock->borrowed_socket, make_string_item("destroy"));
+    }
+    if (is_callable(destroy_fn)) {
+        // A pre-adoption TLSSocket destroy must abort the borrowed connect
+        // request; plain destroy() can defer pending net.Socket closes.
+        js_call_function(destroy_fn, sock->borrowed_socket, NULL, 0);
+        js_microtask_flush();
+    }
 }
 
 // emit event on TLS socket JS object
@@ -760,7 +836,27 @@ static void tls_socket_shutdown_transport(JsTlsSocket* sock) {
     uv_shutdown(sreq, tls_socket_stream(sock),
         [](uv_shutdown_t* req, int status) {
             (void)status;
+            JsTlsSocket* sock = (JsTlsSocket*)req->data;
             mem_free(req);
+            if (!sock || sock->destroyed) return;
+            uv_tcp_t* tcp = tls_socket_tcp(sock);
+            if (!tcp || uv_is_closing((uv_handle_t*)tcp)) return;
+            sock->destroyed = true;
+            if (sock->tls_conn) {
+                tls_connection_destroy(sock->tls_conn);
+                sock->tls_conn = NULL;
+            }
+            // uv_shutdown only half-closes the stream; TLS end() has no
+            // allowHalfOpen support here, so the native handle must close too.
+            uv_close((uv_handle_t*)tcp, [](uv_handle_t* handle) {
+                JsTlsSocket* s = (JsTlsSocket*)handle->data;
+                if (!s) return;
+                tls_socket_emit(s->js_object, "close", NULL, 0);
+                tls_server_note_socket_closed(s);
+                tls_socket_detach_js_object(s->js_object);
+                if (s->owns_context && s->tls_ctx) tls_context_destroy(s->tls_ctx);
+                mem_free(s);
+            });
         });
 }
 
@@ -805,6 +901,42 @@ static void tls_socket_schedule_deferred_io(Item obj) {
     js_setTimeout(tick, (Item){.item = i2it(0)});
 }
 
+static Item tls_socket_drain_check_later(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    JsTlsSocket* sock = tls_socket_from_object(env[0]);
+    if (!sock || sock->destroyed) return make_js_undefined();
+    sock->drain_check_scheduled = false;
+    if (!sock->need_drain) return make_js_undefined();
+
+    uv_stream_t* stream = tls_socket_stream(sock);
+    size_t write_queue_size = stream ? uv_stream_get_write_queue_size(stream) : 0;
+    if ((int64_t)write_queue_size > sock->high_water_mark) {
+        Item* next_env = js_alloc_env(1);
+        next_env[0] = env[0];
+        Item next_tick = js_new_closure((void*)tls_socket_drain_check_later, 0, next_env, 1);
+        sock->drain_check_scheduled = true;
+        js_setTimeout(next_tick, (Item){.item = i2it(0)});
+        return make_js_undefined();
+    }
+
+    // TLS writes enqueue encrypted records through mbedTLS; without replaying
+    // the drain edge, producers that saw write(false) wait until the watchdog.
+    sock->need_drain = false;
+    tls_socket_emit(sock->js_object, "drain", NULL, 0);
+    return make_js_undefined();
+}
+
+static void tls_socket_schedule_drain_check(Item obj) {
+    JsTlsSocket* sock = tls_socket_from_object(obj);
+    if (!sock || sock->drain_check_scheduled) return;
+    Item* env = js_alloc_env(1);
+    env[0] = obj;
+    Item tick = js_new_closure((void*)tls_socket_drain_check_later, 0, env, 1);
+    sock->drain_check_scheduled = true;
+    js_setTimeout(tick, (Item){.item = i2it(0)});
+}
+
 extern "C" Item js_tls_socket_read(void) {
     Item self = js_get_this();
     JsTlsSocket* sock = tls_socket_from_object(self);
@@ -828,7 +960,15 @@ static bool tls_socket_write_item(JsTlsSocket* sock, Item data_item) {
         return tls_socket_queue_plaintext(sock, data, data_len);
     }
     int written = tls_write(sock->tls_conn, (const unsigned char*)data, data_len);
-    return written >= 0;
+    if (written < 0) return false;
+    uv_stream_t* stream = tls_socket_stream(sock);
+    size_t write_queue_size = stream ? uv_stream_get_write_queue_size(stream) : 0;
+    bool below_hwm = (int64_t)write_queue_size <= sock->high_water_mark;
+    if (!below_hwm) {
+        sock->need_drain = true;
+        tls_socket_schedule_drain_check(sock->js_object);
+    }
+    return below_hwm;
 }
 
 // write(data)
@@ -864,6 +1004,7 @@ extern "C" Item js_tls_socket_end(Item rest_args) {
         tls_socket_emit(self, "end", NULL, 0);
         tls_socket_emit(self, "close", NULL, 0);
         sock->destroyed = true;
+        tls_server_note_socket_closed(sock);
         mem_free(sock);
         tls_socket_detach_js_object(self);
         return self;
@@ -890,6 +1031,7 @@ extern "C" Item js_tls_socket_destroy(void) {
     }
 
     sock->destroyed = true;
+    tls_socket_destroy_pending_borrowed_socket(sock);
     tls_socket_detach_js_object(self);
     if (sock->tls_conn) {
         tls_connection_destroy(sock->tls_conn);
@@ -906,6 +1048,7 @@ extern "C" Item js_tls_socket_destroy(void) {
     }
     if (!sock->tcp_initialized) {
         tls_socket_emit(sock->js_object, "close", NULL, 0);
+        tls_server_note_socket_closed(sock);
         // Deferred TLS callbacks may still hold the JS object; detach before
         // freeing so they cannot recover a stale native socket pointer.
         tls_socket_detach_js_object(sock->js_object);
@@ -915,6 +1058,7 @@ extern "C" Item js_tls_socket_destroy(void) {
             JsTlsSocket* s = (JsTlsSocket*)handle->data;
             if (s) {
                 tls_socket_emit(s->js_object, "close", NULL, 0);
+                tls_server_note_socket_closed(s);
                 tls_socket_detach_js_object(s->js_object);
                 mem_free(s);
             }
@@ -1005,6 +1149,7 @@ extern "C" Item js_tls_socket_getAuthorized(void) {
 
 // create a JS TLSSocket object
 static Item make_tls_socket_object(JsTlsSocket* sock) {
+    if (sock->high_water_mark <= 0) sock->high_water_mark = 16 * 1024;
     Item obj = js_new_object();
     // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(obj, JS_CLASS_TLS_SOCKET);  // A3-T3b
@@ -1048,6 +1193,11 @@ static Item make_tls_socket_object(JsTlsSocket* sock) {
     js_property_set(obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
     js_property_set(obj, make_string_item("writable"), (Item){.item = ITEM_TRUE});
     js_property_set(obj, make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
+    Item hwm = (Item){.item = i2it(sock->high_water_mark)};
+    Item writable_state = js_new_object();
+    js_property_set(writable_state, make_string_item("highWaterMark"), hwm);
+    js_property_set(obj, make_string_item("_writableState"), writable_state);
+    js_property_set(obj, make_string_item("writableHighWaterMark"), hwm);
     sock->pending_read = make_js_undefined();
     sock->js_object = obj;
     return obj;
@@ -1123,6 +1273,7 @@ static void tls_socket_close_after_error(JsTlsSocket* sock) {
             JsTlsSocket* s = (JsTlsSocket*)h->data;
             if (!s) return;
             tls_socket_emit(s->js_object, "close", NULL, 0);
+            tls_server_note_socket_closed(s);
             tls_socket_detach_js_object(s->js_object);
             if (s->owns_context && s->tls_ctx) tls_context_destroy(s->tls_ctx);
             mem_free(s);
@@ -1234,6 +1385,7 @@ static void tls_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_
             JsTlsSocket* s = (JsTlsSocket*)h->data;
             if (s) {
                 tls_socket_emit(s->js_object, "close", NULL, 0);
+                tls_server_note_socket_closed(s);
                 tls_socket_detach_js_object(s->js_object);
                 if (s->owns_context && s->tls_ctx) tls_context_destroy(s->tls_ctx);
                 mem_free(s);
@@ -1386,6 +1538,7 @@ extern "C" Item js_tls_server_emit(Item event_item, Item socket_item) {
         client->owns_context = false;
         client->is_server = true;
         client->owner_server = srv;
+        srv->active_connections++;
         Item tls_obj = make_tls_socket_object(client);
         // Shared TCP balancers deliver accepted net.Socket objects through
         // Server.emit('connection'); adopt that transport instead of waiting on
@@ -1431,6 +1584,9 @@ extern "C" Item js_tls_TLSSocket(Item socket_item, Item options_item) {
     js_property_set(obj, make_string_item("alpnProtocol"), make_string_item("http/1.1"));
     if (get_type_id(socket_item) == LMD_TYPE_MAP || get_type_id(socket_item) == LMD_TYPE_OBJECT ||
         get_type_id(socket_item) == LMD_TYPE_VMAP) {
+        sock->borrowed_socket = socket_item;
+        sock->has_borrowed_socket = true;
+        js_property_set(obj, make_string_item("__underlying_socket__"), socket_item);
         schedule_tls_attach_existing_socket(obj, socket_item);
     } else if (sock->is_server) {
         schedule_tls_secure_event(obj);
@@ -1489,7 +1645,7 @@ extern "C" Item js_tls_connect(Item options_item) {
             reject_unauthorized = false;
         }
         Item ca_item = js_property_get(options_item, make_string_item("ca"));
-        if (tls_first_material_to_cstr(ca_item, ca_buf, sizeof(ca_buf))) {
+        if (tls_material_list_to_cstr(ca_item, ca_buf, sizeof(ca_buf))) {
             has_ca = true;
         }
         Item session_item = js_property_get(options_item, make_string_item("session"));
@@ -1532,7 +1688,7 @@ extern "C" Item js_tls_connect(Item options_item) {
                     reject_unauthorized = false;
                 }
                 Item ca_item = js_property_get(second, make_string_item("ca"));
-                if (tls_first_material_to_cstr(ca_item, ca_buf, sizeof(ca_buf))) {
+                if (tls_material_list_to_cstr(ca_item, ca_buf, sizeof(ca_buf))) {
                     has_ca = true;
                 }
                 Item session_item = js_property_get(second, make_string_item("session"));
@@ -1589,6 +1745,9 @@ extern "C" Item js_tls_connect(Item options_item) {
         if (!uv_is_closing((uv_handle_t*)&sock->tcp)) uv_close((uv_handle_t*)&sock->tcp, NULL);
         sock->tcp_handle = NULL;
         sock->tcp_initialized = false;
+        sock->borrowed_socket = existing_socket_item;
+        sock->has_borrowed_socket = true;
+        js_property_set(obj, make_string_item("__underlying_socket__"), existing_socket_item);
         schedule_tls_attach_existing_socket(obj, existing_socket_item);
         return obj;
     }
@@ -1662,6 +1821,7 @@ static void tls_server_client_read_cb(uv_stream_t* stream, ssize_t nread, const 
             JsTlsSocket* s = (JsTlsSocket*)h->data;
             if (s) {
                 tls_socket_emit(s->js_object, "close", NULL, 0);
+                tls_server_note_socket_closed(s);
                 // Deferred shutdown/session callbacks keep only the JS object;
                 // detach before freeing this server-side accepted socket.
                 tls_socket_detach_js_object(s->js_object);
@@ -1689,6 +1849,7 @@ static void tls_server_connection_cb(uv_stream_t* server, int status) {
     client->owner_server = srv;
 
     if (uv_accept(server, (uv_stream_t*)&client->tcp) == 0) {
+        srv->active_connections++;
         make_tls_socket_object(client);
         // The TLS server must wait for client records; a first handshake call
         // commonly returns WANT_READ before any connection handler can run.
@@ -1696,6 +1857,7 @@ static void tls_server_connection_cb(uv_stream_t* server, int status) {
         if (!client->tls_conn) {
             log_error("tls: server handshake setup failed");
             if (client->tls_conn) tls_connection_destroy(client->tls_conn);
+            tls_server_note_socket_closed(client);
             uv_close((uv_handle_t*)&client->tcp, [](uv_handle_t* h) {
                 mem_free(h->data);
             });
@@ -1836,23 +1998,35 @@ static Item js_tls_server_getConnections(Item callback) {
     return self;
 }
 
-// server.close()
-extern "C" Item js_tls_server_close(void) {
+// server.close([callback])
+extern "C" Item js_tls_server_close(Item callback) {
     Item self = js_get_this();
     Item handle_item = js_property_get(self, make_string_item("__server__"));
     if (handle_item.item == 0) return self;
     JsTlsServer* srv = (JsTlsServer*)(uintptr_t)it2i(handle_item);
     if (!srv) return self;
+    if (is_callable(callback)) srv->close_callback = callback;
+    srv->closing = true;
 
     if (!uv_is_closing((uv_handle_t*)&srv->tcp)) {
         uv_close((uv_handle_t*)&srv->tcp, [](uv_handle_t* h) {
             JsTlsServer* s = (JsTlsServer*)h->data;
             if (s) {
+                s->listen_closed = true;
+                // server.close() must not free the shared TLS context while
+                // accepted sockets still reference it for pending handshakes.
                 tls_socket_emit(s->js_object, "close", NULL, 0);
-                if (s->tls_ctx) tls_context_destroy(s->tls_ctx);
-                mem_free(s);
+                if (is_callable(s->close_callback)) {
+                    js_call_function(s->close_callback, s->js_object, NULL, 0);
+                    js_microtask_flush();
+                }
+                js_property_set(s->js_object, make_string_item("__server__"), ItemNull);
+                tls_server_maybe_destroy(s);
             }
         });
+    } else if (srv->listen_closed && is_callable(srv->close_callback)) {
+        js_call_function(srv->close_callback, srv->js_object, NULL, 0);
+        js_microtask_flush();
     }
     return self;
 }
@@ -1959,7 +2133,7 @@ extern "C" Item js_tls_createServer(Item options_item, Item handler) {
     js_property_set(obj, make_string_item("listen"),
                     js_new_function((void*)js_tls_server_listen, 3));
     js_property_set(obj, make_string_item("close"),
-                    js_new_function((void*)js_tls_server_close, 0));
+                    js_new_function((void*)js_tls_server_close, 1));
     js_property_set(obj, make_string_item("on"),
                     js_new_function((void*)js_tls_server_on, 2));
     js_property_set(obj, make_string_item("once"),

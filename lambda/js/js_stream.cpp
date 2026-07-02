@@ -646,6 +646,31 @@ static void js_stream_set_readable_buffer(Item self, Item buffer) {
                       (Item){.item = i2it(js_stream_readable_buffer_length(self, buffer))});
 }
 
+static int64_t js_stream_readable_cached_length(Item self, Item buf) {
+    Item state = js_property_get(self, key_readable_state);
+    if (get_type_id(state) == LMD_TYPE_MAP) {
+        Item length = js_property_get(state, make_string_item("length"));
+        if (get_type_id(length) == LMD_TYPE_INT) return it2i(length);
+    }
+    return js_stream_readable_buffer_length(self, buf);
+}
+
+static void js_stream_adjust_readable_length(Item self, int64_t delta) {
+    Item state = js_property_get(self, key_readable_state);
+    if (get_type_id(state) != LMD_TYPE_MAP) return;
+    Item current_item = js_property_get(state, make_string_item("length"));
+    int64_t current = get_type_id(current_item) == LMD_TYPE_INT ? it2i(current_item) : 0;
+    int64_t next = current + delta;
+    if (next < 0) next = 0;
+    js_state_set_item(state, "length", (Item){.item = i2it(next)});
+}
+
+static void js_stream_append_readable_chunk(Item self, Item buf, Item chunk) {
+    js_array_push(buf, chunk);
+    // append-heavy sync _read() paths rely on length staying O(1), not rescanning the buffer.
+    js_stream_adjust_readable_length(self, js_stream_readable_chunk_length(self, chunk));
+}
+
 static bool js_state_get_bool(Item state, const char* name) {
     if (get_type_id(state) != LMD_TYPE_MAP) return false;
     return js_item_is_true(js_property_get(state, make_string_item(name)));
@@ -1264,7 +1289,9 @@ static void js_stream_emit_readable(Item self) {
     }
     if (js_state_get_bool(state, "emittedReadable")) return;
     js_state_set_bool(state, "emittedReadable", true);
-    if (js_item_is_true(js_property_get(self, make_string_item("__defer_readable_emit__")))) {
+    if (js_item_is_true(js_property_get(self, make_string_item("__defer_readable_emit__"))) ||
+        js_item_is_true(js_property_get(self, key_reading_sync))) {
+        // sync _read() may push before read() unwinds; defer readable to avoid recursive user callbacks.
         Item* env = js_alloc_env(1);
         env[0] = self;
         Item tick = js_new_closure((void*)js_stream_emit_readable_tick_closure, 0, env, 1);
@@ -2466,8 +2493,7 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
             buf = js_array_new(0);
             js_stream_set_readable_buffer(self, buf);
         }
-        js_array_push(buf, chunk);
-        js_stream_set_readable_buffer(self, buf);
+        js_stream_append_readable_chunk(self, buf, chunk);
         if (js_state_get_bool(js_property_get(self, key_readable_state), "readableListening")) {
             // the prefetch is now readable even though the pipe is paused for drain.
             js_stream_emit_readable(self);
@@ -2551,7 +2577,7 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
         buf = js_array_new(0);
         js_stream_set_readable_buffer(self, buf);
     }
-    js_array_push(buf, chunk);
+    js_stream_append_readable_chunk(self, buf, chunk);
     Item flowing = js_property_get(self, key_flowing);
     js_stream_async_iterators_drain(self, make_js_undefined());
     if (flowing.item != 0 && it2b(flowing)) {
@@ -2661,7 +2687,7 @@ static int64_t js_stream_readable_buffer_length(Item self, Item buf) {
 }
 
 static bool js_stream_readable_accepts_more(Item self, Item buf) {
-    int64_t length = js_stream_readable_buffer_length(self, buf);
+    int64_t length = js_stream_readable_cached_length(self, buf);
     if (length == 0) return true;
     Item state = js_property_get(self, key_readable_state);
     int64_t hwm = js_stream_state_get_int(state, "highWaterMark", js_stream_default_byte_hwm);
@@ -2672,7 +2698,7 @@ static bool js_stream_readable_buffer_backpressured(Item self) {
     Item state = js_property_get(self, key_readable_state);
     if (get_type_id(state) != LMD_TYPE_MAP) return false;
     Item buf = js_property_get(self, key_buffer);
-    int64_t length = js_stream_readable_buffer_length(self, buf);
+    int64_t length = js_stream_readable_cached_length(self, buf);
     int64_t hwm = js_stream_state_get_int(state, "highWaterMark", js_stream_default_byte_hwm);
     return hwm > 0 && length >= hwm;
 }
@@ -2747,11 +2773,54 @@ static Item js_readable_read_exact(Item self, Item buf, int64_t blen, int64_t wa
         if (available >= want) break;
     }
     if (available < want && !js_item_is_true(js_property_get(self, key_end_pending))) {
-        js_stream_call_read_if_needed(self, (Item){.item = i2it(want)});
-        return ItemNull;
+        Item read_fn = js_property_get(self, make_string_item("_read"));
+        Item pull_size = (Item){.item = i2it(js_stream_read_size_hint(self, (Item){.item = i2it(want)}))};
+        while (available < want && !js_item_is_true(js_property_get(self, key_end_pending))) {
+            if (get_type_id(read_fn) != LMD_TYPE_FUNC ||
+                js_item_is_true(js_property_get(self, key_destroyed)) ||
+                js_item_is_true(js_property_get(self, key_reading))) {
+                break;
+            }
+            int64_t before_len = blen;
+            js_stream_set_reading(self, true);
+            js_property_set(self, key_reading_sync, js_bool_item(true));
+            js_call_function(read_fn, self, &pull_size, 1);
+            js_property_set(self, key_reading_sync, js_bool_item(false));
+            if (js_check_exception()) {
+                Item err = js_clear_exception();
+                js_stream_set_reading(self, false);
+                js_stream_destroy(self, err);
+                return ItemNull;
+            }
+            buf = js_property_get(self, key_buffer);
+            if (get_type_id(buf) != LMD_TYPE_ARRAY) return ItemNull;
+            blen = js_array_length(buf);
+            // sync _read() can satisfy one byte at a time; keep pulling until progress stops or EOF.
+            if (blen > before_len || js_item_is_true(js_property_get(self, key_end_pending))) {
+                js_stream_set_reading(self, false);
+            }
+            if (blen <= before_len) break;
+            for (int64_t i = before_len; i < blen && available < want; i++) {
+                available += js_stream_readable_chunk_length(self, js_array_get_int(buf, i));
+            }
+        }
+        if (available < want && !js_item_is_true(js_property_get(self, key_end_pending))) {
+            return ItemNull;
+        }
     }
     if (available == 0) return ItemNull;
     if (want > available) want = available;
+    if (want == available) {
+        Item consumed = buf;
+        js_stream_set_readable_buffer(self, js_array_new(0));
+        if (js_item_is_true(js_property_get(self, key_end_pending)))
+            js_stream_schedule_end(self);
+        else
+            js_stream_schedule_read(self);
+        // reading the full buffer must not duplicate hundreds of thousands of chunk refs.
+        if (blen == 1) return js_array_get_int(consumed, 0);
+        return js_buffer_concat(consumed, (Item){.item = i2it(want)});
+    }
 
     Item parts = js_array_new(0);
     Item new_buf = js_array_new(0);
@@ -2883,6 +2952,27 @@ extern "C" Item js_readable_read_size(Item self, Item size_item) {
         }
         if (js_stream_encoding_is_base64(encoding)) {
             int64_t available = js_stream_readable_buffer_length(self, buf);
+            while (available < 3 &&
+                   !js_item_is_true(js_property_get(self, key_end_pending)) &&
+                   !js_item_is_true(js_property_get(self, key_end_emitted))) {
+                int64_t before_available = available;
+                js_stream_call_read_if_needed(self, make_js_undefined());
+                buf = js_property_get(self, key_buffer);
+                if (get_type_id(buf) != LMD_TYPE_ARRAY) {
+                    js_stream_update_need_after_read(self);
+                    return ItemNull;
+                }
+                blen = js_array_length(buf);
+                available = js_stream_readable_buffer_length(self, buf);
+                if (available <= before_available) break;
+            }
+            if (available < 3 &&
+                !js_item_is_true(js_property_get(self, key_end_pending)) &&
+                !js_item_is_true(js_property_get(self, key_end_emitted))) {
+                // base64 needs a complete 3-byte group; an empty push is not EOF, so keep the tail buffered.
+                js_stream_mark_readable_needed(self, true);
+                return ItemNull;
+            }
             int64_t remainder = available % 3;
             if (available > 3 && remainder != 0) {
                 // base64 StringDecoder holds incomplete 3-byte groups until the
@@ -9093,7 +9183,7 @@ extern "C" Item js_stream_get_readableLength(void) {
     ensure_keys();
     Item self = js_get_this();
     Item buf = js_property_get(self, key_buffer);
-    return (Item){.item = i2it(js_stream_readable_buffer_length(self, buf))};
+    return (Item){.item = i2it(js_stream_readable_cached_length(self, buf))};
 }
 
 extern "C" Item js_stream_get_readableFlowing(void) {

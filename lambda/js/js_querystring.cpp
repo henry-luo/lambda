@@ -14,6 +14,7 @@
 #include "../../lib/hex.h"
 
 #include <cstring>
+#include <math.h>
 
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
@@ -234,7 +235,29 @@ static void qs_plus_to_space(char* s) {
     }
 }
 
-extern "C" Item js_qs_parse(Item str_item, Item sep_item, Item eq_item) {
+// parse() has a fourth options argument; maxKeys must be applied before scanning all pairs.
+static int64_t qs_parse_max_keys(Item options_item) {
+    int64_t max_keys = 1000;
+    TypeId options_type = get_type_id(options_item);
+    if (options_type != LMD_TYPE_MAP && options_type != LMD_TYPE_OBJECT &&
+            options_type != LMD_TYPE_VMAP) {
+        return max_keys;
+    }
+    Item value = js_property_get(options_item, make_string_item("maxKeys"));
+    TypeId value_type = get_type_id(value);
+    if (value_type == LMD_TYPE_INT) {
+        int64_t n = it2i(value);
+        return n > 0 ? n : -1;
+    }
+    if (value_type == LMD_TYPE_FLOAT) {
+        double n = it2d(value);
+        if (!isfinite(n)) return -1;
+        return n > 0 ? (int64_t)n : -1;
+    }
+    return max_keys;
+}
+
+extern "C" Item js_qs_parse(Item str_item, Item sep_item, Item eq_item, Item options_item) {
     extern Item js_object_create(Item proto);
     Item obj = js_object_create(ItemNull);
     if (get_type_id(str_item) != LMD_TYPE_STRING) return obj;
@@ -266,9 +289,12 @@ extern "C" Item js_qs_parse(Item str_item, Item sep_item, Item eq_item) {
     char* p = input;
     if (*p == '?') p++;
     char* end = input + len;
+    int64_t max_keys = qs_parse_max_keys(options_item);
+    int64_t parsed_keys = 0;
 
     // helper lambda-like: process one key=value pair
     while (p < end) {
+        if (max_keys >= 0 && parsed_keys >= max_keys) break;
         // find next separator
         char* sep_pos = (sep_len == 1) ? strchr(p, sep[0]) : strstr(p, sep);
         int pair_len = sep_pos ? (int)(sep_pos - p) : (int)(end - p);
@@ -281,6 +307,8 @@ extern "C" Item js_qs_parse(Item str_item, Item sep_item, Item eq_item) {
         *pair_end = saved;
 
         if (eq_pos && eq_pos < pair_end) {
+            // maxKeys limits parsed pairs; non-finite numeric values disable the cap like Node.
+            parsed_keys++;
             // key = value
             int key_raw_len = (int)(eq_pos - p);
             int val_raw_len = (int)(pair_end - eq_pos - eq_len);
@@ -315,6 +343,8 @@ extern "C" Item js_qs_parse(Item str_item, Item sep_item, Item eq_item) {
             if (key_dec) mem_free(key_dec);
             if (val_dec) mem_free(val_dec);
         } else if (pair_len > 0) {
+            // maxKeys applies to key-only pairs too, not just key=value pairs.
+            parsed_keys++;
             // key with no value
             char key_buf[4096];
             if (pair_len >= (int)sizeof(key_buf)) pair_len = (int)sizeof(key_buf) - 1;
@@ -429,11 +459,11 @@ extern "C" Item js_get_querystring_namespace(void) {
 
     qs_namespace = js_new_object();
 
-    qs_set_method(qs_namespace, "parse",     (void*)js_qs_parse, 3);
+    qs_set_method(qs_namespace, "parse",     (void*)js_qs_parse, 4);
     qs_set_method(qs_namespace, "stringify",  (void*)js_qs_stringify, 3);
     qs_set_method(qs_namespace, "escape",    (void*)js_qs_escape, 1);
     qs_set_method(qs_namespace, "unescape",  (void*)js_qs_unescape, 1);
-    qs_set_method(qs_namespace, "decode",    (void*)js_qs_parse, 3);     // alias
+    qs_set_method(qs_namespace, "decode",    (void*)js_qs_parse, 4);     // alias
     qs_set_method(qs_namespace, "encode",    (void*)js_qs_stringify, 3); // alias
 
     // default export is the namespace itself
