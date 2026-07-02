@@ -23,4 +23,7 @@
       <div index: 3, flags: ['hover', 'active']
         <ul index: 3, flags: ['hover', 'active']
           <li index: 1, flags: ['active']>
-          <li index: 7, flags: ['hover']>>>>>>
+          <li index: 7, flags: ['hover']>>>
+      <div index: 39
+        <div index: 5
+          <input index: 3, flags: ['readonly', 'valid', 'optional']>>>>>>

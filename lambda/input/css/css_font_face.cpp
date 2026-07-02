@@ -11,6 +11,28 @@
 #include <string.h>
 #include <stdlib.h>
 
+static void css_font_face_clear_heap_src(CssFontFaceDescriptor* descriptor) {
+    if (!descriptor) return;
+
+    if (descriptor->src_url) {
+        mem_free(descriptor->src_url);
+        descriptor->src_url = nullptr;
+    }
+    if (descriptor->src_local) {
+        mem_free(descriptor->src_local);
+        descriptor->src_local = nullptr;
+    }
+    if (descriptor->src_urls) {
+        for (int i = 0; i < descriptor->src_count; i++) {
+            if (descriptor->src_urls[i].url) mem_free(descriptor->src_urls[i].url);
+            if (descriptor->src_urls[i].format) mem_free(descriptor->src_urls[i].format);
+        }
+        mem_free(descriptor->src_urls);
+        descriptor->src_urls = nullptr;
+    }
+    descriptor->src_count = 0;
+}
+
 // Helper: trim whitespace and quotes from a string
 static char* trim_and_unquote(const char* str, size_t len, Pool* pool) {
     if (!str || len == 0) return nullptr;
@@ -519,6 +541,17 @@ CssFontFaceDescriptor* css_parse_font_face_content(const char* content, Pool* po
         else if (prop_len >= 3 && strncmp(prop_start, "src", 3) == 0) {
             // Extract all src URLs with their formats
             char* temp_val = trim_and_unquote(val_start, val_len, pool);
+
+            if (!pool) {
+                // Multiple src declarations in one @font-face override earlier
+                // declarations; heap-owned parsed sources must be released first.
+                css_font_face_clear_heap_src(descriptor);
+            } else {
+                descriptor->src_urls = nullptr;
+                descriptor->src_url = nullptr;
+                descriptor->src_local = nullptr;
+                descriptor->src_count = 0;
+            }
 
             // Allocate array for src entries
             if (pool) {

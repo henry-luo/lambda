@@ -23,8 +23,11 @@
   }
   <html flags: ['hover', 'active'], scroll: {
       y: 72,
-      max_y: 3762.2060546875
+      max_y: 3763.1435546875
     }
     <body index: 2, flags: ['hover', 'active']
       <div index: 27, flags: ['hover', 'active']
-        <p index: 3, flags: ['active']>>>>>
+        <p index: 3, flags: ['active']>>
+      <div index: 39
+        <div index: 5
+          <input index: 3, flags: ['readonly', 'valid', 'optional']>>>>>>

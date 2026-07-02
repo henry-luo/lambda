@@ -9,7 +9,38 @@
 #include "../../lib/mem.h"
 #include "../../lib/time_util.h"
 #include "../input/css/css_font_face.hpp"
+#include <strings.h>
 #include <time.h>
+
+static bool is_supported_web_font_source(const char* url, const char* format) {
+    if (format && *format) {
+        if (strcasecmp(format, "woff2") == 0 ||
+            strcasecmp(format, "woff") == 0 ||
+            strcasecmp(format, "truetype") == 0 ||
+            strcasecmp(format, "opentype") == 0 ||
+            strcasecmp(format, "ttf") == 0 ||
+            strcasecmp(format, "otf") == 0) {
+            return true;
+        }
+        return false;
+    }
+
+    if (!url) return false;
+    const char* clean_end = url + strlen(url);
+    const char* query = strchr(url, '?');
+    const char* fragment = strchr(url, '#');
+    if (query && query < clean_end) clean_end = query;
+    if (fragment && fragment < clean_end) clean_end = fragment;
+
+    size_t len = (size_t)(clean_end - url);
+    // Browser font selection skips fallback formats this loader cannot decode;
+    // downloading them first turns ordinary legacy src lists into hard 404s.
+    return (len >= 6 && strncasecmp(clean_end - 6, ".woff2", 6) == 0) ||
+           (len >= 5 && strncasecmp(clean_end - 5, ".woff", 5) == 0) ||
+           (len >= 4 && strncasecmp(clean_end - 4, ".ttf", 4) == 0) ||
+           (len >= 4 && strncasecmp(clean_end - 4, ".otf", 4) == 0) ||
+           (len >= 4 && strncasecmp(clean_end - 4, ".ttc", 4) == 0);
+}
 
 // Helper: resolve a potentially relative URL against the document's base URL.
 // Returns a heap-allocated absolute URL string (caller must free with mem_free).
@@ -30,6 +61,26 @@ static char* resolve_url(const char* href, DomDocument* doc) {
     }
     if (resolved) url_destroy(resolved);
     return mem_strdup(href, MEM_CAT_NETWORK);
+}
+
+static char* resolve_font_resource_url(const char* href, const char* stylesheet_url,
+                                       DomDocument* doc) {
+    if (!href) return nullptr;
+    if (url_is_absolute_url(href)) {
+        return mem_strdup(href, MEM_CAT_NETWORK);
+    }
+    if (stylesheet_url && url_is_absolute_url(stylesheet_url)) {
+        Url* base = url_parse(stylesheet_url);
+        Url* resolved = base ? url_resolve_relative(href, base) : NULL;
+        if (base) url_destroy(base);
+        if (resolved && resolved->href) {
+            char* result = mem_strdup(resolved->href->chars, MEM_CAT_NETWORK);
+            url_destroy(resolved);
+            return result;
+        }
+        if (resolved) url_destroy(resolved);
+    }
+    return resolve_url(href, doc);
 }
 
 // Initialize network support for a document
@@ -149,6 +200,12 @@ static void discover_img_callback(DomElement* img, void* user_data) {
         log_debug("network: <img> without src attribute");
         return;
     }
+    if (strncmp(src, "data:", 5) == 0) {
+        // Data URI images are decoded synchronously by load_image(); queuing
+        // them as network transfers produces false URL-format failures.
+        log_debug("network: skipping data URI image for async discovery");
+        return;
+    }
 
     log_debug("network: discovered image: %s", src);
 
@@ -254,15 +311,24 @@ void radiant_discover_document_resources(DomDocument* doc) {
         for (int s = 0; s < doc->stylesheet_count; s++) {
             if (!doc->stylesheets[s]) continue;
             int face_count = 0;
+            CssStylesheet* sheet = doc->stylesheets[s];
+            Pool* face_pool = doc->pool ? doc->pool : sheet->pool;
+            bool free_faces = (face_pool == NULL);
+            const char* font_base_url = sheet->origin_url ? sheet->origin_url : NULL;
             CssFontFaceDescriptor** faces = css_extract_font_faces(
-                doc->stylesheets[s], NULL, doc->pool, &face_count);
+                sheet, font_base_url, face_pool, &face_count);
             for (int f = 0; f < face_count; f++) {
                 if (!faces[f]) continue;
                 // Try each src URL in order — queue the first HTTP URL found
                 for (int u = 0; u < faces[f]->src_count; u++) {
                     const char* font_url = faces[f]->src_urls[u].url;
                     if (!font_url) continue;
-                    char* abs_url = resolve_url(font_url, doc);
+                    if (!is_supported_web_font_source(font_url, faces[f]->src_urls[u].format)) {
+                        log_debug("network: skipping unsupported @font-face source: %s (format: %s)",
+                                  font_url, faces[f]->src_urls[u].format ? faces[f]->src_urls[u].format : "?");
+                        continue;
+                    }
+                    char* abs_url = resolve_font_resource_url(font_url, font_base_url, doc);
                     if (abs_url && url_is_absolute_url(abs_url) &&
                         (strncmp(abs_url, "http://", 7) == 0 || strncmp(abs_url, "https://", 8) == 0)) {
                         log_debug("network: discovered @font-face url: %s (family: %s)",
@@ -276,7 +342,7 @@ void radiant_discover_document_resources(DomDocument* doc) {
                 }
                 // Also try the fallback src_url field
                 if (faces[f]->src_url && faces[f]->src_count == 0) {
-                    char* abs_url = resolve_url(faces[f]->src_url, doc);
+                    char* abs_url = resolve_font_resource_url(faces[f]->src_url, font_base_url, doc);
                     if (abs_url && url_is_absolute_url(abs_url) &&
                         (strncmp(abs_url, "http://", 7) == 0 || strncmp(abs_url, "https://", 8) == 0)) {
                         log_debug("network: discovered @font-face src_url: %s", abs_url);
@@ -285,6 +351,14 @@ void radiant_discover_document_resources(DomDocument* doc) {
                     }
                     mem_free(abs_url);
                 }
+            }
+            if (free_faces && faces) {
+                // css_extract_font_faces() heap-allocates when no pool is
+                // available; async discovery owns those transient descriptors.
+                for (int f = 0; f < face_count; f++) {
+                    css_font_face_descriptor_free(faces[f]);
+                }
+                mem_free(faces);
             }
         }
     }

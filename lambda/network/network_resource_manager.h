@@ -22,6 +22,7 @@ struct DomElement;
 struct CssEngine;
 struct CookieJar;
 struct NetworkScheduler;
+struct ImageSurface;
 
 typedef void (*NetworkWakeCallback)(void* user_data);
 
@@ -77,6 +78,10 @@ typedef struct NetworkResource {
     // Callback on completion
     void (*on_complete)(struct NetworkResource* res, void* user_data);
     void* user_data;
+
+    // Decoded resource owned by this network entry and borrowed by the DOM.
+    struct ImageSurface* image_surface;
+    bool image_surface_borrowed;
     
     // Reference count for cleanup
     int ref_count;

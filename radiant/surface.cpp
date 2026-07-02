@@ -17,6 +17,7 @@
 #include "../lambda/input/input.hpp"  // for download_http_content
 
 #include <unistd.h>
+#include <strings.h>
 
 typedef struct ImageEntry {
     // ImageFormat format;
@@ -504,6 +505,17 @@ static void load_image_cleanup_failed(Url* abs_url, char* file_path, unsigned ch
     if (abs_url) url_destroy(abs_url);
 }
 
+static bool image_path_has_declared_non_svg_extension(const char* file_path) {
+    if (!file_path) return false;
+    const char* slash = strrchr(file_path, '/');
+    const char* dot = strrchr(file_path, '.');
+    if (!dot || (slash && dot < slash)) return false;
+    // cached network resources keep a synthetic suffix, so sniff their bytes for SVG.
+    if (strcasecmp(dot, ".cache") == 0) return false;
+    if (strcasecmp(dot, ".svg") == 0 || strcasecmp(dot, ".svgz") == 0) return false;
+    return true;
+}
+
 ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     if (uicon->document == NULL || uicon->document->url == NULL) {
         log_error("Missing URL context for image: %s", img_url);
@@ -586,7 +598,30 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         log_debug("[BG-IMAGE] Loaded data URI image: %dx%d", surface->width, surface->height);
         return surface;
     }
-    Url* abs_url = parse_url(uicon->document->url, img_url);
+    const char* resolved_img_url = img_url;
+    char* local_file_url = nullptr;
+    if (file_exists(img_url)) {
+        char abs_path[4096];
+        if (img_url[0] == '/') {
+            str_copy(abs_path, sizeof(abs_path), img_url, strlen(img_url));
+        } else {
+            char cwd_buf[4096];
+            if (getcwd(cwd_buf, sizeof(cwd_buf))) {
+                str_fmt(abs_path, sizeof(abs_path), "%s/%s", cwd_buf, img_url);
+            } else {
+                abs_path[0] = '\0';
+            }
+        }
+        if (abs_path[0]) {
+            // Cached network resources are local files even when the document
+            // base URL is HTTP, so resolve them as file URLs.
+            local_file_url = url_from_local_path(abs_path);
+            if (local_file_url) resolved_img_url = local_file_url;
+        }
+    }
+
+    Url* abs_url = parse_url(uicon->document->url, resolved_img_url);
+    if (local_file_url) mem_free(local_file_url);
     if (!abs_url) {
         log_error("Failed to parse URL: %s", img_url);
         return NULL;
@@ -667,6 +702,17 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         log_debug("[image] HTTP image format detection: is_svg=%s", is_svg ? "yes" : "no");
     } else {
         is_svg = (slen > 4 && strcmp(file_path + slen - 4, ".svg") == 0);
+        if (!is_svg && !image_path_has_declared_non_svg_extension(file_path)) {
+            FILE* svg_probe = fopen(file_path, "rb");
+            if (svg_probe) {
+                unsigned char probe_buf[512];
+                size_t probe_size = fread(probe_buf, 1, sizeof(probe_buf), svg_probe);
+                fclose(svg_probe);
+                // Network cache files do not preserve extensions; declared
+                // .png/.jpg resources must keep browser-like type handling.
+                is_svg = is_svg_content(probe_buf, probe_size);
+            }
+        }
     }
 
     if (is_svg) {

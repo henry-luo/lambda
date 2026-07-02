@@ -37,6 +37,7 @@ extern "C" Item js_internal_binding(Item name);
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" void js_note_array_prototype_push_tamper(Item object, Item key);
 extern double js_get_number(Item value);
+extern __thread EvalContext* context;
 
 #define JS_FUNC_FLAG_HAS_BOUND_THIS_G 16
 
@@ -2640,13 +2641,15 @@ extern "C" Item js_process_set_exitCode(Item code_item) {
 
 extern "C" int js_process_current_exit_code(void) {
     int code = js_process_exit_code_value;
-    if (js_process_object.item != ITEM_NULL) {
+    if (js_process_object.item != ITEM_NULL && context && context->name_pool) {
         Item prop = js_property_get(js_process_object,
             (Item){.item = s2it(heap_create_name("exitCode", 8))});
         TypeId type = get_type_id(prop);
         if (type == LMD_TYPE_INT) code = (int)it2i(prop);
         else if (type == LMD_TYPE_FLOAT) code = (int)it2d(prop);
     }
+    // process exit code is queried once more by the CLI after the JS EvalContext
+    // has been restored; at that boundary only the synchronized scalar is valid.
     js_process_exit_code_value = code;
     return code;
 }
@@ -3652,6 +3655,16 @@ static void js_process_ipc_emit_message(Item message, Item handle) {
     } else {
         js_process_emit((Item){.item = s2it(heap_create_name("message", 7))}, message);
     }
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        // IPC message listener throws are async uncaught exceptions; leaving the
+        // throw pending aborts the buffered message loop and delays disconnect.
+        Item handled = js_process_emit(
+            (Item){.item = s2it(heap_create_name("uncaughtException", 17))}, error);
+        if (handled.item != ITEM_TRUE && handled.item != b2it(true)) {
+            js_throw_value(error);
+        }
+    }
 }
 
 static void js_process_ipc_flush_pending(void) {
@@ -3671,11 +3684,36 @@ static void js_process_ipc_flush_pending(void) {
     }
 }
 
+static bool js_process_ipc_is_disconnect_control(Item message) {
+    if (get_type_id(message) != LMD_TYPE_MAP && get_type_id(message) != LMD_TYPE_OBJECT &&
+        get_type_id(message) != LMD_TYPE_VMAP) {
+        return false;
+    }
+    Item value = js_property_get(message,
+        (Item){.item = s2it(heap_create_name("__lambda_ipc_disconnect__", 25))});
+    return value.item == ITEM_TRUE || value.item == b2it(true);
+}
+
+static void js_process_ipc_close_from_control(void) {
+    if (!js_process_ipc_active || js_process_ipc_closing) return;
+    js_process_ipc_closing = true;
+    // parent ChildProcess.disconnect() is an internal channel close, not a
+    // user message; close the child pipe promptly so message listeners do not
+    // keep the process alive until the drain watchdog.
+    js_process_ipc_emit_disconnect_once();
+    uv_read_stop((uv_stream_t*)&js_process_ipc_pipe);
+    uv_close((uv_handle_t*)&js_process_ipc_pipe, js_process_ipc_close_cb);
+}
+
 static void js_process_ipc_handle_line(const char* chars, int len) {
     if (!chars || len <= 0) return;
     Item json = (Item){.item = s2it(heap_create_name(chars, len))};
     Item message = js_json_parse(json);
     if (js_check_exception()) return;
+    if (js_process_ipc_is_disconnect_control(message)) {
+        js_process_ipc_close_from_control();
+        return;
+    }
     Item handle = js_process_ipc_take_pending_handle();
     if (!js_process_has_message_listener()) {
         // parent IPC can arrive before user code registers process.on('message');
@@ -12943,18 +12981,28 @@ extern "C" Item js_json_parse(Item str_item) {
         return ItemNull;
     }
 
-    // null-terminate for the parser
-    char* buf = LAMBDA_ALLOCA(s->len + 1, char);
-    memcpy(buf, s->chars, s->len);
-    buf[s->len] = '\0';
-
     if (!js_input) {
         log_error("js_json_parse: no input context");
         return ItemNull;
     }
 
+    // large IPC JSON payloads still need a nul copy, but must not overflow
+    // the bounded stack buffer.
+    size_t buf_len = (size_t)s->len + 1;
+    bool heap_buf = buf_len > LAMBDA_ALLOCA_MAX_BYTES;
+    char* buf = heap_buf
+        ? (char*)mem_alloc(buf_len, MEM_CAT_JS_RUNTIME)
+        : LAMBDA_ALLOCA(buf_len, char);
+    if (!buf) {
+        js_throw_range_error("Invalid string length");
+        return ItemNull;
+    }
+    memcpy(buf, s->chars, s->len);
+    buf[s->len] = '\0';
+
     bool ok = false;
     Item result = parse_json_to_item_strict(js_input, buf, &ok);
+    if (heap_buf) mem_free(buf);
     if (!ok) {
         js_throw_syntax_error((Item){.item = s2it(heap_create_name("Unexpected token in JSON"))});
         return ItemNull;
@@ -15660,6 +15708,8 @@ extern "C" Item js_get_global_this() {
         // populate namespace objects on globalThis (Math, JSON, Reflect, console)
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Math", 4))}, js_get_math_object_value());
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("JSON", 4))}, js_get_json_object_value());
+        extern Item js_get_intl_object_value(void);
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Intl", 4))}, js_get_intl_object_value());
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Reflect", 7))}, js_get_reflect_object_value());
         extern Item js_get_atomics_object_value(void);
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Atomics", 7))}, js_get_atomics_object_value());

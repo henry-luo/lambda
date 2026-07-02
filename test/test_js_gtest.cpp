@@ -719,6 +719,33 @@ TEST(JavaScriptRegression, ModuleCompileCacheHonorsPermissionWriteGrants) {
     ASSERT_NE(strstr(output, "1:true"), nullptr) << output;
 }
 
+TEST(JavaScriptRegression, DocumentExitCodeAfterContextRestoreDoesNotInternWithNullContext) {
+    unlink("log.txt");
+    char output[4096];
+#ifdef _WIN32
+    const char* command =
+        "lambda.exe js \"test/js/js_document_exit_context.js\" "
+        "--document \"test/js/js_document_exit_context.html\" 2>&1";
+#else
+    const char* command =
+        "./lambda.exe js \"test/js/js_document_exit_context.js\" "
+        "--document \"test/js/js_document_exit_context.html\" 2>&1";
+#endif
+
+    int status = execute_command_status(command, output, sizeof(output));
+    ASSERT_EQ(status, 0) << output;
+    ASSERT_NE(strstr(output, "A plain-call=3"), nullptr) << output;
+    ASSERT_NE(strstr(output, "B dispatched=3"), nullptr) << output;
+
+    char* log_content = read_expected_output("log.txt");
+    ASSERT_NE(log_content, nullptr) << "expected logging-enabled JS run to create log.txt";
+    ASSERT_EQ(strstr(log_content, "heap_create_name called with invalid context or name_pool"), nullptr)
+        << log_content;
+    ASSERT_EQ(strstr(log_content, "map_get: key must be string or symbol, got type null"), nullptr)
+        << log_content;
+    free(log_content);
+}
+
 TEST(JavaScriptFuzz, FuzzIifeObjectLabelBlockDoesNotTimeout) {
     char output[2048];
     int status = execute_js_script_status("test/js/fuzz_iife_invalid_object_block.js",

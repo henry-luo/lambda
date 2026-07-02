@@ -217,3 +217,240 @@ return false;
 - Stage-4C view bundle `editor-view-dom`: **crash → runs (3/9)** — the this-capture crash is gone. *(Remaining `editor-view-dom` failures ("…reading 'doc'": the edit pipeline yields no transaction) and the `full-editor-dom` crash are SEPARATE follow-ups, not this bug.)*
 - Recommended before merge: `make node-baseline` (class `this` is load-bearing).
 - `git diff --check` → clean
+
+---
+---
+
+# Bug 3 — LambdaJS headless (`lambda.exe js --document`): post-dispatch `process.exitCode` lookup interns with `context == NULL`
+
+**Date:** 2026-07-01 · **Component:** LambdaJS runtime — `process.exitCode` bridge across JS `EvalContext` lifetime · **Status:** FIXED — and confirmed to be a RED HERRING for the editor (the real editor blocker is a separate `onChange is not a function` / "Bug 4")
+**Discovered by:** Stage 4C — while chasing the editor's post-Bug-2 `editor-view-dom` failures.
+
+> **READ §5–§6 FIRST.** §1–§4 preserve the *initial* diagnosis and are partly superseded. The live repro showed the failing intern happens **after** the dispatched handler and after `transpile_js_to_mir` restores `context` to the caller's old value (`NULL` on CLI `js --document`), when `main.cpp` asks `js_process_current_exit_code()` one more time. It is a genuine runtime boundary bug, but it is NOT what breaks the Stage-4C view tests.
+
+## 1. The issue
+
+`heap_create_name()` (`lambda/lambda-mem.cpp:557`) interns structural identifiers (map keys, element tags, attribute/mark names) via `context->name_pool`, where `context` is the thread-local `EvalContext*`:
+```c
+String* heap_create_name(const char* name, size_t len) {
+    if (!context || !context->name_pool) { log_error("heap_create_name called with invalid context or name_pool"); return nullptr; }
+    return name_pool_create_len(context->name_pool, name, len);
+}
+```
+On the `lambda.exe js --document` path, the original suspicion was that `context`/`context->name_pool` became invalid inside `js_dom_dispatch_event` → `fire_listeners` → `js_call_function`. That framing was wrong. The handler's own dynamic object/Map interning succeeds; the invalid intern happens later, after JS execution has completed and the CLI queries process exit state without an active JS `EvalContext`.
+
+## 2. Symptom
+
+Log (even with most logging off):
+```
+[ERR!] heap_create_name called with invalid context or name_pool
+[ERR!] map_get: key must be string or symbol, got type null
+```
+For trivial handler code the JS-visible result still looks right (the value semantics survive a failed intern). ~~For the editor, the null names corrupt the produced transaction…~~ **Correction (see §5):** this causal link was WRONG. The editor's transaction is produced correctly (`P5 tx=ok`); the failing interns observed (`'exitCode'`) are post-dispatch noise, and the `editor-view-dom` "reading 'doc'" failures come from a *separate* bug (`onChange is not a function`, Bug 4), not from Bug 3.
+
+## 3. Minimal reproduce
+
+`temp/4c-spikes/interncmp.js` — intern in a plain call (OK) vs a dispatched handler (fails):
+```js
+"use strict";
+function doIntern(t){ var o = {}; o['k'+t] = 1; var m = new Map(); m.set('key'+t, 2); return o['k'+t] + m.get('key'+t); }
+console.log('A plain-call=' + doIntern('A'));                       // 0 heap_create_name errors
+var d = document.createElement('div'); document.body.appendChild(d);
+d.addEventListener('keydown', function(){ globalThis.__B = doIntern('B'); });
+d.dispatchEvent(new KeyboardEvent('keydown', { key:'x', bubbles:true }));  // 2 heap_create_name errors in log.txt
+console.log('B dispatched=' + globalThis.__B);
+```
+Run: `./lambda.exe js interncmp.js --document page.html` (WITHOUT `--no-log`), then inspect `log.txt`:
+- **Expected:** 0 `heap_create_name … invalid context` errors
+- **Actual before fix:** 2 errors, but log ordering proves they occur after `js-mir: transpilation completed`, not inside the handler body.
+
+End-to-end editor probe (`temp/4c-spikes/pipe2.js`): a real `EditorViewDom`-shaped handler runs and prints `P5 tx=ok steps=1` (the tx IS produced). The `heap_create_name` errors were post-dispatch noise, not the editor blocker.
+
+## 4. Root cause diagnosis
+
+`context` (thread-local `EvalContext*`) is the source of `name_pool` for `heap_create_name`. It is established for the top-level script run and remains valid through the synchronous DOM dispatch. The actual failing path is the CLI/process bridge after the JS MIR entrypoint returns:
+
+1. `transpile_js_to_mir_core_len()` calls `js_process_current_exit_code()` while the JS context is still active, which synchronizes the C-side `js_process_exit_code_value` cache from `process.exitCode`.
+2. The entrypoint then restores `context = old_context`; on standalone `lambda.exe js --document`, `old_context` is `NULL`.
+3. `lambda/main.cpp` computes the final exit code by calling `js_process_current_exit_code()` again.
+4. The old implementation tried to read `process.exitCode` from the JS object every time, so it called `heap_create_name("exitCode")` with `context == NULL`, producing the two `heap_create_name` errors and the null-key `map_get` error.
+
+Confirmed by `log.txt`: before the fix, the invalid-context errors appear after `js-mir: transpilation completed`, not between the dispatch-site and handler-call logs. The first failing intern is `"exitCode"`.
+
+**Correction (see §5–§6):** the initial framing above — "the dispatch path does not re-establish `context`" — is incorrect. `js_call_function` does not touch `context`, and `context` is valid at the dispatch site. The pointer is restored to `NULL` only after JS execution completes.
+
+### Key files
+- `lambda/lambda-mem.cpp:557` `heap_create_name` (the `context->name_pool` guard)
+- `lambda/js/js_globals.cpp:2641` `js_process_current_exit_code` (fixed boundary)
+- `lambda/js/js_mir_entrypoints_require.cpp:995`/`:1009` syncs process exit code while JS context is active
+- `lambda/js/js_mir_entrypoints_require.cpp:1052` restores `context = old_context`
+- `lambda/main.cpp:2387` asks for final JS exit code after the JS entrypoint has returned
+
+## 5. Refined findings + attempt log (2026-07-01)
+
+Deeper diagnosis with a pointer-level probe (log `context` / `context->name_pool` / `_lambda_rt` at the dispatch site vs at the `heap_create_name` failure), plus final log ordering:
+- **At the dispatch site** (`fire_listeners`, before `js_call_function`): `context`, `context->name_pool`, and `_lambda_rt` are ALL valid and consistent.
+- **At the failure point**: **`context == NULL`** (not merely a null `name_pool`) and first failing intern is `"exitCode"`.
+- **Ordering proof**: `log.txt` shows the invalid-context errors after `js-mir: transpilation completed`, so the failure is outside the dispatched handler body.
+
+So the loss is not at the dispatch boundary, and not inside the handler's own interning. The correct invariant is: `js_process_current_exit_code()` may read the JS `process` object only while an `EvalContext` is active; after the JS entrypoint returns, it must use the scalar exit-code cache that was already synchronized while the context was live.
+
+### Attempts (both reverted)
+1. **Restore `context` from `_lambda_rt` at the `fire_listeners` dispatch site** — no effect: `context` is valid there and gets nulled later. Reverted.
+2. **Fallback in `heap_create_name`: use `_lambda_rt`'s `name_pool` when `context`/`name_pool` is null** — eliminated the interning errors (`interncmp.js` 2→0), **but** (a) regressed the JS unit suite by ~13 (299→286: typed-array/DataView/child_process/fuzz) because `heap_create_name` is core and `_lambda_rt` is stale in contexts where `context` is *legitimately* null, and (b) **did NOT fix the editor**. Reverted.
+
+### IMPORTANT — `heap_create_name` was a RED HERRING for the editor
+Fixing the interning errors left `editor-view-dom` at **3/9** unchanged. The `'exitCode'` interning failures are post-dispatch noise, not the edit-pipeline blocker. The transaction IS produced (`P5 tx=ok`). **The editor's real blocker is a SEPARATE bug:** `editor-view-dom` fails with **`onChange is not a function`** — inside `EditorViewDom.dispatch = (action) => { … this.onChange?.(this.state) }`, `this.onChange` holds a non-function (the empty `seenStates` → `Cannot read properties of undefined (reading 'doc')` cascades from that). This looks like *another* instance-field/`this`-binding corruption in the dispatched path (`this.onChange` was set from `opts.onChange`, a function) and should be filed/diagnosed as **Bug 4** — it, not Bug 3, is what blocks the Stage-4C view tests.
+
+## 6. Fix landed
+
+`js_process_current_exit_code()` now reads `process.exitCode` from the JS object only when `context && context->name_pool` is valid. After the JS entrypoint has restored `context` to the CLI caller's old value, it returns the already-synchronized `js_process_exit_code_value` scalar instead. This keeps `heap_create_name()` strict and avoids the reverted `_lambda_rt` fallback.
+
+Regression added:
+- `test/js/js_document_exit_context.{js,html,txt}` covers the visible `js --document` behavior.
+- `JavaScriptRegression.DocumentExitCodeAfterContextRestoreDoesNotInternWithNullContext` runs the same script without `--no-log`, then asserts `log.txt` has no `heap_create_name called with invalid context or name_pool` or null-key `map_get` errors.
+
+Validation:
+- `./lambda.exe js temp/4c-spikes/interncmp.js --document temp/4c-spikes/page.html` → `A plain-call=3`, `B dispatched=3`, 0 invalid-context errors.
+- `./lambda.exe js test/js/js_document_exit_context.js --document test/js/js_document_exit_context.html` → same output, 0 invalid-context errors.
+- `make build` → passed.
+- `make build-test` → passed (pre-existing warning noise only).
+- `./test/test_js_gtest.exe --gtest_filter=JavaScriptRegression.DocumentExitCodeAfterContextRestoreDoesNotInternWithNullContext` → passed.
+- `./test/test_js_gtest.exe --gtest_filter=JavaScriptTests/JsFileTest.Run/js_document_exit_context` → passed.
+
+---
+---
+
+# Bug 4 — hoisted IIFE-scope function declaration not written to its module-var slot → nested inline-`new` field-arrow captures garbage ("X is not a function")
+
+**Date:** 2026-07-01 · **Component:** LambdaJS JS→MIR lowering — function-declaration hoisting / module-var write-through · **Status:** FIXED
+**Discovered by:** Stage 4C — the real editor blocker behind `editor-view-dom` (`onChange is not a function` / `Cannot read properties of undefined (reading 'doc')`). This is the "Bug 4" flagged as a red herring away from Bug 3. See `vibe/editing/Radiant_Editor_Stage4C.md`.
+
+## 1. The issue
+
+A **class field-initializer arrow** that captures an **outer-scope function declaration** reads garbage for that function **when the class is inline-`new`'d inside a nested function**. After esbuild bundles the editor into an IIFE, every module import becomes an IIFE-scope function/const; the editor's `EditorViewDom.handleBeforeInput = (ev) => { intentFromInputEvent(ev); … this.dispatch(…) }` captures such a binding, and the view is constructed inside a nested `mount()`/`it()` closure — so the capture resolves to an undefined slot and calling it throws `intentFromInputEvent is not a function`, aborting the handler before `dispatch` runs (→ `onChange` never fires → downstream `reading 'doc'` on the empty `seenStates`).
+
+## 2. Symptom
+
+Inside the dispatched field-arrow, `typeof <captured outer fn>` is `"object"` (garbage), and calling it throws `is not a function`. In a full editor bundle the wild value can also be a stack/heap pointer → `EXC_BAD_ACCESS` in `Item::type_id` via `js_debug_check_callee`. `editor-view-dom` sat at 3/9; the whole typing pipeline failed.
+
+## 3. Minimal reproduce — `temp/4c-spikes/t3.js`
+```js
+"use strict";
+(() => {
+  function helper(){ return 42; }
+  class A { m = () => helper(); }
+  function mount(){ return new A(); }        // inline-new INSIDE a nested function
+  console.log(mount().m());                  // expected 42; actual: throws "is not a function"
+})();
+```
+Reproduces identically under `JS_MIR_INTERP=1` (lowering bug, not JIT). Variants that WORK isolate the trigger: (a) top-level `new A()` — OK; (b) a nested plain closure reading `helper` — OK. Only **nested inline-`new` + field-arrow capture of an IIFE-scope decl** fails.
+
+## 4. Root cause
+
+`helper` is a function declaration local to the IIFE. Its binding is promoted to a **module-var slot** (`module_consts` entry `MCONST_MODVAR`, `int_val = 2`), and a nested closure's field-arrow capture resolves it via `js_get_module_var(2)` (`jm_create_func_or_closure`, `lambda/js/js_mir_expression_lowering.cpp` ~12612 — the fallback taken because `jm_find_var("_js_helper")` misses inside `mount`). But the **inner-function-declaration hoist** (`jm_function_class_lowering.cpp` ~542 and ~3046) wrote the closure only to its local reg + the shared scope env via `jm_scope_env_mark_and_writeback` — it **never wrote the module-var slot**. So `js_get_module_var(2)` returned an undefined/garbage slot. (At top level the capture instead reads the closure from the scope-env slot directly via `jm_find_var`, so it was fine — hence top-level `new` worked and only nested `new` failed.) `is_iife_var` is `false` on this entry; the missing write-through is unconditional, matching the non-direct function-declaration statement path in `js_mir_statement_lowering.cpp` which already writes the module var for `MCONST_MODVAR`/`var_kind==0`.
+
+### Key files
+- `lambda/js/js_mir_function_class_lowering.cpp` — the two "Hoist inner function declarations" loops (~542, ~3046) that created the closure without a module-var write.
+- `lambda/js/js_mir_expression_lowering.cpp:~12612` — the capture-fill fallback that reads `js_get_module_var(int_val)`.
+- `lambda/js/js_mir_statement_lowering.cpp:~5175` — the existing (non-direct) write-through this mirrors.
+
+## 5. Fix landed
+
+Added `jm_hoisted_func_modvar_write_through(mt, vname, val_reg)` and called it right after both inner-function-declaration hoist writes. It looks up `vname` in `module_consts` and, for `MCONST_MODVAR` / `var_kind==0` / not `annexb_suppressed`, emits `js_set_module_var(int_val, closure)` — so every resolution path (module-var readers + scope-env readers) sees the same closure. Same condition the non-direct statement path already uses (no `is_iife_var` gate).
+
+### Validation
+- `./lambda.exe js temp/4c-spikes/t3.js` → `42` (was: throws). Same under `JS_MIR_INTERP=1`.
+- Stage-4C `view/editor-view-dom` bundle: **3/9 → 9/9** (added the missing `toHaveBeenCalled`/`toHaveBeenCalledTimes`/`toHaveBeenCalledWith` mock matchers to the in-engine harness for the last case). `render-vnode` 9/9, `dom-bridge` 7/7, `html-parser` 12/12, `use-editor-state` 5/5, `reconcile` 4/6 (pre-existing DOM-fidelity gaps).
+- Regression: `test/js/class_field_decl_capture_nested_new.{js,txt}` (top-level + nested inline-new + capture-with-`this` + sibling arrows) — passes in `test_js_gtest`.
+- No regression: `test_js_gtest` **301/302** (only pre-existing `vm_runincontext_cross_unit`). `make build` clean.
+
+### Remaining (separate, NOT this bug)
+- `view/full-editor-dom` still crashes — a **stack overflow** (`Item::type_id` at a stack address), a distinct deeper issue (render/reconcile loop or DOM-fidelity gap), matching Stage-4C's "Bug 4 + possibly more".
+- Hand-repro `temp/4c-spikes/nest3c.js` exposes an adjacent **env-sizing** bug: a mixed-capture field arrow that reuses `mount`'s size-1 scope env reads a captured fn from an out-of-bounds slot. Pre-existing, does not affect the real editor tests; filed as a follow-up.
+
+---
+---
+
+# Bug 5 — `view/full-editor-dom.test.ts` stack overflow: deeply-nested closure captures an IIFE-scope imported function and mis-resolves it to a recursing callable (only in full-bundle context)
+
+**Date:** 2026-07-02 · **Component:** LambdaJS JS→MIR lowering — capture resolution for a deeply-nested closure over an IIFE-scope import (module-var binding), full-bundle-density only · **Status:** FIXED (2026-07-02)
+**Discovered by:** Stage 4C — `test/editor-js/test/view/full-editor-dom.test.ts` bundle segfaults on the last test (`emoji picker > opening the picker and clicking an emoji inserts it at the caret`). Bundle harness prints all 14 `RUN:` lines but no `HARNESS pass=…` summary; exit 139 (segfault); backtrace `EXC_BAD_ACCESS` in `Item::type_id(this=0x000000016fda1900)` at `lambda.hpp:165` — the `0x16fd...` `this` is a stack address = **stack overflow**.
+
+## 1. The issue
+
+A **deeply-nested closure** (`method → open() → EMOJI.map → arrow → arrow`) built by `FullEditorDom.buildEmojiPicker` — `onclick: () => this.run(s => cmdInsertText(s, em))` — captures three names: `this`, the loop-scope `em`, and the **IIFE-scope imported function** `cmdInsertText`. When invoked from inside a synthetic `click` dispatch, the inner arrow's captured `cmdInsertText` resolves to a callable whose body recursively re-invokes itself (self-recursive resolution), blowing the stack. Bug 4's write-through (hoisted inner function decl → module var) fixed the analogous shape for **module-local function decls**; this is the same class for a **cross-module import binding** in a nested-closure position, and Bug 4's fix does not reach it.
+
+## 2. Symptom
+
+Segfault (exit 139), no output past `RUN: FullEditorDom — emoji picker > opening the picker and clicking an emoji inserts it at the caret`. Backtrace: single dedup'd frame `EXC_BAD_ACCESS (code=1, address=0x13)` in `Item::type_id(this=0x000000016fda1900) at lambda.hpp:165:20` — the low-hex `this` is a stack address, so `type_id` was called on a stack-clobbered `Item*`, i.e. the stack is exhausted mid-recursion. Reproduces deterministically. `test_js_gtest` and lambda baselines are unaffected (only the Stage-4C bundle triggers the density).
+
+## 3. Reproduce
+
+```
+cd test/editor-js && node tools/build-conformance.mjs --out ../../temp/4c-spikes/v_full-editor-dom.js test/view/full-editor-dom.test.ts
+cd ../.. && ./lambda.exe js temp/4c-spikes/v_full-editor-dom.js --document temp/4c-spikes/page.html --no-log   # exit 139
+lldb -b -o run -o "bt 25" -o quit -- ./lambda.exe js temp/4c-spikes/v_full-editor-dom.js --document temp/4c-spikes/page.html --no-log
+```
+
+**Bisection results** (all spikes in `temp/4c-spikes/`):
+- Mount only (`spike_fed.js`): OK.
+- First test (Tab indent on `<ul><li>`, `spike_fed2.js`): OK — all 13 earlier tests pass in isolation too.
+- Emoji click via toolbar palette (`spike_emoji.js`): CRASH — `D:` last log before segfault is emitted; `D2:` (post-`emojiBtn.dispatchEvent(click)`) never reached.
+- Same emoji-click flow but neuter `runCmd` to a no-op (`spike_noop.js`): SURVIVES.
+- Neuter only `render` inside `runCmd` (`spike_noren.js`): CRASH.
+- Isolate `runCmd` body: `syncSelectionFromDom` alone survives; `cmd()` alone (= `cmdInsertText`) CRASHES.
+- Call the **directly-imported** `cmdInsertText` inside the emoji click handler (`spike_bis2.js`) → `DIRECT ok tx=nn`; then call the **passed closure** `cmd = s => cmdInsertText(s, em)` in the same context → CRASH.
+- Call the same emoji-palette-passed closure `runCmd(s => cmdInsertText(s, em))` OUTSIDE the click dispatch (`spike_emoji4.js`, palette already open): OK.
+- Call the same closure from a **fresh** button's click dispatch (`spike_ctx.js`): OK.
+- Hand-mimicking the closure shape (nested class + IIFE fn + inline-`new` + deeply-nested arrow) in isolation (`emoji_min.js`, `emoji_min2.js`, `spike_mimic.js`): all OK. **Requires the full editor bundle's binding density to fire.**
+
+The distinguishing factor is **which arrow captures the import binding**, in **which enclosing-scope-env stack**, called from **which JS dispatch context** — a "fragile to minimize, module-state-dependent" nature analogous to Bug 4 but on the cross-module-import side.
+
+## 4. Root cause diagnosis
+
+- `Item::type_id` at a stack address `0x16fd_a1900` (macOS stack range) is diagnostic of stack overflow, not a null/garbage pointer.
+- The crash is inside the innermost arrow's body when it goes to call `cmdInsertText`. Runtime confirms:
+  - Direct-import `cmdInsertText` (fresh lookup at call site): callable and returns a Transaction.
+  - The **captured** `cmdInsertText` (read via the closure's env slot): calling it recurses.
+- The closure has three captures: `this`, `em`, `cmdInsertText`. `this` and `em` work (any `this.state`/`em` read before the call succeeds — see intermediate logs). Only the `cmdInsertText` capture is broken.
+- Same layer/mechanism as Bug 4: the field/nested-arrow capture-fill (`jm_create_func_or_closure`, `lambda/js/js_mir_expression_lowering.cpp` ~12612) falls back to `module_consts`→`js_get_module_var(int_val)` when the enclosing scope-env chain doesn't reach the binding. The final cause was the direct sync-IIFE function-declaration promotion path: `register_fn_as_module_const()` registered `cmdInsertText` as `MCONST_MODVAR` but did not distinguish it from an ordinary wrapper-local declaration during capture/shadow analysis. `ancestor_func_locals` therefore reported `_js_cmdInsertText` as a normal ancestor binding, so the nested arrow kept it as a closure capture and snapshotted the wrong callable instead of using the live module-var read.
+- **Layer:** JS→MIR **lowering** (module-var/capture resolution), not JIT codegen — the small mimics reproduce identically under `JS_MIR_INTERP=1`; the real crash is not JIT-only either (test bundle uses default MIR path).
+- **NOT a JS-side infinite recursion** — proven by neutering `runCmd` (survives) and by the palette-open-then-direct call (survives). The stack overflow is in the JIT'd function's re-entry chain following the mis-resolved capture.
+
+## 4a. Fix landed
+
+Added `JsModuleConstEntry::is_iife_func_decl` and `jm_modvar_is_iife_scope_binding()`. Direct sync-IIFE function declarations now carry the narrower `is_iife_func_decl` marker, and the capture/shadow analysis skips those names when the ancestor is the IIFE body. This keeps runtime module-var visibility unchanged (important for UMD/highlight.js-style IIFEs) while preventing deeply nested closures from snapshotting promoted wrapper-local function declarations.
+
+### Key files / lines
+- `test/editor-js/demo/full-editor-dom.ts:316-337` `buildEmojiPicker`, the `open` closure and `EMOJI.map(em => h('button', { onclick: () => this.runCmd(s => cmdInsertText(s, em)) }, [em]))` triple-nesting.
+- `lambda/js/js_mir_module_batch_lowering.cpp` direct IIFE function promotion and capture/shadow filtering (`is_iife_func_decl`, `jm_modvar_is_iife_scope_binding`).
+- `lambda/js/js_mir_expression_lowering.cpp:~12612` capture-fill fallback: `js_get_module_var(int_val)` for non-scope-env bindings, `jm_create_func_or_closure`.
+- `lambda/js/js_mir_expression_lowering.cpp:~12694` `jm_transpile_func_expr` (arrow lowering) — capture set assembly.
+- `lambda/js/js_mir_function_class_lowering.cpp:17,575,3087` `jm_hoisted_func_modvar_write_through` (Bug 4 fix — analogous invariant, different binding class).
+- `lambda/js/js_mir_context.hpp:57` `JsModuleConstEntry` (MCONST_MODVAR / var_kind / is_iife_var / is_iife_func_decl / annexb_suppressed).
+
+## 5. Diagnostic quirk
+
+`JS_MIR_DUMP=1` did not produce `temp/js_mir_dump.txt` for the FullEditorDom bundles even though the bundle otherwise runs (crash happens after transpile). The dump is guarded by a NULL-label scan (`lambda/js/js_mir_entrypoints_require.cpp:750-786`) but the mimics that dumped fine (`spike_mimic.js`) don't reproduce the bug. For diagnosis the practical approach is a **printf/log_debug probe in `jm_create_func_or_closure`** filtered on capture name `cmdInsertText` + arrow's source position, then re-run the failing bundle to record which env slot / int_val the capture resolves to. Comparing that against the module-var initialization at bundle entry should point at the mis-populated slot.
+
+## 6. Reproduces (files)
+
+- Full-bundle crash: `temp/4c-spikes/v_full-editor-dom.js` (via `test/editor-js/tools/build-conformance.mjs`).
+- Instrumented full-bundle: `temp/4c-spikes/spike_emoji.js`, `spike_emoji3.js`, `spike_bis.js`, `spike_bis2.js`, `spike_ctx.js`, `spike_emoji4.js`, `spike_noop.js`, `spike_noren.js`, `spike_steps.js` (`test/editor-js/tools/_*.mjs` regenerate them).
+- Adversarial mimics that DID NOT reproduce (all pass; kept as counter-examples so a future fix must not just satisfy these): `emoji_min.js`, `emoji_min2.js`, `spike_mimic.js`, `spike_mimic2.js`.
+
+## 7. Interim workaround (test-side only, only if triage demands unblocking Stage-4C Phase A count)
+
+Rewriting the deep-nested closure to hoist the import into a stable outer local — `const insertText = cmdInsertText; onclick: () => this.runCmd(s => insertText(s, em))` — is expected to unblock the case (it moves the capture from an import binding to a plain local), but this weakens the coverage and hides the LambdaJS bug. **Not applied** — per CLAUDE.md rule #1, the fix belongs in `js_mir_expression_lowering.cpp` capture resolution, not in the editor. Documented here only so a triage owner has an escape hatch.
+
+## 8. Status vs Stage 4C
+
+Bug 5 no longer blocks `view/full-editor-dom`: the bundle now completes instead of segfaulting, and the emoji picker test reaches the harness summary. Current result is `HARNESS pass=13 fail=1 skip=0`; the remaining failure is a normal Shift+Tab outdent assertion (`expected "1.75em" to be ""`) and is a separate editor/runtime discrepancy, not the Bug 5 stack overflow.
+
+Validation:
+- `make build` clean.
+- `cd test/editor-js && node tools/build-conformance.mjs --out ../../temp/4c-spikes/v_full-editor-dom-fresh.js test/view/full-editor-dom.test.ts`
+- `./lambda.exe js temp/4c-spikes/v_full-editor-dom-fresh.js --document temp/4c-spikes/page.html --no-log` → no crash; `HARNESS pass=13 fail=1 skip=0`.
+- `./lambda.exe js test/js/hljs_highlight.js --no-log` → expected stdout restored after splitting the IIFE marker from `is_iife_var`.
+- `./test/test_js_gtest.exe` → **302/303**; only known `vm_runincontext_cross_unit` remains failing.

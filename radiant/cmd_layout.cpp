@@ -148,6 +148,13 @@ static void annotate_css_stylesheet_source_file(CssStylesheet* stylesheet, const
     }
 }
 
+static bool resolve_wpt_root_resource_path(const char* href, char* out_path, size_t out_size) {
+    // WPT server-root fixtures such as /fonts/... live outside test/layout/data/support.
+    if (strlen("ref/wpt") + strlen(href) + 1 > out_size) return false;
+    snprintf(out_path, out_size, "ref/wpt%s", href);
+    return access(out_path, R_OK) == 0;
+}
+
 static bool resolve_layout_support_resource_path(const char* href, const char* base_path,
                                                  char* out_path, size_t out_size) {
     if (!href || href[0] != '/' || href[1] == '/' || !base_path || !out_path || out_size == 0) {
@@ -173,7 +180,8 @@ static bool resolve_layout_support_resource_path(const char* href, const char* b
     if (!data_marker) {
         if (strlen("test/layout/data/support") + strlen(href) + 1 > out_size) return false;
         snprintf(out_path, out_size, "test/layout/data/support%s", href);
-        return access(out_path, R_OK) == 0;
+        if (access(out_path, R_OK) == 0) return true;
+        return resolve_wpt_root_resource_path(href, out_path, out_size);
     }
 
     size_t data_root_len = data_marker - base_local + marker_prefix_len + strlen("data");
@@ -183,7 +191,8 @@ static bool resolve_layout_support_resource_path(const char* href, const char* b
     out_path[data_root_len] = '\0';
     strncat(out_path, "/support", out_size - strlen(out_path) - 1);
     strncat(out_path, href, out_size - strlen(out_path) - 1);
-    return access(out_path, R_OK) == 0;
+    if (access(out_path, R_OK) == 0) return true;
+    return resolve_wpt_root_resource_path(href, out_path, out_size);
 }
 
 static bool css_file_url_to_local_path(const char* href, char* out_path, size_t out_size) {
@@ -2945,6 +2954,9 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         return nullptr;
     }
 
+    Url* superseded_html_urls[4] = {nullptr};
+    int superseded_html_url_count = 0;
+
     char* html_filepath = url_to_local_path(html_url);
     log_debug("[Lambda CSS] Loading HTML document: %s", html_filepath);
 
@@ -2966,7 +2978,14 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
             Url* redirected_url = url_parse(eff_url);
             if (redirected_url && redirected_url->is_valid) {
                 log_info("[redirect] Updating document URL: %s → %s", url_str, eff_url);
+                // the returned document owns the final URL, so keep replaced
+                // URLs until success instead of leaving them unreachable.
+                if (html_url && html_url != redirected_url && superseded_html_url_count < 4) {
+                    superseded_html_urls[superseded_html_url_count++] = html_url;
+                }
                 html_url = redirected_url;
+            } else if (redirected_url) {
+                url_destroy(redirected_url);
             }
             mem_free(eff_url);
         }
@@ -3101,8 +3120,17 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         Url* base_url = url_parse(base_href);
         if (base_url && base_url->is_valid) {
             log_info("[base] Overriding document URL with base href: %s", base_href);
-            // Don't destroy old html_url as it may be referenced elsewhere
+            // Input and DomDocument must agree on the same owned Url; otherwise
+            // replacing html_url for <base> leaves the initial parse URL leaked.
+            if (input && input->url == html_url) {
+                input->url = base_url;
+            }
+            if (html_url && html_url != base_url && superseded_html_url_count < 4) {
+                superseded_html_urls[superseded_html_url_count++] = html_url;
+            }
             html_url = base_url;
+        } else if (base_url) {
+            url_destroy(base_url);
         }
     }
 
@@ -3360,6 +3388,11 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     dom_doc->html_root = html_root;
     dom_doc->html_version = detected_version;
     dom_doc->url = html_url;
+    for (int i = 0; i < superseded_html_url_count; i++) {
+        if (superseded_html_urls[i] && superseded_html_urls[i] != html_url) {
+            url_destroy(superseded_html_urls[i]);
+        }
+    }
     dom_doc->view_tree = nullptr;  // Will be created during layout
     dom_doc->state = nullptr;
 

@@ -5,7 +5,7 @@
     target: "html.body.2.div.23.div.5.textarea.5",
     offset: 5
   }, hover: "html.body.2.div.23.div.5.textarea.5", scroll: {
-    y: 2278.859375
+    y: 2280.265625
   }, render: {
     dirty: true,
     repaint: true,
@@ -14,8 +14,8 @@
     active_surface: true
   }
   <html flags: ['hover', 'focus-within'], scroll: {
-      y: 2278.859375,
-      max_y: 4395.359375
+      y: 2280.265625,
+      max_y: 4318.765625
     }
     <body index: 2, flags: ['hover', 'focus-within']
       <div index: 23, flags: ['hover', 'focus-within']
@@ -25,4 +25,7 @@
             }>>>
       <div index: 27
         <div index: 5
-          <input index: 5, flags: ['placeholder-shown', 'valid', 'optional']>>>>>>
+          <input index: 5, flags: ['placeholder-shown', 'valid', 'optional']>>>
+      <div index: 39
+        <div index: 5
+          <input index: 3, flags: ['readonly', 'valid', 'optional']>>>>>>

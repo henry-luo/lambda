@@ -26322,6 +26322,89 @@ extern "C" Item js_get_css_object_value() {
     return js_css_namespace_object;
 }
 
+// =============================================================================
+// Intl namespace — minimal Intl.Segmenter (word granularity, ASCII heuristic).
+//
+// Only enough for the editor's caret word-navigation (`new Intl.Segmenter(
+// undefined, { granularity: 'word' }).segment(text)` iterated for isWordLike
+// segments). A word char is [A-Za-z0-9_] plus any byte with the high bit set
+// (so multi-byte UTF-8 letters stay in the current segment rather than
+// splitting the sequence). No locale handling; higher-fidelity Unicode word
+// breaking is a follow-up.
+// =============================================================================
+static inline bool js_intl_segmenter_is_word_byte(unsigned char c) {
+    if (c >= 'A' && c <= 'Z') return true;
+    if (c >= 'a' && c <= 'z') return true;
+    if (c >= '0' && c <= '9') return true;
+    if (c == '_') return true;
+    if (c >= 0x80) return true;  // UTF-8 continuation / lead byte
+    return false;
+}
+
+extern "C" Item js_intl_segmenter_segment(Item text_item) {
+    Item arr_item = js_array_new(0);
+    if (get_type_id(text_item) != LMD_TYPE_STRING &&
+        get_type_id(text_item) != LMD_TYPE_SYMBOL) {
+        return arr_item;
+    }
+    String* s = it2s(text_item);
+    if (!s || s->len == 0) return arr_item;
+
+    Item idx_key    = (Item){.item = s2it(heap_create_name("index"))};
+    Item seg_key    = (Item){.item = s2it(heap_create_name("segment"))};
+    Item wordy_key  = (Item){.item = s2it(heap_create_name("isWordLike"))};
+
+    int i = 0;
+    while (i < (int)s->len) {
+        unsigned char lead = (unsigned char)s->chars[i];
+        bool is_word = js_intl_segmenter_is_word_byte(lead);
+        int j = i + 1;
+        while (j < (int)s->len) {
+            unsigned char c = (unsigned char)s->chars[j];
+            if (js_intl_segmenter_is_word_byte(c) != is_word) break;
+            j++;
+        }
+        Item entry = js_new_object();
+        js_property_set(entry, idx_key, (Item){.item = i2it((int64_t)i)});
+        char* seg = (char*)pool_calloc(js_input->pool, j - i + 1);
+        memcpy(seg, s->chars + i, j - i);
+        seg[j - i] = '\0';
+        js_property_set(entry, seg_key, (Item){.item = s2it(heap_create_name(seg, (size_t)(j - i)))});
+        js_property_set(entry, wordy_key, (Item){.item = b2it(is_word ? 1 : 0)});
+        js_array_push(arr_item, entry);
+        i = j;
+    }
+    return arr_item;
+}
+
+extern "C" Item js_intl_segmenter_new(Item /*locale*/, Item /*opts*/) {
+    // The spec ties .segment() to the constructor's granularity; we only
+    // implement word granularity, so the option is intentionally ignored.
+    Item obj = js_new_object();
+    js_property_set(obj,
+        (Item){.item = s2it(heap_create_name("segment"))},
+        js_new_function((void*)js_intl_segmenter_segment, 1));
+    return obj;
+}
+
+static Item js_intl_object = {.item = ITEM_NULL};
+extern "C" void js_reset_intl_object() { js_intl_object = (Item){.item = ITEM_NULL}; }
+
+extern "C" Item js_get_intl_object_value() {
+    if (js_intl_object.item != ITEM_NULL) return js_intl_object;
+    js_intl_object = js_object_create(ItemNull);
+    heap_register_gc_root(&js_intl_object.item);
+    js_property_set(js_intl_object,
+        (Item){.item = s2it(heap_create_name("Segmenter"))},
+        js_new_function((void*)js_intl_segmenter_new, 2));
+    Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+    js_property_set(js_intl_object, tag_k,
+        (Item){.item = s2it(heap_create_name("Intl", 4))});
+    js_mark_non_writable(js_intl_object, tag_k);
+    js_mark_non_enumerable(js_intl_object, tag_k);
+    return js_intl_object;
+}
+
 static Item js_console_object = {.item = ITEM_NULL};
 void js_reset_console_object() { js_console_object = (Item){.item = ITEM_NULL}; }
 
@@ -36839,6 +36922,12 @@ extern "C" Item js_module_get(Item specifier) {
         extern Item js_get_internal_net_namespace(void);
         return js_get_internal_net_namespace();
     }
+    // internal/js_stream_socket — JSStreamSocket constructor used by stream wrap tests.
+    if ((spec->len == 25 && memcmp(spec->chars, "internal/js_stream_socket", 25) == 0) ||
+        (spec->len == 28 && memcmp(spec->chars, "internal/js_stream_socket.js", 28) == 0)) {
+        extern Item js_get_internal_js_stream_socket_constructor(void);
+        return js_get_internal_js_stream_socket_constructor();
+    }
     // node:tls
     if ((spec->len == 3 && memcmp(spec->chars, "tls", 3) == 0) ||
         (spec->len == 6 && memcmp(spec->chars, "tls.js", 6) == 0) ||
@@ -37461,6 +37550,12 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 36 && memcmp(spec->chars, "internal/streams/add-abort-signal.js", 36) == 0)) {
         extern Item js_get_internal_stream_add_abort_signal_namespace(void);
         return js_get_internal_stream_add_abort_signal_namespace();
+    }
+    // internal/streams/end-of-stream — bounded native EOS shim backed by stream.finished.
+    if ((spec->len == 30 && memcmp(spec->chars, "internal/streams/end-of-stream", 30) == 0) ||
+        (spec->len == 33 && memcmp(spec->chars, "internal/streams/end-of-stream.js", 33) == 0)) {
+        extern Item js_get_internal_stream_end_of_stream_namespace(void);
+        return js_get_internal_stream_end_of_stream_namespace();
     }
     // internal/streams/state — selected stream state helpers used by Node tests.
     if ((spec->len == 22 && memcmp(spec->chars, "internal/streams/state", 22) == 0) ||

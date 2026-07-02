@@ -6,6 +6,28 @@
 // Function definition transpiler
 // ============================================================================
 
+// Bug 4: a hoisted inner function declaration whose binding was promoted to a
+// module-var slot (MCONST_MODVAR) is resolved by nested closures via
+// js_get_module_var(int_val). This hoist writes only the local reg + the shared
+// scope env, leaving the module-var slot undefined — so a nested closure that
+// captures it (e.g. a class field-initializer arrow inline-`new`'d inside a
+// nested function) reads an undefined slot and throws "X is not a function".
+// Mirror the write-through the non-direct function-declaration statement path
+// already performs (js_mir_statement_lowering.cpp) so all resolution paths agree.
+static void jm_hoisted_func_modvar_write_through(JsMirTranspiler* mt, const char* vname, MIR_reg_t val_reg) {
+    if (!mt->module_consts) return;
+    JsModuleConstEntry lookup;
+    memset(&lookup, 0, sizeof(lookup));
+    snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+    JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+    if (mc && mc->const_type == MCONST_MODVAR && mc->var_kind == 0 &&
+        !mc->annexb_suppressed) {
+        jm_call_void_2(mt, "js_set_module_var",
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
+    }
+}
+
 static bool jm_function_arguments_are_aliased(JsMirTranspiler* mt, JsFuncCollected* fc, JsFunctionNode* fn) {
     return !fc->has_non_simple_params &&
            !mt->is_module &&
@@ -553,6 +575,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                                 MIR_new_reg_op(mt->ctx, hvar),
                                 MIR_new_reg_op(mt->ctx, fn_item)));
                             jm_set_var(mt, hvname, hvar);
+                            // Bug 4: keep the module-var slot in sync for nested
+                            // closures that resolve this hoist via js_get_module_var.
+                            jm_hoisted_func_modvar_write_through(mt, hvname, hvar);
                         }
                     }
                 }
@@ -3062,6 +3087,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                                 MIR_new_reg_op(mt->ctx, fn_item)));
                             jm_set_var(mt, hvname, hvar);
                             jm_scope_env_mark_and_writeback(mt, hvname, hvar);
+                            // Bug 4: an IIFE-scope inner function declaration is
+                            // resolved by nested closures via js_get_module_var(int_val)
+                            // — e.g. a class field-init arrow that captures it when the
+                            // class is inline-`new`'d in a nested function. This hoist
+                            // writes only the local reg + scope env, leaving the
+                            // module-var slot undefined, so the capture reads garbage
+                            // ("X is not a function"). Keep the module-var slot in sync.
+                            jm_hoisted_func_modvar_write_through(mt, hvname, hvar);
                         }
                     }
                 }

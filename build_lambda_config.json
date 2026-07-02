@@ -3987,6 +3987,18 @@
                         "icon": "🖼️"
                     },
                     {
+                        "source": "test/test_radiant_online_view_gtest.cpp",
+                        "name": "Radiant Online View Tests",
+                        "dependencies": [],
+                        "binary": "test_radiant_online_view_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🌐"
+                    },
+                    {
                         "source": "test/test_layout_fuzzy_gtest.cpp",
                         "name": "Layout Fuzzy Tests",
                         "dependencies": [],

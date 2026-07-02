@@ -316,7 +316,13 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
             // cache in entry for future loads (mutable cast is safe here)
             handle->is_document_font = true; // @font-face: cleared between documents
             if (entry) {
-                ((FontFaceEntry*)entry)->loaded_handle = handle;
+                FontFaceEntry* mutable_entry = (FontFaceEntry*)entry;
+                // loaded_handle caches only one size; replacing it must drop the
+                // previous retained size-specific handle or document fonts leak.
+                if (mutable_entry->loaded_handle && mutable_entry->loaded_handle != handle) {
+                    font_handle_release(mutable_entry->loaded_handle);
+                }
+                mutable_entry->loaded_handle = handle;
                 font_handle_retain(handle); // entry holds a ref too
             }
             log_info("font_face: loaded '%s' from source %d: %s",
@@ -333,7 +339,13 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
     if (fallback_handle) {
         fallback_handle->is_document_font = true; // @font-face: cleared between documents
         if (entry) {
-            ((FontFaceEntry*)entry)->loaded_handle = fallback_handle;
+            FontFaceEntry* mutable_entry = (FontFaceEntry*)entry;
+            // loaded_handle caches only one size; replacing it must drop the
+            // previous retained size-specific handle or document fonts leak.
+            if (mutable_entry->loaded_handle && mutable_entry->loaded_handle != fallback_handle) {
+                font_handle_release(mutable_entry->loaded_handle);
+            }
+            mutable_entry->loaded_handle = fallback_handle;
             font_handle_retain(fallback_handle);
         }
         log_info("font_face: loaded '%s' from source %d (icon/symbol font): %s",
