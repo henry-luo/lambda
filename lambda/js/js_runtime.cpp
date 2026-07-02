@@ -16,6 +16,8 @@
 #include "../../lib/memtrack.h"
 #ifndef _WIN32
 #include <unistd.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
 #endif
 
 extern "C" Item js_to_property_key(Item key);
@@ -27,6 +29,7 @@ extern "C" Item js_reflect_delete_property(Item obj, Item key);
 extern "C" Item js_object_set_prototype_of(Item obj, Item proto);
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
 extern "C" Item js_has_own_property(Item obj, Item key);
+extern "C" Item js_object_keys(Item object);
 extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
 extern "C" Item js_symbol_well_known(Item name);
@@ -36,7 +39,9 @@ extern "C" Item js_process_emit2(Item event_name, Item arg1, Item arg2);
 extern "C" int js_is_process_object_value(Item object);
 extern "C" Item js_get_process_exec_argv(void);
 extern "C" Item js_get_process_argv(void);
+extern "C" Item js_get_process_object_value(void);
 extern "C" Item js_cp_fork(Item rest_args);
+extern "C" void js_child_process_emit_or_queue_cluster_online(Item obj);
 extern "C" Item push_d(double dval);
 extern "C" double it2d(Item item);
 extern "C" int64_t it2i(Item item);
@@ -7831,6 +7836,8 @@ extern "C" Item js_get_length_item(Item object) {
 extern "C" void js_array_push_item_direct(Array* arr, Item value) {
     if (arr->length + 2 > arr->capacity) {
         JS_PROPERTY_SET_BRANCH("array_push_direct_expand");
+        // expand_list may trigger GC before the new element is stored, so root the incoming value.
+        heap_register_gc_root(&value.item);
         // Save/restore extra: JS uses arr->extra as a companion-map pointer,
         // but expand_list interprets it as an extra-item count at buffer end.
         int64_t saved_extra = arr->extra;
@@ -7838,6 +7845,7 @@ extern "C" void js_array_push_item_direct(Array* arr, Item value) {
         int64_t old_capacity = arr->capacity;
         expand_list((List*)arr);
         arr->extra = saved_extra;
+        heap_unregister_gc_root(&value.item);
         // P8: expand_list copies the old buffer and leaves new slots at the
         // tail uninitialized (heap_data_alloc returns zero-init memory, which
         // for JS Items decodes as `null`/`undefined` and falsely registers as
@@ -12703,6 +12711,18 @@ extern "C" Item js_super_apply_native(Item callee, Item this_val, Item args_arra
 
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_CALL_FUNCTION);
+    static int js_call_depth = 0;
+    struct JsCallDepthGuard {
+        int* depth;
+        bool ok;
+        JsCallDepthGuard(int* depth_ptr) : depth(depth_ptr), ok(++(*depth_ptr) <= 4096) {}
+        ~JsCallDepthGuard() { --(*depth); }
+    } call_depth_guard(&js_call_depth);
+    if (!call_depth_guard.ok) {
+        // unbounded JS recursion must throw inside the active call so assert.throws can catch it.
+        js_throw_range_error("Maximum call stack size exceeded");
+        return ItemNull;
+    }
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
         // Proxy [[Call]] trap
         if (js_is_proxy(func_item)) {
@@ -34538,22 +34558,41 @@ static bool js_runtime_string_equals(Item value, const char* expected) {
 
 static Item js_cluster_primary_options = {0};
 static bool js_cluster_primary_options_rooted = false;
+static int64_t js_cluster_next_worker_id = 1;
 
 static Item js_cluster_key(const char* name) {
     return (Item){.item = s2it(heap_create_name(name, strlen(name)))};
 }
 
-static bool js_cluster_fd_is_open(int fd) {
+static bool js_cluster_is_object_item(Item item) {
+    TypeId type = get_type_id(item);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+}
+
+static bool js_cluster_is_callable(Item item) {
+    return get_type_id(item) == LMD_TYPE_FUNC;
+}
+
+static bool js_cluster_fd_is_listening_socket(int fd) {
 #ifdef _WIN32
     (void)fd;
     return false;
 #else
-    int copy = dup(fd);
-    if (copy < 0) return false;
-    close(copy);
-    return true;
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !S_ISSOCK(st.st_mode)) return false;
+    int accepting = 0;
+    socklen_t accepting_len = sizeof(accepting);
+    if (getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN, &accepting, &accepting_len) != 0) return false;
+    return accepting != 0;
 #endif
 }
+
+static bool js_cluster_is_worker_process(void) {
+    const char* worker_id = getenv("NODE_UNIQUE_ID");
+    return worker_id && worker_id[0] != '\0';
+}
+
+extern "C" void js_net_close_all_active_servers(void);
 
 static Item js_cluster_worker_on(Item event_item, Item callback) {
     Item self = js_get_this();
@@ -34567,7 +34606,105 @@ static Item js_cluster_worker_on(Item event_item, Item callback) {
     return self;
 }
 
-static Item js_cluster_fork(void) {
+static Item js_cluster_worker_disconnect(void) {
+    js_net_close_all_active_servers();
+    Item process_obj = js_get_process_object_value();
+    Item disconnect = js_property_get(process_obj, js_cluster_key("disconnect"));
+    if (js_cluster_is_callable(disconnect)) {
+        // cluster worker disconnect owns server shutdown first; plain process
+        // IPC close alone leaves worker listeners refed until the drain watchdog.
+        js_call_function(disconnect, process_obj, NULL, 0);
+        js_microtask_flush();
+    }
+    return make_js_undefined();
+}
+
+static void js_cluster_copy_env(Item target, Item source) {
+    if (!js_cluster_is_object_item(target) || !js_cluster_is_object_item(source)) return;
+    Item keys = js_object_keys(source);
+    if (get_type_id(keys) != LMD_TYPE_ARRAY) return;
+    int64_t len = js_array_length(keys);
+    for (int64_t i = 0; i < len; i++) {
+        Item key = js_array_get_int(keys, i);
+        if (get_type_id(key) != LMD_TYPE_STRING) continue;
+        js_property_set(target, key, js_property_get(source, key));
+    }
+}
+
+static Item js_cluster_make_worker_env(Item fork_env, int64_t worker_id) {
+    Item env = js_new_object();
+    Item process_obj = js_get_process_object_value();
+    Item process_env = js_property_get(process_obj, js_cluster_key("env"));
+    js_cluster_copy_env(env, process_env);
+    js_cluster_copy_env(env, fork_env);
+
+    char id_buf[32];
+    snprintf(id_buf, sizeof(id_buf), "%lld", (long long)worker_id);
+    js_property_set(env, js_cluster_key("NODE_UNIQUE_ID"),
+                    (Item){.item = s2it(heap_create_name(id_buf, strlen(id_buf)))});
+    return env;
+}
+
+static Item js_cluster_primary_exit_kill_worker(Item env_item, Item code) {
+    (void)code;
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    Item child = env ? env[0] : make_js_undefined();
+    Item kill = js_property_get(child, js_cluster_key("kill"));
+    if (js_cluster_is_callable(kill)) {
+        Item signal = js_cluster_key("SIGTERM");
+        js_call_function(kill, child, &signal, 1);
+        js_microtask_flush();
+    }
+    return make_js_undefined();
+}
+
+static void js_cluster_register_worker_exit_kill(Item child) {
+    Item process_obj = js_get_process_object_value();
+    Item on = js_property_get(process_obj, js_cluster_key("on"));
+    if (!js_cluster_is_callable(on)) return;
+    Item* env = js_alloc_env(1);
+    env[0] = child;
+    Item listener = js_new_closure((void*)js_cluster_primary_exit_kill_worker, 1, env, 1);
+    Item args[2] = { js_cluster_key("exit"), listener };
+    js_call_function(on, process_obj, args, 2);
+    js_microtask_flush();
+}
+
+static Item js_cluster_make_worker_object(void) {
+    Item worker = js_new_object();
+    const char* worker_id = getenv("NODE_UNIQUE_ID");
+    int64_t id = worker_id && worker_id[0] ? atoll(worker_id) : 1;
+    js_property_set(worker, js_cluster_key("id"), (Item){.item = i2it(id)});
+    Item process_obj = js_get_process_object_value();
+    js_property_set(worker, js_cluster_key("process"), process_obj);
+    Item send = js_property_get(process_obj, js_cluster_key("send"));
+    if (js_cluster_is_callable(send)) js_property_set(worker, js_cluster_key("send"), send);
+    js_property_set(worker, js_cluster_key("disconnect"),
+                    js_new_function((void*)js_cluster_worker_disconnect, 0));
+    Item on = js_property_get(process_obj, js_cluster_key("on"));
+    if (js_cluster_is_callable(on)) js_property_set(worker, js_cluster_key("on"), on);
+    Item once = js_property_get(process_obj, js_cluster_key("once"));
+    if (js_cluster_is_callable(once)) js_property_set(worker, js_cluster_key("once"), once);
+    return worker;
+}
+
+extern "C" void js_cluster_notify_worker_listening(void) {
+    if (!js_cluster_is_worker_process()) return;
+    Item process_obj = js_get_process_object_value();
+    Item send = js_property_get(process_obj, js_cluster_key("send"));
+    if (!js_cluster_is_callable(send)) return;
+    extern void js_process_ipc_clear_force_ref(void);
+    Item message = js_new_object();
+    // cluster readiness is an internal IPC frame; without it primary-side
+    // worker.once('listening') waits forever while the worker is already bound.
+    js_property_set(message, js_cluster_key("__lambda_cluster_listening__"),
+                    (Item){.item = ITEM_TRUE});
+    js_call_function(send, process_obj, &message, 1);
+    js_process_ipc_clear_force_ref();
+    js_microtask_flush();
+}
+
+static Item js_cluster_fork(Item fork_env) {
     Item argv = js_get_process_argv();
     if (get_type_id(argv) != LMD_TYPE_ARRAY || js_array_length(argv) < 2) {
         Item worker = js_new_object();
@@ -34578,6 +34715,7 @@ static Item js_cluster_fork(void) {
         return worker;
     }
 
+    int64_t worker_id = js_cluster_next_worker_id++;
     Item module_path = js_array_get_int(argv, 1);
     Item fork_args = js_array_new(0);
     if (get_type_id(js_cluster_primary_options) == LMD_TYPE_MAP ||
@@ -34597,13 +34735,14 @@ static Item js_cluster_fork(void) {
     js_array_push(stdio, (Item){.item = i2it(0)});
     js_array_push(stdio, (Item){.item = i2it(1)});
     js_array_push(stdio, (Item){.item = i2it(2)});
-    if (js_cluster_fd_is_open(3)) {
-        // cluster workers inherit the primary's listening fd so listen({fd:3})
-        // binds the same server handle instead of falling back to a fresh bind.
+    if (js_cluster_fd_is_listening_socket(3)) {
+        // only inherit fd 3 when it is the parent-provided listening socket;
+        // test runners may keep unrelated descriptors open there, causing spawn EBADF.
         js_array_push(stdio, (Item){.item = i2it(3)});
     }
     js_array_push(stdio, js_cluster_key("ipc"));
     js_property_set(options, js_cluster_key("stdio"), stdio);
+    js_property_set(options, js_cluster_key("env"), js_cluster_make_worker_env(fork_env, worker_id));
 
     Item rest = js_array_new(0);
     js_array_push(rest, module_path);
@@ -34624,8 +34763,14 @@ static Item js_cluster_fork(void) {
     Item child = js_cp_fork(rest);
     if (had_ipc_ref) setenv("LAMBDA_JS_IPC_REF", old_ipc_ref_buf, 1);
     else unsetenv("LAMBDA_JS_IPC_REF");
-    js_property_set(child, js_cluster_key("id"), (Item){.item = i2it(1)});
+    js_property_set(child, js_cluster_key("id"), (Item){.item = i2it(worker_id)});
     js_property_set(child, js_cluster_key("process"), child);
+    // cluster workers report online after fork; without queuing this, callers
+    // that send initial IPC from worker.on('online') never start their worker.
+    js_child_process_emit_or_queue_cluster_online(child);
+    // cluster primaries own worker lifetimes; otherwise process.exit(0) leaves
+    // the worker's server handle alive after the primary intentionally exits.
+    js_cluster_register_worker_exit_kill(child);
     return child;
 }
 
@@ -34637,7 +34782,7 @@ static Item js_cluster_setup_primary(Item options) {
     js_cluster_primary_options = options;
     Item self = js_get_this();
     js_property_set(self, (Item){.item = s2it(heap_create_name("fork", 4))},
-                    js_new_function((void*)js_cluster_fork, 0));
+                    js_new_function((void*)js_cluster_fork, 1));
     return make_js_undefined();
 }
 
@@ -37216,26 +37361,37 @@ extern "C" Item js_module_get(Item specifier) {
         return wt_ns;
     }
 
-    // cluster — minimal stub (isPrimary: true, isMaster: true, isWorker: false)
+    // cluster — minimal primary/worker shim
     if ((spec->len == 7 && memcmp(spec->chars, "cluster", 7) == 0) ||
         (spec->len == 10 && memcmp(spec->chars, "cluster.js", 10) == 0) ||
         (spec->len == 12 && memcmp(spec->chars, "node:cluster", 12) == 0)) {
         static Item cl_ns = {0};
         static uint64_t cl_epoch = (uint64_t)-1;
-        if (cl_ns.item == 0 || cl_epoch != js_heap_epoch) {
+        static bool cl_worker_mode = false;
+        bool is_worker = js_cluster_is_worker_process();
+        if (cl_ns.item == 0 || cl_epoch != js_heap_epoch || cl_worker_mode != is_worker) {
             cl_epoch = js_heap_epoch;
+            cl_worker_mode = is_worker;
             cl_ns = js_new_object();
             heap_register_gc_root(&cl_ns.item);
             js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isPrimary", 9))},
-                            (Item){.item = ITEM_TRUE});
+                            (Item){.item = b2it(!is_worker)});
             js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isMaster", 8))},
-                            (Item){.item = ITEM_TRUE});
+                            (Item){.item = b2it(!is_worker)});
             js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isWorker", 8))},
-                            (Item){.item = ITEM_FALSE});
+                            (Item){.item = b2it(is_worker)});
+            if (is_worker) {
+                // cluster workers are selected by the inherited worker id, not
+                // by argv; otherwise the worker re-enters primary/testcase code.
+                js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("worker", 6))},
+                                js_cluster_make_worker_object());
+            }
             js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("setupPrimary", 12))},
                             js_new_function((void*)js_cluster_setup_primary, 1));
             js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("setupMaster", 11))},
                             js_new_function((void*)js_cluster_setup_primary, 1));
+            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("fork", 4))},
+                            js_new_function((void*)js_cluster_fork, 1));
             js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("default", 7))}, cl_ns);
         }
         return cl_ns;

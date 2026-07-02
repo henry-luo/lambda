@@ -2735,6 +2735,21 @@ static bool js_stream_readable_buffer_has_string(Item buf) {
     return false;
 }
 
+static bool js_stream_collapse_exact_read_buffer(Item self, Item* buf, int64_t* blen,
+                                                int64_t available, int64_t want) {
+    if (!buf || !blen || *blen < 4096) return true;
+    int64_t total = js_stream_readable_cached_length(self, *buf);
+    if (total != available || total <= 0 || total > want) return true;
+    Item collapsed = js_buffer_concat(*buf, (Item){.item = i2it(total)});
+    if (js_check_exception()) return false;
+    Item next_buf = js_array_new(0);
+    js_array_push(next_buf, collapsed);
+    js_stream_set_readable_buffer(self, next_buf);
+    *buf = next_buf;
+    *blen = 1;
+    return true;
+}
+
 static Item js_stream_concat_decoded_chunks(Item buf, Item encoding) {
     if (get_type_id(buf) != LMD_TYPE_ARRAY) return ItemNull;
     StrBuf* sb = strbuf_new_cap(64);
@@ -2803,6 +2818,12 @@ static Item js_readable_read_exact(Item self, Item buf, int64_t blen, int64_t wa
             for (int64_t i = before_len; i < blen && available < want; i++) {
                 available += js_stream_readable_chunk_length(self, js_array_get_int(buf, i));
             }
+            // sync exact reads may produce tiny chunks until EOF; collapsing
+            // proven-consumed data keeps the readable buffer from becoming a
+            // hundreds-thousand-entry array before the final read completes.
+            if (!js_stream_collapse_exact_read_buffer(self, &buf, &blen, available, want)) {
+                return ItemNull;
+            }
         }
         if (available < want && !js_item_is_true(js_property_get(self, key_end_pending))) {
             return ItemNull;
@@ -2811,15 +2832,16 @@ static Item js_readable_read_exact(Item self, Item buf, int64_t blen, int64_t wa
     if (available == 0) return ItemNull;
     if (want > available) want = available;
     if (want == available) {
-        Item consumed = buf;
+        // concat can allocate and trigger GC, so keep the chunk list rooted on the stream until after it returns.
+        Item consumed = blen == 1 ? js_array_get_int(buf, 0)
+                                  : js_buffer_concat(buf, (Item){.item = i2it(want)});
+        if (js_check_exception()) return ItemNull;
         js_stream_set_readable_buffer(self, js_array_new(0));
         if (js_item_is_true(js_property_get(self, key_end_pending)))
             js_stream_schedule_end(self);
         else
             js_stream_schedule_read(self);
-        // reading the full buffer must not duplicate hundreds of thousands of chunk refs.
-        if (blen == 1) return js_array_get_int(consumed, 0);
-        return js_buffer_concat(consumed, (Item){.item = i2it(want)});
+        return consumed;
     }
 
     Item parts = js_array_new(0);

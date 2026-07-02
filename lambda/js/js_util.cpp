@@ -1232,7 +1232,40 @@ static bool js_util_is_host_singleton_object(Item value) {
     return js_is_global_this_object_value(value) || js_is_process_object_value(value);
 }
 
-extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
+typedef struct JsDeepEqualPair {
+    Item a;
+    Item b;
+} JsDeepEqualPair;
+
+typedef struct JsDeepEqualContext {
+    JsDeepEqualPair stack[4096];
+    int depth;
+} JsDeepEqualContext;
+
+static bool js_util_deep_equal_is_object_like_type(TypeId type) {
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
+           type == LMD_TYPE_OBJECT || type == LMD_TYPE_ELEMENT ||
+           type == LMD_TYPE_VMAP;
+}
+
+static int js_util_deep_equal_enter(JsDeepEqualContext* ctx, Item a, Item b) {
+    if (!ctx) return 1;
+    for (int i = 0; i < ctx->depth; i++) {
+        if (ctx->stack[i].a.item == a.item && ctx->stack[i].b.item == b.item) return 0;
+        if (ctx->stack[i].a.item == a.item || ctx->stack[i].b.item == b.item) return -1;
+    }
+    if (ctx->depth >= (int)(sizeof(ctx->stack) / sizeof(ctx->stack[0]))) return -1;
+    ctx->stack[ctx->depth].a = a;
+    ctx->stack[ctx->depth].b = b;
+    ctx->depth++;
+    return 1;
+}
+
+static void js_util_deep_equal_leave(JsDeepEqualContext* ctx) {
+    if (ctx && ctx->depth > 0) ctx->depth--;
+}
+
+static Item js_util_isDeepStrictEqual_impl(Item a, Item b, JsDeepEqualContext* ctx) {
     // use strict equality for primitives
     Item eq = js_strict_equal(a, b);
     if (js_is_truthy(eq)) return (Item){.item = b2it(true)};
@@ -1246,9 +1279,23 @@ extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
         return (Item){.item = b2it(false)};
     }
 
+    bool compare_object_like = js_util_deep_equal_is_object_like_type(ta);
+    if (compare_object_like) {
+        int enter_status = js_util_deep_equal_enter(ctx, a, b);
+        if (enter_status == 0) {
+            // cyclic containers re-enter the same active pair; treating it as equal prevents unbounded recursion.
+            return (Item){.item = b2it(true)};
+        }
+        if (enter_status < 0) {
+            // a cycle that remaps one side to a different counterpart is not structurally consistent.
+            return (Item){.item = b2it(false)};
+        }
+    }
+
     bool a_dataview = js_is_dataview(a);
     bool b_dataview = js_is_dataview(b);
     if (a_dataview || b_dataview) {
+        if (compare_object_like) js_util_deep_equal_leave(ctx);
         return (Item){.item = b2it(a_dataview && b_dataview &&
                                   js_util_dataview_bytes_equal(a, b))};
     }
@@ -1256,6 +1303,7 @@ extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
     bool a_typed_array = js_is_typed_array(a);
     bool b_typed_array = js_is_typed_array(b);
     if (a_typed_array || b_typed_array) {
+        if (compare_object_like) js_util_deep_equal_leave(ctx);
         return (Item){.item = b2it(a_typed_array && b_typed_array &&
                                   js_util_typed_array_bytes_equal(a, b))};
     }
@@ -1263,13 +1311,20 @@ extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
     if (ta == LMD_TYPE_ARRAY) {
         int64_t la = js_array_length(a);
         int64_t lb = js_array_length(b);
-        if (la != lb) return (Item){.item = b2it(false)};
+        if (la != lb) {
+            js_util_deep_equal_leave(ctx);
+            return (Item){.item = b2it(false)};
+        }
         for (int64_t i = 0; i < la; i++) {
             Item ea = js_array_get_int(a, i);
             Item eb = js_array_get_int(b, i);
-            Item r = js_util_isDeepStrictEqual(ea, eb);
-            if (!js_is_truthy(r)) return (Item){.item = b2it(false)};
+            Item r = js_util_isDeepStrictEqual_impl(ea, eb, ctx);
+            if (!js_is_truthy(r)) {
+                js_util_deep_equal_leave(ctx);
+                return (Item){.item = b2it(false)};
+            }
         }
+        js_util_deep_equal_leave(ctx);
         return (Item){.item = b2it(true)};
     }
 
@@ -1285,7 +1340,10 @@ extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
             // Set: compare by size, then check each element
             Item size_a = js_collection_method(a, 9, ItemNull, ItemNull); // 9=size
             Item size_b = js_collection_method(b, 9, ItemNull, ItemNull);
-            if (it2i(size_a) != it2i(size_b)) return (Item){.item = b2it(false)};
+            if (it2i(size_a) != it2i(size_b)) {
+                js_util_deep_equal_leave(ctx);
+                return (Item){.item = b2it(false)};
+            }
             // Convert both to arrays and compare elements
             Item arr_a = js_iterable_to_array(a);
             Item arr_b = js_iterable_to_array(b);
@@ -1300,19 +1358,26 @@ extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
                     int64_t lb = js_array_length(arr_b);
                     for (int64_t j = 0; j < lb; j++) {
                         Item eb = js_array_get_int(arr_b, j);
-                        Item r = js_util_isDeepStrictEqual(elem, eb);
+                        Item r = js_util_isDeepStrictEqual_impl(elem, eb, ctx);
                         if (js_is_truthy(r)) { found = true; break; }
                     }
-                    if (!found) return (Item){.item = b2it(false)};
+                    if (!found) {
+                        js_util_deep_equal_leave(ctx);
+                        return (Item){.item = b2it(false)};
+                    }
                 }
             }
+            js_util_deep_equal_leave(ctx);
             return (Item){.item = b2it(true)};
         }
         if (a_map && b_map) {
             // Map: compare by size, then compare key-value pairs
             Item size_a = js_collection_method(a, 9, ItemNull, ItemNull);
             Item size_b = js_collection_method(b, 9, ItemNull, ItemNull);
-            if (it2i(size_a) != it2i(size_b)) return (Item){.item = b2it(false)};
+            if (it2i(size_a) != it2i(size_b)) {
+                js_util_deep_equal_leave(ctx);
+                return (Item){.item = b2it(false)};
+            }
             // Convert to array of [key, value] entries
             Item entries_a = js_iterable_to_array(a);
             int64_t la = js_array_length(entries_a);
@@ -1321,30 +1386,49 @@ extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
                 Item ka = js_array_get_int(pair, 0);
                 Item va = js_array_get_int(pair, 1);
                 Item vb = js_collection_method(b, 1, ka, ItemNull); // 1=get
-                Item r = js_util_isDeepStrictEqual(va, vb);
-                if (!js_is_truthy(r)) return (Item){.item = b2it(false)};
+                Item r = js_util_isDeepStrictEqual_impl(va, vb, ctx);
+                if (!js_is_truthy(r)) {
+                    js_util_deep_equal_leave(ctx);
+                    return (Item){.item = b2it(false)};
+                }
             }
+            js_util_deep_equal_leave(ctx);
             return (Item){.item = b2it(true)};
         }
         if ((a_set && !b_set) || (!a_set && b_set) || (a_map && !b_map) || (!a_map && b_map)) {
+            js_util_deep_equal_leave(ctx);
             return (Item){.item = b2it(false)};
         }
         Item keys_a = js_object_keys(a);
         Item keys_b = js_object_keys(b);
         int64_t la = js_array_length(keys_a);
         int64_t lb = js_array_length(keys_b);
-        if (la != lb) return (Item){.item = b2it(false)};
+        if (la != lb) {
+            js_util_deep_equal_leave(ctx);
+            return (Item){.item = b2it(false)};
+        }
         for (int64_t i = 0; i < la; i++) {
             Item key = js_array_get_int(keys_a, i);
             Item va = js_property_get(a, key);
             Item vb = js_property_get(b, key);
-            Item r = js_util_isDeepStrictEqual(va, vb);
-            if (!js_is_truthy(r)) return (Item){.item = b2it(false)};
+            Item r = js_util_isDeepStrictEqual_impl(va, vb, ctx);
+            if (!js_is_truthy(r)) {
+                js_util_deep_equal_leave(ctx);
+                return (Item){.item = b2it(false)};
+            }
         }
+        js_util_deep_equal_leave(ctx);
         return (Item){.item = b2it(true)};
     }
 
+    if (compare_object_like) js_util_deep_equal_leave(ctx);
     return (Item){.item = b2it(false)};
+}
+
+extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
+    JsDeepEqualContext ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    return js_util_isDeepStrictEqual_impl(a, b, &ctx);
 }
 
 // additional util.types.* functions

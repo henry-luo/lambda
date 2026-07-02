@@ -46,6 +46,7 @@ extern "C" Item js_buffer_from_bytes(const char* data, int len);
 extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe);
 extern "C" int js_net_dup_ipc_stdio_fd(Item handle_item);
 extern "C" uv_stream_t* js_net_stream_from_ipc_send_handle(Item handle_item);
+extern "C" void js_net_close_ipc_sent_stream(uv_stream_t* stream);
 
 // =============================================================================
 // Helpers
@@ -255,6 +256,12 @@ typedef struct JsChildProcess {
     bool   process_exited;
     bool   callback_fired;    // true after callback has been invoked
     int    handles_closed;    // count of uv_close completions (need 3: process + 2 pipes)
+    bool   aborted;
+    int    abort_kill_signal;
+    Item   abort_reason;
+    Item   abort_signal;
+    Item   abort_listener;
+    Item*  abort_env;
 } JsChildProcess;
 
 // =============================================================================
@@ -271,6 +278,8 @@ static void child_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t*
 // =============================================================================
 
 static void maybe_complete(JsChildProcess* cp);
+static Item child_abort_error(Item reason);
+static void child_remove_abort_signal(JsChildProcess* cp);
 
 static void child_handle_close_cb(uv_handle_t* handle) {
     JsChildProcess* cp = (JsChildProcess*)handle->data;
@@ -278,6 +287,7 @@ static void child_handle_close_cb(uv_handle_t* handle) {
     cp->handles_closed++;
     // all 3 handles (process + 2 pipes) fully closed → safe to free struct
     if (cp->handles_closed >= 3) {
+        if (cp->abort_env) cp->abort_env[0] = (Item){.item = 0};
         if (cp->stdout_buf) mem_free(cp->stdout_buf);
         if (cp->stderr_buf) mem_free(cp->stderr_buf);
         mem_free(cp);
@@ -359,6 +369,7 @@ static void child_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
 
     cp->exit_code = (int)exit_status;
     cp->process_exited = true;
+    child_remove_abort_signal(cp);
 
     uv_close((uv_handle_t*)process, child_handle_close_cb);
     maybe_complete(cp);
@@ -376,7 +387,9 @@ static void maybe_complete(JsChildProcess* cp) {
     // call callback(err, stdout, stderr)
     if (get_type_id(cp->callback) == LMD_TYPE_FUNC) {
         Item err = ItemNull;
-        if (cp->max_buffer_exceeded) {
+        if (cp->aborted) {
+            err = child_abort_error(cp->abort_reason);
+        } else if (cp->max_buffer_exceeded) {
             char emsg[128];
             snprintf(emsg, sizeof(emsg), "%s maxBuffer length exceeded",
                      cp->max_buffer_stream[0] ? cp->max_buffer_stream : "stdout");
@@ -410,11 +423,84 @@ static void maybe_complete(JsChildProcess* cp) {
     // NOTE: struct is freed by child_handle_close_cb when all handles are closed
 }
 
+static Item child_abort_error(Item reason) {
+    Item err = js_new_error_with_name(make_string_item("AbortError"),
+                                      make_string_item("The operation was aborted"));
+    js_property_set(err, make_string_item("name"), make_string_item("AbortError"));
+    js_property_set(err, make_string_item("code"), make_string_item("ABORT_ERR"));
+    if (!is_nullish_item(reason)) {
+        js_property_set(err, make_string_item("cause"), reason);
+    }
+    return err;
+}
+
+static Item child_abort_with_env(Item env_item, Item event_item) {
+    (void)event_item;
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    JsChildProcess* cp = env ? (JsChildProcess*)(uintptr_t)env[0].item : NULL;
+    if (!cp || cp->process_exited || uv_is_closing((uv_handle_t*)&cp->process)) {
+        return make_js_undefined();
+    }
+    cp->aborted = true;
+    cp->abort_reason = is_object_item(cp->abort_signal)
+        ? js_property_get(cp->abort_signal, make_string_item("reason"))
+        : make_js_undefined();
+    // AbortSignal owns cancellation for exec(); without killing the shell child,
+    // long-running commands stay as refed UV_PROCESS handles until the drain watchdog.
+    uv_process_kill(&cp->process, cp->abort_kill_signal ? cp->abort_kill_signal : SIGTERM);
+    return make_js_undefined();
+}
+
+static Item child_abort_later(Item env_item) {
+    return child_abort_with_env(env_item, make_js_undefined());
+}
+
+static bool child_signal_is_abort_signal(Item signal) {
+    if (!is_object_item(signal)) return false;
+    Item add_listener = js_property_get(signal, make_string_item("addEventListener"));
+    Item aborted = js_property_get(signal, make_string_item("aborted"));
+    return is_callable(add_listener) && get_type_id(aborted) == LMD_TYPE_BOOL;
+}
+
+static void child_install_abort_signal(JsChildProcess* cp, Item options) {
+    if (!cp || !is_object_item(options)) return;
+    Item signal = js_property_get(options, make_string_item("signal"));
+    if (is_nullish_item(signal)) return;
+    cp->abort_signal = signal;
+    cp->abort_kill_signal = SIGTERM;
+    Item* abort_env = js_alloc_env(1);
+    abort_env[0] = (Item){.item = (uint64_t)(uintptr_t)cp};
+    cp->abort_env = abort_env;
+    Item listener = js_new_closure((void*)child_abort_with_env, 1, abort_env, 1);
+    cp->abort_listener = listener;
+    Item add_listener = js_property_get(signal, make_string_item("addEventListener"));
+    Item args[2] = {make_string_item("abort"), listener};
+    js_call_function(add_listener, signal, args, 2);
+    js_microtask_flush();
+    Item aborted = js_property_get(signal, make_string_item("aborted"));
+    if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
+        Item abort_tick = js_new_closure((void*)child_abort_later, 0, abort_env, 1);
+        js_next_tick_enqueue(abort_tick);
+    }
+}
+
+static void child_remove_abort_signal(JsChildProcess* cp) {
+    if (!cp || !is_object_item(cp->abort_signal) || !is_callable(cp->abort_listener)) return;
+    Item remove_listener = js_property_get(cp->abort_signal, make_string_item("removeEventListener"));
+    if (is_callable(remove_listener)) {
+        Item args[2] = {make_string_item("abort"), cp->abort_listener};
+        js_call_function(remove_listener, cp->abort_signal, args, 2);
+    }
+    cp->abort_signal = make_js_undefined();
+    cp->abort_listener = make_js_undefined();
+}
+
 // =============================================================================
 // exec(command, callback) — async, buffers stdout/stderr
 // =============================================================================
 
-static Item js_cp_exec_with_max_buffer(Item command_item, Item callback_item, size_t max_buffer) {
+static Item js_cp_exec_with_options(Item command_item, Item options_item,
+                                    Item callback_item, size_t max_buffer) {
     char cmd_buf[4096];
     const char* cmd = item_to_cstr(command_item, cmd_buf, sizeof(cmd_buf));
     if (!cmd) {
@@ -432,6 +518,9 @@ static Item js_cp_exec_with_max_buffer(Item command_item, Item callback_item, si
 
     cp->callback = callback_item;
     cp->max_buffer = max_buffer;
+    cp->abort_signal = make_js_undefined();
+    cp->abort_listener = make_js_undefined();
+    cp->abort_reason = make_js_undefined();
 
     // init pipes
     uv_pipe_init(loop, &cp->stdout_pipe, 0);
@@ -482,12 +571,56 @@ static Item js_cp_exec_with_max_buffer(Item command_item, Item callback_item, si
     // start reading stdout/stderr
     uv_read_start((uv_stream_t*)&cp->stdout_pipe, child_alloc_cb, child_stdout_read_cb);
     uv_read_start((uv_stream_t*)&cp->stderr_pipe, child_alloc_cb, child_stderr_read_cb);
+    child_install_abort_signal(cp, options_item);
 
     return make_js_undefined();
 }
 
-extern "C" Item js_cp_exec(Item command_item, Item callback_item) {
-    return js_cp_exec_with_max_buffer(command_item, callback_item, 1024 * 1024);
+static bool validate_exec_args(Item rest_args, Item* out_command, Item* out_options, Item* out_callback) {
+    int64_t argc = js_array_length(rest_args);
+    Item command = argc > 0 ? js_array_get_int(rest_args, 0) : make_js_undefined();
+    if (get_type_id(command) != LMD_TYPE_STRING) {
+        js_throw_invalid_arg_type("command", "string", command);
+        return false;
+    }
+    Item options = make_js_undefined();
+    Item callback = make_js_undefined();
+    Item second = argc > 1 ? js_array_get_int(rest_args, 1) : make_js_undefined();
+    Item third = argc > 2 ? js_array_get_int(rest_args, 2) : make_js_undefined();
+    if (is_callable(second)) {
+        callback = second;
+    } else if (is_object_item(second) || is_nullish_item(second)) {
+        options = second;
+        if (!is_nullish_item(third)) {
+            if (!is_callable(third)) {
+                js_throw_invalid_arg_type("callback", "function", third);
+                return false;
+            }
+            callback = third;
+        }
+    } else if (!is_undefined_item(second)) {
+        js_throw_invalid_arg_type("options", "object", second);
+        return false;
+    }
+    if (is_object_item(options)) {
+        Item signal = js_property_get(options, make_string_item("signal"));
+        if (!is_nullish_item(signal) && !child_signal_is_abort_signal(signal)) {
+            js_throw_invalid_arg_type("options.signal", "AbortSignal", signal);
+            return false;
+        }
+    }
+    *out_command = command;
+    *out_options = options;
+    *out_callback = callback;
+    return true;
+}
+
+extern "C" Item js_cp_exec(Item rest_args) {
+    Item command = make_js_undefined();
+    Item options = make_js_undefined();
+    Item callback = make_js_undefined();
+    if (!validate_exec_args(rest_args, &command, &options, &callback)) return ItemNull;
+    return js_cp_exec_with_options(command, options, callback, 1024 * 1024);
 }
 
 // =============================================================================
@@ -579,6 +712,8 @@ typedef struct JsSpawnProcess {
     bool         stdin_pipe_active;
     bool         stdout_pipe_active;
     bool         stderr_pipe_active;
+    bool         stdout_pipe_reading;
+    bool         stderr_pipe_reading;
     bool         ipc_pipe_active;
     int          stdin_pending_writes;
     size_t       stdin_pending_bytes;
@@ -603,6 +738,8 @@ typedef struct JsSpawnProcess {
     char*        ipc_buf;
     size_t       ipc_len;
     size_t       ipc_cap;
+    uv_stream_t* pending_sent_streams[8];
+    int          pending_sent_stream_count;
 } JsSpawnProcess;
 
 typedef struct SpawnWriteReq {
@@ -610,6 +747,10 @@ typedef struct SpawnWriteReq {
     char* data;
     size_t len;
     bool close_ipc_after;
+    bool close_sent_handle_after;
+    bool close_sent_stream_after;
+    uv_stream_t* sent_handle;
+    Item callback;
 } SpawnWriteReq;
 
 static Item spawn_signal_name_item(int signal_number);
@@ -627,17 +768,37 @@ static void spawn_set_connected(Item obj, bool connected) {
                     (Item){.item = b2it(connected)});
 }
 
+static Item spawn_listener_callback(Item record) {
+    if (is_callable(record)) return record;
+    if (is_object_item(record)) return js_property_get(record, make_string_item("listener"));
+    return make_js_undefined();
+}
+
+static bool spawn_listener_once(Item record) {
+    if (!is_object_item(record)) return false;
+    Item once = js_property_get(record, make_string_item("once"));
+    return once.item == ITEM_TRUE || once.item == b2it(true);
+}
+
 static void spawn_emit_event(Item obj, const char* event, Item* args, int argc) {
     char key_buf[64];
     snprintf(key_buf, sizeof(key_buf), "__on_%s__", event);
-    Item listeners = js_property_get(obj, make_string_item(key_buf));
+    Item key = make_string_item(key_buf);
+    Item listeners = js_property_get(obj, key);
     if (is_callable(listeners)) {
         js_call_function(listeners, obj, args, argc);
         js_microtask_flush();
     } else if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
         int64_t count = js_array_length(listeners);
+        Item next = js_array_new(0);
         for (int64_t i = 0; i < count; i++) {
-            Item cb = js_array_get_int(listeners, i);
+            Item record = js_array_get_int(listeners, i);
+            if (!spawn_listener_once(record)) js_array_push(next, record);
+        }
+        js_property_set(obj, key, next);
+        for (int64_t i = 0; i < count; i++) {
+            Item record = js_array_get_int(listeners, i);
+            Item cb = spawn_listener_callback(record);
             if (is_callable(cb)) {
                 js_call_function(cb, obj, args, argc);
             }
@@ -670,6 +831,14 @@ static bool spawn_has_event_listener(Item obj, const char* event) {
 
 static Item spawn_pending_messages_key(void) {
     return make_string_item("__pending_ipc_messages__");
+}
+
+static Item spawn_pending_cluster_listening_key(void) {
+    return make_string_item("__pending_cluster_listening__");
+}
+
+static Item spawn_pending_cluster_online_key(void) {
+    return make_string_item("__pending_cluster_online__");
 }
 
 static void spawn_queue_ipc_message(Item obj, Item message, Item handle) {
@@ -713,6 +882,51 @@ static void spawn_flush_queued_ipc_messages(Item obj) {
         Item handle = js_property_get(entry, make_string_item("handle"));
         spawn_emit_ipc_message_or_queue(obj, message, handle);
     }
+}
+
+static bool spawn_ipc_is_cluster_listening(Item message) {
+    if (get_type_id(message) != LMD_TYPE_MAP && get_type_id(message) != LMD_TYPE_OBJECT &&
+        get_type_id(message) != LMD_TYPE_VMAP) {
+        return false;
+    }
+    Item value = js_property_get(message, make_string_item("__lambda_cluster_listening__"));
+    return value.item == ITEM_TRUE || value.item == b2it(true);
+}
+
+static void spawn_emit_or_queue_cluster_listening(Item obj) {
+    if (!spawn_has_event_listener(obj, "listening")) {
+        js_property_set(obj, spawn_pending_cluster_listening_key(), (Item){.item = ITEM_TRUE});
+        return;
+    }
+    spawn_emit_event(obj, "listening", NULL, 0);
+}
+
+static void spawn_flush_cluster_listening(Item obj) {
+    Item pending = js_property_get(obj, spawn_pending_cluster_listening_key());
+    if (pending.item != ITEM_TRUE && pending.item != b2it(true)) return;
+    if (!spawn_has_event_listener(obj, "listening")) return;
+    js_property_set(obj, spawn_pending_cluster_listening_key(), (Item){.item = ITEM_FALSE});
+    spawn_emit_event(obj, "listening", NULL, 0);
+}
+
+static void spawn_emit_or_queue_cluster_online(Item obj) {
+    if (!spawn_has_event_listener(obj, "online")) {
+        js_property_set(obj, spawn_pending_cluster_online_key(), (Item){.item = ITEM_TRUE});
+        return;
+    }
+    spawn_emit_event(obj, "online", NULL, 0);
+}
+
+static void spawn_flush_cluster_online(Item obj) {
+    Item pending = js_property_get(obj, spawn_pending_cluster_online_key());
+    if (pending.item != ITEM_TRUE && pending.item != b2it(true)) return;
+    if (!spawn_has_event_listener(obj, "online")) return;
+    js_property_set(obj, spawn_pending_cluster_online_key(), (Item){.item = ITEM_FALSE});
+    spawn_emit_event(obj, "online", NULL, 0);
+}
+
+extern "C" void js_child_process_emit_or_queue_cluster_online(Item obj) {
+    spawn_emit_or_queue_cluster_online(obj);
 }
 
 static Item spawn_emit_error_later(Item env_item) {
@@ -888,6 +1102,9 @@ static void spawn_clear_env(Item* env) {
     if (env) env[0] = (Item){.item = 0};
 }
 
+static void spawn_close_pending_sent_stream_wrappers(JsSpawnProcess* sp);
+static void spawn_clear_stdio_handle_properties(JsSpawnProcess* sp);
+
 static void spawn_release_process(JsSpawnProcess* sp) {
     if (!sp) return;
     // JS closures outlive libuv handles, so clear their native pointer slots
@@ -903,6 +1120,8 @@ static void spawn_release_process(JsSpawnProcess* sp) {
     spawn_clear_env(sp->ref_env);
     spawn_clear_env(sp->unref_env);
     spawn_clear_env(sp->abort_env);
+    spawn_close_pending_sent_stream_wrappers(sp);
+    spawn_clear_stdio_handle_properties(sp);
     if (sp->ipc_buf) mem_free(sp->ipc_buf);
     mem_free(sp);
 }
@@ -932,13 +1151,60 @@ static void spawn_stdin_write_cb(uv_write_t* req, int status) {
     }
 }
 
+static void spawn_sent_stream_close_cb(uv_handle_t* handle) {
+    if (handle) mem_free(handle);
+}
+
+static void spawn_close_sent_stream_wrapper(uv_stream_t* stream) {
+    if (!stream || uv_is_closing((uv_handle_t*)stream)) return;
+    uv_close((uv_handle_t*)stream, spawn_sent_stream_close_cb);
+}
+
+static void spawn_track_sent_stream_wrapper(JsSpawnProcess* sp, uv_stream_t* stream) {
+    if (!sp || !stream) return;
+    uv_unref((uv_handle_t*)stream);
+    if (sp->pending_sent_stream_count >= 8) {
+        spawn_close_sent_stream_wrapper(sp->pending_sent_streams[0]);
+        for (int i = 1; i < sp->pending_sent_stream_count; i++) {
+            sp->pending_sent_streams[i - 1] = sp->pending_sent_streams[i];
+        }
+        sp->pending_sent_stream_count--;
+    }
+    sp->pending_sent_streams[sp->pending_sent_stream_count++] = stream;
+}
+
+static void spawn_close_pending_sent_stream_wrappers(JsSpawnProcess* sp) {
+    if (!sp) return;
+    for (int i = 0; i < sp->pending_sent_stream_count; i++) {
+        spawn_close_sent_stream_wrapper(sp->pending_sent_streams[i]);
+        sp->pending_sent_streams[i] = NULL;
+    }
+    sp->pending_sent_stream_count = 0;
+}
+
 static void spawn_ipc_write_cb(uv_write_t* req, int status) {
     SpawnWriteReq* wr = (SpawnWriteReq*)req;
     JsSpawnProcess* sp = req->handle ? (JsSpawnProcess*)req->handle->data : NULL;
     bool close_ipc_after = wr->close_ipc_after;
+    bool close_sent_handle_after = wr->close_sent_handle_after;
+    bool close_sent_stream_after = wr->close_sent_stream_after;
+    uv_stream_t* sent_handle = wr->sent_handle;
+    Item callback = wr->callback;
     if (wr->data) mem_free(wr->data);
     mem_free(wr);
-    (void)status;
+    if (close_sent_stream_after) {
+        spawn_close_sent_stream_wrapper(sent_handle);
+    } else if (close_sent_handle_after) {
+        // IPC socket sends default to keepOpen=false; leaving the sender's
+        // duplicate handle alive keeps transferred sockets referenced until the drain watchdog.
+        js_net_close_ipc_sent_stream(sent_handle);
+    }
+    if (is_callable(callback)) {
+        Item err = status < 0 ? make_ipc_channel_closed_error() : make_js_undefined();
+        // ChildProcess.send callbacks belong to the IPC write completion edge;
+        // firing at queue time lets teardown race ahead of transferred handles.
+        schedule_spawn_send_callback(callback, err);
+    }
     if (close_ipc_after && sp && sp->ipc_pipe_active && !uv_is_closing((uv_handle_t*)&sp->ipc_pipe)) {
         sp->ipc_pipe_active = false;
         uv_read_stop((uv_stream_t*)&sp->ipc_pipe);
@@ -1012,7 +1278,9 @@ static void spawn_remove_abort_signal(JsSpawnProcess* sp) {
     sp->abort_listener = make_js_undefined();
 }
 
-static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message, uv_stream_t* send_handle) {
+static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message, uv_stream_t* send_handle,
+                                 bool close_send_handle_after, bool close_sent_stream_after,
+                                 Item callback) {
     if (!sp || !sp->ipc_pipe_active) return false;
     Item json = js_json_stringify(message);
     if (js_check_exception() || get_type_id(json) != LMD_TYPE_STRING) return false;
@@ -1030,16 +1298,54 @@ static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message, uv_stream_t* 
     wr->data[s->len] = '\n';
     uv_buf_t buf = uv_buf_init(wr->data, (unsigned int)len);
     int r = 0;
+    wr->callback = callback;
     if (send_handle) {
+        wr->close_sent_handle_after = close_send_handle_after;
+        wr->close_sent_stream_after = close_sent_stream_after;
+        wr->sent_handle = send_handle;
         r = uv_write2(&wr->req, (uv_stream_t*)&sp->ipc_pipe, &buf, 1,
                       send_handle, spawn_ipc_write_cb);
     } else {
         r = uv_write(&wr->req, (uv_stream_t*)&sp->ipc_pipe, &buf, 1, spawn_ipc_write_cb);
     }
     if (r == 0) return true;
+    if (close_sent_stream_after) spawn_close_sent_stream_wrapper(send_handle);
     mem_free(wr->data);
     mem_free(wr);
     return false;
+}
+
+static uv_stream_t* spawn_duplicate_tcp_send_handle(Item handle_item) {
+#ifdef _WIN32
+    (void)handle_item;
+    return NULL;
+#else
+    int fd = js_net_dup_ipc_stdio_fd(handle_item);
+    if (fd < 0) return NULL;
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) {
+        close(fd);
+        return NULL;
+    }
+    uv_tcp_t* tcp = (uv_tcp_t*)mem_calloc(1, sizeof(uv_tcp_t), MEM_CAT_JS_RUNTIME);
+    if (!tcp) {
+        close(fd);
+        return NULL;
+    }
+    int r = uv_tcp_init(loop, tcp);
+    if (r != 0) {
+        close(fd);
+        mem_free(tcp);
+        return NULL;
+    }
+    r = uv_tcp_open(tcp, (uv_os_sock_t)fd);
+    if (r != 0) {
+        close(fd);
+        spawn_close_sent_stream_wrapper((uv_stream_t*)tcp);
+        return NULL;
+    }
+    return (uv_stream_t*)tcp;
+#endif
 }
 
 static void spawn_ipc_send_disconnect_and_close(JsSpawnProcess* sp) {
@@ -1080,6 +1386,12 @@ static void spawn_ipc_handle_line(JsSpawnProcess* sp, const char* chars, int len
     Item json = make_string_item(chars, len);
     Item message = js_json_parse(json);
     if (js_check_exception()) return;
+    if (spawn_ipc_is_cluster_listening(message)) {
+        // cluster readiness is carried over ChildProcess IPC but surfaces as a
+        // worker 'listening' event, not as a user-visible message payload.
+        spawn_emit_or_queue_cluster_listening(sp->js_object);
+        return;
+    }
     Item handle = js_net_accept_ipc_tcp_handle(&sp->ipc_pipe);
     spawn_emit_ipc_message_or_queue(sp->js_object, message, handle);
 }
@@ -1119,6 +1431,9 @@ static void spawn_ipc_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t
             sp->ipc_len += (size_t)nread;
             sp->ipc_buf[sp->ipc_len] = '\0';
             spawn_ipc_consume_lines(sp);
+            // A child IPC reply means delayed descriptor receivers have accepted
+            // pending keepOpen duplicates; closing earlier can make writes EBADF.
+            spawn_close_pending_sent_stream_wrappers(sp);
         }
     }
     if (buf->base) mem_free(buf->base);
@@ -1228,6 +1543,7 @@ static void spawn_stdout_read_cb(uv_stream_t* stream, ssize_t nread, const uv_bu
     if (nread < 0) {
         if (sp) {
             sp->stdout_pipe_active = false;
+            sp->stdout_pipe_reading = false;
             spawn_emit_event(stdout_obj, "end", NULL, 0);
             spawn_emit_event(stdout_obj, "close", NULL, 0);
             spawn_maybe_emit_process_close(sp);
@@ -1246,6 +1562,7 @@ static void spawn_stderr_read_cb(uv_stream_t* stream, ssize_t nread, const uv_bu
     if (nread < 0) {
         if (sp) {
             sp->stderr_pipe_active = false;
+            sp->stderr_pipe_reading = false;
             spawn_emit_event(stderr_obj, "end", NULL, 0);
             spawn_emit_event(stderr_obj, "close", NULL, 0);
             spawn_maybe_emit_process_close(sp);
@@ -1286,11 +1603,19 @@ static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
 }
 
 extern "C" Item js_spawn_stream_on(Item event_item, Item callback);
-static Item spawn_add_listener(Item self, Item event_item, Item callback);
+extern "C" Item js_spawn_stream_once(Item event_item, Item callback);
+static Item spawn_add_listener(Item self, Item event_item, Item callback, bool once);
+static void spawn_resume_stdio_stream(Item stream_obj);
 
 static Item js_spawn_stream_set_encoding(Item encoding) {
     (void)encoding;
     return js_get_this();
+}
+
+static Item js_spawn_stream_resume(void) {
+    Item self = js_get_this();
+    spawn_resume_stdio_stream(self);
+    return self;
 }
 
 static Item spawn_stream_pipe_on_data(Item env_item, Item chunk) {
@@ -1323,7 +1648,7 @@ static Item js_spawn_stream_pipe(Item dest, Item options) {
     Item* data_env = js_alloc_env(1);
     data_env[0] = dest;
     spawn_add_listener(source, make_string_item("data"),
-                       js_new_closure((void*)spawn_stream_pipe_on_data, 1, data_env, 1));
+                       js_new_closure((void*)spawn_stream_pipe_on_data, 1, data_env, 1), false);
 
     Item should_end = (Item){.item = ITEM_TRUE};
     if (is_object_item(options)) {
@@ -1336,7 +1661,7 @@ static Item js_spawn_stream_pipe(Item dest, Item options) {
     // child stdio streams are lightweight readables; missing pipe() aborts
     // silent fork setup and leaves the IPC child alive until the drain watchdog.
     spawn_add_listener(source, make_string_item("end"),
-                       js_new_closure((void*)spawn_stream_pipe_on_end, 0, end_env, 2));
+                       js_new_closure((void*)spawn_stream_pipe_on_end, 0, end_env, 2), false);
     return dest;
 }
 
@@ -1345,44 +1670,79 @@ static Item make_stream_object(void) {
     Item obj = js_new_object();
     js_property_set(obj, make_string_item("on"),
                     js_new_function((void*)js_spawn_stream_on, 2));
+    js_property_set(obj, make_string_item("once"),
+                    js_new_function((void*)js_spawn_stream_once, 2));
     js_property_set(obj, make_string_item("setEncoding"),
                     js_new_function((void*)js_spawn_stream_set_encoding, 1));
     js_property_set(obj, make_string_item("pipe"),
                     js_new_function((void*)js_spawn_stream_pipe, 2));
+    js_property_set(obj, make_string_item("resume"),
+                    js_new_function((void*)js_spawn_stream_resume, 0));
     return obj;
 }
 
 // on(event, callback) for spawn objects — stores as __on_<event>__
-static Item spawn_add_listener(Item self, Item event_item, Item callback) {
+static Item spawn_make_listener_record(Item callback, bool once) {
+    if (!once) return callback;
+    Item record = js_new_object();
+    js_property_set(record, make_string_item("listener"), callback);
+    js_property_set(record, make_string_item("once"), (Item){.item = ITEM_TRUE});
+    return record;
+}
+
+static Item spawn_add_listener(Item self, Item event_item, Item callback, bool once) {
     if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
     String* ev = it2s(event_item);
     char key_buf[64];
     snprintf(key_buf, sizeof(key_buf), "__on_%.*s__", (int)ev->len, ev->chars);
     Item key = make_string_item(key_buf);
     Item existing = js_property_get(self, key);
+    Item record = spawn_make_listener_record(callback, once);
     if (is_callable(existing)) {
         Item listeners = js_array_new(0);
         js_array_push(listeners, existing);
-        js_array_push(listeners, callback);
+        js_array_push(listeners, record);
         js_property_set(self, key, listeners);
     } else if (get_type_id(existing) == LMD_TYPE_ARRAY) {
-        js_array_push(existing, callback);
+        js_array_push(existing, record);
     } else {
-        js_property_set(self, key, callback);
+        if (once) {
+            Item listeners = js_array_new(0);
+            js_array_push(listeners, record);
+            js_property_set(self, key, listeners);
+        } else {
+            js_property_set(self, key, callback);
+        }
     }
     if (ev->len == 7 && memcmp(ev->chars, "message", 7) == 0) {
         spawn_flush_queued_ipc_messages(self);
+    } else if (ev->len == 9 && memcmp(ev->chars, "listening", 9) == 0) {
+        spawn_flush_cluster_listening(self);
+    } else if (ev->len == 6 && memcmp(ev->chars, "online", 6) == 0) {
+        spawn_flush_cluster_online(self);
+    } else if (ev->len == 4 && memcmp(ev->chars, "data", 4) == 0) {
+        spawn_resume_stdio_stream(self);
     }
     return self;
 }
 
 extern "C" Item js_spawn_on(Item event_item, Item callback) {
-    return spawn_add_listener(js_get_this(), event_item, callback);
+    return spawn_add_listener(js_get_this(), event_item, callback, false);
+}
+
+extern "C" Item js_spawn_once(Item event_item, Item callback) {
+    // fork cleanup commonly waits on once('message'); treating it as missing
+    // leaves IPC children and transferred sockets referenced until drain.
+    return spawn_add_listener(js_get_this(), event_item, callback, true);
 }
 
 // on() for stdout/stderr stream sub-objects
 extern "C" Item js_spawn_stream_on(Item event_item, Item callback) {
-    return spawn_add_listener(js_get_this(), event_item, callback);
+    return spawn_add_listener(js_get_this(), event_item, callback, false);
+}
+
+extern "C" Item js_spawn_stream_once(Item event_item, Item callback) {
+    return spawn_add_listener(js_get_this(), event_item, callback, true);
 }
 
 static void spawn_mark_stream_destroyed(Item stream_obj) {
@@ -1438,6 +1798,90 @@ static void install_spawn_stream_destroy(Item stream_obj, JsSpawnProcess* sp,
                     js_new_closure((void*)js_spawn_stream_destroy, 1, env, 2));
     js_property_set(stream_obj, make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
     js_property_set(stream_obj, make_string_item("closed"), (Item){.item = ITEM_FALSE});
+    js_property_set(stream_obj, make_string_item("__lambda_spawn_stdio_owner__"),
+                    (Item){.item = i2it((int64_t)(uintptr_t)sp)});
+    js_property_set(stream_obj, make_string_item("__lambda_spawn_stdio_kind__"),
+                    (Item){.item = i2it(kind)});
+}
+
+static void spawn_clear_stdio_handle_properties(JsSpawnProcess* sp) {
+    if (!sp || !sp->js_object.item) return;
+    const char* names[3] = {"stdin", "stdout", "stderr"};
+    for (int i = 0; i < 3; i++) {
+        Item stream_obj = js_property_get(sp->js_object, make_string_item(names[i]));
+        if (!is_object_item(stream_obj)) continue;
+        js_property_set(stream_obj, make_string_item("__lambda_spawn_stdio_owner__"),
+                        make_js_undefined());
+        js_property_set(stream_obj, make_string_item("__lambda_spawn_stdio_kind__"),
+                        make_js_undefined());
+    }
+}
+
+static void spawn_resume_stdio_stream(Item stream_obj) {
+    if (!is_object_item(stream_obj)) return;
+    Item owner_item = js_property_get(stream_obj, make_string_item("__lambda_spawn_stdio_owner__"));
+    Item kind_item = js_property_get(stream_obj, make_string_item("__lambda_spawn_stdio_kind__"));
+    if (get_type_id(owner_item) != LMD_TYPE_INT || get_type_id(kind_item) != LMD_TYPE_INT) return;
+    JsSpawnProcess* owner = (JsSpawnProcess*)(uintptr_t)it2i(owner_item);
+    int kind = (int)it2i(kind_item);
+    if (!owner) return;
+    if (kind == 1 && owner->stdout_pipe_active && !owner->stdout_pipe_reading) {
+        int r = uv_read_start((uv_stream_t*)&owner->stdout_pipe, spawn_alloc_cb, spawn_stdout_read_cb);
+        if (r == 0) owner->stdout_pipe_reading = true;
+    } else if (kind == 2 && owner->stderr_pipe_active && !owner->stderr_pipe_reading) {
+        int r = uv_read_start((uv_stream_t*)&owner->stderr_pipe, spawn_alloc_cb, spawn_stderr_read_cb);
+        if (r == 0) owner->stderr_pipe_reading = true;
+    }
+}
+
+#ifndef _WIN32
+static int spawn_dup_uv_fd(const uv_handle_t* handle) {
+    if (!handle || uv_is_closing(handle)) return -1;
+    uv_os_fd_t fd;
+    if (uv_fileno(handle, &fd) != 0) return -1;
+    return dup((int)fd);
+}
+#endif
+
+static int spawn_dup_stdio_handle_fd(Item handle_item) {
+    if (!is_object_item(handle_item)) return js_net_dup_ipc_stdio_fd(handle_item);
+    Item owner_item = js_property_get(handle_item, make_string_item("__lambda_spawn_stdio_owner__"));
+    Item kind_item = js_property_get(handle_item, make_string_item("__lambda_spawn_stdio_kind__"));
+    if (get_type_id(owner_item) != LMD_TYPE_INT || get_type_id(kind_item) != LMD_TYPE_INT) {
+        return js_net_dup_ipc_stdio_fd(handle_item);
+    }
+    JsSpawnProcess* owner = (JsSpawnProcess*)(uintptr_t)it2i(owner_item);
+    int kind = (int)it2i(kind_item);
+    if (!owner) return -1;
+
+#ifdef _WIN32
+    (void)owner;
+    (void)kind;
+    return -1;
+#else
+    if (kind == 0 && owner->stdin_pipe_active) {
+        // stdio arrays may reuse another ChildProcess pipe; duplicate the live
+        // parent endpoint so uv_spawn can hand ownership of only the duplicate to the child.
+        return spawn_dup_uv_fd((const uv_handle_t*)&owner->stdin_pipe);
+    }
+    if (kind == 1 && owner->stdout_pipe_active) {
+        if (owner->stdout_pipe_reading) {
+            // Reused readable stdio belongs to the receiving child until user
+            // code explicitly resumes the parent stream; otherwise the parent drains it first.
+            uv_read_stop((uv_stream_t*)&owner->stdout_pipe);
+            owner->stdout_pipe_reading = false;
+        }
+        return spawn_dup_uv_fd((const uv_handle_t*)&owner->stdout_pipe);
+    }
+    if (kind == 2 && owner->stderr_pipe_active) {
+        if (owner->stderr_pipe_reading) {
+            uv_read_stop((uv_stream_t*)&owner->stderr_pipe);
+            owner->stderr_pipe_reading = false;
+        }
+        return spawn_dup_uv_fd((const uv_handle_t*)&owner->stderr_pipe);
+    }
+    return -1;
+#endif
 }
 
 static Item js_spawn_send_with_env(Item env_item, Item message, Item send_handle, Item options, Item callback) {
@@ -1469,15 +1913,32 @@ static Item js_spawn_send_with_env(Item env_item, Item message, Item send_handle
     }
 
     uv_stream_t* native_handle = NULL;
+    bool close_send_handle_after = false;
+    bool close_sent_stream_after = false;
     if (!is_nullish_item(send_handle) && !is_callable(send_handle)) {
         native_handle = js_net_stream_from_ipc_send_handle(send_handle);
         if (!native_handle) {
             return js_throw_type_error_code("ERR_INVALID_HANDLE_TYPE", "This handle type cannot be sent");
         }
+        Item keep_open = is_object_item(options)
+            ? js_property_get(options, make_string_item("keepOpen"))
+            : make_js_undefined();
+        close_send_handle_after = keep_open.item != ITEM_TRUE && keep_open.item != b2it(true);
+        if (!close_send_handle_after) {
+            // keepOpen:true must pass a duplicate descriptor; sending the live
+            // parent socket can leave delayed receivers with an EBADF handle.
+            uv_stream_t* duplicate = spawn_duplicate_tcp_send_handle(send_handle);
+            if (duplicate) {
+                native_handle = duplicate;
+                spawn_track_sent_stream_wrapper(sp, duplicate);
+            }
+        }
     }
 
-    if (!spawn_ipc_write_json(sp, message, native_handle)) return (Item){.item = ITEM_FALSE};
-    schedule_spawn_send_callback(cb, make_js_undefined());
+    if (!spawn_ipc_write_json(sp, message, native_handle, close_send_handle_after,
+                              close_sent_stream_after, cb)) {
+        return (Item){.item = ITEM_FALSE};
+    }
     return (Item){.item = ITEM_TRUE};
 }
 
@@ -1546,6 +2007,8 @@ static Item make_child_process_object(void) {
     js_property_set(obj, make_string_item("stdio"), stdio);
     js_property_set(obj, make_string_item("on"),
                     js_new_function((void*)js_spawn_on, 2));
+    js_property_set(obj, make_string_item("once"),
+                    js_new_function((void*)js_spawn_once, 2));
     js_property_set(obj, make_string_item("pid"), make_js_undefined());
     js_property_set(obj, make_string_item("killed"), (Item){.item = ITEM_FALSE});
     js_property_set(obj, make_string_item("exitCode"), ItemNull);
@@ -2052,7 +2515,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
             stdio[i].flags = UV_INHERIT_FD;
             stdio[i].data.fd = req.stdio_fd[i];
         } else if (mode == CP_STDIO_HANDLE) {
-            int fd = js_net_dup_ipc_stdio_fd(req.stdio_handle[i]);
+            int fd = spawn_dup_stdio_handle_fd(req.stdio_handle[i]);
             if (fd < 0) {
                 pre_spawn_error = UV_EBADF;
                 stdio[i].flags = UV_IGNORE;
@@ -2180,10 +2643,14 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     schedule_spawn_event(obj);
 
     if (sp->stdout_pipe_active) {
-        uv_read_start((uv_stream_t*)&sp->stdout_pipe, spawn_alloc_cb, spawn_stdout_read_cb);
+        if (uv_read_start((uv_stream_t*)&sp->stdout_pipe, spawn_alloc_cb, spawn_stdout_read_cb) == 0) {
+            sp->stdout_pipe_reading = true;
+        }
     }
     if (sp->stderr_pipe_active) {
-        uv_read_start((uv_stream_t*)&sp->stderr_pipe, spawn_alloc_cb, spawn_stderr_read_cb);
+        if (uv_read_start((uv_stream_t*)&sp->stderr_pipe, spawn_alloc_cb, spawn_stderr_read_cb) == 0) {
+            sp->stderr_pipe_reading = true;
+        }
     }
     if (sp->ipc_pipe_active) {
         uv_read_start((uv_stream_t*)&sp->ipc_pipe, spawn_alloc_cb, spawn_ipc_read_cb);
@@ -2343,8 +2810,8 @@ extern "C" Item js_cp_execFile(Item rest_args) {
         }
     }
 
-    js_cp_exec_with_max_buffer(make_string_item(cmd), callback_item,
-                               execfile_max_buffer_from_options(options_item));
+    js_cp_exec_with_options(make_string_item(cmd), options_item, callback_item,
+                            execfile_max_buffer_from_options(options_item));
     return make_child_process_object();
 }
 
@@ -3132,7 +3599,7 @@ extern "C" Item js_get_child_process_namespace(void) {
 
     cp_namespace = js_new_object();
 
-    js_cp_set_method(cp_namespace, "exec",       (void*)js_cp_exec, 2);
+    js_cp_set_method(cp_namespace, "exec",       (void*)js_cp_exec, -1);
     js_cp_set_method(cp_namespace, "execSync",   (void*)js_cp_execSync, 2);
     js_cp_set_method(cp_namespace, "spawn",      (void*)js_cp_spawn, -1);
     js_cp_set_method(cp_namespace, "spawnSync",  (void*)js_cp_spawnSync, 3);

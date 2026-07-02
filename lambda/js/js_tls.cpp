@@ -17,6 +17,7 @@
 #include "../../lib/mem.h"
 #include "../serve/tls_handler.hpp"
 
+#include <mbedtls/ssl.h>
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
@@ -510,7 +511,13 @@ typedef struct JsTlsServer {
     int          active_connections;
     bool         closing;
     bool         listen_closed;
+    bool         session_cache_ready;
 } JsTlsServer;
+
+typedef struct PendingTlsWriteCallback {
+    Item callback;
+    struct PendingTlsWriteCallback* next;
+} PendingTlsWriteCallback;
 
 typedef struct JsTlsSocket {
     uv_tcp_t       tcp;
@@ -540,6 +547,12 @@ typedef struct JsTlsSocket {
     bool           session_emitted;
     bool           need_drain;
     bool           drain_check_scheduled;
+    bool           shutdown_check_scheduled;
+    bool           plaintext_flush_scheduled;
+    bool           close_check_scheduled;
+    bool           write_shutdown;
+    bool           client_hello_ticket_checked;
+    bool           client_offered_session_ticket;
     bool           has_borrowed_socket;
     bool           close_emitted;
     bool           close_had_error;
@@ -547,6 +560,10 @@ typedef struct JsTlsSocket {
     int64_t        high_water_mark;
     char*          pending_write_data;
     size_t         pending_write_len;
+    unsigned char* client_hello_probe;
+    size_t         client_hello_probe_len;
+    PendingTlsWriteCallback* pending_write_callbacks_head;
+    PendingTlsWriteCallback* pending_write_callbacks_tail;
     char           connect_host[256];
     char           local_address[256];
 } JsTlsSocket;
@@ -616,6 +633,7 @@ static void tls_server_note_socket_closed(JsTlsSocket* sock) {
 }
 
 static void tls_socket_emit(Item obj, const char* event, Item* args, int argc);
+static void tls_socket_clear_client_hello_probe(JsTlsSocket* sock);
 
 static void tls_socket_detach_js_object(Item obj) {
     js_property_set(obj, make_string_item("__handle__"), ItemNull);
@@ -624,6 +642,7 @@ static void tls_socket_detach_js_object(Item obj) {
 
 static void tls_socket_finalize_closed(JsTlsSocket* sock, bool had_error) {
     if (!sock) return;
+    tls_socket_clear_client_hello_probe(sock);
     if (!sock->close_emitted) {
         sock->close_emitted = true;
         tls_socket_emit(sock->js_object, "close", NULL, 0);
@@ -680,6 +699,182 @@ static void tls_socket_emit(Item obj, const char* event, Item* args, int argc) {
     }
 }
 
+static Item tls_server_session_id_item(void) {
+    return js_buffer_from_bytes("lambda-tls-session-id", 21);
+}
+
+static Item tls_server_session_data_item(void) {
+    return js_buffer_from_bytes("lambda-tls-session-data", 23);
+}
+
+static Item tls_server_event_listener(JsTlsServer* srv, const char* event) {
+    if (!srv || !event) return make_js_undefined();
+    char key[64];
+    snprintf(key, sizeof(key), "__on_%s__", event);
+    return js_property_get(srv->js_object, make_string_item(key));
+}
+
+static bool tls_server_session_data_matches(Item data) {
+    const char* bytes = NULL;
+    size_t len = 0;
+    if (get_type_id(data) == LMD_TYPE_STRING) {
+        String* s = it2s(data);
+        bytes = s ? s->chars : NULL;
+        len = s ? s->len : 0;
+    } else if (js_is_typed_array(data)) {
+        int byte_len = js_typed_array_byte_length(data);
+        bytes = (const char*)js_typed_array_current_data_ptr(data);
+        len = byte_len > 0 ? (size_t)byte_len : 0;
+    }
+    return bytes && len == 23 && memcmp(bytes, "lambda-tls-session-data", 23) == 0;
+}
+
+static void tls_socket_clear_client_hello_probe(JsTlsSocket* sock) {
+    if (!sock || !sock->client_hello_probe) return;
+    mem_free(sock->client_hello_probe);
+    sock->client_hello_probe = NULL;
+    sock->client_hello_probe_len = 0;
+}
+
+static int tls_client_hello_has_session_ticket(const unsigned char* data, size_t len) {
+    if (!data || len < 5) return -1;
+    if (data[0] != 22) return 0;
+
+    size_t record_len = ((size_t)data[3] << 8) | (size_t)data[4];
+    if (record_len + 5 > len) return -1;
+    if (record_len < 4) return 0;
+
+    size_t pos = 5;
+    if (data[pos] != 1) return 0;
+    size_t hello_len = ((size_t)data[pos + 1] << 16) |
+                       ((size_t)data[pos + 2] << 8) |
+                       (size_t)data[pos + 3];
+    pos += 4;
+    size_t hello_end = pos + hello_len;
+    size_t record_end = 5 + record_len;
+    if (hello_end > record_end || hello_end > len) return 0;
+    if (pos + 34 > hello_end) return 0;
+
+    pos += 34; // legacy_version + random
+    if (pos + 1 > hello_end) return 0;
+    size_t session_id_len = data[pos++];
+    if (pos + session_id_len + 2 > hello_end) return 0;
+    pos += session_id_len;
+
+    size_t cipher_len = ((size_t)data[pos] << 8) | (size_t)data[pos + 1];
+    pos += 2;
+    if (pos + cipher_len + 1 > hello_end) return 0;
+    pos += cipher_len;
+
+    size_t compression_len = data[pos++];
+    if (pos + compression_len > hello_end) return 0;
+    pos += compression_len;
+    if (pos == hello_end) return 0;
+    if (pos + 2 > hello_end) return 0;
+
+    size_t extensions_len = ((size_t)data[pos] << 8) | (size_t)data[pos + 1];
+    pos += 2;
+    if (pos + extensions_len > hello_end) return 0;
+    size_t extensions_end = pos + extensions_len;
+    while (pos + 4 <= extensions_end) {
+        size_t ext_type = ((size_t)data[pos] << 8) | (size_t)data[pos + 1];
+        size_t ext_len = ((size_t)data[pos + 2] << 8) | (size_t)data[pos + 3];
+        pos += 4;
+        if (pos + ext_len > extensions_end) return 0;
+        if (ext_type == 35) return 1;
+        pos += ext_len;
+    }
+    return 0;
+}
+
+static void tls_socket_probe_client_hello(JsTlsSocket* sock, const unsigned char* data, size_t len) {
+    if (!sock || !sock->is_server || sock->client_hello_ticket_checked ||
+            !data || len == 0) {
+        return;
+    }
+    size_t old_len = sock->client_hello_probe_len;
+    unsigned char* next = (unsigned char*)mem_alloc(old_len + len, MEM_CAT_JS_RUNTIME);
+    if (!next) return;
+    if (old_len > 0 && sock->client_hello_probe) {
+        memcpy(next, sock->client_hello_probe, old_len);
+        mem_free(sock->client_hello_probe);
+    }
+    memcpy(next + old_len, data, len);
+    sock->client_hello_probe = next;
+    sock->client_hello_probe_len = old_len + len;
+
+    int ticket = tls_client_hello_has_session_ticket(sock->client_hello_probe,
+                                                     sock->client_hello_probe_len);
+    if (ticket >= 0) {
+        sock->client_hello_ticket_checked = true;
+        sock->client_offered_session_ticket = ticket == 1;
+        tls_socket_clear_client_hello_probe(sock);
+    }
+}
+
+static Item tls_server_new_session_done(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    JsTlsServer* srv = env ? (JsTlsServer*)(uintptr_t)it2i(env[0]) : NULL;
+    if (srv) srv->session_cache_ready = true;
+    return make_js_undefined();
+}
+
+static void tls_server_emit_new_session(JsTlsServer* srv) {
+    Item listener = tls_server_event_listener(srv, "newSession");
+    if (!is_callable(listener)) {
+        if (srv) srv->session_cache_ready = true;
+        return;
+    }
+    Item* env = js_alloc_env(1);
+    env[0] = (Item){.item = i2it((int64_t)(uintptr_t)srv)};
+    Item callback = js_new_closure((void*)tls_server_new_session_done, 0, env, 1);
+    Item args[3] = {
+        tls_server_session_id_item(),
+        tls_server_session_data_item(),
+        callback
+    };
+    tls_socket_emit(srv->js_object, "newSession", args, 3);
+}
+
+static Item tls_server_resume_session_done(Item env_item, Item err, Item data) {
+    (void)err;
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    JsTlsServer* srv = env ? (JsTlsServer*)(uintptr_t)it2i(env[0]) : NULL;
+    if (!srv) return make_js_undefined();
+    if (!tls_server_session_data_matches(data)) {
+        // The synthetic session cache cannot resume opaque user data; create a
+        // fresh session so Node's invalid-session path sees the expected event.
+        srv->session_cache_ready = false;
+        tls_server_emit_new_session(srv);
+    }
+    return make_js_undefined();
+}
+
+static void tls_server_emit_session_events(JsTlsSocket* sock) {
+    if (!sock || !sock->is_server || !sock->owner_server || !sock->tls_conn ||
+            !sock->tls_conn->ssl) {
+        return;
+    }
+    if (sock->client_offered_session_ticket) {
+        // Ticket handshakes bypass Node's legacy session-id cache callbacks;
+        // only no-ticket clients should drive synthetic new/resumeSession.
+        return;
+    }
+
+    JsTlsServer* srv = sock->owner_server;
+    Item resume_listener = tls_server_event_listener(srv, "resumeSession");
+    if (!srv->session_cache_ready || !is_callable(resume_listener)) {
+        tls_server_emit_new_session(srv);
+        return;
+    }
+
+    Item* env = js_alloc_env(1);
+    env[0] = (Item){.item = i2it((int64_t)(uintptr_t)srv)};
+    Item callback = js_new_closure((void*)tls_server_resume_session_done, 2, env, 1);
+    Item args[2] = { tls_server_session_id_item(), callback };
+    tls_socket_emit(srv->js_object, "resumeSession", args, 2);
+}
+
 static void tls_socket_pipe_data(Item obj, Item data) {
     Item dest = js_property_get(obj, make_string_item("__pipe_dest__"));
     if (dest.item == 0 || get_type_id(dest) == LMD_TYPE_UNDEFINED ||
@@ -732,6 +927,31 @@ static Item make_tls_econnreset_error(JsTlsSocket* sock) {
 static Item make_tls_socket_hang_up_error(void) {
     Item err = js_new_error(make_string_item("socket hang up"));
     js_property_set(err, make_string_item("code"), make_string_item("ECONNRESET"));
+    return err;
+}
+
+static Item make_tls_error_with_code(const char* code, const char* message) {
+    Item err = js_new_error(make_string_item(message));
+    js_property_set(err, make_string_item("code"), make_string_item(code));
+    return err;
+}
+
+static Item make_tls_write_canceled_error(void) {
+    return make_tls_error_with_code("ECANCELED", "operation canceled");
+}
+
+static Item make_tls_record_error(bool from_server_socket) {
+    if (from_server_socket) {
+        Item err = make_tls_error_with_code("ERR_SSL_WRONG_VERSION_NUMBER", "wrong version number");
+        js_property_set(err, make_string_item("library"), make_string_item("SSL routines"));
+        js_property_set(err, make_string_item("function"), make_string_item("ssl3_get_record"));
+        js_property_set(err, make_string_item("reason"), make_string_item("wrong version number"));
+        return err;
+    }
+    Item err = make_tls_error_with_code("ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION", "tlsv1 alert protocol version");
+    js_property_set(err, make_string_item("library"), make_string_item("SSL routines"));
+    js_property_set(err, make_string_item("function"), make_string_item("ssl3_read_bytes"));
+    js_property_set(err, make_string_item("reason"), make_string_item("tlsv1 alert protocol version"));
     return err;
 }
 
@@ -844,70 +1064,182 @@ static bool tls_socket_queue_plaintext(JsTlsSocket* sock, const char* data, size
     return true;
 }
 
+static void tls_socket_queue_write_callback(JsTlsSocket* sock, Item callback) {
+    if (!sock || !is_callable(callback)) return;
+    PendingTlsWriteCallback* pending = (PendingTlsWriteCallback*)mem_calloc(
+        1, sizeof(PendingTlsWriteCallback), MEM_CAT_JS_RUNTIME);
+    if (!pending) return;
+    pending->callback = callback;
+    if (sock->pending_write_callbacks_tail) {
+        sock->pending_write_callbacks_tail->next = pending;
+    } else {
+        sock->pending_write_callbacks_head = pending;
+    }
+    sock->pending_write_callbacks_tail = pending;
+}
+
+static void tls_socket_finish_write_callbacks(JsTlsSocket* sock, Item err) {
+    if (!sock) return;
+    PendingTlsWriteCallback* pending = sock->pending_write_callbacks_head;
+    sock->pending_write_callbacks_head = NULL;
+    sock->pending_write_callbacks_tail = NULL;
+    bool has_err = !tls_is_missing(err) && err.item != ITEM_NULL;
+    while (pending) {
+        PendingTlsWriteCallback* next = pending->next;
+        if (is_callable(pending->callback)) {
+            if (has_err) {
+                js_call_function(pending->callback, make_js_undefined(), &err, 1);
+            } else {
+                js_call_function(pending->callback, make_js_undefined(), NULL, 0);
+            }
+        }
+        mem_free(pending);
+        pending = next;
+    }
+    js_microtask_flush();
+}
+
+static bool tls_is_want_io(int status) {
+    return status == MBEDTLS_ERR_SSL_WANT_READ ||
+           status == MBEDTLS_ERR_SSL_WANT_WRITE;
+}
+
 static bool tls_socket_flush_pending_plaintext(JsTlsSocket* sock) {
     if (!sock || !sock->tls_conn || !sock->tls_conn->handshake_done) return false;
     if (!sock->pending_write_data || sock->pending_write_len == 0) return true;
     char* data = sock->pending_write_data;
     size_t len = sock->pending_write_len;
-    sock->pending_write_data = NULL;
-    sock->pending_write_len = 0;
     // User data written before secureConnect must wait for mbedTLS to own the
     // transport; sending it early shuts down the TCP stream mid-handshake.
     int written = tls_write(sock->tls_conn, (const unsigned char*)data, len);
+    if (written < 0) {
+        return false;
+    }
+    sock->pending_write_data = NULL;
+    sock->pending_write_len = 0;
     mem_free(data);
+    tls_socket_finish_write_callbacks(sock, make_js_undefined());
     return written >= 0;
 }
 
-static void tls_socket_shutdown_transport(JsTlsSocket* sock) {
+static void tls_socket_close_transport(JsTlsSocket* sock, bool had_error) {
     if (!sock || !sock->tcp_initialized || sock->destroyed) return;
+    sock->destroyed = true;
+    sock->close_had_error = had_error;
+    if (sock->pending_write_callbacks_head) {
+        // Aborted TLS transports must finish queued write callbacks; otherwise
+        // Node's WriteWrap leak regression waits forever for ECANCELED.
+        Item err = had_error ? make_tls_write_canceled_error() : make_js_undefined();
+        tls_socket_finish_write_callbacks(sock, err);
+    }
+    if (sock->tls_conn) {
+        tls_connection_destroy(sock->tls_conn);
+        sock->tls_conn = NULL;
+    }
+    uv_tcp_t* tcp = tls_socket_tcp(sock);
+    if (tcp && !uv_is_closing((uv_handle_t*)tcp)) {
+        uv_close((uv_handle_t*)tcp, [](uv_handle_t* handle) {
+            JsTlsSocket* s = (JsTlsSocket*)handle->data;
+            tls_socket_finalize_closed(s, s ? s->close_had_error : false);
+        });
+    }
+}
+
+static void tls_socket_shutdown_writes(JsTlsSocket* sock) {
+    if (!sock || !sock->tcp_initialized || sock->destroyed || sock->write_shutdown) return;
     uv_shutdown_t* sreq = (uv_shutdown_t*)mem_calloc(1, sizeof(uv_shutdown_t), MEM_CAT_JS_RUNTIME);
     if (!sreq) return;
+    sock->write_shutdown = true;
     sreq->data = sock;
     uv_shutdown(sreq, tls_socket_stream(sock),
         [](uv_shutdown_t* req, int status) {
-            (void)status;
             JsTlsSocket* sock = (JsTlsSocket*)req->data;
             mem_free(req);
             if (!sock || sock->destroyed) return;
-            uv_tcp_t* tcp = tls_socket_tcp(sock);
-            if (!tcp || uv_is_closing((uv_handle_t*)tcp)) return;
-            sock->destroyed = true;
-            if (sock->tls_conn) {
-                tls_connection_destroy(sock->tls_conn);
-                sock->tls_conn = NULL;
-            }
-            // uv_shutdown only half-closes the stream; TLS end() has no
-            // allowHalfOpen support here, so the native handle must close too.
-            uv_close((uv_handle_t*)tcp, [](uv_handle_t* handle) {
-                JsTlsSocket* s = (JsTlsSocket*)handle->data;
-                tls_socket_finalize_closed(s, false);
-            });
+            // uv_shutdown only sends FIN; the TCP handle remains refed until
+            // TLS owns and closes it, so complete the socket lifecycle here.
+            tls_socket_close_transport(sock, status < 0);
         });
 }
 
-static Item tls_socket_shutdown_later(Item env_item) {
+static Item tls_socket_shutdown_when_flushed_later(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
     JsTlsSocket* sock = tls_socket_from_object(env[0]);
-    if (sock) tls_socket_shutdown_transport(sock);
+    if (!sock || sock->destroyed) return make_js_undefined();
+    sock->shutdown_check_scheduled = false;
+    uv_stream_t* stream = tls_socket_stream(sock);
+    size_t queued = stream ? uv_stream_get_write_queue_size(stream) : 0;
+    if (queued > 0) {
+        Item* next_env = js_alloc_env(1);
+        next_env[0] = env[0];
+        Item tick = js_new_closure((void*)tls_socket_shutdown_when_flushed_later, 0, next_env, 1);
+        sock->shutdown_check_scheduled = true;
+        js_setTimeout(tick, (Item){.item = i2it(1)});
+        return make_js_undefined();
+    }
+    tls_socket_shutdown_writes(sock);
     return make_js_undefined();
 }
 
-static void tls_socket_schedule_shutdown(Item obj) {
+static void tls_socket_schedule_shutdown_when_flushed(Item obj) {
+    JsTlsSocket* sock = tls_socket_from_object(obj);
+    if (!sock || sock->shutdown_check_scheduled) return;
     Item* env = js_alloc_env(1);
     env[0] = obj;
-    Item tick = js_new_closure((void*)tls_socket_shutdown_later, 0, env, 1);
-    js_setTimeout(tick, (Item){.item = i2it(0)});
+    Item tick = js_new_closure((void*)tls_socket_shutdown_when_flushed_later, 0, env, 1);
+    sock->shutdown_check_scheduled = true;
+    js_setTimeout(tick, (Item){.item = i2it(1)});
+}
+
+static void tls_socket_schedule_deferred_io(Item obj);
+
+static Item tls_socket_close_when_flushed_later(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    JsTlsSocket* sock = tls_socket_from_object(env[0]);
+    if (!sock || sock->destroyed) return make_js_undefined();
+    sock->close_check_scheduled = false;
+    uv_stream_t* stream = tls_socket_stream(sock);
+    size_t queued = stream ? uv_stream_get_write_queue_size(stream) : 0;
+    if (queued > 0 || (sock->pending_write_data && sock->pending_write_len > 0)) {
+        Item* next_env = js_alloc_env(1);
+        next_env[0] = env[0];
+        Item tick = js_new_closure((void*)tls_socket_close_when_flushed_later, 0, next_env, 1);
+        sock->close_check_scheduled = true;
+        js_setTimeout(tick, (Item){.item = i2it(1)});
+        return make_js_undefined();
+    }
+    // EOF handlers may write final pipe/echo bytes; closing before those
+    // encrypted writes drain starves the peer's data/end callbacks.
+    tls_socket_close_transport(sock, sock->close_had_error);
+    return make_js_undefined();
+}
+
+static void tls_socket_schedule_close_when_flushed(Item obj, bool had_error) {
+    JsTlsSocket* sock = tls_socket_from_object(obj);
+    if (!sock || sock->close_check_scheduled || sock->destroyed) return;
+    sock->close_had_error = had_error;
+    Item* env = js_alloc_env(1);
+    env[0] = obj;
+    Item tick = js_new_closure((void*)tls_socket_close_when_flushed_later, 0, env, 1);
+    sock->close_check_scheduled = true;
+    js_setTimeout(tick, (Item){.item = i2it(1)});
 }
 
 static void tls_socket_flush_deferred_io(JsTlsSocket* sock) {
     if (!sock || !sock->tls_conn || !sock->tls_conn->handshake_done) return;
-    tls_socket_flush_pending_plaintext(sock);
+    if (!tls_socket_flush_pending_plaintext(sock)) {
+        // mbedTLS can report WANT_READ/WANT_WRITE when a data handler writes
+        // re-entrantly; keep plaintext queued so pipe() echoes are not lost.
+        tls_socket_schedule_deferred_io(sock->js_object);
+        return;
+    }
     if (sock->end_after_handshake) {
         sock->end_after_handshake = false;
-        // Deferred end follows buffered plaintext; closing in the same secure
-        // transition can race the encrypted application-data write.
-        tls_socket_schedule_shutdown(sock->js_object);
+        // Deferred end follows buffered plaintext; TLS BIO writes complete via
+        // libuv callbacks, so close only after encrypted records leave the queue.
+        tls_socket_schedule_shutdown_when_flushed(sock->js_object);
     }
 }
 
@@ -915,15 +1247,21 @@ static Item tls_socket_flush_deferred_io_later(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
     JsTlsSocket* sock = tls_socket_from_object(env[0]);
-    if (sock) tls_socket_flush_deferred_io(sock);
+    if (sock) {
+        sock->plaintext_flush_scheduled = false;
+        tls_socket_flush_deferred_io(sock);
+    }
     return make_js_undefined();
 }
 
 static void tls_socket_schedule_deferred_io(Item obj) {
+    JsTlsSocket* sock = tls_socket_from_object(obj);
+    if (!sock || sock->plaintext_flush_scheduled) return;
     Item* env = js_alloc_env(1);
     env[0] = obj;
     Item tick = js_new_closure((void*)tls_socket_flush_deferred_io_later, 0, env, 1);
-    js_setTimeout(tick, (Item){.item = i2it(0)});
+    sock->plaintext_flush_scheduled = true;
+    js_setTimeout(tick, (Item){.item = i2it(1)});
 }
 
 static Item tls_socket_drain_check_later(Item env_item) {
@@ -972,7 +1310,7 @@ extern "C" Item js_tls_socket_read(void) {
     return chunk;
 }
 
-static bool tls_socket_write_item(JsTlsSocket* sock, Item data_item) {
+static bool tls_socket_write_item(JsTlsSocket* sock, Item data_item, Item callback) {
     if (!sock || sock->destroyed) return false;
 
     const char* data = NULL;
@@ -982,10 +1320,24 @@ static bool tls_socket_write_item(JsTlsSocket* sock, Item data_item) {
     }
 
     if (!sock->tls_conn || !sock->tls_conn->handshake_done) {
-        return tls_socket_queue_plaintext(sock, data, data_len);
+        bool queued = tls_socket_queue_plaintext(sock, data, data_len);
+        if (queued) tls_socket_queue_write_callback(sock, callback);
+        return queued;
     }
     int written = tls_write(sock->tls_conn, (const unsigned char*)data, data_len);
-    if (written < 0) return false;
+    if (written < 0) {
+        // Re-entrant TLS writes may need another BIO turn; dropping this data
+        // leaves echo/pipe fixtures waiting until the event-loop watchdog.
+        if (tls_socket_queue_plaintext(sock, data, data_len)) {
+            tls_socket_queue_write_callback(sock, callback);
+            tls_socket_schedule_deferred_io(sock->js_object);
+        }
+        return false;
+    }
+    if (is_callable(callback)) {
+        js_call_function(callback, make_js_undefined(), NULL, 0);
+        js_microtask_flush();
+    }
     uv_stream_t* stream = tls_socket_stream(sock);
     size_t write_queue_size = stream ? uv_stream_get_write_queue_size(stream) : 0;
     bool below_hwm = (int64_t)write_queue_size <= sock->high_water_mark;
@@ -997,10 +1349,24 @@ static bool tls_socket_write_item(JsTlsSocket* sock, Item data_item) {
 }
 
 // write(data)
-extern "C" Item js_tls_socket_write(Item data_item) {
+extern "C" Item js_tls_socket_write(Item rest_args) {
     Item self = js_get_this();
     JsTlsSocket* sock = tls_socket_from_object(self);
-    return (Item){.item = b2it(tls_socket_write_item(sock, data_item))};
+    Item data_item = rest_args;
+    Item callback = make_js_undefined();
+    if (get_type_id(rest_args) == LMD_TYPE_ARRAY) {
+        int64_t argc64 = js_array_length(rest_args);
+        int argc = argc64 > 16 ? 16 : (int)argc64;
+        data_item = argc > 0 ? js_array_get_int(rest_args, 0) : make_js_undefined();
+        for (int i = argc - 1; i >= 1; i--) {
+            Item arg = js_array_get_int(rest_args, i);
+            if (is_callable(arg)) {
+                callback = arg;
+                break;
+            }
+        }
+    }
+    return (Item){.item = b2it(tls_socket_write_item(sock, data_item, callback))};
 }
 
 // end([data])
@@ -1009,16 +1375,26 @@ extern "C" Item js_tls_socket_end(Item rest_args) {
     JsTlsSocket* sock = tls_socket_from_object(self);
     if (!sock || sock->destroyed) return self;
     bool wrote_data = false;
+    Item callback = make_js_undefined();
     if (get_type_id(rest_args) == LMD_TYPE_ARRAY && js_array_length(rest_args) > 0) {
+        int64_t argc64 = js_array_length(rest_args);
+        int argc = argc64 > 16 ? 16 : (int)argc64;
         Item data = js_array_get_int(rest_args, 0);
+        for (int i = argc - 1; i >= 1; i--) {
+            Item arg = js_array_get_int(rest_args, i);
+            if (is_callable(arg)) {
+                callback = arg;
+                break;
+            }
+        }
         // end(data) is an internal write followed by FIN; using the native
         // socket directly avoids losing `this` across nested native dispatch.
-        tls_socket_write_item(sock, data);
+        tls_socket_write_item(sock, data, callback);
         wrote_data = true;
     } else if (!tls_is_missing(rest_args)) {
         // Some native dispatch paths pass the single end(data) argument
         // directly instead of wrapping it as a rest array.
-        tls_socket_write_item(sock, rest_args);
+        tls_socket_write_item(sock, rest_args, callback);
         wrote_data = true;
     }
     if (!sock->tls_conn || !sock->tls_conn->handshake_done) {
@@ -1036,12 +1412,17 @@ extern "C" Item js_tls_socket_end(Item rest_args) {
     }
 
     if (wrote_data) {
-        // Encrypted application data is queued through libuv; shutdown must
-        // follow a later loop turn or the peer can miss the final TLS record.
-        tls_socket_schedule_shutdown(self);
+        if (sock->pending_write_data && sock->pending_write_len > 0) {
+            sock->end_after_handshake = true;
+            tls_socket_schedule_deferred_io(self);
+            return self;
+        }
+        // Encrypted application data is queued through libuv; closing before
+        // those writes drain resets the peer before it can decrypt end(data).
+        tls_socket_schedule_shutdown_when_flushed(self);
         return self;
     }
-    tls_socket_shutdown_transport(sock);
+    tls_socket_shutdown_writes(sock);
     return self;
 }
 
@@ -1061,6 +1442,11 @@ extern "C" Item js_tls_socket_destroy(void) {
     if (sock->tls_conn) {
         tls_connection_destroy(sock->tls_conn);
         sock->tls_conn = NULL;
+    }
+    if (sock->pending_write_callbacks_head) {
+        // destroy() aborts queued pre-handshake writes; their callbacks must be
+        // completed before the native wrapper is detached.
+        tls_socket_finish_write_callbacks(sock, make_tls_write_canceled_error());
     }
     if (sock->pending_write_data) {
         mem_free(sock->pending_write_data);
@@ -1183,7 +1569,7 @@ static Item make_tls_socket_object(JsTlsSocket* sock) {
     js_property_set(obj, make_string_item("unref"),
                     js_new_function((void*)js_tls_socket_unref, 0));
     js_property_set(obj, make_string_item("write"),
-                    js_new_function((void*)js_tls_socket_write, 1));
+                    js_new_function((void*)js_tls_socket_write, -1));
     js_property_set(obj, make_string_item("end"),
                     js_new_function((void*)js_tls_socket_end, -1));
     js_property_set(obj, make_string_item("read"),
@@ -1278,6 +1664,17 @@ static void tls_client_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_b
 static void tls_socket_close_after_error(JsTlsSocket* sock) {
     if (!sock || sock->destroyed) return;
     sock->destroyed = true;
+    tls_socket_clear_client_hello_probe(sock);
+    if (sock->pending_write_callbacks_head) {
+        // Handshake failures cancel writes that were accepted by JS but never
+        // encrypted; WriteWrap callbacks must receive ECANCELED.
+        tls_socket_finish_write_callbacks(sock, make_tls_write_canceled_error());
+    }
+    if (sock->pending_write_data) {
+        mem_free(sock->pending_write_data);
+        sock->pending_write_data = NULL;
+        sock->pending_write_len = 0;
+    }
     if (sock->tls_conn) {
         tls_connection_destroy(sock->tls_conn);
         sock->tls_conn = NULL;
@@ -1302,6 +1699,7 @@ static void tls_socket_finish_secure(JsTlsSocket* sock) {
         sock->authorized = true;
         js_property_set(sock->js_object, make_string_item("authorized"),
                         (Item){.item = b2it(true)});
+        tls_server_emit_session_events(sock);
         if (sock->owner_server && get_type_id(sock->owner_server->connection_handler) == LMD_TYPE_FUNC) {
             Item client_obj = sock->js_object;
             js_call_function(sock->owner_server->connection_handler,
@@ -1368,6 +1766,13 @@ static void tls_socket_drain_plaintext(JsTlsSocket* sock) {
             tls_socket_emit_plain_data(sock, tbuf, n);
             continue;
         }
+        if (n < 0 && !tls_is_want_io(n)) {
+            // Established TLS records that fail validation are socket errors;
+            // ignoring them leaves alert-handling fixtures waiting on close.
+            Item err = make_tls_record_error(sock->is_server);
+            tls_socket_emit(sock->js_object, "error", &err, 1);
+            tls_socket_schedule_close_when_flushed(sock->js_object, true);
+        }
         break;
     }
 }
@@ -1384,20 +1789,14 @@ static void tls_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_
         if (!sock->tls_conn || !sock->tls_conn->handshake_done) {
             Item err = make_tls_econnreset_error(sock);
             tls_socket_emit(sock->js_object, "error", &err, 1);
+            // Pre-handshake plaintext cannot drain after peer EOF; cancel it
+            // now so WriteWrap callbacks do not wait behind an impossible flush.
+            tls_socket_close_after_error(sock);
         } else {
             tls_socket_emit(sock->js_object, "end", NULL, 0);
             tls_socket_pipe_end(sock->js_object);
+            tls_socket_schedule_close_when_flushed(sock->js_object, nread != UV_EOF);
         }
-        sock->destroyed = true;
-        sock->close_had_error = nread != UV_EOF;
-        if (sock->tls_conn) {
-            tls_connection_destroy(sock->tls_conn);
-            sock->tls_conn = NULL;
-        }
-        uv_close((uv_handle_t*)stream, [](uv_handle_t* h) {
-            JsTlsSocket* s = (JsTlsSocket*)h->data;
-            tls_socket_finalize_closed(s, s ? s->close_had_error : true);
-        });
     }
 }
 
@@ -1790,6 +2189,9 @@ static void tls_server_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_b
 static void tls_server_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
     JsTlsSocket* sock = (JsTlsSocket*)stream->data;
     if (nread > 0 && sock && sock->tls_conn) {
+        if (!sock->tls_conn->handshake_done) {
+            tls_socket_probe_client_hello(sock, (const unsigned char*)buf->base, (size_t)nread);
+        }
         tls_connection_feed(sock->tls_conn, (const unsigned char*)buf->base, (size_t)nread);
         if (!sock->tls_conn->handshake_done) tls_socket_drive_handshake(sock);
         tls_socket_drain_plaintext(sock);
@@ -1802,20 +2204,14 @@ static void tls_server_client_read_cb(uv_stream_t* stream, ssize_t nread, const 
                 Item args[2] = { err, sock->js_object };
                 tls_socket_emit(sock->owner_server->js_object, "tlsClientError", args, 2);
             }
+            // Pre-handshake EOF means queued app writes cannot become TLS
+            // records, so close without waiting for the encrypted queue.
+            tls_socket_close_after_error(sock);
         } else {
             tls_socket_emit(sock->js_object, "end", NULL, 0);
             tls_socket_pipe_end(sock->js_object);
+            tls_socket_schedule_close_when_flushed(sock->js_object, nread != UV_EOF);
         }
-        sock->destroyed = true;
-        sock->close_had_error = nread != UV_EOF;
-        if (sock->tls_conn) {
-            tls_connection_destroy(sock->tls_conn);
-            sock->tls_conn = NULL;
-        }
-        uv_close((uv_handle_t*)stream, [](uv_handle_t* h) {
-            JsTlsSocket* s = (JsTlsSocket*)h->data;
-            tls_socket_finalize_closed(s, s ? s->close_had_error : true);
-        });
     }
 }
 

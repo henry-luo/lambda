@@ -1028,7 +1028,7 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         // Phase 4: If callee resolves to a function with a native version
         // and all arg types match, the call returns the function's return type
         JsFuncCollected* fc = jm_resolve_native_call(mt, call);
-        if (fc) return fc->return_type;
+        if (fc && jm_call_result_uses_native_register(mt, call, fc)) return fc->return_type;
         // Phase 5: If callee is Math.xxx(), resolve return type at compile time
         String* math_method = jm_get_math_method(call);
         if (math_method) return jm_math_return_type(math_method, mt, call->arguments);
@@ -1037,6 +1037,7 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         {
             JsFuncCollected* any_fc = jm_find_collected_func_for_call(mt, call);
             if (any_fc && any_fc->return_type != LMD_TYPE_ANY
+                && jm_call_result_uses_native_register(mt, call, any_fc)
                 && any_fc->node && !any_fc->node->is_generator && !any_fc->node->is_async)
                 return any_fc->return_type;
         }
@@ -1534,7 +1535,7 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         }
 
         JsFuncCollected* fc = jm_resolve_native_call(mt, call);
-        if (fc) {
+        if (fc && jm_call_result_uses_native_register(mt, call, fc)) {
             // jm_transpile_expression → jm_transpile_call → native call → native result
             MIR_reg_t result = jm_transpile_expression(mt, expr);
             if (target_type == LMD_TYPE_FLOAT)
