@@ -111,6 +111,7 @@ enum SimEventType {
     SIM_EVENT_IME_COMPOSE,     // drive shared composition start/update/end
     SIM_EVENT_SET_EDITING_SELECTION, // set editing selection by selector + offsets
     SIM_EVENT_SET_EDITING_VALUE, // set live editing value for deterministic setup
+    SIM_EVENT_SNAPSHOT_STATE_STORE, // capture DOM/ViewState binding for later comparison
     // Assertions
     SIM_EVENT_ASSERT_CARET,
     SIM_EVENT_ASSERT_SELECTION,
@@ -132,6 +133,7 @@ enum SimEventType {
     SIM_EVENT_ASSERT_ATTRIBUTE,  // verify HTML attribute value
     SIM_EVENT_ASSERT_COUNT,      // verify number of elements matching a selector
     SIM_EVENT_ASSERT_STATE_STORE, // verify DocState/ViewState store invariants
+    SIM_EVENT_ASSERT_STATE_STORE_SNAPSHOT, // compare current state binding against snapshot
     SIM_EVENT_ASSERT_EVENT_LOG, // verify event/state JSONL contains records
     SIM_EVENT_ASSERT_EDITING_EVENT, // structured editing event-state log assertion
     SIM_EVENT_ASSERT_EDITING_SELECTION, // verify form/rich editing selection range
@@ -191,6 +193,7 @@ struct SimEvent {
     char* assert_contains;       // for assert_text: substring match
     char* assert_equals;         // for assert_text: exact match
     char* assert_not_contains;   // for assert_attribute: negative substring match (pass when absent OR does not include)
+    char* state_snapshot_name;   // for snapshot_state_store/assert_state_store_snapshot
     char* clipboard_mime;        // for assert_clipboard: MIME representation to read
     char* clipboard_html;        // optional text/html payload for paste/drop
     bool expected_visible;       // for assert_visible
@@ -389,6 +392,7 @@ struct EventSimContext {
     float replay_expected_scroll_x;
     float replay_expected_scroll_y;
     bool replay_has_scroll;
+    ArrayList* state_store_snapshots;
 };
 
 // Load events from JSON file
