@@ -66,6 +66,7 @@ struct JsModuleConstEntry {
     int var_kind;       // v20 TDZ: 0=var, 1=let, 2=const (for MCONST_MODVAR)
     bool is_implicit_global; // true if registered as implicit global (not explicitly declared)
     bool is_nested_func_hoist; // true if from nested function decl name (Annex B candidate, not a real var)
+    bool is_iife_func_decl; // true if direct sync-IIFE function decl promoted to module var for escaping closures
     bool annexb_suppressed;    // AnnexB B.3.3.3: true if propagation suppressed (let/const collision, catch param, etc.)
     // Js57 P3 (Track B2): live binding for self-imported default. When set,
     // identifier reads emit js_get_live_binding_default(specifier) instead of

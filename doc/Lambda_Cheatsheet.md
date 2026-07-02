@@ -130,6 +130,8 @@ string"
 'symbol'          // Symbol
 symbol            // Unquoted symbol
 'name' == "name"  // false: symbol != string
+"" == null        // true: empty string is null
+'' == null        // true: empty symbol is null
 ```
 
 **Binary:**

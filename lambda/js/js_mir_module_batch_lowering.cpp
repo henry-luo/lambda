@@ -261,6 +261,11 @@ static bool jm_parent_has_duplicate_lexical_slot_name(JsFuncCollected* parent, c
     return count > 1;
 }
 
+static bool jm_modvar_is_iife_scope_binding(JsModuleConstEntry* mc) {
+    return mc && mc->const_type == MCONST_MODVAR &&
+        (mc->is_iife_var || mc->is_iife_func_decl);
+}
+
 static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode* target,
     const char* name, char* out_key);
 
@@ -3825,6 +3830,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             snprintf(lookup.name, sizeof(lookup.name), "%s", mce.name);
             if (!hashmap_get(mt->module_consts, &lookup)) {
                 mce.const_type = MCONST_MODVAR;
+                // Direct IIFE function declarations are promoted out of the
+                // wrapper frame; capture analysis must not mistake the original
+                // wrapper-local declaration for a normal ancestor capture.
+                mce.is_iife_func_decl = true;
                 mce.int_val = mt->module_var_count++;
                 hashmap_set(mt->module_consts, &mce);
                 log_debug("js-mir: iife func '%s' → module_var[%d]", mce.name, (int)mce.int_val);
@@ -4237,8 +4246,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             JsModuleConstEntry mclookup;
                             snprintf(mclookup.name, sizeof(mclookup.name), "%s", e->name);
                             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                            is_iife_promoted_module_var = mc && mc->const_type == MCONST_MODVAR &&
-                                mc->is_iife_var && anc->is_iife_body;
+                            is_iife_promoted_module_var =
+                                jm_modvar_is_iife_scope_binding(mc) && anc->is_iife_body;
                         }
                         if (!is_iife_promoted_module_var) {
                             jm_name_set_add(ancestor_func_locals, e->name);
@@ -4357,8 +4366,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 JsModuleConstEntry mclookup;
                                 snprintf(mclookup.name, sizeof(mclookup.name), "%s", bl_entry->name);
                                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                                if (mc && mc->const_type == MCONST_MODVAR &&
-                                    mc->is_iife_var && parent->is_iife_body) {
+                                if (jm_modvar_is_iife_scope_binding(mc) && parent->is_iife_body) {
                                     skip_local_binding = true;
                                 }
                             }
@@ -4448,10 +4456,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                             jm_name_hash, jm_name_cmp, NULL, NULL);
                                         jm_collect_body_locals(anc->node->body, anc_locals);
                                         if (jm_name_set_has(anc_locals, cap_name)) {
-                                            bool is_iife_promoted_module_var = mc_prop->const_type == MCONST_MODVAR &&
-                                                mc_prop->is_iife_var && anc->is_iife_body;
+                                            bool is_iife_promoted_module_var =
+                                                jm_modvar_is_iife_scope_binding(mc_prop) && anc->is_iife_body;
                                             if (!is_iife_promoted_module_var) {
-                                            shadowed_by_ancestor = true;
+                                                shadowed_by_ancestor = true;
                                             }
                                         }
                                         hashmap_free(anc_locals);
