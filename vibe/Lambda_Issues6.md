@@ -208,16 +208,7 @@ issue #33 / an MIR error, issue #34).
 
 **Status: UNFIXED (diagnostic/robustness gap).**
 
----
-
-## Runtime / environment observations (not language bugs, but worth recording)
-
-- **`R3` from a prior note no longer reproduces.** `fn g(a,b){ a / 2.0 + b }`
-  now returns the correct value (`g(10.0,1.0)` → `6`). The earlier
-  "`a/2.0+b` mis-parses" note appears resolved (or was context-specific);
-  no current repro.
-
-## 36. `parse()` leaks its `parse://inline` URL at shutdown — FIXED
+## 36. `parse()` leaks its `parse://inline` URL at shutdown
 
 **Severity: MEDIUM** (memtrack leak) — Every `parse(str, {...})` call leaked one
 `Url` (96 B) plus its ~5 component `String`s, reported at shutdown:
@@ -263,9 +254,9 @@ Result: `parse()` / math render / `convert` (json, xml, yaml, md, toml, csv)
 all run **leak-free, no ASan errors, exit 0**. Verified across 5+ runs and the
 full math gate (823/921, unchanged).
 
-**Status: FIXED.**
+**Status: ✅ FIXED.**
 
-## 37. `./lambda.exe layout` URL leaks + a masked double-free — FIXED
+## 37. `./lambda.exe layout` URL leaks + a masked double-free
 
 **Severity: MEDIUM** (leak) / **HIGH** (the masked UAF) — Two URL-ownership bugs
 in `radiant/cmd_layout.cpp`, exposed while fixing #36.
@@ -294,7 +285,7 @@ covers the case where doc creation failed after the input parsed. Now html,
 txt, svg, xml, wiki, ls layout are all leak-free and exit 0; markdown/latex no
 longer crash.
 
-**Status: FIXED (37a + 37b).**
+**Status: ✅ FIXED (37a + 37b).**
 
 - **Residual: markdown/latex layout leaks ~48 `FontFaceDescriptor`s — SEPARATE,
   pre-existing, UNFIXED.** Once 37b stopped the crash, markdown/latex layout
@@ -329,19 +320,19 @@ longer crash.
 
 ## Summary table
 
-| # | Layer | Issue | Repro | Fix status |
-|---|-------|-------|-------|------------|
-| 31 | parser | bare map as `if` branch → E100 | minimal ✅ | workaround (block form) |
-| 32 | parser | `(let x={...}, x)` branch form → E100 | minimal ✅ | workaround (block form) |
-| 33 | parser | multi-line `++` → `error` elements, no diagnostic | minimal ✅ | workaround (one line) |
-| 34 | MIR | float param inferred `int` → JIT verify error | real only ⚠️ | workaround (constants inside) |
-| 35 | runtime | parse errors non-fatal, broken module runs | observed ✅ | workflow mitigation |
-| 36 | runtime | `parse()` leaks `parse://inline` URL (InputManager never torn down) | minimal ✅ | **FIXED** (destroy_global + 2 double-frees) |
-| 37a | runtime | `layout` leaks `cwd` URL (never freed) | observed ✅ | **FIXED** (url_destroy(cwd)) |
-| 37b | runtime | `layout x.md`/`.tex`/… UAF — `input_url` double-free (was masked) | observed ✅ | **FIXED** (InputManager::detach_url) |
-| — | layout | markdown/latex leak ~48 FontFaceDescriptors (font subsystem) | observed ✅ | unfixed, pre-existing, separate |
-| — | runtime | `expected a map, got array` on load | observed ✅ | unfixed, low pri |
-| — | env | ~9 s cold JIT start (test-timeout trap) | observed ✅ | n/a |
+| #   | Layer   | Issue                                                               | Repro        | Fix status                                  |
+| --- | ------- | ------------------------------------------------------------------- | ------------ | ------------------------------------------- |
+| 31  | parser  | bare map as `if` branch → E100                                      | minimal ✅    | workaround (block form)                     |
+| 32  | parser  | `(let x={...}, x)` branch form → E100                               | minimal ✅    | workaround (block form)                     |
+| 33  | parser  | multi-line `++` → `error` elements, no diagnostic                   | minimal ✅    | workaround (one line)                       |
+| 34  | MIR     | float param inferred `int` → JIT verify error                       | real only ⚠️ | workaround (constants inside)               |
+| 35  | runtime | parse errors non-fatal, broken module runs                          | observed ✅   | workflow mitigation                         |
+| 36  | runtime | `parse()` leaks `parse://inline` URL (InputManager never torn down) | minimal ✅    | **FIXED** (destroy_global + 2 double-frees) |
+| 37a | runtime | `layout` leaks `cwd` URL (never freed)                              | observed ✅   | **FIXED** (url_destroy(cwd))                |
+| 37b | runtime | `layout x.md`/`.tex`/… UAF — `input_url` double-free (was masked)   | observed ✅   | **FIXED** (InputManager::detach_url)        |
+| —   | layout  | markdown/latex leak ~48 FontFaceDescriptors (font subsystem)        | observed ✅   | unfixed, pre-existing, separate             |
+| —   | runtime | `expected a map, got array` on load                                 | observed ✅   | unfixed, low pri                            |
+| —   | env     | ~9 s cold JIT start (test-timeout trap)                             | observed ✅   | n/a                                         |
 
 **Note on exit code:** contrary to this doc's first draft, no memtrack leak sets
 exit code 1 — a successful run returns 0 regardless. Exit code *is* a reliable
