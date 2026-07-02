@@ -12,7 +12,10 @@ keeps the `ViewTree` shell and retained DOM/view nodes, runs
 `view_pool_destroy` remains reserved for document/root teardown. The overflow
 fixture is now covered by `dom_mutation_overflow_retained_full`. Native
 `DragDropState` source removal is covered by
-`dom_mutation_removed_source_clears_dragdrop`.
+`dom_mutation_removed_source_clears_dragdrop`. Child insert/remove now only
+keeps the `structural-css-risk` fallback when loaded selectors depend on
+sibling/child structure (`:first-child`, `:nth-*`, sibling combinators,
+`:has(...)`, etc.); simple styled structural mutations remain incremental.
 
 ## 1. Problem Statement
 
@@ -441,10 +444,12 @@ Work:
 
 Verification:
 
-- `dom_mutation_structural_css_retains_state`,
-  `dom_mutation_stylesheet_fallback_retains_state`, and
-  `dom_mutation_innerhtml_parent_retains_child_prunes` now assert
+- `dom_mutation_stylesheet_fallback_retains_state` and
+  `dom_mutation_innerhtml_parent_retains_child_prunes` still assert
   `retained_full_layout`.
+- `dom_mutation_structural_css_retains_state` now asserts `incremental` for a
+  simple stylesheet, while `dom_mutation_structural_css_risk_retained_full`
+  asserts `retained_full_layout` for a real structural selector dependency.
 - `dom_mutation_removed_source_clears_dragdrop` verifies that removing the
   active drag source clears native `DragDropState` deliberately instead of
   leaving a stale `View*`.
@@ -461,7 +466,10 @@ full layout.
 
 Work:
 
-- Replace `structural-css-risk` with scoped selector invalidation.
+- **Partially implemented:** replace the broad `structural-css-risk` gate with
+  a conservative selector dependency scan. Child insert/remove now stays
+  incremental for simple class/id/tag/attribute/descendant/child selectors, and
+  falls back only for sibling/position-sensitive selectors.
 - Introduce `CHILD_REPLACE` records for `innerHTML`/`textContent` parent-local
   replacement.
 - **Implemented:** treat record overflow as retained full layout rather than
@@ -474,7 +482,8 @@ Work:
 
 Verification:
 
-- Add tests for structural insert/remove in a styled document.
+- **Implemented:** add tests for structural insert/remove in a styled document:
+  one safe simple-stylesheet case and one `:first-child` risk case.
 - Add tests for `innerHTML` replacement preserving parent state but dropping
   removed child state.
 - **Implemented:** add an overflow/batch mutation test that keeps focus/state on
@@ -540,9 +549,10 @@ Add fixtures under `test/ui` with matching `.html` and `.json` files:
 
 | Fixture | Purpose | Key assertions |
 |---------|---------|----------------|
-| `dom_mutation_structural_css_retains_state` | Styled document inserts/removes a sibling node; this used to be a broad `structural-css-risk` case. | state snapshot before/after, focus/caret/scroll retained, reconcile mode not destructive |
+| `dom_mutation_structural_css_retains_state` | Styled document inserts/removes a sibling node under simple selectors. | implemented; incremental reconcile, state snapshot before/after retained |
+| `dom_mutation_structural_css_risk_retained_full` | Styled document inserts before a `:first-child` match. | implemented; retained full layout with `structural-css-risk` |
 | `dom_mutation_stylesheet_fallback_retains_state` | Mutating a `<style>` element still needs broad recascade. | connected state retained even when layout scope is broad |
-| `dom_mutation_innerhtml_parent_retains_child_prunes` | `innerHTML` / `textContent` replaces children but parent survives. | parent state retained, removed child state pruned, DOM text updated |
+| `dom_mutation_innerhtml_parent_retains_child_prunes` | `innerHTML` / `textContent` replaces children but parent survives. | parent state retained, removed child state pruned, still broad `TREE_REPLACE` fallback |
 | `dom_mutation_overflow_retained_full` | More mutation records than `DOM_JS_MUTATION_RECORD_CAP`. | retained full layout, connected focus/state survives |
 | `dom_mutation_replacechild_notifies` | Regression for structural paths that pre-record details but miss final notify. | reconcile runs, layout/text reflects replacement |
 | `dom_mutation_dragover_retains_dragdrop` | During native drag, `dragover` mutates DOM. | mid-drag `drag_drop=true`, `drag_drop_active=true`, source rebound, drop/dragend completes |

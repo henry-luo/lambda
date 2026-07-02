@@ -4026,6 +4026,151 @@ static bool dom_js_node_is_stylesheet_related(DomNode* node) {
            strcasecmp(elem->tag_name, "link") == 0;
 }
 
+static bool dom_js_simple_selector_has_structural_dependency(CssSimpleSelector* simple) {
+    if (!simple) return false;
+
+    switch (simple->type) {
+        case CSS_SELECTOR_PSEUDO_EMPTY:
+        case CSS_SELECTOR_PSEUDO_FIRST_CHILD:
+        case CSS_SELECTOR_PSEUDO_LAST_CHILD:
+        case CSS_SELECTOR_PSEUDO_ONLY_CHILD:
+        case CSS_SELECTOR_PSEUDO_FIRST_OF_TYPE:
+        case CSS_SELECTOR_PSEUDO_LAST_OF_TYPE:
+        case CSS_SELECTOR_PSEUDO_ONLY_OF_TYPE:
+        case CSS_SELECTOR_PSEUDO_NTH_CHILD:
+        case CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD:
+        case CSS_SELECTOR_PSEUDO_NTH_OF_TYPE:
+        case CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE:
+            return true;
+        case CSS_SELECTOR_PSEUDO_HAS:
+            return true;
+        default:
+            break;
+    }
+
+    if (simple->function_selectors && simple->function_selector_count > 0) {
+        for (size_t i = 0; i < simple->function_selector_count; i++) {
+            CssSelector* selector = simple->function_selectors[i];
+            if (!selector) continue;
+            for (size_t part = 0; part + 1 < selector->compound_selector_count; part++) {
+                CssCombinator combinator = selector->combinators[part];
+                if (combinator == CSS_COMBINATOR_NEXT_SIBLING ||
+                    combinator == CSS_COMBINATOR_SUBSEQUENT_SIBLING) {
+                    return true;
+                }
+            }
+            for (size_t part = 0; part < selector->compound_selector_count; part++) {
+                CssCompoundSelector* compound = selector->compound_selectors[part];
+                if (!compound) continue;
+                for (size_t s = 0; s < compound->simple_selector_count; s++) {
+                    if (dom_js_simple_selector_has_structural_dependency(
+                            compound->simple_selectors[s])) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
+static bool dom_js_selector_has_structural_dependency(CssSelector* selector) {
+    if (!selector) return false;
+
+    for (size_t i = 0; i + 1 < selector->compound_selector_count; i++) {
+        CssCombinator combinator = selector->combinators[i];
+        if (combinator == CSS_COMBINATOR_NEXT_SIBLING ||
+            combinator == CSS_COMBINATOR_SUBSEQUENT_SIBLING) {
+            return true;
+        }
+    }
+
+    for (size_t i = 0; i < selector->compound_selector_count; i++) {
+        CssCompoundSelector* compound = selector->compound_selectors[i];
+        if (!compound) continue;
+        for (size_t s = 0; s < compound->simple_selector_count; s++) {
+            if (dom_js_simple_selector_has_structural_dependency(
+                    compound->simple_selectors[s])) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool dom_js_selector_group_has_structural_dependency(CssSelectorGroup* group) {
+    if (!group) return false;
+    for (size_t i = 0; i < group->selector_count; i++) {
+        if (dom_js_selector_has_structural_dependency(group->selectors[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool dom_js_rule_has_structural_dependency(CssRule* rule) {
+    if (!rule) return false;
+
+    if (rule->type == CSS_RULE_STYLE ||
+        rule->type == CSS_RULE_NESTING ||
+        rule->type == CSS_RULE_NESTED_DECLARATIONS) {
+        if (dom_js_selector_group_has_structural_dependency(
+                rule->data.style_rule.selector_group) ||
+            dom_js_selector_has_structural_dependency(
+                rule->data.style_rule.selector)) {
+            return true;
+        }
+        for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
+            if (dom_js_rule_has_structural_dependency(
+                    rule->data.style_rule.nested_rules[i])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if (rule->type == CSS_RULE_MEDIA ||
+        rule->type == CSS_RULE_SUPPORTS ||
+        rule->type == CSS_RULE_CONTAINER ||
+        rule->type == CSS_RULE_SCOPE ||
+        rule->type == CSS_RULE_LAYER) {
+        for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
+            if (dom_js_rule_has_structural_dependency(
+                    rule->data.conditional_rule.rules[i])) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool dom_js_stylesheet_has_structural_dependency(CssStylesheet* stylesheet) {
+    if (!stylesheet || stylesheet->disabled) return false;
+
+    for (size_t i = 0; i < stylesheet->rule_count; i++) {
+        if (dom_js_rule_has_structural_dependency(stylesheet->rules[i])) {
+            return true;
+        }
+    }
+    for (size_t i = 0; i < stylesheet->imported_count; i++) {
+        if (dom_js_stylesheet_has_structural_dependency(
+                stylesheet->imported_stylesheets[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool dom_js_document_has_structural_css_dependency(DomDocument* doc) {
+    if (!doc || !doc->stylesheets || doc->stylesheet_count <= 0) return false;
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        if (dom_js_stylesheet_has_structural_dependency(doc->stylesheets[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool dom_js_mutation_can_incremental(DomDocument* doc, const char** reason) {
     if (reason) *reason = "eligible";
     if (!doc || !doc->root || !doc->view_tree) {
@@ -4054,7 +4199,9 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc, const char** reaso
         }
         if ((record->kind == DOM_JS_MUTATION_CHILD_INSERT ||
              record->kind == DOM_JS_MUTATION_CHILD_REMOVE) &&
-            doc->stylesheet_count > 0) {
+            dom_js_document_has_structural_css_dependency(doc)) {
+            // Stylesheet presence alone is safe for retained incremental layout;
+            // only sibling/child-position-dependent selectors need broad recascade.
             if (reason) *reason = "structural-css-risk";
             return false;
         }

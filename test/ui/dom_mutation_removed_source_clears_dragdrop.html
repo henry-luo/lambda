@@ -25,16 +25,13 @@
     <div id="drag-src" class="box" draggable="true">Drag source</div>
     <div id="drop-zone" class="box" dropzone="copy">Drop target</div>
   </div>
-  <p id="status">ready</p>
   <script>
     const src = document.getElementById('drag-src');
     const zone = document.getElementById('drop-zone');
-    const status = document.getElementById('status');
     let removed = false;
 
     src.addEventListener('dragstart', (event) => {
       event.dataTransfer.setData('text/plain', 'payload');
-      status.textContent = 'dragstart';
     });
 
     zone.addEventListener('dragover', (event) => {
@@ -43,12 +40,10 @@
         removed = true;
         src.remove();
       }
-      status.textContent = 'source removed';
     });
 
     zone.addEventListener('drop', (event) => {
       event.preventDefault();
-      status.textContent = 'unexpected drop';
     });
   </script>
 </body>
