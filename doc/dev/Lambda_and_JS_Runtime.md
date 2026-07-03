@@ -73,7 +73,7 @@ The two runtimes are documented together because the interop is structural, not 
 - **Containers start with `TypeId`** (the `Container` header), and object structs are **non-moving** — JIT code and pools may hold raw pointers.
 - **Data-zone pointers relocate**: any *naked* pointer into the data zone (boxed numerics, hoisted buffer pointers) must be reachable through a precise, writable root across allocations.
 - **Names are interned once**: never compare key strings by content when a pooled `String*` identity comparison is available; never mutate a pooled string.
-- **Errors don't cross raw**: Lambda-side errors are `ItemError`/`LambdaError` return values; JS-side errors are the pending-exception flag. Bridge points (e.g. DOM callbacks, `input()`/`format()` from JS) must translate, not leak.
+- **Errors don't cross raw**: Lambda-side errors are `ItemError`/`LambdaError` return values (Go-style error tier); JS-side errors are the pending-exception flag. Bridge points (e.g. DOM callbacks, `input()`/`format()` from JS) must translate, not leak — the pending flag is never set while control is in Lambda code, and an `ItemError` never enters JS expression evaluation. The unification protocol (shared zero-copy payload + two choke-point converters) is specified in [`vibe/Lambda_Tuning_Proposal.md`](../../vibe/Lambda_Tuning_Proposal.md) Part 6 §6.6.
 - **`log_*` only** (`lib/log.h`) for diagnostics; `./temp/` for scratch files; C+ convention (`doc/dev/C_Plus_Convention.md`), no `std::` containers — `lib/` equivalents (`Str`, `StrBuf`, `ArrayList`, `HashMap`, mempool).
 
 ---

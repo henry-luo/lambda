@@ -7,13 +7,14 @@
 - **Convention:** `file:line` references drift; confirm against the symbol name.
 - **Related docs:** [JS_15 — Performance & Optimization](../doc/dev/js/JS_15_Performance.md) (optimization catalog), [JS_03 — Value Model](../doc/dev/js/JS_03_Value_Model.md), [JS_04 — MIR Lowering](../doc/dev/js/JS_04_MIR_Lowering.md), [Lambda_Box_Unbox.md](Lambda_Box_Unbox.md) (Lambda-side dual-version proposal), `Lambda_GC_Root_Issue.md` (open JIT-local rooting issue).
 
-This document has five parts:
+This document has six parts:
 
 - **Part 1** — a whole-engine analysis of where LambdaJS loses to Node.js, and a ranked set of tuning proposals.
 - **Part 2** — a detailed design for one specific idea: **stack allocation of boxed 64-bit scalars** (int64 / float / datetime), replacing nursery heap boxing for frame-local values.
 - **Part 3** — eliminating/reducing the **per-call JIT GC root-frame overhead** (`heap_jit_gc_root_frame_enter`/`_set`/`_exit`) in the Lambda-script MIR transpiler — the prime suspect in the T0 regression.
 - **Part 4** — a design assessment: **Lambda's high-byte tagging vs. NaN-boxing** — which is faster, which is the better design for Lambda, and the recommended strategy.
 - **Part 5** — a concrete candidate fix for the double-boxing problem: **inline doubles via high-byte float self-tagging** (a no-rotation adaptation of the "Float Self-Tagging" technique), with a single-bit-mask discrimination scheme and the TypeId re-alignment it requires.
+- **Part 6** — the **exception/error model**: LambdaJS's pending-flag design vs. V8's zero-cost handler tables vs. Go's two-tier model (the prior art behind Lambda-script's error values); how the per-call-site exception check (currently a C call) can be tuned; and a proposal for unifying the Lambda and LambdaJS error models at the interop boundary.
 
 ---
 
@@ -503,3 +504,138 @@ The enum itself does **not** need renumbering — the user-visible re-alignment 
 | S3 | GC audit pass (§5.5.1) + ASan run of the full benchmark suite; then default the flag on | clean ASan, no baseline regressions |
 
 **Fallback:** if S2 measures worse than expected (branch-prediction cost in `get_type_id` on non-float-heavy code), the flag confines the experiment; the S0 sentinel cleanup is worth keeping regardless.
+
+---
+
+# Part 6 — Exception & Error Handling: Design Comparison, Check-Site Tuning & Model Unification
+
+Three things in one part: a documentation of how LambdaJS implements JS exceptions versus V8 and versus Go — the prior art Lambda-script's own error model is based on (§6.1–6.4); a concrete tuning proposal for the one measurable inefficiency in the current design — the per-site exception check being a full C call (§6.5); and a proposal for unifying the Lambda and LambdaJS error models at the runtime interop boundary (§6.6).
+
+## 6.1 How LambdaJS handles JS exceptions
+
+LambdaJS uses **no C++ exceptions, no `longjmp`, no stack unwinder** for ordinary JS throws ([JS_04 §9](../doc/dev/js/JS_04_MIR_Lowering.md)). The whole mechanism is a thread-global pending flag plus compiler-emitted check-and-branch sequences:
+
+1. **Throw = set a flag.** `js_throw_value(v)` (`js_runtime_state.cpp:424`) sets `js_exception_pending = true` and stores the value in `js_exception_value` — a registered GC root (`:1016`), so the in-flight Error object survives collection. All convenience throwers (`js_throw_type_error`, TDZ checks, const-assign, …) funnel into it. **Control does not transfer** — the throwing C helper simply returns normally.
+2. **Propagation = emitted checks.** After essentially every runtime call that can throw, the transpiler calls `jm_emit_exc_propagate_check` (`js_mir_statement_lowering.cpp:1545`), which emits a call to `js_check_exception()` + `MIR_BT`:
+   - **inside a `try`** (transpile-time `try_ctx_stack`, fixed depth 16): branch to the catch label (or finally if no catch);
+   - **outside any `try`**: branch to a per-function `func_except_label` that returns `ItemNull` — the function exits early, the *caller's* check fires, and the exception cascades up as a chain of ordinary early returns.
+3. **try/catch/finally is label plumbing.** Catch restores the `with`-scope depth and the transient args-stack mark (a throw mid-argument-evaluation would leak a half-built frame), then `js_clear_exception()` reads-and-clears the flag to bind the catch parameter. Finally saves-and-clears any pending exception, runs the finalizer, and re-throws the saved one unless the finalizer threw a new one (spec precedence). Abrupt `return`/`break`/`continue` are delayed through dedicated registers and inline intervening finalizers (`jm_emit_abrupt_jump_cleanup`, `js_mir_completion.cpp`).
+4. **Stack overflow is the one signal-based case.** A `SIGSEGV` handler on an alternate stack (`sigaltstack`, `lambda-stack.cpp`) plus a `sigsetjmp` recovery point armed around `js_main` converts a genuine overflow into a normal `RangeError: Maximum call stack size exceeded`.
+5. **Defense in depth in the runtime:** ~395 runtime helpers in `js_runtime.cpp` (plus ~12 in `js_globals.cpp`) additionally guard `if (js_exception_pending) return …` at entry, so a helper invoked with an exception already pending refuses to run its effects. This redundancy matters for §6.5's coalescing option.
+
+**Why this design fits the engine:** frames unwind by returning normally, so the args stack, JIT root frames, and scope state clean up through their ordinary code paths; and the mechanism works *identically* under the JIT and the MIR interpreter — which has no unwind metadata and could not support a table-driven unwinder at all.
+
+## 6.2 How V8 implements JS exceptions
+
+V8 inverts the cost model — **"zero-cost" exceptions**: the non-throwing path carries *no checks whatsoever*; all cost lands on the throw path.
+
+1. **Pending exception exists there too** — `Isolate::Throw` stores the thrown value in a per-isolate slot, conceptually like LambdaJS's flag. The difference is propagation.
+2. **Throw = stack walk + direct jump.** The runtime walks the machine stack (`Isolate::UnwindAndFindHandler`) looking for a frame with a matching handler:
+   - **Ignition (interpreter) frames** — every bytecode array carries a **handler table**: ranges of bytecode offsets mapped to catch-handler offsets. The walker tests whether the frame's current offset lies inside a try range.
+   - **TurboFan/Maglev (optimized) frames** — call sites inside `try` blocks are recorded in the generated Code object's handler table (each such call has an exception continuation); catching in optimized code may trigger **deoptimization** to materialize the interpreter frame the handler expects.
+   - On a match, V8 **restores that frame's SP/FP and jumps directly into the catch block**, abandoning every intermediate frame in one step — no intermediate function "returns".
+3. **API boundary:** V8 is compiled with C++ exceptions disabled; embedders use `v8::TryCatch` objects forming a thread-local chain the unwinder also consults; API calls signal failure via empty `MaybeLocal` while the exception stays pending.
+4. **Stack overflow:** not signal-based — explicit **stack-limit checks** against an isolate limit at function entries and loop back-edges throw `RangeError` before any guard page is hit.
+
+## 6.3 Prior art: Go's two-tier model — the basis of Lambda-script's error handling
+
+Go splits the problem in two, and each tier maps onto something in this runtime:
+
+**Tier 1 — ordinary errors are values, with no runtime mechanism at all.** Go's designed-in error path is multiple return values (`f() (T, error)`), checked explicitly at each call site. No flag, no unwinder, no handler tables — error propagation is plain dataflow the compiler treats like any other value. **This is the model Lambda-script's error handling is based on**: the `ItemError` sentinel + rich `LambdaError` heap object (`lambda-error.h:180` — code, message, location, stack trace, help, cause chain), `T^E` return types, `?` propagation, and `let a^err` destructuring ([LR_10](../doc/dev/lambda/LR_10_Error_Handling.md), `doc/Lambda_Error_Handling.md`). Go validates that this model is excellent *when the language surface is designed around it from day one* — which Lambda-script was, and JS was not. That is precisely why §6.5 rejects retrofitting sentinel returns onto the JS helper surface while the same model remains the right one for Lambda.
+
+**Tier 2 — `panic`/`recover` for exceptional failures:**
+
+1. `panic(v)` (`runtime.gopanic`) links a `_panic` record onto the goroutine's panic list, then — instead of consulting handler tables — **runs the goroutine's deferred-function chain in LIFO order**. The defer chain *is* the unwind mechanism.
+2. `recover()` is meaningful only directly inside a deferred function during a panic; the runtime (`runtime.recovery`) then restores the SP/PC saved in that frame's defer record and resumes **as if the deferring function returned normally**. No recover → print panic + all goroutine stacks, exit.
+3. **Defer cost evolution:** heap-allocated defer records (~50 ns) → stack-allocated (Go 1.13) → **open-coded defers** (Go 1.14): statically-known defers compile to inline exit code plus FUNCDATA metadata so a panic can still discover them by stack scanning. Normal-path defer cost is now near zero, paid for with per-function metadata.
+4. **Signals become panics:** the runtime converts SIGSEGV/SIGBUS (e.g. nil-pointer dereference) into a *recoverable* panic by injecting `sigpanic` onto the goroutine stack — the generalized form of Lambda's SIGSEGV→RangeError stack-overflow trick. Go-code stack overflow itself is prevented structurally (copying stacks grown via the `morestack` prologue check); exceeding the max stack size is a non-recoverable fatal, as are `throw()` fatals (concurrent map write, deadlock), which bypass `recover` entirely.
+
+**The lesson for this engine:** Go's zero-cost happy path is *purchased with metadata Go must have anyway* — precise stack maps and pcvalue tables exist for the GC and stack copying, so panic unwinding got its infrastructure nearly for free (V8 similarly amortizes handler tables against deopt metadata). MIR has no such metadata and nowhere to hang it. Also note the binding-time symmetry: Go's defer-chain unwinding is the runtime-driven version of what LambdaJS's transpiler does at compile time — LambdaJS inlines `finally` blocks and cleanup into every abrupt path in generated code; same semantics, opposite binding time, and the compile-time choice is the only one available when the backend cannot introspect frames.
+
+## 6.4 The trade-off
+
+| | LambdaJS (flag + emitted checks) | V8 (handler tables + unwinder) | Go panic path (defer chain) |
+|---|---|---|---|
+| Cost when nothing throws | a check + branch after **every** throwing call | **zero** | **zero** (near-zero even with defers, post-1.14) |
+| Cost of an actual throw | cheap — set flag, cascade of early returns | expensive — stack walk, table lookups, possible deopt | expensive — run the defer chain, then jump |
+| Infrastructure required | none (works on any backend, incl. the MIR interpreter) | per-code handler tables + an unwinder that understands every frame type | stack maps + defer FUNCDATA (needed by the GC anyway) |
+| Cleanup on unwind | compiled-in (finally inlined at each abrupt path) | reconstructed by the unwinder | the defer chain *is* the cleanup |
+| GC in-flight exception | one rooted global | pending slot + unwinder cooperation | `_panic` record on the goroutine |
+
+Real programs throw rarely, so the zero-cost models are faster in principle — but both are funded by frame metadata MIR does not have, and both would break the MIR-interpreter path. **The flag-check architecture is the right choice for this engine.** What is *not* forced by the architecture is the current cost of each check — which is the tuning target below. And the alignment worth remembering: **Lambda-script ≈ Go's error tier** (values, by design), **LambdaJS ≈ a flag-polling design forced by MIR's constraints**, **V8 ≈ Go's panic tier taken to the limit**.
+
+## 6.5 Tuning the emitted check
+
+### Current cost
+
+The emitted check is **itself a C call**: `jm_emit_exc_propagate_check` emits `jm_call_0(mt, "js_check_exception", …)` + `MIR_BT` (`js_mir_statement_lowering.cpp:1555`, `:1565`) — a full call/return round trip to a function that reads one boolean (`js_runtime_state.cpp:477`). Emission volume: ~155 transpiler sites call `jm_emit_exc_propagate_check` (106 in expression lowering alone) plus ~46 direct `"js_check_exception"` emissions — at runtime this fires **after nearly every runtime call** in generated code. Per site that is ~10–20 cycles of call overhead for what should be a 2-instruction load-and-branch. This is a distributed tax on exactly the call-dense code that Wall 3 (Part 1) already penalizes — richards/deltablue-class programs pay it once or more per JS-level operation.
+
+### E1 — Inline the flag load *(the core fix; small, mechanical)*
+
+`js_exception_pending` is a field of the singleton `JsRuntimeState` capsule (`js_runtime_state.hpp` aliases; instantiated once) — its address is a link-time constant. Replace the emitted call with:
+
+```
+; was:  CALL js_check_exception → reg ; BT reg, target
+; now:  MOV  reg, mem8[&js_state.exception_pending]   ; one byte load, baked address
+;       BT   reg, target
+```
+
+Precedent for baking runtime-global addresses into emitted MIR exists on both sides: the Lambda transpiler's inline heap-bump allocation (`transpile-mir.cpp:80` static_assert) and the JS lowering's interned-string and cache-pointer constants (JS_15 §6 counts ~59 baked realm pointers). One more baked pointer does not change the (already-blocked) relocatable-MIR caching story. Implementation is confined to `jm_emit_exc_propagate_check` plus the handful of direct `"js_check_exception"` emission sites; the C function stays for runtime-internal and interpreter-C callers. Works identically under JIT and MIR interpreter (a mem-op is a mem-op).
+
+**Expected effect:** turns ~15 cycles into ~2–4 per check site. On call-dense benchmarks where every JS operation is 1–3 runtime calls each followed by a check, this is a several-percent to double-digit reduction — a tax cut, not a wall removal. Combine with Part 1 T2 (call-path slimming); measure on richards/deltablue/towers.
+
+### E2 — Elide checks after non-throwing helpers *(second-order)*
+
+Many emitted calls cannot throw (`js_get_slot_f`, boxing helpers, raw comparisons, `js_args_save/restore`, …) yet some sites conservatively check anyway. Add a `can_throw` bit to the runtime-helper registry (the `sys_func_registry` metadata already drives import emission) and skip `jm_emit_exc_propagate_check` after provably non-throwing callees. Zero runtime cost, pure emission-volume reduction; also shrinks code size, which helps the link-time story (JS_15 §3).
+
+### E3 — Coalesce checks across guarded call sequences *(only with care)*
+
+Because ~395 runtime helpers already refuse to run with an exception pending (§6.1.5), a straight-line sequence of calls to *guarded* helpers could carry a single check at the end instead of one per call. The gate: every callee in the covered span must be entry-guarded (whitelist, verified — not assumed), and no intervening MIR may branch on or store a possibly-poisoned result value in a way observable after the catch. This is a real analysis, not a peephole; do it only if E1+E2 profiling still shows check overhead, and validate against full test262 (exception-ordering tests are exactly what this can break).
+
+### Rejected: sentinel-return propagation
+
+Folding "did it throw" into the return value (an `ItemError`-style poison, checked by the consumer) would merge the check into dataflow but requires every helper signature and every consumer to handle poison values — a runtime-wide ABI change for less benefit than E1 delivers at a fraction of the cost. Lambda-script's own runtime uses this model (`ItemError`, [LR_10](../doc/dev/lambda/LR_10_Error_Handling.md)), but retrofitting it onto the JS helper surface is not worth it.
+
+### Sequencing & validation
+
+**E1 first** (small diff, immediate benchmark A/B), **E2 alongside** (registry metadata + emission skip), **E3 only on evidence**. Gates: full test262 (the throw-ordering and finally-precedence clusters specifically), `make test-lambda-baseline`, and the JS benchmark suite on both JIT and interpreter modes — the interpreter runs the same lowered MIR, so E1/E2 must be verified there too.
+
+## 6.6 Unifying the two error models at the interop boundary
+
+Lambda and LambdaJS deliberately use **different in-flight error representations** — Lambda-script carries errors as values (`ItemError`/`LambdaError`, the Go error tier, §6.3), LambdaJS carries them as a pending flag (§6.1) — yet the two runtimes interop on one heap and must pass failures across the boundary seamlessly. The unification question is real but has a clean answer:
+
+> **Do not unify the propagation mechanisms. Unify the error *value*, and fix a strict two-function conversion protocol at the boundary.**
+
+Each mechanism is optimal for its language: dataflow error values preserve `fn`'s referential transparency (a hidden mutable flag would break pure-functional semantics and the `T^E` type system), while JS's spec requires exceptions to erupt from arbitrary expression positions (getters, coercions, iterators), which the flag model serves and sentinel returns cannot (§6.5, rejected alternative). What must be shared is the **payload** — and because both engines already speak `Item` on one heap, the payload can cross **zero-copy**.
+
+### U1 — One error payload, two views
+
+- **JS → Lambda:** the JS exception value is already an `Item`. Add an `Item payload` field to `LambdaError` (`lambda-error.h:180`; the existing `void* details` could serve, but a typed, GC-traced field is cleaner — when the `LambdaError` is heap-allocated, the GC must trace it). A JS throw wraps as `LambdaError{ code = ERR_JS_EXCEPTION, message = ToString(value), payload = value }` — lossless, by reference.
+- **Lambda → JS:** expose a `LambdaError` to JS as an `Error`-like object carrying `.name` (mapped from `LambdaErrorCode` — reuse the existing code taxonomy: type errors → `TypeError`, range → `RangeError`, parse → `SyntaxError`, default → `Error`), `.message`, `.code`, `.help`, and a non-enumerable reference to the original `LambdaError` so a **round trip preserves identity** in both directions (Lambda → JS → Lambda returns the same `LambdaError*`; JS → Lambda → JS re-throws the same JS value from `payload`).
+
+### U2 — Two conversion choke points (the whole protocol)
+
+- **`js_result_from_lambda(Item v)`** — for JS code invoking Lambda-ABI facilities (shared parsers via `input()`/`JSON.parse`, formatters, URL, sys funcs): one high-byte tag compare (`type_id == LMD_TYPE_ERROR`); on error, `js_throw_value(js_error_from_lambda(it2err(v)))` and return the JS convention. Cost on the success path: **one tag compare** (~2 cycles — same class as E1's inlined flag load).
+- **`lambda_result_from_js(Item v)`** — for Lambda-side code invoking JS (Radiant/DOM callbacks into handlers, document scripts, future `import "mod.js"` from `.ls`): one flag load (the E1 inline form); if pending, `js_clear_exception()` and return `err2it(lambda_error_from_js(value))`. A JS `throw` thereby surfaces to Lambda script as an ordinary `T^E` error — **`let x^err = call()` becomes the cross-language catch**, and `?` propagates it like any native error.
+
+Registry support: give `sys_func_registry` entries an ABI bit (lambda-error-returning vs. js-throwing) so the JS transpiler auto-wraps lambda-ABI helpers at emission instead of relying on ad-hoc call-site handling — today raw `ItemError` comparisons appear inside JS runtime code (e.g. `js_globals.cpp:17228`), which is exactly the scattered pattern to funnel through U2.
+
+### U3 — The boundary invariant (add to the interop contract)
+
+> The pending-exception flag is **never set while control is in Lambda-script code**, and an `ItemError` **never enters JS expression evaluation**. Every crossing goes through the two U2 functions.
+
+Enforce in debug builds with boundary assertions (precedent: `js_assert_batch_runtime_state_clear`, which already audits leaked exception state between test262 cases). This invariant belongs in the interop-contract list of `doc/dev/Lambda_and_JS_Runtime.md` §4.
+
+### U4 — Semantics mapping
+
+| Lambda-script | JavaScript | Bridge behavior |
+|---|---|---|
+| `raise e` / error value returned | `throw v` | wrap per U1, carrier switches per U2 |
+| `T^E` return + `?` propagation | exception propagation | automatic at each boundary |
+| `let x^err = expr` | `try { } catch (e) { }` | catches errors from either origin |
+| — (pure code needs no finalizers) | `finally` | JS-side only; a Go-style `defer` for `pn` procedures is a possible future addition, not required for interop |
+| error `cause` chain | `Error.cause` / `AggregateError` | map chain ↔ cause on conversion |
+
+### Cost, risks, and validation
+
+Cost is one tag compare or one flag load per boundary crossing — negligible, and crossings are call-grained, not operation-grained. Risks: double-reporting (an error converted at the boundary must not also leave the source-side state set — U2 functions both consume their source representation), and GC tracing of the new `payload` field. Validation: round-trip identity tests in both directions (throw in JS → caught as `^err` in Lambda with the same payload Item; `raise` in Lambda → caught in JS `try/catch` with correct `.name`/`.code`; double round trips preserve identity), the error-code→name mapping table, and the debug boundary assertions running under the full test262 + lambda baselines.
