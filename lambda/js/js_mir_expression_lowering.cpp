@@ -10460,21 +10460,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 // save with-scope depth before direct call (function may return from inside 'with')
                 MIR_reg_t saved_wd = jm_call_0(mt, "js_with_save_depth", MIR_T_I64);
 
-                MIR_reg_t pushed_stack_frame = 0;
-                if (fc->node && fc->node->name) {
-                    // Direct MIR calls bypass js_call_function; push the same
-                    // dynamic frame metadata so REPL Error stacks keep callers.
-                    pushed_stack_frame = jm_call_2(mt, "js_runtime_call_frame_push_name", MIR_T_I64,
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)fc->node->name->chars),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)fc->node->name->len));
-                }
                 bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
                 jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
                 jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
-                if (fc->node && fc->node->name) {
-                    jm_call_void_1(mt, "js_runtime_call_frame_pop_guarded",
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, pushed_stack_frame));
-                }
 
                 // restore with-scope depth after direct call
                 jm_call_void_1(mt, "js_with_restore_depth",

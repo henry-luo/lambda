@@ -38,8 +38,6 @@ extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
 extern "C" Item js_symbol_well_known(Item name);
 extern "C" Item js_util_custom_promisify_args_symbol(void);
-extern "C" int64_t js_runtime_call_frame_push(Item func_item);
-extern "C" void js_runtime_call_frame_pop(void);
 extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
                                              Item filename_item,
                                              int64_t line_offset,
@@ -13162,11 +13160,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         }
         bool pushed_vm_stack_source = js_function_has_vm_stack_source(fn);
         if (pushed_vm_stack_source) js_function_push_vm_stack_source(fn);
-        // Error.stack needs the dynamic JS call chain; lexical stack strings
-        // cannot represent callbacks invoked by another function.
-        bool pushed_call_frame = js_runtime_call_frame_push(func_item) != 0;
         Item result = js_invoke_fn(fn, merged_args, total_argc);
-        if (pushed_call_frame) js_runtime_call_frame_pop();
         if (pushed_vm_stack_source) js_eval_source_pop();
         js_current_private_home_class = prev_private_home_class;
         js_current_private_home_class_index = prev_private_home_class_index;
@@ -13248,11 +13242,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     }
     bool pushed_vm_stack_source = js_function_has_vm_stack_source(fn);
     if (pushed_vm_stack_source) js_function_push_vm_stack_source(fn);
-    // Error.stack needs the dynamic JS call chain; lexical stack strings
-    // cannot represent callbacks invoked by another function.
-    bool pushed_call_frame = js_runtime_call_frame_push(func_item) != 0;
     Item result = js_invoke_fn(fn, args, arg_count);
-    if (pushed_call_frame) js_runtime_call_frame_pop();
     if (pushed_vm_stack_source) js_eval_source_pop();
     js_current_private_home_class = prev_private_home_class;
     js_current_private_home_class_index = prev_private_home_class_index;

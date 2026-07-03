@@ -1,4 +1,5 @@
 #include "js_mir_internal.hpp"
+#include "../lambda-error.h"
 #include "../../lib/mem_factory.h"
 #include <cstdio>
 #include <cstdlib>
@@ -224,7 +225,6 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         context->name_pool = name_pool_create(context->pool, nullptr);
         context->type_list = arraylist_new(64);
     }
-
     _lambda_rt = (Context*)context;
 
     Input* js_input = Input::create(context->pool);
@@ -652,6 +652,8 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         context->name_pool = name_pool_create(context->pool, nullptr);
         context->type_list = arraylist_new(64);
     }
+    ArrayList* previous_debug_info = context->debug_info;
+    const char* previous_current_file = context->current_file;
 
     _lambda_rt = (Context*)context;
 
@@ -884,6 +886,9 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     MIR_link(ctx, use_mir_interp_for_script ? MIR_set_interp_interface : gen_interface, import_resolver);
     g_last_js_mir_phase_timing.link_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: mir_linked");
+    void* js_debug_info = jm_build_js_debug_info(mt, filename);
+    context->debug_info = (ArrayList*)js_debug_info;
+    context->current_file = filename ? filename : "<string>";
     // Restore opt level if we changed it
     if (effective_opt != g_js_mir_optimize_level) {
         MIR_gen_set_optimize_level(ctx, g_js_mir_optimize_level);
@@ -902,6 +907,9 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
 
     if (!js_main) {
         log_error("js-mir: failed to find js_main");
+        context->debug_info = previous_debug_info;
+        context->current_file = previous_current_file;
+        if (js_debug_info) free_debug_info_table(js_debug_info);
         jm_clear_active_js_transpile(NULL, mt, NULL);
         jm_destroy_mir_transpiler(mt);
         g_active_mir_ctx = NULL;
@@ -1106,6 +1114,8 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     // (no longer needed — JS objects are now Lambda Maps)
 
     ArrayList* result_type_list = (ArrayList*)context->type_list;
+    context->debug_info = previous_debug_info;
+    context->current_file = previous_current_file;
     context = old_context;
 
     // Cleanup
@@ -1146,6 +1156,10 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     } else {
         g_active_mir_ctx = NULL;
         MIR_finish(ctx);
+    }
+    if (js_debug_info) {
+        free_debug_info_table(js_debug_info);
+        js_debug_info = NULL;
     }
     g_active_mir_ctx = NULL;  // normal cleanup done, no longer need recovery
 

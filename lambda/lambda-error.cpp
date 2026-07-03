@@ -244,6 +244,11 @@ void free_debug_info_table(void* debug_info_list) {
     
     DebugInfoList* list = (DebugInfoList*)debug_info_list;
     for (size_t i = 0; i < list->length; i++) {
+        if (list->items[i]) {
+            if (list->items[i]->lambda_func_name) mem_free((void*)list->items[i]->lambda_func_name);
+            // source_file is still a borrowed/reserved field; only duplicated
+            // display names are owned by the debug table today.
+        }
         mem_free(list->items[i]);
     }
     mem_free(list->items);

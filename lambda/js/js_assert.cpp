@@ -5265,6 +5265,7 @@ extern "C" Item js_assert_AssertionError_ctor(Item options) {
     extern Item js_new_error_with_name(Item type_name, Item message);
     extern Item js_property_get(Item obj, Item key);
     extern Item js_property_set(Item obj, Item key, Item value);
+    extern Item js_error_captureStackTrace(Item target, Item ctor);
     if (get_type_id(options) != LMD_TYPE_MAP) {
         // Public AssertionError construction requires an options object; accepting
         // primitives hides caller mistakes and breaks Node's validation contract.
@@ -5304,6 +5305,15 @@ extern "C" Item js_assert_AssertionError_ctor(Item options) {
     js_property_set(error, assert_make_string("diff"), assert_make_string(diff_str));
     js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(generated)});
     js_assert_attach_assertion_error_prototype(error);
+    Item stack_start = js_property_get(options, assert_make_string("stackStartFn"));
+    if (get_type_id(stack_start) != LMD_TYPE_FUNC) {
+        stack_start = js_property_get(options, assert_make_string("stackStartFunction"));
+    }
+    if (get_type_id(stack_start) == LMD_TYPE_FUNC) {
+        // Node AssertionError options provide the public trim function; without
+        // applying it, wrapper frames become visible once stacks are real.
+        js_error_captureStackTrace(error, stack_start);
+    }
     return error;
 }
 
