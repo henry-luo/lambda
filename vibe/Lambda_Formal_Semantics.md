@@ -136,22 +136,45 @@ applies to user functions, but **built-in operators emit unchecked error values
 freely**. Combined with errors being falsy, `a[i] or default` silently swallows what
 was morally an exception.
 
-### A7. Aliasing under mutation: three regimes, none documented
+### A7. Aliasing under mutation (REVISED after deeper probing)
 
 Probe (`pn` context):
 
 ```lambda
-var a = [1,2,3];  let b = a;  a[0] = 99      // b[0] == 99    → arrays: REFERENCE
-var c = <Counter>; let d = c; c.increment()  // d.value == 0  → objects: COPY
+var a = [1,2,3];  let b = a;  a[0] = 99      // b[0] == 99     → arrays: REFERENCE
+var c = <Counter step:1>; let d = c; c.increment()
+                                             // c.value == 1, d.value == 1 → objects: REFERENCE too
 var e = <div class:"x">; let f = e; e.class = "y"  // f.class == "y" → elements: REFERENCE
+let g = [4,5,6]; var h = g; h[0] = 77        // g[0] == 77 (!) → mutating a LET-bound value
 ```
 
-Plus the documented third regime: closures assigning captured `var`s get a
-**writable copy** (`Lambda_Func.md` § Mutable Captures).
+**Revision:** the original probe concluded objects had COPY semantics
+(`d.value == 0` after `c.increment()`) — that was an artifact of object-mutation
+bugs, not copy semantics; the probe never read `c.value` back (also 0). With a
+working mutation path, the `let` alias sees the mutation: **all containers alias**
+(uniform reference semantics), and `let`-bound values are mutable through a `var`
+alias — directly violating any "let is final" reading.
 
-So "does `let b = a` alias?" currently depends on the runtime TypeId of the value.
-Nothing in the docs specifies which containers have reference vs. value semantics.
-This is the single largest semantic underspecification in the language. See B3.
+**Object pn-method mutation is separately broken** (bug cluster, probed):
+
+- `var c = <Counter>` (all defaults): `c.increment()` silently no-ops
+  (`c.value` stays 0); with an explicit attribute (`<Counter step: 5>`) it works.
+- After creating aliases (`let d = c; var e = c`), a *second* `c.increment()` is
+  silently lost (`c.value` stays 1) — mutation reliability depends on sharing state.
+- `pn add(n: int) {...}` — a pn method **with a parameter** — fails to parse;
+  only zero-arg pn methods compile.
+- `frozen.increment()` on a `let`-bound object: no error, silently ineffective.
+
+Plus the documented closure regime: docs claim captured `var`s get a **writable
+copy** (`Lambda_Func.md` § Mutable Captures) — probing shows this behavior does not
+exist: assignment to a capture in `fn` is a compile error (that then continues
+executing with the assignment dropped), and in a nested `pn` it crashes at runtime
+(`unknown add type: 0, 5`). The doc section is aspirational (A10 family). Capture
+snapshots at creation (by value) do work correctly.
+
+So the current state is: uniform reference aliasing, unreliable object mutation,
+no working capture mutation, and nothing documented. See B3, and §C4 for the
+resolution discussion.
 
 ### A8. Array covariance: `is` and assignment disagree; failure is a silent log
 
@@ -689,6 +712,170 @@ Additional points in favor, recorded:
    alignment. Recorded so the width's trajectory (32 → 56 → 53) and the reasoning at
    each step aren't lost.
 
+### C4. Aliasing and mutability: let/var/closure model (2026-07-04) — RESOLVED: mutable value semantics
+
+**Decision (designer-approved in full): containers are values; mutability is a
+property of bindings, not values; `var` is its only marker.**
+
+1. **`let` is final.** Nothing reachable through a `let` binding ever changes —
+   not by reassignment, not by mutation through any other binding, not by a method.
+2. **Bindings and assignment copy, observably.** `var b = a` gives `b` an
+   independent value regardless of whether `a` is `let` or `var`; the same holds for
+   every binding form. Applies uniformly to arrays, maps, elements, and objects.
+   *Implementation:* copy-on-write on the existing `ref_cnt` fields — share until
+   first mutation, copy at the mutation point iff `ref_cnt > 1` (refcount-based, not
+   binding-kind-based, so it covers values reached via fields/elements/captures with
+   one mechanism). **COW must be unobservable** — a verifiable property in the
+   formal model, sibling of boxing-invisibility.
+3. **`var` parameters are the sole sharing construct**: `pn f(var a: T)` — the
+   designer's syntax, chosen over a new `mut` keyword (no new keyword; Pascal's
+   `procedure f(var x: T)` precedent; `var` becomes the single mutability marker:
+   locally a mutable binding, in signatures a mutable/inout parameter). Sub-rules:
+   - arguments to a `var` param must themselves be `var` — a `let` binding, literal,
+     or temporary is a compile error (else `let`-finality re-breaks at the call
+     boundary; Pascal lvalue rule, Swift `&` rule);
+   - **exclusivity**: passing the same `var` (or overlapping paths, e.g. `x` and
+     `x.field`) to two `var` params is a compile error (else aliasing returns inside
+     the callee; Swift exclusive-access precedent);
+   - `pn` methods mutate the receiver, so the **receiver must be `var`** —
+     `frozen.increment()` on a `let` binding is a compile error;
+   - `var` params pass as borrows (no refcount bump, no copy) — preserving the
+     in-place hot path for `push`/`splice` and the awfy benchmarks, which gain
+     honest `var` annotations in their signatures.
+4. **Closures are immutable values.** Capture copies at creation (snapshot —
+   verified working today). Assignment to a captured name is a **compile error**
+   with a teaching message ("captures are immutable — use an object with a `pn`
+   method, or a `var` parameter"). Plain (non-`var`) parameters are likewise
+   `let`-like: not assignable.
+5. **No reference cells.** Shared mutable state lives in module-level / view-instance
+   `var` (the Elm/React shape Lambda's `edit` views already have). An explicit `ref`
+   type is deferred until a real need appears.
+6. **Structural `==` remains the only equality.** Values have no identity, so no
+   `===`/identity operator ever needs to exist.
+
+Model in two sentences: *values never alias; `var` is the only mutability marker —
+locally a mutable binding, in signatures the language's single, explicit sharing
+point. `pn` is thereby locally imperative but observably functional.*
+
+#### C4.1 Current behavior (probed — the bug catalog)
+
+The starting point was worse than finding A7 originally recorded (see A7 REVISED):
+
+| Probe | Result | Verdict |
+|---|---|---|
+| `let g = [4,5,6]; var h = g; h[0] = 77` | `g[0] == 77` | **`let`-bound values are mutable through a `var` alias** — the canonical violation; becomes a regression fixture |
+| `var a = [1,2,3]; var b = a; b[0] = 99` | `a[0] == 99` | var–var aliases too |
+| `var c = <Counter step:1>; let d = c; c.increment()` | `c.value == 1, d.value == 1` | objects alias as well — A7's "objects copy" was an artifact of the bugs below |
+| `var c = <Counter>` (all defaults); `c.increment()` | `c.value` stays 0 | default-constructed objects: pn-method mutation silently no-ops |
+| after aliases exist, second `c.increment()` | lost (`c.value` stays 1) | mutation reliability depends on sharing state |
+| `pn add(n: int) {...}` method | fails to parse | pn methods with parameters unsupported |
+| `frozen.increment()` on `let` receiver | no error, no effect | silent no-op (C4 target: compile error) |
+| assignment to capture in `fn` closure | compile error **that keeps executing**, assignment dropped | silent-continue family (A8) |
+| capture mutation in nested `pn` | runtime crash `unknown add type: 0, 5` | broken codegen |
+| `var x=1; let f=()=>x; x=2; f()` | `1` | capture snapshots at creation — correct, kept |
+
+So current reality: uniform reference aliasing (all container kinds), unreliable
+object mutation, no working capture mutation, and the docs' "Mutable Captures in
+Procedural Closures" section (writable per-closure copy, counter → 1, 2) describing
+behavior that never shipped (A10 aspirational-docs family). There was no working
+behavior to preserve on the closure front, and the "three regimes" of the original
+A7 were really one consistent-but-wrong behavior plus a bug cluster.
+
+#### C4.2 The discussion arc
+
+**Round 1 — review's recommendation: mutable value semantics.** One rule
+("assignment copies, observably; mutation never visible through another binding"),
+COW on the existing refcounts, an inout-style `mut` parameter for caller-visible
+mutation, no reference cells, structural equality only. Why it fits Lambda: the
+language was already ~90% there (pure `fn`; captures snapshot; copy-with-override
+idioms `{*:base}` / `<Point *:p, x:v>` as the native "modify"); the formal model
+needs a store **only for `var` bindings** — the single largest Stage-4
+simplification available; and it matches the "pure functional scripting language"
+identity, making `pn` locally imperative but observably functional. Precedents:
+Swift (COW arrays/dicts/structs, `inout`), Koka/Perceus (functional-but-in-place),
+Hylo (mutable value semantics as the whole language), R/Matlab (copy-on-modify runs
+the world's data science — Lambda's domain). The alternative — uniform reference
+semantics (Python/JS model) — was presented and rejected: trivial to implement and
+familiar, but buys the aliasing-bug class forever, `let` protecting the binding but
+never the contents, a store-everywhere formal model, an eventual identity-vs-equality
+operator split, and a functional language that isn't.
+
+**Round 2 — designer refinements (all adopted):**
+
+1. `let` is final, always — elevated to the anchor rule.
+2. `var b = a` where `a` is `let`-bound must copy before mutation ("if a is static,
+   b should make a copy before assignment"). Review refined the trigger from
+   binding-kind to **refcount at the mutation point** (handles all sharing shapes
+   with one mechanism) and extended the rule to `var`-sourced assignment (else a
+   two-regime system survives in miniature — and the probe showed var–var aliasing
+   is equally broken today).
+3. **`pn f(var a: T)` instead of `mut`** — designer's syntax, endorsed by review as
+   strictly better: no new keyword, Pascal precedent, and `var` becomes the single
+   mutability marker in the language.
+
+**Round 3 — the closure question (designer): "if captures are copies, can they be
+mutated?"** Resolution: no — compile error. The mutable-capture option (docs'
+claimed per-closure writable copy) fails on rule 1 itself: a stateful `counter()`
+returning 1, 2, 3 is a `let`-bound value changing observable behavior per call, and
+closures acquire identity (the counter paradox: does `let c2 = counter` share or
+fork the count? — both answers are bad). The per-call-copy option is value-semantics
+legal but a confusion trap (the intuitive counter returns 1, 1, 1 silently).
+Immutable captures match Java (effectively-final) and C++ (const by-value captures),
+and the probes showed no working behavior was being given up. Idioms for state:
+object with `pn` methods in a `var`, module-level `var`, view `state`, `var` local
+inside the closure body, `var` params.
+
+**Round 4 — the JS question (designer): "JS closures are mutable and used as
+objects — how to model that if Lambda closures are immutable?"** Resolution: the
+meta-/object-language distinction. A JS closure is never modeled *by* a Lambda
+closure; it is modeled *as data* — an immutable term `<jsclosure params; body,
+envaddr>` plus environment records in the model's `<store>` cell. Mutability is a
+property of the *configuration*, never of meta-language values; two JS closures
+sharing an environment record share mutations through store-rewrite rules, and full
+JS semantics (including `var`-in-loop capture bugs) falls out with no Lambda value
+ever mutating. Meta-language immutability is *required*, not merely tolerable: rule
+matching, COW, and derivation replay are sound only over immutable terms — which is
+why K, Redex, and Coq are all immutable meta-languages happily modeling mutable
+heaps. The LambdaJS engine is unaffected (its JS scopes are C++-internal), and the
+Lambda-native replacement for the closure-as-object pattern is the object type with
+`pn` methods — state declared as typed fields, mutation root visible as a `var`
+binding, rather than smuggled into an invisible environment record. (Working
+example verified: `type Counter { value: int = 0, step: int = 1; pn increment()
+{ value = value + step } fn double() => value * 2 }`, used via
+`var c = <Counter step: 1>` — modulo the C4.1 bugs.)
+
+#### C4.3 Costs accepted (recorded to avoid relitigation)
+
+- **Migration**: `pn` code mutating through un-annotated params or `let`/`var`
+  aliases breaks and needs `var` annotations or restructuring; the awfy benchmarks
+  need signature updates; the editor/Radiant bridge needs an audit for element
+  aliasing it may rely on.
+- **COW perf cliffs**: a container with `ref_cnt > 1` copies on first mutation;
+  accidental copies in hot loops are a real hazard (Swift lives with this).
+  Mitigations: `var`-param borrows (no refcount bump), JIT uniqueness tracking, and
+  a possible lint ("mutation of shared container copies — consider a `var` param").
+  **Elements are the worst case** (whole-document copies) — editor workloads should
+  be benchmarked before this ships.
+- Users coming from JS/Python must learn that mutation does not travel — offset by
+  it being the *point* of the model, and by `var` params making every place it does
+  travel visible in a signature.
+
+#### C4.4 Follow-ups
+
+1. Implement: COW at mutation points (refcount-triggered); `var`-param grammar and
+   the three compile checks (var-args-only, exclusivity, `var` receiver for `pn`
+   methods); compile error for capture assignment (both `fn` and `pn` closures,
+   replacing today's silent-continue and crash).
+2. Fix the C4.1 object-mutation bug cluster (default-instance no-op, lost second
+   mutation, pn methods with parameters not parsing) — needed under any semantics.
+3. Migration audit: fixtures/stdlib for aliasing reliance; benchmark signatures;
+   editor/Radiant element paths; element-COW performance benchmark.
+4. Docs: delete/rewrite `Lambda_Func.md` § Mutable Captures (aspirational); write
+   the aliasing/mutability section (this model); document the state idioms.
+5. Formal model (Stage 4): store only for `var` bindings; **`let`-finality and
+   COW-unobservability become verifiable properties**; the `let g/var h` probe
+   becomes a regression fixture.
+
 ---
 
 ## Triage summary
@@ -701,11 +888,11 @@ Additional points in favor, recorded:
 | A4 | `'a' == "a"` raises | **Fix or re-document** — impl and docs must agree |
 | A5 | `==` non-reflexive / repr-sensitive | Document NaN; **fix ArrayNum ==** (task_38782787) |
 | A6 | OOB trichotomy, silent error values | **Decide & fix** (B8) |
-| A7 | Aliasing trichotomy | **Document now, converge later** (B3) |
+| A7 | Aliasing (revised: uniform reference + broken object mutation) | **RESOLVED** (§C4): mutable value semantics — `let` final, bindings copy (COW), `var` params as sole sharing, closures immutable |
 | A8 | Covariance log-only failure | **Fix failure mode**; decide assignment-subtyping rule |
 | A9 | REPL rollback replay | **Bug fix** (tooling) |
 | A10 | Spec gaps (generics, `as`, open maps, match order, `~`) | **Document**; delete aspirational generics text or implement |
-| B1–B8 | Design recommendations | Discussion — this document's purpose. B1 resolved via §C1 (adopted for strings, rejected for symbols/binary). B2 superseded by §C3 (checked-error retracted; promotion + Go tier adopted) |
+| B1–B8 | Design recommendations | Discussion — this document's purpose. B1 resolved via §C1 (adopted for strings, rejected for symbols/binary). B2 superseded by §C3 (checked-error retracted; promotion + Go tier adopted). B3 resolved via §C4 (value semantics adopted; `var` params instead of `mut`) |
 
 Every "decide" row above is a decision that formal rules (the Redex model of
 [Lambda_Semantics.md](Lambda_Semantics.md), or the proposed native DSL) will force
