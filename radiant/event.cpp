@@ -3893,7 +3893,9 @@ static void dom_js_mutation_reset_records(DomDocument* doc) {
     doc->js_mutation_record_overflow = 0;
 }
 
-static bool dom_js_mutation_kind_seen(DomDocument* doc, DomJsMutationKind kind) {
+// Release builds strip some logging callsites, so this diagnostic helper can be
+// referenced only in debug builds even though the reconcile logic keeps it nearby.
+[[maybe_unused]] static bool dom_js_mutation_kind_seen(DomDocument* doc, DomJsMutationKind kind) {
     if (!doc) return false;
     uint32_t slot = (uint32_t)kind;
     if (slot >= 31) slot = 0;

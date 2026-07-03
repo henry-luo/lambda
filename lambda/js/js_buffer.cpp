@@ -42,6 +42,7 @@ static Item make_string_item(const char* str) {
 
 extern "C" Item js_get_current_this(void);
 extern "C" Item js_blob_new(Item parts, Item options);
+extern "C" Item js_blob_url_resolve(Item id_item);
 extern "C" void js_set_function_name(Item fn_item, Item name_item);
 void* heap_alloc(int size, TypeId type_id);
 
@@ -3046,6 +3047,9 @@ extern "C" Item js_get_buffer_namespace(void) {
         js_set_function_name(blob_ctor, make_string_item("Blob"));
         js_property_set(buffer_namespace, make_string_item("Blob"), blob_ctor);
     }
+    // buffer.resolveObjectURL reads URL.createObjectURL's process-local Blob
+    // registry; without the shared resolver the Buffer and URL surfaces diverge.
+    buf_set_method(buffer_namespace, "resolveObjectURL", (void*)js_blob_url_resolve, 1);
 
     // Buffer.constants — MAX_LENGTH and MAX_STRING_LENGTH
     {

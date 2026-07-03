@@ -255,6 +255,7 @@ void js_set_this(Item this_val);
 Item js_get_new_target();
 void js_set_new_target(Item target);
 void js_set_direct_new_target(Item target);
+void js_set_pending_call_source(const char* source, int64_t len);
 Item js_super_bind_this(Item this_val, Item construct_result);
 Item js_get_super_this_value(void);
 Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor);

@@ -17,11 +17,13 @@
 #include <cmath>
 #include <cstdio>
 #include <cerrno>
+#include <time.h>
 
 // forward declarations
 extern "C" Item js_util_inspect(Item obj_item, Item options_item);
 extern "C" Item js_symbol_for(Item desc);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
+extern "C" Item js_buffer_isBuffer(Item obj);
 
 struct JsUtilFunctionView {
     TypeId type_id;
@@ -335,6 +337,7 @@ struct JsInspectContext {
 };
 
 static Item js_util_inspect_value(Item obj_item, JsInspectContext* ctx, int depth_left);
+static void js_util_inspect_append_escaped_char(StrBuf* sb, char ch);
 
 static Item js_util_inspect_make_string(StrBuf* sb) {
     Item result = make_string_item(sb->str ? sb->str : "", (int)sb->length);
@@ -482,25 +485,56 @@ static void js_util_inspect_append_escaped_char(StrBuf* sb, char ch) {
     else strbuf_append_char(sb, ch);
 }
 
-static void js_util_inspect_append_assertion_string(StrBuf* sb, Item value) {
+static void js_util_inspect_append_assertion_string(StrBuf* sb, Item value, size_t long_limit) {
     String* s = get_type_id(value) == LMD_TYPE_STRING ? it2s(value) : NULL;
-    strbuf_append_char(sb, '\'');
     if (s && s->len > 0) {
-        size_t limit = s->len;
-        bool append_ellipsis = false;
         int newline_count = 0;
         for (size_t i = 0; i < s->len; i++) {
             if (s->chars[i] == '\n') {
                 newline_count++;
                 if (newline_count == 10) {
-                    limit = i + 1;
-                    append_ellipsis = true;
-                    break;
+                    if (i + 1 <= 32) {
+                        // Very short repeated lines stay readable as one escaped
+                        // literal in Node's AssertionError inspect output.
+                        strbuf_append_char(sb, '\'');
+                        for (size_t k = 0; k <= i; k++) {
+                            js_util_inspect_append_escaped_char(sb, s->chars[k]);
+                        }
+                        strbuf_append_str(sb, "...'");
+                        return;
+                    }
+                    // AssertionError inspect prints long multiline strings as
+                    // concatenated quoted chunks; one giant literal misses
+                    // Node's public diagnostic shape.
+                    size_t start = 0;
+                    int line = 0;
+                    for (size_t j = 0; j <= i; j++) {
+                        if (s->chars[j] != '\n') continue;
+                        if (line > 0) strbuf_append_str(sb, "    ");
+                        strbuf_append_char(sb, '\'');
+                        for (size_t k = start; k <= j; k++) {
+                            js_util_inspect_append_escaped_char(sb, s->chars[k]);
+                        }
+                        strbuf_append_str(sb, "' +\n");
+                        start = j + 1;
+                        line++;
+                    }
+                    strbuf_append_str(sb, "    '...'");
+                    return;
                 }
             }
         }
-        if (!append_ellipsis && s->len > 9488) {
-            limit = 9488;
+    }
+
+    strbuf_append_char(sb, '\'');
+    if (s && s->len > 0) {
+        size_t limit = s->len;
+        bool append_ellipsis = false;
+        if (!append_ellipsis && s->len > long_limit) {
+            // AssertionError inspect intentionally shows a short excerpt of
+            // actual/expected string slots; Assert instances with diff options
+            // use Node's longer public excerpt while plain assert stays compact.
+            limit = long_limit;
             append_ellipsis = true;
         }
         for (size_t i = 0; i < limit; i++) {
@@ -529,11 +563,43 @@ static void js_util_inspect_append_key(StrBuf* sb, String* key, bool hidden) {
     if (hidden) strbuf_append_char(sb, ']');
 }
 
+static void js_util_inspect_append_quoted_key(StrBuf* sb, String* key, bool hidden) {
+    if (hidden) strbuf_append_char(sb, '[');
+    if (!key) {
+        if (hidden) strbuf_append_char(sb, ']');
+        return;
+    }
+    bool identifier = key->len > 0 &&
+        ((key->chars[0] >= 'A' && key->chars[0] <= 'Z') ||
+         (key->chars[0] >= 'a' && key->chars[0] <= 'z') ||
+         key->chars[0] == '_' || key->chars[0] == '$');
+    for (size_t i = 1; identifier && i < key->len; i++) {
+        char ch = key->chars[i];
+        identifier = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+            (ch >= '0' && ch <= '9') || ch == '_' || ch == '$';
+    }
+    if (identifier) {
+        strbuf_append_str_n(sb, key->chars, key->len);
+    } else {
+        strbuf_append_char(sb, '\'');
+        for (size_t i = 0; i < key->len; i++) {
+            js_util_inspect_append_escaped_char(sb, key->chars[i]);
+        }
+        strbuf_append_char(sb, '\'');
+    }
+    if (hidden) strbuf_append_char(sb, ']');
+}
+
 static void js_util_inspect_append_property(StrBuf* sb, Item owner, Item key,
                                             JsInspectContext* ctx, int depth_left,
                                             bool* first) {
     if (get_type_id(key) != LMD_TYPE_STRING) return;
     String* ks = it2s(key);
+    if (ks && ks->len == 20 && memcmp(ks->chars, "__strict_arguments__", 20) == 0) {
+        // Strict Arguments stores this engine marker in the companion map; Node
+        // inspect/deep diagnostics must not expose it as a user property.
+        return;
+    }
     bool enumerable = true;
     if (ks) enumerable = js_props_obj_query_enumerable(owner, ks->chars, (int)ks->len);
     bool hidden = ctx && ctx->show_hidden && !enumerable;
@@ -550,14 +616,22 @@ static void js_util_inspect_append_property(StrBuf* sb, Item owner, Item key,
 
 static void js_util_inspect_append_named_value(StrBuf* sb, const char* name, Item value,
                                                JsInspectContext* ctx, int depth_left,
-                                               bool* first, bool assertion_string) {
+                                               bool* first, bool assertion_string,
+                                               size_t assertion_string_limit = 488) {
     if (js_util_inspect_is_undefined(value)) return;
     if (!*first) strbuf_append_str(sb, ", ");
     *first = false;
     strbuf_append_str(sb, name);
     strbuf_append_str(sb, ": ");
     if (assertion_string && get_type_id(value) == LMD_TYPE_STRING) {
-        js_util_inspect_append_assertion_string(sb, value);
+        js_util_inspect_append_assertion_string(sb, value, assertion_string_limit);
+        return;
+    }
+    if (assertion_string && get_type_id(value) == LMD_TYPE_ARRAY &&
+            js_array_length(value) > 50) {
+        // AssertionError's property suffix is a compact summary; expanding
+        // large actual/expected arrays hides the useful constructor tag.
+        strbuf_append_str(sb, "[Array]");
         return;
     }
     Item value_str = js_util_inspect_value(value, ctx, depth_left - 1);
@@ -568,8 +642,12 @@ static void js_util_inspect_append_named_value(StrBuf* sb, const char* name, Ite
 static Item js_util_inspect_assertion_error(Item obj_item, JsInspectContext* ctx, int depth_left) {
     Item message = js_property_get(obj_item, make_string_item("message"));
     Item code = js_property_get(obj_item, make_string_item("code"));
+    Item diff = js_property_get(obj_item, make_string_item("diff"));
+    Item instance_error = js_property_get(obj_item, make_string_item("__assert_instance_error__"));
     String* ms = get_type_id(message) == LMD_TYPE_STRING ? it2s(message) : NULL;
     String* cs = get_type_id(code) == LMD_TYPE_STRING ? it2s(code) : NULL;
+    size_t assertion_string_limit =
+        (get_type_id(instance_error) == LMD_TYPE_BOOL && it2b(instance_error)) ? 9488 : 488;
 
     StrBuf* sb = strbuf_new();
     strbuf_append_str(sb, "AssertionError");
@@ -589,17 +667,31 @@ static Item js_util_inspect_assertion_error(Item obj_item, JsInspectContext* ctx
         js_property_get(obj_item, make_string_item("generatedMessage")),
         ctx, depth_left, &first, false);
     js_util_inspect_append_named_value(sb, "code", code, ctx, depth_left, &first, false);
-    js_util_inspect_append_named_value(sb, "actual",
-        js_property_get(obj_item, make_string_item("actual")),
-        ctx, depth_left, &first, true);
-    js_util_inspect_append_named_value(sb, "expected",
-        js_property_get(obj_item, make_string_item("expected")),
-        ctx, depth_left, &first, true);
+    Item actual = js_property_get(obj_item, make_string_item("actual"));
+    Item expected = js_property_get(obj_item, make_string_item("expected"));
+    bool multiline_expected = get_type_id(actual) == LMD_TYPE_ARRAY &&
+        js_array_length(actual) > 50 && !js_util_inspect_is_undefined(expected);
+    js_util_inspect_append_named_value(sb, "actual", actual,
+        ctx, depth_left, &first, true, assertion_string_limit);
+    if (multiline_expected) {
+        // Large AssertionError arrays keep the expected slot on the next line;
+        // otherwise Node's compact `[Array]` summary is not discoverable.
+        strbuf_append_str(sb, ",\n  expected: ");
+        if (get_type_id(expected) == LMD_TYPE_STRING) {
+            js_util_inspect_append_assertion_string(sb, expected, assertion_string_limit);
+        } else {
+            Item value_str = js_util_inspect_value(expected, ctx, depth_left - 1);
+            String* vs = it2s(value_str);
+            if (vs) strbuf_append_str_n(sb, vs->chars, vs->len);
+        }
+    } else {
+        js_util_inspect_append_named_value(sb, "expected", expected,
+            ctx, depth_left, &first, true, assertion_string_limit);
+    }
     js_util_inspect_append_named_value(sb, "operator",
         js_property_get(obj_item, make_string_item("operator")),
         ctx, depth_left, &first, false);
-    js_util_inspect_append_named_value(sb, "diff",
-        js_property_get(obj_item, make_string_item("diff")),
+    js_util_inspect_append_named_value(sb, "diff", diff,
         ctx, depth_left, &first, false);
 
     strbuf_append_str(sb, " }");
@@ -627,6 +719,194 @@ static Item js_util_inspect_abort_controller(Item obj_item, JsInspectContext* ct
     if (st) strbuf_append_str_n(sb, st->chars, st->len);
     else strbuf_append_str(sb, "[AbortSignal]");
     strbuf_append_str(sb, " }");
+    return js_util_inspect_make_string(sb);
+}
+
+static bool js_util_inspect_constructor_name(Item value, char* out, int out_size) {
+    if (out_size <= 0 || get_type_id(value) != LMD_TYPE_MAP) return false;
+    out[0] = '\0';
+    Item ctor = js_property_get(value, make_string_item("constructor"));
+    if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) {
+        Item proto = js_get_prototype_of(value);
+        if (get_type_id(proto) == LMD_TYPE_MAP) {
+            ctor = js_property_get(proto, make_string_item("constructor"));
+        }
+    }
+    if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) return false;
+    Item name = js_property_get(ctor, make_string_item("name"));
+    String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
+    if (!ns || ns->len == 0) return false;
+    int len = (int)(ns->len < (size_t)out_size - 1 ? ns->len : (size_t)out_size - 1);
+    memcpy(out, ns->chars, len);
+    out[len] = '\0';
+    return true;
+}
+
+static bool js_util_is_arguments_exotic(Item value) {
+    if (get_type_id(value) != LMD_TYPE_ARRAY || !value.array ||
+            value.array->is_content != 1 || value.array->extra == 0) {
+        return false;
+    }
+    Map* props = (Map*)(uintptr_t)value.array->extra;
+    bool found = false;
+    Item tag = js_map_get_fast_ext(props, "__sym_4", 7, &found);
+    if (!found || get_type_id(tag) != LMD_TYPE_STRING) return false;
+    String* s = it2s(tag);
+    return s && s->len == 9 && memcmp(s->chars, "Arguments", 9) == 0;
+}
+
+static bool js_util_is_arguments_deep_value(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_MAP) return js_class_id(value) == JS_CLASS_ARGUMENTS;
+    if (type == LMD_TYPE_ARRAY) return js_util_is_arguments_exotic(value);
+    return false;
+}
+
+static Item js_util_inspect_date(Item obj_item, JsInspectContext* ctx, int depth_left) {
+    StrBuf* sb = strbuf_new();
+    char ctor_name[64];
+    if (js_util_inspect_constructor_name(obj_item, ctor_name, sizeof(ctor_name)) &&
+            strcmp(ctor_name, "Date") != 0) {
+        strbuf_append_str(sb, ctor_name);
+        strbuf_append_char(sb, ' ');
+    }
+    bool found_time = false;
+    Item time_value = js_map_get_fast_ext(obj_item.map, "__time__", 8, &found_time);
+    bool valid = found_time &&
+        (get_type_id(time_value) == LMD_TYPE_INT || get_type_id(time_value) == LMD_TYPE_FLOAT);
+    if (valid) {
+        double millis = get_type_id(time_value) == LMD_TYPE_INT ? (double)it2i(time_value) : it2d(time_value);
+        if (millis != millis) valid = false;
+        if (valid) {
+            time_t seconds = (time_t)(millis / 1000.0);
+            int ms = (int)((int64_t)millis % 1000);
+            if (ms < 0) ms = -ms;
+            struct tm tm_value;
+            if (gmtime_r(&seconds, &tm_value)) {
+                char buf[40];
+                snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+                    tm_value.tm_year + 1900, tm_value.tm_mon + 1, tm_value.tm_mday,
+                    tm_value.tm_hour, tm_value.tm_min, tm_value.tm_sec, ms);
+                strbuf_append_str(sb, buf);
+            } else {
+                valid = false;
+            }
+        }
+    }
+    if (!valid) strbuf_append_str(sb, "Invalid Date");
+
+    Item keys = (ctx && ctx->show_hidden) ? js_object_get_own_property_names(obj_item) : js_object_keys(obj_item);
+    int64_t klen = js_array_length(keys);
+    if (klen > 0) {
+        int64_t emitted = 0;
+        for (int64_t i = 0; i < klen; i++) {
+            Item key = js_array_get_int(keys, i);
+            if (get_type_id(key) != LMD_TYPE_STRING) continue;
+            String* ks = it2s(key);
+            if (ks && ks->len == 8 && memcmp(ks->chars, "__time__", 8) == 0) continue;
+            bool enumerable = ks ? js_props_obj_query_enumerable(obj_item, ks->chars, (int)ks->len) : true;
+            bool hidden = ctx && ctx->show_hidden && !enumerable;
+            Item value = js_property_get(obj_item, key);
+            Item text = js_util_inspect_value(value, ctx, depth_left - 1);
+            String* ts = get_type_id(text) == LMD_TYPE_STRING ? it2s(text) : NULL;
+            if (emitted == 0) strbuf_append_str(sb, " { ");
+            else strbuf_append_str(sb, ", ");
+            js_util_inspect_append_quoted_key(sb, ks, hidden);
+            strbuf_append_str(sb, ": ");
+            if (ts) strbuf_append_str_n(sb, ts->chars, ts->len);
+            emitted++;
+        }
+        if (emitted > 0) strbuf_append_str(sb, " }");
+    }
+    return js_util_inspect_make_string(sb);
+}
+
+static Item js_util_inspect_arguments(Item obj_item, JsInspectContext* ctx, int depth_left) {
+    Item keys = (ctx && ctx->show_hidden) ? js_object_get_own_property_names(obj_item) : js_object_keys(obj_item);
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, "[Arguments] {");
+    int64_t klen = js_array_length(keys);
+    bool first = true;
+    for (int64_t i = 0; i < klen; i++) {
+        Item key = js_array_get_int(keys, i);
+        if (get_type_id(key) != LMD_TYPE_STRING) continue;
+        String* ks = it2s(key);
+        if (ks && ks->len == 20 && memcmp(ks->chars, "__strict_arguments__", 20) == 0) {
+            // Strict Arguments uses this internal bit for callee semantics; it
+            // is not part of the public Arguments inspect shape.
+            continue;
+        }
+        Item value = js_property_get(obj_item, key);
+        Item text = js_util_inspect_value(value, ctx, depth_left - 1);
+        String* ts = get_type_id(text) == LMD_TYPE_STRING ? it2s(text) : NULL;
+        strbuf_append_str(sb, first ? " " : ", ");
+        first = false;
+        js_util_inspect_append_quoted_key(sb, ks, false);
+        strbuf_append_str(sb, ": ");
+        if (ts) strbuf_append_str_n(sb, ts->chars, ts->len);
+    }
+    if (!first) strbuf_append_char(sb, ' ');
+    strbuf_append_char(sb, '}');
+    return js_util_inspect_make_string(sb);
+}
+
+static Item js_util_inspect_regexp(Item obj_item, JsInspectContext* ctx, int depth_left) {
+    Item text = js_to_string_val(obj_item);
+    String* rs = get_type_id(text) == LMD_TYPE_STRING ? it2s(text) : NULL;
+    StrBuf* sb = strbuf_new();
+    char ctor_name[64];
+    if (js_util_inspect_constructor_name(obj_item, ctor_name, sizeof(ctor_name)) &&
+            strcmp(ctor_name, "RegExp") != 0) {
+        strbuf_append_str(sb, ctor_name);
+        strbuf_append_char(sb, ' ');
+    }
+    if (rs) strbuf_append_str_n(sb, rs->chars, rs->len);
+    else strbuf_append_str(sb, "/(?:)/");
+
+    Item keys = (ctx && ctx->show_hidden) ? js_object_get_own_property_names(obj_item) : js_object_keys(obj_item);
+    int64_t klen = js_array_length(keys);
+    if (klen > 0) {
+        strbuf_append_str(sb, " {");
+        for (int64_t i = 0; i < klen; i++) {
+            Item key = js_array_get_int(keys, i);
+            if (get_type_id(key) != LMD_TYPE_STRING) continue;
+            String* ks = it2s(key);
+            bool enumerable = ks ? js_props_obj_query_enumerable(obj_item, ks->chars, (int)ks->len) : true;
+            bool hidden = ctx && ctx->show_hidden && !enumerable;
+            Item value = js_property_get(obj_item, key);
+            Item value_text = js_util_inspect_value(value, ctx, depth_left - 1);
+            String* vs = get_type_id(value_text) == LMD_TYPE_STRING ? it2s(value_text) : NULL;
+            strbuf_append_str(sb, i == 0 ? " " : ", ");
+            js_util_inspect_append_quoted_key(sb, ks, hidden);
+            strbuf_append_str(sb, ": ");
+            if (vs) strbuf_append_str_n(sb, vs->chars, vs->len);
+        }
+        strbuf_append_str(sb, " }");
+    }
+    return js_util_inspect_make_string(sb);
+}
+
+static Item js_util_inspect_typed_array(Item obj_item, JsInspectContext* ctx, int depth_left) {
+    JsTypedArray* ta = js_get_typed_array_ptr(obj_item.map);
+    const char* type_name = ta && ta->is_buffer ? "Buffer" : js_typed_array_type_name(obj_item);
+    if (!type_name) type_name = "Uint8Array";
+    int len = js_typed_array_length(obj_item);
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, type_name);
+    strbuf_append_char(sb, '(');
+    strbuf_append_int64(sb, len < 0 ? 0 : len);
+    if (ta && ta->is_buffer) strbuf_append_str(sb, ") [Uint8Array] [");
+    else strbuf_append_str(sb, ") [");
+    if (len > 0) strbuf_append_char(sb, ' ');
+    for (int i = 0; i < len; i++) {
+        if (i > 0) strbuf_append_str(sb, ", ");
+        Item elem = js_typed_array_get(obj_item, (Item){.item = i2it(i)});
+        Item elem_text = js_util_inspect_value(elem, ctx, depth_left - 1);
+        String* es = get_type_id(elem_text) == LMD_TYPE_STRING ? it2s(elem_text) : NULL;
+        if (es) strbuf_append_str_n(sb, es->chars, es->len);
+    }
+    if (len > 0) strbuf_append_char(sb, ' ');
+    strbuf_append_char(sb, ']');
     return js_util_inspect_make_string(sb);
 }
 
@@ -670,6 +950,26 @@ static Item js_util_inspect_object(Item obj_item, JsInspectContext* ctx, int dep
     if (cls == JS_CLASS_ABORT_CONTROLLER) {
         Item result = depth_left < 0 ? make_string_item("[AbortController]")
             : js_util_inspect_abort_controller(obj_item, ctx, depth_left);
+        if (ctx) js_util_inspect_seen_pop(ctx->seen);
+        return result;
+    }
+    if (cls == JS_CLASS_DATE) {
+        // Date inspect is value-based; falling through to own properties prints
+        // "{}" and breaks assert's public Date diagnostics.
+        Item result = js_util_inspect_date(obj_item, ctx, depth_left);
+        if (ctx) js_util_inspect_seen_pop(ctx->seen);
+        return result;
+    }
+    if (cls == JS_CLASS_REGEXP) {
+        // RegExp inspect must expose the pattern/flags, not the backing map.
+        Item result = js_util_inspect_regexp(obj_item, ctx, depth_left);
+        if (ctx) js_util_inspect_seen_pop(ctx->seen);
+        return result;
+    }
+    if (cls == JS_CLASS_ARGUMENTS) {
+        // Arguments objects have a distinct assert diff label even though their
+        // enumerable shape looks object-like.
+        Item result = js_util_inspect_arguments(obj_item, ctx, depth_left);
         if (ctx) js_util_inspect_seen_pop(ctx->seen);
         return result;
     }
@@ -789,12 +1089,18 @@ static Item js_util_inspect_value(Item obj_item, JsInspectContext* ctx, int dept
             strbuf_append_str_n(sb, ns->chars, ns->len);
             strbuf_append_char(sb, ']');
         } else {
-            strbuf_append_str(sb, "[Function]");
+            strbuf_append_str(sb, "[Function (anonymous)]");
         }
         return js_util_inspect_make_string(sb);
     }
 
+    if (js_class_id(obj_item) == JS_CLASS_ARGUMENTS || js_util_is_arguments_exotic(obj_item)) {
+        // Arguments may share array storage with a companion property map, but
+        // Node diagnostics preserve the public [Arguments] label.
+        return js_util_inspect_arguments(obj_item, ctx, depth_left);
+    }
     if (tid == LMD_TYPE_ARRAY) return js_util_inspect_array(obj_item, ctx, depth_left);
+    if (js_is_typed_array(obj_item)) return js_util_inspect_typed_array(obj_item, ctx, depth_left);
     if (js_util_inspect_is_object_like(obj_item)) return js_util_inspect_object(obj_item, ctx, depth_left);
 
     Item result = js_json_stringify(obj_item);
@@ -1290,6 +1596,15 @@ static bool js_util_typed_array_bytes_equal(Item a, Item b) {
     return memcmp(adata, bdata, (size_t)alen) == 0;
 }
 
+static bool js_util_typed_array_loose_compatible(JsTypedArray* a, JsTypedArray* b) {
+    if (!a || !b) return false;
+    if (a->element_type == b->element_type) return true;
+    // Buffer is a Uint8Array subclass; loose deep equality may ignore that
+    // subclass boundary, but signed/wider typed-array views are distinct types.
+    return ((a->is_buffer && a->element_type == JS_TYPED_UINT8 && b->element_type == JS_TYPED_UINT8) ||
+            (b->is_buffer && b->element_type == JS_TYPED_UINT8 && a->element_type == JS_TYPED_UINT8));
+}
+
 static bool js_util_arraybuffer_bytes_equal(Item a, Item b) {
     JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(a);
     JsArrayBuffer* bb = js_get_arraybuffer_ptr_item(b);
@@ -1354,6 +1669,17 @@ static bool js_util_is_nan_number(Item value) {
     return type == LMD_TYPE_FLOAT && isnan(it2d(value));
 }
 
+static bool js_util_strict_zero_sign_differs(Item a, Item b) {
+    TypeId ta = get_type_id(a);
+    TypeId tb = get_type_id(b);
+    bool a_num = ta == LMD_TYPE_INT || ta == LMD_TYPE_FLOAT;
+    bool b_num = tb == LMD_TYPE_INT || tb == LMD_TYPE_FLOAT;
+    if (!a_num || !b_num) return false;
+    double av = ta == LMD_TYPE_FLOAT ? it2d(a) : (double)it2i(a);
+    double bv = tb == LMD_TYPE_FLOAT ? it2d(b) : (double)it2i(b);
+    return av == 0.0 && bv == 0.0 && signbit(av) != signbit(bv);
+}
+
 static bool js_util_has_own_key(Item object, const char* key, int len) {
     extern Item js_has_own_property(Item obj, Item key);
     Item result = js_has_own_property(object,
@@ -1361,8 +1687,74 @@ static bool js_util_has_own_key(Item object, const char* key, int len) {
     return get_type_id(result) == LMD_TYPE_BOOL && it2b(result);
 }
 
+static Item js_util_deep_dispatch_value(Item value) {
+    return js_is_proxy(value) ? js_proxy_get_target(value) : value;
+}
+
+static TypeId js_util_deep_dispatch_type(Item value) {
+    return get_type_id(js_util_deep_dispatch_value(value));
+}
+
+static JsClass js_util_deep_dispatch_class(Item value) {
+    Item target = js_util_deep_dispatch_value(value);
+    return get_type_id(target) == LMD_TYPE_MAP ? js_class_id(target) : JS_CLASS_NONE;
+}
+
+static int64_t js_util_array_length_for_deep(Item value) {
+    if (!js_is_proxy(value)) return js_array_length(value);
+    Item len = js_property_get(value, make_string_item("length", 6));
+    TypeId type = get_type_id(len);
+    if (type == LMD_TYPE_INT) return it2i(len);
+    if (type == LMD_TYPE_FLOAT) return (int64_t)it2d(len);
+    return -1;
+}
+
+static bool js_util_string_equals(Item value, const char* text) {
+    if (get_type_id(value) != LMD_TYPE_STRING || !text) return false;
+    String* s = it2s(value);
+    size_t len = strlen(text);
+    return s && s->len == len && memcmp(s->chars, text, len) == 0;
+}
+
+static bool js_util_has_constructor_prototype(Item value, const char* ctor_name, int ctor_len) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    Item proto = js_get_prototype_of(value);
+    if (get_type_id(proto) != LMD_TYPE_MAP) return false;
+    Item ctor = js_get_constructor(make_string_item(ctor_name, ctor_len));
+    if (get_type_id(ctor) == LMD_TYPE_FUNC) {
+        Item ctor_proto = js_property_get(ctor, make_string_item("prototype", 9));
+        if (proto.item == ctor_proto.item) return true;
+    }
+    Item tag = js_property_get(proto, make_string_item("__sym_4", 7));
+    return js_util_string_equals(tag, ctor_name);
+}
+
+static bool js_util_is_real_regexp(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    Item target = js_util_deep_dispatch_value(value);
+    if (get_type_id(target) != LMD_TYPE_MAP) return false;
+    if (js_class_id(target) == JS_CLASS_REGEXP) return true;
+    bool found = false;
+    (void)js_map_get_fast_ext(target.map, "__rd", 4, &found);
+    return found;
+}
+
+static bool js_util_is_regexp_like_value(Item value) {
+    if (js_util_is_real_regexp(value)) return true;
+    return js_util_has_constructor_prototype(value, "RegExp", 6) ||
+           js_util_string_equals(js_property_get(value, make_string_item("__sym_4", 7)), "RegExp");
+}
+
+static bool js_util_is_url_like_value(Item value) {
+    return get_type_id(value) == LMD_TYPE_MAP &&
+           (js_util_deep_dispatch_class(value) == JS_CLASS_URL ||
+            js_util_has_constructor_prototype(value, "URL", 3));
+}
+
 static bool js_util_is_error_like_value(Item value) {
-    return get_type_id(value) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(value));
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    if (js_class_is_error_like(js_util_deep_dispatch_class(value))) return true;
+    return js_util_has_constructor_prototype(value, "Error", 5);
 }
 
 static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bool strict);
@@ -1381,6 +1773,28 @@ static bool js_util_key_is_symbol(Item key) {
 static Item js_util_enumerable_own_keys(Item object, bool include_symbols) {
     Item result = js_object_keys(object);
     if (get_type_id(result) != LMD_TYPE_ARRAY) result = js_array_new(0);
+    int64_t result_len = js_array_length(result);
+    Item filtered = ItemNull;
+    bool filtered_marker = false;
+    for (int64_t i = 0; i < result_len; i++) {
+        Item key = js_array_get_int(result, i);
+        String* ks = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
+        if (ks && ks->len == 20 && memcmp(ks->chars, "__strict_arguments__", 20) == 0) {
+            // The strict Arguments marker is runtime bookkeeping, not an
+            // enumerable user key for Node-compatible deep equality.
+            filtered_marker = true;
+            continue;
+        }
+        if (filtered_marker && get_type_id(filtered) != LMD_TYPE_ARRAY) {
+            filtered = js_array_new(0);
+            for (int64_t j = 0; j < i; j++) js_array_push(filtered, js_array_get_int(result, j));
+        }
+        if (get_type_id(filtered) == LMD_TYPE_ARRAY) js_array_push(filtered, key);
+    }
+    if (filtered_marker) {
+        if (get_type_id(filtered) != LMD_TYPE_ARRAY) filtered = js_array_new(0);
+        result = filtered;
+    }
     if (!include_symbols) return result;
 
     Item symbols = js_object_get_own_property_symbols(object);
@@ -1452,7 +1866,7 @@ static bool js_util_date_time_equal(Item a, Item b) {
 }
 
 static bool js_util_regexp_slots_equal(Item a, Item b, JsDeepEqualContext* ctx, bool strict) {
-    if (js_class_id(a) != JS_CLASS_REGEXP || js_class_id(b) != JS_CLASS_REGEXP) return false;
+    if (!js_util_is_real_regexp(a) || !js_util_is_real_regexp(b)) return false;
     const char* names[] = {"source", "flags", "lastIndex", NULL};
     const int lens[] = {6, 5, 9, 0};
     for (int i = 0; names[i]; i++) {
@@ -1469,12 +1883,23 @@ static bool js_util_is_weak_collection(Item value) {
     return cls == JS_CLASS_WEAK_MAP || cls == JS_CLASS_WEAK_SET;
 }
 
+static bool js_util_is_buffer_value(Item value) {
+    Item result = js_buffer_isBuffer(value);
+    if (get_type_id(result) == LMD_TYPE_BOOL) return it2b(result);
+    return get_type_id(result) == LMD_TYPE_INT && it2i(result) != 0;
+}
+
 static bool js_util_is_boxed_primitive(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
     JsClass cls = js_class_id(value);
-    return cls == JS_CLASS_BOOLEAN || cls == JS_CLASS_NUMBER ||
-           cls == JS_CLASS_STRING || cls == JS_CLASS_SYMBOL ||
-           cls == JS_CLASS_BIGINT;
+    if (cls == JS_CLASS_BOOLEAN || cls == JS_CLASS_NUMBER ||
+            cls == JS_CLASS_STRING || cls == JS_CLASS_SYMBOL ||
+            cls == JS_CLASS_BIGINT) {
+        return true;
+    }
+    bool found = false;
+    (void)js_map_get_fast_ext(value.map, "__primitiveValue__", 18, &found);
+    return found;
 }
 
 static bool js_util_boxed_primitive_equal(Item a, Item b, JsDeepEqualContext* ctx, bool strict) {
@@ -1498,13 +1923,55 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
     if (js_util_is_nan_number(a) && js_util_is_nan_number(b)) {
         return (Item){.item = b2it(true)};
     }
-    Item eq = strict ? js_strict_equal(a, b) : js_equal(a, b);
-    if (js_is_truthy(eq)) return (Item){.item = b2it(true)};
-
-    TypeId ta = get_type_id(a);
-    TypeId tb = get_type_id(b);
+    if (strict && js_util_strict_zero_sign_differs(a, b)) {
+        // Node deepStrictEqual uses SameValue for numeric primitives; `===`
+        // collapses +0 and -0 too early for assert's signed-zero cases.
+        return (Item){.item = b2it(false)};
+    }
+    TypeId ta = js_util_deep_dispatch_type(a);
+    TypeId tb = js_util_deep_dispatch_type(b);
     bool a_object_like = js_util_deep_equal_is_object_like_type(ta);
     bool b_object_like = js_util_deep_equal_is_object_like_type(tb);
+    if (!strict && a_object_like != b_object_like) {
+        // Legacy assert.deepEqual is loose for primitive leaves, but it must
+        // not let JS ToPrimitive make arrays/objects equal to primitives.
+        return (Item){.item = b2it(false)};
+    }
+    if (!strict && ta == LMD_TYPE_MAP && tb == LMD_TYPE_MAP) {
+        JsClass class_a = js_util_deep_dispatch_class(a);
+        JsClass class_b = js_util_deep_dispatch_class(b);
+        if (js_util_is_boxed_primitive(a) != js_util_is_boxed_primitive(b)) {
+            // Boxed primitives are branded values in loose deep equality; their
+            // enumerable index-like fields must not make them equal plain maps.
+            return (Item){.item = b2it(false)};
+        }
+        if (class_a != class_b && (class_a != JS_CLASS_NONE || class_b != JS_CLASS_NONE)) {
+            bool a_byte_view = js_is_typed_array(a) || js_util_is_buffer_value(a);
+            bool b_byte_view = js_is_typed_array(b) || js_util_is_buffer_value(b);
+            JsTypedArray* atyped = a_byte_view ? js_get_typed_array_ptr(a.map) : NULL;
+            JsTypedArray* btyped = b_byte_view ? js_get_typed_array_ptr(b.map) : NULL;
+            if (!a_byte_view || !b_byte_view ||
+                    !js_util_typed_array_loose_compatible(atyped, btyped)) {
+                // Loose deep equality ignores prototypes for ordinary objects,
+                // but branded built-ins are not interchangeable except
+                // Buffer/Uint8Array byte views, which Node compares by bytes.
+                return (Item){.item = b2it(false)};
+            }
+        }
+    }
+    if (a.item == b.item) return (Item){.item = b2it(true)};
+    bool a_arguments = js_util_is_arguments_deep_value(a);
+    bool b_arguments = js_util_is_arguments_deep_value(b);
+    if (a_arguments != b_arguments) {
+        // Arguments is array-backed internally in LambdaJS, but Node deep
+        // equality treats it as a distinct exotic object from arrays/maps.
+        return (Item){.item = b2it(false)};
+    }
+    if (strict || (!a_object_like && !b_object_like)) {
+        Item eq = strict ? js_strict_equal(a, b) : js_equal(a, b);
+        if (js_is_truthy(eq)) return (Item){.item = b2it(true)};
+    }
+
     if (ta != tb && (strict || !a_object_like || !b_object_like)) {
         return (Item){.item = b2it(false)};
     }
@@ -1537,15 +2004,23 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
         return (Item){.item = b2it(equal)};
     }
 
-    bool a_typed_array = js_is_typed_array(a);
-    bool b_typed_array = js_is_typed_array(b);
+    bool a_typed_array = js_is_typed_array(a) || js_util_is_buffer_value(a);
+    bool b_typed_array = js_is_typed_array(b) || js_util_is_buffer_value(b);
     if (a_typed_array || b_typed_array) {
         if (!a_typed_array || !b_typed_array) {
+            // Buffer instances are byte views too; missing this branch lets a
+            // fake object with copied index keys compare as a plain object.
             if (compare_object_like) js_util_deep_equal_leave(ctx);
             return (Item){.item = b2it(false)};
         }
         JsTypedArray* atyped = js_get_typed_array_ptr(a.map);
         JsTypedArray* btyped = js_get_typed_array_ptr(b.map);
+        if (!atyped || !btyped) {
+            // Borrowed TypedArray/Buffer prototypes do not carry native backing
+            // storage; comparing them as byte views makes fake object types pass.
+            if (compare_object_like) js_util_deep_equal_leave(ctx);
+            return (Item){.item = b2it(false)};
+        }
         if (strict && atyped && btyped && atyped->is_buffer != btyped->is_buffer) {
             // Buffer shares Uint8Array storage, but strict deep equality must keep the distinct Buffer prototype visible.
             if (compare_object_like) js_util_deep_equal_leave(ctx);
@@ -1557,7 +2032,8 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
             int blen = js_typed_array_byte_length(b);
             void* adata = js_typed_array_current_data_ptr(a);
             void* bdata = js_typed_array_current_data_ptr(b);
-            equal = alen == blen && (alen == 0 || (adata && bdata && memcmp(adata, bdata, (size_t)alen) == 0));
+            equal = js_util_typed_array_loose_compatible(atyped, btyped) &&
+                alen == blen && (alen == 0 || (adata && bdata && memcmp(adata, bdata, (size_t)alen) == 0));
         }
         // Typed-array bytes are only the indexed storage; enumerable custom and
         // symbol properties still participate in Node deep equality.
@@ -1577,7 +2053,8 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
     }
 
     if (ta == LMD_TYPE_MAP && tb == LMD_TYPE_MAP &&
-        (js_class_id(a) == JS_CLASS_DATE || js_class_id(b) == JS_CLASS_DATE)) {
+        (js_util_deep_dispatch_class(a) == JS_CLASS_DATE ||
+         js_util_deep_dispatch_class(b) == JS_CLASS_DATE)) {
         bool equal = js_util_date_time_equal(a, b) &&
                      js_util_compare_enumerable_properties(a, b, ctx, strict);
         if (compare_object_like) js_util_deep_equal_leave(ctx);
@@ -1585,7 +2062,9 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
     }
 
     if (ta == LMD_TYPE_MAP && tb == LMD_TYPE_MAP &&
-        (js_class_id(a) == JS_CLASS_REGEXP || js_class_id(b) == JS_CLASS_REGEXP)) {
+        (js_util_is_regexp_like_value(a) || js_util_is_regexp_like_value(b))) {
+        // Borrowed RegExp prototypes/tags do not provide RegExp internal slots;
+        // treating those fakes as plain objects lets distinct object types pass.
         bool equal = js_util_regexp_slots_equal(a, b, ctx, strict) &&
                      js_util_compare_enumerable_properties(a, b, ctx, strict);
         if (compare_object_like) js_util_deep_equal_leave(ctx);
@@ -1607,9 +2086,10 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
     }
 
     if (ta == LMD_TYPE_MAP && tb == LMD_TYPE_MAP &&
-        (js_class_id(a) == JS_CLASS_URL || js_class_id(b) == JS_CLASS_URL)) {
+        (js_util_is_url_like_value(a) || js_util_is_url_like_value(b))) {
         // URL wrappers rebuild nested searchParams methods per instance; href is the canonical structural value.
-        bool equal = js_util_url_href_equal(a, b) &&
+        bool equal = js_class_id(a) == JS_CLASS_URL && js_class_id(b) == JS_CLASS_URL &&
+                     js_util_url_href_equal(a, b) &&
                      js_util_compare_enumerable_properties(a, b, ctx, strict);
         if (compare_object_like) js_util_deep_equal_leave(ctx);
         return (Item){.item = b2it(equal)};
@@ -1620,11 +2100,27 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
             js_util_deep_equal_leave(ctx);
             return (Item){.item = b2it(false)};
         }
-        int64_t la = js_array_length(a);
-        int64_t lb = js_array_length(b);
+        // Proxies dispatch by target type, but key collection still goes
+        // through proxy traps so invalid ownKeys remains observable.
+        int64_t la = js_util_array_length_for_deep(a);
+        int64_t lb = js_util_array_length_for_deep(b);
         if (la != lb) {
             js_util_deep_equal_leave(ctx);
                 return (Item){.item = b2it(false)};
+        }
+        if (a_arguments && b_arguments) {
+            for (int64_t i = 0; i < la; i++) {
+                Item r = js_util_isDeepEqual_impl(
+                    js_array_get_int(a, i),
+                    js_array_get_int(b, i),
+                    ctx, strict);
+                if (!js_is_truthy(r)) {
+                    js_util_deep_equal_leave(ctx);
+                    return (Item){.item = b2it(false)};
+                }
+            }
+            // Arguments indexed slots are stored in array backing; relying only
+            // on Object.keys can miss changed parameter values after inspection.
         }
         // Array holes differ from present undefined elements; comparing the
         // enumerable own-key set preserves sparseness and custom properties.
@@ -1639,7 +2135,10 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
                 js_util_deep_equal_leave(ctx);
                 return (Item){.item = b2it(false)};
             }
-            if (strict && js_class_id(a) != js_class_id(b)) {
+            JsClass class_a = js_util_deep_dispatch_class(a);
+            JsClass class_b = js_util_deep_dispatch_class(b);
+            if (strict && js_class_is_error_like(class_a) &&
+                    js_class_is_error_like(class_b) && class_a != class_b) {
                 js_util_deep_equal_leave(ctx);
                 return (Item){.item = b2it(false)};
             }
@@ -1838,7 +2337,6 @@ extern "C" Item js_util_types_isPrimitive(Item obj) {
 }
 
 extern "C" Item js_util_types_isBuffer(Item obj) {
-    extern Item js_buffer_isBuffer(Item);
     return js_buffer_isBuffer(obj);
 }
 

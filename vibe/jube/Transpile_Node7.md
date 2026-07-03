@@ -647,3 +647,104 @@ Results:
 | --- | --- |
 | focused 9-regression Test262 batch | 9/9 pass |
 | `make test262-baseline` | 40261/40261 fully passed, 0 regressions, 0 retry |
+
+## Progress Update: 2026-07-03 Release Build and Assert Red-Test Handoff
+
+This session first restored the release build after the broad Node-runtime
+changes above. The release-only failures were warning-as-error style issues
+where debug-only code left symbols or locals unused in optimized builds.
+
+Release build fixes:
+
+- `radiant/event.cpp`: marked the DOM mutation helper as `[[maybe_unused]]`
+  because release builds can strip the debug logging callsites that reference
+  it.
+- `lambda/js/js_runtime.cpp`: gated the `js_invoke_trace_call()` source-snippet
+  debug payload behind `#ifndef NDEBUG` and retained release `(void)` uses so
+  optimized builds do not carry unused-but-set locals.
+
+Verification:
+
+```bash
+make build-release
+make build-test
+```
+
+Results:
+
+| Gate | Result |
+| --- | --- |
+| `make build-release` | pass; `lambda.exe` release artifact produced |
+| `make build-test` | pass after the release rebuild |
+
+### Assert / Inspect / Diff Progress
+
+The remaining Node official regressions are now concentrated in two baseline
+tests:
+
+- `test-assert.js`
+- `test-assert-deep.js`
+
+Two subagent-led assert passes narrowed the failures and kept the work scoped
+to the assert/inspect/runtime call-source path. The baseline was intentionally
+not updated because these two tests are still red.
+
+Confirmed improvements:
+
+- Date and RegExp subclass construction now preserve their hidden native slots
+  when constructed through subclass paths, and Date methods read the private
+  `__time__` slot without re-entering prototype dispatch.
+- Proxy `ownKeys` invariant errors now preserve the omitted property name, for
+  example `'length'`, instead of reporting only a generic non-configurable key.
+- `assert.throws()` validator callbacks now pass only when they return literal
+  `true`, matching Node instead of accepting arbitrary truthy values.
+- Several `assert.throws()` object-pattern mismatch paths now preserve
+  generated AssertionError metadata more closely.
+- `assert.doesNotThrow()` now reports stringified non-Error thrown values.
+- `Arguments` versus plain object `strictEqual` diff indentation was fixed.
+- Several nested object/array diff cases for overlapping arrays and swapped
+  keys now pass in direct instrumented runs.
+- One native direct-call path now emits pending call-source metadata.
+
+Current focused command:
+
+```bash
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='NodeOfficial/NodeOfficialTest.Run/test_assert:NodeOfficial/NodeOfficialTest.Run/test_assert_deep' --gtest_brief=1
+```
+
+Current result: both selected tests still fail.
+
+Outstanding `test-assert.js` buckets:
+
+- `new Function('assert', 'assert(1 === 2);')(assert)` still loses the captured
+  source expression and falls back to `Expected true but got false`.
+- One long array diff still chooses the wrong LCS/order for the expected Node
+  message.
+- A null-versus-object `assert.throws()` pattern failure still formats through
+  `Comparison {}` instead of the direct `+ null` / `- { ... }` diff shape.
+
+Outstanding `test-assert-deep.js` buckets:
+
+- Three expected deep-equality failures are still missing, so the relevant
+  comparisons are still incorrectly accepted.
+- The extra-properties-on-errors `assert.throws()` case still prints the nested
+  multiline AssertionError message raw instead of Node's escaped
+  `'\n' +` inspect form.
+- One deep nested tail-array diff still needs Node's `... Skipped lines`
+  abbreviation.
+
+Likely next root-cause areas:
+
+- call-source metadata for native/direct function calls created by
+  `new Function()` or eval-style dynamic compilation;
+- deep/partial equality cases that still accept structures which Node rejects;
+- AssertionError inspect formatting for nested multiline messages;
+- the array diff LCS / skipped-lines renderer used by assert failure messages.
+
+Baseline policy for the next session:
+
+- do not update `test/node/official_baseline.txt` while
+  `test-assert.js` or `test-assert-deep.js` is red;
+- after both focused tests pass, rerun the broader assert slice, Node prelim,
+  full Node official baseline-only, and `make test262-baseline` before
+  refreshing the official baseline metadata.

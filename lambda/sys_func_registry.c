@@ -1688,6 +1688,7 @@ JitImport jit_runtime_imports[] = {
     {"js_get_new_target", FPTR(js_get_new_target)},
     {"js_set_new_target", FPTR(js_set_new_target)},
     {"js_set_direct_new_target", FPTR(js_set_direct_new_target)},
+    {"js_set_pending_call_source", FPTR(js_set_pending_call_source)},
     {"js_super_bind_this", FPTR(js_super_bind_this)},
     {"js_get_super_this_value", FPTR(js_get_super_this_value)},
     {"js_get_super_constructor_from_receiver", FPTR(js_get_super_constructor_from_receiver)},
