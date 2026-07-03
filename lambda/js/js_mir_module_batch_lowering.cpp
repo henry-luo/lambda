@@ -5607,6 +5607,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 bool eligible = (fc->capture_count == 0 &&
                                  !(fc->node && fc->node->is_generator) &&
                                  !(fc->node && fc->node->is_async) &&
+                                 // arguments object setup lives in the boxed prologue;
+                                 // P6 must not re-enable native after the first gate vetoed it.
+                                 !fc->uses_arguments &&
                                  jm_p6_function_allows_native_specialization(fc) &&
                                  !fc->has_non_simple_params &&
                                  fc->param_count <= 16);
