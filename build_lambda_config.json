@@ -2394,6 +2394,41 @@
                         "icon": "🎬"
                     },
                     {
+                        "source": "test_state_store_gtest.cpp",
+                        "name": "StateStore DOM Mutation Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lambda/input/css/dom_node.cpp",
+                            "lambda/input/css/dom_element.cpp",
+                            "lambda/input/css/selector_matcher.cpp",
+                            "lambda/render_map.cpp",
+                            "lambda/template_state.cpp",
+                            "radiant/animation.cpp",
+                            "radiant/display_list_bounds.cpp",
+                            "radiant/display_list_storage.cpp",
+                            "radiant/dom_range.cpp",
+                            "radiant/dom_range_resolver.cpp",
+                            "radiant/editing_host.cpp",
+                            "radiant/event_state_log.cpp",
+                            "radiant/layout_counters.cpp",
+                            "radiant/retained_display_list.cpp",
+                            "radiant/state_store.cpp",
+                            "radiant/symbol_resolver.cpp",
+                            "test/test_state_store_stubs.cpp",
+                            "lib/test_utils.c",
+                            "lib/test_utils_pool.c"
+                        ],
+                        "binary": "test_state_store_gtest.exe",
+                        "icon": "🧠"
+                    },
+                    {
                         "source": "test_css_animation_gtest.cpp",
                         "name": "CSS Animation Tests",
                         "dependencies": [
