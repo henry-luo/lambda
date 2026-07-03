@@ -34,6 +34,11 @@ static bool jm_analysis_function_decl_is_direct_binding(JsFunctionNode* fn) {
         ts_node_end_byte(body) == ts_node_end_byte(parent);
 }
 
+// Forward declare
+void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs);
+void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_only);
+void jm_collect_pattern_names(JsAstNode* pat, struct hashmap* names);
+
 void jm_name_set_add(struct hashmap* set, const char* name) {
     JsNameSetEntry e;
     memset(&e, 0, sizeof(e));
@@ -95,6 +100,20 @@ static void jm_name_set_add_binding(struct hashmap* set, const char* name, JsAst
     hashmap_set(set, &e);
 }
 
+static void jm_name_set_add_existing(struct hashmap* set, JsNameSetEntry* entry) {
+    if (!set || !entry) return;
+    JsNameSetEntry* existing = (JsNameSetEntry*)hashmap_get(set, entry);
+    if (existing) {
+        if ((existing->binding_start == 0 && existing->binding_end == 0) &&
+            (entry->binding_start != 0 || entry->binding_end != 0)) {
+            existing->binding_start = entry->binding_start;
+            existing->binding_end = entry->binding_end;
+        }
+        return;
+    }
+    hashmap_set(set, entry);
+}
+
 bool jm_name_set_has(struct hashmap* set, const char* name) {
     JsNameSetEntry key;
     memset(&key, 0, sizeof(key));
@@ -114,10 +133,25 @@ static bool jm_ref_is_local_binding(struct hashmap* locals, JsNameSetEntry* ref)
         local->binding_end == ref->binding_end;
 }
 
-// Forward declare
-void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs);
-void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_only);
-void jm_collect_pattern_names(JsAstNode* pat, struct hashmap* names);
+static bool jm_for_head_declares_lexical_names(JsForOfNode* fo, struct hashmap* names) {
+    if (!fo || !names) return false;
+    bool lexical_head = false;
+    if (fo->left && fo->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)fo->left;
+        if (vd->kind == JS_VAR_LET || vd->kind == JS_VAR_CONST) {
+            lexical_head = true;
+            for (JsAstNode* d = vd->declarations; d; d = d->next) {
+                if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+                jm_collect_pattern_names(((JsVariableDeclaratorNode*)d)->id, names);
+            }
+        }
+    } else if (fo->left && (fo->kind == JS_VAR_LET || fo->kind == JS_VAR_CONST)) {
+        lexical_head = true;
+        jm_collect_pattern_names(fo->left, names);
+    }
+    return lexical_head;
+}
+
 // v15: Count yield points in a generator function body (not recursing into nested functions)
 int jm_count_yields(JsAstNode* node) {
     if (!node) return 0;
@@ -1029,9 +1063,33 @@ void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs) {
     case JS_AST_NODE_FOR_OF_STATEMENT:
     case JS_AST_NODE_FOR_IN_STATEMENT: {
         JsForOfNode* fo = (JsForOfNode*)node;
-        jm_collect_body_refs(fo->left, refs);
+        struct hashmap* loop_head_lexicals = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        bool lexical_head = jm_for_head_declares_lexical_names(fo, loop_head_lexicals);
+        if (!lexical_head) {
+            jm_collect_body_refs(fo->left, refs);
+        } else if (fo->left && fo->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+            // a lexical for-of/in head declares the body binding; only any
+            // initializer references belong in the outer capture scan.
+            jm_collect_body_refs(fo->left, refs);
+        }
         jm_collect_body_refs(fo->right, refs);
-        jm_collect_body_refs(fo->body, refs);
+        if (lexical_head) {
+            struct hashmap* body_refs = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            jm_collect_body_refs(fo->body, body_refs);
+            size_t biter = 0; void* bitem = NULL;
+            while (hashmap_iter(body_refs, &biter, &bitem)) {
+                JsNameSetEntry* ref = (JsNameSetEntry*)bitem;
+                if (!jm_name_set_has(loop_head_lexicals, ref->name)) {
+                    jm_name_set_add_existing(refs, ref);
+                }
+            }
+            hashmap_free(body_refs);
+        } else {
+            jm_collect_body_refs(fo->body, refs);
+        }
+        hashmap_free(loop_head_lexicals);
         break;
     }
     case JS_AST_NODE_TRY_STATEMENT: {

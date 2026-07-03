@@ -35,6 +35,22 @@ static bool jm_function_arguments_are_aliased(JsMirTranspiler* mt, JsFuncCollect
            !jm_has_use_strict_directive(fn);
 }
 
+static bool jm_function_has_duplicate_param_names(JsFunctionNode* fn) {
+    if (!fn) return false;
+    char names[16][128];
+    int count = 0;
+    for (JsAstNode* p = fn->params; p && count < 16; p = p->next) {
+        char pname[128];
+        jm_get_param_name(p, count, pname, sizeof(pname));
+        for (int i = 0; i < count; i++) {
+            if (strcmp(names[i], pname) == 0) return true;
+        }
+        snprintf(names[count], sizeof(names[count]), "%s", pname);
+        count++;
+    }
+    return false;
+}
+
 static void jm_activate_arguments_aliasing(JsMirTranspiler* mt, JsFuncCollected* fc, JsFunctionNode* fn, MIR_reg_t args_reg) {
     if (jm_function_arguments_are_aliased(mt, fc, fn)) {
         mt->arguments_reg = args_reg;
@@ -354,8 +370,13 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     //               return type is INT or FLOAT, param_count <= 16.
     // Also respect has_native_version flag (Phase 1.76 may have revoked it).
     bool generate_native = false;
+    // Native MIR params cannot represent sloppy duplicate formals, and arrow
+    // block bodies still rely on boxed statement-completion return handling.
     if (fc->has_native_version &&
         !has_captures && !fc->has_non_simple_params &&
+        !jm_function_has_duplicate_param_names(fn) &&
+        !(fn->is_arrow && fn->body &&
+          fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) &&
         param_count > 0 && param_count <= 16 &&
         (fc->return_type == LMD_TYPE_INT || fc->return_type == LMD_TYPE_FLOAT)) {
         generate_native = true;
@@ -1196,6 +1217,16 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             int gen_populate_limit = fc->scope_env_normal_count > 0 ? fc->scope_env_normal_count : fc->scope_env_count;
             for (int s = 0; s < gen_populate_limit; s++) {
                 const char* sname = fc->scope_env_names[s];
+                const char* lookup_sname = sname;
+                char base_sname[128];
+                const char* keyed_at = strchr(sname, '@');
+                if (keyed_at) {
+                    size_t base_len = (size_t)(keyed_at - sname);
+                    if (base_len >= sizeof(base_sname)) base_len = sizeof(base_sname) - 1;
+                    memcpy(base_sname, sname, base_len);
+                    base_sname[base_len] = '\0';
+                    lookup_sname = base_sname;
+                }
                 int target_slot = s;
                 if (fc->reuse_parent_env) {
                     for (int c = 0; c < fc->capture_count; c++) {
@@ -1206,7 +1237,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         }
                     }
                 }
-                JsMirVarEntry* svar = jm_find_var(mt, sname);
+                // keyed duplicate lexical slots keep their base MIR binding name.
+                JsMirVarEntry* svar = jm_find_var(mt, lookup_sname);
                 MIR_reg_t val;
                 if (svar) {
                     val = svar->reg;
@@ -1688,6 +1720,16 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 int async_populate_limit = fc->scope_env_normal_count > 0 ? fc->scope_env_normal_count : fc->scope_env_count;
                 for (int s = 0; s < async_populate_limit; s++) {
                     const char* sname = fc->scope_env_names[s];
+                    const char* lookup_sname = sname;
+                    char base_sname[128];
+                    const char* keyed_at = strchr(sname, '@');
+                    if (keyed_at) {
+                        size_t base_len = (size_t)(keyed_at - sname);
+                        if (base_len >= sizeof(base_sname)) base_len = sizeof(base_sname) - 1;
+                        memcpy(base_sname, sname, base_len);
+                        base_sname[base_len] = '\0';
+                        lookup_sname = base_sname;
+                    }
                     int target_slot = s;
                     if (fc->reuse_parent_env) {
                         for (int c = 0; c < fc->capture_count; c++) {
@@ -1698,7 +1740,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                             }
                         }
                     }
-                    JsMirVarEntry* svar = jm_find_var(mt, sname);
+                    // keyed duplicate lexical slots keep their base MIR binding name.
+                    JsMirVarEntry* svar = jm_find_var(mt, lookup_sname);
                     MIR_reg_t val;
                     if (svar) {
                         val = svar->reg;
@@ -2973,9 +3016,21 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             int populate_limit = fc->scope_env_normal_count > 0 ? fc->scope_env_normal_count : fc->scope_env_count;
             for (int s = 0; s < populate_limit; s++) {
                 const char* sname = fc->scope_env_names[s];
+                const char* lookup_sname = sname;
+                char base_sname[128];
+                const char* keyed_at = strchr(sname, '@');
+                if (keyed_at) {
+                    size_t base_len = (size_t)(keyed_at - sname);
+                    if (base_len >= sizeof(base_sname)) base_len = sizeof(base_sname) - 1;
+                    memcpy(base_sname, sname, base_len);
+                    base_sname[base_len] = '\0';
+                    lookup_sname = base_sname;
+                }
                 // v29: Skip __parent_env__ slot — already populated above
                 if (fc->has_parent_env_link && s == fc->scope_env_count - 1) continue;
-                JsMirVarEntry* svar = jm_find_var(mt, sname);
+                // duplicate lexical captures use keyed env-slot names; the
+                // active MIR binding is still stored under the base identifier.
+                JsMirVarEntry* svar = jm_find_var(mt, lookup_sname);
                 MIR_reg_t val;
                 if (svar) {
                     if (svar->from_env) {

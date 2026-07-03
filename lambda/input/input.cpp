@@ -446,10 +446,9 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     }
 
     ShapeEntry* shape_entry = alloc_shape_entry(input->pool, key, type_id, map_type->last);
-    if (map_type->slot_entries && map_type->slot_count > 0 &&
-            shape_entry->byte_offset < map_type->byte_size) {
-        shape_entry->byte_offset = map_type->byte_size;
-    }
+    // Type-changing rebuilds can repack earlier fields, so `last + sizeof(last)`
+    // is not authoritative for appends; new fields must start at byte_size.
+    shape_entry->byte_offset = map_type->byte_size;
     if (!map_type->shape) { map_type->shape = shape_entry; }
     map_type->last = shape_entry;
     map_type->length++;
