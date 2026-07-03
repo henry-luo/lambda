@@ -1561,7 +1561,7 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             "ArrayBuffer", "DataView",
             "Int8Array", "Uint8Array", "Uint8ClampedArray",
             "Int16Array", "Uint16Array", "Int32Array", "Uint32Array",
-            "Float32Array", "Float64Array", NULL
+            "Float16Array", "Float32Array", "Float64Array", NULL
         };
         for (int i = 0; builtins[i]; i++) {
             if ((int)id->name->len == (int)strlen(builtins[i]) &&
@@ -10229,7 +10229,19 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 // save with-scope depth before direct call (function may return from inside 'with')
                 MIR_reg_t saved_wd = jm_call_0(mt, "js_with_save_depth", MIR_T_I64);
 
+                MIR_reg_t pushed_stack_frame = 0;
+                if (fc->node && fc->node->name) {
+                    // Direct MIR calls bypass js_call_function; push the same
+                    // dynamic frame metadata so REPL Error stacks keep callers.
+                    pushed_stack_frame = jm_call_2(mt, "js_runtime_call_frame_push_name", MIR_T_I64,
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)fc->node->name->chars),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)fc->node->name->len));
+                }
                 jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+                if (fc->node && fc->node->name) {
+                    jm_call_void_1(mt, "js_runtime_call_frame_pop_guarded",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, pushed_stack_frame));
+                }
 
                 // restore with-scope depth after direct call
                 jm_call_void_1(mt, "js_with_restore_depth",
@@ -10250,18 +10262,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     // Fallback: evaluate callee, build args array, call js_call_function
     static int fallback_site_counter = 0;
     int site_id = fallback_site_counter++;
-    if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
-        JsIdentifierNode* fb_id = (JsIdentifierNode*)call->callee;
-        log_debug("js-mir: FALLBACK[site=%d] call to '%.*s' (argc=%d) in func '%s'",
-            site_id, (int)fb_id->name->len, fb_id->name->chars, arg_count,
-            mt->current_fc ? mt->current_fc->name : "__main__");
-    } else if (site_id == 393 || (site_id >= 3125 && site_id <= 3140)) {
-        // Focused debug for the failing site range
-        int ctype = call->callee ? call->callee->node_type : -1;
-        log_debug("js-mir: FALLBACK[site=%d] callee_type=%d argc=%d in func '%s'",
-            site_id, ctype, arg_count,
-            mt->current_fc ? mt->current_fc->name : "__main__");
-    }
 
     // Check if any argument is a spread element — if so, use js_apply_function with array
     bool fallback_has_spread = false;
@@ -10444,14 +10444,15 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
 //       live length/data are loaded through js_typed_array_length() and
 //       js_typed_array_current_data_ptr(); JsTypedArray no longer caches them.
 //
-// Element sizes: INT8/UINT8=1, INT16/UINT16=2, INT32/UINT32/FLOAT32=4, FLOAT64=8
+// Element sizes: INT8/UINT8=1, INT16/UINT16/FLOAT16=2, INT32/UINT32/FLOAT32=4, FLOAT64=8
 
 // Get the element size (log2) for MIR index scale and the MIR load/store type
 int jm_typed_array_elem_shift(int ta_type) {
     switch (ta_type) {
     case JS_TYPED_INT8: case JS_TYPED_UINT8:
     case JS_TYPED_UINT8_CLAMPED:                     return 0; // 1 byte
-    case JS_TYPED_INT16: case JS_TYPED_UINT16:   return 1; // 2 bytes
+    case JS_TYPED_INT16: case JS_TYPED_UINT16:
+    case JS_TYPED_FLOAT16:                       return 1; // 2 bytes
     case JS_TYPED_INT32: case JS_TYPED_UINT32:
     case JS_TYPED_FLOAT32:                       return 2; // 4 bytes
     case JS_TYPED_FLOAT64:                       return 3; // 8 bytes
@@ -10615,7 +10616,7 @@ MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t arr_reg,
 
 // Returns whether a typed array stores integer elements (vs float)
 bool jm_typed_array_is_int(int ta_type) {
-    return ta_type != JS_TYPED_FLOAT32 && ta_type != JS_TYPED_FLOAT64;
+    return ta_type != JS_TYPED_FLOAT16 && ta_type != JS_TYPED_FLOAT32 && ta_type != JS_TYPED_FLOAT64;
 }
 
 // Emit inline typed array element GET: arr[idx]
@@ -10631,6 +10632,13 @@ bool jm_typed_array_is_int(int ta_type) {
 MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                MIR_reg_t idx_native, int ta_type,
                                                MIR_reg_t h_data, MIR_reg_t h_len) {
+    if (ta_type == JS_TYPED_FLOAT16) {
+        MIR_reg_t idx_boxed = jm_box_int_reg(mt, idx_native);
+        return jm_call_2(mt, "js_typed_array_get", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed));
+    }
+
     // P4h: use hoisted data pointer and length when available
     MIR_reg_t data_ptr, ta_len;
     if (h_data && h_len) {
@@ -10793,6 +10801,15 @@ MIR_reg_t jm_transpile_typed_array_get_native(JsMirTranspiler* mt, MIR_reg_t arr
                                                       MIR_reg_t idx_native, int ta_type,
                                                       TypeId target_type,
                                                       MIR_reg_t h_data) {
+    if (ta_type == JS_TYPED_FLOAT16) {
+        MIR_reg_t idx_boxed = jm_box_int_reg(mt, idx_native);
+        MIR_reg_t boxed = jm_call_2(mt, "js_typed_array_get", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed));
+        if (target_type == LMD_TYPE_INT) return jm_emit_unbox_int(mt, boxed);
+        return jm_emit_unbox_float(mt, boxed);
+    }
+
     // P4h: use hoisted data pointer when available
     MIR_reg_t data_ptr;
     if (h_data) {
@@ -10867,6 +10884,15 @@ MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                MIR_reg_t idx_native, MIR_reg_t val_boxed,
                                                int ta_type,
                                                MIR_reg_t h_data, MIR_reg_t h_len) {
+    if (ta_type == JS_TYPED_FLOAT16) {
+        MIR_reg_t idx_boxed = jm_box_int_reg(mt, idx_native);
+        (void)jm_call_3(mt, "js_typed_array_set", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, val_boxed));
+        return val_boxed;
+    }
+
     // P4h: use hoisted data pointer and length when available
     MIR_reg_t data_ptr, ta_len;
     if (h_data && h_len) {
@@ -12438,6 +12464,10 @@ int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, bool has
         int slot = fc->captures[ci].scope_env_slot;
         if (slot >= 0 && slot + 1 > env_size) env_size = slot + 1;
     }
+    if (fc->closure_env_has_parent_link &&
+        fc->closure_env_parent_link_slot + 1 > env_size) {
+        env_size = fc->closure_env_parent_link_slot + 1;
+    }
     return env_size;
 }
 
@@ -12462,10 +12492,12 @@ static int jm_find_var_scope_depth_for_expr(JsMirTranspiler* mt, const char* nam
 }
 
 static bool jm_capture_is_current_loop_lexical(JsMirTranspiler* mt, const char* name, JsMirVarEntry* var) {
-    if (!mt || !name || !var || !var->is_let_const || mt->iteration_depth <= 0) return false;
+    if (!mt || !name || !var || !var->is_let_const) return false;
     if (mt->allow_loop_let_scope_env_for_immediate_call) return false;
-    if (mt->loop_scope_depth < 0) return true;
+    if (mt->loop_scope_depth < 0) return mt->iteration_depth > 0;
     int depth = jm_find_var_scope_depth_for_expr(mt, name);
+    // for-init closures are created before iteration_depth increments, but they
+    // still capture the loop lexical cell and must not share the parent env.
     return depth >= mt->loop_scope_depth;
 }
 
@@ -12628,8 +12660,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
             }
         }
-        if (use_scope_env && mt->iteration_depth > 0 &&
-            !mt->allow_loop_let_scope_env_for_immediate_call) {
+        if (use_scope_env && !mt->allow_loop_let_scope_env_for_immediate_call) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
                 if (jm_capture_is_current_loop_lexical(mt, fc->captures[ci].name, cv)) {
@@ -12661,6 +12692,14 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
             MIR_reg_t env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
+            if (fc->closure_env_has_parent_link && mt->scope_env_reg != 0) {
+                // mixed loop closures need private slots for loop lets while
+                // captured outer lets still write through to the parent cell.
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                        fc->closure_env_parent_link_slot * (int)sizeof(uint64_t), env, 0, 1),
+                    MIR_new_reg_op(mt->ctx, mt->scope_env_reg)));
+            }
 
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 int slot = fc->captures[ci].scope_env_slot >= 0 ? fc->captures[ci].scope_env_slot : ci;
@@ -12843,8 +12882,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 }
             }
         }
-        if (use_scope_env && mt->iteration_depth > 0 &&
-            !mt->allow_loop_let_scope_env_for_immediate_call) {
+        if (use_scope_env && !mt->allow_loop_let_scope_env_for_immediate_call) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
                 if (jm_capture_is_current_loop_lexical(mt, fc->captures[ci].name, cv)) {
@@ -12911,6 +12949,14 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
 
             MIR_reg_t env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
+            if (fc->closure_env_has_parent_link && mt->scope_env_reg != 0) {
+                // mixed loop closures need private slots for loop lets while
+                // captured outer lets still write through to the parent cell.
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                        fc->closure_env_parent_link_slot * (int)sizeof(uint64_t), env, 0, 1),
+                    MIR_new_reg_op(mt->ctx, mt->scope_env_reg)));
+            }
 
             for (int i = 0; i < fc->capture_count; i++) {
                     int slot = fc->captures[i].scope_env_slot >= 0 ? fc->captures[i].scope_env_slot : i;

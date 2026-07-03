@@ -1474,6 +1474,7 @@ int jm_detect_typed_array_new(JsAstNode* rhs) {
         if (ctor->name->len == 11 && strncmp(ctor->name->chars, "Uint32Array", 11) == 0) return JS_TYPED_UINT32;
         if (ctor->name->len == 11 && strncmp(ctor->name->chars, "Uint16Array", 11) == 0) return JS_TYPED_UINT16;
         if (ctor->name->len == 17 && strncmp(ctor->name->chars, "Uint8ClampedArray", 17) == 0) return JS_TYPED_UINT8_CLAMPED;
+        if (ctor->name->len == 12 && strncmp(ctor->name->chars, "Float16Array", 12) == 0) return JS_TYPED_FLOAT16;
         if (ctor->name->len == 12 && strncmp(ctor->name->chars, "Float64Array", 12) == 0) return JS_TYPED_FLOAT64;
         if (ctor->name->len == 12 && strncmp(ctor->name->chars, "Float32Array", 12) == 0) return JS_TYPED_FLOAT32;
         return -1;
@@ -2767,7 +2768,8 @@ void jm_prescan_float_widening(JsMirTranspiler* mt, JsAstNode* body) {
                             JsIdentifierNode* ctor = (JsIdentifierNode*)ne->callee;
                             bool is_float_array = false;
                             if (ctor->name->len == 12 &&
-                                (strncmp(ctor->name->chars, "Float64Array", 12) == 0 ||
+                                (strncmp(ctor->name->chars, "Float16Array", 12) == 0 ||
+                                 strncmp(ctor->name->chars, "Float64Array", 12) == 0 ||
                                  strncmp(ctor->name->chars, "Float32Array", 12) == 0)) {
                                 is_float_array = true;
                             }

@@ -13,3 +13,7 @@ test-http-head-request.js  # [parallel-conflict] passes alone but failed during 
 test-https-agent-session-eviction.js  # [parallel-conflict] passes alone but crashed during parallel baseline run
 test-child-process-detached.js  # [parallel-conflict] detached child cleanup can be signaled by neighboring process tests
 test-repl-unexpected-token-recoverable.js  # [parallel-conflict] spawned interactive REPL can receive signal/pipe interference in full pool
+test-cluster-disconnect-race.js  # [parallel-conflict] cluster worker disconnect IPC can hold sibling capture pipes until watchdog
+test-cluster-disconnect-unshared-tcp.js  # [parallel-conflict] unshared worker server teardown can hold sibling capture pipes until watchdog
+test-cluster-disconnect-unshared-udp.js  # [parallel-conflict] unshared worker dgram teardown can hold sibling capture pipes until watchdog
+test-cluster-disconnect-with-no-workers.js  # [parallel-conflict] callback-order control is distorted by neighboring cluster pipe lifetimes

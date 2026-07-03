@@ -18,8 +18,10 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <errno.h>
 #include <math.h>
 #include <netinet/in.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #ifndef _WIN32
@@ -39,9 +41,20 @@ extern "C" Item js_timeout_ref(Item this_val);
 extern "C" Item js_timeout_unref(Item this_val);
 extern "C" Item js_net_Socket(Item options);
 extern "C" Item js_object_keys(Item object);
-extern "C" void js_cluster_notify_worker_listening(void);
+extern "C" void js_cluster_notify_worker_listening(Item address);
+extern "C" bool js_process_ipc_worker_disconnect_requested(void);
 extern "C" void js_process_ipc_notify_handle_accepted(void);
 extern "C" void js_process_ipc_notify_socket_closed(void);
+extern "C" uv_stream_t* js_http_stream_from_ipc_send_handle(Item handle_item);
+extern "C" void* js_http_ipc_sent_stream_connection_account(uv_stream_t* stream);
+extern "C" void js_http_complete_transferred_connection_account(void* account);
+extern "C" bool js_http_close_ipc_sent_stream_defer_account(uv_stream_t* stream);
+extern "C" bool js_http_close_ipc_sent_stream(uv_stream_t* stream);
+extern "C" Item js_process_emit(Item event_name, Item arg1);
+extern "C" Item js_process_emit2(Item event_name, Item arg1, Item arg2);
+extern "C" Item js_net_get_socket_prototype(void);
+extern "C" bool js_cluster_is_worker_runtime(void);
+extern "C" bool js_cluster_worker_uses_sched_rr(void);
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -64,6 +77,13 @@ static bool is_undefined_item(Item item) {
 
 static bool is_callable(Item item) {
     return get_type_id(item) == LMD_TYPE_FUNC;
+}
+
+static void* net_native_ptr_from_item(Item item) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT) return (void*)(uintptr_t)it2i(item);
+    if (type == LMD_TYPE_INT64) return (void*)(uintptr_t)it2l(item);
+    return NULL;
 }
 
 static Item net_normalized_args_key(void) {
@@ -214,6 +234,7 @@ typedef struct JsSocket {
     Item      onread_buffer;
     Item      onread_callback;
     Item      tls_socket;
+    Item      handle_close_object;
     PendingSocketWrite* pending_writes_head;
     PendingSocketWrite* pending_writes_tail;
     SocketAutoAttemptTimerReq* auto_attempt_timer;
@@ -247,6 +268,12 @@ typedef struct SocketShutdownReq {
     Item          callback;
 } SocketShutdownReq;
 
+typedef struct JsPipeHandle {
+    uv_pipe_t pipe;
+    Item      js_object;
+    bool      closed;
+} JsPipeHandle;
+
 typedef struct SocketBlockedErrorReq {
     uv_timer_t timer;
     JsSocket*  sock;
@@ -260,13 +287,58 @@ struct PendingSocketWrite {
     PendingSocketWrite* next;
 };
 
+#define NET_PENDING_IPC_STREAM_MAX 128
+typedef struct NetPendingIpcStream {
+    uv_stream_t* stream;
+    JsSocket*    sock;
+    bool         close_seen;
+    bool         cleanup_seen;
+} NetPendingIpcStream;
+
+static NetPendingIpcStream net_pending_ipc_streams[NET_PENDING_IPC_STREAM_MAX];
+
+static NetPendingIpcStream* net_pending_ipc_find_stream(uv_stream_t* stream) {
+    if (!stream) return NULL;
+    for (int i = 0; i < NET_PENDING_IPC_STREAM_MAX; i++) {
+        if (net_pending_ipc_streams[i].stream == stream) return &net_pending_ipc_streams[i];
+    }
+    return NULL;
+}
+
+static NetPendingIpcStream* net_pending_ipc_find_socket(JsSocket* sock) {
+    if (!sock) return NULL;
+    for (int i = 0; i < NET_PENDING_IPC_STREAM_MAX; i++) {
+        if (net_pending_ipc_streams[i].sock == sock) return &net_pending_ipc_streams[i];
+    }
+    return NULL;
+}
+
+static void net_pending_ipc_register_socket(JsSocket* sock) {
+    if (!sock) return;
+    uv_stream_t* stream = (uv_stream_t*)&sock->tcp;
+    if (net_pending_ipc_find_stream(stream)) return;
+    for (int i = 0; i < NET_PENDING_IPC_STREAM_MAX; i++) {
+        if (!net_pending_ipc_streams[i].stream) {
+            net_pending_ipc_streams[i].stream = stream;
+            net_pending_ipc_streams[i].sock = sock;
+            return;
+        }
+    }
+}
+
+static void net_pending_ipc_clear(NetPendingIpcStream* entry) {
+    if (!entry) return;
+    memset(entry, 0, sizeof(NetPendingIpcStream));
+}
+
 static JsSocket* socket_from_object(Item self) {
     TypeId type = get_type_id(self);
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return NULL;
     Item handle_item = js_property_get(self, make_string_item("__handle__"));
     if (handle_item.item == 0 || handle_item.item == ITEM_NULL || is_undefined_item(handle_item)) return NULL;
-    if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
-    return (JsSocket*)(uintptr_t)it2i(handle_item);
+    // Native pointers can be boxed as INT64 in worker-mode heaps; accepting
+    // only small INT makes valid sockets look detached.
+    return (JsSocket*)net_native_ptr_from_item(handle_item);
 }
 
 static void socket_sync_no_half_open_listener(Item obj);
@@ -400,6 +472,7 @@ static void socket_note_closed(JsSocket* sock);
 static void socket_remove_abort_listener(JsSocket* sock);
 static void socket_release_after_pending_connect(JsSocket* sock);
 static void socket_configure_onread(JsSocket* sock, Item onread);
+static bool socket_start_read(JsSocket* sock);
 static bool socket_schedule_auto_retry(JsSocket* sock);
 static void socket_shutdown_writes(JsSocket* sock, Item callback);
 static void socket_update_writable(JsSocket* sock, bool writable);
@@ -418,6 +491,23 @@ static void socket_hide_handle(JsSocket* sock) {
     if (!sock || !sock->js_object.item) return;
     js_property_set(sock->js_object, make_string_item("_handle"), ItemNull);
     sock->handle_exposed = false;
+}
+
+static void socket_free_detached(JsSocket* sock) {
+    if (!sock) return;
+    NetPendingIpcStream* pending = net_pending_ipc_find_socket(sock);
+    if (pending && !pending->cleanup_seen) {
+        // descriptor-transfer cleanup can trail the socket close callback; keep
+        // wrapper storage until IPC cleanup can identify the net stream safely.
+        pending->close_seen = true;
+        sock->tcp.data = NULL;
+        return;
+    }
+    if (pending) net_pending_ipc_clear(pending);
+    // IPC descriptor cleanup may retain the uv_stream_t pointer after close;
+    // detach handle data before release so stale callbacks cannot see a wrapper.
+    sock->tcp.data = NULL;
+    mem_free(sock);
 }
 
 static void socket_clear_timeout(JsSocket* sock) {
@@ -803,12 +893,36 @@ static void socket_emit_onread(JsSocket* sock, int nread) {
 extern "C" Item js_socket_on(Item event_item, Item callback) {
     Item self = js_get_this();
     socket_add_listener_item(self, event_item, callback, false);
+    if (get_type_id(event_item) == LMD_TYPE_STRING) {
+        String* ev = it2s(event_item);
+        if (ev && ev->len == 4 && memcmp(ev->chars, "data", 4) == 0) {
+            JsSocket* sock = socket_from_object(self);
+            if (sock && !sock->destroyed) {
+                // ipc-adopted sockets are intentionally delivered paused; the
+                // data listener is the userland readiness edge that starts reads.
+                sock->paused = false;
+                socket_start_read(sock);
+            }
+        }
+    }
     return self;
 }
 
 extern "C" Item js_socket_once(Item event_item, Item callback) {
     Item self = js_get_this();
     socket_add_listener_item(self, event_item, callback, true);
+    if (get_type_id(event_item) == LMD_TYPE_STRING) {
+        String* ev = it2s(event_item);
+        if (ev && ev->len == 4 && memcmp(ev->chars, "data", 4) == 0) {
+            JsSocket* sock = socket_from_object(self);
+            if (sock && !sock->destroyed) {
+                // ipc-adopted sockets are intentionally delivered paused; the
+                // data listener is the userland readiness edge that starts reads.
+                sock->paused = false;
+                socket_start_read(sock);
+            }
+        }
+    }
     return self;
 }
 
@@ -1181,7 +1295,7 @@ static void socket_remove_abort_listener(JsSocket* sock) {
 
 static void socket_release_after_pending_connect(JsSocket* sock) {
     if (!sock || !sock->free_after_connect_pending || sock->connect_pending) return;
-    mem_free(sock);
+    socket_free_detached(sock);
 }
 
 static bool socket_configure_abort_signal(JsSocket* sock, Item signal) {
@@ -1466,7 +1580,7 @@ static void socket_close_now(JsSocket* sock) {
                 if (s->connect_pending) {
                     s->free_after_connect_pending = true;
                 } else {
-                    mem_free(s);
+                    socket_free_detached(s);
                 }
             }
         });
@@ -1498,7 +1612,7 @@ static void socket_close_reset_now(JsSocket* sock) {
                 if (s->connect_pending) {
                     s->free_after_connect_pending = true;
                 } else {
-                    mem_free(s);
+                    socket_free_detached(s);
                 }
             }
         });
@@ -1515,7 +1629,7 @@ static void socket_close_reset_now(JsSocket* sock) {
                     if (s->connect_pending) {
                         s->free_after_connect_pending = true;
                     } else {
-                        mem_free(s);
+                        socket_free_detached(s);
                     }
                 }
             });
@@ -1562,7 +1676,7 @@ extern "C" void js_net_socket_tls_closed(Item socket_obj, bool had_error) {
     net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, sock->js_object);
     socket_emit_close(sock->js_object, had_error);
     socket_note_closed(sock);
-    mem_free(sock);
+    socket_free_detached(sock);
 }
 
 static Item js_socket_timeout_fire(Item env_item) {
@@ -1744,8 +1858,9 @@ static JsSocket* socket_from_handle_object(Item self) {
     TypeId type = get_type_id(self);
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return NULL;
     Item handle_item = js_property_get(self, make_string_item("__socket_handle__"));
-    if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
-    return (JsSocket*)(uintptr_t)it2i(handle_item);
+    // IPC/internal handles carry native pointers through JS properties; worker
+    // heaps can box them as INT64 even when primary heaps use INT.
+    return (JsSocket*)net_native_ptr_from_item(handle_item);
 }
 
 static Item js_socket_handle_setKeepAlive(Item enable_item, Item delay_item) {
@@ -1771,15 +1886,82 @@ static Item js_socket_handle_setNoDelay(Item enable_item) {
     return make_undefined_item();
 }
 
-static Item js_socket_handle_close(void) {
+static void socket_handle_close_cb(uv_handle_t* handle) {
+    JsSocket* sock = handle ? (JsSocket*)handle->data : NULL;
+    if (!sock) return;
+    Item handle_obj = sock->handle_close_object;
+    if (handle_obj.item) {
+        Item callback = js_property_get(handle_obj, make_string_item("__handle_close_callback__"));
+        js_property_set(handle_obj, make_string_item("__handle_close_callback__"), make_undefined_item());
+        if (is_callable(callback)) {
+            js_call_function(callback, handle_obj, NULL, 0);
+            js_microtask_flush();
+        }
+        net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, handle_obj);
+        sock->handle_close_object = make_undefined_item();
+    }
+    socket_note_closed(sock);
+    if (!sock->js_object.item || sock->js_object.item == handle_obj.item) {
+        socket_free_detached(sock);
+    }
+}
+
+static Item js_socket_handle_close(Item callback) {
     Item self = js_get_this();
     JsSocket* sock = socket_from_handle_object(self);
     if (!sock) return make_undefined_item();
     sock->handle_closed_by_user = true;
     if (!uv_is_closing((uv_handle_t*)&sock->tcp)) {
-        uv_close((uv_handle_t*)&sock->tcp, NULL);
+        if (is_callable(callback)) {
+            // raw accepted handles can be closed before they are wrapped as
+            // sockets; root the handle until libuv runs the close callback.
+            js_property_set(self, make_string_item("__handle_close_callback__"), callback);
+            sock->handle_close_object = self;
+            net_active_add(net_active_sockets, NET_ACTIVE_SOCKET_MAX, self);
+        }
+        uv_close((uv_handle_t*)&sock->tcp, socket_handle_close_cb);
+    } else if (is_callable(callback)) {
+        js_call_function(callback, self, NULL, 0);
+        js_microtask_flush();
     }
     return make_undefined_item();
+}
+
+static JsPipeHandle* pipe_handle_from_object(Item self) {
+    if (!net_is_object_like(self)) return NULL;
+    Item handle_item = js_property_get(self, make_string_item("__pipe_handle__"));
+    return (JsPipeHandle*)net_native_ptr_from_item(handle_item);
+}
+
+static void pipe_handle_close_cb(uv_handle_t* handle) {
+    JsPipeHandle* ph = handle ? (JsPipeHandle*)handle->data : NULL;
+    if (!ph) return;
+    net_active_remove(net_active_sockets, NET_ACTIVE_SOCKET_MAX, ph->js_object);
+    mem_free(ph);
+}
+
+static Item js_pipe_handle_close(Item callback) {
+    (void)callback;
+    Item self = js_get_this();
+    JsPipeHandle* ph = pipe_handle_from_object(self);
+    if (!ph || ph->closed) return make_undefined_item();
+    ph->closed = true;
+    if (!uv_is_closing((uv_handle_t*)&ph->pipe)) {
+        uv_close((uv_handle_t*)&ph->pipe, pipe_handle_close_cb);
+    }
+    return make_undefined_item();
+}
+
+static Item make_pipe_handle_object(JsPipeHandle* ph) {
+    Item obj = js_new_object();
+    if (!ph) return obj;
+    ph->js_object = obj;
+    js_property_set(obj, make_string_item("__pipe_handle__"),
+                    (Item){.item = i2it((int64_t)(uintptr_t)ph)});
+    js_property_set(obj, make_string_item("close"),
+                    js_new_function((void*)js_pipe_handle_close, 1));
+    net_active_add(net_active_sockets, NET_ACTIVE_SOCKET_MAX, obj);
+    return obj;
 }
 
 static Item js_socket_setEncoding(Item encoding) {
@@ -1995,6 +2177,7 @@ extern "C" Item js_net_createServer(Item rest_args);
 static Item net_socket_prototype = {0};
 static Item net_server_prototype = {0};
 static Item net_socket_connect_fn = {0};
+static Item net_namespace = {0};
 static bool net_default_auto_select_family = false;
 static int net_auto_select_family_timeout = 500; // Node.js default
 static bool net_cli_options_applied = false;
@@ -2033,7 +2216,7 @@ static Item make_socket_handle_object(JsSocket* sock) {
     js_property_set(handle, make_string_item("setNoDelay"),
                     js_new_function((void*)js_socket_handle_setNoDelay, 1));
     js_property_set(handle, make_string_item("close"),
-                    js_new_function((void*)js_socket_handle_close, 0));
+                    js_new_function((void*)js_socket_handle_close, 1));
     return handle;
 }
 
@@ -2142,21 +2325,55 @@ static bool net_fd_is_listening_socket(int fd) {
 #else
     int accepting = 0;
     socklen_t accepting_len = sizeof(accepting);
-    if (getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN, &accepting, &accepting_len) != 0) return false;
-    return accepting != 0;
+    if (getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN, &accepting, &accepting_len) == 0 &&
+        accepting != 0) {
+        return true;
+    }
+    struct sockaddr_storage peer;
+    socklen_t peer_len = sizeof(peer);
+    if (getpeername(fd, (struct sockaddr*)&peer, &peer_len) == 0) return false;
+    // Descriptor-passed listening TCP handles can report SO_ACCEPTCONN=0 on
+    // some platforms; unlike transferred sockets, they still have no peer.
+    return errno == ENOTCONN;
 #endif
 }
 
 static Item make_server_object_from_fd(uv_loop_t* loop, int fd);
+static Item js_server_address_for(Item self);
+extern "C" Item js_get_net_namespace(void);
+static Item make_pipe_handle_object(JsPipeHandle* ph);
 
 extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe) {
-    if (!pipe || uv_pipe_pending_count(pipe) <= 0 ||
-        uv_pipe_pending_type(pipe) != UV_TCP) {
+    if (!pipe || uv_pipe_pending_count(pipe) <= 0) {
         return make_undefined_item();
     }
 
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return make_undefined_item();
+
+    uv_handle_type pending_type = uv_pipe_pending_type(pipe);
+    if (pending_type == UV_NAMED_PIPE) {
+        JsPipeHandle* ph = (JsPipeHandle*)mem_calloc(1, sizeof(JsPipeHandle), MEM_CAT_JS_RUNTIME);
+        if (!ph) return make_undefined_item();
+        uv_pipe_init(loop, &ph->pipe, 0);
+        ph->pipe.data = ph;
+        int r = uv_accept((uv_stream_t*)pipe, (uv_stream_t*)&ph->pipe);
+        if (r != 0) {
+            uv_close((uv_handle_t*)&ph->pipe, [](uv_handle_t* h) {
+                JsPipeHandle* p = h ? (JsPipeHandle*)h->data : NULL;
+                if (p) mem_free(p);
+            });
+            return make_undefined_item();
+        }
+        js_process_ipc_notify_handle_accepted();
+        // Cluster pipe listeners pass named-pipe endpoints, not TCP sockets;
+        // accepting only UV_TCP leaves primary-owned pipe dispatch unusable.
+        return make_pipe_handle_object(ph);
+    }
+
+    if (pending_type != UV_TCP) {
+        return make_undefined_item();
+    }
 
     uv_tcp_t* accepted = (uv_tcp_t*)mem_calloc(1, sizeof(uv_tcp_t), MEM_CAT_JS_RUNTIME);
     if (!accepted) return make_undefined_item();
@@ -2190,9 +2407,20 @@ extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe) {
     if (fd < 0) return make_undefined_item();
 
     if (is_listener) {
+        if (get_type_id(net_server_prototype) != LMD_TYPE_MAP) {
+            // IPC can deliver a server before userland touches net.Server in
+            // this process; initialize prototypes so transferred servers brand correctly.
+            js_get_net_namespace();
+        }
         // IPC TCP handles can be listening servers; treating them as sockets
         // breaks cluster server transfer and leaves worker IPC alive to timeout.
         return make_server_object_from_fd(loop, fd);
+    }
+
+    if (get_type_id(net_socket_prototype) != LMD_TYPE_MAP) {
+        // IPC can deliver a socket before userland touches net.Socket in this
+        // process; initialize prototypes so transferred sockets pass instanceof.
+        js_get_net_namespace();
     }
 
     JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
@@ -2211,7 +2439,7 @@ extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe) {
 #endif
         uv_close((uv_handle_t*)&sock->tcp, [](uv_handle_t* h) {
             JsSocket* s = h ? (JsSocket*)h->data : NULL;
-            if (s) mem_free(s);
+            socket_free_detached(s);
         });
         return make_undefined_item();
     }
@@ -2295,7 +2523,15 @@ typedef struct NetResolveReq {
     bool has_block_list;
 } NetResolveReq;
 
+typedef struct NetPipeConnectReq {
+    uv_connect_t req;
+    uv_pipe_t    pipe;
+    JsSocket*    sock;
+    char         path[4096];
+} NetPipeConnectReq;
+
 static void client_connect_cb(uv_connect_t* req, int status);
+static void socket_close_now(JsSocket* sock);
 
 static Item make_uv_error(int status, const char* syscall, const char* host, int port) {
     const char* code = uv_err_name(status);
@@ -2469,6 +2705,52 @@ static bool copy_string_item(Item value, char* out, int out_size) {
     return true;
 }
 
+static void normalize_pipe_fs_path(const char* path, char* out, int out_size) {
+    if (!out || out_size <= 0) return;
+    out[0] = '\0';
+    if (!path || !path[0]) return;
+#ifdef _WIN32
+    snprintf(out, (size_t)out_size, "%s", path);
+#else
+    char joined[4096];
+    if (path[0] == '/') {
+        snprintf(joined, sizeof(joined), "%s", path);
+    } else {
+        char cwd[4096];
+        if (!getcwd(cwd, sizeof(cwd))) {
+            snprintf(out, (size_t)out_size, "%s", path);
+            return;
+        }
+        snprintf(joined, sizeof(joined), "%s/%s", cwd, path);
+    }
+
+    const char* slash = strrchr(joined, '/');
+    if (slash && slash[1] != '\0') {
+        char parent[4096];
+        int parent_len = (int)(slash - joined);
+        if (parent_len <= 0) {
+            parent[0] = '/';
+            parent[1] = '\0';
+        } else {
+            if (parent_len >= (int)sizeof(parent)) parent_len = (int)sizeof(parent) - 1;
+            memcpy(parent, joined, (size_t)parent_len);
+            parent[parent_len] = '\0';
+        }
+
+        char resolved_parent[4096];
+        if (realpath(parent, resolved_parent)) {
+            // Node common.PIPE can be relative through a harness symlink; libuv
+            // counts raw ".." segments against sockaddr_un before the OS resolves them.
+            snprintf(out, (size_t)out_size, "%s/%s", resolved_parent, slash + 1);
+            return;
+        }
+    }
+    // libuv pipe connect/bind is resolved against native cwd; normalizing keeps
+    // relative Node test pipe paths stable across primary/worker IPC turns.
+    snprintf(out, (size_t)out_size, "%s", joined);
+#endif
+}
+
 static bool string_item_has_nul(Item value) {
     if (get_type_id(value) != LMD_TYPE_STRING) return false;
     String* s = it2s(value);
@@ -2492,8 +2774,7 @@ static bool validate_host_string(Item value, const char* name) {
 static JsBoundSocket* bound_socket_from_item(Item self) {
     if (!net_is_object_like(self)) return NULL;
     Item handle_item = js_property_get(self, make_string_item("__bound_socket_handle__"));
-    if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
-    return (JsBoundSocket*)(uintptr_t)it2i(handle_item);
+    return (JsBoundSocket*)net_native_ptr_from_item(handle_item);
 }
 
 static Item bound_socket_throw_adopted(void) {
@@ -2719,8 +3000,7 @@ static NetBlockList* net_block_list_from_item(Item self) {
     TypeId type = get_type_id(self);
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return NULL;
     Item handle_item = js_property_get(self, make_string_item("__net_block_list__"));
-    if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
-    return (NetBlockList*)(uintptr_t)it2i(handle_item);
+    return (NetBlockList*)net_native_ptr_from_item(handle_item);
 }
 
 static bool net_block_list_type_family(Item type_item, int* family) {
@@ -3158,7 +3438,13 @@ static bool normalize_connect_args(Item rest_args, NetConnectOptions* out) {
 
     if (get_type_id(first) == LMD_TYPE_STRING) {
         String* s = it2s(first);
-        if (s->len > 0 && s->chars[0] == '/') {
+        bool looks_like_path = s->len > 0 && s->chars[0] == '/';
+        for (uint64_t i = 0; i < s->len && !looks_like_path; i++) {
+            looks_like_path = s->chars[i] == '/' || s->chars[i] == '\\';
+        }
+        if (looks_like_path) {
+            // Node treats string connect arguments with path separators as IPC
+            // paths; parsing relative socket paths as ports leaves pipe tests idle.
             if (!copy_string_item(first, out->path, (int)sizeof(out->path))) return false;
             out->has_path = true;
             return true;
@@ -3910,6 +4196,51 @@ static void client_connect_cb(uv_connect_t* req, int status) {
     }
 }
 
+static void pipe_connect_close_cb(uv_handle_t* handle) {
+    NetPipeConnectReq* pc = handle ? (NetPipeConnectReq*)handle->data : NULL;
+    if (pc) mem_free(pc);
+}
+
+static void pipe_connect_cb(uv_connect_t* req, int status) {
+    NetPipeConnectReq* pc = req ? (NetPipeConnectReq*)req->data : NULL;
+    JsSocket* sock = pc ? pc->sock : NULL;
+    if (!pc || !sock) return;
+
+    sock->connect_pending = false;
+    if (status != 0) {
+        Item err = make_path_connect_error(status, "");
+        socket_emit(sock->js_object, "error", &err, 1);
+    } else {
+        sock->connected = true;
+        socket_update_state_properties(sock);
+        socket_emit(sock->js_object, "connect", NULL, 0);
+        socket_emit(sock->js_object, "ready", NULL, 0);
+    }
+    socket_close_now(sock);
+    if (!uv_is_closing((uv_handle_t*)&pc->pipe)) {
+        uv_close((uv_handle_t*)&pc->pipe, pipe_connect_close_cb);
+    }
+}
+
+static int socket_start_pipe_connect(JsSocket* sock, const char* path) {
+    if (!sock || !path || !path[0]) return UV_EINVAL;
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) return UV_EINVAL;
+    NetPipeConnectReq* pc = (NetPipeConnectReq*)mem_calloc(1, sizeof(NetPipeConnectReq), MEM_CAT_JS_RUNTIME);
+    if (!pc) return UV_ENOMEM;
+    pc->sock = sock;
+    normalize_pipe_fs_path(path, pc->path, (int)sizeof(pc->path));
+    pc->req.data = pc;
+    pc->pipe.data = pc;
+    uv_pipe_init(loop, &pc->pipe, 0);
+    sock->connect_pending = true;
+    socket_update_state_properties(sock);
+    // primary-owned cluster pipe listeners must still use libuv's pipe connect
+    // path; synthetic connects corrupt loop ownership during drain.
+    uv_pipe_connect(&pc->req, &pc->pipe, pc->path, pipe_connect_cb);
+    return 0;
+}
+
 static Item create_socket_for_connect(const NetConnectOptions* options) {
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) {
@@ -3941,8 +4272,11 @@ static Item create_socket_for_connect(const NetConnectOptions* options) {
     }
 
     if (options->has_path) {
-        Item err = make_path_connect_error(UV_ENOENT, options->path);
-        socket_schedule_error_close_event(sock, err);
+        int r = socket_start_pipe_connect(sock, options->path);
+        if (r != 0) {
+            Item err = make_path_connect_error(r, options->path);
+            socket_schedule_error_close_event(sock, err);
+        }
         return obj;
     }
 
@@ -4015,8 +4349,11 @@ static Item js_socket_connect_args(Item self, Item rest_args) {
     }
 
     if (options.has_path) {
-        Item err = make_path_connect_error(UV_ENOENT, options.path);
-        socket_schedule_error_close_event(sock, err);
+        int r = socket_start_pipe_connect(sock, options.path);
+        if (r != 0) {
+            Item err = make_path_connect_error(r, options.path);
+            socket_schedule_error_close_event(sock, err);
+        }
         return self;
     }
 
@@ -4062,14 +4399,17 @@ extern "C" Item js_net_createConnection(Item rest_args) {
 
 struct JsServer {
     uv_tcp_t tcp;
+    uv_pipe_t pipe;
     Item     js_object;
     Item     connection_handler;
+    bool     is_pipe;
     bool     closed;
     bool     listen_pending;
     bool     allow_half_open;
     bool     close_requested;
     bool     handle_closed;
     bool     close_event_emitted;
+    bool     ipc_transfer_defer_close_event;
     bool     has_block_list;
     bool     listen_after_close;
     bool     keep_alive;
@@ -4083,7 +4423,368 @@ struct JsServer {
     Item     pending_listen_callback;
 };
 
+#define NET_CLUSTER_PIPE_SERVER_MAX 16
+#define NET_CLUSTER_PIPE_WORKER_MAX 32
+#define NET_CLUSTER_PIPE_PENDING_MAX 256
+#define NET_CLUSTER_PIPE_SOCKET_MAX 512
+
+typedef struct NetClusterPipeWorker {
+    Item worker;
+    int  max_connections;
+    bool active;
+} NetClusterPipeWorker;
+
+typedef struct NetClusterPipePending {
+    Item handle;
+    int64_t seq;
+    int selected_worker;
+    bool active;
+    bool in_flight;
+    bool rejected_workers[NET_CLUSTER_PIPE_WORKER_MAX];
+} NetClusterPipePending;
+
+typedef struct NetClusterPipeServer {
+    uv_pipe_t pipe;
+    char path[4096];
+    int64_t next_seq;
+    bool active;
+    bool closing;
+    NetClusterPipeWorker workers[NET_CLUSTER_PIPE_WORKER_MAX];
+    NetClusterPipePending pending[NET_CLUSTER_PIPE_PENDING_MAX];
+} NetClusterPipeServer;
+
+typedef struct NetClusterWorkerPipeServer {
+    char path[4096];
+    Item server_obj;
+    Item callback;
+    bool active;
+    bool query_sent;
+    bool listening_emitted;
+} NetClusterWorkerPipeServer;
+
+typedef struct NetClusterPipeSocketRecord {
+    Item obj;
+    JsServer* owner;
+    bool active;
+} NetClusterPipeSocketRecord;
+
+static NetClusterPipeServer net_cluster_pipe_servers[NET_CLUSTER_PIPE_SERVER_MAX];
+static NetClusterWorkerPipeServer net_cluster_worker_pipe_servers[NET_CLUSTER_PIPE_WORKER_MAX];
+static Item net_cluster_pipe_worker_roots[NET_CLUSTER_PIPE_SERVER_MAX][NET_CLUSTER_PIPE_WORKER_MAX];
+static Item net_cluster_pipe_pending_roots[NET_CLUSTER_PIPE_SERVER_MAX][NET_CLUSTER_PIPE_PENDING_MAX];
+static Item net_cluster_worker_server_roots[NET_CLUSTER_PIPE_WORKER_MAX];
+static Item net_cluster_worker_callback_roots[NET_CLUSTER_PIPE_WORKER_MAX];
+static Item net_cluster_pipe_socket_roots[NET_CLUSTER_PIPE_SOCKET_MAX];
+static NetClusterPipeSocketRecord net_cluster_pipe_sockets[NET_CLUSTER_PIPE_SOCKET_MAX];
+static bool net_cluster_pipe_roots_registered = false;
+
 static JsServer* server_from_object(Item self);
+static bool server_emit(Item self, const char* event, Item* args, int argc);
+static void server_maybe_finish_close(JsServer* srv);
+static int server_max_connections(JsServer* srv);
+static void net_cluster_close_pipe_sockets_for_server(JsServer* srv);
+
+static void net_cluster_pipe_server_close_cb(uv_handle_t* handle) {
+    NetClusterPipeServer* server = handle ? (NetClusterPipeServer*)handle->data : NULL;
+    if (!server) return;
+    memset(server, 0, sizeof(NetClusterPipeServer));
+}
+
+static void net_cluster_pipe_register_roots(void) {
+    if (net_cluster_pipe_roots_registered) return;
+    heap_register_gc_root_range((uint64_t*)net_cluster_pipe_worker_roots,
+        NET_CLUSTER_PIPE_SERVER_MAX * NET_CLUSTER_PIPE_WORKER_MAX);
+    heap_register_gc_root_range((uint64_t*)net_cluster_pipe_pending_roots,
+        NET_CLUSTER_PIPE_SERVER_MAX * NET_CLUSTER_PIPE_PENDING_MAX);
+    heap_register_gc_root_range((uint64_t*)net_cluster_worker_server_roots,
+        NET_CLUSTER_PIPE_WORKER_MAX);
+    heap_register_gc_root_range((uint64_t*)net_cluster_worker_callback_roots,
+        NET_CLUSTER_PIPE_WORKER_MAX);
+    heap_register_gc_root_range((uint64_t*)net_cluster_pipe_socket_roots,
+        NET_CLUSTER_PIPE_SOCKET_MAX);
+    net_cluster_pipe_roots_registered = true;
+}
+
+static void net_cluster_close_pipe_handle_item(Item handle) {
+    if (!net_is_object_like(handle)) return;
+    Item close_fn = js_property_get(handle, make_string_item("close"));
+    if (is_callable(close_fn)) {
+        js_call_function(close_fn, handle, NULL, 0);
+        js_microtask_flush();
+    }
+}
+
+static int64_t net_cluster_int64_value(Item value, int64_t fallback) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT) return it2i(value);
+    if (type == LMD_TYPE_INT64) return it2l(value);
+    if (type == LMD_TYPE_FLOAT) return (int64_t)it2d(value);
+    return fallback;
+}
+
+static bool net_cluster_bool_value(Item value) {
+    if (value.item == ITEM_TRUE || value.item == b2it(true)) return true;
+    if (get_type_id(value) == LMD_TYPE_BOOL) return it2b(value);
+    return false;
+}
+
+static NetClusterPipePending* net_cluster_primary_find_pending(NetClusterPipeServer* server,
+                                                               int64_t seq) {
+    if (!server) return NULL;
+    for (int i = 0; i < NET_CLUSTER_PIPE_PENDING_MAX; i++) {
+        NetClusterPipePending* pending = &server->pending[i];
+        if (pending->active && pending->seq == seq) return pending;
+    }
+    return NULL;
+}
+
+static void net_cluster_primary_clear_pending(NetClusterPipeServer* server,
+                                              NetClusterPipePending* pending) {
+    if (!server || !pending) return;
+    int server_index = (int)(server - net_cluster_pipe_servers);
+    int pending_index = (int)(pending - server->pending);
+    if (pending_index >= 0 && pending_index < NET_CLUSTER_PIPE_PENDING_MAX) {
+        net_cluster_pipe_pending_roots[server_index][pending_index] = make_undefined_item();
+    }
+    memset(pending, 0, sizeof(NetClusterPipePending));
+}
+
+static NetClusterPipePending* net_cluster_primary_alloc_pending(NetClusterPipeServer* server,
+                                                                Item handle) {
+    if (!server || !net_is_object_like(handle)) return NULL;
+    net_cluster_pipe_register_roots();
+    for (int i = 0; i < NET_CLUSTER_PIPE_PENDING_MAX; i++) {
+        NetClusterPipePending* pending = &server->pending[i];
+        if (pending->active) continue;
+        memset(pending, 0, sizeof(NetClusterPipePending));
+        pending->active = true;
+        pending->selected_worker = -1;
+        pending->handle = handle;
+        pending->seq = ++server->next_seq;
+        int server_index = (int)(server - net_cluster_pipe_servers);
+        net_cluster_pipe_pending_roots[server_index][i] = handle;
+        return pending;
+    }
+    return NULL;
+}
+
+static int net_cluster_primary_select_worker(NetClusterPipeServer* server,
+                                             NetClusterPipePending* pending) {
+    if (!server || !pending) return -1;
+    for (int w = 0; w < NET_CLUSTER_PIPE_WORKER_MAX; w++) {
+        NetClusterPipeWorker* candidate = &server->workers[w];
+        if (!candidate->active || !candidate->worker.item) continue;
+        if (pending->rejected_workers[w]) continue;
+        return w;
+    }
+    return -1;
+}
+
+static bool net_cluster_primary_send_pending(NetClusterPipeServer* server,
+                                             NetClusterPipePending* pending) {
+    if (!server || !server->active || server->closing || !pending || !pending->active) {
+        return false;
+    }
+    int worker_index = net_cluster_primary_select_worker(server, pending);
+    if (worker_index < 0) return false;
+    NetClusterPipeWorker* selected = &server->workers[worker_index];
+
+    Item message = js_new_object();
+    js_property_set(message, make_string_item("act"), make_string_item("newconn"));
+    js_property_set(message, make_string_item("__lambda_cluster_pipe_newconn__"),
+                    (Item){.item = ITEM_TRUE});
+    js_property_set(message, make_string_item("key"), make_string_item(server->path));
+    js_property_set(message, make_string_item("path"), make_string_item(server->path));
+    js_property_set(message, make_string_item("seq"), (Item){.item = i2it(pending->seq)});
+    Item send = js_property_get(selected->worker, make_string_item("send"));
+    bool sent = false;
+    if (is_callable(send)) {
+        Item options = js_new_object();
+        js_property_set(options, make_string_item("keepOpen"), (Item){.item = ITEM_TRUE});
+        Item args[3] = { message, pending->handle, options };
+        Item result = js_call_function(send, selected->worker, args, 3);
+        sent = result.item == ITEM_TRUE || result.item == b2it(true);
+        js_microtask_flush();
+    }
+    if (!sent) {
+        pending->rejected_workers[worker_index] = true;
+        return net_cluster_primary_send_pending(server, pending);
+    }
+    pending->selected_worker = worker_index;
+    pending->in_flight = true;
+    return sent;
+}
+
+static void net_cluster_primary_close_pipe_server(NetClusterPipeServer* server) {
+    if (!server || (!server->active && !server->closing)) return;
+    int server_index = (int)(server - net_cluster_pipe_servers);
+    for (int i = 0; i < NET_CLUSTER_PIPE_PENDING_MAX; i++) {
+        NetClusterPipePending* pending = &server->pending[i];
+        if (pending->active) {
+            net_cluster_close_pipe_handle_item(pending->handle);
+            net_cluster_pipe_pending_roots[server_index][i] = make_undefined_item();
+            memset(pending, 0, sizeof(NetClusterPipePending));
+        }
+    }
+    for (int i = 0; i < NET_CLUSTER_PIPE_WORKER_MAX; i++) {
+        server->workers[i].active = false;
+        server->workers[i].worker = make_undefined_item();
+        net_cluster_pipe_worker_roots[server_index][i] = make_undefined_item();
+    }
+    server->active = false;
+    if (!server->closing) {
+        server->closing = true;
+        if (!uv_is_closing((uv_handle_t*)&server->pipe)) {
+            uv_close((uv_handle_t*)&server->pipe, net_cluster_pipe_server_close_cb);
+        }
+    }
+}
+
+extern "C" void js_net_cluster_primary_worker_disconnected(Item worker) {
+    if (!net_is_object_like(worker)) return;
+    for (int s = 0; s < NET_CLUSTER_PIPE_SERVER_MAX; s++) {
+        NetClusterPipeServer* server = &net_cluster_pipe_servers[s];
+        if (!server->active || server->closing) continue;
+        bool removed = false;
+        for (int w = 0; w < NET_CLUSTER_PIPE_WORKER_MAX; w++) {
+            NetClusterPipeWorker* entry = &server->workers[w];
+            if (!entry->active || entry->worker.item != worker.item) continue;
+            entry->active = false;
+            entry->worker = make_undefined_item();
+            net_cluster_pipe_worker_roots[s][w] = make_undefined_item();
+            removed = true;
+        }
+        if (!removed) continue;
+
+        bool has_workers = false;
+        for (int w = 0; w < NET_CLUSTER_PIPE_WORKER_MAX; w++) {
+            if (server->workers[w].active && server->workers[w].worker.item) {
+                has_workers = true;
+                break;
+            }
+        }
+        if (!has_workers) {
+            // primary-owned RR pipe listeners outlive worker IPC unless the last
+            // disconnect closes the shared accept handle and its pending tokens.
+            net_cluster_primary_close_pipe_server(server);
+            continue;
+        }
+
+        for (int p = 0; p < NET_CLUSTER_PIPE_PENDING_MAX; p++) {
+            NetClusterPipePending* pending = &server->pending[p];
+            if (!pending->active || pending->selected_worker < 0 ||
+                pending->selected_worker >= NET_CLUSTER_PIPE_WORKER_MAX) {
+                continue;
+            }
+            NetClusterPipeWorker* selected = &server->workers[pending->selected_worker];
+            if (selected->active && selected->worker.item) continue;
+            pending->rejected_workers[pending->selected_worker] = true;
+            pending->selected_worker = -1;
+            pending->in_flight = false;
+            if (!net_cluster_primary_send_pending(server, pending)) {
+                net_cluster_close_pipe_handle_item(pending->handle);
+                net_cluster_primary_clear_pending(server, pending);
+            }
+        }
+    }
+}
+
+static bool net_cluster_primary_dispatch_pipe_connection(NetClusterPipeServer* server, Item handle) {
+    // primary-owned RR pipes cannot count sends as accepts; workers decide from
+    // live maxConnections and ack so rejected descriptors can be rerouted.
+    NetClusterPipePending* pending = net_cluster_primary_alloc_pending(server, handle);
+    if (!pending) return false;
+    if (net_cluster_primary_send_pending(server, pending)) return true;
+    net_cluster_primary_clear_pending(server, pending);
+    return false;
+}
+
+static NetClusterPipeSocketRecord* net_cluster_pipe_socket_record_from_object(Item obj) {
+    if (!net_is_object_like(obj)) return NULL;
+    Item ptr = js_property_get(obj, make_string_item("__cluster_pipe_socket_record__"));
+    return (NetClusterPipeSocketRecord*)net_native_ptr_from_item(ptr);
+}
+
+static void net_cluster_close_pipe_socket_record(NetClusterPipeSocketRecord* record) {
+    if (!record || !record->active) return;
+    Item obj = record->obj;
+    JsServer* owner = record->owner;
+    record->active = false;
+    record->obj = make_undefined_item();
+    record->owner = NULL;
+    if (net_is_object_like(obj)) {
+        js_property_set(obj, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
+        Item handle = js_property_get(obj, make_string_item("_handle"));
+        js_property_set(obj, make_string_item("_handle"), ItemNull);
+        js_property_set(obj, make_string_item("__cluster_pipe_socket_record__"),
+                        make_undefined_item());
+        net_cluster_close_pipe_handle_item(handle);
+    }
+    if (owner && owner->connection_count > 0) {
+        owner->connection_count--;
+        server_maybe_finish_close(owner);
+    }
+}
+
+static void net_cluster_close_pipe_sockets_for_server(JsServer* srv) {
+    if (!srv) return;
+    for (int i = 0; i < NET_CLUSTER_PIPE_SOCKET_MAX; i++) {
+        NetClusterPipeSocketRecord* record = &net_cluster_pipe_sockets[i];
+        if (record->active && record->owner == srv) {
+            net_cluster_close_pipe_socket_record(record);
+            net_cluster_pipe_socket_roots[i] = make_undefined_item();
+        }
+    }
+}
+
+static Item js_cluster_pipe_socket_destroy(void) {
+    Item self = js_get_this();
+    NetClusterPipeSocketRecord* record = net_cluster_pipe_socket_record_from_object(self);
+    if (record) {
+        // worker pipe sockets are accounting tokens for primary-transferred
+        // descriptors; maxConnections must drop only when the socket closes.
+        net_cluster_close_pipe_socket_record(record);
+        int index = (int)(record - net_cluster_pipe_sockets);
+        if (index >= 0 && index < NET_CLUSTER_PIPE_SOCKET_MAX) {
+            net_cluster_pipe_socket_roots[index] = make_undefined_item();
+        }
+        return make_undefined_item();
+    }
+    Item handle = js_property_get(self, make_string_item("_handle"));
+    net_cluster_close_pipe_handle_item(handle);
+    js_property_set(self, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
+    return make_undefined_item();
+}
+
+static Item make_cluster_pipe_socket_object(Item handle, JsServer* owner) {
+    net_cluster_pipe_register_roots();
+    Item obj = js_new_object();
+    js_property_set(obj, make_string_item("_handle"), net_is_object_like(handle) ? handle : ItemNull);
+    js_property_set(obj, make_string_item("destroy"),
+                    js_new_function((void*)js_cluster_pipe_socket_destroy, 0));
+    js_property_set(obj, make_string_item("end"),
+                    js_new_function((void*)js_cluster_pipe_socket_destroy, 0));
+    js_property_set(obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
+    js_property_set(obj, make_string_item("writable"), (Item){.item = ITEM_TRUE});
+    js_property_set(obj, make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
+    for (int i = 0; i < NET_CLUSTER_PIPE_SOCKET_MAX; i++) {
+        NetClusterPipeSocketRecord* record = &net_cluster_pipe_sockets[i];
+        if (record->active) continue;
+        record->active = true;
+        record->obj = obj;
+        record->owner = owner;
+        net_cluster_pipe_socket_roots[i] = obj;
+        js_property_set(obj, make_string_item("__cluster_pipe_socket_record__"),
+                        (Item){.item = i2it((int64_t)(uintptr_t)record)});
+        break;
+    }
+    return obj;
+}
+
+static uv_handle_t* server_handle(JsServer* srv) {
+    if (!srv) return NULL;
+    return srv->is_pipe ? (uv_handle_t*)&srv->pipe : (uv_handle_t*)&srv->tcp;
+}
 
 static Item server_make_listener_record(Item listener, bool once) {
     Item record = js_new_object();
@@ -4169,6 +4870,7 @@ static void server_maybe_finish_close(JsServer* srv) {
     // keep JsServer alive until all owner_server links are detached, or socket
     // close callbacks can decrement connection_count through a freed pointer.
     net_active_remove(net_active_servers, NET_ACTIVE_SERVER_MAX, srv->js_object);
+    if (srv->ipc_transfer_defer_close_event) return;
     if (!srv->close_event_emitted) {
         srv->close_event_emitted = true;
         js_property_set(srv->js_object, make_string_item("listening"), (Item){.item = ITEM_FALSE});
@@ -4202,8 +4904,10 @@ static void server_close_handle_now(JsServer* srv) {
     srv->closed = true;
     srv->close_requested = true;
     srv->listen_pending = false;
-    if (!uv_is_closing((uv_handle_t*)&srv->tcp)) {
-        uv_close((uv_handle_t*)&srv->tcp, [](uv_handle_t* h) {
+    net_cluster_close_pipe_sockets_for_server(srv);
+    uv_handle_t* handle = server_handle(srv);
+    if (handle && !uv_is_closing(handle)) {
+        uv_close(handle, [](uv_handle_t* h) {
             JsServer* s = h ? (JsServer*)h->data : NULL;
             if (s) {
                 s->handle_closed = true;
@@ -4348,11 +5052,37 @@ static void server_capture_connection_rejection(Item result, Item client_obj) {
 
 static Item make_server_handle_object(JsServer* srv);
 
+static bool server_emit_cluster_worker_newconn(JsServer* srv, JsSocket* client, Item client_handle) {
+    if (!srv || !client || !js_cluster_is_worker_runtime()) return false;
+    Item message = js_new_object();
+    js_property_set(message, make_string_item("act"), make_string_item("newconn"));
+    // Cluster SCHED_RR delivers accepted sockets through internalMessage before
+    // public connection handlers; worker tests may replace handle.close there.
+    js_process_emit2(make_string_item("internalMessage"), message, client_handle);
+    js_microtask_flush();
+    if (js_check_exception()) return false;
+
+    bool listener_closed_server = srv->closed || srv->close_requested;
+    bool listener_closed_handle = uv_is_closing((uv_handle_t*)&client->tcp);
+    if (!listener_closed_server && !listener_closed_handle) return false;
+    if (!listener_closed_handle) {
+        Item close_fn = js_property_get(client_handle, make_string_item("close"));
+        if (is_callable(close_fn)) {
+            js_call_function(close_fn, client_handle, NULL, 0);
+            js_microtask_flush();
+        } else {
+            socket_close_now(client);
+        }
+    }
+    return true;
+}
+
 static JsServer* server_from_handle_object(Item self) {
     if (!net_is_object_like(self)) return NULL;
     Item handle_item = js_property_get(self, make_string_item("__server_handle__"));
-    if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
-    return (JsServer*)(uintptr_t)it2i(handle_item);
+    // Server handle wrappers store native pointers; worker-mode values can be
+    // boxed as INT64, so decode both integer representations.
+    return (JsServer*)net_native_ptr_from_item(handle_item);
 }
 
 static void server_apply_accepted_handle_options(JsServer* srv, JsSocket* client, Item client_handle) {
@@ -4472,12 +5202,19 @@ extern "C" int js_net_dup_ipc_stdio_fd(Item handle_item) {
 
 extern "C" uv_stream_t* js_net_stream_from_ipc_send_handle(Item handle_item) {
     if (!net_is_object_like(handle_item)) return NULL;
+    JsPipeHandle* ph = pipe_handle_from_object(handle_item);
+    if (ph && !ph->closed && !uv_is_closing((uv_handle_t*)&ph->pipe)) {
+        return (uv_stream_t*)&ph->pipe;
+    }
     JsServer* srv = server_from_handle_object(handle_item);
     if (srv && !uv_is_closing((uv_handle_t*)&srv->tcp)) {
         return (uv_stream_t*)&srv->tcp;
     }
     JsSocket* sock = socket_from_handle_object(handle_item);
     if (sock && !uv_is_closing((uv_handle_t*)&sock->tcp)) {
+        // uv_write2 descriptor passing completes asynchronously; remember net
+        // streams by address so later cleanup never falls through to HTTP.
+        net_pending_ipc_register_socket(sock);
         return (uv_stream_t*)&sock->tcp;
     }
 
@@ -4487,36 +5224,52 @@ extern "C" uv_stream_t* js_net_stream_from_ipc_send_handle(Item handle_item) {
         // to the native TCP handle used by uv_write2 descriptor passing.
         return js_net_stream_from_ipc_send_handle(inner);
     }
+    uv_stream_t* http_stream = js_http_stream_from_ipc_send_handle(handle_item);
+    if (http_stream) return http_stream;
     return NULL;
 }
 
 static JsServer* server_from_ipc_stream(uv_stream_t* stream) {
-    if (!stream || stream->type != UV_TCP) return NULL;
-    JsServer* srv = (JsServer*)stream->data;
-    if (!srv || (uv_stream_t*)&srv->tcp != stream) return NULL;
+    // IPC cleanup can receive stream pointers after close callbacks run; only
+    // rooted live wrappers may be dereferenced to identify a net handle.
     for (int i = 0; i < NET_ACTIVE_SERVER_MAX; i++) {
-        if (net_active_servers[i].item == srv->js_object.item) return srv;
+        JsServer* srv = server_from_object(net_active_servers[i]);
+        if (srv && (uv_stream_t*)&srv->tcp == stream) return srv;
     }
     return NULL;
 }
 
 static JsSocket* socket_from_ipc_stream(uv_stream_t* stream) {
-    if (!stream || stream->type != UV_TCP) return NULL;
-    JsSocket* sock = (JsSocket*)stream->data;
-    if (!sock || (uv_stream_t*)&sock->tcp != stream) return NULL;
+    // IPC cleanup can receive stream pointers after close callbacks run; only
+    // rooted live wrappers may be dereferenced to identify a net handle.
     for (int i = 0; i < NET_ACTIVE_SOCKET_MAX; i++) {
-        if (net_active_sockets[i].item == sock->js_object.item) return sock;
+        JsSocket* sock = socket_from_object(net_active_sockets[i]);
+        if (sock && (uv_stream_t*)&sock->tcp == stream) return sock;
     }
     return NULL;
 }
 
 extern "C" void* js_net_ipc_sent_stream_connection_account(uv_stream_t* stream) {
+    if (stream && uv_handle_get_type((uv_handle_t*)stream) == UV_NAMED_PIPE) return NULL;
+    NetPendingIpcStream* pending = net_pending_ipc_find_stream(stream);
     JsSocket* sock = socket_from_ipc_stream(stream);
-    if (!sock || !sock->owner_server) return NULL;
+    if (!sock && pending) sock = pending->sock;
+    if (!sock || !sock->owner_server) {
+        if (pending) return NULL;
+        void* http_account = js_http_ipc_sent_stream_connection_account(stream);
+        // HTTP accepted sockets share IPC plumbing but use JsHttpServer
+        // accounting; tag the aligned pointer so completion dispatches safely.
+        return http_account ? (void*)((uintptr_t)http_account | (uintptr_t)1U) : NULL;
+    }
     return (void*)sock->owner_server;
 }
 
 extern "C" void js_net_complete_transferred_connection_account(void* account) {
+    uintptr_t raw = (uintptr_t)account;
+    if ((raw & 1U) != 0) {
+        js_http_complete_transferred_connection_account((void*)(raw & ~(uintptr_t)1U));
+        return;
+    }
     JsServer* srv = (JsServer*)account;
     if (!srv) return;
     if (srv->connection_count > 0) srv->connection_count--;
@@ -4526,24 +5279,57 @@ extern "C" void js_net_complete_transferred_connection_account(void* account) {
 extern "C" void js_net_close_ipc_sent_stream(uv_stream_t* stream);
 
 extern "C" void js_net_close_ipc_sent_stream_defer_account(uv_stream_t* stream) {
+    NetPendingIpcStream* pending = net_pending_ipc_find_stream(stream);
+    if (pending) pending->cleanup_seen = true;
     JsSocket* sock = socket_from_ipc_stream(stream);
+    if (!sock && pending) sock = pending->sock;
+    if (pending && pending->close_seen) {
+        socket_free_detached(pending->sock);
+        return;
+    }
     if (sock && sock->owner_server) {
         sock->transfer_account_pending = true;
+    } else if (!sock && js_http_close_ipc_sent_stream_defer_account(stream)) {
+        return;
     }
     js_net_close_ipc_sent_stream(stream);
 }
 
 extern "C" void js_net_close_ipc_sent_stream(uv_stream_t* stream) {
-    if (!stream || stream->type != UV_TCP || uv_is_closing((uv_handle_t*)stream)) return;
+    if (!stream) return;
+    if (uv_handle_get_type((uv_handle_t*)stream) == UV_NAMED_PIPE) {
+        JsPipeHandle* ph = (JsPipeHandle*)stream->data;
+        if (!ph || ph->closed || uv_is_closing((uv_handle_t*)&ph->pipe)) return;
+        ph->closed = true;
+        uv_close((uv_handle_t*)&ph->pipe, pipe_handle_close_cb);
+        return;
+    }
+    NetPendingIpcStream* pending = net_pending_ipc_find_stream(stream);
+    if (pending) pending->cleanup_seen = true;
+    if (pending && pending->close_seen) {
+        socket_free_detached(pending->sock);
+        return;
+    }
     JsServer* srv = server_from_ipc_stream(stream);
     if (srv) {
+        if (uv_is_closing((uv_handle_t*)&srv->tcp)) return;
         // IPC keepOpen=false transfers the sender's listening fd ownership;
         // leaving the server refed makes cluster tests wait for the drain watchdog.
+        js_property_set(srv->js_object, make_string_item("__ipc_transferred_address__"),
+                        js_server_address_for(srv->js_object));
+        // keepOpen:false transfers native ownership immediately, but Node
+        // surfaces sender-side 'close' when userland later calls server.close().
+        srv->ipc_transfer_defer_close_event = true;
         server_close_handle_now(srv);
         return;
     }
     JsSocket* sock = socket_from_ipc_stream(stream);
-    if (!sock || sock->destroyed) return;
+    if (!sock && pending) sock = pending->sock;
+    if (!sock || sock->destroyed) {
+        if (!pending) js_http_close_ipc_sent_stream(stream);
+        return;
+    }
+    if (uv_is_closing((uv_handle_t*)&sock->tcp)) return;
     socket_close_now(sock);
 }
 
@@ -4578,7 +5364,7 @@ static void server_connection_cb(uv_stream_t* server, int status) {
     if (uv_accept(server, (uv_stream_t*)&client->tcp) == 0) {
         if (!context || !context->heap) {
             uv_close((uv_handle_t*)&client->tcp, [](uv_handle_t* h) {
-                mem_free(h->data);
+                socket_free_detached(h ? (JsSocket*)h->data : NULL);
             });
             return;
         }
@@ -4600,7 +5386,7 @@ static void server_connection_cb(uv_stream_t* server, int status) {
             }
             if (peer_ip[0] && net_block_list_blocks_item(srv->block_list, peer_ip, peer_family)) {
                 uv_close((uv_handle_t*)&client->tcp, [](uv_handle_t* h) {
-                    mem_free(h->data);
+                    socket_free_detached(h ? (JsSocket*)h->data : NULL);
                 });
                 return;
             }
@@ -4610,12 +5396,13 @@ static void server_connection_cb(uv_stream_t* server, int status) {
         if (max_connections >= 0 && srv->connection_count >= max_connections) {
             server_emit_drop(srv, client);
             uv_close((uv_handle_t*)&client->tcp, [](uv_handle_t* h) {
-                mem_free(h->data);
+                socket_free_detached(h ? (JsSocket*)h->data : NULL);
             });
             return;
         }
 
         Item client_handle = make_socket_handle_object(client);
+        if (server_emit_cluster_worker_newconn(srv, client, client_handle)) return;
         Item server_handle = js_property_get(srv->js_object, make_string_item("_handle"));
         Item onconnection = js_property_get(server_handle, make_string_item("onconnection"));
         if (is_callable(onconnection)) {
@@ -4627,9 +5414,73 @@ static void server_connection_cb(uv_stream_t* server, int status) {
         }
     } else {
         uv_close((uv_handle_t*)&client->tcp, [](uv_handle_t* h) {
-            mem_free(h->data);
+            socket_free_detached(h ? (JsSocket*)h->data : NULL);
         });
     }
+}
+
+static void server_pipe_connection_cb(uv_stream_t* server, int status) {
+    if (status < 0) return;
+    uv_loop_t* loop = server ? server->loop : lambda_uv_loop();
+    if (!loop) return;
+
+    uv_pipe_t* client = (uv_pipe_t*)mem_calloc(1, sizeof(uv_pipe_t), MEM_CAT_JS_RUNTIME);
+    if (!client) return;
+    uv_pipe_init(loop, client, 0);
+    if (uv_accept(server, (uv_stream_t*)client) != 0) {
+        uv_close((uv_handle_t*)client, [](uv_handle_t* h) {
+            if (h) mem_free(h);
+        });
+        return;
+    }
+    // Path servers currently need bind/listen/error semantics for cluster IPC
+    // coordination; close accepted pipe clients until pipe sockets are modeled.
+    uv_close((uv_handle_t*)client, [](uv_handle_t* h) {
+        if (h) mem_free(h);
+    });
+}
+
+static Item js_server_address_for(Item self) {
+    Item handle_item = js_property_get(self, make_string_item("__server__"));
+    if (handle_item.item == 0 || handle_item.item == ITEM_NULL) {
+        Item transferred = js_property_get(self, make_string_item("__ipc_transferred_address__"));
+        return net_is_object_like(transferred) ? transferred : ItemNull;
+    }
+    JsServer* srv = (JsServer*)net_native_ptr_from_item(handle_item);
+    if (!srv) {
+        Item transferred = js_property_get(self, make_string_item("__ipc_transferred_address__"));
+        return net_is_object_like(transferred) ? transferred : ItemNull;
+    }
+
+    struct sockaddr_storage addr;
+    int addrlen = sizeof(addr);
+    int r = uv_tcp_getsockname(&srv->tcp, (struct sockaddr*)&addr, &addrlen);
+    if (r != 0) {
+        // A keepOpen:false IPC server transfer closes sender ownership, but
+        // userland still reads address().port to connect to the receiver.
+        Item transferred = js_property_get(self, make_string_item("__ipc_transferred_address__"));
+        return net_is_object_like(transferred) ? transferred : ItemNull;
+    }
+
+    Item result = js_new_object();
+    if (addr.ss_family == AF_INET) {
+        struct sockaddr_in* a4 = (struct sockaddr_in*)&addr;
+        char ip[64];
+        uv_ip4_name(a4, ip, sizeof(ip));
+        js_property_set(result, make_string_item("address"), make_string_item(ip));
+        js_property_set(result, make_string_item("family"), make_string_item("IPv4"));
+        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a4->sin_port))});
+    } else if (addr.ss_family == AF_INET6) {
+        struct sockaddr_in6* a6 = (struct sockaddr_in6*)&addr;
+        char ip[128];
+        uv_ip6_name(a6, ip, sizeof(ip));
+        js_property_set(result, make_string_item("address"), make_string_item(ip));
+        js_property_set(result, make_string_item("family"), make_string_item("IPv6"));
+        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a6->sin6_port))});
+    } else {
+        return ItemNull;
+    }
+    return result;
 }
 
 static Item js_server_emit_listening_scheduled(Item env_item) {
@@ -4643,12 +5494,12 @@ static Item js_server_emit_listening_scheduled(Item env_item) {
         return make_undefined_item();
     }
 
-    JsServer* srv = (JsServer*)(uintptr_t)it2i(handle_item);
+    JsServer* srv = (JsServer*)net_native_ptr_from_item(handle_item);
     if (!srv || srv->closed || !srv->listen_pending) return make_undefined_item();
 
     srv->listen_pending = false;
     server_emit(self, "listening", NULL, 0);
-    js_cluster_notify_worker_listening();
+    js_cluster_notify_worker_listening(js_server_address_for(self));
     if (is_callable(callback)) {
         js_call_function(callback, self, NULL, 0);
     }
@@ -4669,12 +5520,325 @@ static void server_schedule_listening(Item self, JsServer* srv, Item callback) {
     js_setTimeout(fn, (Item){.item = i2it(0)});
 }
 
+static NetClusterPipeServer* net_cluster_primary_find_pipe_server(const char* path, bool create) {
+    if (!path || !path[0]) return NULL;
+    for (int i = 0; i < NET_CLUSTER_PIPE_SERVER_MAX; i++) {
+        if (net_cluster_pipe_servers[i].active &&
+            strcmp(net_cluster_pipe_servers[i].path, path) == 0) {
+            return &net_cluster_pipe_servers[i];
+        }
+    }
+    if (!create) return NULL;
+
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) return NULL;
+    for (int i = 0; i < NET_CLUSTER_PIPE_SERVER_MAX; i++) {
+        NetClusterPipeServer* cps = &net_cluster_pipe_servers[i];
+        if (cps->active || cps->closing) continue;
+        memset(cps, 0, sizeof(NetClusterPipeServer));
+        snprintf(cps->path, sizeof(cps->path), "%s", path);
+        uv_pipe_init(loop, &cps->pipe, 0);
+        cps->pipe.data = cps;
+        char bind_path[4096];
+        normalize_pipe_fs_path(cps->path, bind_path, (int)sizeof(bind_path));
+        int r = uv_pipe_bind(&cps->pipe, bind_path);
+        if (r != 0) {
+            // uv_close keeps the embedded pipe on libuv's close queue; clearing
+            // the slot before the callback corrupts that queue during drain.
+            cps->closing = true;
+            uv_close((uv_handle_t*)&cps->pipe, net_cluster_pipe_server_close_cb);
+            return NULL;
+        }
+        r = uv_listen((uv_stream_t*)&cps->pipe, 128, [](uv_stream_t* stream, int status) {
+            if (status < 0) return;
+            NetClusterPipeServer* server = stream ? (NetClusterPipeServer*)stream->data : NULL;
+            if (!server || server->closing) return;
+            uv_loop_t* accept_loop = stream->loop;
+            JsPipeHandle* ph = (JsPipeHandle*)mem_calloc(1, sizeof(JsPipeHandle), MEM_CAT_JS_RUNTIME);
+            if (!ph) return;
+            uv_pipe_init(accept_loop, &ph->pipe, 0);
+            ph->pipe.data = ph;
+            if (uv_accept(stream, (uv_stream_t*)&ph->pipe) != 0) {
+                uv_close((uv_handle_t*)&ph->pipe, pipe_handle_close_cb);
+                return;
+            }
+
+            Item handle = make_pipe_handle_object(ph);
+            if (!net_cluster_primary_dispatch_pipe_connection(server, handle)) {
+                Item close_fn = js_property_get(handle, make_string_item("close"));
+                if (is_callable(close_fn)) {
+                    js_call_function(close_fn, handle, NULL, 0);
+                    js_microtask_flush();
+                }
+            }
+        });
+        if (r != 0) {
+            // uv_close keeps the embedded pipe on libuv's close queue; clearing
+            // the slot before the callback corrupts that queue during drain.
+            cps->closing = true;
+            uv_close((uv_handle_t*)&cps->pipe, net_cluster_pipe_server_close_cb);
+            return NULL;
+        }
+        cps->active = true;
+        return cps;
+    }
+    return NULL;
+}
+
+static NetClusterWorkerPipeServer* net_cluster_worker_find_pipe_server(const char* path, bool create) {
+    if (!path || !path[0]) return NULL;
+    for (int i = 0; i < NET_CLUSTER_PIPE_WORKER_MAX; i++) {
+        if (net_cluster_worker_pipe_servers[i].active &&
+            strcmp(net_cluster_worker_pipe_servers[i].path, path) == 0) {
+            return &net_cluster_worker_pipe_servers[i];
+        }
+    }
+    if (!create) return NULL;
+    net_cluster_pipe_register_roots();
+    for (int i = 0; i < NET_CLUSTER_PIPE_WORKER_MAX; i++) {
+        NetClusterWorkerPipeServer* entry = &net_cluster_worker_pipe_servers[i];
+        if (entry->active) continue;
+        memset(entry, 0, sizeof(NetClusterWorkerPipeServer));
+        snprintf(entry->path, sizeof(entry->path), "%s", path);
+        entry->active = true;
+        return entry;
+    }
+    return NULL;
+}
+
+static void net_cluster_worker_emit_pipe_listening(NetClusterWorkerPipeServer* entry) {
+    if (!entry || !entry->active || entry->listening_emitted) return;
+    JsServer* srv = server_from_object(entry->server_obj);
+    if (!srv) return;
+    entry->listening_emitted = true;
+    srv->listen_pending = false;
+    js_property_set(entry->server_obj, make_string_item("listening"), (Item){.item = ITEM_TRUE});
+    server_emit(entry->server_obj, "listening", NULL, 0);
+    js_cluster_notify_worker_listening(ItemNull);
+    if (is_callable(entry->callback)) {
+        js_call_function(entry->callback, entry->server_obj, NULL, 0);
+        js_microtask_flush();
+    }
+}
+
+static Item net_cluster_worker_send_pipe_query_tick(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    NetClusterWorkerPipeServer* entry = env ? (NetClusterWorkerPipeServer*)(uintptr_t)env[0].item : NULL;
+    if (!entry || !entry->active || entry->query_sent) return make_undefined_item();
+    JsServer* srv = server_from_object(entry->server_obj);
+    if (!srv) return make_undefined_item();
+    entry->query_sent = true;
+
+    Item process_obj = js_get_process_object_value();
+    Item send = js_property_get(process_obj, make_string_item("send"));
+    if (!is_callable(send)) return make_undefined_item();
+    Item message = js_new_object();
+    js_property_set(message, make_string_item("__lambda_cluster_query_server__"),
+                    (Item){.item = ITEM_TRUE});
+    js_property_set(message, make_string_item("addressType"), make_string_item("pipe"));
+    js_property_set(message, make_string_item("path"), make_string_item(entry->path));
+    js_property_set(message, make_string_item("key"), make_string_item(entry->path));
+    js_property_set(message, make_string_item("maxConnections"),
+                    (Item){.item = i2it(server_max_connections(srv))});
+    // Cluster workers must ask the primary to own SCHED_RR pipe listeners;
+    // direct worker binds make only one worker observable and leave the rest idle.
+    Item sent = js_call_function(send, process_obj, &message, 1);
+    js_microtask_flush();
+    if (sent.item == ITEM_TRUE || sent.item == b2it(true)) {
+        // once the query is queued, the worker's listen callback may run; waiting
+        // for a second IPC ack can leave sibling workers stuck before user setup.
+        net_cluster_worker_emit_pipe_listening(entry);
+    }
+    return make_undefined_item();
+}
+
+static bool net_cluster_worker_register_pipe_server(Item self, JsServer* srv,
+                                                    const char* path, Item callback) {
+    if (!srv || !path || !path[0] || !js_cluster_is_worker_runtime() ||
+        !js_cluster_worker_uses_sched_rr()) {
+        return false;
+    }
+    NetClusterWorkerPipeServer* entry = net_cluster_worker_find_pipe_server(path, true);
+    if (!entry) return false;
+    int index = (int)(entry - net_cluster_worker_pipe_servers);
+    entry->server_obj = self;
+    entry->callback = callback;
+    net_cluster_worker_server_roots[index] = self;
+    net_cluster_worker_callback_roots[index] = callback;
+    srv->is_pipe = true;
+    srv->listen_pending = true;
+    js_property_set(self, make_string_item("__lambda_cluster_pipe_path__"), make_string_item(path));
+    Item* env = js_alloc_env(1);
+    env[0] = (Item){.item = (uint64_t)(uintptr_t)entry};
+    // maxConnections is often assigned immediately after listen(); scheduling
+    // after the current script turn preserves that async listen configuration edge.
+    js_setTimeout(js_new_closure((void*)net_cluster_worker_send_pipe_query_tick, 0, env, 1),
+                  (Item){.item = i2it(0)});
+    return true;
+}
+
+static bool net_cluster_primary_handle_pipe_ack(Item worker, Item message) {
+    Item is_ack = js_property_get(message, make_string_item("__lambda_cluster_pipe_ack__"));
+    if (is_ack.item != ITEM_TRUE && is_ack.item != b2it(true)) return false;
+    String* path = it2s(js_property_get(message, make_string_item("path")));
+    if (!path || path->len <= 0) return true;
+    char path_buf[4096];
+    int len = (int)path->len < (int)sizeof(path_buf) - 1 ? (int)path->len : (int)sizeof(path_buf) - 1;
+    memcpy(path_buf, path->chars, (size_t)len);
+    path_buf[len] = '\0';
+
+    NetClusterPipeServer* server = net_cluster_primary_find_pipe_server(path_buf, false);
+    if (!server) return true;
+    int64_t seq = net_cluster_int64_value(js_property_get(message, make_string_item("seq")), -1);
+    NetClusterPipePending* pending = net_cluster_primary_find_pending(server, seq);
+    if (!pending) return true;
+    bool accepted = net_cluster_bool_value(js_property_get(message, make_string_item("accepted")));
+    if (accepted) {
+        net_cluster_close_pipe_handle_item(pending->handle);
+        net_cluster_primary_clear_pending(server, pending);
+        return true;
+    }
+
+    if (pending->selected_worker >= 0 &&
+        pending->selected_worker < NET_CLUSTER_PIPE_WORKER_MAX) {
+        pending->rejected_workers[pending->selected_worker] = true;
+    }
+    for (int i = 0; i < NET_CLUSTER_PIPE_WORKER_MAX; i++) {
+        if (server->workers[i].active && server->workers[i].worker.item == worker.item) {
+            pending->rejected_workers[i] = true;
+            break;
+        }
+    }
+    pending->selected_worker = -1;
+    pending->in_flight = false;
+    if (net_cluster_primary_send_pending(server, pending)) return true;
+    net_cluster_close_pipe_handle_item(pending->handle);
+    net_cluster_primary_clear_pending(server, pending);
+    return true;
+}
+
+extern "C" bool js_net_cluster_primary_handle_message(Item worker, Item message) {
+    if (!net_is_object_like(message) || !net_is_object_like(worker)) return false;
+    if (net_cluster_primary_handle_pipe_ack(worker, message)) return true;
+    Item is_query = js_property_get(message, make_string_item("__lambda_cluster_query_server__"));
+    if (is_query.item != ITEM_TRUE && is_query.item != b2it(true)) return false;
+    if (!js_is_truthy(js_property_get(message, make_string_item("path")))) return true;
+    String* path = it2s(js_property_get(message, make_string_item("path")));
+    if (!path || path->len <= 0) return true;
+    char path_buf[4096];
+    int len = (int)path->len < (int)sizeof(path_buf) - 1 ? (int)path->len : (int)sizeof(path_buf) - 1;
+    memcpy(path_buf, path->chars, (size_t)len);
+    path_buf[len] = '\0';
+
+    NetClusterPipeServer* server = net_cluster_primary_find_pipe_server(path_buf, true);
+    if (!server) return true;
+    net_cluster_pipe_register_roots();
+    for (int i = 0; i < NET_CLUSTER_PIPE_WORKER_MAX; i++) {
+        NetClusterPipeWorker* entry = &server->workers[i];
+        if (entry->active && entry->worker.item == worker.item) return true;
+    }
+    for (int i = 0; i < NET_CLUSTER_PIPE_WORKER_MAX; i++) {
+        NetClusterPipeWorker* entry = &server->workers[i];
+        if (entry->active) continue;
+        entry->active = true;
+        entry->worker = worker;
+        Item max_item = js_property_get(message, make_string_item("maxConnections"));
+        entry->max_connections = get_type_id(max_item) == LMD_TYPE_INT ? (int)it2i(max_item) : -1;
+        int server_index = (int)(server - net_cluster_pipe_servers);
+        net_cluster_pipe_worker_roots[server_index][i] = worker;
+        break;
+    }
+
+    Item reply = js_new_object();
+    js_property_set(reply, make_string_item("__lambda_cluster_server_listening__"),
+                    (Item){.item = ITEM_TRUE});
+    js_property_set(reply, make_string_item("path"), make_string_item(path_buf));
+    Item send = js_property_get(worker, make_string_item("send"));
+    if (is_callable(send)) {
+        Item sent_reply = js_call_function(send, worker, &reply, 1);
+        (void)sent_reply;
+        js_microtask_flush();
+    }
+    return true;
+}
+
+static void net_cluster_worker_send_pipe_ack(const char* path, int64_t seq, bool accepted) {
+    if (!path || !path[0]) return;
+    Item process_obj = js_get_process_object_value();
+    Item send = js_property_get(process_obj, make_string_item("send"));
+    if (!is_callable(send)) return;
+    Item message = js_new_object();
+    js_property_set(message, make_string_item("__lambda_cluster_pipe_ack__"),
+                    (Item){.item = ITEM_TRUE});
+    js_property_set(message, make_string_item("path"), make_string_item(path));
+    js_property_set(message, make_string_item("seq"), (Item){.item = i2it(seq)});
+    js_property_set(message, make_string_item("accepted"), (Item){.item = b2it(accepted)});
+    js_call_function(send, process_obj, &message, 1);
+    js_microtask_flush();
+}
+
+extern "C" bool js_net_cluster_worker_handle_primary_message(Item message, Item handle) {
+    if (!net_is_object_like(message)) return false;
+    Item is_listening = js_property_get(message, make_string_item("__lambda_cluster_server_listening__"));
+    Item is_newconn = js_property_get(message, make_string_item("__lambda_cluster_pipe_newconn__"));
+    if (is_listening.item != ITEM_TRUE && is_listening.item != b2it(true) &&
+        is_newconn.item != ITEM_TRUE && is_newconn.item != b2it(true)) {
+        return false;
+    }
+    String* path = it2s(js_property_get(message, make_string_item("path")));
+    if (!path || path->len <= 0) return true;
+    char path_buf[4096];
+    int len = (int)path->len < (int)sizeof(path_buf) - 1 ? (int)path->len : (int)sizeof(path_buf) - 1;
+    memcpy(path_buf, path->chars, (size_t)len);
+    path_buf[len] = '\0';
+
+    NetClusterWorkerPipeServer* entry = net_cluster_worker_find_pipe_server(path_buf, false);
+    if (!entry || !entry->active) return true;
+    JsServer* srv = server_from_object(entry->server_obj);
+    if (!srv) return true;
+
+    if (is_listening.item == ITEM_TRUE || is_listening.item == b2it(true)) {
+        net_cluster_worker_emit_pipe_listening(entry);
+        return true;
+    }
+
+    int64_t seq = net_cluster_int64_value(js_property_get(message, make_string_item("seq")), -1);
+    int max_connections = server_max_connections(srv);
+    if (!net_is_object_like(handle) ||
+        (max_connections >= 0 && srv->connection_count >= max_connections)) {
+        net_cluster_worker_send_pipe_ack(path_buf, seq, false);
+        net_cluster_close_pipe_handle_item(handle);
+        return true;
+    }
+    srv->connection_count++;
+    // the primary owns RR accept and waits for worker capacity feedback; emit
+    // only after accepting so rejected handles can be rerouted while still open.
+    net_cluster_worker_send_pipe_ack(path_buf, seq, true);
+    Item socket_obj = make_cluster_pipe_socket_object(handle, srv);
+    if (get_type_id(srv->connection_handler) == LMD_TYPE_FUNC) {
+        js_call_function(srv->connection_handler, entry->server_obj, &socket_obj, 1);
+        js_microtask_flush();
+    }
+    server_emit(entry->server_obj, "connection", &socket_obj, 1);
+    return true;
+}
+
 static Item js_server_emit_error_scheduled(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_undefined_item();
     Item self = env[0];
     Item err = env[1];
     server_emit(self, "error", &err, 1);
+    if (js_check_exception()) {
+        Item thrown = js_clear_exception();
+        // server 'error' listeners run asynchronously; exceptions thrown there
+        // must route through process.uncaughtException before fatal shutdown.
+        Item handled = js_process_emit(make_string_item("uncaughtException"), thrown);
+        if (js_check_exception()) return make_undefined_item();
+        if (handled.item != ITEM_TRUE && handled.item != b2it(true)) {
+            js_throw_value(thrown);
+        }
+    }
     return make_undefined_item();
 }
 
@@ -4684,6 +5848,21 @@ static void server_schedule_error(Item self, Item err) {
     env[1] = err;
     Item fn = js_new_closure((void*)js_server_emit_error_scheduled, 0, env, 2);
     js_next_tick_enqueue(fn);
+}
+
+static void server_ref_listening_handle(JsServer* srv) {
+    uv_handle_t* handle = server_handle(srv);
+    if (!handle || uv_is_closing(handle)) return;
+    // listen() is a liveness root by default; forked children can otherwise
+    // exit before the deferred listening callback starts their server flow.
+    uv_ref(handle);
+}
+
+static void server_close_if_worker_disconnect_requested(JsServer* srv) {
+    if (!srv || !js_process_ipc_worker_disconnect_requested()) return;
+    // cluster disconnect can reach a worker before user code calls listen();
+    // close late listeners because the earlier active-server drain missed them.
+    server_close_handle_now(srv);
 }
 
 static void server_update_connection_key(Item self, JsServer* srv, int requested_port) {
@@ -4754,10 +5933,15 @@ static bool server_configure_listen_signal(Item self, Item signal, bool* out_abo
 extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) {
     Item self = js_get_this();
     Item handle_item = js_property_get(self, make_string_item("__server__"));
-    if (handle_item.item == 0 || handle_item.item == ITEM_NULL || is_undefined_item(handle_item)) return self;
-    if (get_type_id(handle_item) != LMD_TYPE_INT) return self;
-    JsServer* srv = (JsServer*)(uintptr_t)it2i(handle_item);
-    if (!srv) return self;
+    if (handle_item.item == 0 || handle_item.item == ITEM_NULL || is_undefined_item(handle_item)) {
+        return self;
+    }
+    // Worker-mode native pointers may be boxed as INT64; rejecting them makes
+    // cluster workers return from listen() without binding.
+    JsServer* srv = (JsServer*)net_native_ptr_from_item(handle_item);
+    if (!srv) {
+        return self;
+    }
 
     if (is_callable(host_item)) {
         callback = host_item;
@@ -4788,7 +5972,7 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
     }
 
     if (!srv->closed && !srv->close_requested &&
-        (srv->listen_pending || uv_is_active((uv_handle_t*)&srv->tcp))) {
+        (srv->listen_pending || uv_is_active(server_handle(srv)))) {
         return js_throw_error_with_code(
             "ERR_SERVER_ALREADY_LISTEN",
             "Listen method has been called more than once without closing.");
@@ -4804,11 +5988,17 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
         srv->close_requested = false;
         srv->handle_closed = false;
         srv->close_event_emitted = false;
+        srv->ipc_transfer_defer_close_event = false;
         srv->connection_count = 0;
     }
 
     int port = 0;
     char host_buf[256] = "0.0.0.0";
+    char pipe_path[4096];
+    pipe_path[0] = '\0';
+    bool use_pipe_path = false;
+    bool pipe_readable_all = false;
+    bool pipe_writable_all = false;
     bool ipv6_only = false;
     bool reuse_port = false;
     bool listen_signal_aborted = false;
@@ -4841,10 +6031,12 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
             server_close_after_listen_error(srv);
             return self;
         }
+        server_ref_listening_handle(srv);
         net_active_add(net_active_servers, NET_ACTIVE_SERVER_MAX, self);
         server_update_connection_key(self, srv, 0);
         js_property_set(self, make_string_item("listening"), (Item){.item = ITEM_TRUE});
         server_schedule_listening(self, srv, callback);
+        server_close_if_worker_disconnect_requested(srv);
         return self;
     }
 
@@ -4889,10 +6081,12 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
                 server_close_after_listen_error(srv);
                 return self;
             }
+            server_ref_listening_handle(srv);
             net_active_add(net_active_servers, NET_ACTIVE_SERVER_MAX, self);
             server_update_connection_key(self, srv, 0);
             js_property_set(self, make_string_item("listening"), (Item){.item = ITEM_TRUE});
             server_schedule_listening(self, srv, callback);
+            server_close_if_worker_disconnect_requested(srv);
             return self;
         }
         if (!has_port && !has_path) {
@@ -4921,6 +6115,14 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
                     "The argument 'options' is invalid. Received an instance of Object");
                 return self;
             }
+            String* path = it2s(opt_path);
+            int len = (int)path->len < (int)sizeof(pipe_path) - 1 ?
+                (int)path->len : (int)sizeof(pipe_path) - 1;
+            memcpy(pipe_path, path->chars, (size_t)len);
+            pipe_path[len] = '\0';
+            use_pipe_path = true;
+            pipe_readable_all = js_is_truthy(js_property_get(port_item, make_string_item("readableAll")));
+            pipe_writable_all = js_is_truthy(js_property_get(port_item, make_string_item("writableAll")));
         }
         Item opt_host = js_property_get(port_item, make_string_item("host"));
         if (!is_undefined_item(opt_host) && opt_host.item != ITEM_NULL) {
@@ -4945,11 +6147,11 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
         char* end = NULL;
         long parsed = strtol(first, &end, 0);
         if (end == first || *end != '\0' || parsed < 0 || parsed > 65535) {
-            Item err = make_uv_error(UV_EACCES, "listen", first, -1);
-            server_schedule_error(self, err);
-            return self;
+            snprintf(pipe_path, sizeof(pipe_path), "%s", first);
+            use_pipe_path = true;
+        } else {
+            port = (int)parsed;
         }
-        port = (int)parsed;
     } else {
         if (port_type == LMD_TYPE_BOOL) {
             js_throw_type_error_code(
@@ -4965,6 +6167,57 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
         int len = (int)h->len < 255 ? (int)h->len : 255;
         memcpy(host_buf, h->chars, (size_t)len);
         host_buf[len] = '\0';
+    }
+
+    if (use_pipe_path) {
+        // object-form permission listens must bind locally so readableAll /
+        // writableAll chmod applies to the socket file being asserted.
+        if (!pipe_readable_all && !pipe_writable_all &&
+            net_cluster_worker_register_pipe_server(self, srv, pipe_path, callback)) {
+            return self;
+        }
+        uv_loop_t* loop = lambda_uv_loop();
+        if (!loop) return self;
+        srv->is_pipe = true;
+        uv_pipe_init(loop, &srv->pipe, 0);
+        srv->pipe.data = srv;
+
+        char pipe_fs_path[4096];
+        normalize_pipe_fs_path(pipe_path, pipe_fs_path, (int)sizeof(pipe_fs_path));
+        int pipe_r = uv_pipe_bind(&srv->pipe, pipe_fs_path);
+        if (pipe_r != 0) {
+            Item err = make_uv_error(pipe_r, "listen", pipe_path, -1);
+            // string listen() is an IPC path, not a numeric port; surfacing
+            // bind failures lets nested cluster workers report EADDRINUSE.
+            server_schedule_error(self, err);
+            server_close_after_listen_error(srv);
+            return self;
+        }
+#ifndef _WIN32
+        if (pipe_readable_all || pipe_writable_all) {
+            mode_t mode = 0700;
+            if (pipe_readable_all) mode |= 0555;
+            if (pipe_writable_all) mode |= 0333;
+            // object-form pipe listen owns the socket-file mode; missing chmod
+            // makes official tests throw before they can close/disconnect.
+            chmod(pipe_fs_path, mode);
+        }
+#endif
+
+        pipe_r = uv_listen((uv_stream_t*)&srv->pipe, 128, server_pipe_connection_cb);
+        if (pipe_r != 0) {
+            Item err = make_uv_error(pipe_r, "listen", pipe_path, -1);
+            server_schedule_error(self, err);
+            server_close_after_listen_error(srv);
+            return self;
+        }
+
+        server_ref_listening_handle(srv);
+        net_active_add(net_active_servers, NET_ACTIVE_SERVER_MAX, self);
+        js_property_set(self, make_string_item("listening"), (Item){.item = ITEM_TRUE});
+        server_schedule_listening(self, srv, callback);
+        server_close_if_worker_disconnect_requested(srv);
+        return self;
     }
 
     struct sockaddr_storage addr;
@@ -5008,9 +6261,11 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
         return self;
     }
 
+    server_ref_listening_handle(srv);
     net_active_add(net_active_servers, NET_ACTIVE_SERVER_MAX, self);
     js_property_set(self, make_string_item("listening"), (Item){.item = ITEM_TRUE});
     server_schedule_listening(self, srv, callback);
+    server_close_if_worker_disconnect_requested(srv);
     if (listen_signal_aborted) {
         Item close_fn = js_property_get(self, make_string_item("close"));
         if (is_callable(close_fn)) {
@@ -5024,49 +6279,23 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
 // server.address() — returns {address, family, port} of the listening socket
 static Item js_server_address(void) {
     Item self = js_get_this();
-    Item handle_item = js_property_get(self, make_string_item("__server__"));
-    if (handle_item.item == 0 || handle_item.item == ITEM_NULL) return ItemNull;
-    JsServer* srv = (JsServer*)(uintptr_t)it2i(handle_item);
-    if (!srv) return ItemNull;
-
-    struct sockaddr_storage addr;
-    int addrlen = sizeof(addr);
-    int r = uv_tcp_getsockname(&srv->tcp, (struct sockaddr*)&addr, &addrlen);
-    if (r != 0) return ItemNull;
-
-    Item result = js_new_object();
-    if (addr.ss_family == AF_INET) {
-        struct sockaddr_in* a4 = (struct sockaddr_in*)&addr;
-        char ip[64];
-        uv_ip4_name(a4, ip, sizeof(ip));
-        js_property_set(result, make_string_item("address"), make_string_item(ip));
-        js_property_set(result, make_string_item("family"), make_string_item("IPv4"));
-        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a4->sin_port))});
-    } else if (addr.ss_family == AF_INET6) {
-        struct sockaddr_in6* a6 = (struct sockaddr_in6*)&addr;
-        char ip[128];
-        uv_ip6_name(a6, ip, sizeof(ip));
-        js_property_set(result, make_string_item("address"), make_string_item(ip));
-        js_property_set(result, make_string_item("family"), make_string_item("IPv6"));
-        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a6->sin6_port))});
-    }
-    return result;
+    return js_server_address_for(self);
 }
 
 static JsServer* server_from_object(Item self) {
     TypeId type = get_type_id(self);
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return NULL;
     Item handle_item = js_property_get(self, make_string_item("__server__"));
-    if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
-    return (JsServer*)(uintptr_t)it2i(handle_item);
+    return (JsServer*)net_native_ptr_from_item(handle_item);
 }
 
 // server.ref() / server.unref()
 static Item js_server_ref(void) {
     Item self = js_get_this();
     JsServer* srv = server_from_object(self);
-    if (srv && !uv_is_closing((uv_handle_t*)&srv->tcp)) {
-        uv_ref((uv_handle_t*)&srv->tcp);
+    uv_handle_t* handle = server_handle(srv);
+    if (handle && !uv_is_closing(handle)) {
+        uv_ref(handle);
     }
     return self;
 }
@@ -5074,8 +6303,9 @@ static Item js_server_ref(void) {
 static Item js_server_unref(void) {
     Item self = js_get_this();
     JsServer* srv = server_from_object(self);
-    if (srv && !uv_is_closing((uv_handle_t*)&srv->tcp)) {
-        uv_unref((uv_handle_t*)&srv->tcp);
+    uv_handle_t* handle = server_handle(srv);
+    if (handle && !uv_is_closing(handle)) {
+        uv_unref(handle);
     }
     return self;
 }
@@ -5116,7 +6346,7 @@ extern "C" Item js_server_close(Item callback) {
     Item self = js_get_this();
     Item handle_item = js_property_get(self, make_string_item("__server__"));
     if (handle_item.item == 0) return self;
-    JsServer* srv = (JsServer*)(uintptr_t)it2i(handle_item);
+    JsServer* srv = (JsServer*)net_native_ptr_from_item(handle_item);
     if (!srv) return self;
     srv->closed = true;
     srv->close_requested = true;
@@ -5125,6 +6355,7 @@ extern "C" Item js_server_close(Item callback) {
         js_property_set(self, make_string_item("__close_callback__"), callback);
     }
 
+    srv->ipc_transfer_defer_close_event = false;
     server_close_handle_now(srv);
     return self;
 }
@@ -5419,7 +6650,7 @@ extern "C" Item js_net_Socket(Item options) {
 #ifndef _WIN32
                 if (fd >= 0) close(fd);
 #endif
-                mem_free(sock);
+                socket_free_detached(sock);
                 js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
                                          "The property 'options.handle' is invalid");
                 return ItemNull;
@@ -5643,8 +6874,94 @@ static Item js_stream_wrap_destroy(void) {
     return self;
 }
 
+static Item js_stream_wrap_write_exception_tick(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_undefined_item();
+    js_process_emit(make_string_item("uncaughtException"), env[1]);
+    Item proto_err = socket_make_error("EPROTO", "write EPROTO");
+    socket_emit(env[0], "error", &proto_err, 1);
+    return make_undefined_item();
+}
+
+static void js_stream_wrap_schedule_write_exception(Item self, Item err) {
+    Item* env = js_alloc_env(2);
+    env[0] = self;
+    env[1] = err;
+    js_next_tick_enqueue(js_new_closure((void*)js_stream_wrap_write_exception_tick, 0, env, 2));
+}
+
+static bool js_stream_wrap_call_direct_write(Item self, Item stream, Item chunk,
+                                             Item encoding, Item callback) {
+    Item write_fn = js_property_get(stream, make_string_item("_write"));
+    if (!is_callable(write_fn)) {
+        write_fn = js_property_get(stream, make_string_item("__write_handler__"));
+    }
+    if (!is_callable(write_fn)) return false;
+
+    Item args[3] = { chunk, encoding, callback };
+    js_call_function(write_fn, stream, args, 3);
+    if (js_check_exception()) {
+        // JSStreamSocket write dispatch must preserve synchronous wrapped-stream
+        // throws; the generic Writable path records them as stream errors instead.
+        Item err = js_clear_exception();
+        js_stream_wrap_schedule_write_exception(self, err);
+    }
+    return true;
+}
+
+static Item js_stream_wrap_write(Item chunk, Item encoding, Item callback) {
+    Item self = js_get_this();
+    Item stream = js_property_get(self, make_string_item("stream"));
+    if (is_callable(encoding) && !is_callable(callback)) {
+        callback = encoding;
+        encoding = make_undefined_item();
+    }
+    if (encoding.item == 0) encoding = make_undefined_item();
+    if (callback.item == 0) callback = make_undefined_item();
+
+    if (js_stream_wrap_call_direct_write(self, stream, chunk, encoding, callback)) {
+        return (Item){.item = ITEM_TRUE};
+    }
+
+    Item write_fn = js_property_get(stream, make_string_item("write"));
+    if (!is_callable(write_fn)) return (Item){.item = ITEM_FALSE};
+    Item args[3] = { chunk, encoding, callback };
+    return js_call_function(write_fn, stream, args, 3);
+}
+
+static Item js_stream_wrap_end(Item chunk, Item encoding, Item callback) {
+    Item self = js_get_this();
+    Item stream = js_property_get(self, make_string_item("stream"));
+    if (is_callable(chunk)) {
+        callback = chunk;
+        chunk = make_undefined_item();
+        encoding = make_undefined_item();
+    } else if (is_callable(encoding) && !is_callable(callback)) {
+        callback = encoding;
+        encoding = make_undefined_item();
+    }
+    if (encoding.item == 0) encoding = make_undefined_item();
+    if (callback.item == 0) callback = make_undefined_item();
+
+    if (!is_undefined_item(chunk) && chunk.item != ITEM_NULL &&
+        js_stream_wrap_call_direct_write(self, stream, chunk, encoding, make_undefined_item())) {
+        return self;
+    }
+
+    Item end_fn = js_property_get(stream, make_string_item("end"));
+    if (is_callable(end_fn)) {
+        Item args[3] = { chunk, encoding, callback };
+        js_call_function(end_fn, stream, args, 3);
+    }
+    return self;
+}
+
 extern "C" Item js_internal_js_stream_socket_constructor(Item stream) {
     Item wrap = js_new_object();
+    Item socket_proto = js_net_get_socket_prototype();
+    if (get_type_id(socket_proto) == LMD_TYPE_MAP) {
+        js_set_prototype(wrap, socket_proto);
+    }
     js_property_set(wrap, make_string_item("stream"), stream);
     js_property_set(wrap, make_string_item("readable"), js_property_get(stream, make_string_item("readable")));
     js_property_set(wrap, make_string_item("writable"), js_property_get(stream, make_string_item("writable")));
@@ -5658,6 +6975,8 @@ extern "C" Item js_internal_js_stream_socket_constructor(Item stream) {
     js_property_set(wrap, make_string_item("off"),
                     js_new_function((void*)js_socket_removeListener, 2));
     js_property_set(wrap, make_string_item("destroy"), js_new_function((void*)js_stream_wrap_destroy, 0));
+    js_property_set(wrap, make_string_item("write"), js_new_function((void*)js_stream_wrap_write, 3));
+    js_property_set(wrap, make_string_item("end"), js_new_function((void*)js_stream_wrap_end, 3));
 
     Item on = js_property_get(stream, make_string_item("on"));
     if (is_callable(on)) {
@@ -5700,8 +7019,6 @@ extern "C" Item js_get_internal_js_stream_socket_constructor(void) {
 // =============================================================================
 // net Module Namespace
 // =============================================================================
-
-static Item net_namespace = {0};
 
 static Item net_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);

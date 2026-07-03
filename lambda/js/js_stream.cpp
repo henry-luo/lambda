@@ -76,7 +76,6 @@ extern "C" Item js_promise_with_resolvers(void);
 extern "C" Item js_promise_resolve(Item value);
 extern "C" Item js_promise_reject(Item reason);
 extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
-extern "C" Item js_setTimeout(Item callback, Item delay);
 extern "C" Item js_setImmediate(Item callback);
 extern "C" Item js_get_async_iterator(Item iterable);
 extern "C" Item js_async_iterator_step_result(Item iterator);
@@ -1680,7 +1679,9 @@ static void js_stream_schedule_end_immediate(Item self) {
     Item* env = js_alloc_env(1);
     env[0] = self;
     Item tick = js_new_closure((void*)js_stream_emit_end_tick_closure, 0, env, 1);
-    js_setTimeout(tick, (Item){.item = i2it(0)});
+    // flowing EOF is stream-internal nextTick work; routing it through timers
+    // allocates libuv handles per stream and strands large read-stream batches.
+    js_next_tick_enqueue(tick);
 }
 
 static Item js_stream_emit_error_tick(Item self, Item err) {

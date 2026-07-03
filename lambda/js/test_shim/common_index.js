@@ -495,6 +495,7 @@ function expectRequiredTLAError(err) {
 // Lambda injects some globals (Node, innerWidth, innerHeight) that are not
 // present in Node.js. We allow them by default.
 const _allowedGlobals = new Set();
+const _knownGlobals = new Set(Object.getOwnPropertyNames(globalThis));
 
 function allowGlobals() {
   for (let i = 0; i < arguments.length; i++) {
@@ -502,10 +503,19 @@ function allowGlobals() {
   }
 }
 
-// Disable globals leak detection by default in Lambda — Lambda has extra globals
-// like Node, innerWidth, innerHeight that real Node.js doesn't.
-// Tests that specifically want this check can set NODE_TEST_KNOWN_GLOBALS=1.
-// (The upstream Node.js common module enables this by default.)
+function checkGlobals() {
+  if (process.env.NODE_TEST_KNOWN_GLOBALS === '0') return;
+  const leaked = Object.getOwnPropertyNames(globalThis).filter((name) => {
+    return !_knownGlobals.has(name) && !_allowedGlobals.has(name);
+  });
+  if (leaked.length > 0) {
+    // Snapshot-at-require keeps Lambda's host globals legal while still making
+    // fixture-added globals fail like upstream Node common.
+    assert.fail('Unexpected global(s) found: ' + leaked.join(', '));
+  }
+}
+
+process.on('exit', checkGlobals);
 
 const PIPE = (() => {
   const localRelative = path.relative(process.cwd(), tmpdir.path + '/');

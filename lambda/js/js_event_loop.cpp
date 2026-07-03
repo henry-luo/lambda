@@ -30,20 +30,30 @@ extern "C" Item js_async_hooks_get_current_resource(void);
 extern "C" Item js_async_hooks_enter_resource(Item resource);
 extern "C" void js_async_hooks_restore_resource(Item previous);
 extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_len);
+extern "C" void js_async_hooks_emit_before_resource(Item resource);
+extern "C" void js_async_hooks_emit_after_resource(Item resource);
 extern "C" void js_async_hooks_emit_destroy_resource(Item resource);
 extern "C" Item js_util_promisify_custom_symbol(void);
 extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
 extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
+extern "C" void js_process_emit_exit(int code);
+extern "C" void js_process_mark_fatal_exit(int code);
+extern "C" bool js_process_dispatch_uncaught_exception(Item error, Item origin);
+extern "C" void js_report_uncaught_exception(Item error);
 extern "C" void js_promise_flush_unhandled_checks(void);
 extern "C" bool js_process_exit_requested(void);
+extern "C" int js_check_exception(void);
+extern "C" Item js_clear_exception(void);
+extern "C" void js_throw_value(Item error);
 extern "C" Item js_domain_get_current(void);
 extern "C" Item js_domain_set_current(Item domain);
 extern "C" void js_domain_restore(Item previous);
 extern "C" Item js_domain_capture_stack(void);
 extern "C" Item js_domain_set_stack(Item stack);
 extern "C" void js_domain_restore_stack(Item previous);
+extern "C" int js_domain_emit_current_error(Item error);
 extern "C" Context* _lambda_rt;
 
 // =============================================================================
@@ -77,6 +87,31 @@ static int raf_count = 0;
 static int64_t next_raf_id = 1;
 static bool auto_close_mode = false;
 static bool event_loop_shutting_down = false;
+
+static bool js_event_loop_dispatch_uncaught_error(Item error) {
+    Item origin = (Item){.item = s2it(heap_create_name("uncaughtException", 17))};
+    bool handled = js_process_dispatch_uncaught_exception(error, origin);
+    if (js_check_exception()) {
+        Item handler_error = js_clear_exception();
+        js_report_uncaught_exception(handler_error);
+        js_process_emit_exit(1);
+        js_process_mark_fatal_exit(1);
+        return true;
+    }
+    if (handled) return false;
+    js_report_uncaught_exception(error);
+    // async nextTick/timer throws are fatal process exits; without requesting
+    // hard exit here, cluster workers remain refed until the drain watchdog.
+    js_process_emit_exit(1);
+    js_process_mark_fatal_exit(1);
+    return true;
+}
+
+static bool js_event_loop_handle_uncaught_exception(void) {
+    if (!js_check_exception()) return false;
+    Item error = js_clear_exception();
+    return js_event_loop_dispatch_uncaught_error(error);
+}
 
 extern "C" void js_event_loop_set_auto_close_mode(bool enabled) {
     auto_close_mode = enabled;
@@ -154,6 +189,23 @@ extern "C" void js_microtask_enqueue(Item callback) {
     microtask_push(callback);
 }
 
+extern "C" void js_microtask_enqueue_with_resource(Item callback, Item resource) {
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        log_error("event_loop: microtask_enqueue_with_resource called with non-function (type=%d)", get_type_id(callback));
+        return;
+    }
+    if (microtask_count >= MICROTASK_CAPACITY) {
+        log_error("event_loop: microtask queue overflow (%d)", MICROTASK_CAPACITY);
+        return;
+    }
+    microtask_ring[microtask_tail] = callback;
+    microtask_resource_ring[microtask_tail] = resource;
+    microtask_als_ring[microtask_tail] = js_als_capture_context();
+    microtask_domain_ring[microtask_tail] = js_domain_capture_stack();
+    microtask_tail = (microtask_tail + 1) % MICROTASK_CAPACITY;
+    microtask_count++;
+}
+
 extern "C" void js_next_tick_enqueue(Item callback) {
     if (get_type_id(callback) != LMD_TYPE_FUNC) {
         log_error("event_loop: nextTick enqueue called with non-function (type=%d)", get_type_id(callback));
@@ -169,6 +221,17 @@ extern "C" int js_microtask_pending_count(void) {
     return next_tick_count + microtask_count;
 }
 
+static bool js_event_loop_resource_type_equals(Item resource, const char* name, int name_len) {
+    if (resource.item == 0 || resource.item == ITEM_NULL ||
+        get_type_id(resource) == LMD_TYPE_UNDEFINED) {
+        return false;
+    }
+    Item type = js_property_get(resource, (Item){.item = s2it(heap_create_name("type", 4))});
+    if (get_type_id(type) != LMD_TYPE_STRING) return false;
+    String* s = it2s(type);
+    return s && s->len == (uint64_t)name_len && memcmp(s->chars, name, (size_t)name_len) == 0;
+}
+
 extern "C" void js_microtask_flush(void) {
     int safety = 0;
     while ((next_tick_count > 0 || microtask_count > 0) &&
@@ -179,11 +242,26 @@ extern "C" void js_microtask_flush(void) {
             Item domain = ItemNull;
             Item cb = next_tick_pop(&resource, &als_context, &domain);
             if (get_type_id(cb) == LMD_TYPE_FUNC) {
+                bool is_node_microtask = js_event_loop_resource_type_equals(resource, "Microtask", 9);
                 Item previous_resource = js_async_hooks_enter_resource(resource);
                 Item previous_domain = js_domain_set_stack(domain);
                 js_als_context_call(als_context, cb, ItemNull, ItemNull, 0);
                 js_domain_restore_stack(previous_domain);
                 js_async_hooks_restore_resource(previous_resource);
+                if (is_node_microtask) {
+                    // Node's queueMicrotask async resource reports the paired
+                    // after/before hooks around uncaught handling, not at enqueue.
+                    Item pending_error = js_check_exception() ? js_clear_exception() : ItemNull;
+                    js_async_hooks_emit_after_resource(resource);
+                    bool fatal = (pending_error.item != ItemNull.item)
+                        ? js_event_loop_dispatch_uncaught_error(pending_error)
+                        : js_event_loop_handle_uncaught_exception();
+                    js_async_hooks_emit_before_resource(resource);
+                    js_async_hooks_emit_destroy_resource(resource);
+                    if (fatal) return;
+                } else if (js_event_loop_handle_uncaught_exception()) {
+                    return;
+                }
             }
             safety++;
         }
@@ -193,11 +271,26 @@ extern "C" void js_microtask_flush(void) {
             Item domain = ItemNull;
             Item cb = microtask_pop(&resource, &als_context, &domain);
             if (get_type_id(cb) == LMD_TYPE_FUNC) {
+                bool is_node_microtask = js_event_loop_resource_type_equals(resource, "Microtask", 9);
                 Item previous_resource = js_async_hooks_enter_resource(resource);
                 Item previous_domain = js_domain_set_stack(domain);
                 js_als_context_call(als_context, cb, ItemNull, ItemNull, 0);
                 js_domain_restore_stack(previous_domain);
                 js_async_hooks_restore_resource(previous_resource);
+                if (is_node_microtask) {
+                    // queueMicrotask exceptions still need the async resource's
+                    // terminal hooks before the uncaught path can end the turn.
+                    Item pending_error = js_check_exception() ? js_clear_exception() : ItemNull;
+                    js_async_hooks_emit_after_resource(resource);
+                    bool fatal = (pending_error.item != ItemNull.item)
+                        ? js_event_loop_dispatch_uncaught_error(pending_error)
+                        : js_event_loop_handle_uncaught_exception();
+                    js_async_hooks_emit_before_resource(resource);
+                    js_async_hooks_emit_destroy_resource(resource);
+                    if (fatal) return;
+                } else if (js_event_loop_handle_uncaught_exception()) {
+                    return;
+                }
             }
             safety++;
         }
@@ -206,6 +299,7 @@ extern "C" void js_microtask_flush(void) {
         log_error("event_loop: nextTick/microtask flush exceeded safety limit");
     }
     js_promise_flush_unhandled_checks();
+    js_event_loop_handle_uncaught_exception();
 }
 
 static bool raf_push(Item cb, int64_t id) {
@@ -555,10 +649,12 @@ static void timer_abandon_all_without_uv(const char* reason_prefix) {
 static void timer_fire_cb(uv_timer_t *handle) {
     JsTimerHandle *th = (JsTimerHandle *)handle->data;
     bool close_after_fire = th && !th->is_interval;
+    bool fatal_uncaught = false;
     JsTimerRuntimeScope scope;
     if (timer_runtime_enter(th, &scope)) {
         Item previous_resource = js_async_hooks_enter_resource(th->async_resource);
         Item previous_domain = js_domain_set_stack(th->domain);
+        js_async_hooks_emit_before_resource(th->async_resource);
         if (get_type_id(th->callback) == LMD_TYPE_FUNC) {
             if (th->extra_count > 0) {
                 if (th->extra_count == 1) {
@@ -571,6 +667,22 @@ static void timer_fire_cb(uv_timer_t *handle) {
             } else {
                 js_als_context_call(th->als_context, th->callback, ItemNull, ItemNull, 0);
             }
+            if (js_check_exception()) {
+                Item error = js_clear_exception();
+                // Domain-owned async callbacks must route their throw while the
+                // captured domain stack is still active; restoring first makes
+                // domain errors look like fatal process uncaught exceptions.
+                if (!js_domain_emit_current_error(error) && !js_check_exception()) {
+                    js_throw_value(error);
+                }
+            }
+        }
+        Item pending_error = js_check_exception() ? js_clear_exception() : ItemNull;
+        js_async_hooks_emit_after_resource(th->async_resource);
+        if (pending_error.item != ItemNull.item) {
+            // Uncaught async callbacks must see their originating async resource;
+            // restoring first makes executionAsyncId() fall back to the root id.
+            fatal_uncaught = js_event_loop_dispatch_uncaught_error(pending_error);
         }
         js_domain_restore_stack(previous_domain);
         js_async_hooks_restore_resource(previous_resource);
@@ -590,6 +702,7 @@ static void timer_fire_cb(uv_timer_t *handle) {
         timer_mark_object_destroyed(th);
         timer_close_handle(th);
     }
+    if (fatal_uncaught) return;
     js_microtask_flush();
 }
 static double item_to_ms(Item delay) {
@@ -865,7 +978,8 @@ extern "C" Item js_setTimeout_args(Item callback, Item delay, Item args_array) {
     return timer_obj;
 }
 
-static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args) {
+static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args,
+                                 const char* resource_name, int resource_len) {
     if (get_type_id(callback) != LMD_TYPE_FUNC) {
         extern Item js_throw_type_error_code(const char*, const char*);
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
@@ -896,7 +1010,8 @@ static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args) 
         th->extra_count = count;
     }
 
-    timer_capture_runtime(th, "Immediate", 9);
+    timer_capture_runtime(th, resource_name ? resource_name : "Immediate",
+                          resource_len > 0 ? resource_len : 9);
 
     uv_timer_init(loop, &th->timer);
     // Immediates queued while draining the current check phase belong to the next turn.
@@ -913,11 +1028,17 @@ static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args) 
 }
 
 extern "C" Item js_setImmediate_timer(Item callback) {
-    return js_setImmediate_impl(callback, ItemNull, false);
+    return js_setImmediate_impl(callback, ItemNull, false, "Immediate", 9);
 }
 
 extern "C" Item js_setImmediate_timer_args(Item callback, Item args_array) {
-    return js_setImmediate_impl(callback, args_array, true);
+    return js_setImmediate_impl(callback, args_array, true, "Immediate", 9);
+}
+
+extern "C" Item js_setImmediate_resource_args(Item callback, Item args_array,
+                                               const char* resource_name,
+                                               int resource_len) {
+    return js_setImmediate_impl(callback, args_array, true, resource_name, resource_len);
 }
 
 // Helper: create a JS array from 1-4 items (used by transpiler for setTimeout extra args)
@@ -1791,6 +1912,7 @@ extern "C" void js_event_loop_pump_nowait(void) {
 extern "C" int js_event_loop_drain(void) {
     // flush any synchronous microtasks first (from Promise resolutions)
     js_microtask_flush();
+    if (js_event_loop_handle_uncaught_exception()) return 0;
 
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return 0;
@@ -1845,9 +1967,14 @@ extern "C" int js_event_loop_drain(void) {
         // them before blocking so recurring timers cannot stall static rendering.
         stop_all_interval_timers();
         uv_run(loop, UV_RUN_NOWAIT);
+        if (js_event_loop_handle_uncaught_exception()) {
+            result = 0;
+        } else {
 
-        // run libuv event loop until all one-shot timers/handles are done (or watchdog fires)
-        result = lambda_uv_run();
+            // run libuv event loop until all one-shot timers/handles are done (or watchdog fires)
+            result = lambda_uv_run();
+            if (js_event_loop_handle_uncaught_exception()) result = 0;
+        }
 
         if (watchdog_state.fired) {
             event_loop_close_refed_handles_after_watchdog(loop, (uv_handle_t*)&watchdog);

@@ -2463,6 +2463,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     if (pi >= 0 && pi < mt->func_count && mt->func_entries[pi].has_parent_env_link) {
                         parent_env_link_slot = mt->func_entries[pi].scope_env_count - 1;
                     }
+                    if (parent_env_link_slot < 0 && fc->closure_env_has_parent_link) {
+                        parent_env_link_slot = fc->closure_env_parent_link_slot;
+                    }
                     if (parent_env_link_slot >= 0) {
                         // Load parent env pointer from env[last_slot]
                         MIR_reg_t parent_env = jm_new_reg(mt, "gp_env", MIR_T_I64);
@@ -2514,6 +2517,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     int pel_slot = -1;
                     if (pi2 >= 0 && pi2 < mt->func_count && mt->func_entries[pi2].has_parent_env_link)
                         pel_slot = mt->func_entries[pi2].scope_env_count - 1;
+                    if (pel_slot < 0 && fc->closure_env_has_parent_link) {
+                        pel_slot = fc->closure_env_parent_link_slot;
+                    }
                     if (pel_slot >= 0) {
                         // Load grandparent env reg for this var, with null guard.
                         // If parent env link is null, coalesce to env_reg for write-back safety.

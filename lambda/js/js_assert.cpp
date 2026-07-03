@@ -11,6 +11,7 @@
 #include "js_event_loop.h"
 #include "js_class.h"
 #include "js_error_codes.h"
+#include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -19,6 +20,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <math.h>
 
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
@@ -26,9 +28,11 @@ static inline Item make_js_undefined() {
 
 extern "C" Item js_util_inspect(Item obj_item, Item options_item);
 extern "C" Item js_util_isDeepStrictEqual(Item a, Item b);
+extern "C" Item js_util_isDeepEqual(Item a, Item b);
 extern "C" Item js_get_this(void);
 extern "C" Item js_new_method_function(void* func_ptr, int param_count);
 extern "C" Item js_process_set_exitCode(Item code_item);
+extern "C" int64_t js_key_is_symbol_c(Item key);
 
 static void js_assert_append_inspected_value(StrBuf* sb, Item value);
 
@@ -740,6 +744,113 @@ static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
     return result;
 }
 
+static bool js_assert_has_own_key_early(Item object, const char* key) {
+    extern Item js_has_own_property(Item obj, Item key);
+    Item result = js_has_own_property(object, assert_make_string(key));
+    return get_type_id(result) == LMD_TYPE_BOOL && it2b(result);
+}
+
+static void js_assert_append_error_label(StrBuf* sb, Item value) {
+    if (get_type_id(value) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(value))) {
+        const char* name = js_class_to_name(js_class_id(value));
+        if (!name) name = "Error";
+        Item msg = js_property_get(value, assert_make_string("message"));
+        String* ms = get_type_id(msg) == LMD_TYPE_STRING ? it2s(msg) : NULL;
+        strbuf_append_char(sb, '[');
+        strbuf_append_str(sb, name);
+        if (ms && ms->len > 0) {
+            strbuf_append_str(sb, ": ");
+            strbuf_append_str_n(sb, ms->chars, ms->len);
+        }
+        strbuf_append_char(sb, ']');
+        return;
+    }
+    js_assert_append_inspected_value(sb, value);
+}
+
+static void js_assert_append_error_cause_value(StrBuf* sb, Item value, const char* prefix) {
+    if (get_type_id(value) == LMD_TYPE_MAP && !js_class_is_error_like(js_class_id(value))) {
+        Item keys = js_object_keys(value);
+        int64_t len = js_array_length(keys);
+        if (len == 1) {
+            Item key = js_array_get_int(keys, 0);
+            String* ks = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
+            strbuf_append_str(sb, "{\n");
+            strbuf_append_str(sb, prefix);
+            strbuf_append_str(sb, "  ");
+            if (ks) strbuf_append_str_n(sb, ks->chars, ks->len);
+            strbuf_append_str(sb, ": ");
+            js_assert_append_inspected_value(sb, js_property_get(value, key));
+            strbuf_append_str(sb, "\n");
+            strbuf_append_str(sb, prefix);
+            strbuf_append_str(sb, "}");
+            return;
+        }
+    }
+    js_assert_append_error_label(sb, value);
+}
+
+static Item js_assert_deep_strict_error_message(Item actual, Item expected) {
+    if (get_type_id(actual) != LMD_TYPE_MAP || get_type_id(expected) != LMD_TYPE_MAP ||
+            !js_class_is_error_like(js_class_id(actual)) ||
+            !js_class_is_error_like(js_class_id(expected))) {
+        return ItemNull;
+    }
+
+    const char* keys[] = {"cause", "errors", NULL};
+    for (int i = 0; keys[i]; i++) {
+        bool actual_has = js_assert_has_own_key_early(actual, keys[i]);
+        bool expected_has = js_assert_has_own_key_early(expected, keys[i]);
+        if (!actual_has && !expected_has) continue;
+        Item actual_value = actual_has ? js_property_get(actual, assert_make_string(keys[i])) : make_js_undefined();
+        Item expected_value = expected_has ? js_property_get(expected, assert_make_string(keys[i])) : make_js_undefined();
+        Item equal = js_util_isDeepStrictEqual(actual_value, expected_value);
+        bool same = get_type_id(equal) == LMD_TYPE_BOOL && it2b(equal);
+        if (same && actual_has == expected_has) continue;
+
+        StrBuf* sb = strbuf_new();
+        strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
+        strbuf_append_str(sb, "+ actual - expected\n\n");
+        if (actual_has && expected_has) {
+            strbuf_append_str(sb, "  ");
+            js_assert_append_error_label(sb, actual);
+            strbuf_append_str(sb, " {\n+   [");
+            strbuf_append_str(sb, keys[i]);
+            strbuf_append_str(sb, "]: ");
+            js_assert_append_error_cause_value(sb, actual_value, "+   ");
+            strbuf_append_str(sb, "\n-   [");
+            strbuf_append_str(sb, keys[i]);
+            strbuf_append_str(sb, "]: ");
+            js_assert_append_error_cause_value(sb, expected_value, "-   ");
+            strbuf_append_str(sb, "\n  }\n");
+        } else if (actual_has) {
+            strbuf_append_str(sb, "+ ");
+            js_assert_append_error_label(sb, actual);
+            strbuf_append_str(sb, " {\n+   [");
+            strbuf_append_str(sb, keys[i]);
+            strbuf_append_str(sb, "]: ");
+            js_assert_append_error_cause_value(sb, actual_value, "+   ");
+            strbuf_append_str(sb, "\n+ }\n- ");
+            js_assert_append_error_label(sb, expected);
+            strbuf_append_str(sb, "\n");
+        } else {
+            strbuf_append_str(sb, "+ ");
+            js_assert_append_error_label(sb, actual);
+            strbuf_append_str(sb, "\n- ");
+            js_assert_append_error_label(sb, expected);
+            strbuf_append_str(sb, " {\n-   [");
+            strbuf_append_str(sb, keys[i]);
+            strbuf_append_str(sb, "]: ");
+            js_assert_append_error_cause_value(sb, expected_value, "-   ");
+            strbuf_append_str(sb, "\n- }\n");
+        }
+        Item result = assert_make_string_n(sb->str, sb->length);
+        strbuf_free(sb);
+        return result;
+    }
+    return ItemNull;
+}
+
 // assert(value[, message]) / assert.ok(value[, message])
 extern "C" Item js_assert_ok(Item value, Item message) {
     if (!assert_is_truthy(value)) {
@@ -815,6 +926,11 @@ extern "C" Item js_assert_deepStrictEqual(Item actual, Item expected, Item messa
             return throw_assert_msg_or_auto_item(message, array_msg,
                 actual, expected, "deepStrictEqual");
         }
+        Item error_msg = js_assert_deep_strict_error_message(actual, expected);
+        if (get_type_id(error_msg) == LMD_TYPE_STRING) {
+            return throw_assert_msg_or_auto_item(message, error_msg,
+                actual, expected, "deepStrictEqual");
+        }
         return throw_assert_msg_or_auto(message,
             "assert.deepStrictEqual: values are not deep-strict-equal", actual, expected, "deepStrictEqual");
     }
@@ -839,10 +955,11 @@ extern "C" Item js_assert_notDeepStrictEqual(Item actual, Item expected, Item me
 }
 
 // assert.deepEqual(actual, expected[, message]) — legacy loose deep equality
-// In modern Node.js (v16+), deepEqual behaves like deepStrictEqual
 extern "C" Item js_assert_deepEqual(Item actual, Item expected, Item message) {
     if (js_pending_call_argc < 2) return js_assert_throw_missing_actual_expected();
-    Item result = js_util_isDeepStrictEqual(actual, expected);
+    // Node's legacy deepEqual ignores prototypes and recurses with == semantics;
+    // routing it through strict comparison rejects documented loose cases.
+    Item result = js_util_isDeepEqual(actual, expected);
     bool equal = (get_type_id(result) == LMD_TYPE_INT && it2i(result) == 1) ||
                  (get_type_id(result) == LMD_TYPE_BOOL && it2b(result));
     if (!equal) {
@@ -855,7 +972,7 @@ extern "C" Item js_assert_deepEqual(Item actual, Item expected, Item message) {
 // assert.notDeepEqual(actual, expected[, message])
 extern "C" Item js_assert_notDeepEqual(Item actual, Item expected, Item message) {
     if (js_pending_call_argc < 2) return js_assert_throw_missing_actual_expected();
-    Item result = js_util_isDeepStrictEqual(actual, expected);
+    Item result = js_util_isDeepEqual(actual, expected);
     bool equal = (get_type_id(result) == LMD_TYPE_INT && it2i(result) == 1) ||
                  (get_type_id(result) == LMD_TYPE_BOOL && it2b(result));
     if (equal) {
@@ -1223,48 +1340,615 @@ static bool js_assert_is_partial_object_like(Item value) {
            type == LMD_TYPE_VMAP;
 }
 
+static bool js_assert_is_error_like_value(Item value);
+static bool js_assert_is_regexp_like(Item value);
+static bool js_assert_is_any_arraybuffer(Item value);
+static bool js_assert_is_weak_collection_like(Item value);
+static bool js_assert_is_collection_like(Item value);
+
+typedef struct JsAssertPartialPair {
+    Item actual;
+    Item expected;
+} JsAssertPartialPair;
+
+typedef struct JsAssertPartialContext {
+    JsAssertPartialPair stack[4096];
+    int depth;
+} JsAssertPartialContext;
+
 static bool js_assert_deep_strict_equal_bool(Item actual, Item expected) {
+    if (actual.item == expected.item) return true;
+    TypeId actual_type = get_type_id(actual);
+    TypeId expected_type = get_type_id(expected);
+    if ((actual_type == LMD_TYPE_INT || actual_type == LMD_TYPE_FLOAT) &&
+            (expected_type == LMD_TYPE_INT || expected_type == LMD_TYPE_FLOAT)) {
+        if (actual_type == LMD_TYPE_INT && it2i(actual) <= -(int64_t)JS_SYMBOL_BASE) {
+            return false;
+        }
+        if (expected_type == LMD_TYPE_INT && it2i(expected) <= -(int64_t)JS_SYMBOL_BASE) {
+            return false;
+        }
+        double actual_num = actual_type == LMD_TYPE_FLOAT ? it2d(actual) : (double)it2i(actual);
+        double expected_num = expected_type == LMD_TYPE_FLOAT ? it2d(expected) : (double)it2i(expected);
+        if (actual_num != actual_num || expected_num != expected_num) {
+            return actual_num != actual_num && expected_num != expected_num;
+        }
+        // Partial deep equality uses SameValue for numeric leaves; the generic
+        // helper collapses signed zero, which lets Float16/Float32 elements
+        // with different backing bits compare equal.
+        if (actual_num == 0.0 && expected_num == 0.0) {
+            return signbit(actual_num) == signbit(expected_num);
+        }
+        return actual_num == expected_num;
+    }
+    if (js_assert_is_error_like_value(actual) || js_assert_is_error_like_value(expected) ||
+            js_assert_is_regexp_like(actual) || js_assert_is_regexp_like(expected) ||
+            js_assert_is_any_arraybuffer(actual) || js_assert_is_any_arraybuffer(expected)) {
+        return false;
+    }
     Item result = js_util_isDeepStrictEqual(actual, expected);
     return (get_type_id(result) == LMD_TYPE_INT && it2i(result) == 1) ||
            (get_type_id(result) == LMD_TYPE_BOOL && it2b(result));
 }
 
-static bool js_assert_partial_deep_match(Item actual, Item expected, int depth_left) {
-    if (js_assert_deep_strict_equal_bool(actual, expected)) return true;
-    if (depth_left <= 0) return false;
+static bool js_assert_partial_deep_match_impl(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx);
+static bool js_assert_partial_deep_match(Item actual, Item expected, int depth_left);
 
-    if (get_type_id(expected) == LMD_TYPE_ARRAY) {
-        if (get_type_id(actual) != LMD_TYPE_ARRAY) return false;
-        int64_t expected_len = js_array_length(expected);
-        if (js_array_length(actual) < expected_len) return false;
-        for (int64_t i = 0; i < expected_len; i++) {
-            if (!js_assert_partial_deep_match(
-                    js_array_get_int(actual, i),
-                    js_array_get_int(expected, i),
-                    depth_left - 1)) {
-                return false;
+static bool js_assert_is_symbol_key(Item key) {
+    return js_key_is_symbol_c(key) != 0;
+}
+
+static bool js_assert_key_string_equals(Item left, Item right) {
+    if (get_type_id(left) != LMD_TYPE_STRING || get_type_id(right) != LMD_TYPE_STRING) return false;
+    String* ls = it2s(left);
+    String* rs = it2s(right);
+    return ls && rs && ls->len == rs->len && memcmp(ls->chars, rs->chars, ls->len) == 0;
+}
+
+static bool js_assert_same_property_key(Item left, Item right) {
+    if (left.item == right.item) return true;
+    if (js_assert_is_symbol_key(left) || js_assert_is_symbol_key(right)) return false;
+    return js_assert_key_string_equals(left, right);
+}
+
+static bool js_assert_key_is_array_index(Item key) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* s = it2s(key);
+    if (!s || s->len == 0 || s->len > 10) return false;
+    if (s->len > 1 && s->chars[0] == '0') return false;
+    uint64_t value = 0;
+    for (size_t i = 0; i < s->len; i++) {
+        char ch = s->chars[i];
+        if (ch < '0' || ch > '9') return false;
+        value = value * 10 + (uint64_t)(ch - '0');
+        if (value > 4294967294ULL) return false;
+    }
+    return true;
+}
+
+static bool js_assert_descriptor_is_enumerable(Item desc) {
+    if (get_type_id(desc) != LMD_TYPE_MAP) return false;
+    bool found = false;
+    Item enumerable = js_map_get_fast_ext(desc.map, "enumerable", 10, &found);
+    return found && js_is_truthy(enumerable);
+}
+
+static Item js_assert_enumerable_own_keys(Item object) {
+    extern Item js_object_get_own_property_symbols(Item object);
+    Item result = js_object_keys(object);
+    if (get_type_id(result) != LMD_TYPE_ARRAY) result = js_array_new(0);
+
+    Item symbols = js_object_get_own_property_symbols(object);
+    if (get_type_id(symbols) == LMD_TYPE_ARRAY) {
+        int64_t sym_count = js_array_length(symbols);
+        for (int64_t i = 0; i < sym_count; i++) {
+            Item key = js_array_get_int(symbols, i);
+            Item desc = js_object_get_own_property_descriptor(object, key);
+            if (js_assert_descriptor_is_enumerable(desc)) {
+                js_array_push(result, key);
             }
         }
+    }
+    return result;
+}
+
+static Item js_assert_filter_keys(Item keys, bool want_index_keys) {
+    Item result = js_array_new(0);
+    int64_t key_count = js_array_length(keys);
+    for (int64_t i = 0; i < key_count; i++) {
+        Item key = js_array_get_int(keys, i);
+        if (js_assert_key_is_array_index(key) == want_index_keys) {
+            js_array_push(result, key);
+        }
+    }
+    return result;
+}
+
+static bool js_assert_has_enumerable_own_key(Item object, Item key) {
+    Item desc = js_object_get_own_property_descriptor(object, key);
+    return js_assert_descriptor_is_enumerable(desc);
+}
+
+static bool js_assert_tag_equals(Item value, const char* tag) {
+    if (get_type_id(value) != LMD_TYPE_MAP || !tag) return false;
+    Item tag_value = js_property_get(value, assert_make_string("__sym_4"));
+    return js_assert_string_equals(tag_value, tag);
+}
+
+static bool js_assert_has_own_key(Item object, const char* key) {
+    extern Item js_has_own_property(Item obj, Item key);
+    Item result = js_has_own_property(object, assert_make_string(key));
+    return (get_type_id(result) == LMD_TYPE_BOOL && it2b(result)) ||
+           (get_type_id(result) == LMD_TYPE_INT && it2i(result) != 0);
+}
+
+static int js_assert_partial_deep_enter(JsAssertPartialContext* ctx, Item actual, Item expected) {
+    if (!ctx) return 1;
+    for (int i = 0; i < ctx->depth; i++) {
+        if (ctx->stack[i].actual.item == actual.item &&
+                ctx->stack[i].expected.item == expected.item) {
+            return 0;
+        }
+        if (ctx->stack[i].actual.item == actual.item ||
+                ctx->stack[i].expected.item == expected.item) {
+            return -1;
+        }
+    }
+    if (ctx->depth >= (int)(sizeof(ctx->stack) / sizeof(ctx->stack[0]))) return -1;
+    ctx->stack[ctx->depth].actual = actual;
+    ctx->stack[ctx->depth].expected = expected;
+    ctx->depth++;
+    return 1;
+}
+
+static void js_assert_partial_deep_leave(JsAssertPartialContext* ctx) {
+    if (ctx && ctx->depth > 0) ctx->depth--;
+}
+
+static bool js_assert_is_regexp_like(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    if (js_class_id(value) == JS_CLASS_REGEXP) return true;
+    bool found = false;
+    extern Item js_map_get_fast_ext(Map* m, const char* key, int len, bool* found);
+    (void)js_map_get_fast_ext(value.map, "__rd", 4, &found);
+    return found;
+}
+
+static bool js_assert_is_dataview_like(Item value) {
+    return js_is_dataview(value) || js_assert_tag_equals(value, "DataView");
+}
+
+static bool js_assert_is_error_like_value(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    return js_class_is_error_like(js_class_id(value));
+}
+
+static bool js_assert_partial_error_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+    if (!js_assert_is_error_like_value(actual) || !js_assert_is_error_like_value(expected)) return false;
+    const char* keys[] = {"message", "cause", "errors", NULL};
+    for (int i = 0; keys[i]; i++) {
+        if (!js_assert_has_own_key(expected, keys[i])) continue;
+        if (!js_assert_has_own_key(actual, keys[i])) return false;
+        if (!js_assert_partial_deep_match_impl(
+                js_property_get(actual, assert_make_string(keys[i])),
+                js_property_get(expected, assert_make_string(keys[i])),
+                depth_left - 1, ctx)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool js_assert_partial_regexp_match(Item actual, Item expected) {
+    if (!js_assert_is_regexp_like(actual) || !js_assert_is_regexp_like(expected)) return false;
+    return js_assert_deep_strict_equal_bool(
+               js_property_get(actual, assert_make_string("source")),
+               js_property_get(expected, assert_make_string("source"))) &&
+           js_assert_deep_strict_equal_bool(
+               js_property_get(actual, assert_make_string("flags")),
+               js_property_get(expected, assert_make_string("flags")));
+}
+
+static bool js_assert_is_any_arraybuffer(Item value) {
+    return js_is_arraybuffer(value) || js_is_sharedarraybuffer(value) ||
+           js_assert_tag_equals(value, "ArrayBuffer") ||
+           js_assert_tag_equals(value, "SharedArrayBuffer");
+}
+
+static int js_assert_dataview_current_length(JsDataView* dv) {
+    if (!dv || !dv->buffer) return -1;
+    if (dv->length_tracking) {
+        int length = dv->buffer->byte_length - dv->byte_offset;
+        return length > 0 ? length : 0;
+    }
+    if (dv->byte_offset < 0 || dv->byte_length < 0 ||
+            dv->byte_offset + dv->byte_length > dv->buffer->byte_length) {
+        return -1;
+    }
+    return dv->byte_length;
+}
+
+static bool js_assert_partial_dataview_match(Item actual, Item expected) {
+    if (!js_assert_is_dataview_like(actual) || !js_assert_is_dataview_like(expected)) return false;
+    JsDataView* actual_dv = js_get_dataview_ptr(actual);
+    JsDataView* expected_dv = js_get_dataview_ptr(expected);
+    if (!actual_dv || !expected_dv || !actual_dv->buffer || !expected_dv->buffer) return false;
+    if (actual_dv->buffer->detached || expected_dv->buffer->detached) return false;
+    if (actual_dv->buffer->is_shared != expected_dv->buffer->is_shared) return false;
+    int actual_len = js_assert_dataview_current_length(actual_dv);
+    int expected_len = js_assert_dataview_current_length(expected_dv);
+    if (actual_len < 0 || expected_len < 0 || actual_len < expected_len) return false;
+    if (expected_len == 0) return true;
+    if (!actual_dv->buffer->data || !expected_dv->buffer->data) return false;
+    uint8_t* actual_bytes = (uint8_t*)actual_dv->buffer->data + actual_dv->byte_offset;
+    uint8_t* expected_bytes = (uint8_t*)expected_dv->buffer->data + expected_dv->byte_offset;
+    return memcmp(actual_bytes, expected_bytes, (size_t)expected_len) == 0;
+}
+
+static bool js_assert_partial_arraybuffer_match(Item actual, Item expected) {
+    if (!js_assert_is_any_arraybuffer(actual) || !js_assert_is_any_arraybuffer(expected)) return false;
+    bool actual_shared = js_is_sharedarraybuffer(actual) || js_assert_tag_equals(actual, "SharedArrayBuffer");
+    bool expected_shared = js_is_sharedarraybuffer(expected) || js_assert_tag_equals(expected, "SharedArrayBuffer");
+    if (actual_shared != expected_shared) return false;
+    int actual_len = js_arraybuffer_byte_length(actual);
+    int expected_len = js_arraybuffer_byte_length(expected);
+    if (actual_len < expected_len) return false;
+    JsArrayBuffer* actual_ab = js_get_arraybuffer_ptr_item(actual);
+    JsArrayBuffer* expected_ab = js_get_arraybuffer_ptr_item(expected);
+    if (!actual_ab || !expected_ab) return false;
+    if (expected_len <= 0) return true;
+    if (!actual_ab->data || !expected_ab->data) return false;
+    return memcmp(actual_ab->data, expected_ab->data, (size_t)expected_len) == 0;
+}
+
+static bool js_assert_is_url_like(Item value) {
+    return get_type_id(value) == LMD_TYPE_MAP && js_class_id(value) == JS_CLASS_URL;
+}
+
+static bool js_assert_partial_url_match(Item actual, Item expected) {
+    if (!js_assert_is_url_like(actual) || !js_assert_is_url_like(expected)) return false;
+    Item href_key = assert_make_string("href");
+    Item actual_href = js_property_get(actual, href_key);
+    Item expected_href = js_property_get(expected, href_key);
+    // url wrappers materialize per-instance searchParams methods; href is the canonical URL value for equality.
+    return js_assert_deep_strict_equal_bool(actual_href, expected_href);
+}
+
+static bool js_assert_partial_key_value_subset(Item actual, Item expected, Item actual_keys, Item expected_keys, int depth_left, JsAssertPartialContext* ctx) {
+    int64_t expected_count = js_array_length(expected_keys);
+    int64_t actual_count = js_array_length(actual_keys);
+    if (actual_count < expected_count) return false;
+    if (expected_count == 0) return true;
+
+    bool* used = (bool*)calloc((size_t)actual_count, sizeof(bool));
+    if (!used) return false;
+
+    for (int64_t i = 0; i < expected_count; i++) {
+        Item expected_key = js_array_get_int(expected_keys, i);
+        Item expected_value = js_property_get(expected, expected_key);
+        bool found = false;
+        for (int64_t j = 0; j < actual_count; j++) {
+            if (used[j]) continue;
+            Item actual_key = js_array_get_int(actual_keys, j);
+            Item actual_value = js_property_get(actual, actual_key);
+            if (js_assert_partial_deep_match_impl(actual_value, expected_value, depth_left - 1, ctx)) {
+                used[j] = true;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            free(used);
+            return false;
+        }
+    }
+
+    free(used);
+    return true;
+}
+
+static bool js_assert_partial_named_key_subset(Item actual, Item expected, Item actual_keys, Item expected_keys, int depth_left, JsAssertPartialContext* ctx) {
+    int64_t expected_count = js_array_length(expected_keys);
+    int64_t actual_count = js_array_length(actual_keys);
+    for (int64_t i = 0; i < expected_count; i++) {
+        Item expected_key = js_array_get_int(expected_keys, i);
+        Item expected_value = js_property_get(expected, expected_key);
+        bool found = false;
+        for (int64_t j = 0; j < actual_count; j++) {
+            Item actual_key = js_array_get_int(actual_keys, j);
+            if (!js_assert_same_property_key(actual_key, expected_key)) continue;
+            if (!js_assert_partial_deep_match_impl(
+                    js_property_get(actual, actual_key),
+                    expected_value,
+                    depth_left - 1, ctx)) {
+                return false;
+            }
+            found = true;
+            break;
+        }
+        if (!found) return false;
+    }
+    return true;
+}
+
+static bool js_assert_partial_array_like_key_match(Item actual, Item expected,
+        Item actual_keys, Item expected_keys, int depth_left, JsAssertPartialContext* ctx) {
+    // Array-like partial equality is value-subset based for indexed elements,
+    // but named and symbol keys remain observable own properties. Matching all
+    // keys by value let `actual.ignored = v` satisfy `expected.extra = v`, and
+    // dropped enumerable symbol-key mismatches entirely.
+    Item actual_index_keys = js_assert_filter_keys(actual_keys, true);
+    Item expected_index_keys = js_assert_filter_keys(expected_keys, true);
+    if (!js_assert_partial_key_value_subset(actual, expected,
+            actual_index_keys, expected_index_keys, depth_left, ctx)) {
+        return false;
+    }
+    Item actual_named_keys = js_assert_filter_keys(actual_keys, false);
+    Item expected_named_keys = js_assert_filter_keys(expected_keys, false);
+    return js_assert_partial_named_key_subset(actual, expected,
+        actual_named_keys, expected_named_keys, depth_left, ctx);
+}
+
+static bool js_assert_partial_array_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+    if (get_type_id(actual) != LMD_TYPE_ARRAY) return false;
+    if (js_array_length(actual) < js_array_length(expected)) return false;
+
+    // partial array equality is value-subset based; enumerate present keys so sparse arrays do not scan every hole.
+    Item expected_keys = js_assert_enumerable_own_keys(expected);
+    Item actual_keys = js_assert_enumerable_own_keys(actual);
+    return js_assert_partial_array_like_key_match(actual, expected, actual_keys, expected_keys, depth_left, ctx);
+}
+
+static bool js_assert_partial_typed_array_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+    if (!js_is_typed_array(actual) || !js_is_typed_array(expected)) return false;
+    JsTypedArray* actual_ta = js_get_typed_array_ptr(actual.map);
+    JsTypedArray* expected_ta = js_get_typed_array_ptr(expected.map);
+    if (!actual_ta || !expected_ta) return false;
+    // TypedArray subsets still require the same element kind; otherwise equal
+    // numeric slots make Int16Array/Uint16Array instances look interchangeable.
+    if (actual_ta->element_type != expected_ta->element_type) return false;
+    if (js_typed_array_length(actual) < js_typed_array_length(expected)) return false;
+    Item expected_keys = js_assert_enumerable_own_keys(expected);
+    Item actual_keys = js_assert_enumerable_own_keys(actual);
+    return js_assert_partial_array_like_key_match(actual, expected, actual_keys, expected_keys, depth_left, ctx);
+}
+
+static bool js_assert_partial_set_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+    extern Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
+    extern Item js_iterable_to_array(Item iterable);
+
+    Item actual_values = js_iterable_to_array(actual);
+    Item expected_values = js_iterable_to_array(expected);
+    int64_t actual_count = js_array_length(actual_values);
+    int64_t expected_count = js_array_length(expected_values);
+    if (actual_count < expected_count) return false;
+    if (expected_count == 0) return true;
+
+    bool* used = (bool*)calloc((size_t)actual_count, sizeof(bool));
+    if (!used) return false;
+
+    for (int64_t i = 0; i < expected_count; i++) {
+        Item expected_value = js_array_get_int(expected_values, i);
+        bool found = false;
+        for (int64_t j = 0; j < actual_count; j++) {
+            if (used[j]) continue;
+            Item actual_value = js_array_get_int(actual_values, j);
+            if (js_assert_partial_deep_match_impl(actual_value, expected_value, depth_left - 1, ctx)) {
+                used[j] = true;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            free(used);
+            return false;
+        }
+    }
+
+    free(used);
+    return true;
+}
+
+static bool js_assert_partial_map_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+    extern Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
+    extern Item js_iterable_to_array(Item iterable);
+
+    Item actual_entries = js_iterable_to_array(actual);
+    Item expected_entries = js_iterable_to_array(expected);
+    int64_t actual_count = js_array_length(actual_entries);
+    int64_t expected_count = js_array_length(expected_entries);
+    if (actual_count < expected_count) return false;
+    if (expected_count == 0) return true;
+
+    bool* used = (bool*)calloc((size_t)actual_count, sizeof(bool));
+    if (!used) return false;
+
+    for (int64_t i = 0; i < expected_count; i++) {
+        Item expected_pair = js_array_get_int(expected_entries, i);
+        Item expected_key = js_array_get_int(expected_pair, 0);
+        Item expected_value = js_array_get_int(expected_pair, 1);
+        bool found = false;
+        for (int64_t j = 0; j < actual_count; j++) {
+            if (used[j]) continue;
+            Item actual_pair = js_array_get_int(actual_entries, j);
+            Item actual_key = js_array_get_int(actual_pair, 0);
+            Item actual_value = js_array_get_int(actual_pair, 1);
+            if (js_assert_deep_strict_equal_bool(actual_key, expected_key) &&
+                js_assert_partial_deep_match_impl(actual_value, expected_value, depth_left - 1, ctx)) {
+                used[j] = true;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            free(used);
+            return false;
+        }
+    }
+
+    free(used);
+    return true;
+}
+
+static bool js_assert_partial_collection_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+    extern bool js_is_set_instance(Item obj);
+    extern bool js_is_map_instance(Item obj);
+
+    if (js_assert_is_weak_collection_like(actual) || js_assert_is_weak_collection_like(expected)) {
+        return false;
+    }
+    bool actual_set = js_is_set_instance(actual);
+    bool expected_set = js_is_set_instance(expected);
+    bool actual_map = js_is_map_instance(actual);
+    bool expected_map = js_is_map_instance(expected);
+    actual_set = actual_set || js_assert_tag_equals(actual, "Set");
+    expected_set = expected_set || js_assert_tag_equals(expected, "Set");
+    actual_map = actual_map || js_assert_tag_equals(actual, "Map");
+    expected_map = expected_map || js_assert_tag_equals(expected, "Map");
+    if (actual_set || expected_set) {
+        return actual_set && expected_set && js_assert_partial_set_match(actual, expected, depth_left, ctx);
+    }
+    if (actual_map || expected_map) {
+        return actual_map && expected_map && js_assert_partial_map_match(actual, expected, depth_left, ctx);
+    }
+    return false;
+}
+
+static bool js_assert_is_weak_collection_like(Item value) {
+    return js_assert_tag_equals(value, "WeakMap") || js_assert_tag_equals(value, "WeakSet");
+}
+
+static bool js_assert_is_collection_like(Item value) {
+    extern bool js_is_set_instance(Item obj);
+    extern bool js_is_map_instance(Item obj);
+    if (js_assert_is_weak_collection_like(value)) return true;
+    return js_is_set_instance(value) || js_is_map_instance(value) ||
+           js_assert_tag_equals(value, "Set") || js_assert_tag_equals(value, "Map");
+}
+
+static bool js_assert_partial_is_special_map(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    JsClass cls = js_class_id(value);
+    return (cls != JS_CLASS_NONE && cls != JS_CLASS_OBJECT) ||
+           js_assert_is_regexp_like(value) ||
+           js_assert_tag_equals(value, "WeakMap") ||
+           js_assert_tag_equals(value, "WeakSet") ||
+           js_assert_is_dataview_like(value) ||
+           js_assert_is_any_arraybuffer(value);
+}
+
+static bool js_assert_partial_deep_match_impl(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+    if (actual.item == expected.item) return true;
+    if (depth_left <= 0) return false;
+    bool actual_object_like = js_assert_is_partial_object_like(actual);
+    bool expected_object_like = js_assert_is_partial_object_like(expected);
+    if (!actual_object_like && !expected_object_like &&
+            js_assert_deep_strict_equal_bool(actual, expected)) {
         return true;
+    }
+
+    bool entered = false;
+    if (actual_object_like || expected_object_like) {
+        int enter_status = js_assert_partial_deep_enter(ctx, actual, expected);
+        if (enter_status == 0) {
+            // cyclic partial comparisons must reuse the same active actual/expected pair instead of recursing forever.
+            return true;
+        }
+        if (enter_status < 0) {
+            // reusing only one side would let a cycle in expected match a different actual node.
+            return false;
+        }
+        entered = true;
+    }
+
+    bool result = false;
+    if (js_assert_is_error_like_value(actual) || js_assert_is_error_like_value(expected)) {
+        result = js_assert_partial_error_match(actual, expected, depth_left, ctx);
+        goto done;
+    }
+    if (js_assert_is_regexp_like(actual) || js_assert_is_regexp_like(expected)) {
+        result = js_assert_partial_regexp_match(actual, expected);
+        goto done;
+    }
+    if (js_assert_is_any_arraybuffer(actual) || js_assert_is_any_arraybuffer(expected)) {
+        result = js_assert_partial_arraybuffer_match(actual, expected);
+        goto done;
+    }
+    if (js_assert_is_dataview_like(actual) || js_assert_is_dataview_like(expected)) {
+        result = js_assert_partial_dataview_match(actual, expected);
+        goto done;
+    }
+    if (js_assert_item_is_date(actual) || js_assert_item_is_date(expected)) {
+        result = js_assert_item_is_date(actual) && js_assert_item_is_date(expected) &&
+                 js_assert_deep_strict_equal_bool(actual, expected);
+        goto done;
+    }
+    if (js_assert_is_url_like(actual) || js_assert_is_url_like(expected)) {
+        result = js_assert_partial_url_match(actual, expected);
+        goto done;
+    }
+
+    if (get_type_id(expected) == LMD_TYPE_ARRAY) {
+        result = js_assert_partial_array_match(actual, expected, depth_left, ctx);
+        goto done;
+    }
+
+    if (js_is_typed_array(expected) || js_is_typed_array(actual)) {
+        result = js_assert_partial_typed_array_match(actual, expected, depth_left, ctx);
+        goto done;
+    }
+
+    if (get_type_id(expected) == LMD_TYPE_MAP || get_type_id(actual) == LMD_TYPE_MAP) {
+        // Collection internals are hidden from public object enumeration; if a
+        // Map/Set subset check fails, falling through would compare them as
+        // empty plain objects.
+        if (js_assert_is_collection_like(actual) || js_assert_is_collection_like(expected)) {
+            result = js_assert_partial_collection_match(actual, expected, depth_left, ctx);
+            goto done;
+        }
+        // Maps for RegExp/Error/ArrayBuffer/etc. have internal slots that are
+        // not represented by enumerable object keys; falling through made
+        // unequal special objects compare as empty plain-object subsets.
+        if (js_assert_partial_is_special_map(expected) || js_assert_partial_is_special_map(actual)) {
+            result = false;
+            goto done;
+        }
     }
 
     if (js_assert_is_partial_object_like(expected)) {
-        if (!js_assert_is_partial_object_like(actual)) return false;
-        Item keys = js_object_keys(expected);
+        if (!js_assert_is_partial_object_like(actual)) {
+            result = false;
+            goto done;
+        }
+        Item keys = js_assert_enumerable_own_keys(expected);
         int64_t key_len = js_array_length(keys);
         for (int64_t i = 0; i < key_len; i++) {
             Item key = js_array_get_int(keys, i);
-            if (!js_assert_partial_deep_match(
+            if (!js_assert_has_enumerable_own_key(actual, key)) {
+                result = false;
+                goto done;
+            }
+            if (!js_assert_partial_deep_match_impl(
                     js_property_get(actual, key),
                     js_property_get(expected, key),
-                    depth_left - 1)) {
-                return false;
+                    depth_left - 1, ctx)) {
+                result = false;
+                goto done;
             }
         }
-        return true;
+        result = true;
+        goto done;
     }
 
-    return false;
+done:
+    if (entered) js_assert_partial_deep_leave(ctx);
+    return result;
+}
+
+static bool js_assert_partial_deep_match(Item actual, Item expected, int depth_left) {
+    JsAssertPartialContext ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    return js_assert_partial_deep_match_impl(actual, expected, depth_left, &ctx);
 }
 
 static void js_assert_append_inspected_value(StrBuf* sb, Item value) {

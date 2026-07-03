@@ -359,3 +359,291 @@ Remaining timing note: `test-child-process-http-socket-leak.js` remains around
 10s, and several cluster/socket-transfer cases remain around the 5s drain
 boundary. Those are separate lifecycle/handle-retention issues from the
 listen-callback ordering bug fixed here.
+
+## Progress Update: 2026-07-02 Cluster 5s Drain Cleanup
+
+This follow-up reduced most of the remaining cluster tests that were passing
+functionally but waiting for the 5s drain boundary.
+
+Implemented design:
+
+- `process.prependListener()` and `process.prependOnceListener()` now preserve
+  true prepend ordering for the process event map. `internalMessage` ordering is
+  observable in cluster tests because user listeners can wrap a transferred
+  handle's `close()` before the runtime's SCHED_RR compatibility path consumes
+  the accepted socket.
+- `process.channel` is now exposed for IPC children and supports `ref()` /
+  `unref()`. `process.channel.unref()` explicitly overrides hidden cluster IPC
+  listeners so RR workers with no other refed handles can exit without waiting
+  for the drain watchdog.
+- object-form pipe `listen({ path, readableAll, writableAll })` now applies the
+  expected socket-file mode after bind. Without the chmod, the official test
+  threw before it could close the server and disconnect the worker.
+- HTTP `server.listen()` treats numeric strings as TCP ports, matching
+  `net.Server.listen()`. `process.env.PORT` from cluster workers was previously
+  interpreted as a pipe path, so the worker missed the expected `EADDRINUSE`
+  path and waited for the watchdog.
+
+Touched files:
+
+| File | Role |
+| --- | --- |
+| `lambda/js/js_globals.cpp` | process prepend ordering and `process.channel.ref/unref` IPC liveness |
+| `lambda/js/js_net.cpp` | pipe listen mode bits for object-form pipe listens |
+| `lambda/js/js_http.cpp` | numeric-string HTTP listen ports |
+
+Verification from the parent workspace:
+
+```bash
+make build
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='*test_cluster_worker_handle_close*:*test_cluster_rr_handle_close*:*test_cluster_rr_handle_ref_unref*:*test_cluster_rr_handle_keep_loop_alive*' --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='*test_cluster_listen_pipe_readable_writable*:*test_cluster_ipc_throw*:*test_cluster_net_server_drop_connection*' --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='*test_cluster*' --gtest_brief=1
+```
+
+Results:
+
+| Gate | Result |
+| --- | --- |
+| Focused RR/channel group | 4/4 pass, about 3.3s total; `test-cluster-rr-handle-keep-loop-alive.js` intentionally waits about 3s |
+| Focused residual group | 3/3 pass; `test-cluster-listen-pipe-readable-writable.js` and `test-cluster-ipc-throw.js` about 0.47s |
+| Full cluster slice | 76/76 pass, 0 regressions, about 9.6s |
+
+Remaining design boundary: `test-cluster-net-server-drop-connection.js` still
+passes but remains around 5.9s. The root cause is not another missing unref or
+callback-ordering edge; Lambda's cluster path still lets workers bind a pipe
+server directly, while Node's SCHED_RR model keeps the listener in the primary
+and sends accepted sockets to workers as `newconn` handles. Fixing this requires
+a broader primary-owned SCHED_RR pipe-server distribution design.
+
+## Progress Update: 2026-07-03 Cluster Pipe Timing Follow-up
+
+This session validated the post-redesign cluster pipe behavior and removed two
+more harness-visible 5s waits from the focused cluster set.
+
+Implemented / retained design:
+
+- Unix pipe paths are normalized by resolving the existing parent directory
+  before `uv_pipe_bind()` / `uv_pipe_connect()`. Node official tests can build
+  `common.PIPE` through symlinked or `..`-heavy harness paths; handing that raw
+  spelling to libuv can fail before the deferred `listen` callback gets a turn.
+- `test-cluster-listen-pipe-readable-writable.js` remains on the local
+  object-form pipe-listen path so `readableAll` / `writableAll` chmod applies to
+  the socket file being asserted.
+- Hidden cluster `process.disconnect` routing remains non-liveness-counted, so
+  idle workers do not wait for the drain watchdog only because the runtime
+  installed internal listeners.
+
+Rejected during consolidation:
+
+- A `test_node_gtest.cpp` no-`cd` / file-capture / serial-list harness path for
+  cluster tests was tried and removed. It improved neither the remaining
+  `test-cluster-net-server-drop-connection.js` wait nor the semantic
+  `common.mustCall` warning seen in manual runs, and it was too broad for a
+  runtime compatibility fix.
+
+Verification:
+
+```bash
+make build-test
+make -C build/premake config=debug_native test_node_gtest -j10 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='*test_cluster_listen_pipe_readable_writable*:*test_cluster_eaccess*' --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='*test_cluster_net_server_drop_connection*' --gtest_brief=1
+```
+
+Results:
+
+| Gate | Result |
+| --- | --- |
+| `test-cluster-listen-pipe-readable-writable.js` + `test-cluster-eaccess.js` | 2/2 pass, about 0.9s total; individual timings about 0.55s and 0.86s |
+| `test-cluster-net-server-drop-connection.js` before RR cleanup | pass, still about 5.28s |
+
+Remaining boundary: `test-cluster-net-server-drop-connection.js` still needs a
+runtime-side ownership/lifecycle fix. Direct shell runs of the official command
+exit quickly, but the gtest runner observes a 5s drain wait. Harness-only
+changes were not sufficient, so the next pass should inspect which cluster
+worker/server/socket handle remains refed until `EVENT_LOOP_DRAIN_TIMEOUT_MS`
+after the 10 piped client connections are distributed and the workers receive
+their disconnect messages.
+
+## Progress Update: 2026-07-03 RR Pipe Worker Cleanup
+
+The remaining `test-cluster-net-server-drop-connection.js` wait was fixed by
+cleaning up primary-owned SCHED_RR pipe dispatch state when workers disconnect
+or exit.
+
+Implemented design:
+
+- primary-side RR pipe servers now remove disconnected worker slots and clear
+  pending dispatch handles tied to that worker;
+- if all workers for a primary-owned pipe server are gone, the shared accept
+  handle is closed instead of staying refed until the event-loop drain watchdog;
+- worker `disconnect` and `exit` forwarding in the cluster runtime now both
+  notify the net layer, covering explicit `Worker.disconnect()` and
+  worker-initiated `process.disconnect()` paths.
+
+Touched files:
+
+| File | Role |
+| --- | --- |
+| `lambda/js/js_net.cpp` | releases primary RR pipe server worker slots, pending handles, and accept handles |
+| `lambda/js/js_runtime.cpp` | wires worker disconnect/exit events into RR pipe cleanup |
+
+Verification:
+
+```bash
+make -C build/premake config=debug_native lambda test_node_gtest -j10 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='*test_cluster_net_server_drop_connection*' --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='*test_cluster_listen_pipe_readable_writable*:*test_cluster_eaccess*' --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='*test_cluster*' --gtest_brief=1
+```
+
+Results:
+
+| Gate | Result |
+| --- | --- |
+| `test-cluster-net-server-drop-connection.js` | pass, about 0.63s |
+| readable/writable + eaccess neighbors | 2/2 pass, about 0.9s total |
+| full cluster slice | 76/76 pass, 0 regressions, about 10.0s |
+
+Follow-up disconnect cleanup:
+
+- the official-test runner now closes inherited fd >= 3 immediately before
+  execing each test command. Parallel `popen()` runs can otherwise leak sibling
+  capture-pipe writers into spawned Lambda/cluster children, delaying EOF until
+  unrelated worker drain watchdogs fire;
+- four cluster disconnect fixtures are serial because their worker/IPC teardown
+  is process-pipe sensitive and they do not benefit from parallel execution.
+
+Additional verification:
+
+```bash
+make -C build/premake config=debug_native test_node_gtest -j10 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='*test_cluster_disconnect_unshared_udp*:*test_cluster_disconnect_race*:*test_cluster_disconnect_unshared_tcp*:*test_cluster_disconnect_with_no_workers*' --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='*test_cluster_disconnect_unshared_tcp*' --gtest_brief=1
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='*test_cluster*' --gtest_brief=1
+```
+
+Results:
+
+| Gate | Result |
+| --- | --- |
+| four disconnect fixtures, focused | 4/4 pass; transient filtered run had one 5.55s TCP outlier |
+| `test-cluster-disconnect-unshared-tcp.js`, standalone | pass, about 0.56s |
+| full cluster slice after FD isolation | 76/76 pass, 0 regressions, about 11.7s; four disconnect fixtures all below 0.8s in `temp/node_official_times.tsv` |
+
+Former remaining timing boundary, now addressed:
+
+- `test-cluster-disconnect-unshared-udp.js`
+- `test-cluster-disconnect-race.js`
+- `test-cluster-disconnect-unshared-tcp.js`
+- `test-cluster-disconnect-with-no-workers.js`
+
+## Progress Update: 2026-07-03 Slow-List Consolidation
+
+This pass continued the 10s-ish official-test cleanup after the cluster
+ownership fixes. The main rule was to remove waits by fixing runtime ownership
+or algorithmic root causes, not by broadening skips.
+
+Implemented design:
+
+- HTTP server backpressure now stops parsing already-buffered pipelined request
+  bytes after response backpressure pauses reads. This keeps
+  `test-http-pipeline-flood.js` from overprocessing flood traffic.
+- HTTP response lifecycle now settles aborted responses, emits response `drain`,
+  handles close-delimited zero-byte final writes, dispatches upgrade requests to
+  upgrade listeners, and supports the response/socket surfaces needed by
+  keep-alive reuse and `IncomingMessage.destroy()`.
+- Advanced IPC serialization now encodes Buffers and typed arrays as compact
+  byte envelopes instead of enumerating every numeric property. This removes
+  the orphaned child process wait in
+  `test-child-process-advanced-serialization-splitted-length-field.js`.
+- Process lifecycle and async error handling now preserve uncaught errors
+  through process hooks, keep timer/immediate resources active during uncaught
+  dispatch, provide queueMicrotask async-hook resources, validate
+  `process.exitCode`, route console writes through process streams, and make
+  warning delivery match Node timing closely enough for the official common and
+  process fixtures.
+- `assert.partialDeepStrictEqual()` now avoids scanning sparse array holes,
+  handles partial Map/Set/TypedArray subsets, tracks active comparison pairs for
+  circular structures, compares URL values by `href`, and recognizes typed-array
+  numeric SameValue details.
+- Real `Float16Array` support was added with binary16 storage, conversion,
+  global constructor registration, MIR/runtime paths, and
+  `util.types.isFloat16Array`.
+- REPL `.load` now evaluates loaded source and propagates errors through the
+  REPL stack formatter, including `Error.prepareStackTrace` and virtual REPL
+  filenames.
+- Wrapped JS stream sockets now inherit the socket prototype bridge and preserve
+  synchronous wrapped-stream exceptions while still emitting the socket error
+  expected by the official net wrapper tests.
+
+Slow-list update:
+
+- removed stale entries that now run under 10s:
+  `test-assert-deep.js`, `test-fs-readdir-stack-overflow.js`,
+  `test-http-byteswritten.js`, `test-http-pipeline-flood.js`, and
+  `test-http-pipeline-requests-connection-leak.js`;
+- retained only real heavy or unsupported cases:
+  `test-compile-cache-success.js`, `test-snapshot-typescript.js`,
+  `test-stream2-read-sync-stack.js`, and the three documented TLS cases.
+
+Verification:
+
+```bash
+make -C build/premake config=debug_native lambda test_node_gtest -j10 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_node_gtest.exe --baseline-only --no-update-slow-list --timeout=70000 --gtest_filter='*test_http_client_incomingmessage_destroy*:*test_http_outgoing_end_cork*:*test_http_upgrade_server2*:*test_http_byteswritten*:*test_http_pipeline_flood*:*test_child_process_advanced_serialization_splitted_length_field*:*test_assert_partial_deep_equal*:*test_assert_typedarray_deepequal*:*test_common*:*test_async_wrap_uncaughtexception*:*test_process_uncaught_exception_monitor*:*test_promises_unhandled_rejections*:*test_queue_microtask_uncaught_asynchooks*:*test_repl_pretty_custom_stack*:*test_wrap_js_stream_exceptions*' --gtest_brief=1
+```
+
+Results:
+
+| Gate | Result |
+| --- | --- |
+| repaired focused group | 19/19 pass, 0 regressions, about 7.0s |
+| former `test-assert-partial-deep-equal.js` timeout | pass, about 1.4s |
+| former child-process advanced serialization orphan wait | pass, about 1.3s |
+| former HTTP flood wait | pass, about 0.8s |
+
+Remaining slow-list rationale:
+
+- `test-stream2-read-sync-stack.js` is CPU-bound in the current interpreter:
+  the fixture performs 256K synchronous `_read()` / `push(Buffer.allocUnsafe(1))`
+  turns rather than waiting on a timeout.
+- `test-compile-cache-success.js` and `test-snapshot-typescript.js` execute the
+  10.5MB TypeScript snapshot fixture and still need real compile-cache/snapshot
+  artifact semantics before joining the normal baseline set.
+
+## Progress Update: 2026-07-03 Test262 Baseline Regression Fix
+
+The slow-list work temporarily exposed nine `make test262-baseline`
+regressions: seven in `Float16Array` conversion tests and two in lexical
+closure scope tests.
+
+Implemented design:
+
+- `Float16Array` conversion now rounds directly from JS `Number` (`double`) to
+  IEEE-754 binary16. The previous implementation narrowed through `float32`
+  first, which double-rounded subnormal tie cases such as `2^-25` plus one
+  double ulp to zero instead of the minimum half subnormal (`2^-24`).
+- Closures created in `for (let ...; ...)` initializers now treat the synthetic
+  loop lexical scope as current even before `iteration_depth` increments. This
+  prevents later loop-body/test/update writes from mutating the initializer
+  closure's captured cell, while still allowing closures created after the
+  per-iteration boundary to observe the current iteration binding.
+- Stale fallback-call diagnostic logging was removed from
+  `js_mir_expression_lowering.cpp` after the release build surfaced unused
+  debug-only locals.
+
+Verification:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --run-async --batch-file=temp/test262_regressions_current.txt
+make test262-baseline
+```
+
+Results:
+
+| Gate | Result |
+| --- | --- |
+| focused 9-regression Test262 batch | 9/9 pass |
+| `make test262-baseline` | 40261/40261 fully passed, 0 regressions, 0 retry |

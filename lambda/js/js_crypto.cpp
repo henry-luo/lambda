@@ -15,6 +15,9 @@
 
 extern "C" Item js_get_current_this(void);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
+extern "C" Item js_setImmediate_resource_args(Item callback, Item args_array,
+                                               const char* resource_name,
+                                               int resource_len);
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include <cstring>
@@ -639,8 +642,12 @@ extern "C" Item js_crypto_randomBytes(Item size_item, Item callback_item) {
     }
 
     if (has_callback) {
-        Item args[2] = { ItemNull, result };
-        js_call_function(callback_item, ItemNull, args, 2);
+        Item args = js_array_new(0);
+        js_array_push(args, ItemNull);
+        js_array_push(args, result);
+        // randomBytes(callback) is async from userland's perspective; invoking
+        // inline skips RANDOMBYTESREQUEST hooks and loses async uncaught context.
+        js_setImmediate_resource_args(callback_item, args, "RANDOMBYTESREQUEST", 18);
         return make_js_undefined_crypto();
     }
     return result;

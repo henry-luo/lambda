@@ -7,14 +7,9 @@
 # Format: test-filename.js  # reason
 # Lines starting with # are comments. Blank lines are ignored.
 #
-test-assert-deep.js                              # [timeout] observed 20.0s (>10s)
-test-compile-cache-success.js                    # [slow] observed 17.8s (>10s)
-test-fs-readdir-stack-overflow.js                # [timeout] observed 60.1s (>10s)
-test-http-byteswritten.js                        # [slow] observed 29.9s (>10s)
-test-http-pipeline-flood.js                      # [slow] observed 65.8s (>10s)
-test-http-pipeline-requests-connection-leak.js   # [slow] observed 17.5s (>10s)
-test-snapshot-typescript.js                      # [timeout] observed 60.1s (>10s)
-test-stream2-read-sync-stack.js                  # [slow] observed 17.7s (>10s)
+test-compile-cache-success.js                    # [slow] executes the 10.5MB TypeScript snapshot fixture twice through spawnSync; compile-cache semantics need real cache artifact support before this is a normal baseline test
+test-snapshot-typescript.js                      # [timeout] snapshot support is still placeholder-only, and the build phase loads the 10.5MB TypeScript fixture before the second phase can run
+test-stream2-read-sync-stack.js                  # [slow] CPU-bound: 256K synchronous _read()/push(Buffer.allocUnsafe(1)) turns in the current LambdaJS interpreter, not a timeout/drain wait
 test-tls-cli-min-version-1.2.js                  # [timeout] harness popen run waits until timeout; direct child exits fast with incomplete mustCall diagnostics
 test-tls-destroy-stream-12.js                    # [timeout] harness popen run waits until timeout; direct child exits fast with incomplete mustCall diagnostics
 test-tls-ticket-12.js                            # [timeout] harness popen run waits until timeout; full fix needs real TLS session ticket/resumption semantics

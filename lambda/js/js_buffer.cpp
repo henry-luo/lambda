@@ -16,6 +16,7 @@
 #include "../../lib/mem.h"
 #include "../../lib/hex.h"
 #include "../../lib/base64.h"
+#include "../../lib/str.h"
 #include "../../lib/utf.h"
 
 #include <cstring>
@@ -24,6 +25,9 @@
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
 }
+
+static const int64_t JS_BUFFER_MAX_LENGTH = (1LL << 30) - 1;
+static const int64_t JS_BUFFER_MAX_STRING_LENGTH = (1LL << 28) - 16;
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
@@ -39,11 +43,25 @@ static Item make_string_item(const char* str) {
 extern "C" Item js_get_current_this(void);
 extern "C" Item js_blob_new(Item parts, Item options);
 extern "C" void js_set_function_name(Item fn_item, Item name_item);
+void* heap_alloc(int size, TypeId type_id);
+
+static Item make_buffer_content_string_item(const char* str, int len,
+                                            bool ascii_known, bool is_ascii) {
+    if (!str || len < 0 || len > JS_BUFFER_MAX_STRING_LENGTH) return ItemNull;
+    size_t alloc_size = sizeof(String) + (size_t)len + 1;
+    // Buffer payload strings are transient content; interning megabyte output
+    // hashed and retained every byte in the name pool before this fast path.
+    String* s = (String*)heap_alloc((int)alloc_size, LMD_TYPE_STRING);
+    if (!s) return ItemNull;
+    if (len > 0) memcpy(s->chars, str, (size_t)len);
+    s->chars[len] = '\0';
+    s->len = (uint32_t)len;
+    s->is_ascii = ascii_known ? (is_ascii ? 1 : 0)
+                              : (str_is_ascii(str, (size_t)len) ? 1 : 0);
+    return (Item){.item = s2it(s)};
+}
 
 // Helper: get raw data pointer and length from a typed array Item
-static const int64_t JS_BUFFER_MAX_LENGTH = (1LL << 30) - 1;
-static const int64_t JS_BUFFER_MAX_STRING_LENGTH = (1LL << 28) - 16;
-
 static uint8_t* buffer_data(Item buf, int* out_len) {
     if (!js_is_typed_array(buf)) { *out_len = 0; return NULL; }
     uint8_t* data = (uint8_t*)js_typed_array_current_data_ptr(buf);
@@ -472,6 +490,13 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
 
         if (strcmp(enc_buf, "latin1") == 0 || strcmp(enc_buf, "binary") == 0) {
             // latin1/binary: one output byte per code point, keeping the low byte
+            if (s->is_ascii) {
+                Item buf = create_buffer((int)s->len);
+                int buf_byte_len = 0;
+                uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+                if (bdata && s->len > 0) memcpy(bdata, s->chars, (size_t)buf_byte_len);
+                return buf;
+            }
             int byte_len = buffer_utf8_codepoint_count(s->chars, (int)s->len);
             Item buf = create_buffer(byte_len);
             int buf_byte_len = 0;
@@ -488,6 +513,20 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
         if (strcmp(enc_buf, "ucs2") == 0 || strcmp(enc_buf, "ucs-2") == 0 ||
             strcmp(enc_buf, "utf16le") == 0 || strcmp(enc_buf, "utf-16le") == 0) {
             // UCS-2 / UTF-16LE: decode UTF-8 to code points, encode each as 2 bytes LE
+            if (s->is_ascii) {
+                int out_bytes = (int)s->len * 2;
+                Item buf = create_buffer(out_bytes);
+                int buf_byte_len = 0;
+                uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+                if (bdata) {
+                    int j = 0;
+                    for (uint32_t i = 0; i < s->len && j + 1 < buf_byte_len; i++) {
+                        bdata[j++] = (uint8_t)s->chars[i];
+                        bdata[j++] = 0;
+                    }
+                }
+                return buf;
+            }
             const char* p = s->chars;
             const char* end = p + s->len;
             // first pass: count code points
@@ -539,6 +578,13 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
         }
 
         // default: utf-8 with WHATWG replacement semantics for WTF-8 surrogate halves
+        if (s->is_ascii) {
+            Item buf = create_buffer((int)s->len);
+            int buf_byte_len = 0;
+            uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+            if (bdata && s->len > 0) memcpy(bdata, s->chars, (size_t)buf_byte_len);
+            return buf;
+        }
         int byte_len = buffer_utf8_encoded_len(s->chars, (int)s->len);
         Item buf = create_buffer(byte_len);
         int buf_byte_len = 0;
@@ -886,7 +932,7 @@ static Item js_buffer_copyBytesFrom(Item view, Item offset_item, Item length_ite
     int elem_size = 1;
     switch (ta->element_type) {
         case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: elem_size = 1; break;
-        case JS_TYPED_INT16: case JS_TYPED_UINT16: elem_size = 2; break;
+        case JS_TYPED_INT16: case JS_TYPED_UINT16: case JS_TYPED_FLOAT16: elem_size = 2; break;
         case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: elem_size = 4; break;
         case JS_TYPED_FLOAT64: elem_size = 8; break;
         default: break;
@@ -1186,7 +1232,7 @@ static Item js_buffer_utf8_to_string(uint8_t* slice, int slice_len) {
         i++;
     }
     out[j] = '\0';
-    Item result = make_string_item(out, j);
+    Item result = make_buffer_content_string_item(out, j, false, false);
     mem_free(out);
     return result;
 }
@@ -1244,7 +1290,7 @@ extern "C" Item js_buffer_toString(Item buf, Item encoding, Item start_item, Ite
     if (strcmp(enc_buf, "hex") == 0) {
         char* hex = (char*)mem_alloc(slice_len * 2 + 1, MEM_CAT_JS_RUNTIME);
         hex_encode(slice, (size_t)slice_len, hex);
-        Item result = make_string_item(hex, slice_len * 2);
+        Item result = make_buffer_content_string_item(hex, slice_len * 2, true, true);
         mem_free(hex);
         return result;
     }
@@ -1254,7 +1300,7 @@ extern "C" Item js_buffer_toString(Item buf, Item encoding, Item start_item, Ite
         size_t out_len = base64_encoded_len((size_t)slice_len, variant);
         char* b64_str = (char*)mem_alloc(out_len + 1, MEM_CAT_JS_RUNTIME);
         size_t j = base64_encode(slice, (size_t)slice_len, b64_str, variant);
-        Item result = make_string_item(b64_str, (int)j);
+        Item result = make_buffer_content_string_item(b64_str, (int)j, true, true);
         mem_free(b64_str);
         return result;
     }
@@ -1263,7 +1309,7 @@ extern "C" Item js_buffer_toString(Item buf, Item encoding, Item start_item, Ite
         char* ascii = (char*)mem_alloc((size_t)slice_len + 1, MEM_CAT_JS_RUNTIME);
         for (int i = 0; i < slice_len; i++) ascii[i] = (char)(slice[i] & 0x7F);
         ascii[slice_len] = '\0';
-        Item result = make_string_item(ascii, slice_len);
+        Item result = make_buffer_content_string_item(ascii, slice_len, true, true);
         mem_free(ascii);
         return result;
     }
@@ -1271,17 +1317,19 @@ extern "C" Item js_buffer_toString(Item buf, Item encoding, Item start_item, Ite
     if (strcmp(enc_buf, "latin1") == 0 || strcmp(enc_buf, "binary") == 0) {
         char* latin1 = (char*)mem_alloc((size_t)slice_len * 2 + 1, MEM_CAT_JS_RUNTIME);
         int j = 0;
+        bool ascii_only = true;
         for (int i = 0; i < slice_len; i++) {
             uint8_t b = slice[i];
             if (b < 0x80) {
                 latin1[j++] = (char)b;
             } else {
+                ascii_only = false;
                 latin1[j++] = (char)(0xC0 | (b >> 6));
                 latin1[j++] = (char)(0x80 | (b & 0x3F));
             }
         }
         latin1[j] = '\0';
-        Item result = make_string_item(latin1, j);
+        Item result = make_buffer_content_string_item(latin1, j, true, ascii_only);
         mem_free(latin1);
         return result;
     }
@@ -1293,21 +1341,24 @@ extern "C" Item js_buffer_toString(Item buf, Item encoding, Item start_item, Ite
         // worst case UTF-8: 3 bytes per code point (BMP), 4 for surrogates
         char* utf8 = (char*)mem_alloc(pairs * 3 + 1, MEM_CAT_JS_RUNTIME);
         int j = 0;
+        bool ascii_only = true;
         for (int i = 0; i < pairs; i++) {
             uint16_t cp = (uint16_t)(slice[i * 2] | (slice[i * 2 + 1] << 8));
             if (cp < 0x80) {
                 utf8[j++] = (char)cp;
             } else if (cp < 0x800) {
+                ascii_only = false;
                 utf8[j++] = (char)(0xC0 | (cp >> 6));
                 utf8[j++] = (char)(0x80 | (cp & 0x3F));
             } else {
+                ascii_only = false;
                 utf8[j++] = (char)(0xE0 | (cp >> 12));
                 utf8[j++] = (char)(0x80 | ((cp >> 6) & 0x3F));
                 utf8[j++] = (char)(0x80 | (cp & 0x3F));
             }
         }
         utf8[j] = '\0';
-        Item result = make_string_item(utf8, j);
+        Item result = make_buffer_content_string_item(utf8, j, true, ascii_only);
         mem_free(utf8);
         return result;
     }

@@ -225,6 +225,8 @@ struct JsFuncCollected {
     int reuse_env_slot_count;        // v16: slot count when reusing parent env
     bool has_parent_env_link;        // v29: scope env slot 0 stores parent env pointer (for mixed transitive)
     bool parent_env_link_uses_grandparent; // parent link should store parent's parent env
+    bool closure_env_has_parent_link; // copied closure env carries direct parent scope_env for mixed loop captures
+    int closure_env_parent_link_slot; // slot in copied closure env holding direct parent scope_env
     // Phase 4: Type inference results
     TypeId param_types[16];         // inferred parameter types
     TypeId return_type;             // inferred return type

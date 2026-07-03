@@ -1384,6 +1384,18 @@ static bool js_eval_source_is_v8_native_probe(String* code_str, bool* result_val
 extern "C" void js_eval_source_push(Item filename, Item source,
                                     int64_t line_offset, int64_t column_offset);
 extern "C" void js_eval_source_pop(void);
+extern "C" int js_parse_error_get(int64_t* out_row, int64_t* out_col,
+                                  char* out_message, int64_t out_message_size);
+
+static Item js_eval_parse_error_message(void) {
+    char message[128];
+    message[0] = '\0';
+    if (!js_parse_error_get(NULL, NULL, message, sizeof(message)) ||
+        message[0] == '\0') {
+        return (Item){.item = s2it(heap_create_name("Invalid eval source", 19))};
+    }
+    return (Item){.item = s2it(heap_create_name(message, strlen(message)))};
+}
 
 extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
                                               Item filename_item,
@@ -1658,7 +1670,9 @@ extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
         if (!js_transpiler_parse(tp, source, source_len)) {
             log_error("js-eval: parse failed for direct script");
             js_transpiler_destroy(tp);
-            js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid eval source", 19))});
+            // Dynamic eval surfaces parser diagnostics through SyntaxError;
+            // the REPL uses the same location to render the source caret.
+            js_throw_syntax_error(js_eval_parse_error_message());
             if (has_eval_source) js_eval_source_pop();
             return ItemNull;
         }

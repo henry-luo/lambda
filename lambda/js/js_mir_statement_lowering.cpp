@@ -871,6 +871,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                                 else if (ctor->name->len == 11 && strncmp(ctor->name->chars, "Uint16Array", 11) == 0) ta_type = JS_TYPED_UINT16;
                                 else if (ctor->name->len == 10 && strncmp(ctor->name->chars, "Uint8Array", 10) == 0) ta_type = JS_TYPED_UINT8;
                                 else if (ctor->name->len == 17 && strncmp(ctor->name->chars, "Uint8ClampedArray", 17) == 0) ta_type = JS_TYPED_UINT8_CLAMPED;
+                                else if (ctor->name->len == 12 && strncmp(ctor->name->chars, "Float16Array", 12) == 0) ta_type = JS_TYPED_FLOAT16;
                                 else if (ctor->name->len == 12 && strncmp(ctor->name->chars, "Float64Array", 12) == 0) ta_type = JS_TYPED_FLOAT64;
                                 else if (ctor->name->len == 12 && strncmp(ctor->name->chars, "Float32Array", 12) == 0) ta_type = JS_TYPED_FLOAT32;
                                 if (ta_type >= 0) {
@@ -1276,6 +1277,17 @@ static void jm_init_if_clause_function_binding(JsMirTranspiler* mt, JsAstNode* s
     jm_scope_env_mark_and_writeback(mt, vname, fn_reg);
 }
 
+static void jm_init_block_function_bindings(JsMirTranspiler* mt, JsBlockNode* blk) {
+    if (!mt || !blk) return;
+    for (JsAstNode* s = blk->statements; s; s = s->next) {
+        if (s->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+        // Block function declarations are visible from the start of their
+        // block; initializing only at the textual declaration loses callbacks
+        // referenced by earlier sibling functions.
+        jm_init_if_clause_function_binding(mt, s);
+    }
+}
+
 // transpile one if-branch body with the same scope/TDZ handling as the inline
 // consequent/alternate paths below (used by the constant-folded dead-branch path).
 static void jm_transpile_if_branch(JsMirTranspiler* mt, JsAstNode* branch) {
@@ -1284,6 +1296,7 @@ static void jm_transpile_if_branch(JsMirTranspiler* mt, JsAstNode* branch) {
         jm_push_scope(mt);
         jm_init_block_tdz(mt, branch);
         JsBlockNode* blk = (JsBlockNode*)branch;
+        jm_init_block_function_bindings(mt, blk);
         JsAstNode* s = blk->statements;
         while (s) { jm_transpile_statement(mt, s); s = s->next; }
         jm_pop_scope(mt);
@@ -1369,6 +1382,7 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
             jm_push_scope(mt);
             jm_init_block_tdz(mt, if_node->consequent);  // v20 TDZ
             JsBlockNode* blk = (JsBlockNode*)if_node->consequent;
+            jm_init_block_function_bindings(mt, blk);
             JsAstNode* s = blk->statements;
             while (s) { jm_transpile_statement(mt, s); s = s->next; }
             jm_pop_scope(mt);
@@ -1398,6 +1412,7 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
             jm_push_scope(mt);
             jm_init_block_tdz(mt, if_node->alternate);  // v20 TDZ
             JsBlockNode* blk = (JsBlockNode*)if_node->alternate;
+            jm_init_block_function_bindings(mt, blk);
             JsAstNode* s = blk->statements;
             while (s) { jm_transpile_statement(mt, s); s = s->next; }
             jm_pop_scope(mt);
@@ -1677,6 +1692,10 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     }
 
     jm_push_scope(mt);
+    int saved_loop_scope_depth = mt->loop_scope_depth;
+    // normal for-loops need a lexical boundary too; without it, closures made
+    // in the loop treat enclosing block lets as per-iteration loop bindings.
+    mt->loop_scope_depth = mt->scope_depth;
 
     // Init let/const declarations inside the for scope.
     if (for_node->init && init_is_lexical_decl) {
@@ -1974,6 +1993,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
 
     if (mt->iteration_depth > 0) mt->iteration_depth--;
     if (mt->loop_depth > 0) mt->loop_depth--;
+    mt->loop_scope_depth = saved_loop_scope_depth;
     jm_pop_scope(mt);
 }
 
@@ -2565,6 +2585,7 @@ static bool jm_ctor_name_is_builtin_collision(const char* name, int len) {
                    strncmp(name, "TextDecoder", 11) == 0;
         case 12:
             return strncmp(name, "Float64Array", 12) == 0 ||
+                   strncmp(name, "Float16Array", 12) == 0 ||
                    strncmp(name, "Float32Array", 12) == 0;
         case 14:
             return strncmp(name, "ReferenceError", 14) == 0 ||
@@ -2667,8 +2688,9 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     else if (ctor_len == 11 && strncmp(ctor_name, "Uint16Array", 11) == 0) { typed_array_type = 3; is_builtin = true; }
     else if (ctor_len == 10 && strncmp(ctor_name, "Uint8Array", 10) == 0) { typed_array_type = 1; is_builtin = true; }
     else if (ctor_len == 17 && strncmp(ctor_name, "Uint8ClampedArray", 17) == 0) { typed_array_type = JS_TYPED_UINT8_CLAMPED; is_builtin = true; }
-    else if (ctor_len == 12 && strncmp(ctor_name, "Float64Array", 12) == 0) { typed_array_type = 7; is_builtin = true; }
-    else if (ctor_len == 12 && strncmp(ctor_name, "Float32Array", 12) == 0) { typed_array_type = 6; is_builtin = true; }
+    else if (ctor_len == 12 && strncmp(ctor_name, "Float16Array", 12) == 0) { typed_array_type = JS_TYPED_FLOAT16; is_builtin = true; }
+    else if (ctor_len == 12 && strncmp(ctor_name, "Float64Array", 12) == 0) { typed_array_type = JS_TYPED_FLOAT64; is_builtin = true; }
+    else if (ctor_len == 12 && strncmp(ctor_name, "Float32Array", 12) == 0) { typed_array_type = JS_TYPED_FLOAT32; is_builtin = true; }
     else if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) { is_arraybuffer = true; is_builtin = true; }
     else if (ctor_len == 17 && strncmp(ctor_name, "SharedArrayBuffer", 17) == 0) { is_sharedarraybuffer = true; is_builtin = true; }
     else if (ctor_len == 8 && strncmp(ctor_name, "DataView", 8) == 0) { is_dataview = true; is_builtin = true; }
@@ -5938,6 +5960,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         jm_push_scope(mt);
         jm_init_block_tdz(mt, stmt);  // v20 TDZ
         JsBlockNode* blk = (JsBlockNode*)stmt;
+        jm_init_block_function_bindings(mt, blk);
         jm_transpile_statement_list_with_using(mt, blk->statements);
         jm_pop_scope(mt);
 

@@ -75,11 +75,43 @@ static void jm_name_set_add_ref(struct hashmap* set, const char* name, JsIdentif
     hashmap_set(set, &e);
 }
 
+static void jm_name_set_add_binding(struct hashmap* set, const char* name, JsAstNode* binding_node) {
+    JsNameSetEntry e;
+    memset(&e, 0, sizeof(e));
+    snprintf(e.name, sizeof(e.name), "%s", name);
+    if (binding_node && !ts_node_is_null(binding_node->node)) {
+        e.binding_start = ts_node_start_byte(binding_node->node);
+        e.binding_end = ts_node_end_byte(binding_node->node);
+    }
+    JsNameSetEntry* existing = (JsNameSetEntry*)hashmap_get(set, &e);
+    if (existing) {
+        if ((existing->binding_start == 0 && existing->binding_end == 0) &&
+            (e.binding_start != 0 || e.binding_end != 0)) {
+            existing->binding_start = e.binding_start;
+            existing->binding_end = e.binding_end;
+        }
+        return;
+    }
+    hashmap_set(set, &e);
+}
+
 bool jm_name_set_has(struct hashmap* set, const char* name) {
     JsNameSetEntry key;
     memset(&key, 0, sizeof(key));
     snprintf(key.name, sizeof(key.name), "%s", name);
     return hashmap_get(set, &key) != NULL;
+}
+
+static bool jm_ref_is_local_binding(struct hashmap* locals, JsNameSetEntry* ref) {
+    if (!locals || !ref) return false;
+    JsNameSetEntry* local = (JsNameSetEntry*)hashmap_get(locals, ref);
+    if (!local) return false;
+    if ((local->binding_start == 0 && local->binding_end == 0) ||
+        (ref->binding_start == 0 && ref->binding_end == 0)) {
+        return true;
+    }
+    return local->binding_start == ref->binding_start &&
+        local->binding_end == ref->binding_end;
 }
 
 // Forward declare
@@ -1136,7 +1168,15 @@ void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_on
                 // plain identifier: for (s of arr) or for (let/const s of arr)
                 // When var_only, skip let/const loop variables (they're block-scoped)
                 if (!var_only || fo->kind == 0) {
-                    jm_collect_pattern_names(fo->left, locals);
+                    if (fo->kind == JS_VAR_LET || fo->kind == JS_VAR_CONST) {
+                        JsIdentifierNode* id = (JsIdentifierNode*)fo->left;
+                        char name[128];
+                        snprintf(name, sizeof(name), "_js_%.*s",
+                            (int)id->name->len, id->name->chars);
+                        jm_name_set_add_binding(locals, name, fo->left);
+                    } else {
+                        jm_collect_pattern_names(fo->left, locals);
+                    }
                 }
             } else if (fo->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
                 JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)fo->left;
@@ -1721,7 +1761,9 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     while (hashmap_iter(refs, &iter, &item)) {
         JsNameSetEntry* ref = (JsNameSetEntry*)item;
         if (jm_name_set_has(params, ref->name)) continue;    // local param
-        if (jm_name_set_has(locals, ref->name)) continue;    // local var
+        // for-of/in lexical heads are block-scoped; a same-named loop variable
+        // must not mask an earlier outer binding captured before that block.
+        if (jm_ref_is_local_binding(locals, ref)) continue;  // local var
         if (strcmp(ref->name, "_js_new.target") == 0) continue; // handled by arrow lexical capture below
         // NFE self-reference: check before outer_scope guard since NFE name
         // is not in outer scope but still needs to be captured
