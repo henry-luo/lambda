@@ -1561,10 +1561,23 @@ editor-4c-view: build
 	echo "editor-4c-view: $$PASS/$$TOTAL passed"; \
 	if [ $$FAIL -gt 0 ]; then exit 1; fi
 
-# Stage 4C — full editor conformance: Phase A (js breadth) + Phase B (view depth).
-editor-4c: editor-4c-js editor-4c-view
+# Stage 4C Milestone 3 — parity report: cross-check the Radiant Phase-A pass-set
+# against the vitest/jsdom oracle (the editor's own suite under Node). Runs
+# Phase A (via run-phase-a.mjs) AND a fresh vitest oracle, reconciles per group,
+# writes vibe/editing/Stage4C_Parity_Report.md, and exits non-zero on any
+# unexplained divergence. React `.test.tsx` are the only intentional exclusion.
+editor-4c-parity: build
+	@echo "Running Stage 4C parity report (Radiant Phase-A vs vitest/jsdom oracle)..."
 	@echo "=============================================================="
-	@echo "Stage 4C complete: Phase A (lambda.exe js) + Phase B (lambda.exe view + event_sim) both green."
+	@cd test/editor-js && node tools/parity-report.mjs --refresh-oracle
+	@echo "=============================================================="
+
+# Stage 4C — full editor conformance: parity (Phase A breadth + jsdom oracle
+# cross-check) + Phase B (view depth). Parity subsumes the Phase-A run, so
+# `editor-4c-js` is only needed for a quick Phase-A-only pass.
+editor-4c: editor-4c-parity editor-4c-view
+	@echo "=============================================================="
+	@echo "Stage 4C complete: parity (Phase A + jsdom oracle) + Phase B (view + event_sim) all green."
 
 # Save/check/diff layout suite snapshots for regression detection outside baseline
 layout-snapshot:

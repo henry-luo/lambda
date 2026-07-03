@@ -44,6 +44,21 @@ set -e
 TEST_TIME=$(date +%s)
 echo "Tests took $((TEST_TIME - BUILD_TIME))s"
 
+# Stage 4C editor conformance — Phase A breadth + vitest/jsdom parity report
+# (headless: node + esbuild + lambda.exe js + jsdom) and Phase B depth
+# (lambda.exe view --headless + event_sim). `make editor-4c` = parity + view.
+echo ""
+echo "--- Running Stage 4C editor conformance (make editor-4c) ---"
+set +e
+( cd test/editor-js && npm install ) >> test_output.txt 2>&1
+make editor-4c 2>&1 | tee -a test_output.txt
+EDITOR4C_EXIT=${PIPESTATUS[0]}
+set -e
+EDITOR4C_TIME=$(date +%s)
+echo "Stage 4C took $((EDITOR4C_TIME - TEST_TIME))s (exit $EDITOR4C_EXIT)"
+# Fold Stage 4C into the overall result (only downgrade a passing run).
+if [ $TEST_EXIT -eq 0 ] && [ $EDITOR4C_EXIT -ne 0 ]; then TEST_EXIT=$EDITOR4C_EXIT; fi
+
 # Summary
 TOTAL_TIME=$((TEST_TIME - START_TIME))
 echo ""
