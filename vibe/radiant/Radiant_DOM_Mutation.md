@@ -515,6 +515,10 @@ Verification:
   incremental while preserving unrelated focused state.
 - **Implemented:** add an overflow/batch mutation test that keeps focus/state on
   connected nodes.
+- **Implemented:** add a stylesheet-mutation fallback test that forces retained
+  full layout and verifies connected form state is rebound.
+- **Implemented:** add a `replaceChild` notification test that verifies
+  reconciled DOM reflects the replacement and remains incremental.
 
 ## 9. Test Strategy
 
@@ -532,21 +536,24 @@ assertions are useful, but not sufficient for the new contract:
 
 ### 9.1 C++ StateStore Unit Tests
 
-Pending: add focused unit tests for the rebind/prune helpers before relying only
-on UI fixtures. This is deferred because `state_store.cpp` currently pulls in
-state-machine, render-map, clipboard, and GLFW dependencies, so a clean unit
-target needs either a smaller retention helper boundary or a dedicated test
-adapter. These tests should create a small DOM tree and DocState, then exercise:
+Implemented initial dedicated unit target: `test_state_store_gtest.exe`.
+The target uses real `state_store.cpp` against a synthetic retained DOM tree and
+a narrow adapter for unexercised state-machine/rendering/clipboard hooks.
 
-- connected-node `view_state_map` entries survive a simulated full reflow;
+Covered:
+
+- connected-node `view_state_map` entries survive simulated fallback pruning;
 - removed-subtree view state is pruned;
 - `state_map` entries for connected nodes survive;
 - `state_map` entries for removed nodes are pruned;
-- focus/caret/selection anchors rebind when their DOM nodes survive;
-- `DragDropState` keeps `pending` / `active` / source id through rebind;
-- `DragDropState` clears only when the source node is removed.
+- `DragDropState` keeps the active source when only the drop target disappears;
+- `DragDropState` clears when the source node is removed.
 
-This layer should not depend on rendering pixels or event dispatch. It protects
+Still useful as a later expansion:
+
+- focus/caret/selection anchors rebind when their DOM nodes survive.
+
+This layer does not depend on rendering pixels or event dispatch. It protects
 the core state-retention invariant directly.
 
 ### 9.2 EventSim Harness Enhancements
@@ -579,13 +586,13 @@ Add fixtures under `test/ui` with matching `.html` and `.json` files:
 |---------|---------|----------------|
 | `dom_mutation_structural_css_retains_state` | Styled document inserts/removes a sibling node under simple selectors. | implemented; incremental reconcile, state snapshot before/after retained |
 | `dom_mutation_structural_css_risk_retained_full` | Styled document inserts before a `:first-child` match. | implemented; retained full layout with `structural-css-risk` |
-| `dom_mutation_stylesheet_fallback_retains_state` | Mutating a `<style>` element still needs broad recascade. | connected state retained even when layout scope is broad |
+| `dom_mutation_stylesheet_fallback_retains_state` | Mutating a `<style>` element still needs broad recascade. | implemented; retained full layout, connected form state retained |
 | `dom_mutation_innerhtml_parent_retains_child_prunes` | `innerHTML` replaces children but parent survives. | implemented; incremental reconcile, parent state retained, removed child state pruned |
 | `dom_mutation_textcontent_incremental` | Element `textContent` replaces children while unrelated focused state survives. | implemented; incremental reconcile, focus/form state retained |
 | `dom_mutation_textarea_defaultvalue_incremental` | `textarea.defaultValue` replaces child text while unrelated focused state survives. | implemented; incremental reconcile, focus/form state retained |
 | `dom_mutation_overflow_retained_full` | More mutation records than `DOM_JS_MUTATION_RECORD_CAP`. | retained full layout, connected focus/state survives |
 | `dom_mutation_retained_full_preserves_textarea_caret` | Textarea input mutates a sibling stylesheet and forces broad retained full layout. | implemented; retained full layout, form state retained, typed value/caret preserved |
-| `dom_mutation_replacechild_notifies` | Regression for structural paths that pre-record details but miss final notify. | reconcile runs, layout/text reflects replacement |
+| `dom_mutation_replacechild_notifies` | Regression for structural paths that pre-record details but miss final notify. | implemented; incremental reconcile, layout/text reflects replacement |
 | `dom_mutation_dragover_retains_dragdrop` | During native drag, `dragover` mutates DOM. | implemented; mid-drag `drag_drop=true`, `drag_drop_active=true`, source retained, drop/dragend completes |
 | `dom_mutation_removed_source_clears_dragdrop` | Drag source is removed by handler. | implemented; drag/drop clears deliberately, no stale source pointer |
 
