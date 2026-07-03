@@ -2495,6 +2495,21 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             if (has_captures) {
             env_reg = MIR_reg(mt->ctx, closure_env_param_name, func);
             for (int i = 0; i < fc->capture_count; i++) {
+                if (!fc->captures[i].is_nfe_binding && fc->captures[i].scope_env_slot < 0 &&
+                    fc->parent_index >= 0 && fc->parent_index < mt->func_count) {
+                    JsFuncCollected* parent_fc = &mt->func_entries[fc->parent_index];
+                    int parent_normal_limit = parent_fc->scope_env_normal_count > 0 ?
+                        parent_fc->scope_env_normal_count : parent_fc->scope_env_count;
+                    for (int ps = 0; ps < parent_normal_limit; ps++) {
+                        if (parent_fc->scope_env_names &&
+                            strcmp(fc->captures[i].name, parent_fc->scope_env_names[ps]) == 0) {
+                            // resolve propagated captures before dense fallback;
+                            // appended NFE slots are not capture cells.
+                            fc->captures[i].scope_env_slot = ps;
+                            break;
+                        }
+                    }
+                }
                 // Skip captures that are MCONST_MODVAR (IIFE-promoted vars):
                 // For PER-CLOSURE envs (scope_env_slot < 0), the env holds stale
                 // snapshots, so module vars should be read live via js_get_module_var.
