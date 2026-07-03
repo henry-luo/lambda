@@ -47,6 +47,7 @@ extern NamePool* module_mir_name_pools[];
 extern Pool* module_mir_ast_pools[];
 extern char* module_mir_source_buffers[];
 extern int module_mir_context_count;
+void* jm_build_js_debug_info(JsMirTranspiler* mt, const char* filename);
 
 typedef enum JsMirReferenceKind {
     JS_MIR_REF_INVALID = 0,

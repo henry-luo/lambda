@@ -1009,8 +1009,6 @@ extern Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, It
 
 // v24: strict mode flag setter (js_runtime.cpp)
 extern void js_set_strict_mode(int64_t strict);
-extern int64_t js_runtime_call_frame_push_name(const char* name, int64_t name_len);
-extern void js_runtime_call_frame_pop_guarded(int64_t pushed);
 
 // with-statement scope support (js_globals.cpp)
 extern void js_with_push(Item obj);
@@ -1651,8 +1649,6 @@ JitImport jit_runtime_imports[] = {
     {"js_args_save", FPTR(js_args_save)},
     {"js_args_restore", FPTR(js_args_restore)},
     {"js_call_function", FPTR(js_call_function)},
-    {"js_runtime_call_frame_push_name", FPTR(js_runtime_call_frame_push_name)},
-    {"js_runtime_call_frame_pop_guarded", FPTR(js_runtime_call_frame_pop_guarded)},
     {"js_apply_function", FPTR(js_apply_function)},
     {"js_apply_constructor", FPTR(js_apply_constructor)},
     {"js_new_function_from_string", FPTR(js_new_function_from_string)},

@@ -1,4 +1,5 @@
 #include "js_runtime_internal.hpp"
+#include "../lambda-error.h"
 
 JsRuntimeState js_runtime_state;
 extern __thread EvalContext* context;
@@ -12,24 +13,11 @@ static bool js_eval_source_compact_stack[JS_EVAL_SOURCE_STACK_MAX];
 static int js_eval_source_stack_depth = 0;
 static bool js_eval_source_roots_registered = false;
 
-#define JS_RUNTIME_CALL_STACK_MAX 256
-static Item js_runtime_call_stack[JS_RUNTIME_CALL_STACK_MAX];
-static Item js_runtime_call_stack_filename[JS_RUNTIME_CALL_STACK_MAX];
-static int js_runtime_call_stack_depth = 0;
-static bool js_runtime_call_stack_roots_registered = false;
-
 static void js_eval_source_register_roots(void) {
     if (js_eval_source_roots_registered) return;
     heap_register_gc_root_range((uint64_t*)js_eval_source_filename_stack, JS_EVAL_SOURCE_STACK_MAX);
     heap_register_gc_root_range((uint64_t*)js_eval_source_code_stack, JS_EVAL_SOURCE_STACK_MAX);
     js_eval_source_roots_registered = true;
-}
-
-static void js_runtime_call_stack_register_roots(void) {
-    if (js_runtime_call_stack_roots_registered) return;
-    heap_register_gc_root_range((uint64_t*)js_runtime_call_stack, JS_RUNTIME_CALL_STACK_MAX);
-    heap_register_gc_root_range((uint64_t*)js_runtime_call_stack_filename, JS_RUNTIME_CALL_STACK_MAX);
-    js_runtime_call_stack_roots_registered = true;
 }
 
 static void js_eval_source_push_mode(Item filename, Item source,
@@ -81,50 +69,6 @@ static bool js_eval_source_current(Item* out_filename, Item* out_source,
     if (out_column_offset) *out_column_offset = js_eval_source_column_offset_stack[idx];
     if (out_compact_stack) *out_compact_stack = js_eval_source_compact_stack[idx];
     return true;
-}
-
-extern "C" int64_t js_runtime_call_frame_push(Item func_item) {
-    js_runtime_call_stack_register_roots();
-    if (js_runtime_call_stack_depth >= JS_RUNTIME_CALL_STACK_MAX) return 0;
-    if (get_type_id(func_item) != LMD_TYPE_FUNC) return 0;
-    Item filename = (Item){.item = ITEM_JS_UNDEFINED};
-    JsFunction* fn = (JsFunction*)func_item.function;
-    if (fn && fn->vm_stack_filename) {
-        filename = (Item){.item = s2it(fn->vm_stack_filename)};
-    } else {
-        Item current_filename = ItemNull;
-        if (!js_eval_source_current(&current_filename, NULL, NULL, NULL, NULL)) return 0;
-        filename = current_filename;
-    }
-    if (get_type_id(filename) != LMD_TYPE_STRING) return 0;
-    int idx = js_runtime_call_stack_depth++;
-    js_runtime_call_stack[idx] = func_item;
-    js_runtime_call_stack_filename[idx] = filename;
-    return 1;
-}
-
-extern "C" int64_t js_runtime_call_frame_push_name(const char* name, int64_t name_len) {
-    js_runtime_call_stack_register_roots();
-    if (js_runtime_call_stack_depth >= JS_RUNTIME_CALL_STACK_MAX) return 0;
-    Item current_filename = ItemNull;
-    if (!js_eval_source_current(&current_filename, NULL, NULL, NULL, NULL)) return 0;
-    if (get_type_id(current_filename) != LMD_TYPE_STRING) return 0;
-    if (!name || name_len < 0) name_len = 0;
-    int idx = js_runtime_call_stack_depth++;
-    js_runtime_call_stack[idx] = (Item){.item = s2it(heap_create_name(name, (size_t)name_len))};
-    js_runtime_call_stack_filename[idx] = current_filename;
-    return 1;
-}
-
-extern "C" void js_runtime_call_frame_pop(void) {
-    if (js_runtime_call_stack_depth <= 0) return;
-    int idx = --js_runtime_call_stack_depth;
-    js_runtime_call_stack[idx] = ItemNull;
-    js_runtime_call_stack_filename[idx] = ItemNull;
-}
-
-extern "C" void js_runtime_call_frame_pop_guarded(int64_t pushed) {
-    if (pushed) js_runtime_call_frame_pop();
 }
 
 static int js_eval_source_first_line(String* source, const char** out_line) {
@@ -803,6 +747,160 @@ static Item js_error_default_stack_string(Item error_name, Item message) {
     return (Item){.item = s2it(heap_create_name(buf, len))};
 }
 
+static bool js_stack_raw_name_visible(const char* raw) {
+    if (!raw || !raw[0]) return false;
+    if (strcmp(raw, "js_main") == 0 || strcmp(raw, "main") == 0) return false;
+    if (strncmp(raw, "js_capture_", 11) == 0) return false;
+    return true;
+}
+
+static void js_stack_display_name(const char* raw, const char** out_name, int* out_len) {
+    const char* name = raw ? raw : "<anonymous>";
+    int len = (int)strlen(name);
+    if (strncmp(name, "_js_", 4) == 0) {
+        name += 4;
+        len -= 4;
+    }
+    if (len > 2 && name[len - 2] == '_' && name[len - 1] == 'n') {
+        len -= 2;
+    }
+    int end = len;
+    while (end > 0 && name[end - 1] >= '0' && name[end - 1] <= '9') end--;
+    if (end > 0 && end < len && name[end - 1] == '_') {
+        len = end - 1;
+    }
+    if (len <= 0) {
+        name = "<anonymous>";
+        len = 11;
+    }
+    *out_name = name;
+    *out_len = len;
+}
+
+static String* js_stack_current_filename(void) {
+    if (context && context->current_file) {
+        return heap_create_name(context->current_file, strlen(context->current_file));
+    }
+    Item filename_item = ItemNull;
+    if (js_eval_source_current(&filename_item, NULL, NULL, NULL, NULL) &&
+        get_type_id(filename_item) == LMD_TYPE_STRING) {
+        return it2s(filename_item);
+    }
+    return NULL;
+}
+
+static bool js_stack_function_name_matches(Item fn_item, StackFrame* frame) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC || !frame || !frame->function_name) return false;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    if (!fn || !fn->name || fn->name->len <= 0) return false;
+
+    const char* display = NULL;
+    int display_len = 0;
+    js_stack_display_name(frame->function_name, &display, &display_len);
+    return display_len == (int)fn->name->len &&
+        strncmp(display, fn->name->chars, (size_t)display_len) == 0;
+}
+
+static int js_stack_append_frame_text(StrBuf* sb, StackFrame* frame, bool include_prefix) {
+    if (!sb || !frame || !js_stack_raw_name_visible(frame->function_name)) return 0;
+    if (frame->is_native) return 0;
+
+    const char* name = NULL;
+    int name_len = 0;
+    js_stack_display_name(frame->function_name, &name, &name_len);
+
+    const char* file_chars = NULL;
+    int file_len = 0;
+    if (frame->location.file) {
+        file_chars = frame->location.file;
+        file_len = (int)strlen(file_chars);
+    } else {
+        String* cur_file = js_stack_current_filename();
+        if (cur_file) {
+            file_chars = cur_file->chars;
+            file_len = (int)cur_file->len;
+        }
+    }
+    if (!file_chars || file_len <= 0) {
+        file_chars = "<anonymous>";
+        file_len = 11;
+    }
+
+    uint32_t line = frame->location.line > 0 ? frame->location.line : 1;
+    if (include_prefix) strbuf_append_str(sb, "    at ");
+    if (name_len > 0) {
+        strbuf_append_str_n(sb, name, name_len);
+        strbuf_append_str(sb, " (");
+        strbuf_append_str_n(sb, file_chars, file_len);
+        strbuf_append_char(sb, ':');
+        strbuf_append_int(sb, (int)line);
+        strbuf_append_str(sb, ":1)");
+    } else {
+        strbuf_append_str_n(sb, file_chars, file_len);
+        strbuf_append_char(sb, ':');
+        strbuf_append_int(sb, (int)line);
+        strbuf_append_str(sb, ":1");
+    }
+    return 1;
+}
+
+static Item js_stack_frame_string(StackFrame* frame) {
+    StrBuf* sb = strbuf_new_cap(128);
+    if (!sb) return (Item){.item = ITEM_JS_UNDEFINED};
+    if (!js_stack_append_frame_text(sb, frame, false)) {
+        strbuf_free(sb);
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    Item result = (Item){.item = s2it(heap_create_name(sb->str, sb->length))};
+    strbuf_free(sb);
+    return result;
+}
+
+static StackFrame* js_capture_native_stack_frames(void) {
+    if (!context || !context->debug_info) return NULL;
+    // LambdaJS stack traces reuse Lambda's zero-normal-overhead frame walk:
+    // capture only while constructing an Error stack, never on successful calls.
+    return err_capture_stack_trace(context->debug_info, 64);
+}
+
+static Item js_error_native_stack_string(Item error_name, Item message, Item stack_start_fn) {
+    StackFrame* trace = js_capture_native_stack_frames();
+    if (!trace) return (Item){.item = ITEM_JS_UNDEFINED};
+
+    Item header = js_error_default_stack_string(error_name, message);
+    String* header_str = get_type_id(header) == LMD_TYPE_STRING ? it2s(header) : NULL;
+    StrBuf* sb = strbuf_new_cap(256);
+    if (!sb) {
+        err_free_stack_trace(trace);
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    if (header_str) strbuf_append_str_n(sb, header_str->chars, header_str->len);
+
+    int frame_count = 0;
+    bool trimming = get_type_id(stack_start_fn) == LMD_TYPE_FUNC;
+    for (StackFrame* frame = trace; frame; frame = frame->next) {
+        if (trimming) {
+            if (js_stack_function_name_matches(stack_start_fn, frame)) trimming = false;
+            continue;
+        }
+        int before = sb->length;
+        strbuf_append_char(sb, '\n');
+        if (js_stack_append_frame_text(sb, frame, true)) {
+            frame_count++;
+        } else {
+            sb->length = before;
+            sb->str[before] = '\0';
+        }
+    }
+
+    Item result = frame_count > 0
+        ? (Item){.item = s2it(heap_create_name(sb->str, sb->length))}
+        : (Item){.item = ITEM_JS_UNDEFINED};
+    strbuf_free(sb);
+    err_free_stack_trace(trace);
+    return result;
+}
+
 static Item js_error_prepare_stack_trace(Item error_obj) {
     Item error_name = (Item){.item = s2it(heap_create_name("Error", 5))};
     Item error_ctor = js_get_constructor(error_name);
@@ -812,35 +910,17 @@ static Item js_error_prepare_stack_trace(Item error_obj) {
     if (get_type_id(prepare) != LMD_TYPE_FUNC) return (Item){.item = ITEM_JS_UNDEFINED};
 
     Item frames = js_array_new(0);
-    for (int i = js_runtime_call_stack_depth - 1; i >= 0; i--) {
-        Item fn_item = js_runtime_call_stack[i];
-        Item filename_item = js_runtime_call_stack_filename[i];
-        if (get_type_id(filename_item) != LMD_TYPE_STRING) continue;
-        JsFunction* fn = get_type_id(fn_item) == LMD_TYPE_FUNC ? (JsFunction*)fn_item.function : NULL;
-        String* filename = it2s(filename_item);
-        if (!filename) continue;
-        const char* name = NULL;
-        int name_len = 0;
-        if (fn && fn->name && fn->name->len > 0) {
-            name = fn->name->chars;
-            name_len = (int)fn->name->len;
-        } else if (get_type_id(fn_item) == LMD_TYPE_STRING) {
-            String* ns = it2s(fn_item);
-            if (ns) {
-                name = ns->chars;
-                name_len = (int)ns->len;
-            }
+    StackFrame* trace = js_capture_native_stack_frames();
+    int frame_count = 0;
+    for (StackFrame* frame = trace; frame; frame = frame->next) {
+        Item frame_text = js_stack_frame_string(frame);
+        if (get_type_id(frame_text) == LMD_TYPE_STRING) {
+            js_array_push(frames, frame_text);
+            frame_count++;
         }
-        char buf[512];
-        int len = name_len > 0
-            ? snprintf(buf, sizeof(buf), "%.*s (%.*s:1:1)",
-                       name_len, name, (int)filename->len, filename->chars)
-            : snprintf(buf, sizeof(buf), "%.*s:1:1",
-                       (int)filename->len, filename->chars);
-        if (len < 0) len = 0;
-        if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
-        js_array_push(frames, (Item){.item = s2it(heap_create_name(buf, len))});
     }
+    if (trace) err_free_stack_trace(trace);
+    if (frame_count == 0) return (Item){.item = ITEM_JS_UNDEFINED};
 
     Item args[2] = { error_obj, frames };
     Item prepared = js_call_function(prepare, (Item){.item = ITEM_JS_UNDEFINED}, args, 2);
@@ -879,12 +959,15 @@ extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
             }
         }
     }
-    // Error.prepareStackTrace observes dynamic call frames; the older lexical
-    // fallback alone drops REPL-loaded call chains such as d -> c -> b -> a.
+    // Error stacks now use Lambda's JIT frame walk so normal calls avoid
+    // per-call push/pop bookkeeping; lexical source strings remain fallback.
     Item prepared_stack = js_error_prepare_stack_trace(obj);
+    Item native_stack = js_error_native_stack_string(name_val, message, (Item){.item = ITEM_JS_UNDEFINED});
     Item eval_stack = js_eval_source_stack_string(name_val, message);
     if (prepared_stack.item != ITEM_JS_UNDEFINED) {
         js_property_set(obj, stack_key, prepared_stack);
+    } else if (native_stack.item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj, stack_key, native_stack);
     } else if (eval_stack.item != ITEM_JS_UNDEFINED) {
         js_property_set(obj, stack_key, eval_stack);
     } else if (stack_str.item != ITEM_JS_UNDEFINED) {
@@ -952,11 +1035,14 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
         js_mark_non_enumerable(obj, name_key);
     }
     // Error.prepareStackTrace may test err instanceof SyntaxError, so typed
-    // errors must be linked to their prototype before invoking the hook.
+    // errors must be linked before invoking the native-stack-backed hook.
     Item prepared_stack = js_error_prepare_stack_trace(obj);
+    Item native_stack = js_error_native_stack_string(error_name, message, (Item){.item = ITEM_JS_UNDEFINED});
     Item eval_stack = js_eval_source_stack_string(error_name, message);
     if (prepared_stack.item != ITEM_JS_UNDEFINED) {
         js_property_set(obj, stack_key, prepared_stack);
+    } else if (native_stack.item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj, stack_key, native_stack);
     } else if (eval_stack.item != ITEM_JS_UNDEFINED) {
         js_property_set(obj, stack_key, eval_stack);
     } else if (stack_str.item != ITEM_JS_UNDEFINED) {
@@ -990,18 +1076,25 @@ extern "C" Item js_error_set_cause(Item error, Item options) {
 }
 
 // V8-specific: Error.captureStackTrace(targetObject[, constructorOpt])
-// Sets .stack property on targetObject. In our runtime, just a no-op stub
-// that sets an empty stack string to satisfy code that checks for .stack.
+// Captures from the native/JIT frame chain. constructorOpt trims through the
+// named function so Node's stackStartFn wrappers do not leak into .stack.
 extern "C" Item js_error_captureStackTrace(Item target, Item ctor) {
-    (void)ctor;
     if (get_type_id(target) == LMD_TYPE_MAP) {
         Item stack_key = (Item){.item = s2it(heap_create_name("stack", 5))};
-        // only set if not already present
-        bool found = false;
-        js_map_get_fast(target.map, "stack", 5, &found);
-        if (!found) {
-            js_property_set(target, stack_key, (Item){.item = s2it(heap_create_name("", 0))});
+        Item name = js_property_get(target, (Item){.item = s2it(heap_create_name("name", 4))});
+        if (get_type_id(name) != LMD_TYPE_STRING) {
+            name = (Item){.item = s2it(heap_create_name("Error", 5))};
         }
+        Item message = js_property_get(target, (Item){.item = s2it(heap_create_name("message", 7))});
+        if (get_type_id(message) != LMD_TYPE_STRING) {
+            message = (Item){.item = ITEM_JS_UNDEFINED};
+        }
+        Item stack = js_error_native_stack_string(name, message, ctor);
+        if (stack.item == ITEM_JS_UNDEFINED) {
+            stack = js_error_default_stack_string(name, message);
+        }
+        js_property_set(target, stack_key, stack);
+        js_runtime_make_non_enumerable(target, stack_key);
     }
     return make_js_undefined();
 }

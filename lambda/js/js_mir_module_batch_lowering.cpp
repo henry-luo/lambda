@@ -1,5 +1,6 @@
 #include "js_mir_internal.hpp"
 #include "../../lib/file.h"
+#include "../lambda-error.h"
 
 extern "C" void js_dynfunc_cache_reset(void);
 
@@ -19,6 +20,91 @@ int module_mir_context_count = 0;
 // Runtime context saved for use by js_new_function_from_string (new Function(...) support)
 Runtime* js_source_runtime = NULL;
 int js_dynamic_func_counter = 0;
+
+static int js_debug_func_name_cmp(const void *a, const void *b, void *udata) {
+    (void)udata;
+    return strcmp(*(const char**)a, *(const char**)b);
+}
+
+static uint64_t js_debug_func_name_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const char* name = *(const char**)item;
+    return hashmap_sip(name, strlen(name), seed0, seed1);
+}
+
+static void js_debug_func_name_entry_free(void* item) {
+    char** entry = (char**)item;
+    if (entry[0]) mem_free(entry[0]);
+    if (entry[1]) mem_free(entry[1]);
+}
+
+static char* js_debug_strdup(const char* s) {
+    if (!s) return NULL;
+    size_t len = strlen(s) + 1;
+    char* copy = (char*)mem_alloc(len, MEM_CAT_JS_RUNTIME);
+    if (copy) memcpy(copy, s, len);
+    return copy;
+}
+
+static char* js_debug_display_name(JsFuncCollected* fc) {
+    if (!fc) return js_debug_strdup("<anonymous>");
+    if (fc->node && fc->node->name && fc->node->name->len > 0) {
+        int len = (int)fc->node->name->len;
+        char* name = (char*)mem_alloc((size_t)len + 1, MEM_CAT_JS_RUNTIME);
+        if (!name) return NULL;
+        memcpy(name, fc->node->name->chars, (size_t)len);
+        name[len] = '\0';
+        return name;
+    }
+    const char* raw = fc->name;
+    if (strncmp(raw, "_js_", 4) == 0) raw += 4;
+    int len = (int)strlen(raw);
+    int end = len;
+    while (end > 0 && raw[end - 1] >= '0' && raw[end - 1] <= '9') end--;
+    if (end > 0 && end < len && raw[end - 1] == '_') len = end - 1;
+    if (len <= 0) return js_debug_strdup("<anonymous>");
+    char* name = (char*)mem_alloc((size_t)len + 1, MEM_CAT_JS_RUNTIME);
+    if (!name) return NULL;
+    memcpy(name, raw, (size_t)len);
+    name[len] = '\0';
+    return name;
+}
+
+static void js_debug_map_set(struct hashmap* map, const char* mir_name, const char* display_name) {
+    if (!map || !mir_name || !display_name) return;
+    char* entry[2] = { js_debug_strdup(mir_name), js_debug_strdup(display_name) };
+    if (!entry[0] || !entry[1]) {
+        if (entry[0]) mem_free(entry[0]);
+        if (entry[1]) mem_free(entry[1]);
+        return;
+    }
+    hashmap_set(map, entry);
+}
+
+void* jm_build_js_debug_info(JsMirTranspiler* mt, const char* filename) {
+    (void)filename;
+    if (!mt || !mt->ctx) return NULL;
+    struct hashmap* name_map = hashmap_new(sizeof(char*[2]), 64, 0, 0,
+        js_debug_func_name_hash, js_debug_func_name_cmp, js_debug_func_name_entry_free, NULL);
+    if (!name_map) return build_debug_info_table(mt->ctx, NULL);
+
+    for (int i = 0; i < mt->func_count; i++) {
+        JsFuncCollected* fc = &mt->func_entries[i];
+        char* display_name = js_debug_display_name(fc);
+        if (!display_name) continue;
+        js_debug_map_set(name_map, fc->name, display_name);
+        if (fc->has_native_version) {
+            char native_name[160];
+            snprintf(native_name, sizeof(native_name), "%s_n", fc->name);
+            js_debug_map_set(name_map, native_name, display_name);
+        }
+        mem_free(display_name);
+    }
+    js_debug_map_set(name_map, "js_main", "<module>");
+
+    void* debug_info = build_debug_info_table(mt->ctx, name_map);
+    hashmap_free(name_map);
+    return debug_info;
+}
 
 // Track the active MIR context during compilation/execution so that
 // batch timeout recovery (longjmp from SIGALRM) can finish the leaked context.

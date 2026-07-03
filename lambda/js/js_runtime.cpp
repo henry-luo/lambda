@@ -38,8 +38,6 @@ extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
 extern "C" Item js_symbol_well_known(Item name);
 extern "C" Item js_util_custom_promisify_args_symbol(void);
-extern "C" int64_t js_runtime_call_frame_push(Item func_item);
-extern "C" void js_runtime_call_frame_pop(void);
 extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
                                              Item filename_item,
                                              int64_t line_offset,
@@ -8645,7 +8643,6 @@ struct JsTemplateRegistryEntry {
 };
 
 static JsTemplateRegistryEntry* js_template_registry = NULL;
-static bool js_template_registry_atexit_registered = false;
 
 extern "C" void js_reset_template_registry(void) {
     JsTemplateRegistryEntry* entry = js_template_registry;
@@ -8680,12 +8677,6 @@ extern "C" Item js_build_template_object_cached(Item* cooked, Item* raw, int cou
         if (entry->site_id == site_id && entry->count == count) return entry->object;
     }
     Item obj = js_build_template_object(cooked, raw, count);
-    if (!js_template_registry_atexit_registered) {
-        // Tagged-template cache entries are native allocations; the last script
-        // in a process may exit without another batch reset to free them.
-        atexit(js_reset_template_registry);
-        js_template_registry_atexit_registered = true;
-    }
     JsTemplateRegistryEntry* entry = (JsTemplateRegistryEntry*)mem_calloc(1, sizeof(JsTemplateRegistryEntry), MEM_CAT_JS_RUNTIME);
     if (entry) {
         entry->site_id = site_id;
@@ -13169,11 +13160,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         }
         bool pushed_vm_stack_source = js_function_has_vm_stack_source(fn);
         if (pushed_vm_stack_source) js_function_push_vm_stack_source(fn);
-        // Error.stack needs the dynamic JS call chain; lexical stack strings
-        // cannot represent callbacks invoked by another function.
-        bool pushed_call_frame = js_runtime_call_frame_push(func_item) != 0;
         Item result = js_invoke_fn(fn, merged_args, total_argc);
-        if (pushed_call_frame) js_runtime_call_frame_pop();
         if (pushed_vm_stack_source) js_eval_source_pop();
         js_current_private_home_class = prev_private_home_class;
         js_current_private_home_class_index = prev_private_home_class_index;
@@ -13255,11 +13242,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     }
     bool pushed_vm_stack_source = js_function_has_vm_stack_source(fn);
     if (pushed_vm_stack_source) js_function_push_vm_stack_source(fn);
-    // Error.stack needs the dynamic JS call chain; lexical stack strings
-    // cannot represent callbacks invoked by another function.
-    bool pushed_call_frame = js_runtime_call_frame_push(func_item) != 0;
     Item result = js_invoke_fn(fn, args, arg_count);
-    if (pushed_call_frame) js_runtime_call_frame_pop();
     if (pushed_vm_stack_source) js_eval_source_pop();
     js_current_private_home_class = prev_private_home_class;
     js_current_private_home_class_index = prev_private_home_class_index;
@@ -33289,6 +33272,13 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox, Item options) {
     js_vm_swap_global_this(prev_global);
     js_vm_restore_context_bindings(sandbox, vm_bindings, vm_binding_count);
     js_set_prototype(sandbox, previous_proto);
+    if (get_type_id(result) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(result))) {
+        // VM contexts do not yet allocate separate Error prototypes; mark the
+        // result so host-realm instanceof checks still observe the realm split.
+        Item vm_error_key = (Item){.item = s2it(heap_create_name("__vm_context_error__", 20))};
+        js_property_set(result, vm_error_key, (Item){.item = b2it(true)});
+        js_mark_non_enumerable(result, vm_error_key);
+    }
     return result;
 }
 
