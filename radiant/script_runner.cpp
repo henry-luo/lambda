@@ -42,6 +42,7 @@
 #include "../lambda/network/network_resource_manager.h"
 
 extern "C" void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
+extern "C" bool js_dom_is_host_driven_loop(void);  // defined in lambda/js/js_dom.cpp
 
 #include <cstring>
 #include <cstdlib>
@@ -1993,11 +1994,25 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         log_error("execute_document_scripts: JS execution failed");
     } else {
         log_info("execute_document_scripts: JS execution completed successfully");
-        // Drain queued timers (setTimeout, setInterval).
-        // This runs all pending callbacks with a 5s watchdog timeout.
-        js_event_loop_drain();
-        log_mem_stage("js: after event loop drain");
-        log_info("execute_document_scripts: timer queue drained");
+        if (js_dom_is_host_driven_loop()) {
+            // A long-lived host (Radiant `view`) pumps the event loop AFTER it
+            // commits the first layout. Draining timers here — still inside the
+            // loader, before @font-face processing and the first layout pass —
+            // fires load-time setTimeout(0) callbacks against an uncommitted
+            // document, so geometry APIs (getBoundingClientRect) read zero boxes
+            // (e.g. an editor's post-mount overlay re-sync mis-anchors its table
+            // column resizers). Flush only microtasks and leave timers queued so
+            // they run post-commit with real geometry (browser semantics: a
+            // setTimeout(0) queued during load fires after layout).
+            js_microtask_flush();
+            log_info("execute_document_scripts: microtasks flushed; timers deferred to host loop");
+        } else {
+            // Static one-shot render (make layout, headless smoke): no host loop
+            // will pump later, so drain everything now with the 5s watchdog.
+            js_event_loop_drain();
+            log_mem_stage("js: after event loop drain");
+            log_info("execute_document_scripts: timer queue drained");
+        }
     }
 
     // Retain JS state on DomDocument for interactive event handler dispatch.

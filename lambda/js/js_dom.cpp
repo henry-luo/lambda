@@ -211,6 +211,20 @@ static Item js_document_fonts_value = {.item = ITEM_NULL};
 
 static __thread DomDocument* _js_current_document = nullptr;
 static __thread UiContext* _js_current_ui_context = nullptr;
+// True when a long-lived host (the Radiant `view` window / event_sim loop) owns
+// the reflow cycle and pumps the JS event loop across the document's lifetime.
+// In that mode geometry queries must NOT rebuild the view tree from under the
+// live renderer, and load-time setTimeout(0) callbacks are deferred to the
+// host's post-commit pump. The transient `lambda.exe js` document session leaves
+// this false and keeps the self-contained rebuild-on-demand behaviour.
+static __thread bool _js_host_driven_loop = false;
+
+extern "C" void js_dom_set_host_driven_loop(bool enabled) {
+    _js_host_driven_loop = enabled;
+}
+extern "C" bool js_dom_is_host_driven_loop(void) {
+    return _js_host_driven_loop;
+}
 // The "main" document — the one bound by js_dom_set_document at page load.
 // Foreign documents created via document.implementation.create*Document are
 // distinct: they have a null defaultView and getSelection() returns null per
@@ -430,6 +444,31 @@ static bool js_dom_ensure_layout_for_geometry(DomDocument* doc) {
     if (doc->view_tree && doc->view_tree->root &&
         doc->js_mutation_count == 0) {
         return true;
+    }
+
+    // Host-driven mode: the Radiant window/event_sim loop owns reflow and holds
+    // live pointers into doc->view_tree (renderer, hovered view, event dispatch).
+    // Tearing the tree down and rebuilding it here — synchronously, mid geometry
+    // query — frees view state out from under those holders (observed as a
+    // use-after-free in a timer callback touching a freed DomNode). The host
+    // already reflows after each DOM mutation, so hand back the committed tree's
+    // geometry as-is. It may be a mutation behind, but that is the same guarantee
+    // the renderer paints and it never crashes; callers that need pixel-fresh
+    // geometry run after the host's next reflow. Before commit there is no tree
+    // to read yet, so report whether one exists without forcing one.
+    if (js_dom_is_host_driven_loop()) {
+        return doc->view_tree && doc->view_tree->root;
+    }
+
+    // Transient `lambda.exe js` session: no host reflow loop exists, so the
+    // geometry query must build/refresh the view tree itself. Only do this once
+    // the initial layout has committed — load-time inline scripts run inside the
+    // document loader (before @font-face processing and the first
+    // layout_html_doc() pass), and rebuilding from there re-enters an unfinished
+    // load and crashes.
+    DocState* ds = doc->state ? (DocState*)doc->state : nullptr;
+    if (!ds || ds->lifecycle != DOC_LIFECYCLE_COMMITTED) {
+        return doc->view_tree && doc->view_tree->root;
     }
 
     if (doc->view_tree) {
@@ -1319,6 +1358,7 @@ void js_dom_register_named_elements(DomElement* root) {
 }
 
 static void js_dom_install_window_frames_global(void);
+static void js_dom_install_window_dialog_globals(void);
 
 // ============================================================================
 // DOM Context Management
@@ -1348,6 +1388,7 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         // install window.getSelection() global
         js_dom_selection_install_globals();
         js_dom_install_window_frames_global();
+        js_dom_install_window_dialog_globals();
         // install FormData constructor
         extern void js_formdata_install_globals(void);
         js_formdata_install_globals();
@@ -2275,6 +2316,57 @@ static void js_dom_install_window_frames_global(void) {
     if (get_type_id(window) == LMD_TYPE_MAP) {
         js_property_set(window, js_string_key("frames"), frames);
         js_property_set(window, js_string_key("length"), length_item);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Stage 4C Phase B: window.prompt() with a harness-settable response queue.
+// Headless `lambda.exe view` has no dialog UI, so event_sim seeds answers via
+// js_window_dialog_push_response() (the `set_prompt` event); each prompt() call
+// dequeues one. A NULL response models pressing Cancel → JS null. This lets
+// script editors that gate on window.prompt (link URL, mention name) run
+// end-to-end. FIFO; thread-local (one document per thread).
+// ---------------------------------------------------------------------------
+static __thread char* s_prompt_queue[32];
+static __thread int s_prompt_head = 0;
+static __thread int s_prompt_tail = 0;
+
+extern "C" void js_window_dialog_push_response(const char* value) {
+    int next = (s_prompt_tail + 1) % 32;
+    if (next == s_prompt_head) return;  // queue full — drop
+    s_prompt_queue[s_prompt_tail] = value ? mem_strdup(value, MEM_CAT_JS_RUNTIME) : NULL;
+    s_prompt_tail = next;
+}
+
+extern "C" void js_window_dialog_reset(void) {
+    while (s_prompt_head != s_prompt_tail) {
+        if (s_prompt_queue[s_prompt_head]) mem_free(s_prompt_queue[s_prompt_head]);
+        s_prompt_head = (s_prompt_head + 1) % 32;
+    }
+    s_prompt_head = 0;
+    s_prompt_tail = 0;
+}
+
+// window.prompt(message, default) — positional args (unused); returns the next
+// seeded response as a JS string, or null (empty queue / seeded Cancel).
+static Item js_window_prompt(Item message_item, Item default_item) {
+    (void)message_item; (void)default_item;
+    if (s_prompt_head == s_prompt_tail) return ItemNull;
+    char* r = s_prompt_queue[s_prompt_head];
+    s_prompt_head = (s_prompt_head + 1) % 32;
+    if (!r) return ItemNull;  // seeded Cancel
+    Item out = (Item){.item = s2it(heap_create_name(r))};
+    mem_free(r);
+    return out;
+}
+
+static void js_dom_install_window_dialog_globals(void) {
+    Item global = js_get_global_this();
+    Item fn = js_new_function((void*)js_window_prompt, 2);
+    js_property_set(global, js_string_key("prompt"), fn);
+    Item window = js_property_get(global, js_string_key("window"));
+    if (get_type_id(window) == LMD_TYPE_MAP) {
+        js_property_set(window, js_string_key("prompt"), fn);
     }
 }
 

@@ -1,0 +1,16 @@
+{
+  "name": "editor4c: mention toolbar inserts an inline mention atom via window.prompt",
+  "_note": "Phase B — mention gesture through window.prompt. The toolbar Insert-mention button calls `window.prompt('Mention:', 'alice')` then `cmdInsertInlineAtom(s, 'mention', [{name:'label', value:name}])`, inserting a selectable inline atom at the caret. `set_prompt` seeds the answer (headless has no dialog). Click into a paragraph to place the caret, seed the name, click the button → a `.rdt-mention` atom labeled with the seeded name appears. The seed doc has no mentions, so a count of 1 is unambiguous.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface p"}},
+    {"type": "wait", "ms": 80},
+    {"type": "set_prompt", "response": "bob"},
+    {"type": "click", "target": {"selector": "button.rdt-btn[title=\"Insert mention\"]"}},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface .rdt-mention"}, "equals": 1},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface .rdt-mention"}, "contains": "bob"}
+  ]
+}

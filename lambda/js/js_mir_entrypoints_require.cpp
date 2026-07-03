@@ -29,6 +29,7 @@
 
 int js_dynamic_import_suppress_module_drain = 0;
 extern "C" int js_batch_execution_mode = 0;
+extern "C" bool js_dom_is_host_driven_loop(void);
 extern "C" int js_process_current_exit_code(void);
 extern "C" bool js_process_exit_requested(void);
 extern "C" void js_process_mark_fatal_exit(int code);
@@ -1013,14 +1014,23 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     // Dynamic import loads modules from inside an already-running script; if the
     // nested module drains the global microtask queue, outer async-generator
     // Promise jobs can run with the imported module's temporary context active.
-    if (js_dynamic_import_suppress_module_drain <= 0) {
-        js_event_loop_drain();
-    }
-    if (runtime->dom_doc) {
-        // Headless Radiant layout has no frame clock; flush a bounded number
-        // of requestAnimationFrame ticks before the JS heap/context are
-        // restored so DOM callbacks can still allocate wrapper objects.
-        js_animation_frame_drain(64);
+    if (js_dom_is_host_driven_loop()) {
+        // A long-lived host (Radiant `view`) keeps this MIR context alive and
+        // pumps the event loop after it commits the first layout. Firing timers
+        // now would run load-time setTimeout(0) callbacks against an uncommitted
+        // document (geometry APIs read zero boxes). Settle only promise
+        // microtasks; leave timers + rAF queued for the host's post-commit pump.
+        js_microtask_flush();
+    } else {
+        if (js_dynamic_import_suppress_module_drain <= 0) {
+            js_event_loop_drain();
+        }
+        if (runtime->dom_doc) {
+            // Headless Radiant layout has no frame clock; flush a bounded number
+            // of requestAnimationFrame ticks before the JS heap/context are
+            // restored so DOM callbacks can still allocate wrapper objects.
+            js_animation_frame_drain(64);
+        }
     }
     if (!fatal_exception && js_check_exception()) {
         fatal_exception = true;

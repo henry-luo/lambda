@@ -107,6 +107,7 @@ enum SimEventType {
     // F6: clipboard helpers
     SIM_EVENT_PASTE_TEXT,      // seed clipboard, dispatch Cmd+V into focused
     SIM_EVENT_ASSERT_CLIPBOARD, // assert current clipboard text matches
+    SIM_EVENT_SET_PROMPT,      // seed the next window.prompt() response (or Cancel)
     // F7: IME composition
     SIM_EVENT_IME_COMPOSE,     // drive shared composition start/update/end
     SIM_EVENT_SET_EDITING_SELECTION, // set editing selection by selector + offsets

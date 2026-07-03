@@ -1,0 +1,22 @@
+{
+  "name": "editor4c: block markdown autoformat (## + space → h2) fires on the space",
+  "_note": "Phase B — markdown block autoformat via onBeforeInput → dispatchIntent → cmdInputRule (src/commands/input-rules.ts blockRule). Cmd+A + Backspace collapses the doc to one bare editable block; typing '## ' makes the block's whole text the marker '##', and the trailing space triggers blockRule → converts the block to an <h2> and consumes the '## ' marker (not inserted). Then 'Sub' types into the new heading. Distinctive: the seed's single <h1> is gone (0) and exactly one <h2> named 'Sub' exists — proving the space-triggered block rule fired, not a literal insert (which would read '## Sub' in a non-heading block).",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 60},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "wait", "ms": 80},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "wait", "ms": 100},
+    {"type": "type", "target": {"selector": ".rdt-surface"}, "text": "## "},
+    {"type": "wait", "ms": 100},
+    {"type": "type", "target": {"selector": ".rdt-surface"}, "text": "Sub"},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface h1"}, "equals": 0},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface h2"}, "equals": 1},
+    {"type": "assert_text", "target": {"selector": ".rdt-surface h2"}, "equals": "Sub"}
+  ]
+}

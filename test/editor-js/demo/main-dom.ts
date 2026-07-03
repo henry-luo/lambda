@@ -43,10 +43,24 @@ const RICH_DOC = `
 </doc>
 `
 
+const TABLE_DOC = `
+<doc>
+  <h1>Table <cursor></cursor>column resize</h1>
+  <p>Drag a column border to resize.</p>
+  <table><tbody>
+    <tr><td>Alpha</td><td>Beta</td><td>Gamma</td></tr>
+    <tr><td>One</td><td>Two</td><td>Three</td></tr>
+  </tbody></table>
+  <p>Trailing paragraph.</p>
+</doc>
+`
+
 function main(): void {
   const root = document.getElementById('root')
   if (root === null) return
-  const { doc, selection } = parseHtmlToDoc(RICH_DOC, docSchema)
+  const seed = (window as unknown as { __RDT_SEED?: string }).__RDT_SEED
+  const src = seed === 'table' ? TABLE_DOC : RICH_DOC
+  const { doc, selection } = parseHtmlToDoc(src, docSchema)
   new FullEditorDom(root, { doc, schema: docSchema, initialSelection: selection })
 }
 

@@ -26,6 +26,7 @@
 #include <cstdio>
 
 extern __thread EvalContext* context;
+extern "C" bool js_dom_is_host_driven_loop(void);  // defined in lambda/js/js_dom.cpp
 extern "C" Item js_async_hooks_get_current_resource(void);
 extern "C" Item js_async_hooks_enter_resource(Item resource);
 extern "C" void js_async_hooks_restore_resource(Item previous);
@@ -1554,6 +1555,16 @@ extern "C" void js_event_loop_abandon_all_timers(void) {
 
 extern "C" void js_event_loop_init(void) {
     if (timer_handle_count > 0) {
+        // Host-driven sessions (Radiant `view`) share ONE event loop across all
+        // of a page's script executions, matching the browser. A later page
+        // script re-entering init must not discard timers a prior script queued
+        // (e.g. an editor's post-mount setTimeout(0)); the host drains them after
+        // committing layout. The loop is already live here (timers exist), so
+        // preserve it. The first init of a session runs fully (timer_count == 0).
+        if (js_dom_is_host_driven_loop()) {
+            event_loop_shutting_down = false;
+            return;
+        }
         js_event_loop_shutdown();
     }
     event_loop_shutting_down = false;
@@ -1913,6 +1924,14 @@ extern "C" int js_event_loop_drain(void) {
     // flush any synchronous microtasks first (from Promise resolutions)
     js_microtask_flush();
     if (js_event_loop_handle_uncaught_exception()) return 0;
+
+    // Host-driven sessions (Radiant `view`) own the timer/rAF cadence and pump
+    // the loop via js_event_loop_pump_nowait() AFTER committing the first layout.
+    // A drain here — reached from the document loader before that commit — would
+    // fire load-time setTimeout(0) callbacks too early, against an uncommitted
+    // document, so geometry queries read zero boxes. Microtasks (promise jobs)
+    // are already flushed above; leave timers queued for the host's pump.
+    if (js_dom_is_host_driven_loop()) return 0;
 
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return 0;

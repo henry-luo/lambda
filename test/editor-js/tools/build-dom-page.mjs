@@ -47,3 +47,14 @@ if (!template.includes(marker)) throw new Error('script marker not found in demo
 const html = template.replace(marker, `<script>\n${chunk.code}\n</script>`)
 writeFileSync(outFile, html)
 console.log(`wrote ${outFile} (classic IIFE, ${(html.length / 1024).toFixed(1)} kB)`)
+
+// Also emit a table-seeded variant for the column-resize gesture fixture. A
+// classic inline script sets window.__RDT_SEED='table' BEFORE the bundle runs,
+// so main-dom.ts picks the TABLE_DOC seed.
+const tableFile = resolve(root, '../html/editor-table.html')
+const tableHtml = template.replace(
+  marker,
+  `<script>window.__RDT_SEED='table'</script>\n<script>\n${chunk.code}\n</script>`
+)
+writeFileSync(tableFile, tableHtml)
+console.log(`wrote ${tableFile} (table seed, ${(tableHtml.length / 1024).toFixed(1)} kB)`)

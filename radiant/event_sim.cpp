@@ -84,6 +84,9 @@ extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
                                                          const char* html_payload,
                                                          bool move);
 
+// Stage 4C: seed the next window.prompt() answer (headless has no dialog UI).
+extern "C" void js_window_dialog_push_response(const char* value);
+
 // Forward declaration for parse_json
 void parse_json(Input* input, const char* json_string);
 
@@ -1355,6 +1358,13 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         const char* html = reader.get("html").cstring();
         if (html) ev->clipboard_html = mem_strdup(html, MEM_CAT_LAYOUT);
         parse_target(reader, ev);
+    }
+    else if (strcmp(type_str, "set_prompt") == 0) {
+        // Seed the next window.prompt() answer. `"response"` present (even "")
+        // → that string; absent → Cancel (null). input_text==NULL encodes Cancel.
+        ev->type = SIM_EVENT_SET_PROMPT;
+        const char* resp = reader.get("response").cstring();
+        if (resp) ev->input_text = mem_strdup(resp, MEM_CAT_LAYOUT);
     }
     else if (strcmp(type_str, "assert_clipboard") == 0) {
         ev->type = SIM_EVENT_ASSERT_CLIPBOARD;
@@ -4166,6 +4176,14 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             sim_key(uicon, GLFW_KEY_V, RDT_MOD_CTRL, true);
             sim_key(uicon, GLFW_KEY_V, RDT_MOD_CTRL, false);
             #endif
+            break;
+        }
+
+        case SIM_EVENT_SET_PROMPT: {
+            // Seed the next window.prompt() answer (input_text==NULL → Cancel).
+            log_info("event_sim: set_prompt response=%s",
+                     ev->input_text ? ev->input_text : "(cancel)");
+            js_window_dialog_push_response(ev->input_text);
             break;
         }
 

@@ -40,6 +40,8 @@ extern "C" {
 extern "C" void js_batch_reset(void);
 extern "C" void js_dom_batch_reset(void);
 extern "C" void js_globals_batch_reset(void);
+extern "C" void js_dom_set_ui_context(void* ui_context);
+extern "C" void js_dom_set_host_driven_loop(bool enabled);
 
 #ifdef __APPLE__
 #include <mach/mach.h>
@@ -976,6 +978,32 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
     // Recreate surface with correct dimensions
     ui_context_create_surface(&ui_context, width, height);
 
+    // Expose this window's UiContext to the JS DOM layer BEFORE the document is
+    // loaded, because load-time inline scripts (e.g. the editor bootstrap) run
+    // synchronously inside load_doc_by_format() and may call geometry APIs
+    // (getBoundingClientRect/getClientRects). Those route through
+    // js_dom_ensure_layout_for_geometry(), which needs a UiContext to force a
+    // synchronous layout when the DOM has been mutated. In the `view` path this
+    // thread-local was never set (only the headless `lambda.exe js` session set
+    // it), so it bailed and returned stale/zero rects for freshly built
+    // subtrees (e.g. an editor table read by syncColResizers). Every
+    // ui_context_cleanup() below is paired with a matching reset to null since
+    // ui_context is a stack local that must not outlive this frame.
+    js_dom_set_ui_context(&ui_context);
+
+    // Mark this as a host-driven session ONLY when a loop will actually pump the
+    // JS event loop after the first layout commits: an interactive GUI window
+    // (!headless) or a headless event simulation (sim_ctx). In that mode geometry
+    // queries read committed geometry instead of rebuilding the live view tree,
+    // and load-time timers defer to the post-commit pump (browser-faithful:
+    // setTimeout(0) queued during load fires after the first layout). A static
+    // headless render (no window, no events) has no such pump, so it must keep
+    // the self-contained load-time drain — leaving host-driven false there avoids
+    // stranding its timers. Cleared alongside the UiContext reset before each
+    // ui_context_cleanup().
+    bool host_driven_loop = (!headless || sim_ctx != nullptr);
+    js_dom_set_host_driven_loop(host_driven_loop);
+
     // Network resources (owned by this function, shared across document lifetime)
     NetworkThreadPool* thread_pool = nullptr;
     EnhancedFileCache* file_cache = nullptr;
@@ -992,6 +1020,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         if (!pool) {
             log_error("Failed to create memory pool for document");
             url_destroy(cwd);
+            js_dom_set_ui_context(nullptr);
+            js_dom_set_host_driven_loop(false);
             ui_context_cleanup(&ui_context);
             return -1;
         }
@@ -1030,6 +1060,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
                 log_error("Failed to parse in-memory script URL: %s", file_to_load);
                 pool_destroy(pool);
                 url_destroy(cwd);
+                js_dom_set_ui_context(nullptr);
+                js_dom_set_host_driven_loop(false);
                 ui_context_cleanup(&ui_context);
                 return -1;
             }
@@ -1041,6 +1073,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             log_error("Failed to load document: %s", file_to_load);
             pool_destroy(pool);
             url_destroy(cwd);
+            js_dom_set_ui_context(nullptr);
+            js_dom_set_host_driven_loop(false);
             ui_context_cleanup(&ui_context);
             return -1;
         }
@@ -1207,6 +1241,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         network_downloader_cleanup_shared();
         view_close_event_log();
         view_close_state_dump();
+        js_dom_set_ui_context(nullptr);
+        js_dom_set_host_driven_loop(false);  // ui_context is a stack local; drop the JS-DOM reference before teardown
         ui_context_cleanup(&ui_context);
         view_cleanup_input_manager();
         lambda_uv_cleanup();
@@ -1386,6 +1422,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
     network_downloader_cleanup_shared();
     view_close_event_log();
     view_close_state_dump();
+    js_dom_set_ui_context(nullptr);
+    js_dom_set_host_driven_loop(false);  // ui_context is a stack local; drop the JS-DOM reference before teardown
     ui_context_cleanup(&ui_context);
     view_cleanup_input_manager();
     lambda_uv_cleanup();

@@ -1,0 +1,16 @@
+{
+  "name": "editor4c: link toolbar wraps the selection in an <a href> via window.prompt",
+  "_note": "Phase B — link gesture through window.prompt. The toolbar Link button calls `window.prompt('Link URL:', 'https://')` then `cmdToggleMark(s, 'link', url)` on the selection. Headless `view` has no dialog UI, so `set_prompt` seeds the answer (new js_dom.cpp window.prompt response queue + event_sim SET_PROMPT). Double-click selects a word in the h1 (which has no link initially), seed the URL, click Link → the word gains an <a href>. Asserts a fresh anchor in the h1 carrying the seeded href.",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "dblclick", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "wait", "ms": 80},
+    {"type": "set_prompt", "response": "https://example.com/x"},
+    {"type": "click", "target": {"selector": "button.rdt-btn[title=\"Link\"]"}},
+    {"type": "wait", "ms": 150},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface h1 a"}, "equals": 1},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface h1 a"}, "attribute": "href", "contains": "example.com/x"}
+  ]
+}
