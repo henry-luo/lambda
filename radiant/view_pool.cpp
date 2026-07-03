@@ -628,6 +628,26 @@ void view_pool_init(ViewTree* tree) {
     }
 }
 
+void view_pool_reset_retained(ViewTree* tree) {
+    if (!tree) return;
+
+    if (tree->root) {
+        // DOM mutation fallback keeps DOM/view nodes; only layout-pool-owned
+        // props are replaced so StateStore anchors can keep binding by node id.
+        release_view_owned_resources_in_node(tree->root);
+        clear_view_owned_pointers_in_node(tree->root);
+        tree->root = NULL;
+    }
+
+    Arena* arena = tree->arena;
+    Pool* pool = tree->pool;
+    tree->arena = NULL;
+    tree->pool = NULL;
+    if (arena) arena_destroy(arena);
+    if (pool) pool_destroy(pool);
+    view_pool_init(tree);
+}
+
 void view_pool_destroy(ViewTree* tree) {
     if (tree->root) {
         release_view_owned_resources_in_node(tree->root);

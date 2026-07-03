@@ -14,6 +14,58 @@ static bool jm_test262_fast_paths_enabled(JsMirTranspiler* mt) {
            strstr(mt->filename, "test/js262/test/") != NULL;
 }
 
+typedef struct JsMirClosureTrackerSnapshot {
+    bool has_env;
+    MIR_reg_t env_reg;
+    int capture_count;
+    bool preserve_after_readback;
+    char capture_names[JS_MIR_LAST_CLOSURE_CAPTURE_MAX][128];
+    int capture_slots[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    bool capture_is_transitive[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    bool capture_is_nfe[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+} JsMirClosureTrackerSnapshot;
+
+static int jm_closure_tracker_capture_count_clamped(int count) {
+    if (count < 0) return 0;
+    if (count > JS_MIR_LAST_CLOSURE_CAPTURE_MAX) return JS_MIR_LAST_CLOSURE_CAPTURE_MAX;
+    return count;
+}
+
+static void jm_save_closure_tracker_snapshot(JsMirTranspiler* mt,
+        JsMirClosureTrackerSnapshot* snapshot) {
+    if (!mt || !snapshot) return;
+    snapshot->has_env = mt->last_closure_has_env;
+    snapshot->env_reg = mt->last_closure_env_reg;
+    snapshot->capture_count =
+        jm_closure_tracker_capture_count_clamped(mt->last_closure_capture_count);
+    snapshot->preserve_after_readback = mt->preserve_last_closure_env_after_readback;
+    for (int i = 0; i < snapshot->capture_count; i++) {
+        snprintf(snapshot->capture_names[i], sizeof(snapshot->capture_names[i]),
+            "%s", mt->last_closure_capture_names[i]);
+        snapshot->capture_slots[i] = mt->last_closure_capture_slots[i];
+        snapshot->capture_is_transitive[i] = mt->last_closure_capture_is_transitive[i];
+        snapshot->capture_is_nfe[i] = mt->last_closure_capture_is_nfe[i];
+    }
+}
+
+static void jm_restore_closure_tracker_snapshot(JsMirTranspiler* mt,
+        const JsMirClosureTrackerSnapshot* snapshot) {
+    if (!mt || !snapshot) return;
+    mt->last_closure_has_env = snapshot->has_env;
+    mt->last_closure_env_reg = snapshot->env_reg;
+    mt->last_closure_capture_count = snapshot->capture_count;
+    mt->preserve_last_closure_env_after_readback = snapshot->preserve_after_readback;
+    for (int i = 0; i < snapshot->capture_count; i++) {
+        snprintf(mt->last_closure_capture_names[i],
+            sizeof(mt->last_closure_capture_names[i]), "%s",
+            snapshot->capture_names[i]);
+        mt->last_closure_capture_slots[i] = snapshot->capture_slots[i];
+        mt->last_closure_capture_is_transitive[i] =
+            snapshot->capture_is_transitive[i];
+        mt->last_closure_capture_is_nfe[i] = snapshot->capture_is_nfe[i];
+    }
+}
+
 static bool jm_is_proto_literal_key(JsAstNode* key) {
     if (!key) return false;
     if (key->node_type == JS_AST_NODE_IDENTIFIER) {
@@ -1114,6 +1166,18 @@ static MIR_reg_t jm_emit_plain_call_this_arg(JsMirTranspiler* mt, JsCallNode* ca
 }
 
 MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
+    if (!id || !id->name) {
+        // Unsupported identifier-shaped AST nodes can reach expression lowering
+        // without a parsed name; keep the runtime graceful instead of crashing
+        // while resolving an unnameable binding.
+        bool has_ts_node = id && !ts_node_is_null(id->base.node);
+        TSPoint point = has_ts_node ? ts_node_start_point(id->base.node) : (TSPoint){0, 0};
+        const char* ts_type = has_ts_node ? ts_node_type(id->base.node) : "(null)";
+        log_warn("js-mir: nameless identifier node at %u:%u (%s); emitting undefined",
+            point.row + 1, point.column + 1, ts_type ? ts_type : "(unknown)");
+        return jm_emit_undefined(mt);
+    }
+
     // Handle 'this' keyword: use captured _js_this if in arrow function, else js_get_this()
     if (id->name->len == 4 && strncmp(id->name->chars, "this", 4) == 0) {
         return jm_emit_current_this(mt);
@@ -1342,6 +1406,8 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
                 JsFuncCollected* direct_func = jm_find_direct_function_decl_by_vname(mt, mc->name);
                 if (direct_func && direct_func->func_item && !direct_func->is_reassigned) {
+                    JsMirClosureTrackerSnapshot saved_closure_tracker;
+                    jm_save_closure_tracker_snapshot(mt, &saved_closure_tracker);
                     MIR_reg_t is_undef = jm_new_reg(mt, "func_decl_undef", MIR_T_I64);
                     MIR_reg_t result = jm_new_reg(mt, "func_decl_val", MIR_T_I64);
                     MIR_label_t use_existing = jm_new_label(mt);
@@ -1367,6 +1433,10 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                         MIR_new_reg_op(mt->ctx, result),
                         MIR_new_reg_op(mt->ctx, mv)));
                     jm_emit_label(mt, done);
+                    // Cached function declarations skip the fresh closure-env
+                    // allocation path, so the branch-local env register must not
+                    // become the later capture readback target after the merge.
+                    jm_restore_closure_tracker_snapshot(mt, &saved_closure_tracker);
                     return jm_apply_with_identifier_fallback(mt, id, result);
                 }
                 if (mc->is_nested_func_hoist && !mc->is_iife_var) {
@@ -13148,6 +13218,7 @@ MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
     // Identifiers: handle native-typed variables (need boxing)
     if (item->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)item;
+        if (!id->name) return jm_transpile_identifier(mt, id);
         char vname[128];
         snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
         JsMirVarEntry* var = jm_find_var(mt, vname);

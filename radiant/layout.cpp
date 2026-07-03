@@ -2987,14 +2987,22 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         doc_state_set_lifecycle((DocState*)doc->state, DOC_LIFECYCLE_COMMITTED);
         return;
     }
+    bool init_view_pool = false;
     if (is_reflow) {
-        // if (doc->view_tree->root) free_view(doc->view_tree, doc->view_tree->root);
-        // view_pool_destroy(doc->view_tree);
+        if (!doc->view_tree) {
+            doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT);
+            init_view_pool = true;
+        } else if (!doc->view_tree->pool) {
+            init_view_pool = true;
+        }
     } else {
         doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT);
+        init_view_pool = true;
     }
-    // Phase 16: In incremental layout, keep existing view pool (preserves BoundaryProp etc.)
-    if (!doc->incremental_layout) {
+    // Phase 16: In incremental layout, keep existing view pool (preserves BoundaryProp etc.).
+    // Reflow callers either keep the current pool or pre-reset it for retained
+    // full layout; initializing here would leak the previous layout pool.
+    if (init_view_pool && !doc->incremental_layout) {
         view_pool_init(doc->view_tree);
         // attribute the view-tree pool/arena to this document for grouped reporting
         if (doc->mem_ctx && doc->view_tree->pool) {

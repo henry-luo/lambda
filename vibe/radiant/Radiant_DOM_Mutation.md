@@ -3,7 +3,22 @@
 **Filed:** 2026-07-02  
 **Area:** Radiant JS DOM mutation, layout reconciliation, StateStore retention  
 **Related:** `vibe/radiant/Radiant_Issue4.md`, `vibe/editing/Radiant_Editor_Stage4C.md`  
-**Status:** proposal
+**Status:** implementation in progress
+
+**Implementation update, 2026-07-03:** ordinary DOM mutation fallback now uses
+`DOM_RECONCILE_RETAINED_FULL_LAYOUT`: it releases layout-pool-owned props,
+keeps the `ViewTree` shell and retained DOM/view nodes, runs
+`layout_html_doc(..., true)`, and prunes/reprojects StateStore afterward.
+`view_pool_destroy` remains reserved for document/root teardown. The overflow
+fixture is now covered by `dom_mutation_overflow_retained_full`. Native
+`DragDropState` source removal is covered by
+`dom_mutation_removed_source_clears_dragdrop`. Child insert/remove now only
+keeps the `structural-css-risk` fallback when loaded selectors depend on
+sibling/child structure (`:first-child`, `:nth-*`, sibling combinators,
+`:has(...)`, etc.); simple styled structural mutations remain incremental.
+Parent-local `innerHTML`, `innerText`, element `textContent`, and
+`textarea.defaultValue` replacements now keep their detailed child remove/insert
+records instead of forcing a broad `TREE_REPLACE` fallback.
 
 ## 1. Problem Statement
 
@@ -207,10 +222,10 @@ Target modes:
 The critical change is that "full recascade" should not imply "destroy
 `ViewTree`".
 
-### 5.3 Downgrade `TREE_REPLACE`
+### 5.3 Downgrade Parent-Local `TREE_REPLACE`
 
-`innerHTML`, `textContent`, and `innerText` currently record
-`DOM_JS_MUTATION_TREE_REPLACE`, which forces fallback.
+`innerHTML`, `textContent`, `innerText`, and `textarea.defaultValue` used to record
+`DOM_JS_MUTATION_TREE_REPLACE`, which forced fallback.
 
 Most tree replacement is still local:
 
@@ -218,14 +233,19 @@ Most tree replacement is still local:
 - new children are inserted under the same parent;
 - the parent DOM node survives.
 
-Proposal:
+Implemented approach:
 
-- replace broad `TREE_REPLACE` with a structured record:
-  - `parent`;
-  - removed child range or "all children";
-  - inserted first/last child;
-  - mutation kind `CHILD_REPLACE`;
-  - bool `parent_survives = true`.
+- keep the existing child remove/insert records emitted by
+  `dom_pre_remove(...)` / `dom_post_insert(...)`;
+- finalize the mutation with `js_dom_mutation_notify()` without adding a broad
+  tree-replace record;
+- treat the parent as the surviving mutation root.
+
+The original `CHILD_REPLACE` proposal is no longer necessary for these local
+setters because the remove/insert record sequence is already precise enough.
+
+Policy:
+
 - if the parent remains connected, use retained reflow.
 - detach StateStore entries for removed descendants only.
 - keep parent-owned state.
@@ -337,12 +357,16 @@ create new nodes.
 - `doc_state_begin_drag_drop(...)` allocates it from the StateStore arena;
 - `doc_state_clear_drag_drop(...)` zeroes the struct.
 
-So the owner is retained, but the live drag payload is not retained across
-fallback because:
+**Implemented status.** The owner is retained, and active drag/drop now survives
+DOM mutation as long as the dragged source remains connected:
 
-- `DragDropState::source_view` is a raw `View*`;
-- `DragDropState::drop_target` is a raw `View*`;
-- fallback calls `doc_state_clear_drag_drop(state)`.
+- `DragDropState::source_node_id` and `drop_target_node_id` are recorded in
+  `radiant/state_store.hpp`;
+- retained-full fallback no longer calls `doc_state_clear_drag_drop(state)` for
+  connected sources;
+- `doc_state_rebind_after_layout(...)` clears drag/drop only when the source
+  view disappeared, and clears only the drop target/range when the target
+  disappeared.
 
 ### 7.2 Target Shape
 
@@ -381,8 +405,10 @@ On fallback after reflow:
 - re-hit-test or re-resolve the drop target from pointer coordinates/range;
 - continue dispatching `dragover`, `drop`, and `dragend` from StateStore state.
 
-This lets the Stage 4C `g_jsdnd_active` / `g_jsdnd_source` workaround be
-deleted once the native DragDropState survives mutation.
+The old Stage 4C `g_jsdnd_active` / `g_jsdnd_source` workaround is no longer
+present in the editor bundle. `test/ui/editor4c/drag-reorder.json` now runs on
+the native drag session plus the editor's local source index, while the focused
+`dom_mutation_dragover_retains_dragdrop` fixture proves StateStore retention.
 
 ## 8. Proposed Implementation Phases
 
@@ -401,17 +427,19 @@ Work:
 - Preserve `view_state_map` entries by `ViewId`; prune only ids absent from the
   live DOM.
 - Preserve focus/caret/selection through DOM anchors.
-- Preserve `DragDropState` through source DOM id and active/pending flags.
+- **Implemented:** preserve `DragDropState` through source DOM id and
+  active/pending flags.
 - Keep animation retention conservative: if animation targets can be rebound by
   DOM id, retain; otherwise drop only animations whose targets cannot be found.
 
 Verification:
 
-- `test/ui/editor4c/drag-reorder.json` should pass without `g_jsdnd_*`.
-- Add a focused test where `dragover` mutates DOM and native `DragDropState`
-  remains active through `mouseup`.
-- Add a focus/caret test where a handler mutates a sibling subtree and caret
-  remains on the focused editable host.
+- **Implemented:** `test/ui/editor4c/drag-reorder.json` passes without
+  `g_jsdnd_*`.
+- **Implemented:** add a focused test where `dragover` mutates DOM and native
+  `DragDropState` remains active through `mouseup`.
+- **Implemented:** add a focus/caret test where a handler mutates a sibling
+  subtree and caret remains on the focused editable host.
 
 ### Phase 2: Retained Full Layout Instead of Destroyed ViewTree
 
@@ -419,20 +447,40 @@ Goal: make broad recascade/reflow retain the `ViewTree` object and node identity
 
 Work:
 
-- Add an explicit "retained full layout" mode:
+- **Implemented:** add an explicit "retained full layout" mode:
   - re-cascade whole DOM;
-  - mark whole DOM `layout_dirty`;
+  - release old layout-pool props and clear per-node layout pointers;
   - call `layout_html_doc(..., true)` or an equivalent full-flow retained pass;
-  - clear dirty flags after layout.
-- Reserve `view_pool_destroy` for document/root epoch replacement, not ordinary
-  DOM mutation.
-- Audit layout props allocated from `ViewTree::pool` to ensure retained full
-  layout either reuses or replaces them without leaking stale per-node props.
+  - report `DOM_RECONCILE_RETAINED_FULL_LAYOUT` to event_sim.
+- **Implemented:** reserve `view_pool_destroy` for document/root epoch
+  replacement, not ordinary DOM mutation.
+- **Partially implemented:** layout props allocated from `ViewTree::pool` are
+  bulk released/replaced by `view_pool_reset_retained(...)`; a broader layout
+  audit is still useful for specialized props and embedded resources.
 
 Verification:
 
-- Compare layout output before/after retained full layout for baseline fixtures.
-- Run editor mutation fixtures that currently hit fallback.
+- `dom_mutation_stylesheet_fallback_retains_state` and
+  `dom_mutation_overflow_retained_full` still assert `retained_full_layout`.
+- `dom_mutation_innerhtml_parent_retains_child_prunes` now asserts incremental
+  reconcile for parent-local `innerHTML`, with parent state retained and removed
+  child state pruned.
+- `dom_mutation_textcontent_incremental` asserts incremental reconcile for
+  element `textContent`, while preserving unrelated focused input state.
+- `dom_mutation_structural_css_retains_state` now asserts `incremental` for a
+  simple stylesheet, while `dom_mutation_structural_css_risk_retained_full`
+  asserts `retained_full_layout` for a real structural selector dependency.
+- `dom_mutation_removed_source_clears_dragdrop` verifies that removing the
+  active drag source clears native `DragDropState` deliberately instead of
+  leaving a stale `View*`.
+- `dom_mutation_retained_full_preserves_textarea_caret` verifies that a broad
+  stylesheet mutation keeps textarea focus/form state and caret position through
+  retained full layout.
+- The recent editor/list/form regressions were rerun after this slice:
+  `test_list_reflow`, `test_form_beforeinput_target_ranges`,
+  `test_rich_text_editor`, and `test_rich_text_editor_typing`.
+- Still pending: compare retained-full layout output across a broader baseline
+  fixture set.
 
 ### Phase 3: Reduce Incremental Fallbacks
 
@@ -441,12 +489,17 @@ full layout.
 
 Work:
 
-- Replace `structural-css-risk` with scoped selector invalidation.
-- Introduce `CHILD_REPLACE` records for `innerHTML`/`textContent` parent-local
-  replacement.
-- Treat record overflow as retained full layout rather than state-discarding
-  fallback.
-- Add mutation logging that reports:
+- **Partially implemented:** replace the broad `structural-css-risk` gate with
+  a conservative selector dependency scan. Child insert/remove now stays
+  incremental for simple class/id/tag/attribute/descendant/child selectors, and
+  falls back only for sibling/position-sensitive selectors.
+- **Implemented:** downgrade parent-local `innerHTML`, `innerText`, element
+  `textContent`, and `textarea.defaultValue` replacement by preserving detailed
+  child remove/insert records instead of adding a broad `TREE_REPLACE` record.
+  A dedicated `CHILD_REPLACE` enum was not needed for this slice.
+- **Implemented:** treat record overflow as retained full layout rather than
+  state-discarding fallback.
+- **Implemented:** add mutation logging that reports:
   - mutation kinds;
   - chosen recascade scope;
   - chosen layout mode;
@@ -454,10 +507,14 @@ Work:
 
 Verification:
 
-- Add tests for structural insert/remove in a styled document.
-- Add tests for `innerHTML` replacement preserving parent state but dropping
-  removed child state.
-- Add an overflow/batch mutation test that keeps focus/state on connected nodes.
+- **Implemented:** add tests for structural insert/remove in a styled document:
+  one safe simple-stylesheet case and one `:first-child` risk case.
+- **Implemented:** add tests for `innerHTML` replacement preserving parent state
+  but dropping removed child state.
+- **Implemented:** add tests for `textarea.defaultValue` replacement staying
+  incremental while preserving unrelated focused state.
+- **Implemented:** add an overflow/batch mutation test that keeps focus/state on
+  connected nodes.
 
 ## 9. Test Strategy
 
@@ -469,15 +526,17 @@ assertions are useful, but not sufficient for the new contract:
   retained or recreated;
 - `assert_state_store` can check `DragDropState`, view state, scroll state, and
   focus-related state, but it does not currently prove same-entry rebinding;
-- `assert_state_store` only checks `drag_drop_active` / `drag_drop_pending` when
-  `state->drag_drop` is non-null, so fixtures must also assert
-  `"drag_drop": true` today; the assertion should be tightened so expecting
-  active/pending/source fails if `drag_drop` was cleared.
+- `assert_state_store` now makes positive `drag_drop_active`,
+  `drag_drop_pending`, `drag_drop_source`, and `drag_drop_target` expectations
+  fail when `DragDropState` is absent.
 
 ### 9.1 C++ StateStore Unit Tests
 
-Add focused unit tests for the rebind/prune helpers before relying only on UI
-fixtures. These tests should create a small DOM tree and DocState, then exercise:
+Pending: add focused unit tests for the rebind/prune helpers before relying only
+on UI fixtures. This is deferred because `state_store.cpp` currently pulls in
+state-machine, render-map, clipboard, and GLFW dependencies, so a clean unit
+target needs either a smaller retention helper boundary or a dedicated test
+adapter. These tests should create a small DOM tree and DocState, then exercise:
 
 - connected-node `view_state_map` entries survive a simulated full reflow;
 - removed-subtree view state is pruned;
@@ -494,21 +553,20 @@ the core state-retention invariant directly.
 
 Add small, explicit assertion hooks rather than inferring behavior from logs:
 
-- `assert_reconcile_mode`: check the last DOM-mutation reconcile mode and
+- **Implemented:** `assert_reconcile_mode`: check the last DOM-mutation reconcile mode and
   fallback reason, e.g. `incremental`, `retained_full_layout`,
   `destructive_rebuild`, `document_rebuild`.
-- `snapshot_state_store`: capture state for a target selector, including
+- **Implemented:** `snapshot_state_store`: capture state for a target selector, including
   `DomNode::id`, requested `ViewState` kind, weak-ref status, scroll/focus flags,
   and drag/drop source/target ids.
-- `assert_state_store_snapshot`: compare the current state against a previous
+- **Implemented:** `assert_state_store_snapshot`: compare the current state against a previous
   snapshot. This should prove that state remained bound to the same DOM id, not
   merely that a new default state exists.
-- Tighten `assert_state_store` so `drag_drop_active`, `drag_drop_pending`,
+- **Implemented:** tighten `assert_state_store` so `drag_drop_active`, `drag_drop_pending`,
   `drag_drop_source`, and `drag_drop_target` fail when `state->drag_drop` is
   absent.
-- Add optional `drag_step` or paused-drag support if primitive
-  `mouse_down`/`mouse_move`/`mouse_up` steps are not enough to assert mid-drag
-  state after a `dragover` mutation.
+- **Not needed so far:** primitive `mouse_down`/`mouse_move`/`mouse_up` steps
+  are enough to assert mid-drag state after a `dragover` mutation.
 
 The reconcile-mode assertion should read structured state stored on the document
 or DocState during reconciliation, not parse `./log.txt`.
@@ -519,17 +577,22 @@ Add fixtures under `test/ui` with matching `.html` and `.json` files:
 
 | Fixture | Purpose | Key assertions |
 |---------|---------|----------------|
-| `dom_mutation_structural_css_retains_state` | Styled document inserts/removes a sibling node; this used to be a broad `structural-css-risk` case. | state snapshot before/after, focus/caret/scroll retained, reconcile mode not destructive |
+| `dom_mutation_structural_css_retains_state` | Styled document inserts/removes a sibling node under simple selectors. | implemented; incremental reconcile, state snapshot before/after retained |
+| `dom_mutation_structural_css_risk_retained_full` | Styled document inserts before a `:first-child` match. | implemented; retained full layout with `structural-css-risk` |
 | `dom_mutation_stylesheet_fallback_retains_state` | Mutating a `<style>` element still needs broad recascade. | connected state retained even when layout scope is broad |
-| `dom_mutation_innerhtml_parent_retains_child_prunes` | `innerHTML` / `textContent` replaces children but parent survives. | parent state retained, removed child state pruned, DOM text updated |
+| `dom_mutation_innerhtml_parent_retains_child_prunes` | `innerHTML` replaces children but parent survives. | implemented; incremental reconcile, parent state retained, removed child state pruned |
+| `dom_mutation_textcontent_incremental` | Element `textContent` replaces children while unrelated focused state survives. | implemented; incremental reconcile, focus/form state retained |
+| `dom_mutation_textarea_defaultvalue_incremental` | `textarea.defaultValue` replaces child text while unrelated focused state survives. | implemented; incremental reconcile, focus/form state retained |
 | `dom_mutation_overflow_retained_full` | More mutation records than `DOM_JS_MUTATION_RECORD_CAP`. | retained full layout, connected focus/state survives |
+| `dom_mutation_retained_full_preserves_textarea_caret` | Textarea input mutates a sibling stylesheet and forces broad retained full layout. | implemented; retained full layout, form state retained, typed value/caret preserved |
 | `dom_mutation_replacechild_notifies` | Regression for structural paths that pre-record details but miss final notify. | reconcile runs, layout/text reflects replacement |
-| `dom_mutation_dragover_retains_dragdrop` | During native drag, `dragover` mutates DOM. | mid-drag `drag_drop=true`, `drag_drop_active=true`, source rebound, drop/dragend completes |
-| `dom_mutation_removed_source_clears_dragdrop` | Drag source is removed by handler. | drag/drop clears deliberately, no stale source pointer |
+| `dom_mutation_dragover_retains_dragdrop` | During native drag, `dragover` mutates DOM. | implemented; mid-drag `drag_drop=true`, `drag_drop_active=true`, source retained, drop/dragend completes |
+| `dom_mutation_removed_source_clears_dragdrop` | Drag source is removed by handler. | implemented; drag/drop clears deliberately, no stale source pointer |
 
-Existing `test/ui/editor4c/drag-reorder.json` should remain as a behavior
-regression, but it is not enough by itself because it currently proves the
-`g_jsdnd_*` workaround rather than native `DragDropState` retention.
+Existing `test/ui/editor4c/drag-reorder.json` remains as an editor behavior
+regression. It complements, but does not replace,
+`dom_mutation_dragover_retains_dragdrop`, which is the focused native
+StateStore-retention assertion.
 
 ### 9.4 Example Development Commands
 

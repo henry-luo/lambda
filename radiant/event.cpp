@@ -3893,14 +3893,12 @@ static void dom_js_mutation_reset_records(DomDocument* doc) {
     doc->js_mutation_record_overflow = 0;
 }
 
-#ifndef NDEBUG
 static bool dom_js_mutation_kind_seen(DomDocument* doc, DomJsMutationKind kind) {
     if (!doc) return false;
     uint32_t slot = (uint32_t)kind;
     if (slot >= 31) slot = 0;
     return (doc->js_mutation_kind_mask & (1u << slot)) != 0;
 }
-#endif
 
 static void dom_js_mutation_log_records(DomDocument* doc) {
 #ifndef NDEBUG
@@ -3938,13 +3936,39 @@ static void dom_js_record_reconcile(DomDocument* doc,
                                     const char* reason,
                                     int mutations,
                                     int records,
-                                    int overflow) {
+                                    int overflow,
+                                    const char* recascade_scope,
+                                    const char* layout_scope,
+                                    const char* state_action,
+                                    int state_pruned) {
     if (!doc) return;
     doc->last_dom_reconcile_mode = mode;
     doc->last_dom_reconcile_reason = reason ? reason : "none";
     doc->last_dom_reconcile_mutations = mutations;
     doc->last_dom_reconcile_records = records;
     doc->last_dom_reconcile_record_overflow = overflow;
+
+    // Keep the reconcile decision self-contained in logs: mutation details are
+    // otherwise separated from the layout/state-retention decision.
+    log_info("dom mutation reconcile: mode=%s reason=%s recascade=%s layout=%s state=%s pruned=%d "
+             "mutations=%d records=%d overflow=%d kinds=[insert:%d remove:%d text:%d attr:%d style:%d style_repaint:%d tree:%d unknown:%d]",
+             dom_reconcile_mode_name(mode),
+             doc->last_dom_reconcile_reason,
+             recascade_scope ? recascade_scope : "unknown",
+             layout_scope ? layout_scope : "unknown",
+             state_action ? state_action : "unknown",
+             state_pruned,
+             mutations,
+             records,
+             overflow,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_CHILD_INSERT) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_CHILD_REMOVE) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_TEXT) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_ATTRIBUTE) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_STYLE) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_STYLE_REPAINT) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_TREE_REPLACE) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_UNKNOWN) ? 1 : 0);
 
     DocState* state = (DocState*)doc->state;
     if (!state || !event_state_log_enabled(state->active_event_log)) return;
@@ -3960,6 +3984,10 @@ static void dom_js_record_reconcile(DomDocument* doc,
         jw_kv_int(&w, "mutations", mutations);
         jw_kv_int(&w, "records", records);
         jw_kv_int(&w, "record_overflow", overflow);
+        jw_kv_str(&w, "recascade_scope", recascade_scope ? recascade_scope : "unknown");
+        jw_kv_str(&w, "layout_scope", layout_scope ? layout_scope : "unknown");
+        jw_kv_str(&w, "state_action", state_action ? state_action : "unknown");
+        jw_kv_int(&w, "state_pruned", state_pruned);
     jw_obj_end(&w);
     event_state_log_finish_record(state->active_event_log, &w);
 }
@@ -4026,6 +4054,151 @@ static bool dom_js_node_is_stylesheet_related(DomNode* node) {
            strcasecmp(elem->tag_name, "link") == 0;
 }
 
+static bool dom_js_simple_selector_has_structural_dependency(CssSimpleSelector* simple) {
+    if (!simple) return false;
+
+    switch (simple->type) {
+        case CSS_SELECTOR_PSEUDO_EMPTY:
+        case CSS_SELECTOR_PSEUDO_FIRST_CHILD:
+        case CSS_SELECTOR_PSEUDO_LAST_CHILD:
+        case CSS_SELECTOR_PSEUDO_ONLY_CHILD:
+        case CSS_SELECTOR_PSEUDO_FIRST_OF_TYPE:
+        case CSS_SELECTOR_PSEUDO_LAST_OF_TYPE:
+        case CSS_SELECTOR_PSEUDO_ONLY_OF_TYPE:
+        case CSS_SELECTOR_PSEUDO_NTH_CHILD:
+        case CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD:
+        case CSS_SELECTOR_PSEUDO_NTH_OF_TYPE:
+        case CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE:
+            return true;
+        case CSS_SELECTOR_PSEUDO_HAS:
+            return true;
+        default:
+            break;
+    }
+
+    if (simple->function_selectors && simple->function_selector_count > 0) {
+        for (size_t i = 0; i < simple->function_selector_count; i++) {
+            CssSelector* selector = simple->function_selectors[i];
+            if (!selector) continue;
+            for (size_t part = 0; part + 1 < selector->compound_selector_count; part++) {
+                CssCombinator combinator = selector->combinators[part];
+                if (combinator == CSS_COMBINATOR_NEXT_SIBLING ||
+                    combinator == CSS_COMBINATOR_SUBSEQUENT_SIBLING) {
+                    return true;
+                }
+            }
+            for (size_t part = 0; part < selector->compound_selector_count; part++) {
+                CssCompoundSelector* compound = selector->compound_selectors[part];
+                if (!compound) continue;
+                for (size_t s = 0; s < compound->simple_selector_count; s++) {
+                    if (dom_js_simple_selector_has_structural_dependency(
+                            compound->simple_selectors[s])) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
+static bool dom_js_selector_has_structural_dependency(CssSelector* selector) {
+    if (!selector) return false;
+
+    for (size_t i = 0; i + 1 < selector->compound_selector_count; i++) {
+        CssCombinator combinator = selector->combinators[i];
+        if (combinator == CSS_COMBINATOR_NEXT_SIBLING ||
+            combinator == CSS_COMBINATOR_SUBSEQUENT_SIBLING) {
+            return true;
+        }
+    }
+
+    for (size_t i = 0; i < selector->compound_selector_count; i++) {
+        CssCompoundSelector* compound = selector->compound_selectors[i];
+        if (!compound) continue;
+        for (size_t s = 0; s < compound->simple_selector_count; s++) {
+            if (dom_js_simple_selector_has_structural_dependency(
+                    compound->simple_selectors[s])) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool dom_js_selector_group_has_structural_dependency(CssSelectorGroup* group) {
+    if (!group) return false;
+    for (size_t i = 0; i < group->selector_count; i++) {
+        if (dom_js_selector_has_structural_dependency(group->selectors[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool dom_js_rule_has_structural_dependency(CssRule* rule) {
+    if (!rule) return false;
+
+    if (rule->type == CSS_RULE_STYLE ||
+        rule->type == CSS_RULE_NESTING ||
+        rule->type == CSS_RULE_NESTED_DECLARATIONS) {
+        if (dom_js_selector_group_has_structural_dependency(
+                rule->data.style_rule.selector_group) ||
+            dom_js_selector_has_structural_dependency(
+                rule->data.style_rule.selector)) {
+            return true;
+        }
+        for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
+            if (dom_js_rule_has_structural_dependency(
+                    rule->data.style_rule.nested_rules[i])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if (rule->type == CSS_RULE_MEDIA ||
+        rule->type == CSS_RULE_SUPPORTS ||
+        rule->type == CSS_RULE_CONTAINER ||
+        rule->type == CSS_RULE_SCOPE ||
+        rule->type == CSS_RULE_LAYER) {
+        for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
+            if (dom_js_rule_has_structural_dependency(
+                    rule->data.conditional_rule.rules[i])) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool dom_js_stylesheet_has_structural_dependency(CssStylesheet* stylesheet) {
+    if (!stylesheet || stylesheet->disabled) return false;
+
+    for (size_t i = 0; i < stylesheet->rule_count; i++) {
+        if (dom_js_rule_has_structural_dependency(stylesheet->rules[i])) {
+            return true;
+        }
+    }
+    for (size_t i = 0; i < stylesheet->imported_count; i++) {
+        if (dom_js_stylesheet_has_structural_dependency(
+                stylesheet->imported_stylesheets[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool dom_js_document_has_structural_css_dependency(DomDocument* doc) {
+    if (!doc || !doc->stylesheets || doc->stylesheet_count <= 0) return false;
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        if (dom_js_stylesheet_has_structural_dependency(doc->stylesheets[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool dom_js_mutation_can_incremental(DomDocument* doc, const char** reason) {
     if (reason) *reason = "eligible";
     if (!doc || !doc->root || !doc->view_tree) {
@@ -4054,7 +4227,9 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc, const char** reaso
         }
         if ((record->kind == DOM_JS_MUTATION_CHILD_INSERT ||
              record->kind == DOM_JS_MUTATION_CHILD_REMOVE) &&
-            doc->stylesheet_count > 0) {
+            dom_js_document_has_structural_css_dependency(doc)) {
+            // Stylesheet presence alone is safe for retained incremental layout;
+            // only sibling/child-position-dependent selectors need broad recascade.
             if (reason) *reason = "structural-css-risk";
             return false;
         }
@@ -4331,7 +4506,9 @@ static bool post_html_handler_incremental_rebuild(
     // incremental mutation handling from a broad fallback path.
     dom_js_record_reconcile(doc, DOM_RECONCILE_INCREMENTAL, "eligible",
                             mutations, doc->js_mutation_record_count,
-                            doc->js_mutation_record_overflow);
+                            doc->js_mutation_record_overflow,
+                            "mutation-subtrees", "incremental-layout",
+                            "retained", 0);
     return true;
 }
 
@@ -4394,11 +4571,13 @@ static void post_html_handler_rebuild(EventContext* evcon,
         doc_state_close_context_menu(state);
     }
 
-    // Force full relayout by clearing view tree
-    if (doc->view_tree) {
-        view_pool_destroy(doc->view_tree);
-        mem_free(doc->view_tree);
-        doc->view_tree = nullptr;
+    // Broad DOM fallback is a layout-resource epoch change, not a DOM/view-node
+    // identity change; keep the ViewTree shell and retained nodes for StateStore.
+    if (!doc->view_tree) {
+        doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT);
+        view_pool_reset_retained(doc->view_tree);
+    } else {
+        view_pool_reset_retained(doc->view_tree);
     }
 
     // Clear stale layout-pool targets. DOM-backed StateStore entries survive
@@ -4417,11 +4596,12 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
     if (evcon->ui_context) evcon->ui_context->document = doc;
-    layout_html_doc(evcon->ui_context, doc, false);
+    layout_html_doc(evcon->ui_context, doc, true);
     if (evcon->ui_context) evcon->ui_context->document = saved_doc;
 
+    int state_pruned = 0;
     if (state) {
-        state_store_prune_after_reflow(state);
+        state_pruned = (int)state_store_prune_after_reflow(state); // INT_CAST_OK: log/test telemetry count
         state_store_refresh_caret_projection(state);
     }
 
@@ -4433,19 +4613,21 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     auto t3 = high_resolution_clock::now();
 
-    log_info("[TIMING] html handler rebuild: mode=full cascade=%.2fms layout=%.2fms repaint_req=%.2fms "
+    log_info("[TIMING] html handler rebuild: mode=retained_full_layout cascade=%.2fms layout=%.2fms repaint_req=%.2fms "
              "total=%.2fms (mutations=%d)",
              duration<double, std::milli>(t1 - t0).count(),
              duration<double, std::milli>(t2 - t1).count(),
              duration<double, std::milli>(t3 - t2).count(),
              duration<double, std::milli>(t3 - t_start).count(),
              mutations);
-    // Full fallback is still a DOM-preserving broad reconcile; keep the reason
+    // Retained full layout is still a broad reconcile; keep the reason
     // test-visible so state-retention fixtures do not have to scrape log.txt.
-    dom_js_record_reconcile(doc, DOM_RECONCILE_FULL,
+    dom_js_record_reconcile(doc, DOM_RECONCILE_RETAINED_FULL_LAYOUT,
                             fallback_reason ? fallback_reason : "unknown",
                             mutations, doc->js_mutation_record_count,
-                            doc->js_mutation_record_overflow);
+                            doc->js_mutation_record_overflow,
+                            "full-document", "full-flow-retained",
+                            "retained-pruned-after-reflow", state_pruned);
 
     // Reset mutation count for next event
     dom_js_mutation_reset_records(doc);

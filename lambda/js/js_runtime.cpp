@@ -8756,6 +8756,40 @@ extern "C" Item js_promise_async_function_start(void);
 extern "C" Item js_promise_async_function_finish(Item promise, Item result, int64_t had_exception);
 
 // Invoke a JsFunction with args, handling env if it's a closure
+static bool js_invoke_trace_enabled() {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char* env = getenv("LAMBDA_JS_INVOKE_TRACE");
+        enabled = (env && env[0] && strcmp(env, "0") != 0) ? 1 : 0;
+    }
+    return enabled != 0;
+}
+
+static void js_invoke_trace_call(JsFunction* fn, int arg_count, int effective_count) {
+    if (!js_invoke_trace_enabled()) return;
+    // Browser-smoke crash recovery can land after generated code faults, so
+    // emit the callee before entering it while the JsFunction metadata is valid.
+    const char* source_chars = "";
+    int source_len = 0;
+    if (fn && fn->source_text &&
+        (((uintptr_t)fn->source_text & 3) == 0) &&
+        (uintptr_t)fn->source_text >= 0x1000) {
+        source_chars = fn->source_text->chars;
+        source_len = fn->source_text->len > 120 ? 120 : (int)fn->source_text->len;
+    }
+    log_debug("js_invoke_trace: fn=%p func_ptr=%p argc=%d effective=%d params=%d env=%p name=%.*s source=%.*s",
+        (void*)fn,
+        fn ? fn->func_ptr : NULL,
+        arg_count,
+        effective_count,
+        fn ? fn->param_count : 0,
+        fn ? (void*)fn->env : NULL,
+        fn && fn->name ? (int)fn->name->len : 6,
+        fn && fn->name ? fn->name->chars : "(anon)",
+        source_len,
+        source_chars);
+}
+
 static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count) {
 
     // Builtin functions have no func_ptr — dispatch by builtin_id
@@ -8937,6 +8971,8 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count) {
         // Clamp to declared param count — excess args accessible via arguments object
         effective_count = fn->param_count;
     }
+
+    js_invoke_trace_call(fn, arg_count, effective_count);
 
     // P0 safety: func_ptr must be a valid code address. NULL stub is handled
     // below; very small non-NULL values indicate corruption (lib_marked.js
@@ -13567,7 +13603,21 @@ static inline uint64_t js_regex_cache_key(const char* pattern, const char* flags
     return (uint64_t)(uintptr_t)pattern ^ ((uint64_t)(uintptr_t)flags * 2654435761ULL);
 }
 
+static void js_regex_cache_entry_release_native(JsRegexCacheEntry* ce) {
+    if (!ce || !ce->rd || !ce->rd->wrapper) return;
+    JsRegexCompiled* wrapper = ce->rd->wrapper;
+    // Batch resets clear stale AST-keyed cache entries before the heap may run
+    // RegExp map finalizers; release wrapper native state here and poison the
+    // RegExp data pointer so a later finalizer cannot double-free it.
+    ce->rd->wrapper = nullptr;
+    if (ce->rd->re2 == wrapper->re2) ce->rd->re2 = nullptr;
+    js_regex_compiled_free(wrapper);
+}
+
 void js_regex_cache_reset() {
+    for (auto it = g_regex_compile_cache.begin(); it != g_regex_compile_cache.end(); ++it) {
+        js_regex_cache_entry_release_native(&it->second);
+    }
     g_regex_compile_cache.clear();
     g_regex_property_cache_chars = NULL;
     g_regex_property_cache_len = 0;

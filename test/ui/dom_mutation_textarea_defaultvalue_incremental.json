@@ -1,0 +1,18 @@
+{
+  "name": "DOM mutation textarea defaultValue incremental",
+  "html": "test/ui/dom_mutation_textarea_defaultvalue_incremental.html",
+  "viewport": {"width": 640, "height": 320},
+  "events": [
+    {"type": "wait", "ms": 200},
+    {"type": "click", "target": {"selector": "#name"}},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_focus", "target": {"selector": "#name"}},
+    {"type": "assert_state_store", "target": {"selector": "#name"}, "view_state": true, "kind": "form", "weak_ref": true},
+    {"type": "snapshot_state_store", "name": "focused-input", "target": {"selector": "#name"}},
+    {"type": "key_press", "key": "b"},
+    {"type": "wait", "ms": 160},
+    {"type": "assert_value", "target": {"selector": "#notes"}, "equals": "new default text"},
+    {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "eligible"},
+    {"type": "assert_state_store_snapshot", "name": "focused-input", "target": {"selector": "#name"}}
+  ]
+}

@@ -383,6 +383,146 @@ static const RadiantOnlineViewCase g_online_view_cases[] = {
     {"podman_docs", "https://docs.podman.io/en/latest/", true},
     {"helm_docs", "https://helm.sh/docs/", true},
     {"envoy_docs", "https://www.envoyproxy.io/docs/envoy/latest/", true},
+    {"openjdk_docs", "https://openjdk.org/projects/jdk/", true},
+    {"eclipse_help", "https://help.eclipse.org/latest/index.jsp", true},
+    {"jetbrains_idea_help", "https://www.jetbrains.com/help/idea/getting-started.html", true},
+    {"gradle_docs", "https://docs.gradle.org/current/userguide/userguide.html", true},
+    {"maven_pom_ref", "https://maven.apache.org/pom.html", true},
+    {"spring_framework_docs", "https://docs.spring.io/spring-framework/reference/", true},
+    {"quarkus_guides", "https://quarkus.io/guides/", true},
+    {"micronaut_docs", "https://docs.micronaut.io/latest/guide/", true},
+    {"llvm_doxygen", "https://llvm.org/doxygen/", true},
+    {"clang_tidy_docs", "https://clang.llvm.org/extra/clang-tidy/", true},
+    {"cppreference", "https://en.cppreference.com/w/", true},
+    {"cplusplus_ref", "https://cplusplus.com/reference/", true},
+    {"iso_cpp", "https://isocpp.org/", true},
+    {"boost_asio_docs", "https://www.boost.org/doc/libs/release/doc/html/boost_asio.html", true},
+    {"qt_qml_docs", "https://doc.qt.io/qt-6/qmlapplications.html", true},
+    {"gnome_developer_docs", "https://developer.gnome.org/documentation/", true},
+    {"kde_develop_docs", "https://develop.kde.org/docs/", true},
+    {"freedesktop_specs", "https://specifications.freedesktop.org/", true},
+    {"wayland_docs", "https://wayland.freedesktop.org/docs/html/", true},
+    {"xiph", "https://xiph.org/", true},
+    {"matroska_specs", "https://www.matroska.org/technical/", true},
+    {"w3c_svg2", "https://www.w3.org/TR/SVG2/", true},
+    {"w3c_uievents", "https://www.w3.org/TR/uievents/", true},
+    {"whatwg_encoding", "https://encoding.spec.whatwg.org/", true},
+    {"webgl_spec", "https://www.khronos.org/registry/webgl/specs/latest/1.0/", true},
+    {"vulkan_spec", "https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html", true},
+    {"opengl_wiki", "https://www.khronos.org/opengl/wiki/Main_Page", true},
+    {"mdn_webgl", "https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API", true},
+    {"w3c_selectors4", "https://www.w3.org/TR/selectors-4/", true},
+    {"w3c_css_grid", "https://www.w3.org/TR/css-grid-2/", true},
+    {"w3c_css_color", "https://www.w3.org/TR/css-color-4/", true},
+    {"nasa", "https://www.nasa.gov/", true},
+    {"noaa", "https://www.noaa.gov/", true},
+    {"usgs", "https://www.usgs.gov/", true},
+    {"nist", "https://www.nist.gov/", true},
+    {"loc", "https://www.loc.gov/", true},
+    {"archive_org", "https://archive.org/", true},
+    {"openstreetmap_wiki", "https://wiki.openstreetmap.org/wiki/Main_Page", true},
+    {"wiktionary_main", "https://en.wiktionary.org/wiki/Wiktionary:Main_Page", true},
+    {"wikibooks_main", "https://en.wikibooks.org/wiki/Main_Page", true},
+    {"wikidata_main", "https://www.wikidata.org/wiki/Wikidata:Main_Page", true},
+    {"crates_io", "https://crates.io/", true},
+    {"pypi", "https://pypi.org/", true},
+    {"rubygems", "https://rubygems.org/", true},
+    {"packagist", "https://packagist.org/", true},
+    {"nuget", "https://www.nuget.org/", true},
+    {"maven_central", "https://central.sonatype.com/", true},
+    {"pkgx_docs", "https://docs.pkgx.sh/", true},
+    {"conda_forge_docs", "https://conda-forge.org/docs/", true},
+    {"clickhouse_docs", "https://clickhouse.com/docs/", true},
+    {"elastic_docs", "https://www.elastic.co/docs", true},
+    {"opensearch_docs", "https://docs.opensearch.org/latest/", true},
+    {"cassandra_docs", "https://cassandra.apache.org/doc/latest/", true},
+    {"cockroach_docs", "https://www.cockroachlabs.com/docs/stable/", true},
+    {"influx_docs", "https://docs.influxdata.com/", true},
+    {"sphinx_docs", "https://www.sphinx-doc.org/en/master/", true},
+    {"mkdocs_docs", "https://www.mkdocs.org/", true},
+    {"docusaurus_docs", "https://docusaurus.io/docs", true},
+    {"hugo_docs", "https://gohugo.io/documentation/", true},
+    {"jekyll_docs", "https://jekyllrb.com/docs/", true},
+    {"wordpress_docs", "https://wordpress.org/documentation/", true},
+    {"drupal_docs", "https://www.drupal.org/docs", true},
+    {"joomla_docs", "https://docs.joomla.org/Main_Page", true},
+    {"latex_project_docs", "https://www.latex-project.org/help/documentation/", true},
+    {"tex_live_docs", "https://tug.org/texlive/doc.html", true},
+    {"pandoc_manual", "https://pandoc.org/MANUAL.html", true},
+    {"commonmark_spec", "https://spec.commonmark.org/0.31.2/", true},
+    {"asciidoctor_docs", "https://docs.asciidoctor.org/asciidoc/latest/", true},
+    {"pulumi_docs", "https://www.pulumi.com/docs/", true},
+    {"openapi_spec", "https://spec.openapis.org/oas/latest.html", true},
+    {"json_schema_docs", "https://json-schema.org/learn/getting-started-step-by-step", true},
+    {"yaml_spec", "https://yaml.org/spec/1.2.2/", true},
+    {"toml_spec", "https://toml.io/en/v1.0.0", true},
+    {"protobuf_docs", "https://protobuf.dev/overview/", true},
+    {"grpc_docs", "https://grpc.io/docs/", true},
+    {"flatbuffers_docs", "https://flatbuffers.dev/", true},
+    {"capnproto_docs", "https://capnproto.org/", true},
+    {"apache_arrow_docs", "https://arrow.apache.org/docs/", true},
+    {"parquet_docs", "https://parquet.apache.org/docs/", true},
+    {"orc_docs", "https://orc.apache.org/docs/", true},
+    {"kafka_docs", "https://kafka.apache.org/documentation/", true},
+    {"pulsar_docs", "https://pulsar.apache.org/docs/", true},
+    {"rabbitmq_docs", "https://www.rabbitmq.com/docs", true},
+    {"nats_docs", "https://docs.nats.io/", true},
+    {"zeromq_docs", "https://zeromq.org/get-started/", true},
+    {"istio_docs", "https://istio.io/latest/docs/", true},
+    {"linkerd_docs", "https://linkerd.io/2.16/overview/", true},
+    {"consul_docs", "https://developer.hashicorp.com/consul/docs", true},
+    {"vault_docs", "https://developer.hashicorp.com/vault/docs", true},
+    {"nomad_docs", "https://developer.hashicorp.com/nomad/docs", true},
+    {"opentelemetry_docs", "https://opentelemetry.io/docs/", true},
+    {"jaeger_docs", "https://www.jaegertracing.io/docs/latest/", true},
+    {"minio_docs", "https://min.io/docs/minio/linux/index.html", true},
+    {"ceph_docs", "https://docs.ceph.com/en/latest/", true},
+    {"gluster_docs", "https://docs.gluster.org/en/latest/", true},
+    {"openzfs_docs", "https://openzfs.github.io/openzfs-docs/", true},
+    {"btrfs_docs", "https://btrfs.readthedocs.io/en/latest/", true},
+    {"llvm_libc_docs", "https://libc.llvm.org/", true},
+    {"freetype_docs", "https://freetype.org/freetype2/docs/", true},
+    {"harfbuzz_docs", "https://harfbuzz.github.io/", true},
+    {"pango_docs", "https://docs.gtk.org/Pango/", true},
+    {"libjpeg_turbo_docs", "https://libjpeg-turbo.org/Documentation/Documentation", true},
+    {"zstd_docs", "https://facebook.github.io/zstd/", true},
+    {"brotli_repo", "https://github.com/google/brotli", true},
+    {"libxml2_docs", "https://gnome.pages.gitlab.gnome.org/libxml2/", true},
+    {"libxslt_docs", "https://gnome.pages.gitlab.gnome.org/libxslt/", true},
+    {"swift_docs", "https://www.swift.org/documentation/", true},
+    {"julia_docs", "https://docs.julialang.org/en/v1/", true},
+    {"dlang_docs", "https://dlang.org/documentation.html", true},
+    {"fortran_docs", "https://fortran-lang.org/learn/", true},
+    {"ada_docs", "https://learn.adacore.com/", true},
+    {"elm_docs", "https://guide.elm-lang.org/", true},
+    {"fsharp_docs", "https://learn.microsoft.com/en-us/dotnet/fsharp/", true},
+    {"raku_docs", "https://docs.raku.org/", true},
+    {"gleam_docs", "https://gleam.run/documentation/", true},
+    {"rescript_docs", "https://rescript-lang.org/docs/manual/latest/introduction", true},
+    {"reason_docs", "https://reasonml.github.io/docs/en/what-and-why", true},
+    {"roc_docs", "https://www.roc-lang.org/", true},
+    {"odin_docs", "https://odin-lang.org/docs/", true},
+    {"vlang_docs", "https://docs.vlang.io/", true},
+    {"pip_docs", "https://pip.pypa.io/en/stable/", true},
+    {"poetry_docs", "https://python-poetry.org/docs/", true},
+    {"uv_docs", "https://docs.astral.sh/uv/", true},
+    {"setuptools_docs", "https://setuptools.pypa.io/en/latest/", true},
+    {"sphinx_theme_docs", "https://pydata-sphinx-theme.readthedocs.io/en/stable/", true},
+    {"readthedocs_docs", "https://docs.readthedocs.com/platform/stable/", true},
+    {"home_assistant_docs", "https://www.home-assistant.io/docs/", true},
+    {"esp_idf_docs", "https://docs.espressif.com/projects/esp-idf/en/latest/esp32/", true},
+    {"zephyr_docs", "https://docs.zephyrproject.org/latest/", true},
+    {"arduino_docs", "https://docs.arduino.cc/", true},
+    {"raspberry_pi_docs", "https://www.raspberrypi.com/documentation/", true},
+    {"ros_docs", "https://docs.ros.org/en/rolling/", true},
+    {"opencv_tutorials", "https://docs.opencv.org/4.x/d9/df8/tutorial_root.html", true},
+    {"threejs_docs", "https://threejs.org/docs/", true},
+    {"d3_docs", "https://d3js.org/getting-started", true},
+    {"chartjs_docs", "https://www.chartjs.org/docs/latest/", true},
+    {"leaflet_docs", "https://leafletjs.com/reference.html", true},
+    {"mapbox_docs", "https://docs.mapbox.com/", true},
+    {"openlayers_docs", "https://openlayers.org/doc/", true},
+    {"qgis_docs", "https://docs.qgis.org/latest/en/docs/", true},
 };
 
 static bool online_view_file_readable(const char* path) {
@@ -1240,6 +1380,62 @@ TEST(RadiantOnlineViewTest, LoadsNewOnlinePages201To210) {
 
 TEST(RadiantOnlineViewTest, LoadsNewOnlinePages211To220) {
     online_view_expect_case_range(311, 321);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages221To230) {
+    online_view_expect_case_range(321, 331);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages231To240) {
+    online_view_expect_case_range(331, 341);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages241To250) {
+    online_view_expect_case_range(341, 351);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages251To260) {
+    online_view_expect_case_range(351, 361);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages261To270) {
+    online_view_expect_case_range(361, 371);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages271To280) {
+    online_view_expect_case_range(371, 381);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages281To290) {
+    online_view_expect_case_range(381, 391);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages291To300) {
+    online_view_expect_case_range(391, 401);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages301To310) {
+    online_view_expect_case_range(401, 411);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages311To320) {
+    online_view_expect_case_range(411, 421);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages321To330) {
+    online_view_expect_case_range(421, 431);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages331To340) {
+    online_view_expect_case_range(431, 441);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages341To350) {
+    online_view_expect_case_range(441, 451);
+}
+
+TEST(RadiantOnlineViewTest, LoadsNewOnlinePages351To360) {
+    online_view_expect_case_range(451, 461);
 }
 
 #endif
