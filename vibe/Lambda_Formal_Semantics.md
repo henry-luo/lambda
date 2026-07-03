@@ -340,8 +340,8 @@ Initial recommendation (B1): retire the identification; make `""` a falsy string
 
 1. **Universal null.** `null` should be the one absence value for all types —
    otherwise every type needs its own null: a null datetime? a null binary? If a
-   "null datetime" is weird, why is a "null string" not equally weird? With `"" ≡
-   null` (and `'' ≡ null`, `b'' ≡ null`), null is a universal null for scalar values
+   "null datetime" is weird, why is a "null string" not equally weird? With
+   `"" ≡ null` (and `'' ≡ null`, `b'' ≡ null`), null is a universal null for scalar values
    (NaN excepted).
 2. **Leverage built-in null support.** The language already has optional types
    (`T?`), null checks, falsy null — a universal null value rides on all of it.
@@ -376,8 +376,8 @@ Initial recommendation (B1): retire the identification; make `""` a falsy string
    from the world (empty files, empty HTTP bodies), and `b'' ≡ null` conflates "empty
    data" with "no data". (NaN, conversely, is the cautionary tale of an in-band
    no-value living *inside* a type: `nan == nan` false poisons the algebra.)
-3. **Null-vs-empty is a distinction optional types exist to express.** `name:
-   string?` should have three states: absent, present-empty, present-non-empty
+3. **Null-vs-empty is a distinction optional types exist to express.**
+   `name: string?` should have three states: absent, present-empty, present-non-empty
    (HTML `alt=""` vs missing `alt` is accessibility-meaningful; SQL `''` vs `NULL`;
    form submitted-empty vs not-submitted). The identification makes the middle state
    unrepresentable — it fights the optional-type machinery rather than leveraging it.
@@ -694,8 +694,9 @@ Additional points in favor, recorded:
 3. Migration audit: fixtures/stdlib for values in (2⁵³, 2⁵⁵).
 4. Separate fix, surfaced by probing: `type(error_value)` propagates the error
    instead of returning a type (Redex disagreement #5).
-5. Formal model (Stage 4): the flex-tier rule is `n₁ op n₂ → int(r) if |r| ≤ 2⁵³−1,
-   else float64(r)`; machine tier is `mod 2ⁿ` — both now clean one-line rules, which
+5. Formal model (Stage 4): the flex-tier rule is
+   `n₁ op n₂ → int(r) if |r| ≤ 2⁵³−1, else float64(r)`; machine tier is
+   `mod 2ⁿ` — both now clean one-line rules, which
    was the point of forcing the decision.
 
 #### C3.4 Designer addenda (for the record)
@@ -828,8 +829,9 @@ inside the closure body, `var` params.
 **Round 4 — the JS question (designer): "JS closures are mutable and used as
 objects — how to model that if Lambda closures are immutable?"** Resolution: the
 meta-/object-language distinction. A JS closure is never modeled *by* a Lambda
-closure; it is modeled *as data* — an immutable term `<jsclosure params; body,
-envaddr>` plus environment records in the model's `<store>` cell. Mutability is a
+closure; it is modeled *as data* — an immutable term
+`<jsclosure params; body, envaddr>` plus environment records in the model's
+`<store>` cell. Mutability is a
 property of the *configuration*, never of meta-language values; two JS closures
 sharing an environment record share mutations through store-rewrite rules, and full
 JS semantics (including `var`-in-loop capture bugs) falls out with no Lambda value
@@ -839,10 +841,70 @@ why K, Redex, and Coq are all immutable meta-languages happily modeling mutable
 heaps. The LambdaJS engine is unaffected (its JS scopes are C++-internal), and the
 Lambda-native replacement for the closure-as-object pattern is the object type with
 `pn` methods — state declared as typed fields, mutation root visible as a `var`
-binding, rather than smuggled into an invisible environment record. (Working
-example verified: `type Counter { value: int = 0, step: int = 1; pn increment()
-{ value = value + step } fn double() => value * 2 }`, used via
-`var c = <Counter step: 1>` — modulo the C4.1 bugs.)
+binding, rather than smuggled into an invisible environment record. Working
+example, verified (modulo the C4.1 bugs):
+
+```lambda
+type Counter {
+    value: int = 0,
+    step: int = 1;
+    pn increment() { value = value + step }
+    fn double() => value * 2
+}
+// var c = <Counter step: 1>;  c.increment()
+```
+
+#### C4.2a Clarification: nested `pn` and interior mutation through captures
+
+Designer follow-up: is this allowed?
+
+```lambda
+pn a() {
+    var b = [...]
+    pn c() { b[0] = 123 }   // ?
+}
+```
+
+**No — compile error.** The capture rule forbids not just rebinding (`b = ...`) but
+*interior mutation through* a captured name (`b[0] = ...`, `b.f = ...`): a capture
+is a `let`-like snapshot. Allowing it would either mutate `c`'s private copy
+(silently useless) or open a hidden sharing channel into `a`'s `b` that bypasses the
+`var`-param rule and detonates the moment `c` escapes. The blessed rewrite is
+mechanical: `pn c(var arr: int[]) { arr[0] = 123 }; c(b)` — the mutation becomes
+visible in the signature, preserving "`var` params are the only sharing construct."
+
+Two notes recorded with the ruling:
+
+- **Pascal-style relaxation deferred, not rejected — and agreed as needed**
+  (designer): the canonical use case is a **closure-style parser** — one big
+  function holding local `var` state (`pos`, `tokens`, `errors`) and many nested,
+  *mutually recursive* `pn` helpers (`peek`/`advance`/`expect`/`parse_expr`/…) that
+  read and mutate it. Under the strict rule, every helper threads the same
+  `var` params through every signature and internal call site — explicitness that
+  documents mutation at module boundaries becomes pure ceremony inside what is
+  conceptually one function.
+  **Spec sketch for the future relaxation**: a non-escaping nested `pn` is *not a
+  value* — no closure is created; it is a named, parameterized block whose
+  references to enclosing `var`s are direct up-level accesses into the enclosing
+  activation (valid because it provably cannot outlive it; observationally
+  equivalent to inlining). Escape check is syntactic: the `pn`'s name may appear
+  **only in call position** — mutual recursion qualifies (calls by name); binding,
+  passing, or returning the name is a compile error for any nested `pn` that
+  mutates enclosing `var`s. Direct access also means such blocks see *current*
+  values (no snapshot-timing surprise). The two-regime story stays clean:
+  *closure = value = immutable captures; non-escaping nested `pn` = named block =
+  direct access* — the strict rule governs function values, and these blocks never
+  were values. Start strict; add the relaxation later (backward-compatible; the
+  reverse would be breaking).
+  Interim idiom for the parser case: the object form —
+  `type Parser { src: string, pos: int; pn advance() ... }` with the helpers as
+  pn methods — typed state, no threading, instantiable; currently blocked by the
+  C4.1 bug that pn methods with parameters fail to parse, making that fix a
+  prerequisite.
+- **Snapshot timing**: captures snapshot at closure *creation* — a nested `pn` that
+  merely reads `b` (as a closure, under the strict rule) sees `b` as of its
+  declaration point, not the call. Helpers needing current values take parameters —
+  or, once the relaxation lands, non-escaping blocks see current values directly.
 
 #### C4.3 Costs accepted (recorded to avoid relitigation)
 
@@ -898,3 +960,95 @@ Every "decide" row above is a decision that formal rules (the Redex model of
 [Lambda_Semantics.md](Lambda_Semantics.md), or the proposed native DSL) will force
 anyway. Resolving them first means the formal model describes the language you
 *want*, not the accidents you have.
+
+---
+
+## Summary — Overall Assessment (2026-07-04)
+
+With C1–C4 decided, this document concludes on the core principles and designs.
+Remaining open items (see below) continue in a follow-up document,
+**Lambda_Formal_Semantics2.md**. The review's overall assessment:
+
+### The language now has a theory of itself
+
+The review began expecting a pleasant data model with fuzzy semantics — which the
+A-findings confirmed. What exists after C1–C4 is rarer: a scripting language with a
+small set of axioms that *answer questions on their own*. The four decisions didn't
+accumulate — they compounded into principles:
+
+- **Emptiness ≠ nothingness** (C1's box argument) — decided `""`, then decided
+  truthiness, then settled the empty-file question *without new deliberation*:
+  `<file>` with no content fell straight out of the model.
+- **Values vs. containers** — one 2×2 that settled truthiness, and whose "value"
+  column then anchored C4's value semantics.
+- **Exact until you ask for float** — the numeric tier split, literal strictness,
+  smallest-exact-home: one story from literals through data ingestion to overflow.
+- **Mutation is visible or it doesn't exist** — `let` finality, `var` as the sole
+  marker, sharing only in signatures, nothing mutable inside a value. The closure
+  ruling, the nested-`pn` ruling, and the JS-modeling answer were all *derived* from
+  this, not decided fresh.
+
+That is the test of a designed language versus an accreted one: when a new question
+arrives, do the existing principles answer it? Lambda now passes that test
+repeatedly.
+
+### Where it sits
+
+The composite occupies a genuinely unoccupied point in the design space. No
+mainstream *scripting* language has value semantics (Swift has it but is
+compiled/OO; R has copy-on-modify but semantic chaos elsewhere). Nobody pairs a
+JS-safe-integer flex tier with a Go machine tier. The truthiness table is
+"JavaScript's object rule with the C legacy removed" — a spot every dynamic
+language arguably *should* have landed on and none did. Errors as falsy values with
+compile-time enforcement is cleaner than exceptions and cleaner than Go's
+`if err != nil`. And all of it sits on a document-native data model, which is the
+actual domain. The nearest relative in *spirit* is XQuery/XDM — but with a real
+programming language attached.
+
+### Standing concerns, in order
+
+1. **The spec–implementation gap is now large and must not grow.** C1–C4 define
+   real migrations: literal `""` mechanics, the int width change, COW, capture
+   errors, the object-mutation bug cluster. The docs were already aspirational in
+   places (A10); the C-log is aspirational *by design*. That is fine exactly as
+   long as the decisions land as code and formal rules soon — "implement C1–C4 +
+   encode as rules + verify fixtures" should be treated as one indivisible program
+   of work.
+2. **The error discipline still leaks at the builtin boundary** (A6/B8) — the last
+   big *semantic* hole. `T^E` is one of the language's crown jewels, and OOB
+   indexing quietly excreting error values undermines it. Ranked the next design
+   discussion.
+3. **Performance will pressure the semantics.** COW cliffs on elements, promotion
+   checks, decimal paths — against a strong benchmark culture. The line to hold is
+   the one this review established: representation tricks (boxing, sharing,
+   inference) may do anything *as long as they are unobservable*, and the formal
+   model exists to verify exactly that.
+4. **The learning curve is real.** Mutation that doesn't travel, containers that
+   are always truthy, `if (results)` not meaning "any results" — JS/Python muscle
+   memory will fight all of it. Every point is defensible; the burden lands on
+   error messages, lints, and docs. A language this principled deserves diagnostics
+   that *teach the principle*, not just reject the code.
+
+### Verdict
+
+Before this exercise: "a very good data model with implementation-defined
+semantics." Now: **one of the most coherent semantic cores of any scripting
+language available for comparison** — with the caveat that a third of it currently
+exists on paper rather than in the binary. The four C-records read like the
+beginning of an actual language specification, which is precisely what the
+semantics DSL needs as input: Stage 4's rules can be written against a language
+whose every touched corner has a stated, argued, dated answer.
+
+The thing to preserve above all is the *method* that got here: probe the
+implementation, argue from principles, record the losing arguments alongside the
+winners. The log is worth more than the decisions themselves — it is what will keep
+the next ten decisions consistent with these four.
+
+### Carried forward to Lambda_Formal_Semantics2.md
+
+A2 (document div/mod conventions) · A4 (`symbol == string`) · A5 (ArrayNum `==`
+fix) · A6/B8 (OOB + builtin error-value leaks) · A8 (covariance failure mode) ·
+A9 (REPL) · A10 (spec gaps: generics, `as`, open/closed maps, match order) ·
+B4 (`~` overloading) · B5 (`|` disambiguation) · B6 (`[int]` footgun) ·
+B7 (inference unobservability as enforced invariant) — plus the C1–C4
+implementation follow-ups listed in their respective sections.
